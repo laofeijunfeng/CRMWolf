@@ -8,15 +8,15 @@ from sqlalchemy.orm import Session
 
 from app.services.ai_parser.base_parser import EntityAIParserBase
 from app.services.ai_parser.constants import LEAD_SOURCE_ENUM_MAP, COMPANY_SCALE_ENUM_MAP
-from app.services.follow_up_parser import follow_up_parser_service
+from app.services.lead_ai_confirmed_write_service import lead_ai_confirmed_write_service
 from app.utils.time import business_now
-from app.crud.lead import lead_crud, lead_follow_up_crud
-from app.schemas.lead import LeadCreate, LeadFollowUpCreate
+from app.crud.lead import lead_crud
+from app.schemas.lead import LeadCreate
 from app.models.lead import LeadSource, CompanyScale, FollowUpMethod
 
 
 # 系统提示词：保留既有线索解析规则，供内部解析流程复用
-# 注意：next_follow_time 让 AI 返回原始表述，后端代码会用 parse_relative_time 转换
+# 注意：next_follow_time 让 AI 返回原始表述，后端统一使用 AgentTemporalResolver 转换
 PARSE_LEAD_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的线索信息解析助手。
 
 【当前日期】
@@ -275,28 +275,16 @@ class LeadAIParser(EntityAIParserBase):
         next_follow_time_str = parsed_data.get("next_follow_time")
 
         if follow_up_content or next_action:
-            # 解析下次跟进时间
-            next_follow_time_dt = None
-            if next_follow_time_str:
-                next_follow_time_dt = follow_up_parser_service.parse_relative_time(
-                    next_follow_time_str,
-                    base_date=business_now()
-                )
-
-            # 构建跟进内容
             content = follow_up_content or "【线索解析时提取的信息】"
-
-            follow_up_create = LeadFollowUpCreate(
+            await lead_ai_confirmed_write_service.create_lead_follow_up(
+                db=db,
+                lead_id=entity.id,
+                lead_public_id=entity.public_id,
+                team_id=team_id,
+                user_id=user_id,
                 content=content,
                 method=FollowUpMethod.OTHER,
                 next_action=next_action,
-                next_follow_time=next_follow_time_dt
-            )
-
-            lead_follow_up_crud.create(
-                db=db,
-                obj_in=follow_up_create,
-                lead_id=entity.id,
-                creator_id=user_id,
-                team_id=team_id
+                next_follow_time_text=next_follow_time_str,
+                action_namespace="lead_create_follow_up",
             )

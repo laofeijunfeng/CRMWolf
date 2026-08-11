@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Union
 
-from app.services.agent import agent_copy
+from app.services.agent import action_workflow, agent_copy
 from app.utils.name_normalizer import normalize_corp_name
 
 
@@ -170,7 +170,7 @@ def opportunity_next_task_from_suggestions(
             if missing_fields
             else agent_copy.opportunity_suggestion_needs_procurement(title)
         )
-        return {
+        next_task = {
             "action": "collect_opportunity_fields",
             "customer": customer,
             "payload": {
@@ -182,7 +182,11 @@ def opportunity_next_task_from_suggestions(
             },
             "content": content,
         }
-    return {
+        return action_workflow.attach_workflow(
+            next_task,
+            action_workflow.optional_suggestion_contract(action=next_task["action"]),
+        )
+    next_task = {
         "action": "create_opportunity",
         "customer": customer,
         "payload": {
@@ -191,6 +195,10 @@ def opportunity_next_task_from_suggestions(
         },
         "content": f"这条还像「{title}」，{format_opportunity_summary(opportunity)}。要创建吗？",
     }
+    return action_workflow.attach_workflow(
+        next_task,
+        action_workflow.optional_suggestion_contract(action=next_task["action"]),
+    )
 
 
 def stage_move_action_from_suggestions(

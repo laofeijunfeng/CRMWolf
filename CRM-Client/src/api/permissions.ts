@@ -1,16 +1,13 @@
 import request from '@/utils/request'
+import {
+  PermissionResponseSchema,
+  RoleMutationResponseSchema,
+  type PermissionResponse
+} from '@/schemas/role'
+import { omitUndefined } from '@/lib/utils'
+import { z } from 'zod'
 
-export interface PermissionResponse {
-  id: number
-  code: string
-  name: string
-  resource: string
-  action: string
-  scope: string | null
-  description: string | null
-  created_at: string
-  updated_at: string
-}
+export type { PermissionResponse } from '@/schemas/role'
 
 export interface UserPermissionsResponse {
   permissions: PermissionResponse[]
@@ -30,24 +27,36 @@ export interface GetUserPermissionsParams {
 }
 
 const permissionApi = {
-  getUserPermissions: async (params?: GetUserPermissionsParams) => {
-    const response = await request.get<UserPermissionsResponse>('/v1/auth/me/permissions', {
-      params: params || {}
+  async getUserPermissions(params?: GetUserPermissionsParams): Promise<UserPermissionsResponse> {
+    const UserPermissionsResponseSchema = z.object({
+      permissions: z.array(PermissionResponseSchema),
+      total: z.number(),
+      cached: z.boolean().optional(),
     })
-    return response
+
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = await request.get<UserPermissionsResponse>('/v1/auth/me/permissions', {
+      params: params ?? {}
+    })
+    return omitUndefined(UserPermissionsResponseSchema.parse(response))
   },
 
-  getAllPermissions: async (params?: PermissionQueryParams) => {
-    const response = await request.get<PermissionResponse[]>('/v1/permissions', { params })
-    return response
+  async getAllPermissions(params?: PermissionQueryParams): Promise<PermissionResponse[]> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response: unknown = await request.get('/v1/permissions', { params })
+    return PermissionResponseSchema.array().parse(response)
   },
 
-  assignPermissionToRole: (permissionId: number, roleId: number) => {
-    return request.post(`/v1/permissions/${permissionId}/roles`, { role_id: roleId })
+  async assignPermissionToRole(permissionId: number, roleId: number): Promise<z.infer<typeof RoleMutationResponseSchema>> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response: unknown = await request.post(`/v1/permissions/${permissionId}/roles`, { role_id: roleId })
+    return RoleMutationResponseSchema.parse(response)
   },
 
-  removePermissionFromRole: (permissionId: number, roleId: number) => {
-    return request.delete(`/v1/permissions/${permissionId}/roles/${roleId}`)
+  async removePermissionFromRole(permissionId: number, roleId: number): Promise<z.infer<typeof RoleMutationResponseSchema>> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response: unknown = await request.delete(`/v1/permissions/${permissionId}/roles/${roleId}`)
+    return RoleMutationResponseSchema.parse(response)
   }
 }
 

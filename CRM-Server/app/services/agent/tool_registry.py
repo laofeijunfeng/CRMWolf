@@ -224,21 +224,25 @@ class CreateLeadFollowUpInput(BaseModel):
 class CreateContactInput(BaseModel):
     customer_id: CustomerIdentifier = Field(..., description="客户对外ID；兼容历史任务中的数据库ID")
     contact: AgentContactPayload
+    idempotency_suffix: Optional[str] = None
 
 
 class CreateInvoiceTitleInput(BaseModel):
     customer_id: CustomerIdentifier = Field(..., description="客户对外ID；兼容历史任务中的数据库ID")
     invoice_title: AgentInvoiceTitlePayload
     set_default: bool = False
+    idempotency_suffix: Optional[str] = None
 
 
 class CreateDeploymentInfoInput(BaseModel):
     deployment_info: AgentDeploymentInfoPayload
+    idempotency_suffix: Optional[str] = None
 
 
 class CreateCustomerMemberInput(BaseModel):
     customer_id: CustomerIdentifier = Field(..., description="客户对外ID；兼容历史任务中的数据库ID")
     member: AgentCustomerMemberPayload
+    idempotency_suffix: Optional[str] = None
 
 
 class CreateOpportunityInput(BaseModel):
@@ -512,6 +516,7 @@ class AgentToolRegistry:
                 context,
                 customer_id=model.customer_id,
                 contact=_dump_payload(model.contact),
+                idempotency_suffix=model.idempotency_suffix,
             )
 
         async def create_invoice_title(service, context, model):
@@ -520,12 +525,14 @@ class AgentToolRegistry:
                 customer_id=model.customer_id,
                 invoice_title=_dump_payload(model.invoice_title),
                 set_default=model.set_default,
+                idempotency_suffix=model.idempotency_suffix,
             )
 
         async def create_deployment_info(service, context, model):
             return await service.create_deployment_info(
                 context,
                 deployment_info=_dump_payload(model.deployment_info),
+                idempotency_suffix=model.idempotency_suffix,
             )
 
         async def create_customer_member(service, context, model):
@@ -533,6 +540,7 @@ class AgentToolRegistry:
                 context,
                 customer_id=model.customer_id,
                 member=_dump_payload(model.member),
+                idempotency_suffix=model.idempotency_suffix,
             )
 
         async def create_opportunity(service, context, model):

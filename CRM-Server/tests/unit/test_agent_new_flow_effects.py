@@ -1,5 +1,8 @@
 from types import SimpleNamespace
 
+import pytest
+
+from app.services.agent import action_workflow
 from app.services.agent.new_flow_effects import NewFlowSideEffectContext, NewFlowSideEffectHandler
 
 
@@ -60,3 +63,128 @@ def test_new_flow_side_effect_handler_applies_waiting_memory_and_final_notice(mo
     assert context.current_interrupt["task_projection_key"] == "task-501"
     assert final_event == {"event": "final", "content": "我先切到新流程处理。\n\n已处理"}
     assert context.assistant_content == "我先切到新流程处理。\n\n已处理"
+
+
+@pytest.mark.asyncio
+async def test_new_flow_side_effect_handler_queues_direct_action_level_auto_execute_item(monkeypatch):
+    class FakeActionReviewGraphService:
+        async def run(self, input_state):
+            return {
+                "decision": "auto_execute",
+                "risk_level": "low",
+                "execution_confidence": 0.96,
+                "reason": "明确低风险跟进记录。",
+                "events": [],
+            }
+
+    created_tasks = []
+
+    def create_waiting_task(db_arg, event, team_id, user_id, session_arg):
+        created_tasks.append(event)
+        return SimpleNamespace(id=501, task_key="task-501", target_type="customer", target_id=101)
+
+    monkeypatch.setattr(
+        "app.services.agent.new_flow_effects.task_factory._create_waiting_task_from_event",
+        create_waiting_task,
+    )
+    handler = NewFlowSideEffectHandler(action_review_graph_service=FakeActionReviewGraphService())
+    workflow = action_workflow.required_write_contract(action="create_customer_activity")
+    context = NewFlowSideEffectContext(
+        db=object(),
+        session=SimpleNamespace(id=3),
+        team_id=1,
+        user_id=2,
+    )
+
+    event = await handler.apply_async(
+        {
+            "event": "confirmation_required",
+            "action": "create_customer_activity",
+            "workflow": workflow,
+            "payload": {"customer_id": 101, "content": "今天拜访客户"},
+            "content": "请确认是否创建这条跟进记录？",
+        },
+        context,
+    )
+
+    assert event["event"] == "action_auto_execution_queued"
+    assert created_tasks == []
+    assert context.auto_execute_tasks is None
+    assert context.auto_execute_actions is not None
+    assert len(context.auto_execute_actions) == 1
+    [action_item] = context.auto_execute_actions
+    assert action_item.action_id == workflow["action_id"]
+    assert action_item.action_type == "create_customer_activity"
+    assert action_item.payload["customer_id"] == 101
+    assert action_item.payload["content"] == "今天拜访客户"
+    assert action_item.workflow["status"] == action_workflow.STATUS_PLANNED
+    assert action_item.workflow["policy"]["execution_policy"] == action_workflow.EXECUTION_AUTO_EXECUTE
+    assert action_item.payload["workflow"]["policy"]["execution_policy"] == action_workflow.EXECUTION_AUTO_EXECUTE
+    assert action_item.task_id is None
+    assert action_item.target_type == "customer"
+    assert action_item.target_id == 101
+
+
+@pytest.mark.asyncio
+async def test_new_flow_side_effect_handler_keeps_task_projection_when_auto_execute_action_needs_follow_up_projection(monkeypatch):
+    class FakeActionReviewGraphService:
+        async def run(self, input_state):
+            return {
+                "decision": "auto_execute",
+                "risk_level": "low",
+                "execution_confidence": 0.96,
+                "reason": "明确低风险跟进记录，但后续动作需要任务投影承接。",
+                "events": [],
+            }
+
+    created_tasks = []
+
+    def create_waiting_task(db_arg, event, team_id, user_id, session_arg):
+        created_tasks.append(event)
+        return SimpleNamespace(
+            id=501,
+            task_key="task-501",
+            target_type="customer",
+            target_id=101,
+        )
+
+    monkeypatch.setattr(
+        "app.services.agent.new_flow_effects.task_factory._create_waiting_task_from_event",
+        create_waiting_task,
+    )
+    handler = NewFlowSideEffectHandler(action_review_graph_service=FakeActionReviewGraphService())
+    workflow = action_workflow.required_write_contract(action="create_customer_activity")
+    context = NewFlowSideEffectContext(
+        db=object(),
+        session=SimpleNamespace(id=3),
+        team_id=1,
+        user_id=2,
+    )
+
+    event = await handler.apply_async(
+        {
+            "event": "confirmation_required",
+            "action": "create_customer_activity",
+            "workflow": workflow,
+            "payload": {
+                "customer_id": 101,
+                "content": "今天拜访客户",
+                "_next_task": {
+                    "action": "transition_follow_up_task",
+                    "payload": {"task_id": "fut_1", "transition_action": "complete"},
+                },
+            },
+            "content": "请确认是否创建这条跟进记录？",
+        },
+        context,
+    )
+
+    assert event["event"] == "action_auto_execution_queued"
+    assert len(created_tasks) == 1
+    assert context.auto_execute_tasks is not None
+    assert len(context.auto_execute_tasks) == 1
+    assert context.auto_execute_actions is not None
+    [action_item] = context.auto_execute_actions
+    assert action_item.task_id == 501
+    assert action_item.target_type == "customer"
+    assert action_item.target_id == 101

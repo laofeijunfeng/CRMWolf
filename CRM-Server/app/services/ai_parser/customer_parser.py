@@ -13,9 +13,8 @@ from app.models.customer import CustomerSource
 from app.schemas.customer import ContactCreate, CustomerCreate
 from app.services.ai_parser.base_parser import EntityAIParserBase
 from app.services.ai_parser.constants import COMPANY_SCALE_ENUM_MAP, CUSTOMER_SOURCE_ENUM_MAP
+from app.services.customer_ai_confirmed_write_service import customer_ai_confirmed_write_service
 from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
-from app.services.follow_up_parser import follow_up_parser_service
-from app.utils.time import business_now
 
 
 def _resolve_customer_source(value: str | None) -> CustomerSource | None:
@@ -342,19 +341,7 @@ class CustomerAIParser(EntityAIParserBase):
         # 2. 创建客户活动（如果有）
         follow_up_info = parsed_data.get("follow_up_info")
         if follow_up_info and (follow_up_info.get("content") or follow_up_info.get("next_action")):
-            from app.crud.customer_activity import customer_activity_crud
-            from app.schemas.customer_activity import CustomerActivityCreate
             from app.services.customer_activity_kinds import CustomerActivityKind
-            from app.services.customer_activity_processing_service import customer_activity_processing_service
-
-            # 解析下次跟进时间
-            next_follow_time_dt = None
-            next_follow_time_str = follow_up_info.get("next_follow_time")
-            if next_follow_time_str:
-                next_follow_time_dt = follow_up_parser_service.parse_relative_time(
-                    next_follow_time_str,
-                    base_date=business_now()
-                )
 
             source_content_parts = []
             if follow_up_info.get("content"):
@@ -362,20 +349,15 @@ class CustomerAIParser(EntityAIParserBase):
             if follow_up_info.get("next_action"):
                 source_content_parts.append(f"下一步：{follow_up_info['next_action']}")
 
-            activity_create = CustomerActivityCreate(
-                activity_kind=CustomerActivityKind.OTHER_FOLLOW_UP,
-                source_content="\n".join(source_content_parts) or "AI 创建客户时提取的信息",
-                next_action=follow_up_info.get("next_action"),
-                next_follow_time=next_follow_time_dt,
-                next_follow_time_source="AI_EXTRACTED" if next_follow_time_dt else None,
-            )
-
-            created_activity = customer_activity_crud.create(
+            await customer_ai_confirmed_write_service.create_customer_activity(
                 db=db,
-                obj_in=activity_create,
                 customer_id=customer.id,
-                creator_id=user_id,
-                owner_id=user_id,
-                team_id=team_id
+                customer_public_id=customer.public_id,
+                team_id=team_id,
+                user_id=user_id,
+                content="\n".join(source_content_parts) or "AI 创建客户时提取的信息",
+                activity_kind=CustomerActivityKind.OTHER_FOLLOW_UP,
+                next_action=follow_up_info.get("next_action"),
+                next_follow_time_text=follow_up_info.get("next_follow_time"),
+                action_namespace="customer_create_follow_up",
             )
-            await customer_activity_processing_service.trigger_processing(created_activity.id, team_id)

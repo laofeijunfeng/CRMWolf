@@ -3,7 +3,7 @@
 These tables store Agent conversation state and audit data only. Business data
 must still be created or changed through existing CRM APIs.
 """
-from sqlalchemy import JSON, BigInteger, Column, DateTime, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, JSON, BigInteger, Column, DateTime, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -46,6 +46,17 @@ class AgentIdempotencyStatus:
     PENDING = "PENDING"
     SUCCESS = "SUCCESS"
     FAILED = "FAILED"
+
+
+class AgentWorkflowActionStatus:
+    PLANNED = "PLANNED"
+    WAITING_USER = "WAITING_USER"
+    RUNNING = "RUNNING"
+    EXECUTED = "EXECUTED"
+    SKIPPED = "SKIPPED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+    BLOCKED = "BLOCKED"
 
 
 class AgentMemoryEntry(Base):
@@ -95,6 +106,7 @@ class AgentSession(Base):
 
     messages = relationship("AgentMessage", back_populates="session", cascade="all, delete-orphan")
     tasks = relationship("AgentTask", back_populates="session", cascade="all, delete-orphan")
+    workflow_actions = relationship("AgentWorkflowAction", back_populates="session", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("idx_agent_session_team_user_status", "team_id", "user_id", "status"),
@@ -169,6 +181,7 @@ class AgentTask(Base):
 
     session = relationship("AgentSession", back_populates="tasks")
     tool_calls = relationship("AgentToolCall", back_populates="task", cascade="all, delete-orphan")
+    workflow_actions = relationship("AgentWorkflowAction", back_populates="task")
 
     __table_args__ = (
         Index("idx_agent_task_session_status", "session_id", "status"),
@@ -273,4 +286,90 @@ class AgentIdempotencyKey(Base):
         Index("idx_agent_idempotency_session_task", "session_id", "task_id"),
         Index("idx_agent_idempotency_team_user_status", "team_id", "user_id", "status"),
         {"comment": "CRM AI Agent幂等键表"},
+    )
+
+
+class AgentWorkflowAction(Base):
+    """Action ledger for Agent-planned business work.
+
+    AgentTask remains the compatibility projection for a waiting user turn.
+    This ledger is the durable action-level state: every suggested, confirmed,
+    skipped, executed, or failed CRM action can be audited independently from
+    the current UI's single pending-task shape.
+    """
+
+    __tablename__ = "crm_agent_workflow_actions"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
+    workflow_id = Column(String(64), nullable=False, index=True, comment="Agent工作流ID")
+    action_id = Column(String(64), nullable=False, comment="Agent动作ID")
+    parent_action_id = Column(String(64), nullable=True, index=True, comment="父动作ID")
+    team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
+    user_id = Column(BigInteger, nullable=True, index=True, comment="系统用户ID")
+    session_id = Column(
+        BigInteger,
+        ForeignKey("crm_agent_sessions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="Agent会话ID",
+    )
+    task_id = Column(
+        BigInteger,
+        ForeignKey("crm_agent_tasks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="兼容挂起任务ID",
+    )
+    source_message_id = Column(
+        BigInteger,
+        ForeignKey("crm_agent_messages.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="来源消息ID",
+    )
+    source_type = Column(String(80), nullable=False, index=True, comment="动作来源")
+    action_type = Column(String(100), nullable=False, index=True, comment="动作类型")
+    status = Column(
+        String(20),
+        nullable=False,
+        default=AgentWorkflowActionStatus.PLANNED,
+        index=True,
+        comment="动作状态",
+    )
+    scope = Column(String(50), nullable=False, index=True, comment="动作范围")
+    source = Column(String(80), nullable=False, comment="业务来源策略")
+    execution_policy = Column(String(80), nullable=False, comment="执行策略")
+    on_reject = Column(String(80), nullable=False, comment="拒绝策略")
+    blocking = Column(Boolean, nullable=False, default=True, comment="是否阻塞工作流")
+    target_type = Column(String(50), nullable=True, index=True, comment="目标业务对象类型")
+    target_id = Column(BigInteger, nullable=True, index=True, comment="目标业务对象ID")
+    dependency_json = Column(JSON, nullable=True, comment="动作依赖")
+    payload_json = Column(JSON, nullable=True, comment="动作输入载荷")
+    result_json = Column(JSON, nullable=True, comment="动作结果")
+    decision_json = Column(JSON, nullable=True, comment="用户或路由决策")
+    idempotency_key = Column(String(160), nullable=True, index=True, comment="业务幂等键")
+    status_reason = Column(Text, nullable=True, comment="状态原因")
+    error_message = Column(Text, nullable=True, comment="错误信息")
+    started_time = Column(DateTime, nullable=True, comment="开始时间")
+    finished_time = Column(DateTime, nullable=True, comment="结束时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, index=True, comment="创建时间")
+    last_modified_time = Column(
+        DateTime,
+        nullable=False,
+        default=business_now,
+        onupdate=business_now,
+        comment="最后修改时间",
+    )
+
+    session = relationship("AgentSession", back_populates="workflow_actions")
+    task = relationship("AgentTask", back_populates="workflow_actions")
+
+    __table_args__ = (
+        UniqueConstraint("workflow_id", "action_id", name="uk_agent_workflow_action_identity"),
+        UniqueConstraint("action_id", name="uq_crm_agent_workflow_actions_action_id"),
+        Index("idx_agent_workflow_action_session_status", "session_id", "status"),
+        Index("idx_agent_workflow_action_task_status", "task_id", "status"),
+        Index("idx_agent_workflow_action_team_user_status", "team_id", "user_id", "status"),
+        Index("idx_agent_workflow_action_workflow_created", "workflow_id", "created_time"),
+        {"comment": "CRM AI Agent动作工作流账本"},
     )

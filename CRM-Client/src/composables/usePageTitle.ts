@@ -34,7 +34,7 @@ export function usePageTitle(): {
 
   // 自动设置 route.meta.title（静态标题）
   onMounted(() => {
-    const title = route.meta?.title
+    const title = route.meta?.['title']
     if (title !== undefined && title !== null && typeof title === 'string') {
       store.setTitle(title)
     }

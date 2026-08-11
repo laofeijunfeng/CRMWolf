@@ -4,7 +4,7 @@ import type { HTMLAttributes } from "vue"
 import { reactiveOmit } from "@vueuse/core"
 import { useForwardPropsEmits } from "reka-ui"
 import { DrawerContent, DrawerPortal } from "vaul-vue"
-import { cn } from "@/lib/utils"
+import { cn, omitUndefined } from "@/lib/utils"
 import DrawerOverlay from "./DrawerOverlay.vue"
 
 const props = withDefaults(defineProps<DialogContentProps & {
@@ -26,7 +26,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
   <DrawerPortal v-if="props.portal">
     <DrawerOverlay v-if="props.showOverlay" :class="props.overlayClass" />
     <DrawerContent
-      v-bind="forwarded" :class="cn(
+      v-bind="omitUndefined(forwarded)" :class="cn(
         'fixed inset-x-0 bottom-0 z-[201] mt-24 flex h-auto flex-col rounded-t-wolf-sheet border bg-background',
         props.class,
       )"
@@ -38,7 +38,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
   <template v-else>
     <DrawerOverlay v-if="props.showOverlay" :class="props.overlayClass" />
     <DrawerContent
-      v-bind="forwarded" :class="cn(
+      v-bind="omitUndefined(forwarded)" :class="cn(
         'absolute inset-x-0 bottom-0 z-[201] mt-24 flex h-auto flex-col rounded-t-wolf-sheet border bg-background',
         props.class,
       )"

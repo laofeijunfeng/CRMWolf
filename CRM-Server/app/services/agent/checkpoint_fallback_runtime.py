@@ -111,6 +111,7 @@ class AgentCheckpointFallbackRuntime:
         graph.add_node("confirmed_task_execution", self._run_confirmed_task_execution)
         graph.add_node("no_pending_confirmation", self._run_no_pending_confirmation)
         graph.add_node("new_flow_fallback", self._run_new_flow_fallback)
+        graph.add_node("checkpoint_write_blocked", self._checkpoint_write_blocked)
         graph.add_node("finish_fallback", self._finish_fallback)
         graph.add_edge(START, "start_fallback")
         graph.add_conditional_edges(
@@ -126,15 +127,16 @@ class AgentCheckpointFallbackRuntime:
             "decide_application_action",
             self._route_after_application_action,
             {
-                "confirmed_task_execution": "confirmed_task_execution",
+                "confirmed_task_execution": "checkpoint_write_blocked",
                 "no_pending_confirmation": "no_pending_confirmation",
-                "new_flow_fallback": "new_flow_fallback",
+                "new_flow_fallback": "checkpoint_write_blocked",
                 "finish_fallback": "finish_fallback",
             },
         )
         graph.add_edge("confirmed_task_execution", "finish_fallback")
         graph.add_edge("no_pending_confirmation", "finish_fallback")
         graph.add_edge("new_flow_fallback", "finish_fallback")
+        graph.add_edge("checkpoint_write_blocked", "finish_fallback")
         graph.add_edge("finish_fallback", END)
         return graph.compile()
 
@@ -339,9 +341,30 @@ class AgentCheckpointFallbackRuntime:
             "events": output_events,
         }
 
-    def _finish_fallback(self, state: AgentRuntimeState) -> AgentRuntimeState:
+    def _checkpoint_write_blocked(self, state: AgentRuntimeState) -> AgentRuntimeState:
+        assistant_content = (
+            "当前 Agent checkpoint 存储不可用。为避免绕过审计、幂等和恢复机制，本轮业务写入已暂停；"
+            "请稍后重试。"
+        )
         return {
-            "runtime_status": "checkpoint_unavailable_fallback_finished",
+            "runtime_status": "checkpoint_unavailable_write_blocked",
+            "assistant_content": assistant_content,
+            "events": [
+                {
+                    "event": "agent_root_checkpoint_write_blocked",
+                    "content": assistant_content,
+                    "application_action": state.get("application_action") or "run_new_flow",
+                    "checkpoint_unavailable": True,
+                    "fallback_reason": "checkpoint_storage_error",
+                },
+                {"event": "final", "content": assistant_content},
+            ],
+        }
+
+    def _finish_fallback(self, state: AgentRuntimeState) -> AgentRuntimeState:
+        runtime_status = state.get("runtime_status")
+        return {
+            "runtime_status": runtime_status or "checkpoint_unavailable_fallback_finished",
             "events": [{
                 "event": "agent_root_checkpoint_fallback_finished",
                 "application_action": state.get("application_action") or "finish",

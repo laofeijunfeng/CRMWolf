@@ -7,7 +7,7 @@ import type { HTMLAttributes } from 'vue'
 import { Form, type GenericObject } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import type { ZodType } from 'zod'
-import { cn } from '@/lib/utils'
+import { cn, omitUndefined } from '@/lib/utils'
 
 interface Props {
   class?: HTMLAttributes['class']
@@ -30,7 +30,7 @@ function handleSubmit(values: GenericObject): void {
   <Form
     v-if="props.schema"
     :validation-schema="toTypedSchema(props.schema)"
-    :initial-values="props.initialValues"
+    v-bind="omitUndefined({ initialValues: props.initialValues })"
     :class="cn('space-y-wolf-md', props.class)"
     @submit="handleSubmit"
   >
@@ -38,7 +38,7 @@ function handleSubmit(values: GenericObject): void {
   </Form>
   <Form
     v-else
-    :initial-values="props.initialValues"
+    v-bind="omitUndefined({ initialValues: props.initialValues })"
     :class="cn('space-y-wolf-md', props.class)"
     @submit="handleSubmit"
   >

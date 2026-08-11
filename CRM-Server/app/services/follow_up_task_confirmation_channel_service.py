@@ -408,24 +408,6 @@ class FollowUpTaskConfirmationChannelService:
             )
         return event
 
-    def resolve_bound_reply(
-        self,
-        db: Session,
-        *,
-        team_id: int,
-        user_id: int,
-        case_public_id: str,
-        reply_text: str,
-    ) -> dict[str, Any]:
-        result = self.resolve_reply(
-            db,
-            team_id=team_id,
-            user_id=user_id,
-            case_public_id=case_public_id,
-            reply_text=reply_text,
-        )
-        return self._resolution_event(result)
-
     def _case_payload(
         self,
         case: FollowUpTaskConfirmationCase,

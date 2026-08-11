@@ -12,7 +12,7 @@
  * - UI/UX Pro Max §5: z-index-management
  * - AppLayout.vue $z-index-modal: 1000
  */
-import type { VariantProps } from "class varience-authority"
+import type { VariantProps } from "class-variance-authority"
 import { cva } from "class-variance-authority"
 
 export { default as Sheet } from "./Sheet.vue"

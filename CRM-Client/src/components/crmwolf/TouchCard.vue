@@ -23,7 +23,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   clickable: false,
-  ariaLabel: undefined,
+  ariaLabel: '',
   disabled: false,
 })
 
@@ -47,6 +47,10 @@ const cardClasses = computed((): string =>
   )
 )
 
+const ariaLabelAttribute = computed((): string | undefined =>
+  props.ariaLabel.length > 0 ? props.ariaLabel : undefined
+)
+
 function handleClick(): void {
   if (!props.disabled && props.clickable) {
     emit('click')
@@ -64,7 +68,7 @@ function handleKeyDown(event: KeyboardEvent): void {
 <template>
   <Card
     :class="cardClasses"
-    :aria-label="ariaLabel"
+    :aria-label="ariaLabelAttribute"
     :role="clickable ? 'button' : undefined"
     :tabindex="clickable && !disabled ? 0 : undefined"
     @click="handleClick"

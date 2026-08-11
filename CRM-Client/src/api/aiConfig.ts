@@ -1,6 +1,7 @@
 /**
  * AI 配置 API
  */
+import { z } from 'zod'
 import request from '@/utils/request'
 
 export interface AIConfigResponse {
@@ -37,19 +38,48 @@ export interface SSEEvent {
   full_content?: string
 }
 
+const AIConfigResponseSchema = z.object({
+  id: z.number(),
+  api_host: z.string(),
+  api_key_masked: z.string(),
+  model_name: z.string(),
+  temperature: z.number(),
+  max_tokens: z.number(),
+  updated_at: z.string().nullable(),
+}).passthrough()
+
+const AIConfigEnvelopeSchema = z.object({
+  code: z.number(),
+  message: z.string(),
+  data: AIConfigResponseSchema.nullable(),
+})
+
+const AIConfigSaveEnvelopeSchema = z.object({
+  code: z.number(),
+  message: z.string(),
+  data: AIConfigResponseSchema,
+})
+
+type AIConfigEnvelope = z.infer<typeof AIConfigEnvelopeSchema>
+type AIConfigSaveEnvelope = z.infer<typeof AIConfigSaveEnvelopeSchema>
+
 export const aiConfigApi = {
   /**
    * 获取 AI 配置
    */
-  getConfig: () => {
-    return request.get<any, { code: number; message: string; data: AIConfigResponse | null }>('/v1/ai/config')
+  async getConfig(): Promise<AIConfigEnvelope> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const raw: unknown = await request.get('/v1/ai/config')
+    return AIConfigEnvelopeSchema.parse(raw)
   },
 
   /**
    * 保存 AI 配置
    */
-  saveConfig: (data: AIConfigCreate) => {
-    return request.post<AIConfigCreate, { code: number; message: string; data: AIConfigResponse }>('/v1/ai/config', data)
+  async saveConfig(data: AIConfigCreate): Promise<AIConfigSaveEnvelope> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const raw: unknown = await request.post('/v1/ai/config', data)
+    return AIConfigSaveEnvelopeSchema.parse(raw)
   },
 
   /**
@@ -94,7 +124,7 @@ export const aiConfigApi = {
 
       // 解析 SSE 数据（按双换行分隔）
       const lines = buffer.split('\n\n')
-      buffer = lines.pop() || ''  // 保留不完整的部分
+      buffer = lines.pop() ?? ''  // 保留不完整的部分
 
       for (const line of lines) {
         if (line.startsWith('data: ')) {

@@ -4,7 +4,7 @@ import type { HTMLAttributes } from "vue"
 import { reactiveOmit } from "@vueuse/core"
 
 import { StepperTrigger, useForwardProps } from "reka-ui"
-import { cn } from "@/lib/utils"
+import { cn, omitUndefined } from "@/lib/utils"
 
 const props = defineProps<StepperTriggerProps & { class?: HTMLAttributes["class"] }>()
 
@@ -15,7 +15,7 @@ const forwarded = useForwardProps(delegatedProps)
 
 <template>
   <StepperTrigger
-    v-bind="forwarded"
+    v-bind="omitUndefined(forwarded)"
     :class="cn('p-2 flex flex-col items-center text-center gap-2 rounded-md', props.class)"
   >
     <slot />

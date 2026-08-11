@@ -3,7 +3,7 @@ import type { SeparatorProps } from "reka-ui"
 import type { HTMLAttributes } from "vue"
 import { reactiveOmit } from "@vueuse/core"
 import { Separator } from "reka-ui"
-import { cn } from "@/lib/utils"
+import { cn, omitUndefined } from "@/lib/utils"
 
 const props = withDefaults(defineProps<
   SeparatorProps & { class?: HTMLAttributes["class"] }
@@ -17,7 +17,7 @@ const delegatedProps = reactiveOmit(props, "class")
 
 <template>
   <Separator
-    v-bind="delegatedProps"
+    v-bind="omitUndefined(delegatedProps)"
     :class="
       cn(
         'shrink-0 bg-border',

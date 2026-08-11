@@ -21,9 +21,11 @@ from app.schemas.agent import (
     AgentTaskCreate,
     AgentTaskUpdate,
 )
+from app.services.agent import action_workflow
 from app.services.agent import business_rules
 from app.services.agent import session_projection
 from app.services.agent import task_display
+from app.services.agent import workflow_action_ledger
 from app.services.agent.guardrails import AgentToolExecutionPolicy
 from app.services.agent.quality import AgentFollowUpQualityEvaluatorError, agent_follow_up_quality_evaluator
 from app.services.agent.runtime import AgentToolRuntime
@@ -100,6 +102,26 @@ def _suspend_pending_task(
         if suspension_kind == "dismissed":
             state["dismissed"] = True
             state["dismissed_reason"] = reason
+            workflow = action_workflow.workflow_from_task_state(state)
+            if action_workflow.is_optional_skip_workflow(workflow):
+                state["workflow"] = action_workflow.mark_skipped(
+                    workflow,
+                    reason=reason,
+                    source="langgraph_resume",
+                )
+                workflow_action_ledger.mark_action_skipped(
+                    db,
+                    workflow=workflow,
+                    team_id=task.team_id,
+                    user_id=task.user_id,
+                    task_id=task.id,
+                    reason=reason,
+                    source_type=workflow_action_ledger.SOURCE_PENDING_RESUME,
+                    decision={
+                        "suspension_kind": suspension_kind,
+                        "decision": "skip_current_action",
+                    },
+                )
     elif state.get("suspension_kind") is None:
         state["suspension_kind"] = "paused"
     agent_task_crud.update(

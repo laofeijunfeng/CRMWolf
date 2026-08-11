@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Literal, Mapping, NotRequired, Optional, Protocol, TypedDict
 
-from app.services.agent import task_display
+from app.services.agent import action_workflow, task_display
 from app.services.agent.input import AgentInputKind, AgentTurnInput
 from app.services.agent.interaction_contract import (
     STATUS_WAITING_CONFIRMATION,
@@ -35,6 +35,7 @@ AgentResumeAction = Literal[
     "edit",
     "reject",
     "cancel",
+    "skip_current_action",
     "select",
     "submit",
     "submit_fields",
@@ -81,6 +82,7 @@ class AgentInterruptPayload(TypedDict, total=False):
     interaction: AgentInteractionPayload
     source_event: str
     runtime_events: list[JSONDict]
+    workflow: JSONDict
 
 
 class AgentResumePayload(TypedDict, total=False):
@@ -112,6 +114,7 @@ class AgentWaitingEvent(TypedDict, total=False):
     content: str
     decision: JSONDict
     candidates: list[JSONDict]
+    workflow: JSONDict
 
 
 class AgentWaitingTaskLike(Protocol):
@@ -153,6 +156,9 @@ def interrupt_from_waiting_task(
     }
     if action:
         event["action"] = action
+    workflow = action_workflow.workflow_from_task_state(state)
+    if workflow:
+        event["workflow"] = workflow
     customer = _as_json_dict(state.get("customer"))
     if customer:
         event["customer"] = customer
@@ -184,10 +190,16 @@ def interrupt_from_waiting_event(
         "business_action": business_action,
         "target_refs": _target_refs_for_event(event, payload),
         "draft_payload": _draft_payload_for_event(event, payload),
-        "allowed_resume_actions": allowed_resume_actions_for_interaction(interaction_payload),
+        "allowed_resume_actions": allowed_resume_actions_for_interaction(
+            interaction_payload,
+            workflow=event.get("workflow"),
+        ),
         "interaction": interaction_payload,
         "source_event": event_name,
     }
+    workflow = action_workflow.workflow_from_event(event)
+    if workflow:
+        result["workflow"] = workflow
     task_id = event.get("task_id")
     if isinstance(task_id, (int, str)):
         result["task_projection_id"] = task_id
@@ -275,6 +287,10 @@ def validate_resume_payload(
     metadata = coerce_json_dict(resume_payload.get("metadata"))
     content = resume_payload.get("content")
     content_text = content.strip() if isinstance(content, str) else ""
+    if action == "skip_current_action":
+        if not action_workflow.is_optional_skip_interrupt(current_interrupt):
+            raise ValueError("skip_current_action is only allowed for optional non-blocking actions")
+        return
     if action == "select" or interrupt_type == "choice":
         if action != "cancel" and not _has_choice_resume_value(metadata):
             if _is_turn_relation_choice_interrupt(current_interrupt):
@@ -367,26 +383,37 @@ def interrupt_payload_from_json(value: object) -> AgentInterruptPayload | None:
         if events:
             interrupt_payload["runtime_events"] = events
 
+    workflow = action_workflow.workflow_from_mapping(payload.get("workflow"))
+    if workflow:
+        interrupt_payload["workflow"] = workflow
+
     return interrupt_payload or None
 
 
 def allowed_resume_actions_for_interaction(
     interaction: Optional[Mapping[str, object]],
+    *,
+    workflow: object = None,
 ) -> list[AgentResumeAction]:
     interaction = interaction or {}
     status = interaction.get("status")
     interaction_type = interaction.get("type")
+    optional_skip = action_workflow.is_optional_skip_workflow(workflow)
     if status == STATUS_WAITING_CONFIRMATION:
-        return ["approve", "edit", "reject", "cancel"]
+        return (
+            ["approve", "edit", "reject", "skip_current_action", "cancel"]
+            if optional_skip
+            else ["approve", "edit", "reject", "cancel"]
+        )
     if interaction_type == "form":
-        return ["submit_fields", "cancel"]
+        return ["submit_fields", "skip_current_action", "cancel"] if optional_skip else ["submit_fields", "cancel"]
     if interaction_type == "choice":
         return ["select", "cancel"]
     if interaction_type == "text":
         return ["submit_text", "cancel"]
     if status == STATUS_WAITING_USER_INPUT:
         return ["submit", "cancel"]
-    return ["resume", "cancel"]
+    return ["resume", "skip_current_action", "cancel"] if optional_skip else ["resume", "cancel"]
 
 
 def reason_for_event(
@@ -420,6 +447,8 @@ def _resume_action_for_turn(
     if turn_input.kind == AgentInputKind.CONFIRM:
         return "approve"
     if turn_input.kind == AgentInputKind.REJECT:
+        if action_workflow.is_optional_skip_interrupt(current_interrupt):
+            return "skip_current_action"
         if current_interrupt.get("type") == "choice":
             return "cancel"
         return "reject"
@@ -432,11 +461,15 @@ def _resume_action_for_turn(
         return "select"
     if current_interrupt.get("type") == "confirm":
         if _is_rejection_text(turn_input.content):
+            if action_workflow.is_optional_skip_interrupt(current_interrupt):
+                return "skip_current_action"
             return "reject"
         if _is_confirmation_text(turn_input.content):
             return "approve"
         return "edit"
     if current_interrupt.get("type") == "form":
+        if _is_rejection_text(turn_input.content) and action_workflow.is_optional_skip_interrupt(current_interrupt):
+            return "skip_current_action"
         return "submit_fields"
     if current_interrupt.get("type") == "text":
         return "submit_text"
@@ -630,6 +663,7 @@ def _resume_actions_from_json(value: object) -> list[AgentResumeAction]:
             "edit",
             "reject",
             "cancel",
+            "skip_current_action",
             "select",
             "submit",
             "submit_fields",
@@ -672,6 +706,9 @@ def _draft_payload_for_event(event: AgentWaitingEvent, payload: JSONDict) -> JSO
     candidates = event.get("candidates")
     if candidates:
         draft["candidates"] = candidates
+    workflow = action_workflow.workflow_from_event(event)
+    if workflow:
+        draft["workflow"] = workflow
     return draft
 
 
@@ -709,6 +746,9 @@ def _waiting_event_from_json(event: JSONDict) -> AgentWaitingEvent:
     candidates = _as_json_dict_list(event.get("candidates"))
     if candidates:
         result["candidates"] = candidates
+    workflow = action_workflow.workflow_from_event(event)
+    if workflow:
+        result["workflow"] = workflow
     return result
 
 

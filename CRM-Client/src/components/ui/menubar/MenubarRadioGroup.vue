@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { omitUndefined } from "@/lib/utils"
 import type { MenubarRadioGroupEmits, MenubarRadioGroupProps } from "reka-ui"
 import {
   MenubarRadioGroup,
@@ -13,7 +14,7 @@ const forwarded = useForwardPropsEmits(props, emits)
 </script>
 
 <template>
-  <MenubarRadioGroup v-bind="forwarded">
+  <MenubarRadioGroup v-bind="omitUndefined(forwarded)">
     <slot />
   </MenubarRadioGroup>
 </template>

@@ -167,7 +167,7 @@ async def test_checkpoint_fallback_runtime_prefers_traced_pending_events() -> No
 
 
 @pytest.mark.asyncio
-async def test_checkpoint_fallback_runtime_routes_confirmed_pending_task() -> None:
+async def test_checkpoint_fallback_runtime_blocks_confirmed_pending_task_write() -> None:
     pending_graph = FakePendingConfirmedGraphService()
     confirmed_graph = FakeConfirmedTaskGraphService()
     runtime = AgentCheckpointFallbackRuntime(
@@ -189,9 +189,11 @@ async def test_checkpoint_fallback_runtime_routes_confirmed_pending_task() -> No
     )
 
     assert result.state["application_action"] == "execute_confirmed_task"
-    assert result.turn_output.assistant_content == "已执行确认任务。"
+    assert result.state["runtime_status"] == "checkpoint_unavailable_write_blocked"
+    assert "业务写入已暂停" in result.turn_output.assistant_content
     assert pending_graph.calls[0]["task"] is task
-    assert confirmed_graph.calls[0]["task"] is task
+    assert confirmed_graph.calls == []
+    assert any(event["event"] == "agent_root_checkpoint_write_blocked" for event in result.turn_output.events)
 
 
 @pytest.mark.asyncio
@@ -218,6 +220,36 @@ async def test_checkpoint_fallback_runtime_routes_no_pending_confirmation() -> N
 
     assert result.state["application_action"] == "no_pending_confirmation"
     assert result.turn_output.assistant_content
+    assert pending_graph.calls == []
+    assert confirmed_graph.calls == []
+    assert new_flow_adapter.calls == []
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_fallback_runtime_blocks_new_flow_write_side_effects() -> None:
+    pending_graph = FakePendingHandledGraphService()
+    confirmed_graph = FakeConfirmedTaskGraphService()
+    new_flow_adapter = FakeNewFlowRuntime()
+    runtime = AgentCheckpointFallbackRuntime(
+        pending_graph_service=pending_graph,
+        confirmed_task_graph_service=confirmed_graph,
+        new_flow_adapter=new_flow_adapter,
+    )
+
+    result = await runtime.run(
+        db=object(),
+        session=SimpleNamespace(id=4, session_key="abc", context_json={}),
+        task=None,
+        turn_input=AgentTurnInput.text("今天和客户沟通了续费"),
+        content="今天和客户沟通了续费",
+        team_id=2,
+        user_id=3,
+        authorization="Bearer test",
+    )
+
+    assert result.state["application_action"] == "run_new_flow"
+    assert result.state["runtime_status"] == "checkpoint_unavailable_write_blocked"
+    assert "业务写入已暂停" in result.turn_output.assistant_content
     assert pending_graph.calls == []
     assert confirmed_graph.calls == []
     assert new_flow_adapter.calls == []

@@ -12,7 +12,6 @@ const props = withDefaults(defineProps<{
   class?: HTMLAttributes["class"]
 }>(), {
   defaultOpen: defaultDocument?.cookie.includes(`${SIDEBAR_COOKIE_NAME}=false`) === false,
-  open: undefined,
 })
 
 const emits = defineEmits<{

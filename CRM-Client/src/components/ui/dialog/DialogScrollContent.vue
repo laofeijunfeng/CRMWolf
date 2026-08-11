@@ -10,7 +10,7 @@ import {
   DialogPortal,
   useForwardPropsEmits,
 } from "reka-ui"
-import { cn } from "@/lib/utils"
+import { cn, omitUndefined } from "@/lib/utils"
 
 const props = defineProps<DialogContentProps & { class?: HTMLAttributes["class"] }>()
 const emits = defineEmits<DialogContentEmits>()
@@ -32,7 +32,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
             props.class,
           )
         "
-        v-bind="forwarded"
+        v-bind="omitUndefined(forwarded)"
         @pointer-down-outside="(event) => {
           const originalEvent = event.detail.originalEvent;
           const target = originalEvent.target as HTMLElement;

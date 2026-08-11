@@ -3,7 +3,7 @@ import type { RadioGroupRootEmits, RadioGroupRootProps } from "reka-ui"
 import type { HTMLAttributes } from "vue"
 import { reactiveOmit } from "@vueuse/core"
 import { RadioGroupRoot, useForwardPropsEmits } from "reka-ui"
-import { cn } from "@/lib/utils"
+import { cn, omitUndefined } from "@/lib/utils"
 
 const props = defineProps<RadioGroupRootProps & { class?: HTMLAttributes["class"] }>()
 const emits = defineEmits<RadioGroupRootEmits>()
@@ -16,7 +16,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
 <template>
   <RadioGroupRoot
     :class="cn('grid gap-2', props.class)"
-    v-bind="forwarded"
+    v-bind="omitUndefined(forwarded)"
   >
     <slot />
   </RadioGroupRoot>

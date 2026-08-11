@@ -28,6 +28,7 @@ import { useTeamStore } from '@/stores/team'
 import { useUserStore } from '@/stores/user'
 import { teamJoinSchema, type TeamJoinFormValues } from '@/schemas/team-join.schema'
 import { handleApiError } from '@/utils/errorHandler'
+import { omitUndefined } from '@/lib/utils'
 
 const router = useRouter()
 const teamStore = useTeamStore()
@@ -119,7 +120,7 @@ const confirmLogout = (): void => {
                   maxlength="20"
                   :aria-invalid="!!errorMessage"
                   :aria-describedby="errorMessage ? 'invite-code-error invite-code-hint' : 'invite-code-hint'"
-                  v-bind="componentField"
+                  v-bind="omitUndefined(componentField)"
                 />
               </FormControl>
               <!-- UI/UX Pro Max: 帮助文本 -->
@@ -127,7 +128,7 @@ const confirmLogout = (): void => {
                 邀请码长度为 4-20 个字符
               </FormDescription>
               <!-- UI/UX Pro Max: 错误消息 -->
-              <ErrorMessage id="invite-code-error" :message="errorMessage" />
+              <ErrorMessage v-if="errorMessage" id="invite-code-error" :message="errorMessage" />
             </FormItem>
           </FormField>
 

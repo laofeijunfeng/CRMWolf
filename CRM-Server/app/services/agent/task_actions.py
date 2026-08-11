@@ -22,6 +22,7 @@ from app.schemas.agent import (
     AgentTaskUpdate,
 )
 from app.services.agent.guardrails import AgentToolExecutionPolicy
+from app.services.agent import action_workflow
 from app.services.agent.quality import AgentFollowUpQualityEvaluatorError, agent_follow_up_quality_evaluator
 from app.services.agent.runtime import AgentToolRuntime
 from app.services.agent.schemas import (
@@ -77,26 +78,13 @@ def _opportunity_create_tool_payload(opportunity: dict, customer_id: object) -> 
     return tool_opportunity
 
 def _tool_name_for_action(action: Optional[str]) -> Optional[str]:
-    return {
-        "create_customer_activity": "create_customer_activity",
-        "create_lead": "create_lead",
-        "create_customer": "create_customer",
-        "create_lead_follow_up": "create_lead_follow_up",
-        "create_contact": "create_contact",
-        "create_invoice_title": "create_invoice_title",
-        "create_deployment_info": "create_deployment_info",
-        "create_customer_member": "create_customer_member",
-        "create_opportunity": "create_opportunity",
-        "move_opportunity_stage": "move_opportunity_stage",
-        "transition_follow_up_task": "transition_follow_up_task",
-        "create_payment_plan": "create_payment_plan",
-        "create_payment_record": "create_payment_record",
-    }.get(action or "")
+    return action_workflow.tool_name_for_action(action)
 
 def _tool_payload_for_action(action: Optional[str], payload: dict, customer: dict, task_key: str) -> Optional[dict]:
     if action == "create_customer_activity":
+        customer_id = payload.get("customer_id") or customer.get("id")
         return {
-            "customer_id": payload["customer_id"],
+            "customer_id": customer_id,
             "customer_name": customer.get("account_name"),
             "activity_kind": payload.get("activity_kind") or "OTHER_FOLLOW_UP",
             "source_content": payload.get("source_content") or payload.get("content") or "",
@@ -124,21 +112,33 @@ def _tool_payload_for_action(action: Optional[str], payload: dict, customer: dic
             "idempotency_suffix": task_key,
         }
     if action == "create_contact":
-        return {"customer_id": payload["customer_id"], "contact": payload["contact"]}
+        return {
+            "customer_id": payload["customer_id"],
+            "contact": payload["contact"],
+            "idempotency_suffix": task_key,
+        }
     if action == "create_invoice_title":
         return {
             "customer_id": payload["customer_id"],
             "invoice_title": payload["invoice_title"],
             "set_default": bool(payload.get("set_default")),
+            "idempotency_suffix": task_key,
         }
     if action == "create_deployment_info":
         deployment_info = dict(payload["deployment_info"])
         deployment_info["customer_id"] = payload.get("customer_id") or deployment_info.get("customer_id")
-        return {"deployment_info": deployment_info}
+        return {
+            "deployment_info": deployment_info,
+            "idempotency_suffix": task_key,
+        }
     if action == "create_customer_member":
         member = dict(payload["member"])
         member.pop("user_name", None)
-        return {"customer_id": payload["customer_id"], "member": member}
+        return {
+            "customer_id": payload["customer_id"],
+            "member": member,
+            "idempotency_suffix": task_key,
+        }
     if action == "create_opportunity":
         opportunity = _opportunity_create_tool_payload(
             dict(payload["opportunity"]),
@@ -157,6 +157,12 @@ def _tool_payload_for_action(action: Optional[str], payload: dict, customer: dic
             "action": payload["transition_action"],
             "proposed_due_at": payload.get("proposed_due_at"),
             "reason": payload.get("reason"),
+            "idempotency_suffix": task_key,
+        }
+    if action == "resolve_follow_up_task_confirmation_case":
+        return {
+            "case_id": payload["case_id"],
+            "reply_text": payload["reply_text"],
             "idempotency_suffix": task_key,
         }
     if action == "create_payment_plan":

@@ -52,7 +52,10 @@ from app.services.customer_intelligence_context_service import (
     CustomerIntelligenceContextService,
     customer_intelligence_context_service,
 )
-from app.services.customer_intelligence_event_service import CustomerIntelligenceEvent
+from app.services.customer_intelligence_event_service import (
+    CUSTOMER_INTELLIGENCE_COMMITTED_EVENT_TRIGGER_TYPES,
+    CustomerIntelligenceEvent,
+)
 from app.services.customer_intelligence_trace_service import visible_trace_events
 from app.services.customer_memory_store_service import (
     CUSTOMER_MEMORY_FACTS,
@@ -281,11 +284,11 @@ class CustomerIntelligenceGraphService:
             self._route_after_normalize,
             {
                 "load_context": "load_customer_context",
+                "retrieve_memory": "retrieve_memory",
                 "skip": "emit_trace",
             },
         )
-        graph.add_edge("load_customer_context", "retrieve_memory")
-        graph.add_edge("retrieve_memory", "plan_refresh")
+        graph.add_edge(["load_customer_context", "retrieve_memory"], "plan_refresh")
         graph.add_conditional_edges(
             "plan_refresh",
             self._route_after_plan,
@@ -511,11 +514,11 @@ class CustomerIntelligenceGraphService:
             "events": [{"event": "customer_intelligence_event_normalized", "trigger_type": event.get("trigger_type")}],
         }
 
-    def _route_after_normalize(self, state: CustomerIntelligenceGraphState) -> str:
+    def _route_after_normalize(self, state: CustomerIntelligenceGraphState) -> str | list[str]:
         event = coerce_json_dict(state.get("event"))
         if not event.get("customer_id") or not event.get("team_id"):
             return "skip"
-        return "load_context"
+        return ["load_context", "retrieve_memory"]
 
     def _load_customer_context(
         self,
@@ -1268,18 +1271,7 @@ def _route_for_trigger(trigger_type: str) -> CustomerIntelligenceRoute:
         return "write_memory"
     if trigger_type == "customer_brief_generated":
         return "write_memory"
-    if trigger_type in {
-        "customer_activity_created",
-        "customer_activity_updated",
-        "customer_activity_deleted",
-        "customer_contact_created",
-        "customer_contact_updated",
-        "customer_contact_deleted",
-        "customer_business_object_created",
-        "customer_business_object_updated",
-        "customer_business_object_deleted",
-        "deal_journey_event_recorded",
-    }:
+    if trigger_type in CUSTOMER_INTELLIGENCE_COMMITTED_EVENT_TRIGGER_TYPES:
         return "refresh_brief"
     return "skip"
 

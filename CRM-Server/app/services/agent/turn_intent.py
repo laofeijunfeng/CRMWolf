@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.crud.agent import agent_task_crud
 from app.models.agent import AgentTaskStatus
+from app.services.agent import action_workflow
 from app.services.agent.input import AgentInputKind, AgentTurnInput
 from app.services.agent.interrupts import (
     AgentInterruptPayload,
@@ -135,7 +136,7 @@ class AgentTurnIntentRouter:
 
         metadata = coerce_json_dict(turn_input.metadata)
         explicit_action = metadata.get("action") or metadata.get("resume_action")
-        if explicit_action in {"cancel", "dismiss", "pause", "submit_fields", "approve", "reject"}:
+        if explicit_action in {"cancel", "dismiss", "pause", "skip_current_action", "submit_fields", "approve", "reject"}:
             return AgentTurnIntentDecision(
                 intent=self._intent_for_action(str(explicit_action), current_interrupt=current_interrupt),
                 confidence=1.0,
@@ -159,12 +160,16 @@ class AgentTurnIntentRouter:
             return AgentTurnIntentDecision(
                 intent=(
                     "DISMISS_CURRENT_SUGGESTION"
-                    if self._looks_like_system_suggestion(active_task)
+                    if self._is_optional_suggestion(current_interrupt=current_interrupt, task=active_task)
                     else "CANCEL_CURRENT_TASK"
                 ),
                 confidence=0.96,
                 target_task_id=self._task_id(active_task),
-                normalized_action="dismiss" if self._looks_like_system_suggestion(active_task) else "cancel",
+                normalized_action=(
+                    "skip_current_action"
+                    if self._is_optional_suggestion(current_interrupt=current_interrupt, task=active_task)
+                    else "cancel"
+                ),
                 reason="用户明确表达当前任务不继续处理。",
             )
         if current_interrupt.get("type") == "form" and _FIELD_SIGNAL_RE.search(normalized):
@@ -249,7 +254,7 @@ class AgentTurnIntentRouter:
             "CONFIRM_EXECUTION": "approve",
             "REJECT_EXECUTION": "reject",
             "CANCEL_CURRENT_TASK": "cancel",
-            "DISMISS_CURRENT_SUGGESTION": "cancel",
+            "DISMISS_CURRENT_SUGGESTION": "skip_current_action",
             "PAUSE_CURRENT_TASK": "cancel",
             "PATCH_ACTIVE_DRAFT": "submit_fields",
             "RESUME_SUSPENDED_DRAFT": "submit",
@@ -258,6 +263,7 @@ class AgentTurnIntentRouter:
             "cancel",
             "dismiss",
             "pause",
+            "skip_current_action",
             "submit_fields",
             "approve",
             "reject",
@@ -265,7 +271,9 @@ class AgentTurnIntentRouter:
             "resume",
             "patch",
         } else intent_action_map.get(decision.intent)
-        if action in {"dismiss", "pause"}:
+        if action == "dismiss":
+            action = "skip_current_action"
+        if action == "pause":
             action = "cancel"
         if action == "patch":
             action = "submit_fields" if current_interrupt.get("type") == "form" else "submit"
@@ -278,7 +286,7 @@ class AgentTurnIntentRouter:
     def _intent_for_action(self, action: str, *, current_interrupt: AgentInterruptPayload) -> str:
         if action in {"cancel", "pause"}:
             return "CANCEL_CURRENT_TASK"
-        if action == "dismiss":
+        if action in {"dismiss", "skip_current_action"}:
             return "DISMISS_CURRENT_SUGGESTION"
         if action == "approve":
             return "CONFIRM_EXECUTION"
@@ -290,11 +298,21 @@ class AgentTurnIntentRouter:
 
     def _looks_like_system_suggestion(self, task) -> bool:
         state = coerce_json_dict(getattr(task, "state_json", None))
-        action = state.get("action")
-        if action in {"collect_opportunity_fields", "create_opportunity"}:
+        if action_workflow.is_optional_skip_workflow(state.get("workflow")):
             return True
+        action = state.get("action")
         payload = coerce_json_dict(getattr(task, "input_json", None))
         return bool(payload.get("suggestion") or state.get("suggestion"))
+
+    def _is_optional_suggestion(
+        self,
+        *,
+        current_interrupt: AgentInterruptPayload,
+        task,
+    ) -> bool:
+        if action_workflow.is_optional_skip_interrupt(current_interrupt):
+            return True
+        return self._looks_like_system_suggestion(task)
 
     def _memory_snapshot(self, session, task) -> AgentMemorySnapshot:
         return AgentMemorySnapshot(

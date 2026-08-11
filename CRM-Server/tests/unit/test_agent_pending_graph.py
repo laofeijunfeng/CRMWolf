@@ -10,7 +10,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.services.agent.input import AgentTurnInput
 from app.models.agent import AgentTaskStatus
 from app.services.agent.schemas import AgentConfirmationIntentDecision, AgentTurnRelationDecision
-from app.services.agent import follow_up_fields, opportunity_fields, pending_graph as pending_graph_module, selection
+from app.services.agent import action_workflow, follow_up_fields, opportunity_fields, pending_graph as pending_graph_module
+from app.services.agent import selection
 from app.services.agent import session_state
 from app.services.agent.pending_interaction_graph import PendingInteractionGraphService
 from app.services.agent.pending_graph import PendingTaskGraphService, build_pending_task_graph_config, build_pending_task_thread_id
@@ -526,8 +527,45 @@ async def test_pending_task_graph_resumes_native_interaction_interrupt_after_ser
 
 
 @pytest.mark.asyncio
-async def test_pending_task_graph_rejects_native_confirmation_interrupt_without_text_reclassification():
-    task = SimpleNamespace(id=101)
+async def test_pending_task_graph_rejects_native_confirmation_interrupt_without_text_reclassification(monkeypatch):
+    workflow = action_workflow.required_write_contract(action="create_opportunity")
+    task = SimpleNamespace(
+        id=101,
+        state_json={
+            "workflow": workflow,
+            "payload": {"workflow": workflow},
+        },
+    )
+    cancelled_actions = []
+
+    def fake_mark_action_cancelled(
+        db,
+        *,
+        workflow,
+        team_id,
+        user_id,
+        task_id=None,
+        reason=None,
+        source_type=None,
+        decision=None,
+    ):
+        cancelled_actions.append({
+            "db": db,
+            "workflow": workflow,
+            "team_id": team_id,
+            "user_id": user_id,
+            "task_id": task_id,
+            "reason": reason,
+            "source_type": source_type,
+            "decision": decision,
+        })
+        return SimpleNamespace(status="CANCELLED")
+
+    monkeypatch.setattr(
+        pending_graph_module.workflow_action_ledger,
+        "mark_action_cancelled",
+        fake_mark_action_cancelled,
+    )
     preflight = FakePreflightGraphService(FakePreflightResult(
         task=task,
         events=[{"event": "pending_interruption_assessed"}],
@@ -540,6 +578,7 @@ async def test_pending_task_graph_rejects_native_confirmation_interrupt_without_
             "event": "confirmation_required",
             "task_id": 101,
             "action": "create_opportunity",
+            "workflow": workflow,
             "payload": {"customer_id": 7},
         }, {"event": "final"}],
     ))
@@ -567,6 +606,77 @@ async def test_pending_task_graph_rejects_native_confirmation_interrupt_without_
         {"event": "task_cancelled", "task_id": 101, "content": "好嘞，这一步先放着。"},
         {"event": "final", "content": "好嘞，这一步先放着。"},
     ]
+    assert cancelled_actions == [{
+        "db": state["db"],
+        "workflow": workflow,
+        "team_id": 1,
+        "user_id": 2,
+        "task_id": 101,
+        "reason": "用户通过 LangGraph interrupt resume 拒绝执行。",
+        "source_type": pending_graph_module.workflow_action_ledger.SOURCE_PENDING_RESUME,
+        "decision": {
+            "decision": "reject",
+            "resume_reason": "write_confirmation",
+            "content": "先不处理",
+        },
+    }]
+    assert task.state_json["workflow"]["status"] == action_workflow.STATUS_CANCELLED
+    assert task.state_json["workflow"]["status_reason"] == "用户通过 LangGraph interrupt resume 拒绝执行。"
+    assert task.state_json["workflow"]["status_source"] == "langgraph_resume"
+    assert task.state_json["payload"]["workflow"]["status"] == action_workflow.STATUS_CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_pending_task_graph_skips_optional_suggestion_without_cancelling_required_workflow():
+    workflow = action_workflow.optional_suggestion_contract(action="collect_opportunity_fields")
+    task = SimpleNamespace(id=101)
+    interaction = FakeInteractionGraphService(FakeInteractionResult(
+        handled=True,
+        assistant_content="请补充商机信息。",
+        remember_pending_task=True,
+        events=[{
+            "event": "confirmation_required",
+            "task_id": 101,
+            "action": "collect_opportunity_fields",
+            "content": "请补充商机信息。",
+            "workflow": workflow,
+            "payload": {"customer_id": 7, "workflow": workflow},
+        }, {"event": "final"}],
+    ))
+    service = PendingTaskGraphService(
+        preflight_graph_service=FakePreflightGraphService(FakePreflightResult(
+            task=task,
+            events=[{"event": "pending_interruption_assessed"}],
+        )),
+        interaction_graph_service=interaction,
+        checkpointer=InMemorySaver(),
+    )
+    await service.run(_state(task))
+
+    state = _state(task)
+    state["resume_payload"] = {"action": "skip_current_action", "content": "先不管"}
+    side_effects = PendingTaskGraphSideEffects(task=task)
+    result = await service.run(state, side_effects=side_effects)
+
+    assert result["handled"] is True
+    assert result["has_active_task"] is False
+    assert result["clear_pending_task_id"] == 101
+    assert result["suspension_kind"] == "dismissed"
+    assert result["suspend_reason"] == "先不管"
+    assert result["assistant_content"] == "已跳过补商机信息建议。"
+    assert result["events"][-2:] == [
+        {
+            "event": "workflow_action_skipped",
+            "content": "已跳过补商机信息建议。",
+            "reason": "先不管",
+            "action_id": workflow["action_id"],
+            "action_type": "collect_opportunity_fields",
+            "task_id": 101,
+        },
+        {"event": "final", "content": "已跳过补商机信息建议。"},
+    ]
+    assert side_effects.task is None
+    assert side_effects.suspended_task is task
 
 
 @pytest.mark.asyncio

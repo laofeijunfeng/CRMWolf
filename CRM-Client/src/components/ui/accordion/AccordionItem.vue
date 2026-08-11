@@ -3,7 +3,7 @@ import type { AccordionItemProps } from "reka-ui"
 import type { HTMLAttributes } from "vue"
 import { reactiveOmit } from "@vueuse/core"
 import { AccordionItem, useForwardProps } from "reka-ui"
-import { cn } from "@/lib/utils"
+import { cn, omitUndefined } from "@/lib/utils"
 
 const props = defineProps<AccordionItemProps & { class?: HTMLAttributes["class"] }>()
 
@@ -14,7 +14,7 @@ const forwardedProps = useForwardProps(delegatedProps)
 
 <template>
   <AccordionItem
-    v-bind="forwardedProps"
+    v-bind="omitUndefined(forwardedProps)"
     :class="cn('border-b', props.class)"
   >
     <slot />

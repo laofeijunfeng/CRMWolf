@@ -27,7 +27,7 @@ import {
   DialogPortal,
   useForwardPropsEmits,
 } from "reka-ui"
-import { cn } from "@/lib/utils"
+import { cn, omitUndefined } from "@/lib/utils"
 import { sheetVariants } from "."
 
 interface SheetContentProps extends DialogContentProps {
@@ -58,7 +58,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
     <!-- DialogContent: Sheet 主体 z-[201]（在 Overlay 之上） -->
     <DialogContent
       :class="cn(sheetVariants({ side }), props.class)"
-      v-bind="{ ...forwarded, ...$attrs }"
+      v-bind="omitUndefined({ ...forwarded, ...$attrs })"
     >
       <slot />
 

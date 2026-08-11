@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { omitUndefined } from "@/lib/utils"
 import type { DropdownMenuRootEmits, DropdownMenuRootProps } from "reka-ui"
 import { DropdownMenuRoot, useForwardPropsEmits } from "reka-ui"
 
@@ -9,7 +10,7 @@ const forwarded = useForwardPropsEmits(props, emits)
 </script>
 
 <template>
-  <DropdownMenuRoot v-bind="forwarded">
+  <DropdownMenuRoot v-bind="omitUndefined(forwarded)">
     <slot />
   </DropdownMenuRoot>
 </template>

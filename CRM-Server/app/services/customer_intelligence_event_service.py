@@ -43,6 +43,20 @@ CustomerIntelligenceTriggerType = Literal[
     "agent_customer_question",
 ]
 
+CUSTOMER_INTELLIGENCE_INLINE_TRIGGER_TYPES = frozenset({"agent_customer_question"})
+CUSTOMER_INTELLIGENCE_COMMITTED_EVENT_TRIGGER_TYPES = frozenset({
+    "customer_activity_created",
+    "customer_activity_updated",
+    "customer_activity_deleted",
+    "customer_contact_created",
+    "customer_contact_updated",
+    "customer_contact_deleted",
+    "customer_business_object_created",
+    "customer_business_object_updated",
+    "customer_business_object_deleted",
+    "deal_journey_event_recorded",
+})
+
 
 @dataclass(frozen=True)
 class CustomerIntelligenceSource:

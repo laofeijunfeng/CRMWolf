@@ -1,39 +1,38 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { authApi, type UserResponse } from '@/api/auth'
+import { logger } from '@/utils/logger'
 import { usePermissionStore } from './permissions'
 import { useTeamStore } from './team'
 
 export const useUserStore = defineStore('user', () => {
-  const token = ref<string>(localStorage.getItem('token') || '')
+  const token = ref<string>(localStorage.getItem('token') ?? '')
   const userInfo = ref<UserResponse | null>(null)
 
-  // 用户角色类型定义
-  interface UserRole { id: number; name: string; code: string }
   const loading = ref(false)
 
-  const setToken = (newToken: string) => {
+  const setToken = (newToken: string): void => {
     token.value = newToken
     localStorage.setItem('token', newToken)
   }
 
-  const setUserInfo = (info: UserResponse) => {
+  const setUserInfo = (info: UserResponse): void => {
     userInfo.value = info
   }
 
-  const login = async () => {
+  const login = async (): Promise<void> => {
     loading.value = true
     try {
       const permissionStore = usePermissionStore()
       await permissionStore.fetchPermissions()
     } catch (error) {
-      console.error('获取权限失败', error)
+      logger.error('[UserStore]', 'loginPermissions:failed', { error })
     } finally {
       loading.value = false
     }
   }
 
-  const fetchUserInfo = async () => {
+  const fetchUserInfo = async (): Promise<UserResponse> => {
     loading.value = true
     try {
       const res = await authApi.getUserInfo()
@@ -42,20 +41,19 @@ export const useUserStore = defineStore('user', () => {
         const roles = await authApi.getUserRoles()
         setUserInfo({ ...res, roles })
       } catch (roleError) {
-        console.warn('获取用户角色失败', roleError)
+        logger.warn('[UserStore]', 'fetchUserRoles:failed', { error: roleError })
         setUserInfo(res)
       }
 
-      console.log('========== 获取用户信息 ==========')
-      console.log('用户信息:', res)
-      console.log('用户ID:', res.id)
-      console.log('用户名:', res.name)
-      console.log('邮箱:', res.email)
-      console.log('====================================')
+      logger.debug('[UserStore]', 'fetchUserInfo:success', {
+        userId: res.id,
+        name: res.name,
+        email: res.email,
+      })
 
       return res
     } catch (error) {
-      console.error('获取用户信息失败', error)
+      logger.error('[UserStore]', 'fetchUserInfo:failed', { error })
       throw error
     } finally {
       loading.value = false
@@ -73,8 +71,8 @@ export const useUserStore = defineStore('user', () => {
     teamStore.clearTeam()
   }
 
-  const isLoggedIn = () => {
-    return !!token.value
+  const isLoggedIn = (): boolean => {
+    return token.value.length > 0
   }
 
   return {

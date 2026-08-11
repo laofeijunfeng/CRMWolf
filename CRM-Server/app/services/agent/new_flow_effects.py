@@ -9,7 +9,7 @@ from app.services.agent.action_review_graph import (
     ActionReviewGraphService,
     action_review_graph_service as default_action_review_graph_service,
 )
-from app.services.agent import interactions, session_state, task_display, task_factory
+from app.services.agent import action_plan, action_workflow, interactions, session_state, task_display, task_execution, task_factory
 from app.services.agent.interrupts import AgentInterruptPayload, interrupt_from_waiting_event
 from app.services.agent.state import AgentGraphInput, AgentGraphResult
 from app.services.agent.types import JSONDict, coerce_json_dict
@@ -42,6 +42,7 @@ class NewFlowSideEffectContext:
     assistant_content: str | None = None
     current_interrupt: AgentInterruptPayload | None = None
     auto_execute_tasks: list[object] | None = None
+    auto_execute_actions: list[action_plan.ActionPlanItem] | None = None
     review_events: list[JSONDict] | None = None
 
 
@@ -76,21 +77,59 @@ class NewFlowSideEffectHandler:
                 "execution_confidence": review.get("execution_confidence"),
                 "reason": review.get("reason"),
             }
-            task = task_factory._create_waiting_task_from_event(
-                context.db,
-                event_object,
-                context.team_id,
-                context.user_id,
-                context.session,
-            )
             if decision == "auto_execute":
-                if task is not None:
-                    if context.auto_execute_tasks is None:
-                        context.auto_execute_tasks = []
-                    context.auto_execute_tasks.append(task)
+                workflow = action_workflow.mark_auto_executable(
+                    action_workflow.ensure_event_workflow(event_object),
+                    reason=review.get("reason"),
+                    source="action_review",
+                )
+                event_object = action_workflow.attach_workflow(event_object, workflow)
+                action_item = action_plan.item_from_workflow(
+                    workflow,
+                    payload=event_object.get("payload"),
+                    target_type=_event_target_type(event_object),
+                    target_id=_event_target_id(event_object),
+                )
+                if action_item is not None and task_execution.can_direct_execute_action_envelope(
+                    task_execution.execution_envelope_from_plan_node(action_item)
+                ):
+                    if context.auto_execute_actions is None:
+                        context.auto_execute_actions = []
+                    context.auto_execute_actions.append(action_item)
+                else:
+                    task = task_factory._create_waiting_task_from_event(
+                        context.db,
+                        event_object,
+                        context.team_id,
+                        context.user_id,
+                        context.session,
+                    )
+                    if task is not None:
+                        if context.auto_execute_tasks is None:
+                            context.auto_execute_tasks = []
+                        context.auto_execute_tasks.append(task)
+                        action_item = action_plan.item_from_workflow(
+                            workflow,
+                            payload=event_object.get("payload"),
+                            task=task,
+                            task_id=getattr(task, "id", None),
+                            target_type=getattr(task, "target_type", None),
+                            target_id=getattr(task, "target_id", None),
+                        )
+                        if action_item is not None:
+                            if context.auto_execute_actions is None:
+                                context.auto_execute_actions = []
+                            context.auto_execute_actions.append(action_item)
                 event_object["event"] = "action_auto_execution_queued"
                 event_object["content"] = _auto_execution_content(event_object.get("action"))
             else:
+                task = task_factory._create_waiting_task_from_event(
+                    context.db,
+                    event_object,
+                    context.team_id,
+                    context.user_id,
+                    context.session,
+                )
                 event_with_interaction = interactions._with_interaction(
                     event_object,
                     db=context.db,
@@ -143,6 +182,37 @@ class NewFlowSideEffectHandler:
 def _auto_execution_content(action: object) -> str:
     label = task_display.readable_execution_label(action) or "业务操作"
     return f"已识别为明确的{label}，正在执行。"
+
+
+def _event_target_type(event: dict[str, object]) -> str | None:
+    target_type = event.get("target_type")
+    if isinstance(target_type, str) and target_type.strip():
+        return target_type.strip()
+    payload = coerce_json_dict(event.get("payload"))
+    if payload.get("customer_id") is not None:
+        return "customer"
+    return None
+
+
+def _event_target_id(event: dict[str, object]) -> int | None:
+    target_id = event.get("target_id")
+    if isinstance(target_id, int):
+        return target_id
+    if isinstance(target_id, str) and target_id.strip():
+        try:
+            return int(target_id.strip())
+        except ValueError:
+            return None
+    payload = coerce_json_dict(event.get("payload"))
+    customer_id = payload.get("customer_id")
+    if isinstance(customer_id, int):
+        return customer_id
+    if isinstance(customer_id, str) and customer_id.strip():
+        try:
+            return int(customer_id.strip())
+        except ValueError:
+            return None
+    return None
 
 
 new_flow_side_effect_handler = NewFlowSideEffectHandler()

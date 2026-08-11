@@ -171,16 +171,22 @@ async def startup_event():
     from app.tasks.customer_intelligence_backfill import start_customer_intelligence_backfill_scheduler
     start_customer_intelligence_backfill_scheduler()
 
+    logger.info("启动 Agent workflow 恢复扫描任务...")
+    from app.tasks.agent_workflow_recovery import start_agent_workflow_recovery_scheduler
+    start_agent_workflow_recovery_scheduler()
+
     logger.info("审批超时自动催办任务已停用，催办改为审批中心手动触发")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """应用关闭时停止后台调度任务"""
+    from app.tasks.agent_workflow_recovery import stop_agent_workflow_recovery_scheduler
     from app.tasks.customer_evidence_sync import stop_customer_evidence_sync_scheduler
     from app.tasks.customer_intelligence_backfill import stop_customer_intelligence_backfill_scheduler
     from app.tasks.customer_intelligence_refresh_retry import stop_customer_intelligence_refresh_retry_scheduler
 
+    stop_agent_workflow_recovery_scheduler()
     stop_customer_intelligence_backfill_scheduler()
     stop_customer_intelligence_refresh_retry_scheduler()
     stop_customer_evidence_sync_scheduler()

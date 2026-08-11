@@ -5,7 +5,7 @@ import { reactiveOmit } from "@vueuse/core"
 import {
   ContextMenuSeparator,
 } from "reka-ui"
-import { cn } from "@/lib/utils"
+import { cn, omitUndefined } from "@/lib/utils"
 
 const props = defineProps<ContextMenuSeparatorProps & { class?: HTMLAttributes["class"] }>()
 
@@ -13,5 +13,5 @@ const delegatedProps = reactiveOmit(props, "class")
 </script>
 
 <template>
-  <ContextMenuSeparator v-bind="delegatedProps" :class="cn('-mx-1 my-1 h-px bg-border', props.class)" />
+  <ContextMenuSeparator v-bind="omitUndefined(delegatedProps)" :class="cn('-mx-1 my-1 h-px bg-border', props.class)" />
 </template>

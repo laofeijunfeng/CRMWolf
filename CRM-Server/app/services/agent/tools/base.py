@@ -18,8 +18,13 @@ class AgentToolContext:
     session_id: int
     authorization: str
     task_id: Optional[int] = None
+    workflow_id: Optional[str] = None
+    action_id: Optional[str] = None
+    execution_policy: Optional[str] = None
+    authorization_source: Optional[str] = None
     hitl_decision: Optional[str] = None
     confirmed_by_user: bool = False
+    auto_execute_authorized: bool = False
     allowed_tool_names: Optional[List[str]] = None
     allowed_customer_ids: Optional[List[str]] = None
 

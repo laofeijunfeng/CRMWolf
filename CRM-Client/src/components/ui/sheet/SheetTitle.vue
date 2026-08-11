@@ -3,7 +3,7 @@ import type { DialogTitleProps } from "reka-ui"
 import type { HTMLAttributes } from "vue"
 import { reactiveOmit } from "@vueuse/core"
 import { DialogTitle } from "reka-ui"
-import { cn } from "@/lib/utils"
+import { cn, omitUndefined } from "@/lib/utils"
 
 const props = defineProps<DialogTitleProps & { class?: HTMLAttributes["class"] }>()
 
@@ -13,7 +13,7 @@ const delegatedProps = reactiveOmit(props, "class")
 <template>
   <DialogTitle
     :class="cn('text-lg font-semibold text-foreground', props.class)"
-    v-bind="delegatedProps"
+    v-bind="omitUndefined(delegatedProps)"
   >
     <slot />
   </DialogTitle>

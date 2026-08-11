@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { omitUndefined } from "@/lib/utils"
 import type { ContextMenuSubEmits, ContextMenuSubProps } from "reka-ui"
 import {
   ContextMenuSub,
@@ -12,7 +13,7 @@ const forwarded = useForwardPropsEmits(props, emits)
 </script>
 
 <template>
-  <ContextMenuSub v-bind="forwarded">
+  <ContextMenuSub v-bind="omitUndefined(forwarded)">
     <slot />
   </ContextMenuSub>
 </template>

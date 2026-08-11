@@ -40,7 +40,7 @@
                   maxlength="50"
                   :aria-invalid="!!errorMessage"
                   :aria-describedby="errorMessage ? 'team-name-error team-name-hint' : 'team-name-hint'"
-                  v-bind="componentField"
+                  v-bind="omitUndefined(componentField)"
                 />
               </FormControl>
               <!-- UI/UX Pro Max: 帮助文本 -->
@@ -48,7 +48,7 @@
                 团队名称长度为 2-50 个字符
               </FormDescription>
               <!-- UI/UX Pro Max: 错误消息使用 ErrorMessage（自动 aria-live） -->
-              <ErrorMessage id="team-name-error" :message="errorMessage" />
+              <ErrorMessage v-if="errorMessage" id="team-name-error" :message="errorMessage" />
             </FormItem>
           </FormField>
 
@@ -119,6 +119,7 @@ import { useTeamStore } from '@/stores/team'
 import { useUserStore } from '@/stores/user'
 import { teamCreateSchema, type TeamCreateFormValues } from '@/schemas/team-create.schema'
 import { handleApiError } from '@/utils/errorHandler'
+import { omitUndefined } from '@/lib/utils'
 
 const router = useRouter()
 const teamStore = useTeamStore()

@@ -153,18 +153,19 @@ const isSubmitterGeneric = computed<boolean>(() => {
 })
 
 const canEditRecord = computed<boolean>(() => {
-  if (!hasRecord.value) return false
+  const record = props.record
+  if (record === null) return false
   if (
-    props.record?.approval_phase !== 'draft' &&
-    props.record.approval_phase !== 'rejected'
+    record.approval_phase !== 'draft' &&
+    record.approval_phase !== 'rejected'
   ) {
     return false
   }
-  const approvalStatus = props.approval?.status ?? props.record?.approval?.status
+  const approvalStatus = props.approval?.status ?? record.approval?.status
   if (approvalStatus === 'PENDING') return false
-  if (props.record?.confirmation_status === 'CONFIRMED') return false
+  if (record.confirmation_status === 'CONFIRMED') return false
   if (permissionStore.hasAnyPermission(['payment:record:edit', 'payment:edit'])) return true
-  return props.record?.creator_id === currentUserId.value
+  return record.creator_id === currentUserId.value
 })
 
 const confirmationStatusLabel = computed<string>(() => {

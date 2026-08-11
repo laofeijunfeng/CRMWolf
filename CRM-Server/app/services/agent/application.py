@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import Counter
 from typing import AsyncGenerator, Optional
 
 from fastapi import HTTPException
@@ -34,10 +35,6 @@ from app.services.agent.state import (
     AgentRuntimeContext,
 )
 from app.services.agent.types import JSONDict, coerce_json_dict
-from app.services.follow_up_task_confirmation_channel_service import (
-    FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION,
-    follow_up_task_confirmation_channel_service,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -112,43 +109,6 @@ class AgentApplicationService:
                 "message_id": user_message.id,
                 "content": user_message.content,
             }
-
-            bound_confirmation_event = self._resolve_bound_follow_up_confirmation_reply(
-                db,
-                team_id=team_id,
-                user_id=user_id,
-                content=content,
-                turn_input=agent_turn_input,
-            )
-            if bound_confirmation_event is not None:
-                emitted_event = coerce_json_dict(bound_confirmation_event)
-                interactions._append_trace_event(trace_events, emitted_event)
-                yield emitted_event
-                assistant_message = agent_message_crud.create(
-                    db,
-                    AgentMessageCreate(
-                        team_id=team_id,
-                        user_id=user_id,
-                        session_id=session.id,
-                        role=AgentMessageRole.ASSISTANT,
-                        event_type="assistant_message",
-                        content=str(emitted_event.get("content") or agent_copy.generic_completed()),
-                        payload_json={
-                            "source": "follow_up_task_confirmation_reply",
-                            "trace_events": trace_events,
-                            "content_format": emitted_event.get("content_format") or "text",
-                        },
-                    ),
-                )
-                yield {
-                    "event": "message",
-                    "role": AgentMessageRole.ASSISTANT,
-                    "message_id": assistant_message.id,
-                    "content": assistant_message.content,
-                    "content_format": emitted_event.get("content_format") or "text",
-                }
-                yield {"event": "done", "session_id": session.id}
-                return
 
             assistant_content = None
             runtime_event_queue = asyncio.Queue()
@@ -245,6 +205,16 @@ class AgentApplicationService:
                 assistant_content = agent_copy.generic_completed()
                 assistant_content_format = "text"
 
+            observability_event = self._build_turn_observability_event(
+                trace_events=trace_events,
+                assistant_content=assistant_content,
+                assistant_content_format=assistant_content_format,
+            )
+            interactions._append_trace_event(
+                trace_events,
+                interactions._with_interaction(observability_event, db=db, team_id=team_id),
+            )
+
             assistant_message = self._persist_runtime_success_message(
                 db,
                 team_id=team_id,
@@ -255,8 +225,10 @@ class AgentApplicationService:
                 content_format=assistant_content_format,
                 trace_events=trace_events,
                 source="langgraph",
+                turn_observability=coerce_json_dict(observability_event.get("summary")),
             )
             assistant_message_persisted = True
+            yield observability_event
             yield {
                 "event": "message",
                 "role": AgentMessageRole.ASSISTANT,
@@ -380,6 +352,7 @@ class AgentApplicationService:
         content_format: str,
         trace_events: list[JSONDict],
         source: str,
+        turn_observability: JSONDict | None = None,
     ) -> AgentMessage:
         existing = self._find_persisted_assistant_for_user_message(
             db,
@@ -404,9 +377,26 @@ class AgentApplicationService:
                     "for_user_message_id": user_message_id,
                     "trace_events": trace_events,
                     "content_format": content_format,
+                    "turn_observability": turn_observability or {},
                 },
             ),
         )
+
+    def _build_turn_observability_event(
+        self,
+        *,
+        trace_events: list[JSONDict],
+        assistant_content: str,
+        assistant_content_format: str,
+    ) -> JSONDict:
+        return {
+            "event": "agent_turn_observability",
+            "summary": _build_turn_observability_summary(
+                trace_events=trace_events,
+                assistant_content=assistant_content,
+                assistant_content_format=assistant_content_format,
+            ),
+        }
 
     def _find_persisted_assistant_for_user_message(
         self,
@@ -491,6 +481,16 @@ class AgentApplicationService:
                 assistant_content = agent_copy.generic_completed()
                 assistant_content_format = "text"
 
+            observability_event = self._build_turn_observability_event(
+                trace_events=trace_events,
+                assistant_content=assistant_content,
+                assistant_content_format=assistant_content_format,
+            )
+            interactions._append_trace_event(
+                trace_events,
+                interactions._with_interaction(observability_event, db=db, team_id=team_id),
+            )
+
             self._persist_runtime_success_message(
                 db,
                 team_id=team_id,
@@ -501,6 +501,7 @@ class AgentApplicationService:
                 content_format=assistant_content_format,
                 trace_events=trace_events,
                 source="langgraph_stream_cancelled_finalizer",
+                turn_observability=coerce_json_dict(observability_event.get("summary")),
             )
         except Exception:
             logger.exception(
@@ -586,41 +587,6 @@ class AgentApplicationService:
             logger.warning("Agent root graph checkpoint is unavailable", exc_info=True)
             return AgentApplicationRuntimeResult(checkpoint_unavailable=True)
 
-    def _resolve_bound_follow_up_confirmation_reply(
-        self,
-        db: Session,
-        *,
-        team_id: int,
-        user_id: int,
-        content: str,
-        turn_input: AgentTurnInput,
-    ) -> JSONDict | None:
-        case_public_id = _structured_follow_up_confirmation_case_public_id_from_turn(
-            turn_input,
-        )
-        if case_public_id is None:
-            return None
-
-        try:
-            return coerce_json_dict(
-                follow_up_task_confirmation_channel_service.resolve_bound_reply(
-                    db,
-                    team_id=team_id,
-                    user_id=user_id,
-                    case_public_id=case_public_id,
-                    reply_text=content,
-                )
-            )
-        except SQLAlchemyError:
-            db.rollback()
-            logger.exception(
-                "Follow-up confirmation structured reply failed: team_id=%s user_id=%s case_public_id=%s",
-                team_id,
-                user_id,
-                case_public_id,
-            )
-            return None
-
 agent_application_service = AgentApplicationService()
 
 
@@ -644,33 +610,230 @@ def _content_format_from_events(events: object) -> str | None:
     return None
 
 
-def _structured_follow_up_confirmation_case_public_id_from_turn(
-    turn_input: AgentTurnInput,
-) -> str | None:
-    metadata = turn_input.metadata
-    if not isinstance(metadata, dict):
-        return None
-    if not _is_follow_up_confirmation_structured_action(metadata):
-        return None
-    for key in ("case_public_id", "follow_up_confirmation_case_public_id"):
-        value = metadata.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
+def _build_turn_observability_summary(
+    *,
+    trace_events: list[JSONDict],
+    assistant_content: str,
+    assistant_content_format: str,
+) -> JSONDict:
+    event_names = [str(event.get("event")) for event in trace_events if event.get("event")]
+    tool_events = [event for event in trace_events if event.get("event") == "tool_result"]
+    read_tool_events = [event for event in trace_events if event.get("event") == "agent_read_tool_executed"]
+    semantic_event = _last_event(trace_events, "semantic_parsed")
+    final_event = _last_event(trace_events, "final")
+    customer_candidates_event = _last_event(trace_events, "customer_candidates")
+    search_event = _last_tool_event(tool_events, "search_customers")
+    context_event = _last_tool_event(tool_events, "get_customer_context")
+
+    tool_names = [str(event.get("tool_name")) for event in tool_events if event.get("tool_name")]
+    successful_tools = [
+        str(event.get("tool_name"))
+        for event in tool_events
+        if event.get("tool_name") and event.get("success") is True
+    ]
+    failed_tools = [
+        str(event.get("tool_name"))
+        for event in tool_events
+        if event.get("tool_name") and event.get("success") is False
+    ]
+    read_tool_names = [str(event.get("tool_name")) for event in read_tool_events if event.get("tool_name")]
+    workflow_events = [
+        event
+        for event in trace_events
+        if isinstance(event.get("workflow_id"), str) or isinstance(event.get("action_id"), str)
+    ]
+
+    summary: JSONDict = {
+        "schema_version": "agent.turn_observability.v1",
+        "event_count": len(trace_events),
+        "event_counts": dict(Counter(event_names)),
+        "assistant": {
+            "content_format": assistant_content_format,
+            "content_length": len(assistant_content),
+            "empty": not bool(assistant_content.strip()),
+        },
+        "semantic": _semantic_summary(semantic_event),
+        "customer_resolution": _customer_resolution_summary(
+            customer_candidates_event=customer_candidates_event,
+            search_event=search_event,
+        ),
+        "retrieval": _retrieval_summary(search_event=search_event, context_event=context_event),
+        "tools": {
+            "called": tool_names,
+            "successful": successful_tools,
+            "failed": failed_tools,
+            "idempotent_replay_count": sum(1 for event in tool_events if event.get("idempotent_replay") is True),
+        },
+        "read_tools": {
+            "called": read_tool_names,
+            "query_types": [
+                str(event.get("query_type"))
+                for event in read_tool_events
+                if event.get("query_type")
+            ],
+            "successful": [
+                str(event.get("tool_name"))
+                for event in read_tool_events
+                if event.get("tool_name") and event.get("success") is True
+            ],
+            "failed": [
+                str(event.get("tool_name"))
+                for event in read_tool_events
+                if event.get("tool_name") and event.get("success") is False
+            ],
+        },
+        "workflow": _workflow_summary(workflow_events),
+        "quality_flags": [],
+        "final": {
+            "intent": final_event.get("intent") if final_event else None,
+            "tool_execution_enabled": final_event.get("tool_execution_enabled") if final_event else None,
+        },
+    }
+    summary["quality_flags"] = _turn_quality_flags(summary)
+    return summary
+
+
+def _last_event(events: list[JSONDict], event_name: str) -> JSONDict | None:
+    for event in reversed(events):
+        if event.get("event") == event_name:
+            return event
     return None
 
 
-def _is_follow_up_confirmation_structured_action(metadata: dict[str, object]) -> bool:
-    action_values = (
-        metadata.get("business_action"),
-        metadata.get("action"),
-        metadata.get("resume_action"),
-    )
-    return any(
-        value
-        in {
-            FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION,
-            "resolve_follow_up_task_confirmation_case",
-            "follow_up_task_confirmation_reply",
+def _last_tool_event(events: list[JSONDict], tool_name: str) -> JSONDict | None:
+    for event in reversed(events):
+        if event.get("tool_name") == tool_name:
+            return event
+    return None
+
+
+def _semantic_summary(event: JSONDict | None) -> JSONDict:
+    if not event:
+        return {
+            "intent": None,
+            "technical_intent": None,
+            "confidence": None,
+            "parse_source": None,
+            "need_clarification": None,
         }
-        for value in action_values
+    return {
+        "intent": event.get("intent"),
+        "technical_intent": event.get("technical_intent"),
+        "intent_label": event.get("intent_label"),
+        "confidence": event.get("confidence"),
+        "parse_source": event.get("parse_source"),
+        "model": event.get("model"),
+        "need_clarification": event.get("need_clarification"),
+        "fallback_reason": event.get("fallback_reason"),
+        "fallback_error": event.get("fallback_error"),
+    }
+
+
+def _customer_resolution_summary(
+    *,
+    customer_candidates_event: JSONDict | None,
+    search_event: JSONDict | None,
+) -> JSONDict:
+    candidates = customer_candidates_event.get("customers") if customer_candidates_event else None
+    if not isinstance(candidates, list):
+        candidates = []
+    search_data = coerce_json_dict(search_event.get("data")) if search_event else {}
+    retrieval = coerce_json_dict(search_data.get("retrieval"))
+    return {
+        "candidate_count": len(candidates),
+        "selected_customer_id": _first_candidate_value(candidates, "id"),
+        "selected_customer_name": _first_candidate_value(candidates, "account_name"),
+        "identity_status": retrieval.get("identity_status"),
+        "identity_strategy": retrieval.get("identity_strategy"),
+        "identity_decision": retrieval.get("identity_decision"),
+        "identity_candidate_count": retrieval.get("identity_candidate_count"),
+        "identity_related_count": retrieval.get("identity_related_count"),
+        "semantic_related_customer_count": retrieval.get("semantic_related_customer_count"),
+    }
+
+
+def _retrieval_summary(*, search_event: JSONDict | None, context_event: JSONDict | None) -> JSONDict:
+    search_data = coerce_json_dict(search_event.get("data")) if search_event else {}
+    search_retrieval = coerce_json_dict(search_data.get("retrieval"))
+    context_data = coerce_json_dict(context_event.get("data")) if context_event else {}
+    context_retrieval = coerce_json_dict(context_data.get("retrieval"))
+    semantic_evidence = context_data.get("semantic_evidence")
+    return {
+        "customer_search": {
+            "mode": search_retrieval.get("mode"),
+            "lexical_status": search_retrieval.get("lexical_status"),
+            "alias_status": search_retrieval.get("alias_status"),
+            "semantic_status": search_retrieval.get("semantic_status"),
+            "semantic_source": search_retrieval.get("semantic_source"),
+            "semantic_candidate_count": search_retrieval.get("semantic_candidate_count"),
+        },
+        "customer_context": {
+            "called": context_event is not None,
+            "retrieval_status": context_retrieval.get("status") or context_retrieval.get("retrieval_status"),
+            "semantic_evidence_count": len(semantic_evidence) if isinstance(semantic_evidence, list) else None,
+            "top_score": context_retrieval.get("top_score"),
+        },
+    }
+
+
+def _workflow_summary(events: list[JSONDict]) -> JSONDict:
+    workflow_ids = sorted({str(event.get("workflow_id")) for event in events if event.get("workflow_id")})
+    action_ids = sorted({str(event.get("action_id")) for event in events if event.get("action_id")})
+    statuses = Counter(
+        str(event.get("status"))
+        for event in events
+        if event.get("status") and (event.get("workflow_id") or event.get("action_id"))
     )
+    return {
+        "workflow_ids": workflow_ids,
+        "action_ids": action_ids,
+        "status_counts": dict(statuses),
+    }
+
+
+def _turn_quality_flags(summary: JSONDict) -> list[str]:
+    flags: list[str] = []
+    semantic = coerce_json_dict(summary.get("semantic"))
+    customer_resolution = coerce_json_dict(summary.get("customer_resolution"))
+    retrieval = coerce_json_dict(summary.get("retrieval"))
+    tools = coerce_json_dict(summary.get("tools"))
+    read_tools = coerce_json_dict(summary.get("read_tools"))
+    assistant = coerce_json_dict(summary.get("assistant"))
+
+    if assistant.get("empty") is True:
+        flags.append("assistant_response_empty")
+    if semantic.get("intent") == "CRM_READ_QUERY" and not tools.get("successful") and not read_tools.get("successful"):
+        flags.append("read_query_without_successful_business_tool")
+    if (
+        semantic.get("intent") == "CRM_READ_QUERY"
+        and customer_resolution.get("candidate_count") == 1
+        and not read_tools.get("successful")
+        and not coerce_json_dict(retrieval.get("customer_context")).get("called")
+    ):
+        flags.append("resolved_customer_read_without_context_or_read_tool")
+    if _as_int(customer_resolution.get("candidate_count")) and _as_int(customer_resolution.get("candidate_count")) > 1:
+        flags.append("multiple_customer_candidates")
+    if _as_int(customer_resolution.get("identity_related_count")) and _as_int(customer_resolution.get("identity_related_count")) > 5:
+        flags.append("semantic_related_customer_noise_high")
+    if tools.get("failed") or read_tools.get("failed"):
+        flags.append("tool_failure_seen")
+    if semantic.get("fallback_error"):
+        flags.append("semantic_parse_fallback_error")
+    return flags
+
+
+def _first_candidate_value(candidates: list[object], key: str) -> object:
+    if not candidates:
+        return None
+    first = candidates[0]
+    if not isinstance(first, dict):
+        return None
+    return first.get(key)
+
+
+def _as_int(value: object) -> int | None:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    return None

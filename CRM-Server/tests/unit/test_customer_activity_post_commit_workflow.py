@@ -9,6 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
 from app.crud.sales_commitment import follow_up_task_confirmation_case_crud, follow_up_task_crud
+from app.models.agent import AgentWorkflowAction
 from app.models.customer import Customer
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_vector_document import CustomerVectorDocument
@@ -64,6 +65,7 @@ def db_session(monkeypatch):
             FollowUpTaskConfirmationCase.__table__,
             FollowUpTaskTransitionPolicyDecisionLog.__table__,
             FollowUpTaskReconciliationRun.__table__,
+            AgentWorkflowAction.__table__,
         ],
     )
     Session = sessionmaker(bind=engine)
@@ -302,16 +304,32 @@ async def test_post_commit_workflow_completes_old_same_owner_task_without_next_s
     assert state["execution_results"][0]["status"] == "EXECUTED"
     assert db_session.query(FollowUpTaskTransitionPolicyDecisionLog).count() == 1
     event_names = [event["event"] for event in state["events"]]
-    assert event_names == [
-        "post_commit_workflow_started",
-        "activity_loaded",
-        "next_step_projected",
-        "historical_tasks_matched",
-        "transition_policy_applied",
-        "transition_execution_finished",
-        "confirmation_cases_created",
-        "post_commit_outcome_built",
-    ]
+    assert event_names[:2] == ["post_commit_workflow_started", "activity_loaded"]
+    assert "next_step_projected" in event_names
+    assert "historical_tasks_matched" in event_names
+    assert event_names.index("transition_policy_applied") > event_names.index("historical_tasks_matched")
+    assert event_names.index("transition_execution_finished") > event_names.index("transition_policy_applied")
+    assert event_names.index("confirmation_cases_created") > event_names.index("transition_execution_finished")
+    assert event_names[-1] == "post_commit_outcome_built"
+    ledger_actions = _post_commit_ledger_actions(db_session)
+    assert {action.action_type for action in ledger_actions} == {
+        "project_next_follow_up_tasks",
+        "reconcile_historical_follow_up_tasks",
+    }
+    assert {action.workflow_id for action in ledger_actions} == {"wf_pc_190_activity_created_deterministic"}
+    assert {action.action_id for action in ledger_actions} == {
+        "act_pc_proj_190_activity_created_deterministic",
+        "act_pc_recon_190_activity_created_deterministic",
+    }
+    assert all(action.status == "EXECUTED" for action in ledger_actions)
+    assert all(
+        action.dependency_json == {
+            "depends_on": [],
+            "parallel_group": "post_commit_activity_analysis",
+            "join": "apply_transition_policy",
+        }
+        for action in ledger_actions
+    )
 
 
 @pytest.mark.asyncio
@@ -348,3 +366,18 @@ async def test_post_commit_workflow_creates_confirmation_case_when_policy_blocks
     assert state["post_commit"]["needs_user_confirmation"] is True
     assert state["post_commit"]["confirmation_case_public_ids"] == [cases[0].public_id]
     assert state["post_commit"]["confirmation_cases"][0]["task_public_id"] == task.public_id
+    ledger_actions = _post_commit_ledger_actions(db_session)
+    assert {action.action_type for action in ledger_actions} == {
+        "project_next_follow_up_tasks",
+        "reconcile_historical_follow_up_tasks",
+    }
+    assert all(action.status == "EXECUTED" for action in ledger_actions)
+
+
+def _post_commit_ledger_actions(db_session) -> list[AgentWorkflowAction]:
+    return (
+        db_session.query(AgentWorkflowAction)
+        .filter(AgentWorkflowAction.workflow_id.like("wf_pc_%"))
+        .order_by(AgentWorkflowAction.action_type.asc())
+        .all()
+    )

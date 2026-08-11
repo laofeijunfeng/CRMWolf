@@ -3,7 +3,7 @@ import type { StepperRootEmits, StepperRootProps } from "reka-ui"
 import type { HTMLAttributes } from "vue"
 import { reactiveOmit } from "@vueuse/core"
 import { StepperRoot, useForwardPropsEmits } from "reka-ui"
-import { cn } from "@/lib/utils"
+import { cn, omitUndefined } from "@/lib/utils"
 
 const props = defineProps<StepperRootProps & { class?: HTMLAttributes["class"] }>()
 const emits = defineEmits<StepperRootEmits>()
@@ -20,7 +20,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
       'flex gap-2',
       props.class,
     )"
-    v-bind="forwarded"
+    v-bind="omitUndefined(forwarded)"
   >
     <slot v-bind="slotProps" />
   </StepperRoot>

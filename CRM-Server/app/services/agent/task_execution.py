@@ -8,6 +8,7 @@ import uuid
 from typing import Optional
 
 from fastapi import HTTPException, status
+from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -37,10 +38,10 @@ from app.services.agent.tools.api_client import CRMAPIClientError
 from app.services.agent.tool_registry import AgentToolRegistry
 from app.services.agent.tools import CRMAgentToolService
 from app.services.agent.tools.base import AgentToolContext, AgentToolResult
-from app.services.agent.types import AgentRuntimeEventSink, JSONDict
+from app.services.agent.types import AgentRuntimeEventSink, JSONDict, coerce_json_dict
 from app.utils.sse_encoder import SSEJsonEncoder
 
-from app.services.agent import agent_copy, task_display
+from app.services.agent import action_workflow, agent_copy, task_display, workflow_action_ledger
 from app.services.agent.follow_up_fields import (
     _stage_customer_activity_after_create,
     _stage_lead_follow_up_after_create,
@@ -57,6 +58,222 @@ class WaitingTaskExecutionResult:
     progress_events: list[JSONDict] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class ActionExecutionEnvelope:
+    """Action-owned execution input.
+
+    ``AgentTask`` is a confirmation/UI projection. The executable command is
+    the action envelope: action id/type, workflow policy, payload and target
+    customer context.
+    """
+
+    action_id: str
+    action_type: str
+    workflow: JSONDict = field(default_factory=dict)
+    payload: JSONDict = field(default_factory=dict)
+    customer: JSONDict = field(default_factory=dict)
+    task_id: int | None = None
+    task_key: str | None = None
+    session_id: int | None = None
+    target_type: str | None = None
+    target_id: int | None = None
+
+
+@dataclass(frozen=True)
+class ActionToolExecutionResult:
+    tool_result: AgentToolResult | None
+    progress_events: list[JSONDict] = field(default_factory=list)
+
+
+def execution_envelope_from_task(task: object) -> ActionExecutionEnvelope:
+    state = coerce_json_dict(getattr(task, "state_json", None))
+    workflow = action_workflow.workflow_from_task_state(state)
+    action = _action_type_from_state(state, workflow)
+    task_id = _optional_int(getattr(task, "id", None))
+    return ActionExecutionEnvelope(
+        action_id=_action_id_from_workflow_or_task(workflow=workflow, task_id=task_id),
+        action_type=action,
+        workflow=workflow,
+        payload=_payload_from_task_state(task=task, state=state),
+        customer=coerce_json_dict(state.get("customer")),
+        task_id=task_id,
+        task_key=_optional_str(getattr(task, "task_key", None)) or f"task_{task_id or 'unknown'}",
+        session_id=_optional_int(getattr(task, "session_id", None)),
+        target_type=_optional_str(getattr(task, "target_type", None)),
+        target_id=_optional_int(getattr(task, "target_id", None)),
+    )
+
+
+def execution_envelope_from_plan_node(node: object) -> ActionExecutionEnvelope:
+    workflow = action_workflow.workflow_from_mapping(getattr(node, "workflow", None))
+    payload = coerce_json_dict(getattr(node, "payload", None))
+    task = getattr(node, "task", None)
+    task_envelope = execution_envelope_from_task(task) if task is not None else None
+    customer = coerce_json_dict(payload.get("customer"))
+    if not customer and task_envelope is not None:
+        customer = task_envelope.customer
+    target_type = _optional_str(getattr(node, "target_type", None))
+    target_id = _optional_int(getattr(node, "target_id", None))
+    action_type = _optional_str(getattr(node, "action_type", None))
+    task_id = _optional_int(getattr(node, "task_id", None))
+    return ActionExecutionEnvelope(
+        action_id=_optional_str(getattr(node, "action_id", None))
+        or _action_id_from_workflow_or_task(workflow=workflow, task_id=task_id),
+        action_type=action_type or str(workflow.get("action_type") or "unknown"),
+        workflow=workflow,
+        payload=payload or (task_envelope.payload if task_envelope is not None else {}),
+        customer=customer,
+        task_id=task_id,
+        task_key=(task_envelope.task_key if task_envelope is not None else None) or f"action_{_optional_str(getattr(node, 'action_id', None)) or 'unknown'}",
+        session_id=task_envelope.session_id if task_envelope is not None else None,
+        target_type=target_type,
+        target_id=target_id,
+    )
+
+
+def can_direct_execute_action_envelope(envelope: ActionExecutionEnvelope) -> bool:
+    """Return whether an action envelope is complete enough to run without task projection."""
+
+    if not action_workflow.workflow_from_mapping(envelope.workflow):
+        return False
+    payload = envelope.payload
+    action_type = envelope.action_type
+    if action_type == "create_customer_activity":
+        if isinstance(payload.get("_next_task"), dict):
+            return False
+        customer_id = payload.get("customer_id") or envelope.customer.get("id")
+        return bool(customer_id and (payload.get("source_content") or payload.get("content")))
+    if action_type == "transition_follow_up_task":
+        return bool(payload.get("task_id") and payload.get("transition_action"))
+    return False
+
+
+def action_execution_blocking_reason(envelope: ActionExecutionEnvelope) -> str | None:
+    """Validate capability requirements before a CRM mutation reaches tools."""
+
+    capability = action_workflow.action_capability(envelope.action_type)
+    if not (
+        capability.is_write
+        or capability.requires_idempotency_key
+        or capability.required_payload_fields
+    ):
+        return None
+    try:
+        tool_payload = _tool_payload_for_action(
+            envelope.action_type,
+            envelope.payload,
+            envelope.customer,
+            envelope.task_key or envelope.action_id,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        return f"invalid_action_payload:{exc}"
+    if capability.requires_idempotency_key and not _payload_has_idempotency_key(tool_payload):
+        return "missing_idempotency_key"
+    validation_error = _tool_payload_validation_error(capability.tool_name, tool_payload)
+    if validation_error:
+        return validation_error
+    missing_fields = [
+        field
+        for field in capability.required_payload_fields
+        if not _payload_field_present(envelope.payload, field)
+    ]
+    if missing_fields:
+        return f"missing_required_payload_fields:{','.join(sorted(missing_fields))}"
+    return None
+
+
+def _tool_execution_policy(
+    *,
+    tool_name: str,
+    context: AgentToolContext,
+    allowed_customer_ids: list[str],
+) -> AgentToolExecutionPolicy:
+    is_auto_execute = context.execution_policy == action_workflow.EXECUTION_AUTO_EXECUTE
+    return AgentToolExecutionPolicy(
+        hitl_decision=None if is_auto_execute else "approve",
+        execution_policy=context.execution_policy,
+        workflow_id=context.workflow_id,
+        action_id=context.action_id,
+        authorization_source=context.authorization_source,
+        auto_execute_authorized=context.auto_execute_authorized,
+        allowed_tool_names=[tool_name],
+        allowed_customer_ids=allowed_customer_ids,
+    )
+
+
+async def execute_action_envelope(
+    db: Session,
+    envelope: ActionExecutionEnvelope,
+    *,
+    session: object,
+    team_id: int,
+    user_id: int,
+    authorization: str,
+    event_sink: AgentRuntimeEventSink | None = None,
+) -> ActionToolExecutionResult:
+    action = envelope.action_type
+    tool_name = _tool_name_for_action(action)
+    workflow = action_workflow.workflow_from_mapping(envelope.workflow)
+    is_auto_execute = action_workflow.is_auto_execute_workflow(workflow)
+    workflow_id = _optional_str(workflow.get("workflow_id"))
+    action_id = _optional_str(workflow.get("action_id")) or envelope.action_id
+    authorization_source = "semantic_auto_execute_low_risk" if is_auto_execute else None
+    blocking_reason = action_execution_blocking_reason(envelope)
+    if blocking_reason:
+        return ActionToolExecutionResult(
+            AgentToolResult(
+                tool_name=tool_name or action or "unknown",
+                success=False,
+                error_message=blocking_reason,
+                status_code=status.HTTP_409_CONFLICT,
+            )
+        )
+    tool_payload = _tool_payload_for_action(action, envelope.payload, envelope.customer, envelope.task_key or envelope.action_id)
+    context = AgentToolContext(
+        db=db,
+        team_id=team_id,
+        user_id=user_id,
+        session_id=_optional_int(getattr(session, "id", None)) or envelope.session_id or 0,
+        task_id=envelope.task_id,
+        workflow_id=workflow_id,
+        action_id=action_id,
+        execution_policy=action_workflow.EXECUTION_AUTO_EXECUTE if is_auto_execute else None,
+        authorization_source=authorization_source,
+        authorization=authorization,
+        hitl_decision=None if is_auto_execute else "approve",
+        confirmed_by_user=not is_auto_execute,
+        auto_execute_authorized=is_auto_execute,
+        allowed_tool_names=[tool_name] if tool_name else [],
+        allowed_customer_ids=_allowed_customer_ids_for_envelope(envelope),
+    )
+    registry = AgentToolRegistry(CRMAgentToolService())
+    runtime = AgentToolRuntime(registry)
+
+    result = None
+    progress_events: list[JSONDict] = []
+    if action == "move_opportunity_stage" and tool_name:
+        result = await _execute_opportunity_stage_move_plan(
+            runtime,
+            context,
+            envelope.payload,
+            envelope.task_key or envelope.action_id,
+            progress_events=progress_events,
+            event_sink=event_sink,
+        )
+    elif tool_name and tool_payload:
+        result = await runtime.execute(
+            tool_name,
+            context,
+            tool_payload,
+            policy=_tool_execution_policy(
+                tool_name=tool_name,
+                context=context,
+                allowed_customer_ids=_allowed_customer_ids_for_envelope(envelope),
+            ),
+        )
+    return ActionToolExecutionResult(result, progress_events)
+
+
 async def _execute_waiting_task(
     db: Session,
     task,
@@ -66,50 +283,22 @@ async def _execute_waiting_task(
     authorization: str,
     event_sink: AgentRuntimeEventSink | None = None,
 ):
-    state = task.state_json or {}
-    action = state.get("action")
-    payload = state.get("payload") or {}
-    customer = state.get("customer") or {}
-    tool_name = _tool_name_for_action(action)
-    tool_payload = _tool_payload_for_action(action, payload, customer, task.task_key)
-    context = AgentToolContext(
-        db=db,
+    envelope = execution_envelope_from_task(task)
+    action = envelope.action_type
+    payload = envelope.payload
+    customer = envelope.customer
+    agent_task_crud.update(db, task, AgentTaskUpdate(status=AgentTaskStatus.RUNNING))
+    execution = await execute_action_envelope(
+        db,
+        envelope,
+        session=session,
         team_id=team_id,
         user_id=user_id,
-        session_id=session.id,
-        task_id=task.id,
         authorization=authorization,
-        hitl_decision="approve",
-        confirmed_by_user=True,
-        allowed_tool_names=[tool_name] if tool_name else [],
-        allowed_customer_ids=[customer["id"]] if customer.get("id") else [],
+        event_sink=event_sink,
     )
-    registry = AgentToolRegistry(CRMAgentToolService())
-    runtime = AgentToolRuntime(registry)
-
-    agent_task_crud.update(db, task, AgentTaskUpdate(status=AgentTaskStatus.RUNNING))
-    result = None
-    progress_events: list[JSONDict] = []
-    if action == "move_opportunity_stage" and tool_name:
-        result = await _execute_opportunity_stage_move_plan(
-            runtime,
-            context,
-            payload,
-            task.task_key,
-            progress_events=progress_events,
-            event_sink=event_sink,
-        )
-    elif tool_name and tool_payload:
-        result = await runtime.execute(
-            tool_name,
-            context,
-            tool_payload,
-            policy=AgentToolExecutionPolicy(
-                hitl_decision="approve",
-                allowed_tool_names=[tool_name],
-                allowed_customer_ids=[str(customer["id"])] if customer.get("id") else [],
-            ),
-        )
+    result = execution.tool_result
+    progress_events = execution.progress_events
 
     if result and result.success:
         agent_task_crud.update(
@@ -117,6 +306,16 @@ async def _execute_waiting_task(
             task,
             AgentTaskUpdate(status=AgentTaskStatus.COMPLETED, result_json=result.data),
         )
+        current_workflow = envelope.workflow
+        if current_workflow:
+            workflow_action_ledger.mark_action_executed(
+                db,
+                workflow=current_workflow,
+                team_id=team_id,
+                user_id=user_id,
+                result=result.data if isinstance(result.data, dict) else {"data": result.data},
+                task_id=task.id,
+            )
         if action == "create_payment_plan":
             created_items = result.data.get("items") if isinstance(result.data, dict) else result.data
             created_plan = created_items[0] if isinstance(created_items, list) and created_items else result.data
@@ -126,6 +325,13 @@ async def _execute_waiting_task(
                     "payment_plan_id": created_plan.get("id"),
                     **pending_record,
                 }
+                next_workflow = action_workflow.required_write_contract(action="create_payment_record")
+                next_target_id = _task_target_id(
+                    db,
+                    team_id=team_id,
+                    target_type="customer",
+                    target_id=customer.get("id"),
+                )
                 next_task = agent_task_crud.create(
                     db,
                     AgentTaskCreate(
@@ -136,24 +342,32 @@ async def _execute_waiting_task(
                         intent="PAYMENT_RECORD",
                         status=AgentTaskStatus.WAITING_USER,
                         target_type="customer",
-                        target_id=_task_target_id(
-                            db,
-                            team_id=team_id,
-                            target_type="customer",
-                            target_id=customer.get("id"),
-                        ),
+                        target_id=next_target_id,
                         summary="登记本次回款",
                         input_json=next_payload,
                         state_json={
                             "action": "create_payment_record",
                             "payload": next_payload,
                             "customer": customer,
+                            "workflow": next_workflow,
                             "hitl": AgentHITLPolicy(
                                 required_for_tools=["create_payment_record"],
                                 confirmation_summary="登记本次回款",
                             ).model_dump(exclude_none=True),
                         },
                     ),
+                )
+                workflow_action_ledger.create_or_update_waiting_action(
+                    db,
+                    workflow=next_workflow,
+                    team_id=team_id,
+                    user_id=user_id,
+                    session_id=session.id,
+                    task_id=next_task.id,
+                    source_type=workflow_action_ledger.SOURCE_AGENT_PLANNING,
+                    payload=next_payload,
+                    target_type="customer",
+                    target_id=next_target_id,
                 )
                 return WaitingTaskExecutionResult(result, "回款计划已创建。请确认是否登记本次回款？", next_task, progress_events)
             return WaitingTaskExecutionResult(result, "回款计划已创建。", progress_events=progress_events)
@@ -239,11 +453,18 @@ async def _execute_waiting_task(
         if action == "create_customer_activity" and isinstance(payload.get("_next_task"), dict):
             next_action = payload["_next_task"]
             next_payload = next_action.get("payload") or {}
+            next_workflow = action_workflow.ensure_event_workflow(next_action)
             next_content = next_action.get("content")
             next_summary = (
                 next_content
                 if isinstance(next_content, str) and next_content.strip() and "_" not in next_content
                 else task_display.readable_action_label(next_action.get("action")) or "等待确认业务操作"
+            )
+            next_target_id = _task_target_id(
+                db,
+                team_id=team_id,
+                target_type="customer",
+                target_id=next_payload.get("customer_id") or customer.get("id"),
             )
             next_task = agent_task_crud.create(
                 db,
@@ -253,21 +474,17 @@ async def _execute_waiting_task(
                     user_id=user_id,
                     session_id=session.id,
                     intent="CUSTOMER_ACTIVITY",
-                        status=AgentTaskStatus.WAITING_USER,
-                        target_type="customer",
-                        target_id=_task_target_id(
-                            db,
-                            team_id=team_id,
-                            target_type="customer",
-                            target_id=next_payload.get("customer_id") or customer.get("id"),
-                        ),
-                        summary=next_summary,
+                    status=AgentTaskStatus.WAITING_USER,
+                    target_type="customer",
+                    target_id=next_target_id,
+                    summary=next_summary,
                     input_json=next_payload,
                     state_json={
                         "action": next_action.get("action"),
                         "payload": next_payload,
                         "customer": next_action.get("customer") or customer,
                         "opportunities": next_action.get("opportunities") or [],
+                        "workflow": next_workflow,
                         "hitl": AgentHITLPolicy(
                             required_for_tools=[_tool_name_for_action(next_action.get("action"))]
                             if _tool_name_for_action(next_action.get("action"))
@@ -276,6 +493,18 @@ async def _execute_waiting_task(
                         ).model_dump(exclude_none=True),
                     },
                 ),
+            )
+            workflow_action_ledger.create_or_update_waiting_action(
+                db,
+                workflow=next_workflow,
+                team_id=team_id,
+                user_id=user_id,
+                session_id=session.id,
+                task_id=next_task.id,
+                source_type=workflow_action_ledger.SOURCE_AGENT_PLANNING,
+                payload=next_payload,
+                target_type="customer",
+                target_id=next_target_id,
             )
             return WaitingTaskExecutionResult(
                 result,
@@ -293,6 +522,16 @@ async def _execute_waiting_task(
         task,
         AgentTaskUpdate(status=AgentTaskStatus.FAILED, error_message=error_message),
     )
+    if envelope.workflow:
+        workflow_action_ledger.mark_action_failed(
+            db,
+            workflow=envelope.workflow,
+            team_id=team_id,
+            user_id=user_id,
+            task_id=envelope.task_id,
+            error_message=error_message,
+            result=coerce_json_dict(result.to_event()) if result else {"success": False, "error": error_message},
+        )
     return WaitingTaskExecutionResult(result, f"执行失败：{error_message}", progress_events=progress_events)
 
 
@@ -338,9 +577,9 @@ async def _execute_opportunity_stage_move_plan(
             "move_opportunity_stage",
             context,
             tool_payload,
-            policy=AgentToolExecutionPolicy(
-                hitl_decision="approve",
-                allowed_tool_names=["move_opportunity_stage"],
+            policy=_tool_execution_policy(
+                tool_name="move_opportunity_stage",
+                context=context,
                 allowed_customer_ids=[str(payload["customer_id"])] if payload.get("customer_id") else [],
             ),
         )
@@ -398,6 +637,114 @@ async def _append_progress_event(
     progress_events.append(event)
     if event_sink:
         await event_sink(event)
+
+
+def _action_type_from_state(state: JSONDict, workflow: JSONDict) -> str:
+    action_type = workflow.get("action_type")
+    if isinstance(action_type, str) and action_type.strip():
+        return action_type.strip()
+    action = state.get("action")
+    if isinstance(action, str) and action.strip():
+        return action.strip()
+    return "unknown"
+
+
+def _action_id_from_workflow_or_task(*, workflow: JSONDict, task_id: int | None) -> str:
+    action_id = workflow.get("action_id")
+    if isinstance(action_id, str) and action_id.strip():
+        return action_id.strip()
+    if task_id is not None:
+        return f"task:{task_id}"
+    return "task:unknown"
+
+
+def _payload_from_task_state(*, task: object, state: JSONDict) -> JSONDict:
+    state_payload = coerce_json_dict(state.get("payload"))
+    if state_payload:
+        return state_payload
+    task_input = coerce_json_dict(getattr(task, "input_json", None))
+    input_payload = coerce_json_dict(task_input.get("payload"))
+    if input_payload:
+        return input_payload
+    input_business_payload = _strip_internal_payload_keys(task_input)
+    if input_business_payload:
+        return input_business_payload
+    return _strip_internal_payload_keys(state)
+
+
+def _strip_internal_payload_keys(value: JSONDict) -> JSONDict:
+    return {
+        key: item
+        for key, item in value.items()
+        if key not in {"action", "workflow", "dependency_json", "customer", "hitl", "opportunities"}
+    }
+
+
+def _allowed_customer_ids_for_envelope(envelope: ActionExecutionEnvelope) -> list[str]:
+    customer_id = envelope.customer.get("id") or envelope.payload.get("customer_id")
+    if customer_id is None:
+        return []
+    return [str(customer_id)]
+
+
+def _optional_int(value: object) -> int | None:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            return int(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _optional_str(value: object) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _payload_has_idempotency_key(payload: object) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    value = payload.get("idempotency_suffix") or payload.get("idempotency_key")
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _tool_payload_validation_error(tool_name: str | None, payload: object) -> str | None:
+    if not tool_name or not isinstance(payload, dict):
+        return "invalid_tool_payload:missing_tool_payload"
+    try:
+        spec = AgentToolRegistry().get(tool_name)
+    except KeyError:
+        return f"invalid_tool_payload:unregistered_tool:{tool_name}"
+    try:
+        spec.input_model.model_validate(payload)
+    except ValidationError as exc:
+        return f"invalid_tool_payload:{_compact_validation_errors(exc)}"
+    return None
+
+
+def _compact_validation_errors(exc: ValidationError) -> str:
+    errors: list[str] = []
+    for error in exc.errors():
+        loc = ".".join(str(part) for part in error.get("loc", ()) if part is not None)
+        message = str(error.get("msg") or "invalid")
+        errors.append(f"{loc or 'payload'}:{message}")
+        if len(errors) >= 3:
+            break
+    return ";".join(errors)
+
+
+def _payload_field_present(payload: object, field: str) -> bool:
+    if not isinstance(payload, dict) or not field:
+        return False
+    current: object = payload
+    for part in field.split("."):
+        if not isinstance(current, dict) or part not in current:
+            return False
+        current = current.get(part)
+    return current not in (None, "")
 
 
 def _follow_up_transition_skip_response(skip_reason: object) -> str:

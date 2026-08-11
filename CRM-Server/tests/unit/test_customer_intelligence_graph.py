@@ -311,11 +311,13 @@ async def test_customer_intelligence_graph_loads_context_plans_refresh_and_check
     assert result["route"] == "refresh_profile"
     assert result["refresh_plan"]["target_sections"] == ["base_profile", "dynamic_brief", "memory"]
     assert result["customer_context"]["strong_context"]["customer"]["account_name"] == "越秀金融"
-    assert [step["title"] for step in result["visible_trace"]] == [
-        "理解触发来源",
-        "读取客户上下文",
-        "读取客户记忆",
-        "制定更新计划",
+    trace_titles = [step["title"] for step in result["visible_trace"]]
+    assert trace_titles[0] == "理解触发来源"
+    assert "读取客户上下文" in trace_titles
+    assert "读取客户记忆" in trace_titles
+    assert trace_titles.index("制定更新计划") > trace_titles.index("读取客户上下文")
+    assert trace_titles.index("制定更新计划") > trace_titles.index("读取客户记忆")
+    assert trace_titles[-5:] == [
         "提炼客户事实",
         "沉淀客户事实",
         "刷新客户档案",
@@ -371,11 +373,13 @@ async def test_customer_intelligence_graph_streams_visible_trace_before_final_re
     assert "理解触发来源" in chunks[0]["event"]["content"]
     assert chunks[-1]["kind"] == "result"
     assert chunks[-1]["result"]["route"] == "refresh_profile"
-    assert [step["title"] for step in chunks[-1]["result"]["visible_trace"]] == [
-        "理解触发来源",
-        "读取客户上下文",
-        "读取客户记忆",
-        "制定更新计划",
+    trace_titles = [step["title"] for step in chunks[-1]["result"]["visible_trace"]]
+    assert trace_titles[0] == "理解触发来源"
+    assert "读取客户上下文" in trace_titles
+    assert "读取客户记忆" in trace_titles
+    assert trace_titles.index("制定更新计划") > trace_titles.index("读取客户上下文")
+    assert trace_titles.index("制定更新计划") > trace_titles.index("读取客户记忆")
+    assert trace_titles[-5:] == [
         "提炼客户事实",
         "沉淀客户事实",
         "刷新客户档案",
@@ -776,11 +780,13 @@ async def test_customer_intelligence_graph_interrupts_for_reviewable_facts_and_r
     assert fact_service.review_audits[0]["audit_input"].fact_id == 901
     assert memory_store_service.fact_writes[0]["value"]["fact_refs"][1]["fact_id"] == 901
     assert resumed["customer_fact_review"]["status"] == "resolved"
-    assert [step["title"] for step in resumed["visible_trace"]] == [
-        "理解触发来源",
-        "读取客户上下文",
-        "读取客户记忆",
-        "制定更新计划",
+    trace_titles = [step["title"] for step in resumed["visible_trace"]]
+    assert trace_titles[0] == "理解触发来源"
+    assert "读取客户上下文" in trace_titles
+    assert "读取客户记忆" in trace_titles
+    assert trace_titles.index("制定更新计划") > trace_titles.index("读取客户上下文")
+    assert trace_titles.index("制定更新计划") > trace_titles.index("读取客户记忆")
+    assert trace_titles[-7:] == [
         "提炼客户事实",
         "复核客户事实",
         "复核客户事实",
@@ -921,4 +927,5 @@ async def test_customer_intelligence_graph_records_error_when_db_missing():
 
     assert result["errors"][0]["event"] == "customer_intelligence_context_failed"
     assert result["refresh_plan"]["route"] == "refresh_profile"
-    assert result["visible_trace"][1]["content"] == "未能读取客户上下文"
+    context_trace = next(step for step in result["visible_trace"] if step["title"] == "读取客户上下文")
+    assert context_trace["content"] == "未能读取客户上下文"

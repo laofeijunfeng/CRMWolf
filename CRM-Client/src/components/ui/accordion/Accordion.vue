@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { omitUndefined } from "@/lib/utils"
 import type { AccordionRootEmits, AccordionRootProps } from "reka-ui"
 import {
   AccordionRoot,
@@ -12,7 +13,7 @@ const forwarded = useForwardPropsEmits(props, emits)
 </script>
 
 <template>
-  <AccordionRoot v-bind="forwarded">
+  <AccordionRoot v-bind="omitUndefined(forwarded)">
     <slot />
   </AccordionRoot>
 </template>

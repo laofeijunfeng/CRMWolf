@@ -3,6 +3,7 @@ from datetime import datetime
 
 from app.services.agent.schemas import AgentTemporalExpression
 from app.services.agent.temporal import AgentTemporalResolver
+from app.services.follow_up_parser import follow_up_parser_service
 
 
 def test_agent_temporal_resolver_resolves_next_weekday_from_system_date():
@@ -195,3 +196,22 @@ def test_agent_temporal_resolver_rolls_month_day_to_next_year_when_needed():
     result = resolver.resolve_date(expression, base_datetime=datetime(2026, 7, 24, 10, 0, 0))
 
     assert result == "2027-01-10"
+
+
+def test_agent_temporal_resolver_supports_legacy_follow_up_parser_dates():
+    resolver = AgentTemporalResolver()
+    base_datetime = datetime(2026, 8, 10, 10, 0, 0)
+
+    assert resolver.resolve_follow_up_time_text("2026-08-25", base_datetime=base_datetime) == "2026-08-25T09:00:00"
+    assert resolver.resolve_follow_up_time_text("下周", base_datetime=base_datetime) == "2026-08-17T09:00:00"
+    assert resolver.resolve_follow_up_time_text("半个月后", base_datetime=base_datetime) == "2026-08-24T09:00:00"
+    assert resolver.resolve_follow_up_time_text("本周末", base_datetime=base_datetime) == "2026-08-15T09:00:00"
+
+
+def test_legacy_follow_up_parser_delegates_to_agent_temporal_resolver():
+    result = follow_up_parser_service.parse_relative_time(
+        "2 个月后",
+        base_date=datetime(2026, 8, 10, 0, 45, 25),
+    )
+
+    assert result == datetime(2026, 10, 10, 9, 0, 0)

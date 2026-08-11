@@ -4,7 +4,7 @@ import type { HTMLAttributes } from "vue"
 import { reactiveOmit } from "@vueuse/core"
 
 import { StepperIndicator, useForwardProps } from "reka-ui"
-import { cn } from "@/lib/utils"
+import { cn, omitUndefined } from "@/lib/utils"
 
 const props = defineProps<StepperIndicatorProps & { class?: HTMLAttributes["class"] }>()
 
@@ -16,7 +16,7 @@ const forwarded = useForwardProps(delegatedProps)
 <template>
   <StepperIndicator
     v-slot="slotProps"
-    v-bind="forwarded"
+    v-bind="omitUndefined(forwarded)"
     :class="cn(
       'inline-flex items-center justify-center rounded-full text-muted-foreground/50 w-10 h-10',
       // Disabled

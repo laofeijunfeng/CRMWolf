@@ -7,7 +7,7 @@ import {
   NavigationMenuTrigger,
   useForwardProps,
 } from "reka-ui"
-import { cn } from "@/lib/utils"
+import { cn, omitUndefined } from "@/lib/utils"
 import { navigationMenuTriggerStyle } from "."
 
 const props = defineProps<NavigationMenuTriggerProps & { class?: HTMLAttributes["class"] }>()
@@ -19,7 +19,7 @@ const forwardedProps = useForwardProps(delegatedProps)
 
 <template>
   <NavigationMenuTrigger
-    v-bind="forwardedProps"
+    v-bind="omitUndefined(forwardedProps)"
     :class="cn(navigationMenuTriggerStyle(), 'group', props.class)"
   >
     <slot />

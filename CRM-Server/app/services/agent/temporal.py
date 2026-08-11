@@ -111,6 +111,18 @@ class AgentTemporalResolver:
         if not text:
             return None
 
+        if re.fullmatch(r"20[0-9]{2}-[0-9]{1,2}-[0-9]{1,2}", text):
+            try:
+                parsed_date = date.fromisoformat(text)
+            except ValueError:
+                return None
+            return AgentTemporalExpression(
+                raw_text=raw_text,
+                kind="EXPLICIT_DATE",
+                date_text=parsed_date.isoformat(),
+                confidence=0.95,
+            )
+
         if text in {"今天", "今日"}:
             return AgentTemporalExpression(
                 raw_text=raw_text,
@@ -146,6 +158,42 @@ class AgentTemporalResolver:
                 amount=3,
                 unit="day",
                 confidence=0.95,
+            )
+        if text == "半个月后":
+            return AgentTemporalExpression(
+                raw_text=raw_text,
+                kind="RELATIVE_DAY",
+                direction="future",
+                amount=14,
+                unit="day",
+                confidence=0.9,
+            )
+        if text in {"下周", "下星期", "下礼拜"}:
+            return AgentTemporalExpression(
+                raw_text=raw_text,
+                kind="RELATIVE_WEEK",
+                direction="future",
+                amount=1,
+                unit="week",
+                confidence=0.9,
+            )
+        if text in {"本周末", "这周末", "这个周末", "周末"}:
+            return AgentTemporalExpression(
+                raw_text=raw_text,
+                kind="RELATIVE_WEEKDAY",
+                direction="current",
+                weekday=6,
+                confidence=0.9,
+            )
+        if text in {"下周末", "下星期末", "下礼拜末"}:
+            return AgentTemporalExpression(
+                raw_text=raw_text,
+                kind="RELATIVE_WEEKDAY",
+                direction="next",
+                amount=1,
+                unit="week",
+                weekday=6,
+                confidence=0.9,
             )
 
         weekday_expression = self._weekday_expression_from_text(raw_text, text)
@@ -398,6 +446,8 @@ class AgentTemporalResolver:
         raw_text = expression.raw_text or ""
         if any(marker in raw_text for marker in ("季度", "年")):
             return 0 < abs((resolved_date - base_date).days) < 28
+        if "半个月" in raw_text:
+            return False
         if any(marker in raw_text for marker in ("个月", "月后", "月以后", "月之后")):
             return 0 < abs((resolved_date - base_date).days) < 21
         if "周" in raw_text and (expression.amount or 1) >= 1:

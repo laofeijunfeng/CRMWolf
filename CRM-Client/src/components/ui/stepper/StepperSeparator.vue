@@ -4,7 +4,7 @@ import type { HTMLAttributes } from "vue"
 import { reactiveOmit } from "@vueuse/core"
 
 import { StepperSeparator, useForwardProps } from "reka-ui"
-import { cn } from "@/lib/utils"
+import { cn, omitUndefined } from "@/lib/utils"
 
 const props = defineProps<StepperSeparatorProps & { class?: HTMLAttributes["class"] }>()
 
@@ -15,7 +15,7 @@ const forwarded = useForwardProps(delegatedProps)
 
 <template>
   <StepperSeparator
-    v-bind="forwarded"
+    v-bind="omitUndefined(forwarded)"
     :class="cn(
       'bg-muted',
       // Disabled

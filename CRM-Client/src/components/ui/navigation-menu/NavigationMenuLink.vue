@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { omitUndefined } from "@/lib/utils"
 import type { NavigationMenuLinkEmits, NavigationMenuLinkProps } from "reka-ui"
 import {
   NavigationMenuLink,
@@ -12,7 +13,7 @@ const forwarded = useForwardPropsEmits(props, emits)
 </script>
 
 <template>
-  <NavigationMenuLink v-bind="forwarded">
+  <NavigationMenuLink v-bind="omitUndefined(forwarded)">
     <slot />
   </NavigationMenuLink>
 </template>

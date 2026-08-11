@@ -92,7 +92,7 @@ const executeAction = (action: ActionConfig): void => {
       :key="action.label"
       :size="size"
       variant="ghost"
-      :disabled="action.disabled"
+      :disabled="action.disabled === true"
       :class="['action-button', { 'action-destructive': action.destructive }]"
       @click.stop="executeAction(action)"
       :aria-label="action.label"
@@ -122,7 +122,7 @@ const executeAction = (action: ActionConfig): void => {
 
           <!-- 操作项 -->
           <DropdownMenuItem
-            :disabled="action.disabled"
+            :disabled="action.disabled === true"
             :class="['dropdown-item', { 'dropdown-item-destructive': action.destructive }]"
             @click.stop="executeAction(action)"
           >

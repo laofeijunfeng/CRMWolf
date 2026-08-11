@@ -4,7 +4,7 @@ import type { HTMLAttributes } from "vue"
 import { reactiveOmit, useCurrentElement } from "@vueuse/core"
 import { ListboxItem, useForwardPropsEmits, useId } from "reka-ui"
 import { computed, onMounted, onUnmounted, ref } from "vue"
-import { cn } from "@/lib/utils"
+import { cn, omitUndefined } from "@/lib/utils"
 import { useCommand, useCommandGroup } from "."
 
 const props = defineProps<ListboxItemProps & { class?: HTMLAttributes["class"] }>()
@@ -41,11 +41,15 @@ onMounted(() => {
   if (!(currentElement.value instanceof HTMLElement))
     return
 
+  const itemText = currentElement.value.textContent ?? (
+    props.value === undefined || props.value === null ? "" : String(props.value)
+  )
+
   // textValue to perform filter
-  allItems.value.set(id, currentElement.value.textContent ?? props?.value!.toString())
+  allItems.value.set(id, itemText)
 
   const groupId = groupContext?.id
-  if (groupId) {
+  if (groupId !== undefined && groupId.length > 0) {
     if (!allGroups.value.has(groupId)) {
       allGroups.value.set(groupId, new Set([id]))
     }
@@ -62,7 +66,7 @@ onUnmounted(() => {
 <template>
   <ListboxItem
     v-if="isRender"
-    v-bind="forwarded"
+    v-bind="omitUndefined(forwarded)"
     :id="id"
     ref="itemRef"
     :class="cn('relative flex cursor-default gap-2 select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0', props.class)"

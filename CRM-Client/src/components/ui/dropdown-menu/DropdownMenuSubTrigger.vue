@@ -7,7 +7,7 @@ import {
   DropdownMenuSubTrigger,
   useForwardProps,
 } from "reka-ui"
-import { cn } from "@/lib/utils"
+import { cn, omitUndefined } from "@/lib/utils"
 
 const props = defineProps<DropdownMenuSubTriggerProps & { class?: HTMLAttributes["class"] }>()
 
@@ -18,7 +18,7 @@ const forwardedProps = useForwardProps(delegatedProps)
 
 <template>
   <DropdownMenuSubTrigger
-    v-bind="forwardedProps"
+    v-bind="omitUndefined(forwardedProps)"
     :class="cn(
       'flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none focus:bg-accent data-[state=open]:bg-accent',
       props.class,

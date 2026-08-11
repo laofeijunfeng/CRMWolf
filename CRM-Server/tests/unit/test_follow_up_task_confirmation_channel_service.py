@@ -430,11 +430,11 @@ def test_prompt_next_pending_case_respects_case_prompt_limit(db_session):
     assert db_session.query(FollowUpTaskConfirmationPromptDelivery).count() == 1
 
 
-def test_resolve_bound_reply_applies_confirmation_case(db_session):
+def test_resolve_reply_applies_confirmation_case_for_agent_tool_boundary(db_session):
     task = _create_task(db_session)
     case = _create_confirmation_case(db_session, task)
 
-    event = FollowUpTaskConfirmationChannelService().resolve_bound_reply(
+    result = FollowUpTaskConfirmationChannelService().resolve_reply(
         db_session,
         team_id=1,
         user_id=2,
@@ -445,8 +445,7 @@ def test_resolve_bound_reply_applies_confirmation_case(db_session):
     db_session.refresh(task)
     db_session.refresh(case)
 
-    assert event["event"] == "follow_up_task_confirmation_case_resolved"
-    assert event["case"]["public_id"] == case.public_id
-    assert event["decision"]["action"] == FollowUpTaskConfirmationResolutionAction.COMPLETE
-    assert event["application"]["status"] == "APPLIED"
+    assert result["case"]["public_id"] == case.public_id
+    assert result["decision"]["action"] == FollowUpTaskConfirmationResolutionAction.COMPLETE
+    assert result["application"]["status"] == "APPLIED"
     assert task.status == FollowUpTaskStatus.COMPLETED

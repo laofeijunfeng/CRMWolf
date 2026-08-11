@@ -15,11 +15,13 @@ from app.services.agent.checkpointer import (
     is_checkpoint_storage_error,
     with_checkpoint_unavailable_fallback_event,
 )
+from app.services.agent import action_workflow
 from app.services.agent import agent_copy
 from app.services.agent import execution_trace
 from app.services.agent import interactions
 from app.services.agent import session_state
 from app.services.agent import task_display
+from app.services.agent import workflow_action_ledger
 from app.services.agent.hitl_runtime import interrupt_from_runtime_events
 from app.services.agent.interrupts import AgentInterruptPayload, interrupt_from_waiting_event, interrupt_from_waiting_task
 from app.services.agent.pending_interaction_graph import (
@@ -740,8 +742,30 @@ class PendingTaskGraphService:
             }])
         action = _resume_action(resume_payload_json)
         reason = _resume_reason(resume_payload_json, current_interrupt)
+        if action == "skip_current_action" or (
+            action in {"reject", "cancel"}
+            and action_workflow.is_optional_skip_interrupt(current_interrupt)
+        ):
+            skip_update = _skip_pending_action_update(
+                runtime.context.task,
+                current_interrupt=current_interrupt,
+                resume_payload=resume_payload_json,
+            )
+            if runtime.context.task:
+                runtime.context.side_effects.suspended_task = runtime.context.task
+            runtime.context.side_effects.task = None
+            runtime.context.task = None
+            update.update(skip_update)
+            update["resume_route"] = "end"
+            return update
         if action == "cancel":
             cancel_update = _cancel_pending_task_update(runtime.context.task, resume_payload=resume_payload_json)
+            _cancel_workflow_action_for_interrupt(
+                runtime.context,
+                current_interrupt=current_interrupt,
+                resume_payload=resume_payload_json,
+                reason="用户取消当前等待动作。",
+            )
             if runtime.context.task:
                 runtime.context.side_effects.suspended_task = runtime.context.task
             runtime.context.side_effects.task = None
@@ -776,6 +800,12 @@ class PendingTaskGraphService:
                 return update
             if action in {"reject", "cancel"}:
                 cancel_update = _cancel_pending_task_update(runtime.context.task, resume_payload=resume_payload_json)
+                _cancel_workflow_action_for_interrupt(
+                    runtime.context,
+                    current_interrupt=current_interrupt,
+                    resume_payload=resume_payload_json,
+                    reason="用户通过 LangGraph interrupt resume 拒绝执行。",
+                )
                 if runtime.context.task:
                     runtime.context.side_effects.suspended_task = runtime.context.task
                 runtime.context.side_effects.task = None
@@ -1195,6 +1225,114 @@ def _cancel_pending_task_update(task: object, *, resume_payload: JSONDict | None
             },
             {"event": "final", "content": assistant_content},
         ])
+    return update
+
+
+def _cancel_workflow_action_for_interrupt(
+    context: PendingTaskRuntimeContext,
+    *,
+    current_interrupt: JSONDict | None,
+    resume_payload: JSONDict | None,
+    reason: str,
+) -> None:
+    workflow = action_workflow.workflow_from_mapping(
+        (current_interrupt or {}).get("workflow")
+        if isinstance(current_interrupt, dict)
+        else None
+    )
+    if not workflow or context.db is None:
+        return
+    resume_payload_json = coerce_json_dict(resume_payload)
+    task_id = _optional_object_id(context.task)
+    decision: JSONDict = {
+        "decision": _resume_action(resume_payload_json) or "cancel",
+        "resume_reason": _resume_reason(resume_payload_json, current_interrupt),
+    }
+    resume_content = resume_payload_json.get("content")
+    if isinstance(resume_content, str) and resume_content.strip():
+        decision["content"] = resume_content.strip()
+    _mark_task_workflow_cancelled(
+        context.task,
+        workflow=workflow,
+        reason=reason,
+    )
+    workflow_action_ledger.mark_action_cancelled(
+        context.db,
+        workflow=workflow,
+        team_id=context.team_id,
+        user_id=context.user_id,
+        task_id=task_id,
+        reason=reason,
+        source_type=workflow_action_ledger.SOURCE_PENDING_RESUME,
+        decision=decision,
+    )
+
+
+def _mark_task_workflow_cancelled(
+    task: object | None,
+    *,
+    workflow: JSONDict,
+    reason: str,
+) -> None:
+    if task is None:
+        return
+    state = coerce_json_dict(getattr(task, "state_json", None))
+    if not state:
+        return
+    cancelled_workflow = action_workflow.mark_cancelled(
+        workflow,
+        reason=reason,
+        source="langgraph_resume",
+    )
+    state["workflow"] = cancelled_workflow
+    payload = coerce_json_dict(state.get("payload"))
+    if payload:
+        payload["workflow"] = cancelled_workflow
+        state["payload"] = payload
+    setattr(task, "state_json", state)
+
+
+def _skip_pending_action_update(
+    task: object,
+    *,
+    current_interrupt: JSONDict | None,
+    resume_payload: JSONDict | None = None,
+) -> PendingTaskGraphState:
+    task_id = _optional_object_id(task)
+    workflow = action_workflow.workflow_from_mapping(
+        (current_interrupt or {}).get("workflow")
+        if isinstance(current_interrupt, dict)
+        else None
+    )
+    action_id = workflow.get("action_id") if workflow else None
+    action_type = workflow.get("action_type") if workflow else None
+    action_label = task_display.readable_execution_label(action_type)
+    assistant_content = f"已跳过{action_label}建议。" if action_label else "已跳过这项建议。"
+    resume_text = (resume_payload or {}).get("content")
+    status_reason = resume_text if isinstance(resume_text, str) and resume_text.strip() else "用户跳过当前可选建议动作。"
+    event: JSONDict = {
+        "event": "workflow_action_skipped",
+        "content": assistant_content,
+        "reason": status_reason,
+    }
+    if isinstance(action_id, str):
+        event["action_id"] = action_id
+    if isinstance(action_type, str):
+        event["action_type"] = action_type
+    if task_id is not None:
+        event["task_id"] = task_id
+    update: PendingTaskGraphState = {
+        "handled": True,
+        "assistant_content": assistant_content,
+        "has_active_task": False,
+        "task_projection": {},
+        "suspend_reason": status_reason,
+        "suspension_kind": "dismissed",
+        "events": _events([event, {"event": "final", "content": assistant_content}]),
+    }
+    if task_id is not None:
+        update["clear_pending_task_id"] = task_id
+        update["suspended_task_id"] = task_id
     return update
 
 

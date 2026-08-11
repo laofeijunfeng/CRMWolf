@@ -6,7 +6,7 @@ import {
   NavigationMenuRoot,
   useForwardPropsEmits,
 } from "reka-ui"
-import { cn } from "@/lib/utils"
+import { cn, omitUndefined } from "@/lib/utils"
 import NavigationMenuViewport from "./NavigationMenuViewport.vue"
 
 const props = defineProps<NavigationMenuRootProps & { class?: HTMLAttributes["class"] }>()
@@ -20,7 +20,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
 
 <template>
   <NavigationMenuRoot
-    v-bind="forwarded"
+    v-bind="omitUndefined(forwarded)"
     :class="cn('relative z-10 flex max-w-max flex-1 items-center justify-center', props.class)"
   >
     <slot />

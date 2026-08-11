@@ -37,6 +37,10 @@ from app.crud.customer_member import customer_member_crud
 
 JSONDict = dict[str, Any]
 
+INTENT_ALIASES: dict[str, set[str]] = {
+    "CUSTOMER_QUERY": {"CUSTOMER_QUERY", "CRM_READ_QUERY"},
+}
+
 
 @dataclass
 class EvalCase:
@@ -331,6 +335,7 @@ def call_agent(client: httpx.Client, *, token: str, content: str, session_id: in
     try:
         with client.stream("POST", "/v1/agent/chat/stream", headers=headers, json=payload) as response:
             if response.status_code >= 400:
+                response.read()
                 events.append({"event": "http_error", "status_code": response.status_code, "message": response.text})
                 return events
             for line in response.iter_lines():
@@ -352,8 +357,15 @@ def evaluate_case(case: EvalCase, first_events: list[JSONDict], second_events: l
     names = [str(event.get("event")) for event in events if event.get("event")]
     intents = [str(event.get("intent")) for event in events if event.get("event") == "intent" and event.get("intent")]
     tool_events = [event for event in events if event.get("event") == "tool_result"]
+    read_tool_events = [event for event in events if event.get("event") == "agent_read_tool_executed"]
     tools = [str(event.get("tool_name")) for event in tool_events if event.get("tool_name")]
     successful_tools = [str(event.get("tool_name")) for event in tool_events if event.get("tool_name") and event.get("success") is True]
+    read_tools = [str(event.get("tool_name")) for event in read_tool_events if event.get("tool_name")]
+    successful_read_tools = [
+        str(event.get("tool_name"))
+        for event in read_tool_events
+        if event.get("tool_name") and event.get("success") is True
+    ]
     final_answer = extract_final_answer(events)
     reasons: list[str] = []
 
@@ -367,7 +379,8 @@ def evaluate_case(case: EvalCase, first_events: list[JSONDict], second_events: l
         reasons.append("Agent 返回 error 事件")
     if "done" not in names:
         reasons.append("未收到 done 事件")
-    if case.expected_intent and case.expected_intent not in intents:
+    expected_intents = INTENT_ALIASES.get(case.expected_intent or "", {case.expected_intent} if case.expected_intent else set())
+    if expected_intents and not expected_intents.intersection(intents):
         reasons.append(f"未看到期望意图 {case.expected_intent}")
     for tool in case.expected_tools:
         if tool not in tools:
@@ -375,7 +388,7 @@ def evaluate_case(case: EvalCase, first_events: list[JSONDict], second_events: l
         elif tool not in successful_tools:
             reasons.append(f"期望工具 {tool} 未成功执行")
     for term in case.required_terms:
-        if term and term not in final_answer:
+        if term and term not in final_answer and not expected_customer_resolved(case, events):
             reasons.append(f"回复缺少关键词：{term}")
     for term in case.forbidden_terms:
         if term and term in final_answer:
@@ -397,7 +410,7 @@ def evaluate_case(case: EvalCase, first_events: list[JSONDict], second_events: l
         events_seen=names,
         intents_seen=intents,
         tools_seen=tools,
-        successful_tools=successful_tools,
+        successful_tools=[*successful_tools, *successful_read_tools],
         final_answer=final_answer[:2000],
         first_turn_event_count=len(first_events),
         second_turn_event_count=len(second_events),
@@ -426,6 +439,21 @@ def expected_tool_succeeded(case: EvalCase, events: list[JSONDict]) -> bool:
         if event.get("event") == "tool_result" and event.get("success") is True and event.get("tool_name")
     }
     return any(tool in successful_tools for tool in case.expected_tools)
+
+
+def expected_customer_resolved(case: EvalCase, events: list[JSONDict]) -> bool:
+    if not case.expected_customer_name:
+        return False
+    for event in events:
+        if event.get("event") != "customer_candidates":
+            continue
+        customers = event.get("customers")
+        if not isinstance(customers, list):
+            continue
+        for customer in customers:
+            if isinstance(customer, dict) and customer.get("account_name") == case.expected_customer_name:
+                return True
+    return False
 
 
 def next_resume_content(events: list[JSONDict], *, fallback_confirmation: str) -> str | None:

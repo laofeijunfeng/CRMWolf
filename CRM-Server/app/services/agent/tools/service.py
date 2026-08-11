@@ -916,9 +916,15 @@ class CRMAgentToolService:
 
         return await self._run_write_tool(context, "create_lead_follow_up", payload, action_key, call_api)
 
-    async def create_contact(self, context: AgentToolContext, customer_id: Union[str, int], contact: JsonDict) -> AgentToolResult:
+    async def create_contact(
+        self,
+        context: AgentToolContext,
+        customer_id: Union[str, int],
+        contact: JsonDict,
+        idempotency_suffix: Optional[str] = None,
+    ) -> AgentToolResult:
         payload = {"customer_id": customer_id, "contact": contact}
-        action_key = self._action_key("create_contact", context, payload, None)
+        action_key = self._action_key("create_contact", context, payload, idempotency_suffix)
 
         async def call_api():
             customer_public_id = self._resolve_customer_public_id(context, customer_id)
@@ -937,13 +943,14 @@ class CRMAgentToolService:
         customer_id: Union[str, int],
         invoice_title: JsonDict,
         set_default: bool = False,
+        idempotency_suffix: Optional[str] = None,
     ) -> AgentToolResult:
         payload = {
             "customer_id": customer_id,
             "invoice_title": invoice_title,
             "set_default": set_default,
         }
-        action_key = self._action_key("create_invoice_title", context, payload, None)
+        action_key = self._action_key("create_invoice_title", context, payload, idempotency_suffix)
 
         async def call_api():
             customer_public_id = self._resolve_customer_public_id(context, customer_id)
@@ -969,9 +976,10 @@ class CRMAgentToolService:
         self,
         context: AgentToolContext,
         deployment_info: JsonDict,
+        idempotency_suffix: Optional[str] = None,
     ) -> AgentToolResult:
         payload = {"deployment_info": deployment_info}
-        action_key = self._action_key("create_deployment_info", context, payload, None)
+        action_key = self._action_key("create_deployment_info", context, payload, idempotency_suffix)
 
         async def call_api():
             api_payload = dict(deployment_info)
@@ -991,9 +999,10 @@ class CRMAgentToolService:
         context: AgentToolContext,
         customer_id: Union[str, int],
         member: JsonDict,
+        idempotency_suffix: Optional[str] = None,
     ) -> AgentToolResult:
         payload = {"customer_id": customer_id, "member": member}
-        action_key = self._action_key("create_customer_member", context, payload, None)
+        action_key = self._action_key("create_customer_member", context, payload, idempotency_suffix)
 
         async def call_api():
             customer_public_id = self._resolve_customer_public_id(context, customer_id)

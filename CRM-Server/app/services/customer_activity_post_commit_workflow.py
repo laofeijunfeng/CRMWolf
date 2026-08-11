@@ -22,7 +22,9 @@ from app.crud.sales_commitment import (
     follow_up_task_crud,
     follow_up_task_transition_policy_decision_log_crud,
 )
+from app.models.agent import AgentWorkflowActionStatus
 from app.models.sales_commitment import FollowUpTaskSourceType
+from app.services.agent import workflow_action_ledger
 from app.services.customer_activity_ai.checkpointer import customer_activity_checkpoint_saver
 from app.services.follow_up_task_confirmation_service import follow_up_task_confirmation_service
 from app.services.follow_up_task_projection_service import follow_up_task_projection_service
@@ -240,12 +242,12 @@ class CustomerActivityPostCommitWorkflow:
             "load_activity",
             self._route_after_load_activity,
             {
-                "continue": "project_next_step",
+                "project_next_step": "project_next_step",
+                "match_and_plan_historical_tasks": "match_and_plan_historical_tasks",
                 "finish": "build_post_commit_outcome",
             },
         )
-        graph.add_edge("project_next_step", "match_and_plan_historical_tasks")
-        graph.add_edge("match_and_plan_historical_tasks", "apply_transition_policy")
+        graph.add_edge(["project_next_step", "match_and_plan_historical_tasks"], "apply_transition_policy")
         graph.add_edge("apply_transition_policy", "execute_transition")
         graph.add_edge("execute_transition", "create_confirmation_cases")
         graph.add_edge("create_confirmation_cases", "build_post_commit_outcome")
@@ -304,8 +306,10 @@ class CustomerActivityPostCommitWorkflow:
         finally:
             db.close()
 
-    def _route_after_load_activity(self, state: CustomerActivityPostCommitState) -> str:
-        return "finish" if state.get("skip_reason") else "continue"
+    def _route_after_load_activity(self, state: CustomerActivityPostCommitState) -> str | list[str]:
+        if state.get("skip_reason"):
+            return "finish"
+        return ["project_next_step", "match_and_plan_historical_tasks"]
 
     def _project_next_step(self, state: CustomerActivityPostCommitState) -> CustomerActivityPostCommitState:
         db = SessionLocal()
@@ -320,12 +324,37 @@ class CustomerActivityPostCommitWorkflow:
                 )
             except Exception as exc:
                 logger.exception("客户活动后提交任务投影失败: activity_id=%s", state["activity_id"])
+                _record_post_commit_system_action(
+                    db,
+                    state=state,
+                    action_type="project_next_follow_up_tasks",
+                    source_type=workflow_action_ledger.SOURCE_POST_COMMIT_PROJECTION,
+                    status=AgentWorkflowActionStatus.FAILED,
+                    result={"success": False, "error": str(exc)},
+                    reason=str(exc)[:300],
+                )
                 return {
                     "projection_result": {"success": False, "error": str(exc)},
                     "events": [{"event": "next_step_projection_failed", "error": str(exc)[:300]}],
                 }
+            projection_payload = _projection_payload(result)
+            _record_post_commit_system_action(
+                db,
+                state=state,
+                action_type="project_next_follow_up_tasks",
+                source_type=workflow_action_ledger.SOURCE_POST_COMMIT_PROJECTION,
+                status=AgentWorkflowActionStatus.EXECUTED
+                if result.projection_run_status != "FAILED"
+                else AgentWorkflowActionStatus.FAILED,
+                payload={
+                    "activity_id": state["activity_id"],
+                    "trigger_type": state["trigger_type"],
+                },
+                result=projection_payload,
+                reason=result.skip_reason or result.error_message,
+            )
             return {
-                "projection_result": _projection_payload(result),
+                "projection_result": projection_payload,
                 "events": [
                     {
                         "event": "next_step_projected",
@@ -369,6 +398,15 @@ class CustomerActivityPostCommitWorkflow:
                     plan_source="customer_activity_post_commit",
                 )
             except ValueError as exc:
+                _record_post_commit_system_action(
+                    db,
+                    state=state,
+                    action_type="reconcile_historical_follow_up_tasks",
+                    source_type=workflow_action_ledger.SOURCE_POST_COMMIT_RECONCILIATION,
+                    status=AgentWorkflowActionStatus.BLOCKED,
+                    result={"success": False, "error": str(exc)},
+                    reason=str(exc)[:300],
+                )
                 return {
                     "skip_reason": CustomerActivityPostCommitSkipReason.RECONCILIATION_UNAVAILABLE,
                     "error_message": str(exc),
@@ -376,14 +414,41 @@ class CustomerActivityPostCommitWorkflow:
                 }
             except Exception as exc:
                 logger.exception("客户活动后提交历史任务对账失败: activity_id=%s", state["activity_id"])
+                _record_post_commit_system_action(
+                    db,
+                    state=state,
+                    action_type="reconcile_historical_follow_up_tasks",
+                    source_type=workflow_action_ledger.SOURCE_POST_COMMIT_RECONCILIATION,
+                    status=AgentWorkflowActionStatus.FAILED,
+                    result={"success": False, "error": str(exc)},
+                    reason=str(exc)[:300],
+                )
                 return {
                     "skip_reason": CustomerActivityPostCommitSkipReason.RECONCILIATION_UNAVAILABLE,
                     "error_message": str(exc),
                     "events": [{"event": "historical_reconciliation_failed", "error": str(exc)[:300]}],
                 }
+            match_payload = match_result.to_dict()
+            plan_payload = plan.to_dict()
+            _record_post_commit_system_action(
+                db,
+                state=state,
+                action_type="reconcile_historical_follow_up_tasks",
+                source_type=workflow_action_ledger.SOURCE_POST_COMMIT_RECONCILIATION,
+                status=AgentWorkflowActionStatus.EXECUTED,
+                payload={
+                    "activity_id": state["activity_id"],
+                    "include_cross_owner": False,
+                },
+                result={
+                    "match_result": match_payload,
+                    "transition_plan": plan_payload,
+                },
+                reason=plan.decision.decision,
+            )
             return {
-                "match_result": match_result.to_dict(),
-                "transition_plan": plan.to_dict(),
+                "match_result": match_payload,
+                "transition_plan": plan_payload,
                 "events": [
                     {
                         "event": "historical_tasks_matched",
@@ -678,6 +743,74 @@ def _activity_payload(activity: CustomerActivity) -> dict[str, Any]:
         "next_follow_time": activity.next_follow_time.isoformat() if activity.next_follow_time else None,
         "occurred_at": activity.occurred_at.isoformat() if activity.occurred_at else None,
     }
+
+
+def _record_post_commit_system_action(
+    db: Session,
+    *,
+    state: CustomerActivityPostCommitState,
+    action_type: str,
+    source_type: str,
+    status: str,
+    payload: dict[str, Any] | None = None,
+    result: dict[str, Any] | None = None,
+    reason: str | None = None,
+) -> None:
+    activity = state.get("activity") or {}
+    activity_id = state.get("activity_id")
+    trigger_type = str(state.get("trigger_type") or "unknown")
+    workflow_action_ledger.record_system_action(
+        db,
+        team_id=state["team_id"],
+        user_id=_actor_id_as_int(state.get("actor_id")),
+        workflow_id=_post_commit_workflow_id(activity_id, trigger_type),
+        action_id=_post_commit_action_id(action_type, activity_id, trigger_type),
+        action_type=action_type,
+        source_type=source_type,
+        status=status,
+        target_type="customer",
+        target_id=activity.get("customer_id") if isinstance(activity.get("customer_id"), int) else None,
+        dependency={
+            "depends_on": [],
+            "parallel_group": "post_commit_activity_analysis",
+            "join": "apply_transition_policy",
+        },
+        payload=payload
+        or {
+            "activity_id": activity_id,
+            "activity_public_id": activity.get("public_id"),
+            "trigger_type": state.get("trigger_type"),
+        },
+        result=result,
+        reason=reason,
+    )
+
+
+def _actor_id_as_int(value: object) -> int | None:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
+def _post_commit_workflow_id(activity_id: object, trigger_type: str) -> str:
+    return f"wf_pc_{activity_id}_{_stable_identifier_part(trigger_type)}"[:64]
+
+
+def _post_commit_action_id(action_type: str, activity_id: object, trigger_type: str) -> str:
+    prefix_by_action = {
+        "project_next_follow_up_tasks": "proj",
+        "reconcile_historical_follow_up_tasks": "recon",
+    }
+    prefix = prefix_by_action.get(action_type, "sys")
+    trigger = _stable_identifier_part(trigger_type)
+    return f"act_pc_{prefix}_{activity_id}_{trigger}"[:64]
+
+
+def _stable_identifier_part(value: str) -> str:
+    cleaned = "".join(ch if ch.isalnum() else "_" for ch in value.strip().lower())
+    return cleaned.strip("_") or "unknown"
 
 
 def _projection_payload(result: FollowUpTaskProjectionResult) -> dict[str, Any]:

@@ -1,6 +1,7 @@
 """LangGraph-native root runtime foundation for CRM Agent turns."""
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from langchain_core.runnables import RunnableConfig
@@ -8,8 +9,18 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
 from langgraph.types import Command, interrupt
 
-from app.crud.agent import agent_task_crud
-from app.services.agent import agent_copy, execution_trace, interactions, task_display
+from app.core.database import SessionLocal
+from app.crud.agent import agent_session_crud, agent_task_crud, agent_workflow_action_crud
+from app.services.agent import (
+    action_plan,
+    action_workflow,
+    agent_copy,
+    execution_trace,
+    interactions,
+    task_display,
+    task_execution,
+    workflow_action_ledger,
+)
 from app.services.agent.checkpointer import agent_checkpoint_saver
 from app.services.agent.confirmed_task_graph import (
     ConfirmedTaskGraphService,
@@ -69,7 +80,20 @@ from app.services.agent.state import (
 )
 from app.services.agent.turn_intent import AgentTurnIntentRouter, agent_turn_intent_router
 from app.services.agent.types import JSONDict, JSONList, coerce_json_dict, coerce_json_value
+from app.services.customer_intelligence_refresh_service import (
+    CustomerIntelligenceRefreshService,
+)
+from app.services.customer_intelligence_refresh_service import (
+    customer_intelligence_refresh_service as default_customer_intelligence_refresh_service,
+)
+from app.services.customer_intelligence_event_service import (
+    CUSTOMER_INTELLIGENCE_COMMITTED_EVENT_TRIGGER_TYPES,
+    CUSTOMER_INTELLIGENCE_INLINE_TRIGGER_TYPES,
+)
 from app.services.customer_intelligence_trace_service import visible_trace_events
+from app.services.follow_up_task_confirmation_channel_service import (
+    FOLLOW_UP_CONFIRMATION_RESOLVED_EVENT,
+)
 
 AGENT_CHECKPOINT_NS = "crm_agent"
 logger = logging.getLogger(__name__)
@@ -127,6 +151,7 @@ class AgentRootRuntime:
         pending_task_side_effect_handler: PendingTaskSideEffectHandler | None = None,
         customer_intelligence_graph_service: CustomerIntelligenceGraphService | None = None,
         customer_intelligence_trigger_policy: CustomerIntelligenceTriggerPolicy | None = None,
+        customer_intelligence_refresh_service: CustomerIntelligenceRefreshService | None = None,
         turn_intent_router: AgentTurnIntentRouter | None = None,
     ) -> None:
         self.pending_graph_service = pending_graph_service or pending_task_graph_service
@@ -141,6 +166,9 @@ class AgentRootRuntime:
         )
         self.customer_intelligence_trigger_policy = (
             customer_intelligence_trigger_policy or default_customer_intelligence_trigger_policy
+        )
+        self.customer_intelligence_refresh_service = (
+            customer_intelligence_refresh_service or default_customer_intelligence_refresh_service
         )
         self.turn_intent_router = turn_intent_router or agent_turn_intent_router
         self._graph = self._build_graph(checkpointer)
@@ -363,6 +391,17 @@ class AgentRootRuntime:
             session_id=session_id,
             session_key=session_key,
         )
+        structured_action_result = await self._handle_structured_business_action_turn(
+            turn_input=turn_input,
+            content=content,
+            team_id=team_id,
+            user_id=user_id,
+            session_id=session_id,
+            current_customer=current_customer,
+            context=context,
+        )
+        if structured_action_result is not None:
+            return structured_action_result
         checkpoint_interrupt = interrupt_payload_from_json(checkpoint_values.get("current_interrupt"))
         runtime_current_interrupt = checkpoint_interrupt
         if checkpoint_interrupt:
@@ -421,6 +460,150 @@ class AgentRootRuntime:
             context=context,
             current_interrupt=runtime_current_interrupt,
         )
+
+    async def _handle_structured_business_action_turn(
+        self,
+        *,
+        turn_input: AgentTurnInput,
+        content: str,
+        team_id: int,
+        user_id: int,
+        session_id: int,
+        current_customer: JSONDict,
+        context: AgentRuntimeContext,
+    ) -> AgentRuntimeInvokeResult | None:
+        action_type = _structured_business_action_type_from_turn(turn_input)
+        if action_type != "resolve_follow_up_task_confirmation_case":
+            return None
+        case_public_id = _structured_follow_up_confirmation_case_public_id_from_turn(turn_input)
+        if not case_public_id:
+            return None
+
+        workflow = action_workflow.required_write_contract(
+            action=action_type,
+            source=action_workflow.SOURCE_EXPLICIT_USER_REQUEST,
+        )
+        action_id = str(workflow["action_id"])
+        payload: JSONDict = {
+            "case_id": case_public_id,
+            "reply_text": content,
+        }
+        envelope = task_execution.ActionExecutionEnvelope(
+            action_id=action_id,
+            action_type=action_type,
+            workflow=workflow,
+            payload=payload,
+            customer=current_customer,
+            session_id=session_id,
+            task_key=action_id,
+        )
+        workflow_action_ledger.mark_action_running(
+            context.db,
+            workflow=workflow,
+            team_id=team_id,
+            user_id=user_id,
+            session_id=session_id,
+            task_id=None,
+            source_type=workflow_action_ledger.SOURCE_PENDING_RESUME,
+            payload=payload,
+            target_type="follow_up_confirmation_case",
+            target_id=None,
+            reason="structured_business_action",
+        )
+        execution = await task_execution.execute_action_envelope(
+            context.db,
+            envelope,
+            session=context.session,
+            team_id=team_id,
+            user_id=user_id,
+            authorization=context.authorization or "",
+            event_sink=context.event_sink,
+        )
+        tool_result = execution.tool_result
+        tool_event = coerce_json_dict(tool_result.to_event()) if tool_result else {}
+        events: list[JSONDict] = [
+            {
+                "event": "structured_business_action_started",
+                "action_type": action_type,
+                "action_id": action_id,
+                "case_public_id": case_public_id,
+            },
+            *execution.progress_events,
+        ]
+        if tool_event:
+            events.append(tool_event)
+        if tool_result and tool_result.success:
+            result_payload = coerce_json_dict(tool_result.data)
+            resolved_event = _follow_up_confirmation_resolved_event_from_tool_result(
+                result_payload,
+                case_public_id=case_public_id,
+            )
+            assistant_content = str(
+                resolved_event.get("content")
+                or result_payload.get("content")
+                or agent_copy.generic_completed()
+            )
+            events.append(resolved_event)
+            events.append({
+                "event": "action_completed",
+                "action_id": action_id,
+                "action_type": action_type,
+            })
+            workflow_action_ledger.mark_action_executed(
+                context.db,
+                workflow=workflow,
+                team_id=team_id,
+                user_id=user_id,
+                result=result_payload,
+                task_id=None,
+            )
+            await _publish_events(context, events)
+            context.side_effects.new_flow_events.extend(events)
+            context.side_effects.new_flow_assistant_content = assistant_content
+            return coerce_json_dict({
+                "application_action": "run_new_flow",
+                "events": events,
+                "assistant_content": assistant_content,
+                "structured_business_action": {
+                    "action_type": action_type,
+                    "action_id": action_id,
+                    "case_public_id": case_public_id,
+                    "status": "executed",
+                },
+            })
+
+        error_message = tool_result.error_message if tool_result else f"暂不支持的执行动作：{action_type}"
+        events.append({
+            "event": "action_failed",
+            "action_id": action_id,
+            "action_type": action_type,
+            "reason": error_message,
+        })
+        workflow_action_ledger.mark_action_failed(
+            context.db,
+            workflow=workflow,
+            team_id=team_id,
+            user_id=user_id,
+            error_message=error_message,
+            task_id=None,
+            result=tool_event or {"success": False, "error": error_message},
+        )
+        assistant_content = f"执行失败：{error_message}"
+        await _publish_events(context, events)
+        context.side_effects.new_flow_events.extend(events)
+        context.side_effects.new_flow_assistant_content = assistant_content
+        return coerce_json_dict({
+            "application_action": "run_new_flow",
+            "events": events,
+            "assistant_content": assistant_content,
+            "structured_business_action": {
+                "action_type": action_type,
+                "action_id": action_id,
+                "case_public_id": case_public_id,
+                "status": "failed",
+                "reason": error_message,
+            },
+        })
 
     async def checkpoint_state_at(
         self,
@@ -874,12 +1057,118 @@ class AgentRootRuntime:
             return "customer_intelligence_graph"
         return "finish"
 
+    def _should_run_customer_intelligence_inline(self, state: AgentRuntimeState, event: object | None) -> bool:
+        if _is_customer_intelligence_resume(state.get("resume_payload")):
+            return True
+        trigger_type = _customer_intelligence_trigger_type(event)
+        if trigger_type in CUSTOMER_INTELLIGENCE_INLINE_TRIGGER_TYPES:
+            return True
+        return trigger_type not in CUSTOMER_INTELLIGENCE_COMMITTED_EVENT_TRIGGER_TYPES
+
+    async def _schedule_customer_intelligence_refresh(
+        self,
+        runtime: Runtime[AgentRuntimeContext],
+        event: object,
+    ) -> AgentRuntimeState:
+        context = runtime.context
+        trigger_type = _customer_intelligence_trigger_type(event)
+        event_key = _customer_intelligence_event_key(event)
+        customer_id = _customer_intelligence_customer_id(event)
+        scheduled_event: JSONDict = {
+            "event": "agent_root_customer_intelligence_refresh_scheduled",
+            "mode": "background",
+            "trigger_type": trigger_type,
+            "event_key": event_key,
+            "customer_id": customer_id,
+        }
+        result_projection: JSONDict = {
+            "handled": True,
+            "mode": "background",
+            "scheduled": False,
+            "trigger_type": trigger_type,
+            "event_key": event_key,
+            "customer_id": customer_id,
+        }
+
+        try:
+            request = await self.customer_intelligence_refresh_service.trigger_committed_event_refresh(
+                context.db,
+                event=event,
+                scope="brief",
+            )
+        except Exception as exc:
+            logger.exception(
+                "Agent 客户智能后台刷新调度失败，已隔离为非阻塞后置效果: team_id=%s, session_id=%s, trigger_type=%s",
+                context.team_id,
+                context.session_id,
+                trigger_type,
+            )
+            failed_event = {
+                **scheduled_event,
+                "event": "agent_root_customer_intelligence_refresh_schedule_failed",
+                "reason": str(exc),
+            }
+            context.side_effects.customer_intelligence_events.append(failed_event)
+            await _publish_event(context, failed_event)
+            return {
+                "customer_intelligence_requested": False,
+                "customer_intelligence_result": {
+                    **result_projection,
+                    "handled": False,
+                    "reason": "background_refresh_schedule_failed",
+                },
+                "events": [failed_event],
+            }
+
+        scheduled = bool(getattr(request, "scheduled", False))
+        request_id = getattr(request, "request_id", None)
+        scheduled_event["scheduled"] = scheduled
+        if isinstance(request_id, str):
+            scheduled_event["request_id"] = request_id
+            result_projection["request_id"] = request_id
+        result_projection["scheduled"] = scheduled
+        result_projection["scope"] = str(getattr(request, "scope", "brief") or "brief")
+        context.side_effects.customer_intelligence_events.append(scheduled_event)
+        context.side_effects.customer_intelligence_result = result_projection
+        await _publish_event(context, scheduled_event)
+        return {
+            "customer_intelligence_requested": False,
+            "customer_intelligence_event": _customer_intelligence_event_projection(event),
+            "customer_intelligence_result": result_projection,
+            "events": [scheduled_event],
+        }
+
     async def _run_customer_intelligence_graph(
         self,
         state: AgentRuntimeState,
         runtime: Runtime[AgentRuntimeContext],
     ) -> AgentRuntimeState:
         context = runtime.context
+        event_object = context.customer_intelligence_event
+        if not self._should_run_customer_intelligence_inline(state, event_object):
+            if not context.db:
+                return {
+                    "customer_intelligence_requested": False,
+                    "customer_intelligence_result": {
+                        "handled": False,
+                        "reason": "missing_runtime_context",
+                    },
+                    "events": [{
+                        "event": "agent_root_customer_intelligence_refresh_unavailable",
+                        "reason": "missing_runtime_context",
+                    }],
+                }
+            if event_object is None:
+                return {
+                    "customer_intelligence_requested": False,
+                    "customer_intelligence_result": {"handled": False, "reason": "missing_event"},
+                    "events": [{
+                        "event": "agent_root_customer_intelligence_skipped",
+                        "reason": "missing_event",
+                    }],
+                }
+            return await self._schedule_customer_intelligence_refresh(runtime, event_object)
+
         started_event = _step_event(
             "customer_intelligence",
             "started",
@@ -931,7 +1220,6 @@ class AgentRootRuntime:
                 else:
                     result = await self.customer_intelligence_graph_service.resume_review(graph_input)
             else:
-                event_object = context.customer_intelligence_event
                 if event_object is None:
                     return {
                         "customer_intelligence_requested": False,
@@ -1204,59 +1492,1038 @@ class AgentRootRuntime:
         side_effect_context: NewFlowSideEffectContext,
     ) -> JSONDict:
         tasks = side_effect_context.auto_execute_tasks or []
-        if not tasks:
+        plan_items = _auto_execute_plan_items(side_effect_context, tasks=tasks)
+        if not plan_items:
             return {}
         assistant_content: str | None = None
         current_interrupt: AgentInterruptPayload | None = None
         emitted_event_count = 0
-        for task in tasks:
-            started_event = _step_event(
-                "auto_execute_task",
-                "started",
-                task_display.readable_execution_label(_task_action(task)) or "执行业务操作",
+        initial_plan = action_plan.build_action_execution_plan(plan_items)
+        ledger_state = _auto_execute_ledger_state(
+            context,
+            action_ids=_plan_action_ids_for_ledger(initial_plan),
+        )
+        satisfied_action_ids = set(ledger_state.get("satisfied_action_ids", []))
+        running_action_ids = set(ledger_state.get("running_action_ids", []))
+        terminal_action_ids = set(ledger_state.get("terminal_action_ids", []))
+        executed_action_count = 0
+        last_mode = "none"
+        for _ in range(len(plan_items) + 1):
+            plan = action_plan.build_action_execution_plan(
+                plan_items,
+                satisfied_action_ids=satisfied_action_ids,
+                running_action_ids=running_action_ids,
+                terminal_action_ids=terminal_action_ids,
             )
-            context.side_effects.new_flow_events.append(started_event)
-            await _publish_event(context, started_event)
+            plan_event = {
+                "event": "agent_root_auto_execute_plan_built",
+                **plan.summary(),
+            }
+            context.side_effects.new_flow_events.append(plan_event)
+            await _publish_event(context, plan_event)
+            emitted_event_count += 1
+            if plan.blocked_nodes:
+                _mark_auto_execute_nodes_blocked(context, plan.blocked_nodes)
+            if not plan.ready_nodes:
+                if plan.blocked_nodes:
+                    blocked_event = {
+                        "event": "agent_root_auto_execute_plan_blocked",
+                        "blocked_actions": [
+                            {
+                                "action_id": node.action_id,
+                                "action_type": node.action_type,
+                                "task_id": node.task_id,
+                                "reason": node.blocked_reason,
+                            }
+                            for node in plan.blocked_nodes
+                        ],
+                    }
+                    context.side_effects.new_flow_events.append(blocked_event)
+                    await _publish_event(context, blocked_event)
+                    emitted_event_count += 1
+                break
+            blocked_taskless_nodes = tuple(
+                node
+                for node in plan.ready_nodes
+                if node.task is None and not _can_direct_execute_action_node(node)
+            )
+            if blocked_taskless_nodes:
+                blocked_taskless_nodes = _auto_execute_nodes_with_blocked_reason(
+                    blocked_taskless_nodes,
+                    "missing_task_projection",
+                )
+                _mark_auto_execute_nodes_blocked(
+                    context,
+                    blocked_taskless_nodes,
+                )
+                blocked_event = {
+                    "event": "agent_root_auto_execute_plan_blocked",
+                    "blocked_actions": [
+                        {
+                            "action_id": node.action_id,
+                            "action_type": node.action_type,
+                            "task_id": node.task_id,
+                            "reason": node.blocked_reason,
+                        }
+                        for node in blocked_taskless_nodes
+                    ],
+                }
+                context.side_effects.new_flow_events.append(blocked_event)
+                await _publish_event(context, blocked_event)
+                emitted_event_count += 1
+                break
+            ready_nodes = plan.ready_nodes
+            authorization_blocked_nodes = _auto_execute_nodes_requiring_authorization(
+                ready_nodes,
+                authorization=context.authorization,
+            )
+            if authorization_blocked_nodes:
+                _mark_auto_execute_nodes_blocked(context, authorization_blocked_nodes)
+                terminal_action_ids.update(node.action_id for node in authorization_blocked_nodes)
+                blocked_action_ids = {node.action_id for node in authorization_blocked_nodes}
+                blocked_event = {
+                    "event": "agent_root_auto_execute_plan_blocked",
+                    "blocked_actions": [
+                        {
+                            "action_id": node.action_id,
+                            "action_type": node.action_type,
+                            "task_id": node.task_id,
+                            "reason": node.blocked_reason,
+                        }
+                        for node in authorization_blocked_nodes
+                    ],
+                }
+                context.side_effects.new_flow_events.append(blocked_event)
+                await _publish_event(context, blocked_event)
+                emitted_event_count += 1
+                ready_nodes = tuple(node for node in ready_nodes if node.action_id not in blocked_action_ids)
+                if not ready_nodes:
+                    continue
+            execution_blocked_nodes = _auto_execute_nodes_blocked_by_execution_contract(ready_nodes)
+            if execution_blocked_nodes:
+                _mark_auto_execute_nodes_blocked(context, execution_blocked_nodes)
+                terminal_action_ids.update(node.action_id for node in execution_blocked_nodes)
+                blocked_action_ids = {node.action_id for node in execution_blocked_nodes}
+                blocked_event = {
+                    "event": "agent_root_auto_execute_plan_blocked",
+                    "blocked_actions": [
+                        {
+                            "action_id": node.action_id,
+                            "action_type": node.action_type,
+                            "task_id": node.task_id,
+                            "reason": node.blocked_reason,
+                        }
+                        for node in execution_blocked_nodes
+                    ],
+                }
+                context.side_effects.new_flow_events.append(blocked_event)
+                await _publish_event(context, blocked_event)
+                emitted_event_count += 1
+                ready_nodes = tuple(node for node in ready_nodes if node.action_id not in blocked_action_ids)
+                if not ready_nodes:
+                    continue
+            executable_nodes = _select_auto_execute_nodes_for_batch(ready_nodes)
+            _mark_auto_execute_nodes_running(context, executable_nodes)
+            if len(executable_nodes) > 1:
+                branch = await self._run_new_flow_auto_execute_nodes_parallel(context, list(executable_nodes))
+                last_mode = str(branch.get("mode") or "parallel_isolated")
+            else:
+                branch = await self._run_new_flow_auto_execute_node_in_context(
+                    context,
+                    executable_nodes[0],
+                    include_graph_progress_events=not bool(context.event_sink),
+                )
+                context.side_effects.new_flow_events.extend(branch["events"])
+                last_mode = str(branch.get("mode") or "single_in_context")
+            emitted_event_count += int(branch.get("emitted_event_count") or 0)
+            self._customer_intelligence_event_from_confirmed_tool_result(context, branch.get("tool_result") or {})
+            result = coerce_json_dict(branch.get("result"))
+            result_content = result.get("assistant_content") or branch.get("assistant_content")
+            if isinstance(result_content, str):
+                assistant_content = result_content
+            branch_interrupt = branch.get("current_interrupt")
+            if isinstance(branch_interrupt, dict):
+                current_interrupt = branch_interrupt
+            successful_task_ids = {
+                int(item)
+                for item in branch.get("completed_task_ids", [])
+                if isinstance(item, int)
+            }
+            if len(executable_nodes) == 1 and not successful_task_ids and _auto_execute_branch_completed(branch):
+                task_id = executable_nodes[0].task_id
+                if task_id is not None:
+                    successful_task_ids.add(task_id)
+            successful_action_ids = {
+                str(item)
+                for item in branch.get("completed_action_ids", [])
+                if isinstance(item, str) and item
+            }
+            failed_action_ids = {
+                str(item)
+                for item in branch.get("failed_action_ids", [])
+                if isinstance(item, str) and item
+            }
+            if (
+                len(executable_nodes) == 1
+                and not successful_action_ids
+                and not successful_task_ids
+                and _auto_execute_branch_failed(branch)
+            ):
+                failed_action_ids.add(executable_nodes[0].action_id)
+            new_terminal_failed_action_ids = failed_action_ids - terminal_action_ids
+            if new_terminal_failed_action_ids:
+                terminal_action_ids.update(new_terminal_failed_action_ids)
+            newly_completed = [
+                node.action_id
+                for node in executable_nodes
+                if node.action_id in successful_action_ids or node.task_id in successful_task_ids
+            ]
+            if not newly_completed and not new_terminal_failed_action_ids:
+                break
+            satisfied_action_ids.update(newly_completed)
+            executed_action_count += len(newly_completed)
+            if current_interrupt:
+                break
+            if executed_action_count >= len(plan_items):
+                break
+        return coerce_json_dict({
+            "event": "agent_root_new_flow_auto_execution_completed",
+            "mode": last_mode,
+            "emitted_event_count": emitted_event_count,
+            "executed_action_count": executed_action_count,
+            "assistant_content": assistant_content,
+            "current_interrupt": current_interrupt,
+        })
+
+    async def retry_workflow_action(
+        self,
+        *,
+        db: object,
+        action: object,
+        session: object | None,
+        team_id: int,
+        user_id: int,
+        authorization: str = "",
+        retry_source: str = workflow_action_ledger.SOURCE_MANUAL_RETRY,
+        reason: str | None = None,
+        event_sink=None,
+    ) -> object:
+        """Retry one durable workflow action through the normal action planner.
+
+        The retry endpoint should not become a second mutation path. This method
+        first restores the action state in the ledger, then replays only actions
+        whose original workflow policy allows automatic execution. Confirmation
+        required actions stay WAITING_USER and must resume through HITL.
+        """
+
+        prepared_action = workflow_action_ledger.prepare_action_retry(
+            db,
+            action,
+            retry_source=retry_source,
+            reason=reason,
+        )
+        if not _workflow_action_is_auto_executable(prepared_action):
+            return prepared_action
+        prepared_item = action_plan.item_from_ledger_action(prepared_action)
+        workflow = action_workflow.workflow_from_mapping(prepared_item.workflow if prepared_item else None)
+        if session is None:
+            if workflow:
+                return workflow_action_ledger.mark_action_blocked(
+                    db,
+                    workflow=workflow,
+                    team_id=team_id,
+                    user_id=user_id,
+                    session_id=_optional_int(getattr(prepared_action, "session_id", None)),
+                    task_id=_optional_int(getattr(prepared_action, "task_id", None)),
+                    source_type=workflow_action_ledger.SOURCE_MANUAL_RETRY,
+                    payload=coerce_json_dict(getattr(prepared_action, "payload_json", None)),
+                    target_type=_optional_str(getattr(prepared_action, "target_type", None)),
+                    target_id=_optional_int(getattr(prepared_action, "target_id", None)),
+                    reason="retry_blocked:missing_session_context",
+                ) or prepared_action
+            return prepared_action
+
+        workflow_id = _optional_str(getattr(prepared_action, "workflow_id", None))
+        if not workflow_id:
+            return prepared_action
+        workflow_actions = agent_workflow_action_crud.list_by_workflow(
+            db,
+            workflow_id,
+            team_id=team_id,
+            user_id=user_id,
+            include_system_actions=True,
+        )
+        plan_items = _retryable_workflow_plan_items(workflow_actions)
+        if not plan_items:
+            return prepared_action
+        side_effects = AgentRootRuntimeSideEffects()
+        session_id = _optional_int(getattr(session, "id", None)) or _optional_int(
+            getattr(prepared_action, "session_id", None)
+        )
+        context = AgentRuntimeContext(
+            db=db,
+            session=session,
+            turn_input=AgentTurnInput(
+                content="",
+                source="api",
+                metadata={
+                    "workflow_id": workflow_id,
+                    "action_id": getattr(prepared_action, "action_id", None),
+                    "retry_source": retry_source,
+                },
+            ),
+            content="",
+            team_id=team_id,
+            user_id=user_id,
+            session_id=session_id or 0,
+            authorization=authorization,
+            side_effects=side_effects,
+            event_sink=event_sink,
+        )
+        side_effect_context = NewFlowSideEffectContext(
+            db=db,
+            session=session,
+            team_id=team_id,
+            user_id=user_id,
+            auto_execute_actions=plan_items,
+        )
+        await self._run_new_flow_auto_execute_tasks(context, side_effect_context)
+        refreshed_action = agent_workflow_action_crud.get_by_workflow_action(
+            db,
+            workflow_id=workflow_id,
+            action_id=str(getattr(prepared_action, "action_id", "")),
+            team_id=team_id,
+            user_id=user_id,
+            include_system_actions=True,
+        )
+        return refreshed_action or prepared_action
+
+    async def retry_workflow(
+        self,
+        *,
+        db: object,
+        workflow_id: str,
+        actions: list[object],
+        session: object | None,
+        team_id: int,
+        user_id: int,
+        authorization: str = "",
+        retry_source: str = workflow_action_ledger.SOURCE_MANUAL_RETRY,
+        reason: str | None = None,
+        event_sink=None,
+    ) -> list[object]:
+        """Recover retryable workflow actions, then replay auto actions via DAG.
+
+        This is intentionally not a full workflow rerun. Already executed
+        actions remain satisfied, HITL actions remain waiting for a resume, and
+        only failed/blocked actions are moved back into recoverable states.
+        """
+
+        prepared_actions: list[object] = []
+        for action in actions:
+            if not _workflow_action_is_retryable(action):
+                continue
+            prepared_actions.append(
+                workflow_action_ledger.prepare_action_retry(
+                    db,
+                    action,
+                    retry_source=retry_source,
+                    reason=reason,
+                )
+            )
+        if not prepared_actions:
+            raise ValueError("No retryable workflow actions found")
+
+        if not any(_workflow_action_is_auto_executable(action) for action in prepared_actions):
+            return agent_workflow_action_crud.list_by_workflow(
+                db,
+                workflow_id,
+                team_id=team_id,
+                user_id=user_id,
+                include_system_actions=True,
+            )
+
+        auto_workflow = _first_auto_executable_workflow(prepared_actions)
+        if session is None:
+            if auto_workflow:
+                workflow_action_ledger.mark_action_blocked(
+                    db,
+                    workflow=auto_workflow,
+                    team_id=team_id,
+                    user_id=user_id,
+                    session_id=_optional_int(getattr(prepared_actions[0], "session_id", None)),
+                    task_id=_optional_int(getattr(prepared_actions[0], "task_id", None)),
+                    source_type=workflow_action_ledger.SOURCE_MANUAL_RETRY,
+                    payload=coerce_json_dict(getattr(prepared_actions[0], "payload_json", None)),
+                    target_type=_optional_str(getattr(prepared_actions[0], "target_type", None)),
+                    target_id=_optional_int(getattr(prepared_actions[0], "target_id", None)),
+                    reason="retry_blocked:missing_session_context",
+                )
+            return agent_workflow_action_crud.list_by_workflow(
+                db,
+                workflow_id,
+                team_id=team_id,
+                user_id=user_id,
+                include_system_actions=True,
+            )
+
+        refreshed_actions = agent_workflow_action_crud.list_by_workflow(
+            db,
+            workflow_id,
+            team_id=team_id,
+            user_id=user_id,
+            include_system_actions=True,
+        )
+        plan_items = _retryable_workflow_plan_items(refreshed_actions)
+        if plan_items:
+            side_effects = AgentRootRuntimeSideEffects()
+            session_id = _optional_int(getattr(session, "id", None)) or _optional_int(
+                getattr(prepared_actions[0], "session_id", None)
+            )
+            context = AgentRuntimeContext(
+                db=db,
+                session=session,
+                turn_input=AgentTurnInput(
+                    content="",
+                    source="api",
+                    metadata={
+                        "workflow_id": workflow_id,
+                        "retry_source": retry_source,
+                        "retry_scope": "workflow",
+                    },
+                ),
+                content="",
+                team_id=team_id,
+                user_id=user_id,
+                session_id=session_id or 0,
+                authorization=authorization,
+                side_effects=side_effects,
+                event_sink=event_sink,
+            )
+            side_effect_context = NewFlowSideEffectContext(
+                db=db,
+                session=session,
+                team_id=team_id,
+                user_id=user_id,
+                auto_execute_actions=plan_items,
+            )
+            await self._run_new_flow_auto_execute_tasks(context, side_effect_context)
+        return agent_workflow_action_crud.list_by_workflow(
+            db,
+            workflow_id,
+            team_id=team_id,
+            user_id=user_id,
+            include_system_actions=True,
+        )
+
+    async def _run_new_flow_auto_execute_task_in_context(
+        self,
+        context: AgentRuntimeContext,
+        task: object,
+        *,
+        include_graph_progress_events: bool,
+    ) -> JSONDict:
+        started_event = _step_event(
+            "auto_execute_task",
+            "started",
+            task_display.readable_execution_label(_task_action(task)) or "执行业务操作",
+        )
+        await _publish_event(context, started_event)
+        result = await self.confirmed_task_graph_service.run({
+            "db": context.db,
+            "session": context.session,
+            "task": task,
+            "team_id": context.team_id,
+            "user_id": context.user_id,
+            "session_id": context.session_id,
+            "authorization": context.authorization or "",
+            "channel": context.turn_input.source if context.turn_input else "web",
+            "provider": context.turn_input.provider if context.turn_input else None,
+            "events": [],
+            "event_sink": context.event_sink,
+        })
+        output_events = execution_trace.confirmed_task_execution_events(
+            task=task,
+            graph_events=result.get("events", []),
+            output_events=result.get("output_events", []),
+            include_graph_progress_events=include_graph_progress_events,
+        )
+        await _publish_events(context, output_events)
+        assistant_content = result.get("assistant_content")
+        current_interrupt = _next_task_interrupt_from_output_events_for_context(
+            output_events,
+            context=context,
+            assistant_content=assistant_content if isinstance(assistant_content, str) else "",
+        )
+        return coerce_json_dict({
+            "result": result,
+            "tool_result": result.get("tool_result") or {},
+            "events": [started_event, *output_events],
+            "emitted_event_count": len(output_events) + 1,
+            "assistant_content": assistant_content,
+            "current_interrupt": current_interrupt,
+        })
+
+    async def _run_new_flow_auto_execute_node_in_context(
+        self,
+        context: AgentRuntimeContext,
+        node: action_plan.ActionPlanNode,
+        *,
+        include_graph_progress_events: bool,
+    ) -> JSONDict:
+        if node.task is not None:
+            branch = await self._run_new_flow_auto_execute_task_in_context(
+                context,
+                node.task,
+                include_graph_progress_events=include_graph_progress_events,
+            )
+            if _auto_execute_branch_completed(branch):
+                branch.setdefault("completed_action_ids", [node.action_id])
+            return coerce_json_dict(branch)
+        return await self._run_new_flow_auto_execute_action_in_context(context, node)
+
+    async def _run_new_flow_auto_execute_action_in_context(
+        self,
+        context: AgentRuntimeContext,
+        node: action_plan.ActionPlanNode,
+    ) -> JSONDict:
+        envelope = task_execution.execution_envelope_from_plan_node(node)
+        started_event = _step_event(
+            "auto_execute_action",
+            "started",
+            task_display.readable_execution_label(envelope.action_type) or "执行业务操作",
+        )
+        await _publish_event(context, started_event)
+        execution = await task_execution.execute_action_envelope(
+            context.db,
+            envelope,
+            session=context.session,
+            team_id=context.team_id,
+            user_id=context.user_id,
+            authorization=context.authorization or "",
+            event_sink=context.event_sink,
+        )
+        tool_result = execution.tool_result
+        tool_event = coerce_json_dict(tool_result.to_event()) if tool_result else {}
+        output_events: list[JSONDict] = [started_event, *execution.progress_events]
+        if tool_event:
+            output_events.append(tool_event)
+        if tool_result and tool_result.success:
+            assistant_content = _direct_action_success_content(envelope.action_type)
+            workflow_action_ledger.mark_action_executed(
+                context.db,
+                workflow=envelope.workflow,
+                team_id=context.team_id,
+                user_id=context.user_id,
+                result=tool_result.data if isinstance(tool_result.data, dict) else {"data": tool_result.data},
+                task_id=None,
+            )
+            output_events.append({
+                "event": "action_completed",
+                "action_id": envelope.action_id,
+                "action_type": envelope.action_type,
+            })
+            await _publish_events(context, output_events[1:])
+            return coerce_json_dict({
+                "result": {"execution_status": "completed", "assistant_content": assistant_content},
+                "tool_result": tool_event,
+                "events": output_events,
+                "emitted_event_count": len(output_events),
+                "assistant_content": assistant_content,
+                "completed_action_ids": [node.action_id],
+                "mode": "single_action_in_context",
+            })
+        error_message = tool_result.error_message if tool_result else f"暂不支持的执行动作：{envelope.action_type}"
+        workflow_action_ledger.mark_action_failed(
+            context.db,
+            workflow=envelope.workflow,
+            team_id=context.team_id,
+            user_id=context.user_id,
+            task_id=None,
+            error_message=error_message,
+            result=tool_event or {"success": False, "error": error_message},
+        )
+        output_events.append({
+            "event": "action_failed",
+            "action_id": envelope.action_id,
+            "action_type": envelope.action_type,
+            "reason": error_message,
+        })
+        await _publish_events(context, output_events[1:])
+        return coerce_json_dict({
+            "result": {"execution_status": "failed", "assistant_content": f"执行失败：{error_message}"},
+            "tool_result": tool_event,
+            "events": output_events,
+            "emitted_event_count": len(output_events),
+            "assistant_content": f"执行失败：{error_message}",
+            "failed_action_ids": [node.action_id],
+            "mode": "single_action_in_context",
+        })
+
+    async def _run_new_flow_auto_execute_tasks_parallel(
+        self,
+        context: AgentRuntimeContext,
+        tasks: list[object],
+    ) -> JSONDict:
+        branch_inputs = [
+            _auto_execute_branch_input(
+                task,
+                session_id=context.session_id,
+                team_id=context.team_id,
+                user_id=context.user_id,
+                authorization=context.authorization or "",
+                channel=context.turn_input.source if context.turn_input else "web",
+                provider=context.turn_input.provider if context.turn_input else None,
+            )
+            for task in tasks
+        ]
+        if any(item is None for item in branch_inputs):
+            assistant_content: str | None = None
+            current_interrupt: AgentInterruptPayload | None = None
+            emitted_event_count = 0
+            completed_task_ids: list[int] = []
+            for task in tasks:
+                branch = await self._run_new_flow_auto_execute_task_in_context(
+                    context,
+                    task,
+                    include_graph_progress_events=not bool(context.event_sink),
+                )
+                context.side_effects.new_flow_events.extend(branch["events"])
+                emitted_event_count += int(branch.get("emitted_event_count") or 0)
+                self._customer_intelligence_event_from_confirmed_tool_result(context, branch.get("tool_result") or {})
+                if isinstance(branch.get("assistant_content"), str):
+                    assistant_content = branch["assistant_content"]
+                branch_interrupt = branch.get("current_interrupt")
+                if isinstance(branch_interrupt, dict):
+                    current_interrupt = branch_interrupt
+                task_id = _optional_int(getattr(task, "id", None))
+                if task_id is not None and _auto_execute_branch_completed(branch):
+                    completed_task_ids.append(task_id)
+            return coerce_json_dict({
+                "event": "agent_root_new_flow_auto_execution_completed",
+                "mode": "serial_fallback",
+                "emitted_event_count": emitted_event_count,
+                "completed_task_ids": completed_task_ids,
+                "assistant_content": assistant_content,
+                "current_interrupt": current_interrupt,
+            })
+
+        started_event = _step_event("auto_execute_tasks_parallel", "started", f"并行执行 {len(tasks)} 个低风险业务操作")
+        context.side_effects.new_flow_events.append(started_event)
+        await _publish_event(context, started_event)
+        branch_results = await asyncio.gather(
+            *[
+                self._run_new_flow_auto_execute_task_isolated(coerce_json_dict(item))
+                for item in branch_inputs
+                if item is not None
+            ],
+            return_exceptions=True,
+        )
+        assistant_content: str | None = None
+        current_interrupt: AgentInterruptPayload | None = None
+        emitted_event_count = 1
+        completed_task_ids: list[int] = []
+        failed_task_ids: list[int] = []
+        for branch_input, branch_result in zip(branch_inputs, branch_results, strict=False):
+            branch_input_json = coerce_json_dict(branch_input)
+            task_id = _optional_int(branch_input_json.get("task_id"))
+            if isinstance(branch_result, Exception):
+                event = {
+                    "event": "agent_root_auto_execute_branch_failed",
+                    "task_id": task_id,
+                    "reason": str(branch_result),
+                }
+                if task_id is not None:
+                    failed_task_ids.append(task_id)
+                context.side_effects.new_flow_events.append(event)
+                await _publish_event(context, event)
+                emitted_event_count += 1
+                continue
+            branch = coerce_json_dict(branch_result)
+            events = [event for event in branch.get("events", []) if isinstance(event, dict)]
+            context.side_effects.new_flow_events.extend(events)
+            await _publish_events(context, events)
+            emitted_event_count += int(branch.get("emitted_event_count") or len(events))
+            self._customer_intelligence_event_from_confirmed_tool_result(context, branch.get("tool_result") or {})
+            if task_id is not None and _auto_execute_branch_completed(branch):
+                completed_task_ids.append(task_id)
+            elif task_id is not None:
+                failed_task_ids.append(task_id)
+                event = {
+                    "event": "agent_root_auto_execute_branch_incomplete",
+                    "task_id": task_id,
+                    "reason": "missing_success_signal",
+                }
+                context.side_effects.new_flow_events.append(event)
+                await _publish_event(context, event)
+                emitted_event_count += 1
+            if isinstance(branch.get("assistant_content"), str):
+                assistant_content = branch["assistant_content"]
+            branch_interrupt = branch.get("current_interrupt")
+            if isinstance(branch_interrupt, dict):
+                current_interrupt = branch_interrupt
+        completed_event = _step_event("auto_execute_tasks_parallel", "completed", f"并行执行完成 {len(tasks)} 个低风险业务操作")
+        context.side_effects.new_flow_events.append(completed_event)
+        await _publish_event(context, completed_event)
+        emitted_event_count += 1
+        return coerce_json_dict({
+            "event": "agent_root_new_flow_auto_execution_completed",
+            "mode": "parallel_isolated",
+            "emitted_event_count": emitted_event_count,
+            "completed_task_ids": completed_task_ids,
+            "failed_task_ids": failed_task_ids,
+            "assistant_content": assistant_content,
+            "current_interrupt": current_interrupt,
+        })
+
+    async def _run_new_flow_auto_execute_nodes_parallel(
+        self,
+        context: AgentRuntimeContext,
+        nodes: list[action_plan.ActionPlanNode],
+    ) -> JSONDict:
+        if all(node.task is not None for node in nodes):
+            branch = await self._run_new_flow_auto_execute_tasks_parallel(
+                context,
+                [node.task for node in nodes if node.task is not None],
+            )
+            completed_task_ids = {
+                int(item)
+                for item in branch.get("completed_task_ids", [])
+                if isinstance(item, int)
+            }
+            failed_task_ids = {
+                int(item)
+                for item in branch.get("failed_task_ids", [])
+                if isinstance(item, int)
+            }
+            branch["completed_action_ids"] = [
+                node.action_id
+                for node in nodes
+                if node.task_id in completed_task_ids
+            ]
+            branch["failed_action_ids"] = [
+                node.action_id
+                for node in nodes
+                if node.task_id in failed_task_ids
+            ]
+            return coerce_json_dict(branch)
+
+        branch_inputs = [
+            _auto_execute_node_branch_input(
+                node,
+                session_id=context.session_id,
+                team_id=context.team_id,
+                user_id=context.user_id,
+                authorization=context.authorization or "",
+                channel=context.turn_input.source if context.turn_input else "web",
+                provider=context.turn_input.provider if context.turn_input else None,
+            )
+            for node in nodes
+        ]
+        if any(item is None for item in branch_inputs):
+            assistant_content: str | None = None
+            current_interrupt: AgentInterruptPayload | None = None
+            emitted_event_count = 0
+            completed_action_ids: list[str] = []
+            for node in nodes:
+                branch = await self._run_new_flow_auto_execute_node_in_context(
+                    context,
+                    node,
+                    include_graph_progress_events=not bool(context.event_sink),
+                )
+                context.side_effects.new_flow_events.extend(branch["events"])
+                emitted_event_count += int(branch.get("emitted_event_count") or 0)
+                self._customer_intelligence_event_from_confirmed_tool_result(context, branch.get("tool_result") or {})
+                if isinstance(branch.get("assistant_content"), str):
+                    assistant_content = branch["assistant_content"]
+                branch_interrupt = branch.get("current_interrupt")
+                if isinstance(branch_interrupt, dict):
+                    current_interrupt = branch_interrupt
+                completed_action_ids.extend([
+                    item
+                    for item in branch.get("completed_action_ids", [])
+                    if isinstance(item, str)
+                ])
+                if current_interrupt:
+                    break
+            return coerce_json_dict({
+                "event": "agent_root_new_flow_auto_execution_completed",
+                "mode": "serial_node_fallback",
+                "emitted_event_count": emitted_event_count,
+                "completed_action_ids": completed_action_ids,
+                "assistant_content": assistant_content,
+                "current_interrupt": current_interrupt,
+            })
+
+        started_event = _step_event("auto_execute_actions_parallel", "started", f"并行执行 {len(nodes)} 个低风险业务动作")
+        context.side_effects.new_flow_events.append(started_event)
+        await _publish_event(context, started_event)
+        branch_results = await asyncio.gather(
+            *[
+                self._run_new_flow_auto_execute_node_isolated(coerce_json_dict(item))
+                for item in branch_inputs
+                if item is not None
+            ],
+            return_exceptions=True,
+        )
+        assistant_content: str | None = None
+        current_interrupt: AgentInterruptPayload | None = None
+        emitted_event_count = 1
+        completed_action_ids: list[str] = []
+        completed_task_ids: list[int] = []
+        failed_action_ids: list[str] = []
+        failed_task_ids: list[int] = []
+        nodes_by_action_id = {node.action_id: node for node in nodes}
+        for branch_input, branch_result in zip(branch_inputs, branch_results, strict=False):
+            branch_input_json = coerce_json_dict(branch_input)
+            action_id = _optional_str(branch_input_json.get("action_id"))
+            task_id = _optional_int(branch_input_json.get("task_id"))
+            if isinstance(branch_result, Exception):
+                if action_id:
+                    failed_action_ids.append(action_id)
+                    node = nodes_by_action_id.get(action_id)
+                    if node is not None:
+                        _mark_auto_execute_node_failed(context, node, str(branch_result))
+                if task_id is not None:
+                    failed_task_ids.append(task_id)
+                event = {
+                    "event": "agent_root_auto_execute_branch_failed",
+                    "task_id": task_id,
+                    "action_id": action_id,
+                    "reason": str(branch_result),
+                }
+                context.side_effects.new_flow_events.append(event)
+                await _publish_event(context, event)
+                emitted_event_count += 1
+                continue
+            branch = coerce_json_dict(branch_result)
+            events = [event for event in branch.get("events", []) if isinstance(event, dict)]
+            context.side_effects.new_flow_events.extend(events)
+            await _publish_events(context, events)
+            emitted_event_count += int(branch.get("emitted_event_count") or len(events))
+            self._customer_intelligence_event_from_confirmed_tool_result(context, branch.get("tool_result") or {})
+            completed_action_ids.extend([
+                item
+                for item in branch.get("completed_action_ids", [])
+                if isinstance(item, str)
+            ])
+            completed_task_ids.extend([
+                item
+                for item in branch.get("completed_task_ids", [])
+                if isinstance(item, int)
+            ])
+            failed_action_ids.extend([
+                item
+                for item in branch.get("failed_action_ids", [])
+                if isinstance(item, str)
+            ])
+            failed_task_ids.extend([
+                item
+                for item in branch.get("failed_task_ids", [])
+                if isinstance(item, int)
+            ])
+            if isinstance(branch.get("assistant_content"), str):
+                assistant_content = branch["assistant_content"]
+            branch_interrupt = branch.get("current_interrupt")
+            if isinstance(branch_interrupt, dict):
+                current_interrupt = branch_interrupt
+        completed_event = _step_event("auto_execute_actions_parallel", "completed", f"并行执行完成 {len(nodes)} 个低风险业务动作")
+        context.side_effects.new_flow_events.append(completed_event)
+        await _publish_event(context, completed_event)
+        emitted_event_count += 1
+        return coerce_json_dict({
+            "event": "agent_root_new_flow_auto_execution_completed",
+            "mode": "parallel_isolated",
+            "emitted_event_count": emitted_event_count,
+            "completed_action_ids": completed_action_ids,
+            "completed_task_ids": completed_task_ids,
+            "failed_action_ids": failed_action_ids,
+            "failed_task_ids": failed_task_ids,
+            "assistant_content": assistant_content,
+            "current_interrupt": current_interrupt,
+        })
+
+    async def _run_new_flow_auto_execute_node_isolated(self, branch_input: JSONDict) -> JSONDict:
+        if branch_input.get("node_kind") == "task":
+            branch = await self._run_new_flow_auto_execute_task_isolated(branch_input)
+            action_id = _optional_str(branch_input.get("action_id"))
+            if action_id and _auto_execute_branch_completed(branch):
+                branch["completed_action_ids"] = [action_id]
+            return coerce_json_dict(branch)
+        return await self._run_new_flow_auto_execute_action_isolated(branch_input)
+
+    async def _run_new_flow_auto_execute_action_isolated(self, branch_input: JSONDict) -> JSONDict:
+        session_id = _optional_int(branch_input.get("session_id"))
+        if session_id is None:
+            raise ValueError("auto execute action branch requires session_id")
+        db = SessionLocal()
+        try:
+            session = agent_session_crud.get_by_id(
+                db,
+                session_id,
+                team_id=int(branch_input["team_id"]),
+                user_id=int(branch_input["user_id"]),
+            )
+            if session is None:
+                raise ValueError("auto execute action branch could not reload session")
+            envelope = task_execution.ActionExecutionEnvelope(
+                action_id=str(branch_input["action_id"]),
+                action_type=str(branch_input["action_type"]),
+                workflow=coerce_json_dict(branch_input.get("workflow")),
+                payload=coerce_json_dict(branch_input.get("payload")),
+                customer=coerce_json_dict(branch_input.get("customer")),
+                task_key=_optional_str(branch_input.get("task_key")),
+                session_id=session_id,
+                target_type=_optional_str(branch_input.get("target_type")),
+                target_id=_optional_int(branch_input.get("target_id")),
+            )
+            execution = await task_execution.execute_action_envelope(
+                db,
+                envelope,
+                session=session,
+                team_id=int(branch_input["team_id"]),
+                user_id=int(branch_input["user_id"]),
+                authorization=str(branch_input.get("authorization") or ""),
+                event_sink=None,
+            )
+            tool_result = execution.tool_result
+            tool_event = coerce_json_dict(tool_result.to_event()) if tool_result else {}
+            started_event = _step_event(
+                "auto_execute_action",
+                "started",
+                task_display.readable_execution_label(envelope.action_type) or "执行业务操作",
+            )
+            events = [started_event, *execution.progress_events]
+            if tool_event:
+                events.append(tool_event)
+            if tool_result and tool_result.success:
+                assistant_content = _direct_action_success_content(envelope.action_type)
+                workflow_action_ledger.mark_action_executed(
+                    db,
+                    workflow=envelope.workflow,
+                    team_id=int(branch_input["team_id"]),
+                    user_id=int(branch_input["user_id"]),
+                    result=tool_result.data if isinstance(tool_result.data, dict) else {"data": tool_result.data},
+                    task_id=None,
+                )
+                events.append({
+                    "event": "action_completed",
+                    "action_id": envelope.action_id,
+                    "action_type": envelope.action_type,
+                })
+                return coerce_json_dict({
+                    "result": {"execution_status": "completed", "assistant_content": assistant_content},
+                    "tool_result": tool_event,
+                    "events": events,
+                    "emitted_event_count": len(events),
+                    "assistant_content": assistant_content,
+                    "completed_action_ids": [envelope.action_id],
+                })
+            error_message = tool_result.error_message if tool_result else f"暂不支持的执行动作：{envelope.action_type}"
+            workflow_action_ledger.mark_action_failed(
+                db,
+                workflow=envelope.workflow,
+                team_id=int(branch_input["team_id"]),
+                user_id=int(branch_input["user_id"]),
+                task_id=None,
+                error_message=error_message,
+                result=tool_event or {"success": False, "error": error_message},
+            )
+            events.append({
+                "event": "action_failed",
+                "action_id": envelope.action_id,
+                "action_type": envelope.action_type,
+                "reason": error_message,
+            })
+            return coerce_json_dict({
+                "result": {"execution_status": "failed", "assistant_content": f"执行失败：{error_message}"},
+                "tool_result": tool_event,
+                "events": events,
+                "emitted_event_count": len(events),
+                "assistant_content": f"执行失败：{error_message}",
+                "failed_action_ids": [envelope.action_id],
+            })
+        finally:
+            db.close()
+
+    async def _run_new_flow_auto_execute_task_isolated(self, branch_input: JSONDict) -> JSONDict:
+        task_id = _optional_int(branch_input.get("task_id"))
+        session_id = _optional_int(branch_input.get("session_id"))
+        if task_id is None or session_id is None:
+            raise ValueError("auto execute branch requires task_id and session_id")
+        db = SessionLocal()
+        task: object | None = None
+        try:
+            session = agent_session_crud.get_by_id(
+                db,
+                session_id,
+                team_id=int(branch_input["team_id"]),
+                user_id=int(branch_input["user_id"]),
+            )
+            task = agent_task_crud.get_by_id(
+                db,
+                task_id,
+                team_id=int(branch_input["team_id"]),
+                user_id=int(branch_input["user_id"]),
+            )
+            if session is None or task is None:
+                raise ValueError("auto execute branch could not reload session/task")
             result = await self.confirmed_task_graph_service.run({
-                "db": context.db,
-                "session": context.session,
+                "db": db,
+                "session": session,
                 "task": task,
-                "team_id": context.team_id,
-                "user_id": context.user_id,
-                "session_id": context.session_id,
-                "authorization": context.authorization or "",
-                "channel": context.turn_input.source if context.turn_input else "web",
-                "provider": context.turn_input.provider if context.turn_input else None,
+                "team_id": int(branch_input["team_id"]),
+                "user_id": int(branch_input["user_id"]),
+                "session_id": session_id,
+                "authorization": str(branch_input.get("authorization") or ""),
+                "channel": str(branch_input.get("channel") or "web"),
+                "provider": branch_input.get("provider"),
                 "events": [],
-                "event_sink": context.event_sink,
+                "event_sink": None,
             })
             output_events = execution_trace.confirmed_task_execution_events(
                 task=task,
                 graph_events=result.get("events", []),
                 output_events=result.get("output_events", []),
-                include_graph_progress_events=not bool(context.event_sink),
+                include_graph_progress_events=True,
             )
-            await _publish_events(context, output_events)
-            context.side_effects.new_flow_events.extend(output_events)
-            emitted_event_count += len(output_events) + 1
-            self._customer_intelligence_event_from_confirmed_tool_result(
-                context,
-                result.get("tool_result") or {},
-            )
-            result_content = result.get("assistant_content")
-            if isinstance(result_content, str):
-                assistant_content = result_content
-            current_interrupt = _next_task_interrupt_from_output_events_for_context(
-                output_events,
-                context=context,
-                assistant_content=assistant_content or "",
-            )
-        return coerce_json_dict({
-            "event": "agent_root_new_flow_auto_execution_completed",
-            "emitted_event_count": emitted_event_count,
-            "assistant_content": assistant_content,
-            "current_interrupt": current_interrupt,
-        })
+            assistant_content = result.get("assistant_content")
+            return coerce_json_dict({
+                "result": result,
+                "tool_result": result.get("tool_result") or {},
+                "events": [
+                    _step_event(
+                        "auto_execute_task",
+                        "started",
+                        task_display.readable_execution_label(_task_action(task)) or "执行业务操作",
+                    ),
+                    *output_events,
+                ],
+                "emitted_event_count": len(output_events) + 1,
+                "assistant_content": assistant_content,
+                "current_interrupt": None,
+            })
+        except Exception as exc:
+            workflow = action_workflow.workflow_from_task_state(getattr(task, "state_json", None))
+            if workflow:
+                try:
+                    workflow_action_ledger.mark_action_failed(
+                        db,
+                        workflow=workflow,
+                        team_id=int(branch_input["team_id"]),
+                        user_id=int(branch_input["user_id"]),
+                        task_id=task_id,
+                        error_message=str(exc),
+                        result={"success": False, "error": str(exc)},
+                    )
+                except Exception:
+                    logger.exception(
+                        "Agent 并行自动执行分支失败后写入 Action Ledger 失败: task_id=%s",
+                        task_id,
+                    )
+            raise
+        finally:
+            db.close()
 
     async def _run_confirmed_task_execution(
         self,
@@ -1686,6 +2953,61 @@ def _customer_intelligence_event_key_from_state(state: AgentRuntimeState) -> str
     return event_key if isinstance(event_key, str) and event_key else None
 
 
+def _customer_intelligence_trigger_type(event: object | None) -> str:
+    if event is None:
+        return ""
+    trigger_type = getattr(event, "trigger_type", None)
+    if isinstance(trigger_type, str):
+        return trigger_type
+    event_dict = coerce_json_dict(event)
+    trigger_type = event_dict.get("trigger_type")
+    return trigger_type if isinstance(trigger_type, str) else ""
+
+
+def _customer_intelligence_event_key(event: object | None) -> str | None:
+    if event is None:
+        return None
+    event_key = getattr(event, "event_key", None)
+    if isinstance(event_key, str) and event_key:
+        return event_key
+    event_dict = coerce_json_dict(event)
+    event_key = event_dict.get("event_key")
+    return event_key if isinstance(event_key, str) and event_key else None
+
+
+def _customer_intelligence_customer_id(event: object | None) -> int | None:
+    if event is None:
+        return None
+    customer_id = getattr(event, "customer_id", None)
+    if isinstance(customer_id, int):
+        return customer_id
+    event_dict = coerce_json_dict(event)
+    customer_id = event_dict.get("customer_id")
+    return customer_id if isinstance(customer_id, int) else None
+
+
+def _customer_intelligence_event_projection(event: object | None) -> JSONDict:
+    if event is None:
+        return {}
+    to_dict = getattr(event, "to_dict", None)
+    if callable(to_dict):
+        return coerce_json_dict(to_dict())
+    event_dict = coerce_json_dict(event)
+    if event_dict:
+        return event_dict
+    projection: JSONDict = {}
+    event_key = _customer_intelligence_event_key(event)
+    trigger_type = _customer_intelligence_trigger_type(event)
+    customer_id = _customer_intelligence_customer_id(event)
+    if event_key:
+        projection["event_key"] = event_key
+    if trigger_type:
+        projection["trigger_type"] = trigger_type
+    if customer_id is not None:
+        projection["customer_id"] = customer_id
+    return projection
+
+
 def _task_projection(task: object) -> JSONDict:
     projection: JSONDict = {}
     for key in ("id", "task_key", "status", "intent", "target_type", "target_id"):
@@ -1776,7 +3098,7 @@ def _pending_task_id_from_state(state: AgentRuntimeState) -> int | None:
 def _should_emit_new_flow_event(event: JSONDict, context: NewFlowSideEffectContext) -> bool:
     if event.get("event") != "final":
         return True
-    return not bool(context.auto_execute_tasks)
+    return not (context.auto_execute_tasks or context.auto_execute_actions)
 
 
 def _should_publish_deferred_new_flow_final(
@@ -1800,6 +3122,404 @@ def _task_action(task: object) -> str | None:
     state = coerce_json_dict(state_json)
     action = state.get("action")
     return action if isinstance(action, str) else None
+
+
+def _plan_action_ids_for_ledger(plan: action_plan.ActionExecutionPlan) -> list[str]:
+    action_ids: set[str] = set()
+    for node in plan.nodes:
+        if node.action_id:
+            action_ids.add(node.action_id)
+        action_ids.update(node.depends_on)
+    return sorted(action_ids)
+
+
+def _auto_execute_ledger_state(
+    context: AgentRuntimeContext,
+    *,
+    action_ids: list[str],
+) -> JSONDict:
+    if not context.db or not action_ids:
+        return {}
+    try:
+        return workflow_action_ledger.execution_state_for_action_ids(
+            context.db,
+            action_ids=action_ids,
+            team_id=context.team_id,
+            user_id=context.user_id,
+            include_system_actions=True,
+        )
+    except Exception:
+        logger.exception(
+            "Agent 自动执行读取 Action Ledger 状态失败，已降级为本轮内存计划: team_id=%s, session_id=%s",
+            context.team_id,
+            context.session_id,
+        )
+        return {}
+
+
+def _auto_execute_plan_items(
+    side_effect_context: NewFlowSideEffectContext,
+    *,
+    tasks: list[object],
+) -> list[action_plan.ActionPlanItem]:
+    action_items = [
+        item
+        for item in (getattr(side_effect_context, "auto_execute_actions", None) or [])
+        if isinstance(item, action_plan.ActionPlanItem)
+    ]
+    if action_items:
+        return action_items
+    return action_plan.items_from_tasks(list(tasks))
+
+
+def _retryable_workflow_plan_items(actions: list[object]) -> list[action_plan.ActionPlanItem]:
+    items: list[action_plan.ActionPlanItem] = []
+    for action in actions:
+        if not _workflow_action_is_auto_executable(action):
+            continue
+        item = action_plan.item_from_ledger_action(action)
+        if item is not None:
+            items.append(item)
+    return items
+
+
+def _workflow_action_is_auto_executable(action: object) -> bool:
+    return (
+        _optional_str(getattr(action, "execution_policy", None)) == action_workflow.EXECUTION_AUTO_EXECUTE
+        or _optional_str(getattr(action, "scope", None)) == action_workflow.SCOPE_DERIVED_AUTOMATION
+    )
+
+
+def _workflow_action_is_retryable(action: object) -> bool:
+    return _optional_str(getattr(action, "status", None)) in {"FAILED", "BLOCKED"}
+
+
+def _first_auto_executable_workflow(actions: list[object]) -> JSONDict:
+    for action in actions:
+        if not _workflow_action_is_auto_executable(action):
+            continue
+        item = action_plan.item_from_ledger_action(action)
+        if item is not None:
+            return action_workflow.workflow_from_mapping(item.workflow)
+    return {}
+
+
+def _mark_auto_execute_nodes_running(
+    context: AgentRuntimeContext,
+    nodes: tuple[action_plan.ActionPlanNode, ...],
+) -> None:
+    _mark_auto_execute_nodes_status(context, nodes, status="running")
+
+
+def _mark_auto_execute_nodes_blocked(
+    context: AgentRuntimeContext,
+    nodes: tuple[action_plan.ActionPlanNode, ...],
+) -> None:
+    _mark_auto_execute_nodes_status(context, nodes, status="blocked")
+
+
+def _mark_auto_execute_node_failed(
+    context: AgentRuntimeContext,
+    node: action_plan.ActionPlanNode,
+    error_message: str,
+) -> None:
+    if not context.db or not hasattr(context.db, "query"):
+        return
+    workflow = action_workflow.workflow_from_mapping(node.workflow)
+    if not workflow and node.task is not None:
+        workflow = action_workflow.workflow_from_task_state(getattr(node.task, "state_json", None))
+    if not workflow:
+        return
+    try:
+        workflow_action_ledger.mark_action_failed(
+            context.db,
+            workflow=workflow,
+            team_id=context.team_id,
+            user_id=context.user_id,
+            task_id=node.task_id,
+            error_message=error_message,
+            result={"success": False, "error": error_message},
+        )
+    except Exception:
+        logger.exception(
+            "Agent 自动执行分支失败后写入 Action Ledger 失败: action_id=%s, team_id=%s, session_id=%s",
+            node.action_id,
+            context.team_id,
+            context.session_id,
+        )
+
+
+def _auto_execute_nodes_with_blocked_reason(
+    nodes: tuple[action_plan.ActionPlanNode, ...],
+    reason: str,
+) -> tuple[action_plan.ActionPlanNode, ...]:
+    return tuple(
+        action_plan.ActionPlanNode(
+            action_id=node.action_id,
+            action_type=node.action_type,
+            workflow=node.workflow,
+            payload=node.payload,
+            task=node.task,
+            task_id=node.task_id,
+            target_type=node.target_type,
+            target_id=node.target_id,
+            depends_on=node.depends_on,
+            parallel_group=node.parallel_group,
+            terminal=node.terminal,
+            blocked_reason=node.blocked_reason or reason,
+        )
+        for node in nodes
+    )
+
+
+def _auto_execute_nodes_requiring_authorization(
+    nodes: tuple[action_plan.ActionPlanNode, ...],
+    *,
+    authorization: str | None,
+) -> tuple[action_plan.ActionPlanNode, ...]:
+    if isinstance(authorization, str) and authorization.strip():
+        return ()
+    return _auto_execute_nodes_with_blocked_reason(
+        tuple(
+            node
+            for node in nodes
+            if action_workflow.action_requires_user_authorization(node.action_type)
+        ),
+        "missing_authorization",
+    )
+
+
+def _auto_execute_nodes_blocked_by_execution_contract(
+    nodes: tuple[action_plan.ActionPlanNode, ...],
+) -> tuple[action_plan.ActionPlanNode, ...]:
+    blocked: list[action_plan.ActionPlanNode] = []
+    for node in nodes:
+        if node.task is not None:
+            continue
+        reason = task_execution.action_execution_blocking_reason(
+            task_execution.execution_envelope_from_plan_node(node)
+        )
+        if not reason:
+            continue
+        blocked.append(action_plan.ActionPlanNode(
+            action_id=node.action_id,
+            action_type=node.action_type,
+            workflow=node.workflow,
+            payload=node.payload,
+            task=node.task,
+            task_id=node.task_id,
+            target_type=node.target_type,
+            target_id=node.target_id,
+            depends_on=node.depends_on,
+            parallel_group=node.parallel_group,
+            terminal=node.terminal,
+            blocked_reason=reason,
+        ))
+    return tuple(blocked)
+
+
+def _select_auto_execute_nodes_for_batch(
+    nodes: tuple[action_plan.ActionPlanNode, ...],
+) -> tuple[action_plan.ActionPlanNode, ...]:
+    if len(nodes) <= 1:
+        return nodes
+    parallel_safe_nodes = tuple(
+        node
+        for node in nodes
+        if action_workflow.action_is_parallel_safe(node.action_type)
+    )
+    if len(parallel_safe_nodes) > 1:
+        return parallel_safe_nodes
+    return (nodes[0],)
+
+
+def _mark_auto_execute_nodes_status(
+    context: AgentRuntimeContext,
+    nodes: tuple[action_plan.ActionPlanNode, ...],
+    *,
+    status: str,
+) -> None:
+    if not context.db or not hasattr(context.db, "query") or not nodes:
+        return
+    for node in nodes:
+        workflow = action_workflow.workflow_from_mapping(node.workflow)
+        if not workflow and node.task is not None:
+            workflow = action_workflow.workflow_from_task_state(getattr(node.task, "state_json", None))
+        if not workflow:
+            continue
+        try:
+            common = {
+                "workflow": workflow,
+                "team_id": context.team_id,
+                "user_id": context.user_id,
+                "session_id": context.session_id,
+                "task_id": node.task_id,
+                "source_type": workflow_action_ledger.SOURCE_AGENT_PLANNING,
+                "payload": node.payload,
+                "target_type": node.target_type,
+                "target_id": node.target_id,
+            }
+            if status == "running":
+                workflow_action_ledger.mark_action_running(
+                    context.db,
+                    **common,
+                    reason="AUTO_EXECUTION_READY",
+                )
+            elif status == "blocked":
+                workflow_action_ledger.mark_action_blocked(
+                    context.db,
+                    **common,
+                    reason=node.blocked_reason or "AUTO_EXECUTION_BLOCKED",
+                )
+        except Exception:
+            logger.exception(
+                "Agent 自动执行写入 Action Ledger 状态失败: action_id=%s, status=%s, team_id=%s, session_id=%s",
+                node.action_id,
+                status,
+                context.team_id,
+                context.session_id,
+            )
+
+
+def _auto_execute_branch_input(
+    task: object,
+    *,
+    session_id: int,
+    team_id: int,
+    user_id: int,
+    authorization: str,
+    channel: str,
+    provider: object | None,
+) -> JSONDict | None:
+    task_id = _optional_int(getattr(task, "id", None))
+    if task_id is None:
+        return None
+    return {
+        "task_id": task_id,
+        "session_id": session_id,
+        "team_id": team_id,
+        "user_id": user_id,
+        "authorization": authorization,
+        "channel": channel,
+        "provider": coerce_json_value(provider),
+    }
+
+
+def _auto_execute_node_branch_input(
+    node: action_plan.ActionPlanNode,
+    *,
+    session_id: int,
+    team_id: int,
+    user_id: int,
+    authorization: str,
+    channel: str,
+    provider: object | None,
+) -> JSONDict | None:
+    if node.task is not None:
+        branch_input = _auto_execute_branch_input(
+            node.task,
+            session_id=session_id,
+            team_id=team_id,
+            user_id=user_id,
+            authorization=authorization,
+            channel=channel,
+            provider=provider,
+        )
+        if branch_input is None:
+            return None
+        branch_input["node_kind"] = "task"
+        branch_input["action_id"] = node.action_id
+        return branch_input
+    if not _can_direct_execute_action_node(node):
+        return None
+    envelope = task_execution.execution_envelope_from_plan_node(node)
+    return {
+        "node_kind": "action",
+        "action_id": envelope.action_id,
+        "action_type": envelope.action_type,
+        "workflow": envelope.workflow,
+        "payload": envelope.payload,
+        "customer": envelope.customer,
+        "task_key": envelope.task_key,
+        "session_id": session_id,
+        "team_id": team_id,
+        "user_id": user_id,
+        "authorization": authorization,
+        "channel": channel,
+        "provider": coerce_json_value(provider),
+        "target_type": envelope.target_type,
+        "target_id": envelope.target_id,
+    }
+
+
+def _can_direct_execute_action_node(node: action_plan.ActionPlanNode) -> bool:
+    if node.task is not None:
+        return True
+    return task_execution.can_direct_execute_action_envelope(
+        task_execution.execution_envelope_from_plan_node(node)
+    )
+
+
+def _direct_action_success_content(action_type: object) -> str:
+    if action_type == "create_customer_activity":
+        return agent_copy.customer_activity_created()
+    if action_type == "transition_follow_up_task":
+        return "任务状态已更新。"
+    return agent_copy.generic_completed()
+
+
+def _auto_execute_branch_completed(branch: object) -> bool:
+    branch_json = coerce_json_dict(branch)
+    tool_result = coerce_json_dict(branch_json.get("tool_result"))
+    if tool_result.get("success") is True:
+        return True
+    result = coerce_json_dict(branch_json.get("result"))
+    if result.get("execution_status") == "completed":
+        return True
+    events = branch_json.get("events")
+    if isinstance(events, list):
+        return any(
+            isinstance(event, dict) and event.get("event") == "task_completed"
+            for event in events
+        )
+    return False
+
+
+def _auto_execute_branch_failed(branch: object) -> bool:
+    branch_json = coerce_json_dict(branch)
+    tool_result = coerce_json_dict(branch_json.get("tool_result"))
+    if tool_result.get("success") is False and any(
+        isinstance(tool_result.get(key), str) and str(tool_result.get(key)).strip()
+        for key in ("error", "error_message", "reason")
+    ):
+        return True
+    result = coerce_json_dict(branch_json.get("result"))
+    if result.get("execution_status") == "failed":
+        return True
+    events = branch_json.get("events")
+    if isinstance(events, list):
+        return any(
+            isinstance(event, dict) and event.get("event") in {"task_failed", "action_failed"}
+            for event in events
+        )
+    return False
+
+
+def _optional_int(value: object) -> int | None:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            return int(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _optional_str(value: object) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
 
 
 def _next_task_interrupt_from_output_events(
@@ -2227,6 +3947,48 @@ def _interrupt_history_values(interrupts: object) -> list[JSONDict]:
         if interrupt_payload:
             projected.append(interrupt_payload)
     return projected
+
+
+def _structured_business_action_type_from_turn(turn_input: AgentTurnInput) -> str | None:
+    metadata = coerce_json_dict(turn_input.metadata)
+    action_values = (
+        metadata.get("business_action"),
+        metadata.get("action"),
+        metadata.get("resume_action"),
+    )
+    for value in action_values:
+        if value == "resolve_follow_up_task_confirmation_case":
+            return "resolve_follow_up_task_confirmation_case"
+        if value == "follow_up_task_confirmation_reply":
+            return "resolve_follow_up_task_confirmation_case"
+    return None
+
+
+def _structured_follow_up_confirmation_case_public_id_from_turn(
+    turn_input: AgentTurnInput,
+) -> str | None:
+    if _structured_business_action_type_from_turn(turn_input) != "resolve_follow_up_task_confirmation_case":
+        return None
+    metadata = coerce_json_dict(turn_input.metadata)
+    for key in ("case_public_id", "follow_up_confirmation_case_public_id"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _follow_up_confirmation_resolved_event_from_tool_result(
+    result_payload: JSONDict,
+    *,
+    case_public_id: str,
+) -> JSONDict:
+    event = coerce_json_dict(result_payload)
+    event.setdefault("event", FOLLOW_UP_CONFIRMATION_RESOLVED_EVENT)
+    event.setdefault("case_public_id", case_public_id)
+    event.setdefault("content_format", "text")
+    if not isinstance(event.get("content"), str) or not str(event.get("content")).strip():
+        event["content"] = agent_copy.generic_completed()
+    return event
 
 
 def _string_list(value: object) -> list[str]:

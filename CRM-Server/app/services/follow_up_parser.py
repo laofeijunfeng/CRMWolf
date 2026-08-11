@@ -16,6 +16,7 @@ import httpx
 
 from app.crud.ai_config import ai_config_crud
 from app.schemas.lead_parse import LeadFollowUpParseInfo
+from app.services.agent.temporal import agent_temporal_resolver
 from app.utils.time import business_now
 
 
@@ -152,69 +153,11 @@ class FollowUpParserService:
         """
         if not time_text:
             return None
-
-        base_date = base_date or business_now()
-        time_text = time_text.strip().lower()
-
-        # 先尝试标准日期格式
-        parsed = self._parse_standard_date(time_text)
-        if parsed:
-            return parsed
-
-        # 相对时间解析
-        # 今天
-        if "今天" in time_text or "当日" in time_text:
-            return base_date
-
-        # 明天
-        if "明天" in time_text or "次日" in time_text:
-            return base_date + timedelta(days=1)
-
-        # 后天
-        if "后天" in time_text:
-            return base_date + timedelta(days=2)
-
-        # X天后、X天、X日后（支持中文数字）
-        chinese_num_map = {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10}
-        days_match = re.search(r'([一二三四五六七八九十\d]+)\s*天[后以]?|([一二三四五六七八九十\d]+)\s*日后', time_text)
-        if days_match:
-            num_str = days_match.group(1) or days_match.group(2)
-            # 处理中文数字
-            if num_str in chinese_num_map:
-                days = chinese_num_map[num_str]
-            else:
-                days = int(num_str)
-            return base_date + timedelta(days=days)
-
-        # 下周X（如下周三）- 更具体的规则优先检查
-        weekday_match = re.search(r'下周([一二三四五六七日天])', time_text)
-        if weekday_match:
-            weekday_map = {
-                '一': 0, '二': 1, '三': 2, '四': 3, '五': 4, '六': 5, '七': 6, '日': 6, '天': 6
-            }
-            target_weekday = weekday_map.get(weekday_match.group(1))
-            if target_weekday:
-                current_weekday = base_date.weekday()
-                days_to_add = (target_weekday - current_weekday + 7) % 7
-                if days_to_add == 0:
-                    days_to_add = 7  # 如果是同一天，跳到下周
-                return base_date + timedelta(days=days_to_add)
-
-        # 一周后、下周（通用规则）
-        if "一周后" in time_text or "下周" in time_text:
-            return base_date + timedelta(days=7)
-
-        # 两周后
-        if "两周后" in time_text or "半个月后" in time_text:
-            return base_date + timedelta(days=14)
-
-        # 本周末
-        if "本周末" in time_text:
-            current_weekday = base_date.weekday()
-            days_to_saturday = (5 - current_weekday) % 7
-            return base_date + timedelta(days=days_to_saturday)
-
-        return None
+        resolved = agent_temporal_resolver.resolve_follow_up_time_text(
+            time_text,
+            base_datetime=base_date or business_now(),
+        )
+        return datetime.fromisoformat(resolved) if resolved else None
 
     def _parse_standard_date(self, date_text: str) -> Optional[datetime]:
         """尝试解析标准日期格式"""

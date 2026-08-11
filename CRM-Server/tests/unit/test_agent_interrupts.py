@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from app.services.agent import action_workflow
 from app.services.agent import interactions
 from app.services.agent import session_state
 from app.services.agent.interrupts import (
@@ -225,7 +226,7 @@ def test_resume_payload_maps_turn_relation_choice_label_to_selected_task():
     assert payload["metadata"]["selected_task_id"] == 301
 
 
-async def test_turn_intent_router_cancels_form_interrupt_for_natural_language_skip():
+async def test_turn_intent_router_cancels_required_form_interrupt_for_natural_language_skip():
     task = SimpleNamespace(
         id=13,
         intent="CREATE_OPPORTUNITY",
@@ -254,6 +255,41 @@ async def test_turn_intent_router_cancels_form_interrupt_for_natural_language_sk
     )
 
     assert result.resume_payload["action"] == "cancel"
+    assert result.decision.intent == "CANCEL_CURRENT_TASK"
+    assert result.resume_payload["metadata"]["turn_intent"]["intent"] == "CANCEL_CURRENT_TASK"
+
+
+async def test_turn_intent_router_skips_optional_suggestion_form_interrupt_for_natural_language_skip():
+    workflow = action_workflow.optional_suggestion_contract(action="collect_opportunity_fields")
+    task = SimpleNamespace(
+        id=13,
+        intent="CREATE_OPPORTUNITY",
+        target_type="customer",
+        target_id=101,
+        summary="等待补充商机信息",
+        state_json={"action": "collect_opportunity_fields", "workflow": workflow},
+        input_json={},
+        status="WAITING_USER",
+    )
+
+    result = await AgentTurnIntentRouter().route_resume(
+        None,
+        team_id=1,
+        user_id=2,
+        session=None,
+        turn_input=AgentTurnInput.text("暂不处理"),
+        current_interrupt={
+            "type": "form",
+            "reason": "missing_required_fields",
+            "allowed_resume_actions": ["submit_fields", "skip_current_action", "cancel"],
+            "business_action": "create_opportunity",
+            "task_projection_id": 13,
+            "workflow": workflow,
+        },
+        active_task=task,
+    )
+
+    assert result.resume_payload["action"] == "skip_current_action"
     assert result.decision.intent == "DISMISS_CURRENT_SUGGESTION"
     assert result.resume_payload["metadata"]["turn_intent"]["intent"] == "DISMISS_CURRENT_SUGGESTION"
 
@@ -373,6 +409,31 @@ def test_validate_resume_payload_rejects_disallowed_action():
         assert "not allowed" in str(exc)
     else:
         raise AssertionError("expected invalid resume action to be rejected")
+
+
+def test_validate_resume_payload_rejects_skip_current_action_for_required_workflow():
+    workflow = action_workflow.required_write_contract(action="create_opportunity")
+
+    try:
+        validate_resume_payload(
+            {"action": "skip_current_action", "content": "先不管"},
+            current_interrupt={
+                "type": "confirm",
+                "allowed_resume_actions": ["approve", "edit", "reject", "cancel", "skip_current_action"],
+                "workflow": workflow,
+            },
+        )
+    except ValueError as exc:
+        assert "optional non-blocking" in str(exc)
+    else:
+        raise AssertionError("expected required workflow skip to be rejected")
+
+
+def test_workflow_from_mapping_rejects_malformed_contract():
+    workflow = action_workflow.optional_suggestion_contract(action="collect_opportunity_fields")
+    workflow["policy"]["scope"] = "optional"
+
+    assert action_workflow.workflow_from_mapping(workflow) == {}
 
 
 def test_validate_resume_payload_rejects_stale_task_projection():

@@ -6,7 +6,7 @@ import {
   MenubarRoot,
   useForwardPropsEmits,
 } from "reka-ui"
-import { cn } from "@/lib/utils"
+import { cn, omitUndefined } from "@/lib/utils"
 
 const props = defineProps<MenubarRootProps & { class?: HTMLAttributes["class"] }>()
 const emits = defineEmits<MenubarRootEmits>()
@@ -18,7 +18,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
 
 <template>
   <MenubarRoot
-    v-bind="forwarded"
+    v-bind="omitUndefined(forwarded)"
     :class="
       cn(
         'flex h-10 items-center gap-x-1 rounded-md border bg-background p-1',

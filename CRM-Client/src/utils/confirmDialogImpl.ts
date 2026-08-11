@@ -1,10 +1,10 @@
 /**
  * 确认对话框实现
- * 使用 Vue 3 的 createApp 动态创建对话框
+ * 使用全局状态驱动确认对话框
  */
 
-import { createApp, h, ref } from 'vue'
-import ConfirmDialogComponent from '@/components/crmwolf/ConfirmDialog.vue'
+import { ref } from 'vue'
+import type { Ref } from 'vue'
 
 export interface ConfirmDialogOptions {
   message: string
@@ -48,14 +48,14 @@ export function createConfirmDialog(options: ConfirmDialogOptions): Promise<bool
 /**
  * 确认对话框组件的状态管理
  */
-export function useConfirmDialogState() {
+export function useConfirmDialogState(): Ref<typeof confirmDialogState.value> {
   return confirmDialogState
 }
 
 /**
  * 处理确认
  */
-export function handleConfirm() {
+export function handleConfirm(): void {
   confirmDialogState.value.resolve?.(true)
   confirmDialogState.value.visible = false
 }
@@ -63,7 +63,7 @@ export function handleConfirm() {
 /**
  * 处理取消
  */
-export function handleCancel() {
+export function handleCancel(): void {
   confirmDialogState.value.resolve?.(false)
   confirmDialogState.value.visible = false
 }

@@ -2,7 +2,7 @@
 import type { PrimitiveProps } from "reka-ui"
 import type { HTMLAttributes } from "vue"
 import { Primitive } from "reka-ui"
-import { cn } from "@/lib/utils"
+import { cn, omitUndefined } from "@/lib/utils"
 
 const props = withDefaults(defineProps<PrimitiveProps & { class?: HTMLAttributes["class"] }>(), {
   as: "a",
@@ -11,8 +11,7 @@ const props = withDefaults(defineProps<PrimitiveProps & { class?: HTMLAttributes
 
 <template>
   <Primitive
-    :as="as"
-    :as-child="asChild"
+    v-bind="omitUndefined({ as, asChild })"
     :class="cn('transition-colors hover:text-foreground', props.class)"
   >
     <slot />

@@ -13,7 +13,7 @@ interface Props {
   class?: HTMLAttributes['class']
   position?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'top-center' | 'bottom-center'
   richColors?: boolean
-  expand?: boolean | 'bottom' | 'top'
+  expand?: boolean
   closeButton?: boolean
   duration?: number
 }

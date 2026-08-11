@@ -20,12 +20,11 @@ from app.core.deps import (
 )
 from app.models.user import User
 from app.api.customers import _ensure_customer_name_available
-from app.utils.time import business_now
 
 # 已有功能（MagicWand）
 from app.schemas.customer_ai import CustomerAIParseRequest, CustomerAICreateRequest as CustomerActivityAICreateRequest
 from app.services.follow_up_parser import follow_up_parser_service
-from app.services.customer_activity_kinds import infer_activity_kind
+from app.services.customer_ai_confirmed_write_service import customer_ai_confirmed_write_service
 
 # 新增功能（AI 创建客户）
 from app.schemas.customer_ai_create import CustomerAICreateParseRequest, CustomerAICreateRequest as CustomerCreateAIRequest
@@ -96,40 +95,21 @@ async def create_customer_activity_from_ai(
 
     处理 next_action 和 next_follow_time（相对时间转换为具体日期）
     """
-    from app.crud.customer_activity import customer_activity_crud
-    from app.schemas.customer_activity import CustomerActivityCreate
-    from app.services.customer_activity_processing_service import customer_activity_processing_service
-
     customer = check_customer_edit_permission(request.customer_id, team_id, current_user, db)
-
-    activity_kind = infer_activity_kind(request.method, request.content)
-
-    # 解析下次跟进时间（相对时间 → 具体日期）
-    next_follow_time_dt = None
-    if request.next_follow_time:
-        next_follow_time_dt = follow_up_parser_service.parse_relative_time(
-            request.next_follow_time,
-            base_date=business_now()
-        )
-
-    activity_create = CustomerActivityCreate(
-        activity_kind=activity_kind,
-        source_content=request.content,
-        next_action=request.next_action,
-        next_follow_time=next_follow_time_dt,
-        next_follow_time_source="AI_EXTRACTED" if next_follow_time_dt else None,
-    )
-
-    activity = customer_activity_crud.create(
+    result = await customer_ai_confirmed_write_service.create_customer_activity(
         db=db,
-        obj_in=activity_create,
         customer_id=customer.id,
-        creator_id=str(current_user.id),
-        owner_id=str(current_user.id),
-        team_id=customer.team_id,
-        operator_name=current_user.name if hasattr(current_user, 'name') else None
+        customer_public_id=customer.public_id,
+        team_id=team_id,
+        user_id=current_user.id,
+        content=request.content,
+        method=request.method,
+        next_action=request.next_action,
+        next_follow_time_text=request.next_follow_time,
+        operator_name=current_user.name if hasattr(current_user, "name") else None,
+        action_namespace="customer_activity_magic_wand",
     )
-    await customer_activity_processing_service.trigger_processing(activity.id, team_id)
+    activity = result.activity
 
     return {
         "id": activity.id,
@@ -137,7 +117,8 @@ async def create_customer_activity_from_ai(
         "source_content": request.content,
         "activity_kind": activity.activity_kind,
         "next_action": request.next_action,
-        "next_follow_time": next_follow_time_dt.isoformat() if next_follow_time_dt else None
+        "next_follow_time": result.next_follow_time_iso,
+        "idempotent_replay": result.idempotent_replay,
     }
 
 

@@ -47,7 +47,7 @@ describe('DialogContent close control', () => {
     await nextTick()
     getCloseButton().click()
     await nextTick()
-    expect(wrapper.vm.open).toBe(false)
+    expect((wrapper.vm as unknown as { open: boolean }).open).toBe(false)
     wrapper.unmount()
   })
 })

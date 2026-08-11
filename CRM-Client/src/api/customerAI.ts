@@ -39,7 +39,10 @@ const CustomerAICreateResponseSchema = z.object({
   id: z.number(),
   customer_id: z.string(),
   source_content: z.string(),
-  activity_kind: z.string()
+  activity_kind: z.string(),
+  next_action: z.string().nullable().optional(),
+  next_follow_time: z.string().nullable().optional(),
+  idempotent_replay: z.boolean().optional()
 })
 
 type CustomerAICreateResponse = z.infer<typeof CustomerAICreateResponseSchema>

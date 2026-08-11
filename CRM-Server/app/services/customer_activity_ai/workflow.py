@@ -30,11 +30,10 @@ from app.services.customer_activity_ai.structuring_agent import (
     ActivityStructuringError,
     activity_structuring_agent,
 )
+from app.services.agent.temporal import agent_temporal_resolver
 from app.services.customer_activity_kinds import get_activity_kind_meta
 from app.services.customer_activity_post_commit_workflow import customer_activity_post_commit_workflow
-from app.services.follow_up_parser import follow_up_parser_service
 from app.services.industry_display_service import industry_display_service
-from app.utils.time import business_now
 
 logger = logging.getLogger(__name__)
 
@@ -318,10 +317,11 @@ class CustomerActivityAIWorkflow:
         next_follow_time_text = str(content_json.get("next_follow_time_text") or "").strip()
         if not next_follow_time_text:
             return None
-        return follow_up_parser_service.parse_relative_time(
+        next_follow_time_iso = agent_temporal_resolver.resolve_follow_up_time_text(
             next_follow_time_text,
-            base_date=activity.occurred_at or business_now(),
+            base_datetime=activity.occurred_at,
         )
+        return datetime.fromisoformat(next_follow_time_iso) if next_follow_time_iso else None
 
     def _can_ai_update_next_follow_time(self, activity: CustomerActivity) -> bool:
         source = activity.next_follow_time_source

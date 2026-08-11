@@ -7,12 +7,14 @@ from datetime import datetime, timedelta
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
+from sqlalchemy import and_, func, not_, or_
+
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 from app.crud.sales_commitment import follow_up_task_reconciliation_run_crud
 from app.models.customer_activity import CustomerActivity
-from app.models.sales_commitment import FollowUpTask, FollowUpTaskStatus
+from app.models.sales_commitment import FollowUpTask, FollowUpTaskSourceType, FollowUpTaskStatus
 from app.utils.time import business_now
 
 DEFAULT_RECONCILIATION_LOOKBACK_DAYS = 90
@@ -151,6 +153,20 @@ class TaskReconciliationService:
         )
         if not include_cross_owner:
             query = query.filter(FollowUpTask.owner_id == activity_owner_id)
+        current_source_filters = []
+        if source_activity_id is not None:
+            current_source_filters.append(func.coalesce(FollowUpTask.source_activity_id, -1) == source_activity_id)
+        if source_public_id:
+            current_source_filters.append(func.coalesce(FollowUpTask.source_public_id, "") == source_public_id)
+        if current_source_filters:
+            query = query.filter(
+                not_(
+                    and_(
+                        FollowUpTask.source_type == FollowUpTaskSourceType.CUSTOMER_ACTIVITY,
+                        or_(*current_source_filters),
+                    )
+                )
+            )
 
         rows = (
             query.order_by(
@@ -177,6 +193,7 @@ class TaskReconciliationService:
             "due_at_start": starts_at.isoformat(),
             "due_at_end": ends_at.isoformat(),
             "limit": limit,
+            "excluded_current_source": bool(current_source_filters),
         }
         usage_policy = {
             "state_source": "mysql.crm_follow_up_tasks",

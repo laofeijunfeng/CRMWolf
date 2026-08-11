@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { teamApi, type TeamResponse } from '@/api/team'
+import { logger } from '@/utils/logger'
 import { usePermissionStore } from './permissions'
 
 export const useTeamStore = defineStore('team', () => {
@@ -8,21 +9,21 @@ export const useTeamStore = defineStore('team', () => {
   const currentTeam = ref<TeamResponse | null>(null)
   const loading = ref(false)
 
-  const fetchUserTeams = async () => {
+  const fetchUserTeams = async (): Promise<TeamResponse[]> => {
     loading.value = true
     try {
       const res = await teamApi.getUserTeams()
       teams.value = res.teams
 
       if (res.teams.length === 1) {
-        currentTeam.value = res.teams[0]
-      } else if (res.teams.length > 1 && res.current_team_id) {
-        currentTeam.value = res.teams.find(t => t.id === res.current_team_id) || res.teams[0]
+        currentTeam.value = res.teams[0] ?? null
+      } else if (res.teams.length > 1 && res.current_team_id !== null && res.current_team_id !== undefined) {
+        currentTeam.value = res.teams.find(t => t.id === res.current_team_id) ?? res.teams[0] ?? null
       }
 
       return res.teams
     } catch (error) {
-      console.error('获取用户团队失败', error)
+      logger.error('[TeamStore]', 'fetchUserTeams:failed', { error })
       teams.value = []
       currentTeam.value = null
       throw error
@@ -31,23 +32,23 @@ export const useTeamStore = defineStore('team', () => {
     }
   }
 
-  const switchTeam = async (teamId: number) => {
+  const switchTeam = async (teamId: number): Promise<void> => {
     loading.value = true
     try {
       await teamApi.switchTeam(teamId)
-      currentTeam.value = teams.value.find(t => t.id === teamId) || null
+      currentTeam.value = teams.value.find(t => t.id === teamId) ?? null
       // 切换团队后刷新权限
       const permissionStore = usePermissionStore()
       await permissionStore.refreshPermissions()
     } catch (error) {
-      console.error('切换团队失败', error)
+      logger.error('[TeamStore]', 'switchTeam:failed', { teamId, error })
       throw error
     } finally {
       loading.value = false
     }
   }
 
-  const createTeam = async (name: string) => {
+  const createTeam = async (name: string): Promise<TeamResponse> => {
     loading.value = true
     try {
       const team = await teamApi.createTeam({ name })
@@ -58,14 +59,14 @@ export const useTeamStore = defineStore('team', () => {
       await permissionStore.refreshPermissions()
       return team
     } catch (error) {
-      console.error('创建团队失败', error)
+      logger.error('[TeamStore]', 'createTeam:failed', { error })
       throw error
     } finally {
       loading.value = false
     }
   }
 
-  const joinTeam = async (code: string) => {
+  const joinTeam = async (code: string): Promise<TeamResponse> => {
     loading.value = true
     try {
       const team = await teamApi.joinTeam({ code })
@@ -76,22 +77,22 @@ export const useTeamStore = defineStore('team', () => {
       await permissionStore.refreshPermissions()
       return team
     } catch (error) {
-      console.error('加入团队失败', error)
+      logger.error('[TeamStore]', 'joinTeam:failed', { error })
       throw error
     } finally {
       loading.value = false
     }
   }
 
-  const hasTeam = () => {
-    return !!currentTeam.value
+  const hasTeam = (): boolean => {
+    return currentTeam.value !== null
   }
 
-  const hasAnyTeam = () => {
+  const hasAnyTeam = (): boolean => {
     return teams.value.length > 0
   }
 
-  const clearTeam = () => {
+  const clearTeam = (): void => {
     teams.value = []
     currentTeam.value = null
   }

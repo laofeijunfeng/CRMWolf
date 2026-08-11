@@ -1,13 +1,16 @@
 """Tests for the LangGraph-native CRM Agent root runtime."""
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
-from app.services.agent import agent_copy
+from app.services.agent import action_plan, action_workflow, agent_copy
 from app.services.agent import root_runtime as root_runtime_module
+from app.services.agent.task_execution import ActionToolExecutionResult
+from app.services.agent.tools.base import AgentToolResult
 from app.services.agent.input import AgentTurnInput
 from app.services.agent.root_runtime import (
     AgentRootRuntime,
@@ -124,6 +127,103 @@ class FakeConfirmedTaskGraphService:
                 {"event": "confirmed_task_graph_finished"},
             ],
         }
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_structured_follow_up_confirmation_uses_action_envelope_and_ledger(monkeypatch):
+    execute_calls = []
+    running_calls = []
+    executed_calls = []
+    published_events = []
+
+    async def fake_execute_action_envelope(db, envelope, *, session, team_id, user_id, authorization, event_sink):
+        execute_calls.append({
+            "db": db,
+            "envelope": envelope,
+            "session": session,
+            "team_id": team_id,
+            "user_id": user_id,
+            "authorization": authorization,
+            "event_sink": event_sink,
+        })
+        return ActionToolExecutionResult(
+            AgentToolResult(
+                tool_name="resolve_follow_up_task_confirmation_case",
+                success=True,
+                data={
+                    "event": "follow_up_task_confirmation_resolved",
+                    "content": "已确认完成, 并更新了这项跟进任务。",
+                    "content_format": "text",
+                    "case_public_id": "fuc_structured",
+                },
+            )
+        )
+
+    def fake_mark_running(db, **kwargs):
+        running_calls.append({"db": db, **kwargs})
+
+    def fake_mark_executed(db, **kwargs):
+        executed_calls.append({"db": db, **kwargs})
+
+    async def capture_event(event):
+        published_events.append(event)
+
+    monkeypatch.setattr(root_runtime_module.task_execution, "execute_action_envelope", fake_execute_action_envelope)
+    monkeypatch.setattr(root_runtime_module.workflow_action_ledger, "mark_action_running", fake_mark_running)
+    monkeypatch.setattr(root_runtime_module.workflow_action_ledger, "mark_action_executed", fake_mark_executed)
+
+    runtime = AgentRootRuntime(checkpointer=InMemorySaver())
+    context = AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=3),
+        turn_input=AgentTurnInput.text(
+            "已完成",
+            metadata={
+                "business_action": "resolve_follow_up_task_confirmation_case",
+                "case_public_id": "fuc_structured",
+            },
+        ),
+        content="已完成",
+        team_id=1,
+        user_id=2,
+        session_id=3,
+        authorization="Bearer test-token",
+        event_sink=capture_event,
+    )
+
+    state = await runtime.run_turn(
+        turn_input=context.turn_input,
+        content="已完成",
+        team_id=1,
+        user_id=2,
+        session_id=3,
+        session_key="session-key",
+        current_customer={},
+        context=context,
+    )
+
+    assert state["application_action"] == "run_new_flow"
+    assert state["structured_business_action"]["status"] == "executed"
+    assert execute_calls[0]["envelope"].action_type == "resolve_follow_up_task_confirmation_case"
+    assert execute_calls[0]["envelope"].payload == {
+        "case_id": "fuc_structured",
+        "reply_text": "已完成",
+    }
+    assert execute_calls[0]["envelope"].task_key == execute_calls[0]["envelope"].action_id
+    assert running_calls[0]["payload"] == {"case_id": "fuc_structured", "reply_text": "已完成"}
+    assert executed_calls[0]["result"]["case_public_id"] == "fuc_structured"
+    assert context.side_effects.new_flow_assistant_content == "已确认完成, 并更新了这项跟进任务。"
+    assert any(event.get("event") == "follow_up_task_confirmation_resolved" for event in published_events)
+
+
+def _test_workflow(action_id: str, *, action_type: str, dependency_json: dict | None = None) -> dict:
+    workflow = action_workflow.required_write_contract(action=action_type)
+    workflow["workflow_id"] = "wf_test"
+    workflow["action_id"] = action_id
+    workflow["action_type"] = action_type
+    if dependency_json:
+        workflow["dependency_json"] = dependency_json
+    return workflow
 
 
 @pytest.mark.asyncio
@@ -525,6 +625,21 @@ class FakeCustomerIntelligenceTriggerPolicy:
         return self.event
 
 
+class FakeCustomerIntelligenceRefreshService:
+    def __init__(self):
+        self.trigger_calls = []
+
+    async def trigger_committed_event_refresh(self, db, *, event, scope="brief"):
+        self.trigger_calls.append({"db": db, "event": event, "scope": scope})
+        return SimpleNamespace(
+            request_id=f"business-event-{event.trigger_type}-test",
+            event=event,
+            scope=scope,
+            scheduled=True,
+            schedule_error=None,
+        )
+
+
 def waiting_task_stub():
     return SimpleNamespace(
         id=101,
@@ -804,12 +919,14 @@ async def test_root_runtime_streams_customer_intelligence_trace_without_duplicat
 
 
 @pytest.mark.asyncio
-async def test_root_runtime_continues_to_customer_intelligence_after_confirmed_activity_write():
+async def test_root_runtime_schedules_customer_intelligence_after_confirmed_activity_write():
     customer_intelligence_event = SimpleNamespace(
         event_key="activity-created-1",
+        trigger_type="customer_activity_created",
         customer_id=101,
     )
     customer_intelligence_graph_service = FakeAnsweringCustomerIntelligenceGraphService()
+    customer_intelligence_refresh_service = FakeCustomerIntelligenceRefreshService()
     trigger_policy = FakeCustomerIntelligenceTriggerPolicy(customer_intelligence_event)
     side_effects = AgentRootRuntimeSideEffects()
     runtime = AgentRootRuntime(
@@ -818,8 +935,10 @@ async def test_root_runtime_continues_to_customer_intelligence_after_confirmed_a
         confirmed_task_graph_service=FakeConfirmedTaskGraphService(),
         customer_intelligence_graph_service=customer_intelligence_graph_service,
         customer_intelligence_trigger_policy=trigger_policy,
+        customer_intelligence_refresh_service=customer_intelligence_refresh_service,
     )
     task = waiting_task_stub()
+    db = object()
 
     state = await runtime.checkpoint_turn_start({
         "team_id": 2,
@@ -832,7 +951,7 @@ async def test_root_runtime_continues_to_customer_intelligence_after_confirmed_a
         "pending_task_requested": True,
         "task_projection": {"id": task.id, "task_key": task.task_key},
     }, context=AgentRuntimeContext(
-        db=object(),
+        db=db,
         session=SimpleNamespace(id=4, context_json={}),
         task=task,
         turn_input=AgentTurnInput.confirm(source="web"),
@@ -845,10 +964,32 @@ async def test_root_runtime_continues_to_customer_intelligence_after_confirmed_a
     ))
 
     assert trigger_policy.tool_result_calls
-    assert customer_intelligence_graph_service.run_calls[0]["event"] == customer_intelligence_event
-    assert state["customer_intelligence_result"]["route"] == "answer_context"
+    assert customer_intelligence_graph_service.run_calls == []
+    assert customer_intelligence_refresh_service.trigger_calls == [{
+        "db": db,
+        "event": customer_intelligence_event,
+        "scope": "brief",
+    }]
+    assert state["customer_intelligence_result"] == {
+        "handled": True,
+        "mode": "background",
+        "scheduled": True,
+        "trigger_type": "customer_activity_created",
+        "event_key": "activity-created-1",
+        "customer_id": 101,
+        "request_id": "business-event-customer_activity_created-test",
+        "scope": "brief",
+    }
     assert side_effects.confirmed_task_assistant_content == "跟进记录已创建。"
-    assert side_effects.customer_intelligence_events
+    assert side_effects.customer_intelligence_events == [{
+        "event": "agent_root_customer_intelligence_refresh_scheduled",
+        "mode": "background",
+        "trigger_type": "customer_activity_created",
+        "event_key": "activity-created-1",
+        "customer_id": 101,
+        "scheduled": True,
+        "request_id": "business-event-customer_activity_created-test",
+    }]
 
 
 @pytest.mark.asyncio
@@ -1050,6 +1191,19 @@ async def test_root_runtime_auto_executes_low_risk_reviewed_new_flow_action(monk
         create_waiting_task,
     )
     confirmed_task_graph_service = FakeConfirmedTaskGraphService()
+
+    async def fake_execute_action_envelope(db, envelope, *, session, team_id, user_id, authorization, event_sink):
+        return ActionToolExecutionResult(
+            AgentToolResult(
+                tool_name="create_customer_activity",
+                success=True,
+                data={"id": 901},
+                tool_call_id=7001,
+            )
+        )
+
+    monkeypatch.setattr(root_runtime_module.task_execution, "execute_action_envelope", fake_execute_action_envelope)
+    monkeypatch.setattr(root_runtime_module.workflow_action_ledger, "mark_action_executed", lambda *args, **kwargs: None)
     runtime = AgentRootRuntime(
         checkpointer=InMemorySaver(),
         new_flow_graph_service=FakeAutoExecutableNewFlowGraphService(),
@@ -1076,11 +1230,11 @@ async def test_root_runtime_auto_executes_low_risk_reviewed_new_flow_action(monk
         side_effects=side_effects,
     ))
 
-    assert created_tasks[0].id == 501
-    assert confirmed_task_graph_service.calls[0]["task"].id == 501
+    assert created_tasks == []
+    assert confirmed_task_graph_service.calls == []
     assert state["current_interrupt"] is None
     assert state["new_flow_result"]["has_interrupt"] is False
-    assert state["assistant_content"] == "跟进记录已创建。"
+    assert state["assistant_content"] == agent_copy.customer_activity_created()
     assert "请确认是否创建这条跟进记录？" not in [
         event.get("content")
         for event in side_effects.new_flow_events
@@ -1090,7 +1244,7 @@ async def test_root_runtime_auto_executes_low_risk_reviewed_new_flow_action(monk
     assert [event["event"] for event in side_effects.new_flow_events].count("action_auto_execution_queued") == 1
     assert {
         "event": "agent_step",
-        "step": "auto_execute_task",
+        "step": "auto_execute_action",
         "status": "started",
         "content": "记录跟进",
     } in side_effects.new_flow_events
@@ -1098,6 +1252,995 @@ async def test_root_runtime_auto_executes_low_risk_reviewed_new_flow_action(monk
         event.get("content")
         for event in side_effects.new_flow_events
     ])
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_serializes_ready_write_tasks_unless_parallel_safe(monkeypatch):
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeAutoExecutableNewFlowGraphService(),
+        confirmed_task_graph_service=FakeConfirmedTaskGraphService(),
+    )
+    started: list[int] = []
+
+    async def fake_in_context(context, node, *, include_graph_progress_events):
+        task_id = node.task_id
+        started.append(task_id)
+        return {
+            "result": {
+                "assistant_content": f"任务 {task_id} 已执行。",
+                "tool_result": {"event": "tool_result", "success": True, "task_id": task_id},
+            },
+            "tool_result": {"event": "tool_result", "success": True, "task_id": task_id},
+            "events": [{"event": "task_completed", "task_id": task_id, "content": f"任务 {task_id} 已执行。"}],
+            "emitted_event_count": 1,
+            "assistant_content": f"任务 {task_id} 已执行。",
+        }
+
+    monkeypatch.setattr(runtime, "_run_new_flow_auto_execute_node_in_context", fake_in_context)
+    side_effects = AgentRootRuntimeSideEffects()
+    result = await runtime._run_new_flow_auto_execute_tasks(
+        AgentRuntimeContext(
+            db=object(),
+            session=SimpleNamespace(id=4, context_json={}),
+            turn_input=AgentTurnInput(content="批量自动执行", source="web"),
+            content="批量自动执行",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            authorization="Bearer test",
+            side_effects=side_effects,
+        ),
+        SimpleNamespace(
+            auto_execute_tasks=[
+                SimpleNamespace(id=501, state_json={"action": "create_customer_activity"}),
+                SimpleNamespace(id=502, state_json={"action": "transition_follow_up_task"}),
+            ],
+        ),
+    )
+
+    assert result["mode"] == "single_in_context"
+    assert started == [501, 502]
+    assert result["emitted_event_count"] == 4
+    assert [event["event"] for event in side_effects.new_flow_events] == [
+        "agent_root_auto_execute_plan_built",
+        "task_completed",
+        "agent_root_auto_execute_plan_built",
+        "task_completed",
+    ]
+    assert side_effects.new_flow_events[0]["ready_count"] == 2
+    assert side_effects.new_flow_events[2]["ready_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_executes_auto_execute_tasks_in_dependency_rounds(monkeypatch):
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeAutoExecutableNewFlowGraphService(),
+        confirmed_task_graph_service=FakeConfirmedTaskGraphService(),
+    )
+    started: list[int] = []
+
+    async def fake_in_context(context, task, *, include_graph_progress_events):
+        started.append(task.id)
+        return {
+            "result": {"assistant_content": f"任务 {task.id} 已执行。"},
+            "tool_result": {"event": "tool_result", "success": True, "task_id": task.id},
+            "events": [{"event": "task_completed", "task_id": task.id}],
+            "emitted_event_count": 1,
+            "assistant_content": f"任务 {task.id} 已执行。",
+        }
+
+    monkeypatch.setattr(runtime, "_run_new_flow_auto_execute_task_in_context", fake_in_context)
+    side_effects = AgentRootRuntimeSideEffects()
+    result = await runtime._run_new_flow_auto_execute_tasks(
+        AgentRuntimeContext(
+            db=object(),
+            session=SimpleNamespace(id=4, context_json={}),
+            turn_input=AgentTurnInput(content="依赖自动执行", source="web"),
+            content="依赖自动执行",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            authorization="Bearer test",
+            side_effects=side_effects,
+        ),
+        SimpleNamespace(
+            auto_execute_tasks=[
+                SimpleNamespace(
+                    id=501,
+                    state_json={
+                        "action": "create_customer_activity",
+                        "workflow": _test_workflow("act_first", action_type="create_customer_activity"),
+                    },
+                ),
+                SimpleNamespace(
+                    id=502,
+                    state_json={
+                        "action": "transition_follow_up_task",
+                        "workflow": _test_workflow(
+                            "act_second",
+                            action_type="transition_follow_up_task",
+                            dependency_json={"depends_on": ["act_first"]},
+                        ),
+                    },
+                ),
+            ],
+        ),
+    )
+
+    assert started == [501, 502]
+    assert result["executed_action_count"] == 2
+    plan_events = [
+        event
+        for event in side_effects.new_flow_events
+        if event["event"] == "agent_root_auto_execute_plan_built"
+    ]
+    assert [event["ready_count"] for event in plan_events] == [1, 1]
+    assert [event["blocked_count"] for event in plan_events] == [1, 0]
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_records_auto_execute_running_and_blocked_actions(monkeypatch):
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeAutoExecutableNewFlowGraphService(),
+        confirmed_task_graph_service=FakeConfirmedTaskGraphService(),
+    )
+    ledger_events: list[dict] = []
+
+    class FakeSession:
+        def query(self, *args, **kwargs):
+            return None
+
+    def fake_ledger_state(db, *, action_ids, team_id, user_id, include_system_actions=True):
+        return {
+            "satisfied_action_ids": [],
+            "terminal_action_ids": [],
+        }
+
+    def fake_mark_running(db, **kwargs):
+        ledger_events.append({
+            "status": "RUNNING",
+            "action_id": kwargs["workflow"]["action_id"],
+            "task_id": kwargs["task_id"],
+            "payload": kwargs["payload"],
+            "target_type": kwargs["target_type"],
+            "target_id": kwargs["target_id"],
+            "reason": kwargs["reason"],
+        })
+
+    def fake_mark_blocked(db, **kwargs):
+        ledger_events.append({
+            "status": "BLOCKED",
+            "action_id": kwargs["workflow"]["action_id"],
+            "task_id": kwargs["task_id"],
+            "payload": kwargs["payload"],
+            "target_type": kwargs["target_type"],
+            "target_id": kwargs["target_id"],
+            "reason": kwargs["reason"],
+        })
+
+    async def fake_in_context(context, task, *, include_graph_progress_events):
+        return {
+            "result": {"assistant_content": f"任务 {task.id} 已执行。"},
+            "tool_result": {"event": "tool_result", "success": True, "task_id": task.id},
+            "events": [{"event": "task_completed", "task_id": task.id}],
+            "emitted_event_count": 1,
+            "assistant_content": f"任务 {task.id} 已执行。",
+        }
+
+    monkeypatch.setattr(root_runtime_module.workflow_action_ledger, "execution_state_for_action_ids", fake_ledger_state)
+    monkeypatch.setattr(root_runtime_module.workflow_action_ledger, "mark_action_running", fake_mark_running)
+    monkeypatch.setattr(root_runtime_module.workflow_action_ledger, "mark_action_blocked", fake_mark_blocked)
+    monkeypatch.setattr(runtime, "_run_new_flow_auto_execute_task_in_context", fake_in_context)
+    side_effects = AgentRootRuntimeSideEffects()
+    await runtime._run_new_flow_auto_execute_tasks(
+        AgentRuntimeContext(
+            db=FakeSession(),
+            session=SimpleNamespace(id=4, context_json={}),
+            turn_input=AgentTurnInput(content="ledger 状态记录", source="web"),
+            content="ledger 状态记录",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            authorization="Bearer test",
+            side_effects=side_effects,
+        ),
+        SimpleNamespace(
+            auto_execute_tasks=[
+                SimpleNamespace(
+                    id=501,
+                    state_json={
+                        "action": "create_customer_activity",
+                        "payload": {"content": "今天拜访客户"},
+                        "workflow": _test_workflow("act_first", action_type="create_customer_activity"),
+                    },
+                    input_json={},
+                    target_type="customer",
+                    target_id=9,
+                ),
+                SimpleNamespace(
+                    id=502,
+                    state_json={
+                        "action": "transition_follow_up_task",
+                        "workflow": _test_workflow(
+                            "act_second",
+                            action_type="transition_follow_up_task",
+                            dependency_json={"depends_on": ["act_first"]},
+                        ),
+                    },
+                    input_json={},
+                    target_type="customer",
+                    target_id=9,
+                ),
+            ],
+        ),
+    )
+
+    assert ledger_events == [
+        {
+            "status": "BLOCKED",
+            "action_id": "act_second",
+            "task_id": 502,
+            "payload": {},
+            "target_type": "customer",
+            "target_id": 9,
+            "reason": "waiting_dependencies:act_first",
+        },
+        {
+            "status": "RUNNING",
+            "action_id": "act_first",
+            "task_id": 501,
+            "payload": {"content": "今天拜访客户"},
+            "target_type": "customer",
+            "target_id": 9,
+            "reason": "AUTO_EXECUTION_READY",
+        },
+        {
+            "status": "RUNNING",
+            "action_id": "act_second",
+            "task_id": 502,
+            "payload": {},
+            "target_type": "customer",
+            "target_id": 9,
+            "reason": "AUTO_EXECUTION_READY",
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_prefers_action_level_plan_items_over_legacy_task_payload(monkeypatch):
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeAutoExecutableNewFlowGraphService(),
+        confirmed_task_graph_service=FakeConfirmedTaskGraphService(),
+    )
+    ledger_events: list[dict] = []
+
+    class FakeSession:
+        def query(self, *args, **kwargs):
+            return None
+
+    def fake_ledger_state(db, *, action_ids, team_id, user_id, include_system_actions=True):
+        return {
+            "satisfied_action_ids": [],
+            "running_action_ids": [],
+            "terminal_action_ids": [],
+        }
+
+    def fake_mark_running(db, **kwargs):
+        ledger_events.append({
+            "action_id": kwargs["workflow"]["action_id"],
+            "payload": kwargs["payload"],
+            "target_type": kwargs["target_type"],
+            "target_id": kwargs["target_id"],
+        })
+
+    async def fake_in_context(context, task, *, include_graph_progress_events):
+        return {
+            "result": {"assistant_content": "已执行。"},
+            "tool_result": {"event": "tool_result", "success": True, "task_id": task.id},
+            "events": [{"event": "task_completed", "task_id": task.id}],
+            "emitted_event_count": 1,
+            "assistant_content": "已执行。",
+        }
+
+    workflow = _test_workflow("act_action_envelope", action_type="create_customer_activity")
+    task = SimpleNamespace(
+        id=501,
+        state_json={
+            "action": "create_customer_activity",
+            "payload": {"content": "legacy payload should not win"},
+            "workflow": workflow,
+        },
+        input_json={},
+        target_type="customer",
+        target_id=9,
+    )
+    action_item = action_plan.item_from_workflow(
+        workflow,
+        payload={"content": "action envelope payload"},
+        task=task,
+        task_id=501,
+        target_type="customer",
+        target_id=10,
+    )
+    assert action_item is not None
+
+    monkeypatch.setattr(root_runtime_module.workflow_action_ledger, "execution_state_for_action_ids", fake_ledger_state)
+    monkeypatch.setattr(root_runtime_module.workflow_action_ledger, "mark_action_running", fake_mark_running)
+    monkeypatch.setattr(runtime, "_run_new_flow_auto_execute_task_in_context", fake_in_context)
+    await runtime._run_new_flow_auto_execute_tasks(
+        AgentRuntimeContext(
+            db=FakeSession(),
+            session=SimpleNamespace(id=4, context_json={}),
+            turn_input=AgentTurnInput(content="action envelope 优先", source="web"),
+            content="action envelope 优先",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            authorization="Bearer test",
+            side_effects=AgentRootRuntimeSideEffects(),
+        ),
+        SimpleNamespace(
+            auto_execute_tasks=[task],
+            auto_execute_actions=[action_item],
+        ),
+    )
+
+    assert ledger_events == [{
+        "action_id": "act_action_envelope",
+        "payload": {"content": "action envelope payload"},
+        "target_type": "customer",
+        "target_id": 10,
+    }]
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_blocks_action_level_plan_item_without_task_projection(monkeypatch):
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeAutoExecutableNewFlowGraphService(),
+        confirmed_task_graph_service=FakeConfirmedTaskGraphService(),
+    )
+    ledger_events: list[dict] = []
+
+    class FakeSession:
+        def query(self, *args, **kwargs):
+            return None
+
+    def fake_ledger_state(db, *, action_ids, team_id, user_id, include_system_actions=True):
+        return {
+            "satisfied_action_ids": [],
+            "running_action_ids": [],
+            "terminal_action_ids": [],
+        }
+
+    def fake_mark_blocked(db, **kwargs):
+        ledger_events.append({
+            "action_id": kwargs["workflow"]["action_id"],
+            "reason": kwargs["reason"],
+            "payload": kwargs["payload"],
+        })
+
+    workflow = _test_workflow("act_without_task", action_type="create_customer_activity")
+    action_item = action_plan.item_from_workflow(
+        workflow,
+        payload={"content": "action without task"},
+        target_type="customer",
+        target_id=10,
+    )
+    assert action_item is not None
+
+    monkeypatch.setattr(root_runtime_module.workflow_action_ledger, "execution_state_for_action_ids", fake_ledger_state)
+    monkeypatch.setattr(root_runtime_module.workflow_action_ledger, "mark_action_blocked", fake_mark_blocked)
+    result = await runtime._run_new_flow_auto_execute_tasks(
+        context := AgentRuntimeContext(
+            db=FakeSession(),
+            session=SimpleNamespace(id=4, context_json={}),
+            turn_input=AgentTurnInput(content="缺少 task 投影", source="web"),
+            content="缺少 task 投影",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            authorization="Bearer test",
+            side_effects=AgentRootRuntimeSideEffects(),
+        ),
+        SimpleNamespace(
+            auto_execute_tasks=[],
+            auto_execute_actions=[action_item],
+        ),
+    )
+
+    assert result["executed_action_count"] == 0
+    assert ledger_events == [{
+        "action_id": "act_without_task",
+        "reason": "missing_task_projection",
+        "payload": {"content": "action without task"},
+    }]
+    blocked_event = next(
+        event
+        for event in context.side_effects.new_flow_events
+        if event["event"] == "agent_root_auto_execute_plan_blocked"
+    )
+    assert blocked_event["blocked_actions"] == [{
+        "action_id": "act_without_task",
+        "action_type": "create_customer_activity",
+        "task_id": None,
+        "reason": "missing_task_projection",
+    }]
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_directly_executes_complete_action_level_plan_item_without_task_projection(monkeypatch):
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeAutoExecutableNewFlowGraphService(),
+        confirmed_task_graph_service=FakeConfirmedTaskGraphService(),
+    )
+    executed = []
+    ledger_executed = []
+
+    class FakeSession:
+        def query(self, *args, **kwargs):
+            return None
+
+    def fake_ledger_state(db, *, action_ids, team_id, user_id, include_system_actions=True):
+        return {
+            "satisfied_action_ids": [],
+            "running_action_ids": [],
+            "terminal_action_ids": [],
+        }
+
+    async def fake_execute_action_envelope(db, envelope, *, session, team_id, user_id, authorization, event_sink):
+        executed.append({
+            "action_id": envelope.action_id,
+            "action_type": envelope.action_type,
+            "payload": envelope.payload,
+            "customer": envelope.customer,
+            "authorization": authorization,
+        })
+        return ActionToolExecutionResult(
+            AgentToolResult(
+                tool_name="create_customer_activity",
+                success=True,
+                data={"id": 901},
+                tool_call_id=7001,
+            )
+        )
+
+    def fake_mark_executed(db, **kwargs):
+        ledger_executed.append(kwargs)
+
+    workflow = _test_workflow("act_without_task", action_type="create_customer_activity")
+    action_item = action_plan.item_from_workflow(
+        workflow,
+        payload={
+            "customer_id": 10,
+            "source_content": "今天和客户确认了续费推进事项",
+            "customer": {"id": 10, "account_name": "测试客户"},
+        },
+        target_type="customer",
+        target_id=10,
+    )
+    assert action_item is not None
+
+    monkeypatch.setattr(root_runtime_module.workflow_action_ledger, "execution_state_for_action_ids", fake_ledger_state)
+    monkeypatch.setattr(root_runtime_module.workflow_action_ledger, "mark_action_executed", fake_mark_executed)
+    monkeypatch.setattr(root_runtime_module.task_execution, "execute_action_envelope", fake_execute_action_envelope)
+
+    result = await runtime._run_new_flow_auto_execute_tasks(
+        AgentRuntimeContext(
+            db=FakeSession(),
+            session=SimpleNamespace(id=4, context_json={}),
+            turn_input=AgentTurnInput(content="直接执行 action envelope", source="web"),
+            content="直接执行 action envelope",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            authorization="Bearer test",
+            side_effects=AgentRootRuntimeSideEffects(),
+        ),
+        SimpleNamespace(
+            auto_execute_tasks=[],
+            auto_execute_actions=[action_item],
+        ),
+    )
+
+    assert result["executed_action_count"] == 1
+    assert result["mode"] == "single_action_in_context"
+    assert executed == [{
+        "action_id": "act_without_task",
+        "action_type": "create_customer_activity",
+        "payload": {
+            "customer_id": 10,
+            "source_content": "今天和客户确认了续费推进事项",
+            "customer": {"id": 10, "account_name": "测试客户"},
+        },
+        "customer": {"id": 10, "account_name": "测试客户"},
+        "authorization": "Bearer test",
+    }]
+    assert ledger_executed[0]["workflow"] == workflow
+    assert ledger_executed[0]["result"] == {"id": 901}
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_blocks_user_authorized_action_without_authorization(monkeypatch):
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeAutoExecutableNewFlowGraphService(),
+        confirmed_task_graph_service=FakeConfirmedTaskGraphService(),
+    )
+    blocked: list[dict] = []
+    executed: list[str] = []
+
+    class FakeSession:
+        def query(self, *args, **kwargs):
+            return None
+
+    def fake_ledger_state(db, *, action_ids, team_id, user_id, include_system_actions=True):
+        return {
+            "satisfied_action_ids": [],
+            "running_action_ids": [],
+            "terminal_action_ids": [],
+        }
+
+    def fake_mark_blocked(db, **kwargs):
+        blocked.append(kwargs)
+
+    async def fake_execute_action_envelope(db, envelope, *, session, team_id, user_id, authorization, event_sink):
+        executed.append(envelope.action_id)
+        return ActionToolExecutionResult(None)
+
+    workflow = _test_workflow("act_requires_auth", action_type="create_customer_activity")
+    action_item = action_plan.item_from_workflow(
+        workflow,
+        payload={
+            "customer_id": 10,
+            "source_content": "今天和客户确认了续费推进事项",
+        },
+        target_type="customer",
+        target_id=10,
+    )
+    assert action_item is not None
+
+    monkeypatch.setattr(root_runtime_module.workflow_action_ledger, "execution_state_for_action_ids", fake_ledger_state)
+    monkeypatch.setattr(root_runtime_module.workflow_action_ledger, "mark_action_blocked", fake_mark_blocked)
+    monkeypatch.setattr(root_runtime_module.task_execution, "execute_action_envelope", fake_execute_action_envelope)
+
+    side_effects = AgentRootRuntimeSideEffects()
+    result = await runtime._run_new_flow_auto_execute_tasks(
+        AgentRuntimeContext(
+            db=FakeSession(),
+            session=SimpleNamespace(id=4, context_json={}),
+            turn_input=AgentTurnInput(content="后台恢复重放", source="api"),
+            content="后台恢复重放",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            authorization="",
+            side_effects=side_effects,
+        ),
+        SimpleNamespace(
+            auto_execute_tasks=[],
+            auto_execute_actions=[action_item],
+        ),
+    )
+
+    assert result["executed_action_count"] == 0
+    assert executed == []
+    assert blocked[0]["workflow"] == workflow
+    assert blocked[0]["reason"] == "missing_authorization"
+    blocked_event = next(
+        event
+        for event in side_effects.new_flow_events
+        if event["event"] == "agent_root_auto_execute_plan_blocked"
+    )
+    assert blocked_event["blocked_actions"] == [{
+        "action_id": "act_requires_auth",
+        "action_type": "create_customer_activity",
+        "task_id": None,
+        "reason": "missing_authorization",
+    }]
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_stops_auto_execute_rounds_when_interrupt_is_created(monkeypatch):
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeAutoExecutableNewFlowGraphService(),
+        confirmed_task_graph_service=FakeConfirmedTaskGraphService(),
+    )
+    started: list[int] = []
+
+    async def fake_in_context(context, task, *, include_graph_progress_events):
+        started.append(task.id)
+        return {
+            "result": {"assistant_content": "需要确认下一步。"},
+            "tool_result": {"event": "tool_result", "success": True, "task_id": task.id},
+            "events": [{"event": "confirmation_required", "task_id": 900}],
+            "emitted_event_count": 1,
+            "assistant_content": "需要确认下一步。",
+            "current_interrupt": {
+                "type": "confirm",
+                "task_projection_id": 900,
+            },
+        }
+
+    monkeypatch.setattr(runtime, "_run_new_flow_auto_execute_task_in_context", fake_in_context)
+    side_effects = AgentRootRuntimeSideEffects()
+    result = await runtime._run_new_flow_auto_execute_tasks(
+        AgentRuntimeContext(
+            db=object(),
+            session=SimpleNamespace(id=4, context_json={}),
+            turn_input=AgentTurnInput(content="依赖自动执行并中断", source="web"),
+            content="依赖自动执行并中断",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            authorization="Bearer test",
+            side_effects=side_effects,
+        ),
+        SimpleNamespace(
+            auto_execute_tasks=[
+                SimpleNamespace(
+                    id=501,
+                    state_json={
+                        "action": "create_customer_activity",
+                        "workflow": _test_workflow("act_first", action_type="create_customer_activity"),
+                    },
+                ),
+                SimpleNamespace(
+                    id=502,
+                    state_json={
+                        "action": "transition_follow_up_task",
+                        "workflow": _test_workflow(
+                            "act_second",
+                            action_type="transition_follow_up_task",
+                            dependency_json={"depends_on": ["act_first"]},
+                        ),
+                    },
+                ),
+            ],
+        ),
+    )
+
+    assert started == [501]
+    assert result["executed_action_count"] == 1
+    assert result["current_interrupt"]["task_projection_id"] == 900
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_does_not_unlock_downstream_when_ready_branch_is_incomplete(monkeypatch):
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeAutoExecutableNewFlowGraphService(),
+        confirmed_task_graph_service=FakeConfirmedTaskGraphService(),
+    )
+    started: list[int] = []
+
+    async def fake_in_context(context, task, *, include_graph_progress_events):
+        started.append(task.id)
+        return {
+            "result": {"assistant_content": "暂未完成。"},
+            "tool_result": {"event": "tool_result", "success": False, "task_id": task.id},
+            "events": [{"event": "agent_step", "status": "completed"}],
+            "emitted_event_count": 1,
+            "assistant_content": "暂未完成。",
+        }
+
+    monkeypatch.setattr(runtime, "_run_new_flow_auto_execute_task_in_context", fake_in_context)
+    side_effects = AgentRootRuntimeSideEffects()
+    result = await runtime._run_new_flow_auto_execute_tasks(
+        AgentRuntimeContext(
+            db=object(),
+            session=SimpleNamespace(id=4, context_json={}),
+            turn_input=AgentTurnInput(content="上游没有完成", source="web"),
+            content="上游没有完成",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            authorization="Bearer test",
+            side_effects=side_effects,
+        ),
+        SimpleNamespace(
+            auto_execute_tasks=[
+                SimpleNamespace(
+                    id=501,
+                    state_json={
+                        "action": "create_customer_activity",
+                        "workflow": _test_workflow("act_first", action_type="create_customer_activity"),
+                    },
+                ),
+                SimpleNamespace(
+                    id=502,
+                    state_json={
+                        "action": "transition_follow_up_task",
+                        "workflow": _test_workflow(
+                            "act_second",
+                            action_type="transition_follow_up_task",
+                            dependency_json={"depends_on": ["act_first"]},
+                        ),
+                    },
+                ),
+            ],
+        ),
+    )
+
+    assert started == [501]
+    assert result["executed_action_count"] == 0
+    assert [event["ready_count"] for event in side_effects.new_flow_events if event["event"] == "agent_root_auto_execute_plan_built"] == [1]
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_marks_downstream_blocked_after_ready_action_fails(monkeypatch):
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeAutoExecutableNewFlowGraphService(),
+        confirmed_task_graph_service=FakeConfirmedTaskGraphService(),
+    )
+    blocked_actions: list[dict] = []
+
+    class FakeSession:
+        def query(self, *args, **kwargs):
+            return None
+
+    def fake_ledger_state(db, *, action_ids, team_id, user_id, include_system_actions=True):
+        return {
+            "satisfied_action_ids": [],
+            "running_action_ids": [],
+            "terminal_action_ids": [],
+        }
+
+    def fake_mark_running(db, **kwargs):
+        return None
+
+    def fake_mark_blocked(db, **kwargs):
+        blocked_actions.append({
+            "action_id": kwargs["workflow"]["action_id"],
+            "reason": kwargs["reason"],
+        })
+
+    async def fake_in_context(context, task, *, include_graph_progress_events):
+        return {
+            "result": {"execution_status": "failed", "assistant_content": "执行失败：tool failed"},
+            "tool_result": {"event": "tool_result", "success": False, "error": "tool failed", "task_id": task.id},
+            "events": [{"event": "task_failed", "task_id": task.id, "reason": "tool failed"}],
+            "emitted_event_count": 1,
+            "assistant_content": "执行失败：tool failed",
+        }
+
+    monkeypatch.setattr(root_runtime_module.workflow_action_ledger, "execution_state_for_action_ids", fake_ledger_state)
+    monkeypatch.setattr(root_runtime_module.workflow_action_ledger, "mark_action_running", fake_mark_running)
+    monkeypatch.setattr(root_runtime_module.workflow_action_ledger, "mark_action_blocked", fake_mark_blocked)
+    monkeypatch.setattr(runtime, "_run_new_flow_auto_execute_task_in_context", fake_in_context)
+    side_effects = AgentRootRuntimeSideEffects()
+
+    result = await runtime._run_new_flow_auto_execute_tasks(
+        AgentRuntimeContext(
+            db=FakeSession(),
+            session=SimpleNamespace(id=4, context_json={}),
+            turn_input=AgentTurnInput(content="上游执行失败", source="web"),
+            content="上游执行失败",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            authorization="Bearer test",
+            side_effects=side_effects,
+        ),
+        SimpleNamespace(
+            auto_execute_tasks=[
+                SimpleNamespace(
+                    id=501,
+                    state_json={
+                        "action": "create_customer_activity",
+                        "workflow": _test_workflow("act_first", action_type="create_customer_activity"),
+                    },
+                ),
+                SimpleNamespace(
+                    id=502,
+                    state_json={
+                        "action": "transition_follow_up_task",
+                        "workflow": _test_workflow(
+                            "act_second",
+                            action_type="transition_follow_up_task",
+                            dependency_json={"depends_on": ["act_first"]},
+                        ),
+                    },
+                ),
+            ],
+        ),
+    )
+
+    assert result["executed_action_count"] == 0
+    assert blocked_actions == [
+        {"action_id": "act_second", "reason": "waiting_dependencies:act_first"},
+        {"action_id": "act_second", "reason": "terminal_dependencies:act_first"},
+    ]
+    plan_events = [
+        event
+        for event in side_effects.new_flow_events
+        if event["event"] == "agent_root_auto_execute_plan_built"
+    ]
+    assert [event["ready_count"] for event in plan_events] == [1, 0]
+    assert [event["terminal_action_count"] for event in plan_events] == [0, 1]
+    blocked_event = next(
+        event
+        for event in side_effects.new_flow_events
+        if event["event"] == "agent_root_auto_execute_plan_blocked"
+    )
+    assert blocked_event["blocked_actions"] == [{
+        "action_id": "act_second",
+        "action_type": "transition_follow_up_task",
+        "task_id": 502,
+        "reason": "terminal_dependencies:act_first",
+    }]
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_uses_ledger_satisfied_actions_to_skip_rerun_and_unlock_downstream(monkeypatch):
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeAutoExecutableNewFlowGraphService(),
+        confirmed_task_graph_service=FakeConfirmedTaskGraphService(),
+    )
+    started: list[int] = []
+    ledger_calls = []
+
+    def fake_ledger_state(db, *, action_ids, team_id, user_id, include_system_actions=True):
+        ledger_calls.append({
+            "action_ids": action_ids,
+            "team_id": team_id,
+            "user_id": user_id,
+            "include_system_actions": include_system_actions,
+        })
+        return {
+            "satisfied_action_ids": ["act_first"],
+            "terminal_action_ids": [],
+        }
+
+    async def fake_in_context(context, task, *, include_graph_progress_events):
+        started.append(task.id)
+        return {
+            "result": {"assistant_content": f"任务 {task.id} 已执行。"},
+            "tool_result": {"event": "tool_result", "success": True, "task_id": task.id},
+            "events": [{"event": "task_completed", "task_id": task.id}],
+            "emitted_event_count": 1,
+            "assistant_content": f"任务 {task.id} 已执行。",
+        }
+
+    monkeypatch.setattr(root_runtime_module.workflow_action_ledger, "execution_state_for_action_ids", fake_ledger_state)
+    monkeypatch.setattr(runtime, "_run_new_flow_auto_execute_task_in_context", fake_in_context)
+    side_effects = AgentRootRuntimeSideEffects()
+    result = await runtime._run_new_flow_auto_execute_tasks(
+        AgentRuntimeContext(
+            db=object(),
+            session=SimpleNamespace(id=4, context_json={}),
+            turn_input=AgentTurnInput(content="ledger 防重跑", source="web"),
+            content="ledger 防重跑",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            authorization="Bearer test",
+            side_effects=side_effects,
+        ),
+        SimpleNamespace(
+            auto_execute_tasks=[
+                SimpleNamespace(
+                    id=501,
+                    state_json={
+                        "action": "create_customer_activity",
+                        "workflow": _test_workflow("act_first", action_type="create_customer_activity"),
+                    },
+                ),
+                SimpleNamespace(
+                    id=502,
+                    state_json={
+                        "action": "transition_follow_up_task",
+                        "workflow": _test_workflow(
+                            "act_second",
+                            action_type="transition_follow_up_task",
+                            dependency_json={"depends_on": ["act_first"]},
+                        ),
+                    },
+                ),
+            ],
+        ),
+    )
+
+    assert ledger_calls == [{
+        "action_ids": ["act_first", "act_second"],
+        "team_id": 2,
+        "user_id": 3,
+        "include_system_actions": True,
+    }]
+    assert started == [502]
+    assert result["executed_action_count"] == 1
+    plan_events = [
+        event
+        for event in side_effects.new_flow_events
+        if event["event"] == "agent_root_auto_execute_plan_built"
+    ]
+    assert plan_events[0]["terminal_count"] == 1
+    assert plan_events[0]["satisfied_action_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_does_not_rerun_running_action_or_unlock_downstream(monkeypatch):
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeAutoExecutableNewFlowGraphService(),
+        confirmed_task_graph_service=FakeConfirmedTaskGraphService(),
+    )
+    started: list[int] = []
+
+    def fake_ledger_state(db, *, action_ids, team_id, user_id, include_system_actions=True):
+        return {
+            "satisfied_action_ids": [],
+            "running_action_ids": ["act_first"],
+            "terminal_action_ids": [],
+        }
+
+    async def fake_in_context(context, task, *, include_graph_progress_events):
+        started.append(task.id)
+        return {
+            "result": {"assistant_content": f"任务 {task.id} 已执行。"},
+            "tool_result": {"event": "tool_result", "success": True, "task_id": task.id},
+            "events": [{"event": "task_completed", "task_id": task.id}],
+            "emitted_event_count": 1,
+            "assistant_content": f"任务 {task.id} 已执行。",
+        }
+
+    monkeypatch.setattr(root_runtime_module.workflow_action_ledger, "execution_state_for_action_ids", fake_ledger_state)
+    monkeypatch.setattr(runtime, "_run_new_flow_auto_execute_task_in_context", fake_in_context)
+    side_effects = AgentRootRuntimeSideEffects()
+    result = await runtime._run_new_flow_auto_execute_tasks(
+        AgentRuntimeContext(
+            db=object(),
+            session=SimpleNamespace(id=4, context_json={}),
+            turn_input=AgentTurnInput(content="ledger RUNNING 防重入", source="web"),
+            content="ledger RUNNING 防重入",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            authorization="Bearer test",
+            side_effects=side_effects,
+        ),
+        SimpleNamespace(
+            auto_execute_tasks=[
+                SimpleNamespace(
+                    id=501,
+                    state_json={
+                        "action": "create_customer_activity",
+                        "workflow": _test_workflow("act_first", action_type="create_customer_activity"),
+                    },
+                ),
+                SimpleNamespace(
+                    id=502,
+                    state_json={
+                        "action": "transition_follow_up_task",
+                        "workflow": _test_workflow(
+                            "act_second",
+                            action_type="transition_follow_up_task",
+                            dependency_json={"depends_on": ["act_first"]},
+                        ),
+                    },
+                ),
+            ],
+        ),
+    )
+
+    assert started == []
+    assert result["executed_action_count"] == 0
+    plan_events = [
+        event
+        for event in side_effects.new_flow_events
+        if event["event"] == "agent_root_auto_execute_plan_built"
+    ]
+    assert plan_events[0]["active_count"] == 1
+    assert plan_events[0]["blocked_count"] == 1
+    assert plan_events[0]["ready_count"] == 0
 
 
 @pytest.mark.asyncio
@@ -1938,4 +3081,322 @@ def test_project_turn_output_keeps_switch_notice_single_for_new_flow():
     ]
     assert output.assistant_content == (
         "这条是在说「汇川技术」。我先把刚才那一步放着，切过来处理。\n\n已切换处理汇川技术的跟进。"
+    )
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_retry_keeps_confirmation_action_waiting(monkeypatch):
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeAutoExecutableNewFlowGraphService(),
+        confirmed_task_graph_service=FakeConfirmedTaskGraphService(),
+    )
+    original = SimpleNamespace(
+        workflow_id="wf_retry_required",
+        action_id="act_required",
+        status="FAILED",
+        execution_policy=action_workflow.EXECUTION_REQUIRES_CONFIRMATION,
+        scope=action_workflow.SCOPE_REQUIRED_WRITE,
+    )
+    prepared = SimpleNamespace(
+        **{
+            **original.__dict__,
+            "status": "WAITING_USER",
+            "source": action_workflow.SOURCE_EXPLICIT_USER_REQUEST,
+            "on_reject": action_workflow.ON_REJECT_CANCEL_ACTION,
+            "blocking": True,
+        }
+    )
+    prepare_calls = []
+
+    def fake_prepare(db, action, *, retry_source, reason):
+        prepare_calls.append({
+            "db": db,
+            "action_id": action.action_id,
+            "retry_source": retry_source,
+            "reason": reason,
+        })
+        return prepared
+
+    async def fail_if_replayed(*args, **kwargs):
+        raise AssertionError("confirmation-required retry must not auto execute")
+
+    monkeypatch.setattr(root_runtime_module.workflow_action_ledger, "prepare_action_retry", fake_prepare)
+    monkeypatch.setattr(runtime, "_run_new_flow_auto_execute_tasks", fail_if_replayed)
+
+    db = object()
+    result = await runtime.retry_workflow_action(
+        db=db,
+        action=original,
+        session=SimpleNamespace(id=4),
+        team_id=2,
+        user_id=3,
+        retry_source="manual_test",
+        reason="用户手动重试",
+    )
+
+    assert result is prepared
+    assert prepare_calls == [{
+        "db": db,
+        "action_id": "act_required",
+        "retry_source": "manual_test",
+        "reason": "用户手动重试",
+    }]
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_retry_replays_auto_execute_actions_through_dag(monkeypatch):
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeAutoExecutableNewFlowGraphService(),
+        confirmed_task_graph_service=FakeConfirmedTaskGraphService(),
+    )
+    failed_action = _ledger_action_stub(
+        action_id="act_projection",
+        status="FAILED",
+        execution_policy=action_workflow.EXECUTION_AUTO_EXECUTE,
+        scope=action_workflow.SCOPE_DERIVED_AUTOMATION,
+        action_type="create_customer_activity",
+        payload_json={
+            "customer_id": 10,
+            "source_content": "今天和客户确认续费推进",
+        },
+    )
+    prepared_action = _ledger_action_stub(
+        action_id="act_projection",
+        status="PLANNED",
+        execution_policy=action_workflow.EXECUTION_AUTO_EXECUTE,
+        scope=action_workflow.SCOPE_DERIVED_AUTOMATION,
+        action_type="create_customer_activity",
+        payload_json={
+            "customer_id": 10,
+            "source_content": "今天和客户确认续费推进",
+        },
+    )
+    downstream_action = _ledger_action_stub(
+        action_id="act_profile_refresh",
+        status="PLANNED",
+        execution_policy=action_workflow.EXECUTION_AUTO_EXECUTE,
+        scope=action_workflow.SCOPE_DERIVED_AUTOMATION,
+        action_type="transition_follow_up_task",
+        dependency_json={"depends_on": ["act_projection"]},
+        payload_json={"task_id": 99, "transition_action": "complete"},
+    )
+    required_waiting_action = _ledger_action_stub(
+        action_id="act_optional_opportunity",
+        status="WAITING_USER",
+        execution_policy=action_workflow.EXECUTION_REQUIRES_CONFIRMATION,
+        scope=action_workflow.SCOPE_OPTIONAL_SUGGESTION,
+        action_type="create_opportunity",
+    )
+    replay_calls = []
+    refreshed = SimpleNamespace(**{**prepared_action.__dict__, "status": "EXECUTED"})
+
+    def fake_prepare(db, action, *, retry_source, reason):
+        return prepared_action
+
+    class FakeWorkflowActionCrud:
+        def list_by_workflow(self, db, workflow_id, team_id=None, user_id=None, include_system_actions=False):
+            assert workflow_id == "wf_retry"
+            assert include_system_actions is True
+            return [prepared_action, downstream_action, required_waiting_action]
+
+        def get_by_workflow_action(
+            self,
+            db,
+            *,
+            workflow_id,
+            action_id,
+            team_id=None,
+            user_id=None,
+            include_system_actions=False,
+        ):
+            assert workflow_id == "wf_retry"
+            assert action_id == "act_projection"
+            return refreshed
+
+    async def fake_replay(context, side_effect_context):
+        replay_calls.append({
+            "session_id": context.session_id,
+            "authorization": context.authorization,
+            "action_ids": [item.action_id for item in side_effect_context.auto_execute_actions],
+        })
+        return {"executed_action_count": 2}
+
+    monkeypatch.setattr(root_runtime_module.workflow_action_ledger, "prepare_action_retry", fake_prepare)
+    monkeypatch.setattr(root_runtime_module, "agent_workflow_action_crud", FakeWorkflowActionCrud())
+    monkeypatch.setattr(runtime, "_run_new_flow_auto_execute_tasks", fake_replay)
+
+    result = await runtime.retry_workflow_action(
+        db=object(),
+        action=failed_action,
+        session=SimpleNamespace(id=4),
+        team_id=2,
+        user_id=3,
+        authorization="Bearer retry-test",
+    )
+
+    assert result is refreshed
+    assert replay_calls == [{
+        "session_id": 4,
+        "authorization": "Bearer retry-test",
+        "action_ids": ["act_projection", "act_profile_refresh"],
+    }]
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_retry_workflow_prepares_retryable_actions_and_replays_auto_dag(monkeypatch):
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeAutoExecutableNewFlowGraphService(),
+        confirmed_task_graph_service=FakeConfirmedTaskGraphService(),
+    )
+    failed_auto = _ledger_action_stub(
+        action_id="act_auto_failed",
+        status="FAILED",
+        execution_policy=action_workflow.EXECUTION_AUTO_EXECUTE,
+        scope=action_workflow.SCOPE_DERIVED_AUTOMATION,
+        action_type="create_customer_activity",
+        payload_json={"customer_id": 10, "source_content": "补偿写入跟进"},
+    )
+    blocked_auto = _ledger_action_stub(
+        action_id="act_auto_blocked",
+        status="BLOCKED",
+        execution_policy=action_workflow.EXECUTION_AUTO_EXECUTE,
+        scope=action_workflow.SCOPE_DERIVED_AUTOMATION,
+        action_type="transition_follow_up_task",
+        dependency_json={"depends_on": ["act_auto_failed"]},
+        payload_json={"task_id": 99, "transition_action": "complete"},
+    )
+    failed_required = _ledger_action_stub(
+        action_id="act_required_failed",
+        status="FAILED",
+        execution_policy=action_workflow.EXECUTION_REQUIRES_CONFIRMATION,
+        scope=action_workflow.SCOPE_REQUIRED_WRITE,
+        action_type="create_opportunity",
+    )
+    executed_auto = _ledger_action_stub(
+        action_id="act_auto_done",
+        status="EXECUTED",
+        execution_policy=action_workflow.EXECUTION_AUTO_EXECUTE,
+        scope=action_workflow.SCOPE_DERIVED_AUTOMATION,
+        action_type="refresh_customer_profile",
+    )
+    prepared = {
+        "act_auto_failed": _ledger_action_stub(
+            action_id="act_auto_failed",
+            status="PLANNED",
+            execution_policy=action_workflow.EXECUTION_AUTO_EXECUTE,
+            scope=action_workflow.SCOPE_DERIVED_AUTOMATION,
+            action_type="create_customer_activity",
+            payload_json={"customer_id": 10, "source_content": "补偿写入跟进"},
+        ),
+        "act_auto_blocked": _ledger_action_stub(
+            action_id="act_auto_blocked",
+            status="PLANNED",
+            execution_policy=action_workflow.EXECUTION_AUTO_EXECUTE,
+            scope=action_workflow.SCOPE_DERIVED_AUTOMATION,
+            action_type="transition_follow_up_task",
+            dependency_json={"depends_on": ["act_auto_failed"]},
+            payload_json={"task_id": 99, "transition_action": "complete"},
+        ),
+        "act_required_failed": _ledger_action_stub(
+            action_id="act_required_failed",
+            status="WAITING_USER",
+            execution_policy=action_workflow.EXECUTION_REQUIRES_CONFIRMATION,
+            scope=action_workflow.SCOPE_REQUIRED_WRITE,
+            action_type="create_opportunity",
+        ),
+    }
+    prepare_calls: list[str] = []
+    replay_calls: list[list[str]] = []
+
+    def fake_prepare(db, action, *, retry_source, reason):
+        prepare_calls.append(action.action_id)
+        assert retry_source == "manual_test"
+        assert reason == "恢复工作流"
+        return prepared[action.action_id]
+
+    class FakeWorkflowActionCrud:
+        def list_by_workflow(self, db, workflow_id, team_id=None, user_id=None, include_system_actions=False):
+            assert workflow_id == "wf_retry"
+            assert include_system_actions is True
+            return [
+                prepared["act_auto_failed"],
+                prepared["act_auto_blocked"],
+                prepared["act_required_failed"],
+                executed_auto,
+            ]
+
+    async def fake_replay(context, side_effect_context):
+        replay_calls.append([item.action_id for item in side_effect_context.auto_execute_actions])
+        return {"executed_action_count": 2}
+
+    monkeypatch.setattr(root_runtime_module.workflow_action_ledger, "prepare_action_retry", fake_prepare)
+    monkeypatch.setattr(root_runtime_module, "agent_workflow_action_crud", FakeWorkflowActionCrud())
+    monkeypatch.setattr(runtime, "_run_new_flow_auto_execute_tasks", fake_replay)
+
+    result = await runtime.retry_workflow(
+        db=object(),
+        workflow_id="wf_retry",
+        actions=[failed_auto, blocked_auto, failed_required, executed_auto],
+        session=SimpleNamespace(id=4),
+        team_id=2,
+        user_id=3,
+        authorization="Bearer workflow-retry",
+        retry_source="manual_test",
+        reason="恢复工作流",
+    )
+
+    assert prepare_calls == ["act_auto_failed", "act_auto_blocked", "act_required_failed"]
+    assert replay_calls == [["act_auto_failed", "act_auto_blocked", "act_auto_done"]]
+    assert [action.action_id for action in result] == [
+        "act_auto_failed",
+        "act_auto_blocked",
+        "act_required_failed",
+        "act_auto_done",
+    ]
+
+
+def _ledger_action_stub(
+    *,
+    action_id: str,
+    status: str,
+    execution_policy: str,
+    scope: str,
+    action_type: str,
+    workflow_id: str = "wf_retry",
+    dependency_json: dict | None = None,
+    payload_json: dict | None = None,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        workflow_id=workflow_id,
+        action_id=action_id,
+        parent_action_id=None,
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        task_id=None,
+        source_message_id=None,
+        source_type="agent_planning",
+        action_type=action_type,
+        status=status,
+        scope=scope,
+        source=(
+            action_workflow.SOURCE_SYSTEM_AUTOMATION
+            if execution_policy == action_workflow.EXECUTION_AUTO_EXECUTE
+            else action_workflow.SOURCE_BUSINESS_SUGGESTION
+        ),
+        execution_policy=execution_policy,
+        on_reject=action_workflow.ON_REJECT_ASK_CLARIFICATION,
+        blocking=False,
+        target_type="customer",
+        target_id=10,
+        dependency_json=dependency_json,
+        payload_json=payload_json,
+        result_json=None,
+        decision_json=None,
+        idempotency_key=None,
+        status_reason=None,
+        error_message=None,
     )

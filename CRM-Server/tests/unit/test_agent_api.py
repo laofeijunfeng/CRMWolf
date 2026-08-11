@@ -23,6 +23,7 @@ from app.models.agent import (
     AgentTask,
     AgentTaskStatus,
     AgentToolCall,
+    AgentWorkflowAction,
 )
 from app.models.customer import Customer
 from app.models.customer_activity import CustomerActivity
@@ -36,6 +37,7 @@ from app.models.sales_commitment import (
     SalesCommitment,
 )
 from app.services.agent.confirmed_task_graph import ConfirmedTaskGraphService
+from app.services.agent import action_workflow
 from app.services.agent.input import AgentTurnInput
 from app.services.agent.pending_graph import PendingTaskGraphService
 from app.services.agent.root_runtime import AgentRootRuntime
@@ -87,6 +89,7 @@ def _build_client(monkeypatch):
         AgentTask.__table__,
         AgentToolCall.__table__,
         AgentIdempotencyKey.__table__,
+        AgentWorkflowAction.__table__,
     ]
     Base.metadata.create_all(engine, tables=tables)
     Session = sessionmaker(bind=engine)
@@ -265,8 +268,618 @@ def test_agent_session_and_stream_api(monkeypatch):
         assert [item["role"] for item in messages_body["items"]] == ["USER", "ASSISTANT"]
         assistant_message = messages_body["items"][1]
         trace_events = assistant_message["payload_json"]["trace_events"]
-        assert [event["event"] for event in trace_events] == ["agent_step", "tool_result"]
+        assert [event["event"] for event in trace_events] == [
+            "agent_step",
+            "tool_result",
+            "agent_turn_observability",
+        ]
         assert trace_events[1]["tool_name"] == "get_customer_context"
+        observability = assistant_message["payload_json"]["turn_observability"]
+        assert observability["schema_version"] == "agent.turn_observability.v1"
+        assert observability["retrieval"]["customer_context"]["called"] is True
+    finally:
+        engine.dispose()
+
+
+def test_agent_session_actions_api_lists_workflow_action_timeline(monkeypatch):
+    client, engine = _build_client(monkeypatch)
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "动作账本会话"}).json()
+        Session = sessionmaker(bind=engine)
+        db = Session()
+        try:
+            db.add_all([
+                AgentWorkflowAction(
+                    workflow_id="wf_action_api",
+                    action_id="act_waiting",
+                    team_id=1,
+                    user_id=2,
+                    session_id=session["id"],
+                    source_type="agent_planning",
+                    action_type="create_opportunity",
+                    status="WAITING_USER",
+                    scope="optional_suggestion",
+                    source="business_suggestion",
+                    execution_policy="requires_confirmation",
+                    on_reject="skip_and_continue",
+                    blocking=False,
+                    target_type="customer",
+                    target_id=7,
+                    payload_json={"customer_id": 7},
+                ),
+                AgentWorkflowAction(
+                    workflow_id="wf_action_api",
+                    action_id="act_executed",
+                    team_id=1,
+                    user_id=2,
+                    session_id=session["id"],
+                    source_type="post_commit_projection",
+                    action_type="project_next_follow_up_tasks",
+                    status="EXECUTED",
+                    scope="derived_automation",
+                    source="system_automation",
+                    execution_policy="auto_execute",
+                    on_reject="ask_clarification",
+                    blocking=False,
+                    result_json={"created_task_count": 1},
+                ),
+                AgentWorkflowAction(
+                    workflow_id="wf_background",
+                    action_id="act_background",
+                    team_id=1,
+                    user_id=None,
+                    session_id=None,
+                    source_type="post_commit_reconciliation",
+                    action_type="reconcile_historical_follow_up_tasks",
+                    status="EXECUTED",
+                    scope="derived_automation",
+                    source="system_automation",
+                    execution_policy="auto_execute",
+                    on_reject="ask_clarification",
+                    blocking=False,
+                    target_type="customer",
+                    target_id=7,
+                    result_json={"matched_task_count": 1},
+                ),
+                AgentWorkflowAction(
+                    workflow_id="wf_other_user",
+                    action_id="act_other_user",
+                    team_id=1,
+                    user_id=3,
+                    session_id=None,
+                    source_type="agent_planning",
+                    action_type="create_customer_activity",
+                    status="EXECUTED",
+                    scope="required_write",
+                    source="explicit_user_request",
+                    execution_policy="requires_confirmation",
+                    on_reject="cancel_action",
+                    blocking=True,
+                    target_type="customer",
+                    target_id=7,
+                ),
+            ])
+            db.commit()
+        finally:
+            db.close()
+
+        response = client.get(f"/v1/agent/sessions/{session['id']}/actions")
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["total"] == 2
+        assert [item["action_id"] for item in body["items"]] == ["act_waiting", "act_executed"]
+        assert body["items"][0]["payload_json"] == {"customer_id": 7}
+        assert body["items"][1]["result_json"] == {"created_task_count": 1}
+
+        filtered_response = client.get(
+            f"/v1/agent/sessions/{session['id']}/actions",
+            params={"action_status": "WAITING_USER"},
+        )
+        assert filtered_response.status_code == 200, filtered_response.text
+        filtered_body = filtered_response.json()
+        assert filtered_body["total"] == 1
+        assert filtered_body["items"][0]["action_id"] == "act_waiting"
+
+        missing_response = client.get("/v1/agent/sessions/999/actions")
+        assert missing_response.status_code == 404
+
+        target_response = client.get(
+            "/v1/agent/actions",
+            params={"target_type": "customer", "target_id": 7},
+        )
+        assert target_response.status_code == 200, target_response.text
+        target_body = target_response.json()
+        assert target_body["total"] == 2
+        assert {item["action_id"] for item in target_body["items"]} == {"act_waiting", "act_background"}
+        assert "act_other_user" not in {item["action_id"] for item in target_body["items"]}
+        waiting_item = next(item for item in target_body["items"] if item["action_id"] == "act_waiting")
+        assert waiting_item["capability"]["is_write"] is True
+        assert waiting_item["capability"]["requires_user_authorization"] is True
+        assert waiting_item["capability"]["requires_idempotency_key"] is True
+        assert waiting_item["capability"]["parallel_safe"] is False
+    finally:
+        engine.dispose()
+
+
+def test_agent_workflow_detail_api_exposes_action_graph_and_status(monkeypatch):
+    client, engine = _build_client(monkeypatch)
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "工作流图"}).json()
+        Session = sessionmaker(bind=engine)
+        db = Session()
+        try:
+            db.add_all([
+                AgentWorkflowAction(
+                    workflow_id="wf_graph_api",
+                    action_id="act_root",
+                    team_id=1,
+                    user_id=2,
+                    session_id=session["id"],
+                    source_type="agent_planning",
+                    action_type="create_customer_activity",
+                    status="EXECUTED",
+                    scope="required_write",
+                    source="explicit_user_request",
+                    execution_policy="requires_confirmation",
+                    on_reject="cancel_action",
+                    blocking=True,
+                ),
+                AgentWorkflowAction(
+                    workflow_id="wf_graph_api",
+                    action_id="act_projection",
+                    parent_action_id="act_root",
+                    team_id=1,
+                    user_id=None,
+                    session_id=session["id"],
+                    source_type="post_commit_projection",
+                    action_type="project_next_follow_up_tasks",
+                    status="EXECUTED",
+                    scope="derived_automation",
+                    source="system_automation",
+                    execution_policy="auto_execute",
+                    on_reject="ask_clarification",
+                    blocking=False,
+                    dependency_json={
+                        "depends_on": ["act_root"],
+                        "parallel_group": "post_commit_activity_analysis",
+                        "join": "apply_transition_policy",
+                    },
+                ),
+                AgentWorkflowAction(
+                    workflow_id="wf_graph_api",
+                    action_id="act_reconciliation",
+                    parent_action_id="act_root",
+                    team_id=1,
+                    user_id=2,
+                    session_id=session["id"],
+                    source_type="post_commit_reconciliation",
+                    action_type="reconcile_historical_follow_up_tasks",
+                    status="WAITING_USER",
+                    scope="optional_suggestion",
+                    source="business_suggestion",
+                    execution_policy="requires_confirmation",
+                    on_reject="skip_and_continue",
+                    blocking=False,
+                    status_reason="等待用户确认历史任务是否完成",
+                    dependency_json={
+                        "depends_on": ["act_root", "act_missing"],
+                        "parallel_group": "post_commit_activity_analysis",
+                    },
+                ),
+                AgentWorkflowAction(
+                    workflow_id="wf_graph_api",
+                    action_id="act_other_user",
+                    team_id=1,
+                    user_id=3,
+                    session_id=session["id"],
+                    source_type="agent_planning",
+                    action_type="create_opportunity",
+                    status="BLOCKED",
+                    scope="optional_suggestion",
+                    source="business_suggestion",
+                    execution_policy="requires_confirmation",
+                    on_reject="ask_clarification",
+                    blocking=True,
+                ),
+            ])
+            db.commit()
+        finally:
+            db.close()
+
+        response = client.get("/v1/agent/workflows/wf_graph_api")
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["workflow_status"] == "WAITING_USER"
+        assert body["status_reason"] == "WAITING_USER: act_reconciliation"
+        assert body["action_summary"] == {
+            "total": 3,
+            "by_status": {"EXECUTED": 2, "WAITING_USER": 1},
+            "waiting_action_count": 1,
+            "failed_action_count": 0,
+            "blocked_action_count": 0,
+        }
+        assert [node["action_id"] for node in body["nodes"]] == [
+            "act_root",
+            "act_projection",
+            "act_reconciliation",
+        ]
+        reconciliation_node = next(node for node in body["nodes"] if node["action_id"] == "act_reconciliation")
+        assert reconciliation_node["depends_on"] == ["act_root", "act_missing"]
+        assert reconciliation_node["parallel_group"] == "post_commit_activity_analysis"
+        assert reconciliation_node["status_reason"] == "等待用户确认历史任务是否完成"
+        assert reconciliation_node["error_message"] is None
+        assert {tuple(edge.values()) for edge in body["edges"]} == {
+            ("act_root", "act_projection", "parent"),
+            ("act_root", "act_projection", "depends_on"),
+            ("act_root", "act_reconciliation", "parent"),
+            ("act_root", "act_reconciliation", "depends_on"),
+        }
+        assert "act_other_user" not in {action["action_id"] for action in body["actions"]}
+        projection_action = next(action for action in body["actions"] if action["action_id"] == "act_projection")
+        assert projection_action["capability"]["allows_background_recovery"] is True
+        assert projection_action["capability"]["parallel_safe"] is True
+
+        missing_response = client.get("/v1/agent/workflows/wf_missing")
+        assert missing_response.status_code == 404
+    finally:
+        engine.dispose()
+
+
+def test_agent_workflow_action_retry_api_prepares_retry_and_preserves_policy(monkeypatch):
+    client, engine = _build_client(monkeypatch)
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "动作重试"}).json()
+        Session = sessionmaker(bind=engine)
+        db = Session()
+        try:
+            db.add_all([
+                AgentWorkflowAction(
+                    workflow_id="wf_retry_api",
+                    action_id="act_retry_failed",
+                    team_id=1,
+                    user_id=2,
+                    session_id=session["id"],
+                    source_type="agent_planning",
+                    action_type="create_customer_activity",
+                    status="FAILED",
+                    scope="required_write",
+                    source="explicit_user_request",
+                    execution_policy="requires_confirmation",
+                    on_reject="cancel_action",
+                    blocking=True,
+                    result_json={"success": False},
+                    status_reason="tool failed",
+                    error_message="database timeout",
+                ),
+                AgentWorkflowAction(
+                    workflow_id="wf_retry_api",
+                    action_id="act_retry_executed",
+                    team_id=1,
+                    user_id=2,
+                    session_id=session["id"],
+                    source_type="agent_planning",
+                    action_type="create_customer_activity",
+                    status="EXECUTED",
+                    scope="required_write",
+                    source="explicit_user_request",
+                    execution_policy="requires_confirmation",
+                    on_reject="cancel_action",
+                    blocking=True,
+                ),
+                AgentWorkflowAction(
+                    workflow_id="wf_retry_api",
+                    action_id="act_retry_other_user",
+                    team_id=1,
+                    user_id=3,
+                    session_id=session["id"],
+                    source_type="agent_planning",
+                    action_type="create_customer_activity",
+                    status="FAILED",
+                    scope="required_write",
+                    source="explicit_user_request",
+                    execution_policy="requires_confirmation",
+                    on_reject="cancel_action",
+                    blocking=True,
+                ),
+            ])
+            db.commit()
+        finally:
+            db.close()
+
+        response = client.post(
+            "/v1/agent/workflows/wf_retry_api/actions/act_retry_failed/retry",
+            json={"retry_source": "manual_api", "reason": "排除临时异常后重试"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["status"] == "WAITING_USER"
+        assert body["result_json"] is None
+        assert body["error_message"] is None
+        assert body["status_reason"] == "排除临时异常后重试"
+        assert body["decision_json"]["last_retry"]["previous_status"] == "FAILED"
+        assert body["decision_json"]["last_retry"]["previous_error_message"] == "database timeout"
+
+        executed_response = client.post(
+            "/v1/agent/workflows/wf_retry_api/actions/act_retry_executed/retry",
+            json={"reason": "不应该重试已执行动作"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert executed_response.status_code == 409
+
+        other_user_response = client.post(
+            "/v1/agent/workflows/wf_retry_api/actions/act_retry_other_user/retry",
+            json={"reason": "越权"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert other_user_response.status_code == 404
+    finally:
+        engine.dispose()
+
+
+def test_agent_workflow_retry_api_delegates_to_root_runtime(monkeypatch):
+    class FakeRootRuntime:
+        def __init__(self):
+            self.calls = []
+
+        async def retry_workflow(self, **kwargs):
+            self.calls.append(kwargs)
+            actions = kwargs["actions"]
+            actions[0].status = "PLANNED"
+            actions[0].status_reason = "恢复工作流"
+            actions[0].error_message = None
+            return actions
+
+    fake_runtime = FakeRootRuntime()
+    monkeypatch.setattr(agent_api, "agent_root_runtime", fake_runtime)
+    client, engine = _build_client(monkeypatch)
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "工作流恢复"}).json()
+        Session = sessionmaker(bind=engine)
+        db = Session()
+        try:
+            db.add(
+                AgentWorkflowAction(
+                    workflow_id="wf_retry_full_api",
+                    action_id="act_retry_failed",
+                    team_id=1,
+                    user_id=2,
+                    session_id=session["id"],
+                    source_type="post_commit_projection",
+                    action_type="project_next_follow_up_tasks",
+                    status="FAILED",
+                    scope="derived_automation",
+                    source="system_automation",
+                    execution_policy="auto_execute",
+                    on_reject="ask_clarification",
+                    blocking=False,
+                    error_message="temporary projection failure",
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        response = client.post(
+            "/v1/agent/workflows/wf_retry_full_api/retry",
+            json={"retry_source": "manual_api", "reason": "恢复工作流"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["workflow_id"] == "wf_retry_full_api"
+        assert body["actions"][0]["status"] == "PLANNED"
+        assert body["actions"][0]["status_reason"] == "恢复工作流"
+        assert fake_runtime.calls
+        call = fake_runtime.calls[0]
+        assert call["workflow_id"] == "wf_retry_full_api"
+        assert call["session"].id == session["id"]
+        assert call["authorization"] == "Bearer test-token"
+        assert call["retry_source"] == "manual_api"
+        assert call["reason"] == "恢复工作流"
+    finally:
+        engine.dispose()
+
+
+def test_agent_workflow_recovery_scan_api_is_user_scoped_dry_run(monkeypatch):
+    class FakeRecoveryService:
+        def __init__(self):
+            self.calls = []
+
+        async def recover_once(self, *args, **kwargs):
+            self.calls.append(kwargs)
+            return {
+                "scanned_actions": 1,
+                "scanned_workflows": 1,
+                "eligible_workflows": 1,
+                "retried_workflows": 0,
+                "retried_actions": 0,
+                "dry_run": kwargs["dry_run"],
+                "skipped": {},
+                "policy_reasons": {},
+                "failed": 0,
+                "decisions": [
+                    {
+                        "workflow_id": "wf_scan",
+                        "eligible": True,
+                        "reason": "eligible",
+                        "action_count": 1,
+                        "retryable_action_count": 1,
+                        "safe_action_count": 1,
+                        "policy_reasons": {},
+                        "retryable_action_policies": [
+                            {
+                                "action_id": "act_scan",
+                                "action_type": "refresh_customer_profile",
+                                "allowed": True,
+                                "reason": "allowed",
+                                "execution_mode": "root_runtime_retry",
+                                "requires_user_authorization": False,
+                            }
+                        ],
+                    }
+                ],
+            }
+
+    fake_service = FakeRecoveryService()
+    monkeypatch.setattr(agent_api, "agent_workflow_recovery_service", fake_service)
+    client, engine = _build_client(monkeypatch)
+    try:
+        response = client.post(
+            "/v1/agent/workflow-recovery/scan",
+            json={"limit": 10, "safe_action_types": ["refresh_customer_profile"]},
+        )
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["dry_run"] is True
+        assert body["retried_workflows"] == 0
+        assert fake_service.calls
+        call = fake_service.calls[0]
+        assert call["limit"] == 10
+        assert call["dry_run"] is True
+        assert call["safe_action_types"] == ["refresh_customer_profile"]
+        assert call["team_id"] == 1
+        assert call["user_id"] == 2
+    finally:
+        engine.dispose()
+
+
+def test_agent_runtime_overview_api_combines_checkpoint_and_action_ledger(monkeypatch):
+    class FakeRootRuntime:
+        def __init__(self):
+            self.calls = []
+
+        async def current_checkpoint_state(self, **kwargs):
+            self.calls.append(kwargs)
+            return {
+                "checkpoint_id": "cp-overview",
+                "runtime_status": "waiting",
+                "current_interrupt": {
+                    "type": "confirm_action",
+                    "business_action": "RECONCILE_FOLLOW_UP_TASK",
+                },
+                "application_action": "resume_interrupt",
+            }
+
+    fake_runtime = FakeRootRuntime()
+    monkeypatch.setattr(agent_api, "agent_root_runtime", fake_runtime)
+    client, engine = _build_client(monkeypatch)
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "运行总览"}).json()
+        Session = sessionmaker(bind=engine)
+        db = Session()
+        try:
+            db.add_all([
+                AgentWorkflowAction(
+                    workflow_id="wf_overview",
+                    action_id="act_waiting_overview",
+                    team_id=1,
+                    user_id=2,
+                    session_id=session["id"],
+                    source_type="agent_planning",
+                    action_type="reconcile_follow_up_task",
+                    status="WAITING_USER",
+                    scope="optional_suggestion",
+                    source="business_suggestion",
+                    execution_policy="requires_confirmation",
+                    on_reject="skip_and_continue",
+                    blocking=False,
+                ),
+                AgentWorkflowAction(
+                    workflow_id="wf_overview",
+                    action_id="act_failed_overview",
+                    team_id=1,
+                    user_id=2,
+                    session_id=session["id"],
+                    source_type="post_commit_projection",
+                    action_type="project_next_follow_up_tasks",
+                    status="FAILED",
+                    scope="derived_automation",
+                    source="system_automation",
+                    execution_policy="auto_execute",
+                    on_reject="ask_clarification",
+                    blocking=False,
+                    error_message="projection failed",
+                ),
+                AgentWorkflowAction(
+                    workflow_id="wf_overview",
+                    action_id="act_blocked_overview",
+                    team_id=1,
+                    user_id=2,
+                    session_id=session["id"],
+                    source_type="agent_planning",
+                    action_type="create_opportunity",
+                    status="BLOCKED",
+                    scope="optional_suggestion",
+                    source="business_suggestion",
+                    execution_policy="requires_confirmation",
+                    on_reject="ask_clarification",
+                    blocking=True,
+                ),
+                AgentWorkflowAction(
+                    workflow_id="wf_overview",
+                    action_id="act_system_overview",
+                    team_id=1,
+                    user_id=None,
+                    session_id=session["id"],
+                    source_type="post_commit_reconciliation",
+                    action_type="reconcile_historical_follow_up_tasks",
+                    status="EXECUTED",
+                    scope="derived_automation",
+                    source="system_automation",
+                    execution_policy="auto_execute",
+                    on_reject="ask_clarification",
+                    blocking=False,
+                ),
+            ])
+            db.commit()
+        finally:
+            db.close()
+
+        response = client.get(
+            f"/v1/agent/sessions/{session['id']}/runtime/overview",
+            params={"recent_action_limit": 2},
+        )
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["session_id"] == session["id"]
+        assert body["session_key"] == session["session_key"]
+        assert body["runtime_status"] == "waiting"
+        assert body["checkpoint_id"] == "cp-overview"
+        assert body["has_interrupt"] is True
+        assert body["current_interrupt"]["business_action"] == "RECONCILE_FOLLOW_UP_TASK"
+        assert body["action_summary"] == {
+            "total": 4,
+            "by_status": {
+                "WAITING_USER": 1,
+                "FAILED": 1,
+                "BLOCKED": 1,
+                "EXECUTED": 1,
+            },
+            "waiting_action_count": 1,
+            "failed_action_count": 1,
+            "blocked_action_count": 1,
+        }
+        assert len(body["recent_actions"]) == 2
+        assert [item["action_id"] for item in body["recent_actions"]] == [
+            "act_system_overview",
+            "act_blocked_overview",
+        ]
+        assert body["values"]["application_action"] == "resume_interrupt"
+        assert fake_runtime.calls[0] == {
+            "team_id": 1,
+            "user_id": 2,
+            "session_id": session["id"],
+            "session_key": session["session_key"],
+        }
+
+        missing_response = client.get("/v1/agent/sessions/999/runtime/overview")
+        assert missing_response.status_code == 404
     finally:
         engine.dispose()
 
@@ -325,7 +938,12 @@ async def test_agent_application_streams_runtime_events_before_turn_finishes(mon
 
         fake_runtime.release.set()
         remaining_events = [event async for event in stream]
-        assert [event["event"] for event in remaining_events] == ["message", "done"]
+        assert [event["event"] for event in remaining_events] == [
+            "agent_turn_observability",
+            "message",
+            "done",
+        ]
+        assert remaining_events[0]["summary"]["schema_version"] == "agent.turn_observability.v1"
         assert fake_runtime.finished is True
     finally:
         engine.dispose()
@@ -469,15 +1087,7 @@ def test_agent_stream_and_im_gateway_do_not_prompt_unrelated_pending_confirmatio
                 })
             return {"application_action": "run_new_flow", "events": []}
 
-    def fail_prompt_next_pending_case(*args, **kwargs):
-        raise AssertionError("普通 Agent 任务查询不应该兜底弹出历史 pending confirmation case")
-
     monkeypatch.setattr(agent_api.agent_application_module, "agent_root_runtime", FakeRootRuntime())
-    monkeypatch.setattr(
-        agent_api.agent_application_module.follow_up_task_confirmation_channel_service,
-        "prompt_next_pending_case",
-        fail_prompt_next_pending_case,
-    )
 
     client, engine = _build_client(monkeypatch)
     Session = sessionmaker(bind=engine)
@@ -516,34 +1126,30 @@ def test_agent_stream_and_im_gateway_do_not_prompt_unrelated_pending_confirmatio
         engine.dispose()
 
 
-def test_agent_stream_resolves_bound_follow_up_confirmation_reply_before_runtime(monkeypatch):
-    class RuntimeMustNotRun:
-        async def run_turn(self, **kwargs):
-            raise AssertionError("bound follow-up confirmation replies must bypass root runtime")
+def test_agent_stream_routes_structured_follow_up_confirmation_reply_through_root_runtime(monkeypatch):
+    class FakeRootRuntime:
+        def __init__(self):
+            self.calls = []
 
-    resolve_calls = []
+        async def run_turn(self, *, turn_input, content, context, **kwargs):
+            self.calls.append({"turn_input": turn_input, "content": content, **kwargs})
+            event = {
+                "event": FOLLOW_UP_CONFIRMATION_RESOLVED_EVENT,
+                "content": "已更新为下周五继续跟进。",
+                "content_format": "text",
+                "case_public_id": turn_input.metadata["case_public_id"],
+                "resolution": "delayed",
+            }
+            context.side_effects.new_flow_events.append(event)
+            context.side_effects.new_flow_assistant_content = "已更新为下周五继续跟进。"
+            return {
+                "application_action": "run_new_flow",
+                "assistant_content": "已更新为下周五继续跟进。",
+                "events": [event],
+            }
 
-    def fake_resolve_bound_reply(db, *, team_id, user_id, case_public_id, reply_text):
-        resolve_calls.append({
-            "team_id": team_id,
-            "user_id": user_id,
-            "case_public_id": case_public_id,
-            "reply_text": reply_text,
-        })
-        return {
-            "event": FOLLOW_UP_CONFIRMATION_RESOLVED_EVENT,
-            "content": "已更新为下周五继续跟进。",
-            "content_format": "text",
-            "case_public_id": case_public_id,
-            "resolution": "delayed",
-        }
-
-    monkeypatch.setattr(agent_api.agent_application_module, "agent_root_runtime", RuntimeMustNotRun())
-    monkeypatch.setattr(
-        agent_api.agent_application_module.follow_up_task_confirmation_channel_service,
-        "resolve_bound_reply",
-        fake_resolve_bound_reply,
-    )
+    fake_runtime = FakeRootRuntime()
+    monkeypatch.setattr(agent_api.agent_application_module, "agent_root_runtime", fake_runtime)
 
     client, engine = _build_client(monkeypatch)
     try:
@@ -564,18 +1170,15 @@ def test_agent_stream_resolves_bound_follow_up_confirmation_reply_before_runtime
         assert response.status_code == 200, response.text
         assert FOLLOW_UP_CONFIRMATION_RESOLVED_EVENT in response.text
         assert "已更新为下周五继续跟进。" in response.text
-        assert resolve_calls == [
-            {
-                "team_id": 1,
-                "user_id": 2,
-                "case_public_id": "fuc_22222222222222222222222222222222",
-                "reply_text": "今天联系了，还没有进展，下周五再说",
-            }
-        ]
+        assert len(fake_runtime.calls) == 1
+        assert fake_runtime.calls[0]["turn_input"].metadata["case_public_id"] == (
+            "fuc_22222222222222222222222222222222"
+        )
+        assert fake_runtime.calls[0]["content"] == "今天联系了，还没有进展，下周五再说"
 
         messages_response = client.get(f"/v1/agent/sessions/{session['id']}/messages")
         assistant_message = messages_response.json()["items"][1]
-        assert assistant_message["payload_json"]["source"] == "follow_up_task_confirmation_reply"
+        assert assistant_message["payload_json"]["source"] == "langgraph"
     finally:
         engine.dispose()
 
@@ -597,23 +1200,7 @@ def test_agent_stream_does_not_resolve_implicit_follow_up_confirmation_for_long_
             }
 
     fake_runtime = FakeRootRuntime()
-    resolve_calls = []
-
-    def fake_resolve_bound_reply(db, *, team_id, user_id, case_public_id, reply_text):
-        resolve_calls.append({
-            "team_id": team_id,
-            "user_id": user_id,
-            "case_public_id": case_public_id,
-            "reply_text": reply_text,
-        })
-        raise AssertionError("implicit follow-up confirmation text must not mutate before root runtime")
-
     monkeypatch.setattr(agent_api.agent_application_module, "agent_root_runtime", fake_runtime)
-    monkeypatch.setattr(
-        agent_api.agent_application_module.follow_up_task_confirmation_channel_service,
-        "resolve_bound_reply",
-        fake_resolve_bound_reply,
-    )
 
     client, engine = _build_client(monkeypatch)
     Session = sessionmaker(bind=engine)
@@ -662,7 +1249,6 @@ def test_agent_stream_does_not_resolve_implicit_follow_up_confirmation_for_long_
         assert response.status_code == 200, response.text
         assert "进入主 Agent 处理" in response.text
         assert FOLLOW_UP_CONFIRMATION_RESOLVED_EVENT not in response.text
-        assert resolve_calls == []
         assert [call["content"] for call in fake_runtime.calls] == [long_follow_up_note]
 
         messages_response = client.get(f"/v1/agent/sessions/{session['id']}/messages")
@@ -2119,7 +2705,7 @@ def test_agent_stream_cancels_active_form_interrupt_for_plain_skip_text(monkeypa
         )
         assert second_response.status_code == 200, second_response.text
         assert '"event": "turn_intent_classified"' in second_response.text
-        assert '"intent": "DISMISS_CURRENT_SUGGESTION"' in second_response.text
+        assert '"intent": "CANCEL_CURRENT_TASK"' in second_response.text
         assert '"resume_action": "cancel"' in second_response.text
         assert '"event": "task_cancelled"' in second_response.text
         assert "还差商机" not in second_response.text
@@ -2130,6 +2716,88 @@ def test_agent_stream_cancels_active_form_interrupt_for_plain_skip_text(monkeypa
         try:
             task = db.query(AgentTask).one()
             assert task.status == AgentTaskStatus.SUSPENDED
+        finally:
+            db.close()
+    finally:
+        engine.dispose()
+
+
+def test_agent_stream_skips_optional_suggestion_form_interrupt_for_plain_skip_text(monkeypatch):
+    customer = {
+        "id": 101,
+        "account_name": "广州睿狐科技有限公司",
+        "owner_info": {"id": 2},
+        "collaborator_infos": [],
+    }
+
+    class FakeGraphService:
+        def __init__(self):
+            self.calls = []
+
+        async def stream_events(self, input_state):
+            self.calls.append(input_state)
+            workflow = action_workflow.optional_suggestion_contract(action="collect_opportunity_fields")
+            payload = {
+                "customer_id": customer["id"],
+                "opportunity": {
+                    "customer_id": customer["id"],
+                    "total_amount": 50000,
+                },
+                "missing_fields": ["purchase_type", "expected_closing_date"],
+            }
+            yield {
+                "event": "opportunity_fields_required",
+                "action": "collect_opportunity_fields",
+                "customer": customer,
+                "workflow": workflow,
+                "payload": {**payload, "workflow": workflow},
+            }
+            yield {"event": "final", "content": "请补充采购类型和预计成交日期。"}
+
+    fake_graph = FakeGraphService()
+    monkeypatch.setattr(agent_api, "crm_agent_graph_service", fake_graph)
+
+    client, engine = _build_client(monkeypatch)
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "商机会话"}).json()
+
+        first_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "今天记录一条广州睿狐科技的续费跟进"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert first_response.status_code == 200, first_response.text
+        assert '"event": "opportunity_fields_required"' in first_response.text
+
+        second_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "暂不处理"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert second_response.status_code == 200, second_response.text
+        assert '"event": "turn_intent_classified"' in second_response.text
+        assert '"intent": "DISMISS_CURRENT_SUGGESTION"' in second_response.text
+        assert '"resume_action": "skip_current_action"' in second_response.text
+        assert '"event": "workflow_action_skipped"' in second_response.text
+        assert '"event": "task_cancelled"' not in second_response.text
+        assert len(fake_graph.calls) == 1
+
+        Session = sessionmaker(bind=engine)
+        db = Session()
+        try:
+            task = db.query(AgentTask).one()
+            assert task.status == AgentTaskStatus.SUSPENDED
+            assert task.state_json["suspension_kind"] == "dismissed"
+            assert task.state_json["dismissed_reason"] == "暂不处理"
+            assert task.state_json["workflow"]["status"] == "skipped"
+            assert task.state_json["workflow"]["status_reason"] == "暂不处理"
+            assert task.state_json["workflow"]["status_source"] == "langgraph_resume"
+            ledger_action = db.query(AgentWorkflowAction).one()
+            assert ledger_action.task_id == task.id
+            assert ledger_action.action_id == task.state_json["workflow"]["action_id"]
+            assert ledger_action.status == "SKIPPED"
+            assert ledger_action.status_reason == "暂不处理"
+            assert ledger_action.decision_json["decision"] == "skip_current_action"
         finally:
             db.close()
     finally:

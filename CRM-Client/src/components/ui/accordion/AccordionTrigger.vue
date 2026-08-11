@@ -7,7 +7,7 @@ import {
   AccordionHeader,
   AccordionTrigger,
 } from "reka-ui"
-import { cn } from "@/lib/utils"
+import { cn, omitUndefined } from "@/lib/utils"
 
 const props = defineProps<AccordionTriggerProps & { class?: HTMLAttributes["class"] }>()
 
@@ -17,7 +17,7 @@ const delegatedProps = reactiveOmit(props, "class")
 <template>
   <AccordionHeader class="flex">
     <AccordionTrigger
-      v-bind="delegatedProps"
+      v-bind="omitUndefined(delegatedProps)"
       :class="
         cn(
           'flex flex-1 items-center justify-between py-4 font-medium transition-all hover:underline [&[data-state=open]>svg]:rotate-180',

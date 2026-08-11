@@ -25,7 +25,9 @@ from app.schemas.agent import (
 from app.services.agent.guardrails import AgentToolExecutionPolicy
 from app.services.agent.quality import AgentFollowUpQualityEvaluatorError, agent_follow_up_quality_evaluator
 from app.services.agent.runtime import AgentToolRuntime
+from app.services.agent import action_workflow
 from app.services.agent import task_display
+from app.services.agent import workflow_action_ledger
 from app.services.agent.schemas import (
     AgentHITLPolicy,
     AgentMemorySnapshot,
@@ -110,6 +112,7 @@ def _create_waiting_task_from_event(db: Session, event: dict, team_id: int, user
     contracts = event.get("contracts") or []
     payment_plans = event.get("payment_plans") or []
     hitl_review = event.get("hitl_review") if isinstance(event.get("hitl_review"), dict) else {}
+    workflow = action_workflow.ensure_event_workflow(event)
     intent = None
     if action in {"create_customer_activity", "select_customer_for_activity", "collect_follow_up_quality_fields"}:
         intent = "CUSTOMER_ACTIVITY"
@@ -149,6 +152,12 @@ def _create_waiting_task_from_event(db: Session, event: dict, team_id: int, user
         confirmation_summary=confirmation_summary,
     )
     target_type = "lead" if intent == "CREATE_LEAD" else "customer"
+    target_id = _task_target_id(
+        db,
+        team_id=team_id,
+        target_type=target_type,
+        target_id=payload.get("lead_id") if target_type == "lead" else payload.get("customer_id"),
+    )
     task = agent_task_crud.create(
         db,
         AgentTaskCreate(
@@ -159,12 +168,7 @@ def _create_waiting_task_from_event(db: Session, event: dict, team_id: int, user
             intent=intent,
             status=AgentTaskStatus.WAITING_USER,
             target_type=target_type,
-            target_id=_task_target_id(
-                db,
-                team_id=team_id,
-                target_type=target_type,
-                target_id=payload.get("lead_id") if target_type == "lead" else payload.get("customer_id"),
-            ),
+            target_id=target_id,
             summary=confirmation_summary,
             input_json=payload,
             state_json={
@@ -175,10 +179,23 @@ def _create_waiting_task_from_event(db: Session, event: dict, team_id: int, user
                 "opportunities": opportunities,
                 "contracts": contracts,
                 "payment_plans": payment_plans,
+                "workflow": workflow,
                 "hitl_review": hitl_review,
                 "hitl": hitl_policy.model_dump(exclude_none=True),
             },
         ),
+    )
+    workflow_action_ledger.create_or_update_waiting_action(
+        db,
+        workflow=workflow,
+        team_id=team_id,
+        user_id=user_id,
+        session_id=session.id,
+        task_id=task.id,
+        source_type=workflow_action_ledger.SOURCE_AGENT_PLANNING,
+        payload=payload,
+        target_type=target_type,
+        target_id=target_id,
     )
     event["task_id"] = task.id
     event["task_key"] = task.task_key

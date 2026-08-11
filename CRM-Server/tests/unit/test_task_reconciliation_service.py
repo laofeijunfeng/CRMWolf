@@ -105,6 +105,8 @@ def _create_task(
     owner_id: str = "2",
     status: str = FollowUpTaskStatus.OPEN,
     due_at: datetime | None = None,
+    source_activity_id: int | None = 100,
+    source_public_id: str | None = None,
     task_hash: str = "task-hash",
 ) -> FollowUpTask:
     return follow_up_task_crud.create(
@@ -121,7 +123,8 @@ def _create_task(
             due_at_text="本周三",
             due_at_granularity=DueAtGranularity.DATETIME,
             source_type=FollowUpTaskSourceType.CUSTOMER_ACTIVITY,
-            source_activity_id=101,
+            source_activity_id=source_activity_id,
+            source_public_id=source_public_id,
             confidence=0.91,
             evidence_json={"quote": "客户说下周确认预算"},
             task_hash=task_hash,
@@ -169,6 +172,46 @@ def test_reconciliation_candidates_return_same_owner_open_tasks_only_by_default(
     assert run.actor_id == "2"
     assert run.source_activity_id == 101
     assert run.candidate_public_ids_json == [expected.public_id]
+
+
+def test_reconciliation_candidates_exclude_tasks_sourced_from_current_activity(db_session):
+    previous_task = _create_task(db_session, source_activity_id=100, task_hash="previous-task")
+    current_activity_task = _create_task(db_session, source_activity_id=101, task_hash="current-task")
+
+    result = task_reconciliation_service.list_candidates_for_activity(
+        db_session,
+        team_id=1,
+        activity_id=101,
+        anchor_at=datetime(2026, 8, 6, 10, 0, 0),
+    )
+
+    assert [item.public_id for item in result.items] == [previous_task.public_id]
+    assert result.filters["excluded_current_source"] is True
+    run = db_session.query(FollowUpTaskReconciliationRun).filter_by(public_id=result.run_public_id).one()
+    assert run.candidate_public_ids_json == [previous_task.public_id]
+    assert current_activity_task.public_id not in run.candidate_public_ids_json
+
+
+def test_reconciliation_candidates_exclude_tasks_sourced_from_current_activity_public_id(db_session):
+    activity = db_session.query(CustomerActivity).filter_by(id=101).one()
+    activity.public_id = "act_11111111111111111111111111111111"
+    previous_task = _create_task(db_session, source_activity_id=100, task_hash="previous-task-public")
+    _create_task(
+        db_session,
+        source_activity_id=None,
+        source_public_id=activity.public_id,
+        task_hash="current-task-public",
+    )
+    db_session.commit()
+
+    result = task_reconciliation_service.list_candidates_for_activity(
+        db_session,
+        team_id=1,
+        activity_id=101,
+        anchor_at=datetime(2026, 8, 6, 10, 0, 0),
+    )
+
+    assert [item.public_id for item in result.items] == [previous_task.public_id]
 
 
 def test_reconciliation_candidates_can_include_cross_owner_as_confirmation_only(db_session):

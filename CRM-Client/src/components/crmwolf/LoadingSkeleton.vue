@@ -18,7 +18,7 @@ interface Props {
   showAvatar?: boolean
 }
 
-const props = withDefaults(defineProps<Props>(), {
+withDefaults(defineProps<Props>(), {
   rows: 3,
   type: 'list',
   showAvatar: false,

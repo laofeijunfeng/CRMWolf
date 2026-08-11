@@ -3,7 +3,7 @@ import type { NavigationMenuListProps } from "reka-ui"
 import type { HTMLAttributes } from "vue"
 import { reactiveOmit } from "@vueuse/core"
 import { NavigationMenuList, useForwardProps } from "reka-ui"
-import { cn } from "@/lib/utils"
+import { cn, omitUndefined } from "@/lib/utils"
 
 const props = defineProps<NavigationMenuListProps & { class?: HTMLAttributes["class"] }>()
 
@@ -14,7 +14,7 @@ const forwardedProps = useForwardProps(delegatedProps)
 
 <template>
   <NavigationMenuList
-    v-bind="forwardedProps"
+    v-bind="omitUndefined(forwardedProps)"
     :class="
       cn(
         'group flex flex-1 list-none items-center justify-center gap-x-1',
