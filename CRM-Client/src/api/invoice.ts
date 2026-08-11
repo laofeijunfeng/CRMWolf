@@ -333,12 +333,6 @@ const invoiceApi = {
     return InvoiceApplicationResponseSchema.parse(await request.post<InvoiceApplicationResponse>(`/v1/invoice-applications/${applicationId}/finance-approval`, data))
   },
 
-  markAsInvoiced: async (applicationId: number, invoiceNumber: string): Promise<InvoiceApplicationResponse> => {
-    return InvoiceApplicationResponseSchema.parse(await request.post<InvoiceApplicationResponse>(`/v1/invoice-applications/${applicationId}/mark-invoiced`, {
-      invoice_number: invoiceNumber
-    }))
-  },
-
   /**
    * 发票开票（审批通过后调用）
    * @param applicationId 发票申请 ID

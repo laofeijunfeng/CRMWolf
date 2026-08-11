@@ -60,6 +60,7 @@ import { AmountText, FileAttachment } from '@/components/crmwolf'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import StatusBadge, { type InvoiceStatus as InvoiceBadgeStatus } from '@/components/StatusBadge.vue'
 import InvoiceApplicationFormDialog from '@/components/dialogs/InvoiceApplicationFormDialog.vue'
+import InvoiceMarkIssuedDialog from '@/components/dialogs/InvoiceMarkIssuedDialog.vue'
 import InvoiceTypeSegmentedControl from '@/components/invoice/InvoiceTypeSegmentedControl.vue'
 import invoiceApi, {
   type InvoiceApplicationResponse,
@@ -113,7 +114,6 @@ const markIssuedDialogOpen = ref<boolean>(false)
 const reissueDialogOpen = ref<boolean>(false)
 const completeReissueDialogOpen = ref<boolean>(false)
 const redOffsetDialogOpen = ref<boolean>(false)
-const marking = ref<boolean>(false)
 const creatingReissue = ref<boolean>(false)
 const completingReissue = ref<boolean>(false)
 const redOffsetting = ref<boolean>(false)
@@ -126,9 +126,6 @@ const redOffsetFileUrl = ref<string>('')
 const completeReissueRedFileError = ref<string>('')
 const completeReissueNewFileError = ref<string>('')
 const redOffsetFileError = ref<string>('')
-const invoicedForm = ref<{ invoice_number: string }>({
-  invoice_number: '',
-})
 type ReissueFormState = Omit<
   InvoiceReissueApplicationCreate,
   'invoice_bank_name' | 'invoice_bank_account' | 'invoice_address' | 'invoice_phone'
@@ -473,7 +470,6 @@ const resetState = (): void => {
   reissueDialogOpen.value = false
   completeReissueDialogOpen.value = false
   redOffsetDialogOpen.value = false
-  marking.value = false
   creatingReissue.value = false
   completingReissue.value = false
   redOffsetting.value = false
@@ -481,7 +477,6 @@ const resetState = (): void => {
   completingReissueApplication.value = null
   handledAutoEditReissueId.value = null
   deleting.value = false
-  invoicedForm.value.invoice_number = ''
   resetCompleteReissueUploadForm()
   resetRedOffsetUploadForm()
 }
@@ -855,33 +850,15 @@ const handleDelete = async (): Promise<void> => {
 }
 
 const handleMarkIssued = (): void => {
-  invoicedForm.value.invoice_number = invoiceInfo.value?.invoice_number ?? ''
   markIssuedDialogOpen.value = true
 }
 
-const handleConfirmIssued = async (): Promise<void> => {
+const handleInvoiceIssued = async (): Promise<void> => {
   const invoice = invoiceInfo.value
-  const invoiceNumber = invoicedForm.value.invoice_number.trim()
   if (invoice === null) return
-  if (invoiceNumber.length === 0) {
-    toast.warning('请输入发票号码')
-    return
-  }
-
-  marking.value = true
-  try {
-    await invoiceApi.markAsInvoiced(invoice.id, invoiceNumber)
-    toast.success('发票申请已标记开票')
-    markIssuedDialogOpen.value = false
-    invoicedForm.value.invoice_number = ''
-    await fetchInvoiceDetail(invoice.id)
-    emit('refresh')
-  } catch (error: unknown) {
-    logger.error('[InvoiceDetailSheet]', '标记开票失败', { error })
-    handleApiError(error, '标记开票')
-  } finally {
-    marking.value = false
-  }
+  markIssuedDialogOpen.value = false
+  await fetchInvoiceDetail(invoice.id)
+  emit('refresh')
 }
 
 const handleDownloadWithFeedback = async (_file?: FileAttachmentItem): Promise<void> => {
@@ -1396,11 +1373,10 @@ onBeforeUnmount((): void => {
         <Button
           v-if="canMarkIssued"
           type="button"
-          :disabled="marking"
           @click="handleMarkIssued"
         >
           <Stamp data-icon="inline-start" aria-hidden="true" />
-          标记开票
+          开票
         </Button>
         <Button
           v-if="canRedOffset"
@@ -1428,34 +1404,12 @@ onBeforeUnmount((): void => {
     </DetailSheetContent>
   </Sheet>
 
-  <Dialog :open="markIssuedDialogOpen" @update:open="markIssuedDialogOpen = $event">
-    <DialogContent class="sm:max-w-[480px]">
-      <DialogHeader>
-        <DialogTitle>标记开票</DialogTitle>
-        <DialogDescription>请输入发票号码以完成开票标记。</DialogDescription>
-      </DialogHeader>
-      <div class="dialog-form">
-        <div class="form-field">
-          <Label for="invoice-sheet-number">发票号码</Label>
-          <Input
-            id="invoice-sheet-number"
-            v-model="invoicedForm.invoice_number"
-            placeholder="请输入发票号码"
-            :disabled="marking"
-          />
-        </div>
-      </div>
-      <DialogFooter>
-        <Button variant="outline" type="button" :disabled="marking" @click="markIssuedDialogOpen = false">
-          取消
-        </Button>
-        <Button type="button" :disabled="marking" @click="handleConfirmIssued">
-          <Loader2 v-if="marking" data-icon="inline-start" aria-hidden="true" class="animate-spin" />
-          {{ marking ? '提交中...' : '确定' }}
-        </Button>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
+  <InvoiceMarkIssuedDialog
+    v-if="invoiceInfo"
+    v-model:open="markIssuedDialogOpen"
+    :application-id="invoiceInfo.id"
+    @issued="handleInvoiceIssued"
+  />
 
   <Dialog :open="redOffsetDialogOpen" @update:open="handleRedOffsetDialogOpenChange">
     <DialogContent class="sm:max-w-[520px]">

@@ -23,11 +23,11 @@ import { AmountText, DataTable, TableRowActions } from '@/components/crmwolf'
 import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
 import type { ViewPreferenceConfig } from '@/api/viewPreference'
-import { Button } from '@/components/ui/button'
 import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
 import InvoiceDetailSheet from '@/views/InvoiceDetailSheet.vue'
 import InvoiceApplicationFormDialog from '@/components/dialogs/InvoiceApplicationFormDialog.vue'
+import InvoiceMarkIssuedDialog from '@/components/dialogs/InvoiceMarkIssuedDialog.vue'
 import {
   downloadInvoiceFile as downloadInvoiceFileApi,
   downloadInvoiceReissueFile,
@@ -66,12 +66,8 @@ const editingInvoiceApplication = ref<InvoiceApplicationResponse | null>(null)
 const selectedInvoiceId = ref<number | null>(null)
 const invoiceDetailSheetVisible = ref(false)
 
-// 标记开票弹窗
-const invoicedModalVisible = ref(false)
-const currentApplication = ref<InvoiceApplicationResponse | null>(null)
-const invoicedForm = ref({
-  invoice_number: ''
-})
+const markIssuedDialogOpen = ref(false)
+const issuingInvoiceApplication = ref<InvoiceApplicationResponse | null>(null)
 
 const pagination = reactive({
   current: 1,
@@ -424,9 +420,8 @@ const handleDelete = async (record: InvoiceApplicationResponse): Promise<void> =
 }
 
 const handleMarkInvoiced = (record: InvoiceApplicationResponse): void => {
-  currentApplication.value = record
-  invoicedForm.value.invoice_number = ''
-  invoicedModalVisible.value = true
+  issuingInvoiceApplication.value = record
+  markIssuedDialogOpen.value = true
 }
 
 const toInvoiceRow = (row: Record<string, unknown>): InvoiceApplicationResponse => {
@@ -461,22 +456,17 @@ const deleteInvoiceRow = (row: Record<string, unknown>): void => {
   void handleDelete(toInvoiceRow(row))
 }
 
-const handleConfirmInvoiced = async (): Promise<void> => {
-  if (!invoicedForm.value.invoice_number) {
-    toast.error('请输入发票号码')
-    return
+const handleMarkIssuedDialogOpenChange = (open: boolean): void => {
+  markIssuedDialogOpen.value = open
+  if (!open) {
+    issuingInvoiceApplication.value = null
   }
+}
 
-  if (!currentApplication.value) return
-
-  try {
-    await invoiceApi.markAsInvoiced(currentApplication.value.id, invoicedForm.value.invoice_number)
-    toast.success('发票已标记开票')
-    invoicedModalVisible.value = false
-    fetchInvoiceApplications()
-  } catch (error) {
-    handleApiError(error, '标记开票')
-  }
+const handleInvoiceIssued = (): void => {
+  markIssuedDialogOpen.value = false
+  issuingInvoiceApplication.value = null
+  fetchInvoiceApplications()
 }
 
 const downloadInvoiceFile = async (row: InvoiceApplicationResponse): Promise<void> => {
@@ -849,25 +839,13 @@ watchEffect(() => {
       </template>
     </DataTable>
 
-    <!-- 标记开票弹窗（TODO: 替换为 shadcn-vue Dialog）-->
-    <div v-if="invoicedModalVisible" class="modal-overlay" @click="invoicedModalVisible = false">
-      <div class="modal-content" @click.stop>
-        <h3 class="modal-title">标记开票</h3>
-        <div class="modal-body">
-          <label class="form-label">发票号码</label>
-          <input
-            v-model="invoicedForm.invoice_number"
-            type="text"
-            class="form-input"
-            placeholder="请输入发票号码"
-          />
-        </div>
-        <div class="modal-footer">
-          <Button variant="outline" @click="invoicedModalVisible = false">取消</Button>
-          <Button type="button" @click="handleConfirmInvoiced">确定</Button>
-        </div>
-      </div>
-    </div>
+    <InvoiceMarkIssuedDialog
+      v-if="issuingInvoiceApplication"
+      :open="markIssuedDialogOpen"
+      :application-id="issuingInvoiceApplication.id"
+      @update:open="handleMarkIssuedDialogOpenChange"
+      @issued="handleInvoiceIssued"
+    />
 
     <InvoiceApplicationFormDialog
       :open="invoiceApplicationDialogOpen"
@@ -1006,65 +984,4 @@ watchEffect(() => {
   color: $wolf-text-tertiary-v2;
 }
 
-// 简易弹窗样式（临时使用，后续替换为 shadcn-vue Dialog）
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.modal-content {
-  background: $wolf-bg-card-v2;
-  border-radius: $wolf-radius-overlay-v2;
-  padding: $wolf-space-lg-v2;
-  min-width: 400px;
-  max-width: 500px;
-}
-
-.modal-title {
-  font-size: $wolf-font-size-title-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  color: $wolf-text-primary-v2;
-  margin-bottom: $wolf-space-md-v2;
-}
-
-.modal-body {
-  margin-bottom: $wolf-space-lg-v2;
-}
-
-.form-label {
-  display: block;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  color: $wolf-text-secondary-v2;
-  margin-bottom: $wolf-space-xs-v2;
-}
-
-.form-input {
-  width: 100%;
-  height: 44px;
-  padding: 0 $wolf-space-md-v2;
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-v2;
-  font-size: $wolf-font-size-body-v2;
-  color: $wolf-text-primary-v2;
-
-  &:focus {
-    outline: $wolf-focus-ring-width-v2 solid $wolf-primary-v2;
-    outline-offset: $wolf-focus-ring-offset-v2;
-  }
-}
-
-.modal-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: $wolf-space-sm-v2;
-}
 </style>
