@@ -75,6 +75,10 @@ const canViewSalesDashboard = computed(() => permissionStore.hasAnyPermission([
   'sales_dashboard:view:all',
 ]))
 
+const shouldShowDashboardGroup = computed(() => {
+  return !permissionStore.initialized || canViewSalesDashboard.value
+})
+
 const navGroups = computed<NavMainGroup[]>(() => [
   {
     label: '销售流程',
@@ -140,7 +144,7 @@ const navGroups = computed<NavMainGroup[]>(() => [
       },
     ],
   },
-  ...(canViewSalesDashboard.value
+  ...(shouldShowDashboardGroup.value
     ? [{
         label: '数据看板',
         items: [

@@ -133,6 +133,21 @@ describe('AppLayout sidebar visibility CSS contract', () => {
     expect(appLayoutSource).not.toContain('height: calc(100dvh - $wolf-bottom-nav-height-v2)')
   })
 
+  it('keeps the desktop sidebar uncontrolled when no open prop is passed', () => {
+    const sidebarProviderSource = readFileSync('src/components/ui/sidebar/SidebarProvider.vue', 'utf-8')
+
+    expect(sidebarProviderSource).not.toContain('open: undefined')
+    expect(sidebarProviderSource).toContain('passive: (props.open === undefined) as false')
+  })
+
+  it('keeps dashboard navigation visible while permissions are still loading', () => {
+    const appSidebarSource = readFileSync('src/components/app-sidebar/AppSidebar.vue', 'utf-8')
+
+    expect(appSidebarSource).toContain('const shouldShowDashboardGroup = computed(() => {')
+    expect(appSidebarSource).toContain('return !permissionStore.initialized || canViewSalesDashboard.value')
+    expect(appSidebarSource).toContain('...(shouldShowDashboardGroup.value')
+  })
+
   it('keeps the top bar aligned with the white main workspace surface', () => {
     const appLayoutSource = readFileSync('src/AppLayout.vue', 'utf-8')
 

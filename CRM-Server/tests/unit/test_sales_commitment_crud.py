@@ -829,6 +829,35 @@ def test_projection_run_records_success_and_idempotent_retry(db_session):
     assert rows[0].id == result.created_task_ids[0]
 
 
+def test_projection_run_skips_existing_completed_source_hash_instead_of_failing(db_session):
+    _seed_customer_and_activity(db_session)
+
+    first = follow_up_task_projection_service.run_activity_projection(
+        db_session,
+        activity_id=10,
+        trigger_type=FollowUpTaskProjectionTrigger.HISTORICAL_BACKFILL,
+        actor_id="2",
+    )
+    task = follow_up_task_crud.get_by_id(db_session, first.created_task_ids[0], team_id=1)
+    follow_up_task_crud.complete(db_session, task)
+
+    repeat = follow_up_task_projection_service.run_activity_projection(
+        db_session,
+        activity_id=10,
+        trigger_type=FollowUpTaskProjectionTrigger.HISTORICAL_BACKFILL,
+        actor_id="2",
+    )
+
+    assert repeat.projection_run_status == FollowUpTaskProjectionStatus.SKIPPED
+    assert repeat.skip_reason == FollowUpTaskProjectionSkipReason.DUPLICATE_EXISTING_TASK
+    assert repeat.error_message is None
+    assert db_session.query(FollowUpTask).count() == 1
+    run = follow_up_task_projection_run_crud.get_by_id(db_session, repeat.projection_run_id, team_id=1)
+    assert run.status == FollowUpTaskProjectionStatus.SKIPPED
+    assert run.skip_reason == FollowUpTaskProjectionSkipReason.DUPLICATE_EXISTING_TASK
+    assert run.error_message is None
+
+
 def test_projection_run_records_skipped_without_next_step(db_session):
     _seed_customer_and_activity(db_session)
     activity = customer_activity_crud.get_by_id(db_session, 10)

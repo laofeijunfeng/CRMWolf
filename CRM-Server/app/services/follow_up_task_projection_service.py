@@ -48,6 +48,7 @@ class FollowUpTaskProjectionSkipReason:
     NO_NEXT_STEP = "NO_NEXT_STEP"
     NO_DUE_AT = "NO_DUE_AT"
     NO_CHANGE = "NO_CHANGE"
+    DUPLICATE_EXISTING_TASK = "DUPLICATE_EXISTING_TASK"
     SOURCE_NEXT_STEP_REMOVED = "SOURCE_NEXT_STEP_REMOVED"
     SOURCE_ACTIVITY_DELETED = "SOURCE_ACTIVITY_DELETED"
     SUPERSEDED_INPUT = "SUPERSEDED_INPUT"
@@ -499,6 +500,16 @@ class FollowUpTaskProjectionService:
             )
             commitment_id = existing_commitments[0].id if existing_commitments else None
 
+        duplicate_existing_task = None
+        if not existing_tasks:
+            duplicate_existing_task = follow_up_task_crud.get_by_source_hash(
+                db,
+                team_id=activity.team_id,
+                source_type=FollowUpTaskSourceType.CUSTOMER_ACTIVITY,
+                source_key=source_key,
+                task_hash=task_hash,
+            )
+
         if existing_tasks:
             task = existing_tasks[0]
             duplicate_tasks = existing_tasks[1:]
@@ -582,7 +593,7 @@ class FollowUpTaskProjectionService:
                         reason="DUPLICATE_SOURCE_TASK",
                     )
                 )
-        else:
+        elif duplicate_existing_task is None:
             created_task = self._create_task(
                 db,
                 activity=activity,
@@ -601,8 +612,10 @@ class FollowUpTaskProjectionService:
             created_task_ids.append(created_task.id)
 
         skip_reason = None
+        if duplicate_existing_task is not None:
+            skip_reason = FollowUpTaskProjectionSkipReason.DUPLICATE_EXISTING_TASK
         if not created_task_ids and not updated_task_ids and not cancelled_task_ids and not created_commitment_ids and not updated_commitment_ids:
-            skip_reason = FollowUpTaskProjectionSkipReason.NO_CHANGE
+            skip_reason = skip_reason or FollowUpTaskProjectionSkipReason.NO_CHANGE
 
         self._sync_vector_documents(
             db,
