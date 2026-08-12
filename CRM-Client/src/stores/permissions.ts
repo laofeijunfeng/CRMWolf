@@ -1,9 +1,14 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import permissionApi, { type PermissionResponse } from '@/api/permissions'
+import permissionApi from '@/api/permissions'
+import { logger } from '@/utils/logger'
+import type {
+  PermissionResponse as UserPermissionResponse,
+  UserPermissionsResponse
+} from '@/schemas/auth'
 
 export const usePermissionStore = defineStore('permissions', () => {
-  const permissions = ref<PermissionResponse[]>([])
+  const permissions = ref<UserPermissionResponse[]>([])
   const loading = ref(false)
   const initialized = ref(false)
 
@@ -67,37 +72,30 @@ export const usePermissionStore = defineStore('permissions', () => {
     return hasPermission(`${resource}:cancel`)
   }
 
-  const fetchPermissions = async () => {
+  const fetchPermissions = async (): Promise<UserPermissionsResponse | undefined> => {
     if (loading.value) return
-    
+
     loading.value = true
     try {
       const response = await permissionApi.getUserPermissions({ use_cache: false })
-      permissions.value = response.permissions || []
+      permissions.value = response.permissions
       initialized.value = true
-      
-      console.log('========== 权限信息调试 ==========')
-      console.log('原始权限数据:', response)
-      console.log('权限列表:', permissions.value)
-      console.log('权限代码列表:', permissions.value.map(p => p.code))
-      console.log('权限集合:', Array.from(permissionSet.value))
-      console.log('=================================')
-      
+
       return response
     } catch (error) {
-      console.error('获取权限失败', error)
+      logger.error('[PermissionStore]', 'fetchPermissions:failed', { error })
       throw error
     } finally {
       loading.value = false
     }
   }
 
-  const clearPermissions = () => {
+  const clearPermissions = (): void => {
     permissions.value = []
     initialized.value = false
   }
 
-  const refreshPermissions = async () => {
+  const refreshPermissions = async (): Promise<UserPermissionsResponse | undefined> => {
     clearPermissions()
     return await fetchPermissions()
   }

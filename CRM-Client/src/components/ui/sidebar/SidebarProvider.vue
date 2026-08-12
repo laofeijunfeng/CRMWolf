@@ -6,12 +6,15 @@ import { computed, ref } from "vue"
 import { cn } from "@/lib/utils"
 import { provideSidebarContext, SIDEBAR_COOKIE_MAX_AGE, SIDEBAR_COOKIE_NAME, SIDEBAR_KEYBOARD_SHORTCUT, SIDEBAR_WIDTH, SIDEBAR_WIDTH_ICON } from "./utils"
 
-const props = withDefaults(defineProps<{
+interface SidebarProviderProps {
   defaultOpen?: boolean
-  open?: boolean
+  open?: boolean | undefined
   class?: HTMLAttributes["class"]
-}>(), {
+}
+
+const props = withDefaults(defineProps<SidebarProviderProps>(), {
   defaultOpen: defaultDocument?.cookie.includes(`${SIDEBAR_COOKIE_NAME}=false`) === false,
+  open: undefined,
 })
 
 const emits = defineEmits<{

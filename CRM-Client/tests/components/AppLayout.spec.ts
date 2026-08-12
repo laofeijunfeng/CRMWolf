@@ -136,7 +136,7 @@ describe('AppLayout sidebar visibility CSS contract', () => {
   it('keeps the desktop sidebar uncontrolled when no open prop is passed', () => {
     const sidebarProviderSource = readFileSync('src/components/ui/sidebar/SidebarProvider.vue', 'utf-8')
 
-    expect(sidebarProviderSource).not.toContain('open: undefined')
+    expect(sidebarProviderSource).toContain('open: undefined')
     expect(sidebarProviderSource).toContain('passive: (props.open === undefined) as false')
   })
 

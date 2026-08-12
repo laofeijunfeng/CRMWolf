@@ -4,16 +4,14 @@ import {
   RoleMutationResponseSchema,
   type PermissionResponse
 } from '@/schemas/role'
+import {
+  UserPermissionsResponseSchema,
+  type UserPermissionsResponse
+} from '@/schemas/auth'
 import { omitUndefined } from '@/lib/utils'
 import { z } from 'zod'
 
 export type { PermissionResponse } from '@/schemas/role'
-
-export interface UserPermissionsResponse {
-  permissions: PermissionResponse[]
-  total: number
-  cached?: boolean
-}
 
 export interface PermissionQueryParams {
   skip?: number
@@ -28,12 +26,6 @@ export interface GetUserPermissionsParams {
 
 const permissionApi = {
   async getUserPermissions(params?: GetUserPermissionsParams): Promise<UserPermissionsResponse> {
-    const UserPermissionsResponseSchema = z.object({
-      permissions: z.array(PermissionResponseSchema),
-      total: z.number(),
-      cached: z.boolean().optional(),
-    })
-
     // eslint-disable-next-line crmwolf/require-zod-schema
     const response = await request.get<UserPermissionsResponse>('/v1/auth/me/permissions', {
       params: params ?? {}
