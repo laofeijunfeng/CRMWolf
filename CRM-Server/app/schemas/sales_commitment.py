@@ -737,3 +737,114 @@ class FollowUpTaskConfirmationCaseResponse(_PublicIdResponse):
         data["customer_id"] = customer_public_id
         data["customer_public_id"] = customer_public_id
         return cls.model_validate(data)
+
+
+class FollowUpTaskConfirmationResolveRequest(BaseModel):
+    reply_text: str = Field(..., min_length=1, max_length=500, description="用户对确认问题的回复")
+
+
+class FollowUpTaskConfirmationCustomerResponse(BaseModel):
+    id: str = Field(..., description="客户对外ID")
+    public_id: str = Field(..., description="客户对外ID")
+    name: str = Field(..., description="客户名称")
+    account_name: str = Field(..., description="客户名称")
+
+
+class FollowUpTaskConfirmationTaskResponse(BaseModel):
+    id: str = Field(..., description="跟进任务对外ID")
+    public_id: str = Field(..., description="跟进任务对外ID")
+    title: str = Field(..., description="跟进任务标题")
+    description: str | None = Field(None, description="跟进任务说明")
+    status: str = Field(..., description="跟进任务状态")
+    due_at: datetime | None = Field(None, description="任务到期时间")
+    due_at_text: str | None = Field(None, description="任务原始时间表达")
+    source_type: str | None = Field(None, description="任务来源类型")
+    source_public_id: str | None = Field(None, description="任务来源对象对外ID")
+
+
+class FollowUpTaskConfirmationCaseItemResponse(BaseModel):
+    id: str = Field(..., description="确认Case对外ID")
+    public_id: str = Field(..., description="确认Case对外ID")
+    status: str = Field(..., description="确认状态")
+    question_text: str = Field(..., description="确认问题")
+    suggested_action: str = Field(..., description="建议动作")
+    owner_id: str = Field(..., description="归属人ID")
+    creator_id: str = Field(..., description="创建人ID")
+    customer: FollowUpTaskConfirmationCustomerResponse | None = None
+    task: FollowUpTaskConfirmationTaskResponse | None = None
+    expires_at: datetime | None = None
+    prompt_count: int = 0
+    last_prompted_at: datetime | None = None
+    unresolved_reply_count: int = 0
+    last_unresolved_reply_text: str | None = None
+    last_unresolved_reply_at: datetime | None = None
+    resolved_action: str | None = None
+    resolved_due_at: datetime | None = None
+    resolved_due_at_text: str | None = None
+    expired_at: datetime | None = None
+    application_status: str | None = None
+    application_skip_reason: str | None = None
+    applied_at: datetime | None = None
+    created_time: datetime | None = None
+
+
+class FollowUpTaskConfirmationCaseFiltersResponse(BaseModel):
+    status: str
+    owner_scope: str
+
+
+class FollowUpTaskConfirmationUsagePolicyResponse(BaseModel):
+    case_state_source: str | None = None
+    task_state_source: str | None = None
+    mutation_gate: str | None = None
+    rule: str
+
+
+class FollowUpTaskConfirmationCaseListResponse(BaseModel):
+    items: list[FollowUpTaskConfirmationCaseItemResponse]
+    total: int
+    skip: int
+    limit: int
+    filters: FollowUpTaskConfirmationCaseFiltersResponse
+    usage_policy: FollowUpTaskConfirmationUsagePolicyResponse
+
+
+class FollowUpTaskConfirmationPendingCountResponse(BaseModel):
+    count: int
+
+
+class FollowUpTaskConfirmationDecisionResponse(BaseModel):
+    action: str
+    confidence: float
+    reason: str
+    resolved: bool
+    proposed_due_at: datetime | None = None
+    proposed_due_at_text: str | None = None
+
+
+class FollowUpTaskConfirmationExecutionResultResponse(BaseModel):
+    status: str
+    action: str
+    task_public_id: str | None = None
+    previous_status: str | None = None
+    new_status: str | None = None
+    skip_reason: str | None = None
+    event_type: str | None = None
+    payload_json: dict[str, Any] | None = None
+
+
+class FollowUpTaskConfirmationApplicationResponse(BaseModel):
+    status: str
+    case_public_id: str | None = None
+    task_public_id: str | None = None
+    action: str | None = None
+    skip_reason: str | None = None
+    execution_results: list[FollowUpTaskConfirmationExecutionResultResponse] = Field(default_factory=list)
+
+
+class FollowUpTaskConfirmationResolveResponse(BaseModel):
+    case: FollowUpTaskConfirmationCaseItemResponse | None = None
+    decision: FollowUpTaskConfirmationDecisionResponse
+    application: FollowUpTaskConfirmationApplicationResponse
+    assistant_follow_up_prompt: str | None = None
+    usage_policy: FollowUpTaskConfirmationUsagePolicyResponse

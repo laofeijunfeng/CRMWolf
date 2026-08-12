@@ -32,7 +32,7 @@ vi.mock('@/stores/team', () => ({ useTeamStore: () => teamStore }))
 vi.mock('@/stores/permissions', () => ({ usePermissionStore: () => permissionStore }))
 vi.mock('@/stores/pageTitle', () => ({ usePageTitleStore: () => ({ title: ref(''), tabs: [], activeTab: '', hasTabs: false }) }))
 vi.mock('@/stores/header', () => ({ useHeaderStore: () => ({ tabs: [], activeTab: '', hasTabs: false, leftAction: null, showBack: false, backRoute: null, actions: [], hasActions: false, setActiveTab: vi.fn() }) }))
-vi.mock('@/utils/logger', () => ({ logger: { error: vi.fn() } }))
+vi.mock('@/utils/logger', () => ({ logger: { error: vi.fn(), warn: vi.fn() } }))
 vi.mock('@/utils/confirmDialog', () => ({ confirmLogout: vi.fn() }))
 
 import AppLayout from '@/AppLayout.vue'
@@ -58,6 +58,7 @@ describe('AppLayout user menu', () => {
       global: {
         stubs: {
           ApprovalIcon: true,
+          FollowUpConfirmationIcon: true,
           BottomNav: true,
           TopBarTabs: true,
           'router-view': true,

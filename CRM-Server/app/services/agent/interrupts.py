@@ -18,6 +18,7 @@ TURN_RELATION_SOURCE_EVENT = "turn_relation_clarification_required"
 TURN_RELATION_BUSINESS_ACTION = "select_suspended_task"
 RUNTIME_WAITING_EVENT_TYPES = WAITING_TASK_EVENT_TYPES | frozenset({
     "pending_interruption_confirmation_required",
+    "follow_up_task_confirmation_case_prompt",
     TURN_RELATION_SOURCE_EVENT,
 })
 
@@ -28,6 +29,7 @@ AgentInterruptReason = Literal[
     "missing_required_fields",
     "insufficient_follow_up_quality",
     "pending_flow_switch_confirmation",
+    "follow_up_task_confirmation",
     "user_input_required",
 ]
 AgentResumeAction = Literal[
@@ -292,7 +294,9 @@ def validate_resume_payload(
             raise ValueError("skip_current_action is only allowed for optional non-blocking actions")
         return
     if action == "select" or interrupt_type == "choice":
-        if action != "cancel" and not _has_choice_resume_value(metadata):
+        has_choice_value = _has_choice_resume_value(metadata)
+        allows_free_text = _is_follow_up_confirmation_choice_interrupt(current_interrupt) and bool(content_text)
+        if action != "cancel" and not has_choice_value and not allows_free_text:
             if _is_turn_relation_choice_interrupt(current_interrupt):
                 raise ValueError("choice interrupt resume requires a selected task id or turn_relation in metadata")
             raise ValueError("choice interrupt resume requires a selected id in metadata")
@@ -329,6 +333,7 @@ def interrupt_payload_from_json(value: object) -> AgentInterruptPayload | None:
         "missing_required_fields",
         "insufficient_follow_up_quality",
         "pending_flow_switch_confirmation",
+        "follow_up_task_confirmation",
         "user_input_required",
     }:
         interrupt_payload["reason"] = reason
@@ -436,6 +441,8 @@ def reason_for_event(
         return "insufficient_follow_up_quality"
     if event_name == "pending_interruption_confirmation_required":
         return "pending_flow_switch_confirmation"
+    if event_name == "follow_up_task_confirmation_case_prompt":
+        return "follow_up_task_confirmation"
     return "user_input_required"
 
 
@@ -604,6 +611,7 @@ def _has_selection_resume_value(metadata: JSONDict) -> bool:
         "selected_payment_plan_id",
         "selected_option_id",
         "choice_id",
+        "selected_value",
     ):
         value = metadata.get(key)
         if _is_ref_id(value) and str(value).strip():
@@ -620,6 +628,16 @@ def _has_choice_resume_value(metadata: JSONDict) -> bool:
 def _has_turn_relation_resume_value(metadata: JSONDict) -> bool:
     relation = metadata.get("turn_relation")
     return relation in {"START_NEW_FLOW", "RESUME_SUSPENDED_DRAFT", "ASK_USER"}
+
+
+def _is_follow_up_confirmation_choice_interrupt(current_interrupt: AgentInterruptPayload) -> bool:
+    if current_interrupt.get("type") != "choice":
+        return False
+    if current_interrupt.get("reason") == "follow_up_task_confirmation":
+        return True
+    if current_interrupt.get("source_event") == "follow_up_task_confirmation_case_prompt":
+        return True
+    return current_interrupt.get("business_action") == "resolve_follow_up_task_confirmation_case"
 
 
 def _is_turn_relation_choice_interrupt(current_interrupt: AgentInterruptPayload) -> bool:

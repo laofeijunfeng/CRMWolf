@@ -48,6 +48,8 @@ export type AgentEventType =
   | "action_review_decided"
   | "action_review_finished"
   | "action_auto_execution_queued"
+  | "agent_root_customer_intelligence_refresh_scheduled"
+  | "agent_root_customer_intelligence_refresh_schedule_failed"
   | "pending_interruption_confirmation_required"
   | "pending_task_interrupted"
   | "task_completed"
@@ -58,6 +60,54 @@ export type AgentEventType =
   | "error"
 
 export type AgentContentFormat = "text" | "markdown"
+
+export type AgentAsyncOperationStatus =
+  | "QUEUED"
+  | "RUNNING"
+  | "WAITING_USER"
+  | "RETRY_SCHEDULED"
+  | "SUCCEEDED"
+  | "DEGRADED"
+  | "FAILED"
+  | "CANCELLED"
+
+export interface AgentAsyncOperationEvent {
+  sequence: number
+  event_type: string
+  status: AgentAsyncOperationStatus | string
+  event_key: string
+  step?: string | null
+  message?: string | null
+  payload: Record<string, unknown>
+  occurred_at: string
+}
+
+export interface AgentAsyncOperation {
+  public_id: string
+  request_id: string
+  team_id: number
+  user_id: number
+  session_id?: number | null
+  source_user_message_id?: number | null
+  source_assistant_message_id?: number | null
+  operation_type: string
+  resource_type: string
+  resource_id?: number | null
+  resource_public_id?: string | null
+  status: AgentAsyncOperationStatus
+  summary?: string | null
+  current_step?: string | null
+  graph_thread_id?: string | null
+  result: Record<string, unknown>
+  error_message?: string | null
+  started_time?: string | null
+  finished_time?: string | null
+  next_retry_at?: string | null
+  attempt_count: number
+  created_time: string
+  updated_time: string
+  events: AgentAsyncOperationEvent[]
+}
 
 export interface AgentChatRequest {
   content: string
@@ -133,6 +183,14 @@ export interface AgentChatSSEEvent {
   data?: unknown
   error_message?: string | null
   status_code?: number | null
+  request_id?: string
+  operation_public_id?: string
+  source_user_message_id?: number
+  event_key?: string
+  trigger_type?: string
+  customer_id?: number
+  scheduled?: boolean
+  mode?: string
 }
 
 export interface AgentInteractionChoice {
@@ -177,6 +235,14 @@ export const agentApi = {
 
   listMessages: (sessionId: number, params?: { page?: number, page_size?: number }): Promise<PaginatedResponse<AgentMessageResponse>> => {
     return request.get<PaginatedResponse<AgentMessageResponse>>(`/v1/agent/sessions/${sessionId}/messages`, { params })
+  },
+
+  listSessionOperations: (sessionId: number, params?: { limit?: number }): Promise<AgentAsyncOperation[]> => {
+    return request.get<AgentAsyncOperation[]>(`/v1/agent/sessions/${sessionId}/operations`, { params })
+  },
+
+  getOperation: (operationPublicId: string): Promise<AgentAsyncOperation> => {
+    return request.get<AgentAsyncOperation>(`/v1/agent/operations/${operationPublicId}`)
   },
 
   chatStream: async (

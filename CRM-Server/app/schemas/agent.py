@@ -1,4 +1,5 @@
 """CRM AI Agent schemas."""
+
 from datetime import datetime
 from typing import List, Optional, TypeAlias
 
@@ -419,3 +420,47 @@ class AgentRuntimeHistoryResponse(BaseModel):
     total: int = Field(..., description="返回数量")
     before_checkpoint_id: Optional[str] = Field(None, description="本次查询的checkpoint游标")
     limit: int = Field(..., description="本次查询限制")
+
+
+class AgentAsyncOperationEventResponse(BaseModel):
+    sequence: int = Field(..., description="操作内递增事件序号")
+    event_type: str = Field(..., description="生命周期事件类型")
+    status: str = Field(..., description="事件后的操作状态")
+    event_key: str = Field(..., description="操作内事件幂等键")
+    step: Optional[str] = Field(None, description="当前业务步骤")
+    message: Optional[str] = Field(None, description="用户可见进度说明")
+    payload: JsonDict = Field(default_factory=dict, description="结构化进度载荷")
+    occurred_at: datetime = Field(..., description="事件发生时间")
+
+    class Config:
+        from_attributes = True
+
+
+class AgentAsyncOperationResponse(BaseModel):
+    public_id: str = Field(..., description="异步操作对外ID")
+    request_id: str = Field(..., description="后台请求ID")
+    team_id: int = Field(..., description="团队ID")
+    user_id: int = Field(..., description="用户ID")
+    session_id: Optional[int] = Field(None, description="来源 Agent 会话ID")
+    source_user_message_id: Optional[int] = Field(None, description="来源用户消息ID")
+    source_assistant_message_id: Optional[int] = Field(None, description="来源助手消息ID")
+    operation_type: str = Field(..., description="异步操作类型")
+    resource_type: str = Field(..., description="业务资源类型")
+    resource_id: Optional[int] = Field(None, description="内部业务资源ID")
+    resource_public_id: Optional[str] = Field(None, description="业务资源对外ID")
+    status: str = Field(..., description="异步操作状态")
+    summary: Optional[str] = Field(None, description="用户可见摘要")
+    current_step: Optional[str] = Field(None, description="当前步骤")
+    graph_thread_id: Optional[str] = Field(None, description="LangGraph thread ID")
+    result: JsonDict = Field(default_factory=dict, description="可回放结果摘要")
+    error_message: Optional[str] = Field(None, description="错误信息")
+    started_time: Optional[datetime] = Field(None, description="开始时间")
+    finished_time: Optional[datetime] = Field(None, description="结束时间")
+    next_retry_at: Optional[datetime] = Field(None, description="下次重试时间")
+    attempt_count: int = Field(0, description="已开始执行次数")
+    created_time: datetime = Field(..., description="创建时间")
+    updated_time: datetime = Field(..., description="更新时间")
+    events: List[AgentAsyncOperationEventResponse] = Field(default_factory=list, description="可回放进度事件")
+
+    class Config:
+        from_attributes = True

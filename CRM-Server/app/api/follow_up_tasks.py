@@ -11,15 +11,29 @@ from app.core.database import get_db
 from app.core.deps import get_current_active_user, get_current_user_team
 from app.crud.permission import permission_crud
 from app.crud.sales_commitment import (
+    follow_up_task_confirmation_case_crud,
     follow_up_task_crud,
     follow_up_task_projection_run_crud,
     sales_commitment_crud,
 )
-from app.models.sales_commitment import FollowUpTaskProjectionStatus, FollowUpTaskSourceType
-from app.schemas.sales_commitment import FollowUpTaskProjectionRunResponse
-from app.services.follow_up_task_reconciliation_evaluation_service import FollowUpTaskReconciliationDecision
+from app.models.sales_commitment import (
+    FollowUpTaskConfirmationStatus,
+    FollowUpTaskProjectionStatus,
+    FollowUpTaskSourceType,
+)
+from app.schemas.sales_commitment import (
+    FollowUpTaskConfirmationCaseListResponse,
+    FollowUpTaskConfirmationPendingCountResponse,
+    FollowUpTaskConfirmationResolveRequest,
+    FollowUpTaskConfirmationResolveResponse,
+    FollowUpTaskProjectionRunResponse,
+)
+from app.services.follow_up_task_confirmation_channel_service import (
+    follow_up_task_confirmation_channel_service,
+)
 from app.services.follow_up_task_projection_service import follow_up_task_projection_service
 from app.services.follow_up_task_query_service import follow_up_task_query_service
+from app.services.follow_up_task_reconciliation_evaluation_service import FollowUpTaskReconciliationDecision
 from app.services.follow_up_task_transition_execution_service import (
     FollowUpTaskTransitionExecutionStatus,
     follow_up_task_transition_execution_service,
@@ -71,6 +85,76 @@ def list_follow_up_tasks(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get(
+    "/confirmation-cases",
+    response_model=FollowUpTaskConfirmationCaseListResponse,
+    summary="查询我的待确认跟进任务",
+)
+def list_follow_up_task_confirmation_cases(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> FollowUpTaskConfirmationCaseListResponse:
+    payload = follow_up_task_confirmation_channel_service.list_pending_cases(
+        db,
+        team_id=team_id,
+        user_id=current_user.id,
+        skip=skip,
+        limit=limit,
+    )
+    return FollowUpTaskConfirmationCaseListResponse.model_validate(payload)
+
+
+@router.get(
+    "/confirmation-cases/pending-count",
+    response_model=FollowUpTaskConfirmationPendingCountResponse,
+    summary="查询我的待确认跟进任务数量",
+)
+def get_follow_up_task_confirmation_pending_count(
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> FollowUpTaskConfirmationPendingCountResponse:
+    payload = follow_up_task_confirmation_channel_service.list_pending_cases(
+        db,
+        team_id=team_id,
+        user_id=current_user.id,
+        limit=1,
+    )
+    return FollowUpTaskConfirmationPendingCountResponse(count=int(payload["total"]))
+
+
+@router.post(
+    "/confirmation-cases/{case_id}/resolve",
+    response_model=FollowUpTaskConfirmationResolveResponse,
+    summary="处理待确认跟进任务",
+)
+def resolve_follow_up_task_confirmation_case(
+    case_id: str,
+    request: FollowUpTaskConfirmationResolveRequest,
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> FollowUpTaskConfirmationResolveResponse:
+    case = follow_up_task_confirmation_case_crud.get_by_public_id(db, case_id, team_id=team_id)
+    if (
+        case is None
+        or case.owner_id != str(current_user.id)
+        or case.status != FollowUpTaskConfirmationStatus.PENDING
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="待确认事项不存在")
+    payload = follow_up_task_confirmation_channel_service.resolve_reply(
+        db,
+        team_id=team_id,
+        user_id=current_user.id,
+        case_public_id=case_id,
+        reply_text=request.reply_text,
+    )
+    return FollowUpTaskConfirmationResolveResponse.model_validate(payload)
 
 
 @router.get("/customer-arrangements/{customer_id}", summary="查询客户当前跟进安排")

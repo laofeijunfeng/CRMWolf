@@ -97,7 +97,11 @@ class FollowUpTaskConfirmationPromptChannel:
 
 
 class FollowUpTaskConfirmationPromptStatus:
+    QUEUED = "QUEUED"
+    PROJECTED = "PROJECTED"
     SENT = "SENT"
+    SKIPPED = "SKIPPED"
+    FAILED = "FAILED"
 
 
 class DueAtGranularity:
@@ -442,13 +446,20 @@ class FollowUpTaskConfirmationPromptDelivery(Base):
         comment="投递状态",
     )
     payload_json = Column(JSON, nullable=True, comment="投递载荷快照")
-    prompted_at = Column(DateTime, nullable=False, default=business_now, index=True, comment="提示时间")
+    reason_code = Column(String(80), nullable=True, index=True, comment="投递状态原因码")
+    error_message = Column(Text, nullable=True, comment="投递失败信息")
+    thread_id = Column(String(160), nullable=True, index=True, comment="Agent线程ID")
+    run_id = Column(String(100), nullable=True, index=True, comment="运行ID")
+    attempted_at = Column(DateTime, nullable=False, default=business_now, index=True, comment="投递尝试时间")
+    delivered_at = Column(DateTime, nullable=True, index=True, comment="确认送达时间")
+    prompted_at = Column(DateTime, nullable=False, default=business_now, index=True, comment="兼容提示时间")
     created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
 
     __table_args__ = (
         Index("idx_follow_up_confirmation_prompt_owner_time", "team_id", "owner_id", "prompted_at"),
         Index("idx_follow_up_confirmation_prompt_case_time", "team_id", "case_id", "prompted_at"),
         Index("idx_follow_up_confirmation_prompt_session", "team_id", "agent_session_id", "created_time"),
+        Index("uq_follow_up_confirmation_prompt_key", "team_id", "prompt_key", unique=True),
         {"comment": "跟进任务确认提示投递日志表"},
     )
 

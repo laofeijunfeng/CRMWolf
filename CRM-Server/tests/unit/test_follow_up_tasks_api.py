@@ -178,7 +178,7 @@ def _seed_customer_and_activity(db):
     )
 
 
-def _create_commitment(db):
+def _create_commitment(db, *, task_id: int = 201):
     return sales_commitment_crud.create(
         db,
         SalesCommitmentInternalCreate(
@@ -194,13 +194,13 @@ def _create_commitment(db):
             due_at_text="下周三",
             due_at_granularity=DueAtGranularity.DATETIME,
             evidence_json={"activity_id": 101},
-            commitment_hash="commitment-hash",
+            commitment_hash=f"commitment-hash-{task_id}",
         ),
     )
 
 
 def _create_task(db, *, task_id: int = 201, owner_id: str = "2", status: str = FollowUpTaskStatus.OPEN):
-    commitment = _create_commitment(db)
+    commitment = _create_commitment(db, task_id=task_id)
     return follow_up_task_crud.create(
         db,
         FollowUpTaskInternalCreate(
@@ -222,6 +222,36 @@ def _create_task(db, *, task_id: int = 201, owner_id: str = "2", status: str = F
             task_hash=f"task-hash-{task_id}",
         ),
     )
+
+
+def _create_confirmation_case(
+    db,
+    *,
+    task: FollowUpTask,
+    case_id: int = 301,
+    public_id: str = "fuc_11111111111111111111111111111111",
+    owner_id: str | None = None,
+):
+    case = FollowUpTaskConfirmationCase(
+        id=case_id,
+        public_id=public_id,
+        team_id=task.team_id,
+        task_id=task.id,
+        customer_id=task.customer_id,
+        owner_id=owner_id or task.owner_id,
+        creator_id="2",
+        status="PENDING",
+        suggested_action="COMPLETE",
+        confirmation_hash=f"confirmation-hash-{case_id}",
+        question_text=f"上次安排的「{task.title}」这次是否已经完成?",
+        source_activity_id=task.source_activity_id,
+        source_public_id=task.source_public_id,
+        source_plan_json={"plan_source": "unit_test"},
+    )
+    db.add(case)
+    db.commit()
+    db.refresh(case)
+    return case
 
 
 def _create_failed_projection_run(db):
@@ -289,6 +319,99 @@ def test_list_follow_up_tasks_returns_public_ids_and_customer_summary(client, db
     assert len(payload["customer_summary"]) == 1
     assert payload["customer_summary"][0]["customer"]["id"] == "cus_11111111111111111111111111111111"
     assert payload["usage_policy"]["task_state_source"] == "mysql"
+
+
+def test_list_pending_confirmation_cases_only_returns_current_owner_cases(client, db_session):
+    owned_task = _create_task(db_session, task_id=201, owner_id="2")
+    owned_case = _create_confirmation_case(db_session, task=owned_task)
+    other_task = _create_task(db_session, task_id=202, owner_id="9")
+    _create_confirmation_case(
+        db_session,
+        task=other_task,
+        case_id=302,
+        public_id="fuc_22222222222222222222222222222222",
+        owner_id="9",
+    )
+
+    response = client.get("/v1/follow-up-tasks/confirmation-cases")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 1
+    assert payload["skip"] == 0
+    assert payload["limit"] == 20
+    assert payload["items"][0]["public_id"] == owned_case.public_id
+    assert payload["items"][0]["task"]["public_id"] == owned_task.public_id
+    assert payload["items"][0]["customer"]["public_id"] == "cus_11111111111111111111111111111111"
+    assert "confirmation_hash" not in payload["items"][0]
+
+
+
+def test_pending_confirmation_cases_support_owner_scoped_pagination(client, db_session):
+    first_task = _create_task(db_session, task_id=211, owner_id="2")
+    first_case = _create_confirmation_case(
+        db_session,
+        task=first_task,
+        case_id=311,
+        public_id="fuc_31111111111111111111111111111111",
+    )
+    second_task = _create_task(db_session, task_id=212, owner_id="2")
+    second_case = _create_confirmation_case(
+        db_session,
+        task=second_task,
+        case_id=312,
+        public_id="fuc_31222222222222222222222222222222",
+    )
+
+    response = client.get("/v1/follow-up-tasks/confirmation-cases?skip=1&limit=1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 2
+    assert payload["skip"] == 1
+    assert payload["limit"] == 1
+    assert [item["public_id"] for item in payload["items"]] == [second_case.public_id]
+    assert first_case.public_id != second_case.public_id
+
+def test_pending_confirmation_count_is_owner_scoped(client, db_session):
+    task = _create_task(db_session, owner_id="2")
+    _create_confirmation_case(db_session, task=task)
+
+    response = client.get("/v1/follow-up-tasks/confirmation-cases/pending-count")
+
+    assert response.status_code == 200
+    assert response.json() == {"count": 1}
+
+
+def test_owner_can_resolve_confirmation_case_and_it_leaves_pending_inbox(client, db_session):
+    task = _create_task(db_session, owner_id="2")
+    case = _create_confirmation_case(db_session, task=task)
+
+    response = client.post(
+        f"/v1/follow-up-tasks/confirmation-cases/{case.public_id}/resolve",
+        json={"reply_text": "先放着"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["case"]["public_id"] == case.public_id
+    assert payload["case"]["status"] == "RESOLVED"
+    assert payload["decision"]["action"] == "KEEP_OPEN"
+    assert payload["application"]["status"] == "SKIPPED"
+    assert payload["application"]["skip_reason"] == "KEEP_OPEN_NO_MUTATION"
+    assert client.get("/v1/follow-up-tasks/confirmation-cases/pending-count").json() == {"count": 0}
+
+
+def test_non_owner_cannot_resolve_confirmation_case(client, db_session):
+    task = _create_task(db_session, owner_id="9")
+    case = _create_confirmation_case(db_session, task=task, owner_id="9")
+
+    response = client.post(
+        f"/v1/follow-up-tasks/confirmation-cases/{case.public_id}/resolve",
+        json={"reply_text": "已完成"},
+    )
+
+    assert response.status_code == 404
 
 
 def test_customer_arrangement_returns_readonly_customer_scope_without_internal_ids(client, db_session):

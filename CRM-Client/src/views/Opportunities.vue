@@ -851,6 +851,7 @@ watchEffect(() => {
     <!-- 新建商机弹窗 -->
     <OpportunityFormDialog
       :open="opportunityDialogOpen"
+      :success-message="null"
       @update:open="opportunityDialogOpen = $event"
       @success="handleOpportunitySuccess"
     />

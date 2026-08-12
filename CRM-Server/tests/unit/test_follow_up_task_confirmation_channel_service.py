@@ -449,3 +449,337 @@ def test_resolve_reply_applies_confirmation_case_for_agent_tool_boundary(db_sess
     assert result["decision"]["action"] == FollowUpTaskConfirmationResolutionAction.COMPLETE
     assert result["application"]["status"] == "APPLIED"
     assert task.status == FollowUpTaskStatus.COMPLETED
+
+
+def test_prepare_case_prompt_queues_attempt_until_checkpoint_acknowledges_projection(db_session):
+    task = _create_task(db_session)
+    case = _create_confirmation_case(db_session, task)
+    service = FollowUpTaskConfirmationChannelService()
+
+    first_event = service.prepare_case_prompt_by_public_ids(
+        db_session,
+        team_id=1,
+        user_id=2,
+        case_public_ids=[case.public_id],
+        interaction_scope="crm_agent:1:2:33:test",
+    )
+    second_event = service.prepare_case_prompt_by_public_ids(
+        db_session,
+        team_id=1,
+        user_id=2,
+        case_public_ids=[case.public_id],
+        interaction_scope="crm_agent:1:2:33:test",
+    )
+
+    db_session.refresh(case)
+    deliveries = db_session.query(FollowUpTaskConfirmationPromptDelivery).all()
+
+    assert first_event is not None
+    assert second_event is not None
+    assert first_event["interaction"]["interaction_id"] == second_event["interaction"]["interaction_id"]
+    assert first_event["delivery"]["status"] == FollowUpTaskConfirmationPromptStatus.QUEUED
+    assert first_event["delivery"]["reason_code"] == "ROOT_GRAPH_INTERRUPT_PLANNED"
+    assert first_event["interaction"]["payload"]["prompt_delivery_key"].startswith("projection:")
+    assert len(deliveries) == 1
+    assert deliveries[0].status == FollowUpTaskConfirmationPromptStatus.QUEUED
+    assert deliveries[0].reason_code == "ROOT_GRAPH_INTERRUPT_PLANNED"
+    assert deliveries[0].attempted_at is not None
+    assert deliveries[0].delivered_at is None
+    assert case.prompt_count == 0
+    assert case.last_prompted_at is None
+
+
+
+def test_prepare_case_prompt_uses_bounded_deterministic_key_for_max_length_scope(db_session):
+    task = _create_task(db_session)
+    case = _create_confirmation_case(db_session, task)
+    service = FollowUpTaskConfirmationChannelService()
+    session_key = "s" * 64
+    initial_scope = f"crm_agent:1:2:33:{session_key}"
+    clarification_scope = f"{initial_scope}:clarification:1"
+
+    first_event = service.prepare_case_prompt_by_public_ids(
+        db_session,
+        team_id=1,
+        user_id=2,
+        case_public_ids=[case.public_id],
+        interaction_scope=initial_scope,
+    )
+    retried_event = service.prepare_case_prompt_by_public_ids(
+        db_session,
+        team_id=1,
+        user_id=2,
+        case_public_ids=[case.public_id],
+        interaction_scope=initial_scope,
+    )
+    clarification_event = service.prepare_case_prompt_by_public_ids(
+        db_session,
+        team_id=1,
+        user_id=2,
+        case_public_ids=[case.public_id],
+        interaction_scope=clarification_scope,
+        prompt_override="请明确选择已完成、延期或忽略。",
+    )
+
+    initial_key = first_event["interaction"]["payload"]["prompt_delivery_key"]
+    retry_key = retried_event["interaction"]["payload"]["prompt_delivery_key"]
+    clarification_key = clarification_event["interaction"]["payload"]["prompt_delivery_key"]
+
+    assert initial_key == retry_key
+    assert initial_key != clarification_key
+    assert initial_key.startswith("projection:")
+    assert clarification_key.startswith("projection:")
+    assert len(initial_key) <= 128
+    assert len(clarification_key) <= 128
+    assert len(service._projection_prompt_key(
+        case_public_id="fuc_" + ("c" * 60),
+        interaction_scope=clarification_scope,
+    )) <= 128
+    assert service.mark_projection_projected(
+        db_session,
+        team_id=1,
+        prompt_key=initial_key,
+    ).status == FollowUpTaskConfirmationPromptStatus.PROJECTED
+
+
+def test_mark_projection_projected_transitions_queued_attempt_idempotently(db_session):
+    task = _create_task(db_session)
+    case = _create_confirmation_case(db_session, task)
+    service = FollowUpTaskConfirmationChannelService()
+    event = service.prepare_case_prompt_by_public_ids(
+        db_session,
+        team_id=1,
+        user_id=2,
+        case_public_ids=[case.public_id],
+        interaction_scope="crm_agent:1:2:33:test",
+    )
+    prompt_key = event["interaction"]["payload"]["prompt_delivery_key"]
+
+    first = service.mark_projection_projected(db_session, team_id=1, prompt_key=prompt_key)
+    second = service.mark_projection_projected(db_session, team_id=1, prompt_key=prompt_key)
+
+    assert first is not None
+    assert second is not None
+    assert first.id == second.id
+    assert second.status == FollowUpTaskConfirmationPromptStatus.PROJECTED
+    assert second.reason_code == "ROOT_GRAPH_INTERRUPT_CHECKPOINTED"
+
+def test_failed_projection_can_be_requeued_and_projected_with_same_prompt_key(db_session):
+    task = _create_task(db_session)
+    case = _create_confirmation_case(db_session, task)
+    service = FollowUpTaskConfirmationChannelService()
+    interaction_scope = "crm_agent:1:2:33:test"
+
+    event = service.prepare_case_prompt_by_public_ids(
+        db_session,
+        team_id=1,
+        user_id=2,
+        case_public_ids=[case.public_id],
+        interaction_scope=interaction_scope,
+    )
+    prompt_key = event["interaction"]["payload"]["prompt_delivery_key"]
+    failed = service.mark_projection_failed(
+        db_session,
+        team_id=1,
+        prompt_key=prompt_key,
+        error_message="checkpoint write failed",
+    )
+    failed_attempted_at = failed.attempted_at
+
+    retried_event = service.prepare_case_prompt_by_public_ids(
+        db_session,
+        team_id=1,
+        user_id=2,
+        case_public_ids=[case.public_id],
+        interaction_scope=interaction_scope,
+    )
+    retried = db_session.query(FollowUpTaskConfirmationPromptDelivery).one()
+
+    assert retried_event["interaction"]["payload"]["prompt_delivery_key"] == prompt_key
+    assert retried.status == FollowUpTaskConfirmationPromptStatus.QUEUED
+    assert retried.reason_code == "ROOT_GRAPH_INTERRUPT_PLANNED"
+    assert retried.error_message is None
+    assert retried.attempted_at >= failed_attempted_at
+    assert retried.delivered_at is None
+
+    projected = service.mark_projection_projected(db_session, team_id=1, prompt_key=prompt_key)
+
+    assert projected.status == FollowUpTaskConfirmationPromptStatus.PROJECTED
+    assert projected.reason_code == "ROOT_GRAPH_INTERRUPT_CHECKPOINTED"
+
+
+def test_mark_projection_failed_records_acknowledgement_failure(db_session):
+    task = _create_task(db_session)
+    case = _create_confirmation_case(db_session, task)
+    service = FollowUpTaskConfirmationChannelService()
+    event = service.prepare_case_prompt_by_public_ids(
+        db_session,
+        team_id=1,
+        user_id=2,
+        case_public_ids=[case.public_id],
+        interaction_scope="crm_agent:1:2:33:test",
+    )
+    prompt_key = event["interaction"]["payload"]["prompt_delivery_key"]
+
+    delivery = service.mark_projection_failed(
+        db_session,
+        team_id=1,
+        prompt_key=prompt_key,
+        error_message="checkpoint acknowledgement failed",
+    )
+
+    assert delivery is not None
+    assert delivery.status == FollowUpTaskConfirmationPromptStatus.FAILED
+    assert delivery.reason_code == "ROOT_GRAPH_PROJECTION_ACK_FAILED"
+    assert delivery.error_message == "checkpoint acknowledgement failed"
+    assert delivery.delivered_at is None
+
+
+def test_prepare_case_prompt_records_owner_mismatch_as_skipped(db_session):
+    task = _create_task(db_session, owner_id="9")
+    case = _create_confirmation_case(db_session, task)
+
+    event = FollowUpTaskConfirmationChannelService().prepare_case_prompt_by_public_ids(
+        db_session,
+        team_id=1,
+        user_id=2,
+        case_public_ids=[case.public_id],
+        interaction_scope="crm_agent:1:2:33:test",
+    )
+
+    delivery = db_session.query(FollowUpTaskConfirmationPromptDelivery).one()
+    assert event is None
+    assert delivery.status == FollowUpTaskConfirmationPromptStatus.SKIPPED
+    assert delivery.reason_code == "OWNER_MISMATCH"
+    assert delivery.owner_id == "2"
+    assert delivery.attempted_at is not None
+    assert delivery.delivered_at is None
+
+
+def test_record_projection_failure_creates_bounded_failed_attempt_for_long_scope(db_session):
+    task = _create_task(db_session)
+    case = _create_confirmation_case(db_session, task)
+    service = FollowUpTaskConfirmationChannelService()
+    interaction_scope = f"crm_agent:1:2:33:{'s' * 64}:clarification:1"
+
+    failed = service.record_projection_failure_by_public_ids(
+        db_session,
+        team_id=1,
+        user_id=2,
+        case_public_ids=[case.public_id],
+        interaction_scope=interaction_scope,
+        error_message="stream projection failed before queueing",
+    )
+
+    deliveries = db_session.query(FollowUpTaskConfirmationPromptDelivery).all()
+    assert len(failed) == 1
+    assert len(deliveries) == 1
+    assert deliveries[0].prompt_key == service._projection_prompt_key(
+        case_public_id=case.public_id,
+        interaction_scope=interaction_scope,
+    )
+    assert len(deliveries[0].prompt_key) <= 128
+    assert deliveries[0].thread_id == interaction_scope
+    assert deliveries[0].status == FollowUpTaskConfirmationPromptStatus.FAILED
+    assert deliveries[0].reason_code == "ROOT_GRAPH_PROJECTION_FAILED"
+
+
+def test_record_projection_failure_updates_long_scope_queued_attempt_in_place(db_session):
+    task = _create_task(db_session)
+    case = _create_confirmation_case(db_session, task)
+    service = FollowUpTaskConfirmationChannelService()
+    interaction_scope = f"crm_agent:1:2:33:{'s' * 64}:clarification:1"
+    event = service.prepare_case_prompt_by_public_ids(
+        db_session,
+        team_id=1,
+        user_id=2,
+        case_public_ids=[case.public_id],
+        interaction_scope=interaction_scope,
+    )
+    prompt_key = event["interaction"]["payload"]["prompt_delivery_key"]
+
+    failed = service.record_projection_failure_by_public_ids(
+        db_session,
+        team_id=1,
+        user_id=2,
+        case_public_ids=[case.public_id],
+        interaction_scope=interaction_scope,
+        error_message="stream projection failed",
+    )
+
+    deliveries = db_session.query(FollowUpTaskConfirmationPromptDelivery).all()
+    assert len(failed) == 1
+    assert len(deliveries) == 1
+    assert failed[0].id == deliveries[0].id
+    assert deliveries[0].prompt_key == prompt_key
+    assert len(deliveries[0].prompt_key) <= 128
+    assert deliveries[0].thread_id == interaction_scope
+    assert deliveries[0].status == FollowUpTaskConfirmationPromptStatus.FAILED
+    assert deliveries[0].reason_code == "ROOT_GRAPH_PROJECTION_FAILED"
+
+
+def test_record_projection_failure_is_owner_scoped_and_idempotent(db_session):
+    task = _create_task(db_session)
+    case = _create_confirmation_case(db_session, task)
+    service = FollowUpTaskConfirmationChannelService()
+
+    first = service.record_projection_failure_by_public_ids(
+        db_session,
+        team_id=1,
+        user_id=2,
+        case_public_ids=[case.public_id],
+        interaction_scope="crm_agent:1:2:33:test",
+        error_message="stream projection failed",
+    )
+    second = service.record_projection_failure_by_public_ids(
+        db_session,
+        team_id=1,
+        user_id=2,
+        case_public_ids=[case.public_id],
+        interaction_scope="crm_agent:1:2:33:test",
+        error_message="stream projection failed",
+    )
+
+    deliveries = db_session.query(FollowUpTaskConfirmationPromptDelivery).all()
+    assert len(first) == 1
+    assert len(second) == 1
+    assert len(deliveries) == 1
+    assert deliveries[0].status == FollowUpTaskConfirmationPromptStatus.FAILED
+    assert deliveries[0].reason_code == "ROOT_GRAPH_PROJECTION_FAILED"
+    assert deliveries[0].error_message == "stream projection failed"
+    assert deliveries[0].delivered_at is None
+
+
+def test_create_attempt_recovers_concurrent_prompt_key_insert_without_rolling_back_outer_transaction():
+    from unittest.mock import Mock
+
+    from sqlalchemy.exc import IntegrityError
+
+    from app.crud.sales_commitment import FollowUpTaskConfirmationPromptDeliveryCRUD
+
+    db = Mock()
+    db.begin_nested.return_value.__enter__ = Mock(return_value=None)
+    db.begin_nested.return_value.__exit__ = Mock(return_value=False)
+    db.flush.side_effect = IntegrityError("insert", {}, Exception("duplicate prompt key"))
+    existing = Mock(spec=FollowUpTaskConfirmationPromptDelivery)
+    crud = FollowUpTaskConfirmationPromptDeliveryCRUD()
+    crud.get_by_prompt_key = Mock(side_effect=[None, existing])
+
+    result = crud.create_attempt(
+        db,
+        team_id=1,
+        case_id=13,
+        owner_id="2",
+        channel="agent",
+        provider="langgraph",
+        agent_session_id=None,
+        interaction_id="int_fuc_stable",
+        prompt_key="projection:fuc_case:thread_1",
+        status=FollowUpTaskConfirmationPromptStatus.PROJECTED,
+        commit=False,
+    )
+
+    assert result is existing
+    assert crud.get_by_prompt_key.call_count == 2
+    db.rollback.assert_not_called()
+    db.commit.assert_not_called()

@@ -90,7 +90,27 @@
             <AvatarFallback class="agent-chat__avatar-fallback">{{ userInitial }}</AvatarFallback>
           </Avatar>
         </Message>
+
+        <section
+          v-if="operationsByMessageId.get(message.id)?.length"
+          class="agent-chat__operations"
+          aria-label="后台任务状态"
+        >
+          <AgentAsyncOperationCard
+            v-for="operation in operationsByMessageId.get(message.id)"
+            :key="operation.public_id"
+            :operation="operation"
+          />
+        </section>
       </template>
+
+      <section v-if="unanchoredAsyncOperations.length > 0" class="agent-chat__operations" aria-label="未关联的后台任务状态">
+        <AgentAsyncOperationCard
+          v-for="operation in unanchoredAsyncOperations"
+          :key="operation.public_id"
+          :operation="operation"
+        />
+      </section>
     </MessageScroller>
 
     <AgentInteractionDrawer
@@ -130,7 +150,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onActivated, onMounted, ref, type Component } from "vue"
+import { computed, onActivated, onBeforeUnmount, onMounted, ref, type Component } from "vue"
 import { toast } from "vue-sonner"
 import {
   AlertTriangle,
@@ -160,6 +180,9 @@ import {
 import { loadLatestAgentMessages, resolveInitialAgentSession } from "@/components/agent/agentHistory"
 import AgentMessageBody from "@/components/agent/AgentMessageBody.vue"
 import AgentInteractionDrawer from "@/components/agent/AgentInteractionDrawer.vue"
+import AgentAsyncOperationCard from "@/components/agent/AgentAsyncOperationCard.vue"
+import { groupAgentAsyncOperationsByMessage } from "@/components/agent/agentAsyncOperations"
+import { useAgentAsyncOperations } from "@/composables/useAgentAsyncOperations"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Bubble } from "@/components/ui/bubble"
 import { Button } from "@/components/ui/button"
@@ -192,9 +215,21 @@ const sessionKey = ref<string | undefined>(undefined)
 const messages = ref<ChatMessage[]>([])
 const isLoadingHistory = ref(false)
 const activeAssistantId = ref<string | null>(null)
+const activeUserMessageId = ref<string | null>(null)
 const activeInteraction = ref<AgentInteraction | null>(null)
 const interactionDrawerHeight = ref(0)
 const messageScrollKey = ref(0)
+const {
+  operations: asyncOperations,
+  loadSession: loadSessionOperations,
+  acknowledgeScheduled: acknowledgeScheduledOperation,
+  resumePolling: resumeOperationPolling,
+  dispose: disposeOperationPolling,
+} = useAgentAsyncOperations({
+  onChanged: () => {
+    messageScrollKey.value += 1
+  },
+})
 
 const LAST_SESSION_STORAGE_KEY = "crm_agent_last_session_id"
 
@@ -203,9 +238,13 @@ const userInitial = computed(() => {
   const name = userStore.userInfo?.name
   return name !== undefined && name.length > 0 ? name.charAt(0) : "我"
 })
+const groupedAsyncOperations = computed(() => groupAgentAsyncOperationsByMessage(messages.value, asyncOperations.value))
+const operationsByMessageId = computed(() => groupedAsyncOperations.value.byMessageId)
+const unanchoredAsyncOperations = computed(() => groupedAsyncOperations.value.unanchored)
 const messageScrollCount = computed(() => (
   messages.value.length
   + messages.value.reduce((total, message) => total + message.steps.length, 0)
+  + asyncOperations.value.length
 ))
 const messageContentStyle = computed(() => ({
   paddingBottom: activeInteraction.value === null
@@ -363,6 +402,7 @@ const loadSessionMessages = async (targetSessionId: number): Promise<boolean> =>
   activeAssistantId.value = null
   restoreInteractionFromMessages(loadedMessages)
   sessionId.value = targetSessionId
+  await loadSessionOperations(targetSessionId)
   localStorage.setItem(LAST_SESSION_STORAGE_KEY, String(targetSessionId))
   messageScrollKey.value += 1
   return true
@@ -639,6 +679,10 @@ const eventToLogText = (event: AgentChatSSEEvent): string | null => {
       return event.decision === "auto_execute" ? "执行策略已确认" : null
     case "action_auto_execution_queued":
       return event.content !== undefined && event.content.length > 0 ? event.content : `正在执行：${formatBusinessAction(event.action)}`
+    case "agent_root_customer_intelligence_refresh_scheduled":
+      return "客户活动已记录，客户档案将在后台更新，可继续进行其他操作"
+    case "agent_root_customer_intelligence_refresh_schedule_failed":
+      return "客户活动已记录，但客户档案后台更新暂未成功调度"
     case "task_completed":
       return event.content !== undefined && event.content.length > 0 ? event.content : "任务已完成"
     case "task_failed":
@@ -666,12 +710,40 @@ const handleSSEEvent = (event: AgentChatSSEEvent): void => {
     sessionKey.value = event.session_key
     if (event.session_id !== undefined) {
       localStorage.setItem(LAST_SESSION_STORAGE_KEY, String(event.session_id))
+      void loadSessionOperations(event.session_id).catch(() => {
+        // The session event remains authoritative; a later operation acknowledgement/history load retries delivery.
+      })
     }
     return
   }
 
+  if (event.event === "agent_root_customer_intelligence_refresh_scheduled") {
+    if (event.operation_public_id !== undefined && event.operation_public_id.length > 0) {
+      const operationSessionId = event.session_id ?? sessionId.value
+      acknowledgeScheduledOperation({
+        operationPublicId: event.operation_public_id,
+        ...(event.request_id !== undefined ? { requestId: event.request_id } : {}),
+        ...(operationSessionId !== undefined ? { sessionId: operationSessionId } : {}),
+        ...(event.customer_id !== undefined ? { customerId: event.customer_id } : {}),
+        ...(event.source_user_message_id !== undefined
+          ? { sourceUserMessageId: event.source_user_message_id }
+          : {}),
+      })
+    }
+  }
+
   if (event.event === "message") {
     const role = normalizeRole(event.role)
+    if (role === "user" && event.message_id !== undefined) {
+      const activeUserMessage = activeUserMessageId.value === null
+        ? undefined
+        : messages.value.find(message => message.id === activeUserMessageId.value)
+      if (activeUserMessage !== undefined) {
+        activeUserMessage.id = String(event.message_id)
+        activeUserMessageId.value = activeUserMessage.id
+      }
+      return
+    }
     if (role === "assistant" && event.content !== undefined) {
       updateAssistantDraft(event.content, event.message_id, false, normalizeContentFormat(event.content_format))
     }
@@ -712,7 +784,9 @@ const sendMessageContent = async (content: string, interactionMetadata?: Record<
     return
   }
 
-  messages.value.push({ id: nextId("user"), role: "user", content, contentFormat: "text", steps: [] })
+  const userMessageId = nextId("user")
+  messages.value.push({ id: userMessageId, role: "user", content, contentFormat: "text", steps: [] })
+  activeUserMessageId.value = userMessageId
   startAssistantDraft()
   input.value = ""
   setActiveInteraction(null)
@@ -744,6 +818,7 @@ const sendMessageContent = async (content: string, interactionMetadata?: Record<
     const draft = activeAssistantMessage()
     if (draft) draft.isStreaming = false
     activeAssistantId.value = null
+    activeUserMessageId.value = null
     isStreaming.value = false
   }
 }
@@ -770,6 +845,11 @@ onMounted(() => {
 
 onActivated(() => {
   messageScrollKey.value += 1
+  resumeOperationPolling()
+})
+
+onBeforeUnmount(() => {
+  disposeOperationPolling()
 })
 </script>
 
@@ -801,6 +881,13 @@ onActivated(() => {
 
 .agent-chat__message {
   align-items: flex-start;
+}
+
+.agent-chat__operations {
+  display: grid;
+  gap: $wolf-space-sm-v2;
+  width: min(calc(100% - 40px), 680px);
+  margin: $wolf-space-xs-v2 0 $wolf-space-lg-v2 40px;
 }
 
 .agent-chat__avatar {

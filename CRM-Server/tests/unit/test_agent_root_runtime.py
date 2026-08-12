@@ -1,7 +1,7 @@
 """Tests for the LangGraph-native CRM Agent root runtime."""
+
 from __future__ import annotations
 
-import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -9,8 +9,6 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 from app.services.agent import action_plan, action_workflow, agent_copy
 from app.services.agent import root_runtime as root_runtime_module
-from app.services.agent.task_execution import ActionToolExecutionResult
-from app.services.agent.tools.base import AgentToolResult
 from app.services.agent.input import AgentTurnInput
 from app.services.agent.root_runtime import (
     AgentRootRuntime,
@@ -19,6 +17,13 @@ from app.services.agent.root_runtime import (
 )
 from app.services.agent.schemas import AgentConfirmationIntentDecision
 from app.services.agent.state import AgentRootRuntimeSideEffects, AgentRuntimeContext
+from app.services.agent.task_execution import ActionToolExecutionResult
+from app.services.agent.tools.base import AgentToolResult
+from app.services.customer_intelligence_refresh_service import AgentAsyncOperationBinding
+from app.services.follow_up_task_confirmation_channel_service import (
+    FOLLOW_UP_CONFIRMATION_PROMPT_EVENT,
+    FollowUpTaskConfirmationChannelService,
+)
 
 
 class FakePendingGraphService:
@@ -92,7 +97,11 @@ class FakeConfirmingPendingGraphService:
             side_effects.task = state["task"]
         return {
             "has_active_task": True,
-            "task_projection": {"id": state["task"].id, "task_key": state["task"].task_key, "status": state["task"].status},
+            "task_projection": {
+                "id": state["task"].id,
+                "task_key": state["task"].task_key,
+                "status": state["task"].status,
+            },
             "handled": False,
             "confirmation_decision": AgentConfirmationIntentDecision(
                 intent="confirm",
@@ -137,15 +146,17 @@ async def test_root_runtime_structured_follow_up_confirmation_uses_action_envelo
     published_events = []
 
     async def fake_execute_action_envelope(db, envelope, *, session, team_id, user_id, authorization, event_sink):
-        execute_calls.append({
-            "db": db,
-            "envelope": envelope,
-            "session": session,
-            "team_id": team_id,
-            "user_id": user_id,
-            "authorization": authorization,
-            "event_sink": event_sink,
-        })
+        execute_calls.append(
+            {
+                "db": db,
+                "envelope": envelope,
+                "session": session,
+                "team_id": team_id,
+                "user_id": user_id,
+                "authorization": authorization,
+                "event_sink": event_sink,
+            }
+        )
         return ActionToolExecutionResult(
             AgentToolResult(
                 tool_name="resolve_follow_up_task_confirmation_case",
@@ -247,12 +258,14 @@ async def test_root_runtime_run_turn_aligns_context_task_to_checkpoint_interrupt
     lookup_calls = []
 
     def fake_get_by_id(db, task_id, *, team_id, user_id):
-        lookup_calls.append({
-            "db": db,
-            "task_id": task_id,
-            "team_id": team_id,
-            "user_id": user_id,
-        })
+        lookup_calls.append(
+            {
+                "db": db,
+                "task_id": task_id,
+                "team_id": team_id,
+                "user_id": user_id,
+            }
+        )
         return checkpoint_task if task_id == checkpoint_task.id else None
 
     class RuntimeUnderTest(AgentRootRuntime):
@@ -327,12 +340,14 @@ async def test_root_runtime_run_turn_aligns_context_task_to_checkpoint_interrupt
     )
 
     assert context.task == checkpoint_task
-    assert lookup_calls == [{
-        "db": context.db,
-        "task_id": checkpoint_task.id,
-        "team_id": 1,
-        "user_id": 2,
-    }]
+    assert lookup_calls == [
+        {
+            "db": context.db,
+            "task_id": checkpoint_task.id,
+            "team_id": 1,
+            "user_id": 2,
+        }
+    ]
     assert runtime.resume_calls[0]["current_interrupt"]["task_projection_id"] == checkpoint_task.id
     assert runtime.resume_calls[0]["resume_payload"]["task_projection_id"] == checkpoint_task.id
     assert state["task_projection"]["id"] == checkpoint_task.id
@@ -470,26 +485,28 @@ class FakeCustomerIntelligenceGraphService:
                 "source_event": "customer_fact_review_required",
             },
             "__interrupt__": [
-                SimpleNamespace(value={
-                    "schema_version": "agent.interrupt.v1",
-                    "type": "confirm",
-                    "reason": "user_input_required",
-                    "business_action": "review_customer_facts",
-                    "allowed_resume_actions": ["approve", "reject", "cancel"],
-                    "draft_payload": {"customer_name": "越秀金融", "candidate_count": 1},
-                    "interaction": {
+                SimpleNamespace(
+                    value={
                         "schema_version": "agent.interrupt.v1",
-                        "interaction_id": "ci-event-1",
                         "type": "confirm",
+                        "reason": "user_input_required",
                         "business_action": "review_customer_facts",
-                        "status": "waiting_confirmation",
-                        "title": "确认是否沉淀客户事实",
-                        "prompt": "是否沉淀到客户智能档案？",
-                        "payload": {"customer_name": "越秀金融"},
-                        "allow_cancel": True,
-                    },
-                    "source_event": "customer_fact_review_required",
-                }),
+                        "allowed_resume_actions": ["approve", "reject", "cancel"],
+                        "draft_payload": {"customer_name": "越秀金融", "candidate_count": 1},
+                        "interaction": {
+                            "schema_version": "agent.interrupt.v1",
+                            "interaction_id": "ci-event-1",
+                            "type": "confirm",
+                            "business_action": "review_customer_facts",
+                            "status": "waiting_confirmation",
+                            "title": "确认是否沉淀客户事实",
+                            "prompt": "是否沉淀到客户智能档案？",
+                            "payload": {"customer_name": "越秀金融"},
+                            "allow_cancel": True,
+                        },
+                        "source_event": "customer_fact_review_required",
+                    }
+                ),
             ],
             "events": [{"event": "customer_intelligence_fact_review_required"}],
         }
@@ -629,14 +646,42 @@ class FakeCustomerIntelligenceRefreshService:
     def __init__(self):
         self.trigger_calls = []
 
-    async def trigger_committed_event_refresh(self, db, *, event, scope="brief"):
-        self.trigger_calls.append({"db": db, "event": event, "scope": scope})
+    async def trigger_committed_event_refresh(self, db, *, event, scope="brief", agent_binding=None):
+        self.trigger_calls.append(
+            {
+                "db": db,
+                "event": event,
+                "scope": scope,
+                "agent_binding": agent_binding,
+            }
+        )
         return SimpleNamespace(
             request_id=f"business-event-{event.trigger_type}-test",
             event=event,
             scope=scope,
             scheduled=True,
             schedule_error=None,
+            operation_public_id="aop_customer_intelligence_test",
+        )
+
+
+class FakeFailedCustomerIntelligenceRefreshService(FakeCustomerIntelligenceRefreshService):
+    async def trigger_committed_event_refresh(self, db, *, event, scope="brief", agent_binding=None):
+        self.trigger_calls.append(
+            {
+                "db": db,
+                "event": event,
+                "scope": scope,
+                "agent_binding": agent_binding,
+            }
+        )
+        return SimpleNamespace(
+            request_id=f"business-event-{event.trigger_type}-failed",
+            event=event,
+            scope=scope,
+            scheduled=False,
+            schedule_error="operation projection unavailable",
+            operation_public_id=None,
         )
 
 
@@ -663,25 +708,28 @@ async def test_root_runtime_checkpoints_serializable_agent_state():
     runtime = AgentRootRuntime(checkpointer=InMemorySaver(), new_flow_graph_service=new_flow_graph_service)
     side_effects = AgentRootRuntimeSideEffects()
 
-    state = await runtime.checkpoint_turn_start({
-        "team_id": 2,
-        "user_id": 3,
-        "session_id": 4,
-        "session_key": "abc",
-        "channel": "web",
-        "content": "记录一下客户跟进",
-        "turn_kind": "text",
-        "current_customer": {"id": 10, "account_name": "睿狐科技"},
-    }, context=AgentRuntimeContext(
-        db=object(),
-        session=SimpleNamespace(id=4),
-        content="记录一下客户跟进",
-        team_id=2,
-        user_id=3,
-        session_id=4,
-        authorization="Bearer test",
-        side_effects=side_effects,
-    ))
+    state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": "记录一下客户跟进",
+            "turn_kind": "text",
+            "current_customer": {"id": 10, "account_name": "睿狐科技"},
+        },
+        context=AgentRuntimeContext(
+            db=object(),
+            session=SimpleNamespace(id=4),
+            content="记录一下客户跟进",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            authorization="Bearer test",
+            side_effects=side_effects,
+        ),
+    )
 
     assert state["runtime_status"] == "checkpointed"
     assert state["route"] == "new_flow_graph"
@@ -716,26 +764,29 @@ async def test_root_runtime_bubbles_customer_intelligence_review_interrupt():
         customer_intelligence_graph_service=customer_intelligence_graph_service,
     )
 
-    state = await runtime.checkpoint_turn_start({
-        "team_id": 2,
-        "user_id": 3,
-        "session_id": 4,
-        "session_key": "abc",
-        "channel": "web",
-        "content": "刷新客户档案",
-        "turn_kind": "text",
-        "customer_intelligence_requested": True,
-    }, context=AgentRuntimeContext(
-        db=object(),
-        session=SimpleNamespace(id=4, context_json={}),
-        content="刷新客户档案",
-        team_id=2,
-        user_id=3,
-        session_id=4,
-        authorization="Bearer test",
-        customer_intelligence_event=SimpleNamespace(event_key="ci-event-1"),
-        side_effects=side_effects,
-    ))
+    state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": "刷新客户档案",
+            "turn_kind": "text",
+            "customer_intelligence_requested": True,
+        },
+        context=AgentRuntimeContext(
+            db=object(),
+            session=SimpleNamespace(id=4, context_json={}),
+            content="刷新客户档案",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            authorization="Bearer test",
+            customer_intelligence_event=SimpleNamespace(event_key="ci-event-1"),
+            side_effects=side_effects,
+        ),
+    )
 
     assert customer_intelligence_graph_service.run_calls
     assert state["current_interrupt"]["business_action"] == "review_customer_facts"
@@ -762,25 +813,28 @@ async def test_root_runtime_routes_customer_query_to_customer_intelligence_graph
         customer_intelligence_trigger_policy=trigger_policy,
     )
 
-    state = await runtime.checkpoint_turn_start({
-        "team_id": 2,
-        "user_id": 3,
-        "session_id": 4,
-        "session_key": "abc",
-        "channel": "web",
-        "content": "总结一下这个客户",
-        "turn_kind": "text",
-    }, context=AgentRuntimeContext(
-        db=object(),
-        session=SimpleNamespace(id=4, context_json={}),
-        content="总结一下这个客户",
-        team_id=2,
-        user_id=3,
-        session_id=4,
-        user_message_id=88,
-        authorization="Bearer test",
-        side_effects=side_effects,
-    ))
+    state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": "总结一下这个客户",
+            "turn_kind": "text",
+        },
+        context=AgentRuntimeContext(
+            db=object(),
+            session=SimpleNamespace(id=4, context_json={}),
+            content="总结一下这个客户",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            user_message_id=88,
+            authorization="Bearer test",
+            side_effects=side_effects,
+        ),
+    )
 
     assert trigger_policy.new_flow_calls
     assert customer_intelligence_graph_service.run_calls[0]["event"] == customer_intelligence_event
@@ -796,9 +850,7 @@ async def test_root_runtime_routes_customer_query_to_customer_intelligence_graph
     }
     output = project_turn_output(state, side_effects)
     assert [
-        (event.get("content"), event.get("content_format"))
-        for event in output.events
-        if event.get("event") == "final"
+        (event.get("content"), event.get("content_format")) for event in output.events if event.get("event") == "final"
     ] == [("越秀金融当前正在推进 CRM 项目，商机处于 POC 阶段。", "markdown")]
     assert output.assistant_content == "越秀金融当前正在推进 CRM 项目，商机处于 POC 阶段。"
 
@@ -819,32 +871,31 @@ async def test_root_runtime_does_not_reuse_new_flow_completion_when_customer_ans
         customer_intelligence_trigger_policy=trigger_policy,
     )
 
-    state = await runtime.checkpoint_turn_start({
-        "team_id": 2,
-        "user_id": 3,
-        "session_id": 4,
-        "session_key": "abc",
-        "channel": "web",
-        "content": "汇川技术现在是什么情况",
-        "turn_kind": "text",
-    }, context=AgentRuntimeContext(
-        db=object(),
-        session=SimpleNamespace(id=4, context_json={}),
-        content="汇川技术现在是什么情况",
-        team_id=2,
-        user_id=3,
-        session_id=4,
-        user_message_id=88,
-        authorization="Bearer test",
-        side_effects=side_effects,
-    ))
+    state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": "汇川技术现在是什么情况",
+            "turn_kind": "text",
+        },
+        context=AgentRuntimeContext(
+            db=object(),
+            session=SimpleNamespace(id=4, context_json={}),
+            content="汇川技术现在是什么情况",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            user_message_id=88,
+            authorization="Bearer test",
+            side_effects=side_effects,
+        ),
+    )
 
     output = project_turn_output(state, side_effects)
-    final_contents = [
-        event.get("content")
-        for event in output.events
-        if event.get("event") == "final"
-    ]
+    final_contents = [event.get("content") for event in output.events if event.get("event") == "final"]
     assert output.assistant_content == "客户资料不足，暂时无法整理回答。"
     assert final_contents == ["客户资料不足，暂时无法整理回答。"]
     assert "已处理新流程" not in final_contents
@@ -871,26 +922,29 @@ async def test_root_runtime_streams_customer_intelligence_trace_without_duplicat
     async def event_sink(event):
         streamed_events.append(event)
 
-    state = await runtime.checkpoint_turn_start({
-        "team_id": 2,
-        "user_id": 3,
-        "session_id": 4,
-        "session_key": "abc",
-        "channel": "web",
-        "content": "总结一下这个客户",
-        "turn_kind": "text",
-    }, context=AgentRuntimeContext(
-        db=object(),
-        session=SimpleNamespace(id=4, context_json={}),
-        content="总结一下这个客户",
-        team_id=2,
-        user_id=3,
-        session_id=4,
-        user_message_id=88,
-        authorization="Bearer test",
-        event_sink=event_sink,
-        side_effects=side_effects,
-    ))
+    state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": "总结一下这个客户",
+            "turn_kind": "text",
+        },
+        context=AgentRuntimeContext(
+            db=object(),
+            session=SimpleNamespace(id=4, context_json={}),
+            content="总结一下这个客户",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            user_message_id=88,
+            authorization="Bearer test",
+            event_sink=event_sink,
+            side_effects=side_effects,
+        ),
+    )
 
     customer_intelligence_step_contents = [
         event["content"]
@@ -940,36 +994,46 @@ async def test_root_runtime_schedules_customer_intelligence_after_confirmed_acti
     task = waiting_task_stub()
     db = object()
 
-    state = await runtime.checkpoint_turn_start({
-        "team_id": 2,
-        "user_id": 3,
-        "session_id": 4,
-        "session_key": "abc",
-        "channel": "web",
-        "content": "确认",
-        "turn_kind": "confirm",
-        "pending_task_requested": True,
-        "task_projection": {"id": task.id, "task_key": task.task_key},
-    }, context=AgentRuntimeContext(
-        db=db,
-        session=SimpleNamespace(id=4, context_json={}),
-        task=task,
-        turn_input=AgentTurnInput.confirm(source="web"),
-        content="确认",
-        team_id=2,
-        user_id=3,
-        session_id=4,
-        authorization="Bearer test",
-        side_effects=side_effects,
-    ))
+    state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": "确认",
+            "turn_kind": "confirm",
+            "pending_task_requested": True,
+            "task_projection": {"id": task.id, "task_key": task.task_key},
+        },
+        context=AgentRuntimeContext(
+            db=db,
+            session=SimpleNamespace(id=4, context_json={}),
+            task=task,
+            turn_input=AgentTurnInput.confirm(source="web"),
+            content="确认",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            user_message_id=91,
+            authorization="Bearer test",
+            side_effects=side_effects,
+        ),
+    )
 
     assert trigger_policy.tool_result_calls
     assert customer_intelligence_graph_service.run_calls == []
-    assert customer_intelligence_refresh_service.trigger_calls == [{
-        "db": db,
-        "event": customer_intelligence_event,
-        "scope": "brief",
-    }]
+    assert len(customer_intelligence_refresh_service.trigger_calls) == 1
+    trigger_call = customer_intelligence_refresh_service.trigger_calls[0]
+    assert trigger_call["db"] is db
+    assert trigger_call["event"] is customer_intelligence_event
+    assert trigger_call["scope"] == "brief"
+    assert trigger_call["agent_binding"] == AgentAsyncOperationBinding(
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        source_user_message_id=91,
+    )
     assert state["customer_intelligence_result"] == {
         "handled": True,
         "mode": "background",
@@ -978,18 +1042,94 @@ async def test_root_runtime_schedules_customer_intelligence_after_confirmed_acti
         "event_key": "activity-created-1",
         "customer_id": 101,
         "request_id": "business-event-customer_activity_created-test",
+        "operation_public_id": "aop_customer_intelligence_test",
+        "source_user_message_id": 91,
         "scope": "brief",
     }
     assert side_effects.confirmed_task_assistant_content == "跟进记录已创建。"
-    assert side_effects.customer_intelligence_events == [{
-        "event": "agent_root_customer_intelligence_refresh_scheduled",
+    assert side_effects.customer_intelligence_events == [
+        {
+            "event": "agent_root_customer_intelligence_refresh_scheduled",
+            "mode": "background",
+            "trigger_type": "customer_activity_created",
+            "event_key": "activity-created-1",
+            "customer_id": 101,
+            "scheduled": True,
+            "request_id": "business-event-customer_activity_created-test",
+            "operation_public_id": "aop_customer_intelligence_test",
+            "source_user_message_id": 91,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_reports_committed_refresh_schedule_failure_instead_of_success():
+    customer_intelligence_event = SimpleNamespace(
+        event_key="activity-created-failed",
+        trigger_type="customer_activity_created",
+        customer_id=101,
+    )
+    refresh_service = FakeFailedCustomerIntelligenceRefreshService()
+    side_effects = AgentRootRuntimeSideEffects()
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        pending_graph_service=FakeConfirmingPendingGraphService(),
+        confirmed_task_graph_service=FakeConfirmedTaskGraphService(),
+        customer_intelligence_trigger_policy=FakeCustomerIntelligenceTriggerPolicy(customer_intelligence_event),
+        customer_intelligence_refresh_service=refresh_service,
+    )
+    task = waiting_task_stub()
+
+    state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": "确认",
+            "turn_kind": "confirm",
+            "pending_task_requested": True,
+            "task_projection": {"id": task.id, "task_key": task.task_key},
+        },
+        context=AgentRuntimeContext(
+            db=object(),
+            session=SimpleNamespace(id=4, context_json={}),
+            task=task,
+            turn_input=AgentTurnInput.confirm(source="web"),
+            content="确认",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            authorization="Bearer test",
+            side_effects=side_effects,
+        ),
+    )
+
+    assert state["customer_intelligence_result"] == {
+        "handled": False,
         "mode": "background",
+        "scheduled": False,
         "trigger_type": "customer_activity_created",
-        "event_key": "activity-created-1",
+        "event_key": "activity-created-failed",
         "customer_id": 101,
-        "scheduled": True,
-        "request_id": "business-event-customer_activity_created-test",
-    }]
+        "request_id": "business-event-customer_activity_created-failed",
+        "scope": "brief",
+        "reason": "background_refresh_schedule_failed",
+        "schedule_error": "operation projection unavailable",
+    }
+    assert side_effects.customer_intelligence_events == [
+        {
+            "event": "agent_root_customer_intelligence_refresh_schedule_failed",
+            "mode": "background",
+            "trigger_type": "customer_activity_created",
+            "event_key": "activity-created-failed",
+            "customer_id": 101,
+            "scheduled": False,
+            "request_id": "business-event-customer_activity_created-failed",
+            "reason": "operation projection unavailable",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -1013,16 +1153,19 @@ async def test_root_runtime_resumes_customer_intelligence_review_through_root_in
         side_effects=side_effects,
     )
 
-    first_state = await runtime.checkpoint_turn_start({
-        "team_id": 2,
-        "user_id": 3,
-        "session_id": 4,
-        "session_key": "abc",
-        "channel": "web",
-        "content": "刷新客户档案",
-        "turn_kind": "text",
-        "customer_intelligence_requested": True,
-    }, context=context)
+    first_state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": "刷新客户档案",
+            "turn_kind": "text",
+            "customer_intelligence_requested": True,
+        },
+        context=context,
+    )
 
     resumed_side_effects = AgentRootRuntimeSideEffects()
     resumed_state = await runtime.resume_interrupt(
@@ -1063,35 +1206,40 @@ async def test_root_runtime_resets_turn_scoped_result_projections_between_invoke
         new_flow_graph_service=FakeNewFlowGraphService(),
     )
 
-    first_state = await runtime.checkpoint_turn_start({
-        "team_id": 2,
-        "user_id": 3,
-        "session_id": 4,
-        "session_key": "abc",
-        "channel": "web",
-        "content": "记录一下客户跟进",
-        "turn_kind": "text",
-    }, context=AgentRuntimeContext(
-        db=object(),
-        session=SimpleNamespace(id=4, context_json={}),
-        content="记录一下客户跟进",
-        team_id=2,
-        user_id=3,
-        session_id=4,
-        authorization="Bearer test",
-        side_effects=AgentRootRuntimeSideEffects(),
-    ))
+    first_state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": "记录一下客户跟进",
+            "turn_kind": "text",
+        },
+        context=AgentRuntimeContext(
+            db=object(),
+            session=SimpleNamespace(id=4, context_json={}),
+            content="记录一下客户跟进",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            authorization="Bearer test",
+            side_effects=AgentRootRuntimeSideEffects(),
+        ),
+    )
 
-    second_state = await runtime.checkpoint_turn_start({
-        "team_id": 2,
-        "user_id": 3,
-        "session_id": 4,
-        "session_key": "abc",
-        "channel": "web",
-        "content": "确认",
-        "turn_kind": "confirm",
-        "current_interrupt": {"type": "confirm", "business_action": "CREATE_FOLLOW_UP"},
-    })
+    second_state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": "确认",
+            "turn_kind": "confirm",
+            "current_interrupt": {"type": "confirm", "business_action": "CREATE_FOLLOW_UP"},
+        }
+    )
 
     assert first_state["new_flow_result"]["assistant_content"] == "已处理新流程"
     assert second_state["new_flow_result"] == {}
@@ -1106,6 +1254,7 @@ async def test_root_runtime_applies_new_flow_side_effects_inside_graph_node(monk
         "app.services.agent.new_flow_effects.session_state._remember_current_customer",
         lambda db_arg, session_arg, customer: remembered_customers.append(customer),
     )
+
     def create_waiting_task(db_arg, event, team_id, user_id, session_arg):
         event["task_id"] = 501
         event["task_key"] = "task-501"
@@ -1121,25 +1270,28 @@ async def test_root_runtime_applies_new_flow_side_effects_inside_graph_node(monk
     )
     side_effects = AgentRootRuntimeSideEffects()
 
-    state = await runtime.checkpoint_turn_start({
-        "team_id": 2,
-        "user_id": 3,
-        "session_id": 4,
-        "session_key": "abc",
-        "channel": "web",
-        "content": "今天和越秀金融沟通",
-        "turn_kind": "text",
-    }, context=AgentRuntimeContext(
-        db=object(),
-        session=SimpleNamespace(id=4, context_json={}),
-        content="今天和越秀金融沟通",
-        team_id=2,
-        user_id=3,
-        session_id=4,
-        authorization="Bearer test",
-        switch_notice="我先切到新流程处理。",
-        side_effects=side_effects,
-    ))
+    state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": "今天和越秀金融沟通",
+            "turn_kind": "text",
+        },
+        context=AgentRuntimeContext(
+            db=object(),
+            session=SimpleNamespace(id=4, context_json={}),
+            content="今天和越秀金融沟通",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            authorization="Bearer test",
+            switch_notice="我先切到新流程处理。",
+            side_effects=side_effects,
+        ),
+    )
 
     assert remembered_customers == [{"id": 101, "account_name": "越秀金融"}]
     assert waiting_events[0]["event"] == "confirmation_required"
@@ -1203,7 +1355,9 @@ async def test_root_runtime_auto_executes_low_risk_reviewed_new_flow_action(monk
         )
 
     monkeypatch.setattr(root_runtime_module.task_execution, "execute_action_envelope", fake_execute_action_envelope)
-    monkeypatch.setattr(root_runtime_module.workflow_action_ledger, "mark_action_executed", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        root_runtime_module.workflow_action_ledger, "mark_action_executed", lambda *args, **kwargs: None
+    )
     runtime = AgentRootRuntime(
         checkpointer=InMemorySaver(),
         new_flow_graph_service=FakeAutoExecutableNewFlowGraphService(),
@@ -1211,24 +1365,27 @@ async def test_root_runtime_auto_executes_low_risk_reviewed_new_flow_action(monk
     )
     side_effects = AgentRootRuntimeSideEffects()
 
-    state = await runtime.checkpoint_turn_start({
-        "team_id": 2,
-        "user_id": 3,
-        "session_id": 4,
-        "session_key": "abc",
-        "channel": "web",
-        "content": "今天和越秀金融沟通",
-        "turn_kind": "text",
-    }, context=AgentRuntimeContext(
-        db=object(),
-        session=SimpleNamespace(id=4, context_json={}),
-        content="今天和越秀金融沟通",
-        team_id=2,
-        user_id=3,
-        session_id=4,
-        authorization="Bearer test",
-        side_effects=side_effects,
-    ))
+    state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": "今天和越秀金融沟通",
+            "turn_kind": "text",
+        },
+        context=AgentRuntimeContext(
+            db=object(),
+            session=SimpleNamespace(id=4, context_json={}),
+            content="今天和越秀金融沟通",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            authorization="Bearer test",
+            side_effects=side_effects,
+        ),
+    )
 
     assert created_tasks == []
     assert confirmed_task_graph_service.calls == []
@@ -1236,9 +1393,7 @@ async def test_root_runtime_auto_executes_low_risk_reviewed_new_flow_action(monk
     assert state["new_flow_result"]["has_interrupt"] is False
     assert state["assistant_content"] == agent_copy.customer_activity_created()
     assert "请确认是否创建这条跟进记录？" not in [
-        event.get("content")
-        for event in side_effects.new_flow_events
-        if event.get("event") == "final"
+        event.get("content") for event in side_effects.new_flow_events if event.get("event") == "final"
     ]
     assert [event["event"] for event in side_effects.new_flow_events].count("action_review_decided") == 1
     assert [event["event"] for event in side_effects.new_flow_events].count("action_auto_execution_queued") == 1
@@ -1248,10 +1403,7 @@ async def test_root_runtime_auto_executes_low_risk_reviewed_new_flow_action(monk
         "status": "started",
         "content": "记录跟进",
     } in side_effects.new_flow_events
-    assert "确认记录跟进" not in str([
-        event.get("content")
-        for event in side_effects.new_flow_events
-    ])
+    assert "确认记录跟进" not in str([event.get("content") for event in side_effects.new_flow_events])
 
 
 @pytest.mark.asyncio
@@ -1372,9 +1524,7 @@ async def test_root_runtime_executes_auto_execute_tasks_in_dependency_rounds(mon
     assert started == [501, 502]
     assert result["executed_action_count"] == 2
     plan_events = [
-        event
-        for event in side_effects.new_flow_events
-        if event["event"] == "agent_root_auto_execute_plan_built"
+        event for event in side_effects.new_flow_events if event["event"] == "agent_root_auto_execute_plan_built"
     ]
     assert [event["ready_count"] for event in plan_events] == [1, 1]
     assert [event["blocked_count"] for event in plan_events] == [1, 0]
@@ -1400,26 +1550,30 @@ async def test_root_runtime_records_auto_execute_running_and_blocked_actions(mon
         }
 
     def fake_mark_running(db, **kwargs):
-        ledger_events.append({
-            "status": "RUNNING",
-            "action_id": kwargs["workflow"]["action_id"],
-            "task_id": kwargs["task_id"],
-            "payload": kwargs["payload"],
-            "target_type": kwargs["target_type"],
-            "target_id": kwargs["target_id"],
-            "reason": kwargs["reason"],
-        })
+        ledger_events.append(
+            {
+                "status": "RUNNING",
+                "action_id": kwargs["workflow"]["action_id"],
+                "task_id": kwargs["task_id"],
+                "payload": kwargs["payload"],
+                "target_type": kwargs["target_type"],
+                "target_id": kwargs["target_id"],
+                "reason": kwargs["reason"],
+            }
+        )
 
     def fake_mark_blocked(db, **kwargs):
-        ledger_events.append({
-            "status": "BLOCKED",
-            "action_id": kwargs["workflow"]["action_id"],
-            "task_id": kwargs["task_id"],
-            "payload": kwargs["payload"],
-            "target_type": kwargs["target_type"],
-            "target_id": kwargs["target_id"],
-            "reason": kwargs["reason"],
-        })
+        ledger_events.append(
+            {
+                "status": "BLOCKED",
+                "action_id": kwargs["workflow"]["action_id"],
+                "task_id": kwargs["task_id"],
+                "payload": kwargs["payload"],
+                "target_type": kwargs["target_type"],
+                "target_id": kwargs["target_id"],
+                "reason": kwargs["reason"],
+            }
+        )
 
     async def fake_in_context(context, task, *, include_graph_progress_events):
         return {
@@ -1530,12 +1684,14 @@ async def test_root_runtime_prefers_action_level_plan_items_over_legacy_task_pay
         }
 
     def fake_mark_running(db, **kwargs):
-        ledger_events.append({
-            "action_id": kwargs["workflow"]["action_id"],
-            "payload": kwargs["payload"],
-            "target_type": kwargs["target_type"],
-            "target_id": kwargs["target_id"],
-        })
+        ledger_events.append(
+            {
+                "action_id": kwargs["workflow"]["action_id"],
+                "payload": kwargs["payload"],
+                "target_type": kwargs["target_type"],
+                "target_id": kwargs["target_id"],
+            }
+        )
 
     async def fake_in_context(context, task, *, include_graph_progress_events):
         return {
@@ -1589,12 +1745,14 @@ async def test_root_runtime_prefers_action_level_plan_items_over_legacy_task_pay
         ),
     )
 
-    assert ledger_events == [{
-        "action_id": "act_action_envelope",
-        "payload": {"content": "action envelope payload"},
-        "target_type": "customer",
-        "target_id": 10,
-    }]
+    assert ledger_events == [
+        {
+            "action_id": "act_action_envelope",
+            "payload": {"content": "action envelope payload"},
+            "target_type": "customer",
+            "target_id": 10,
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -1618,11 +1776,13 @@ async def test_root_runtime_blocks_action_level_plan_item_without_task_projectio
         }
 
     def fake_mark_blocked(db, **kwargs):
-        ledger_events.append({
-            "action_id": kwargs["workflow"]["action_id"],
-            "reason": kwargs["reason"],
-            "payload": kwargs["payload"],
-        })
+        ledger_events.append(
+            {
+                "action_id": kwargs["workflow"]["action_id"],
+                "reason": kwargs["reason"],
+                "payload": kwargs["payload"],
+            }
+        )
 
     workflow = _test_workflow("act_without_task", action_type="create_customer_activity")
     action_item = action_plan.item_from_workflow(
@@ -1654,22 +1814,26 @@ async def test_root_runtime_blocks_action_level_plan_item_without_task_projectio
     )
 
     assert result["executed_action_count"] == 0
-    assert ledger_events == [{
-        "action_id": "act_without_task",
-        "reason": "missing_task_projection",
-        "payload": {"content": "action without task"},
-    }]
+    assert ledger_events == [
+        {
+            "action_id": "act_without_task",
+            "reason": "missing_task_projection",
+            "payload": {"content": "action without task"},
+        }
+    ]
     blocked_event = next(
         event
         for event in context.side_effects.new_flow_events
         if event["event"] == "agent_root_auto_execute_plan_blocked"
     )
-    assert blocked_event["blocked_actions"] == [{
-        "action_id": "act_without_task",
-        "action_type": "create_customer_activity",
-        "task_id": None,
-        "reason": "missing_task_projection",
-    }]
+    assert blocked_event["blocked_actions"] == [
+        {
+            "action_id": "act_without_task",
+            "action_type": "create_customer_activity",
+            "task_id": None,
+            "reason": "missing_task_projection",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -1694,13 +1858,15 @@ async def test_root_runtime_directly_executes_complete_action_level_plan_item_wi
         }
 
     async def fake_execute_action_envelope(db, envelope, *, session, team_id, user_id, authorization, event_sink):
-        executed.append({
-            "action_id": envelope.action_id,
-            "action_type": envelope.action_type,
-            "payload": envelope.payload,
-            "customer": envelope.customer,
-            "authorization": authorization,
-        })
+        executed.append(
+            {
+                "action_id": envelope.action_id,
+                "action_type": envelope.action_type,
+                "payload": envelope.payload,
+                "customer": envelope.customer,
+                "authorization": authorization,
+            }
+        )
         return ActionToolExecutionResult(
             AgentToolResult(
                 tool_name="create_customer_activity",
@@ -1750,17 +1916,19 @@ async def test_root_runtime_directly_executes_complete_action_level_plan_item_wi
 
     assert result["executed_action_count"] == 1
     assert result["mode"] == "single_action_in_context"
-    assert executed == [{
-        "action_id": "act_without_task",
-        "action_type": "create_customer_activity",
-        "payload": {
-            "customer_id": 10,
-            "source_content": "今天和客户确认了续费推进事项",
+    assert executed == [
+        {
+            "action_id": "act_without_task",
+            "action_type": "create_customer_activity",
+            "payload": {
+                "customer_id": 10,
+                "source_content": "今天和客户确认了续费推进事项",
+                "customer": {"id": 10, "account_name": "测试客户"},
+            },
             "customer": {"id": 10, "account_name": "测试客户"},
-        },
-        "customer": {"id": 10, "account_name": "测试客户"},
-        "authorization": "Bearer test",
-    }]
+            "authorization": "Bearer test",
+        }
+    ]
     assert ledger_executed[0]["workflow"] == workflow
     assert ledger_executed[0]["result"] == {"id": 901}
 
@@ -1833,16 +2001,16 @@ async def test_root_runtime_blocks_user_authorized_action_without_authorization(
     assert blocked[0]["workflow"] == workflow
     assert blocked[0]["reason"] == "missing_authorization"
     blocked_event = next(
-        event
-        for event in side_effects.new_flow_events
-        if event["event"] == "agent_root_auto_execute_plan_blocked"
+        event for event in side_effects.new_flow_events if event["event"] == "agent_root_auto_execute_plan_blocked"
     )
-    assert blocked_event["blocked_actions"] == [{
-        "action_id": "act_requires_auth",
-        "action_type": "create_customer_activity",
-        "task_id": None,
-        "reason": "missing_authorization",
-    }]
+    assert blocked_event["blocked_actions"] == [
+        {
+            "action_id": "act_requires_auth",
+            "action_type": "create_customer_activity",
+            "task_id": None,
+            "reason": "missing_authorization",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -1970,7 +2138,11 @@ async def test_root_runtime_does_not_unlock_downstream_when_ready_branch_is_inco
 
     assert started == [501]
     assert result["executed_action_count"] == 0
-    assert [event["ready_count"] for event in side_effects.new_flow_events if event["event"] == "agent_root_auto_execute_plan_built"] == [1]
+    assert [
+        event["ready_count"]
+        for event in side_effects.new_flow_events
+        if event["event"] == "agent_root_auto_execute_plan_built"
+    ] == [1]
 
 
 @pytest.mark.asyncio
@@ -1997,10 +2169,12 @@ async def test_root_runtime_marks_downstream_blocked_after_ready_action_fails(mo
         return None
 
     def fake_mark_blocked(db, **kwargs):
-        blocked_actions.append({
-            "action_id": kwargs["workflow"]["action_id"],
-            "reason": kwargs["reason"],
-        })
+        blocked_actions.append(
+            {
+                "action_id": kwargs["workflow"]["action_id"],
+                "reason": kwargs["reason"],
+            }
+        )
 
     async def fake_in_context(context, task, *, include_graph_progress_events):
         return {
@@ -2059,23 +2233,21 @@ async def test_root_runtime_marks_downstream_blocked_after_ready_action_fails(mo
         {"action_id": "act_second", "reason": "terminal_dependencies:act_first"},
     ]
     plan_events = [
-        event
-        for event in side_effects.new_flow_events
-        if event["event"] == "agent_root_auto_execute_plan_built"
+        event for event in side_effects.new_flow_events if event["event"] == "agent_root_auto_execute_plan_built"
     ]
     assert [event["ready_count"] for event in plan_events] == [1, 0]
     assert [event["terminal_action_count"] for event in plan_events] == [0, 1]
     blocked_event = next(
-        event
-        for event in side_effects.new_flow_events
-        if event["event"] == "agent_root_auto_execute_plan_blocked"
+        event for event in side_effects.new_flow_events if event["event"] == "agent_root_auto_execute_plan_blocked"
     )
-    assert blocked_event["blocked_actions"] == [{
-        "action_id": "act_second",
-        "action_type": "transition_follow_up_task",
-        "task_id": 502,
-        "reason": "terminal_dependencies:act_first",
-    }]
+    assert blocked_event["blocked_actions"] == [
+        {
+            "action_id": "act_second",
+            "action_type": "transition_follow_up_task",
+            "task_id": 502,
+            "reason": "terminal_dependencies:act_first",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -2089,12 +2261,14 @@ async def test_root_runtime_uses_ledger_satisfied_actions_to_skip_rerun_and_unlo
     ledger_calls = []
 
     def fake_ledger_state(db, *, action_ids, team_id, user_id, include_system_actions=True):
-        ledger_calls.append({
-            "action_ids": action_ids,
-            "team_id": team_id,
-            "user_id": user_id,
-            "include_system_actions": include_system_actions,
-        })
+        ledger_calls.append(
+            {
+                "action_ids": action_ids,
+                "team_id": team_id,
+                "user_id": user_id,
+                "include_system_actions": include_system_actions,
+            }
+        )
         return {
             "satisfied_action_ids": ["act_first"],
             "terminal_action_ids": [],
@@ -2149,18 +2323,18 @@ async def test_root_runtime_uses_ledger_satisfied_actions_to_skip_rerun_and_unlo
         ),
     )
 
-    assert ledger_calls == [{
-        "action_ids": ["act_first", "act_second"],
-        "team_id": 2,
-        "user_id": 3,
-        "include_system_actions": True,
-    }]
+    assert ledger_calls == [
+        {
+            "action_ids": ["act_first", "act_second"],
+            "team_id": 2,
+            "user_id": 3,
+            "include_system_actions": True,
+        }
+    ]
     assert started == [502]
     assert result["executed_action_count"] == 1
     plan_events = [
-        event
-        for event in side_effects.new_flow_events
-        if event["event"] == "agent_root_auto_execute_plan_built"
+        event for event in side_effects.new_flow_events if event["event"] == "agent_root_auto_execute_plan_built"
     ]
     assert plan_events[0]["terminal_count"] == 1
     assert plan_events[0]["satisfied_action_count"] == 1
@@ -2234,9 +2408,7 @@ async def test_root_runtime_does_not_rerun_running_action_or_unlock_downstream(m
     assert started == []
     assert result["executed_action_count"] == 0
     plan_events = [
-        event
-        for event in side_effects.new_flow_events
-        if event["event"] == "agent_root_auto_execute_plan_built"
+        event for event in side_effects.new_flow_events if event["event"] == "agent_root_auto_execute_plan_built"
     ]
     assert plan_events[0]["active_count"] == 1
     assert plan_events[0]["blocked_count"] == 1
@@ -2263,24 +2435,27 @@ async def test_root_runtime_checkpoints_new_flow_result_and_interrupt_snapshot(m
         new_flow_graph_service=FakeSideEffectNewFlowGraphService(),
     )
 
-    state = await runtime.checkpoint_turn_start({
-        "team_id": 2,
-        "user_id": 3,
-        "session_id": 4,
-        "session_key": "abc",
-        "channel": "web",
-        "content": "今天和越秀金融沟通",
-        "turn_kind": "text",
-    }, context=AgentRuntimeContext(
-        db=object(),
-        session=SimpleNamespace(id=4, context_json={}),
-        content="今天和越秀金融沟通",
-        team_id=2,
-        user_id=3,
-        session_id=4,
-        authorization="Bearer test",
-        side_effects=AgentRootRuntimeSideEffects(),
-    ))
+    state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": "今天和越秀金融沟通",
+            "turn_kind": "text",
+        },
+        context=AgentRuntimeContext(
+            db=object(),
+            session=SimpleNamespace(id=4, context_json={}),
+            content="今天和越秀金融沟通",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            authorization="Bearer test",
+            side_effects=AgentRootRuntimeSideEffects(),
+        ),
+    )
 
     checkpoint_state = await runtime.current_checkpoint_state(
         team_id=2,
@@ -2299,16 +2474,18 @@ async def test_root_runtime_checkpoints_new_flow_result_and_interrupt_snapshot(m
 async def test_root_runtime_exposes_checkpoint_history_for_replayable_audit():
     runtime = AgentRootRuntime(checkpointer=InMemorySaver())
 
-    first_state = await runtime.checkpoint_turn_start({
-        "team_id": 2,
-        "user_id": 3,
-        "session_id": 4,
-        "session_key": "abc",
-        "channel": "web",
-        "content": "确认",
-        "turn_kind": "confirm",
-        "current_interrupt": {"type": "confirm", "business_action": "CREATE_FOLLOW_UP"},
-    })
+    first_state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": "确认",
+            "turn_kind": "confirm",
+            "current_interrupt": {"type": "confirm", "business_action": "CREATE_FOLLOW_UP"},
+        }
+    )
     assert first_state["current_interrupt"]["business_action"] == "CREATE_FOLLOW_UP"
 
     await runtime.resume_interrupt(
@@ -2351,16 +2528,18 @@ async def test_root_runtime_exposes_checkpoint_history_for_replayable_audit():
 async def test_root_runtime_can_read_state_at_history_checkpoint():
     runtime = AgentRootRuntime(checkpointer=InMemorySaver())
 
-    await runtime.checkpoint_turn_start({
-        "team_id": 2,
-        "user_id": 3,
-        "session_id": 4,
-        "session_key": "abc",
-        "channel": "web",
-        "content": "确认",
-        "turn_kind": "confirm",
-        "current_interrupt": {"type": "confirm", "business_action": "CREATE_FOLLOW_UP"},
-    })
+    await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": "确认",
+            "turn_kind": "confirm",
+            "current_interrupt": {"type": "confirm", "business_action": "CREATE_FOLLOW_UP"},
+        }
+    )
     await runtime.resume_interrupt(
         resume_payload={"action": "approve", "content": "确认", "source": "web", "metadata": {}},
         team_id=2,
@@ -2375,10 +2554,7 @@ async def test_root_runtime_can_read_state_at_history_checkpoint():
         session_key="abc",
         limit=12,
     )
-    interrupted_checkpoint = next(
-        item for item in history
-        if isinstance(item["values"].get("current_interrupt"), dict)
-    )
+    interrupted_checkpoint = next(item for item in history if isinstance(item["values"].get("current_interrupt"), dict))
 
     checkpoint_state = await runtime.checkpoint_state_at(
         checkpoint_id=interrupted_checkpoint["checkpoint_id"],
@@ -2417,24 +2593,27 @@ async def test_root_runtime_prefers_native_new_flow_graph_stream_updates(monkeyp
     )
     side_effects = AgentRootRuntimeSideEffects()
 
-    state = await runtime.checkpoint_turn_start({
-        "team_id": 2,
-        "user_id": 3,
-        "session_id": 4,
-        "session_key": "abc",
-        "channel": "web",
-        "content": "今天和越秀金融沟通",
-        "turn_kind": "text",
-    }, context=AgentRuntimeContext(
-        db=object(),
-        session=SimpleNamespace(id=4, context_json={}),
-        content="今天和越秀金融沟通",
-        team_id=2,
-        user_id=3,
-        session_id=4,
-        authorization="Bearer test",
-        side_effects=side_effects,
-    ))
+    state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": "今天和越秀金融沟通",
+            "turn_kind": "text",
+        },
+        context=AgentRuntimeContext(
+            db=object(),
+            session=SimpleNamespace(id=4, context_json={}),
+            content="今天和越秀金融沟通",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            authorization="Bearer test",
+            side_effects=side_effects,
+        ),
+    )
 
     assert new_flow_graph_service.calls == []
     assert len(new_flow_graph_service.stream_calls) == 1
@@ -2487,24 +2666,27 @@ async def test_root_runtime_resumes_generated_interrupt_by_loading_task_projecti
     )
 
     first_side_effects = AgentRootRuntimeSideEffects()
-    first_state = await runtime.checkpoint_turn_start({
-        "team_id": 2,
-        "user_id": 3,
-        "session_id": 4,
-        "session_key": "abc",
-        "channel": "web",
-        "content": "今天和越秀金融沟通",
-        "turn_kind": "text",
-    }, context=AgentRuntimeContext(
-        db=object(),
-        session=SimpleNamespace(id=4, context_json={}),
-        content="今天和越秀金融沟通",
-        team_id=2,
-        user_id=3,
-        session_id=4,
-        authorization="Bearer test",
-        side_effects=first_side_effects,
-    ))
+    first_state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": "今天和越秀金融沟通",
+            "turn_kind": "text",
+        },
+        context=AgentRuntimeContext(
+            db=object(),
+            session=SimpleNamespace(id=4, context_json={}),
+            content="今天和越秀金融沟通",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            authorization="Bearer test",
+            side_effects=first_side_effects,
+        ),
+    )
 
     resumed_side_effects = AgentRootRuntimeSideEffects()
     resumed_state = await runtime.resume_interrupt(
@@ -2573,24 +2755,27 @@ async def test_root_runtime_resumes_generated_interrupt_after_runtime_restart(mo
         checkpointer=checkpointer,
         new_flow_graph_service=FakeNativeNewFlowGraphService(),
     )
-    first_state = await first_runtime.checkpoint_turn_start({
-        "team_id": 2,
-        "user_id": 3,
-        "session_id": 4,
-        "session_key": "abc",
-        "channel": "web",
-        "content": "今天和越秀金融沟通",
-        "turn_kind": "text",
-    }, context=AgentRuntimeContext(
-        db=object(),
-        session=SimpleNamespace(id=4, context_json={}),
-        content="今天和越秀金融沟通",
-        team_id=2,
-        user_id=3,
-        session_id=4,
-        authorization="Bearer test",
-        side_effects=AgentRootRuntimeSideEffects(),
-    ))
+    first_state = await first_runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": "今天和越秀金融沟通",
+            "turn_kind": "text",
+        },
+        context=AgentRuntimeContext(
+            db=object(),
+            session=SimpleNamespace(id=4, context_json={}),
+            content="今天和越秀金融沟通",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            authorization="Bearer test",
+            side_effects=AgentRootRuntimeSideEffects(),
+        ),
+    )
 
     resumed_runtime = AgentRootRuntime(
         checkpointer=checkpointer,
@@ -2638,16 +2823,18 @@ async def test_root_runtime_resumes_generated_interrupt_after_runtime_restart(mo
 async def test_root_runtime_uses_langgraph_interrupt_for_waiting_state():
     runtime = AgentRootRuntime(checkpointer=InMemorySaver())
 
-    state = await runtime.checkpoint_turn_start({
-        "team_id": 2,
-        "user_id": 3,
-        "session_id": 4,
-        "session_key": "abc",
-        "channel": "web",
-        "content": "确认",
-        "turn_kind": "confirm",
-        "current_interrupt": {"type": "confirm", "business_action": "CREATE_FOLLOW_UP"},
-    })
+    state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": "确认",
+            "turn_kind": "confirm",
+            "current_interrupt": {"type": "confirm", "business_action": "CREATE_FOLLOW_UP"},
+        }
+    )
 
     assert state["route"] == "interrupt"
     assert "__interrupt__" in state
@@ -2658,16 +2845,18 @@ async def test_root_runtime_uses_langgraph_interrupt_for_waiting_state():
 @pytest.mark.asyncio
 async def test_root_runtime_resumes_langgraph_interrupt_with_command():
     runtime = AgentRootRuntime(checkpointer=InMemorySaver())
-    await runtime.checkpoint_turn_start({
-        "team_id": 2,
-        "user_id": 3,
-        "session_id": 4,
-        "session_key": "abc",
-        "channel": "web",
-        "content": "确认",
-        "turn_kind": "confirm",
-        "current_interrupt": {"type": "confirm", "business_action": "CREATE_FOLLOW_UP"},
-    })
+    await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": "确认",
+            "turn_kind": "confirm",
+            "current_interrupt": {"type": "confirm", "business_action": "CREATE_FOLLOW_UP"},
+        }
+    )
 
     state = await runtime.resume_interrupt(
         resume_payload={"action": "approve", "content": "确认", "source": "web", "metadata": {}},
@@ -2696,20 +2885,22 @@ async def test_root_runtime_resumes_langgraph_interrupt_with_command():
 @pytest.mark.asyncio
 async def test_root_runtime_rejects_resume_action_not_allowed_by_current_interrupt():
     runtime = AgentRootRuntime(checkpointer=InMemorySaver())
-    await runtime.checkpoint_turn_start({
-        "team_id": 2,
-        "user_id": 3,
-        "session_id": 4,
-        "session_key": "abc",
-        "channel": "web",
-        "content": "确认",
-        "turn_kind": "confirm",
-        "current_interrupt": {
-            "type": "confirm",
-            "business_action": "CREATE_FOLLOW_UP",
-            "allowed_resume_actions": ["approve", "edit", "reject", "cancel"],
-        },
-    })
+    await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": "确认",
+            "turn_kind": "confirm",
+            "current_interrupt": {
+                "type": "confirm",
+                "business_action": "CREATE_FOLLOW_UP",
+                "allowed_resume_actions": ["approve", "edit", "reject", "cancel"],
+            },
+        }
+    )
 
     with pytest.raises(ValueError, match="not allowed"):
         await runtime.resume_interrupt(
@@ -2740,21 +2931,22 @@ async def test_root_runtime_emits_no_pending_confirmation_side_effects():
     runtime = AgentRootRuntime(checkpointer=InMemorySaver())
     side_effects = AgentRootRuntimeSideEffects()
 
-    state = await runtime.checkpoint_turn_start({
-        "team_id": 2,
-        "user_id": 3,
-        "session_id": 4,
-        "session_key": "abc",
-        "channel": "web",
-        "content": "确认",
-        "turn_kind": "confirm",
-    }, context=AgentRuntimeContext(side_effects=side_effects))
+    state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": "确认",
+            "turn_kind": "confirm",
+        },
+        context=AgentRuntimeContext(side_effects=side_effects),
+    )
 
     assert state["application_action"] == "no_pending_confirmation"
     expected_content = agent_copy.no_pending_confirmation()
-    assert side_effects.no_pending_confirmation_events == [
-        {"event": "final", "content": expected_content}
-    ]
+    assert side_effects.no_pending_confirmation_events == [{"event": "final", "content": expected_content}]
     assert side_effects.no_pending_confirmation_assistant_content == expected_content
 
 
@@ -3029,16 +3221,20 @@ async def test_root_runtime_decides_confirmed_task_execution_after_pending_subgr
 
 def test_project_turn_output_preserves_pending_events_before_confirmed_task_events():
     side_effects = AgentRootRuntimeSideEffects()
-    side_effects.pending_task_events.extend([
-        {"event": "confirmation_intent_assessed"},
-    ])
-    side_effects.confirmed_task_events.extend([
-        {"event": "agent_step", "step": "confirmed_task_execute", "status": "started", "content": "执行记录跟进"},
-        {"event": "agent_step", "step": "confirmed_task_execute", "status": "completed", "content": "执行记录跟进"},
-        {"event": "tool_result", "success": True, "content": "记录跟进已执行"},
-        {"event": "task_completed", "content": "跟进记录已创建。"},
-        {"event": "final", "content": "跟进记录已创建。"},
-    ])
+    side_effects.pending_task_events.extend(
+        [
+            {"event": "confirmation_intent_assessed"},
+        ]
+    )
+    side_effects.confirmed_task_events.extend(
+        [
+            {"event": "agent_step", "step": "confirmed_task_execute", "status": "started", "content": "执行记录跟进"},
+            {"event": "agent_step", "step": "confirmed_task_execute", "status": "completed", "content": "执行记录跟进"},
+            {"event": "tool_result", "success": True, "content": "记录跟进已执行"},
+            {"event": "task_completed", "content": "跟进记录已创建。"},
+            {"event": "final", "content": "跟进记录已创建。"},
+        ]
+    )
     side_effects.confirmed_task_assistant_content = "跟进记录已创建。"
 
     output = project_turn_output({"application_action": "execute_confirmed_task"}, side_effects)
@@ -3056,16 +3252,20 @@ def test_project_turn_output_preserves_pending_events_before_confirmed_task_even
 
 def test_project_turn_output_keeps_switch_notice_single_for_new_flow():
     side_effects = AgentRootRuntimeSideEffects()
-    side_effects.pending_task_events.extend([
-        {"event": "pending_task_interrupted"},
-    ])
+    side_effects.pending_task_events.extend(
+        [
+            {"event": "pending_task_interrupted"},
+        ]
+    )
     side_effects.pending_task_switch_notice = "这条是在说「汇川技术」。我先把刚才那一步放着，切过来处理。"
-    side_effects.new_flow_events.extend([
-        {
-            "event": "final",
-            "content": "这条是在说「汇川技术」。我先把刚才那一步放着，切过来处理。\n\n已切换处理汇川技术的跟进。",
-        },
-    ])
+    side_effects.new_flow_events.extend(
+        [
+            {
+                "event": "final",
+                "content": "这条是在说「汇川技术」。我先把刚才那一步放着，切过来处理。\n\n已切换处理汇川技术的跟进。",
+            },
+        ]
+    )
     side_effects.new_flow_assistant_content = (
         "这条是在说「汇川技术」。我先把刚才那一步放着，切过来处理。\n\n已切换处理汇川技术的跟进。"
     )
@@ -3110,12 +3310,14 @@ async def test_root_runtime_retry_keeps_confirmation_action_waiting(monkeypatch)
     prepare_calls = []
 
     def fake_prepare(db, action, *, retry_source, reason):
-        prepare_calls.append({
-            "db": db,
-            "action_id": action.action_id,
-            "retry_source": retry_source,
-            "reason": reason,
-        })
+        prepare_calls.append(
+            {
+                "db": db,
+                "action_id": action.action_id,
+                "retry_source": retry_source,
+                "reason": reason,
+            }
+        )
         return prepared
 
     async def fail_if_replayed(*args, **kwargs):
@@ -3136,12 +3338,14 @@ async def test_root_runtime_retry_keeps_confirmation_action_waiting(monkeypatch)
     )
 
     assert result is prepared
-    assert prepare_calls == [{
-        "db": db,
-        "action_id": "act_required",
-        "retry_source": "manual_test",
-        "reason": "用户手动重试",
-    }]
+    assert prepare_calls == [
+        {
+            "db": db,
+            "action_id": "act_required",
+            "retry_source": "manual_test",
+            "reason": "用户手动重试",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -3216,11 +3420,13 @@ async def test_root_runtime_retry_replays_auto_execute_actions_through_dag(monke
             return refreshed
 
     async def fake_replay(context, side_effect_context):
-        replay_calls.append({
-            "session_id": context.session_id,
-            "authorization": context.authorization,
-            "action_ids": [item.action_id for item in side_effect_context.auto_execute_actions],
-        })
+        replay_calls.append(
+            {
+                "session_id": context.session_id,
+                "authorization": context.authorization,
+                "action_ids": [item.action_id for item in side_effect_context.auto_execute_actions],
+            }
+        )
         return {"executed_action_count": 2}
 
     monkeypatch.setattr(root_runtime_module.workflow_action_ledger, "prepare_action_retry", fake_prepare)
@@ -3237,11 +3443,13 @@ async def test_root_runtime_retry_replays_auto_execute_actions_through_dag(monke
     )
 
     assert result is refreshed
-    assert replay_calls == [{
-        "session_id": 4,
-        "authorization": "Bearer retry-test",
-        "action_ids": ["act_projection", "act_profile_refresh"],
-    }]
+    assert replay_calls == [
+        {
+            "session_id": 4,
+            "authorization": "Bearer retry-test",
+            "action_ids": ["act_projection", "act_profile_refresh"],
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -3400,3 +3608,963 @@ def _ledger_action_stub(
         status_reason=None,
         error_message=None,
     )
+
+
+class FakeFollowUpConfirmationChannelService:
+    def __init__(self):
+        self.prepare_calls = []
+        self.resolve_calls = []
+        self.list_calls = []
+        self.projected_prompt_keys = []
+        self.failed_projection_calls = []
+        self.pending_case_public_ids = []
+        self.pending_checks = []
+
+    def is_case_pending_for_owner(self, db, *, team_id, user_id, case_public_id):
+        self.pending_checks.append(
+            {
+                "db": db,
+                "team_id": team_id,
+                "user_id": user_id,
+                "case_public_id": case_public_id,
+            }
+        )
+        return case_public_id in self.pending_case_public_ids
+
+    def prepare_case_prompt_by_public_ids(
+        self,
+        db,
+        *,
+        team_id,
+        user_id,
+        case_public_ids,
+        interaction_scope,
+        prompt_override=None,
+        reason_code="ROOT_GRAPH_INTERRUPT_PLANNED",
+    ):
+        self.prepare_calls.append(
+            {
+                "db": db,
+                "team_id": team_id,
+                "user_id": user_id,
+                "case_public_ids": case_public_ids,
+                "interaction_scope": interaction_scope,
+                "prompt_override": prompt_override,
+                "reason_code": reason_code,
+            }
+        )
+        if not case_public_ids:
+            return None
+        case_public_id = case_public_ids[0]
+        return {
+            "event": "follow_up_task_confirmation_case_prompt",
+            "content": prompt_override or "上次安排的任务这次是否已经完成?",
+            "case_public_id": case_public_id,
+            "interaction": {
+                "schema_version": "agent.interaction.v1",
+                "interaction_id": "int_follow_up_confirmation_stable",
+                "type": "choice",
+                "business_action": "resolve_follow_up_task_confirmation_case",
+                "status": "waiting_user_input",
+                "title": "确认跟进进展",
+                "prompt": prompt_override or "上次安排的任务这次是否已经完成?",
+                "payload": {
+                    "case_public_id": case_public_id,
+                    "prompt_delivery_key": FollowUpTaskConfirmationChannelService._projection_prompt_key(
+                        case_public_id=case_public_id,
+                        interaction_scope=interaction_scope,
+                    ),
+                },
+                "choices": [
+                    {
+                        "label": "已完成",
+                        "value": "已完成",
+                        "metadata": {"case_public_id": case_public_id},
+                    },
+                ],
+            },
+        }
+
+    def list_pending_cases(self, db, *, team_id, user_id, skip=0, limit=20):
+        self.list_calls.append(
+            {
+                "db": db,
+                "team_id": team_id,
+                "user_id": user_id,
+                "skip": skip,
+                "limit": limit,
+            }
+        )
+        items = [{"public_id": public_id} for public_id in self.pending_case_public_ids[skip : skip + limit]]
+        return {
+            "items": items,
+            "total": len(self.pending_case_public_ids),
+            "skip": skip,
+            "limit": limit,
+        }
+
+    def mark_projection_projected(self, db, *, team_id, prompt_key):
+        self.projected_prompt_keys.append(prompt_key)
+        return {"status": "PROJECTED"}
+
+    def mark_projection_failed(self, db, *, team_id, prompt_key, error_message):
+        self.failed_projection_calls.append(
+            {
+                "db": db,
+                "team_id": team_id,
+                "prompt_key": prompt_key,
+                "error_message": error_message,
+            }
+        )
+        return {"status": "FAILED"}
+
+    def resolve_reply_event(
+        self,
+        db,
+        *,
+        team_id,
+        user_id,
+        case_public_id,
+        reply_text,
+    ):
+        self.resolve_calls.append(
+            {
+                "db": db,
+                "team_id": team_id,
+                "user_id": user_id,
+                "case_public_id": case_public_id,
+                "reply_text": reply_text,
+            }
+        )
+        return {
+            "event": "follow_up_task_confirmation_resolved",
+            "case_public_id": case_public_id,
+            "content": "已确认完成，并更新了这项跟进任务。",
+        }
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_projects_auto_executed_activity_confirmation_as_interrupt(monkeypatch):
+    case_public_id = "fuc_b6184685cfcf4345b6d52e48d23bf170"
+
+    monkeypatch.setattr(
+        "app.services.agent.new_flow_effects.session_state._remember_current_customer",
+        lambda db_arg, session_arg, customer: None,
+    )
+
+    async def fake_execute_action_envelope(
+        db,
+        envelope,
+        *,
+        session,
+        team_id,
+        user_id,
+        authorization,
+        event_sink,
+    ):
+        return ActionToolExecutionResult(
+            AgentToolResult(
+                tool_name="create_customer_activity",
+                success=True,
+                data={
+                    "id": 212,
+                    "post_commit": {
+                        "needs_user_confirmation": True,
+                        "confirmation_case_public_ids": [case_public_id],
+                    },
+                },
+                tool_call_id=7001,
+            )
+        )
+
+    monkeypatch.setattr(root_runtime_module.task_execution, "execute_action_envelope", fake_execute_action_envelope)
+    monkeypatch.setattr(
+        root_runtime_module.workflow_action_ledger, "mark_action_executed", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        root_runtime_module.workflow_action_ledger, "execution_state_for_action_ids", lambda *args, **kwargs: {}
+    )
+
+    channel_service = FakeFollowUpConfirmationChannelService()
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeAutoExecutableNewFlowGraphService(),
+        confirmed_task_graph_service=FakeConfirmedTaskGraphService(),
+        confirmation_channel_service=channel_service,
+    )
+    side_effects = AgentRootRuntimeSideEffects()
+    context = AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4, context_json={}),
+        content="今天已经反馈分类分级表，明天提供测试报告",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=side_effects,
+    )
+
+    state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": context.content,
+            "turn_kind": "text",
+        },
+        context=context,
+    )
+
+    current_interrupt = state["current_interrupt"]
+    assert current_interrupt["reason"] == "follow_up_task_confirmation"
+    assert current_interrupt["business_action"] == "resolve_follow_up_task_confirmation_case"
+    assert current_interrupt["interaction"]["interaction_id"] == "int_follow_up_confirmation_stable"
+    assert current_interrupt["interaction"]["payload"]["case_public_id"] == case_public_id
+    assert state["post_write_effects"] == {
+        "follow_up_confirmation_case_public_ids": [case_public_id],
+    }
+    assert channel_service.prepare_calls[0]["case_public_ids"] == [case_public_id]
+    assert channel_service.projected_prompt_keys == [current_interrupt["interaction"]["payload"]["prompt_delivery_key"]]
+    assert len(channel_service.projected_prompt_keys[0]) <= 128
+    assert [event for event in side_effects.new_flow_events if event.get("event") == "final"] == []
+    prompt_events = [
+        event
+        for event in side_effects.business_interaction_events
+        if event.get("event") == "follow_up_task_confirmation_case_prompt"
+    ]
+    assert len(prompt_events) == 1
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_resumes_projected_follow_up_confirmation_through_channel_service(monkeypatch):
+    case_public_id = "fuc_b6184685cfcf4345b6d52e48d23bf170"
+    channel_service = FakeFollowUpConfirmationChannelService()
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        confirmation_channel_service=channel_service,
+    )
+    side_effects = AgentRootRuntimeSideEffects()
+    context = AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4, context_json={}),
+        turn_input=AgentTurnInput.text("已完成"),
+        content="已完成",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=side_effects,
+    )
+    interrupt_payload = {
+        "schema_version": "agent.interrupt.v1",
+        "interrupt_id": "int_follow_up_confirmation_stable",
+        "reason": "follow_up_task_confirmation",
+        "business_action": "resolve_follow_up_task_confirmation_case",
+        "content": "上次安排的任务这次是否已经完成?",
+        "interaction": {
+            "schema_version": "agent.interaction.v1",
+            "interaction_id": "int_follow_up_confirmation_stable",
+            "type": "choice",
+            "business_action": "resolve_follow_up_task_confirmation_case",
+            "status": "waiting_user_input",
+            "title": "确认跟进进展",
+            "prompt": "上次安排的任务这次是否已经完成?",
+            "payload": {"case_public_id": case_public_id},
+            "choices": [],
+        },
+    }
+
+    await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": "记录跟进",
+            "turn_kind": "text",
+            "current_interrupt": interrupt_payload,
+        },
+        context=context,
+    )
+
+    result = await runtime.resume_interrupt(
+        resume_payload={
+            "action": "submit",
+            "content": "已完成",
+            "metadata": {},
+        },
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="abc",
+        context=context,
+    )
+
+    assert channel_service.resolve_calls == [
+        {
+            "db": context.db,
+            "team_id": 2,
+            "user_id": 3,
+            "case_public_id": case_public_id,
+            "reply_text": "已完成",
+        }
+    ]
+    assert result["assistant_content"] == "已确认完成，并更新了这项跟进任务。"
+    assert any(
+        event.get("event") == "follow_up_task_confirmation_resolved"
+        for event in side_effects.business_interaction_events
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_turn_discards_stale_follow_up_interrupt_before_processing_new_message():
+    case_public_id = "fuc_resolved_in_confirmation_center"
+
+    class RecordingTurnIntentRouter:
+        def __init__(self):
+            self.calls = []
+
+        async def route_resume(self, db, **kwargs):
+            self.calls.append({"db": db, **kwargs})
+            return SimpleNamespace(
+                decision=SimpleNamespace(
+                    intent="CONTINUE_PENDING",
+                    confidence=1.0,
+                    target_task_id=None,
+                    normalized_action="submit",
+                    reason="测试旧确认中断。",
+                ),
+                resume_payload={
+                    "action": "submit",
+                    "content": kwargs["turn_input"].content,
+                    "metadata": {},
+                },
+                source="test_router",
+            )
+
+    channel_service = FakeFollowUpConfirmationChannelService()
+    channel_service.pending_case_public_ids = [case_public_id]
+    new_flow_graph_service = FakeNewFlowGraphService()
+    turn_intent_router = RecordingTurnIntentRouter()
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=new_flow_graph_service,
+        confirmation_channel_service=channel_service,
+        turn_intent_router=turn_intent_router,
+    )
+    published_events = []
+
+    async def capture_event(event):
+        published_events.append(event)
+
+    context = AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4, context_json={}),
+        turn_input=AgentTurnInput.text("查看这个客户的最新进展"),
+        content="查看这个客户的最新进展",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=AgentRootRuntimeSideEffects(),
+        event_sink=capture_event,
+    )
+    initial_event = channel_service.prepare_case_prompt_by_public_ids(
+        context.db,
+        team_id=2,
+        user_id=3,
+        case_public_ids=[case_public_id],
+        interaction_scope="crm_agent:2:3:4:abc",
+    )
+    interrupt_payload = {
+        "schema_version": "agent.interrupt.v1",
+        "interrupt_id": "int_stale_follow_up_confirmation",
+        "type": "choice",
+        "reason": "follow_up_task_confirmation",
+        "business_action": "resolve_follow_up_task_confirmation_case",
+        "interaction": initial_event["interaction"],
+    }
+    await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": "记录跟进",
+            "turn_kind": "text",
+            "current_interrupt": interrupt_payload,
+        },
+        context=context,
+    )
+
+    channel_service.pending_case_public_ids = []
+    published_events.clear()
+    context.side_effects = AgentRootRuntimeSideEffects()
+
+    result = await runtime.run_turn(
+        turn_input=context.turn_input,
+        content=context.content,
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="abc",
+        current_customer={},
+        context=context,
+    )
+
+    assert turn_intent_router.calls == []
+    assert channel_service.resolve_calls == []
+    assert new_flow_graph_service.calls[0]["content"] == "查看这个客户的最新进展"
+    assert result["assistant_content"] == "已处理新流程"
+    assert any(
+        event.get("event") == "follow_up_task_confirmation_stale_interrupt_discarded"
+        and event.get("case_public_id") == case_public_id
+        for event in published_events
+    )
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_keeps_follow_up_confirmation_interrupt_when_reply_is_unrecognized():
+    case_public_id = "fuc_b6184685cfcf4345b6d52e48d23bf170"
+
+    class UnresolvedChannelService(FakeFollowUpConfirmationChannelService):
+        def resolve_reply_event(self, db, *, team_id, user_id, case_public_id, reply_text):
+            self.resolve_calls.append(
+                {
+                    "db": db,
+                    "team_id": team_id,
+                    "user_id": user_id,
+                    "case_public_id": case_public_id,
+                    "reply_text": reply_text,
+                }
+            )
+            return {
+                "event": "follow_up_task_confirmation_case_resolved",
+                "content": "请直接回复已完成、先放着、不管了，或说明延期时间。",
+                "case": {"public_id": case_public_id, "unresolved_reply_count": 1},
+                "assistant_follow_up_prompt": "请直接回复已完成、先放着、不管了，或说明延期时间。",
+            }
+
+    channel_service = UnresolvedChannelService()
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        confirmation_channel_service=channel_service,
+    )
+    context = AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4, context_json={}),
+        turn_input=AgentTurnInput.text("再看看"),
+        content="再看看",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=AgentRootRuntimeSideEffects(),
+    )
+    interrupt_payload = {
+        "schema_version": "agent.interrupt.v1",
+        "interrupt_id": "int_follow_up_confirmation_stable",
+        "type": "choice",
+        "reason": "follow_up_task_confirmation",
+        "business_action": "resolve_follow_up_task_confirmation_case",
+        "interaction": channel_service.prepare_case_prompt_by_public_ids(
+            context.db,
+            team_id=2,
+            user_id=3,
+            case_public_ids=[case_public_id],
+            interaction_scope="initial",
+        )["interaction"],
+    }
+
+    await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": "记录跟进",
+            "turn_kind": "text",
+            "current_interrupt": interrupt_payload,
+        },
+        context=context,
+    )
+
+    result = await runtime.resume_interrupt(
+        resume_payload={
+            "action": "select",
+            "content": "再看看",
+            "metadata": {"selected_value": "再看看"},
+        },
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="abc",
+        context=context,
+    )
+
+    assert result["current_interrupt"]["reason"] == "follow_up_task_confirmation"
+    retry_interaction = result["current_interrupt"]["interaction"]
+    assert retry_interaction["prompt"] == "请直接回复已完成、先放着、不管了，或说明延期时间。"
+    assert retry_interaction["payload"]["prompt_delivery_key"] == (
+        FollowUpTaskConfirmationChannelService._projection_prompt_key(
+            case_public_id=case_public_id,
+            interaction_scope="crm_agent:2:3:4:abc:clarification:1",
+        )
+    )
+    assert result["runtime_status"] == "resumed"
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_projects_async_owner_inbox_case_on_later_active_turn():
+    case_public_id = "fuc_async_page_created"
+    channel_service = FakeFollowUpConfirmationChannelService()
+    channel_service.pending_case_public_ids = [case_public_id]
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeNewFlowGraphService(),
+        confirmation_channel_service=channel_service,
+    )
+    side_effects = AgentRootRuntimeSideEffects()
+    context = AgentRuntimeContext(
+        db=SimpleNamespace(query=lambda *args, **kwargs: None),
+        session=SimpleNamespace(id=4, context_json={}),
+        content="查看客户最新进展",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=side_effects,
+    )
+
+    state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": context.content,
+            "turn_kind": "text",
+        },
+        context=context,
+    )
+
+    assert state["current_interrupt"]["reason"] == "follow_up_task_confirmation"
+    assert state["current_interrupt"]["interaction"]["payload"]["case_public_id"] == case_public_id
+    assert channel_service.prepare_calls[0]["case_public_ids"] == []
+    assert channel_service.prepare_calls[1]["case_public_ids"] == [case_public_id]
+    assert channel_service.list_calls[0]["limit"] == 1
+    assert [event for event in side_effects.new_flow_events if event.get("event") == "final"] == []
+    assert side_effects.business_interaction_assistant_content == "上次安排的任务这次是否已经完成?"
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_reconciles_next_owner_inbox_case_after_first_resolution():
+    first_case = "fuc_first"
+    second_case = "fuc_second"
+
+    class MultiCaseChannelService(FakeFollowUpConfirmationChannelService):
+        def resolve_reply_event(self, db, *, team_id, user_id, case_public_id, reply_text):
+            result = super().resolve_reply_event(
+                db,
+                team_id=team_id,
+                user_id=user_id,
+                case_public_id=case_public_id,
+                reply_text=reply_text,
+            )
+            self.pending_case_public_ids = [second_case]
+            return result
+
+    channel_service = MultiCaseChannelService()
+    channel_service.pending_case_public_ids = [first_case]
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeNewFlowGraphService(),
+        confirmation_channel_service=channel_service,
+    )
+    context = AgentRuntimeContext(
+        db=SimpleNamespace(query=lambda *args, **kwargs: None),
+        session=SimpleNamespace(id=4, context_json={}),
+        content="查看客户最新进展",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=AgentRootRuntimeSideEffects(),
+    )
+
+    first_state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": context.content,
+            "turn_kind": "text",
+        },
+        context=context,
+    )
+    assert first_state["current_interrupt"]["interaction"]["payload"]["case_public_id"] == first_case
+
+    resumed = await runtime.resume_interrupt(
+        resume_payload={
+            "action": "select",
+            "content": "已完成",
+            "metadata": {"selected_value": "已完成"},
+        },
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="abc",
+        context=context,
+    )
+
+    assert resumed["current_interrupt"]["reason"] == "follow_up_task_confirmation"
+    assert resumed["current_interrupt"]["interaction"]["payload"]["case_public_id"] == second_case
+    assert [call["case_public_ids"] for call in channel_service.prepare_calls][-1] == [second_case]
+
+
+@pytest.mark.asyncio
+async def test_follow_up_confirmation_is_published_only_after_checkpoint_projection():
+    case_public_id = "fuc_checkpoint_safe"
+    channel_service = FakeFollowUpConfirmationChannelService()
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeNewFlowGraphService(),
+        confirmation_channel_service=channel_service,
+    )
+    published_events = []
+
+    async def capture_event(event):
+        published_events.append(event)
+
+    context = AgentRuntimeContext(
+        db=SimpleNamespace(query=lambda *args, **kwargs: None),
+        session=SimpleNamespace(id=4, context_json={}),
+        content="查看客户最新进展",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=AgentRootRuntimeSideEffects(),
+        event_sink=capture_event,
+    )
+    channel_service.pending_case_public_ids = [case_public_id]
+    projection_calls = []
+    original_mark_projected = channel_service.mark_projection_projected
+
+    def mark_projected_after_checkpoint(db, *, team_id, prompt_key):
+        assert not any(event.get("event") == FOLLOW_UP_CONFIRMATION_PROMPT_EVENT for event in published_events)
+        projection_calls.append(prompt_key)
+        return original_mark_projected(db, team_id=team_id, prompt_key=prompt_key)
+
+    channel_service.mark_projection_projected = mark_projected_after_checkpoint
+
+    await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": context.content,
+            "turn_kind": "text",
+        },
+        context=context,
+    )
+
+    prompt_events = [event for event in published_events if event.get("event") == FOLLOW_UP_CONFIRMATION_PROMPT_EVENT]
+    assert projection_calls == [
+        FollowUpTaskConfirmationChannelService._projection_prompt_key(
+            case_public_id=case_public_id,
+            interaction_scope="crm_agent:2:3:4:abc",
+        )
+    ]
+    assert len(prompt_events) == 1
+    assert prompt_events[0]["interaction"]["payload"]["case_public_id"] == case_public_id
+
+
+@pytest.mark.asyncio
+async def test_projection_acknowledgement_failure_is_audited_without_exposing_prompt():
+    case_public_id = "fuc_projection_ack_failed"
+    channel_service = FakeFollowUpConfirmationChannelService()
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeNewFlowGraphService(),
+        confirmation_channel_service=channel_service,
+    )
+    published_events = []
+
+    async def capture_event(event):
+        published_events.append(event)
+
+    class RollbackDB:
+        def __init__(self):
+            self.rollback_calls = 0
+
+        def query(self, *args, **kwargs):
+            return None
+
+        def rollback(self):
+            self.rollback_calls += 1
+
+    db = RollbackDB()
+    context = AgentRuntimeContext(
+        db=db,
+        session=SimpleNamespace(id=4, context_json={}),
+        content="查看客户最新进展",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=AgentRootRuntimeSideEffects(),
+        event_sink=capture_event,
+    )
+    channel_service.pending_case_public_ids = [case_public_id]
+
+    def fail_projection(db_arg, *, team_id, prompt_key):
+        raise RuntimeError("checkpoint acknowledgement failed")
+
+    channel_service.mark_projection_projected = fail_projection
+
+    state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": context.content,
+            "turn_kind": "text",
+        },
+        context=context,
+    )
+
+    prompt_key = FollowUpTaskConfirmationChannelService._projection_prompt_key(
+        case_public_id=case_public_id,
+        interaction_scope="crm_agent:2:3:4:abc",
+    )
+    assert state.get("current_interrupt") is None
+    assert (
+        await runtime.has_pending_interrupt(
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            session_key="abc",
+        )
+        is False
+    )
+    assert db.rollback_calls == 1
+    assert channel_service.failed_projection_calls == [
+        {
+            "db": db,
+            "team_id": 2,
+            "prompt_key": prompt_key,
+            "error_message": "checkpoint acknowledgement failed",
+        }
+    ]
+    assert not any(event.get("event") == FOLLOW_UP_CONFIRMATION_PROMPT_EVENT for event in published_events)
+    assert any(
+        event.get("event") == "follow_up_task_confirmation_projection_ack_failed"
+        and event.get("prompt_key") == prompt_key
+        for event in published_events
+    )
+
+
+@pytest.mark.asyncio
+async def test_projection_ack_failure_discards_hidden_interrupt_and_retries_on_next_turn():
+    case_public_id = "fuc_projection_retry"
+    channel_service = FakeFollowUpConfirmationChannelService()
+    channel_service.pending_case_public_ids = [case_public_id]
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeNewFlowGraphService(),
+        confirmation_channel_service=channel_service,
+    )
+    published_events = []
+
+    async def capture_event(event):
+        published_events.append(event)
+
+    db = SimpleNamespace(query=lambda *args, **kwargs: None, rollback=lambda: None)
+    context = AgentRuntimeContext(
+        db=db,
+        session=SimpleNamespace(id=4, context_json={}),
+        content="查看客户最新进展",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=AgentRootRuntimeSideEffects(),
+        event_sink=capture_event,
+    )
+    original_mark_projected = channel_service.mark_projection_projected
+    attempts = 0
+
+    def fail_once(db_arg, *, team_id, prompt_key):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("checkpoint acknowledgement failed")
+        return original_mark_projected(db_arg, team_id=team_id, prompt_key=prompt_key)
+
+    channel_service.mark_projection_projected = fail_once
+
+    first = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": context.content,
+            "turn_kind": "text",
+        },
+        context=context,
+    )
+
+    assert first.get("current_interrupt") is None
+    assert (
+        await runtime.has_pending_interrupt(
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            session_key="abc",
+        )
+        is False
+    )
+
+    second = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": "继续处理客户事项",
+            "turn_kind": "text",
+        },
+        context=context,
+    )
+
+    assert attempts == 2
+    assert second["current_interrupt"]["reason"] == "follow_up_task_confirmation"
+    assert second["current_interrupt"]["interaction"]["payload"]["case_public_id"] == case_public_id
+    assert any(event.get("event") == FOLLOW_UP_CONFIRMATION_PROMPT_EVENT for event in published_events)
+
+
+@pytest.mark.asyncio
+async def test_unrecognized_confirmation_reply_is_only_exposed_after_retry_interrupt_is_checkpointed():
+    case_public_id = "fuc_clarification_checkpoint_safe"
+
+    class UnresolvedChannelService(FakeFollowUpConfirmationChannelService):
+        def resolve_reply_event(self, db, *, team_id, user_id, case_public_id, reply_text):
+            self.resolve_calls.append(
+                {
+                    "db": db,
+                    "team_id": team_id,
+                    "user_id": user_id,
+                    "case_public_id": case_public_id,
+                    "reply_text": reply_text,
+                }
+            )
+            return {
+                "event": "follow_up_task_confirmation_case_resolved",
+                "content": "请直接回复已完成、先放着、不管了，或说明延期时间。",
+                "case": {"public_id": case_public_id, "unresolved_reply_count": 1},
+                "assistant_follow_up_prompt": "请直接回复已完成、先放着、不管了，或说明延期时间。",
+            }
+
+    channel_service = UnresolvedChannelService()
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        confirmation_channel_service=channel_service,
+    )
+    published_events = []
+
+    async def capture_event(event):
+        published_events.append(event)
+
+    context = AgentRuntimeContext(
+        db=SimpleNamespace(query=lambda *args, **kwargs: None),
+        session=SimpleNamespace(id=4, context_json={}),
+        turn_input=AgentTurnInput.text("再看看"),
+        content="再看看",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=AgentRootRuntimeSideEffects(),
+        event_sink=capture_event,
+    )
+    initial_event = channel_service.prepare_case_prompt_by_public_ids(
+        context.db,
+        team_id=2,
+        user_id=3,
+        case_public_ids=[case_public_id],
+        interaction_scope="initial",
+    )
+    interrupt_payload = {
+        "schema_version": "agent.interrupt.v1",
+        "interrupt_id": "int_follow_up_confirmation_stable",
+        "type": "choice",
+        "reason": "follow_up_task_confirmation",
+        "business_action": "resolve_follow_up_task_confirmation_case",
+        "interaction": initial_event["interaction"],
+    }
+    await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": "记录跟进",
+            "turn_kind": "text",
+            "current_interrupt": interrupt_payload,
+        },
+        context=context,
+    )
+    published_events.clear()
+
+    original_mark_projected = channel_service.mark_projection_projected
+
+    def assert_not_exposed_before_checkpoint(db, *, team_id, prompt_key):
+        assert not any(
+            event.get("event") == FOLLOW_UP_CONFIRMATION_PROMPT_EVENT or event.get("assistant_follow_up_prompt")
+            for event in published_events
+        )
+        return original_mark_projected(db, team_id=team_id, prompt_key=prompt_key)
+
+    channel_service.mark_projection_projected = assert_not_exposed_before_checkpoint
+
+    result = await runtime.resume_interrupt(
+        resume_payload={
+            "action": "select",
+            "content": "再看看",
+            "metadata": {"selected_value": "再看看"},
+        },
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="abc",
+        context=context,
+    )
+
+    retry_interaction = result["current_interrupt"]["interaction"]
+    assert retry_interaction["prompt"] == "请直接回复已完成、先放着、不管了，或说明延期时间。"
+    assert retry_interaction["payload"]["prompt_delivery_key"] == (
+        FollowUpTaskConfirmationChannelService._projection_prompt_key(
+            case_public_id=case_public_id,
+            interaction_scope="crm_agent:2:3:4:abc:clarification:1",
+        )
+    )
+    prompt_events = [event for event in published_events if event.get("event") == FOLLOW_UP_CONFIRMATION_PROMPT_EVENT]
+    assert len(prompt_events) == 1
+    assert not any(event.get("event") == "follow_up_task_confirmation_case_resolved" for event in published_events)

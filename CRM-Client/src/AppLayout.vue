@@ -130,6 +130,7 @@
             <div v-if="visibleHeaderActions.length > 0" class="header-divider"></div>
 
             <!-- 审批中心（固定在最右，永不移动） -->
+            <FollowUpConfirmationIcon class="header-confirmation" />
             <ApprovalIcon class="header-approval" />
           </div>
         </div>
@@ -197,6 +198,7 @@ import {
   MoreHorizontal,
 } from 'lucide-vue-next'
 import ApprovalIcon from '@/components/ApprovalIcon.vue'
+import FollowUpConfirmationIcon from '@/components/FollowUpConfirmationIcon.vue'
 import AppSidebar from '@/components/app-sidebar/AppSidebar.vue'
 import { TopBarTabs } from '@/components/crmwolf'
 import { logger } from '@/utils/logger'
@@ -624,6 +626,7 @@ $z-index-bottom-nav: 100;
   margin: 0 $wolf-space-sm-v2;  // 0 8px
 }
 
+.header-confirmation,
 .header-approval {
   flex-shrink: 0;
 }

@@ -11,6 +11,11 @@ from app.models.agent import (
     AgentToolCall,
     AgentToolCallStatus,
 )
+from app.models.agent_async_operation import (
+    AgentAsyncOperation,
+    AgentAsyncOperationEvent,
+    AgentAsyncOperationStatus,
+)
 from app.models.ai_config import AIConfig
 from app.models.approval import Approval, ApprovalFlow, ApprovalNode, ApprovalRecord
 from app.models.contract import Contract, ContractStatus, PaymentStatus
@@ -116,6 +121,9 @@ from app.models.view_preference import ViewPreference, ViewPreferenceScope
 __all__ = [
     "AIConfig",
     "AgentChannelSession",
+    "AgentAsyncOperationStatus",
+    "AgentAsyncOperationEvent",
+    "AgentAsyncOperation",
     "AgentIdempotencyKey",
     "AgentIdempotencyStatus",
     "AgentMemoryEntry",

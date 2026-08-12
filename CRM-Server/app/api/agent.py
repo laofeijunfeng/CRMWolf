@@ -13,6 +13,7 @@ from app.core.deps import get_current_active_user, get_current_user_team, securi
 from app.crud.agent import agent_message_crud, agent_session_crud, agent_workflow_action_crud
 from app.models.user import User
 from app.schemas.agent import (
+    AgentAsyncOperationResponse,
     AgentChatRequest,
     AgentCreateSessionRequest,
     AgentMessageResponse,
@@ -36,6 +37,7 @@ from app.services.agent import action_workflow
 from app.services.agent import application as agent_application_module
 from app.services.agent import confirmation_intent, field_common, follow_up_fields, selection, session_state, task_execution
 from app.services.agent import interactions as agent_interactions
+from app.services.agent.async_operation_service import agent_async_operation_service
 from app.services.agent.application import agent_application_service
 from app.services.agent.graph import crm_agent_graph_service
 from app.services.agent.input import AgentTurnInput
@@ -315,6 +317,42 @@ async def retry_agent_workflow_action(
         return _action_response(action_result)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/sessions/{session_id}/operations", response_model=list[AgentAsyncOperationResponse])
+async def list_agent_async_operations(
+    session_id: int,
+    limit: int = Query(50, ge=1, le=100, description="异步操作数量"),
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    _get_owned_session(db, team_id=team_id, user_id=current_user.id, session_id=session_id)
+    return agent_async_operation_service.list_session_projections(
+        db,
+        team_id=team_id,
+        user_id=current_user.id,
+        session_id=session_id,
+        limit=limit,
+    )
+
+
+@router.get("/operations/{operation_public_id}", response_model=AgentAsyncOperationResponse)
+async def get_agent_async_operation(
+    operation_public_id: str,
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    operation = agent_async_operation_service.get_projection(
+        db,
+        team_id=team_id,
+        user_id=current_user.id,
+        public_id=operation_public_id,
+    )
+    if operation is None:
+        raise HTTPException(status_code=404, detail="Agent async operation not found")
+    return operation
 
 
 @router.get("/sessions/{session_id}/messages", response_model=PaginatedResponse[AgentMessageResponse])

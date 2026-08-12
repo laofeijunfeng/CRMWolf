@@ -74,6 +74,12 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true, title: 'AI Agent', keepAlive: true }
       },
       {
+        path: 'follow-up-confirmations',
+        name: 'FollowUpConfirmationCenter',
+        component: () => import('@/views/FollowUpConfirmationCenter.vue'),
+        meta: { requiresAuth: true, title: '跟进确认中心' }
+      },
+      {
         path: 'leads',
         name: 'Leads',
         component: () => import('@/views/Leads.vue'),

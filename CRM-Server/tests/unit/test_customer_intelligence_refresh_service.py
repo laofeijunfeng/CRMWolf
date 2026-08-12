@@ -4,13 +4,20 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import create_engine, text, true
+from sqlalchemy import BigInteger, create_engine, text, true
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
+from app.models.agent_async_operation import (
+    AgentAsyncOperation,
+    AgentAsyncOperationEvent,
+    AgentAsyncOperationStatus,
+)
 from app.models.customer import Customer
 from app.models.customer_intelligence_run import CustomerIntelligenceRun, CustomerIntelligenceRunStatus
+from app.services.agent.async_operation_service import AgentAsyncOperationService
 from app.services.customer_intelligence_event_service import (
     CustomerIntelligenceEvent,
     CustomerIntelligenceSource,
@@ -20,6 +27,11 @@ from app.services.customer_intelligence_refresh_service import (
     CustomerIntelligenceRefreshRequest,
     CustomerIntelligenceRefreshService,
 )
+
+
+@compiles(BigInteger, "sqlite")
+def _bigint_to_sqlite_int(element, compiler, **kw):
+    return "INTEGER"
 
 
 class FakeGraphService:
@@ -225,6 +237,32 @@ class FailingRunService(FakeRunService):
         raise RuntimeError("customer intelligence run table unavailable")
 
 
+class FakeIdentityResolutionService:
+    def __init__(self):
+        self.customer_calls = []
+        self.team_calls = []
+
+    def rebuild_customer_identity_terms(self, db, *, team_id: int, customer_id: int) -> int:
+        self.customer_calls.append({"db": db, "team_id": team_id, "customer_id": customer_id})
+        return 0
+
+    def rebuild_team_identity_terms(
+        self,
+        db,
+        *,
+        team_id: int | None = None,
+        customer_ids=None,
+        limit: int = 100,
+    ) -> tuple[int, ...]:
+        self.team_calls.append({
+            "db": db,
+            "team_id": team_id,
+            "customer_ids": customer_ids,
+            "limit": limit,
+        })
+        return ()
+
+
 class FakeVectorDocumentService:
     def __init__(self, rebuilt_customer_ids: list[int] | None = None):
         self.rebuilt_customer_ids = rebuilt_customer_ids or []
@@ -380,6 +418,7 @@ async def test_customer_intelligence_refresh_service_schedules_customer_lifecycl
         graph_service=FakeGraphService(),
         event_service=FakeEventService(),
         run_service=FakeRunService(),
+        identity_resolution_service=FakeIdentityResolutionService(),
     )
 
     request = await service.trigger_customer_created_refresh(
@@ -666,9 +705,18 @@ def test_customer_intelligence_refresh_service_recovers_stale_generating_state()
         poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
-    Base.metadata.create_all(engine, tables=[Customer.__table__, CustomerIntelligenceRun.__table__])
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            Customer.__table__,
+            CustomerIntelligenceRun.__table__,
+            AgentAsyncOperation.__table__,
+            AgentAsyncOperationEvent.__table__,
+        ],
+    )
     Session = sessionmaker(bind=engine)
     db = Session()
+    operation_service = AgentAsyncOperationService()
     db.add(
         Customer(
             id=101,
@@ -698,10 +746,25 @@ def test_customer_intelligence_refresh_service_recovers_stale_generating_state()
         )
     )
     db.commit()
+    operation = operation_service.ensure_scheduled(
+        db,
+        operation_key="customer-intelligence:stale-request-101",
+        request_id="stale-request-101",
+        team_id=2,
+        user_id=9,
+        session_id=None,
+        source_user_message_id=None,
+        operation_type="customer_intelligence_refresh",
+        resource_type="customer",
+        resource_id=101,
+    )
+    operation_service.mark_running(db, operation)
+    db.commit()
     service = CustomerIntelligenceRefreshService(
         graph_service=FakeGraphService(),
         event_service=FakeEventService(),
         run_service=FakeRunService(),
+        async_operation_service=operation_service,
     )
     try:
         result = service.recover_stale_runtime_state(db, team_id=2)
@@ -712,6 +775,12 @@ def test_customer_intelligence_refresh_service_recovers_stale_generating_state()
         brief_status = customer.customer_brief_status
         run_status = run.status
         next_retry_at = run.next_retry_at
+        operation_projection = operation_service.get_projection(
+            db,
+            team_id=2,
+            user_id=9,
+            public_id=str(operation.public_id),
+        )
     finally:
         db.close()
         engine.dispose()
@@ -723,6 +792,99 @@ def test_customer_intelligence_refresh_service_recovers_stale_generating_state()
     assert brief_status == "PENDING"
     assert run_status == CustomerIntelligenceRunStatus.RETRY_PENDING
     assert next_retry_at is not None
+    assert operation_projection is not None
+    assert operation_projection.status == AgentAsyncOperationStatus.RETRY_SCHEDULED
+    assert operation_projection.next_retry_at is not None
+    assert operation_projection.events[-1].event_type == "RETRY_SCHEDULED"
+
+
+def test_customer_intelligence_refresh_service_marks_exhausted_stale_operation_failed():
+    engine = create_engine(
+        "sqlite:///:memory:",
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            Customer.__table__,
+            CustomerIntelligenceRun.__table__,
+            AgentAsyncOperation.__table__,
+            AgentAsyncOperationEvent.__table__,
+        ],
+    )
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    operation_service = AgentAsyncOperationService()
+    db.add(
+        Customer(
+            id=101,
+            team_id=2,
+            account_name="重试耗尽的客户",
+            city="广州",
+            creator_id="9",
+            profile_status="GENERATING",
+            customer_brief_status="GENERATING",
+        )
+    )
+    db.add(
+        CustomerIntelligenceRun(
+            id=301,
+            run_key="exhausted-stale-run-101",
+            request_id="exhausted-stale-request-101",
+            event_key="exhausted-stale-event-101",
+            tenant_id=2,
+            team_id=2,
+            customer_id=101,
+            trigger_type="manual_refresh_requested",
+            scope="full",
+            status=CustomerIntelligenceRunStatus.RUNNING,
+            attempt_count=3,
+            max_attempts=3,
+            started_time=datetime.now() - timedelta(minutes=15),
+        )
+    )
+    db.commit()
+    operation = operation_service.ensure_scheduled(
+        db,
+        operation_key="customer-intelligence:exhausted-stale-request-101",
+        request_id="exhausted-stale-request-101",
+        team_id=2,
+        user_id=9,
+        session_id=None,
+        source_user_message_id=None,
+        operation_type="customer_intelligence_refresh",
+        resource_type="customer",
+        resource_id=101,
+    )
+    operation_service.mark_running(db, operation)
+    db.commit()
+    service = CustomerIntelligenceRefreshService(
+        graph_service=FakeGraphService(),
+        event_service=FakeEventService(),
+        run_service=FakeRunService(),
+        async_operation_service=operation_service,
+    )
+    try:
+        result = service.recover_stale_runtime_state(db, team_id=2)
+        db.commit()
+        run = db.query(CustomerIntelligenceRun).filter(CustomerIntelligenceRun.id == 301).one()
+        operation_projection = operation_service.get_projection(
+            db,
+            team_id=2,
+            user_id=9,
+            public_id=str(operation.public_id),
+        )
+    finally:
+        db.close()
+        engine.dispose()
+
+    assert result["stale_runs"] == 1
+    assert run.status == CustomerIntelligenceRunStatus.FAILED
+    assert operation_projection is not None
+    assert operation_projection.status == AgentAsyncOperationStatus.FAILED
+    assert operation_projection.finished_time is not None
+    assert operation_projection.events[-1].event_type == "FAILED"
 
 
 def test_customer_intelligence_refresh_service_closes_obsolete_historical_runs():
@@ -731,9 +893,18 @@ def test_customer_intelligence_refresh_service_closes_obsolete_historical_runs()
         poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
-    Base.metadata.create_all(engine, tables=[Customer.__table__, CustomerIntelligenceRun.__table__])
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            Customer.__table__,
+            CustomerIntelligenceRun.__table__,
+            AgentAsyncOperation.__table__,
+            AgentAsyncOperationEvent.__table__,
+        ],
+    )
     Session = sessionmaker(bind=engine)
     db = Session()
+    operation_service = AgentAsyncOperationService()
     db.add(
         Customer(
             id=101,
@@ -763,10 +934,25 @@ def test_customer_intelligence_refresh_service_closes_obsolete_historical_runs()
         )
     )
     db.commit()
+    operation = operation_service.ensure_scheduled(
+        db,
+        operation_key="customer-intelligence:historical-request-101",
+        request_id="historical-request-101",
+        team_id=2,
+        user_id=9,
+        session_id=None,
+        source_user_message_id=None,
+        operation_type="customer_intelligence_refresh",
+        resource_type="customer",
+        resource_id=101,
+    )
+    operation_service.mark_running(db, operation)
+    db.commit()
     service = CustomerIntelligenceRefreshService(
         graph_service=FakeGraphService(),
         event_service=FakeEventService(),
         run_service=FakeRunService(),
+        async_operation_service=operation_service,
     )
     try:
         result = service.recover_stale_runtime_state(db, team_id=2)
@@ -775,6 +961,12 @@ def test_customer_intelligence_refresh_service_closes_obsolete_historical_runs()
         run_status = run.status
         route = run.route
         result_json = run.result_json
+        operation_projection = operation_service.get_projection(
+            db,
+            team_id=2,
+            user_id=9,
+            public_id=str(operation.public_id),
+        )
     finally:
         db.close()
         engine.dispose()
@@ -784,6 +976,10 @@ def test_customer_intelligence_refresh_service_closes_obsolete_historical_runs()
     assert run_status == CustomerIntelligenceRunStatus.CANCELLED
     assert route == "historical_backfill_satisfied"
     assert result_json["reason"] == "customer_brief_already_available"
+    assert operation_projection is not None
+    assert operation_projection.status == AgentAsyncOperationStatus.CANCELLED
+    assert operation_projection.result["reason"] == "customer_brief_already_available"
+    assert operation_projection.events[-1].event_type == "CANCELLED"
 
 
 @pytest.mark.asyncio
@@ -908,7 +1104,15 @@ async def test_customer_intelligence_refresh_service_schedules_missing_historica
         poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
-    Base.metadata.create_all(engine, tables=[Customer.__table__, CustomerIntelligenceRun.__table__])
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            Customer.__table__,
+            CustomerIntelligenceRun.__table__,
+            AgentAsyncOperation.__table__,
+            AgentAsyncOperationEvent.__table__,
+        ],
+    )
     Session = sessionmaker(bind=engine)
     db = Session()
     db.add_all([
@@ -1011,7 +1215,15 @@ async def test_customer_intelligence_refresh_service_recovers_before_historical_
         poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
-    Base.metadata.create_all(engine, tables=[Customer.__table__, CustomerIntelligenceRun.__table__])
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            Customer.__table__,
+            CustomerIntelligenceRun.__table__,
+            AgentAsyncOperation.__table__,
+            AgentAsyncOperationEvent.__table__,
+        ],
+    )
     Session = sessionmaker(bind=engine)
     db = Session()
     db.add_all([
@@ -1068,6 +1280,7 @@ async def test_customer_intelligence_refresh_service_recovers_before_historical_
         event_service=FakeEventService(),
         run_service=run_service,
         vector_document_service=vector_document_service,
+        identity_resolution_service=FakeIdentityResolutionService(),
     )
     monkeypatch.setattr(
         service,

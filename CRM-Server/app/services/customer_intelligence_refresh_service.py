@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Literal, cast
 from uuid import uuid4
@@ -28,11 +28,16 @@ from app.models.deployment import DeploymentInfo
 from app.models.invoice import InvoiceApplication, InvoiceTitle
 from app.models.license_application import LicenseApplication
 from app.models.opportunity import Opportunity
+from app.services.agent.async_operation_service import (
+    AgentAsyncOperationService,
+    agent_async_operation_service,
+)
 from app.services.agent.customer_intelligence_graph import (
     CustomerIntelligenceGraphService,
+    build_customer_intelligence_thread_id,
     customer_intelligence_graph_service,
 )
-from app.services.agent.types import JSONDict
+from app.services.agent.types import JSONDict, coerce_json_dict
 from app.services.customer_intelligence_event_service import (
     CustomerIntelligenceEvent,
     CustomerIntelligenceEventService,
@@ -82,12 +87,23 @@ class CustomerIntelligenceRefreshRequest:
 
 
 @dataclass(frozen=True)
+class AgentAsyncOperationBinding:
+    team_id: int
+    user_id: int
+    session_id: int
+    source_user_message_id: int | None = None
+    source_assistant_message_id: int | None = None
+
+
+@dataclass(frozen=True)
 class CustomerIntelligenceCommittedEventRequest:
     request_id: str
     event: CustomerIntelligenceEvent
     scope: CustomerIntelligenceRefreshScope
     scheduled: bool = True
     schedule_error: str | None = None
+    operation_public_id: str | None = None
+    agent_binding: AgentAsyncOperationBinding | None = None
 
 
 @dataclass(frozen=True)
@@ -124,12 +140,14 @@ class CustomerIntelligenceRefreshService:
         run_service: CustomerIntelligenceRunService | None = None,
         vector_document_service: CustomerVectorDocumentService | None = None,
         identity_resolution_service: CustomerIdentityResolutionService | None = None,
+        async_operation_service: AgentAsyncOperationService | None = None,
     ) -> None:
         self.graph_service = graph_service or customer_intelligence_graph_service
         self.event_service = event_service or customer_intelligence_event_service
         self.run_service = run_service or customer_intelligence_run_service
         self.vector_document_service = vector_document_service or customer_vector_document_service
         self.identity_resolution_service = identity_resolution_service or customer_identity_resolution_service
+        self.async_operation_service = async_operation_service or agent_async_operation_service
 
     async def trigger_committed_event_refresh(
         self,
@@ -137,11 +155,13 @@ class CustomerIntelligenceRefreshService:
         *,
         event: CustomerIntelligenceEvent,
         scope: CustomerIntelligenceRefreshScope = "brief",
+        agent_binding: AgentAsyncOperationBinding | None = None,
     ) -> CustomerIntelligenceCommittedEventRequest:
         request = CustomerIntelligenceCommittedEventRequest(
             request_id=f"business-event-{event.trigger_type}-{uuid4().hex}",
             event=event,
             scope=scope,
+            agent_binding=agent_binding,
         )
         scheduled_request = self._schedule_committed_event_run(request)
         if scheduled_request.scheduled:
@@ -417,6 +437,8 @@ class CustomerIntelligenceRefreshService:
             request_id=request.request_id,
             event=request.event,
             scope=request.scope,
+            agent_binding=request.agent_binding,
+            operation_public_id=request.operation_public_id,
         )
 
     async def _run_event_refresh(
@@ -425,12 +447,15 @@ class CustomerIntelligenceRefreshService:
         request_id: str,
         event: CustomerIntelligenceEvent,
         scope: CustomerIntelligenceRefreshScope,
+        agent_binding: AgentAsyncOperationBinding | None = None,
+        operation_public_id: str | None = None,
     ) -> JSONDict:
         run_input = CustomerIntelligenceRunInput(
             request_id=request_id,
             event=event,
             scope=scope,
         )
+        track_operation = agent_binding is not None or operation_public_id is not None
         try:
             self._mark_run_running(run_input)
         except Exception as exc:
@@ -442,6 +467,19 @@ class CustomerIntelligenceRefreshService:
                 scope,
                 request_id,
             )
+            failed_run = None
+            try:
+                failed_run = self._mark_run_failed(run_input, error_message=str(exc))
+            except Exception:
+                logger.exception("记录客户智能启动失败状态失败: request_id=%s", request_id)
+            if track_operation:
+                self._fail_operation(
+                    request_id=request_id,
+                    team_id=event.team_id,
+                    operation_public_id=operation_public_id,
+                    error_message=str(exc),
+                    retry_at=getattr(failed_run, "next_retry_at", None),
+                )
             self._mark_failed_event(event=event, scope=scope, request_id=request_id, error_message=str(exc))
             return {
                 "success": False,
@@ -449,20 +487,63 @@ class CustomerIntelligenceRefreshService:
                 "error": str(exc),
             }
 
+        operation = (
+            self._mark_operation_running(
+                request_id=request_id,
+                event=event,
+                agent_binding=agent_binding,
+                operation_public_id=operation_public_id,
+            )
+            if track_operation
+            else None
+        )
+        graph_user_id = operation["user_id"] if operation is not None else _actor_user_id(event.actor_id)
+        graph_session_id = operation["session_id"] if operation is not None else 0
         try:
-            result = await self.graph_service.run({
+            graph_input = {
                 "team_id": event.team_id,
-                "user_id": _actor_user_id(event.actor_id),
-                "session_id": 0,
+                "user_id": graph_user_id,
+                "session_id": graph_session_id,
                 "event": event,
-            })
+            }
+            result: JSONDict = {}
+            stream_run = getattr(self.graph_service, "stream_run", None)
+            if callable(stream_run):
+                progress_index = 0
+                async for chunk in stream_run(graph_input):
+                    if chunk.get("kind") == "event":
+                        progress_index += 1
+                        if track_operation:
+                            self._record_operation_progress(
+                                request_id=request_id,
+                                team_id=event.team_id,
+                                operation_public_id=operation_public_id,
+                                event=chunk.get("event"),
+                                progress_index=progress_index,
+                            )
+                    elif chunk.get("kind") == "result":
+                        result = cast(JSONDict, chunk.get("result") or {})
+            else:
+                result = await self.graph_service.run(graph_input)
             self._mark_run_succeeded(run_input, result=result)
-            return {
+            degraded = coerce_json_dict(result.get("brief_refresh_result")).get("degraded") is True
+            if track_operation:
+                self._complete_operation(
+                    request_id=request_id,
+                    team_id=event.team_id,
+                    operation_public_id=operation_public_id,
+                    result=result,
+                    degraded=degraded,
+                )
+            response: JSONDict = {
                 "success": True,
                 "request_id": request_id,
                 "event_key": event.event_key,
                 "route": str(result.get("route") or ""),
             }
+            if degraded:
+                response["degraded"] = True
+            return response
         except Exception as exc:
             logger.exception(
                 "客户智能刷新失败: team_id=%s, customer_id=%s, trigger_type=%s, scope=%s, request_id=%s",
@@ -472,13 +553,22 @@ class CustomerIntelligenceRefreshService:
                 scope,
                 request_id,
             )
+            failed_run = None
             try:
-                self._mark_run_failed(run_input, error_message=str(exc))
+                failed_run = self._mark_run_failed(run_input, error_message=str(exc))
             except Exception:
                 logger.exception(
                     "记录客户智能运行失败状态失败: customer_id=%s, request_id=%s",
                     event.customer_id,
                     request_id,
+                )
+            if track_operation:
+                self._fail_operation(
+                    request_id=request_id,
+                    team_id=event.team_id,
+                    operation_public_id=operation_public_id,
+                    error_message=str(exc),
+                    retry_at=getattr(failed_run, "next_retry_at", None),
                 )
             self._mark_failed_event(event=event, scope=scope, request_id=request_id, error_message=str(exc))
             return {
@@ -486,6 +576,164 @@ class CustomerIntelligenceRefreshService:
                 "request_id": request_id,
                 "error": str(exc),
             }
+
+    def _mark_operation_running(
+        self,
+        *,
+        request_id: str,
+        event: CustomerIntelligenceEvent,
+        agent_binding: AgentAsyncOperationBinding | None,
+        operation_public_id: str | None,
+    ) -> JSONDict | None:
+        db = SessionLocal()
+        try:
+            operation = self.async_operation_service.get_for_update(
+                db,
+                team_id=event.team_id,
+                request_id=request_id,
+                operation_public_id=operation_public_id,
+            )
+            if operation is None:
+                return None
+            binding = agent_binding
+            graph_user_id = binding.user_id if binding is not None else int(operation.user_id)
+            graph_session_id = binding.session_id if binding is not None else int(operation.session_id or 0)
+            graph_thread_id = build_customer_intelligence_thread_id(
+                team_id=event.team_id,
+                user_id=graph_user_id,
+                session_id=graph_session_id,
+                event_key=event.event_key,
+            )
+            self.async_operation_service.mark_running(
+                db,
+                operation,
+                graph_thread_id=graph_thread_id,
+                summary="系统正在提炼本次跟进中的客户事实，可继续进行其他操作",
+            )
+            db.commit()
+            return {"user_id": graph_user_id, "session_id": graph_session_id}
+        except Exception:
+            db.rollback()
+            logger.exception("标记 Agent 异步操作运行状态失败: request_id=%s", request_id)
+            return None
+        finally:
+            db.close()
+
+    def _record_operation_progress(
+        self,
+        *,
+        request_id: str,
+        team_id: int,
+        operation_public_id: str | None,
+        event: object,
+        progress_index: int,
+    ) -> None:
+        progress = coerce_json_dict(event)
+        message = str(progress.get("content") or progress.get("message") or "").strip()
+        if not message:
+            return
+        step = str(progress.get("step") or "customer_intelligence")
+        db = SessionLocal()
+        try:
+            operation = self.async_operation_service.get_for_update(
+                db,
+                team_id=team_id,
+                request_id=request_id,
+                operation_public_id=operation_public_id,
+            )
+            if operation is None:
+                return
+            self.async_operation_service.record_progress(
+                db,
+                operation,
+                event_key=(
+                    f"graph-progress:{int(operation.attempt_count or 0)}:{progress_index}:{step}:{message[:80]}"
+                ),
+                step=step,
+                message=message,
+                payload=progress,
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("记录 Agent 异步操作进度失败: request_id=%s", request_id)
+        finally:
+            db.close()
+
+    def _complete_operation(
+        self,
+        *,
+        request_id: str,
+        team_id: int,
+        operation_public_id: str | None,
+        result: JSONDict,
+        degraded: bool,
+    ) -> None:
+        db = SessionLocal()
+        try:
+            operation = self.async_operation_service.get_for_update(
+                db,
+                team_id=team_id,
+                request_id=request_id,
+                operation_public_id=operation_public_id,
+            )
+            if operation is None:
+                return
+            persisted_refs = result.get("persisted_customer_fact_refs")
+            fact_count = len(persisted_refs) if isinstance(persisted_refs, list) else 0
+            if degraded:
+                summary = f"已沉淀 {fact_count} 条客户事实并更新基础客户概况，AI 增强暂不可用，已自动降级"
+            else:
+                summary = f"客户档案已更新，本次沉淀 {fact_count} 条客户事实"
+            self.async_operation_service.complete(
+                db,
+                operation,
+                degraded=degraded,
+                summary=summary,
+                result={
+                    "route": str(result.get("route") or ""),
+                    "persisted_fact_count": fact_count,
+                    "degraded": degraded,
+                },
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("完成 Agent 异步操作投影失败: request_id=%s", request_id)
+        finally:
+            db.close()
+
+    def _fail_operation(
+        self,
+        *,
+        request_id: str,
+        team_id: int,
+        operation_public_id: str | None,
+        error_message: str,
+        retry_at: datetime | None,
+    ) -> None:
+        db = SessionLocal()
+        try:
+            operation = self.async_operation_service.get_for_update(
+                db,
+                team_id=team_id,
+                request_id=request_id,
+                operation_public_id=operation_public_id,
+            )
+            if operation is None:
+                return
+            self.async_operation_service.fail(
+                db,
+                operation,
+                error_message=error_message,
+                retry_at=retry_at,
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("标记 Agent 异步操作失败状态失败: request_id=%s", request_id)
+        finally:
+            db.close()
 
     def _mark_run_running(self, run_input: CustomerIntelligenceRunInput) -> None:
         db = SessionLocal()
@@ -509,11 +757,14 @@ class CustomerIntelligenceRefreshService:
         finally:
             db.close()
 
-    def _mark_run_failed(self, run_input: CustomerIntelligenceRunInput, *, error_message: str) -> None:
+    def _mark_run_failed(
+        self, run_input: CustomerIntelligenceRunInput, *, error_message: str
+    ) -> CustomerIntelligenceRun:
         db = SessionLocal()
         try:
-            self.run_service.mark_failed(db, run_input, error_message=error_message)
+            run = self.run_service.mark_failed(db, run_input, error_message=error_message)
             db.commit()
+            return run
         except Exception:
             db.rollback()
             raise
@@ -528,10 +779,39 @@ class CustomerIntelligenceRefreshService:
         try:
             recovered = self.recover_stale_runtime_state(db, team_id=team_id)
             db.commit()
-            retry_requests = [
-                _request_from_run(run)
-                for run in self.run_service.list_due(db, team_id=team_id, limit=limit)
-            ]
+            retry_requests = []
+            for run in self.run_service.list_due(db, team_id=team_id, limit=limit):
+                retry_request = _request_from_run(run)
+                if isinstance(retry_request, CustomerIntelligenceCommittedEventRequest):
+                    try:
+                        operation = self.async_operation_service.get_by_request_id(
+                            db,
+                            team_id=run.team_id,
+                            request_id=retry_request.request_id,
+                        )
+                    except (AttributeError, NotImplementedError):
+                        operation = None
+                    if operation is not None:
+                        retry_request = replace(
+                            retry_request,
+                            operation_public_id=str(operation.public_id),
+                            agent_binding=AgentAsyncOperationBinding(
+                                team_id=int(operation.team_id),
+                                user_id=int(operation.user_id),
+                                session_id=int(operation.session_id or 0),
+                                source_user_message_id=(
+                                    int(operation.source_user_message_id)
+                                    if operation.source_user_message_id is not None
+                                    else None
+                                ),
+                                source_assistant_message_id=(
+                                    int(operation.source_assistant_message_id)
+                                    if operation.source_assistant_message_id is not None
+                                    else None
+                                ),
+                            ),
+                        )
+                retry_requests.append(retry_request)
         finally:
             db.close()
 
@@ -578,19 +858,34 @@ class CustomerIntelligenceRefreshService:
         if team_id is not None:
             stale_query = stale_query.filter(CustomerIntelligenceRun.team_id == team_id)
 
-        stale_runs = stale_query.limit(200).all()
+        stale_runs = stale_query.order_by(CustomerIntelligenceRun.id.asc()).limit(200).with_for_update().all()
         stale_count = 0
         for run in stale_runs:
             attempts = int(run.attempt_count or 0)
+            retry_at: datetime | None
             if attempts < int(run.max_attempts or 1):
                 run.status = CustomerIntelligenceRunStatus.RETRY_PENDING
                 run.next_retry_at = current_time
                 run.error_message = "上一次客户智能档案刷新未正常结束，已自动恢复为待重试。"
+                retry_at = current_time
             else:
                 run.status = CustomerIntelligenceRunStatus.FAILED
                 run.finished_time = current_time
                 run.next_retry_at = None
                 run.error_message = "上一次客户智能档案刷新未正常结束，且已达到最大重试次数。"
+                retry_at = None
+            operation = self.async_operation_service.get_by_request_id(
+                db,
+                team_id=int(run.team_id),
+                request_id=str(run.request_id),
+            )
+            if operation is not None:
+                self.async_operation_service.fail(
+                    db,
+                    operation,
+                    error_message=str(run.error_message),
+                    retry_at=retry_at,
+                )
             stale_count += 1
 
         retryable_customer_ids = self._customer_ids_with_runs(
@@ -601,11 +896,14 @@ class CustomerIntelligenceRefreshService:
             ],
             team_id=team_id,
         )
-        failed_customer_ids = self._customer_ids_with_runs(
-            db,
-            statuses=[CustomerIntelligenceRunStatus.FAILED],
-            team_id=team_id,
-        ) - retryable_customer_ids
+        failed_customer_ids = (
+            self._customer_ids_with_runs(
+                db,
+                statuses=[CustomerIntelligenceRunStatus.FAILED],
+                team_id=team_id,
+            )
+            - retryable_customer_ids
+        )
 
         pending_updates = self._reset_generating_customers(
             db,
@@ -662,7 +960,7 @@ class CustomerIntelligenceRefreshService:
             query = query.filter(CustomerIntelligenceRun.team_id == team_id)
 
         closed = 0
-        for run in query.limit(500).all():
+        for run in query.order_by(CustomerIntelligenceRun.id.asc()).limit(500).with_for_update().all():
             run.status = CustomerIntelligenceRunStatus.CANCELLED
             run.finished_time = finished_at
             run.next_retry_at = None
@@ -672,6 +970,21 @@ class CustomerIntelligenceRefreshService:
                 "route": "historical_backfill_satisfied",
                 "reason": "customer_brief_already_available",
             }
+            operation = self.async_operation_service.get_by_request_id(
+                db,
+                team_id=int(run.team_id),
+                request_id=str(run.request_id),
+            )
+            if operation is not None:
+                self.async_operation_service.cancel(
+                    db,
+                    operation,
+                    summary="客户档案已由更新的数据生成，本次历史补齐任务已取消",
+                    result={
+                        "route": "historical_backfill_satisfied",
+                        "reason": "customer_brief_already_available",
+                    },
+                )
             closed += 1
         if closed > 0:
             db.flush()
@@ -826,8 +1139,42 @@ class CustomerIntelligenceRefreshService:
         try:
             self._mark_pending_event(db, request)
             self._ensure_pending_event_run(db, request)
+            scheduled_request = request
+            binding = request.agent_binding
+            if binding is not None:
+                customer_public_id = (
+                    db.query(Customer.public_id)
+                    .filter(
+                        Customer.team_id == request.event.team_id,
+                        Customer.id == request.event.customer_id,
+                    )
+                    .scalar()
+                )
+                graph_thread_id = build_customer_intelligence_thread_id(
+                    team_id=binding.team_id,
+                    user_id=binding.user_id,
+                    session_id=binding.session_id,
+                    event_key=request.event.event_key,
+                )
+                operation = self.async_operation_service.ensure_scheduled(
+                    db,
+                    operation_key=f"customer-intelligence:{request.request_id}",
+                    request_id=request.request_id,
+                    team_id=binding.team_id,
+                    user_id=binding.user_id,
+                    session_id=binding.session_id,
+                    source_user_message_id=binding.source_user_message_id,
+                    source_assistant_message_id=binding.source_assistant_message_id,
+                    operation_type="customer_intelligence_refresh",
+                    resource_type="customer",
+                    resource_id=request.event.customer_id,
+                    resource_public_id=str(customer_public_id) if customer_public_id else None,
+                    summary="客户活动已记录，客户档案正在后台更新",
+                    graph_thread_id=graph_thread_id,
+                )
+                scheduled_request = replace(request, operation_public_id=str(operation.public_id))
             db.commit()
-            return request
+            return scheduled_request
         except Exception as exc:
             try:
                 db.rollback()
@@ -851,6 +1198,7 @@ class CustomerIntelligenceRefreshService:
                 scope=request.scope,
                 scheduled=False,
                 schedule_error=str(exc),
+                agent_binding=request.agent_binding,
             )
         finally:
             db.close()
@@ -899,10 +1247,7 @@ class CustomerIntelligenceRefreshService:
             if not normalized_ids:
                 return []
             query = query.filter(Customer.id.in_(normalized_ids))
-        return [
-            int(row[0])
-            for row in query.order_by(Customer.id.asc()).limit(max(1, min(limit, 500))).all()
-        ]
+        return [int(row[0]) for row in query.order_by(Customer.id.asc()).limit(max(1, min(limit, 500))).all()]
 
     def _select_missing_historical_customer_ids(
         self,
@@ -918,10 +1263,7 @@ class CustomerIntelligenceRefreshService:
         )
         if team_id is not None:
             query = query.filter(Customer.team_id == team_id)
-        return [
-            int(row[0])
-            for row in query.order_by(Customer.id.asc()).limit(max(1, min(limit, 500))).all()
-        ]
+        return [int(row[0]) for row in query.order_by(Customer.id.asc()).limit(max(1, min(limit, 500))).all()]
 
     def has_customer_business_data(self, db: Session, *, customer_id: int, team_id: int) -> bool:
         return bool(
@@ -950,11 +1292,13 @@ class CustomerIntelligenceRefreshService:
         return exists().where(
             CustomerIntelligenceRun.team_id == Customer.team_id,
             CustomerIntelligenceRun.customer_id == Customer.id,
-            CustomerIntelligenceRun.status.in_([
-                CustomerIntelligenceRunStatus.PENDING,
-                CustomerIntelligenceRunStatus.RUNNING,
-                CustomerIntelligenceRunStatus.RETRY_PENDING,
-            ]),
+            CustomerIntelligenceRun.status.in_(
+                [
+                    CustomerIntelligenceRunStatus.PENDING,
+                    CustomerIntelligenceRunStatus.RUNNING,
+                    CustomerIntelligenceRunStatus.RETRY_PENDING,
+                ]
+            ),
         )
 
     def _has_customer_business_data_filter(self) -> ColumnElement[bool]:

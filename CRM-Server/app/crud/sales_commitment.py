@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from sqlalchemy import false, or_
+from sqlalchemy.exc import IntegrityError
 
 from app.models.sales_commitment import (
     FollowUpTask,
@@ -1058,6 +1059,107 @@ class FollowUpTaskConfirmationCaseCRUD:
 
 
 class FollowUpTaskConfirmationPromptDeliveryCRUD:
+    def get_by_prompt_key(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        prompt_key: str,
+    ) -> FollowUpTaskConfirmationPromptDelivery | None:
+        return (
+            db.query(FollowUpTaskConfirmationPromptDelivery)
+            .filter(
+                FollowUpTaskConfirmationPromptDelivery.team_id == team_id,
+                FollowUpTaskConfirmationPromptDelivery.prompt_key == prompt_key,
+            )
+            .order_by(FollowUpTaskConfirmationPromptDelivery.id.desc())
+            .first()
+        )
+
+    def create_attempt(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        case_id: int,
+        owner_id: str,
+        channel: str,
+        interaction_id: str,
+        prompt_key: str,
+        status: str,
+        reason_code: str | None = None,
+        provider: str | None = None,
+        agent_session_id: int | None = None,
+        payload_json: dict[str, Any] | None = None,
+        error_message: str | None = None,
+        thread_id: str | None = None,
+        run_id: str | None = None,
+        attempted_at: datetime | None = None,
+        delivered_at: datetime | None = None,
+        commit: bool = True,
+    ) -> FollowUpTaskConfirmationPromptDelivery:
+        existing = self.get_by_prompt_key(db, team_id=team_id, prompt_key=prompt_key)
+        if existing is not None:
+            return existing
+        resolved_attempted_at = attempted_at or business_now()
+        db_obj = FollowUpTaskConfirmationPromptDelivery(
+            team_id=team_id,
+            case_id=case_id,
+            owner_id=owner_id,
+            channel=channel,
+            provider=provider,
+            agent_session_id=agent_session_id,
+            interaction_id=interaction_id,
+            prompt_key=prompt_key,
+            status=status,
+            payload_json=payload_json,
+            reason_code=reason_code,
+            error_message=error_message,
+            thread_id=thread_id,
+            run_id=run_id,
+            attempted_at=resolved_attempted_at,
+            delivered_at=delivered_at,
+            prompted_at=resolved_attempted_at,
+        )
+        try:
+            with db.begin_nested():
+                db.add(db_obj)
+                db.flush()
+        except IntegrityError:
+            existing = self.get_by_prompt_key(db, team_id=team_id, prompt_key=prompt_key)
+            if existing is None:
+                raise
+            return existing
+
+        if commit:
+            db.commit()
+            db.refresh(db_obj)
+        return db_obj
+
+    def update_attempt_status(
+        self,
+        db: Session,
+        delivery: FollowUpTaskConfirmationPromptDelivery,
+        *,
+        status: str,
+        reason_code: str | None = None,
+        error_message: str | None = None,
+        attempted_at: datetime | None = None,
+        delivered_at: datetime | None = None,
+        commit: bool = True,
+    ) -> FollowUpTaskConfirmationPromptDelivery:
+        delivery.status = status
+        delivery.reason_code = reason_code
+        delivery.error_message = error_message
+        if attempted_at is not None:
+            delivery.attempted_at = attempted_at
+        delivery.delivered_at = delivered_at
+        db.add(delivery)
+        if commit:
+            db.commit()
+            db.refresh(delivery)
+        return delivery
+
     def latest_for_owner_since(
         self,
         db: Session,
@@ -1120,7 +1222,9 @@ class FollowUpTaskConfirmationPromptDeliveryCRUD:
         prompted_at: datetime | None = None,
         commit: bool = True,
     ) -> FollowUpTaskConfirmationPromptDelivery:
-        db_obj = FollowUpTaskConfirmationPromptDelivery(
+        resolved_prompted_at = prompted_at or business_now()
+        return self.create_attempt(
+            db,
             team_id=team_id,
             case_id=case_id,
             owner_id=owner_id,
@@ -1130,11 +1234,12 @@ class FollowUpTaskConfirmationPromptDeliveryCRUD:
             interaction_id=interaction_id,
             prompt_key=prompt_key,
             status=FollowUpTaskConfirmationPromptStatus.SENT,
+            reason_code="CHANNEL_DISPATCHED",
             payload_json=payload_json,
-            prompted_at=prompted_at or business_now(),
+            attempted_at=resolved_prompted_at,
+            delivered_at=resolved_prompted_at,
+            commit=commit,
         )
-        db.add(db_obj)
-        return _flush_or_commit(db, db_obj, commit=commit)
 
 
 class FollowUpTaskTransitionPolicyDecisionLogCRUD:

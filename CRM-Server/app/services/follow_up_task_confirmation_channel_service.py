@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -16,6 +17,7 @@ from app.models.sales_commitment import (
     FollowUpTask,
     FollowUpTaskConfirmationCase,
     FollowUpTaskConfirmationPromptDelivery,
+    FollowUpTaskConfirmationPromptStatus,
     FollowUpTaskConfirmationStatus,
 )
 from app.services.agent.interaction_contract import (
@@ -73,12 +75,14 @@ class FollowUpTaskConfirmationChannelService:
         *,
         team_id: int,
         user_id: int,
+        skip: int = 0,
         limit: int = 20,
     ) -> dict[str, Any]:
         cases, total = follow_up_task_confirmation_case_crud.list_pending_for_owner(
             db,
             team_id=team_id,
             owner_id=str(user_id),
+            skip=skip,
             limit=limit,
         )
         tasks_by_id = {
@@ -101,6 +105,8 @@ class FollowUpTaskConfirmationChannelService:
                 for case in cases
             ],
             "total": total,
+            "skip": skip,
+            "limit": limit,
             "filters": {
                 "status": FollowUpTaskConfirmationStatus.PENDING,
                 "owner_scope": "mine",
@@ -111,6 +117,27 @@ class FollowUpTaskConfirmationChannelService:
                 "rule": "确认Case只展示给任务归属人; 应用结果仍由确认应用服务做二次校验.",
             },
         }
+
+    def is_case_pending_for_owner(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_id: int,
+        case_public_id: str,
+    ) -> bool:
+        """Revalidate an Agent interrupt against the durable owner-scoped inbox."""
+
+        case = follow_up_task_confirmation_case_crud.get_by_public_id(
+            db,
+            case_public_id,
+            team_id=team_id,
+        )
+        if case is None or case.owner_id != str(user_id):
+            return False
+        if case.status != FollowUpTaskConfirmationStatus.PENDING:
+            return False
+        return case.expires_at is None or case.expires_at > business_now()
 
     def resolve_reply(
         self,
@@ -151,6 +178,27 @@ class FollowUpTaskConfirmationChannelService:
             },
         }
 
+    def resolve_reply_event(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_id: int,
+        case_public_id: str,
+        reply_text: str,
+    ) -> dict[str, Any]:
+        """Resolve through the application service and project a channel event."""
+
+        return self._resolution_event(
+            self.resolve_reply(
+                db,
+                team_id=team_id,
+                user_id=user_id,
+                case_public_id=case_public_id,
+                reply_text=reply_text,
+            )
+        )
+
     def preview_reply_decision(
         self,
         reply_text: str,
@@ -158,6 +206,275 @@ class FollowUpTaskConfirmationChannelService:
         base_date: datetime | None = None,
     ) -> FollowUpTaskConfirmationReplyDecision:
         return self.confirmation_service.interpret_reply(reply_text, base_date=base_date)
+
+    def prepare_case_prompt_by_public_ids(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_id: int,
+        case_public_ids: list[str],
+        interaction_scope: str,
+        prompt_override: str | None = None,
+        reason_code: str = "ROOT_GRAPH_INTERRUPT_PLANNED",
+    ) -> dict[str, Any] | None:
+        """Build one owner-scoped pending interaction without claiming delivery."""
+
+        owner_id = str(user_id)
+        seen: set[str] = set()
+        for case_public_id in case_public_ids:
+            if not case_public_id or case_public_id in seen:
+                continue
+            seen.add(case_public_id)
+            case = follow_up_task_confirmation_case_crud.get_by_public_id(
+                db,
+                case_public_id,
+                team_id=team_id,
+            )
+            if case is None:
+                continue
+            interaction_id = self._stable_interaction_id(
+                case_public_id=case.public_id,
+                interaction_scope=interaction_scope,
+            )
+            prompt_key = self._projection_prompt_key(
+                case_public_id=case.public_id,
+                interaction_scope=interaction_scope,
+            )
+            if case.owner_id != owner_id:
+                self._record_projection_attempt(
+                    db,
+                    case=case,
+                    owner_id=owner_id,
+                    interaction_id=interaction_id,
+                    prompt_key=prompt_key,
+                    interaction_scope=interaction_scope,
+                    status=FollowUpTaskConfirmationPromptStatus.SKIPPED,
+                    reason_code="OWNER_MISMATCH",
+                )
+                continue
+            if case.status != FollowUpTaskConfirmationStatus.PENDING:
+                self._record_projection_attempt(
+                    db,
+                    case=case,
+                    owner_id=owner_id,
+                    interaction_id=interaction_id,
+                    prompt_key=prompt_key,
+                    interaction_scope=interaction_scope,
+                    status=FollowUpTaskConfirmationPromptStatus.SKIPPED,
+                    reason_code=f"CASE_NOT_PENDING_{case.status}",
+                )
+                continue
+            task = follow_up_task_crud.get_by_id(db, case.task_id, team_id=team_id)
+            customer = self._customers_by_id(
+                db,
+                team_id=team_id,
+                customer_ids=[case.customer_id],
+            ).get(case.customer_id)
+            event = self._prompt_event(case, task=task, customer=customer)
+            interaction = event.get("interaction")
+            if prompt_override:
+                event["content"] = prompt_override
+                if isinstance(interaction, dict):
+                    interaction["prompt"] = prompt_override
+            if isinstance(interaction, dict):
+                interaction["interaction_id"] = interaction_id
+            delivery = self._record_projection_attempt(
+                db,
+                case=case,
+                owner_id=owner_id,
+                interaction_id=interaction_id,
+                prompt_key=prompt_key,
+                interaction_scope=interaction_scope,
+                status=FollowUpTaskConfirmationPromptStatus.QUEUED,
+                reason_code=reason_code,
+            )
+            if isinstance(interaction, dict):
+                payload = interaction.get("payload")
+                if not isinstance(payload, dict):
+                    payload = {}
+                    interaction["payload"] = payload
+                payload["prompt_delivery_key"] = prompt_key
+            event["delivery"] = {
+                **self._delivery_payload(delivery),
+                "status": delivery.status,
+                "reason_code": delivery.reason_code,
+                "interaction_scope": interaction_scope,
+                "prompt_key": prompt_key,
+            }
+            return event
+        return None
+
+    def mark_projection_projected(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        prompt_key: str,
+    ) -> FollowUpTaskConfirmationPromptDelivery | None:
+        """Acknowledge projection only after the Root Graph checkpoint exposes the interrupt."""
+
+        delivery = self.prompt_delivery_crud.get_by_prompt_key(
+            db,
+            team_id=team_id,
+            prompt_key=prompt_key,
+        )
+        if delivery is None:
+            return None
+        if delivery.status == FollowUpTaskConfirmationPromptStatus.PROJECTED:
+            return delivery
+        if delivery.status != FollowUpTaskConfirmationPromptStatus.QUEUED:
+            return delivery
+        return self.prompt_delivery_crud.update_attempt_status(
+            db,
+            delivery,
+            status=FollowUpTaskConfirmationPromptStatus.PROJECTED,
+            reason_code="ROOT_GRAPH_INTERRUPT_CHECKPOINTED",
+        )
+
+    def mark_projection_failed(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        prompt_key: str,
+        error_message: str,
+    ) -> FollowUpTaskConfirmationPromptDelivery | None:
+        """Record an acknowledgement/audit failure for a checkpoint-visible prompt."""
+
+        delivery = self.prompt_delivery_crud.get_by_prompt_key(
+            db,
+            team_id=team_id,
+            prompt_key=prompt_key,
+        )
+        if delivery is None:
+            return None
+        return self.prompt_delivery_crud.update_attempt_status(
+            db,
+            delivery,
+            status=FollowUpTaskConfirmationPromptStatus.FAILED,
+            reason_code="ROOT_GRAPH_PROJECTION_ACK_FAILED",
+            error_message=error_message[:2000],
+        )
+
+    def record_projection_failure_by_public_ids(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_id: int,
+        case_public_ids: list[str],
+        interaction_scope: str,
+        error_message: str,
+    ) -> list[FollowUpTaskConfirmationPromptDelivery]:
+        """Persist owner-scoped failed Root Graph projection attempts when the DB is still available."""
+
+        owner_id = str(user_id)
+        deliveries: list[FollowUpTaskConfirmationPromptDelivery] = []
+        seen: set[str] = set()
+        for case_public_id in case_public_ids:
+            if not case_public_id or case_public_id in seen:
+                continue
+            seen.add(case_public_id)
+            case = follow_up_task_confirmation_case_crud.get_by_public_id(
+                db,
+                case_public_id,
+                team_id=team_id,
+            )
+            if case is None or case.owner_id != owner_id:
+                continue
+            interaction_id = self._stable_interaction_id(
+                case_public_id=case.public_id,
+                interaction_scope=interaction_scope,
+            )
+            prompt_key = self._projection_prompt_key(
+                case_public_id=case.public_id,
+                interaction_scope=interaction_scope,
+            )
+            queued = self.prompt_delivery_crud.get_by_prompt_key(
+                db,
+                team_id=case.team_id,
+                prompt_key=prompt_key,
+            )
+            if queued is not None and queued.status == FollowUpTaskConfirmationPromptStatus.QUEUED:
+                deliveries.append(self.prompt_delivery_crud.update_attempt_status(
+                    db,
+                    queued,
+                    status=FollowUpTaskConfirmationPromptStatus.FAILED,
+                    reason_code="ROOT_GRAPH_PROJECTION_FAILED",
+                    error_message=error_message[:2000],
+                ))
+                continue
+            deliveries.append(self.prompt_delivery_crud.create_attempt(
+                db,
+                team_id=case.team_id,
+                case_id=case.id,
+                owner_id=owner_id,
+                channel="agent",
+                provider="langgraph",
+                agent_session_id=None,
+                interaction_id=interaction_id,
+                prompt_key=prompt_key,
+                status=FollowUpTaskConfirmationPromptStatus.FAILED,
+                reason_code="ROOT_GRAPH_PROJECTION_FAILED",
+                error_message=error_message[:2000],
+                payload_json={
+                    "case_public_id": case.public_id,
+                    "interaction_scope": interaction_scope,
+                },
+                thread_id=interaction_scope,
+            ))
+        return deliveries
+
+    def _record_projection_attempt(
+        self,
+        db: Session,
+        *,
+        case: FollowUpTaskConfirmationCase,
+        owner_id: str,
+        interaction_id: str,
+        prompt_key: str,
+        interaction_scope: str,
+        status: str,
+        reason_code: str,
+    ) -> FollowUpTaskConfirmationPromptDelivery:
+        existing = self.prompt_delivery_crud.get_by_prompt_key(
+            db,
+            team_id=case.team_id,
+            prompt_key=prompt_key,
+        )
+        if (
+            existing is not None
+            and existing.status == FollowUpTaskConfirmationPromptStatus.FAILED
+            and status == FollowUpTaskConfirmationPromptStatus.QUEUED
+        ):
+            return self.prompt_delivery_crud.update_attempt_status(
+                db,
+                existing,
+                status=FollowUpTaskConfirmationPromptStatus.QUEUED,
+                reason_code=reason_code,
+                error_message=None,
+                attempted_at=business_now(),
+                delivered_at=None,
+            )
+        return self.prompt_delivery_crud.create_attempt(
+            db,
+            team_id=case.team_id,
+            case_id=case.id,
+            owner_id=owner_id,
+            channel="agent",
+            provider="langgraph",
+            agent_session_id=None,
+            interaction_id=interaction_id,
+            prompt_key=prompt_key,
+            status=status,
+            reason_code=reason_code,
+            payload_json={
+                "case_public_id": case.public_id,
+                "interaction_scope": interaction_scope,
+            },
+            thread_id=interaction_scope,
+        )
 
     def prompt_next_pending_case(
         self,
@@ -389,6 +706,18 @@ class FollowUpTaskConfirmationChannelService:
             },
         }
 
+    @staticmethod
+    def _projection_prompt_key(*, case_public_id: str, interaction_scope: str) -> str:
+        """Return a bounded idempotency key while preserving the full scope in thread_id."""
+
+        digest = hashlib.sha256(f"{case_public_id}:{interaction_scope}".encode()).hexdigest()
+        return f"projection:{digest}"
+
+    @staticmethod
+    def _stable_interaction_id(*, case_public_id: str, interaction_scope: str) -> str:
+        digest = hashlib.sha256(f"{case_public_id}:{interaction_scope}".encode()).hexdigest()[:32]
+        return f"int_fuc_{digest}"
+
     def _resolution_event(
         self,
         payload: dict[str, Any],
@@ -400,12 +729,6 @@ class FollowUpTaskConfirmationChannelService:
             "content_format": "text",
             **payload,
         }
-        case_payload = payload.get("case")
-        if payload.get("assistant_follow_up_prompt") and isinstance(case_payload, dict):
-            event["interaction"] = self._prompt_interaction_for_case_payload(
-                case_payload,
-                str(payload["assistant_follow_up_prompt"]),
-            )
         return event
 
     def _case_payload(
@@ -479,6 +802,7 @@ class FollowUpTaskConfirmationChannelService:
             "value": label,
             "metadata": {
                 "business_action": FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION,
+                "selected_value": label,
                 "case_public_id": case_public_id,
                 "follow_up_confirmation_case_public_id": case_public_id,
             },
@@ -523,7 +847,11 @@ class FollowUpTaskConfirmationChannelService:
             "provider": delivery.provider,
             "agent_session_id": delivery.agent_session_id,
             "interaction_id": delivery.interaction_id,
+            "status": delivery.status,
+            "reason_code": delivery.reason_code,
             "prompted_at": delivery.prompted_at.isoformat() if delivery.prompted_at else None,
+            "attempted_at": delivery.attempted_at.isoformat() if delivery.attempted_at else None,
+            "delivered_at": delivery.delivered_at.isoformat() if delivery.delivered_at else None,
         }
 
     @staticmethod

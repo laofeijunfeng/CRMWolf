@@ -344,14 +344,14 @@ export const opportunityApi = {
     return z.null().parse(response)
   },
 
-  markAsWon: async (opportunityId: string, data: OpportunityWinRequest): Promise<null> => {
-    const response = await request.patch<null>(`/v1/opportunities/${opportunityId}/win`, data)
-    return z.null().parse(response)
+  markAsWon: async (opportunityId: string, data: OpportunityWinRequest): Promise<Opportunity> => {
+    const response = await request.patch<Opportunity>(`/v1/opportunities/${opportunityId}/win`, data)
+    return OpportunityApiResponseSchema.parse(response) as Opportunity
   },
 
-  markAsLost: async (opportunityId: string, data: OpportunityLossRequest): Promise<null> => {
-    const response = await request.patch<null>(`/v1/opportunities/${opportunityId}/lose`, data)
-    return z.null().parse(response)
+  markAsLost: async (opportunityId: string, data: OpportunityLossRequest): Promise<Opportunity> => {
+    const response = await request.patch<Opportunity>(`/v1/opportunities/${opportunityId}/lose`, data)
+    return OpportunityApiResponseSchema.parse(response) as Opportunity
   },
 
   deleteOpportunity: async (opportunityId: string): Promise<MessageResponse> => {

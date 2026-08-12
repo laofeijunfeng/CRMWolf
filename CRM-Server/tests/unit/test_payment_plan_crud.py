@@ -123,6 +123,8 @@ def test_batch_create_passes_team_id_to_operation_log(monkeypatch):
     )
 
     assert len(result) == 1
+    assert isinstance(result[0], PaymentPlan)
+    assert hasattr(result[0], "contract")
     assert log_calls
     assert log_calls[0]["event_type"] == "PAYMENT_PLAN_CREATED"
     assert log_calls[0]["team_id"] == 7

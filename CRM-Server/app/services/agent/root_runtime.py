@@ -1,4 +1,5 @@
 """LangGraph-native root runtime foundation for CRM Agent turns."""
+
 from __future__ import annotations
 
 import asyncio
@@ -21,6 +22,10 @@ from app.services.agent import (
     task_execution,
     workflow_action_ledger,
 )
+from app.services.agent.business_interaction_planner import (
+    BusinessInteractionPlanner,
+    business_interaction_planner,
+)
 from app.services.agent.checkpointer import agent_checkpoint_saver
 from app.services.agent.confirmed_task_graph import (
     ConfirmedTaskGraphService,
@@ -41,11 +46,15 @@ from app.services.agent.customer_intelligence_trigger import (
 from app.services.agent.customer_intelligence_trigger import (
     customer_intelligence_trigger_policy as default_customer_intelligence_trigger_policy,
 )
+from app.services.agent.follow_up_confirmation_graph import (
+    FollowUpConfirmationGraphService,
+)
 from app.services.agent.graph import crm_agent_graph_service
 from app.services.agent.input import AgentTurnInput
 from app.services.agent.interrupts import (
     AgentInterruptPayload,
     AgentResumePayload,
+    interrupt_from_waiting_event,
     interrupt_from_waiting_task,
     interrupt_payload_from_json,
     validate_resume_payload,
@@ -67,6 +76,7 @@ from app.services.agent.pending_effects import (
     pending_task_side_effect_handler as default_pending_task_side_effect_handler,
 )
 from app.services.agent.pending_graph import PendingTaskGraphService, pending_task_graph_service
+from app.services.agent.post_write_effects import merge_post_write_effects, normalize_post_write_effects
 from app.services.agent.state import (
     AgentRootRuntimeSideEffects,
     AgentRuntimeApplicationAction,
@@ -80,19 +90,23 @@ from app.services.agent.state import (
 )
 from app.services.agent.turn_intent import AgentTurnIntentRouter, agent_turn_intent_router
 from app.services.agent.types import JSONDict, JSONList, coerce_json_dict, coerce_json_value
+from app.services.customer_intelligence_event_service import (
+    CUSTOMER_INTELLIGENCE_COMMITTED_EVENT_TRIGGER_TYPES,
+    CUSTOMER_INTELLIGENCE_INLINE_TRIGGER_TYPES,
+)
 from app.services.customer_intelligence_refresh_service import (
+    AgentAsyncOperationBinding,
     CustomerIntelligenceRefreshService,
 )
 from app.services.customer_intelligence_refresh_service import (
     customer_intelligence_refresh_service as default_customer_intelligence_refresh_service,
 )
-from app.services.customer_intelligence_event_service import (
-    CUSTOMER_INTELLIGENCE_COMMITTED_EVENT_TRIGGER_TYPES,
-    CUSTOMER_INTELLIGENCE_INLINE_TRIGGER_TYPES,
-)
 from app.services.customer_intelligence_trace_service import visible_trace_events
 from app.services.follow_up_task_confirmation_channel_service import (
+    FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION,
+    FOLLOW_UP_CONFIRMATION_PROMPT_EVENT,
     FOLLOW_UP_CONFIRMATION_RESOLVED_EVENT,
+    follow_up_task_confirmation_channel_service,
 )
 
 AGENT_CHECKPOINT_NS = "crm_agent"
@@ -153,6 +167,9 @@ class AgentRootRuntime:
         customer_intelligence_trigger_policy: CustomerIntelligenceTriggerPolicy | None = None,
         customer_intelligence_refresh_service: CustomerIntelligenceRefreshService | None = None,
         turn_intent_router: AgentTurnIntentRouter | None = None,
+        confirmation_channel_service=None,
+        follow_up_confirmation_graph_service: FollowUpConfirmationGraphService | None = None,
+        interaction_planner: BusinessInteractionPlanner | None = None,
     ) -> None:
         self.pending_graph_service = pending_graph_service or pending_task_graph_service
         self.new_flow_graph_service = new_flow_graph_service or crm_agent_graph_service
@@ -171,6 +188,12 @@ class AgentRootRuntime:
             customer_intelligence_refresh_service or default_customer_intelligence_refresh_service
         )
         self.turn_intent_router = turn_intent_router or agent_turn_intent_router
+        self.confirmation_channel_service = confirmation_channel_service or follow_up_task_confirmation_channel_service
+        self.follow_up_confirmation_graph_service = (
+            follow_up_confirmation_graph_service
+            or FollowUpConfirmationGraphService(channel_service=self.confirmation_channel_service)
+        )
+        self.interaction_planner = interaction_planner or business_interaction_planner
         self._graph = self._build_graph(checkpointer)
 
     def _build_graph(self, checkpointer):
@@ -187,6 +210,12 @@ class AgentRootRuntime:
         graph.add_node("customer_intelligence_graph", self._run_customer_intelligence_graph)
         graph.add_node("confirmed_task_execution", self._run_confirmed_task_execution)
         graph.add_node("no_pending_confirmation", self._run_no_pending_confirmation)
+        graph.add_node("reconcile_pending_business_interactions", self._reconcile_pending_business_interactions)
+        graph.add_node("resolve_follow_up_confirmation", self._resolve_follow_up_confirmation)
+        graph.add_node(
+            "discard_unexposed_follow_up_confirmation",
+            self._discard_unexposed_follow_up_confirmation,
+        )
         graph.add_node("generated_interrupt_wait", self._wait_for_interrupt_resume)
         graph.add_node("finish_turn", self._finish_turn)
         graph.add_edge(START, "start_turn")
@@ -207,6 +236,8 @@ class AgentRootRuntime:
             {
                 "pending_task_subgraph": "pending_task_subgraph",
                 "customer_intelligence_graph": "customer_intelligence_graph",
+                "follow_up_confirmation": "resolve_follow_up_confirmation",
+                "discard_follow_up_confirmation": "discard_unexposed_follow_up_confirmation",
                 "finish": "decide_application_action",
             },
         )
@@ -221,7 +252,7 @@ class AgentRootRuntime:
                 "confirmed_task_execution": "confirmed_task_execution",
                 "no_pending_confirmation": "no_pending_confirmation",
                 "generated_interrupt_wait": "generated_interrupt_wait",
-                "finish": "finish_turn",
+                "finish": "reconcile_pending_business_interactions",
             },
         )
         graph.add_conditional_edges(
@@ -230,7 +261,7 @@ class AgentRootRuntime:
             {
                 "generated_interrupt_wait": "generated_interrupt_wait",
                 "customer_intelligence_graph": "customer_intelligence_graph",
-                "finish": "finish_turn",
+                "finish": "reconcile_pending_business_interactions",
             },
         )
         graph.add_conditional_edges(
@@ -238,7 +269,7 @@ class AgentRootRuntime:
             self._route_after_customer_intelligence_graph,
             {
                 "generated_interrupt_wait": "generated_interrupt_wait",
-                "finish": "finish_turn",
+                "finish": "reconcile_pending_business_interactions",
             },
         )
         graph.add_conditional_edges(
@@ -246,10 +277,20 @@ class AgentRootRuntime:
             self._route_after_confirmed_task_execution,
             {
                 "customer_intelligence_graph": "customer_intelligence_graph",
+                "finish": "reconcile_pending_business_interactions",
+            },
+        )
+        graph.add_edge("no_pending_confirmation", "reconcile_pending_business_interactions")
+        graph.add_edge("resolve_follow_up_confirmation", "reconcile_pending_business_interactions")
+        graph.add_edge("discard_unexposed_follow_up_confirmation", "finish_turn")
+        graph.add_conditional_edges(
+            "reconcile_pending_business_interactions",
+            self._route_after_pending_business_interactions,
+            {
+                "generated_interrupt_wait": "generated_interrupt_wait",
                 "finish": "finish_turn",
             },
         )
-        graph.add_edge("no_pending_confirmation", "finish_turn")
         graph.add_edge("generated_interrupt_wait", "resume_route_marker")
         graph.add_edge("finish_turn", END)
         return graph.compile(checkpointer=checkpointer)
@@ -272,6 +313,19 @@ class AgentRootRuntime:
             context=context,
         )
         snapshot = await self._graph.aget_state(config)
+        root_interrupt = _new_snapshot_interrupt_payload(snapshot, previous_interrupt_ids=set())
+        if root_interrupt:
+            projected = await self._publish_checkpointed_follow_up_projection(
+                root_interrupt,
+                context=context,
+            )
+            if not projected:
+                return await self._discard_checkpointed_follow_up_projection(
+                    config=config,
+                    context=context,
+                )
+            result["current_interrupt"] = root_interrupt
+            return result
         initial_interrupt = interrupt_payload_from_json(state.get("current_interrupt"))
         if state.get("pending_task_requested"):
             if initial_interrupt:
@@ -285,6 +339,15 @@ class AgentRootRuntime:
                     previous_interrupt_ids=set(),
                 )
             if bubbled_interrupt:
+                projected = await self._publish_checkpointed_follow_up_projection(
+                    bubbled_interrupt,
+                    context=context,
+                )
+                if not projected:
+                    return await self._discard_checkpointed_follow_up_projection(
+                        config=config,
+                        context=context,
+                    )
                 return await self._project_bubbled_pending_interrupt(
                     bubbled_interrupt,
                     snapshot=snapshot,
@@ -391,18 +454,28 @@ class AgentRootRuntime:
             session_id=session_id,
             session_key=session_key,
         )
-        structured_action_result = await self._handle_structured_business_action_turn(
-            turn_input=turn_input,
-            content=content,
-            team_id=team_id,
-            user_id=user_id,
-            session_id=session_id,
-            current_customer=current_customer,
-            context=context,
-        )
-        if structured_action_result is not None:
-            return structured_action_result
         checkpoint_interrupt = interrupt_payload_from_json(checkpoint_values.get("current_interrupt"))
+        if checkpoint_interrupt is not None:
+            checkpoint_interrupt = await self._discard_stale_follow_up_confirmation_before_turn(
+                checkpoint_interrupt=checkpoint_interrupt,
+                team_id=team_id,
+                user_id=user_id,
+                session_id=session_id,
+                session_key=session_key,
+                context=context,
+            )
+        if checkpoint_interrupt is None:
+            structured_action_result = await self._handle_structured_business_action_turn(
+                turn_input=turn_input,
+                content=content,
+                team_id=team_id,
+                user_id=user_id,
+                session_id=session_id,
+                current_customer=current_customer,
+                context=context,
+            )
+            if structured_action_result is not None:
+                return structured_action_result
         runtime_current_interrupt = checkpoint_interrupt
         if checkpoint_interrupt:
             _align_context_task_to_interrupt(context, checkpoint_interrupt)
@@ -460,6 +533,81 @@ class AgentRootRuntime:
             context=context,
             current_interrupt=runtime_current_interrupt,
         )
+
+    async def _discard_stale_follow_up_confirmation_before_turn(
+        self,
+        *,
+        checkpoint_interrupt: AgentInterruptPayload,
+        team_id: int,
+        user_id: int,
+        session_id: int,
+        session_key: str,
+        context: AgentRuntimeContext,
+    ) -> AgentInterruptPayload | None:
+        case_public_id = _follow_up_confirmation_case_public_id(checkpoint_interrupt)
+        if case_public_id is None or context.db is None:
+            return checkpoint_interrupt
+        try:
+            is_pending = self.confirmation_channel_service.is_case_pending_for_owner(
+                context.db,
+                team_id=team_id,
+                user_id=user_id,
+                case_public_id=case_public_id,
+            )
+        except Exception:
+            logger.exception("Follow-up confirmation interrupt revalidation failed")
+            return checkpoint_interrupt
+        if is_pending:
+            return checkpoint_interrupt
+
+        await self._discard_stale_follow_up_confirmation_interrupt(
+            case_public_id=case_public_id,
+            team_id=team_id,
+            user_id=user_id,
+            session_id=session_id,
+            session_key=session_key,
+            context=context,
+        )
+        event = {
+            "event": "follow_up_task_confirmation_stale_interrupt_discarded",
+            "case_public_id": case_public_id,
+            "reason": "case_not_pending_for_owner",
+        }
+        context.side_effects.business_interaction_events.append(event)
+        await _publish_event(context, event)
+        return None
+
+    async def _discard_stale_follow_up_confirmation_interrupt(
+        self,
+        *,
+        case_public_id: str,
+        team_id: int,
+        user_id: int,
+        session_id: int,
+        session_key: str,
+        context: AgentRuntimeContext,
+    ) -> None:
+        config = build_agent_graph_config(
+            team_id=team_id,
+            user_id=user_id,
+            session_id=session_id,
+            session_key=session_key,
+        )
+        await self._graph.ainvoke(
+            Command(
+                resume={
+                    "action": "cancel",
+                    "metadata": {
+                        "business_action": FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION,
+                        "case_public_id": case_public_id,
+                        "follow_up_confirmation_discard_reason": "stale_case",
+                    },
+                }
+            ),
+            config,
+            context=context,
+        )
+        context.side_effects.current_interrupt = None
 
     async def _handle_structured_business_action_turn(
         self,
@@ -539,16 +687,16 @@ class AgentRootRuntime:
                 case_public_id=case_public_id,
             )
             assistant_content = str(
-                resolved_event.get("content")
-                or result_payload.get("content")
-                or agent_copy.generic_completed()
+                resolved_event.get("content") or result_payload.get("content") or agent_copy.generic_completed()
             )
             events.append(resolved_event)
-            events.append({
-                "event": "action_completed",
-                "action_id": action_id,
-                "action_type": action_type,
-            })
+            events.append(
+                {
+                    "event": "action_completed",
+                    "action_id": action_id,
+                    "action_type": action_type,
+                }
+            )
             workflow_action_ledger.mark_action_executed(
                 context.db,
                 workflow=workflow,
@@ -560,25 +708,29 @@ class AgentRootRuntime:
             await _publish_events(context, events)
             context.side_effects.new_flow_events.extend(events)
             context.side_effects.new_flow_assistant_content = assistant_content
-            return coerce_json_dict({
-                "application_action": "run_new_flow",
-                "events": events,
-                "assistant_content": assistant_content,
-                "structured_business_action": {
-                    "action_type": action_type,
-                    "action_id": action_id,
-                    "case_public_id": case_public_id,
-                    "status": "executed",
-                },
-            })
+            return coerce_json_dict(
+                {
+                    "application_action": "run_new_flow",
+                    "events": events,
+                    "assistant_content": assistant_content,
+                    "structured_business_action": {
+                        "action_type": action_type,
+                        "action_id": action_id,
+                        "case_public_id": case_public_id,
+                        "status": "executed",
+                    },
+                }
+            )
 
         error_message = tool_result.error_message if tool_result else f"暂不支持的执行动作：{action_type}"
-        events.append({
-            "event": "action_failed",
-            "action_id": action_id,
-            "action_type": action_type,
-            "reason": error_message,
-        })
+        events.append(
+            {
+                "event": "action_failed",
+                "action_id": action_id,
+                "action_type": action_type,
+                "reason": error_message,
+            }
+        )
         workflow_action_ledger.mark_action_failed(
             context.db,
             workflow=workflow,
@@ -592,18 +744,20 @@ class AgentRootRuntime:
         await _publish_events(context, events)
         context.side_effects.new_flow_events.extend(events)
         context.side_effects.new_flow_assistant_content = assistant_content
-        return coerce_json_dict({
-            "application_action": "run_new_flow",
-            "events": events,
-            "assistant_content": assistant_content,
-            "structured_business_action": {
-                "action_type": action_type,
-                "action_id": action_id,
-                "case_public_id": case_public_id,
-                "status": "failed",
-                "reason": error_message,
-            },
-        })
+        return coerce_json_dict(
+            {
+                "application_action": "run_new_flow",
+                "events": events,
+                "assistant_content": assistant_content,
+                "structured_business_action": {
+                    "action_type": action_type,
+                    "action_id": action_id,
+                    "case_public_id": case_public_id,
+                    "status": "failed",
+                    "reason": error_message,
+                },
+            }
+        )
 
     async def checkpoint_state_at(
         self,
@@ -644,9 +798,7 @@ class AgentRootRuntime:
             session_key=session_key,
         )
         before_config = (
-            _config_with_checkpoint_id(config, checkpoint_id=before_checkpoint_id)
-            if before_checkpoint_id
-            else None
+            _config_with_checkpoint_id(config, checkpoint_id=before_checkpoint_id) if before_checkpoint_id else None
         )
         history: list[AgentRuntimeStateHistoryItem] = []
         async for snapshot in self._graph.aget_state_history(
@@ -710,6 +862,15 @@ class AgentRootRuntime:
             snapshot = await self._graph.aget_state(config)
             bubbled_interrupt = _snapshot_interrupt_payload_except(snapshot, resumed_interrupt=resumed_interrupt)
             if bubbled_interrupt:
+                projected = await self._publish_checkpointed_follow_up_projection(
+                    bubbled_interrupt,
+                    context=context,
+                )
+                if not projected:
+                    return await self._discard_checkpointed_follow_up_projection(
+                        config=config,
+                        context=context,
+                    )
                 return await self._project_bubbled_pending_interrupt(
                     bubbled_interrupt,
                     snapshot=snapshot,
@@ -725,6 +886,15 @@ class AgentRootRuntime:
             next_snapshot = await self._graph.aget_state(config)
             bubbled_interrupt = _new_snapshot_interrupt_payload(next_snapshot, previous_interrupt_ids=interrupt_ids)
             if bubbled_interrupt:
+                projected = await self._publish_checkpointed_follow_up_projection(
+                    bubbled_interrupt,
+                    context=context,
+                )
+                if not projected:
+                    return await self._discard_checkpointed_follow_up_projection(
+                        config=config,
+                        context=context,
+                    )
                 return await self._project_bubbled_pending_interrupt(
                     bubbled_interrupt,
                     snapshot=next_snapshot,
@@ -732,6 +902,104 @@ class AgentRootRuntime:
                     config=config,
                 )
         return current_result
+
+    async def _publish_checkpointed_follow_up_projection(
+        self,
+        interrupt_payload: AgentInterruptPayload,
+        *,
+        context: AgentRuntimeContext | None,
+    ) -> bool:
+        """Expose a confirmation only after its native interrupt is checkpoint-visible."""
+
+        if context is None or context.db is None or interrupt_payload.get("reason") != "follow_up_task_confirmation":
+            return True
+        interaction = coerce_json_dict(interrupt_payload.get("interaction"))
+        payload = coerce_json_dict(interaction.get("payload"))
+        prompt_key = payload.get("prompt_delivery_key")
+        if not isinstance(prompt_key, str) or not prompt_key:
+            return True
+        try:
+            projection = self.follow_up_confirmation_graph_service.mark_projected(
+                context.db,
+                team_id=context.team_id,
+                prompt_key=prompt_key,
+            )
+            projection_status = (
+                projection.get("status") if isinstance(projection, dict) else getattr(projection, "status", None)
+            )
+            if projection_status != "PROJECTED":
+                raise RuntimeError(
+                    f"projection acknowledgement did not reach PROJECTED: {projection_status or 'MISSING'}"
+                )
+        except Exception as exc:
+            logger.exception("Follow-up confirmation projection acknowledgement failed")
+            rollback = getattr(context.db, "rollback", None)
+            if callable(rollback):
+                rollback()
+            try:
+                self.follow_up_confirmation_graph_service.mark_projection_failed(
+                    context.db,
+                    team_id=context.team_id,
+                    prompt_key=prompt_key,
+                    error_message=str(exc),
+                )
+            except Exception:
+                logger.exception("Follow-up confirmation projection acknowledgement audit failed")
+            event = {
+                "event": "follow_up_task_confirmation_projection_ack_failed",
+                "prompt_key": prompt_key,
+                "reason": str(exc),
+            }
+            context.side_effects.business_interaction_events.append(event)
+            await _publish_event(context, event)
+            return False
+
+        prompt_event = {
+            "event": FOLLOW_UP_CONFIRMATION_PROMPT_EVENT,
+            "content": str(
+                interaction.get("prompt")
+                or (payload.get("case", {}).get("question_text") if isinstance(payload.get("case"), dict) else "")
+                or ""
+            ),
+            "content_format": "text",
+            "case_public_id": payload.get("case_public_id"),
+            "cases": [payload["case"]] if isinstance(payload.get("case"), dict) else [],
+            "interaction": interaction,
+        }
+        if any(
+            event.get("event") == FOLLOW_UP_CONFIRMATION_PROMPT_EVENT
+            and coerce_json_dict(event.get("interaction")).get("interaction_id") == interaction.get("interaction_id")
+            for event in context.side_effects.business_interaction_events
+        ):
+            return True
+        context.side_effects.business_interaction_events.append(prompt_event)
+        prompt_content = prompt_event.get("content")
+        if isinstance(prompt_content, str) and prompt_content:
+            context.side_effects.business_interaction_assistant_content = prompt_content
+        await _publish_event(context, prompt_event)
+        return True
+
+    async def _discard_checkpointed_follow_up_projection(
+        self,
+        *,
+        config: RunnableConfig,
+        context: AgentRuntimeContext | None,
+    ) -> AgentRuntimeInvokeResult:
+        """Resume an unexposed interrupt internally so user input cannot bind to it."""
+
+        return await self._graph.ainvoke(
+            Command(
+                resume={
+                    "action": "cancel",
+                    "metadata": {
+                        "business_action": FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION,
+                        "projection_ack_failed": True,
+                    },
+                }
+            ),
+            config,
+            context=context,
+        )
 
     async def _project_bubbled_pending_interrupt(
         self,
@@ -757,21 +1025,23 @@ class AgentRootRuntime:
                 },
             )
         pending_result = _pending_graph_result_from_bubbled_interrupt(interrupt_payload)
-        state.update({
-            "application_action": "pending_handled",
-            "pending_task_handled": True,
-            "pending_task_result": _pending_task_result_projection(pending_result),
-            "assistant_content": pending_result.get("assistant_content"),
-            "current_interrupt": interrupt_payload,
-            "task_projection": task_projection,
-            "events": [
-                *[event for event in state.get("events", []) if isinstance(event, dict)],
-                {
-                    "event": "agent_root_pending_task_interrupt_bubbled",
-                    "source_event": interrupt_payload.get("source_event"),
-                },
-            ],
-        })
+        state.update(
+            {
+                "application_action": "pending_handled",
+                "pending_task_handled": True,
+                "pending_task_result": _pending_task_result_projection(pending_result),
+                "assistant_content": pending_result.get("assistant_content"),
+                "current_interrupt": interrupt_payload,
+                "task_projection": task_projection,
+                "events": [
+                    *[event for event in state.get("events", []) if isinstance(event, dict)],
+                    {
+                        "event": "agent_root_pending_task_interrupt_bubbled",
+                        "source_event": interrupt_payload.get("source_event"),
+                    },
+                ],
+            }
+        )
         if snapshot_interrupts:
             state["__interrupt__"] = snapshot_interrupts
         if context and context.db and context.session:
@@ -816,18 +1086,24 @@ class AgentRootRuntime:
             "pending_task_handled": False,
             "pending_task_result": {},
             "new_flow_result": {},
+            "post_write_effects": {},
             "resume_payload": {},
             "assistant_content": None,
             "switch_notice": None,
-            "events": [{
-                "event": "agent_root_graph_started",
-                "thread_id": build_agent_thread_id(
-                    team_id=state["team_id"],
-                    user_id=state["user_id"],
-                    session_id=state["session_id"],
-                    session_key=state.get("session_key"),
-                ),
-            }],
+            "deferred_final_events": [],
+            "follow_up_confirmation_projection_suppressed": False,
+            "follow_up_confirmation_discard_reason": None,
+            "events": [
+                {
+                    "event": "agent_root_graph_started",
+                    "thread_id": build_agent_thread_id(
+                        team_id=state["team_id"],
+                        user_id=state["user_id"],
+                        session_id=state["session_id"],
+                        session_key=state.get("session_key"),
+                    ),
+                }
+            ],
         }
 
     def _route_after_start(self, state: AgentRuntimeState) -> str:
@@ -848,26 +1124,49 @@ class AgentRootRuntime:
         resume_payload = interrupt(state["current_interrupt"])
         resume_payload_json = coerce_json_dict(resume_payload)
         metadata = coerce_json_dict(resume_payload_json.get("metadata"))
+        active_interrupt = interrupt_payload_from_json(state.get("current_interrupt")) or {}
+        if active_interrupt.get("reason") == "follow_up_task_confirmation":
+            interaction = coerce_json_dict(active_interrupt.get("interaction"))
+            interaction_payload = coerce_json_dict(interaction.get("payload"))
+            case_public_id = interaction_payload.get("case_public_id")
+            if isinstance(case_public_id, str) and case_public_id:
+                metadata.setdefault("case_public_id", case_public_id)
+                metadata.setdefault("follow_up_confirmation_case_public_id", case_public_id)
+            metadata.setdefault("business_action", FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION)
+            resume_payload_json["business_action"] = FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION
+            resume_payload_json["interrupt_reason"] = "follow_up_task_confirmation"
+            resume_payload_json["metadata"] = metadata
         turn_intent = coerce_json_dict(metadata.get("turn_intent"))
+        projection_ack_failed = metadata.get("projection_ack_failed") is True
+        discard_reason = metadata.get("follow_up_confirmation_discard_reason")
+        should_discard_follow_up_confirmation = projection_ack_failed or isinstance(discard_reason, str)
         update: AgentRuntimeState = {
             "runtime_status": "resumed",
             "current_interrupt": None,
             "resume_payload": resume_payload_json,
             "turn_intent": turn_intent,
-            "events": [{
-                "event": "agent_root_interrupt_resumed",
-                "resume_action": resume_payload_json.get("action"),
-                "turn_intent": turn_intent.get("intent"),
-                "turn_intent_confidence": turn_intent.get("confidence"),
-            }],
+            "follow_up_confirmation_projection_suppressed": should_discard_follow_up_confirmation,
+            "follow_up_confirmation_discard_reason": (discard_reason if isinstance(discard_reason, str) else None),
+            "events": [
+                {
+                    "event": "agent_root_interrupt_resumed",
+                    "resume_action": resume_payload_json.get("action"),
+                    "turn_intent": turn_intent.get("intent"),
+                    "turn_intent_confidence": turn_intent.get("confidence"),
+                }
+            ],
         }
-        if runtime.context and runtime.context.task:
-            update["pending_task_requested"] = True
-        elif _resume_task_projection_id(update.get("resume_payload")) is not None:
+        if (runtime.context and runtime.context.task) or _resume_task_projection_id(
+            update.get("resume_payload")
+        ) is not None:
             update["pending_task_requested"] = True
         return update
 
     def _route_after_interrupt_resume(self, state: AgentRuntimeState) -> str:
+        if state.get("follow_up_confirmation_projection_suppressed"):
+            return "discard_follow_up_confirmation"
+        if _is_follow_up_confirmation_resume(state.get("resume_payload")):
+            return "follow_up_confirmation"
         if _is_customer_intelligence_resume(state.get("resume_payload")):
             return "customer_intelligence_graph"
         if state.get("pending_task_requested"):
@@ -903,10 +1202,12 @@ class AgentRootRuntime:
             return {
                 "route": "pending_task_subgraph",
                 "pending_task_result": {"handled": False, "available": False},
-                "events": [{
-                    "event": "agent_root_pending_task_subgraph_unavailable",
-                    "reason": "missing_runtime_context",
-                }],
+                "events": [
+                    {
+                        "event": "agent_root_pending_task_subgraph_unavailable",
+                        "reason": "missing_runtime_context",
+                    }
+                ],
             }
         pending_side_effects = PendingTaskGraphSideEffects(
             task=context.task,
@@ -937,12 +1238,14 @@ class AgentRootRuntime:
         return {
             "route": "pending_task_subgraph",
             "pending_task_result": _pending_task_result_projection(result),
-            "events": [{
-                "event": "agent_root_pending_task_subgraph_completed",
-                "handled": bool(result.get("handled")),
-                "has_task": bool(result.get("has_active_task") or result.get("task_projection")),
-                "event_count": len(result.get("events", [])),
-            }],
+            "events": [
+                {
+                    "event": "agent_root_pending_task_subgraph_completed",
+                    "handled": bool(result.get("handled")),
+                    "has_task": bool(result.get("has_active_task") or result.get("task_projection")),
+                    "event_count": len(result.get("events", [])),
+                }
+            ],
         }
 
     async def _apply_pending_task_effects(
@@ -953,18 +1256,22 @@ class AgentRootRuntime:
         context = runtime.context
         if not context.db or not context.session:
             return {
-                "events": [{
-                    "event": "agent_root_pending_task_effects_unavailable",
-                    "reason": "missing_runtime_context",
-                }],
+                "events": [
+                    {
+                        "event": "agent_root_pending_task_effects_unavailable",
+                        "reason": "missing_runtime_context",
+                    }
+                ],
             }
         pending_result = context.side_effects.pending_task_result
         if not pending_result:
             return {
-                "events": [{
-                    "event": "agent_root_pending_task_effects_skipped",
-                    "reason": "empty_pending_result",
-                }],
+                "events": [
+                    {
+                        "event": "agent_root_pending_task_effects_skipped",
+                        "reason": "empty_pending_result",
+                    }
+                ],
             }
         result = self.pending_task_side_effect_handler.apply(
             pending_result,
@@ -1001,13 +1308,15 @@ class AgentRootRuntime:
         update: AgentRuntimeState = {
             "current_interrupt": current_interrupt,
             "suspended_candidates": suspended_candidates,
-            "events": [{
-                "event": "agent_root_pending_task_effects_applied",
-                "event_count": len(result.events),
-                "has_assistant_content": bool(result.assistant_content),
-                "has_switch_notice": bool(result.switch_notice),
-                "has_interrupt": bool(current_interrupt),
-            }],
+            "events": [
+                {
+                    "event": "agent_root_pending_task_effects_applied",
+                    "event_count": len(result.events),
+                    "has_assistant_content": bool(result.assistant_content),
+                    "has_switch_notice": bool(result.switch_notice),
+                    "has_interrupt": bool(current_interrupt),
+                }
+            ],
         }
         if result.assistant_content:
             update["assistant_content"] = result.assistant_content
@@ -1026,10 +1335,12 @@ class AgentRootRuntime:
         update: AgentRuntimeState = {
             "application_action": action,
             "pending_task_handled": action == "pending_handled",
-            "events": [{
-                "event": "agent_root_application_action_decided",
-                "application_action": action,
-            }],
+            "events": [
+                {
+                    "event": "agent_root_application_action_decided",
+                    "application_action": action,
+                }
+            ],
         }
         assistant_content = pending_result.get("assistant_content")
         if isinstance(assistant_content, str):
@@ -1081,6 +1392,8 @@ class AgentRootRuntime:
             "event_key": event_key,
             "customer_id": customer_id,
         }
+        if isinstance(context.user_message_id, int):
+            scheduled_event["source_user_message_id"] = context.user_message_id
         result_projection: JSONDict = {
             "handled": True,
             "mode": "background",
@@ -1089,12 +1402,20 @@ class AgentRootRuntime:
             "event_key": event_key,
             "customer_id": customer_id,
         }
+        if isinstance(context.user_message_id, int):
+            result_projection["source_user_message_id"] = context.user_message_id
 
         try:
             request = await self.customer_intelligence_refresh_service.trigger_committed_event_refresh(
                 context.db,
                 event=event,
                 scope="brief",
+                agent_binding=AgentAsyncOperationBinding(
+                    team_id=context.team_id,
+                    user_id=context.user_id,
+                    session_id=context.session_id,
+                    source_user_message_id=context.user_message_id,
+                ),
             )
         except Exception as exc:
             logger.exception(
@@ -1126,16 +1447,32 @@ class AgentRootRuntime:
         if isinstance(request_id, str):
             scheduled_event["request_id"] = request_id
             result_projection["request_id"] = request_id
+        operation_public_id = getattr(request, "operation_public_id", None)
+        if isinstance(operation_public_id, str) and operation_public_id:
+            scheduled_event["operation_public_id"] = operation_public_id
+            result_projection["operation_public_id"] = operation_public_id
         result_projection["scheduled"] = scheduled
         result_projection["scope"] = str(getattr(request, "scope", "brief") or "brief")
-        context.side_effects.customer_intelligence_events.append(scheduled_event)
+        delivery_event = scheduled_event
+        if not scheduled:
+            schedule_error = str(getattr(request, "schedule_error", "") or "")
+            delivery_event = {
+                **scheduled_event,
+                "event": "agent_root_customer_intelligence_refresh_schedule_failed",
+                "reason": schedule_error or "background_refresh_not_scheduled",
+            }
+            result_projection["handled"] = False
+            result_projection["reason"] = "background_refresh_schedule_failed"
+            if schedule_error:
+                result_projection["schedule_error"] = schedule_error
+        context.side_effects.customer_intelligence_events.append(delivery_event)
         context.side_effects.customer_intelligence_result = result_projection
-        await _publish_event(context, scheduled_event)
+        await _publish_event(context, delivery_event)
         return {
             "customer_intelligence_requested": False,
             "customer_intelligence_event": _customer_intelligence_event_projection(event),
             "customer_intelligence_result": result_projection,
-            "events": [scheduled_event],
+            "events": [delivery_event],
         }
 
     async def _run_customer_intelligence_graph(
@@ -1153,19 +1490,23 @@ class AgentRootRuntime:
                         "handled": False,
                         "reason": "missing_runtime_context",
                     },
-                    "events": [{
-                        "event": "agent_root_customer_intelligence_refresh_unavailable",
-                        "reason": "missing_runtime_context",
-                    }],
+                    "events": [
+                        {
+                            "event": "agent_root_customer_intelligence_refresh_unavailable",
+                            "reason": "missing_runtime_context",
+                        }
+                    ],
                 }
             if event_object is None:
                 return {
                     "customer_intelligence_requested": False,
                     "customer_intelligence_result": {"handled": False, "reason": "missing_event"},
-                    "events": [{
-                        "event": "agent_root_customer_intelligence_skipped",
-                        "reason": "missing_event",
-                    }],
+                    "events": [
+                        {
+                            "event": "agent_root_customer_intelligence_skipped",
+                            "reason": "missing_event",
+                        }
+                    ],
                 }
             return await self._schedule_customer_intelligence_refresh(runtime, event_object)
 
@@ -1179,10 +1520,12 @@ class AgentRootRuntime:
         if not context.db:
             return {
                 "customer_intelligence_result": {"handled": False, "reason": "missing_runtime_context"},
-                "events": [{
-                    "event": "agent_root_customer_intelligence_unavailable",
-                    "reason": "missing_runtime_context",
-                }],
+                "events": [
+                    {
+                        "event": "agent_root_customer_intelligence_unavailable",
+                        "reason": "missing_runtime_context",
+                    }
+                ],
             }
 
         streamed_customer_intelligence_trace = False
@@ -1192,10 +1535,12 @@ class AgentRootRuntime:
                 if not event_key:
                     return {
                         "customer_intelligence_result": {"handled": False, "reason": "missing_event_key"},
-                        "events": [{
-                            "event": "agent_root_customer_intelligence_resume_skipped",
-                            "reason": "missing_event_key",
-                        }],
+                        "events": [
+                            {
+                                "event": "agent_root_customer_intelligence_resume_skipped",
+                                "reason": "missing_event_key",
+                            }
+                        ],
                     }
                 graph_input = {
                     "team_id": context.team_id,
@@ -1224,10 +1569,12 @@ class AgentRootRuntime:
                     return {
                         "customer_intelligence_requested": False,
                         "customer_intelligence_result": {"handled": False, "reason": "missing_event"},
-                        "events": [{
-                            "event": "agent_root_customer_intelligence_skipped",
-                            "reason": "missing_event",
-                        }],
+                        "events": [
+                            {
+                                "event": "agent_root_customer_intelligence_skipped",
+                                "reason": "missing_event",
+                            }
+                        ],
                     }
                 graph_input = {
                     "team_id": context.team_id,
@@ -1291,11 +1638,13 @@ class AgentRootRuntime:
             "customer_intelligence_event": coerce_json_dict(result.get("event")),
             "customer_intelligence_result": projected_result,
             "current_interrupt": current_interrupt,
-            "events": [{
-                "event": "agent_root_customer_intelligence_graph_completed",
-                "has_interrupt": bool(current_interrupt),
-                "event_count": len(output_events),
-            }],
+            "events": [
+                {
+                    "event": "agent_root_customer_intelligence_graph_completed",
+                    "has_interrupt": bool(current_interrupt),
+                    "event_count": len(output_events),
+                }
+            ],
         }
         if assistant_content:
             update["assistant_content"] = assistant_content
@@ -1321,10 +1670,12 @@ class AgentRootRuntime:
         await _publish_event(context, new_flow_branch_event)
         if not context.db or not context.session:
             return {
-                "events": [{
-                    "event": "agent_root_new_flow_unavailable",
-                    "reason": "missing_runtime_context",
-                }],
+                "events": [
+                    {
+                        "event": "agent_root_new_flow_unavailable",
+                        "reason": "missing_runtime_context",
+                    }
+                ],
             }
 
         switch_notice = state.get("switch_notice")
@@ -1400,16 +1751,33 @@ class AgentRootRuntime:
 
         assistant_content = auto_execute_result.get("assistant_content") or side_effect_context.assistant_content
         current_interrupt = auto_execute_result.get("current_interrupt") or side_effect_context.current_interrupt
-        if _should_publish_deferred_new_flow_final(
+        post_write_effects = merge_post_write_effects(
+            state.get("post_write_effects"),
+            auto_execute_result,
+            context.side_effects.new_flow_events,
+        )
+        publish_deferred_final = _should_publish_deferred_new_flow_final(
             deferred_final_events,
             customer_intelligence_requested=customer_intelligence_event is not None,
             current_interrupt=current_interrupt,
             context=side_effect_context,
-        ):
+        )
+        defer_final_for_business_arbitration = _should_defer_new_flow_final_for_business_arbitration(
+            deferred_final_events,
+            customer_intelligence_requested=customer_intelligence_event is not None,
+            current_interrupt=current_interrupt,
+            context=side_effect_context,
+        )
+        if publish_deferred_final:
             for final_event in deferred_final_events:
                 context.side_effects.new_flow_events.append(final_event)
                 await _publish_event(context, final_event)
                 event_count += 1
+        deferred_final_projection = deferred_final_events if defer_final_for_business_arbitration else []
+        if deferred_final_projection:
+            # Keep the graph-result event count stable even though publication is
+            # postponed until the root interaction planner has selected a target.
+            event_count += len(deferred_final_projection)
         if current_interrupt:
             context.side_effects.current_interrupt = current_interrupt
         if isinstance(assistant_content, str):
@@ -1418,17 +1786,21 @@ class AgentRootRuntime:
                 "assistant_content": assistant_content,
                 "current_interrupt": current_interrupt,
                 "customer_intelligence_requested": customer_intelligence_event is not None,
+                "post_write_effects": post_write_effects,
+                "deferred_final_events": deferred_final_projection,
                 "new_flow_result": _new_flow_result_projection(
                     event_count=event_count,
                     assistant_content=assistant_content,
                     current_interrupt=current_interrupt,
                 ),
-                "events": [{
-                    "event": "agent_root_new_flow_graph_completed",
-                    "event_count": event_count,
-                    "has_assistant_content": True,
-                    "has_interrupt": bool(current_interrupt),
-                }],
+                "events": [
+                    {
+                        "event": "agent_root_new_flow_graph_completed",
+                        "event_count": event_count,
+                        "has_assistant_content": True,
+                        "has_interrupt": bool(current_interrupt),
+                    }
+                ],
             }
             if current_interrupt:
                 update["task_projection"] = _interrupt_task_projection(current_interrupt)
@@ -1436,17 +1808,21 @@ class AgentRootRuntime:
         update = {
             "current_interrupt": current_interrupt,
             "customer_intelligence_requested": customer_intelligence_event is not None,
+            "post_write_effects": post_write_effects,
+            "deferred_final_events": deferred_final_projection,
             "new_flow_result": _new_flow_result_projection(
                 event_count=event_count,
                 assistant_content=None,
                 current_interrupt=current_interrupt,
             ),
-            "events": [{
-                "event": "agent_root_new_flow_graph_completed",
-                "event_count": event_count,
-                "has_assistant_content": False,
-                "has_interrupt": bool(current_interrupt),
-            }],
+            "events": [
+                {
+                    "event": "agent_root_new_flow_graph_completed",
+                    "event_count": event_count,
+                    "has_assistant_content": False,
+                    "has_interrupt": bool(current_interrupt),
+                }
+            ],
         }
         if current_interrupt:
             update["task_projection"] = _interrupt_task_projection(current_interrupt)
@@ -1498,6 +1874,7 @@ class AgentRootRuntime:
         assistant_content: str | None = None
         current_interrupt: AgentInterruptPayload | None = None
         emitted_event_count = 0
+        post_write_effects = normalize_post_write_effects(None)
         initial_plan = action_plan.build_action_execution_plan(plan_items)
         ledger_state = _auto_execute_ledger_state(
             context,
@@ -1543,9 +1920,7 @@ class AgentRootRuntime:
                     emitted_event_count += 1
                 break
             blocked_taskless_nodes = tuple(
-                node
-                for node in plan.ready_nodes
-                if node.task is None and not _can_direct_execute_action_node(node)
+                node for node in plan.ready_nodes if node.task is None and not _can_direct_execute_action_node(node)
             )
             if blocked_taskless_nodes:
                 blocked_taskless_nodes = _auto_execute_nodes_with_blocked_reason(
@@ -1636,6 +2011,7 @@ class AgentRootRuntime:
                 context.side_effects.new_flow_events.extend(branch["events"])
                 last_mode = str(branch.get("mode") or "single_in_context")
             emitted_event_count += int(branch.get("emitted_event_count") or 0)
+            post_write_effects = merge_post_write_effects(post_write_effects, branch)
             self._customer_intelligence_event_from_confirmed_tool_result(context, branch.get("tool_result") or {})
             result = coerce_json_dict(branch.get("result"))
             result_content = result.get("assistant_content") or branch.get("assistant_content")
@@ -1644,24 +2020,16 @@ class AgentRootRuntime:
             branch_interrupt = branch.get("current_interrupt")
             if isinstance(branch_interrupt, dict):
                 current_interrupt = branch_interrupt
-            successful_task_ids = {
-                int(item)
-                for item in branch.get("completed_task_ids", [])
-                if isinstance(item, int)
-            }
+            successful_task_ids = {int(item) for item in branch.get("completed_task_ids", []) if isinstance(item, int)}
             if len(executable_nodes) == 1 and not successful_task_ids and _auto_execute_branch_completed(branch):
                 task_id = executable_nodes[0].task_id
                 if task_id is not None:
                     successful_task_ids.add(task_id)
             successful_action_ids = {
-                str(item)
-                for item in branch.get("completed_action_ids", [])
-                if isinstance(item, str) and item
+                str(item) for item in branch.get("completed_action_ids", []) if isinstance(item, str) and item
             }
             failed_action_ids = {
-                str(item)
-                for item in branch.get("failed_action_ids", [])
-                if isinstance(item, str) and item
+                str(item) for item in branch.get("failed_action_ids", []) if isinstance(item, str) and item
             }
             if (
                 len(executable_nodes) == 1
@@ -1686,14 +2054,17 @@ class AgentRootRuntime:
                 break
             if executed_action_count >= len(plan_items):
                 break
-        return coerce_json_dict({
-            "event": "agent_root_new_flow_auto_execution_completed",
-            "mode": last_mode,
-            "emitted_event_count": emitted_event_count,
-            "executed_action_count": executed_action_count,
-            "assistant_content": assistant_content,
-            "current_interrupt": current_interrupt,
-        })
+        return coerce_json_dict(
+            {
+                "event": "agent_root_new_flow_auto_execution_completed",
+                "mode": last_mode,
+                "emitted_event_count": emitted_event_count,
+                "executed_action_count": executed_action_count,
+                "assistant_content": assistant_content,
+                "current_interrupt": current_interrupt,
+                "post_write_effects": post_write_effects,
+            }
+        )
 
     async def retry_workflow_action(
         self,
@@ -1728,19 +2099,22 @@ class AgentRootRuntime:
         workflow = action_workflow.workflow_from_mapping(prepared_item.workflow if prepared_item else None)
         if session is None:
             if workflow:
-                return workflow_action_ledger.mark_action_blocked(
-                    db,
-                    workflow=workflow,
-                    team_id=team_id,
-                    user_id=user_id,
-                    session_id=_optional_int(getattr(prepared_action, "session_id", None)),
-                    task_id=_optional_int(getattr(prepared_action, "task_id", None)),
-                    source_type=workflow_action_ledger.SOURCE_MANUAL_RETRY,
-                    payload=coerce_json_dict(getattr(prepared_action, "payload_json", None)),
-                    target_type=_optional_str(getattr(prepared_action, "target_type", None)),
-                    target_id=_optional_int(getattr(prepared_action, "target_id", None)),
-                    reason="retry_blocked:missing_session_context",
-                ) or prepared_action
+                return (
+                    workflow_action_ledger.mark_action_blocked(
+                        db,
+                        workflow=workflow,
+                        team_id=team_id,
+                        user_id=user_id,
+                        session_id=_optional_int(getattr(prepared_action, "session_id", None)),
+                        task_id=_optional_int(getattr(prepared_action, "task_id", None)),
+                        source_type=workflow_action_ledger.SOURCE_MANUAL_RETRY,
+                        payload=coerce_json_dict(getattr(prepared_action, "payload_json", None)),
+                        target_type=_optional_str(getattr(prepared_action, "target_type", None)),
+                        target_id=_optional_int(getattr(prepared_action, "target_id", None)),
+                        reason="retry_blocked:missing_session_context",
+                    )
+                    or prepared_action
+                )
             return prepared_action
 
         workflow_id = _optional_str(getattr(prepared_action, "workflow_id", None))
@@ -1929,19 +2303,21 @@ class AgentRootRuntime:
             task_display.readable_execution_label(_task_action(task)) or "执行业务操作",
         )
         await _publish_event(context, started_event)
-        result = await self.confirmed_task_graph_service.run({
-            "db": context.db,
-            "session": context.session,
-            "task": task,
-            "team_id": context.team_id,
-            "user_id": context.user_id,
-            "session_id": context.session_id,
-            "authorization": context.authorization or "",
-            "channel": context.turn_input.source if context.turn_input else "web",
-            "provider": context.turn_input.provider if context.turn_input else None,
-            "events": [],
-            "event_sink": context.event_sink,
-        })
+        result = await self.confirmed_task_graph_service.run(
+            {
+                "db": context.db,
+                "session": context.session,
+                "task": task,
+                "team_id": context.team_id,
+                "user_id": context.user_id,
+                "session_id": context.session_id,
+                "authorization": context.authorization or "",
+                "channel": context.turn_input.source if context.turn_input else "web",
+                "provider": context.turn_input.provider if context.turn_input else None,
+                "events": [],
+                "event_sink": context.event_sink,
+            }
+        )
         output_events = execution_trace.confirmed_task_execution_events(
             task=task,
             graph_events=result.get("events", []),
@@ -1955,14 +2331,17 @@ class AgentRootRuntime:
             context=context,
             assistant_content=assistant_content if isinstance(assistant_content, str) else "",
         )
-        return coerce_json_dict({
-            "result": result,
-            "tool_result": result.get("tool_result") or {},
-            "events": [started_event, *output_events],
-            "emitted_event_count": len(output_events) + 1,
-            "assistant_content": assistant_content,
-            "current_interrupt": current_interrupt,
-        })
+        return coerce_json_dict(
+            {
+                "result": result,
+                "tool_result": result.get("tool_result") or {},
+                "post_write_effects": normalize_post_write_effects(result.get("tool_result")),
+                "events": [started_event, *output_events],
+                "emitted_event_count": len(output_events) + 1,
+                "assistant_content": assistant_content,
+                "current_interrupt": current_interrupt,
+            }
+        )
 
     async def _run_new_flow_auto_execute_node_in_context(
         self,
@@ -2018,21 +2397,26 @@ class AgentRootRuntime:
                 result=tool_result.data if isinstance(tool_result.data, dict) else {"data": tool_result.data},
                 task_id=None,
             )
-            output_events.append({
-                "event": "action_completed",
-                "action_id": envelope.action_id,
-                "action_type": envelope.action_type,
-            })
+            output_events.append(
+                {
+                    "event": "action_completed",
+                    "action_id": envelope.action_id,
+                    "action_type": envelope.action_type,
+                }
+            )
             await _publish_events(context, output_events[1:])
-            return coerce_json_dict({
-                "result": {"execution_status": "completed", "assistant_content": assistant_content},
-                "tool_result": tool_event,
-                "events": output_events,
-                "emitted_event_count": len(output_events),
-                "assistant_content": assistant_content,
-                "completed_action_ids": [node.action_id],
-                "mode": "single_action_in_context",
-            })
+            return coerce_json_dict(
+                {
+                    "result": {"execution_status": "completed", "assistant_content": assistant_content},
+                    "tool_result": tool_event,
+                    "post_write_effects": normalize_post_write_effects(tool_event),
+                    "events": output_events,
+                    "emitted_event_count": len(output_events),
+                    "assistant_content": assistant_content,
+                    "completed_action_ids": [node.action_id],
+                    "mode": "single_action_in_context",
+                }
+            )
         error_message = tool_result.error_message if tool_result else f"暂不支持的执行动作：{envelope.action_type}"
         workflow_action_ledger.mark_action_failed(
             context.db,
@@ -2043,22 +2427,27 @@ class AgentRootRuntime:
             error_message=error_message,
             result=tool_event or {"success": False, "error": error_message},
         )
-        output_events.append({
-            "event": "action_failed",
-            "action_id": envelope.action_id,
-            "action_type": envelope.action_type,
-            "reason": error_message,
-        })
+        output_events.append(
+            {
+                "event": "action_failed",
+                "action_id": envelope.action_id,
+                "action_type": envelope.action_type,
+                "reason": error_message,
+            }
+        )
         await _publish_events(context, output_events[1:])
-        return coerce_json_dict({
-            "result": {"execution_status": "failed", "assistant_content": f"执行失败：{error_message}"},
-            "tool_result": tool_event,
-            "events": output_events,
-            "emitted_event_count": len(output_events),
-            "assistant_content": f"执行失败：{error_message}",
-            "failed_action_ids": [node.action_id],
-            "mode": "single_action_in_context",
-        })
+        return coerce_json_dict(
+            {
+                "result": {"execution_status": "failed", "assistant_content": f"执行失败：{error_message}"},
+                "tool_result": tool_event,
+                "post_write_effects": normalize_post_write_effects(tool_event),
+                "events": output_events,
+                "emitted_event_count": len(output_events),
+                "assistant_content": f"执行失败：{error_message}",
+                "failed_action_ids": [node.action_id],
+                "mode": "single_action_in_context",
+            }
+        )
 
     async def _run_new_flow_auto_execute_tasks_parallel(
         self,
@@ -2099,14 +2488,16 @@ class AgentRootRuntime:
                 task_id = _optional_int(getattr(task, "id", None))
                 if task_id is not None and _auto_execute_branch_completed(branch):
                     completed_task_ids.append(task_id)
-            return coerce_json_dict({
-                "event": "agent_root_new_flow_auto_execution_completed",
-                "mode": "serial_fallback",
-                "emitted_event_count": emitted_event_count,
-                "completed_task_ids": completed_task_ids,
-                "assistant_content": assistant_content,
-                "current_interrupt": current_interrupt,
-            })
+            return coerce_json_dict(
+                {
+                    "event": "agent_root_new_flow_auto_execution_completed",
+                    "mode": "serial_fallback",
+                    "emitted_event_count": emitted_event_count,
+                    "completed_task_ids": completed_task_ids,
+                    "assistant_content": assistant_content,
+                    "current_interrupt": current_interrupt,
+                }
+            )
 
         started_event = _step_event("auto_execute_tasks_parallel", "started", f"并行执行 {len(tasks)} 个低风险业务操作")
         context.side_effects.new_flow_events.append(started_event)
@@ -2121,6 +2512,7 @@ class AgentRootRuntime:
         )
         assistant_content: str | None = None
         current_interrupt: AgentInterruptPayload | None = None
+        post_write_effects = normalize_post_write_effects(None)
         emitted_event_count = 1
         completed_task_ids: list[int] = []
         failed_task_ids: list[int] = []
@@ -2140,6 +2532,7 @@ class AgentRootRuntime:
                 emitted_event_count += 1
                 continue
             branch = coerce_json_dict(branch_result)
+            post_write_effects = merge_post_write_effects(post_write_effects, branch)
             events = [event for event in branch.get("events", []) if isinstance(event, dict)]
             context.side_effects.new_flow_events.extend(events)
             await _publish_events(context, events)
@@ -2162,19 +2555,24 @@ class AgentRootRuntime:
             branch_interrupt = branch.get("current_interrupt")
             if isinstance(branch_interrupt, dict):
                 current_interrupt = branch_interrupt
-        completed_event = _step_event("auto_execute_tasks_parallel", "completed", f"并行执行完成 {len(tasks)} 个低风险业务操作")
+        completed_event = _step_event(
+            "auto_execute_tasks_parallel", "completed", f"并行执行完成 {len(tasks)} 个低风险业务操作"
+        )
         context.side_effects.new_flow_events.append(completed_event)
         await _publish_event(context, completed_event)
         emitted_event_count += 1
-        return coerce_json_dict({
-            "event": "agent_root_new_flow_auto_execution_completed",
-            "mode": "parallel_isolated",
-            "emitted_event_count": emitted_event_count,
-            "completed_task_ids": completed_task_ids,
-            "failed_task_ids": failed_task_ids,
-            "assistant_content": assistant_content,
-            "current_interrupt": current_interrupt,
-        })
+        return coerce_json_dict(
+            {
+                "event": "agent_root_new_flow_auto_execution_completed",
+                "mode": "parallel_isolated",
+                "emitted_event_count": emitted_event_count,
+                "completed_task_ids": completed_task_ids,
+                "failed_task_ids": failed_task_ids,
+                "assistant_content": assistant_content,
+                "current_interrupt": current_interrupt,
+                "post_write_effects": post_write_effects,
+            }
+        )
 
     async def _run_new_flow_auto_execute_nodes_parallel(
         self,
@@ -2186,26 +2584,10 @@ class AgentRootRuntime:
                 context,
                 [node.task for node in nodes if node.task is not None],
             )
-            completed_task_ids = {
-                int(item)
-                for item in branch.get("completed_task_ids", [])
-                if isinstance(item, int)
-            }
-            failed_task_ids = {
-                int(item)
-                for item in branch.get("failed_task_ids", [])
-                if isinstance(item, int)
-            }
-            branch["completed_action_ids"] = [
-                node.action_id
-                for node in nodes
-                if node.task_id in completed_task_ids
-            ]
-            branch["failed_action_ids"] = [
-                node.action_id
-                for node in nodes
-                if node.task_id in failed_task_ids
-            ]
+            completed_task_ids = {int(item) for item in branch.get("completed_task_ids", []) if isinstance(item, int)}
+            failed_task_ids = {int(item) for item in branch.get("failed_task_ids", []) if isinstance(item, int)}
+            branch["completed_action_ids"] = [node.action_id for node in nodes if node.task_id in completed_task_ids]
+            branch["failed_action_ids"] = [node.action_id for node in nodes if node.task_id in failed_task_ids]
             return coerce_json_dict(branch)
 
         branch_inputs = [
@@ -2239,23 +2621,25 @@ class AgentRootRuntime:
                 branch_interrupt = branch.get("current_interrupt")
                 if isinstance(branch_interrupt, dict):
                     current_interrupt = branch_interrupt
-                completed_action_ids.extend([
-                    item
-                    for item in branch.get("completed_action_ids", [])
-                    if isinstance(item, str)
-                ])
+                completed_action_ids.extend(
+                    [item for item in branch.get("completed_action_ids", []) if isinstance(item, str)]
+                )
                 if current_interrupt:
                     break
-            return coerce_json_dict({
-                "event": "agent_root_new_flow_auto_execution_completed",
-                "mode": "serial_node_fallback",
-                "emitted_event_count": emitted_event_count,
-                "completed_action_ids": completed_action_ids,
-                "assistant_content": assistant_content,
-                "current_interrupt": current_interrupt,
-            })
+            return coerce_json_dict(
+                {
+                    "event": "agent_root_new_flow_auto_execution_completed",
+                    "mode": "serial_node_fallback",
+                    "emitted_event_count": emitted_event_count,
+                    "completed_action_ids": completed_action_ids,
+                    "assistant_content": assistant_content,
+                    "current_interrupt": current_interrupt,
+                }
+            )
 
-        started_event = _step_event("auto_execute_actions_parallel", "started", f"并行执行 {len(nodes)} 个低风险业务动作")
+        started_event = _step_event(
+            "auto_execute_actions_parallel", "started", f"并行执行 {len(nodes)} 个低风险业务动作"
+        )
         context.side_effects.new_flow_events.append(started_event)
         await _publish_event(context, started_event)
         branch_results = await asyncio.gather(
@@ -2268,6 +2652,7 @@ class AgentRootRuntime:
         )
         assistant_content: str | None = None
         current_interrupt: AgentInterruptPayload | None = None
+        post_write_effects = normalize_post_write_effects(None)
         emitted_event_count = 1
         completed_action_ids: list[str] = []
         completed_task_ids: list[int] = []
@@ -2297,51 +2682,43 @@ class AgentRootRuntime:
                 emitted_event_count += 1
                 continue
             branch = coerce_json_dict(branch_result)
+            post_write_effects = merge_post_write_effects(post_write_effects, branch)
             events = [event for event in branch.get("events", []) if isinstance(event, dict)]
             context.side_effects.new_flow_events.extend(events)
             await _publish_events(context, events)
             emitted_event_count += int(branch.get("emitted_event_count") or len(events))
             self._customer_intelligence_event_from_confirmed_tool_result(context, branch.get("tool_result") or {})
-            completed_action_ids.extend([
-                item
-                for item in branch.get("completed_action_ids", [])
-                if isinstance(item, str)
-            ])
-            completed_task_ids.extend([
-                item
-                for item in branch.get("completed_task_ids", [])
-                if isinstance(item, int)
-            ])
-            failed_action_ids.extend([
-                item
-                for item in branch.get("failed_action_ids", [])
-                if isinstance(item, str)
-            ])
-            failed_task_ids.extend([
-                item
-                for item in branch.get("failed_task_ids", [])
-                if isinstance(item, int)
-            ])
+            completed_action_ids.extend(
+                [item for item in branch.get("completed_action_ids", []) if isinstance(item, str)]
+            )
+            completed_task_ids.extend([item for item in branch.get("completed_task_ids", []) if isinstance(item, int)])
+            failed_action_ids.extend([item for item in branch.get("failed_action_ids", []) if isinstance(item, str)])
+            failed_task_ids.extend([item for item in branch.get("failed_task_ids", []) if isinstance(item, int)])
             if isinstance(branch.get("assistant_content"), str):
                 assistant_content = branch["assistant_content"]
             branch_interrupt = branch.get("current_interrupt")
             if isinstance(branch_interrupt, dict):
                 current_interrupt = branch_interrupt
-        completed_event = _step_event("auto_execute_actions_parallel", "completed", f"并行执行完成 {len(nodes)} 个低风险业务动作")
+        completed_event = _step_event(
+            "auto_execute_actions_parallel", "completed", f"并行执行完成 {len(nodes)} 个低风险业务动作"
+        )
         context.side_effects.new_flow_events.append(completed_event)
         await _publish_event(context, completed_event)
         emitted_event_count += 1
-        return coerce_json_dict({
-            "event": "agent_root_new_flow_auto_execution_completed",
-            "mode": "parallel_isolated",
-            "emitted_event_count": emitted_event_count,
-            "completed_action_ids": completed_action_ids,
-            "completed_task_ids": completed_task_ids,
-            "failed_action_ids": failed_action_ids,
-            "failed_task_ids": failed_task_ids,
-            "assistant_content": assistant_content,
-            "current_interrupt": current_interrupt,
-        })
+        return coerce_json_dict(
+            {
+                "event": "agent_root_new_flow_auto_execution_completed",
+                "mode": "parallel_isolated",
+                "emitted_event_count": emitted_event_count,
+                "completed_action_ids": completed_action_ids,
+                "completed_task_ids": completed_task_ids,
+                "failed_action_ids": failed_action_ids,
+                "failed_task_ids": failed_task_ids,
+                "assistant_content": assistant_content,
+                "current_interrupt": current_interrupt,
+                "post_write_effects": post_write_effects,
+            }
+        )
 
     async def _run_new_flow_auto_execute_node_isolated(self, branch_input: JSONDict) -> JSONDict:
         if branch_input.get("node_kind") == "task":
@@ -2406,19 +2783,24 @@ class AgentRootRuntime:
                     result=tool_result.data if isinstance(tool_result.data, dict) else {"data": tool_result.data},
                     task_id=None,
                 )
-                events.append({
-                    "event": "action_completed",
-                    "action_id": envelope.action_id,
-                    "action_type": envelope.action_type,
-                })
-                return coerce_json_dict({
-                    "result": {"execution_status": "completed", "assistant_content": assistant_content},
-                    "tool_result": tool_event,
-                    "events": events,
-                    "emitted_event_count": len(events),
-                    "assistant_content": assistant_content,
-                    "completed_action_ids": [envelope.action_id],
-                })
+                events.append(
+                    {
+                        "event": "action_completed",
+                        "action_id": envelope.action_id,
+                        "action_type": envelope.action_type,
+                    }
+                )
+                return coerce_json_dict(
+                    {
+                        "result": {"execution_status": "completed", "assistant_content": assistant_content},
+                        "tool_result": tool_event,
+                        "post_write_effects": normalize_post_write_effects(tool_event),
+                        "events": events,
+                        "emitted_event_count": len(events),
+                        "assistant_content": assistant_content,
+                        "completed_action_ids": [envelope.action_id],
+                    }
+                )
             error_message = tool_result.error_message if tool_result else f"暂不支持的执行动作：{envelope.action_type}"
             workflow_action_ledger.mark_action_failed(
                 db,
@@ -2429,20 +2811,25 @@ class AgentRootRuntime:
                 error_message=error_message,
                 result=tool_event or {"success": False, "error": error_message},
             )
-            events.append({
-                "event": "action_failed",
-                "action_id": envelope.action_id,
-                "action_type": envelope.action_type,
-                "reason": error_message,
-            })
-            return coerce_json_dict({
-                "result": {"execution_status": "failed", "assistant_content": f"执行失败：{error_message}"},
-                "tool_result": tool_event,
-                "events": events,
-                "emitted_event_count": len(events),
-                "assistant_content": f"执行失败：{error_message}",
-                "failed_action_ids": [envelope.action_id],
-            })
+            events.append(
+                {
+                    "event": "action_failed",
+                    "action_id": envelope.action_id,
+                    "action_type": envelope.action_type,
+                    "reason": error_message,
+                }
+            )
+            return coerce_json_dict(
+                {
+                    "result": {"execution_status": "failed", "assistant_content": f"执行失败：{error_message}"},
+                    "tool_result": tool_event,
+                    "post_write_effects": normalize_post_write_effects(tool_event),
+                    "events": events,
+                    "emitted_event_count": len(events),
+                    "assistant_content": f"执行失败：{error_message}",
+                    "failed_action_ids": [envelope.action_id],
+                }
+            )
         finally:
             db.close()
 
@@ -2468,19 +2855,21 @@ class AgentRootRuntime:
             )
             if session is None or task is None:
                 raise ValueError("auto execute branch could not reload session/task")
-            result = await self.confirmed_task_graph_service.run({
-                "db": db,
-                "session": session,
-                "task": task,
-                "team_id": int(branch_input["team_id"]),
-                "user_id": int(branch_input["user_id"]),
-                "session_id": session_id,
-                "authorization": str(branch_input.get("authorization") or ""),
-                "channel": str(branch_input.get("channel") or "web"),
-                "provider": branch_input.get("provider"),
-                "events": [],
-                "event_sink": None,
-            })
+            result = await self.confirmed_task_graph_service.run(
+                {
+                    "db": db,
+                    "session": session,
+                    "task": task,
+                    "team_id": int(branch_input["team_id"]),
+                    "user_id": int(branch_input["user_id"]),
+                    "session_id": session_id,
+                    "authorization": str(branch_input.get("authorization") or ""),
+                    "channel": str(branch_input.get("channel") or "web"),
+                    "provider": branch_input.get("provider"),
+                    "events": [],
+                    "event_sink": None,
+                }
+            )
             output_events = execution_trace.confirmed_task_execution_events(
                 task=task,
                 graph_events=result.get("events", []),
@@ -2488,21 +2877,24 @@ class AgentRootRuntime:
                 include_graph_progress_events=True,
             )
             assistant_content = result.get("assistant_content")
-            return coerce_json_dict({
-                "result": result,
-                "tool_result": result.get("tool_result") or {},
-                "events": [
-                    _step_event(
-                        "auto_execute_task",
-                        "started",
-                        task_display.readable_execution_label(_task_action(task)) or "执行业务操作",
-                    ),
-                    *output_events,
-                ],
-                "emitted_event_count": len(output_events) + 1,
-                "assistant_content": assistant_content,
-                "current_interrupt": None,
-            })
+            return coerce_json_dict(
+                {
+                    "result": result,
+                    "tool_result": result.get("tool_result") or {},
+                    "post_write_effects": normalize_post_write_effects(result.get("tool_result")),
+                    "events": [
+                        _step_event(
+                            "auto_execute_task",
+                            "started",
+                            task_display.readable_execution_label(_task_action(task)) or "执行业务操作",
+                        ),
+                        *output_events,
+                    ],
+                    "emitted_event_count": len(output_events) + 1,
+                    "assistant_content": assistant_content,
+                    "current_interrupt": None,
+                }
+            )
         except Exception as exc:
             workflow = action_workflow.workflow_from_task_state(getattr(task, "state_json", None))
             if workflow:
@@ -2540,24 +2932,28 @@ class AgentRootRuntime:
         await _publish_event(context, confirmed_branch_event)
         if not context.db or not context.session or not context.task:
             return {
-                "events": [{
-                    "event": "agent_root_confirmed_task_execution_unavailable",
-                    "reason": "missing_runtime_context",
-                }],
+                "events": [
+                    {
+                        "event": "agent_root_confirmed_task_execution_unavailable",
+                        "reason": "missing_runtime_context",
+                    }
+                ],
             }
-        result = await self.confirmed_task_graph_service.run({
-            "db": context.db,
-            "session": context.session,
-            "task": context.task,
-            "team_id": context.team_id,
-            "user_id": context.user_id,
-            "session_id": context.session_id,
-            "authorization": context.authorization or "",
-            "channel": context.turn_input.source if context.turn_input else "web",
-            "provider": context.turn_input.provider if context.turn_input else None,
-            "events": [],
-            "event_sink": context.event_sink,
-        })
+        result = await self.confirmed_task_graph_service.run(
+            {
+                "db": context.db,
+                "session": context.session,
+                "task": context.task,
+                "team_id": context.team_id,
+                "user_id": context.user_id,
+                "session_id": context.session_id,
+                "authorization": context.authorization or "",
+                "channel": context.turn_input.source if context.turn_input else "web",
+                "provider": context.turn_input.provider if context.turn_input else None,
+                "events": [],
+                "event_sink": context.event_sink,
+            }
+        )
         output_events = execution_trace.confirmed_task_execution_events(
             task=context.task,
             graph_events=result.get("events", []),
@@ -2585,13 +2981,20 @@ class AgentRootRuntime:
             "assistant_content": assistant_content if isinstance(assistant_content, str) else None,
             "current_interrupt": current_interrupt,
             "customer_intelligence_requested": customer_intelligence_event is not None,
-            "events": [{
-                "event": "agent_root_confirmed_task_subgraph_completed",
-                "emitted_event_count": len(output_events),
-                "task_event": task_event.get("event"),
-                "execution_status": result.get("execution_status"),
-                "has_next_interrupt": bool(current_interrupt),
-            }],
+            "post_write_effects": merge_post_write_effects(
+                state.get("post_write_effects"),
+                result.get("tool_result"),
+                output_events,
+            ),
+            "events": [
+                {
+                    "event": "agent_root_confirmed_task_subgraph_completed",
+                    "emitted_event_count": len(output_events),
+                    "task_event": task_event.get("event"),
+                    "execution_status": result.get("execution_status"),
+                    "has_next_interrupt": bool(current_interrupt),
+                }
+            ],
         }
         if current_interrupt:
             update["task_projection"] = _interrupt_task_projection(current_interrupt)
@@ -2616,10 +3019,12 @@ class AgentRootRuntime:
                 context.team_id,
                 context.session_id,
             )
-            context.side_effects.customer_intelligence_events.append({
-                "event": "agent_root_customer_intelligence_trigger_failed",
-                "source": "confirmed_tool_result",
-            })
+            context.side_effects.customer_intelligence_events.append(
+                {
+                    "event": "agent_root_customer_intelligence_trigger_failed",
+                    "source": "confirmed_tool_result",
+                }
+            )
             return None
         if event is not None:
             context.customer_intelligence_event = event
@@ -2631,6 +3036,268 @@ class AgentRootRuntime:
         if state.get("customer_intelligence_requested"):
             return "customer_intelligence_graph"
         return "finish"
+
+    async def _reconcile_pending_business_interactions(
+        self,
+        state: AgentRuntimeState,
+        runtime: Runtime[AgentRuntimeContext],
+    ) -> AgentRuntimeState:
+        context = runtime.context
+        if state.get("current_interrupt"):
+            return {}
+        effects = normalize_post_write_effects(state.get("post_write_effects"))
+        case_public_ids = effects.get("follow_up_confirmation_case_public_ids") or []
+        if context is None:
+            return {"post_write_effects": effects}
+        if context.db is None:
+            final_events = await self._publish_deferred_final_events(state, context=context)
+            return {
+                "post_write_effects": effects,
+                "deferred_final_events": [],
+                **({"assistant_content": _last_event_content(final_events)} if final_events else {}),
+            }
+        # Durable-inbox compensation requires a real persistence boundary. Some
+        # graph-only invocations intentionally carry an opaque placeholder DB;
+        # when there are no explicit post-write case ids, publish the ordinary
+        # final after arbitration instead of treating the placeholder as a DB.
+        if not case_public_ids and not callable(getattr(context.db, "query", None)):
+            final_events = await self._publish_deferred_final_events(state, context=context)
+            return {
+                "post_write_effects": effects,
+                "deferred_final_events": [],
+                **({"assistant_content": _last_event_content(final_events)} if final_events else {}),
+            }
+        interaction_scope = build_agent_thread_id(
+            team_id=context.team_id,
+            user_id=context.user_id,
+            session_id=context.session_id,
+            session_key=state.get("session_key"),
+        )
+        try:
+            prompt_event = await self.follow_up_confirmation_graph_service.prepare(
+                db=context.db,
+                team_id=context.team_id,
+                user_id=context.user_id,
+                case_public_ids=case_public_ids,
+                interaction_scope=interaction_scope,
+                include_owner_inbox_fallback=True,
+            )
+        except Exception as exc:
+            logger.exception("Follow-up confirmation projection failed")
+            rollback = getattr(context.db, "rollback", None)
+            if callable(rollback):
+                rollback()
+            try:
+                self.confirmation_channel_service.record_projection_failure_by_public_ids(
+                    context.db,
+                    team_id=context.team_id,
+                    user_id=context.user_id,
+                    case_public_ids=case_public_ids,
+                    interaction_scope=interaction_scope,
+                    error_message=str(exc),
+                )
+            except Exception:
+                logger.exception("Follow-up confirmation projection failure audit could not be persisted")
+            event = {
+                "event": "follow_up_task_confirmation_projection_failed",
+                "case_public_ids": case_public_ids,
+                "reason": str(exc),
+            }
+            context.side_effects.business_interaction_events.append(event)
+            await _publish_event(context, event)
+            final_events = await self._publish_deferred_final_events(state, context=context)
+            return {
+                "events": [event],
+                "post_write_effects": effects,
+                "deferred_final_events": [],
+                **({"assistant_content": _last_event_content(final_events)} if final_events else {}),
+            }
+        if not prompt_event:
+            event = {
+                "event": "follow_up_task_confirmation_projection_skipped",
+                "case_public_ids": case_public_ids,
+                "reason": "no_owner_scoped_pending_case",
+            }
+            context.side_effects.business_interaction_events.append(event)
+            await _publish_event(context, event)
+            final_events = await self._publish_deferred_final_events(state, context=context)
+            return {
+                "events": [event],
+                "post_write_effects": effects,
+                "deferred_final_events": [],
+                **({"assistant_content": _last_event_content(final_events)} if final_events else {}),
+            }
+        prompt_json = coerce_json_dict(prompt_event)
+        interaction_plan = self.interaction_planner.plan(
+            semantic=coerce_json_dict(state.get("semantic")),
+            business_context=coerce_json_dict(state.get("current_customer")),
+            suggestions={},
+            current_interrupt=interrupt_payload_from_json(state.get("current_interrupt")),
+            pending_task_projection=coerce_json_dict(state.get("task_projection")),
+            tool_capability={"follow_up_confirmation": True},
+            follow_up_confirmation_candidate=prompt_json,
+        )
+        if interaction_plan.action != "follow_up_confirmation":
+            event = {
+                "event": "follow_up_task_confirmation_projection_deferred",
+                "case_public_ids": case_public_ids,
+                "reason": interaction_plan.reason,
+            }
+            context.side_effects.business_interaction_events.append(event)
+            await _publish_event(context, event)
+            return {"events": [event], "post_write_effects": effects, "deferred_final_events": []}
+        prompt_json = interaction_plan.candidate
+        interaction = coerce_json_dict(prompt_json.get("interaction"))
+        waiting_event = {
+            "event": FOLLOW_UP_CONFIRMATION_PROMPT_EVENT,
+            "business_action": FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION,
+            "payload": coerce_json_dict(interaction.get("payload")),
+            "content": str(prompt_json.get("content") or ""),
+        }
+        current_interrupt = interrupt_from_waiting_event(waiting_event, interaction=interaction)
+        context.side_effects.current_interrupt = current_interrupt
+        prompt_content = prompt_json.get("content")
+        return {
+            "current_interrupt": current_interrupt,
+            "post_write_effects": effects,
+            "deferred_final_events": [],
+            "assistant_content": prompt_content if isinstance(prompt_content, str) else None,
+            "events": [
+                {
+                    "event": "agent_root_follow_up_confirmation_projected",
+                    "case_public_id": prompt_json.get("case_public_id"),
+                    "interaction_id": interaction.get("interaction_id"),
+                }
+            ],
+        }
+
+    async def _publish_deferred_final_events(
+        self,
+        state: AgentRuntimeState,
+        *,
+        context: AgentRuntimeContext,
+    ) -> list[JSONDict]:
+        events = [
+            coerce_json_dict(event) for event in state.get("deferred_final_events", []) if isinstance(event, dict)
+        ]
+        for event in events:
+            context.side_effects.new_flow_events.append(event)
+            await _publish_event(context, event)
+        return events
+
+    def _route_after_pending_business_interactions(self, state: AgentRuntimeState) -> str:
+        return "generated_interrupt_wait" if state.get("current_interrupt") else "finish"
+
+    def _discard_unexposed_follow_up_confirmation(
+        self,
+        state: AgentRuntimeState,
+        runtime: Runtime[AgentRuntimeContext],
+    ) -> AgentRuntimeState:
+        """Clear a checkpointed prompt that never became user-visible."""
+
+        if runtime.context:
+            runtime.context.side_effects.current_interrupt = None
+        discard_reason = state.get("follow_up_confirmation_discard_reason")
+        event_name = (
+            "agent_root_follow_up_confirmation_stale_interrupt_discarded"
+            if discard_reason == "stale_case"
+            else "agent_root_follow_up_confirmation_projection_discarded"
+        )
+        return {
+            "current_interrupt": None,
+            "assistant_content": None,
+            "follow_up_confirmation_projection_suppressed": False,
+            "follow_up_confirmation_discard_reason": None,
+            "events": [
+                {
+                    "event": event_name,
+                    "reason": discard_reason,
+                }
+            ],
+        }
+
+    async def _resolve_follow_up_confirmation(
+        self,
+        state: AgentRuntimeState,
+        runtime: Runtime[AgentRuntimeContext],
+    ) -> AgentRuntimeState:
+        context = runtime.context
+        resume_payload = coerce_json_dict(state.get("resume_payload"))
+        metadata = coerce_json_dict(resume_payload.get("metadata"))
+        case_public_id = metadata.get("case_public_id") or metadata.get("follow_up_confirmation_case_public_id")
+        reply_text = str(resume_payload.get("content") or metadata.get("selected_value") or "").strip()
+        if not isinstance(case_public_id, str) or not case_public_id or not reply_text or not context.db:
+            event = {
+                "event": "follow_up_task_confirmation_resolution_skipped",
+                "reason": "missing_case_reply_or_runtime_context",
+            }
+            context.side_effects.business_interaction_events.append(event)
+            await _publish_event(context, event)
+            return {"events": [event], "post_write_effects": {}}
+        try:
+            resolved_event = await self.follow_up_confirmation_graph_service.resolve(
+                db=context.db,
+                team_id=context.team_id,
+                user_id=context.user_id,
+                case_public_id=case_public_id,
+                reply_text=reply_text,
+            )
+        except Exception as exc:
+            logger.exception("Follow-up confirmation resolution failed")
+            resolved_event = {
+                "event": "follow_up_task_confirmation_resolution_failed",
+                "case_public_id": case_public_id,
+                "reason": str(exc),
+                "content": "这项跟进确认暂时处理失败，请稍后在确认中心重试。",
+            }
+        content = resolved_event.get("content")
+        next_interrupt: AgentInterruptPayload | None = None
+        follow_up_prompt = resolved_event.get("assistant_follow_up_prompt")
+        if isinstance(follow_up_prompt, str) and follow_up_prompt:
+            case_payload = coerce_json_dict(resolved_event.get("case"))
+            unresolved_reply_count = case_payload.get("unresolved_reply_count")
+            retry_number = unresolved_reply_count if isinstance(unresolved_reply_count, int) else 1
+            interaction_scope = (
+                f"{build_agent_thread_id(team_id=context.team_id, user_id=context.user_id, session_id=context.session_id, session_key=state.get('session_key'))}"
+                f":clarification:{retry_number}"
+            )
+            prompt_event = await self.follow_up_confirmation_graph_service.prepare(
+                db=context.db,
+                team_id=context.team_id,
+                user_id=context.user_id,
+                case_public_ids=[case_public_id],
+                interaction_scope=interaction_scope,
+                include_owner_inbox_fallback=False,
+                prompt_override=follow_up_prompt,
+                reason_code="ROOT_GRAPH_CLARIFICATION_PLANNED",
+            )
+            next_interaction = coerce_json_dict(prompt_event.get("interaction"))
+            if next_interaction:
+                waiting_event = {
+                    "event": FOLLOW_UP_CONFIRMATION_PROMPT_EVENT,
+                    "business_action": FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION,
+                    "payload": coerce_json_dict(next_interaction.get("payload")),
+                    "content": follow_up_prompt,
+                }
+                next_interrupt = interrupt_from_waiting_event(waiting_event, interaction=next_interaction)
+                context.side_effects.current_interrupt = next_interrupt
+        else:
+            context.side_effects.business_interaction_events.append(resolved_event)
+            if isinstance(content, str):
+                context.side_effects.business_interaction_assistant_content = content
+            await _publish_event(context, resolved_event)
+        return {
+            "assistant_content": content if isinstance(content, str) else None,
+            "current_interrupt": next_interrupt,
+            "post_write_effects": {},
+            "events": [
+                {
+                    "event": "agent_root_follow_up_confirmation_resolved",
+                    "case_public_id": case_public_id,
+                    "needs_retry": next_interrupt is not None,
+                }
+            ],
+        }
 
     async def _run_no_pending_confirmation(
         self,
@@ -2645,20 +3312,24 @@ class AgentRootRuntime:
             await _publish_event(runtime.context, event)
         return {
             "assistant_content": assistant_content,
-            "events": [{
-                "event": "agent_root_no_pending_confirmation_completed",
-                "has_assistant_content": True,
-            }],
+            "events": [
+                {
+                    "event": "agent_root_no_pending_confirmation_completed",
+                    "has_assistant_content": True,
+                }
+            ],
         }
 
     def _route_event(self, route: str, state: AgentRuntimeState) -> AgentRuntimeState:
         return {
             "route": route,
-            "events": [{
-                "event": "agent_root_route_selected",
-                "route": route,
-                "has_interrupt": bool(state.get("current_interrupt")),
-            }],
+            "events": [
+                {
+                    "event": "agent_root_route_selected",
+                    "route": route,
+                    "has_interrupt": bool(state.get("current_interrupt")),
+                }
+            ],
         }
 
     def _finish_turn(self, state: AgentRuntimeState) -> AgentRuntimeState:
@@ -2680,8 +3351,12 @@ def project_turn_output(
     action = state.get("application_action")
     if action == "pending_handled":
         return AgentRuntimeTurnOutput(
-            events=list(side_effects.pending_task_events),
-            assistant_content=side_effects.pending_task_assistant_content or _assistant_content_from_state(state),
+            events=[*side_effects.pending_task_events, *side_effects.business_interaction_events],
+            assistant_content=(
+                side_effects.business_interaction_assistant_content
+                or side_effects.pending_task_assistant_content
+                or _assistant_content_from_state(state)
+            ),
             switch_notice=side_effects.pending_task_switch_notice or _switch_notice_from_state(state),
         )
     if action == "execute_confirmed_task":
@@ -2690,15 +3365,21 @@ def project_turn_output(
                 *side_effects.pending_task_events,
                 *side_effects.confirmed_task_events,
                 *side_effects.customer_intelligence_events,
+                *side_effects.business_interaction_events,
             ],
-            assistant_content=side_effects.confirmed_task_assistant_content or _assistant_content_from_state(state),
+            assistant_content=(
+                side_effects.business_interaction_assistant_content
+                or side_effects.confirmed_task_assistant_content
+                or _assistant_content_from_state(state)
+            ),
             switch_notice=_switch_notice_from_state(state),
         )
     if action == "no_pending_confirmation":
         return AgentRuntimeTurnOutput(
-            events=list(side_effects.no_pending_confirmation_events),
+            events=[*side_effects.no_pending_confirmation_events, *side_effects.business_interaction_events],
             assistant_content=(
-                side_effects.no_pending_confirmation_assistant_content
+                side_effects.business_interaction_assistant_content
+                or side_effects.no_pending_confirmation_assistant_content
                 or _assistant_content_from_state(state)
             ),
             switch_notice=_switch_notice_from_state(state),
@@ -2708,9 +3389,11 @@ def project_turn_output(
             *side_effects.pending_task_events,
             *side_effects.new_flow_events,
             *side_effects.customer_intelligence_events,
+            *side_effects.business_interaction_events,
         ],
         assistant_content=(
-            side_effects.customer_intelligence_assistant_content
+            side_effects.business_interaction_assistant_content
+            or side_effects.customer_intelligence_assistant_content
             or side_effects.new_flow_assistant_content
             or _assistant_content_from_state(state)
         ),
@@ -2730,6 +3413,14 @@ def decide_application_action(state: AgentRuntimeState) -> AgentRuntimeApplicati
     if state.get("turn_kind") == "confirm" or _is_confirmation_text(state.get("content") or ""):
         return "no_pending_confirmation"
     return "run_new_flow"
+
+
+def _last_event_content(events: list[JSONDict]) -> str | None:
+    for event in reversed(events):
+        content = event.get("content")
+        if isinstance(content, str) and content:
+            return content
+    return None
 
 
 def _assistant_content_from_state(state: AgentRuntimeState) -> str | None:
@@ -2865,11 +3556,13 @@ def _customer_intelligence_output_events(result: object) -> list[JSONDict]:
     events = _customer_intelligence_trace_events(result)
     assistant_content = _customer_intelligence_assistant_content(result)
     if assistant_content:
-        events.append({
-            "event": "final",
-            "content": assistant_content,
-            "content_format": _customer_intelligence_content_format(result),
-        })
+        events.append(
+            {
+                "event": "final",
+                "content": assistant_content,
+                "content_format": _customer_intelligence_content_format(result),
+            }
+        )
     return events
 
 
@@ -2937,6 +3630,7 @@ def _customer_intelligence_interrupt_from_result(result: object) -> AgentInterru
     if review and review.get("status") == "required":
         return review
     return None
+
 
 def _is_customer_intelligence_resume(resume_payload: object) -> bool:
     payload = coerce_json_dict(resume_payload)
@@ -3108,13 +3802,23 @@ def _should_publish_deferred_new_flow_final(
     current_interrupt: AgentInterruptPayload | None,
     context: NewFlowSideEffectContext,
 ) -> bool:
-    if not events:
+    if not events or not _should_emit_new_flow_event({"event": "final"}, context):
         return False
-    if not _should_emit_new_flow_event({"event": "final"}, context):
+    # A final that expresses the already-selected interrupt may be emitted now.
+    # Ordinary finals are held until durable business-interaction arbitration.
+    return bool(current_interrupt) and not customer_intelligence_requested
+
+
+def _should_defer_new_flow_final_for_business_arbitration(
+    events: list[JSONDict],
+    *,
+    customer_intelligence_requested: bool,
+    current_interrupt: AgentInterruptPayload | None,
+    context: NewFlowSideEffectContext,
+) -> bool:
+    if not events or not _should_emit_new_flow_event({"event": "final"}, context):
         return False
-    if current_interrupt:
-        return True
-    return not customer_intelligence_requested
+    return not customer_intelligence_requested and current_interrupt is None
 
 
 def _task_action(task: object) -> str | None:
@@ -3280,11 +3984,7 @@ def _auto_execute_nodes_requiring_authorization(
     if isinstance(authorization, str) and authorization.strip():
         return ()
     return _auto_execute_nodes_with_blocked_reason(
-        tuple(
-            node
-            for node in nodes
-            if action_workflow.action_requires_user_authorization(node.action_type)
-        ),
+        tuple(node for node in nodes if action_workflow.action_requires_user_authorization(node.action_type)),
         "missing_authorization",
     )
 
@@ -3296,25 +3996,25 @@ def _auto_execute_nodes_blocked_by_execution_contract(
     for node in nodes:
         if node.task is not None:
             continue
-        reason = task_execution.action_execution_blocking_reason(
-            task_execution.execution_envelope_from_plan_node(node)
-        )
+        reason = task_execution.action_execution_blocking_reason(task_execution.execution_envelope_from_plan_node(node))
         if not reason:
             continue
-        blocked.append(action_plan.ActionPlanNode(
-            action_id=node.action_id,
-            action_type=node.action_type,
-            workflow=node.workflow,
-            payload=node.payload,
-            task=node.task,
-            task_id=node.task_id,
-            target_type=node.target_type,
-            target_id=node.target_id,
-            depends_on=node.depends_on,
-            parallel_group=node.parallel_group,
-            terminal=node.terminal,
-            blocked_reason=reason,
-        ))
+        blocked.append(
+            action_plan.ActionPlanNode(
+                action_id=node.action_id,
+                action_type=node.action_type,
+                workflow=node.workflow,
+                payload=node.payload,
+                task=node.task,
+                task_id=node.task_id,
+                target_type=node.target_type,
+                target_id=node.target_id,
+                depends_on=node.depends_on,
+                parallel_group=node.parallel_group,
+                terminal=node.terminal,
+                blocked_reason=reason,
+            )
+        )
     return tuple(blocked)
 
 
@@ -3323,11 +4023,7 @@ def _select_auto_execute_nodes_for_batch(
 ) -> tuple[action_plan.ActionPlanNode, ...]:
     if len(nodes) <= 1:
         return nodes
-    parallel_safe_nodes = tuple(
-        node
-        for node in nodes
-        if action_workflow.action_is_parallel_safe(node.action_type)
-    )
+    parallel_safe_nodes = tuple(node for node in nodes if action_workflow.action_is_parallel_safe(node.action_type))
     if len(parallel_safe_nodes) > 1:
         return parallel_safe_nodes
     return (nodes[0],)
@@ -3455,9 +4151,7 @@ def _auto_execute_node_branch_input(
 def _can_direct_execute_action_node(node: action_plan.ActionPlanNode) -> bool:
     if node.task is not None:
         return True
-    return task_execution.can_direct_execute_action_envelope(
-        task_execution.execution_envelope_from_plan_node(node)
-    )
+    return task_execution.can_direct_execute_action_envelope(task_execution.execution_envelope_from_plan_node(node))
 
 
 def _direct_action_success_content(action_type: object) -> str:
@@ -3478,10 +4172,7 @@ def _auto_execute_branch_completed(branch: object) -> bool:
         return True
     events = branch_json.get("events")
     if isinstance(events, list):
-        return any(
-            isinstance(event, dict) and event.get("event") == "task_completed"
-            for event in events
-        )
+        return any(isinstance(event, dict) and event.get("event") == "task_completed" for event in events)
     return False
 
 
@@ -3499,8 +4190,7 @@ def _auto_execute_branch_failed(branch: object) -> bool:
     events = branch_json.get("events")
     if isinstance(events, list):
         return any(
-            isinstance(event, dict) and event.get("event") in {"task_failed", "action_failed"}
-            for event in events
+            isinstance(event, dict) and event.get("event") in {"task_failed", "action_failed"} for event in events
         )
     return False
 
@@ -3687,11 +4377,7 @@ def _updated_suspended_candidates(
     if not suspended_candidate:
         return current_candidates
     suspended_id = suspended_candidate.get("id")
-    remaining = [
-        candidate
-        for candidate in current_candidates
-        if candidate.get("id") != suspended_id
-    ]
+    remaining = [candidate for candidate in current_candidates if candidate.get("id") != suspended_id]
     return [suspended_candidate, *remaining][:5]
 
 
@@ -3848,6 +4534,17 @@ def _interrupt_item_id(interrupt_item: object) -> str | None:
     return value if isinstance(value, str) else None
 
 
+def _is_follow_up_confirmation_resume(value: object) -> bool:
+    payload = coerce_json_dict(value)
+    metadata = coerce_json_dict(payload.get("metadata"))
+    return (
+        payload.get("interrupt_reason") == "follow_up_task_confirmation"
+        or payload.get("business_action") == FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION
+        or metadata.get("business_action") == FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION
+        or bool(metadata.get("follow_up_confirmation_case_public_id"))
+    )
+
+
 def _is_confirmation_text(content: str) -> bool:
     normalized = content.strip().lower()
     return normalized in {"是", "确认", "可以", "执行", "好的", "好", "yes", "y", "ok"}
@@ -3947,6 +4644,19 @@ def _interrupt_history_values(interrupts: object) -> list[JSONDict]:
         if interrupt_payload:
             projected.append(interrupt_payload)
     return projected
+
+
+def _follow_up_confirmation_case_public_id(
+    interrupt_payload: AgentInterruptPayload,
+) -> str | None:
+    if interrupt_payload.get("reason") != "follow_up_task_confirmation":
+        return None
+    interaction = coerce_json_dict(interrupt_payload.get("interaction"))
+    payload = coerce_json_dict(interaction.get("payload"))
+    case_public_id = payload.get("case_public_id")
+    if isinstance(case_public_id, str) and case_public_id.strip():
+        return case_public_id.strip()
+    return None
 
 
 def _structured_business_action_type_from_turn(turn_input: AgentTurnInput) -> str | None:

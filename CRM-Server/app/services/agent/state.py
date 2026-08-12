@@ -1101,6 +1101,12 @@ class ActionReviewRuntimeContext:
     low_risk_auto_execute_threshold: float = 0.92
 
 
+class AgentPostWriteEffects(TypedDict, total=False):
+    """Durable business effects emitted by any successful write path."""
+
+    follow_up_confirmation_case_public_ids: list[str]
+
+
 class AgentRuntimeState(TypedDict, total=False):
     """Serializable state owned by the LangGraph-native Agent root runtime."""
 
@@ -1123,6 +1129,7 @@ class AgentRuntimeState(TypedDict, total=False):
     guardrails: JSONDict
     tool_requests: list[JSONDict]
     tool_results: list[JSONDict]
+    post_write_effects: AgentPostWriteEffects
     resume_payload: AgentResumePayload
     pending_task_result: JSONDict
     new_flow_result: JSONDict
@@ -1137,6 +1144,9 @@ class AgentRuntimeState(TypedDict, total=False):
     fallback_reason: str
     assistant_content: Optional[str]
     switch_notice: Optional[str]
+    deferred_final_events: list[JSONDict]
+    follow_up_confirmation_projection_suppressed: bool
+    follow_up_confirmation_discard_reason: Optional[str]
     events: Annotated[list[JSONDict], merge_runtime_events]
 
 
@@ -1187,6 +1197,8 @@ class AgentRootRuntimeSideEffects:
     confirmed_task_assistant_content: str | None = None
     no_pending_confirmation_events: list[JSONDict] = field(default_factory=list)
     no_pending_confirmation_assistant_content: str | None = None
+    business_interaction_events: list[JSONDict] = field(default_factory=list)
+    business_interaction_assistant_content: str | None = None
     pending_task_graph_side_effects: PendingTaskGraphSideEffects | None = None
 
 
