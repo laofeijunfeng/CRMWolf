@@ -31,6 +31,7 @@ import CustomerFormDialog from '@/components/dialogs/CustomerFormDialog.vue'
 import CustomerTransferDialog from '@/components/dialogs/CustomerTransferDialog.vue'
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
 import CustomerDetailSheet from './CustomerDetailSheet.vue'
+import CustomerOpportunityHoverCard from '@/components/customer/CustomerOpportunityHoverCard.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import customerApi, {
   type CustomerResponse,
@@ -71,14 +72,34 @@ const showCustomerForm = ref(false)
 const editingCustomerId = ref<string | null>(null)
 
 const selectedCustomerId = ref<string | null>(null)
+const targetOpportunityId = ref<string | null>(null)
+const targetCustomerDetailPanel = ref<'opportunities' | null>(null)
+
 const openCustomerDetail = (customerId: string): void => {
+  targetOpportunityId.value = null
+  targetCustomerDetailPanel.value = null
   selectedCustomerId.value = customerId
 }
+
+const openCustomerOpportunity = (customerId: string, opportunityId: string): void => {
+  targetOpportunityId.value = opportunityId
+  targetCustomerDetailPanel.value = 'opportunities'
+  selectedCustomerId.value = customerId
+}
+
+const openCustomerOpportunities = (customerId: string): void => {
+  targetOpportunityId.value = null
+  targetCustomerDetailPanel.value = 'opportunities'
+  selectedCustomerId.value = customerId
+}
+
 const sheetVisible = computed({
   get: () => selectedCustomerId.value !== null,
   set: (visible: boolean) => {
     if (!visible) {
       selectedCustomerId.value = null
+      targetOpportunityId.value = null
+      targetCustomerDetailPanel.value = null
     }
   }
 })
@@ -892,9 +913,18 @@ watchEffect(() => {
 
       <!-- 客户名称 -->
       <template #cell-account_name="{ row }">
-        <span class="link-text" @click.stop="handleViewDetail(row)">
-          {{ row.account_name }}
-        </span>
+        <CustomerOpportunityHoverCard
+          :customer-id="row.id"
+          :customer-name="row.account_name"
+          @select-opportunity="openCustomerOpportunity(row.id, $event)"
+          @view-all="openCustomerOpportunities(row.id)"
+        >
+          <template #trigger>
+            <span class="link-text" data-testid="customer-opportunity-trigger" @click.stop="openCustomerDetail(row.id)">
+              {{ row.account_name }}
+            </span>
+          </template>
+        </CustomerOpportunityHoverCard>
       </template>
 
       <!-- 行业：有二级行业时只显示二级（解析 name 中的 "/"），否则显示完整路径 -->
@@ -1113,6 +1143,8 @@ watchEffect(() => {
     <CustomerDetailSheet
       v-model:visible="sheetVisible"
       :customer-id="selectedCustomerId ?? null"
+      :target-opportunity-id="targetOpportunityId"
+      :target-panel="targetCustomerDetailPanel"
       @refresh="handleSheetRefresh"
       @view-customer="openCustomerDetail"
     />

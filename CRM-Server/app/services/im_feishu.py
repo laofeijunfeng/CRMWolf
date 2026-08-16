@@ -1,4 +1,5 @@
 """Feishu bot adapter for IM Agent messages."""
+
 import base64
 from dataclasses import dataclass
 import hashlib
@@ -19,6 +20,10 @@ from app.models.oauth import OAuthProviderConfig
 from app.schemas.agent import AgentSessionCreate
 from app.services.agent import agent_copy
 from app.services.agent.task_factory import WAITING_TASK_EVENT_TYPES
+from app.services.follow_up_task_confirmation_channel_service import (
+    FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION,
+    follow_up_task_confirmation_channel_service,
+)
 from app.services.im_agent_gateway import im_agent_gateway
 
 
@@ -30,6 +35,14 @@ class IMReplyBinding:
     agent_session_id: Optional[int] = None
     agent_task_id: Optional[int] = None
     agent_interaction_type: Optional[str] = None
+    confirmation_delivery_public_id: Optional[str] = None
+    confirmation_case_public_id: Optional[str] = None
+    agent_interaction_id: Optional[str] = None
+    prompt_delivery_key: Optional[str] = None
+
+    @property
+    def is_follow_up_confirmation(self) -> bool:
+        return bool(self.confirmation_delivery_public_id and self.confirmation_case_public_id)
 
 
 @dataclass(frozen=True)
@@ -70,13 +83,17 @@ class FeishuBotService:
             header.get("event_type"),
             app_id,
         )
-        integration_config = encrypted_config or (oauth_provider_config_crud.get_by_app_id(db, IMBotProvider.FEISHU, app_id) if app_id else None)
+        integration_config = encrypted_config or (
+            oauth_provider_config_crud.get_by_app_id(db, IMBotProvider.FEISHU, app_id) if app_id else None
+        )
         if not integration_config:
             raise FeishuBotEventError("未找到匹配的飞书第三方集成配置")
         if app_id and integration_config.app_id and app_id != integration_config.app_id:
             raise FeishuBotEventError("飞书事件 App ID 与第三方集成配置不匹配")
         if not integration_config.bot_enabled:
-            logger.info("飞书机器人未启用，跳过事件: event_id=%s team_id=%s", header.get("event_id"), integration_config.team_id)
+            logger.info(
+                "飞书机器人未启用，跳过事件: event_id=%s team_id=%s", header.get("event_id"), integration_config.team_id
+            )
             return {"message": "bot disabled"}
         payload_token = payload.get("token") or header.get("token")
         if integration_config.bot_verification_token and payload_token != integration_config.bot_verification_token:
@@ -102,6 +119,7 @@ class FeishuBotService:
         if duplicate:
             return {"message": "duplicate"}
 
+        failure_persisted = False
         try:
             im_inbound_event_crud.mark_status(db, inbound_event, IMInboundEventStatus.PROCESSING)
             delivery = IMReplyDelivery(reply_to_message_id=message_id, text=None)
@@ -110,30 +128,80 @@ class FeishuBotService:
             else:
                 delivery = await self._handle_message_event(db, integration_config, event)
             response_message_id = None
+            binding = delivery.binding if delivery.text and delivery.reply_to_message_id else None
             if delivery.text and delivery.reply_to_message_id:
-                response_message_id = await self.reply_text(db, integration_config, delivery.reply_to_message_id, delivery.text)
-            binding = delivery.binding if response_message_id else None
+                try:
+                    response_message_id = await self.reply_text(
+                        db, integration_config, delivery.reply_to_message_id, delivery.text
+                    )
+                except Exception as send_exc:
+                    db.rollback()
+                    if binding and binding.confirmation_delivery_public_id:
+                        follow_up_task_confirmation_channel_service.acknowledge_im_provider_failed(
+                            db,
+                            team_id=integration_config.team_id,
+                            delivery_public_id=binding.confirmation_delivery_public_id,
+                            error_message=str(send_exc),
+                            commit=False,
+                        )
+                    im_inbound_event_crud.mark_status(
+                        db,
+                        inbound_event,
+                        IMInboundEventStatus.FAILED,
+                        error_message=str(send_exc),
+                        commit=False,
+                    )
+                    db.commit()
+                    failure_persisted = True
+                    raise
+
+            persisted_binding = binding if response_message_id else None
+            if response_message_id and persisted_binding and persisted_binding.confirmation_delivery_public_id:
+                acknowledged = follow_up_task_confirmation_channel_service.acknowledge_im_provider_visible(
+                    db,
+                    team_id=integration_config.team_id,
+                    delivery_public_id=persisted_binding.confirmation_delivery_public_id,
+                    provider_message_id=response_message_id,
+                    commit=False,
+                )
+                if acknowledged is None or acknowledged.provider_message_id != response_message_id:
+                    db.rollback()
+                    raise FeishuBotEventError("确认提示未能绑定到飞书可见消息")
             im_inbound_event_crud.mark_status(
                 db,
                 inbound_event,
                 IMInboundEventStatus.PROCESSED,
                 response_message_id=response_message_id,
-                agent_session_id=binding.agent_session_id if binding else None,
-                agent_task_id=binding.agent_task_id if binding else None,
-                agent_interaction_type=binding.agent_interaction_type if binding else None,
+                agent_session_id=persisted_binding.agent_session_id if persisted_binding else None,
+                agent_task_id=persisted_binding.agent_task_id if persisted_binding else None,
+                agent_interaction_type=persisted_binding.agent_interaction_type if persisted_binding else None,
+                confirmation_delivery_public_id=(
+                    persisted_binding.confirmation_delivery_public_id if persisted_binding else None
+                ),
+                confirmation_case_public_id=(
+                    persisted_binding.confirmation_case_public_id if persisted_binding else None
+                ),
+                agent_interaction_id=persisted_binding.agent_interaction_id if persisted_binding else None,
+                prompt_delivery_key=persisted_binding.prompt_delivery_key if persisted_binding else None,
+                commit=False,
             )
+            db.commit()
             return {"message": "processed"}
         except Exception as exc:
             logger.exception("飞书机器人事件处理失败: %s", exc)
-            im_inbound_event_crud.mark_status(
-                db,
-                inbound_event,
-                IMInboundEventStatus.FAILED,
-                error_message=str(exc),
-            )
+            if not failure_persisted:
+                db.rollback()
+                im_inbound_event_crud.mark_status(
+                    db,
+                    inbound_event,
+                    IMInboundEventStatus.FAILED,
+                    error_message=str(exc),
+                )
             raise
 
-    async def _handle_message_event(self, db: Session, integration_config: OAuthProviderConfig, event: Dict[str, Any]) -> IMReplyDelivery:
+    async def _handle_message_event(
+        self, db: Session, integration_config: OAuthProviderConfig, event: Dict[str, Any]
+    ) -> IMReplyDelivery:
         message = event.get("message") or {}
         message_id = message.get("message_id")
         message_type = message.get("message_type")
@@ -158,7 +226,7 @@ class FeishuBotService:
             )
             return IMReplyDelivery(message_id, None)
 
-        sender_id = ((event.get("sender") or {}).get("sender_id") or {})
+        sender_id = (event.get("sender") or {}).get("sender_id") or {}
         open_id = sender_id.get("open_id")
         if not open_id:
             logger.info("飞书消息缺少发送人 open_id: message_id=%s sender_id=%s", message.get("message_id"), sender_id)
@@ -245,7 +313,9 @@ class FeishuBotService:
         reaction = event.get("reaction") or event
         operator = reaction.get("operator") or event.get("operator") or {}
         operator_type = operator.get("operator_type") or event.get("operator_type")
-        emoji_type = (((reaction.get("reaction_type") or event.get("reaction_type") or {}).get("emoji_type")) or "").strip()
+        emoji_type = (
+            ((reaction.get("reaction_type") or event.get("reaction_type") or {}).get("emoji_type")) or ""
+        ).strip()
         logger.info(
             "处理飞书消息表情事件: message_id=%s emoji_type=%s operator_type=%s",
             message_id,
@@ -257,7 +327,9 @@ class FeishuBotService:
         if not im_agent_gateway.intent_from_emoji(emoji_type):
             return IMReplyDelivery(None, None)
 
-        operator_id = self._extract_operator_open_id(operator) or self._extract_operator_open_id(event.get("user_id") or {})
+        operator_id = self._extract_operator_open_id(operator) or self._extract_operator_open_id(
+            event.get("user_id") or {}
+        )
         if not operator_id:
             logger.info(
                 "飞书消息表情事件缺少用户 open_id: message_id=%s operator=%s user_id=%s",
@@ -266,7 +338,9 @@ class FeishuBotService:
                 event.get("user_id"),
             )
             return IMReplyDelivery(None, None)
-        account = user_oauth_account_crud.get_by_open_id(db, integration_config.team_id, IMBotProvider.FEISHU, operator_id)
+        account = user_oauth_account_crud.get_by_open_id(
+            db, integration_config.team_id, IMBotProvider.FEISHU, operator_id
+        )
         if not account:
             logger.info("飞书消息表情操作人未绑定 CRM 账号: message_id=%s operator_open_id=%s", message_id, operator_id)
             return IMReplyDelivery(message_id, agent_copy.im_account_not_bound("飞书"))
@@ -283,7 +357,9 @@ class FeishuBotService:
             return IMReplyDelivery(None, None)
         return IMReplyDelivery(message_id, self._render_im_reply(result), self._extract_reply_binding(result))
 
-    async def reply_text(self, db: Session, integration_config: OAuthProviderConfig, message_id: str, text: str) -> Optional[str]:
+    async def reply_text(
+        self, db: Session, integration_config: OAuthProviderConfig, message_id: str, text: str
+    ) -> Optional[str]:
         secret = oauth_provider_config_crud.get_secret(integration_config)
         if not integration_config.app_id or not secret:
             raise FeishuBotEventError("机器人 app_id 或 app_secret 未配置")
@@ -305,8 +381,12 @@ class FeishuBotService:
             data = response.json()
         if data.get("code") != 0:
             raise FeishuBotEventError(data.get("msg") or "飞书回复消息失败")
-        logger.info("飞书机器人回复成功: message_id=%s response_message_id=%s", message_id, ((data.get("data") or {}).get("message_id")))
-        return ((data.get("data") or {}).get("message_id"))
+        logger.info(
+            "飞书机器人回复成功: message_id=%s response_message_id=%s",
+            message_id,
+            ((data.get("data") or {}).get("message_id")),
+        )
+        return (data.get("data") or {}).get("message_id")
 
     async def add_message_reaction(
         self,
@@ -337,7 +417,7 @@ class FeishuBotService:
             data = response.json()
         if data.get("code") != 0:
             raise FeishuBotEventError(data.get("msg") or "飞书添加消息表情失败")
-        reaction_id = ((data.get("data") or {}).get("reaction_id"))
+        reaction_id = (data.get("data") or {}).get("reaction_id")
         logger.info(
             "飞书机器人添加消息表情成功: message_id=%s emoji_type=%s reaction_id=%s",
             message_id,
@@ -374,13 +454,15 @@ class FeishuBotService:
             return None
         data = response.json()
         if data.get("code") != 0:
-            logger.warning("获取飞书引用消息失败: message_id=%s code=%s msg=%s", message_id, data.get("code"), data.get("msg"))
+            logger.warning(
+                "获取飞书引用消息失败: message_id=%s code=%s msg=%s", message_id, data.get("code"), data.get("msg")
+            )
             return None
-        items = ((data.get("data") or {}).get("items") or [])
+        items = (data.get("data") or {}).get("items") or []
         if not items:
             return None
         item = items[0]
-        raw_content = ((item.get("body") or {}).get("content") or "{}")
+        raw_content = (item.get("body") or {}).get("content") or "{}"
         return self._extract_content_text(raw_content, item.get("msg_type"), item.get("mentions") or [])
 
     def _resolve_url_verification_config(
@@ -468,7 +550,7 @@ class FeishuBotService:
         )
 
     def _extract_post_text(self, content: Dict[str, Any]) -> str:
-        zh_cn = (content.get("zh_cn") or {})
+        zh_cn = content.get("zh_cn") or {}
         post_content = zh_cn.get("content") or []
         parts = []
         for line in post_content:
@@ -479,7 +561,9 @@ class FeishuBotService:
                     parts.append(str(node["text"]))
         return "\n".join(parts).strip()
 
-    async def _build_agent_content(self, integration_config: OAuthProviderConfig, message: Dict[str, Any], content: str) -> str:
+    async def _build_agent_content(
+        self, integration_config: OAuthProviderConfig, message: Dict[str, Any], content: str
+    ) -> str:
         root_id = message.get("root_id") or message.get("parent_id")
         if not root_id:
             return content
@@ -528,10 +612,43 @@ class FeishuBotService:
     def _extract_reply_binding(self, result: Dict[str, Any]) -> IMReplyBinding:
         session = result.get("session") or {}
         agent_session_id = self._safe_int(session.get("session_id"))
+        interactions: list[dict[str, Any]] = []
+        top_level_interaction = result.get("interaction")
+        if isinstance(top_level_interaction, dict):
+            interactions.append(top_level_interaction)
         waiting_event = None
         for event in result.get("events") or []:
+            if not isinstance(event, dict):
+                continue
+            event_interaction = event.get("interaction")
+            if isinstance(event_interaction, dict):
+                interactions.append(event_interaction)
             if event.get("event") in WAITING_TASK_EVENT_TYPES and event.get("task_id"):
                 waiting_event = event
+
+        for interaction in interactions:
+            if interaction.get("business_action") != FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION:
+                continue
+            payload = interaction.get("payload") if isinstance(interaction.get("payload"), dict) else {}
+            case = payload.get("case") if isinstance(payload.get("case"), dict) else {}
+            case_public_id = self._clean_string(
+                payload.get("case_public_id") or case.get("public_id") or case.get("id")
+            )
+            delivery_public_id = self._clean_string(
+                payload.get("confirmation_delivery_public_id") or payload.get("delivery_public_id")
+            )
+            prompt_delivery_key = self._clean_string(payload.get("prompt_delivery_key"))
+            interaction_id = self._clean_string(interaction.get("interaction_id") or payload.get("interaction_id"))
+            if case_public_id and delivery_public_id:
+                return IMReplyBinding(
+                    agent_session_id=agent_session_id,
+                    agent_interaction_type=str(interaction.get("type") or "choice"),
+                    confirmation_delivery_public_id=delivery_public_id,
+                    confirmation_case_public_id=case_public_id,
+                    agent_interaction_id=interaction_id,
+                    prompt_delivery_key=prompt_delivery_key,
+                )
+
         if not waiting_event:
             return IMReplyBinding(agent_session_id=agent_session_id)
         return IMReplyBinding(
@@ -539,6 +656,13 @@ class FeishuBotService:
             agent_task_id=self._safe_int(waiting_event.get("task_id")),
             agent_interaction_type=waiting_event.get("event"),
         )
+
+    @staticmethod
+    def _clean_string(value: Any) -> Optional[str]:
+        if not isinstance(value, str):
+            return None
+        cleaned = value.strip()
+        return cleaned or None
 
     def _safe_int(self, value: Any) -> Optional[int]:
         if value is None:

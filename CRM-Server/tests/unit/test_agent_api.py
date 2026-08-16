@@ -27,7 +27,12 @@ from app.models.agent import (
 )
 from app.models.customer import Customer
 from app.models.customer_activity import CustomerActivity
+from app.models.customer_intelligence_run import CustomerIntelligenceRun, CustomerIntelligenceRunStatus
 from app.models.customer_vector_document import CustomerVectorDocument
+from app.models.agent_async_operation import AgentAsyncOperation, AgentAsyncOperationEvent
+from app.models.agent_confirmed_application_step import AgentConfirmedApplicationStep
+from app.models.agent_pending_application_step import AgentPendingApplicationStep
+from app.models.agent_pending_interrupt_projection import AgentPendingInterruptProjection
 from app.models.sales_commitment import (
     FollowUpTask,
     FollowUpTaskConfirmationCase,
@@ -78,6 +83,9 @@ def _build_client(monkeypatch):
         Customer.__table__,
         CustomerActivity.__table__,
         CustomerVectorDocument.__table__,
+        CustomerIntelligenceRun.__table__,
+        AgentAsyncOperation.__table__,
+        AgentAsyncOperationEvent.__table__,
         SalesCommitment.__table__,
         FollowUpTask.__table__,
         FollowUpTaskEvent.__table__,
@@ -90,6 +98,9 @@ def _build_client(monkeypatch):
         AgentToolCall.__table__,
         AgentIdempotencyKey.__table__,
         AgentWorkflowAction.__table__,
+        AgentConfirmedApplicationStep.__table__,
+        AgentPendingApplicationStep.__table__,
+        AgentPendingInterruptProjection.__table__,
     ]
     Base.metadata.create_all(engine, tables=tables)
     Session = sessionmaker(bind=engine)
@@ -1006,6 +1017,322 @@ async def test_agent_application_uses_streamed_final_as_assistant_content(monkey
             )
             assert persisted_assistant is not None
             assert persisted_assistant.payload_json["content_format"] == "markdown"
+        finally:
+            db.close()
+    finally:
+        engine.dispose()
+
+
+async def test_agent_application_projects_schedule_intent_and_kicks_only_after_message_commit(monkeypatch):
+    class FakeEventService:
+        def from_dict(self, payload):
+            assert payload == {"event_key": "intent-event"}
+            return SimpleNamespace(
+                event_key="intent-event",
+                trigger_type="customer_activity_created",
+                team_id=1,
+                tenant_id=1,
+                customer_id=88,
+            )
+
+    class FakeCustomerIntelligenceService:
+        def __init__(self):
+            self.event_service = FakeEventService()
+            self.calls = []
+            self.kick_calls = []
+            self.Session = None
+
+        def enqueue_committed_event_refresh(self, db, *, event, scope):
+            self.calls.append(("enqueue", event.event_key, scope))
+            return SimpleNamespace(request_id="business-event-customer_activity_created-intent")
+
+        def bind_committed_events_to_agent(self, db, *, team_id, request_ids, binding):
+            self.calls.append(("bind", team_id, tuple(request_ids), binding))
+            return (
+                SimpleNamespace(
+                    request_id=request_ids[0],
+                    kick_required=True,
+                ),
+            )
+
+        def kick_committed_event_refresh(self, request):
+            check_db = self.Session()
+            try:
+                binding = self.calls[-1][3]
+                persisted = check_db.query(AgentMessage).filter(
+                    AgentMessage.id == binding.source_assistant_message_id,
+                    AgentMessage.role == AgentMessageRole.ASSISTANT,
+                ).one_or_none()
+                assert persisted is not None, "kick must happen only after assistant message commit"
+            finally:
+                check_db.close()
+            self.kick_calls.append(request.request_id)
+
+    class FakeRootRuntime:
+        async def run_turn(self, *, context, **kwargs):
+            if context.event_sink:
+                await context.event_sink({
+                    "event": "final",
+                    "content": "客户跟进记录已创建。",
+                    "content_format": "text",
+                })
+            return {
+                "application_action": "run_new_flow",
+                "assistant_content": "客户跟进记录已创建。",
+                "customer_intelligence_schedule_intent": {
+                    "scope": "brief",
+                    "event": {"event_key": "intent-event"},
+                },
+            }
+
+    fake_service = FakeCustomerIntelligenceService()
+    monkeypatch.setattr(agent_api.agent_application_module, "agent_root_runtime", FakeRootRuntime())
+    monkeypatch.setattr(
+        agent_api.agent_application_service,
+        "customer_intelligence_service",
+        fake_service,
+    )
+    client, engine = _build_client(monkeypatch)
+    Session = sessionmaker(bind=engine)
+    fake_service.Session = Session
+    monkeypatch.setattr(agent_api.agent_application_module, "SessionLocal", lambda: Session())
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "调度 intent 投影"}).json()
+        events = []
+        async for event in agent_api.agent_application_service.stream_chat_events(
+            content="今天已给客户反馈数据分类分级表",
+            team_id=1,
+            user_id=2,
+            authorization="Bearer test-token",
+            session_id=session["id"],
+        ):
+            events.append(event)
+
+        user_message_id = next(
+            event["message_id"]
+            for event in events
+            if event.get("event") == "message" and event.get("role") == "USER"
+        )
+        assistant_message_id = next(
+            event["message_id"]
+            for event in events
+            if event.get("event") == "message" and event.get("role") == "ASSISTANT"
+        )
+        assert fake_service.calls[0] == ("enqueue", "intent-event", "brief")
+        _, team_id, request_ids, binding = fake_service.calls[1]
+        assert team_id == 1
+        assert request_ids == ("business-event-customer_activity_created-intent",)
+        assert binding.session_id == session["id"]
+        assert binding.source_user_message_id == user_message_id
+        assert binding.source_assistant_message_id == assistant_message_id
+        assert fake_service.kick_calls == ["business-event-customer_activity_created-intent"]
+    finally:
+        engine.dispose()
+
+
+async def test_agent_application_keeps_assistant_visible_when_customer_intelligence_projection_fails(monkeypatch):
+    class FakeEventService:
+        def from_dict(self, payload):
+            return SimpleNamespace(
+                event_key="broken-intent-event",
+                trigger_type="customer_activity_created",
+                team_id=1,
+                tenant_id=1,
+                customer_id=88,
+            )
+
+    class FailingCustomerIntelligenceService:
+        event_service = FakeEventService()
+
+        def enqueue_committed_event_refresh(self, db, *, event, scope):
+            raise RuntimeError("projection boom")
+
+        def bind_committed_events_to_agent(self, *args, **kwargs):
+            raise AssertionError("failed enqueue must not bind")
+
+        def kick_committed_event_refresh(self, request):
+            raise AssertionError("failed projection must not kick")
+
+    class FakeRootRuntime:
+        async def run_turn(self, *, context, **kwargs):
+            if context.event_sink:
+                await context.event_sink({
+                    "event": "final",
+                    "content": "客户跟进记录已创建。",
+                    "content_format": "text",
+                })
+            return {
+                "application_action": "run_new_flow",
+                "assistant_content": "客户跟进记录已创建。",
+                "customer_intelligence_schedule_intent": {
+                    "scope": "brief",
+                    "event": {"event_key": "broken-intent-event"},
+                },
+            }
+
+    monkeypatch.setattr(agent_api.agent_application_module, "agent_root_runtime", FakeRootRuntime())
+    monkeypatch.setattr(
+        agent_api.agent_application_service,
+        "customer_intelligence_service",
+        FailingCustomerIntelligenceService(),
+    )
+    client, engine = _build_client(monkeypatch)
+    Session = sessionmaker(bind=engine)
+    monkeypatch.setattr(agent_api.agent_application_module, "SessionLocal", lambda: Session())
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "投影失败隔离"}).json()
+        events = []
+        async for event in agent_api.agent_application_service.stream_chat_events(
+            content="今天已给客户反馈数据分类分级表",
+            team_id=1,
+            user_id=2,
+            authorization="Bearer test-token",
+            session_id=session["id"],
+        ):
+            events.append(event)
+
+        assistant_message_id = next(
+            event["message_id"]
+            for event in events
+            if event.get("event") == "message" and event.get("role") == "ASSISTANT"
+        )
+        db = Session()
+        try:
+            message = db.query(AgentMessage).filter(AgentMessage.id == assistant_message_id).one()
+            assert message.content == "客户跟进记录已创建。"
+            assert any(
+                event.get("event") == "agent_customer_intelligence_projection_failed"
+                and "projection boom" in str(event.get("reason"))
+                for event in message.payload_json["trace_events"]
+            )
+        finally:
+            db.close()
+    finally:
+        engine.dispose()
+
+
+async def test_agent_application_late_binds_customer_intelligence_to_exact_assistant_message(monkeypatch):
+    request_id = "business-event-customer_activity_created-exactturn123456"
+
+    class FakeRootRuntime:
+        async def run_turn(self, *, context, **kwargs):
+            if context.event_sink:
+                await context.event_sink({
+                    "event": "final",
+                    "content": "客户跟进记录已创建。",
+                    "content_format": "text",
+                })
+            return {
+                "application_action": "run_new_flow",
+                "assistant_content": "客户跟进记录已创建。",
+                "customer_intelligence_requests": [
+                    {
+                        "request_id": request_id,
+                        "scope": "brief",
+                        "event": {"event_key": "exact-turn-event"},
+                        "bound": True,
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(agent_api.agent_application_module, "agent_root_runtime", FakeRootRuntime())
+    monkeypatch.setattr(
+        agent_api.agent_application_service.customer_intelligence_service,
+        "kick_committed_event_refresh",
+        lambda request: (_ for _ in ()).throw(
+            AssertionError("terminal customer-intelligence replay must not kick")
+        ),
+    )
+    client, engine = _build_client(monkeypatch)
+    Session = sessionmaker(bind=engine)
+    monkeypatch.setattr(agent_api.agent_application_module, "SessionLocal", lambda: Session())
+    db = Session()
+    try:
+        customer = Customer(
+            team_id=1,
+            account_name="精确消息绑定客户",
+            city="深圳",
+            creator_id="2",
+        )
+        db.add(customer)
+        db.flush()
+        db.add(
+            CustomerIntelligenceRun(
+                run_key="customer-intelligence:exact-turn-event",
+                request_id=request_id,
+                event_key="exact-turn-event",
+                tenant_id=1,
+                team_id=1,
+                customer_id=customer.id,
+                trigger_type="customer_activity_created",
+                scope="brief",
+                status=CustomerIntelligenceRunStatus.SUCCESS,
+                attempt_count=1,
+                max_attempts=3,
+                event_json={
+                    "event_key": "exact-turn-event",
+                    "trigger_type": "customer_activity_created",
+                    "tenant_id": 1,
+                    "team_id": 1,
+                    "customer_id": customer.id,
+                    "occurred_at": "2026-08-13T09:00:00",
+                    "source": {
+                        "source_type": "customer_activity",
+                        "source_object_id": "212",
+                        "business_object_type": "customer_activity",
+                        "business_object_id": "212",
+                    },
+                    "summary": "客户跟进记录",
+                    "payload": {"activity_revision": 1},
+                    "actor_id": "2",
+                },
+                result_json={"route": "refresh_brief"},
+                visible_trace_json=[
+                    {
+                        "title": "提炼客户事实",
+                        "content": "提炼出 6 条可沉淀事实，1 条需复核事实",
+                    }
+                ],
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "精确消息绑定"}).json()
+        events = []
+        async for event in agent_api.agent_application_service.stream_chat_events(
+            content="今天已给客户反馈数据分类分级表",
+            team_id=1,
+            user_id=2,
+            authorization="Bearer test-token",
+            session_id=session["id"],
+        ):
+            events.append(event)
+
+        user_message_id = next(
+            event["message_id"]
+            for event in events
+            if event.get("event") == "message" and event.get("role") == "USER"
+        )
+        assistant_message_id = next(
+            event["message_id"]
+            for event in events
+            if event.get("event") == "message" and event.get("role") == "ASSISTANT"
+        )
+
+        db = Session()
+        try:
+            operation = db.query(AgentAsyncOperation).filter(
+                AgentAsyncOperation.team_id == 1,
+                AgentAsyncOperation.request_id == request_id,
+            ).one()
+            assert operation.session_id == session["id"]
+            assert operation.source_user_message_id == user_message_id
+            assert operation.source_assistant_message_id == assistant_message_id
+            assert operation.status == "SUCCEEDED"
+            assert operation.summary == "客户档案后台更新"
         finally:
             db.close()
     finally:
@@ -2396,7 +2723,6 @@ def test_agent_stream_defers_follow_up_next_task_until_after_follow_up_created(m
         assert "要不要我继续帮你补齐商机信息" in confirm_response.text
         assert '"next_task_id": 2' in confirm_response.text
         assert '"interaction":' in confirm_response.text
-
         yes_response = client.post(
             "/v1/agent/chat/stream",
             json={"session_id": session["id"], "content": "是"},

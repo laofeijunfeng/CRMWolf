@@ -10,9 +10,14 @@ import { cn } from '@/lib/utils'
 type Side = 'top' | 'right' | 'bottom' | 'left'
 type Align = 'start' | 'center' | 'end'
 
+const emit = defineEmits<{
+  'update:open': [open: boolean]
+}>()
+
 const props = withDefaults(defineProps<{
   side?: Side
   align?: Align
+  open?: boolean
   openDelay?: number
   closeDelay?: number
   contentClass?: HTMLAttributes['class']
@@ -26,7 +31,7 @@ const props = withDefaults(defineProps<{
 </script>
 
 <template>
-  <HoverCard :open-delay="props.openDelay" :close-delay="props.closeDelay">
+  <HoverCard :open="props.open" :open-delay="props.openDelay" :close-delay="props.closeDelay" @update:open="emit('update:open', $event)">
     <HoverCardTrigger as-child>
       <slot name="trigger" />
     </HoverCardTrigger>

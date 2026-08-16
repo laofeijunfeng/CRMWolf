@@ -34,6 +34,8 @@ class CustomerIntelligenceRun(Base):
     max_attempts = Column(Integer, nullable=False, default=3, comment="最大尝试次数")
     last_duration_ms = Column(Integer, nullable=True, comment="最近一次运行耗时毫秒")
     next_retry_at = Column(DateTime, nullable=True, index=True, comment="下次可重试时间")
+    lease_token = Column(String(64), nullable=True, index=True, comment="当前执行租约令牌")
+    lease_expires_at = Column(DateTime, nullable=True, index=True, comment="当前执行租约过期时间")
     started_time = Column(DateTime, nullable=True, index=True, comment="开始时间")
     finished_time = Column(DateTime, nullable=True, index=True, comment="结束时间")
     route = Column(String(50), nullable=True, index=True, comment="Graph 路由")
@@ -46,7 +48,7 @@ class CustomerIntelligenceRun(Base):
     __table_args__ = (
         UniqueConstraint("run_key", name="uq_customer_intelligence_run_key"),
         Index("idx_customer_intelligence_run_customer", "team_id", "customer_id", "created_time"),
-        Index("idx_customer_intelligence_run_retry", "status", "next_retry_at"),
+        Index("idx_customer_intelligence_run_retry", "status", "next_retry_at", "lease_expires_at"),
         Index("idx_customer_intelligence_run_event", "team_id", "event_key"),
         {"comment": "客户智能 LangGraph 运行审计表"},
     )

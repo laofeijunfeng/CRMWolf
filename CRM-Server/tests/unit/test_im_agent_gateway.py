@@ -49,24 +49,16 @@ async def test_im_gateway_text_confirmation_uses_referenced_response_session(mon
     monkeypatch.setattr(
         gateway_module.im_inbound_event_crud,
         "get_by_response_message_id",
-        lambda *args, **kwargs: SimpleNamespace(raw_event={"message": {"chat_id": "chat_1", "thread_id": ""}}),
-    )
-    monkeypatch.setattr(
-        gateway_module.agent_channel_session_crud,
-        "get_by_scope",
-        lambda *args, **kwargs: SimpleNamespace(agent_session_id=9),
+        lambda *args, **kwargs: SimpleNamespace(agent_session_id=9, agent_task_id=1),
     )
     monkeypatch.setattr(
         gateway_module.agent_task_crud,
-        "get_latest_waiting",
+        "get_by_id",
         lambda *args, **kwargs: SimpleNamespace(
             id=1,
+            session_id=9,
             status=AgentTaskStatus.WAITING_USER,
-            state_json={"action": "create_customer_activity"},
-            created_time=None,
-        )
-        if kwargs.get("session_id") == 9
-        else None,
+        ),
     )
 
     async def fake_handle_message(**kwargs):
@@ -76,7 +68,7 @@ async def test_im_gateway_text_confirmation_uses_referenced_response_session(mon
     monkeypatch.setattr(gateway_module.agent_im_conversation_service, "handle_message", fake_handle_message)
 
     result = await gateway.handle_text(
-        None,
+        object(),
         team_id=1,
         user_id=2,
         provider="feishu",
@@ -102,24 +94,16 @@ async def test_im_gateway_field_supplement_uses_referenced_pending_session(monke
     monkeypatch.setattr(
         gateway_module.im_inbound_event_crud,
         "get_by_response_message_id",
-        lambda *args, **kwargs: SimpleNamespace(raw_event={"message": {"chat_id": "chat_1", "thread_id": ""}}),
-    )
-    monkeypatch.setattr(
-        gateway_module.agent_channel_session_crud,
-        "get_by_scope",
-        lambda *args, **kwargs: SimpleNamespace(agent_session_id=9),
+        lambda *args, **kwargs: SimpleNamespace(agent_session_id=9, agent_task_id=1),
     )
     monkeypatch.setattr(
         gateway_module.agent_task_crud,
-        "get_latest_waiting",
+        "get_by_id",
         lambda *args, **kwargs: SimpleNamespace(
             id=1,
+            session_id=9,
             status=AgentTaskStatus.WAITING_USER,
-            state_json={"action": "collect_opportunity_fields"},
-            created_time=None,
-        )
-        if kwargs.get("session_id") == 9
-        else None,
+        ),
     )
 
     async def fake_handle_message(**kwargs):
@@ -129,7 +113,7 @@ async def test_im_gateway_field_supplement_uses_referenced_pending_session(monke
     monkeypatch.setattr(gateway_module.agent_im_conversation_service, "handle_message", fake_handle_message)
 
     result = await gateway.handle_text(
-        None,
+        object(),
         team_id=1,
         user_id=2,
         provider="feishu",
@@ -150,33 +134,11 @@ async def test_im_gateway_field_supplement_uses_referenced_pending_session(monke
 
 
 @pytest.mark.asyncio
-async def test_im_gateway_maps_referenced_choice_number_to_interaction_metadata(monkeypatch):
+async def test_im_gateway_referenced_choice_text_uses_exact_pending_session_without_history_scan(monkeypatch):
     gateway = IMAgentGateway()
     captured = {}
 
     monkeypatch.setattr(gateway, "_resolve_referenced_pending_session_id", lambda *args, **kwargs: 91)
-    monkeypatch.setattr(
-        gateway,
-        "_latest_waiting_interaction",
-        lambda *args, **kwargs: {
-            "interaction_id": "int_draft",
-            "type": "choice",
-            "business_action": "select_suspended_task",
-            "status": "waiting_user_input",
-            "choices": [
-                {
-                    "label": "继续处理：广州睿狐增购10个账号补商机信息",
-                    "value": "继续处理：广州睿狐增购10个账号补商机信息",
-                    "metadata": {"selected_task_id": 201},
-                },
-                {
-                    "label": "继续处理：广州睿狐创建商机确认",
-                    "value": "继续处理：广州睿狐创建商机确认",
-                    "metadata": {"selected_task_id": 202},
-                },
-            ],
-        },
-    )
 
     async def fake_handle_message(**kwargs):
         captured.update(kwargs)
@@ -197,37 +159,20 @@ async def test_im_gateway_maps_referenced_choice_number_to_interaction_metadata(
 
     assert result["final_content"] == "resumed"
     assert captured["session_id"] == 91
-    assert captured["content"] == "继续处理：广州睿狐增购10个账号补商机信息"
-    assert captured["turn_input"].metadata["selected_task_id"] == 201
-    assert captured["turn_input"].metadata["business_action"] == "select_suspended_task"
+    assert captured["content"] == "1"
+    assert captured["turn_input"].kind == AgentInputKind.TEXT
     assert captured["turn_input"].metadata["reply_to_message_ids"] == ["om_bot_reply"]
+    assert "selected_task_id" not in captured["turn_input"].metadata
 
 
 @pytest.mark.asyncio
-async def test_im_gateway_binds_latest_follow_up_confirmation_interaction(monkeypatch):
+async def test_im_gateway_does_not_bind_unreferenced_business_text_to_old_confirmation(monkeypatch):
     gateway = IMAgentGateway()
     captured = {}
 
-    monkeypatch.setattr(
-        gateway,
-        "_latest_waiting_interaction",
-        lambda *args, **kwargs: {
-            "interaction_id": "int_follow_up_confirmation",
-            "type": "choice",
-            "business_action": "resolve_follow_up_task_confirmation_case",
-            "status": "waiting_user_input",
-            "payload": {"case_public_id": "fuc_11111111111111111111111111111111"},
-            "choices": [
-                {"label": "已完成", "value": "已完成"},
-                {"label": "先放着", "value": "先放着"},
-                {"label": "不管了", "value": "不管了"},
-            ],
-        },
-    )
-
     async def fake_handle_message(**kwargs):
         captured.update(kwargs)
-        return {"final_content": "bound", "interaction": None, "events": [], "im_events": []}
+        return {"final_content": "new flow", "interaction": None, "events": [], "im_events": []}
 
     monkeypatch.setattr(gateway_module.agent_im_conversation_service, "handle_message", fake_handle_message)
 
@@ -241,13 +186,11 @@ async def test_im_gateway_binds_latest_follow_up_confirmation_interaction(monkey
         agent_content="今天联系了,还没有进展,下周五再说",
     )
 
-    assert result["final_content"] == "bound"
+    assert result["final_content"] == "new flow"
     assert captured["session_id"] == 10
-    assert captured["turn_input"].metadata["business_action"] == "resolve_follow_up_task_confirmation_case"
-    assert captured["turn_input"].metadata["case_public_id"] == "fuc_11111111111111111111111111111111"
-    assert captured["turn_input"].metadata["follow_up_confirmation_case_public_id"] == (
-        "fuc_11111111111111111111111111111111"
-    )
+    assert captured["turn_input"].content == "今天联系了,还没有进展,下周五再说"
+    assert "business_action" not in captured["turn_input"].metadata
+    assert "case_public_id" not in captured["turn_input"].metadata
 
 
 @pytest.mark.asyncio
@@ -255,23 +198,16 @@ async def test_im_gateway_binds_referenced_follow_up_confirmation_session(monkey
     gateway = IMAgentGateway()
     captured = {}
 
-    monkeypatch.setattr(gateway, "_resolve_referenced_pending_session_id", lambda *args, **kwargs: None)
-    monkeypatch.setattr(gateway, "_session_id_for_response_message", lambda *args, **kwargs: 91)
     monkeypatch.setattr(
         gateway,
-        "_latest_waiting_interaction",
-        lambda *args, **kwargs: {
-            "interaction_id": "int_follow_up_confirmation",
-            "type": "choice",
-            "business_action": "resolve_follow_up_task_confirmation_case",
-            "status": "waiting_user_input",
-            "payload": {"case": {"public_id": "fuc_22222222222222222222222222222222"}},
-            "choices": [
-                {"label": "已完成", "value": "已完成"},
-                {"label": "先放着", "value": "先放着"},
-                {"label": "不管了", "value": "不管了"},
-            ],
-        },
+        "_resolve_referenced_confirmation_target",
+        lambda *args, **kwargs: gateway_module.IMConfirmationReplyTarget(
+            session_id=91,
+            delivery_public_id="fud_11111111111111111111111111111111",
+            case_public_id="fuc_22222222222222222222222222222222",
+            interaction_id="int_follow_up_confirmation",
+            prompt_delivery_key="projection:test",
+        ),
     )
 
     async def fake_handle_message(**kwargs):
@@ -317,18 +253,6 @@ async def test_im_gateway_uses_hidden_reply_binding_before_channel_fallback(monk
         "get_by_id",
         lambda *args, **kwargs: SimpleNamespace(id=101, session_id=91, status=AgentTaskStatus.WAITING_USER),
     )
-    monkeypatch.setattr(
-        gateway_module.agent_task_crud,
-        "get_latest_waiting",
-        lambda *args, **kwargs: SimpleNamespace(id=101, status=AgentTaskStatus.WAITING_USER)
-        if kwargs.get("session_id") == 91
-        else None,
-    )
-    monkeypatch.setattr(
-        gateway_module.agent_channel_session_crud,
-        "get_by_scope",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("hidden binding should avoid channel fallback")),
-    )
 
     async def fake_handle_message(**kwargs):
         captured.update(kwargs)
@@ -337,7 +261,7 @@ async def test_im_gateway_uses_hidden_reply_binding_before_channel_fallback(monk
     monkeypatch.setattr(gateway_module.agent_im_conversation_service, "handle_message", fake_handle_message)
 
     result = await gateway.handle_text(
-        None,
+        object(),
         team_id=1,
         user_id=2,
         provider="feishu",
@@ -353,31 +277,19 @@ async def test_im_gateway_uses_hidden_reply_binding_before_channel_fallback(monk
 
 
 @pytest.mark.asyncio
-async def test_im_gateway_text_confirmation_falls_back_to_recent_chat_task(monkeypatch):
+async def test_im_gateway_text_confirmation_without_exact_binding_stays_plain_text(monkeypatch):
     gateway = IMAgentGateway()
     captured = {}
 
     monkeypatch.setattr(
-        gateway_module.agent_task_crud,
-        "get_latest_waiting",
-        lambda *args, **kwargs: SimpleNamespace(
-            id=1,
-            status=AgentTaskStatus.WAITING_USER,
-            state_json={"action": "create_customer_activity"},
-            created_time=None,
-        )
-        if kwargs.get("session_id") == 9
-        else None,
-    )
-    monkeypatch.setattr(
-        gateway_module.agent_channel_session_crud,
-        "list_by_chat",
-        lambda *args, **kwargs: [SimpleNamespace(agent_session_id=9)],
+        gateway_module.im_inbound_event_crud,
+        "get_by_response_message_id",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("no referenced message should be queried")),
     )
 
     async def fake_handle_message(**kwargs):
         captured.update(kwargs)
-        return {"final_content": "created", "interaction": None, "events": [], "im_events": []}
+        return {"final_content": "new flow", "interaction": None, "events": [], "im_events": []}
 
     monkeypatch.setattr(gateway_module.agent_im_conversation_service, "handle_message", fake_handle_message)
 
@@ -394,38 +306,20 @@ async def test_im_gateway_text_confirmation_falls_back_to_recent_chat_task(monke
         referenced_message_ids=[],
     )
 
-    assert result["final_content"] == "created"
-    assert captured["session_id"] == 9
-    assert captured["turn_input"].kind == AgentInputKind.CONFIRM
+    assert result["final_content"] == "new flow"
+    assert captured["session_id"] == 10
+    assert captured["content"] == "是"
+    assert captured["turn_input"].kind == AgentInputKind.TEXT
 
 
 @pytest.mark.asyncio
-async def test_im_gateway_text_confirmation_does_not_pick_ambiguous_chat_task(monkeypatch):
+async def test_im_gateway_does_not_scan_chat_sessions_for_confirmation(monkeypatch):
     gateway = IMAgentGateway()
     captured = {}
 
-    def fake_latest_waiting(*args, **kwargs):
-        session_id = kwargs.get("session_id")
-        if session_id in {9, 11}:
-            return SimpleNamespace(
-                id=session_id,
-                status=AgentTaskStatus.WAITING_USER,
-                state_json={"action": "create_customer_activity"},
-                created_time=None,
-            )
-        return None
-
-    monkeypatch.setattr(gateway_module.agent_task_crud, "get_latest_waiting", fake_latest_waiting)
-    monkeypatch.setattr(
-        gateway_module.agent_channel_session_crud,
-        "list_by_chat",
-        lambda *args, **kwargs: [SimpleNamespace(agent_session_id=9), SimpleNamespace(agent_session_id=11)],
-    )
-    monkeypatch.setattr(gateway_module.agent_channel_session_crud, "get_by_scope", lambda *args, **kwargs: None)
-
     async def fake_handle_message(**kwargs):
         captured.update(kwargs)
-        return {"final_content": "need clarification", "interaction": None, "events": [], "im_events": []}
+        return {"final_content": "plain", "interaction": None, "events": [], "im_events": []}
 
     monkeypatch.setattr(gateway_module.agent_im_conversation_service, "handle_message", fake_handle_message)
 
@@ -442,9 +336,9 @@ async def test_im_gateway_text_confirmation_does_not_pick_ambiguous_chat_task(mo
         referenced_message_ids=[],
     )
 
-    assert result["final_content"] == "need clarification"
+    assert result["final_content"] == "plain"
     assert captured["session_id"] == 10
-    assert captured["turn_input"].kind == AgentInputKind.CONFIRM
+    assert captured["turn_input"].kind == AgentInputKind.TEXT
 
 
 @pytest.mark.asyncio
@@ -455,12 +349,16 @@ async def test_im_gateway_maps_reaction_to_structured_confirmation(monkeypatch):
     monkeypatch.setattr(
         gateway_module.im_inbound_event_crud,
         "get_by_response_message_id",
-        lambda *args, **kwargs: SimpleNamespace(raw_event={"message": {"chat_id": "chat_1", "thread_id": ""}}),
+        lambda *args, **kwargs: SimpleNamespace(agent_session_id=9, agent_task_id=1),
     )
     monkeypatch.setattr(
-        gateway_module.agent_channel_session_crud,
-        "get_by_scope",
-        lambda *args, **kwargs: SimpleNamespace(agent_session_id=9),
+        gateway_module.agent_task_crud,
+        "get_by_id",
+        lambda *args, **kwargs: SimpleNamespace(
+            id=1,
+            session_id=9,
+            status=AgentTaskStatus.WAITING_USER,
+        ),
     )
 
     async def fake_handle_message(**kwargs):
@@ -470,7 +368,7 @@ async def test_im_gateway_maps_reaction_to_structured_confirmation(monkeypatch):
     monkeypatch.setattr(gateway_module.agent_im_conversation_service, "handle_message", fake_handle_message)
 
     result = await gateway.handle_reaction(
-        None,
+        object(),
         team_id=1,
         user_id=2,
         provider="feishu",

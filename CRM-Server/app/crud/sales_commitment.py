@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, TypeVar
 
-from sqlalchemy import false, or_
+from sqlalchemy import and_, false, or_
 from sqlalchemy.exc import IntegrityError
 
 from app.models.sales_commitment import (
     FollowUpTask,
     FollowUpTaskConfirmationCase,
+    FollowUpTaskConfirmationDeliveryPurpose,
     FollowUpTaskConfirmationPromptDelivery,
     FollowUpTaskConfirmationPromptStatus,
     FollowUpTaskConfirmationStatus,
@@ -25,6 +26,7 @@ from app.models.sales_commitment import (
     SalesCommitment,
     SalesCommitmentStatus,
 )
+from app.schemas.system_recovery import FollowUpConfirmationDeliveryRecoveryCandidate
 from app.utils.time import (
     DUE_AT_GRANULARITY_DATETIME,
     FOLLOW_UP_TASK_DUE_WINDOW_OVERDUE,
@@ -55,6 +57,14 @@ if TYPE_CHECKING:
     )
 
 ModelT = TypeVar("ModelT")
+
+_TERMINAL_CONFIRMATION_PROMPT_STATUSES = FollowUpTaskConfirmationPromptStatus.TERMINAL
+
+
+def _is_terminal_confirmation_prompt_delivery(
+    delivery: FollowUpTaskConfirmationPromptDelivery,
+) -> bool:
+    return delivery.status in _TERMINAL_CONFIRMATION_PROMPT_STATUSES
 
 
 def _dump(obj: object, *, exclude_unset: bool = False) -> dict[str, Any]:
@@ -785,6 +795,42 @@ class FollowUpTaskConfirmationCaseCRUD:
             query = query.filter(FollowUpTaskConfirmationCase.team_id == team_id)
         return query.first()
 
+    def get_by_public_id_for_update(
+        self,
+        db: Session,
+        *,
+        public_id: str,
+        team_id: int,
+    ) -> FollowUpTaskConfirmationCase | None:
+        return (
+            db.query(FollowUpTaskConfirmationCase)
+            .filter(
+                FollowUpTaskConfirmationCase.public_id == public_id,
+                FollowUpTaskConfirmationCase.team_id == team_id,
+            )
+            .populate_existing()
+            .with_for_update()
+            .one_or_none()
+        )
+
+    def get_by_id_for_update(
+        self,
+        db: Session,
+        *,
+        case_id: int,
+        team_id: int,
+    ) -> FollowUpTaskConfirmationCase | None:
+        return (
+            db.query(FollowUpTaskConfirmationCase)
+            .filter(
+                FollowUpTaskConfirmationCase.id == case_id,
+                FollowUpTaskConfirmationCase.team_id == team_id,
+            )
+            .populate_existing()
+            .with_for_update()
+            .one_or_none()
+        )
+
     def get_pending_by_hash(
         self,
         db: Session,
@@ -1059,6 +1105,47 @@ class FollowUpTaskConfirmationCaseCRUD:
 
 
 class FollowUpTaskConfirmationPromptDeliveryCRUD:
+    """Durable delivery state machine for confirmation prompts.
+
+    Persistence owns idempotency and delivery invariants. Channel adapters may
+    retry freely; only the first transition to SENT increments the case prompt
+    counters.
+    """
+
+    def get_by_public_id(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        public_id: str,
+    ) -> FollowUpTaskConfirmationPromptDelivery | None:
+        return (
+            db.query(FollowUpTaskConfirmationPromptDelivery)
+            .filter(
+                FollowUpTaskConfirmationPromptDelivery.team_id == team_id,
+                FollowUpTaskConfirmationPromptDelivery.public_id == public_id,
+            )
+            .first()
+        )
+
+    def get_by_public_id_for_update(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        public_id: str,
+    ) -> FollowUpTaskConfirmationPromptDelivery | None:
+        return (
+            db.query(FollowUpTaskConfirmationPromptDelivery)
+            .filter(
+                FollowUpTaskConfirmationPromptDelivery.team_id == team_id,
+                FollowUpTaskConfirmationPromptDelivery.public_id == public_id,
+            )
+            .populate_existing()
+            .with_for_update()
+            .one_or_none()
+        )
+
     def get_by_prompt_key(
         self,
         db: Session,
@@ -1076,7 +1163,7 @@ class FollowUpTaskConfirmationPromptDeliveryCRUD:
             .first()
         )
 
-    def create_attempt(
+    def ensure_queued(
         self,
         db: Session,
         *,
@@ -1084,42 +1171,46 @@ class FollowUpTaskConfirmationPromptDeliveryCRUD:
         case_id: int,
         owner_id: str,
         channel: str,
+        purpose: str,
         interaction_id: str,
         prompt_key: str,
-        status: str,
-        reason_code: str | None = None,
         provider: str | None = None,
+        recipient_id: str | None = None,
         agent_session_id: int | None = None,
+        origin_turn_id: str | None = None,
+        origin_message_id: str | None = None,
+        source_activity_id: int | None = None,
+        expected_activity_revision: int | None = None,
         payload_json: dict[str, Any] | None = None,
-        error_message: str | None = None,
+        reason_code: str = "DELIVERY_QUEUED",
         thread_id: str | None = None,
         run_id: str | None = None,
-        attempted_at: datetime | None = None,
-        delivered_at: datetime | None = None,
         commit: bool = True,
     ) -> FollowUpTaskConfirmationPromptDelivery:
         existing = self.get_by_prompt_key(db, team_id=team_id, prompt_key=prompt_key)
         if existing is not None:
             return existing
-        resolved_attempted_at = attempted_at or business_now()
         db_obj = FollowUpTaskConfirmationPromptDelivery(
             team_id=team_id,
             case_id=case_id,
             owner_id=owner_id,
             channel=channel,
+            purpose=purpose,
             provider=provider,
+            recipient_id=recipient_id,
             agent_session_id=agent_session_id,
             interaction_id=interaction_id,
             prompt_key=prompt_key,
-            status=status,
+            status=FollowUpTaskConfirmationPromptStatus.QUEUED,
             payload_json=payload_json,
             reason_code=reason_code,
-            error_message=error_message,
             thread_id=thread_id,
             run_id=run_id,
-            attempted_at=resolved_attempted_at,
-            delivered_at=delivered_at,
-            prompted_at=resolved_attempted_at,
+            origin_turn_id=origin_turn_id,
+            origin_message_id=origin_message_id,
+            source_activity_id=source_activity_id,
+            expected_activity_revision=expected_activity_revision,
+            attempt_count=0,
         )
         try:
             with db.begin_nested():
@@ -1130,11 +1221,368 @@ class FollowUpTaskConfirmationPromptDeliveryCRUD:
             if existing is None:
                 raise
             return existing
-
         if commit:
             db.commit()
             db.refresh(db_obj)
         return db_obj
+
+    def create_attempt(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        case_id: int,
+        owner_id: str,
+        channel: str,
+        purpose: str = FollowUpTaskConfirmationDeliveryPurpose.INBOX_VISIBILITY,
+        interaction_id: str,
+        prompt_key: str,
+        status: str,
+        reason_code: str | None = None,
+        provider: str | None = None,
+        recipient_id: str | None = None,
+        agent_session_id: int | None = None,
+        origin_turn_id: str | None = None,
+        origin_message_id: str | None = None,
+        source_activity_id: int | None = None,
+        expected_activity_revision: int | None = None,
+        payload_json: dict[str, Any] | None = None,
+        error_message: str | None = None,
+        thread_id: str | None = None,
+        run_id: str | None = None,
+        attempted_at: datetime | None = None,
+        delivered_at: datetime | None = None,
+        commit: bool = True,
+    ) -> FollowUpTaskConfirmationPromptDelivery:
+        delivery = self.ensure_queued(
+            db,
+            team_id=team_id,
+            case_id=case_id,
+            owner_id=owner_id,
+            channel=channel,
+            purpose=purpose,
+            provider=provider,
+            recipient_id=recipient_id,
+            agent_session_id=agent_session_id,
+            origin_turn_id=origin_turn_id,
+            origin_message_id=origin_message_id,
+            source_activity_id=source_activity_id,
+            expected_activity_revision=expected_activity_revision,
+            interaction_id=interaction_id,
+            prompt_key=prompt_key,
+            payload_json=payload_json,
+            reason_code=reason_code or "DELIVERY_QUEUED",
+            thread_id=thread_id,
+            run_id=run_id,
+            commit=False,
+        )
+        resolved_attempted_at = attempted_at or business_now()
+        if delivery.status == FollowUpTaskConfirmationPromptStatus.QUEUED and status != delivery.status:
+            return self.update_attempt_status(
+                db,
+                delivery,
+                status=status,
+                reason_code=reason_code,
+                error_message=error_message,
+                attempted_at=resolved_attempted_at,
+                delivered_at=delivered_at,
+                commit=commit,
+            )
+        if delivery.attempted_at is None:
+            delivery.attempted_at = resolved_attempted_at
+            db.add(delivery)
+        if commit:
+            db.commit()
+            db.refresh(delivery)
+        return delivery
+
+    def claim_for_dispatch(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        public_id: str,
+        lease_token: str,
+        lease_expires_at: datetime,
+        max_attempts: int,
+        now: datetime | None = None,
+        commit: bool = True,
+    ) -> FollowUpTaskConfirmationPromptDelivery | None:
+        """Atomically claim one due delivery without consuming another worker's retry."""
+
+        resolved_now = now or business_now()
+        delivery = (
+            db.query(FollowUpTaskConfirmationPromptDelivery)
+            .filter(
+                FollowUpTaskConfirmationPromptDelivery.team_id == team_id,
+                FollowUpTaskConfirmationPromptDelivery.public_id == public_id,
+            )
+            .populate_existing()
+            .with_for_update()
+            .one_or_none()
+        )
+        if delivery is None or _is_terminal_confirmation_prompt_delivery(delivery):
+            return None
+        if int(delivery.attempt_count or 0) >= max(1, max_attempts):
+            return None
+        if delivery.lease_token and delivery.lease_expires_at and delivery.lease_expires_at > resolved_now:
+            return None
+        if delivery.status == FollowUpTaskConfirmationPromptStatus.FAILED:
+            if delivery.next_attempt_at is not None and delivery.next_attempt_at > resolved_now:
+                return None
+        elif delivery.status not in {
+            FollowUpTaskConfirmationPromptStatus.QUEUED,
+            FollowUpTaskConfirmationPromptStatus.PROJECTED,
+        }:
+            return None
+
+        delivery.attempt_count = int(delivery.attempt_count or 0) + 1
+        delivery.attempted_at = resolved_now
+        delivery.next_attempt_at = None
+        delivery.error_message = None
+        delivery.lease_token = lease_token
+        delivery.lease_expires_at = lease_expires_at
+        db.add(delivery)
+        if commit:
+            db.commit()
+            db.refresh(delivery)
+        else:
+            db.flush()
+        return delivery
+
+    @staticmethod
+    def _owns_dispatch_lease(
+        delivery: FollowUpTaskConfirmationPromptDelivery | None,
+        lease_token: str,
+    ) -> bool:
+        return bool(delivery is not None and delivery.lease_token == lease_token)
+
+    def acknowledge_sent(
+        self,
+        db: Session,
+        delivery: FollowUpTaskConfirmationPromptDelivery,
+        *,
+        provider_message_id: str,
+        reason_code: str = "CHANNEL_ACKNOWLEDGED",
+        delivered_at: datetime | None = None,
+        commit: bool = True,
+    ) -> FollowUpTaskConfirmationPromptDelivery:
+        if _is_terminal_confirmation_prompt_delivery(delivery):
+            return delivery
+        resolved_at = delivered_at or business_now()
+        case = (
+            db.query(FollowUpTaskConfirmationCase)
+            .filter(
+                FollowUpTaskConfirmationCase.team_id == delivery.team_id,
+                FollowUpTaskConfirmationCase.id == delivery.case_id,
+            )
+            .first()
+        )
+        delivery.status = FollowUpTaskConfirmationPromptStatus.SENT
+        delivery.reason_code = reason_code
+        delivery.error_message = None
+        delivery.provider_message_id = provider_message_id
+        delivery.delivered_at = resolved_at
+        # A SENT delivery means the confirmation became user-visible. Purpose
+        # controls presentation semantics (inbox vs intrusive prompt), not
+        # whether the case has been delivered.
+        delivery.prompted_at = resolved_at
+        delivery.next_attempt_at = None
+        delivery.lease_token = None
+        delivery.lease_expires_at = None
+        if case is not None:
+            case.last_prompted_at = resolved_at
+            case.prompt_count = int(case.prompt_count or 0) + 1
+            db.add(case)
+        db.add(delivery)
+        if commit:
+            db.commit()
+            db.refresh(delivery)
+        else:
+            db.flush()
+        return delivery
+
+    def acknowledge_failed(
+        self,
+        db: Session,
+        delivery: FollowUpTaskConfirmationPromptDelivery,
+        *,
+        reason_code: str,
+        error_message: str | None,
+        next_attempt_at: datetime | None,
+        commit: bool = True,
+    ) -> FollowUpTaskConfirmationPromptDelivery:
+        if _is_terminal_confirmation_prompt_delivery(delivery):
+            return delivery
+        delivery.status = FollowUpTaskConfirmationPromptStatus.FAILED
+        delivery.reason_code = reason_code
+        delivery.error_message = error_message
+        delivery.delivered_at = None
+        delivery.prompted_at = None
+        delivery.next_attempt_at = next_attempt_at
+        delivery.lease_token = None
+        delivery.lease_expires_at = None
+        db.add(delivery)
+        if commit:
+            db.commit()
+            db.refresh(delivery)
+        else:
+            db.flush()
+        return delivery
+
+    def acknowledge_exhausted(
+        self,
+        db: Session,
+        delivery: FollowUpTaskConfirmationPromptDelivery,
+        *,
+        reason_code: str = "DELIVERY_RETRIES_EXHAUSTED",
+        error_message: str | None,
+        commit: bool = True,
+    ) -> FollowUpTaskConfirmationPromptDelivery:
+        return self._acknowledge_unsent_terminal(
+            db,
+            delivery,
+            status=FollowUpTaskConfirmationPromptStatus.EXHAUSTED,
+            reason_code=reason_code,
+            error_message=error_message,
+            commit=commit,
+        )
+
+    def acknowledge_ambiguous(
+        self,
+        db: Session,
+        delivery: FollowUpTaskConfirmationPromptDelivery,
+        *,
+        reason_code: str,
+        error_message: str | None,
+        commit: bool = True,
+    ) -> FollowUpTaskConfirmationPromptDelivery:
+        return self._acknowledge_unsent_terminal(
+            db,
+            delivery,
+            status=FollowUpTaskConfirmationPromptStatus.AMBIGUOUS,
+            reason_code=reason_code,
+            error_message=error_message,
+            commit=commit,
+        )
+
+    def _acknowledge_unsent_terminal(
+        self,
+        db: Session,
+        delivery: FollowUpTaskConfirmationPromptDelivery,
+        *,
+        status: str,
+        reason_code: str,
+        error_message: str | None,
+        commit: bool,
+    ) -> FollowUpTaskConfirmationPromptDelivery:
+        if _is_terminal_confirmation_prompt_delivery(delivery):
+            return delivery
+        delivery.status = status
+        delivery.reason_code = reason_code
+        delivery.error_message = error_message
+        delivery.delivered_at = None
+        delivery.prompted_at = None
+        delivery.next_attempt_at = None
+        delivery.lease_token = None
+        delivery.lease_expires_at = None
+        db.add(delivery)
+        if commit:
+            db.commit()
+            db.refresh(delivery)
+        else:
+            db.flush()
+        return delivery
+
+    def acknowledge_skipped(
+        self,
+        db: Session,
+        delivery: FollowUpTaskConfirmationPromptDelivery,
+        *,
+        reason_code: str,
+        error_message: str | None = None,
+        commit: bool = True,
+    ) -> FollowUpTaskConfirmationPromptDelivery:
+        if _is_terminal_confirmation_prompt_delivery(delivery):
+            return delivery
+        delivery.status = FollowUpTaskConfirmationPromptStatus.SKIPPED
+        delivery.reason_code = reason_code
+        delivery.error_message = error_message
+        delivery.delivered_at = None
+        delivery.prompted_at = None
+        delivery.next_attempt_at = None
+        delivery.lease_token = None
+        delivery.lease_expires_at = None
+        db.add(delivery)
+        if commit:
+            db.commit()
+            db.refresh(delivery)
+        else:
+            db.flush()
+        return delivery
+
+    def acknowledge_sent_if_lease_owner(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        public_id: str,
+        lease_token: str,
+        provider_message_id: str,
+        reason_code: str = "CHANNEL_ACKNOWLEDGED",
+        commit: bool = True,
+    ) -> FollowUpTaskConfirmationPromptDelivery | None:
+        # Serialize acknowledgement so a duplicated adapter callback cannot
+        # increment case delivery counters more than once. The lease check and
+        # SENT transition remain in the same database transaction.
+        delivery = self.get_by_public_id_for_update(db, team_id=team_id, public_id=public_id)
+        if not self._owns_dispatch_lease(delivery, lease_token):
+            return None
+        return self.acknowledge_sent(
+            db, delivery, provider_message_id=provider_message_id, reason_code=reason_code, commit=commit
+        )
+
+    def acknowledge_failed_if_lease_owner(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        public_id: str,
+        lease_token: str,
+        reason_code: str,
+        error_message: str | None,
+        next_attempt_at: datetime | None,
+        commit: bool = True,
+    ) -> FollowUpTaskConfirmationPromptDelivery | None:
+        delivery = self.get_by_public_id_for_update(db, team_id=team_id, public_id=public_id)
+        if not self._owns_dispatch_lease(delivery, lease_token):
+            return None
+        return self.acknowledge_failed(
+            db,
+            delivery,
+            reason_code=reason_code,
+            error_message=error_message,
+            next_attempt_at=next_attempt_at,
+            commit=commit,
+        )
+
+    def acknowledge_skipped_if_lease_owner(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        public_id: str,
+        lease_token: str,
+        reason_code: str,
+        error_message: str | None = None,
+        commit: bool = True,
+    ) -> FollowUpTaskConfirmationPromptDelivery | None:
+        delivery = self.get_by_public_id_for_update(db, team_id=team_id, public_id=public_id)
+        if not self._owns_dispatch_lease(delivery, lease_token):
+            return None
+        return self.acknowledge_skipped(
+            db, delivery, reason_code=reason_code, error_message=error_message, commit=commit
+        )
 
     def update_attempt_status(
         self,
@@ -1148,12 +1596,16 @@ class FollowUpTaskConfirmationPromptDeliveryCRUD:
         delivered_at: datetime | None = None,
         commit: bool = True,
     ) -> FollowUpTaskConfirmationPromptDelivery:
+        if _is_terminal_confirmation_prompt_delivery(delivery):
+            return delivery
         delivery.status = status
         delivery.reason_code = reason_code
         delivery.error_message = error_message
         if attempted_at is not None:
             delivery.attempted_at = attempted_at
         delivery.delivered_at = delivered_at
+        if status != FollowUpTaskConfirmationPromptStatus.SENT:
+            delivery.prompted_at = None
         db.add(delivery)
         if commit:
             db.commit()
@@ -1206,40 +1658,109 @@ class FollowUpTaskConfirmationPromptDeliveryCRUD:
             .first()
         )
 
-    def create_sent(
+    def list_system_recovery_candidates(
         self,
         db: Session,
         *,
-        team_id: int,
-        case_id: int,
-        owner_id: str,
-        channel: str,
-        provider: str | None,
-        agent_session_id: int | None,
-        interaction_id: str,
-        prompt_key: str,
-        payload_json: dict[str, Any] | None = None,
-        prompted_at: datetime | None = None,
-        commit: bool = True,
-    ) -> FollowUpTaskConfirmationPromptDelivery:
-        resolved_prompted_at = prompted_at or business_now()
-        return self.create_attempt(
-            db,
-            team_id=team_id,
-            case_id=case_id,
-            owner_id=owner_id,
-            channel=channel,
-            provider=provider,
-            agent_session_id=agent_session_id,
-            interaction_id=interaction_id,
-            prompt_key=prompt_key,
-            status=FollowUpTaskConfirmationPromptStatus.SENT,
-            reason_code="CHANNEL_DISPATCHED",
-            payload_json=payload_json,
-            attempted_at=resolved_prompted_at,
-            delivered_at=resolved_prompted_at,
-            commit=commit,
+        now: datetime | None = None,
+        max_attempts: int = 5,
+        limit: int = 50,
+    ) -> list[FollowUpConfirmationDeliveryRecoveryCandidate]:
+        """Privileged control-plane scan returning checkpoint-safe routing data."""
+        resolved_now = now or business_now()
+        attempt_limit = max(1, max_attempts)
+        lease_available = or_(
+            FollowUpTaskConfirmationPromptDelivery.lease_token.is_(None),
+            FollowUpTaskConfirmationPromptDelivery.lease_expires_at.is_(None),
+            FollowUpTaskConfirmationPromptDelivery.lease_expires_at <= resolved_now,
         )
+        claimable = and_(
+            FollowUpTaskConfirmationPromptDelivery.attempt_count < attempt_limit,
+            or_(
+                FollowUpTaskConfirmationPromptDelivery.status
+                == FollowUpTaskConfirmationPromptStatus.QUEUED,
+                FollowUpTaskConfirmationPromptDelivery.status
+                == FollowUpTaskConfirmationPromptStatus.PROJECTED,
+                and_(
+                    FollowUpTaskConfirmationPromptDelivery.status
+                    == FollowUpTaskConfirmationPromptStatus.FAILED,
+                    FollowUpTaskConfirmationPromptDelivery.next_attempt_at.is_not(None),
+                    FollowUpTaskConfirmationPromptDelivery.next_attempt_at <= resolved_now,
+                ),
+            ),
+        )
+        needs_terminalization = and_(
+            FollowUpTaskConfirmationPromptDelivery.attempt_count >= attempt_limit,
+            FollowUpTaskConfirmationPromptDelivery.status.in_(
+                [
+                    FollowUpTaskConfirmationPromptStatus.QUEUED,
+                    FollowUpTaskConfirmationPromptStatus.PROJECTED,
+                    FollowUpTaskConfirmationPromptStatus.FAILED,
+                ]
+            ),
+        )
+        rows = (
+            db.query(
+                FollowUpTaskConfirmationPromptDelivery.public_id,
+                FollowUpTaskConfirmationPromptDelivery.team_id,
+                FollowUpTaskConfirmationPromptDelivery.owner_id,
+                FollowUpTaskConfirmationPromptDelivery.channel,
+                FollowUpTaskConfirmationPromptDelivery.purpose,
+                FollowUpTaskConfirmationPromptDelivery.provider,
+                FollowUpTaskConfirmationPromptDelivery.recipient_id,
+                FollowUpTaskConfirmationPromptDelivery.agent_session_id,
+                FollowUpTaskConfirmationPromptDelivery.origin_turn_id,
+                FollowUpTaskConfirmationPromptDelivery.origin_message_id,
+                FollowUpTaskConfirmationPromptDelivery.source_activity_id,
+                FollowUpTaskConfirmationPromptDelivery.expected_activity_revision,
+                FollowUpTaskConfirmationCase.public_id.label("case_public_id"),
+            )
+            .join(
+                FollowUpTaskConfirmationCase,
+                and_(
+                    FollowUpTaskConfirmationCase.id == FollowUpTaskConfirmationPromptDelivery.case_id,
+                    FollowUpTaskConfirmationCase.team_id == FollowUpTaskConfirmationPromptDelivery.team_id,
+                ),
+            )
+            .filter(
+                FollowUpTaskConfirmationPromptDelivery.purpose
+                == FollowUpTaskConfirmationDeliveryPurpose.INBOX_VISIBILITY,
+                lease_available,
+                or_(claimable, needs_terminalization),
+            )
+            .order_by(
+                FollowUpTaskConfirmationPromptDelivery.created_time.asc(),
+                FollowUpTaskConfirmationPromptDelivery.id.asc(),
+            )
+            .limit(max(1, limit))
+            .all()
+        )
+        candidates: list[FollowUpConfirmationDeliveryRecoveryCandidate] = []
+        for row in rows:
+            candidates.append(
+                FollowUpConfirmationDeliveryRecoveryCandidate(
+                    delivery_public_id=str(row.public_id),
+                    case_public_id=str(row.case_public_id),
+                    team_id=int(row.team_id),
+                    owner_id=str(row.owner_id),
+                    channel=str(row.channel),
+                    purpose=str(row.purpose),
+                    provider=str(row.provider) if row.provider is not None else None,
+                    recipient_id=str(row.recipient_id) if row.recipient_id is not None else None,
+                    agent_session_id=(int(row.agent_session_id) if row.agent_session_id is not None else None),
+                    origin_turn_id=str(row.origin_turn_id) if row.origin_turn_id is not None else None,
+                    origin_message_id=(str(row.origin_message_id) if row.origin_message_id is not None else None),
+                    source_activity_id=(
+                        int(row.source_activity_id) if row.source_activity_id is not None else None
+                    ),
+                    expected_activity_revision=(
+                        int(row.expected_activity_revision)
+                        if row.expected_activity_revision is not None
+                        else None
+                    ),
+                )
+            )
+        return candidates
 
 
 class FollowUpTaskTransitionPolicyDecisionLogCRUD:

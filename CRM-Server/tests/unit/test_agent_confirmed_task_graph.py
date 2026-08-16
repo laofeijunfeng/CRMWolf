@@ -7,17 +7,15 @@ import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.services.agent import confirmed_task_graph as confirmed_task_graph_module
+from app.services.agent.confirmed_application_step_projection import (
+    ConfirmedApplicationStepProjectionResult,
+)
 from app.services.agent.confirmed_task_graph import (
     ConfirmedTaskGraphService,
     build_confirmed_task_graph_config,
     build_confirmed_task_thread_id,
 )
-from app.services.agent.state import (
-    ConfirmedTaskExecutionResult,
-    ConfirmedTaskGraphSideEffects,
-    ConfirmedTaskRuntimeContext,
-)
+from app.services.agent.state import ConfirmedTaskGraphSideEffects, ConfirmedTaskRuntimeContext
 
 
 class FakeCheckpointFailingGraph:
@@ -25,36 +23,48 @@ class FakeCheckpointFailingGraph:
         raise SQLAlchemyError("checkpoint write failed")
 
 
-class FakeFallbackGraph:
-    def __init__(self):
+class FakeConfirmedApplicationProjector:
+    def __init__(self, *, error: Exception | None = None):
         self.calls = []
+        self.error = error
 
-    async def ainvoke(self, state, config, *, context):
-        self.calls.append({"state": state, "config": config, "context": context})
-        return {
-            **state,
-            "task_event": {"event": "task_completed", "task_id": 101},
-            "assistant_content": "fallback ok",
-            "execution_status": "completed",
-            "events": [{"event": "confirmed_task_graph_finished"}],
-        }
-
-
-class FakeConfirmedTaskSideEffectHandler:
-    def __init__(self):
-        self.calls = []
-
-    def apply(self, context):
-        self.calls.append(context)
-        output_events = []
-        if context.execution.tool_event:
-            output_events.append(context.execution.tool_event)
-        output_events.append(context.execution.task_event)
-        output_events.append({"event": "final", "content": context.execution.assistant_content})
-        return SimpleNamespace(
-            task_event=context.execution.task_event,
-            output_events=output_events,
-            assistant_content=context.execution.assistant_content,
+    async def project(self, request):
+        self.calls.append(request)
+        if self.error is not None:
+            raise self.error
+        return ConfirmedApplicationStepProjectionResult(
+            status="COMPLETED",
+            step_id=request.step["step_id"],
+            result={
+                "execution_status": "completed",
+                "tool_result": {
+                    "event": "tool_result",
+                    "tool_name": "create_customer_activity",
+                    "success": True,
+                },
+                "task_event": {
+                    "event": "task_completed",
+                    "task_id": request.task.id,
+                    "content": "跟进记录已创建。",
+                },
+                "assistant_content": "跟进记录已创建。",
+                "output_events": [
+                    {"event": "tool_result", "tool_name": "create_customer_activity", "success": True},
+                    {"event": "task_completed", "task_id": request.task.id, "content": "跟进记录已创建。"},
+                    {"event": "final", "content": "跟进记录已创建。"},
+                ],
+                "executed_task_snapshot": {
+                    "id": request.task.id,
+                    "task_key": request.task.task_key,
+                    "team_id": request.team_id,
+                    "user_id": request.user_id,
+                    "session_id": request.session_id,
+                    "status": "COMPLETED",
+                    "state_json": request.task.state_json,
+                },
+                "active_task_snapshot": {},
+                "progress_events": [],
+            },
         )
 
 
@@ -62,6 +72,9 @@ def _task():
     return SimpleNamespace(
         id=101,
         task_key="task-101",
+        team_id=1,
+        user_id=2,
+        session_id=3,
         status="WAITING_USER",
         intent="CREATE_FOLLOW_UP",
         target_type="customer",
@@ -84,31 +97,11 @@ def _input_state(task):
 
 
 @pytest.mark.asyncio
-async def test_confirmed_task_graph_checkpoints_by_session_and_task_thread(monkeypatch):
+async def test_confirmed_task_graph_checkpoints_execution_intent_and_hydrates_projected_result():
     task = _task()
-    calls = []
-
-    async def fake_execute_confirmed_task(db, task, *, session, team_id, user_id, authorization, event_sink):
-        calls.append({
-            "db": db,
-            "task": task,
-            "session": session,
-            "team_id": team_id,
-            "user_id": user_id,
-            "authorization": authorization,
-            "event_sink": event_sink,
-        })
-        return ConfirmedTaskExecutionResult(
-            tool_event={"event": "tool_result", "tool_name": "create_customer_activity", "success": True},
-            task_event={"event": "task_completed", "task_id": task.id, "content": "跟进记录已创建。"},
-            assistant_content="跟进记录已创建。",
-            next_task=None,
-        )
-
-    monkeypatch.setattr(confirmed_task_graph_module, "execute_confirmed_task", fake_execute_confirmed_task)
-    side_effect_handler = FakeConfirmedTaskSideEffectHandler()
+    projector = FakeConfirmedApplicationProjector()
     service = ConfirmedTaskGraphService(
-        side_effect_handler=side_effect_handler,
+        application_projector=projector,
         checkpointer=InMemorySaver(),
     )
 
@@ -123,46 +116,29 @@ async def test_confirmed_task_graph_checkpoints_by_session_and_task_thread(monke
     assert build_confirmed_task_thread_id(team_id=1, user_id=2, session_id=3, task_id=101) == (
         "crm_agent_confirmed:1:2:3:101"
     )
-    assert calls[0]["task"] is task
-    assert calls[0]["authorization"] == "Bearer test"
-    assert calls[0]["event_sink"] is None
-    assert side_effect_handler.calls[0].task is task
-    assert snapshot.values["task_projection"] == {
-        "id": 101,
-        "task_key": "task-101",
-        "status": "WAITING_USER",
-        "intent": "CREATE_FOLLOW_UP",
-        "target_type": "customer",
-        "target_id": 17,
-    }
-    assert snapshot.values["tool_request"] == {
-        "task": snapshot.values["task_projection"],
-        "action": "create_customer_activity",
-    }
+    assert projector.calls[0].task is task
+    assert projector.calls[0].authorization == "Bearer test"
+    assert projector.calls[0].event_sink is None
+    assert snapshot.values["task_projection"]["id"] == 101
+    assert snapshot.values["application_step"]["step_type"] == "confirmed_task_execution"
+    assert snapshot.values["application_step"]["action"] == "create_customer_activity"
+    assert snapshot.values["application_step"]["task_snapshot"]["task_key"] == "task-101"
+    assert snapshot.values["application_step_result"]["execution_status"] == "completed"
     assert snapshot.values["execution_status"] == "completed"
     assert result["output_events"] == [
         {"event": "tool_result", "tool_name": "create_customer_activity", "success": True},
         {"event": "task_completed", "task_id": 101, "content": "跟进记录已创建。"},
         {"event": "final", "content": "跟进记录已创建。"},
     ]
+    assert result["executed_task_snapshot"]["id"] == 101
+    assert result["active_task_snapshot"] == {}
 
 
 @pytest.mark.asyncio
-async def test_confirmed_task_graph_internal_state_keeps_runtime_objects_in_context(monkeypatch):
+async def test_confirmed_task_graph_keeps_runtime_objects_out_of_checkpoint_state():
     task = _task()
-    async def fake_execute_confirmed_task(db, task, *, session, team_id, user_id, authorization, event_sink):
-        return ConfirmedTaskExecutionResult(
-            tool_event={"event": "tool_result", "tool_name": "create_customer_activity", "success": True},
-            task_event={"event": "task_completed", "task_id": task.id, "content": "跟进记录已创建。"},
-            assistant_content="跟进记录已创建。",
-            next_task=None,
-        )
-
-    monkeypatch.setattr(confirmed_task_graph_module, "execute_confirmed_task", fake_execute_confirmed_task)
-    side_effect_handler = FakeConfirmedTaskSideEffectHandler()
-    service = ConfirmedTaskGraphService(
-        side_effect_handler=side_effect_handler,
-    )
+    projector = FakeConfirmedApplicationProjector()
+    service = ConfirmedTaskGraphService(application_projector=projector)
     side_effects = ConfirmedTaskGraphSideEffects()
 
     state = await service._graph.ainvoke(
@@ -170,7 +146,7 @@ async def test_confirmed_task_graph_internal_state_keeps_runtime_objects_in_cont
             "team_id": 1,
             "user_id": 2,
             "session_id": 3,
-            "task_projection": {"id": 101},
+            "task_projection": {},
             "events": [],
         },
         context=ConfirmedTaskRuntimeContext(
@@ -189,41 +165,33 @@ async def test_confirmed_task_graph_internal_state_keeps_runtime_objects_in_cont
     assert "session" not in state
     assert "task" not in state
     assert "authorization" not in state
+    assert state["application_step"]["task_snapshot"]["id"] == 101
     assert side_effects.task_event == {"event": "task_completed", "task_id": 101, "content": "跟进记录已创建。"}
     assert side_effects.output_events[-1] == {"event": "final", "content": "跟进记录已创建。"}
-    assert side_effect_handler.calls[0].execution.assistant_content == "跟进记录已创建。"
+    assert state["executed_task_snapshot"]["id"] == 101
+    assert state["active_task_snapshot"] == {}
 
 
 @pytest.mark.asyncio
-async def test_confirmed_task_graph_does_not_fallback_for_business_sql_errors(monkeypatch):
-    async def fake_execute_confirmed_task(db, task, *, session, team_id, user_id, authorization, event_sink):
-        raise SQLAlchemyError("business db failed")
-
-    monkeypatch.setattr(confirmed_task_graph_module, "execute_confirmed_task", fake_execute_confirmed_task)
-    service = ConfirmedTaskGraphService(checkpointer=InMemorySaver())
+async def test_confirmed_task_graph_does_not_fallback_for_business_sql_errors():
+    service = ConfirmedTaskGraphService(
+        application_projector=FakeConfirmedApplicationProjector(error=SQLAlchemyError("business db failed")),
+        checkpointer=InMemorySaver(),
+    )
 
     with pytest.raises(SQLAlchemyError, match="business db failed"):
         await service.run(_input_state(_task()))
 
 
 @pytest.mark.asyncio
-async def test_confirmed_task_graph_falls_back_only_for_checkpoint_storage_errors(monkeypatch):
+async def test_confirmed_task_graph_propagates_checkpoint_errors_to_root_fail_closed_runtime():
     service = ConfirmedTaskGraphService(
-        side_effect_handler=FakeConfirmedTaskSideEffectHandler(),
+        application_projector=FakeConfirmedApplicationProjector(),
         checkpointer=InMemorySaver(),
     )
-    fallback_graph = FakeFallbackGraph()
     service._graph = FakeCheckpointFailingGraph()
-    service._fallback_graph = fallback_graph
-    monkeypatch.setattr(confirmed_task_graph_module, "is_checkpoint_storage_error", lambda exc: True)
 
-    result = await service.run(_input_state(_task()))
+    with pytest.raises(SQLAlchemyError, match="checkpoint write failed"):
+        await service.run(_input_state(_task()))
 
-    assert fallback_graph.calls
-    assert fallback_graph.calls[0]["state"]["task_projection"]["id"] == 101
-    assert result["events"][0]["event"] == "agent_checkpoint_unavailable_fallback_started"
-    assert result["events"][0]["runtime"] == "crm_agent_confirmed_task"
-    assert result["events"][0]["graph"] == "crm_agent_confirmed_task"
-    assert result["events"][0]["fallback_reason"] == "checkpoint_storage_error"
-    assert result["output_events"][0] == result["events"][0]
-    assert result["execution_status"] == "completed"
+    assert not hasattr(service, "_fallback_graph")

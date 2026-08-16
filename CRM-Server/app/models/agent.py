@@ -3,7 +3,7 @@
 These tables store Agent conversation state and audit data only. Business data
 must still be created or changed through existing CRM APIs.
 """
-from sqlalchemy import Boolean, JSON, BigInteger, Column, DateTime, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Boolean, Column, DateTime, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -44,8 +44,10 @@ class AgentToolCallStatus:
 
 class AgentIdempotencyStatus:
     PENDING = "PENDING"
+    DISPATCHED = "DISPATCHED"
     SUCCESS = "SUCCESS"
     FAILED = "FAILED"
+    AMBIGUOUS = "AMBIGUOUS"
 
 
 class AgentWorkflowActionStatus:

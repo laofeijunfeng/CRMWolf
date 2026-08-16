@@ -11,7 +11,10 @@ from app.services.ai_task_limiter import ai_generation_semaphore
 from app.services.customer_activity_ai.evaluation_agent import ActivityEvaluationError
 from app.services.customer_activity_ai.structuring_agent import ActivityStructuringError
 from app.services.customer_activity_ai.workflow import customer_activity_ai_workflow
-from app.services.customer_activity_post_commit_workflow import customer_activity_post_commit_workflow
+from app.services.customer_activity_post_commit_job_service import (
+    CustomerActivityPostCommitJobRequest,
+    customer_activity_post_commit_job_service,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +25,10 @@ def _empty_post_commit_outcome() -> Dict[str, Any]:
         "confirmation_case_public_ids": [],
         "confirmation_cases": [],
         "created_confirmation_case_count": 0,
+        "confirmation_deliveries": [],
         "prompt_policy": {
             "prompt_scope": "current_activity",
-            "delivery": "channel_contextual",
+            "delivery": "durable_confirmation_inbox",
         },
     }
 
@@ -82,6 +86,25 @@ class CustomerActivityProcessingService:
     async def trigger_evaluation(self, activity_id: int, team_id: int) -> None:
         asyncio.create_task(self.evaluate(activity_id=activity_id, team_id=team_id))
 
+    def enqueue_post_commit_workflow(
+        self,
+        *,
+        activity_id: int,
+        team_id: int,
+        trigger_type: str,
+        actor_id: str | None = None,
+        activity_revision: int | None = None,
+    ) -> CustomerActivityPostCommitJobRequest:
+        """Persist the revision-scoped job before any best-effort execution begins."""
+
+        return customer_activity_post_commit_job_service.enqueue(
+            activity_id=activity_id,
+            team_id=team_id,
+            trigger_type=trigger_type,
+            actor_id=actor_id,
+            activity_revision=activity_revision,
+        )
+
     async def run_post_commit_workflow(
         self,
         *,
@@ -89,46 +112,35 @@ class CustomerActivityProcessingService:
         team_id: int,
         trigger_type: str,
         actor_id: str | None = None,
+        activity_revision: int | None = None,
     ) -> Dict[str, Any]:
         logger.info(
-            "开始客户活动后提交 workflow: activity_id=%s, team_id=%s, trigger_type=%s",
+            "持久化并执行客户活动后提交 workflow: activity_id=%s, team_id=%s, trigger_type=%s",
             activity_id,
             team_id,
             trigger_type,
         )
+        request = self.enqueue_post_commit_workflow(
+            activity_id=activity_id,
+            team_id=team_id,
+            trigger_type=trigger_type,
+            actor_id=actor_id,
+            activity_revision=activity_revision,
+        )
         try:
-            state = await customer_activity_post_commit_workflow.run(
-                activity_id=activity_id,
-                team_id=team_id,
-                trigger_type=trigger_type,
-                actor_id=actor_id,
-            )
-            logger.info(
-                "客户活动后提交 workflow 完成: activity_id=%s, skip_reason=%s, error=%s",
-                activity_id,
-                state.get("skip_reason"),
-                state.get("error_message"),
-            )
-            return {
-                "success": not bool(state.get("error_message")),
-                "activity_id": activity_id,
-                "skip_reason": state.get("skip_reason"),
-                "error": state.get("error_message"),
-                "projection_result": state.get("projection_result"),
-                "match_result": state.get("match_result"),
-                "transition_plan": state.get("transition_plan"),
-                "policy_results": state.get("policy_results") or [],
-                "execution_results": state.get("execution_results") or [],
-                "confirmation_cases": state.get("confirmation_cases") or [],
-                "post_commit": state.get("post_commit") or _empty_post_commit_outcome(),
-            }
+            return await customer_activity_post_commit_job_service.run(request)
         except Exception as exc:
-            logger.exception("客户活动后提交 workflow 调度失败: activity_id=%s", activity_id)
+            logger.exception(
+                "客户活动后提交持久任务执行失败: activity_id=%s job=%s",
+                activity_id,
+                request.job_public_id,
+            )
             return {
                 "success": False,
                 "activity_id": activity_id,
                 "error": str(exc),
                 "post_commit": _empty_post_commit_outcome(),
+                "post_commit_job": request.model_dump(),
             }
 
     async def trigger_post_commit_workflow(
@@ -138,15 +150,19 @@ class CustomerActivityProcessingService:
         team_id: int,
         trigger_type: str,
         actor_id: str | None = None,
-    ) -> None:
-        asyncio.create_task(
-            self.run_post_commit_workflow(
-                activity_id=activity_id,
-                team_id=team_id,
-                trigger_type=trigger_type,
-                actor_id=actor_id,
-            )
+        activity_revision: int | None = None,
+    ) -> CustomerActivityPostCommitJobRequest:
+        """Durably enqueue, then best-effort kick for low latency."""
+
+        request = self.enqueue_post_commit_workflow(
+            activity_id=activity_id,
+            team_id=team_id,
+            trigger_type=trigger_type,
+            actor_id=actor_id,
+            activity_revision=activity_revision,
         )
+        customer_activity_post_commit_job_service.kick(request)
+        return request
 
     async def recover_unfinished(self, limit: int = 100) -> int:
         db = SessionLocal()

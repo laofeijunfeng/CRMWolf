@@ -174,6 +174,22 @@ def test_reconciliation_candidates_return_same_owner_open_tasks_only_by_default(
     assert run.candidate_public_ids_json == [expected.public_id]
 
 
+def test_reconciliation_candidates_never_cross_customer_boundary(db_session):
+    same_customer = _create_task(db_session, customer_id=1, task_hash="same-customer")
+    other_customer = _create_task(db_session, customer_id=2, task_hash="other-customer-same-owner")
+
+    result = task_reconciliation_service.list_candidates_for_activity(
+        db_session,
+        team_id=1,
+        activity_id=101,
+        anchor_at=datetime(2026, 8, 6, 10, 0, 0),
+    )
+
+    candidate_public_ids = [item.public_id for item in result.items]
+    assert candidate_public_ids == [same_customer.public_id]
+    assert other_customer.public_id not in candidate_public_ids
+
+
 def test_reconciliation_candidates_exclude_tasks_sourced_from_current_activity(db_session):
     previous_task = _create_task(db_session, source_activity_id=100, task_hash="previous-task")
     current_activity_task = _create_task(db_session, source_activity_id=101, task_hash="current-task")

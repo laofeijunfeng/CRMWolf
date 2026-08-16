@@ -6,7 +6,7 @@
 
     from app.services.operation_log_service import operation_log_service
     from app.constants.operation_log_events import EventTypes, ResourceTypes, EventActions
-    
+
     # 记录线索创建
     operation_log_service.log(
         db=db,
@@ -32,7 +32,7 @@ from app.crud.operation_log import operation_log_crud
 
 class OperationLogService:
     """操作记录服务"""
-    
+
     def log(
         self,
         db: Session,
@@ -46,7 +46,8 @@ class OperationLogService:
         secondary_resource_type: Optional[str] = None,
         secondary_resource_id: Optional[int] = None,
         remark: Optional[str] = None,
-        team_id: Optional[int] = None
+        team_id: Optional[int] = None,
+        commit: bool = True,
     ) -> Optional[object]:
         """
         记录操作日志
@@ -75,14 +76,14 @@ class OperationLogService:
                 operator_id=operator_id,
                 operator_name=operator_name,
                 content=content,
-                remark=remark
+                remark=remark,
             )
 
-            return operation_log_crud.create(db, log_data, team_id=team_id)
+            return operation_log_crud.create(db, log_data, team_id=team_id, commit=commit)
         except Exception as e:
             print(f"记录操作日志失败: {str(e)}")
             return None
-    
+
     def log_lead_created(
         self,
         db: Session,
@@ -91,7 +92,7 @@ class OperationLogService:
         source: str,
         city: str,
         operator_id: str,
-        operator_name: Optional[str] = None
+        operator_name: Optional[str] = None,
     ):
         """记录线索创建"""
         return self.log(
@@ -102,13 +103,9 @@ class OperationLogService:
             resource_id=lead_id,
             operator_id=operator_id,
             operator_name=operator_name,
-            content={
-                "leadName": lead_name,
-                "source": source,
-                "city": city
-            }
+            content={"leadName": lead_name, "source": source, "city": city},
         )
-    
+
     def log_lead_converted(
         self,
         db: Session,
@@ -118,7 +115,7 @@ class OperationLogService:
         customer_name: str,
         operator_id: str,
         operator_name: Optional[str] = None,
-        team_id: Optional[int] = None
+        team_id: Optional[int] = None,
     ):
         """记录线索转化"""
         return self.log(
@@ -132,13 +129,9 @@ class OperationLogService:
             operator_id=operator_id,
             operator_name=operator_name,
             team_id=team_id,
-            content={
-                "originalLeadName": lead_name,
-                "newCustomerName": customer_name,
-                "newCustomerId": customer_id
-            }
+            content={"originalLeadName": lead_name, "newCustomerName": customer_name, "newCustomerId": customer_id},
         )
-    
+
     def log_customer_activity(
         self,
         db: Session,
@@ -150,13 +143,11 @@ class OperationLogService:
         next_follow_time: Optional[str] = None,
         next_action: Optional[str] = None,
         team_id: Optional[int] = None,
-        activity_id: Optional[int] = None
+        activity_id: Optional[int] = None,
+        commit: bool = True,
     ):
         """记录客户活动"""
-        content_data = {
-            "content": activity_content,
-            "activity_kind": activity_kind
-        }
+        content_data = {"content": activity_content, "activity_kind": activity_kind}
         if next_follow_time:
             content_data["next_follow_up_date"] = next_follow_time
         if next_action:
@@ -175,7 +166,8 @@ class OperationLogService:
             operator_id=operator_id,
             operator_name=operator_name,
             content=content_data,
-            team_id=team_id
+            team_id=team_id,
+            commit=commit,
         )
 
     def log_lead_follow_up(
@@ -189,13 +181,10 @@ class OperationLogService:
         next_follow_time: Optional[str] = None,
         next_action: Optional[str] = None,
         team_id: Optional[int] = None,
-        follow_up_id: Optional[int] = None
+        follow_up_id: Optional[int] = None,
     ):
         """记录线索跟进"""
-        content_data = {
-            "content": follow_up_content,
-            "method": method
-        }
+        content_data = {"content": follow_up_content, "method": method}
         if next_follow_time:
             content_data["next_follow_up_date"] = next_follow_time
         if next_action:
@@ -212,9 +201,9 @@ class OperationLogService:
             operator_id=operator_id,
             operator_name=operator_name,
             content=content_data,
-            team_id=team_id
+            team_id=team_id,
         )
-    
+
     def log_opportunity_created(
         self,
         db: Session,
@@ -223,7 +212,7 @@ class OperationLogService:
         expected_amount: float,
         stage: str,
         operator_id: str,
-        operator_name: Optional[str] = None
+        operator_name: Optional[str] = None,
     ):
         """记录商机创建"""
         return self.log(
@@ -234,13 +223,9 @@ class OperationLogService:
             resource_id=opportunity_id,
             operator_id=operator_id,
             operator_name=operator_name,
-            content={
-                "opportunityName": opportunity_name,
-                "expectedAmount": expected_amount,
-                "stage": stage
-            }
+            content={"opportunityName": opportunity_name, "expectedAmount": expected_amount, "stage": stage},
         )
-    
+
     def log_contract_created(
         self,
         db: Session,
@@ -248,7 +233,7 @@ class OperationLogService:
         contract_name: str,
         amount: float,
         operator_id: str,
-        operator_name: Optional[str] = None
+        operator_name: Optional[str] = None,
     ):
         """记录合同创建"""
         return self.log(
@@ -259,12 +244,9 @@ class OperationLogService:
             resource_id=contract_id,
             operator_id=operator_id,
             operator_name=operator_name,
-            content={
-                "contractName": contract_name,
-                "amount": float(amount)
-            }
+            content={"contractName": contract_name, "amount": float(amount)},
         )
-    
+
     def log_contract_status_changed(
         self,
         db: Session,
@@ -272,7 +254,7 @@ class OperationLogService:
         previous_status: str,
         current_status: str,
         operator_id: str,
-        operator_name: Optional[str] = None
+        operator_name: Optional[str] = None,
     ):
         """记录合同状态变更"""
         return self.log(
@@ -283,10 +265,7 @@ class OperationLogService:
             resource_id=contract_id,
             operator_id=operator_id,
             operator_name=operator_name,
-            content={
-                "previousStatus": previous_status,
-                "currentStatus": current_status
-            }
+            content={"previousStatus": previous_status, "currentStatus": current_status},
         )
 
 

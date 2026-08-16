@@ -18,6 +18,7 @@ from app.models.sales_commitment import (
     FollowUpTaskConfirmationPromptDelivery,
     FollowUpTaskConfirmationPromptStatus,
     FollowUpTaskConfirmationResolutionAction,
+    FollowUpTaskConfirmationStatus,
     FollowUpTaskEvent,
     FollowUpTaskProjectionRun,
     FollowUpTaskSourceType,
@@ -71,6 +72,7 @@ def db_session():
     )
     Session = sessionmaker(bind=engine)
     session = Session()
+    session.info["session_factory"] = Session
     _seed_customer_and_activity(session)
     session.commit()
     yield session
@@ -99,6 +101,18 @@ def _seed_customer_and_activity(db_session) -> None:
             occurred_at=datetime(2026, 8, 6, 10, 0, 0),
             owner_id="2",
             creator_id="2",
+        ),
+        CustomerActivity(
+            id=190,
+            team_id=1,
+            customer_id=1,
+            activity_kind="PHONE_FOLLOW_UP",
+            source_content="客户确认预算已通过。",
+            summary="客户确认预算已通过。",
+            occurred_at=datetime(2026, 8, 6, 11, 0, 0),
+            owner_id="2",
+            creator_id="2",
+            post_commit_revision=1,
         ),
     ])
 
@@ -158,6 +172,7 @@ def _create_confirmation_case(
     *,
     source_activity_public_id: str = "act_22222222222222222222222222222222",
     source_activity_id: int | None = None,
+    source_activity_revision: int | None = None,
 ) -> FollowUpTaskConfirmationCase:
     plan = FollowUpTaskTransitionPlanService().plan(
         FollowUpTaskReconciliationDecision(
@@ -188,6 +203,7 @@ def _create_confirmation_case(
         action=plan.actions[0],
         actor_id=task.owner_id,
         source_activity_id=source_activity_id,
+        source_activity_revision=source_activity_revision,
         source_public_id=source_activity_public_id,
     ).case
 
@@ -239,18 +255,21 @@ def test_prompt_cases_by_public_ids_prompts_requested_owner_cases_without_owner_
         db_session,
         first_task,
         source_activity_id=190,
+        source_activity_revision=1,
         source_activity_public_id="act_33333333333333333333333333333333",
     )
     second_case = _create_confirmation_case(
         db_session,
         second_task,
         source_activity_id=190,
+        source_activity_revision=1,
         source_activity_public_id="act_33333333333333333333333333333333",
     )
     other_owner_case = _create_confirmation_case(
         db_session,
         other_owner_task,
         source_activity_id=190,
+        source_activity_revision=1,
         source_activity_public_id="act_33333333333333333333333333333333",
     )
     now = datetime(2026, 8, 6, 11, 30, 0)
@@ -300,6 +319,7 @@ def test_prompt_cases_by_public_ids_respects_case_cooldown(db_session):
         db_session,
         task,
         source_activity_id=190,
+        source_activity_revision=1,
         source_activity_public_id="act_33333333333333333333333333333333",
     )
     service = FollowUpTaskConfirmationChannelService(prompt_cooldown=timedelta(hours=4))
@@ -335,6 +355,7 @@ def test_prompt_cases_by_public_ids_respects_case_prompt_limit(db_session):
         db_session,
         task,
         source_activity_id=190,
+        source_activity_revision=1,
         source_activity_public_id="act_33333333333333333333333333333333",
     )
     service = FollowUpTaskConfirmationChannelService(
@@ -564,6 +585,201 @@ def test_mark_projection_projected_transitions_queued_attempt_idempotently(db_se
     assert second.status == FollowUpTaskConfirmationPromptStatus.PROJECTED
     assert second.reason_code == "ROOT_GRAPH_INTERRUPT_CHECKPOINTED"
 
+
+def test_mark_projection_projected_skips_superseded_source_activity_revision(db_session):
+    task = _create_task(db_session)
+    case = _create_confirmation_case(
+        db_session,
+        task,
+        source_activity_id=101,
+        source_activity_revision=1,
+    )
+    service = FollowUpTaskConfirmationChannelService()
+    event = service.prepare_case_prompt_by_public_ids(
+        db_session,
+        team_id=1,
+        user_id=2,
+        case_public_ids=[case.public_id],
+        interaction_scope="crm_agent:1:2:33:test",
+    )
+    prompt_key = event["interaction"]["payload"]["prompt_delivery_key"]
+    activity = db_session.query(CustomerActivity).filter(CustomerActivity.id == 101).one()
+    activity.post_commit_revision = 2
+    db_session.commit()
+
+    delivery = service.mark_projection_projected(db_session, team_id=1, prompt_key=prompt_key)
+    failed = service.mark_projection_failed(
+        db_session,
+        team_id=1,
+        prompt_key=prompt_key,
+        error_message="late projection audit callback",
+    )
+
+    db_session.refresh(case)
+    assert delivery is not None
+    assert failed is not None
+    assert failed.id == delivery.id
+    assert delivery.status == FollowUpTaskConfirmationPromptStatus.SKIPPED
+    assert delivery.reason_code == "SUPERSEDED_ACTIVITY_REVISION"
+    assert case.status == FollowUpTaskConfirmationStatus.CANCELLED
+    assert case.cancelled_reason == "SOURCE_ACTIVITY_REVISION_SUPERSEDED"
+    assert case.prompt_count == 0
+
+
+def test_case_pending_revalidation_uses_an_owned_transaction(db_session):
+    task = _create_task(db_session)
+    case = _create_confirmation_case(db_session, task)
+    service = FollowUpTaskConfirmationChannelService(
+        session_factory=db_session.info["session_factory"],
+    )
+
+    customer = db_session.query(Customer).filter_by(id=1).one()
+    customer.account_name = "未提交的调用方修改"
+
+    pending = service.revalidate_case_pending_for_owner(
+        team_id=1,
+        user_id=2,
+        case_public_id=case.public_id,
+    )
+
+    assert pending is True
+    assert db_session.in_transaction() is True
+    db_session.rollback()
+    db_session.expire_all()
+    assert db_session.query(Customer).filter_by(id=1).one().account_name != "未提交的调用方修改"
+
+
+def test_case_pending_revalidation_cancels_superseded_source_activity_revision(db_session):
+    task = _create_task(db_session)
+    case = _create_confirmation_case(
+        db_session,
+        task,
+        source_activity_id=101,
+        source_activity_revision=1,
+    )
+    activity = db_session.query(CustomerActivity).filter(CustomerActivity.id == 101).one()
+    activity.post_commit_revision = 2
+    db_session.commit()
+
+    pending = FollowUpTaskConfirmationChannelService(
+        session_factory=db_session.info["session_factory"],
+    ).revalidate_case_pending_for_owner(
+        team_id=1,
+        user_id=2,
+        case_public_id=case.public_id,
+    )
+
+    db_session.refresh(case)
+    assert pending is False
+    assert case.status == FollowUpTaskConfirmationStatus.CANCELLED
+    assert case.cancelled_reason == "SOURCE_ACTIVITY_REVISION_SUPERSEDED"
+
+def test_web_visibility_ack_skips_superseded_source_activity_revision(db_session):
+    task = _create_task(db_session)
+    case = _create_confirmation_case(
+        db_session,
+        task,
+        source_activity_id=101,
+        source_activity_revision=1,
+    )
+    service = FollowUpTaskConfirmationChannelService()
+    event = service.prepare_case_prompt_by_public_ids(
+        db_session,
+        team_id=1,
+        user_id=2,
+        case_public_ids=[case.public_id],
+        interaction_scope="crm_agent:1:2:33:test",
+    )
+    prompt_key = event["interaction"]["payload"]["prompt_delivery_key"]
+    projected = service.mark_projection_projected(db_session, team_id=1, prompt_key=prompt_key)
+    assert projected.status == FollowUpTaskConfirmationPromptStatus.PROJECTED
+
+    activity = db_session.query(CustomerActivity).filter(CustomerActivity.id == 101).one()
+    activity.post_commit_revision = 2
+    db_session.commit()
+
+    delivery = service.acknowledge_web_message_visible(
+        db_session,
+        team_id=1,
+        prompt_key=prompt_key,
+        provider_message_id="agent_message:99",
+    )
+
+    db_session.refresh(case)
+    assert delivery is not None
+    assert delivery.status == FollowUpTaskConfirmationPromptStatus.SKIPPED
+    assert delivery.reason_code == "SUPERSEDED_ACTIVITY_REVISION"
+    assert delivery.provider_message_id is None
+    assert case.status == FollowUpTaskConfirmationStatus.CANCELLED
+    assert case.prompt_count == 0
+    assert case.last_prompted_at is None
+
+
+def test_agent_message_visibility_acknowledges_sent_once(db_session):
+    task = _create_task(db_session)
+    case = _create_confirmation_case(db_session, task)
+    service = FollowUpTaskConfirmationChannelService()
+    event = service.prepare_case_prompt_by_public_ids(
+        db_session,
+        team_id=1,
+        user_id=2,
+        case_public_ids=[case.public_id],
+        interaction_scope="crm_agent:1:2:33:test",
+    )
+    prompt_key = event["interaction"]["payload"]["prompt_delivery_key"]
+    service.mark_projection_projected(db_session, team_id=1, prompt_key=prompt_key)
+
+    first = service.acknowledge_agent_message_visible(
+        db_session, team_id=1, prompt_key=prompt_key, provider_message_id="agent_message:99"
+    )
+    second = service.acknowledge_agent_message_visible(
+        db_session, team_id=1, prompt_key=prompt_key, provider_message_id="agent_message:99"
+    )
+
+    db_session.refresh(case)
+    assert first.status == FollowUpTaskConfirmationPromptStatus.SENT
+    assert second.status == FollowUpTaskConfirmationPromptStatus.SENT
+    assert second.provider_message_id == "agent_message:99"
+    assert case.prompt_count == 1
+    assert case.last_prompted_at is not None
+
+
+def test_late_projection_failure_preserves_sent_terminal_delivery(db_session):
+    task = _create_task(db_session)
+    case = _create_confirmation_case(db_session, task)
+    service = FollowUpTaskConfirmationChannelService()
+    event = service.prepare_case_prompt_by_public_ids(
+        db_session,
+        team_id=1,
+        user_id=2,
+        case_public_ids=[case.public_id],
+        interaction_scope="crm_agent:1:2:33:test",
+    )
+    prompt_key = event["interaction"]["payload"]["prompt_delivery_key"]
+    service.mark_projection_projected(db_session, team_id=1, prompt_key=prompt_key)
+    sent = service.acknowledge_agent_message_visible(
+        db_session,
+        team_id=1,
+        prompt_key=prompt_key,
+        provider_message_id="agent_message:99",
+    )
+
+    failed = service.mark_projection_failed(
+        db_session,
+        team_id=1,
+        prompt_key=prompt_key,
+        error_message="late projection audit callback",
+    )
+
+    db_session.refresh(case)
+    assert failed is not None
+    assert failed.id == sent.id
+    assert failed.status == FollowUpTaskConfirmationPromptStatus.SENT
+    assert failed.reason_code == "WEB_ASSISTANT_MESSAGE_VISIBLE"
+    assert failed.provider_message_id == "agent_message:99"
+    assert case.prompt_count == 1
+
+
 def test_failed_projection_can_be_requeued_and_projected_with_same_prompt_key(db_session):
     task = _create_task(db_session)
     case = _create_confirmation_case(db_session, task)
@@ -656,6 +872,93 @@ def test_prepare_case_prompt_records_owner_mismatch_as_skipped(db_session):
     assert delivery.delivered_at is None
 
 
+def test_prepare_case_prompt_cancels_superseded_source_activity_revision(db_session):
+    task = _create_task(db_session)
+    case = _create_confirmation_case(
+        db_session,
+        task,
+        source_activity_id=101,
+        source_activity_revision=1,
+    )
+    activity = db_session.query(CustomerActivity).filter_by(id=101, team_id=1).one()
+    activity.post_commit_revision = 2
+    db_session.commit()
+
+    event = FollowUpTaskConfirmationChannelService().prepare_case_prompt_by_public_ids(
+        db_session,
+        team_id=1,
+        user_id=2,
+        case_public_ids=[case.public_id],
+        interaction_scope="crm_agent:1:2:33:superseded",
+    )
+
+    db_session.refresh(case)
+    delivery = db_session.query(FollowUpTaskConfirmationPromptDelivery).one()
+    assert event is None
+    assert case.status == "CANCELLED"
+    assert case.cancelled_reason == "SOURCE_ACTIVITY_REVISION_SUPERSEDED"
+    assert delivery.status == FollowUpTaskConfirmationPromptStatus.SKIPPED
+    assert delivery.reason_code == "SUPERSEDED_ACTIVITY_REVISION"
+    assert delivery.source_activity_id == 101
+    assert delivery.expected_activity_revision == 1
+
+
+def test_synchronous_prompt_cancels_case_when_source_activity_was_deleted(db_session):
+    task = _create_task(db_session)
+    case = _create_confirmation_case(
+        db_session,
+        task,
+        source_activity_id=101,
+        source_activity_revision=1,
+    )
+    activity = db_session.query(CustomerActivity).filter_by(id=101, team_id=1).one()
+    db_session.delete(activity)
+    db_session.commit()
+
+    events = FollowUpTaskConfirmationChannelService().prompt_cases_by_public_ids(
+        db_session,
+        team_id=1,
+        user_id=2,
+        case_public_ids=[case.public_id],
+        channel="web",
+    )
+
+    db_session.refresh(case)
+    delivery = db_session.query(FollowUpTaskConfirmationPromptDelivery).one()
+    assert events == []
+    assert case.status == "CANCELLED"
+    assert case.cancelled_reason == "SOURCE_ACTIVITY_DELETED"
+    assert delivery.status == FollowUpTaskConfirmationPromptStatus.SKIPPED
+    assert delivery.reason_code == "ACTIVITY_NOT_FOUND"
+    assert delivery.source_activity_id == 101
+    assert delivery.expected_activity_revision == 1
+
+
+def test_confirmation_case_identity_allows_a_new_activity_revision_generation(db_session):
+    task = _create_task(db_session)
+    first = _create_confirmation_case(
+        db_session,
+        task,
+        source_activity_id=101,
+        source_activity_revision=1,
+    )
+    first.status = "CANCELLED"
+    first.cancelled_reason = "SOURCE_ACTIVITY_REVISION_SUPERSEDED"
+    db_session.commit()
+
+    second = _create_confirmation_case(
+        db_session,
+        task,
+        source_activity_id=101,
+        source_activity_revision=2,
+    )
+
+    assert second.id != first.id
+    assert second.confirmation_hash != first.confirmation_hash
+    assert second.source_activity_revision == 2
+    assert db_session.query(FollowUpTaskConfirmationCase).count() == 2
+
+
 def test_record_projection_failure_creates_bounded_failed_attempt_for_long_scope(db_session):
     task = _create_task(db_session)
     case = _create_confirmation_case(db_session, task)
@@ -677,6 +980,8 @@ def test_record_projection_failure_creates_bounded_failed_attempt_for_long_scope
     assert deliveries[0].prompt_key == service._projection_prompt_key(
         case_public_id=case.public_id,
         interaction_scope=interaction_scope,
+        source_activity_id=case.source_activity_id,
+        source_activity_revision=case.source_activity_revision,
     )
     assert len(deliveries[0].prompt_key) <= 128
     assert deliveries[0].thread_id == interaction_scope

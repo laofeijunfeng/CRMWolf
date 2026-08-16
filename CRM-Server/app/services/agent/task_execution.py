@@ -1,53 +1,35 @@
 """Agent confirmed task execution."""
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass, field
-import json
-import uuid
-from typing import Optional
 
-from fastapi import HTTPException, status
+from fastapi import status
 from pydantic import ValidationError
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.crud.agent import agent_session_crud, agent_task_crud
-from app.crud.procurement import procurement_method_crud
+from app.crud.agent import agent_task_crud
 from app.models.agent import AgentTaskStatus
-from app.models.customer import Customer
 from app.schemas.agent import (
-    AgentCreateSessionRequest,
-    AgentSessionCreate,
-    AgentSessionUpdate,
-    AgentTaskCreate,
     AgentTaskUpdate,
 )
-from app.services.agent.guardrails import AgentToolExecutionPolicy
-from app.services.agent.quality import AgentFollowUpQualityEvaluatorError, agent_follow_up_quality_evaluator
-from app.services.agent.runtime import AgentToolRuntime
-from app.services.agent.schemas import (
-    AgentHITLPolicy,
-    AgentMemorySnapshot,
-    AgentPendingInterruptionDecision,
-    AgentSemanticParseResult,
-)
-from app.services.agent.semantic import AgentSemanticParserError, agent_semantic_parser
-from app.services.agent.temporal import agent_temporal_resolver
-from app.services.agent.tools.api_client import CRMAPIClientError
-from app.services.agent.tool_registry import AgentToolRegistry
-from app.services.agent.tools import CRMAgentToolService
-from app.services.agent.tools.base import AgentToolContext, AgentToolResult
-from app.services.agent.types import AgentRuntimeEventSink, JSONDict, coerce_json_dict
-from app.utils.sse_encoder import SSEJsonEncoder
-
 from app.services.agent import action_workflow, agent_copy, task_display, workflow_action_ledger
 from app.services.agent.follow_up_fields import (
     _stage_customer_activity_after_create,
     _stage_lead_follow_up_after_create,
 )
+from app.services.agent.guardrails import AgentToolExecutionPolicy
+from app.services.agent.next_waiting_task_projection import (
+    NextWaitingTaskProjectionRequest,
+    NextWaitingTaskSpec,
+    next_waiting_task_projector,
+)
+from app.services.agent.runtime import AgentToolRuntime
 from app.services.agent.task_actions import _tool_name_for_action, _tool_payload_for_action
-from app.services.agent.task_factory import _new_task_key, _task_target_id
+from app.services.agent.task_factory import _task_target_id
+from app.services.agent.tool_registry import AgentToolRegistry
+from app.services.agent.tools import CRMAgentToolService
+from app.services.agent.tools.base import AgentToolContext, AgentToolResult
+from app.services.agent.types import AgentRuntimeEventSink, JSONDict, coerce_json_dict
 
 
 @dataclass(frozen=True)
@@ -325,50 +307,31 @@ async def _execute_waiting_task(
                     "payment_plan_id": created_plan.get("id"),
                     **pending_record,
                 }
-                next_workflow = action_workflow.required_write_contract(action="create_payment_record")
                 next_target_id = _task_target_id(
                     db,
                     team_id=team_id,
                     target_type="customer",
                     target_id=customer.get("id"),
                 )
-                next_task = agent_task_crud.create(
-                    db,
-                    AgentTaskCreate(
-                        task_key=_new_task_key(),
-                        team_id=team_id,
-                        user_id=user_id,
-                        session_id=session.id,
-                        intent="PAYMENT_RECORD",
-                        status=AgentTaskStatus.WAITING_USER,
-                        target_type="customer",
-                        target_id=next_target_id,
-                        summary="登记本次回款",
-                        input_json=next_payload,
-                        state_json={
-                            "action": "create_payment_record",
-                            "payload": next_payload,
-                            "customer": customer,
-                            "workflow": next_workflow,
-                            "hitl": AgentHITLPolicy(
-                                required_for_tools=["create_payment_record"],
-                                confirmation_summary="登记本次回款",
-                            ).model_dump(exclude_none=True),
-                        },
-                    ),
-                )
-                workflow_action_ledger.create_or_update_waiting_action(
-                    db,
-                    workflow=next_workflow,
+                next_task = next_waiting_task_projector.project(NextWaitingTaskProjectionRequest(
+                    db=db,
+                    parent_task=task,
                     team_id=team_id,
                     user_id=user_id,
                     session_id=session.id,
-                    task_id=next_task.id,
-                    source_type=workflow_action_ledger.SOURCE_AGENT_PLANNING,
-                    payload=next_payload,
-                    target_type="customer",
-                    target_id=next_target_id,
-                )
+                    spec=NextWaitingTaskSpec(
+                        slot="payment_record_after_plan",
+                        action="create_payment_record",
+                        intent="PAYMENT_RECORD",
+                        target_type="customer",
+                        target_id=next_target_id,
+                        summary="登记本次回款",
+                        payload=next_payload,
+                        state_context={"customer": customer},
+                        required_tools=("create_payment_record",),
+                        confirmation_summary="登记本次回款",
+                    ),
+                )).task
                 return WaitingTaskExecutionResult(result, "回款计划已创建。请确认是否登记本次回款？", next_task, progress_events)
             return WaitingTaskExecutionResult(result, "回款计划已创建。", progress_events=progress_events)
         if action == "create_payment_record":
@@ -453,7 +416,6 @@ async def _execute_waiting_task(
         if action == "create_customer_activity" and isinstance(payload.get("_next_task"), dict):
             next_action = payload["_next_task"]
             next_payload = next_action.get("payload") or {}
-            next_workflow = action_workflow.ensure_event_workflow(next_action)
             next_content = next_action.get("content")
             next_summary = (
                 next_content
@@ -466,46 +428,29 @@ async def _execute_waiting_task(
                 target_type="customer",
                 target_id=next_payload.get("customer_id") or customer.get("id"),
             )
-            next_task = agent_task_crud.create(
-                db,
-                AgentTaskCreate(
-                    task_key=_new_task_key(),
-                    team_id=team_id,
-                    user_id=user_id,
-                    session_id=session.id,
-                    intent="CUSTOMER_ACTIVITY",
-                    status=AgentTaskStatus.WAITING_USER,
-                    target_type="customer",
-                    target_id=next_target_id,
-                    summary=next_summary,
-                    input_json=next_payload,
-                    state_json={
-                        "action": next_action.get("action"),
-                        "payload": next_payload,
-                        "customer": next_action.get("customer") or customer,
-                        "opportunities": next_action.get("opportunities") or [],
-                        "workflow": next_workflow,
-                        "hitl": AgentHITLPolicy(
-                            required_for_tools=[_tool_name_for_action(next_action.get("action"))]
-                            if _tool_name_for_action(next_action.get("action"))
-                            else [],
-                            confirmation_summary=next_action.get("content") or "等待确认执行下一步动作",
-                        ).model_dump(exclude_none=True),
-                    },
-                ),
-            )
-            workflow_action_ledger.create_or_update_waiting_action(
-                db,
-                workflow=next_workflow,
+            next_tool = _tool_name_for_action(next_action.get("action"))
+            next_task = next_waiting_task_projector.project(NextWaitingTaskProjectionRequest(
+                db=db,
+                parent_task=task,
                 team_id=team_id,
                 user_id=user_id,
                 session_id=session.id,
-                task_id=next_task.id,
-                source_type=workflow_action_ledger.SOURCE_AGENT_PLANNING,
-                payload=next_payload,
-                target_type="customer",
-                target_id=next_target_id,
-            )
+                spec=NextWaitingTaskSpec(
+                    slot="deferred_next_task_after_customer_activity",
+                    action=str(next_action.get("action") or ""),
+                    intent="CUSTOMER_ACTIVITY",
+                    target_type="customer",
+                    target_id=next_target_id,
+                    summary=next_summary,
+                    payload=next_payload,
+                    state_context={
+                        "customer": next_action.get("customer") or customer,
+                        "opportunities": next_action.get("opportunities") or [],
+                    },
+                    required_tools=(next_tool,) if next_tool else (),
+                    confirmation_summary=next_action.get("content") or "等待确认执行下一步动作",
+                ),
+            )).task
             return WaitingTaskExecutionResult(
                 result,
                 agent_copy.customer_activity_created_with_next(next_action.get("content")),

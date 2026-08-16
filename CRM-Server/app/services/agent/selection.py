@@ -1,17 +1,18 @@
 """Agent pending task selection handlers."""
 from __future__ import annotations
 
-from copy import deepcopy
 import json
 import uuid
 from collections.abc import Mapping
+from copy import deepcopy
 from typing import Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.crud.agent import agent_session_crud, agent_task_crud
+from app.crud.agent import agent_session_crud
+from app.crud.agent import agent_task_crud as agent_task_crud
 from app.crud.procurement import procurement_method_crud
 from app.models.agent import AgentTaskStatus
 from app.models.customer import Customer
@@ -24,6 +25,12 @@ from app.schemas.agent import (
 )
 from app.services.agent import business_rules, choice_resolution, task_display
 from app.services.agent.guardrails import AgentToolExecutionPolicy
+from app.services.agent.interactions import (
+    _customer_requires_procurement_method,
+    _opportunity_field_defaults,
+    _opportunity_interaction_fields,
+    _opportunity_missing_display_fields,
+)
 from app.services.agent.quality import AgentFollowUpQualityEvaluatorError, agent_follow_up_quality_evaluator
 from app.services.agent.resource_resolution_graph import resource_resolution_graph_service
 from app.services.agent.runtime import AgentToolRuntime
@@ -35,22 +42,16 @@ from app.services.agent.schemas import (
 )
 from app.services.agent.semantic import AgentSemanticParserError, agent_semantic_parser
 from app.services.agent.state import ResourceResolutionGraphState
+from app.services.agent.task_actions import _tool_name_for_action
 from app.services.agent.task_factory import _task_target_id
+from app.services.agent.task_projection import update_agent_task
 from app.services.agent.temporal import agent_temporal_resolver
-from app.services.agent.tools.api_client import CRMAPIClientError
 from app.services.agent.tool_registry import AgentToolRegistry
 from app.services.agent.tools import CRMAgentToolService
+from app.services.agent.tools.api_client import CRMAPIClientError
 from app.services.agent.tools.base import AgentToolContext
 from app.services.agent.types import JSONDict, coerce_json_dict, coerce_json_value
 from app.utils.sse_encoder import SSEJsonEncoder
-
-from app.services.agent.interactions import (
-    _customer_requires_procurement_method,
-    _opportunity_field_defaults,
-    _opportunity_interaction_fields,
-    _opportunity_missing_display_fields,
-)
-from app.services.agent.task_actions import _tool_name_for_action
 
 
 def _is_customer_selection_task(task) -> bool:
@@ -385,7 +386,7 @@ async def _apply_customer_selection(
         return None, f"没有匹配到你选择的客户，请告诉我要选择哪一个：{candidate_names}"
 
     if action == "select_customer_for_payment_record":
-        agent_task_crud.update(
+        update_agent_task(
             db,
             task,
             AgentTaskUpdate(
@@ -424,7 +425,7 @@ async def _apply_customer_selection(
             confirmation_summary=message,
         ).model_dump(exclude_none=True),
     }
-    agent_task_crud.update(
+    update_agent_task(
         db,
         task,
         AgentTaskUpdate(
@@ -536,7 +537,7 @@ async def _apply_business_selection(
                 confirmation_summary=message,
             ).model_dump(exclude_none=True),
         }
-        agent_task_crud.update(
+        update_agent_task(
             db,
             task,
             AgentTaskUpdate(summary=message, input_json=next_payload, state_json=new_state),
@@ -574,7 +575,7 @@ async def _apply_business_selection(
                 confirmation_summary=f"登记回款到「{plan.get('stage_name')}」",
             ).model_dump(exclude_none=True),
         }
-        agent_task_crud.update(db, task, AgentTaskUpdate(summary=f"登记回款到「{plan.get('stage_name')}」", input_json=next_payload, state_json=new_state))
+        update_agent_task(db, task, AgentTaskUpdate(summary=f"登记回款到「{plan.get('stage_name')}」", input_json=next_payload, state_json=new_state))
         return plan, f"已选择回款计划「{plan.get('stage_name')}」。请确认是否登记这笔回款？"
 
     if action == "select_contract_for_payment_plan":
@@ -608,7 +609,7 @@ async def _apply_business_selection(
                 confirmation_summary=f"基于合同「{contract.get('contract_name')}」创建回款计划",
             ).model_dump(exclude_none=True),
         }
-        agent_task_crud.update(db, task, AgentTaskUpdate(summary=f"基于合同「{contract.get('contract_name')}」创建回款计划", input_json=next_payload, state_json=new_state))
+        update_agent_task(db, task, AgentTaskUpdate(summary=f"基于合同「{contract.get('contract_name')}」创建回款计划", input_json=next_payload, state_json=new_state))
         return contract, f"已选择合同「{contract.get('contract_name')}」。请确认是否先创建回款计划？"
 
     return None, f"暂不支持的选择动作：{action}"

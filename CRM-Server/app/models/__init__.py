@@ -11,6 +11,19 @@ from app.models.agent import (
     AgentToolCall,
     AgentToolCallStatus,
 )
+from app.models.agent_pending_interrupt_projection import (
+    AgentPendingInterruptDeliveryStatus,
+    AgentPendingInterruptProjection,
+    AgentPendingInterruptProjectionStatus,
+)
+from app.models.agent_pending_application_step import (
+    AgentPendingApplicationStep,
+    AgentPendingApplicationStepStatus,
+)
+from app.models.agent_confirmed_application_step import (
+    AgentConfirmedApplicationStep,
+    AgentConfirmedApplicationStepStatus,
+)
 from app.models.agent_async_operation import (
     AgentAsyncOperation,
     AgentAsyncOperationEvent,
@@ -22,6 +35,10 @@ from app.models.contract import Contract, ContractStatus, PaymentStatus
 from app.models.conversation_log import ConversationLog
 from app.models.customer import Contact, Customer, CustomerMember
 from app.models.customer_activity import CustomerActivity
+from app.models.customer_activity_post_commit_job import (
+    CustomerActivityPostCommitJob,
+    CustomerActivityPostCommitJobStatus,
+)
 from app.models.customer_context_answer_telemetry import CustomerContextAnswerTelemetry
 from app.models.customer_fact import (
     CustomerFact,
@@ -90,6 +107,7 @@ from app.models.sales_commitment import (
     DueAtGranularity,
     FollowUpTask,
     FollowUpTaskConfirmationCase,
+    FollowUpTaskConfirmationDeliveryPurpose,
     FollowUpTaskConfirmationPromptChannel,
     FollowUpTaskConfirmationPromptDelivery,
     FollowUpTaskConfirmationPromptStatus,
@@ -126,6 +144,13 @@ __all__ = [
     "AgentAsyncOperation",
     "AgentIdempotencyKey",
     "AgentIdempotencyStatus",
+    "AgentConfirmedApplicationStep",
+    "AgentConfirmedApplicationStepStatus",
+    "AgentPendingApplicationStep",
+    "AgentPendingApplicationStepStatus",
+    "AgentPendingInterruptDeliveryStatus",
+    "AgentPendingInterruptProjection",
+    "AgentPendingInterruptProjectionStatus",
     "AgentMemoryEntry",
     "AgentMessage",
     "AgentMessageRole",
@@ -147,6 +172,8 @@ __all__ = [
     "ConversationLog",
     "Customer",
     "CustomerActivity",
+    "CustomerActivityPostCommitJob",
+    "CustomerActivityPostCommitJobStatus",
     "CustomerContextAnswerTelemetry",
     "CustomerDealJourney",
     "CustomerDealJourneyEvent",
@@ -177,6 +204,7 @@ __all__ = [
     "FollowUpMethod",
     "FollowUpTask",
     "FollowUpTaskConfirmationCase",
+    "FollowUpTaskConfirmationDeliveryPurpose",
     "FollowUpTaskConfirmationPromptChannel",
     "FollowUpTaskConfirmationPromptDelivery",
     "FollowUpTaskConfirmationPromptStatus",

@@ -1,25 +1,26 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
+import pytest
 from sqlalchemy import BigInteger, create_engine
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm.exc import NoResultFound
 
 from app.core.database import Base
 from app.models.customer_intelligence_run import CustomerIntelligenceRun, CustomerIntelligenceRunStatus
-from app.services.customer_intelligence_event_service import (
-    CustomerIntelligenceEvent,
-    CustomerIntelligenceSource,
-)
+from app.services.customer_intelligence_event_service import CustomerIntelligenceEvent, CustomerIntelligenceSource
 from app.services.customer_intelligence_run_service import (
+    CustomerIntelligenceRunClaimStatus,
     CustomerIntelligenceRunInput,
+    CustomerIntelligenceRunLeaseMutationStatus,
     customer_intelligence_run_service,
 )
 
 
 @compiles(BigInteger, "sqlite")
-def _bigint_to_sqlite_int(element, compiler, **kw):
+def _bigint_to_sqlite_int(element, compiler, **kw):  # noqa: ANN001, ANN003
     return "INTEGER"
 
 
@@ -36,7 +37,7 @@ def _event(
     team_id: int = 2,
     customer_id: int = 101,
     request_id: str = "request-1",
-):
+) -> CustomerIntelligenceEvent:
     return CustomerIntelligenceEvent(
         event_key=event_key,
         trigger_type="manual_refresh_requested",
@@ -44,318 +45,219 @@ def _event(
         team_id=team_id,
         customer_id=customer_id,
         occurred_at=datetime(2026, 8, 2, 10, 0, 0),
-        source=CustomerIntelligenceSource(
-            source_type="manual_refresh",
-            source_object_id=request_id,
-        ),
+        source=CustomerIntelligenceSource(source_type="manual_refresh", source_object_id=request_id),
         actor_id="9",
     )
 
 
-def test_customer_intelligence_run_service_records_success_idempotently():
-    db = _session()
-    run_input = CustomerIntelligenceRunInput(request_id="request-1", event=_event(), scope="full")
-
-    pending = customer_intelligence_run_service.ensure_pending(db, run_input)
-    running = customer_intelligence_run_service.mark_running(
-        db,
-        run_input,
-        started_at=datetime(2026, 8, 2, 10, 0, 0),
+def _input(**kwargs) -> CustomerIntelligenceRunInput:  # noqa: ANN003
+    request_id = str(kwargs.pop("request_id", "request-1"))
+    max_attempts = int(kwargs.pop("max_attempts", 3))
+    return CustomerIntelligenceRunInput(
+        request_id=request_id,
+        event=_event(request_id=request_id, **kwargs),
+        scope="brief",
+        max_attempts=max_attempts,
     )
-    succeeded = customer_intelligence_run_service.mark_succeeded(
+
+
+def test_pending_run_is_claimed_once_and_live_lease_is_busy():
+    db = _session()
+    run_input = _input()
+    now = datetime(2026, 8, 2, 10, 0, 0)
+
+    first = customer_intelligence_run_service.claim_for_execution(db, run_input, now=now, lease_seconds=120)
+    second = customer_intelligence_run_service.claim_for_execution(
         db,
         run_input,
+        now=now + timedelta(seconds=30),
+        lease_seconds=120,
+    )
+
+    assert first.status == CustomerIntelligenceRunClaimStatus.CLAIMED
+    assert first.lease_token
+    assert first.run.attempt_count == 1
+    assert second.status == CustomerIntelligenceRunClaimStatus.BUSY
+    assert second.lease_token is None
+    assert second.run.attempt_count == 1
+
+
+def test_expired_running_lease_is_reclaimed_with_new_token():
+    db = _session()
+    run_input = _input()
+    now = datetime(2026, 8, 2, 10, 0, 0)
+    first = customer_intelligence_run_service.claim_for_execution(db, run_input, now=now, lease_seconds=30)
+
+    reclaimed = customer_intelligence_run_service.claim_for_execution(
+        db,
+        run_input,
+        now=now + timedelta(seconds=31),
+        lease_seconds=30,
+    )
+
+    assert reclaimed.status == CustomerIntelligenceRunClaimStatus.CLAIMED
+    assert reclaimed.lease_token != first.lease_token
+    assert reclaimed.run.attempt_count == 2
+
+
+def test_terminal_run_is_never_restarted_by_ensure_or_claim():
+    db = _session()
+    run_input = _input()
+    now = datetime(2026, 8, 2, 10, 0, 0)
+    claim = customer_intelligence_run_service.claim_for_execution(db, run_input, now=now)
+    completed = customer_intelligence_run_service.mark_succeeded_if_lease_owner(
+        db,
+        run_input,
+        lease_token=str(claim.lease_token),
         result={
-            "route": "refresh_profile",
+            "route": "refresh_brief",
             "event": {"event_key": "event-1"},
-            "persisted_customer_fact_refs": [{"fact_id": 501}],
-            "visible_trace": [{"title": "读取客户上下文", "content": "已读取客户上下文"}],
+            "visible_trace": [{"title": "提炼客户事实", "content": "提炼出 6 条可沉淀事实"}],
         },
-        finished_at=datetime(2026, 8, 2, 10, 0, 2),
+        finished_at=now + timedelta(seconds=2),
     )
-    db.commit()
-
-    assert pending.id == running.id == succeeded.id
-    assert db.query(CustomerIntelligenceRun).count() == 1
-    assert succeeded.status == CustomerIntelligenceRunStatus.SUCCESS
-    assert succeeded.attempt_count == 1
-    assert succeeded.last_duration_ms == 2000
-    assert succeeded.route == "refresh_profile"
-    assert succeeded.result_json["persisted_fact_count"] == 1
-    assert succeeded.visible_trace_json[0]["title"] == "读取客户上下文"
-
-
-def test_customer_intelligence_run_service_records_retryable_failure():
-    db = _session()
-    run_input = CustomerIntelligenceRunInput(request_id="request-1", event=_event(), scope="brief")
-
-    customer_intelligence_run_service.mark_running(
+    customer_intelligence_run_service.ensure_pending(db, run_input)
+    terminal = customer_intelligence_run_service.claim_for_execution(
         db,
         run_input,
-        started_at=datetime(2026, 8, 2, 10, 0, 0),
+        now=now + timedelta(minutes=5),
     )
-    failed = customer_intelligence_run_service.mark_failed(
+
+    assert completed.status == CustomerIntelligenceRunLeaseMutationStatus.APPLIED
+    assert terminal.status == CustomerIntelligenceRunClaimStatus.TERMINAL
+    assert terminal.run.status == CustomerIntelligenceRunStatus.SUCCESS
+    assert terminal.run.attempt_count == 1
+    assert terminal.run.visible_trace_json[0]["title"] == "提炼客户事实"
+
+
+def test_stale_lease_cannot_overwrite_new_owner_success():
+    db = _session()
+    run_input = _input()
+    now = datetime(2026, 8, 2, 10, 0, 0)
+    stale = customer_intelligence_run_service.claim_for_execution(db, run_input, now=now, lease_seconds=30)
+    owner = customer_intelligence_run_service.claim_for_execution(
         db,
         run_input,
-        error_message="graph failed",
-        finished_at=datetime(2026, 8, 2, 10, 0, 1),
+        now=now + timedelta(seconds=31),
+        lease_seconds=30,
     )
-    db.commit()
 
-    assert failed.status == CustomerIntelligenceRunStatus.RETRY_PENDING
-    assert failed.attempt_count == 1
-    assert failed.next_retry_at is not None
-    assert failed.error_message == "graph failed"
-
-
-def test_customer_intelligence_run_service_lists_retryable_runs():
-    db = _session()
-    run_input = CustomerIntelligenceRunInput(request_id="request-1", event=_event(), scope="brief")
-    other_team_input = CustomerIntelligenceRunInput(
-        request_id="request-2",
-        event=_event(event_key="event-2", team_id=3, customer_id=201, request_id="request-2"),
-        scope="brief",
-    )
-    customer_intelligence_run_service.mark_running(db, run_input)
-    customer_intelligence_run_service.mark_failed(
+    stale_result = customer_intelligence_run_service.mark_succeeded_if_lease_owner(
         db,
         run_input,
-        error_message="graph failed",
-        finished_at=datetime(2026, 8, 2, 10, 0, 0),
+        lease_token=str(stale.lease_token),
+        result={"route": "stale"},
+        finished_at=now + timedelta(seconds=32),
     )
-    customer_intelligence_run_service.mark_running(db, other_team_input)
-    customer_intelligence_run_service.mark_failed(
-        db,
-        other_team_input,
-        error_message="other team graph failed",
-        finished_at=datetime(2026, 8, 2, 10, 0, 0),
-    )
-    db.commit()
-
-    retryable = customer_intelligence_run_service.list_retryable(
-        db,
-        now=datetime(2026, 8, 2, 10, 1, 0),
-        team_id=2,
-    )
-
-    assert [run.request_id for run in retryable] == ["request-1"]
-
-
-def test_customer_intelligence_run_service_lists_pending_and_due_retry_runs():
-    db = _session()
-    pending_input = CustomerIntelligenceRunInput(
-        request_id="pending-request",
-        event=_event(event_key="pending-event", request_id="pending-request"),
-        scope="brief",
-    )
-    due_retry_input = CustomerIntelligenceRunInput(
-        request_id="due-retry-request",
-        event=_event(event_key="due-retry-event", request_id="due-retry-request"),
-        scope="brief",
-    )
-    future_retry_input = CustomerIntelligenceRunInput(
-        request_id="future-retry-request",
-        event=_event(event_key="future-retry-event", request_id="future-retry-request"),
-        scope="brief",
-    )
-    stale_running_input = CustomerIntelligenceRunInput(
-        request_id="stale-running-request",
-        event=_event(event_key="stale-running-event", request_id="stale-running-request"),
-        scope="brief",
-    )
-    active_running_input = CustomerIntelligenceRunInput(
-        request_id="active-running-request",
-        event=_event(event_key="active-running-event", request_id="active-running-request"),
-        scope="brief",
-    )
-
-    pending = customer_intelligence_run_service.ensure_pending(db, pending_input)
-    pending.created_time = datetime(2026, 8, 2, 10, 0, 0)
-    due_retry = customer_intelligence_run_service.mark_running(db, due_retry_input)
-    due_retry.created_time = datetime(2026, 8, 2, 10, 1, 0)
-    customer_intelligence_run_service.mark_failed(
-        db,
-        due_retry_input,
-        error_message="graph failed",
-        finished_at=datetime(2026, 8, 2, 10, 0, 0),
-    )
-    future_retry = customer_intelligence_run_service.mark_running(db, future_retry_input)
-    future_retry.created_time = datetime(2026, 8, 2, 10, 2, 0)
-    customer_intelligence_run_service.mark_failed(
-        db,
-        future_retry_input,
-        error_message="graph failed",
-        finished_at=datetime(2026, 8, 2, 10, 3, 0),
-    )
-    stale_running = customer_intelligence_run_service.mark_running(
-        db,
-        stale_running_input,
-        started_at=datetime(2026, 8, 2, 9, 45, 0),
-    )
-    stale_running.created_time = datetime(2026, 8, 2, 10, 4, 0)
-    active_running = customer_intelligence_run_service.mark_running(
-        db,
-        active_running_input,
-        started_at=datetime(2026, 8, 2, 10, 0, 30),
-    )
-    active_running.created_time = datetime(2026, 8, 2, 10, 5, 0)
-    db.commit()
-
-    due_runs = customer_intelligence_run_service.list_due(
-        db,
-        now=datetime(2026, 8, 2, 10, 1, 0),
-        team_id=2,
-    )
-
-    assert [run.request_id for run in due_runs] == [
-        "pending-request",
-        "due-retry-request",
-        "stale-running-request",
-    ]
-
-
-def test_customer_intelligence_run_service_projects_diagnostic_trace_events():
-    db = _session()
-    run_input = CustomerIntelligenceRunInput(request_id="request-1", event=_event(), scope="full")
-    customer_intelligence_run_service.mark_running(
+    owner_result = customer_intelligence_run_service.mark_succeeded_if_lease_owner(
         db,
         run_input,
-        started_at=datetime(2026, 8, 2, 10, 0, 0),
-    )
-    succeeded = customer_intelligence_run_service.mark_succeeded(
-        db,
-        run_input,
-        result={
-            "route": "refresh_profile",
-            "event": {"event_key": "event-1"},
-            "persisted_customer_fact_refs": [{"fact_id": 501}],
-            "visible_trace": [
-                {"title": "读取客户上下文", "content": "已读取客户上下文"},
-                {"title": "更新客户记忆", "content": "已沉淀客户摘要和证据索引"},
-            ],
-        },
-        finished_at=datetime(2026, 8, 2, 10, 0, 2),
-    )
-    db.commit()
-
-    diagnostic = customer_intelligence_run_service.get_diagnostic(
-        db,
-        team_id=2,
-        run_id=succeeded.id,
-    )
-
-    assert diagnostic is not None
-    assert diagnostic.request_id == "request-1"
-    assert diagnostic.route == "refresh_profile"
-    assert [step["title"] for step in diagnostic.visible_trace] == ["读取客户上下文", "更新客户记忆"]
-    assert [event["content"] for event in diagnostic.trace_events] == [
-        "读取客户上下文：已读取客户上下文",
-        "更新客户记忆：已沉淀客户摘要和证据索引",
-    ]
-
-
-def test_customer_intelligence_run_service_lists_customer_and_request_diagnostics():
-    db = _session()
-    first_input = CustomerIntelligenceRunInput(request_id="request-1", event=_event(), scope="full")
-    second_event = CustomerIntelligenceEvent(
-        event_key="event-2",
-        trigger_type="manual_refresh_requested",
-        tenant_id=2,
-        team_id=2,
-        customer_id=101,
-        occurred_at=datetime(2026, 8, 2, 10, 1, 0),
-        source=CustomerIntelligenceSource(
-            source_type="manual_refresh",
-            source_object_id="request-2",
-        ),
-        actor_id="9",
-    )
-    second_input = CustomerIntelligenceRunInput(request_id="request-2", event=second_event, scope="brief")
-
-    first = customer_intelligence_run_service.mark_running(db, first_input)
-    first.created_time = datetime(2026, 8, 2, 10, 0, 0)
-    customer_intelligence_run_service.mark_failed(
-        db,
-        first_input,
-        error_message="graph failed",
-        finished_at=datetime(2026, 8, 2, 10, 0, 1),
-    )
-    second = customer_intelligence_run_service.mark_running(db, second_input)
-    second.created_time = datetime(2026, 8, 2, 10, 1, 0)
-    customer_intelligence_run_service.mark_succeeded(
-        db,
-        second_input,
+        lease_token=str(owner.lease_token),
         result={"route": "refresh_brief"},
-        finished_at=datetime(2026, 8, 2, 10, 1, 1),
-    )
-    db.commit()
-
-    customer_runs = customer_intelligence_run_service.list_customer_diagnostics(
-        db,
-        team_id=2,
-        customer_id=101,
-    )
-    request_runs = customer_intelligence_run_service.list_request_diagnostics(
-        db,
-        team_id=2,
-        request_id="request-1",
+        finished_at=now + timedelta(seconds=33),
     )
 
-    assert [run.request_id for run in customer_runs] == ["request-2", "request-1"]
-    assert [run.request_id for run in request_runs] == ["request-1"]
-    assert request_runs[0].error_message == "graph failed"
+    assert stale_result.status == CustomerIntelligenceRunLeaseMutationStatus.STALE_LEASE
+    assert owner_result.status == CustomerIntelligenceRunLeaseMutationStatus.APPLIED
+    assert owner_result.run.route == "refresh_brief"
 
 
-def test_customer_intelligence_run_service_lists_diagnostics_with_filters():
+def test_failure_schedules_retry_then_exhaustion_becomes_terminal():
     db = _session()
-    failed_input = CustomerIntelligenceRunInput(request_id="request-1", event=_event(), scope="full")
-    success_input = CustomerIntelligenceRunInput(
-        request_id="request-2",
-        event=_event(event_key="event-2", request_id="request-2"),
-        scope="brief",
+    run_input = _input(max_attempts=2)
+    now = datetime(2026, 8, 2, 10, 0, 0)
+    first = customer_intelligence_run_service.claim_for_execution(db, run_input, now=now)
+    failed = customer_intelligence_run_service.mark_failed_if_lease_owner(
+        db,
+        run_input,
+        lease_token=str(first.lease_token),
+        error_message="graph failed",
+        finished_at=now + timedelta(seconds=1),
     )
-    other_team_input = CustomerIntelligenceRunInput(
-        request_id="request-3",
-        event=_event(event_key="event-3", team_id=3, customer_id=201, request_id="request-3"),
-        scope="brief",
+    second = customer_intelligence_run_service.claim_for_execution(
+        db,
+        run_input,
+        now=failed.run.next_retry_at,
+    )
+    failed_again = customer_intelligence_run_service.mark_failed_if_lease_owner(
+        db,
+        run_input,
+        lease_token=str(second.lease_token),
+        error_message="graph failed again",
+        finished_at=now + timedelta(minutes=2),
+    )
+    terminal = customer_intelligence_run_service.claim_for_execution(
+        db,
+        run_input,
+        now=now + timedelta(minutes=3),
     )
 
-    failed = customer_intelligence_run_service.mark_running(db, failed_input)
-    failed.created_time = datetime(2026, 8, 2, 10, 0, 0)
-    customer_intelligence_run_service.mark_failed(
+    assert second.status == CustomerIntelligenceRunClaimStatus.CLAIMED
+    assert failed_again.run.status == CustomerIntelligenceRunStatus.FAILED
+    assert terminal.status == CustomerIntelligenceRunClaimStatus.TERMINAL
+
+
+def test_list_due_excludes_live_leases_and_other_teams():
+    db = _session()
+    now = datetime(2026, 8, 2, 10, 0, 0)
+    pending = _input(request_id="pending", event_key="pending")
+    live = _input(request_id="live", event_key="live")
+    expired = _input(request_id="expired", event_key="expired")
+    other = _input(request_id="other", event_key="other", team_id=3, customer_id=303)
+    customer_intelligence_run_service.ensure_pending(db, pending)
+    customer_intelligence_run_service.claim_for_execution(db, live, now=now, lease_seconds=120)
+    customer_intelligence_run_service.claim_for_execution(db, expired, now=now, lease_seconds=30)
+    customer_intelligence_run_service.ensure_pending(db, other)
+
+    due = customer_intelligence_run_service.list_due(
         db,
-        failed_input,
-        error_message="graph failed",
-        finished_at=datetime(2026, 8, 2, 10, 0, 1),
+        now=now + timedelta(seconds=31),
+        team_id=2,
     )
-    success = customer_intelligence_run_service.mark_running(db, success_input)
-    success.created_time = datetime(2026, 8, 2, 10, 1, 0)
-    customer_intelligence_run_service.mark_succeeded(
-        db,
-        success_input,
-        result={"route": "refresh_brief"},
-        finished_at=datetime(2026, 8, 2, 10, 1, 1),
+
+    assert [run.request_id for run in due] == ["pending", "expired"]
+
+
+def test_request_lookup_is_tenant_scoped():
+    db = _session()
+    customer_intelligence_run_service.ensure_pending(db, _input(request_id="shared", team_id=2, event_key="a"))
+    customer_intelligence_run_service.ensure_pending(db, _input(request_id="shared", team_id=3, event_key="b"))
+
+    assert customer_intelligence_run_service.get_by_request_id(db, team_id=2, request_id="shared").team_id == 2
+    assert customer_intelligence_run_service.get_by_request_id(db, team_id=4, request_id="shared") is None
+
+
+def test_lease_mutation_cannot_lock_cross_team_row_even_with_same_run_key():
+    db = _session()
+    run_input = _input(team_id=2)
+    run_key = customer_intelligence_run_service.run_key(run_input)
+    cross_team_run = CustomerIntelligenceRun(
+        run_key=run_key,
+        request_id=run_input.request_id,
+        event_key=run_input.event.event_key,
+        event_json=run_input.event.to_dict(),
+        tenant_id=3,
+        team_id=3,
+        customer_id=303,
+        trigger_type=run_input.event.trigger_type,
+        scope=run_input.scope,
+        status=CustomerIntelligenceRunStatus.RUNNING,
+        attempt_count=1,
+        max_attempts=3,
+        lease_token="cross-team-lease",
     )
-    other_team = customer_intelligence_run_service.mark_running(db, other_team_input)
-    other_team.created_time = datetime(2026, 8, 2, 10, 2, 0)
-    customer_intelligence_run_service.mark_failed(
-        db,
-        other_team_input,
-        error_message="other team graph failed",
-        finished_at=datetime(2026, 8, 2, 10, 2, 1),
-    )
+    db.add(cross_team_run)
     db.commit()
 
-    failed_runs = customer_intelligence_run_service.list_diagnostics(
-        db,
-        team_id=2,
-        status=CustomerIntelligenceRunStatus.RETRY_PENDING,
-    )
-    request_runs = customer_intelligence_run_service.list_diagnostics(
-        db,
-        team_id=2,
-        request_id="request-2",
-    )
+    with pytest.raises(NoResultFound):
+        customer_intelligence_run_service.mark_succeeded_if_lease_owner(
+            db,
+            run_input,
+            lease_token="cross-team-lease",
+            result={"route": "should-not-apply"},
+        )
 
-    assert [run.request_id for run in failed_runs] == ["request-1"]
-    assert [run.request_id for run in request_runs] == ["request-2"]
+    db.refresh(cross_team_run)
+    assert cross_team_run.team_id == 3
+    assert cross_team_run.status == CustomerIntelligenceRunStatus.RUNNING
+    assert cross_team_run.route is None

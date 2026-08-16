@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+
+from hashlib import sha256
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
@@ -22,6 +25,11 @@ from app.services.agent import (
     task_execution,
     workflow_action_ledger,
 )
+from app.services.agent.active_task_ownership import (
+    ActiveTaskOwnershipCandidate,
+    ActiveTaskOwnershipProjection,
+    active_task_ownership_projector,
+)
 from app.services.agent.business_interaction_planner import (
     BusinessInteractionPlanner,
     business_interaction_planner,
@@ -33,6 +41,7 @@ from app.services.agent.confirmed_task_graph import (
 from app.services.agent.confirmed_task_graph import (
     confirmed_task_graph_service as default_confirmed_task_graph_service,
 )
+from app.services.agent.confirmed_task_ownership import confirmed_task_ownership_projector
 from app.services.agent.customer_intelligence_graph import (
     CustomerIntelligenceGraphService,
 )
@@ -51,6 +60,7 @@ from app.services.agent.follow_up_confirmation_graph import (
 )
 from app.services.agent.graph import crm_agent_graph_service
 from app.services.agent.input import AgentTurnInput
+from app.services.agent.interrupt_projection import classify_interrupt_projection
 from app.services.agent.interrupts import (
     AgentInterruptPayload,
     AgentResumePayload,
@@ -75,7 +85,45 @@ from app.services.agent.pending_effects import (
 from app.services.agent.pending_effects import (
     pending_task_side_effect_handler as default_pending_task_side_effect_handler,
 )
-from app.services.agent.pending_graph import PendingTaskGraphService, pending_task_graph_service
+from app.services.agent.pending_application_step_contracts import (
+    PendingApplicationStepRequest,
+    completed_application_step_acknowledgement,
+    is_pending_application_step_request,
+)
+from app.services.agent.pending_application_step_projection import (
+    PendingApplicationStepProjectionRequest,
+    PendingApplicationStepProjector,
+)
+from app.services.agent.pending_application_steps import (
+    pending_application_step_executor as default_pending_application_step_executor,
+)
+from app.services.agent.pending_continuation import (
+    PendingTaskContinuationRef,
+    pending_task_continuation_from_json,
+)
+from app.services.agent.pending_interrupt_coordinator import (
+    PendingInterruptCoordinationRequest,
+    PendingInterruptCoordinator,
+    projection_is_exposable,
+    projection_state,
+    retryable_projection_interrupt,
+)
+from app.services.agent.pending_interrupt_projection import (
+    PendingInterruptProjectionRequest,
+    PendingInterruptProjector,
+    PendingTaskOutcomeProjectionRequest,
+    PendingTaskOutcomeProjector,
+    pending_interrupt_projection_key,
+    pending_task_outcome_projector as default_pending_task_outcome_projector,
+)
+from app.services.agent.pending_graph import (
+    PendingTaskGraphService,
+    pending_task_graph_service,
+)
+from app.services.agent.pending_outcome import (
+    PendingTaskAbortVerificationRequest,
+    PendingTaskOutcomeRecovery,
+)
 from app.services.agent.post_write_effects import merge_post_write_effects, normalize_post_write_effects
 from app.services.agent.state import (
     AgentRootRuntimeSideEffects,
@@ -85,19 +133,19 @@ from app.services.agent.state import (
     AgentRuntimeState,
     AgentRuntimeStateHistoryItem,
     AgentRuntimeTurnOutput,
+    PendingTaskGraphInput,
     PendingTaskGraphResult,
     PendingTaskGraphSideEffects,
+    PendingTaskInternalCommand,
 )
+from app.services.agent.task_projection import agent_task_snapshot
 from app.services.agent.turn_intent import AgentTurnIntentRouter, agent_turn_intent_router
 from app.services.agent.types import JSONDict, JSONList, coerce_json_dict, coerce_json_value
 from app.services.customer_intelligence_event_service import (
     CUSTOMER_INTELLIGENCE_COMMITTED_EVENT_TRIGGER_TYPES,
     CUSTOMER_INTELLIGENCE_INLINE_TRIGGER_TYPES,
 )
-from app.services.customer_intelligence_refresh_service import (
-    AgentAsyncOperationBinding,
-    CustomerIntelligenceRefreshService,
-)
+from app.services.customer_intelligence_refresh_service import CustomerIntelligenceRefreshService
 from app.services.customer_intelligence_refresh_service import (
     customer_intelligence_refresh_service as default_customer_intelligence_refresh_service,
 )
@@ -110,6 +158,8 @@ from app.services.follow_up_task_confirmation_channel_service import (
 )
 
 AGENT_CHECKPOINT_NS = "crm_agent"
+PENDING_TASK_OUTCOME_PROJECTION_REASON = "pending_task_outcome_projection"
+PENDING_TASK_OUTCOME_PROJECTION_SCHEMA = "agent.pending_task_projection.v1"
 logger = logging.getLogger(__name__)
 
 
@@ -163,6 +213,9 @@ class AgentRootRuntime:
         new_flow_side_effect_handler: NewFlowSideEffectHandler | None = None,
         confirmed_task_graph_service: ConfirmedTaskGraphService | None = None,
         pending_task_side_effect_handler: PendingTaskSideEffectHandler | None = None,
+        pending_task_outcome_projector: PendingTaskOutcomeProjector | None = None,
+        pending_interrupt_projector: PendingInterruptProjector | None = None,
+        pending_application_step_projector: PendingApplicationStepProjector | None = None,
         customer_intelligence_graph_service: CustomerIntelligenceGraphService | None = None,
         customer_intelligence_trigger_policy: CustomerIntelligenceTriggerPolicy | None = None,
         customer_intelligence_refresh_service: CustomerIntelligenceRefreshService | None = None,
@@ -177,6 +230,27 @@ class AgentRootRuntime:
         self.confirmed_task_graph_service = confirmed_task_graph_service or default_confirmed_task_graph_service
         self.pending_task_side_effect_handler = (
             pending_task_side_effect_handler or default_pending_task_side_effect_handler
+        )
+        if pending_task_outcome_projector is not None and pending_interrupt_projector is not None:
+            raise ValueError("provide only one pending-task outcome projector")
+        self.pending_task_outcome_projector = (
+            pending_task_outcome_projector
+            or pending_interrupt_projector
+            or (
+                default_pending_task_outcome_projector
+                if pending_task_side_effect_handler is None
+                else PendingTaskOutcomeProjector(side_effect_handler=self.pending_task_side_effect_handler)
+            )
+        )
+        # Compatibility alias for integrations still using the historical name.
+        self.pending_interrupt_projector = self.pending_task_outcome_projector
+        self.pending_interrupt_coordinator = PendingInterruptCoordinator(
+            outcome_loader=self._load_checkpointed_pending_outcome,
+            projector=self.pending_task_outcome_projector,
+        )
+        self.pending_application_step_projector = (
+            pending_application_step_projector
+            or PendingApplicationStepProjector(executor=default_pending_application_step_executor)
         )
         self.customer_intelligence_graph_service = (
             customer_intelligence_graph_service or default_customer_intelligence_graph_service
@@ -203,7 +277,7 @@ class AgentRootRuntime:
         graph.add_node("wait_for_interrupt_resume", self._wait_for_interrupt_resume)
         graph.add_node("resume_route_marker", self._resume_route_marker)
         graph.add_node("pending_task_subgraph", self._run_pending_task_subgraph)
-        graph.add_node("pending_task_effects", self._apply_pending_task_effects)
+        graph.add_node("pending_task_projection_barrier", self._await_pending_task_projection)
         graph.add_node("new_flow_route_marker", self._new_flow_route_marker)
         graph.add_node("decide_application_action", self._decide_application_action)
         graph.add_node("new_flow_graph", self._run_new_flow_graph)
@@ -241,8 +315,8 @@ class AgentRootRuntime:
                 "finish": "decide_application_action",
             },
         )
-        graph.add_edge("pending_task_subgraph", "pending_task_effects")
-        graph.add_edge("pending_task_effects", "decide_application_action")
+        graph.add_edge("pending_task_subgraph", "pending_task_projection_barrier")
+        graph.add_edge("pending_task_projection_barrier", "decide_application_action")
         graph.add_edge("new_flow_route_marker", "decide_application_action")
         graph.add_conditional_edges(
             "decide_application_action",
@@ -252,6 +326,7 @@ class AgentRootRuntime:
                 "confirmed_task_execution": "confirmed_task_execution",
                 "no_pending_confirmation": "no_pending_confirmation",
                 "generated_interrupt_wait": "generated_interrupt_wait",
+                "internal_abort": "finish_turn",
                 "finish": "reconcile_pending_business_interactions",
             },
         )
@@ -315,17 +390,12 @@ class AgentRootRuntime:
         snapshot = await self._graph.aget_state(config)
         root_interrupt = _new_snapshot_interrupt_payload(snapshot, previous_interrupt_ids=set())
         if root_interrupt:
-            projected = await self._publish_checkpointed_follow_up_projection(
+            return await self._project_checkpointed_interrupt(
                 root_interrupt,
+                snapshot=snapshot,
                 context=context,
+                config=config,
             )
-            if not projected:
-                return await self._discard_checkpointed_follow_up_projection(
-                    config=config,
-                    context=context,
-                )
-            result["current_interrupt"] = root_interrupt
-            return result
         initial_interrupt = interrupt_payload_from_json(state.get("current_interrupt"))
         if state.get("pending_task_requested"):
             if initial_interrupt:
@@ -339,16 +409,7 @@ class AgentRootRuntime:
                     previous_interrupt_ids=set(),
                 )
             if bubbled_interrupt:
-                projected = await self._publish_checkpointed_follow_up_projection(
-                    bubbled_interrupt,
-                    context=context,
-                )
-                if not projected:
-                    return await self._discard_checkpointed_follow_up_projection(
-                        config=config,
-                        context=context,
-                    )
-                return await self._project_bubbled_pending_interrupt(
+                return await self._project_checkpointed_interrupt(
                     bubbled_interrupt,
                     snapshot=snapshot,
                     context=context,
@@ -454,6 +515,16 @@ class AgentRootRuntime:
             session_id=session_id,
             session_key=session_key,
         )
+        pending_projection_result = await self._retry_unprojected_pending_interrupt(
+            checkpoint_values=checkpoint_values,
+            team_id=team_id,
+            user_id=user_id,
+            session_id=session_id,
+            session_key=session_key,
+            context=context,
+        )
+        if pending_projection_result is not None:
+            return pending_projection_result
         checkpoint_interrupt = interrupt_payload_from_json(checkpoint_values.get("current_interrupt"))
         if checkpoint_interrupt is not None:
             checkpoint_interrupt = await self._discard_stale_follow_up_confirmation_before_turn(
@@ -534,6 +605,52 @@ class AgentRootRuntime:
             current_interrupt=runtime_current_interrupt,
         )
 
+    async def _retry_unprojected_pending_interrupt(
+        self,
+        *,
+        checkpoint_values: JSONDict,
+        team_id: int,
+        user_id: int,
+        session_id: int,
+        session_key: str | None,
+        context: AgentRuntimeContext,
+    ) -> AgentRuntimeInvokeResult | None:
+        """Finish an exact hidden PendingTask projection before accepting input."""
+
+        if not hasattr(self, "_graph"):
+            return None
+        config = build_agent_graph_config(
+            team_id=team_id,
+            user_id=user_id,
+            session_id=session_id,
+            session_key=session_key,
+        )
+        snapshot = await self._graph.aget_state(config)
+        snapshot_values = coerce_json_dict(getattr(snapshot, "values", None))
+        interrupt_payload = _new_snapshot_interrupt_payload(snapshot, previous_interrupt_ids=set())
+        if _is_pending_task_outcome_projection_barrier(interrupt_payload):
+            return await self._project_pending_task_outcome_barrier(
+                interrupt_payload,
+                snapshot=snapshot,
+                context=context,
+                config=config,
+            )
+        if interrupt_payload is not None and _snapshot_interrupt_is_exposable(
+            checkpoint_values,
+            interrupt_payload,
+        ):
+            return None
+        if interrupt_payload is None:
+            interrupt_payload = retryable_projection_interrupt(snapshot_values)
+        if not interrupt_payload or not interrupt_payload.get("checkpoint_ref"):
+            return None
+        return await self._project_checkpointed_interrupt(
+            interrupt_payload,
+            snapshot=snapshot,
+            context=context,
+            config=config,
+        )
+
     async def _discard_stale_follow_up_confirmation_before_turn(
         self,
         *,
@@ -548,8 +665,7 @@ class AgentRootRuntime:
         if case_public_id is None or context.db is None:
             return checkpoint_interrupt
         try:
-            is_pending = self.confirmation_channel_service.is_case_pending_for_owner(
-                context.db,
+            is_pending = self.confirmation_channel_service.revalidate_case_pending_for_owner(
                 team_id=team_id,
                 user_id=user_id,
                 case_public_id=case_public_id,
@@ -829,6 +945,11 @@ class AgentRootRuntime:
         if not interrupt_payload:
             raise ValueError("cannot resume agent runtime without an active interrupt")
         validate_resume_payload(resume_payload, current_interrupt=interrupt_payload)
+        if context is not None:
+            # Resume hydration belongs to the application/runtime boundary.
+            # Graph nodes receive only the serialized snapshot derived from
+            # this authoritative task and never query ORM state themselves.
+            _align_context_task_to_interrupt(context, interrupt_payload)
         config = build_agent_graph_config(
             team_id=team_id,
             user_id=user_id,
@@ -862,16 +983,7 @@ class AgentRootRuntime:
             snapshot = await self._graph.aget_state(config)
             bubbled_interrupt = _snapshot_interrupt_payload_except(snapshot, resumed_interrupt=resumed_interrupt)
             if bubbled_interrupt:
-                projected = await self._publish_checkpointed_follow_up_projection(
-                    bubbled_interrupt,
-                    context=context,
-                )
-                if not projected:
-                    return await self._discard_checkpointed_follow_up_projection(
-                        config=config,
-                        context=context,
-                    )
-                return await self._project_bubbled_pending_interrupt(
+                return await self._project_checkpointed_interrupt(
                     bubbled_interrupt,
                     snapshot=snapshot,
                     context=context,
@@ -886,22 +998,493 @@ class AgentRootRuntime:
             next_snapshot = await self._graph.aget_state(config)
             bubbled_interrupt = _new_snapshot_interrupt_payload(next_snapshot, previous_interrupt_ids=interrupt_ids)
             if bubbled_interrupt:
-                projected = await self._publish_checkpointed_follow_up_projection(
-                    bubbled_interrupt,
-                    context=context,
-                )
-                if not projected:
-                    return await self._discard_checkpointed_follow_up_projection(
-                        config=config,
-                        context=context,
-                    )
-                return await self._project_bubbled_pending_interrupt(
+                return await self._project_checkpointed_interrupt(
                     bubbled_interrupt,
                     snapshot=next_snapshot,
                     context=context,
                     config=config,
                 )
         return current_result
+
+    async def _project_checkpointed_interrupt(
+        self,
+        interrupt_payload: AgentInterruptPayload,
+        *,
+        snapshot: object,
+        context: AgentRuntimeContext | None,
+        config: RunnableConfig,
+    ) -> AgentRuntimeInvokeResult:
+        """Dispatch a native interrupt to its authenticated owning runtime."""
+
+        if is_pending_application_step_request(interrupt_payload):
+            return await self._project_pending_application_step(
+                interrupt_payload,
+                snapshot=snapshot,
+                context=context,
+                config=config,
+            )
+        if _is_pending_task_outcome_projection_barrier(interrupt_payload):
+            return await self._project_pending_task_outcome_barrier(
+                interrupt_payload,
+                snapshot=snapshot,
+                context=context,
+                config=config,
+            )
+
+        target = classify_interrupt_projection(
+            interrupt_payload,
+            team_id=context.team_id if context is not None else None,
+            user_id=context.user_id if context is not None else None,
+            session_id=context.session_id if context is not None else None,
+        )
+        if target.owner == "root":
+            projected = await self._publish_checkpointed_follow_up_projection(
+                interrupt_payload,
+                context=context,
+            )
+            if not projected:
+                return await self._discard_checkpointed_follow_up_projection(
+                    config=config,
+                    context=context,
+                )
+            state = coerce_json_dict(getattr(snapshot, "values", None))
+            state["current_interrupt"] = interrupt_payload
+            snapshot_interrupts = _snapshot_interrupt_items(snapshot)
+            if snapshot_interrupts:
+                state["__interrupt__"] = snapshot_interrupts
+            return state
+        return await self._project_bubbled_pending_interrupt(
+            interrupt_payload,
+            snapshot=snapshot,
+            context=context,
+            config=config,
+            continuation=target.continuation,
+            continuation_failure=target.failure_reason,
+        )
+
+    async def _project_pending_application_step(
+        self,
+        step: PendingApplicationStepRequest,
+        *,
+        snapshot: object,
+        context: AgentRuntimeContext | None,
+        config: RunnableConfig,
+    ) -> AgentRuntimeInvokeResult:
+        """Execute one hidden child application step and resume its exact checkpoint."""
+
+        state = coerce_json_dict(getattr(snapshot, "values", None))
+        if context is None or context.db is None or context.session is None:
+            return await self._record_pending_application_step_failure(
+                state=state,
+                step=step,
+                snapshot=snapshot,
+                context=context,
+                config=config,
+                failure_reason="missing_runtime_context",
+                retryable=True,
+            )
+
+        continuation = pending_task_continuation_from_json(
+            step.get("checkpoint_ref"),
+            expected_team_id=context.team_id,
+            expected_user_id=context.user_id,
+            expected_session_id=context.session_id,
+        )
+        if continuation is None:
+            return await self._resume_pending_application_step(
+                step,
+                acknowledgement={
+                    "schema_version": step.get("schema_version"),
+                    "status": "FAILED",
+                    "step_id": step.get("step_id"),
+                    "failure_reason": "invalid_continuation",
+                    "retryable": False,
+                },
+                config=config,
+                context=context,
+            )
+
+        task = None
+        continuation_task_id = continuation.get("task_id")
+        step_task_id = _optional_int(coerce_json_dict(step.get("task_snapshot")).get("id"))
+        if (
+            isinstance(continuation_task_id, int)
+            and isinstance(step_task_id, int)
+            and continuation_task_id != step_task_id
+        ):
+            return await self._resume_pending_application_step(
+                step,
+                acknowledgement={
+                    "schema_version": step.get("schema_version"),
+                    "status": "FAILED",
+                    "step_id": step.get("step_id"),
+                    "failure_reason": "task_continuation_mismatch",
+                    "retryable": False,
+                },
+                config=config,
+                context=context,
+            )
+        task_id = step_task_id or continuation_task_id
+        if isinstance(task_id, int):
+            task = agent_task_crud.get_by_id(
+                context.db,
+                task_id,
+                team_id=context.team_id,
+                user_id=context.user_id,
+            )
+        context.task = task
+        projection = await self.pending_application_step_projector.project(
+            PendingApplicationStepProjectionRequest(
+                db=context.db,
+                session=context.session,
+                team_id=context.team_id,
+                user_id=context.user_id,
+                session_id=context.session_id,
+                step=step,
+                task=task,
+                authorization=context.authorization or "",
+            )
+        )
+        if projection.status == "COMPLETED":
+            acknowledgement = completed_application_step_acknowledgement(
+                step,
+                result=projection.result,
+                replayed=projection.replayed,
+            )
+            return await self._resume_pending_application_step(
+                step,
+                acknowledgement=acknowledgement,
+                config=config,
+                context=context,
+            )
+        if projection.retryable or projection.busy:
+            return await self._record_pending_application_step_failure(
+                state=state,
+                step=step,
+                snapshot=snapshot,
+                context=context,
+                config=config,
+                failure_reason=projection.failure_reason or "application_step_in_progress",
+                retryable=True,
+            )
+        return await self._resume_pending_application_step(
+            step,
+            acknowledgement={
+                "schema_version": step.get("schema_version"),
+                "status": "FAILED",
+                "step_id": projection.step_id,
+                "failure_reason": projection.failure_reason or "application_step_failed",
+                "retryable": False,
+            },
+            config=config,
+            context=context,
+        )
+
+    async def _record_pending_application_step_failure(
+        self,
+        *,
+        state: JSONDict,
+        step: PendingApplicationStepRequest,
+        snapshot: object,
+        context: AgentRuntimeContext | None,
+        config: RunnableConfig,
+        failure_reason: str,
+        retryable: bool,
+    ) -> AgentRuntimeInvokeResult:
+        event = {
+            "event": "pending_application_step_in_progress" if retryable else "pending_application_step_failed",
+            "step_id": step.get("step_id"),
+            "step_type": step.get("step_type"),
+            "reason": failure_reason,
+            "retryable": retryable,
+            "internal": True,
+        }
+        runtime_status = (
+            "pending_application_step_in_progress"
+            if retryable
+            else "pending_application_step_failed"
+        )
+        continuation = pending_task_continuation_from_json(step.get("checkpoint_ref"))
+        projection = {
+            "status": "IN_PROGRESS" if retryable else "FAILED",
+            "projection_key": (
+                pending_interrupt_projection_key(continuation, step)
+                if continuation is not None
+                else "pending_application_step:invalid_continuation"
+            ),
+            "replayed": False,
+            "busy": retryable,
+            "retryable": retryable,
+            "failure_reason": failure_reason,
+            "continuation": coerce_json_dict(continuation),
+            "interrupt": coerce_json_dict(step),
+        }
+        update = {
+            "application_action": "finish",
+            "runtime_status": runtime_status,
+            "runtime_retryable": retryable,
+            "pending_interrupt_projection": projection,
+            "pending_task_continuation_ref": continuation,
+            "pending_task_snapshot": coerce_json_dict(step.get("task_snapshot")),
+            "current_interrupt": None,
+            "assistant_content": (
+                "当前流程正在后台完成关键步骤，请稍后重试。"
+                if retryable
+                else "当前流程关键步骤执行失败，请重新发起。"
+            ),
+            "events": [event],
+        }
+        # A retryable application-step outcome must not rewrite the interrupted
+        # root checkpoint. LangGraph owns the exact nested task continuation;
+        # updating parent state here would fork/consume that task and force the
+        # child node to replay with a new continuation identity. The durable
+        # application-step ledger is the retry authority while the unchanged
+        # checkpoint remains the execution authority.
+        if not retryable:
+            await self._graph.aupdate_state(config, update)
+        state.update(update)
+        state.pop("__interrupt__", None)
+        if context is not None:
+            context.side_effects.current_interrupt = None
+            context.side_effects.pending_task_events.append(event)
+        return state
+
+    async def _resume_pending_application_step(
+        self,
+        step: PendingApplicationStepRequest,
+        *,
+        acknowledgement: JSONDict,
+        config: RunnableConfig,
+        context: AgentRuntimeContext | None,
+    ) -> AgentRuntimeInvokeResult:
+        """Resume the owning root graph so LangGraph restores the exact child task.
+
+        Nested interrupts are resumed through their parent graph. The runtime-only
+        command supplies the authenticated child continuation when LangGraph
+        replays the parent node; the acknowledgement itself remains the native
+        ``Command(resume=...)`` value consumed by the child's ``interrupt()``.
+        """
+
+        if context is None:
+            raise ValueError("pending application-step resume requires runtime context")
+        continuation = pending_task_continuation_from_json(
+            step.get("checkpoint_ref"),
+            expected_team_id=context.team_id,
+            expected_user_id=context.user_id,
+            expected_session_id=context.session_id,
+        )
+        if continuation is None:
+            raise ValueError("pending application-step resume continuation mismatch")
+        context.internal_pending_command = PendingTaskInternalCommand(
+            action="resume_application_step",
+            continuation=continuation,
+            expected_interrupt=step,
+        )
+        original_turn_input = context.turn_input
+        original_content = context.content
+        step_turn_input = coerce_json_dict(step.get("turn_input"))
+        if step_turn_input:
+            context.turn_input = AgentTurnInput.model_validate(step_turn_input)
+        context.content = str(step.get("content") or "")
+        try:
+            result = await self._graph.ainvoke(
+                Command(resume=acknowledgement),
+                config,
+                context=context,
+            )
+        finally:
+            context.internal_pending_command = None
+            context.turn_input = original_turn_input
+            context.content = original_content
+        return await self._continue_ready_nodes_after_resume(
+            result,
+            config=config,
+            context=context,
+            resumed_interrupt=step,
+        )
+
+    async def _project_pending_task_outcome_barrier(
+        self,
+        barrier: JSONDict,
+        *,
+        snapshot: object,
+        context: AgentRuntimeContext | None,
+        config: RunnableConfig,
+    ) -> AgentRuntimeInvokeResult:
+        """Project one terminal PendingTask outcome before releasing the graph."""
+
+        state = coerce_json_dict(getattr(snapshot, "values", None))
+        continuation = pending_task_continuation_from_json(
+            barrier.get("checkpoint_ref"),
+            expected_team_id=context.team_id if context is not None else state.get("team_id"),
+            expected_user_id=context.user_id if context is not None else state.get("user_id"),
+            expected_session_id=context.session_id if context is not None else state.get("session_id"),
+        )
+        outcome = coerce_json_dict(state.get("pending_task_outcome_intent"))
+        failure_reason: str | None = None
+        if continuation is None:
+            failure_reason = "invalid_continuation"
+        elif barrier != _pending_task_outcome_projection_barrier(continuation, outcome):
+            failure_reason = "projection_barrier_identity_mismatch"
+        elif context is None or context.db is None or context.session is None:
+            failure_reason = "missing_runtime_context"
+
+        if failure_reason is not None:
+            projection_key = (
+                pending_interrupt_projection_key(continuation, barrier)
+                if continuation is not None
+                else "pending_task_projection:invalid_continuation"
+            )
+            failed_projection = {
+                "status": "FAILED",
+                "projection_key": projection_key,
+                "replayed": False,
+                "busy": False,
+                "retryable": False,
+                "failure_reason": failure_reason,
+                "delivery_status": None,
+                "continuation": coerce_json_dict(continuation),
+                "interrupt": barrier,
+            }
+            return await self._resume_pending_task_projection_barrier(
+                barrier,
+                acknowledgement={
+                    "status": "FAILED",
+                    "projection_key": projection_key,
+                    "projection": failed_projection,
+                    "failure_reason": failure_reason,
+                },
+                config=config,
+                context=context,
+            )
+
+        projection = await self.pending_task_outcome_projector.project(
+            PendingTaskOutcomeProjectionRequest(
+                db=context.db,
+                session=context.session,
+                team_id=context.team_id,
+                user_id=context.user_id,
+                session_id=context.session_id,
+                continuation=continuation,
+                interrupt=barrier,
+                outcome=outcome,
+                task=context.task,
+                switch_notice=context.switch_notice,
+                event_sink=context.event_sink,
+            )
+        )
+        projected_state = projection_state(
+            projection,
+            continuation=continuation,
+            interrupt=barrier,
+        )
+        if projection.status != "PROJECTED" and (projection.retryable or projection.busy):
+            runtime_status = (
+                "pending_projection_in_progress"
+                if projection.status == "IN_PROGRESS" or projection.busy
+                else "pending_projection_failed"
+            )
+            assistant_content = (
+                "当前待确认流程正在完成状态同步，请稍后刷新或重试。"
+                if runtime_status == "pending_projection_in_progress"
+                else "当前待确认流程投影失败，请稍后重试。"
+            )
+            event = {
+                "event": "pending_task_outcome_projection_in_progress"
+                if runtime_status == "pending_projection_in_progress"
+                else "pending_task_outcome_projection_failed",
+                "reason": projection.failure_reason,
+                "projection_key": projection.projection_key,
+                "retryable": True,
+            }
+            await self._graph.aupdate_state(
+                config,
+                {
+                    "runtime_status": runtime_status,
+                    "runtime_retryable": True,
+                    "pending_interrupt_projection": projected_state,
+                    "assistant_content": assistant_content,
+                    "current_interrupt": None,
+                    "events": [event],
+                },
+            )
+            state.update({
+                "application_action": "finish",
+                "runtime_status": runtime_status,
+                "runtime_retryable": True,
+                "pending_interrupt_projection": projected_state,
+                "pending_task_handled": False,
+                "assistant_content": assistant_content,
+                "current_interrupt": None,
+                "events": [
+                    *[event for event in state.get("events", []) if isinstance(event, dict)],
+                    event,
+                ],
+            })
+            state.pop("__interrupt__", None)
+            return state
+
+        if projection.status == "PROJECTED":
+            # Projection output is authoritative even when the active task was
+            # deliberately cleared (for example, a paused/suspended draft).
+            # Falling back to the pre-projection runtime task would resurrect
+            # a task that the durable outcome just removed from the active slot.
+            context.task = projection.task
+            context.switch_notice = projection.switch_notice
+            context.side_effects.pending_task_result = outcome
+            context.side_effects.pending_task_events.extend(projection.events)
+            context.side_effects.pending_task_assistant_content = projection.assistant_content
+            context.side_effects.pending_task_switch_notice = projection.switch_notice
+            projected_interrupt = projection.current_interrupt
+            if _is_pending_task_outcome_projection_barrier(projected_interrupt):
+                projected_interrupt = None
+            context.side_effects.current_interrupt = projected_interrupt
+            acknowledgement = {
+                "status": "PROJECTED",
+                "projection_key": projection.projection_key,
+                "projection": projected_state,
+                "assistant_content": projection.assistant_content,
+                "switch_notice": projection.switch_notice,
+                "current_interrupt": projected_interrupt,
+                "task_projection": coerce_json_dict(outcome.get("task_projection")),
+                "task_snapshot": coerce_json_dict(projection.task_snapshot),
+                "suspended_task_snapshot": coerce_json_dict(
+                    projection.suspended_task_snapshot
+                ),
+            }
+        else:
+            acknowledgement = {
+                "status": "FAILED",
+                "projection_key": projection.projection_key,
+                "projection": projected_state,
+                "failure_reason": projection.failure_reason or "projection_failed",
+            }
+        return await self._resume_pending_task_projection_barrier(
+            barrier,
+            acknowledgement=acknowledgement,
+            config=config,
+            context=context,
+        )
+
+    async def _resume_pending_task_projection_barrier(
+        self,
+        barrier: JSONDict,
+        *,
+        acknowledgement: JSONDict,
+        config: RunnableConfig,
+        context: AgentRuntimeContext | None,
+    ) -> AgentRuntimeInvokeResult:
+        result = await self._graph.ainvoke(
+            Command(resume=acknowledgement),
+            config,
+            context=context,
+        )
+        return await self._continue_ready_nodes_after_resume(
+            result,
+            config=config,
+            context=context,
+            resumed_interrupt=barrier,
+        )
 
     async def _publish_checkpointed_follow_up_projection(
         self,
@@ -927,6 +1510,20 @@ class AgentRootRuntime:
             projection_status = (
                 projection.get("status") if isinstance(projection, dict) else getattr(projection, "status", None)
             )
+            if projection_status == "SKIPPED":
+                reason_code = (
+                    projection.get("reason_code")
+                    if isinstance(projection, dict)
+                    else getattr(projection, "reason_code", None)
+                )
+                event = {
+                    "event": "follow_up_task_confirmation_projection_suppressed",
+                    "prompt_key": prompt_key,
+                    "reason_code": reason_code or "PROJECTION_NOT_ELIGIBLE",
+                }
+                context.side_effects.business_interaction_events.append(event)
+                await _publish_event(context, event)
+                return False
             if projection_status != "PROJECTED":
                 raise RuntimeError(
                     f"projection acknowledgement did not reach PROJECTED: {projection_status or 'MISSING'}"
@@ -968,7 +1565,9 @@ class AgentRootRuntime:
         }
         if any(
             event.get("event") == FOLLOW_UP_CONFIRMATION_PROMPT_EVENT
-            and coerce_json_dict(event.get("interaction")).get("interaction_id") == interaction.get("interaction_id")
+            and coerce_json_dict(
+                coerce_json_dict(event.get("interaction")).get("payload")
+            ).get("prompt_delivery_key") == prompt_key
             for event in context.side_effects.business_interaction_events
         ):
             return True
@@ -1001,6 +1600,35 @@ class AgentRootRuntime:
             context=context,
         )
 
+    async def _load_checkpointed_pending_outcome(
+        self,
+        interrupt_payload: AgentInterruptPayload,
+        *,
+        context: AgentRuntimeContext | None,
+        continuation: PendingTaskContinuationRef | None = None,
+    ) -> PendingTaskOutcomeRecovery:
+        """Resolve a bubbled child interrupt through its exact continuation."""
+
+        checkpoint_ref = continuation or _pending_checkpoint_ref_from_interrupt(
+            interrupt_payload,
+            context=context,
+        )
+        if checkpoint_ref is None:
+            return PendingTaskOutcomeRecovery(failure_reason="invalid_continuation")
+        trace_events = list(context.side_effects.pending_task_events) if context is not None else []
+        try:
+            return await self.pending_graph_service.load_checkpointed_outcome(
+                checkpoint_ref,
+                expected_interrupt=interrupt_payload,
+                trace_events=trace_events,
+            )
+        except (AttributeError, RuntimeError, ValueError):
+            logger.exception(
+                "Failed to reload checkpointed pending-task outcome",
+                extra={"pending_checkpoint_ref": checkpoint_ref},
+            )
+            return PendingTaskOutcomeRecovery(failure_reason="checkpoint_recovery_exception")
+
     async def _project_bubbled_pending_interrupt(
         self,
         interrupt_payload: AgentInterruptPayload,
@@ -1008,75 +1636,225 @@ class AgentRootRuntime:
         snapshot: object,
         context: AgentRuntimeContext | None,
         config: RunnableConfig,
+        continuation: PendingTaskContinuationRef | None = None,
+        continuation_failure: str | None = None,
     ) -> AgentRuntimeInvokeResult:
-        """Project a native child-graph interrupt into the root turn output."""
+        """Delegate child recovery/projection and persist its root visibility state."""
 
-        state: AgentRuntimeInvokeResult = {}
-        state.update(coerce_json_dict(getattr(snapshot, "values", None)))
-        task_projection = _interrupt_task_projection(interrupt_payload)
-        snapshot_interrupts = _snapshot_interrupt_items(snapshot)
-        if not snapshot_interrupts:
-            await self._graph.aupdate_state(
-                config,
-                {
-                    "current_interrupt": interrupt_payload,
-                    "pending_task_requested": True,
-                    "task_projection": task_projection,
-                },
+        state: AgentRuntimeInvokeResult = coerce_json_dict(getattr(snapshot, "values", None))
+        outcome = await self.pending_interrupt_coordinator.coordinate(
+            PendingInterruptCoordinationRequest(
+                interrupt=interrupt_payload,
+                context=context,
+                continuation=continuation,
+                continuation_failure=continuation_failure,
             )
-        pending_result = _pending_graph_result_from_bubbled_interrupt(interrupt_payload)
-        state.update(
-            {
+        )
+        task_projection = outcome.task_projection or _interrupt_task_projection(interrupt_payload)
+        if outcome.pending_result is not None:
+            state.update({
                 "application_action": "pending_handled",
-                "pending_task_handled": True,
-                "pending_task_result": _pending_task_result_projection(pending_result),
-                "assistant_content": pending_result.get("assistant_content"),
-                "current_interrupt": interrupt_payload,
+                "pending_task_handled": outcome.status == "PROJECTED",
+                "pending_task_result": _pending_task_result_projection(outcome.pending_result),
+                "assistant_content": outcome.pending_result.get("assistant_content"),
+                "task_projection": task_projection,
+            })
+            bubbled_event: JSONDict = {
+                "event": "agent_root_pending_task_interrupt_bubbled",
+                "source_event": interrupt_payload.get("source_event"),
+            }
+            state["events"] = [
+                *[event for event in state.get("events", []) if isinstance(event, dict)],
+                bubbled_event,
+            ]
+
+        if outcome.exposable:
+            if context is not None:
+                context.task = outcome.task or context.task
+                context.switch_notice = outcome.switch_notice
+                context.side_effects.pending_task_result = outcome.pending_result
+                context.side_effects.pending_task_events.extend(outcome.events)
+                context.side_effects.pending_task_assistant_content = outcome.assistant_content
+                context.side_effects.pending_task_switch_notice = outcome.switch_notice
+                context.side_effects.current_interrupt = outcome.current_interrupt
+            state.update({
+                "runtime_status": outcome.runtime_status,
+                "runtime_retryable": outcome.retryable,
+                "pending_interrupt_projection": outcome.projection_state,
+                "assistant_content": outcome.assistant_content,
+                "current_interrupt": outcome.current_interrupt,
                 "task_projection": task_projection,
                 "events": [
                     *[event for event in state.get("events", []) if isinstance(event, dict)],
-                    {
-                        "event": "agent_root_pending_task_interrupt_bubbled",
-                        "source_event": interrupt_payload.get("source_event"),
-                    },
+                    outcome.event,
                 ],
-            }
+            })
+        else:
+            if context is not None:
+                context.side_effects.pending_task_events.append(outcome.event)
+                context.side_effects.pending_task_assistant_content = outcome.assistant_content
+                await _publish_event_best_effort(
+                    context,
+                    outcome.event,
+                    log_message="Pending-task interrupt coordination event publication failed",
+                )
+            state.update({
+                "application_action": "finish",
+                "runtime_status": outcome.runtime_status,
+                "runtime_retryable": outcome.retryable,
+                "pending_interrupt_projection": outcome.projection_state,
+                "pending_task_handled": False,
+                "pending_task_result": {
+                    **coerce_json_dict(state.get("pending_task_result")),
+                    "projection": outcome.projection_state,
+                    **({
+                        "recovery_failed": True,
+                        "failure_reason": outcome.projection_state.get("failure_reason"),
+                    } if outcome.runtime_status == "checkpoint_recovery_failed" else {}),
+                },
+                "assistant_content": outcome.assistant_content,
+                "current_interrupt": None,
+                "events": [
+                    *[event for event in state.get("events", []) if isinstance(event, dict)],
+                    outcome.event,
+                ],
+            })
+            state.pop("__interrupt__", None)
+
+        if not outcome.terminal:
+            await self._graph.aupdate_state(
+                config,
+                {
+                    "application_action": state.get("application_action"),
+                    "runtime_status": outcome.runtime_status,
+                    "runtime_retryable": outcome.retryable,
+                    "pending_interrupt_projection": outcome.projection_state,
+                    "pending_task_handled": state.get("pending_task_handled", False),
+                    "pending_task_result": coerce_json_dict(state.get("pending_task_result")),
+                    "assistant_content": state.get("assistant_content"),
+                    "current_interrupt": outcome.current_interrupt if outcome.exposable else None,
+                    "task_projection": task_projection,
+                    "events": [outcome.event],
+                },
+            )
+        if outcome.terminal:
+            return await self._abort_terminal_pending_interrupt(
+                state,
+                interrupt_payload,
+                continuation=continuation,
+                context=context,
+                config=config,
+            )
+        return state
+
+    async def _abort_terminal_pending_interrupt(
+        self,
+        state: AgentRuntimeInvokeResult,
+        interrupt_payload: AgentInterruptPayload,
+        *,
+        continuation: PendingTaskContinuationRef | None,
+        context: AgentRuntimeContext | None,
+        config: RunnableConfig,
+    ) -> AgentRuntimeInvokeResult:
+        """Resume the root-owned child interrupt into its internal abort route."""
+
+        resolved = continuation or _pending_checkpoint_ref_from_interrupt(
+            interrupt_payload,
+            context=context,
         )
-        if snapshot_interrupts:
-            state["__interrupt__"] = snapshot_interrupts
-        if context and context.db and context.session:
-            if not context.task:
-                task_id = _interrupt_task_projection_id(interrupt_payload)
-                if task_id is not None:
-                    context.task = agent_task_crud.get_by_id(
-                        context.db,
-                        task_id,
-                        team_id=context.team_id,
-                        user_id=context.user_id,
-                    )
-            pending_side_effects = PendingTaskGraphSideEffects(task=context.task)
-            result = self.pending_task_side_effect_handler.apply(
-                pending_result,
-                PendingTaskSideEffectContext(
-                    db=context.db,
-                    session=context.session,
-                    team_id=context.team_id,
-                    user_id=context.user_id,
-                    task=context.task,
-                    switch_notice=context.switch_notice,
-                    graph_side_effects=pending_side_effects,
-                ),
+        if resolved is None:
+            return await self._persist_terminal_abort_result(
+                state,
+                config=config,
+                abort_status="invalid_continuation",
             )
-            context.task = result.task
-            context.side_effects.pending_task_result = pending_result
-            context.side_effects.pending_task_graph_side_effects = pending_side_effects
-            context.side_effects.pending_task_events.extend(result.events)
-            await _publish_events(context, result.events)
-            context.side_effects.pending_task_assistant_content = (
-                result.assistant_content if isinstance(result.assistant_content, str) else None
+        if context is None:
+            return await self._persist_terminal_abort_result(
+                state,
+                config=config,
+                abort_status="missing_runtime_context",
             )
-            context.side_effects.pending_task_switch_notice = result.switch_notice
-            context.side_effects.current_interrupt = result.current_interrupt or interrupt_payload
+
+        context.internal_pending_command = PendingTaskInternalCommand(
+            action="abort_projection",
+            continuation=resolved,
+            expected_interrupt=interrupt_payload,
+        )
+        try:
+            await self._graph.ainvoke(
+                Command(resume={"action": "abort_projection"}),
+                config,
+                context=context,
+            )
+            verification = await self._verify_terminal_pending_abort(
+                resolved,
+                interrupt_payload=interrupt_payload,
+                context=context,
+            )
+            abort_status = verification.failure_reason or "ABORTED"
+        except (AttributeError, RuntimeError, ValueError):
+            logger.exception(
+                "Failed to abort terminal pending-task projection",
+                extra={"pending_checkpoint_ref": resolved},
+            )
+            abort_status = "projection_abort_exception"
+        finally:
+            context.internal_pending_command = None
+        return await self._persist_terminal_abort_result(
+            state,
+            config=config,
+            abort_status=abort_status,
+        )
+
+    async def _verify_terminal_pending_abort(
+        self,
+        continuation: PendingTaskContinuationRef,
+        *,
+        interrupt_payload: AgentInterruptPayload,
+        context: AgentRuntimeContext,
+    ) -> PendingTaskOutcomeRecovery:
+        verifier = getattr(self.pending_graph_service, "verify_projection_aborted", None)
+        if not callable(verifier):
+            return PendingTaskOutcomeRecovery(failure_reason="projection_abort_verifier_unavailable")
+        return await verifier(PendingTaskAbortVerificationRequest(
+            continuation=continuation,
+            expected_interrupt=interrupt_payload,
+            team_id=context.team_id,
+            user_id=context.user_id,
+            session_id=context.session_id,
+        ))
+
+    async def _persist_terminal_abort_result(
+        self,
+        state: AgentRuntimeInvokeResult,
+        *,
+        config: RunnableConfig,
+        abort_status: str,
+    ) -> AgentRuntimeInvokeResult:
+        terminal_projection = {
+            **coerce_json_dict(state.get("pending_interrupt_projection")),
+            "abort_status": abort_status,
+        }
+        state.update({
+            "pending_interrupt_projection": terminal_projection,
+            "current_interrupt": None,
+        })
+        state.pop("__interrupt__", None)
+        await self._graph.aupdate_state(
+            config,
+            {
+                "application_action": state.get("application_action"),
+                "runtime_status": state.get("runtime_status"),
+                "runtime_retryable": state.get("runtime_retryable"),
+                "pending_interrupt_projection": terminal_projection,
+                "pending_task_handled": state.get("pending_task_handled", False),
+                "pending_task_result": coerce_json_dict(state.get("pending_task_result")),
+                "assistant_content": state.get("assistant_content"),
+                "current_interrupt": None,
+                "task_projection": coerce_json_dict(state.get("task_projection")),
+            },
+        )
+        await self._graph.aupdate_state(config, None, as_node=END)
         return state
 
     def _start_turn(self, state: AgentRuntimeState) -> AgentRuntimeState:
@@ -1085,8 +1863,11 @@ class AgentRootRuntime:
             "application_action": "finish",
             "pending_task_handled": False,
             "pending_task_result": {},
+            "pending_task_continuation_ref": None,
+            "pending_task_resume_error": None,
             "new_flow_result": {},
             "post_write_effects": {},
+            "customer_intelligence_requests": [],
             "resume_payload": {},
             "assistant_content": None,
             "switch_notice": None,
@@ -1140,10 +1921,22 @@ class AgentRootRuntime:
         projection_ack_failed = metadata.get("projection_ack_failed") is True
         discard_reason = metadata.get("follow_up_confirmation_discard_reason")
         should_discard_follow_up_confirmation = projection_ack_failed or isinstance(discard_reason, str)
+        raw_checkpoint_ref = active_interrupt.get("checkpoint_ref")
+        continuation_ref = _pending_checkpoint_ref_from_interrupt(
+            active_interrupt,
+            context=runtime.context,
+        )
+        continuation_error = (
+            "invalid_continuation"
+            if raw_checkpoint_ref is not None and continuation_ref is None
+            else None
+        )
         update: AgentRuntimeState = {
             "runtime_status": "resumed",
             "current_interrupt": None,
             "resume_payload": resume_payload_json,
+            "pending_task_continuation_ref": continuation_ref,
+            "pending_task_resume_error": continuation_error,
             "turn_intent": turn_intent,
             "follow_up_confirmation_projection_suppressed": should_discard_follow_up_confirmation,
             "follow_up_confirmation_discard_reason": (discard_reason if isinstance(discard_reason, str) else None),
@@ -1163,6 +1956,8 @@ class AgentRootRuntime:
         return update
 
     def _route_after_interrupt_resume(self, state: AgentRuntimeState) -> str:
+        if state.get("pending_task_resume_error"):
+            return "finish"
         if state.get("follow_up_confirmation_projection_suppressed"):
             return "discard_follow_up_confirmation"
         if _is_follow_up_confirmation_resume(state.get("resume_payload")):
@@ -1182,22 +1977,21 @@ class AgentRootRuntime:
         runtime: Runtime[AgentRuntimeContext],
     ) -> AgentRuntimeState:
         context = runtime.context
-        pending_branch_event = _step_event(
-            "pending_task_branch",
-            "started",
-            "进入待确认或待补充流程",
-        )
-        context.side_effects.pending_task_events.append(pending_branch_event)
-        await _publish_event(context, pending_branch_event)
-        if not context.task and context.db:
-            task_id = _pending_task_id_from_state(state)
-            if task_id is not None:
-                context.task = agent_task_crud.get_by_id(
-                    context.db,
-                    task_id,
-                    team_id=context.team_id,
-                    user_id=context.user_id,
-                )
+        internal_command = context.internal_pending_command
+        if internal_command is None:
+            pending_branch_event = _step_event(
+                "pending_task_branch",
+                "started",
+                "进入待确认或待补充流程",
+            )
+            context.side_effects.pending_task_events.append(pending_branch_event)
+            await _publish_event(context, pending_branch_event)
+        task_snapshot = coerce_json_dict(state.get("pending_task_snapshot"))
+        if not task_snapshot and context.task is not None:
+            # Compatibility hydration for in-flight root turns. The ORM object
+            # remains application-owned and only its checkpoint-safe snapshot
+            # crosses into the child graph.
+            task_snapshot = agent_task_snapshot(context.task)
         if not context.db or not context.session or not context.turn_input:
             return {
                 "route": "pending_task_subgraph",
@@ -1210,34 +2004,76 @@ class AgentRootRuntime:
                 ],
             }
         pending_side_effects = PendingTaskGraphSideEffects(
-            task=context.task,
-            event_sink=context.event_sink,
+            task=task_snapshot or None,
         )
-        pending_graph_input = {
+        if internal_command is None:
+            context.side_effects.pending_task_graph_side_effects = pending_side_effects
+        pending_graph_input: PendingTaskGraphInput = {
             "db": context.db,
             "session": context.session,
-            "task": context.task,
+            "task_snapshot": task_snapshot,
             "turn_input": context.turn_input,
             "content": context.content,
             "team_id": context.team_id,
             "user_id": context.user_id,
             "session_id": context.session_id,
             "authorization": context.authorization,
-            "resume_payload": state.get("resume_payload") or {},
             "suspended_candidates": state.get("suspended_candidates") or [],
             "events": [],
         }
-        run_with_trace = getattr(self.pending_graph_service, "run_with_trace", None)
-        if callable(run_with_trace):
-            result = await run_with_trace(pending_graph_input, side_effects=pending_side_effects)
+        continuation_ref = state.get("pending_task_continuation_ref")
+        resume_payload = state.get("resume_payload") or {}
+        if continuation_ref is not None:
+            pending_graph_input["continuation_ref"] = continuation_ref
+            pending_graph_input["resume_payload"] = resume_payload
+        elif resume_payload:
+            pending_graph_input["projected_resume_payload"] = resume_payload
+        if internal_command is not None:
+            internal_continuation = pending_task_continuation_from_json(
+                internal_command.continuation,
+                expected_team_id=context.team_id,
+                expected_user_id=context.user_id,
+                expected_session_id=context.session_id,
+            )
+            if internal_continuation is None:
+                raise ValueError("invalid internal pending-task command")
+            pending_graph_input["continuation_ref"] = internal_continuation
+            if internal_command.action == "abort_projection":
+                pending_graph_input["resume_payload"] = {"action": "abort_projection"}
+                result = await self.pending_graph_service.run(
+                    pending_graph_input,
+                    side_effects=pending_side_effects,
+                )
+            elif internal_command.action == "resume_application_step":
+                # The acknowledgement is propagated by the owning root graph's
+                # native Command(resume=...). Supplying only the exact durable
+                # continuation here lets LangGraph restore the interrupted child
+                # task instead of starting a new invocation.
+                pending_graph_input.pop("resume_payload", None)
+                result = await self.pending_graph_service.run_with_trace(
+                    pending_graph_input,
+                    side_effects=pending_side_effects,
+                )
+            else:
+                raise ValueError("invalid internal pending-task command")
         else:
-            result = await self.pending_graph_service.run(pending_graph_input, side_effects=pending_side_effects)
-        context.task = pending_side_effects.task
+            result = await self.pending_graph_service.run_with_trace(
+                pending_graph_input,
+                side_effects=pending_side_effects,
+            )
         context.side_effects.pending_task_result = result
         context.side_effects.pending_task_graph_side_effects = pending_side_effects
+        continuation = pending_task_continuation_from_json(
+            pending_side_effects.checkpoint_ref,
+            expected_team_id=context.team_id,
+            expected_user_id=context.user_id,
+            expected_session_id=context.session_id,
+        )
         return {
             "route": "pending_task_subgraph",
             "pending_task_result": _pending_task_result_projection(result),
+            "pending_task_outcome_intent": _pending_task_outcome_intent(result),
+            "pending_task_continuation_ref": continuation,
             "events": [
                 {
                     "event": "agent_root_pending_task_subgraph_completed",
@@ -1248,82 +2084,103 @@ class AgentRootRuntime:
             ],
         }
 
-    async def _apply_pending_task_effects(
-        self,
-        state: AgentRuntimeState,
-        runtime: Runtime[AgentRuntimeContext],
-    ) -> AgentRuntimeState:
-        context = runtime.context
-        if not context.db or not context.session:
+    def _await_pending_task_projection(self, state: AgentRuntimeState) -> AgentRuntimeState:
+        """Pause on an internal durable barrier before application side effects.
+
+        The node only emits a checkpoint-safe projection request and consumes a
+        projection acknowledgement. Database mutation and transport delivery are
+        owned by the application projector outside LangGraph execution.
+        """
+
+        outcome = coerce_json_dict(state.get("pending_task_outcome_intent"))
+        if not _pending_task_outcome_requires_projection(outcome):
             return {
-                "events": [
-                    {
-                        "event": "agent_root_pending_task_effects_unavailable",
-                        "reason": "missing_runtime_context",
-                    }
-                ],
+                "events": [{
+                    "event": "agent_root_pending_task_projection_skipped",
+                    "reason": "no_projectable_outcome",
+                }]
             }
-        pending_result = context.side_effects.pending_task_result
-        if not pending_result:
+        continuation = pending_task_continuation_from_json(
+            state.get("pending_task_continuation_ref"),
+            expected_team_id=state.get("team_id"),
+            expected_user_id=state.get("user_id"),
+            expected_session_id=state.get("session_id"),
+        )
+        if continuation is None:
             return {
-                "events": [
-                    {
-                        "event": "agent_root_pending_task_effects_skipped",
-                        "reason": "empty_pending_result",
-                    }
-                ],
+                "application_action": "finish",
+                "runtime_status": "pending_projection_failed",
+                "runtime_retryable": False,
+                "pending_task_result": {
+                    **coerce_json_dict(state.get("pending_task_result")),
+                    "projection_aborted": True,
+                    "failure_reason": "missing_pending_task_continuation",
+                },
+                "events": [{
+                    "event": "agent_root_pending_task_projection_rejected",
+                    "reason": "missing_pending_task_continuation",
+                }],
             }
-        result = self.pending_task_side_effect_handler.apply(
-            pending_result,
-            PendingTaskSideEffectContext(
-                db=context.db,
-                session=context.session,
-                team_id=context.team_id,
-                user_id=context.user_id,
-                task=context.task,
-                switch_notice=context.switch_notice,
-                graph_side_effects=context.side_effects.pending_task_graph_side_effects,
-            ),
-        )
-        context.task = result.task
-        context.switch_notice = result.switch_notice
-        context.side_effects.pending_task_events.extend(result.events)
-        await _publish_events(
-            context,
-            _unstreamed_pending_effect_events(result.events, streamed_pending_steps=bool(context.event_sink)),
-        )
-        context.side_effects.pending_task_assistant_content = result.assistant_content
-        context.side_effects.pending_task_switch_notice = result.switch_notice
-        current_interrupt = result.current_interrupt
-        context.side_effects.current_interrupt = current_interrupt
-        suspended_task = (
-            context.side_effects.pending_task_graph_side_effects.suspended_task
-            if context.side_effects.pending_task_graph_side_effects
-            else None
-        )
-        suspended_candidates = _updated_suspended_candidates(
-            state.get("suspended_candidates"),
-            suspended_task=suspended_task,
-        )
+
+        barrier = _pending_task_outcome_projection_barrier(continuation, outcome)
+        acknowledgement = coerce_json_dict(interrupt(barrier))
+        expected_key = pending_interrupt_projection_key(continuation, barrier)
+        projection = coerce_json_dict(acknowledgement.get("projection"))
+        if acknowledgement.get("projection_key") != expected_key:
+            raise ValueError("pending-task projection acknowledgement key mismatch")
+        if acknowledgement.get("status") != "PROJECTED":
+            return {
+                "application_action": "finish",
+                "runtime_status": "pending_projection_failed",
+                "runtime_retryable": False,
+                "pending_interrupt_projection": projection,
+                "pending_task_result": {
+                    **coerce_json_dict(state.get("pending_task_result")),
+                    "projection_aborted": True,
+                    "failure_reason": acknowledgement.get("failure_reason") or "projection_failed",
+                },
+                "events": [{
+                    "event": "agent_root_pending_task_projection_aborted",
+                    "projection_key": expected_key,
+                    "reason": acknowledgement.get("failure_reason") or "projection_failed",
+                }],
+            }
+
         update: AgentRuntimeState = {
-            "current_interrupt": current_interrupt,
-            "suspended_candidates": suspended_candidates,
-            "events": [
-                {
-                    "event": "agent_root_pending_task_effects_applied",
-                    "event_count": len(result.events),
-                    "has_assistant_content": bool(result.assistant_content),
-                    "has_switch_notice": bool(result.switch_notice),
-                    "has_interrupt": bool(current_interrupt),
-                }
-            ],
+            "runtime_status": "pending_projection_projected",
+            "runtime_retryable": False,
+            "pending_interrupt_projection": projection,
+            "current_interrupt": coerce_json_dict(acknowledgement.get("current_interrupt")) or None,
+            "events": [{
+                "event": "agent_root_pending_task_outcome_projected",
+                "projection_key": expected_key,
+                "replayed": bool(projection.get("replayed")),
+                "delivery_status": projection.get("delivery_status"),
+            }],
         }
-        if result.assistant_content:
-            update["assistant_content"] = result.assistant_content
-        if result.switch_notice:
-            update["switch_notice"] = result.switch_notice
-        if current_interrupt:
-            update["task_projection"] = _interrupt_task_projection(current_interrupt)
+        assistant_content = acknowledgement.get("assistant_content")
+        if isinstance(assistant_content, str):
+            update["assistant_content"] = assistant_content
+        switch_notice = acknowledgement.get("switch_notice")
+        if isinstance(switch_notice, str):
+            update["switch_notice"] = switch_notice
+        if "task_projection" in acknowledgement:
+            update["task_projection"] = coerce_json_dict(
+                acknowledgement.get("task_projection")
+            )
+        if "task_snapshot" in acknowledgement:
+            active_task_snapshot = coerce_json_dict(
+                acknowledgement.get("task_snapshot")
+            )
+            suspended_task_snapshot = coerce_json_dict(
+                acknowledgement.get("suspended_task_snapshot")
+            )
+            update["pending_task_snapshot"] = active_task_snapshot
+            update["suspended_candidates"] = _reconcile_suspended_candidates(
+                state.get("suspended_candidates"),
+                active_task=active_task_snapshot,
+                suspended_task=suspended_task_snapshot,
+            )
         return update
 
     def _new_flow_route_marker(self, state: AgentRuntimeState) -> AgentRuntimeState:
@@ -1351,6 +2208,8 @@ class AgentRootRuntime:
         return update
 
     def _route_after_application_action(self, state: AgentRuntimeState) -> str:
+        if coerce_json_dict(state.get("pending_task_result")).get("projection_aborted") is True:
+            return "internal_abort"
         if state.get("application_action") == "execute_confirmed_task":
             return "confirmed_task_execution"
         if state.get("application_action") == "no_pending_confirmation":
@@ -1369,6 +2228,8 @@ class AgentRootRuntime:
         return "finish"
 
     def _should_run_customer_intelligence_inline(self, state: AgentRuntimeState, event: object | None) -> bool:
+        if state.get("customer_intelligence_requests"):
+            return False
         if _is_customer_intelligence_resume(state.get("resume_payload")):
             return True
         trigger_type = _customer_intelligence_trigger_type(event)
@@ -1376,103 +2237,60 @@ class AgentRootRuntime:
             return True
         return trigger_type not in CUSTOMER_INTELLIGENCE_COMMITTED_EVENT_TRIGGER_TYPES
 
-    async def _schedule_customer_intelligence_refresh(
+    def _schedule_customer_intelligence_refresh_intent(
         self,
-        runtime: Runtime[AgentRuntimeContext],
+        state: AgentRuntimeState,
         event: object,
     ) -> AgentRuntimeState:
-        context = runtime.context
+        """Record checkpoint-safe background work without projecting or kicking it.
+
+        The Agent application binds the durable request to the exact persisted
+        assistant message, commits that projection, and only then asks the
+        runtime adapter to kick eligible work.
+        """
+
+        event_projection = _customer_intelligence_event_projection(event)
         trigger_type = _customer_intelligence_trigger_type(event)
         event_key = _customer_intelligence_event_key(event)
         customer_id = _customer_intelligence_customer_id(event)
-        scheduled_event: JSONDict = {
-            "event": "agent_root_customer_intelligence_refresh_scheduled",
+        requests = [
+            coerce_json_dict(item)
+            for item in state.get("customer_intelligence_requests") or []
+            if isinstance(item, dict)
+        ]
+        schedule_intent: JSONDict = {
+            "event": event_projection,
+            "scope": "brief",
+            "request_ids": [
+                str(item["request_id"])
+                for item in requests
+                if isinstance(item.get("request_id"), str) and item.get("request_id")
+            ],
+        }
+        requested_event: JSONDict = {
+            "event": "agent_root_customer_intelligence_refresh_requested",
             "mode": "background",
+            "projection_status": "PENDING",
             "trigger_type": trigger_type,
             "event_key": event_key,
             "customer_id": customer_id,
         }
-        if isinstance(context.user_message_id, int):
-            scheduled_event["source_user_message_id"] = context.user_message_id
-        result_projection: JSONDict = {
-            "handled": True,
-            "mode": "background",
-            "scheduled": False,
-            "trigger_type": trigger_type,
-            "event_key": event_key,
-            "customer_id": customer_id,
-        }
-        if isinstance(context.user_message_id, int):
-            result_projection["source_user_message_id"] = context.user_message_id
-
-        try:
-            request = await self.customer_intelligence_refresh_service.trigger_committed_event_refresh(
-                context.db,
-                event=event,
-                scope="brief",
-                agent_binding=AgentAsyncOperationBinding(
-                    team_id=context.team_id,
-                    user_id=context.user_id,
-                    session_id=context.session_id,
-                    source_user_message_id=context.user_message_id,
-                ),
-            )
-        except Exception as exc:
-            logger.exception(
-                "Agent 客户智能后台刷新调度失败，已隔离为非阻塞后置效果: team_id=%s, session_id=%s, trigger_type=%s",
-                context.team_id,
-                context.session_id,
-                trigger_type,
-            )
-            failed_event = {
-                **scheduled_event,
-                "event": "agent_root_customer_intelligence_refresh_schedule_failed",
-                "reason": str(exc),
-            }
-            context.side_effects.customer_intelligence_events.append(failed_event)
-            await _publish_event(context, failed_event)
-            return {
-                "customer_intelligence_requested": False,
-                "customer_intelligence_result": {
-                    **result_projection,
-                    "handled": False,
-                    "reason": "background_refresh_schedule_failed",
-                },
-                "events": [failed_event],
-            }
-
-        scheduled = bool(getattr(request, "scheduled", False))
-        request_id = getattr(request, "request_id", None)
-        scheduled_event["scheduled"] = scheduled
-        if isinstance(request_id, str):
-            scheduled_event["request_id"] = request_id
-            result_projection["request_id"] = request_id
-        operation_public_id = getattr(request, "operation_public_id", None)
-        if isinstance(operation_public_id, str) and operation_public_id:
-            scheduled_event["operation_public_id"] = operation_public_id
-            result_projection["operation_public_id"] = operation_public_id
-        result_projection["scheduled"] = scheduled
-        result_projection["scope"] = str(getattr(request, "scope", "brief") or "brief")
-        delivery_event = scheduled_event
-        if not scheduled:
-            schedule_error = str(getattr(request, "schedule_error", "") or "")
-            delivery_event = {
-                **scheduled_event,
-                "event": "agent_root_customer_intelligence_refresh_schedule_failed",
-                "reason": schedule_error or "background_refresh_not_scheduled",
-            }
-            result_projection["handled"] = False
-            result_projection["reason"] = "background_refresh_schedule_failed"
-            if schedule_error:
-                result_projection["schedule_error"] = schedule_error
-        context.side_effects.customer_intelligence_events.append(delivery_event)
-        context.side_effects.customer_intelligence_result = result_projection
-        await _publish_event(context, delivery_event)
         return {
             "customer_intelligence_requested": False,
-            "customer_intelligence_event": _customer_intelligence_event_projection(event),
-            "customer_intelligence_result": result_projection,
-            "events": [delivery_event],
+            "customer_intelligence_event": event_projection,
+            "customer_intelligence_requests": requests,
+            "customer_intelligence_schedule_intent": schedule_intent,
+            "customer_intelligence_result": {
+                "handled": True,
+                "mode": "background",
+                "scheduled": False,
+                "projection_status": "PENDING",
+                "trigger_type": trigger_type,
+                "event_key": event_key,
+                "customer_id": customer_id,
+                "scope": "brief",
+            },
+            "events": [requested_event],
         }
 
     async def _run_customer_intelligence_graph(
@@ -1482,21 +2300,11 @@ class AgentRootRuntime:
     ) -> AgentRuntimeState:
         context = runtime.context
         event_object = context.customer_intelligence_event
+        if event_object is None:
+            requests = state.get("customer_intelligence_requests") or context.customer_intelligence_requests
+            if requests and isinstance(requests[0], dict):
+                event_object = coerce_json_dict(requests[0].get("event"))
         if not self._should_run_customer_intelligence_inline(state, event_object):
-            if not context.db:
-                return {
-                    "customer_intelligence_requested": False,
-                    "customer_intelligence_result": {
-                        "handled": False,
-                        "reason": "missing_runtime_context",
-                    },
-                    "events": [
-                        {
-                            "event": "agent_root_customer_intelligence_refresh_unavailable",
-                            "reason": "missing_runtime_context",
-                        }
-                    ],
-                }
             if event_object is None:
                 return {
                     "customer_intelligence_requested": False,
@@ -1508,7 +2316,7 @@ class AgentRootRuntime:
                         }
                     ],
                 }
-            return await self._schedule_customer_intelligence_refresh(runtime, event_object)
+            return self._schedule_customer_intelligence_refresh_intent(state, event_object)
 
         started_event = _step_event(
             "customer_intelligence",
@@ -1750,7 +2558,31 @@ class AgentRootRuntime:
         )
 
         assistant_content = auto_execute_result.get("assistant_content") or side_effect_context.assistant_content
-        current_interrupt = auto_execute_result.get("current_interrupt") or side_effect_context.current_interrupt
+        ownership = active_task_ownership_projector.arbitrate(
+            [
+                ActiveTaskOwnershipCandidate.from_mapping(
+                    auto_execute_result,
+                    source="new_flow_auto_execute",
+                ),
+                ActiveTaskOwnershipCandidate(
+                    source="new_flow_waiting_task",
+                    active_task_snapshot=coerce_json_dict(side_effect_context.active_task_snapshot),
+                    current_interrupt=side_effect_context.current_interrupt,
+                    rejection_event=side_effect_context.ownership_rejection_event,
+                ),
+            ],
+            team_id=context.team_id,
+            user_id=context.user_id,
+            session_id=context.session_id,
+            source="new_flow",
+        )
+        active_task_snapshot = ownership.active_task_snapshot
+        current_interrupt = ownership.current_interrupt
+        ownership_rejection = ownership.rejection_event
+        if ownership_rejection and ownership_rejection not in context.side_effects.new_flow_events:
+            context.side_effects.new_flow_events.append(ownership_rejection)
+            await _publish_event(context, ownership_rejection)
+            event_count += 1
         post_write_effects = merge_post_write_effects(
             state.get("post_write_effects"),
             auto_execute_result,
@@ -1785,7 +2617,11 @@ class AgentRootRuntime:
             update: AgentRuntimeState = {
                 "assistant_content": assistant_content,
                 "current_interrupt": current_interrupt,
+                "pending_task_snapshot": active_task_snapshot,
+                "task_projection": ownership.task_projection,
+                "pending_task_requested": bool(active_task_snapshot),
                 "customer_intelligence_requested": customer_intelligence_event is not None,
+                "customer_intelligence_requests": list(context.customer_intelligence_requests),
                 "post_write_effects": post_write_effects,
                 "deferred_final_events": deferred_final_projection,
                 "new_flow_result": _new_flow_result_projection(
@@ -1802,12 +2638,17 @@ class AgentRootRuntime:
                     }
                 ],
             }
-            if current_interrupt:
-                update["task_projection"] = _interrupt_task_projection(current_interrupt)
+            if ownership_rejection:
+                update["runtime_status"] = "new_flow_task_ownership_rejected"
+                update["runtime_retryable"] = False
             return update
         update = {
             "current_interrupt": current_interrupt,
+            "pending_task_snapshot": active_task_snapshot,
+            "task_projection": ownership.task_projection,
+            "pending_task_requested": bool(active_task_snapshot),
             "customer_intelligence_requested": customer_intelligence_event is not None,
+            "customer_intelligence_requests": list(context.customer_intelligence_requests),
             "post_write_effects": post_write_effects,
             "deferred_final_events": deferred_final_projection,
             "new_flow_result": _new_flow_result_projection(
@@ -1824,8 +2665,9 @@ class AgentRootRuntime:
                 }
             ],
         }
-        if current_interrupt:
-            update["task_projection"] = _interrupt_task_projection(current_interrupt)
+        if ownership_rejection:
+            update["runtime_status"] = "new_flow_task_ownership_rejected"
+            update["runtime_retryable"] = False
         return update
 
     def _customer_intelligence_event_from_new_flow(
@@ -1873,6 +2715,8 @@ class AgentRootRuntime:
             return {}
         assistant_content: str | None = None
         current_interrupt: AgentInterruptPayload | None = None
+        active_task_snapshot: JSONDict = {}
+        ownership_rejection_event: JSONDict | None = None
         emitted_event_count = 0
         post_write_effects = normalize_post_write_effects(None)
         initial_plan = action_plan.build_action_execution_plan(plan_items)
@@ -2017,9 +2861,31 @@ class AgentRootRuntime:
             result_content = result.get("assistant_content") or branch.get("assistant_content")
             if isinstance(result_content, str):
                 assistant_content = result_content
-            branch_interrupt = branch.get("current_interrupt")
-            if isinstance(branch_interrupt, dict):
-                current_interrupt = branch_interrupt
+            branch_ownership = active_task_ownership_projector.arbitrate(
+                [
+                    ActiveTaskOwnershipCandidate(
+                        source="new_flow_auto_execute_accumulated",
+                        active_task_snapshot=active_task_snapshot,
+                        current_interrupt=current_interrupt,
+                        rejection_event=ownership_rejection_event,
+                    ),
+                    ActiveTaskOwnershipCandidate.from_mapping(
+                        branch,
+                        source=f"new_flow_auto_execute_batch:{last_mode}",
+                    ),
+                ],
+                team_id=context.team_id,
+                user_id=context.user_id,
+                session_id=context.session_id,
+                source="new_flow_auto_execute",
+            )
+            active_task_snapshot = branch_ownership.active_task_snapshot
+            current_interrupt = branch_ownership.current_interrupt
+            ownership_rejection_event = branch_ownership.rejection_event
+            if ownership_rejection_event and ownership_rejection_event not in context.side_effects.new_flow_events:
+                context.side_effects.new_flow_events.append(ownership_rejection_event)
+                await _publish_event(context, ownership_rejection_event)
+                emitted_event_count += 1
             successful_task_ids = {int(item) for item in branch.get("completed_task_ids", []) if isinstance(item, int)}
             if len(executable_nodes) == 1 and not successful_task_ids and _auto_execute_branch_completed(branch):
                 task_id = executable_nodes[0].task_id
@@ -2050,7 +2916,7 @@ class AgentRootRuntime:
                 break
             satisfied_action_ids.update(newly_completed)
             executed_action_count += len(newly_completed)
-            if current_interrupt:
+            if current_interrupt or ownership_rejection_event:
                 break
             if executed_action_count >= len(plan_items):
                 break
@@ -2062,6 +2928,8 @@ class AgentRootRuntime:
                 "executed_action_count": executed_action_count,
                 "assistant_content": assistant_content,
                 "current_interrupt": current_interrupt,
+                "active_task_snapshot": active_task_snapshot,
+                "ownership_rejection_event": ownership_rejection_event,
                 "post_write_effects": post_write_effects,
             }
         )
@@ -2326,20 +3194,31 @@ class AgentRootRuntime:
         )
         await _publish_events(context, output_events)
         assistant_content = result.get("assistant_content")
-        current_interrupt = _next_task_interrupt_from_output_events_for_context(
-            output_events,
-            context=context,
-            assistant_content=assistant_content if isinstance(assistant_content, str) else "",
+        ownership = confirmed_task_ownership_projector.project(
+            result,
+            expected_task=task,
+            team_id=context.team_id,
+            user_id=context.user_id,
+            session_id=context.session_id,
         )
+        active_task_snapshot = ownership.active_task_snapshot
+        current_interrupt = ownership.current_interrupt
+        ownership_rejection = ownership.rejection_event
+        branch_events = [started_event, *output_events]
+        if ownership_rejection:
+            branch_events.append(ownership_rejection)
+            await _publish_event(context, ownership_rejection)
         return coerce_json_dict(
             {
                 "result": result,
                 "tool_result": result.get("tool_result") or {},
                 "post_write_effects": normalize_post_write_effects(result.get("tool_result")),
-                "events": [started_event, *output_events],
-                "emitted_event_count": len(output_events) + 1,
+                "events": branch_events,
+                "emitted_event_count": len(branch_events),
                 "assistant_content": assistant_content,
                 "current_interrupt": current_interrupt,
+                "active_task_snapshot": active_task_snapshot,
+                "ownership_rejection_event": ownership_rejection,
             }
         )
 
@@ -2469,6 +3348,8 @@ class AgentRootRuntime:
         if any(item is None for item in branch_inputs):
             assistant_content: str | None = None
             current_interrupt: AgentInterruptPayload | None = None
+            active_task_snapshot: JSONDict = {}
+            ownership_rejection_event: JSONDict | None = None
             emitted_event_count = 0
             completed_task_ids: list[int] = []
             for task in tasks:
@@ -2482,12 +3363,36 @@ class AgentRootRuntime:
                 self._customer_intelligence_event_from_confirmed_tool_result(context, branch.get("tool_result") or {})
                 if isinstance(branch.get("assistant_content"), str):
                     assistant_content = branch["assistant_content"]
-                branch_interrupt = branch.get("current_interrupt")
-                if isinstance(branch_interrupt, dict):
-                    current_interrupt = branch_interrupt
+                ownership = active_task_ownership_projector.arbitrate(
+                    [
+                        ActiveTaskOwnershipCandidate(
+                            source="serial_fallback_accumulated",
+                            active_task_snapshot=active_task_snapshot,
+                            current_interrupt=current_interrupt,
+                            rejection_event=ownership_rejection_event,
+                        ),
+                        ActiveTaskOwnershipCandidate.from_mapping(
+                            branch,
+                            source=f"serial_fallback_task:{getattr(task, 'id', 'unknown')}",
+                        ),
+                    ],
+                    team_id=context.team_id,
+                    user_id=context.user_id,
+                    session_id=context.session_id,
+                    source="new_flow_auto_execute_serial_fallback",
+                )
+                active_task_snapshot = ownership.active_task_snapshot
+                current_interrupt = ownership.current_interrupt
+                ownership_rejection_event = ownership.rejection_event
+                if ownership_rejection_event and ownership_rejection_event not in context.side_effects.new_flow_events:
+                    context.side_effects.new_flow_events.append(ownership_rejection_event)
+                    await _publish_event(context, ownership_rejection_event)
+                    emitted_event_count += 1
                 task_id = _optional_int(getattr(task, "id", None))
                 if task_id is not None and _auto_execute_branch_completed(branch):
                     completed_task_ids.append(task_id)
+                if current_interrupt or ownership_rejection_event:
+                    break
             return coerce_json_dict(
                 {
                     "event": "agent_root_new_flow_auto_execution_completed",
@@ -2496,6 +3401,8 @@ class AgentRootRuntime:
                     "completed_task_ids": completed_task_ids,
                     "assistant_content": assistant_content,
                     "current_interrupt": current_interrupt,
+                    "active_task_snapshot": active_task_snapshot,
+                    "ownership_rejection_event": ownership_rejection_event,
                 }
             )
 
@@ -2511,7 +3418,7 @@ class AgentRootRuntime:
             return_exceptions=True,
         )
         assistant_content: str | None = None
-        current_interrupt: AgentInterruptPayload | None = None
+        ownership_candidates: list[ActiveTaskOwnershipCandidate] = []
         post_write_effects = normalize_post_write_effects(None)
         emitted_event_count = 1
         completed_task_ids: list[int] = []
@@ -2552,9 +3459,23 @@ class AgentRootRuntime:
                 emitted_event_count += 1
             if isinstance(branch.get("assistant_content"), str):
                 assistant_content = branch["assistant_content"]
-            branch_interrupt = branch.get("current_interrupt")
-            if isinstance(branch_interrupt, dict):
-                current_interrupt = branch_interrupt
+            ownership_candidates.append(
+                ActiveTaskOwnershipCandidate.from_mapping(
+                    branch,
+                    source=f"parallel_task:{task_id if task_id is not None else 'unknown'}",
+                )
+            )
+        ownership = active_task_ownership_projector.arbitrate(
+            ownership_candidates,
+            team_id=context.team_id,
+            user_id=context.user_id,
+            session_id=context.session_id,
+            source="new_flow_auto_execute_parallel_tasks",
+        )
+        if ownership.rejection_event and ownership.rejection_event not in context.side_effects.new_flow_events:
+            context.side_effects.new_flow_events.append(ownership.rejection_event)
+            await _publish_event(context, ownership.rejection_event)
+            emitted_event_count += 1
         completed_event = _step_event(
             "auto_execute_tasks_parallel", "completed", f"并行执行完成 {len(tasks)} 个低风险业务操作"
         )
@@ -2569,7 +3490,9 @@ class AgentRootRuntime:
                 "completed_task_ids": completed_task_ids,
                 "failed_task_ids": failed_task_ids,
                 "assistant_content": assistant_content,
-                "current_interrupt": current_interrupt,
+                "current_interrupt": ownership.current_interrupt,
+                "active_task_snapshot": ownership.active_task_snapshot,
+                "ownership_rejection_event": ownership.rejection_event,
                 "post_write_effects": post_write_effects,
             }
         )
@@ -2651,7 +3574,7 @@ class AgentRootRuntime:
             return_exceptions=True,
         )
         assistant_content: str | None = None
-        current_interrupt: AgentInterruptPayload | None = None
+        ownership_candidates: list[ActiveTaskOwnershipCandidate] = []
         post_write_effects = normalize_post_write_effects(None)
         emitted_event_count = 1
         completed_action_ids: list[str] = []
@@ -2696,9 +3619,23 @@ class AgentRootRuntime:
             failed_task_ids.extend([item for item in branch.get("failed_task_ids", []) if isinstance(item, int)])
             if isinstance(branch.get("assistant_content"), str):
                 assistant_content = branch["assistant_content"]
-            branch_interrupt = branch.get("current_interrupt")
-            if isinstance(branch_interrupt, dict):
-                current_interrupt = branch_interrupt
+            ownership_candidates.append(
+                ActiveTaskOwnershipCandidate.from_mapping(
+                    branch,
+                    source=f"parallel_action:{action_id or 'unknown'}",
+                )
+            )
+        ownership = active_task_ownership_projector.arbitrate(
+            ownership_candidates,
+            team_id=context.team_id,
+            user_id=context.user_id,
+            session_id=context.session_id,
+            source="new_flow_auto_execute_parallel_actions",
+        )
+        if ownership.rejection_event and ownership.rejection_event not in context.side_effects.new_flow_events:
+            context.side_effects.new_flow_events.append(ownership.rejection_event)
+            await _publish_event(context, ownership.rejection_event)
+            emitted_event_count += 1
         completed_event = _step_event(
             "auto_execute_actions_parallel", "completed", f"并行执行完成 {len(nodes)} 个低风险业务动作"
         )
@@ -2715,7 +3652,9 @@ class AgentRootRuntime:
                 "failed_action_ids": failed_action_ids,
                 "failed_task_ids": failed_task_ids,
                 "assistant_content": assistant_content,
-                "current_interrupt": current_interrupt,
+                "current_interrupt": ownership.current_interrupt,
+                "active_task_snapshot": ownership.active_task_snapshot,
+                "ownership_rejection_event": ownership.rejection_event,
                 "post_write_effects": post_write_effects,
             }
         )
@@ -2877,22 +3816,34 @@ class AgentRootRuntime:
                 include_graph_progress_events=True,
             )
             assistant_content = result.get("assistant_content")
+            ownership = confirmed_task_ownership_projector.project(
+                result,
+                expected_task=task,
+                team_id=int(branch_input["team_id"]),
+                user_id=int(branch_input["user_id"]),
+                session_id=session_id,
+            )
+            branch_events = [
+                _step_event(
+                    "auto_execute_task",
+                    "started",
+                    task_display.readable_execution_label(_task_action(task)) or "执行业务操作",
+                ),
+                *output_events,
+            ]
+            if ownership.rejection_event:
+                branch_events.append(ownership.rejection_event)
             return coerce_json_dict(
                 {
                     "result": result,
                     "tool_result": result.get("tool_result") or {},
                     "post_write_effects": normalize_post_write_effects(result.get("tool_result")),
-                    "events": [
-                        _step_event(
-                            "auto_execute_task",
-                            "started",
-                            task_display.readable_execution_label(_task_action(task)) or "执行业务操作",
-                        ),
-                        *output_events,
-                    ],
-                    "emitted_event_count": len(output_events) + 1,
+                    "events": branch_events,
+                    "emitted_event_count": len(branch_events),
                     "assistant_content": assistant_content,
-                    "current_interrupt": None,
+                    "current_interrupt": ownership.current_interrupt,
+                    "active_task_snapshot": ownership.active_task_snapshot,
+                    "ownership_rejection_event": ownership.rejection_event,
                 }
             )
         except Exception as exc:
@@ -2962,11 +3913,16 @@ class AgentRootRuntime:
         )
         task_event = coerce_json_dict(result.get("task_event"))
         assistant_content = result.get("assistant_content")
-        current_interrupt = _next_task_interrupt_from_output_events(
-            output_events,
-            runtime=runtime,
-            assistant_content=assistant_content if isinstance(assistant_content, str) else "",
+        ownership = confirmed_task_ownership_projector.project(
+            result,
+            expected_task=context.task,
+            team_id=context.team_id,
+            user_id=context.user_id,
+            session_id=context.session_id,
         )
+        active_task_snapshot = ownership.active_task_snapshot
+        current_interrupt = ownership.current_interrupt
+        ownership_rejection = ownership.rejection_event
         context.side_effects.confirmed_task_result = result
         context.side_effects.confirmed_task_events.extend(output_events)
         await _publish_events(context, output_events)
@@ -2980,24 +3936,34 @@ class AgentRootRuntime:
         update: AgentRuntimeState = {
             "assistant_content": assistant_content if isinstance(assistant_content, str) else None,
             "current_interrupt": current_interrupt,
+            "pending_task_snapshot": active_task_snapshot,
+            "task_projection": ownership.task_projection,
+            "pending_task_requested": bool(active_task_snapshot),
             "customer_intelligence_requested": customer_intelligence_event is not None,
+            "customer_intelligence_requests": list(context.customer_intelligence_requests),
             "post_write_effects": merge_post_write_effects(
                 state.get("post_write_effects"),
                 result.get("tool_result"),
                 output_events,
             ),
             "events": [
+                *([ownership_rejection] if ownership_rejection else []),
                 {
                     "event": "agent_root_confirmed_task_subgraph_completed",
                     "emitted_event_count": len(output_events),
                     "task_event": task_event.get("event"),
                     "execution_status": result.get("execution_status"),
                     "has_next_interrupt": bool(current_interrupt),
-                }
+                    "ownership_status": "rejected" if ownership_rejection else "accepted",
+                },
             ],
         }
-        if current_interrupt:
-            update["task_projection"] = _interrupt_task_projection(current_interrupt)
+        if ownership_rejection:
+            update["runtime_status"] = "confirmed_task_ownership_rejected"
+            update["runtime_retryable"] = False
+        # The executed ORM entity is no longer the active owner. Any next turn
+        # must hydrate exclusively from the checkpoint-safe active snapshot.
+        context.task = None
         return update
 
     def _customer_intelligence_event_from_confirmed_tool_result(
@@ -3005,6 +3971,31 @@ class AgentRootRuntime:
         context: AgentRuntimeContext,
         tool_result: object,
     ) -> object | None:
+        durable_requests = _customer_intelligence_requests_from_tool_result(
+            tool_result,
+            team_id=context.team_id,
+        )
+        for request in durable_requests:
+            request_id = request.get("request_id")
+            if not isinstance(request_id, str):
+                continue
+            if any(item.get("request_id") == request_id for item in context.customer_intelligence_requests):
+                continue
+            context.customer_intelligence_requests.append(request)
+        if durable_requests:
+            event_payload = coerce_json_dict(durable_requests[0].get("event"))
+            event = self.customer_intelligence_refresh_service.event_service.from_dict(event_payload)
+            if event is None:
+                context.side_effects.customer_intelligence_events.append(
+                    {
+                        "event": "agent_root_customer_intelligence_trigger_failed",
+                        "source": "durable_tool_result",
+                        "reason": "invalid_durable_event",
+                    }
+                )
+                return None
+            context.customer_intelligence_event = event
+            return event
         if context.customer_intelligence_event is not None:
             return context.customer_intelligence_event
         try:
@@ -3049,18 +4040,7 @@ class AgentRootRuntime:
         case_public_ids = effects.get("follow_up_confirmation_case_public_ids") or []
         if context is None:
             return {"post_write_effects": effects}
-        if context.db is None:
-            final_events = await self._publish_deferred_final_events(state, context=context)
-            return {
-                "post_write_effects": effects,
-                "deferred_final_events": [],
-                **({"assistant_content": _last_event_content(final_events)} if final_events else {}),
-            }
-        # Durable-inbox compensation requires a real persistence boundary. Some
-        # graph-only invocations intentionally carry an opaque placeholder DB;
-        # when there are no explicit post-write case ids, publish the ordinary
-        # final after arbitration instead of treating the placeholder as a DB.
-        if not case_public_ids and not callable(getattr(context.db, "query", None)):
+        if context.db is None or not case_public_ids:
             final_events = await self._publish_deferred_final_events(state, context=context)
             return {
                 "post_write_effects": effects,
@@ -3080,7 +4060,7 @@ class AgentRootRuntime:
                 user_id=context.user_id,
                 case_public_ids=case_public_ids,
                 interaction_scope=interaction_scope,
-                include_owner_inbox_fallback=True,
+                turn_scope=dict(state.get("turn_scope") or {}),
             )
         except Exception as exc:
             logger.exception("Follow-up confirmation projection failed")
@@ -3094,6 +4074,7 @@ class AgentRootRuntime:
                     user_id=context.user_id,
                     case_public_ids=case_public_ids,
                     interaction_scope=interaction_scope,
+                    turn_scope=dict(state.get("turn_scope") or {}),
                     error_message=str(exc),
                 )
             except Exception:
@@ -3128,14 +4109,26 @@ class AgentRootRuntime:
                 **({"assistant_content": _last_event_content(final_events)} if final_events else {}),
             }
         prompt_json = coerce_json_dict(prompt_event)
+        interaction = coerce_json_dict(prompt_json.get("interaction"))
+        interaction_payload = coerce_json_dict(interaction.get("payload"))
+        case_payload = coerce_json_dict(interaction_payload.get("case"))
+        customer_payload = coerce_json_dict(case_payload.get("customer"))
+        candidate = {
+            "interaction_id": str(interaction.get("interaction_id") or ""),
+            "kind": "follow_up_confirmation",
+            "origin": "current_turn",
+            "presentation": "blocking_interrupt",
+            "customer_id": case_payload.get("customer_id"),
+            "customer_public_id": customer_payload.get("public_id"),
+            "case_public_id": prompt_json.get("case_public_id"),
+            "business_action": FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION,
+            "priority": 100,
+            "payload": prompt_json,
+        }
         interaction_plan = self.interaction_planner.plan(
-            semantic=coerce_json_dict(state.get("semantic")),
-            business_context=coerce_json_dict(state.get("current_customer")),
-            suggestions={},
+            turn_scope=dict(state.get("turn_scope") or {}),
             current_interrupt=interrupt_payload_from_json(state.get("current_interrupt")),
-            pending_task_projection=coerce_json_dict(state.get("task_projection")),
-            tool_capability={"follow_up_confirmation": True},
-            follow_up_confirmation_candidate=prompt_json,
+            candidates=[candidate],
         )
         if interaction_plan.action != "follow_up_confirmation":
             event = {
@@ -3146,7 +4139,7 @@ class AgentRootRuntime:
             context.side_effects.business_interaction_events.append(event)
             await _publish_event(context, event)
             return {"events": [event], "post_write_effects": effects, "deferred_final_events": []}
-        prompt_json = interaction_plan.candidate
+        prompt_json = coerce_json_dict(interaction_plan.candidate.get("payload"))
         interaction = coerce_json_dict(prompt_json.get("interaction"))
         waiting_event = {
             "event": FOLLOW_UP_CONFIRMATION_PROMPT_EVENT,
@@ -3267,7 +4260,7 @@ class AgentRootRuntime:
                 user_id=context.user_id,
                 case_public_ids=[case_public_id],
                 interaction_scope=interaction_scope,
-                include_owner_inbox_fallback=False,
+                turn_scope=dict(state.get("turn_scope") or {}),
                 prompt_override=follow_up_prompt,
                 reason_code="ROOT_GRAPH_CLARIFICATION_PLANNED",
             )
@@ -3333,10 +4326,19 @@ class AgentRootRuntime:
         }
 
     def _finish_turn(self, state: AgentRuntimeState) -> AgentRuntimeState:
-        return {
-            "runtime_status": "checkpointed",
+        update: AgentRuntimeState = {
             "events": [{"event": "agent_root_graph_checkpointed"}],
         }
+        runtime_status = state.get("runtime_status")
+        if runtime_status not in {
+            "pending_projection_projected",
+            "pending_projection_failed",
+            "checkpoint_recovery_failed",
+            "confirmed_task_ownership_rejected",
+            "new_flow_task_ownership_rejected",
+        }:
+            update["runtime_status"] = "checkpointed"
+        return update
 
 
 agent_root_runtime = AgentRootRuntime()
@@ -3449,6 +4451,20 @@ async def _publish_events(
         await _publish_event(context, event)
 
 
+async def _publish_event_best_effort(
+    context: AgentRuntimeContext,
+    event: JSONDict,
+    *,
+    log_message: str,
+) -> bool:
+    try:
+        await _publish_event(context, event)
+    except Exception:
+        logger.exception(log_message)
+        return False
+    return True
+
+
 def _step_event(step: str, status: str, content: str) -> JSONDict:
     return {
         "event": "agent_step",
@@ -3468,6 +4484,55 @@ def _unstreamed_pending_effect_events(
     return [event for event in events if event.get("event") != "agent_step"]
 
 
+def _pending_task_outcome_intent(result: object) -> JSONDict:
+    """Return the complete checkpoint-safe PendingTask business outcome."""
+
+    if not isinstance(result, dict):
+        return {}
+    return {
+        str(key): coerce_json_value(value)
+        for key, value in result.items()
+        if isinstance(key, str) and key != "__interrupt__"
+    }
+
+
+def _pending_task_outcome_requires_projection(outcome: JSONDict) -> bool:
+    if not outcome or outcome.get("projection_aborted") is True:
+        return False
+    return not bool(coerce_json_dict(outcome.get("current_interrupt")))
+
+
+def _pending_task_outcome_projection_barrier(
+    continuation: PendingTaskContinuationRef,
+    outcome: JSONDict,
+) -> JSONDict:
+    identity = {
+        "continuation": coerce_json_dict(continuation),
+        "outcome": outcome,
+    }
+    digest = sha256(
+        json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return {
+        "schema_version": PENDING_TASK_OUTCOME_PROJECTION_SCHEMA,
+        "type": "confirm",
+        "reason": PENDING_TASK_OUTCOME_PROJECTION_REASON,
+        "business_action": "project_pending_task_outcome",
+        "source_event": "pending_task_outcome_ready",
+        "checkpoint_ref": coerce_json_dict(continuation),
+        "projection_digest": digest,
+    }
+
+
+def _is_pending_task_outcome_projection_barrier(value: object) -> bool:
+    payload = coerce_json_dict(value)
+    return (
+        payload.get("schema_version") == PENDING_TASK_OUTCOME_PROJECTION_SCHEMA
+        and payload.get("reason") == PENDING_TASK_OUTCOME_PROJECTION_REASON
+        and payload.get("business_action") == "project_pending_task_outcome"
+    )
+
+
 def _pending_task_result_projection(result: object) -> JSONDict:
     if not isinstance(result, dict):
         return {"handled": False}
@@ -3479,6 +4544,8 @@ def _pending_task_result_projection(result: object) -> JSONDict:
         "remember_pending_task": bool(result.get("remember_pending_task")),
         "event_count": len(result.get("events", [])) if isinstance(result.get("events"), list) else 0,
     }
+    if result.get("projection_aborted") is True:
+        projection["projection_aborted"] = True
     assistant_content = result.get("assistant_content")
     if isinstance(assistant_content, str):
         projection["assistant_content"] = assistant_content
@@ -3647,6 +4714,67 @@ def _customer_intelligence_event_key_from_state(state: AgentRuntimeState) -> str
     return event_key if isinstance(event_key, str) and event_key else None
 
 
+def _customer_intelligence_requests_from_tool_result(
+    value: object,
+    *,
+    team_id: int,
+) -> list[JSONDict]:
+    """Extract exact persisted intelligence requests from nested tool outputs."""
+
+    requests: list[JSONDict] = []
+    seen: set[str] = set()
+
+    def visit(item: object) -> None:
+        if isinstance(item, list):
+            for child in item:
+                visit(child)
+            return
+        if not isinstance(item, dict):
+            return
+        payload = coerce_json_dict(item)
+        if payload.get("tool_name") == "create_customer_activity" and payload.get("success") is True:
+            data = coerce_json_dict(payload.get("data"))
+            durable_work = coerce_json_dict(data.get("durable_work"))
+            request_id = durable_work.get("customer_intelligence_request_id")
+            scope = durable_work.get("customer_intelligence_scope")
+            event = coerce_json_dict(durable_work.get("customer_intelligence_event"))
+            event_team_id = _optional_int(event.get("team_id"))
+            tenant_id = _optional_int(event.get("tenant_id"))
+            if (
+                isinstance(request_id, str)
+                and request_id
+                and request_id not in seen
+                and scope in {"full", "brief"}
+                and event_team_id == team_id
+                and tenant_id == team_id
+            ):
+                seen.add(request_id)
+                requests.append(
+                    {
+                        "request_id": request_id,
+                        "scope": scope,
+                        "event": event,
+                        "bound": False,
+                    }
+                )
+        for child in payload.values():
+            if isinstance(child, (dict, list)):
+                visit(child)
+
+    visit(value)
+    return requests
+
+
+def _unbound_customer_intelligence_requests(
+    context: AgentRuntimeContext,
+) -> list[JSONDict]:
+    return [
+        item
+        for item in context.customer_intelligence_requests
+        if item.get("bound") is not True
+    ]
+
+
 def _customer_intelligence_trigger_type(event: object | None) -> str:
     if event is None:
         return ""
@@ -3744,7 +4872,24 @@ def _turn_start_state(
     current_customer: JSONDict,
     context: AgentRuntimeContext,
 ) -> AgentRuntimeState:
+    pending_task_snapshot = agent_task_snapshot(context.task) if context.task else {}
     task_projection = _task_projection(context.task) if context.task else {}
+    customer_id = current_customer.get("id")
+    customer_public_id = current_customer.get("public_id")
+    if isinstance(customer_id, str) and customer_id.startswith("cus_") and not customer_public_id:
+        customer_public_id = customer_id
+        customer_id = None
+    turn_id_source = context.user_message_id if context.user_message_id is not None else session_key
+    turn_scope = {
+        "turn_id": f"agent_turn:{team_id}:{user_id}:{session_id}:{turn_id_source}",
+        "session_id": session_id,
+        "channel": turn_input.source,
+        "provider": turn_input.provider,
+        "source_message_id": context.user_message_id,
+        "customer_id": customer_id if isinstance(customer_id, int) else None,
+        "customer_public_id": customer_public_id if isinstance(customer_public_id, str) else None,
+        "operation_status": "active",
+    }
     return {
         "team_id": team_id,
         "user_id": user_id,
@@ -3753,11 +4898,17 @@ def _turn_start_state(
         "channel": turn_input.source,
         "content": content,
         "turn_kind": turn_input.kind.value,
+        "turn_scope": turn_scope,
+        "interaction_candidates": [],
         "current_interrupt": current_interrupt,
         "task_projection": task_projection,
+        "pending_task_snapshot": pending_task_snapshot,
         "suspended_candidates": suspended_candidates,
         "pending_task_requested": current_interrupt is not None or bool(suspended_candidates),
-        "customer_intelligence_requested": context.customer_intelligence_event is not None,
+        "customer_intelligence_requested": (
+            context.customer_intelligence_event is not None or bool(context.customer_intelligence_requests)
+        ),
+        "customer_intelligence_requests": list(context.customer_intelligence_requests),
         "current_customer": current_customer,
     }
 
@@ -4212,73 +5363,6 @@ def _optional_str(value: object) -> str | None:
     return None
 
 
-def _next_task_interrupt_from_output_events(
-    output_events: list[JSONDict],
-    *,
-    runtime: Runtime[AgentRuntimeContext],
-    assistant_content: str,
-) -> AgentInterruptPayload | None:
-    next_task_id = _next_task_id_from_output_events(output_events)
-    context = runtime.context
-    return _next_task_interrupt_from_output_events_for_context(
-        output_events,
-        context=context,
-        assistant_content=assistant_content,
-        next_task_id=next_task_id,
-    )
-
-
-def _next_task_interrupt_from_output_events_for_context(
-    output_events: list[JSONDict],
-    *,
-    context: AgentRuntimeContext,
-    assistant_content: str,
-    next_task_id: int | None = None,
-) -> AgentInterruptPayload | None:
-    task_id = next_task_id if next_task_id is not None else _next_task_id_from_output_events(output_events)
-    if task_id is None or not context.db:
-        return None
-    next_task = agent_task_crud.get_by_id(
-        context.db,
-        task_id,
-        team_id=context.team_id,
-        user_id=context.user_id,
-    )
-    if not next_task:
-        return None
-    context.task = next_task
-    interaction = _next_task_interaction_from_output_events(output_events)
-    if not interaction:
-        interaction = interactions._pending_task_interaction(
-            next_task,
-            assistant_content,
-            db=context.db,
-            team_id=context.team_id,
-        )
-    return interrupt_from_waiting_task(next_task, interaction=interaction)
-
-
-def _next_task_id_from_output_events(output_events: list[JSONDict]) -> int | None:
-    for event in output_events:
-        raw_id = event.get("next_task_id")
-        if isinstance(raw_id, int):
-            return raw_id
-        if isinstance(raw_id, str):
-            try:
-                return int(raw_id)
-            except ValueError:
-                return None
-    return None
-
-
-def _next_task_interaction_from_output_events(output_events: list[JSONDict]) -> JSONDict:
-    for event in output_events:
-        interaction = coerce_json_dict(event.get("interaction"))
-        if interaction:
-            return interaction
-    return {}
-
-
 def _resume_task_projection_id(resume_payload: object) -> int | None:
     payload = coerce_json_dict(resume_payload)
     value = payload.get("task_projection_id")
@@ -4292,42 +5376,22 @@ def _resume_task_projection_id(resume_payload: object) -> int | None:
     return None
 
 
-def _pending_graph_result_from_bubbled_interrupt(interrupt_payload: AgentInterruptPayload) -> PendingTaskGraphResult:
-    assistant_content = _interrupt_assistant_content(interrupt_payload)
-    source_event = interrupt_payload.get("source_event")
-    event_name = source_event if isinstance(source_event, str) and source_event else "interaction_required"
-    event: JSONDict = {
-        "event": event_name,
-        "content": assistant_content,
-    }
-    task_id = _interrupt_task_projection_id(interrupt_payload)
-    if task_id is not None:
-        event["task_id"] = task_id
-    draft_payload = coerce_json_dict(interrupt_payload.get("draft_payload"))
-    if draft_payload:
-        event["payload"] = draft_payload
-    interaction = coerce_json_dict(interrupt_payload.get("interaction"))
-    if interaction:
-        event["interaction"] = interaction
-    runtime_events = _interrupt_runtime_events(interrupt_payload)
-    if runtime_events:
-        return {
-            "handled": True,
-            "has_active_task": task_id is not None,
-            "remember_pending_task": task_id is not None,
-            "assistant_content": assistant_content,
-            "current_interrupt": interrupt_payload,
-            "events": runtime_events,
-        }
-    return {
-        "handled": True,
-        "has_active_task": task_id is not None,
-        "remember_pending_task": task_id is not None,
-        "assistant_content": assistant_content,
-        "current_interrupt": interrupt_payload,
-        "events": [event, {"event": "final", "content": assistant_content}],
-    }
+def _pending_checkpoint_ref_from_interrupt(
+    interrupt_payload: AgentInterruptPayload,
+    *,
+    context: AgentRuntimeContext | None,
+) -> PendingTaskContinuationRef | None:
+    """Authenticate the exact child continuation carried by an interrupt."""
 
+    continuation = pending_task_continuation_from_json(
+        interrupt_payload.get("checkpoint_ref"),
+        expected_team_id=context.team_id if context is not None else None,
+        expected_user_id=context.user_id if context is not None else None,
+        expected_session_id=context.session_id if context is not None else None,
+    )
+    if continuation is None and interrupt_payload.get("checkpoint_ref") is not None:
+        logger.warning("Rejected invalid pending-task continuation reference")
+    return continuation
 
 def _interrupt_assistant_content(interrupt_payload: AgentInterruptPayload) -> str:
     interaction = coerce_json_dict(interrupt_payload.get("interaction"))
@@ -4381,11 +5445,30 @@ def _updated_suspended_candidates(
     return [suspended_candidate, *remaining][:5]
 
 
+def _reconcile_suspended_candidates(
+    candidates: object,
+    *,
+    active_task: object | None,
+    suspended_task: object | None,
+) -> list[JSONDict]:
+    """Project active/suspended application ownership into root checkpoint state."""
+
+    updated = _updated_suspended_candidates(
+        candidates,
+        suspended_task=suspended_task,
+    )
+    active_id = _optional_int(agent_task_snapshot(active_task).get("id"))
+    if active_id is None:
+        return updated
+    return [candidate for candidate in updated if candidate.get("id") != active_id][:5]
+
+
 def _suspended_task_candidate_projection(task: object | None) -> JSONDict:
     if not task:
         return {}
-    state = coerce_json_dict(getattr(task, "state_json", None))
-    task_input = coerce_json_dict(getattr(task, "input_json", None))
+    snapshot = agent_task_snapshot(task)
+    state = coerce_json_dict(snapshot.get("state_json"))
+    task_input = coerce_json_dict(snapshot.get("input_json"))
     nested_payload = task_input.get("payload")
     payload = coerce_json_dict(nested_payload) if isinstance(nested_payload, dict) else task_input
     customer = coerce_json_dict(payload.get("customer")) or coerce_json_dict(state.get("customer"))
@@ -4395,39 +5478,31 @@ def _suspended_task_candidate_projection(task: object | None) -> JSONDict:
         or _json_list_values(payload.get("missing_fields"))
     )
     projection: JSONDict = {
+        **snapshot,
+        # Readable routing metadata is additive; the canonical durable fields
+        # above remain sufficient to restore the runtime task view.
         "state": state,
         "input": task_input,
         "missing_fields": missing_fields,
     }
-    for key in ("id", "intent", "target_type", "target_id", "summary"):
-        value = getattr(task, key, None)
-        if value is not None:
-            projection[key] = coerce_json_value(value)
-    status = getattr(task, "status", None)
-    if status is not None:
-        projection["status"] = coerce_json_value(getattr(status, "value", status))
-    action = state.get("action") or task_input.get("action")
-    if action is not None:
-        projection["action"] = coerce_json_value(action)
-    projection["display_summary"] = task_display.pending_task_display_summary(
+    action = state.get("action") or payload.get("action")
+    if isinstance(action, str) and action:
+        projection["action"] = action
+    customer_name = customer.get("account_name") or customer.get("customer_name") or customer.get("name")
+    if isinstance(customer_name, str) and customer_name:
+        projection["customer_name"] = customer_name
+    display_summary = task_display.pending_task_display_summary(
         action=action,
-        summary=getattr(task, "summary", None),
-        intent=getattr(task, "intent", None),
-        state={key: value for key, value in state.items()},
-        task_input={key: value for key, value in task_input.items()},
-        payload={key: value for key, value in payload.items()},
-        customer={key: value for key, value in customer.items()},
+        summary=snapshot.get("summary"),
+        intent=snapshot.get("intent"),
+        state=state,
+        task_input=task_input,
+        payload=payload,
+        customer=customer,
         missing_fields=missing_fields,
     )
-    customer_name = customer.get("account_name") or customer.get("name") or state.get("customer_name")
-    if customer_name is not None:
-        projection["customer_name"] = coerce_json_value(customer_name)
-    created_time = getattr(task, "created_time", None)
-    if created_time is not None:
-        projection["created_time"] = coerce_json_value(created_time)
-    updated_time = getattr(task, "updated_time", None)
-    if updated_time is not None:
-        projection["updated_time"] = coerce_json_value(updated_time)
+    if display_summary:
+        projection["display_summary"] = display_summary
     return projection
 
 
@@ -4476,9 +5551,32 @@ def _new_snapshot_interrupt_payload(
 def _snapshot_values(snapshot: object) -> JSONDict:
     values = coerce_json_dict(getattr(snapshot, "values", None))
     active_interrupt = _new_snapshot_interrupt_payload(snapshot, previous_interrupt_ids=set())
-    if active_interrupt:
+    if _snapshot_interrupt_is_exposable(values, active_interrupt):
         values["current_interrupt"] = active_interrupt
+    elif active_interrupt:
+        values.pop("current_interrupt", None)
     return values
+
+
+def _snapshot_interrupt_is_exposable(
+    values: JSONDict,
+    active_interrupt: AgentInterruptPayload | None,
+) -> bool:
+    if (
+        active_interrupt is None
+        or is_pending_application_step_request(active_interrupt)
+        or _is_pending_task_outcome_projection_barrier(active_interrupt)
+    ):
+        return False
+    checkpoint_ref = pending_task_continuation_from_json(
+        active_interrupt.get("checkpoint_ref"),
+        expected_team_id=values.get("team_id") if isinstance(values.get("team_id"), int) else None,
+        expected_user_id=values.get("user_id") if isinstance(values.get("user_id"), int) else None,
+        expected_session_id=values.get("session_id") if isinstance(values.get("session_id"), int) else None,
+    )
+    if checkpoint_ref is None:
+        return not bool(active_interrupt.get("checkpoint_ref"))
+    return projection_is_exposable(values, active_interrupt)
 
 
 def _snapshot_interrupt_payload_except(
@@ -4494,6 +5592,10 @@ def _snapshot_interrupt_payload_except(
 
 
 def _same_interrupt_payload(left: JSONDict, right: JSONDict) -> bool:
+    left_typed_identity = _typed_interrupt_identity(left)
+    right_typed_identity = _typed_interrupt_identity(right)
+    if left_typed_identity is not None or right_typed_identity is not None:
+        return left_typed_identity == right_typed_identity
     left_interaction_id = _interrupt_interaction_id(left)
     right_interaction_id = _interrupt_interaction_id(right)
     if left_interaction_id and right_interaction_id and left_interaction_id != right_interaction_id:
@@ -4505,6 +5607,35 @@ def _same_interrupt_payload(left: JSONDict, right: JSONDict) -> bool:
         and left.get("source_event") == right.get("source_event")
         and _interrupt_task_projection_id(left) == _interrupt_task_projection_id(right)
     )
+
+
+def _typed_interrupt_identity(interrupt_payload: JSONDict) -> tuple[str, JSONDict] | None:
+    """Return the stable identity owned by an internal interrupt contract.
+
+    Internal application steps and projection barriers intentionally share the
+    same generic confirm fields.  Their contract-specific identity must win
+    over the user-facing interrupt fallback or consecutive child interrupts
+    are incorrectly collapsed during native LangGraph resume.
+    """
+
+    if is_pending_application_step_request(interrupt_payload):
+        return (
+            "pending_application_step",
+            {
+                "step_id": interrupt_payload.get("step_id"),
+                "step_type": interrupt_payload.get("step_type"),
+                "checkpoint_ref": coerce_json_dict(interrupt_payload.get("checkpoint_ref")),
+            },
+        )
+    if _is_pending_task_outcome_projection_barrier(interrupt_payload):
+        return (
+            "pending_task_outcome_projection",
+            {
+                "projection_digest": interrupt_payload.get("projection_digest"),
+                "checkpoint_ref": coerce_json_dict(interrupt_payload.get("checkpoint_ref")),
+            },
+        )
+    return None
 
 
 def _interrupt_interaction_id(interrupt_payload: JSONDict) -> str | None:
@@ -4559,6 +5690,11 @@ def _config_with_checkpoint_id(config: RunnableConfig, *, checkpoint_id: str) ->
     }
 
 
+def _snapshot_waits_on_node(snapshot: object, node_name: str) -> bool:
+    next_nodes = getattr(snapshot, "next", ())
+    return isinstance(next_nodes, tuple | list) and node_name in next_nodes
+
+
 def _snapshot_has_next_nodes(snapshot: object) -> bool:
     next_nodes = getattr(snapshot, "next", ())
     return bool(next_nodes)
@@ -4611,19 +5747,29 @@ def _root_state_history_values(values: JSONDict) -> JSONDict:
         "channel",
         "content",
         "turn_kind",
+        "turn_scope",
+        "interaction_candidates",
         "runtime_status",
+        "runtime_retryable",
+        "pending_interrupt_projection",
         "route",
         "application_action",
         "pending_task_handled",
         "current_customer",
         "current_interrupt",
         "task_projection",
+        "pending_task_snapshot",
+        "pending_task_requested",
         "suspended_candidates",
         "resume_payload",
         "pending_task_result",
+        "pending_task_outcome_intent",
+        "pending_task_continuation_ref",
         "new_flow_result",
         "customer_intelligence_requested",
         "customer_intelligence_event",
+        "customer_intelligence_requests",
+        "customer_intelligence_schedule_intent",
         "customer_intelligence_result",
         "assistant_content",
         "switch_notice",

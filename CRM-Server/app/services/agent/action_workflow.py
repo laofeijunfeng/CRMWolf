@@ -1,11 +1,13 @@
 """Action-level workflow policy for Agent HITL decisions."""
 from __future__ import annotations
 
+import hashlib
+import json
+import uuid
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from functools import lru_cache
-import uuid
-from collections.abc import Mapping
 
 from app.services.agent.types import JSONDict, coerce_json_dict
 
@@ -220,6 +222,50 @@ def required_write_contract(
         on_reject=ON_REJECT_CANCEL_ACTION,
         blocking=True,
     )
+
+
+def stable_child_required_write_contract(
+    *,
+    parent_workflow: object,
+    parent_action_id: str,
+    slot: str,
+    action: object,
+    source: str = SOURCE_EXPLICIT_USER_REQUEST,
+    risk_level: object = None,
+) -> JSONDict:
+    """Build one replay-stable child action for a semantic workflow slot.
+
+    The child identity deliberately excludes the generated payload. A retried
+    parent execution must resolve to the first durable child projection; a
+    changed payload is treated as a projection conflict instead of silently
+    creating a second user-visible task.
+    """
+
+    normalized_parent = workflow_from_mapping(parent_workflow)
+    normalized_parent_action_id = str(parent_action_id or "").strip()
+    normalized_slot = str(slot or "").strip()
+    if not normalized_parent_action_id:
+        raise ValueError("stable child workflow requires parent_action_id")
+    if not normalized_slot:
+        raise ValueError("stable child workflow requires slot")
+    parent_workflow_id = str(normalized_parent.get("workflow_id") or "").strip()
+    if not parent_workflow_id:
+        parent_workflow_id = _stable_identifier("wf", {"parent_action_id": normalized_parent_action_id})
+    child = required_write_contract(action=action, source=source, risk_level=risk_level)
+    child["workflow_id"] = parent_workflow_id
+    child["action_id"] = _stable_identifier(
+        "act",
+        {"parent_action_id": normalized_parent_action_id, "slot": normalized_slot},
+    )
+    child["parent_action_id"] = normalized_parent_action_id
+    return child
+
+
+def _stable_identifier(prefix: str, identity: Mapping[str, object]) -> str:
+    digest = hashlib.sha256(
+        json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return f"{prefix}_{digest[:60]}"
 
 
 def workflow_from_mapping(value: object) -> JSONDict:

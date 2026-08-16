@@ -9,7 +9,14 @@ from app.utils.time import business_now
 
 
 class OperationLogCRUD:
-    def create(self, db: Session, obj_in: OperationLogCreate, team_id: Optional[int] = None) -> OperationLog:
+    def create(
+        self,
+        db: Session,
+        obj_in: OperationLogCreate,
+        team_id: Optional[int] = None,
+        *,
+        commit: bool = True,
+    ) -> OperationLog:
         operated_at = business_now()
         event_id = f"evt_{operated_at.strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
 
@@ -26,12 +33,15 @@ class OperationLogCRUD:
             team_id=team_id,
             operated_at=operated_at,
             content=obj_in.content,
-            remark=obj_in.remark
+            remark=obj_in.remark,
         )
 
         db.add(db_obj)
-        db.commit()
-        db.refresh(db_obj)
+        if commit:
+            db.commit()
+            db.refresh(db_obj)
+        else:
+            db.flush()
         return db_obj
 
     def get_by_event_id(self, db: Session, event_id: str, team_id: Optional[int] = None) -> Optional[OperationLog]:
@@ -48,11 +58,11 @@ class OperationLogCRUD:
         team_id: Optional[int] = None,
         skip: int = 0,
         limit: int = 20,
-        event_types: Optional[List[str]] = None
+        event_types: Optional[List[str]] = None,
     ) -> Tuple[List[OperationLog], int]:
         query = db.query(OperationLog).filter(
             OperationLog.primary_resource_type == primary_resource_type,
-            OperationLog.primary_resource_id == primary_resource_id
+            OperationLog.primary_resource_id == primary_resource_id,
         )
 
         if team_id is not None:
@@ -67,12 +77,7 @@ class OperationLogCRUD:
         return logs, total
 
     def get_by_operator(
-        self,
-        db: Session,
-        operator_id: str,
-        team_id: Optional[int] = None,
-        skip: int = 0,
-        limit: int = 20
+        self, db: Session, operator_id: str, team_id: Optional[int] = None, skip: int = 0, limit: int = 20
     ) -> Tuple[List[OperationLog], int]:
         query = db.query(OperationLog).filter(OperationLog.operator_id == operator_id)
 
@@ -85,12 +90,7 @@ class OperationLogCRUD:
         return logs, total
 
     def get_by_event_types(
-        self,
-        db: Session,
-        event_types: List[str],
-        team_id: Optional[int] = None,
-        skip: int = 0,
-        limit: int = 20
+        self, db: Session, event_types: List[str], team_id: Optional[int] = None, skip: int = 0, limit: int = 20
     ) -> Tuple[List[OperationLog], int]:
         query = db.query(OperationLog).filter(OperationLog.event_type.in_(event_types))
 
@@ -102,24 +102,18 @@ class OperationLogCRUD:
 
         return logs, total
 
-    def migrate_lead_logs_to_customer(
-        self,
-        db: Session,
-        lead_id: int,
-        customer_id: int
-    ):
+    def migrate_lead_logs_to_customer(self, db: Session, lead_id: int, customer_id: int):
         """
         将线索的操作记录迁移到客户
 
         当线索转化为客户时，将所有与该线索相关的操作记录（包括跟进记录）
         更新为指向新客户，这样在客户详情中可以看到完整的操作历史
         """
-        logs = db.query(OperationLog).filter(
-            and_(
-                OperationLog.primary_resource_type == "LEAD",
-                OperationLog.primary_resource_id == lead_id
-            )
-        ).all()
+        logs = (
+            db.query(OperationLog)
+            .filter(and_(OperationLog.primary_resource_type == "LEAD", OperationLog.primary_resource_id == lead_id))
+            .all()
+        )
 
         for log in logs:
             log.primary_resource_type = "CUSTOMER"
@@ -140,7 +134,7 @@ class OperationLogCRUD:
         skip: int = 0,
         limit: int = 100,
         event_type: Optional[str] = None,
-        operator_id: Optional[str] = None
+        operator_id: Optional[str] = None,
     ) -> Tuple[List[OperationLog], int]:
         """获取团队的操作日志列表"""
         query = db.query(OperationLog).filter(OperationLog.team_id == team_id)

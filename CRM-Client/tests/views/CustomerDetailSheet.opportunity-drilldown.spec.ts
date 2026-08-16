@@ -239,6 +239,39 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
     customerApi.getCustomerMembers.mockResolvedValue([])
   })
 
+  it('opens the requested opportunity directly when a target opportunity is provided', async () => {
+    const wrapper = mount(CustomerDetailSheet, {
+      props: {
+        customerId: 'cus_test_19',
+        targetOpportunityId: 'opp_test_88',
+        visible: true,
+      },
+    })
+
+    await flushPromises()
+    await nextTick()
+
+    const detail = wrapper.get('[data-testid="opportunity-detail-content"]')
+    expect(detail.attributes('data-opportunity-id')).toBe('opp_test_88')
+    expect(detail.attributes('data-embedded')).toBe('true')
+  })
+
+  it('opens the project journey when the opportunities panel is requested', async () => {
+    const wrapper = mount(CustomerDetailSheet, {
+      props: {
+        customerId: 'cus_test_19',
+        targetPanel: 'opportunities',
+        visible: true,
+      },
+    })
+
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.get('[data-testid="tab-opportunities"]').attributes('data-active')).toBe('true')
+    expect(wrapper.find('[data-testid="opportunities-panel"]').exists()).toBe(true)
+  })
+
   it('renders opportunity detail content inside the current customer sheet when an opportunity is selected', async () => {
     const wrapper = mount(CustomerDetailSheet, {
       props: {

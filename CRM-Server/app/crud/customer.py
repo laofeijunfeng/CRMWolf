@@ -7,13 +7,7 @@ from app.models.customer import Customer, Contact, CustomerMember
 from app.models.lead import Lead, LeadStatus
 from app.models.contract import Contract
 from app.models.opportunity import Opportunity
-from app.schemas.customer import (
-    CustomerCreate,
-    CustomerUpdate,
-    CustomerStatusEnum,
-    ContactCreate,
-    ContactUpdate
-)
+from app.schemas.customer import CustomerCreate, CustomerUpdate, CustomerStatusEnum, ContactCreate, ContactUpdate
 from app.crud.operation_log import operation_log_crud
 from app.utils.time import business_now
 
@@ -83,30 +77,34 @@ class CustomerCRUD:
         order_dir: Optional[str] = None,
         scope: Optional[str] = None,
         current_user_id: Optional[str] = None,
-        include_collaborated: bool = False
+        include_collaborated: bool = False,
     ) -> Tuple[List[Customer], int]:
         query = db.query(Customer).filter(Customer.team_id == team_id)
 
         current_user_id = str(current_user_id) if current_user_id is not None else None
         if scope == "collaborated" and current_user_id:
             query = query.filter(
-                db.query(CustomerMember.id).filter(
+                db.query(CustomerMember.id)
+                .filter(
                     CustomerMember.team_id == team_id,
                     CustomerMember.customer_id == Customer.id,
                     CustomerMember.user_id == current_user_id,
                     CustomerMember.is_active == True,
-                ).exists()
+                )
+                .exists()
             )
         elif include_collaborated and current_user_id:
             query = query.filter(
                 or_(
                     Customer.owner_id == current_user_id,
-                    db.query(CustomerMember.id).filter(
+                    db.query(CustomerMember.id)
+                    .filter(
                         CustomerMember.team_id == team_id,
                         CustomerMember.customer_id == Customer.id,
                         CustomerMember.user_id == current_user_id,
                         CustomerMember.is_active == True,
-                    ).exists()
+                    )
+                    .exists(),
                 )
             )
 
@@ -139,7 +137,7 @@ class CustomerCRUD:
                 or_(
                     Customer.account_name.like(f"%{keyword}%"),
                     Customer.industry.like(f"%{keyword}%"),
-                    Customer.city.like(f"%{keyword}%")
+                    Customer.city.like(f"%{keyword}%"),
                 )
             )
         if created_time_start:
@@ -150,18 +148,18 @@ class CustomerCRUD:
         total = query.count()
 
         allowed_sort_fields = [
-            'created_time',
-            'account_name',
-            'status',
-            'industry',
-            'source',
-            'city',
-            'company_scale',
-            'owner_id',
+            "created_time",
+            "account_name",
+            "status",
+            "industry",
+            "source",
+            "city",
+            "company_scale",
+            "owner_id",
         ]
         if order_by and order_dir and order_by in allowed_sort_fields:
             order_column = getattr(Customer, order_by)
-            if order_dir.lower() == 'desc':
+            if order_dir.lower() == "desc":
                 query = query.order_by(order_column.desc())
             else:
                 query = query.order_by(order_column.asc())
@@ -172,22 +170,24 @@ class CustomerCRUD:
 
         return customers, total
 
-    def create(self, db: Session, obj_in: CustomerCreate, creator_id: str, team_id: int, operator_name: Optional[str] = None) -> Customer:
+    def create(
+        self, db: Session, obj_in: CustomerCreate, creator_id: str, team_id: int, operator_name: Optional[str] = None
+    ) -> Customer:
         from app.services.operation_log_service import operation_log_service
 
-        customer_data = obj_in.model_dump(exclude={'primary_contact'})
-        customer_data['creator_id'] = creator_id
-        customer_data['status'] = 0
-        customer_data['team_id'] = team_id
+        customer_data = obj_in.model_dump(exclude={"primary_contact"})
+        customer_data["creator_id"] = creator_id
+        customer_data["status"] = 0
+        customer_data["team_id"] = team_id
 
-        if not customer_data.get('owner_id'):
-            customer_data['owner_id'] = creator_id
+        if not customer_data.get("owner_id"):
+            customer_data["owner_id"] = creator_id
 
         db_obj = Customer(**customer_data)
         db.add(db_obj)
         db.commit()
         db.refresh(db_obj)
-        
+
         operation_log_service.log(
             db=db,
             event_type="CUSTOMER_CREATED",
@@ -201,24 +201,24 @@ class CustomerCRUD:
                 "industry": db_obj.industry,
                 "city": db_obj.city,
                 "source": db_obj.source,
-                "fromLead": False
+                "fromLead": False,
             },
-            team_id=team_id  # ✅ 必须传递 team_id（团队隔离）
+            team_id=team_id,  # ✅ 必须传递 team_id（团队隔离）
         )
 
         return db_obj
 
     def update(self, db: Session, db_obj: Customer, obj_in: CustomerUpdate) -> Customer:
         update_data = obj_in.model_dump(exclude_unset=True)
-        
+
         if update_data:
             for field, value in update_data.items():
                 setattr(db_obj, field, value)
-            
+
             db_obj.version += 1
             db.commit()
             db.refresh(db_obj)
-        
+
         return db_obj
 
     def update_status(self, db: Session, db_obj: Customer, status: int) -> Customer:
@@ -244,7 +244,9 @@ class CustomerCRUD:
         db: Session,
         customer_id: int,
         status: str,
-        error_message: Optional[str] = None
+        error_message: Optional[str] = None,
+        *,
+        commit: bool = True,
     ) -> Customer:
         """更新档案生成状态"""
         customer = db.query(Customer).filter(Customer.id == customer_id).first()
@@ -258,16 +260,14 @@ class CustomerCRUD:
             customer.profile_generated_time = business_now()
 
         customer.version += 1
-        db.commit()
-        db.refresh(customer)
+        if commit:
+            db.commit()
+            db.refresh(customer)
+        else:
+            db.flush()
         return customer
 
-    def update_profile(
-        self,
-        db: Session,
-        customer_id: int,
-        profile_data: dict
-    ) -> Customer:
+    def update_profile(self, db: Session, customer_id: int, profile_data: dict) -> Customer:
         """写入客户智能图生成的基础档案字段"""
         customer = db.query(Customer).filter(Customer.id == customer_id).first()
         if not customer:
@@ -287,7 +287,9 @@ class CustomerCRUD:
         db: Session,
         customer_id: int,
         status: str,
-        error_message: Optional[str] = None
+        error_message: Optional[str] = None,
+        *,
+        commit: bool = True,
     ) -> Customer:
         """更新客户概况生成状态"""
         customer = db.query(Customer).filter(Customer.id == customer_id).first()
@@ -303,16 +305,14 @@ class CustomerCRUD:
             customer.customer_brief_generated_time = business_now()
 
         customer.version += 1
-        db.commit()
-        db.refresh(customer)
+        if commit:
+            db.commit()
+            db.refresh(customer)
+        else:
+            db.flush()
         return customer
 
-    def update_customer_brief(
-        self,
-        db: Session,
-        customer_id: int,
-        brief_data: dict
-    ) -> Customer:
+    def update_customer_brief(self, db: Session, customer_id: int, brief_data: dict) -> Customer:
         """更新客户概况内容"""
         customer = db.query(Customer).filter(Customer.id == customer_id).first()
         if not customer:
@@ -327,7 +327,9 @@ class CustomerCRUD:
         db.refresh(customer)
         return customer
 
-    def delete(self, db: Session, db_obj: Customer, operator_id: Optional[str] = None, team_id: Optional[int] = None) -> Customer:
+    def delete(
+        self, db: Session, db_obj: Customer, operator_id: Optional[str] = None, team_id: Optional[int] = None
+    ) -> Customer:
         """删除客户，如果客户来源于线索，则恢复线索状态为 FOLLOWING
 
         注意：删除前会检查是否存在关联合同，如有则抛出异常
@@ -340,10 +342,7 @@ class CustomerCRUD:
             team_id = db_obj.team_id
 
         # 检查是否存在关联合同
-        contracts = db.query(Contract).filter(
-            Contract.customer_id == db_obj.id,
-            Contract.deleted_at.is_(None)
-        ).count()
+        contracts = db.query(Contract).filter(Contract.customer_id == db_obj.id, Contract.deleted_at.is_(None)).count()
         if contracts > 0:
             raise ValueError(f"该客户存在 {contracts} 个关联合同，无法删除。请先删除相关合同。")
 
@@ -369,8 +368,8 @@ class CustomerCRUD:
                         "oldStatus": "CONVERTED",
                         "newStatus": "FOLLOWING",
                         "deletedCustomerId": db_obj.id,
-                        "deletedCustomerName": db_obj.account_name
-                    }
+                        "deletedCustomerName": db_obj.account_name,
+                    },
                 )
 
         customer_name = db_obj.account_name
@@ -390,8 +389,8 @@ class CustomerCRUD:
             content={
                 "customerName": customer_name,
                 "sourceLeadId": source_lead_id,
-                "leadRestored": source_lead_id is not None
-            }
+                "leadRestored": source_lead_id is not None,
+            },
         )
 
         return db_obj
@@ -405,15 +404,19 @@ class CustomerCRUD:
         creator_id: str,
         team_id: int,
         default_procurement_method_id: Optional[int] = None,
-        operator_name: Optional[str] = None
+        operator_name: Optional[str] = None,
     ) -> Tuple[Customer, Contact]:
         from app.crud.customer_activity import customer_activity_crud
         from app.services.operation_log_service import operation_log_service
 
-        lead = db.query(Lead).filter(
-            Lead.id == lead_id,
-            Lead.team_id == team_id,
-        ).first()
+        lead = (
+            db.query(Lead)
+            .filter(
+                Lead.id == lead_id,
+                Lead.team_id == team_id,
+            )
+            .first()
+        )
         if not lead:
             raise ValueError("线索不存在")
 
@@ -433,7 +436,7 @@ class CustomerCRUD:
             team_id=team_id,
             default_procurement_method_id=default_procurement_method_id,
             creator_id=creator_id,
-            profile_status="PENDING"
+            profile_status="PENDING",
         )
 
         db.add(customer)
@@ -443,23 +446,23 @@ class CustomerCRUD:
             customer_id=customer.id,
             team_id=team_id,
             name=lead.contact_name,
-            mobile=lead.contact_phone or '',
+            mobile=lead.contact_phone or "",
             is_primary=True,
-            is_decision_maker=True
+            is_decision_maker=True,
         )
 
         db.add(contact)
         db.flush()
-        
+
         customer_activity_crud.migrate_from_lead(db, lead_id, customer.id, team_id)
-        
+
         lead.status = LeadStatus.CONVERTED
         lead.version += 1
-        
+
         db.commit()
         db.refresh(customer)
         db.refresh(contact)
-        
+
         operation_log_service.log_lead_converted(
             db=db,
             lead_id=lead_id,
@@ -468,14 +471,10 @@ class CustomerCRUD:
             customer_name=customer.account_name,
             operator_id=creator_id,
             operator_name=operator_name,
-            team_id=team_id
+            team_id=team_id,
         )
-        
-        operation_log_crud.migrate_lead_logs_to_customer(
-            db=db,
-            lead_id=lead_id,
-            customer_id=customer.id
-        )
+
+        operation_log_crud.migrate_lead_logs_to_customer(db=db, lead_id=lead_id, customer_id=customer.id)
 
         return customer, contact
 
@@ -492,51 +491,34 @@ class CustomerCRUD:
             "following": len([c for c in customers if c.status == 0]),
             "won": len([c for c in customers if c.status == 1]),
             "lost": len([c for c in customers if c.status == 2]),
-            "inactive": len([c for c in customers if c.status == 3])
+            "inactive": len([c for c in customers if c.status == 3]),
         }
 
-    def get_trend(
-        self,
-        db: Session,
-        team_id: int,
-        days: int = 30,
-        owner_id: Optional[str] = None
-    ) -> List[dict]:
+    def get_trend(self, db: Session, team_id: int, days: int = 30, owner_id: Optional[str] = None) -> List[dict]:
         now = business_now()
         start_date = now - timedelta(days=days)
 
-        query = db.query(Customer).filter(
-            Customer.team_id == team_id,
-            Customer.created_time >= start_date
-        )
+        query = db.query(Customer).filter(Customer.team_id == team_id, Customer.created_time >= start_date)
 
         if owner_id:
             query = query.filter(Customer.owner_id == owner_id)
-        
+
         customers = query.all()
-        
+
         trend_data = {}
         for customer in customers:
-            date_str = customer.created_time.strftime('%Y-%m-%d')
+            date_str = customer.created_time.strftime("%Y-%m-%d")
             trend_data[date_str] = trend_data.get(date_str, 0) + 1
-        
+
         result = []
         for i in range(days):
-            date_str = (now - timedelta(days=days - 1 - i)).strftime('%Y-%m-%d')
-            result.append({
-                "date": date_str,
-                "count": trend_data.get(date_str, 0)
-            })
-        
+            date_str = (now - timedelta(days=days - 1 - i)).strftime("%Y-%m-%d")
+            result.append({"date": date_str, "count": trend_data.get(date_str, 0)})
+
         return result
 
     def return_to_pool(
-        self,
-        db: Session,
-        customer: Customer,
-        return_reason: str,
-        team_id: int,
-        detailed_reason: Optional[str] = None
+        self, db: Session, customer: Customer, return_reason: str, team_id: int, detailed_reason: Optional[str] = None
     ) -> Customer:
         customer.owner_id = None
         customer.return_reason = return_reason
@@ -560,12 +542,9 @@ class CustomerCRUD:
         city: Optional[str] = None,
         keyword: Optional[str] = None,
         order_by: Optional[str] = None,
-        order_dir: Optional[str] = None
+        order_dir: Optional[str] = None,
     ) -> Tuple[List[Customer], int]:
-        query = db.query(Customer).filter(
-            Customer.team_id == team_id,
-            Customer.owner_id.is_(None)
-        )
+        query = db.query(Customer).filter(Customer.team_id == team_id, Customer.owner_id.is_(None))
 
         if status is not None:
             query = query.filter(Customer.status == status)
@@ -573,18 +552,15 @@ class CustomerCRUD:
             query = query.filter(Customer.city == city)
         if keyword:
             query = query.filter(
-                or_(
-                    Customer.account_name.like(f"%{keyword}%"),
-                    Customer.industry.like(f"%{keyword}%")
-                )
+                or_(Customer.account_name.like(f"%{keyword}%"), Customer.industry.like(f"%{keyword}%"))
             )
 
         total = query.count()
 
-        allowed_sort_fields = ['returned_time', 'account_name', 'city', 'status', 'created_time']
+        allowed_sort_fields = ["returned_time", "account_name", "city", "status", "created_time"]
         if order_by and order_dir and order_by in allowed_sort_fields:
             order_column = getattr(Customer, order_by)
-            if order_dir.lower() == 'desc':
+            if order_dir.lower() == "desc":
                 query = query.order_by(order_column.desc())
             else:
                 query = query.order_by(order_column.asc())
@@ -595,13 +571,7 @@ class CustomerCRUD:
 
         return customers, total
 
-    def claim_customer(
-        self,
-        db: Session,
-        customer: Customer,
-        owner_id: str,
-        team_id: int
-    ) -> Customer:
+    def claim_customer(self, db: Session, customer: Customer, owner_id: str, team_id: int) -> Customer:
         if customer.owner_id is not None:
             raise ValueError("该客户已有负责人，无法领取")
 
@@ -614,14 +584,9 @@ class CustomerCRUD:
         db.refresh(customer)
 
         return customer
-    
+
     def assign_customer(
-        self,
-        db: Session,
-        customer: Customer,
-        new_owner_id: str,
-        team_id: int,
-        opportunity_transfer_scope: str = "none"
+        self, db: Session, customer: Customer, new_owner_id: str, team_id: int, opportunity_transfer_scope: str = "none"
     ) -> Tuple[Customer, int, int]:
         customer.owner_id = new_owner_id
 
@@ -636,8 +601,7 @@ class CustomerCRUD:
 
         if opportunity_transfer_scope in {"following", "all"}:
             opportunity_query = db.query(Opportunity).filter(
-                Opportunity.team_id == team_id,
-                Opportunity.customer_id == customer.id
+                Opportunity.team_id == team_id, Opportunity.customer_id == customer.id
             )
             if opportunity_transfer_scope == "following":
                 opportunity_query = opportunity_query.filter(Opportunity.status == 0)
@@ -647,22 +611,14 @@ class CustomerCRUD:
 
             if opportunity_ids:
                 db.query(Opportunity).filter(
-                    Opportunity.id.in_(opportunity_ids),
-                    Opportunity.team_id == team_id
-                ).update(
-                    {Opportunity.owner_id: new_owner_id},
-                    synchronize_session=False
-                )
+                    Opportunity.id.in_(opportunity_ids), Opportunity.team_id == team_id
+                ).update({Opportunity.owner_id: new_owner_id}, synchronize_session=False)
 
                 contract_query = db.query(Contract).filter(
-                    Contract.team_id == team_id,
-                    Contract.opportunity_id.in_(opportunity_ids)
+                    Contract.team_id == team_id, Contract.opportunity_id.in_(opportunity_ids)
                 )
                 transferred_contracts = contract_query.count()
-                contract_query.update(
-                    {Contract.owner_id: new_owner_id},
-                    synchronize_session=False
-                )
+                contract_query.update({Contract.owner_id: new_owner_id}, synchronize_session=False)
 
         db.commit()
         db.refresh(customer)
@@ -674,7 +630,7 @@ class CustomerCRUD:
         customer: Customer,
         loss_reason: str,
         operator_id: Optional[str] = None,
-        operator_name: Optional[str] = None
+        operator_name: Optional[str] = None,
     ) -> Customer:
         """标记客户为输单，记录输单原因"""
         from app.services.operation_log_service import operation_log_service
@@ -695,10 +651,7 @@ class CustomerCRUD:
             operator_id=operator_id or "system",
             operator_name=operator_name,
             team_id=customer.team_id,
-            content={
-                "customerName": customer.account_name,
-                "lossReason": loss_reason
-            }
+            content={"customerName": customer.account_name, "lossReason": loss_reason},
         )
 
         return customer
@@ -737,7 +690,9 @@ class ContactCRUD:
             query = query.filter(Contact.team_id == team_id)
         return query.all()
 
-    def get_primary_by_customer_id(self, db: Session, customer_id: int, team_id: Optional[int] = None) -> Optional[Contact]:
+    def get_primary_by_customer_id(
+        self, db: Session, customer_id: int, team_id: Optional[int] = None
+    ) -> Optional[Contact]:
         """获取客户的主联系人
 
         Args:
@@ -748,9 +703,7 @@ class ContactCRUD:
         Returns:
             主联系人对象或 None
         """
-        query = db.query(Contact).filter(
-            and_(Contact.customer_id == customer_id, Contact.is_primary == 1)
-        )
+        query = db.query(Contact).filter(and_(Contact.customer_id == customer_id, Contact.is_primary == 1))
         if team_id is not None:
             query = query.filter(Contact.team_id == team_id)
         return query.first()
@@ -772,12 +725,7 @@ class ContactCRUD:
         return query.first()
 
     def create(
-        self,
-        db: Session,
-        obj_in: ContactCreate,
-        customer_id: int,
-        team_id: int,
-        is_primary: bool = False
+        self, db: Session, obj_in: ContactCreate, customer_id: int, team_id: int, is_primary: bool = False
     ) -> Contact:
         """创建联系人
 
@@ -792,9 +740,9 @@ class ContactCRUD:
             创建的联系人对象
         """
         contact_data = obj_in.model_dump()
-        contact_data['customer_id'] = customer_id
-        contact_data['team_id'] = team_id
-        contact_data['is_primary'] = 1 if is_primary else 0
+        contact_data["customer_id"] = customer_id
+        contact_data["team_id"] = team_id
+        contact_data["is_primary"] = 1 if is_primary else 0
 
         if is_primary:
             existing_primary = self.get_primary_by_customer_id(db, customer_id, team_id)
@@ -844,7 +792,7 @@ class ContactCRUD:
     def delete(self, db: Session, db_obj: Contact) -> Contact:
         if db_obj.is_primary:
             raise ValueError("不能删除主联系人")
-        
+
         db.delete(db_obj)
         db.commit()
         return db_obj

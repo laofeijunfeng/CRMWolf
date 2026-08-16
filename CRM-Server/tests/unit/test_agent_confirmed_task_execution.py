@@ -1,12 +1,18 @@
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import BigInteger, create_engine
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
-from app.services.agent import interactions
-from app.services.agent.confirmed_task_graph import execute_confirmed_task
-from app.services.agent import action_workflow
+from app.core.database import Base
+from app.models.agent import AgentSession, AgentTask, AgentTaskStatus, AgentWorkflowAction
+from app.services.agent import action_workflow, interactions
 from app.services.agent.action_plan import ActionPlanNode
+from app.services.agent.confirmed_task_graph import execute_confirmed_task
 from app.services.agent.guardrails import AgentToolExecutionPolicy, AgentToolGuardrailError, agent_tool_guardrails
+from app.services.agent.task_actions import _tool_payload_for_action
 from app.services.agent.task_execution import (
     ActionExecutionEnvelope,
     WaitingTaskExecutionResult,
@@ -16,9 +22,14 @@ from app.services.agent.task_execution import (
     execute_action_envelope,
     execution_envelope_from_plan_node,
 )
-from app.services.agent.task_actions import _tool_payload_for_action
-from app.services.agent.tools.base import AgentToolContext
-from app.services.agent.tools.base import AgentToolResult
+from app.services.agent.tools.base import AgentToolContext, AgentToolResult
+
+
+@compiles(BigInteger, "sqlite")
+def _confirmed_task_bigint_to_sqlite_int(element, compiler, **kw):
+    return "INTEGER"
+
+
 
 
 @pytest.mark.asyncio
@@ -563,3 +574,106 @@ async def test_execute_waiting_task_marks_workflow_action_failed_when_tool_fails
     assert failures[0]["workflow"] == workflow
     assert failures[0]["task_id"] == 11
     assert failures[0]["error_message"] == "API 写入失败"
+
+
+@pytest.mark.asyncio
+async def test_confirmed_payment_plan_replay_projects_one_stable_next_task(monkeypatch):
+    engine = create_engine(
+        "sqlite:///:memory:",
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            AgentSession.__table__,
+            AgentTask.__table__,
+            AgentWorkflowAction.__table__,
+        ],
+    )
+    db = sessionmaker(bind=engine)()
+    workflow = action_workflow.required_write_contract(action="create_payment_plan")
+    db.add(AgentSession(
+        id=3,
+        session_key="confirmed_payment_plan_replay",
+        team_id=1,
+        user_id=2,
+        title="Confirmed payment plan replay",
+        context_json={},
+    ))
+    db.add(AgentTask(
+        id=11,
+        task_key="task_confirmed_payment_plan",
+        team_id=1,
+        user_id=2,
+        session_id=3,
+        intent="PAYMENT_PLAN",
+        status=AgentTaskStatus.WAITING_USER,
+        target_type="customer",
+        target_id=101,
+        summary="创建回款计划",
+        input_json={"contract_id": 501},
+        state_json={
+            "action": "create_payment_plan",
+            "workflow": workflow,
+            "customer": {"id": 101, "account_name": "示例客户"},
+            "payload": {
+                "contract_id": 501,
+                "stage_name": "首付款",
+                "planned_amount": 1000,
+                "due_date": "2026-08-20",
+                "pending_payment_record": {
+                    "actual_amount": 1000,
+                    "payment_date": "2026-08-14",
+                    "commission_member_id": "usr_2",
+                },
+            },
+        },
+    ))
+    db.commit()
+
+    class ReplayRuntime:
+        def __init__(self, registry):
+            self.registry = registry
+
+        async def execute(self, tool_name, context, payload, policy):
+            assert tool_name == "create_payment_plan"
+            return AgentToolResult(
+                tool_name=tool_name,
+                success=True,
+                data={"items": [{"id": 9001}]},
+                idempotent_replay=True,
+            )
+
+    monkeypatch.setattr("app.services.agent.task_execution.AgentToolRuntime", ReplayRuntime)
+    monkeypatch.setattr("app.services.agent.task_execution._task_target_id", lambda *args, **kwargs: 101)
+
+    try:
+        task = db.get(AgentTask, 11)
+        first = await execute_confirmed_task(
+            db,
+            task,
+            session=db.get(AgentSession, 3),
+            team_id=1,
+            user_id=2,
+            authorization="Bearer test",
+        )
+        replay = await execute_confirmed_task(
+            db,
+            db.get(AgentTask, 11),
+            session=db.get(AgentSession, 3),
+            team_id=1,
+            user_id=2,
+            authorization="Bearer test",
+        )
+
+        assert first.next_task.id == replay.next_task.id
+        child_tasks = db.query(AgentTask).filter(AgentTask.id != 11).all()
+        assert len(child_tasks) == 1
+        child_actions = db.query(AgentWorkflowAction).all()
+        assert len(child_actions) == 1
+        assert child_actions[0].task_id == child_tasks[0].id
+        assert child_actions[0].parent_action_id == workflow["action_id"]
+    finally:
+        db.close()
+        engine.dispose()

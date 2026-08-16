@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from app.core.config import get_settings
+from app.core.database import SessionLocal
 from app.crud.sales_commitment import (
     FollowUpTaskConfirmationPromptDeliveryCRUD,
     follow_up_task_confirmation_case_crud,
@@ -16,6 +20,7 @@ from app.models.customer import Customer
 from app.models.sales_commitment import (
     FollowUpTask,
     FollowUpTaskConfirmationCase,
+    FollowUpTaskConfirmationDeliveryPurpose,
     FollowUpTaskConfirmationPromptDelivery,
     FollowUpTaskConfirmationPromptStatus,
     FollowUpTaskConfirmationStatus,
@@ -24,6 +29,12 @@ from app.services.agent.interaction_contract import (
     INTERACTION_TYPE_CHOICE,
     STATUS_WAITING_USER_INPUT,
     build_interaction,
+)
+from app.services.follow_up_confirmation_case_revision_guard import (
+    FollowUpConfirmationCaseRevisionGuard,
+    FollowUpConfirmationCaseRevisionGuardResult,
+    FollowUpConfirmationSourceRevisionContract,
+    follow_up_confirmation_case_revision_guard,
 )
 from app.services.follow_up_task_confirmation_application_service import (
     FollowUpTaskConfirmationApplicationService,
@@ -47,6 +58,66 @@ DEFAULT_PROMPT_COOLDOWN = timedelta(hours=4)
 DEFAULT_MAX_PROMPTS_PER_CASE = 3
 
 
+@dataclass(frozen=True)
+class _ProjectionDeliveryContext:
+    """Normalized channel identity for one checkpoint-visible Agent prompt."""
+
+    channel: str
+    purpose: str
+    provider: str
+    recipient_id: str
+    agent_session_id: int | None
+    origin_turn_id: str | None
+    origin_message_id: str | None
+
+    @classmethod
+    def from_turn_scope(
+        cls,
+        *,
+        turn_scope: dict[str, Any] | None,
+        owner_id: str,
+    ) -> "_ProjectionDeliveryContext":
+        scope = turn_scope or {}
+        raw_channel = str(scope.get("channel") or "web").strip().lower()
+        channel = "im" if raw_channel == "im" else "web"
+        purpose = (
+            FollowUpTaskConfirmationDeliveryPurpose.IM_PROMPT
+            if channel == "im"
+            else FollowUpTaskConfirmationDeliveryPurpose.AGENT_TURN_PROMPT
+        )
+        provider = str(scope.get("provider") or channel).strip() or channel
+        session_value = scope.get("session_id")
+        try:
+            agent_session_id = int(session_value) if session_value is not None else None
+        except (TypeError, ValueError):
+            agent_session_id = None
+        return cls(
+            channel=channel,
+            purpose=purpose,
+            provider=provider,
+            recipient_id=owner_id,
+            agent_session_id=agent_session_id,
+            origin_turn_id=_optional_string(scope.get("turn_id")),
+            origin_message_id=_optional_string(scope.get("source_message_id")),
+        )
+
+
+@dataclass(frozen=True)
+class _PromptVisibilityGuardResult:
+    """Locked durable state required before a prompt becomes user-visible."""
+
+    delivery: FollowUpTaskConfirmationPromptDelivery | None
+    case: FollowUpTaskConfirmationCase | None
+    reason_code: str | None
+
+
+def _optional_string(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 class FollowUpTaskConfirmationChannelService:
     """Shared business entrypoint for Web Agent, IM, and future channel adapters."""
 
@@ -60,14 +131,20 @@ class FollowUpTaskConfirmationChannelService:
         prompt_delivery_crud: FollowUpTaskConfirmationPromptDeliveryCRUD = (
             follow_up_task_confirmation_prompt_delivery_crud
         ),
+        case_revision_guard: FollowUpConfirmationCaseRevisionGuard = (
+            follow_up_confirmation_case_revision_guard
+        ),
         prompt_cooldown: timedelta = DEFAULT_PROMPT_COOLDOWN,
         max_prompts_per_case: int = DEFAULT_MAX_PROMPTS_PER_CASE,
+        session_factory: Callable[[], Session] = SessionLocal,
     ) -> None:
         self.application_service = application_service
         self.confirmation_service = confirmation_service
         self.prompt_delivery_crud = prompt_delivery_crud
+        self.case_revision_guard = case_revision_guard
         self.prompt_cooldown = prompt_cooldown
         self.max_prompts_per_case = max_prompts_per_case
+        self._session_factory = session_factory
 
     def list_pending_cases(
         self,
@@ -118,7 +195,38 @@ class FollowUpTaskConfirmationChannelService:
             },
         }
 
-    def is_case_pending_for_owner(
+    def revalidate_case_pending_for_owner(
+        self,
+        *,
+        team_id: int,
+        user_id: int,
+        case_public_id: str,
+    ) -> bool:
+        """Revalidate one checkpoint interrupt in an owned transaction.
+
+        Checkpoint replay happens before the Agent turn uses its request-scoped
+        database session.  Owning this short transaction prevents revision
+        cancellation and row-lock release from implicitly committing unrelated
+        mutations accumulated by the caller.
+        """
+
+        db = self._session_factory()
+        try:
+            pending = self._is_case_pending_for_owner_in_transaction(
+                db,
+                team_id=team_id,
+                user_id=user_id,
+                case_public_id=case_public_id,
+            )
+            db.commit()
+            return pending
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def _is_case_pending_for_owner_in_transaction(
         self,
         db: Session,
         *,
@@ -126,13 +234,14 @@ class FollowUpTaskConfirmationChannelService:
         user_id: int,
         case_public_id: str,
     ) -> bool:
-        """Revalidate an Agent interrupt against the durable owner-scoped inbox."""
-
-        case = follow_up_task_confirmation_case_crud.get_by_public_id(
+        guard = self.case_revision_guard.lock_and_validate(
             db,
-            case_public_id,
             team_id=team_id,
+            case_public_id=case_public_id,
         )
+        case = guard.case
+        if guard.reason is not None:
+            return False
         if case is None or case.owner_id != str(user_id):
             return False
         if case.status != FollowUpTaskConfirmationStatus.PENDING:
@@ -207,6 +316,309 @@ class FollowUpTaskConfirmationChannelService:
     ) -> FollowUpTaskConfirmationReplyDecision:
         return self.confirmation_service.interpret_reply(reply_text, base_date=base_date)
 
+    def prompt_next_pending_case(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_id: int,
+        channel: str,
+        provider: str | None = None,
+        agent_session_id: int | None = None,
+        now: datetime | None = None,
+        commit: bool = True,
+    ) -> dict[str, Any] | None:
+        """Compatibility adapter for synchronous, already-visible channels.
+
+        New Agent turns use ``prepare_case_prompt_by_public_ids`` and explicit
+        visibility acknowledgement. This entrypoint remains for channel
+        boundaries that synchronously guarantee visibility before returning.
+        It still writes through the same durable delivery state machine.
+        """
+
+        resolved_now = now or business_now()
+        case = self._select_prompt_case(
+            db,
+            team_id=team_id,
+            owner_id=str(user_id),
+            now=resolved_now,
+        )
+        if case is None:
+            return None
+        return self._record_synchronously_visible_prompt(
+            db,
+            team_id=team_id,
+            case=case,
+            channel=channel,
+            provider=provider,
+            agent_session_id=agent_session_id,
+            visible_at=resolved_now,
+            commit=commit,
+        )
+
+    def prompt_cases_by_public_ids(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_id: int,
+        case_public_ids: list[str],
+        channel: str,
+        provider: str | None = None,
+        agent_session_id: int | None = None,
+        now: datetime | None = None,
+        commit: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Compatibility batch adapter scoped to requested owner cases.
+
+        Explicit case ids intentionally bypass owner-level cooldown so multiple
+        confirmations created by one activity can be surfaced together; each
+        case still enforces its own cooldown and prompt limit.
+        """
+
+        resolved_now = now or business_now()
+        owner_id = str(user_id)
+        events: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for raw_public_id in case_public_ids:
+            case_public_id = str(raw_public_id or "").strip()
+            if not case_public_id or case_public_id in seen:
+                continue
+            seen.add(case_public_id)
+            case = follow_up_task_confirmation_case_crud.get_by_public_id(
+                db,
+                case_public_id,
+                team_id=team_id,
+            )
+            if case is None or case.owner_id != owner_id:
+                continue
+            if case.status != FollowUpTaskConfirmationStatus.PENDING:
+                continue
+            if not self._case_prompt_allowed(db, team_id=team_id, case=case, now=resolved_now):
+                continue
+            event = self._record_synchronously_visible_prompt(
+                db,
+                team_id=team_id,
+                case=case,
+                channel=channel,
+                provider=provider,
+                agent_session_id=agent_session_id,
+                visible_at=resolved_now,
+                prompt_scope="current_activity",
+                commit=False,
+            )
+            if event is not None:
+                events.append(event)
+        if commit and seen:
+            db.commit()
+            for event in events:
+                delivery_public_id = event.get("delivery", {}).get("public_id")
+                if not delivery_public_id:
+                    continue
+                delivery = self.prompt_delivery_crud.get_by_public_id(
+                    db, team_id=team_id, public_id=str(delivery_public_id)
+                )
+                if delivery is not None:
+                    event["delivery"] = self._delivery_payload(delivery)
+        return events
+
+    def _select_prompt_case(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        owner_id: str,
+        now: datetime,
+    ) -> FollowUpTaskConfirmationCase | None:
+        recent_owner_delivery = self.prompt_delivery_crud.latest_for_owner_since(
+            db,
+            team_id=team_id,
+            owner_id=owner_id,
+            since=now - self.prompt_cooldown,
+        )
+        if recent_owner_delivery is not None:
+            return None
+        cases, _ = follow_up_task_confirmation_case_crud.list_pending_for_owner(
+            db,
+            team_id=team_id,
+            owner_id=owner_id,
+            limit=20,
+            now=now,
+        )
+        return next(
+            (case for case in cases if self._case_prompt_allowed(db, team_id=team_id, case=case, now=now)),
+            None,
+        )
+
+    def _case_prompt_allowed(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        case: FollowUpTaskConfirmationCase,
+        now: datetime,
+    ) -> bool:
+        if int(case.prompt_count or 0) >= self.max_prompts_per_case:
+            return False
+        return self.prompt_delivery_crud.latest_for_case_since(
+            db,
+            team_id=team_id,
+            case_id=case.id,
+            since=now - self.prompt_cooldown,
+        ) is None
+
+    def _record_synchronously_visible_prompt(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        case: FollowUpTaskConfirmationCase,
+        channel: str,
+        provider: str | None,
+        agent_session_id: int | None,
+        visible_at: datetime,
+        prompt_scope: str | None = None,
+        commit: bool = True,
+    ) -> dict[str, Any] | None:
+        guard = self.case_revision_guard.lock_and_validate(
+            db,
+            team_id=team_id,
+            case_public_id=case.public_id,
+        )
+        locked_case = guard.case
+        if locked_case is None:
+            return None
+        if guard.reason is not None:
+            self._record_synchronous_revision_skip(
+                db,
+                case=locked_case,
+                guard=guard,
+                channel=channel,
+                provider=provider,
+                agent_session_id=agent_session_id,
+                prompt_scope=prompt_scope,
+                reason_code=guard.reason,
+            )
+            if commit:
+                db.commit()
+            return None
+
+        case = locked_case
+        task = follow_up_task_crud.get_by_id(db, case.task_id, team_id=team_id)
+        customer = self._customers_by_id(
+            db, team_id=team_id, customer_ids=[case.customer_id]
+        ).get(case.customer_id)
+        event = self._prompt_event(case, task=task, customer=customer)
+        interaction = event["interaction"]
+        purpose = (
+            FollowUpTaskConfirmationDeliveryPurpose.IM_PROMPT
+            if str(channel).lower() == "im"
+            else FollowUpTaskConfirmationDeliveryPurpose.AGENT_TURN_PROMPT
+        )
+        payload_json = {
+            "event": event["event"],
+            "case_public_id": case.public_id,
+            "task_public_id": task.public_id if task is not None else None,
+            "customer_public_id": customer.public_id if customer is not None else None,
+        }
+        if prompt_scope:
+            payload_json["prompt_scope"] = prompt_scope
+        prompt_key = f"legacy-visible:{case.public_id}:{interaction['interaction_id']}"
+        delivery = self.prompt_delivery_crud.ensure_queued(
+            db,
+            team_id=team_id,
+            case_id=case.id,
+            owner_id=case.owner_id,
+            channel=channel,
+            purpose=purpose,
+            provider=provider,
+            recipient_id=case.owner_id,
+            agent_session_id=agent_session_id,
+            source_activity_id=case.source_activity_id,
+            expected_activity_revision=case.source_activity_revision,
+            interaction_id=str(interaction["interaction_id"]),
+            prompt_key=prompt_key,
+            payload_json=payload_json,
+            reason_code="SYNCHRONOUS_CHANNEL_VISIBLE",
+            commit=False,
+        )
+        delivery = self.prompt_delivery_crud.acknowledge_sent(
+            db,
+            delivery,
+            provider_message_id=f"{channel}:{interaction['interaction_id']}",
+            reason_code="SYNCHRONOUS_CHANNEL_VISIBLE",
+            delivered_at=visible_at,
+            commit=False,
+        )
+        if commit:
+            db.commit()
+            db.refresh(case)
+            db.refresh(delivery)
+        event["delivery"] = self._delivery_payload(delivery)
+        return event
+
+    def _record_synchronous_revision_skip(
+        self,
+        db: Session,
+        *,
+        case: FollowUpTaskConfirmationCase,
+        guard: FollowUpConfirmationCaseRevisionGuardResult,
+        channel: str,
+        provider: str | None,
+        agent_session_id: int | None,
+        prompt_scope: str | None,
+        reason_code: str,
+    ) -> FollowUpTaskConfirmationPromptDelivery:
+        purpose = (
+            FollowUpTaskConfirmationDeliveryPurpose.IM_PROMPT
+            if str(channel).lower() == "im"
+            else FollowUpTaskConfirmationDeliveryPurpose.AGENT_TURN_PROMPT
+        )
+        interaction_scope = ":".join(
+            [
+                "synchronous_revision_guard",
+                channel,
+                provider or "default",
+                str(agent_session_id or "none"),
+                prompt_scope or "owner_inbox",
+            ]
+        )
+        interaction_id = self._stable_interaction_id(
+            case_public_id=case.public_id,
+            interaction_scope=interaction_scope,
+            source_activity_id=guard.contract.source_activity_id,
+            source_activity_revision=guard.contract.activity_revision,
+        )
+        prompt_key = self._projection_prompt_key(
+            case_public_id=case.public_id,
+            interaction_scope=interaction_scope,
+            source_activity_id=guard.contract.source_activity_id,
+            source_activity_revision=guard.contract.activity_revision,
+        )
+        return self.prompt_delivery_crud.create_attempt(
+            db,
+            team_id=case.team_id,
+            case_id=case.id,
+            owner_id=case.owner_id,
+            channel=channel,
+            purpose=purpose,
+            provider=provider,
+            recipient_id=case.owner_id,
+            agent_session_id=agent_session_id,
+            source_activity_id=guard.contract.source_activity_id,
+            expected_activity_revision=guard.contract.activity_revision,
+            interaction_id=interaction_id,
+            prompt_key=prompt_key,
+            status=FollowUpTaskConfirmationPromptStatus.SKIPPED,
+            reason_code=reason_code,
+            payload_json={
+                "case_public_id": case.public_id,
+                "prompt_scope": prompt_scope,
+            },
+            thread_id=interaction_scope,
+            commit=False,
+        )
+
     def prepare_case_prompt_by_public_ids(
         self,
         db: Session,
@@ -215,6 +627,7 @@ class FollowUpTaskConfirmationChannelService:
         user_id: int,
         case_public_ids: list[str],
         interaction_scope: str,
+        turn_scope: dict[str, Any] | None = None,
         prompt_override: str | None = None,
         reason_code: str = "ROOT_GRAPH_INTERRUPT_PLANNED",
     ) -> dict[str, Any] | None:
@@ -226,21 +639,71 @@ class FollowUpTaskConfirmationChannelService:
             if not case_public_id or case_public_id in seen:
                 continue
             seen.add(case_public_id)
-            case = follow_up_task_confirmation_case_crud.get_by_public_id(
+            guard = self.case_revision_guard.lock_and_validate(
                 db,
-                case_public_id,
                 team_id=team_id,
+                case_public_id=case_public_id,
             )
+            case = guard.case
             if case is None:
                 continue
             interaction_id = self._stable_interaction_id(
                 case_public_id=case.public_id,
                 interaction_scope=interaction_scope,
+                source_activity_id=guard.contract.source_activity_id,
+                source_activity_revision=guard.contract.activity_revision,
             )
             prompt_key = self._projection_prompt_key(
                 case_public_id=case.public_id,
                 interaction_scope=interaction_scope,
+                source_activity_id=guard.contract.source_activity_id,
+                source_activity_revision=guard.contract.activity_revision,
             )
+            if guard.reason is not None:
+                self._record_projection_attempt(
+                    db,
+                    case=case,
+                    owner_id=owner_id,
+                    interaction_id=interaction_id,
+                    prompt_key=prompt_key,
+                    interaction_scope=interaction_scope,
+                    turn_scope=turn_scope,
+                    status=FollowUpTaskConfirmationPromptStatus.SKIPPED,
+                    reason_code=guard.reason,
+                )
+                continue
+            expected_customer_id = (turn_scope or {}).get("customer_id")
+            if expected_customer_id is not None and str(expected_customer_id) != str(case.customer_id):
+                self._record_projection_attempt(
+                    db,
+                    case=case,
+                    owner_id=owner_id,
+                    interaction_id=interaction_id,
+                    prompt_key=prompt_key,
+                    interaction_scope=interaction_scope,
+                    turn_scope=turn_scope,
+                    status=FollowUpTaskConfirmationPromptStatus.SKIPPED,
+                    reason_code="CURRENT_TURN_CUSTOMER_MISMATCH",
+                )
+                continue
+            expected_source_activity_id = (turn_scope or {}).get("business_object_id")
+            if (
+                (turn_scope or {}).get("business_object_type") == "customer_activity"
+                and expected_source_activity_id is not None
+                and str(expected_source_activity_id) != str(case.source_activity_id)
+            ):
+                self._record_projection_attempt(
+                    db,
+                    case=case,
+                    owner_id=owner_id,
+                    interaction_id=interaction_id,
+                    prompt_key=prompt_key,
+                    interaction_scope=interaction_scope,
+                    turn_scope=turn_scope,
+                    status=FollowUpTaskConfirmationPromptStatus.SKIPPED,
+                    reason_code="CURRENT_TURN_SOURCE_MISMATCH",
+                )
+                continue
             if case.owner_id != owner_id:
                 self._record_projection_attempt(
                     db,
@@ -249,6 +712,7 @@ class FollowUpTaskConfirmationChannelService:
                     interaction_id=interaction_id,
                     prompt_key=prompt_key,
                     interaction_scope=interaction_scope,
+                    turn_scope=turn_scope,
                     status=FollowUpTaskConfirmationPromptStatus.SKIPPED,
                     reason_code="OWNER_MISMATCH",
                 )
@@ -261,6 +725,7 @@ class FollowUpTaskConfirmationChannelService:
                     interaction_id=interaction_id,
                     prompt_key=prompt_key,
                     interaction_scope=interaction_scope,
+                    turn_scope=turn_scope,
                     status=FollowUpTaskConfirmationPromptStatus.SKIPPED,
                     reason_code=f"CASE_NOT_PENDING_{case.status}",
                 )
@@ -286,6 +751,7 @@ class FollowUpTaskConfirmationChannelService:
                 interaction_id=interaction_id,
                 prompt_key=prompt_key,
                 interaction_scope=interaction_scope,
+                turn_scope=turn_scope,
                 status=FollowUpTaskConfirmationPromptStatus.QUEUED,
                 reason_code=reason_code,
             )
@@ -295,6 +761,9 @@ class FollowUpTaskConfirmationChannelService:
                     payload = {}
                     interaction["payload"] = payload
                 payload["prompt_delivery_key"] = prompt_key
+                payload["delivery_public_id"] = delivery.public_id
+                payload["confirmation_delivery_public_id"] = delivery.public_id
+                payload["interaction_id"] = interaction_id
             event["delivery"] = {
                 **self._delivery_payload(delivery),
                 "status": delivery.status,
@@ -314,13 +783,20 @@ class FollowUpTaskConfirmationChannelService:
     ) -> FollowUpTaskConfirmationPromptDelivery | None:
         """Acknowledge projection only after the Root Graph checkpoint exposes the interrupt."""
 
-        delivery = self.prompt_delivery_crud.get_by_prompt_key(
+        visibility = self._lock_prompt_visibility(
             db,
             team_id=team_id,
             prompt_key=prompt_key,
         )
+        delivery = visibility.delivery
         if delivery is None:
             return None
+        if visibility.reason_code is not None:
+            return self.prompt_delivery_crud.acknowledge_skipped(
+                db,
+                delivery,
+                reason_code=visibility.reason_code,
+            )
         if delivery.status == FollowUpTaskConfirmationPromptStatus.PROJECTED:
             return delivery
         if delivery.status != FollowUpTaskConfirmationPromptStatus.QUEUED:
@@ -330,6 +806,195 @@ class FollowUpTaskConfirmationChannelService:
             delivery,
             status=FollowUpTaskConfirmationPromptStatus.PROJECTED,
             reason_code="ROOT_GRAPH_INTERRUPT_CHECKPOINTED",
+        )
+
+    def acknowledge_web_message_visible(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        prompt_key: str,
+        provider_message_id: str,
+        commit: bool = True,
+    ) -> FollowUpTaskConfirmationPromptDelivery | None:
+        """Acknowledge Web visibility after the durable assistant message is available."""
+
+        visibility = self._lock_prompt_visibility(
+            db,
+            team_id=team_id,
+            prompt_key=prompt_key,
+        )
+        delivery = visibility.delivery
+        if delivery is None:
+            return None
+        if delivery.purpose != FollowUpTaskConfirmationDeliveryPurpose.AGENT_TURN_PROMPT:
+            return delivery
+        if delivery.channel != "web":
+            return delivery
+        if delivery.status == FollowUpTaskConfirmationPromptStatus.SENT:
+            return delivery
+        if visibility.reason_code is not None:
+            return self.prompt_delivery_crud.acknowledge_skipped(
+                db,
+                delivery,
+                reason_code=visibility.reason_code,
+                commit=commit,
+            )
+        if delivery.status not in {
+            FollowUpTaskConfirmationPromptStatus.QUEUED,
+            FollowUpTaskConfirmationPromptStatus.PROJECTED,
+        }:
+            return delivery
+        return self.prompt_delivery_crud.acknowledge_sent(
+            db,
+            delivery,
+            provider_message_id=provider_message_id,
+            reason_code="WEB_ASSISTANT_MESSAGE_VISIBLE",
+            commit=commit,
+        )
+
+    def _lock_prompt_visibility(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        prompt_key: str,
+    ) -> _PromptVisibilityGuardResult:
+        """Fence the final checkpoint/message visibility transition.
+
+        Delivery is located by its stable prompt key, then the case/activity
+        generation is locked before the delivery row. This matches the lock
+        order used by case creation and asynchronous projection and prevents a
+        stale activity generation from being acknowledged as visible.
+        """
+
+        candidate = self.prompt_delivery_crud.get_by_prompt_key(
+            db,
+            team_id=team_id,
+            prompt_key=prompt_key,
+        )
+        if candidate is None:
+            return _PromptVisibilityGuardResult(None, None, None)
+        if candidate.status == FollowUpTaskConfirmationPromptStatus.SENT:
+            return _PromptVisibilityGuardResult(candidate, None, None)
+
+        requested_contract = FollowUpConfirmationSourceRevisionContract(
+            source_activity_id=candidate.source_activity_id,
+            activity_revision=candidate.expected_activity_revision,
+        )
+        guard = self.case_revision_guard.lock_and_validate_by_id(
+            db,
+            team_id=team_id,
+            case_id=candidate.case_id,
+            requested_contract=requested_contract,
+        )
+        delivery = self.prompt_delivery_crud.get_by_public_id_for_update(
+            db,
+            team_id=team_id,
+            public_id=candidate.public_id,
+        )
+        if delivery is None:
+            return _PromptVisibilityGuardResult(None, guard.case, "DELIVERY_NOT_FOUND")
+        if delivery.status == FollowUpTaskConfirmationPromptStatus.SENT:
+            return _PromptVisibilityGuardResult(delivery, guard.case, None)
+        if guard.reason is not None:
+            return _PromptVisibilityGuardResult(delivery, guard.case, guard.reason)
+
+        case = guard.case
+        if case is None:
+            return _PromptVisibilityGuardResult(delivery, None, "CASE_NOT_FOUND")
+        if delivery.case_id != case.id:
+            return _PromptVisibilityGuardResult(delivery, case, "DELIVERY_CASE_MISMATCH")
+        if delivery.owner_id != case.owner_id:
+            return _PromptVisibilityGuardResult(delivery, case, "OWNER_MISMATCH")
+        if case.status != FollowUpTaskConfirmationStatus.PENDING:
+            return _PromptVisibilityGuardResult(
+                delivery,
+                case,
+                f"CASE_NOT_PENDING_{case.status}",
+            )
+        if case.expires_at is not None and case.expires_at <= business_now():
+            return _PromptVisibilityGuardResult(delivery, case, "CASE_EXPIRED")
+        return _PromptVisibilityGuardResult(delivery, case, None)
+
+    def acknowledge_agent_message_visible(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        prompt_key: str,
+        provider_message_id: str,
+        commit: bool = True,
+    ) -> FollowUpTaskConfirmationPromptDelivery | None:
+        """Backward-compatible alias for Web assistant-message visibility ACK."""
+
+        return self.acknowledge_web_message_visible(
+            db,
+            team_id=team_id,
+            prompt_key=prompt_key,
+            provider_message_id=provider_message_id,
+            commit=commit,
+        )
+
+    def acknowledge_im_provider_visible(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        delivery_public_id: str,
+        provider_message_id: str,
+        commit: bool = True,
+    ) -> FollowUpTaskConfirmationPromptDelivery | None:
+        """Acknowledge exact IM visibility only after the provider returns a message ID."""
+
+        delivery = self.prompt_delivery_crud.get_by_public_id(db, team_id=team_id, public_id=delivery_public_id)
+        if delivery is None:
+            return None
+        if delivery.channel != "im" or delivery.purpose != FollowUpTaskConfirmationDeliveryPurpose.IM_PROMPT:
+            return delivery
+        if delivery.status == FollowUpTaskConfirmationPromptStatus.SENT:
+            return delivery
+        if delivery.status not in {
+            FollowUpTaskConfirmationPromptStatus.QUEUED,
+            FollowUpTaskConfirmationPromptStatus.PROJECTED,
+        }:
+            return delivery
+        return self.prompt_delivery_crud.acknowledge_sent(
+            db,
+            delivery,
+            provider_message_id=provider_message_id,
+            reason_code="IM_PROVIDER_MESSAGE_ACKNOWLEDGED",
+            commit=commit,
+        )
+
+    def acknowledge_im_provider_failed(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        delivery_public_id: str,
+        error_message: str,
+        commit: bool = True,
+    ) -> FollowUpTaskConfirmationPromptDelivery | None:
+        """Make a failed IM send explicit instead of silently leaving a projected prompt."""
+
+        delivery = self.prompt_delivery_crud.get_by_public_id(db, team_id=team_id, public_id=delivery_public_id)
+        if delivery is None:
+            return None
+        if delivery.channel != "im" or delivery.purpose != FollowUpTaskConfirmationDeliveryPurpose.IM_PROMPT:
+            return delivery
+        if delivery.status == FollowUpTaskConfirmationPromptStatus.SENT:
+            return delivery
+        settings = get_settings()
+        base = max(1, settings.FOLLOW_UP_CONFIRMATION_DELIVERY_RETRY_BASE_SECONDS)
+        exponent = max(0, int(delivery.attempt_count or 1) - 1)
+        return self.prompt_delivery_crud.acknowledge_failed(
+            db,
+            delivery,
+            reason_code="IM_PROVIDER_MESSAGE_FAILED",
+            error_message=error_message[:2000],
+            next_attempt_at=business_now() + timedelta(seconds=base * (2**exponent)),
+            commit=commit,
         )
 
     def mark_projection_failed(
@@ -366,6 +1031,7 @@ class FollowUpTaskConfirmationChannelService:
         case_public_ids: list[str],
         interaction_scope: str,
         error_message: str,
+        turn_scope: dict[str, Any] | None = None,
     ) -> list[FollowUpTaskConfirmationPromptDelivery]:
         """Persist owner-scoped failed Root Graph projection attempts when the DB is still available."""
 
@@ -376,54 +1042,85 @@ class FollowUpTaskConfirmationChannelService:
             if not case_public_id or case_public_id in seen:
                 continue
             seen.add(case_public_id)
-            case = follow_up_task_confirmation_case_crud.get_by_public_id(
+            guard = self.case_revision_guard.lock_and_validate(
                 db,
-                case_public_id,
                 team_id=team_id,
+                case_public_id=case_public_id,
             )
+            case = guard.case
             if case is None or case.owner_id != owner_id:
                 continue
             interaction_id = self._stable_interaction_id(
                 case_public_id=case.public_id,
                 interaction_scope=interaction_scope,
+                source_activity_id=guard.contract.source_activity_id,
+                source_activity_revision=guard.contract.activity_revision,
             )
             prompt_key = self._projection_prompt_key(
                 case_public_id=case.public_id,
                 interaction_scope=interaction_scope,
+                source_activity_id=guard.contract.source_activity_id,
+                source_activity_revision=guard.contract.activity_revision,
             )
+            if guard.reason is not None:
+                deliveries.append(
+                    self._record_projection_attempt(
+                        db,
+                        case=case,
+                        owner_id=owner_id,
+                        interaction_id=interaction_id,
+                        prompt_key=prompt_key,
+                        interaction_scope=interaction_scope,
+                        turn_scope=turn_scope,
+                        status=FollowUpTaskConfirmationPromptStatus.SKIPPED,
+                        reason_code=guard.reason,
+                    )
+                )
+                continue
             queued = self.prompt_delivery_crud.get_by_prompt_key(
                 db,
                 team_id=case.team_id,
                 prompt_key=prompt_key,
             )
             if queued is not None and queued.status == FollowUpTaskConfirmationPromptStatus.QUEUED:
-                deliveries.append(self.prompt_delivery_crud.update_attempt_status(
+                deliveries.append(
+                    self.prompt_delivery_crud.update_attempt_status(
+                        db,
+                        queued,
+                        status=FollowUpTaskConfirmationPromptStatus.FAILED,
+                        reason_code="ROOT_GRAPH_PROJECTION_FAILED",
+                        error_message=error_message[:2000],
+                    )
+                )
+                continue
+            context = _ProjectionDeliveryContext.from_turn_scope(turn_scope=turn_scope, owner_id=owner_id)
+            deliveries.append(
+                self.prompt_delivery_crud.create_attempt(
                     db,
-                    queued,
+                    team_id=case.team_id,
+                    case_id=case.id,
+                    owner_id=owner_id,
+                    channel=context.channel,
+                    purpose=context.purpose,
+                    provider=context.provider,
+                    recipient_id=context.recipient_id,
+                    agent_session_id=context.agent_session_id,
+                    origin_turn_id=context.origin_turn_id,
+                    origin_message_id=context.origin_message_id,
+                    source_activity_id=case.source_activity_id,
+                    expected_activity_revision=case.source_activity_revision,
+                    interaction_id=interaction_id,
+                    prompt_key=prompt_key,
                     status=FollowUpTaskConfirmationPromptStatus.FAILED,
                     reason_code="ROOT_GRAPH_PROJECTION_FAILED",
                     error_message=error_message[:2000],
-                ))
-                continue
-            deliveries.append(self.prompt_delivery_crud.create_attempt(
-                db,
-                team_id=case.team_id,
-                case_id=case.id,
-                owner_id=owner_id,
-                channel="agent",
-                provider="langgraph",
-                agent_session_id=None,
-                interaction_id=interaction_id,
-                prompt_key=prompt_key,
-                status=FollowUpTaskConfirmationPromptStatus.FAILED,
-                reason_code="ROOT_GRAPH_PROJECTION_FAILED",
-                error_message=error_message[:2000],
-                payload_json={
-                    "case_public_id": case.public_id,
-                    "interaction_scope": interaction_scope,
-                },
-                thread_id=interaction_scope,
-            ))
+                    payload_json={
+                        "case_public_id": case.public_id,
+                        "interaction_scope": interaction_scope,
+                    },
+                    thread_id=interaction_scope,
+                )
+            )
         return deliveries
 
     def _record_projection_attempt(
@@ -435,6 +1132,7 @@ class FollowUpTaskConfirmationChannelService:
         interaction_id: str,
         prompt_key: str,
         interaction_scope: str,
+        turn_scope: dict[str, Any] | None,
         status: str,
         reason_code: str,
     ) -> FollowUpTaskConfirmationPromptDelivery:
@@ -457,14 +1155,21 @@ class FollowUpTaskConfirmationChannelService:
                 attempted_at=business_now(),
                 delivered_at=None,
             )
+        context = _ProjectionDeliveryContext.from_turn_scope(turn_scope=turn_scope, owner_id=owner_id)
         return self.prompt_delivery_crud.create_attempt(
             db,
             team_id=case.team_id,
             case_id=case.id,
             owner_id=owner_id,
-            channel="agent",
-            provider="langgraph",
-            agent_session_id=None,
+            channel=context.channel,
+            purpose=context.purpose,
+            provider=context.provider,
+            recipient_id=context.recipient_id,
+            agent_session_id=context.agent_session_id,
+            origin_turn_id=context.origin_turn_id,
+            origin_message_id=context.origin_message_id,
+            source_activity_id=case.source_activity_id,
+            expected_activity_revision=case.source_activity_revision,
             interaction_id=interaction_id,
             prompt_key=prompt_key,
             status=status,
@@ -475,194 +1180,6 @@ class FollowUpTaskConfirmationChannelService:
             },
             thread_id=interaction_scope,
         )
-
-    def prompt_next_pending_case(
-        self,
-        db: Session,
-        *,
-        team_id: int,
-        user_id: int,
-        channel: str,
-        provider: str | None = None,
-        agent_session_id: int | None = None,
-        now: datetime | None = None,
-        commit: bool = True,
-    ) -> dict[str, Any] | None:
-        resolved_now = now or business_now()
-        case = self._select_prompt_case(
-            db,
-            team_id=team_id,
-            owner_id=str(user_id),
-            now=resolved_now,
-        )
-        if case is None:
-            return None
-
-        return self._deliver_prompt(
-            db,
-            team_id=team_id,
-            case=case,
-            channel=channel,
-            provider=provider,
-            agent_session_id=agent_session_id,
-            prompted_at=resolved_now,
-            commit=commit,
-        )
-
-    def prompt_cases_by_public_ids(
-        self,
-        db: Session,
-        *,
-        team_id: int,
-        user_id: int,
-        case_public_ids: list[str],
-        channel: str,
-        provider: str | None = None,
-        agent_session_id: int | None = None,
-        now: datetime | None = None,
-        commit: bool = True,
-    ) -> list[dict[str, Any]]:
-        resolved_now = now or business_now()
-        events: list[dict[str, Any]] = []
-        seen: set[str] = set()
-        owner_id = str(user_id)
-        for case_public_id in case_public_ids:
-            if not case_public_id or case_public_id in seen:
-                continue
-            seen.add(case_public_id)
-            case = follow_up_task_confirmation_case_crud.get_by_public_id(
-                db,
-                str(case_public_id),
-                team_id=team_id,
-            )
-            if case is None:
-                continue
-            if case.status != FollowUpTaskConfirmationStatus.PENDING or case.owner_id != owner_id:
-                continue
-            if not self._case_prompt_allowed(
-                db,
-                team_id=team_id,
-                case=case,
-                now=resolved_now,
-            ):
-                continue
-            events.append(
-                self._deliver_prompt(
-                    db,
-                    team_id=team_id,
-                    case=case,
-                    channel=channel,
-                    provider=provider,
-                    agent_session_id=agent_session_id,
-                    prompted_at=resolved_now,
-                    prompt_scope="current_activity",
-                    commit=False,
-                )
-            )
-        if commit and events:
-            db.commit()
-        return events
-
-    def _select_prompt_case(
-        self,
-        db: Session,
-        *,
-        team_id: int,
-        owner_id: str,
-        now: datetime,
-    ) -> FollowUpTaskConfirmationCase | None:
-        cooldown_since = now - self.prompt_cooldown
-        recent_owner_delivery = self.prompt_delivery_crud.latest_for_owner_since(
-            db,
-            team_id=team_id,
-            owner_id=owner_id,
-            since=cooldown_since,
-        )
-        if recent_owner_delivery is not None:
-            return None
-
-        cases, _ = follow_up_task_confirmation_case_crud.list_pending_for_owner(
-            db,
-            team_id=team_id,
-            owner_id=owner_id,
-            limit=20,
-            now=now,
-        )
-        for case in cases:
-            if self._case_prompt_allowed(db, team_id=team_id, case=case, now=now):
-                return case
-        return None
-
-    def _case_prompt_allowed(
-        self,
-        db: Session,
-        *,
-        team_id: int,
-        case: FollowUpTaskConfirmationCase,
-        now: datetime,
-    ) -> bool:
-        if int(case.prompt_count or 0) >= self.max_prompts_per_case:
-            return False
-        recent_case_delivery = self.prompt_delivery_crud.latest_for_case_since(
-            db,
-            team_id=team_id,
-            case_id=case.id,
-            since=now - self.prompt_cooldown,
-        )
-        return recent_case_delivery is None
-
-    def _deliver_prompt(
-        self,
-        db: Session,
-        *,
-        team_id: int,
-        case: FollowUpTaskConfirmationCase,
-        channel: str,
-        provider: str | None,
-        agent_session_id: int | None,
-        prompted_at: datetime,
-        prompt_scope: str | None = None,
-        commit: bool = True,
-    ) -> dict[str, Any]:
-        task = follow_up_task_crud.get_by_id(db, case.task_id, team_id=team_id)
-        customer = self._customers_by_id(db, team_id=team_id, customer_ids=[case.customer_id]).get(case.customer_id)
-        event = self._prompt_event(case, task=task, customer=customer)
-        interaction = event["interaction"]
-        payload_json = {
-            "event": event["event"],
-            "case_public_id": case.public_id,
-            "task_public_id": task.public_id if task is not None else None,
-            "customer_public_id": customer.public_id if customer is not None else None,
-        }
-        if prompt_scope:
-            payload_json["prompt_scope"] = prompt_scope
-        prompt_key = f"{case.public_id}:{interaction['interaction_id']}"
-        delivery = self.prompt_delivery_crud.create_sent(
-            db,
-            team_id=team_id,
-            case_id=case.id,
-            owner_id=case.owner_id,
-            channel=channel,
-            provider=provider,
-            agent_session_id=agent_session_id,
-            interaction_id=str(interaction["interaction_id"]),
-            prompt_key=prompt_key,
-            payload_json=payload_json,
-            prompted_at=prompted_at,
-            commit=False,
-        )
-        follow_up_task_confirmation_case_crud.mark_prompted(
-            db,
-            case,
-            prompted_at=prompted_at,
-            commit=False,
-        )
-        if commit:
-            db.commit()
-            db.refresh(case)
-            db.refresh(delivery)
-        event["delivery"] = self._delivery_payload(delivery)
-        return event
 
     def _prompt_event(
         self,
@@ -707,15 +1224,35 @@ class FollowUpTaskConfirmationChannelService:
         }
 
     @staticmethod
-    def _projection_prompt_key(*, case_public_id: str, interaction_scope: str) -> str:
+    def _projection_prompt_key(
+        *,
+        case_public_id: str,
+        interaction_scope: str,
+        source_activity_id: int | None = None,
+        source_activity_revision: int | None = None,
+    ) -> str:
         """Return a bounded idempotency key while preserving the full scope in thread_id."""
 
-        digest = hashlib.sha256(f"{case_public_id}:{interaction_scope}".encode()).hexdigest()
+        identity = (
+            f"{case_public_id}:{source_activity_id or 'none'}:"
+            f"{source_activity_revision or 'legacy'}:{interaction_scope}"
+        )
+        digest = hashlib.sha256(identity.encode()).hexdigest()
         return f"projection:{digest}"
 
     @staticmethod
-    def _stable_interaction_id(*, case_public_id: str, interaction_scope: str) -> str:
-        digest = hashlib.sha256(f"{case_public_id}:{interaction_scope}".encode()).hexdigest()[:32]
+    def _stable_interaction_id(
+        *,
+        case_public_id: str,
+        interaction_scope: str,
+        source_activity_id: int | None = None,
+        source_activity_revision: int | None = None,
+    ) -> str:
+        identity = (
+            f"{case_public_id}:{source_activity_id or 'none'}:"
+            f"{source_activity_revision or 'legacy'}:{interaction_scope}"
+        )
+        digest = hashlib.sha256(identity.encode()).hexdigest()[:32]
         return f"int_fuc_{digest}"
 
     def _resolution_event(
@@ -746,6 +1283,9 @@ class FollowUpTaskConfirmationChannelService:
             "suggested_action": case.suggested_action,
             "owner_id": case.owner_id,
             "creator_id": case.creator_id,
+            "customer_id": case.customer_id,
+            "source_activity_id": case.source_activity_id,
+            "source_activity_revision": case.source_activity_revision,
             "customer": self._customer_payload(customer),
             "task": self._task_payload(task),
             "expires_at": case.expires_at.isoformat() if case.expires_at else None,
@@ -844,7 +1384,10 @@ class FollowUpTaskConfirmationChannelService:
             "id": delivery.public_id,
             "public_id": delivery.public_id,
             "channel": delivery.channel,
+            "purpose": delivery.purpose,
             "provider": delivery.provider,
+            "provider_message_id": delivery.provider_message_id,
+            "prompt_key": delivery.prompt_key,
             "agent_session_id": delivery.agent_session_id,
             "interaction_id": delivery.interaction_id,
             "status": delivery.status,

@@ -1,4 +1,10 @@
-"""LangGraph subgraph for pending-task interaction handling."""
+"""Legacy compatibility graph for pending-task interaction handling.
+
+Production PendingTask execution uses ``PendingInteractionApplicationModule``
+behind the durable application-step seam. This graph remains only for explicit
+legacy adapters and migration regression coverage; it is not a checkpoint
+owner in the production runtime.
+"""
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
@@ -10,6 +16,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.models.agent import AgentTaskStatus
 from app.services.agent import (
     choice_resolution,
     customer_fields,
@@ -25,10 +32,13 @@ from app.services.agent.checkpointer import (
     checkpoint_unavailable_fallback_event,
     is_checkpoint_storage_error,
 )
-from app.models.agent import AgentTaskStatus
 from app.services.agent.state import PendingTaskTurnResult, internal_graph_start_event, merge_turn_scoped_events
-from app.services.agent.types import JSONDict, JSONValue, coerce_json_dict, coerce_json_value
-
+from app.services.agent.types import (
+    JSONDict,
+    JSONValue,  # noqa: F401 -- JSONDict forward refs are resolved by LangGraph at runtime.
+    coerce_json_dict,
+    coerce_json_value,
+)
 
 PENDING_INTERACTION_CHECKPOINT_NS = "crm_agent_pending_interaction"
 FieldPredicate = Callable[[object], bool]

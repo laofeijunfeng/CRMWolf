@@ -35,12 +35,35 @@ from app.services.agent.state import (
     AgentRuntimeContext,
 )
 from app.services.agent.types import JSONDict, coerce_json_dict
+from app.services.customer_intelligence_refresh_service import (
+    AgentAsyncOperationBinding,
+    CustomerIntelligenceCommittedEventRequest,
+    CustomerIntelligenceRefreshService,
+    customer_intelligence_refresh_service,
+)
+from app.services.follow_up_task_confirmation_channel_service import (
+    FollowUpTaskConfirmationChannelService,
+    follow_up_task_confirmation_channel_service,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class AgentApplicationService:
-    """Channel-independent Agent turn runner."""
+    """Channel-independent Agent turn runner and visibility transaction boundary."""
+
+    def __init__(
+        self,
+        *,
+        customer_intelligence_service: CustomerIntelligenceRefreshService | None = None,
+        confirmation_channel_service: FollowUpTaskConfirmationChannelService | None = None,
+    ) -> None:
+        self.customer_intelligence_service = (
+            customer_intelligence_service or customer_intelligence_refresh_service
+        )
+        self.confirmation_channel_service = (
+            confirmation_channel_service or follow_up_task_confirmation_channel_service
+        )
 
     async def stream_chat_events(
         self,
@@ -225,6 +248,8 @@ class AgentApplicationService:
                 content_format=assistant_content_format,
                 trace_events=trace_events,
                 source="langgraph",
+                visibility_channel=agent_turn_input.source,
+                runtime_state=runtime_state,
                 turn_observability=coerce_json_dict(observability_event.get("summary")),
             )
             assistant_message_persisted = True
@@ -352,6 +377,8 @@ class AgentApplicationService:
         content_format: str,
         trace_events: list[JSONDict],
         source: str,
+        visibility_channel: str,
+        runtime_state: JSONDict,
         turn_observability: JSONDict | None = None,
     ) -> AgentMessage:
         existing = self._find_persisted_assistant_for_user_message(
@@ -361,24 +388,160 @@ class AgentApplicationService:
             session_id=session_id,
             user_message_id=user_message_id,
         )
-        if existing is not None:
-            return existing
-        return agent_message_crud.create(
+        message = existing
+        if message is None:
+            message = agent_message_crud.create(
+                db,
+                AgentMessageCreate(
+                    team_id=team_id,
+                    user_id=user_id,
+                    session_id=session_id,
+                    role=AgentMessageRole.ASSISTANT,
+                    event_type="assistant_message",
+                    content=content,
+                    payload_json={
+                        "source": source,
+                        "for_user_message_id": user_message_id,
+                        "trace_events": trace_events,
+                        "content_format": content_format,
+                        "turn_observability": turn_observability or {},
+                    },
+                ),
+                commit=False,
+            )
+        self._acknowledge_visible_confirmation_deliveries(
             db,
-            AgentMessageCreate(
+            team_id=team_id,
+            assistant_message=message,
+            trace_events=trace_events,
+            visibility_channel=visibility_channel,
+            commit=False,
+        )
+        kick_requests: tuple[CustomerIntelligenceCommittedEventRequest, ...] = ()
+        try:
+            with db.begin_nested():
+                kick_requests = self._project_customer_intelligence_operations_to_assistant_message(
+                    db,
+                    runtime_state=runtime_state,
+                    team_id=team_id,
+                    user_id=user_id,
+                    session_id=session_id,
+                    user_message_id=user_message_id,
+                    assistant_message_id=int(message.id),
+                )
+        except Exception as exc:
+            logger.exception(
+                "Agent 客户智能异步操作投影失败: team_id=%s, session_id=%s, user_message_id=%s",
+                team_id,
+                session_id,
+                user_message_id,
+            )
+            trace_events.append(
+                {
+                    "event": "agent_customer_intelligence_projection_failed",
+                    "reason": str(exc),
+                }
+            )
+            payload = message.payload_json if isinstance(message.payload_json, dict) else {}
+            message.payload_json = {**payload, "trace_events": trace_events}
+            db.add(message)
+        db.commit()
+        db.refresh(message)
+        for request in kick_requests:
+            if not request.kick_required:
+                continue
+            try:
+                self.customer_intelligence_service.kick_committed_event_refresh(request)
+            except Exception:
+                logger.exception(
+                    "Agent 客户智能异步操作 kick 失败，等待 durable recovery: request_id=%s",
+                    request.request_id,
+                )
+        return message
+
+    def _acknowledge_visible_confirmation_deliveries(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        assistant_message: AgentMessage,
+        trace_events: list[JSONDict],
+        visibility_channel: str,
+        commit: bool = True,
+    ) -> None:
+        # CRM message persistence is a user-visibility acknowledgement only for the Web channel.
+        # IM adapters must acknowledge after their provider returns the actual response message ID.
+        if visibility_channel != "web":
+            return
+        prompt_keys: set[str] = set()
+        for event in trace_events:
+            interaction = event.get("interaction")
+            if not isinstance(interaction, dict):
+                continue
+            payload = interaction.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            prompt_key = payload.get("prompt_delivery_key")
+            if isinstance(prompt_key, str) and prompt_key:
+                prompt_keys.add(prompt_key)
+        for prompt_key in prompt_keys:
+            self.confirmation_channel_service.acknowledge_web_message_visible(
+                db,
+                team_id=team_id,
+                prompt_key=prompt_key,
+                provider_message_id=f"agent_message:{assistant_message.id}",
+                commit=commit,
+            )
+
+    def _project_customer_intelligence_operations_to_assistant_message(
+        self,
+        db: Session,
+        *,
+        runtime_state: JSONDict,
+        team_id: int,
+        user_id: int,
+        session_id: int,
+        user_message_id: int,
+        assistant_message_id: int,
+    ) -> tuple[CustomerIntelligenceCommittedEventRequest, ...]:
+        """Project exact durable work in the assistant-message transaction.
+
+        The returned requests may be kicked only after the caller commits.
+        Replays bind the same operation and terminal or leased runs naturally
+        return ``kick_required=False``.
+        """
+
+        request_ids = list(_customer_intelligence_request_ids(runtime_state))
+        if not request_ids:
+            intent = coerce_json_dict(runtime_state.get("customer_intelligence_schedule_intent"))
+            event_payload = coerce_json_dict(intent.get("event"))
+            event = self.customer_intelligence_service.event_service.from_dict(event_payload)
+            if event is None:
+                if intent:
+                    raise ValueError("客户智能调度 intent 事件快照无效")
+                return ()
+            if int(event.team_id) != int(team_id) or int(event.tenant_id) != int(team_id):
+                raise ValueError("客户智能调度 intent 团队不匹配")
+            scope = str(intent.get("scope") or "brief")
+            if scope not in {"full", "brief"}:
+                raise ValueError("客户智能调度 intent scope 无效")
+            queued = self.customer_intelligence_service.enqueue_committed_event_refresh(
+                db,
+                event=event,
+                scope=scope,
+            )
+            request_ids.append(queued.request_id)
+
+        return self.customer_intelligence_service.bind_committed_events_to_agent(
+            db,
+            team_id=team_id,
+            request_ids=request_ids,
+            binding=AgentAsyncOperationBinding(
                 team_id=team_id,
                 user_id=user_id,
                 session_id=session_id,
-                role=AgentMessageRole.ASSISTANT,
-                event_type="assistant_message",
-                content=content,
-                payload_json={
-                    "source": source,
-                    "for_user_message_id": user_message_id,
-                    "trace_events": trace_events,
-                    "content_format": content_format,
-                    "turn_observability": turn_observability or {},
-                },
+                source_user_message_id=user_message_id,
+                source_assistant_message_id=assistant_message_id,
             ),
         )
 
@@ -501,6 +664,8 @@ class AgentApplicationService:
                 content_format=assistant_content_format,
                 trace_events=trace_events,
                 source="langgraph_stream_cancelled_finalizer",
+                visibility_channel=turn_input.source,
+                runtime_state=runtime_state,
                 turn_observability=coerce_json_dict(observability_event.get("summary")),
             )
         except Exception:
@@ -588,6 +753,26 @@ class AgentApplicationService:
             return AgentApplicationRuntimeResult(checkpoint_unavailable=True)
 
 agent_application_service = AgentApplicationService()
+
+
+def _customer_intelligence_request_ids(runtime_state: JSONDict) -> tuple[str, ...]:
+    requests = runtime_state.get("customer_intelligence_requests")
+    if not isinstance(requests, list):
+        return ()
+    request_ids: list[str] = []
+    seen: set[str] = set()
+    for item in requests:
+        if not isinstance(item, dict):
+            continue
+        request_id = item.get("request_id")
+        if not isinstance(request_id, str):
+            continue
+        request_id = request_id.strip()
+        if not request_id or request_id in seen:
+            continue
+        seen.add(request_id)
+        request_ids.append(request_id)
+    return tuple(request_ids)
 
 
 def _normalize_content_format(value: object) -> str | None:

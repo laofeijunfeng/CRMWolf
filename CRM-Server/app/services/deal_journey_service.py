@@ -78,6 +78,7 @@ class DealJourneyService:
         actor_id: Optional[str] = None,
         summary: Optional[str] = None,
         metadata: JsonObject | None = None,
+        enqueue_customer_intelligence: bool = True,
     ) -> Optional[CustomerDealJourneyEvent]:
         if not deal_journey_id:
             return None
@@ -91,7 +92,8 @@ class DealJourneyService:
         ).first()
         if existing:
             self._upsert_event_evidence(db, existing)
-            self._enqueue_customer_intelligence_refresh(db, existing)
+            if enqueue_customer_intelligence:
+                self._enqueue_customer_intelligence_refresh(db, existing)
             return existing
 
         event = CustomerDealJourneyEvent(
@@ -109,7 +111,8 @@ class DealJourneyService:
         db.add(event)
         db.flush()
         self._upsert_event_evidence(db, event)
-        self._enqueue_customer_intelligence_refresh(db, event)
+        if enqueue_customer_intelligence:
+            self._enqueue_customer_intelligence_refresh(db, event)
 
         journey = db.query(CustomerDealJourney).filter(CustomerDealJourney.id == deal_journey_id).first()
         if journey and (journey.last_event_at is None or normalized_event_time > journey.last_event_at):

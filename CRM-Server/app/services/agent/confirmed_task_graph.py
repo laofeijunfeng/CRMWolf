@@ -1,20 +1,19 @@
-"""LangGraph subgraph for confirmed Agent write execution."""
+"""LangGraph orchestration for durable confirmed Agent write intents."""
 from __future__ import annotations
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
-from sqlalchemy.exc import SQLAlchemyError
 
 from app.services.agent import task_execution
-from app.services.agent.checkpointer import (
-    agent_checkpoint_saver,
-    checkpoint_unavailable_fallback_event,
-    is_checkpoint_storage_error,
-    with_checkpoint_unavailable_fallback_event,
+from app.services.agent.checkpointer import agent_checkpoint_saver
+from app.services.agent.confirmed_application_step_contracts import build_confirmed_application_step_request
+from app.services.agent.confirmed_application_step_projection import (
+    ConfirmedApplicationStepProjectionRequest,
+    ConfirmedApplicationStepProjector,
 )
+from app.services.agent.confirmed_application_steps import DefaultConfirmedApplicationStepExecutor
 from app.services.agent.confirmed_task_effects import (
-    ConfirmedTaskSideEffectContext,
     ConfirmedTaskSideEffectHandler,
     confirmed_task_side_effect_handler,
 )
@@ -28,25 +27,27 @@ from app.services.agent.state import (
     internal_graph_start_event,
     visible_graph_events,
 )
+from app.services.agent.task_projection import agent_task_snapshot
 from app.services.agent.types import AgentRuntimeEventSink, JSONDict, coerce_json_dict, coerce_json_value
-
 
 CONFIRMED_TASK_CHECKPOINT_NS = "crm_agent_confirmed_task"
 
 
 class ConfirmedTaskGraphService:
-    """Executes user-approved write tasks as a checkpointed subgraph."""
+    """Checkpoints execution intent and hydrates results from the application projector."""
 
     def __init__(
         self,
         *,
         side_effect_handler: ConfirmedTaskSideEffectHandler | None = None,
+        application_projector: ConfirmedApplicationStepProjector | None = None,
         checkpointer: object | None = None,
     ) -> None:
         self.side_effect_handler = side_effect_handler or confirmed_task_side_effect_handler
-        self._checkpoint_enabled = checkpointer is not None
+        self.application_projector = application_projector or ConfirmedApplicationStepProjector(
+            executor=DefaultConfirmedApplicationStepExecutor(side_effect_handler=self.side_effect_handler)
+        )
         self._graph = self._build_graph(checkpointer)
-        self._fallback_graph = self._build_graph(None)
 
     def _build_graph(self, checkpointer: object | None):
         graph = StateGraph(ConfirmedTaskGraphState, context_schema=ConfirmedTaskRuntimeContext)
@@ -73,45 +74,33 @@ class ConfirmedTaskGraphService:
             session_id=context.session_id,
             task_id=_optional_object_id(context.task),
         )
-        try:
-            result = await self._graph.ainvoke(checkpoint_state, config, context=context)
-            return _with_visible_events(_merge_side_effects(result, side_effects))
-        except SQLAlchemyError as exc:
-            if not self._checkpoint_enabled or not is_checkpoint_storage_error(exc):
-                raise
-            fallback_side_effects = ConfirmedTaskGraphSideEffects()
-            fallback_context = _runtime_context_from_input(input_state, fallback_side_effects)
-            result = await self._fallback_graph.ainvoke(checkpoint_state, config, context=fallback_context)
-            merged = _with_visible_events(_merge_side_effects(result, fallback_side_effects))
-            fallback_event = checkpoint_unavailable_fallback_event(
-                runtime="crm_agent_confirmed_task",
-                graph=CONFIRMED_TASK_CHECKPOINT_NS,
-            )
-            merged = with_checkpoint_unavailable_fallback_event(
-                merged,
-                runtime="crm_agent_confirmed_task",
-                graph=CONFIRMED_TASK_CHECKPOINT_NS,
-            )
-            merged["output_events"] = [fallback_event, *_events(merged.get("output_events"))]
-            return merged
+        # Confirmed tasks are write-capable. Checkpoint failures must bubble to
+        # the root runtime, whose single fail-closed policy preserves the last
+        # durable interrupt and blocks unowned execution.
+        result = await self._graph.ainvoke(checkpoint_state, config, context=context)
+        return _with_visible_events(_merge_side_effects(result, side_effects))
 
     def _prepare_execution(
         self,
         state: ConfirmedTaskGraphState,
         runtime: Runtime[ConfirmedTaskRuntimeContext],
     ) -> ConfirmedTaskGraphState:
-        task_projection = state.get("task_projection") or _task_projection(runtime.context.task)
-        tool_request: JSONDict = {
-            "task": task_projection,
-            "action": _task_action(runtime.context.task),
-        }
+        task_projection = state.get("task_projection") or agent_task_snapshot(runtime.context.task)
+        action = _task_action(runtime.context.task)
+        tool_request: JSONDict = {"task": task_projection, "action": action}
+        application_step = build_confirmed_application_step_request(
+            task_snapshot=task_projection,
+            action=action or "",
+        )
         return {
             "task_projection": task_projection,
             "tool_request": tool_request,
+            "application_step": application_step,
             "events": [{
                 "event": "confirmed_task_graph_started",
                 "task_id": task_projection.get("id"),
-                "action": tool_request.get("action"),
+                "action": action,
+                "application_step_id": application_step["step_id"],
             }],
         }
 
@@ -130,32 +119,49 @@ class ConfirmedTaskGraphService:
                 }],
             }
 
-        execution = await execute_confirmed_task(
-            context.db,
-            context.task,
+        application_step = coerce_json_dict(state.get("application_step"))
+        projection = await self.application_projector.project(ConfirmedApplicationStepProjectionRequest(
+            db=context.db,
             session=context.session,
+            task=context.task,
             team_id=context.team_id,
             user_id=context.user_id,
+            session_id=context.session_id,
             authorization=context.authorization or "",
+            channel=context.channel,
+            provider=context.provider,
+            step=application_step,  # type: ignore[arg-type]
             event_sink=context.event_sink,
-        )
-        tool_result: JSONDict = {}
-        if execution.tool_event:
-            tool_result = coerce_json_dict(execution.tool_event)
-            context.side_effects.tool_event = tool_result
-        context.side_effects.execution = execution
-        context.side_effects.task_event = coerce_json_dict(execution.task_event)
-        context.side_effects.assistant_content = execution.assistant_content
+        ))
+        if projection.status != "COMPLETED":
+            return {
+                "execution_status": projection.status.lower(),
+                "events": [{
+                    "event": "confirmed_task_application_projection_deferred",
+                    "step_id": projection.step_id,
+                    "status": projection.status,
+                    "retryable": projection.retryable,
+                    "reason": projection.failure_reason,
+                }],
+            }
+
+        application_result = coerce_json_dict(projection.result)
+        tool_result = coerce_json_dict(application_result.get("tool_result"))
+        task_event = coerce_json_dict(application_result.get("task_event"))
+        assistant_content = application_result.get("assistant_content")
         return {
+            "application_step_result": application_result,
             "tool_result": tool_result,
-            "task_event": coerce_json_dict(execution.task_event),
-            "assistant_content": execution.assistant_content,
-            "execution_status": "completed" if execution.task_event.get("event") == "task_completed" else "failed",
+            "task_event": task_event,
+            "assistant_content": assistant_content if isinstance(assistant_content, str) else None,
+            "execution_status": str(application_result.get("execution_status") or "failed"),
             "events": [
-                *execution.progress_events,
+                *_events(application_result.get("progress_events")),
                 {
                     "event": "confirmed_task_execution_completed",
-                    "task_event": execution.task_event.get("event"),
+                    "task_event": task_event.get("event"),
+                    "application_step_id": projection.step_id,
+                    "application_step_replayed": projection.replayed,
                 },
             ],
         }
@@ -165,36 +171,35 @@ class ConfirmedTaskGraphService:
         state: ConfirmedTaskGraphState,
         runtime: Runtime[ConfirmedTaskRuntimeContext],
     ) -> ConfirmedTaskGraphState:
-        context = runtime.context
-        execution = context.side_effects.execution
-        if not context.db or not context.session or not context.task or not execution:
+        application_result = coerce_json_dict(state.get("application_step_result"))
+        if not application_result:
             return {
                 "events": [{
                     "event": "confirmed_task_effects_skipped",
-                    "reason": "missing_runtime_context",
+                    "reason": "missing_application_step_result",
                 }],
             }
-        effect_result = self.side_effect_handler.apply(
-            ConfirmedTaskSideEffectContext(
-                db=context.db,
-                session=context.session,
-                task=context.task,
-                team_id=context.team_id,
-                user_id=context.user_id,
-                execution=execution,
-                channel=context.channel,
-                provider=context.provider,
-            )
-        )
-        context.side_effects.task_event = effect_result.task_event
-        context.side_effects.assistant_content = effect_result.assistant_content
-        context.side_effects.output_events = effect_result.output_events
+
+        task_event = coerce_json_dict(application_result.get("task_event"))
+        assistant_content = application_result.get("assistant_content")
+        output_events = _events(application_result.get("output_events"))
+        executed_task_snapshot = coerce_json_dict(application_result.get("executed_task_snapshot"))
+        active_task_snapshot = coerce_json_dict(application_result.get("active_task_snapshot"))
+        side_effects = runtime.context.side_effects
+        side_effects.tool_event = coerce_json_dict(application_result.get("tool_result")) or None
+        side_effects.task_event = task_event
+        side_effects.assistant_content = assistant_content if isinstance(assistant_content, str) else None
+        side_effects.output_events = output_events
+        side_effects.executed_task_snapshot = executed_task_snapshot
+        side_effects.active_task_snapshot = active_task_snapshot
         return {
-            "task_event": effect_result.task_event,
-            "assistant_content": effect_result.assistant_content,
+            "task_event": task_event,
+            "assistant_content": side_effects.assistant_content,
+            "executed_task_snapshot": executed_task_snapshot,
+            "active_task_snapshot": active_task_snapshot,
             "events": [{
                 "event": "confirmed_task_effects_applied",
-                "emitted_event_count": len(effect_result.output_events),
+                "emitted_event_count": len(output_events),
             }],
         }
 
@@ -255,6 +260,7 @@ async def execute_confirmed_task(
     authorization: str,
     event_sink: AgentRuntimeEventSink | None = None,
 ) -> ConfirmedTaskExecutionResult:
+    """Compatibility seam for direct callers outside runtime orchestration."""
     execution = await task_execution._execute_waiting_task(
         db,
         task,
@@ -286,7 +292,7 @@ def _checkpoint_state_from_input(input_state: ConfirmedTaskGraphInput) -> Confir
         "team_id": int(input_state.get("team_id") or 0),
         "user_id": int(input_state.get("user_id") or 0),
         "session_id": int(input_state.get("session_id") or 0),
-        "task_projection": _task_projection(task),
+        "task_projection": agent_task_snapshot(task),
         "events": [internal_graph_start_event("confirmed_task_graph_invocation_started")],
     }
     state["events"].extend(_events(input_state.get("events") or []))
@@ -327,20 +333,8 @@ def _with_visible_events(result: ConfirmedTaskGraphResult) -> ConfirmedTaskGraph
     return projected
 
 
-def _task_projection(task: object) -> JSONDict:
-    if not task:
-        return {}
-    projection: JSONDict = {}
-    for key in ("id", "task_key", "status", "intent", "target_type", "target_id"):
-        value = getattr(task, key, None)
-        if value is not None:
-            projection[key] = coerce_json_value(value)
-    return projection
-
-
 def _task_action(task: object) -> str | None:
-    state_json = getattr(task, "state_json", None)
-    state = coerce_json_dict(state_json)
+    state = coerce_json_dict(getattr(task, "state_json", None))
     action = state.get("action")
     return action if isinstance(action, str) else None
 

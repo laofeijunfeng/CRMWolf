@@ -752,3 +752,99 @@ def test_workflow_action_ledger_rejects_retry_for_non_retryable_terminal_action(
     finally:
         db.close()
         engine.dispose()
+
+
+def test_for_update_queries_refresh_cached_agent_state(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'agent-lock-refresh.db'}")
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            AgentSession.__table__,
+            AgentTask.__table__,
+            AgentWorkflowAction.__table__,
+        ],
+    )
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    concurrent = Session()
+    try:
+        session = agent_session_crud.create(
+            db,
+            AgentSessionCreate(
+                session_key="session-lock-refresh",
+                team_id=1,
+                user_id=2,
+                title="锁刷新测试",
+            ),
+        )
+        task = agent_task_crud.create(
+            db,
+            AgentTaskCreate(
+                task_key="task-lock-refresh",
+                team_id=1,
+                user_id=2,
+                session_id=session.id,
+                intent="CREATE_CUSTOMER_ACTIVITY",
+                summary="旧任务摘要",
+            ),
+        )
+        action = agent_workflow_action_crud.create(
+            db,
+            AgentWorkflowActionCreate(
+                workflow_id="wf_lock_refresh",
+                action_id="act_lock_refresh",
+                team_id=1,
+                user_id=2,
+                session_id=session.id,
+                task_id=task.id,
+                source_type="agent_planning",
+                action_type="create_customer_activity",
+                status=AgentWorkflowActionStatus.WAITING_USER,
+                scope="primary_action",
+                source="user_request",
+                execution_policy="requires_confirmation",
+                on_reject="cancel",
+                blocking=True,
+                payload_json={},
+            ),
+        )
+        assert task.summary == "旧任务摘要"
+        assert action.status == AgentWorkflowActionStatus.WAITING_USER
+
+        concurrent_task = concurrent.get(AgentTask, task.id)
+        concurrent_action = concurrent.get(AgentWorkflowAction, action.id)
+        concurrent_task.summary = "并发更新后的任务摘要"
+        concurrent_action.status = AgentWorkflowActionStatus.EXECUTED
+        concurrent.commit()
+
+        locked_task = agent_task_crud.get_by_id_for_update(
+            db,
+            task.id,
+            team_id=1,
+            user_id=2,
+        )
+        locked_action = agent_workflow_action_crud.get_by_action_id_for_update(
+            db,
+            action.action_id,
+            team_id=1,
+            user_id=2,
+        )
+
+        assert locked_task.summary == "并发更新后的任务摘要"
+        assert locked_action.status == AgentWorkflowActionStatus.EXECUTED
+        assert agent_task_crud.get_by_id_for_update(
+            db,
+            task.id,
+            team_id=1,
+            user_id=999,
+        ) is None
+        assert agent_workflow_action_crud.get_by_action_id_for_update(
+            db,
+            action.action_id,
+            team_id=999,
+            user_id=2,
+        ) is None
+    finally:
+        concurrent.close()
+        db.close()
+        engine.dispose()

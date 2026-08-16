@@ -3,13 +3,14 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.crud.agent import agent_task_crud
 from app.schemas.agent import AgentTaskUpdate
 from app.services.agent import business_rules
-from app.services.agent.schemas import AgentHITLPolicy, AgentSemanticParseResult
-from app.services.agent.semantic import AgentSemanticParserError
 from app.services.agent.field_common import _drop_empty_values, _parse_task_field_supplement
 from app.services.agent.follow_up_fields import _merge_lead_follow_up_fields
+from app.services.agent.schemas import AgentHITLPolicy, AgentSemanticParseResult
+from app.services.agent.semantic import AgentSemanticParserError
+from app.services.agent.task_projection import update_agent_task
+
 
 def _is_lead_fields_task(task) -> bool:
     state = task.state_json or {}
@@ -46,7 +47,7 @@ async def _apply_lead_fields(db: Session, task, content: str):
     state = {**state, "payload": payload}
 
     if missing_fields:
-        agent_task_crud.update(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
+        update_agent_task(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
         return False, (
             "还需要补充："
             f"{business_rules.format_lead_missing_fields(missing_fields)}。"
@@ -61,7 +62,7 @@ async def _apply_lead_fields(db: Session, task, content: str):
             confirmation_summary=f"创建线索「{lead.get('lead_name')}」",
         ).model_dump(exclude_none=True),
     }
-    agent_task_crud.update(
+    update_agent_task(
         db,
         task,
         AgentTaskUpdate(

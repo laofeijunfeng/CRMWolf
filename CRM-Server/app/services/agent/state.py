@@ -8,6 +8,7 @@ from langgraph.types import Interrupt
 
 from app.services.agent.input import AgentTurnInput
 from app.services.agent.interrupts import AgentInterruptPayload, AgentResumePayload
+from app.services.agent.pending_continuation import PendingTaskContinuationRef
 from app.services.agent.schemas import (
     AgentConfirmationIntentDecision,
     AgentFollowUpQualityResult,
@@ -880,16 +881,64 @@ class AgentGraphRuntimeContext:
     side_effects: AgentGraphSideEffects = field(default_factory=AgentGraphSideEffects)
 
 
+class PendingTaskEffectIntent(TypedDict, total=False):
+    """Checkpoint-safe request for durable PendingTask business projection."""
+
+    intent_id: str
+    intent_type: Literal[
+        "project_pending_task_state",
+        "resume_suspended_task",
+        "cancel_workflow_action",
+    ]
+    task_id: int
+    expected_task: JSONDict
+    task_update: JSONDict
+    workflow: JSONDict
+    reason: str
+    source_type: str
+    decision: JSONDict
+
+
+class PendingTaskInternalResumePayload(TypedDict):
+    """Root-owned control command for releasing a hidden child interrupt."""
+
+    action: Literal["abort_projection"]
+
+
+PendingTaskResumePayload = AgentResumePayload | PendingTaskInternalResumePayload
+
+
+@dataclass(frozen=True)
+class PendingTaskInternalCommand:
+    """Non-checkpointed command routed through the owning root graph."""
+
+    action: Literal["abort_projection", "resume_application_step"]
+    continuation: PendingTaskContinuationRef
+    expected_interrupt: AgentInterruptPayload
+
+
 class PendingTaskGraphState(TypedDict, total=False):
+    """Checkpoint-safe state owned by the pending-task graph.
+
+    Application-step request identity must be derived exclusively from these
+    serialized values. Runtime context may hydrate dependencies and mutable
+    application models, but it is not replay-authoritative after an interrupt.
+    """
+
     has_active_task: bool
+    task_snapshot: JSONDict
+    turn_input: JSONDict
     task_projection: JSONDict
     current_interrupt: AgentInterruptPayload | None
     pending_interrupt_requested: bool
-    resume_payload: AgentResumePayload
+    resume_payload: PendingTaskResumePayload
     resume_route: str
     suspended_candidates: list[JSONDict]
     turn_relation_decision: JSONDict
     resumed_task_id: int
+    effect_intents: list[PendingTaskEffectIntent]
+    projection_aborted: bool
+    projection_abort_interrupt: AgentInterruptPayload
     content: str
     team_id: int
     user_id: int
@@ -910,18 +959,26 @@ class PendingTaskGraphState(TypedDict, total=False):
 
 
 class PendingTaskGraphInput(TypedDict, total=False):
-    """Application input for one pending-task subgraph invocation."""
+    """Application input for one pending-task subgraph invocation.
+
+    ``task_snapshot`` is the only task representation allowed across the
+    application-to-graph seam. Runtime-only services may still be supplied in
+    the graph context while their migration to explicit application-step
+    intents is completed.
+    """
 
     db: object
     session: object
-    task: object
+    task_snapshot: JSONDict
     turn_input: AgentTurnInput
     content: str
     team_id: int
     user_id: int
     session_id: int
     authorization: str
-    resume_payload: AgentResumePayload
+    continuation_ref: PendingTaskContinuationRef
+    resume_payload: PendingTaskResumePayload
+    projected_resume_payload: AgentResumePayload
     suspended_candidates: list[JSONDict]
     events: list[JSONDict]
 
@@ -930,6 +987,22 @@ class PendingTaskGraphResult(PendingTaskGraphState, total=False):
     """Checkpoint-safe pending-task graph result."""
 
     __interrupt__: list[Interrupt]
+
+
+@dataclass
+class PendingTaskPreflightResult:
+    """Runtime result from the ordinary pending preflight application module."""
+
+    task: object = None
+    handled: bool = False
+    events: list[JSONDict] = field(default_factory=list)
+    assistant_content: Optional[str] = None
+    switch_notice: Optional[str] = None
+    suspended_task: object = None
+    suspend_reason: Optional[str] = None
+    suspension_kind: Optional[str] = None
+    clear_pending_task_id: Optional[int] = None
+    confirmation_decision: object = None
 
 
 @dataclass(frozen=True)
@@ -956,6 +1029,7 @@ class PendingTaskGraphSideEffects:
     preflight_result: object | None = None
     interaction_result: object | None = None
     event_sink: AgentRuntimeEventSink | None = None
+    checkpoint_ref: PendingTaskContinuationRef | None = None
 
 
 @dataclass
@@ -982,10 +1056,14 @@ class ConfirmedTaskGraphState(TypedDict, total=False):
     session_id: int
     task_projection: JSONDict
     tool_request: JSONDict
+    application_step: JSONDict
+    application_step_result: JSONDict
     tool_result: JSONDict
     task_event: JSONDict
     execution_status: str
     assistant_content: Optional[str]
+    executed_task_snapshot: JSONDict
+    active_task_snapshot: JSONDict
     events: Annotated[list[JSONDict], merge_turn_scoped_events]
 
 
@@ -1031,6 +1109,8 @@ class ConfirmedTaskGraphSideEffects:
     task_event: JSONDict = field(default_factory=dict)
     assistant_content: str | None = None
     output_events: list[JSONDict] = field(default_factory=list)
+    executed_task_snapshot: JSONDict = field(default_factory=dict)
+    active_task_snapshot: JSONDict = field(default_factory=dict)
 
 
 @dataclass
@@ -1107,6 +1187,42 @@ class AgentPostWriteEffects(TypedDict, total=False):
     follow_up_confirmation_case_public_ids: list[str]
 
 
+class AgentTurnScope(TypedDict, total=False):
+    """Checkpoint-safe identity and business ownership for one Agent turn.
+
+    This is the authority used when deciding whether a durable business item may
+    become a blocking interaction in the current LangGraph thread.
+    """
+
+    turn_id: str
+    session_id: int
+    channel: str
+    provider: str | None
+    source_message_id: str | int | None
+    intent: str
+    customer_id: int | None
+    customer_public_id: str | None
+    business_object_type: str | None
+    business_object_id: str | int | None
+    operation_status: str
+    operation_error: str | None
+
+
+class InteractionCandidate(TypedDict, total=False):
+    """Normalized candidate considered by final-turn interaction arbitration."""
+
+    interaction_id: str
+    kind: str
+    origin: Literal["current_turn", "durable_inbox", "channel_notification"]
+    presentation: Literal["blocking_interrupt", "inline_notice", "notification_only"]
+    customer_id: int | None
+    customer_public_id: str | None
+    case_public_id: str | None
+    business_action: str
+    priority: int
+    payload: JSONDict
+
+
 class AgentRuntimeState(TypedDict, total=False):
     """Serializable state owned by the LangGraph-native Agent root runtime."""
 
@@ -1117,9 +1233,12 @@ class AgentRuntimeState(TypedDict, total=False):
     channel: str
     content: str
     turn_kind: str
+    turn_scope: AgentTurnScope
+    interaction_candidates: list[InteractionCandidate]
     current_interrupt: AgentInterruptPayload | None
     turn_intent: JSONDict
     task_projection: JSONDict
+    pending_task_snapshot: JSONDict
     suspended_candidates: list[JSONDict]
     pending_task_requested: bool
     current_customer: JSONDict
@@ -1132,11 +1251,18 @@ class AgentRuntimeState(TypedDict, total=False):
     post_write_effects: AgentPostWriteEffects
     resume_payload: AgentResumePayload
     pending_task_result: JSONDict
+    pending_task_outcome_intent: JSONDict
+    pending_task_continuation_ref: PendingTaskContinuationRef | None
+    pending_task_resume_error: str | None
     new_flow_result: JSONDict
     customer_intelligence_requested: bool
     customer_intelligence_event: JSONDict
+    customer_intelligence_requests: list[JSONDict]
+    customer_intelligence_schedule_intent: JSONDict
     customer_intelligence_result: JSONDict
     runtime_status: str
+    runtime_retryable: bool
+    pending_interrupt_projection: JSONDict
     route: str
     application_action: AgentRuntimeApplicationAction
     pending_task_handled: bool
@@ -1241,5 +1367,7 @@ class AgentRuntimeContext:
     authorization: str | None = None
     switch_notice: str | None = None
     customer_intelligence_event: object | None = None
+    customer_intelligence_requests: list[JSONDict] = field(default_factory=list)
     side_effects: AgentRootRuntimeSideEffects = field(default_factory=AgentRootRuntimeSideEffects)
     event_sink: AgentRuntimeEventSink | None = None
+    internal_pending_command: PendingTaskInternalCommand | None = None

@@ -1,8 +1,8 @@
 """Durable ledger for Agent workflow actions."""
 from __future__ import annotations
 
-from collections.abc import Mapping
 import uuid
+from collections.abc import Mapping
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -130,6 +130,7 @@ def mark_action_skipped(
     reason: str | None = None,
     source_type: str = SOURCE_PENDING_RESUME,
     decision: Mapping[str, object] | None = None,
+    commit: bool = True,
 ) -> AgentWorkflowAction | None:
     workflow_json = action_workflow.workflow_from_mapping(workflow)
     if not workflow_json:
@@ -153,7 +154,7 @@ def mark_action_skipped(
         finished_time=business_now(),
     )
     try:
-        return agent_workflow_action_crud.update(db, db_obj, update)
+        return agent_workflow_action_crud.update(db, db_obj, update, commit=commit)
     except SQLAlchemyError:
         db.rollback()
         raise
@@ -169,6 +170,7 @@ def mark_action_cancelled(
     reason: str | None = None,
     source_type: str = SOURCE_PENDING_RESUME,
     decision: Mapping[str, object] | None = None,
+    commit: bool = True,
 ) -> AgentWorkflowAction | None:
     workflow_json = action_workflow.workflow_from_mapping(workflow)
     if not workflow_json:
@@ -192,7 +194,7 @@ def mark_action_cancelled(
         finished_time=business_now(),
     )
     try:
-        return agent_workflow_action_crud.update(db, db_obj, update)
+        return agent_workflow_action_crud.update(db, db_obj, update, commit=commit)
     except SQLAlchemyError:
         db.rollback()
         raise
@@ -402,6 +404,7 @@ def record_system_action(
     payload: Mapping[str, object] | None = None,
     result: Mapping[str, object] | None = None,
     reason: str | None = None,
+    commit: bool = True,
 ) -> AgentWorkflowAction:
     resolved_workflow_id = workflow_id or f"wf_{uuid.uuid4().hex}"
     resolved_action_id = action_id or f"act_{uuid.uuid4().hex}"
@@ -435,7 +438,7 @@ def record_system_action(
         status_reason=reason,
     )
     try:
-        db_obj = existing or agent_workflow_action_crud.create(db, create_in)
+        db_obj = existing or agent_workflow_action_crud.create(db, create_in, commit=commit)
         return agent_workflow_action_crud.update(
             db,
             db_obj,
@@ -448,6 +451,7 @@ def record_system_action(
                 status_reason=reason,
                 finished_time=business_now() if status in _TERMINAL_STATUSES else None,
             ),
+            commit=commit,
         )
     except SQLAlchemyError:
         db.rollback()

@@ -10,8 +10,15 @@ from app.services.agent.interaction_contract import (
     STATUS_WAITING_CONFIRMATION,
     STATUS_WAITING_USER_INPUT,
 )
-from app.services.agent.task_factory import WAITING_TASK_EVENT_TYPES
+from app.services.agent.pending_continuation import (
+    PendingTaskContinuationRef,
+    pending_task_continuation_from_json,
+)
 from app.services.agent.types import JSONDict, JSONValue, coerce_json_dict, coerce_json_value
+from app.services.agent.waiting_task_semantics import (
+    WAITING_TASK_EVENT_TYPES,
+    waiting_event_name_from_task_state,
+)
 
 INTERRUPT_SCHEMA_VERSION = "agent.interrupt.v1"
 TURN_RELATION_SOURCE_EVENT = "turn_relation_clarification_required"
@@ -30,6 +37,7 @@ AgentInterruptReason = Literal[
     "insufficient_follow_up_quality",
     "pending_flow_switch_confirmation",
     "follow_up_task_confirmation",
+    "pending_task_outcome_projection",
     "user_input_required",
 ]
 AgentResumeAction = Literal[
@@ -85,6 +93,8 @@ class AgentInterruptPayload(TypedDict, total=False):
     source_event: str
     runtime_events: list[JSONDict]
     workflow: JSONDict
+    checkpoint_ref: PendingTaskContinuationRef
+    projection_digest: str
 
 
 class AgentResumePayload(TypedDict, total=False):
@@ -143,9 +153,64 @@ def interrupt_from_waiting_task(
     """
 
     state = task.state_json if isinstance(task.state_json, Mapping) else {}
+    return _interrupt_from_waiting_task_fields(
+        task_id=task.id,
+        task_key=task.task_key,
+        target_type=task.target_type,
+        target_id=task.target_id,
+        state=state,
+        interaction=interaction,
+    )
+
+
+def interrupt_from_waiting_task_snapshot(
+    task_snapshot: Mapping[str, object],
+    *,
+    interaction: Optional[Mapping[str, object]] = None,
+) -> AgentInterruptPayload:
+    """Project an owned checkpoint task snapshot without ORM hydration.
+
+    This adapter lets a parent graph transfer active-task ownership using only
+    JSON-safe state.  Application code may hydrate the referenced task on the
+    next turn, but graph routing and interrupt identity never need to infer the
+    owner from mutable database state or transport events.
+    """
+
+    task_id = task_snapshot.get("id")
+    task_key = task_snapshot.get("task_key")
+    if not isinstance(task_id, (int, str)):
+        raise ValueError("waiting task snapshot requires task id")
+    if not isinstance(task_key, str) or not task_key:
+        raise ValueError("waiting task snapshot requires task key")
+    state = _as_json_dict(task_snapshot.get("state_json") or task_snapshot.get("state"))
+    target_type = _as_optional_str(task_snapshot.get("target_type"))
+    target_id = task_snapshot.get("target_id")
+    if not isinstance(target_id, (int, str)):
+        target_id = None
+    return _interrupt_from_waiting_task_fields(
+        task_id=task_id,
+        task_key=task_key,
+        target_type=target_type,
+        target_id=target_id,
+        state=state,
+        interaction=interaction,
+    )
+
+
+def _interrupt_from_waiting_task_fields(
+    *,
+    task_id: int | str,
+    task_key: str,
+    target_type: str | None,
+    target_id: int | str | None,
+    state: Mapping[str, object],
+    interaction: Optional[Mapping[str, object]],
+) -> AgentInterruptPayload:
     action = _as_optional_str(state.get("action"))
     payload = _as_json_dict(state.get("payload"))
-    source_event = _source_event_from_task_action(action)
+    source_event = waiting_event_name_from_task_state(state)
+    if source_event is None:
+        raise ValueError("waiting task has no registered interaction semantics")
     event: AgentWaitingEvent = {
         "event": source_event,
         "payload": payload,
@@ -153,8 +218,8 @@ def interrupt_from_waiting_task(
         "opportunities": _as_json_dict_list(state.get("opportunities")),
         "contracts": _as_json_dict_list(state.get("contracts")),
         "payment_plans": _as_json_dict_list(state.get("payment_plans")),
-        "task_id": task.id,
-        "task_key": task.task_key,
+        "task_id": task_id,
+        "task_key": task_key,
     }
     if action:
         event["action"] = action
@@ -164,10 +229,10 @@ def interrupt_from_waiting_task(
     customer = _as_json_dict(state.get("customer"))
     if customer:
         event["customer"] = customer
-    if task.target_type:
-        event["target_type"] = task.target_type
-    if task.target_id is not None:
-        event["target_id"] = task.target_id
+    if target_type:
+        event["target_type"] = target_type
+    if target_id is not None:
+        event["target_id"] = target_id
     return interrupt_from_waiting_event(event, interaction=interaction)
 
 
@@ -334,6 +399,7 @@ def interrupt_payload_from_json(value: object) -> AgentInterruptPayload | None:
         "insufficient_follow_up_quality",
         "pending_flow_switch_confirmation",
         "follow_up_task_confirmation",
+        "pending_task_outcome_projection",
         "user_input_required",
     }:
         interrupt_payload["reason"] = reason
@@ -392,7 +458,22 @@ def interrupt_payload_from_json(value: object) -> AgentInterruptPayload | None:
     if workflow:
         interrupt_payload["workflow"] = workflow
 
+    checkpoint_ref = _checkpoint_ref_from_json(payload.get("checkpoint_ref"))
+    if checkpoint_ref:
+        interrupt_payload["checkpoint_ref"] = checkpoint_ref
+
+    projection_digest = payload.get("projection_digest")
+    if isinstance(projection_digest, str) and projection_digest:
+        interrupt_payload["projection_digest"] = projection_digest
+
     return interrupt_payload or None
+
+
+def _checkpoint_ref_from_json(value: object) -> PendingTaskContinuationRef | None:
+    # Preserve only references that satisfy the pending-task continuation
+    # module's canonical locator and namespace invariants. Tenant/session scope
+    # is authenticated again by the root runtime against Runtime Context.
+    return pending_task_continuation_from_json(value)
 
 
 def allowed_resume_actions_for_interaction(
@@ -772,31 +853,6 @@ def _waiting_event_from_json(event: JSONDict) -> AgentWaitingEvent:
 
 def _has_ref(refs: list[AgentTargetRef], ref_type: str, ref_id: int | str) -> bool:
     return any(ref.get("type") == ref_type and ref.get("id") == ref_id for ref in refs)
-
-
-def _source_event_from_task_action(action: Optional[str]) -> str:
-    event_names = {
-        "collect_opportunity_fields": "opportunity_fields_required",
-        "collect_contact_fields": "contact_fields_required",
-        "collect_invoice_title_fields": "invoice_title_fields_required",
-        "collect_deployment_info_fields": "deployment_info_fields_required",
-        "collect_customer_member_fields": "customer_member_fields_required",
-        "collect_payment_fields": "payment_fields_required",
-        "collect_lead_fields": "lead_fields_required",
-        "collect_customer_fields": "customer_fields_required",
-        "collect_follow_up_quality_fields": "follow_up_quality_required",
-        "collect_lead_follow_up_quality_fields": "follow_up_quality_required",
-        "create_opportunity": "confirmation_required",
-        "move_opportunity_stage": "confirmation_required",
-        "select_opportunity_for_stage_move": "business_selection_required",
-        "create_customer_activity": "confirmation_required",
-        "create_lead_follow_up": "confirmation_required",
-        "create_payment_record": "confirmation_required",
-        "create_payment_plan": "confirmation_required",
-        "create_lead": "confirmation_required",
-        "create_customer": "confirmation_required",
-    }
-    return event_names.get(action or "", "confirmation_required")
 
 
 def _as_interaction_payload(value: Optional[Mapping[str, object]]) -> AgentInteractionPayload:

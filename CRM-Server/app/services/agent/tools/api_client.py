@@ -32,8 +32,11 @@ class InternalCRMAPIClient:
         *,
         params: Optional[Dict[str, object]] = None,
         json: Optional[Dict[str, object]] = None,
+        idempotency_key: Optional[str] = None,
     ) -> object:
         headers = {"Authorization": authorization}
+        if idempotency_key:
+            headers["Idempotency-Key"] = idempotency_key
         url = f"{self.base_url}/{path.lstrip('/')}"
 
         async with httpx.AsyncClient(timeout=self.timeout, trust_env=False) as client:

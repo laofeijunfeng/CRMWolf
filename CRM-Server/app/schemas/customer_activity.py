@@ -111,6 +111,17 @@ class CustomerActivityPostCommitConfirmationCase(BaseModel):
     suggested_action: str = Field(..., description="建议处理动作")
 
 
+class CustomerActivityPostCommitConfirmationDelivery(BaseModel):
+    delivery_public_id: str | None = Field(None, description="确认投递对外ID")
+    case_public_id: str = Field(..., description="确认Case对外ID")
+    purpose: str = Field(..., description="投递用途")
+    channel: str = Field(..., description="可见渠道")
+    provider: str | None = Field(None, description="渠道提供方")
+    status: str = Field(..., description="投递状态")
+    reason_code: str | None = Field(None, description="投递状态原因码")
+    provider_message_id: str | None = Field(None, description="渠道可见对象ID")
+
+
 class CustomerActivityPostCommitPromptPolicy(BaseModel):
     prompt_scope: str = Field(..., description="提示范围")
     delivery: str = Field(..., description="提示投递策略")
@@ -124,7 +135,42 @@ class CustomerActivityPostCommitOutcome(BaseModel):
         description="需要提示的确认Case摘要",
     )
     created_confirmation_case_count: int = Field(0, description="本次新建确认Case数量")
+    confirmation_deliveries: list[CustomerActivityPostCommitConfirmationDelivery] = Field(
+        default_factory=list,
+        description="本次确认Case的持久可见性投递结果",
+    )
     prompt_policy: CustomerActivityPostCommitPromptPolicy = Field(..., description="确认提示策略")
+
+
+class CustomerActivityDurableEventSource(BaseModel):
+    source_type: str = Field(..., description="客户智能事件来源类型")
+    source_object_id: str = Field(..., description="客户智能事件来源对象ID")
+    business_object_type: str | None = Field(None, description="业务对象类型")
+    business_object_id: str | None = Field(None, description="业务对象ID")
+
+
+class CustomerActivityDurableIntelligenceEvent(BaseModel):
+    event_key: str = Field(..., description="客户智能事件幂等键")
+    trigger_type: str = Field(..., description="客户智能触发类型")
+    tenant_id: int = Field(..., description="租户ID")
+    team_id: int = Field(..., description="团队ID")
+    customer_id: int = Field(..., description="客户内部ID")
+    occurred_at: datetime | None = Field(None, description="业务发生时间")
+    source: CustomerActivityDurableEventSource
+    summary: str | None = Field(None, description="事件摘要")
+    payload: Dict[str, Any] = Field(default_factory=dict, description="事件载荷")
+    actor_id: str | None = Field(None, description="触发人ID")
+
+
+class CustomerActivityDurableWork(BaseModel):
+    activity_revision: int = Field(..., description="本次活动语义修订号")
+    post_commit_job_public_id: str | None = Field(None, description="精确后提交任务ID")
+    customer_intelligence_request_id: str | None = Field(None, description="精确客户智能请求ID")
+    customer_intelligence_scope: str | None = Field(None, description="客户智能刷新范围")
+    customer_intelligence_event: CustomerActivityDurableIntelligenceEvent | None = Field(
+        None,
+        description="已原子持久化的客户智能事件快照",
+    )
 
 
 class CustomerActivityResponse(BaseModel):
@@ -163,6 +209,10 @@ class CustomerActivityResponse(BaseModel):
     post_commit: Optional[CustomerActivityPostCommitOutcome] = Field(
         None,
         description="活动提交后的任务投影与确认结果",
+    )
+    durable_work: CustomerActivityDurableWork | None = Field(
+        None,
+        description="与本次活动写入原子提交的持久后台工作",
     )
 
 

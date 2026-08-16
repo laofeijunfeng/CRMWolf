@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from app.services.agent import interactions
+from app.services.agent.task_projection import agent_task_snapshot
 from app.services.agent.types import JSONDict, coerce_json_dict, coerce_json_value
 
 if TYPE_CHECKING:
@@ -32,6 +33,8 @@ class ConfirmedTaskSideEffectResult:
     task_event: JSONDict = field(default_factory=dict)
     output_events: list[JSONDict] = field(default_factory=list)
     assistant_content: str | None = None
+    executed_task_snapshot: JSONDict = field(default_factory=dict)
+    active_task_snapshot: JSONDict = field(default_factory=dict)
 
 
 class ConfirmedTaskSideEffectHandler:
@@ -40,10 +43,13 @@ class ConfirmedTaskSideEffectHandler:
     def apply(self, context: ConfirmedTaskSideEffectContext) -> ConfirmedTaskSideEffectResult:
         execution = context.execution
         task_event = coerce_json_dict(execution.task_event)
+        executed_task_snapshot = agent_task_snapshot(context.task)
+        active_task_snapshot: JSONDict = {}
 
         if _should_offer_next_task(context.task, execution, task_event):
             next_task = execution.next_task
             if next_task:
+                active_task_snapshot = agent_task_snapshot(next_task)
                 task_event["next_task_id"] = coerce_json_value(_task_id(next_task))
                 task_event["interaction"] = interactions._pending_task_interaction(
                     next_task,
@@ -62,6 +68,8 @@ class ConfirmedTaskSideEffectHandler:
             task_event=task_event,
             output_events=output_events,
             assistant_content=assistant_content,
+            executed_task_snapshot=executed_task_snapshot,
+            active_task_snapshot=active_task_snapshot,
         )
 
 

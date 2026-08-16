@@ -1,8 +1,14 @@
-"""LangGraph subgraph for pending-task preflight routing."""
+"""Legacy compatibility graph for pending-task preflight routing.
+
+Production PendingTask execution uses ``PendingPreflightApplicationModule``
+behind the durable application-step seam. This graph remains only for explicit
+legacy adapters and migration regression coverage; it is not a checkpoint
+owner in the production runtime.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Annotated, Optional, TypedDict
+from typing import Annotated, TypedDict
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
@@ -17,9 +23,17 @@ from app.services.agent.checkpointer import (
 )
 from app.services.agent.confirmation_intent import agent_confirmation_intent_service
 from app.services.agent.input import AgentTurnInput
-from app.services.agent.state import internal_graph_start_event, merge_turn_scoped_events
-from app.services.agent.types import JSONDict, JSONValue, coerce_json_dict, coerce_json_value
-
+from app.services.agent.state import (
+    PendingTaskPreflightResult,
+    internal_graph_start_event,
+    merge_turn_scoped_events,
+)
+from app.services.agent.types import (
+    JSONDict,
+    JSONValue,  # noqa: F401 -- JSONDict forward refs are resolved by LangGraph at runtime.
+    coerce_json_dict,
+    coerce_json_value,
+)
 
 PENDING_PREFLIGHT_CHECKPOINT_NS = "crm_agent_pending_preflight"
 
@@ -45,22 +59,6 @@ class PendingPreflightGraphInput(TypedDict, total=False):
     team_id: int
     session_id: int
     events: list[JSONDict]
-
-
-@dataclass
-class PendingTaskPreflightResult:
-    """Runtime result produced by the pending preflight LangGraph subgraph."""
-
-    task: object = None
-    handled: bool = False
-    events: list[JSONDict] = field(default_factory=list)
-    assistant_content: str | None = None
-    switch_notice: str | None = None
-    suspended_task: object = None
-    suspend_reason: str | None = None
-    suspension_kind: str | None = None
-    clear_pending_task_id: int | None = None
-    confirmation_decision: object = None
 
 
 @dataclass
@@ -367,7 +365,12 @@ class PendingPreflightGraphService:
         return "end"
 
 
-def build_pending_preflight_graph_config(*, team_id: int, session_id: int, task_id: int | None = None) -> RunnableConfig:
+def build_pending_preflight_graph_config(
+    *,
+    team_id: int,
+    session_id: int,
+    task_id: int | None = None,
+) -> RunnableConfig:
     task_key = str(task_id) if task_id is not None else "task"
     return {
         "configurable": {"thread_id": f"crm_agent_pending_preflight:{team_id}:{session_id}:{task_key}"},

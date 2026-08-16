@@ -5,18 +5,23 @@ from copy import deepcopy
 
 from sqlalchemy.orm import Session
 
-from app.crud.agent import agent_task_crud
-from app.models.agent import AgentTaskStatus
-from app.schemas.agent import AgentTaskCreate, AgentTaskUpdate
+from app.schemas.agent import AgentTaskUpdate
+from app.services.agent.field_common import _drop_empty_values, _parse_task_field_supplement
+from app.services.agent.next_waiting_task_projection import (
+    NextWaitingTaskProjectionRequest,
+    NextWaitingTaskSpec,
+    next_waiting_task_projector,
+)
 from app.services.agent.quality import AgentFollowUpQualityEvaluatorError, agent_follow_up_quality_evaluator
 from app.services.agent.schemas import AgentHITLPolicy, AgentMemorySnapshot, AgentSemanticParseResult
 from app.services.agent.semantic import AgentSemanticParserError
+from app.services.agent.task_factory import _task_target_id
+from app.services.agent.task_projection import update_agent_task
 from app.services.agent.temporal import agent_temporal_resolver
-from app.services.agent.field_common import _drop_empty_values, _parse_task_field_supplement
-from app.services.agent.task_factory import _new_task_key, _task_target_id
 from app.services.customer_activity_kinds import (
     infer_activity_kind,
 )
+
 
 def _is_follow_up_quality_fields_task(task) -> bool:
     state = task.state_json or {}
@@ -190,6 +195,7 @@ def _customer_activity_create_payload(customer_id: str, activity: dict, quality:
 def _create_customer_activity_task(
     db: Session,
     session,
+    parent_task,
     *,
     team_id: int,
     user_id: int,
@@ -204,31 +210,26 @@ def _create_customer_activity_task(
     payload = dict(activity)
     payload.setdefault("source_content", payload.get("content") or "")
     payload["customer_id"] = customer_id
-    next_task = agent_task_crud.create(
-        db,
-        AgentTaskCreate(
-            task_key=_new_task_key(),
-            team_id=team_id,
-            user_id=user_id,
-            session_id=session.id,
+    projection = next_waiting_task_projector.project(NextWaitingTaskProjectionRequest(
+        db=db,
+        parent_task=parent_task,
+        team_id=team_id,
+        user_id=user_id,
+        session_id=session.id,
+        spec=NextWaitingTaskSpec(
+            slot="customer_activity_after_customer_create",
+            action=action,
             intent="CUSTOMER_ACTIVITY",
-            status=AgentTaskStatus.WAITING_USER,
             target_type="customer",
             target_id=_task_target_id(db, team_id=team_id, target_type="customer", target_id=customer_id),
             summary=summary,
-            input_json=payload,
-            state_json={
-                "action": action,
-                "payload": payload,
-                "customer": customer,
-                "hitl": AgentHITLPolicy(
-                    required_for_tools=required_tools,
-                    confirmation_summary=confirmation_summary,
-                ).model_dump(exclude_none=True),
-            },
+            payload=payload,
+            state_context={"customer": customer},
+            required_tools=tuple(required_tools),
+            confirmation_summary=confirmation_summary,
         ),
-    )
-    return next_task
+    ))
+    return projection.task
 
 async def _stage_customer_activity_after_create(
     db: Session,
@@ -246,6 +247,7 @@ async def _stage_customer_activity_after_create(
         next_task = _create_customer_activity_task(
             db,
             session,
+            task,
             team_id=team_id,
             user_id=user_id,
             customer=customer,
@@ -263,6 +265,7 @@ async def _stage_customer_activity_after_create(
         next_task = _create_customer_activity_task(
             db,
             session,
+            task,
             team_id=team_id,
             user_id=user_id,
             customer=customer,
@@ -279,6 +282,7 @@ async def _stage_customer_activity_after_create(
     next_task = _create_customer_activity_task(
         db,
         session,
+        task,
         team_id=team_id,
         user_id=user_id,
         customer=customer,
@@ -293,6 +297,7 @@ async def _stage_customer_activity_after_create(
 def _create_lead_follow_up_task(
     db: Session,
     session,
+    parent_task,
     *,
     team_id: int,
     user_id: int,
@@ -305,30 +310,25 @@ def _create_lead_follow_up_task(
 ):
     payload = dict(follow_up)
     payload["lead_id"] = lead_id
-    next_task = agent_task_crud.create(
-        db,
-        AgentTaskCreate(
-            task_key=_new_task_key(),
-            team_id=team_id,
-            user_id=user_id,
-            session_id=session.id,
+    projection = next_waiting_task_projector.project(NextWaitingTaskProjectionRequest(
+        db=db,
+        parent_task=parent_task,
+        team_id=team_id,
+        user_id=user_id,
+        session_id=session.id,
+        spec=NextWaitingTaskSpec(
+            slot="lead_follow_up_after_lead_create",
+            action=action,
             intent="CREATE_LEAD",
-            status=AgentTaskStatus.WAITING_USER,
             target_type="lead",
             target_id=_task_target_id(db, team_id=team_id, target_type="lead", target_id=lead_id),
             summary=summary,
-            input_json=payload,
-            state_json={
-                "action": action,
-                "payload": payload,
-                "hitl": AgentHITLPolicy(
-                    required_for_tools=required_tools,
-                    confirmation_summary=confirmation_summary,
-                ).model_dump(exclude_none=True),
-            },
+            payload=payload,
+            required_tools=tuple(required_tools),
+            confirmation_summary=confirmation_summary,
         ),
-    )
-    return next_task
+    ))
+    return projection.task
 
 async def _stage_lead_follow_up_after_create(
     db: Session,
@@ -346,6 +346,7 @@ async def _stage_lead_follow_up_after_create(
         next_task = _create_lead_follow_up_task(
             db,
             session,
+            task,
             team_id=team_id,
             user_id=user_id,
             lead_id=lead_id,
@@ -363,6 +364,7 @@ async def _stage_lead_follow_up_after_create(
         next_task = _create_lead_follow_up_task(
             db,
             session,
+            task,
             team_id=team_id,
             user_id=user_id,
             lead_id=lead_id,
@@ -379,6 +381,7 @@ async def _stage_lead_follow_up_after_create(
     next_task = _create_lead_follow_up_task(
         db,
         session,
+        task,
         team_id=team_id,
         user_id=user_id,
         lead_id=lead_id,
@@ -434,7 +437,7 @@ async def _apply_follow_up_quality_fields(db: Session, task, content: str):
     payload["quality"] = quality.model_dump(exclude_none=True)
     state = {**state, "payload": payload}
     if not quality.passed:
-        agent_task_crud.update(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
+        update_agent_task(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
         return False, quality.supplement_question or "还差一点关键信息，请继续补充这条客户活动。"
 
     raw_source_content = payload.get("source_content") or payload.get("content") or ""
@@ -457,7 +460,7 @@ async def _apply_follow_up_quality_fields(db: Session, task, content: str):
             confirmation_summary=f"为「{customer.get('account_name')}」创建客户活动",
         ).model_dump(exclude_none=True),
     }
-    agent_task_crud.update(
+    update_agent_task(
         db,
         task,
         AgentTaskUpdate(
@@ -490,7 +493,7 @@ async def _apply_lead_follow_up_quality_fields(db: Session, task, content: str):
     follow_up["quality"] = quality.model_dump(exclude_none=True)
     state = {**state, "payload": follow_up}
     if not quality.passed:
-        agent_task_crud.update(db, task, AgentTaskUpdate(input_json=follow_up, state_json=state))
+        update_agent_task(db, task, AgentTaskUpdate(input_json=follow_up, state_json=state))
         return False, quality.supplement_question or "这条线索跟进还差一点关键信息，请继续补充。"
 
     next_payload = _lead_follow_up_create_payload(lead_id, follow_up, quality)
@@ -502,7 +505,7 @@ async def _apply_lead_follow_up_quality_fields(db: Session, task, content: str):
             confirmation_summary="创建线索跟进记录",
         ).model_dump(exclude_none=True),
     }
-    agent_task_crud.update(
+    update_agent_task(
         db,
         task,
         AgentTaskUpdate(

@@ -75,9 +75,7 @@ const routes: RouteRecordRaw[] = [
       },
       {
         path: 'follow-up-confirmations',
-        name: 'FollowUpConfirmationCenter',
-        component: () => import('@/views/FollowUpConfirmationCenter.vue'),
-        meta: { requiresAuth: true, title: '跟进确认中心' }
+        redirect: { path: '/customer-tracking', query: { tab: 'confirmations' } }
       },
       {
         path: 'leads',

@@ -152,17 +152,30 @@ class IMInboundEventCRUD:
         agent_session_id: Optional[int] = None,
         agent_task_id: Optional[int] = None,
         agent_interaction_type: Optional[str] = None,
+        confirmation_delivery_public_id: Optional[str] = None,
+        confirmation_case_public_id: Optional[str] = None,
+        agent_interaction_id: Optional[str] = None,
+        prompt_delivery_key: Optional[str] = None,
         error_message: Optional[str] = None,
+        commit: bool = True,
     ) -> IMInboundEvent:
         db_obj.status = status
         db_obj.response_message_id = response_message_id
         db_obj.agent_session_id = agent_session_id
         db_obj.agent_task_id = agent_task_id
         db_obj.agent_interaction_type = agent_interaction_type
+        db_obj.confirmation_delivery_public_id = confirmation_delivery_public_id
+        db_obj.confirmation_case_public_id = confirmation_case_public_id
+        db_obj.agent_interaction_id = agent_interaction_id
+        db_obj.prompt_delivery_key = prompt_delivery_key
         db_obj.error_message = error_message
         db_obj.processed_time = business_now()
-        db.commit()
-        db.refresh(db_obj)
+        db.add(db_obj)
+        if commit:
+            db.commit()
+            db.refresh(db_obj)
+        else:
+            db.flush()
         return db_obj
 
     def get_by_response_message_id(
@@ -180,6 +193,27 @@ class IMInboundEventCRUD:
         if team_id is not None:
             query = query.filter(IMInboundEvent.team_id == team_id)
         return query.order_by(IMInboundEvent.created_time.desc(), IMInboundEvent.id.desc()).first()
+
+    def get_by_confirmation_delivery_public_id(
+        self,
+        db: Session,
+        *,
+        provider: str,
+        team_id: int,
+        confirmation_delivery_public_id: str,
+    ) -> Optional[IMInboundEvent]:
+        return (
+            db.query(IMInboundEvent)
+            .filter(
+                IMInboundEvent.provider == provider,
+                IMInboundEvent.team_id == team_id,
+                IMInboundEvent.confirmation_delivery_public_id == confirmation_delivery_public_id,
+                IMInboundEvent.response_message_id.is_not(None),
+            )
+            .order_by(IMInboundEvent.created_time.desc(), IMInboundEvent.id.desc())
+            .first()
+        )
+
 
 
 agent_channel_session_crud = AgentChannelSessionCRUD()

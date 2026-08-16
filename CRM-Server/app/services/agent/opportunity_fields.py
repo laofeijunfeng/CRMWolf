@@ -2,23 +2,27 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from app.crud.agent import agent_task_crud
 from app.schemas.agent import AgentTaskUpdate
 from app.services.agent import agent_copy, business_rules
-from app.services.agent.schemas import AgentHITLPolicy, AgentSemanticParseResult
-from app.services.agent.semantic import AgentSemanticParserError
-from app.services.agent.temporal import agent_temporal_resolver
-from app.services.agent.field_common import _drop_empty_values, _extract_generated_form_int, _parse_task_field_supplement
+from app.services.agent.field_common import (
+    _drop_empty_values,
+    _extract_generated_form_int,
+    _parse_task_field_supplement,
+)
 from app.services.agent.interactions import (
     _customer_requires_procurement_method,
     _opportunity_field_defaults,
     _opportunity_interaction_fields,
     _opportunity_missing_display_fields,
 )
+from app.services.agent.schemas import AgentHITLPolicy, AgentSemanticParseResult
+from app.services.agent.semantic import AgentSemanticParserError
+from app.services.agent.task_projection import update_agent_task
+from app.services.agent.temporal import agent_temporal_resolver
+
 
 def _is_opportunity_fields_task(task) -> bool:
     state = task.state_json or {}
@@ -73,7 +77,7 @@ async def _apply_opportunity_fields(db: Session, task, content: str):
     state = {**state, "payload": payload}
 
     if missing_fields:
-        agent_task_crud.update(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
+        update_agent_task(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
         display_fields = business_rules.format_opportunity_missing_fields(
             _opportunity_missing_display_fields(missing_fields, customer)
         )
@@ -92,7 +96,7 @@ async def _apply_opportunity_fields(db: Session, task, content: str):
             confirmation_summary=f"为「{customer.get('account_name')}」创建商机",
         ).model_dump(exclude_none=True),
     }
-    agent_task_crud.update(
+    update_agent_task(
         db,
         task,
         AgentTaskUpdate(

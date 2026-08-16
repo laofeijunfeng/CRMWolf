@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watchEffect } from 'vue'
+import { computed, onMounted, ref, watch, watchEffect } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useRoute, useRouter } from 'vue-router'
 import { CheckCircle2, Clock3, FileText, Plus, RefreshCw, XCircle } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { DataTable, HoverInfo, TableRowActions, type ActionConfig } from '@/components/crmwolf'
@@ -22,10 +24,12 @@ import { Sheet, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/she
 import { DetailSheetContent } from '@/components/ui/detail-sheet'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import FollowUpFormDialog from '@/components/dialogs/FollowUpFormDialog.vue'
+import FollowUpConfirmationPanel from '@/components/customer-tracking/FollowUpConfirmationPanel.vue'
 import { followUpTaskApi, type FollowUpTaskItem, type FollowUpTaskStatusFilter } from '@/api/followUpTask'
 import { handleApiError } from '@/utils/errorHandler'
 import { confirmDialog } from '@/utils/confirmDialog'
-import { useHeaderStore } from '@/stores/header'
+import { useHeaderStore, type TabItem } from '@/stores/header'
+import { useFollowUpConfirmationStore } from '@/stores/followUpConfirmation'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
@@ -33,7 +37,7 @@ import { formatLocalDate } from '@/utils/format'
 
 usePageTitle()
 
-type TrackingTabKey = 'all' | 'open' | 'completed' | 'cancelled'
+type TrackingTabKey = FollowUpTaskStatusFilter | 'confirmations'
 type TrackingDueTone = 'overdue' | 'today' | 'soon' | 'future' | 'closed' | 'empty'
 type TrackingRow = FollowUpTaskItem & {
   customer_name: string
@@ -45,7 +49,12 @@ type TrackingRow = FollowUpTaskItem & {
   status_label: string
 }
 
+const route = useRoute()
+const router = useRouter()
 const headerStore = useHeaderStore()
+const confirmationStore = useFollowUpConfirmationStore()
+const { pendingCount: pendingConfirmationCount } = storeToRefs(confirmationStore)
+const { fetchPendingCases, fetchPendingCount } = confirmationStore
 const loading = ref(false)
 const tasks = ref<FollowUpTaskItem[]>([])
 const selectedTaskId = ref<string | null>(null)
@@ -57,19 +66,21 @@ const delaySubmitting = ref(false)
 const delayDate = ref<Date | null>(null)
 const delayReason = ref('')
 
-const activeTab = ref<TrackingTabKey>('open')
+const initialTab: TrackingTabKey = route.query['tab'] === 'confirmations' ? 'confirmations' : 'open'
+const activeTab = ref<string>(initialTab)
 const activeFilters = ref<ListFilterCondition[]>([])
 const activeSorts = ref<ListSortCondition[]>([])
 const activeColumns = ref<ViewPreferenceConfig['columns']>([])
 const page = ref(1)
 const pageSize = ref(20)
 
-const tabs = [
+const tabs = computed<TabItem[]>(() => [
   { key: 'all', label: '所有追踪' },
   { key: 'open', label: '待处理' },
+  { key: 'confirmations', label: '待确认', badge: pendingConfirmationCount.value },
   { key: 'completed', label: '已完成' },
   { key: 'cancelled', label: '已关闭' },
-]
+])
 
 const columns = [
   { key: 'customer_name', title: '客户', width: '220px', filterable: true, filterType: 'text' as const, sortable: true, sortType: 'text' as const },
@@ -99,7 +110,7 @@ const customFilterViews = useCustomFilterViews({
   activeColumns,
   refresh: fetchTasks,
 })
-const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
+const allTabs = computed(() => customFilterViews.mergeTabs(tabs.value))
 const activeColumnPreferenceConfig = computed<ViewPreferenceConfig>(() => ({ version: 1, columns: activeColumns.value }))
 const columnPreferenceMode = computed<'default' | 'custom'>(() => isCustomFilterViewTab(activeTab.value) ? 'custom' : 'default')
 
@@ -122,11 +133,21 @@ const filteredRows = computed(() => applySorts(applyFilters(rows.value, activeFi
 const pagedRows = computed(() => filteredRows.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
 const selectedCustomerId = computed(() => selectedTask.value?.customer?.id ?? selectedTask.value?.customer?.public_id ?? null)
 
+function taskStatusForTab(tab: string): FollowUpTaskStatusFilter | null {
+  if (tab === 'confirmations') return null
+  if (isCustomFilterViewTab(tab)) return 'all'
+  if (tab === 'all' || tab === 'open' || tab === 'completed' || tab === 'cancelled') return tab
+  return 'open'
+}
+
 async function fetchTasks(): Promise<void> {
+  const status = taskStatusForTab(activeTab.value)
+  if (status === null) return
+
   loading.value = true
   try {
     const response = await followUpTaskApi.list({
-      status: activeTab.value as FollowUpTaskStatusFilter,
+      status,
       owner_scope: 'mine',
       limit: 100,
     })
@@ -136,6 +157,18 @@ async function fetchTasks(): Promise<void> {
   } finally {
     loading.value = false
   }
+}
+
+async function refreshActiveView(): Promise<void> {
+  if (activeTab.value === 'confirmations') {
+    try {
+      await fetchPendingCases()
+    } catch (error) {
+      handleApiError(error, '刷新待确认追踪')
+    }
+    return
+  }
+  await fetchTasks()
 }
 
 async function openDetail(row: TrackingRow): Promise<void> {
@@ -363,7 +396,26 @@ function handleColumnConfigReset(): void {
 
 onMounted(() => {
   void customFilterViews.loadCustomViews()
-  void fetchTasks()
+  void fetchPendingCount().catch(() => undefined)
+  if (activeTab.value !== 'confirmations') {
+    void fetchTasks()
+  }
+})
+
+watch(activeTab, (tab) => {
+  const routeTab = route.query['tab']
+  if (tab === 'confirmations') {
+    if (routeTab === 'confirmations') return
+    void router.replace({
+      query: { ...route.query, tab: 'confirmations' },
+    }).catch(() => undefined)
+    return
+  }
+
+  if (routeTab === undefined) return
+  const query = { ...route.query }
+  delete query['tab']
+  void router.replace({ query }).catch(() => undefined)
 })
 
 useTopBarRegistration({
@@ -376,7 +428,7 @@ useTopBarRegistration({
       icon: RefreshCw,
       type: 'default',
       handler: (): void => {
-        void fetchTasks()
+        void refreshActiveView()
       },
       ariaLabel: '刷新客户追踪',
     },
@@ -391,14 +443,19 @@ watchEffect(() => {
     if (!restoredBuiltInState) {
       activeSorts.value = []
     }
-    void fetchTasks()
+    if (activeTab.value !== 'confirmations') {
+      void fetchTasks()
+    }
   }
 })
 </script>
 
 <template>
   <div class="customer-tracking-page">
+    <FollowUpConfirmationPanel v-if="activeTab === 'confirmations'" />
+
     <DataTable
+      v-else
       :columns="columns"
       :data="pagedRows"
       :loading="loading"

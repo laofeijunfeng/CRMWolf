@@ -20,6 +20,7 @@ class FakeChannelService:
         user_id,
         case_public_ids,
         interaction_scope,
+        turn_scope=None,
     ):
         self.prepare_calls.append({
             "db": db,
@@ -67,7 +68,7 @@ class FakeChannelService:
 
 
 @pytest.mark.asyncio
-async def test_prepare_compensates_from_durable_owner_inbox_when_current_turn_has_no_case_ids():
+async def test_prepare_requires_explicit_current_turn_case_ids_and_never_reads_owner_inbox():
     channel = FakeChannelService()
     service = FollowUpConfirmationGraphService(channel_service=channel)
     db = object()
@@ -78,18 +79,11 @@ async def test_prepare_compensates_from_durable_owner_inbox_when_current_turn_ha
         user_id=3,
         case_public_ids=[],
         interaction_scope="crm_agent:2:3:4:abc",
-        include_owner_inbox_fallback=True,
     )
 
-    assert event["case_public_id"] == "fuc_inbox"
-    assert channel.list_calls == [{
-        "db": db,
-        "team_id": 2,
-        "user_id": 3,
-        "skip": 0,
-        "limit": 1,
-    }]
-    assert [call["case_public_ids"] for call in channel.prepare_calls] == [[], ["fuc_inbox"]]
+    assert event == {}
+    assert channel.prepare_calls == []
+    assert channel.list_calls == []
 
 
 @pytest.mark.asyncio

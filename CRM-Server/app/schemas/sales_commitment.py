@@ -614,6 +614,7 @@ class FollowUpTaskConfirmationCaseInternalCreate(BaseModel):
     confirmation_hash: str = Field(..., min_length=1, max_length=64, description="确认Case幂等哈希")
     question_text: str = Field(..., min_length=1, description="确认问题")
     source_activity_id: int | None = Field(None, description="来源客户活动内部ID")
+    source_activity_revision: int | None = Field(None, ge=1, description="来源客户活动修订号")
     source_public_id: str | None = Field(None, max_length=64, description="来源对象对外ID")
     source_plan_json: dict[str, Any] | None = Field(None, description="状态迁移计划快照")
     expires_at: datetime | None = Field(None, description="确认Case过期时间")
@@ -635,6 +636,7 @@ class FollowUpTaskConfirmationCaseInternalCreate(BaseModel):
 class FollowUpTaskConfirmationCaseInternalUpdate(BaseModel):
     status: str | None = Field(None, description="确认状态")
     question_text: str | None = Field(None, min_length=1, description="确认问题")
+    source_activity_revision: int | None = Field(None, ge=1, description="来源客户活动修订号")
     expires_at: datetime | None = Field(None, description="确认Case过期时间")
     last_prompted_at: datetime | None = Field(None, description="最近提醒时间")
     prompt_count: int | None = Field(None, ge=0, description="提醒次数")
@@ -685,6 +687,7 @@ class FollowUpTaskConfirmationCaseResponse(_PublicIdResponse):
     suggested_action: str = Field(..., description="建议处理动作")
     confirmation_hash: str = Field(..., description="确认Case幂等哈希")
     question_text: str = Field(..., description="确认问题")
+    source_activity_revision: int | None = Field(None, description="来源客户活动修订号")
     source_public_id: str | None = Field(None, description="来源对象对外ID")
     expires_at: datetime | None = Field(None, description="确认Case过期时间")
     last_prompted_at: datetime | None = Field(None, description="最近提醒时间")

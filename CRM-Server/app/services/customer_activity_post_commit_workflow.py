@@ -19,13 +19,32 @@ from langgraph.types import RetryPolicy
 from app.core.database import SessionLocal
 from app.crud.customer_activity import customer_activity_crud
 from app.crud.sales_commitment import (
+    follow_up_task_confirmation_case_crud,
     follow_up_task_crud,
     follow_up_task_transition_policy_decision_log_crud,
 )
 from app.models.agent import AgentWorkflowActionStatus
-from app.models.sales_commitment import FollowUpTaskSourceType
+from app.models.sales_commitment import (
+    FollowUpTaskConfirmationDeliveryPurpose,
+    FollowUpTaskSourceType,
+)
 from app.services.agent import workflow_action_ledger
 from app.services.customer_activity_ai.checkpointer import customer_activity_checkpoint_saver
+from app.services.customer_activity_revision_fence import (
+    CustomerActivityRevisionFence,
+    CustomerActivityRevisionFenceReason,
+    CustomerActivityRevisionFenceResult,
+    customer_activity_revision_fence,
+)
+from app.services.follow_up_confirmation_delivery_workflow import (
+    ConfirmationDeliveryInput,
+    follow_up_confirmation_delivery_workflow,
+)
+from app.services.follow_up_task_confirmation_cleanup_service import (
+    FollowUpTaskConfirmationCancelReason,
+    FollowUpTaskConfirmationCleanupService,
+    follow_up_task_confirmation_cleanup_service,
+)
 from app.services.follow_up_task_confirmation_service import follow_up_task_confirmation_service
 from app.services.follow_up_task_projection_service import follow_up_task_projection_service
 from app.services.follow_up_task_reconciliation_evaluation_service import FollowUpTaskReconciliationDecision
@@ -43,7 +62,7 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
     from app.models.customer_activity import CustomerActivity
-    from app.models.sales_commitment import FollowUpTask
+    from app.models.sales_commitment import FollowUpTask, FollowUpTaskConfirmationCase
     from app.services.follow_up_task_confirmation_service import FollowUpTaskConfirmationCaseResult
     from app.services.follow_up_task_projection_service import FollowUpTaskProjectionResult
     from app.services.follow_up_task_transition_execution_service import FollowUpTaskTransitionExecutionResult
@@ -58,16 +77,25 @@ def merge_post_commit_events(left: list[dict[str, Any]], right: list[dict[str, A
     return [*left, *right]
 
 
+def merge_revision_fence_failures(
+    left: list[dict[str, Any]],
+    right: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return [*left, *right]
+
+
 class CustomerActivityPostCommitSkipReason:
     ACTIVITY_NOT_FOUND = "ACTIVITY_NOT_FOUND"
     ACTIVITY_MISSING_CUSTOMER = "ACTIVITY_MISSING_CUSTOMER"
     ACTIVITY_MISSING_OWNER = "ACTIVITY_MISSING_OWNER"
     RECONCILIATION_UNAVAILABLE = "RECONCILIATION_UNAVAILABLE"
+    SUPERSEDED_ACTIVITY_REVISION = "SUPERSEDED_ACTIVITY_REVISION"
 
 
 class CustomerActivityPostCommitState(TypedDict, total=False):
     activity_id: int
     team_id: int
+    expected_activity_revision: int
     trigger_type: str
     actor_id: str | None
     run_id: str
@@ -78,9 +106,11 @@ class CustomerActivityPostCommitState(TypedDict, total=False):
     policy_results: list[dict[str, Any]]
     execution_results: list[dict[str, Any]]
     confirmation_cases: list[dict[str, Any]]
+    confirmation_deliveries: list[dict[str, Any]]
     post_commit: dict[str, Any]
     skip_reason: str | None
     error_message: str | None
+    revision_fence_failures: Annotated[list[dict[str, Any]], merge_revision_fence_failures]
     events: Annotated[list[dict[str, Any]], merge_post_commit_events]
 
 
@@ -101,6 +131,8 @@ class _ProjectionService(Protocol):
         team_id: int,
         trigger_type: str,
         actor_id: str | None = None,
+        activity_snapshot: CustomerActivity | None = None,
+        commit: bool = True,
     ) -> FollowUpTaskProjectionResult: ...
 
 
@@ -162,9 +194,23 @@ class _ConfirmationService(Protocol):
         action: FollowUpTaskTransitionAction,
         actor_id: str,
         source_activity_id: int | None = None,
+        source_activity_revision: int | None = None,
         source_public_id: str | None = None,
         commit: bool = True,
     ) -> FollowUpTaskConfirmationCaseResult: ...
+
+
+class _ConfirmationDeliveryWorkflow(Protocol):
+    async def run(self, request: ConfirmationDeliveryInput) -> dict[str, Any]: ...
+
+
+class _ConfirmationCaseCrud(Protocol):
+    def get_by_public_id(
+        self,
+        db: Session,
+        public_id: str,
+        team_id: int | None = None,
+    ) -> FollowUpTaskConfirmationCase | None: ...
 
 
 class _FollowUpTaskCrud(Protocol):
@@ -211,8 +257,14 @@ class CustomerActivityPostCommitWorkflow:
         policy_service: _TransitionPolicyService = follow_up_task_transition_policy_service,
         execution_service: _TransitionExecutionService = follow_up_task_transition_execution_service,
         confirmation_service: _ConfirmationService = follow_up_task_confirmation_service,
+        confirmation_case_crud: _ConfirmationCaseCrud = follow_up_task_confirmation_case_crud,
         task_crud: _FollowUpTaskCrud = follow_up_task_crud,
         policy_log_crud: _PolicyDecisionLogCrud = follow_up_task_transition_policy_decision_log_crud,
+        delivery_workflow: _ConfirmationDeliveryWorkflow = follow_up_confirmation_delivery_workflow,
+        revision_fence: CustomerActivityRevisionFence = customer_activity_revision_fence,
+        confirmation_cleanup_service: FollowUpTaskConfirmationCleanupService = (
+            follow_up_task_confirmation_cleanup_service
+        ),
         checkpointer: object | None = customer_activity_checkpoint_saver,
     ) -> None:
         self.projection_service = projection_service
@@ -221,8 +273,12 @@ class CustomerActivityPostCommitWorkflow:
         self.policy_service = policy_service
         self.execution_service = execution_service
         self.confirmation_service = confirmation_service
+        self.confirmation_case_crud = confirmation_case_crud
         self.task_crud = task_crud
         self.policy_log_crud = policy_log_crud
+        self.delivery_workflow = delivery_workflow
+        self.revision_fence = revision_fence
+        self.confirmation_cleanup_service = confirmation_cleanup_service
         self._graph = self._build_graph(checkpointer)
 
     def _build_graph(self, checkpointer: object | None) -> _CompiledPostCommitGraph:
@@ -235,6 +291,7 @@ class CustomerActivityPostCommitWorkflow:
         graph.add_node("apply_transition_policy", self._apply_transition_policy)
         graph.add_node("execute_transition", self._execute_transition)
         graph.add_node("create_confirmation_cases", self._create_confirmation_cases)
+        graph.add_node("schedule_confirmation_deliveries", self._schedule_confirmation_deliveries)
         graph.add_node("build_post_commit_outcome", self._build_post_commit_outcome)
 
         graph.add_edge(START, "load_activity")
@@ -250,7 +307,8 @@ class CustomerActivityPostCommitWorkflow:
         graph.add_edge(["project_next_step", "match_and_plan_historical_tasks"], "apply_transition_policy")
         graph.add_edge("apply_transition_policy", "execute_transition")
         graph.add_edge("execute_transition", "create_confirmation_cases")
-        graph.add_edge("create_confirmation_cases", "build_post_commit_outcome")
+        graph.add_edge("create_confirmation_cases", "schedule_confirmation_deliveries")
+        graph.add_edge("schedule_confirmation_deliveries", "build_post_commit_outcome")
         graph.add_edge("build_post_commit_outcome", END)
         return graph.compile(checkpointer=checkpointer)
 
@@ -259,15 +317,20 @@ class CustomerActivityPostCommitWorkflow:
         *,
         activity_id: int,
         team_id: int,
+        expected_activity_revision: int,
         trigger_type: str,
         actor_id: str | None = None,
         run_id: str | None = None,
+        thread_id: str | None = None,
     ) -> CustomerActivityPostCommitState:
         resolved_run_id = run_id or uuid4().hex
-        thread_id = f"customer_activity_post_commit:{activity_id}:{trigger_type}:{resolved_run_id}"
+        resolved_thread_id = thread_id or (
+            f"customer_activity_post_commit:{activity_id}:{trigger_type}:{resolved_run_id}"
+        )
         state: CustomerActivityPostCommitState = {
             "activity_id": activity_id,
             "team_id": team_id,
+            "expected_activity_revision": expected_activity_revision,
             "trigger_type": trigger_type,
             "actor_id": actor_id,
             "run_id": resolved_run_id,
@@ -277,12 +340,13 @@ class CustomerActivityPostCommitWorkflow:
             state,
             {
                 "configurable": {
-                    "thread_id": thread_id,
+                    "thread_id": resolved_thread_id,
                     "checkpoint_ns": "customer_activity_post_commit",
                 },
                 "metadata": {
                     "activity_id": activity_id,
                     "team_id": team_id,
+                    "expected_activity_revision": expected_activity_revision,
                     "trigger_type": trigger_type,
                     "actor_id": actor_id,
                     "run_id": resolved_run_id,
@@ -299,6 +363,21 @@ class CustomerActivityPostCommitWorkflow:
                     "skip_reason": CustomerActivityPostCommitSkipReason.ACTIVITY_NOT_FOUND,
                     "events": [{"event": "activity_not_found", "activity_id": state["activity_id"]}],
                 }
+            actual_revision = int(activity.post_commit_revision or 1)
+            if actual_revision != state["expected_activity_revision"]:
+                return {
+                    "skip_reason": CustomerActivityPostCommitSkipReason.SUPERSEDED_ACTIVITY_REVISION,
+                    **self._revision_fence_failure(
+                        state,
+                        node="load_activity",
+                        fence=CustomerActivityRevisionFenceResult(
+                            activity=activity,
+                            expected_revision=state["expected_activity_revision"],
+                            actual_revision=actual_revision,
+                            reason=CustomerActivityPostCommitSkipReason.SUPERSEDED_ACTIVITY_REVISION,
+                        ),
+                    ),
+                }
             return {
                 "activity": _activity_payload(activity),
                 "events": [{"event": "activity_loaded", "activity_id": activity.id}],
@@ -314,6 +393,25 @@ class CustomerActivityPostCommitWorkflow:
     def _project_next_step(self, state: CustomerActivityPostCommitState) -> CustomerActivityPostCommitState:
         db = SessionLocal()
         try:
+            fence = self._lock_expected_revision(db, state)
+            if not fence.allowed:
+                self._record_fenced_system_action(
+                    db,
+                    state=state,
+                    action_type="project_next_follow_up_tasks",
+                    source_type=workflow_action_ledger.SOURCE_POST_COMMIT_PROJECTION,
+                    fence=fence,
+                )
+                db.commit()
+                return {
+                    "projection_result": {
+                        "success": False,
+                        "skip_reason": fence.reason,
+                        "expected_activity_revision": fence.expected_revision,
+                        "actual_activity_revision": fence.actual_revision,
+                    },
+                    **self._revision_fence_failure(state, node="project_next_step", fence=fence),
+                }
             try:
                 result = self.projection_service.run_activity_projection(
                     db,
@@ -321,6 +419,8 @@ class CustomerActivityPostCommitWorkflow:
                     team_id=state["team_id"],
                     trigger_type=state["trigger_type"],
                     actor_id=state.get("actor_id"),
+                    activity_snapshot=fence.activity,
+                    commit=False,
                 )
             except Exception as exc:
                 logger.exception("客户活动后提交任务投影失败: activity_id=%s", state["activity_id"])
@@ -332,7 +432,9 @@ class CustomerActivityPostCommitWorkflow:
                     status=AgentWorkflowActionStatus.FAILED,
                     result={"success": False, "error": str(exc)},
                     reason=str(exc)[:300],
+                    commit=False,
                 )
+                db.commit()
                 return {
                     "projection_result": {"success": False, "error": str(exc)},
                     "events": [{"event": "next_step_projection_failed", "error": str(exc)[:300]}],
@@ -352,7 +454,9 @@ class CustomerActivityPostCommitWorkflow:
                 },
                 result=projection_payload,
                 reason=result.skip_reason or result.error_message,
+                commit=False,
             )
+            db.commit()
             return {
                 "projection_result": projection_payload,
                 "events": [
@@ -430,6 +534,25 @@ class CustomerActivityPostCommitWorkflow:
                 }
             match_payload = match_result.to_dict()
             plan_payload = plan.to_dict()
+            fence = self._lock_expected_revision(db, state)
+            if not fence.allowed:
+                self._record_fenced_system_action(
+                    db,
+                    state=state,
+                    action_type="reconcile_historical_follow_up_tasks",
+                    source_type=workflow_action_ledger.SOURCE_POST_COMMIT_RECONCILIATION,
+                    fence=fence,
+                )
+                db.commit()
+                return {
+                    "match_result": None,
+                    "transition_plan": None,
+                    **self._revision_fence_failure(
+                        state,
+                        node="match_and_plan_historical_tasks",
+                        fence=fence,
+                    ),
+                }
             _record_post_commit_system_action(
                 db,
                 state=state,
@@ -445,7 +568,9 @@ class CustomerActivityPostCommitWorkflow:
                     "transition_plan": plan_payload,
                 },
                 reason=plan.decision.decision,
+                commit=False,
             )
+            db.commit()
             return {
                 "match_result": match_payload,
                 "transition_plan": plan_payload,
@@ -461,12 +586,22 @@ class CustomerActivityPostCommitWorkflow:
             db.close()
 
     def _apply_transition_policy(self, state: CustomerActivityPostCommitState) -> CustomerActivityPostCommitState:
+        if state.get("revision_fence_failures"):
+            return self._skip_after_revision_fence(state, "transition_policy_skipped") | {"policy_results": []}
         plan_payload = state.get("transition_plan")
         if not plan_payload:
             return {"policy_results": [], "events": [{"event": "transition_policy_skipped"}]}
 
         db = SessionLocal()
         try:
+            fence = self._lock_expected_revision(db, state)
+            if not fence.allowed:
+                db.rollback()
+                return {
+                    "policy_results": [],
+                    "skip_reason": self._skip_reason_for_fence(fence),
+                    **self._revision_fence_failure(state, node="apply_transition_policy", fence=fence),
+                }
             policy_results: list[dict[str, Any]] = []
             for action_payload in plan_payload.get("actions") or []:
                 decision = self._policy_decision_for_action(db, state=state, action_payload=action_payload)
@@ -500,6 +635,10 @@ class CustomerActivityPostCommitWorkflow:
             db.close()
 
     def _execute_transition(self, state: CustomerActivityPostCommitState) -> CustomerActivityPostCommitState:
+        if state.get("revision_fence_failures"):
+            return self._skip_after_revision_fence(state, "transition_execution_skipped") | {
+                "execution_results": []
+            }
         plan_payload = state.get("transition_plan")
         if not plan_payload:
             return {"execution_results": [], "events": [{"event": "transition_execution_skipped"}]}
@@ -508,6 +647,14 @@ class CustomerActivityPostCommitWorkflow:
         allowed = _plan_is_allowed_by_policy(state.get("policy_results") or [])
         db = SessionLocal()
         try:
+            fence = self._lock_expected_revision(db, state)
+            if not fence.allowed:
+                db.rollback()
+                return {
+                    "execution_results": [],
+                    "skip_reason": self._skip_reason_for_fence(fence),
+                    **self._revision_fence_failure(state, node="execute_transition", fence=fence),
+                }
             results = self.execution_service.execute_plan(
                 db,
                 team_id=state["team_id"],
@@ -515,8 +662,9 @@ class CustomerActivityPostCommitWorkflow:
                 actor_id=state.get("actor_id"),
                 expected_owner_id=(state.get("activity") or {}).get("owner_id"),
                 enabled=allowed,
-                commit=True,
+                commit=False,
             )
+            db.commit()
             return {
                 "execution_results": [result.to_dict() for result in results],
                 "events": [
@@ -531,6 +679,10 @@ class CustomerActivityPostCommitWorkflow:
             db.close()
 
     def _create_confirmation_cases(self, state: CustomerActivityPostCommitState) -> CustomerActivityPostCommitState:
+        if state.get("revision_fence_failures"):
+            return self._skip_after_revision_fence(state, "confirmation_cases_skipped") | {
+                "confirmation_cases": []
+            }
         plan_payload = state.get("transition_plan")
         if not plan_payload:
             return {"confirmation_cases": [], "events": [{"event": "confirmation_cases_skipped"}]}
@@ -549,6 +701,14 @@ class CustomerActivityPostCommitWorkflow:
         cases: list[dict[str, Any]] = []
         db = SessionLocal()
         try:
+            fence = self._lock_expected_revision(db, state)
+            if not fence.allowed:
+                db.rollback()
+                return {
+                    "confirmation_cases": [],
+                    "skip_reason": self._skip_reason_for_fence(fence),
+                    **self._revision_fence_failure(state, node="create_confirmation_cases", fence=fence),
+                }
             for action in plan.actions:
                 confirmation_action = self._confirmation_action(
                     action,
@@ -580,6 +740,7 @@ class CustomerActivityPostCommitWorkflow:
                     action=confirmation_action,
                     actor_id=state.get("actor_id") or task.owner_id,
                     source_activity_id=state["activity_id"],
+                    source_activity_revision=state["expected_activity_revision"],
                     source_public_id=(state.get("activity") or {}).get("public_id"),
                     commit=False,
                 )
@@ -590,6 +751,7 @@ class CustomerActivityPostCommitWorkflow:
                         "created": result.created,
                         "confirmation_hash": result.confirmation_hash,
                         "suggested_action": result.case.suggested_action,
+                        "owner_id": result.case.owner_id,
                     }
                 )
             db.commit()
@@ -599,6 +761,220 @@ class CustomerActivityPostCommitWorkflow:
             }
         finally:
             db.close()
+
+    async def _schedule_confirmation_deliveries(
+        self,
+        state: CustomerActivityPostCommitState,
+    ) -> CustomerActivityPostCommitState:
+        if state.get("revision_fence_failures"):
+            return self._skip_after_revision_fence(state, "confirmation_deliveries_skipped") | {
+                "confirmation_deliveries": []
+            }
+        delivery_targets: list[dict[str, Any]] = []
+        deliveries: list[dict[str, Any]] = []
+        db = SessionLocal()
+        try:
+            fence = self._lock_expected_revision(db, state)
+            if not fence.allowed:
+                skip_reason = self._skip_reason_for_fence(fence)
+                cleanup = self.confirmation_cleanup_service.cancel_pending_cases_for_source_activity(
+                    db,
+                    team_id=state["team_id"],
+                    source_activity_id=state["activity_id"],
+                    actor_id=state.get("actor_id"),
+                    reason=self._confirmation_cancel_reason_for_fence(fence),
+                    commit=False,
+                )
+                db.commit()
+                return {
+                    "confirmation_cases": [],
+                    "confirmation_deliveries": [
+                        {
+                            "case_public_id": case.get("case_public_id"),
+                            "status": "SKIPPED",
+                            "reason_code": skip_reason,
+                        }
+                        for case in state.get("confirmation_cases") or []
+                        if isinstance(case, dict) and case.get("case_public_id")
+                    ],
+                    "skip_reason": skip_reason,
+                    **self._revision_fence_failure(
+                        state,
+                        node="schedule_confirmation_deliveries",
+                        fence=fence,
+                        extra={"cancelled_case_count": cleanup.cancelled_count},
+                    ),
+                }
+            for case_payload in state.get("confirmation_cases") or []:
+                case_public_id = (
+                    case_payload.get("case_public_id")
+                    if isinstance(case_payload, dict)
+                    else None
+                )
+                if not case_public_id:
+                    continue
+                persisted_case = self.confirmation_case_crud.get_by_public_id(
+                    db,
+                    public_id=str(case_public_id),
+                    team_id=state["team_id"],
+                )
+                if persisted_case is None:
+                    deliveries.append(
+                        {
+                            "delivery_public_id": None,
+                            "case_public_id": str(case_public_id),
+                            "channel": "web",
+                            "provider": "confirmation_center",
+                            "purpose": FollowUpTaskConfirmationDeliveryPurpose.INBOX_VISIBILITY,
+                            "status": "SKIPPED",
+                            "reason_code": "CASE_NOT_FOUND",
+                            "provider_message_id": None,
+                        }
+                    )
+                    continue
+                delivery_targets.append(
+                    {
+                        "case_public_id": str(persisted_case.public_id),
+                        "owner_id": str(persisted_case.owner_id),
+                        "source_activity_id": persisted_case.source_activity_id,
+                        "source_activity_revision": persisted_case.source_activity_revision,
+                    }
+                )
+            db.commit()
+        finally:
+            db.close()
+        for target in delivery_targets:
+            case_public_id = target["case_public_id"]
+            result = await self.delivery_workflow.run(
+                ConfirmationDeliveryInput(
+                    case_public_id=str(case_public_id),
+                    team_id=state["team_id"],
+                    owner_id=target["owner_id"],
+                    channel="web",
+                    provider="confirmation_center",
+                    origin_turn_id=f"activity:{state['activity_id']}",
+                    origin_message_id=state["activity_id"],
+                    source_activity_id=target["source_activity_id"],
+                    expected_activity_revision=target["source_activity_revision"],
+                )
+            )
+            deliveries.append(
+                {
+                    "delivery_public_id": result.get("delivery_public_id"),
+                    "case_public_id": str(case_public_id),
+                    "channel": "web",
+                    "provider": "confirmation_center",
+                    "purpose": FollowUpTaskConfirmationDeliveryPurpose.INBOX_VISIBILITY,
+                    "status": result.get("status"),
+                    "reason_code": result.get("reason_code"),
+                    "provider_message_id": result.get("provider_message_id"),
+                }
+            )
+        return {
+            "confirmation_deliveries": deliveries,
+            "events": [
+                {
+                    "event": "confirmation_deliveries_scheduled",
+                    "delivery_count": len(deliveries),
+                    "sent_count": sum(1 for item in deliveries if item.get("status") == "SENT"),
+                }
+            ],
+        }
+
+    def _lock_expected_revision(
+        self,
+        db: Session,
+        state: CustomerActivityPostCommitState,
+    ) -> CustomerActivityRevisionFenceResult:
+        return self.revision_fence.lock_for_mutation(
+            db,
+            team_id=state["team_id"],
+            activity_id=state["activity_id"],
+            expected_revision=state["expected_activity_revision"],
+        )
+
+    @staticmethod
+    def _revision_fence_failure(
+        state: CustomerActivityPostCommitState,
+        *,
+        node: str,
+        fence: CustomerActivityRevisionFenceResult,
+        extra: dict[str, Any] | None = None,
+    ) -> CustomerActivityPostCommitState:
+        payload = {
+            "node": node,
+            "reason": fence.reason,
+            "activity_id": state["activity_id"],
+            "expected_activity_revision": fence.expected_revision,
+            "actual_activity_revision": fence.actual_revision,
+            **(extra or {}),
+        }
+        return {
+            "revision_fence_failures": [payload],
+            "events": [{"event": "activity_revision_fenced", **payload}],
+        }
+
+    @staticmethod
+    def _skip_reason_for_fence(fence: CustomerActivityRevisionFenceResult) -> str:
+        if fence.reason == CustomerActivityRevisionFenceReason.ACTIVITY_NOT_FOUND:
+            return CustomerActivityPostCommitSkipReason.ACTIVITY_NOT_FOUND
+        return CustomerActivityPostCommitSkipReason.SUPERSEDED_ACTIVITY_REVISION
+
+    @staticmethod
+    def _confirmation_cancel_reason_for_fence(fence: CustomerActivityRevisionFenceResult) -> str:
+        if fence.reason == CustomerActivityRevisionFenceReason.ACTIVITY_NOT_FOUND:
+            return FollowUpTaskConfirmationCancelReason.SOURCE_ACTIVITY_DELETED
+        return FollowUpTaskConfirmationCancelReason.SOURCE_ACTIVITY_REVISION_SUPERSEDED
+
+    @classmethod
+    def _skip_after_revision_fence(
+        cls,
+        state: CustomerActivityPostCommitState,
+        event: str,
+    ) -> CustomerActivityPostCommitState:
+        failure_reasons = {
+            str(failure.get("reason"))
+            for failure in state.get("revision_fence_failures") or []
+            if isinstance(failure, dict) and failure.get("reason")
+        }
+        if CustomerActivityRevisionFenceReason.ACTIVITY_NOT_FOUND in failure_reasons:
+            reason = CustomerActivityPostCommitSkipReason.ACTIVITY_NOT_FOUND
+        elif CustomerActivityRevisionFenceReason.SUPERSEDED_ACTIVITY_REVISION in failure_reasons:
+            reason = CustomerActivityPostCommitSkipReason.SUPERSEDED_ACTIVITY_REVISION
+        else:
+            reason = str(
+                state.get("skip_reason")
+                or CustomerActivityPostCommitSkipReason.SUPERSEDED_ACTIVITY_REVISION
+            )
+        return {
+            "skip_reason": reason,
+            "events": [{"event": event, "reason": reason}],
+        }
+
+    def _record_fenced_system_action(
+        self,
+        db: Session,
+        *,
+        state: CustomerActivityPostCommitState,
+        action_type: str,
+        source_type: str,
+        fence: CustomerActivityRevisionFenceResult,
+    ) -> None:
+        _record_post_commit_system_action(
+            db,
+            state=state,
+            action_type=action_type,
+            source_type=source_type,
+            status=AgentWorkflowActionStatus.BLOCKED,
+            result={
+                "success": False,
+                "skip_reason": fence.reason,
+                "expected_activity_revision": fence.expected_revision,
+                "actual_activity_revision": fence.actual_revision,
+            },
+            reason=fence.reason,
+            commit=False,
+        )
 
     def _build_post_commit_outcome(self, state: CustomerActivityPostCommitState) -> CustomerActivityPostCommitState:
         confirmation_cases = [
@@ -610,14 +986,16 @@ class CustomerActivityPostCommitWorkflow:
             str(case["case_public_id"])
             for case in confirmation_cases
         ]
+        confirmation_deliveries = list(state.get("confirmation_deliveries") or [])
         post_commit = {
             "needs_user_confirmation": bool(confirmation_case_public_ids),
             "confirmation_case_public_ids": confirmation_case_public_ids,
             "confirmation_cases": confirmation_cases,
+            "confirmation_deliveries": confirmation_deliveries,
             "created_confirmation_case_count": sum(1 for case in confirmation_cases if case.get("created") is True),
             "prompt_policy": {
                 "prompt_scope": "current_activity",
-                "delivery": "channel_contextual",
+                "delivery": "durable_confirmation_inbox",
             },
         }
         return {
@@ -732,6 +1110,7 @@ def _activity_payload(activity: CustomerActivity) -> dict[str, Any]:
         "id": activity.id,
         "public_id": getattr(activity, "public_id", None),
         "team_id": activity.team_id,
+        "post_commit_revision": int(activity.post_commit_revision or 1),
         "customer_id": activity.customer_id,
         "owner_id": activity.owner_id,
         "creator_id": activity.creator_id,
@@ -755,6 +1134,7 @@ def _record_post_commit_system_action(
     payload: dict[str, Any] | None = None,
     result: dict[str, Any] | None = None,
     reason: str | None = None,
+    commit: bool = True,
 ) -> None:
     activity = state.get("activity") or {}
     activity_id = state.get("activity_id")
@@ -783,6 +1163,7 @@ def _record_post_commit_system_action(
         },
         result=result,
         reason=reason,
+        commit=commit,
     )
 
 

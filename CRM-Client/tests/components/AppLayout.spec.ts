@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { ref, type Ref } from 'vue'
+import { createPinia } from 'pinia'
 import { readFileSync } from 'node:fs'
 
 interface UserInfoMock { id: number; name: string; avatar_url?: string }
@@ -26,10 +27,17 @@ const permissionStore = vi.hoisted(() => ({
   hasAnyPermission: vi.fn(() => true),
 }))
 
+const confirmationApiMocks = vi.hoisted(() => ({
+  getPendingCount: vi.fn().mockResolvedValue(0),
+  list: vi.fn(),
+  resolve: vi.fn(),
+}))
+
 vi.mock('vue-router', () => ({ useRoute: () => route, useRouter: () => router }))
 vi.mock('@/stores/user', () => ({ useUserStore: () => userStore }))
 vi.mock('@/stores/team', () => ({ useTeamStore: () => teamStore }))
 vi.mock('@/stores/permissions', () => ({ usePermissionStore: () => permissionStore }))
+vi.mock('@/api/followUpTask', () => ({ followUpConfirmationApi: confirmationApiMocks }))
 vi.mock('@/stores/pageTitle', () => ({ usePageTitleStore: () => ({ title: ref(''), tabs: [], activeTab: '', hasTabs: false }) }))
 vi.mock('@/stores/header', () => ({ useHeaderStore: () => ({ tabs: [], activeTab: '', hasTabs: false, leftAction: null, showBack: false, backRoute: null, actions: [], hasActions: false, setActiveTab: vi.fn() }) }))
 vi.mock('@/utils/logger', () => ({ logger: { error: vi.fn(), warn: vi.fn() } }))
@@ -56,9 +64,9 @@ describe('AppLayout user menu', () => {
   it('opens the account menu by click, not hover', async () => {
     wrapper = mount(AppLayout, {
       global: {
+        plugins: [createPinia()],
         stubs: {
           ApprovalIcon: true,
-          FollowUpConfirmationIcon: true,
           BottomNav: true,
           TopBarTabs: true,
           'router-view': true,

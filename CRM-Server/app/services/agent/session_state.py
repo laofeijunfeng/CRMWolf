@@ -79,11 +79,22 @@ def _get_owned_session(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent会话不存在")
     return session
 
-def _remember_current_customer(db: Session, session, customer: Optional[dict]) -> None:
+def _remember_current_customer(
+    db: Session,
+    session,
+    customer: Optional[dict],
+    *,
+    commit: bool = True,
+) -> None:
     context = session_projection.with_current_customer(session_projection.session_context(session), customer)
     if context == session_projection.session_context(session):
         return
-    agent_session_crud.update(db, session, AgentSessionUpdate(context_json=context))
+    agent_session_crud.update(
+        db,
+        session,
+        AgentSessionUpdate(context_json=context),
+        commit=commit,
+    )
 
 def _suspend_pending_task(
     db: Session,
@@ -92,6 +103,7 @@ def _suspend_pending_task(
     reason: str,
     *,
     suspension_kind: str | None = None,
+    commit: bool = True,
 ) -> None:
     if not task:
         return
@@ -121,6 +133,7 @@ def _suspend_pending_task(
                         "suspension_kind": suspension_kind,
                         "decision": "skip_current_action",
                     },
+                    commit=commit,
                 )
     elif state.get("suspension_kind") is None:
         state["suspension_kind"] = "paused"
@@ -128,6 +141,7 @@ def _suspend_pending_task(
         db,
         task,
         AgentTaskUpdate(status=AgentTaskStatus.SUSPENDED, state_json=state),
+        commit=commit,
     )
 
 def _get_latest_suspended_task(db: Session, session, team_id: int, user_id: int):

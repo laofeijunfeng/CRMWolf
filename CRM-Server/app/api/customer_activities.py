@@ -24,6 +24,11 @@ from app.schemas.customer_activity import (
 )
 from app.services.customer_activity_kinds import get_activity_kind_meta
 from app.services.customer_activity_processing_service import customer_activity_processing_service
+from app.services.customer_activity_post_commit_job_service import customer_activity_post_commit_job_service
+from app.services.customer_activity_write_service import (
+    CustomerActivityWriteResult,
+    customer_activity_write_service,
+)
 from app.services.follow_up_task_projection_service import follow_up_task_projection_service
 
 router = APIRouter(prefix="/v1/customer-activities", tags=["客户活动"])
@@ -65,6 +70,7 @@ def _build_activity_response(
     activity,
     *,
     post_commit: dict[str, Any] | None = None,
+    write_result: CustomerActivityWriteResult | None = None,
 ) -> CustomerActivityResponse:
     creator_info = _load_user_info(db, activity.creator_id)
     owner_info = _load_user_info(db, activity.owner_id)
@@ -127,7 +133,23 @@ def _build_activity_response(
         "effectiveness_evaluated_time": activity.effectiveness_evaluated_time,
         "effectiveness_error_message": activity.effectiveness_error_message,
         "post_commit": post_commit,
+        "durable_work": _durable_work_response(write_result),
     })
+
+
+def _durable_work_response(write_result: CustomerActivityWriteResult | None) -> dict[str, Any] | None:
+    if write_result is None:
+        return None
+    intelligence = write_result.customer_intelligence_request
+    return {
+        "activity_revision": write_result.activity_revision,
+        "post_commit_job_public_id": (
+            write_result.post_commit_job.job_public_id if write_result.post_commit_job is not None else None
+        ),
+        "customer_intelligence_request_id": intelligence.request_id if intelligence is not None else None,
+        "customer_intelligence_scope": intelligence.scope if intelligence is not None else None,
+        "customer_intelligence_event": intelligence.event.to_dict() if intelligence is not None else None,
+    }
 
 
 def _update_touched_post_commit_fields(activity_update: CustomerActivityUpdate) -> bool:
@@ -161,33 +183,31 @@ async def create_activity(
     db: Session = Depends(get_db),
 ):
     customer = check_customer_activity_permission(customer_id, team_id, current_user, db)
-    created = customer_activity_crud.create(
-        db=db,
+    write_result = customer_activity_write_service.create(
+        db,
         obj_in=activity,
         customer_id=customer.id,
         creator_id=str(current_user.id),
         owner_id=str(current_user.id),
         team_id=team_id,
         operator_name=current_user.name,
+        post_commit_trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_CREATED_DETERMINISTIC,
+        actor_id=str(current_user.id),
     )
     post_commit: dict[str, Any] | None = None
-    if post_commit_mode == "sync":
-        post_commit_result = await customer_activity_processing_service.run_post_commit_workflow(
-            activity_id=created.id,
-            team_id=team_id,
-            trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_CREATED_DETERMINISTIC,
-            actor_id=str(current_user.id),
-        )
+    if post_commit_mode == "sync" and write_result.post_commit_job is not None:
+        post_commit_result = await customer_activity_post_commit_job_service.run(write_result.post_commit_job)
         post_commit = post_commit_result.get("post_commit")
+        customer_activity_write_service.kick(write_result, include_post_commit=False)
     else:
-        await customer_activity_processing_service.trigger_post_commit_workflow(
-            activity_id=created.id,
-            team_id=team_id,
-            trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_CREATED_DETERMINISTIC,
-            actor_id=str(current_user.id),
-        )
-    await customer_activity_processing_service.trigger_processing(created.id, team_id)
-    return _build_activity_response(db, created, post_commit=post_commit)
+        customer_activity_write_service.kick(write_result)
+    await customer_activity_processing_service.trigger_processing(write_result.activity.id, team_id)
+    return _build_activity_response(
+        db,
+        write_result.activity,
+        post_commit=post_commit,
+        write_result=write_result,
+    )
 
 
 @router.get("/{customer_id}", response_model=List[CustomerActivityResponse], summary="查询客户活动列表")
@@ -224,17 +244,16 @@ async def update_activity(
     if activity.creator_id != str(current_user.id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权更新此客户活动")
     check_customer_activity_permission(activity.customer_id, team_id, current_user, db)
-    should_run_post_commit = _update_touched_post_commit_fields(activity_update)
-    updated = customer_activity_crud.update(db, activity, activity_update)
-    if should_run_post_commit:
-        await customer_activity_processing_service.trigger_post_commit_workflow(
-            activity_id=updated.id,
-            team_id=team_id,
-            trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_UPDATED,
-            actor_id=str(current_user.id),
-        )
-    await customer_activity_processing_service.trigger_processing(updated.id, team_id)
-    return _build_activity_response(db, updated)
+    write_result = customer_activity_write_service.update(
+        db,
+        activity=activity,
+        obj_in=activity_update,
+        post_commit_trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_UPDATED,
+        actor_id=str(current_user.id),
+    )
+    customer_activity_write_service.kick(write_result)
+    await customer_activity_processing_service.trigger_processing(write_result.activity.id, team_id)
+    return _build_activity_response(db, write_result.activity, write_result=write_result)
 
 
 @router.patch("/{activity_id}/next-time", response_model=CustomerActivityResponse, summary="更新下次跟进时间")
@@ -250,17 +269,16 @@ async def update_next_time(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="客户活动不存在")
     check_customer_activity_permission(activity.customer_id, team_id, current_user, db)
     if next_time.next_follow_time:
-        updated = customer_activity_crud.update_next_time(db, activity, next_time.next_follow_time)
-        await customer_activity_processing_service.trigger_post_commit_workflow(
-            activity_id=updated.id,
-            team_id=team_id,
-            trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_UPDATED,
+        write_result = customer_activity_write_service.update_next_follow_time(
+            db,
+            activity=activity,
+            next_follow_time=next_time.next_follow_time,
+            post_commit_trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_UPDATED,
             actor_id=str(current_user.id),
         )
-        customer_activity_crud.update_effectiveness_status(db, updated.id, "GENERATING")
-        db.refresh(updated)
-        await customer_activity_processing_service.trigger_evaluation(updated.id, team_id)
-        return _build_activity_response(db, updated)
+        customer_activity_write_service.kick(write_result)
+        await customer_activity_processing_service.trigger_evaluation(write_result.activity.id, team_id)
+        return _build_activity_response(db, write_result.activity, write_result=write_result)
     return _build_activity_response(db, activity)
 
 

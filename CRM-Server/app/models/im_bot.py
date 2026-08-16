@@ -70,6 +70,14 @@ class IMInboundEvent(Base):
     agent_session_id = Column(BigInteger, nullable=True, index=True, comment="回复绑定的Agent会话ID")
     agent_task_id = Column(BigInteger, nullable=True, index=True, comment="回复绑定的Agent任务ID")
     agent_interaction_type = Column(String(80), nullable=True, comment="回复绑定的Agent交互事件类型")
+    confirmation_delivery_public_id = Column(
+        String(64), nullable=True, index=True, comment="精确绑定的确认提示投递ID"
+    )
+    confirmation_case_public_id = Column(
+        String(64), nullable=True, index=True, comment="精确绑定的确认Case ID"
+    )
+    agent_interaction_id = Column(String(80), nullable=True, index=True, comment="精确绑定的Agent交互ID")
+    prompt_delivery_key = Column(String(128), nullable=True, index=True, comment="确认提示幂等归因键")
     error_message = Column(Text, nullable=True, comment="错误信息")
     raw_event = Column(JSON, nullable=True, comment="必要事件快照")
     created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")

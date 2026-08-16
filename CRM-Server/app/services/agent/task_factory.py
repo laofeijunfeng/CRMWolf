@@ -1,64 +1,26 @@
 """Factories for persisted Agent waiting tasks."""
 from __future__ import annotations
 
-from copy import deepcopy
-import json
 import uuid
-from typing import Optional
 
-from fastapi import HTTPException, status
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.crud.agent import agent_session_crud, agent_task_crud
-from app.crud.procurement import procurement_method_crud
+from app.crud.agent import agent_task_crud
 from app.models.agent import AgentTaskStatus
 from app.models.customer import Customer
 from app.models.lead import Lead
 from app.schemas.agent import (
-    AgentCreateSessionRequest,
-    AgentSessionCreate,
-    AgentSessionUpdate,
     AgentTaskCreate,
-    AgentTaskUpdate,
 )
-from app.services.agent.guardrails import AgentToolExecutionPolicy
-from app.services.agent.quality import AgentFollowUpQualityEvaluatorError, agent_follow_up_quality_evaluator
-from app.services.agent.runtime import AgentToolRuntime
-from app.services.agent import action_workflow
-from app.services.agent import task_display
-from app.services.agent import workflow_action_ledger
+from app.services.agent import action_workflow, task_display, workflow_action_ledger
 from app.services.agent.schemas import (
     AgentHITLPolicy,
-    AgentMemorySnapshot,
-    AgentPendingInterruptionDecision,
-    AgentSemanticParseResult,
 )
-from app.services.agent.semantic import AgentSemanticParserError, agent_semantic_parser
-from app.services.agent.temporal import agent_temporal_resolver
-from app.services.agent.tools.api_client import CRMAPIClientError
-from app.services.agent.tool_registry import AgentToolRegistry
-from app.services.agent.tools import CRMAgentToolService
-from app.services.agent.tools.base import AgentToolContext
-from app.utils.sse_encoder import SSEJsonEncoder
-
 from app.services.agent.task_actions import _tool_name_for_action
-
-
-WAITING_TASK_EVENT_TYPES = frozenset({
-    "confirmation_required",
-    "customer_selection_required",
-    "contact_fields_required",
-    "invoice_title_fields_required",
-    "deployment_info_fields_required",
-    "customer_member_fields_required",
-    "payment_fields_required",
-    "lead_fields_required",
-    "customer_fields_required",
-    "opportunity_fields_required",
-    "follow_up_quality_required",
-    "business_selection_required",
-})
+from app.services.agent.waiting_task_semantics import (
+    WAITING_TASK_EVENT_TYPES,
+    normalize_waiting_task_state,
+)
 
 
 def _new_task_key() -> str:
@@ -171,8 +133,9 @@ def _create_waiting_task_from_event(db: Session, event: dict, team_id: int, user
             target_id=target_id,
             summary=confirmation_summary,
             input_json=payload,
-            state_json={
+            state_json=normalize_waiting_task_state({
                 "action": action,
+                "source_event": event.get("event"),
                 "payload": payload,
                 "customer": customer,
                 "customers": customers,
@@ -182,7 +145,7 @@ def _create_waiting_task_from_event(db: Session, event: dict, team_id: int, user
                 "workflow": workflow,
                 "hitl_review": hitl_review,
                 "hitl": hitl_policy.model_dump(exclude_none=True),
-            },
+            }),
         ),
     )
     workflow_action_ledger.create_or_update_waiting_action(

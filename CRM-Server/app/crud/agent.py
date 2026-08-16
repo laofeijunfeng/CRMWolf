@@ -6,6 +6,7 @@ through existing API endpoints in the tool layer.
 from typing import List, Optional, Tuple
 
 from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.agent import (
@@ -101,24 +102,43 @@ class AgentSessionCRUD:
             return db_obj
         return self.create(db, obj_in)
 
-    def update(self, db: Session, db_obj: AgentSession, obj_in: AgentSessionUpdate) -> AgentSession:
+    def update(
+        self,
+        db: Session,
+        db_obj: AgentSession,
+        obj_in: AgentSessionUpdate,
+        *,
+        commit: bool = True,
+    ) -> AgentSession:
         update_data = obj_in.model_dump(exclude_unset=True)
         for field, value in update_data.items():
             setattr(db_obj, field, value)
-        db.commit()
-        db.refresh(db_obj)
+        if commit:
+            db.commit()
+            db.refresh(db_obj)
+        else:
+            db.flush()
         return db_obj
 
 
 class AgentMessageCRUD:
-    def create(self, db: Session, obj_in: AgentMessageCreate) -> AgentMessage:
+    def create(
+        self,
+        db: Session,
+        obj_in: AgentMessageCreate,
+        *,
+        commit: bool = True,
+    ) -> AgentMessage:
         db_obj = AgentMessage(**obj_in.model_dump())
         db.add(db_obj)
         session = db.query(AgentSession).filter(AgentSession.id == obj_in.session_id).first()
         if session is not None:
             session.last_modified_time = business_now()
-        db.commit()
-        db.refresh(db_obj)
+        if commit:
+            db.commit()
+            db.refresh(db_obj)
+        else:
+            db.flush()
         return db_obj
 
     def list_by_session(
@@ -161,6 +181,26 @@ class AgentTaskCRUD:
             query = query.filter(AgentTask.user_id == user_id)
         return query.first()
 
+    def get_by_id_for_update(
+        self,
+        db: Session,
+        task_id: int,
+        *,
+        team_id: int,
+        user_id: int,
+    ) -> Optional[AgentTask]:
+        return (
+            db.query(AgentTask)
+            .filter(
+                AgentTask.id == task_id,
+                AgentTask.team_id == team_id,
+                AgentTask.user_id == user_id,
+            )
+            .populate_existing()
+            .with_for_update()
+            .first()
+        )
+
     def get_by_key(
         self,
         db: Session,
@@ -181,6 +221,26 @@ class AgentTaskCRUD:
         db.commit()
         db.refresh(db_obj)
         return db_obj
+
+    def get_or_create_by_task_key(self, db: Session, obj_in: AgentTaskCreate) -> tuple[AgentTask, bool]:
+        """Return one globally unique task projection for a stable task key."""
+
+        existing = self.get_by_key(db, obj_in.task_key)
+        if existing is not None:
+            return existing, False
+        candidate = AgentTask(**obj_in.model_dump())
+        try:
+            with db.begin_nested():
+                db.add(candidate)
+                db.flush()
+        except IntegrityError:
+            existing = self.get_by_key(db, obj_in.task_key)
+            if existing is None:
+                raise
+            return existing, False
+        db.commit()
+        db.refresh(candidate)
+        return candidate, True
 
     def list_by_session(
         self,
@@ -210,12 +270,22 @@ class AgentTaskCRUD:
             AgentTask.status == AgentTaskStatus.WAITING_USER,
         ).order_by(AgentTask.created_time.desc(), AgentTask.id.desc()).first()
 
-    def update(self, db: Session, db_obj: AgentTask, obj_in: AgentTaskUpdate) -> AgentTask:
+    def update(
+        self,
+        db: Session,
+        db_obj: AgentTask,
+        obj_in: AgentTaskUpdate,
+        *,
+        commit: bool = True,
+    ) -> AgentTask:
         update_data = obj_in.model_dump(exclude_unset=True)
         for field, value in update_data.items():
             setattr(db_obj, field, value)
-        db.commit()
-        db.refresh(db_obj)
+        if commit:
+            db.commit()
+            db.refresh(db_obj)
+        else:
+            db.flush()
         return db_obj
 
 
@@ -284,30 +354,74 @@ class AgentIdempotencyKeyCRUD:
             AgentIdempotencyKey.action_key == action_key,
         ).first()
 
-    def create(self, db: Session, obj_in: AgentIdempotencyKeyCreate) -> AgentIdempotencyKey:
+    def create(
+        self,
+        db: Session,
+        obj_in: AgentIdempotencyKeyCreate,
+        *,
+        commit: bool = True,
+    ) -> AgentIdempotencyKey:
         db_obj = AgentIdempotencyKey(**obj_in.model_dump())
         db.add(db_obj)
-        db.commit()
-        db.refresh(db_obj)
+        if commit:
+            db.commit()
+            db.refresh(db_obj)
+        else:
+            db.flush()
         return db_obj
 
-    def get_or_create(self, db: Session, obj_in: AgentIdempotencyKeyCreate) -> AgentIdempotencyKey:
+    def ensure(
+        self,
+        db: Session,
+        obj_in: AgentIdempotencyKeyCreate,
+        *,
+        commit: bool = True,
+    ) -> tuple[AgentIdempotencyKey, bool]:
         db_obj = self.get_by_action_key(db, obj_in.team_id, obj_in.user_id, obj_in.action_key)
         if db_obj:
-            return db_obj
-        return self.create(db, obj_in)
+            return db_obj, False
+
+        candidate = AgentIdempotencyKey(**obj_in.model_dump())
+        try:
+            with db.begin_nested():
+                db.add(candidate)
+                db.flush()
+        except IntegrityError:
+            db_obj = self.get_by_action_key(db, obj_in.team_id, obj_in.user_id, obj_in.action_key)
+            if db_obj is None:
+                raise
+            return db_obj, False
+        if commit:
+            db.commit()
+            db.refresh(candidate)
+        return candidate, True
+
+    def get_or_create(
+        self,
+        db: Session,
+        obj_in: AgentIdempotencyKeyCreate,
+        *,
+        commit: bool = True,
+    ) -> AgentIdempotencyKey:
+        db_obj, _ = self.ensure(db, obj_in, commit=commit)
+        return db_obj
 
     def update(
         self,
         db: Session,
         db_obj: AgentIdempotencyKey,
         obj_in: AgentIdempotencyKeyUpdate,
+        *,
+        commit: bool = True,
     ) -> AgentIdempotencyKey:
         update_data = obj_in.model_dump(exclude_unset=True)
         for field, value in update_data.items():
             setattr(db_obj, field, value)
-        db.commit()
-        db.refresh(db_obj)
+        if commit:
+            db.commit()
+            db.refresh(db_obj)
+        else:
+            db.flush()
         return db_obj
 
 
@@ -325,6 +439,26 @@ class AgentWorkflowActionCRUD:
         if user_id is not None:
             query = query.filter(AgentWorkflowAction.user_id == user_id)
         return query.first()
+
+    def get_by_action_id_for_update(
+        self,
+        db: Session,
+        action_id: str,
+        *,
+        team_id: int,
+        user_id: int,
+    ) -> Optional[AgentWorkflowAction]:
+        return (
+            db.query(AgentWorkflowAction)
+            .filter(
+                AgentWorkflowAction.action_id == action_id,
+                AgentWorkflowAction.team_id == team_id,
+                AgentWorkflowAction.user_id == user_id,
+            )
+            .populate_existing()
+            .with_for_update()
+            .first()
+        )
 
     def get_by_workflow_action(
         self,
@@ -370,30 +504,50 @@ class AgentWorkflowActionCRUD:
                 query = query.filter(AgentWorkflowAction.user_id == user_id)
         return query.order_by(AgentWorkflowAction.created_time.asc(), AgentWorkflowAction.id.asc()).all()
 
-    def create(self, db: Session, obj_in: AgentWorkflowActionCreate) -> AgentWorkflowAction:
+    def create(
+        self,
+        db: Session,
+        obj_in: AgentWorkflowActionCreate,
+        *,
+        commit: bool = True,
+    ) -> AgentWorkflowAction:
         db_obj = AgentWorkflowAction(**obj_in.model_dump())
         db.add(db_obj)
-        db.commit()
-        db.refresh(db_obj)
+        if commit:
+            db.commit()
+            db.refresh(db_obj)
+        else:
+            db.flush()
         return db_obj
 
-    def get_or_create(self, db: Session, obj_in: AgentWorkflowActionCreate) -> AgentWorkflowAction:
+    def get_or_create(
+        self,
+        db: Session,
+        obj_in: AgentWorkflowActionCreate,
+        *,
+        commit: bool = True,
+    ) -> AgentWorkflowAction:
         db_obj = self.get_by_action_id(db, obj_in.action_id, team_id=obj_in.team_id, user_id=obj_in.user_id)
         if db_obj:
             return db_obj
-        return self.create(db, obj_in)
+        return self.create(db, obj_in, commit=commit)
 
     def update(
         self,
         db: Session,
         db_obj: AgentWorkflowAction,
         obj_in: AgentWorkflowActionUpdate,
+        *,
+        commit: bool = True,
     ) -> AgentWorkflowAction:
         update_data = obj_in.model_dump(exclude_unset=True)
         for field, value in update_data.items():
             setattr(db_obj, field, value)
-        db.commit()
-        db.refresh(db_obj)
+        if commit:
+            db.commit()
+            db.refresh(db_obj)
+        else:
+            db.flush()
         return db_obj
 
     def list_by_session(

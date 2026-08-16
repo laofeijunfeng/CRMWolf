@@ -62,6 +62,8 @@ class Settings(BaseSettings):
     CUSTOMER_INTELLIGENCE_RETRY_ENABLED: bool = True
     CUSTOMER_INTELLIGENCE_RETRY_INTERVAL_SECONDS: int = 60
     CUSTOMER_INTELLIGENCE_RETRY_BATCH_SIZE: int = 20
+    CUSTOMER_INTELLIGENCE_LEASE_SECONDS: int = 300
+    CUSTOMER_INTELLIGENCE_MAX_ATTEMPTS: int = 3
     CUSTOMER_INTELLIGENCE_BACKFILL_ENABLED: bool = True
     CUSTOMER_INTELLIGENCE_BACKFILL_INTERVAL_SECONDS: int = 300
     CUSTOMER_INTELLIGENCE_BACKFILL_BATCH_SIZE: int = 20
@@ -70,6 +72,18 @@ class Settings(BaseSettings):
     AGENT_WORKFLOW_RECOVERY_INTERVAL_SECONDS: int = 60
     AGENT_WORKFLOW_RECOVERY_BATCH_SIZE: int = 20
     AGENT_WORKFLOW_RECOVERY_SAFE_ACTION_TYPES: str = ""
+    FOLLOW_UP_CONFIRMATION_DELIVERY_RECOVERY_ENABLED: bool = True
+    FOLLOW_UP_CONFIRMATION_DELIVERY_RECOVERY_INTERVAL_SECONDS: int = 30
+    FOLLOW_UP_CONFIRMATION_DELIVERY_RECOVERY_BATCH_SIZE: int = 50
+    FOLLOW_UP_CONFIRMATION_DELIVERY_MAX_ATTEMPTS: int = 5
+    FOLLOW_UP_CONFIRMATION_DELIVERY_RETRY_BASE_SECONDS: int = 30
+    FOLLOW_UP_CONFIRMATION_DELIVERY_LEASE_SECONDS: int = 120
+    CUSTOMER_ACTIVITY_POST_COMMIT_RECOVERY_ENABLED: bool = True
+    CUSTOMER_ACTIVITY_POST_COMMIT_RECOVERY_INTERVAL_SECONDS: int = 30
+    CUSTOMER_ACTIVITY_POST_COMMIT_RECOVERY_BATCH_SIZE: int = 50
+    CUSTOMER_ACTIVITY_POST_COMMIT_MAX_ATTEMPTS: int = 5
+    CUSTOMER_ACTIVITY_POST_COMMIT_RETRY_BASE_SECONDS: int = 30
+    CUSTOMER_ACTIVITY_POST_COMMIT_LEASE_SECONDS: int = 300
 
     # 飞书配置(已废弃, 保留兼容)
     FEISHU_APP_ID: str = ""
@@ -104,31 +118,31 @@ class Settings(BaseSettings):
 
     # 开放接口配置
     OPENAPI_RATE_LIMIT_TPS: int = 100  # 默认 TPS
-    OPENAPI_BURST_LIMIT: int = 200     # 突发限制
+    OPENAPI_BURST_LIMIT: int = 200  # 突发限制
 
     # AI 工具配置(Phase 3-5 功能开关)
-    MULTI_TOOL_ENABLED: bool = True    # 是否启用多工具返回(parsed_multi)
-    REACT_ENABLED: bool = True         # 是否启用 ReAct 循环(已稳定, 开启)
-    AGENT_ENABLED: bool = False        # Agent 模式总开关(关闭则使用原有单工具模式)
-    WORKFLOW_ENABLED: bool = True      # Workflow 模式开关(业务流程硬编码编排)
-    REACT_MAX_ROUNDS: int = 10         # ReAct 最大轮数
+    MULTI_TOOL_ENABLED: bool = True  # 是否启用多工具返回(parsed_multi)
+    REACT_ENABLED: bool = True  # 是否启用 ReAct 循环(已稳定, 开启)
+    AGENT_ENABLED: bool = False  # Agent 模式总开关(关闭则使用原有单工具模式)
+    WORKFLOW_ENABLED: bool = True  # Workflow 模式开关(业务流程硬编码编排)
+    REACT_MAX_ROUNDS: int = 10  # ReAct 最大轮数
     REACT_SINGLE_ROUND_TIMEOUT: int = 30  # 单轮超时(秒)
-    REACT_TOTAL_TIMEOUT: int = 120     # 总超时(秒)
+    REACT_TOTAL_TIMEOUT: int = 120  # 总超时(秒)
     AGENT_SESSION_TIMEOUT: int = 1800  # 会话过期时间(秒, 默认30分钟)
     WORKFLOW_SESSION_TIMEOUT: int = 1800  # Workflow Session 过期时间(秒)
 
     # LangSmith Tracing 配置(用于 AI Assistant 可视化调试)
     LANGCHAIN_TRACING_V2: bool = True  # 是否启用 LangSmith Tracing
-    LANGSMITH_API_KEY: str = ""        # LangSmith API Key(从环境变量读取)
+    LANGSMITH_API_KEY: str = ""  # LangSmith API Key(从环境变量读取)
     LANGCHAIN_PROJECT: str = "CRMWolf-AI-Assistant"  # LangSmith 项目名称
     LANGSMITH_ENDPOINT: str = "https://api.smith.langchain.com"  # LangSmith API 端点
 
     # Phase E: Agent 资源隔离配置
-    AGENT_THREAD_POOL_SIZE: int = 4    # Agent 专用线程池大小
-    AGENT_MAX_CONCURRENT: int = 10     # Agent 最大并发数
-    AGENT_TIMEOUT: int = 120           # Agent 执行超时(秒)
-    AGENT_USER_RATE_LIMIT: int = 10    # 每用户每分钟请求限制
-    AGENT_GLOBAL_RATE_LIMIT: int = 100 # 全局每分钟请求限制
+    AGENT_THREAD_POOL_SIZE: int = 4  # Agent 专用线程池大小
+    AGENT_MAX_CONCURRENT: int = 10  # Agent 最大并发数
+    AGENT_TIMEOUT: int = 120  # Agent 执行超时(秒)
+    AGENT_USER_RATE_LIMIT: int = 10  # 每用户每分钟请求限制
+    AGENT_GLOBAL_RATE_LIMIT: int = 100  # 全局每分钟请求限制
     AGENT_INTERNAL_API_BASE_URL: str = "http://127.0.0.1:8000/api"  # Agent Tool 调用现有后端 API 的基础地址
 
     def get_database_url(self) -> str:

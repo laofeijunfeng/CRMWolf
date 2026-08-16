@@ -1,6 +1,7 @@
 import json
 import logging
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -51,11 +52,16 @@ def _default_content_json(activity_kind: str, source_content: str, next_action: 
     }
 
 
-def _upsert_customer_activity_evidence(db: Session, activity: CustomerActivity) -> None:
+def _upsert_customer_activity_evidence(
+    db: Session,
+    activity: CustomerActivity,
+    *,
+    commit: bool = True,
+) -> None:
     try:
         from app.services.customer_vector_document_service import customer_vector_document_service
 
-        customer_vector_document_service.upsert_customer_activity(db, activity)
+        customer_vector_document_service.upsert_customer_activity(db, activity, commit=commit)
     except Exception:
         logger.exception("客户活动证据元数据写入失败: activity_id=%s", activity.id)
 
@@ -67,6 +73,38 @@ def _mark_customer_activity_evidence_deleted(db: Session, activity: CustomerActi
         customer_vector_document_service.mark_customer_activity_deleted(db, activity)
     except Exception:
         logger.exception("客户活动证据元数据删除标记失败: activity_id=%s", activity.id)
+
+
+POST_COMMIT_RELEVANT_FIELDS = frozenset(
+    {
+        "activity_kind",
+        "source_content",
+        "content_json",
+        "summary",
+        "next_follow_time",
+        "next_follow_time_source",
+        "next_action",
+        "occurred_at",
+        "owner_id",
+        "customer_id",
+    }
+)
+
+
+def _post_commit_value(value: Any) -> Any:
+    """Normalize mutable/serialized activity values before revision comparison."""
+
+    if isinstance(value, dict):
+        return _json_dumps(value)
+    return value
+
+
+def _post_commit_fields_changed(db_obj: CustomerActivity, values: dict[str, Any]) -> bool:
+    return any(
+        field in POST_COMMIT_RELEVANT_FIELDS
+        and _post_commit_value(getattr(db_obj, field, None)) != _post_commit_value(value)
+        for field, value in values.items()
+    )
 
 
 class CustomerActivityCRUD:
@@ -131,6 +169,7 @@ class CustomerActivityCRUD:
         operator_name: str | None = None,
         original_lead_id: int | None = None,
         owner_id: str | None = None,
+        commit: bool = True,
     ) -> CustomerActivity:
         from app.services.deal_journey_service import deal_journey_service
         from app.services.operation_log_service import operation_log_service
@@ -146,6 +185,7 @@ class CustomerActivityCRUD:
         data["creator_id"] = creator_id
         data["owner_id"] = owner_id or creator_id
         data["team_id"] = team_id
+        data["post_commit_revision"] = 1
         data["occurred_at"] = data.get("occurred_at") or business_now()
         if data.get("next_follow_time") is not None and not data.get("next_follow_time_source"):
             data["next_follow_time_source"] = "USER"
@@ -163,10 +203,10 @@ class CustomerActivityCRUD:
 
         db_obj = CustomerActivity(**data)
         db.add(db_obj)
-        db.commit()
-        db.refresh(db_obj)
+        db.flush()
 
         from app.models.deal_journey import DealJourneyEventType, DealJourneySourceType
+
         label = get_activity_kind_meta(db_obj.activity_kind)["label"]
         deal_journey_service.record_event(
             db,
@@ -179,8 +219,11 @@ class CustomerActivityCRUD:
             event_time=db_obj.occurred_at,
             actor_id=creator_id,
             summary=f"新增客户活动: {label}",
+            # CustomerActivityWriteService enqueues the canonical, revision-scoped
+            # intelligence event in the same transaction. The journey event remains
+            # evidence/audit and must not create a duplicate intelligence run.
+            enqueue_customer_intelligence=False,
         )
-        db.commit()
 
         operation_log_service.log_customer_activity(
             db=db,
@@ -193,8 +236,14 @@ class CustomerActivityCRUD:
             next_action=db_obj.next_action,
             team_id=team_id,
             activity_id=db_obj.id,
+            commit=False,
         )
-        _upsert_customer_activity_evidence(db, db_obj)
+        _upsert_customer_activity_evidence(db, db_obj, commit=False)
+        if commit:
+            db.commit()
+            db.refresh(db_obj)
+        else:
+            db.flush()
         return db_obj
 
     def migrate_from_lead(
@@ -238,8 +287,16 @@ class CustomerActivityCRUD:
             _upsert_customer_activity_evidence(db, activity)
         return migrated
 
-    def update(self, db: Session, db_obj: CustomerActivity, obj_in: CustomerActivityUpdate) -> CustomerActivity:
+    def update(
+        self,
+        db: Session,
+        db_obj: CustomerActivity,
+        obj_in: CustomerActivityUpdate,
+        *,
+        commit: bool = True,
+    ) -> CustomerActivity:
         update_data = obj_in.model_dump(exclude_unset=True)
+        revision_changed = _post_commit_fields_changed(db_obj, update_data)
         if "content_json" in update_data:
             update_data["content_json"] = _json_dumps(update_data["content_json"])
         if "source_content" in update_data:
@@ -250,9 +307,14 @@ class CustomerActivityCRUD:
             update_data["next_follow_time_source"] = "USER"
         for field, value in update_data.items():
             setattr(db_obj, field, value)
-        db.commit()
-        db.refresh(db_obj)
-        _upsert_customer_activity_evidence(db, db_obj)
+        if revision_changed:
+            db_obj.post_commit_revision = int(db_obj.post_commit_revision or 1) + 1
+        _upsert_customer_activity_evidence(db, db_obj, commit=False)
+        if commit:
+            db.commit()
+            db.refresh(db_obj)
+        else:
+            db.flush()
         return db_obj
 
     def update_next_time(
@@ -260,12 +322,20 @@ class CustomerActivityCRUD:
         db: Session,
         db_obj: CustomerActivity,
         next_follow_time: datetime | None,
+        *,
+        commit: bool = True,
     ) -> CustomerActivity:
+        changed = db_obj.next_follow_time != next_follow_time or db_obj.next_follow_time_source != "USER"
         db_obj.next_follow_time = next_follow_time
         db_obj.next_follow_time_source = "USER"
-        db.commit()
-        db.refresh(db_obj)
-        _upsert_customer_activity_evidence(db, db_obj)
+        if changed:
+            db_obj.post_commit_revision = int(db_obj.post_commit_revision or 1) + 1
+        _upsert_customer_activity_evidence(db, db_obj, commit=False)
+        if commit:
+            db.commit()
+            db.refresh(db_obj)
+        else:
+            db.flush()
         return db_obj
 
     def update_processing_status(
@@ -274,6 +344,8 @@ class CustomerActivityCRUD:
         activity_id: int,
         status: str,
         error_message: str | None = None,
+        *,
+        commit: bool = True,
     ) -> CustomerActivity | None:
         activity = self.get_by_id(db, activity_id)
         if not activity:
@@ -282,9 +354,12 @@ class CustomerActivityCRUD:
         activity.processing_error = error_message
         if status == "COMPLETED":
             activity.processed_at = business_now()
-        db.commit()
-        db.refresh(activity)
-        _upsert_customer_activity_evidence(db, activity)
+        _upsert_customer_activity_evidence(db, activity, commit=False)
+        if commit:
+            db.commit()
+            db.refresh(activity)
+        else:
+            db.flush()
         return activity
 
     def update_processed_content(
@@ -298,24 +373,40 @@ class CustomerActivityCRUD:
         next_action: str | None = None,
         next_follow_time: datetime | None = None,
         next_follow_time_source: str | None = None,
+        commit: bool = True,
     ) -> CustomerActivity | None:
         activity = self.get_by_id(db, activity_id)
         if not activity:
             return None
+        structured_values: dict[str, Any] = {
+            "content_json": content_json,
+            "summary": summary or self.build_summary(activity.activity_kind, content_json, activity.source_content),
+        }
+        if next_action is not None:
+            structured_values["next_action"] = next_action
+        if next_follow_time is not None:
+            structured_values["next_follow_time"] = next_follow_time
+            structured_values["next_follow_time_source"] = next_follow_time_source or "AI_EXTRACTED"
+        revision_changed = _post_commit_fields_changed(activity, structured_values)
         activity.title = title or self.build_title(activity.activity_kind, content_json)
         activity.content_json = _json_dumps(content_json)
-        activity.summary = summary or self.build_summary(activity.activity_kind, content_json, activity.source_content)
+        activity.summary = structured_values["summary"]
         if next_action is not None:
             activity.next_action = next_action
         if next_follow_time is not None:
             activity.next_follow_time = next_follow_time
-            activity.next_follow_time_source = next_follow_time_source or "AI_EXTRACTED"
+            activity.next_follow_time_source = str(structured_values["next_follow_time_source"])
+        if revision_changed:
+            activity.post_commit_revision = int(activity.post_commit_revision or 1) + 1
         activity.processing_status = "COMPLETED"
         activity.processing_error = None
         activity.processed_at = business_now()
-        db.commit()
-        db.refresh(activity)
-        _upsert_customer_activity_evidence(db, activity)
+        _upsert_customer_activity_evidence(db, activity, commit=False)
+        if commit:
+            db.commit()
+            db.refresh(activity)
+        else:
+            db.flush()
         return activity
 
     def update_effectiveness_status(
@@ -324,6 +415,8 @@ class CustomerActivityCRUD:
         activity_id: int,
         status: str,
         error_message: str | None = None,
+        *,
+        commit: bool = True,
     ) -> CustomerActivity | None:
         activity = self.get_by_id(db, activity_id)
         if not activity:
@@ -338,8 +431,11 @@ class CustomerActivityCRUD:
             activity.effectiveness_evaluated_time = None
         elif status == "FAILED":
             activity.effectiveness_evaluated_time = business_now()
-        db.commit()
-        db.refresh(activity)
+        if commit:
+            db.commit()
+            db.refresh(activity)
+        else:
+            db.flush()
         return activity
 
     def update_effectiveness_result(

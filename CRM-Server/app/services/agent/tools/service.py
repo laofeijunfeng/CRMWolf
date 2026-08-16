@@ -830,6 +830,7 @@ class CRMAgentToolService:
                 "POST",
                 f"/v1/customer-activities/{customer_public_id}",
                 context.authorization,
+                idempotency_key=action_key,
                 params={"post_commit_mode": "sync"},
                 json={
                     "activity_kind": activity_kind,
@@ -857,6 +858,7 @@ class CRMAgentToolService:
                 "POST",
                 "/v1/leads/",
                 context.authorization,
+                idempotency_key=action_key,
                 json=lead,
             )
 
@@ -876,6 +878,7 @@ class CRMAgentToolService:
                 "POST",
                 "/v1/customers/",
                 context.authorization,
+                idempotency_key=action_key,
                 json=customer,
             )
 
@@ -906,6 +909,7 @@ class CRMAgentToolService:
                 "POST",
                 f"/v1/leads/{lead_public_id}/follow-ups",
                 context.authorization,
+                idempotency_key=action_key,
                 json={
                     "content": content,
                     "method": method,
@@ -932,6 +936,7 @@ class CRMAgentToolService:
                 "POST",
                 f"/v1/customers/{customer_public_id}/contacts",
                 context.authorization,
+                idempotency_key=action_key,
                 json=contact,
             )
 
@@ -958,6 +963,7 @@ class CRMAgentToolService:
                 "POST",
                 "/v1/invoice-titles",
                 context.authorization,
+                idempotency_key=action_key,
                 params={"customer_id": customer_public_id},
                 json=invoice_title,
             )
@@ -966,6 +972,7 @@ class CRMAgentToolService:
                     "PATCH",
                     f"/v1/invoice-titles/{created['id']}/set-default",
                     context.authorization,
+                    idempotency_key=f"{action_key}:set-default",
                 )
                 return {"invoice_title": updated, "set_default": True}
             return {"invoice_title": created, "set_default": False}
@@ -989,6 +996,7 @@ class CRMAgentToolService:
                 "POST",
                 "/v1/deployment-infos/",
                 context.authorization,
+                idempotency_key=action_key,
                 json=api_payload,
             )
 
@@ -1010,6 +1018,7 @@ class CRMAgentToolService:
                 "POST",
                 f"/v1/customers/{customer_public_id}/members",
                 context.authorization,
+                idempotency_key=action_key,
                 json=member,
             )
 
@@ -1033,6 +1042,7 @@ class CRMAgentToolService:
                 "POST",
                 "/v1/opportunities/",
                 context.authorization,
+                idempotency_key=action_key,
                 json=api_payload,
             )
 
@@ -1108,6 +1118,7 @@ class CRMAgentToolService:
                 "POST",
                 f"/v1/opportunities/{opportunity_public_id}/move-stage",
                 context.authorization,
+                idempotency_key=action_key,
                 json={"stage_template_id": stage_template_id},
             )
 
@@ -1137,6 +1148,7 @@ class CRMAgentToolService:
                 "POST",
                 f"/v1/payments/contracts/{contract_id}/payment-plans",
                 context.authorization,
+                idempotency_key=action_key,
                 json={"plans": [plan]},
             )
             return {"items": created if isinstance(created, list) else [created]}
@@ -1171,6 +1183,7 @@ class CRMAgentToolService:
                 "POST",
                 f"/v1/payments/payment-plans/{payment_plan_id}/records",
                 context.authorization,
+                idempotency_key=action_key,
                 json=record,
             )
 
@@ -1303,7 +1316,7 @@ class CRMAgentToolService:
         call_api: Callable[[], object],
     ) -> AgentToolResult:
         request_hash = self._hash_json(request_json)
-        idempotency = agent_idempotency_key_crud.get_or_create(
+        idempotency, created = agent_idempotency_key_crud.ensure(
             context.db,
             AgentIdempotencyKeyCreate(
                 team_id=context.team_id,
@@ -1314,6 +1327,13 @@ class CRMAgentToolService:
                 request_hash=request_hash,
             ),
         )
+        if idempotency.request_hash != request_hash:
+            return AgentToolResult(
+                tool_name=tool_name,
+                success=False,
+                error_message="idempotency_request_mismatch",
+                status_code=409,
+            )
         if idempotency.status == AgentIdempotencyStatus.SUCCESS:
             return AgentToolResult(
                 tool_name=tool_name,
@@ -1321,19 +1341,52 @@ class CRMAgentToolService:
                 data=idempotency.result_json,
                 idempotent_replay=True,
             )
+        if not created:
+            if idempotency.status == AgentIdempotencyStatus.PENDING:
+                agent_idempotency_key_crud.update(
+                    context.db,
+                    idempotency,
+                    AgentIdempotencyKeyUpdate(
+                        status=AgentIdempotencyStatus.AMBIGUOUS,
+                        error_message="legacy_pending_write_requires_reconciliation",
+                    ),
+                )
+            return AgentToolResult(
+                tool_name=tool_name,
+                success=False,
+                error_message="idempotency_execution_ambiguous",
+                status_code=409,
+            )
 
+        agent_idempotency_key_crud.update(
+            context.db,
+            idempotency,
+            AgentIdempotencyKeyUpdate(
+                status=AgentIdempotencyStatus.DISPATCHED,
+                error_message=None,
+            ),
+        )
         result = await self._run_read_tool(context, tool_name, request_json, call_api)
         if result.success:
             agent_idempotency_key_crud.update(
                 context.db,
                 idempotency,
-                AgentIdempotencyKeyUpdate(status=AgentIdempotencyStatus.SUCCESS, result_json=result.data),
+                AgentIdempotencyKeyUpdate(
+                    status=AgentIdempotencyStatus.SUCCESS,
+                    result_json=result.data,
+                    error_message=None,
+                ),
             )
         else:
+            failure_status = (
+                AgentIdempotencyStatus.FAILED
+                if result.status_code is not None and 400 <= result.status_code < 500
+                else AgentIdempotencyStatus.AMBIGUOUS
+            )
             agent_idempotency_key_crud.update(
                 context.db,
                 idempotency,
-                AgentIdempotencyKeyUpdate(status=AgentIdempotencyStatus.FAILED, error_message=result.error_message),
+                AgentIdempotencyKeyUpdate(status=failure_status, error_message=result.error_message),
             )
         return result
 

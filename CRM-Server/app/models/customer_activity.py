@@ -35,6 +35,7 @@ class CustomerActivity(Base):
     effectiveness_status = Column(String(20), nullable=True, default="PENDING", comment="AI评估状态：PENDING/GENERATING/COMPLETED/FAILED")
     effectiveness_evaluated_time = Column(DateTime, nullable=True, comment="AI评估完成时间")
     effectiveness_error_message = Column(Text, nullable=True, comment="AI评估失败原因")
+    post_commit_revision = Column(Integer, nullable=False, default=1, comment="后提交工作流修订号")
 
     __table_args__ = (
         Index("idx_customer_activity_customer", "customer_id"),

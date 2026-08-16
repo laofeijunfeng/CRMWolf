@@ -3,17 +3,18 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from app.services.agent import action_workflow
-from app.services.agent import interactions
-from app.services.agent import session_state
+import pytest
+
+from app.services.agent import action_workflow, interactions, session_state
+from app.services.agent.input import AgentTurnInput
 from app.services.agent.interrupts import (
     allowed_resume_actions_for_interaction,
     interrupt_from_waiting_event,
     interrupt_from_waiting_task,
+    interrupt_from_waiting_task_snapshot,
     resume_payload_from_turn_input,
     validate_resume_payload,
 )
-from app.services.agent.input import AgentTurnInput
 from app.services.agent.turn_intent import AgentTurnIntentRouter
 
 
@@ -48,6 +49,38 @@ def test_confirmation_waiting_task_projects_to_confirm_interrupt():
     ]
     assert interrupt["interaction"]["prompt"] == "确认后，我会继续执行「确认记录跟进」。"
     assert "create_customer_activity" not in interrupt["interaction"]["prompt"]
+
+
+def test_waiting_task_snapshot_projects_without_orm_hydration():
+    task = SimpleNamespace(
+        id=12,
+        task_key="task_12",
+        status="WAITING_USER",
+        intent="CUSTOMER_ACTIVITY",
+        target_type="customer",
+        target_id=101,
+        summary="等待确认执行：create_customer_activity",
+        state_json={
+            "action": "create_customer_activity",
+            "customer": {"id": 101, "account_name": "广州睿狐科技有限公司"},
+            "payload": {"customer_id": 101, "content": "今天可以签合同了"},
+        },
+    )
+    interaction = interactions._pending_task_interaction(task, task.summary)
+    snapshot = {
+        "id": task.id,
+        "task_key": task.task_key,
+        "status": task.status,
+        "intent": task.intent,
+        "target_type": task.target_type,
+        "target_id": task.target_id,
+        "summary": task.summary,
+        "state_json": task.state_json,
+    }
+
+    assert interrupt_from_waiting_task_snapshot(snapshot, interaction=interaction) == (
+        interrupt_from_waiting_task(task, interaction=interaction)
+    )
 
 
 def test_confirmation_event_prompt_hides_internal_action_key():
@@ -116,6 +149,71 @@ def test_choice_waiting_event_projects_to_disambiguation_interrupt():
     assert interrupt["business_action"] == "select_customer"
     assert interrupt["allowed_resume_actions"] == ["select", "cancel"]
     assert interrupt["draft_payload"]["customers"][0]["id"] == 101
+
+
+@pytest.mark.parametrize(
+    ("action", "source_event", "business_action", "candidate_field"),
+    [
+        ("select_customer_for_activity", "customer_selection_required", "select_customer", "customers"),
+        ("select_customer_for_opportunity", "customer_selection_required", "select_customer", "customers"),
+        ("select_customer_for_contact", "customer_selection_required", "select_customer", "customers"),
+        ("select_customer_for_invoice_title", "customer_selection_required", "select_customer", "customers"),
+        ("select_customer_for_deployment_info", "customer_selection_required", "select_customer", "customers"),
+        ("select_customer_for_customer_member", "customer_selection_required", "select_customer", "customers"),
+        ("select_customer_for_payment_record", "customer_selection_required", "select_customer", "customers"),
+        (
+            "select_contract_for_payment_plan",
+            "business_selection_required",
+            "select_business_object",
+            "contracts",
+        ),
+        (
+            "select_payment_plan_for_record",
+            "business_selection_required",
+            "select_business_object",
+            "payment_plans",
+        ),
+        (
+            "select_opportunity_for_stage_move",
+            "business_selection_required",
+            "select_business_object",
+            "opportunities",
+        ),
+    ],
+)
+def test_selection_waiting_task_snapshot_preserves_disambiguation_semantics(
+    action: str,
+    source_event: str,
+    business_action: str,
+    candidate_field: str,
+):
+    snapshot = {
+        "id": 31,
+        "task_key": "task_31",
+        "status": "WAITING_USER",
+        "target_type": "customer",
+        "target_id": 101,
+        "state_json": {
+            "action": action,
+            candidate_field: [{"id": 101, "name": "候选项"}],
+            "payload": {},
+        },
+    }
+
+    interrupt = interrupt_from_waiting_task_snapshot(
+        snapshot,
+        interaction={
+            "type": "choice",
+            "status": "waiting_user_input",
+            "business_action": business_action,
+        },
+    )
+
+    assert interrupt["type"] == "choice"
+    assert interrupt["source_event"] == source_event
+    assert interrupt["reason"] == "business_object_disambiguation"
+    assert interrupt["business_action"] == business_action
+    assert interrupt["allowed_resume_actions"] == ["select", "cancel"]
 
 
 def test_allowed_resume_actions_has_status_fallback():
@@ -537,3 +635,34 @@ def test_validate_resume_payload_rejects_stale_business_action():
         assert "business_action" in str(exc)
     else:
         raise AssertionError("expected stale business action to be rejected")
+
+
+def test_interrupt_payload_json_preserves_pending_checkpoint_continuation():
+    from app.services.agent.interrupts import interrupt_payload_from_json
+
+    payload = interrupt_payload_from_json({
+        "schema_version": "agent.interrupt.v1",
+        "type": "confirm",
+        "reason": "write_confirmation",
+        "business_action": "create_opportunity",
+        "checkpoint_ref": {
+            "runtime": "crm_agent_pending_task",
+            "thread_id": "crm_agent_pending:2:3:4:101",
+            "checkpoint_ns": "pending_task_subgraph:checkpoint-1",
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "task_id": 101,
+        },
+    })
+
+    assert payload is not None
+    assert payload["checkpoint_ref"] == {
+        "runtime": "crm_agent_pending_task",
+        "thread_id": "crm_agent_pending:2:3:4:101",
+        "checkpoint_ns": "pending_task_subgraph:checkpoint-1",
+        "team_id": 2,
+        "user_id": 3,
+        "session_id": 4,
+        "task_id": 101,
+    }

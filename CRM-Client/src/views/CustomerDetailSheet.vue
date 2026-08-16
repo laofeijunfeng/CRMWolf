@@ -71,8 +71,12 @@ import approvalGenericApi from '@/api/approvalGeneric'
 import { confirmDelete } from '@/utils/confirmDialog'
 
 // ==================== Props & Emits ====================
+type CustomerDetailPanel = 'customer-brief' | 'customer-info' | 'followup' | 'opportunities'
+
 interface Props {
   customerId: string | null
+  targetOpportunityId?: string | null
+  targetPanel?: CustomerDetailPanel | null
   visible: boolean
 }
 
@@ -725,6 +729,17 @@ const handleViewOpportunity = (opportunityId: string): void => {
   restoreFocusOpportunityId.value = null
 }
 
+const applyNavigationTarget = (): void => {
+  if (props.targetOpportunityId !== undefined && props.targetOpportunityId !== null) {
+    handleViewOpportunity(props.targetOpportunityId)
+    return
+  }
+
+  if (props.targetPanel !== undefined && props.targetPanel !== null) {
+    activePanel.value = props.targetPanel
+  }
+}
+
 const handleBackFromOpportunity = (): void => {
   const previousOpportunityId = selectedOpportunityId.value
   selectedOpportunityId.value = null
@@ -1032,6 +1047,7 @@ const handlePaymentPlanDetailViewApproval = (record: PaymentRecordInfo): void =>
 watch(() => props.visible, (visible): void => {
   if (visible && props.customerId !== null) {
     resetLocalNavigation()
+    applyNavigationTarget()
     loadAllData(props.customerId)
   } else if (!visible) {
     // 清理状态
@@ -1058,8 +1074,20 @@ watch(() => props.visible, (visible): void => {
 watch(() => props.customerId, (customerId, previousCustomerId): void => {
   if (!props.visible || customerId === null || customerId === previousCustomerId) return
   resetLocalNavigation()
+  applyNavigationTarget()
   selectedContractId.value = null
   loadAllData(customerId)
+})
+
+watch(() => props.targetOpportunityId, (opportunityId): void => {
+  if (!props.visible || opportunityId === undefined || opportunityId === null) return
+  handleViewOpportunity(opportunityId)
+})
+
+watch(() => props.targetPanel, (panel): void => {
+  const hasTargetOpportunity = props.targetOpportunityId !== undefined && props.targetOpportunityId !== null
+  if (!props.visible || panel === undefined || panel === null || hasTargetOpportunity) return
+  activePanel.value = panel
 })
 </script>
 

@@ -96,12 +96,26 @@ class FollowUpTaskConfirmationPromptChannel:
     IM = "im"
 
 
+class FollowUpTaskConfirmationDeliveryPurpose:
+    """Why a confirmation delivery exists and whether it is intrusive."""
+
+    INBOX_VISIBILITY = "INBOX_VISIBILITY"
+    AGENT_TURN_PROMPT = "AGENT_TURN_PROMPT"
+    IM_PROMPT = "IM_PROMPT"
+
+    INTRUSIVE = frozenset({AGENT_TURN_PROMPT, IM_PROMPT})
+
+
 class FollowUpTaskConfirmationPromptStatus:
     QUEUED = "QUEUED"
     PROJECTED = "PROJECTED"
     SENT = "SENT"
     SKIPPED = "SKIPPED"
     FAILED = "FAILED"
+    EXHAUSTED = "EXHAUSTED"
+    AMBIGUOUS = "AMBIGUOUS"
+
+    TERMINAL = frozenset({SENT, SKIPPED, EXHAUSTED, AMBIGUOUS})
 
 
 class DueAtGranularity:
@@ -374,6 +388,7 @@ class FollowUpTaskConfirmationCase(Base):
     confirmation_hash = Column(String(64), nullable=False, index=True, comment="确认Case幂等哈希")
     question_text = Column(Text, nullable=False, comment="确认问题")
     source_activity_id = Column(BigInteger, nullable=True, index=True, comment="来源客户活动ID")
+    source_activity_revision = Column(Integer, nullable=True, comment="来源客户活动修订号")
     source_public_id = Column(String(64), nullable=True, comment="来源对象对外ID")
     source_plan_json = Column(JSON, nullable=True, comment="状态迁移计划快照")
     expires_at = Column(DateTime, nullable=True, index=True, comment="确认Case过期时间")
@@ -407,6 +422,12 @@ class FollowUpTaskConfirmationCase(Base):
         Index("idx_follow_up_confirmation_owner_status_expiry", "team_id", "owner_id", "status", "expires_at"),
         Index("idx_follow_up_confirmation_task_status", "team_id", "task_id", "status"),
         Index("idx_follow_up_confirmation_source", "team_id", "source_activity_id"),
+        Index(
+            "idx_follow_up_confirmation_source_revision",
+            "team_id",
+            "source_activity_id",
+            "source_activity_revision",
+        ),
         {"comment": "跟进任务确认Case表"},
     )
 
@@ -434,6 +455,13 @@ class FollowUpTaskConfirmationPromptDelivery(Base):
     )
     owner_id = Column(String(100), nullable=False, index=True, comment="提示接收人")
     channel = Column(String(30), nullable=False, index=True, comment="渠道")
+    purpose = Column(
+        String(40),
+        nullable=False,
+        default=FollowUpTaskConfirmationDeliveryPurpose.INBOX_VISIBILITY,
+        index=True,
+        comment="投递用途/展示语义",
+    )
     provider = Column(String(30), nullable=True, index=True, comment="渠道供应商")
     agent_session_id = Column(BigInteger, nullable=True, index=True, comment="Agent会话ID")
     interaction_id = Column(String(80), nullable=False, index=True, comment="Agent交互ID")
@@ -441,7 +469,7 @@ class FollowUpTaskConfirmationPromptDelivery(Base):
     status = Column(
         String(20),
         nullable=False,
-        default=FollowUpTaskConfirmationPromptStatus.SENT,
+        default=FollowUpTaskConfirmationPromptStatus.QUEUED,
         index=True,
         comment="投递状态",
     )
@@ -450,15 +478,41 @@ class FollowUpTaskConfirmationPromptDelivery(Base):
     error_message = Column(Text, nullable=True, comment="投递失败信息")
     thread_id = Column(String(160), nullable=True, index=True, comment="Agent线程ID")
     run_id = Column(String(100), nullable=True, index=True, comment="运行ID")
-    attempted_at = Column(DateTime, nullable=False, default=business_now, index=True, comment="投递尝试时间")
+    provider_message_id = Column(String(160), nullable=True, index=True, comment="渠道返回的消息或可见对象ID")
+    recipient_id = Column(String(160), nullable=True, index=True, comment="渠道接收人ID")
+    origin_turn_id = Column(String(160), nullable=True, index=True, comment="来源Agent轮次ID")
+    origin_message_id = Column(String(160), nullable=True, index=True, comment="来源消息ID")
+    source_activity_id = Column(BigInteger, nullable=True, index=True, comment="来源客户活动ID")
+    expected_activity_revision = Column(Integer, nullable=True, comment="投递绑定的客户活动修订号")
+    attempt_count = Column(Integer, nullable=False, default=0, comment="实际投递尝试次数")
+    next_attempt_at = Column(DateTime, nullable=True, index=True, comment="下次允许重试时间")
+    lease_token = Column(String(64), nullable=True, index=True, comment="当前投递租约令牌")
+    lease_expires_at = Column(DateTime, nullable=True, index=True, comment="当前投递租约过期时间")
+    attempted_at = Column(DateTime, nullable=True, index=True, comment="最近投递尝试时间")
     delivered_at = Column(DateTime, nullable=True, index=True, comment="确认送达时间")
-    prompted_at = Column(DateTime, nullable=False, default=business_now, index=True, comment="兼容提示时间")
+    prompted_at = Column(DateTime, nullable=True, index=True, comment="兼容提示时间，仅真实送达后写入")
     created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
+    updated_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="更新时间")
 
     __table_args__ = (
         Index("idx_follow_up_confirmation_prompt_owner_time", "team_id", "owner_id", "prompted_at"),
         Index("idx_follow_up_confirmation_prompt_case_time", "team_id", "case_id", "prompted_at"),
         Index("idx_follow_up_confirmation_prompt_session", "team_id", "agent_session_id", "created_time"),
+        Index(
+            "idx_follow_up_confirmation_prompt_activity_revision",
+            "team_id",
+            "source_activity_id",
+            "expected_activity_revision",
+        ),
+        Index("idx_follow_up_confirmation_prompt_purpose", "team_id", "purpose", "status", "created_time"),
+        Index(
+            "idx_follow_up_confirmation_prompt_recovery",
+            "status",
+            "next_attempt_at",
+            "lease_expires_at",
+            "attempt_count",
+            "created_time",
+        ),
         Index("uq_follow_up_confirmation_prompt_key", "team_id", "prompt_key", unique=True),
         {"comment": "跟进任务确认提示投递日志表"},
     )

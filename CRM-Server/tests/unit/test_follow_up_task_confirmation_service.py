@@ -260,6 +260,26 @@ def test_confirmation_case_created_from_blocked_transition_plan_is_idempotent(db
     assert "source_plan_json" not in response.model_dump()
 
 
+def test_confirmation_case_does_not_inherit_task_source_activity_without_trigger_revision(db_session):
+    task = _create_task(db_session)
+    plan = _confirmation_plan(task)
+
+    case = FollowUpTaskConfirmationService().create_case_from_plan_action(
+        db_session,
+        team_id=1,
+        task=task,
+        plan=plan,
+        action=plan.actions[0],
+        actor_id="2",
+    ).case
+
+    assert case.source_activity_id is None
+    assert case.source_activity_revision is None
+    assert case.source_plan_json["confirmation_source"]["source_activity_id"] is None
+    assert case.source_plan_json["confirmation_source"]["source_activity_revision"] is None
+    assert case.source_plan_json["confirmation_source"]["task_source_activity_id"] == task.source_activity_id
+
+
 def test_confirmation_case_reuses_source_activity_task_thread_and_upgrades_suggestion(db_session):
     task = _create_task(db_session)
     service = FollowUpTaskConfirmationService()

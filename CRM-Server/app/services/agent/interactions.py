@@ -1,30 +1,15 @@
 """Agent interaction payload builders."""
 from __future__ import annotations
 
-from copy import deepcopy
 import json
-import uuid
 from typing import Optional
 
-from fastapi import HTTPException, status
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.crud.agent import agent_session_crud, agent_task_crud
 from app.crud.procurement import procurement_method_crud
-from app.models.agent import AgentTaskStatus
 from app.models.customer import Customer
-from app.schemas.agent import (
-    AgentCreateSessionRequest,
-    AgentSessionCreate,
-    AgentSessionUpdate,
-    AgentTaskCreate,
-    AgentTaskUpdate,
-)
-from app.services.agent import business_rules
-from app.services.agent import agent_copy
-from app.services.agent import choice_resolution
-from app.services.agent import task_display
+from app.services.agent import agent_copy, business_rules, choice_resolution, task_display
 from app.services.agent.interaction_contract import (
     INTERACTION_TYPE_CHOICE,
     INTERACTION_TYPE_FORM,
@@ -34,21 +19,7 @@ from app.services.agent.interaction_contract import (
     build_interaction,
     payload_from_event,
 )
-from app.services.agent.guardrails import AgentToolExecutionPolicy
-from app.services.agent.quality import AgentFollowUpQualityEvaluatorError, agent_follow_up_quality_evaluator
-from app.services.agent.runtime import AgentToolRuntime
-from app.services.agent.schemas import (
-    AgentHITLPolicy,
-    AgentMemorySnapshot,
-    AgentPendingInterruptionDecision,
-    AgentSemanticParseResult,
-)
-from app.services.agent.semantic import AgentSemanticParserError, agent_semantic_parser
-from app.services.agent.temporal import agent_temporal_resolver
-from app.services.agent.tools.api_client import CRMAPIClientError
-from app.services.agent.tool_registry import AgentToolRegistry
-from app.services.agent.tools import CRMAgentToolService
-from app.services.agent.tools.base import AgentToolContext
+from app.services.agent.waiting_task_semantics import waiting_event_name_from_task_state
 from app.utils.sse_encoder import SSEJsonEncoder
 
 
@@ -436,30 +407,9 @@ def _pending_task_interaction(task, content: str, *, db: Optional[Session] = Non
     action = state.get("action")
     payload = state.get("payload") if isinstance(state.get("payload"), dict) else {}
     customer = state.get("customer")
-    event_names = {
-        "collect_opportunity_fields": "opportunity_fields_required",
-        "collect_contact_fields": "contact_fields_required",
-        "collect_invoice_title_fields": "invoice_title_fields_required",
-        "collect_deployment_info_fields": "deployment_info_fields_required",
-        "collect_customer_member_fields": "customer_member_fields_required",
-        "collect_payment_fields": "payment_fields_required",
-        "collect_lead_fields": "lead_fields_required",
-        "collect_customer_fields": "customer_fields_required",
-        "collect_follow_up_quality_fields": "follow_up_quality_required",
-        "collect_lead_follow_up_quality_fields": "follow_up_quality_required",
-        "create_opportunity": "confirmation_required",
-        "move_opportunity_stage": "confirmation_required",
-        "select_opportunity_for_stage_move": "business_selection_required",
-        "create_customer_activity": "confirmation_required",
-        "create_lead_follow_up": "confirmation_required",
-        "create_payment_record": "confirmation_required",
-        "create_payment_plan": "confirmation_required",
-        "create_lead": "confirmation_required",
-        "create_customer": "confirmation_required",
-    }
-    event_name = event_names.get(str(action))
+    event_name = waiting_event_name_from_task_state(state)
     if not event_name:
-        return _pending_task_confirmation_interaction(content)
+        raise ValueError("waiting task has no registered interaction semantics")
     event = {
         "event": event_name,
         "action": action,

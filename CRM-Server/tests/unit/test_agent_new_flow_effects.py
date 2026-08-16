@@ -21,7 +21,22 @@ def test_new_flow_side_effect_handler_applies_waiting_memory_and_final_notice(mo
         event["task_id"] = 501
         event["task_key"] = "task-501"
         waiting_events.append(event)
-        return SimpleNamespace(id=501, task_key="task-501")
+        return SimpleNamespace(
+            id=501,
+            task_key="task-501",
+            team_id=team_id,
+            user_id=user_id,
+            session_id=session_arg.id,
+            status="WAITING_USER",
+            intent="CUSTOMER_ACTIVITY",
+            target_type="customer",
+            target_id=101,
+            summary="请确认是否创建这条跟进记录？",
+            state_json={
+                "action": event["action"],
+                "payload": event["payload"],
+            },
+        )
 
     monkeypatch.setattr(
         "app.services.agent.new_flow_effects.task_factory._create_waiting_task_from_event",
@@ -61,6 +76,11 @@ def test_new_flow_side_effect_handler_applies_waiting_memory_and_final_notice(mo
     assert context.current_interrupt["allowed_resume_actions"] == ["approve", "edit", "reject", "cancel"]
     assert context.current_interrupt["task_projection_id"] == 501
     assert context.current_interrupt["task_projection_key"] == "task-501"
+    assert context.active_task_snapshot["id"] == 501
+    assert context.active_task_snapshot["team_id"] == 1
+    assert context.active_task_snapshot["user_id"] == 2
+    assert context.active_task_snapshot["session_id"] == 3
+    assert context.ownership_rejection_event is None
     assert final_event == {"event": "final", "content": "我先切到新流程处理。\n\n已处理"}
     assert context.assistant_content == "我先切到新流程处理。\n\n已处理"
 

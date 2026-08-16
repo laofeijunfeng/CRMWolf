@@ -10,8 +10,24 @@ from app.services.agent.state import ConfirmedTaskExecutionResult
 def test_confirmed_task_effects_clear_completed_task_and_offer_next(monkeypatch):
     db = object()
     session = SimpleNamespace(id=3)
-    task = SimpleNamespace(id=11, state_json={"action": "create_customer_activity"})
-    next_task = SimpleNamespace(id=12, state_json={"action": "collect_opportunity_fields"})
+    task = SimpleNamespace(
+        id=11,
+        task_key="task-11",
+        team_id=1,
+        user_id=2,
+        session_id=3,
+        status="COMPLETED",
+        state_json={"action": "create_customer_activity"},
+    )
+    next_task = SimpleNamespace(
+        id=12,
+        task_key="task-12",
+        team_id=1,
+        user_id=2,
+        session_id=3,
+        status="WAITING_USER",
+        state_json={"action": "collect_opportunity_fields"},
+    )
     monkeypatch.setattr(
         "app.services.agent.confirmed_task_effects.interactions._should_offer_next_pending_task",
         lambda action: action == "create_customer_activity",
@@ -53,12 +69,24 @@ def test_confirmed_task_effects_clear_completed_task_and_offer_next(monkeypatch)
         result.task_event,
         {"event": "final", "content": "跟进记录已创建。"},
     ]
+    assert result.executed_task_snapshot["id"] == 11
+    assert result.executed_task_snapshot["status"] == "COMPLETED"
+    assert result.active_task_snapshot["id"] == 12
+    assert result.active_task_snapshot["status"] == "WAITING_USER"
 
 
 def test_confirmed_task_effects_do_not_clear_failed_task(monkeypatch):
     db = object()
     session = SimpleNamespace(id=3)
-    task = SimpleNamespace(id=11, state_json={"action": "unsupported"})
+    task = SimpleNamespace(
+        id=11,
+        task_key="task-11",
+        team_id=1,
+        user_id=2,
+        session_id=3,
+        status="FAILED",
+        state_json={"action": "unsupported"},
+    )
 
     result = confirmed_task_side_effect_handler.apply(
         ConfirmedTaskSideEffectContext(
@@ -79,13 +107,23 @@ def test_confirmed_task_effects_do_not_clear_failed_task(monkeypatch):
         {"event": "task_failed", "task_id": 11, "content": "执行失败"},
         {"event": "final", "content": "执行失败"},
     ]
+    assert result.executed_task_snapshot["id"] == 11
+    assert result.active_task_snapshot == {}
 
 
 
 def test_confirmed_task_effects_leave_post_commit_confirmation_for_root_runtime():
     db = object()
     session = SimpleNamespace(id=3)
-    task = SimpleNamespace(id=11, state_json={"action": "create_customer_activity"})
+    task = SimpleNamespace(
+        id=11,
+        task_key="task-11",
+        team_id=1,
+        user_id=2,
+        session_id=3,
+        status="COMPLETED",
+        state_json={"action": "create_customer_activity"},
+    )
     tool_event = {
         "event": "tool_result",
         "tool_name": "create_customer_activity",
@@ -120,3 +158,5 @@ def test_confirmed_task_effects_leave_post_commit_confirmation_for_root_runtime(
         {"event": "final", "content": "跟进记录已创建。"},
     ]
     assert result.assistant_content == "跟进记录已创建。"
+    assert result.executed_task_snapshot["id"] == 11
+    assert result.active_task_snapshot == {}

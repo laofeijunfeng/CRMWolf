@@ -10,6 +10,12 @@ from langgraph.checkpoint.memory import InMemorySaver
 from app.services.agent import action_plan, action_workflow, agent_copy
 from app.services.agent import root_runtime as root_runtime_module
 from app.services.agent.input import AgentTurnInput
+from app.services.agent.pending_graph import PendingTaskGraphService
+from app.services.agent.pending_application_step_contracts import build_pending_application_step_request
+from app.services.agent.pending_application_step_projection import PendingApplicationStepProjectionResult
+from app.services.agent.pending_continuation import bind_pending_task_namespace, new_pending_task_continuation
+from app.services.agent.pending_interrupt_projection import PendingInterruptProjectionResult
+from app.services.agent.pending_outcome import PendingTaskOutcomeRecovery
 from app.services.agent.root_runtime import (
     AgentRootRuntime,
     build_agent_thread_id,
@@ -18,6 +24,7 @@ from app.services.agent.root_runtime import (
 from app.services.agent.schemas import AgentConfirmationIntentDecision
 from app.services.agent.state import AgentRootRuntimeSideEffects, AgentRuntimeContext
 from app.services.agent.task_execution import ActionToolExecutionResult
+from app.services.agent.task_projection import agent_task_snapshot
 from app.services.agent.tools.base import AgentToolResult
 from app.services.customer_intelligence_refresh_service import AgentAsyncOperationBinding
 from app.services.follow_up_task_confirmation_channel_service import (
@@ -26,22 +33,109 @@ from app.services.follow_up_task_confirmation_channel_service import (
 )
 
 
+def without_projection_metadata(events):
+    return [
+        {key: value for key, value in event.items() if key not in {"projection_key", "projection_event_id"}}
+        for event in events
+    ]
+
+
+def bind_fake_pending_continuation(state, side_effects, *, continuation_id: str) -> None:
+    if side_effects is None:
+        return
+    task_snapshot = state["task_snapshot"]
+    side_effects.task = task_snapshot
+    side_effects.checkpoint_ref = new_pending_task_continuation(
+        team_id=state["team_id"],
+        user_id=state["user_id"],
+        session_id=state["session_id"],
+        task_id=task_snapshot["id"],
+        continuation_id=continuation_id,
+    )
+
+
+def _waiting_task_snapshot(
+    task_id: int,
+    *,
+    action: str = "collect_opportunity_fields",
+    target_id: int = 17,
+) -> dict[str, object]:
+    return {
+        "id": task_id,
+        "task_key": f"task-{task_id}",
+        "team_id": 2,
+        "user_id": 3,
+        "session_id": 4,
+        "status": "WAITING_USER",
+        "intent": "CREATE_OPPORTUNITY",
+        "target_type": "customer",
+        "target_id": target_id,
+        "summary": "等待补充业务信息",
+        "state_json": {
+            "action": action,
+            "payload": {"customer_id": target_id, "missing_fields": ["total_amount"]},
+        },
+    }
+
+
+def _persisted_waiting_task_from_event(
+    event: dict[str, object],
+    *,
+    team_id: int,
+    user_id: int,
+    session_id: int,
+    task_id: int = 501,
+) -> SimpleNamespace:
+    """Build the persisted task returned by the application write seam.
+
+    New-flow ownership must be projected from the created task itself. Tests
+    therefore model the complete persisted contract instead of relying on the
+    legacy event mutation side effect.
+    """
+
+    event["task_id"] = task_id
+    event["task_key"] = f"task-{task_id}"
+    payload = dict(event.get("payload") or {})
+    customer_id = payload.get("customer_id")
+    return SimpleNamespace(
+        id=task_id,
+        task_key=f"task-{task_id}",
+        team_id=team_id,
+        user_id=user_id,
+        session_id=session_id,
+        status="WAITING_USER",
+        intent="CUSTOMER_ACTIVITY",
+        target_type="customer",
+        target_id=customer_id if isinstance(customer_id, int) else None,
+        summary=event.get("content") or "等待确认业务操作",
+        input_json=payload,
+        state_json={
+            "action": event.get("action"),
+            "payload": payload,
+            "customer": event.get("customer"),
+        },
+    )
+
+
 class FakePendingGraphService:
     def __init__(self):
         self.calls = []
 
-    async def run(self, state, *, side_effects=None):
+    async def run_with_trace(self, state, *, side_effects=None):
         self.calls.append(state)
-        if side_effects:
-            side_effects.task = state["task"]
+        bind_fake_pending_continuation(
+            state,
+            side_effects,
+            continuation_id="fake-pending-outcome",
+        )
         return {
             "has_active_task": True,
             "task_projection": {
-                "id": state["task"].id,
-                "task_key": state["task"].task_key,
-                "status": state["task"].status,
-                "intent": state["task"].intent,
-                "target_id": state["task"].target_id,
+                "id": state["task_snapshot"]["id"],
+                "task_key": state["task_snapshot"]["task_key"],
+                "status": state["task_snapshot"]["status"],
+                "intent": state["task_snapshot"]["intent"],
+                "target_id": state["task_snapshot"]["target_id"],
             },
             "handled": True,
             "assistant_content": "请确认是否创建商机？",
@@ -64,16 +158,19 @@ class FakeTracedPendingGraphService:
 
     async def run_with_trace(self, state, *, side_effects=None):
         self.trace_calls.append(state)
-        if side_effects:
-            side_effects.task = state["task"]
+        bind_fake_pending_continuation(
+            state,
+            side_effects,
+            continuation_id="fake-traced-pending-outcome",
+        )
         return {
             "has_active_task": True,
             "task_projection": {
-                "id": state["task"].id,
-                "task_key": state["task"].task_key,
-                "status": state["task"].status,
-                "intent": state["task"].intent,
-                "target_id": state["task"].target_id,
+                "id": state["task_snapshot"]["id"],
+                "task_key": state["task_snapshot"]["task_key"],
+                "status": state["task_snapshot"]["status"],
+                "intent": state["task_snapshot"]["intent"],
+                "target_id": state["task_snapshot"]["target_id"],
             },
             "handled": True,
             "assistant_content": "请确认是否创建商机？",
@@ -87,20 +184,54 @@ class FakeTracedPendingGraphService:
         }
 
 
+class FakeNativeInterruptPreflightGraphService:
+    async def run(self, input_state):
+        return SimpleNamespace(
+            task=input_state["task"],
+            handled=False,
+            events=[{"event": "pending_interruption_assessed"}],
+            assistant_content=None,
+            switch_notice=None,
+            suspended_task=None,
+            suspend_reason=None,
+            suspension_kind=None,
+            clear_pending_task_id=None,
+            confirmation_decision=None,
+        )
+
+
+class FakeNativeInterruptInteractionGraphService:
+    async def run(self, input_state):
+        return SimpleNamespace(
+            handled=True,
+            events=[
+                {"event": "confirmation_required", "content": "商机信息齐了。要创建商机吗？"},
+                {"event": "final", "content": "商机信息齐了。要创建商机吗？"},
+            ],
+            assistant_content="商机信息齐了。要创建商机吗？",
+            selected_customer=None,
+            remember_pending_task=True,
+            clear_pending_task_id=None,
+        )
+
+
 class FakeConfirmingPendingGraphService:
     def __init__(self):
         self.calls = []
 
-    async def run(self, state, *, side_effects=None):
+    async def run_with_trace(self, state, *, side_effects=None):
         self.calls.append(state)
-        if side_effects:
-            side_effects.task = state["task"]
+        bind_fake_pending_continuation(
+            state,
+            side_effects,
+            continuation_id="fake-confirming-pending-outcome",
+        )
         return {
             "has_active_task": True,
             "task_projection": {
-                "id": state["task"].id,
-                "task_key": state["task"].task_key,
-                "status": state["task"].status,
+                "id": state["task_snapshot"]["id"],
+                "task_key": state["task_snapshot"]["task_key"],
+                "status": state["task_snapshot"]["status"],
             },
             "handled": False,
             "confirmation_decision": AgentConfirmationIntentDecision(
@@ -119,16 +250,93 @@ class FakeConfirmedTaskGraphService:
     async def run(self, state):
         self.calls.append(state)
         task = state["task"]
+        executed_task_snapshot = agent_task_snapshot(task)
+        executed_task_snapshot.update({
+            "team_id": state["team_id"],
+            "user_id": state["user_id"],
+            "session_id": state["session_id"],
+            "status": "COMPLETED",
+        })
         return {
             "task_projection": {"id": task.id, "task_key": task.task_key, "status": task.status},
             "tool_result": {"event": "tool_result", "tool_name": "create_customer_activity", "success": True},
             "task_event": {"event": "task_completed", "task_id": task.id, "content": "跟进记录已创建。"},
             "assistant_content": "跟进记录已创建。",
             "execution_status": "completed",
+            "executed_task_snapshot": executed_task_snapshot,
+            "active_task_snapshot": {},
             "output_events": [
                 {"event": "tool_result", "tool_name": "create_customer_activity", "success": True},
                 {"event": "task_completed", "task_id": task.id, "content": "跟进记录已创建。"},
                 {"event": "final", "content": "跟进记录已创建。"},
+            ],
+            "events": [
+                {"event": "confirmed_task_graph_started"},
+                {"event": "confirmed_task_execution_completed"},
+                {"event": "confirmed_task_graph_finished"},
+            ],
+        }
+
+
+class FakeConfirmedTaskWithNextGraphService(FakeConfirmedTaskGraphService):
+    async def run(self, state):
+        self.calls.append(state)
+        task = state["task"]
+        executed_task_snapshot = agent_task_snapshot(task)
+        executed_task_snapshot.update({
+            "team_id": state["team_id"],
+            "user_id": state["user_id"],
+            "session_id": state["session_id"],
+            "status": "COMPLETED",
+        })
+        active_task_snapshot = {
+            "id": 102,
+            "task_key": "task-102",
+            "team_id": state["team_id"],
+            "user_id": state["user_id"],
+            "session_id": state["session_id"],
+            "status": "WAITING_USER",
+            "intent": "CREATE_OPPORTUNITY",
+            "target_type": "customer",
+            "target_id": 17,
+            "summary": "等待补充商机信息",
+            "state_json": {
+                "action": "collect_opportunity_fields",
+                "customer": {"id": 17, "account_name": "广州睿狐科技有限公司"},
+                "payload": {"customer_id": 17, "missing_fields": ["total_amount"]},
+            },
+        }
+        interaction = {
+            "schema_version": "agent.interaction.v1",
+            "interaction_id": "int-next-task-102",
+            "type": "form",
+            "status": "waiting_user_input",
+            "business_action": "create_opportunity",
+            "prompt": "还差商机金额。请补充。",
+            "fields": [],
+            "choices": [],
+            "presentation": {},
+            "metadata": {},
+        }
+        task_event = {
+            "event": "task_completed",
+            "task_id": task.id,
+            "content": "跟进记录已创建。",
+            "next_task_id": 102,
+            "interaction": interaction,
+        }
+        return {
+            "task_projection": {"id": task.id, "task_key": task.task_key, "status": task.status},
+            "tool_result": {"event": "tool_result", "tool_name": "create_customer_activity", "success": True},
+            "task_event": task_event,
+            "assistant_content": "还差商机金额。请补充。",
+            "execution_status": "completed",
+            "executed_task_snapshot": executed_task_snapshot,
+            "active_task_snapshot": active_task_snapshot,
+            "output_events": [
+                {"event": "tool_result", "tool_name": "create_customer_activity", "success": True},
+                task_event,
+                {"event": "final", "content": "还差商机金额。请补充。"},
             ],
             "events": [
                 {"event": "confirmed_task_graph_started"},
@@ -370,6 +578,90 @@ class FakePendingTaskSideEffectHandler:
         )
 
 
+class FakePendingInterruptProjector:
+    def __init__(self, result):
+        self.result = result
+        self.calls = []
+
+    async def project(self, request):
+        self.calls.append(request)
+        if not self.result.projection_key:
+            self.result.projection_key = root_runtime_module.pending_interrupt_projection_key(
+                request.continuation, request.interrupt
+            )
+        return self.result
+
+
+class SequencedPendingInterruptProjector:
+    def __init__(self, results):
+        self.results = list(results)
+        self.calls = []
+
+    async def project(self, request):
+        self.calls.append(request)
+        result = self.results[min(len(self.calls) - 1, len(self.results) - 1)]
+        if not result.projection_key:
+            result.projection_key = root_runtime_module.pending_interrupt_projection_key(
+                request.continuation, request.interrupt
+            )
+        if result.status == "PROJECTED" and result.current_interrupt is None:
+            result.current_interrupt = request.interrupt
+        return result
+
+
+
+
+class SequencedPendingApplicationStepProjector:
+    def __init__(self, results):
+        self.results = list(results)
+        self.calls = []
+
+    async def project(self, request):
+        self.calls.append(request)
+        return self.results[min(len(self.calls) - 1, len(self.results) - 1)]
+
+
+def completed_interaction_application_step(task):
+    prompt = "商机信息齐了。要创建商机吗？"
+    event = {
+        "event": "confirmation_required",
+        "task_id": task.id,
+        "task_key": task.task_key,
+        "action": "create_opportunity",
+        "payload": {"customer_id": 7},
+        "content": prompt,
+    }
+    current_interrupt = root_runtime_module.interrupt_from_waiting_event(
+        event,
+        interaction={
+            "schema_version": "agent.interaction.v1",
+            "type": "confirmation",
+            "business_action": "create_opportunity",
+            "status": "waiting_confirmation",
+            "prompt": prompt,
+            "payload": {"customer_id": 7},
+            "task_id": task.id,
+            "task_key": task.task_key,
+        },
+    )
+    return PendingApplicationStepProjectionResult(
+        status="COMPLETED",
+        step_id="ignored-by-fake",
+        result={
+            "step_type": "interaction",
+            "task_snapshot": agent_task_snapshot(task),
+            "result": {
+                "handled": True,
+                "events": [event, {"event": "final", "content": prompt}],
+                "assistant_content": prompt,
+                "selected_customer": {},
+                "remember_pending_task": True,
+                "clear_pending_task_id": None,
+                "current_interrupt": current_interrupt,
+            },
+        },
+    )
+
 class FakeNewFlowGraphService:
     def __init__(self):
         self.calls = []
@@ -378,6 +670,35 @@ class FakeNewFlowGraphService:
         self.calls.append(input_state)
         yield {"event": "agent_step", "step": "semantic_parse", "status": "started"}
         yield {"event": "final", "content": "已处理新流程"}
+
+
+def test_snapshot_interrupt_identity_distinguishes_consecutive_application_steps():
+    continuation = bind_pending_task_namespace(
+        new_pending_task_continuation(
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            task_id=101,
+            continuation_id="application-step-identity",
+        ),
+        "pending_task_subgraph:application-step-identity",
+    )
+    common = {
+        "continuation": continuation,
+        "task_snapshot": {"id": 101, "task_key": "task-101"},
+        "content": "补充金额 10 万",
+        "turn_input": {"kind": "text", "content": "补充金额 10 万", "metadata": {}},
+    }
+    preflight = build_pending_application_step_request(step_type="preflight", **common)
+    interaction = build_pending_application_step_request(step_type="interaction", **common)
+    snapshot = SimpleNamespace(interrupts=[SimpleNamespace(id="interaction", value=interaction)])
+
+    assert root_runtime_module._same_interrupt_payload(preflight, dict(preflight)) is True
+    assert root_runtime_module._same_interrupt_payload(preflight, interaction) is False
+    assert root_runtime_module._snapshot_interrupt_payload_except(
+        snapshot,
+        resumed_interrupt=preflight,
+    ) == interaction
 
 
 class FakeNativeNewFlowGraphService:
@@ -645,6 +966,33 @@ class FakeCustomerIntelligenceTriggerPolicy:
 class FakeCustomerIntelligenceRefreshService:
     def __init__(self):
         self.trigger_calls = []
+        self.bind_batch_calls = []
+        self.kick_calls = []
+
+    def bind_committed_events_to_agent(self, db, *, team_id, request_ids, binding):
+        self.bind_batch_calls.append(
+            {
+                "db": db,
+                "team_id": team_id,
+                "request_ids": list(request_ids),
+                "binding": binding,
+            }
+        )
+        return tuple(
+            SimpleNamespace(
+                request_id=request_id,
+                event=SimpleNamespace(trigger_type="customer_activity_created"),
+                scope="brief",
+                scheduled=True,
+                kick_required=False,
+                schedule_error=None,
+                operation_public_id=f"aop-{request_id}",
+            )
+            for request_id in request_ids
+        )
+
+    def kick_committed_event_refresh(self, request):
+        self.kick_calls.append(request)
 
     async def trigger_committed_event_refresh(self, db, *, event, scope="brief", agent_binding=None):
         self.trigger_calls.append(
@@ -973,7 +1321,7 @@ async def test_root_runtime_streams_customer_intelligence_trace_without_duplicat
 
 
 @pytest.mark.asyncio
-async def test_root_runtime_schedules_customer_intelligence_after_confirmed_activity_write():
+async def test_root_runtime_records_customer_intelligence_schedule_intent_without_projection_side_effects():
     customer_intelligence_event = SimpleNamespace(
         event_key="activity-created-1",
         trigger_type="customer_activity_created",
@@ -992,7 +1340,6 @@ async def test_root_runtime_schedules_customer_intelligence_after_confirmed_acti
         customer_intelligence_refresh_service=customer_intelligence_refresh_service,
     )
     task = waiting_task_stub()
-    db = object()
 
     state = await runtime.checkpoint_turn_start(
         {
@@ -1007,7 +1354,7 @@ async def test_root_runtime_schedules_customer_intelligence_after_confirmed_acti
             "task_projection": {"id": task.id, "task_key": task.task_key},
         },
         context=AgentRuntimeContext(
-            db=db,
+            db=object(),
             session=SimpleNamespace(id=4, context_json={}),
             task=task,
             turn_input=AgentTurnInput.confirm(source="web"),
@@ -1023,54 +1370,44 @@ async def test_root_runtime_schedules_customer_intelligence_after_confirmed_acti
 
     assert trigger_policy.tool_result_calls
     assert customer_intelligence_graph_service.run_calls == []
-    assert len(customer_intelligence_refresh_service.trigger_calls) == 1
-    trigger_call = customer_intelligence_refresh_service.trigger_calls[0]
-    assert trigger_call["db"] is db
-    assert trigger_call["event"] is customer_intelligence_event
-    assert trigger_call["scope"] == "brief"
-    assert trigger_call["agent_binding"] == AgentAsyncOperationBinding(
-        team_id=2,
-        user_id=3,
-        session_id=4,
-        source_user_message_id=91,
-    )
+    assert customer_intelligence_refresh_service.trigger_calls == []
+    assert customer_intelligence_refresh_service.bind_batch_calls == []
+    assert customer_intelligence_refresh_service.kick_calls == []
+    assert state["customer_intelligence_schedule_intent"] == {
+        "event": {
+            "event_key": "activity-created-1",
+            "trigger_type": "customer_activity_created",
+            "customer_id": 101,
+        },
+        "scope": "brief",
+        "request_ids": [],
+    }
     assert state["customer_intelligence_result"] == {
         "handled": True,
         "mode": "background",
-        "scheduled": True,
+        "scheduled": False,
+        "projection_status": "PENDING",
         "trigger_type": "customer_activity_created",
         "event_key": "activity-created-1",
         "customer_id": 101,
-        "request_id": "business-event-customer_activity_created-test",
-        "operation_public_id": "aop_customer_intelligence_test",
-        "source_user_message_id": 91,
         "scope": "brief",
     }
     assert side_effects.confirmed_task_assistant_content == "跟进记录已创建。"
-    assert side_effects.customer_intelligence_events == [
-        {
-            "event": "agent_root_customer_intelligence_refresh_scheduled",
-            "mode": "background",
-            "trigger_type": "customer_activity_created",
-            "event_key": "activity-created-1",
-            "customer_id": 101,
-            "scheduled": True,
-            "request_id": "business-event-customer_activity_created-test",
-            "operation_public_id": "aop_customer_intelligence_test",
-            "source_user_message_id": 91,
-        }
-    ]
+    assert side_effects.customer_intelligence_events == []
+    assert any(
+        event.get("event") == "agent_root_customer_intelligence_refresh_requested"
+        for event in state["events"]
+    )
 
 
 @pytest.mark.asyncio
-async def test_root_runtime_reports_committed_refresh_schedule_failure_instead_of_success():
+async def test_root_runtime_does_not_observe_projection_failure_inside_graph_node():
     customer_intelligence_event = SimpleNamespace(
         event_key="activity-created-failed",
         trigger_type="customer_activity_created",
         customer_id=101,
     )
     refresh_service = FakeFailedCustomerIntelligenceRefreshService()
-    side_effects = AgentRootRuntimeSideEffects()
     runtime = AgentRootRuntime(
         checkpointer=InMemorySaver(),
         pending_graph_service=FakeConfirmingPendingGraphService(),
@@ -1102,34 +1439,12 @@ async def test_root_runtime_reports_committed_refresh_schedule_failure_instead_o
             user_id=3,
             session_id=4,
             authorization="Bearer test",
-            side_effects=side_effects,
         ),
     )
 
-    assert state["customer_intelligence_result"] == {
-        "handled": False,
-        "mode": "background",
-        "scheduled": False,
-        "trigger_type": "customer_activity_created",
-        "event_key": "activity-created-failed",
-        "customer_id": 101,
-        "request_id": "business-event-customer_activity_created-failed",
-        "scope": "brief",
-        "reason": "background_refresh_schedule_failed",
-        "schedule_error": "operation projection unavailable",
-    }
-    assert side_effects.customer_intelligence_events == [
-        {
-            "event": "agent_root_customer_intelligence_refresh_schedule_failed",
-            "mode": "background",
-            "trigger_type": "customer_activity_created",
-            "event_key": "activity-created-failed",
-            "customer_id": 101,
-            "scheduled": False,
-            "request_id": "business-event-customer_activity_created-failed",
-            "reason": "operation projection unavailable",
-        }
-    ]
+    assert refresh_service.trigger_calls == []
+    assert state["customer_intelligence_result"]["projection_status"] == "PENDING"
+    assert state["customer_intelligence_result"]["scheduled"] is False
 
 
 @pytest.mark.asyncio
@@ -1256,9 +1571,13 @@ async def test_root_runtime_applies_new_flow_side_effects_inside_graph_node(monk
     )
 
     def create_waiting_task(db_arg, event, team_id, user_id, session_arg):
-        event["task_id"] = 501
-        event["task_key"] = "task-501"
         waiting_events.append(event)
+        return _persisted_waiting_task_from_event(
+            event,
+            team_id=team_id,
+            user_id=user_id,
+            session_id=session_arg.id,
+        )
 
     monkeypatch.setattr(
         "app.services.agent.new_flow_effects.task_factory._create_waiting_task_from_event",
@@ -1404,6 +1723,178 @@ async def test_root_runtime_auto_executes_low_risk_reviewed_new_flow_action(monk
         "content": "记录跟进",
     } in side_effects.new_flow_events
     assert "确认记录跟进" not in str([event.get("content") for event in side_effects.new_flow_events])
+
+
+@pytest.mark.asyncio
+async def test_in_context_auto_execute_surfaces_confirmed_ownership_rejection():
+    published_events: list[dict[str, object]] = []
+
+    async def capture_event(event):
+        published_events.append(event)
+
+    class MismatchedNextOwnerGraph(FakeConfirmedTaskWithNextGraphService):
+        async def run(self, state):
+            result = await super().run(state)
+            result["active_task_snapshot"]["session_id"] = 999
+            return result
+
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeAutoExecutableNewFlowGraphService(),
+        confirmed_task_graph_service=MismatchedNextOwnerGraph(),
+    )
+    task = _persisted_waiting_task_from_event(
+        {
+            "action": "create_customer_activity",
+            "payload": {"customer_id": 101, "content": "已沟通项目进展"},
+            "content": "请确认是否创建这条跟进记录？",
+        },
+        team_id=2,
+        user_id=3,
+        session_id=4,
+    )
+    context = AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4, context_json={}),
+        turn_input=AgentTurnInput(content="自动执行", source="web"),
+        content="自动执行",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        event_sink=capture_event,
+        side_effects=AgentRootRuntimeSideEffects(),
+    )
+
+    result = await runtime._run_new_flow_auto_execute_task_in_context(
+        context,
+        task,
+        include_graph_progress_events=True,
+    )
+
+    assert result["current_interrupt"] is None
+    assert result["active_task_snapshot"] == {}
+    assert result["ownership_rejection_event"] == {
+        "event": "agent_root_confirmed_task_ownership_rejected",
+        "reason": "active_task_owner_mismatch",
+        "expected_task_id": 501,
+        "executed_task_id": 501,
+        "next_task_id": 102,
+        "active_task_id": 102,
+    }
+    assert result["ownership_rejection_event"] in published_events
+
+
+@pytest.mark.asyncio
+async def test_parallel_auto_execute_fails_closed_when_branches_emit_distinct_active_tasks(monkeypatch):
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeAutoExecutableNewFlowGraphService(),
+        confirmed_task_graph_service=FakeConfirmedTaskGraphService(),
+    )
+
+    async def fake_isolated(branch_input):
+        source_task_id = branch_input["task_id"]
+        active_task_id = 102 if source_task_id == 501 else 103
+        return {
+            "result": {"execution_status": "completed"},
+            "tool_result": {"success": True, "task_id": source_task_id},
+            "events": [],
+            "emitted_event_count": 0,
+            "active_task_snapshot": _waiting_task_snapshot(active_task_id),
+        }
+
+    monkeypatch.setattr(runtime, "_run_new_flow_auto_execute_task_isolated", fake_isolated)
+    side_effects = AgentRootRuntimeSideEffects()
+    result = await runtime._run_new_flow_auto_execute_tasks_parallel(
+        AgentRuntimeContext(
+            db=object(),
+            session=SimpleNamespace(id=4, context_json={}),
+            turn_input=AgentTurnInput(content="并行自动执行", source="web"),
+            content="并行自动执行",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            authorization="Bearer test",
+            side_effects=side_effects,
+        ),
+        [
+            SimpleNamespace(id=501, state_json={"action": "create_customer_activity"}),
+            SimpleNamespace(id=502, state_json={"action": "transition_follow_up_task"}),
+        ],
+    )
+
+    assert result["current_interrupt"] is None
+    assert result["active_task_snapshot"] == {}
+    assert result["ownership_rejection_event"] == {
+        "event": "agent_root_active_task_ownership_rejected",
+        "reason": "multiple_active_tasks",
+        "source": "new_flow_auto_execute_parallel_tasks",
+        "active_task_ids": [102, 103],
+        "candidate_sources": ["parallel_task:501", "parallel_task:502"],
+    }
+    assert result["ownership_rejection_event"] in side_effects.new_flow_events
+
+
+@pytest.mark.asyncio
+async def test_root_checkpoints_next_task_from_new_flow_auto_execution(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.agent.new_flow_effects.session_state._remember_current_customer",
+        lambda db_arg, session_arg, customer: None,
+    )
+    monkeypatch.setattr(
+        root_runtime_module.task_execution,
+        "can_direct_execute_action_envelope",
+        lambda envelope: False,
+    )
+
+    def create_waiting_task(db_arg, event, team_id, user_id, session_arg):
+        return _persisted_waiting_task_from_event(
+            event,
+            team_id=team_id,
+            user_id=user_id,
+            session_id=session_arg.id,
+        )
+
+    monkeypatch.setattr(
+        "app.services.agent.new_flow_effects.task_factory._create_waiting_task_from_event",
+        create_waiting_task,
+    )
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeAutoExecutableNewFlowGraphService(),
+        confirmed_task_graph_service=FakeConfirmedTaskWithNextGraphService(),
+    )
+    context = AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4, context_json={}),
+        content="今天和越秀金融沟通",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=AgentRootRuntimeSideEffects(),
+    )
+
+    state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "new-flow-auto-next-owner",
+            "channel": "web",
+            "content": context.content,
+            "turn_kind": "text",
+        },
+        context=context,
+    )
+
+    assert state["pending_task_snapshot"]["id"] == 102
+    assert state["task_projection"]["id"] == 102
+    assert state["pending_task_requested"] is True
+    assert state["current_interrupt"]["task_projection_id"] == 102
+    assert state["current_interrupt"]["task_projection_key"] == "task-102"
+    assert state["current_interrupt"]["type"] == "form"
 
 
 @pytest.mark.asyncio
@@ -2031,9 +2522,19 @@ async def test_root_runtime_stops_auto_execute_rounds_when_interrupt_is_created(
             "emitted_event_count": 1,
             "assistant_content": "需要确认下一步。",
             "current_interrupt": {
+                "schema_version": "agent.interrupt.v1",
                 "type": "confirm",
+                "reason": "write_confirmation",
+                "business_action": "collect_opportunity_fields",
+                "target_refs": {},
+                "draft_payload": {},
+                "allowed_resume_actions": ["approve", "edit", "reject", "cancel"],
+                "interaction": {},
+                "source_event": "opportunity_fields_required",
                 "task_projection_id": 900,
+                "task_projection_key": "task-900",
             },
+            "active_task_snapshot": _waiting_task_snapshot(900),
         }
 
     monkeypatch.setattr(runtime, "_run_new_flow_auto_execute_task_in_context", fake_in_context)
@@ -2077,6 +2578,8 @@ async def test_root_runtime_stops_auto_execute_rounds_when_interrupt_is_created(
     assert started == [501]
     assert result["executed_action_count"] == 1
     assert result["current_interrupt"]["task_projection_id"] == 900
+    assert result["active_task_snapshot"]["id"] == 900
+    assert result["ownership_rejection_event"] is None
 
 
 @pytest.mark.asyncio
@@ -2425,6 +2928,15 @@ async def test_root_runtime_checkpoints_new_flow_result_and_interrupt_snapshot(m
     def create_waiting_task(db_arg, event, team_id, user_id, session_arg):
         event["task_id"] = 501
         event["task_key"] = "task-501"
+        snapshot = _waiting_task_snapshot(501, action=event["action"], target_id=101)
+        snapshot["team_id"] = team_id
+        snapshot["user_id"] = user_id
+        snapshot["session_id"] = session_arg.id
+        snapshot["state_json"] = {
+            "action": event["action"],
+            "payload": event["payload"],
+        }
+        return SimpleNamespace(**snapshot)
 
     monkeypatch.setattr(
         "app.services.agent.new_flow_effects.task_factory._create_waiting_task_from_event",
@@ -2468,6 +2980,9 @@ async def test_root_runtime_checkpoints_new_flow_result_and_interrupt_snapshot(m
     assert checkpoint_state["current_interrupt"] == state["current_interrupt"]
     assert checkpoint_state["new_flow_result"]["has_interrupt"] is True
     assert checkpoint_state["new_flow_result"]["task_projection_id"] == 501
+    assert checkpoint_state["pending_task_snapshot"]["id"] == 501
+    assert checkpoint_state["task_projection"]["id"] == 501
+    assert checkpoint_state["pending_task_requested"] is True
 
 
 @pytest.mark.asyncio
@@ -2578,9 +3093,13 @@ async def test_root_runtime_prefers_native_new_flow_graph_stream_updates(monkeyp
     )
 
     def create_waiting_task(db_arg, event, team_id, user_id, session_arg):
-        event["task_id"] = 501
-        event["task_key"] = "task-501"
         waiting_events.append(event)
+        return _persisted_waiting_task_from_event(
+            event,
+            team_id=team_id,
+            user_id=user_id,
+            session_id=session_arg.id,
+        )
 
     monkeypatch.setattr(
         "app.services.agent.new_flow_effects.task_factory._create_waiting_task_from_event",
@@ -2640,11 +3159,24 @@ async def test_root_runtime_resumes_generated_interrupt_by_loading_task_projecti
     )
 
     def create_waiting_task(db_arg, event, team_id, user_id, session_arg):
-        event["task_id"] = 501
-        event["task_key"] = "task-501"
         waiting_events.append(event)
+        return _persisted_waiting_task_from_event(
+            event,
+            team_id=team_id,
+            user_id=user_id,
+            session_id=session_arg.id,
+        )
 
-    task = SimpleNamespace(id=501, task_key="task-501", status="WAITING_USER")
+    task = _persisted_waiting_task_from_event(
+        {
+            "action": "create_customer_activity",
+            "payload": {"customer_id": 101, "content": "已沟通项目进展"},
+            "content": "请确认是否创建这条跟进记录？",
+        },
+        team_id=2,
+        user_id=3,
+        session_id=4,
+    )
     loaded_task_ids = []
     monkeypatch.setattr(
         "app.services.agent.new_flow_effects.task_factory._create_waiting_task_from_event",
@@ -2720,7 +3252,8 @@ async def test_root_runtime_resumes_generated_interrupt_by_loading_task_projecti
 
     assert waiting_events[0]["task_id"] == 501
     assert loaded_task_ids == [501]
-    assert pending_graph_service.calls[0]["task"] is task
+    assert "task" not in pending_graph_service.calls[0]
+    assert pending_graph_service.calls[0]["task_snapshot"] == agent_task_snapshot(task)
     assert confirmed_task_graph_service.calls[0]["task"] is task
     assert resumed_state["application_action"] == "execute_confirmed_task"
     assert resumed_state["current_interrupt"] is None
@@ -2737,11 +3270,24 @@ async def test_root_runtime_resumes_generated_interrupt_after_runtime_restart(mo
     )
 
     def create_waiting_task(db_arg, event, team_id, user_id, session_arg):
-        event["task_id"] = 501
-        event["task_key"] = "task-501"
         waiting_events.append(event)
+        return _persisted_waiting_task_from_event(
+            event,
+            team_id=team_id,
+            user_id=user_id,
+            session_id=session_arg.id,
+        )
 
-    task = SimpleNamespace(id=501, task_key="task-501", status="WAITING_USER")
+    task = _persisted_waiting_task_from_event(
+        {
+            "action": "create_customer_activity",
+            "payload": {"customer_id": 101, "content": "已沟通项目进展"},
+            "content": "请确认是否创建这条跟进记录？",
+        },
+        team_id=2,
+        user_id=3,
+        session_id=4,
+    )
     loaded_task_ids = []
     monkeypatch.setattr(
         "app.services.agent.new_flow_effects.task_factory._create_waiting_task_from_event",
@@ -2988,12 +3534,13 @@ async def test_root_runtime_routes_pending_task_through_subgraph_context():
         ),
     )
 
-    assert pending_graph_service.calls[0]["task"] is task
+    assert "task" not in pending_graph_service.calls[0]
+    assert pending_graph_service.calls[0]["task_snapshot"] == agent_task_snapshot(task)
     assert pending_effects.calls[0]["graph_state"]["task_projection"]["id"] == 101
     assert pending_effects.calls[0]["context"].graph_side_effects.task is task
     assert side_effects.pending_task_result is not None
     assert side_effects.pending_task_result["task_projection"]["id"] == 101
-    assert side_effects.pending_task_events == [
+    assert without_projection_metadata(side_effects.pending_task_events) == [
         {
             "event": "agent_step",
             "step": "pending_task_branch",
@@ -3023,11 +3570,682 @@ async def test_root_runtime_routes_pending_task_through_subgraph_context():
     assert [event["event"] for event in state["events"]] == [
         "agent_root_graph_started",
         "agent_root_pending_task_subgraph_completed",
-        "agent_root_pending_task_effects_applied",
+        "agent_root_pending_task_outcome_projected",
         "agent_root_application_action_decided",
         "agent_root_graph_checkpointed",
     ]
     assert state["application_action"] == "pending_handled"
+
+
+@pytest.mark.asyncio
+async def test_root_pending_node_uses_checkpoint_task_snapshot_without_loading_orm(monkeypatch):
+    task = waiting_task_stub()
+    task_snapshot = agent_task_snapshot(task)
+    pending_graph_service = FakePendingGraphService()
+    projector = SequencedPendingInterruptProjector([
+        PendingInterruptProjectionResult(
+            status="PROJECTED",
+            projection_key="",
+            task=None,
+            events=[],
+            assistant_content="请确认是否创建商机？",
+            delivery_status="INLINE_VISIBLE",
+        )
+    ])
+
+    def reject_graph_node_hydration(*args, **kwargs):
+        raise AssertionError("root pending graph node must not load ORM task state")
+
+    monkeypatch.setattr(root_runtime_module.agent_task_crud, "get_by_id", reject_graph_node_hydration)
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        pending_graph_service=pending_graph_service,
+        pending_interrupt_projector=projector,
+    )
+
+    await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "snapshot-only",
+            "channel": "web",
+            "content": "补充金额 10 万",
+            "turn_kind": "text",
+            "pending_task_requested": True,
+            "task_projection": {"id": task.id, "task_key": task.task_key},
+            "pending_task_snapshot": task_snapshot,
+        },
+        context=AgentRuntimeContext(
+            db=object(),
+            session=SimpleNamespace(id=4, context_json={}),
+            task=None,
+            turn_input=AgentTurnInput.text("补充金额 10 万"),
+            content="补充金额 10 万",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            authorization="Bearer test",
+            side_effects=AgentRootRuntimeSideEffects(),
+        ),
+    )
+
+    assert len(pending_graph_service.calls) == 1
+    assert "task" not in pending_graph_service.calls[0]
+    assert pending_graph_service.calls[0]["task_snapshot"] == task_snapshot
+    assert projector.calls[0].task is None
+    assert projector.calls[0].continuation["task_id"] == task.id
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_holds_terminal_pending_outcome_behind_durable_projection_barrier():
+    class TerminalPendingGraphService(FakePendingGraphService):
+        async def run_with_trace(self, state, *, side_effects=None):
+            if side_effects is not None:
+                side_effects.checkpoint_ref = new_pending_task_continuation(
+                    team_id=state["team_id"],
+                    user_id=state["user_id"],
+                    session_id=state["session_id"],
+                    task_id=state["task_snapshot"]["id"],
+                    continuation_id="terminal-outcome-1",
+                )
+            return await super().run_with_trace(state, side_effects=side_effects)
+
+    pending_graph_service = TerminalPendingGraphService()
+    pending_effects = FakePendingTaskSideEffectHandler()
+    projector = SequencedPendingInterruptProjector([
+        PendingInterruptProjectionResult(
+            status="IN_PROGRESS",
+            projection_key="",
+            busy=True,
+            retryable=True,
+            failure_reason="projection_in_progress",
+        ),
+        PendingInterruptProjectionResult(
+            status="PROJECTED",
+            projection_key="",
+            assistant_content="请确认是否创建商机？",
+            delivery_status="INLINE_VISIBLE",
+        ),
+    ])
+    new_flow_graph_service = FakeNewFlowGraphService()
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        pending_graph_service=pending_graph_service,
+        pending_task_side_effect_handler=pending_effects,
+        pending_interrupt_projector=projector,
+        new_flow_graph_service=new_flow_graph_service,
+    )
+    task = waiting_task_stub()
+    context = AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4, context_json={}),
+        task=task,
+        turn_input=AgentTurnInput.text("补充金额 10 万"),
+        content="补充金额 10 万",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=AgentRootRuntimeSideEffects(),
+    )
+
+    first = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": context.content,
+            "turn_kind": "text",
+            "pending_task_requested": True,
+            "task_projection": {"id": 101, "task_key": "task-101"},
+        },
+        context=context,
+    )
+
+    assert first["runtime_status"] == "pending_projection_in_progress"
+    assert first["runtime_retryable"] is True
+    assert first.get("current_interrupt") is None
+    assert pending_effects.calls == []
+    assert len(projector.calls) == 1
+    assert new_flow_graph_service.calls == []
+
+    context.turn_input = AgentTurnInput.text("这条新输入不能被消费")
+    context.content = "这条新输入不能被消费"
+    second = await runtime.run_turn(
+        turn_input=context.turn_input,
+        content=context.content,
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="abc",
+        current_customer={},
+        context=context,
+    )
+
+    assert len(projector.calls) == 2
+    assert second["runtime_status"] == "pending_projection_projected"
+    assert second["application_action"] == "pending_handled"
+    assert pending_effects.calls == []
+    assert new_flow_graph_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_projects_authoritative_pending_outcome_when_child_graph_interrupts():
+    checkpointer = InMemorySaver()
+    pending_graph_service = PendingTaskGraphService(
+        preflight_graph_service=FakeNativeInterruptPreflightGraphService(),
+        interaction_graph_service=FakeNativeInterruptInteractionGraphService(),
+        checkpointer=checkpointer,
+    )
+    pending_effects = FakePendingTaskSideEffectHandler()
+    runtime = AgentRootRuntime(
+        checkpointer=checkpointer,
+        pending_graph_service=pending_graph_service,
+        pending_task_side_effect_handler=pending_effects,
+    )
+    task = waiting_task_stub()
+    side_effects = AgentRootRuntimeSideEffects()
+
+    state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": "补充金额 10 万",
+            "turn_kind": "text",
+            "pending_task_requested": True,
+            "task_projection": {"id": 101, "task_key": "task-101"},
+        },
+        context=AgentRuntimeContext(
+            db=object(),
+            session=SimpleNamespace(id=4, context_json={}),
+            task=task,
+            turn_input=AgentTurnInput.text("补充金额 10 万"),
+            content="补充金额 10 万",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            authorization="Bearer test",
+            side_effects=side_effects,
+        ),
+    )
+
+    assert state["application_action"] == "pending_handled"
+    assert state["pending_task_result"]["handled"] is True
+    assert state["pending_task_result"]["task"]["id"] == 101
+    assert state["assistant_content"] == "商机信息齐了。要创建商机吗？"
+    assert state["current_interrupt"]["source_event"] == "confirmation_required"
+    checkpoint_ref = state["current_interrupt"]["checkpoint_ref"]
+    assert checkpoint_ref["runtime"] == "crm_agent_pending_task"
+    assert checkpoint_ref["continuation_id"]
+    assert checkpoint_ref["thread_id"] == (
+        f"crm_agent_pending:2:3:4:101:{checkpoint_ref['continuation_id']}"
+    )
+    assert checkpoint_ref["checkpoint_ns"].startswith("pending_task_subgraph:")
+    assert checkpoint_ref["team_id"] == 2
+    assert checkpoint_ref["user_id"] == 3
+    assert checkpoint_ref["session_id"] == 4
+    assert checkpoint_ref["task_id"] == 101
+    assert side_effects.pending_task_result is not None
+    assert side_effects.pending_task_result["task_projection"]["id"] == 101
+    assert side_effects.pending_task_assistant_content == "商机信息齐了。要创建商机吗？"
+    event_names = [event["event"] for event in side_effects.pending_task_events]
+    assert event_names[0] == "agent_step"
+    assert "pending_interruption_assessed" in event_names
+    assert "confirmation_required" in event_names
+    assert "final" in event_names
+    assert event_names.index("pending_interruption_assessed") < event_names.index("confirmation_required")
+    assert event_names.index("confirmation_required") < event_names.index("final")
+    checkpoint_state = await runtime.current_checkpoint_state(
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="abc",
+    )
+    assert checkpoint_state["runtime_status"] == "pending_projection_projected"
+    assert checkpoint_state["current_interrupt"] == state["current_interrupt"]
+    assert checkpoint_state["pending_interrupt_projection"]["status"] == "PROJECTED"
+    assert checkpoint_state["pending_interrupt_projection"]["delivery_status"] == "INLINE_VISIBLE"
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_exposes_retryable_projection_in_progress_without_exposing_child_interrupt():
+    checkpointer = InMemorySaver()
+    pending_graph_service = PendingTaskGraphService(
+        preflight_graph_service=FakeNativeInterruptPreflightGraphService(),
+        interaction_graph_service=FakeNativeInterruptInteractionGraphService(),
+        checkpointer=checkpointer,
+    )
+    projector = FakePendingInterruptProjector(
+        PendingInterruptProjectionResult(
+            status="IN_PROGRESS",
+            projection_key="",
+            busy=True,
+            retryable=True,
+            failure_reason="projection_in_progress",
+        )
+    )
+    published_events = []
+
+    async def capture_event(event):
+        published_events.append(event)
+
+    runtime = AgentRootRuntime(
+        checkpointer=checkpointer,
+        pending_graph_service=pending_graph_service,
+        pending_interrupt_projector=projector,
+    )
+    task = waiting_task_stub()
+    context = AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4, context_json={}),
+        task=task,
+        turn_input=AgentTurnInput.text("补充金额 10 万"),
+        content="补充金额 10 万",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=AgentRootRuntimeSideEffects(),
+        event_sink=capture_event,
+    )
+
+    state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": context.content,
+            "turn_kind": "text",
+            "pending_task_requested": True,
+            "task_projection": {"id": 101, "task_key": "task-101"},
+        },
+        context=context,
+    )
+
+    assert len(projector.calls) == 1
+    assert state["runtime_status"] == "pending_projection_in_progress"
+    assert state["runtime_retryable"] is True
+    busy_projection_key = projector.calls[0] and root_runtime_module.pending_interrupt_projection_key(
+        projector.calls[0].continuation, projector.calls[0].interrupt
+    )
+    projection_state = state["pending_interrupt_projection"]
+    assert {
+        key: projection_state.get(key)
+        for key in (
+            "status",
+            "projection_key",
+            "replayed",
+            "busy",
+            "retryable",
+            "failure_reason",
+            "delivery_status",
+        )
+    } == {
+        "status": "IN_PROGRESS",
+        "projection_key": busy_projection_key,
+        "replayed": False,
+        "busy": True,
+        "retryable": True,
+        "failure_reason": "projection_in_progress",
+        "delivery_status": None,
+    }
+    assert projection_state["continuation"] == projector.calls[0].continuation
+    assert projection_state["interrupt"] == projector.calls[0].interrupt
+    assert "abort_status" not in projection_state
+    child_load_result = await pending_graph_service._checkpoint_store.load_result(
+        projector.calls[0].continuation,
+        expected_interrupt=projector.calls[0].interrupt,
+    )
+    assert child_load_result.failure_reason is None
+    assert child_load_result.snapshot is not None
+    assert child_load_result.snapshot.interrupts
+    assert child_load_result.snapshot.values.get("projection_aborted") is not True
+    assert state["application_action"] == "finish"
+    assert state["pending_task_handled"] is False
+    assert state["current_interrupt"] is None
+    assert "__interrupt__" not in state
+    assert state["assistant_content"] == "当前待确认流程正在完成状态同步，请稍后刷新或重试。"
+    assert published_events[-1] == {
+        "event": "pending_task_interrupt_projection_in_progress",
+        "reason": "projection_in_progress",
+        "projection_key": busy_projection_key,
+        "retryable": True,
+    }
+    checkpoint_state = await runtime.current_checkpoint_state(
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="abc",
+    )
+    assert checkpoint_state["runtime_status"] == "pending_projection_in_progress"
+    assert checkpoint_state["runtime_retryable"] is True
+    assert checkpoint_state["pending_interrupt_projection"]["status"] == "IN_PROGRESS"
+    assert checkpoint_state.get("current_interrupt") is None
+    assert await runtime.current_interrupt(
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="abc",
+    ) is None
+
+
+@pytest.mark.asyncio
+async def test_run_turn_retries_hidden_child_projection_before_consuming_new_user_input():
+    checkpointer = InMemorySaver()
+    pending_graph_service = PendingTaskGraphService(
+        preflight_graph_service=FakeNativeInterruptPreflightGraphService(),
+        interaction_graph_service=FakeNativeInterruptInteractionGraphService(),
+        checkpointer=checkpointer,
+    )
+    projector = SequencedPendingInterruptProjector([
+        PendingInterruptProjectionResult(
+            status="IN_PROGRESS",
+            projection_key="",
+            busy=True,
+            retryable=True,
+            failure_reason="projection_in_progress",
+        ),
+        PendingInterruptProjectionResult(
+            status="PROJECTED",
+            projection_key="",
+            assistant_content="商机信息齐了。要创建商机吗？",
+            delivery_status="INLINE_VISIBLE",
+        ),
+    ])
+    new_flow_graph_service = FakeNewFlowGraphService()
+    runtime = AgentRootRuntime(
+        checkpointer=checkpointer,
+        pending_graph_service=pending_graph_service,
+        pending_interrupt_projector=projector,
+        new_flow_graph_service=new_flow_graph_service,
+    )
+    task = waiting_task_stub()
+    context = AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4, context_json={}),
+        task=task,
+        turn_input=AgentTurnInput.text("补充金额 10 万"),
+        content="补充金额 10 万",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=AgentRootRuntimeSideEffects(),
+    )
+    first = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": context.content,
+            "turn_kind": "text",
+            "pending_task_requested": True,
+            "task_projection": {"id": 101, "task_key": "task-101"},
+        },
+        context=context,
+    )
+    assert first["runtime_status"] == "pending_projection_in_progress"
+    checkpoint_before_retry = await runtime.current_checkpoint_state(
+        team_id=2, user_id=3, session_id=4, session_key="abc"
+    )
+    assert checkpoint_before_retry.get("current_interrupt") is None
+
+    context.turn_input = AgentTurnInput.text("这是不应该被消费的新消息")
+    context.content = "这是不应该被消费的新消息"
+    second = await runtime.run_turn(
+        turn_input=context.turn_input,
+        content=context.content,
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="abc",
+        current_customer={},
+        context=context,
+    )
+
+    assert len(projector.calls) == 2
+    assert second["runtime_status"] == "pending_projection_projected"
+    assert second["current_interrupt"]["reason"] == "write_confirmation"
+    assert second["assistant_content"] == "商机信息齐了。要创建商机吗？"
+    assert new_flow_graph_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_projection_failure_remains_authoritative_when_failure_event_sink_raises():
+    checkpointer = InMemorySaver()
+    pending_graph_service = PendingTaskGraphService(
+        preflight_graph_service=FakeNativeInterruptPreflightGraphService(),
+        interaction_graph_service=FakeNativeInterruptInteractionGraphService(),
+        checkpointer=checkpointer,
+    )
+    projector = FakePendingInterruptProjector(
+        PendingInterruptProjectionResult(
+            status="FAILED",
+            projection_key="pending_interrupt_projection:v1:failed",
+            retryable=False,
+            failure_reason="projection_continuation_mismatch",
+        )
+    )
+
+    async def failing_event_sink(event):
+        if event.get("event") == "pending_task_interrupt_projection_failed":
+            raise RuntimeError(f"transport unavailable: {event['event']}")
+
+    new_flow_graph_service = FakeNewFlowGraphService()
+    runtime = AgentRootRuntime(
+        checkpointer=checkpointer,
+        pending_graph_service=pending_graph_service,
+        pending_interrupt_projector=projector,
+        new_flow_graph_service=new_flow_graph_service,
+    )
+    task = waiting_task_stub()
+    context = AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4, context_json={}),
+        task=task,
+        turn_input=AgentTurnInput.text("补充金额 10 万"),
+        content="补充金额 10 万",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=AgentRootRuntimeSideEffects(),
+        event_sink=failing_event_sink,
+    )
+
+    state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": context.content,
+            "turn_kind": "text",
+            "pending_task_requested": True,
+            "task_projection": {"id": 101, "task_key": "task-101"},
+        },
+        context=context,
+    )
+
+    assert state["runtime_status"] == "pending_projection_failed"
+    assert state["runtime_retryable"] is False
+    projection_state = state["pending_interrupt_projection"]
+    assert {
+        key: projection_state.get(key)
+        for key in (
+            "status",
+            "projection_key",
+            "replayed",
+            "busy",
+            "retryable",
+            "failure_reason",
+            "delivery_status",
+        )
+    } == {
+        "status": "FAILED",
+        "projection_key": "pending_interrupt_projection:v1:failed",
+        "replayed": False,
+        "busy": False,
+        "retryable": False,
+        "failure_reason": "projection_continuation_mismatch",
+        "delivery_status": None,
+    }
+    assert projection_state["continuation"] == projector.calls[0].continuation
+    assert projection_state["interrupt"] == projector.calls[0].interrupt
+    assert state["application_action"] == "finish"
+    assert state["pending_task_handled"] is False
+    assert state["current_interrupt"] is None
+    assert "__interrupt__" not in state
+    assert state["assistant_content"] == "当前待确认流程投影失败，本次流程已终止；你可以重新发起。"
+    assert context.side_effects.pending_task_events[-1] == {
+        "event": "pending_task_interrupt_projection_failed",
+        "reason": "projection_continuation_mismatch",
+        "projection_key": "pending_interrupt_projection:v1:failed",
+        "retryable": False,
+    }
+    checkpoint_state = await runtime.current_checkpoint_state(
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="abc",
+    )
+    assert checkpoint_state["runtime_status"] == "pending_projection_failed"
+    assert checkpoint_state.get("current_interrupt") is None
+    assert await runtime.current_interrupt(
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="abc",
+    ) is None
+
+    context.event_sink = None
+    context.turn_input = AgentTurnInput.text("重新记录一个客户跟进")
+    context.content = "重新记录一个客户跟进"
+    next_state = await runtime.run_turn(
+        turn_input=context.turn_input,
+        content=context.content,
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="abc",
+        current_customer={},
+        context=context,
+    )
+    assert next_state["runtime_status"] != "pending_projection_failed"
+    assert len(new_flow_graph_service.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_recovery_failure_survives_sink_failure_and_releases_child_continuation():
+    checkpointer = InMemorySaver()
+    delegate = PendingTaskGraphService(
+        preflight_graph_service=FakeNativeInterruptPreflightGraphService(),
+        interaction_graph_service=FakeNativeInterruptInteractionGraphService(),
+        checkpointer=checkpointer,
+    )
+
+    abort_verification_requests = []
+
+    class RecoveryFailingPendingGraphService:
+        async def run(self, state, *, side_effects=None):
+            return await delegate.run(state, side_effects=side_effects)
+
+        async def run_with_trace(self, state, *, side_effects=None):
+            return await delegate.run_with_trace(state, side_effects=side_effects)
+
+        async def load_checkpointed_outcome(self, *args, **kwargs):
+            return PendingTaskOutcomeRecovery(failure_reason="checkpoint_corrupt")
+
+        async def verify_projection_aborted(self, request):
+            abort_verification_requests.append(request)
+            return await delegate.verify_projection_aborted(request)
+
+    async def failing_event_sink(event):
+        if event.get("event") == "pending_task_checkpoint_recovery_failed":
+            raise RuntimeError("transport unavailable")
+
+    new_flow_graph_service = FakeNewFlowGraphService()
+    runtime = AgentRootRuntime(
+        checkpointer=checkpointer,
+        pending_graph_service=RecoveryFailingPendingGraphService(),
+        new_flow_graph_service=new_flow_graph_service,
+    )
+    task = waiting_task_stub()
+    context = AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4, context_json={}),
+        task=task,
+        turn_input=AgentTurnInput.text("补充金额 10 万"),
+        content="补充金额 10 万",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=AgentRootRuntimeSideEffects(),
+        event_sink=failing_event_sink,
+    )
+
+    state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": context.content,
+            "turn_kind": "text",
+            "pending_task_requested": True,
+            "task_projection": {"id": 101, "task_key": "task-101"},
+        },
+        context=context,
+    )
+
+    assert state["runtime_status"] == "checkpoint_recovery_failed"
+    assert state["runtime_retryable"] is False
+    assert state["current_interrupt"] is None
+    assert state["pending_interrupt_projection"]["failure_reason"] == "checkpoint_corrupt"
+    assert state["pending_interrupt_projection"]["abort_status"] == "ABORTED"
+    continuation = state["pending_interrupt_projection"].get("continuation")
+    if continuation is None:
+        continuation = context.side_effects.pending_task_graph_side_effects.checkpoint_ref
+    child_load_result = await delegate._checkpoint_store.load_result(continuation)
+    assert child_load_result.failure_reason is None
+    assert child_load_result.snapshot is not None
+    assert child_load_result.snapshot.interrupts == ()
+    assert child_load_result.snapshot.values["projection_aborted"] is True
+    assert (
+        child_load_result.snapshot.values["projection_abort_interrupt"]
+        == abort_verification_requests[0].expected_interrupt
+    )
+    assert child_load_result.snapshot.values["effect_intents"] == []
+
+    context.event_sink = None
+    context.task = None
+    context.turn_input = AgentTurnInput.text("重新记录一个客户跟进")
+    context.content = "重新记录一个客户跟进"
+    next_state = await runtime.run_turn(
+        turn_input=context.turn_input,
+        content=context.content,
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="abc",
+        current_customer={},
+        context=context,
+    )
+    assert next_state["runtime_status"] != "checkpoint_recovery_failed"
+    assert len(new_flow_graph_service.calls) == 1
 
 
 @pytest.mark.asyncio
@@ -3069,8 +4287,9 @@ async def test_root_runtime_prefers_traced_pending_task_graph_events():
     )
 
     assert pending_graph_service.calls == []
-    assert pending_graph_service.trace_calls[0]["task"] is task
-    assert side_effects.pending_task_events[:3] == [
+    assert "task" not in pending_graph_service.trace_calls[0]
+    assert pending_graph_service.trace_calls[0]["task_snapshot"] == agent_task_snapshot(task)
+    assert without_projection_metadata(side_effects.pending_task_events[:3]) == [
         {
             "event": "agent_step",
             "step": "pending_task_branch",
@@ -3216,7 +4435,72 @@ async def test_root_runtime_decides_confirmed_task_execution_after_pending_subgr
         "task_event": "task_completed",
         "execution_status": "completed",
         "has_next_interrupt": False,
+        "ownership_status": "accepted",
     }
+    assert state["pending_task_snapshot"] == {}
+    assert state["task_projection"] == {}
+    assert state["pending_task_requested"] is False
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_transfers_confirmed_task_ownership_to_next_snapshot_atomically():
+    pending_graph_service = FakeConfirmingPendingGraphService()
+    confirmed_task_graph_service = FakeConfirmedTaskWithNextGraphService()
+    context = AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4),
+        task=SimpleNamespace(
+            id=101,
+            task_key="task-101",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            status="WAITING_USER",
+            state_json={"action": "create_customer_activity"},
+        ),
+        turn_input=AgentTurnInput.confirm(source="web"),
+        content="确认",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=AgentRootRuntimeSideEffects(),
+    )
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        pending_graph_service=pending_graph_service,
+        confirmed_task_graph_service=confirmed_task_graph_service,
+        pending_task_side_effect_handler=FakePendingTaskSideEffectHandler(),
+    )
+
+    state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "confirmed-next-owner",
+            "channel": "web",
+            "content": "确认",
+            "turn_kind": "confirm",
+            "pending_task_requested": True,
+            "task_projection": {"id": 101, "task_key": "task-101"},
+        },
+        context=context,
+    )
+
+    assert state["pending_task_snapshot"]["id"] == 102
+    assert state["task_projection"] == {
+        "id": 102,
+        "task_key": "task-102",
+        "status": "WAITING_USER",
+        "intent": "CREATE_OPPORTUNITY",
+        "target_type": "customer",
+        "target_id": 17,
+    }
+    assert state["pending_task_requested"] is True
+    assert state["current_interrupt"]["task_projection_id"] == 102
+    assert state["current_interrupt"]["task_projection_key"] == "task-102"
+    assert context.task is None
 
 
 def test_project_turn_output_preserves_pending_events_before_confirmed_task_events():
@@ -3620,10 +4904,9 @@ class FakeFollowUpConfirmationChannelService:
         self.pending_case_public_ids = []
         self.pending_checks = []
 
-    def is_case_pending_for_owner(self, db, *, team_id, user_id, case_public_id):
+    def revalidate_case_pending_for_owner(self, *, team_id, user_id, case_public_id):
         self.pending_checks.append(
             {
-                "db": db,
                 "team_id": team_id,
                 "user_id": user_id,
                 "case_public_id": case_public_id,
@@ -3639,6 +4922,7 @@ class FakeFollowUpConfirmationChannelService:
         user_id,
         case_public_ids,
         interaction_scope,
+        turn_scope=None,
         prompt_override=None,
         reason_code="ROOT_GRAPH_INTERRUPT_PLANNED",
     ):
@@ -4120,10 +5404,10 @@ async def test_root_runtime_keeps_follow_up_confirmation_interrupt_when_reply_is
 
 
 @pytest.mark.asyncio
-async def test_root_runtime_projects_async_owner_inbox_case_on_later_active_turn():
-    case_public_id = "fuc_async_page_created"
+async def test_root_runtime_never_projects_owner_inbox_case_on_unrelated_later_turn():
+    historical_case = "fuc_async_page_created_for_other_customer"
     channel_service = FakeFollowUpConfirmationChannelService()
-    channel_service.pending_case_public_ids = [case_public_id]
+    channel_service.pending_case_public_ids = [historical_case]
     runtime = AgentRootRuntime(
         checkpointer=InMemorySaver(),
         new_flow_graph_service=FakeNewFlowGraphService(),
@@ -4133,7 +5417,7 @@ async def test_root_runtime_projects_async_owner_inbox_case_on_later_active_turn
     context = AgentRuntimeContext(
         db=SimpleNamespace(query=lambda *args, **kwargs: None),
         session=SimpleNamespace(id=4, context_json={}),
-        content="查看客户最新进展",
+        content="给当前客户添加一条部署信息",
         team_id=2,
         user_id=3,
         session_id=4,
@@ -4150,21 +5434,26 @@ async def test_root_runtime_projects_async_owner_inbox_case_on_later_active_turn
             "channel": "web",
             "content": context.content,
             "turn_kind": "text",
+            "turn_scope": {
+                "turn_id": "turn-current-customer",
+                "session_id": 4,
+                "channel": "web",
+                "customer_id": 101,
+                "operation_status": "active",
+            },
         },
         context=context,
     )
 
-    assert state["current_interrupt"]["reason"] == "follow_up_task_confirmation"
-    assert state["current_interrupt"]["interaction"]["payload"]["case_public_id"] == case_public_id
-    assert channel_service.prepare_calls[0]["case_public_ids"] == []
-    assert channel_service.prepare_calls[1]["case_public_ids"] == [case_public_id]
-    assert channel_service.list_calls[0]["limit"] == 1
-    assert [event for event in side_effects.new_flow_events if event.get("event") == "final"] == []
-    assert side_effects.business_interaction_assistant_content == "上次安排的任务这次是否已经完成?"
+    assert not state.get("current_interrupt")
+    assert channel_service.prepare_calls == []
+    assert channel_service.list_calls == []
+    assert any(event.get("event") == "final" for event in side_effects.new_flow_events)
+    assert state["assistant_content"] == "已处理新流程"
 
 
 @pytest.mark.asyncio
-async def test_root_runtime_reconciles_next_owner_inbox_case_after_first_resolution():
+async def test_resolving_current_confirmation_does_not_chain_next_owner_inbox_case():
     first_case = "fuc_first"
     second_case = "fuc_second"
 
@@ -4188,17 +5477,31 @@ async def test_root_runtime_reconciles_next_owner_inbox_case_after_first_resolut
         confirmation_channel_service=channel_service,
     )
     context = AgentRuntimeContext(
-        db=SimpleNamespace(query=lambda *args, **kwargs: None),
+        db=object(),
         session=SimpleNamespace(id=4, context_json={}),
-        content="查看客户最新进展",
+        content="记录当前客户跟进",
         team_id=2,
         user_id=3,
         session_id=4,
         authorization="Bearer test",
         side_effects=AgentRootRuntimeSideEffects(),
     )
-
-    first_state = await runtime.checkpoint_turn_start(
+    initial_event = channel_service.prepare_case_prompt_by_public_ids(
+        context.db,
+        team_id=2,
+        user_id=3,
+        case_public_ids=[first_case],
+        interaction_scope="crm_agent:2:3:4:abc",
+    )
+    interrupt_payload = {
+        "schema_version": "agent.interrupt.v1",
+        "interrupt_id": "int_follow_up_confirmation_stable",
+        "type": "choice",
+        "reason": "follow_up_task_confirmation",
+        "business_action": "resolve_follow_up_task_confirmation_case",
+        "interaction": initial_event["interaction"],
+    }
+    await runtime.checkpoint_turn_start(
         {
             "team_id": 2,
             "user_id": 3,
@@ -4207,10 +5510,10 @@ async def test_root_runtime_reconciles_next_owner_inbox_case_after_first_resolut
             "channel": "web",
             "content": context.content,
             "turn_kind": "text",
+            "current_interrupt": interrupt_payload,
         },
         context=context,
     )
-    assert first_state["current_interrupt"]["interaction"]["payload"]["case_public_id"] == first_case
 
     resumed = await runtime.resume_interrupt(
         resume_payload={
@@ -4225,9 +5528,10 @@ async def test_root_runtime_reconciles_next_owner_inbox_case_after_first_resolut
         context=context,
     )
 
-    assert resumed["current_interrupt"]["reason"] == "follow_up_task_confirmation"
-    assert resumed["current_interrupt"]["interaction"]["payload"]["case_public_id"] == second_case
-    assert [call["case_public_ids"] for call in channel_service.prepare_calls][-1] == [second_case]
+    assert not resumed.get("current_interrupt")
+    assert resumed["assistant_content"] == "已确认完成，并更新了这项跟进任务。"
+    assert [call["case_public_ids"] for call in channel_service.prepare_calls] == [[first_case]]
+    assert channel_service.list_calls == []
 
 
 @pytest.mark.asyncio
@@ -4255,7 +5559,13 @@ async def test_follow_up_confirmation_is_published_only_after_checkpoint_project
         side_effects=AgentRootRuntimeSideEffects(),
         event_sink=capture_event,
     )
-    channel_service.pending_case_public_ids = [case_public_id]
+    context.side_effects.new_flow_events.append({
+        "event": "customer_activity_post_commit_completed",
+        "post_commit": {
+            "needs_user_confirmation": True,
+            "confirmation_case_public_ids": [case_public_id],
+        },
+    })
     projection_calls = []
     original_mark_projected = channel_service.mark_projection_projected
 
@@ -4288,6 +5598,70 @@ async def test_follow_up_confirmation_is_published_only_after_checkpoint_project
     ]
     assert len(prompt_events) == 1
     assert prompt_events[0]["interaction"]["payload"]["case_public_id"] == case_public_id
+
+
+@pytest.mark.asyncio
+async def test_projection_revision_skip_suppresses_prompt_without_reclassifying_delivery_failed():
+    case_public_id = "fuc_projection_revision_superseded"
+    channel_service = FakeFollowUpConfirmationChannelService()
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeNewFlowGraphService(),
+        confirmation_channel_service=channel_service,
+    )
+    published_events = []
+
+    async def capture_event(event):
+        published_events.append(event)
+
+    context = AgentRuntimeContext(
+        db=SimpleNamespace(query=lambda *args, **kwargs: None),
+        session=SimpleNamespace(id=4, context_json={}),
+        content="查看客户最新进展",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=AgentRootRuntimeSideEffects(),
+        event_sink=capture_event,
+    )
+    context.side_effects.new_flow_events.append({
+        "event": "customer_activity_post_commit_completed",
+        "post_commit": {
+            "needs_user_confirmation": True,
+            "confirmation_case_public_ids": [case_public_id],
+        },
+    })
+
+    def skip_superseded_projection(db_arg, *, team_id, prompt_key):
+        return {
+            "status": "SKIPPED",
+            "reason_code": "SUPERSEDED_ACTIVITY_REVISION",
+        }
+
+    channel_service.mark_projection_projected = skip_superseded_projection
+
+    state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": context.content,
+            "turn_kind": "text",
+        },
+        context=context,
+    )
+
+    assert state.get("current_interrupt") is None
+    assert channel_service.failed_projection_calls == []
+    assert not any(event.get("event") == FOLLOW_UP_CONFIRMATION_PROMPT_EVENT for event in published_events)
+    assert any(
+        event.get("event") == "follow_up_task_confirmation_projection_suppressed"
+        and event.get("reason_code") == "SUPERSEDED_ACTIVITY_REVISION"
+        for event in published_events
+    )
 
 
 @pytest.mark.asyncio
@@ -4326,7 +5700,13 @@ async def test_projection_acknowledgement_failure_is_audited_without_exposing_pr
         side_effects=AgentRootRuntimeSideEffects(),
         event_sink=capture_event,
     )
-    channel_service.pending_case_public_ids = [case_public_id]
+    context.side_effects.new_flow_events.append({
+        "event": "customer_activity_post_commit_completed",
+        "post_commit": {
+            "needs_user_confirmation": True,
+            "confirmation_case_public_ids": [case_public_id],
+        },
+    })
 
     def fail_projection(db_arg, *, team_id, prompt_key):
         raise RuntimeError("checkpoint acknowledgement failed")
@@ -4381,7 +5761,6 @@ async def test_projection_acknowledgement_failure_is_audited_without_exposing_pr
 async def test_projection_ack_failure_discards_hidden_interrupt_and_retries_on_next_turn():
     case_public_id = "fuc_projection_retry"
     channel_service = FakeFollowUpConfirmationChannelService()
-    channel_service.pending_case_public_ids = [case_public_id]
     runtime = AgentRootRuntime(
         checkpointer=InMemorySaver(),
         new_flow_graph_service=FakeNewFlowGraphService(),
@@ -4404,6 +5783,13 @@ async def test_projection_ack_failure_discards_hidden_interrupt_and_retries_on_n
         side_effects=AgentRootRuntimeSideEffects(),
         event_sink=capture_event,
     )
+    context.side_effects.new_flow_events.append({
+        "event": "customer_activity_post_commit_completed",
+        "post_commit": {
+            "needs_user_confirmation": True,
+            "confirmation_case_public_ids": [case_public_id],
+        },
+    })
     original_mark_projected = channel_service.mark_projection_projected
     attempts = 0
 
@@ -4568,3 +5954,213 @@ async def test_unrecognized_confirmation_reply_is_only_exposed_after_retry_inter
     prompt_events = [event for event in published_events if event.get("event") == FOLLOW_UP_CONFIRMATION_PROMPT_EVENT]
     assert len(prompt_events) == 1
     assert not any(event.get("event") == "follow_up_task_confirmation_case_resolved" for event in published_events)
+
+@pytest.mark.asyncio
+async def test_root_projects_hidden_pending_application_step_before_exposing_business_interrupt(monkeypatch):
+    checkpointer = InMemorySaver()
+    task = waiting_task_stub()
+    task.team_id = 2
+    task.user_id = 3
+    task.session_id = 4
+    task.input_json = {}
+    task.state_json = {}
+    lookup_calls = []
+
+    def get_task(db, task_id, team_id=None, user_id=None):
+        lookup_calls.append({
+            "db": db,
+            "task_id": task_id,
+            "team_id": team_id,
+            "user_id": user_id,
+        })
+        return task
+
+    monkeypatch.setattr(root_runtime_module.agent_task_crud, "get_by_id", get_task)
+    interaction = FakeNativeInterruptInteractionGraphService()
+    pending_graph = PendingTaskGraphService(
+        preflight_graph_service=FakeNativeInterruptPreflightGraphService(),
+        interaction_graph_service=interaction,
+        checkpointer=checkpointer,
+        application_step_protocol=True,
+    )
+    projector = SequencedPendingApplicationStepProjector([
+        PendingApplicationStepProjectionResult(
+            status="COMPLETED",
+            step_id="ignored-by-fake",
+            result={
+                "step_type": "preflight",
+                "task_snapshot": agent_task_snapshot(task),
+                "suspended_task_snapshot": {},
+                "result": {
+                    "handled": False,
+                    "events": [{"event": "pending_interruption_assessed"}],
+                    "confirmation_decision": {},
+                },
+            },
+        ),
+        completed_interaction_application_step(task),
+    ])
+    runtime = AgentRootRuntime(
+        checkpointer=checkpointer,
+        pending_graph_service=pending_graph,
+        pending_application_step_projector=projector,
+        pending_task_side_effect_handler=FakePendingTaskSideEffectHandler(),
+    )
+    context = AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4, context_json={}),
+        task=task,
+        turn_input=AgentTurnInput.text("补充金额 10 万"),
+        content="补充金额 10 万",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=AgentRootRuntimeSideEffects(),
+    )
+
+    state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "application-step-root",
+            "channel": "web",
+            "content": context.content,
+            "turn_kind": "text",
+            "pending_task_requested": True,
+            "task_projection": {"id": 101, "task_key": "task-101"},
+        },
+        context=context,
+    )
+
+    assert len(projector.calls) == 2
+    preflight_step = projector.calls[0].step
+    interaction_step = projector.calls[1].step
+    assert preflight_step["internal"] is True
+    assert preflight_step["step_type"] == "preflight"
+    assert interaction_step["internal"] is True
+    assert interaction_step["step_type"] == "interaction"
+    assert preflight_step["step_id"] != interaction_step["step_id"]
+    assert preflight_step["checkpoint_ref"]["checkpoint_ns"].startswith("pending_task_subgraph:")
+    assert interaction_step["checkpoint_ref"] == preflight_step["checkpoint_ref"]
+    assert lookup_calls == [
+        {
+            "db": context.db,
+            "task_id": 101,
+            "team_id": 2,
+            "user_id": 3,
+        },
+        {
+            "db": context.db,
+            "task_id": 101,
+            "team_id": 2,
+            "user_id": 3,
+        },
+    ]
+    assert state["current_interrupt"]["reason"] == "write_confirmation"
+    assert state["current_interrupt"].get("internal") is not True
+    assert state["runtime_status"] == "pending_projection_projected"
+
+
+@pytest.mark.asyncio
+async def test_root_retries_hidden_application_step_before_accepting_new_turn(monkeypatch):
+    checkpointer = InMemorySaver()
+    task = waiting_task_stub()
+    task.team_id = 2
+    task.user_id = 3
+    task.session_id = 4
+    task.input_json = {}
+    task.state_json = {}
+    monkeypatch.setattr(
+        root_runtime_module.agent_task_crud,
+        "get_by_id",
+        lambda db, task_id, team_id=None, user_id=None: task,
+    )
+    pending_graph = PendingTaskGraphService(
+        preflight_graph_service=FakeNativeInterruptPreflightGraphService(),
+        interaction_graph_service=FakeNativeInterruptInteractionGraphService(),
+        checkpointer=checkpointer,
+        application_step_protocol=True,
+    )
+    projector = SequencedPendingApplicationStepProjector([
+        PendingApplicationStepProjectionResult(
+            status="IN_PROGRESS",
+            step_id="busy",
+            busy=True,
+            retryable=True,
+            failure_reason="application_step_lease_busy",
+        ),
+        PendingApplicationStepProjectionResult(
+            status="COMPLETED",
+            step_id="completed",
+            result={
+                "step_type": "preflight",
+                "task_snapshot": agent_task_snapshot(task),
+                "suspended_task_snapshot": {},
+                "result": {
+                    "handled": False,
+                    "events": [{"event": "pending_interruption_assessed"}],
+                    "confirmation_decision": {},
+                },
+            },
+        ),
+        completed_interaction_application_step(task),
+    ])
+    new_flow = FakeNewFlowGraphService()
+    runtime = AgentRootRuntime(
+        checkpointer=checkpointer,
+        pending_graph_service=pending_graph,
+        pending_application_step_projector=projector,
+        new_flow_graph_service=new_flow,
+        pending_task_side_effect_handler=FakePendingTaskSideEffectHandler(),
+    )
+    context = AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4, context_json={}),
+        task=task,
+        turn_input=AgentTurnInput.text("补充金额 10 万"),
+        content="补充金额 10 万",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=AgentRootRuntimeSideEffects(),
+    )
+
+    first = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "application-step-retry",
+            "channel": "web",
+            "content": context.content,
+            "turn_kind": "text",
+            "pending_task_requested": True,
+            "task_projection": {"id": 101, "task_key": "task-101"},
+        },
+        context=context,
+    )
+    assert first["runtime_status"] == "pending_application_step_in_progress"
+    assert first.get("current_interrupt") is None
+
+    context.turn_input = AgentTurnInput.text("这条新输入不能被消费")
+    context.content = "这条新输入不能被消费"
+    second = await runtime.run_turn(
+        turn_input=context.turn_input,
+        content=context.content,
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="application-step-retry",
+        current_customer={},
+        context=context,
+    )
+
+    assert len(projector.calls) == 3
+    assert projector.calls[0].step["step_id"] == projector.calls[1].step["step_id"]
+    assert projector.calls[2].step["step_type"] == "interaction"
+    assert projector.calls[2].step["content"] == "补充金额 10 万"
+    assert second["current_interrupt"]["reason"] == "write_confirmation"
+    assert new_flow.calls == []

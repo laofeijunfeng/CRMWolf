@@ -5,12 +5,13 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from app.services.agent.active_task_ownership import active_task_ownership_projector
 from app.services.agent.action_review_graph import (
     ActionReviewGraphService,
     action_review_graph_service as default_action_review_graph_service,
 )
 from app.services.agent import action_plan, action_workflow, interactions, session_state, task_display, task_execution, task_factory
-from app.services.agent.interrupts import AgentInterruptPayload, interrupt_from_waiting_event
+from app.services.agent.interrupts import AgentInterruptPayload
 from app.services.agent.state import AgentGraphInput, AgentGraphResult
 from app.services.agent.types import JSONDict, coerce_json_dict
 
@@ -41,6 +42,8 @@ class NewFlowSideEffectContext:
     switch_notice: str | None = None
     assistant_content: str | None = None
     current_interrupt: AgentInterruptPayload | None = None
+    active_task_snapshot: JSONDict | None = None
+    ownership_rejection_event: JSONDict | None = None
     auto_execute_tasks: list[object] | None = None
     auto_execute_actions: list[action_plan.ActionPlanItem] | None = None
     review_events: list[JSONDict] | None = None
@@ -135,10 +138,17 @@ class NewFlowSideEffectHandler:
                     db=context.db,
                     team_id=context.team_id,
                 )
-                context.current_interrupt = interrupt_from_waiting_event(
-                    coerce_json_dict(event_with_interaction),
+                ownership = active_task_ownership_projector.project_task(
+                    task,
+                    team_id=context.team_id,
+                    user_id=context.user_id,
+                    session_id=getattr(context.session, "id", 0) if context.session else 0,
+                    source="new_flow_waiting_task",
                     interaction=event_with_interaction.get("interaction"),
                 )
+                context.current_interrupt = ownership.current_interrupt
+                context.active_task_snapshot = ownership.active_task_snapshot
+                context.ownership_rejection_event = ownership.rejection_event
 
         return self._apply_common(event_object, context)
 
@@ -157,10 +167,17 @@ class NewFlowSideEffectHandler:
                 db=context.db,
                 team_id=context.team_id,
             )
-            context.current_interrupt = interrupt_from_waiting_event(
-                coerce_json_dict(event_with_interaction),
+            ownership = active_task_ownership_projector.project_task(
+                task,
+                team_id=context.team_id,
+                user_id=context.user_id,
+                session_id=getattr(context.session, "id", 0) if context.session else 0,
+                source="new_flow_waiting_task",
                 interaction=event_with_interaction.get("interaction"),
             )
+            context.current_interrupt = ownership.current_interrupt
+            context.active_task_snapshot = ownership.active_task_snapshot
+            context.ownership_rejection_event = ownership.rejection_event
         return self._apply_common(event_object, context)
 
     def _apply_common(self, event_object: dict[str, object], context: NewFlowSideEffectContext) -> JSONDict:

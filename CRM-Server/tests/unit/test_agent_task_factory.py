@@ -1,3 +1,5 @@
+import pytest
+
 from app.services.agent import task_factory
 
 
@@ -31,3 +33,38 @@ def test_confirmation_summary_for_action_hides_internal_action_key():
         "create_customer_activity",
         content=None,
     ) == "确认记录跟进"
+
+
+def test_waiting_task_semantics_fail_closed_on_unregistered_action():
+    from app.services.agent.waiting_task_semantics import require_waiting_event_name_for_task_action
+
+    try:
+        require_waiting_event_name_for_task_action("select_unknown_resource")
+    except ValueError as exc:
+        assert "no registered interaction semantics" in str(exc)
+    else:
+        raise AssertionError("expected unregistered waiting action to fail closed")
+
+
+def test_waiting_task_semantics_reject_conflicting_persisted_source_event():
+    from app.services.agent.waiting_task_semantics import waiting_event_name_from_task_state
+
+    try:
+        waiting_event_name_from_task_state({
+            "action": "select_customer_for_activity",
+            "source_event": "confirmation_required",
+        })
+    except ValueError as exc:
+        assert "semantics conflict" in str(exc)
+    else:
+        raise AssertionError("expected conflicting waiting semantics to fail closed")
+
+
+def test_waiting_task_semantics_reject_unregistered_action_even_with_persisted_source_event():
+    from app.services.agent.waiting_task_semantics import waiting_event_name_from_task_state
+
+    with pytest.raises(ValueError, match="no registered interaction semantics"):
+        waiting_event_name_from_task_state({
+            "action": "select_unknown_resource",
+            "source_event": "customer_selection_required",
+        })

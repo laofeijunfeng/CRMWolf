@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, TypedDict
 from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime  # noqa: TC002 -- LangGraph resolves node hints at runtime.
 
-from app.services.agent.state import merge_turn_scoped_events
+from app.services.agent.state import AgentTurnScope, merge_turn_scoped_events
 from app.services.agent.types import (
     JSONDict,
     JSONValue,  # noqa: F401 -- JSONDict forward refs are resolved by LangGraph at runtime.
@@ -28,6 +28,7 @@ class FollowUpConfirmationGraphState(TypedDict, total=False):
     mode: FollowUpConfirmationGraphMode
     case_public_ids: list[str]
     interaction_scope: str
+    turn_scope: AgentTurnScope
     prompt_override: str
     reason_code: str
     case_public_id: str
@@ -79,15 +80,19 @@ class FollowUpConfirmationGraphService:
         user_id: int,
         case_public_ids: list[str],
         interaction_scope: str,
-        include_owner_inbox_fallback: bool = True,
+        turn_scope: AgentTurnScope | None = None,
         prompt_override: str | None = None,
         reason_code: str = "ROOT_GRAPH_INTERRUPT_PLANNED",
     ) -> JSONDict:
+        explicit_case_public_ids = list(dict.fromkeys(value for value in case_public_ids if value))
+        if not explicit_case_public_ids:
+            return {}
         result = await self._graph.ainvoke(
             {
                 "mode": "prepare",
-                "case_public_ids": case_public_ids,
+                "case_public_ids": explicit_case_public_ids,
                 "interaction_scope": interaction_scope,
+                "turn_scope": dict(turn_scope or {}),
                 "prompt_override": prompt_override or "",
                 "reason_code": reason_code,
                 "prompt_event": {},
@@ -95,35 +100,7 @@ class FollowUpConfirmationGraphService:
             },
             context=FollowUpConfirmationRuntimeContext(db=db, team_id=team_id, user_id=user_id),
         )
-        prompt_event = coerce_json_dict(result.get("prompt_event"))
-        if prompt_event or not include_owner_inbox_fallback:
-            return prompt_event
-        pending = self.channel_service.list_pending_cases(
-            db,
-            team_id=team_id,
-            user_id=user_id,
-            limit=1,
-        )
-        pending_ids = [
-            str(item.get("public_id"))
-            for item in pending.get("items", [])
-            if isinstance(item, dict) and item.get("public_id")
-        ]
-        if not pending_ids:
-            return {}
-        fallback_result = await self._graph.ainvoke(
-            {
-                "mode": "prepare",
-                "case_public_ids": pending_ids,
-                "interaction_scope": interaction_scope,
-                "prompt_override": prompt_override or "",
-                "reason_code": reason_code,
-                "prompt_event": {},
-                "events": [],
-            },
-            context=FollowUpConfirmationRuntimeContext(db=db, team_id=team_id, user_id=user_id),
-        )
-        return coerce_json_dict(fallback_result.get("prompt_event"))
+        return coerce_json_dict(result.get("prompt_event"))
 
     async def resolve(
         self,
@@ -184,6 +161,7 @@ class FollowUpConfirmationGraphService:
             "user_id": context.user_id,
             "case_public_ids": list(state.get("case_public_ids") or []),
             "interaction_scope": str(state.get("interaction_scope") or ""),
+            "turn_scope": dict(state.get("turn_scope") or {}),
         }
         prompt_override = str(state.get("prompt_override") or "")
         reason_code = str(state.get("reason_code") or "")

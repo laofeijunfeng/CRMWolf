@@ -157,12 +157,19 @@ class FollowUpTaskConfirmationService:
         action: FollowUpTaskTransitionAction,
         actor_id: str,
         source_activity_id: int | None = None,
+        source_activity_revision: int | None = None,
         source_public_id: str | None = None,
         commit: bool = True,
     ) -> FollowUpTaskConfirmationCaseResult:
         if not action.requires_confirmation:
             raise ValueError("confirmation case requires a confirmation action")
-        confirmation_hash = self._confirmation_hash(team_id=team_id, task=task, plan=plan, action=action)
+        confirmation_hash = self._confirmation_hash(
+            team_id=team_id,
+            task=task,
+            plan=plan,
+            action=action,
+            source_activity_revision=source_activity_revision,
+        )
         existing = self.confirmation_case_crud.get_pending_by_hash(
             db,
             team_id=team_id,
@@ -183,6 +190,7 @@ class FollowUpTaskConfirmationService:
             actor_id=actor_id,
             confirmation_hash=confirmation_hash,
             source_activity_id=source_activity_id,
+            source_activity_revision=source_activity_revision,
             source_public_id=source_public_id,
         )
         existing_thread_case = self._pending_case_for_activity_task(
@@ -190,6 +198,7 @@ class FollowUpTaskConfirmationService:
             team_id=team_id,
             task_id=task.id,
             source_activity_id=source_activity_id,
+            source_activity_revision=source_activity_revision,
         )
         if existing_thread_case is not None:
             case = self._maybe_upgrade_pending_case(
@@ -338,6 +347,7 @@ class FollowUpTaskConfirmationService:
         actor_id: str,
         confirmation_hash: str,
         source_activity_id: int | None,
+        source_activity_revision: int | None,
         source_public_id: str | None,
     ) -> FollowUpTaskConfirmationCaseInternalCreate:
         return FollowUpTaskConfirmationCaseInternalCreate(
@@ -349,12 +359,14 @@ class FollowUpTaskConfirmationService:
             suggested_action=self._suggested_action(plan, action),
             confirmation_hash=confirmation_hash,
             question_text=self._question_text(task=task, plan=plan, action=action),
-            source_activity_id=source_activity_id if source_activity_id is not None else task.source_activity_id,
+            source_activity_id=source_activity_id,
+            source_activity_revision=source_activity_revision,
             source_public_id=source_public_id or action.source_activity_public_id or task.source_public_id,
             source_plan_json={
                 **plan.to_dict(),
                 "confirmation_source": {
                     "source_activity_id": source_activity_id,
+                    "source_activity_revision": source_activity_revision,
                     "source_public_id": source_public_id,
                     "task_source_activity_id": task.source_activity_id,
                     "task_source_public_id": task.source_public_id,
@@ -370,6 +382,7 @@ class FollowUpTaskConfirmationService:
         team_id: int,
         task_id: int,
         source_activity_id: int | None,
+        source_activity_revision: int | None,
     ) -> FollowUpTaskConfirmationCase | None:
         if source_activity_id is None:
             return None
@@ -379,7 +392,7 @@ class FollowUpTaskConfirmationService:
             source_activity_id=source_activity_id,
         )
         for case in cases:
-            if case.task_id == task_id:
+            if case.task_id == task_id and case.source_activity_revision == source_activity_revision:
                 return case
         return None
 
@@ -408,6 +421,7 @@ class FollowUpTaskConfirmationService:
                 "confirmation_hash": incoming["confirmation_hash"],
                 "question_text": incoming["question_text"],
                 "source_activity_id": incoming["source_activity_id"],
+                "source_activity_revision": incoming["source_activity_revision"],
                 "source_public_id": incoming["source_public_id"],
                 "source_plan_json": incoming["source_plan_json"],
                 "expires_at": incoming["expires_at"],
@@ -448,17 +462,19 @@ class FollowUpTaskConfirmationService:
         task: FollowUpTask,
         plan: FollowUpTaskTransitionPlan,
         action: FollowUpTaskTransitionAction,
+        source_activity_revision: int | None,
     ) -> str:
-        raw = "|".join(
-            [
-                str(team_id),
-                task.public_id,
-                plan.decision.decision,
-                action.task_public_id or "",
-                action.source_activity_public_id or "",
-                action.proposed_due_at or "",
-            ]
-        )
+        identity_parts = [
+            str(team_id),
+            task.public_id,
+            plan.decision.decision,
+            action.task_public_id or "",
+            action.source_activity_public_id or "",
+            action.proposed_due_at or "",
+        ]
+        if source_activity_revision is not None:
+            identity_parts.append(f"activity_revision:{source_activity_revision}")
+        raw = "|".join(identity_parts)
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def _suggested_action(

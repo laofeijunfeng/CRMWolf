@@ -32,7 +32,7 @@ from app.services.customer_activity_ai.structuring_agent import (
 )
 from app.services.agent.temporal import agent_temporal_resolver
 from app.services.customer_activity_kinds import get_activity_kind_meta
-from app.services.customer_activity_post_commit_workflow import customer_activity_post_commit_workflow
+from app.services.customer_activity_write_service import customer_activity_write_service
 from app.services.industry_display_service import industry_display_service
 
 logger = logging.getLogger(__name__)
@@ -157,30 +157,24 @@ class CustomerActivityAIWorkflow:
             if not activity:
                 raise CustomerActivityWorkflowError("客户活动不存在")
             next_follow_time = self._resolve_structured_next_follow_time(result, activity)
-            updated = customer_activity_crud.update_processed_content(
+            write_result = customer_activity_write_service.persist_structured_content(
                 db,
-                state["activity_id"],
+                activity_id=state["activity_id"],
+                team_id=state["team_id"],
                 title=result.get("title"),
                 content_json=result.get("content_json") or {},
                 summary=result.get("summary"),
                 next_action=result.get("next_action"),
                 next_follow_time=next_follow_time,
                 next_follow_time_source="AI_EXTRACTED" if next_follow_time else None,
-            )
-            if not updated:
-                raise CustomerActivityWorkflowError("客户活动不存在")
-            customer_activity_crud.update_effectiveness_status(db, state["activity_id"], "GENERATING")
-        finally:
-            db.close()
-        try:
-            await customer_activity_post_commit_workflow.run(
-                activity_id=state["activity_id"],
-                team_id=state["team_id"],
-                trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_STRUCTURED_COMPLETED,
+                post_commit_trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_STRUCTURED_COMPLETED,
                 actor_id=None,
             )
-        except Exception:
-            logger.exception("客户活动结构化后 post-commit workflow 触发失败: activity_id=%s", state["activity_id"])
+            customer_activity_write_service.kick(write_result)
+        except ValueError as exc:
+            raise CustomerActivityWorkflowError(str(exc)) from exc
+        finally:
+            db.close()
 
         db = SessionLocal()
         try:

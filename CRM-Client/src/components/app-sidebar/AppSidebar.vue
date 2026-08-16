@@ -28,7 +28,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 import {
   BarChart3,
@@ -54,12 +55,48 @@ import {
   SidebarRail,
 } from '@/components/ui/sidebar'
 import { usePermissionStore } from '@/stores/permissions'
+import { useFollowUpConfirmationStore } from '@/stores/followUpConfirmation'
+import { logger } from '@/utils/logger'
 import NavMain, { type NavMainGroup } from './NavMain.vue'
 import NavUser from './NavUser.vue'
 
 const router = useRouter()
 const route = useRoute()
 const permissionStore = usePermissionStore()
+const confirmationStore = useFollowUpConfirmationStore()
+const { pendingCount: pendingConfirmationCount } = storeToRefs(confirmationStore)
+const { fetchPendingCount } = confirmationStore
+
+const pendingConfirmationBadge = computed<number | string | undefined>(() => {
+  if (pendingConfirmationCount.value <= 0) return undefined
+  return pendingConfirmationCount.value > 99 ? '99+' : pendingConfirmationCount.value
+})
+
+const confirmationRefreshIntervalMs = 45_000
+let confirmationRefreshTimer: number | undefined
+let confirmationRefreshInFlight = false
+
+async function refreshPendingConfirmationCount(): Promise<void> {
+  if (confirmationRefreshInFlight) return
+  confirmationRefreshInFlight = true
+  try {
+    await fetchPendingCount()
+  } catch (error) {
+    logger.warn('[AppSidebar]', '待确认追踪数量加载失败', { error })
+  } finally {
+    confirmationRefreshInFlight = false
+  }
+}
+
+function handleWindowFocus(): void {
+  void refreshPendingConfirmationCount()
+}
+
+function handleVisibilityChange(): void {
+  if (document.visibilityState === 'visible') {
+    void refreshPendingConfirmationCount()
+  }
+}
 
 const currentPath = computed(() => {
   const path = route.path
@@ -106,6 +143,12 @@ const navGroups = computed<NavMainGroup[]>(() => [
         path: '/customer-tracking',
         icon: ListChecks,
         active: currentPath.value.startsWith('/customer-tracking'),
+        ...(pendingConfirmationBadge.value !== undefined
+          ? {
+              badge: pendingConfirmationBadge.value,
+              badgeDescription: `待确认 ${pendingConfirmationBadge.value} 条`,
+            }
+          : {}),
       },
       {
         label: '商机管理',
@@ -168,4 +211,21 @@ const navGroups = computed<NavMainGroup[]>(() => [
 const handleMenuClick = (path: string): void => {
   router.push(path)
 }
+
+onMounted(() => {
+  void refreshPendingConfirmationCount()
+  confirmationRefreshTimer = window.setInterval(() => {
+    void refreshPendingConfirmationCount()
+  }, confirmationRefreshIntervalMs)
+  window.addEventListener('focus', handleWindowFocus)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+})
+
+onBeforeUnmount(() => {
+  if (confirmationRefreshTimer !== undefined) {
+    window.clearInterval(confirmationRefreshTimer)
+  }
+  window.removeEventListener('focus', handleWindowFocus)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+})
 </script>

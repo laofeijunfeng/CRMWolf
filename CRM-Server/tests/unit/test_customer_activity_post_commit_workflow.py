@@ -17,6 +17,8 @@ from app.models.sales_commitment import (
     DueAtGranularity,
     FollowUpTask,
     FollowUpTaskConfirmationCase,
+    FollowUpTaskConfirmationPromptDelivery,
+    FollowUpTaskConfirmationPromptStatus,
     FollowUpTaskConfirmationStatus,
     FollowUpTaskEvent,
     FollowUpTaskProjectionStatus,
@@ -28,6 +30,7 @@ from app.models.sales_commitment import (
 )
 from app.schemas.sales_commitment import FollowUpTaskInternalCreate
 from app.services.customer_activity_post_commit_workflow import CustomerActivityPostCommitWorkflow
+from app.services.follow_up_task_confirmation_service import FollowUpTaskConfirmationService
 from app.services.follow_up_task_projection_service import FollowUpTaskProjectionResult
 from app.services.follow_up_task_reconciliation_evaluation_service import FollowUpTaskReconciliationDecision
 from app.services.task_reconciliation_semantic_matcher import TaskReconciliationSemanticMatchResult
@@ -63,6 +66,7 @@ def db_session(monkeypatch):
             FollowUpTask.__table__,
             FollowUpTaskEvent.__table__,
             FollowUpTaskConfirmationCase.__table__,
+            FollowUpTaskConfirmationPromptDelivery.__table__,
             FollowUpTaskTransitionPolicyDecisionLog.__table__,
             FollowUpTaskReconciliationRun.__table__,
             AgentWorkflowAction.__table__,
@@ -70,6 +74,9 @@ def db_session(monkeypatch):
     )
     Session = sessionmaker(bind=engine)
     monkeypatch.setattr("app.services.customer_activity_post_commit_workflow.SessionLocal", Session)
+    from app.services.follow_up_confirmation_delivery_workflow import follow_up_confirmation_delivery_workflow
+
+    monkeypatch.setattr(follow_up_confirmation_delivery_workflow.projection, "_session_factory", Session)
     session = Session()
     _seed_customer_and_activities(session)
     session.commit()
@@ -194,13 +201,25 @@ class FakeProjectionService:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
 
-    def run_activity_projection(self, db, *, activity_id, team_id, trigger_type, actor_id=None):
+    def run_activity_projection(
+        self,
+        db,
+        *,
+        activity_id,
+        team_id,
+        trigger_type,
+        actor_id=None,
+        activity_snapshot=None,
+        commit=True,
+    ):
         self.calls.append(
             {
                 "activity_id": activity_id,
                 "team_id": team_id,
                 "trigger_type": trigger_type,
                 "actor_id": actor_id,
+                "activity_snapshot": activity_snapshot,
+                "commit": commit,
             }
         )
         return FollowUpTaskProjectionResult(
@@ -292,6 +311,7 @@ async def test_post_commit_workflow_completes_old_same_owner_task_without_next_s
     state = await workflow.run(
         activity_id=190,
         team_id=1,
+        expected_activity_revision=1,
         trigger_type="ACTIVITY_CREATED_DETERMINISTIC",
         actor_id="2",
     )
@@ -346,6 +366,7 @@ async def test_post_commit_workflow_creates_confirmation_case_when_policy_blocks
     state = await workflow.run(
         activity_id=190,
         team_id=1,
+        expected_activity_revision=1,
         trigger_type="ACTIVITY_CREATED_DETERMINISTIC",
         actor_id="2",
     )
@@ -361,17 +382,202 @@ async def test_post_commit_workflow_creates_confirmation_case_when_policy_blocks
     assert total == 1
     assert cases[0].status == FollowUpTaskConfirmationStatus.PENDING
     assert cases[0].source_activity_id == 190
+    assert cases[0].source_activity_revision == 1
     assert cases[0].source_plan_json["confirmation_source"]["source_activity_id"] == 190
+    assert cases[0].source_plan_json["confirmation_source"]["source_activity_revision"] == 1
     assert state["confirmation_cases"][0]["case_public_id"] == cases[0].public_id
     assert state["post_commit"]["needs_user_confirmation"] is True
     assert state["post_commit"]["confirmation_case_public_ids"] == [cases[0].public_id]
     assert state["post_commit"]["confirmation_cases"][0]["task_public_id"] == task.public_id
+    assert state["post_commit"]["prompt_policy"]["delivery"] == "durable_confirmation_inbox"
+    assert state["post_commit"]["confirmation_deliveries"][0]["status"] == FollowUpTaskConfirmationPromptStatus.SENT
+    delivery = db_session.query(FollowUpTaskConfirmationPromptDelivery).one()
+    db_session.refresh(cases[0])
+    assert delivery.provider_message_id == f"inbox:{cases[0].public_id}"
+    assert delivery.source_activity_id == 190
+    assert delivery.expected_activity_revision == 1
+    assert cases[0].prompt_count == 1
+    assert cases[0].last_prompted_at is not None
     ledger_actions = _post_commit_ledger_actions(db_session)
     assert {action.action_type for action in ledger_actions} == {
         "project_next_follow_up_tasks",
         "reconcile_historical_follow_up_tasks",
     }
     assert all(action.status == "EXECUTED" for action in ledger_actions)
+
+
+@pytest.mark.asyncio
+async def test_post_commit_delivery_uses_confirmation_case_owner_not_activity_owner(db_session):
+    task = _create_open_task(db_session)
+    task.owner_id = "3"
+    db_session.commit()
+    workflow = _workflow(
+        projection_service=FakeProjectionService(),
+        matcher=FakeMatcher(_match_result(task)),
+        policy_service=FakePolicyService(allowed=False),
+    )
+
+    state = await workflow.run(
+        activity_id=190,
+        team_id=1,
+        expected_activity_revision=1,
+        trigger_type="ACTIVITY_CREATED_DETERMINISTIC",
+        actor_id="2",
+    )
+
+    db_session.expire_all()
+    case = db_session.query(FollowUpTaskConfirmationCase).one()
+    delivery = db_session.query(FollowUpTaskConfirmationPromptDelivery).one()
+    assert case.owner_id == "3"
+    assert delivery.owner_id == "3"
+    assert delivery.status == FollowUpTaskConfirmationPromptStatus.SENT
+    assert state["confirmation_deliveries"][0]["status"] == FollowUpTaskConfirmationPromptStatus.SENT
+
+
+@pytest.mark.asyncio
+async def test_post_commit_workflow_fences_stale_revision_before_task_transition(db_session):
+    task = _create_open_task(db_session)
+    projection_service = FakeProjectionService()
+
+    class RevisionAdvancingMatcher(FakeMatcher):
+        async def match_activity(self, db, *, team_id, activity_id, include_cross_owner=False):
+            result = await super().match_activity(
+                db,
+                team_id=team_id,
+                activity_id=activity_id,
+                include_cross_owner=include_cross_owner,
+            )
+            activity = db.query(CustomerActivity).filter_by(id=activity_id, team_id=team_id).one()
+            activity.post_commit_revision = 2
+            db.commit()
+            return result
+
+    workflow = _workflow(
+        projection_service=projection_service,
+        matcher=RevisionAdvancingMatcher(_match_result(task)),
+        policy_service=FakePolicyService(allowed=True),
+    )
+
+    state = await workflow.run(
+        activity_id=190,
+        team_id=1,
+        expected_activity_revision=1,
+        trigger_type="ACTIVITY_CREATED_DETERMINISTIC",
+        actor_id="2",
+    )
+
+    db_session.expire_all()
+    assert db_session.get(FollowUpTask, task.id).status == FollowUpTaskStatus.OPEN
+    assert state["skip_reason"] == "SUPERSEDED_ACTIVITY_REVISION"
+    assert state["execution_results"] == []
+    assert state["confirmation_cases"] == []
+    assert state["confirmation_deliveries"] == []
+    assert db_session.query(FollowUpTaskTransitionPolicyDecisionLog).count() == 0
+    assert db_session.query(FollowUpTaskConfirmationCase).count() == 0
+    assert db_session.query(FollowUpTaskConfirmationPromptDelivery).count() == 0
+    assert any(event["event"] == "activity_revision_fenced" for event in state["events"])
+
+
+@pytest.mark.asyncio
+async def test_post_commit_workflow_preserves_activity_not_found_fence_reason(db_session):
+    task = _create_open_task(db_session)
+    projection_service = FakeProjectionService()
+
+    class ActivityDeletingMatcher(FakeMatcher):
+        async def match_activity(self, db, *, team_id, activity_id, include_cross_owner=False):
+            result = await super().match_activity(
+                db,
+                team_id=team_id,
+                activity_id=activity_id,
+                include_cross_owner=include_cross_owner,
+            )
+            activity = db.query(CustomerActivity).filter_by(id=activity_id, team_id=team_id).one()
+            db.delete(activity)
+            db.commit()
+            return result
+
+    workflow = _workflow(
+        projection_service=projection_service,
+        matcher=ActivityDeletingMatcher(_match_result(task)),
+        policy_service=FakePolicyService(allowed=True),
+    )
+
+    state = await workflow.run(
+        activity_id=190,
+        team_id=1,
+        expected_activity_revision=1,
+        trigger_type="ACTIVITY_CREATED_DETERMINISTIC",
+        actor_id="2",
+    )
+
+    db_session.expire_all()
+    assert db_session.get(FollowUpTask, task.id).status == FollowUpTaskStatus.OPEN
+    assert state["skip_reason"] == "ACTIVITY_NOT_FOUND"
+    assert state["confirmation_cases"] == []
+    assert state["confirmation_deliveries"] == []
+    assert any(
+        event["event"] == "activity_revision_fenced" and event["reason"] == "ACTIVITY_NOT_FOUND"
+        for event in state["events"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_post_commit_workflow_cancels_case_when_revision_changes_before_delivery(db_session):
+    task = _create_open_task(db_session)
+    projection_service = FakeProjectionService()
+
+    class RevisionAdvancingConfirmationService:
+        def __init__(self) -> None:
+            self.delegate = FollowUpTaskConfirmationService()
+
+        def create_case_from_plan_action(self, db, **kwargs):
+            result = self.delegate.create_case_from_plan_action(db, **kwargs)
+            activity = db.query(CustomerActivity).filter_by(id=190, team_id=1).one()
+            activity.post_commit_revision = 2
+            return result
+
+    class DeliveryMustNotRun:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def run(self, request):
+            self.calls += 1
+            raise AssertionError("superseded confirmation must not be dispatched")
+
+    delivery_workflow = DeliveryMustNotRun()
+    workflow = CustomerActivityPostCommitWorkflow(
+        projection_service=projection_service,
+        matcher=FakeMatcher(_match_result(task)),
+        policy_service=FakePolicyService(allowed=False),
+        confirmation_service=RevisionAdvancingConfirmationService(),
+        delivery_workflow=delivery_workflow,
+        checkpointer=None,
+    )
+
+    state = await workflow.run(
+        activity_id=190,
+        team_id=1,
+        expected_activity_revision=1,
+        trigger_type="ACTIVITY_CREATED_DETERMINISTIC",
+        actor_id="2",
+    )
+
+    db_session.expire_all()
+    case = db_session.query(FollowUpTaskConfirmationCase).one()
+    assert delivery_workflow.calls == 0
+    assert case.status == FollowUpTaskConfirmationStatus.CANCELLED
+    assert case.cancelled_reason == "SOURCE_ACTIVITY_REVISION_SUPERSEDED"
+    assert state["skip_reason"] == "SUPERSEDED_ACTIVITY_REVISION"
+    assert state["confirmation_cases"] == []
+    assert state["confirmation_deliveries"] == [
+        {
+            "case_public_id": case.public_id,
+            "status": "SKIPPED",
+            "reason_code": "SUPERSEDED_ACTIVITY_REVISION",
+        }
+    ]
+    assert state["post_commit"]["needs_user_confirmation"] is False
+    assert state["post_commit"]["confirmation_case_public_ids"] == []
 
 
 def _post_commit_ledger_actions(db_session) -> list[AgentWorkflowAction]:

@@ -13,6 +13,7 @@ from sqlalchemy.types import BigInteger
 from app.core.database import Base
 from app.models.agent import (
     AgentIdempotencyKey,
+    AgentIdempotencyStatus,
     AgentMessage,
     AgentSession,
     AgentTask,
@@ -73,7 +74,7 @@ class FakeCRMAPIClient:
     def __init__(self) -> None:
         self.calls = []
 
-    async def request(self, method, path, authorization, *, params=None, json=None):
+    async def request(self, method, path, authorization, *, params=None, json=None, idempotency_key=None):
         self.calls.append({
             "method": method,
             "path": path,
@@ -146,7 +147,7 @@ class FakeCRMAPIClient:
 
 
 class EmptyCustomerSearchCRMAPIClient(FakeCRMAPIClient):
-    async def request(self, method, path, authorization, *, params=None, json=None):
+    async def request(self, method, path, authorization, *, params=None, json=None, idempotency_key=None):
         self.calls.append({
             "method": method,
             "path": path,
@@ -156,7 +157,14 @@ class EmptyCustomerSearchCRMAPIClient(FakeCRMAPIClient):
         })
         if method == "GET" and path == "/v1/customers/":
             return {"items": [], "total": 0}
-        return await super().request(method, path, authorization, params=params, json=json)
+        return await super().request(
+            method,
+            path,
+            authorization,
+            params=params,
+            json=json,
+            idempotency_key=idempotency_key,
+        )
 
 
 class ExactCustomerSearchCRMAPIClient(FakeCRMAPIClient):
@@ -164,7 +172,7 @@ class ExactCustomerSearchCRMAPIClient(FakeCRMAPIClient):
         super().__init__()
         self.item = item
 
-    async def request(self, method, path, authorization, *, params=None, json=None):
+    async def request(self, method, path, authorization, *, params=None, json=None, idempotency_key=None):
         self.calls.append({
             "method": method,
             "path": path,
@@ -174,7 +182,14 @@ class ExactCustomerSearchCRMAPIClient(FakeCRMAPIClient):
         })
         if method == "GET" and path == "/v1/customers/":
             return {"items": [self.item], "total": 1}
-        return await super().request(method, path, authorization, params=params, json=json)
+        return await super().request(
+            method,
+            path,
+            authorization,
+            params=params,
+            json=json,
+            idempotency_key=idempotency_key,
+        )
 
 
 class FakeCustomerEmbeddingService:
@@ -2363,6 +2378,131 @@ async def test_agent_tool_create_customer_activity_is_idempotent():
         assert fake_client.calls[0]["json"]["next_follow_time"] == "2026-07-29T09:00:00"
         assert db.query(AgentIdempotencyKey).count() == 1
         assert db.query(AgentToolCall).count() == 1
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_write_tool_propagates_stable_action_key_to_internal_api():
+    class IdempotencyCapturingClient(FakeCRMAPIClient):
+        def __init__(self):
+            super().__init__()
+            self.idempotency_keys = []
+
+        async def request(
+            self,
+            method,
+            path,
+            authorization,
+            *,
+            params=None,
+            json=None,
+            idempotency_key=None,
+        ):
+            self.idempotency_keys.append(idempotency_key)
+            return await super().request(
+                method,
+                path,
+                authorization,
+                params=params,
+                json=json,
+                idempotency_key=idempotency_key,
+            )
+
+    engine, db = _db_session()
+    fake_client = IdempotencyCapturingClient()
+    service = CRMAgentToolService(api_client=fake_client)
+    try:
+        result = await service.create_customer_activity(
+            _context(db),
+            customer_id=CUSTOMER_PUBLIC_ID,
+            customer_name="越秀金融",
+            activity_kind="PHONE_FOLLOW_UP",
+            source_content="稳定动作键透传",
+            idempotency_suffix="act_123",
+        )
+
+        assert result.success is True
+        assert fake_client.idempotency_keys == ["create_customer_activity:3:act_123"]
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_rejects_same_idempotency_key_with_changed_payload():
+    engine, db = _db_session()
+    fake_client = FakeCRMAPIClient()
+    service = CRMAgentToolService(api_client=fake_client)
+    context = _context(db)
+    try:
+        first = await service.create_customer_activity(
+            context,
+            customer_id=CUSTOMER_PUBLIC_ID,
+            customer_name="越秀金融",
+            activity_kind="PHONE_FOLLOW_UP",
+            source_content="第一次内容",
+            idempotency_suffix="msg-contract",
+        )
+        conflict = await service.create_customer_activity(
+            context,
+            customer_id=CUSTOMER_PUBLIC_ID,
+            customer_name="越秀金融",
+            activity_kind="PHONE_FOLLOW_UP",
+            source_content="第二次不同内容",
+            idempotency_suffix="msg-contract",
+        )
+
+        assert first.success is True
+        assert conflict.success is False
+        assert conflict.status_code == 409
+        assert conflict.error_message == "idempotency_request_mismatch"
+        assert len(fake_client.calls) == 1
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_fails_closed_for_previously_dispatched_write():
+    engine, db = _db_session()
+    fake_client = FakeCRMAPIClient()
+    service = CRMAgentToolService(api_client=fake_client)
+    context = _context(db)
+    payload = {
+        "customer_id": CUSTOMER_PUBLIC_ID,
+        "customer_name": "越秀金融",
+        "activity_kind": "PHONE_FOLLOW_UP",
+        "source_content": "可能已写入的内容",
+        "title": None,
+        "next_action": None,
+        "next_follow_time": None,
+    }
+    db.add(AgentIdempotencyKey(
+        team_id=1,
+        user_id=2,
+        session_id=3,
+        action_key="create_customer_activity:3:msg-dispatched",
+        status=AgentIdempotencyStatus.DISPATCHED,
+        request_hash=service._hash_json(payload),
+    ))
+    db.commit()
+    try:
+        result = await service.create_customer_activity(
+            context,
+            customer_id=CUSTOMER_PUBLIC_ID,
+            customer_name="越秀金融",
+            activity_kind="PHONE_FOLLOW_UP",
+            source_content="可能已写入的内容",
+            idempotency_suffix="msg-dispatched",
+        )
+
+        assert result.success is False
+        assert result.status_code == 409
+        assert result.error_message == "idempotency_execution_ambiguous"
+        assert fake_client.calls == []
+        assert db.query(AgentToolCall).count() == 0
     finally:
         db.close()
         engine.dispose()

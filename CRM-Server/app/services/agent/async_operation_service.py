@@ -15,6 +15,7 @@ from app.models.agent_async_operation import (
     AgentAsyncOperationEvent,
     AgentAsyncOperationStatus,
 )
+from app.models.customer_intelligence_run import CustomerIntelligenceRun, CustomerIntelligenceRunStatus
 from app.services.agent.types import coerce_json_dict
 from app.utils.time import business_now
 
@@ -73,6 +74,172 @@ class AgentAsyncOperationProjection:
 
 
 class AgentAsyncOperationService:
+    def bind_source(
+        self,
+        db: Session,
+        *,
+        operation_key: str,
+        request_id: str,
+        team_id: int,
+        user_id: int,
+        session_id: int,
+        source_user_message_id: int | None,
+        source_assistant_message_id: int | None,
+        operation_type: str,
+        resource_type: str,
+        resource_id: int,
+        resource_public_id: str | None = None,
+        graph_thread_id: str | None = None,
+        summary: str = "客户档案后台更新",
+    ) -> AgentAsyncOperation:
+        """Idempotently bind durable work to its exact Agent source messages.
+
+        Source binding is independent from lifecycle projection, so a run that
+        already reached a terminal state can still be attached to the original
+        turn without resetting or re-executing the work.
+        """
+
+        operation = self.ensure_scheduled(
+            db,
+            operation_key=operation_key,
+            request_id=request_id,
+            team_id=team_id,
+            user_id=user_id,
+            session_id=session_id,
+            source_user_message_id=source_user_message_id,
+            source_assistant_message_id=source_assistant_message_id,
+            operation_type=operation_type,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            resource_public_id=resource_public_id,
+            summary=summary,
+            graph_thread_id=graph_thread_id,
+        )
+        locked = self._lock_operation(db, operation.id)
+        self._validate_binding_identity(
+            locked,
+            operation_key=operation_key,
+            request_id=request_id,
+            team_id=team_id,
+            operation_type=operation_type,
+            resource_type=resource_type,
+            resource_id=resource_id,
+        )
+        for field, value in (
+            ("user_id", user_id),
+            ("session_id", session_id),
+            ("source_user_message_id", source_user_message_id),
+            ("source_assistant_message_id", source_assistant_message_id),
+            ("resource_public_id", resource_public_id),
+            ("graph_thread_id", graph_thread_id),
+        ):
+            current = getattr(locked, field)
+            if current is not None and value is not None and str(current) != str(value):
+                raise ValueError(f"异步操作来源绑定冲突: {field}")
+            if current is None and value is not None:
+                setattr(locked, field, value)
+        if not locked.summary:
+            locked.summary = summary
+        db.flush()
+        return locked
+
+    def project_customer_intelligence_run(
+        self,
+        db: Session,
+        operation: AgentAsyncOperation,
+        run: CustomerIntelligenceRun,
+    ) -> AgentAsyncOperation:
+        """Project the durable run snapshot into the user-facing operation."""
+
+        locked = self._lock_operation(db, operation.id)
+        if int(locked.team_id) != int(run.team_id) or str(locked.request_id) != str(run.request_id):
+            raise ValueError("客户智能运行与异步操作不匹配")
+        if locked.resource_id is not None and int(locked.resource_id) != int(run.customer_id):
+            raise ValueError("客户智能运行与异步操作客户不匹配")
+
+        run_status = str(run.status)
+        status_by_run = {
+            CustomerIntelligenceRunStatus.PENDING: AgentAsyncOperationStatus.QUEUED,
+            CustomerIntelligenceRunStatus.RUNNING: AgentAsyncOperationStatus.RUNNING,
+            CustomerIntelligenceRunStatus.RETRY_PENDING: AgentAsyncOperationStatus.RETRY_SCHEDULED,
+            CustomerIntelligenceRunStatus.FAILED: AgentAsyncOperationStatus.FAILED,
+            CustomerIntelligenceRunStatus.CANCELLED: AgentAsyncOperationStatus.CANCELLED,
+        }
+        result = coerce_json_dict(run.result_json)
+        degraded = result.get("degraded") is True
+        projected_status = (
+            AgentAsyncOperationStatus.DEGRADED
+            if run_status == CustomerIntelligenceRunStatus.SUCCESS and degraded
+            else AgentAsyncOperationStatus.SUCCEEDED
+            if run_status == CustomerIntelligenceRunStatus.SUCCESS
+            else status_by_run.get(run_status, AgentAsyncOperationStatus.QUEUED)
+        )
+        locked.status = projected_status
+        locked.attempt_count = int(run.attempt_count or 0)
+        locked.started_time = run.started_time
+        locked.finished_time = run.finished_time if projected_status in TERMINAL_OPERATION_STATUSES else None
+        locked.next_retry_at = run.next_retry_at
+        locked.error_message = str(run.error_message)[:2000] if run.error_message else None
+        if run_status == CustomerIntelligenceRunStatus.SUCCESS:
+            locked.summary = "客户档案后台更新"
+            locked.result_json = result
+        elif run_status == CustomerIntelligenceRunStatus.RUNNING:
+            locked.summary = "客户档案后台更新"
+        elif run_status == CustomerIntelligenceRunStatus.RETRY_PENDING:
+            locked.summary = "客户档案后台更新"
+        elif run_status == CustomerIntelligenceRunStatus.FAILED:
+            locked.summary = "客户档案后台更新失败"
+        elif run_status == CustomerIntelligenceRunStatus.CANCELLED:
+            locked.summary = "客户档案后台更新已取消"
+        else:
+            locked.summary = locked.summary or "客户档案后台更新"
+
+        for index, item in enumerate(run.visible_trace_json or []):
+            trace = coerce_json_dict(item)
+            message = str(trace.get("content") or trace.get("message") or "").strip()
+            step = str(trace.get("title") or trace.get("step") or "customer_intelligence").strip()
+            if not message:
+                continue
+            self._append_event(
+                db,
+                locked,
+                event_key=f"customer-intelligence-run:{int(run.id)}:trace:{index}",
+                event_type="PROGRESS",
+                status=projected_status,
+                step=step,
+                message=message,
+                payload=trace,
+                occurred_at=run.finished_time or run.started_time,
+            )
+            locked.current_step = step
+
+        lifecycle_type = {
+            AgentAsyncOperationStatus.QUEUED: "SCHEDULED",
+            AgentAsyncOperationStatus.RUNNING: "STARTED",
+            AgentAsyncOperationStatus.RETRY_SCHEDULED: "RETRY_SCHEDULED",
+            AgentAsyncOperationStatus.SUCCEEDED: "SUCCEEDED",
+            AgentAsyncOperationStatus.DEGRADED: "DEGRADED",
+            AgentAsyncOperationStatus.FAILED: "FAILED",
+            AgentAsyncOperationStatus.CANCELLED: "CANCELLED",
+        }[projected_status]
+        self._append_event(
+            db,
+            locked,
+            event_key=f"customer-intelligence-run:{int(run.id)}:lifecycle:{run_status}:{int(run.attempt_count or 0)}",
+            event_type=lifecycle_type,
+            status=projected_status,
+            step=locked.current_step,
+            message=locked.summary,
+            payload={
+                "run_id": int(run.id),
+                "run_status": run_status,
+                "next_retry_at": run.next_retry_at.isoformat() if run.next_retry_at else None,
+            },
+            occurred_at=run.finished_time or run.started_time,
+        )
+        db.flush()
+        return locked
+
     def ensure_scheduled(
         self,
         db: Session,
@@ -183,6 +350,7 @@ class AgentAsyncOperationService:
         step: str,
         message: str,
         payload: JSONDict | None = None,
+        occurred_at: datetime | None = None,
     ) -> AgentAsyncOperationEvent | None:
         locked_operation = self._lock_operation(db, operation.id)
         if str(locked_operation.status) in TERMINAL_OPERATION_STATUSES:
@@ -196,6 +364,7 @@ class AgentAsyncOperationService:
             step=step,
             message=message,
             payload=payload,
+            occurred_at=occurred_at,
         )
         if event is not None:
             locked_operation.current_step = step
@@ -332,7 +501,7 @@ class AgentAsyncOperationService:
             )
         else:
             query = query.filter(AgentAsyncOperation.request_id == request_id)
-        return query.order_by(AgentAsyncOperation.id.desc()).with_for_update().first()
+        return query.order_by(AgentAsyncOperation.id.desc()).populate_existing().with_for_update().first()
 
     def get_projection(
         self,
@@ -408,6 +577,7 @@ class AgentAsyncOperationService:
         step: str | None = None,
         message: str | None = None,
         payload: JSONDict | None = None,
+        occurred_at: datetime | None = None,
     ) -> AgentAsyncOperationEvent | None:
         locked_operation = operation
         duplicate = (
@@ -431,15 +601,44 @@ class AgentAsyncOperationService:
             step=step,
             message=message,
             payload_json=payload or {},
-            occurred_at=business_now(),
+            occurred_at=occurred_at or business_now(),
         )
         db.add(event)
         db.flush()
         return event
 
     @staticmethod
+    def _validate_binding_identity(
+        operation: AgentAsyncOperation,
+        *,
+        operation_key: str,
+        request_id: str,
+        team_id: int,
+        operation_type: str,
+        resource_type: str,
+        resource_id: int,
+    ) -> None:
+        expected = {
+            "operation_key": operation_key,
+            "request_id": request_id,
+            "team_id": team_id,
+            "operation_type": operation_type,
+            "resource_type": resource_type,
+            "resource_id": resource_id,
+        }
+        for field, value in expected.items():
+            if str(getattr(operation, field)) != str(value):
+                raise ValueError(f"异步操作身份校验失败: {field}")
+
+    @staticmethod
     def _lock_operation(db: Session, operation_id: int) -> AgentAsyncOperation:
-        return db.query(AgentAsyncOperation).filter(AgentAsyncOperation.id == operation_id).with_for_update().one()
+        return (
+            db.query(AgentAsyncOperation)
+            .filter(AgentAsyncOperation.id == operation_id)
+            .populate_existing()
+            .with_for_update()
+            .one()
+        )
 
     @staticmethod
     def _get_by_key(db: Session, *, team_id: int, operation_key: str) -> AgentAsyncOperation | None:

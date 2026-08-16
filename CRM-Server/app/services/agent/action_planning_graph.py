@@ -44,6 +44,7 @@ from app.services.agent.state import (
     ActionPlanningRuntimeContext,
 )
 from app.services.agent.types import JSONDict, JSONValue, coerce_json_dict
+from app.services.agent.waiting_task_semantics import require_waiting_event_name_for_task_action
 from app.services.customer_activity_kinds import get_activity_category, infer_activity_kind
 
 ACTION_PLANNING_CHECKPOINT_NS = "crm_agent_action_planning"
@@ -1587,36 +1588,7 @@ def _payload_has_follow_up_target_and_content(action: object, payload: dict[str,
 
 
 def _interaction_event_name(action: JSONDict) -> str:
-    action_name = action.get("action")
-    if action_name in {
-        "select_customer_for_activity",
-        "select_customer_for_contact",
-        "select_customer_for_invoice_title",
-        "select_customer_for_deployment_info",
-        "select_customer_for_customer_member",
-        "select_customer_for_payment_record",
-        "select_customer_for_opportunity",
-    }:
-        return "customer_selection_required"
-    if action_name == "collect_contact_fields":
-        return "contact_fields_required"
-    if action_name == "collect_opportunity_fields":
-        return "opportunity_fields_required"
-    if action_name == "collect_invoice_title_fields":
-        return "invoice_title_fields_required"
-    if action_name == "collect_deployment_info_fields":
-        return "deployment_info_fields_required"
-    if action_name == "collect_customer_member_fields":
-        return "customer_member_fields_required"
-    if action_name == "collect_payment_fields":
-        return "payment_fields_required"
-    if action_name == "collect_lead_fields":
-        return "lead_fields_required"
-    if action_name == "collect_customer_fields":
-        return "customer_fields_required"
-    if action_name in {"select_contract_for_payment_plan", "select_payment_plan_for_record", "select_opportunity_for_stage_move"}:
-        return "business_selection_required"
-    return "confirmation_required"
+    return require_waiting_event_name_for_task_action(action.get("action"))
 
 
 def _checkpoint_state_from_input(input_state: ActionPlanningGraphInput) -> ActionPlanningGraphState:

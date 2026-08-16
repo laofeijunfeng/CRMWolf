@@ -12,7 +12,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from hashlib import sha256
-from typing import Literal
+from typing import Literal, cast
 
 from app.models.customer import Contact, Customer
 from app.models.customer_activity import CustomerActivity
@@ -107,6 +107,47 @@ class CustomerIntelligenceEvent:
 
 
 class CustomerIntelligenceEventService:
+    def from_dict(self, payload: JsonObject) -> CustomerIntelligenceEvent | None:
+        """Restore the durable event contract from its persisted JSON snapshot."""
+
+        source_payload = payload.get("source")
+        if not isinstance(source_payload, dict):
+            return None
+        event_key = payload.get("event_key")
+        trigger_type = payload.get("trigger_type")
+        tenant_id = _positive_int(payload.get("tenant_id"))
+        team_id = _positive_int(payload.get("team_id"))
+        customer_id = _positive_int(payload.get("customer_id"))
+        if not isinstance(event_key, str) or not event_key.strip():
+            return None
+        if not isinstance(trigger_type, str) or trigger_type not in _CUSTOMER_INTELLIGENCE_TRIGGER_TYPES:
+            return None
+        if tenant_id is None or team_id is None or customer_id is None or tenant_id != team_id:
+            return None
+        source_type = _required_string(source_payload.get("source_type"))
+        source_object_id = _required_string(source_payload.get("source_object_id"))
+        if source_type is None or source_object_id is None:
+            return None
+        occurred_at = _datetime_from_iso(payload.get("occurred_at"))
+        event_payload = payload.get("payload")
+        return CustomerIntelligenceEvent(
+            event_key=event_key,
+            trigger_type=cast(CustomerIntelligenceTriggerType, trigger_type),
+            tenant_id=tenant_id,
+            team_id=team_id,
+            customer_id=customer_id,
+            occurred_at=occurred_at,
+            source=CustomerIntelligenceSource(
+                source_type=source_type,
+                source_object_id=source_object_id,
+                business_object_type=_optional_string(source_payload.get("business_object_type")),
+                business_object_id=_optional_string(source_payload.get("business_object_id")),
+            ),
+            summary=_optional_string(payload.get("summary")),
+            payload=event_payload if isinstance(event_payload, dict) else {},
+            actor_id=_optional_string(payload.get("actor_id")),
+        )
+
     def from_customer_activity(
         self,
         activity: CustomerActivity,
@@ -120,12 +161,14 @@ class CustomerIntelligenceEventService:
         if activity.customer_id is None:
             return None
         source_object_id = str(activity.id)
+        activity_revision = int(getattr(activity, "post_commit_revision", None) or 1)
+        event_identity = f"{source_object_id}:revision:{activity_revision}"
         return CustomerIntelligenceEvent(
             event_key=self._event_key(
                 team_id=int(activity.team_id),
                 trigger_type=trigger_type,
                 source_type="customer_activity",
-                source_object_id=source_object_id,
+                source_object_id=event_identity,
             ),
             trigger_type=trigger_type,
             tenant_id=int(activity.team_id),
@@ -140,6 +183,7 @@ class CustomerIntelligenceEventService:
             ),
             summary=activity.summary or activity.source_content,
             payload={
+                "activity_revision": activity_revision,
                 "activity_kind": activity.activity_kind,
                 "title": activity.title,
                 "next_action": activity.next_action,
@@ -535,6 +579,55 @@ class CustomerIntelligenceEventService:
                 customer.similar_customers,
             ]
         )
+
+
+_CUSTOMER_INTELLIGENCE_TRIGGER_TYPES = frozenset({
+    "customer_created",
+    "customer_converted_from_lead",
+    "customer_activity_created",
+    "customer_activity_updated",
+    "customer_activity_deleted",
+    "customer_contact_created",
+    "customer_contact_updated",
+    "customer_contact_deleted",
+    "customer_profile_generated",
+    "customer_brief_generated",
+    "customer_business_object_created",
+    "customer_business_object_updated",
+    "customer_business_object_deleted",
+    "deal_journey_event_recorded",
+    "manual_refresh_requested",
+    "customer_intelligence_batch_rebuild_requested",
+    "customer_intelligence_historical_backfill_requested",
+    "agent_customer_question",
+})
+
+
+def _positive_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _required_string(value: object) -> str | None:
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _optional_string(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _datetime_from_iso(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 customer_intelligence_event_service = CustomerIntelligenceEventService()

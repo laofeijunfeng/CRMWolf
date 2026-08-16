@@ -3,12 +3,13 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.crud.agent import agent_task_crud
 from app.schemas.agent import AgentTaskUpdate
 from app.services.agent import business_rules
+from app.services.agent.field_common import _drop_empty_values, _parse_task_field_supplement
 from app.services.agent.schemas import AgentHITLPolicy, AgentSemanticParseResult
 from app.services.agent.semantic import AgentSemanticParserError
-from app.services.agent.field_common import _drop_empty_values, _parse_task_field_supplement
+from app.services.agent.task_projection import update_agent_task
+
 
 def _is_contact_fields_task(task) -> bool:
     state = task.state_json or {}
@@ -54,7 +55,7 @@ async def _apply_contact_fields(db: Session, task, content: str):
     payload["missing_fields"] = missing_fields
 
     if missing_fields:
-        agent_task_crud.update(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
+        update_agent_task(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
         return False, (
             "还需要补充："
             f"{business_rules.format_contact_missing_fields(missing_fields)}。"
@@ -70,7 +71,7 @@ async def _apply_contact_fields(db: Session, task, content: str):
             confirmation_summary=f"为「{customer.get('account_name')}」创建联系人「{contact.get('name')}」",
         ).model_dump(exclude_none=True),
     }
-    agent_task_crud.update(
+    update_agent_task(
         db,
         task,
         AgentTaskUpdate(
@@ -97,7 +98,7 @@ async def _apply_invoice_title_fields(db: Session, task, content: str):
     payload["set_default"] = set_default
 
     if missing_fields:
-        agent_task_crud.update(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
+        update_agent_task(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
         return False, (
             "还需要补充："
             f"{business_rules.format_invoice_title_missing_fields(missing_fields)}。"
@@ -117,7 +118,7 @@ async def _apply_invoice_title_fields(db: Session, task, content: str):
             confirmation_summary=f"为「{customer.get('account_name')}」创建发票抬头「{invoice_title.get('title')}」",
         ).model_dump(exclude_none=True),
     }
-    agent_task_crud.update(
+    update_agent_task(
         db,
         task,
         AgentTaskUpdate(
@@ -143,7 +144,7 @@ async def _apply_deployment_info_fields(db: Session, task, content: str):
     payload["missing_fields"] = missing_fields
 
     if missing_fields:
-        agent_task_crud.update(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
+        update_agent_task(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
         return False, (
             "还需要补充："
             f"{business_rules.format_deployment_info_missing_fields(missing_fields)}。"
@@ -162,7 +163,7 @@ async def _apply_deployment_info_fields(db: Session, task, content: str):
             confirmation_summary=f"为「{customer.get('account_name')}」创建部署信息「{deployment_info.get('deployment_name')}」",
         ).model_dump(exclude_none=True),
     }
-    agent_task_crud.update(
+    update_agent_task(
         db,
         task,
         AgentTaskUpdate(
@@ -186,7 +187,7 @@ async def _apply_customer_member_fields(db: Session, task, content: str):
     if missing_fields:
         payload["customer_member"] = member
         payload["missing_fields"] = missing_fields
-        agent_task_crud.update(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
+        update_agent_task(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
         return False, (
             "还需要补充："
             f"{business_rules.format_customer_member_missing_fields(missing_fields)}。"
@@ -199,7 +200,7 @@ async def _apply_customer_member_fields(db: Session, task, content: str):
     if member_error:
         payload["customer_member"] = member
         payload["missing_fields"] = ["user_name"]
-        agent_task_crud.update(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
+        update_agent_task(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
         return False, member_error
 
     next_payload = {"customer_id": payload.get("customer_id") or customer.get("id"), "member": resolved_member}
@@ -212,7 +213,7 @@ async def _apply_customer_member_fields(db: Session, task, content: str):
             confirmation_summary=f"为「{customer.get('account_name')}」添加客户成员「{resolved_member.get('user_name') or resolved_member.get('user_id')}」",
         ).model_dump(exclude_none=True),
     }
-    agent_task_crud.update(
+    update_agent_task(
         db,
         task,
         AgentTaskUpdate(
