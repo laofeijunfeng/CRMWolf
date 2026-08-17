@@ -21,6 +21,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.crud.customer import customer_crud
+from app.crud.team import team_crud
 from app.models.contract import Contract
 from app.models.customer import Contact, Customer
 from app.models.customer_activity import CustomerActivity
@@ -48,6 +49,9 @@ from app.services.customer_intelligence_event_service import (
     CustomerIntelligenceEventService,
     JsonObject,
     customer_intelligence_event_service,
+)
+from app.services.customer_intelligence_operation_projector import (
+    CustomerIntelligenceOperationProjector,
 )
 from app.services.customer_intelligence_run_service import (
     CustomerIntelligenceRunClaim,
@@ -144,6 +148,7 @@ class CustomerIntelligenceRefreshService:
         vector_document_service: CustomerVectorDocumentService | None = None,
         identity_resolution_service: CustomerIdentityResolutionService | None = None,
         async_operation_service: AgentAsyncOperationService | None = None,
+        operation_projector: CustomerIntelligenceOperationProjector | None = None,
     ) -> None:
         self.graph_service = graph_service or customer_intelligence_graph_service
         self.event_service = event_service or customer_intelligence_event_service
@@ -151,6 +156,10 @@ class CustomerIntelligenceRefreshService:
         self.vector_document_service = vector_document_service or customer_vector_document_service
         self.identity_resolution_service = identity_resolution_service or customer_identity_resolution_service
         self.async_operation_service = async_operation_service or agent_async_operation_service
+        self.operation_projector = operation_projector or CustomerIntelligenceOperationProjector(
+            run_service=self.run_service,
+            operation_service=self.async_operation_service,
+        )
 
     async def trigger_committed_event_refresh(
         self,
@@ -252,8 +261,6 @@ class CustomerIntelligenceRefreshService:
             raise ValueError("客户智能持久运行刷新范围无效")
         graph_thread_id = build_customer_intelligence_thread_id(
             team_id=binding.team_id,
-            user_id=binding.user_id,
-            session_id=binding.session_id,
             event_key=event.event_key,
         )
         operation = self.async_operation_service.bind_source(
@@ -272,7 +279,14 @@ class CustomerIntelligenceRefreshService:
             graph_thread_id=graph_thread_id,
             summary="客户档案后台更新",
         )
-        operation = self.async_operation_service.project_customer_intelligence_run(db, operation, run)
+        projected_operation = self.operation_projector.project_run(
+            db,
+            run=run,
+            operation_public_id=str(operation.public_id),
+        )
+        if projected_operation is None:
+            raise RuntimeError("客户智能异步操作绑定后投影不可见")
+        operation = projected_operation
         return CustomerIntelligenceCommittedEventRequest(
             request_id=request_id,
             event=event,
@@ -588,7 +602,6 @@ class CustomerIntelligenceRefreshService:
             scope=scope,
             max_attempts=settings.CUSTOMER_INTELLIGENCE_MAX_ATTEMPTS,
         )
-        track_operation = agent_binding is not None or operation_public_id is not None
         try:
             claim = self._claim_run(
                 run_input,
@@ -604,28 +617,19 @@ class CustomerIntelligenceRefreshService:
             return {"success": False, "request_id": request_id, "error": str(exc)}
 
         if claim.status != CustomerIntelligenceRunClaimStatus.CLAIMED:
-            if track_operation:
-                self._project_operation_run(
-                    request_id=request_id,
-                    team_id=event.team_id,
-                    operation_public_id=operation_public_id,
-                    run=claim.run,
-                )
+            self._project_operation_run(
+                run=claim.run,
+                operation_public_id=operation_public_id,
+            )
             return self._claim_response(request_id=request_id, event=event, claim=claim)
 
         lease_token = claim.lease_token
         if lease_token is None:
             raise RuntimeError("客户智能运行已获取执行权但缺少租约令牌")
 
-        operation = (
-            self._project_operation_run(
-                request_id=request_id,
-                team_id=event.team_id,
-                operation_public_id=operation_public_id,
-                run=claim.run,
-            )
-            if track_operation
-            else None
+        operation = self._project_operation_run(
+            run=claim.run,
+            operation_public_id=operation_public_id,
         )
         graph_user_id = int(operation.user_id) if operation is not None else _actor_user_id(event.actor_id)
         graph_session_id = int(operation.session_id or 0) if operation is not None else 0
@@ -639,18 +643,14 @@ class CustomerIntelligenceRefreshService:
             result: JSONDict = {}
             stream_run = getattr(self.graph_service, "stream_run", None)
             if callable(stream_run):
-                progress_index = 0
                 async for chunk in stream_run(graph_input):
                     if chunk.get("kind") == "event":
-                        progress_index += 1
-                        if track_operation:
-                            self._record_operation_progress(
-                                request_id=request_id,
-                                team_id=event.team_id,
-                                operation_public_id=operation_public_id,
-                                event=chunk.get("event"),
-                                progress_index=progress_index,
-                            )
+                        self._record_operation_progress(
+                            run_input=run_input,
+                            lease_token=lease_token,
+                            operation_public_id=operation_public_id,
+                            event=chunk.get("event"),
+                        )
                     elif chunk.get("kind") == "result":
                         result = cast(JSONDict, chunk.get("result") or {})
             else:
@@ -662,26 +662,20 @@ class CustomerIntelligenceRefreshService:
                 result=result,
             )
             if mutation.status != CustomerIntelligenceRunLeaseMutationStatus.APPLIED:
-                if track_operation:
-                    self._project_operation_run(
-                        request_id=request_id,
-                        team_id=event.team_id,
-                        operation_public_id=operation_public_id,
-                        run=mutation.run,
-                    )
+                self._project_operation_run(
+                    run=mutation.run,
+                    operation_public_id=operation_public_id,
+                )
                 return {
                     "success": False,
                     "request_id": request_id,
                     "superseded": True,
                     "run_status": str(mutation.run.status),
                 }
-            if track_operation:
-                self._project_operation_run(
-                    request_id=request_id,
-                    team_id=event.team_id,
-                    operation_public_id=operation_public_id,
-                    run=mutation.run,
-                )
+            self._project_operation_run(
+                run=mutation.run,
+                operation_public_id=operation_public_id,
+            )
             degraded = coerce_json_dict(mutation.run.result_json).get("degraded") is True
             response: JSONDict = {
                 "success": True,
@@ -707,13 +701,10 @@ class CustomerIntelligenceRefreshService:
                 error_message=str(exc),
             )
             if mutation.status == CustomerIntelligenceRunLeaseMutationStatus.APPLIED:
-                if track_operation:
-                    self._project_operation_run(
-                        request_id=request_id,
-                        team_id=event.team_id,
-                        operation_public_id=operation_public_id,
-                        run=mutation.run,
-                    )
+                self._project_operation_run(
+                    run=mutation.run,
+                    operation_public_id=operation_public_id,
+                )
                 self._project_customer_failure(event=event, scope=scope, run=mutation.run)
             return {
                 "success": False,
@@ -830,28 +821,27 @@ class CustomerIntelligenceRefreshService:
     def _project_operation_run(
         self,
         *,
-        request_id: str,
-        team_id: int,
-        operation_public_id: str | None,
         run: CustomerIntelligenceRun,
+        operation_public_id: str | None,
     ):
         db = SessionLocal()
         try:
-            operation = self.async_operation_service.get_for_update(
+            projected = self.operation_projector.project_run(
                 db,
-                team_id=team_id,
-                request_id=request_id,
+                run=run,
                 operation_public_id=operation_public_id,
             )
-            if operation is None:
-                return None
-            projected = self.async_operation_service.project_customer_intelligence_run(db, operation, run)
             db.commit()
             self._detach(db, projected)
             return projected
-        except Exception:
+        except Exception as exc:
             db.rollback()
-            logger.exception("投影客户智能异步操作失败: request_id=%s", request_id)
+            logger.exception("投影客户智能异步操作失败: request_id=%s", run.request_id)
+            self._record_operation_projection_warning(
+                run=run,
+                operation_public_id=operation_public_id,
+                error_message=str(exc),
+            )
             return None
         finally:
             db.close()
@@ -859,41 +849,65 @@ class CustomerIntelligenceRefreshService:
     def _record_operation_progress(
         self,
         *,
-        request_id: str,
-        team_id: int,
+        run_input: CustomerIntelligenceRunInput,
+        lease_token: str,
         operation_public_id: str | None,
         event: object,
-        progress_index: int,
     ) -> None:
         progress = coerce_json_dict(event)
         message = str(progress.get("content") or progress.get("message") or "").strip()
         if not message:
             return
-        step = str(progress.get("title") or progress.get("step") or "customer_intelligence")
+        db = SessionLocal()
+        try:
+            mutation = self.run_service.record_visible_progress_if_lease_owner(
+                db,
+                run_input,
+                lease_token=lease_token,
+                progress=progress,
+            )
+            db.commit()
+            self._detach(db, mutation.run)
+        except Exception:
+            db.rollback()
+            logger.exception("持久化客户智能运行进度失败: request_id=%s", run_input.request_id)
+            return
+        finally:
+            db.close()
+        if mutation.status == CustomerIntelligenceRunLeaseMutationStatus.APPLIED:
+            self._project_operation_run(
+                run=mutation.run,
+                operation_public_id=operation_public_id,
+            )
+
+    def _record_operation_projection_warning(
+        self,
+        *,
+        run: CustomerIntelligenceRun,
+        operation_public_id: str | None,
+        error_message: str,
+    ) -> None:
         db = SessionLocal()
         try:
             operation = self.async_operation_service.get_for_update(
                 db,
-                team_id=team_id,
-                request_id=request_id,
+                team_id=int(run.team_id),
+                request_id=str(run.request_id),
                 operation_public_id=operation_public_id,
             )
             if operation is None:
                 return
-            self.async_operation_service.record_progress(
+            self.async_operation_service.record_projection_warning(
                 db,
                 operation,
-                event_key=(
-                    f"graph-progress:{int(operation.attempt_count or 0)}:{progress_index}:{step}:{message[:80]}"
-                ),
-                step=step,
-                message=message,
-                payload=progress,
+                run_id=int(run.id),
+                run_status=str(run.status),
+                error_message=error_message,
             )
             db.commit()
         except Exception:
             db.rollback()
-            logger.exception("记录 Agent 异步操作进度失败: request_id=%s", request_id)
+            logger.exception("记录客户智能投影异常失败: request_id=%s", run.request_id)
         finally:
             db.close()
 
@@ -1004,16 +1018,32 @@ class CustomerIntelligenceRefreshService:
         if not hasattr(db, "query"):
             return {
                 "obsolete_historical_runs": 0,
+                "reconciled_operations": 0,
                 "stale_runs": 0,
                 "pending_customers": 0,
                 "failed_customers": 0,
             }
+        if team_id is None:
+            totals: JSONDict = {
+                "obsolete_historical_runs": 0,
+                "reconciled_operations": 0,
+                "stale_runs": 0,
+                "pending_customers": 0,
+                "failed_customers": 0,
+            }
+            for team in team_crud.get_all_teams(db):
+                team_result = self.recover_stale_runtime_state(db, team_id=int(team.id))
+                for key in totals:
+                    totals[key] = int(totals[key]) + int(team_result.get(key) or 0)
+            return totals
         current_time = business_now()
         obsolete_historical_runs = self._close_obsolete_historical_backfill_runs(
             db,
             team_id=team_id,
             finished_at=current_time,
         )
+
+        reconciliation = self.operation_projector.reconcile(db, team_id=team_id, limit=200)
 
         due_runs = self.run_service.list_due(
             db,
@@ -1027,13 +1057,7 @@ class CustomerIntelligenceRefreshService:
             if str(run.status) == CustomerIntelligenceRunStatus.RUNNING
         ]
         for run in due_runs:
-            operation = self.async_operation_service.get_by_request_id(
-                db,
-                team_id=int(run.team_id),
-                request_id=str(run.request_id),
-            )
-            if operation is not None:
-                self.async_operation_service.project_customer_intelligence_run(db, operation, run)
+            self.operation_projector.project_run(db, run=run)
 
         retryable_customer_ids = self._customer_ids_with_runs(
             db,
@@ -1074,6 +1098,7 @@ class CustomerIntelligenceRefreshService:
         )
         return {
             "obsolete_historical_runs": obsolete_historical_runs,
+            "reconciled_operations": reconciliation.projected,
             "stale_runs": len(expired_running_runs),
             "pending_customers": pending_updates,
             "failed_customers": failed_updates,
@@ -1321,8 +1346,6 @@ class CustomerIntelligenceRefreshService:
                 )
                 graph_thread_id = build_customer_intelligence_thread_id(
                     team_id=binding.team_id,
-                    user_id=binding.user_id,
-                    session_id=binding.session_id,
                     event_key=request.event.event_key,
                 )
                 operation = self.async_operation_service.bind_source(
@@ -1348,7 +1371,14 @@ class CustomerIntelligenceRefreshService:
                 )
                 if run is None:
                     raise RuntimeError("客户智能持久运行调度后不可见")
-                operation = self.async_operation_service.project_customer_intelligence_run(db, operation, run)
+                projected_operation = self.operation_projector.project_run(
+                    db,
+                    run=run,
+                    operation_public_id=str(operation.public_id),
+                )
+                if projected_operation is None:
+                    raise RuntimeError("客户智能异步操作调度后投影不可见")
+                operation = projected_operation
                 scheduled_request = replace(
                     request,
                     scheduled=True,

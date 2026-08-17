@@ -179,8 +179,14 @@ class CustomerIntelligenceRuntimeContext:
     session_id: int = 0
 
 
-def build_customer_intelligence_thread_id(*, team_id: int, user_id: int, session_id: int, event_key: str) -> str:
-    return f"crm_agent_customer_intelligence:{team_id}:{user_id}:{session_id}:{event_key}"
+def build_customer_intelligence_thread_id(*, team_id: int, event_key: str) -> str:
+    """Return the durable execution identity for one customer-intelligence event.
+
+    Agent sessions and messages may be attached after execution starts, so they
+    are observability metadata rather than part of checkpoint identity.
+    """
+
+    return f"crm_agent_customer_intelligence:{team_id}:{event_key}"
 
 
 def build_customer_intelligence_graph_config(
@@ -194,8 +200,6 @@ def build_customer_intelligence_graph_config(
         "configurable": {
             "thread_id": build_customer_intelligence_thread_id(
                 team_id=team_id,
-                user_id=user_id,
-                session_id=session_id,
                 event_key=event_key,
             ),
         },

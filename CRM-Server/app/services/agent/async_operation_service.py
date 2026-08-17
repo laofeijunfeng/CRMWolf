@@ -183,9 +183,10 @@ class AgentAsyncOperationService:
         if run_status == CustomerIntelligenceRunStatus.SUCCESS:
             locked.summary = "客户档案后台更新"
             locked.result_json = result
-        elif run_status == CustomerIntelligenceRunStatus.RUNNING:
-            locked.summary = "客户档案后台更新"
-        elif run_status == CustomerIntelligenceRunStatus.RETRY_PENDING:
+        elif run_status in {
+            CustomerIntelligenceRunStatus.RUNNING,
+            CustomerIntelligenceRunStatus.RETRY_PENDING,
+        }:
             locked.summary = "客户档案后台更新"
         elif run_status == CustomerIntelligenceRunStatus.FAILED:
             locked.summary = "客户档案后台更新失败"
@@ -370,6 +371,48 @@ class AgentAsyncOperationService:
             locked_operation.current_step = step
             locked_operation.summary = message
             db.flush()
+        return event
+
+    def record_projection_warning(
+        self,
+        db: Session,
+        operation: AgentAsyncOperation,
+        *,
+        run_id: int,
+        run_status: str,
+        error_message: str,
+    ) -> AgentAsyncOperationEvent | None:
+        """Expose a retriable UI-projection failure without failing the run.
+
+        The durable customer-intelligence run remains authoritative. This event
+        prevents a projection outage from looking like an unexplained spinner;
+        a later projection or read-repair clears ``error_message`` and converges
+        the operation to the run snapshot.
+        """
+
+        locked_operation = self._lock_operation(db, operation.id)
+        if str(locked_operation.status) in TERMINAL_OPERATION_STATUSES:
+            return None
+        message = "后台状态同步异常。系统将自动恢复。"
+        locked_operation.error_message = error_message[:2000]
+        event = self._append_event(
+            db,
+            locked_operation,
+            event_key=f"projection-warning:{run_id}:{run_status}",
+            event_type="PROGRESS",
+            status=str(locked_operation.status or AgentAsyncOperationStatus.RUNNING),
+            step="projection_sync",
+            message=message,
+            payload={
+                "run_id": run_id,
+                "run_status": run_status,
+                "error": error_message[:2000],
+            },
+        )
+        if event is not None:
+            locked_operation.current_step = "projection_sync"
+            locked_operation.summary = message
+        db.flush()
         return event
 
     def complete(

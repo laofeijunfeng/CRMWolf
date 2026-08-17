@@ -287,10 +287,8 @@ async def test_customer_intelligence_graph_loads_context_plans_refresh_and_check
 
     assert build_customer_intelligence_thread_id(
         team_id=2,
-        user_id=9,
-        session_id=77,
         event_key=event.event_key,
-    ) == f"crm_agent_customer_intelligence:2:9:77:{event.event_key}"
+    ) == f"crm_agent_customer_intelligence:2:{event.event_key}"
     assert context_service.calls[0]["customer_id"] == 101
     assert context_service.calls[0]["team_id"] == 2
     assert memory_store_service.reads[0]["customer_id"] == 101

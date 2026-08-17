@@ -1,5 +1,6 @@
 """CRM AI Agent API."""
 import json
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, status
@@ -33,34 +34,100 @@ from app.schemas.agent import (
     AgentWorkflowRetryRequest,
 )
 from app.schemas.common import PaginatedResponse
-from app.services.agent import action_workflow
+from app.services.agent import (
+    action_workflow,
+    confirmation_intent,
+    field_common,
+    follow_up_fields,
+    selection,
+    session_state,
+    task_execution,
+)
 from app.services.agent import application as agent_application_module
-from app.services.agent import confirmation_intent, field_common, follow_up_fields, selection, session_state, task_execution
 from app.services.agent import interactions as agent_interactions
-from app.services.agent.async_operation_service import agent_async_operation_service
 from app.services.agent.application import agent_application_service
+from app.services.agent.async_operation_service import (
+    TERMINAL_OPERATION_STATUSES,
+    AgentAsyncOperationProjection,
+    agent_async_operation_service,
+)
 from app.services.agent.graph import crm_agent_graph_service
 from app.services.agent.input import AgentTurnInput
 from app.services.agent.interactions import (
     _interaction_for_event as _service_interaction_for_event,
+)
+from app.services.agent.interactions import (
     _procurement_method_options,
+)
+from app.services.agent.interactions import (
     _with_interaction as _service_with_interaction,
 )
 from app.services.agent.quality import agent_follow_up_quality_evaluator
+from app.services.agent.root_runtime import agent_root_runtime
 from app.services.agent.semantic import agent_semantic_parser
 from app.services.agent.session_state import (
     _build_session_create,
     _get_owned_session,
 )
-from app.services.agent.root_runtime import agent_root_runtime
 from app.services.agent.tools import CRMAgentToolService
 from app.services.agent.workflow_recovery_service import agent_workflow_recovery_service
+from app.services.customer_intelligence_operation_projector import (
+    customer_intelligence_operation_projector,
+)
 from app.utils.sse_encoder import SSEJsonEncoder
 
-
 router = APIRouter(prefix="/v1/agent", tags=["CRM AI Agent"])
+logger = logging.getLogger(__name__)
+
 
 _WORKFLOW_TERMINAL_STATUSES = {"EXECUTED", "SKIPPED", "FAILED", "CANCELLED", "BLOCKED"}
+
+
+def _read_repair_customer_intelligence_operations(
+    db: Session,
+    operations: list[AgentAsyncOperationProjection],
+) -> bool:
+    repaired = False
+    for operation in operations:
+        if (
+            operation.operation_type != "customer_intelligence_refresh"
+            or operation.status in TERMINAL_OPERATION_STATUSES
+        ):
+            continue
+        try:
+            projected = customer_intelligence_operation_projector.project_request(
+                db,
+                team_id=operation.team_id,
+                request_id=operation.request_id,
+                operation_public_id=operation.public_id,
+            )
+            if projected is not None:
+                db.commit()
+                repaired = True
+        except Exception as exc:
+            db.rollback()
+            logger.exception(
+                "读取 Agent 异步操作时修复客户智能投影失败: operation_public_id=%s",
+                operation.public_id,
+            )
+            persisted_operation = agent_async_operation_service.get_for_update(
+                db,
+                team_id=operation.team_id,
+                request_id=operation.request_id,
+                operation_public_id=operation.public_id,
+            )
+            if persisted_operation is None:
+                continue
+            agent_async_operation_service.record_projection_warning(
+                db,
+                persisted_operation,
+                run_id=0,
+                run_status="UNKNOWN",
+                error_message=str(exc),
+            )
+            db.commit()
+            repaired = True
+    return repaired
 
 
 def _encode_sse(event: dict) -> str:
@@ -328,13 +395,22 @@ async def list_agent_async_operations(
     db: Session = Depends(get_db),
 ):
     _get_owned_session(db, team_id=team_id, user_id=current_user.id, session_id=session_id)
-    return agent_async_operation_service.list_session_projections(
+    operations = agent_async_operation_service.list_session_projections(
         db,
         team_id=team_id,
         user_id=current_user.id,
         session_id=session_id,
         limit=limit,
     )
+    if _read_repair_customer_intelligence_operations(db, operations):
+        operations = agent_async_operation_service.list_session_projections(
+            db,
+            team_id=team_id,
+            user_id=current_user.id,
+            session_id=session_id,
+            limit=limit,
+        )
+    return operations
 
 
 @router.get("/operations/{operation_public_id}", response_model=AgentAsyncOperationResponse)
@@ -352,6 +428,15 @@ async def get_agent_async_operation(
     )
     if operation is None:
         raise HTTPException(status_code=404, detail="Agent async operation not found")
+    if _read_repair_customer_intelligence_operations(db, [operation]):
+        operation = agent_async_operation_service.get_projection(
+            db,
+            team_id=team_id,
+            user_id=current_user.id,
+            public_id=operation_public_id,
+        )
+        if operation is None:
+            raise HTTPException(status_code=404, detail="Agent async operation not found")
     return operation
 
 

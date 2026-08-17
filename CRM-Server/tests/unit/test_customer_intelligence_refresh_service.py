@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
@@ -18,12 +19,14 @@ from app.models.agent_async_operation import (
 from app.models.customer import Customer
 from app.models.customer_intelligence_run import CustomerIntelligenceRun, CustomerIntelligenceRunStatus
 from app.services.agent.async_operation_service import AgentAsyncOperationService
+from app.services.agent.customer_intelligence_graph import build_customer_intelligence_graph_config
 from app.services.customer_intelligence_event_service import (
     CustomerIntelligenceEvent,
     CustomerIntelligenceEventService,
     CustomerIntelligenceSource,
 )
 from app.services.customer_intelligence_refresh_service import (
+    AgentAsyncOperationBinding,
     CustomerIntelligenceCommittedEventRequest,
     CustomerIntelligenceRefreshRequest,
     CustomerIntelligenceRefreshService,
@@ -214,6 +217,14 @@ class FakeSession:
         self.closed = True
 
 
+class FakeOperationProjector:
+    def project_run(self, db, *, run, operation_public_id=None):
+        return None
+
+    def reconcile(self, db, *, team_id, limit=200):
+        return SimpleNamespace(candidates=0, projected=0)
+
+
 class FakeRunService:
     def __init__(self):
         self.pending = []
@@ -275,6 +286,22 @@ class FakeRunService:
         run.visible_trace_json = list(result.get("visible_trace") or [])
         run.lease_token = None
         self.succeeded.append({"db": db, "run_input": run_input, "result": result})
+        return CustomerIntelligenceRunLeaseMutation(
+            CustomerIntelligenceRunLeaseMutationStatus.APPLIED,
+            run,
+        )
+
+    def record_visible_progress_if_lease_owner(self, db, run_input, *, lease_token, progress):
+        run = self._runs[run_input.request_id]
+        if run.lease_token != lease_token or run.status != CustomerIntelligenceRunStatus.RUNNING:
+            return CustomerIntelligenceRunLeaseMutation(
+                CustomerIntelligenceRunLeaseMutationStatus.STALE_LEASE,
+                run,
+            )
+        trace = list(run.visible_trace_json or [])
+        if progress not in trace:
+            trace.append(dict(progress))
+        run.visible_trace_json = trace
         return CustomerIntelligenceRunLeaseMutation(
             CustomerIntelligenceRunLeaseMutationStatus.APPLIED,
             run,
@@ -865,6 +892,7 @@ def test_customer_intelligence_refresh_service_recovers_expired_lease_without_st
 
         assert result == {
             "obsolete_historical_runs": 0,
+            "reconciled_operations": 0,
             "stale_runs": 1,
             "pending_customers": 1,
             "failed_customers": 0,
@@ -972,6 +1000,7 @@ def test_customer_intelligence_refresh_service_does_not_recover_live_lease():
 
     assert result == {
         "obsolete_historical_runs": 0,
+        "reconciled_operations": 0,
         "stale_runs": 0,
         "pending_customers": 0,
         "failed_customers": 0,
@@ -1623,7 +1652,7 @@ async def test_customer_intelligence_refresh_service_records_failed_run_and_mark
 
 @pytest.mark.asyncio
 async def test_customer_intelligence_refresh_service_runs_due_retries(monkeypatch):
-    sessions = [FakeSession(), FakeSession(), FakeSession(), FakeSession()]
+    sessions = [FakeSession() for _ in range(6)]
     graph_service = FakeGraphService()
     event_service = FakeEventService()
     run_service = FakeRunService()
@@ -1650,6 +1679,7 @@ async def test_customer_intelligence_refresh_service_runs_due_retries(monkeypatc
         graph_service=graph_service,
         event_service=event_service,
         run_service=run_service,
+        operation_projector=FakeOperationProjector(),
     )
 
     result = await service.run_due_retries(team_id=2, limit=10)
@@ -1664,7 +1694,7 @@ async def test_customer_intelligence_refresh_service_runs_due_retries(monkeypatc
 
 @pytest.mark.asyncio
 async def test_customer_intelligence_refresh_service_filters_due_retries_by_team(monkeypatch):
-    sessions = [FakeSession(), FakeSession(), FakeSession(), FakeSession()]
+    sessions = [FakeSession() for _ in range(6)]
     graph_service = FakeGraphService()
     event_service = FakeEventService()
     run_service = FakeRunService()
@@ -1700,6 +1730,7 @@ async def test_customer_intelligence_refresh_service_filters_due_retries_by_team
         graph_service=graph_service,
         event_service=event_service,
         run_service=run_service,
+        operation_projector=FakeOperationProjector(),
     )
 
     result = await service.run_due_retries(team_id=2, limit=10)
@@ -1711,7 +1742,7 @@ async def test_customer_intelligence_refresh_service_filters_due_retries_by_team
 
 @pytest.mark.asyncio
 async def test_customer_intelligence_refresh_service_retries_committed_business_event_from_persisted_event_json(monkeypatch):
-    sessions = [FakeSession(), FakeSession(), FakeSession(), FakeSession()]
+    sessions = [FakeSession() for _ in range(6)]
     graph_service = FakeGraphService()
     run_service = FakeRunService()
     event = _business_event()
@@ -1738,6 +1769,7 @@ async def test_customer_intelligence_refresh_service_retries_committed_business_
         graph_service=graph_service,
         event_service=FakeEventService(),
         run_service=run_service,
+        operation_projector=FakeOperationProjector(),
     )
 
     result = await service.run_due_retries(team_id=2, limit=10)
@@ -1746,3 +1778,272 @@ async def test_customer_intelligence_refresh_service_retries_committed_business_
     assert run_service.running[0]["run_input"].request_id == "business-event-retry"
     assert run_service.running[0]["run_input"].event.trigger_type == "customer_contact_updated"
     assert graph_service.calls[0]["event"].event_key == "contact-event-1"
+
+
+class _LateBindingGraphService:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.progress_consumed = asyncio.Event()
+        self.release = asyncio.Event()
+        self.inputs: list[dict[str, object]] = []
+
+    async def stream_run(self, input_state):
+        self.inputs.append(input_state)
+        self.started.set()
+        yield {
+            "kind": "event",
+            "event": {"title": "提炼客户事实", "content": "正在提炼客户事实"},
+        }
+        self.progress_consumed.set()
+        await self.release.wait()
+        yield {
+            "kind": "result",
+            "result": {
+                "route": "refresh_brief",
+                "degraded": False,
+                "visible_trace": [
+                    {"title": "提炼客户事实", "content": "提炼出 2 条可沉淀事实"},
+                ],
+            },
+        }
+
+
+def test_customer_intelligence_graph_thread_identity_does_not_depend_on_late_agent_binding() -> None:
+    background_config = build_customer_intelligence_graph_config(
+        team_id=2,
+        user_id=9,
+        session_id=0,
+        event_key="contact-event-1",
+    )
+    bound_config = build_customer_intelligence_graph_config(
+        team_id=2,
+        user_id=9,
+        session_id=554,
+        event_key="contact-event-1",
+    )
+
+    assert background_config["configurable"]["thread_id"] == bound_config["configurable"]["thread_id"]
+    assert background_config["metadata"]["session_id"] == 0
+    assert bound_config["metadata"]["session_id"] == 554
+
+
+@pytest.mark.asyncio
+async def test_committed_event_late_agent_binding_converges_to_terminal_operation(monkeypatch) -> None:
+    engine = create_engine(
+        "sqlite:///:memory:",
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            Customer.__table__,
+            CustomerIntelligenceRun.__table__,
+            AgentAsyncOperation.__table__,
+            AgentAsyncOperationEvent.__table__,
+        ],
+    )
+    Session = sessionmaker(bind=engine)
+    graph_service = _LateBindingGraphService()
+    run_service = CustomerIntelligenceRunService()
+    operation_service = AgentAsyncOperationService()
+    service = CustomerIntelligenceRefreshService(
+        graph_service=graph_service,
+        event_service=CustomerIntelligenceEventService(),
+        run_service=run_service,
+        async_operation_service=operation_service,
+    )
+    monkeypatch.setattr(
+        "app.services.customer_intelligence_refresh_service.SessionLocal",
+        Session,
+    )
+    event = _business_event()
+    request_id = "business-event-late-binding"
+
+    setup_db = Session()
+    try:
+        setup_db.add(
+            Customer(
+                id=101,
+                team_id=2,
+                account_name="晚绑定客户",
+                city="广州",
+                creator_id="9",
+            )
+        )
+        request = CustomerIntelligenceCommittedEventRequest(
+            request_id=request_id,
+            event=event,
+            scope="brief",
+        )
+        service._ensure_pending_event_run(setup_db, request)
+        setup_db.commit()
+    finally:
+        setup_db.close()
+
+    execution = asyncio.create_task(service.run_committed_event_refresh(request))
+    await graph_service.started.wait()
+    await graph_service.progress_consumed.wait()
+
+    binding_db = Session()
+    try:
+        bound = service.bind_committed_event_to_agent(
+            binding_db,
+            team_id=2,
+            request_id=request_id,
+            binding=AgentAsyncOperationBinding(
+                team_id=2,
+                user_id=9,
+                session_id=554,
+                source_user_message_id=1001,
+                source_assistant_message_id=1002,
+            ),
+        )
+        binding_db.commit()
+        running_projection = operation_service.get_projection(
+            binding_db,
+            team_id=2,
+            user_id=9,
+            public_id=str(bound.operation_public_id),
+        )
+        assert running_projection is not None
+        assert running_projection.status == AgentAsyncOperationStatus.RUNNING
+        assert [event.message for event in running_projection.events if event.event_type == "PROGRESS"] == [
+            "正在提炼客户事实",
+        ]
+    finally:
+        binding_db.close()
+
+    graph_service.release.set()
+    result = await execution
+
+    assertion_db = Session()
+    try:
+        terminal_projection = operation_service.get_projection(
+            assertion_db,
+            team_id=2,
+            user_id=9,
+            public_id=str(bound.operation_public_id),
+        )
+        durable_run = run_service.get_by_request_id(
+            assertion_db,
+            team_id=2,
+            request_id=request_id,
+        )
+        assert result["success"] is True
+        assert durable_run is not None
+        assert durable_run.status == CustomerIntelligenceRunStatus.SUCCESS
+        assert terminal_projection is not None
+        assert terminal_projection.status == AgentAsyncOperationStatus.SUCCEEDED
+        assert terminal_projection.finished_time is not None
+    finally:
+        assertion_db.close()
+        engine.dispose()
+
+
+
+def test_recover_stale_runtime_state_reconciles_terminal_run_projection(monkeypatch) -> None:
+    engine = create_engine(
+        "sqlite:///:memory:",
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            Customer.__table__,
+            CustomerIntelligenceRun.__table__,
+            AgentAsyncOperation.__table__,
+            AgentAsyncOperationEvent.__table__,
+        ],
+    )
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    run_service = CustomerIntelligenceRunService()
+    operation_service = AgentAsyncOperationService()
+    event = _business_event()
+    request_id = "terminal-run-stale-operation"
+    run_input = CustomerIntelligenceRunInput(
+        request_id=request_id,
+        event=event,
+        scope="brief",
+    )
+    completed_at = business_now()
+    db.add(
+        Customer(
+            id=101,
+            team_id=2,
+            account_name="终态投影修复客户",
+            city="广州",
+            creator_id="9",
+            customer_brief_status="COMPLETED",
+        )
+    )
+    db.add(
+        CustomerIntelligenceRun(
+            run_key=run_service.run_key(run_input),
+            request_id=request_id,
+            event_key=event.event_key,
+            event_json=event.to_dict(),
+            tenant_id=2,
+            team_id=2,
+            customer_id=101,
+            actor_id=event.actor_id,
+            trigger_type=event.trigger_type,
+            scope="brief",
+            status=CustomerIntelligenceRunStatus.SUCCESS,
+            attempt_count=1,
+            max_attempts=3,
+            started_time=completed_at - timedelta(seconds=10),
+            finished_time=completed_at,
+            route="refresh_brief",
+            result_json={"route": "refresh_brief", "degraded": False},
+            visible_trace_json=[
+                {"title": "提炼客户事实", "content": "提炼出 2 条可沉淀事实"},
+            ],
+        )
+    )
+    db.commit()
+    operation = operation_service.ensure_scheduled(
+        db,
+        operation_key=f"customer-intelligence:{request_id}",
+        request_id=request_id,
+        team_id=2,
+        user_id=9,
+        session_id=None,
+        source_user_message_id=None,
+        operation_type="customer_intelligence_refresh",
+        resource_type="customer",
+        resource_id=101,
+    )
+    operation_service.mark_running(db, operation)
+    db.commit()
+    service = CustomerIntelligenceRefreshService(
+        graph_service=FakeGraphService(),
+        event_service=CustomerIntelligenceEventService(),
+        run_service=run_service,
+        async_operation_service=operation_service,
+    )
+
+    try:
+        monkeypatch.setattr(
+            "app.services.customer_intelligence_refresh_service.team_crud.get_all_teams",
+            lambda db_arg: [SimpleNamespace(id=2)],
+        )
+        recovery = service.recover_stale_runtime_state(db)
+        db.commit()
+        projection = operation_service.get_projection(
+            db,
+            team_id=2,
+            user_id=9,
+            public_id=str(operation.public_id),
+        )
+
+        assert recovery["reconciled_operations"] == 1
+        assert projection is not None
+        assert projection.status == AgentAsyncOperationStatus.SUCCEEDED
+        assert projection.finished_time == completed_at
+        assert [event.event_type for event in projection.events][-1] == "SUCCEEDED"
+    finally:
+        db.close()
+        engine.dispose()

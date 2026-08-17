@@ -158,6 +158,29 @@ class FakePendingGraphService:
         }
 
 
+class FakeTerminalRecoveryPendingGraphService:
+    def __init__(self):
+        self.calls = []
+
+    async def run_with_trace(self, state, *, side_effects=None):
+        self.calls.append(state)
+        return {
+            "handled": False,
+            "recovery_failed": True,
+            "terminal": True,
+            "runtime_status": "checkpoint_recovery_failed",
+            "runtime_retryable": False,
+            "failure_reason": "checkpoint_locator_not_found",
+            "current_interrupt": None,
+            "assistant_content": "当前待确认流程恢复失败，本次流程已终止；你可以重新发起。",  # noqa: RUF001
+            "events": [{
+                "event": "pending_task_checkpoint_recovery_failed",
+                "reason": "checkpoint_locator_not_found",
+                "retryable": False,
+            }],
+        }
+
+
 class FakeTracedPendingGraphService:
     def __init__(self):
         self.calls = []
@@ -4981,29 +5004,11 @@ async def test_root_runtime_projection_failure_remains_authoritative_when_failur
 
 @pytest.mark.asyncio
 async def test_root_runtime_terminates_direct_pending_checkpoint_recovery_failure():
-    class TerminalRecoveryPendingGraphService:
-        async def run_with_trace(self, state, *, side_effects=None):
-            return {
-                "handled": False,
-                "recovery_failed": True,
-                "terminal": True,
-                "runtime_status": "checkpoint_recovery_failed",
-                "runtime_retryable": False,
-                "failure_reason": "checkpoint_locator_not_found",
-                "current_interrupt": None,
-                "assistant_content": "当前待确认流程恢复失败，本次流程已终止；你可以重新发起。",
-                "events": [{
-                    "event": "pending_task_checkpoint_recovery_failed",
-                    "reason": "checkpoint_locator_not_found",
-                    "retryable": False,
-                }],
-            }
-
     checkpointer = InMemorySaver()
     new_flow_graph_service = FakeNewFlowGraphService()
     runtime = AgentRootRuntime(
         checkpointer=checkpointer,
-        pending_graph_service=TerminalRecoveryPendingGraphService(),
+        pending_graph_service=FakeTerminalRecoveryPendingGraphService(),
         new_flow_graph_service=new_flow_graph_service,
     )
     task = waiting_task_stub()
@@ -5063,6 +5068,84 @@ async def test_root_runtime_terminates_direct_pending_checkpoint_recovery_failur
     )
     assert next_state["runtime_status"] != "checkpoint_recovery_failed"
     assert len(new_flow_graph_service.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_does_not_resume_historical_suspended_candidate_without_active_interrupt():
+    checkpointer = InMemorySaver()
+    pending_graph_service = FakeTerminalRecoveryPendingGraphService()
+    new_flow_graph_service = FakeNewFlowGraphService()
+    runtime = AgentRootRuntime(
+        checkpointer=checkpointer,
+        pending_graph_service=pending_graph_service,
+        new_flow_graph_service=new_flow_graph_service,
+    )
+    context = AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=2, context_json={}),
+        task=None,
+        turn_input=AgentTurnInput.text("历史轮次"),
+        content="历史轮次",
+        team_id=1,
+        user_id=1,
+        session_id=2,
+        authorization="Bearer test",
+        side_effects=AgentRootRuntimeSideEffects(),
+    )
+    historical_candidate = {
+        "id": 78,
+        "task_key": "task-78",
+        "status": "SUSPENDED",
+        "intent": "CREATE_OPPORTUNITY",
+        "target_type": "customer",
+        "target_id": 9001,
+        "summary": "华米商机字段补充确认",
+        "suspend_reason": "用户选择先不处理",
+    }
+
+    failed = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 1,
+            "user_id": 1,
+            "session_id": 2,
+            "session_key": "session-2",
+            "channel": "web",
+            "content": context.content,
+            "turn_kind": "text",
+            "current_interrupt": None,
+            # Reproduce a checkpoint written by the pre-fix runtime, where a
+            # historical candidate alone incorrectly requested pending resume.
+            "pending_task_requested": True,
+            "suspended_candidates": [historical_candidate],
+        },
+        context=context,
+    )
+    assert failed["runtime_status"] == "checkpoint_recovery_failed"
+    assert failed["suspended_candidates"] == [historical_candidate]
+    assert len(pending_graph_service.calls) == 1
+    assert new_flow_graph_service.calls == []
+    context.side_effects = AgentRootRuntimeSideEffects()
+    context.turn_input = AgentTurnInput.text(
+        "今天和国智技术沟通了项目进展并请整理成跟进记录"
+    )
+    context.content = context.turn_input.content
+
+    result = await runtime.run_turn(
+        turn_input=context.turn_input,
+        content=context.content,
+        team_id=1,
+        user_id=1,
+        session_id=2,
+        session_key="session-2",
+        current_customer={},
+        context=context,
+    )
+
+    assert len(pending_graph_service.calls) == 1
+    assert len(new_flow_graph_service.calls) == 1
+    assert new_flow_graph_service.calls[0]["content"] == context.content
+    assert result["runtime_status"] != "checkpoint_recovery_failed"
+    assert result["route"] == "new_flow_graph"
 
 
 @pytest.mark.asyncio

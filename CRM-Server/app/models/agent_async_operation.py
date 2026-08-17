@@ -68,7 +68,11 @@ class AgentAsyncOperation(Base):
         Index("idx_agent_async_operation_owner_session", "team_id", "user_id", "session_id", "created_time"),
         Index("idx_agent_async_operation_owner_status", "team_id", "user_id", "status", "updated_time"),
         Index("idx_agent_async_operation_resource", "team_id", "resource_type", "resource_id"),
-        {"comment": "Agent 异步操作用户可见投影表"},
+        {
+            "comment": "Agent 异步操作用户可见投影表",
+            "mysql_charset": "utf8mb4",
+            "mysql_collate": "utf8mb4_general_ci",
+        },
     )
 
 

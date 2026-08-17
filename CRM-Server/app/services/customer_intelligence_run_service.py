@@ -226,10 +226,39 @@ class CustomerIntelligenceRunService:
         run.next_retry_at = None
         run.route = str(result.get("route") or "") or None
         run.result_json = _result_summary(result)
-        run.visible_trace_json = _visible_trace(result)
+        run.visible_trace_json = _merge_visible_trace(run.visible_trace_json, _visible_trace(result))
         run.error_message = None
         run.lease_token = None
         run.lease_expires_at = None
+        db.flush()
+        return CustomerIntelligenceRunLeaseMutation(CustomerIntelligenceRunLeaseMutationStatus.APPLIED, run)
+
+    def record_visible_progress_if_lease_owner(
+        self,
+        db: Session,
+        run_input: CustomerIntelligenceRunInput,
+        *,
+        lease_token: str,
+        progress: JSONDict,
+    ) -> CustomerIntelligenceRunLeaseMutation:
+        """Persist streamed progress on the authoritative run before UI projection.
+
+        Agent operations may be bound after the graph has already started. Keeping
+        progress on the leased run makes those events replayable when the UI
+        projection appears later, while the lease check prevents a superseded
+        executor from publishing stale progress.
+        """
+
+        run = self._get_by_key_for_update(
+            db,
+            team_id=run_input.event.team_id,
+            run_key=self.run_key(run_input),
+        )
+        if str(run.status) in TERMINAL_RUN_STATUSES:
+            return CustomerIntelligenceRunLeaseMutation(CustomerIntelligenceRunLeaseMutationStatus.TERMINAL, run)
+        if str(run.lease_token or "") != lease_token or str(run.status) != CustomerIntelligenceRunStatus.RUNNING:
+            return CustomerIntelligenceRunLeaseMutation(CustomerIntelligenceRunLeaseMutationStatus.STALE_LEASE, run)
+        run.visible_trace_json = _merge_visible_trace(run.visible_trace_json, [progress])
         db.flush()
         return CustomerIntelligenceRunLeaseMutation(CustomerIntelligenceRunLeaseMutationStatus.APPLIED, run)
 
@@ -451,6 +480,26 @@ def _visible_trace(result: JSONDict) -> list[JSONDict]:
     if not isinstance(trace, list):
         return []
     return [coerce_json_dict(item) for item in trace if isinstance(item, dict)][:50]
+
+
+def _merge_visible_trace(existing: object, incoming: list[JSONDict]) -> list[JSONDict]:
+    merged: list[JSONDict] = []
+    seen: set[tuple[str, str]] = set()
+    existing_items = existing if isinstance(existing, list) else []
+    for item in [*existing_items, *incoming]:
+        trace = coerce_json_dict(item)
+        title = str(trace.get("title") or trace.get("step") or "").strip()
+        content = str(trace.get("content") or trace.get("message") or "").strip()
+        if not content:
+            continue
+        identity = (title, content)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        merged.append(trace)
+        if len(merged) >= 50:
+            break
+    return merged
 
 
 def _result_summary(result: JSONDict) -> JSONDict:

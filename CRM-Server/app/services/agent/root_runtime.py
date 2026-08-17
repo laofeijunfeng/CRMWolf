@@ -5418,7 +5418,11 @@ def _turn_start_state(
         "task_projection": task_projection,
         "pending_task_snapshot": pending_task_snapshot,
         "suspended_candidates": suspended_candidates,
-        "pending_task_requested": current_interrupt is not None or bool(suspended_candidates),
+        # A pending branch is resumable only when the Root checkpoint owns an
+        # active interrupt. Suspended candidates are historical/audit context;
+        # their presence must never grant resume authority or intercept a new
+        # business turn.
+        "pending_task_requested": current_interrupt is not None,
         "customer_intelligence_requested": (
             context.customer_intelligence_event is not None or bool(context.customer_intelligence_requests)
         ),
