@@ -25,6 +25,7 @@ import { handleApiError } from '@/utils/errorHandler'
 import { formatCurrency } from '@/utils/format'
 import { normalizePaginatedResponse } from '@/types/pagination'
 import InvoiceTypeSegmentedControl from '@/components/invoice/InvoiceTypeSegmentedControl.vue'
+import InvoiceTitleFormDialog from '@/components/dialogs/InvoiceTitleFormDialog.vue'
 import {
   InputField,
   SearchableSelectField,
@@ -44,6 +45,7 @@ interface Props {
   fixedCustomer?: FixedCustomer | null
   fixedInvoiceTitle?: InvoiceTitleResponse | null
   fixedContractId?: number | null
+  canCreateInvoiceTitle?: boolean
 }
 
 interface Emits {
@@ -73,6 +75,7 @@ const props = withDefaults(defineProps<Props>(), {
   fixedCustomer: null,
   fixedInvoiceTitle: null,
   fixedContractId: null,
+  canCreateInvoiceTitle: false,
 })
 const emit = defineEmits<Emits>()
 
@@ -86,6 +89,7 @@ const loadingPaymentPlans = ref(false)
 const loadingInvoiceTitles = ref(false)
 const submitting = ref(false)
 const customerSearchKeyword = ref('')
+const invoiceTitleDialogOpen = ref(false)
 
 const form = reactive<InvoiceApplicationForm>({
   customerId: '',
@@ -397,6 +401,21 @@ function handlePaymentPlanChange(value: unknown): void {
   form.invoiceAmount = String(getPaymentPlanInvoiceAmount(plan))
 }
 
+function handleAddInvoiceTitle(): void {
+  if (!props.canCreateInvoiceTitle || submitting.value || form.customerId.trim() === '') return
+  invoiceTitleDialogOpen.value = true
+}
+
+function handleInvoiceTitleSuccess(invoiceTitle: InvoiceTitleResponse): void {
+  invoiceTitles.value = [
+    ...invoiceTitles.value.filter((item) => item.id !== invoiceTitle.id),
+    invoiceTitle,
+  ]
+  form.invoiceTitleId = String(invoiceTitle.id)
+  errors.invoiceTitleId = ''
+  invoiceTitleDialogOpen.value = false
+}
+
 function handleInvoiceTitleChange(value: unknown): void {
   const nextInvoiceTitleId = normalizeSelectValue(value)
   if (nextInvoiceTitleId === null || nextInvoiceTitleId === '') return
@@ -486,6 +505,7 @@ watch(
   () => [props.open, props.mode, props.application?.id, props.fixedCustomer?.id, props.fixedInvoiceTitle?.id, props.fixedContractId] as const,
   ([open], previousValues) => {
     if (!open) {
+      invoiceTitleDialogOpen.value = false
       clearErrors()
       customerSearchKeyword.value = ''
       return
@@ -607,7 +627,10 @@ watch(
             :options="invoiceTitleOptions"
             :placeholder="loadingInvoiceTitles ? '加载抬头中...' : '请选择发票抬头'"
             :disabled="loadingInvoiceTitles || submitting || form.customerId === ''"
+            :add-action-label="canCreateInvoiceTitle && form.customerId !== '' ? '新增发票抬头' : ''"
+            :add-action-disabled="submitting"
             :error="errors.invoiceTitleId"
+            @add="handleAddInvoiceTitle"
             @update:model-value="handleInvoiceTitleChange"
           />
 
@@ -660,6 +683,14 @@ watch(
       </form>
     </DialogContent>
   </Dialog>
+
+  <InvoiceTitleFormDialog
+    v-if="form.customerId !== ''"
+    :customer-id="form.customerId"
+    :open="invoiceTitleDialogOpen"
+    @update:open="invoiceTitleDialogOpen = $event"
+    @success="handleInvoiceTitleSuccess"
+  />
 </template>
 
 <style scoped lang="scss">

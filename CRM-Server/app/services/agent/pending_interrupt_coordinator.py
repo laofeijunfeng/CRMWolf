@@ -11,18 +11,28 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
+from app.services.agent.pending_continuation import (
+    PendingTaskContinuationRef,
+    build_agent_root_thread_id,
+    pending_task_continuation_from_json,
+)
 from app.services.agent.pending_interrupt_projection import (
     PendingInterruptProjectionRequest,
     PendingInterruptProjectionResult,
     PendingInterruptProjector,
     pending_interrupt_projection_key,
 )
-from app.services.agent.pending_outcome import PendingTaskOutcomeRecovery
+from app.services.agent.pending_outcome import (
+    PENDING_TASK_CHECKPOINT_RECOVERY_FAILED_STATUS,
+    PENDING_TASK_RECOVERY_FAILED_MESSAGE,
+    PENDING_TASK_RECOVERY_RETRYABLE_MESSAGE,
+    PendingTaskOutcomeRecovery,
+    is_retryable_pending_task_recovery_failure,
+)
 from app.services.agent.types import JSONDict, coerce_json_dict
 
 if TYPE_CHECKING:
     from app.services.agent.interrupts import AgentInterruptPayload
-    from app.services.agent.pending_continuation import PendingTaskContinuationRef
     from app.services.agent.state import AgentRuntimeContext, PendingTaskGraphResult
 
 PendingInterruptCoordinationStatus = Literal[
@@ -37,8 +47,8 @@ PendingInterruptCoordinationStatus = Literal[
 class PendingInterruptCoordinationRequest:
     interrupt: AgentInterruptPayload
     context: AgentRuntimeContext | None
-    continuation: PendingTaskContinuationRef | None = None
-    continuation_failure: str | None = None
+    root_thread_id: str
+    continuation: PendingTaskContinuationRef
 
 
 @dataclass
@@ -81,25 +91,19 @@ class PendingInterruptCoordinator:
         self,
         request: PendingInterruptCoordinationRequest,
     ) -> PendingInterruptCoordinationOutcome:
-        recovery = (
-            PendingTaskOutcomeRecovery(failure_reason=request.continuation_failure)
-            if request.continuation_failure
-            else await self.outcome_loader(
-                request.interrupt,
-                context=request.context,
-                continuation=request.continuation,
-            )
+        recovery = await self.outcome_loader(
+            request.interrupt,
+            context=request.context,
+            continuation=request.continuation,
         )
         pending_result = recovery.outcome
         if pending_result is None:
             return _recovery_failure_outcome(
                 request.interrupt,
-                reason=recovery.failure_reason or "checkpoint_not_found",
+                reason=recovery.failure_reason or "checkpoint_locator_not_found",
+                continuation=request.continuation,
             )
-
-        continuation = request.continuation or _continuation_from_interrupt(request.interrupt)
-        if continuation is None:
-            return _recovery_failure_outcome(request.interrupt, reason="invalid_continuation")
+        continuation = request.continuation
 
         context = request.context
         if context is None or context.db is None or context.session is None:
@@ -124,6 +128,7 @@ class PendingInterruptCoordinator:
                 continuation=continuation,
                 interrupt=request.interrupt,
                 outcome=pending_result,
+                root_thread_id=request.root_thread_id,
                 task=context.task,
                 switch_notice=context.switch_notice,
                 event_sink=context.event_sink,
@@ -217,8 +222,6 @@ def retryable_projection_interrupt(values: JSONDict) -> AgentInterruptPayload | 
 
     from app.services.agent.interrupts import interrupt_payload_from_json
     from app.services.agent.pending_application_step_contracts import is_pending_application_step_request
-    from app.services.agent.pending_continuation import pending_task_continuation_from_json
-
     raw_interrupt = coerce_json_dict(projection.get("interrupt"))
     interrupt = (
         raw_interrupt
@@ -232,6 +235,7 @@ def retryable_projection_interrupt(values: JSONDict) -> AgentInterruptPayload | 
         expected_team_id=values.get("team_id") if isinstance(values.get("team_id"), int) else None,
         expected_user_id=values.get("user_id") if isinstance(values.get("user_id"), int) else None,
         expected_session_id=values.get("session_id") if isinstance(values.get("session_id"), int) else None,
+        expected_thread_id=_expected_root_thread_id(values),
     )
     interrupt_continuation = _continuation_from_interrupt(interrupt, values=values)
     if continuation is None or interrupt_continuation != continuation:
@@ -253,8 +257,10 @@ def _recovery_failure_outcome(
     interrupt: AgentInterruptPayload,
     *,
     reason: str,
+    continuation: PendingTaskContinuationRef | None = None,
 ) -> PendingInterruptCoordinationOutcome:
-    continuation = _continuation_from_interrupt(interrupt)
+    continuation = continuation or _continuation_from_interrupt(interrupt)
+    retryable = is_retryable_pending_task_recovery_failure(reason)
     projection_key = (
         pending_interrupt_projection_key(continuation, interrupt)
         if continuation is not None
@@ -266,25 +272,29 @@ def _recovery_failure_outcome(
             "projection_key": projection_key,
             "replayed": False,
             "busy": False,
-            "retryable": False,
+            "retryable": retryable,
             "failure_reason": reason,
             "delivery_status": None,
         }
     )
     return PendingInterruptCoordinationOutcome(
-        status="TERMINAL_FAILURE",
-        runtime_status="checkpoint_recovery_failed",
-        retryable=False,
-        assistant_content="当前待确认流程恢复失败，本次流程已终止；你可以重新发起。",  # noqa: RUF001
+        status="RETRYABLE_FAILURE" if retryable else "TERMINAL_FAILURE",
+        runtime_status=PENDING_TASK_CHECKPOINT_RECOVERY_FAILED_STATUS,
+        retryable=retryable,
+        assistant_content=(
+            PENDING_TASK_RECOVERY_RETRYABLE_MESSAGE
+            if retryable
+            else PENDING_TASK_RECOVERY_FAILED_MESSAGE
+        ),
         projection_state=projection,
         event={
             "event": "pending_task_checkpoint_recovery_failed",
             "reason": reason,
             "source_event": interrupt.get("source_event"),
             "projection_key": projection_key,
-            "retryable": False,
+            "retryable": retryable,
         },
-        terminal=True,
+        terminal=not retryable,
     )
 
 
@@ -340,12 +350,26 @@ def _continuation_from_interrupt(
     *,
     values: JSONDict | None = None,
 ) -> PendingTaskContinuationRef | None:
-    from app.services.agent.pending_continuation import pending_task_continuation_from_json
-
     scoped = values or {}
     return pending_task_continuation_from_json(
         interrupt.get("checkpoint_ref"),
         expected_team_id=scoped.get("team_id") if isinstance(scoped.get("team_id"), int) else None,
         expected_user_id=scoped.get("user_id") if isinstance(scoped.get("user_id"), int) else None,
         expected_session_id=scoped.get("session_id") if isinstance(scoped.get("session_id"), int) else None,
+        expected_thread_id=_expected_root_thread_id(scoped),
+    )
+
+
+def _expected_root_thread_id(values: JSONDict) -> str | None:
+    team_id = values.get("team_id")
+    user_id = values.get("user_id")
+    session_id = values.get("session_id")
+    if not all(isinstance(value, int) and not isinstance(value, bool) for value in (team_id, user_id, session_id)):
+        return None
+    session_key = values.get("session_key")
+    return build_agent_root_thread_id(
+        team_id=team_id,
+        user_id=user_id,
+        session_id=session_id,
+        session_key=session_key if isinstance(session_key, str) else None,
     )

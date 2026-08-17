@@ -70,7 +70,7 @@ interface Props {
 
 interface Emits {
   (e: 'update:open', value: boolean): void
-  (e: 'success'): void
+  (e: 'success', invoiceTitle: InvoiceTitleResponse): void
 }
 
 const props = defineProps<Props>()
@@ -164,17 +164,14 @@ const onSubmit = handleSubmit(async (formValues) => {
       phone: formValues.phone ?? null
     }
 
-    if (isEdit.value && props.invoiceTitle) {
-      await invoiceApi.updateInvoiceTitle(props.invoiceTitle.id, data as InvoiceTitleUpdate)
-      toast.success('发票抬头更新成功')
-    } else {
-      await invoiceApi.createInvoiceTitle(props.customerId, data as InvoiceTitleCreate)
-      toast.success('发票抬头创建成功')
-    }
+    const savedInvoiceTitle = isEdit.value && props.invoiceTitle
+      ? await invoiceApi.updateInvoiceTitle(props.invoiceTitle.id, data as InvoiceTitleUpdate)
+      : await invoiceApi.createInvoiceTitle(props.customerId, data as InvoiceTitleCreate)
 
+    toast.success(isEdit.value ? '发票抬头更新成功' : '发票抬头创建成功')
     isDirty.value = false
     visible.value = false
-    emit('success')
+    emit('success', savedInvoiceTitle)
   } catch (error) {
     handleApiError(error, isEdit.value ? '更新发票抬头' : '创建发票抬头')
   } finally {

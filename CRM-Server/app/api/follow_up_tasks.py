@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import get_current_active_user, get_current_user_team
@@ -26,6 +25,9 @@ from app.schemas.sales_commitment import (
     FollowUpTaskConfirmationPendingCountResponse,
     FollowUpTaskConfirmationResolveRequest,
     FollowUpTaskConfirmationResolveResponse,
+    FollowUpTaskCustomerArrangementResponse,
+    FollowUpTaskDetailResponse,
+    FollowUpTaskListResponse,
     FollowUpTaskProjectionRunResponse,
 )
 from app.services.follow_up_task_confirmation_channel_service import (
@@ -48,6 +50,9 @@ from app.services.follow_up_task_transition_plan_service import (
 )
 from app.utils.time import business_now
 
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
 router = APIRouter(prefix="/v1/follow-up-tasks", tags=["客户跟进任务"])
 projection_router = APIRouter(prefix="/v1/follow-up-task-projection-runs", tags=["客户跟进任务投影"])
 observability_router = APIRouter(prefix="/v1/follow-up-task-transition-observability", tags=["客户跟进任务观测"])
@@ -59,7 +64,7 @@ class FollowUpTaskTransitionRequest(BaseModel):
     reason: str | None = Field(None, max_length=500, description="操作原因")
 
 
-@router.get("", summary="查询我的客户跟进任务")
+@router.get("", response_model=FollowUpTaskListResponse, summary="查询我的客户跟进任务")
 def list_follow_up_tasks(
     status_filter: str = Query("open", alias="status"),
     due_window: str | None = Query(None),
@@ -69,9 +74,9 @@ def list_follow_up_tasks(
     team_id: int = Depends(get_current_user_team),
     current_user=Depends(get_current_active_user),
     db: Session = Depends(get_db),
-) -> dict[str, Any]:
+) -> FollowUpTaskListResponse:
     try:
-        return follow_up_task_query_service.list_tasks(
+        payload = follow_up_task_query_service.list_tasks(
             db,
             team_id=team_id,
             user_id=current_user.id,
@@ -81,6 +86,7 @@ def list_follow_up_tasks(
             owner_scope=owner_scope,
             limit=limit,
         )
+        return FollowUpTaskListResponse.model_validate(payload)
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except ValueError as exc:
@@ -157,14 +163,18 @@ def resolve_follow_up_task_confirmation_case(
     return FollowUpTaskConfirmationResolveResponse.model_validate(payload)
 
 
-@router.get("/customer-arrangements/{customer_id}", summary="查询客户当前跟进安排")
+@router.get(
+    "/customer-arrangements/{customer_id}",
+    response_model=FollowUpTaskCustomerArrangementResponse,
+    summary="查询客户当前跟进安排",
+)
 def get_customer_follow_up_arrangement(
     customer_id: str,
     limit: int = Query(20, ge=1, le=100),
     team_id: int = Depends(get_current_user_team),
     current_user=Depends(get_current_active_user),
     db: Session = Depends(get_db),
-) -> dict[str, Any]:
+) -> FollowUpTaskCustomerArrangementResponse:
     try:
         payload = follow_up_task_query_service.list_tasks(
             db,
@@ -185,23 +195,24 @@ def get_customer_follow_up_arrangement(
         "task_state_source": "mysql",
         "id_policy": "对外只返回 task/customer public_id；来源活动当前沿用既有客户活动内部ID路由，不作为任务展示字段。",
     }
-    return payload
+    return FollowUpTaskCustomerArrangementResponse.model_validate(payload)
 
 
-@router.get("/{task_id}", summary="查询客户跟进任务详情")
+@router.get("/{task_id}", response_model=FollowUpTaskDetailResponse, summary="查询客户跟进任务详情")
 def get_follow_up_task_detail(
     task_id: str,
     team_id: int = Depends(get_current_user_team),
     current_user=Depends(get_current_active_user),
     db: Session = Depends(get_db),
-) -> dict[str, Any]:
+) -> FollowUpTaskDetailResponse:
     try:
-        return follow_up_task_query_service.get_task_detail(
+        payload = follow_up_task_query_service.get_task_detail(
             db,
             team_id=team_id,
             user_id=current_user.id,
             task_public_id=task_id,
         )
+        return FollowUpTaskDetailResponse.model_validate(payload)
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except ValueError as exc:

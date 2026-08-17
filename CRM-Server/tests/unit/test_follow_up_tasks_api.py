@@ -137,75 +137,133 @@ def _seed_customer_and_activity(db):
             User(id=9, email="customer-owner@example.com", name="销售负责人"),
         ]
     )
-    db.add(
-        Customer(
-            id=1,
-            public_id="cus_11111111111111111111111111111111",
-            team_id=1,
-            account_name="测试客户",
-            city="上海",
-            owner_id="9",
-            creator_id="9",
-        )
+    db.add_all(
+        [
+            Customer(
+                id=1,
+                public_id="cus_11111111111111111111111111111111",
+                team_id=1,
+                account_name="测试客户",
+                city="上海",
+                owner_id="9",
+                creator_id="9",
+            ),
+            Customer(
+                id=2,
+                public_id="cus_22222222222222222222222222222222",
+                team_id=1,
+                account_name="另一客户",
+                city="北京",
+                owner_id="9",
+                creator_id="9",
+            ),
+        ]
     )
-    db.add(
-        CustomerMember(
-            id=11,
-            team_id=1,
-            customer_id=1,
-            user_id="2",
-            member_role="PRESALES",
-            access_level="FOLLOW_UP",
-            created_by="9",
-            is_active=True,
-        )
+    db.add_all(
+        [
+            CustomerMember(
+                id=11,
+                team_id=1,
+                customer_id=1,
+                user_id="2",
+                member_role="PRESALES",
+                access_level="FOLLOW_UP",
+                created_by="9",
+                is_active=True,
+            ),
+            CustomerMember(
+                id=12,
+                team_id=1,
+                customer_id=2,
+                user_id="2",
+                member_role="PRESALES",
+                access_level="FOLLOW_UP",
+                created_by="9",
+                is_active=True,
+            ),
+        ]
     )
-    db.add(
-        CustomerActivity(
-            id=101,
-            team_id=1,
-            customer_id=1,
-            activity_kind="PHONE_FOLLOW_UP",
-            title="电话确认预算",
-            source_content="客户说下周三看预算。",
-            summary="客户还在确认预算。",
-            next_action="下周三回访预算进展",
-            next_follow_time=datetime(2026, 8, 12, 10, 0, 0),
-            occurred_at=datetime(2026, 8, 6, 9, 0, 0),
-            owner_id="2",
-            creator_id="2",
-        )
+    db.add_all(
+        [
+            CustomerActivity(
+                id=101,
+                team_id=1,
+                customer_id=1,
+                activity_kind="PHONE_FOLLOW_UP",
+                title="电话确认预算",
+                source_content="客户说下周三看预算。",
+                summary="客户还在确认预算。",
+                next_action="下周三回访预算进展",
+                next_follow_time=datetime(2026, 8, 12, 10, 0, 0),
+                occurred_at=datetime(2026, 8, 6, 9, 0, 0),
+                owner_id="2",
+                creator_id="2",
+            ),
+            CustomerActivity(
+                id=102,
+                team_id=1,
+                customer_id=2,
+                activity_kind="PHONE_FOLLOW_UP",
+                title="另一客户跟进",
+                source_content="另一客户仍需回访。",
+                summary="另一客户待继续跟进。",
+                next_action="下周四继续回访",
+                next_follow_time=datetime(2026, 8, 13, 10, 0, 0),
+                occurred_at=datetime(2026, 8, 7, 9, 0, 0),
+                owner_id="2",
+                creator_id="2",
+            ),
+        ]
     )
 
 
-def _create_commitment(db, *, task_id: int = 201):
+def _create_commitment(
+    db,
+    *,
+    task_id: int = 201,
+    customer_id: int = 1,
+    source_activity_id: int = 101,
+):
     return sales_commitment_crud.create(
         db,
         SalesCommitmentInternalCreate(
             team_id=1,
-            customer_id=1,
+            customer_id=customer_id,
             owner_id="2",
             creator_id="2",
             title="跟进预算",
             content="下周三回访预算进展",
             source_type=FollowUpTaskSourceType.CUSTOMER_ACTIVITY,
-            source_activity_id=101,
+            source_activity_id=source_activity_id,
             due_at=datetime(2026, 8, 12, 10, 0, 0),
             due_at_text="下周三",
             due_at_granularity=DueAtGranularity.DATETIME,
-            evidence_json={"activity_id": 101},
+            evidence_json={"activity_id": source_activity_id},
             commitment_hash=f"commitment-hash-{task_id}",
         ),
     )
 
 
-def _create_task(db, *, task_id: int = 201, owner_id: str = "2", status: str = FollowUpTaskStatus.OPEN):
-    commitment = _create_commitment(db, task_id=task_id)
+def _create_task(
+    db,
+    *,
+    task_id: int = 201,
+    owner_id: str = "2",
+    status: str = FollowUpTaskStatus.OPEN,
+    customer_id: int = 1,
+    source_activity_id: int = 101,
+):
+    commitment = _create_commitment(
+        db,
+        task_id=task_id,
+        customer_id=customer_id,
+        source_activity_id=source_activity_id,
+    )
     return follow_up_task_crud.create(
         db,
         FollowUpTaskInternalCreate(
             team_id=1,
-            customer_id=1,
+            customer_id=customer_id,
             commitment_id=commitment.id,
             owner_id=owner_id,
             creator_id=owner_id,
@@ -216,9 +274,9 @@ def _create_task(db, *, task_id: int = 201, owner_id: str = "2", status: str = F
             due_at_text="下周三",
             due_at_granularity=DueAtGranularity.DATETIME,
             source_type=FollowUpTaskSourceType.CUSTOMER_ACTIVITY,
-            source_activity_id=101,
+            source_activity_id=source_activity_id,
             confidence=0.92,
-            evidence_json={"activity_id": 101, "quote": "客户说下周三看预算"},
+            evidence_json={"activity_id": source_activity_id, "quote": "客户说下周三看预算"},
             task_hash=f"task-hash-{task_id}",
         ),
     )
@@ -231,13 +289,15 @@ def _create_confirmation_case(
     case_id: int = 301,
     public_id: str = "fuc_11111111111111111111111111111111",
     owner_id: str | None = None,
+    team_id: int | None = None,
+    customer_id: int | None = None,
 ):
     case = FollowUpTaskConfirmationCase(
         id=case_id,
         public_id=public_id,
-        team_id=task.team_id,
+        team_id=team_id if team_id is not None else task.team_id,
         task_id=task.id,
-        customer_id=task.customer_id,
+        customer_id=customer_id if customer_id is not None else task.customer_id,
         owner_id=owner_id or task.owner_id,
         creator_id="2",
         status="PENDING",
@@ -319,6 +379,31 @@ def test_list_follow_up_tasks_returns_public_ids_and_customer_summary(client, db
     assert len(payload["customer_summary"]) == 1
     assert payload["customer_summary"][0]["customer"]["id"] == "cus_11111111111111111111111111111111"
     assert payload["usage_policy"]["task_state_source"] == "mysql"
+
+
+def test_list_follow_up_tasks_projects_pending_confirmations_onto_the_matching_task(client, db_session):
+    task = _create_task(db_session, task_id=201)
+    other_task = _create_task(
+        db_session,
+        task_id=202,
+        customer_id=2,
+        source_activity_id=102,
+    )
+    case = _create_confirmation_case(db_session, task=task)
+
+    response = client.get("/v1/follow-up-tasks")
+
+    assert response.status_code == 200
+    items_by_public_id = {item["public_id"]: item for item in response.json()["items"]}
+    assert items_by_public_id[task.public_id]["pending_confirmations"] == [
+        {
+            "public_id": case.public_id,
+            "question_text": case.question_text,
+            "suggested_action": "COMPLETE",
+            "created_time": case.created_time.isoformat(),
+        }
+    ]
+    assert items_by_public_id[other_task.public_id]["pending_confirmations"] == []
 
 
 def test_list_pending_confirmation_cases_only_returns_current_owner_cases(client, db_session):
@@ -446,6 +531,47 @@ def test_get_follow_up_task_detail_returns_source_activity_context(client, db_se
     assert payload["source_activity"]["summary"] == "客户还在确认预算。"
     assert payload["source_activity"]["next_action"] == "下周三回访预算进展"
     assert payload["source_activity"]["owner_info"]["name"] == "售前"
+
+
+def test_get_follow_up_task_detail_only_projects_pending_confirmations_for_current_owner_and_team(
+    client,
+    db_session,
+):
+    task = _create_task(db_session)
+    owned_case = _create_confirmation_case(db_session, task=task)
+    _create_confirmation_case(
+        db_session,
+        task=task,
+        case_id=302,
+        public_id="fuc_22222222222222222222222222222222",
+        owner_id="9",
+    )
+    _create_confirmation_case(
+        db_session,
+        task=task,
+        case_id=303,
+        public_id="fuc_33333333333333333333333333333333",
+        team_id=2,
+    )
+    _create_confirmation_case(
+        db_session,
+        task=task,
+        case_id=304,
+        public_id="fuc_44444444444444444444444444444444",
+        customer_id=2,
+    )
+
+    response = client.get(f"/v1/follow-up-tasks/{task.public_id}")
+
+    assert response.status_code == 200
+    assert response.json()["pending_confirmations"] == [
+        {
+            "public_id": owned_case.public_id,
+            "question_text": owned_case.question_text,
+            "suggested_action": "COMPLETE",
+            "created_time": owned_case.created_time.isoformat(),
+        }
+    ]
 
 
 @pytest.mark.parametrize(

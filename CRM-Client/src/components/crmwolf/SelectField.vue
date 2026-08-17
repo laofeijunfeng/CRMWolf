@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, useAttrs } from 'vue'
+import { Plus } from 'lucide-vue-next'
 import {
   Select,
   SelectContent,
   SelectItem,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
@@ -35,6 +37,8 @@ interface Props {
   class?: HTMLAttributes['class'] | undefined
   triggerClass?: HTMLAttributes['class'] | undefined
   contentClass?: HTMLAttributes['class'] | undefined
+  addActionLabel?: string
+  addActionDisabled?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -51,12 +55,16 @@ const props = withDefaults(defineProps<Props>(), {
   class: undefined,
   triggerClass: undefined,
   contentClass: undefined,
+  addActionLabel: '',
+  addActionDisabled: false,
 })
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
+  add: []
 }>()
 const attrs = useAttrs()
+const addActionValue = `__select-field-add-${Math.random().toString(36).slice(2, 9)}`
 
 const selectId = computed(() => props.id ?? `select-field-${Math.random().toString(36).slice(2, 9)}`)
 const descriptionId = computed(() => `${selectId.value}-description`)
@@ -69,11 +77,17 @@ const describedBy = computed(() => {
 const normalizedValue = computed(() => props.modelValue === undefined || props.modelValue === null ? '' : String(props.modelValue))
 const selectDisabled = computed(() => props.disabled === true)
 const selectPlaceholder = computed(() => props.placeholder ?? '请选择')
+const hasAddAction = computed(() => props.addActionLabel.trim() !== '')
 const triggerBindings = computed(() =>
   props.ariaLabel !== undefined && props.ariaLabel.trim().length > 0 ? { ...attrs, 'aria-label': props.ariaLabel } : attrs
 )
 
 function handleUpdate(value: unknown): void {
+  if (value === addActionValue) {
+    if (!props.addActionDisabled) emit('add')
+    return
+  }
+
   if (typeof value === 'string') {
     emit('update:modelValue', value)
     return
@@ -112,6 +126,18 @@ function handleUpdate(value: unknown): void {
           :disabled="option.disabled === true"
         >
           {{ option.label }}
+        </SelectItem>
+        <SelectSeparator v-if="hasAddAction" />
+        <SelectItem
+          v-if="hasAddAction"
+          :value="addActionValue"
+          :disabled="addActionDisabled === true"
+          :aria-label="addActionLabel"
+          class="justify-center px-2 text-wolf-primary focus:text-wolf-primary"
+          data-slot="select-add-action"
+        >
+          <Plus class="size-4" aria-hidden="true" />
+          <span class="sr-only">{{ addActionLabel }}</span>
         </SelectItem>
       </SelectContent>
     </Select>

@@ -247,7 +247,6 @@ def _has_pending_task_result(graph_state: PendingTaskGraphResult) -> bool:
         or graph_state.get("handled")
         or graph_state.get("events")
         or graph_state.get("effect_intents")
-        or graph_state.get("projection_aborted")
     )
 
 

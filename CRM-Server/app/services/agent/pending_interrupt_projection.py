@@ -50,6 +50,7 @@ class PendingInterruptProjectionRequest:
     team_id: int
     user_id: int
     session_id: int
+    root_thread_id: str
     continuation: PendingTaskContinuationRef
     interrupt: AgentInterruptPayload
     outcome: PendingTaskGraphResult
@@ -421,6 +422,7 @@ def _validate_request(request: PendingInterruptProjectionRequest) -> str | None:
         expected_team_id=request.team_id,
         expected_user_id=request.user_id,
         expected_session_id=request.session_id,
+        expected_thread_id=request.root_thread_id,
     )
     if continuation is None:
         return "invalid_continuation"
@@ -429,6 +431,7 @@ def _validate_request(request: PendingInterruptProjectionRequest) -> str | None:
         expected_team_id=request.team_id,
         expected_user_id=request.user_id,
         expected_session_id=request.session_id,
+        expected_thread_id=request.root_thread_id,
     )
     if interrupt_continuation != continuation:
         return "interrupt_continuation_mismatch"

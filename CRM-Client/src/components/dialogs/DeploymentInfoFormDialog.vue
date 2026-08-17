@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { InputField } from '@/components/crmwolf'
-import deploymentApi from '@/api/deployment'
+import deploymentApi, { type DeploymentInfoResponse } from '@/api/deployment'
 import type { DeploymentInfoCreate } from '@/schemas/deployment'
 import { handleApiError } from '@/utils/errorHandler'
 
@@ -24,7 +24,7 @@ interface Props {
 
 interface Emits {
   (event: 'update:open', value: boolean): void
-  (event: 'success'): void
+  (event: 'success', deployment: DeploymentInfoResponse): void
 }
 
 interface DeploymentForm {
@@ -104,10 +104,10 @@ async function handleSubmit(): Promise<void> {
 
   submitting.value = true
   try {
-    await deploymentApi.create(payload)
+    const createdDeployment = await deploymentApi.create(payload)
     toast.success('部署信息已新增')
     visible.value = false
-    emit('success')
+    emit('success', createdDeployment)
   } catch (error: unknown) {
     handleApiError(error, '新增部署信息')
   } finally {

@@ -2,18 +2,25 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
 from app.services.agent import action_plan, action_workflow, agent_copy
+from app.services.agent import pending_graph as pending_graph_module
 from app.services.agent import root_runtime as root_runtime_module
 from app.services.agent.input import AgentTurnInput
-from app.services.agent.pending_graph import PendingTaskGraphService
-from app.services.agent.pending_application_step_contracts import build_pending_application_step_request
+from app.services.agent.interrupts import interrupt_payload_from_json
+from app.services.agent.pending_application_step_contracts import (
+    build_pending_application_step_request,
+    pending_application_step_id,
+)
 from app.services.agent.pending_application_step_projection import PendingApplicationStepProjectionResult
-from app.services.agent.pending_continuation import bind_pending_task_namespace, new_pending_task_continuation
+from app.services.agent.pending_checkpoint import PendingTaskCheckpointLoadResult
+from app.services.agent.pending_continuation import new_pending_task_continuation
+from app.services.agent.pending_graph import PendingTaskGraphService
 from app.services.agent.pending_interrupt_projection import PendingInterruptProjectionResult
 from app.services.agent.pending_outcome import PendingTaskOutcomeRecovery
 from app.services.agent.root_runtime import (
@@ -26,7 +33,6 @@ from app.services.agent.state import AgentRootRuntimeSideEffects, AgentRuntimeCo
 from app.services.agent.task_execution import ActionToolExecutionResult
 from app.services.agent.task_projection import agent_task_snapshot
 from app.services.agent.tools.base import AgentToolResult
-from app.services.customer_intelligence_refresh_service import AgentAsyncOperationBinding
 from app.services.follow_up_task_confirmation_channel_service import (
     FOLLOW_UP_CONFIRMATION_PROMPT_EVENT,
     FollowUpTaskConfirmationChannelService,
@@ -43,6 +49,13 @@ def without_projection_metadata(events):
 def bind_fake_pending_continuation(state, side_effects, *, continuation_id: str) -> None:
     if side_effects is None:
         return
+    runtime_config = root_runtime_module.get_config()
+    configurable = runtime_config.get("configurable", {})
+    root_thread_id = configurable.get("thread_id")
+    checkpoint_ns = configurable.get("checkpoint_ns")
+    assert isinstance(root_thread_id, str)
+    assert isinstance(checkpoint_ns, str)
+    assert checkpoint_ns.startswith("pending_task_subgraph:")
     task_snapshot = state["task_snapshot"]
     side_effects.task = task_snapshot
     side_effects.checkpoint_ref = new_pending_task_continuation(
@@ -50,7 +63,8 @@ def bind_fake_pending_continuation(state, side_effects, *, continuation_id: str)
         user_id=state["user_id"],
         session_id=state["session_id"],
         task_id=task_snapshot["id"],
-        continuation_id=continuation_id,
+        root_thread_id=root_thread_id,
+        checkpoint_ns=checkpoint_ns,
     )
 
 
@@ -673,15 +687,13 @@ class FakeNewFlowGraphService:
 
 
 def test_snapshot_interrupt_identity_distinguishes_consecutive_application_steps():
-    continuation = bind_pending_task_namespace(
-        new_pending_task_continuation(
-            team_id=2,
-            user_id=3,
-            session_id=4,
-            task_id=101,
-            continuation_id="application-step-identity",
-        ),
-        "pending_task_subgraph:application-step-identity",
+    continuation = new_pending_task_continuation(
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        task_id=101,
+        root_thread_id="crm_agent:2:3:4:4",
+        checkpoint_ns="pending_task_subgraph:application-step-identity",
     )
     common = {
         "continuation": continuation,
@@ -3419,6 +3431,7 @@ async def test_root_runtime_resumes_langgraph_interrupt_with_command():
         "agent_root_graph_started",
         "agent_root_route_selected",
         "agent_root_interrupt_resumed",
+        "agent_root_interrupt_resume_validated",
         "agent_root_route_selected",
         "agent_root_application_action_decided",
         "agent_root_no_pending_confirmation_completed",
@@ -3456,6 +3469,50 @@ async def test_root_runtime_rejects_resume_action_not_allowed_by_current_interru
             session_id=4,
             session_key="abc",
         )
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_terminalizes_legacy_pending_continuation_before_exposure():
+    runtime = AgentRootRuntime(checkpointer=InMemorySaver())
+    waiting_state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": "确认",
+            "turn_kind": "confirm",
+            "current_interrupt": {
+                "schema_version": "agent.interrupt.v1",
+                "type": "confirm",
+                "reason": "write_confirmation",
+                "business_action": "create_opportunity",
+                "allowed_resume_actions": ["approve", "edit", "reject", "cancel"],
+                "checkpoint_ref": {
+                    "runtime": "crm_agent_pending_task",
+                    "thread_id": "crm_agent_pending:2:3:4:101",
+                    "checkpoint_ns": "pending_task_subgraph:checkpoint-1",
+                    "team_id": 2,
+                    "user_id": 3,
+                    "session_id": 4,
+                    "task_id": 101,
+                },
+            },
+        }
+    )
+    assert waiting_state["runtime_status"] == "checkpoint_recovery_failed"
+    assert waiting_state["pending_task_result"]["failure_reason"] == "invalid_continuation"
+    assert waiting_state["current_interrupt"] is None
+    history = await runtime.state_history(
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="abc",
+        limit=20,
+    )
+    assert any("pending_resume_recovery_failure" in item["next_nodes"] for item in history)
+    assert any("finish_turn" in item["next_nodes"] for item in history)
 
 
 @pytest.mark.asyncio
@@ -3647,7 +3704,8 @@ async def test_root_runtime_holds_terminal_pending_outcome_behind_durable_projec
                     user_id=state["user_id"],
                     session_id=state["session_id"],
                     task_id=state["task_snapshot"]["id"],
-                    continuation_id="terminal-outcome-1",
+                    root_thread_id=f"crm_agent:{state['team_id']}:{state['user_id']}:{state['session_id']}:{state['session_id']}",
+                    checkpoint_ns="pending_task_subgraph:terminal-outcome-1",
                 )
             return await super().run_with_trace(state, side_effects=side_effects)
 
@@ -3733,6 +3791,86 @@ async def test_root_runtime_holds_terminal_pending_outcome_behind_durable_projec
 
 
 @pytest.mark.asyncio
+async def test_root_runtime_routes_terminal_outcome_projection_failure_through_failure_node():
+    class TerminalPendingGraphService(FakePendingGraphService):
+        async def run_with_trace(self, state, *, side_effects=None):
+            if side_effects is not None:
+                side_effects.checkpoint_ref = new_pending_task_continuation(
+                    team_id=state["team_id"],
+                    user_id=state["user_id"],
+                    session_id=state["session_id"],
+                    task_id=state["task_snapshot"]["id"],
+                    root_thread_id=(
+                        f"crm_agent:{state['team_id']}:{state['user_id']}:"
+                        f"{state['session_id']}:{state['session_id']}"
+                    ),
+                    checkpoint_ns="pending_task_subgraph:terminal-outcome-failure",
+                )
+            return await super().run_with_trace(state, side_effects=side_effects)
+
+    projector = FakePendingInterruptProjector(
+        PendingInterruptProjectionResult(
+            status="FAILED",
+            projection_key="",
+            retryable=False,
+            failure_reason="projection_write_failed",
+        )
+    )
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        pending_graph_service=TerminalPendingGraphService(),
+        pending_task_side_effect_handler=FakePendingTaskSideEffectHandler(),
+        pending_interrupt_projector=projector,
+    )
+    task = waiting_task_stub()
+    context = AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4, context_json={}),
+        task=task,
+        turn_input=AgentTurnInput.text("补充金额 10 万"),
+        content="补充金额 10 万",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=AgentRootRuntimeSideEffects(),
+    )
+
+    state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": context.content,
+            "turn_kind": "text",
+            "pending_task_requested": True,
+            "task_projection": {"id": 101, "task_key": "task-101"},
+        },
+        context=context,
+    )
+
+    assert state["runtime_status"] == "pending_projection_failed"
+    assert state["runtime_retryable"] is False
+    assert state["application_action"] == "finish"
+    assert state["current_interrupt"] is None
+    assert state["pending_task_continuation_ref"] is None
+    assert state["pending_task_requested"] is False
+    assert state["pending_task_result"]["failure_reason"] == "projection_write_failed"
+    assert "projection_aborted" not in state["pending_task_result"]
+    history = await runtime.state_history(
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="abc",
+        limit=30,
+    )
+    assert any("pending_projection_failure" in item["next_nodes"] for item in history)
+    assert any("finish_turn" in item["next_nodes"] for item in history)
+
+
+@pytest.mark.asyncio
 async def test_root_runtime_projects_authoritative_pending_outcome_when_child_graph_interrupts():
     checkpointer = InMemorySaver()
     pending_graph_service = PendingTaskGraphService(
@@ -3783,9 +3921,8 @@ async def test_root_runtime_projects_authoritative_pending_outcome_when_child_gr
     checkpoint_ref = state["current_interrupt"]["checkpoint_ref"]
     assert checkpoint_ref["runtime"] == "crm_agent_pending_task"
     assert checkpoint_ref["continuation_id"]
-    assert checkpoint_ref["thread_id"] == (
-        f"crm_agent_pending:2:3:4:101:{checkpoint_ref['continuation_id']}"
-    )
+    assert checkpoint_ref["persistence_scope"] == "root"
+    assert checkpoint_ref["thread_id"] == "crm_agent:2:3:4:abc"
     assert checkpoint_ref["checkpoint_ns"].startswith("pending_task_subgraph:")
     assert checkpoint_ref["team_id"] == 2
     assert checkpoint_ref["user_id"] == 3
@@ -3811,6 +3948,680 @@ async def test_root_runtime_projects_authoritative_pending_outcome_when_child_gr
     assert checkpoint_state["current_interrupt"] == state["current_interrupt"]
     assert checkpoint_state["pending_interrupt_projection"]["status"] == "PROJECTED"
     assert checkpoint_state["pending_interrupt_projection"]["delivery_status"] == "INLINE_VISIBLE"
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_resumes_root_owned_pending_wait_through_exact_child_continuation():
+    checkpointer = InMemorySaver()
+    pending_graph_service = PendingTaskGraphService(
+        preflight_graph_service=FakeNativeInterruptPreflightGraphService(),
+        interaction_graph_service=FakeNativeInterruptInteractionGraphService(),
+        checkpointer=checkpointer,
+    )
+    runtime = AgentRootRuntime(
+        checkpointer=checkpointer,
+        pending_graph_service=pending_graph_service,
+        pending_task_side_effect_handler=FakePendingTaskSideEffectHandler(),
+    )
+    task = waiting_task_stub()
+    context = AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4, context_json={}),
+        task=task,
+        turn_input=AgentTurnInput.text("补充金额 10 万"),
+        content="补充金额 10 万",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=AgentRootRuntimeSideEffects(),
+    )
+
+    waiting_state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": context.content,
+            "turn_kind": "text",
+            "pending_task_requested": True,
+            "task_projection": {"id": 101, "task_key": "task-101"},
+        },
+        context=context,
+    )
+    current_interrupt = waiting_state["current_interrupt"]
+    continuation = current_interrupt["checkpoint_ref"]
+
+    resumed_state = await runtime.resume_interrupt(
+        resume_payload={
+            "action": "approve",
+            "content": "确认",
+            "source": "web",
+            "metadata": {},
+            "business_action": current_interrupt["business_action"],
+            "interrupt_reason": current_interrupt["reason"],
+        },
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="abc",
+        current_interrupt=current_interrupt,
+        context=context,
+    )
+
+    assert resumed_state["application_action"] == "execute_confirmed_task"
+    assert resumed_state["current_interrupt"] is None
+    assert resumed_state["pending_task_continuation_ref"] is None
+    assert resumed_state["pending_task_result"]["confirmation_decision"]["intent"] == "confirm"
+    recovery = await pending_graph_service.load_checkpointed_outcome(continuation)
+    assert recovery.failure_reason is None
+    assert recovery.outcome is not None
+    assert recovery.outcome.get("current_interrupt") is None
+    assert recovery.outcome["confirmation_decision"]["intent"] == "confirm"
+
+    history = await runtime.state_history(
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="abc",
+        limit=30,
+    )
+    assert any("generated_interrupt_wait" in item["next_nodes"] for item in history)
+    assert any("validate_interrupt_resume" in item["next_nodes"] for item in history)
+    assert any("pending_task_subgraph" in item["next_nodes"] for item in history)
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_terminates_when_native_child_checkpoint_disappears_before_resume():
+    checkpointer = InMemorySaver()
+    pending_graph_service = PendingTaskGraphService(
+        preflight_graph_service=FakeNativeInterruptPreflightGraphService(),
+        interaction_graph_service=FakeNativeInterruptInteractionGraphService(),
+        checkpointer=checkpointer,
+    )
+    new_flow_graph_service = FakeNewFlowGraphService()
+    runtime = AgentRootRuntime(
+        checkpointer=checkpointer,
+        pending_graph_service=pending_graph_service,
+        pending_task_side_effect_handler=FakePendingTaskSideEffectHandler(),
+        new_flow_graph_service=new_flow_graph_service,
+    )
+    task = waiting_task_stub()
+    context = AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4, context_json={}),
+        task=task,
+        turn_input=AgentTurnInput.text("补充金额 10 万"),
+        content="补充金额 10 万",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=AgentRootRuntimeSideEffects(),
+    )
+    state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": context.content,
+            "turn_kind": "text",
+            "pending_task_requested": True,
+            "task_projection": {"id": 101, "task_key": "task-101"},
+        },
+        context=context,
+    )
+    current_interrupt = state["current_interrupt"]
+    checkpoint_ref = current_interrupt["checkpoint_ref"]
+    thread_id = checkpoint_ref["thread_id"]
+    checkpoint_ns = checkpoint_ref["checkpoint_ns"]
+
+    del checkpointer.storage[thread_id][checkpoint_ns]
+    for key in list(checkpointer.writes):
+        if key[0] == thread_id and key[1] == checkpoint_ns:
+            del checkpointer.writes[key]
+    for key in list(checkpointer.blobs):
+        if key[0] == thread_id and key[1] == checkpoint_ns:
+            del checkpointer.blobs[key]
+
+    result = await runtime.resume_interrupt(
+        resume_payload={
+            "action": "approve",
+            "content": "确认",
+            "source": "web",
+            "metadata": {},
+            "business_action": current_interrupt["business_action"],
+            "interrupt_reason": current_interrupt["reason"],
+        },
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="abc",
+        current_interrupt=current_interrupt,
+        context=context,
+    )
+
+    assert result["runtime_status"] == "checkpoint_recovery_failed"
+    assert result["runtime_retryable"] is False
+    assert result["application_action"] == "finish"
+    assert result["current_interrupt"] is None
+    assert result["pending_task_continuation_ref"] is None
+    assert result["pending_task_requested"] is False
+    assert result["pending_task_result"]["failure_reason"] == "checkpoint_locator_not_found"
+    assert any(
+        event.get("event") == "pending_task_checkpoint_recovery_failed"
+        for event in result["events"]
+    )
+    history = await runtime.state_history(
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="abc",
+        limit=30,
+    )
+    assert any("validate_interrupt_resume" in item["next_nodes"] for item in history)
+    assert any("pending_resume_recovery_failure" in item["next_nodes"] for item in history)
+    assert any("finish_turn" in item["next_nodes"] for item in history)
+
+    context.task = None
+    context.turn_input = AgentTurnInput.text("重新记录一个客户跟进")
+    context.content = "重新记录一个客户跟进"
+    next_state = await runtime.run_turn(
+        turn_input=context.turn_input,
+        content=context.content,
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="abc",
+        current_customer={},
+        context=context,
+    )
+    assert next_state["runtime_status"] != "checkpoint_recovery_failed"
+    assert len(new_flow_graph_service.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_keeps_root_wait_retryable_when_checkpoint_store_is_temporarily_unavailable():
+    checkpointer = InMemorySaver()
+    delegate = PendingTaskGraphService(
+        preflight_graph_service=FakeNativeInterruptPreflightGraphService(),
+        interaction_graph_service=FakeNativeInterruptInteractionGraphService(),
+        checkpointer=checkpointer,
+    )
+
+    class TemporarilyUnavailablePendingGraphService:
+        def __init__(self):
+            self.fail_load = False
+            self.run_calls = 0
+
+        async def run_with_trace(self, state, *, side_effects=None):
+            self.run_calls += 1
+            return await delegate.run_with_trace(state, side_effects=side_effects)
+
+        async def load_checkpointed_outcome(self, *args, **kwargs):
+            if self.fail_load:
+                return PendingTaskOutcomeRecovery(
+                    failure_reason="checkpoint_store_unavailable"
+                )
+            return await delegate.load_checkpointed_outcome(*args, **kwargs)
+
+    class ForbiddenSecondConfirmationRouter:
+        async def route_resume(self, db, **kwargs):
+            raise AssertionError("validated deferred resume must bypass turn intent routing")
+
+    pending_graph_service = TemporarilyUnavailablePendingGraphService()
+    runtime = AgentRootRuntime(
+        checkpointer=checkpointer,
+        pending_graph_service=pending_graph_service,
+        pending_task_side_effect_handler=FakePendingTaskSideEffectHandler(),
+        turn_intent_router=ForbiddenSecondConfirmationRouter(),
+    )
+    task = waiting_task_stub()
+    context = AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4, context_json={}),
+        task=task,
+        turn_input=AgentTurnInput.text("补充金额 10 万"),
+        content="补充金额 10 万",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=AgentRootRuntimeSideEffects(),
+    )
+    waiting_state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": context.content,
+            "turn_kind": "text",
+            "pending_task_requested": True,
+            "task_projection": {"id": 101, "task_key": "task-101"},
+        },
+        context=context,
+    )
+    current_interrupt = waiting_state["current_interrupt"]
+    continuation = current_interrupt["checkpoint_ref"]
+    pending_graph_service.fail_load = True
+
+    result = await runtime.resume_interrupt(
+        resume_payload={
+            "action": "approve",
+            "content": "确认",
+            "source": "web",
+            "metadata": {},
+            "business_action": current_interrupt["business_action"],
+            "interrupt_reason": current_interrupt["reason"],
+        },
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="abc",
+        current_interrupt=current_interrupt,
+        context=context,
+    )
+
+    assert pending_graph_service.run_calls == 1
+    assert result["runtime_status"] == "checkpoint_recovery_failed"
+    assert result["runtime_retryable"] is True
+    assert result["application_action"] == "finish"
+    assert result["current_interrupt"]["checkpoint_ref"] == current_interrupt["checkpoint_ref"]
+    assert result["current_interrupt"]["interaction"] == current_interrupt["interaction"]
+    assert result["current_interrupt"]["business_action"] == current_interrupt["business_action"]
+    assert result["pending_task_continuation_ref"] == continuation
+    assert result["pending_interrupt_projection"] == {}
+    assert result["pending_task_result"]["failure_reason"] == "checkpoint_store_unavailable"
+    assert result["pending_task_deferred_resume"]["continuation"] == continuation
+    assert result["pending_task_deferred_resume"]["interrupt"] == interrupt_payload_from_json(
+        current_interrupt
+    )
+    assert result["pending_task_deferred_resume"]["resume_payload"]["action"] == "approve"
+    assert result["pending_task_deferred_resume"]["resume_payload"]["content"] == "确认"
+    assert result["assistant_content"] == "当前待确认流程暂时无法恢复，请稍后重试。"
+    recovery_events = [
+        event
+        for event in context.side_effects.pending_task_events
+        if event.get("event") == "pending_task_checkpoint_recovery_failed"
+    ]
+    assert recovery_events == [{
+        "event": "pending_task_checkpoint_recovery_failed",
+        "reason": "checkpoint_store_unavailable",
+        "retryable": True,
+    }]
+
+    pending_graph_service.fail_load = False
+    context.turn_input = AgentTurnInput.text("检查恢复状态")
+    context.content = "检查恢复状态"
+    recovered = await runtime.run_turn(
+        turn_input=context.turn_input,
+        content=context.content,
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="abc",
+        current_customer={},
+        context=context,
+    )
+
+    assert pending_graph_service.run_calls == 2
+    assert recovered["runtime_status"] != "checkpoint_recovery_failed"
+    assert recovered["current_interrupt"] is None
+    assert recovered["pending_task_continuation_ref"] is None
+    assert recovered["pending_task_deferred_resume"] is None
+    assert [
+        event
+        for event in context.side_effects.pending_task_events
+        if event.get("event") == "pending_task_checkpoint_recovery_failed"
+    ] == recovery_events
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_fails_closed_when_deferred_resume_invariant_cannot_be_built(monkeypatch):
+    checkpointer = InMemorySaver()
+    delegate = PendingTaskGraphService(
+        preflight_graph_service=FakeNativeInterruptPreflightGraphService(),
+        interaction_graph_service=FakeNativeInterruptInteractionGraphService(),
+        checkpointer=checkpointer,
+    )
+
+    class TemporarilyUnavailablePendingGraphService:
+        def __init__(self):
+            self.fail_load = False
+
+        async def run_with_trace(self, state, *, side_effects=None):
+            return await delegate.run_with_trace(state, side_effects=side_effects)
+
+        async def load_checkpointed_outcome(self, *args, **kwargs):
+            if self.fail_load:
+                return PendingTaskOutcomeRecovery(
+                    failure_reason="checkpoint_store_unavailable"
+                )
+            return await delegate.load_checkpointed_outcome(*args, **kwargs)
+
+    def reject_invalid_capability(**kwargs):
+        raise ValueError("deferred resume invariant failed")
+
+    monkeypatch.setattr(
+        root_runtime_module,
+        "build_pending_task_deferred_resume",
+        reject_invalid_capability,
+    )
+    pending_graph_service = TemporarilyUnavailablePendingGraphService()
+    runtime = AgentRootRuntime(
+        checkpointer=checkpointer,
+        pending_graph_service=pending_graph_service,
+        pending_task_side_effect_handler=FakePendingTaskSideEffectHandler(),
+    )
+    context = AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4, context_json={}),
+        task=waiting_task_stub(),
+        turn_input=AgentTurnInput.text("补充金额 10 万"),
+        content="补充金额 10 万",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=AgentRootRuntimeSideEffects(),
+    )
+    waiting_state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "invalid-deferred-invariant",
+            "channel": "web",
+            "content": context.content,
+            "turn_kind": "text",
+            "pending_task_requested": True,
+            "task_projection": {"id": 101, "task_key": "task-101"},
+        },
+        context=context,
+    )
+    current_interrupt = waiting_state["current_interrupt"]
+    pending_graph_service.fail_load = True
+
+    result = await runtime.resume_interrupt(
+        resume_payload={
+            "action": "approve",
+            "content": "确认",
+            "source": "web",
+            "metadata": {},
+            "business_action": current_interrupt["business_action"],
+            "interrupt_reason": current_interrupt["reason"],
+        },
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="invalid-deferred-invariant",
+        current_interrupt=current_interrupt,
+        context=context,
+    )
+
+    assert result["runtime_status"] == "checkpoint_recovery_failed"
+    assert result["runtime_retryable"] is False
+    assert result["pending_task_result"]["failure_reason"] == "invalid_continuation"
+    assert result["current_interrupt"] is None
+    assert result["pending_task_continuation_ref"] is None
+    assert result["pending_task_deferred_resume"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tamper_kind", ["continuation", "interrupt", "resume_payload"])
+async def test_root_runtime_fails_closed_when_deferred_resume_capability_is_invalid(tamper_kind):
+    checkpointer = InMemorySaver()
+    delegate = PendingTaskGraphService(
+        preflight_graph_service=FakeNativeInterruptPreflightGraphService(),
+        interaction_graph_service=FakeNativeInterruptInteractionGraphService(),
+        checkpointer=checkpointer,
+    )
+
+    class TemporarilyUnavailablePendingGraphService:
+        def __init__(self):
+            self.fail_load = False
+            self.run_calls = 0
+
+        async def run_with_trace(self, state, *, side_effects=None):
+            self.run_calls += 1
+            return await delegate.run_with_trace(state, side_effects=side_effects)
+
+        async def load_checkpointed_outcome(self, *args, **kwargs):
+            if self.fail_load:
+                return PendingTaskOutcomeRecovery(
+                    failure_reason="checkpoint_store_unavailable"
+                )
+            return await delegate.load_checkpointed_outcome(*args, **kwargs)
+
+    class ForbiddenIntentRouter:
+        async def route_resume(self, db, **kwargs):
+            raise AssertionError("invalid deferred resume must fail closed before intent routing")
+
+    pending_graph_service = TemporarilyUnavailablePendingGraphService()
+    runtime = AgentRootRuntime(
+        checkpointer=checkpointer,
+        pending_graph_service=pending_graph_service,
+        pending_task_side_effect_handler=FakePendingTaskSideEffectHandler(),
+        turn_intent_router=ForbiddenIntentRouter(),
+    )
+    task = waiting_task_stub()
+    context = AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4, context_json={}),
+        task=task,
+        turn_input=AgentTurnInput.text("补充金额 10 万"),
+        content="补充金额 10 万",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=AgentRootRuntimeSideEffects(),
+    )
+    waiting_state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "invalid-deferred-resume",
+            "channel": "web",
+            "content": context.content,
+            "turn_kind": "text",
+            "pending_task_requested": True,
+            "task_projection": {"id": 101, "task_key": "task-101"},
+        },
+        context=context,
+    )
+    current_interrupt = waiting_state["current_interrupt"]
+    pending_graph_service.fail_load = True
+    failed = await runtime.resume_interrupt(
+        resume_payload={
+            "action": "approve",
+            "content": "确认",
+            "source": "web",
+            "metadata": {},
+            "business_action": current_interrupt["business_action"],
+            "interrupt_reason": current_interrupt["reason"],
+        },
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="invalid-deferred-resume",
+        current_interrupt=current_interrupt,
+        context=context,
+    )
+    capability = deepcopy(failed["pending_task_deferred_resume"])
+    if tamper_kind == "continuation":
+        capability["continuation"]["checkpoint_ns"] = "pending_task_subgraph:tampered"
+    elif tamper_kind == "interrupt":
+        capability["interrupt"]["interaction"]["prompt"] = "篡改后的确认提示"
+    else:
+        capability["resume_payload"]["action"] = "submit_text"
+
+    config = root_runtime_module.build_agent_graph_config(
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="invalid-deferred-resume",
+    )
+    await runtime._graph.aupdate_state(
+        config,
+        {"pending_task_deferred_resume": capability},
+    )
+    pending_graph_service.fail_load = False
+    context.turn_input = AgentTurnInput.text("检查恢复状态")
+    context.content = "检查恢复状态"
+
+    recovered = await runtime.run_turn(
+        turn_input=context.turn_input,
+        content=context.content,
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="invalid-deferred-resume",
+        current_customer={},
+        context=context,
+    )
+
+    assert pending_graph_service.run_calls == 1
+    assert recovered["runtime_status"] == "checkpoint_recovery_failed"
+    assert recovered["runtime_retryable"] is False
+    assert recovered["pending_task_result"]["failure_reason"] == "invalid_continuation"
+    assert recovered["current_interrupt"] is None
+    assert recovered["pending_task_continuation_ref"] is None
+    assert recovered["pending_task_deferred_resume"] is None
+    history = await runtime.state_history(
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="invalid-deferred-resume",
+        limit=30,
+    )
+    assert any("pending_resume_recovery_failure" in item["next_nodes"] for item in history)
+    assert any("finish_turn" in item["next_nodes"] for item in history)
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_preserves_first_child_interrupt_when_authoritative_load_is_temporarily_unavailable():
+    checkpointer = InMemorySaver()
+    pending_graph_service = PendingTaskGraphService(
+        preflight_graph_service=FakeNativeInterruptPreflightGraphService(),
+        interaction_graph_service=FakeNativeInterruptInteractionGraphService(),
+        checkpointer=checkpointer,
+    )
+    durable_store = pending_graph_service._checkpoint_store
+
+    class FailFirstAuthoritativeLoadStore:
+        enabled = True
+
+        def __init__(self):
+            self.calls = 0
+
+        async def load_result(self, checkpoint_ref, *, expected_interrupt=None):
+            self.calls += 1
+            if self.calls == 1:
+                return PendingTaskCheckpointLoadResult(
+                    failure_reason="checkpoint_store_unavailable"
+                )
+            return await durable_store.load_result(
+                checkpoint_ref,
+                expected_interrupt=expected_interrupt,
+            )
+
+    class ConfirmPendingTurnIntentRouter:
+        async def route_resume(self, db, **kwargs):
+            current_interrupt = kwargs["current_interrupt"]
+            return SimpleNamespace(
+                decision=SimpleNamespace(
+                    intent="CONTINUE_PENDING",
+                    confidence=1.0,
+                    target_task_id=current_interrupt.get("task_projection_id"),
+                    normalized_action="approve",
+                    reason="测试首次权威读取瞬态失败后的恢复。",
+                ),
+                resume_payload={
+                    "action": "approve",
+                    "content": kwargs["turn_input"].content,
+                    "source": "web",
+                    "metadata": {},
+                    "business_action": current_interrupt["business_action"],
+                    "interrupt_reason": current_interrupt["reason"],
+                },
+                source="test_router",
+            )
+
+    failing_store = FailFirstAuthoritativeLoadStore()
+    pending_graph_service._checkpoint_store = failing_store
+    runtime = AgentRootRuntime(
+        checkpointer=checkpointer,
+        pending_graph_service=pending_graph_service,
+        pending_task_side_effect_handler=FakePendingTaskSideEffectHandler(),
+        turn_intent_router=ConfirmPendingTurnIntentRouter(),
+    )
+    task = waiting_task_stub()
+    context = AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4, context_json={}),
+        task=task,
+        turn_input=AgentTurnInput.text("补充金额 10 万"),
+        content="补充金额 10 万",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=AgentRootRuntimeSideEffects(),
+    )
+
+    first = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "first-authoritative-load-retry",
+            "channel": "web",
+            "content": context.content,
+            "turn_kind": "text",
+            "pending_task_requested": True,
+            "task_projection": {"id": 101, "task_key": "task-101"},
+        },
+        context=context,
+    )
+
+    continuation = context.side_effects.pending_task_graph_side_effects.checkpoint_ref
+    assert first["runtime_status"] == "checkpoint_recovery_failed"
+    assert first["runtime_retryable"] is True
+    assert first["current_interrupt"]["reason"] == "write_confirmation"
+    assert first["current_interrupt"]["checkpoint_ref"] == continuation
+    assert first["pending_task_continuation_ref"] == continuation
+    assert first.get("pending_task_deferred_resume") is None
+
+    context.turn_input = AgentTurnInput.text("确认")
+    context.content = "确认"
+    recovered = await runtime.run_turn(
+        turn_input=context.turn_input,
+        content=context.content,
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="first-authoritative-load-retry",
+        current_customer={},
+        context=context,
+    )
+
+    assert failing_store.calls >= 2
+    assert recovered["runtime_status"] != "checkpoint_recovery_failed"
+    assert recovered["current_interrupt"] is None
+    assert recovered["pending_task_continuation_ref"] is None
+    assert len([
+        event
+        for event in context.side_effects.pending_task_events
+        if event.get("event") == "pending_task_checkpoint_recovery_failed"
+    ]) == 1
 
 
 @pytest.mark.asyncio
@@ -3871,6 +4682,7 @@ async def test_root_runtime_exposes_retryable_projection_in_progress_without_exp
     )
 
     assert len(projector.calls) == 1
+    assert projector.calls[0].root_thread_id == "crm_agent:2:3:4:abc"
     assert state["runtime_status"] == "pending_projection_in_progress"
     assert state["runtime_retryable"] is True
     busy_projection_key = projector.calls[0] and root_runtime_module.pending_interrupt_projection_key(
@@ -3900,14 +4712,14 @@ async def test_root_runtime_exposes_retryable_projection_in_progress_without_exp
     assert projection_state["continuation"] == projector.calls[0].continuation
     assert projection_state["interrupt"] == projector.calls[0].interrupt
     assert "abort_status" not in projection_state
-    child_load_result = await pending_graph_service._checkpoint_store.load_result(
+    recovery = await pending_graph_service.load_checkpointed_outcome(
         projector.calls[0].continuation,
         expected_interrupt=projector.calls[0].interrupt,
     )
-    assert child_load_result.failure_reason is None
-    assert child_load_result.snapshot is not None
-    assert child_load_result.snapshot.interrupts
-    assert child_load_result.snapshot.values.get("projection_aborted") is not True
+    assert recovery.failure_reason is None
+    assert recovery.outcome is not None
+    assert recovery.outcome.get("current_interrupt") is not None
+    assert recovery.outcome.get("projection_aborted") is not True
     assert state["application_action"] == "finish"
     assert state["pending_task_handled"] is False
     assert state["current_interrupt"] is None
@@ -4105,6 +4917,8 @@ async def test_root_runtime_projection_failure_remains_authoritative_when_failur
     assert projection_state["interrupt"] == projector.calls[0].interrupt
     assert state["application_action"] == "finish"
     assert state["pending_task_handled"] is False
+    assert state["pending_task_continuation_ref"] is None
+    assert state["pending_task_requested"] is False
     assert state["current_interrupt"] is None
     assert "__interrupt__" not in state
     assert state["assistant_content"] == "当前待确认流程投影失败，本次流程已终止；你可以重新发起。"
@@ -4128,6 +4942,25 @@ async def test_root_runtime_projection_failure_remains_authoritative_when_failur
         session_id=4,
         session_key="abc",
     ) is None
+    history = await runtime.state_history(
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="abc",
+    )
+    assert any("pending_projection_failure" in item["next_nodes"] for item in history)
+    assert any("finish_turn" in item["next_nodes"] for item in history)
+    assert any(
+        item["values"].get("pending_task_projection_error")
+        == "projection_continuation_mismatch"
+        for item in history
+    )
+    continuation = projector.calls[0].continuation
+    recovery = await pending_graph_service.load_checkpointed_outcome(continuation)
+    assert recovery.failure_reason is None
+    assert recovery.outcome is not None
+    assert recovery.outcome.get("current_interrupt") is not None
+    assert recovery.outcome.get("projection_aborted") is not True
 
     context.event_sink = None
     context.turn_input = AgentTurnInput.text("重新记录一个客户跟进")
@@ -4147,15 +4980,99 @@ async def test_root_runtime_projection_failure_remains_authoritative_when_failur
 
 
 @pytest.mark.asyncio
-async def test_checkpoint_recovery_failure_survives_sink_failure_and_releases_child_continuation():
+async def test_root_runtime_terminates_direct_pending_checkpoint_recovery_failure():
+    class TerminalRecoveryPendingGraphService:
+        async def run_with_trace(self, state, *, side_effects=None):
+            return {
+                "handled": False,
+                "recovery_failed": True,
+                "terminal": True,
+                "runtime_status": "checkpoint_recovery_failed",
+                "runtime_retryable": False,
+                "failure_reason": "checkpoint_locator_not_found",
+                "current_interrupt": None,
+                "assistant_content": "当前待确认流程恢复失败，本次流程已终止；你可以重新发起。",
+                "events": [{
+                    "event": "pending_task_checkpoint_recovery_failed",
+                    "reason": "checkpoint_locator_not_found",
+                    "retryable": False,
+                }],
+            }
+
+    checkpointer = InMemorySaver()
+    new_flow_graph_service = FakeNewFlowGraphService()
+    runtime = AgentRootRuntime(
+        checkpointer=checkpointer,
+        pending_graph_service=TerminalRecoveryPendingGraphService(),
+        new_flow_graph_service=new_flow_graph_service,
+    )
+    task = waiting_task_stub()
+    context = AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4, context_json={}),
+        task=task,
+        turn_input=AgentTurnInput.text("补充金额 10 万"),
+        content="补充金额 10 万",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=AgentRootRuntimeSideEffects(),
+    )
+
+    state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "abc",
+            "channel": "web",
+            "content": context.content,
+            "turn_kind": "text",
+            "pending_task_requested": True,
+            "task_projection": {"id": 101, "task_key": "task-101"},
+        },
+        context=context,
+    )
+
+    assert state["application_action"] == "finish"
+    assert state["runtime_status"] == "checkpoint_recovery_failed"
+    assert state["runtime_retryable"] is False
+    assert state["current_interrupt"] is None
+    assert state["pending_task_continuation_ref"] is None
+    assert state["pending_task_requested"] is False
+    assert state["assistant_content"] == "当前待确认流程恢复失败，本次流程已终止；你可以重新发起。"
+    assert len([
+        event
+        for event in context.side_effects.pending_task_events
+        if event.get("event") == "pending_task_checkpoint_recovery_failed"
+    ]) == 1
+
+    context.task = None
+    context.turn_input = AgentTurnInput.text("重新记录一个客户跟进")
+    context.content = "重新记录一个客户跟进"
+    next_state = await runtime.run_turn(
+        turn_input=context.turn_input,
+        content=context.content,
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="abc",
+        current_customer={},
+        context=context,
+    )
+    assert next_state["runtime_status"] != "checkpoint_recovery_failed"
+    assert len(new_flow_graph_service.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_recovery_failure_survives_sink_failure_without_mutating_child_checkpoint():
     checkpointer = InMemorySaver()
     delegate = PendingTaskGraphService(
         preflight_graph_service=FakeNativeInterruptPreflightGraphService(),
         interaction_graph_service=FakeNativeInterruptInteractionGraphService(),
         checkpointer=checkpointer,
     )
-
-    abort_verification_requests = []
 
     class RecoveryFailingPendingGraphService:
         async def run(self, state, *, side_effects=None):
@@ -4166,10 +5083,6 @@ async def test_checkpoint_recovery_failure_survives_sink_failure_and_releases_ch
 
         async def load_checkpointed_outcome(self, *args, **kwargs):
             return PendingTaskOutcomeRecovery(failure_reason="checkpoint_corrupt")
-
-        async def verify_projection_aborted(self, request):
-            abort_verification_requests.append(request)
-            return await delegate.verify_projection_aborted(request)
 
     async def failing_event_sink(event):
         if event.get("event") == "pending_task_checkpoint_recovery_failed":
@@ -4214,21 +5127,21 @@ async def test_checkpoint_recovery_failure_survives_sink_failure_and_releases_ch
     assert state["runtime_status"] == "checkpoint_recovery_failed"
     assert state["runtime_retryable"] is False
     assert state["current_interrupt"] is None
-    assert state["pending_interrupt_projection"]["failure_reason"] == "checkpoint_corrupt"
-    assert state["pending_interrupt_projection"]["abort_status"] == "ABORTED"
-    continuation = state["pending_interrupt_projection"].get("continuation")
-    if continuation is None:
-        continuation = context.side_effects.pending_task_graph_side_effects.checkpoint_ref
-    child_load_result = await delegate._checkpoint_store.load_result(continuation)
-    assert child_load_result.failure_reason is None
-    assert child_load_result.snapshot is not None
-    assert child_load_result.snapshot.interrupts == ()
-    assert child_load_result.snapshot.values["projection_aborted"] is True
-    assert (
-        child_load_result.snapshot.values["projection_abort_interrupt"]
-        == abort_verification_requests[0].expected_interrupt
-    )
-    assert child_load_result.snapshot.values["effect_intents"] == []
+    assert state["pending_interrupt_projection"] == {}
+    assert state["pending_task_continuation_ref"] is None
+    assert state["pending_task_requested"] is False
+    assert len([
+        event
+        for event in context.side_effects.pending_task_events
+        if event.get("event") == "pending_task_checkpoint_recovery_failed"
+    ]) == 1
+    continuation = context.side_effects.pending_task_graph_side_effects.checkpoint_ref
+    recovery = await delegate.load_checkpointed_outcome(continuation)
+    assert recovery.failure_reason is None
+    assert recovery.outcome is not None
+    assert recovery.outcome.get("current_interrupt") is not None
+    assert recovery.outcome.get("projection_aborted") is not True
+    assert recovery.outcome["pending_interrupt_requested"] is True
 
     context.event_sink = None
     context.task = None
@@ -6164,3 +7077,178 @@ async def test_root_retries_hidden_application_step_before_accepting_new_turn(mo
     assert projector.calls[2].step["content"] == "补充金额 10 万"
     assert second["current_interrupt"]["reason"] == "write_confirmation"
     assert new_flow.calls == []
+
+
+@pytest.mark.asyncio
+async def test_terminal_pending_application_step_failure_uses_root_projection_failure_branch(monkeypatch):
+    checkpointer = InMemorySaver()
+    task = waiting_task_stub()
+    task.team_id = 2
+    task.user_id = 3
+    task.session_id = 4
+    task.input_json = {}
+    task.state_json = {}
+    monkeypatch.setattr(
+        root_runtime_module.agent_task_crud,
+        "get_by_id",
+        lambda db, task_id, team_id=None, user_id=None: task,
+    )
+    pending_graph = PendingTaskGraphService(
+        checkpointer=checkpointer,
+        application_step_protocol=True,
+    )
+
+    class TerminalFailingProjector:
+        def __init__(self):
+            self.calls = []
+
+        async def project(self, request):
+            self.calls.append(request)
+            return PendingApplicationStepProjectionResult(
+                status="FAILED",
+                step_id=request.step["step_id"],
+                retryable=False,
+                failure_reason="application_step_validation_failed",
+            )
+
+    projector = TerminalFailingProjector()
+    runtime = AgentRootRuntime(
+        checkpointer=checkpointer,
+        pending_graph_service=pending_graph,
+        pending_application_step_projector=projector,
+        pending_task_side_effect_handler=FakePendingTaskSideEffectHandler(),
+    )
+    context = AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4, context_json={}),
+        task=task,
+        turn_input=AgentTurnInput.text("补充金额 10 万"),
+        content="补充金额 10 万",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=AgentRootRuntimeSideEffects(),
+    )
+
+    state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "terminal-application-step-failure",
+            "channel": "web",
+            "content": context.content,
+            "turn_kind": "text",
+            "pending_task_requested": True,
+            "task_projection": {"id": 101, "task_key": "task-101"},
+        },
+        context=context,
+    )
+
+    step = projector.calls[0].step
+    assert state["runtime_status"] == "pending_projection_failed"
+    assert state["runtime_retryable"] is False
+    assert state["current_interrupt"] is None
+    assert state["pending_task_continuation_ref"] is None
+    assert state["pending_task_result"]["failure_reason"] == "application_step_validation_failed"
+    assert len([
+        event
+        for event in context.side_effects.pending_task_events
+        if event.get("event") == "pending_application_step_failed"
+    ]) == 1
+    recovery = await pending_graph.load_checkpointed_outcome(
+        step["checkpoint_ref"],
+        expected_interrupt=step,
+    )
+    assert recovery.failure_reason is None
+    assert recovery.outcome is not None
+    assert recovery.outcome["current_interrupt"] == step
+    history = await runtime.state_history(
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="terminal-application-step-failure",
+        limit=30,
+    )
+    assert any("pending_projection_failure" in item["next_nodes"] for item in history)
+    assert any("finish_turn" in item["next_nodes"] for item in history)
+
+
+@pytest.mark.asyncio
+async def test_invalid_pending_application_step_continuation_fails_in_root_projection_branch(monkeypatch):
+    checkpointer = InMemorySaver()
+    task = waiting_task_stub()
+    task.team_id = 2
+    task.user_id = 3
+    task.session_id = 4
+    task.input_json = {}
+    task.state_json = {}
+    original_builder = pending_graph_module.build_pending_application_step_request
+
+    def build_request_with_invalid_continuation(**kwargs):
+        request = original_builder(**kwargs)
+        request["checkpoint_ref"] = {
+            **request["checkpoint_ref"],
+            "team_id": 999,
+        }
+        request["step_id"] = pending_application_step_id(request)
+        return request
+
+    monkeypatch.setattr(
+        pending_graph_module,
+        "build_pending_application_step_request",
+        build_request_with_invalid_continuation,
+    )
+    pending_graph = PendingTaskGraphService(
+        checkpointer=checkpointer,
+        application_step_protocol=True,
+    )
+    runtime = AgentRootRuntime(
+        checkpointer=checkpointer,
+        pending_graph_service=pending_graph,
+        pending_task_side_effect_handler=FakePendingTaskSideEffectHandler(),
+    )
+    context = AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4, context_json={}),
+        task=task,
+        turn_input=AgentTurnInput.text("补充金额 10 万"),
+        content="补充金额 10 万",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=AgentRootRuntimeSideEffects(),
+    )
+
+    state = await runtime.checkpoint_turn_start(
+        {
+            "team_id": 2,
+            "user_id": 3,
+            "session_id": 4,
+            "session_key": "invalid-application-step-continuation",
+            "channel": "web",
+            "content": context.content,
+            "turn_kind": "text",
+            "pending_task_requested": True,
+            "task_projection": {"id": 101, "task_key": "task-101"},
+        },
+        context=context,
+    )
+
+    continuation = context.side_effects.pending_task_graph_side_effects.checkpoint_ref
+    assert state["runtime_status"] == "pending_projection_failed"
+    assert state["runtime_retryable"] is False
+    assert state["current_interrupt"] is None
+    assert state["pending_task_continuation_ref"] is None
+    assert state["pending_task_result"]["failure_reason"] == "invalid_continuation"
+    assert len([
+        event
+        for event in context.side_effects.pending_task_events
+        if event.get("event") == "pending_application_step_failed"
+    ]) == 1
+    recovery = await pending_graph.load_checkpointed_outcome(continuation)
+    assert recovery.failure_reason is None
+    assert recovery.outcome is not None
+    assert recovery.outcome["current_interrupt"]["reason"] == "pending_task_application_step"

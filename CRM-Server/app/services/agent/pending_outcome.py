@@ -18,20 +18,6 @@ from app.services.agent.types import JSONDict, coerce_json_dict, coerce_json_val
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from app.services.agent.interrupts import AgentInterruptPayload
-    from app.services.agent.pending_continuation import PendingTaskContinuationRef
-
-
-@dataclass(frozen=True)
-class PendingTaskAbortVerificationRequest:
-    """Authenticated proof request for one root-owned terminal abort."""
-
-    continuation: PendingTaskContinuationRef
-    expected_interrupt: AgentInterruptPayload
-    team_id: int
-    user_id: int
-    session_id: int
-
 
 @dataclass(frozen=True)
 class PendingTaskOutcomeRecovery:
@@ -43,6 +29,85 @@ class PendingTaskOutcomeRecovery:
     @property
     def recovered(self) -> bool:
         return self.outcome is not None
+
+
+PENDING_TASK_RECOVERY_FAILED_MESSAGE = (
+    "当前待确认流程恢复失败，本次流程已终止；你可以重新发起。"  # noqa: RUF001
+)
+PENDING_TASK_RECOVERY_RETRYABLE_MESSAGE = "当前待确认流程暂时无法恢复，请稍后重试。"  # noqa: RUF001
+PENDING_TASK_CHECKPOINT_RECOVERY_FAILED_STATUS = "checkpoint_recovery_failed"
+TRANSIENT_PENDING_TASK_RECOVERY_FAILURES = frozenset({
+    "checkpoint_recovery_exception",
+    "checkpoint_store_unavailable",
+})
+
+
+def is_retryable_pending_task_recovery_failure(reason: str | None) -> bool:
+    """Return whether the exact continuation may recover after infrastructure heals."""
+
+    return reason in TRANSIENT_PENDING_TASK_RECOVERY_FAILURES
+
+
+def is_pending_task_recovery_failure(outcome: object) -> bool:
+    """Recognize the canonical checkpoint recovery failure contract."""
+
+    return (
+        isinstance(outcome, dict)
+        and outcome.get("recovery_failed") is True
+        and outcome.get("runtime_status")
+        == PENDING_TASK_CHECKPOINT_RECOVERY_FAILED_STATUS
+    )
+
+
+def is_terminal_pending_task_recovery(outcome: object) -> bool:
+    """Recognize the canonical terminal recovery contract at runtime seams."""
+
+    return (
+        is_pending_task_recovery_failure(outcome)
+        and isinstance(outcome, dict)
+        and outcome.get("terminal") is True
+        and outcome.get("runtime_retryable") is False
+        and outcome.get("runtime_status") == PENDING_TASK_CHECKPOINT_RECOVERY_FAILED_STATUS
+    )
+
+
+def pending_task_recovery_failure(
+    reason: str,
+    *,
+    retryable: bool | None = None,
+) -> PendingTaskGraphResult:
+    """Return a user-safe outcome when durable child state is unavailable.
+
+    The checkpoint adapter keeps the storage-specific reason for observability,
+    while the user-facing content remains stable and does not leak runtime
+    exception details. Deterministic failures terminate the continuation;
+    transient infrastructure failures remain retryable at the Root-owned wait.
+    """
+
+    can_retry = (
+        is_retryable_pending_task_recovery_failure(reason)
+        if retryable is None
+        else retryable
+    )
+    return {
+        "handled": False,
+        "recovery_failed": True,
+        "terminal": not can_retry,
+        "runtime_status": PENDING_TASK_CHECKPOINT_RECOVERY_FAILED_STATUS,
+        "runtime_retryable": can_retry,
+        "failure_reason": reason,
+        "current_interrupt": None,
+        "assistant_content": (
+            PENDING_TASK_RECOVERY_RETRYABLE_MESSAGE
+            if can_retry
+            else PENDING_TASK_RECOVERY_FAILED_MESSAGE
+        ),
+        "events": [{
+            "event": "pending_task_checkpoint_recovery_failed",
+            "reason": reason,
+            "retryable": can_retry,
+        }],
+    }
 
 
 class PendingTaskOutcomeAssembler:

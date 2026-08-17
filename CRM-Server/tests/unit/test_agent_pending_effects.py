@@ -639,7 +639,7 @@ def _workflow_cancellation_result(workflow):
     }
 
 
-def test_pending_task_side_effect_handler_abort_outcome_has_no_business_mutation(monkeypatch):
+def test_pending_task_side_effect_handler_empty_outcome_has_no_business_mutation(monkeypatch):
     handler = PendingTaskSideEffectHandler()
     monkeypatch.setattr(
         "app.services.agent.pending_effects.agent_task_crud.update",
@@ -648,7 +648,6 @@ def test_pending_task_side_effect_handler_abort_outcome_has_no_business_mutation
     result = handler.apply(
         {
             "handled": False,
-            "projection_aborted": True,
             "effect_intents": [],
             "events": [],
         },

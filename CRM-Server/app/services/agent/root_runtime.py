@@ -5,10 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-
 from hashlib import sha256
 
 from langchain_core.runnables import RunnableConfig
+from langgraph.config import get_config
 from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
 from langgraph.types import Command, interrupt
@@ -20,14 +20,12 @@ from app.services.agent import (
     action_workflow,
     agent_copy,
     execution_trace,
-    interactions,
     task_display,
     task_execution,
     workflow_action_ledger,
 )
 from app.services.agent.active_task_ownership import (
     ActiveTaskOwnershipCandidate,
-    ActiveTaskOwnershipProjection,
     active_task_ownership_projector,
 )
 from app.services.agent.business_interaction_planner import (
@@ -65,7 +63,6 @@ from app.services.agent.interrupts import (
     AgentInterruptPayload,
     AgentResumePayload,
     interrupt_from_waiting_event,
-    interrupt_from_waiting_task,
     interrupt_payload_from_json,
     validate_resume_payload,
 )
@@ -77,13 +74,6 @@ from app.services.agent.new_flow_effects import (
 )
 from app.services.agent.new_flow_effects import (
     new_flow_side_effect_handler as default_new_flow_side_effect_handler,
-)
-from app.services.agent.pending_effects import (
-    PendingTaskSideEffectContext,
-    PendingTaskSideEffectHandler,
-)
-from app.services.agent.pending_effects import (
-    pending_task_side_effect_handler as default_pending_task_side_effect_handler,
 )
 from app.services.agent.pending_application_step_contracts import (
     PendingApplicationStepRequest,
@@ -99,7 +89,18 @@ from app.services.agent.pending_application_steps import (
 )
 from app.services.agent.pending_continuation import (
     PendingTaskContinuationRef,
+    build_agent_root_thread_id,
     pending_task_continuation_from_json,
+)
+from app.services.agent.pending_effects import (
+    PendingTaskSideEffectHandler,
+)
+from app.services.agent.pending_effects import (
+    pending_task_side_effect_handler as default_pending_task_side_effect_handler,
+)
+from app.services.agent.pending_graph import (
+    PendingTaskGraphService,
+    pending_task_graph_service,
 )
 from app.services.agent.pending_interrupt_coordinator import (
     PendingInterruptCoordinationRequest,
@@ -109,20 +110,24 @@ from app.services.agent.pending_interrupt_coordinator import (
     retryable_projection_interrupt,
 )
 from app.services.agent.pending_interrupt_projection import (
-    PendingInterruptProjectionRequest,
     PendingInterruptProjector,
     PendingTaskOutcomeProjectionRequest,
     PendingTaskOutcomeProjector,
     pending_interrupt_projection_key,
+)
+from app.services.agent.pending_interrupt_projection import (
     pending_task_outcome_projector as default_pending_task_outcome_projector,
 )
-from app.services.agent.pending_graph import (
-    PendingTaskGraphService,
-    pending_task_graph_service,
-)
 from app.services.agent.pending_outcome import (
-    PendingTaskAbortVerificationRequest,
     PendingTaskOutcomeRecovery,
+    is_pending_task_recovery_failure,
+    is_retryable_pending_task_recovery_failure,
+    pending_task_recovery_failure,
+)
+from app.services.agent.pending_resume import (
+    PendingTaskDeferredResume,
+    build_pending_task_deferred_resume,
+    pending_task_deferred_resume_from_json,
 )
 from app.services.agent.post_write_effects import merge_post_write_effects, normalize_post_write_effects
 from app.services.agent.state import (
@@ -166,8 +171,12 @@ logger = logging.getLogger(__name__)
 def build_agent_thread_id(*, team_id: int, user_id: int, session_id: int, session_key: str | None = None) -> str:
     """Return the stable LangGraph thread id for one CRM Agent session."""
 
-    key = session_key or str(session_id)
-    return f"crm_agent:{team_id}:{user_id}:{session_id}:{key}"
+    return build_agent_root_thread_id(
+        team_id=team_id,
+        user_id=user_id,
+        session_id=session_id,
+        session_key=session_key,
+    )
 
 
 def build_agent_graph_config(
@@ -275,6 +284,15 @@ class AgentRootRuntime:
         graph.add_node("start_turn", self._start_turn)
         graph.add_node("interrupt_route_marker", self._interrupt_route_marker)
         graph.add_node("wait_for_interrupt_resume", self._wait_for_interrupt_resume)
+        graph.add_node("validate_interrupt_resume", self._validate_interrupt_resume)
+        graph.add_node(
+            "pending_resume_recovery_failure",
+            self._handle_pending_resume_recovery_failure,
+        )
+        graph.add_node(
+            "pending_projection_failure",
+            self._handle_pending_projection_failure,
+        )
         graph.add_node("resume_route_marker", self._resume_route_marker)
         graph.add_node("pending_task_subgraph", self._run_pending_task_subgraph)
         graph.add_node("pending_task_projection_barrier", self._await_pending_task_projection)
@@ -303,7 +321,17 @@ class AgentRootRuntime:
             },
         )
         graph.add_edge("interrupt_route_marker", "wait_for_interrupt_resume")
-        graph.add_edge("wait_for_interrupt_resume", "resume_route_marker")
+        graph.add_edge("wait_for_interrupt_resume", "validate_interrupt_resume")
+        graph.add_conditional_edges(
+            "validate_interrupt_resume",
+            self._route_after_interrupt_resume_validation,
+            {
+                "resume": "resume_route_marker",
+                "recovery_failure": "pending_resume_recovery_failure",
+            },
+        )
+        graph.add_edge("pending_resume_recovery_failure", "finish_turn")
+        graph.add_edge("pending_projection_failure", "finish_turn")
         graph.add_conditional_edges(
             "resume_route_marker",
             self._route_after_interrupt_resume,
@@ -315,8 +343,23 @@ class AgentRootRuntime:
                 "finish": "decide_application_action",
             },
         )
-        graph.add_edge("pending_task_subgraph", "pending_task_projection_barrier")
-        graph.add_edge("pending_task_projection_barrier", "decide_application_action")
+        graph.add_conditional_edges(
+            "pending_task_subgraph",
+            self._route_after_pending_task_subgraph,
+            {
+                "projection": "pending_task_projection_barrier",
+                "recovery_failure": "pending_resume_recovery_failure",
+                "projection_failure": "pending_projection_failure",
+            },
+        )
+        graph.add_conditional_edges(
+            "pending_task_projection_barrier",
+            self._route_after_pending_task_projection_barrier,
+            {
+                "projected": "decide_application_action",
+                "projection_failure": "pending_projection_failure",
+            },
+        )
         graph.add_edge("new_flow_route_marker", "decide_application_action")
         graph.add_conditional_edges(
             "decide_application_action",
@@ -326,7 +369,6 @@ class AgentRootRuntime:
                 "confirmed_task_execution": "confirmed_task_execution",
                 "no_pending_confirmation": "no_pending_confirmation",
                 "generated_interrupt_wait": "generated_interrupt_wait",
-                "internal_abort": "finish_turn",
                 "finish": "reconcile_pending_business_interactions",
             },
         )
@@ -366,7 +408,7 @@ class AgentRootRuntime:
                 "finish": "finish_turn",
             },
         )
-        graph.add_edge("generated_interrupt_wait", "resume_route_marker")
+        graph.add_edge("generated_interrupt_wait", "validate_interrupt_resume")
         graph.add_edge("finish_turn", END)
         return graph.compile(checkpointer=checkpointer)
 
@@ -535,6 +577,43 @@ class AgentRootRuntime:
                 session_key=session_key,
                 context=context,
             )
+        root_thread_id = build_agent_root_thread_id(
+            team_id=team_id,
+            user_id=user_id,
+            session_id=session_id,
+            session_key=session_key,
+        )
+        raw_deferred_resume = checkpoint_values.get("pending_task_deferred_resume")
+        deferred_resume_present = raw_deferred_resume is not None
+        runtime_current_interrupt = checkpoint_interrupt
+        deferred_resume = (
+            pending_task_deferred_resume_from_json(
+                raw_deferred_resume,
+                expected_team_id=team_id,
+                expected_user_id=user_id,
+                expected_session_id=session_id,
+                expected_thread_id=root_thread_id,
+                expected_interrupt=runtime_current_interrupt,
+            )
+            if deferred_resume_present and runtime_current_interrupt is not None
+            else None
+        )
+        if deferred_resume_present and deferred_resume is None:
+            deferred_interrupt = interrupt_payload_from_json(
+                coerce_json_dict(raw_deferred_resume).get("interrupt")
+            )
+            return await self._adopt_pending_recovery_failure(
+                config=build_agent_graph_config(
+                    team_id=team_id,
+                    user_id=user_id,
+                    session_id=session_id,
+                    session_key=session_key,
+                ),
+                context=context,
+                continuation=None,
+                interrupt_payload=runtime_current_interrupt or deferred_interrupt or {},
+                failure_reason="invalid_continuation",
+            )
         if checkpoint_interrupt is None:
             structured_action_result = await self._handle_structured_business_action_turn(
                 turn_input=turn_input,
@@ -547,7 +626,6 @@ class AgentRootRuntime:
             )
             if structured_action_result is not None:
                 return structured_action_result
-        runtime_current_interrupt = checkpoint_interrupt
         if checkpoint_interrupt:
             _align_context_task_to_interrupt(context, checkpoint_interrupt)
         initial_state = _turn_start_state(
@@ -561,6 +639,7 @@ class AgentRootRuntime:
             suspended_candidates=_suspended_candidates_from_state(checkpoint_values),
             current_customer=current_customer,
             context=context,
+            pending_task_deferred_resume=deferred_resume,
         )
         if not runtime_current_interrupt:
             return await self.checkpoint_turn_start(initial_state, context=context)
@@ -572,7 +651,41 @@ class AgentRootRuntime:
             session_key=session_key,
         )
         if not has_pending_interrupt:
-            await self.checkpoint_turn_start(initial_state, context=context)
+            waiting_state = await self.checkpoint_turn_start(initial_state, context=context)
+            rebuilt_interrupt = interrupt_payload_from_json(waiting_state.get("current_interrupt"))
+            if rebuilt_interrupt is not None:
+                runtime_current_interrupt = rebuilt_interrupt
+        if deferred_resume is not None:
+            authenticated_deferred_resume = pending_task_deferred_resume_from_json(
+                deferred_resume,
+                expected_team_id=team_id,
+                expected_user_id=user_id,
+                expected_session_id=session_id,
+                expected_thread_id=root_thread_id,
+                expected_interrupt=runtime_current_interrupt,
+            )
+            if authenticated_deferred_resume is None:
+                return await self._adopt_pending_recovery_failure(
+                    config=build_agent_graph_config(
+                        team_id=team_id,
+                        user_id=user_id,
+                        session_id=session_id,
+                        session_key=session_key,
+                    ),
+                    context=context,
+                    continuation=None,
+                    interrupt_payload=runtime_current_interrupt,
+                    failure_reason="invalid_continuation",
+                )
+            return await self.resume_interrupt(
+                resume_payload=authenticated_deferred_resume["resume_payload"],
+                team_id=team_id,
+                user_id=user_id,
+                session_id=session_id,
+                session_key=session_key,
+                context=context,
+                current_interrupt=runtime_current_interrupt,
+            )
         turn_intent_result = await self.turn_intent_router.route_resume(
             context.db,
             team_id=team_id,
@@ -1036,6 +1149,7 @@ class AgentRootRuntime:
             team_id=context.team_id if context is not None else None,
             user_id=context.user_id if context is not None else None,
             session_id=context.session_id if context is not None else None,
+            thread_id=_config_thread_id(config),
         )
         if target.owner == "root":
             projected = await self._publish_checkpointed_follow_up_projection(
@@ -1053,13 +1167,20 @@ class AgentRootRuntime:
             if snapshot_interrupts:
                 state["__interrupt__"] = snapshot_interrupts
             return state
+        if target.owner == "invalid_pending_task" or target.continuation is None:
+            return await self._adopt_pending_recovery_failure(
+                config=config,
+                context=context,
+                continuation=None,
+                interrupt_payload=interrupt_payload,
+                failure_reason=target.failure_reason or "invalid_continuation",
+            )
         return await self._project_bubbled_pending_interrupt(
             interrupt_payload,
             snapshot=snapshot,
             context=context,
             config=config,
             continuation=target.continuation,
-            continuation_failure=target.failure_reason,
         )
 
     async def _project_pending_application_step(
@@ -1089,19 +1210,17 @@ class AgentRootRuntime:
             expected_team_id=context.team_id,
             expected_user_id=context.user_id,
             expected_session_id=context.session_id,
+            expected_thread_id=_config_thread_id(config),
         )
         if continuation is None:
-            return await self._resume_pending_application_step(
-                step,
-                acknowledgement={
-                    "schema_version": step.get("schema_version"),
-                    "status": "FAILED",
-                    "step_id": step.get("step_id"),
-                    "failure_reason": "invalid_continuation",
-                    "retryable": False,
-                },
-                config=config,
+            return await self._record_pending_application_step_failure(
+                state=state,
+                step=step,
+                snapshot=snapshot,
                 context=context,
+                config=config,
+                failure_reason="invalid_continuation",
+                retryable=False,
             )
 
         task = None
@@ -1112,17 +1231,14 @@ class AgentRootRuntime:
             and isinstance(step_task_id, int)
             and continuation_task_id != step_task_id
         ):
-            return await self._resume_pending_application_step(
-                step,
-                acknowledgement={
-                    "schema_version": step.get("schema_version"),
-                    "status": "FAILED",
-                    "step_id": step.get("step_id"),
-                    "failure_reason": "task_continuation_mismatch",
-                    "retryable": False,
-                },
-                config=config,
+            return await self._record_pending_application_step_failure(
+                state=state,
+                step=step,
+                snapshot=snapshot,
                 context=context,
+                config=config,
+                failure_reason="task_continuation_mismatch",
+                retryable=False,
             )
         task_id = step_task_id or continuation_task_id
         if isinstance(task_id, int):
@@ -1141,6 +1257,7 @@ class AgentRootRuntime:
                 user_id=context.user_id,
                 session_id=context.session_id,
                 step=step,
+                root_thread_id=_config_thread_id(config),
                 task=task,
                 authorization=context.authorization or "",
             )
@@ -1167,17 +1284,14 @@ class AgentRootRuntime:
                 failure_reason=projection.failure_reason or "application_step_in_progress",
                 retryable=True,
             )
-        return await self._resume_pending_application_step(
-            step,
-            acknowledgement={
-                "schema_version": step.get("schema_version"),
-                "status": "FAILED",
-                "step_id": projection.step_id,
-                "failure_reason": projection.failure_reason or "application_step_failed",
-                "retryable": False,
-            },
-            config=config,
+        return await self._record_pending_application_step_failure(
+            state=state,
+            step=step,
+            snapshot=snapshot,
             context=context,
+            config=config,
+            failure_reason=projection.failure_reason or "application_step_failed",
+            retryable=False,
         )
 
     async def _record_pending_application_step_failure(
@@ -1204,7 +1318,21 @@ class AgentRootRuntime:
             if retryable
             else "pending_application_step_failed"
         )
-        continuation = pending_task_continuation_from_json(step.get("checkpoint_ref"))
+        continuation = pending_task_continuation_from_json(
+            step.get("checkpoint_ref"),
+            expected_team_id=(
+                context.team_id if context is not None else _optional_int(state.get("team_id"))
+            ),
+            expected_user_id=(
+                context.user_id if context is not None else _optional_int(state.get("user_id"))
+            ),
+            expected_session_id=(
+                context.session_id
+                if context is not None
+                else _optional_int(state.get("session_id"))
+            ),
+            expected_thread_id=_config_thread_id(config),
+        )
         projection = {
             "status": "IN_PROGRESS" if retryable else "FAILED",
             "projection_key": (
@@ -1234,14 +1362,24 @@ class AgentRootRuntime:
             ),
             "events": [event],
         }
+        if not retryable:
+            return await self._adopt_pending_projection_failure(
+                {
+                    **state,
+                    **update,
+                },
+                config=config,
+                context=context,
+                continuation=continuation,
+                interrupt_payload=step,
+                failure_reason=failure_reason,
+            )
         # A retryable application-step outcome must not rewrite the interrupted
         # root checkpoint. LangGraph owns the exact nested task continuation;
         # updating parent state here would fork/consume that task and force the
         # child node to replay with a new continuation identity. The durable
         # application-step ledger is the retry authority while the unchanged
         # checkpoint remains the execution authority.
-        if not retryable:
-            await self._graph.aupdate_state(config, update)
         state.update(update)
         state.pop("__interrupt__", None)
         if context is not None:
@@ -1272,6 +1410,7 @@ class AgentRootRuntime:
             expected_team_id=context.team_id,
             expected_user_id=context.user_id,
             expected_session_id=context.session_id,
+            expected_thread_id=_config_thread_id(config),
         )
         if continuation is None:
             raise ValueError("pending application-step resume continuation mismatch")
@@ -1319,6 +1458,7 @@ class AgentRootRuntime:
             expected_team_id=context.team_id if context is not None else state.get("team_id"),
             expected_user_id=context.user_id if context is not None else state.get("user_id"),
             expected_session_id=context.session_id if context is not None else state.get("session_id"),
+            expected_thread_id=_config_thread_id(config),
         )
         outcome = coerce_json_dict(state.get("pending_task_outcome_intent"))
         failure_reason: str | None = None
@@ -1368,6 +1508,7 @@ class AgentRootRuntime:
                 continuation=continuation,
                 interrupt=barrier,
                 outcome=outcome,
+                root_thread_id=_config_thread_id(config),
                 task=context.task,
                 switch_notice=context.switch_notice,
                 event_sink=context.event_sink,
@@ -1615,12 +1756,13 @@ class AgentRootRuntime:
         )
         if checkpoint_ref is None:
             return PendingTaskOutcomeRecovery(failure_reason="invalid_continuation")
-        trace_events = list(context.side_effects.pending_task_events) if context is not None else []
         try:
+            # Recovery reads only the exact child checkpoint. Outer/root
+            # delivery events are not child execution trace and must never be
+            # merged back into an authoritative child outcome.
             return await self.pending_graph_service.load_checkpointed_outcome(
                 checkpoint_ref,
                 expected_interrupt=interrupt_payload,
-                trace_events=trace_events,
             )
         except (AttributeError, RuntimeError, ValueError):
             logger.exception(
@@ -1636,8 +1778,7 @@ class AgentRootRuntime:
         snapshot: object,
         context: AgentRuntimeContext | None,
         config: RunnableConfig,
-        continuation: PendingTaskContinuationRef | None = None,
-        continuation_failure: str | None = None,
+        continuation: PendingTaskContinuationRef,
     ) -> AgentRuntimeInvokeResult:
         """Delegate child recovery/projection and persist its root visibility state."""
 
@@ -1647,7 +1788,7 @@ class AgentRootRuntime:
                 interrupt=interrupt_payload,
                 context=context,
                 continuation=continuation,
-                continuation_failure=continuation_failure,
+                root_thread_id=_config_thread_id(config),
             )
         )
         task_projection = outcome.task_projection or _interrupt_task_projection(interrupt_payload)
@@ -1689,8 +1830,21 @@ class AgentRootRuntime:
                     outcome.event,
                 ],
             })
+            return await self._adopt_pending_interrupt_as_root_wait(
+                state,
+                config=config,
+                context=context,
+                continuation=continuation,
+                pending_result=outcome.pending_result,
+                interrupt_payload=outcome.current_interrupt or interrupt_payload,
+                task_projection=task_projection,
+            )
         else:
-            if context is not None:
+            if (
+                context is not None
+                and not outcome.terminal
+                and outcome.runtime_status != "checkpoint_recovery_failed"
+            ):
                 context.side_effects.pending_task_events.append(outcome.event)
                 context.side_effects.pending_task_assistant_content = outcome.assistant_content
                 await _publish_event_best_effort(
@@ -1721,7 +1875,10 @@ class AgentRootRuntime:
             })
             state.pop("__interrupt__", None)
 
-        if not outcome.terminal:
+        if (
+            not outcome.terminal
+            and outcome.runtime_status != "checkpoint_recovery_failed"
+        ):
             await self._graph.aupdate_state(
                 config,
                 {
@@ -1737,125 +1894,169 @@ class AgentRootRuntime:
                     "events": [outcome.event],
                 },
             )
-        if outcome.terminal:
-            return await self._abort_terminal_pending_interrupt(
-                state,
-                interrupt_payload,
-                continuation=continuation,
-                context=context,
+        if outcome.runtime_status == "checkpoint_recovery_failed":
+            return await self._adopt_pending_recovery_failure(
                 config=config,
+                context=context,
+                continuation=continuation,
+                interrupt_payload=interrupt_payload,
+                failure_reason=str(
+                    outcome.projection_state.get("failure_reason")
+                    or "checkpoint_locator_not_found"
+                ),
+            )
+        if outcome.terminal:
+            return await self._adopt_pending_projection_failure(
+                state,
+                config=config,
+                context=context,
+                continuation=continuation,
+                interrupt_payload=interrupt_payload,
+                failure_reason=str(
+                    outcome.projection_state.get("failure_reason")
+                    or "projection_failed"
+                ),
             )
         return state
 
-    async def _abort_terminal_pending_interrupt(
+    async def _adopt_pending_interrupt_as_root_wait(
         self,
         state: AgentRuntimeInvokeResult,
-        interrupt_payload: AgentInterruptPayload,
         *,
-        continuation: PendingTaskContinuationRef | None,
+        config: RunnableConfig,
         context: AgentRuntimeContext | None,
-        config: RunnableConfig,
-    ) -> AgentRuntimeInvokeResult:
-        """Resume the root-owned child interrupt into its internal abort route."""
-
-        resolved = continuation or _pending_checkpoint_ref_from_interrupt(
-            interrupt_payload,
-            context=context,
-        )
-        if resolved is None:
-            return await self._persist_terminal_abort_result(
-                state,
-                config=config,
-                abort_status="invalid_continuation",
-            )
-        if context is None:
-            return await self._persist_terminal_abort_result(
-                state,
-                config=config,
-                abort_status="missing_runtime_context",
-            )
-
-        context.internal_pending_command = PendingTaskInternalCommand(
-            action="abort_projection",
-            continuation=resolved,
-            expected_interrupt=interrupt_payload,
-        )
-        try:
-            await self._graph.ainvoke(
-                Command(resume={"action": "abort_projection"}),
-                config,
-                context=context,
-            )
-            verification = await self._verify_terminal_pending_abort(
-                resolved,
-                interrupt_payload=interrupt_payload,
-                context=context,
-            )
-            abort_status = verification.failure_reason or "ABORTED"
-        except (AttributeError, RuntimeError, ValueError):
-            logger.exception(
-                "Failed to abort terminal pending-task projection",
-                extra={"pending_checkpoint_ref": resolved},
-            )
-            abort_status = "projection_abort_exception"
-        finally:
-            context.internal_pending_command = None
-        return await self._persist_terminal_abort_result(
-            state,
-            config=config,
-            abort_status=abort_status,
-        )
-
-    async def _verify_terminal_pending_abort(
-        self,
         continuation: PendingTaskContinuationRef,
-        *,
+        pending_result: PendingTaskGraphResult | None,
         interrupt_payload: AgentInterruptPayload,
-        context: AgentRuntimeContext,
-    ) -> PendingTaskOutcomeRecovery:
-        verifier = getattr(self.pending_graph_service, "verify_projection_aborted", None)
-        if not callable(verifier):
-            return PendingTaskOutcomeRecovery(failure_reason="projection_abort_verifier_unavailable")
-        return await verifier(PendingTaskAbortVerificationRequest(
-            continuation=continuation,
-            expected_interrupt=interrupt_payload,
-            team_id=context.team_id,
-            user_id=context.user_id,
-            session_id=context.session_id,
-        ))
+        task_projection: JSONDict,
+    ) -> AgentRuntimeInvokeResult:
+        """Complete the child node and expose its interaction from a Root wait.
 
-    async def _persist_terminal_abort_result(
+        A nested interrupt is an implementation detail of PendingTask.  Once its
+        outcome has been projected, Root adopts the interaction and owns the
+        user-facing ``interrupt()``.  The child checkpoint remains available at
+        the exact continuation and is resumed only after Root validation.
+        """
+
+        if pending_result is None:
+            return await self._adopt_pending_recovery_failure(
+                config=config,
+                context=context,
+                continuation=continuation,
+                interrupt_payload=interrupt_payload,
+                failure_reason="invalid_continuation",
+            )
+        root_update: AgentRuntimeState = {
+            "application_action": "pending_handled",
+            "runtime_status": str(state.get("runtime_status") or "pending_projection_projected"),
+            "runtime_retryable": False,
+            "pending_task_handled": True,
+            "pending_task_result": _pending_task_result_projection(pending_result),
+            "pending_task_outcome_intent": _pending_task_outcome_intent(pending_result),
+            "pending_task_continuation_ref": continuation,
+            "pending_task_resume_error": None,
+            "pending_task_projection_error": None,
+            "pending_interrupt_projection": coerce_json_dict(state.get("pending_interrupt_projection")),
+            "assistant_content": state.get("assistant_content"),
+            "current_interrupt": interrupt_payload,
+            "resumed_interrupt": None,
+            "task_projection": task_projection,
+            "events": [{
+                "event": "agent_root_pending_interrupt_adopted",
+                "continuation_id": continuation.get("continuation_id"),
+                "source_event": interrupt_payload.get("source_event"),
+            }],
+        }
+        await self._graph.aupdate_state(
+            config,
+            root_update,
+            as_node="pending_task_subgraph",
+        )
+        await self._graph.ainvoke(None, config, context=context)
+        snapshot = await self._graph.aget_state(config)
+        return _snapshot_values(snapshot)
+
+    async def _adopt_pending_projection_failure(
         self,
         state: AgentRuntimeInvokeResult,
         *,
         config: RunnableConfig,
-        abort_status: str,
+        context: AgentRuntimeContext | None,
+        continuation: PendingTaskContinuationRef | None,
+        interrupt_payload: AgentInterruptPayload,
+        failure_reason: str,
     ) -> AgentRuntimeInvokeResult:
-        terminal_projection = {
-            **coerce_json_dict(state.get("pending_interrupt_projection")),
-            "abort_status": abort_status,
-        }
-        state.update({
-            "pending_interrupt_projection": terminal_projection,
-            "current_interrupt": None,
-        })
-        state.pop("__interrupt__", None)
+        """Adopt an application projection failure into a Root-owned terminal branch."""
+
         await self._graph.aupdate_state(
             config,
             {
-                "application_action": state.get("application_action"),
-                "runtime_status": state.get("runtime_status"),
-                "runtime_retryable": state.get("runtime_retryable"),
-                "pending_interrupt_projection": terminal_projection,
-                "pending_task_handled": state.get("pending_task_handled", False),
+                "application_action": "finish",
+                "pending_task_handled": False,
                 "pending_task_result": coerce_json_dict(state.get("pending_task_result")),
-                "assistant_content": state.get("assistant_content"),
+                "pending_task_outcome_intent": {},
+                "pending_task_continuation_ref": continuation,
+                "pending_task_resume_error": None,
+                "pending_task_projection_error": failure_reason,
+                "pending_interrupt_projection": coerce_json_dict(
+                    state.get("pending_interrupt_projection")
+                ),
+                "resumed_interrupt": interrupt_payload,
                 "current_interrupt": None,
-                "task_projection": coerce_json_dict(state.get("task_projection")),
+                "assistant_content": state.get("assistant_content"),
+                "runtime_status": "pending_projection_failed",
+                "runtime_retryable": False,
+                "events": [{
+                    "event": "agent_root_pending_projection_failure_adopted",
+                    "reason": failure_reason,
+                }],
             },
+            as_node="pending_task_subgraph",
         )
-        await self._graph.aupdate_state(config, None, as_node=END)
-        return state
+        await self._graph.ainvoke(None, config, context=context)
+        snapshot = await self._graph.aget_state(config)
+        return _snapshot_values(snapshot)
+
+    async def _adopt_pending_recovery_failure(
+        self,
+        *,
+        config: RunnableConfig,
+        context: AgentRuntimeContext | None,
+        continuation: PendingTaskContinuationRef | None,
+        interrupt_payload: AgentInterruptPayload,
+        failure_reason: str,
+    ) -> AgentRuntimeInvokeResult:
+        """Route an externally observed child recovery failure through Root Graph."""
+
+        retryable = is_retryable_pending_task_recovery_failure(failure_reason)
+        failure = pending_task_recovery_failure(
+            failure_reason,
+            retryable=retryable,
+        )
+        await self._graph.aupdate_state(
+            config,
+            {
+                "application_action": "finish",
+                "pending_task_handled": False,
+                "pending_task_result": _pending_task_result_projection(failure),
+                "pending_task_outcome_intent": {},
+                "pending_task_continuation_ref": continuation if retryable else None,
+                "pending_task_resume_error": failure_reason,
+                "pending_task_projection_error": None,
+                "resumed_interrupt": interrupt_payload,
+                "current_interrupt": interrupt_payload if retryable else None,
+                "runtime_status": "pending_resume_recovery_failed",
+                "runtime_retryable": retryable,
+                "events": [{
+                    "event": "agent_root_pending_recovery_failure_adopted",
+                    "reason": failure_reason,
+                }],
+            },
+            as_node="pending_task_subgraph",
+        )
+        await self._graph.ainvoke(None, config, context=context)
+        snapshot = await self._graph.aget_state(config)
+        return _snapshot_values(snapshot)
 
     def _start_turn(self, state: AgentRuntimeState) -> AgentRuntimeState:
         return {
@@ -1865,6 +2066,8 @@ class AgentRootRuntime:
             "pending_task_result": {},
             "pending_task_continuation_ref": None,
             "pending_task_resume_error": None,
+            "pending_task_projection_error": None,
+            "resumed_interrupt": None,
             "new_flow_result": {},
             "post_write_effects": {},
             "customer_intelligence_requests": [],
@@ -1921,22 +2124,15 @@ class AgentRootRuntime:
         projection_ack_failed = metadata.get("projection_ack_failed") is True
         discard_reason = metadata.get("follow_up_confirmation_discard_reason")
         should_discard_follow_up_confirmation = projection_ack_failed or isinstance(discard_reason, str)
-        raw_checkpoint_ref = active_interrupt.get("checkpoint_ref")
-        continuation_ref = _pending_checkpoint_ref_from_interrupt(
-            active_interrupt,
-            context=runtime.context,
-        )
-        continuation_error = (
-            "invalid_continuation"
-            if raw_checkpoint_ref is not None and continuation_ref is None
-            else None
-        )
         update: AgentRuntimeState = {
             "runtime_status": "resumed",
             "current_interrupt": None,
+            "resumed_interrupt": active_interrupt or None,
             "resume_payload": resume_payload_json,
-            "pending_task_continuation_ref": continuation_ref,
-            "pending_task_resume_error": continuation_error,
+            "pending_task_deferred_resume": None,
+            "pending_task_continuation_ref": None,
+            "pending_task_resume_error": None,
+            "pending_task_projection_error": None,
             "turn_intent": turn_intent,
             "follow_up_confirmation_projection_suppressed": should_discard_follow_up_confirmation,
             "follow_up_confirmation_discard_reason": (discard_reason if isinstance(discard_reason, str) else None),
@@ -1955,9 +2151,251 @@ class AgentRootRuntime:
             update["pending_task_requested"] = True
         return update
 
+    async def _validate_interrupt_resume(
+        self,
+        state: AgentRuntimeState,
+        runtime: Runtime[AgentRuntimeContext],
+    ) -> AgentRuntimeState:
+        """Authenticate and validate a resumed child locator inside Root Graph.
+
+        User-facing waits are Root-owned. A PendingTask continuation is only
+        admitted to the child subgraph after the exact current child checkpoint
+        has been validated. Every failed lookup is fail-closed and becomes an
+        explicit graph branch; transient infrastructure failures retain the
+        Root-owned wait for a later retry.
+        """
+
+        resumed_interrupt = interrupt_payload_from_json(state.get("resumed_interrupt"))
+        if resumed_interrupt is None:
+            return {
+                "pending_task_resume_error": "invalid_continuation",
+                "events": [{
+                    "event": "agent_root_interrupt_resume_validation_failed",
+                    "reason": "missing_resumed_interrupt",
+                }],
+            }
+
+        target = classify_interrupt_projection(
+            resumed_interrupt,
+            team_id=state.get("team_id"),
+            user_id=state.get("user_id"),
+            session_id=state.get("session_id"),
+            thread_id=_current_graph_thread_id(),
+        )
+        if target.owner == "root":
+            return {
+                "pending_task_continuation_ref": None,
+                "pending_task_resume_error": None,
+                "events": [{
+                    "event": "agent_root_interrupt_resume_validated",
+                    "owner": "root",
+                }],
+            }
+        if target.owner == "invalid_pending_task" or target.continuation is None:
+            return {
+                "pending_task_continuation_ref": None,
+                "pending_task_resume_error": target.failure_reason or "invalid_continuation",
+                "events": [{
+                    "event": "agent_root_interrupt_resume_validation_failed",
+                    "owner": "pending_task",
+                    "reason": target.failure_reason or "invalid_continuation",
+                }],
+            }
+
+        recovery = await self._load_checkpointed_pending_outcome(
+            resumed_interrupt,
+            context=runtime.context,
+            continuation=target.continuation,
+        )
+        if recovery.outcome is None:
+            reason = recovery.failure_reason or "checkpoint_locator_not_found"
+            return {
+                "pending_task_continuation_ref": target.continuation,
+                "pending_task_resume_error": reason,
+                "events": [{
+                    "event": "agent_root_interrupt_resume_validation_failed",
+                    "owner": "pending_task",
+                    "reason": reason,
+                }],
+            }
+        return {
+            "pending_task_continuation_ref": target.continuation,
+            "pending_task_resume_error": None,
+            "events": [{
+                "event": "agent_root_interrupt_resume_validated",
+                "owner": "pending_task",
+                "continuation_id": target.continuation.get("continuation_id"),
+            }],
+        }
+
+    def _route_after_interrupt_resume_validation(self, state: AgentRuntimeState) -> str:
+        return "recovery_failure" if state.get("pending_task_resume_error") else "resume"
+
+    async def _handle_pending_resume_recovery_failure(
+        self,
+        state: AgentRuntimeState,
+        runtime: Runtime[AgentRuntimeContext],
+    ) -> AgentRuntimeState:
+        """Record an unavailable child continuation as one Root-owned failure node."""
+
+        pending_result = coerce_json_dict(state.get("pending_task_result"))
+        reason = str(
+            state.get("pending_task_resume_error")
+            or pending_result.get("failure_reason")
+            or "invalid_continuation"
+        )
+        resumed_interrupt = (
+            interrupt_payload_from_json(state.get("resumed_interrupt"))
+            or interrupt_payload_from_json(pending_result.get("current_interrupt"))
+            or {}
+        )
+        continuation = pending_task_continuation_from_json(
+            state.get("pending_task_continuation_ref"),
+            expected_team_id=state.get("team_id"),
+            expected_user_id=state.get("user_id"),
+            expected_session_id=state.get("session_id"),
+            expected_thread_id=_current_graph_thread_id(),
+        )
+        retryable = is_retryable_pending_task_recovery_failure(reason)
+        deferred_resume: PendingTaskDeferredResume | None = None
+        resume_payload = coerce_json_dict(state.get("resume_payload"))
+        if retryable and resume_payload:
+            if continuation is None or not resumed_interrupt:
+                reason = "invalid_continuation"
+                retryable = False
+                continuation = None
+            else:
+                try:
+                    deferred_resume = build_pending_task_deferred_resume(
+                        continuation=continuation,
+                        interrupt=resumed_interrupt,
+                        resume_payload=resume_payload,
+                    )
+                except ValueError:
+                    reason = "invalid_continuation"
+                    retryable = False
+                    continuation = None
+        failure = pending_task_recovery_failure(reason, retryable=retryable)
+        projection_key = (
+            pending_interrupt_projection_key(continuation, resumed_interrupt)
+            if continuation is not None
+            else "pending_interrupt_projection:invalid_continuation"
+        )
+        failure_event = coerce_json_dict(failure["events"][0])
+        if runtime.context is not None:
+            runtime.context.side_effects.pending_task_events.append(failure_event)
+            runtime.context.side_effects.pending_task_assistant_content = str(
+                failure.get("assistant_content") or ""
+            )
+            runtime.context.side_effects.current_interrupt = (
+                resumed_interrupt if retryable else None
+            )
+            await _publish_event_best_effort(
+                runtime.context,
+                failure_event,
+                log_message="Pending-task checkpoint recovery event publication failed",
+            )
+        return {
+            "application_action": "finish",
+            "runtime_status": str(failure["runtime_status"]),
+            "runtime_retryable": retryable,
+            # Recovery ownership is independent from CRM/application projection.
+            # Clearing this field prevents the next user turn from being
+            # misclassified as an unprojected child outcome and consumed only
+            # to replay an already-visible prompt.
+            "pending_interrupt_projection": {},
+            "pending_task_handled": False,
+            "pending_task_result": _pending_task_result_projection(failure),
+            "pending_task_outcome_intent": {},
+            "pending_task_continuation_ref": continuation if retryable else None,
+            "pending_task_deferred_resume": deferred_resume,
+            "pending_task_requested": False,
+            "pending_task_resume_error": None,
+            "pending_task_projection_error": None,
+            "assistant_content": failure.get("assistant_content"),
+            "current_interrupt": resumed_interrupt if retryable else None,
+            "resumed_interrupt": None,
+            "events": [failure_event, {
+                "event": (
+                    "agent_root_pending_resume_recovery_deferred"
+                    if retryable
+                    else "agent_root_pending_resume_recovery_terminalized"
+                ),
+                "reason": reason,
+                "projection_key": projection_key,
+                "retryable": retryable,
+            }],
+        }
+
+    async def _handle_pending_projection_failure(
+        self,
+        state: AgentRuntimeState,
+        runtime: Runtime[AgentRuntimeContext],
+    ) -> AgentRuntimeState:
+        """Terminalize a CRM projection failure without mutating the child checkpoint."""
+
+        reason = str(state.get("pending_task_projection_error") or "projection_failed")
+        projection = coerce_json_dict(state.get("pending_interrupt_projection"))
+        assistant_content = state.get("assistant_content")
+        if not isinstance(assistant_content, str) or not assistant_content:
+            assistant_content = "当前待确认流程投影失败，本次流程已终止；你可以重新发起。"
+        projection_interrupt = coerce_json_dict(projection.get("interrupt"))
+        if is_pending_application_step_request(projection_interrupt):
+            failure_event = {
+                "event": "pending_application_step_failed",
+                "step_id": projection_interrupt.get("step_id"),
+                "step_type": projection_interrupt.get("step_type"),
+                "reason": reason,
+                "retryable": False,
+                "internal": True,
+            }
+        else:
+            failure_event = {
+                "event": (
+                    "pending_task_outcome_projection_failed"
+                    if _is_pending_task_outcome_projection_barrier(projection_interrupt)
+                    else "pending_task_interrupt_projection_failed"
+                ),
+                "reason": reason,
+                "projection_key": projection.get("projection_key"),
+                "retryable": False,
+            }
+        if runtime.context is not None:
+            runtime.context.side_effects.pending_task_assistant_content = assistant_content
+            runtime.context.side_effects.current_interrupt = None
+            runtime.context.side_effects.pending_task_events.append(failure_event)
+            await _publish_event_best_effort(
+                runtime.context,
+                failure_event,
+                log_message="Pending-task projection failure event publication failed",
+            )
+        return {
+            "application_action": "finish",
+            "runtime_status": "pending_projection_failed",
+            "runtime_retryable": False,
+            "pending_interrupt_projection": projection,
+            "pending_task_handled": False,
+            "pending_task_result": {
+                **coerce_json_dict(state.get("pending_task_result")),
+                "failure_reason": reason,
+            },
+            "pending_task_outcome_intent": {},
+            "pending_task_continuation_ref": None,
+            "pending_task_deferred_resume": None,
+            "pending_task_requested": False,
+            "pending_task_resume_error": None,
+            "pending_task_projection_error": None,
+            "assistant_content": assistant_content,
+            "current_interrupt": None,
+            "resumed_interrupt": None,
+            "events": [failure_event, {
+                "event": "agent_root_pending_projection_failure_terminalized",
+                "reason": reason,
+                "projection_key": projection.get("projection_key"),
+            }],
+        }
+
     def _route_after_interrupt_resume(self, state: AgentRuntimeState) -> str:
-        if state.get("pending_task_resume_error"):
-            return "finish"
         if state.get("follow_up_confirmation_projection_suppressed"):
             return "discard_follow_up_confirmation"
         if _is_follow_up_confirmation_resume(state.get("resume_payload")):
@@ -2034,17 +2472,12 @@ class AgentRootRuntime:
                 expected_team_id=context.team_id,
                 expected_user_id=context.user_id,
                 expected_session_id=context.session_id,
+                expected_thread_id=_current_graph_thread_id(),
             )
             if internal_continuation is None:
                 raise ValueError("invalid internal pending-task command")
             pending_graph_input["continuation_ref"] = internal_continuation
-            if internal_command.action == "abort_projection":
-                pending_graph_input["resume_payload"] = {"action": "abort_projection"}
-                result = await self.pending_graph_service.run(
-                    pending_graph_input,
-                    side_effects=pending_side_effects,
-                )
-            elif internal_command.action == "resume_application_step":
+            if internal_command.action == "resume_application_step":
                 # The acknowledgement is propagated by the owning root graph's
                 # native Command(resume=...). Supplying only the exact durable
                 # continuation here lets LangGraph restore the interrupted child
@@ -2068,21 +2501,62 @@ class AgentRootRuntime:
             expected_team_id=context.team_id,
             expected_user_id=context.user_id,
             expected_session_id=context.session_id,
+            expected_thread_id=_current_graph_thread_id(),
         )
+        root_event = {
+            "event": "agent_root_pending_task_subgraph_completed",
+            "handled": bool(result.get("handled")),
+            "has_task": bool(result.get("has_active_task") or result.get("task_projection")),
+            "event_count": len(result.get("events", [])),
+        }
+        if is_pending_task_recovery_failure(result):
+            assistant_content = result.get("assistant_content")
+            reason = str(result.get("failure_reason") or "invalid_continuation")
+            retryable = bool(result.get("runtime_retryable"))
+            recovery_continuation = continuation
+            if recovery_continuation is None and retryable:
+                recovery_continuation = pending_task_continuation_from_json(
+                    state.get("pending_task_continuation_ref"),
+                    expected_team_id=context.team_id,
+                    expected_user_id=context.user_id,
+                    expected_session_id=context.session_id,
+                    expected_thread_id=_current_graph_thread_id(),
+                )
+            recovery_interrupt = interrupt_payload_from_json(
+                result.get("current_interrupt")
+            )
+            return {
+                "route": "pending_task_subgraph",
+                "pending_task_requested": False,
+                "pending_task_result": _pending_task_result_projection(result),
+                "pending_task_outcome_intent": {},
+                "pending_task_continuation_ref": (
+                    recovery_continuation if retryable else None
+                ),
+                "pending_task_resume_error": reason,
+                "runtime_status": str(result.get("runtime_status") or "checkpoint_recovery_failed"),
+                "runtime_retryable": retryable,
+                "assistant_content": assistant_content if isinstance(assistant_content, str) else None,
+                "current_interrupt": recovery_interrupt if retryable else None,
+                "events": [root_event],
+            }
         return {
             "route": "pending_task_subgraph",
             "pending_task_result": _pending_task_result_projection(result),
             "pending_task_outcome_intent": _pending_task_outcome_intent(result),
             "pending_task_continuation_ref": continuation,
-            "events": [
-                {
-                    "event": "agent_root_pending_task_subgraph_completed",
-                    "handled": bool(result.get("handled")),
-                    "has_task": bool(result.get("has_active_task") or result.get("task_projection")),
-                    "event_count": len(result.get("events", [])),
-                }
-            ],
+            "events": [root_event],
         }
+
+    def _route_after_pending_task_subgraph(self, state: AgentRuntimeState) -> str:
+        pending_result = coerce_json_dict(state.get("pending_task_result"))
+        if state.get("pending_task_resume_error") or is_pending_task_recovery_failure(
+            pending_result
+        ):
+            return "recovery_failure"
+        if state.get("pending_task_projection_error"):
+            return "projection_failure"
+        return "projection"
 
     def _await_pending_task_projection(self, state: AgentRuntimeState) -> AgentRuntimeState:
         """Pause on an internal durable barrier before application side effects.
@@ -2105,15 +2579,16 @@ class AgentRootRuntime:
             expected_team_id=state.get("team_id"),
             expected_user_id=state.get("user_id"),
             expected_session_id=state.get("session_id"),
+            expected_thread_id=_root_thread_id_from_state(state),
         )
         if continuation is None:
             return {
                 "application_action": "finish",
                 "runtime_status": "pending_projection_failed",
                 "runtime_retryable": False,
+                "pending_task_projection_error": "missing_pending_task_continuation",
                 "pending_task_result": {
                     **coerce_json_dict(state.get("pending_task_result")),
-                    "projection_aborted": True,
                     "failure_reason": "missing_pending_task_continuation",
                 },
                 "events": [{
@@ -2134,13 +2609,15 @@ class AgentRootRuntime:
                 "runtime_status": "pending_projection_failed",
                 "runtime_retryable": False,
                 "pending_interrupt_projection": projection,
+                "pending_task_projection_error": (
+                    acknowledgement.get("failure_reason") or "projection_failed"
+                ),
                 "pending_task_result": {
                     **coerce_json_dict(state.get("pending_task_result")),
-                    "projection_aborted": True,
                     "failure_reason": acknowledgement.get("failure_reason") or "projection_failed",
                 },
                 "events": [{
-                    "event": "agent_root_pending_task_projection_aborted",
+                    "event": "agent_root_pending_task_projection_rejected",
                     "projection_key": expected_key,
                     "reason": acknowledgement.get("failure_reason") or "projection_failed",
                 }],
@@ -2183,6 +2660,14 @@ class AgentRootRuntime:
             )
         return update
 
+    def _route_after_pending_task_projection_barrier(
+        self,
+        state: AgentRuntimeState,
+    ) -> str:
+        if state.get("pending_task_projection_error"):
+            return "projection_failure"
+        return "projected"
+
     def _new_flow_route_marker(self, state: AgentRuntimeState) -> AgentRuntimeState:
         return self._route_event("new_flow_graph", state)
 
@@ -2205,11 +2690,16 @@ class AgentRootRuntime:
         switch_notice = pending_result.get("switch_notice")
         if isinstance(switch_notice, str):
             update["switch_notice"] = switch_notice
+        if not state.get("current_interrupt"):
+            # The exact child continuation is needed only while Root owns a
+            # user-visible wait. Once the child reaches a terminal outcome,
+            # clear that capability instead of leaking stale resume authority
+            # into later turns.
+            update["pending_task_continuation_ref"] = None
+            update["pending_task_deferred_resume"] = None
         return update
 
     def _route_after_application_action(self, state: AgentRuntimeState) -> str:
-        if coerce_json_dict(state.get("pending_task_result")).get("projection_aborted") is True:
-            return "internal_abort"
         if state.get("application_action") == "execute_confirmed_task":
             return "confirmed_task_execution"
         if state.get("application_action") == "no_pending_confirmation":
@@ -4251,8 +4741,17 @@ class AgentRootRuntime:
             unresolved_reply_count = case_payload.get("unresolved_reply_count")
             retry_number = unresolved_reply_count if isinstance(unresolved_reply_count, int) else 1
             interaction_scope = (
-                f"{build_agent_thread_id(team_id=context.team_id, user_id=context.user_id, session_id=context.session_id, session_key=state.get('session_key'))}"
-                f":clarification:{retry_number}"
+                build_agent_thread_id(
+                    team_id=context.team_id,
+                    user_id=context.user_id,
+                    session_id=context.session_id,
+                    session_key=(
+                        state.get("session_key")
+                        if isinstance(state.get("session_key"), str)
+                        else None
+                    ),
+                )
+                + f":clarification:{retry_number}"
             )
             prompt_event = await self.follow_up_confirmation_graph_service.prepare(
                 db=context.db,
@@ -4405,6 +4904,8 @@ def project_turn_output(
 
 def decide_application_action(state: AgentRuntimeState) -> AgentRuntimeApplicationAction:
     pending_result = state.get("pending_task_result") or {}
+    if is_pending_task_recovery_failure(pending_result):
+        return "finish"
     if bool(pending_result.get("handled")):
         return "pending_handled"
     if bool(pending_result.get("has_task")) or bool(state.get("pending_task_requested")):
@@ -4497,7 +4998,7 @@ def _pending_task_outcome_intent(result: object) -> JSONDict:
 
 
 def _pending_task_outcome_requires_projection(outcome: JSONDict) -> bool:
-    if not outcome or outcome.get("projection_aborted") is True:
+    if not outcome or is_pending_task_recovery_failure(outcome):
         return False
     return not bool(coerce_json_dict(outcome.get("current_interrupt")))
 
@@ -4544,8 +5045,19 @@ def _pending_task_result_projection(result: object) -> JSONDict:
         "remember_pending_task": bool(result.get("remember_pending_task")),
         "event_count": len(result.get("events", [])) if isinstance(result.get("events"), list) else 0,
     }
-    if result.get("projection_aborted") is True:
-        projection["projection_aborted"] = True
+    if result.get("recovery_failed") is True:
+        projection["recovery_failed"] = True
+    if result.get("terminal") is True:
+        projection["terminal"] = True
+    runtime_status = result.get("runtime_status")
+    if isinstance(runtime_status, str):
+        projection["runtime_status"] = runtime_status
+    runtime_retryable = result.get("runtime_retryable")
+    if isinstance(runtime_retryable, bool):
+        projection["runtime_retryable"] = runtime_retryable
+    failure_reason = result.get("failure_reason")
+    if isinstance(failure_reason, str):
+        projection["failure_reason"] = failure_reason
     assistant_content = result.get("assistant_content")
     if isinstance(assistant_content, str):
         projection["assistant_content"] = assistant_content
@@ -4871,6 +5383,7 @@ def _turn_start_state(
     suspended_candidates: list[JSONDict],
     current_customer: JSONDict,
     context: AgentRuntimeContext,
+    pending_task_deferred_resume: PendingTaskDeferredResume | None = None,
 ) -> AgentRuntimeState:
     pending_task_snapshot = agent_task_snapshot(context.task) if context.task else {}
     task_projection = _task_projection(context.task) if context.task else {}
@@ -4901,6 +5414,7 @@ def _turn_start_state(
         "turn_scope": turn_scope,
         "interaction_candidates": [],
         "current_interrupt": current_interrupt,
+        "pending_task_deferred_resume": pending_task_deferred_resume,
         "task_projection": task_projection,
         "pending_task_snapshot": pending_task_snapshot,
         "suspended_candidates": suspended_candidates,
@@ -5380,14 +5894,19 @@ def _pending_checkpoint_ref_from_interrupt(
     interrupt_payload: AgentInterruptPayload,
     *,
     context: AgentRuntimeContext | None,
+    expected_thread_id: str | None = None,
 ) -> PendingTaskContinuationRef | None:
     """Authenticate the exact child continuation carried by an interrupt."""
 
+    if interrupt_payload.get("checkpoint_ref_error"):
+        logger.warning("Rejected invalid pending-task continuation reference")
+        return None
     continuation = pending_task_continuation_from_json(
         interrupt_payload.get("checkpoint_ref"),
         expected_team_id=context.team_id if context is not None else None,
         expected_user_id=context.user_id if context is not None else None,
         expected_session_id=context.session_id if context is not None else None,
+        expected_thread_id=expected_thread_id,
     )
     if continuation is None and interrupt_payload.get("checkpoint_ref") is not None:
         logger.warning("Rejected invalid pending-task continuation reference")
@@ -5566,6 +6085,7 @@ def _snapshot_interrupt_is_exposable(
         active_interrupt is None
         or is_pending_application_step_request(active_interrupt)
         or _is_pending_task_outcome_projection_barrier(active_interrupt)
+        or active_interrupt.get("checkpoint_ref_error") is not None
     ):
         return False
     checkpoint_ref = pending_task_continuation_from_json(
@@ -5573,6 +6093,7 @@ def _snapshot_interrupt_is_exposable(
         expected_team_id=values.get("team_id") if isinstance(values.get("team_id"), int) else None,
         expected_user_id=values.get("user_id") if isinstance(values.get("user_id"), int) else None,
         expected_session_id=values.get("session_id") if isinstance(values.get("session_id"), int) else None,
+        expected_thread_id=_root_thread_id_from_state(values),
     )
     if checkpoint_ref is None:
         return not bool(active_interrupt.get("checkpoint_ref"))
@@ -5681,6 +6202,33 @@ def _is_confirmation_text(content: str) -> bool:
     return normalized in {"是", "确认", "可以", "执行", "好的", "好", "yes", "y", "ok"}
 
 
+def _config_thread_id(config: RunnableConfig) -> str | None:
+    thread_id = coerce_json_dict(config.get("configurable")).get("thread_id")
+    return thread_id if isinstance(thread_id, str) and thread_id else None
+
+
+def _current_graph_thread_id() -> str | None:
+    try:
+        return _config_thread_id(get_config())
+    except RuntimeError:
+        return None
+
+
+def _root_thread_id_from_state(state: JSONDict) -> str | None:
+    team_id = state.get("team_id")
+    user_id = state.get("user_id")
+    session_id = state.get("session_id")
+    if not all(isinstance(value, int) and not isinstance(value, bool) for value in (team_id, user_id, session_id)):
+        return None
+    session_key = state.get("session_key")
+    return build_agent_thread_id(
+        team_id=team_id,
+        user_id=user_id,
+        session_id=session_id,
+        session_key=session_key if isinstance(session_key, str) else None,
+    )
+
+
 def _config_with_checkpoint_id(config: RunnableConfig, *, checkpoint_id: str) -> RunnableConfig:
     configurable = coerce_json_dict(config.get("configurable"))
     configurable["checkpoint_id"] = checkpoint_id
@@ -5765,6 +6313,9 @@ def _root_state_history_values(values: JSONDict) -> JSONDict:
         "pending_task_result",
         "pending_task_outcome_intent",
         "pending_task_continuation_ref",
+        "pending_task_resume_error",
+        "pending_task_deferred_resume",
+        "pending_task_projection_error",
         "new_flow_result",
         "customer_intelligence_requested",
         "customer_intelligence_event",

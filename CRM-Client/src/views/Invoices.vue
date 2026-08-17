@@ -175,6 +175,7 @@ const columns = [
 
 // ==================== 权限 ====================
 const canCreateInvoice = computed(() => permissionStore.hasPermission('invoice:create'))
+const canCreateInvoiceTitle = computed(() => permissionStore.hasPermission('invoice:title:create'))
 const canMarkInvoiced = computed(() => permissionStore.hasPermission('invoice:mark_issued'))
 
 const canDeleteInvoiceApplicationRow = (row: InvoiceApplicationResponse): boolean => {
@@ -851,6 +852,7 @@ watchEffect(() => {
       :open="invoiceApplicationDialogOpen"
       :mode="invoiceApplicationDialogMode"
       :application="editingInvoiceApplication"
+      :can-create-invoice-title="canCreateInvoiceTitle"
       @update:open="handleInvoiceApplicationDialogClose"
       @success="handleInvoiceApplicationSuccess"
     />

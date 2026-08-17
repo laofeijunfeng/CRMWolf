@@ -5,6 +5,7 @@ import request from '@/utils/request'
 export type FollowUpTaskStatus = 'OPEN' | 'COMPLETED' | 'CANCELLED' | string
 export type FollowUpTaskStatusFilter = 'all' | 'open' | 'completed' | 'cancelled'
 export type FollowUpTaskTransitionAction = 'complete' | 'cancel' | 'delay'
+export type FollowUpTaskConfirmationAction = 'COMPLETE' | 'DELAY' | 'CANCEL' | 'KEEP_OPEN' | 'UNKNOWN'
 
 export interface FollowUpTaskCustomer {
   id: string
@@ -31,6 +32,13 @@ export interface FollowUpTaskUser {
   avatar_url?: string | null
 }
 
+export interface FollowUpTaskPendingConfirmation {
+  public_id: string
+  question_text: string
+  suggested_action: FollowUpTaskConfirmationAction
+  created_time: string | null
+}
+
 export interface FollowUpTaskItem {
   id: string
   public_id: string
@@ -55,6 +63,7 @@ export interface FollowUpTaskItem {
   created_time?: string | null
   updated_time?: string | null
   semantic_evidence?: Record<string, unknown>[]
+  pending_confirmations?: FollowUpTaskPendingConfirmation[]
   source_activity?: FollowUpTaskSourceActivity | null
 }
 
@@ -147,23 +156,6 @@ export const FollowUpConfirmationCaseSchema = z.object({
   created_time: NullableDateTimeSchema
 })
 
-export const FollowUpConfirmationCaseListResponseSchema = z.object({
-  items: z.array(FollowUpConfirmationCaseSchema),
-  total: z.number().int().nonnegative(),
-  skip: z.number().int().nonnegative(),
-  limit: z.number().int().positive(),
-  filters: z.object({
-    status: z.string(),
-    owner_scope: z.string()
-  }),
-  usage_policy: z.object({
-    case_state_source: z.string().nullable().optional(),
-    task_state_source: z.string().nullable().optional(),
-    mutation_gate: z.string().nullable().optional(),
-    rule: z.string()
-  })
-})
-
 export const FollowUpConfirmationPendingCountResponseSchema = z.object({
   count: z.number().int().nonnegative()
 })
@@ -208,25 +200,13 @@ export const FollowUpConfirmationResolveResponseSchema = z.object({
   })
 })
 
-export type FollowUpConfirmationCase = z.infer<typeof FollowUpConfirmationCaseSchema>
-export type FollowUpConfirmationCaseListResponse = z.infer<typeof FollowUpConfirmationCaseListResponseSchema>
 export type FollowUpConfirmationResolveResponse = z.infer<typeof FollowUpConfirmationResolveResponseSchema>
-
-export interface FollowUpConfirmationCaseListParams {
-  skip?: number
-  limit?: number
-}
 
 export interface FollowUpConfirmationResolvePayload {
   reply_text: string
 }
 
 export const followUpConfirmationApi = {
-  async list(params: FollowUpConfirmationCaseListParams = {}): Promise<FollowUpConfirmationCaseListResponse> {
-    const raw = await request.get<unknown>('/v1/follow-up-tasks/confirmation-cases', { params })
-    return FollowUpConfirmationCaseListResponseSchema.parse(raw)
-  },
-
   async getPendingCount(): Promise<number> {
     const raw = await request.get<unknown>('/v1/follow-up-tasks/confirmation-cases/pending-count')
     return FollowUpConfirmationPendingCountResponseSchema.parse(raw).count

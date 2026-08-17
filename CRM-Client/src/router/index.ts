@@ -75,7 +75,7 @@ const routes: RouteRecordRaw[] = [
       },
       {
         path: 'follow-up-confirmations',
-        redirect: { path: '/customer-tracking', query: { tab: 'confirmations' } }
+        redirect: '/customer-tracking'
       },
       {
         path: 'leads',

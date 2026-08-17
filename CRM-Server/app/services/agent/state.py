@@ -9,6 +9,7 @@ from langgraph.types import Interrupt
 from app.services.agent.input import AgentTurnInput
 from app.services.agent.interrupts import AgentInterruptPayload, AgentResumePayload
 from app.services.agent.pending_continuation import PendingTaskContinuationRef
+from app.services.agent.pending_resume import PendingTaskDeferredResume
 from app.services.agent.schemas import (
     AgentConfirmationIntentDecision,
     AgentFollowUpQualityResult,
@@ -899,20 +900,14 @@ class PendingTaskEffectIntent(TypedDict, total=False):
     decision: JSONDict
 
 
-class PendingTaskInternalResumePayload(TypedDict):
-    """Root-owned control command for releasing a hidden child interrupt."""
-
-    action: Literal["abort_projection"]
-
-
-PendingTaskResumePayload = AgentResumePayload | PendingTaskInternalResumePayload
+PendingTaskResumePayload = AgentResumePayload
 
 
 @dataclass(frozen=True)
 class PendingTaskInternalCommand:
     """Non-checkpointed command routed through the owning root graph."""
 
-    action: Literal["abort_projection", "resume_application_step"]
+    action: Literal["resume_application_step"]
     continuation: PendingTaskContinuationRef
     expected_interrupt: AgentInterruptPayload
 
@@ -937,13 +932,16 @@ class PendingTaskGraphState(TypedDict, total=False):
     turn_relation_decision: JSONDict
     resumed_task_id: int
     effect_intents: list[PendingTaskEffectIntent]
-    projection_aborted: bool
-    projection_abort_interrupt: AgentInterruptPayload
     content: str
     team_id: int
     user_id: int
     session_id: int
     handled: bool
+    recovery_failed: bool
+    terminal: bool
+    runtime_status: str
+    runtime_retryable: bool
+    failure_reason: str
     assistant_content: Optional[str]
     switch_notice: Optional[str]
     suspended_task_id: int
@@ -1236,6 +1234,7 @@ class AgentRuntimeState(TypedDict, total=False):
     turn_scope: AgentTurnScope
     interaction_candidates: list[InteractionCandidate]
     current_interrupt: AgentInterruptPayload | None
+    resumed_interrupt: AgentInterruptPayload | None
     turn_intent: JSONDict
     task_projection: JSONDict
     pending_task_snapshot: JSONDict
@@ -1254,6 +1253,8 @@ class AgentRuntimeState(TypedDict, total=False):
     pending_task_outcome_intent: JSONDict
     pending_task_continuation_ref: PendingTaskContinuationRef | None
     pending_task_resume_error: str | None
+    pending_task_deferred_resume: PendingTaskDeferredResume | None
+    pending_task_projection_error: str | None
     new_flow_result: JSONDict
     customer_intelligence_requested: bool
     customer_intelligence_event: JSONDict

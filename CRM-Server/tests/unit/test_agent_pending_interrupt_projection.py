@@ -17,7 +17,6 @@ from app.models.agent_pending_interrupt_projection import (
     AgentPendingInterruptProjectionStatus,
 )
 from app.services.agent.pending_continuation import (
-    bind_pending_task_namespace,
     new_pending_task_continuation,
 )
 from app.services.agent.pending_effects import PendingTaskSideEffectResult
@@ -112,15 +111,10 @@ class SuspendingSideEffectHandler:
 
 
 def _continuation():
-    return bind_pending_task_namespace(
-        new_pending_task_continuation(
-            team_id=7,
-            user_id=11,
-            session_id=13,
-            task_id=17,
-            continuation_id="turn-1",
-        ),
-        "pending_task_subgraph:child-1",
+    return new_pending_task_continuation(
+        team_id=7, user_id=11, session_id=13, task_id=17,
+        root_thread_id="crm_agent:7:11:13:13",
+        checkpoint_ns="pending_task_subgraph:child-1",
     )
 
 
@@ -148,6 +142,7 @@ def _request(db_session, *, event_sink=None, continuation=None, interrupt=None, 
         team_id=7,
         user_id=11,
         session_id=13,
+        root_thread_id="crm_agent:7:11:13:13",
         continuation=continuation,
         interrupt=interrupt,
         outcome={

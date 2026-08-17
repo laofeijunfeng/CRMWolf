@@ -149,7 +149,10 @@ Graph interrupt payload 必须能直接映射到前端和 IM 的统一 `interact
 7. 已将确认后 tool 执行纳入 dedicated confirmed-task/tool-execution subgraph，保留现有 tool registry、guardrails、幂等和 CRM API 边界；底层 runtime 只能作为子图节点调用的执行原语，不能再由 application 正常路径直接编排。
 8. 已在 root runtime 接入 LangGraph state history/time-travel 读取接口，并通过 `/v1/agent/sessions/{session_id}/runtime/state`、`/v1/agent/sessions/{session_id}/runtime/history` 和 `/v1/agent/sessions/{session_id}/runtime/checkpoints/{checkpoint_id}` 按 session ownership 暴露 JSON-safe 状态投影、分支事件、interrupt 和 resume payload；后续继续把该投影接入前端 trace 展示。
 9. 已将 application 正常路径收敛为 `agent_root_runtime.run_turn()` 单入口；checkpoint interrupt 读取、初始 root state 构造、`Command(resume=...)` 恢复和 checkpoint task projection 对齐均由 root runtime 负责，application 不再手工编排 root graph 分支。
-10. 继续删除或降级旧 pending dispatcher/session task 状态职责；`crm_agent_tasks` 只保留展示、审计和本轮新等待事件的 task projection 职责。checkpoint 不可用时不得通过 `crm_agent_tasks` 恢复旧 pending；该场景必须显式降级并输出 checkpoint outage trace。
+10. 继续删除或降级旧 pending dispatcher/session task 状态职责；`crm_agent_tasks` 只保留展示、审计和本轮新等待事件的 task projection 职责。checkpoint 不可用时不得通过 `crm_agent_tasks` 恢复旧 pending；该场景必须显式降级并输出 checkpoint outage trace。PendingTask 恢复只接受 continuation 中的精确 `thread_id + checkpoint_ns`，saver 返回的 locator 必须完全一致，不允许 namespace/history 扫描或用返回值重写 locator。
+11. PendingTask 的用户可见等待由 Root Graph 持有。用户 `Command(resume=...)` 后，Root 先验证 authoritative child checkpoint；任何无法读取的结果都 fail closed，不得进入 child。`checkpoint_locator_not_found`、`checkpoint_interrupt_not_found`、`checkpoint_corrupt`、`invalid_continuation` 进入不可重试失败节点并释放等待；`checkpoint_store_unavailable`、`checkpoint_recovery_exception` 进入可重试失败节点并保留 Root-owned interrupt，待基础设施恢复后重新建立原生 interrupt 再恢复 child。首次 child 已产生 interrupt、但 authoritative read 瞬态失败时，也必须保留本轮生成的 exact continuation 与已观察到的 interrupt，不能产生孤立 child checkpoint。
+12. PendingTask outcome 的 CRM/application projection 失败与 checkpoint recovery 失败是两个独立状态机分支。所有 terminal projection failure 必须经 `pending_projection_failure -> finish_turn -> END`，所有 recovery failure 必须经 `pending_resume_recovery_failure -> finish_turn -> END`；失败节点是业务失败事件和用户提示的唯一 owner，不得通过 `projection_aborted`、图外终态伪造或重复发布事件。隐藏 application step 的 terminal projector failure、continuation 校验失败和 task/continuation 身份不一致同样属于 projection failure；Root 不得用 `FAILED` acknowledgement 恢复 child，而应保持 child interrupt checkpoint 不变后进入统一失败分支。
+13. `pending_interrupt_projection` 只保存 CRM/application projection 状态，不得承载 checkpoint recovery 状态。用户已提交并通过 Root interrupt 校验后若发生可重试 recovery failure，Root checkpoint 必须保存与 exact continuation + interrupt identity 绑定的 deferred resume capability（包含原始、已验证的 resume payload）；下一次请求只负责触发恢复，Application adapter 必须先重新建立原生 Root interrupt，再自动重放该 payload 并继续 `Command(resume=...)`，不得再次调用意图路由或要求用户重复确认，也不能先消费一轮输入做提示重放。首次 child authoritative read 瞬态失败、尚无用户 resume payload 时，只保留 exact continuation 和 Root-owned interrupt，不得伪造 deferred resume。deferred resume capability 必须区分 absent 与 present-but-invalid；后者（continuation 篡改、interrupt identity 不匹配、resume payload 非法或 capability 构建 invariant 失败）必须 fail closed，经 `pending_resume_recovery_failure -> finish_turn -> END` 显式终止，不得退回意图路由、要求用户重复确认或触碰 child checkpoint。恢复 authoritative child outcome 时只读取 exact child checkpoint，不得把 Root/application 的累计 delivery events 当作 child trace 合并回 outcome，否则会造成失败事件重复投影。child 终态后必须清除 continuation 与 deferred resume capability，避免后续 turn 持有陈旧恢复权限。
 
 当前迁移不追求把纯 CRUD、字段清洗、枚举归一和幂等实现包装成图节点。LangGraph 必须充分负责长期运行的 orchestration、branching、checkpoint、interrupt/resume、subgraph 组合和状态历史；确定性业务原语应保持为普通可测试模块，由图节点调用。
 
@@ -162,6 +165,11 @@ Graph interrupt payload 必须能直接映射到前端和 IM 的统一 `interact
 - 至少客户识别、跟进记录、商机流程、confirmed-task/tool 执行被拆为 subgraph 或明确的可替换子图边界。
 - 所有会等待用户的业务分支都有 interrupt payload、allowed resume actions 和审计事件。
 - 所有 conditional edge 都能在测试中验证分支原因。
+- PendingTask resume 在 exact checkpoint 未验证成功前不会进入 child；瞬态存储故障保留可重试 Root interrupt，确定性损坏显式终止。
+- PendingTask 的 projection failure 与 recovery failure 经过不同命名节点，且每次失败只发布一条业务失败事件。
+- PendingTask 的 durable resume 遇到 checkpoint storage error 时不得进入 no-checkpointer fallback；fallback 只允许处理未持有 continuation 的首次无状态调用。
+- terminal application-step projection failure 经 Root `pending_projection_failure` 终止，且不消费、不改写 child checkpoint。
+- 瞬态 recovery failure 恢复后，下一次用户响应在同一 turn 内重新建立 Root interrupt 并成功恢复 child，不要求用户重复确认；Root/application 事件不会反向污染 child outcome。
 - `crm_agent_tasks` 不再是运行时唯一 pending 状态来源。
 - 当前 checkpoint state 与 checkpoint history 能通过只读 API 查询，排查复杂分支时以 LangGraph checkpoint 为准，而不是从消息文案或旧任务投影反推。
 - 真实写入仍全部经过 CRM API、权限、HITL、幂等和审计。
@@ -169,7 +177,7 @@ Graph interrupt payload 必须能直接映射到前端和 IM 的统一 `interact
 ## 剩余收敛边界
 
 - `AgentApplicationService` 可以保留 checkpoint 存储不可用时的显式 fallback，但 fallback 只能作为故障隔离路径，不能承载正常业务状态机，也不能扫描 `crm_agent_tasks` 恢复旧 pending；进入该路径时必须输出 `agent_root_checkpoint_unavailable_fallback_started`，并在 SSE 与 assistant trace 中记录 `runtime`、`checkpoint_unavailable` 和 `fallback_reason`。
-- 会跨轮等待或执行写入的 domain subgraph 如果保留 no-checkpointer fallback，也必须输出 `agent_checkpoint_unavailable_fallback_started`；pending-task 和 confirmed-task 子图已经将该事件写入 graph result，confirmed-task 还必须同步写入 application-facing `output_events`。
+- 会跨轮等待或执行写入的 domain subgraph 如果保留 no-checkpointer fallback，也必须输出 `agent_checkpoint_unavailable_fallback_started`；fallback 仅适用于没有 continuation capability 的首次调用，任何 durable resume 必须 fail closed 并保留 exact continuation。pending-task 和 confirmed-task 子图已经将该事件写入 graph result，confirmed-task 还必须同步写入 application-facing `output_events`。
 - `session_state.py` 可以保留会话绑定、当前客户记忆、task projection 读取和 suspended task 展示，但不能成为恢复用户等待态的事实来源。
 - 应用入口恢复等待态时必须读取 root graph checkpoint 中的 active interrupt；没有 active interrupt 时按无当前等待态的新一轮输入进入 root graph，不得把 `WAITING_USER` task 反向投影为恢复 interrupt。
 - 新增业务分支如果会跨轮等待、改变草稿或触发写入，必须先设计 domain subgraph 的 state、interrupt payload、resume action 和 checkpoint thread，再实现具体业务逻辑。

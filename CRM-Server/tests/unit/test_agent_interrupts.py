@@ -637,7 +637,7 @@ def test_validate_resume_payload_rejects_stale_business_action():
         raise AssertionError("expected stale business action to be rejected")
 
 
-def test_interrupt_payload_json_preserves_pending_checkpoint_continuation():
+def test_interrupt_payload_json_marks_legacy_pending_checkpoint_continuation_invalid():
     from app.services.agent.interrupts import interrupt_payload_from_json
 
     payload = interrupt_payload_from_json({
@@ -657,12 +657,30 @@ def test_interrupt_payload_json_preserves_pending_checkpoint_continuation():
     })
 
     assert payload is not None
-    assert payload["checkpoint_ref"] == {
-        "runtime": "crm_agent_pending_task",
-        "thread_id": "crm_agent_pending:2:3:4:101",
-        "checkpoint_ns": "pending_task_subgraph:checkpoint-1",
-        "team_id": 2,
-        "user_id": 3,
-        "session_id": 4,
-        "task_id": 101,
-    }
+    assert "checkpoint_ref" not in payload
+    assert payload["checkpoint_ref_error"] == "invalid_continuation"
+
+
+def test_interrupt_payload_json_preserves_root_owned_checkpoint_locator_for_later_authentication():
+    from app.services.agent.interrupts import interrupt_payload_from_json
+    from app.services.agent.pending_continuation import new_pending_task_continuation
+
+    continuation = new_pending_task_continuation(
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        task_id=101,
+        root_thread_id="crm_agent:2:3:4:abc",
+        checkpoint_ns="pending_task_subgraph:checkpoint-1",
+    )
+
+    payload = interrupt_payload_from_json({
+        "schema_version": "agent.interrupt.v1",
+        "type": "confirm",
+        "reason": "write_confirmation",
+        "business_action": "create_opportunity",
+        "checkpoint_ref": continuation,
+    })
+
+    assert payload is not None
+    assert payload["checkpoint_ref"] == continuation

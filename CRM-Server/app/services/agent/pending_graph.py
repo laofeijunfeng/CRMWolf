@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+from uuid import uuid4
 
-from langchain_core.runnables import RunnableConfig
 from langgraph.config import get_config
 from langgraph.graph import END, START, StateGraph
-from langgraph.runtime import Runtime
 from langgraph.types import Command, interrupt
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -37,20 +37,23 @@ from app.services.agent.pending_application_step_contracts import (
     PENDING_APPLICATION_STEP_SCHEMA,
     build_pending_application_step_request,
 )
-from app.services.agent.pending_checkpoint import PendingTaskCheckpointStore
+from app.services.agent.pending_checkpoint import (
+    PendingTaskCheckpointRepository,
+    PendingTaskCheckpointStore,
+)
 from app.services.agent.pending_continuation import (
+    PENDING_TASK_CHILD_NAMESPACE_PREFIX,
     PENDING_TASK_RUNTIME,
     PendingTaskContinuationRef,
-    bind_pending_task_namespace,
+    build_agent_root_thread_id,
     new_pending_task_continuation,
     pending_task_checkpoint_config,
     pending_task_continuation_from_json,
-    pending_task_thread_id,
 )
 from app.services.agent.pending_outcome import (
-    PendingTaskAbortVerificationRequest,
     PendingTaskOutcomeRecovery,
     pending_task_outcome_assembler,
+    pending_task_recovery_failure,
 )
 from app.services.agent.schemas import AgentConfirmationIntentDecision
 from app.services.agent.state import (
@@ -77,6 +80,12 @@ from app.services.agent.workflow_action_cancellation_contracts import (
     expected_task_cancellation_snapshot,
 )
 
+if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
+    from langgraph.graph.state import CompiledStateGraph
+    from langgraph.runtime import Runtime
+
+
 
 class PendingTaskGraphService:
     """Runs pending-task routing as a small business state machine."""
@@ -89,6 +98,7 @@ class PendingTaskGraphService:
         preflight_graph_service: object | None = None,
         interaction_graph_service: object | None = None,
         checkpointer: object | None = None,
+        checkpoint_store: PendingTaskCheckpointRepository | None = None,
         application_step_protocol: bool | None = None,
     ) -> None:
         self.application_step_protocol = (
@@ -102,12 +112,12 @@ class PendingTaskGraphService:
             raise ValueError("legacy pending graph mode requires explicit application adapters")
         self.preflight_graph_service = preflight_graph_service
         self.interaction_graph_service = interaction_graph_service
-        self._checkpoint_store = PendingTaskCheckpointStore(checkpointer)
+        self._checkpoint_store = checkpoint_store or PendingTaskCheckpointStore(checkpointer)
         self._checkpoint_enabled = self._checkpoint_store.enabled
         self._graph = self._build_graph(checkpointer)
         self._fallback_graph = self._build_graph(None)
 
-    def _build_graph(self, checkpointer: object | None):
+    def _build_graph(self, checkpointer: object | None) -> CompiledStateGraph:
         graph = StateGraph(PendingTaskGraphState, context_schema=PendingTaskRuntimeContext)
         graph.add_node("load_suspended_candidates", self._load_suspended_candidates)
         graph.add_node("classify_turn_relation", self._classify_turn_relation)
@@ -232,6 +242,8 @@ class PendingTaskGraphService:
         except SQLAlchemyError as exc:
             if not self._checkpoint_enabled or not is_checkpoint_storage_error(exc):
                 raise
+            if prepared.is_resume:
+                return pending_task_recovery_failure("checkpoint_store_unavailable")
             task_snapshot = _task_snapshot_from_input(input_state)
             fallback_context = _runtime_context_from_input(
                 input_state,
@@ -275,6 +287,8 @@ class PendingTaskGraphService:
         except SQLAlchemyError as exc:
             if not self._checkpoint_enabled or not is_checkpoint_storage_error(exc):
                 raise
+            if prepared.is_resume:
+                return pending_task_recovery_failure("checkpoint_store_unavailable")
             task_snapshot = _task_snapshot_from_input(input_state)
             fallback_side_effects = PendingTaskGraphSideEffects(task=task_snapshot or None)
             fallback_context = _runtime_context_from_input(input_state, fallback_side_effects)
@@ -295,39 +309,6 @@ class PendingTaskGraphService:
                 runtime=PENDING_TASK_RUNTIME,
                 graph=PENDING_TASK_CHECKPOINT_NS,
             )
-
-    async def verify_projection_aborted(
-        self,
-        request: PendingTaskAbortVerificationRequest,
-    ) -> PendingTaskOutcomeRecovery:
-        """Verify the durable proof written by a root-owned terminal abort."""
-
-        continuation = pending_task_continuation_from_json(
-            request.continuation,
-            expected_team_id=request.team_id,
-            expected_user_id=request.user_id,
-            expected_session_id=request.session_id,
-        )
-        if continuation is None:
-            return PendingTaskOutcomeRecovery(failure_reason="invalid_continuation")
-        aborted = await self._checkpoint_store.load_result(continuation)
-        snapshot = aborted.snapshot
-        if snapshot is None:
-            return PendingTaskOutcomeRecovery(
-                failure_reason=aborted.failure_reason or "projection_abort_checkpoint_missing"
-            )
-        if not _is_projection_abort_complete(
-            snapshot.values,
-            snapshot.interrupts,
-            expected_interrupt=request.expected_interrupt,
-        ):
-            return PendingTaskOutcomeRecovery(failure_reason="projection_abort_incomplete")
-        return PendingTaskOutcomeRecovery(
-            outcome=pending_task_outcome_assembler.assemble(
-                checkpoint_values=snapshot.values,
-                interrupts=snapshot.interrupts,
-            )
-        )
 
     async def load_checkpointed_outcome(
         self,
@@ -359,6 +340,7 @@ class PendingTaskGraphService:
         *,
         side_effects: PendingTaskGraphSideEffects | None,
     ) -> _PendingTaskInvocation:
+        is_resume = bool(coerce_json_dict(input_state.get("continuation_ref")))
         task_snapshot = _task_snapshot_from_input(input_state)
         checkpoint_state = _checkpoint_state_from_input(input_state)
         graph_side_effects = side_effects or PendingTaskGraphSideEffects(task=task_snapshot or None)
@@ -367,22 +349,10 @@ class PendingTaskGraphService:
         continuation = prepare_pending_task_continuation(
             input_state,
             side_effects=graph_side_effects,
-        )
-        uses_persisted_namespace = bool(continuation.get("checkpoint_ns"))
-        continuation = _bind_continuation_namespace_from_runtime(
-            continuation,
-            side_effects=graph_side_effects,
+            require_root_runtime=self._checkpoint_enabled,
         )
         context = _runtime_context_from_input(input_state, graph_side_effects)
-        config = pending_task_checkpoint_config(
-            continuation,
-            # A new nested invocation inherits the namespace LangGraph assigned
-            # to the current root node. A resumed continuation must instead
-            # address the exact namespace persisted in its interrupt payload;
-            # inheriting the new root-node namespace would resume an empty
-            # checkpoint and silently lose the child outcome.
-            include_namespace=uses_persisted_namespace,
-        )
+        config = pending_task_checkpoint_config(continuation)
         graph_input = _graph_input_from_turn_sync(
             checkpoint_state=checkpoint_state,
             resume_payload=coerce_json_dict(input_state.get("resume_payload")),
@@ -393,6 +363,7 @@ class PendingTaskGraphService:
             context=context,
             continuation=continuation,
             config=config,
+            is_resume=is_resume,
         )
 
     async def _authoritative_outcome(
@@ -417,8 +388,11 @@ class PendingTaskGraphService:
         )
         snapshot = load_result.snapshot
         if snapshot is None:
-            reason = load_result.failure_reason or "checkpoint_not_found"
-            raise RuntimeError(f"pending_task_authoritative_outcome_unavailable:{reason}")
+            reason = load_result.failure_reason or "checkpoint_locator_not_found"
+            failure = pending_task_recovery_failure(reason)
+            if failure.get("runtime_retryable") is True and expected_interrupt is not None:
+                failure["current_interrupt"] = expected_interrupt
+            return failure
         return pending_task_outcome_assembler.assemble(
             observed_state=observed,
             checkpoint_values=snapshot.values,
@@ -475,7 +449,7 @@ class PendingTaskGraphService:
         return {}
 
     def _route_after_load_suspended_candidates(self, state: PendingTaskGraphState) -> str:
-        if _resume_action(coerce_json_dict(state.get("resume_payload"))) in {"cancel", "abort_projection"}:
+        if _resume_action(coerce_json_dict(state.get("resume_payload"))) == "cancel":
             return "resume"
         if state.get("resume_payload") and state.get("has_active_task"):
             return "resume"
@@ -869,6 +843,7 @@ class PendingTaskGraphService:
             expected_team_id=runtime.context.team_id,
             expected_user_id=runtime.context.user_id,
             expected_session_id=runtime.context.session_id,
+            expected_thread_id=_current_runtime_thread_id(),
         )
         if continuation is None:
             raise ValueError("pending application step requires an authenticated continuation")
@@ -912,7 +887,7 @@ class PendingTaskGraphService:
                 "retryable": bool(acknowledgement.get("retryable")),
                 "result": {
                     "handled": True,
-                    "assistant_content": "当前待处理流程执行失败，请重新发起。",
+                    "assistant_content": "当前待处理流程执行失败，请重新发起。",  # noqa: RUF001
                     "events": [{
                         "event": "pending_application_step_failed",
                         "step_type": step_type,
@@ -1099,19 +1074,6 @@ class PendingTaskGraphService:
             }])
         action = _resume_action(resume_payload_json)
         reason = _resume_reason(resume_payload_json, current_interrupt)
-        if action == "abort_projection":
-            return {
-                **update,
-                "handled": False,
-                "has_active_task": False,
-                "task_projection": {},
-                "assistant_content": None,
-                "confirmation_decision": {},
-                "projection_aborted": True,
-                "projection_abort_interrupt": coerce_json_dict(current_interrupt),
-                "resume_route": "end",
-                "events": [],
-            }
         if action == "skip_current_action" or (
             action in {"reject", "cancel"}
             and action_workflow.is_optional_skip_interrupt(current_interrupt)
@@ -1237,54 +1199,59 @@ class _PendingTaskInvocation:
     context: PendingTaskRuntimeContext
     continuation: PendingTaskContinuationRef
     config: RunnableConfig
+    is_resume: bool
 
 
-def build_pending_task_thread_id(
+def _current_runtime_thread_id() -> str | None:
+    try:
+        configurable = coerce_json_dict(get_config().get("configurable"))
+    except RuntimeError:
+        return None
+    thread_id = configurable.get("thread_id")
+    return thread_id if isinstance(thread_id, str) and thread_id else None
+
+
+def _runtime_checkpoint_locator(
+    input_state: PendingTaskGraphInput,
     *,
-    team_id: int,
-    user_id: int,
-    session_id: int,
-    task_id: int | None = None,
-    continuation_id: str | None = None,
-) -> str:
-    """Return the canonical legacy or isolated continuation thread."""
-
-    return pending_task_thread_id(
-        team_id=team_id,
-        user_id=user_id,
-        session_id=session_id,
-        task_id=task_id,
-        continuation_id=continuation_id,
-    )
-
-
-def _bind_continuation_namespace_from_runtime(
-    continuation: PendingTaskContinuationRef,
-    *,
-    side_effects: PendingTaskGraphSideEffects,
-) -> PendingTaskContinuationRef:
-    """Capture a new child namespace without rewriting a durable locator."""
-
+    require_root_runtime: bool,
+) -> tuple[str, str]:
     try:
         runtime_config = get_config()
     except RuntimeError:
-        runtime_config = {}
+        if require_root_runtime:
+            raise RuntimeError(
+                "durable pending-task execution requires Agent Root Graph runtime"
+            ) from None
+        team_id = int(input_state.get("team_id") or 0)
+        user_id = int(input_state.get("user_id") or 0)
+        session_id = int(input_state.get("session_id") or 0)
+        return (
+            build_agent_root_thread_id(
+                team_id=team_id,
+                user_id=user_id,
+                session_id=session_id,
+            ),
+            f"{PENDING_TASK_CHILD_NAMESPACE_PREFIX}ephemeral-{uuid4().hex}",
+        )
     configurable = coerce_json_dict(runtime_config.get("configurable"))
-    checkpoint_ns = continuation.get("checkpoint_ns", "")
-    if not checkpoint_ns:
-        runtime_checkpoint_ns = configurable.get("checkpoint_ns")
-        if isinstance(runtime_checkpoint_ns, str):
-            checkpoint_ns = runtime_checkpoint_ns
-    bound = bind_pending_task_namespace(continuation, checkpoint_ns)
-    side_effects.checkpoint_ref = bound
-    return bound
+    thread_id = configurable.get("thread_id")
+    checkpoint_ns = configurable.get("checkpoint_ns")
+    if not isinstance(thread_id, str) or not thread_id:
+        raise ValueError("pending-task root thread is unavailable")
+    if (
+        not isinstance(checkpoint_ns, str)
+        or not checkpoint_ns.startswith(PENDING_TASK_CHILD_NAMESPACE_PREFIX)
+    ):
+        raise ValueError("pending-task child namespace is unavailable")
+    return thread_id, checkpoint_ns
 
 
 def _with_pending_checkpoint_ref(
     interrupt_payload: AgentInterruptPayload,
     context: PendingTaskRuntimeContext,
 ) -> AgentInterruptPayload:
-    """Attach the exact authenticated continuation before native suspension."""
+    """Attach the server-owned V2 locator before native suspension."""
 
     continuation = context.side_effects.checkpoint_ref
     if continuation is None:
@@ -1298,9 +1265,14 @@ def prepare_pending_task_continuation(
     input_state: PendingTaskGraphInput,
     *,
     side_effects: PendingTaskGraphSideEffects,
+    require_root_runtime: bool = True,
 ) -> PendingTaskContinuationRef:
-    """Resolve a new invocation or an explicit continuation for resume."""
+    """Resolve an exact Root-owned continuation; legacy child refs are invalid."""
 
+    root_thread_id, checkpoint_ns = _runtime_checkpoint_locator(
+        input_state,
+        require_root_runtime=require_root_runtime,
+    )
     resume_payload = coerce_json_dict(input_state.get("resume_payload"))
     raw_continuation = input_state.get("continuation_ref") or side_effects.checkpoint_ref
     if raw_continuation is not None:
@@ -1309,6 +1281,7 @@ def prepare_pending_task_continuation(
             expected_team_id=int(input_state.get("team_id") or 0),
             expected_user_id=int(input_state.get("user_id") or 0),
             expected_session_id=int(input_state.get("session_id") or 0),
+            expected_thread_id=root_thread_id,
         )
         if continuation is None:
             raise ValueError("invalid pending-task continuation")
@@ -1319,70 +1292,19 @@ def prepare_pending_task_continuation(
             team_id=int(input_state.get("team_id") or 0),
             user_id=int(input_state.get("user_id") or 0),
             session_id=int(input_state.get("session_id") or 0),
-            task_id=_optional_object_id(
-                side_effects.task or _task_snapshot_from_input(input_state)
-            ),
+            task_id=_optional_object_id(side_effects.task or _task_snapshot_from_input(input_state)),
+            root_thread_id=root_thread_id,
+            checkpoint_ns=checkpoint_ns,
         )
     side_effects.checkpoint_ref = continuation
     input_state["continuation_ref"] = continuation
     return continuation
 
 
-def prepare_pending_task_checkpoint(
-    input_state: PendingTaskGraphInput,
-    *,
-    side_effects: PendingTaskGraphSideEffects,
-) -> PendingTaskContinuationRef:
-    """Compatibility alias for the explicit continuation contract."""
 
-    return prepare_pending_task_continuation(input_state, side_effects=side_effects)
-
-
-def build_pending_task_checkpoint_ref(
-    *,
-    team_id: int,
-    user_id: int,
-    session_id: int,
-    task_id: int | None = None,
-    continuation_id: str | None = None,
-) -> PendingTaskContinuationRef:
-    """Create a continuation whose returned identity must be persisted for resume."""
-
-    return new_pending_task_continuation(
-        team_id=team_id,
-        user_id=user_id,
-        session_id=session_id,
-        task_id=task_id,
-        continuation_id=continuation_id,
-    )
-
-
-def pending_task_graph_config_from_ref(
-    checkpoint_ref: PendingTaskContinuationRef,
-) -> RunnableConfig:
-    return pending_task_checkpoint_config(checkpoint_ref)
-
-
-def build_pending_task_graph_config(
-    *,
-    team_id: int,
-    user_id: int,
-    session_id: int,
-    task_id: int | None = None,
-    continuation_id: str | None = None,
-) -> RunnableConfig:
-    return pending_task_checkpoint_config(
-        build_pending_task_checkpoint_ref(
-            team_id=team_id,
-            user_id=user_id,
-            session_id=session_id,
-            task_id=task_id,
-            continuation_id=continuation_id,
-        )
-    )
-
-
-pending_task_graph_service = PendingTaskGraphService(checkpointer=agent_checkpoint_saver)
+pending_task_graph_service = PendingTaskGraphService(
+    checkpointer=agent_checkpoint_saver
+)
 
 
 def _checkpoint_state_from_input(input_state: PendingTaskGraphInput) -> PendingTaskGraphState:
@@ -1613,12 +1535,12 @@ def _turn_relation_decision_from_text(
                 relation="RESUME_SUSPENDED_DRAFT",
                 confidence=1.0,
                 target_task_id=candidate_id,
-                reason="用户明确表示继续，且当前只有一个挂起草稿。",
+                reason="用户明确表示继续，且当前只有一个挂起草稿。",  # noqa: RUF001
             )
     return session_state.AgentTurnRelationDecision(
         relation="ASK_USER",
         confidence=1.0,
-        reason="用户表示继续挂起草稿，但无法唯一定位是哪一个。",
+        reason="用户表示继续挂起草稿，但无法唯一定位是哪一个。",  # noqa: RUF001
     )
 
 
@@ -1656,30 +1578,6 @@ def _normalized_turn_relation_text(content: str) -> str:
 def _resume_action(resume_payload: JSONDict) -> str | None:
     action = resume_payload.get("action")
     return action if isinstance(action, str) else None
-
-
-def _is_projection_abort_complete(
-    checkpoint_values: object,
-    interrupts: object,
-    *,
-    expected_interrupt: AgentInterruptPayload | None = None,
-) -> bool:
-    """Verify the exact durable proof of a released child interrupt."""
-
-    values = coerce_json_dict(checkpoint_values)
-    abort_interrupt = coerce_json_dict(values.get("projection_abort_interrupt"))
-    return (
-        not interrupts
-        and values.get("projection_aborted") is True
-        and values.get("pending_interrupt_requested") is False
-        and values.get("current_interrupt") is None
-        and values.get("resume_route") == "end"
-        and values.get("effect_intents") == []
-        and (
-            expected_interrupt is None
-            or abort_interrupt == coerce_json_dict(expected_interrupt)
-        )
-    )
 
 
 def _resume_reason(resume_payload: JSONDict, current_interrupt: JSONDict | None) -> str | None:

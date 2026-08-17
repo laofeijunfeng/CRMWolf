@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch, watchEffect } from 'vue'
+import { computed, onMounted, ref, watchEffect } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useRoute, useRouter } from 'vue-router'
-import { CheckCircle2, Clock3, FileText, Plus, RefreshCw, XCircle } from 'lucide-vue-next'
+import { CheckCircle2, Clock3, FileText, PauseCircle, Plus, RefreshCw, XCircle } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { DataTable, HoverInfo, TableRowActions, type ActionConfig } from '@/components/crmwolf'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
@@ -24,8 +23,12 @@ import { Sheet, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/she
 import { DetailSheetContent } from '@/components/ui/detail-sheet'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import FollowUpFormDialog from '@/components/dialogs/FollowUpFormDialog.vue'
-import FollowUpConfirmationPanel from '@/components/customer-tracking/FollowUpConfirmationPanel.vue'
-import { followUpTaskApi, type FollowUpTaskItem, type FollowUpTaskStatusFilter } from '@/api/followUpTask'
+import {
+  followUpTaskApi,
+  type FollowUpTaskItem,
+  type FollowUpTaskPendingConfirmation,
+  type FollowUpTaskStatusFilter,
+} from '@/api/followUpTask'
 import { handleApiError } from '@/utils/errorHandler'
 import { confirmDialog } from '@/utils/confirmDialog'
 import { useHeaderStore, type TabItem } from '@/stores/header'
@@ -37,8 +40,13 @@ import { formatLocalDate } from '@/utils/format'
 
 usePageTitle()
 
-type TrackingTabKey = FollowUpTaskStatusFilter | 'confirmations'
 type TrackingDueTone = 'overdue' | 'today' | 'soon' | 'future' | 'closed' | 'empty'
+
+const confirmationReply = {
+  complete: '已完成',
+  keepOpen: '先放着',
+  cancel: '不管了',
+} as const
 type TrackingRow = FollowUpTaskItem & {
   customer_name: string
   owner_name: string
@@ -49,12 +57,10 @@ type TrackingRow = FollowUpTaskItem & {
   status_label: string
 }
 
-const route = useRoute()
-const router = useRouter()
 const headerStore = useHeaderStore()
 const confirmationStore = useFollowUpConfirmationStore()
-const { pendingCount: pendingConfirmationCount } = storeToRefs(confirmationStore)
-const { fetchPendingCases, fetchPendingCount } = confirmationStore
+const { resolvingCaseId, postResolveRefreshError } = storeToRefs(confirmationStore)
+const { resolveCase } = confirmationStore
 const loading = ref(false)
 const tasks = ref<FollowUpTaskItem[]>([])
 const selectedTaskId = ref<string | null>(null)
@@ -65,9 +71,9 @@ const delayDialogOpen = ref(false)
 const delaySubmitting = ref(false)
 const delayDate = ref<Date | null>(null)
 const delayReason = ref('')
+const delayConfirmationCaseId = ref<string | null>(null)
 
-const initialTab: TrackingTabKey = route.query['tab'] === 'confirmations' ? 'confirmations' : 'open'
-const activeTab = ref<string>(initialTab)
+const activeTab = ref<string>('open')
 const activeFilters = ref<ListFilterCondition[]>([])
 const activeSorts = ref<ListSortCondition[]>([])
 const activeColumns = ref<ViewPreferenceConfig['columns']>([])
@@ -77,7 +83,6 @@ const pageSize = ref(20)
 const tabs = computed<TabItem[]>(() => [
   { key: 'all', label: '所有追踪' },
   { key: 'open', label: '待处理' },
-  { key: 'confirmations', label: '待确认', badge: pendingConfirmationCount.value },
   { key: 'completed', label: '已完成' },
   { key: 'cancelled', label: '已关闭' },
 ])
@@ -94,12 +99,13 @@ const columns = [
     filterType: 'enum' as const,
     filterOptions: [
       { value: '待处理', label: '待处理' },
+      { value: '需确认', label: '需确认' },
       { value: '已完成', label: '已完成' },
       { value: '已关闭', label: '已关闭' },
     ],
   },
   { key: 'tracking_time', title: '跟进时效', width: '150px', sortable: true, sortType: 'date' as const },
-  { key: 'actions', title: '操作', width: '220px', align: 'center' as const, fixed: 'right' as const },
+  { key: 'actions', title: '操作', width: '260px', align: 'center' as const, fixed: 'right' as const },
 ]
 
 const customFilterViews = useCustomFilterViews({
@@ -126,15 +132,15 @@ const rows = computed<TrackingRow[]>(() => tasks.value.map((task) => ({
   tracking_time: formatTrackingDueLabel(task),
   tracking_time_tone: getTrackingDueTone(task),
   tracking_time_tooltip_rows: getTrackingDueTooltipRows(task),
-  status_label: statusLabel(task.status),
+  status_label: hasPendingConfirmation(task) ? '需确认' : statusLabel(task.status),
 })))
 
 const filteredRows = computed(() => applySorts(applyFilters(rows.value, activeFilters.value), activeSorts.value))
 const pagedRows = computed(() => filteredRows.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
 const selectedCustomerId = computed(() => selectedTask.value?.customer?.id ?? selectedTask.value?.customer?.public_id ?? null)
+const selectedPendingConfirmation = computed(() => firstPendingConfirmation(selectedTask.value))
 
-function taskStatusForTab(tab: string): FollowUpTaskStatusFilter | null {
-  if (tab === 'confirmations') return null
+function taskStatusForTab(tab: string): FollowUpTaskStatusFilter {
   if (isCustomFilterViewTab(tab)) return 'all'
   if (tab === 'all' || tab === 'open' || tab === 'completed' || tab === 'cancelled') return tab
   return 'open'
@@ -142,7 +148,6 @@ function taskStatusForTab(tab: string): FollowUpTaskStatusFilter | null {
 
 async function fetchTasks(): Promise<void> {
   const status = taskStatusForTab(activeTab.value)
-  if (status === null) return
 
   loading.value = true
   try {
@@ -160,14 +165,6 @@ async function fetchTasks(): Promise<void> {
 }
 
 async function refreshActiveView(): Promise<void> {
-  if (activeTab.value === 'confirmations') {
-    try {
-      await fetchPendingCases()
-    } catch (error) {
-      handleApiError(error, '刷新待确认追踪')
-    }
-    return
-  }
   await fetchTasks()
 }
 
@@ -198,8 +195,9 @@ async function transitionTask(task: FollowUpTaskItem, action: 'complete' | 'canc
   }
 }
 
-function openDelayDialog(task: FollowUpTaskItem): void {
+function openDelayDialog(task: FollowUpTaskItem, confirmationCaseId: string | null = null): void {
   selectedTask.value = task
+  delayConfirmationCaseId.value = confirmationCaseId
   delayDate.value = task.due_at !== null && task.due_at !== undefined && task.due_at.trim().length > 0
     ? new Date(task.due_at)
     : new Date()
@@ -214,6 +212,23 @@ async function submitDelay(): Promise<void> {
   }
   delaySubmitting.value = true
   try {
+    if (delayConfirmationCaseId.value !== null) {
+      const reason = delayReason.value.trim()
+      const replyText = reason.length > 0
+        ? `延期到 ${formatLocalDate(delayDate.value)}，原因：${reason}`
+        : `延期到 ${formatLocalDate(delayDate.value)}`
+      const resolved = await resolvePendingConfirmation(
+        selectedTask.value,
+        delayConfirmationCaseId.value,
+        replyText,
+      )
+      if (resolved) {
+        delayDialogOpen.value = false
+        delayConfirmationCaseId.value = null
+      }
+      return
+    }
+
     const response = await followUpTaskApi.transition(selectedTask.value.public_id, {
       action: 'delay',
       proposed_due_at: formatLocalDate(delayDate.value),
@@ -230,15 +245,104 @@ async function submitDelay(): Promise<void> {
   }
 }
 
-const primaryActions = (row: TrackingRow): ActionConfig[] => [
-  { label: '完成', icon: CheckCircle2, visible: row.status === 'OPEN', handler: () => void transitionTask(row, 'complete') },
-  { label: '延期', icon: Clock3, visible: row.status === 'OPEN', handler: () => openDelayDialog(row) },
-]
+function firstPendingConfirmation(task: FollowUpTaskItem | null | undefined): FollowUpTaskPendingConfirmation | null {
+  return task?.pending_confirmations?.[0] ?? null
+}
 
-const secondaryActions = (row: TrackingRow): ActionConfig[] => [
-  { label: '关闭', icon: XCircle, visible: row.status === 'OPEN', destructive: true, handler: () => void transitionTask(row, 'cancel') },
-  { label: '添加跟进记录', icon: Plus, visible: Boolean(row.customer?.id), handler: () => openFollowUpDialog(row) },
-]
+function hasPendingConfirmation(task: FollowUpTaskItem | null | undefined): boolean {
+  return firstPendingConfirmation(task) !== null
+}
+
+async function refreshTaskReadModels(taskPublicId: string): Promise<void> {
+  await fetchTasks()
+  if (selectedTaskId.value !== taskPublicId) return
+  try {
+    selectedTask.value = await followUpTaskApi.getDetail(taskPublicId)
+  } catch (error) {
+    handleApiError(error, '刷新追踪详情')
+  }
+}
+
+async function resolvePendingConfirmation(
+  task: FollowUpTaskItem,
+  casePublicId: string,
+  replyText: string,
+): Promise<boolean> {
+  try {
+    const result = await resolveCase(casePublicId, replyText)
+    if (!result.decision.resolved) {
+      toast.warning('还需要明确处理方式', {
+        description: result.assistant_follow_up_prompt ?? '请提供更明确的处理结果。',
+      })
+      return false
+    }
+    await refreshTaskReadModels(task.public_id)
+    toast.success('追踪状态已更新', postResolveRefreshError.value !== null
+      ? { description: postResolveRefreshError.value }
+      : undefined)
+    return true
+  } catch (error) {
+    handleApiError(error, '处理待确认追踪')
+    return false
+  }
+}
+
+const primaryActions = (row: TrackingRow): ActionConfig[] => {
+  const confirmation = firstPendingConfirmation(row)
+  if (confirmation !== null) {
+    return [
+      {
+        label: '确认完成',
+        icon: CheckCircle2,
+        disabled: resolvingCaseId.value === confirmation.public_id,
+        handler: () => void resolvePendingConfirmation(row, confirmation.public_id, confirmationReply.complete),
+      },
+      {
+        label: '延期',
+        icon: Clock3,
+        disabled: resolvingCaseId.value === confirmation.public_id,
+        handler: () => openDelayDialog(row, confirmation.public_id),
+      },
+    ]
+  }
+  return [
+    { label: '完成', icon: CheckCircle2, visible: row.status === 'OPEN', handler: () => void transitionTask(row, 'complete') },
+    { label: '延期', icon: Clock3, visible: row.status === 'OPEN', handler: () => openDelayDialog(row) },
+  ]
+}
+
+const secondaryActions = (row: TrackingRow): ActionConfig[] => {
+  const confirmation = firstPendingConfirmation(row)
+  const addFollowUpAction = {
+    label: '添加跟进记录',
+    icon: Plus,
+    visible: Boolean(row.customer?.id),
+    handler: (): void => openFollowUpDialog(row),
+  }
+  if (confirmation !== null) {
+    const resolving = resolvingCaseId.value === confirmation.public_id
+    return [
+      {
+        label: '保持待处理',
+        icon: PauseCircle,
+        disabled: resolving,
+        handler: () => void resolvePendingConfirmation(row, confirmation.public_id, confirmationReply.keepOpen),
+      },
+      {
+        label: '关闭追踪',
+        icon: XCircle,
+        destructive: true,
+        disabled: resolving,
+        handler: () => void resolvePendingConfirmation(row, confirmation.public_id, confirmationReply.cancel),
+      },
+      addFollowUpAction,
+    ]
+  }
+  return [
+    { label: '关闭', icon: XCircle, visible: row.status === 'OPEN', destructive: true, handler: () => void transitionTask(row, 'cancel') },
+    addFollowUpAction,
+  ]
+}
 
 function actionRow(row: TrackingRow): Record<string, unknown> {
   return row as unknown as Record<string, unknown>
@@ -255,7 +359,8 @@ function statusLabel(status: string): string {
   return '待处理'
 }
 
-function statusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
+function statusVariant(status: string, requiresConfirmation = false): 'default' | 'secondary' | 'destructive' | 'outline' {
+  if (requiresConfirmation) return 'secondary'
   if (status === 'COMPLETED') return 'default'
   if (status === 'CANCELLED') return 'secondary'
   return 'outline'
@@ -396,26 +501,7 @@ function handleColumnConfigReset(): void {
 
 onMounted(() => {
   void customFilterViews.loadCustomViews()
-  void fetchPendingCount().catch(() => undefined)
-  if (activeTab.value !== 'confirmations') {
-    void fetchTasks()
-  }
-})
-
-watch(activeTab, (tab) => {
-  const routeTab = route.query['tab']
-  if (tab === 'confirmations') {
-    if (routeTab === 'confirmations') return
-    void router.replace({
-      query: { ...route.query, tab: 'confirmations' },
-    }).catch(() => undefined)
-    return
-  }
-
-  if (routeTab === undefined) return
-  const query = { ...route.query }
-  delete query['tab']
-  void router.replace({ query }).catch(() => undefined)
+  void fetchTasks()
 })
 
 useTopBarRegistration({
@@ -443,19 +529,14 @@ watchEffect(() => {
     if (!restoredBuiltInState) {
       activeSorts.value = []
     }
-    if (activeTab.value !== 'confirmations') {
-      void fetchTasks()
-    }
+    void fetchTasks()
   }
 })
 </script>
 
 <template>
   <div class="customer-tracking-page">
-    <FollowUpConfirmationPanel v-if="activeTab === 'confirmations'" />
-
     <DataTable
-      v-else
       :columns="columns"
       :data="pagedRows"
       :loading="loading"
@@ -495,16 +576,31 @@ watchEffect(() => {
       </template>
 
       <template #cell-tracking_content="{ row }">
-        <HoverInfo side="top" align="start" content-class="tracking-content-hover-card">
-          <template #trigger>
-            <span class="tracking-content">{{ row.tracking_content }}</span>
-          </template>
-          <div class="tracking-content-hover-text">{{ row.tracking_content }}</div>
-        </HoverInfo>
+        <div class="tracking-content-cell">
+          <HoverInfo side="top" align="start" content-class="tracking-content-hover-card">
+            <template #trigger>
+              <span class="tracking-content">{{ row.tracking_content }}</span>
+            </template>
+            <div class="tracking-content-hover-text">{{ row.tracking_content }}</div>
+          </HoverInfo>
+          <div
+            v-if="firstPendingConfirmation(row)"
+            class="tracking-confirmation-inline"
+            role="status"
+          >
+            <span class="tracking-confirmation-label">需确认</span>
+            <span class="tracking-confirmation-question">
+              {{ firstPendingConfirmation(row)?.question_text }}
+            </span>
+            <span v-if="(row.pending_confirmations?.length ?? 0) > 1" class="tracking-confirmation-more">
+              另有 {{ (row.pending_confirmations?.length ?? 1) - 1 }} 条
+            </span>
+          </div>
+        </div>
       </template>
 
       <template #cell-status_label="{ row }">
-        <Badge :variant="statusVariant(row.status)">{{ row.status_label }}</Badge>
+        <Badge :variant="statusVariant(row.status, hasPendingConfirmation(row))">{{ row.status_label }}</Badge>
       </template>
 
       <template #cell-tracking_time="{ row }">
@@ -540,10 +636,14 @@ watchEffect(() => {
           <div class="tracking-mobile-card-title">
             {{ row.customer_name }}
           </div>
-          <Badge :variant="statusVariant(row.status)">{{ row.status_label }}</Badge>
+          <Badge :variant="statusVariant(row.status, hasPendingConfirmation(row))">{{ row.status_label }}</Badge>
         </div>
         <div class="tracking-mobile-card-content">
           {{ row.tracking_content }}
+        </div>
+        <div v-if="firstPendingConfirmation(row)" class="tracking-confirmation-inline" role="status">
+          <span class="tracking-confirmation-label">需确认</span>
+          <span class="tracking-confirmation-question">{{ firstPendingConfirmation(row)?.question_text }}</span>
         </div>
         <div class="tracking-mobile-card-meta">
           <span class="tracking-time-badge" :class="`tracking-time-badge--${row.tracking_time_tone}`">
@@ -583,6 +683,11 @@ watchEffect(() => {
           <div class="tracking-sheet-content">
             <div v-if="detailLoading" class="tracking-sheet-muted">正在加载...</div>
             <div v-else-if="selectedTask" class="tracking-detail">
+              <div v-if="selectedPendingConfirmation" class="tracking-confirmation-detail" role="status">
+                <span class="tracking-confirmation-label">需确认</span>
+                <p class="tracking-confirmation-detail-question">{{ selectedPendingConfirmation.question_text }}</p>
+              </div>
+
               <Card class="tracking-info-card">
                 <CardContent class="p-0">
                   <div class="tracking-card-header">
@@ -601,7 +706,7 @@ watchEffect(() => {
                       <div class="tracking-attribute-item">
                         <div class="tracking-attribute-label">状态</div>
                         <div class="tracking-attribute-value">
-                          <Badge :variant="statusVariant(selectedTask.status)">{{ statusLabel(selectedTask.status) }}</Badge>
+                          <Badge :variant="statusVariant(selectedTask.status, selectedPendingConfirmation !== null)">{{ selectedPendingConfirmation ? '需确认' : statusLabel(selectedTask.status) }}</Badge>
                         </div>
                       </div>
                       <div class="tracking-attribute-item">
@@ -647,7 +752,36 @@ watchEffect(() => {
 
         <SheetFooter class="tracking-sheet-footer p-4 border-t border-wolf-border-default-v2">
           <Button variant="outline" @click="selectedTaskId = null">关闭</Button>
-          <template v-if="selectedTask?.status === 'OPEN'">
+          <template v-if="selectedTask && selectedPendingConfirmation">
+            <Button
+              variant="ghost"
+              :disabled="resolvingCaseId === selectedPendingConfirmation.public_id"
+              @click="resolvePendingConfirmation(selectedTask, selectedPendingConfirmation.public_id, confirmationReply.keepOpen)"
+            >
+              保持待处理
+            </Button>
+            <Button
+              variant="outline"
+              :disabled="resolvingCaseId === selectedPendingConfirmation.public_id"
+              @click="resolvePendingConfirmation(selectedTask, selectedPendingConfirmation.public_id, confirmationReply.cancel)"
+            >
+              关闭追踪
+            </Button>
+            <Button
+              variant="outline"
+              :disabled="resolvingCaseId === selectedPendingConfirmation.public_id"
+              @click="openDelayDialog(selectedTask, selectedPendingConfirmation.public_id)"
+            >
+              延期
+            </Button>
+            <Button
+              :disabled="resolvingCaseId === selectedPendingConfirmation.public_id"
+              @click="resolvePendingConfirmation(selectedTask, selectedPendingConfirmation.public_id, confirmationReply.complete)"
+            >
+              确认完成
+            </Button>
+          </template>
+          <template v-else-if="selectedTask?.status === 'OPEN'">
             <Button variant="outline" @click="openDelayDialog(selectedTask)">延期</Button>
             <Button variant="outline" @click="transitionTask(selectedTask, 'cancel')">关闭追踪</Button>
             <Button @click="transitionTask(selectedTask, 'complete')">完成</Button>
@@ -667,7 +801,7 @@ watchEffect(() => {
     <Dialog v-model:open="delayDialogOpen">
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>延期客户追踪</DialogTitle>
+          <DialogTitle>{{ delayConfirmationCaseId ? '确认延期' : '延期客户追踪' }}</DialogTitle>
           <DialogDescription class="sr-only">选择新的追踪时间</DialogDescription>
         </DialogHeader>
         <div class="tracking-delay-form">
@@ -729,6 +863,54 @@ watchEffect(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.tracking-content-cell {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: $wolf-space-xs-v2;
+}
+
+.tracking-confirmation-inline {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: $wolf-space-xs-v2;
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  line-height: 18px;
+}
+
+.tracking-confirmation-label {
+  flex: 0 0 auto;
+  color: $wolf-warning-text-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
+}
+
+.tracking-confirmation-question {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.tracking-confirmation-more {
+  flex: 0 0 auto;
+  color: $wolf-text-tertiary-v2;
+}
+
+.tracking-confirmation-detail {
+  display: flex;
+  align-items: baseline;
+  gap: $wolf-space-sm-v2;
+  padding: 0 $wolf-space-xs-v2;
+}
+
+.tracking-confirmation-detail-question {
+  margin: 0;
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-body-v2;
+  line-height: $wolf-line-height-body-v2;
 }
 
 :global(.tracking-content-hover-card) {

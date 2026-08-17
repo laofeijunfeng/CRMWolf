@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
-
-from sqlalchemy.orm import Session
+from typing import TYPE_CHECKING, Any, Protocol
 
 from app.crud.permission import permission_crud
-from app.crud.sales_commitment import follow_up_task_crud
+from app.crud.sales_commitment import follow_up_task_confirmation_case_crud, follow_up_task_crud
 from app.models.customer import Customer, CustomerMember
 from app.models.customer_activity import CustomerActivity
 from app.models.sales_commitment import FollowUpTask, FollowUpTaskStatus
@@ -19,6 +17,13 @@ from app.services.follow_up_task_semantic_evidence_service import (
     follow_up_task_semantic_evidence_service,
 )
 from app.services.work_summary_service import work_summary_service
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
+    from app.models.sales_commitment import FollowUpTaskConfirmationCase
+
+
 from app.utils.time import (
     FOLLOW_UP_TASK_DUE_WINDOW_OVERDUE,
     business_now,
@@ -34,13 +39,28 @@ FOLLOW_UP_TASK_QUERY_STATUSES = {
 FOLLOW_UP_TASK_OWNER_SCOPES = {"mine", "customer"}
 
 
+class FollowUpTaskConfirmationReadRepository(Protocol):
+    def list_pending_for_tasks(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        owner_id: str,
+        task_ids: list[int],
+    ) -> list[FollowUpTaskConfirmationCase]: ...
+
+
 class FollowUpTaskQueryService:
     def __init__(
         self,
         *,
         semantic_evidence_service: FollowUpTaskSemanticEvidenceService | None = None,
+        confirmation_read_repository: FollowUpTaskConfirmationReadRepository = (
+            follow_up_task_confirmation_case_crud
+        ),
     ) -> None:
         self.semantic_evidence_service = semantic_evidence_service or follow_up_task_semantic_evidence_service
+        self.confirmation_read_repository = confirmation_read_repository
 
     def list_tasks(
         self,
@@ -100,12 +120,19 @@ class FollowUpTaskQueryService:
             db,
             user_ids=[task.owner_id for task in rows] + [task.creator_id for task in rows],
         )
+        pending_confirmations_by_task_id = self._pending_confirmations_by_task_id(
+            db,
+            team_id=team_id,
+            user_id=user_id,
+            tasks=rows,
+        )
         items = [
             self._task_payload(
                 task,
                 customers_by_id.get(task.customer_id),
                 users_by_id=users_by_id,
                 semantic_evidence=semantic_evidence_by_task_id.get(str(task.public_id)),
+                pending_confirmations=pending_confirmations_by_task_id.get(task.id, []),
             )
             for task in rows
         ]
@@ -159,7 +186,18 @@ class FollowUpTaskQueryService:
                 activity.owner_id if activity is not None else None,
             ],
         )
-        payload = self._task_payload(task, customer, users_by_id=users_by_id)
+        pending_confirmations_by_task_id = self._pending_confirmations_by_task_id(
+            db,
+            team_id=team_id,
+            user_id=user_id,
+            tasks=[task],
+        )
+        payload = self._task_payload(
+            task,
+            customer,
+            users_by_id=users_by_id,
+            pending_confirmations=pending_confirmations_by_task_id.get(task.id, []),
+        )
         payload["source_activity"] = self._activity_payload(activity, users_by_id=users_by_id)
         return payload
 
@@ -338,6 +376,7 @@ class FollowUpTaskQueryService:
         *,
         users_by_id: dict[str, dict[str, Any]] | None = None,
         semantic_evidence: list[dict[str, Any]] | None = None,
+        pending_confirmations: list[FollowUpTaskConfirmationCase] | None = None,
     ) -> dict[str, Any]:
         users = users_by_id or {}
         return {
@@ -364,6 +403,38 @@ class FollowUpTaskQueryService:
             "created_time": task.created_time.isoformat() if task.created_time else None,
             "updated_time": task.updated_time.isoformat() if task.updated_time else None,
             "semantic_evidence": semantic_evidence or [],
+            "pending_confirmations": [
+                self._pending_confirmation_payload(case)
+                for case in pending_confirmations or []
+            ],
+        }
+
+    def _pending_confirmations_by_task_id(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_id: int,
+        tasks: list[FollowUpTask],
+    ) -> dict[int, list[FollowUpTaskConfirmationCase]]:
+        cases = self.confirmation_read_repository.list_pending_for_tasks(
+            db,
+            team_id=team_id,
+            owner_id=str(user_id),
+            task_ids=[task.id for task in tasks],
+        )
+        result: dict[int, list[FollowUpTaskConfirmationCase]] = {}
+        for case in cases:
+            result.setdefault(case.task_id, []).append(case)
+        return result
+
+    @staticmethod
+    def _pending_confirmation_payload(case: FollowUpTaskConfirmationCase) -> dict[str, Any]:
+        return {
+            "public_id": case.public_id,
+            "question_text": case.question_text,
+            "suggested_action": case.suggested_action,
+            "created_time": case.created_time.isoformat() if case.created_time else None,
         }
 
     def _activity_payload(

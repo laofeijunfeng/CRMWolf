@@ -25,7 +25,6 @@ from app.services.agent.pending_application_step_projection import (
 )
 from app.services.agent.pending_application_steps import DefaultPendingApplicationStepExecutor
 from app.services.agent.pending_continuation import (
-    bind_pending_task_namespace,
     new_pending_task_continuation,
 )
 from app.services.agent.state import PendingTaskTurnResult
@@ -79,28 +78,18 @@ def db_session():
 
 
 def _continuation():
-    return bind_pending_task_namespace(
-        new_pending_task_continuation(
-            team_id=7,
-            user_id=11,
-            session_id=13,
-            task_id=17,
-            continuation_id="turn-application-step",
-        ),
-        "pending_task_subgraph:child-1",
+    return new_pending_task_continuation(
+        team_id=7, user_id=11, session_id=13, task_id=17,
+        root_thread_id="crm_agent:7:11:13:13",
+        checkpoint_ns="pending_task_subgraph:child-1",
     )
 
 
 def _continuation_without_task():
-    return bind_pending_task_namespace(
-        new_pending_task_continuation(
-            team_id=7,
-            user_id=11,
-            session_id=13,
-            task_id=None,
-            continuation_id="turn-application-step-no-task",
-        ),
-        "pending_task_subgraph:child-no-task",
+    return new_pending_task_continuation(
+        team_id=7, user_id=11, session_id=13, task_id=None,
+        root_thread_id="crm_agent:7:11:13:13",
+        checkpoint_ns="pending_task_subgraph:child-no-task",
     )
 
 
@@ -123,6 +112,7 @@ def _request(db_session, *, step=None):
         team_id=7,
         user_id=11,
         session_id=13,
+        root_thread_id="crm_agent:7:11:13:13",
         step=step or _step(db_session),
         task=db_session.get(AgentTask, 17),
         authorization="Bearer test",

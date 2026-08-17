@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { ChevronRight, CircleAlert } from 'lucide-vue-next'
-import { AmountText, Button, HoverInfo, Progress, Skeleton } from '@/components/crmwolf'
+import { AmountText, Badge, Button, HoverInfo, Progress, Skeleton } from '@/components/crmwolf'
 import {
   Empty,
   EmptyDescription,
@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/empty'
 import { Separator } from '@/components/ui/separator'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { opportunityApi, type OpportunityListResponse } from '@/api/opportunity'
+import { OpportunityStatus, opportunityApi, type OpportunityListResponse } from '@/api/opportunity'
 import { normalizePaginatedResponse } from '@/types/pagination'
 
 const PREVIEW_LIMIT = 3
@@ -62,11 +62,14 @@ const loadOpportunities = async (): Promise<void> => {
     const response = await opportunityApi.getOpportunities({
       customer_id: props.customerId,
       limit: PREVIEW_LIMIT,
+      status_exclude: OpportunityStatus.LOST,
       order_by: 'created_time',
       order_dir: 'desc',
     })
     const normalized = normalizePaginatedResponse(response)
-    opportunities.value = normalized.items.slice(0, PREVIEW_LIMIT)
+    opportunities.value = normalized.items
+      .filter((opportunity) => opportunity.status !== OpportunityStatus.LOST)
+      .slice(0, PREVIEW_LIMIT)
     total.value = normalized.total
     loaded.value = true
   } catch {
@@ -114,13 +117,18 @@ const handleViewAll = (): void => {
     </template>
 
     <section aria-label="客户商机概览">
-      <header class="px-4 pt-4 pb-3">
-        <h3 class="truncate text-xl font-semibold leading-7 text-wolf-text-primary-v2" :title="customerName">
+      <header class="flex items-start justify-between gap-3 px-4 pt-4 pb-3">
+        <h3 class="min-w-0 truncate text-xl font-semibold leading-7 text-wolf-text-primary-v2" :title="customerName">
           {{ customerName }}
         </h3>
-        <p class="mt-1 text-sm text-wolf-text-secondary-v2">
-          商机进展<span v-if="loaded"> · 共 {{ total }} 个</span>
-        </p>
+        <Badge
+          v-if="loaded"
+          variant="outline"
+          class="shrink-0 border-blue-100 bg-blue-50 text-blue-700 hover:bg-blue-50"
+          data-testid="customer-opportunity-total"
+        >
+          共 {{ total }} 个
+        </Badge>
       </header>
 
       <div v-if="loading" class="space-y-3 px-4 pb-4" aria-live="polite" aria-label="正在加载客户商机">
@@ -161,8 +169,18 @@ const handleViewAll = (): void => {
             @click="handleSelectOpportunity(opportunity.id)"
           >
             <span class="flex w-full min-w-0 flex-col">
-              <span class="truncate text-sm font-medium uppercase tracking-[0.08em] text-wolf-text-secondary-v2" :title="opportunity.opportunity_name">
-                {{ opportunity.opportunity_name }}
+              <span class="flex min-w-0 items-start justify-between gap-3">
+                <span class="truncate text-sm font-medium uppercase tracking-[0.08em] text-wolf-text-secondary-v2" :title="opportunity.opportunity_name">
+                  {{ opportunity.opportunity_name }}
+                </span>
+                <Badge
+                  variant="outline"
+                  class="shrink-0 border-blue-100 bg-blue-50 text-blue-700 hover:bg-blue-50"
+                  :data-testid="`customer-opportunity-stage-${opportunity.id}`"
+                  :title="`业务旅程当前状态：${getStageName(opportunity)}`"
+                >
+                  {{ getStageName(opportunity) }}
+                </Badge>
               </span>
               <AmountText
                 :value="opportunity.total_amount"
@@ -173,11 +191,11 @@ const handleViewAll = (): void => {
               <Progress
                 :model-value="getWinProbability(opportunity)"
                 class="mt-3 h-1.5 bg-wolf-bg-card"
-                :aria-label="`${opportunity.opportunity_name} 进度 ${getWinProbability(opportunity)}%`"
+                :aria-label="`${opportunity.opportunity_name} 赢率 ${getWinProbability(opportunity)}%`"
               />
               <span class="mt-2 flex items-center justify-between gap-3 text-sm">
                 <span class="font-medium text-wolf-text-secondary-v2">
-                  {{ getWinProbability(opportunity) }}% · {{ getStageName(opportunity) }}
+                  赢率 {{ getWinProbability(opportunity) }}%
                 </span>
                 <ChevronRight class="h-4 w-4 shrink-0 text-wolf-text-tertiary-v2 group-hover:text-sidebar-accent-foreground" aria-hidden="true" />
               </span>
@@ -203,3 +221,12 @@ const handleViewAll = (): void => {
     </section>
   </HoverInfo>
 </template>
+
+<style scoped lang="scss">
+@use '@/styles/variables-v2.scss' as *;
+
+:global(.customer-opportunity-hover-card) {
+  border-radius: $wolf-radius-popover-v2;
+  box-shadow: $wolf-shadow-hover-v2;
+}
+</style>

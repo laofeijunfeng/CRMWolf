@@ -184,6 +184,9 @@ const canEditPaymentPlanPermission = computed(() => permissionStore.hasPermissio
 const canDeletePaymentPlanPermission = computed(() => permissionStore.hasPermission('payment:plan:delete'))
 const canRecordPaymentPermission = computed(() => permissionStore.hasPermission('payment:confirm'))
 const canCreateInvoice = computed(() => permissionStore.hasPermission('invoice:create'))
+const canCreateInvoiceTitle = computed(() =>
+  resolvedCanEditCustomerContext.value && permissionStore.hasPermission('invoice:title:create')
+)
 
 const isActive = computed(() => opportunity.value?.status === 0)
 const approvalPhase = computed(() => opportunity.value?.approval_phase)
@@ -697,15 +700,18 @@ function handleApplyLicense(): void {
     toast.error('你没有在该客户下申请 License 的权限')
     return
   }
-  if (deployments.value.length === 0) {
-    toast.info('请先在客户详情中维护部署信息')
-    return
-  }
   licenseApplicationDialogOpen.value = true
 }
 
 function handleLicenseApplicationDialogOpenChange(open: boolean): void {
   licenseApplicationDialogOpen.value = open
+}
+
+function handleLicenseDeploymentCreated(deployment: DeploymentInfoResponse): void {
+  deployments.value = [
+    ...deployments.value.filter((item) => item.id !== deployment.id),
+    deployment,
+  ]
 }
 
 async function handleLicenseApplicationSuccess(): Promise<void> {
@@ -1253,6 +1259,7 @@ watch(approvalPhase, phase => {
       :open="invoiceApplicationDialogOpen"
       :fixed-customer="{ id: opportunity.customer_id, account_name: displayCustomerName }"
       :fixed-contract-id="relatedContract?.id ?? null"
+      :can-create-invoice-title="canCreateInvoiceTitle"
       @update:open="handleInvoiceApplicationDialogOpenChange"
       @success="handleInvoiceApplicationSuccess"
     />
@@ -1265,7 +1272,9 @@ watch(approvalPhase, phase => {
       :contracts="relatedContracts"
       :default-license-type="defaultLicenseApplicationType"
       :default-contract-id="approvedRelatedContract?.id ?? null"
+      :can-create-deployment="canCreateLicenseApplication"
       @update:open="handleLicenseApplicationDialogOpenChange"
+      @deployment-created="handleLicenseDeploymentCreated"
       @success="handleLicenseApplicationSuccess"
     />
 

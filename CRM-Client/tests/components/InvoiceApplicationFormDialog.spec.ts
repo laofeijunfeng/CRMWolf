@@ -61,14 +61,24 @@ const PassthroughStub = defineComponent({
   template: '<div><slot /></div>',
 })
 
+const InvoiceTitleFormDialogStub = defineComponent({
+  name: 'InvoiceTitleFormDialog',
+  props: {
+    open: { type: Boolean, default: false },
+  },
+  emits: ['update:open', 'success'],
+  template: '<div data-testid="invoice-title-form-dialog" :data-open="open" />',
+})
+
 const SelectFieldStub = defineComponent({
   name: 'SelectField',
   props: {
     id: { type: String, default: '' },
     modelValue: { type: [String, Number], default: '' },
     options: { type: Array, default: () => [] },
+    addActionLabel: { type: String, default: '' },
   },
-  emits: ['update:modelValue'],
+  emits: ['update:modelValue', 'add'],
   template: '<div :data-testid="id"><slot /></div>',
 })
 
@@ -164,6 +174,7 @@ describe('InvoiceApplicationFormDialog', () => {
           InputField: InputFieldStub,
           InvoiceTypeSegmentedControl: PassthroughStub,
           SelectionSummary: PassthroughStub,
+          InvoiceTitleFormDialog: InvoiceTitleFormDialogStub,
         },
       },
     })
@@ -183,4 +194,63 @@ describe('InvoiceApplicationFormDialog', () => {
 
     expect(wrapper.find('#invoice-application-amount').element).toHaveProperty('value', '100000')
   })
+
+  it('allows a new invoice title to be created inline and selects it', async () => {
+    const wrapper = mount(InvoiceApplicationFormDialog, {
+      props: {
+        open: true,
+        mode: 'create',
+        fixedCustomer: {
+          id: 'customer-1',
+          account_name: '测试客户',
+        },
+        canCreateInvoiceTitle: true,
+      },
+      global: {
+        stubs: {
+          Dialog: DialogStub,
+          DialogContent: PassthroughStub,
+          DialogDescription: PassthroughStub,
+          DialogFooter: PassthroughStub,
+          DialogHeader: PassthroughStub,
+          DialogTitle: PassthroughStub,
+          Button: PassthroughStub,
+          SearchableSelectField: PassthroughStub,
+          SelectField: SelectFieldStub,
+          InputField: InputFieldStub,
+          InvoiceTypeSegmentedControl: PassthroughStub,
+          SelectionSummary: PassthroughStub,
+          InvoiceTitleFormDialog: InvoiceTitleFormDialogStub,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const titleField = findSelectField(wrapper, 'invoice-application-title')
+    expect(titleField.props('addActionLabel')).toBe('新增发票抬头')
+    await titleField.vm.$emit('add')
+    await nextTick()
+    expect(wrapper.getComponent(InvoiceTitleFormDialogStub).props('open')).toBe(true)
+
+    const title = {
+      id: 32,
+      customer_id: 'customer-1',
+      title_type: 'COMPANY' as const,
+      title: '新建测试公司',
+      taxpayer_id: '913100000000000001',
+      bank_name: null,
+      bank_account: null,
+      address: null,
+      phone: null,
+      is_default: false,
+      created_time: '2026-08-17T00:00:00',
+      last_modified_time: '2026-08-17T00:00:00',
+    }
+    await wrapper.getComponent(InvoiceTitleFormDialogStub).vm.$emit('success', title)
+    await nextTick()
+
+    expect(findSelectField(wrapper, 'invoice-application-title').props('modelValue')).toBe('32')
+  })
+
 })

@@ -848,6 +848,45 @@ class FollowUpTaskConfirmationCaseCRUD:
             .first()
         )
 
+    def list_pending_for_tasks(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        owner_id: str,
+        task_ids: list[int],
+        now: datetime | None = None,
+    ) -> list[FollowUpTaskConfirmationCase]:
+        """Return visible pending confirmations for a bounded task read model."""
+
+        normalized_task_ids = list(dict.fromkeys(task_id for task_id in task_ids if task_id))
+        if not normalized_task_ids:
+            return []
+        resolved_now = now or business_now()
+        return (
+            db.query(FollowUpTaskConfirmationCase)
+            .join(FollowUpTask, FollowUpTask.id == FollowUpTaskConfirmationCase.task_id)
+            .filter(
+                FollowUpTaskConfirmationCase.team_id == team_id,
+                FollowUpTaskConfirmationCase.owner_id == owner_id,
+                FollowUpTaskConfirmationCase.task_id.in_(normalized_task_ids),
+                FollowUpTaskConfirmationCase.customer_id == FollowUpTask.customer_id,
+                FollowUpTask.team_id == team_id,
+                FollowUpTask.owner_id == owner_id,
+                FollowUpTaskConfirmationCase.status == FollowUpTaskConfirmationStatus.PENDING,
+                or_(
+                    FollowUpTaskConfirmationCase.expires_at.is_(None),
+                    FollowUpTaskConfirmationCase.expires_at > resolved_now,
+                ),
+            )
+            .order_by(
+                FollowUpTaskConfirmationCase.task_id.asc(),
+                FollowUpTaskConfirmationCase.created_time.asc(),
+                FollowUpTaskConfirmationCase.id.asc(),
+            )
+            .all()
+        )
+
     def list_pending_for_owner(
         self,
         db: Session,

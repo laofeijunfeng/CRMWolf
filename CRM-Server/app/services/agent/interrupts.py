@@ -12,7 +12,7 @@ from app.services.agent.interaction_contract import (
 )
 from app.services.agent.pending_continuation import (
     PendingTaskContinuationRef,
-    pending_task_continuation_from_json,
+    pending_task_continuation_shape_from_json,
 )
 from app.services.agent.types import JSONDict, JSONValue, coerce_json_dict, coerce_json_value
 from app.services.agent.waiting_task_semantics import (
@@ -94,6 +94,7 @@ class AgentInterruptPayload(TypedDict, total=False):
     runtime_events: list[JSONDict]
     workflow: JSONDict
     checkpoint_ref: PendingTaskContinuationRef
+    checkpoint_ref_error: Literal["invalid_continuation"]
     projection_digest: str
 
 
@@ -458,9 +459,15 @@ def interrupt_payload_from_json(value: object) -> AgentInterruptPayload | None:
     if workflow:
         interrupt_payload["workflow"] = workflow
 
-    checkpoint_ref = _checkpoint_ref_from_json(payload.get("checkpoint_ref"))
+    raw_checkpoint_ref = payload.get("checkpoint_ref")
+    checkpoint_ref = _checkpoint_ref_from_json(raw_checkpoint_ref)
     if checkpoint_ref:
         interrupt_payload["checkpoint_ref"] = checkpoint_ref
+    elif raw_checkpoint_ref is not None:
+        # Preserve the ownership claim even when an old or malformed locator
+        # cannot be represented by the V2 continuation contract.  Dropping the
+        # field would incorrectly reclassify a child-owned interrupt as Root.
+        interrupt_payload["checkpoint_ref_error"] = "invalid_continuation"
 
     projection_digest = payload.get("projection_digest")
     if isinstance(projection_digest, str) and projection_digest:
@@ -470,10 +477,10 @@ def interrupt_payload_from_json(value: object) -> AgentInterruptPayload | None:
 
 
 def _checkpoint_ref_from_json(value: object) -> PendingTaskContinuationRef | None:
-    # Preserve only references that satisfy the pending-task continuation
-    # module's canonical locator and namespace invariants. Tenant/session scope
-    # is authenticated again by the root runtime against Runtime Context.
-    return pending_task_continuation_from_json(value)
+    # This generic JSON adapter has no trusted Root Graph thread context. Keep a
+    # canonical locator shape here; the root runtime authenticates ownership at
+    # the checkpoint load/resume boundary before using it as a capability.
+    return pending_task_continuation_shape_from_json(value)
 
 
 def allowed_resume_actions_for_interaction(

@@ -45,6 +45,7 @@ class PendingApplicationStepProjectionRequest:
     team_id: int
     user_id: int
     session_id: int
+    root_thread_id: str
     step: PendingApplicationStepRequest
     task: object | None = None
     authorization: str = ""
@@ -91,7 +92,10 @@ class PendingApplicationStepProjector:
                 failure_reason=failure_reason,
             )
 
-        continuation = pending_task_continuation_from_json(request.step["checkpoint_ref"])
+        continuation = pending_task_continuation_from_json(
+            request.step["checkpoint_ref"],
+            expected_thread_id=request.root_thread_id,
+        )
         assert continuation is not None
         record = self.crud.ensure(
             request.db,
@@ -255,6 +259,7 @@ def _validate_request(request: PendingApplicationStepProjectionRequest) -> str |
         expected_team_id=request.team_id,
         expected_user_id=request.user_id,
         expected_session_id=request.session_id,
+        expected_thread_id=request.root_thread_id,
     )
     if continuation is None:
         return "invalid_continuation"

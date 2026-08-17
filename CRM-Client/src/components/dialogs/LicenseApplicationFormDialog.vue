@@ -18,6 +18,7 @@ import {
   TextareaField,
 } from '@/components/crmwolf'
 import SelectionSummary from '@/components/crmwolf/SelectionSummary.vue'
+import DeploymentInfoFormDialog from '@/components/dialogs/DeploymentInfoFormDialog.vue'
 import licenseApplicationApi, { type LicenseType } from '@/api/licenseApplication'
 import type { LicenseApplicationCreate } from '@/schemas/licenseApplication'
 import type { ContractListResponse } from '@/api/contract'
@@ -34,11 +35,13 @@ interface Props {
   defaultLicenseType?: LicenseType | null
   defaultContractId?: number | null
   fixedContractId?: number | null
+  canCreateDeployment?: boolean
 }
 
 interface Emits {
   (event: 'update:open', value: boolean): void
   (event: 'success'): void
+  (event: 'deployment-created', deployment: DeploymentInfoResponse): void
 }
 
 interface LicenseForm {
@@ -60,11 +63,14 @@ interface LicenseFormErrors {
 const props = withDefaults(defineProps<Props>(), {
   defaultLicenseType: null,
   defaultContractId: null,
-  fixedContractId: null
+  fixedContractId: null,
+  canCreateDeployment: false,
 })
 const emit = defineEmits<Emits>()
 
 const submitting = ref(false)
+const deploymentDialogOpen = ref(false)
+const locallyCreatedDeployments = ref<DeploymentInfoResponse[]>([])
 
 const form = reactive<LicenseForm>({
   deploymentId: '',
@@ -96,11 +102,18 @@ const approvedContracts = computed<ContractListResponse[]>(() => {
 const selectedContract = computed<ContractListResponse | null>(() => {
   return approvedContracts.value.find((contract) => String(contract.id) === form.contractId) ?? null
 })
+const availableDeployments = computed<DeploymentInfoResponse[]>(() => {
+  const propDeploymentIds = new Set(props.deployments.map((deployment) => deployment.id))
+  return [
+    ...props.deployments,
+    ...locallyCreatedDeployments.value.filter((deployment) => !propDeploymentIds.has(deployment.id)),
+  ]
+})
 const selectedDeployment = computed<DeploymentInfoResponse | null>(() => {
-  return props.deployments.find((deployment) => String(deployment.id) === form.deploymentId) ?? null
+  return availableDeployments.value.find((deployment) => String(deployment.id) === form.deploymentId) ?? null
 })
 const deploymentOptions = computed(() =>
-  props.deployments.map((deployment) => ({
+  availableDeployments.value.map((deployment) => ({
     value: String(deployment.id),
     label: `${deployment.deployment_name}${deployment.is_default ? ' · 默认' : ''}`,
   }))
@@ -125,7 +138,7 @@ const selectedDeploymentSummaryItems = computed(() => {
   ]
 })
 
-const hasDeployments = computed<boolean>(() => props.deployments.length > 0)
+const hasDeployments = computed<boolean>(() => availableDeployments.value.length > 0)
 const hasFixedContract = computed<boolean>(() => props.fixedContractId !== null)
 const defaultApprovedContract = computed<ContractListResponse | null>(() => {
   if (props.defaultContractId === null) return null
@@ -182,7 +195,7 @@ function getInitialAuthorizedUsers(contractId: string): string {
     return String(contract.user_count)
   }
 
-  const deployment = props.deployments.find((item) => String(item.id) === form.deploymentId)
+  const deployment = availableDeployments.value.find((item) => String(item.id) === form.deploymentId)
   if (deployment?.authorized_users !== null && deployment?.authorized_users !== undefined && deployment.authorized_users > 0) {
     return String(deployment.authorized_users)
   }
@@ -191,12 +204,12 @@ function getInitialAuthorizedUsers(contractId: string): string {
 }
 
 function resetForm(): void {
-  const defaultDeployment = props.deployments.find((deployment) => deployment.is_default)
+  const defaultDeployment = availableDeployments.value.find((deployment) => deployment.is_default)
   const initialLicenseType = getInitialLicenseType()
   const initialContractId = getInitialContractId(initialLicenseType)
   form.deploymentId = defaultDeployment !== undefined
     ? String(defaultDeployment.id)
-    : props.deployments[0] !== undefined ? String(props.deployments[0].id) : ''
+    : availableDeployments.value[0] !== undefined ? String(availableDeployments.value[0].id) : ''
   form.licenseType = initialLicenseType
   form.contractId = initialContractId
   form.authorizedUsers = getInitialAuthorizedUsers(initialContractId)
@@ -274,6 +287,22 @@ function handleCancel(): void {
   }
 }
 
+function handleAddDeployment(): void {
+  if (!props.canCreateDeployment || submitting.value) return
+  deploymentDialogOpen.value = true
+}
+
+function handleDeploymentSuccess(deployment: DeploymentInfoResponse): void {
+  locallyCreatedDeployments.value = [
+    ...locallyCreatedDeployments.value.filter((item) => item.id !== deployment.id),
+    deployment,
+  ]
+  form.deploymentId = String(deployment.id)
+  errors.deploymentId = ''
+  deploymentDialogOpen.value = false
+  emit('deployment-created', deployment)
+}
+
 function handleLicenseTypeChange(value: string): void {
   if (value !== 'TRIAL' && value !== 'OFFICIAL') return
   form.licenseType = value
@@ -322,6 +351,8 @@ watch(
     if (open) {
       resetForm()
     } else {
+      deploymentDialogOpen.value = false
+      locallyCreatedDeployments.value = []
       clearErrors()
     }
   },
@@ -346,9 +377,12 @@ watch(
             label="部署信息"
             required
             :options="deploymentOptions"
-            :placeholder="hasDeployments ? '请选择部署信息' : '请先新增部署信息'"
-            :disabled="submitting || !hasDeployments"
+            :placeholder="hasDeployments ? '请选择部署信息' : '请新增部署信息'"
+            :disabled="submitting"
+            :add-action-label="canCreateDeployment ? '新增部署信息' : ''"
+            :add-action-disabled="submitting"
             :error="errors.deploymentId"
+            @add="handleAddDeployment"
           />
 
           <div class="license-application-dialog__field">
@@ -437,6 +471,13 @@ watch(
       </form>
     </DialogContent>
   </Dialog>
+
+  <DeploymentInfoFormDialog
+    :customer-id="customerId"
+    :open="deploymentDialogOpen"
+    @update:open="deploymentDialogOpen = $event"
+    @success="handleDeploymentSuccess"
+  />
 </template>
 
 <style scoped lang="scss">

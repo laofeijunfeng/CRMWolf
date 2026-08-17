@@ -2,19 +2,23 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import CustomerOpportunityHoverCard from '@/components/customer/CustomerOpportunityHoverCard.vue'
-import type { OpportunityListResponse } from '@/api/opportunity'
+import { OpportunityStatus, type OpportunityListResponse } from '@/api/opportunity'
 
 const opportunityApi = vi.hoisted(() => ({
   getOpportunities: vi.fn(),
 }))
 
-vi.mock('@/api/opportunity', () => ({ opportunityApi }))
+vi.mock('@/api/opportunity', () => ({ opportunityApi, OpportunityStatus: { LOST: 2 } }))
 
 vi.mock('@/components/crmwolf', () => ({
   AmountText: defineComponent({
     name: 'AmountText',
     props: { value: [Number, String], size: String },
     setup: (props) => () => h('span', `金额 ${String(props.value)}`),
+  }),
+  Badge: defineComponent({
+    name: 'Badge',
+    setup: (_, { attrs, slots }) => () => h('span', attrs, slots.default?.()),
   }),
   Button: defineComponent({
     name: 'Button',
@@ -129,7 +133,7 @@ describe('CustomerOpportunityHoverCard', () => {
       items: [
         opportunityFixture('opp_test_88'),
         opportunityFixture('opp_test_87'),
-        opportunityFixture('opp_test_86'),
+        opportunityFixture('opp_test_86', { status: OpportunityStatus.LOST }),
         opportunityFixture('opp_test_85'),
       ],
       total: 4,
@@ -151,15 +155,18 @@ describe('CustomerOpportunityHoverCard', () => {
     expect(opportunityApi.getOpportunities).toHaveBeenCalledWith({
       customer_id: 'cus_test_19',
       limit: 3,
+      status_exclude: OpportunityStatus.LOST,
       order_by: 'created_time',
       order_dir: 'desc',
     })
     expect(wrapper.text()).toContain('企业 CRM 升级项目')
-    expect(wrapper.text()).toContain('65%')
-    expect(wrapper.text()).toContain('方案沟通')
+    expect(wrapper.get('[data-testid="customer-opportunity-total"]').text()).toBe('共 4 个')
+    expect(wrapper.text()).toContain('赢率 65%')
+    expect(wrapper.get('[data-testid="customer-opportunity-stage-opp_test_88"]').text()).toBe('方案沟通')
     expect(wrapper.get('[data-progress="65"]').exists()).toBe(true)
-    expect(wrapper.findAll('[data-testid^="customer-opportunity-"]')).toHaveLength(3)
-    expect(wrapper.find('[data-testid="customer-opportunity-opp_test_85"]').exists()).toBe(false)
+    expect(wrapper.findAll('button[data-testid^="customer-opportunity-"]')).toHaveLength(3)
+    expect(wrapper.find('[data-testid="customer-opportunity-opp_test_86"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="customer-opportunity-opp_test_85"]').exists()).toBe(true)
 
     const opportunityItem = wrapper.get('[data-testid="customer-opportunity-opp_test_88"]')
     expect(opportunityItem.classes()).not.toContain('min-h-[152px]')

@@ -7,7 +7,8 @@ exact child continuation reference and returns checkpoint-safe business state.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Mapping, Sequence
+import logging
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, cast
 
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
     from app.services.agent.pending_continuation import PendingTaskContinuationRef
 
 _INTERRUPT_CHANNEL = "__interrupt__"
+logger = logging.getLogger(__name__)
 
 
 class AsyncCheckpointReader(Protocol):
@@ -29,14 +31,19 @@ class AsyncCheckpointReader(Protocol):
 
     async def aget_tuple(self, config: RunnableConfig) -> object | None: ...
 
-    def alist(
+
+class PendingTaskCheckpointRepository(Protocol):
+    """Persistence seam consumed by pending-task orchestration."""
+
+    @property
+    def enabled(self) -> bool: ...
+
+    async def load_result(
         self,
-        config: RunnableConfig | None,
+        checkpoint_ref: PendingTaskContinuationRef,
         *,
-        filter: dict[str, object] | None = None,
-        before: RunnableConfig | None = None,
-        limit: int | None = None,
-    ) -> AsyncIterator[object]: ...
+        expected_interrupt: AgentInterruptPayload | None = None,
+    ) -> PendingTaskCheckpointLoadResult: ...
 
 
 @dataclass(frozen=True)
@@ -66,67 +73,44 @@ class PendingTaskCheckpointStore:
     def enabled(self) -> bool:
         return self._reader is not None
 
-    async def load(
-        self,
-        checkpoint_ref: PendingTaskContinuationRef,
-        *,
-        expected_interrupt: AgentInterruptPayload | None = None,
-    ) -> PendingTaskCheckpointSnapshot | None:
-        """Compatibility projection of :meth:`load_result`."""
-
-        return (
-            await self.load_result(
-                checkpoint_ref,
-                expected_interrupt=expected_interrupt,
-            )
-        ).snapshot
-
     async def load_result(
         self,
         checkpoint_ref: PendingTaskContinuationRef,
         *,
         expected_interrupt: AgentInterruptPayload | None = None,
     ) -> PendingTaskCheckpointLoadResult:
-        """Resolve one exact continuation and report why recovery failed.
-
-        Explicit child namespaces never scan other namespaces. Namespace-less
-        references are legacy-only and fail closed when more than one dynamic
-        child continuation matches the interrupt identity.
-        """
+        """Resolve one exact V2 root-owned continuation; never scan namespaces."""
 
         reader = self._reader
         if reader is None:
             return PendingTaskCheckpointLoadResult(failure_reason="checkpoint_store_unavailable")
 
-        checkpoint_ns = checkpoint_ref.get("checkpoint_ns")
-        if checkpoint_ns:
-            exact_config = _checkpoint_config(checkpoint_ref)
+        exact_config = _checkpoint_config(checkpoint_ref)
+        try:
             checkpoint_tuple = await reader.aget_tuple(exact_config)
-            snapshot = _snapshot_from_tuple(checkpoint_tuple, checkpoint_ref)
-            if _snapshot_matches(snapshot, expected_interrupt):
-                return PendingTaskCheckpointLoadResult(snapshot=snapshot)
-
-            async for checkpoint_tuple in reader.alist(exact_config, limit=64):
-                snapshot = _snapshot_from_tuple(checkpoint_tuple, checkpoint_ref)
-                if _snapshot_matches(snapshot, expected_interrupt):
-                    return PendingTaskCheckpointLoadResult(snapshot=snapshot)
-            return PendingTaskCheckpointLoadResult(failure_reason="checkpoint_not_found")
-
-        list_config = _checkpoint_config(checkpoint_ref, include_namespace=False)
-        matches: dict[str, PendingTaskCheckpointSnapshot] = {}
-        async for checkpoint_tuple in reader.alist(list_config, limit=64):
-            snapshot = _snapshot_from_tuple(checkpoint_tuple, checkpoint_ref)
-            if not _snapshot_matches(snapshot, expected_interrupt):
-                continue
-            namespace = snapshot.ref.get("checkpoint_ns") if snapshot else None
-            key = namespace if isinstance(namespace, str) and namespace else "legacy_root"
-            if snapshot is not None:
-                matches.setdefault(key, snapshot)
-        if not matches:
-            return PendingTaskCheckpointLoadResult(failure_reason="checkpoint_not_found")
-        if len(matches) > 1:
-            return PendingTaskCheckpointLoadResult(failure_reason="ambiguous_legacy_continuation")
-        return PendingTaskCheckpointLoadResult(snapshot=next(iter(matches.values())))
+        except Exception:
+            logger.exception(
+                "Failed to load exact pending-task checkpoint",
+                extra={
+                    "thread_id": checkpoint_ref["thread_id"],
+                    "checkpoint_ns": checkpoint_ref["checkpoint_ns"],
+                },
+            )
+            return PendingTaskCheckpointLoadResult(
+                failure_reason="checkpoint_recovery_exception"
+            )
+        if checkpoint_tuple is None:
+            return PendingTaskCheckpointLoadResult(
+                failure_reason="checkpoint_locator_not_found"
+            )
+        snapshot = _snapshot_from_tuple(checkpoint_tuple, checkpoint_ref)
+        if snapshot is None:
+            return PendingTaskCheckpointLoadResult(failure_reason="checkpoint_corrupt")
+        if not _snapshot_matches(snapshot, expected_interrupt):
+            return PendingTaskCheckpointLoadResult(
+                failure_reason="checkpoint_interrupt_not_found"
+            )
+        return PendingTaskCheckpointLoadResult(snapshot=snapshot)
 
 
 def _as_checkpoint_reader(checkpointer: object | None) -> AsyncCheckpointReader | None:
@@ -134,21 +118,16 @@ def _as_checkpoint_reader(checkpointer: object | None) -> AsyncCheckpointReader 
         return None
     if not callable(getattr(checkpointer, "aget_tuple", None)):
         return None
-    if not callable(getattr(checkpointer, "alist", None)):
-        return None
     return cast("AsyncCheckpointReader", checkpointer)
 
 
-def _checkpoint_config(
-    checkpoint_ref: PendingTaskContinuationRef,
-    *,
-    include_namespace: bool = True,
-) -> RunnableConfig:
-    configurable: dict[str, object] = {"thread_id": checkpoint_ref["thread_id"]}
-    checkpoint_ns = checkpoint_ref.get("checkpoint_ns")
-    if include_namespace and checkpoint_ns:
-        configurable["checkpoint_ns"] = checkpoint_ns
-    return {"configurable": configurable}
+def _checkpoint_config(checkpoint_ref: PendingTaskContinuationRef) -> RunnableConfig:
+    return {
+        "configurable": {
+            "thread_id": checkpoint_ref["thread_id"],
+            "checkpoint_ns": checkpoint_ref["checkpoint_ns"],
+        }
+    }
 
 
 def _snapshot_from_tuple(
@@ -156,6 +135,11 @@ def _snapshot_from_tuple(
     requested_ref: PendingTaskContinuationRef,
 ) -> PendingTaskCheckpointSnapshot | None:
     if checkpoint_tuple is None:
+        return None
+    if not _tuple_matches_requested_ref(
+        getattr(checkpoint_tuple, "config", None),
+        requested_ref,
+    ):
         return None
     checkpoint = getattr(checkpoint_tuple, "checkpoint", None)
     if not isinstance(checkpoint, Mapping):
@@ -165,26 +149,22 @@ def _snapshot_from_tuple(
         return None
     values = {str(key): value for key, value in channel_values.items() if isinstance(key, str)}
     interrupts = _interrupts_from_checkpoint_tuple(checkpoint_tuple, values)
-    ref = _resolved_ref(requested_ref, getattr(checkpoint_tuple, "config", None))
     return PendingTaskCheckpointSnapshot(
-        ref=ref,
+        ref={**requested_ref},
         values=values,
         interrupts=interrupts,
     )
 
 
-def _resolved_ref(
-    requested_ref: PendingTaskContinuationRef,
+def _tuple_matches_requested_ref(
     config: object,
-) -> PendingTaskContinuationRef:
+    requested_ref: PendingTaskContinuationRef,
+) -> bool:
     configurable = coerce_json_dict(coerce_json_dict(config).get("configurable"))
-    thread_id = configurable.get("thread_id")
-    checkpoint_ns = configurable.get("checkpoint_ns")
-    return {
-        **requested_ref,
-        "thread_id": thread_id if isinstance(thread_id, str) else requested_ref["thread_id"],
-        "checkpoint_ns": checkpoint_ns if isinstance(checkpoint_ns, str) else "",
-    }
+    return (
+        configurable.get("thread_id") == requested_ref["thread_id"]
+        and configurable.get("checkpoint_ns") == requested_ref["checkpoint_ns"]
+    )
 
 
 def _interrupts_from_checkpoint_tuple(

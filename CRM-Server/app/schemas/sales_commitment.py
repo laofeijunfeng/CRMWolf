@@ -742,6 +742,112 @@ class FollowUpTaskConfirmationCaseResponse(_PublicIdResponse):
         return cls.model_validate(data)
 
 
+class FollowUpTaskQueryCustomerResponse(BaseModel):
+    id: str
+    public_id: str
+    name: str
+    account_name: str
+
+
+class FollowUpTaskQueryUserResponse(BaseModel):
+    id: str
+    name: str
+    avatar_url: str | None = None
+
+
+class FollowUpTaskPendingConfirmationResponse(BaseModel):
+    public_id: str
+    question_text: str
+    suggested_action: str
+    created_time: datetime | None = None
+
+
+class FollowUpTaskQueryItemResponse(BaseModel):
+    id: str
+    public_id: str
+    customer: FollowUpTaskQueryCustomerResponse | None = None
+    owner_id: str
+    owner_info: FollowUpTaskQueryUserResponse | None = None
+    creator_id: str
+    creator_info: FollowUpTaskQueryUserResponse | None = None
+    title: str
+    description: str | None = None
+    status: str
+    due_at: datetime | None = None
+    due_at_text: str | None = None
+    due_at_granularity: str | None = None
+    due_at_timezone: str | None = None
+    overdue_days: int = 0
+    source_type: str | None = None
+    source_public_id: str | None = None
+    confidence: float | None = None
+    completed_at: datetime | None = None
+    cancelled_at: datetime | None = None
+    created_time: datetime | None = None
+    updated_time: datetime | None = None
+    semantic_evidence: list[dict[str, Any]] = Field(default_factory=list)
+    pending_confirmations: list[FollowUpTaskPendingConfirmationResponse] = Field(default_factory=list)
+
+
+class FollowUpTaskSourceActivityResponse(BaseModel):
+    customer: FollowUpTaskQueryCustomerResponse | None = None
+    activity_kind: str | None = None
+    title: str | None = None
+    summary: str | None = None
+    next_action: str | None = None
+    next_follow_time: datetime | None = None
+    occurred_at: datetime | None = None
+    owner_id: str | None = None
+    owner_info: FollowUpTaskQueryUserResponse | None = None
+
+
+class FollowUpTaskDetailResponse(FollowUpTaskQueryItemResponse):
+    source_activity: FollowUpTaskSourceActivityResponse | None = None
+
+
+class FollowUpTaskQueryFiltersResponse(BaseModel):
+    status: str
+    due_window: str | None = None
+    customer_id: str | None = None
+    owner_scope: str
+    retrieval_mode: str
+    query_text: str | None = None
+    query_text_ignored_reason: str | None = None
+
+
+class FollowUpTaskCustomerSummaryResponse(BaseModel):
+    customer: FollowUpTaskQueryCustomerResponse
+    open_task_count: int = 0
+    overdue_task_count: int = 0
+    nearest_due_at: datetime | None = None
+
+
+class FollowUpTaskQueryUsagePolicyResponse(BaseModel):
+    task_state_source: str
+    semantic_evidence_source: str
+    rule: str
+
+
+class FollowUpTaskListResponse(BaseModel):
+    items: list[FollowUpTaskQueryItemResponse]
+    total: int
+    filters: FollowUpTaskQueryFiltersResponse
+    customer_summary: list[FollowUpTaskCustomerSummaryResponse] = Field(default_factory=list)
+    semantic_retrieval: dict[str, Any]
+    usage_policy: FollowUpTaskQueryUsagePolicyResponse
+
+
+class FollowUpTaskDisplayPolicyResponse(BaseModel):
+    surface: str
+    mode: str
+    task_state_source: str
+    id_policy: str
+
+
+class FollowUpTaskCustomerArrangementResponse(FollowUpTaskListResponse):
+    display_policy: FollowUpTaskDisplayPolicyResponse
+
+
 class FollowUpTaskConfirmationResolveRequest(BaseModel):
     reply_text: str = Field(..., min_length=1, max_length=500, description="用户对确认问题的回复")
 

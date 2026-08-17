@@ -6,14 +6,15 @@ from types import SimpleNamespace
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph import END, START, StateGraph
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.models.agent import AgentTaskStatus
 from app.services.agent import action_workflow, follow_up_fields, opportunity_fields, selection, session_state
 from app.services.agent import pending_graph as pending_graph_module
 from app.services.agent.input import AgentTurnInput
-from app.services.agent.pending_continuation import pending_task_checkpoint_config
-from app.services.agent.pending_graph import PendingTaskGraphService, build_pending_task_thread_id
+from app.services.agent.pending_checkpoint import PendingTaskCheckpointLoadResult
+from app.services.agent.pending_graph import PendingTaskGraphService
 from app.services.agent.pending_interaction_graph import PendingInteractionGraphService
 from app.services.agent.schemas import AgentConfirmationIntentDecision, AgentTurnRelationDecision
 from app.services.agent.state import PendingTaskGraphSideEffects, PendingTaskRuntimeContext
@@ -121,6 +122,71 @@ class FakeCheckpointFailingGraph:
         raise SQLAlchemyError("checkpoint write failed")
 
 
+class DurablePendingTaskRootHarness:
+    """Invoke the pending graph from a real root-owned LangGraph node."""
+
+    def __init__(
+        self,
+        service: PendingTaskGraphService,
+        checkpointer: InMemorySaver,
+        *,
+        with_trace: bool = False,
+    ) -> None:
+        self.service = service
+        self.checkpointer = checkpointer
+        self.with_trace = with_trace
+        self._invocation_index = 0
+        self._inputs: dict[str, tuple[dict, PendingTaskGraphSideEffects]] = {}
+        self._results: dict[str, dict] = {}
+        graph = StateGraph(dict)
+        graph.add_node("pending_task_subgraph", self._run_pending_task)
+        graph.add_edge(START, "pending_task_subgraph")
+        graph.add_edge("pending_task_subgraph", END)
+        self._graph = graph.compile(checkpointer=checkpointer)
+
+    async def _run_pending_task(self, state: dict) -> dict:
+        invocation_id = state["invocation_id"]
+        input_state, side_effects = self._inputs[invocation_id]
+        run_pending = self.service.run_with_trace if self.with_trace else self.service.run
+        self._results[invocation_id] = await run_pending(input_state, side_effects=side_effects)
+        return {"completed_invocation_id": invocation_id}
+
+    async def run(
+        self,
+        input_state: dict,
+        *,
+        side_effects: PendingTaskGraphSideEffects | None = None,
+    ) -> dict:
+        self._invocation_index += 1
+        invocation_id = f"invocation-{self._invocation_index}"
+        graph_side_effects = side_effects or PendingTaskGraphSideEffects(
+            task=input_state.get("task_snapshot")
+        )
+        self._inputs[invocation_id] = (input_state, graph_side_effects)
+        thread_id = (
+            f"crm_agent:{input_state['team_id']}:{input_state['user_id']}:"
+            f"{input_state['session_id']}:{input_state['session_id']}"
+        )
+        await self._graph.ainvoke(
+            {"invocation_id": invocation_id},
+            {"configurable": {"thread_id": thread_id}},
+        )
+        result = self._results.get(invocation_id)
+        if result is not None:
+            return result
+        continuation = graph_side_effects.checkpoint_ref
+        assert continuation is not None
+        recovery = await self.service.load_checkpointed_outcome(continuation)
+        assert recovery.outcome is not None
+        return recovery.outcome
+
+
+def _durable_pending_runtime(*, checkpointer=None, **kwargs):
+    durable_checkpointer = checkpointer or InMemorySaver()
+    service = PendingTaskGraphService(checkpointer=durable_checkpointer, **kwargs)
+    return service, DurablePendingTaskRootHarness(service, durable_checkpointer)
+
+
 class FakePendingFallbackGraph:
     def __init__(self):
         self.calls = []
@@ -135,6 +201,13 @@ class FakePendingFallbackGraph:
             "events": [{"event": "final", "content": "fallback ok"}],
             "assistant_content": "fallback ok",
         }
+
+
+class FakeMissingPendingCheckpointStore:
+    enabled = True
+
+    async def load_result(self, checkpoint_ref, *, expected_interrupt=None):
+        return PendingTaskCheckpointLoadResult(failure_reason="checkpoint_locator_not_found")
 
 
 def _state(task):
@@ -191,6 +264,31 @@ def _resume_state(state, continuation, resume_payload):
         "continuation_ref": continuation,
         "resume_payload": resume_payload,
     }
+
+
+@pytest.mark.asyncio
+async def test_pending_graph_returns_terminal_recovery_when_authoritative_checkpoint_is_missing():
+    task = SimpleNamespace(id=101)
+    _, runtime = _durable_pending_runtime(
+        preflight_graph_service=FakePreflightGraphService(FakePreflightResult()),
+        interaction_graph_service=FakeInteractionGraphService(FakeInteractionResult()),
+        checkpoint_store=FakeMissingPendingCheckpointStore(),
+    )
+
+    result = await runtime.run(_state(task))
+
+    assert result["handled"] is False
+    assert result["recovery_failed"] is True
+    assert result["terminal"] is True
+    assert result["runtime_status"] == "checkpoint_recovery_failed"
+    assert result["failure_reason"] == "checkpoint_locator_not_found"
+    assert result["current_interrupt"] is None
+    assert result["assistant_content"] == "当前待确认流程恢复失败，本次流程已终止；你可以重新发起。"
+    assert result["events"] == [{
+        "event": "pending_task_checkpoint_recovery_failed",
+        "reason": "checkpoint_locator_not_found",
+        "retryable": False,
+    }]
 
 
 def test_pending_task_snapshot_builds_readable_opportunity_draft_summary():
@@ -405,7 +503,6 @@ async def test_pending_task_graph_run_with_trace_reconciles_checkpointed_authori
     result = await PendingTaskGraphService(
         preflight_graph_service=preflight,
         interaction_graph_service=interaction,
-        checkpointer=InMemorySaver(),
     ).run_with_trace(_state(task))
 
     assert result["handled"] is True
@@ -461,7 +558,6 @@ async def test_pending_task_graph_run_with_trace_reconciles_new_turn_after_exist
     service = PendingTaskGraphService(
         preflight_graph_service=FakePreflightGraphService(FakePreflightResult()),
         interaction_graph_service=interaction,
-        checkpointer=InMemorySaver(),
     )
 
     await service.run(_state_without_task())
@@ -511,7 +607,6 @@ async def test_pending_task_graph_returns_progress_events_without_calling_transp
     service = PendingTaskGraphService(
         preflight_graph_service=preflight,
         interaction_graph_service=FakeInteractionGraphService(FakeInteractionResult()),
-        checkpointer=InMemorySaver(),
     )
 
     async def forbidden_transport(_event):
@@ -605,7 +700,7 @@ async def test_pending_task_graph_internal_state_keeps_runtime_objects_in_contex
 @pytest.mark.asyncio
 async def test_pending_task_graph_checkpoints_by_session_and_task_thread():
     task = SimpleNamespace(id=101)
-    service = PendingTaskGraphService(
+    service, runtime = _durable_pending_runtime(
         preflight_graph_service=FakePreflightGraphService(FakePreflightResult(
             task=task,
             events=[{"event": "pending_interruption_assessed"}],
@@ -616,34 +711,34 @@ async def test_pending_task_graph_checkpoints_by_session_and_task_thread():
             remember_pending_task=True,
             events=[{"event": "confirmation_required"}, {"event": "final"}],
         )),
-        checkpointer=InMemorySaver(),
     )
 
-    initial_result, continuation = await _start_continuation(service, _state(task))
-    snapshot = await service._graph.aget_state(pending_task_checkpoint_config(continuation))
+    _, continuation = await _start_continuation(runtime, _state(task))
+    recovery = await service.load_checkpointed_outcome(continuation)
+    assert recovery.outcome is not None
+    snapshot = recovery.outcome
 
-    assert build_pending_task_thread_id(team_id=1, user_id=2, session_id=3, task_id=101) == (
-        "crm_agent_pending:1:2:3:101"
-    )
     assert continuation["continuation_id"]
-    assert continuation["thread_id"].startswith("crm_agent_pending:1:2:3:101:")
-    assert snapshot.values["handled"] is True
-    assert snapshot.values["task_projection"] == {"id": 101}
-    assert snapshot.values["interaction_result"] == {
+    assert continuation["persistence_scope"] == "root"
+    assert continuation["thread_id"] == "crm_agent:1:2:3:3"
+    assert continuation["checkpoint_ns"].startswith("pending_task_subgraph:")
+    assert snapshot["handled"] is True
+    assert snapshot["task_projection"] == {"id": 101}
+    assert snapshot["interaction_result"] == {
         "handled": True,
         "remember_pending_task": True,
         "has_selected_customer": False,
         "event_count": 2,
     }
-    assert snapshot.values["current_interrupt"]["type"] == "confirm"
-    assert snapshot.values["current_interrupt"]["source_event"] == "confirmation_required"
-    assert snapshot.next == ("wait_interaction_interrupt",)
+    assert snapshot["current_interrupt"]["type"] == "confirm"
+    assert snapshot["current_interrupt"]["source_event"] == "confirmation_required"
+    assert snapshot["__interrupt__"]
 
 
 @pytest.mark.asyncio
 async def test_pending_task_graph_resumes_native_interaction_interrupt():
     task = SimpleNamespace(id=101)
-    service = PendingTaskGraphService(
+    _, runtime = _durable_pending_runtime(
         preflight_graph_service=FakePreflightGraphService(FakePreflightResult(
             task=task,
             events=[{"event": "pending_interruption_assessed"}],
@@ -659,12 +754,11 @@ async def test_pending_task_graph_resumes_native_interaction_interrupt():
                 "payload": {"customer_id": 7},
             }, {"event": "final"}],
         )),
-        checkpointer=InMemorySaver(),
     )
-    initial_result, continuation = await _start_continuation(service, _state(task))
+    _, continuation = await _start_continuation(runtime, _state(task))
 
     state = _resume_state(_state(task), continuation, {"action": "approve", "content": "确认"})
-    result = await service.run(state)
+    result = await runtime.run(state)
 
     assert result["resume_payload"] == {"action": "approve", "content": "确认"}
     assert result["events"][-1] == {
@@ -693,15 +787,15 @@ async def test_pending_task_graph_resumes_native_interaction_interrupt_after_ser
             "payload": {"customer_id": 7},
         }, {"event": "final"}],
     ))
-    first_service = PendingTaskGraphService(
+    first_service, first_runtime = _durable_pending_runtime(
+        checkpointer=checkpointer,
         preflight_graph_service=FakePreflightGraphService(FakePreflightResult(
             task=task,
             events=[{"event": "pending_interruption_assessed"}],
         )),
         interaction_graph_service=first_interaction,
-        checkpointer=checkpointer,
     )
-    _, continuation = await _start_continuation(first_service, _state(task))
+    _, continuation = await _start_continuation(first_runtime, _state(task))
 
     resumed_preflight = FakePreflightGraphService(FakePreflightResult(task=task))
     resumed_interaction = FakeInteractionGraphService(FakeInteractionResult())
@@ -710,8 +804,9 @@ async def test_pending_task_graph_resumes_native_interaction_interrupt_after_ser
         interaction_graph_service=resumed_interaction,
         checkpointer=checkpointer,
     )
+    resumed_runtime = DurablePendingTaskRootHarness(resumed_service, checkpointer)
     state = _resume_state(_state(task), continuation, {"action": "approve", "content": "确认"})
-    result = await resumed_service.run(state)
+    result = await resumed_runtime.run(state)
 
     assert resumed_preflight.calls == []
     assert resumed_interaction.calls == []
@@ -758,15 +853,14 @@ async def test_pending_task_graph_rejects_native_confirmation_interrupt_without_
             "payload": {"customer_id": 7},
         }, {"event": "final"}],
     ))
-    service = PendingTaskGraphService(
+    _, runtime = _durable_pending_runtime(
         preflight_graph_service=preflight,
         interaction_graph_service=interaction,
-        checkpointer=InMemorySaver(),
     )
-    initial_result, continuation = await _start_continuation(service, _state(task))
+    initial_result, continuation = await _start_continuation(runtime, _state(task))
 
     state = _resume_state(_state(task), continuation, {"action": "reject", "content": "先不处理"})
-    result = await service.run(state)
+    result = await runtime.run(state)
 
     assert len(preflight.calls) == 1
     assert len(interaction.calls) == 1
@@ -827,19 +921,18 @@ async def test_pending_task_graph_skips_optional_suggestion_without_cancelling_r
             "payload": {"customer_id": 7, "workflow": workflow},
         }, {"event": "final"}],
     ))
-    service = PendingTaskGraphService(
+    _, runtime = _durable_pending_runtime(
         preflight_graph_service=FakePreflightGraphService(FakePreflightResult(
             task=task,
             events=[{"event": "pending_interruption_assessed"}],
         )),
         interaction_graph_service=interaction,
-        checkpointer=InMemorySaver(),
     )
-    _, continuation = await _start_continuation(service, _state(task))
+    _, continuation = await _start_continuation(runtime, _state(task))
 
     state = _resume_state(_state(task), continuation, {"action": "skip_current_action", "content": "先不管"})
     side_effects = PendingTaskGraphSideEffects(task=task)
-    result = await service.run(state, side_effects=side_effects)
+    result = await runtime.run(state, side_effects=side_effects)
 
     assert result["handled"] is True
     assert result["has_active_task"] is False
@@ -876,22 +969,21 @@ async def test_pending_task_graph_routes_native_confirmation_edit_back_to_intera
             "payload": {"customer_id": 7},
         }, {"event": "final"}],
     ))
-    service = PendingTaskGraphService(
+    _, runtime = _durable_pending_runtime(
         preflight_graph_service=FakePreflightGraphService(FakePreflightResult(
             task=task,
             events=[{"event": "pending_interruption_assessed"}],
         )),
         interaction_graph_service=interaction,
-        checkpointer=InMemorySaver(),
     )
-    _, continuation = await _start_continuation(service, _state(task))
+    _, continuation = await _start_continuation(runtime, _state(task))
 
     state = _state(task)
     state["continuation_ref"] = continuation
     state["content"] = "金额改成 30 万"
     state["turn_input"] = AgentTurnInput.text("金额改成 30 万")
     state["resume_payload"] = {"action": "edit", "content": "金额改成 30 万"}
-    result = await service.run(state)
+    result = await runtime.run(state)
 
     assert len(interaction.calls) == 2
     assert interaction.calls[1]["content"] == "金额改成 30 万"
@@ -917,7 +1009,6 @@ async def test_pending_task_graph_applies_projected_pending_switch_approval_with
     result = await PendingTaskGraphService(
         preflight_graph_service=preflight,
         interaction_graph_service=interaction,
-        checkpointer=InMemorySaver(),
     ).run(state, side_effects=side_effects)
 
     assert preflight.calls == []
@@ -965,7 +1056,6 @@ async def test_pending_task_graph_routes_projected_pending_switch_rejection_to_i
     result = await PendingTaskGraphService(
         preflight_graph_service=preflight,
         interaction_graph_service=interaction,
-        checkpointer=InMemorySaver(),
     ).run(state, side_effects=side_effects)
 
     assert preflight.calls == []
@@ -1007,7 +1097,6 @@ async def test_pending_task_graph_preflights_projected_missing_fields_resume_bef
     result = await PendingTaskGraphService(
         preflight_graph_service=FakePreflightGraphService(FakePreflightResult(task=task)),
         interaction_graph_service=interaction,
-        checkpointer=InMemorySaver(),
     ).run(state)
 
     assert result["resume_route"] == "preflight"
@@ -1051,21 +1140,20 @@ async def test_pending_task_graph_resumes_native_missing_fields_interrupt_after_
             "payload": {"opportunity": {"amount": 300000}},
         }, {"event": "final", "content": "还需要预计成交日期。"}],
     ))
-    first_service = PendingTaskGraphService(
+    first_service, first_runtime = _durable_pending_runtime(
+        checkpointer=checkpointer,
         preflight_graph_service=FakePreflightGraphService(FakePreflightResult(
             task=task,
             events=[{"event": "pending_interruption_assessed"}],
         )),
         interaction_graph_service=first_interaction,
-        checkpointer=checkpointer,
     )
 
-    _, continuation = await _start_continuation(first_service, _state(task))
-    snapshot = await first_service._graph.aget_state(pending_task_checkpoint_config(continuation))
-
-    assert snapshot.interrupts
-    assert snapshot.values["current_interrupt"]["reason"] == "missing_required_fields"
-    assert snapshot.next == ("wait_interaction_interrupt",)
+    _, continuation = await _start_continuation(first_runtime, _state(task))
+    recovery = await first_service.load_checkpointed_outcome(continuation)
+    assert recovery.outcome is not None
+    assert recovery.outcome["__interrupt__"]
+    assert recovery.outcome["current_interrupt"]["reason"] == "missing_required_fields"
 
     async def fake_apply(db, task_arg, content):
         task_arg.input_json = {"opportunity": {"amount": 300000, "expected_closing_date": "2026-08-30"}}
@@ -1090,7 +1178,8 @@ async def test_pending_task_graph_resumes_native_missing_fields_interrupt_after_
     state["turn_input"] = AgentTurnInput.text("预计 8 月底成交")
     state["resume_payload"] = {"action": "submit_fields", "content": "预计 8 月底成交"}
 
-    result = await resumed_service.run(state)
+    resumed_runtime = DurablePendingTaskRootHarness(resumed_service, checkpointer)
+    result = await resumed_runtime.run(state)
 
     assert resumed_preflight.calls == []
     assert result["resume_route"] == "field_resume"
@@ -1109,10 +1198,10 @@ async def test_pending_task_graph_resumes_native_missing_fields_interrupt_after_
         },
         {"event": "final", "content": "商机信息齐了，请确认是否创建？"},
     ]
-    resumed_snapshot = await resumed_service._graph.aget_state(pending_task_checkpoint_config(continuation))
-    assert resumed_snapshot.interrupts
-    assert resumed_snapshot.values["current_interrupt"]["reason"] == "write_confirmation"
-    assert resumed_snapshot.next == ("wait_interaction_interrupt",)
+    resumed_recovery = await resumed_service.load_checkpointed_outcome(continuation)
+    assert resumed_recovery.outcome is not None
+    assert resumed_recovery.outcome["__interrupt__"]
+    assert resumed_recovery.outcome["current_interrupt"]["reason"] == "write_confirmation"
 
 
 @pytest.mark.asyncio
@@ -1166,7 +1255,6 @@ async def test_pending_task_graph_routes_choice_resume_to_native_choice_node(mon
     result = await PendingTaskGraphService(
         preflight_graph_service=FakePreflightGraphService(FakePreflightResult(task=task)),
         interaction_graph_service=interaction,
-        checkpointer=InMemorySaver(),
     ).run(state)
 
     assert result["resume_route"] == "choice_resume"
@@ -1207,21 +1295,20 @@ async def test_pending_task_graph_resumes_native_choice_interrupt_after_service_
             "customers": [selected_customer],
         }, {"event": "final", "content": "请选择客户。"}],
     ))
-    first_service = PendingTaskGraphService(
+    first_service, first_runtime = _durable_pending_runtime(
+        checkpointer=checkpointer,
         preflight_graph_service=FakePreflightGraphService(FakePreflightResult(
             task=task,
             events=[{"event": "pending_interruption_assessed"}],
         )),
         interaction_graph_service=first_interaction,
-        checkpointer=checkpointer,
     )
 
-    _, continuation = await _start_continuation(first_service, _state(task))
-    snapshot = await first_service._graph.aget_state(pending_task_checkpoint_config(continuation))
-
-    assert snapshot.interrupts
-    assert snapshot.values["current_interrupt"]["reason"] == "business_object_disambiguation"
-    assert snapshot.next == ("wait_interaction_interrupt",)
+    _, continuation = await _start_continuation(first_runtime, _state(task))
+    recovery = await first_service.load_checkpointed_outcome(continuation)
+    assert recovery.outcome is not None
+    assert recovery.outcome["__interrupt__"]
+    assert recovery.outcome["current_interrupt"]["reason"] == "business_object_disambiguation"
 
     monkeypatch.setattr(
         selection,
@@ -1261,7 +1348,8 @@ async def test_pending_task_graph_resumes_native_choice_interrupt_after_service_
         "metadata": {"selected_customer_id": 7},
     }
 
-    result = await resumed_service.run(state)
+    resumed_runtime = DurablePendingTaskRootHarness(resumed_service, checkpointer)
+    result = await resumed_runtime.run(state)
 
     assert resumed_preflight.calls == []
     assert result["resume_route"] == "choice_resume"
@@ -1310,7 +1398,6 @@ async def test_pending_task_graph_preflights_projected_quality_text_resume_befor
     result = await PendingTaskGraphService(
         preflight_graph_service=FakePreflightGraphService(FakePreflightResult(task=task)),
         interaction_graph_service=interaction,
-        checkpointer=InMemorySaver(),
     ).run(state)
 
     assert result["resume_route"] == "preflight"
@@ -1345,21 +1432,20 @@ async def test_pending_task_graph_resumes_native_text_interrupt_after_service_re
             "payload": {"content": "拜访了客户"},
         }, {"event": "final", "content": "请补充有效跟进信息。"}],
     ))
-    first_service = PendingTaskGraphService(
+    first_service, first_runtime = _durable_pending_runtime(
+        checkpointer=checkpointer,
         preflight_graph_service=FakePreflightGraphService(FakePreflightResult(
             task=task,
             events=[{"event": "pending_interruption_assessed"}],
         )),
         interaction_graph_service=first_interaction,
-        checkpointer=checkpointer,
     )
 
-    _, continuation = await _start_continuation(first_service, _state(task))
-    snapshot = await first_service._graph.aget_state(pending_task_checkpoint_config(continuation))
-
-    assert snapshot.interrupts
-    assert snapshot.values["current_interrupt"]["reason"] == "insufficient_follow_up_quality"
-    assert snapshot.next == ("wait_interaction_interrupt",)
+    _, continuation = await _start_continuation(first_runtime, _state(task))
+    recovery = await first_service.load_checkpointed_outcome(continuation)
+    assert recovery.outcome is not None
+    assert recovery.outcome["__interrupt__"]
+    assert recovery.outcome["current_interrupt"]["reason"] == "insufficient_follow_up_quality"
 
     async def fake_apply(db, task_arg, content):
         task_arg.input_json = {"content": "张总确认预算 30 万，8 月底签合同"}
@@ -1387,7 +1473,8 @@ async def test_pending_task_graph_resumes_native_text_interrupt_after_service_re
         "content": "张总确认预算 30 万，8 月底签合同",
     }
 
-    result = await resumed_service.run(state)
+    resumed_runtime = DurablePendingTaskRootHarness(resumed_service, checkpointer)
+    result = await resumed_runtime.run(state)
 
     assert resumed_preflight.calls == []
     assert result["resume_route"] == "text_resume"
@@ -1406,39 +1493,37 @@ async def test_pending_task_graph_resumes_native_text_interrupt_after_service_re
         },
         {"event": "final", "content": "跟进内容已补充完整，请确认是否保存？"},
     ]
-    resumed_snapshot = await resumed_service._graph.aget_state(pending_task_checkpoint_config(continuation))
-    assert resumed_snapshot.interrupts
-    assert resumed_snapshot.values["current_interrupt"]["reason"] == "write_confirmation"
-    assert resumed_snapshot.next == ("wait_interaction_interrupt",)
+    resumed_recovery = await resumed_service.load_checkpointed_outcome(continuation)
+    assert resumed_recovery.outcome is not None
+    assert resumed_recovery.outcome["__interrupt__"]
+    assert resumed_recovery.outcome["current_interrupt"]["reason"] == "write_confirmation"
 
 
 @pytest.mark.asyncio
 async def test_pending_task_graph_does_not_fallback_for_business_sql_errors():
     task = SimpleNamespace(id=101)
-    service = PendingTaskGraphService(
+    _, runtime = _durable_pending_runtime(
         preflight_graph_service=FakeFailingPreflightGraphService(),
         interaction_graph_service=FakeInteractionGraphService(FakeInteractionResult()),
-        checkpointer=InMemorySaver(),
     )
 
     with pytest.raises(SQLAlchemyError, match="business db failed"):
-        await service.run(_state(task))
+        await runtime.run(_state(task))
 
 
 @pytest.mark.asyncio
 async def test_pending_task_graph_records_checkpoint_storage_fallback(monkeypatch):
     task = SimpleNamespace(id=101)
-    service = PendingTaskGraphService(
+    service, runtime = _durable_pending_runtime(
         preflight_graph_service=FakePreflightGraphService(FakePreflightResult()),
         interaction_graph_service=FakeInteractionGraphService(FakeInteractionResult()),
-        checkpointer=InMemorySaver(),
     )
     fallback_graph = FakePendingFallbackGraph()
     service._graph = FakeCheckpointFailingGraph()
     service._fallback_graph = fallback_graph
     monkeypatch.setattr(pending_graph_module, "is_checkpoint_storage_error", lambda exc: True)
 
-    result = await service.run(_state(task))
+    result = await runtime.run(_state(task))
 
     assert fallback_graph.calls
     assert fallback_graph.calls[0]["state"]["task_projection"]["id"] == 101
@@ -1449,7 +1534,60 @@ async def test_pending_task_graph_records_checkpoint_storage_fallback(monkeypatc
     assert result["assistant_content"] == "fallback ok"
 
 
-def test_task_projection_intent_supersedes_legacy_resume_for_same_task():
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_trace", [False, True])
+async def test_pending_task_graph_never_falls_back_when_resuming_exact_continuation(
+    monkeypatch,
+    with_trace,
+):
+    task = SimpleNamespace(id=101)
+    checkpointer = InMemorySaver()
+    service, first_runtime = _durable_pending_runtime(
+        checkpointer=checkpointer,
+        preflight_graph_service=FakePreflightGraphService(FakePreflightResult(
+            task=task,
+            events=[{"event": "pending_interruption_assessed"}],
+        )),
+        interaction_graph_service=FakeInteractionGraphService(FakeInteractionResult(
+            handled=True,
+            assistant_content="请确认是否创建商机？",
+            remember_pending_task=True,
+            events=[{"event": "confirmation_required"}, {"event": "final"}],
+        )),
+    )
+    _, continuation = await _start_continuation(first_runtime, _state(task))
+
+    fallback_graph = FakePendingFallbackGraph()
+    service._graph = FakeCheckpointFailingGraph()
+    service._fallback_graph = fallback_graph
+    monkeypatch.setattr(pending_graph_module, "is_checkpoint_storage_error", lambda exc: True)
+    resumed_runtime = DurablePendingTaskRootHarness(
+        service,
+        checkpointer,
+        with_trace=with_trace,
+    )
+
+    result = await resumed_runtime.run(
+        _resume_state(
+            _state(task),
+            continuation,
+            {"action": "approve", "content": "确认"},
+        )
+    )
+
+    assert fallback_graph.calls == []
+    assert result["recovery_failed"] is True
+    assert result["runtime_status"] == "checkpoint_recovery_failed"
+    assert result["runtime_retryable"] is True
+    assert result["failure_reason"] == "checkpoint_store_unavailable"
+    recovery = await service.load_checkpointed_outcome(continuation)
+    assert recovery.failure_reason is None
+    assert recovery.outcome is not None
+    assert recovery.outcome["current_interrupt"] is not None
+
+
+@pytest.mark.asyncio
+async def test_task_projection_intent_supersedes_legacy_resume_for_same_task():
     task = SimpleNamespace(
         id=202,
         status=AgentTaskStatus.SUSPENDED,
@@ -1680,7 +1818,6 @@ async def test_pending_task_graph_cancels_turn_relation_choice_without_reasking(
     result = await PendingTaskGraphService(
         preflight_graph_service=FakePreflightGraphService(FakePreflightResult()),
         interaction_graph_service=FakeInteractionGraphService(FakeInteractionResult()),
-        checkpointer=InMemorySaver(),
     ).run(state)
 
     assert result["handled"] is True
@@ -1820,13 +1957,12 @@ async def test_pending_task_graph_interrupts_inside_subgraph_for_turn_relation_c
         )
 
     monkeypatch.setattr(pending_graph_module.session_state, "_assess_turn_relation", fake_assess)
-    service = PendingTaskGraphService(
+    _, runtime = _durable_pending_runtime(
         preflight_graph_service=FakePreflightGraphService(FakePreflightResult()),
         interaction_graph_service=FakeInteractionGraphService(FakeInteractionResult()),
-        checkpointer=InMemorySaver(),
     )
 
-    result = await service.run(_state_with_suspended_candidates([{
+    result = await runtime.run(_state_with_suspended_candidates([{
         "id": 202,
         "intent": "CREATE_OPPORTUNITY",
         "summary": "广州睿狐商机草稿",
@@ -1865,18 +2001,17 @@ async def test_pending_task_graph_resumes_subgraph_interrupt_with_selected_task(
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("graph must not persist task resume")),
     )
     interaction = FakeInteractionGraphService(FakeInteractionResult(events=[{"event": "interaction_planned"}]))
-    service = PendingTaskGraphService(
+    _, runtime = _durable_pending_runtime(
         preflight_graph_service=FakePreflightGraphService(FakePreflightResult()),
         interaction_graph_service=interaction,
-        checkpointer=InMemorySaver(),
     )
 
-    _, continuation = await _start_continuation(service, _state_with_suspended_candidates([{
+    _, continuation = await _start_continuation(runtime, _state_with_suspended_candidates([{
         **_serialized_task_candidate(suspended_task),
         "summary": "广州睿狐商机草稿",
     }]))
     side_effects = PendingTaskGraphSideEffects()
-    result = await service.run({
+    result = await runtime.run({
         **_state_without_task(),
         "content": "继续这个草稿",
         "turn_input": AgentTurnInput.text("继续这个草稿"),
@@ -1934,65 +2069,6 @@ async def test_pending_task_graph_asks_when_resume_target_is_not_a_candidate(mon
 
 
 @pytest.mark.asyncio
-async def test_pending_task_graph_abort_projection_releases_native_interrupt_without_business_effects(monkeypatch):
-    workflow = action_workflow.required_write_contract(action="create_opportunity")
-    task = SimpleNamespace(
-        id=101,
-        task_key="task-101",
-        status=AgentTaskStatus.WAITING_USER,
-        state_json={"workflow": workflow, "payload": {"workflow": workflow}},
-    )
-    service = PendingTaskGraphService(
-        preflight_graph_service=FakePreflightGraphService(FakePreflightResult(
-            task=task,
-            events=[{"event": "pending_interruption_assessed"}],
-        )),
-        interaction_graph_service=FakeInteractionGraphService(FakeInteractionResult(
-            handled=True,
-            assistant_content="请确认是否创建商机？",
-            remember_pending_task=True,
-            events=[{
-                "event": "confirmation_required",
-                "task_id": 101,
-                "action": "create_opportunity",
-                "workflow": workflow,
-            }, {"event": "final"}],
-        )),
-        checkpointer=InMemorySaver(),
-    )
-    initial_result, continuation = await _start_continuation(service, _state(task))
-    monkeypatch.setattr(
-        pending_graph_module.session_state,
-        "_resume_suspended_task",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("abort must not resume task")),
-    )
-    monkeypatch.setattr(
-        pending_graph_module.workflow_action_ledger,
-        "mark_action_cancelled",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("abort must not mutate ledger")),
-    )
-
-    result = await service.run(_resume_state(
-        _state(task),
-        continuation,
-        {"action": "abort_projection", "content": "internal recovery"},
-    ))
-    snapshot = await service._graph.aget_state(pending_task_checkpoint_config(continuation))
-
-    assert result["handled"] is False
-    assert result["projection_aborted"] is True
-    assert result["pending_interrupt_requested"] is False
-    assert result["current_interrupt"] is None
-    assert result["resume_route"] == "end"
-    assert result["effect_intents"] == []
-    assert result["projection_abort_interrupt"] == snapshot.values["projection_abort_interrupt"]
-    assert result["projection_abort_interrupt"] == initial_result["current_interrupt"]
-    assert not any(event.get("event") == "task_cancelled" for event in result["events"])
-    assert task.state_json["workflow"]["status"] == action_workflow.STATUS_WAITING_USER
-    assert snapshot.next == ()
-    assert snapshot.interrupts == ()
-
-@pytest.mark.asyncio
 async def test_pending_graph_uses_hidden_application_step_interrupt_for_preflight():
     task = SimpleNamespace(
         id=101,
@@ -2014,13 +2090,12 @@ async def test_pending_graph_uses_hidden_application_step_interrupt_for_prefligh
         remember_pending_task=True,
         events=[{"event": "confirmation_required"}, {"event": "final"}],
     ))
-    service = PendingTaskGraphService(
+    service, runtime = _durable_pending_runtime(
         preflight_graph_service=preflight,
         interaction_graph_service=interaction,
-        checkpointer=InMemorySaver(),
         application_step_protocol=True,
     )
-    first, continuation = await _start_continuation(service, _state(task))
+    first, continuation = await _start_continuation(runtime, _state(task))
 
     application_step = first["current_interrupt"]
     assert application_step["reason"] == "pending_task_application_step"
@@ -2047,7 +2122,7 @@ async def test_pending_graph_uses_hidden_application_step_interrupt_for_prefligh
         "replayed": False,
         "retryable": False,
     }
-    interaction_step_result = await service.run(
+    interaction_step_result = await runtime.run(
         _resume_state(_state(task), continuation, acknowledgement)
     )
 
@@ -2098,7 +2173,7 @@ async def test_pending_graph_uses_hidden_application_step_interrupt_for_prefligh
         "replayed": False,
         "retryable": False,
     }
-    resumed = await service.run(
+    resumed = await runtime.run(
         _resume_state(_state(task), continuation, interaction_acknowledgement)
     )
 
@@ -2121,10 +2196,9 @@ async def test_pending_graph_uses_hidden_application_step_for_semantic_turn_rela
             AssertionError("LangGraph node must not execute semantic turn-relation assessment")
         ),
     )
-    service = PendingTaskGraphService(
+    service, runtime = _durable_pending_runtime(
         preflight_graph_service=FakePreflightGraphService(FakePreflightResult()),
         interaction_graph_service=FakeInteractionGraphService(FakeInteractionResult()),
-        checkpointer=InMemorySaver(),
         application_step_protocol=True,
     )
     state = _state_with_suspended_candidates([{
@@ -2137,7 +2211,7 @@ async def test_pending_graph_uses_hidden_application_step_for_semantic_turn_rela
     state["turn_input"] = AgentTurnInput.text("张总说金额改成 30 万")
     state["content"] = "张总说金额改成 30 万"
 
-    first, continuation = await _start_continuation(service, state)
+    first, continuation = await _start_continuation(runtime, state)
 
     application_step = first["current_interrupt"]
     assert application_step["reason"] == "pending_task_application_step"
@@ -2165,7 +2239,7 @@ async def test_pending_graph_uses_hidden_application_step_for_semantic_turn_rela
         "replayed": False,
         "retryable": False,
     }
-    resumed = await service.run(_resume_state(state, continuation, acknowledgement))
+    resumed = await runtime.run(_resume_state(state, continuation, acknowledgement))
 
     assert resumed["turn_relation_decision"]["relation"] == "ASK_USER"
     assert resumed["current_interrupt"]["reason"] == "business_object_disambiguation"
