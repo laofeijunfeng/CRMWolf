@@ -1,3 +1,4 @@
+import { AcquisitionSourceInfoSchema } from './acquisition-source'
 /**
  * Zod Schema - 通用审批（Generic Approval）类型
  *
@@ -41,6 +42,7 @@ export const ApprovalCustomerInfoSchema = z.object({
   city: z.string().nullable().optional(),
   company_scale: z.string().nullable().optional(),
   source: z.string().nullable().optional(),
+  source_info: AcquisitionSourceInfoSchema.nullable().optional(),
   status: z.number().int().nullable().optional(),
   owner_id: z.string().nullable().optional()
 })

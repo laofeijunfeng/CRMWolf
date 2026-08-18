@@ -10,6 +10,7 @@ from app.services.agent.follow_up_fields import _merge_customer_activity_fields
 from app.services.agent.schemas import AgentHITLPolicy, AgentSemanticParseResult
 from app.services.agent.semantic import AgentSemanticParserError
 from app.services.agent.task_projection import update_agent_task
+from app.services.acquisition_source_service import resolve_write_fields_for_ai
 
 
 def _is_customer_fields_task(task) -> bool:
@@ -42,8 +43,11 @@ async def _apply_customer_fields(db: Session, task, content: str):
     except AgentSemanticParserError as exc:
         return False, f"我没有可靠识别到补充的客户信息，请换一种说法补充。原因：{str(exc)}"
 
-    customer = _merge_customer_fields(payload.get("customer") or {}, semantic_result)
-    customer.setdefault("source", "其他")
+    customer = resolve_write_fields_for_ai(
+        _merge_customer_fields(payload.get("customer") or {}, semantic_result),
+        db,
+        getattr(task, "team_id", None),
+    )
     customer_activity = _merge_customer_activity_fields(
         payload.get("customer_activity") or payload.get("customer_follow_up") or {},
         semantic_result,

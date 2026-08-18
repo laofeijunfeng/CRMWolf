@@ -58,6 +58,8 @@ import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCu
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { normalizePaginatedResponse } from '@/types/pagination'
 import { buildSortFieldsFromFilterFields, getPrimarySort } from '@/utils/listSorts'
+import { useAcquisitionSourceOptions } from '@/composables/useAcquisitionSourceOptions'
+import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -71,6 +73,10 @@ const loading = ref(false)
 const tableData = ref<Lead[]>([])
 const userOptions = ref<UserResponse[]>([])
 const ownerFilterOptions = ref<LeadOwnerFilterOption[]>([])
+const {
+  filterSelectOptions: sourceFilterSelectOptions,
+  loadFilterOptions: loadSourceFilterOptions,
+} = useAcquisitionSourceOptions()
 
 // LeadDetailSheet 状态
 const sheetVisible = ref(false)
@@ -107,7 +113,7 @@ const tabs = [
 const activeTab = ref('all')
 
 // ==================== 列表筛选配置 ====================
-const baseFilterFields: ListFilterField[] = [
+const baseFilterFields = computed<ListFilterField[]>(() => [
   { key: 'lead_name', type: 'text', label: '线索名称' },
   { key: 'contact_name', type: 'text', label: '联系人' },
   { key: 'contact_phone', type: 'text', label: '联系电话' },
@@ -125,15 +131,7 @@ const baseFilterFields: ListFilterField[] = [
     key: 'source',
     type: 'enum',
     label: '来源',
-    options: [
-      { value: '线上注册', label: '线上注册' },
-      { value: '市场活动', label: '市场活动' },
-      { value: '客户推荐', label: '客户推荐' },
-      { value: '电话营销', label: '电话营销' },
-      { value: '网站咨询', label: '网站咨询' },
-      { value: '展会', label: '展会' },
-      { value: '其他', label: '其他' }
-    ]
+    options: sourceFilterSelectOptions.value
   },
   { key: 'city', type: 'text', label: '城市' },
   {
@@ -149,10 +147,10 @@ const baseFilterFields: ListFilterField[] = [
     ]
   },
   { key: 'created_time', type: 'date', label: '创建时间' }
-]
+])
 
 const filterFields = computed<ListFilterField[]>(() => {
-  const fields: ListFilterField[] = baseFilterFields.slice()
+  const fields: ListFilterField[] = baseFilterFields.value.slice()
   if (ownerFilterOptions.value.length > 0) {
     fields.splice(fields.length - 1, 0, {
       key: 'owner_id',
@@ -490,6 +488,7 @@ const mapLeadStatus = (status: number): 'new' | 'following' | 'converted' | 'inv
 onMounted(() => {
   void customFilterViews.loadCustomViews()
   fetchOwnerFilterOptions()
+  void loadSourceFilterOptions()
   fetchLeadList()
 })
 
@@ -581,7 +580,7 @@ watchEffect(() => {
           <span>{{ row.contact_phone || '-' }}</span>
         </div>
         <div class="lead-mobile-card-meta">
-          <span>{{ row.source || '-' }}</span>
+          <span>{{ getAcquisitionSourceDisplayName(row, '-') }}</span>
           <span>{{ row.city || '-' }}</span>
           <span>负责人：{{ row.owner_info?.name || '未分配' }}</span>
         </div>
@@ -672,8 +671,8 @@ watchEffect(() => {
       <!-- 来源 -->
       <template #cell-source="{ row }">
         <StatusBadge
-          v-if="row.source"
-          :status="row.source"
+          v-if="getAcquisitionSourceDisplayName(row, '')"
+          :status="getAcquisitionSourceDisplayName(row, '')"
           type="source"
         />
         <span v-else class="text-muted-foreground">-</span>

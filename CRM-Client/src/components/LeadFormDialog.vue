@@ -33,6 +33,7 @@ import {
 } from '@/components/crmwolf'
 import { leadApi } from '@/api/lead'
 import { leadSchema, type LeadForm } from '@/schemas/lead-form'
+import { useAcquisitionSourceOptions } from '@/composables/useAcquisitionSourceOptions'
 
 interface Props {
   open: boolean
@@ -61,16 +62,11 @@ const visible = computed({
   set: (val) => emit('update:open', val)
 })
 
-// 选项配置
-const sourceOptions: { value: LeadForm['source']; label: string }[] = [
-  { value: '线上注册', label: '线上注册' },
-  { value: '市场活动', label: '市场活动' },
-  { value: '客户推荐', label: '客户推荐' },
-  { value: '电话营销', label: '电话营销' },
-  { value: '网站咨询', label: '网站咨询' },
-  { value: '展会', label: '展会' },
-  { value: '其他', label: '其他' }
-]
+const {
+  formSelectOptions: sourceOptions,
+  loadFormOptions,
+  ensureOption,
+} = useAcquisitionSourceOptions()
 
 const companyScaleOptions: { value: NonNullable<LeadForm['company_scale']>; label: string }[] = [
   { value: '1-50人', label: '1-50人' },
@@ -87,13 +83,18 @@ watch(initialValues, (): void => {
 
 // 编辑模式：加载线索详情
 watch([(): boolean => props.open, (): string | undefined => props.leadId], async ([open, leadId]): Promise<void> => {
+  if (open) {
+    await loadFormOptions()
+  }
+
   if (open && props.mode === 'edit' && leadId !== undefined && leadId !== null) {
     loading.value = true
     try {
       const lead = await leadApi.getLeadDetail(leadId)
+      ensureOption(lead.source_info)
       initialValues.value = {
         lead_name: lead.lead_name,
-        source: lead.source as LeadForm['source'],
+        source_public_id: lead.source_info?.public_id ?? '',
         city: lead.city,
         company_scale: lead.company_scale as LeadForm['company_scale'] | undefined,
         contact_name: lead.contact_name,
@@ -121,7 +122,7 @@ const handleSubmit = async (values: GenericObject): Promise<void> => {
     // Build API payload - remark field is optional and may not be in API types yet
     const payload = {
       lead_name: formData.lead_name,
-      source: formData.source,
+      source_public_id: formData.source_public_id,
       city: formData.city,
       contact_name: formData.contact_name,
       contact_phone: formData.contact_phone,
@@ -130,11 +131,11 @@ const handleSubmit = async (values: GenericObject): Promise<void> => {
 
     if (props.mode === 'create') {
       // Cast to include remark if present (backend may support it)
-      await leadApi.createLead({ ...payload, remark: formData.remark } as unknown as { lead_name: string; source: string; city: string; contact_name: string; contact_phone: string; company_scale?: string })
+      await leadApi.createLead({ ...payload, remark: formData.remark } as LeadForm)
       toast.success('线索创建成功')
     } else if (props.leadId !== undefined) {
       // Cast to include remark if present (backend may support it)
-      await leadApi.updateLead(props.leadId, { ...payload, remark: formData.remark } as unknown as { lead_name?: string; source?: string; city?: string; contact_name?: string; contact_phone?: string; company_scale?: string })
+      await leadApi.updateLead(props.leadId, { ...payload, remark: formData.remark } as Partial<LeadForm>)
       toast.success('线索更新成功')
     }
 
@@ -214,7 +215,7 @@ const continueEditing = (): void => {
             </FormField>
 
             <!-- 线索来源 -->
-            <FormField v-slot="{ value, handleChange }" name="source">
+            <FormField v-slot="{ value, handleChange }" name="source_public_id">
               <FormItem>
                 <SelectField
                   id="lead-source"

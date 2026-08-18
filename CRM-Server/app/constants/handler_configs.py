@@ -61,7 +61,8 @@ from app.schemas.invoice import InvoiceApplicationCreate, InvoiceApplicationUpda
 # ============================================================================
 # 枚举类导入
 # ============================================================================
-from app.models.lead import LeadSource, LeadStatus, CompanyScale, FollowUpMethod
+from app.constants.acquisition_sources import SYSTEM_DEFAULT_SOURCES
+from app.models.lead import LeadStatus, CompanyScale, FollowUpMethod
 from app.models.customer import CustomerStatus
 from app.models.opportunity import OpportunityStatus, PurchaseType, LicenseType
 from app.models.invoice import InvoiceType
@@ -212,17 +213,10 @@ CRUD_MAPPINGS: Dict[str, Dict[str, Any]] = {
 ENUM_MAPPINGS: Dict[str, Dict[str, Any]] = {
     # 线索相关
     "lead_source": {
-        "enum_class": LeadSource,
-        "display_name": "线索来源",
-        # 中文 -> 枚举成员名（用于从中文获取枚举）
+        "display_name": "获客来源",
         "values": {
-            "线上注册": "ONLINE_REGISTER",
-            "市场活动": "MARKETING_ACTIVITY",
-            "客户推荐": "REFERRAL",
-            "电话营销": "COLD_CALL",
-            "网站咨询": "WEBSITE_INQUIRY",
-            "展会": "EXHIBITION",
-            "其他": "OTHER",
+            str(item["name"]): str(item["code"])
+            for item in SYSTEM_DEFAULT_SOURCES
         },
     },
     "lead_status": {

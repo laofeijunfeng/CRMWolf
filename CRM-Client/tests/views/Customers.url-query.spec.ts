@@ -38,6 +38,11 @@ vi.mock('vue-router', () => ({
   useRouter: () => ({ push: routerPush }),
 }))
 vi.mock('@/api/customer', () => ({ default: customerApi }))
+vi.mock('@/api/acquisition-source', () => ({
+  acquisitionSourceApi: {
+    listOptions: vi.fn().mockResolvedValue([]),
+  },
+}))
 vi.mock('@/stores/user', () => ({ useUserStore: () => userStore }))
 vi.mock('@/stores/permissions', () => ({ usePermissionStore: () => permissionStore }))
 vi.mock('@/stores/header', () => ({ useHeaderStore: () => headerStore }))

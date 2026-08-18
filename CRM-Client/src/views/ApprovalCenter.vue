@@ -389,7 +389,7 @@
                     </div>
                     <div class="attribute-item">
                       <div class="attribute-label">客户来源</div>
-                      <div class="attribute-value">{{ approvalCustomerInfo.source || '-' }}</div>
+                      <div class="attribute-value">{{ getAcquisitionSourceDisplayName(approvalCustomerInfo) }}</div>
                     </div>
                     <div class="attribute-item">
                       <div class="attribute-label">客户状态</div>
@@ -591,6 +591,7 @@ import approvalGenericApi from '@/api/approvalGeneric'
 import contractApi from '@/api/contract'
 import invoiceApi, { type InvoiceApplicationResponse } from '@/api/invoice'
 import type { EntityType, ApprovalCustomerInfo, ApprovalDetail, ApprovalListItem, ApprovalListQuery } from '@/schemas/approvalGeneric'
+import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
 import type { ContractResponse } from '@/api/contract'
 
 type Tab = 'pending' | 'processed' | 'submitted'

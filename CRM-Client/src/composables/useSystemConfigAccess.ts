@@ -7,6 +7,7 @@ export const SYSTEM_CONFIG_PERMISSION_CODES = [
   'approval:flow:create',
   'approval:flow:edit',
   'procurement_method:view',
+  'acquisition_source:view',
   'system:config',
   'ai:manage',
 ] as const

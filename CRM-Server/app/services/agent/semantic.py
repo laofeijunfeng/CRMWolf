@@ -11,17 +11,18 @@ from sqlalchemy.orm import Session
 
 from app.crud.ai_config import ai_config_crud
 from app.services.ai_service import ai_service
+from app.services.acquisition_source_service import default_source_name, format_active_source_names
 from app.services.agent.prompts import (
     build_confirmation_intent_messages,
     build_resource_resolution_messages,
     build_turn_intent_messages,
     CRM_AGENT_PENDING_INTERRUPTION_SYSTEM_PROMPT,
     CRM_AGENT_RESOURCE_RESOLUTION_SYSTEM_PROMPT,
-    CRM_AGENT_SEMANTIC_SYSTEM_PROMPT,
     CRM_AGENT_TURN_RELATION_SYSTEM_PROMPT,
     build_pending_interruption_messages,
     build_semantic_messages,
     build_turn_relation_messages,
+    render_semantic_system_prompt,
 )
 from app.services.agent.langchain_runtime import AgentLangChainRuntime, AgentLangChainStructuredOutputError
 from app.services.agent.schemas import (
@@ -367,6 +368,8 @@ class AgentSemanticParser:
             raise AgentSemanticParserError("AI API Key 未设置，无法进行 Agent 语义理解。")
 
         memory_json = (memory or AgentMemorySnapshot()).model_dump_json(exclude_none=True)
+        source_names = format_active_source_names(db, team_id)
+        fallback_source_name = default_source_name(db, team_id)
         fallback_reason = None
         fallback_error = None
         try:
@@ -378,6 +381,8 @@ class AgentSemanticParser:
                 memory_json=memory_json,
                 temperature=min(float(config.temperature or 0.1), 0.2),
                 current_date=current_date,
+                source_names=source_names,
+                default_source_name=fallback_source_name,
             )
         except AgentSemanticParserError:
             raise
@@ -396,7 +401,13 @@ class AgentSemanticParser:
             api_host=config.api_host,
             api_key=api_key,
             model=config.model_name,
-            messages=build_semantic_messages(user_message, memory_json, current_date=current_date),
+            messages=build_semantic_messages(
+                user_message,
+                memory_json,
+                current_date=current_date,
+                source_names=source_names,
+                default_source_name=fallback_source_name,
+            ),
             temperature=min(float(config.temperature or 0.1), 0.2),
             max_tokens=max(int(config.max_tokens or 1024), 1500),
             response_format={"type": "json_object"},
@@ -419,9 +430,14 @@ class AgentSemanticParser:
         memory_json: str,
         temperature: float,
         current_date: Optional[date] = None,
+        source_names: Optional[list[str]] = None,
+        default_source_name: Optional[str] = None,
     ) -> Optional[AgentSemanticParseResult]:
         prompt_date = current_date or date.today()
-        system_prompt = f"{CRM_AGENT_SEMANTIC_SYSTEM_PROMPT}\n\n【当前日期】\n{prompt_date.isoformat()}"
+        system_prompt = (
+            f"{render_semantic_system_prompt(source_names, default_source_name)}"
+            f"\n\n【当前日期】\n{prompt_date.isoformat()}"
+        )
         user_prompt = "【会话记忆】\n" f"{memory_json}\n\n" "【用户输入】\n" f"{user_message}"
         try:
             return await self.langchain_runtime.ainvoke_structured(

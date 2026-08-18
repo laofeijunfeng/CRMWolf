@@ -286,6 +286,8 @@ class CRMAgentGraphService:
             state.get("content", ""),
             temporal_resolver=self.temporal_resolver,
             base_datetime=context.side_effects.current_datetime,
+            db=context.db,
+            team_id=context.team_id,
         )
         parsed = self._apply_explicit_customer_hint(
             semantic_result,

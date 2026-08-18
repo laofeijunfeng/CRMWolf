@@ -44,7 +44,7 @@ class RoleCRUD:
             db.commit()
         return obj
 
-    def assign_to_user(self, db: Session, user_id: int, role_id: int, team_id: int) -> UserRole:
+    def assign_to_user(self, db: Session, user_id: int, role_id: int, team_id: int, commit: bool = True) -> UserRole:
         """
         为用户在指定团队分配角色
 
@@ -55,8 +55,11 @@ class RoleCRUD:
         """
         user_role = UserRole(user_id=user_id, role_id=role_id, team_id=team_id)
         db.add(user_role)
-        db.commit()
-        db.refresh(user_role)
+        if commit:
+            db.commit()
+            db.refresh(user_role)
+        else:
+            db.flush()
         return user_role
 
     def remove_from_user(self, db: Session, user_id: int, role_id: int, team_id: int) -> bool:

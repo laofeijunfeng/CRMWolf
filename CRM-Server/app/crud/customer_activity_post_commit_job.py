@@ -112,6 +112,26 @@ class CustomerActivityPostCommitJobCRUD:
             .one_or_none()
         )
 
+    def get_latest_by_activity(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        activity_id: int,
+    ) -> CustomerActivityPostCommitJob | None:
+        return (
+            db.query(CustomerActivityPostCommitJob)
+            .filter(
+                CustomerActivityPostCommitJob.team_id == team_id,
+                CustomerActivityPostCommitJob.activity_id == activity_id,
+            )
+            .order_by(
+                CustomerActivityPostCommitJob.activity_revision.desc(),
+                CustomerActivityPostCommitJob.id.desc(),
+            )
+            .first()
+        )
+
     def claim_for_execution(
         self,
         db: Session,

@@ -92,15 +92,7 @@ export const LeadStatusMap: Record<string, string> = {
   'INVALID': '无效'
 }
 
-export const LeadSourceSchema = z.enum([
-  'WEBSITE',
-  'REFERRAL',
-  'EVENT',
-  'COLD_CALL',
-  'WEBSITE_INQUIRY',
-  'EXHIBITION',
-  'OTHER'
-])
+export const LeadSourceSchema = z.string().min(1)
 
 export const CompanyScaleSchema = z.enum([
   '1-10',

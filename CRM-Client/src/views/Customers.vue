@@ -47,7 +47,9 @@ import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
-import { customerSourceOptions, companyScaleOptions } from '@/schemas/customer-form'
+import { companyScaleOptions } from '@/schemas/customer-form'
+import { useAcquisitionSourceOptions } from '@/composables/useAcquisitionSourceOptions'
+import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
 import { getPrimarySort } from '@/utils/listSorts'
 
@@ -65,6 +67,10 @@ const loading = ref(false)
 const tableData = ref<CustomerTableRow[]>([])
 const ownerFilterOptions = ref<OwnerFilterOption[]>([])
 const industryFilterOptions = ref<{ value: string; label: string }[]>([])
+const {
+  filterSelectOptions: sourceFilterSelectOptions,
+  loadFilterOptions: loadSourceFilterOptions,
+} = useAcquisitionSourceOptions()
 const selectedCustomer = ref<CustomerResponse | null>(null)
 const transferCustomer = ref<CustomerResponse | null>(null)
 const transferDialogOpen = ref(false)
@@ -232,10 +238,10 @@ const columns = computed(() => [
     width: '120px',
     filterable: true,
     filterType: 'enum' as const,
-    filterOptions: [...customerSourceOptions],
+    filterOptions: sourceFilterSelectOptions.value,
     sortable: true,
     sortType: 'enum' as const,
-    sortOptions: [...customerSourceOptions]
+    sortOptions: sourceFilterSelectOptions.value
   },
   { key: 'creator', title: '创建人', width: '100px' },
   {
@@ -395,8 +401,8 @@ const fetchCustomerList = async (): Promise<void> => {
       status_exclude: getDelimitedFilterValues(activeFilters.value, 'status', ['neq', 'not_contains']),
       industry: getDelimitedFilterValues(activeFilters.value, 'industry'),
       industry_exclude: getDelimitedFilterValues(activeFilters.value, 'industry', ['neq', 'not_contains']),
-      source: getDelimitedFilterValues(activeFilters.value, 'source'),
-      source_exclude: getDelimitedFilterValues(activeFilters.value, 'source', ['neq', 'not_contains']),
+      source_public_id: getDelimitedFilterValues(activeFilters.value, 'source'),
+      source_public_id_exclude: getDelimitedFilterValues(activeFilters.value, 'source', ['neq', 'not_contains']),
       city: getFilterValue(activeFilters.value, 'city', ['eq', 'contains']),
       company_scale: getDelimitedFilterValues(activeFilters.value, 'company_scale'),
       company_scale_exclude: getDelimitedFilterValues(activeFilters.value, 'company_scale', ['neq', 'not_contains']),
@@ -730,6 +736,7 @@ const mapCustomerStatus = (status: number): 'following' | 'won' | 'lost' | 'expi
 onMounted(() => {
   void fetchOwnerFilterOptions()
   void fetchIndustryFilterOptions()
+  void loadSourceFilterOptions()
   void customFilterViews.loadCustomViews()
   fetchCustomerList()
 })
@@ -823,8 +830,8 @@ watchEffect(() => {
             type="industry"
           />
           <StatusBadge
-            v-if="row.source"
-            :status="row.source"
+            v-if="getAcquisitionSourceDisplayName(row, '')"
+            :status="getAcquisitionSourceDisplayName(row, '')"
             type="source"
           />
           <span class="license-badge" :class="getLicenseStatusClass(row)">
@@ -940,8 +947,8 @@ watchEffect(() => {
       <!-- 来源 -->
       <template #cell-source="{ row }">
         <StatusBadge
-          v-if="row.source"
-          :status="row.source"
+          v-if="getAcquisitionSourceDisplayName(row, '')"
+          :status="getAcquisitionSourceDisplayName(row, '')"
           type="source"
         />
         <span v-else class="text-muted-foreground">-</span>

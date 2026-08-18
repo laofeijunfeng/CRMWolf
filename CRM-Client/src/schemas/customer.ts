@@ -11,6 +11,7 @@ import {
   PaginatedResponseSchema,
   OptionalStringFromNullableSchema
 } from './common'
+import { AcquisitionSourceInfoSchema } from './acquisition-source'
 
 // ===== 行业信息 Schema =====
 export const CustomerIndustryInfoSchema = z.object({
@@ -43,6 +44,7 @@ export const CustomerResponseSchema = z.object({
   address: z.string().max(500).nullable(),
   company_scale: z.string().max(50).nullable(),
   source: z.string().max(100).nullable(),
+  source_info: AcquisitionSourceInfoSchema.nullable().optional(),
   status: CustomerStatusSchema,
   owner_id: z.string().nullable(),
   source_lead_id: z.string().nullable(),
@@ -140,6 +142,7 @@ export const CustomerCreateSchema = z.object({
   address: z.string().max(500).optional(),
   company_scale: z.string().max(50).optional(),
   source: z.string().max(100).optional(),
+  source_public_id: z.string().min(1).optional(),
   owner_id: z.string().optional(),
   default_procurement_method_id: z.number().int().optional()
 })

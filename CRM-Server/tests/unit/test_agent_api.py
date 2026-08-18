@@ -25,6 +25,7 @@ from app.models.agent import (
     AgentToolCall,
     AgentWorkflowAction,
 )
+from app.models.acquisition_source import AcquisitionSource
 from app.models.customer import Customer
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_intelligence_run import CustomerIntelligenceRun, CustomerIntelligenceRunStatus
@@ -81,6 +82,7 @@ def _build_client(monkeypatch):
     )
     tables = [
         Customer.__table__,
+        AcquisitionSource.__table__,
         CustomerActivity.__table__,
         CustomerVectorDocument.__table__,
         CustomerIntelligenceRun.__table__,
@@ -191,7 +193,12 @@ class FakeTurnRelationAndSemanticParser:
         })
         relation = dict(self.relation)
         if relation.get("target_task_id") == "__first_suspended__":
-            relation["target_task_id"] = suspended_tasks[0]["id"]
+            first_suspended = (suspended_tasks or [None])[0]
+            if isinstance(first_suspended, dict) and first_suspended.get("id") is not None:
+                relation["target_task_id"] = first_suspended["id"]
+            else:
+                relation["relation"] = "START_NEW_FLOW"
+                relation["target_task_id"] = None
         return AgentTurnRelationDecision.model_validate(relation)
 
     async def parse(self, db, *, team_id, user_message, memory=None, current_date=None):
@@ -2423,7 +2430,7 @@ def test_agent_event_interaction_protocol_for_missing_lead_fields():
     ]
 
 
-def test_agent_tool_payload_for_create_lead_defaults_source():
+def test_agent_tool_payload_for_create_lead_does_not_inject_legacy_source():
     payload = _tool_payload_for_action(
         "create_lead",
         {
@@ -2444,10 +2451,10 @@ def test_agent_tool_payload_for_create_lead_defaults_source():
             "city": "广州",
             "contact_name": "王总",
             "contact_phone": "13800138000",
-            "source": "其他",
         },
         "idempotency_suffix": "task-lead-001",
     }
+    assert "source" not in payload["lead"]
 
 
 def test_agent_tool_payload_for_create_opportunity_strips_draft_fields():

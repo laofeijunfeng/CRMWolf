@@ -56,6 +56,7 @@ import { Plus, Pencil, RefreshCw, Loader2, Sparkles } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { handleApiError } from '@/utils/errorHandler'
 import customerApi, { type CustomerDetailResponse, type ContactResponse, type CustomerMemberResponse } from '@/api/customer'
+import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
 import customerActivityApi, { type CustomerActivityResponse } from '@/api/customerActivity'
 import { opportunityApi, type OpportunityListResponse } from '@/api/opportunity'
 import contractApi, { type ContractListResponse, type ContractResponse } from '@/api/contract'
@@ -1321,7 +1322,7 @@ watch(() => props.targetPanel, (panel): void => {
                     <div class="attributes-grid">
                       <div class="attribute-item">
                         <div class="attribute-label">客户来源</div>
-                        <div class="attribute-value">{{ customer?.source || '-' }}</div>
+                        <div class="attribute-value">{{ getAcquisitionSourceDisplayName(customer) }}</div>
                       </div>
                       <div class="attribute-item">
                         <div class="attribute-label">所在城市</div>

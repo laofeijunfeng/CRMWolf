@@ -2,6 +2,7 @@ import request from '@/utils/request'
 import { z } from 'zod'
 import type { PaginatedResponse } from '@/types/pagination'
 import { logger } from '@/utils/logger'
+import type { AcquisitionSourceInfo } from '@/schemas/acquisition-source'
 import {
   ConvertResponseSchema,
   CustomerResponseSchema,
@@ -107,12 +108,14 @@ export interface ConvertResponse {
   message: string
 }
 
+export type { AcquisitionSourceInfo }
+
 export interface CustomerCreate {
   account_name: string
   city: string
   address?: string | null
   company_scale?: string | null
-  source?: string | null
+  source_public_id?: string | null
   default_procurement_method_id?: number | null
   primary_contact?: ContactCreate | null
 }
@@ -122,7 +125,7 @@ export interface CustomerUpdate {
   city?: string | null
   address?: string | null
   company_scale?: string | null
-  source?: string | null
+  source_public_id?: string | null
   default_procurement_method_id?: number | null
 }
 
@@ -163,6 +166,7 @@ export interface CustomerResponse {
   address: string | null
   company_scale: string | null
   source: string | null
+  source_info?: AcquisitionSourceInfo | null
   status: CustomerStatus
   owner_id: string | null
   source_lead_id: string | null
@@ -218,6 +222,7 @@ export interface CustomerDetailResponse {
   address: string | null
   company_scale: string | null
   source: string | null
+  source_info?: AcquisitionSourceInfo | null
   status: CustomerStatus
   owner_id: string
   source_lead_id: string | null
@@ -305,8 +310,8 @@ export interface CustomerQueryParams {
   industry?: string
   industry_exclude?: string
   city?: string
-  source?: string
-  source_exclude?: string
+  source_public_id?: string
+  source_public_id_exclude?: string
   company_scale?: string
   company_scale_exclude?: string
   owner_id?: string

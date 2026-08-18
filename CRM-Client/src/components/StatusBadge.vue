@@ -26,7 +26,7 @@ export type PaymentRecordStatus = 'pending' | 'confirmed' | 'rejected'
 export type GenericStatus = 'active' | 'inactive' | 'pending' | 'success' | 'warning' | 'danger'
 
 // 新增枚举字段类型
-export type SourceType = '线上注册' | '市场活动' | '客户推荐' | '电话营销' | '网站咨询' | '展会' | '其他'
+export type SourceType = string
 export type AuthorizationModeType = 'SUBSCRIPTION' | 'PERPETUAL'
 export type ProcurementTypeType = 'NEW' | 'RENEWAL' | 'EXPANSION'
 export type IndustryType = 'IT/互联网' | '金融' | '教育' | '医疗' | '制造' | '零售' | '房地产' | '其他'
@@ -103,15 +103,6 @@ const STATUS_CONFIG = {
     warning: { label: '警告', color: 'warning' },
     danger: { label: '危险', color: 'danger' }
   },
-  source: {
-    '线上注册': { label: '线上注册', color: 'success' },
-    '市场活动': { label: '市场活动', color: 'warning' },
-    '客户推荐': { label: '客户推荐', color: 'success' },
-    '电话营销': { label: '电话营销', color: 'warning' },
-    '网站咨询': { label: '网站咨询', color: 'success' },
-    '展会': { label: '展会', color: 'warning' },
-    '其他': { label: '其他', color: 'neutral' }
-  },
   authorizationMode: {
     'SUBSCRIPTION': { label: '订阅制', color: 'warning' },
     'PERPETUAL': { label: '买断制', color: 'success' }
@@ -138,16 +129,15 @@ const STATUS_CONFIG = {
 
 // 获取状态配置
 const config = computed<StatusConfigItem>(() => {
-  const typeConfig = STATUS_CONFIG[type.value] as Record<string, StatusConfigItem>
-
-  // 行业字段特殊处理：动态显示，统一颜色
-  if (type.value === 'industry') {
+  // 行业 / 获客来源名称可配置，动态显示，统一颜色
+  if (type.value === 'industry' || type.value === 'source') {
     return {
       label: String(props.status),
       color: 'neutral' as StatusColor
     }
   }
 
+  const typeConfig = STATUS_CONFIG[type.value] as Record<string, StatusConfigItem>
   const statusConfig = typeConfig[props.status]
   return statusConfig ?? { label: '未知', color: 'neutral' }
 })

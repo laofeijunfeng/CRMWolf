@@ -49,13 +49,7 @@ export const ACTION_CONFIGS: Record<string, ActionConfig> = {
       { key: 'phone', label: '联系电话', type: 'text' },
       { key: 'email', label: '邮箱', type: 'text' },
       { key: 'address', label: '地址', type: 'text' },
-      { key: 'source', label: '客户来源', type: 'select', options: {
-        website: '官网',
-        referral: '推荐',
-        event: '展会',
-        cold_call: '电话开发',
-        other: '其他'
-      }}
+      { key: 'source', label: '客户来源', type: 'text' }
     ]
   },
 

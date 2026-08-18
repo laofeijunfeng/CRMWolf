@@ -15,6 +15,9 @@ from app.core.database import SessionLocal
 from app.crud.customer_activity import customer_activity_crud
 from app.crud.customer_activity_post_commit_job import customer_activity_post_commit_job_crud
 from app.models.customer_activity_post_commit_job import CustomerActivityPostCommitJobStatus
+from app.services.customer_activity_post_commit_operation_projector import (
+    customer_activity_post_commit_operation_projector,
+)
 from app.services.customer_activity_post_commit_workflow import customer_activity_post_commit_workflow
 from app.utils.time import business_now
 
@@ -106,6 +109,7 @@ class CustomerActivityPostCommitJobService:
             if existing is None:
                 raise ValueError("客户活动后提交任务不存在")
             if existing.status in CustomerActivityPostCommitJobStatus.TERMINAL:
+                self._project_bound_operation(db, existing)
                 return dict(existing.result_json or {})
             max_attempts = max(1, settings.CUSTOMER_ACTIVITY_POST_COMMIT_MAX_ATTEMPTS)
             if int(existing.attempt_count or 0) >= max_attempts:
@@ -122,6 +126,7 @@ class CustomerActivityPostCommitJobService:
                     now=claimed_at,
                 )
                 if finalized is not None and finalized.status in CustomerActivityPostCommitJobStatus.TERMINAL:
+                    self._project_bound_operation(db, finalized)
                     return dict(finalized.result_json or terminal_result)
                 return self._busy_result(existing.activity_id)
             job = customer_activity_post_commit_job_crud.claim_for_execution(
@@ -139,7 +144,7 @@ class CustomerActivityPostCommitJobService:
             activity = customer_activity_crud.get_by_id(db, job.activity_id, job.team_id)
             if activity is None:
                 result = self._skipped_result(job.activity_id, "ACTIVITY_NOT_FOUND")
-                customer_activity_post_commit_job_crud.mark_completed_if_lease_owner(
+                updated = customer_activity_post_commit_job_crud.mark_completed_if_lease_owner(
                     db,
                     team_id=job.team_id,
                     public_id=job.public_id,
@@ -147,10 +152,11 @@ class CustomerActivityPostCommitJobService:
                     result_json=result,
                     skipped=True,
                 )
+                self._project_bound_operation(db, updated or job)
                 return result
             if int(activity.post_commit_revision or 1) != int(job.activity_revision):
                 result = self._skipped_result(job.activity_id, "SUPERSEDED_ACTIVITY_REVISION")
-                customer_activity_post_commit_job_crud.mark_completed_if_lease_owner(
+                updated = customer_activity_post_commit_job_crud.mark_completed_if_lease_owner(
                     db,
                     team_id=job.team_id,
                     public_id=job.public_id,
@@ -158,6 +164,7 @@ class CustomerActivityPostCommitJobService:
                     result_json=result,
                     skipped=True,
                 )
+                self._project_bound_operation(db, updated or job)
                 return result
             job_data = {
                 "activity_id": int(job.activity_id),
@@ -169,6 +176,7 @@ class CustomerActivityPostCommitJobService:
                 "activity_revision": int(job.activity_revision),
                 "attempt_count": int(job.attempt_count or 1),
             }
+            self._project_bound_operation(db, job)
         finally:
             db.close()
 
@@ -237,9 +245,25 @@ class CustomerActivityPostCommitJobService:
                     request.job_public_id,
                 )
                 return self._lease_lost_result(job_data["activity_id"])
+            self._project_bound_operation(db, updated)
             return result
         finally:
             db.close()
+
+    @staticmethod
+    def _project_bound_operation(db: Session, job: object | None) -> None:
+        if job is None:
+            return
+        try:
+            projected = customer_activity_post_commit_operation_projector.project_job(db, job)
+            if projected is not None:
+                db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception(
+                "投影客户活动后提交异步操作失败: job=%s",
+                getattr(job, "public_id", None),
+            )
 
     def kick(self, request: CustomerActivityPostCommitJobRequest) -> None:
         """Best-effort latency optimization; durable recovery remains authoritative."""
@@ -277,6 +301,7 @@ class CustomerActivityPostCommitJobService:
                     error_message=str(exc),
                 )
                 if updated is not None:
+                    self._project_bound_operation(db, updated)
                     return result
             else:
                 updated = customer_activity_post_commit_job_crud.mark_failed_if_lease_owner(
@@ -288,6 +313,7 @@ class CustomerActivityPostCommitJobService:
                     next_attempt_at=self._next_attempt_at(attempt_count),
                 )
                 if updated is not None:
+                    self._project_bound_operation(db, updated)
                     return None
             logger.warning(
                 "客户活动后提交任务失败结果因租约已变更被忽略: job=%s",

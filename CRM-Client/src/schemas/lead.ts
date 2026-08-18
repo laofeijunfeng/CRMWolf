@@ -13,6 +13,7 @@ import {
   CompanyScaleSchema,
   PaginatedResponseSchema
 } from './common'
+import { AcquisitionSourceInfoSchema } from './acquisition-source'
 
 // ===== 线索基础类型 =====
 export const LeadResponseSchema = z.object({
@@ -20,6 +21,7 @@ export const LeadResponseSchema = z.object({
   public_id: z.string().min(1),
   lead_name: z.string().min(1).max(255),
   source: LeadSourceSchema,
+  source_info: AcquisitionSourceInfoSchema.nullable().optional(),
   city: z.string().min(1).max(100),
   contact_name: z.string().min(1).max(100),
   contact_phone: z.string().min(1).max(20),
@@ -70,7 +72,7 @@ export type LeadDetailResponse = z.infer<typeof LeadDetailResponseSchema>
 // ===== 线索创建请求 =====
 export const LeadCreateSchema = z.object({
   lead_name: z.string().min(1).max(255),
-  source: LeadSourceSchema,
+  source_public_id: z.string().min(1),
   city: z.string().min(1).max(100),
   contact_name: z.string().min(1).max(100),
   contact_phone: z.string().min(1).max(20),

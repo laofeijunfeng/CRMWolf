@@ -71,6 +71,9 @@ from app.services.agent.session_state import (
 )
 from app.services.agent.tools import CRMAgentToolService
 from app.services.agent.workflow_recovery_service import agent_workflow_recovery_service
+from app.services.customer_activity_post_commit_operation_projector import (
+    customer_activity_post_commit_operation_projector,
+)
 from app.services.customer_intelligence_operation_projector import (
     customer_intelligence_operation_projector,
 )
@@ -127,6 +130,36 @@ def _read_repair_customer_intelligence_operations(
             )
             db.commit()
             repaired = True
+    return repaired
+
+
+def _read_repair_customer_activity_post_commit_operations(
+    db: Session,
+    operations: list[AgentAsyncOperationProjection],
+) -> bool:
+    repaired = False
+    for operation in operations:
+        if (
+            operation.operation_type != "customer_activity_post_commit"
+            or operation.status in TERMINAL_OPERATION_STATUSES
+        ):
+            continue
+        try:
+            projected = customer_activity_post_commit_operation_projector.project_request(
+                db,
+                team_id=operation.team_id,
+                request_id=operation.request_id,
+                operation_public_id=operation.public_id,
+            )
+            if projected is not None:
+                db.commit()
+                repaired = True
+        except Exception:
+            db.rollback()
+            logger.exception(
+                "读取 Agent 异步操作时修复客户活动后提交投影失败: operation_public_id=%s",
+                operation.public_id,
+            )
     return repaired
 
 
@@ -402,7 +435,7 @@ async def list_agent_async_operations(
         session_id=session_id,
         limit=limit,
     )
-    if _read_repair_customer_intelligence_operations(db, operations):
+    if _read_repair_customer_intelligence_operations(db, operations) or _read_repair_customer_activity_post_commit_operations(db, operations):
         operations = agent_async_operation_service.list_session_projections(
             db,
             team_id=team_id,
@@ -428,7 +461,7 @@ async def get_agent_async_operation(
     )
     if operation is None:
         raise HTTPException(status_code=404, detail="Agent async operation not found")
-    if _read_repair_customer_intelligence_operations(db, [operation]):
+    if _read_repair_customer_intelligence_operations(db, [operation]) or _read_repair_customer_activity_post_commit_operations(db, [operation]):
         operation = agent_async_operation_service.get_projection(
             db,
             team_id=team_id,

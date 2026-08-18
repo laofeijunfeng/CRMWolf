@@ -1,7 +1,8 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List
 from datetime import date, datetime, time
-from app.models.lead import LeadSource, LeadStatus, CompanyScale, FollowUpMethod
+from app.models.lead import LeadStatus, CompanyScale, FollowUpMethod
+from app.schemas.acquisition_source import AcquisitionSourceInfo
 
 
 class OwnerInfo(BaseModel):
@@ -15,7 +16,6 @@ class OwnerInfo(BaseModel):
 
 class LeadBase(BaseModel):
     lead_name: str = Field(..., min_length=1, max_length=255, description="线索名称（项目名称或公司名称）")
-    source: LeadSource = Field(..., description="线索来源：如：WEBSITE:官网, REFERRAL:转介绍, EVENT:活动等")
     city: str = Field(..., min_length=1, max_length=100, description="所在城市（必填）")
     contact_name: str = Field(..., min_length=1, max_length=100, description="联系人姓名（必填）")
     contact_phone: str = Field(..., min_length=1, max_length=20, description="联系人手机（必填，主要联系方式）")
@@ -51,12 +51,22 @@ class LeadBase(BaseModel):
 
 
 class LeadCreate(LeadBase):
-    pass
+    source: Optional[str] = Field(None, max_length=50, description="获客来源名称（导入/兼容）")
+    source_public_id: Optional[str] = Field(None, description="获客来源对外ID")
+
+    @model_validator(mode="after")
+    def source_must_be_present(self):
+        public_id = (self.source_public_id or "").strip()
+        source_name = (self.source or "").strip() if self.source is not None else ""
+        if not public_id and not source_name:
+            raise ValueError("获客来源不能为空")
+        return self
 
 
 class LeadUpdate(BaseModel):
     lead_name: Optional[str] = Field(None, min_length=1, max_length=255, description="线索名称")
-    source: Optional[LeadSource] = Field(None, description="线索来源")
+    source: Optional[str] = Field(None, max_length=50, description="获客来源名称（兼容）")
+    source_public_id: Optional[str] = Field(None, description="获客来源对外ID")
     city: Optional[str] = Field(None, min_length=1, max_length=100, description="所在城市")
     contact_name: Optional[str] = Field(None, min_length=1, max_length=100, description="联系人姓名")
     contact_phone: Optional[str] = Field(None, min_length=1, max_length=20, description="联系人手机")
@@ -95,6 +105,8 @@ class LeadUpdate(BaseModel):
 class LeadResponse(LeadBase):
     id: str = Field(..., validation_alias="public_id", description="线索对外ID")
     public_id: str = Field(..., description="线索对外ID")
+    source: str = Field(..., description="获客来源当前名称")
+    source_info: Optional[AcquisitionSourceInfo] = Field(None, description="获客来源对象")
     owner_id: Optional[str] = Field(None, description="负责人系统用户ID")
     status: LeadStatus = Field(..., description="线索状态：NEW:新线索, CONTACTED:已联系, QUALIFIED:已确认, CONVERTED:已转化, INVALID:无效")
     invalid_reason: Optional[str] = Field(None, description="无效原因")
@@ -216,7 +228,9 @@ class LeadTrendResponse(BaseModel):
 
 
 class LeadConversionResponse(BaseModel):
-    source: str = Field(..., description="来源")
+    source: str = Field(..., description="来源当前名称")
+    source_public_id: Optional[str] = Field(None, description="获客来源对外ID")
+    source_name: Optional[str] = Field(None, description="来源当前名称")
     total: int = Field(..., description="总数")
     converted: int = Field(..., description="转化数")
     conversion_rate: float = Field(..., description="转化率（%）")

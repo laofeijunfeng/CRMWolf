@@ -1,5 +1,8 @@
 import request from '@/utils/request'
+import type { AcquisitionSourceInfo } from '@/schemas/acquisition-source'
 import type { PaginatedResponse } from '@/types/pagination'
+
+export type { AcquisitionSourceInfo }
 
 export interface OwnerInfo {
   id: string
@@ -12,6 +15,7 @@ export interface Lead {
   public_id: string
   lead_name: string
   source: string
+  source_info?: AcquisitionSourceInfo | null
   city: string
   contact_name: string
   contact_phone: string
@@ -31,6 +35,7 @@ export interface LeadDetail {
   public_id: string
   lead_name: string
   source: string
+  source_info?: AcquisitionSourceInfo | null
   city: string
   contact_name: string
   contact_phone: string
@@ -49,7 +54,7 @@ export interface LeadDetail {
 
 export interface LeadCreate {
   lead_name: string
-  source: string
+  source_public_id: string
   city: string
   contact_name: string
   contact_phone: string
@@ -58,7 +63,7 @@ export interface LeadCreate {
 
 export interface LeadUpdate {
   lead_name?: string
-  source?: string
+  source_public_id?: string
   city?: string
   contact_name?: string
   contact_phone?: string

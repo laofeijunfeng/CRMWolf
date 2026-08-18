@@ -26,7 +26,8 @@ import {
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { customerFormSchema, customerSourceOptions, companyScaleOptions, type CustomerForm } from '@/schemas/customer-form'
+import { customerFormSchema, companyScaleOptions, type CustomerForm } from '@/schemas/customer-form'
+import { useAcquisitionSourceOptions } from '@/composables/useAcquisitionSourceOptions'
 
 usePageTitle()
 
@@ -45,6 +46,11 @@ onUnmounted(() => {
 const loading = ref(false)
 const submitting = ref(false)
 const procurementMethodOptions = ref<ProcurementMethodOption[]>([])
+const {
+  formSelectOptions: sourceSelectOptions,
+  loadFormOptions,
+  ensureOption,
+} = useAcquisitionSourceOptions()
 
 const customerId = computed(() => String(route.params['id'] ?? ''))
 const isEdit = computed(() => !!customerId.value)
@@ -57,7 +63,7 @@ const { handleSubmit, setValues } = useForm({
     city: '',
     address: '',
     company_scale: undefined,
-    source: undefined,
+    source_public_id: undefined,
     default_procurement_method_id: undefined
   } as unknown as CustomerForm
 })
@@ -65,12 +71,6 @@ const { handleSubmit, setValues } = useForm({
 function normalizeCompanyScale(value: string | null): CustomerForm['company_scale'] | undefined {
   return companyScaleOptions.some(option => option.value === value)
     ? value as CustomerForm['company_scale']
-    : undefined
-}
-
-function normalizeCustomerSource(value: string | null): CustomerForm['source'] | undefined {
-  return customerSourceOptions.some(option => option.value === value)
-    ? value as CustomerForm['source']
     : undefined
 }
 
@@ -84,12 +84,13 @@ const fetchCustomerDetail = async (): Promise<void> => {
   loading.value = true
   try {
     const res = await customerApi.getCustomerDetail(customerId.value)
+    ensureOption(res.source_info)
     setValues({
       account_name: res.account_name ?? '',
       city: res.city ?? '',
       address: res.address ?? '',
       company_scale: normalizeCompanyScale(res.company_scale),
-      source: normalizeCustomerSource(res.source),
+      source_public_id: res.source_info?.public_id,
       default_procurement_method_id: res.default_procurement_method_id ?? undefined
     } as Partial<CustomerForm>)
   } catch (error: unknown) {
@@ -104,6 +105,7 @@ const fetchOptions = async (): Promise<void> => {
   try {
     const procurementRes = await procurementApi.getProcurementMethodOptions()
     procurementMethodOptions.value = procurementRes
+    await loadFormOptions()
   } catch (error) {
     logger.error('[CustomerEdit]', '获取选项失败', { error })
   }
@@ -119,7 +121,7 @@ const onSubmit = handleSubmit(async (formValues: CustomerForm) => {
         city: emptyToNull(formValues.city),
         address: emptyToNull(formValues.address),
         company_scale: formValues.company_scale ?? null,
-        source: formValues.source ?? null,
+        source_public_id: formValues.source_public_id,
         default_procurement_method_id: formValues.default_procurement_method_id ?? null
       } as CustomerUpdate
       await customerApi.updateCustomer(customerId.value, updateData)
@@ -130,7 +132,7 @@ const onSubmit = handleSubmit(async (formValues: CustomerForm) => {
         city: formValues.city,
         address: emptyToNull(formValues.address),
         company_scale: formValues.company_scale ?? null,
-        source: formValues.source ?? null,
+        source_public_id: formValues.source_public_id,
         default_procurement_method_id: formValues.default_procurement_method_id ?? null
       } as CustomerCreate
       await customerApi.createCustomer(createData)
@@ -207,7 +209,7 @@ onMounted(async () => {
 
           <div class="form-grid">
             <!-- Source -->
-            <FormField v-slot="{ componentField }" name="source">
+            <FormField v-slot="{ componentField }" name="source_public_id">
               <FormItem>
                 <FormLabel>客户来源 <span class="text-destructive">*</span></FormLabel>
                 <Select v-bind="componentField as any">
@@ -218,7 +220,7 @@ onMounted(async () => {
                   </FormControl>
                   <SelectContent>
                     <SelectItem
-                      v-for="option in customerSourceOptions"
+                      v-for="option in sourceSelectOptions"
                       :key="option.value"
                       :value="option.value"
                     >

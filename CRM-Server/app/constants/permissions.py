@@ -86,6 +86,11 @@ ALL_PERMISSIONS = [
     {"name": "查看采购方式", "code": "procurement_method:view", "resource": "procurement_method", "action": "view"},
     {"name": "创建采购方式", "code": "procurement_method:create", "resource": "procurement_method", "action": "create"},
 
+    # 获客来源权限
+    {"name": "查看获客来源", "code": "acquisition_source:view", "resource": "acquisition_source", "action": "view"},
+    {"name": "创建获客来源", "code": "acquisition_source:create", "resource": "acquisition_source", "action": "create"},
+    {"name": "更新获客来源", "code": "acquisition_source:update", "resource": "acquisition_source", "action": "update"},
+
     # 系统管理权限
     {"name": "管理用户", "code": "user:manage", "resource": "user", "action": "manage"},
     {"name": "管理角色", "code": "role:manage", "resource": "role", "action": "manage"},

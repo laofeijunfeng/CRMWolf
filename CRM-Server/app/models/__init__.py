@@ -1,3 +1,4 @@
+from app.models.acquisition_source import AcquisitionSource
 from app.models.agent import (
     AgentIdempotencyKey,
     AgentIdempotencyStatus,
@@ -137,6 +138,7 @@ from app.models.user_role import UserRole
 from app.models.view_preference import ViewPreference, ViewPreferenceScope
 
 __all__ = [
+    "AcquisitionSource",
     "AIConfig",
     "AgentChannelSession",
     "AgentAsyncOperationStatus",

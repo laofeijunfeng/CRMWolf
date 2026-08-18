@@ -21,7 +21,7 @@ import { computed, onMounted, ref, defineAsyncComponent } from 'vue'
 import { usePermissionStore } from '@/stores/permissions'
 import { authApi, type RoleResponse } from '@/api/auth'
 import { Card, CardContent } from '@/components/ui/card'
-import { Shield, Workflow, ShoppingCart, Cpu, Bell, Users, Plug } from 'lucide-vue-next'
+import { Shield, Workflow, ShoppingCart, Cpu, Bell, Users, Plug, Megaphone } from 'lucide-vue-next'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { canAccessSystemConfig } from '@/composables/useSystemConfigAccess'
@@ -51,6 +51,9 @@ const TeamMemberSheet = defineAsyncComponent(() =>
 const LoginIntegrationSheet = defineAsyncComponent(() =>
   import('@/components/system-config/LoginIntegrationSheet.vue')
 )
+const AcquisitionSourceSheet = defineAsyncComponent(() =>
+  import('@/components/system-config/AcquisitionSourceSheet.vue')
+)
 const permissionStore = usePermissionStore()
 const headerStore = useHeaderStore()
 
@@ -62,6 +65,7 @@ const showAIConfigSheet = ref(false)
 const showNotificationSheet = ref(false)
 const showTeamMemberSheet = ref(false)
 const showLoginIntegrationSheet = ref(false)
+const showAcquisitionSourceSheet = ref(false)
 
 // 用户角色（用于判断是否为 TEAM_ADMIN）
 const userRoles = ref<RoleResponse[]>([])
@@ -71,6 +75,7 @@ const rolesLoaded = ref(false)
 const canManageRoles = computed(() => permissionStore.hasPermission('role:manage'))
 const canManageApprovalFlows = computed(() => permissionStore.hasAnyPermission(['approval:flow:create', 'approval:flow:edit']))
 const canManageProcurementMethods = computed(() => permissionStore.hasPermission('procurement_method:view'))
+const canManageAcquisitionSources = computed(() => permissionStore.hasPermission('acquisition_source:view'))
 const canManageAIConfig = computed(() => permissionStore.hasAnyPermission(['system:config', 'ai:manage']))
 const canManageTeam = computed(() => userRoles.value?.some(r => r.code === 'TEAM_ADMIN') ?? false)
 const canAccessPage = computed(() => canAccessSystemConfig(permissionStore, userRoles.value))
@@ -111,6 +116,9 @@ const openSheet = (type: string): void => {
     case 'login-integration':
       showLoginIntegrationSheet.value = true
       break
+    case 'acquisition-source':
+      showAcquisitionSourceSheet.value = true
+      break
   }
 }
 
@@ -148,6 +156,19 @@ onMounted(() => {
           <Workflow class="w-8 h-8 mb-3 text-wolf-primary" />
           <h3 class="text-base font-semibold text-wolf-text-primary mb-1">审批流程管理</h3>
           <p class="text-sm text-wolf-text-secondary">配置审批流程与节点</p>
+        </CardContent>
+      </Card>
+
+      <!-- 获客来源 -->
+      <Card
+        v-if="canManageAcquisitionSources"
+        class="system-config-card"
+        @click="openSheet('acquisition-source')"
+      >
+        <CardContent class="p-6">
+          <Megaphone class="w-8 h-8 mb-3 text-wolf-primary" />
+          <h3 class="text-base font-semibold text-wolf-text-primary mb-1">获客来源</h3>
+          <p class="text-sm text-wolf-text-secondary">配置线索与客户共用的获客渠道</p>
         </CardContent>
       </Card>
 
@@ -231,6 +252,7 @@ onMounted(() => {
     <NotificationSheet v-model:open="showNotificationSheet" />
     <TeamMemberSheet v-model:open="showTeamMemberSheet" />
     <LoginIntegrationSheet v-model:open="showLoginIntegrationSheet" />
+    <AcquisitionSourceSheet v-model:open="showAcquisitionSourceSheet" />
   </div>
 </template>
 

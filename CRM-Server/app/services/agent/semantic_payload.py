@@ -4,6 +4,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Dict, Optional
 
+from sqlalchemy.orm import Session
+
+from app.services.acquisition_source_service import resolve_write_fields_for_ai
 from app.services.agent import business_rules
 from app.services.agent.schemas import AgentSemanticParseResult
 
@@ -14,6 +17,8 @@ def parsed_from_semantic(
     *,
     temporal_resolver: object,
     base_datetime: Optional[datetime] = None,
+    db: Optional[Session] = None,
+    team_id: Optional[int] = None,
 ) -> Dict[str, object]:
     contact = dict(semantic_result.contact or {})
     invoice_title = dict(semantic_result.invoice_title or {})
@@ -81,14 +86,18 @@ def parsed_from_semantic(
             "payment_date_iso": payment_date_iso,
             "notes": payment.notes,
         },
-        "lead": business_rules.drop_empty_values({
-            "lead_name": lead.lead_name,
-            "source": lead.source or "其他",
-            "city": lead.city,
-            "contact_name": lead.contact_name,
-            "contact_phone": lead.contact_phone,
-            "company_scale": lead.company_scale,
-        }),
+        "lead": resolve_write_fields_for_ai(
+            business_rules.drop_empty_values({
+                "lead_name": lead.lead_name,
+                "source": lead.source,
+                "city": lead.city,
+                "contact_name": lead.contact_name,
+                "contact_phone": lead.contact_phone,
+                "company_scale": lead.company_scale,
+            }),
+            db,
+            team_id,
+        ),
         "lead_follow_up": business_rules.drop_empty_values({
             "content": lead.follow_up_content,
             "method": lead.follow_up_method or "其他",
@@ -96,18 +105,22 @@ def parsed_from_semantic(
             "next_follow_time_text": lead.next_follow_time_text,
             "next_follow_time_iso": lead_next_follow_time_iso,
         }),
-        "customer_create": business_rules.drop_empty_values({
-            "account_name": customer_create.account_name,
-            "source": customer_create.source or "其他",
-            "city": customer_create.city,
-            "industry": customer_create.industry,
-            "company_scale": customer_create.company_scale,
-            "contact_name": customer_create.contact_name,
-            "contact_phone": customer_create.contact_phone,
-            "contact_position": customer_create.contact_position,
-            "contact_gender": customer_create.contact_gender,
-            "contact_email": customer_create.contact_email,
-        }),
+        "customer_create": resolve_write_fields_for_ai(
+            business_rules.drop_empty_values({
+                "account_name": customer_create.account_name,
+                "source": customer_create.source,
+                "city": customer_create.city,
+                "industry": customer_create.industry,
+                "company_scale": customer_create.company_scale,
+                "contact_name": customer_create.contact_name,
+                "contact_phone": customer_create.contact_phone,
+                "contact_position": customer_create.contact_position,
+                "contact_gender": customer_create.contact_gender,
+                "contact_email": customer_create.contact_email,
+            }),
+            db,
+            team_id,
+        ),
         "customer_activity": business_rules.drop_empty_values({
             "content": customer_create.follow_up_content,
             "source_content": original_content if customer_create.follow_up_content else None,

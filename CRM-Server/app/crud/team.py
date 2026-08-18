@@ -27,7 +27,7 @@ class TeamCRUD:
         """获取所有团队列表"""
         return db.query(Team).all()
 
-    def create(self, db: Session, obj_in: TeamCreate, owner_id: int) -> Team:
+    def create(self, db: Session, obj_in: TeamCreate, owner_id: int, commit: bool = True) -> Team:
         """创建团队，自动生成邀请码，并复制系统默认权重配置"""
         invite_code = self.generate_invite_code()
         db_obj = Team(
@@ -36,9 +36,11 @@ class TeamCRUD:
             owner_id=owner_id
         )
         db.add(db_obj)
-        db.commit()
-        db.refresh(db_obj)
-
+        if commit:
+            db.commit()
+            db.refresh(db_obj)
+        else:
+            db.flush()
         return db_obj
 
     def update(self, db: Session, db_obj: Team, obj_in: TeamUpdate) -> Team:
@@ -111,7 +113,7 @@ class TeamCRUD:
             members.append(m)
         return members
 
-    def add_member(self, db: Session, team_id: int, user_id: int, set_current: bool = True) -> UserTeam:
+    def add_member(self, db: Session, team_id: int, user_id: int, set_current: bool = True, commit: bool = True) -> UserTeam:
         """添加成员到团队"""
         # 检查用户是否已加入该团队
         existing = db.query(UserTeam).filter(
@@ -136,8 +138,11 @@ class TeamCRUD:
             current_team=is_current
         )
         db.add(user_team)
-        db.commit()
-        db.refresh(user_team)
+        if commit:
+            db.commit()
+            db.refresh(user_team)
+        else:
+            db.flush()
         return user_team
 
     def remove_member(self, db: Session, team_id: int, user_id: int) -> bool:

@@ -20,12 +20,19 @@ interface SearchParams {
   city?: string
 }
 
+interface SourceOption {
+  value: string
+  label: string
+}
+
 interface Props {
   initialValues?: SearchParams
+  sourceOptions?: SourceOption[]
 }
 
 const props = withDefaults(defineProps<Props>(), {
   initialValues: () => ({}),
+  sourceOptions: () => [],
 })
 
 const emit = defineEmits<{
@@ -47,16 +54,10 @@ const statusOptions = [
   { value: '3', label: '无效' },
 ]
 
-const sourceOptions = [
+const sourceOptions = computed(() => [
   { value: '__all__', label: '全部来源' },
-  { value: '线上注册', label: '线上注册' },
-  { value: '市场活动', label: '市场活动' },
-  { value: '客户推荐', label: '客户推荐' },
-  { value: '电话营销', label: '电话营销' },
-  { value: '网站咨询', label: '网站咨询' },
-  { value: '展会', label: '展会' },
-  { value: '其他', label: '其他' },
-]
+  ...props.sourceOptions,
+])
 
 const hasActiveFilters = computed((): boolean => {
   return !!(

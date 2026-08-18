@@ -74,6 +74,7 @@ class Customer(Base):
     address = Column(String(500), nullable=True, comment="公司地址")
     company_scale = Column(String(50), nullable=True, comment="公司规模")
     source = Column(String(50), nullable=True, comment="客户来源")
+    source_id = Column(BigInteger, nullable=True, comment="获客来源ID")
 
     status = Column(Integer, nullable=False, default=0, comment="客户状态：0:跟进中, 1:已赢单, 2:已输单, 3:已失效")
     owner_id = Column(String(100), nullable=True, comment="负责人系统用户ID")
@@ -116,6 +117,11 @@ class Customer(Base):
     invoice_titles = relationship("InvoiceTitle", back_populates="customer", cascade="all, delete-orphan")
     invoice_applications = relationship("InvoiceApplication", back_populates="customer", cascade="all, delete-orphan")
     members = relationship("CustomerMember", back_populates="customer", cascade="all, delete-orphan")
+    acquisition_source = relationship(
+        "AcquisitionSource",
+        primaryjoin="foreign(Customer.source_id)==AcquisitionSource.id",
+        viewonly=True,
+    )
 
     __table_args__ = (
         Index('idx_account_name', 'account_name'),
@@ -126,6 +132,7 @@ class Customer(Base):
         Index('idx_status', 'status'),
         Index('idx_owner_id', 'owner_id'),
         Index('idx_source_lead_id', 'source_lead_id'),
+        Index('idx_customers_source_id', 'source_id'),
         Index('idx_created_time', 'created_time'),
         Index('idx_team_id', 'team_id'),
         Index('idx_customer_public_id', 'public_id'),

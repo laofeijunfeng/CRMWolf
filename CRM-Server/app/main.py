@@ -15,6 +15,7 @@ logger = get_logger(__name__)
 
 from app.api import (
     approval_ai,
+    acquisition_sources,
     approvals,
     auth,
     business_journey_board,
@@ -129,6 +130,7 @@ api_router.include_router(invoices.router, prefix="/v1")
 api_router.include_router(invoices.invoice_router, prefix="/v1")
 api_router.include_router(finance.router, prefix="/v1")
 api_router.include_router(operation_logs.router, prefix="/v1")
+api_router.include_router(acquisition_sources.router)
 api_router.include_router(procurement_methods.router)
 api_router.include_router(procurement_stage_templates.router)
 api_router.include_router(opportunity_stages.router)

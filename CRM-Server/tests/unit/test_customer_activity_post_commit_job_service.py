@@ -287,3 +287,218 @@ def test_recovery_scan_includes_legacy_exhausted_rows_for_terminalization(job_se
 
     assert [(row.team_id, row.job_public_id) for row in rows] == [(1, "pcj_legacy_exhausted")]
     session.close()
+
+
+@pytest.mark.asyncio
+async def test_completed_job_projects_bound_async_operation(monkeypatch):
+    from app.models.agent import AgentSession
+    from app.models.agent_async_operation import AgentAsyncOperation, AgentAsyncOperationEvent
+    from app.services.agent.async_operation_service import AgentAsyncOperationService
+
+    engine = create_engine("sqlite:///:memory:", poolclass=StaticPool, connect_args={"check_same_thread": False})
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            CustomerActivityPostCommitJob.__table__,
+            AgentSession.__table__,
+            AgentAsyncOperation.__table__,
+            AgentAsyncOperationEvent.__table__,
+        ],
+    )
+    Session = sessionmaker(bind=engine)
+    monkeypatch.setattr("app.services.customer_activity_post_commit_job_service.SessionLocal", Session)
+    monkeypatch.setattr(
+        "app.services.customer_activity_post_commit_job_service.get_settings",
+        lambda: SimpleNamespace(
+            CUSTOMER_ACTIVITY_POST_COMMIT_LEASE_SECONDS=60,
+            CUSTOMER_ACTIVITY_POST_COMMIT_MAX_ATTEMPTS=5,
+            CUSTOMER_ACTIVITY_POST_COMMIT_RETRY_BASE_SECONDS=1,
+        ),
+    )
+    session = Session()
+    session.add(AgentSession(id=3, session_key="session-3", team_id=1, user_id=2, title="跟进会话"))
+    session.add(
+        CustomerActivityPostCommitJob(
+            public_id="pcj_project_complete",
+            team_id=1,
+            activity_id=241,
+            activity_revision=1,
+            trigger_type="ACTIVITY_CREATED_DETERMINISTIC",
+            actor_id="2",
+            status=CustomerActivityPostCommitJobStatus.QUEUED,
+            attempt_count=0,
+            run_id="run-project-complete",
+            graph_thread_id="thread-project-complete",
+            created_time=datetime(2026, 8, 18, 10, 0),
+            updated_time=datetime(2026, 8, 18, 10, 0),
+        )
+    )
+    AgentAsyncOperationService().ensure_scheduled(
+        session,
+        operation_key="customer-activity-post-commit:pcj_project_complete",
+        request_id="pcj_project_complete",
+        team_id=1,
+        user_id=2,
+        session_id=3,
+        source_user_message_id=None,
+        operation_type="customer_activity_post_commit",
+        resource_type="customer_activity",
+        resource_id=241,
+        summary="跟进已记录，任务对账处理中",
+    )
+    session.commit()
+    session.close()
+
+    monkeypatch.setattr(
+        "app.services.customer_activity_post_commit_job_service.customer_activity_crud.get_by_id",
+        lambda db, activity_id, team_id: SimpleNamespace(
+            id=activity_id,
+            team_id=team_id,
+            post_commit_revision=1,
+        ),
+    )
+
+    async def _run_workflow(**kwargs):
+        return {
+            "post_commit": {
+                "needs_user_confirmation": False,
+                "confirmation_case_public_ids": [],
+            }
+        }
+
+    monkeypatch.setattr(
+        "app.services.customer_activity_post_commit_job_service.customer_activity_post_commit_workflow.run",
+        _run_workflow,
+    )
+
+    result = await CustomerActivityPostCommitJobService().run(
+        CustomerActivityPostCommitJobRequest(job_public_id="pcj_project_complete", team_id=1)
+    )
+
+    assert result["success"] is True
+    session = Session()
+    operation = session.query(AgentAsyncOperation).one()
+    assert operation.status == "SUCCEEDED"
+    assert operation.request_id == "pcj_project_complete"
+    session.close()
+    engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_superseded_job_does_not_complete_operation_until_successor_finishes(monkeypatch):
+    from app.models.agent import AgentSession
+    from app.models.agent_async_operation import AgentAsyncOperation, AgentAsyncOperationEvent
+    from app.services.agent.async_operation_service import AgentAsyncOperationService
+
+    engine = create_engine("sqlite:///:memory:", poolclass=StaticPool, connect_args={"check_same_thread": False})
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            CustomerActivityPostCommitJob.__table__,
+            AgentSession.__table__,
+            AgentAsyncOperation.__table__,
+            AgentAsyncOperationEvent.__table__,
+        ],
+    )
+    Session = sessionmaker(bind=engine)
+    monkeypatch.setattr("app.services.customer_activity_post_commit_job_service.SessionLocal", Session)
+    monkeypatch.setattr(
+        "app.services.customer_activity_post_commit_job_service.get_settings",
+        lambda: SimpleNamespace(
+            CUSTOMER_ACTIVITY_POST_COMMIT_LEASE_SECONDS=60,
+            CUSTOMER_ACTIVITY_POST_COMMIT_MAX_ATTEMPTS=5,
+            CUSTOMER_ACTIVITY_POST_COMMIT_RETRY_BASE_SECONDS=1,
+        ),
+    )
+    session = Session()
+    session.add(AgentSession(id=3, session_key="session-3", team_id=1, user_id=2, title="跟进会话"))
+    session.add(
+        CustomerActivityPostCommitJob(
+            public_id="pcj_superseded",
+            team_id=1,
+            activity_id=241,
+            activity_revision=1,
+            trigger_type="ACTIVITY_CREATED_DETERMINISTIC",
+            actor_id="2",
+            status=CustomerActivityPostCommitJobStatus.QUEUED,
+            attempt_count=0,
+            run_id="run-superseded",
+            graph_thread_id="thread-superseded",
+            created_time=datetime(2026, 8, 18, 10, 0),
+            updated_time=datetime(2026, 8, 18, 10, 0),
+        )
+    )
+    session.add(
+        CustomerActivityPostCommitJob(
+            public_id="pcj_successor",
+            team_id=1,
+            activity_id=241,
+            activity_revision=2,
+            trigger_type="ACTIVITY_CREATED_DETERMINISTIC",
+            actor_id="2",
+            status=CustomerActivityPostCommitJobStatus.QUEUED,
+            attempt_count=0,
+            run_id="run-successor",
+            graph_thread_id="thread-successor",
+            created_time=datetime(2026, 8, 18, 10, 1),
+            updated_time=datetime(2026, 8, 18, 10, 1),
+        )
+    )
+    AgentAsyncOperationService().ensure_scheduled(
+        session,
+        operation_key="customer-activity-post-commit:pcj_superseded",
+        request_id="pcj_superseded",
+        team_id=1,
+        user_id=2,
+        session_id=3,
+        source_user_message_id=None,
+        operation_type="customer_activity_post_commit",
+        resource_type="customer_activity",
+        resource_id=241,
+        summary="跟进已记录，任务对账处理中",
+    )
+    session.commit()
+    session.close()
+
+    monkeypatch.setattr(
+        "app.services.customer_activity_post_commit_job_service.customer_activity_crud.get_by_id",
+        lambda db, activity_id, team_id: SimpleNamespace(
+            id=activity_id,
+            team_id=team_id,
+            post_commit_revision=2,
+        ),
+    )
+
+    async def _run_workflow(**kwargs):
+        return {
+            "match_result": {"decision": "ASK_CONFIRMATION"},
+            "post_commit": {
+                "needs_user_confirmation": True,
+                "confirmation_case_public_ids": ["fcc_001"],
+            },
+        }
+
+    monkeypatch.setattr(
+        "app.services.customer_activity_post_commit_job_service.customer_activity_post_commit_workflow.run",
+        _run_workflow,
+    )
+
+    superseded_result = await CustomerActivityPostCommitJobService().run(
+        CustomerActivityPostCommitJobRequest(job_public_id="pcj_superseded", team_id=1)
+    )
+    session = Session()
+    operation = session.query(AgentAsyncOperation).one()
+    assert superseded_result["skip_reason"] == "SUPERSEDED_ACTIVITY_REVISION"
+    assert operation.status != "SUCCEEDED"
+    session.close()
+
+    successor_result = await CustomerActivityPostCommitJobService().run(
+        CustomerActivityPostCommitJobRequest(job_public_id="pcj_successor", team_id=1)
+    )
+    session = Session()
+    operation = session.query(AgentAsyncOperation).one()
+    assert successor_result["success"] is True
+    assert operation.status == "SUCCEEDED"
+    assert (operation.result_json or {}).get("post_commit", {}).get("needs_user_confirmation") is True
+    session.close()
+    engine.dispose()

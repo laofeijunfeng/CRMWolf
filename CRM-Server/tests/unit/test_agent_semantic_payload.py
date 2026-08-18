@@ -197,3 +197,30 @@ def test_parsed_from_semantic_uses_time_text_fallback_when_structured_time_missi
 
     assert parsed["next_follow_time_text"] == "周四"
     assert parsed["next_follow_time_iso"] == "2026-08-13T09:00:00"
+
+
+def test_parsed_from_semantic_omits_source_when_session_is_not_queryable():
+    semantic_result = AgentSemanticParseResult.model_validate({
+        "intent": "CREATE_LEAD",
+        "intent_confidence": 0.95,
+        "lead": {
+            "lead_name": "越秀金融",
+            "city": "广州",
+            "contact_name": "张三",
+            "contact_phone": "13800138000",
+        },
+    })
+
+    parsed = parsed_from_semantic(
+        semantic_result,
+        "原始内容",
+        temporal_resolver=FakeTemporalResolver(),
+        db=object(),
+        team_id=1,
+    )
+
+    assert "source" not in parsed["lead"]
+    assert "source_public_id" not in parsed["lead"]
+    assert "source" not in parsed["customer_create"]
+    assert "source_public_id" not in parsed["customer_create"]
+

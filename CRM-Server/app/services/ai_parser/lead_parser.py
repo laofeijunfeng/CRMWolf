@@ -7,12 +7,17 @@ from typing import Dict, Any
 from sqlalchemy.orm import Session
 
 from app.services.ai_parser.base_parser import EntityAIParserBase
-from app.services.ai_parser.constants import LEAD_SOURCE_ENUM_MAP, COMPANY_SCALE_ENUM_MAP
+from app.services.ai_parser.constants import COMPANY_SCALE_ENUM_MAP
+from app.services.acquisition_source_service import (
+    default_source_name,
+    format_active_source_names,
+    resolve_source_for_ai,
+)
 from app.services.lead_ai_confirmed_write_service import lead_ai_confirmed_write_service
 from app.utils.time import business_now
 from app.crud.lead import lead_crud
 from app.schemas.lead import LeadCreate
-from app.models.lead import LeadSource, CompanyScale, FollowUpMethod
+from app.models.lead import CompanyScale, FollowUpMethod
 
 
 # 系统提示词：保留既有线索解析规则，供内部解析流程复用
@@ -38,14 +43,9 @@ PARSE_LEAD_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的线索信息解�
 
 ## 线索来源枚举值
 
-用户可能用各种描述，你需要智能匹配到以下枚举值之一：
-- "线上注册": 包括网站注册、官网注册、网上注册等
-- "市场活动": 包括展会、活动、营销活动等
-- "客户推荐": 包括转介绍、朋友推荐、老客户介绍等
-- "电话营销": 包括电话推销、电话联系、电话沟通等
-- "网站咨询": 包括网上咨询、官网咨询、在线咨询等
-- "展会": 包括参展、展览、博览会等
-- "其他": 无法匹配到上述分类时使用
+只能输出当前团队启用的获客来源名称之一，禁止发明新来源，禁止输出“线索转化”：
+{source_enum_block}
+用户未明确来源时输出“{default_source_name}”，不要追问来源。
 
 ## 公司规模枚举值
 
@@ -152,19 +152,22 @@ class LeadAIParser(EntityAIParserBase):
 
     entity_type = "lead"
 
-    def get_system_prompt(self) -> str:
+    def get_system_prompt(self, db: Session | None = None, team_id: int | None = None) -> str:
         """
-        构建带动态当前日期的系统提示词
-
-        Returns:
-            格式化后的系统提示词
+        构建带动态当前日期和团队获客来源的系统提示词
         """
         current_date = business_now().strftime("%Y-%m-%d")
-        return PARSE_LEAD_SYSTEM_PROMPT_TEMPLATE.format(current_date=current_date)
+        names = format_active_source_names(db, team_id)
+        source_enum_block = "\n".join(f'- "{name}"' for name in names)
+        return (
+            PARSE_LEAD_SYSTEM_PROMPT_TEMPLATE
+            .replace("{current_date}", current_date)
+            .replace("{source_enum_block}", source_enum_block)
+            .replace("{default_source_name}", default_source_name(db, team_id))
+        )
 
     def get_enum_maps(self) -> Dict[str, Dict[str, Any]]:
         return {
-            "source": LEAD_SOURCE_ENUM_MAP,
             "scale": COMPANY_SCALE_ENUM_MAP
         }
 
@@ -229,21 +232,16 @@ class LeadAIParser(EntityAIParserBase):
         Returns:
             创建的 Lead 对象
         """
-        # 枚举值转换
-        source_str = parsed_data.get("source")
-        source_enum = LEAD_SOURCE_ENUM_MAP.get(source_str)
-        if not source_enum:
-            raise ValueError(f"无效的线索来源：{source_str}")
+        source_row = resolve_source_for_ai(db, team_id, parsed_data.get("source"))
 
         company_scale_str = parsed_data.get("company_scale")
         company_scale_enum = None
         if company_scale_str:
             company_scale_enum = COMPANY_SCALE_ENUM_MAP.get(company_scale_str)
 
-        # 创建线索
         lead_create = LeadCreate(
             lead_name=parsed_data["lead_name"],
-            source=LeadSource(source_enum),
+            source_public_id=source_row.public_id,
             city=parsed_data["city"],
             contact_name=parsed_data["contact_name"],
             contact_phone=parsed_data["contact_phone"],

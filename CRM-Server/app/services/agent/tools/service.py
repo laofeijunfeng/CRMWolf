@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import uuid
 from typing import Callable, List, Optional, Union
+
+import httpx
 
 from sqlalchemy import or_
 
@@ -20,8 +23,10 @@ from app.schemas.agent import (
     AgentToolCallCreate,
     AgentToolCallUpdate,
 )
+from app.services.agent.async_operation_service import agent_async_operation_service
 from app.services.agent.tools.api_client import CRMAPIClientError, InternalCRMAPIClient
 from app.services.agent.tools.base import AgentToolContext, AgentToolResult, JsonDict
+from app.services.acquisition_source_service import resolve_write_fields_for_ai
 from app.services.customer_alias_service import CustomerAliasService, customer_alias_service
 from app.services.customer_identity_resolution_service import (
     CustomerIdentityResolutionService,
@@ -65,6 +70,17 @@ from app.services.work_summary_service import WorkSummaryService
 from app.services.work_summary_service import work_summary_service as default_work_summary_service
 from app.utils.public_id import is_opportunity_public_id
 from app.utils.time import business_now
+
+
+logger = logging.getLogger(__name__)
+
+
+def _with_acquisition_source_write_fields(
+    payload: JsonDict,
+    db=None,
+    team_id=None,
+) -> JsonDict:
+    return resolve_write_fields_for_ai(payload, db, team_id)
 
 
 class CRMAgentToolService:
@@ -826,23 +842,89 @@ class CRMAgentToolService:
 
         async def call_api():
             customer_public_id = self._resolve_customer_public_id(context, customer_id)
-            return await self.api_client.request(
-                "POST",
+            try:
+                return await self.api_client.request(
+                    "POST",
+                    f"/v1/customer-activities/{customer_public_id}",
+                    context.authorization,
+                    idempotency_key=action_key,
+                    params={"post_commit_mode": "async"},
+                    json={
+                        "activity_kind": activity_kind,
+                        "source_content": source_content,
+                        "title": title,
+                        "next_action": next_action,
+                        "next_follow_time": next_follow_time,
+                        "next_follow_time_source": "AGENT" if next_follow_time else None,
+                    },
+                )
+            except httpx.TimeoutException:
+                reconciled = await self._reconcile_created_customer_activity(
+                    context,
+                    customer_public_id=customer_public_id,
+                    activity_kind=activity_kind,
+                    source_content=source_content,
+                )
+                if reconciled is not None:
+                    return reconciled
+                raise
+
+        result = await self._run_write_tool(context, "create_customer_activity", payload, action_key, call_api)
+        if result.success:
+            self._bind_customer_activity_post_commit_operation(context, result.data)
+        return result
+
+    async def _reconcile_created_customer_activity(
+        self,
+        context: AgentToolContext,
+        *,
+        customer_public_id: str,
+        activity_kind: str,
+        source_content: str,
+    ) -> Optional[JsonDict]:
+        try:
+            listed = await self.api_client.request(
+                "GET",
                 f"/v1/customer-activities/{customer_public_id}",
                 context.authorization,
-                idempotency_key=action_key,
-                params={"post_commit_mode": "sync"},
-                json={
-                    "activity_kind": activity_kind,
-                    "source_content": source_content,
-                    "title": title,
-                    "next_action": next_action,
-                    "next_follow_time": next_follow_time,
-                    "next_follow_time_source": "AGENT" if next_follow_time else None,
-                },
             )
+        except Exception:
+            return None
+        for item in self._extract_items(listed):
+            if item.get("source_content") == source_content and item.get("activity_kind") == activity_kind:
+                return item
+        return None
 
-        return await self._run_write_tool(context, "create_customer_activity", payload, action_key, call_api)
+    def _bind_customer_activity_post_commit_operation(self, context: AgentToolContext, data: object) -> None:
+        payload = data if isinstance(data, dict) else {}
+        durable_work = payload.get("durable_work") if isinstance(payload.get("durable_work"), dict) else {}
+        job_public_id = durable_work.get("post_commit_job_public_id")
+        activity_id = payload.get("id")
+        if not isinstance(job_public_id, str) or not job_public_id:
+            return
+        if not isinstance(activity_id, int):
+            return
+        try:
+            agent_async_operation_service.bind_source(
+                context.db,
+                operation_key=f"customer-activity-post-commit:{job_public_id}",
+                request_id=job_public_id,
+                team_id=context.team_id,
+                user_id=context.user_id,
+                session_id=context.session_id,
+                source_user_message_id=None,
+                source_assistant_message_id=None,
+                operation_type="customer_activity_post_commit",
+                resource_type="customer_activity",
+                resource_id=activity_id,
+                summary="跟进已记录，任务对账处理中",
+            )
+        except Exception:
+            logger.exception(
+                "绑定客户活动后提交异步操作失败: session_id=%s job_public_id=%s",
+                context.session_id,
+                job_public_id,
+            )
 
     async def create_lead(
         self,
@@ -859,7 +941,7 @@ class CRMAgentToolService:
                 "/v1/leads/",
                 context.authorization,
                 idempotency_key=action_key,
-                json=lead,
+                json=_with_acquisition_source_write_fields(lead, context.db, context.team_id),
             )
 
         return await self._run_write_tool(context, "create_lead", payload, action_key, call_api)
@@ -879,7 +961,7 @@ class CRMAgentToolService:
                 "/v1/customers/",
                 context.authorization,
                 idempotency_key=action_key,
-                json=customer,
+                json=_with_acquisition_source_write_fields(customer, context.db, context.team_id),
             )
 
         return await self._run_write_tool(context, "create_customer", payload, action_key, call_api)

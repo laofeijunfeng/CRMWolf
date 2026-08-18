@@ -16,8 +16,15 @@ from app.schemas.lead import (
     LeadTrendResponse, LeadConversionResponse, LeadMarkInvalidRequest
 )
 from app.schemas.common import PaginatedResponse
-from app.models.lead import LeadStatus, LeadSource
+from app.models.lead import LeadStatus
 from app.models.user import User
+from app.services.acquisition_source_service import (
+    AcquisitionSourceError,
+    build_source_info,
+    get_by_id,
+    map_sources_by_ids,
+    resolve_public_ids_to_ids,
+)
 from app.utils.time import business_now
 
 router = APIRouter(prefix="/v1/leads", tags=["线索管理"])
@@ -72,6 +79,52 @@ def parse_filter_conditions(filters: Optional[str]):
         )
 
 
+def _raise_source_error(exc: AcquisitionSourceError) -> None:
+    raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+def _split_csv(value: Optional[str]) -> List[str]:
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _lead_source_fields(db: Session, lead, source_map: Optional[dict] = None) -> dict:
+    source_row = None
+    if lead.source_id:
+        if source_map is not None:
+            source_row = source_map.get(int(lead.source_id))
+        else:
+            source_row = get_by_id(db, lead.source_id, lead.team_id)
+    current_name = source_row.name if source_row else (lead.source or "")
+    return {
+        "source": current_name,
+        "source_info": build_source_info(source_row),
+    }
+
+
+def _build_lead_response(db: Session, lead) -> LeadResponse:
+    payload = {
+        "id": lead.public_id,
+        "public_id": lead.public_id,
+        "lead_name": lead.lead_name,
+        "city": lead.city,
+        "contact_name": lead.contact_name,
+        "contact_phone": lead.contact_phone,
+        "company_scale": lead.company_scale,
+        "owner_id": lead.owner_id,
+        "status": lead.status,
+        "invalid_reason": lead.invalid_reason,
+        "pool_id": lead.pool_id,
+        "creator_id": lead.creator_id,
+        "created_time": lead.created_time,
+        "last_modified_time": lead.last_modified_time,
+        "version": lead.version,
+        **_lead_source_fields(db, lead),
+    }
+    return LeadResponse(**payload)
+
+
 def _build_user_info_map(db: Session, user_ids: set[str]) -> dict[str, dict]:
     numeric_user_ids = [int(user_id) for user_id in user_ids if user_id and user_id.isdigit()]
     if not numeric_user_ids:
@@ -91,6 +144,11 @@ def _build_user_info_map(db: Session, user_ids: set[str]) -> dict[str, dict]:
 def _build_lead_list_responses(db: Session, leads: List) -> List[LeadListResponse]:
     owner_ids = {lead.owner_id for lead in leads if lead.owner_id}
     users_info = _build_user_info_map(db, owner_ids)
+    source_map = map_sources_by_ids(
+        db,
+        leads[0].team_id,
+        [lead.source_id for lead in leads],
+    ) if leads else {}
 
     result = []
     for lead in leads:
@@ -98,7 +156,7 @@ def _build_lead_list_responses(db: Session, leads: List) -> List[LeadListRespons
             "id": lead.public_id,
             "public_id": lead.public_id,
             "lead_name": lead.lead_name,
-            "source": lead.source,
+            **_lead_source_fields(db, lead, source_map),
             "city": lead.city,
             "contact_name": lead.contact_name,
             "contact_phone": lead.contact_phone,
@@ -127,7 +185,11 @@ def create_lead(
 ):
     _ensure_lead_name_available(db, lead.lead_name, team_id)
 
-    return lead_crud.create(db, lead, str(current_user.id), team_id)
+    try:
+        created = lead_crud.create(db, lead, str(current_user.id), team_id)
+    except AcquisitionSourceError as exc:
+        _raise_source_error(exc)
+    return _build_lead_response(db, created)
 
 
 @router.post("/batch-import", response_model=LeadBatchImportResponse, summary="批量导入线索", description="批量导入线索（最多100条）")
@@ -153,7 +215,7 @@ def batch_import_leads(
                 })
                 continue
 
-            lead_crud.create(db, lead_data, str(current_user.id), team_id)
+            lead_crud.create(db, lead_data, str(current_user.id), team_id, import_by_name=True)
             success_count += 1
         except Exception as e:
             failed_count += 1
@@ -176,7 +238,7 @@ def get_leads(
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="返回记录数"),
     status: Optional[LeadStatus] = Query(None, description="线索状态"),
-    source: Optional[LeadSource] = Query(None, description="线索来源"),
+    source_public_id: Optional[str] = Query(None, description="获客来源对外ID，多个值用逗号分隔"),
     city: Optional[str] = Query(None, description="所在城市"),
     keyword: Optional[str] = Query(None, description="关键词搜索"),
     filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
@@ -214,9 +276,13 @@ def get_leads(
 
     filter_conditions = parse_filter_conditions(filters)
 
+    source_ids = None
+    if source_public_id is not None:
+        source_ids = resolve_public_ids_to_ids(db, team_id, _split_csv(source_public_id))
+
     leads, total = lead_crud.get_multi(
         db, team_id=team_id, skip=skip, limit=limit,
-        status=status, source=source, city=city,
+        status=status, source_ids=source_ids, city=city,
         owner_id=owner_id, keyword=keyword,
         filters=filter_conditions,
         order_by=order_by, order_dir=order_dir
@@ -325,8 +391,14 @@ def get_lead(
 
         enriched_follow_ups.append(LeadFollowUpResponse(**follow_up_dict))
 
-    return LeadDetailResponse(
+    lead_payload = {
         **lead.__dict__,
+        "id": lead.public_id,
+        "public_id": lead.public_id,
+        **_lead_source_fields(db, lead),
+    }
+    return LeadDetailResponse(
+        **lead_payload,
         follow_ups=enriched_follow_ups,
         owner_info=owner_info,
         creator_info=creator_info
@@ -340,7 +412,11 @@ def update_lead(
     lead = Depends(check_lead_owner),
     db: Session = Depends(get_db)
 ):
-    return lead_crud.update(db, lead, lead_update)
+    try:
+        updated = lead_crud.update(db, lead, lead_update)
+    except AcquisitionSourceError as exc:
+        _raise_source_error(exc)
+    return _build_lead_response(db, updated)
 
 
 @router.delete("/{lead_id}", response_model=LeadResponse, summary="删除线索", description="删除线索")
@@ -615,26 +691,25 @@ def get_lead_trend(
 
 @analytics_router.get("/conversion", response_model=List[LeadConversionResponse], summary="线索转化分析", description="统计各来源线索的转化率")
 def get_lead_conversion(
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    from sqlalchemy import func
-    from app.models.lead import Lead
+    results = lead_crud.get_conversion_stats(db, team_id)
 
-    results = db.query(
-        Lead.source.label('source'),
-        func.count(Lead.id).label('total'),
-        func.sum(func.case((Lead.status == LeadStatus.CONVERTED, 1), else_=0)).label('converted')
-    ).group_by(
-        Lead.source
-    ).all()
-
-    return [
-        LeadConversionResponse(
-            source=result.source.value if result.source else "未知",
-            total=result.total,
-            converted=result.converted or 0,
-            conversion_rate=round((result.converted or 0) / result.total * 100, 2) if result.total > 0 else 0
+    source_map = map_sources_by_ids(db, team_id, [result.source_id for result in results])
+    payload = []
+    for result in results:
+        source_row = source_map.get(int(result.source_id)) if result.source_id is not None else None
+        current_name = source_row.name if source_row else "未知"
+        payload.append(
+            LeadConversionResponse(
+                source=current_name,
+                source_public_id=source_row.public_id if source_row else None,
+                source_name=current_name,
+                total=result.total,
+                converted=result.converted or 0,
+                conversion_rate=round((result.converted or 0) / result.total * 100, 2) if result.total > 0 else 0
+            )
         )
-        for result in results
-    ]
+    return payload

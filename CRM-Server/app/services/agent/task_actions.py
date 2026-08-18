@@ -22,6 +22,7 @@ from app.schemas.agent import (
     AgentTaskUpdate,
 )
 from app.services.agent.guardrails import AgentToolExecutionPolicy
+from app.services.acquisition_source_service import resolve_write_fields_for_ai
 from app.services.agent import action_workflow
 from app.services.agent.quality import AgentFollowUpQualityEvaluatorError, agent_follow_up_quality_evaluator
 from app.services.agent.runtime import AgentToolRuntime
@@ -44,13 +45,18 @@ def _normalize_gender(value: object) -> str:
     text = str(value or "").strip()
     return {"男": "1", "女": "2", "未知": "0"}.get(text, text or "0")
 
+
+def _with_acquisition_source_write_fields(payload: dict) -> dict:
+    return resolve_write_fields_for_ai(payload)
+
+
 def _customer_create_api_payload(customer: dict) -> dict:
     payload = {
         key: customer.get(key)
-        for key in ("account_name", "source", "city", "industry", "company_scale")
+        for key in ("account_name", "source", "source_public_id", "city", "industry", "company_scale")
         if customer.get(key) not in (None, "")
     }
-    payload.setdefault("source", "其他")
+    payload = _with_acquisition_source_write_fields(payload)
     has_contact = any(customer.get(field) for field in ["contact_name", "contact_phone", "contact_position", "contact_gender", "contact_email"])
     if has_contact:
         payload["primary_contact"] = {
@@ -94,8 +100,7 @@ def _tool_payload_for_action(action: Optional[str], payload: dict, customer: dic
             "idempotency_suffix": task_key,
         }
     if action == "create_lead":
-        lead = dict(payload["lead"])
-        lead.setdefault("source", "其他")
+        lead = _with_acquisition_source_write_fields(dict(payload["lead"]))
         return {"lead": lead, "idempotency_suffix": task_key}
     if action == "create_customer":
         return {

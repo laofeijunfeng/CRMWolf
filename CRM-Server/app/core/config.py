@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 10080
 
+    # T2-T3 兼容：仍接受线索/客户旧 source 字符串
+    ACQUISITION_SOURCE_ACCEPT_LEGACY_SOURCE: bool = True
+
     # Redis 配置(用于限流)
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379

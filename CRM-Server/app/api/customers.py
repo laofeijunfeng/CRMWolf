@@ -25,6 +25,13 @@ from app.crud.team import team_crud
 from app.crud.user import user_crud
 from app.models.customer import Contact
 from app.services.industry_display_service import industry_display_service
+from app.services.acquisition_source_service import (
+    AcquisitionSourceError,
+    build_source_info,
+    get_by_id,
+    map_sources_by_ids,
+    resolve_public_ids_to_ids,
+)
 from app.schemas.common import PaginatedResponse
 from app.schemas.contract import ContractListResponse, ContractStatusEnum
 from app.schemas.customer import (
@@ -116,6 +123,30 @@ def _ensure_customer_name_available(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=error,
         )
+
+
+def _raise_source_error(exc: AcquisitionSourceError) -> None:
+    raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+def _split_csv(value: Optional[str]) -> List[str]:
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _customer_source_fields(db: Session, customer, source_map: Optional[dict] = None) -> dict:
+    source_row = None
+    if customer.source_id:
+        if source_map is not None:
+            source_row = source_map.get(int(customer.source_id))
+        else:
+            source_row = get_by_id(db, customer.source_id, customer.team_id)
+    current_name = source_row.name if source_row else customer.source
+    return {
+        "source": current_name,
+        "source_info": build_source_info(source_row),
+    }
 
 
 def _get_customer_or_404(db: Session, customer_public_id: str, team_id: int):
@@ -276,7 +307,7 @@ def _customer_response(db: Session, customer) -> CustomerResponse:
         "city": customer.city,
         "address": customer.address,
         "company_scale": customer.company_scale,
-        "source": customer.source,
+        **_customer_source_fields(db, customer),
         "status": customer.status,
         "owner_id": customer.owner_id,
         "source_lead_id": source_lead_public_id,
@@ -777,13 +808,16 @@ async def create_customer(
 
     _ensure_customer_name_available(db, customer.account_name, team_id)
 
-    new_customer = customer_crud.create(
-        db=db,
-        obj_in=customer,
-        creator_id=str(current_user.id),
-        team_id=team_id,
-        operator_name=current_user.name
-    )
+    try:
+        new_customer = customer_crud.create(
+            db=db,
+            obj_in=customer,
+            creator_id=str(current_user.id),
+            team_id=team_id,
+            operator_name=current_user.name
+        )
+    except AcquisitionSourceError as exc:
+        _raise_source_error(exc)
     if customer.primary_contact:
         contact_crud.create(
             db=db,
@@ -817,8 +851,8 @@ def get_customers(
     industry: str = Query(None, description="所属行业"),
     industry_exclude: Optional[str] = Query(None, description="排除的所属行业，多个值用逗号分隔"),
     city: str = Query(None, description="所在城市"),
-    source: str = Query(None, description="客户来源"),
-    source_exclude: Optional[str] = Query(None, description="排除的客户来源，多个值用逗号分隔"),
+    source_public_id: Optional[str] = Query(None, description="获客来源对外ID，多个值用逗号分隔"),
+    source_public_id_exclude: Optional[str] = Query(None, description="排除的获客来源对外ID，多个值用逗号分隔"),
     company_scale: str = Query(None, description="公司规模"),
     company_scale_exclude: Optional[str] = Query(None, description="排除的公司规模，多个值用逗号分隔"),
     owner_id: str = Query(None, description="负责人ID（支持 'me' 表示当前用户）"),
@@ -873,6 +907,13 @@ def get_customers(
     elif actual_owner_id is None and not has_view_all:
         actual_owner_id = current_user_id
 
+    source_ids = None
+    if source_public_id is not None:
+        source_ids = resolve_public_ids_to_ids(db, team_id, _split_csv(source_public_id))
+    source_ids_exclude = None
+    if source_public_id_exclude is not None:
+        source_ids_exclude = resolve_public_ids_to_ids(db, team_id, _split_csv(source_public_id_exclude))
+
     customers, total = customer_crud.get_multi(
         db=db,
         team_id=team_id,
@@ -883,8 +924,8 @@ def get_customers(
         industry=industry,
         industry_exclude=industry_exclude,
         city=city,
-        source=source,
-        source_exclude=source_exclude,
+        source_ids=source_ids,
+        source_ids_exclude=source_ids_exclude,
         company_scale=company_scale,
         company_scale_exclude=company_scale_exclude,
         owner_id=actual_owner_id,
@@ -904,6 +945,7 @@ def get_customers(
     creator_ids = set(c.creator_id for c in customers if c.creator_id)
     customer_ids = [c.id for c in customers]
     source_lead_ids = [c.source_lead_id for c in customers if c.source_lead_id]
+    source_map = map_sources_by_ids(db, team_id, [c.source_id for c in customers])
     procurement_method_ids = set(c.default_procurement_method_id for c in customers if c.default_procurement_method_id)
     
     users_info = {}
@@ -1033,7 +1075,7 @@ def get_customers(
             'city': customer.city,
             'address': customer.address,
             'company_scale': customer.company_scale,
-            'source': customer.source,
+            **_customer_source_fields(db, customer, source_map),
             'status': customer.status,
             'owner_id': customer.owner_id,
             'source_lead_id': source_lead_public_ids.get(customer.source_lead_id),
@@ -1274,6 +1316,7 @@ def get_customer(
         **customer.__dict__,
         "id": customer.public_id,
         "public_id": customer.public_id,
+        **_customer_source_fields(db, customer),
         "source_lead_id": source_lead.public_id if (source_lead := lead_crud.get_by_id(db, customer.source_lead_id, team_id)) else None,
         "customer_brief_markdown": industry_display_service.sanitize_markdown(
             db,
@@ -1310,7 +1353,11 @@ def update_customer(
     if customer_update.account_name:
         _ensure_customer_name_available(db, customer_update.account_name, team_id, exclude_customer_id=customer.id)
 
-    return _customer_response(db, customer_crud.update(db, customer, customer_update))
+    try:
+        updated = customer_crud.update(db, customer, customer_update)
+    except AcquisitionSourceError as exc:
+        _raise_source_error(exc)
+    return _customer_response(db, updated)
 
 
 @router.patch("/{customer_id}/status", response_model=CustomerResponse, summary="更新客户状态", description="用于标记赢单、输单等关键状态变更")

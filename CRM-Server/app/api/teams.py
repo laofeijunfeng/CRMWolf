@@ -9,6 +9,7 @@ from app.crud.team import team_crud, user_team_crud
 from app.crud.role import role_crud
 from app.crud.user import user_crud
 from app.services.permission_service import permission_service
+from app.services.acquisition_source_service import seed_default_sources
 from app.models.user import User
 from app.schemas.team import (
     TeamCreate,
@@ -42,18 +43,19 @@ def create_team(
     db: Session = Depends(get_db)
 ):
     """创建团队"""
-    # 创建团队
-    team = team_crud.create(db, request, owner_id=current_user.id)
-
-    # 创建者自动加入团队并设为当前团队
-    team_crud.add_member(db, team.id, current_user.id, set_current=True)
-
-    # 创建者自动获得 TEAM_ADMIN 角色（在该团队内）
-    admin_role = role_crud.get_by_code(db, "TEAM_ADMIN")
-    if admin_role:
-        role_crud.assign_to_user(db, current_user.id, admin_role.id, team.id)
-        # 清除用户权限缓存，确保下次获取权限时重新加载
-        permission_service.clear_user_permissions_cache(current_user.id, team.id)
+    try:
+        team = team_crud.create(db, request, owner_id=current_user.id, commit=False)
+        team_crud.add_member(db, team.id, current_user.id, set_current=True, commit=False)
+        admin_role = role_crud.get_by_code(db, "TEAM_ADMIN")
+        if admin_role:
+            role_crud.assign_to_user(db, current_user.id, admin_role.id, team.id, commit=False)
+            permission_service.clear_user_permissions_cache(current_user.id, team.id)
+        seed_default_sources(db, team.id, str(current_user.id))
+        db.commit()
+        db.refresh(team)
+    except Exception:
+        db.rollback()
+        raise
 
     return team
 

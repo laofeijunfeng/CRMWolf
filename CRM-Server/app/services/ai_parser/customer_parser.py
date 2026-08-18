@@ -9,22 +9,17 @@ from sqlalchemy.orm import Session
 
 from app.crud.customer import contact_crud, customer_crud
 from app.crud.industry import industry_crud
-from app.models.customer import CustomerSource
 from app.schemas.customer import ContactCreate, CustomerCreate
+from app.services.acquisition_source_service import (
+    default_source_name,
+    format_active_source_names,
+    resolve_source_for_ai,
+)
 from app.services.ai_parser.base_parser import EntityAIParserBase
-from app.services.ai_parser.constants import COMPANY_SCALE_ENUM_MAP, CUSTOMER_SOURCE_ENUM_MAP
+from app.services.ai_parser.constants import COMPANY_SCALE_ENUM_MAP
 from app.services.customer_ai_confirmed_write_service import customer_ai_confirmed_write_service
 from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
-
-
-def _resolve_customer_source(value: str | None) -> CustomerSource | None:
-    if not value:
-        return None
-
-    mapped_value = CUSTOMER_SOURCE_ENUM_MAP.get(value, value)
-    if mapped_value in CustomerSource.__members__:
-        return CustomerSource[mapped_value]
-    return CustomerSource(mapped_value)
+from app.utils.time import business_now
 
 
 # 系统提示词（针对客户创建定制）
@@ -52,16 +47,9 @@ PARSE_CUSTOMER_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的客户信息�
 
 ## 客户来源枚举值
 
-用户可能用各种描述，你需要智能匹配到以下枚举值之一：
-- "线上注册": 包括网站注册、官网注册、网上注册等
-- "市场活动": 包括展会、活动、营销活动等
-- "客户推荐": 包括转介绍、朋友推荐、老客户介绍等
-- "电话营销": 包括电话推销、电话联系、电话沟通等
-- "网站咨询": 包括网上咨询、官网咨询、在线咨询等
-- "展会": 包括参展、展览、博览会等
-- "其他": 无法匹配到上述分类时使用
-
-如果用户未提及客户来源，返回 null。
+只能输出当前团队启用的获客来源名称之一，禁止发明新来源，禁止输出“线索转化”：
+{source_enum_block}
+用户未明确来源时输出“{default_source_name}”，不要追问来源。
 
 ## 缺失字段
 
@@ -162,19 +150,19 @@ class CustomerAIParser(EntityAIParserBase):
 
     entity_type = "customer"
 
-    def get_system_prompt(self) -> str:
-        """
-        构建带动态当前日期的系统提示词
-
-        Returns:
-            格式化后的系统提示词
-        """
+    def get_system_prompt(self, db: Session | None = None, team_id: int | None = None) -> str:
         current_date = business_now().strftime("%Y-%m-%d")
-        return PARSE_CUSTOMER_SYSTEM_PROMPT_TEMPLATE.replace("{current_date}", current_date)
+        names = format_active_source_names(db, team_id)
+        source_enum_block = "\n".join(f'- "{name}"' for name in names)
+        return (
+            PARSE_CUSTOMER_SYSTEM_PROMPT_TEMPLATE
+            .replace("{current_date}", current_date)
+            .replace("{source_enum_block}", source_enum_block)
+            .replace("{default_source_name}", default_source_name(db, team_id))
+        )
 
     def get_enum_maps(self) -> Dict[str, Dict[str, Any]]:
         return {
-            "source": CUSTOMER_SOURCE_ENUM_MAP,
             "scale": COMPANY_SCALE_ENUM_MAP
         }
 
@@ -252,12 +240,12 @@ class CustomerAIParser(EntityAIParserBase):
         if industry_hint:
             industry_code = self._match_industry(db, industry_hint)
 
-        # 创建客户
+        source_row = resolve_source_for_ai(db, team_id, customer_info.get("source"))
         customer_create = CustomerCreate(
             account_name=customer_info["account_name"],
             city=customer_info["city"],
             company_scale=company_scale_value,
-            source=_resolve_customer_source(customer_info.get("source")),
+            source_public_id=source_row.public_id,
             industry=industry_code  # AI 识别的行业编码
         )
 

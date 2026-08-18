@@ -1,10 +1,15 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, func
+from sqlalchemy import and_, case, or_, func
 from typing import Any, Dict, Optional, List, Tuple
 from datetime import datetime, timedelta, time
 from enum import Enum
-from app.models.lead import Lead, LeadFollowUp, LeadStatus, LeadSource, CompanyScale
+from app.models.lead import Lead, LeadFollowUp, LeadStatus, CompanyScale
 from app.schemas.lead import LeadCreate, LeadUpdate, LeadFollowUpCreate
+from app.services.acquisition_source_service import (
+    resolve_for_import,
+    resolve_public_ids_to_ids,
+    resolve_source_for_entity_write,
+)
 from app.utils.time import business_now
 
 
@@ -40,7 +45,7 @@ class LeadCRUD:
         skip: int = 0,
         limit: int = 100,
         status: Optional[LeadStatus] = None,
-        source: Optional[str] = None,
+        source_ids: Optional[List[int]] = None,
         city: Optional[str] = None,
         owner_id: Optional[str] = None,
         creator_id: Optional[str] = None,
@@ -56,8 +61,8 @@ class LeadCRUD:
         else:
             query = query.filter(Lead.status != LeadStatus.CONVERTED)
 
-        if source:
-            query = query.filter(Lead.source == source)
+        if source_ids is not None:
+            query = query.filter(Lead.source_id.in_(source_ids))
         if city:
             query = query.filter(Lead.city == city)
         if owner_id:
@@ -73,7 +78,7 @@ class LeadCRUD:
                 )
             )
         if filters:
-            query = self._apply_filters(query, filters)
+            query = self._apply_filters(query, filters, db=db, team_id=team_id)
 
         total = query.count()
 
@@ -83,13 +88,13 @@ class LeadCRUD:
 
         return leads, total
 
-    def _apply_filters(self, query, filters: List[Dict[str, Any]]):
+    def _apply_filters(self, query, filters: List[Dict[str, Any]], db: Session, team_id: int):
         field_map = {
             "lead_name": (Lead.lead_name, "text"),
             "contact_name": (Lead.contact_name, "text"),
             "contact_phone": (Lead.contact_phone, "text"),
             "city": (Lead.city, "text"),
-            "source": (Lead.source, "source"),
+            "source": (Lead.source_id, "source_id"),
             "company_scale": (Lead.company_scale, "company_scale"),
             "status": (Lead.status, "status"),
             "owner_id": (Lead.owner_id, "text"),
@@ -108,17 +113,31 @@ class LeadCRUD:
             column, field_type = field_map[field]
 
             if op == "is_empty":
-                if field_type in {"text", "source", "company_scale"}:
+                if field_type == "source_id":
+                    query = query.filter(column.is_(None))
+                elif field_type in {"text", "company_scale"}:
                     query = query.filter(or_(column.is_(None), column == ""))
                 else:
                     query = query.filter(column.is_(None))
                 continue
 
             if op == "is_not_empty":
-                if field_type in {"text", "source", "company_scale"}:
+                if field_type == "source_id":
+                    query = query.filter(column.is_not(None))
+                elif field_type in {"text", "company_scale"}:
                     query = query.filter(and_(column.is_not(None), column != ""))
                 else:
                     query = query.filter(column.is_not(None))
+                continue
+
+            if field_type == "source_id":
+                raw_values = value if isinstance(value, list) else [value]
+                source_ids = resolve_public_ids_to_ids(db, team_id, raw_values)
+                if op in {"eq", "contains"}:
+                    query = query.filter(column.in_(source_ids))
+                elif op in {"neq", "not_contains"}:
+                    if source_ids:
+                        query = query.filter(or_(column.is_(None), column.notin_(source_ids)))
                 continue
 
             parsed_value = self._parse_filter_value(field_type, value)
@@ -177,8 +196,6 @@ class LeadCRUD:
         try:
             if field_type == "status":
                 return self._parse_enum_value(LeadStatus, value)
-            if field_type == "source":
-                return self._parse_enum_value(LeadSource, value)
             if field_type == "company_scale":
                 return self._parse_enum_value(CompanyScale, value)
             if field_type == "number":
@@ -202,8 +219,28 @@ class LeadCRUD:
 
         return None
 
-    def create(self, db: Session, obj_in: LeadCreate, creator_id: str, team_id: int) -> Lead:
-        lead_data = obj_in.model_dump()
+    def create(
+        self,
+        db: Session,
+        obj_in: LeadCreate,
+        creator_id: str,
+        team_id: int,
+        *,
+        import_by_name: bool = False,
+    ) -> Lead:
+        lead_data = obj_in.model_dump(exclude={"source_public_id", "source"})
+        if import_by_name:
+            source_row = resolve_for_import(db, team_id, obj_in.source or "")
+        else:
+            source_row = resolve_source_for_entity_write(
+                db,
+                team_id,
+                source_public_id=obj_in.source_public_id,
+                legacy_source=obj_in.source,
+                required=True,
+            )
+        lead_data['source_id'] = source_row.id
+        lead_data['source'] = source_row.name
         lead_data['creator_id'] = creator_id
         lead_data['owner_id'] = creator_id  # 创建人自动成为负责人
         lead_data['status'] = LeadStatus.FOLLOWING  # 有负责人，状态应为跟进中
@@ -217,7 +254,19 @@ class LeadCRUD:
         return db_obj
 
     def update(self, db: Session, db_obj: Lead, obj_in: LeadUpdate) -> Lead:
-        update_data = obj_in.model_dump(exclude_unset=True)
+        update_data = obj_in.model_dump(exclude_unset=True, exclude={"source_public_id", "source"})
+        fields_set = obj_in.model_fields_set
+        if "source_public_id" in fields_set or "source" in fields_set:
+            source_row = resolve_source_for_entity_write(
+                db,
+                db_obj.team_id,
+                source_public_id=obj_in.source_public_id if "source_public_id" in fields_set else None,
+                legacy_source=obj_in.source if "source" in fields_set else None,
+                current_source_id=db_obj.source_id,
+                required=True,
+            )
+            update_data["source_id"] = source_row.id
+            update_data["source"] = source_row.name
         
         for field, value in update_data.items():
             setattr(db_obj, field, value)
@@ -324,6 +373,18 @@ class LeadCRUD:
 
         return lead
 
+    def get_conversion_stats(self, db: Session, team_id: int):
+        return (
+            db.query(
+                Lead.source_id.label("source_id"),
+                func.count(Lead.id).label("total"),
+                func.sum(case((Lead.status == LeadStatus.CONVERTED, 1), else_=0)).label("converted"),
+            )
+            .filter(Lead.team_id == team_id)
+            .group_by(Lead.source_id)
+            .all()
+        )
+
     def get_public_leads(
         self,
         db: Session,
@@ -342,7 +403,7 @@ class LeadCRUD:
             )
         )
         if filters:
-            query = self._apply_filters(query, filters)
+            query = self._apply_filters(query, filters, db=db, team_id=team_id)
         total = query.count()
         query = self._apply_sort(query, order_by, order_dir)
         leads = query.offset(skip).limit(limit).all()

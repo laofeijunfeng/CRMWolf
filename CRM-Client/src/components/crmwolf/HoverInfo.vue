@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import type { HTMLAttributes } from 'vue'
+import { computed, getCurrentInstance } from 'vue'
 import {
   HoverCard,
   HoverCardContent,
   HoverCardTrigger,
 } from '@/components/ui/hover-card'
-import { cn } from '@/lib/utils'
+import { cn, omitUndefined } from '@/lib/utils'
 
 type Side = 'top' | 'right' | 'bottom' | 'left'
 type Align = 'start' | 'center' | 'end'
@@ -28,10 +29,27 @@ const props = withDefaults(defineProps<{
   closeDelay: 100,
   contentClass: undefined,
 })
+
+const instance = getCurrentInstance()
+
+const hoverCardProps = computed(() => {
+  const assignedProps = instance?.vnode.props ?? {}
+  // Vue boolean-casts an omitted `open?: boolean` to false. Reka treats any
+  // defined `open` as controlled, so callers without v-model would stay closed.
+  const open = Object.prototype.hasOwnProperty.call(assignedProps, 'open')
+    ? props.open
+    : undefined
+
+  return omitUndefined({
+    open,
+    openDelay: props.openDelay,
+    closeDelay: props.closeDelay,
+  })
+})
 </script>
 
 <template>
-  <HoverCard :open="props.open" :open-delay="props.openDelay" :close-delay="props.closeDelay" @update:open="emit('update:open', $event)">
+  <HoverCard v-bind="hoverCardProps" @update:open="emit('update:open', $event)">
     <HoverCardTrigger as-child>
       <slot name="trigger" />
     </HoverCardTrigger>

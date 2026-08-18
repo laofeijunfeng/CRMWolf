@@ -1,17 +1,5 @@
 import { z } from 'zod'
 
-// Source options for customer
-export const customerSourceOptions = [
-  { value: '线上注册', label: '线上注册' },
-  { value: '市场活动', label: '市场活动' },
-  { value: '客户推荐', label: '客户推荐' },
-  { value: '电话营销', label: '电话营销' },
-  { value: '网站咨询', label: '网站咨询' },
-  { value: '展会', label: '展会' },
-  { value: '其他', label: '其他' },
-  { value: '线索转化', label: '线索转化' }
-] as const
-
 // Company scale options
 export const companyScaleOptions = [
   { value: '1-50人', label: '1-50人' },
@@ -46,14 +34,7 @@ export const customerFormSchema = z.object({
     invalid_type_error: '请选择公司规模'
   }),
 
-  source: z.enum([
-    '线上注册', '市场活动', '客户推荐',
-    '电话营销', '网站咨询', '展会',
-    '其他', '线索转化'
-  ], {
-    required_error: '请选择客户来源',
-    invalid_type_error: '请选择客户来源'
-  }),
+  source_public_id: z.string().min(1, '请选择获客来源'),
 
   default_procurement_method_id: z.number({
     required_error: '请选择采购方式',
@@ -69,7 +50,7 @@ export const customerCreateSchema = customerFormSchema.pick({
   city: true,
   address: true,
   company_scale: true,
-  source: true,
+  source_public_id: true,
   default_procurement_method_id: true
 }).extend({
   contact_name: z.string()

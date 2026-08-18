@@ -7,6 +7,8 @@ from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.schemas.acquisition_source import AcquisitionSourceInfo
+
 JsonObject = Dict[str, object]
 
 
@@ -41,7 +43,6 @@ class CustomerSource(str, enum.Enum):
     WEBSITE_INQUIRY = "网站咨询"
     EXHIBITION = "展会"
     OTHER = "其他"
-    LEAD_CONVERSION = "线索转化"
 
 
 class CustomerStatusEnum(str, Enum):
@@ -197,7 +198,8 @@ class CustomerBase(BaseModel):
     city: str = Field(..., min_length=1, max_length=100, description="所在城市（必填）")
     address: Optional[str] = Field(None, max_length=500, description="公司地址（详细地址）")
     company_scale: Optional[str] = Field(None, max_length=50, description="公司规模（如：1-50人、51-200人、201-500人、500+人）")
-    source: Optional[CustomerSource] = Field(None, description="客户来源")
+    source: Optional[str] = Field(None, max_length=50, description="获客来源名称（兼容）")
+    source_public_id: Optional[str] = Field(None, description="获客来源对外ID")
     
     @field_validator('account_name')
     @classmethod
@@ -226,7 +228,8 @@ class CustomerUpdate(BaseModel):
     city: Optional[str] = Field(None, min_length=1, max_length=100, description="所在城市")
     address: Optional[str] = Field(None, max_length=500, description="公司地址")
     company_scale: Optional[str] = Field(None, max_length=50, description="公司规模")
-    source: Optional[CustomerSource] = Field(None, description="客户来源")
+    source: Optional[str] = Field(None, max_length=50, description="获客来源名称（兼容）")
+    source_public_id: Optional[str] = Field(None, description="获客来源对外ID")
     default_procurement_method_id: Optional[int] = Field(None, description="默认采购方式ID")
 
     @field_validator('account_name')
@@ -263,7 +266,8 @@ class CustomerResponse(BaseModel):
     city: str = Field(..., description="所在城市")
     address: Optional[str] = Field(None, description="公司地址")
     company_scale: Optional[str] = Field(None, description="公司规模")
-    source: Optional[str] = Field(None, description="客户来源")
+    source: Optional[str] = Field(None, description="获客来源当前名称")
+    source_info: Optional[AcquisitionSourceInfo] = Field(None, description="获客来源对象")
     status: int = Field(..., description="客户状态：0:跟进中, 1:已成交, 2:已输单, 3:已沉寂（公海）")
     owner_id: Optional[str] = Field(None, description="负责人系统用户ID（status=3时为空）")
     source_lead_id: Optional[str] = Field(None, description="来源线索对外ID（从线索转化而来时记录）")
@@ -381,6 +385,7 @@ class CustomerDetailResponse(BaseModel):
     address: Optional[str] = None
     company_scale: Optional[str] = None
     source: Optional[str] = None
+    source_info: Optional[AcquisitionSourceInfo] = None
     status: int
     owner_id: Optional[str] = None
     source_lead_id: Optional[str] = None

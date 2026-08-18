@@ -9,6 +9,7 @@ from app.models.contract import Contract
 from app.models.opportunity import Opportunity
 from app.schemas.customer import CustomerCreate, CustomerUpdate, CustomerStatusEnum, ContactCreate, ContactUpdate
 from app.crud.operation_log import operation_log_crud
+from app.services.acquisition_source_service import get_by_id, resolve_source_for_entity_write
 from app.utils.time import business_now
 
 
@@ -64,8 +65,8 @@ class CustomerCRUD:
         industry: Optional[str] = None,
         industry_exclude: Optional[str] = None,
         city: Optional[str] = None,
-        source: Optional[str] = None,
-        source_exclude: Optional[str] = None,
+        source_ids: Optional[List[int]] = None,
+        source_ids_exclude: Optional[List[int]] = None,
         company_scale: Optional[str] = None,
         company_scale_exclude: Optional[str] = None,
         owner_id: Optional[str] = None,
@@ -120,10 +121,12 @@ class CustomerCRUD:
             query = query.filter(Customer.industry.notin_(_split_csv(industry_exclude)))
         if city:
             query = query.filter(Customer.city == city)
-        if source:
-            query = query.filter(Customer.source.in_(_split_csv(source)))
-        if source_exclude:
-            query = query.filter(Customer.source.notin_(_split_csv(source_exclude)))
+        if source_ids is not None:
+            query = query.filter(Customer.source_id.in_(source_ids))
+        if source_ids_exclude is not None:
+            query = query.filter(
+                or_(Customer.source_id.is_(None), Customer.source_id.notin_(source_ids_exclude))
+            )
         if company_scale:
             query = query.filter(Customer.company_scale.in_(_split_csv(company_scale)))
         if company_scale_exclude:
@@ -175,7 +178,17 @@ class CustomerCRUD:
     ) -> Customer:
         from app.services.operation_log_service import operation_log_service
 
-        customer_data = obj_in.model_dump(exclude={"primary_contact"})
+        customer_data = obj_in.model_dump(exclude={"primary_contact", "source_public_id", "source"})
+        source_row = resolve_source_for_entity_write(
+            db,
+            team_id,
+            source_public_id=obj_in.source_public_id,
+            legacy_source=obj_in.source,
+            required=False,
+        )
+        if source_row is not None:
+            customer_data["source_id"] = source_row.id
+            customer_data["source"] = source_row.name
         customer_data["creator_id"] = creator_id
         customer_data["status"] = 0
         customer_data["team_id"] = team_id
@@ -209,7 +222,19 @@ class CustomerCRUD:
         return db_obj
 
     def update(self, db: Session, db_obj: Customer, obj_in: CustomerUpdate) -> Customer:
-        update_data = obj_in.model_dump(exclude_unset=True)
+        update_data = obj_in.model_dump(exclude_unset=True, exclude={"source_public_id", "source"})
+        fields_set = obj_in.model_fields_set
+        if "source_public_id" in fields_set or "source" in fields_set:
+            source_row = resolve_source_for_entity_write(
+                db,
+                db_obj.team_id,
+                source_public_id=obj_in.source_public_id if "source_public_id" in fields_set else None,
+                legacy_source=obj_in.source if "source" in fields_set else None,
+                current_source_id=db_obj.source_id,
+                required=False,
+            )
+            update_data["source_id"] = source_row.id if source_row else None
+            update_data["source"] = source_row.name if source_row else None
 
         if update_data:
             for field, value in update_data.items():
@@ -424,12 +449,19 @@ class CustomerCRUD:
         if existing_customer:
             raise ValueError("该线索已被转化")
 
+        if not lead.source_id:
+            raise ValueError("线索获客来源缺失，无法转化")
+        source_row = get_by_id(db, lead.source_id, team_id)
+        if source_row is None:
+            raise ValueError("线索获客来源不存在，无法转化")
+
         customer = Customer(
             account_name=account_name or lead.lead_name,
             city=lead.city,
             address=address or None,
             company_scale=lead.company_scale.value if lead.company_scale else None,
-            source=lead.source.value,
+            source=source_row.name,
+            source_id=lead.source_id,
             status=0,
             owner_id=lead.owner_id or creator_id,
             source_lead_id=lead_id,

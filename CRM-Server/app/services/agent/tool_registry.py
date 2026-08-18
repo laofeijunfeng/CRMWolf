@@ -29,7 +29,8 @@ LeadIdentifier = Union[str, int]
 
 class AgentLeadCreatePayload(AgentStrictPayload):
     lead_name: str = Field(..., min_length=1, max_length=255)
-    source: str = Field("其他", min_length=1, max_length=100)
+    source: Optional[str] = Field(None, max_length=100)
+    source_public_id: Optional[str] = Field(None, max_length=64)
     city: str = Field(..., min_length=1, max_length=100)
     contact_name: str = Field(..., min_length=1, max_length=100)
     contact_phone: str = Field(..., min_length=1, max_length=20)
@@ -55,6 +56,7 @@ class AgentCustomerCreatePayload(AgentStrictPayload):
     address: Optional[str] = Field(None, max_length=500)
     company_scale: Optional[str] = Field(None, max_length=50)
     source: Optional[str] = Field(None, max_length=100)
+    source_public_id: Optional[str] = Field(None, max_length=64)
     default_procurement_method_id: Optional[int] = Field(None, ge=1)
     primary_contact: Optional[AgentContactPayload] = None
 

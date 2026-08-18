@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from uuid import uuid4
 
+ACQUISITION_SOURCE_PUBLIC_ID_PATTERN = re.compile(r"^acq_[0-9a-f]{32}$")
 OPPORTUNITY_PUBLIC_ID_PATTERN = re.compile(r"^opp_[0-9a-f]{32}$")
 SALES_COMMITMENT_PUBLIC_ID_PATTERN = re.compile(r"^scm_[0-9a-f]{32}$")
 FOLLOW_UP_TASK_PUBLIC_ID_PATTERN = re.compile(r"^fut_[0-9a-f]{32}$")
@@ -18,6 +19,12 @@ FOLLOW_UP_TASK_RECONCILIATION_EVALUATION_RUN_PUBLIC_ID_PATTERN = re.compile(r"^t
 def generate_public_id(prefix: str) -> str:
     return f"{prefix}_{uuid4().hex}"
 
+
+
+def is_acquisition_source_public_id(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    return bool(ACQUISITION_SOURCE_PUBLIC_ID_PATTERN.fullmatch(value))
 
 def is_opportunity_public_id(value: object) -> bool:
     if not isinstance(value, str):

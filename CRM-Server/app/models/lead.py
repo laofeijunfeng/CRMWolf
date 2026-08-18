@@ -1,4 +1,5 @@
 from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Text, Enum, Index
+from sqlalchemy.orm import relationship
 from app.core.database import Base
 from app.utils.time import business_now
 from app.utils.public_id import generate_public_id
@@ -45,7 +46,8 @@ class Lead(Base):
     public_id = Column(String(64), nullable=False, unique=True, index=True, default=lambda: generate_public_id("lead"), comment="对外线索ID")
     team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
     lead_name = Column(String(255), nullable=False, comment="线索名称")
-    source = Column(Enum(LeadSource), nullable=False, comment="线索来源")
+    source = Column(String(50), nullable=False, comment="线索来源名称（跟读配置表，双写兼容）")
+    source_id = Column(BigInteger, nullable=True, comment="获客来源ID")
     city = Column(String(100), nullable=False, comment="所在城市")
     contact_name = Column(String(100), nullable=False, comment="联系人姓名")
     contact_phone = Column(String(20), nullable=False, comment="联系人手机")
@@ -61,11 +63,18 @@ class Lead(Base):
     last_modified_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="最后修改时间")
     version = Column(Integer, nullable=False, default=1, comment="版本号（乐观锁）")
 
+    acquisition_source = relationship(
+        "AcquisitionSource",
+        primaryjoin="foreign(Lead.source_id)==AcquisitionSource.id",
+        viewonly=True,
+    )
+
     __table_args__ = (
         Index('uq_lead_team_lead_name', 'team_id', 'lead_name', unique=True),
         Index('idx_owner_id', 'owner_id'),
         Index('idx_status', 'status'),
         Index('idx_source', 'source'),
+        Index('idx_leads_source_id', 'source_id'),
         Index('idx_city', 'city'),
         Index('idx_created_time', 'created_time'),
         Index('idx_team_id', 'team_id'),

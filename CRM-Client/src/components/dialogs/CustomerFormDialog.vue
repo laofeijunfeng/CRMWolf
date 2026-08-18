@@ -38,11 +38,11 @@ import procurementApi, { type ProcurementMethodOption } from '@/api/procurement'
 import {
   customerFormSchema,
   customerCreateSchema,
-  customerSourceOptions,
   companyScaleOptions,
   type CustomerForm,
   type CustomerCreateForm
 } from '@/schemas/customer-form'
+import { useAcquisitionSourceOptions } from '@/composables/useAcquisitionSourceOptions'
 
 interface Props {
   open: boolean
@@ -73,7 +73,7 @@ const { handleSubmit, resetForm, setValues, values } = useForm<CustomerForm | Cu
     city: '',
     address: '',
     company_scale: undefined,
-    source: undefined,
+    source_public_id: undefined,
     default_procurement_method_id: undefined,
     contact_name: '',
     contact_mobile: '',
@@ -99,6 +99,12 @@ const procurementMethodSelectOptions = computed(() =>
     label: option.name,
   }))
 )
+const {
+  formSelectOptions: sourceSelectOptions,
+  loadFormOptions,
+  ensureOption,
+} = useAcquisitionSourceOptions()
+
 const isDirty = ref(false)
 const showConfirmDialog = ref(false)
 
@@ -132,12 +138,6 @@ function normalizeCompanyScale(value: string | null): CustomerForm['company_scal
     : undefined
 }
 
-function normalizeCustomerSource(value: string | null): CustomerForm['source'] | undefined {
-  return customerSourceOptions.some(option => option.value === value)
-    ? value as CustomerForm['source']
-    : undefined
-}
-
 function mapContactGenderToApi(gender: string): '1' | '2' {
   return gender === '女' ? '2' : '1'
 }
@@ -151,18 +151,20 @@ function handleProcurementMethodChange(value: string, handleChange: (value: numb
 watch([(): boolean => props.open, (): string | undefined => props.customerId], async ([open, customerId]): Promise<void> => {
   if (open) {
     void fetchProcurementMethodOptions()
+    void loadFormOptions()
   }
 
   if (open && props.mode === 'edit' && customerId !== undefined && customerId !== null) {
     loading.value = true
     try {
       const customer = await customerApi.getCustomerDetail(customerId)
+      ensureOption(customer.source_info)
       setValues({
         account_name: customer.account_name,
         city: customer.city,
         address: customer.address ?? '',
         company_scale: normalizeCompanyScale(customer.company_scale),
-        source: normalizeCustomerSource(customer.source),
+        source_public_id: customer.source_info?.public_id,
         default_procurement_method_id: customer.default_procurement_method_id ?? undefined
       } as Partial<CustomerForm>)
       // Reset dirty state after loading
@@ -181,7 +183,7 @@ watch([(): boolean => props.open, (): string | undefined => props.customerId], a
         city: '',
         address: '',
         company_scale: undefined,
-        source: undefined,
+        source_public_id: undefined,
         default_procurement_method_id: undefined,
         contact_name: '',
         contact_mobile: '',
@@ -205,7 +207,7 @@ const onSubmit = handleSubmit(async (formValues): Promise<void> => {
         city: createData.city,
         address: createData.address !== '' && createData.address !== undefined ? createData.address : null,
         company_scale: createData.company_scale ?? null,
-        source: createData.source ?? null,
+        source_public_id: createData.source_public_id,
         default_procurement_method_id: createData.default_procurement_method_id ?? null,
         primary_contact: {
           name: createData.contact_name,
@@ -225,7 +227,7 @@ const onSubmit = handleSubmit(async (formValues): Promise<void> => {
         city: editData.city,
         address: editData.address !== '' && editData.address !== undefined ? editData.address : null,
         company_scale: editData.company_scale ?? null,
-        source: editData.source ?? null,
+        source_public_id: editData.source_public_id,
         default_procurement_method_id: editData.default_procurement_method_id ?? null
       }
       await customerApi.updateCustomer(props.customerId, data)
@@ -312,14 +314,14 @@ function continueEditing(): void {
             </FormField>
 
             <!-- Customer Source -->
-            <FormField v-slot="{ value, handleChange }" name="source">
+            <FormField v-slot="{ value, handleChange }" name="source_public_id">
               <FormItem>
                 <SelectField
                   id="customer-source"
                   :model-value="String(value ?? '')"
                   label="客户来源"
                   required
-                  :options="customerSourceOptions"
+                  :options="sourceSelectOptions"
                   placeholder="请选择来源"
                   @update:model-value="handleChange"
                 />

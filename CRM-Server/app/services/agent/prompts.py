@@ -4,7 +4,13 @@ from __future__ import annotations
 from datetime import date
 from typing import Optional
 
+from app.constants.acquisition_sources import FORBIDDEN_SOURCE_NAME, SYSTEM_DEFAULT_SOURCES
 from app.services.customer_activity_ai.rules import get_follow_up_quality_principles
+
+_DEFAULT_ACQUISITION_SOURCE_NAMES = [str(item["name"]) for item in SYSTEM_DEFAULT_SOURCES]
+_DEFAULT_ACQUISITION_SOURCE_FALLBACK = next(
+    str(item["name"]) for item in SYSTEM_DEFAULT_SOURCES if item["code"] == "OTHER"
+)
 
 try:
     from langchain_core.prompts import ChatPromptTemplate
@@ -15,7 +21,7 @@ except Exception:  # pragma: no cover - keeps imports resilient in stripped test
 DEFAULT_FOLLOW_UP_QUALITY_PRINCIPLES_BLOCK = get_follow_up_quality_principles()
 
 
-CRM_AGENT_SEMANTIC_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agent 语义解析器。
+CRM_AGENT_SEMANTIC_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 的 CRM AI Agent 语义解析器。
 
 你的任务是把销售输入的自然语言解析为严格 JSON，供后续 LangGraph 编排和 CRM API tool 使用。
 
@@ -143,7 +149,7 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agent 语义解�
   },
   "lead": {
     "lead_name": "线索名称、项目名称或公司名称，无法识别则为 null",
-    "source": "线上注册|市场活动|客户推荐|电话营销|网站咨询|展会|其他|null",
+    "source": "{source_enum}|null",
     "city": "所在城市，无法识别则为 null",
     "contact_name": "联系人姓名，无法识别则为 null",
     "contact_phone": "联系人手机号，无法识别则为 null",
@@ -171,7 +177,7 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agent 语义解�
   },
   "customer_create": {
     "account_name": "客户公司名称，无法识别则为 null",
-    "source": "线上注册|市场活动|客户推荐|电话营销|网站咨询|展会|其他|null",
+    "source": "{source_enum}|null",
     "city": "所在城市，无法识别则为 null",
     "industry": "所属行业，无法识别则为 null",
     "company_scale": "1-50人|51-200人|201-500人|501-1000人|1000人以上|null",
@@ -278,7 +284,7 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agent 语义解�
 - 回款金额只提取用户明确表达的金额；“回款了”“到账了”但没有金额时 actual_amount 必须为 null，并在 missing_fields 中包含 actual_amount。
 - “5 万”这类金额必须归一化为 50000，“30 万”必须归一化为 300000。
 - 创建线索必须尽量提取 lead.lead_name、lead.source、lead.city、lead.contact_name、lead.contact_phone、lead.company_scale。
-- 线索来源只能输出：线上注册、市场活动、客户推荐、电话营销、网站咨询、展会、其他。用户未明确来源时默认可输出“其他”，不要追问来源。
+- 获客来源只能输出当前团队启用项：{source_names_text}。禁止发明新来源，禁止输出“{forbidden_source_name}”。如果系统表单值给出了 source=acq_...，可原样输出该 public_id。用户未明确来源时默认可输出“{default_source_name}”，不要追问来源。
 - 创建线索缺少 lead_name、city、contact_name、contact_phone 时，必须在 missing_fields 中包含对应字段。
 - 如果线索创建请求中还包含拜访、电话、微信沟通内容或下一步计划，应放入 lead.follow_up_content、lead.follow_up_method、lead.next_action 和 lead.next_follow_time；不要把跟进信息混入线索基础字段。
 - 用户表达线索下次跟进时间时，只输出结构化时间要素 lead.next_follow_time，不要自己换算最终日期；lead.next_follow_time_iso 必须输出 null。
@@ -299,6 +305,26 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agent 语义解�
 - 对需要客户的意图，如果 customer.resolution_source 为 NONE 且客户名称置信度低于 0.7，need_clarification 必须为 true。
 - requested_actions 只表达用户可能需要的动作，不代表已经允许执行。
 """
+
+
+def render_semantic_system_prompt(
+    source_names: Optional[list[str]] = None,
+    default_source_name: Optional[str] = None,
+) -> str:
+    names = [str(name).strip() for name in (source_names or _DEFAULT_ACQUISITION_SOURCE_NAMES) if str(name).strip()]
+    if not names:
+        names = list(_DEFAULT_ACQUISITION_SOURCE_NAMES)
+    fallback_name = (default_source_name or _DEFAULT_ACQUISITION_SOURCE_FALLBACK).strip() or _DEFAULT_ACQUISITION_SOURCE_FALLBACK
+    return (
+        CRM_AGENT_SEMANTIC_SYSTEM_PROMPT_TEMPLATE
+        .replace("{source_enum}", "|".join(names))
+        .replace("{source_names_text}", "、".join(names))
+        .replace("{default_source_name}", fallback_name)
+        .replace("{forbidden_source_name}", FORBIDDEN_SOURCE_NAME)
+    )
+
+
+CRM_AGENT_SEMANTIC_SYSTEM_PROMPT = render_semantic_system_prompt()
 
 
 CRM_AGENT_SUGGESTION_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agent 业务建议生成器。
@@ -518,9 +544,18 @@ def build_follow_up_quality_system_prompt(
     return f"{system}\n\n【当前日期】\n{prompt_date.isoformat()}"
 
 
-def build_semantic_messages(user_message: str, memory_json: str, current_date: Optional[date] = None) -> list[dict]:
+def build_semantic_messages(
+    user_message: str,
+    memory_json: str,
+    current_date: Optional[date] = None,
+    source_names: Optional[list[str]] = None,
+    default_source_name: Optional[str] = None,
+) -> list[dict]:
     prompt_date = current_date or date.today()
-    system = f"{CRM_AGENT_SEMANTIC_SYSTEM_PROMPT}\n\n【当前日期】\n{prompt_date.isoformat()}"
+    system = (
+        f"{render_semantic_system_prompt(source_names, default_source_name)}"
+        f"\n\n【当前日期】\n{prompt_date.isoformat()}"
+    )
     user = (
         "【会话记忆】\n"
         f"{memory_json}\n\n"
@@ -830,6 +865,6 @@ def build_semantic_chat_prompt():
     if ChatPromptTemplate is None:
         return None
     return ChatPromptTemplate.from_messages([
-        ("system", CRM_AGENT_SEMANTIC_SYSTEM_PROMPT + "\n\n【当前日期】\n{current_date}"),
+        ("system", render_semantic_system_prompt() + "\n\n【当前日期】\n{current_date}"),
         ("user", "【会话记忆】\n{memory_json}\n\n【用户输入】\n{user_message}"),
     ])

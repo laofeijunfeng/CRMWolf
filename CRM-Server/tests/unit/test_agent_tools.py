@@ -27,6 +27,7 @@ from app.models.customer_fact import CustomerFact, CustomerFactRevision, Custome
 from app.models.customer_identity_term import CustomerIdentityTerm
 from app.models.customer_vector_document import CustomerVectorDocument
 from app.models.invoice import InvoiceApplication
+from app.models.acquisition_source import AcquisitionSource
 from app.models.lead import Lead, LeadSource, LeadStatus
 from app.models.license_application import LicenseApplication
 from app.models.opportunity import Opportunity
@@ -50,6 +51,7 @@ from app.models.user_role import UserRole
 from app.services.agent.middleware import build_langchain_hitl_middleware
 from app.services.agent.tool_registry import AgentToolRegistry
 from app.services.agent.tools.base import AgentToolContext
+from app.services.acquisition_source_service import seed_default_sources
 from app.services.agent.tools.service import CRMAgentToolService
 from app.services.customer_fact_service import CustomerFactInput, customer_fact_service
 from app.services.customer_identity_resolution_service import generated_identity_terms_for_customer_name
@@ -245,6 +247,12 @@ class DisabledCustomerKnowledgeCandidateService:
 class FailingFollowUpTaskSemanticEvidenceService:
     def recall(self, *args, **kwargs):  # noqa: ANN002, ANN003
         raise AssertionError("structured task query should not use semantic evidence")
+
+
+def _seed_sources(db, team_id=1):
+    rows = seed_default_sources(db, team_id=team_id, created_by="1")
+    db.commit()
+    return {row.code: row for row in rows}
 
 
 def _db_session(extra_tables=None):
@@ -2374,7 +2382,7 @@ async def test_agent_tool_create_customer_activity_is_idempotent():
         assert second.idempotent_replay is True
         assert len(fake_client.calls) == 1
         assert fake_client.calls[0]["path"] == f"/v1/customer-activities/{CUSTOMER_PUBLIC_ID}"
-        assert fake_client.calls[0]["params"] == {"post_commit_mode": "sync"}
+        assert fake_client.calls[0]["params"] == {"post_commit_mode": "async"}
         assert fake_client.calls[0]["json"]["next_follow_time"] == "2026-07-29T09:00:00"
         assert db.query(AgentIdempotencyKey).count() == 1
         assert db.query(AgentToolCall).count() == 1
@@ -2510,7 +2518,8 @@ async def test_agent_tool_fails_closed_for_previously_dispatched_write():
 
 @pytest.mark.asyncio
 async def test_agent_tool_create_lead_calls_existing_lead_api():
-    engine, db = _db_session()
+    engine, db = _db_session(extra_tables=[AcquisitionSource.__table__])
+    sources = _seed_sources(db)
     fake_client = FakeCRMAPIClient()
     service = CRMAgentToolService(api_client=fake_client)
     registry = AgentToolRegistry(tool_service=service)
@@ -2539,7 +2548,7 @@ async def test_agent_tool_create_lead_calls_existing_lead_api():
             "params": None,
             "json": {
                 "lead_name": "广州睿狐科技",
-                "source": "其他",
+                "source_public_id": sources["OTHER"].public_id,
                 "city": "广州",
                 "contact_name": "王总",
                 "contact_phone": "13800138000",
@@ -2553,8 +2562,69 @@ async def test_agent_tool_create_lead_calls_existing_lead_api():
 
 
 @pytest.mark.asyncio
-async def test_agent_tool_create_customer_calls_existing_customer_api():
+async def test_agent_tool_create_lead_resolves_unspecified_source_to_team_other():
+    engine, db = _db_session(extra_tables=[AcquisitionSource.__table__])
+    sources = _seed_sources(db)
+    fake_client = FakeCRMAPIClient()
+    service = CRMAgentToolService(api_client=fake_client)
+    registry = AgentToolRegistry(tool_service=service)
+    try:
+        result = await registry.execute(
+            "create_lead",
+            _confirmed_context_for(db, "create_lead"),
+            {
+                "lead": {
+                    "lead_name": "广州睿狐科技",
+                    "city": "广州",
+                    "contact_name": "王总",
+                    "contact_phone": "13800138000",
+                },
+                "idempotency_suffix": "task-lead-unspecified-source",
+            },
+        )
+
+        assert result.success is True
+        assert fake_client.calls[0]["json"]["source_public_id"] == sources["OTHER"].public_id
+        assert "source" not in fake_client.calls[0]["json"]
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_create_lead_omits_chinese_source_when_table_missing():
     engine, db = _db_session()
+    fake_client = FakeCRMAPIClient()
+    service = CRMAgentToolService(api_client=fake_client)
+    registry = AgentToolRegistry(tool_service=service)
+    try:
+        result = await registry.execute(
+            "create_lead",
+            _confirmed_context_for(db, "create_lead"),
+            {
+                "lead": {
+                    "lead_name": "广州睿狐科技",
+                    "source": "其他",
+                    "city": "广州",
+                    "contact_name": "王总",
+                    "contact_phone": "13800138000",
+                },
+                "idempotency_suffix": "task-lead-no-source-table",
+            },
+        )
+
+        assert result.success is True
+        assert "source" not in fake_client.calls[0]["json"]
+        assert "source_public_id" not in fake_client.calls[0]["json"]
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_create_customer_calls_existing_customer_api():
+    engine, db = _db_session(extra_tables=[AcquisitionSource.__table__])
+    sources = _seed_sources(db)
     fake_client = FakeCRMAPIClient()
     service = CRMAgentToolService(api_client=fake_client)
     registry = AgentToolRegistry(tool_service=service)
@@ -2586,7 +2656,7 @@ async def test_agent_tool_create_customer_calls_existing_customer_api():
             "params": None,
             "json": {
                 "account_name": "广州睿狐科技",
-                "source": "其他",
+                "source_public_id": sources["OTHER"].public_id,
                 "city": "广州",
                 "primary_contact": {
                     "name": "王总",

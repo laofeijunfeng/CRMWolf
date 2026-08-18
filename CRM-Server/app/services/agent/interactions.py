@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.crud.procurement import procurement_method_crud
 from app.models.customer import Customer
+from app.services.acquisition_source_service import list_options
 from app.services.agent import agent_copy, business_rules, choice_resolution, task_display
 from app.services.agent.interaction_contract import (
     INTERACTION_TYPE_CHOICE,
@@ -84,6 +85,23 @@ def _procurement_method_options(db: Optional[Session], team_id: Optional[int]) -
         db.rollback()
         return []
     return [{"label": method.name, "value": str(method.id)} for method in methods]
+
+
+def _fallback_acquisition_source_options() -> list[dict[str, str]]:
+    return []
+
+
+def _acquisition_source_options(db: Optional[Session], team_id: Optional[int]) -> list[dict[str, str]]:
+    if db is None or team_id is None or not hasattr(db, "query"):
+        return _fallback_acquisition_source_options()
+    try:
+        with db.begin_nested():
+            rows = list_options(db, team_id, include_inactive=False)
+    except SQLAlchemyError:
+        return _fallback_acquisition_source_options()
+    if not rows:
+        return _fallback_acquisition_source_options()
+    return [{"label": row.name, "value": row.public_id} for row in rows]
 
 def _customer_requires_procurement_method(customer: dict) -> bool:
     return business_rules.customer_requires_procurement_method(customer)
@@ -194,16 +212,8 @@ def _fields_for_missing(
     }
     numeric_fields = {"total_amount", "user_count", "subscription_years", "authorized_users", "actual_amount"}
     date_fields = {"expected_closing_date", "payment_date"}
-    if kind == "lead":
-        option_sets["source"] = [
-            {"label": "线上注册", "value": "线上注册"},
-            {"label": "市场活动", "value": "市场活动"},
-            {"label": "客户推荐", "value": "客户推荐"},
-            {"label": "电话营销", "value": "电话营销"},
-            {"label": "网站咨询", "value": "网站咨询"},
-            {"label": "展会", "value": "展会"},
-            {"label": "其他", "value": "其他"},
-        ]
+    if kind in {"lead", "customer"}:
+        option_sets["source"] = _acquisition_source_options(db, team_id)
         option_sets["company_scale"] = [
             {"label": "1-50人", "value": "1-50人"},
             {"label": "51-200人", "value": "51-200人"},
@@ -212,22 +222,6 @@ def _fields_for_missing(
             {"label": "1000人以上", "value": "1000人以上"},
         ]
     if kind == "customer":
-        option_sets["source"] = [
-            {"label": "线上注册", "value": "线上注册"},
-            {"label": "市场活动", "value": "市场活动"},
-            {"label": "客户推荐", "value": "客户推荐"},
-            {"label": "电话营销", "value": "电话营销"},
-            {"label": "网站咨询", "value": "网站咨询"},
-            {"label": "展会", "value": "展会"},
-            {"label": "其他", "value": "其他"},
-        ]
-        option_sets["company_scale"] = [
-            {"label": "1-50人", "value": "1-50人"},
-            {"label": "51-200人", "value": "51-200人"},
-            {"label": "201-500人", "value": "201-500人"},
-            {"label": "501-1000人", "value": "501-1000人"},
-            {"label": "1000人以上", "value": "1000人以上"},
-        ]
         option_sets["contact_gender"] = option_sets["gender"]
     fields = []
     for key in missing_fields:

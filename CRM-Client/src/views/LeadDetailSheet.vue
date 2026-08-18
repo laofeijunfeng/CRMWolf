@@ -18,6 +18,7 @@ import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Pencil } from 'lucide-vue-next'
 import LeadFormDialog from '@/components/LeadFormDialog.vue'
+import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
 import LeadConvertDialog from '@/components/LeadConvertDialog.vue'
 import {
   Sheet,
@@ -292,7 +293,7 @@ watch(() => props.visible, (visible): void => {
                   <div class="attributes-grid">
                     <div class="attribute-item">
                       <div class="attribute-label">线索来源</div>
-                      <div class="attribute-value">{{ leadData.source || '-' }}</div>
+                      <div class="attribute-value">{{ getAcquisitionSourceDisplayName(leadData) }}</div>
                     </div>
                     <div class="attribute-item">
                       <div class="attribute-label">所在城市</div>

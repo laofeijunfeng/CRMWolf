@@ -229,3 +229,79 @@ def test_agent_operation_detail_exposes_projection_repair_failure(monkeypatch) -
     finally:
         db.close()
         engine.dispose()
+
+
+def test_agent_session_operations_repair_customer_activity_post_commit_projection() -> None:
+    from app.models.customer_activity_post_commit_job import (
+        CustomerActivityPostCommitJob,
+        CustomerActivityPostCommitJobStatus,
+    )
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            AgentSession.__table__,
+            AgentAsyncOperation.__table__,
+            AgentAsyncOperationEvent.__table__,
+            CustomerIntelligenceRun.__table__,
+            CustomerActivityPostCommitJob.__table__,
+        ],
+    )
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    service = AgentAsyncOperationService()
+    try:
+        session = AgentSession(session_key="session-post-commit", team_id=1, user_id=2, title="跟进会话")
+        db.add(session)
+        db.add(
+            CustomerActivityPostCommitJob(
+                public_id="pcj_repair_001",
+                team_id=1,
+                activity_id=241,
+                activity_revision=1,
+                trigger_type="ACTIVITY_CREATED_DETERMINISTIC",
+                actor_id="2",
+                status=CustomerActivityPostCommitJobStatus.COMPLETED,
+                run_id="run-repair-001",
+                graph_thread_id="thread-repair-001",
+                result_json={"success": True, "activity_id": 241},
+            )
+        )
+        db.commit()
+        operation = service.ensure_scheduled(
+            db,
+            operation_key="customer-activity-post-commit:pcj_repair_001",
+            request_id="pcj_repair_001",
+            team_id=1,
+            user_id=2,
+            session_id=session.id,
+            source_user_message_id=21,
+            operation_type="customer_activity_post_commit",
+            resource_type="customer_activity",
+            resource_id=241,
+            summary="跟进已记录，任务对账处理中",
+        )
+        db.commit()
+
+        app = FastAPI()
+        app.include_router(agent_api.router)
+        app.dependency_overrides[agent_api.get_db] = lambda: Session()
+        app.dependency_overrides[agent_api.get_current_user_team] = lambda: 1
+        app.dependency_overrides[agent_api.get_current_active_user] = lambda: SimpleNamespace(id=2)
+
+        with TestClient(app) as client:
+            response = client.get(f"/v1/agent/sessions/{session.id}/operations")
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body[0]["public_id"] == operation.public_id
+        assert body[0]["status"] == "SUCCEEDED"
+        assert body[0]["request_id"] == "pcj_repair_001"
+    finally:
+        db.close()
+        engine.dispose()

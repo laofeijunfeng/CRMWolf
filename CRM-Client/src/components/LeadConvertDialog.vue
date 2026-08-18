@@ -18,6 +18,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
+import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -200,7 +201,7 @@ watch(visible, (val) => {
           <div class="attributes-grid">
             <div class="attribute-item">
               <span class="attribute-label">线索来源</span>
-              <span class="attribute-value">{{ leadData.source || '-' }}</span>
+              <span class="attribute-value">{{ getAcquisitionSourceDisplayName(leadData) }}</span>
             </div>
             <div class="attribute-item">
               <span class="attribute-label">所在城市</span>

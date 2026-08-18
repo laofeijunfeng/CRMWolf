@@ -24,7 +24,7 @@ class EntityAIParserBase(ABC):
     # ==================== 抽象方法（子类必须实现） ====================
 
     @abstractmethod
-    def get_system_prompt(self) -> str:
+    def get_system_prompt(self, db: Session | None = None, team_id: int | None = None) -> str:
         """获取系统提示词（各实体定义自己的提示词）"""
         pass
 
@@ -163,7 +163,7 @@ class EntityAIParserBase(ABC):
             request_body = {
                 "model": config.model_name,
                 "messages": [
-                    {"role": "system", "content": self.get_system_prompt()},
+                    {"role": "system", "content": self.get_system_prompt(db, team_id)},
                     {"role": "user", "content": user_message}
                 ],
                 "temperature": 0.1,
