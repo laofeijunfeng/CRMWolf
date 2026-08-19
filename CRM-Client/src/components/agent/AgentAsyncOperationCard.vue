@@ -72,9 +72,12 @@ const props = defineProps<{
 
 const expanded = ref(false)
 const detailsId = computed(() => `agent-async-operation-${props.operation.public_id}-details`)
-const title = computed(() => props.operation.operation_type === "customer_intelligence_refresh"
-  ? "客户档案后台更新"
-  : "后台任务")
+const OPERATION_TITLES: Record<string, string> = {
+  customer_intelligence_refresh: "客户档案更新",
+  customer_activity_post_commit: "跟进任务对账",
+}
+
+const title = computed(() => OPERATION_TITLES[props.operation.operation_type] ?? "后台任务")
 
 const statusMeta = computed(() => getAgentAsyncOperationStatusMeta(props.operation.status))
 const statusLabel = computed(() => statusMeta.value.label)
@@ -107,13 +110,15 @@ const visibleEvents = computed(() => props.operation.events
   .filter(event => event.event_type === "PROGRESS" && Boolean(event.message)))
 
 const fallbackDetail = computed(() => {
-  if (props.operation.status === "QUEUED") return "客户活动已记录，后台更新即将开始。"
-  if (props.operation.status === "RUNNING") return "正在执行客户档案更新。"
-  if (props.operation.status === "WAITING_USER") return "后台更新正在等待用户确认。"
-  if (props.operation.status === "RETRY_SCHEDULED") return "本次更新暂未完成，系统将自动重试。"
-  if (props.operation.status === "FAILED") return "客户活动已记录，但客户档案更新未完成。"
-  if (props.operation.status === "CANCELLED") return "本次客户档案更新已取消。"
-  return "执行过程已完成。"
+  const summary = props.operation.summary?.trim() ?? ""
+  if (summary.length > 0) return summary
+  if (props.operation.status === "QUEUED") return "后台任务即将开始。"
+  if (props.operation.status === "RUNNING") return "后台任务正在执行。"
+  if (props.operation.status === "WAITING_USER") return "后台任务正在等待用户确认。"
+  if (props.operation.status === "RETRY_SCHEDULED") return "本次任务暂未完成，系统将自动重试。"
+  if (props.operation.status === "FAILED") return "后台任务未完成。"
+  if (props.operation.status === "CANCELLED") return "本次后台任务已取消。"
+  return "后台任务已完成。"
 })
 
 const formatTime = (value: string): string => {

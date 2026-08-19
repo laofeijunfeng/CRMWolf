@@ -111,7 +111,7 @@ describe("CRMAgentChat background operation placement", () => {
 
     const text = wrapper.text()
     const firstAssistantIndex = text.indexOf("第一条已记录")
-    const operationIndex = text.indexOf("客户档案后台更新")
+    const operationIndex = text.indexOf("客户档案更新")
     const secondUserIndex = text.indexOf("第二条消息")
 
     expect(firstAssistantIndex).toBeGreaterThanOrEqual(0)
@@ -168,8 +168,8 @@ describe("CRMAgentChat background operation placement", () => {
     await flushPromises()
 
     const text = wrapper.text()
-    expect(text.indexOf("客户档案后台更新")).toBeGreaterThan(text.indexOf("本轮已记录"))
-    expect(text.indexOf("客户档案后台更新")).toBeLessThan(text.indexOf("下一轮问题"))
+    expect(text.indexOf("客户档案更新")).toBeGreaterThan(text.indexOf("本轮已记录"))
+    expect(text.indexOf("客户档案更新")).toBeLessThan(text.indexOf("下一轮问题"))
     wrapper.unmount()
   })
 })

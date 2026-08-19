@@ -69,7 +69,7 @@ describe("AgentAsyncOperationCard", () => {
     expect(trigger.attributes("aria-expanded")).toBe("false")
     expect(trigger.attributes("aria-label")).toContain("已降级完成")
     expect(trigger.attributes("title")).toBeUndefined()
-    expect(trigger.text()).toBe("客户档案后台更新")
+    expect(trigger.text()).toBe("客户档案更新")
     expect(wrapper.text()).not.toContain("客户档案已更新，本次沉淀 0 条客户事实")
     expect(wrapper.text()).not.toContain("提炼出 6 条可沉淀事实")
     expect(wrapper.find(".agent-async-operation__details").exists()).toBe(false)
@@ -102,7 +102,7 @@ describe("AgentAsyncOperationCard", () => {
 
     expect(wrapper.findComponent(icon).exists()).toBe(true)
     expect(wrapper.get(".agent-async-operation__status-icon").classes()).toContain(className)
-    expect(wrapper.get("button").text()).toBe("客户档案后台更新")
+    expect(wrapper.get("button").text()).toBe("客户档案更新")
   })
 
   it("shows retry reason and schedule only after expansion", async () => {
@@ -124,5 +124,33 @@ describe("AgentAsyncOperationCard", () => {
 
     expect(wrapper.text()).toContain("客户档案服务暂不可用")
     expect(wrapper.text()).toContain("自动重试")
+  })
+
+  it("labels post-commit work as task reconciliation and shows the backend summary when there is no progress trail", async () => {
+    const wrapper = mount(AgentAsyncOperationCard, {
+      props: {
+        operation: {
+          ...degradedOperation,
+          public_id: "aop_post_commit",
+          operation_type: "customer_activity_post_commit",
+          resource_type: "activity",
+          resource_id: 88,
+          resource_public_id: "act_88",
+          status: "SUCCEEDED",
+          summary: "跟进已记录，任务对账完成",
+          current_step: "complete_activity_post_commit",
+          events: [],
+        },
+      },
+    })
+
+    expect(wrapper.get("button").text()).toBe("跟进任务对账")
+    expect(wrapper.text()).not.toContain("跟进已记录，任务对账完成")
+    expect(wrapper.text()).not.toContain("执行过程已完成。")
+
+    await wrapper.get("button").trigger("click")
+
+    expect(wrapper.text()).toContain("跟进已记录，任务对账完成")
+    expect(wrapper.text()).not.toContain("执行过程已完成。")
   })
 })
