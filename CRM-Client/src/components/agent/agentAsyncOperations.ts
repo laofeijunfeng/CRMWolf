@@ -89,6 +89,33 @@ export const getAgentAsyncOperationStatusMeta = (
   status: AgentAsyncOperationStatus
 ): AgentAsyncOperationStatusMeta => AGENT_ASYNC_OPERATION_STATUS_META[status]
 
+export const AGENT_ASYNC_OPERATION_TITLES: Readonly<Record<string, string>> = {
+  customer_intelligence_refresh: "客户档案更新",
+  customer_activity_post_commit: "跟进任务对账",
+}
+
+export const getAgentAsyncOperationTitle = (
+  operation: Pick<AgentAsyncOperation, "operation_type">
+): string => AGENT_ASYNC_OPERATION_TITLES[operation.operation_type] ?? "后台任务"
+
+const AGGREGATE_STATUS_PRIORITY: readonly AgentAsyncOperationStatus[] = [
+  "FAILED",
+  "RETRY_SCHEDULED",
+  "WAITING_USER",
+  "RUNNING",
+  "QUEUED",
+  "DEGRADED",
+  "CANCELLED",
+  "SUCCEEDED",
+]
+
+export const summarizeAgentAsyncOperations = (
+  operations: readonly AgentAsyncOperation[]
+): AgentAsyncOperationStatus => {
+  const statuses = new Set(operations.map(operation => operation.status))
+  return AGGREGATE_STATUS_PRIORITY.find(status => statuses.has(status)) ?? "SUCCEEDED"
+}
+
 export const isTerminalAgentAsyncOperation = (operation: AgentAsyncOperation): boolean => {
   return getAgentAsyncOperationStatusMeta(operation.status).terminal
 }

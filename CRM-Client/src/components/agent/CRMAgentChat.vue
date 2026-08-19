@@ -96,20 +96,12 @@
           class="agent-chat__operations"
           aria-label="后台任务状态"
         >
-          <AgentAsyncOperationCard
-            v-for="operation in operationsByMessageId.get(message.id)"
-            :key="operation.public_id"
-            :operation="operation"
-          />
+          <AgentAsyncOperationList :operations="operationsByMessageId.get(message.id) ?? []" />
         </section>
       </template>
 
       <section v-if="unanchoredAsyncOperations.length > 0" class="agent-chat__operations" aria-label="未关联的后台任务状态">
-        <AgentAsyncOperationCard
-          v-for="operation in unanchoredAsyncOperations"
-          :key="operation.public_id"
-          :operation="operation"
-        />
+        <AgentAsyncOperationList :operations="unanchoredAsyncOperations" />
       </section>
     </MessageScroller>
 
@@ -180,7 +172,7 @@ import {
 import { loadLatestAgentMessages, resolveInitialAgentSession } from "@/components/agent/agentHistory"
 import AgentMessageBody from "@/components/agent/AgentMessageBody.vue"
 import AgentInteractionDrawer from "@/components/agent/AgentInteractionDrawer.vue"
-import AgentAsyncOperationCard from "@/components/agent/AgentAsyncOperationCard.vue"
+import AgentAsyncOperationList from "@/components/agent/AgentAsyncOperationList.vue"
 import { groupAgentAsyncOperationsByMessage } from "@/components/agent/agentAsyncOperations"
 import { useAgentAsyncOperations } from "@/composables/useAgentAsyncOperations"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"

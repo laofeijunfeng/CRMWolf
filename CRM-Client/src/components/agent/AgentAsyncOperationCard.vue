@@ -1,7 +1,7 @@
 <template>
   <article
     class="agent-async-operation"
-    :aria-label="`后台任务：${title}`"
+    :aria-label="title"
     aria-live="polite"
   >
     <button
@@ -64,7 +64,7 @@ import {
   XCircle,
 } from "lucide-vue-next"
 import type { AgentAsyncOperation } from "@/api/agent"
-import { getAgentAsyncOperationStatusMeta } from "@/components/agent/agentAsyncOperations"
+import { getAgentAsyncOperationStatusMeta, getAgentAsyncOperationTitle } from "@/components/agent/agentAsyncOperations"
 
 const props = defineProps<{
   operation: AgentAsyncOperation
@@ -72,12 +72,7 @@ const props = defineProps<{
 
 const expanded = ref(false)
 const detailsId = computed(() => `agent-async-operation-${props.operation.public_id}-details`)
-const OPERATION_TITLES: Record<string, string> = {
-  customer_intelligence_refresh: "客户档案更新",
-  customer_activity_post_commit: "跟进任务对账",
-}
-
-const title = computed(() => OPERATION_TITLES[props.operation.operation_type] ?? "后台任务")
+const title = computed(() => getAgentAsyncOperationTitle(props.operation))
 
 const statusMeta = computed(() => getAgentAsyncOperationStatusMeta(props.operation.status))
 const statusLabel = computed(() => statusMeta.value.label)

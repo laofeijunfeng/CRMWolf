@@ -111,7 +111,7 @@ describe("CRMAgentChat background operation placement", () => {
 
     const text = wrapper.text()
     const firstAssistantIndex = text.indexOf("第一条已记录")
-    const operationIndex = text.indexOf("客户档案更新")
+    const operationIndex = text.indexOf("后台任务")
     const secondUserIndex = text.indexOf("第二条消息")
 
     expect(firstAssistantIndex).toBeGreaterThanOrEqual(0)
@@ -168,8 +168,8 @@ describe("CRMAgentChat background operation placement", () => {
     await flushPromises()
 
     const text = wrapper.text()
-    expect(text.indexOf("客户档案更新")).toBeGreaterThan(text.indexOf("本轮已记录"))
-    expect(text.indexOf("客户档案更新")).toBeLessThan(text.indexOf("下一轮问题"))
+    expect(text.indexOf("后台任务")).toBeGreaterThan(text.indexOf("本轮已记录"))
+    expect(text.indexOf("后台任务")).toBeLessThan(text.indexOf("下一轮问题"))
     wrapper.unmount()
   })
 
@@ -201,12 +201,49 @@ describe("CRMAgentChat background operation placement", () => {
 
     const text = wrapper.text()
     const firstAssistantIndex = text.indexOf("第一条已记录")
-    const operationIndex = text.indexOf("跟进任务对账")
+    const operationIndex = text.indexOf("后台任务")
     const secondUserIndex = text.indexOf("第二条消息")
 
     expect(firstAssistantIndex).toBeGreaterThanOrEqual(0)
     expect(operationIndex).toBeGreaterThan(firstAssistantIndex)
     expect(operationIndex).toBeLessThan(secondUserIndex)
+    wrapper.unmount()
+  })
+
+  it("collapses both background operations into one list until the user expands it", async () => {
+    api.listSessionOperations.mockResolvedValue([
+      operation,
+      {
+        ...operation,
+        public_id: "aop_post_commit",
+        request_id: "pcj_first_turn",
+        operation_type: "customer_activity_post_commit",
+        resource_type: "customer_activity",
+        resource_id: 241,
+        resource_public_id: null,
+        summary: "跟进任务已完成对账",
+      },
+    ])
+
+    const wrapper = mount(CRMAgentChat, {
+      global: {
+        stubs: {
+          AgentInteractionDrawer: true,
+          MessageScroller: { template: "<div><slot /></div>" },
+        },
+      },
+    })
+    await flushPromises()
+
+    const text = wrapper.text()
+    expect(text).toContain("后台任务")
+    expect(text).not.toContain("客户档案更新")
+    expect(text).not.toContain("跟进任务对账")
+
+    await wrapper.get(".agent-async-operation-list__trigger").trigger("click")
+
+    expect(wrapper.text()).toContain("客户档案更新")
+    expect(wrapper.text()).toContain("跟进任务对账")
     wrapper.unmount()
   })
 })

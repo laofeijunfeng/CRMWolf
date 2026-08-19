@@ -3,8 +3,10 @@ import type { AgentAsyncOperation } from "@/api/agent"
 import {
   groupAgentAsyncOperationsByMessage,
   getAgentAsyncOperationStatusMeta,
+  getAgentAsyncOperationTitle,
   isTerminalAgentAsyncOperation,
   mergeAgentAsyncOperation,
+  summarizeAgentAsyncOperations,
   upsertAgentAsyncOperation,
 } from "@/components/agent/agentAsyncOperations"
 
@@ -115,4 +117,20 @@ describe("agent async operation projection", () => {
     expect(getAgentAsyncOperationStatusMeta("FAILED").toneClasses).toContain("wolf-danger")
   })
 
+  it("names operations by type and summarizes the list by the most urgent status", () => {
+    expect(getAgentAsyncOperationTitle(operation("SUCCEEDED", 1))).toBe("客户档案更新")
+    expect(getAgentAsyncOperationTitle({
+      ...operation("SUCCEEDED", 1),
+      operation_type: "customer_activity_post_commit",
+    })).toBe("跟进任务对账")
+    expect(summarizeAgentAsyncOperations([
+      operation("SUCCEEDED", 1),
+      {
+        ...operation("RUNNING", 1),
+        public_id: "aop_2",
+        operation_type: "customer_activity_post_commit",
+      },
+    ])).toBe("RUNNING")
+  })
 })
+
