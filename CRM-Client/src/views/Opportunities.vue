@@ -21,8 +21,9 @@ import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Pencil, ArrowRight, Trophy, XCircle, Trash2 } from 'lucide-vue-next'
 import { AmountText, DataTable, TableRowActions, type ActionConfig } from '@/components/crmwolf'
-import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
-import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
+import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
+import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
+import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { ViewPreferenceConfig } from '@/api/viewPreference'
 import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
@@ -36,7 +37,7 @@ import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCu
 import { isOpportunityPublicId } from '@/utils/opportunityRoutes'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
-import { buildSortFieldsFromFilterFields, getPrimarySort } from '@/utils/listSorts'
+import { getPrimarySort } from '@/utils/listSorts'
 import { customerDetailRoute } from '@/utils/customerRoutes'
 import { normalizePaginatedResponse } from '@/types/pagination'
 import OpportunityDetailSheet from './OpportunityDetailSheet.vue'
@@ -93,87 +94,100 @@ const tabs = [
 
 const activeTab = ref('all')
 
-// ==================== 列表筛选配置 ====================
-const baseFilterFields: ListFilterField[] = [
-  { key: 'opportunity_name', type: 'text', label: '商机名称' },
-  { key: 'customer_name', type: 'text', label: '客户名称' },
-  {
-    key: 'status',
-    type: 'enum',
-    label: '状态',
-    options: [
-      { value: '0', label: '跟进中' },
-      { value: '1', label: '已赢单' },
-      { value: '2', label: '已输单' }
-    ]
-  },
-  {
-    key: 'license_type',
-    type: 'enum',
-    label: '授权模式',
-    options: [
-      { value: 'SUBSCRIPTION', label: '订阅' },
-      { value: 'PERPETUAL', label: '买断' }
-    ]
-  },
-  {
-    key: 'purchase_type',
-    type: 'enum',
-    label: '采购类型',
-    options: [
-      { value: 'NEW', label: '新购' },
-      { value: 'RENEWAL', label: '续购' },
-      { value: 'EXPANSION', label: '增购' }
-    ]
-  },
-  { key: 'expected_closing_date', type: 'date', label: '预计成交日期' },
-  { key: 'stage_name', type: 'text', label: '销售阶段' }
+// ==================== 列表字段注册表 ====================
+const opportunityStatusOptions = [
+  { value: '0', label: '跟进中' },
+  { value: '1', label: '已赢单' },
+  { value: '2', label: '已输单' }
+]
+const licenseTypeOptions = [
+  { value: 'SUBSCRIPTION', label: '订阅' },
+  { value: 'PERPETUAL', label: '买断' }
+]
+const purchaseTypeOptions = [
+  { value: 'NEW', label: '新购' },
+  { value: 'RENEWAL', label: '续购' },
+  { value: 'EXPANSION', label: '增购' }
 ]
 
-const filterFields = computed<ListFilterField[]>(() => {
-  const fields: ListFilterField[] = baseFilterFields.slice()
-  if (ownerFilterOptions.value.length > 0) {
-    fields.push({
-      key: 'owner_id',
-      type: 'enum',
+const fields = computed<ListFieldDefinition[]>(() => {
+  const catalog: ListFieldDefinition[] = [
+    { key: 'opportunity_name', label: '商机名称', type: 'text', column: { width: '220px' }, filter: true, sort: true },
+    {
+      key: 'owner',
       label: '负责人',
+      type: 'enum',
       options: ownerFilterOptions.value.map((owner) => ({
         value: owner.id,
         label: owner.name
-      }))
-    })
-  }
-  return fields
+      })),
+      column: { width: '100px' },
+      filter: ownerFilterOptions.value.length > 0 ? { apiKey: 'owner_id' } : false,
+      sort: { apiKey: 'owner_id' }
+    },
+    { key: 'customer_name', label: '客户名称', type: 'text', column: { width: '150px' }, filter: true, sort: true },
+    {
+      key: 'total_amount',
+      label: '预计金额',
+      type: 'number',
+      column: { align: 'right', width: '130px' },
+      sort: true
+    },
+    { key: 'user_count', label: '用户数', column: { align: 'right', width: '100px' } },
+    {
+      key: 'license_type',
+      label: '授权模式',
+      type: 'enum',
+      options: licenseTypeOptions,
+      column: { align: 'center', width: '100px' },
+      filter: true,
+      sort: true
+    },
+    {
+      key: 'purchase_type',
+      label: '采购类型',
+      type: 'enum',
+      options: purchaseTypeOptions,
+      column: { align: 'center', width: '100px' },
+      filter: true,
+      sort: true
+    },
+    {
+      key: 'expected_closing_date',
+      label: '预计成交日期',
+      type: 'date',
+      column: { width: '140px' },
+      filter: true,
+      sort: true
+    },
+    {
+      key: 'stage',
+      label: '销售阶段',
+      type: 'text',
+      column: { width: '120px' },
+      filter: { apiKey: 'stage_name' },
+      sort: { apiKey: 'stage_name' }
+    },
+    { key: 'win_probability', label: '赢率', column: { align: 'right', width: '80px' } },
+    {
+      key: 'status',
+      label: '状态',
+      type: 'enum',
+      options: opportunityStatusOptions,
+      column: { align: 'center', width: '100px' },
+      filter: true,
+      sort: true
+    },
+    { key: 'approval_phase', label: '审批', column: { align: 'center', width: '110px' } },
+    { key: 'created_time', label: '创建时间', type: 'date', sort: true },
+    { key: 'actions', label: '操作', column: { align: 'center', width: '220px' } }
+  ]
+  return catalog
 })
 
 const activeFilters = ref<ListFilterCondition[]>([])
 const activeSorts = ref<ListSortCondition[]>([])
 const activeColumns = ref<ViewPreferenceConfig['columns']>([])
-
-const extraSortFields: ListSortField[] = [
-  { key: 'total_amount', type: 'number', label: '预计金额' },
-  { key: 'created_time', type: 'date', label: '创建时间' }
-]
-const sortFields = computed<ListSortField[]>(() =>
-  buildSortFieldsFromFilterFields(filterFields.value, extraSortFields)
-)
-
-// ==================== DataTable 配置 ====================
-const columns = [
-  { key: 'opportunity_name', title: '商机名称', width: '220px' },
-  { key: 'owner', title: '负责人', width: '100px' },
-  { key: 'customer_name', title: '客户名称', width: '150px' },
-  { key: 'total_amount', title: '预计金额', align: 'right' as const, width: '130px' },
-  { key: 'user_count', title: '用户数', align: 'right' as const, width: '100px' },
-  { key: 'license_type', title: '授权模式', align: 'center' as const, width: '100px' },
-  { key: 'purchase_type', title: '采购类型', align: 'center' as const, width: '100px' },
-  { key: 'expected_closing_date', title: '预计成交日期', width: '140px' },
-  { key: 'stage', title: '销售阶段', width: '120px' },
-  { key: 'win_probability', title: '赢率', align: 'right' as const, width: '80px' },
-  { key: 'status', title: '状态', align: 'center' as const, width: '100px' },
-  { key: 'approval_phase', title: '审批', align: 'center' as const, width: '110px' },
-  { key: 'actions', title: '操作', align: 'center' as const, width: '220px' }
-]
 
 // ==================== 权限 ====================
 const canCreateOpportunity = computed(() =>
@@ -675,7 +689,7 @@ watchEffect(() => {
   <div class="opportunities-page">
     <!-- DataTable -->
     <DataTable
-      :columns="columns"
+      :fields="fields"
       :data="tableData"
       :loading="loading"
       :page="pagination.current"
@@ -690,8 +704,6 @@ watchEffect(() => {
       :mobile-meta-keys="['stage', 'win_probability', 'owner']"
       v-model:filters="activeFilters"
       v-model:sorts="activeSorts"
-      :filter-fields="filterFields"
-      :sort-fields="sortFields"
       view-key="opportunities.list"
       column-config-enabled
       :column-preference-config="activeColumnPreferenceConfig"

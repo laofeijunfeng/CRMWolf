@@ -20,8 +20,9 @@ import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Eye, Pencil, Trash2, Send, RotateCcw, Stamp, Download } from 'lucide-vue-next'
 import { AmountText, DataTable, TableRowActions } from '@/components/crmwolf'
-import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
-import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
+import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
+import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
+import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { ViewPreferenceConfig } from '@/api/viewPreference'
 import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
@@ -85,93 +86,74 @@ const tabs = [
 
 const activeTab = ref('all')
 
-// ==================== 列表筛选配置 ====================
-const filterFields: ListFilterField[] = [
-  { key: 'keyword', type: 'text', label: '关键字' },
-  {
-    key: 'status',
-    type: 'enum',
-    label: '状态',
-    options: [
-      { value: 'DRAFT', label: '草稿' },
-      { value: 'PENDING_REVIEW', label: '待审批' },
-      { value: 'APPROVED', label: '已批准' },
-      { value: 'REJECTED', label: '已驳回' },
-      { value: 'ISSUED', label: '已开票' },
-      { value: 'CANCELLED', label: '已取消' }
-    ]
-  },
+// ==================== 列表字段注册表 ====================
+const invoiceTypeOptions = [
+  { value: 'VAT_SPECIAL', label: '增值税专用发票' },
+  { value: 'VAT_NORMAL', label: '增值税普通发票' }
+]
+const invoiceStatusOptions = [
+  { value: 'DRAFT', label: '草稿' },
+  { value: 'PENDING_REVIEW', label: '待审批' },
+  { value: 'APPROVED', label: '已批准' },
+  { value: 'REJECTED', label: '已驳回' },
+  { value: 'ISSUED', label: '已开票' },
+  { value: 'CANCELLED', label: '已取消' }
+]
+const invoiceEffectiveStatusOptions = [
+  { value: 'ACTIVE', label: '有效' },
+  { value: 'REISSUE_PENDING', label: '重开中' },
+  { value: 'RED_OFFSET', label: '已冲红' },
+  { value: 'REISSUED', label: '已重开' }
+]
+
+const fields: ListFieldDefinition[] = [
+  { key: 'keyword', label: '关键字', type: 'text', filter: true },
+  { key: 'application_number', label: '申请单号', type: 'text', column: { width: '220px' }, sort: true },
+  { key: 'customer_name', label: '客户名称', column: { width: '150px' } },
+  { key: 'contract_name', label: '合同名称', column: { width: '180px' } },
   {
     key: 'invoice_type',
-    type: 'enum',
     label: '发票类型',
-    options: [
-      { value: 'VAT_SPECIAL', label: '增值税专用发票' },
-      { value: 'VAT_NORMAL', label: '增值税普通发票' }
-    ]
+    type: 'enum',
+    options: invoiceTypeOptions,
+    column: { width: '150px' },
+    filter: true,
+    sort: true
+  },
+  {
+    key: 'invoice_amount',
+    label: '开票金额',
+    type: 'number',
+    column: { align: 'right', width: '130px' },
+    sort: true
+  },
+  { key: 'invoice_title_text', label: '开票抬头', type: 'text', column: { width: '200px' }, sort: true },
+  {
+    key: 'status',
+    label: '状态',
+    type: 'enum',
+    options: invoiceStatusOptions,
+    column: { align: 'center', width: '100px' },
+    filter: true,
+    sort: true
   },
   {
     key: 'invoice_effective_status',
-    type: 'enum',
     label: '发票状态',
-    options: [
-      { value: 'ACTIVE', label: '有效' },
-      { value: 'REISSUE_PENDING', label: '重开中' },
-      { value: 'RED_OFFSET', label: '已冲红' },
-      { value: 'REISSUED', label: '已重开' }
-    ]
+    type: 'enum',
+    options: invoiceEffectiveStatusOptions,
+    column: { align: 'center', width: '110px' },
+    filter: true
   },
-  { key: 'created_time', type: 'date', label: '创建时间' }
+  { key: 'applicant_name', label: '申请人', column: { width: '110px' } },
+  { key: 'created_time', label: '创建时间', type: 'date', column: { width: '170px' }, filter: true, sort: true },
+  { key: 'issued_time', label: '开票时间', type: 'date', sort: true },
+  { key: 'actions', label: '操作', column: { align: 'center', width: '220px' } }
 ]
 
 const activeFilters = ref<ListFilterCondition[]>([])
 const activeSorts = ref<ListSortCondition[]>([])
 const activeColumns = ref<ViewPreferenceConfig['columns']>([])
-
-const sortFields: ListSortField[] = [
-  { key: 'application_number', type: 'text', label: '申请单号' },
-  {
-    key: 'invoice_type',
-    type: 'enum',
-    label: '发票类型',
-    options: [
-      { value: 'VAT_SPECIAL', label: '增值税专用发票' },
-      { value: 'VAT_NORMAL', label: '增值税普通发票' }
-    ]
-  },
-  { key: 'invoice_amount', type: 'number', label: '开票金额' },
-  { key: 'invoice_title_text', type: 'text', label: '开票抬头' },
-  {
-    key: 'status',
-    type: 'enum',
-    label: '状态',
-    options: [
-      { value: 'DRAFT', label: '草稿' },
-      { value: 'PENDING_REVIEW', label: '待审批' },
-      { value: 'APPROVED', label: '已批准' },
-      { value: 'REJECTED', label: '已驳回' },
-      { value: 'ISSUED', label: '已开票' },
-      { value: 'CANCELLED', label: '已取消' }
-    ]
-  },
-  { key: 'created_time', type: 'date', label: '创建时间' },
-  { key: 'issued_time', type: 'date', label: '开票时间' }
-]
-
-// ==================== DataTable 配置 ====================
-const columns = [
-  { key: 'application_number', title: '申请单号', width: '220px' },
-  { key: 'customer_name', title: '客户名称', width: '150px' },
-  { key: 'contract_name', title: '合同名称', width: '180px' },
-  { key: 'invoice_type', title: '发票类型', width: '150px' },
-  { key: 'invoice_amount', title: '开票金额', align: 'right' as const, width: '130px' },
-  { key: 'invoice_title_text', title: '开票抬头', width: '200px' },
-  { key: 'status', title: '状态', align: 'center' as const, width: '100px' },
-  { key: 'invoice_effective_status', title: '发票状态', align: 'center' as const, width: '110px' },
-  { key: 'applicant_name', title: '申请人', width: '110px' },
-  { key: 'created_time', title: '创建时间', width: '170px' },
-  { key: 'actions', title: '操作', align: 'center' as const, width: '220px' }
-]
 
 // ==================== 权限 ====================
 const canCreateInvoice = computed(() => permissionStore.hasPermission('invoice:create'))
@@ -612,7 +594,7 @@ watchEffect(() => {
   <div class="invoices-page">
     <!-- DataTable -->
     <DataTable
-      :columns="columns"
+      :fields="fields"
       :data="tableData"
       :loading="loading"
       :page="pagination.current"
@@ -627,8 +609,6 @@ watchEffect(() => {
       :mobile-meta-keys="['contract_name', 'applicant_name', 'created_time']"
       v-model:filters="activeFilters"
       v-model:sorts="activeSorts"
-      :filter-fields="filterFields"
-      :sort-fields="sortFields"
       view-key="invoices.list"
       column-config-enabled
       :column-preference-config="activeColumnPreferenceConfig"

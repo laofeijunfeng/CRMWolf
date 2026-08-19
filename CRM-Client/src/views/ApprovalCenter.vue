@@ -46,13 +46,12 @@
       <!-- DataTable（桌面 + 移动端卡片） -->
       <DataTable
         v-model:filters="activeFilters"
-        :columns="columns"
+        :fields="fields"
         :data="rows"
         :total="total"
         :page="page"
         :page-size="pageSize"
         :loading="listLoading"
-        :filter-fields="filterFields"
         view-key="approval-center.list"
         column-config-enabled
         height="calc(100vh - 108px)"
@@ -559,7 +558,8 @@ import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { BellRing, Clock, Copy } from 'lucide-vue-next'
 import { AmountText, DataTable, Badge } from '@/components/crmwolf'
-import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
+import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
+import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetHeader, SheetTitle, SheetDescription, SheetFooter } from '@/components/ui/sheet'
 import { DetailSheetContent } from '@/components/ui/detail-sheet'
@@ -1125,93 +1125,52 @@ const tabs = computed(() => {
   ]
 })
 
-// ==================== 筛选配置 ====================
-const filterFields: ListFilterField[] = [
-  { key: 'application_number', type: 'text', label: '单号' },
-  { key: 'entity_name', type: 'text', label: '实体' },
-  {
-    key: 'business_type',
-    type: 'enum',
-    label: '单据类型',
-    options: [
-      { value: 'PAYMENT', label: '回款' },
-      { value: 'INVOICE', label: '发票' },
-      { value: 'INVOICE_REISSUE', label: '发票重开' },
-      { value: 'CONTRACT', label: '合同' },
-      { value: 'LICENSE', label: 'License' },
-      { value: 'OPPORTUNITY', label: '商机' }
-    ]
-  },
-  {
-    key: 'status',
-    type: 'enum',
-    label: '审批状态',
-    options: [
-      { value: 'PENDING', label: '审批中' },
-      { value: 'APPROVED', label: '已通过' },
-      { value: 'REJECTED', label: '已驳回' },
-      { value: 'CANCELLED', label: '已撤回' }
-    ]
-  },
-  { key: 'submitter_name', type: 'text', label: '提交人' },
-  { key: 'entity_amount', type: 'number', label: '金额' },
-  { key: 'created_time', type: 'date', label: '提交时间' }
+// ==================== 列表字段注册表 ====================
+const approvalBusinessTypeOptions = [
+  { value: 'PAYMENT', label: '回款' },
+  { value: 'INVOICE', label: '发票' },
+  { value: 'INVOICE_REISSUE', label: '发票重开' },
+  { value: 'CONTRACT', label: '合同' },
+  { value: 'LICENSE', label: 'License' },
+  { value: 'OPPORTUNITY', label: '商机' }
+]
+const approvalStatusOptions = [
+  { value: 'PENDING', label: '审批中' },
+  { value: 'APPROVED', label: '已通过' },
+  { value: 'REJECTED', label: '已驳回' },
+  { value: 'CANCELLED', label: '已撤回' }
 ]
 
-// ==================== DataTable Columns 配置 ====================
-const columns = [
+const fields: ListFieldDefinition[] = [
   {
     key: 'application_number',
-    title: '单号',
-    width: '180px',
-    fixed: 'left' as const
+    label: '单号',
+    type: 'text',
+    column: { width: '180px', fixed: 'left' },
+    filter: true
   },
   {
     key: 'business_type',
-    title: '类型',
-    width: '90px',
-    align: 'center' as const
+    label: '类型',
+    type: 'enum',
+    options: approvalBusinessTypeOptions,
+    column: { width: '90px', align: 'center' },
+    filter: { label: '单据类型' }
   },
-  {
-    key: 'entity_name',
-    title: '实体',
-    width: '160px'
-  },
-  {
-    key: 'entity_amount',
-    title: '金额',
-    width: '130px',
-    align: 'right' as const
-  },
-  {
-    key: 'submitter_name',
-    title: '提交人',
-    width: '110px'
-  },
-  {
-    key: 'created_time',
-    title: '提交时间',
-    width: '150px'
-  },
+  { key: 'entity_name', label: '实体', type: 'text', column: { width: '160px' }, filter: true },
+  { key: 'entity_amount', label: '金额', type: 'number', column: { width: '130px', align: 'right' }, filter: true },
+  { key: 'submitter_name', label: '提交人', type: 'text', column: { width: '110px' }, filter: true },
+  { key: 'created_time', label: '提交时间', type: 'date', column: { width: '150px' }, filter: true },
   {
     key: 'status',
-    title: '状态',
-    width: '120px',
-    align: 'center' as const
+    label: '状态',
+    type: 'enum',
+    options: approvalStatusOptions,
+    column: { width: '120px', align: 'center' },
+    filter: { label: '审批状态' }
   },
-  {
-    key: 'overdue_hours',
-    title: '超时',
-    width: '130px',
-    align: 'center' as const
-  },
-  {
-    key: 'actions',
-    title: '操作',
-    width: '220px',
-    align: 'center' as const,
-    fixed: 'right' as const
-  }
+  { key: 'overdue_hours', label: '超时', column: { width: '130px', align: 'center' } },
+  { key: 'actions', label: '操作', column: { width: '220px', align: 'center', fixed: 'right' } }
 ]
 
 onUnmounted(() => {

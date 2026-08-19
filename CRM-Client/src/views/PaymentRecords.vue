@@ -20,8 +20,9 @@ import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Pencil, Trash2 } from 'lucide-vue-next'
 import { AmountText, DataTable, TableRowActions } from '@/components/crmwolf'
-import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
-import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
+import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
+import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
+import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { ViewPreferenceConfig } from '@/api/viewPreference'
 import { confirmDelete } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
@@ -80,79 +81,55 @@ const tabs = [
 
 const activeTab = ref('all')
 
-// ==================== DataTable 筛选配置 ====================
-const filterFields: ListFilterField[] = [
-  { key: 'keyword', type: 'text', label: '全局关键词' },
-  { key: 'record_number', type: 'text', label: '回款编号' },
-  { key: 'customer_name', type: 'text', label: '客户名称' },
-  { key: 'actual_payer_name', type: 'text', label: '实际付款方' },
-  { key: 'invoice_title_text', type: 'text', label: '发票抬头' },
-  { key: 'contract_name', type: 'text', label: '合同名称' },
-  { key: 'actual_amount', type: 'number', label: '回款金额' },
-  { key: 'owner_name', type: 'text', label: '负责人' },
-  { key: 'commission_member_name', type: 'text', label: '团队成员' },
-  { key: 'payment_date', type: 'date', label: '回款日期' },
+// ==================== 列表字段注册表 ====================
+const confirmationStatusOptions = [
+  { value: 'PENDING', label: '待确认' },
+  { value: 'CONFIRMED', label: '已确认' },
+  { value: 'DISPUTED', label: '有争议' }
+]
+const approvalStatusOptions = [
+  { value: 'pending_submit', label: '待提交' },
+  { value: 'pending_approval', label: '审批中' },
+  { value: 'rejected', label: '已驳回' },
+  { value: 'approved', label: '已确认' }
+]
+
+const fields: ListFieldDefinition[] = [
+  { key: 'keyword', label: '全局关键词', type: 'text', filter: true },
+  { key: 'record_number', label: '回款编号', type: 'text', column: { width: '180px' }, filter: true, sort: true },
+  { key: 'customer_name', label: '客户名称', type: 'text', column: { width: '180px' }, filter: true, sort: true },
+  { key: 'actual_payer_name', label: '实际付款方', type: 'text', column: { width: '180px' }, filter: true, sort: true },
+  { key: 'invoice_title_text', label: '发票抬头', type: 'text', column: { width: '200px' }, filter: true, sort: true },
+  { key: 'contract_name', label: '合同名称', type: 'text', column: { width: '220px' }, filter: true, sort: true },
+  {
+    key: 'actual_amount',
+    label: '回款金额',
+    type: 'number',
+    column: { align: 'right', width: '140px' },
+    filter: true,
+    sort: true
+  },
+  { key: 'owner_name', label: '负责人', type: 'text', column: { width: '110px' }, filter: true, sort: true },
+  { key: 'commission_member_name', label: '团队成员', type: 'text', column: { width: '110px' }, filter: true, sort: true },
+  { key: 'payment_date', label: '回款日期', type: 'date', column: { width: '120px' }, filter: true, sort: true },
   {
     key: 'confirmation_status',
-    type: 'enum',
     label: '状态',
-    options: [
-      { value: 'PENDING', label: '待确认' },
-      { value: 'CONFIRMED', label: '已确认' },
-      { value: 'DISPUTED', label: '有争议' }
-    ]
+    type: 'enum',
+    options: confirmationStatusOptions,
+    column: { align: 'center', width: '110px' },
+    filter: true,
+    sort: true
   },
-  { key: 'created_time', type: 'date', label: '创建时间' },
+  { key: 'created_time', label: '创建时间', type: 'date', column: { width: '160px' }, filter: true, sort: true },
   {
     key: 'approval_status',
-    type: 'enum',
     label: '审批状态',
-    options: [
-      { value: 'pending_submit', label: '待提交' },
-      { value: 'pending_approval', label: '审批中' },
-      { value: 'rejected', label: '已驳回' },
-      { value: 'approved', label: '已确认' }
-    ]
-  }
-]
-
-const sortFields: ListSortField[] = [
-  { key: 'record_number', type: 'text', label: '回款编号' },
-  { key: 'customer_name', type: 'text', label: '客户名称' },
-  { key: 'actual_payer_name', type: 'text', label: '实际付款方' },
-  { key: 'invoice_title_text', type: 'text', label: '发票抬头' },
-  { key: 'contract_name', type: 'text', label: '合同名称' },
-  { key: 'actual_amount', type: 'number', label: '回款金额' },
-  { key: 'owner_name', type: 'text', label: '负责人' },
-  { key: 'commission_member_name', type: 'text', label: '团队成员' },
-  { key: 'payment_date', type: 'date', label: '回款日期' },
-  {
-    key: 'confirmation_status',
     type: 'enum',
-    label: '状态',
-    options: [
-      { value: 'PENDING', label: '待确认' },
-      { value: 'CONFIRMED', label: '已确认' },
-      { value: 'DISPUTED', label: '有争议' }
-    ]
+    options: approvalStatusOptions,
+    filter: true
   },
-  { key: 'created_time', type: 'date', label: '创建时间' }
-]
-
-// ==================== DataTable 配置 ====================
-const columns = [
-  { key: 'record_number', title: '回款编号', width: '180px' },
-  { key: 'customer_name', title: '客户名称', width: '180px' },
-  { key: 'actual_payer_name', title: '实际付款方', width: '180px' },
-  { key: 'invoice_title_text', title: '发票抬头', width: '200px' },
-  { key: 'contract_name', title: '合同名称', width: '220px' },
-  { key: 'actual_amount', title: '回款金额', align: 'right' as const, width: '140px' },
-  { key: 'owner_name', title: '负责人', width: '110px' },
-  { key: 'commission_member_name', title: '团队成员', width: '110px' },
-  { key: 'payment_date', title: '回款日期', width: '120px' },
-  { key: 'confirmation_status', title: '状态', align: 'center' as const, width: '110px' },
-  { key: 'created_time', title: '创建时间', width: '160px' },
-  { key: 'actions', title: '操作', align: 'center' as const, width: '220px' }
+  { key: 'actions', label: '操作', column: { align: 'center', width: '220px' } }
 ]
 
 // ==================== 权限 ====================
@@ -533,14 +510,12 @@ watchEffect(() => {
     <DataTable
       v-model:filters="activeFilters"
       v-model:sorts="activeSorts"
-      :columns="columns"
+      :fields="fields"
       :data="tableData"
       :loading="loading"
       :page="pagination.current"
       :page-size="pagination.pageSize"
       :total="pagination.total"
-      :filter-fields="filterFields"
-      :sort-fields="sortFields"
       view-key="payment-records.list"
       column-config-enabled
       :column-preference-config="activeColumnPreferenceConfig"

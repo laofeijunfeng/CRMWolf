@@ -41,6 +41,8 @@ export { default as StatusBadge } from '../StatusBadge.vue'
 // Export types
 export type { ActionConfig } from './TableRowActions.vue'
 export type { ColumnConfigOption } from './columnConfigTypes'
+export type { ListFieldDefinition, ListFieldColumnConfig, ListFieldQueryConfig } from './listFieldCatalog'
+export { defineListFields, projectListFieldCatalog } from './listFieldCatalog'
 export type { ListFilterCondition, ListFilterField } from './listFilterTypes'
 export type { ListSortCondition, ListSortField } from './listSortTypes'
 

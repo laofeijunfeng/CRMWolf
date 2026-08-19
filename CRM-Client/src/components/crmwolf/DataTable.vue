@@ -31,51 +31,15 @@ import ListSortPopover from './ListSortPopover.vue'
 import SelectField from './SelectField.vue'
 import { viewPreferenceApi, type ViewPreferenceConfig, type ViewPreferenceScope } from '@/api/viewPreference'
 import type { ColumnConfigOption } from './columnConfigTypes'
-import type { ListFilterCondition, ListFilterField, ListFilterFieldType, ListFilterOption } from './listFilterTypes'
-import type { ListSortCondition, ListSortField, ListSortFieldType, ListSortOption } from './listSortTypes'
+import type { ListFilterCondition } from './listFilterTypes'
+import type { ListSortCondition } from './listSortTypes'
+import { projectListFieldCatalog, type DataTableColumn, type ListFieldDefinition } from './listFieldCatalog'
 import { buildPaginationEntries, type PaginationEntry } from './paginationWindow'
 
 // ==================== Props ====================
-interface Column {
-  /** 列标识 */
-  key: string
-  /** 列标题 */
-  title: string
-  /** 列宽度（可选，不设置则自动分配） */
-  width?: string
-  /** 对齐方式 */
-  align?: 'left' | 'center' | 'right'
-  /** 固定列位置（left/right） */
-  fixed?: 'left' | 'right' | undefined
-  /** 是否可筛选 */
-  filterable?: boolean
-  /** 筛选字段，默认使用 key */
-  filterKey?: string
-  /** 筛选展示名称，默认使用 title */
-  filterLabel?: string
-  /** 筛选字段类型 */
-  filterType?: ListFilterFieldType
-  /** 枚举筛选选项 */
-  filterOptions?: ListFilterOption[]
-  /** 是否可排序 */
-  sortable?: boolean
-  /** 排序字段，默认使用 key */
-  sortKey?: string
-  /** 排序字段类型 */
-  sortType?: ListSortFieldType
-  /** 枚举排序选项顺序 */
-  sortOptions?: ListSortOption[]
-  /** 是否允许在字段配置中拖动排序 */
-  configurable?: boolean | undefined
-  /** 是否允许在字段配置中隐藏 */
-  hideable?: boolean | undefined
-  /** 当前是否显示 */
-  visible?: boolean | undefined
-}
-
 interface Props {
-  /** 列定义 */
-  columns: Column[]
+  /** 列表字段注册表：列、筛选、排序、字段配置的唯一来源，按能力投影，不再接收 columns / filterFields / sortFields */
+  fields: ListFieldDefinition[]
   /** 数据源 */
   data: T[]
   /** 行标识字段 */
@@ -102,12 +66,8 @@ interface Props {
   fixedRightCount?: number
   /** 行是否可作为整体交互目标 */
   rowInteractive?: boolean
-  /** 标准列表筛选字段 */
-  filterFields?: ListFilterField[]
   /** 当前筛选条件 */
   filters?: ListFilterCondition[]
-  /** 标准列表排序字段 */
-  sortFields?: ListSortField[]
   /** 当前排序条件 */
   sorts?: ListSortCondition[]
   /** 窄视口展示模式 */
@@ -144,9 +104,7 @@ const props = withDefaults(defineProps<Props>(), {
   fixedLeftCount: 1,
   fixedRightCount: 1,
   rowInteractive: false,
-  filterFields: () => [],
   filters: () => [],
-  sortFields: () => [],
   sorts: () => [],
   mobileMode: 'card',
   mobileTitleKey: '',
@@ -183,47 +141,13 @@ const totalPages = computed<number>(() => Math.ceil(props.total / props.pageSize
 const paginationEntries = computed<PaginationEntry[]>(() =>
   buildPaginationEntries(props.page, totalPages.value)
 )
-const normalizedFilterFields = computed<ListFilterField[]>(() => {
-  if (props.filterFields.length > 0) {
-    return props.filterFields
-  }
-
-  return props.columns
-    .filter((col) => col.filterable === true && col.filterType !== undefined && col.key !== 'actions')
-    .map((col) => {
-      const field: ListFilterField = {
-        key: col.filterKey ?? col.key,
-        label: col.filterLabel ?? col.title,
-        type: col.filterType as ListFilterFieldType
-      }
-      if (col.filterOptions !== undefined) {
-        field.options = col.filterOptions
-      }
-      return field
-    })
-})
+const projectedFields = computed(() => projectListFieldCatalog(props.fields))
+const tableColumns = computed<DataTableColumn[]>(() => projectedFields.value.columns)
+const normalizedFilterFields = computed(() => projectedFields.value.filterFields)
 const normalizedFilters = computed<ListFilterCondition[]>(() => props.filters ?? [])
 const filterViewSaveAvailable = computed(() => props.filterViewSaveEnabled === true)
 const filterViewSaving = computed(() => props.filterViewSaveLoading === true)
-const normalizedSortFields = computed<ListSortField[]>(() => {
-  if (props.sortFields.length > 0) {
-    return props.sortFields
-  }
-
-  return props.columns
-    .filter((col) => col.sortable === true && col.sortType !== undefined && col.key !== 'actions')
-    .map((col) => {
-      const field: ListSortField = {
-        key: col.sortKey ?? col.key,
-        label: col.title,
-        type: col.sortType as ListSortFieldType
-      }
-      if (col.sortOptions !== undefined) {
-        field.options = col.sortOptions
-      }
-      return field
-    })
-})
+const normalizedSortFields = computed(() => projectedFields.value.sortFields)
 const normalizedSorts = computed<ListSortCondition[]>(() => props.sorts ?? [])
 const hasTableTools = computed(() =>
   normalizedFilterFields.value.length > 0 || normalizedSortFields.value.length > 0 || isColumnConfigAvailable.value
@@ -235,7 +159,7 @@ const pageSizeOptions = computed(() =>
   }))
 )
 
-type ProcessedColumn = Column & {
+type ProcessedColumn = DataTableColumn & {
   fixed?: 'left' | 'right' | undefined
   index: number
   sourceIndex: number
@@ -252,7 +176,7 @@ const isColumnConfigAvailable = computed(() =>
   props.columnConfigEnabled && props.viewKey.trim() !== ''
 )
 
-function resolveColumns(columns: Column[]): ProcessedColumn[] {
+function resolveColumns(columns: DataTableColumn[]): ProcessedColumn[] {
   const cols = columns.map((col, index) => {
     let fixed: 'left' | 'right' | undefined = col.fixed
 
@@ -262,7 +186,7 @@ function resolveColumns(columns: Column[]): ProcessedColumn[] {
     }
 
     // 自动固定右侧列（除非已有 explicit fixed 配置）
-    if (!fixed && index >= props.columns.length - props.fixedRightCount) {
+    if (!fixed && index >= columns.length - props.fixedRightCount) {
       fixed = 'right'
     }
 
@@ -325,7 +249,7 @@ const effectiveColumnPreferenceConfig = computed(() =>
 )
 
 const preferredColumns = computed<ProcessedColumn[]>(() =>
-  applyColumnPreference(resolveColumns(props.columns), effectiveColumnPreferenceConfig.value)
+  applyColumnPreference(resolveColumns(tableColumns.value), effectiveColumnPreferenceConfig.value)
 )
 
 const processedColumns = computed<ProcessedColumn[]>(() =>

@@ -20,8 +20,9 @@ import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Pencil, CheckCircle, Trash2 } from 'lucide-vue-next'
 import { AmountText, DataTable, TableRowActions } from '@/components/crmwolf'
-import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
-import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
+import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
+import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
+import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { ViewPreferenceConfig } from '@/api/viewPreference'
 import { confirmDelete } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
@@ -87,53 +88,38 @@ const activeTab = ref('all')
 //   all: paymentPlansStore.total
 // }))
 
-// ==================== DataTable 筛选配置 ====================
-const filterFields: ListFilterField[] = [
-  { key: 'keyword', type: 'text', label: '客户/合同/商机/阶段' },
+// ==================== 列表字段注册表 ====================
+const paymentPlanStatusOptions = [
+  { value: 'PENDING', label: '待登记' },
+  { value: 'PARTIAL', label: '部分回款' },
+  { value: 'COMPLETED', label: '已登记' },
+  { value: 'OVERDUE', label: '已逾期' }
+]
+
+const fields: ListFieldDefinition[] = [
+  { key: 'keyword', label: '客户/合同/商机/阶段', type: 'text', filter: true },
+  { key: 'plan_number', label: '计划编号', type: 'text', column: { width: '150px' }, sort: true },
+  { key: 'stage_name', label: '阶段名称', type: 'text', column: { width: '120px' }, sort: true },
+  { key: 'customer_name', label: '客户名称', type: 'text', column: true, sort: true },
+  { key: 'contract_name', label: '合同名称', type: 'text', column: true, sort: true },
   {
-    key: 'status',
-    type: 'enum',
-    label: '状态',
-    options: [
-      { value: 'PENDING', label: '待登记' },
-      { value: 'PARTIAL', label: '部分回款' },
-      { value: 'COMPLETED', label: '已登记' },
-      { value: 'OVERDUE', label: '已逾期' }
-    ]
+    key: 'plan_amount',
+    label: '计划金额',
+    type: 'number',
+    column: { align: 'right' },
+    sort: { apiKey: 'planned_amount' }
   },
-  { key: 'due_date', type: 'date', label: '计划日期' }
-]
-
-const sortFields: ListSortField[] = [
-  { key: 'plan_number', type: 'text', label: '计划编号' },
-  { key: 'stage_name', type: 'text', label: '阶段名称' },
-  { key: 'customer_name', type: 'text', label: '客户名称' },
-  { key: 'contract_name', type: 'text', label: '合同名称' },
-  { key: 'planned_amount', type: 'number', label: '计划金额' },
-  { key: 'due_date', type: 'date', label: '计划日期' },
+  { key: 'due_date', label: '计划日期', type: 'date', column: true, filter: true, sort: true },
   {
     key: 'status',
-    type: 'enum',
     label: '状态',
-    options: [
-      { value: 'PENDING', label: '待登记' },
-      { value: 'PARTIAL', label: '部分回款' },
-      { value: 'COMPLETED', label: '已登记' },
-      { value: 'OVERDUE', label: '已逾期' }
-    ]
-  }
-]
-
-// ==================== DataTable 配置 ====================
-const columns = [
-  { key: 'plan_number', title: '计划编号', width: '150px' },
-  { key: 'stage_name', title: '阶段名称', width: '120px' },
-  { key: 'customer_name', title: '客户名称' },
-  { key: 'contract_name', title: '合同名称' },
-  { key: 'plan_amount', title: '计划金额', align: 'right' as const },
-  { key: 'due_date', title: '计划日期' },
-  { key: 'status', title: '状态', align: 'center' as const },
-  { key: 'actions', title: '操作', align: 'center' as const, width: '220px' }
+    type: 'enum',
+    options: paymentPlanStatusOptions,
+    column: { align: 'center' },
+    filter: true,
+    sort: true
+  },
+  { key: 'actions', label: '操作', column: { align: 'center', width: '220px' } }
 ]
 
 // ==================== 权限 ====================
@@ -440,14 +426,12 @@ watch(
     <!-- DataTable -->
     <DataTable
       v-model:filters="activeFilters"
-      :columns="columns"
+      :fields="fields"
       :data="tableData"
       :loading="loading"
       :page="pagination.current"
       :page-size="pagination.pageSize"
       :total="pagination.total"
-      :filter-fields="filterFields"
-      :sort-fields="sortFields"
       :sorts="activeSorts"
       view-key="payment-plans.list"
       column-config-enabled

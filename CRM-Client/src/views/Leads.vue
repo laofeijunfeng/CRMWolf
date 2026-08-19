@@ -22,8 +22,9 @@ import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, ArrowRightLeft, CircleCheck, XCircle, Trash2, Pencil, UserPlus } from 'lucide-vue-next'
 import { DataTable, TableRowActions } from '@/components/crmwolf'
-import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
-import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
+import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
+import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
+import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { ViewPreferenceConfig } from '@/api/viewPreference'
 import { Button } from '@/components/ui/button'
 import {
@@ -57,7 +58,7 @@ import { usePageTitle } from '@/composables/usePageTitle'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { normalizePaginatedResponse } from '@/types/pagination'
-import { buildSortFieldsFromFilterFields, getPrimarySort } from '@/utils/listSorts'
+import { getPrimarySort } from '@/utils/listSorts'
 import { useAcquisitionSourceOptions } from '@/composables/useAcquisitionSourceOptions'
 import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
 
@@ -112,83 +113,75 @@ const tabs = [
 
 const activeTab = ref('all')
 
-// ==================== 列表筛选配置 ====================
-const baseFilterFields = computed<ListFilterField[]>(() => [
-  { key: 'lead_name', type: 'text', label: '线索名称' },
-  { key: 'contact_name', type: 'text', label: '联系人' },
-  { key: 'contact_phone', type: 'text', label: '联系电话' },
-  {
-    key: 'status',
-    type: 'enum',
-    label: '状态',
-    options: [
-      { value: 0, label: '新建' },
-      { value: 1, label: '跟进中' },
-      { value: 3, label: '无效' }
-    ]
-  },
-  {
-    key: 'source',
-    type: 'enum',
-    label: '来源',
-    options: sourceFilterSelectOptions.value
-  },
-  { key: 'city', type: 'text', label: '城市' },
-  {
-    key: 'company_scale',
-    type: 'enum',
-    label: '规模',
-    options: [
-      { value: '1-50人', label: '1-50人' },
-      { value: '51-200人', label: '51-200人' },
-      { value: '201-500人', label: '201-500人' },
-      { value: '501-1000人', label: '501-1000人' },
-      { value: '1000人以上', label: '1000人以上' }
-    ]
-  },
-  { key: 'created_time', type: 'date', label: '创建时间' }
-])
+// ==================== 列表字段注册表 ====================
+const leadStatusOptions = [
+  { value: 0, label: '新建' },
+  { value: 1, label: '跟进中' },
+  { value: 3, label: '无效' }
+]
+const companyScaleOptions = [
+  { value: '1-50人', label: '1-50人' },
+  { value: '51-200人', label: '51-200人' },
+  { value: '201-500人', label: '201-500人' },
+  { value: '501-1000人', label: '501-1000人' },
+  { value: '1000人以上', label: '1000人以上' }
+]
 
-const filterFields = computed<ListFilterField[]>(() => {
-  const fields: ListFilterField[] = baseFilterFields.value.slice()
-  if (ownerFilterOptions.value.length > 0) {
-    fields.splice(fields.length - 1, 0, {
-      key: 'owner_id',
-      type: 'enum',
+const fields = computed<ListFieldDefinition[]>(() => {
+  const catalog: ListFieldDefinition[] = [
+    { key: 'lead_name', label: '线索名称', type: 'text', column: { width: '220px' }, filter: true, sort: true },
+    {
+      key: 'owner',
       label: '负责人',
+      type: 'enum',
       options: ownerFilterOptions.value.map((owner) => ({
         value: owner.id,
         label: owner.name
-      }))
-    })
-  }
-  return fields
+      })),
+      column: { width: '100px' },
+      filter: ownerFilterOptions.value.length > 0 ? { apiKey: 'owner_id' } : false,
+      sort: { apiKey: 'owner_id' }
+    },
+    { key: 'contact_name', label: '联系人', type: 'text', column: { width: '120px' }, filter: true, sort: true },
+    { key: 'contact_phone', label: '联系电话', type: 'text', column: { width: '140px' }, filter: true, sort: true },
+    {
+      key: 'source',
+      label: '来源',
+      type: 'enum',
+      options: sourceFilterSelectOptions.value,
+      column: { width: '120px' },
+      filter: true,
+      sort: true
+    },
+    { key: 'city', label: '城市', type: 'text', column: { width: '100px' }, filter: true, sort: true },
+    {
+      key: 'company_scale',
+      label: '规模',
+      type: 'enum',
+      options: companyScaleOptions,
+      column: { width: '120px' },
+      filter: true,
+      sort: true
+    },
+    {
+      key: 'status',
+      label: '状态',
+      type: 'enum',
+      options: leadStatusOptions,
+      column: { align: 'center', width: '100px' },
+      filter: true,
+      sort: true
+    },
+    { key: 'created_time', label: '创建时间', type: 'date', column: { width: '160px' }, filter: true, sort: true },
+    { key: 'last_modified_time', label: '最后更新', type: 'date', sort: true },
+    { key: 'actions', label: '操作', column: { align: 'center', width: '220px' } }
+  ]
+  return catalog
 })
 
 const activeFilters = ref<ListFilterCondition[]>([])
 const activeSorts = ref<ListSortCondition[]>([])
 const activeColumns = ref<ViewPreferenceConfig['columns']>([])
-
-const extraSortFields: ListSortField[] = [
-  { key: 'last_modified_time', type: 'date', label: '最后更新' }
-]
-const sortFields = computed<ListSortField[]>(() =>
-  buildSortFieldsFromFilterFields(filterFields.value, extraSortFields)
-)
-
-// ==================== DataTable 配置 ====================
-const columns = [
-  { key: 'lead_name', title: '线索名称', width: '220px' },
-  { key: 'owner', title: '负责人', width: '100px' },
-  { key: 'contact_name', title: '联系人', width: '120px' },
-  { key: 'contact_phone', title: '联系电话', width: '140px' },
-  { key: 'source', title: '来源', width: '120px' },
-  { key: 'city', title: '城市', width: '100px' },
-  { key: 'company_scale', title: '规模', width: '120px' },
-  { key: 'status', title: '状态', align: 'center' as const, width: '100px' },
-  { key: 'created_time', title: '创建时间', width: '160px' },
-  { key: 'actions', title: '操作', align: 'center' as const, width: '220px' }
-]
 
 // ==================== 权限 ====================
 const canCreateLead = computed(() => permissionStore.hasPermission('lead:create'))
@@ -532,7 +525,7 @@ watchEffect(() => {
   <div class="leads-page">
     <!-- DataTable -->
     <DataTable
-      :columns="columns"
+      :fields="fields"
       :data="tableData"
       :loading="loading"
       :page="pagination.current"
@@ -546,8 +539,6 @@ watchEffect(() => {
       mobile-status-key="status"
       :mobile-meta-keys="['contact_phone', 'source', 'owner']"
       v-model:filters="activeFilters"
-      :filter-fields="filterFields"
-      :sort-fields="sortFields"
       :sorts="activeSorts"
       view-key="leads.list"
       column-config-enabled

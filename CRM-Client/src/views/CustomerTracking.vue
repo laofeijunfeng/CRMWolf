@@ -5,6 +5,7 @@ import { CheckCircle2, Clock3, FileText, PauseCircle, Plus, RefreshCw, XCircle }
 import { toast } from 'vue-sonner'
 import { DataTable, HoverInfo, TableRowActions, type ActionConfig } from '@/components/crmwolf'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
+import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { ViewPreferenceConfig } from '@/api/viewPreference'
 import { Button } from '@/components/ui/button'
@@ -87,25 +88,43 @@ const tabs = computed<TabItem[]>(() => [
   { key: 'cancelled', label: '已关闭' },
 ])
 
-const columns = [
-  { key: 'customer_name', title: '客户', width: '220px', filterable: true, filterType: 'text' as const, sortable: true, sortType: 'text' as const },
-  { key: 'tracking_content', title: '追踪内容', width: '520px', filterable: true, filterType: 'text' as const },
+const fields: ListFieldDefinition[] = [
+  {
+    key: 'customer_name',
+    label: '客户',
+    type: 'text',
+    column: { width: '220px' },
+    filter: true,
+    sort: true
+  },
+  {
+    key: 'tracking_content',
+    label: '追踪内容',
+    type: 'text',
+    column: { width: '520px' },
+    filter: true
+  },
   {
     key: 'status_label',
-    title: '状态',
-    width: '110px',
-    align: 'center' as const,
-    filterable: true,
-    filterType: 'enum' as const,
-    filterOptions: [
+    label: '状态',
+    type: 'enum',
+    options: [
       { value: '待处理', label: '待处理' },
       { value: '需确认', label: '需确认' },
       { value: '已完成', label: '已完成' },
-      { value: '已关闭', label: '已关闭' },
+      { value: '已关闭', label: '已关闭' }
     ],
+    column: { width: '110px', align: 'center' },
+    filter: true
   },
-  { key: 'tracking_time', title: '跟进时效', width: '150px', sortable: true, sortType: 'date' as const },
-  { key: 'actions', title: '操作', width: '260px', align: 'center' as const, fixed: 'right' as const },
+  {
+    key: 'tracking_time',
+    label: '跟进时效',
+    type: 'date',
+    column: { width: '150px' },
+    sort: true
+  },
+  { key: 'actions', label: '操作', column: { width: '260px', align: 'center', fixed: 'right' } }
 ]
 
 const customFilterViews = useCustomFilterViews({
@@ -537,7 +556,7 @@ watchEffect(() => {
 <template>
   <div class="customer-tracking-page">
     <DataTable
-      :columns="columns"
+      :fields="fields"
       :data="pagedRows"
       :loading="loading"
       :page="page"

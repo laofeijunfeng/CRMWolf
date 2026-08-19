@@ -4,8 +4,9 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import DataTable from '../DataTable.vue'
 import SelectField from '../SelectField.vue'
+import type { ListFieldDefinition } from '../listFieldCatalog'
 
-const columns = [{ key: 'name', title: '名称' }]
+const fields: ListFieldDefinition[] = [{ key: 'name', label: '名称', column: true }]
 const data = [{ id: 1, name: '审批单' }]
 const readView = (name: string): string => readFileSync(
   resolve(process.cwd(), `src/views/${name}.vue`),
@@ -13,7 +14,7 @@ const readView = (name: string): string => readFileSync(
 )
 const mountTable = (rowInteractive: boolean): VueWrapper => mount(DataTable, {
   props: {
-    columns,
+    fields,
     data,
     total: 1,
     page: 1,
@@ -47,11 +48,11 @@ describe('DataTable row interaction', () => {
   it('renders fallback mobile cards from column metadata', () => {
     const wrapper = mount(DataTable, {
       props: {
-        columns: [
-          { key: 'name', title: '名称' },
-          { key: 'status', title: '状态' },
-          { key: 'owner', title: '负责人' }
-        ],
+        fields: [
+          { key: 'name', label: '名称', column: true },
+          { key: 'status', label: '状态', column: true },
+          { key: 'owner', label: '负责人', column: true }
+        ] satisfies ListFieldDefinition[],
         data: [{ id: 1, name: '合同 A', status: '审批中', owner: '张三' }],
         total: 1,
         page: 1,
@@ -71,7 +72,7 @@ describe('DataTable row interaction', () => {
   it('emits row-click from mobile cards but ignores nested controls', async () => {
     const wrapper = mount(DataTable, {
       props: {
-        columns,
+        fields,
         data,
         total: 1,
         page: 1,
@@ -92,7 +93,7 @@ describe('DataTable row interaction', () => {
   it('emits kebab-case page size updates and resets to the first page', async () => {
     const wrapper = mount(DataTable, {
       props: {
-        columns,
+        fields,
         data,
         total: 200,
         page: 3,
@@ -124,7 +125,10 @@ describe('DataTable row interaction', () => {
 
     for (const viewName of listViews) {
       const source = readView(viewName)
-      expect(source).toContain('height="calc(100vh - 108px)"')
+      const expectedHeight = viewName === 'ApprovalCenter'
+        ? 'height="calc(100vh - 108px)"'
+        : 'height="calc(100vh - 121px)"'
+      expect(source).toContain(expectedHeight)
       expect(source).not.toContain('height="calc(100vh - 104px)"')
       expect(source).not.toContain('height="calc(100vh - 120px)"')
       expect(source).not.toContain('height="calc(100vh - 136px)"')

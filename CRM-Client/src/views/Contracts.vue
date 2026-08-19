@@ -20,8 +20,9 @@ import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Edit, Send, Trash2 } from 'lucide-vue-next'
 import { AmountText, DataTable, TableRowActions, type ActionConfig } from '@/components/crmwolf'
-import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
-import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
+import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
+import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
+import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { ViewPreferenceConfig } from '@/api/viewPreference'
 import { confirmDelete } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
@@ -74,136 +75,119 @@ const tabs = [
   { key: 'SIGNED', label: '已签署' }
 ]
 
-// ==================== 列表筛选配置（状态下拉筛选包含全部状态）====================
-const baseFilterFields: ListFilterField[] = [
-  { key: 'contract_name', type: 'text', label: '合同名称' },
-  { key: 'contract_number', type: 'text', label: '合同编号' },
-  { key: 'customer_name', type: 'text', label: '客户名称' },
-  { key: 'opportunity_name', type: 'text', label: '商机名称' },
-  {
-    key: 'status',
-    type: 'enum',
-    label: '状态',
-    options: [
-      { value: 'DRAFT', label: '草稿' },
-      { value: 'PENDING_REVIEW', label: '审批中' },
-      { value: 'SIGNED', label: '已签署' },
-      { value: 'EXPIRED', label: '已到期' },
-      { value: 'TERMINATED', label: '已终止' }
-    ]
-  },
-  {
-    key: 'license_type',
-    type: 'enum',
-    label: '授权模式',
-    options: [
-      { value: 'SUBSCRIPTION', label: '订阅' },
-      { value: 'PERPETUAL', label: '买断' }
-    ]
-  },
-  {
-    key: 'purchase_type',
-    type: 'enum',
-    label: '采购类型',
-    options: [
-      { value: 'NEW', label: '新购' },
-      { value: 'RENEWAL', label: '续购' },
-      { value: 'EXPANSION', label: '增购' }
-    ]
-  },
-  { key: 'subscription_years', type: 'number', label: '采购年限' },
-  { key: 'license_authorized_users', type: 'number', label: '授权数量' },
-  { key: 'standard_unit_price', type: 'number', label: '客单价' },
-  { key: 'license_expiry_date', type: 'date', label: '授权时间' },
-  { key: 'signing_date', type: 'date', label: '签署日期' },
-  { key: 'effective_date', type: 'date', label: '生效日期' },
-  { key: 'expiry_date', type: 'date', label: '到期日期' }
+// ==================== 列表字段注册表 ====================
+const licenseTypeOptions = [
+  { value: 'SUBSCRIPTION', label: '订阅' },
+  { value: 'PERPETUAL', label: '买断' }
+]
+const purchaseTypeOptions = [
+  { value: 'NEW', label: '新购' },
+  { value: 'RENEWAL', label: '续购' },
+  { value: 'EXPANSION', label: '增购' }
+]
+const contractStatusOptions = [
+  { value: 'DRAFT', label: '草稿' },
+  { value: 'PENDING_REVIEW', label: '审批中' },
+  { value: 'SIGNED', label: '已签署' },
+  { value: 'EXPIRED', label: '已到期' },
+  { value: 'TERMINATED', label: '已终止' }
 ]
 
-const filterFields = computed<ListFilterField[]>(() => {
-  const fields: ListFilterField[] = baseFilterFields.slice()
-  if (ownerFilterOptions.value.length > 0) {
-    fields.push({
-      key: 'owner_id',
+const fields = computed<ListFieldDefinition[]>(() => {
+  const catalog: ListFieldDefinition[] = [
+    { key: 'contract_number', label: '合同编号', type: 'text', column: { width: '180px' }, filter: true, sort: true },
+    { key: 'contract_name', label: '合同名称', type: 'text', column: { width: '220px' }, filter: true, sort: true },
+    { key: 'customer_name', label: '客户名称', type: 'text', column: { width: '180px' }, filter: true, sort: true },
+    { key: 'opportunity_name', label: '商机名称', type: 'text', column: { width: '180px' }, filter: true, sort: true },
+    {
+      key: 'total_amount',
+      label: '合同金额',
+      type: 'number',
+      column: { align: 'right', width: '140px' },
+      sort: true
+    },
+    {
+      key: 'license_type',
+      label: '授权模式',
       type: 'enum',
+      options: licenseTypeOptions,
+      column: { align: 'center', width: '110px' },
+      filter: true,
+      sort: true
+    },
+    {
+      key: 'purchase_type',
+      label: '采购类型',
+      type: 'enum',
+      options: purchaseTypeOptions,
+      column: { align: 'center', width: '110px' },
+      filter: true,
+      sort: true
+    },
+    {
+      key: 'subscription_years',
+      label: '采购年限',
+      type: 'number',
+      column: { align: 'center', width: '100px' },
+      filter: true,
+      sort: true
+    },
+    {
+      key: 'license_authorized_users',
+      label: '授权数量',
+      type: 'number',
+      column: { align: 'right', width: '100px' },
+      filter: true,
+      sort: true
+    },
+    {
+      key: 'standard_unit_price',
+      label: '客单价',
+      type: 'number',
+      column: { align: 'right', width: '130px' },
+      filter: true,
+      sort: true
+    },
+    {
+      key: 'license_expiry_date',
+      label: '授权时间',
+      type: 'date',
+      column: { width: '120px' },
+      filter: true,
+      sort: true
+    },
+    {
+      key: 'status',
+      label: '状态',
+      type: 'enum',
+      options: contractStatusOptions,
+      filter: true,
+      sort: true
+    },
+    { key: 'signing_date', label: '签署日期', type: 'date', column: { width: '120px' }, filter: true, sort: true },
+    { key: 'effective_date', label: '生效日期', type: 'date', filter: true, sort: true },
+    { key: 'expiry_date', label: '到期日期', type: 'date', filter: true, sort: true },
+    { key: 'created_time', label: '创建时间', type: 'date', column: { width: '160px' }, sort: true }
+  ]
+  if (ownerFilterOptions.value.length > 0) {
+    catalog.push({
+      key: 'owner_id',
       label: '负责人',
+      type: 'enum',
       options: ownerFilterOptions.value.map((owner) => ({
         value: owner.id,
         label: owner.name
-      }))
+      })),
+      filter: true
     })
   }
-  return fields
+  catalog.push({ key: 'actions', label: '操作', column: { align: 'center', width: '220px' } })
+  return catalog
 })
 
 const activeFilters = ref<ListFilterCondition[]>([])
 const activeSorts = ref<ListSortCondition[]>([])
 const activeColumns = ref<ViewPreferenceConfig['columns']>([])
-
-const sortFields: ListSortField[] = [
-  { key: 'contract_number', type: 'text', label: '合同编号' },
-  { key: 'contract_name', type: 'text', label: '合同名称' },
-  { key: 'customer_name', type: 'text', label: '客户名称' },
-  { key: 'opportunity_name', type: 'text', label: '商机名称' },
-  { key: 'total_amount', type: 'number', label: '合同金额' },
-  {
-    key: 'license_type',
-    type: 'enum',
-    label: '授权模式',
-    options: [
-      { value: 'SUBSCRIPTION', label: '订阅' },
-      { value: 'PERPETUAL', label: '买断' }
-    ]
-  },
-  {
-    key: 'purchase_type',
-    type: 'enum',
-    label: '采购类型',
-    options: [
-      { value: 'NEW', label: '新购' },
-      { value: 'RENEWAL', label: '续购' },
-      { value: 'EXPANSION', label: '增购' }
-    ]
-  },
-  { key: 'subscription_years', type: 'number', label: '采购年限' },
-  { key: 'license_authorized_users', type: 'number', label: '授权数量' },
-  { key: 'standard_unit_price', type: 'number', label: '客单价' },
-  { key: 'license_expiry_date', type: 'date', label: '授权时间' },
-  {
-    key: 'status',
-    type: 'enum',
-    label: '状态',
-    options: [
-      { value: 'DRAFT', label: '草稿' },
-      { value: 'PENDING_REVIEW', label: '审批中' },
-      { value: 'SIGNED', label: '已签署' },
-      { value: 'EXPIRED', label: '已到期' },
-      { value: 'TERMINATED', label: '已终止' }
-    ]
-  },
-  { key: 'signing_date', type: 'date', label: '签署日期' },
-  { key: 'effective_date', type: 'date', label: '生效日期' },
-  { key: 'expiry_date', type: 'date', label: '到期日期' },
-  { key: 'created_time', type: 'date', label: '创建时间' }
-]
-
-// ==================== DataTable 配置 ====================
-const columns = [
-  { key: 'contract_number', title: '合同编号', width: '180px' },
-  { key: 'contract_name', title: '合同名称', width: '220px' },
-  { key: 'customer_name', title: '客户名称', width: '180px' },
-  { key: 'opportunity_name', title: '商机名称', width: '180px' },
-  { key: 'total_amount', title: '合同金额', align: 'right' as const, width: '140px' },
-  { key: 'license_type', title: '授权模式', align: 'center' as const, width: '110px' },
-  { key: 'purchase_type', title: '采购类型', align: 'center' as const, width: '110px' },
-  { key: 'subscription_years', title: '采购年限', align: 'center' as const, width: '100px' },
-  { key: 'license_authorized_users', title: '授权数量', align: 'right' as const, width: '100px' },
-  { key: 'standard_unit_price', title: '客单价', align: 'right' as const, width: '130px' },
-  { key: 'license_expiry_date', title: '授权时间', width: '120px' },
-  { key: 'signing_date', title: '签署日期', width: '120px' },
-  { key: 'created_time', title: '创建时间', width: '160px' },
-  { key: 'actions', title: '操作', align: 'center' as const, width: '220px' }
-]
 
 // ==================== 权限 ====================
 const canCreateContract = computed(() => permissionStore.hasPermission('contract:create'))
@@ -551,7 +535,7 @@ watchEffect(() => {
   <div class="contracts-page">
     <!-- DataTable -->
     <DataTable
-      :columns="columns"
+      :fields="fields"
       :data="tableData"
       :loading="loading"
       :page="pagination.current"
@@ -565,8 +549,6 @@ watchEffect(() => {
       mobile-status-key="status"
       :mobile-meta-keys="['contract_number', 'opportunity_name', 'license_expiry_date']"
       v-model:filters="activeFilters"
-      :filter-fields="filterFields"
-      :sort-fields="sortFields"
       :sorts="activeSorts"
       view-key="contracts.list"
       column-config-enabled

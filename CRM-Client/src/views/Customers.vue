@@ -22,6 +22,7 @@ import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Sparkles, ArrowRightLeft, TrendingUp, TrendingDown, XCircle, Trash2, Pencil, UserRoundCheck } from 'lucide-vue-next'
 import { DataTable, TableRowActions, type ActionConfig } from '@/components/crmwolf'
+import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { ViewPreferenceConfig } from '@/api/viewPreference'
@@ -162,98 +163,82 @@ const ownerFieldOptions = computed(() =>
   }))
 )
 
-const columns = computed(() => [
+const fields = computed<ListFieldDefinition[]>(() => [
   {
     key: 'account_name',
-    title: '客户名称',
-    width: '220px',
-    filterable: true,
-    filterType: 'text' as const,
-    sortable: true,
-    sortType: 'text' as const
+    label: '客户名称',
+    type: 'text',
+    column: { width: '220px' },
+    filter: true,
+    sort: true
   },
   {
     key: 'owner',
-    title: '负责人',
-    width: '100px',
-    filterable: ownerFieldOptions.value.length > 0,
-    filterKey: 'owner_id',
-    filterType: 'enum' as const,
-    filterOptions: ownerFieldOptions.value,
-    sortable: true,
-    sortKey: 'owner_id',
-    sortType: 'enum' as const,
-    sortOptions: ownerFieldOptions.value
+    label: '负责人',
+    type: 'enum',
+    options: ownerFieldOptions.value,
+    column: { width: '100px' },
+    filter: ownerFieldOptions.value.length > 0 ? { apiKey: 'owner_id' } : false,
+    sort: { apiKey: 'owner_id' }
   },
-  { key: 'collaborators', title: '协作者', width: '100px' },
+  { key: 'collaborators', label: '协作者', column: { width: '100px' } },
   {
     key: 'city',
-    title: '城市',
-    width: '100px',
-    filterable: true,
-    filterType: 'text' as const,
-    sortable: true,
-    sortType: 'text' as const
+    label: '城市',
+    type: 'text',
+    column: { width: '100px' },
+    filter: true,
+    sort: true
   },
   {
     key: 'company_scale',
-    title: '规模',
-    width: '120px',
-    filterable: true,
-    filterType: 'enum' as const,
-    filterOptions: [...companyScaleOptions],
-    sortable: true,
-    sortType: 'enum' as const,
-    sortOptions: [...companyScaleOptions]
+    label: '规模',
+    type: 'enum',
+    options: [...companyScaleOptions],
+    column: { width: '120px' },
+    filter: true,
+    sort: true
   },
   {
     key: 'status',
-    title: '状态',
-    align: 'center' as const,
-    width: '100px',
-    filterable: true,
-    filterType: 'enum' as const,
-    filterOptions: customerStatusFilterOptions,
-    sortable: true,
-    sortType: 'enum' as const,
-    sortOptions: customerStatusFilterOptions
+    label: '状态',
+    type: 'enum',
+    options: customerStatusFilterOptions,
+    column: { align: 'center', width: '100px' },
+    filter: true,
+    sort: true
   },
-  { key: 'license_status', title: '授权状态', align: 'center' as const, width: '100px' },
-  { key: 'license_expiry_date', title: '授权到期', width: '120px' },
-  { key: 'default_procurement_method', title: '默认采购方式', width: '140px' },
+  { key: 'license_status', label: '授权状态', column: { align: 'center', width: '100px' } },
+  { key: 'license_expiry_date', label: '授权到期', column: { width: '120px' } },
+  { key: 'default_procurement_method', label: '默认采购方式', column: { width: '140px' } },
   {
     key: 'industry',
-    title: '行业',
-    width: '120px',
-    filterable: true,
-    filterType: 'enum' as const,
-    filterOptions: industryFilterOptions.value,
-    sortable: true,
-    sortType: 'enum' as const,
-    sortOptions: industryFilterOptions.value
+    label: '行业',
+    type: 'enum',
+    options: industryFilterOptions.value,
+    column: { width: '120px' },
+    filter: true,
+    sort: true
   },
   {
     key: 'source',
-    title: '来源',
-    width: '120px',
-    filterable: true,
-    filterType: 'enum' as const,
-    filterOptions: sourceFilterSelectOptions.value,
-    sortable: true,
-    sortType: 'enum' as const,
-    sortOptions: sourceFilterSelectOptions.value
+    label: '来源',
+    type: 'enum',
+    options: sourceFilterSelectOptions.value,
+    column: { width: '120px' },
+    filter: true,
+    sort: true
   },
-  { key: 'creator', title: '创建人', width: '100px' },
+  { key: 'creator', label: '创建人', column: { width: '100px' } },
   {
     key: 'created_time',
-    title: '创建时间',
-    width: '160px',
-    filterable: true,
-    filterType: 'date' as const,
-    sortable: true,
-    sortType: 'date' as const
+    label: '创建时间',
+    type: 'date',
+    column: { width: '160px' },
+    filter: true,
+    sort: true
   },
-  { key: 'actions', title: '操作', align: 'center' as const, width: '220px' }
+  { key: 'actions', label: '操作', column: { align: 'center', width: '220px' } }
 ])
 
 const formatCollaborators = (row: CustomerTableRow): string => {
@@ -784,7 +769,7 @@ watchEffect(() => {
   <div class="customers-page">
     <!-- DataTable -->
     <DataTable
-      :columns="columns"
+      :fields="fields"
       :data="tableData"
       :loading="loading"
       :page="pagination.current"
