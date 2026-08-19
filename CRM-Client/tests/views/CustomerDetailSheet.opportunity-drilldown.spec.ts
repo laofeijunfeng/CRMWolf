@@ -21,7 +21,7 @@ const customerApi = vi.hoisted(() => ({
 const customerActivityApi = vi.hoisted(() => ({ getActivities: vi.fn() }))
 const opportunityApi = vi.hoisted(() => ({ getOpportunities: vi.fn() }))
 const contractApi = vi.hoisted(() => ({ getCustomerContracts: vi.fn() }))
-const invoiceApi = vi.hoisted(() => ({ getInvoiceTitles: vi.fn() }))
+const invoiceApi = vi.hoisted(() => ({ getInvoiceTitles: vi.fn(), getInvoiceApplications: vi.fn() }))
 const deploymentApi = vi.hoisted(() => ({ list: vi.fn() }))
 const handleApiError = vi.hoisted(() => vi.fn())
 const toast = vi.hoisted(() => ({ success: vi.fn(), info: vi.fn() }))
@@ -235,6 +235,7 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
     opportunityApi.getOpportunities.mockResolvedValue([opportunityFixture()])
     contractApi.getCustomerContracts.mockResolvedValue([])
     invoiceApi.getInvoiceTitles.mockResolvedValue({ invoice_titles: [] })
+    invoiceApi.getInvoiceApplications.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 100 })
     deploymentApi.list.mockResolvedValue([])
     customerApi.getCustomerMembers.mockResolvedValue([])
   })
@@ -357,6 +358,7 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
     opportunityApi.getOpportunities.mockClear()
     contractApi.getCustomerContracts.mockClear()
     invoiceApi.getInvoiceTitles.mockClear()
+    invoiceApi.getInvoiceApplications.mockClear()
     deploymentApi.list.mockClear()
     customerApi.getCustomerMembers.mockClear()
 
@@ -368,6 +370,13 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
     expect(opportunityApi.getOpportunities).toHaveBeenCalledWith({ customer_id: 'cus_test_42' })
     expect(contractApi.getCustomerContracts).toHaveBeenCalledWith('cus_test_42')
     expect(invoiceApi.getInvoiceTitles).toHaveBeenCalledWith('cus_test_42')
+    expect(invoiceApi.getInvoiceApplications).toHaveBeenCalledWith({
+      customer_id: 'cus_test_42',
+      page: 1,
+      page_size: 100,
+      order_by: 'created_time',
+      order_dir: 'desc',
+    })
     expect(deploymentApi.list).toHaveBeenCalledWith('cus_test_42')
     expect(customerApi.getCustomerMembers).toHaveBeenCalledWith('cus_test_42')
   })

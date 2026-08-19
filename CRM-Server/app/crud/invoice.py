@@ -175,6 +175,7 @@ class InvoiceApplicationCRUD:
         invoice_effective_status: Optional[str] = None,
         applicant_id: Optional[str] = None,
         current_user_id: Optional[str] = None,
+        visible_customer_ids: Optional[set[int]] = None,
         keyword: Optional[str] = None,
         created_time_start: Optional[date] = None,
         created_time_end: Optional[date] = None,
@@ -244,9 +245,18 @@ class InvoiceApplicationCRUD:
         
         if applicant_id:
             query = query.filter(InvoiceApplication.applicant_id == applicant_id)
-        
+
+        visibility_filters = []
         if current_user_id:
-            query = query.filter(InvoiceApplication.applicant_id == current_user_id)
+            visibility_filters.append(InvoiceApplication.applicant_id == current_user_id)
+        if visible_customer_ids is not None:
+            visibility_filters.append(
+                InvoiceApplication.customer_id.in_(list(visible_customer_ids) or [-1])
+            )
+        if len(visibility_filters) == 1:
+            query = query.filter(visibility_filters[0])
+        elif len(visibility_filters) > 1:
+            query = query.filter(or_(*visibility_filters))
 
         if created_time_start:
             query = query.filter(InvoiceApplication.created_time >= datetime.combine(created_time_start, time.min))

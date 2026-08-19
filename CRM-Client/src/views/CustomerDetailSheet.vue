@@ -62,7 +62,8 @@ import { opportunityApi, type OpportunityListResponse } from '@/api/opportunity'
 import contractApi, { type ContractListResponse, type ContractResponse } from '@/api/contract'
 import type { PaymentPlanResponse, PaymentRecordInfo, ApprovalInfo, ApprovalInfoLite, PaymentRecordUpdate } from '@/api/payment'
 import paymentApi from '@/api/payment'
-import invoiceApi, { type InvoiceTitleResponse } from '@/api/invoice'
+import invoiceApi, { type InvoiceApplicationResponse, type InvoiceTitleResponse } from '@/api/invoice'
+import { downloadInvoiceFile as downloadInvoiceFileApi } from '@/api/fileUpload'
 import deploymentApi, { type DeploymentInfoResponse } from '@/api/deployment'
 import { normalizePaginatedResponse } from '@/types/pagination'
 import { useUserStore } from '@/stores/user'
@@ -160,6 +161,8 @@ const opportunities = ref<OpportunityListResponse[]>([])
 const contracts = ref<ContractListResponse[]>([])
 const paymentPlans = ref<PaymentPlanResponse[]>([])
 const invoiceTitles = ref<InvoiceTitleResponse[]>([])
+const invoiceApplications = ref<InvoiceApplicationResponse[]>([])
+const downloadingInvoiceApplicationId = ref<number | null>(null)
 const deployments = ref<DeploymentInfoResponse[]>([])
 const customerMembers = ref<CustomerMemberResponse[]>([])
 let latestLoadRequestId = 0
@@ -333,6 +336,7 @@ const hasCustomerIntelligenceInputs = computed(() => {
     contracts.value.length > 0 ||
     paymentPlans.value.length > 0 ||
     invoiceTitles.value.length > 0 ||
+    invoiceApplications.value.length > 0 ||
     deployments.value.length > 0
   )
 })
@@ -535,6 +539,7 @@ const loadAllData = async (customerId: string): Promise<void> => {
       opportunitiesData,
       contractsData,
       invoiceTitlesData,
+      invoiceApplicationsData,
       deploymentsData,
       customerMembersData
     ] = await Promise.all([
@@ -543,6 +548,13 @@ const loadAllData = async (customerId: string): Promise<void> => {
       opportunityApi.getOpportunities({ customer_id: customerId }).catch(() => []),
       contractApi.getCustomerContracts(customerId).catch(() => []),
       invoiceApi.getInvoiceTitles(customerId).catch(() => ({ invoice_titles: [] })),
+      invoiceApi.getInvoiceApplications({
+        customer_id: customerId,
+        page: 1,
+        page_size: 100,
+        order_by: 'created_time',
+        order_dir: 'desc'
+      }).catch(() => ({ items: [], total: 0, page: 1, page_size: 100 })),
       deploymentApi.list(customerId).catch(() => []),
       customerApi.getCustomerMembers(customerId).catch(() => [])
     ])
@@ -556,6 +568,7 @@ const loadAllData = async (customerId: string): Promise<void> => {
     opportunities.value = normalizePaginatedResponse(opportunitiesData).items
     contracts.value = contractsData
     invoiceTitles.value = invoiceTitlesData.invoice_titles ?? []
+    invoiceApplications.value = invoiceApplicationsData.items ?? []
     deployments.value = deploymentsData
     customerMembers.value = customerMembersData
 
@@ -898,6 +911,19 @@ const handleSetDefaultInvoiceTitle = async (titleId: number): Promise<void> => {
   }
 }
 
+const handleDownloadInvoiceApplication = async (application: InvoiceApplicationResponse): Promise<void> => {
+  if (downloadingInvoiceApplicationId.value !== null) return
+  downloadingInvoiceApplicationId.value = application.id
+  try {
+    await downloadInvoiceFileApi(application.id, application.invoice_number ?? undefined)
+    toast.success('发票文件已开始下载')
+  } catch (error) {
+    handleApiError(error, '下载发票文件')
+  } finally {
+    downloadingInvoiceApplicationId.value = null
+  }
+}
+
 // License handlers
 const handleCreateDeployment = (): void => {
   if (!canCreateDeployment.value) {
@@ -1059,6 +1085,8 @@ watch(() => props.visible, (visible): void => {
     contracts.value = []
     paymentPlans.value = []
     invoiceTitles.value = []
+    invoiceApplications.value = []
+    downloadingInvoiceApplicationId.value = null
     deployments.value = []
     // Clear nested sheet states
     selectedContractId.value = null
@@ -1388,8 +1416,8 @@ watch(() => props.targetPanel, (panel): void => {
               <InvoicesPanel
                 :customer-id="customerId ?? ''"
                 :invoice-titles="invoiceTitles"
-                :invoice-applications="[]"
-                :show-invoice-applications="false"
+                :invoice-applications="invoiceApplications"
+                :downloading-application-id="downloadingInvoiceApplicationId"
                 :show-add-title="canCreateInvoiceTitle"
                 :show-title-apply-action="false"
                 :can-edit-title="canEditInvoiceTitle"
@@ -1399,6 +1427,7 @@ watch(() => props.targetPanel, (panel): void => {
                 @edit="handleEditInvoiceTitle"
                 @delete="handleDeleteInvoiceTitle"
                 @set-default="handleSetDefaultInvoiceTitle"
+                @download-application="handleDownloadInvoiceApplication"
               />
 
               <LicensePanel

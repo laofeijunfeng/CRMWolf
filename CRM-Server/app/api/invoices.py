@@ -13,9 +13,11 @@ from app.core.deps import (
     check_customer_view_permission,
     check_invoice_edit_permission,
     check_invoice_view_permission,
+    check_invoice_write_scope,
     check_payment_view_permission,
     get_current_active_user,
     get_current_user_team,
+    get_viewable_customer_ids,
     require_permission,
 )
 from app.crud.approval import approval_crud
@@ -341,8 +343,8 @@ def list_invoice_applications(
 
     权限逻辑：
     - invoice:view:all → 可查看所有发票申请
-    - invoice:view:own → 只能查看自己申请的发票
-    - 都没有 → 403 Forbidden
+    - 指定 customer_id 且能查看该客户 → 返回该客户树上的发票
+    - invoice:view:own / 客户可见范围 → 自己申请的发票，或所属客户对自己可见的发票
     """
     from app.crud.permission import permission_crud
 
@@ -352,18 +354,7 @@ def list_invoice_applications(
 
     has_view_all = "invoice:view:all" in permission_codes
     has_view_own = "invoice:view:own" in permission_codes
-
-    if not has_view_all and not has_view_own:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="没有查看发票申请的权限"
-        )
-
-    # 数据所有权隔离
-    current_user_id = None
-    if me or (has_view_own and not has_view_all):
-        # 如果只有 view:own 权限，或者用户明确选择只看自己的数据
-        current_user_id = str(current_user.id)
+    viewable_customer_ids = get_viewable_customer_ids(db, team_id, current_user.id)
 
     effective_limit = page_size if page_size is not None else limit
     effective_skip = (page - 1) * effective_limit if page is not None else skip
@@ -372,6 +363,29 @@ def list_invoice_applications(
     if customer_id:
         customer = check_customer_view_permission(customer_id, team_id, current_user, db)
         internal_customer_id = customer.id
+
+    if (
+        not has_view_all
+        and not has_view_own
+        and internal_customer_id is None
+        and viewable_customer_ids is not None
+        and not viewable_customer_ids
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="没有查看发票申请的权限"
+        )
+
+    # 数据所有权隔离
+    current_user_id = None
+    visible_customer_ids = None
+    if me:
+        current_user_id = str(current_user.id)
+    elif not has_view_all and internal_customer_id is None:
+        if has_view_own:
+            current_user_id = str(current_user.id)
+        if viewable_customer_ids is not None:
+            visible_customer_ids = viewable_customer_ids
 
     applications, total = invoice_application_crud.list_applications(
         db,
@@ -388,6 +402,7 @@ def list_invoice_applications(
         invoice_effective_status=invoice_effective_status,
         applicant_id=applicant_id,
         current_user_id=current_user_id,
+        visible_customer_ids=visible_customer_ids,
         keyword=keyword,
         created_time_start=created_time_start,
         created_time_end=created_time_end,
@@ -421,7 +436,7 @@ def create_invoice_reissue_application(
     current_user: User = Depends(require_permission("invoice_reissue:create")),
     db: Session = Depends(get_db),
 ):
-    original_invoice = check_invoice_view_permission(application_id, team_id, current_user, db)
+    original_invoice = check_invoice_write_scope(application_id, team_id, current_user, db)
     try:
         reissue = invoice_reissue_application_crud.create(
             db,

@@ -212,6 +212,11 @@ const makeAxios409 = (): unknown => ({
   message: 'Request failed with status code 409'
 })
 
+const makeAxios403 = (): unknown => ({
+  response: { status: 403, data: { detail: '您没有权限查看该审批详情' } },
+  message: 'Request failed with status code 403'
+})
+
 const makeAxios500 = (): unknown => ({
   response: { status: 500, data: { detail: '服务器错误' } },
   message: 'Request failed with status code 500'
@@ -405,6 +410,21 @@ describe('ApprovalProcessGeneric', () => {
     await flushPromises()
     expect(w.text()).toContain('审批信息加载失败')
     expect(w.find('[data-testid="reload-detail-btn"]').exists()).toBe(true)
+  })
+
+  it('shows permission empty state on 403 instead of generic load failure', async () => {
+    api.getApprovalDetail.mockRejectedValue(makeAxios403())
+    const w = mountComp({
+      entityType: 'INVOICE',
+      entityId: 1,
+      canApprove: false,
+      isSubmitter: false
+    })
+    await flushPromises()
+    expect(w.text()).toContain('没有权限查看该审批')
+    expect(w.text()).not.toContain('审批信息加载失败')
+    expect(w.find('[data-testid="reload-detail-btn"]').exists()).toBe(false)
+    expect(w.find('[data-testid="submit-approval-btn"]').exists()).toBe(false)
   })
 
   // ---------- C-DSG-7 条4：抽屉侧 REJECTED 态「修改并重新提交」CTA (Important #2) ----------

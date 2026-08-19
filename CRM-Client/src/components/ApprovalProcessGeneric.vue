@@ -105,6 +105,7 @@ const store = useApprovalStore()
 const detail = ref<ApprovalDetail | null>(null)
 const loadError = ref<boolean>(false)
 const notFound = ref<boolean>(false)
+const forbidden = ref<boolean>(false)
 const actionPending = ref<boolean>(false)
 const rejectDialogVisible = ref<boolean>(false)
 const withdrawDialogVisible = ref<boolean>(false)
@@ -142,6 +143,7 @@ const loadDetail = async (): Promise<void> => {
 
   loadError.value = false
   notFound.value = false
+  forbidden.value = false
   conflictNotice.value = ''
   detail.value = null
   try {
@@ -153,6 +155,8 @@ const loadDetail = async (): Promise<void> => {
     if (requestId !== detailRequestId.value) return
     if (isAxiosStatus(err, 404)) {
       notFound.value = true
+    } else if (isAxiosStatus(err, 403)) {
+      forbidden.value = true
     } else {
       loadError.value = true
     }
@@ -290,14 +294,14 @@ watch(
 <template>
   <div class="approval-process-generic">
     <!-- 加载骨架（C-DSG-4 Loading） -->
-    <div v-if="loadError === false && notFound === false && detail === null" class="space-y-2">
+    <div v-if="loadError === false && notFound === false && forbidden === false && detail === null" class="space-y-2">
       <Skeleton class="h-8 w-full" />
       <Skeleton class="h-20 w-full" />
     </div>
 
     <!-- 错误态（C-DSG-4 Error） -->
     <ErrorState
-      v-else-if="loadError && !notFound"
+      v-else-if="loadError && !notFound && !forbidden"
       title="审批信息加载失败"
       description="可点击下方按钮重新加载，若持续失败请联系管理员"
     >
@@ -307,6 +311,19 @@ watch(
         </Button>
       </template>
     </ErrorState>
+
+    <Empty
+      v-else-if="detail === null && forbidden"
+      class="min-h-[112px] border-0 py-3"
+    >
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <AlertTriangle class="h-5 w-5" aria-hidden="true" />
+        </EmptyMedia>
+        <EmptyTitle>没有权限查看该审批</EmptyTitle>
+        <EmptyDescription>你可以查看客户树上的单据，但不能查看无权访问的审批详情</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
 
     <!-- 草稿空态（detail===null 且 404）：提交 CTA -->
     <Empty

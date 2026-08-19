@@ -22,6 +22,7 @@ from sqlalchemy.types import BigInteger
 from app.api import agent as agent_api
 from app.api import approvals as approvals_api
 from app.api import business_journey_board as business_journey_board_api
+from app.api import invoices as invoices_api
 from app.api import license_application as license_api
 from app.api import payments as payments_api
 from app.constants.approval_phase import ApprovalPhase
@@ -45,7 +46,14 @@ from app.models.customer_intelligence_run import CustomerIntelligenceRun
 from app.models.customer_vector_document import CustomerVectorDocument
 from app.models.deal_journey import CustomerDealJourney, CustomerDealJourneyEvent, DealJourneyEventType
 from app.models.deployment import DeploymentInfo
-from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus, InvoiceTitle, InvoiceType
+from app.models.invoice import (
+    InvoiceApplication,
+    InvoiceApplicationStatus,
+    InvoiceRedOffset,
+    InvoiceReissueApplication,
+    InvoiceTitle,
+    InvoiceType,
+)
 from app.models.license_application import LicenseApplication, LicenseApplicationStatus
 from app.models.opportunity import Opportunity
 from app.models.payment import PaymentConfirmationStatus, PaymentPlan, PaymentPlanStatus, PaymentRecord
@@ -166,6 +174,8 @@ def scenario_env(monkeypatch):
         PaymentRecord.__table__,
         InvoiceTitle.__table__,
         InvoiceApplication.__table__,
+        InvoiceReissueApplication.__table__,
+        InvoiceRedOffset.__table__,
         DeploymentInfo.__table__,
         LicenseApplication.__table__,
         ApprovalFlow.__table__,
@@ -226,10 +236,11 @@ def scenario_env(monkeypatch):
     app.include_router(agent_api.router)
     app.include_router(approvals_api.router)
     app.include_router(business_journey_board_api.router)
+    app.include_router(invoices_api.invoice_router, prefix="/v1")
     app.include_router(payments_api.router)
     app.include_router(license_api.router)
 
-    for module in (database, deps, agent_api, approvals_api, business_journey_board_api, payments_api, license_api):
+    for module in (database, deps, agent_api, approvals_api, business_journey_board_api, invoices_api, payments_api, license_api):
         if hasattr(module, "get_db"):
             app.dependency_overrides[module.get_db] = lambda: db
         if hasattr(module, "get_current_user_team"):
@@ -339,6 +350,16 @@ def seed_contract_plan_record(env, *, creator_id="1", amount=Decimal("50000")):
 
 def seed_invoice(env, *, applicant_id="1"):
     customer, opportunity, contract, plan, record = seed_contract_plan_record(env, creator_id=applicant_id)
+    title = InvoiceTitle(
+        team_id=1,
+        customer_id=customer.id,
+        title_type="COMPANY",
+        title=customer.account_name,
+        taxpayer_id="91440101TESTCRM",
+        is_default=True,
+    )
+    env.db.add(title)
+    env.db.flush()
     invoice = InvoiceApplication(
         team_id=1,
         application_number=f"INV-2026-{record.id:03d}",
@@ -347,6 +368,7 @@ def seed_invoice(env, *, applicant_id="1"):
         opportunity_id=opportunity.id,
         payment_plan_id=plan.id,
         payment_record_id=record.id,
+        invoice_title_id=title.id,
         invoice_amount=Decimal("50000"),
         invoice_type=InvoiceType.VAT_NORMAL,
         status=InvoiceApplicationStatus.DRAFT,
@@ -409,6 +431,43 @@ def seed_role(env, role_code="FINANCE"):
     env.db.add(UserRole(user_id=1, role_id=role.id, team_id=1))
     env.db.commit()
     return role
+
+
+def seed_role_for_user(env, user_id, role_code):
+    role = env.db.query(Role).filter(Role.code == role_code).first()
+    if role is None:
+        role = Role(name=role_code, code=role_code)
+        env.db.add(role)
+        env.db.flush()
+    env.db.add(UserRole(user_id=user_id, role_id=role.id, team_id=1))
+    env.db.commit()
+    return role
+
+
+def seed_sales_owned_invoice_created_by_team_owner(env):
+    """团队所有者给销售负责的客户开票：销售是客户所有者，团队所有者只是客户成员。"""
+    salesperson = env.db.get(User, 2)
+    if salesperson is None:
+        env.db.add(User(id=2, email="sales@example.com", name="销售李", status=UserStatus.ACTIVE))
+        env.db.commit()
+
+    seed_role_for_user(env, 1, "TEAM_ADMIN")
+    seed_role_for_user(env, 2, "SALES_MEMBER")
+
+    invoice = seed_invoice(env, applicant_id="1")
+    customer = env.db.get(Customer, invoice.customer_id)
+    customer.owner_id = "2"
+    env.db.add(CustomerMember(
+        team_id=1,
+        customer_id=customer.id,
+        user_id="1",
+        member_role="SALES",
+        access_level="EDIT",
+        created_by="2",
+        is_active=True,
+    ))
+    env.db.commit()
+    return invoice
 
 
 def submit_approval(env, entity_type, entity_id):
@@ -734,14 +793,198 @@ def run_approval_invoice_detail_visible_to_submitter(env):
     assert response.json()["id"] == submit.json()["approval_id"]
 
 
+def switch_to_sales_customer_owner(env):
+    env.current_user.id = 2
+    env.current_user.name = "销售李"
+    env.permissions.discard("customer:view:all")
+    env.permissions.discard("customer:edit:all")
+    env.permissions.add("customer:view:own")
+
+
+def seed_view_member_on_invoice_customer(env, invoice, user_id=3, name="只读成员"):
+    member = env.db.get(User, user_id)
+    if member is None:
+        env.db.add(User(id=user_id, email=f"member{user_id}@example.com", name=name, status=UserStatus.ACTIVE))
+        env.db.commit()
+    env.db.add(CustomerMember(
+        team_id=1,
+        customer_id=invoice.customer_id,
+        user_id=str(user_id),
+        member_role="SALES",
+        access_level="VIEW",
+        created_by="2",
+        is_active=True,
+    ))
+    env.db.commit()
+
+
+def switch_to_customer_view_member(env, user_id=3, name="只读成员"):
+    env.current_user.id = user_id
+    env.current_user.name = name
+    env.permissions.discard("customer:view:all")
+    env.permissions.discard("customer:edit:all")
+    env.permissions.discard("customer:view:own")
+
+
+def assert_customer_tree_invoice_is_readable(env, invoice):
+    customer_public_id = invoice_customer_public_id(env, invoice)
+    listed = env.client.get("/v1/invoice-applications", params={"customer_id": customer_public_id})
+    assert listed.status_code == 200, listed.text
+    assert [item["id"] for item in listed.json()["items"]] == [invoice.id]
+
+    global_listed = env.client.get("/v1/invoice-applications")
+    assert global_listed.status_code == 200, global_listed.text
+    assert [item["id"] for item in global_listed.json()["items"]] == [invoice.id]
+
+    detail = env.client.get(f"/v1/invoice-applications/{invoice.id}")
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["id"] == invoice.id
+    assert detail.json()["applicant_id"] == "1"
+
+
+def assert_customer_tree_invoice_writes_are_forbidden(env, invoice):
+    updated = env.client.put(f"/v1/invoice-applications/{invoice.id}", json={"invoice_amount": "60000"})
+    assert updated.status_code == 403, updated.text
+
+    approved = env.client.post(
+        f"/v1/approvals/INVOICE/{invoice.id}/approve",
+        json={"action": "APPROVE", "comment": "同意"},
+    )
+    assert approved.status_code == 403, approved.text
+
+    cancelled = env.client.post(f"/v1/approvals/INVOICE/{invoice.id}/cancel")
+    assert cancelled.status_code in (400, 403), cancelled.text
+    assert "提交人" in cancelled.json()["detail"] or cancelled.status_code == 403
+
+    issued = env.client.post(f"/v1/invoice-applications/{invoice.id}/mark-issued")
+    assert issued.status_code == 403, issued.text
+
+    env.permissions.add("invoice_reissue:create")
+    reissued = env.client.post(
+        f"/v1/invoice-applications/{invoice.id}/reissues",
+        json={
+            "reason": "抬头变更",
+            "invoice_title_type": "COMPANY",
+            "invoice_title_text": "测试公司",
+            "invoice_taxpayer_id": "91440101TESTCRM",
+            "invoice_amount": "50000",
+            "invoice_type": "VAT_NORMAL",
+        },
+    )
+    assert reissued.status_code == 403, reissued.text
+    assert "自己申请" in reissued.json()["detail"]
+
+
+def invoice_customer_public_id(env, invoice):
+    customer = env.db.get(Customer, invoice.customer_id)
+    assert customer is not None
+    return customer.public_id
+
+
 def run_approval_detail_forbidden_for_unrelated_user(env):
     seed_flow(env, BusinessType.INVOICE)
     invoice = seed_invoice(env)
     submit_approval(env, "INVOICE", invoice.id)
     env.current_user.id = 99
     env.current_user.name = "无关用户"
+    env.permissions.discard("customer:view:all")
+    env.permissions.discard("customer:edit:all")
     response = env.client.get(f"/v1/approvals/INVOICE/{invoice.id}/detail")
     assert response.status_code == 403, response.text
+
+
+def run_customer_owner_can_list_and_get_owner_created_invoice(env):
+    invoice = seed_sales_owned_invoice_created_by_team_owner(env)
+    switch_to_sales_customer_owner(env)
+    assert_customer_tree_invoice_is_readable(env, invoice)
+
+
+def run_customer_owner_can_view_owner_created_invoice_approval_but_not_pending(env):
+    seed_flow(env, BusinessType.INVOICE, role_code="FINANCE")
+    invoice = seed_sales_owned_invoice_created_by_team_owner(env)
+    submit_approval(env, "INVOICE", invoice.id)
+
+    switch_to_sales_customer_owner(env)
+    pending = env.client.get("/v1/approvals", params={"tab": "pending", "business_type": "INVOICE"})
+    assert pending.status_code == 200, pending.text
+    assert pending.json()["items"] == []
+
+    detail = env.client.get(f"/v1/approvals/INVOICE/{invoice.id}/detail")
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["business_id"] == invoice.id
+
+
+def run_owner_created_invoice_visible_when_sales_is_current_approver(env):
+    seed_flow(env, BusinessType.INVOICE, role_code="SALES_MEMBER")
+    invoice = seed_sales_owned_invoice_created_by_team_owner(env)
+    submit_approval(env, "INVOICE", invoice.id)
+
+    switch_to_sales_customer_owner(env)
+    pending = env.client.get("/v1/approvals", params={"tab": "pending", "business_type": "INVOICE"})
+    assert pending.status_code == 200, pending.text
+    assert [item["business_id"] for item in pending.json()["items"]] == [invoice.id]
+
+    detail = env.client.get(f"/v1/approvals/INVOICE/{invoice.id}/detail")
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["business_id"] == invoice.id
+
+
+def run_customer_owner_cannot_mutate_or_approve_owner_created_invoice(env):
+    seed_flow(env, BusinessType.INVOICE, role_code="FINANCE")
+    invoice = seed_sales_owned_invoice_created_by_team_owner(env)
+    submit_approval(env, "INVOICE", invoice.id)
+    switch_to_sales_customer_owner(env)
+    assert_customer_tree_invoice_writes_are_forbidden(env, invoice)
+
+
+def run_customer_view_member_can_list_and_get_owner_created_invoice(env):
+    invoice = seed_sales_owned_invoice_created_by_team_owner(env)
+    seed_view_member_on_invoice_customer(env, invoice)
+    switch_to_customer_view_member(env)
+    assert_customer_tree_invoice_is_readable(env, invoice)
+
+
+def run_customer_view_member_cannot_mutate_or_approve_owner_created_invoice(env):
+    seed_flow(env, BusinessType.INVOICE, role_code="FINANCE")
+    invoice = seed_sales_owned_invoice_created_by_team_owner(env)
+    seed_view_member_on_invoice_customer(env, invoice)
+    submit_approval(env, "INVOICE", invoice.id)
+    switch_to_customer_view_member(env)
+    assert_customer_tree_invoice_writes_are_forbidden(env, invoice)
+
+
+def run_customer_owner_invoice_file_without_upload_is_not_found(env):
+    invoice = seed_sales_owned_invoice_created_by_team_owner(env)
+    switch_to_sales_customer_owner(env)
+    response = env.client.get(f"/v1/invoice-applications/{invoice.id}/file")
+    assert response.status_code == 404, response.text
+    assert response.json()["detail"] == "该发票未上传文件"
+
+
+def run_customer_owner_can_request_approval_file_after_permission_check(env):
+    seed_flow(env, BusinessType.INVOICE, role_code="FINANCE")
+    invoice = seed_sales_owned_invoice_created_by_team_owner(env)
+    submit_approval(env, "INVOICE", invoice.id)
+    switch_to_sales_customer_owner(env)
+    response = env.client.get(f"/v1/approvals/INVOICE/{invoice.id}/file")
+    assert response.status_code == 404, response.text
+    assert "暂无可预览附件" in response.json()["detail"]
+
+
+def run_unrelated_user_cannot_download_invoice_or_approval_file(env):
+    seed_flow(env, BusinessType.INVOICE, role_code="FINANCE")
+    invoice = seed_sales_owned_invoice_created_by_team_owner(env)
+    submit_approval(env, "INVOICE", invoice.id)
+    env.current_user.id = 99
+    env.current_user.name = "无关用户"
+    env.permissions.discard("customer:view:all")
+    env.permissions.discard("customer:edit:all")
+
+    invoice_file = env.client.get(f"/v1/invoice-applications/{invoice.id}/file")
+    assert invoice_file.status_code == 403, invoice_file.text
+
+    approval_file = env.client.get(f"/v1/approvals/INVOICE/{invoice.id}/file")
+    assert approval_file.status_code == 403, approval_file.text
 
 
 def run_approval_cancel_by_submitter(env):
@@ -1013,6 +1256,42 @@ APPROVAL_SCENARIOS = [
     ("approval_invalid_entity_rejected", run_approval_invalid_entity_rejected),
     ("approval_invoice_detail_visible_to_submitter", run_approval_invoice_detail_visible_to_submitter),
     ("approval_detail_forbidden_for_unrelated_user", run_approval_detail_forbidden_for_unrelated_user),
+    (
+        "customer_owner_can_list_and_get_owner_created_invoice",
+        run_customer_owner_can_list_and_get_owner_created_invoice,
+    ),
+    (
+        "customer_owner_can_view_owner_created_invoice_approval_but_not_pending",
+        run_customer_owner_can_view_owner_created_invoice_approval_but_not_pending,
+    ),
+    (
+        "owner_created_invoice_visible_when_sales_is_current_approver",
+        run_owner_created_invoice_visible_when_sales_is_current_approver,
+    ),
+    (
+        "customer_owner_cannot_mutate_or_approve_owner_created_invoice",
+        run_customer_owner_cannot_mutate_or_approve_owner_created_invoice,
+    ),
+    (
+        "customer_view_member_can_list_and_get_owner_created_invoice",
+        run_customer_view_member_can_list_and_get_owner_created_invoice,
+    ),
+    (
+        "customer_view_member_cannot_mutate_or_approve_owner_created_invoice",
+        run_customer_view_member_cannot_mutate_or_approve_owner_created_invoice,
+    ),
+    (
+        "customer_owner_invoice_file_without_upload_is_not_found",
+        run_customer_owner_invoice_file_without_upload_is_not_found,
+    ),
+    (
+        "customer_owner_can_request_approval_file_after_permission_check",
+        run_customer_owner_can_request_approval_file_after_permission_check,
+    ),
+    (
+        "unrelated_user_cannot_download_invoice_or_approval_file",
+        run_unrelated_user_cannot_download_invoice_or_approval_file,
+    ),
     ("approval_cancel_by_submitter", run_approval_cancel_by_submitter),
     ("approval_role_mismatch_blocks_approve", run_approval_role_mismatch_blocks_approve),
     ("approval_self_invoice_without_perm_blocks", run_approval_self_invoice_without_perm_blocks),

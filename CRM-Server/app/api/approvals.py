@@ -11,7 +11,12 @@ from sqlalchemy.orm import Session
 
 from app.constants.business_types import BusinessType, is_valid_business_type
 from app.core.database import get_db
-from app.core.deps import get_current_active_user, get_current_user_team, require_permission
+from app.core.deps import (
+    get_current_active_user,
+    get_current_user_team,
+    require_permission,
+    user_can_view_customer,
+)
 from app.core.logging import get_logger, log_with_fields
 from app.crud.approval import approval_crud, approval_flow_crud
 from app.crud.contract import contract_crud
@@ -46,6 +51,7 @@ from app.services.approval_adapter import (
     get_adapter,
     get_approval_action_path,
     get_approval_card_fields,
+    get_approval_customer_id,
     get_approval_customer_name,
     get_approval_type_name,
 )
@@ -1310,7 +1316,7 @@ def _check_approval_detail_permissions(
     current_user,
     team_id: int,
 ) -> None:
-    """审批详情只允许提交人、当前审批人、已处理人和团队管理员查看。"""
+    """审批详情允许提交人、当前审批人、已处理人、团队管理员，以及可查看该客户的人只读。"""
     user_id_str = str(current_user.id)
     user_roles = role_crud.get_user_roles(db, current_user.id, team_id)
     role_codes = {r.code for r in user_roles}
@@ -1334,6 +1340,15 @@ def _check_approval_detail_permissions(
         ApprovalRecord.action != ApprovalAction.SUBMIT,
     ).first()
     if has_processed_record:
+        return
+
+    try:
+        adapter = get_adapter(approval.business_type)
+    except ValueError:
+        adapter = None
+    entity = adapter.get_entity(db, approval.business_id, team_id) if adapter is not None else None
+    customer_id = get_approval_customer_id(db, approval.business_type, entity)
+    if customer_id and user_can_view_customer(db, team_id, customer_id, current_user.id):
         return
 
     raise HTTPException(
