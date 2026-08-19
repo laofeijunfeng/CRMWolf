@@ -18,7 +18,7 @@ import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
 import { useRouter } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
-import { Plus, Pencil, Trash2 } from 'lucide-vue-next'
+import { Plus, Eye, Pencil, Trash2 } from 'lucide-vue-next'
 import { AmountText, DataTable, TableRowActions, type TableRowActionSet } from '@/components/crmwolf'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
@@ -362,6 +362,10 @@ const handleEdit = (record: PaymentRecordWithDetails): void => {
   editDialogOpen.value = true
 }
 
+const handleViewAction = (row: Record<string, unknown>): void => {
+  handleViewDetail(row as unknown as PaymentRecordWithDetails)
+}
+
 const handleEditAction = (row: Record<string, unknown>): void => {
   handleEdit(row as unknown as PaymentRecordWithDetails)
 }
@@ -453,6 +457,11 @@ const handleDeleteAction = (row: Record<string, unknown>): void => {
 
 const getRowActions = (row: PaymentRecordWithDetails): TableRowActionSet => ({
   primaryActions: [
+    {
+      label: '查看',
+      handler: handleViewAction,
+      icon: Eye
+    },
     {
       label: '编辑',
       handler: handleEditAction,
@@ -590,14 +599,12 @@ watchEffect(() => {
 
       <!-- 回款编号 -->
       <template #cell-record_number="{ row }">
-        <button
-          type="button"
+        <span
           class="record-number-cell record-number-link"
-          :aria-label="`查看回款 ${row.record_number || row.id}`"
           @click.stop="handleViewDetail(row as PaymentRecordWithDetails)"
         >
           {{ row.record_number || '-' }}
-        </button>
+        </span>
       </template>
 
       <!-- 客户名称 -->

@@ -19,7 +19,7 @@ import { ref, reactive, computed, onMounted, watch, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
-import { Plus, Pencil, ArrowRight, Trophy, XCircle, Trash2 } from 'lucide-vue-next'
+import { Plus, Eye, Pencil, ArrowRight, Trophy, XCircle, Trash2 } from 'lucide-vue-next'
 import { AmountText, DataTable, TableRowActions, type TableRowActionSet } from '@/components/crmwolf'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
@@ -545,6 +545,11 @@ const handleLoseSuccess = (): void => {
 // ==================== TableRowActions 配置 ====================
 const getRowActions = (row: OpportunityListResponse): TableRowActionSet => ({
   primaryActions: [
+    {
+      label: '查看',
+      icon: Eye,
+      handler: () => handleViewDetail(row)
+    },
     {
       label: '编辑',
       icon: Pencil,

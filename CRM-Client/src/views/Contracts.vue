@@ -18,7 +18,7 @@
 import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
-import { Plus, Edit, Send, Trash2 } from 'lucide-vue-next'
+import { Plus, Eye, Edit, Send, Trash2 } from 'lucide-vue-next'
 import { AmountText, DataTable, TableRowActions, type TableRowActionSet } from '@/components/crmwolf'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
@@ -415,6 +415,11 @@ const handleSubmitApproval = async (record: ContractListResponse): Promise<void>
 // ==================== TableRowActions 配置 ====================
 const getRowActions = (row: ContractListResponse): TableRowActionSet => ({
   primaryActions: [
+    {
+      label: '查看',
+      icon: Eye,
+      handler: () => handleViewDetail(row)
+    },
     {
       label: '编辑',
       handler: () => handleEdit(row),

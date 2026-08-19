@@ -157,6 +157,35 @@ describe('DataTable list field catalog contract', () => {
     }
   })
 
+  it('does not use native buttons for desktop identity cells', () => {
+    const identityViews = [
+      ['Opportunities.vue', 'opportunity_name'],
+      ['Contracts.vue', 'contract_number'],
+      ['PaymentPlans.vue', 'plan_number'],
+      ['PaymentRecords.vue', 'record_number']
+    ] as const
+    for (const [viewName, fieldKey] of identityViews) {
+      const source = readFileSync(resolve(viewsDir, viewName), 'utf8')
+      const cellStart = source.indexOf(`#cell-${fieldKey}`)
+      expect(cellStart, viewName).toBeGreaterThan(-1)
+      const cellSource = source.slice(cellStart, cellStart + 400)
+      expect(cellSource).not.toContain('<button')
+    }
+  })
+
+  it('keeps an ungated view action on status-gated lists', () => {
+    const gatedViews = ['Opportunities.vue', 'Contracts.vue', 'PaymentPlans.vue', 'PaymentRecords.vue']
+    for (const viewName of gatedViews) {
+      const source = readFileSync(resolve(viewsDir, viewName), 'utf8')
+      const actionStart = source.indexOf('const getRowActions')
+      expect(actionStart, viewName).toBeGreaterThan(-1)
+      const actionBlock = source.slice(actionStart, actionStart + 900)
+      const viewItem = actionBlock.match(/\{[^{}]*label: '查看'[^{}]*\}/)
+      expect(viewItem?.[0], viewName).toBeDefined()
+      expect(viewItem?.[0]).not.toContain('visible:')
+    }
+  })
+
   it('keeps ApprovalCenter approve/reject on mobile only', () => {
     const source = readFileSync(resolve(viewsDir, 'ApprovalCenter.vue'), 'utf8')
     const desktopActions = source.match(/const getRowActions[\s\S]*?return \{[\s\S]*?\n\}/)

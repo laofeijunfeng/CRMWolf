@@ -285,6 +285,50 @@ describe('DataTable row context menu', () => {
     expect(menuEl()).toBeNull()
   })
 
+  it('opens the row menu from a link-text identifier cell', async () => {
+    const wrapper = mountActionTable(
+      {},
+      {
+        'cell-name': '<span class="link-text">审批单</span>'
+      }
+    )
+    const target = wrapper.get('.link-text')
+    const event = new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      button: 2,
+      clientX: 20,
+      clientY: 20
+    })
+    target.element.dispatchEvent(event)
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    await flushPromises()
+    expect(event.defaultPrevented).toBe(true)
+    expect(menuEl()?.textContent).toContain('编辑')
+  })
+
+  it('keeps native context menu on a real identifier button', async () => {
+    const wrapper = mountActionTable(
+      {},
+      {
+        'cell-name': '<button type="button" class="number-cell-link">PLAN-1</button>'
+      }
+    )
+    const target = wrapper.get('.number-cell-link')
+    const event = new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      button: 2,
+      clientX: 20,
+      clientY: 20
+    })
+    target.element.dispatchEvent(event)
+    await flushPromises()
+    expect(event.defaultPrevented).toBe(false)
+    expect(menuEl()).toBeNull()
+  })
+
   it('keeps native context menu on links and inputs', async () => {
     const wrapper = mountActionTable(
       {

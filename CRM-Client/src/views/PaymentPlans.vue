@@ -18,7 +18,7 @@ import { ref, reactive, computed, onMounted, watch, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
-import { Plus, Pencil, CheckCircle, Trash2 } from 'lucide-vue-next'
+import { Plus, Eye, Pencil, CheckCircle, Trash2 } from 'lucide-vue-next'
 import { AmountText, DataTable, TableRowActions, type TableRowActionSet } from '@/components/crmwolf'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
@@ -364,6 +364,11 @@ const handleDelete = async (row: PaymentPlanWithDetails): Promise<void> => {
 const getRowActions = (row: PaymentPlanWithDetails): TableRowActionSet => ({
   primaryActions: [
     {
+      label: '查看',
+      handler: () => handleViewDetail(row),
+      icon: Eye
+    },
+    {
       label: '确认回款',
       handler: () => handleConfirmPayment(row),
       visible: canConfirmPayment.value && row.status !== 'COMPLETED',
@@ -512,14 +517,12 @@ watch(
 
       <!-- 计划编号 -->
       <template #cell-plan_number="{ row }">
-        <button
-          type="button"
+        <span
           class="number-cell number-cell-link"
-          :aria-label="`查看回款计划 ${row.plan_number || row.stage_name}`"
           @click.stop="handleViewDetail(row as PaymentPlanWithDetails)"
         >
           {{ row.plan_number || `#${row.id}` }}
-        </button>
+        </span>
       </template>
 
       <!-- 客户名称 -->
