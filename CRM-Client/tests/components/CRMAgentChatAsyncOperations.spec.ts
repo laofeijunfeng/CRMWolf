@@ -172,4 +172,41 @@ describe("CRMAgentChat background operation placement", () => {
     expect(text.indexOf("客户档案更新")).toBeLessThan(text.indexOf("下一轮问题"))
     wrapper.unmount()
   })
+
+  it("renders a follow-up reconciliation card after the assistant response from its source turn", async () => {
+    api.listSessionOperations.mockResolvedValue([
+      {
+        ...operation,
+        public_id: "aop_post_commit",
+        request_id: "pcj_first_turn",
+        source_user_message_id: 10,
+        source_assistant_message_id: null,
+        operation_type: "customer_activity_post_commit",
+        resource_type: "customer_activity",
+        resource_id: 241,
+        resource_public_id: null,
+        summary: "跟进任务已完成对账",
+      },
+    ])
+
+    const wrapper = mount(CRMAgentChat, {
+      global: {
+        stubs: {
+          AgentInteractionDrawer: true,
+          MessageScroller: { template: "<div><slot /></div>" },
+        },
+      },
+    })
+    await flushPromises()
+
+    const text = wrapper.text()
+    const firstAssistantIndex = text.indexOf("第一条已记录")
+    const operationIndex = text.indexOf("跟进任务对账")
+    const secondUserIndex = text.indexOf("第二条消息")
+
+    expect(firstAssistantIndex).toBeGreaterThanOrEqual(0)
+    expect(operationIndex).toBeGreaterThan(firstAssistantIndex)
+    expect(operationIndex).toBeLessThan(secondUserIndex)
+    wrapper.unmount()
+  })
 })

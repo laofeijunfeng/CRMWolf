@@ -435,7 +435,11 @@ async def list_agent_async_operations(
         session_id=session_id,
         limit=limit,
     )
-    if _read_repair_customer_intelligence_operations(db, operations) or _read_repair_customer_activity_post_commit_operations(db, operations):
+    if (
+        _read_repair_customer_intelligence_operations(db, operations)
+        or _read_repair_customer_activity_post_commit_operations(db, operations)
+        or agent_async_operation_service.repair_unanchored_customer_activity_post_commit_sources(db, operations)
+    ):
         operations = agent_async_operation_service.list_session_projections(
             db,
             team_id=team_id,
@@ -461,7 +465,11 @@ async def get_agent_async_operation(
     )
     if operation is None:
         raise HTTPException(status_code=404, detail="Agent async operation not found")
-    if _read_repair_customer_intelligence_operations(db, [operation]) or _read_repair_customer_activity_post_commit_operations(db, [operation]):
+    if (
+        _read_repair_customer_intelligence_operations(db, [operation])
+        or _read_repair_customer_activity_post_commit_operations(db, [operation])
+        or agent_async_operation_service.repair_unanchored_customer_activity_post_commit_sources(db, [operation])
+    ):
         operation = agent_async_operation_service.get_projection(
             db,
             team_id=team_id,

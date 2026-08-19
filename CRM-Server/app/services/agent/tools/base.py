@@ -27,6 +27,7 @@ class AgentToolContext:
     auto_execute_authorized: bool = False
     allowed_tool_names: Optional[List[str]] = None
     allowed_customer_ids: Optional[List[str]] = None
+    source_user_message_id: Optional[int] = None
 
 
 @dataclass

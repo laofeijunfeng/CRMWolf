@@ -12,7 +12,9 @@ from sqlalchemy.types import BigInteger
 
 from app.api import agent as agent_api
 from app.core.database import Base
-from app.models.agent import AgentSession
+from datetime import datetime, timedelta
+
+from app.models.agent import AgentMessage, AgentMessageRole, AgentSession
 from app.models.agent_async_operation import AgentAsyncOperation, AgentAsyncOperationEvent
 from app.models.customer_intelligence_run import CustomerIntelligenceRun, CustomerIntelligenceRunStatus
 from app.services.agent.async_operation_service import AgentAsyncOperationService
@@ -302,6 +304,153 @@ def test_agent_session_operations_repair_customer_activity_post_commit_projectio
         assert body[0]["public_id"] == operation.public_id
         assert body[0]["status"] == "SUCCEEDED"
         assert body[0]["request_id"] == "pcj_repair_001"
+    finally:
+        db.close()
+        engine.dispose()
+
+
+
+def test_agent_session_operations_repair_customer_activity_post_commit_source() -> None:
+    engine = create_engine(
+        "sqlite:///:memory:",
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            AgentSession.__table__,
+            AgentMessage.__table__,
+            AgentAsyncOperation.__table__,
+            AgentAsyncOperationEvent.__table__,
+        ],
+    )
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    service = AgentAsyncOperationService()
+    try:
+        session = AgentSession(session_key="session-post-commit-source", team_id=1, user_id=2, title="跟进会话")
+        db.add(session)
+        db.commit()
+        first_turn = datetime(2026, 8, 12, 12, 0, 0)
+        db.add_all(
+            [
+                AgentMessage(
+                    id=21,
+                    team_id=1,
+                    user_id=2,
+                    session_id=session.id,
+                    role=AgentMessageRole.USER,
+                    event_type="user_message",
+                    content="记录一条跟进",
+                    created_time=first_turn,
+                ),
+                AgentMessage(
+                    id=22,
+                    team_id=1,
+                    user_id=2,
+                    session_id=session.id,
+                    role=AgentMessageRole.ASSISTANT,
+                    event_type="assistant_message",
+                    content="跟进已记录",
+                    created_time=first_turn + timedelta(seconds=2),
+                ),
+                AgentMessage(
+                    id=23,
+                    team_id=1,
+                    user_id=2,
+                    session_id=session.id,
+                    role=AgentMessageRole.USER,
+                    event_type="user_message",
+                    content="下一轮问题",
+                    created_time=first_turn + timedelta(minutes=5),
+                ),
+            ]
+        )
+        operation = service.ensure_scheduled(
+            db,
+            operation_key="customer-activity-post-commit:pcj_legacy_001",
+            request_id="pcj_legacy_001",
+            team_id=1,
+            user_id=2,
+            session_id=session.id,
+            source_user_message_id=None,
+            operation_type="customer_activity_post_commit",
+            resource_type="customer_activity",
+            resource_id=241,
+            summary="跟进已记录，任务对账处理中",
+        )
+        operation.created_time = first_turn + timedelta(seconds=1)
+        db.commit()
+
+        app = FastAPI()
+        app.include_router(agent_api.router)
+        app.dependency_overrides[agent_api.get_db] = lambda: Session()
+        app.dependency_overrides[agent_api.get_current_user_team] = lambda: 1
+        app.dependency_overrides[agent_api.get_current_active_user] = lambda: SimpleNamespace(id=2)
+
+        with TestClient(app) as client:
+            response = client.get(f"/v1/agent/sessions/{session.id}/operations")
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body[0]["public_id"] == operation.public_id
+        assert body[0]["source_user_message_id"] == 21
+        db.refresh(operation)
+        assert operation.source_user_message_id == 21
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_bind_customer_activity_post_commit_assistant_message() -> None:
+    engine = create_engine(
+        "sqlite:///:memory:",
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            AgentSession.__table__,
+            AgentAsyncOperation.__table__,
+            AgentAsyncOperationEvent.__table__,
+        ],
+    )
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    service = AgentAsyncOperationService()
+    try:
+        session = AgentSession(session_key="session-post-commit-assistant", team_id=1, user_id=2, title="跟进会话")
+        db.add(session)
+        db.commit()
+        operation = service.ensure_scheduled(
+            db,
+            operation_key="customer-activity-post-commit:pcj_assistant_001",
+            request_id="pcj_assistant_001",
+            team_id=1,
+            user_id=2,
+            session_id=session.id,
+            source_user_message_id=21,
+            operation_type="customer_activity_post_commit",
+            resource_type="customer_activity",
+            resource_id=241,
+            summary="跟进已记录，任务对账处理中",
+        )
+        db.commit()
+        bound = service.bind_customer_activity_post_commit_assistant_message(
+            db,
+            team_id=1,
+            user_id=2,
+            session_id=session.id,
+            source_user_message_id=21,
+            source_assistant_message_id=22,
+        )
+        db.commit()
+        db.refresh(operation)
+        assert bound == 1
+        assert operation.source_user_message_id == 21
+        assert operation.source_assistant_message_id == 22
     finally:
         db.close()
         engine.dispose()

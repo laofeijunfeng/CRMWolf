@@ -904,6 +904,14 @@ class CRMAgentToolService:
             return
         if not isinstance(activity_id, int):
             return
+        source_user_message_id = context.source_user_message_id
+        if source_user_message_id is None:
+            source_user_message_id = agent_async_operation_service.latest_session_user_message_id(
+                context.db,
+                team_id=context.team_id,
+                user_id=context.user_id,
+                session_id=context.session_id,
+            )
         try:
             agent_async_operation_service.bind_source(
                 context.db,
@@ -912,7 +920,7 @@ class CRMAgentToolService:
                 team_id=context.team_id,
                 user_id=context.user_id,
                 session_id=context.session_id,
-                source_user_message_id=None,
+                source_user_message_id=source_user_message_id,
                 source_assistant_message_id=None,
                 operation_type="customer_activity_post_commit",
                 resource_type="customer_activity",

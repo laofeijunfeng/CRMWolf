@@ -27,6 +27,7 @@ from app.services.agent.runtime import AgentToolRuntime
 from app.services.agent.task_actions import _tool_name_for_action, _tool_payload_for_action
 from app.services.agent.task_factory import _task_target_id
 from app.services.agent.tool_registry import AgentToolRegistry
+from app.services.agent.async_operation_service import agent_async_operation_service
 from app.services.agent.tools import CRMAgentToolService
 from app.services.agent.tools.base import AgentToolContext, AgentToolResult
 from app.services.agent.types import AgentRuntimeEventSink, JSONDict, coerce_json_dict
@@ -211,11 +212,12 @@ async def execute_action_envelope(
             )
         )
     tool_payload = _tool_payload_for_action(action, envelope.payload, envelope.customer, envelope.task_key or envelope.action_id)
+    session_id = _optional_int(getattr(session, "id", None)) or envelope.session_id or 0
     context = AgentToolContext(
         db=db,
         team_id=team_id,
         user_id=user_id,
-        session_id=_optional_int(getattr(session, "id", None)) or envelope.session_id or 0,
+        session_id=session_id,
         task_id=envelope.task_id,
         workflow_id=workflow_id,
         action_id=action_id,
@@ -227,6 +229,12 @@ async def execute_action_envelope(
         auto_execute_authorized=is_auto_execute,
         allowed_tool_names=[tool_name] if tool_name else [],
         allowed_customer_ids=_allowed_customer_ids_for_envelope(envelope),
+        source_user_message_id=agent_async_operation_service.latest_session_user_message_id(
+            db,
+            team_id=team_id,
+            user_id=user_id,
+            session_id=session_id,
+        ),
     )
     registry = AgentToolRegistry(CRMAgentToolService())
     runtime = AgentToolRuntime(registry)

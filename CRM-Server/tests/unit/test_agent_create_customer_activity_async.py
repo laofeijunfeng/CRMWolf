@@ -15,7 +15,14 @@ from sqlalchemy.pool import StaticPool
 from sqlalchemy.types import BigInteger
 
 from app.core.database import Base
-from app.models.agent import AgentIdempotencyKey, AgentIdempotencyStatus, AgentSession, AgentToolCall
+from app.models.agent import (
+    AgentIdempotencyKey,
+    AgentIdempotencyStatus,
+    AgentMessage,
+    AgentMessageRole,
+    AgentSession,
+    AgentToolCall,
+)
 from app.models.agent_async_operation import AgentAsyncOperation, AgentAsyncOperationEvent
 from app.services.agent.tools.base import AgentToolContext
 from app.services.agent.tools.service import CRMAgentToolService
@@ -108,13 +115,14 @@ def _db_session(extra_tables=None):
     return engine, session
 
 
-def _context(db):
+def _context(db, *, source_user_message_id=None):
     return AgentToolContext(
         db=db,
         team_id=1,
         user_id=2,
         session_id=3,
         authorization="Bearer test-token",
+        source_user_message_id=source_user_message_id,
     )
 
 
@@ -198,7 +206,7 @@ async def test_create_customer_activity_binds_post_commit_async_operation():
     service = CRMAgentToolService(api_client=client)
     try:
         result = await service.create_customer_activity(
-            _context(db),
+            _context(db, source_user_message_id=10),
             customer_id=CUSTOMER_PUBLIC_ID,
             activity_kind="WECHAT_FOLLOW_UP",
             source_content=SOURCE_CONTENT,
@@ -211,8 +219,49 @@ async def test_create_customer_activity_binds_post_commit_async_operation():
         assert operation.request_id == "pcj_async_001"
         assert operation.session_id == 3
         assert operation.resource_id == 241
+        assert operation.source_user_message_id == 10
         assert operation.status == "QUEUED"
         assert "已记录" in (operation.summary or "")
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_create_customer_activity_binds_post_commit_to_latest_user_message():
+    engine, db = _db_session(
+        extra_tables=[
+            AgentMessage.__table__,
+            AgentAsyncOperation.__table__,
+            AgentAsyncOperationEvent.__table__,
+        ]
+    )
+    client = _RecordingClient()
+    service = CRMAgentToolService(api_client=client)
+    try:
+        db.add(
+            AgentMessage(
+                id=10,
+                team_id=1,
+                user_id=2,
+                session_id=3,
+                role=AgentMessageRole.USER,
+                event_type="user_message",
+                content="记录一条跟进",
+            )
+        )
+        db.commit()
+        result = await service.create_customer_activity(
+            _context(db),
+            customer_id=CUSTOMER_PUBLIC_ID,
+            activity_kind="WECHAT_FOLLOW_UP",
+            source_content=SOURCE_CONTENT,
+            idempotency_suffix="msg-bind-fallback",
+        )
+
+        assert result.success is True
+        operation = db.query(AgentAsyncOperation).one()
+        assert operation.source_user_message_id == 10
     finally:
         db.close()
         engine.dispose()

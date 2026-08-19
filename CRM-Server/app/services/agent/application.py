@@ -29,6 +29,7 @@ from app.services.agent.checkpoint_fallback_runtime import agent_checkpoint_fall
 from app.services.agent.checkpointer import is_checkpoint_storage_error
 from app.services.agent.input import AgentTurnInput
 from app.services.agent.root_runtime import agent_root_runtime, project_turn_output
+from app.services.agent.async_operation_service import agent_async_operation_service
 from app.services.agent.state import (
     AgentApplicationRuntimeResult,
     AgentRootRuntimeSideEffects,
@@ -445,6 +446,22 @@ class AgentApplicationService:
             payload = message.payload_json if isinstance(message.payload_json, dict) else {}
             message.payload_json = {**payload, "trace_events": trace_events}
             db.add(message)
+        try:
+            agent_async_operation_service.bind_customer_activity_post_commit_assistant_message(
+                db,
+                team_id=team_id,
+                user_id=user_id,
+                session_id=session_id,
+                source_user_message_id=user_message_id,
+                source_assistant_message_id=int(message.id),
+            )
+        except Exception:
+            logger.exception(
+                "绑定跟进任务对账到助手消息失败: team_id=%s, session_id=%s, user_message_id=%s",
+                team_id,
+                session_id,
+                user_message_id,
+            )
         db.commit()
         db.refresh(message)
         for request in kick_requests:
