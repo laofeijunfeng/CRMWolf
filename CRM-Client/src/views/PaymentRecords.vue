@@ -19,7 +19,7 @@ import { useRouter } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Pencil, Trash2 } from 'lucide-vue-next'
-import { AmountText, DataTable, TableRowActions } from '@/components/crmwolf'
+import { AmountText, DataTable, TableRowActions, type TableRowActionSet } from '@/components/crmwolf'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
@@ -129,7 +129,6 @@ const fields: ListFieldDefinition[] = [
     options: approvalStatusOptions,
     filter: true
   },
-  { key: 'actions', label: '操作', column: { align: 'center', width: '220px' } }
 ]
 
 // ==================== 权限 ====================
@@ -452,6 +451,26 @@ const handleDeleteAction = (row: Record<string, unknown>): void => {
   void handleDelete(row as unknown as PaymentRecordWithDetails)
 }
 
+const getRowActions = (row: PaymentRecordWithDetails): TableRowActionSet => ({
+  primaryActions: [
+    {
+      label: '编辑',
+      handler: handleEditAction,
+      visible: canEditRecordRow(row),
+      icon: Pencil
+    }
+  ],
+  secondaryActions: [
+    {
+      label: '删除',
+      handler: handleDeleteAction,
+      visible: canDeleteRecordRow(row),
+      icon: Trash2,
+      destructive: true
+    }
+  ]
+})
+
 // ==================== 格式化函数 ====================
 const mapPaymentRecordStatus = (status: string): 'pending' | 'confirmed' | 'rejected' => {
   const map: Record<string, 'pending' | 'confirmed' | 'rejected'> = {
@@ -525,6 +544,7 @@ watchEffect(() => {
       height="calc(100vh - 121px)"
       empty-title="暂无回款记录"
       row-interactive
+      :get-row-actions="getRowActions"
       mobile-title-key="record_number"
       mobile-subtitle-key="customer_name"
       mobile-status-key="confirmation_status"
@@ -565,27 +585,7 @@ watchEffect(() => {
       </template>
 
       <template #mobile-actions="{ row }">
-        <TableRowActions
-          :row="row"
-          :primary-actions="[
-            {
-              label: '编辑',
-              handler: handleEditAction,
-              visible: canEditRecordRow(row as PaymentRecordWithDetails),
-              icon: Pencil
-            }
-          ]"
-          :secondary-actions="[
-            {
-              label: '删除',
-              handler: handleDeleteAction,
-              visible: canDeleteRecordRow(row as PaymentRecordWithDetails),
-              icon: Trash2,
-              destructive: true
-            }
-          ]"
-          size="lg"
-        />
+        <TableRowActions :row="row" v-bind="getRowActions(row)" size="lg" />
       </template>
 
       <!-- 回款编号 -->
@@ -635,29 +635,6 @@ watchEffect(() => {
         <StatusBadge :status="mapPaymentRecordStatus(row.confirmation_status ?? 'PENDING')" type="paymentRecord" />
       </template>
 
-      <!-- 操作 -->
-      <template #cell-actions="{ row }">
-        <TableRowActions
-          :row="row"
-          :primary-actions="[
-            {
-              label: '编辑',
-              handler: handleEditAction,
-              visible: canEditRecordRow(row as PaymentRecordWithDetails),
-              icon: Pencil
-            }
-          ]"
-          :secondary-actions="[
-            {
-              label: '删除',
-              handler: handleDeleteAction,
-              visible: canDeleteRecordRow(row as PaymentRecordWithDetails),
-              icon: Trash2,
-              destructive: true
-            }
-          ]"
-        />
-      </template>
     </DataTable>
 
     <PaymentRecordDetailSheet

@@ -59,6 +59,7 @@
         empty-description="所有回款与发票申请都已处理完毕"
         mobile-mode="card"
         row-interactive
+        :get-row-actions="getRowActions"
         @update:page="page = $event; fetchList()"
         @update:page-size="pageSize = $event; page = 1; fetchList()"
         @filter-apply="handleFilterApply"
@@ -121,50 +122,6 @@
           <span v-else class="text-muted-foreground">-</span>
         </template>
 
-        <!-- 操作列 -->
-        <template #cell-actions="{ row }">
-          <div class="flex gap-2 justify-center">
-            <Button
-              variant="ghost"
-              size="sm"
-              data-testid="detail-btn"
-              @click.stop="openDetail(row)"
-            >
-              详情
-            </Button>
-            <Button
-              v-if="hasAttachment(row)"
-              variant="ghost"
-              size="sm"
-              data-testid="preview-btn"
-              :loading="attachmentPreviewPendingId === row.id"
-              @click.stop="handlePreviewAttachment(row)"
-            >
-              预览
-            </Button>
-            <Button
-              v-if="activeTab === 'submitted' && row.status === 'REJECTED'"
-              variant="ghost"
-              size="sm"
-              data-testid="resubmit-btn"
-              :loading="resubmitPendingId === row.id"
-              @click.stop="handleResubmit(row)"
-            >
-              修改并重新提交
-            </Button>
-            <Button
-              v-if="activeTab === 'submitted' && row.status === 'PENDING'"
-              variant="ghost"
-              size="sm"
-              data-testid="remind-btn"
-              :loading="remindPendingId === row.id"
-              @click.stop="handleRemind(row)"
-            >
-              <BellRing class="w-4 h-4" aria-hidden="true" />
-              催办
-            </Button>
-          </div>
-        </template>
 
         <template #mobile-card="{ row }">
           <div :class="cn('approval-mobile-card', row.overdue_hours != null && row.overdue_hours >= 48 && 'is-overdue')">
@@ -557,7 +514,7 @@ import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { BellRing, Clock, Copy } from 'lucide-vue-next'
-import { AmountText, DataTable, Badge } from '@/components/crmwolf'
+import { AmountText, DataTable, Badge, type ActionConfig, type TableRowActionSet } from '@/components/crmwolf'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import { Button } from '@/components/ui/button'
@@ -1170,7 +1127,6 @@ const fields: ListFieldDefinition[] = [
     filter: { label: '审批状态' }
   },
   { key: 'overdue_hours', label: '超时', column: { width: '130px', align: 'center' } },
-  { key: 'actions', label: '操作', column: { width: '220px', align: 'center', fixed: 'right' } }
 ]
 
 onUnmounted(() => {
@@ -1513,6 +1469,38 @@ const handlePreviewAttachment = async (row: ApprovalListItem): Promise<void> => 
   } finally {
     attachmentPreviewPendingId.value = null
   }
+}
+
+const getRowActions = (row: ApprovalListItem): TableRowActionSet => {
+  const primaryActions: ActionConfig[] = [
+    {
+      label: '详情',
+      handler: () => openDetail(row)
+    }
+  ]
+  if (hasAttachment(row)) {
+    primaryActions.push({
+      label: '预览',
+      handler: () => { void handlePreviewAttachment(row) },
+      disabled: attachmentPreviewPendingId.value === row.id
+    })
+  }
+  if (activeTab.value === 'submitted' && row.status === 'REJECTED') {
+    primaryActions.push({
+      label: '修改并重新提交',
+      handler: () => { void handleResubmit(row) },
+      disabled: resubmitPendingId.value === row.id
+    })
+  }
+  if (activeTab.value === 'submitted' && row.status === 'PENDING') {
+    primaryActions.push({
+      label: '催办',
+      icon: BellRing,
+      handler: () => { void handleRemind(row) },
+      disabled: remindPendingId.value === row.id
+    })
+  }
+  return { primaryActions, secondaryActions: [] }
 }
 
 const handleDownloadAttachment = async (): Promise<void> => {

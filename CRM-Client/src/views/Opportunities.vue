@@ -20,7 +20,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Pencil, ArrowRight, Trophy, XCircle, Trash2 } from 'lucide-vue-next'
-import { AmountText, DataTable, TableRowActions, type ActionConfig } from '@/components/crmwolf'
+import { AmountText, DataTable, TableRowActions, type TableRowActionSet } from '@/components/crmwolf'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
@@ -180,7 +180,6 @@ const fields = computed<ListFieldDefinition[]>(() => {
     },
     { key: 'approval_phase', label: '审批', column: { align: 'center', width: '110px' } },
     { key: 'created_time', label: '创建时间', type: 'date', sort: true },
-    { key: 'actions', label: '操作', column: { align: 'center', width: '220px' } }
   ]
   return catalog
 })
@@ -544,43 +543,44 @@ const handleLoseSuccess = (): void => {
 }
 
 // ==================== TableRowActions 配置 ====================
-const getPrimaryActions = (row: OpportunityListResponse): ActionConfig[] => [
-  {
-    label: '编辑',
-    icon: Pencil,
-    handler: () => openEditDialog(row),
-    visible: canEditRow(row) && !isApprovalPending(row)
-  },
-  {
-    label: '推进阶段',
-    icon: ArrowRight,
-    handler: () => handleAdvanceStage(row),
-    visible: row.status === 0 && isApprovalApproved(row) // 仅审批通过的"跟进中"商机可推进
-  }
-]
-
-const getSecondaryActions = (row: OpportunityListResponse): ActionConfig[] => [
-  {
-    label: '赢单',
-    icon: Trophy,
-    handler: () => handleMarkAsWon(row),
-    visible: row.status === 0 && isApprovalApproved(row) // 仅审批通过的"跟进中"商机可赢单
-  },
-  {
-    label: '输单',
-    icon: XCircle,
-    handler: () => handleMarkAsLost(row),
-    visible: row.status === 0 && isApprovalApproved(row) // 仅审批通过的"跟进中"商机可输单
-  },
-  {
-    label: '删除',
-    icon: Trash2,
-    handler: () => handleDelete(row),
-    visible: canDeleteRow(row),
-    destructive: true,
-    separator: true
-  }
-]
+const getRowActions = (row: OpportunityListResponse): TableRowActionSet => ({
+  primaryActions: [
+    {
+      label: '编辑',
+      icon: Pencil,
+      handler: () => openEditDialog(row),
+      visible: canEditRow(row) && !isApprovalPending(row)
+    },
+    {
+      label: '推进阶段',
+      icon: ArrowRight,
+      handler: () => handleAdvanceStage(row),
+      visible: row.status === 0 && isApprovalApproved(row)
+    }
+  ],
+  secondaryActions: [
+    {
+      label: '赢单',
+      icon: Trophy,
+      handler: () => handleMarkAsWon(row),
+      visible: row.status === 0 && isApprovalApproved(row)
+    },
+    {
+      label: '输单',
+      icon: XCircle,
+      handler: () => handleMarkAsLost(row),
+      visible: row.status === 0 && isApprovalApproved(row)
+    },
+    {
+      label: '删除',
+      icon: Trash2,
+      handler: () => handleDelete(row),
+      visible: canDeleteRow(row),
+      destructive: true,
+      separator: true
+    }
+  ]
+})
 
 // ==================== 格式化函数 ====================
 const formatDate = (dateStr: string): string => {
@@ -698,6 +698,7 @@ watchEffect(() => {
       height="calc(100vh - 121px)"
       empty-title="暂无商机"
       row-interactive
+      :get-row-actions="getRowActions"
       mobile-title-key="opportunity_name"
       mobile-subtitle-key="customer_name"
       mobile-status-key="status"
@@ -757,12 +758,7 @@ watchEffect(() => {
       </template>
 
       <template #mobile-actions="{ row }">
-        <TableRowActions
-          :row="row"
-          :primary-actions="getPrimaryActions(row)"
-          :secondary-actions="getSecondaryActions(row)"
-          size="lg"
-        />
+        <TableRowActions :row="row" v-bind="getRowActions(row)" size="lg" />
       </template>
 
       <!-- 商机名称 -->
@@ -844,13 +840,6 @@ watchEffect(() => {
       </template>
 
       <!-- 操作 -->
-      <template #cell-actions="{ row }">
-        <TableRowActions
-          :row="row"
-          :primary-actions="getPrimaryActions(row)"
-          :secondary-actions="getSecondaryActions(row)"
-        />
-      </template>
     </DataTable>
 
     <!-- 商机详情抽屉 -->

@@ -5,10 +5,11 @@
  * - 固定高度卡片，内部滚动
  * - 表头固定（sticky）
  * - 底部分页固定
- * - 固定首列和尾列，中间横向滚动
+ * - 固定左侧识别列，右侧默认不固定，中间横向滚动
+ * - 桌面行操作走右键菜单，不占用操作列
  * - 统一样式（行高 44px、语义表头背景等）
  */
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import {
   Pagination,
@@ -35,6 +36,16 @@ import type { ListFilterCondition } from './listFilterTypes'
 import type { ListSortCondition } from './listSortTypes'
 import { projectListFieldCatalog, type DataTableColumn, type ListFieldDefinition } from './listFieldCatalog'
 import { buildPaginationEntries, type PaginationEntry } from './paginationWindow'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuTrigger
+} from '@/components/ui/context-menu'
+import TableRowContextMenuContent from './TableRowContextMenuContent.vue'
+import {
+  hasVisibleTableRowActions,
+  type TableRowActionSet
+} from './tableRowActionGroups'
 
 // ==================== Props ====================
 interface Props {
@@ -62,10 +73,12 @@ interface Props {
   emptyDescription?: string
   /** 默认固定左侧列数（默认 1，优先级低于 column.fixed） */
   fixedLeftCount?: number
-  /** 默认固定右侧列数（默认 1，优先级低于 column.fixed） */
+  /** 默认固定右侧列数（默认 0，优先级低于 column.fixed） */
   fixedRightCount?: number
   /** 行是否可作为整体交互目标 */
   rowInteractive?: boolean
+  /** 桌面行右键 / 键盘菜单的动作来源；不传则不打开行菜单 */
+  getRowActions?: (row: T, index: number) => TableRowActionSet | null | undefined
   /** 当前筛选条件 */
   filters?: ListFilterCondition[]
   /** 当前排序条件 */
@@ -102,8 +115,9 @@ const props = withDefaults(defineProps<Props>(), {
   emptyTitle: '暂无数据',
   emptyDescription: '',
   fixedLeftCount: 1,
-  fixedRightCount: 1,
+  fixedRightCount: 0,
   rowInteractive: false,
+  getRowActions: () => null,
   filters: () => [],
   sorts: () => [],
   mobileMode: 'card',
@@ -357,8 +371,97 @@ function handlePageSizeChange(value: string): void {
   emit('update:page', 1)  // 重置到第一页
 }
 
+const rowMenuOpen = ref(false)
+const rowMenuRow = ref<T | null>(null)
+const rowMenuActions = ref<TableRowActionSet | null>(null)
+const tableCardRef = ref<HTMLElement | null>(null)
+const ignoreRowClick = ref(false)
+let ignoreRowClickTimer: ReturnType<typeof setTimeout> | null = null
+
+function lockRowClick(): void {
+  ignoreRowClick.value = true
+  if (ignoreRowClickTimer !== null) {
+    clearTimeout(ignoreRowClickTimer)
+    ignoreRowClickTimer = null
+  }
+}
+
+function unlockRowClickSoon(): void {
+  if (ignoreRowClickTimer !== null) {
+    clearTimeout(ignoreRowClickTimer)
+  }
+  ignoreRowClickTimer = setTimeout(() => {
+    ignoreRowClick.value = false
+    ignoreRowClickTimer = null
+  }, 300)
+}
+
+function toActionRow(row: T | null): Record<string, unknown> {
+  return (row ?? {}) as Record<string, unknown>
+}
+
+const rowMenuActionRow = computed<Record<string, unknown>>(() => toActionRow(rowMenuRow.value))
+
+function isNativeContextMenuTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false
+  return target.closest('a, button, input, textarea, select, [contenteditable="true"]') !== null
+}
+
+function resolveRowActions(row: T, index: number): TableRowActionSet | null {
+  return props.getRowActions(row, index) ?? null
+}
+
+function handleRowMenuOpenChange(open: boolean): void {
+  rowMenuOpen.value = open
+  if (open) {
+    lockRowClick()
+    return
+  }
+  unlockRowClickSoon()
+}
+
+function getRowMenuTrigger(): HTMLElement | null {
+  const trigger = tableCardRef.value?.querySelector('.data-table-row-menu-trigger')
+  return trigger instanceof HTMLElement ? trigger : null
+}
+
+async function openRowMenu(event: MouseEvent, row: T, index: number): Promise<void> {
+  const actions = resolveRowActions(row, index)
+  if (!hasVisibleTableRowActions(actions)) return
+  event.preventDefault()
+  event.stopPropagation()
+  rowMenuRow.value = row
+  rowMenuActions.value = actions
+  lockRowClick()
+  await nextTick()
+  const trigger = getRowMenuTrigger()
+  if (trigger === null) {
+    unlockRowClickSoon()
+    return
+  }
+  trigger.style.left = `${event.clientX}px`
+  trigger.style.top = `${event.clientY}px`
+  trigger.dispatchEvent(new MouseEvent('contextmenu', {
+    bubbles: true,
+    cancelable: true,
+    button: 2,
+    clientX: event.clientX,
+    clientY: event.clientY
+  }))
+  await nextTick()
+  if (!rowMenuOpen.value) {
+    unlockRowClickSoon()
+  }
+}
+
+function handleRowContextMenu(event: MouseEvent, row: T, index: number): void {
+  if (isNativeContextMenuTarget(event.target)) return
+  void openRowMenu(event, row, index)
+}
+
 function handleRowClick(row: T, index: number): void {
   if (!props.rowInteractive) return
+  if (ignoreRowClick.value || rowMenuOpen.value) return
   emit('row-click', row, index)
 }
 
@@ -375,10 +478,32 @@ function handleCardClick(event: MouseEvent, row: T, index: number): void {
 
 function handleRowKeydown(event: KeyboardEvent, row: T, index: number): void {
   if (!props.rowInteractive) return
-  if (event.key === 'Enter') {
-    emit('row-click', row, index)
-  } else if (event.key === ' ') {
+  const isContextMenuKey = event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)
+  if (isContextMenuKey) {
+    const actions = resolveRowActions(row, index)
+    if (!hasVisibleTableRowActions(actions)) return
     event.preventDefault()
+    const currentTarget = event.currentTarget
+    const rect = currentTarget instanceof HTMLElement
+      ? currentTarget.getBoundingClientRect()
+      : { right: 0, top: 0, height: 0 }
+    const synthetic = new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      clientX: rect.right - 8,
+      clientY: rect.top + rect.height / 2
+    })
+    void openRowMenu(synthetic, row, index)
+    return
+  }
+  if (event.key === 'Enter') {
+    if (ignoreRowClick.value || rowMenuOpen.value) return
+    emit('row-click', row, index)
+    return
+  }
+  if (event.key === ' ') {
+    event.preventDefault()
+    if (ignoreRowClick.value || rowMenuOpen.value) return
     emit('row-click', row, index)
   }
 }
@@ -562,6 +687,12 @@ watch(
   },
   { immediate: true }
 )
+
+onBeforeUnmount(() => {
+  if (ignoreRowClickTimer !== null) {
+    clearTimeout(ignoreRowClickTimer)
+  }
+})
 </script>
 
 <template>
@@ -577,10 +708,28 @@ watch(
     <!-- 表格卡片 -->
     <div
       v-else
+      ref="tableCardRef"
       class="data-table-card"
       :class="{ 'has-mobile-cards': mobileMode === 'card' }"
       :style="{ height }"
     >
+      <ContextMenu @update:open="handleRowMenuOpenChange">
+        <ContextMenuTrigger as-child>
+          <span
+            class="data-table-row-menu-trigger"
+            aria-hidden="true"
+          />
+        </ContextMenuTrigger>
+        <ContextMenuContent
+          v-if="rowMenuActions !== null && rowMenuRow !== null"
+          class="data-table-row-menu"
+        >
+          <TableRowContextMenuContent
+            :row="rowMenuActionRow"
+            :actions="rowMenuActions"
+          />
+        </ContextMenuContent>
+      </ContextMenu>
       <div v-if="hasTableTools || $slots['tableTools']" class="data-table-tools">
         <ListFilterPopover
           v-if="normalizedFilterFields.length > 0"
@@ -708,6 +857,7 @@ watch(
               :role="rowInteractive ? 'button' : undefined"
               :tabindex="rowInteractive ? 0 : undefined"
               @click="handleRowClick(row, index)"
+              @contextmenu="handleRowContextMenu($event, row, index)"
               @keydown="handleRowKeydown($event, row, index)"
             >
               <td
@@ -797,6 +947,14 @@ watch(
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+
+.data-table-row-menu-trigger {
+  position: fixed;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
 }
 
 // ==================== 表格卡片（固定高度）====================

@@ -34,7 +34,7 @@ export interface ListFieldQueryConfig {
  * - 条件能力用 `false` 显式关闭，不要再拆出第二份字段清单
  * - 开启筛选或排序时必须声明 `type`，禁止默认成 text
  *
- * 三个工具不必展示同一组字段。关键字可以只有筛选，操作列只有列配置，
+ * 三个工具不必展示同一组字段。关键字可以只有筛选，协作者或派生展示列可以只有列配置，
  * 开票时间可以只有排序。新增字段时只改这一条定义，不要再维护三份清单。
  */
 export interface ListFieldDefinition {

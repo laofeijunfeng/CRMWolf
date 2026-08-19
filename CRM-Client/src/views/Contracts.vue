@@ -19,7 +19,7 @@ import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Edit, Send, Trash2 } from 'lucide-vue-next'
-import { AmountText, DataTable, TableRowActions, type ActionConfig } from '@/components/crmwolf'
+import { AmountText, DataTable, TableRowActions, type TableRowActionSet } from '@/components/crmwolf'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
@@ -181,7 +181,6 @@ const fields = computed<ListFieldDefinition[]>(() => {
       filter: true
     })
   }
-  catalog.push({ key: 'actions', label: '操作', column: { align: 'center', width: '220px' } })
   return catalog
 })
 
@@ -414,12 +413,7 @@ const handleSubmitApproval = async (record: ContractListResponse): Promise<void>
 }
 
 // ==================== TableRowActions 配置 ====================
-interface RowActions {
-  primaryActions: ActionConfig[]
-  secondaryActions: ActionConfig[]
-}
-
-const getRowActions = (row: ContractListResponse): RowActions => ({
+const getRowActions = (row: ContractListResponse): TableRowActionSet => ({
   primaryActions: [
     {
       label: '编辑',
@@ -544,6 +538,7 @@ watchEffect(() => {
       height="calc(100vh - 121px)"
       empty-title="暂无合同"
       row-interactive
+      :get-row-actions="getRowActions"
       mobile-title-key="contract_name"
       mobile-subtitle-key="customer_name"
       mobile-status-key="status"
@@ -687,10 +682,6 @@ watchEffect(() => {
         {{ formatDateTime(row.created_time) }}
       </template>
 
-      <!-- 操作 -->
-      <template #cell-actions="{ row }">
-        <TableRowActions :row="row" v-bind="getRowActions(row)" />
-      </template>
     </DataTable>
 
     <!-- Contract Create Dialog -->

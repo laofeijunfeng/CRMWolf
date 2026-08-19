@@ -1,17 +1,16 @@
 <script setup lang="ts">
 /**
- * TableRowActions.vue - 表格行操作组件
+ * TableRowActions.vue - 窄视口卡片行操作
  *
- * UI/UX Pro Max §9 overflow-menu 规则：
- * - 高频操作（primaryActions）放在表格行外
- * - 低频操作（secondaryActions）放在 DropdownMenu 中
+ * 桌面 DataTable 行操作改走右键 Context Menu，不再用本组件把高频操作放在表格行外。
+ * 本组件只服务 `#mobile-actions`：主按钮常显，低频操作收入 DropdownMenu。
  *
  * 设计规范强制要求：
  * - 使用 shadcn-vue DropdownMenu + Button（组合组件，不重复造轮子）
  * - Touch target size ≥44px（UI/UX Pro Max §2）
  * - Destructive actions 使用红色 + 确认对话框（UI/UX Pro Max §8）
  */
-import { computed, type Component } from 'vue'
+import { computed } from 'vue'
 import { MoreHorizontal } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import {
@@ -21,33 +20,16 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator
 } from '@/components/ui/dropdown-menu'
+import type { ActionConfig } from './tableRowActionTypes'
 
-/**
- * 操作配置类型
- */
-export interface ActionConfig {
-  /** 操作名称 */
-  label: string
-  /** 点击处理函数 */
-  handler: (row: Record<string, unknown>) => void
-  /** 是否显示（默认 true） */
-  visible?: boolean
-  /** 是否禁用 */
-  disabled?: boolean
-  /** 图标（Lucide icon） */
-  icon?: Component
-  /** 是否为危险操作（红色样式） */
-  destructive?: boolean
-  /** 是否需要分隔线（在操作上方） */
-  separator?: boolean
-}
+export type { ActionConfig }
 
 interface TableRowActionsProps {
   /** 当前行数据 */
   row: Record<string, unknown>
-  /** 高频操作（放在表格行外） */
+  /** 高频操作（窄视口卡片常显按钮） */
   primaryActions?: ActionConfig[]
-  /** 低频操作（放在 DropdownMenu 中） */
+  /** 低频操作（窄视口收入 DropdownMenu） */
   secondaryActions?: ActionConfig[]
   /** 按钮尺寸 */
   size?: 'default' | 'sm' | 'lg'

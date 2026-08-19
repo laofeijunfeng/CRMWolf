@@ -19,7 +19,7 @@ import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Eye, Pencil, Trash2, Send, RotateCcw, Stamp, Download } from 'lucide-vue-next'
-import { AmountText, DataTable, TableRowActions } from '@/components/crmwolf'
+import { AmountText, DataTable, TableRowActions, type TableRowActionSet } from '@/components/crmwolf'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
@@ -148,7 +148,6 @@ const fields: ListFieldDefinition[] = [
   { key: 'applicant_name', label: '申请人', column: { width: '110px' } },
   { key: 'created_time', label: '创建时间', type: 'date', column: { width: '170px' }, filter: true, sort: true },
   { key: 'issued_time', label: '开票时间', type: 'date', sort: true },
-  { key: 'actions', label: '操作', column: { align: 'center', width: '220px' } }
 ]
 
 const activeFilters = ref<ListFilterCondition[]>([])
@@ -439,6 +438,56 @@ const deleteInvoiceRow = (row: Record<string, unknown>): void => {
   void handleDelete(toInvoiceRow(row))
 }
 
+const getRowActions = (row: InvoiceApplicationResponse): TableRowActionSet => ({
+  primaryActions: [
+    {
+      label: '查看',
+      handler: viewInvoiceRow,
+      icon: Eye
+    },
+    {
+      label: '编辑',
+      handler: editInvoiceRow,
+      visible: (row.status === 'DRAFT' || row.status === 'REJECTED') && canCreateInvoice.value,
+      icon: Pencil
+    },
+    {
+      label: '下载',
+      handler: downloadInvoiceRow,
+      visible: hasDownloadableInvoiceFile(row),
+      icon: Download
+    }
+  ],
+  secondaryActions: [
+    {
+      label: '提交',
+      handler: submitInvoiceRow,
+      visible: row.status === 'DRAFT' && canCreateInvoice.value,
+      icon: Send
+    },
+    {
+      label: '撤回',
+      handler: withdrawInvoiceRow,
+      visible: row.status === 'PENDING_REVIEW',
+      icon: RotateCcw
+    },
+    {
+      label: '开票',
+      handler: markIssuedInvoiceRow,
+      visible: row.status === 'APPROVED' && canMarkInvoiced.value,
+      icon: Stamp
+    },
+    {
+      label: '删除',
+      handler: deleteInvoiceRow,
+      visible: canDeleteInvoiceApplicationRow(row),
+      icon: Trash2,
+      destructive: true,
+      separator: true
+    }
+  ]
+})
+
 const handleMarkIssuedDialogOpenChange = (open: boolean): void => {
   markIssuedDialogOpen.value = open
   if (!open) {
@@ -603,6 +652,7 @@ watchEffect(() => {
       height="calc(100vh - 121px)"
       empty-title="暂无发票申请"
       row-interactive
+      :get-row-actions="getRowActions"
       mobile-title-key="application_number"
       mobile-subtitle-key="customer_name"
       mobile-status-key="status"
@@ -654,57 +704,7 @@ watchEffect(() => {
       </template>
 
       <template #mobile-actions="{ row }">
-        <TableRowActions
-          :row="row"
-          :primary-actions="[
-            {
-              label: '查看',
-              handler: viewInvoiceRow,
-              icon: Eye
-            },
-            {
-              label: '编辑',
-              handler: editInvoiceRow,
-              visible: (row.status === 'DRAFT' || row.status === 'REJECTED') && canCreateInvoice,
-              icon: Pencil
-            },
-            {
-              label: '下载',
-              handler: downloadInvoiceRow,
-              visible: hasDownloadableInvoiceFile(row),
-              icon: Download
-            }
-          ]"
-          :secondary-actions="[
-            {
-              label: '提交',
-              handler: submitInvoiceRow,
-              visible: row.status === 'DRAFT' && canCreateInvoice,
-              icon: Send
-            },
-            {
-              label: '撤回',
-              handler: withdrawInvoiceRow,
-              visible: row.status === 'PENDING_REVIEW',
-              icon: RotateCcw
-            },
-            {
-              label: '开票',
-              handler: markIssuedInvoiceRow,
-              visible: row.status === 'APPROVED' && canMarkInvoiced,
-              icon: Stamp
-            },
-            {
-              label: '删除',
-              handler: deleteInvoiceRow,
-              visible: canDeleteInvoiceApplicationRow(row),
-              icon: Trash2,
-              destructive: true,
-              separator: true
-            }
-          ]"
-          size="lg"
-        />
+        <TableRowActions :row="row" v-bind="getRowActions(row)" size="lg" />
       </template>
 
       <!-- 申请单号 -->
@@ -765,59 +765,6 @@ watchEffect(() => {
         {{ formatDateTime(row.created_time) }}
       </template>
 
-      <!-- 操作 -->
-      <template #cell-actions="{ row }">
-        <TableRowActions
-          :row="row"
-          :primary-actions="[
-            {
-              label: '查看',
-              handler: viewInvoiceRow,
-              icon: Eye
-            },
-            {
-              label: '编辑',
-              handler: editInvoiceRow,
-              visible: (row.status === 'DRAFT' || row.status === 'REJECTED') && canCreateInvoice,
-              icon: Pencil
-            },
-            {
-              label: '下载',
-              handler: downloadInvoiceRow,
-              visible: hasDownloadableInvoiceFile(row),
-              icon: Download
-            }
-          ]"
-          :secondary-actions="[
-            {
-              label: '提交',
-              handler: submitInvoiceRow,
-              visible: row.status === 'DRAFT' && canCreateInvoice,
-              icon: Send
-            },
-            {
-              label: '撤回',
-              handler: withdrawInvoiceRow,
-              visible: row.status === 'PENDING_REVIEW',
-              icon: RotateCcw
-            },
-            {
-              label: '开票',
-              handler: markIssuedInvoiceRow,
-              visible: row.status === 'APPROVED' && canMarkInvoiced,
-              icon: Stamp
-            },
-            {
-              label: '删除',
-              handler: deleteInvoiceRow,
-              visible: canDeleteInvoiceApplicationRow(row),
-              icon: Trash2,
-              destructive: true,
-              separator: true
-            }
-          ]"
-        />
-      </template>
     </DataTable>
 
     <InvoiceMarkIssuedDialog

@@ -29,13 +29,13 @@ describe('projectListFieldCatalog', () => {
         sort: { apiKey: 'owner_id' }
       },
       { key: 'issued_time', label: '开票时间', type: 'date', sort: true },
-      { key: 'actions', label: '操作', column: { align: 'center', hideable: false, configurable: false } }
+      { key: 'collaborators', label: '协作者', column: { align: 'center', hideable: false, configurable: false } }
     ])
 
     expect(projectListFieldCatalog(fields)).toEqual({
       columns: [
         { key: 'owner', title: '负责人', width: '100px' },
-        { key: 'actions', title: '操作', align: 'center', hideable: false, configurable: false }
+        { key: 'collaborators', title: '协作者', align: 'center', hideable: false, configurable: false }
       ],
       filterFields: [
         { key: 'keyword', label: '关键字', type: 'text' },
@@ -150,6 +150,28 @@ describe('DataTable list field catalog contract', () => {
       expect(source).not.toContain(':filter-fields')
       expect(source).not.toContain(':sort-fields')
       expect(source).not.toContain('buildSortFieldsFromFilterFields')
+      expect(source).toContain(':get-row-actions="getRowActions"')
+      expect(source).toContain('#mobile-actions')
+      expect(source).not.toContain('#cell-actions')
+      expect(source).not.toMatch(/key:\s*'actions'/)
+    }
+  })
+
+  it('keeps ApprovalCenter approve/reject on mobile only', () => {
+    const source = readFileSync(resolve(viewsDir, 'ApprovalCenter.vue'), 'utf8')
+    const desktopActions = source.match(/const getRowActions[\s\S]*?return \{[\s\S]*?\n\}/)
+    expect(desktopActions?.[0]).toBeDefined()
+    expect(desktopActions?.[0]).not.toContain('通过')
+    expect(desktopActions?.[0]).not.toContain('驳回')
+    expect(source).toContain('data-testid="mobile-approve-btn"')
+    expect(source).toContain('data-testid="mobile-reject-btn"')
+  })
+
+  it('puts public-sea claim into getRowActions instead of a desktop button', () => {
+    for (const viewName of ['Customers.vue', 'Leads.vue']) {
+      const source = readFileSync(resolve(viewsDir, viewName), 'utf8')
+      expect(source).toContain("label: '领取'")
+      expect(source).not.toMatch(/<Button[\s\S]{0,240}领取[\s\S]{0,80}<\/Button>/)
     }
   })
 

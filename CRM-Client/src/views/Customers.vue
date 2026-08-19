@@ -21,7 +21,7 @@ import { ref, reactive, computed, onMounted, watchEffect, type Component } from 
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Sparkles, ArrowRightLeft, TrendingUp, TrendingDown, XCircle, Trash2, Pencil, UserRoundCheck } from 'lucide-vue-next'
-import { DataTable, TableRowActions, type ActionConfig } from '@/components/crmwolf'
+import { DataTable, TableRowActions, type ActionConfig, type TableRowActionSet } from '@/components/crmwolf'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
@@ -238,7 +238,6 @@ const fields = computed<ListFieldDefinition[]>(() => [
     filter: true,
     sort: true
   },
-  { key: 'actions', label: '操作', column: { align: 'center', width: '220px' } }
 ])
 
 const formatCollaborators = (row: CustomerTableRow): string => {
@@ -338,6 +337,79 @@ const asCustomerActionHandler = (handler: (record: CustomerResponse) => void | P
   return (row: Record<string, unknown>): void => {
     if (!isCustomerResponse(row)) return
     void handler(row)
+  }
+}
+
+const getRowActions = (row: CustomerResponse): TableRowActionSet => {
+  if (activeTab.value === 'public') {
+    return {
+      primaryActions: [
+        {
+          label: '领取',
+          handler: asCustomerActionHandler(handleClaim),
+          visible: canAccessPublic.value
+        }
+      ],
+      secondaryActions: []
+    }
+  }
+  return {
+    primaryActions: [
+      {
+        label: '新建商机',
+        handler: asCustomerActionHandler(handleCreateOpportunity),
+        visible: canCreateOpportunityForRow(row),
+        icon: Sparkles as Component
+      },
+      {
+        label: '编辑',
+        handler: asCustomerActionHandler(handleEdit),
+        visible: canEditRow(row),
+        icon: Pencil as Component
+      }
+    ],
+    secondaryActions: [
+      {
+        label: '移交客户',
+        handler: asCustomerActionHandler(handleTransfer),
+        visible: canAssignCustomer.value,
+        icon: UserRoundCheck as Component
+      },
+      {
+        label: '退回公海',
+        handler: asCustomerActionHandler(handleReturn),
+        visible: canReturnRow(row),
+        icon: ArrowRightLeft as Component
+      },
+      {
+        label: '赢单',
+        handler: asCustomerActionHandler(handleWin),
+        visible: canEditRow(row),
+        icon: TrendingUp as Component
+      },
+      {
+        label: '输单',
+        handler: asCustomerActionHandler(handleLose),
+        visible: canEditRow(row),
+        icon: TrendingDown as Component,
+        destructive: true,
+        separator: true
+      },
+      {
+        label: '失效',
+        handler: asCustomerActionHandler(handleInvalid),
+        visible: canEditRow(row),
+        icon: XCircle as Component,
+        destructive: true
+      },
+      {
+        label: '删除',
+        handler: asCustomerActionHandler(handleDelete),
+        visible: canDeleteRow(row),
+        icon: Trash2 as Component,
+        destructive: true
+      }
+    ]
   }
 }
 
@@ -778,6 +850,7 @@ watchEffect(() => {
       height="calc(100vh - 121px)"
       empty-title="暂无客户"
       row-interactive
+      :get-row-actions="getRowActions"
       mobile-title-key="account_name"
       mobile-status-key="status"
       :mobile-meta-keys="['industry', 'source', 'owner', 'collaborators']"
@@ -832,75 +905,7 @@ watchEffect(() => {
       </template>
 
       <template #mobile-actions="{ row }">
-        <Button
-          v-if="activeTab === 'public' && canAccessPublic"
-          variant="ghost"
-          size="lg"
-          @click.stop="handleClaim(row)"
-        >
-          领取
-        </Button>
-        <TableRowActions
-          v-else
-          :row="row"
-          :primary-actions="[
-            {
-              label: '新建商机',
-              handler: asCustomerActionHandler(handleCreateOpportunity),
-              visible: canCreateOpportunityForRow(row),
-              icon: Sparkles as Component
-            },
-            {
-              label: '编辑',
-              handler: asCustomerActionHandler(handleEdit),
-              visible: canEditRow(row),
-              icon: Pencil as Component
-            }
-          ]"
-          :secondary-actions="[
-            {
-              label: '移交客户',
-              handler: asCustomerActionHandler(handleTransfer),
-              visible: canAssignCustomer,
-              icon: UserRoundCheck as Component
-            },
-            {
-              label: '退回公海',
-              handler: asCustomerActionHandler(handleReturn),
-              visible: canReturnRow(row),
-              icon: ArrowRightLeft as Component
-            },
-            {
-              label: '赢单',
-              handler: asCustomerActionHandler(handleWin),
-              visible: canEditRow(row),
-              icon: TrendingUp as Component
-            },
-            {
-              label: '输单',
-              handler: asCustomerActionHandler(handleLose),
-              visible: canEditRow(row),
-              icon: TrendingDown as Component,
-              destructive: true,
-              separator: true
-            },
-            {
-              label: '失效',
-              handler: asCustomerActionHandler(handleInvalid),
-              visible: canEditRow(row),
-              icon: XCircle as Component,
-              destructive: true
-            },
-            {
-              label: '删除',
-              handler: asCustomerActionHandler(handleDelete),
-              visible: canDeleteRow(row),
-              icon: Trash2 as Component,
-              destructive: true
-            }
-          ]"
-          size="lg"
-        />
+        <TableRowActions :row="row" v-bind="getRowActions(row)" size="lg" />
       </template>
 
       <!-- 客户名称 -->
@@ -996,80 +1001,6 @@ watchEffect(() => {
         {{ formatDateTime(row.created_time) }}
       </template>
 
-      <!-- 操作 -->
-      <template #cell-actions="{ row }">
-        <!-- 公海客户：领取 -->
-        <Button
-          v-if="activeTab === 'public' && canAccessPublic"
-          variant="ghost"
-          size="sm"
-          @click.stop="handleClaim(row)"
-        >
-          领取
-        </Button>
-
-        <!-- 非公海客户：使用 TableRowActions 组件 -->
-        <TableRowActions
-          v-else
-          :row="row"
-          :primary-actions="[
-            {
-              label: '新建商机',
-              handler: asCustomerActionHandler(handleCreateOpportunity),
-              visible: canCreateOpportunityForRow(row),
-              icon: Sparkles as Component
-            },
-            {
-              label: '编辑',
-              handler: asCustomerActionHandler(handleEdit),
-              visible: canEditRow(row),
-              icon: Pencil as Component
-            }
-          ]"
-          :secondary-actions="[
-            {
-              label: '移交客户',
-              handler: asCustomerActionHandler(handleTransfer),
-              visible: canAssignCustomer,
-              icon: UserRoundCheck as Component
-            },
-            {
-              label: '退回公海',
-              handler: asCustomerActionHandler(handleReturn),
-              visible: canReturnRow(row),
-              icon: ArrowRightLeft as Component
-            },
-            {
-              label: '赢单',
-              handler: asCustomerActionHandler(handleWin),
-              visible: canEditRow(row),
-              icon: TrendingUp as Component
-            },
-            {
-              label: '输单',
-              handler: asCustomerActionHandler(handleLose),
-              visible: canEditRow(row),
-              icon: TrendingDown as Component,
-              destructive: true,
-              separator: true  // 在输单前添加分隔线，分隔普通操作和危险操作
-            },
-            {
-              label: '失效',
-              handler: asCustomerActionHandler(handleInvalid),
-              visible: canEditRow(row),
-              icon: XCircle as Component,
-              destructive: true
-            },
-            {
-              label: '删除',
-              handler: asCustomerActionHandler(handleDelete),
-              visible: canDeleteRow(row),
-              icon: Trash2 as Component,
-              destructive: true
-            }
-          ]"
-        />
-      </template>
     </DataTable>
 
     <!-- 退回公海弹窗（临时样式，后续替换为 shadcn-vue Dialog）-->

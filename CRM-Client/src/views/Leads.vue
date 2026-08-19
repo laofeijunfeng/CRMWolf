@@ -21,7 +21,7 @@ import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, ArrowRightLeft, CircleCheck, XCircle, Trash2, Pencil, UserPlus } from 'lucide-vue-next'
-import { DataTable, TableRowActions } from '@/components/crmwolf'
+import { DataTable, TableRowActions, type TableRowActionSet } from '@/components/crmwolf'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
@@ -174,7 +174,6 @@ const fields = computed<ListFieldDefinition[]>(() => {
     },
     { key: 'created_time', label: '创建时间', type: 'date', column: { width: '160px' }, filter: true, sort: true },
     { key: 'last_modified_time', label: '最后更新', type: 'date', sort: true },
-    { key: 'actions', label: '操作', column: { align: 'center', width: '220px' } }
   ]
   return catalog
 })
@@ -455,8 +454,71 @@ const fetchOwnerFilterOptions = async (): Promise<void> => {
 }
 
 // ==================== 格式化函数 ====================
-/** 类型转换辅助函数（用于 TableRowActions） */
-const asLead = (row: Record<string, unknown>): Lead => row as unknown as Lead
+const getRowActions = (row: Lead): TableRowActionSet => {
+  if (activeTab.value === 'public') {
+    return {
+      primaryActions: [
+        {
+          label: '领取',
+          handler: (): void => { void handleClaim(row) },
+          visible: canAccessPublic.value
+        }
+      ],
+      secondaryActions: []
+    }
+  }
+  return {
+    primaryActions: [
+      {
+        label: '编辑',
+        handler: (): void => { void handleEdit(row) },
+        visible: canEditRow(row),
+        icon: Pencil
+      },
+      {
+        label: '转化为客户',
+        handler: (): void => { void handleConvert(row) },
+        visible: canConvertRow(row),
+        icon: CircleCheck
+      }
+    ],
+    secondaryActions: [
+      {
+        label: '领取',
+        handler: (): void => { void handleClaim(row) },
+        visible: canClaimLead.value && row.status === 0 && (row.owner_id === null || row.owner_id === undefined || row.owner_id === ''),
+        icon: UserPlus
+      },
+      {
+        label: '分配',
+        handler: (): void => { void handleAssignModal(row) },
+        visible: canAssignLead.value,
+        icon: UserPlus
+      },
+      {
+        label: '退回公海',
+        handler: (): void => { void handleReturn(row) },
+        visible: canReturnRow(row),
+        icon: ArrowRightLeft
+      },
+      {
+        label: '标记无效',
+        handler: (): void => { void handleMarkInvalid(row) },
+        visible: canEditRow(row) && row.status !== 2,
+        icon: XCircle,
+        destructive: true,
+        separator: true
+      },
+      {
+        label: '删除',
+        handler: (): void => { void handleDelete(row) },
+        visible: canDeleteRow(row),
+        icon: Trash2,
+        destructive: true
+      }
+    ]
+  }
+}
 
 const formatDateTime = (dateStr?: string): string => {
   if (dateStr === undefined || dateStr === '') return '-'
@@ -534,6 +596,7 @@ watchEffect(() => {
       height="calc(100vh - 121px)"
       empty-title="暂无线索"
       row-interactive
+      :get-row-actions="getRowActions"
       mobile-title-key="lead_name"
       mobile-subtitle-key="contact_name"
       mobile-status-key="status"
@@ -578,68 +641,7 @@ watchEffect(() => {
       </template>
 
       <template #mobile-actions="{ row }">
-        <Button
-          v-if="activeTab === 'public' && canAccessPublic"
-          variant="ghost"
-          size="lg"
-          @click.stop="handleClaim(row)"
-        >
-          领取
-        </Button>
-        <TableRowActions
-          v-else
-          :row="row"
-          :primary-actions="[
-            {
-              label: '编辑',
-              handler: (r) => handleEdit(asLead(r)),
-              visible: canEditRow(row),
-              icon: Pencil
-            },
-            {
-              label: '转化为客户',
-              handler: (r) => handleConvert(asLead(r)),
-              visible: canConvertRow(row),
-              icon: CircleCheck
-            }
-          ]"
-          :secondary-actions="[
-            {
-              label: '领取',
-              handler: (r) => handleClaim(asLead(r)),
-              visible: canClaimLead && row.status === 0 && !row.owner_id,
-              icon: UserPlus
-            },
-            {
-              label: '分配',
-              handler: (r) => handleAssignModal(asLead(r)),
-              visible: canAssignLead,
-              icon: UserPlus
-            },
-            {
-              label: '退回公海',
-              handler: (r) => handleReturn(asLead(r)),
-              visible: canReturnRow(row),
-              icon: ArrowRightLeft
-            },
-            {
-              label: '标记无效',
-              handler: (r) => handleMarkInvalid(asLead(r)),
-              visible: canEditRow(row) && row.status !== 2,
-              icon: XCircle,
-              destructive: true,
-              separator: true
-            },
-            {
-              label: '删除',
-              handler: (r) => handleDelete(asLead(r)),
-              visible: canDeleteRow(row),
-              icon: Trash2,
-              destructive: true
-            }
-          ]"
-          size="lg"
-        />
+        <TableRowActions :row="row" v-bind="getRowActions(row)" size="lg" />
       </template>
 
       <!-- 线索名称 -->
@@ -699,73 +701,6 @@ watchEffect(() => {
         {{ formatDateTime(row.created_time) }}
       </template>
 
-      <!-- 操作 -->
-      <template #cell-actions="{ row }">
-        <!-- 公海线索：领取 -->
-        <Button
-          v-if="activeTab === 'public' && canAccessPublic"
-          variant="ghost"
-          size="sm"
-          @click.stop="handleClaim(row)"
-        >
-          领取
-        </Button>
-
-        <!-- 非公海线索：使用 TableRowActions 组件 -->
-        <TableRowActions
-          v-else
-          :row="row"
-          :primary-actions="[
-            {
-              label: '编辑',
-              handler: (r) => handleEdit(asLead(r)),
-              visible: canEditRow(row),
-              icon: Pencil
-            },
-            {
-              label: '转化为客户',
-              handler: (r) => handleConvert(asLead(r)),
-              visible: canConvertRow(row),
-              icon: CircleCheck
-            }
-          ]"
-          :secondary-actions="[
-            {
-              label: '领取',
-              handler: (r) => handleClaim(asLead(r)),
-              visible: canClaimLead && row.status === 0 && !row.owner_id,
-              icon: UserPlus
-            },
-            {
-              label: '分配',
-              handler: (r) => handleAssignModal(asLead(r)),
-              visible: canAssignLead,
-              icon: UserPlus
-            },
-            {
-              label: '退回公海',
-              handler: (r) => handleReturn(asLead(r)),
-              visible: canReturnRow(row),
-              icon: ArrowRightLeft
-            },
-            {
-              label: '标记无效',
-              handler: (r) => handleMarkInvalid(asLead(r)),
-              visible: canEditRow(row) && row.status !== 2,
-              icon: XCircle,
-              destructive: true,
-              separator: true
-            },
-            {
-              label: '删除',
-              handler: (r) => handleDelete(asLead(r)),
-              visible: canDeleteRow(row),
-              icon: Trash2,
-              destructive: true
-            }
-          ]"
-        />
-      </template>
     </DataTable>
 
     <!-- 分配线索弹窗 -->

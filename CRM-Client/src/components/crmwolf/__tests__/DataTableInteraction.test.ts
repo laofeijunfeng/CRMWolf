@@ -1,5 +1,5 @@
-import { mount, type VueWrapper } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import DataTable from '../DataTable.vue'
@@ -133,5 +133,206 @@ describe('DataTable row interaction', () => {
       expect(source).not.toContain('height="calc(100vh - 120px)"')
       expect(source).not.toContain('height="calc(100vh - 136px)"')
     }
+  })
+})
+
+const rowActionHandlers = {
+  edit: vi.fn(),
+  remove: vi.fn()
+}
+
+const attachedWrappers: VueWrapper[] = []
+
+const mountActionTable = (
+  overrides: Record<string, unknown> = {},
+  slots: Record<string, string> = {}
+): VueWrapper => {
+  const wrapper = mount(DataTable, {
+    attachTo: document.body,
+    props: {
+      fields,
+      data,
+      total: 1,
+      page: 1,
+      pageSize: 10,
+      rowInteractive: true,
+      getRowActions: () => ({
+        primaryActions: [{ label: '编辑', handler: rowActionHandlers.edit, visible: true }],
+        secondaryActions: [{ label: '删除', handler: rowActionHandlers.remove, destructive: true, visible: true }]
+      }),
+      ...overrides
+    },
+    slots
+  })
+  attachedWrappers.push(wrapper)
+  return wrapper
+}
+
+async function openRowMenu(wrapper: VueWrapper, eventInit: MouseEventInit = {}): Promise<void> {
+  const row = wrapper.get('tbody tr')
+  const event = new MouseEvent('contextmenu', {
+    clientX: 48,
+    clientY: 64,
+    button: 2,
+    bubbles: true,
+    cancelable: true,
+    ...eventInit
+  })
+  row.element.dispatchEvent(event)
+  await flushPromises()
+  await wrapper.vm.$nextTick()
+  await flushPromises()
+}
+
+function menuEl(): HTMLElement | null {
+  return document.querySelector('.data-table-row-menu')
+}
+
+describe('DataTable row context menu', () => {
+  afterEach(() => {
+    while (attachedWrappers.length > 0) {
+      attachedWrappers.pop()?.unmount()
+    }
+    rowActionHandlers.edit.mockReset()
+    rowActionHandlers.remove.mockReset()
+  })
+
+  it('does not render an actions column by default', () => {
+    const wrapper = mountTable(true)
+    expect(wrapper.findAll('th').map((header) => header.text())).toEqual(['名称'])
+    expect(wrapper.html()).not.toContain('操作')
+  })
+
+  it('opens the row menu with visible actions on contextmenu', async () => {
+    const wrapper = mountActionTable()
+    await openRowMenu(wrapper)
+    const menu = menuEl()
+    expect(menu).not.toBeNull()
+    expect(menu?.textContent).toContain('编辑')
+    expect(menu?.textContent).toContain('删除')
+    expect(menu?.textContent).toContain('常用')
+    expect(menu?.textContent).toContain('危险')
+  })
+
+  it('does not open the menu on left click', async () => {
+    const wrapper = mountActionTable()
+    await wrapper.get('tbody tr').trigger('click')
+    expect(menuEl()).toBeNull()
+    expect(wrapper.emitted('row-click')).toHaveLength(1)
+  })
+
+  it('does not emit row-click after opening or dismissing the context menu', async () => {
+    const wrapper = mountActionTable()
+    await openRowMenu(wrapper)
+    await wrapper.get('tbody tr').trigger('click')
+    expect(wrapper.emitted('row-click')).toBeUndefined()
+  })
+
+  it('does not render row action buttons or overflow triggers', async () => {
+    const wrapper = mountActionTable()
+    await wrapper.get('tbody tr').trigger('mouseenter')
+    expect(wrapper.find('tbody button').exists()).toBe(false)
+    expect(wrapper.find('[aria-label="更多操作"]').exists()).toBe(false)
+  })
+
+  it('opens the same menu from Shift+F10', async () => {
+    const wrapper = mountActionTable()
+    const row = wrapper.get('tbody tr')
+    const event = new KeyboardEvent('keydown', {
+      key: 'F10',
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true
+    })
+    row.element.dispatchEvent(event)
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    expect(menuEl()?.textContent).toContain('编辑')
+  })
+
+  it('does not open an empty menu', async () => {
+    const wrapper = mountActionTable({
+      getRowActions: () => ({
+        primaryActions: [{ label: '领取', handler: vi.fn(), visible: false }],
+        secondaryActions: []
+      })
+    })
+    const row = wrapper.get('tbody tr')
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 20 })
+    row.element.dispatchEvent(event)
+    await flushPromises()
+    expect(event.defaultPrevented).toBe(false)
+    expect(menuEl()).toBeNull()
+  })
+
+  it('does not preventDefault Shift+F10 when there are no visible actions', async () => {
+    const wrapper = mountActionTable({
+      getRowActions: () => ({
+        primaryActions: [{ label: '领取', handler: vi.fn(), visible: false }],
+        secondaryActions: []
+      })
+    })
+    const row = wrapper.get('tbody tr')
+    const event = new KeyboardEvent('keydown', {
+      key: 'F10',
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true
+    })
+    row.element.dispatchEvent(event)
+    await flushPromises()
+    expect(event.defaultPrevented).toBe(false)
+    expect(menuEl()).toBeNull()
+  })
+
+  it('keeps native context menu on links and inputs', async () => {
+    const wrapper = mountActionTable(
+      {
+        getRowActions: () => ({
+          primaryActions: [{ label: '编辑', handler: rowActionHandlers.edit }],
+          secondaryActions: []
+        })
+      },
+      {
+        'cell-name': '<a href="https://example.com/detail" class="name-link">审批单</a>'
+      }
+    )
+    const link = wrapper.get('.name-link')
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 20 })
+    link.element.dispatchEvent(event)
+    await flushPromises()
+    expect(event.defaultPrevented).toBe(false)
+    expect(menuEl()).toBeNull()
+  })
+
+  it('does not pin the last column to the right by default', () => {
+    const wrapper = mount(DataTable, {
+      props: {
+        fields: [
+          { key: 'name', label: '名称', column: { width: '160px' } },
+          { key: 'created_time', label: '创建时间', column: { width: '160px' } }
+        ] satisfies ListFieldDefinition[],
+        data: [{ id: 1, name: '审批单', created_time: '2026-08-19' }],
+        total: 1,
+        page: 1,
+        pageSize: 10
+      }
+    })
+    const headers = wrapper.findAll('th')
+    expect(headers[0]?.classes()).toContain('fixed-left')
+    expect(headers[1]?.classes()).not.toContain('fixed-right')
+    expect(headers[1]?.attributes('style') ?? '').not.toContain('position: sticky')
+  })
+
+  it('invokes the original action handler from a destructive menu item', async () => {
+    const wrapper = mountActionTable()
+    await openRowMenu(wrapper)
+    const deleteItem = Array.from(document.querySelectorAll('.data-table-row-menu [role="menuitem"]'))
+      .find((item) => item.textContent?.includes('删除') === true)
+    expect(deleteItem).toBeDefined()
+    deleteItem?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+    expect(rowActionHandlers.remove).toHaveBeenCalledTimes(1)
+    expect(rowActionHandlers.edit).not.toHaveBeenCalled()
   })
 })

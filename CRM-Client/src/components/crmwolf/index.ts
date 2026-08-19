@@ -39,7 +39,13 @@ export { default as HoverInfo } from './HoverInfo.vue'
 export { default as StatusBadge } from '../StatusBadge.vue'
 
 // Export types
-export type { ActionConfig } from './TableRowActions.vue'
+export type { ActionConfig } from './tableRowActionTypes'
+export type { TableRowActionSet, TableRowActionGroup } from './tableRowActionGroups'
+export {
+  groupTableRowActions,
+  hasVisibleTableRowActions,
+  shouldShowTableRowActionGroupLabels
+} from './tableRowActionGroups'
 export type { ColumnConfigOption } from './columnConfigTypes'
 export type { ListFieldDefinition, ListFieldColumnConfig, ListFieldQueryConfig } from './listFieldCatalog'
 export { defineListFields, projectListFieldCatalog } from './listFieldCatalog'
@@ -98,7 +104,7 @@ export { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/h
 
 // Commands & Menus
 export { Command, CommandInput, CommandList, CommandItem, CommandGroup, CommandEmpty } from '@/components/ui/command'
-export { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
+export { ContextMenu, ContextMenuContent, ContextMenuGroup, ContextMenuItem, ContextMenuLabel, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
 export { Menubar, MenubarContent, MenubarItem, MenubarTrigger } from '@/components/ui/menubar'
 
 // Tables

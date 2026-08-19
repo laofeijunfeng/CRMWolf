@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watchEffect } from 'vue'
 import { storeToRefs } from 'pinia'
 import { CheckCircle2, Clock3, FileText, PauseCircle, Plus, RefreshCw, XCircle } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
-import { DataTable, HoverInfo, TableRowActions, type ActionConfig } from '@/components/crmwolf'
+import { DataTable, HoverInfo, TableRowActions, type ActionConfig, type TableRowActionSet } from '@/components/crmwolf'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
@@ -124,7 +124,6 @@ const fields: ListFieldDefinition[] = [
     column: { width: '150px' },
     sort: true
   },
-  { key: 'actions', label: '操作', column: { width: '260px', align: 'center', fixed: 'right' } }
 ]
 
 const customFilterViews = useCustomFilterViews({
@@ -367,6 +366,11 @@ function actionRow(row: TrackingRow): Record<string, unknown> {
   return row as unknown as Record<string, unknown>
 }
 
+const getRowActions = (row: TrackingRow): TableRowActionSet => ({
+  primaryActions: primaryActions(row),
+  secondaryActions: secondaryActions(row)
+})
+
 function openFollowUpDialog(task: FollowUpTaskItem): void {
   selectedTask.value = task
   followUpDialogOpen.value = true
@@ -565,6 +569,7 @@ watchEffect(() => {
       height="calc(100vh - 121px)"
       row-key="public_id"
       row-interactive
+      :get-row-actions="getRowActions"
       empty-title="暂无客户追踪"
       mobile-title-key="customer_name"
       mobile-subtitle-key="tracking_content"
@@ -642,13 +647,6 @@ watchEffect(() => {
         </HoverInfo>
       </template>
 
-      <template #cell-actions="{ row }">
-        <TableRowActions
-          :row="actionRow(row)"
-          :primary-actions="primaryActions(row)"
-          :secondary-actions="secondaryActions(row)"
-        />
-      </template>
 
       <template #mobile-card="{ row }">
         <div class="tracking-mobile-card-header">
@@ -675,8 +673,7 @@ watchEffect(() => {
         <TableRowActions
           :row="actionRow(row)"
           size="lg"
-          :primary-actions="primaryActions(row)"
-          :secondary-actions="secondaryActions(row)"
+          v-bind="getRowActions(row)"
         />
       </template>
     </DataTable>

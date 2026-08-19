@@ -19,7 +19,7 @@ import { useRoute } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Pencil, CheckCircle, Trash2 } from 'lucide-vue-next'
-import { AmountText, DataTable, TableRowActions } from '@/components/crmwolf'
+import { AmountText, DataTable, TableRowActions, type TableRowActionSet } from '@/components/crmwolf'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
@@ -119,7 +119,6 @@ const fields: ListFieldDefinition[] = [
     filter: true,
     sort: true
   },
-  { key: 'actions', label: '操作', column: { align: 'center', width: '220px' } }
 ]
 
 // ==================== 权限 ====================
@@ -362,6 +361,33 @@ const handleDelete = async (row: PaymentPlanWithDetails): Promise<void> => {
   }
 }
 
+const getRowActions = (row: PaymentPlanWithDetails): TableRowActionSet => ({
+  primaryActions: [
+    {
+      label: '确认回款',
+      handler: () => handleConfirmPayment(row),
+      visible: canConfirmPayment.value && row.status !== 'COMPLETED',
+      icon: CheckCircle
+    }
+  ],
+  secondaryActions: [
+    {
+      label: '编辑',
+      handler: () => handleEdit(row),
+      visible: canEditPlan.value,
+      icon: Pencil
+    },
+    {
+      label: '删除',
+      handler: (): void => { void handleDelete(row) },
+      visible: canDeletePlan.value,
+      icon: Trash2,
+      destructive: true,
+      separator: true
+    }
+  ]
+})
+
 // ==================== 格式化函数 ====================
 const mapPaymentPlanStatus = (status: string): 'pending' | 'partial' | 'completed' | 'overdue' => {
   const map: Record<string, 'pending' | 'partial' | 'completed' | 'overdue'> = {
@@ -442,6 +468,7 @@ watch(
       height="calc(100vh - 121px)"
       empty-title="暂无回款计划"
       row-interactive
+      :get-row-actions="getRowActions"
       mobile-title-key="plan_number"
       mobile-subtitle-key="contract_name"
       mobile-status-key="status"
@@ -480,34 +507,7 @@ watch(
       </template>
 
       <template #mobile-actions="{ row }">
-        <TableRowActions
-          :row="row"
-          :primary-actions="[
-            {
-              label: '确认回款',
-              handler: (r) => handleConfirmPayment(r as unknown as PaymentPlanWithDetails),
-              visible: canConfirmPayment && row.status !== 'COMPLETED',
-              icon: CheckCircle
-            }
-          ]"
-          :secondary-actions="[
-            {
-              label: '编辑',
-              handler: (r) => handleEdit(r as unknown as PaymentPlanWithDetails),
-              visible: canEditPlan,
-              icon: Pencil
-            },
-            {
-              label: '删除',
-              handler: (r) => handleDelete(r as unknown as PaymentPlanWithDetails),
-              visible: canDeletePlan,
-              icon: Trash2,
-              destructive: true,
-              separator: true
-            }
-          ]"
-          size="lg"
-        />
+        <TableRowActions :row="row" v-bind="getRowActions(row)" size="lg" />
       </template>
 
       <!-- 计划编号 -->
@@ -537,36 +537,6 @@ watch(
         <StatusBadge :status="mapPaymentPlanStatus(row.status)" type="paymentPlan" />
       </template>
 
-      <!-- 操作 -->
-      <template #cell-actions="{ row }">
-        <TableRowActions
-          :row="row"
-          :primary-actions="[
-            {
-              label: '确认回款',
-              handler: (r) => handleConfirmPayment(r as unknown as PaymentPlanWithDetails),
-              visible: canConfirmPayment && row.status !== 'COMPLETED',
-              icon: CheckCircle
-            }
-          ]"
-          :secondary-actions="[
-            {
-              label: '编辑',
-              handler: (r) => handleEdit(r as unknown as PaymentPlanWithDetails),
-              visible: canEditPlan,
-              icon: Pencil
-            },
-            {
-              label: '删除',
-              handler: (r) => handleDelete(r as unknown as PaymentPlanWithDetails),
-              visible: canDeletePlan,
-              icon: Trash2,
-              destructive: true,
-              separator: true
-            }
-          ]"
-        />
-      </template>
     </DataTable>
 
     <PaymentPlanDetailSheet
