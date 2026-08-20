@@ -241,7 +241,7 @@ watch(
     </PopoverTrigger>
 
     <PopoverContent align="start" class="list-filter-popover">
-      <TableToolbarBuilderPanel title="筛选条件" reset-label="清空筛选" @reset="resetFilters">
+      <TableToolbarBuilderPanel title="筛选条件" @close="open = false">
         <div class="filter-condition-list">
           <div
             v-for="condition in localConditions"
@@ -317,8 +317,7 @@ watch(
             <Button
               type="button"
               variant="ghost"
-              size="sm"
-              class="icon-button"
+              size="icon-sm"
               aria-label="删除筛选条件"
               @click="removeCondition(condition.id)"
             >
@@ -335,7 +334,7 @@ watch(
               size="sm"
               @click="addCondition"
             >
-              <Plus class="w-4 h-4 mr-1" aria-hidden="true" />
+              <Plus class="w-4 h-4" aria-hidden="true" />
               添加条件
             </Button>
 
@@ -378,62 +377,46 @@ watch(
 @use '@/styles/variables-v2.scss' as *;
 
 :global(.list-filter-popover) {
-  width: min(680px, calc(100vw - 24px));
+  width: min(680px, calc(100vw - #{$wolf-space-xl-v2}));
   padding: 0;
 }
 
 .filter-condition-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: $wolf-space-sm-v2;
 }
 
 .filter-condition-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) 108px minmax(160px, 1.3fr) 32px;
-  gap: 8px;
+  grid-template-columns: minmax(120px, 1fr) 108px minmax(160px, 1.3fr) $wolf-button-height-sm-v2;
+  gap: $wolf-space-sm-v2;
   align-items: center;
 }
 
 .filter-field-select,
 .filter-op-select,
-.filter-value-control {
-  height: 32px;
-}
-
+.filter-value-control,
 .filter-empty-placeholder {
-  height: 32px;
+  height: $wolf-input-height-v2;
 }
 
 .filter-actions {
   display: flex;
   align-items: center;
+  gap: $wolf-space-sm-v2;
 }
 
 .filter-secondary-actions {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 4px;
-}
-
-.icon-button {
-  width: 32px;
-  height: 32px;
-  padding: 0;
-}
-
-.filter-actions {
-  gap: 8px;
+  gap: $wolf-space-sm-v2;
 }
 
 @media (max-width: 640px) {
   .filter-condition-row {
     grid-template-columns: 1fr;
-  }
-
-  .icon-button {
-    justify-self: end;
   }
 
   .filter-secondary-actions {

@@ -117,8 +117,8 @@ const handleViewAll = (): void => {
     </template>
 
     <section aria-label="客户商机概览">
-      <header class="flex items-start justify-between gap-3 px-4 pt-4 pb-3">
-        <h3 class="min-w-0 truncate text-wolf-title font-wolf-semibold leading-6 text-wolf-text-primary-v2" :title="customerName">
+      <header class="flex items-start justify-between gap-wolf-md px-wolf-md pt-wolf-md pb-wolf-md">
+        <h3 class="min-w-0 truncate text-wolf-body font-wolf-semibold text-wolf-text-primary-v2" :title="customerName">
           {{ customerName }}
         </h3>
         <Badge
@@ -131,8 +131,8 @@ const handleViewAll = (): void => {
         </Badge>
       </header>
 
-      <div v-if="loading" class="space-y-3 px-4 pb-4" aria-live="polite" aria-label="正在加载客户商机">
-        <div v-for="index in 2" :key="index" class="space-y-2 rounded-wolf bg-wolf-bg-muted-v2 p-4">
+      <div v-if="loading" class="space-y-wolf-md px-wolf-md pb-wolf-md" aria-live="polite" aria-label="正在加载客户商机">
+        <div v-for="index in 2" :key="index" class="space-y-wolf-sm rounded-wolf bg-wolf-bg-muted-v2 p-wolf-md">
           <Skeleton class="h-4 w-2/5" />
           <Skeleton class="h-8 w-3/5" />
           <Skeleton class="h-1.5 w-full" />
@@ -140,37 +140,37 @@ const handleViewAll = (): void => {
         </div>
       </div>
 
-      <Empty v-else-if="loadFailed" class="border-0 px-4 py-8">
+      <Empty v-else-if="loadFailed" class="border-0 px-wolf-md py-wolf-2xl">
         <EmptyHeader>
-          <CircleAlert class="h-5 w-5 text-wolf-danger-text-v2" aria-hidden="true" />
-          <EmptyTitle class="text-sm">商机加载失败</EmptyTitle>
-          <EmptyDescription class="text-xs">请稍后重试</EmptyDescription>
+          <CircleAlert class="h-4 w-4 text-wolf-danger-text-v2" aria-hidden="true" />
+          <EmptyTitle class="text-wolf-body">商机加载失败</EmptyTitle>
+          <EmptyDescription class="text-wolf-caption">请稍后重试</EmptyDescription>
         </EmptyHeader>
-        <Button variant="outline" size="sm" class="mt-3" @click="retryLoad">
+        <Button variant="outline" size="sm" class="mt-wolf-md" @click="retryLoad">
           重试
         </Button>
       </Empty>
 
-      <Empty v-else-if="loaded && opportunities.length === 0" class="border-0 px-4 py-8">
+      <Empty v-else-if="loaded && opportunities.length === 0" class="border-0 px-wolf-md py-wolf-2xl">
         <EmptyHeader>
-          <EmptyTitle class="text-sm">暂无商机</EmptyTitle>
-          <EmptyDescription class="text-xs">该客户暂未关联商机</EmptyDescription>
+          <EmptyTitle class="text-wolf-body">暂无商机</EmptyTitle>
+          <EmptyDescription class="text-wolf-caption">该客户暂未关联商机</EmptyDescription>
         </EmptyHeader>
       </Empty>
 
       <ScrollArea v-else-if="loaded" class="max-h-[420px]">
-        <div class="space-y-3 px-4 pb-4">
+        <div class="space-y-wolf-md px-wolf-md pb-wolf-md">
           <Button
             v-for="opportunity in opportunities"
             :key="opportunity.id"
             variant="ghost"
-            class="group h-auto w-full items-stretch justify-start rounded-wolf bg-wolf-bg-muted-v2 p-4 text-left hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-wolf-focus"
+            class="group h-auto w-full items-stretch justify-start rounded-wolf bg-wolf-bg-muted-v2 p-wolf-md text-left hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-wolf-focus"
             :data-testid="`customer-opportunity-${opportunity.id}`"
             @click="handleSelectOpportunity(opportunity.id)"
           >
             <span class="flex w-full min-w-0 flex-col">
-              <span class="flex min-w-0 items-start justify-between gap-3">
-                <span class="truncate text-sm font-medium uppercase tracking-[0.08em] text-wolf-text-secondary-v2" :title="opportunity.opportunity_name">
+              <span class="flex min-w-0 items-start justify-between gap-wolf-md">
+                <span class="truncate text-wolf-body font-wolf-medium text-wolf-text-secondary-v2" :title="opportunity.opportunity_name">
                   {{ opportunity.opportunity_name }}
                 </span>
                 <Badge
@@ -186,15 +186,15 @@ const handleViewAll = (): void => {
                 :value="opportunity.total_amount"
                 size="lg"
                 tone="primary"
-                class="mt-3 self-start text-wolf-text-primary-v2"
+                class="mt-wolf-md self-start text-wolf-text-primary-v2"
               />
               <Progress
                 :model-value="getWinProbability(opportunity)"
-                class="mt-3 h-1.5 bg-wolf-bg-card"
+                class="mt-wolf-md h-1.5 bg-wolf-bg-card"
                 :aria-label="`${opportunity.opportunity_name} 赢率 ${getWinProbability(opportunity)}%`"
               />
-              <span class="mt-2 flex items-center justify-between gap-3 text-sm">
-                <span class="font-medium text-wolf-text-secondary-v2">
+              <span class="mt-wolf-sm flex items-center justify-between gap-wolf-md text-wolf-body">
+                <span class="font-wolf-medium text-wolf-text-secondary-v2">
                   赢率 {{ getWinProbability(opportunity) }}%
                 </span>
                 <ChevronRight class="h-4 w-4 shrink-0 text-wolf-text-tertiary-v2 group-hover:text-sidebar-accent-foreground" aria-hidden="true" />
@@ -206,7 +206,7 @@ const handleViewAll = (): void => {
 
       <template v-if="loaded && hasMore">
         <Separator />
-        <div class="p-3">
+        <div class="p-wolf-md">
           <Button
             variant="ghost"
             size="sm"

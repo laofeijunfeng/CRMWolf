@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Eye, EyeOff, GripVertical, Lock, RotateCcw, Save, Settings2, User, Users } from 'lucide-vue-next'
+import { Eye, EyeOff, GripVertical, Lock, Settings2, User, Users } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Separator } from '@/components/ui/separator'
 import TableToolbarButton from './TableToolbarButton.vue'
+import TableToolbarBuilderPanel from './TableToolbarBuilderPanel.vue'
 import type { ViewPreferenceScope } from '@/api/viewPreference'
 import type { ColumnConfigOption } from './columnConfigTypes'
 
@@ -106,85 +106,78 @@ watch(() => props.scope, (scope) => {
     </PopoverTrigger>
 
     <PopoverContent align="start" class="column-config-popover">
-      <div class="column-config-header">
-        <div>
-          <div class="column-config-title">字段配置</div>
-          <div class="column-config-subtitle">拖动非固定列调整表格顺序</div>
-        </div>
-      </div>
-
-      <div v-if="scopeEditable" class="column-config-scope" role="radiogroup" aria-label="保存范围">
-        <Button
-          type="button"
-          size="sm"
-          :variant="selectedScope === 'personal' ? 'default' : 'outline'"
-          @click="selectedScope = 'personal'"
-        >
-          <User class="w-4 h-4" aria-hidden="true" />
-          <span>仅自己</span>
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          :variant="selectedScope === 'team' ? 'default' : 'outline'"
-          @click="selectedScope = 'team'"
-        >
-          <Users class="w-4 h-4" aria-hidden="true" />
-          <span>同步团队</span>
-        </Button>
-      </div>
-
-      <Separator />
-
-      <ScrollArea class="column-config-list-scroll">
-        <div v-if="loading" class="column-config-state">正在读取配置</div>
-        <div v-else class="column-config-list">
-          <div
-            v-for="column in localColumns"
-            :key="column.key"
-            class="column-config-row"
-            :class="{ 'is-locked': !column.configurable, 'is-hidden': !column.visible }"
-            :draggable="column.configurable"
-            @dragstart="handleDragStart(column)"
-            @dragover.prevent
-            @drop="handleDrop(column.key)"
-            @dragend="dragKey = null"
+      <TableToolbarBuilderPanel
+        title="字段配置"
+        subtitle="拖动非固定列调整表格顺序"
+        @close="open = false"
+      >
+        <div v-if="scopeEditable" class="column-config-scope" role="radiogroup" aria-label="保存范围">
+          <Button
+            type="button"
+            size="sm"
+            :variant="selectedScope === 'personal' ? 'default' : 'outline'"
+            @click="selectedScope = 'personal'"
           >
-            <GripVertical v-if="column.configurable" class="column-config-drag-icon" aria-hidden="true" />
-            <Lock v-else class="column-config-lock-icon" aria-hidden="true" />
-
-            <span class="column-config-row-title">{{ column.title }}</span>
-
-            <Button
-              v-if="column.hideable"
-              type="button"
-              variant="ghost"
-              size="icon"
-              class="column-config-visibility-button"
-              :aria-pressed="column.visible"
-              :aria-label="column.visible ? `隐藏${column.title}` : `显示${column.title}`"
-              @click="updateVisible(column.key, !column.visible)"
-            >
-              <Eye v-if="column.visible" class="w-3.5 h-3.5" aria-hidden="true" />
-              <EyeOff v-else class="w-3.5 h-3.5" aria-hidden="true" />
-            </Button>
-            <Lock v-else class="column-config-lock-icon" aria-hidden="true" />
-          </div>
+            <User class="w-4 h-4" aria-hidden="true" />
+            <span>仅自己</span>
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            :variant="selectedScope === 'team' ? 'default' : 'outline'"
+            @click="selectedScope = 'team'"
+          >
+            <Users class="w-4 h-4" aria-hidden="true" />
+            <span>同步团队</span>
+          </Button>
         </div>
-      </ScrollArea>
 
-      <Separator />
+        <ScrollArea class="column-config-list-scroll">
+          <div v-if="loading" class="column-config-state">正在读取配置</div>
+          <div v-else class="column-config-list">
+            <div
+              v-for="column in localColumns"
+              :key="column.key"
+              class="column-config-row"
+              :class="{ 'is-locked': !column.configurable, 'is-hidden': !column.visible }"
+              :draggable="column.configurable"
+              @dragstart="handleDragStart(column)"
+              @dragover.prevent
+              @drop="handleDrop(column.key)"
+              @dragend="dragKey = null"
+            >
+              <GripVertical v-if="column.configurable" class="column-config-drag-icon" aria-hidden="true" />
+              <Lock v-else class="column-config-lock-icon" aria-hidden="true" />
 
-      <div class="column-config-footer">
-        <Button type="button" variant="ghost" size="sm" @click="emit('reset', selectedScope)">
-          <RotateCcw class="w-4 h-4" aria-hidden="true" />
-          <span>恢复默认</span>
-        </Button>
-        <Button type="button" size="sm" :disabled="saving" @click="handleSave">
-          <Save class="w-4 h-4" aria-hidden="true" />
-          <span>{{ saving ? '保存中' : '保存' }}</span>
-        </Button>
-      </div>
+              <span class="column-config-row-title">{{ column.title }}</span>
+
+              <Button
+                v-if="column.hideable"
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                class="column-config-visibility-button"
+                :aria-pressed="column.visible"
+                :aria-label="column.visible ? `隐藏${column.title}` : `显示${column.title}`"
+                @click="updateVisible(column.key, !column.visible)"
+              >
+                <Eye v-if="column.visible" class="w-4 h-4" aria-hidden="true" />
+                <EyeOff v-else class="w-4 h-4" aria-hidden="true" />
+              </Button>
+              <Lock v-else class="column-config-lock-icon" aria-hidden="true" />
+            </div>
+          </div>
+        </ScrollArea>
+
+        <template #footer>
+          <Button type="button" variant="ghost" size="sm" @click="emit('reset', selectedScope)">
+            恢复默认
+          </Button>
+          <Button type="button" size="sm" :disabled="saving" @click="handleSave">
+            {{ saving ? '保存中' : '保存' }}
+          </Button>
+        </template>
+      </TableToolbarBuilderPanel>
     </PopoverContent>
   </Popover>
 </template>
@@ -197,31 +190,10 @@ watch(() => props.scope, (scope) => {
   padding: 0;
 }
 
-.column-config-header {
-  padding: $wolf-space-md-v2;
-}
-
-.column-config-title {
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  color: $wolf-text-primary-v2;
-}
-
-.column-config-subtitle {
-  margin-top: 2px;
-  font-size: $wolf-font-size-caption-v2;
-  color: $wolf-text-tertiary-v2;
-}
-
 .column-config-scope {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: $wolf-space-sm-v2;
-  padding: 0 $wolf-space-md-v2 $wolf-space-md-v2;
-}
-
-.column-config-scope :deep(button) {
-  gap: $wolf-space-xs-v2;
 }
 
 .column-config-list-scroll {
@@ -241,7 +213,7 @@ watch(() => props.scope, (scope) => {
 
 .column-config-row {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) 28px;
+  grid-template-columns: $wolf-button-height-sm-v2 minmax(0, 1fr) $wolf-button-height-sm-v2;
   align-items: center;
   gap: $wolf-space-sm-v2;
   min-height: $wolf-touch-target-min-v2;
@@ -273,27 +245,12 @@ watch(() => props.scope, (scope) => {
 }
 
 .column-config-visibility-button {
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: $wolf-text-tertiary-v2;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   justify-self: center;
-  line-height: 1;
+  color: $wolf-text-tertiary-v2;
 
   &:hover {
-    background: transparent;
     color: $wolf-text-primary-v2;
   }
-}
-
-.column-config-visibility-button :deep(svg) {
-  width: 16px;
-  height: 16px;
 }
 
 .column-config-row.is-hidden .column-config-visibility-button {
@@ -306,16 +263,5 @@ watch(() => props.scope, (scope) => {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: $wolf-font-size-body-v2;
-}
-
-.column-config-footer {
-  display: flex;
-  justify-content: space-between;
-  gap: $wolf-space-sm-v2;
-  padding: $wolf-space-md-v2;
-}
-
-.column-config-footer :deep(button) {
-  gap: $wolf-space-xs-v2;
 }
 </style>

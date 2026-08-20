@@ -159,7 +159,10 @@ describe('CustomerOpportunityHoverCard', () => {
       order_by: 'created_time',
       order_dir: 'desc',
     })
+    expect(wrapper.get('h3').classes()).toContain('text-wolf-body')
+    expect(wrapper.get('h3').classes()).not.toContain('text-wolf-title')
     expect(wrapper.text()).toContain('企业 CRM 升级项目')
+    expect(wrapper.get('[data-testid="customer-opportunity-opp_test_88"] .truncate').classes()).not.toContain('uppercase')
     expect(wrapper.get('[data-testid="customer-opportunity-total"]').text()).toBe('共 4 个')
     expect(wrapper.text()).toContain('赢率 65%')
     expect(wrapper.get('[data-testid="customer-opportunity-stage-opp_test_88"]').text()).toBe('方案沟通')

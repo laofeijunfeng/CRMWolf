@@ -2,29 +2,29 @@
 import { X } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 
-withDefaults(defineProps<{
+defineProps<{
   title: string
-  resetLabel?: string
-}>(), {
-  resetLabel: '清空'
-})
+  subtitle?: string
+}>()
 
 const emit = defineEmits<{
-  reset: []
+  close: []
 }>()
 </script>
 
 <template>
   <div class="table-toolbar-builder">
     <div class="table-toolbar-builder-header">
-      <span class="table-toolbar-builder-title">{{ title }}</span>
+      <div class="table-toolbar-builder-heading">
+        <span class="table-toolbar-builder-title">{{ title }}</span>
+        <span v-if="subtitle" class="table-toolbar-builder-subtitle">{{ subtitle }}</span>
+      </div>
       <Button
         type="button"
         variant="ghost"
-        size="sm"
-        class="table-toolbar-icon-button"
-        :aria-label="resetLabel"
-        @click="emit('reset')"
+        size="icon-sm"
+        aria-label="关闭"
+        @click="emit('close')"
       >
         <X class="w-4 h-4" aria-hidden="true" />
       </Button>
@@ -53,8 +53,19 @@ const emit = defineEmits<{
 .table-toolbar-builder-header,
 .table-toolbar-builder-footer {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  gap: $wolf-space-sm-v2;
+}
+
+.table-toolbar-builder-footer {
+  align-items: center;
+}
+
+.table-toolbar-builder-heading {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
 }
 
 .table-toolbar-builder-title {
@@ -63,13 +74,16 @@ const emit = defineEmits<{
   color: $wolf-text-primary-v2;
 }
 
-.table-toolbar-builder-body {
-  min-width: 0;
+.table-toolbar-builder-subtitle {
+  margin-top: 2px;
+  font-size: $wolf-font-size-caption-v2;
+  color: $wolf-text-tertiary-v2;
 }
 
-.table-toolbar-icon-button {
-  width: 32px;
-  height: 32px;
-  padding: 0;
+.table-toolbar-builder-body {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: $wolf-space-md-v2;
 }
 </style>

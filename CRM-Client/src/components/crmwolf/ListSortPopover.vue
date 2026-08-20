@@ -186,7 +186,7 @@ watch(
     </PopoverTrigger>
 
     <PopoverContent align="start" class="list-sort-popover">
-      <TableToolbarBuilderPanel title="排序条件" reset-label="清空排序" @reset="resetSorts">
+      <TableToolbarBuilderPanel title="排序条件" @close="open = false">
         <div class="sort-condition-list">
           <div
             v-for="(sort, index) in localSorts"
@@ -231,8 +231,7 @@ watch(
               <Button
                 type="button"
                 variant="ghost"
-                size="sm"
-                class="icon-button"
+                size="icon-sm"
                 aria-label="上移排序条件"
                 :disabled="index === 0"
                 @click="moveSort(index, -1)"
@@ -242,8 +241,7 @@ watch(
               <Button
                 type="button"
                 variant="ghost"
-                size="sm"
-                class="icon-button"
+                size="icon-sm"
                 aria-label="下移排序条件"
                 :disabled="index === localSorts.length - 1"
                 @click="moveSort(index, 1)"
@@ -253,8 +251,7 @@ watch(
               <Button
                 type="button"
                 variant="ghost"
-                size="sm"
-                class="icon-button"
+                size="icon-sm"
                 aria-label="删除排序条件"
                 @click="removeSort(sort.id)"
               >
@@ -272,7 +269,7 @@ watch(
             :disabled="!canAddSort"
             @click="addSort"
           >
-            <Plus class="w-4 h-4 mr-1" aria-hidden="true" />
+            <Plus class="w-4 h-4" aria-hidden="true" />
             添加条件
           </Button>
 
@@ -303,44 +300,33 @@ watch(
 @use '@/styles/variables-v2.scss' as *;
 
 :global(.list-sort-popover) {
-  width: min(640px, calc(100vw - 24px));
+  width: min(640px, calc(100vw - #{$wolf-space-xl-v2}));
   padding: 0;
 }
 
 .sort-condition-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: $wolf-space-sm-v2;
 }
 
 .sort-condition-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(140px, 180px) 112px;
-  gap: 8px;
+  grid-template-columns: minmax(180px, 1fr) minmax(140px, 180px) auto;
+  gap: $wolf-space-sm-v2;
   align-items: center;
 }
 
 .sort-field-select,
 .sort-direction-select {
-  height: 32px;
+  height: $wolf-input-height-v2;
 }
 
 .sort-row-actions,
 .sort-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
-}
-
-.sort-actions {
-  gap: 8px;
-}
-
-.icon-button {
-  width: 32px;
-  min-width: 32px;
-  height: 32px;
-  padding: 0;
+  gap: $wolf-space-sm-v2;
 }
 
 @media (max-width: 640px) {
