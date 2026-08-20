@@ -5,7 +5,8 @@
  */
 
 import { z } from 'zod'
-import { BusinessDateTimeStringSchema, OptionalNullableStringSchema } from './common'
+import { getTodayLocalDate } from '@/utils/format'
+import { BusinessDateStringSchema, BusinessDateTimeStringSchema, OptionalNullableStringSchema } from './common'
 
 // ===== License 申请状态枚举 =====
 export const LicenseApplicationStatusSchema = z.enum([
@@ -37,6 +38,11 @@ export const LicenseTypeMap: Record<string, string> = {
   'OFFICIAL': '正式版'
 }
 
+const FutureBusinessDateStringSchema = BusinessDateStringSchema.refine(
+  (value) => value > getTodayLocalDate(),
+  '到期时间必须晚于今天'
+)
+
 // ===== License 申请基础类型（含补充字段）=====
 export const LicenseApplicationSchema = z.object({
   id: z.number().int().positive(),
@@ -46,13 +52,7 @@ export const LicenseApplicationSchema = z.object({
   deployment_info_id: z.number().int().nullable(),
   contract_id: z.number().int().nullable(),
   authorized_users: z.number().int().positive('使用人数必须大于0'),
-  expiry_date: z.string()
-    .refine((val) => {
-      const date = new Date(val)
-      const today = new Date()
-      today.setHours(0, 0, 0, 0)
-      return date > today
-    }, '到期时间必须晚于今天'),
+  expiry_date: BusinessDateStringSchema,
   license_type: LicenseTypeSchema,
   // 补充需求字段
   enterprise_id: z.string().nullable(),
@@ -98,6 +98,7 @@ export const LicenseApplicationCreateSchema = LicenseApplicationSchema.omit({
 }).extend({
   // 正式版必须关联合同（通过 refine 验证）
   contract_id: z.number().int().nullable(),
+  expiry_date: FutureBusinessDateStringSchema,
   // 补充需求：备注字段
   remark: z.string().nullable()
 }).refine(
@@ -121,15 +122,7 @@ export const LicenseApplicationUpdateSchema = z.object({
   deployment_info_id: z.number().int().nullable(),
   contract_id: z.number().int().nullable(),
   authorized_users: z.number().int().positive('使用人数必须大于0'),
-  expiry_date: z.string()
-    .refine((val) => {
-      if (!val) return true // 可选字段，允许为空
-      const date = new Date(val)
-      const today = new Date()
-      today.setHours(0, 0, 0, 0)
-      return date > today
-    }, '到期时间必须晚于今天')
-    .nullable(),
+  expiry_date: FutureBusinessDateStringSchema.nullable(),
   remark: z.string().nullable()
 })
 

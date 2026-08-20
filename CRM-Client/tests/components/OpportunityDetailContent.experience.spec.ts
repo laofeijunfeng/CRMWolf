@@ -3,6 +3,8 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
 import OpportunityDetailContent from '@/components/panels/OpportunityDetailContent.vue'
 import { LicenseType, OpportunityStatus, PurchaseType, type Opportunity } from '@/api/opportunity'
+import type { LicenseApplicationResponse } from '@/api/licenseApplication'
+import { getDateAfterDays } from '@/utils/format'
 
 const opportunityApi = vi.hoisted(() => ({
   getOpportunity: vi.fn(),
@@ -132,7 +134,7 @@ vi.mock('@/components/dialogs/OpportunityFormDialog.vue', () => ({
 const opportunityFixture = (): Opportunity => ({
   id: 88,
   opportunity_name: 'CRM 升级项目',
-  customer_id: 'CUS-19',
+  customer_id: 'cus_19',
   customer_name: '上海测试客户',
   procurement_method_id: null,
   total_amount: 320000,
@@ -153,10 +155,43 @@ const opportunityFixture = (): Opportunity => ({
   updated_time: '2026-07-15T00:00:00.000Z',
   version: 1,
   customer_info: {
-    id: 'CUS-19',
+    id: 'cus_19',
     account_name: '上海测试客户',
   },
 })
+
+
+function buildLicenseApplication(
+  overrides: Partial<LicenseApplicationResponse> = {}
+): LicenseApplicationResponse {
+  return {
+    id: 1,
+    team_id: 1,
+    application_number: 'LIC202608200001',
+    customer_id: 'cus_19',
+    deployment_info_id: null,
+    contract_id: null,
+    authorized_users: 10,
+    expiry_date: getDateAfterDays(14),
+    license_type: 'TRIAL',
+    enterprise_id: null,
+    supported_modules: null,
+    server_license_code: null,
+    client_license_code: null,
+    remark: null,
+    license_code: null,
+    status: 'ISSUED',
+    applicant_id: '9',
+    approver_id: null,
+    approved_time: null,
+    created_time: '2026-08-20T09:46:47',
+    last_modified_time: '2026-08-20T09:46:47',
+    customer_name: '上海测试客户',
+    deployment_name: null,
+    contract_name: null,
+    ...overrides,
+  }
+}
 
 describe('OpportunityDetailContent experience states', () => {
   beforeEach(() => {
@@ -165,7 +200,7 @@ describe('OpportunityDetailContent experience states', () => {
     contractApi.getContractByOpportunity.mockRejectedValue({ response: { status: 404 } })
     approvalGenericApi.submitApproval.mockResolvedValue({ approval_id: 99 })
     customerApi.getCustomerDetail.mockResolvedValue({
-      id: 'CUS-19',
+      id: 'cus_19',
       account_name: '上海测试客户',
       owner_id: '9',
     })
@@ -186,7 +221,7 @@ describe('OpportunityDetailContent experience states', () => {
       props: {
         opportunityId: 88,
         embedded: true,
-        customerContext: { customerId: 'CUS-19', customerName: '上海测试客户' },
+        customerContext: { customerId: 'cus_19', customerName: '上海测试客户' },
       },
     })
 
@@ -258,5 +293,63 @@ describe('OpportunityDetailContent experience states', () => {
 
     expect(approvalGenericApi.submitApproval).toHaveBeenCalledWith('OPPORTUNITY', 88)
     expect(toast.success).toHaveBeenCalledWith('商机已重新提交审批')
+  })
+
+  it('shows expired and valid customer licenses together on opportunity detail', async () => {
+    opportunityApi.getOpportunity.mockResolvedValue({
+      ...opportunityFixture(),
+      approval_phase: 'approved',
+    })
+    licenseApplicationApi.list.mockResolvedValue([
+      buildLicenseApplication({
+        id: 11,
+        application_number: 'LIC202607210001',
+        expiry_date: getDateAfterDays(-16),
+      }),
+      buildLicenseApplication({
+        id: 12,
+        application_number: 'LIC202608200001',
+        expiry_date: getDateAfterDays(14),
+      }),
+    ])
+
+    const wrapper = mount(OpportunityDetailContent, {
+      props: {
+        opportunityId: 88,
+        embedded: true,
+        customerContext: { customerId: 'cus_19', customerName: '上海测试客户' },
+      },
+    })
+
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.text()).toContain('LIC202607210001')
+    expect(wrapper.text()).toContain('LIC202608200001')
+    expect(wrapper.text()).toContain('已过期')
+    expect(wrapper.text()).not.toContain('暂无许可证申请')
+  })
+
+  it('does not pretend license applications are empty when the list request fails', async () => {
+    opportunityApi.getOpportunity.mockResolvedValue({
+      ...opportunityFixture(),
+      approval_phase: 'approved',
+    })
+    licenseApplicationApi.list.mockRejectedValue(new Error('network error'))
+
+    const wrapper = mount(OpportunityDetailContent, {
+      props: {
+        opportunityId: 88,
+        embedded: true,
+        customerContext: { customerId: 'cus_19', customerName: '上海测试客户' },
+      },
+    })
+
+    await flushPromises()
+    await nextTick()
+
+    expect(handleApiError).toHaveBeenCalled()
+    expect(wrapper.text()).not.toContain('暂无许可证申请')
+    expect(wrapper.text()).toContain('许可证申请加载失败')
   })
 })

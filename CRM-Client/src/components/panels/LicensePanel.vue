@@ -16,6 +16,7 @@ import licenseApplicationApi, { type LicenseApplicationResponse, type LicenseApp
 import type { DeploymentInfoResponse } from '@/api/deployment'
 import { toast } from 'vue-sonner'
 import { handleApiError } from '@/utils/errorHandler'
+import { getTodayLocalDate } from '@/utils/format'
 
 // ==================== Props & Emits ====================
 interface Props {
@@ -23,6 +24,7 @@ interface Props {
   customerName?: string | null
   licenseApplications: LicenseApplicationResponse[]
   deployments: DeploymentInfoResponse[]
+  loadError?: boolean
   showDeployments?: boolean
   showLicenseApplications?: boolean
   showAddDeployment?: boolean
@@ -31,6 +33,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   customerName: null,
+  loadError: false,
   showDeployments: true,
   showLicenseApplications: true,
   showAddDeployment: true,
@@ -95,12 +98,16 @@ const handleDownload = async (item: LicenseApplicationResponse): Promise<void> =
   }
 }
 
-// Format date
+const isExpired = (expiryDate: string): boolean => expiryDate < getTodayLocalDate()
+
 const formatDate = (dateStr: string): string => {
   if (dateStr === null || dateStr === undefined || dateStr === '') {
     return '-'
   }
-  const date = new Date(dateStr)
+  const date = new Date(`${dateStr}T00:00:00`)
+  if (Number.isNaN(date.getTime())) {
+    return '-'
+  }
   return date.toLocaleDateString('zh-CN')
 }
 
@@ -182,6 +189,14 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
       :items="licenseApplications"
       empty-text="暂无许可证申请"
     >
+      <template #empty>
+        <div
+          class="license-applications-empty"
+          :role="loadError ? 'alert' : 'status'"
+        >
+          {{ loadError ? '许可证申请加载失败' : '暂无许可证申请' }}
+        </div>
+      </template>
       <template #headerActions>
         <Button v-if="showApply" size="sm" @click="handleApply">
           <Plus class="w-4 h-4 mr-1" />
@@ -202,7 +217,10 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
           部署: {{ getDeploymentName(item.deployment_info_id, deployments) }}
         </span>
         <span> · </span>
-        <span class="inline-flex items-center gap-1">
+        <span
+          class="inline-flex items-center gap-1"
+          :class="{ 'text-wolf-danger-v2': isExpired(item.expiry_date) }"
+        >
           <Calendar class="w-3 h-3" />
           到期: {{ formatDate(item.expiry_date) }}
         </span>
@@ -221,6 +239,12 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
         </Badge>
         <Badge :class="getStatusInfo(item.status).color" class="text-xs">
           {{ getStatusInfo(item.status).label }}
+        </Badge>
+        <Badge
+          v-if="isExpired(item.expiry_date)"
+          class="text-xs bg-red-100 text-red-700"
+        >
+          已过期
         </Badge>
       </template>
 
@@ -282,5 +306,13 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
   font-size: $wolf-font-size-caption-v2;
   font-weight: $wolf-font-weight-medium-v2;
   white-space: nowrap;
+}
+
+.license-applications-empty {
+  width: 100%;
+  font-size: $wolf-font-size-body-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+  color: $wolf-text-tertiary-v2;
+  text-align: center;
 }
 </style>

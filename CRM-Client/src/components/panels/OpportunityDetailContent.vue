@@ -117,6 +117,7 @@ const relationLoading = ref(false)
 const paymentPlans = ref<PaymentPlanResponse[]>([])
 const invoiceApplications = ref<InvoiceApplicationResponse[]>([])
 const licenseApplications = ref<LicenseApplicationResponse[]>([])
+const licenseApplicationsLoadError = ref(false)
 const deployments = ref<DeploymentInfoResponse[]>([])
 const customerPermissionDetail = ref<CustomerDetailResponse | null>(null)
 const customerPermissionMembers = ref<CustomerMemberResponse[]>([])
@@ -359,6 +360,7 @@ async function fetchRelatedBusinessData(opportunityData: Opportunity): Promise<v
   paymentPlans.value = []
   invoiceApplications.value = []
   licenseApplications.value = []
+  licenseApplicationsLoadError.value = false
   deployments.value = []
   if (props.canEditCustomerContext === null) {
     customerPermissionDetail.value = null
@@ -385,7 +387,10 @@ async function fetchRelatedBusinessData(opportunityData: Opportunity): Promise<v
           order_dir: 'desc'
         }).catch(() => ({ items: [], total: 0, page: 1, page_size: 100 }))
         : Promise.resolve({ items: [], total: 0, page: 1, page_size: 100 }),
-      licenseApplicationApi.list(opportunityData.customer_id).catch(() => []),
+      licenseApplicationApi.list(opportunityData.customer_id).then(
+        (data) => ({ ok: true as const, data }),
+        (error: unknown) => ({ ok: false as const, error })
+      ),
       deploymentApi.list(opportunityData.customer_id).catch(() => []),
       props.canEditCustomerContext === null
         ? fetchCustomerPermissionContext(opportunityData.customer_id)
@@ -394,9 +399,16 @@ async function fetchRelatedBusinessData(opportunityData: Opportunity): Promise<v
 
     paymentPlans.value = plansData
     invoiceApplications.value = invoicesData.items ?? []
-    licenseApplications.value = hasApprovedContract
-      ? licensesData.filter(item => item.contract_id === null || item.contract_id === contract.id)
-      : licensesData.filter(item => item.contract_id === null)
+    if (licensesData.ok) {
+      licenseApplicationsLoadError.value = false
+      licenseApplications.value = hasApprovedContract
+        ? licensesData.data.filter(item => item.contract_id === null || item.contract_id === contract.id)
+        : licensesData.data.filter(item => item.contract_id === null)
+    } else {
+      licenseApplicationsLoadError.value = true
+      licenseApplications.value = []
+      handleApiError(licensesData.error, '获取许可证申请')
+    }
     deployments.value = deploymentsData
     if (customerPermissionData !== null) {
       customerPermissionDetail.value = customerPermissionData.detail
@@ -1165,6 +1177,7 @@ watch(approvalPhase, phase => {
               :customer-name="displayCustomerName"
               :license-applications="licenseApplications"
               :deployments="deployments"
+              :load-error="licenseApplicationsLoadError"
               :show-deployments="false"
               :show-apply="canCreateLicenseApplication"
               @add-deployment="handleAddDeployment"
