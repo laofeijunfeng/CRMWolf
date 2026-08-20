@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from app.core.database import get_db
+from app.core.list_query import optional_request_list_query, run_or_400
 from app.core.deps import get_current_active_user, get_current_user_team
 from app.crud.permission import permission_crud
 from app.crud.sales_commitment import (
@@ -70,13 +71,20 @@ def list_follow_up_tasks(
     due_window: str | None = Query(None),
     customer_id: str | None = Query(None, description="客户 public_id"),
     owner_scope: str = Query("mine", description="mine 只查当前 owner，customer 查客户范围"),
+    skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
+    filters: str | None = Query(None, description="通用筛选条件 JSON"),
+    sorts: str | None = Query(None, description="通用排序条件 JSON"),
     team_id: int = Depends(get_current_user_team),
     current_user=Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> FollowUpTaskListResponse:
+    parsed_filters, parsed_sorts = optional_request_list_query(
+        filters_raw=filters,
+        sorts_raw=sorts,
+    )
     try:
-        payload = follow_up_task_query_service.list_tasks(
+        payload = run_or_400(lambda: follow_up_task_query_service.list_tasks(
             db,
             team_id=team_id,
             user_id=current_user.id,
@@ -84,8 +92,11 @@ def list_follow_up_tasks(
             due_window=due_window,
             customer_public_id=customer_id,
             owner_scope=owner_scope,
+            skip=skip,
             limit=limit,
-        )
+            filters=parsed_filters,
+            sorts=parsed_sorts,
+        ))
         return FollowUpTaskListResponse.model_validate(payload)
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc

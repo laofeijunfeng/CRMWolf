@@ -76,6 +76,7 @@ export interface LeadListParams {
   limit?: number
   keyword?: string
   filters?: string | null
+  sorts?: string
   status?: number
   source?: string
   city?: string
@@ -209,7 +210,7 @@ export const leadApi = {
     return request.post<Lead>(`/v1/leads/${id}/mark-invalid`, data)
   },
 
-  getPublicLeads: (params?: Pick<LeadListParams, 'skip' | 'limit' | 'filters'>): Promise<Lead[] | PaginatedResponse<Lead>> => {
+  getPublicLeads: (params?: Pick<LeadListParams, 'skip' | 'limit' | 'filters' | 'sorts'>): Promise<Lead[] | PaginatedResponse<Lead>> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
     return request.get<Lead[] | PaginatedResponse<Lead>>('/v1/leads/public/list', { params })
   },

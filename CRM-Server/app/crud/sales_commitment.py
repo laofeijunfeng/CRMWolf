@@ -27,6 +27,15 @@ from app.models.sales_commitment import (
     SalesCommitmentStatus,
 )
 from app.schemas.system_recovery import FollowUpConfirmationDeliveryRecoveryCandidate
+from app.core.list_query import (
+    FilterCondition,
+    ListQueryContext,
+    SortCondition,
+    paginate_optional_list_query,
+    uses_unified_list_query,
+    without_filter_field,
+)
+from app.core.list_query.catalogs import FOLLOW_UP_TASKS_LIST_QUERY_CATALOG
 from app.utils.time import (
     DUE_AT_GRANULARITY_DATETIME,
     FOLLOW_UP_TASK_DUE_WINDOW_OVERDUE,
@@ -349,6 +358,8 @@ class FollowUpTaskCRUD:
         customer_id: int | None = None,
         skip: int = 0,
         limit: int = 100,
+        filters: list[FilterCondition] | None = None,
+        sorts: list[SortCondition] | None = None,
     ) -> tuple[list[FollowUpTask], int]:
         query = db.query(FollowUpTask).filter(
             FollowUpTask.team_id == team_id,
@@ -364,6 +375,17 @@ class FollowUpTaskCRUD:
             due_window_timezone=due_window_timezone,
             customer_id=customer_id,
         )
+        if uses_unified_list_query(filters=filters, sorts=sorts):
+            effective_filters = without_filter_field(filters, "status_label") if statuses is not None else filters
+            return paginate_optional_list_query(
+                query,
+                FOLLOW_UP_TASKS_LIST_QUERY_CATALOG,
+                skip=skip,
+                limit=limit,
+                filters=effective_filters,
+                sorts=sorts,
+                context=ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id),
+            )
         total = query.count()
         rows = query.order_by(FollowUpTask.due_at.asc(), FollowUpTask.id.asc()).offset(skip).limit(limit).all()
         return rows, total
@@ -383,6 +405,8 @@ class FollowUpTaskCRUD:
         due_window_timezone: str | None = None,
         skip: int = 0,
         limit: int = 100,
+        filters: list[FilterCondition] | None = None,
+        sorts: list[SortCondition] | None = None,
     ) -> tuple[list[FollowUpTask], int]:
         query = db.query(FollowUpTask).filter(
             FollowUpTask.team_id == team_id,
@@ -399,6 +423,17 @@ class FollowUpTaskCRUD:
             due_window_now=due_window_now,
             due_window_timezone=due_window_timezone,
         )
+        if uses_unified_list_query(filters=filters, sorts=sorts):
+            effective_filters = without_filter_field(filters, "status_label") if statuses is not None else filters
+            return paginate_optional_list_query(
+                query,
+                FOLLOW_UP_TASKS_LIST_QUERY_CATALOG,
+                skip=skip,
+                limit=limit,
+                filters=effective_filters,
+                sorts=sorts,
+                context=ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id),
+            )
         total = query.count()
         rows = query.order_by(FollowUpTask.due_at.asc(), FollowUpTask.id.asc()).offset(skip).limit(limit).all()
         return rows, total

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.constants.business_types import BusinessType
 from app.core.database import get_db
+from app.core.list_query import optional_request_list_query, run_or_400
 from app.core.deps import (
     check_customer_edit_permission,
     check_customer_view_permission,
@@ -327,6 +328,8 @@ def list_invoice_applications(
     created_time_end: Optional[date] = Query(None, description="创建时间结束"),
     order_by: Optional[str] = Query(None, description="排序字段"),
     order_dir: Optional[str] = Query(None, description="排序方向 asc/desc"),
+    filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
+    sorts: Optional[str] = Query(None, description="通用排序条件 JSON"),
     page: Optional[int] = Query(None, ge=1, description="页码（兼容前端 page/page_size）"),
     page_size: Optional[int] = Query(None, ge=1, le=100, description="每页记录数（兼容前端 page/page_size）"),
     me: bool = Query(False, description="是否只查询当前用户申请的数据"),
@@ -373,7 +376,12 @@ def list_invoice_applications(
         customer = check_customer_view_permission(customer_id, team_id, current_user, db)
         internal_customer_id = customer.id
 
-    applications, total = invoice_application_crud.list_applications(
+    parsed_filters, parsed_sorts = optional_request_list_query(
+        filters_raw=filters,
+        sorts_raw=sorts,
+    )
+
+    applications, total = run_or_400(lambda: invoice_application_crud.list_applications(
         db,
         team_id=team_id,
         skip=effective_skip,
@@ -393,7 +401,9 @@ def list_invoice_applications(
         created_time_end=created_time_end,
         order_by=order_by,
         order_dir=order_dir,
-    )
+        filters=parsed_filters,
+        sorts=parsed_sorts,
+    ))
 
     populated_applications = [_populate_application_info(db, app, team_id) for app in applications]
 

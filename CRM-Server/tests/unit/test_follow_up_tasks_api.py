@@ -791,3 +791,45 @@ def test_transition_observability_summary_requires_debug_permission_and_returns_
     assert payload["evaluation_runs"]["latest_run"] is None
     assert payload["metric_gaps"] == []
     assert "task_id" not in str(payload)
+
+
+def test_list_follow_up_tasks_applies_server_filters_sorts_count_and_pagination(client, db_session):
+    first = _create_task(db_session, task_id=801)
+    second = _create_task(db_session, task_id=802, customer_id=2, source_activity_id=102)
+    first.title = "回访 Alpha 预算"
+    first.due_at = datetime(2026, 8, 21, 10, 0, 0)
+    second.title = "回访 Beta 合同"
+    second.due_at = datetime(2026, 8, 22, 10, 0, 0)
+    db_session.commit()
+
+    response = client.get(
+        "/v1/follow-up-tasks",
+        params={
+            "status": "all",
+            "skip": 0,
+            "limit": 1,
+            "filters": '[{"field":"tracking_content","op":"contains","value":"回访"}]',
+            "sorts": '[{"field":"tracking_time","direction":"desc"}]',
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 2
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["id"] == second.public_id
+
+
+def test_list_follow_up_tasks_rejects_unknown_unified_query_field(client, db_session):
+    _create_task(db_session, task_id=803)
+
+    response = client.get(
+        "/v1/follow-up-tasks",
+        params={
+            "filters": '[{"field":"missing_field","op":"eq","value":"x"}]',
+            "sorts": "[]",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "missing_field" in response.json()["detail"]

@@ -6,7 +6,7 @@ import DataTable from '../DataTable.vue'
 import SelectField from '../SelectField.vue'
 import type { ListFieldDefinition } from '../listFieldCatalog'
 
-const fields: ListFieldDefinition[] = [{ key: 'name', label: '名称', column: true }]
+const fields: ListFieldDefinition[] = [{ key: 'name', label: '名称', type: 'text', column: true }]
 const data = [{ id: 1, name: '审批单' }]
 const readView = (name: string): string => readFileSync(
   resolve(process.cwd(), `src/views/${name}.vue`),
@@ -49,9 +49,9 @@ describe('DataTable row interaction', () => {
     const wrapper = mount(DataTable, {
       props: {
         fields: [
-          { key: 'name', label: '名称', column: true },
-          { key: 'status', label: '状态', column: true },
-          { key: 'owner', label: '负责人', column: true }
+          { key: 'name', label: '名称', type: 'text', column: true },
+          { key: 'status', label: '状态', type: 'text', column: true },
+          { key: 'owner', label: '负责人', type: 'text', column: true }
         ] satisfies ListFieldDefinition[],
         data: [{ id: 1, name: '合同 A', status: '审批中', owner: '张三' }],
         total: 1,
@@ -353,8 +353,8 @@ describe('DataTable row context menu', () => {
     const wrapper = mount(DataTable, {
       props: {
         fields: [
-          { key: 'name', label: '名称', column: { width: '160px' } },
-          { key: 'created_time', label: '创建时间', column: { width: '160px' } }
+          { key: 'name', label: '名称', type: 'text', column: { width: '160px' } },
+          { key: 'created_time', label: '创建时间', type: 'date', column: { width: '160px' } }
         ] satisfies ListFieldDefinition[],
         data: [{ id: 1, name: '审批单', created_time: '2026-08-19' }],
         total: 1,

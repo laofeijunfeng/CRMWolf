@@ -20,7 +20,8 @@ import {
   SelectValue
 } from '@/components/ui/select'
 import { formatLocalDate } from '@/utils/format'
-import type { ListFilterCondition, ListFilterField, ListFilterFieldType, ListFilterOperator } from './listFilterTypes'
+import { listFilterOperatorsByType, normalizeListFilterOperator } from './listFilterTypes'
+import type { ListFilterCondition, ListFilterField, ListFilterOperator, ListFilterOperatorOption } from './listFilterTypes'
 
 interface EditableCondition {
   id: string
@@ -50,36 +51,6 @@ const emit = defineEmits<{
 const open = ref(false)
 const localConditions = ref<EditableCondition[]>([])
 
-const operatorsByType: Record<ListFilterFieldType, { value: ListFilterOperator, label: string }[]> = {
-  text: [
-    { value: 'contains', label: '包含' },
-    { value: 'not_contains', label: '不包含' },
-    { value: 'eq', label: '等于' },
-    { value: 'neq', label: '不等于' },
-    { value: 'is_empty', label: '为空' },
-    { value: 'is_not_empty', label: '不为空' }
-  ],
-  enum: [
-    { value: 'contains', label: '包含' },
-    { value: 'not_contains', label: '不包含' },
-    { value: 'is_empty', label: '为空' },
-    { value: 'is_not_empty', label: '不为空' }
-  ],
-  date: [
-    { value: 'eq', label: '等于' },
-    { value: 'after', label: '晚于' },
-    { value: 'before', label: '早于' },
-    { value: 'is_empty', label: '为空' },
-    { value: 'is_not_empty', label: '不为空' }
-  ],
-  number: [
-    { value: 'eq', label: '等于' },
-    { value: 'neq', label: '不等于' },
-    { value: 'is_empty', label: '为空' },
-    { value: 'is_not_empty', label: '不为空' }
-  ]
-}
-
 const firstField = computed(() => props.fields[0])
 
 const activeFilterCount = computed(() => normalizeConditions(props.modelValue).length)
@@ -90,9 +61,9 @@ function getField(fieldKey: string): ListFilterField | undefined {
   return props.fields.find((field) => field.key === fieldKey)
 }
 
-function getOperatorOptions(fieldKey: string): { value: ListFilterOperator, label: string }[] {
+function getOperatorOptions(fieldKey: string): readonly ListFilterOperatorOption[] {
   const field = getField(fieldKey) ?? firstField.value
-  return field ? operatorsByType[field.type] : []
+  return field ? listFilterOperatorsByType[field.type] : []
 }
 
 function hasValueInput(condition: EditableCondition): boolean {
@@ -118,18 +89,24 @@ function handleEnumValueChange(condition: EditableCondition, value: string[]): v
 
 function createCondition(condition?: ListFilterCondition): EditableCondition {
   const field = getField(condition?.field ?? '') ?? firstField.value
-  const operatorOptions = field ? operatorsByType[field.type] : []
-  const op = condition?.op && operatorOptions.some((item) => item.value === condition.op)
-    ? condition.op
+  const operatorOptions = field ? listFilterOperatorsByType[field.type] : []
+  const op = field !== undefined && condition?.op !== undefined
+    ? normalizeListFilterOperator(field.type, condition.op) ?? operatorOptions[0]?.value ?? 'contains'
     : operatorOptions[0]?.value ?? 'contains'
+  const rawValue = condition?.value
+  const value = Array.isArray(rawValue)
+    ? rawValue.map((item) => String(item))
+    : rawValue == null
+      ? ''
+      : field?.type === 'enum'
+        ? [String(rawValue)]
+        : String(rawValue)
 
   return {
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     field: field?.key ?? '',
     op,
-    value: Array.isArray(condition?.value)
-      ? condition.value.map((item) => String(item))
-      : condition?.value == null ? '' : String(condition.value)
+    value
   }
 }
 
@@ -140,8 +117,8 @@ function normalizeConditions(conditions: ListFilterCondition[] | EditableConditi
     const field = getField(condition.field)
     if (!field) continue
 
-    const op = condition.op
-    if (!getOperatorOptions(field.key).some((item) => item.value === op)) continue
+    const op = normalizeListFilterOperator(field.type, condition.op)
+    if (op === undefined) continue
 
     if (op === 'is_empty' || op === 'is_not_empty') {
       result.push({ field: field.key, op, value: null })

@@ -1,0 +1,1368 @@
+{
+  "approvals": {
+    "application_number": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "business_type": {
+      "type": "enum",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "in",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains",
+        "not_in"
+      ]
+    },
+    "created_time": {
+      "type": "date",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "after",
+        "before",
+        "eq",
+        "is_empty",
+        "is_not_empty"
+      ]
+    },
+    "entity_amount": {
+      "type": "number",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "eq",
+        "gt",
+        "gte",
+        "is_empty",
+        "is_not_empty",
+        "lt",
+        "lte",
+        "neq"
+      ]
+    },
+    "entity_name": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "overdue_hours": {
+      "type": "number",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "eq",
+        "gt",
+        "gte",
+        "is_empty",
+        "is_not_empty",
+        "lt",
+        "lte",
+        "neq"
+      ]
+    },
+    "status": {
+      "type": "enum",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "in",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains",
+        "not_in"
+      ]
+    },
+    "submitter_name": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    }
+  },
+  "contracts": {
+    "contract_name": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "contract_number": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "created_time": {
+      "type": "date",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "after",
+        "before",
+        "eq",
+        "is_empty",
+        "is_not_empty"
+      ]
+    },
+    "customer_name": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "effective_date": {
+      "type": "date",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "after",
+        "before",
+        "eq",
+        "is_empty",
+        "is_not_empty"
+      ]
+    },
+    "expiry_date": {
+      "type": "date",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "after",
+        "before",
+        "eq",
+        "is_empty",
+        "is_not_empty"
+      ]
+    },
+    "license_authorized_users": {
+      "type": "number",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "eq",
+        "gt",
+        "gte",
+        "is_empty",
+        "is_not_empty",
+        "lt",
+        "lte",
+        "neq"
+      ]
+    },
+    "license_expiry_date": {
+      "type": "date",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "after",
+        "before",
+        "eq",
+        "is_empty",
+        "is_not_empty"
+      ]
+    },
+    "license_type": {
+      "type": "enum",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "in",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains",
+        "not_in"
+      ]
+    },
+    "opportunity_name": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "owner_id": {
+      "type": "enum",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "in",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains",
+        "not_in"
+      ]
+    },
+    "purchase_type": {
+      "type": "enum",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "in",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains",
+        "not_in"
+      ]
+    },
+    "signing_date": {
+      "type": "date",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "after",
+        "before",
+        "eq",
+        "is_empty",
+        "is_not_empty"
+      ]
+    },
+    "standard_unit_price": {
+      "type": "number",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "eq",
+        "gt",
+        "gte",
+        "is_empty",
+        "is_not_empty",
+        "lt",
+        "lte",
+        "neq"
+      ]
+    },
+    "status": {
+      "type": "enum",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "in",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains",
+        "not_in"
+      ]
+    },
+    "subscription_years": {
+      "type": "number",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "eq",
+        "gt",
+        "gte",
+        "is_empty",
+        "is_not_empty",
+        "lt",
+        "lte",
+        "neq"
+      ]
+    },
+    "total_amount": {
+      "type": "number",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "eq",
+        "gt",
+        "gte",
+        "is_empty",
+        "is_not_empty",
+        "lt",
+        "lte",
+        "neq"
+      ]
+    }
+  },
+  "customers": {
+    "account_name": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "city": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "collaborators": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "company_scale": {
+      "type": "enum",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "in",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains",
+        "not_in"
+      ]
+    },
+    "created_time": {
+      "type": "date",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "after",
+        "before",
+        "eq",
+        "is_empty",
+        "is_not_empty"
+      ]
+    },
+    "creator": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "default_procurement_method": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "industry": {
+      "type": "enum",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "in",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains",
+        "not_in"
+      ]
+    },
+    "license_expiry_date": {
+      "type": "date",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "after",
+        "before",
+        "eq",
+        "is_empty",
+        "is_not_empty"
+      ]
+    },
+    "license_status": {
+      "type": "enum",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "in",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains",
+        "not_in"
+      ]
+    },
+    "owner_id": {
+      "type": "enum",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "in",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains",
+        "not_in"
+      ]
+    },
+    "returned_time": {
+      "type": "date",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "after",
+        "before",
+        "eq",
+        "is_empty",
+        "is_not_empty"
+      ]
+    },
+    "source": {
+      "type": "enum",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "in",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains",
+        "not_in"
+      ]
+    },
+    "status": {
+      "type": "enum",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "in",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains",
+        "not_in"
+      ]
+    }
+  },
+  "follow_up_tasks": {
+    "customer_name": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "status_label": {
+      "type": "enum",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "in",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains",
+        "not_in"
+      ]
+    },
+    "tracking_content": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "tracking_time": {
+      "type": "date",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "after",
+        "before",
+        "eq",
+        "is_empty",
+        "is_not_empty"
+      ]
+    }
+  },
+  "invoices": {
+    "applicant_name": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "application_number": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "contract_name": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "created_time": {
+      "type": "date",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "after",
+        "before",
+        "eq",
+        "is_empty",
+        "is_not_empty"
+      ]
+    },
+    "customer_name": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "invoice_amount": {
+      "type": "number",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "eq",
+        "gt",
+        "gte",
+        "is_empty",
+        "is_not_empty",
+        "lt",
+        "lte",
+        "neq"
+      ]
+    },
+    "invoice_effective_status": {
+      "type": "enum",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "in",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains",
+        "not_in"
+      ]
+    },
+    "invoice_title_text": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "invoice_type": {
+      "type": "enum",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "in",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains",
+        "not_in"
+      ]
+    },
+    "issued_time": {
+      "type": "date",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "after",
+        "before",
+        "eq",
+        "is_empty",
+        "is_not_empty"
+      ]
+    },
+    "keyword": {
+      "type": "text",
+      "filterable": true,
+      "sortable": false,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "status": {
+      "type": "enum",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "in",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains",
+        "not_in"
+      ]
+    }
+  },
+  "leads": {
+    "city": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "company_scale": {
+      "type": "enum",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "in",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains",
+        "not_in"
+      ]
+    },
+    "contact_name": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "contact_phone": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "created_time": {
+      "type": "date",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "after",
+        "before",
+        "eq",
+        "is_empty",
+        "is_not_empty"
+      ]
+    },
+    "last_modified_time": {
+      "type": "date",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "after",
+        "before",
+        "eq",
+        "is_empty",
+        "is_not_empty"
+      ]
+    },
+    "lead_name": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "owner_id": {
+      "type": "enum",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "in",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains",
+        "not_in"
+      ]
+    },
+    "source": {
+      "type": "enum",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "in",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains",
+        "not_in"
+      ]
+    },
+    "status": {
+      "type": "enum",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "in",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains",
+        "not_in"
+      ]
+    }
+  },
+  "opportunities": {
+    "approval_phase": {
+      "type": "enum",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "in",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains",
+        "not_in"
+      ]
+    },
+    "created_time": {
+      "type": "date",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "after",
+        "before",
+        "eq",
+        "is_empty",
+        "is_not_empty"
+      ]
+    },
+    "customer_name": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "expected_closing_date": {
+      "type": "date",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "after",
+        "before",
+        "eq",
+        "is_empty",
+        "is_not_empty"
+      ]
+    },
+    "license_type": {
+      "type": "enum",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "in",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains",
+        "not_in"
+      ]
+    },
+    "opportunity_name": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "owner_id": {
+      "type": "enum",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "in",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains",
+        "not_in"
+      ]
+    },
+    "purchase_type": {
+      "type": "enum",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "in",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains",
+        "not_in"
+      ]
+    },
+    "stage_name": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "status": {
+      "type": "enum",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "in",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains",
+        "not_in"
+      ]
+    },
+    "total_amount": {
+      "type": "number",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "eq",
+        "gt",
+        "gte",
+        "is_empty",
+        "is_not_empty",
+        "lt",
+        "lte",
+        "neq"
+      ]
+    },
+    "user_count": {
+      "type": "number",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "eq",
+        "gt",
+        "gte",
+        "is_empty",
+        "is_not_empty",
+        "lt",
+        "lte",
+        "neq"
+      ]
+    },
+    "win_probability": {
+      "type": "number",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "eq",
+        "gt",
+        "gte",
+        "is_empty",
+        "is_not_empty",
+        "lt",
+        "lte",
+        "neq"
+      ]
+    }
+  },
+  "payment_plans": {
+    "contract_name": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "customer_name": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "due_date": {
+      "type": "date",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "after",
+        "before",
+        "eq",
+        "is_empty",
+        "is_not_empty"
+      ]
+    },
+    "keyword": {
+      "type": "text",
+      "filterable": true,
+      "sortable": false,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "plan_number": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "planned_amount": {
+      "type": "number",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "eq",
+        "gt",
+        "gte",
+        "is_empty",
+        "is_not_empty",
+        "lt",
+        "lte",
+        "neq"
+      ]
+    },
+    "stage_name": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "status": {
+      "type": "enum",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "in",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains",
+        "not_in"
+      ]
+    }
+  },
+  "payment_records": {
+    "actual_amount": {
+      "type": "number",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "eq",
+        "gt",
+        "gte",
+        "is_empty",
+        "is_not_empty",
+        "lt",
+        "lte",
+        "neq"
+      ]
+    },
+    "actual_payer_name": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "approval_status": {
+      "type": "enum",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "in",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains",
+        "not_in"
+      ]
+    },
+    "commission_member_name": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "confirmation_status": {
+      "type": "enum",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "in",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains",
+        "not_in"
+      ]
+    },
+    "contract_name": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "created_time": {
+      "type": "date",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "after",
+        "before",
+        "eq",
+        "is_empty",
+        "is_not_empty"
+      ]
+    },
+    "customer_name": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "invoice_title_text": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "keyword": {
+      "type": "text",
+      "filterable": true,
+      "sortable": false,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "owner_name": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "payment_date": {
+      "type": "date",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "after",
+        "before",
+        "eq",
+        "is_empty",
+        "is_not_empty"
+      ]
+    },
+    "record_number": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    }
+  }
+}

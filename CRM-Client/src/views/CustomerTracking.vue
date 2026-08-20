@@ -38,6 +38,7 @@ import { usePageTitle } from '@/composables/usePageTitle'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
 import { formatLocalDate } from '@/utils/format'
+import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
 
 usePageTitle()
 
@@ -80,6 +81,7 @@ const activeSorts = ref<ListSortCondition[]>([])
 const activeColumns = ref<ViewPreferenceConfig['columns']>([])
 const page = ref(1)
 const pageSize = ref(20)
+const total = ref(0)
 
 const tabs = computed<TabItem[]>(() => [
   { key: 'all', label: '所有追踪' },
@@ -153,8 +155,6 @@ const rows = computed<TrackingRow[]>(() => tasks.value.map((task) => ({
   status_label: hasPendingConfirmation(task) ? '需确认' : statusLabel(task.status),
 })))
 
-const filteredRows = computed(() => applySorts(applyFilters(rows.value, activeFilters.value), activeSorts.value))
-const pagedRows = computed(() => filteredRows.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
 const selectedCustomerId = computed(() => selectedTask.value?.customer?.id ?? selectedTask.value?.customer?.public_id ?? null)
 const selectedPendingConfirmation = computed(() => firstPendingConfirmation(selectedTask.value))
 
@@ -166,15 +166,21 @@ function taskStatusForTab(tab: string): FollowUpTaskStatusFilter {
 
 async function fetchTasks(): Promise<void> {
   const status = taskStatusForTab(activeTab.value)
+  const effectiveFilters = status === 'all'
+    ? activeFilters.value
+    : withoutFilterFields(activeFilters.value, ['status_label'])
 
   loading.value = true
   try {
     const response = await followUpTaskApi.list({
       status,
       owner_scope: 'mine',
-      limit: 100,
+      skip: (page.value - 1) * pageSize.value,
+      limit: pageSize.value,
+      ...serializeListQuery({ filters: effectiveFilters, sorts: activeSorts.value })
     })
     tasks.value = response.items
+    total.value = response.total
   } catch (error) {
     handleApiError(error, '获取客户追踪')
   } finally {
@@ -463,53 +469,31 @@ function getTrackingDueTooltipRows(task: FollowUpTaskItem): { label: string; val
   return rows
 }
 
-function applyFilters(items: TrackingRow[], filters: ListFilterCondition[]): TrackingRow[] {
-  return filters.reduce((current, filter) => {
-    return current.filter((item) => {
-      const value = String(item[filter.field as keyof TrackingRow] ?? '')
-      const target = Array.isArray(filter.value) ? filter.value.map(String) : String(filter.value ?? '')
-      if (filter.op === 'eq') return Array.isArray(target) ? target.includes(value) : value === target
-      if (filter.op === 'neq') return value !== target
-      if (filter.op === 'is_empty') return value.trim() === ''
-      if (filter.op === 'is_not_empty') return value.trim() !== ''
-      return value.toLowerCase().includes(String(target).toLowerCase())
-    })
-  }, items)
-}
-
-function applySorts(items: TrackingRow[], sorts: ListSortCondition[]): TrackingRow[] {
-  if (sorts.length === 0) return items
-  const [sort] = sorts
-  if (!sort) return items
-  return [...items].sort((a, b) => {
-    const result = sort.field === 'tracking_time'
-      ? (parseDate(a.due_at)?.getTime() ?? 0) - (parseDate(b.due_at)?.getTime() ?? 0)
-      : String(a[sort.field as keyof TrackingRow] ?? '').localeCompare(String(b[sort.field as keyof TrackingRow] ?? ''))
-    return sort.direction === 'desc' ? -result : result
-  })
-}
-
 function handleFilterApply(filters: ListFilterCondition[]): void {
   activeFilters.value = filters
   page.value = 1
   void customFilterViews.updateActiveCustomViewConfig()
+  void fetchTasks()
 }
 
 function handleSortApply(sorts: ListSortCondition[]): void {
   activeSorts.value = sorts
   page.value = 1
   void customFilterViews.updateActiveCustomViewConfig()
+  void fetchTasks()
 }
 
 function handleFilterReset(): void {
   activeFilters.value = []
   page.value = 1
+  void fetchTasks()
 }
 
 function handleSortReset(): void {
   activeSorts.value = []
   page.value = 1
   void customFilterViews.updateActiveCustomViewConfig()
+  void fetchTasks()
 }
 
 function handleColumnConfigSave(config: ViewPreferenceConfig): void {
@@ -561,11 +545,11 @@ watchEffect(() => {
   <div class="customer-tracking-page">
     <DataTable
       :fields="fields"
-      :data="pagedRows"
+      :data="rows"
       :loading="loading"
       :page="page"
       :page-size="pageSize"
-      :total="filteredRows.length"
+      :total="total"
       height="calc(100vh - 121px)"
       row-key="public_id"
       row-interactive
@@ -583,8 +567,8 @@ watchEffect(() => {
       :column-preference-mode="columnPreferenceMode"
       filter-view-save-enabled
       :filter-view-save-loading="customFilterViews.saving.value"
-      @update:page="page = $event"
-      @update:page-size="pageSize = $event"
+      @update:page="page = $event; fetchTasks()"
+      @update:page-size="pageSize = $event; page = 1; fetchTasks()"
       @filter-apply="handleFilterApply"
       @filter-reset="handleFilterReset"
       @filter-save-view="customFilterViews.saveAsCustomView"

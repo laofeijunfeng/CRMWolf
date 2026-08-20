@@ -36,8 +36,7 @@ import { usePageTitle } from '@/composables/usePageTitle'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
 import { isOpportunityPublicId } from '@/utils/opportunityRoutes'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
-import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
-import { getPrimarySort } from '@/utils/listSorts'
+import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
 import { customerDetailRoute } from '@/utils/customerRoutes'
 import { normalizePaginatedResponse } from '@/types/pagination'
 import OpportunityDetailSheet from './OpportunityDetailSheet.vue'
@@ -122,7 +121,7 @@ const fields = computed<ListFieldDefinition[]>(() => {
         label: owner.name
       })),
       column: { width: '100px' },
-      filter: ownerFilterOptions.value.length > 0 ? { apiKey: 'owner_id' } : false,
+      filter: { apiKey: 'owner_id' },
       sort: { apiKey: 'owner_id' }
     },
     { key: 'customer_name', label: '客户名称', type: 'text', column: { width: '150px' }, filter: true, sort: true },
@@ -131,9 +130,10 @@ const fields = computed<ListFieldDefinition[]>(() => {
       label: '预计金额',
       type: 'number',
       column: { align: 'right', width: '130px' },
+      filter: true,
       sort: true
     },
-    { key: 'user_count', label: '用户数', column: { align: 'right', width: '100px' } },
+    { key: 'user_count', label: '用户数', type: 'number', column: { align: 'right', width: '100px' } },
     {
       key: 'license_type',
       label: '授权模式',
@@ -168,7 +168,7 @@ const fields = computed<ListFieldDefinition[]>(() => {
       filter: { apiKey: 'stage_name' },
       sort: { apiKey: 'stage_name' }
     },
-    { key: 'win_probability', label: '赢率', column: { align: 'right', width: '80px' } },
+    { key: 'win_probability', label: '赢率', type: 'number', column: { align: 'right', width: '80px' } },
     {
       key: 'status',
       label: '状态',
@@ -178,8 +178,19 @@ const fields = computed<ListFieldDefinition[]>(() => {
       filter: true,
       sort: true
     },
-    { key: 'approval_phase', label: '审批', column: { align: 'center', width: '110px' } },
-    { key: 'created_time', label: '创建时间', type: 'date', sort: true },
+    {
+      key: 'approval_phase',
+      label: '审批',
+      type: 'enum',
+      options: [
+        { value: 'draft', label: '草稿' },
+        { value: 'pending_review', label: '审批中' },
+        { value: 'approved', label: '已通过' },
+        { value: 'rejected', label: '已驳回' }
+      ],
+      column: { align: 'center', width: '110px' }
+    },
+    { key: 'created_time', label: '创建时间', type: 'date', column: { width: '160px' } },
   ]
   return catalog
 })
@@ -261,46 +272,21 @@ const fetchOwnerFilterOptions = async (): Promise<void> => {
 const fetchOpportunities = async (): Promise<void> => {
   loading.value = true
   try {
-    const keyword = getFilterValue(activeFilters.value, 'opportunity_name')
-    let status: string | number | null = getDelimitedFilterValues(activeFilters.value, 'status')
-    const expectedClosingDateBounds = getDateBounds(activeFilters.value, 'expected_closing_date')
-    const licenseType = getDelimitedFilterValues(activeFilters.value, 'license_type')
-    const purchaseType = getDelimitedFilterValues(activeFilters.value, 'purchase_type')
-
-    // 快捷筛选标签覆盖
-    if (activeTab.value === 'active') {
-      status = 0
-    } else if (activeTab.value === 'won') {
-      status = 1
-    } else if (activeTab.value === 'lost') {
-      status = 2
-    }
-
+    const tabStatus = activeTab.value === 'active'
+      ? 0
+      : activeTab.value === 'won'
+        ? 1
+        : activeTab.value === 'lost'
+          ? 2
+          : null
+    const effectiveFilters = tabStatus === null
+      ? activeFilters.value
+      : withoutFilterFields(activeFilters.value, ['status'])
     const params: OpportunityListParams = {
       skip: (pagination.current - 1) * pagination.pageSize,
       limit: pagination.pageSize,
-      keyword,
-      status,
-      status_exclude: getDelimitedFilterValues(activeFilters.value, 'status', ['neq', 'not_contains']),
-      customer_keyword: getFilterValue(activeFilters.value, 'customer_name'),
-      stage_name: getFilterValue(activeFilters.value, 'stage_name'),
-      owner_id: getDelimitedFilterValues(activeFilters.value, 'owner_id'),
-      owner_id_exclude: getDelimitedFilterValues(activeFilters.value, 'owner_id', ['neq', 'not_contains']),
-      ...getPrimarySort(activeSorts.value)
-    }
-    if (licenseType !== null) {
-      params.license_type = licenseType
-    }
-    if (purchaseType !== null) {
-      params.purchase_type = purchaseType
-    }
-    params.license_type_exclude = getDelimitedFilterValues(activeFilters.value, 'license_type', ['neq', 'not_contains'])
-    params.purchase_type_exclude = getDelimitedFilterValues(activeFilters.value, 'purchase_type', ['neq', 'not_contains'])
-    if (expectedClosingDateBounds.start !== undefined) {
-      params.expected_closing_date_start = expectedClosingDateBounds.start
-    }
-    if (expectedClosingDateBounds.end !== undefined) {
-      params.expected_closing_date_end = expectedClosingDateBounds.end
+      status: tabStatus,
+      ...serializeListQuery({ filters: effectiveFilters, sorts: activeSorts.value })
     }
 
     const response = await opportunityApi.getOpportunities(params)

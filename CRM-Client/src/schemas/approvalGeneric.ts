@@ -182,6 +182,8 @@ export const ApprovalListResponseSchema = z.object({
 export type ApprovalListResponse = z.infer<typeof ApprovalListResponseSchema>
 
 export const ApprovalListQuerySchema = z.object({
+  filters: z.string().optional(),
+  sorts: z.string().optional(),
   tab: ApprovalTabSchema,
   business_type: z.string().optional(),
   business_type_exclude: z.string().optional(),

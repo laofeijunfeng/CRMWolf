@@ -14,6 +14,16 @@ from app.schemas.approval import (
     ApprovalSubmitRequest, ApprovalActionRequest
 )
 from app.utils.time import business_now
+from app.core.list_query import (
+    FilterCondition,
+    ListQueryContext,
+    SortCondition,
+    apply_filters,
+    apply_sorts,
+    uses_unified_list_query,
+    without_filter_field,
+)
+from app.core.list_query.catalogs import APPROVALS_LIST_QUERY_CATALOG
 
 logger = logging.getLogger(__name__)
 
@@ -995,6 +1005,8 @@ class ApprovalCRUD:
         created_time_end: Optional[date] = None,
         page: int = 1,
         page_size: int = 20,
+        filters: list[FilterCondition] | None = None,
+        sorts: list[SortCondition] | None = None,
     ) -> Tuple[List[Dict[str, Any]], int, int]:
         """通用审批列表查询（E2 越权过滤 + E9 摘要内存 join）。
 
@@ -1033,23 +1045,25 @@ class ApprovalCRUD:
         # ---- 主体查询：按 tab 构造过滤 ----
         query = db.query(Approval).filter(Approval.team_id == team_id)
 
-        include_types = business_types or ([business_type] if business_type else [])
-        exclude_types = business_types_exclude or []
+        unified_protocol = uses_unified_list_query(filters=filters, sorts=sorts)
+        if not unified_protocol:
+            include_types = business_types or ([business_type] if business_type else [])
+            exclude_types = business_types_exclude or []
 
-        if include_types:
-            query = query.filter(Approval.business_type.in_(include_types))
-        if exclude_types:
-            query = query.filter(~Approval.business_type.in_(exclude_types))
-        if statuses:
-            query = query.filter(Approval.status.in_(statuses))
-        if statuses_exclude:
-            query = query.filter(~Approval.status.in_(statuses_exclude))
-        if submitter_name:
-            query = query.filter(Approval.submitter_name.ilike(f"%{submitter_name.strip()}%"))
-        if created_time_start:
-            query = query.filter(Approval.created_time >= datetime.combine(created_time_start, time.min))
-        if created_time_end:
-            query = query.filter(Approval.created_time <= datetime.combine(created_time_end, time.max))
+            if include_types:
+                query = query.filter(Approval.business_type.in_(include_types))
+            if exclude_types:
+                query = query.filter(~Approval.business_type.in_(exclude_types))
+            if statuses:
+                query = query.filter(Approval.status.in_(statuses))
+            if statuses_exclude:
+                query = query.filter(~Approval.status.in_(statuses_exclude))
+            if submitter_name:
+                query = query.filter(Approval.submitter_name.ilike(f"%{submitter_name.strip()}%"))
+            if created_time_start:
+                query = query.filter(Approval.created_time >= datetime.combine(created_time_start, time.min))
+            if created_time_end:
+                query = query.filter(Approval.created_time <= datetime.combine(created_time_end, time.max))
 
         if tab == "pending":
             # JOIN current_node 取 approve_role 过滤
@@ -1080,17 +1094,44 @@ class ApprovalCRUD:
         else:
             raise ValueError(f"非法 tab: {tab}，仅支持 pending / processed / submitted")
 
-        needs_summary_filter = any([
-            application_number,
-            entity_name,
-            entity_amount is not None,
-        ])
-        ordered_query = query.order_by(Approval.created_time.desc())
-        if needs_summary_filter:
-            rows = ordered_query.all()
-        else:
+        if unified_protocol:
+            effective_filters = without_filter_field(filters, "status") if tab == "pending" else filters
+            context = ListQueryContext(
+                db=db,
+                team_id=team_id,
+                current_user_id=user_id_str,
+                now=business_now(),
+            )
+            query = apply_filters(
+                query,
+                APPROVALS_LIST_QUERY_CATALOG,
+                effective_filters or [],
+                context=context,
+            )
             total = query.count()
+            effective_sorts = sorts
+            if tab == "pending" and not effective_sorts:
+                effective_sorts = [SortCondition(field="overdue_hours", direction="desc")]
+            ordered_query = apply_sorts(
+                query,
+                APPROVALS_LIST_QUERY_CATALOG,
+                effective_sorts or [],
+                context=context,
+            )
             rows = ordered_query.offset(skip).limit(page_size).all()
+            needs_summary_filter = False
+        else:
+            needs_summary_filter = any([
+                application_number,
+                entity_name,
+                entity_amount is not None,
+            ])
+            ordered_query = query.order_by(Approval.created_time.desc())
+            if needs_summary_filter:
+                rows = ordered_query.all()
+            else:
+                total = query.count()
+                rows = ordered_query.offset(skip).limit(page_size).all()
 
         # ---- E9：按 business_type 批量预取实体摘要，内存 join 避免 N+1 ----
         summaries = self._batch_entity_summaries(db, rows, team_id)

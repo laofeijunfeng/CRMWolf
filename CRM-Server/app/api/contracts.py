@@ -10,6 +10,12 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.list_query import (
+    enforce_owner_view_scope,
+    optional_request_list_query,
+    run_or_400,
+    uses_unified_list_query,
+)
 from app.core.deps import (
     check_contract_delete_permission,
     check_contract_edit_permission,
@@ -629,6 +635,8 @@ def get_contracts(
     license_expiry_date_end: Optional[date] = Query(None, description="授权时间结束，按最新已签发正式 License 到期时间筛选"),
     order_by: Optional[str] = Query(None, description="排序字段"),
     order_dir: Optional[str] = Query(None, description="排序方向（asc/desc）"),
+    filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
+    sorts: Optional[str] = Query(None, description="通用排序条件 JSON"),
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -642,26 +650,34 @@ def get_contracts(
     # 检查是否有 view:all 权限
     has_view_all = "contract:view:all" in permission_codes
 
-    # 权限验证：如果指定了其他人的 owner_id，必须有 view:all 权限
-    actual_owner_id = owner_id
-    requested_owner_ids = [item.strip() for item in actual_owner_id.split(",") if item.strip()] if actual_owner_id else []
-    if requested_owner_ids and any(item != str(current_user.id) for item in requested_owner_ids):
-        if not has_view_all:
+    parsed_filters, parsed_sorts = optional_request_list_query(
+        filters_raw=filters,
+        sorts_raw=sorts,
+    )
+    if uses_unified_list_query(filters=parsed_filters, sorts=parsed_sorts):
+        actual_owner_id = enforce_owner_view_scope(
+            parsed_filters or [],
+            current_user_id=str(current_user.id),
+            has_view_all=has_view_all,
+            permission_detail="只能查看自己负责的合同，或需要 contract:view:all 权限查看他人数据",
+        )
+    else:
+        actual_owner_id = owner_id
+        requested_owner_ids = [item.strip() for item in actual_owner_id.split(",") if item.strip()] if actual_owner_id else []
+        if requested_owner_ids and any(item != str(current_user.id) for item in requested_owner_ids) and not has_view_all:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="只能查看自己负责的合同，或需要 contract:view:all 权限查看他人数据"
             )
-
-    # 如果前端未指定 owner_id 且没有 view:all 权限，则限制为只看自己的合同
-    if actual_owner_id is None and not has_view_all:
-        actual_owner_id = str(current_user.id)
+        if actual_owner_id is None and not has_view_all:
+            actual_owner_id = str(current_user.id)
 
     internal_customer_id = None
     if customer_id:
         customer = check_customer_view_permission(customer_id, team_id, current_user, db)
         internal_customer_id = customer.id
 
-    contracts, total = contract_crud.get_multi(
+    contracts, total = run_or_400(lambda: contract_crud.get_multi(
         db=db,
         team_id=team_id,
         skip=skip,
@@ -694,8 +710,10 @@ def get_contracts(
         license_expiry_date_start=license_expiry_date_start,
         license_expiry_date_end=license_expiry_date_end,
         order_by=order_by,
-        order_dir=order_dir
-    )
+        order_dir=order_dir,
+        filters=parsed_filters,
+        sorts=parsed_sorts,
+    ))
     
     result = []
     for contract in contracts:

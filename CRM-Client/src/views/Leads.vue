@@ -58,7 +58,7 @@ import { usePageTitle } from '@/composables/usePageTitle'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { normalizePaginatedResponse } from '@/types/pagination'
-import { getPrimarySort } from '@/utils/listSorts'
+import { serializeListQuery } from '@/utils/listQuery'
 import { useAcquisitionSourceOptions } from '@/composables/useAcquisitionSourceOptions'
 import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
 
@@ -139,7 +139,7 @@ const fields = computed<ListFieldDefinition[]>(() => {
         label: owner.name
       })),
       column: { width: '100px' },
-      filter: ownerFilterOptions.value.length > 0 ? { apiKey: 'owner_id' } : false,
+      filter: { apiKey: 'owner_id' },
       sort: { apiKey: 'owner_id' }
     },
     { key: 'contact_name', label: '联系人', type: 'text', column: { width: '120px' }, filter: true, sort: true },
@@ -228,24 +228,18 @@ const canConvertRow = (row: Lead): boolean => {
 const fetchLeadList = async (): Promise<void> => {
   loading.value = true
   try {
-    const params: Record<string, unknown> = {
+    const params: LeadListParams = {
       skip: (pagination.current - 1) * pagination.pageSize,
       limit: pagination.pageSize,
-      filters: activeFilters.value.length > 0 ? JSON.stringify(activeFilters.value) : null,
-      ...getPrimarySort(activeSorts.value)
+      ...serializeListQuery({ filters: activeFilters.value, sorts: activeSorts.value })
     }
 
-    if (activeTab.value === 'public') {
-      const response = await leadApi.getPublicLeads(params)
-      const normalized = normalizePaginatedResponse(response)
-      tableData.value = normalized.items.filter((item: Lead) => item.status !== 2)
-      pagination.total = normalized.total
-    } else {
-      const response = await leadApi.getLeadList(params as LeadListParams)
-      const normalized = normalizePaginatedResponse(response)
-      tableData.value = normalized.items.filter((item: Lead) => item.status !== 2)
-      pagination.total = normalized.total
-    }
+    const response = activeTab.value === 'public'
+      ? await leadApi.getPublicLeads(params)
+      : await leadApi.getLeadList(params)
+    const normalized = normalizePaginatedResponse(response)
+    tableData.value = normalized.items
+    pagination.total = normalized.total
   } catch (error) {
     handleApiError(error, '获取线索列表')
   } finally {

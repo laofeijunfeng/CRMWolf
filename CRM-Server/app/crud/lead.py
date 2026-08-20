@@ -11,6 +11,15 @@ from app.services.acquisition_source_service import (
     resolve_source_for_entity_write,
 )
 from app.utils.time import business_now
+from app.core.list_query import (
+    FilterCondition,
+    ListQueryContext,
+    SortCondition,
+    has_filter_field,
+    paginate_optional_list_query,
+    uses_unified_list_query,
+)
+from app.core.list_query.catalogs import LEADS_LIST_QUERY_CATALOG
 
 
 class LeadCRUD:
@@ -50,11 +59,27 @@ class LeadCRUD:
         owner_id: Optional[str] = None,
         creator_id: Optional[str] = None,
         keyword: Optional[str] = None,
-        filters: Optional[List[Dict[str, Any]]] = None,
+        filters: list[FilterCondition] | None = None,
+        sorts: list[SortCondition] | None = None,
         order_by: Optional[str] = None,
         order_dir: Optional[str] = None
     ) -> Tuple[List[Lead], int]:
         query = db.query(Lead).filter(Lead.team_id == team_id)
+
+        if uses_unified_list_query(filters=filters, sorts=sorts):
+            if not has_filter_field(filters, "status"):
+                query = query.filter(Lead.status != LeadStatus.CONVERTED)
+            if owner_id:
+                query = query.filter(Lead.owner_id == owner_id)
+            return paginate_optional_list_query(
+                query,
+                LEADS_LIST_QUERY_CATALOG,
+                skip=skip,
+                limit=limit,
+                filters=filters,
+                sorts=sorts,
+                context=ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id),
+            )
 
         if status is not None:
             query = query.filter(Lead.status == status)
@@ -391,7 +416,8 @@ class LeadCRUD:
         team_id: int,
         skip: int = 0,
         limit: int = 100,
-        filters: Optional[List[Dict[str, Any]]] = None,
+        filters: list[FilterCondition] | None = None,
+        sorts: list[SortCondition] | None = None,
         order_by: Optional[str] = None,
         order_dir: Optional[str] = None
     ) -> Tuple[List[Lead], int]:
@@ -402,12 +428,21 @@ class LeadCRUD:
                 Lead.status != LeadStatus.CONVERTED
             )
         )
-        if filters:
-            query = self._apply_filters(query, filters, db=db, team_id=team_id)
-        total = query.count()
-        query = self._apply_sort(query, order_by, order_dir)
-        leads = query.offset(skip).limit(limit).all()
-        return leads, total
+        return paginate_optional_list_query(
+            query,
+            LEADS_LIST_QUERY_CATALOG,
+            skip=skip,
+            limit=limit,
+            filters=filters,
+            sorts=sorts,
+            context=ListQueryContext(db=db, team_id=team_id),
+            legacy_filters=(
+                (lambda legacy_query: self._apply_filters(legacy_query, filters, db=db, team_id=team_id))
+                if filters
+                else None
+            ),
+            legacy_sorts=lambda legacy_query: self._apply_sort(legacy_query, order_by, order_dir),
+        )
 
     def _apply_sort(self, query, order_by: Optional[str], order_dir: Optional[str]):
         allowed_sort_fields = [

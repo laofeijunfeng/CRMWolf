@@ -108,7 +108,6 @@ watch(() => props.scope, (scope) => {
     <PopoverContent align="start" class="column-config-popover">
       <TableToolbarBuilderPanel
         title="字段配置"
-        subtitle="拖动非固定列调整表格顺序"
         @close="open = false"
       >
         <div v-if="scopeEditable" class="column-config-scope" role="radiogroup" aria-label="保存范围">
@@ -185,8 +184,7 @@ watch(() => props.scope, (scope) => {
 <style scoped lang="scss">
 @use '@/styles/variables-v2.scss' as *;
 
-.column-config-popover {
-  width: 360px;
+:global(.column-config-popover) {
   padding: 0;
 }
 
@@ -198,10 +196,6 @@ watch(() => props.scope, (scope) => {
 
 .column-config-list-scroll {
   height: 320px;
-}
-
-.column-config-list {
-  padding: $wolf-space-sm-v2;
 }
 
 .column-config-state {

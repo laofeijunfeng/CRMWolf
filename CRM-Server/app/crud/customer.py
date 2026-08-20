@@ -11,6 +11,14 @@ from app.schemas.customer import CustomerCreate, CustomerUpdate, CustomerStatusE
 from app.crud.operation_log import operation_log_crud
 from app.services.acquisition_source_service import get_by_id, resolve_source_for_entity_write
 from app.utils.time import business_now
+from app.core.list_query import (
+    FilterCondition,
+    ListQueryContext,
+    SortCondition,
+    paginate_optional_list_query,
+    uses_unified_list_query,
+)
+from app.core.list_query.catalogs import CUSTOMERS_LIST_QUERY_CATALOG
 
 
 def _split_csv(value: Optional[str]) -> List[str]:
@@ -79,6 +87,8 @@ class CustomerCRUD:
         scope: Optional[str] = None,
         current_user_id: Optional[str] = None,
         include_collaborated: bool = False,
+        filters: list[FilterCondition] | None = None,
+        sorts: list[SortCondition] | None = None,
     ) -> Tuple[List[Customer], int]:
         query = db.query(Customer).filter(Customer.team_id == team_id)
 
@@ -107,6 +117,19 @@ class CustomerCRUD:
                     )
                     .exists(),
                 )
+            )
+
+        if uses_unified_list_query(filters=filters, sorts=sorts):
+            if owner_id:
+                query = query.filter(Customer.owner_id.in_(_split_csv(owner_id)))
+            return paginate_optional_list_query(
+                query,
+                CUSTOMERS_LIST_QUERY_CATALOG,
+                skip=skip,
+                limit=limit,
+                filters=filters,
+                sorts=sorts,
+                context=ListQueryContext(db=db, team_id=team_id, current_user_id=current_user_id),
             )
 
         status_values = _split_int_csv(status)
@@ -575,8 +598,22 @@ class CustomerCRUD:
         keyword: Optional[str] = None,
         order_by: Optional[str] = None,
         order_dir: Optional[str] = None,
+        filters: list[FilterCondition] | None = None,
+        sorts: list[SortCondition] | None = None,
     ) -> Tuple[List[Customer], int]:
         query = db.query(Customer).filter(Customer.team_id == team_id, Customer.owner_id.is_(None))
+
+        if uses_unified_list_query(filters=filters, sorts=sorts):
+            effective_sorts = sorts if sorts else [SortCondition(field="returned_time", direction="desc")]
+            return paginate_optional_list_query(
+                query,
+                CUSTOMERS_LIST_QUERY_CATALOG,
+                skip=skip,
+                limit=limit,
+                filters=filters,
+                sorts=effective_sorts,
+                context=ListQueryContext(db=db, team_id=team_id),
+            )
 
         if status is not None:
             query = query.filter(Customer.status == status)

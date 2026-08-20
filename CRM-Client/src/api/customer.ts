@@ -305,6 +305,8 @@ export interface CustomerTrend {
 export interface CustomerQueryParams {
   skip?: number
   limit?: number
+  filters?: string
+  sorts?: string
   status?: string
   status_exclude?: string
   industry?: string
@@ -413,6 +415,8 @@ export interface CustomerMemberPayload {
 export interface PublicCustomerQueryParams {
   skip?: number
   limit?: number
+  filters?: string
+  sorts?: string
   status?: CustomerStatus
   city?: string
   keyword?: string

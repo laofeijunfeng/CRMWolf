@@ -193,6 +193,8 @@ export interface OpportunityLossRequest {
 export interface OpportunityListParams {
   skip?: number
   limit?: number
+  filters?: string
+  sorts?: string
   status?: string | number | null
   status_exclude?: string | number | null
   procurement_stage_id?: number | null

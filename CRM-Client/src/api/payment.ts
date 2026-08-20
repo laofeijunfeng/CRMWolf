@@ -170,6 +170,8 @@ export interface OverduePayment {
 }
 
 export interface PaymentPlanListParams {
+  filters?: string
+  sorts?: string
   status?: string
   status_exclude?: string
   owner_id?: string
@@ -200,6 +202,8 @@ export interface PaymentPlanWithDetails extends PaymentPlanResponse {
 }
 
 export interface PaymentRecordListParams {
+  filters?: string
+  sorts?: string
   contract_id?: number
   payment_plan_id?: number
   payment_date_start?: string

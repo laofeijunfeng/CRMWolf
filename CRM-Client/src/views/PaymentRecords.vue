@@ -40,8 +40,7 @@ import { useUserStore } from '@/stores/user'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
-import { getDateBounds, getDelimitedFilterValues, getFilterValue, getNumericFilterValue } from '@/utils/listFilters'
-import { serializeListSorts } from '@/utils/listSorts'
+import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -95,7 +94,7 @@ const approvalStatusOptions = [
 ]
 
 const fields: ListFieldDefinition[] = [
-  { key: 'keyword', label: '全局关键词', type: 'text', filter: true },
+  { key: 'keyword', label: '全局关键词', type: 'text', role: 'keyword', filter: true },
   { key: 'record_number', label: '回款编号', type: 'text', column: { width: '180px' }, filter: true, sort: true },
   { key: 'customer_name', label: '客户名称', type: 'text', column: { width: '180px' }, filter: true, sort: true },
   { key: 'actual_payer_name', label: '实际付款方', type: 'text', column: { width: '180px' }, filter: true, sort: true },
@@ -158,102 +157,24 @@ const canDeleteRecordRow = (row: PaymentRecordWithDetails): boolean => {
 const fetchPaymentRecords = async (): Promise<void> => {
   loading.value = true
   try {
+    const tabApprovalStatus = activeTab.value === 'confirmed'
+      ? 'approved'
+      : activeTab.value === 'pending_submit'
+        || activeTab.value === 'pending_approval'
+        || activeTab.value === 'rejected'
+        ? activeTab.value
+        : null
+    const effectiveFilters = tabApprovalStatus === null
+      ? activeFilters.value
+      : withoutFilterFields(activeFilters.value, ['approval_status'])
     const params: PaymentRecordListParams = {
       page: pagination.current,
-      page_size: pagination.pageSize
-    }
-    const sort = serializeListSorts(activeSorts.value)
-    if (sort !== null) {
-      params.sort = sort
-    }
-
-    const paymentDateBounds = getDateBounds(activeFilters.value, 'payment_date')
-    if (paymentDateBounds.start !== undefined) {
-      params.payment_date_start = paymentDateBounds.start
-    }
-    if (paymentDateBounds.end !== undefined) {
-      params.payment_date_end = paymentDateBounds.end
-    }
-
-    const createdTimeBounds = getDateBounds(activeFilters.value, 'created_time')
-    if (createdTimeBounds.start !== undefined) {
-      params.created_time_start = createdTimeBounds.start
-    }
-    if (createdTimeBounds.end !== undefined) {
-      params.created_time_end = createdTimeBounds.end
-    }
-
-    const actualAmount = getNumericFilterValue(activeFilters.value, 'actual_amount')
-    if (actualAmount !== null) {
-      params.actual_amount = actualAmount
-    }
-
-    const recordNumber = getFilterValue(activeFilters.value, 'record_number')
-    const recordNumberExclude = getFilterValue(activeFilters.value, 'record_number', ['neq', 'not_contains'])
-    if (recordNumber !== null && recordNumber.length > 0) params.record_number = recordNumber
-    if (recordNumberExclude !== null && recordNumberExclude.length > 0) params.record_number_exclude = recordNumberExclude
-
-    const customerName = getFilterValue(activeFilters.value, 'customer_name')
-    const customerNameExclude = getFilterValue(activeFilters.value, 'customer_name', ['neq', 'not_contains'])
-    if (customerName !== null && customerName.length > 0) params.customer_name = customerName
-    if (customerNameExclude !== null && customerNameExclude.length > 0) params.customer_name_exclude = customerNameExclude
-
-    const actualPayerName = getFilterValue(activeFilters.value, 'actual_payer_name')
-    const actualPayerNameExclude = getFilterValue(activeFilters.value, 'actual_payer_name', ['neq', 'not_contains'])
-    if (actualPayerName !== null && actualPayerName.length > 0) params.actual_payer_name = actualPayerName
-    if (actualPayerNameExclude !== null && actualPayerNameExclude.length > 0) params.actual_payer_name_exclude = actualPayerNameExclude
-
-    const invoiceTitleText = getFilterValue(activeFilters.value, 'invoice_title_text')
-    const invoiceTitleTextExclude = getFilterValue(activeFilters.value, 'invoice_title_text', ['neq', 'not_contains'])
-    if (invoiceTitleText !== null && invoiceTitleText.length > 0) params.invoice_title_text = invoiceTitleText
-    if (invoiceTitleTextExclude !== null && invoiceTitleTextExclude.length > 0) params.invoice_title_text_exclude = invoiceTitleTextExclude
-
-    const contractName = getFilterValue(activeFilters.value, 'contract_name')
-    const contractNameExclude = getFilterValue(activeFilters.value, 'contract_name', ['neq', 'not_contains'])
-    if (contractName !== null && contractName.length > 0) params.contract_name = contractName
-    if (contractNameExclude !== null && contractNameExclude.length > 0) params.contract_name_exclude = contractNameExclude
-
-    const ownerName = getFilterValue(activeFilters.value, 'owner_name')
-    const ownerNameExclude = getFilterValue(activeFilters.value, 'owner_name', ['neq', 'not_contains'])
-    if (ownerName !== null && ownerName.length > 0) params.owner_name = ownerName
-    if (ownerNameExclude !== null && ownerNameExclude.length > 0) params.owner_name_exclude = ownerNameExclude
-
-    const commissionMemberName = getFilterValue(activeFilters.value, 'commission_member_name')
-    const commissionMemberNameExclude = getFilterValue(activeFilters.value, 'commission_member_name', ['neq', 'not_contains'])
-    if (commissionMemberName !== null && commissionMemberName.length > 0) params.commission_member_name = commissionMemberName
-    if (commissionMemberNameExclude !== null && commissionMemberNameExclude.length > 0) params.commission_member_name_exclude = commissionMemberNameExclude
-
-    const confirmationStatus = getDelimitedFilterValues(activeFilters.value, 'confirmation_status')
-    const confirmationStatusExclude = getDelimitedFilterValues(activeFilters.value, 'confirmation_status', ['neq', 'not_contains'])
-    if (confirmationStatus !== null) {
-      params.confirmation_status = confirmationStatus
-    }
-    if (confirmationStatusExclude !== null) {
-      params.confirmation_status_exclude = confirmationStatusExclude
-    }
-
-    if (activeTab.value === 'pending_submit' || activeTab.value === 'pending_approval' || activeTab.value === 'rejected') {
-      params.approval_status = activeTab.value
-    } else if (activeTab.value === 'confirmed') {
-      params.approval_status = 'approved'
-    } else {
-      const approvalStatus = getDelimitedFilterValues(activeFilters.value, 'approval_status')
-      const approvalStatusExclude = getDelimitedFilterValues(activeFilters.value, 'approval_status', ['neq', 'not_contains'])
-      if (approvalStatus !== null) {
-        params.approval_status = approvalStatus
-      }
-      if (approvalStatusExclude !== null) {
-        params.approval_status_exclude = approvalStatusExclude
-      }
-    }
-
-    const keyword = getFilterValue(activeFilters.value, 'keyword')
-    if (keyword !== null && keyword.length > 0) {
-      params.keyword = keyword
+      page_size: pagination.pageSize,
+      ...(tabApprovalStatus !== null ? { approval_status: tabApprovalStatus } : {}),
+      ...serializeListQuery({ filters: effectiveFilters, sorts: activeSorts.value })
     }
 
     const data = await paymentApi.listPaymentRecords(params)
-
     tableData.value = data.items
     pagination.total = data.total
   } catch (error) {

@@ -7,6 +7,12 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.list_query import (
+    enforce_owner_view_scope,
+    optional_request_list_query,
+    run_or_400,
+    uses_unified_list_query,
+)
 from app.core.deps import (
     check_customer_delete_permission,
     check_customer_edit_permission,
@@ -863,6 +869,8 @@ def get_customers(
     order_by: str = Query(None, description="排序字段（created_time/account_name/city/status/industry）"),
     order_dir: str = Query(None, description="排序方向（asc/desc）"),
     scope: Optional[str] = Query(None, description="客户范围：collaborated/accessible"),
+    filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
+    sorts: Optional[str] = Query(None, description="通用排序条件 JSON"),
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -876,20 +884,10 @@ def get_customers(
     # 检查是否有 view:all 权限
     has_view_all = "customer:view:all" in permission_codes
 
-    actual_owner_id = owner_id
-    if owner_id in ["me", "my"]:
-        actual_owner_id = str(current_user.id)
-
-    requested_owner_ids = [item.strip() for item in actual_owner_id.split(",") if item.strip()] if actual_owner_id else []
-
-    # 权限验证：如果指定了其他人的 owner_id，必须有 view:all 权限
-    if requested_owner_ids and any(item != str(current_user.id) for item in requested_owner_ids):
-        if not has_view_all:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="只能查看自己负责的客户，或需要 customer:view:all 权限查看他人数据"
-            )
-
+    parsed_filters, parsed_sorts = optional_request_list_query(
+        filters_raw=filters,
+        sorts_raw=sorts,
+    )
     allowed_scopes = {None, "collaborated", "accessible"}
     if scope not in allowed_scopes:
         raise HTTPException(
@@ -898,14 +896,29 @@ def get_customers(
         )
 
     current_user_id = str(current_user.id)
-    include_collaborated = False
-    if scope == "collaborated":
-        actual_owner_id = None
-    elif scope == "accessible" and not has_view_all:
-        actual_owner_id = None
-        include_collaborated = True
-    elif actual_owner_id is None and not has_view_all:
-        actual_owner_id = current_user_id
+    include_collaborated = scope == "accessible" and not has_view_all
+    if uses_unified_list_query(filters=parsed_filters, sorts=parsed_sorts):
+        actual_owner_id = enforce_owner_view_scope(
+            parsed_filters or [],
+            current_user_id=current_user_id,
+            has_view_all=has_view_all,
+            permission_detail="只能查看自己负责的客户，或需要 customer:view:all 权限查看他人数据",
+            default_to_self=scope not in {"collaborated", "accessible"},
+        )
+    else:
+        actual_owner_id = owner_id
+        if owner_id in ["me", "my"]:
+            actual_owner_id = current_user_id
+        requested_owner_ids = [item.strip() for item in actual_owner_id.split(",") if item.strip()] if actual_owner_id else []
+        if requested_owner_ids and any(item != current_user_id for item in requested_owner_ids) and not has_view_all:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="只能查看自己负责的客户，或需要 customer:view:all 权限查看他人数据"
+            )
+        if scope in {"collaborated", "accessible"}:
+            actual_owner_id = None
+        elif actual_owner_id is None and not has_view_all:
+            actual_owner_id = current_user_id
 
     source_ids = None
     if source_public_id is not None:
@@ -914,7 +927,7 @@ def get_customers(
     if source_public_id_exclude is not None:
         source_ids_exclude = resolve_public_ids_to_ids(db, team_id, _split_csv(source_public_id_exclude))
 
-    customers, total = customer_crud.get_multi(
+    customers, total = run_or_400(lambda: customer_crud.get_multi(
         db=db,
         team_id=team_id,
         skip=skip,
@@ -937,8 +950,10 @@ def get_customers(
         order_dir=order_dir,
         scope=scope,
         current_user_id=current_user_id,
-        include_collaborated=include_collaborated
-    )
+        include_collaborated=include_collaborated,
+        filters=parsed_filters,
+        sorts=parsed_sorts,
+    ))
     
     result = []
     owner_ids = set(c.owner_id for c in customers if c.owner_id)
@@ -1637,15 +1652,22 @@ def get_public_customers(
     keyword: Optional[str] = Query(None, description="关键词搜索"),
     order_by: Optional[str] = Query(None, description="排序字段"),
     order_dir: Optional[str] = Query(None, description="排序方向（asc/desc）"),
+    filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
+    sorts: Optional[str] = Query(None, description="通用排序条件 JSON"),
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    customers, total = customer_crud.get_public_customers(
+    parsed_filters, parsed_sorts = optional_request_list_query(
+        filters_raw=filters,
+        sorts_raw=sorts,
+    )
+    customers, total = run_or_400(lambda: customer_crud.get_public_customers(
         db, team_id=team_id, skip=skip, limit=limit,
         status=status, city=city, keyword=keyword,
-        order_by=order_by, order_dir=order_dir
-    )
+        order_by=order_by, order_dir=order_dir,
+        filters=parsed_filters, sorts=parsed_sorts,
+    ))
     page = skip // limit + 1
     total_pages = (total + limit - 1) // limit if total > 0 else 0
     return PaginatedResponse[CustomerResponse](

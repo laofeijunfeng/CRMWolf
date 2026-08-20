@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.constants.approval_phase import ApprovalPhase
 from app.constants.business_types import BusinessType
 from app.core.database import get_db
+from app.core.list_query import optional_request_list_query, run_or_400
 from app.core.deps import (
     check_contract_edit_permission,
     check_contract_view_permission,
@@ -383,6 +384,8 @@ def list_payment_plans(
     sort: Optional[str] = Query(None, description="多字段排序，格式：field:asc,field2:desc"),
     order_by: Optional[str] = Query(None, description="兼容旧版单字段排序"),
     order_dir: Optional[str] = Query(None, description="兼容旧版排序方向（asc/desc）"),
+    filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
+    sorts: Optional[str] = Query(None, description="通用排序条件 JSON"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页大小"),
     team_id: int = Depends(get_current_user_team),
@@ -420,8 +423,13 @@ def list_payment_plans(
         # 如果只有 view:own 权限，或者用户明确选择只看自己的数据
         current_user_id = str(current_user.id)
 
+    parsed_filters, parsed_sorts = optional_request_list_query(
+        filters_raw=filters,
+        sorts_raw=sorts,
+    )
+
     try:
-        plans, total = payment_plan_crud.list_plans(
+        plans, total = run_or_400(lambda: payment_plan_crud.list_plans(
             db,
             team_id=team_id,
             skip=skip,
@@ -435,8 +443,10 @@ def list_payment_plans(
             sort=sort,
             order_by=order_by,
             order_dir=order_dir,
-            current_user_id=current_user_id
-        )
+            current_user_id=current_user_id,
+            filters=parsed_filters,
+            sorts=parsed_sorts,
+        ))
 
         # Task 1.2: Computed fields are properties on the model, no need to set them
         # Just enrich with contract/customer info
@@ -464,6 +474,8 @@ def list_payment_plans(
             page_size=page_size,
             total_pages=total_pages
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1162,6 +1174,8 @@ def list_payment_records(
     sort: Optional[str] = Query(None, description="多字段排序，格式：field:asc,field2:desc"),
     order_by: Optional[str] = Query(None, description="兼容旧版单字段排序"),
     order_dir: Optional[str] = Query(None, description="兼容旧版排序方向（asc/desc）"),
+    filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
+    sorts: Optional[str] = Query(None, description="通用排序条件 JSON"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页大小"),
     team_id: int = Depends(get_current_user_team),
@@ -1199,8 +1213,13 @@ def list_payment_records(
         # 如果只有 view:own 权限，或者用户明确选择只看自己的数据
         current_user_id = str(current_user.id)
 
+    parsed_filters, parsed_sorts = optional_request_list_query(
+        filters_raw=filters,
+        sorts_raw=sorts,
+    )
+
     try:
-        records, total = payment_record_crud.list_records(
+        records, total = run_or_400(lambda: payment_record_crud.list_records(
             db,
             team_id=team_id,
             skip=skip,
@@ -1236,8 +1255,10 @@ def list_payment_records(
             approval_status_exclude=approval_status_exclude,
             sort=sort,
             order_by=order_by,
-            order_dir=order_dir
-        )
+            order_dir=order_dir,
+            filters=parsed_filters,
+            sorts=parsed_sorts,
+        ))
 
         # Task 1.4: Calculate pending_approval_me_count
         user_role_objs = role_crud.get_user_roles(db, current_user.id, team_id)
@@ -1422,6 +1443,8 @@ def list_payment_records(
             "total_pages": total_pages,
             "pending_approval_me_count": pending_approval_me_count,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

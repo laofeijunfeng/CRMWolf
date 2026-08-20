@@ -15,6 +15,15 @@ from app.schemas.contract import ContractCreate, ContractUpdate
 from app.services.business_number_generator import BusinessNumberGenerator
 from app.services.contract import ContractPricingService
 from app.utils.time import business_now
+from app.core.list_query import (
+    FilterCondition,
+    ListQueryContext,
+    SortCondition,
+    paginate_optional_list_query,
+    uses_unified_list_query,
+    without_filter_field,
+)
+from app.core.list_query.catalogs import CONTRACTS_LIST_QUERY_CATALOG
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +200,9 @@ class ContractCRUD:
         license_expiry_date_end: Optional[date] = None,
         order_by: Optional[str] = None,
         order_dir: Optional[str] = None,
-        include_deleted: bool = False
+        include_deleted: bool = False,
+        filters: list[FilterCondition] | None = None,
+        sorts: list[SortCondition] | None = None,
     ) -> Tuple[List[Contract], int]:
         """
         查询合同列表
@@ -266,6 +277,25 @@ class ContractCRUD:
         # 默认不包含已删除的合同
         if not include_deleted:
             query = query.filter(Contract.deleted_at.is_(None))
+
+        if uses_unified_list_query(filters=filters, sorts=sorts):
+            effective_filters = filters
+            if customer_id:
+                query = query.filter(Contract.customer_id == customer_id)
+            if status:
+                query = query.filter(Contract.status.in_(_split_csv(status)))
+                effective_filters = without_filter_field(filters, "status")
+            if owner_id:
+                query = query.filter(Contract.owner_id.in_(_split_csv(owner_id)))
+            return paginate_optional_list_query(
+                query,
+                CONTRACTS_LIST_QUERY_CATALOG,
+                skip=skip,
+                limit=limit,
+                filters=effective_filters,
+                sorts=sorts,
+                context=ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id),
+            )
 
         if customer_id:
             query = query.filter(Contract.customer_id == customer_id)

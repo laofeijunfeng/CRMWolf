@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.constants.business_types import BusinessType, is_valid_business_type
 from app.core.database import get_db
+from app.core.list_query import optional_request_list_query, run_or_400
 from app.core.deps import get_current_active_user, get_current_user_team, require_permission
 from app.core.logging import get_logger, log_with_fields
 from app.crud.approval import approval_crud, approval_flow_crud
@@ -2451,6 +2452,8 @@ def list_approvals(
     entity_amount: Optional[float] = Query(None, description="金额精确筛选"),
     created_time_start: Optional[date] = Query(None, description="提交时间起始"),
     created_time_end: Optional[date] = Query(None, description="提交时间结束"),
+    filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
+    sorts: Optional[str] = Query(None, description="通用排序条件 JSON"),
     page: int = Query(1, ge=1, description="页码，1-based"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数"),
     team_id: int = Depends(get_current_user_team),
@@ -2463,39 +2466,50 @@ def list_approvals(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"非法 tab: {tab}，仅支持 pending / processed / submitted",
         )
-    business_types = [item.strip() for item in business_type.split(",") if item.strip()] if business_type else []
-    business_types_exclude = [item.strip() for item in business_type_exclude.split(",") if item.strip()] if business_type_exclude else []
-    invalid_business_types = [
-        item for item in [*business_types, *business_types_exclude]
-        if not is_valid_business_type(item)
-    ]
-    if invalid_business_types:
-        invalid_value = invalid_business_types[0]
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"无效的业务单据类型: {invalid_value}，仅支持 CONTRACT / PAYMENT / INVOICE / LICENSE / OPPORTUNITY",
-        )
-    statuses = [item.strip() for item in approval_status.split(",") if item.strip()] if approval_status else []
-    statuses_exclude = [item.strip() for item in status_exclude.split(",") if item.strip()] if status_exclude else []
-    valid_statuses = {
-        ApprovalStatus.PENDING,
-        ApprovalStatus.APPROVED,
-        ApprovalStatus.REJECTED,
-        ApprovalStatus.CANCELLED,
-    }
-    invalid_statuses = [item for item in [*statuses, *statuses_exclude] if item not in valid_statuses]
-    if invalid_statuses:
-        invalid_value = invalid_statuses[0]
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"无效的审批状态: {invalid_value}，仅支持 PENDING / APPROVED / REJECTED / CANCELLED",
-        )
+    parsed_filters, parsed_sorts = optional_request_list_query(
+        filters_raw=filters,
+        sorts_raw=sorts,
+    )
+    unified_protocol = parsed_filters is not None or parsed_sorts is not None
+
+    business_types: list[str] = []
+    business_types_exclude: list[str] = []
+    statuses: list[str] = []
+    statuses_exclude: list[str] = []
+    if not unified_protocol:
+        business_types = [item.strip() for item in business_type.split(",") if item.strip()] if business_type else []
+        business_types_exclude = [item.strip() for item in business_type_exclude.split(",") if item.strip()] if business_type_exclude else []
+        invalid_business_types = [
+            item for item in [*business_types, *business_types_exclude]
+            if not is_valid_business_type(item)
+        ]
+        if invalid_business_types:
+            invalid_value = invalid_business_types[0]
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"无效的业务单据类型: {invalid_value}，仅支持 CONTRACT / PAYMENT / INVOICE / LICENSE / OPPORTUNITY",
+            )
+        statuses = [item.strip() for item in approval_status.split(",") if item.strip()] if approval_status else []
+        statuses_exclude = [item.strip() for item in status_exclude.split(",") if item.strip()] if status_exclude else []
+        valid_statuses = {
+            ApprovalStatus.PENDING,
+            ApprovalStatus.APPROVED,
+            ApprovalStatus.REJECTED,
+            ApprovalStatus.CANCELLED,
+        }
+        invalid_statuses = [item for item in [*statuses, *statuses_exclude] if item not in valid_statuses]
+        if invalid_statuses:
+            invalid_value = invalid_statuses[0]
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"无效的审批状态: {invalid_value}，仅支持 PENDING / APPROVED / REJECTED / CANCELLED",
+            )
 
     # 当前用户在该 team 下的角色 code 集合（pending tab 过滤用）
     user_role_objs = role_crud.get_user_roles(db, current_user.id, team_id)
     user_roles = [r.code for r in user_role_objs]
 
-    items, total, pending_count = approval_crud.list_approvals(
+    items, total, pending_count = run_or_400(lambda: approval_crud.list_approvals(
         db,
         team_id=team_id,
         user_id=current_user.id,
@@ -2513,7 +2527,9 @@ def list_approvals(
         created_time_end=created_time_end,
         page=page,
         page_size=page_size,
-    )
+        filters=parsed_filters,
+        sorts=parsed_sorts,
+    ))
 
     return ApprovalGenericListResponse(
         items=[ApprovalListItemResponse(**item) for item in items],

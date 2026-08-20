@@ -192,6 +192,8 @@ export interface InvoiceApplicationListResponse {
 }
 
 export interface InvoiceApplicationQueryParams {
+  filters?: string
+  sorts?: string
   customer_id?: string
   contract_id?: number
   payment_plan_id?: number

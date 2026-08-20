@@ -29,7 +29,7 @@ describe('projectListFieldCatalog', () => {
         sort: { apiKey: 'owner_id' }
       },
       { key: 'issued_time', label: '开票时间', type: 'date', sort: true },
-      { key: 'collaborators', label: '协作者', column: { align: 'center', hideable: false, configurable: false } }
+      { key: 'collaborators', label: '协作者', type: 'text', column: { align: 'center', hideable: false, configurable: false } }
     ])
 
     expect(projectListFieldCatalog(fields)).toEqual({
@@ -44,7 +44,8 @@ describe('projectListFieldCatalog', () => {
           label: '负责人',
           type: 'enum',
           options: [{ value: 'u1', label: '张三' }]
-        }
+        },
+        { key: 'collaborators', label: '协作者', type: 'text' }
       ],
       sortFields: [
         {
@@ -53,9 +54,26 @@ describe('projectListFieldCatalog', () => {
           type: 'enum',
           options: [{ value: 'u1', label: '张三' }]
         },
-        { key: 'issued_time', label: '开票时间', type: 'date' }
+        { key: 'issued_time', label: '开票时间', type: 'date' },
+        { key: 'collaborators', label: '协作者', type: 'text' }
       ]
     })
+  })
+
+  it('does not infer query capabilities for keyword, action, or decoration columns', () => {
+    const projected = projectListFieldCatalog([
+      { key: 'keyword', label: '关键字', type: 'text', role: 'keyword', column: true },
+      { key: 'status_badge', label: '状态标记', role: 'decoration', column: true },
+      { key: 'actions', label: '操作', role: 'action', column: true }
+    ])
+
+    expect(projected.columns.map((column) => column.key)).toEqual([
+      'keyword',
+      'status_badge',
+      'actions'
+    ])
+    expect(projected.filterFields).toEqual([])
+    expect(projected.sortFields).toEqual([])
   })
 
   it('keeps filter-only and sort-only fields out of column configuration', () => {
@@ -78,6 +96,7 @@ describe('projectListFieldCatalog', () => {
         type: 'enum',
         column: { width: '100px' },
         filter: false,
+        filterDisabledReason: 'owner options are not ready in this example',
         sort: { apiKey: 'owner_id' }
       }
     ])
@@ -89,8 +108,8 @@ describe('projectListFieldCatalog', () => {
 
   it('rejects duplicate catalog keys so later fields cannot silently fork the same source', () => {
     expect(() => projectListFieldCatalog([
-      { key: 'owner', label: '负责人', column: true },
-      { key: 'owner', label: '客户负责人', filter: { apiKey: 'owner_id' } }
+      { key: 'owner', label: '负责人', type: 'text', column: true },
+      { key: 'owner', label: '客户负责人', type: 'text', filter: { apiKey: 'owner_id' } }
     ])).toThrow('Duplicate list field key: owner')
   })
 
@@ -104,10 +123,38 @@ describe('projectListFieldCatalog', () => {
     ])).toThrow('List field "issued_time" enables filter/sort but has no type')
   })
 
-  it('allows column-only fields to omit type', () => {
+  it('defaults business columns to filter and sort, and rejects a missing type', () => {
     expect(projectListFieldCatalog([
+      { key: 'license_status', label: '授权状态', type: 'enum', column: { width: '100px' } }
+    ])).toEqual({
+      columns: [{ key: 'license_status', title: '授权状态', width: '100px' }],
+      filterFields: [{ key: 'license_status', label: '授权状态', type: 'enum' }],
+      sortFields: [{ key: 'license_status', label: '授权状态', type: 'enum' }]
+    })
+
+    expect(() => projectListFieldCatalog([
       { key: 'collaborators', label: '协作者', column: { width: '100px' } }
-    ]).columns.map((column) => column.key)).toEqual(['collaborators'])
+    ])).toThrow('List field "collaborators" enables filter/sort but has no type')
+  })
+
+  it('rejects a business column that disables filter or sort without a reason', () => {
+    expect(() => defineListFields([
+      { key: 'owner', label: '负责人', type: 'enum', column: true, filter: false }
+    ])).toThrow('List field "owner" disables filter without filterDisabledReason')
+
+    expect(() => projectListFieldCatalog([
+      { key: 'created_time', label: '创建时间', type: 'date', column: true, sort: false }
+    ])).toThrow('List field "created_time" disables sort without sortDisabledReason')
+  })
+
+  it('keeps keyword and action fields from inheriting business-column defaults', () => {
+    const projected = projectListFieldCatalog([
+      { key: 'keyword', label: '关键字', type: 'text', role: 'keyword', filter: true },
+      { key: 'actions', label: '操作', role: 'action', column: { width: '80px' } }
+    ])
+    expect(projected.columns.map((column) => column.key)).toEqual(['actions'])
+    expect(projected.filterFields.map((field) => field.key)).toEqual(['keyword'])
+    expect(projected.sortFields).toEqual([])
   })
 })
 

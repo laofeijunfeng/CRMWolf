@@ -2,6 +2,7 @@ import type { ListFilterField, ListFilterFieldType } from './listFilterTypes'
 import type { ListSortField } from './listSortTypes'
 
 export type ListFieldType = ListFilterFieldType
+export type ListFieldRole = 'keyword' | 'action' | 'decoration'
 
 export interface ListFieldOption {
   value: string | number
@@ -29,13 +30,10 @@ export interface ListFieldQueryConfig {
  *
  * DataTable 的列、筛选、排序、字段配置必须来自这份定义：
  * - `column` 控制表格列和字段配置
- * - `filter` 控制筛选下拉，且仅在列表查询接口支持时开启
- * - `sort` 控制排序下拉，且仅在 order_by 支持时开启
- * - 条件能力用 `false` 显式关闭，不要再拆出第二份字段清单
- * - 开启筛选或排序时必须声明 `type`，禁止默认成 text
- *
- * 三个工具不必展示同一组字段。关键字可以只有筛选，协作者或派生展示列可以只有列配置，
- * 开票时间可以只有排序。新增字段时只改这一条定义，不要再维护三份清单。
+ * - 业务列默认同时打开筛选和排序
+ * - 关键字、操作列、装饰列不默认打开筛排
+ * - 关闭筛排必须写 `false` 并给出原因
+ * - 开启筛选或排序时必须声明 `type`
  */
 export interface ListFieldDefinition {
   key: string
@@ -43,9 +41,12 @@ export interface ListFieldDefinition {
   /** 列展示可省略；筛选或排序开启时必填，决定控件类型。 */
   type?: ListFieldType
   options?: ListFieldOption[]
+  role?: ListFieldRole
   column?: true | false | ListFieldColumnConfig
   filter?: true | false | ListFieldQueryConfig
   sort?: true | false | ListFieldQueryConfig
+  filterDisabledReason?: string
+  sortDisabledReason?: string
 }
 
 export interface DataTableColumn {
@@ -69,6 +70,43 @@ function isEnabled(value: unknown): value is true | object {
   return value === true || (typeof value === 'object' && value !== null)
 }
 
+function isBusinessColumn(field: ListFieldDefinition): boolean {
+  return isEnabled(field.column) && field.role === undefined
+}
+
+export function resolveListFieldFilter(
+  field: ListFieldDefinition
+): true | false | ListFieldQueryConfig | undefined {
+  if (field.filter !== undefined) return field.filter
+  if (isBusinessColumn(field)) return true
+  return undefined
+}
+
+export function resolveListFieldSort(
+  field: ListFieldDefinition
+): true | false | ListFieldQueryConfig | undefined {
+  if (field.sort !== undefined) return field.sort
+  if (isBusinessColumn(field)) return true
+  return undefined
+}
+
+export function listFieldQueryKey(
+  field: ListFieldDefinition,
+  query: true | false | ListFieldQueryConfig | undefined = undefined
+): string {
+  const target = query === undefined ? resolveListFieldFilter(field) : query
+  if (target !== undefined && target !== false && target !== true && target.apiKey !== undefined && target.apiKey !== '') {
+    return target.apiKey
+  }
+  const fallback = field.filter !== undefined && field.filter !== false && field.filter !== true
+    ? field.filter.apiKey
+    : undefined
+  const sortFallback = field.sort !== undefined && field.sort !== false && field.sort !== true
+    ? field.sort.apiKey
+    : undefined
+  return fallback ?? sortFallback ?? field.key
+}
+
 function assertListFieldCatalog(fields: ListFieldDefinition[]): void {
   const seenKeys = new Set<string>()
   for (const field of fields) {
@@ -76,7 +114,16 @@ function assertListFieldCatalog(fields: ListFieldDefinition[]): void {
       throw new Error(`Duplicate list field key: ${field.key}`)
     }
     seenKeys.add(field.key)
-    if ((isEnabled(field.filter) || isEnabled(field.sort)) && field.type === undefined) {
+
+    const filter = resolveListFieldFilter(field)
+    const sort = resolveListFieldSort(field)
+    if (isBusinessColumn(field) && filter === false && (field.filterDisabledReason === undefined || field.filterDisabledReason === '')) {
+      throw new Error(`List field "${field.key}" disables filter without filterDisabledReason`)
+    }
+    if (isBusinessColumn(field) && sort === false && (field.sortDisabledReason === undefined || field.sortDisabledReason === '')) {
+      throw new Error(`List field "${field.key}" disables sort without sortDisabledReason`)
+    }
+    if ((isEnabled(filter) || isEnabled(sort)) && field.type === undefined) {
       throw new Error(`List field "${field.key}" enables filter/sort but has no type`)
     }
   }
@@ -134,12 +181,14 @@ export function projectListFieldCatalog(fields: ListFieldDefinition[]): Projecte
       columns.push(projected)
     }
 
-    if (isEnabled(field.filter)) {
-      filterFields.push(projectQueryField(field, field.filter))
+    const filter = resolveListFieldFilter(field)
+    if (isEnabled(filter)) {
+      filterFields.push(projectQueryField(field, filter))
     }
 
-    if (isEnabled(field.sort)) {
-      sortFields.push(projectQueryField(field, field.sort))
+    const sort = resolveListFieldSort(field)
+    if (isEnabled(sort)) {
+      sortFields.push(projectQueryField(field, sort))
     }
   }
 

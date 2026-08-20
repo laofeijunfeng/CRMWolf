@@ -147,6 +147,8 @@ export interface ContractResponse {
 }
 
 export interface ContractQueryParams {
+  filters?: string
+  sorts?: string
   skip?: number
   limit?: number
   customer_id?: string | null

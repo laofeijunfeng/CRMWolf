@@ -7,6 +7,12 @@ from sqlalchemy.orm import Session
 from app.constants.approval_phase import ApprovalPhase
 from app.constants.business_types import BusinessType
 from app.core.database import get_db
+from app.core.list_query import (
+    enforce_owner_view_scope,
+    optional_request_list_query,
+    run_or_400,
+    uses_unified_list_query,
+)
 from app.core.deps import (
     check_customer_edit_permission,
     check_customer_view_permission,
@@ -270,6 +276,8 @@ def get_opportunities(
     expected_closing_date_end: date = Query(None, description="预计成交日期结束"),
     order_by: str = Query(None, description="排序字段"),
     order_dir: str = Query(None, description="排序方向（asc/desc）"),
+    filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
+    sorts: Optional[str] = Query(None, description="通用排序条件 JSON"),
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -285,27 +293,37 @@ def get_opportunities(
     # 检查是否有 view:all 权限
     has_view_all = "opportunity:view:all" in permission_codes
 
-    # 权限验证：如果指定了其他人的 owner_id，必须有 view:all 权限
-    actual_owner_id = owner_id
-    requested_owner_ids = [item.strip() for item in actual_owner_id.split(",") if item.strip()] if actual_owner_id else []
-    if requested_owner_ids and any(item != str(current_user.id) for item in requested_owner_ids):
-        if not has_view_all:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="只能查看自己负责的商机，或需要 opportunity:view:all 权限查看他人数据"
-            )
-
+    parsed_filters, parsed_sorts = optional_request_list_query(
+        filters_raw=filters,
+        sorts_raw=sorts,
+    )
     internal_customer_id = None
     if customer_id is not None:
         customer = check_customer_view_permission(customer_id, team_id, current_user, db)
         internal_customer_id = customer.id
-        actual_owner_id = None
 
-    # 如果前端未指定 owner_id 且没有 view:all 权限，也不是按可访问客户查询，则限制为只看自己的商机
-    if actual_owner_id is None and not has_view_all and customer_id is None:
-        actual_owner_id = str(current_user.id)
+    if uses_unified_list_query(filters=parsed_filters, sorts=parsed_sorts):
+        actual_owner_id = enforce_owner_view_scope(
+            parsed_filters or [],
+            current_user_id=str(current_user.id),
+            has_view_all=has_view_all,
+            permission_detail="只能查看自己负责的商机，或需要 opportunity:view:all 权限查看他人数据",
+            default_to_self=customer_id is None,
+        )
+    else:
+        actual_owner_id = owner_id
+        requested_owner_ids = [item.strip() for item in actual_owner_id.split(",") if item.strip()] if actual_owner_id else []
+        if requested_owner_ids and any(item != str(current_user.id) for item in requested_owner_ids) and not has_view_all:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="只能查看自己负责的商机，或需要 opportunity:view:all 权限查看他人数据"
+            )
+        if customer_id is not None:
+            actual_owner_id = None
+        elif actual_owner_id is None and not has_view_all:
+            actual_owner_id = str(current_user.id)
 
-    opportunities, total = opportunity_crud.get_multi(
+    opportunities, total = run_or_400(lambda: opportunity_crud.get_multi(
         db=db,
         team_id=team_id,
         skip=skip,
@@ -326,8 +344,10 @@ def get_opportunities(
         expected_closing_date_start=expected_closing_date_start,
         expected_closing_date_end=expected_closing_date_end,
         order_by=order_by,
-        order_dir=order_dir
-    )
+        order_dir=order_dir,
+        filters=parsed_filters,
+        sorts=parsed_sorts,
+    ))
     
     result = []
     for opp in opportunities:

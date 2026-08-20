@@ -39,8 +39,7 @@ import { usePageTitle } from '@/composables/usePageTitle'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { normalizePaginatedResponse } from '@/types/pagination'
-import { getDateBounds, getDelimitedFilterValues, getFilterValue, getNumericFilterValue } from '@/utils/listFilters'
-import { getPrimarySort } from '@/utils/listSorts'
+import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
 import ContractDetailSheet from '@/views/ContractDetailSheet.vue'
 
@@ -104,6 +103,7 @@ const fields = computed<ListFieldDefinition[]>(() => {
       label: '合同金额',
       type: 'number',
       column: { align: 'right', width: '140px' },
+      filter: true,
       sort: true
     },
     {
@@ -167,10 +167,8 @@ const fields = computed<ListFieldDefinition[]>(() => {
     { key: 'signing_date', label: '签署日期', type: 'date', column: { width: '120px' }, filter: true, sort: true },
     { key: 'effective_date', label: '生效日期', type: 'date', filter: true, sort: true },
     { key: 'expiry_date', label: '到期日期', type: 'date', filter: true, sort: true },
-    { key: 'created_time', label: '创建时间', type: 'date', column: { width: '160px' }, sort: true }
-  ]
-  if (ownerFilterOptions.value.length > 0) {
-    catalog.push({
+    { key: 'created_time', label: '创建时间', type: 'date', column: { width: '160px' } },
+    {
       key: 'owner_id',
       label: '负责人',
       type: 'enum',
@@ -178,9 +176,11 @@ const fields = computed<ListFieldDefinition[]>(() => {
         value: owner.id,
         label: owner.name
       })),
-      filter: true
-    })
-  }
+      column: { width: '100px' },
+      filter: true,
+      sort: true
+    }
+  ]
   return catalog
 })
 
@@ -228,51 +228,20 @@ const fetchOwnerFilterOptions = async (): Promise<void> => {
 const fetchContractList = async (): Promise<void> => {
   loading.value = true
   try {
-    // Tab 状态筛选
-    let statusFilter: string | null = null
-    if (['DRAFT', 'PENDING_REVIEW', 'SIGNED'].includes(activeTab.value)) {
-      statusFilter = activeTab.value
-    } else {
-      statusFilter = getDelimitedFilterValues(activeFilters.value, 'status')
-    }
-    const signingDateBounds = getDateBounds(activeFilters.value, 'signing_date')
-    const effectiveDateBounds = getDateBounds(activeFilters.value, 'effective_date')
-    const expiryDateBounds = getDateBounds(activeFilters.value, 'expiry_date')
-    const licenseExpiryDateBounds = getDateBounds(activeFilters.value, 'license_expiry_date')
-
-    const params: Record<string, unknown> = {
+    const tabStatus = ['DRAFT', 'PENDING_REVIEW', 'SIGNED'].includes(activeTab.value)
+      ? activeTab.value
+      : null
+    const effectiveFilters = tabStatus === null
+      ? activeFilters.value
+      : withoutFilterFields(activeFilters.value, ['status'])
+    const params: ContractQueryParams = {
       skip: (pagination.current - 1) * pagination.pageSize,
       limit: pagination.pageSize,
-      keyword: getFilterValue(activeFilters.value, 'contract_name'),
-      status: statusFilter,
-      contract_number: getFilterValue(activeFilters.value, 'contract_number'),
-      customer_keyword: getFilterValue(activeFilters.value, 'customer_name'),
-      opportunity_keyword: getFilterValue(activeFilters.value, 'opportunity_name'),
-      status_exclude: getDelimitedFilterValues(activeFilters.value, 'status', ['neq', 'not_contains']),
-      license_type: getDelimitedFilterValues(activeFilters.value, 'license_type'),
-      license_type_exclude: getDelimitedFilterValues(activeFilters.value, 'license_type', ['neq', 'not_contains']),
-      purchase_type: getDelimitedFilterValues(activeFilters.value, 'purchase_type'),
-      purchase_type_exclude: getDelimitedFilterValues(activeFilters.value, 'purchase_type', ['neq', 'not_contains']),
-      subscription_years: getNumericFilterValue(activeFilters.value, 'subscription_years'),
-      subscription_years_exclude: getNumericFilterValue(activeFilters.value, 'subscription_years', ['neq']),
-      license_authorized_users: getNumericFilterValue(activeFilters.value, 'license_authorized_users'),
-      license_authorized_users_exclude: getNumericFilterValue(activeFilters.value, 'license_authorized_users', ['neq']),
-      standard_unit_price: getNumericFilterValue(activeFilters.value, 'standard_unit_price'),
-      standard_unit_price_exclude: getNumericFilterValue(activeFilters.value, 'standard_unit_price', ['neq']),
-      owner_id: getDelimitedFilterValues(activeFilters.value, 'owner_id'),
-      owner_id_exclude: getDelimitedFilterValues(activeFilters.value, 'owner_id', ['neq', 'not_contains']),
-      signing_date_start: signingDateBounds.start,
-      signing_date_end: signingDateBounds.end,
-      effective_date_start: effectiveDateBounds.start,
-      effective_date_end: effectiveDateBounds.end,
-      expiry_date_start: expiryDateBounds.start,
-      expiry_date_end: expiryDateBounds.end,
-      license_expiry_date_start: licenseExpiryDateBounds.start,
-      license_expiry_date_end: licenseExpiryDateBounds.end,
-      ...getPrimarySort(activeSorts.value)
+      status: tabStatus,
+      ...serializeListQuery({ filters: effectiveFilters, sorts: activeSorts.value })
     }
 
-    const response = await contractApi.getContracts(params as ContractQueryParams)
+    const response = await contractApi.getContracts(params)
     const normalized = normalizePaginatedResponse(response)
     tableData.value = normalized.items
     pagination.total = normalized.total
@@ -630,6 +599,11 @@ watchEffect(() => {
       <!-- 商机名称 -->
       <template #cell-opportunity_name="{ row }">
         {{ row.opportunity_name || row.opportunity_info?.opportunity_name || '-' }}
+      </template>
+
+      <!-- 负责人 -->
+      <template #cell-owner_id="{ row }">
+        {{ row.owner_info?.name || '-' }}
       </template>
 
       <!-- 总金额 -->

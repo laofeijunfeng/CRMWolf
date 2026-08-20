@@ -48,8 +48,7 @@ import { usePageTitle } from '@/composables/usePageTitle'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { buildInvoiceDownloadFileName } from '@/utils/invoiceFileName'
-import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
-import { getPrimarySort } from '@/utils/listSorts'
+import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -107,10 +106,10 @@ const invoiceEffectiveStatusOptions = [
 ]
 
 const fields: ListFieldDefinition[] = [
-  { key: 'keyword', label: '关键字', type: 'text', filter: true },
-  { key: 'application_number', label: '申请单号', type: 'text', column: { width: '220px' }, sort: true },
-  { key: 'customer_name', label: '客户名称', column: { width: '150px' } },
-  { key: 'contract_name', label: '合同名称', column: { width: '180px' } },
+  { key: 'keyword', label: '关键字', type: 'text', role: 'keyword', filter: true },
+  { key: 'application_number', label: '申请单号', type: 'text', column: { width: '220px' } },
+  { key: 'customer_name', label: '客户名称', type: 'text', column: { width: '150px' } },
+  { key: 'contract_name', label: '合同名称', type: 'text', column: { width: '180px' } },
   {
     key: 'invoice_type',
     label: '发票类型',
@@ -125,9 +124,10 @@ const fields: ListFieldDefinition[] = [
     label: '开票金额',
     type: 'number',
     column: { align: 'right', width: '130px' },
+    filter: true,
     sort: true
   },
-  { key: 'invoice_title_text', label: '开票抬头', type: 'text', column: { width: '200px' }, sort: true },
+  { key: 'invoice_title_text', label: '开票抬头', type: 'text', column: { width: '200px' } },
   {
     key: 'status',
     label: '状态',
@@ -143,11 +143,12 @@ const fields: ListFieldDefinition[] = [
     type: 'enum',
     options: invoiceEffectiveStatusOptions,
     column: { align: 'center', width: '110px' },
-    filter: true
+    filter: true,
+    sort: true
   },
-  { key: 'applicant_name', label: '申请人', column: { width: '110px' } },
+  { key: 'applicant_name', label: '申请人', type: 'text', column: { width: '110px' } },
   { key: 'created_time', label: '创建时间', type: 'date', column: { width: '170px' }, filter: true, sort: true },
-  { key: 'issued_time', label: '开票时间', type: 'date', sort: true },
+  { key: 'issued_time', label: '开票时间', type: 'date', filter: true, sort: true },
 ]
 
 const activeFilters = ref<ListFilterCondition[]>([])
@@ -178,53 +179,21 @@ const fetchCustomers = async (): Promise<void> => {
 const fetchInvoiceApplications = async (): Promise<void> => {
   loading.value = true
   try {
+    const tabStatus = activeTab.value === 'pending'
+      ? 'PENDING_REVIEW'
+      : activeTab.value === 'approved'
+        ? 'APPROVED'
+        : activeTab.value === 'invoiced'
+          ? 'ISSUED'
+          : null
+    const effectiveFilters = tabStatus === null
+      ? activeFilters.value
+      : withoutFilterFields(activeFilters.value, ['status'])
     const params: InvoiceApplicationQueryParams = {
       page: pagination.current,
       page_size: pagination.pageSize,
-      ...getPrimarySort(activeSorts.value)
-    }
-
-    // Tab 状态筛选
-    if (activeTab.value === 'pending') {
-      params.status = 'PENDING_REVIEW'
-    } else if (activeTab.value === 'approved') {
-      params.status = 'APPROVED'
-    } else if (activeTab.value === 'invoiced') {
-      params.status = 'ISSUED'
-    } else {
-      const status = getDelimitedFilterValues(activeFilters.value, 'status')
-      const statusExclude = getDelimitedFilterValues(activeFilters.value, 'status', ['neq', 'not_contains'])
-      if (status !== null) {
-        params.status = status
-      }
-      if (statusExclude !== null) {
-        params.status_exclude = statusExclude
-      }
-    }
-
-    const keyword = getFilterValue(activeFilters.value, 'keyword')
-    const invoiceType = getDelimitedFilterValues(activeFilters.value, 'invoice_type')
-    const invoiceEffectiveStatus = getDelimitedFilterValues(activeFilters.value, 'invoice_effective_status')
-    const createdTimeBounds = getDateBounds(activeFilters.value, 'created_time')
-
-    if (keyword !== null && keyword !== '') {
-      params.keyword = keyword
-    }
-    if (invoiceType !== null) {
-      params.invoice_type = invoiceType
-    }
-    if (invoiceEffectiveStatus !== null) {
-      params.invoice_effective_status = invoiceEffectiveStatus
-    }
-    const invoiceTypeExclude = getDelimitedFilterValues(activeFilters.value, 'invoice_type', ['neq', 'not_contains'])
-    if (invoiceTypeExclude !== null) {
-      params.invoice_type_exclude = invoiceTypeExclude
-    }
-    if (createdTimeBounds.start !== undefined) {
-      params.created_time_start = createdTimeBounds.start
-    }
-    if (createdTimeBounds.end !== undefined) {
-      params.created_time_end = createdTimeBounds.end
+      ...(tabStatus !== null ? { status: tabStatus } : {}),
+      ...serializeListQuery({ filters: effectiveFilters, sorts: activeSorts.value })
     }
 
     const response = await invoiceApi.getInvoiceApplications(params)

@@ -46,6 +46,7 @@
       <!-- DataTable（桌面 + 移动端卡片） -->
       <DataTable
         v-model:filters="activeFilters"
+        v-model:sorts="activeSorts"
         :fields="fields"
         :data="rows"
         :total="total"
@@ -64,6 +65,8 @@
         @update:page-size="pageSize = $event; page = 1; fetchList()"
         @filter-apply="handleFilterApply"
         @filter-reset="handleFilterReset"
+        @sort-apply="handleSortApply"
+        @sort-reset="handleSortReset"
         @row-click="openDetail"
       >
         <!-- 单号列：mono font + 点击复制 -->
@@ -517,6 +520,7 @@ import { BellRing, Clock, Copy } from 'lucide-vue-next'
 import { AmountText, DataTable, Badge, type ActionConfig, type TableRowActionSet } from '@/components/crmwolf'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
+import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetHeader, SheetTitle, SheetDescription, SheetFooter } from '@/components/ui/sheet'
 import { DetailSheetContent } from '@/components/ui/detail-sheet'
@@ -540,7 +544,7 @@ import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { formatDateRelative } from '@/utils/format'
-import { getDateBounds, getDelimitedFilterValues, getFilterValue, getNumericFilterValue } from '@/utils/listFilters'
+import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
 import { createConfirmDialog } from '@/utils/confirmDialogImpl'
 import { handleApiError } from '@/utils/errorHandler'
 import { customerDetailRoute } from '@/utils/customerRoutes'
@@ -572,6 +576,7 @@ const router = useRouter()
 // ==================== State ====================
 const activeTab = ref<Tab>('pending')
 const activeFilters = ref<ListFilterCondition[]>([])
+const activeSorts = ref<ListSortCondition[]>([])
 
 const page = ref<number>(1)
 const pageSize = ref<number>(20)
@@ -1126,7 +1131,7 @@ const fields: ListFieldDefinition[] = [
     column: { width: '120px', align: 'center' },
     filter: { label: '审批状态' }
   },
-  { key: 'overdue_hours', label: '超时', column: { width: '130px', align: 'center' } },
+  { key: 'overdue_hours', label: '超时', type: 'number', column: { width: '130px', align: 'center' } },
 ]
 
 onUnmounted(() => {
@@ -1179,34 +1184,17 @@ const fetchList = async (): Promise<void> => {
   loadError.value = null
   listLoading.value = true
   try {
-    const businessType = getDelimitedFilterValues(activeFilters.value, 'business_type')
-    const businessTypeExclude = getDelimitedFilterValues(activeFilters.value, 'business_type', ['neq', 'not_contains'])
-    const status = getDelimitedFilterValues(activeFilters.value, 'status')
-    const statusExclude = getDelimitedFilterValues(activeFilters.value, 'status', ['neq', 'not_contains'])
-    const applicationNumber = getFilterValue(activeFilters.value, 'application_number')
-    const entityName = getFilterValue(activeFilters.value, 'entity_name')
-    const submitterName = getFilterValue(activeFilters.value, 'submitter_name')
-    const entityAmount = getNumericFilterValue(activeFilters.value, 'entity_amount')
-    const createdTimeBounds = getDateBounds(activeFilters.value, 'created_time')
+    const effectiveFilters = activeTab.value === 'pending'
+      ? withoutFilterFields(activeFilters.value, ['status'])
+      : activeFilters.value
     const query: ApprovalListQuery = {
       tab: activeTab.value,
       page: page.value,
       page_size: pageSize.value,
-      ...(businessType !== null ? { business_type: businessType } : {}),
-      ...(businessTypeExclude !== null ? { business_type_exclude: businessTypeExclude } : {}),
-      ...(status !== null ? { status } : {}),
-      ...(statusExclude !== null ? { status_exclude: statusExclude } : {}),
-      ...(applicationNumber !== null && applicationNumber !== '' ? { application_number: applicationNumber } : {}),
-      ...(entityName !== null && entityName !== '' ? { entity_name: entityName } : {}),
-      ...(submitterName !== null && submitterName !== '' ? { submitter_name: submitterName } : {}),
-      ...(entityAmount !== null ? { entity_amount: entityAmount } : {}),
-      ...(createdTimeBounds.start !== undefined ? { created_time_start: createdTimeBounds.start } : {}),
-      ...(createdTimeBounds.end !== undefined ? { created_time_end: createdTimeBounds.end } : {})
+      ...serializeListQuery({ filters: effectiveFilters, sorts: activeSorts.value })
     }
     const res = await store.fetchList(query)
-    rows.value = activeTab.value === 'pending'
-      ? [...res.items].sort(byOverdueDesc)
-      : res.items
+    rows.value = res.items
     total.value = res.total
   } catch (err) {
     if (isAxiosStatus(err, 403)) {
@@ -1217,13 +1205,6 @@ const fetchList = async (): Promise<void> => {
   } finally {
     listLoading.value = false
   }
-}
-
-// 待我审批按 overdue_hours 降序（积压最久顶；null 视为 0）
-const byOverdueDesc = (a: ApprovalListItem, b: ApprovalListItem): number => {
-  const ah = a.overdue_hours ?? 0
-  const bh = b.overdue_hours ?? 0
-  return bh - ah
 }
 
 const reload = (): void => {
@@ -1238,6 +1219,18 @@ const handleFilterApply = (filters: ListFilterCondition[]): void => {
 
 const handleFilterReset = (): void => {
   activeFilters.value = []
+  page.value = 1
+  fetchList()
+}
+
+const handleSortApply = (sorts: ListSortCondition[]): void => {
+  activeSorts.value = sorts
+  page.value = 1
+  fetchList()
+}
+
+const handleSortReset = (): void => {
+  activeSorts.value = []
   page.value = 1
   fetchList()
 }

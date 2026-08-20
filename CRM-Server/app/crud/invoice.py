@@ -1,5 +1,5 @@
 from datetime import date, datetime, time
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import and_, exists, not_, or_
 from sqlalchemy.orm import Session
@@ -28,6 +28,15 @@ from app.schemas.invoice import (
 from app.services.business_number_generator import BusinessNumberGenerator
 from app.utils.approval_delete_guard import assert_deletable_approval_resource
 from app.utils.time import business_now
+from app.core.list_query import (
+    FilterCondition,
+    ListQueryContext,
+    SortCondition,
+    paginate_optional_list_query,
+    uses_unified_list_query,
+    without_filter_field,
+)
+from app.core.list_query.catalogs import INVOICES_LIST_QUERY_CATALOG
 
 
 def _split_csv(value: Optional[str]) -> List[str]:
@@ -179,10 +188,34 @@ class InvoiceApplicationCRUD:
         created_time_start: Optional[date] = None,
         created_time_end: Optional[date] = None,
         order_by: Optional[str] = None,
-        order_dir: Optional[str] = None
+        order_dir: Optional[str] = None,
+        filters: list[FilterCondition] | None = None,
+        sorts: list[SortCondition] | None = None,
     ) -> Tuple[List[InvoiceApplication], int]:
         query = db.query(InvoiceApplication).filter(InvoiceApplication.team_id == team_id)
-        
+
+        # 页签状态与数据范围属于固定 scope；显式统一协议下其余旧参数不再混入。
+        if status:
+            query = query.filter(InvoiceApplication.status.in_(_split_csv(status)))
+        if current_user_id:
+            query = query.filter(InvoiceApplication.applicant_id == current_user_id)
+
+        if uses_unified_list_query(filters=filters, sorts=sorts):
+            effective_filters = without_filter_field(filters, "status") if status else filters
+            return paginate_optional_list_query(
+                query,
+                INVOICES_LIST_QUERY_CATALOG,
+                skip=skip,
+                limit=limit,
+                filters=effective_filters,
+                sorts=sorts,
+                context=ListQueryContext(
+                    db=db,
+                    team_id=team_id,
+                    current_user_id=current_user_id,
+                ),
+            )
+
         if customer_id:
             query = query.filter(InvoiceApplication.customer_id == customer_id)
         
@@ -192,8 +225,6 @@ class InvoiceApplicationCRUD:
         if payment_plan_id:
             query = query.filter(InvoiceApplication.payment_plan_id == payment_plan_id)
         
-        if status:
-            query = query.filter(InvoiceApplication.status.in_(_split_csv(status)))
         if status_exclude:
             query = query.filter(InvoiceApplication.status.notin_(_split_csv(status_exclude)))
 
@@ -245,9 +276,6 @@ class InvoiceApplicationCRUD:
         if applicant_id:
             query = query.filter(InvoiceApplication.applicant_id == applicant_id)
         
-        if current_user_id:
-            query = query.filter(InvoiceApplication.applicant_id == current_user_id)
-
         if created_time_start:
             query = query.filter(InvoiceApplication.created_time >= datetime.combine(created_time_start, time.min))
 

@@ -10,6 +10,8 @@
 - business_type 过滤生效
 - entity 摘要（application_number/entity_name/entity_amount）按 business_type 内存 join
 """
+import json
+
 import pytest
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -74,6 +76,7 @@ def db_session():
         conn.exec_driver_sql("""
             CREATE TABLE crm_opportunities (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                public_id VARCHAR(64) NOT NULL UNIQUE,
                 team_id INTEGER NOT NULL,
                 opportunity_number VARCHAR(50) NOT NULL,
                 opportunity_name VARCHAR(255) NOT NULL,
@@ -104,6 +107,30 @@ def db_session():
                 created_time DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
                 last_modified_time DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
                 version INTEGER NOT NULL DEFAULT 1
+            )
+        """)
+        conn.exec_driver_sql("""
+            CREATE TABLE crm_invoice_reissue_applications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                team_id INTEGER NOT NULL,
+                application_number VARCHAR(50),
+                invoice_title_text VARCHAR(255),
+                invoice_amount NUMERIC(12, 2)
+            )
+        """)
+        conn.exec_driver_sql("""
+            CREATE TABLE crm_license_applications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                team_id INTEGER NOT NULL,
+                application_number VARCHAR(50),
+                license_type VARCHAR(20)
+            )
+        """)
+        conn.exec_driver_sql("""
+            CREATE TABLE crm_contract_payment_plans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                team_id INTEGER NOT NULL,
+                contract_id INTEGER NOT NULL
             )
         """)
     Session = sessionmaker(bind=engine)
@@ -595,6 +622,45 @@ def test_entity_summary_payment_join(
     assert item["entity_amount"] == 12000.0
 
 
+def test_payment_application_number_fallback_is_filterable_on_sqlite(
+    client, db_session, seed_invoice_flow, seed_finance_role,
+):
+    """PAY-{id} fallback must compile on every supported SQLAlchemy dialect."""
+    _flow, node = seed_invoice_flow
+    record = PaymentRecord(
+        team_id=1,
+        record_number="",
+        payment_plan_id=1,
+        actual_amount=Decimal("12000"),
+        payment_date=datetime.now().date(),
+        creator_id="1",
+        creator_name="登记人",
+        confirmation_status=PaymentConfirmationStatus.PENDING,
+    )
+    db_session.add(record)
+    db_session.commit()
+    _make_approval(db_session, BusinessType.PAYMENT, record.id, 1, node)
+
+    response = client.get(
+        "/v1/approvals",
+        params={
+            "tab": "pending",
+            "filters": json.dumps([
+                {
+                    "field": "application_number",
+                    "op": "eq",
+                    "value": f"PAY-{record.id}",
+                },
+            ]),
+            "sorts": "[]",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["total"] == 1
+    assert response.json()["items"][0]["application_number"] == f"PAY-{record.id}"
+
+
 def test_entity_summary_contract_join(
     client, db_session, seed_invoice_flow, seed_finance_role,
 ):
@@ -641,3 +707,157 @@ def test_entity_summary_opportunity_uses_persisted_number(
     assert item["application_number"] == opp.opportunity_number
     assert item["entity_name"] == "统一编号商机"
     assert item["entity_amount"] == 66000.0
+
+
+# ---------- 统一字段目录协议 -----------------------------------------------
+
+def test_unified_query_filters_and_sorts_derived_summary_fields(
+    client, db_session, seed_invoice_flow, seed_finance_role,
+):
+    """摘要字段必须在 SQL 层参与全量筛选、排序和分页。"""
+    _flow, node = seed_invoice_flow
+
+    first = _make_invoice(db_session, team_id=1)
+    first.invoice_title_text = "甲公司"
+    first.invoice_amount = Decimal("5000")
+    db_session.commit()
+    _make_approval(db_session, BusinessType.INVOICE, first.id, 1, node)
+
+    second = _make_invoice(db_session, team_id=1)
+    second.invoice_title_text = "乙公司"
+    second.invoice_amount = Decimal("9000")
+    db_session.commit()
+    _make_approval(db_session, BusinessType.INVOICE, second.id, 1, node)
+
+    response = client.get(
+        "/v1/approvals",
+        params={
+            "tab": "pending",
+            "filters": json.dumps([
+                {"field": "entity_name", "op": "contains", "value": "公司"},
+            ]),
+            "sorts": json.dumps([
+                {"field": "entity_amount", "direction": "desc"},
+            ]),
+            "page": 1,
+            "page_size": 1,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["total"] == 2
+    assert [item["entity_name"] for item in payload["items"]] == ["乙公司"]
+    assert payload["items"][0]["entity_amount"] == 9000.0
+
+
+def test_unified_query_does_not_read_summary_from_another_team(
+    client, db_session, seed_invoice_flow, seed_finance_role,
+):
+    """审批派生字段只能读取审批所属团队的业务实体。"""
+    _flow, node = seed_invoice_flow
+    foreign_invoice = _make_invoice(db_session, team_id=2)
+    foreign_invoice.invoice_title_text = "跨团队机密公司"
+    db_session.commit()
+    _make_approval(db_session, BusinessType.INVOICE, foreign_invoice.id, 1, node)
+
+    response = client.get(
+        "/v1/approvals",
+        params={
+            "tab": "pending",
+            "filters": json.dumps([
+                {"field": "entity_name", "op": "contains", "value": "机密"},
+            ]),
+            "sorts": "[]",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["total"] == 0
+    assert response.json()["items"] == []
+
+
+def test_unified_query_does_not_mix_or_validate_legacy_filters(
+    client, db_session, seed_invoice_flow, seed_finance_role,
+):
+    """显式统一协议只保留 tab/权限 scope，不叠加旧业务筛选参数。"""
+    _flow, node = seed_invoice_flow
+    invoice = _make_invoice(db_session, team_id=1)
+    _make_approval(db_session, BusinessType.INVOICE, invoice.id, 1, node)
+
+    response = client.get(
+        "/v1/approvals",
+        params={
+            "tab": "pending",
+            "business_type": "CONTRACT",
+            "status": ApprovalStatus.REJECTED,
+            "submitter_name": "不存在的提交人",
+            "filters": "[]",
+            "sorts": "[]",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["total"] == 1
+    assert [item["business_type"] for item in response.json()["items"]] == [BusinessType.INVOICE]
+
+
+def test_unified_query_rejects_unknown_approval_field(
+    client, db_session, seed_invoice_flow, seed_finance_role,
+):
+    """未知字段不能静默忽略，HTTP 边界统一返回 400。"""
+    _flow, node = seed_invoice_flow
+    invoice = _make_invoice(db_session, team_id=1)
+    _make_approval(db_session, BusinessType.INVOICE, invoice.id, 1, node)
+
+    response = client.get(
+        "/v1/approvals",
+        params={
+            "tab": "pending",
+            "filters": json.dumps([
+                {"field": "missing_field", "op": "eq", "value": "x"},
+            ]),
+            "sorts": "[]",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "missing_field" in response.json()["detail"]
+
+
+def test_pending_empty_sorts_defaults_to_overdue_hours_desc(
+    client, db_session, seed_invoice_flow, seed_finance_role,
+):
+    """pending 显式新协议未选排序时，仍按超时小时数倒序。"""
+    _flow, node = seed_invoice_flow
+    now = datetime.now()
+
+    recent = _make_invoice(db_session, team_id=1)
+    recent_approval = _make_approval(
+        db_session,
+        BusinessType.INVOICE,
+        recent.id,
+        1,
+        node,
+        created_time=now - timedelta(hours=2),
+    )
+    overdue = _make_invoice(db_session, team_id=1)
+    overdue_approval = _make_approval(
+        db_session,
+        BusinessType.INVOICE,
+        overdue.id,
+        1,
+        node,
+        created_time=now - timedelta(hours=30),
+    )
+
+    response = client.get(
+        "/v1/approvals",
+        params={"tab": "pending", "filters": "[]", "sorts": "[]"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert [item["id"] for item in response.json()["items"]] == [
+        overdue_approval.id,
+        recent_approval.id,
+    ]

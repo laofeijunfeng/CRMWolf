@@ -51,8 +51,8 @@ import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { companyScaleOptions } from '@/schemas/customer-form'
 import { useAcquisitionSourceOptions } from '@/composables/useAcquisitionSourceOptions'
 import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
-import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
-import { getPrimarySort } from '@/utils/listSorts'
+import { serializeListQuery } from '@/utils/listQuery'
+import { LICENSE_STATUS_LABELS, licenseStatusClass, licenseStatusLabel } from '@/utils/licenseStatus'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -178,10 +178,10 @@ const fields = computed<ListFieldDefinition[]>(() => [
     type: 'enum',
     options: ownerFieldOptions.value,
     column: { width: '100px' },
-    filter: ownerFieldOptions.value.length > 0 ? { apiKey: 'owner_id' } : false,
+    filter: { apiKey: 'owner_id' },
     sort: { apiKey: 'owner_id' }
   },
-  { key: 'collaborators', label: '协作者', column: { width: '100px' } },
+  { key: 'collaborators', label: '协作者', type: 'text', column: { width: '100px' } },
   {
     key: 'city',
     label: '城市',
@@ -208,9 +208,15 @@ const fields = computed<ListFieldDefinition[]>(() => [
     filter: true,
     sort: true
   },
-  { key: 'license_status', label: '授权状态', column: { align: 'center', width: '100px' } },
-  { key: 'license_expiry_date', label: '授权到期', column: { width: '120px' } },
-  { key: 'default_procurement_method', label: '默认采购方式', column: { width: '140px' } },
+  {
+    key: 'license_status',
+    label: '授权状态',
+    type: 'enum',
+    options: Object.entries(LICENSE_STATUS_LABELS).map(([value, label]) => ({ value, label })),
+    column: { align: 'center', width: '100px' }
+  },
+  { key: 'license_expiry_date', label: '授权到期', type: 'date', column: { width: '120px' } },
+  { key: 'default_procurement_method', label: '默认采购方式', type: 'text', column: { width: '140px' } },
   {
     key: 'industry',
     label: '行业',
@@ -229,7 +235,7 @@ const fields = computed<ListFieldDefinition[]>(() => [
     filter: true,
     sort: true
   },
-  { key: 'creator', label: '创建人', column: { width: '100px' } },
+  { key: 'creator', label: '创建人', type: 'text', column: { width: '100px' } },
   {
     key: 'created_time',
     label: '创建时间',
@@ -449,23 +455,10 @@ const fetchIndustryFilterOptions = async (): Promise<void> => {
 const fetchCustomerList = async (): Promise<void> => {
   loading.value = true
   try {
-    const createdTimeBounds = getDateBounds(activeFilters.value, 'created_time')
-    const params: Record<string, unknown> = {
+    const params = {
       skip: (pagination.current - 1) * pagination.pageSize,
       limit: pagination.pageSize,
-      keyword: getFilterValue(activeFilters.value, 'account_name'),
-      status: getDelimitedFilterValues(activeFilters.value, 'status'),
-      status_exclude: getDelimitedFilterValues(activeFilters.value, 'status', ['neq', 'not_contains']),
-      industry: getDelimitedFilterValues(activeFilters.value, 'industry'),
-      industry_exclude: getDelimitedFilterValues(activeFilters.value, 'industry', ['neq', 'not_contains']),
-      source_public_id: getDelimitedFilterValues(activeFilters.value, 'source'),
-      source_public_id_exclude: getDelimitedFilterValues(activeFilters.value, 'source', ['neq', 'not_contains']),
-      city: getFilterValue(activeFilters.value, 'city', ['eq', 'contains']),
-      company_scale: getDelimitedFilterValues(activeFilters.value, 'company_scale'),
-      company_scale_exclude: getDelimitedFilterValues(activeFilters.value, 'company_scale', ['neq', 'not_contains']),
-      created_time_start: createdTimeBounds.start,
-      created_time_end: createdTimeBounds.end,
-      ...getPrimarySort(activeSorts.value)
+      ...serializeListQuery({ filters: activeFilters.value, sorts: activeSorts.value })
     }
 
     if (activeTab.value === 'public') {
@@ -474,14 +467,10 @@ const fetchCustomerList = async (): Promise<void> => {
       tableData.value = normalized.items
       pagination.total = normalized.total
     } else {
-      if (activeTab.value === 'collaborated') {
-        params['scope'] = 'collaborated'
-      } else {
-        params['owner_id'] = getDelimitedFilterValues(activeFilters.value, 'owner_id')
-        params['owner_id_exclude'] = getDelimitedFilterValues(activeFilters.value, 'owner_id', ['neq', 'not_contains'])
-      }
-
-      const response = await customerApi.getCustomers(params)
+      const response = await customerApi.getCustomers({
+        ...params,
+        ...(activeTab.value === 'collaborated' ? { scope: 'collaborated' as const } : {})
+      })
       const normalized = normalizeCustomerListResponse(response)
       tableData.value = normalized.items
       pagination.total = normalized.total
@@ -754,28 +743,12 @@ const formatDate = (dateStr?: string | null): string => {
   })
 }
 
-const isDateBeforeToday = (dateStr?: string | null): boolean => {
-  if (dateStr === undefined || dateStr === null || dateStr.trim() === '') return false
-  const date = new Date(`${dateStr.slice(0, 10)}T00:00:00`)
-  if (Number.isNaN(date.getTime())) return false
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  return date < today
-}
-
 const getLicenseStatusLabel = (row: CustomerResponse): string => {
-  if (row.license_expiry_date === null || row.license_expiry_date.trim() === '') return '未授权'
-  if (isDateBeforeToday(row.license_expiry_date)) return '已过期'
-  if (row.license_type === 'TRIAL') return '试用'
-  if (row.license_type === 'OFFICIAL') return '正式'
-  return '已授权'
+  return licenseStatusLabel(row.license_expiry_date, row.license_type)
 }
 
 const getLicenseStatusClass = (row: CustomerResponse): string => {
-  if (row.license_expiry_date === null || row.license_expiry_date.trim() === '') return 'license-badge--none'
-  if (isDateBeforeToday(row.license_expiry_date)) return 'license-badge--expired'
-  if (row.license_type === 'TRIAL') return 'license-badge--trial'
-  return 'license-badge--official'
+  return licenseStatusClass(row.license_expiry_date, row.license_type)
 }
 
 // 状态映射函数（数字状态 → 字符串状态）

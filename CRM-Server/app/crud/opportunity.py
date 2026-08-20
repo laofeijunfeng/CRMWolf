@@ -9,6 +9,15 @@ from app.constants.business_types import BusinessType
 from app.services.business_number_generator import BusinessNumberGenerator
 from app.utils.approval_delete_guard import assert_deletable_approval_resource
 from app.utils.time import business_now
+from app.core.list_query import (
+    FilterCondition,
+    ListQueryContext,
+    SortCondition,
+    paginate_optional_list_query,
+    uses_unified_list_query,
+    without_filter_field,
+)
+from app.core.list_query.catalogs import OPPORTUNITIES_LIST_QUERY_CATALOG
 from app.schemas.opportunity import (
     OpportunityStageCreate,
     OpportunityStageUpdate,
@@ -189,9 +198,32 @@ class OpportunityCRUD:
         expected_closing_date_start: Optional[date] = None,
         expected_closing_date_end: Optional[date] = None,
         order_by: Optional[str] = None,
-        order_dir: Optional[str] = None
+        order_dir: Optional[str] = None,
+        filters: list[FilterCondition] | None = None,
+        sorts: list[SortCondition] | None = None,
     ) -> Tuple[List[Opportunity], int]:
         query = db.query(Opportunity).filter(Opportunity.team_id == team_id)
+
+        if uses_unified_list_query(filters=filters, sorts=sorts):
+            effective_filters = filters
+            if status is not None:
+                status_values = _split_int_csv(status)
+                if status_values:
+                    query = query.filter(Opportunity.status.in_(status_values))
+                effective_filters = without_filter_field(filters, "status")
+            if owner_id is not None:
+                query = query.filter(Opportunity.owner_id.in_(_split_csv(owner_id)))
+            if customer_id is not None:
+                query = query.filter(Opportunity.customer_id == customer_id)
+            return paginate_optional_list_query(
+                query,
+                OPPORTUNITIES_LIST_QUERY_CATALOG,
+                skip=skip,
+                limit=limit,
+                filters=effective_filters,
+                sorts=sorts,
+                context=ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id),
+            )
 
         status_values = _split_int_csv(status)
         if status_values:

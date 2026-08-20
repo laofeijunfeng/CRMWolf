@@ -26,6 +26,12 @@ from app.services.acquisition_source_service import (
     resolve_public_ids_to_ids,
 )
 from app.utils.time import business_now
+from app.core.list_query import (
+    enforce_owner_view_scope,
+    optional_request_list_query,
+    run_or_400,
+    uses_unified_list_query,
+)
 
 router = APIRouter(prefix="/v1/leads", tags=["线索管理"])
 
@@ -242,6 +248,7 @@ def get_leads(
     city: Optional[str] = Query(None, description="所在城市"),
     keyword: Optional[str] = Query(None, description="关键词搜索"),
     filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
+    sorts: Optional[str] = Query(None, description="通用排序条件 JSON"),
     owner_id: Optional[str] = Query(None, description="按负责人ID筛选（支持 me/my 表示当前用户）"),
     order_by: Optional[str] = Query(None, description="排序字段"),
     order_dir: Optional[str] = Query(None, description="排序方向（asc/desc）"),
@@ -258,35 +265,40 @@ def get_leads(
     # 检查是否有 view:all 权限
     has_view_all = "lead:view:all" in permission_codes
 
-    # 权限验证：如果指定了其他人的 owner_id，必须有 view:all 权限
-    if owner_id is not None and owner_id not in ["me", "my"] and owner_id != str(current_user.id):
-        if not has_view_all:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="只能查看自己负责的线索，或需要 lead:view:all 权限查看他人数据"
-            )
-
-    # 处理 "me"/"my" 参数
-    if owner_id in ["me", "my"]:
-        owner_id = str(current_user.id)
-
-    # 如果前端未指定 owner_id 且没有 view:all 权限，则限制为只看自己的线索
-    if owner_id is None and not has_view_all:
-        owner_id = str(current_user.id)
-
-    filter_conditions = parse_filter_conditions(filters)
+    parsed_filters, parsed_sorts = optional_request_list_query(
+        filters_raw=filters,
+        sorts_raw=sorts,
+    )
+    if uses_unified_list_query(filters=parsed_filters, sorts=parsed_sorts):
+        owner_id = enforce_owner_view_scope(
+            parsed_filters or [],
+            current_user_id=str(current_user.id),
+            has_view_all=has_view_all,
+            permission_detail="只能查看自己负责的线索，或需要 lead:view:all 权限查看他人数据",
+        )
+    else:
+        if owner_id is not None and owner_id not in ["me", "my"] and owner_id != str(current_user.id):
+            if not has_view_all:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="只能查看自己负责的线索，或需要 lead:view:all 权限查看他人数据"
+                )
+        if owner_id in ["me", "my"]:
+            owner_id = str(current_user.id)
+        if owner_id is None and not has_view_all:
+            owner_id = str(current_user.id)
 
     source_ids = None
     if source_public_id is not None:
         source_ids = resolve_public_ids_to_ids(db, team_id, _split_csv(source_public_id))
 
-    leads, total = lead_crud.get_multi(
+    leads, total = run_or_400(lambda: lead_crud.get_multi(
         db, team_id=team_id, skip=skip, limit=limit,
         status=status, source_ids=source_ids, city=city,
         owner_id=owner_id, keyword=keyword,
-        filters=filter_conditions,
+        filters=parsed_filters, sorts=parsed_sorts,
         order_by=order_by, order_dir=order_dir
-    )
+    ))
 
     page = skip // limit + 1
     total_pages = (total + limit - 1) // limit if total > 0 else 0
@@ -629,21 +641,27 @@ def get_public_leads(
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="返回记录数"),
     filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
+    sorts: Optional[str] = Query(None, description="通用排序条件 JSON"),
     order_by: Optional[str] = Query(None, description="排序字段"),
     order_dir: Optional[str] = Query(None, description="排序方向（asc/desc）"),
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    leads, total = lead_crud.get_public_leads(
+    parsed_filters, parsed_sorts = optional_request_list_query(
+        filters_raw=filters,
+        sorts_raw=sorts,
+    )
+    leads, total = run_or_400(lambda: lead_crud.get_public_leads(
         db,
         team_id,
         skip,
         limit,
-        filters=parse_filter_conditions(filters),
+        filters=parsed_filters,
+        sorts=parsed_sorts,
         order_by=order_by,
         order_dir=order_dir
-    )
+    ))
     page = skip // limit + 1
     total_pages = (total + limit - 1) // limit if total > 0 else 0
     return PaginatedResponse[LeadResponse](

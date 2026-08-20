@@ -81,6 +81,9 @@ export interface FollowUpTaskTransitionResponse {
 }
 
 export interface FollowUpTaskListParams {
+  skip?: number
+  filters?: string
+  sorts?: string
   status?: FollowUpTaskStatusFilter
   due_window?: string
   customer_id?: string

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol
 
+from app.core.list_query import FilterCondition, SortCondition
 from app.crud.permission import permission_crud
 from app.crud.sales_commitment import follow_up_task_confirmation_case_crud, follow_up_task_crud
 from app.models.customer import Customer, CustomerMember
@@ -74,7 +75,10 @@ class FollowUpTaskQueryService:
         owner_scope: str = "mine",
         query_text: str | None = None,
         retrieval_mode: str | None = None,
+        skip: int = 0,
         limit: int = 50,
+        filters: list[FilterCondition] | None = None,
+        sorts: list[SortCondition] | None = None,
     ) -> dict[str, Any]:
         statuses = self._normalize_status(status)
         customer = self._resolve_visible_customer(db, team_id=team_id, user_id=user_id, public_id=customer_public_id)
@@ -111,7 +115,10 @@ class FollowUpTaskQueryService:
             due_window=due_window,
             customer_id=customer.id if customer is not None else None,
             owner_scope=owner_scope,
+            skip=skip,
             limit=limit,
+            filters=filters,
+            sorts=sorts,
             semantic_task_public_ids=semantic_task_public_ids,
         )
 
@@ -244,7 +251,10 @@ class FollowUpTaskQueryService:
         due_window: str | None,
         customer_id: int | None,
         owner_scope: str,
+        skip: int,
         limit: int,
+        filters: list[FilterCondition] | None,
+        sorts: list[SortCondition] | None,
         semantic_task_public_ids: list[str] | None,
     ) -> tuple[list[FollowUpTask], int]:
         if semantic_task_public_ids == []:
@@ -258,7 +268,10 @@ class FollowUpTaskQueryService:
                     customer_id=customer_id,
                     statuses=statuses,
                     due_window=due_window,
+                    skip=skip,
                     limit=limit,
+                    filters=filters,
+                    sorts=sorts,
                 )
             return follow_up_task_crud.list_for_owner(
                 db,
@@ -267,7 +280,10 @@ class FollowUpTaskQueryService:
                 statuses=statuses,
                 due_window=due_window,
                 customer_id=customer_id,
+                skip=skip,
                 limit=limit,
+                filters=filters,
+                sorts=sorts,
             )
 
         query = db.query(FollowUpTask).filter(

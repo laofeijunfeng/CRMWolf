@@ -39,8 +39,7 @@ import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
-import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
-import { serializeListSorts } from '@/utils/listSorts'
+import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -97,16 +96,17 @@ const paymentPlanStatusOptions = [
 ]
 
 const fields: ListFieldDefinition[] = [
-  { key: 'keyword', label: '客户/合同/商机/阶段', type: 'text', filter: true },
-  { key: 'plan_number', label: '计划编号', type: 'text', column: { width: '150px' }, sort: true },
-  { key: 'stage_name', label: '阶段名称', type: 'text', column: { width: '120px' }, sort: true },
-  { key: 'customer_name', label: '客户名称', type: 'text', column: true, sort: true },
-  { key: 'contract_name', label: '合同名称', type: 'text', column: true, sort: true },
+  { key: 'keyword', label: '客户/合同/商机/阶段', type: 'text', role: 'keyword', filter: true },
+  { key: 'plan_number', label: '计划编号', type: 'text', column: { width: '150px' } },
+  { key: 'stage_name', label: '阶段名称', type: 'text', column: { width: '120px' } },
+  { key: 'customer_name', label: '客户名称', type: 'text', column: true },
+  { key: 'contract_name', label: '合同名称', type: 'text', column: true },
   {
     key: 'plan_amount',
     label: '计划金额',
     type: 'number',
     column: { align: 'right' },
+    filter: { apiKey: 'planned_amount' },
     sort: { apiKey: 'planned_amount' }
   },
   { key: 'due_date', label: '计划日期', type: 'date', column: true, filter: true, sort: true },
@@ -137,49 +137,24 @@ const registerDefaultPayerName = computed<string>(() => selectedConfirmPlan.valu
 const fetchPaymentPlans = async (): Promise<void> => {
   loading.value = true
   try {
+    const tabStatus = activeTab.value === 'pending'
+      ? 'PENDING'
+      : activeTab.value === 'partial'
+        ? 'PARTIAL'
+        : activeTab.value === 'completed'
+          ? 'COMPLETED'
+          : null
+    const effectiveFilters = tabStatus === null
+      ? activeFilters.value
+      : withoutFilterFields(activeFilters.value, ['status'])
     const params: PaymentPlanListParams = {
       page: pagination.current,
-      page_size: pagination.pageSize
-    }
-
-    // 根据 activeTab 设置筛选条件
-    if (activeTab.value === 'pending') {
-      params.status = 'PENDING'
-    } else if (activeTab.value === 'partial') {
-      params.status = 'PARTIAL'
-    } else if (activeTab.value === 'completed') {
-      params.status = 'COMPLETED'
-    } else {
-      const status = getDelimitedFilterValues(activeFilters.value, 'status')
-      const statusExclude = getDelimitedFilterValues(activeFilters.value, 'status', ['neq', 'not_contains'])
-      if (status !== null) {
-        params.status = status
-      }
-      if (statusExclude !== null) {
-        params.status_exclude = statusExclude
-      }
-    }
-
-    const dueDateBounds = getDateBounds(activeFilters.value, 'due_date')
-    if (dueDateBounds.start !== undefined) {
-      params.due_date_start = dueDateBounds.start
-    }
-    if (dueDateBounds.end !== undefined) {
-      params.due_date_end = dueDateBounds.end
-    }
-
-    const keyword = getFilterValue(activeFilters.value, 'keyword')
-    if (keyword !== null && keyword.length > 0) {
-      params.keyword = keyword
-    }
-
-    const sort = serializeListSorts(activeSorts.value)
-    if (sort !== null) {
-      params.sort = sort
+      page_size: pagination.pageSize,
+      ...(tabStatus !== null ? { status: tabStatus } : {}),
+      ...serializeListQuery({ filters: effectiveFilters, sorts: activeSorts.value })
     }
 
     const data = await paymentApi.listPaymentPlans(params)
-
     tableData.value = data.items
     pagination.total = data.total
   } catch (error) {

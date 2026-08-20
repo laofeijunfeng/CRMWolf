@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func, text, case, cast, Integer, inspect
-from sqlalchemy.orm import joinedload
-from typing import Optional, List, Tuple
+from sqlalchemy.orm import contains_eager, joinedload
+from typing import Any, Dict, Optional, List, Tuple
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -15,6 +15,15 @@ from app.schemas.payment import (
 )
 from app.services.business_number_generator import BusinessNumberGenerator
 from app.utils.time import business_now
+from app.core.list_query import (
+    FilterCondition,
+    ListQueryContext,
+    SortCondition,
+    paginate_optional_list_query,
+    uses_unified_list_query,
+    without_filter_field,
+)
+from app.core.list_query.catalogs import PAYMENT_PLANS_LIST_QUERY_CATALOG, PAYMENT_RECORDS_LIST_QUERY_CATALOG
 
 
 def _is_approved_payment_record(record: PaymentRecord) -> bool:
@@ -92,34 +101,69 @@ class PaymentPlanCRUD:
         sort: Optional[str] = None,
         order_by: Optional[str] = None,
         order_dir: Optional[str] = None,
-        current_user_id: Optional[str] = None
+        current_user_id: Optional[str] = None,
+        filters: list[FilterCondition] | None = None,
+        sorts: list[SortCondition] | None = None,
     ) -> Tuple[List[PaymentPlan], int]:
         from app.models.contract import Contract
         from app.models.customer import Customer
         from app.models.opportunity import Opportunity
 
-        plans_query = db.query(PaymentPlan).join(Contract, PaymentPlan.contract_id == Contract.id)
-        plans_query = plans_query.outerjoin(Customer, Contract.customer_id == Customer.id).outerjoin(
-            Opportunity, Contract.opportunity_id == Opportunity.id
+        plans_query = (
+            db.query(PaymentPlan)
+            .join(
+                Contract,
+                and_(PaymentPlan.contract_id == Contract.id, Contract.team_id == team_id),
+            )
+            .outerjoin(
+                Customer,
+                and_(Contract.customer_id == Customer.id, Customer.team_id == team_id),
+            )
+            .outerjoin(
+                Opportunity,
+                and_(Contract.opportunity_id == Opportunity.id, Opportunity.team_id == team_id),
+            )
+            .options(
+                contains_eager(PaymentPlan.contract).contains_eager(Contract.customer),
+                contains_eager(PaymentPlan.contract).contains_eager(Contract.opportunity),
+            )
+            .filter(PaymentPlan.team_id == team_id)
         )
-        plans_query = plans_query.filter(PaymentPlan.team_id == team_id)
-        
+
+        # 页签状态与数据范围属于固定 scope；显式统一协议下其余旧参数不再混入。
         if status:
             plans_query = plans_query.filter(PaymentPlan.status.in_(_split_csv(status)))
-        if status_exclude:
-            plans_query = plans_query.filter(PaymentPlan.status.notin_(_split_csv(status_exclude)))
-        
-        if due_date_start:
-            plans_query = plans_query.filter(PaymentPlan.due_date >= due_date_start)
-        
-        if due_date_end:
-            plans_query = plans_query.filter(PaymentPlan.due_date <= due_date_end)
-        
-        if owner_id:
-            plans_query = plans_query.filter(Contract.owner_id.in_(_split_csv(owner_id)))
-        
         if current_user_id:
             plans_query = plans_query.filter(Contract.owner_id == current_user_id)
+
+        if uses_unified_list_query(filters=filters, sorts=sorts):
+            effective_filters = without_filter_field(filters, "status") if status else filters
+            plans, total = paginate_optional_list_query(
+                plans_query,
+                PAYMENT_PLANS_LIST_QUERY_CATALOG,
+                skip=skip,
+                limit=limit,
+                filters=effective_filters,
+                sorts=sorts,
+                context=ListQueryContext(
+                    db=db,
+                    team_id=team_id,
+                    current_user_id=current_user_id,
+                ),
+            )
+            return plans, total
+
+        if status_exclude:
+            plans_query = plans_query.filter(PaymentPlan.status.notin_(_split_csv(status_exclude)))
+
+        if due_date_start:
+            plans_query = plans_query.filter(PaymentPlan.due_date >= due_date_start)
+
+        if due_date_end:
+            plans_query = plans_query.filter(PaymentPlan.due_date <= due_date_end)
+
+        if owner_id:
+            plans_query = plans_query.filter(Contract.owner_id.in_(_split_csv(owner_id)))
 
         if keyword and keyword.strip():
             like_keyword = f"%{keyword.strip()}%"
@@ -440,7 +484,9 @@ class PaymentRecordCRUD:
         approval_status_exclude: Optional[str] = None,
         sort: Optional[str] = None,
         order_by: Optional[str] = None,
-        order_dir: Optional[str] = None
+        order_dir: Optional[str] = None,
+        filters: list[FilterCondition] | None = None,
+        sorts: list[SortCondition] | None = None,
     ) -> Tuple[List[PaymentRecord], int]:
         from app.models.contract import Contract
         from app.models.customer import Customer
@@ -492,36 +538,58 @@ class PaymentRecordCRUD:
         )
         records_query = records_query.filter(PaymentRecord.team_id == team_id)
 
+        def approval_status_predicate(status_value: str):
+            if status_value == 'pending_submit':
+                return and_(
+                    PaymentRecord.approval_id.is_(None),
+                    PaymentRecord.confirmation_status == PaymentConfirmationStatus.PENDING
+                )
+            if status_value == 'pending_approval':
+                return and_(
+                    PaymentRecord.approval_id.isnot(None),
+                    Approval.status == ApprovalStatus.PENDING
+                )
+            if status_value == 'approved':
+                return PaymentRecord.confirmation_status == PaymentConfirmationStatus.CONFIRMED
+            if status_value == 'rejected':
+                return Approval.status == ApprovalStatus.REJECTED
+            return None
+
+        # 页签审批状态与数据范围属于固定 scope；显式统一协议下其余旧参数不再混入。
         approval_status_values = _split_csv(approval_status)
-        approval_status_exclude_values = _split_csv(approval_status_exclude)
-        if approval_status_values or approval_status_exclude_values:
+        if approval_status_values:
             records_query = records_query.outerjoin(Approval, PaymentRecord.approval_id == Approval.id)
-
-            def approval_status_predicate(status_value: str):
-                if status_value == 'pending_submit':
-                    return and_(
-                        PaymentRecord.approval_id.is_(None),
-                        PaymentRecord.confirmation_status == PaymentConfirmationStatus.PENDING
-                    )
-                if status_value == 'pending_approval':
-                    return and_(
-                        PaymentRecord.approval_id.isnot(None),
-                        Approval.status == ApprovalStatus.PENDING
-                    )
-                if status_value == 'approved':
-                    return PaymentRecord.confirmation_status == PaymentConfirmationStatus.CONFIRMED
-                if status_value == 'rejected':
-                    return Approval.status == ApprovalStatus.REJECTED
-                return None
-
             include_predicates = [predicate for predicate in (approval_status_predicate(value) for value in approval_status_values) if predicate is not None]
-            exclude_predicates = [predicate for predicate in (approval_status_predicate(value) for value in approval_status_exclude_values) if predicate is not None]
-
             if include_predicates:
                 records_query = records_query.filter(or_(*include_predicates))
+
+        if current_user_id:
+            records_query = records_query.filter(Contract.creator_id == current_user_id)
+
+        if uses_unified_list_query(filters=filters, sorts=sorts):
+            effective_filters = without_filter_field(filters, "approval_status") if approval_status else filters
+            return paginate_optional_list_query(
+                records_query,
+                PAYMENT_RECORDS_LIST_QUERY_CATALOG,
+                skip=skip,
+                limit=limit,
+                filters=effective_filters,
+                sorts=sorts,
+                context=ListQueryContext(
+                    db=db,
+                    team_id=team_id,
+                    current_user_id=current_user_id,
+                ),
+            )
+
+        approval_status_exclude_values = _split_csv(approval_status_exclude)
+        if approval_status_exclude_values:
+            if not approval_status_values:
+                records_query = records_query.outerjoin(Approval, PaymentRecord.approval_id == Approval.id)
+            exclude_predicates = [predicate for predicate in (approval_status_predicate(value) for value in approval_status_exclude_values) if predicate is not None]
             if exclude_predicates:
                 records_query = records_query.filter(~or_(*exclude_predicates))
-        
+
         if contract_id:
             records_query = records_query.filter(PaymentPlan.contract_id == contract_id)
         
@@ -543,9 +611,6 @@ class PaymentRecordCRUD:
         if creator_id:
             records_query = records_query.filter(PaymentRecord.creator_id == creator_id)
         
-        if current_user_id:
-            records_query = records_query.filter(Contract.creator_id == current_user_id)
-
         if keyword and keyword.strip():
             like_keyword = f"%{keyword.strip()}%"
             keyword_predicates = [
