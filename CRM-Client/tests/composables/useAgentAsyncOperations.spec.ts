@@ -102,6 +102,35 @@ describe("useAgentAsyncOperations", () => {
     tracker.dispose()
   })
 
+  it("notifies the caller once when a polled operation becomes terminal", async () => {
+    const onTerminal = vi.fn()
+    const getOperation = vi.fn()
+      .mockResolvedValueOnce(operation("RUNNING"))
+      .mockResolvedValueOnce(operation("SUCCEEDED", {
+        finished_time: "2026-08-12T12:00:05",
+        updated_time: "2026-08-12T12:00:05",
+      }))
+    const tracker = useAgentAsyncOperations({
+      api: { getOperation, listSessionOperations: vi.fn() },
+      pollIntervalMs: 2_000,
+      onTerminal,
+    })
+
+    tracker.acknowledgeScheduled({ operationPublicId: "aop_1", sessionId: 3 })
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(2_000)
+
+    expect(onTerminal).toHaveBeenCalledTimes(1)
+    expect(onTerminal).toHaveBeenCalledWith(expect.objectContaining({
+      public_id: "aop_1",
+      status: "SUCCEEDED",
+    }))
+
+    await vi.advanceTimersByTimeAsync(6_000)
+    expect(onTerminal).toHaveBeenCalledTimes(1)
+    tracker.dispose()
+  })
+
   it("restores nonterminal operations from session history and resumes polling", async () => {
     const listSessionOperations = vi.fn().mockResolvedValue([operation("RUNNING")])
     const getOperation = vi.fn().mockResolvedValue(operation("SUCCEEDED"))

@@ -1,6 +1,5 @@
 """CRM AI Agent tool adapter tests."""
 from datetime import date, datetime
-from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -11,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 from sqlalchemy.types import BigInteger
 
 from app.core.database import Base
+from app.models.acquisition_source import AcquisitionSource
 from app.models.agent import (
     AgentIdempotencyKey,
     AgentIdempotencyStatus,
@@ -27,7 +27,6 @@ from app.models.customer_fact import CustomerFact, CustomerFactRevision, Custome
 from app.models.customer_identity_term import CustomerIdentityTerm
 from app.models.customer_vector_document import CustomerVectorDocument
 from app.models.invoice import InvoiceApplication
-from app.models.acquisition_source import AcquisitionSource
 from app.models.lead import Lead, LeadSource, LeadStatus
 from app.models.license_application import LicenseApplication
 from app.models.opportunity import Opportunity
@@ -48,17 +47,19 @@ from app.models.sales_commitment import (
 )
 from app.models.user import User
 from app.models.user_role import UserRole
+from app.services.acquisition_source_service import seed_default_sources
 from app.services.agent.middleware import build_langchain_hitl_middleware
 from app.services.agent.tool_registry import AgentToolRegistry
 from app.services.agent.tools.base import AgentToolContext
-from app.services.acquisition_source_service import seed_default_sources
 from app.services.agent.tools.service import CRMAgentToolService
+from app.services.agent.work_summary_graph import WorkSummaryGraphService
 from app.services.customer_fact_service import CustomerFactInput, customer_fact_service
 from app.services.customer_identity_resolution_service import generated_identity_terms_for_customer_name
 from app.services.customer_knowledge_candidate_service import CustomerKnowledgeCandidateService
 from app.services.customer_qdrant_index_service import CustomerEvidenceSearchResult
 from app.services.follow_up_task_query_service import FollowUpTaskQueryService
 from app.services.follow_up_task_semantic_evidence_service import FollowUpTaskSemanticEvidenceService
+from app.services.work_summary_narrative_service import WorkSummaryNarrativeService
 
 CUSTOMER_PUBLIC_ID = "cus_test_101"
 LEAD_PUBLIC_ID = "lead_test_8101"
@@ -2002,41 +2003,25 @@ async def test_agent_tool_list_completed_work_returns_completed_tasks_and_activi
 
 
 @pytest.mark.asyncio
-async def test_agent_tool_summarize_completed_work_returns_facts_and_grounded_narrative(monkeypatch):
+async def test_agent_tool_summarize_completed_work_returns_graph_outcome(monkeypatch):
     fixed_now = datetime(2026, 8, 6, 10, 0, 0)
     monkeypatch.setattr("app.utils.time.business_now", lambda: fixed_now)
     engine, db = _db_session(_sales_commitment_tables())
 
-    class FakeNarrativeService:
-        async def summarize_with_metadata(self, db, *, team_id, question, work_facts):  # noqa: ARG002
-            fact_id = work_facts["items"][0]["fact_id"]
-            narrative = SimpleNamespace(
-                model_dump=lambda: {
-                    "answer": "本周已完成预算确认。",
-                    "highlights": [{
-                        "category": "completed_work",
-                        "title": "预算确认",
-                        "summary": "已完成预算进展确认。",
-                        "fact_ids": [fact_id],
-                    }],
-                    "customer_summaries": [],
-                    "confidence": 0.9,
-                    "narrative_mode": "fallback",
-                    "missing_context": [],
-                    "citations": [{"fact_id": fact_id}],
-                }
-            )
-            return SimpleNamespace(
-                result=narrative,
-                summary_source="deterministic_work_summary_fallback",
-                model=None,
-                fallback_reason="ai_config_missing",
-                fallback_error=None,
-            )
+    class MissingConfigCrud:
+        def get_config(self, db, team_id):  # noqa: ARG002
+            return None
 
+        def get_decrypted_api_key(self, db, team_id):  # noqa: ARG002
+            return None
+
+    summary_graph = WorkSummaryGraphService(
+        narrative_service=WorkSummaryNarrativeService(config_crud=MissingConfigCrud()),
+        checkpointer=None,
+    )
     service = CRMAgentToolService(
         api_client=FakeCRMAPIClient(),
-        work_summary_narrative_service=FakeNarrativeService(),
+        work_summary_graph_service=summary_graph,
     )
     try:
         _seed_follow_up_task_customer(db)
@@ -2051,12 +2036,83 @@ async def test_agent_tool_summarize_completed_work_returns_facts_and_grounded_na
         )
         db.commit()
 
-        result = await service.summarize_completed_work(_context(db), window="this_week", question="本周我完成了什么")
+        result = await service.summarize_completed_work(
+            _context(db),
+            window="this_week",
+            question="本周我完成了什么",
+        )
 
         assert result.success is True
-        assert result.data["facts"]["completed_tasks"][0]["id"] == task.public_id
-        assert result.data["narrative"]["highlights"][0]["fact_ids"] == [result.data["facts"]["items"][0]["fact_id"]]
-        assert result.data["summary_source"] == "deterministic_work_summary_fallback"
+        assert result.data["coverage"]["available_total"] == 1
+        assert result.data["coverage"]["complete"] is True
+        assert result.data["narrative"]["highlights"][0]["fact_ids"][0].startswith(
+            f"completed_follow_up_task:{task.public_id}:"
+        )
+        assert result.data["summary_source"] == "deterministic_fallback"
+        assert "facts" not in result.data
+    finally:
+        db.close()
+        engine.dispose()
+
+@pytest.mark.asyncio
+async def test_agent_tool_summarize_completed_work_fetches_all_71_facts(monkeypatch):
+    fixed_now = datetime(2026, 8, 20, 17, 0, 0)
+    monkeypatch.setattr("app.utils.time.business_now", lambda: fixed_now)
+    engine, db = _db_session(_sales_commitment_tables())
+
+    class MissingConfigCrud:
+        def get_config(self, db, team_id):  # noqa: ARG002
+            return None
+
+        def get_decrypted_api_key(self, db, team_id):  # noqa: ARG002
+            return None
+
+    summary_graph = WorkSummaryGraphService(
+        narrative_service=WorkSummaryNarrativeService(config_crud=MissingConfigCrud()),
+        checkpointer=None,
+    )
+    service = CRMAgentToolService(
+        api_client=FakeCRMAPIClient(),
+        work_summary_graph_service=summary_graph,
+    )
+    try:
+        _seed_follow_up_task_customer(db)
+        db.add_all([
+            CustomerActivity(
+                id=1000 + index,
+                team_id=1,
+                customer_id=101,
+                activity_kind="WECHAT_FOLLOW_UP",
+                title=f"上周客户沟通 {index}",
+                source_content=f"完成第 {index} 条客户沟通",
+                summary=f"完成第 {index} 条客户沟通",
+                occurred_at=datetime(2026, 8, 10 + (index % 7), 9, index % 60, 0),
+                owner_id="2",
+                creator_id="2",
+            )
+            for index in range(71)
+        ])
+        db.commit()
+
+        result = await service.summarize_completed_work(
+            _context(db),
+            window="last_week",
+            question="我上周做了什么",
+        )
+
+        assert result.success is True
+        assert result.data["coverage"] == {
+            "available_total": 71,
+            "retrieved_total": 71,
+            "summarized_total": 71,
+            "referenced_total": len(result.data["narrative"]["citations"]),
+            "pages_fetched": 2,
+            "complete": True,
+            "stop_reason": "all_facts_collected",
+        }
+        assert 1 <= len(result.data["narrative"]["citations"]) <= 30
+        assert "71 条" in result.data["narrative"]["answer"]
+        assert "facts" not in result.data
     finally:
         db.close()
         engine.dispose()

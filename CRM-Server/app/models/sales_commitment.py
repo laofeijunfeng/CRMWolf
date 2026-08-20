@@ -100,6 +100,7 @@ class FollowUpTaskConfirmationDeliveryPurpose:
     """Why a confirmation delivery exists and whether it is intrusive."""
 
     INBOX_VISIBILITY = "INBOX_VISIBILITY"
+    AGENT_MESSAGE_CARD = "AGENT_MESSAGE_CARD"
     AGENT_TURN_PROMPT = "AGENT_TURN_PROMPT"
     IM_PROMPT = "IM_PROMPT"
 

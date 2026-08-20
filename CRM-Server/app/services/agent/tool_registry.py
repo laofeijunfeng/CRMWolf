@@ -165,7 +165,14 @@ class ListCompletedWorkInput(BaseModel):
     limit: int = Field(50, ge=1, le=100)
 
 
-class SummarizeCompletedWorkInput(ListCompletedWorkInput):
+class SummarizeCompletedWorkInput(BaseModel):
+    window: Literal["today", "this_week", "last_week", "this_month", "custom"] = "this_week"
+    customer_id: Optional[CustomerIdentifier] = Field(None, description="客户对外ID；兼容历史任务中的数据库ID")
+    include_tasks: bool = True
+    include_activities: bool = True
+    include_business_events: bool = True
+    start_at: Optional[str] = Field(None, description="custom 窗口开始时间，ISO 日期或日期时间")
+    end_at: Optional[str] = Field(None, description="custom 窗口结束时间，ISO 日期或日期时间")
     question: Optional[str] = Field(None, max_length=200, description="用户原始问题，例如 本周我完成了什么")
 
 
@@ -449,8 +456,6 @@ class AgentToolRegistry:
                 include_business_events=model.include_business_events,
                 start_at=model.start_at,
                 end_at=model.end_at,
-                cursor=model.cursor,
-                limit=model.limit,
                 question=model.question,
             )
 

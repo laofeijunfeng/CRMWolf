@@ -29,10 +29,16 @@ def test_v2_continuation_is_root_owned_and_projects_exact_checkpoint_config():
     assert continuation["persistence_scope"] == "root"
     assert continuation["thread_id"] == "crm_agent:1:2:3:session-key"
     assert continuation["checkpoint_ns"] == "pending_task_subgraph:child-1"
-    assert pending_task_checkpoint_config(continuation)["configurable"] == {
+    checkpoint_config = pending_task_checkpoint_config(continuation)
+    assert checkpoint_config["configurable"] == {
         "thread_id": "crm_agent:1:2:3:session-key",
         "checkpoint_ns": "pending_task_subgraph:child-1",
     }
+    assert checkpoint_config["metadata"]["continuation_thread_id"] == continuation["thread_id"]
+    assert (
+        checkpoint_config["metadata"]["continuation_checkpoint_ns"]
+        == continuation["checkpoint_ns"]
+    )
 
 
 def test_v2_continuation_identity_is_stable_for_same_root_invocation():

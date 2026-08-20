@@ -156,7 +156,6 @@ class AgentReadQueryPlanner:
         payload: JSONDict = {
             "window": semantic_result.read_query.work_window or _work_summary_window(text),
             "question": str(content or "").strip(),
-            "limit": 50,
         }
         if customer_id:
             payload["customer_id"] = customer_id

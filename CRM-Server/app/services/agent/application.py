@@ -46,6 +46,9 @@ from app.services.follow_up_task_confirmation_channel_service import (
     FollowUpTaskConfirmationChannelService,
     follow_up_task_confirmation_channel_service,
 )
+from app.services.follow_up_task_confirmation_agent_message_card_service import (
+    follow_up_task_confirmation_agent_message_card_service,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -454,6 +457,13 @@ class AgentApplicationService:
                 session_id=session_id,
                 source_user_message_id=user_message_id,
                 source_assistant_message_id=int(message.id),
+            )
+            follow_up_task_confirmation_agent_message_card_service.ensure_session_cards(
+                db,
+                team_id=team_id,
+                user_id=user_id,
+                session_id=session_id,
+                commit=False,
             )
         except Exception:
             logger.exception(

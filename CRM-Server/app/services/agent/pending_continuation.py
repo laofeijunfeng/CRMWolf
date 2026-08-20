@@ -170,6 +170,8 @@ def pending_task_checkpoint_config(continuation: PendingTaskContinuationRef) -> 
             "runtime_namespace": PENDING_TASK_RUNTIME,
             "continuation_id": continuation["continuation_id"],
             "continuation_schema_version": PENDING_TASK_CONTINUATION_SCHEMA_VERSION,
+            "continuation_thread_id": continuation["thread_id"],
+            "continuation_checkpoint_ns": continuation["checkpoint_ns"],
         },
     }
 

@@ -1301,6 +1301,61 @@ class FollowUpTaskConfirmationPromptDeliveryCRUD:
             db.refresh(db_obj)
         return db_obj
 
+    def ensure_agent_message_card(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        case_id: int,
+        owner_id: str,
+        agent_session_id: int,
+        assistant_message_id: int,
+        source_activity_id: int | None,
+        expected_activity_revision: int | None,
+        commit: bool = True,
+    ) -> FollowUpTaskConfirmationPromptDelivery:
+        """Create one non-intrusive Agent-message visibility record per case/message.
+
+        The confirmation center remains the durable inbox. This record only
+        attaches that same case to the exact Web Agent assistant message, and
+        deliberately does not increment the user-prompt counter.
+        """
+
+        provider_message_id = f"agent_message:{assistant_message_id}"
+        prompt_key = f"agent-message-card:{team_id}:{case_id}:{assistant_message_id}"
+        delivery = self.ensure_queued(
+            db,
+            team_id=team_id,
+            case_id=case_id,
+            owner_id=owner_id,
+            channel="web",
+            purpose=FollowUpTaskConfirmationDeliveryPurpose.AGENT_MESSAGE_CARD,
+            provider="web-agent",
+            agent_session_id=agent_session_id,
+            interaction_id=f"agent-message-card:{assistant_message_id}",
+            prompt_key=prompt_key,
+            origin_turn_id=f"agent_session:{agent_session_id}",
+            origin_message_id=str(assistant_message_id),
+            source_activity_id=source_activity_id,
+            expected_activity_revision=expected_activity_revision,
+            payload_json={"case_id": case_id, "assistant_message_id": assistant_message_id},
+            reason_code="AGENT_MESSAGE_CARD_QUEUED",
+            commit=False,
+        )
+        if delivery.status == FollowUpTaskConfirmationPromptStatus.QUEUED:
+            delivery = self.acknowledge_sent(
+                db,
+                delivery,
+                provider_message_id=provider_message_id,
+                reason_code="AGENT_MESSAGE_CARD_VISIBLE",
+                record_case_prompt=False,
+                commit=False,
+            )
+        if commit:
+            db.commit()
+            db.refresh(delivery)
+        return delivery
+
     def create_attempt(
         self,
         db: Session,
@@ -1440,6 +1495,7 @@ class FollowUpTaskConfirmationPromptDeliveryCRUD:
         provider_message_id: str,
         reason_code: str = "CHANNEL_ACKNOWLEDGED",
         delivered_at: datetime | None = None,
+        record_case_prompt: bool = True,
         commit: bool = True,
     ) -> FollowUpTaskConfirmationPromptDelivery:
         if _is_terminal_confirmation_prompt_delivery(delivery):
@@ -1465,7 +1521,7 @@ class FollowUpTaskConfirmationPromptDeliveryCRUD:
         delivery.next_attempt_at = None
         delivery.lease_token = None
         delivery.lease_expires_at = None
-        if case is not None:
+        if case is not None and record_case_prompt:
             case.last_prompted_at = resolved_at
             case.prompt_count = int(case.prompt_count or 0) + 1
             db.add(case)

@@ -23,6 +23,7 @@ interface UseAgentAsyncOperationsOptions {
   api?: AgentAsyncOperationsApi
   pollIntervalMs?: number
   onChanged?: () => void
+  onTerminal?: (operation: AgentAsyncOperation) => void
 }
 
 interface AgentAsyncOperationsController {
@@ -132,6 +133,7 @@ export const useAgentAsyncOperations = (
       upsert(operation)
       if (isTerminalAgentAsyncOperation(operation)) {
         clearPollTimer(operationPublicId)
+        options.onTerminal?.(operation)
         return
       }
     } catch {

@@ -8,7 +8,6 @@ import uuid
 from typing import Callable, List, Optional, Union
 
 import httpx
-
 from sqlalchemy import or_
 
 from app.crud.agent import agent_idempotency_key_crud, agent_tool_call_crud
@@ -23,10 +22,17 @@ from app.schemas.agent import (
     AgentToolCallCreate,
     AgentToolCallUpdate,
 )
+from app.services.acquisition_source_service import resolve_write_fields_for_ai
 from app.services.agent.async_operation_service import agent_async_operation_service
 from app.services.agent.tools.api_client import CRMAPIClientError, InternalCRMAPIClient
 from app.services.agent.tools.base import AgentToolContext, AgentToolResult, JsonDict
-from app.services.acquisition_source_service import resolve_write_fields_for_ai
+from app.services.agent.work_summary_graph import (
+    WorkSummaryGraphRequest,
+    WorkSummaryGraphService,
+)
+from app.services.agent.work_summary_graph import (
+    work_summary_graph_service as default_work_summary_graph_service,
+)
 from app.services.customer_alias_service import CustomerAliasService, customer_alias_service
 from app.services.customer_identity_resolution_service import (
     CustomerIdentityResolutionService,
@@ -62,15 +68,10 @@ from app.services.follow_up_task_transition_plan_service import (
     FollowUpTaskTransitionActionType,
     FollowUpTaskTransitionPlan,
 )
-from app.services.work_summary_narrative_service import WorkSummaryNarrativeService
-from app.services.work_summary_narrative_service import (
-    work_summary_narrative_service as default_work_summary_narrative_service,
-)
 from app.services.work_summary_service import WorkSummaryService
 from app.services.work_summary_service import work_summary_service as default_work_summary_service
 from app.utils.public_id import is_opportunity_public_id
 from app.utils.time import business_now
-
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +103,7 @@ class CRMAgentToolService:
         follow_up_confirmation_channel_service: Optional[FollowUpTaskConfirmationChannelService] = None,
         follow_up_transition_execution_service: Optional[FollowUpTaskTransitionExecutionService] = None,
         work_summary_service: Optional[WorkSummaryService] = None,
-        work_summary_narrative_service: Optional[WorkSummaryNarrativeService] = None,
+        work_summary_graph_service: Optional[WorkSummaryGraphService] = None,
     ) -> None:
         self.api_client = api_client or InternalCRMAPIClient()
         self.intelligence_context_service = intelligence_context_service or customer_intelligence_context_service
@@ -117,7 +118,7 @@ class CRMAgentToolService:
             follow_up_transition_execution_service or follow_up_task_transition_execution_service
         )
         self.work_summary_service = work_summary_service or default_work_summary_service
-        self.work_summary_narrative_service = work_summary_narrative_service or default_work_summary_narrative_service
+        self.work_summary_graph_service = work_summary_graph_service or default_work_summary_graph_service
 
     async def search_customers(self, context: AgentToolContext, keyword: str, limit: int = 10) -> AgentToolResult:
         clean_keyword = keyword.strip()
@@ -554,8 +555,6 @@ class CRMAgentToolService:
         include_business_events: bool = True,
         start_at: Optional[str] = None,
         end_at: Optional[str] = None,
-        cursor: Optional[str] = None,
-        limit: int = 50,
         question: Optional[str] = None,
     ) -> AgentToolResult:
         payload = {
@@ -566,43 +565,42 @@ class CRMAgentToolService:
             "include_business_events": include_business_events,
             "start_at": start_at,
             "end_at": end_at,
-            "cursor": cursor,
-            "limit": limit,
             "question": question,
         }
 
-        async def call_db():
-            customer_public_id = self._resolve_customer_public_id(context, customer_id) if customer_id is not None else None
-            facts = self.work_summary_service.list_completed_work(
-                context.db,
-                team_id=context.team_id,
-                user_id=context.user_id,
-                window=window,
-                customer_public_id=customer_public_id,
-                include_tasks=include_tasks,
-                include_activities=include_activities,
-                include_business_events=include_business_events,
-                start_at=start_at,
-                end_at=end_at,
-                cursor=cursor,
-                limit=limit,
+        async def run_graph():
+            customer_public_id = (
+                self._resolve_customer_public_id(context, customer_id)
+                if customer_id is not None
+                else None
             )
-            narrative = await self.work_summary_narrative_service.summarize_with_metadata(
-                context.db,
-                team_id=context.team_id,
-                question=question or "总结我的工作",
-                work_facts=facts,
+            outcome = await self.work_summary_graph_service.run(
+                WorkSummaryGraphRequest(
+                    db=context.db,
+                    team_id=context.team_id,
+                    user_id=context.user_id,
+                    session_id=context.session_id,
+                    question=question or "总结我的工作",
+                    window=window,
+                    customer_public_id=customer_public_id,
+                    include_tasks=include_tasks,
+                    include_activities=include_activities,
+                    include_business_events=include_business_events,
+                    start_at=start_at,
+                    end_at=end_at,
+                )
             )
+            outcome_data = outcome.model_dump()
             return {
-                "facts": facts,
-                "narrative": narrative.result.model_dump(),
-                "summary_source": narrative.summary_source,
-                "model": narrative.model,
-                "fallback_reason": narrative.fallback_reason,
-                "fallback_error": narrative.fallback_error,
+                "narrative": outcome_data,
+                "coverage": outcome.coverage.model_dump(),
+                "summary_source": outcome.summary_source,
+                "model": outcome.model,
+                "fallback_reason": outcome.fallback_reason,
+                "fallback_error": outcome.fallback_error,
             }
 
-        return await self._run_read_tool(context, "summarize_completed_work", payload, call_db)
+        return await self._run_read_tool(context, "summarize_completed_work", payload, run_graph)
 
     async def list_follow_up_task_confirmation_cases(
         self,

@@ -18,8 +18,56 @@ from sqlalchemy import Engine, text
 
 from app.core.database import engine
 
-
 WRITES_IDX_MAP = {"__error__": -1, "__scheduled__": -2, "__interrupt__": -3, "__resume__": -4}
+
+PENDING_TASK_RUNTIME = "crm_agent_pending_task"
+PENDING_TASK_NAMESPACE_PREFIX = "pending_task_subgraph:"
+AGENT_ROOT_THREAD_PREFIX = "crm_agent:"
+
+
+def _validate_checkpoint_persistence_contract(
+    *,
+    thread_id: str,
+    checkpoint_ns: str,
+    metadata: CheckpointMetadata,
+) -> None:
+    """Reject pending-task checkpoints whose physical locator is not V2-compatible."""
+
+    runtime = metadata.get("runtime")
+    runtime_namespace = metadata.get("runtime_namespace")
+    if runtime != PENDING_TASK_RUNTIME and runtime_namespace != PENDING_TASK_RUNTIME:
+        return
+
+    continuation_id = metadata.get("continuation_id")
+    continuation_thread_id = metadata.get("continuation_thread_id")
+    continuation_checkpoint_ns = metadata.get("continuation_checkpoint_ns")
+    if runtime != PENDING_TASK_RUNTIME or runtime_namespace != PENDING_TASK_RUNTIME:
+        raise ValueError(
+            "pending-task checkpoint metadata is inconsistent: "
+            f"runtime={runtime!r}, runtime_namespace={runtime_namespace!r}"
+        )
+    if not thread_id.startswith(AGENT_ROOT_THREAD_PREFIX):
+        raise ValueError(
+            "pending-task checkpoint thread must be owned by Agent Root: "
+            f"thread_id={thread_id!r}, continuation_id={continuation_id!r}"
+        )
+    if not checkpoint_ns.startswith(PENDING_TASK_NAMESPACE_PREFIX):
+        raise ValueError(
+            "pending-task checkpoint namespace must use the child namespace: "
+            f"checkpoint_ns={checkpoint_ns!r}, continuation_id={continuation_id!r}"
+        )
+    if not isinstance(continuation_id, str) or not continuation_id:
+        raise ValueError(
+            "pending-task checkpoint requires a continuation identity: "
+            f"thread_id={thread_id!r}, checkpoint_ns={checkpoint_ns!r}"
+        )
+    if continuation_thread_id != thread_id or continuation_checkpoint_ns != checkpoint_ns:
+        raise ValueError(
+            "pending-task continuation locator does not match its physical checkpoint: "
+            f"continuation_thread_id={continuation_thread_id!r}, thread_id={thread_id!r}, "
+            f"continuation_checkpoint_ns={continuation_checkpoint_ns!r}, "
+            f"checkpoint_ns={checkpoint_ns!r}, continuation_id={continuation_id!r}"
+        )
 
 
 def _config(thread_id: str, checkpoint_ns: str, checkpoint_id: str | None = None) -> RunnableConfig:
@@ -185,9 +233,15 @@ class SQLAlchemyCheckpointSaver(BaseCheckpointSaver[str]):
         checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
         checkpoint_id = checkpoint["id"]
         parent_checkpoint_id = config["configurable"].get("checkpoint_id")
+        resolved_metadata = get_checkpoint_metadata(config, metadata)
+        _validate_checkpoint_persistence_contract(
+            thread_id=thread_id,
+            checkpoint_ns=checkpoint_ns,
+            metadata=resolved_metadata,
+        )
         values: dict[str, Any] = c.pop("channel_values", {})  # type: ignore[misc]
         checkpoint_type, checkpoint_blob = self._dump(c)
-        metadata_type, metadata_blob = self._dump(get_checkpoint_metadata(config, metadata))
+        metadata_type, metadata_blob = self._dump(resolved_metadata)
         with self.engine.begin() as conn:
             for channel, version in new_versions.items():
                 serde_type, blob = self._dump(values[channel]) if channel in values else ("empty", b"")
@@ -233,6 +287,11 @@ class SQLAlchemyCheckpointSaver(BaseCheckpointSaver[str]):
         thread_id = config["configurable"]["thread_id"]
         checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
         checkpoint_id = config["configurable"]["checkpoint_id"]
+        _validate_checkpoint_persistence_contract(
+            thread_id=thread_id,
+            checkpoint_ns=checkpoint_ns,
+            metadata=get_checkpoint_metadata(config, {}),
+        )
         insert_sql = "INSERT OR IGNORE" if self.engine.dialect.name == "sqlite" else "INSERT IGNORE"
         with self.engine.begin() as conn:
             for idx, (channel, value) in enumerate(writes):

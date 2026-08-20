@@ -20,6 +20,7 @@ from app.models.opportunity import Opportunity
 from app.models.payment import PaymentPlan, PaymentRecord
 from app.models.procurement import OpportunityStageSnapshot
 from app.models.sales_commitment import FollowUpTask, FollowUpTaskStatus
+from app.services.work_summary_models import WorkSummaryFactPage, WorkSummaryQuery
 from app.utils import time as business_time
 from app.utils.time import calculate_follow_up_task_due_window
 
@@ -42,6 +43,39 @@ class WorkSummaryService:
     MySQL remains the source of truth. LLM callers should summarize these facts,
     not invent completed work from vector evidence alone.
     """
+
+    def fetch_page(
+        self,
+        db: Session,
+        *,
+        query: WorkSummaryQuery,
+        cursor: str | None,
+    ) -> WorkSummaryFactPage:
+        """Return one authoritative page for the work-summary workflow."""
+        normalized = WorkSummaryQuery.model_validate(query)
+        result = self.list_completed_work(
+            db,
+            team_id=normalized.team_id,
+            user_id=normalized.user_id,
+            window=normalized.window,
+            customer_public_id=normalized.customer_public_id,
+            include_tasks=normalized.include_tasks,
+            include_activities=normalized.include_activities,
+            include_business_events=normalized.include_business_events,
+            start_at=normalized.start_at,
+            end_at=normalized.end_at,
+            cursor=cursor,
+            limit=normalized.page_size,
+        )
+        return WorkSummaryFactPage(
+            items=result.get("items") or [],
+            available_total=int(result.get("available_total") or 0),
+            next_cursor=result.get("next_cursor"),
+            source_counts=result.get("source_counts") or {},
+            source_total_counts=result.get("source_total_counts") or {},
+            source_status=result.get("source_status") or {},
+            filters=result.get("filters") or {},
+        )
 
     def list_completed_work(
         self,

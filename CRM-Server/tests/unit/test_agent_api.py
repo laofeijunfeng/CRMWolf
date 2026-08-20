@@ -29,6 +29,7 @@ from app.models.agent import (
 from app.models.acquisition_source import AcquisitionSource
 from app.models.customer import Customer
 from app.models.customer_activity import CustomerActivity
+from app.models.customer_activity_post_commit_job import CustomerActivityPostCommitJob
 from app.models.customer_intelligence_run import CustomerIntelligenceRun, CustomerIntelligenceRunStatus
 from app.models.customer_vector_document import CustomerVectorDocument
 from app.models.agent_async_operation import AgentAsyncOperation, AgentAsyncOperationEvent
@@ -84,6 +85,7 @@ def _build_client(monkeypatch):
         Customer.__table__,
         AcquisitionSource.__table__,
         CustomerActivity.__table__,
+        CustomerActivityPostCommitJob.__table__,
         CustomerVectorDocument.__table__,
         CustomerIntelligenceRun.__table__,
         AgentAsyncOperation.__table__,
@@ -369,6 +371,144 @@ def test_agent_messages_include_current_linked_follow_up_task_confirmation_card(
         assert refreshed_card["confirmation_status"] == "RESOLVED"
         assert refreshed_card["resolved_action"] == "COMPLETE"
         assert refreshed_card["completed_at"] == "2026-08-20T10:30:00"
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_agent_messages_backfill_post_commit_confirmation_card_to_source_assistant_message(monkeypatch):
+    client, engine = _build_client(monkeypatch)
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "历史待办确认消息"}).json()
+        customer = Customer(
+            team_id=1,
+            account_name="Apple",
+            city="上海",
+            creator_id="2",
+        )
+        db.add(customer)
+        db.flush()
+        activity = CustomerActivity(
+            team_id=1,
+            customer_id=customer.id,
+            owner_id="2",
+            creator_id="2",
+            activity_kind="PHONE_FOLLOW_UP",
+            source_content="客户已确认合同推进。",
+            occurred_at=datetime(2026, 8, 20, 9, 0, 0),
+            post_commit_revision=1,
+        )
+        db.add(activity)
+        db.flush()
+        task = FollowUpTask(
+            team_id=1,
+            customer_id=customer.id,
+            owner_id="2",
+            creator_id="2",
+            title="跟进 Apple 合同流程推进",
+            status="OPEN",
+            due_at=datetime(2026, 8, 25, 9, 0, 0),
+            due_at_text="8 月 25 日",
+            due_at_granularity="DATETIME",
+            due_at_timezone="Asia/Shanghai",
+            source_type="CUSTOMER_ACTIVITY",
+            source_key=f"activity:{activity.id}",
+            confidence=1,
+            task_hash="post-commit-confirmation-task",
+        )
+        db.add(task)
+        db.flush()
+        confirmation_case = FollowUpTaskConfirmationCase(
+            team_id=1,
+            task_id=task.id,
+            customer_id=customer.id,
+            owner_id="2",
+            creator_id="2",
+            status="PENDING",
+            suggested_action="COMPLETE",
+            confirmation_hash="post-commit-confirmation-case",
+            question_text="关联待办是否已经完成?",
+            source_activity_id=activity.id,
+            source_activity_revision=1,
+        )
+        assistant_message = AgentMessage(
+            team_id=1,
+            user_id=2,
+            session_id=session["id"],
+            role=AgentMessageRole.ASSISTANT,
+            content="好的，客户活动已记录。",
+        )
+        db.add_all([confirmation_case, assistant_message])
+        db.flush()
+        job = CustomerActivityPostCommitJob(
+            public_id="pcj_agent_message_confirmation",
+            team_id=1,
+            activity_id=activity.id,
+            activity_revision=1,
+            trigger_type="ACTIVITY_CREATED_DETERMINISTIC",
+            actor_id="2",
+            status="COMPLETED",
+            run_id="post-commit-card-run",
+            graph_thread_id="post-commit-card-thread",
+        )
+        operation = AgentAsyncOperation(
+            public_id="aop_agent_message_confirmation",
+            operation_key="customer-activity-post-commit:pcj_agent_message_confirmation",
+            request_id=job.public_id,
+            team_id=1,
+            user_id=2,
+            session_id=session["id"],
+            source_assistant_message_id=assistant_message.id,
+            operation_type="customer_activity_post_commit",
+            resource_type="customer_activity",
+            resource_id=activity.id,
+            status="SUCCEEDED",
+            summary="跟进已记录，任务对账完成",
+        )
+        inbox_delivery = FollowUpTaskConfirmationPromptDelivery(
+            team_id=1,
+            case_id=confirmation_case.id,
+            owner_id="2",
+            channel="web",
+            provider="confirmation_center",
+            interaction_id="post-commit-inbox",
+            prompt_key="post-commit-inbox-delivery",
+            status="SENT",
+            provider_message_id=f"inbox:{confirmation_case.public_id}",
+            source_activity_id=activity.id,
+            expected_activity_revision=1,
+        )
+        db.add_all([job, operation, inbox_delivery])
+        db.commit()
+
+        response = client.get(f"/v1/agent/sessions/{session['id']}/messages")
+
+        assert response.status_code == 200, response.text
+        assistant_response = next(
+            item for item in response.json()["items"] if item["id"] == assistant_message.id
+        )
+        assert [card["case_public_id"] for card in assistant_response["linked_follow_up_task_confirmations"]] == [
+            confirmation_case.public_id
+        ]
+        db.expire_all()
+        assert db.query(FollowUpTaskConfirmationPromptDelivery).filter(
+            FollowUpTaskConfirmationPromptDelivery.case_id == confirmation_case.id
+        ).count() == 2
+        card_delivery = db.query(FollowUpTaskConfirmationPromptDelivery).filter(
+            FollowUpTaskConfirmationPromptDelivery.case_id == confirmation_case.id,
+            FollowUpTaskConfirmationPromptDelivery.provider_message_id == f"agent_message:{assistant_message.id}",
+        ).one()
+        assert card_delivery.purpose == "AGENT_MESSAGE_CARD"
+        assert confirmation_case.prompt_count == 0
+
+        repeated_response = client.get(f"/v1/agent/sessions/{session['id']}/messages")
+        assert repeated_response.status_code == 200, repeated_response.text
+        db.expire_all()
+        assert db.query(FollowUpTaskConfirmationPromptDelivery).filter(
+            FollowUpTaskConfirmationPromptDelivery.case_id == confirmation_case.id
+        ).count() == 2
     finally:
         db.close()
         engine.dispose()

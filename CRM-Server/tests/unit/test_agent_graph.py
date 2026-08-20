@@ -193,8 +193,6 @@ class FakeReadQueryToolService(FakeToolService):
         include_business_events=True,
         start_at=None,
         end_at=None,
-        cursor=None,
-        limit=50,
         question=None,
     ):
         self.work_summary_queries.append({
@@ -206,15 +204,12 @@ class FakeReadQueryToolService(FakeToolService):
             "include_business_events": include_business_events,
             "start_at": start_at,
             "end_at": end_at,
-            "cursor": cursor,
-            "limit": limit,
             "question": question,
         })
         return AgentToolResult(
             tool_name="summarize_completed_work",
             success=True,
             data={
-                "facts": {"items": [{"fact_id": "fact_task_1"}], "available_total": 1},
                 "narrative": {
                     "answer": f"### 工作总结\n已完成预算确认。窗口：{window}",
                     "highlights": [{
@@ -226,7 +221,16 @@ class FakeReadQueryToolService(FakeToolService):
                     "confidence": 0.9,
                     "citations": [{"fact_id": "fact_task_1"}],
                 },
-                "summary_source": "deterministic_work_summary_fallback",
+                "coverage": {
+                    "available_total": 1,
+                    "retrieved_total": 1,
+                    "summarized_total": 1,
+                    "referenced_total": 1,
+                    "pages_fetched": 1,
+                    "complete": True,
+                    "stop_reason": "all_facts_collected",
+                },
+                "summary_source": "deterministic_fallback",
             },
             tool_call_id=511,
         )

@@ -79,6 +79,9 @@ from app.services.customer_activity_post_commit_operation_projector import (
 from app.services.customer_intelligence_operation_projector import (
     customer_intelligence_operation_projector,
 )
+from app.services.follow_up_task_confirmation_agent_message_card_service import (
+    follow_up_task_confirmation_agent_message_card_service,
+)
 from app.utils.sse_encoder import SSEJsonEncoder
 
 router = APIRouter(prefix="/v1/agent", tags=["CRM AI Agent"])
@@ -493,6 +496,12 @@ async def list_agent_messages(
     db: Session = Depends(get_db),
 ):
     _get_owned_session(db, team_id=team_id, user_id=current_user.id, session_id=session_id)
+    follow_up_task_confirmation_agent_message_card_service.ensure_session_cards(
+        db,
+        team_id=team_id,
+        user_id=current_user.id,
+        session_id=session_id,
+    )
     skip = (page - 1) * page_size
     items, total = agent_message_crud.list_by_session(
         db,

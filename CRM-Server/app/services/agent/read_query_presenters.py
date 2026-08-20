@@ -22,8 +22,10 @@ def work_summary_tool_response(data: object) -> str:
     answer = _display_text(narrative.get("answer"))
     if answer:
         return answer
-    facts = coerce_json_dict(payload.get("facts"))
-    total = _int_json_value(facts.get("available_total"))
+    coverage = coerce_json_dict(payload.get("coverage"))
+    if not coverage:
+        coverage = coerce_json_dict(narrative.get("coverage"))
+    total = _int_json_value(coverage.get("available_total"))
     if total <= 0:
         return "当前时间范围内没有查询到可确认的工作事实。"
     return f"已查询到 {total} 条可确认工作事实，但暂时没有生成可展示的总结。"

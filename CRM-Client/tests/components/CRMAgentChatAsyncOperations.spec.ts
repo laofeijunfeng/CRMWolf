@@ -1,6 +1,6 @@
 import { flushPromises, mount } from "@vue/test-utils"
 import { createPinia, setActivePinia } from "pinia"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type {
   AgentAsyncOperation,
   AgentChatRequest,
@@ -96,6 +96,10 @@ describe("CRMAgentChat background operation placement", () => {
     api.listSessionOperations.mockReset().mockResolvedValue([operation])
     api.getOperation.mockReset()
     api.chatStream.mockReset()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it("renders a completed background operation after the assistant response from its source turn", async () => {
@@ -244,6 +248,50 @@ describe("CRMAgentChat background operation placement", () => {
     expect(firstAssistantIndex).toBeGreaterThanOrEqual(0)
     expect(operationIndex).toBeGreaterThan(firstAssistantIndex)
     expect(operationIndex).toBeLessThan(secondUserIndex)
+    wrapper.unmount()
+  })
+
+  it("refreshes messages when the current post-commit operation becomes terminal", async () => {
+    vi.useFakeTimers()
+    const runningPostCommitOperation: AgentAsyncOperation = {
+      ...operation,
+      public_id: "aop_post_commit_refresh",
+      request_id: "pcj_refresh",
+      operation_type: "customer_activity_post_commit",
+      resource_type: "customer_activity",
+      resource_id: 241,
+      resource_public_id: null,
+      status: "RUNNING",
+      finished_time: null,
+    }
+    const completedPostCommitOperation: AgentAsyncOperation = {
+      ...runningPostCommitOperation,
+      status: "SUCCEEDED",
+      finished_time: "2026-08-12T12:00:05",
+      updated_time: "2026-08-12T12:00:05",
+    }
+    api.listMessages
+      .mockResolvedValueOnce(paginatedMessages(messages))
+      .mockResolvedValueOnce(paginatedMessages(messages))
+    api.listSessionOperations
+      .mockResolvedValueOnce([runningPostCommitOperation])
+      .mockResolvedValueOnce([completedPostCommitOperation])
+    api.getOperation.mockResolvedValueOnce(completedPostCommitOperation)
+
+    const wrapper = mount(CRMAgentChat, {
+      global: {
+        stubs: {
+          AgentInteractionDrawer: true,
+          MessageScroller: { template: "<div><slot /></div>" },
+        },
+      },
+    })
+    await flushPromises()
+
+    await vi.advanceTimersByTimeAsync(2_000)
+    await flushPromises()
+
+    expect(api.listMessages).toHaveBeenCalledTimes(2)
     wrapper.unmount()
   })
 

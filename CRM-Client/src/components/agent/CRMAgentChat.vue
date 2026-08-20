@@ -244,6 +244,17 @@ const {
   onChanged: () => {
     messageScrollKey.value += 1
   },
+  onTerminal: (operation) => {
+    const targetSessionId = operation.session_id
+    if (
+      operation.operation_type !== "customer_activity_post_commit"
+      || typeof targetSessionId !== "number"
+      || targetSessionId !== sessionId.value
+    ) return
+    void loadSessionMessages(targetSessionId).catch(() => {
+      // The next normal message refresh can recover a delayed confirmation card.
+    })
+  },
 })
 
 const LAST_SESSION_STORAGE_KEY = "crm_agent_last_session_id"

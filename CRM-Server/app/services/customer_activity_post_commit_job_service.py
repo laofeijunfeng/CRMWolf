@@ -14,11 +14,17 @@ from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.crud.customer_activity import customer_activity_crud
 from app.crud.customer_activity_post_commit_job import customer_activity_post_commit_job_crud
-from app.models.customer_activity_post_commit_job import CustomerActivityPostCommitJobStatus
+from app.models.customer_activity_post_commit_job import (
+    CustomerActivityPostCommitJob,
+    CustomerActivityPostCommitJobStatus,
+)
 from app.services.customer_activity_post_commit_operation_projector import (
     customer_activity_post_commit_operation_projector,
 )
 from app.services.customer_activity_post_commit_workflow import customer_activity_post_commit_workflow
+from app.services.follow_up_task_confirmation_agent_message_card_service import (
+    follow_up_task_confirmation_agent_message_card_service,
+)
 from app.utils.time import business_now
 
 if TYPE_CHECKING:
@@ -251,12 +257,17 @@ class CustomerActivityPostCommitJobService:
             db.close()
 
     @staticmethod
-    def _project_bound_operation(db: Session, job: object | None) -> None:
+    def _project_bound_operation(db: Session, job: CustomerActivityPostCommitJob | None) -> None:
         if job is None:
             return
         try:
             projected = customer_activity_post_commit_operation_projector.project_job(db, job)
             if projected is not None:
+                follow_up_task_confirmation_agent_message_card_service.ensure_job_cards(
+                    db,
+                    job=job,
+                    commit=False,
+                )
                 db.commit()
         except Exception:
             db.rollback()
