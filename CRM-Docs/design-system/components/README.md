@@ -16,6 +16,7 @@
 | [用户菜单](user-menu.md) | 团队、账户和会话操作。 |
 | [底部导航](bottom-navigation.md) | 移动端一级目的地。 |
 | [状态徽标](status-badge.md) | 表达业务状态。 |
+| [浮层表面](overlay.md) | 统一菜单、面板、提示和模态外壳。 |
 | [模态框与抽屉](modal-sheet.md) | 承载临时上下文任务。 |
 | [审批通知](approval-notification.md) | 审批入口和待办语义。 |
 

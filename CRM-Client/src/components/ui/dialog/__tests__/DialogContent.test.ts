@@ -29,6 +29,7 @@ describe('DialogContent close control', () => {
     await nextTick()
     const content = document.body.querySelector<HTMLElement>('[role="dialog"]')
     expect(content?.classList.contains('rounded-wolf-overlay')).toBe(true)
+    expect(content?.classList.contains('shadow-wolf-modal')).toBe(true)
     expect(content?.classList.contains('sm:rounded-lg')).toBe(false)
     wrapper.unmount()
   })

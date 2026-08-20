@@ -46,8 +46,8 @@ const emit = defineEmits<{
 .table-toolbar-builder {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 12px;
+  gap: $wolf-space-md-v2;
+  padding: $wolf-space-md-v2;
 }
 
 .table-toolbar-builder-header,
@@ -58,8 +58,8 @@ const emit = defineEmits<{
 }
 
 .table-toolbar-builder-title {
-  font-size: 14px;
-  font-weight: 600;
+  font-size: $wolf-font-size-body-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
   color: $wolf-text-primary-v2;
 }
 

@@ -55,6 +55,7 @@ function executeAction(action: ActionConfig): void {
 }
 
 .table-row-context-menu-item {
+  gap: $wolf-space-sm-v2;
   font-size: $wolf-font-size-body-v2;
   font-weight: $wolf-font-weight-medium-v2;
   color: $wolf-text-primary-v2;
@@ -68,6 +69,5 @@ function executeAction(action: ActionConfig): void {
 .table-row-context-menu-icon {
   width: 16px;
   height: 16px;
-  margin-right: $wolf-space-xs-v2;
 }
 </style>

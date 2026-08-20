@@ -109,7 +109,7 @@ const handleViewAll = (): void => {
     :open="open"
     :open-delay="250"
     :close-delay="180"
-    content-class="customer-opportunity-hover-card w-[460px] p-0"
+    content-class="customer-opportunity-hover-card is-panel w-[460px] p-0"
     @update:open="handleOpenChange"
   >
     <template #trigger>
@@ -118,7 +118,7 @@ const handleViewAll = (): void => {
 
     <section aria-label="客户商机概览">
       <header class="flex items-start justify-between gap-3 px-4 pt-4 pb-3">
-        <h3 class="min-w-0 truncate text-xl font-semibold leading-7 text-wolf-text-primary-v2" :title="customerName">
+        <h3 class="min-w-0 truncate text-wolf-title font-wolf-semibold leading-6 text-wolf-text-primary-v2" :title="customerName">
           {{ customerName }}
         </h3>
         <Badge
@@ -222,11 +222,3 @@ const handleViewAll = (): void => {
   </HoverInfo>
 </template>
 
-<style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
-
-:global(.customer-opportunity-hover-card) {
-  border-radius: $wolf-radius-popover-v2;
-  box-shadow: $wolf-shadow-hover-v2;
-}
-</style>

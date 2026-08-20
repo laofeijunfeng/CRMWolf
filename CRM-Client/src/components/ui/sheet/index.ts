@@ -33,7 +33,7 @@ export { default as SheetTrigger } from "./SheetTrigger.vue"
  * - 同时低于 Dialog (z-1000)，允许 Modal 在 Sheet 上方打开
  */
 export const sheetVariants = cva(
-  "fixed z-[201] gap-4 bg-background p-6 shadow-lg transition ease-in-out data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-300 data-[state=open]:duration-500",
+  "fixed z-[201] gap-4 bg-background p-6 shadow-wolf-modal transition ease-in-out data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-300 data-[state=open]:duration-500",
   {
     variants: {
       side: {

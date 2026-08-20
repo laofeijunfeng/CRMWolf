@@ -3,7 +3,7 @@
 - **用途：**提供团队切换、个人设置和会话操作。
 - **适用范围：**components 领域。
 - **权威性：**本主题是账户菜单内容、层级与安全操作的唯一事实来源。
-- **相关规范：**[组件索引](README.md) · [颜色令牌](../foundations/color-tokens.md) · [圆角与层级](../foundations/radius-elevation.md) · [动效与性能](../foundations/motion-performance.md) · [无障碍](../foundations/accessibility.md)
+- **相关规范：**[组件索引](README.md) · [颜色令牌](../foundations/color-tokens.md) · [圆角与层级](../foundations/radius-elevation.md) · [浮层表面](overlay.md) · [动效与性能](../foundations/motion-performance.md) · [无障碍](../foundations/accessibility.md)
 
 ## 内容与分组
 
@@ -17,4 +17,4 @@
 
 菜单从触发器附近展开，并保持在可用视口内。打开时焦点进入菜单；可用键盘逐项移动和激活，按关闭操作或移开焦点后返回触发器。点击或激活菜单项后按其任务结果关闭或保留菜单，不得产生不确定状态。
 
-颜色遵循[颜色令牌](../foundations/color-tokens.md)，圆角与浮层层级遵循[圆角与层级](../foundations/radius-elevation.md)，焦点、名称和键盘规则遵循[无障碍](../foundations/accessibility.md)。过渡与减少动效遵循[动效与性能](../foundations/motion-performance.md)。
+颜色遵循[颜色令牌](../foundations/color-tokens.md)，圆角与浮层层级遵循[圆角与层级](../foundations/radius-elevation.md)，外壳分档遵循[浮层表面](overlay.md)的 Menu。焦点、名称和键盘规则遵循[无障碍](../foundations/accessibility.md)。过渡与减少动效遵循[动效与性能](../foundations/motion-performance.md)。

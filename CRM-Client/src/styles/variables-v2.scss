@@ -68,12 +68,12 @@ $wolf-danger-text-v2: #DC2626;       // 危险文字色
 $wolf-danger-bg-v2: rgba(#DC2626, 0.1);   // 危险背景色
 
 // ==================== 圆角系统（shadcn-vue 对齐）====================
-// 规则: 控件使用 md(6px)，内容表面/弹窗/抽屉/卡片使用 xl(12px)
+// 规则: 控件使用 md(6px)，卡片、菜单、面板、弹窗、抽屉使用 xl(12px)
 
-$wolf-radius-v2: 6px;         // md：按钮、输入框、下拉框
+$wolf-radius-v2: 6px;         // md：按钮、输入框等控件
 $wolf-radius-sm-v2: 4px;      // sm：标签、小型元素
-$wolf-radius-lg-v2: 8px;      // lg：保留 shadcn 阶梯，少量较大控件使用
-$wolf-radius-xl-v2: 12px;     // xl：sidebar-08 主内容面板、卡片容器
+$wolf-radius-lg-v2: 8px;      // lg：少量较大控件
+$wolf-radius-xl-v2: 12px;     // xl：卡片、菜单、面板、弹窗、抽屉
 $wolf-radius-full-v2: 9999px; // 完全圆角（头像、徽章）
 
 // 语义圆角。新组件优先使用语义 token，避免按数值散落。
@@ -81,7 +81,7 @@ $wolf-radius-control-v2: $wolf-radius-v2;
 $wolf-radius-surface-v2: $wolf-radius-xl-v2;
 $wolf-radius-overlay-v2: $wolf-radius-xl-v2;
 $wolf-radius-sheet-v2: $wolf-radius-xl-v2;
-$wolf-radius-popover-v2: $wolf-radius-v2;
+$wolf-radius-popover-v2: $wolf-radius-overlay-v2;
 
 // ==================== 间距系统（保留 8dp grid）====================
 
@@ -104,9 +104,10 @@ $wolf-form-item-gap-v2: 16px;
 // V1: 极淡极柔 → V2: 中等强度（更有层次感）
 
 $wolf-shadow-card-v2: 0 1px 3px rgba(0, 0, 0, 0.1);       // 卡片阴影
-$wolf-shadow-hover-v2: 0 2px 8px rgba(0, 0, 0, 0.15);     // hover态阴影
-$wolf-shadow-dropdown-v2: 0 -4px 12px rgba(0, 0, 0, 0.15); // 下拉面板阴影（向上展开）
-$wolf-shadow-modal-v2: 0 4px 16px rgba(0, 0, 0, 0.15);    // 弹窗阴影
+$wolf-shadow-hover-v2: 0 2px 8px rgba(0, 0, 0, 0.15);     // Tooltip / 悬停表面
+$wolf-shadow-overlay-v2: 0 4px 12px rgba(0, 0, 0, 0.12);  // 向下展开的菜单和面板
+$wolf-shadow-dropdown-v2: 0 -4px 12px rgba(0, 0, 0, 0.15); // 仅向上展开的面板
+$wolf-shadow-modal-v2: 0 4px 16px rgba(0, 0, 0, 0.15);    // 模态浮层
 $wolf-shadow-bottom-v2: 0 -2px 8px rgba(0, 0, 0, 0.1);    // 底部阴影
 
 // ==================== 过渡动画系统 ====================

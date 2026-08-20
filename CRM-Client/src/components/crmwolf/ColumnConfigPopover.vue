@@ -195,11 +195,10 @@ watch(() => props.scope, (scope) => {
 .column-config-popover {
   width: 360px;
   padding: 0;
-  border-radius: $wolf-radius-xl-v2;
 }
 
 .column-config-header {
-  padding: $wolf-space-lg-v2;
+  padding: $wolf-space-md-v2;
 }
 
 .column-config-title {
@@ -218,7 +217,7 @@ watch(() => props.scope, (scope) => {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: $wolf-space-sm-v2;
-  padding: 0 $wolf-space-lg-v2 $wolf-space-md-v2;
+  padding: 0 $wolf-space-md-v2 $wolf-space-md-v2;
 }
 
 .column-config-scope :deep(button) {
@@ -313,7 +312,7 @@ watch(() => props.scope, (scope) => {
   display: flex;
   justify-content: space-between;
   gap: $wolf-space-sm-v2;
-  padding: $wolf-space-md-v2 $wolf-space-lg-v2;
+  padding: $wolf-space-md-v2;
 }
 
 .column-config-footer :deep(button) {

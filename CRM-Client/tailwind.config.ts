@@ -36,10 +36,13 @@ const config: Config = {
     'rounded-wolf-surface',
     'rounded-wolf-overlay',
     'rounded-wolf-sheet',
+    'rounded-wolf-popover',
     'rounded-wolf-full',
     // Shadows
     'shadow-wolf-card',
     'shadow-wolf-hover',
+    'shadow-wolf-overlay',
+    'shadow-wolf-modal',
     // Spacing
     'px-wolf-lg',
     'px-wolf-sm',
@@ -174,6 +177,7 @@ const config: Config = {
 				'wolf-surface': '12px',
 				'wolf-overlay': '12px',
 				'wolf-sheet': '12px',
+				'wolf-popover': '12px',
 			'wolf-full': '9999px'
 		},
 		spacing: {
@@ -194,6 +198,7 @@ const config: Config = {
 		boxShadow: {
 			'wolf-card': '0 1px 3px rgba(0, 0, 0, 0.1)',
 			'wolf-hover': '0 2px 8px rgba(0, 0, 0, 0.15)',
+			'wolf-overlay': '0 4px 12px rgba(0, 0, 0, 0.12)',
 			'wolf-dropdown': '0 -4px 12px rgba(0, 0, 0, 0.15)',
 			'wolf-modal': '0 4px 16px rgba(0, 0, 0, 0.15)',
 			'wolf-bottom': '0 -2px 8px rgba(0, 0, 0, 0.1)'

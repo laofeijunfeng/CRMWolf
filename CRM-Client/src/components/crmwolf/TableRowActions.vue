@@ -173,14 +173,9 @@ const executeAction = (action: ActionConfig): void => {
   }
 }
 
-// DropdownMenu 内容样式
+// 宽度由业务决定；圆角和阴影走 DropdownMenuContent 的 overlay 表面。
 .dropdown-content {
   min-width: 160px;
-  background: $wolf-bg-card-v2;
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-popover-v2;
-  padding: $wolf-space-xs-v2;
-  box-shadow: $wolf-shadow-modal-v2;
 }
 
 // DropdownMenu 项样式
@@ -216,7 +211,7 @@ const executeAction = (action: ActionConfig): void => {
 .dropdown-icon {
   width: 16px;
   height: 16px;
-  margin-right: $wolf-space-xs-v2;
+  margin-right: $wolf-space-sm-v2;
 }
 
 // Reduced motion 支持（UI/UX Pro Max §7）

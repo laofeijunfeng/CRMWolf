@@ -46,6 +46,16 @@ const hoverCardProps = computed(() => {
     closeDelay: props.closeDelay,
   })
 })
+
+const isPanel = computed(() => cn(props.contentClass).split(/\s+/).includes('is-panel'))
+
+const hoverContentClass = computed(() => cn(
+  'crm-hover-info-content',
+  isPanel.value
+    ? 'overflow-hidden rounded-wolf-overlay shadow-wolf-overlay'
+    : 'rounded-md shadow-wolf-hover',
+  props.contentClass,
+))
 </script>
 
 <template>
@@ -56,7 +66,7 @@ const hoverCardProps = computed(() => {
     <HoverCardContent
       :side="props.side"
       :align="props.align"
-      :class="cn('crm-hover-info-content', props.contentClass)"
+      :class="hoverContentClass"
     >
       <slot />
     </HoverCardContent>
@@ -68,9 +78,7 @@ const hoverCardProps = computed(() => {
 
 :global(.crm-hover-info-content) {
   border-color: $wolf-border-light-v2;
-  border-radius: $wolf-radius-v2;
   background: $wolf-bg-elevated-v2;
   color: $wolf-text-primary-v2;
-  box-shadow: $wolf-shadow-modal-v2;
 }
 </style>

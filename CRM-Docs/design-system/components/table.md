@@ -3,11 +3,11 @@
 - **用途：**展示可比较、可扫描的信息密集型记录。
 - **适用范围：**components 领域。
 - **权威性：**本主题是表格表头、行、对齐与交互的唯一事实来源。
-- **相关规范：**[组件索引](README.md) · [列表卡片](list-card.md)（受限空间替代方案） · [列表页](../patterns/list-page.md) · [间距与布局](../foundations/spacing-layout.md) · [排版](../foundations/typography.md) · [颜色令牌](../foundations/color-tokens.md) · [动效与性能](../foundations/motion-performance.md) · [无障碍](../foundations/accessibility.md)
+- **相关规范：**[组件索引](README.md) · [列表卡片](list-card.md)（受限空间替代方案） · [列表页](../patterns/list-page.md) · [浮层表面](overlay.md) · [间距与布局](../foundations/spacing-layout.md) · [排版](../foundations/typography.md) · [颜色令牌](../foundations/color-tokens.md) · [动效与性能](../foundations/motion-performance.md) · [无障碍](../foundations/accessibility.md)
 
 ## 结构与内容
 
-表头说明每列的含义；列标题简短、稳定，并与单元格内容一一对应。记录名称和主要识别信息置于便于扫描的位置。桌面行操作以行右键菜单为唯一指针入口，键盘用菜单键或 Shift+F10 打开同一份菜单，避免每格都成为不同入口。
+表头说明每列的含义；列标题简短、稳定，并与单元格内容一一对应。记录名称和主要识别信息置于便于扫描的位置。桌面行操作以行右键菜单为唯一指针入口，键盘用菜单键或 Shift+F10 打开同一份菜单，避免每格都成为不同入口。行菜单与筛选、排序、字段配置浮层遵循[浮层表面](overlay.md)。
 
 表格仅用于跨行比较有价值的数据。内容较长时允许行随内容扩展，不得以固定行高截断关键信息。无记录、加载、失败和筛选无结果必须呈现明确状态及后续动作。列表页中列、筛选与排序的字段来源由[列表页](../patterns/list-page.md)定义。
 

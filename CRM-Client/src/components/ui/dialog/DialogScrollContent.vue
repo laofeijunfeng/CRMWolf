@@ -28,7 +28,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
       <DialogContent
         :class="
           cn(
-            'relative z-[1000] grid w-full max-w-lg my-8 gap-4 rounded-wolf-overlay border border-border bg-background p-6 shadow-lg duration-200 md:w-full',
+            'relative z-[1000] grid w-full max-w-lg my-8 gap-4 rounded-wolf-overlay border border-border bg-background p-6 shadow-wolf-modal duration-200 md:w-full',
             props.class,
           )
         "

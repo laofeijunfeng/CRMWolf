@@ -51,6 +51,11 @@
   --wolf-radius-popover: #{$wolf-radius-popover-v2};
   --wolf-radius-full: #{$wolf-radius-full-v2};
 
+  --wolf-shadow-hover: #{$wolf-shadow-hover-v2};
+  --wolf-shadow-overlay: #{$wolf-shadow-overlay-v2};
+  --wolf-shadow-dropdown: #{$wolf-shadow-dropdown-v2};
+  --wolf-shadow-modal: #{$wolf-shadow-modal-v2};
+
   --wolf-space-xs: #{$wolf-space-xs-v2};
   --wolf-space-sm: #{$wolf-space-sm-v2};
   --wolf-space-md: #{$wolf-space-md-v2};
@@ -270,6 +275,8 @@ html, body {
 // 阴影
 .shadow-card { box-shadow: $wolf-shadow-card-v2; }
 .shadow-hover { box-shadow: $wolf-shadow-hover-v2; }
+.shadow-overlay { box-shadow: $wolf-shadow-overlay-v2; }
+.shadow-modal { box-shadow: $wolf-shadow-modal-v2; }
 
 // 过渡
 .transition { transition: all 0.2s ease; }

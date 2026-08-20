@@ -1,5 +1,36 @@
 import { type ClassValue, clsx } from 'clsx'
-import { twMerge } from 'tailwind-merge'
+import { extendTailwindMerge } from 'tailwind-merge'
+
+const twMerge = extendTailwindMerge({
+  extend: {
+    classGroups: {
+      rounded: [{
+        rounded: [
+          'wolf',
+          'wolf-sm',
+          'wolf-md',
+          'wolf-lg',
+          'wolf-xl',
+          'wolf-surface',
+          'wolf-overlay',
+          'wolf-sheet',
+          'wolf-popover',
+          'wolf-full'
+        ]
+      }],
+      shadow: [{
+        shadow: [
+          'wolf-card',
+          'wolf-hover',
+          'wolf-overlay',
+          'wolf-dropdown',
+          'wolf-modal',
+          'wolf-bottom'
+        ]
+      }]
+    }
+  }
+})
 
 export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs))
