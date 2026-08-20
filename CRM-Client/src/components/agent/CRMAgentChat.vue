@@ -37,7 +37,7 @@
         </div>
       </div>
 
-      <template v-for="message in messages" :key="message.id">
+      <div v-for="message in messages" :key="message.id" class="agent-chat__turn">
         <Message :role="message.role" class="agent-chat__message">
           <Avatar v-if="message.role !== 'user'" class="agent-chat__avatar agent-chat__avatar--assistant">
             <AvatarFallback class="agent-chat__avatar-fallback">AI</AvatarFallback>
@@ -112,7 +112,7 @@
             @confirm-complete="confirmFollowUpTaskCompletion"
           />
         </section>
-      </template>
+      </div>
 
       <section v-if="unanchoredAsyncOperations.length > 0" class="agent-chat__operations" aria-label="未关联的后台任务状态">
         <AgentAsyncOperationList :operations="unanchoredAsyncOperations" />
@@ -979,15 +979,30 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
+.agent-chat__turn {
+  display: grid;
+  gap: $wolf-space-md-v2;
+  width: 100%;
+}
+
 .agent-chat__message {
   align-items: flex-start;
+}
+
+.agent-chat__operations,
+.agent-chat__follow-up-confirmations {
+  width: min(calc(100% - 40px), 680px);
+  margin-left: 40px;
 }
 
 .agent-chat__operations {
   display: grid;
   gap: $wolf-space-sm-v2;
-  width: min(calc(100% - 40px), 680px);
-  margin: $wolf-space-xs-v2 0 $wolf-space-lg-v2 40px;
+}
+
+.agent-chat__follow-up-confirmations {
+  display: grid;
+  gap: $wolf-space-sm-v2;
 }
 
 .agent-chat__avatar {
@@ -1221,10 +1236,6 @@ onBeforeUnmount(() => {
     padding: $wolf-space-md-v2 $wolf-page-padding-mobile-v2 $wolf-space-md-v2;
   }
 
-}
-.agent-chat__follow-up-confirmations {
-  margin: 8px 0 0 44px;
-  max-width: min(760px, calc(100% - 44px));
 }
 
 </style>

@@ -1,7 +1,7 @@
 <template>
   <article
     :class="[
-      'flex w-full items-start gap-3 rounded-lg border px-4 py-3 text-sm transition-colors',
+      'flex w-full items-start gap-wolf-md rounded-wolf-xl border px-wolf-lg py-wolf-md text-wolf-auxiliary transition-colors',
       isCompleted
         ? 'border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-950/30 dark:text-green-300'
         : 'border-border bg-card text-foreground',
@@ -12,10 +12,14 @@
       :checked="isCompleted"
       :disabled="!isPending || submitting === true"
       :class="[
-        'mt-0.5 size-7 rounded-full border-border disabled:cursor-default disabled:opacity-100',
+        'mt-0.5 size-6 shrink-0 rounded-full border-border transition-colors disabled:cursor-default disabled:opacity-100',
+        isPending && submitting !== true
+          ? 'cursor-pointer hover:border-primary hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+          : 'cursor-default',
         'data-[state=checked]:border-green-600 data-[state=checked]:bg-green-600 data-[state=checked]:text-white',
       ]"
       :aria-label="isCompleted ? `关联待办「${confirmation.task_title}」已完成` : `确认关联待办「${confirmation.task_title}」已完成`"
+      :title="isPending ? '点击圆圈确认已完成' : undefined"
       @update:checked="handleChecked"
     />
 
