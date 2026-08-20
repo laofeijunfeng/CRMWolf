@@ -1,21 +1,29 @@
-"""Attach durable follow-up confirmations to their originating Agent messages."""
+"""Attach follow-up confirmations to the Agent turn that originated an activity."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from app.crud.customer_activity_agent_origin import customer_activity_agent_origin_crud
 from app.crud.sales_commitment import follow_up_task_confirmation_prompt_delivery_crud
 from app.models.agent import AgentMessage, AgentMessageRole
-from app.models.agent_async_operation import AgentAsyncOperation
-from app.models.customer_activity_post_commit_job import CustomerActivityPostCommitJob
 from app.models.sales_commitment import FollowUpTaskConfirmationCase
+from app.services.customer_activity_agent_origin_service import customer_activity_agent_origin_service
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
+    from app.models.customer_activity_agent_origin import CustomerActivityAgentOrigin
+    from app.models.customer_activity_post_commit_job import CustomerActivityPostCommitJob
+
 
 class FollowUpTaskConfirmationAgentMessageCardService:
-    """Backfill non-intrusive message cards without duplicating confirmation cases."""
+    """Project existing confirmation cases as non-intrusive Agent message cards.
+
+    A card is a second presentation of the same confirmation case shown in
+    customer tracking. Its message attribution comes from the immutable activity
+    origin; it must not depend on the revision that happened to create the case.
+    """
 
     def ensure_session_cards(
         self,
@@ -26,25 +34,22 @@ class FollowUpTaskConfirmationAgentMessageCardService:
         session_id: int,
         commit: bool = True,
     ) -> int:
-        """Attach all safely attributable historical cards for one Agent session."""
+        """Backfill safe legacy origins, then attach all cards for this session."""
 
-        operations = (
-            db.query(AgentAsyncOperation)
-            .filter(
-                AgentAsyncOperation.team_id == team_id,
-                AgentAsyncOperation.user_id == user_id,
-                AgentAsyncOperation.session_id == session_id,
-                AgentAsyncOperation.operation_type == "customer_activity_post_commit",
-                AgentAsyncOperation.resource_type == "customer_activity",
-                AgentAsyncOperation.source_assistant_message_id.is_not(None),
-            )
-            .order_by(AgentAsyncOperation.id.asc())
-            .all()
+        origin_count = customer_activity_agent_origin_service.ensure_session_origins(
+            db,
+            team_id=team_id,
+            user_id=user_id,
+            session_id=session_id,
         )
-        created_count = 0
-        for operation in operations:
-            created_count += self._ensure_operation_cards(db, operation=operation)
-        if created_count and commit:
+        origins = customer_activity_agent_origin_crud.list_by_session(
+            db,
+            team_id=team_id,
+            owner_id=str(user_id),
+            agent_session_id=session_id,
+        )
+        created_count = sum(self._ensure_origin_cards(db, origin=origin) for origin in origins)
+        if (origin_count or created_count) and commit:
             db.commit()
         return created_count
 
@@ -55,58 +60,37 @@ class FollowUpTaskConfirmationAgentMessageCardService:
         job: CustomerActivityPostCommitJob,
         commit: bool = True,
     ) -> int:
-        """Attach cards for a freshly completed job when its source message is known."""
+        """Attach cards for a completed job when its activity already has an origin."""
 
-        operations = (
-            db.query(AgentAsyncOperation)
-            .filter(
-                AgentAsyncOperation.team_id == int(job.team_id),
-                AgentAsyncOperation.request_id == str(job.public_id),
-                AgentAsyncOperation.operation_type == "customer_activity_post_commit",
-                AgentAsyncOperation.resource_type == "customer_activity",
-                AgentAsyncOperation.resource_id == int(job.activity_id),
-                AgentAsyncOperation.source_assistant_message_id.is_not(None),
-            )
-            .order_by(AgentAsyncOperation.id.asc())
-            .all()
+        origin = customer_activity_agent_origin_crud.get_by_activity(
+            db,
+            team_id=int(job.team_id),
+            activity_id=int(job.activity_id),
         )
-        created_count = 0
-        for operation in operations:
-            created_count += self._ensure_operation_cards(db, operation=operation, job=job)
+        if origin is None:
+            return 0
+        created_count = self._ensure_origin_cards(db, origin=origin)
         if created_count and commit:
             db.commit()
         return created_count
 
-    def _ensure_operation_cards(
+    def _ensure_origin_cards(
         self,
         db: Session,
         *,
-        operation: AgentAsyncOperation,
-        job: CustomerActivityPostCommitJob | None = None,
+        origin: CustomerActivityAgentOrigin,
     ) -> int:
-        assistant_message_id = operation.source_assistant_message_id
-        session_id = operation.session_id
-        if assistant_message_id is None or session_id is None or operation.resource_id is None:
-            return 0
-        if job is None:
-            job = (
-                db.query(CustomerActivityPostCommitJob)
-                .filter(
-                    CustomerActivityPostCommitJob.team_id == int(operation.team_id),
-                    CustomerActivityPostCommitJob.public_id == str(operation.request_id),
-                    CustomerActivityPostCommitJob.activity_id == int(operation.resource_id),
-                )
-                .one_or_none()
-            )
-        if job is None:
+        try:
+            owner_user_id = int(origin.owner_id)
+        except (TypeError, ValueError):
             return 0
         assistant_message = (
             db.query(AgentMessage)
             .filter(
-                AgentMessage.id == int(assistant_message_id),
-                AgentMessage.team_id == int(operation.team_id),
-                AgentMessage.user_id == int(operation.user_id),
-                AgentMessage.session_id == int(session_id),
+                AgentMessage.id == int(origin.source_assistant_message_id),
+                AgentMessage.team_id == int(origin.team_id),
+                AgentMessage.user_id == owner_user_id,
+                AgentMessage.session_id == int(origin.agent_session_id),
                 AgentMessage.role == AgentMessageRole.ASSISTANT,
             )
             .one_or_none()
@@ -117,33 +101,34 @@ class FollowUpTaskConfirmationAgentMessageCardService:
         cases = (
             db.query(FollowUpTaskConfirmationCase)
             .filter(
-                FollowUpTaskConfirmationCase.team_id == int(operation.team_id),
-                FollowUpTaskConfirmationCase.owner_id == str(operation.user_id),
-                FollowUpTaskConfirmationCase.source_activity_id == int(job.activity_id),
-                FollowUpTaskConfirmationCase.source_activity_revision == int(job.activity_revision),
+                FollowUpTaskConfirmationCase.team_id == int(origin.team_id),
+                FollowUpTaskConfirmationCase.owner_id == str(origin.owner_id),
+                FollowUpTaskConfirmationCase.source_activity_id == int(origin.activity_id),
             )
             .order_by(FollowUpTaskConfirmationCase.id.asc())
             .all()
         )
         created_count = 0
         for confirmation_case in cases:
-            prompt_key = (
-                f"agent-message-card:{operation.team_id}:{confirmation_case.id}:{assistant_message.id}"
-            )
+            prompt_key = f"agent-message-card:{origin.team_id}:{confirmation_case.id}:{assistant_message.id}"
             existing = follow_up_task_confirmation_prompt_delivery_crud.get_by_prompt_key(
                 db,
-                team_id=int(operation.team_id),
+                team_id=int(origin.team_id),
                 prompt_key=prompt_key,
             )
             follow_up_task_confirmation_prompt_delivery_crud.ensure_agent_message_card(
                 db,
-                team_id=int(operation.team_id),
+                team_id=int(origin.team_id),
                 case_id=int(confirmation_case.id),
-                owner_id=str(operation.user_id),
-                agent_session_id=int(session_id),
+                owner_id=str(origin.owner_id),
+                agent_session_id=int(origin.agent_session_id),
                 assistant_message_id=int(assistant_message.id),
-                source_activity_id=int(job.activity_id),
-                expected_activity_revision=int(job.activity_revision),
+                source_activity_id=int(origin.activity_id),
+                expected_activity_revision=(
+                    int(confirmation_case.source_activity_revision)
+                    if confirmation_case.source_activity_revision is not None
+                    else None
+                ),
                 commit=False,
             )
             if existing is None:

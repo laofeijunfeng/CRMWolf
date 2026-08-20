@@ -17,6 +17,7 @@ from app.models.agent_async_operation import (
 )
 from app.models.customer_intelligence_run import CustomerIntelligenceRun, CustomerIntelligenceRunStatus
 from app.services.agent.types import coerce_json_dict
+from app.services.customer_activity_agent_origin_service import customer_activity_agent_origin_service
 from app.utils.time import business_now
 
 if TYPE_CHECKING:
@@ -195,7 +196,7 @@ class AgentAsyncOperationService:
             .all()
         )
         for operation in operations:
-            self.bind_source(
+            bound_operation = self.bind_source(
                 db,
                 operation_key=str(operation.operation_key),
                 request_id=str(operation.request_id),
@@ -214,6 +215,10 @@ class AgentAsyncOperationService:
                     str(operation.graph_thread_id) if operation.graph_thread_id is not None else None
                 ),
                 summary=str(operation.summary) if operation.summary else "跟进已记录，任务对账处理中",
+            )
+            customer_activity_agent_origin_service.ensure_from_bound_operation(
+                db,
+                operation=bound_operation,
             )
         return len(operations)
 

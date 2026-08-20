@@ -29,6 +29,7 @@ from app.models.agent import (
 from app.models.acquisition_source import AcquisitionSource
 from app.models.customer import Customer
 from app.models.customer_activity import CustomerActivity
+from app.models.customer_activity_agent_origin import CustomerActivityAgentOrigin
 from app.models.customer_activity_post_commit_job import CustomerActivityPostCommitJob
 from app.models.customer_intelligence_run import CustomerIntelligenceRun, CustomerIntelligenceRunStatus
 from app.models.customer_vector_document import CustomerVectorDocument
@@ -44,6 +45,7 @@ from app.models.sales_commitment import (
     FollowUpTaskProjectionRun,
     SalesCommitment,
 )
+from app.services.agent.async_operation_service import agent_async_operation_service
 from app.services.agent.confirmed_task_graph import ConfirmedTaskGraphService
 from app.services.agent import action_workflow
 from app.services.agent.input import AgentTurnInput
@@ -62,6 +64,9 @@ from app.services.agent.state import (
 from app.services.agent.interactions import _opportunity_interaction_fields
 from app.services.agent.task_actions import _tool_payload_for_action
 from app.services.agent.tools.base import AgentToolResult
+from app.services.follow_up_task_confirmation_agent_message_card_service import (
+    follow_up_task_confirmation_agent_message_card_service,
+)
 from app.services.follow_up_task_confirmation_channel_service import (
     FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION,
     FOLLOW_UP_CONFIRMATION_PROMPT_EVENT,
@@ -85,6 +90,7 @@ def _build_client(monkeypatch):
         Customer.__table__,
         AcquisitionSource.__table__,
         CustomerActivity.__table__,
+        CustomerActivityAgentOrigin.__table__,
         CustomerActivityPostCommitJob.__table__,
         CustomerVectorDocument.__table__,
         CustomerIntelligenceRun.__table__,
@@ -376,12 +382,14 @@ def test_agent_messages_include_current_linked_follow_up_task_confirmation_card(
         engine.dispose()
 
 
-def test_agent_messages_backfill_post_commit_confirmation_card_to_source_assistant_message(monkeypatch):
+def test_agent_messages_attach_later_revision_confirmation_case_to_original_agent_turn(monkeypatch):
+    """A rewritten activity keeps the Agent turn that originally created it."""
+
     client, engine = _build_client(monkeypatch)
     Session = sessionmaker(bind=engine)
     db = Session()
     try:
-        session = client.post("/v1/agent/sessions", json={"title": "历史待办确认消息"}).json()
+        session = client.post("/v1/agent/sessions", json={"title": "活动版本升级后的待办确认"}).json()
         customer = Customer(
             team_id=1,
             account_name="Apple",
@@ -390,6 +398,13 @@ def test_agent_messages_backfill_post_commit_confirmation_card_to_source_assista
         )
         db.add(customer)
         db.flush()
+        source_user_message = AgentMessage(
+            team_id=1,
+            user_id=2,
+            session_id=session["id"],
+            role=AgentMessageRole.USER,
+            content="记录 Apple 合同推进情况",
+        )
         activity = CustomerActivity(
             team_id=1,
             customer_id=customer.id,
@@ -398,9 +413,9 @@ def test_agent_messages_backfill_post_commit_confirmation_card_to_source_assista
             activity_kind="PHONE_FOLLOW_UP",
             source_content="客户已确认合同推进。",
             occurred_at=datetime(2026, 8, 20, 9, 0, 0),
-            post_commit_revision=1,
+            post_commit_revision=2,
         )
-        db.add(activity)
+        db.add_all([source_user_message, activity])
         db.flush()
         task = FollowUpTask(
             team_id=1,
@@ -431,7 +446,10 @@ def test_agent_messages_backfill_post_commit_confirmation_card_to_source_assista
             confirmation_hash="post-commit-confirmation-case",
             question_text="关联待办是否已经完成?",
             source_activity_id=activity.id,
-            source_activity_revision=1,
+            # AI structured enrichment rewrote the same activity after Agent
+            # created it. The confirmation belongs to revision 2, not the
+            # original operation/job revision 1.
+            source_activity_revision=2,
         )
         assistant_message = AgentMessage(
             team_id=1,
@@ -442,24 +460,37 @@ def test_agent_messages_backfill_post_commit_confirmation_card_to_source_assista
         )
         db.add_all([confirmation_case, assistant_message])
         db.flush()
-        job = CustomerActivityPostCommitJob(
-            public_id="pcj_agent_message_confirmation",
+        first_job = CustomerActivityPostCommitJob(
+            public_id="pcj_agent_message_confirmation_v1",
             team_id=1,
             activity_id=activity.id,
             activity_revision=1,
             trigger_type="ACTIVITY_CREATED_DETERMINISTIC",
             actor_id="2",
+            status="SKIPPED",
+            run_id="post-commit-card-run-v1",
+            graph_thread_id="post-commit-card-thread-v1",
+            result_json={"skip_reason": "SUPERSEDED_ACTIVITY_REVISION"},
+        )
+        revision_two_job = CustomerActivityPostCommitJob(
+            public_id="pcj_agent_message_confirmation_v2",
+            team_id=1,
+            activity_id=activity.id,
+            activity_revision=2,
+            trigger_type="ACTIVITY_CREATED_DETERMINISTIC",
+            actor_id="2",
             status="COMPLETED",
-            run_id="post-commit-card-run",
-            graph_thread_id="post-commit-card-thread",
+            run_id="post-commit-card-run-v2",
+            graph_thread_id="post-commit-card-thread-v2",
         )
         operation = AgentAsyncOperation(
             public_id="aop_agent_message_confirmation",
-            operation_key="customer-activity-post-commit:pcj_agent_message_confirmation",
-            request_id=job.public_id,
+            operation_key="customer-activity-post-commit:pcj_agent_message_confirmation_v1",
+            request_id=first_job.public_id,
             team_id=1,
             user_id=2,
             session_id=session["id"],
+            source_user_message_id=source_user_message.id,
             source_assistant_message_id=assistant_message.id,
             operation_type="customer_activity_post_commit",
             resource_type="customer_activity",
@@ -478,9 +509,9 @@ def test_agent_messages_backfill_post_commit_confirmation_card_to_source_assista
             status="SENT",
             provider_message_id=f"inbox:{confirmation_case.public_id}",
             source_activity_id=activity.id,
-            expected_activity_revision=1,
+            expected_activity_revision=2,
         )
-        db.add_all([job, operation, inbox_delivery])
+        db.add_all([first_job, revision_two_job, operation, inbox_delivery])
         db.commit()
 
         response = client.get(f"/v1/agent/sessions/{session['id']}/messages")
@@ -493,6 +524,15 @@ def test_agent_messages_backfill_post_commit_confirmation_card_to_source_assista
             confirmation_case.public_id
         ]
         db.expire_all()
+        origin = db.query(CustomerActivityAgentOrigin).filter(
+            CustomerActivityAgentOrigin.team_id == 1,
+            CustomerActivityAgentOrigin.activity_id == activity.id,
+        ).one()
+        assert origin.owner_id == "2"
+        assert origin.agent_session_id == session["id"]
+        assert origin.source_user_message_id == source_user_message.id
+        assert origin.source_assistant_message_id == assistant_message.id
+        assert origin.agent_operation_public_id == operation.public_id
         assert db.query(FollowUpTaskConfirmationPromptDelivery).filter(
             FollowUpTaskConfirmationPromptDelivery.case_id == confirmation_case.id
         ).count() == 2
@@ -501,14 +541,269 @@ def test_agent_messages_backfill_post_commit_confirmation_card_to_source_assista
             FollowUpTaskConfirmationPromptDelivery.provider_message_id == f"agent_message:{assistant_message.id}",
         ).one()
         assert card_delivery.purpose == "AGENT_MESSAGE_CARD"
+        assert card_delivery.expected_activity_revision == 2
         assert confirmation_case.prompt_count == 0
 
         repeated_response = client.get(f"/v1/agent/sessions/{session['id']}/messages")
         assert repeated_response.status_code == 200, repeated_response.text
         db.expire_all()
+        assert db.query(CustomerActivityAgentOrigin).filter(
+            CustomerActivityAgentOrigin.team_id == 1,
+            CustomerActivityAgentOrigin.activity_id == activity.id,
+        ).count() == 1
         assert db.query(FollowUpTaskConfirmationPromptDelivery).filter(
             FollowUpTaskConfirmationPromptDelivery.case_id == confirmation_case.id
         ).count() == 2
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_assistant_binding_recovers_card_when_confirmation_case_precedes_message(monkeypatch):
+    """The post-commit job may finish before the assistant message is persisted."""
+
+    client, engine = _build_client(monkeypatch)
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "后提交先完成"}).json()
+        customer = Customer(team_id=1, account_name="Microsoft", city="上海", creator_id="2")
+        db.add(customer)
+        db.flush()
+        user_message = AgentMessage(
+            team_id=1,
+            user_id=2,
+            session_id=session["id"],
+            role=AgentMessageRole.USER,
+            content="记录 Microsoft 的项目推进",
+        )
+        activity = CustomerActivity(
+            team_id=1,
+            customer_id=customer.id,
+            owner_id="2",
+            creator_id="2",
+            activity_kind="PHONE_FOLLOW_UP",
+            source_content="客户需要补充采购材料。",
+            occurred_at=datetime(2026, 8, 20, 9, 0, 0),
+            post_commit_revision=2,
+        )
+        db.add_all([user_message, activity])
+        db.flush()
+        task = FollowUpTask(
+            team_id=1,
+            customer_id=customer.id,
+            owner_id="2",
+            creator_id="2",
+            title="补充 Microsoft 采购材料",
+            status="OPEN",
+            due_at=datetime(2026, 8, 25, 9, 0, 0),
+            due_at_text="8 月 25 日",
+            due_at_granularity="DATETIME",
+            due_at_timezone="Asia/Shanghai",
+            source_type="CUSTOMER_ACTIVITY",
+            source_key=f"activity:{activity.id}",
+            confidence=1,
+            task_hash="post-commit-race-task",
+        )
+        db.add(task)
+        db.flush()
+        confirmation_case = FollowUpTaskConfirmationCase(
+            team_id=1,
+            task_id=task.id,
+            customer_id=customer.id,
+            owner_id="2",
+            creator_id="2",
+            status="PENDING",
+            suggested_action="COMPLETE",
+            confirmation_hash="post-commit-race-case",
+            question_text="关联待办是否已经完成?",
+            source_activity_id=activity.id,
+            source_activity_revision=2,
+        )
+        completed_job = CustomerActivityPostCommitJob(
+            public_id="pcj_agent_message_race_v2",
+            team_id=1,
+            activity_id=activity.id,
+            activity_revision=2,
+            trigger_type="ACTIVITY_CREATED_DETERMINISTIC",
+            actor_id="2",
+            status="COMPLETED",
+            run_id="post-commit-race-run",
+            graph_thread_id="post-commit-race-thread",
+        )
+        operation = AgentAsyncOperation(
+            public_id="aop_agent_message_race",
+            operation_key="customer-activity-post-commit:pcj_agent_message_race_v1",
+            request_id="pcj_agent_message_race_v1",
+            team_id=1,
+            user_id=2,
+            session_id=session["id"],
+            source_user_message_id=user_message.id,
+            operation_type="customer_activity_post_commit",
+            resource_type="customer_activity",
+            resource_id=activity.id,
+            status="SUCCEEDED",
+            summary="跟进已记录，任务对账完成",
+        )
+        db.add_all([confirmation_case, completed_job, operation])
+        db.commit()
+
+        # The terminal job cannot attach a card until the assistant message and
+        # immutable activity origin exist.
+        assert follow_up_task_confirmation_agent_message_card_service.ensure_job_cards(
+            db,
+            job=completed_job,
+            commit=False,
+        ) == 0
+        assistant_message = AgentMessage(
+            team_id=1,
+            user_id=2,
+            session_id=session["id"],
+            role=AgentMessageRole.ASSISTANT,
+            content="已记录，正在处理后续待办。",
+        )
+        db.add(assistant_message)
+        db.flush()
+
+        assert agent_async_operation_service.bind_customer_activity_post_commit_assistant_message(
+            db,
+            team_id=1,
+            user_id=2,
+            session_id=session["id"],
+            source_user_message_id=user_message.id,
+            source_assistant_message_id=assistant_message.id,
+        ) == 1
+        assert follow_up_task_confirmation_agent_message_card_service.ensure_session_cards(
+            db,
+            team_id=1,
+            user_id=2,
+            session_id=session["id"],
+            commit=False,
+        ) == 1
+        db.commit()
+
+        response = client.get(f"/v1/agent/sessions/{session['id']}/messages")
+        assert response.status_code == 200, response.text
+        assistant_response = next(
+            item for item in response.json()["items"] if item["id"] == assistant_message.id
+        )
+        assert [card["case_public_id"] for card in assistant_response["linked_follow_up_task_confirmations"]] == [
+            confirmation_case.public_id
+        ]
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_ambiguous_legacy_activity_origin_is_not_backfilled_to_any_agent_message(monkeypatch):
+    """Historical repair must refuse conflicting message attribution evidence."""
+
+    client, engine = _build_client(monkeypatch)
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "冲突历史来源"}).json()
+        customer = Customer(team_id=1, account_name="Tesla", city="上海", creator_id="2")
+        db.add(customer)
+        db.flush()
+        activity = CustomerActivity(
+            team_id=1,
+            customer_id=customer.id,
+            owner_id="2",
+            creator_id="2",
+            activity_kind="PHONE_FOLLOW_UP",
+            source_content="历史活动",
+            occurred_at=datetime(2026, 8, 20, 9, 0, 0),
+            post_commit_revision=2,
+        )
+        task = FollowUpTask(
+            team_id=1,
+            customer_id=customer.id,
+            owner_id="2",
+            creator_id="2",
+            title="跟进 Tesla 方案",
+            status="OPEN",
+            due_at=datetime(2026, 8, 25, 9, 0, 0),
+            due_at_text="8 月 25 日",
+            due_at_granularity="DATETIME",
+            due_at_timezone="Asia/Shanghai",
+            source_type="CUSTOMER_ACTIVITY",
+            source_key="activity:ambiguous-origin",
+            confidence=1,
+            task_hash="ambiguous-origin-task",
+        )
+        first_message = AgentMessage(
+            team_id=1,
+            user_id=2,
+            session_id=session["id"],
+            role=AgentMessageRole.ASSISTANT,
+            content="第一条可能来源。",
+        )
+        second_message = AgentMessage(
+            team_id=1,
+            user_id=2,
+            session_id=session["id"],
+            role=AgentMessageRole.ASSISTANT,
+            content="第二条可能来源。",
+        )
+        db.add_all([activity, first_message, second_message])
+        db.flush()
+        task.source_key = f"activity:{activity.id}"
+        db.add(task)
+        db.flush()
+        confirmation_case = FollowUpTaskConfirmationCase(
+            team_id=1,
+            task_id=task.id,
+            customer_id=customer.id,
+            owner_id="2",
+            creator_id="2",
+            status="PENDING",
+            suggested_action="COMPLETE",
+            confirmation_hash="ambiguous-origin-case",
+            question_text="关联待办是否已经完成?",
+            source_activity_id=activity.id,
+            source_activity_revision=2,
+        )
+        db.add_all([
+            confirmation_case,
+            AgentAsyncOperation(
+                public_id="aop_ambiguous_origin_1",
+                operation_key="customer-activity-post-commit:ambiguous-origin-1",
+                request_id="pcj_ambiguous_origin_1",
+                team_id=1,
+                user_id=2,
+                session_id=session["id"],
+                source_assistant_message_id=first_message.id,
+                operation_type="customer_activity_post_commit",
+                resource_type="customer_activity",
+                resource_id=activity.id,
+                status="SUCCEEDED",
+            ),
+            AgentAsyncOperation(
+                public_id="aop_ambiguous_origin_2",
+                operation_key="customer-activity-post-commit:ambiguous-origin-2",
+                request_id="pcj_ambiguous_origin_2",
+                team_id=1,
+                user_id=2,
+                session_id=session["id"],
+                source_assistant_message_id=second_message.id,
+                operation_type="customer_activity_post_commit",
+                resource_type="customer_activity",
+                resource_id=activity.id,
+                status="SUCCEEDED",
+            ),
+        ])
+        db.commit()
+
+        response = client.get(f"/v1/agent/sessions/{session['id']}/messages")
+        assert response.status_code == 200, response.text
+        assert db.query(CustomerActivityAgentOrigin).filter(
+            CustomerActivityAgentOrigin.team_id == 1,
+            CustomerActivityAgentOrigin.activity_id == activity.id,
+        ).count() == 0
+        response_by_id = {item["id"]: item for item in response.json()["items"]}
+        assert response_by_id[first_message.id]["linked_follow_up_task_confirmations"] == []
+        assert response_by_id[second_message.id]["linked_follow_up_task_confirmations"] == []
     finally:
         db.close()
         engine.dispose()

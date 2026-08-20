@@ -12,23 +12,23 @@ from app.models.agent import (
     AgentToolCall,
     AgentToolCallStatus,
 )
-from app.models.agent_pending_interrupt_projection import (
-    AgentPendingInterruptDeliveryStatus,
-    AgentPendingInterruptProjection,
-    AgentPendingInterruptProjectionStatus,
-)
-from app.models.agent_pending_application_step import (
-    AgentPendingApplicationStep,
-    AgentPendingApplicationStepStatus,
+from app.models.agent_async_operation import (
+    AgentAsyncOperation,
+    AgentAsyncOperationEvent,
+    AgentAsyncOperationStatus,
 )
 from app.models.agent_confirmed_application_step import (
     AgentConfirmedApplicationStep,
     AgentConfirmedApplicationStepStatus,
 )
-from app.models.agent_async_operation import (
-    AgentAsyncOperation,
-    AgentAsyncOperationEvent,
-    AgentAsyncOperationStatus,
+from app.models.agent_pending_application_step import (
+    AgentPendingApplicationStep,
+    AgentPendingApplicationStepStatus,
+)
+from app.models.agent_pending_interrupt_projection import (
+    AgentPendingInterruptDeliveryStatus,
+    AgentPendingInterruptProjection,
+    AgentPendingInterruptProjectionStatus,
 )
 from app.models.ai_config import AIConfig
 from app.models.approval import Approval, ApprovalFlow, ApprovalNode, ApprovalRecord
@@ -36,6 +36,7 @@ from app.models.contract import Contract, ContractStatus, PaymentStatus
 from app.models.conversation_log import ConversationLog
 from app.models.customer import Contact, Customer, CustomerMember
 from app.models.customer_activity import CustomerActivity
+from app.models.customer_activity_agent_origin import CustomerActivityAgentOrigin
 from app.models.customer_activity_post_commit_job import (
     CustomerActivityPostCommitJob,
     CustomerActivityPostCommitJobStatus,
@@ -174,6 +175,7 @@ __all__ = [
     "ConversationLog",
     "Customer",
     "CustomerActivity",
+    "CustomerActivityAgentOrigin",
     "CustomerActivityPostCommitJob",
     "CustomerActivityPostCommitJobStatus",
     "CustomerContextAnswerTelemetry",
