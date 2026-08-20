@@ -78,8 +78,8 @@ export const AcquisitionSourceReorderRequestSchema = z.object({
 export type AcquisitionSourceReorderRequest = z.infer<typeof AcquisitionSourceReorderRequestSchema>
 
 export interface AcquisitionSourceNamedEntity {
-  source?: string | null
-  source_info?: Pick<AcquisitionSourceInfo, 'name'> | null
+  source?: string | null | undefined
+  source_info?: Pick<AcquisitionSourceInfo, 'name'> | null | undefined
 }
 
 export function getAcquisitionSourceDisplayName(

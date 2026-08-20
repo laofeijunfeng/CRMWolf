@@ -55,6 +55,21 @@ class AgentMessageCreate(BaseModel):
     payload_json: Optional[JsonDict] = Field(None, description="结构化消息载荷")
 
 
+class AgentLinkedFollowUpTaskConfirmationResponse(BaseModel):
+    """Current follow-up task state linked to a visible Agent assistant message."""
+
+    case_public_id: str = Field(..., description="关联确认Case对外ID")
+    task_public_id: str = Field(..., description="关联跟进待办对外ID")
+    task_title: str = Field(..., description="关联跟进待办标题")
+    customer_name: str | None = Field(None, description="客户名称")
+    due_at: datetime | None = Field(None, description="待办截止时间")
+    task_status: str = Field(..., description="待办当前状态")
+    confirmation_status: str = Field(..., description="确认Case当前状态")
+    resolved_action: str | None = Field(None, description="已处理动作")
+    resolved_at: datetime | None = Field(None, description="确认处理时间")
+    completed_at: datetime | None = Field(None, description="待办完成时间")
+
+
 class AgentMessageResponse(BaseModel):
     id: int = Field(..., description="主键")
     team_id: int = Field(..., description="团队ID")
@@ -64,6 +79,10 @@ class AgentMessageResponse(BaseModel):
     event_type: Optional[str] = Field(None, description="SSE或业务事件类型")
     content: Optional[str] = Field(None, description="消息正文")
     payload_json: Optional[JsonDict] = Field(None, description="结构化消息载荷")
+    linked_follow_up_task_confirmations: list[AgentLinkedFollowUpTaskConfirmationResponse] = Field(
+        default_factory=list,
+        description="精确关联到该消息的跟进待办确认卡片",
+    )
     created_time: datetime = Field(..., description="创建时间")
 
     class Config:

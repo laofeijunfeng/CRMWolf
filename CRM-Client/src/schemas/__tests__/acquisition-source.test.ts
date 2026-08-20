@@ -59,7 +59,7 @@ describe('acquisition source form schemas', () => {
   it('follows the current configured name and falls back to 未设置', () => {
     expect(getAcquisitionSourceDisplayName({
       source: '线上注册',
-      source_info: { public_id: 'acq_referral', name: '朋友介绍', is_active: true },
+      source_info: { name: '朋友介绍' },
     })).toBe('朋友介绍')
     expect(getAcquisitionSourceDisplayName({ source: null, source_info: null })).toBe('未设置')
   })

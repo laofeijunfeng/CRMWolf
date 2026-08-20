@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 from sqlalchemy import and_, false, or_
 from sqlalchemy.exc import IntegrityError
 
+from app.models.customer import Customer
 from app.models.sales_commitment import (
     FollowUpTask,
     FollowUpTaskConfirmationCase,
@@ -1685,6 +1686,98 @@ class FollowUpTaskConfirmationPromptDeliveryCRUD:
             db.commit()
             db.refresh(delivery)
         return delivery
+
+    def list_agent_message_cards(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        owner_id: str,
+        agent_session_id: int,
+        provider_message_ids: Iterable[str],
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Return current task projections for confirmation prompts shown in Agent messages.
+
+        ``provider_message_id`` is written only after the Web Agent assistant
+        message is persisted, so it is the durable message-to-case association.
+        The response intentionally reads the current case/task rows rather than
+        the original prompt payload snapshot: cards stay accurate after a task
+        was handled in another entry point.
+        """
+        message_ids = list(dict.fromkeys(provider_message_ids))
+        if not message_ids:
+            return {}
+
+        rows = (
+            db.query(
+                FollowUpTaskConfirmationPromptDelivery.provider_message_id,
+                FollowUpTaskConfirmationCase.public_id.label("case_public_id"),
+                FollowUpTaskConfirmationCase.status.label("confirmation_status"),
+                FollowUpTaskConfirmationCase.resolved_action,
+                FollowUpTaskConfirmationCase.resolved_at,
+                FollowUpTask.public_id.label("task_public_id"),
+                FollowUpTask.title.label("task_title"),
+                FollowUpTask.due_at,
+                FollowUpTask.status.label("task_status"),
+                FollowUpTask.completed_at,
+                Customer.account_name.label("customer_name"),
+            )
+            .join(
+                FollowUpTaskConfirmationCase,
+                and_(
+                    FollowUpTaskConfirmationCase.id == FollowUpTaskConfirmationPromptDelivery.case_id,
+                    FollowUpTaskConfirmationCase.team_id == FollowUpTaskConfirmationPromptDelivery.team_id,
+                ),
+            )
+            .join(
+                FollowUpTask,
+                and_(
+                    FollowUpTask.id == FollowUpTaskConfirmationCase.task_id,
+                    FollowUpTask.team_id == FollowUpTaskConfirmationCase.team_id,
+                ),
+            )
+            .outerjoin(
+                Customer,
+                and_(Customer.id == FollowUpTask.customer_id, Customer.team_id == FollowUpTask.team_id),
+            )
+            .filter(
+                FollowUpTaskConfirmationPromptDelivery.team_id == team_id,
+                FollowUpTaskConfirmationPromptDelivery.owner_id == owner_id,
+                FollowUpTaskConfirmationPromptDelivery.agent_session_id == agent_session_id,
+                FollowUpTaskConfirmationPromptDelivery.provider_message_id.in_(message_ids),
+            )
+            .order_by(
+                FollowUpTaskConfirmationPromptDelivery.created_time.asc(),
+                FollowUpTaskConfirmationPromptDelivery.id.asc(),
+            )
+            .all()
+        )
+
+        cards_by_provider_message_id: dict[str, list[dict[str, Any]]] = {}
+        seen_case_ids: set[tuple[str, str]] = set()
+        for row in rows:
+            provider_message_id = row.provider_message_id
+            if not provider_message_id:
+                continue
+            dedupe_key = (provider_message_id, row.case_public_id)
+            if dedupe_key in seen_case_ids:
+                continue
+            seen_case_ids.add(dedupe_key)
+            cards_by_provider_message_id.setdefault(provider_message_id, []).append(
+                {
+                    "case_public_id": row.case_public_id,
+                    "task_public_id": row.task_public_id,
+                    "task_title": row.task_title,
+                    "customer_name": row.customer_name,
+                    "due_at": row.due_at,
+                    "task_status": row.task_status,
+                    "confirmation_status": row.confirmation_status,
+                    "resolved_action": row.resolved_action,
+                    "resolved_at": row.resolved_at,
+                    "completed_at": row.completed_at,
+                }
+            )
+        return cards_by_provider_message_id
 
     def latest_for_owner_since(
         self,

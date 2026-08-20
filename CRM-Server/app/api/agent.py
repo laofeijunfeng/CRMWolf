@@ -12,11 +12,13 @@ from sqlalchemy.orm import Session
 from app.core.database import SessionLocal, get_db
 from app.core.deps import get_current_active_user, get_current_user_team, security
 from app.crud.agent import agent_message_crud, agent_session_crud, agent_workflow_action_crud
+from app.crud.sales_commitment import follow_up_task_confirmation_prompt_delivery_crud
 from app.models.user import User
 from app.schemas.agent import (
     AgentAsyncOperationResponse,
     AgentChatRequest,
     AgentCreateSessionRequest,
+    AgentLinkedFollowUpTaskConfirmationResponse,
     AgentMessageResponse,
     AgentRuntimeActionSummaryResponse,
     AgentRuntimeCheckpointStateResponse,
@@ -500,8 +502,24 @@ async def list_agent_messages(
         skip=skip,
         limit=page_size,
     )
+    message_cards_by_provider_id = follow_up_task_confirmation_prompt_delivery_crud.list_agent_message_cards(
+        db,
+        team_id=team_id,
+        owner_id=str(current_user.id),
+        agent_session_id=session_id,
+        provider_message_ids=[f"agent_message:{item.id}" for item in items],
+    )
+    response_items = []
+    for item in items:
+        response = AgentMessageResponse.model_validate(item)
+        response.linked_follow_up_task_confirmations = [
+            AgentLinkedFollowUpTaskConfirmationResponse.model_validate(card)
+            for card in message_cards_by_provider_id.get(f"agent_message:{item.id}", [])
+        ]
+        response_items.append(response)
+
     return PaginatedResponse[AgentMessageResponse](
-        items=items,
+        items=response_items,
         total=total,
         page=page,
         page_size=page_size,

@@ -378,6 +378,15 @@ watch(
   height: $wolf-input-height-v2;
 }
 
+@media (max-width: 767px) {
+  .filter-field-select,
+  .filter-op-select,
+  .filter-value-control,
+  .filter-empty-placeholder {
+    height: $wolf-input-height-mobile-v2;
+  }
+}
+
 .filter-actions {
   display: flex;
   align-items: center;

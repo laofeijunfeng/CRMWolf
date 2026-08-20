@@ -1,6 +1,7 @@
 """CRM AI Agent API tests."""
 import asyncio
 import json
+from datetime import datetime
 from types import SimpleNamespace
 
 from fastapi import FastAPI
@@ -51,7 +52,6 @@ from app.services.agent.schemas import (
     AgentFollowUpQualityResult,
     AgentPendingInterruptionDecision,
     AgentSemanticParseResult,
-    AgentTurnRelationDecision,
 )
 from app.services.agent.state import (
     AgentRootRuntimeSideEffects,
@@ -165,53 +165,6 @@ class FakePendingInterruptionParser:
         return AgentPendingInterruptionDecision.model_validate(self.decision)
 
 
-class FakeTurnRelationAndSemanticParser:
-    def __init__(self, *, relation, semantic_results):
-        self.relation = relation
-        self.semantic_results = semantic_results if isinstance(semantic_results, list) else [semantic_results]
-        self.relation_calls = []
-        self.parse_calls = []
-
-    async def assess_turn_relation(
-        self,
-        db,
-        *,
-        team_id,
-        user_message,
-        active_task=None,
-        suspended_tasks=None,
-        memory=None,
-        current_date=None,
-    ):
-        self.relation_calls.append({
-            "team_id": team_id,
-            "user_message": user_message,
-            "active_task": active_task,
-            "suspended_tasks": suspended_tasks,
-            "memory": memory,
-            "current_date": current_date,
-        })
-        relation = dict(self.relation)
-        if relation.get("target_task_id") == "__first_suspended__":
-            first_suspended = (suspended_tasks or [None])[0]
-            if isinstance(first_suspended, dict) and first_suspended.get("id") is not None:
-                relation["target_task_id"] = first_suspended["id"]
-            else:
-                relation["relation"] = "START_NEW_FLOW"
-                relation["target_task_id"] = None
-        return AgentTurnRelationDecision.model_validate(relation)
-
-    async def parse(self, db, *, team_id, user_message, memory=None, current_date=None):
-        self.parse_calls.append({
-            "team_id": team_id,
-            "user_message": user_message,
-            "memory": memory,
-            "current_date": current_date,
-        })
-        index = min(len(self.parse_calls) - 1, len(self.semantic_results) - 1)
-        return AgentSemanticParseResult.model_validate(self.semantic_results[index])
-
-
 class FakeQualityEvaluator:
     def __init__(self, results):
         self.results = results if isinstance(results, list) else [results]
@@ -296,6 +249,128 @@ def test_agent_session_and_stream_api(monkeypatch):
         assert observability["schema_version"] == "agent.turn_observability.v1"
         assert observability["retrieval"]["customer_context"]["called"] is True
     finally:
+        engine.dispose()
+
+
+def test_agent_messages_include_current_linked_follow_up_task_confirmation_card(monkeypatch):
+    client, engine = _build_client(monkeypatch)
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "待办确认消息"}).json()
+        customer = Customer(
+            team_id=1,
+            account_name="Apple",
+            city="上海",
+            creator_id="2",
+        )
+        db.add(customer)
+        db.flush()
+
+        task = FollowUpTask(
+            team_id=1,
+            customer_id=customer.id,
+            owner_id="2",
+            creator_id="2",
+            title="跟进 Apple 合同流程推进",
+            status="OPEN",
+            due_at=datetime(2026, 8, 18, 9, 0, 0),
+            due_at_text="8 月 18 日",
+            due_at_granularity="DATETIME",
+            due_at_timezone="Asia/Shanghai",
+            source_type="CUSTOMER_ACTIVITY",
+            source_key="activity:agent-message-confirmation",
+            confidence=1,
+            task_hash="agent-message-confirmation-task",
+        )
+        db.add(task)
+        db.flush()
+
+        confirmation_case = FollowUpTaskConfirmationCase(
+            team_id=1,
+            task_id=task.id,
+            customer_id=customer.id,
+            owner_id="2",
+            creator_id="2",
+            status="PENDING",
+            suggested_action="COMPLETE",
+            confirmation_hash="agent-message-confirmation-case",
+            question_text="关联待办是否已经完成?",
+        )
+        db.add(confirmation_case)
+        assistant_message = AgentMessage(
+            team_id=1,
+            user_id=2,
+            session_id=session["id"],
+            role=AgentMessageRole.ASSISTANT,
+            content="请确认关联待办。",
+        )
+        unrelated_message = AgentMessage(
+            team_id=1,
+            user_id=2,
+            session_id=session["id"],
+            role=AgentMessageRole.ASSISTANT,
+            content="没有关联确认。",
+        )
+        db.add_all([assistant_message, unrelated_message])
+        db.flush()
+        db.add(
+            FollowUpTaskConfirmationPromptDelivery(
+                team_id=1,
+                case_id=confirmation_case.id,
+                owner_id="2",
+                channel="web",
+                provider="web-agent",
+                agent_session_id=session["id"],
+                interaction_id="follow-up-confirmation-interaction",
+                prompt_key="agent-message-confirmation-prompt",
+                status="SENT",
+                provider_message_id=f"agent_message:{assistant_message.id}",
+                payload_json={"case_public_id": confirmation_case.public_id},
+            )
+        )
+        db.commit()
+
+        response = client.get(f"/v1/agent/sessions/{session['id']}/messages")
+        assert response.status_code == 200, response.text
+        items = response.json()["items"]
+        linked_message = next(item for item in items if item["id"] == assistant_message.id)
+        assert linked_message["linked_follow_up_task_confirmations"] == [
+            {
+                "case_public_id": confirmation_case.public_id,
+                "task_public_id": task.public_id,
+                "task_title": "跟进 Apple 合同流程推进",
+                "customer_name": "Apple",
+                "due_at": "2026-08-18T09:00:00",
+                "task_status": "OPEN",
+                "confirmation_status": "PENDING",
+                "resolved_action": None,
+                "resolved_at": None,
+                "completed_at": None,
+            }
+        ]
+        unrelated = next(item for item in items if item["id"] == unrelated_message.id)
+        assert unrelated["linked_follow_up_task_confirmations"] == []
+
+        task.status = "COMPLETED"
+        task.completed_at = datetime(2026, 8, 20, 10, 30, 0)
+        confirmation_case.status = "RESOLVED"
+        confirmation_case.resolved_action = "COMPLETE"
+        confirmation_case.resolved_at = datetime(2026, 8, 20, 10, 30, 0)
+        db.commit()
+
+        refreshed = client.get(f"/v1/agent/sessions/{session['id']}/messages")
+        assert refreshed.status_code == 200, refreshed.text
+        refreshed_linked_message = next(
+            item for item in refreshed.json()["items"] if item["id"] == assistant_message.id
+        )
+        refreshed_card = refreshed_linked_message["linked_follow_up_task_confirmations"][0]
+        assert refreshed_card["task_status"] == "COMPLETED"
+        assert refreshed_card["confirmation_status"] == "RESOLVED"
+        assert refreshed_card["resolved_action"] == "COMPLETE"
+        assert refreshed_card["completed_at"] == "2026-08-20T10:30:00"
+    finally:
+        db.close()
         engine.dispose()
 
 
@@ -3919,7 +3994,7 @@ def test_agent_stream_interrupts_pending_task_for_clear_new_customer_flow(monkey
         engine.dispose()
 
 
-def test_agent_stream_resumes_suspended_opportunity_draft_with_structured_relation(monkeypatch):
+def test_agent_stream_keeps_suspended_draft_when_starting_new_opportunity(monkeypatch):
     customer = {
         "id": 101,
         "account_name": "广州睿狐科技有限公司",
@@ -3950,39 +4025,7 @@ def test_agent_stream_resumes_suspended_opportunity_draft_with_structured_relati
             }
             yield {"event": "final", "content": "商机信息齐了。要创建商机吗？"}
 
-    fake_parser = FakeTurnRelationAndSemanticParser(
-        relation={
-            "relation": "RESUME_SUSPENDED_DRAFT",
-            "confidence": 0.93,
-            "target_task_id": "__first_suspended__",
-            "detected_customer_name": None,
-            "detected_intent": "CREATE_OPPORTUNITY",
-            "reason": "用户在修改最近暂停的商机草稿。",
-            "question": None,
-        },
-        semantic_results={
-            "intent": "CREATE_OPPORTUNITY",
-            "intent_confidence": 0.95,
-            "customer": {"name_text": "广州睿狐科技有限公司", "confidence": 0.95, "resolution_source": "MEMORY"},
-            "follow_up": {},
-            "payment": {},
-            "opportunity": {
-                "user_count": 20,
-                "purchase_type": "EXPANSION",
-            },
-            "contact": {},
-            "invoice_title": {},
-            "deployment_info": {},
-            "business_signals": [],
-            "requested_actions": [],
-            "missing_fields": [],
-            "need_clarification": False,
-            "clarification_question": None,
-            "evidence": ["改成增购 20 个"],
-        },
-    )
     monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraphService())
-    monkeypatch.setattr(agent_api, "agent_semantic_parser", fake_parser)
 
     client, engine = _build_client(monkeypatch)
     try:
@@ -4009,26 +4052,26 @@ def test_agent_stream_resumes_suspended_opportunity_draft_with_structured_relati
             headers={"Authorization": "Bearer test-token"},
         )
         assert third_response.status_code == 200, third_response.text
-        assert '"event": "turn_relation_classified"' in third_response.text
-        assert '"event": "suspended_task_resumed"' in third_response.text
         assert '"event": "confirmation_required"' in third_response.text
-        assert len(graph_calls) == 1
-        assert fake_parser.relation_calls[0]["suspended_tasks"][0]["state"]["customer"]["account_name"] == customer["account_name"]
+        assert len(graph_calls) == 2
 
         Session = sessionmaker(bind=engine)
         db = Session()
         try:
-            task = db.query(AgentTask).one()
-            assert task.status == AgentTaskStatus.WAITING_USER
-            assert task.state_json["action"] == "create_opportunity"
-            assert task.state_json["customer"]["account_name"] == customer["account_name"]
-            opportunity = task.state_json["payload"]["opportunity"]
+            tasks = db.query(AgentTask).order_by(AgentTask.id.asc()).all()
+            assert len(tasks) == 2
+            suspended_task, current_task = tasks
+            assert suspended_task.status == AgentTaskStatus.SUSPENDED
+            assert current_task.status == AgentTaskStatus.WAITING_USER
+            assert current_task.state_json["action"] == "create_opportunity"
+            assert current_task.state_json["customer"]["account_name"] == customer["account_name"]
+            opportunity = current_task.state_json["payload"]["opportunity"]
             assert opportunity["customer_id"] == customer["id"]
             assert opportunity["total_amount"] == 50000
-            assert opportunity["user_count"] == 20
+            assert opportunity["user_count"] == 10
             assert opportunity["license_type"] == "SUBSCRIPTION"
             assert opportunity["subscription_years"] == 1
-            assert opportunity["purchase_type"] == "EXPANSION"
+            assert opportunity["purchase_type"] == "NEW"
             assert opportunity["expected_closing_date"] == "2026-08-31"
         finally:
             db.close()

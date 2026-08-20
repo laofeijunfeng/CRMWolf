@@ -31,7 +31,7 @@ import {
   SelectField,
   TextareaField,
 } from '@/components/crmwolf'
-import { leadApi } from '@/api/lead'
+import { leadApi, type LeadCreate, type LeadUpdate } from '@/api/lead'
 import { leadSchema, type LeadForm } from '@/schemas/lead-form'
 import { useAcquisitionSourceOptions } from '@/composables/useAcquisitionSourceOptions'
 
@@ -119,23 +119,20 @@ const handleSubmit = async (values: GenericObject): Promise<void> => {
   submitting.value = true
   try {
     const formData = values as LeadForm
-    // Build API payload - remark field is optional and may not be in API types yet
-    const payload = {
+    const payload: LeadCreate = {
       lead_name: formData.lead_name,
       source_public_id: formData.source_public_id,
       city: formData.city,
       contact_name: formData.contact_name,
       contact_phone: formData.contact_phone,
-      company_scale: formData.company_scale ?? undefined
+      ...(formData.company_scale !== undefined ? { company_scale: formData.company_scale } : {})
     }
 
     if (props.mode === 'create') {
-      // Cast to include remark if present (backend may support it)
-      await leadApi.createLead({ ...payload, remark: formData.remark } as LeadForm)
+      await leadApi.createLead(payload)
       toast.success('线索创建成功')
     } else if (props.leadId !== undefined) {
-      // Cast to include remark if present (backend may support it)
-      await leadApi.updateLead(props.leadId, { ...payload, remark: formData.remark } as Partial<LeadForm>)
+      await leadApi.updateLead(props.leadId, payload satisfies LeadUpdate)
       toast.success('线索更新成功')
     }
 

@@ -84,8 +84,14 @@ function handleValueChange(value: unknown): void {
 @use '@/styles/variables-v2.scss' as *;
 
 .wolf-multi-select-trigger {
-  height: 32px;
+  height: $wolf-input-height-v2;
   min-width: 0;
+}
+
+@media (max-width: 767px) {
+  .wolf-multi-select-trigger {
+    height: $wolf-input-height-mobile-v2;
+  }
 }
 
 .wolf-multi-select-value {

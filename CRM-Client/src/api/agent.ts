@@ -126,12 +126,26 @@ export interface AgentSessionResponse {
   last_modified_time: string
 }
 
+export interface AgentLinkedFollowUpTaskConfirmation {
+  case_public_id: string
+  task_public_id: string
+  task_title: string
+  customer_name?: string | null
+  due_at?: string | null
+  task_status: string
+  confirmation_status: string
+  resolved_action?: string | null
+  resolved_at?: string | null
+  completed_at?: string | null
+}
+
 export interface AgentMessageResponse {
   id: number
   role: "user" | "assistant" | "system" | string
   event_type?: string | null
   content?: string | null
   payload_json?: Record<string, unknown> | null
+  linked_follow_up_task_confirmations?: AgentLinkedFollowUpTaskConfirmation[]
   created_time: string
 }
 

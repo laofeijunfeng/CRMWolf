@@ -120,6 +120,43 @@ describe("CRMAgentChat background operation placement", () => {
     wrapper.unmount()
   })
 
+  it("loads a background operation after the stream finishes committing it", async () => {
+    api.listMessages.mockResolvedValue(paginatedMessages([]))
+    api.listSessionOperations
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{
+        ...operation,
+        source_user_message_id: 20,
+        source_assistant_message_id: 21,
+      }])
+    api.chatStream.mockImplementation(async (_request, onEvent) => {
+      onEvent({ event: "session", session_id: 3, session_key: "session-3" })
+      onEvent({ event: "message", role: "user", message_id: 20, content: "本轮跟进" })
+      onEvent({ event: "message", role: "assistant", message_id: 21, content: "本轮已记录" })
+      onEvent({ event: "done" })
+    })
+
+    const wrapper = mount(CRMAgentChat, {
+      global: {
+        stubs: {
+          AgentInteractionDrawer: true,
+          MessageScroller: { template: "<div><slot /></div>" },
+        },
+      },
+    })
+    await flushPromises()
+
+    await wrapper.get("textarea").setValue("本轮跟进")
+    await wrapper.get("form").trigger("submit")
+    await flushPromises()
+
+    expect(api.listSessionOperations).toHaveBeenCalledTimes(3)
+    expect(wrapper.text()).toContain("后台任务")
+    expect(wrapper.text().indexOf("后台任务")).toBeGreaterThan(wrapper.text().indexOf("本轮已记录"))
+    wrapper.unmount()
+  })
+
   it("keeps a newly scheduled operation with its original turn after the user sends another message", async () => {
     api.listMessages.mockResolvedValue(paginatedMessages([]))
     api.listSessionOperations.mockResolvedValue([])

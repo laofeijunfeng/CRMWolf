@@ -98,6 +98,20 @@
         >
           <AgentAsyncOperationList :operations="operationsByMessageId.get(message.id) ?? []" />
         </section>
+
+        <section
+          v-if="message.role === 'assistant' && message.linkedFollowUpTaskConfirmations.length > 0"
+          class="agent-chat__follow-up-confirmations"
+          aria-label="关联待办确认"
+        >
+          <AgentFollowUpTaskConfirmationCard
+            v-for="confirmation in message.linkedFollowUpTaskConfirmations"
+            :key="confirmation.case_public_id"
+            :confirmation="confirmation"
+            :submitting="confirmationStore.resolvingCaseId !== null"
+            @confirm-complete="confirmFollowUpTaskCompletion"
+          />
+        </section>
       </template>
 
       <section v-if="unanchoredAsyncOperations.length > 0" class="agent-chat__operations" aria-label="未关联的后台任务状态">
@@ -119,7 +133,9 @@
         <InputGroupTextarea
           v-model="input"
           class="agent-chat__textarea"
-          rows="1"
+          :auto-resize="true"
+          :min-rows="3"
+          :max-rows="10"
           :disabled="isStreaming"
           placeholder="让我帮你记录客户活动、补客户资料，顺手看看要不要推进商机..."
           aria-label="输入 Agent 消息"
@@ -167,14 +183,18 @@ import {
   type AgentContentFormat,
   type AgentEventType,
   type AgentInteraction,
+  type AgentLinkedFollowUpTaskConfirmation,
   type AgentMessageResponse,
 } from "@/api/agent"
 import { loadLatestAgentMessages, resolveInitialAgentSession } from "@/components/agent/agentHistory"
 import AgentMessageBody from "@/components/agent/AgentMessageBody.vue"
 import AgentInteractionDrawer from "@/components/agent/AgentInteractionDrawer.vue"
 import AgentAsyncOperationList from "@/components/agent/AgentAsyncOperationList.vue"
+import AgentFollowUpTaskConfirmationCard from "@/components/agent/AgentFollowUpTaskConfirmationCard.vue"
 import { groupAgentAsyncOperationsByMessage } from "@/components/agent/agentAsyncOperations"
 import { useAgentAsyncOperations } from "@/composables/useAgentAsyncOperations"
+import { useFollowUpConfirmationStore } from "@/stores/followUpConfirmation"
+import { confirmDialog } from "@/utils/confirmDialog"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Bubble } from "@/components/ui/bubble"
 import { Button } from "@/components/ui/button"
@@ -188,6 +208,7 @@ interface ChatMessage {
   content: string
   contentFormat: AgentContentFormat
   steps: EventLog[]
+  linkedFollowUpTaskConfirmations: AgentLinkedFollowUpTaskConfirmation[]
   isStreaming?: boolean
   stepsExpanded?: boolean
 }
@@ -200,6 +221,7 @@ interface EventLog {
 }
 
 const userStore = useUserStore()
+const confirmationStore = useFollowUpConfirmationStore()
 const input = ref("")
 const isStreaming = ref(false)
 const sessionId = ref<number | undefined>(undefined)
@@ -209,6 +231,7 @@ const isLoadingHistory = ref(false)
 const activeAssistantId = ref<string | null>(null)
 const activeUserMessageId = ref<string | null>(null)
 const activeInteraction = ref<AgentInteraction | null>(null)
+const shouldRefreshFollowUpConfirmationsAfterStream = ref(false)
 const interactionDrawerHeight = ref(0)
 const messageScrollKey = ref(0)
 const {
@@ -235,7 +258,10 @@ const operationsByMessageId = computed(() => groupedAsyncOperations.value.byMess
 const unanchoredAsyncOperations = computed(() => groupedAsyncOperations.value.unanchored)
 const messageScrollCount = computed(() => (
   messages.value.length
-  + messages.value.reduce((total, message) => total + message.steps.length, 0)
+  + messages.value.reduce(
+    (total, message) => total + message.steps.length + message.linkedFollowUpTaskConfirmations.length,
+    0,
+  )
   + asyncOperations.value.length
 ))
 const messageContentStyle = computed(() => ({
@@ -245,6 +271,12 @@ const messageContentStyle = computed(() => ({
 }))
 
 const nextId = (prefix: string): string => `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`
+
+const FOLLOW_UP_TASK_CONFIRMATION_ACTION = "resolve_follow_up_task_confirmation_case"
+
+const isFollowUpTaskConfirmationInteraction = (interaction: AgentInteraction | undefined | null): boolean => (
+  interaction?.business_action === FOLLOW_UP_TASK_CONFIRMATION_ACTION
+)
 
 const isWaitingInteraction = (interaction: AgentInteraction | undefined | null): interaction is AgentInteraction => {
   if (interaction === undefined || interaction === null) return false
@@ -280,7 +312,14 @@ const addAssistantMessage = (
   if (content.length === 0) return
   const lastMessage = messages.value[messages.value.length - 1]
   if (lastMessage?.role === "assistant" && lastMessage.content === content) return
-  messages.value.push({ id: String(id ?? nextId("assistant")), role: "assistant", content, contentFormat, steps: [] })
+  messages.value.push({
+    id: String(id ?? nextId("assistant")),
+    role: "assistant",
+    content,
+    contentFormat,
+    steps: [],
+    linkedFollowUpTaskConfirmations: [],
+  })
 }
 
 const activeAssistantMessage = (): ChatMessage | null => {
@@ -297,6 +336,7 @@ const startAssistantDraft = (): void => {
     content: "正在理解你的 CRM 操作意图...",
     contentFormat: "text",
     steps: [],
+    linkedFollowUpTaskConfirmations: [],
     isStreaming: true,
   })
   activeAssistantId.value = id
@@ -357,6 +397,9 @@ const toChatMessage = (message: AgentMessageResponse): ChatMessage | null => {
     steps: role === "assistant"
       ? payloadTraceEvents(message.payload_json).map(traceEventToStep).filter((step): step is EventLog => step !== null)
       : [],
+    linkedFollowUpTaskConfirmations: role === "assistant"
+      ? message.linked_follow_up_task_confirmations ?? []
+      : [],
   }
 }
 
@@ -374,7 +417,9 @@ const restoreInteractionFromMessages = (loadedMessages: ChatMessage[]): void => 
     if (message.role !== "assistant") continue
     for (const step of message.steps) {
       if (step.interaction !== undefined) {
-        restoredInteraction = isWaitingInteraction(step.interaction) ? step.interaction : null
+        restoredInteraction = isFollowUpTaskConfirmationInteraction(step.interaction)
+          ? null
+          : isWaitingInteraction(step.interaction) ? step.interaction : null
       }
       if (isTerminalEvent({ event: step.kind })) {
         restoredInteraction = null
@@ -759,11 +804,43 @@ const handleSSEEvent = (event: AgentChatSSEEvent): void => {
   const text = eventToLogText(event)
   if (text !== null && text.length > 0) addEventLog(text, event.event)
   if (event.interaction !== undefined) {
-    setActiveInteraction(isWaitingInteraction(event.interaction) ? event.interaction : null)
+    const isFollowUpConfirmation = isFollowUpTaskConfirmationInteraction(event.interaction)
+    if (isFollowUpConfirmation) shouldRefreshFollowUpConfirmationsAfterStream.value = true
+    setActiveInteraction(
+      isFollowUpConfirmation
+        ? null
+        : isWaitingInteraction(event.interaction) ? event.interaction : null,
+    )
     return
   }
   if (isTerminalEvent(event)) {
     setActiveInteraction(null)
+  }
+}
+
+const confirmFollowUpTaskCompletion = async (
+  confirmation: AgentLinkedFollowUpTaskConfirmation,
+): Promise<void> => {
+  if (confirmationStore.resolvingCaseId !== null) return
+
+  const confirmed = await confirmDialog(
+    "确认已完成该关联待办？完成后不能在此消息中撤销。",
+    "确认完成",
+    { confirmText: "确认完成" },
+  )
+  if (!confirmed) return
+
+  try {
+    const response = await confirmationStore.resolveCase(confirmation.case_public_id, "已完成")
+    if (!response.decision.resolved) {
+      toast.error("关联待办未能完成，请稍后重试。")
+      return
+    }
+    if (sessionId.value !== undefined) await loadSessionMessages(sessionId.value)
+    toast.success("关联待办已完成")
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "确认关联待办失败"
+    toast.error(message)
   }
 }
 
@@ -777,11 +854,19 @@ const sendMessageContent = async (content: string, interactionMetadata?: Record<
   }
 
   const userMessageId = nextId("user")
-  messages.value.push({ id: userMessageId, role: "user", content, contentFormat: "text", steps: [] })
+  messages.value.push({
+    id: userMessageId,
+    role: "user",
+    content,
+    contentFormat: "text",
+    steps: [],
+    linkedFollowUpTaskConfirmations: [],
+  })
   activeUserMessageId.value = userMessageId
   startAssistantDraft()
   input.value = ""
   setActiveInteraction(null)
+  shouldRefreshFollowUpConfirmationsAfterStream.value = false
   isStreaming.value = true
 
   try {
@@ -797,6 +882,18 @@ const sendMessageContent = async (content: string, interactionMetadata?: Record<
       handleSSEEvent,
       token
     )
+    const completedSessionId = sessionId.value
+    if (completedSessionId !== undefined) {
+      try {
+        if (shouldRefreshFollowUpConfirmationsAfterStream.value) {
+          await loadSessionMessages(completedSessionId)
+        } else {
+          await loadSessionOperations(completedSessionId)
+        }
+      } catch {
+        // The streamed response remains usable; a later session refresh restores any delayed artifacts.
+      }
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Agent 请求失败"
     addEventLog(message, "error")
@@ -1087,8 +1184,7 @@ onBeforeUnmount(() => {
 
 .agent-chat__textarea {
   min-height: 72px;
-  max-height: 160px;
-  overflow-y: auto;
+  overflow-y: hidden;
   padding-right: 56px;
   padding-bottom: 14px;
 }
@@ -1115,4 +1211,9 @@ onBeforeUnmount(() => {
   }
 
 }
+.agent-chat__follow-up-confirmations {
+  margin: 8px 0 0 44px;
+  max-width: min(760px, calc(100% - 44px));
+}
+
 </style>

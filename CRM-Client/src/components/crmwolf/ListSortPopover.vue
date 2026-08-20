@@ -73,6 +73,10 @@ function getDirectionOptions(fieldKey: string): { value: ListSortDirection, labe
   return field ? directionOptionsByType[field.type] : []
 }
 
+function getDirectionLabel(fieldKey: string, direction: ListSortDirection): string {
+  return getDirectionOptions(fieldKey).find((option) => option.value === direction)?.label ?? '排序'
+}
+
 function getFirstUnusedField(): ListSortField | undefined {
   return props.fields.find((field) => !usedLocalFields.value.has(field.key)) ?? firstField.value
 }
@@ -214,7 +218,7 @@ watch(
 
             <Select v-model="sort.direction">
               <SelectTrigger class="sort-direction-select">
-                <SelectValue placeholder="排序" />
+                <span>{{ getDirectionLabel(sort.field, sort.direction) }}</span>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem
