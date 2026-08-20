@@ -6,6 +6,9 @@ const apiMocks = vi.hoisted(() => ({
   getPendingCount: vi.fn(),
   resolve: vi.fn(),
 }))
+const logger = vi.hoisted(() => ({
+  warn: vi.fn(),
+}))
 
 vi.mock('@/api/followUpTask', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/api/followUpTask')>()
@@ -14,6 +17,7 @@ vi.mock('@/api/followUpTask', async (importOriginal) => {
     followUpConfirmationApi: apiMocks,
   }
 })
+vi.mock('@/utils/logger', () => ({ logger }))
 
 import { useFollowUpConfirmationStore } from '@/stores/followUpConfirmation'
 

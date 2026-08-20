@@ -186,6 +186,7 @@ import {
   type AgentLinkedFollowUpTaskConfirmation,
   type AgentMessageResponse,
 } from "@/api/agent"
+import type { FollowUpConfirmationResolveResponse } from "@/api/followUpTask"
 import { loadLatestAgentMessages, resolveInitialAgentSession } from "@/components/agent/agentHistory"
 import AgentMessageBody from "@/components/agent/AgentMessageBody.vue"
 import AgentInteractionDrawer from "@/components/agent/AgentInteractionDrawer.vue"
@@ -195,6 +196,7 @@ import { groupAgentAsyncOperationsByMessage } from "@/components/agent/agentAsyn
 import { useAgentAsyncOperations } from "@/composables/useAgentAsyncOperations"
 import { useFollowUpConfirmationStore } from "@/stores/followUpConfirmation"
 import { confirmDialog } from "@/utils/confirmDialog"
+import { logger } from "@/utils/logger"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Bubble } from "@/components/ui/bubble"
 import { Button } from "@/components/ui/button"
@@ -233,6 +235,7 @@ const activeUserMessageId = ref<string | null>(null)
 const activeInteraction = ref<AgentInteraction | null>(null)
 const shouldRefreshFollowUpConfirmationsAfterStream = ref(false)
 const interactionDrawerHeight = ref(0)
+const locallyResolvedFollowUpConfirmations = new Map<string, AgentLinkedFollowUpTaskConfirmation>()
 const messageScrollKey = ref(0)
 const {
   operations: asyncOperations,
@@ -414,6 +417,28 @@ const toChatMessage = (message: AgentMessageResponse): ChatMessage | null => {
   }
 }
 
+const mergeLocallyResolvedFollowUpConfirmations = (
+  loadedMessages: ChatMessage[],
+): ChatMessage[] => loadedMessages.map((message) => {
+  if (message.linkedFollowUpTaskConfirmations.length === 0) return message
+
+  let changed = false
+  const confirmations = message.linkedFollowUpTaskConfirmations.map((confirmation) => {
+    const locallyResolved = locallyResolvedFollowUpConfirmations.get(confirmation.case_public_id)
+    if (locallyResolved === undefined) return confirmation
+
+    if (confirmation.confirmation_status !== "PENDING" || confirmation.task_status !== "OPEN") {
+      locallyResolvedFollowUpConfirmations.delete(confirmation.case_public_id)
+      return confirmation
+    }
+
+    changed = true
+    return locallyResolved
+  })
+
+  return changed ? { ...message, linkedFollowUpTaskConfirmations: confirmations } : message
+})
+
 const latestStep = (message: ChatMessage): EventLog | undefined => message.steps[message.steps.length - 1]
 
 const setActiveInteraction = (interaction: AgentInteraction | null): void => {
@@ -442,9 +467,11 @@ const restoreInteractionFromMessages = (loadedMessages: ChatMessage[]): void => 
 }
 
 const loadSessionMessages = async (targetSessionId: number): Promise<boolean> => {
-  const loadedMessages = (await loadLatestAgentMessages(agentApi.listMessages, targetSessionId))
-    .map(toChatMessage)
-    .filter((message): message is ChatMessage => message !== null)
+  const loadedMessages = mergeLocallyResolvedFollowUpConfirmations(
+    (await loadLatestAgentMessages(agentApi.listMessages, targetSessionId))
+      .map(toChatMessage)
+      .filter((message): message is ChatMessage => message !== null),
+  )
 
   messages.value = loadedMessages
   activeAssistantId.value = null
@@ -829,6 +856,56 @@ const handleSSEEvent = (event: AgentChatSSEEvent): void => {
   }
 }
 
+const applyResolvedFollowUpTaskConfirmation = (
+  confirmation: AgentLinkedFollowUpTaskConfirmation,
+  response: FollowUpConfirmationResolveResponse,
+): void => {
+  const resolvedCase = response.case
+  const executionResult = response.application?.execution_results?.find((result) => (
+    result.task_public_id === confirmation.task_public_id
+  ))
+  const resolvedAction = resolvedCase?.resolved_action
+    ?? response.application?.action
+    ?? response.decision.action
+    ?? "COMPLETE"
+  const taskStatus = resolvedCase?.task?.status
+    ?? executionResult?.new_status
+    ?? (resolvedAction === "COMPLETE" ? "COMPLETED" : confirmation.task_status)
+  const resolvedAt = resolvedCase?.applied_at ?? new Date().toISOString()
+  const locallyResolved: AgentLinkedFollowUpTaskConfirmation = {
+    ...confirmation,
+    task_public_id: resolvedCase?.task?.public_id ?? confirmation.task_public_id,
+    task_title: resolvedCase?.task?.title ?? confirmation.task_title,
+    due_at: resolvedCase?.task?.due_at ?? confirmation.due_at ?? null,
+    task_status: taskStatus,
+    confirmation_status: resolvedCase?.status ?? "RESOLVED",
+    resolved_action: resolvedAction,
+    resolved_at: resolvedAt,
+    completed_at: taskStatus === "COMPLETED" ? resolvedAt : confirmation.completed_at ?? null,
+  }
+
+  locallyResolvedFollowUpConfirmations.set(confirmation.case_public_id, locallyResolved)
+  messages.value = messages.value.map((message) => ({
+    ...message,
+    linkedFollowUpTaskConfirmations: message.linkedFollowUpTaskConfirmations.map((item) => (
+      item.case_public_id === confirmation.case_public_id ? locallyResolved : item
+    )),
+  }))
+}
+
+const refreshAgentMessagesAfterFollowUpConfirmation = (
+  targetSessionId: number,
+  casePublicId: string,
+): void => {
+  void loadSessionMessages(targetSessionId).catch((error: unknown) => {
+    logger.warn('[CRMAgentChat]', 'followUpConfirmation:messageRefreshFailed', {
+      casePublicId,
+      sessionId: targetSessionId,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    })
+  })
+}
+
 const confirmFollowUpTaskCompletion = async (
   confirmation: AgentLinkedFollowUpTaskConfirmation,
 ): Promise<void> => {
@@ -847,10 +924,23 @@ const confirmFollowUpTaskCompletion = async (
       toast.error("关联待办未能完成，请稍后重试。")
       return
     }
-    if (sessionId.value !== undefined) await loadSessionMessages(sessionId.value)
+
+    applyResolvedFollowUpTaskConfirmation(confirmation, response)
+    logger.info('[CRMAgentChat]', 'followUpConfirmation:resolved', {
+      casePublicId: confirmation.case_public_id,
+      sessionId: sessionId.value,
+    })
     toast.success("关联待办已完成")
+
+    if (sessionId.value !== undefined) {
+      refreshAgentMessagesAfterFollowUpConfirmation(sessionId.value, confirmation.case_public_id)
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "确认关联待办失败"
+    logger.error('[CRMAgentChat]', 'followUpConfirmation:resolveFailed', {
+      casePublicId: confirmation.case_public_id,
+      error,
+    })
     toast.error(message)
   }
 }

@@ -25,6 +25,11 @@ const followUpConfirmationApi = vi.hoisted(() => ({
   resolve: vi.fn(),
 }))
 const confirmDialog = vi.hoisted(() => vi.fn<() => Promise<boolean>>())
+const logger = vi.hoisted(() => ({
+  error: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+}))
 
 vi.mock("@/api/agent", async importOriginal => ({
   ...await importOriginal<typeof import("@/api/agent")>(),
@@ -35,6 +40,7 @@ vi.mock("@/api/followUpTask", async importOriginal => ({
   followUpConfirmationApi,
 }))
 vi.mock("@/utils/confirmDialog", () => ({ confirmDialog }))
+vi.mock("@/utils/logger", () => ({ logger }))
 
 import CRMAgentChat from "@/components/agent/CRMAgentChat.vue"
 import { useUserStore } from "@/stores/user"
@@ -139,5 +145,77 @@ describe("CRMAgentChat follow-up task confirmation", () => {
     expect(followUpConfirmationApi.resolve).toHaveBeenCalledWith("fuc_apple", { reply_text: "已完成" })
     expect(wrapper.text()).toContain("已完成")
     expect(wrapper.get('[role="checkbox"]').attributes("disabled")).toBeDefined()
+  })
+
+  it("keeps the card completed and blocks repeat submission when the Agent message refresh fails", async () => {
+    agentApi.listMessages.mockReset()
+      .mockResolvedValueOnce(paginated([pendingMessage()]))
+      .mockRejectedValueOnce(new Error("Agent 会话刷新失败"))
+
+    const wrapper = mount(CRMAgentChat, {
+      global: {
+        stubs: {
+          MessageScroller: { template: "<div><slot /></div>" },
+          AgentInteractionDrawer: { template: '<div data-testid="interaction-drawer" />' },
+        },
+      },
+    })
+    await flushPromises()
+
+    await wrapper.get('[role="checkbox"]').trigger("click")
+    await flushPromises()
+
+    expect(wrapper.text()).toContain("已完成")
+    expect(wrapper.get('[role="checkbox"]').attributes("disabled")).toBeDefined()
+
+    await wrapper.get('[role="checkbox"]').trigger("click")
+    await flushPromises()
+    expect(followUpConfirmationApi.resolve).toHaveBeenCalledOnce()
+    wrapper.unmount()
+  })
+
+  it("locks the card without waiting for the auxiliary pending-count refresh", async () => {
+    followUpConfirmationApi.getPendingCount.mockImplementation(() => new Promise<number>(() => {}))
+
+    const wrapper = mount(CRMAgentChat, {
+      global: {
+        stubs: {
+          MessageScroller: { template: "<div><slot /></div>" },
+          AgentInteractionDrawer: { template: '<div data-testid="interaction-drawer" />' },
+        },
+      },
+    })
+    await flushPromises()
+
+    await wrapper.get('[role="checkbox"]').trigger("click")
+    await flushPromises()
+
+    expect(followUpConfirmationApi.resolve).toHaveBeenCalledOnce()
+    expect(wrapper.text()).toContain("已完成")
+    expect(wrapper.get('[role="checkbox"]').attributes("disabled")).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it("does not regress the completed card when the first Agent message refresh is stale", async () => {
+    agentApi.listMessages.mockReset()
+      .mockResolvedValueOnce(paginated([pendingMessage()]))
+      .mockResolvedValueOnce(paginated([pendingMessage()]))
+
+    const wrapper = mount(CRMAgentChat, {
+      global: {
+        stubs: {
+          MessageScroller: { template: "<div><slot /></div>" },
+          AgentInteractionDrawer: { template: '<div data-testid="interaction-drawer" />' },
+        },
+      },
+    })
+    await flushPromises()
+
+    await wrapper.get('[role="checkbox"]').trigger("click")
+    await flushPromises()
+
+    expect(wrapper.text()).toContain("已完成")
+    expect(wrapper.get('[role="checkbox"]').attributes("disabled")).toBeDefined()
+    wrapper.unmount()
   })
 })

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { logger } from '@/utils/logger'
 import {
   followUpConfirmationApi,
   type FollowUpConfirmationResolveResponse
@@ -15,6 +16,15 @@ export const useFollowUpConfirmationStore = defineStore('followUpConfirmation', 
     pendingCount.value = await followUpConfirmationApi.getPendingCount()
   }
 
+  const refreshPendingCountAfterResolve = (): void => {
+    void fetchPendingCount().catch((error: unknown) => {
+      postResolveRefreshError.value = '确认已处理，但待确认数量刷新失败，请稍后重试。'
+      logger.warn('[FollowUpConfirmationStore]', 'pendingCountRefresh:failedAfterResolve', {
+        errorMessage: error instanceof Error ? error.message : String(error),
+      })
+    })
+  }
+
   const resolveCase = async (caseId: string, replyText: string): Promise<FollowUpConfirmationResolveResponse> => {
     resolvingCaseId.value = caseId
     postResolveRefreshError.value = null
@@ -22,11 +32,7 @@ export const useFollowUpConfirmationStore = defineStore('followUpConfirmation', 
       const response = await followUpConfirmationApi.resolve(caseId, { reply_text: replyText })
       if (response.decision.resolved) {
         pendingCount.value = Math.max(0, pendingCount.value - 1)
-      }
-      try {
-        await fetchPendingCount()
-      } catch {
-        postResolveRefreshError.value = '确认已处理，但待确认数量刷新失败，请稍后重试。'
+        refreshPendingCountAfterResolve()
       }
       return response
     } finally {
