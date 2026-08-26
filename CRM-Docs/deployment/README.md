@@ -120,7 +120,7 @@ docker exec crm-backend python -c "from app.core.database import SessionLocal; f
 
 ## CRM Agent 架构迁移
 
-Root Orchestrator / Workflow Agent / Query Agent 单版本切换必须先执行 [CRM Agent 单版本架构切换门禁](agent-architecture-migration.md)。`deploy.sh` 不会自动执行历史消息写入或 destructive checkpoint cutover；两项操作必须在停流、固定 `--as-of` inventory、数据库备份与独立恢复演练全部通过后，由明确授权的维护窗口单独执行。证据不得提交到 Git。
+Root Orchestrator / Workflow Agent / Query Agent 单版本切换必须先执行 [CRM Agent 单版本架构切换门禁](agent-architecture-migration.md)。`deploy.sh` 不会自动执行历史消息写入或 destructive checkpoint cutover；两项操作必须在停流、固定 `--as-of` inventory、数据库备份与独立恢复演练全部通过后，由明确授权的维护窗口单独执行。若已经发生“schema 提前升级且无升级前备份”的事故，只能按 `agent-architecture-migration.md` 的「强制 schema 升级后的前向恢复」执行带五项显式确认（包括已停止所有写入方）的恢复工具；不得把它用于普通发布。证据不得提交到 Git。
 
 ## 文件说明
 

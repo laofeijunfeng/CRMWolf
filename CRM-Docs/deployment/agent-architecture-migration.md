@@ -11,13 +11,15 @@ CRM-Docs/requirements/2026-08-21-crm-agent-query-architecture-trd.md
 
 ## 1. 工具与边界
 
-当前只保留三项一次性数据工具：
+常规单版本切换只使用三项一次性数据工具：
 
 | 工具 | 作用 | 是否写库 |
 |---|---|---|
 | `scripts/inventory_agent_migration_data.py` | 生成消息与 checkpoint 的无业务内容盘点报告 | 否 |
 | `scripts/migrate_agent_messages.py` | 将历史消息收敛到唯一 Agent UI message schema | 是，分批提交 |
 | `scripts/cutover_agent_checkpoints.py` | 在一个事务中校验所有权、删除静默旧 Agent checkpoint 并写 journal | 是，单事务 |
+
+另有**事故恢复专用**工具 `scripts/recover_agent_runtime_after_forced_schema_upgrade.py`。它不是常规门禁的替代方案；只在新 schema 已被误提前升级、旧应用无法再启动、没有可恢复的升级前数据库备份，且变更负责人已明确接受旧 Agent runtime 与历史消息丢失时使用。它必须同时带 `--execute`、`--accept-legacy-agent-runtime-loss`、`--accept-agent-message-history-loss` 与 `--reset-terminal-customer-intelligence-checkpoints` 四个确认参数。
 
 旧 `checkpoint_migration.py`、`migrate_agent_checkpoints.py` 及其多阶段迁移合同已经删除，不得恢复、转发或重新包装。
 
@@ -67,6 +69,31 @@ Customer Intelligence 的 checkpoint/blob/write 还必须满足：根 namespace�
 | checkpoint cutover | 报告路径、状态和 evidence SHA |
 
 证据只能保存在服务器受限目录或发布工单附件中，不提交到 Git。
+
+## 3.1 强制 schema 升级后的前向恢复（事故专用）
+
+若违反常规顺序，先升级数据库再完成 inventory/message migration/cutover，**不得**尝试启动旧版本后端或伪造 inventory 成功。优先从升级前备份恢复；没有这种备份时，唯一允许的前向恢复路径是：
+
+1. 停止前后端写入并创建、校验升级后紧急备份；在独立临时库完成恢复演练。
+2. 在克隆库重放 message migration，记录不可收敛原因；若不能无损收敛，取得明确的 Agent message history 丢失授权。
+3. 确认前后端、worker、定时任务和任何其他数据库写入方均已停止后，用新版本后端执行事故恢复工具，并传入 `--offline-confirmed`。生产 MySQL 上工具会在盘点前对全部 `crm_*` 表取得 `WRITE` 锁，避免盘点和删除之间出现新的 target/unknown runtime 或新格式消息；不能取得锁即失败，不能绕过。它只会删除已分类的 legacy Agent checkpoint、所有 Customer Intelligence run 均为终态时的 Customer Intelligence checkpoint，以及完全未迁移的 Agent message history；它不会删除 Customer Intelligence run 业务记录、相邻 workflow checkpoint、target runtime 或 unknown runtime。遇到 target/unknown/部分迁移消息/非终态 Customer Intelligence run/被其他表引用的 Agent message 必须失败。
+4. 保存恢复工具的 JSON evidence 和 SHA-256；然后再次运行标准 checkpoint cutover，让标准 journal 验证最终空 legacy post-state。
+5. 仅在新版本健康检查与关键业务验收后清理旧应用镜像。
+
+示例（只在已获明确数据丢失授权的维护窗口中执行）：
+
+```bash
+cd CRM-Server
+PYTHONPATH=. .venv/bin/python scripts/recover_agent_runtime_after_forced_schema_upgrade.py \
+  --output /absolute/path/agent-forced-schema-recovery.json \
+  --execute \
+  --offline-confirmed \
+  --accept-legacy-agent-runtime-loss \
+  --accept-agent-message-history-loss \
+  --reset-terminal-customer-intelligence-checkpoints
+```
+
+该命令通过独立 `agent-forced-schema-recovery-v1` journal 防止被误当作常规 cutover。完成证据会在同一数据库事务提交前先写入临时文件，提交后重新核验 journal 与 post-state 再原子发布；证据目录和文件权限分别为 `0700`、`0600`。恢复报告和备份只保存到服务器受限 evidence 目录，不提交到 Git。
 
 ## 4. 只读 Inventory
 
