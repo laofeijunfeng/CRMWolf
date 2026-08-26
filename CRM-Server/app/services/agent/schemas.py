@@ -76,9 +76,20 @@ AgentTemporalUnit = Literal["day", "week", "month", "year"]
 class AgentCustomerEntity(BaseModel):
     name_text: Optional[str] = Field(None, description="用户原文中的客户名称或简称")
     confidence: float = Field(0.0, ge=0.0, le=1.0, description="客户名称识别置信度")
-    resolution_source: Literal["EXPLICIT", "MEMORY", "NONE"] = Field(
-        "NONE", description="客户来源：用户明示、会话记忆或无"
+    resolution_source: Literal["EXPLICIT", "NONE"] = Field(
+        "NONE", description="客户来源：本轮用户明示或无"
     )
+
+
+class AgentInvoiceTitleEntity(BaseModel):
+    title_type: Optional[Literal["COMPANY", "PERSONAL"]] = Field(None, description="发票抬头类型")
+    title: Optional[str] = Field(None, description="开票抬头")
+    taxpayer_id: Optional[str] = Field(None, description="纳税人识别号")
+    bank_name: Optional[str] = Field(None, description="开户行")
+    bank_account: Optional[str] = Field(None, description="银行账号")
+    address: Optional[str] = Field(None, description="开票地址")
+    phone: Optional[str] = Field(None, description="开票电话")
+    set_default: bool = Field(False, description="是否设为默认发票抬头")
 
 
 class AgentFollowUpEntity(BaseModel):
@@ -228,14 +239,11 @@ class AgentSemanticParseResult(BaseModel):
         default_factory=AgentOpportunityStageTransitionEntity
     )
     contact: Dict[str, object] = Field(default_factory=dict)
-    invoice_title: Dict[str, object] = Field(default_factory=dict)
+    invoice_title: AgentInvoiceTitleEntity = Field(default_factory=AgentInvoiceTitleEntity)
     deployment_info: Dict[str, object] = Field(default_factory=dict)
     customer_member: Dict[str, object] = Field(default_factory=dict)
     business_signals: List[AgentBusinessSignal] = Field(default_factory=list)
     requested_actions: List[AgentRequestedAction] = Field(default_factory=list)
-    missing_fields: List[str] = Field(default_factory=list)
-    need_clarification: bool = Field(False)
-    clarification_question: Optional[str] = Field(None)
     evidence: List[str] = Field(default_factory=list, description="用于解释判断的原文依据")
 
 

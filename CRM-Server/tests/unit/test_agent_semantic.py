@@ -7,8 +7,8 @@ from app.services.agent.prompts import (
     build_semantic_messages,
     render_semantic_system_prompt,
 )
-from app.services.agent.semantic import AgentSemanticParser, AgentSemanticParserError
 from app.services.agent.schemas import AgentSemanticParseResult
+from app.services.agent.semantic import AgentSemanticParser, AgentSemanticParserError
 
 
 def test_semantic_prompt_declares_stage_transition_as_semantic_only():
@@ -27,9 +27,31 @@ def test_semantic_prompt_contains_business_and_boundary_rules():
     assert "围绕客户活动" in messages[0]["content"]
     assert "业务动作只能由后续 tool 调用现有 CRM API 完成" in messages[0]["content"]
     assert "禁止输出 Markdown" in messages[0]["content"]
-    assert "intent_confidence 低于 0.75" in CRM_AGENT_SEMANTIC_SYSTEM_PROMPT
+    assert "intent_confidence 只表示意图识别把握" in CRM_AGENT_SEMANTIC_SYSTEM_PROMPT
     assert "next_follow_time_iso" in CRM_AGENT_SEMANTIC_SYSTEM_PROMPT
     assert "【用户输入】" in messages[1]["content"]
+
+
+def test_semantic_contract_only_extracts_facts_and_does_not_decide_clarification():
+    properties = AgentSemanticParseResult.model_json_schema()["properties"]
+
+    assert "missing_fields" not in properties
+    assert "need_clarification" not in properties
+    assert "clarification_question" not in properties
+    assert "缺失字段、实体绑定和冲突由后续确定性规划器判断" in CRM_AGENT_SEMANTIC_SYSTEM_PROMPT
+
+
+def test_semantic_contract_uses_typed_action_frames_and_no_model_memory_source():
+    schema = AgentSemanticParseResult.model_json_schema()
+
+    assert schema["properties"]["invoice_title"] == {
+        "$ref": "#/$defs/AgentInvoiceTitleEntity"
+    }
+    customer_source = schema["$defs"]["AgentCustomerEntity"]["properties"][
+        "resolution_source"
+    ]
+    assert customer_source["enum"] == ["EXPLICIT", "NONE"]
+    assert "MEMORY" not in CRM_AGENT_SEMANTIC_SYSTEM_PROMPT
 
 
 @pytest.mark.asyncio
@@ -53,9 +75,6 @@ async def test_semantic_parser_uses_langchain_structured_output_path():
                         "deployment_info": {},
                         "business_signals": [],
                         "requested_actions": [],
-                        "missing_fields": [],
-                        "need_clarification": False,
-                        "clarification_question": None,
                         "evidence": ["客户还在立项评估阶段"],
                     }
                 ),
@@ -132,9 +151,6 @@ async def test_semantic_parser_uses_single_structured_path_and_disables_qwen_thi
                         "deployment_info": {},
                         "business_signals": [],
                         "requested_actions": [],
-                        "missing_fields": [],
-                        "need_clarification": False,
-                        "clarification_question": None,
                         "evidence": ["客户还在立项评估阶段"],
                     }
                 ),

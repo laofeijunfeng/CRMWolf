@@ -260,6 +260,46 @@ Root 不使用 `create_agent` 自由选择“调用哪个 Agent”，也不把 Q
 
 Root 可以使用一次 structured model classification 处理自然语言语义，但模型输出必须经过确定性规则校验，且不能直接执行工具或写入。
 
+### 3.4 Workflow 实体绑定与 Grounding
+
+Workflow 不得要求模型把同一个业务事实重复填写到多个 JSON 字段，也不得由每个动作各自判断“是否缺客户”。所有需要现有客户的写操作统一经过 Customer Binding：
+
+```mermaid
+flowchart LR
+  INPUT[用户输入] --> FRAME[Structured Action Frame]
+  PAGE[受信任页面 EntityRef] --> BIND[Customer Binding]
+  SESSION[Root 恢复且策略允许的 EntityRef] --> BIND
+  FRAME --> BIND
+  BIND --> RESOLVE[CRM Identity Resolution]
+  RESOLVE -->|唯一且有权限| ID[Canonical customer_id]
+  RESOLVE -->|多候选| CHOICE[结构化选择]
+  RESOLVE -->|无匹配或冲突| ASK[确定性澄清]
+  ID --> PLAN[Workflow Planner]
+  PLAN --> EXEC[业务 API / 幂等执行]
+```
+
+职责必须严格分离：
+
+| 层级 | 负责 | 不负责 |
+|---|---|---|
+| Semantic Parser | 提取 intent、typed facts、原文证据和置信度 | 决定缺失字段、直接认定 CRM ID、生成最终澄清策略 |
+| Customer Binding | 汇总客户证据、标记来源、执行优先级和冲突策略 | 查询数据库、绕过权限、执行写入 |
+| Identity Resolution | 别名/简称召回、权限过滤、候选排序、canonical customer ID 绑定 | 猜测动作含义、补业务字段 |
+| Workflow Planner | 校验动作必填字段、生成 choice/form/confirmation、构造确定性命令 | 依赖模型的 `need_clarification` 或 `missing_fields` 结论 |
+| Effect Executor | 使用已授权 canonical ID 调用现有业务 API | 再次做自然语言实体猜测 |
+
+客户证据优先级：
+
+1. 用户本轮明确指出的客户；
+2. 受信任上下文中的 canonical `EntityRef`，其来源只能是本轮服务端签发的页面/实体动作，或 Root 恢复且明确允许使用的会话实体；
+3. 当前动作字段中被领域规则声明为“可识别目标客户”的证据。
+
+`EntityRef` 不是模型生成的文本候选，而是服务端已完成所有权校验后签发的 canonical 引用，因此 Customer Binding 不重复做文本 identity resolution；最终业务 API 仍必须按当前 token 和 `team_id` 重新校验写权限。会话实体投影未接通前，Workflow 不得让模型输出 `MEMORY` 伪造该来源，也不得把上一轮客户名称直接塞回 Prompt 作为可信身份。
+
+动作字段不是看到“像公司名的字符串”就可绑定客户。字段必须按业务角色显式声明。例如公司类型发票抬头可作为无其他客户上下文时的候选；个人抬头、实际付款方、联系人姓名、部署名称不得自动变成目标客户。所有文本候选最终仍必须进入 `/v1/customers/identity-resolution`，不能直接成为 `customer_id`。
+
+Semantic 合同中不保留 `need_clarification`、`clarification_question`、通用 `missing_fields` 或模型自报的 `MEMORY` 来源。发票抬头等动作字段必须使用 typed Pydantic action frame，不能以裸 `dict` 作为 Semantic 与 Binding 的业务边界。这些限制避免模型与 Planner 双重决策，也避免某个空槽覆盖其他已提取的有效实体证据。新增 Workflow 动作时，只能在统一 Binding/Planner 中声明实体角色和必填策略，不得在 Prompt、Planner 私有方法和 UI 三处各写一套规则。
+
 ## 4. 核心合同
 
 ### 4.1 RootTurnInput

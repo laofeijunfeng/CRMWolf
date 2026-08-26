@@ -396,8 +396,8 @@ class WorkflowCustomerResolver(Protocol):
     async def resolve(
         self,
         *,
-        explicit_customer_name: str | None,
-        context_customer: EntityRef | None,
+        customer_lookup_name: str | None,
+        trusted_context_customer: EntityRef | None,
         selected_customer_id: str | None,
         authorization: str,
     ) -> WorkflowCustomerResolution: ...
@@ -458,19 +458,19 @@ class CRMWorkflowCustomerResolver:
     async def resolve(
         self,
         *,
-        explicit_customer_name: str | None,
-        context_customer: EntityRef | None,
+        customer_lookup_name: str | None,
+        trusted_context_customer: EntityRef | None,
         selected_customer_id: str | None,
         authorization: str,
     ) -> WorkflowCustomerResolution:
-        if explicit_customer_name is None:
-            if context_customer is None or context_customer.resource != "customer":
+        if customer_lookup_name is None:
+            if trusted_context_customer is None or trusted_context_customer.resource != "customer":
                 return WorkflowCustomerResolution(status="MISSING")
             return WorkflowCustomerResolution(
                 status="RESOLVED",
                 customer=WorkflowCustomerCandidate(
-                    customer_id=context_customer.public_id,
-                    customer_name=context_customer.display_name,
+                    customer_id=trusted_context_customer.public_id,
+                    customer_name=trusted_context_customer.display_name,
                 ),
             )
 
@@ -480,7 +480,7 @@ class CRMWorkflowCustomerResolver:
                 "/v1/customers/identity-resolution",
                 authorization,
                 params={
-                    "query": explicit_customer_name,
+                    "query": customer_lookup_name,
                     "limit": 10,
                 },
             )

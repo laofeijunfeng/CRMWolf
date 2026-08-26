@@ -397,15 +397,15 @@ class ResolvedExplicitWorkflowCustomerResolver:
     async def resolve(
         self,
         *,
-        explicit_customer_name: str | None,
-        context_customer: EntityRef | None,
+        customer_lookup_name: str | None,
+        trusted_context_customer: EntityRef | None,
         selected_customer_id: str | None,
         authorization: str,
     ) -> object:
         self.calls.append(
             {
-                "explicit_customer_name": explicit_customer_name,
-                "context_customer": context_customer,
+                "customer_lookup_name": customer_lookup_name,
+                "trusted_context_customer": trusted_context_customer,
                 "selected_customer_id": selected_customer_id,
                 "authorization": authorization,
             }
@@ -420,33 +420,81 @@ class ResolvedExplicitWorkflowCustomerResolver:
         )
 
 
+class ExplicitOnlyWorkflowCustomerResolver:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def resolve(
+        self,
+        *,
+        customer_lookup_name: str | None,
+        trusted_context_customer: EntityRef | None,
+        selected_customer_id: str | None,
+        authorization: str,
+    ) -> object:
+        self.calls.append(
+            {
+                "customer_lookup_name": customer_lookup_name,
+                "trusted_context_customer": trusted_context_customer,
+                "selected_customer_id": selected_customer_id,
+                "authorization": authorization,
+            }
+        )
+        if customer_lookup_name is None:
+            return SimpleNamespace(status="MISSING", customer=None, candidates=())
+        return SimpleNamespace(
+            status="RESOLVED",
+            customer=SimpleNamespace(
+                customer_id="cus_fanya_001",
+                customer_name="广州凡亚信息科技有限公司",
+            ),
+            candidates=(),
+        )
+
+
+class NotFoundExplicitWorkflowCustomerResolver:
+    def __init__(self) -> None:
+        self.calls: list[str | None] = []
+
+    async def resolve(
+        self,
+        *,
+        customer_lookup_name: str | None,
+        trusted_context_customer: EntityRef | None,
+        selected_customer_id: str | None,
+        authorization: str,
+    ) -> object:
+        self.calls.append(customer_lookup_name)
+        return SimpleNamespace(status="NOT_FOUND", customer=None, candidates=())
+
+
 class ContextWorkflowCustomerResolver:
     """Deterministic resolver for tests whose explicit text names the selected page customer."""
 
     async def resolve(
         self,
         *,
-        explicit_customer_name: str | None,
-        context_customer: EntityRef | None,
+        customer_lookup_name: str | None,
+        trusted_context_customer: EntityRef | None,
         selected_customer_id: str | None,
         authorization: str,
     ) -> object:
         assert authorization == "Bearer test-token"
-        assert context_customer is not None
-        assert context_customer.resource == "customer"
-        assert explicit_customer_name in {None, context_customer.display_name}
-        assert selected_customer_id in {None, context_customer.public_id}
+        assert trusted_context_customer is not None
+        assert trusted_context_customer.resource == "customer"
+        assert customer_lookup_name in {None, trusted_context_customer.display_name}
+        assert selected_customer_id in {None, trusted_context_customer.public_id}
         return SimpleNamespace(
             status="RESOLVED",
             customer=SimpleNamespace(
-                customer_id=context_customer.public_id,
-                customer_name=context_customer.display_name,
+                customer_id=trusted_context_customer.public_id,
+                customer_name=trusted_context_customer.display_name,
             ),
             candidates=(),
         )
 
 
-async def test_explicit_customer_name_is_resolved_without_page_selected_entity() -> None:
+async def test_customer_lookup_name_is_resolved_without_page_selected_entity() -> None:
     parser = StaticSemanticParser(
         AgentSemanticParseResult.model_validate(
             {
@@ -534,8 +582,8 @@ async def test_explicit_customer_name_is_resolved_without_page_selected_entity()
     ]
     assert customer_resolver.calls == [
         {
-            "explicit_customer_name": "凡亚信息",
-            "context_customer": None,
+            "customer_lookup_name": "凡亚信息",
+            "trusted_context_customer": None,
             "selected_customer_id": None,
             "authorization": "Bearer test-token",
         }
@@ -619,13 +667,13 @@ class AmbiguousThenSelectedWorkflowCustomerResolver:
     async def resolve(
         self,
         *,
-        explicit_customer_name: str | None,
-        context_customer: EntityRef | None,
+        customer_lookup_name: str | None,
+        trusted_context_customer: EntityRef | None,
         selected_customer_id: str | None,
         authorization: str,
     ) -> object:
-        assert explicit_customer_name == "凡亚信息"
-        assert context_customer is None
+        assert customer_lookup_name == "凡亚信息"
+        assert trusted_context_customer is None
         assert authorization == "Bearer test-token"
         self.calls.append(selected_customer_id)
         if selected_customer_id is None:
@@ -1985,6 +2033,135 @@ async def test_create_contact_uses_selected_customer_public_id_through_root_disp
     }
 
 
+async def test_create_invoice_title_uses_company_title_as_customer_identity_evidence() -> None:
+    parser = StaticSemanticParser(
+        AgentSemanticParseResult.model_validate(
+            {
+                "intent": "CREATE_INVOICE_TITLE",
+                "intent_confidence": 0.99,
+                "invoice_title": {
+                    "title_type": "COMPANY",
+                    "title": "广州凡亚信息科技有限公司",
+                    "taxpayer_id": "91440101TEST000001",
+                    "bank_name": "招商银行广州分行",
+                    "bank_account": "6225888800000001",
+                    "address": "广州市天河区测试路1号",
+                    "phone": "020-88880000",
+                    "set_default": True,
+                },
+            }
+        )
+    )
+    customer_resolver = ExplicitOnlyWorkflowCustomerResolver()
+    orchestrator = RootOrchestrator(
+        checkpointer=json_safe_checkpointer(),
+        context_resolver=EmptyContextResolver(),
+        decision_classifier=CreateStandaloneWriteDecisionClassifier(reason_code="CREATE_INVOICE_TITLE"),
+        query_executor=FailingQueryExecutor(),
+        interaction_resolver=CanonicalConfirmationResolver(),
+        workflow_subgraph=build_workflow_subgraph(
+            planner=CRMWorkflowPlanner(
+                semantic_parser=parser,
+                temporal_resolver=FixedTemporalResolver(),
+                customer_resolver=customer_resolver,
+            ),
+            effect_executor=CRMWorkflowEffectExecutor(tool_registry=CapturingToolRegistry()),
+        ),
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=2,
+            session_id=566,
+            client_request_id="req_invoice_title_customer_evidence",
+            input=TextTurnInput(
+                type="text",
+                text=(
+                    "创建发票抬头：公司名称广州凡亚信息科技有限公司，"
+                    "税号91440101TEST000001，开户行招商银行广州分行，"
+                    "账号6225888800000001，地址广州市天河区测试路1号，"
+                    "电话020-88880000"
+                ),
+            ),
+        ),
+        runtime=RootRuntimeContext(
+            db=object(),
+            authorization="Bearer test-token",
+            metadata={"current_datetime": datetime(2026, 8, 23, 9, 0, 0)},
+        ),
+    )
+
+    assert isinstance(result, WorkflowDispatchResult)
+    assert isinstance(result.workflow_result, WorkflowWaitingResult)
+    assert result.workflow_result.interaction.business_action == "create_invoice_title"
+    assert customer_resolver.calls == [
+        {
+            "customer_lookup_name": "广州凡亚信息科技有限公司",
+            "trusted_context_customer": None,
+            "selected_customer_id": None,
+            "authorization": "Bearer test-token",
+        }
+    ]
+
+
+async def test_create_invoice_title_reports_unresolved_company_instead_of_missing_customer() -> None:
+    parser = StaticSemanticParser(
+        AgentSemanticParseResult.model_validate(
+            {
+                "intent": "CREATE_INVOICE_TITLE",
+                "intent_confidence": 0.99,
+                "invoice_title": {
+                    "title_type": "COMPANY",
+                    "title": "尚未录入客户库的测试公司有限公司",
+                    "taxpayer_id": "91440101TEST000099",
+                    "bank_name": "测试银行广州分行",
+                    "bank_account": "6225888800000099",
+                    "address": "广州市天河区测试路99号",
+                    "phone": "020-88880099",
+                },
+            }
+        )
+    )
+    customer_resolver = NotFoundExplicitWorkflowCustomerResolver()
+    orchestrator = RootOrchestrator(
+        checkpointer=json_safe_checkpointer(),
+        context_resolver=EmptyContextResolver(),
+        decision_classifier=CreateStandaloneWriteDecisionClassifier(reason_code="CREATE_INVOICE_TITLE"),
+        query_executor=FailingQueryExecutor(),
+        interaction_resolver=CanonicalConfirmationResolver(),
+        workflow_subgraph=build_workflow_subgraph(
+            planner=CRMWorkflowPlanner(
+                semantic_parser=parser,
+                temporal_resolver=FixedTemporalResolver(),
+                customer_resolver=customer_resolver,
+            ),
+            effect_executor=CRMWorkflowEffectExecutor(tool_registry=CapturingToolRegistry()),
+        ),
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=2,
+            session_id=567,
+            client_request_id="req_invoice_title_customer_not_found",
+            input=TextTurnInput(type="text", text="为尚未录入客户库的测试公司有限公司创建发票抬头"),
+        ),
+        runtime=RootRuntimeContext(
+            db=object(),
+            authorization="Bearer test-token",
+            metadata={"current_datetime": datetime(2026, 8, 23, 9, 0, 0)},
+        ),
+    )
+
+    assert isinstance(result, WorkflowDispatchResult)
+    assert isinstance(result.workflow_result, WorkflowWaitingResult)
+    assert result.workflow_result.interaction.business_action == "provide_workflow_customer"
+    assert "尚未录入客户库的测试公司有限公司" in result.workflow_result.interaction.prompt
+    assert customer_resolver.calls == ["尚未录入客户库的测试公司有限公司"]
+
+
 async def test_create_invoice_title_uses_canonical_payload_and_selected_customer() -> None:
     parser = StaticSemanticParser(
         AgentSemanticParseResult.model_validate(
@@ -1993,7 +2170,7 @@ async def test_create_invoice_title_uses_canonical_payload_and_selected_customer
                 "intent_confidence": 0.99,
                 "invoice_title": {
                     "title_type": "COMPANY",
-                    "title": "上海星云科技有限公司",
+                    "title": "上海星云集团有限公司",
                     "taxpayer_id": "91310000TEST000001",
                     "bank_name": "招商银行上海分行",
                     "bank_account": "6225888800000000",
@@ -2060,7 +2237,7 @@ async def test_create_invoice_title_uses_canonical_payload_and_selected_customer
 
     assert isinstance(completed, WorkflowDispatchResult)
     assert isinstance(completed.workflow_result, WorkflowCompletedResult)
-    assert completed.workflow_result.assistant_text == ("已为上海星云科技有限公司创建发票抬头“上海星云科技有限公司”。")
+    assert completed.workflow_result.assistant_text == ("已为上海星云科技有限公司创建发票抬头“上海星云集团有限公司”。")
     workflow_id = waiting.workflow_result.workflow_ref.workflow_id
     assert len(tool_registry.calls) == 1
     assert tool_registry.calls[0]["name"] == "create_invoice_title"
@@ -2068,7 +2245,7 @@ async def test_create_invoice_title_uses_canonical_payload_and_selected_customer
         "customer_id": CUSTOMER_REF.public_id,
         "invoice_title": {
             "title_type": "COMPANY",
-            "title": "上海星云科技有限公司",
+            "title": "上海星云集团有限公司",
             "taxpayer_id": "91310000TEST000001",
             "bank_name": "招商银行上海分行",
             "bank_account": "6225888800000000",

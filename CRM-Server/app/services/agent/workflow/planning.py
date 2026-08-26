@@ -27,6 +27,7 @@ from app.services.agent.workflow.contracts import (
     WorkflowTextStart,
     WorkflowTurnInput,
 )
+from app.services.agent.workflow.customer_binding import bind_workflow_customer
 from app.services.agent.workflow.resources import (
     CRMCustomerMemberResolver,
     CRMFollowUpTaskConfirmationCaseResolver,
@@ -176,13 +177,6 @@ class CRMWorkflowPlanner:
                 "WORKFLOW_INTENT_UNCERTAIN",
                 "我还不能可靠判断要执行的业务操作,请补充更明确的操作和对象。",
             )
-        if bool(getattr(semantic, "need_clarification", False)):
-            question = getattr(semantic, "clarification_question", None)
-            raise WorkflowPlanningError(
-                "WORKFLOW_CLARIFICATION_REQUIRED",
-                question if isinstance(question, str) and question.strip() else "请补充更明确的业务信息。",
-            )
-
         if intent == "CUSTOMER_ACTIVITY":
             return await self._plan_customer_activity(
                 semantic,
@@ -592,28 +586,19 @@ class CRMWorkflowPlanner:
         workflow_id: str,
         runtime: WorkflowRuntimeContext,
     ) -> WorkflowActionPlan:
+        invoice_title_source = semantic.invoice_title
         customer_id, customer_name = await self._resolve_customer(
             semantic,
             request=request,
             workflow_id=workflow_id,
             runtime=runtime,
         )
-        raw_invoice_title = getattr(semantic, "invoice_title", None)
-        invoice_title_source = raw_invoice_title if isinstance(raw_invoice_title, dict) else {}
-        set_default = bool(invoice_title_source.get("set_default"))
-        invoice_title = {
-            key: value
-            for key in (
-                "title_type",
-                "title",
-                "taxpayer_id",
-                "bank_name",
-                "bank_account",
-                "address",
-                "phone",
-            )
-            if (value := invoice_title_source.get(key)) is not None and value != ""
-        }
+        set_default = invoice_title_source.set_default
+        invoice_title = invoice_title_source.model_dump(
+            exclude={"set_default"},
+            exclude_none=True,
+        )
+        invoice_title = {key: value for key, value in invoice_title.items() if value != ""}
         missing_fields = business_rules.missing_invoice_title_fields(invoice_title)
         if missing_fields:
             raise self._needs_text(
@@ -1714,16 +1699,7 @@ class CRMWorkflowPlanner:
         workflow_id: str,
         runtime: WorkflowRuntimeContext,
     ) -> tuple[str, str]:
-        semantic_customer = getattr(semantic, "customer", None)
-        resolution_source = self._optional_non_blank_text(
-            getattr(semantic_customer, "resolution_source", None)
-        )
-        explicit_customer_name = (
-            self._optional_non_blank_text(getattr(semantic_customer, "name_text", None))
-            if resolution_source == "EXPLICIT"
-            else None
-        )
-        context_customer = (
+        trusted_context_customer = (
             request.selected_entity
             if request.selected_entity is not None and request.selected_entity.resource == "customer"
             else None
@@ -1733,10 +1709,18 @@ class CRMWorkflowPlanner:
             "customer_id",
             business_action="select_workflow_customer",
         )
+        binding = bind_workflow_customer(
+            semantic=semantic,
+            trusted_context_customer=trusted_context_customer,
+            selected_customer_id=selected_customer_id,
+        )
+        customer_lookup_name = binding.lookup_name
+        trusted_context_customer = binding.trusted_context_customer
+        selected_customer_id = binding.selected_customer_id
         try:
             resolution = await self._customer_resolver.resolve(
-                explicit_customer_name=explicit_customer_name,
-                context_customer=context_customer,
+                customer_lookup_name=customer_lookup_name,
+                trusted_context_customer=trusted_context_customer,
                 selected_customer_id=selected_customer_id,
                 authorization=self._authorization(runtime),
             )
@@ -1764,7 +1748,7 @@ class CRMWorkflowPlanner:
                 prompt="请说明这项业务操作对应哪个客户。",
             )
         if resolution.status == "NOT_FOUND" or resolution.customer is None:
-            customer_label = f"“{explicit_customer_name}”" if explicit_customer_name else "该客户"
+            customer_label = f"“{customer_lookup_name}”" if customer_lookup_name else "该客户"
             raise self._needs_text(
                 workflow_id=workflow_id,
                 field="customer_name",

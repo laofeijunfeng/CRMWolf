@@ -62,8 +62,8 @@ async def test_workflow_customer_resolver_uses_authoritative_identity_resolution
     resolver = CRMWorkflowCustomerResolver(api_client=api_client)
 
     resolution = await resolver.resolve(
-        explicit_customer_name="凡亚信息",
-        context_customer=EntityRef(
+        customer_lookup_name="凡亚信息",
+        trusted_context_customer=EntityRef(
             ref_id="eref_customer_old",
             resource="customer",
             public_id="cus_old",
@@ -91,8 +91,8 @@ async def test_workflow_customer_resolver_uses_page_context_without_identity_api
     resolver = CRMWorkflowCustomerResolver(api_client=api_client)
 
     resolution = await resolver.resolve(
-        explicit_customer_name=None,
-        context_customer=EntityRef(
+        customer_lookup_name=None,
+        trusted_context_customer=EntityRef(
             ref_id="eref_customer_context",
             resource="customer",
             public_id="cus_context_001",
@@ -133,8 +133,8 @@ async def test_workflow_customer_resolver_requires_selection_for_ambiguous_ident
     resolver = CRMWorkflowCustomerResolver(api_client=api_client)
 
     resolution = await resolver.resolve(
-        explicit_customer_name="凡亚信息",
-        context_customer=None,
+        customer_lookup_name="凡亚信息",
+        trusted_context_customer=None,
         selected_customer_id=None,
         authorization="Bearer signed-token",
     )
@@ -169,14 +169,14 @@ async def test_workflow_customer_resolver_revalidates_signed_selection_against_c
     resolver = CRMWorkflowCustomerResolver(api_client=FakeCRMAPIClient(payload))
 
     selected = await resolver.resolve(
-        explicit_customer_name="凡亚信息",
-        context_customer=None,
+        customer_lookup_name="凡亚信息",
+        trusted_context_customer=None,
         selected_customer_id="cus_fanya_shenzhen",
         authorization="Bearer signed-token",
     )
     stale = await resolver.resolve(
-        explicit_customer_name="凡亚信息",
-        context_customer=None,
+        customer_lookup_name="凡亚信息",
+        trusted_context_customer=None,
         selected_customer_id="cus_removed",
         authorization="Bearer signed-token",
     )
@@ -212,8 +212,8 @@ async def test_workflow_customer_resolver_never_binds_non_identity_results(decis
     )
 
     resolution = await resolver.resolve(
-        explicit_customer_name="凡亚信息",
-        context_customer=None,
+        customer_lookup_name="凡亚信息",
+        trusted_context_customer=None,
         selected_customer_id=None,
         authorization="Bearer signed-token",
     )
@@ -231,8 +231,8 @@ async def test_workflow_customer_resolver_maps_server_failure_to_retryable_error
 
     with pytest.raises(WorkflowResourceResolutionError) as exc_info:
         await resolver.resolve(
-            explicit_customer_name="凡亚信息",
-            context_customer=None,
+            customer_lookup_name="凡亚信息",
+            trusted_context_customer=None,
             selected_customer_id=None,
             authorization="Bearer signed-token",
         )
@@ -264,8 +264,8 @@ async def test_workflow_customer_resolver_fails_closed_on_invalid_identity_contr
 
     with pytest.raises(WorkflowResourceResolutionError) as exc_info:
         await resolver.resolve(
-            explicit_customer_name="凡亚信息",
-            context_customer=None,
+            customer_lookup_name="凡亚信息",
+            trusted_context_customer=None,
             selected_customer_id=None,
             authorization="Bearer signed-token",
         )
