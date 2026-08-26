@@ -15,6 +15,14 @@ if [ -f /run/secrets/secret_key ]; then
     export SECRET_KEY=$(cat /run/secrets/secret_key)
 fi
 
+# `docker compose run backend <command>` is used for migration gates and
+# one-off maintenance jobs.  Respect an explicit command after loading the
+# common runtime environment; otherwise this entrypoint would start Uvicorn
+# instead and could run migrations unexpectedly.
+if [ "$#" -gt 0 ]; then
+    exec "$@"
+fi
+
 # Function to wait for MySQL
 wait_for_mysql() {
     echo "Waiting for MySQL to be ready..."
