@@ -875,6 +875,29 @@ class FollowUpTaskConfirmationCaseCRUD:
             query = query.filter(FollowUpTaskConfirmationCase.team_id == team_id)
         return query.first()
 
+    def list_statuses_by_public_ids(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        public_ids: list[str],
+    ) -> dict[str, str]:
+        normalized_ids = list(dict.fromkeys(public_id for public_id in public_ids if public_id))
+        if not normalized_ids:
+            return {}
+        rows = (
+            db.query(
+                FollowUpTaskConfirmationCase.public_id,
+                FollowUpTaskConfirmationCase.status,
+            )
+            .filter(
+                FollowUpTaskConfirmationCase.team_id == team_id,
+                FollowUpTaskConfirmationCase.public_id.in_(normalized_ids),
+            )
+            .all()
+        )
+        return {str(public_id): str(status) for public_id, status in rows}
+
     def get_by_public_id_for_update(
         self,
         db: Session,
@@ -1270,6 +1293,53 @@ class FollowUpTaskConfirmationPromptDeliveryCRUD:
     retry freely; only the first transition to SENT increments the case prompt
     counters.
     """
+
+    def list_agent_message_case_statuses(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        session_id: int,
+        message_ids: list[int],
+    ) -> dict[int, list[tuple[str, str]]]:
+        """Return follow-up Case states linked to historical Agent messages.
+
+        The explicit Case ID is signed into new actions. This delivery-backed
+        fallback keeps older persisted actions safe during the rollout.
+        """
+        normalized_ids = list(dict.fromkeys(message_id for message_id in message_ids if message_id > 0))
+        if not normalized_ids:
+            return {}
+        rows = (
+            db.query(
+                FollowUpTaskConfirmationPromptDelivery.origin_message_id,
+                FollowUpTaskConfirmationCase.public_id,
+                FollowUpTaskConfirmationCase.status,
+            )
+            .join(
+                FollowUpTaskConfirmationCase,
+                FollowUpTaskConfirmationCase.id == FollowUpTaskConfirmationPromptDelivery.case_id,
+            )
+            .filter(
+                FollowUpTaskConfirmationPromptDelivery.team_id == team_id,
+                FollowUpTaskConfirmationCase.team_id == team_id,
+                FollowUpTaskConfirmationPromptDelivery.agent_session_id == session_id,
+                FollowUpTaskConfirmationPromptDelivery.purpose
+                == FollowUpTaskConfirmationDeliveryPurpose.AGENT_TURN_PROMPT,
+                FollowUpTaskConfirmationPromptDelivery.origin_message_id.in_(
+                    [str(message_id) for message_id in normalized_ids]
+                ),
+            )
+            .all()
+        )
+        result: dict[int, list[tuple[str, str]]] = {}
+        for origin_message_id, case_public_id, status in rows:
+            try:
+                message_id = int(origin_message_id)
+            except (TypeError, ValueError):
+                continue
+            result.setdefault(message_id, []).append((str(case_public_id), str(status)))
+        return result
 
     def get_by_public_id(
         self,

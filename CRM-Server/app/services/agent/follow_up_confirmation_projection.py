@@ -144,7 +144,8 @@ class FollowUpConfirmationAgentUIProjection:
                 return 0
 
             composition = self.ui_composer.compose_follow_up_task_confirmations(
-                [item[1] for item in dispatched]
+                [item[1] for item in dispatched],
+                case_public_ids=[str(item.public_id) for item in projected_cases],
             )
             completed = self.turn_repository.project_assistant(
                 db,

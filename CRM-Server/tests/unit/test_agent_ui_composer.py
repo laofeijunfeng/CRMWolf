@@ -428,3 +428,27 @@ def test_choice_keeps_authoritative_metadata_only_in_signed_action_target() -> N
             },
         }
     ]
+
+
+def test_follow_up_confirmation_signs_case_public_id_for_read_time_projection() -> None:
+    dispatch = _waiting_dispatch(
+        WorkflowInteraction(
+            interaction_id="int_follow_up_confirmation_1",
+            interaction_type="choice",
+            business_action="resolve_follow_up_task_confirmation_case",
+            title="确认待办",
+            prompt="请确认待办是否完成。",
+            options=[WorkflowInteractionOption(value="已完成", label="标记完成")],
+            selection_mode="single",
+            min_selections=1,
+            max_selections=1,
+            submit_on_select=True,
+        )
+    )
+
+    composition = AgentUIComposer().compose_follow_up_task_confirmations(
+        [dispatch],
+        case_public_ids=["fuc_case_1"],
+    )
+
+    assert composition.action_drafts[0].target["follow_up_confirmation_case_public_id"] == "fuc_case_1"

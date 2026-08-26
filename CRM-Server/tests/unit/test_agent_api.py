@@ -166,6 +166,8 @@ def _persist_interaction_message(
     *,
     session_id: int,
     action_status: str,
+    action_target: dict[str, object] | None = None,
+    consume_action: bool = True,
 ) -> dict[str, object]:
     with session_factory() as db:
         row = AgentMessage(
@@ -229,20 +231,21 @@ def _persist_interaction_message(
                 session_id=session_id,
                 message_id=int(row.id),
                 action_type="submit_interaction",
-                target={"interaction_type": "confirmation"},
+                target=action_target or {"interaction_type": "confirmation"},
                 consumption_mode="ONE_SHOT",
             ),
         )
         request_id = "6fa2e0e8-86d4-4d6c-a1b0-6490b2bf12be"
-        repository.begin_consumption(
-            db,
-            public_id=action_id,
-            team_id=1,
-            user_id=2,
-            session_id=session_id,
-            client_request_id=request_id,
-        )
-        if action_status == "CONSUMED":
+        if consume_action:
+            repository.begin_consumption(
+                db,
+                public_id=action_id,
+                team_id=1,
+                user_id=2,
+                session_id=session_id,
+                client_request_id=request_id,
+            )
+        if consume_action and action_status == "CONSUMED":
             repository.complete_consumption(
                 db,
                 public_id=action_id,
@@ -342,6 +345,174 @@ def test_message_history_projects_submitted_interactions_as_authoritative_read_o
     assert persisted_ui["blocks"][0]["state"] == "ACTIVE"
     assert interaction["state"] == expected_state
     assert interaction["submit_action_id"] is None
+
+
+def test_message_history_projects_follow_up_case_revision_replacement(
+    api_harness,
+    monkeypatch,
+) -> None:
+    client, session_factory = api_harness
+    created = _create_session(client)
+    old_ui = _persist_interaction_message(
+        session_factory,
+        session_id=int(created["id"]),
+        action_status="OLD_CASE",
+        action_target={
+            "business_action": "resolve_follow_up_task_confirmation_case",
+            "follow_up_confirmation_case_public_id": "fuc_old",
+        },
+        consume_action=False,
+    )
+    new_ui = _persist_interaction_message(
+        session_factory,
+        session_id=int(created["id"]),
+        action_status="NEW_CASE",
+        action_target={
+            "business_action": "resolve_follow_up_task_confirmation_case",
+            "follow_up_confirmation_case_public_id": "fuc_new",
+        },
+        consume_action=False,
+    )
+    monkeypatch.setattr(
+        agent_api.follow_up_task_confirmation_case_crud,
+        "list_statuses_by_public_ids",
+        lambda *args, **kwargs: {"fuc_old": "CANCELLED", "fuc_new": "PENDING"},
+    )
+    monkeypatch.setattr(
+        agent_api.follow_up_task_confirmation_prompt_delivery_crud,
+        "list_agent_message_case_statuses",
+        lambda *args, **kwargs: {},
+    )
+
+    response = client.get(
+        f"/v1/agent/sessions/{created['id']}/messages",
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    by_message_id = {item["message_id"]: item["blocks"][0] for item in items}
+    assert by_message_id[old_ui["message_id"]]["state"] == "CANCELLED"
+    assert by_message_id[old_ui["message_id"]]["submit_action_id"] is None
+    assert by_message_id[new_ui["message_id"]]["state"] == "ACTIVE"
+    assert by_message_id[new_ui["message_id"]]["submit_action_id"] == new_ui["blocks"][0]["submit_action_id"]
+
+
+def test_message_history_projects_legacy_follow_up_card_from_delivery_case_status(
+    api_harness,
+    monkeypatch,
+) -> None:
+    client, session_factory = api_harness
+    created = _create_session(client)
+    _persist_interaction_message(
+        session_factory,
+        session_id=int(created["id"]),
+        action_status="LEGACY_CANCELLED",
+        action_target={"business_action": "resolve_follow_up_task_confirmation_case"},
+        consume_action=False,
+    )
+    with session_factory() as db:
+        message_id = db.query(AgentMessage.id).filter(AgentMessage.session_id == int(created["id"])).one()[0]
+    monkeypatch.setattr(
+        agent_api.follow_up_task_confirmation_prompt_delivery_crud,
+        "list_agent_message_case_statuses",
+        lambda *args, **kwargs: {message_id: [("fuc_legacy", "CANCELLED")]},
+    )
+
+    response = client.get(
+        f"/v1/agent/sessions/{created['id']}/messages",
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert response.status_code == 200
+    interaction = response.json()["items"][0]["blocks"][0]
+    assert interaction["state"] == "CANCELLED"
+    assert interaction["submit_action_id"] is None
+
+
+def test_message_history_fail_closes_legacy_follow_up_card_when_case_mapping_is_ambiguous(
+    api_harness,
+    monkeypatch,
+) -> None:
+    client, session_factory = api_harness
+    created = _create_session(client)
+    persisted_ui = _persist_interaction_message(
+        session_factory,
+        session_id=int(created["id"]),
+        action_status="LEGACY_AMBIGUOUS",
+        action_target={"business_action": "resolve_follow_up_task_confirmation_case"},
+    )
+    with session_factory() as db:
+        message_id = db.query(AgentMessage.id).filter(AgentMessage.session_id == int(created["id"])).one()[0]
+    monkeypatch.setattr(
+        agent_api.follow_up_task_confirmation_prompt_delivery_crud,
+        "list_agent_message_case_statuses",
+        lambda *args, **kwargs: {
+            message_id: [("fuc_old", "CANCELLED"), ("fuc_new", "PENDING")],
+        },
+    )
+
+    response = client.get(
+        f"/v1/agent/sessions/{created['id']}/messages",
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert response.status_code == 200
+    interaction = response.json()["items"][0]["blocks"][0]
+    assert interaction["state"] == "READ_ONLY"
+    assert interaction["submit_action_id"] is None
+    assert persisted_ui["blocks"][0]["state"] == "ACTIVE"
+
+def test_message_history_isolates_legacy_status_lookup_failures_from_new_cards(
+    api_harness,
+    monkeypatch,
+) -> None:
+    client, session_factory = api_harness
+    created = _create_session(client)
+    _persist_interaction_message(
+        session_factory,
+        session_id=int(created["id"]),
+        action_status="NEW_PENDING",
+        action_target={
+            "business_action": "resolve_follow_up_task_confirmation_case",
+            "follow_up_confirmation_case_public_id": "fuc_new",
+        },
+        consume_action=False,
+    )
+    _persist_interaction_message(
+        session_factory,
+        session_id=int(created["id"]),
+        action_status="LEGACY_LOOKUP_FAILED",
+        action_target={"business_action": "resolve_follow_up_task_confirmation_case"},
+        consume_action=False,
+    )
+    monkeypatch.setattr(
+        agent_api.follow_up_task_confirmation_case_crud,
+        "list_statuses_by_public_ids",
+        lambda *args, **kwargs: {"fuc_new": "PENDING"},
+    )
+
+    def raise_lookup_error(*args, **kwargs):
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(
+        agent_api.follow_up_task_confirmation_prompt_delivery_crud,
+        "list_agent_message_case_statuses",
+        raise_lookup_error,
+    )
+
+    response = client.get(
+        f"/v1/agent/sessions/{created['id']}/messages",
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert response.status_code == 200
+    interactions = {item["turn_id"]: item["blocks"][0] for item in response.json()["items"]}
+    assert interactions["turn_interaction_new_pending"]["state"] == "ACTIVE"
+    assert interactions["turn_interaction_new_pending"]["submit_action_id"] == "act_interaction_new_pending"
+    assert interactions["turn_interaction_legacy_lookup_failed"]["state"] == "READ_ONLY"
+    assert interactions["turn_interaction_legacy_lookup_failed"]["submit_action_id"] is None
+
 
 def test_message_history_rejects_unowned_session(api_harness) -> None:
     client, session_factory = api_harness

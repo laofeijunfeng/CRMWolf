@@ -140,3 +140,50 @@ def test_grouped_interactions_project_each_action_state_independently() -> None:
     assert second.type == "interaction"
     assert second.state == "ACTIVE"
     assert second.submit_action_id == "act_2"
+
+
+def test_cancelled_follow_up_confirmation_case_projects_active_card_as_cancelled() -> None:
+    now = datetime(2026, 8, 26, 23, 8, 41)
+    envelope = AgentUIEnvelope(
+        schema_version="crm.agent.ui.v1",
+        message_id=10,
+        turn_id="turn_10",
+        role="assistant",
+        state="final",
+        blocks=[InteractionBlock(
+            id="b_interaction",
+            type="interaction",
+            interaction_id="int_follow_up_confirmation",
+            interaction_type="choice",
+            presentation="COMPACT_TASK_COMPLETION",
+            state="ACTIVE",
+            prompt="下周二打电话给 Rain 老师确认具体情况",
+            options=[InteractionOption(value="已完成", label="标记完成")],
+            selection_mode="single",
+            min_selections=1,
+            max_selections=1,
+            submit_on_select=True,
+            submit_action_id="act_old_case",
+        )],
+        suggested_actions=[],
+        metadata=AgentUIMetadata(route="WORKFLOW"),
+    )
+    action = AgentUIActionRecord(
+        public_id="act_old_case", team_id=1, user_id=2, session_id=3, message_id=10,
+        action_type="submit_interaction",
+        target={"follow_up_confirmation_case_public_id": "fuc_old_case"},
+        consumption_mode="ONE_SHOT", status="ACTIVE", expires_at=now + timedelta(hours=1),
+        consumed_at=None, consumed_request_id=None, result_message_id=None,
+        lock_version=0, created_time=now, last_modified_time=now,
+    )
+
+    block = project_interaction_action_states(
+        [envelope],
+        [action],
+        now=now,
+        follow_up_confirmation_case_statuses_by_action={"act_old_case": "CANCELLED"},
+    )[0].blocks[0]
+
+    assert block.type == "interaction"
+    assert block.state == "CANCELLED"
+    assert block.submit_action_id is None

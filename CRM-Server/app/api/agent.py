@@ -13,6 +13,10 @@ from app.core.database import get_db
 from app.core.deps import get_current_active_user, get_current_user_team, security
 from app.crud.agent import agent_session_crud, agent_workflow_action_crud
 from app.crud.permission import permission_crud
+from app.crud.sales_commitment import (
+    follow_up_task_confirmation_case_crud,
+    follow_up_task_confirmation_prompt_delivery_crud,
+)
 from app.models.user import User
 from app.schemas.agent import (
     AgentAsyncOperationResponse,
@@ -395,7 +399,84 @@ async def list_agent_messages(
             session_id=session_id,
             message_ids=[item.message_id for item in items],
         )
-        items = project_interaction_action_states(items, actions)
+        follow_up_actions = [
+            action
+            for action in actions
+            if action.target.get("business_action") == "resolve_follow_up_task_confirmation_case"
+            or isinstance(action.target.get("follow_up_confirmation_case_public_id"), str)
+        ]
+        explicit_case_actions = [
+            action
+            for action in follow_up_actions
+            if isinstance(action.target.get("follow_up_confirmation_case_public_id"), str)
+            and action.target.get("follow_up_confirmation_case_public_id")
+        ]
+        legacy_actions = [action for action in follow_up_actions if action not in explicit_case_actions]
+        follow_up_case_statuses_by_action: dict[str, str] = {}
+
+        if explicit_case_actions:
+            explicit_case_ids = [
+                action.target["follow_up_confirmation_case_public_id"]
+                for action in explicit_case_actions
+            ]
+            try:
+                follow_up_case_statuses = follow_up_task_confirmation_case_crud.list_statuses_by_public_ids(
+                    db,
+                    team_id=team_id,
+                    public_ids=explicit_case_ids,
+                )
+            except Exception:
+                db.rollback()
+                logger.exception(
+                    "读取 Agent 跟进确认 Case 状态失败，显式绑定卡片降级为只读: session_id=%s",
+                    session_id,
+                )
+                follow_up_case_statuses_by_action.update(
+                    {action.public_id: "LOOKUP_FAILED" for action in explicit_case_actions}
+                )
+            else:
+                for action in explicit_case_actions:
+                    case_public_id = action.target["follow_up_confirmation_case_public_id"]
+                    follow_up_case_statuses_by_action[action.public_id] = follow_up_case_statuses.get(
+                        case_public_id,
+                        "MISSING",
+                    )
+
+        if legacy_actions:
+            try:
+                legacy_case_candidates = (
+                    follow_up_task_confirmation_prompt_delivery_crud.list_agent_message_case_statuses(
+                        db,
+                        team_id=team_id,
+                        session_id=session_id,
+                        message_ids=[item.message_id for item in items],
+                    )
+                )
+            except Exception:
+                db.rollback()
+                logger.exception(
+                    "读取 Agent 历史跟进确认投递状态失败，旧卡片降级为只读: session_id=%s",
+                    session_id,
+                )
+                follow_up_case_statuses_by_action.update(
+                    {action.public_id: "LOOKUP_FAILED" for action in legacy_actions}
+                )
+            else:
+                for action in legacy_actions:
+                    candidates = {case_id: status for case_id, status in legacy_case_candidates.get(
+                        action.message_id,
+                        [],
+                    )}
+                    if len(candidates) == 1:
+                        follow_up_case_statuses_by_action[action.public_id] = next(iter(candidates.values()))
+                    else:
+                        # Missing or ambiguous legacy delivery cannot identify the Case safely.
+                        follow_up_case_statuses_by_action[action.public_id] = "READ_ONLY"
+        items = project_interaction_action_states(
+            items,
+            actions,
+            follow_up_confirmation_case_statuses_by_action=follow_up_case_statuses_by_action,
+        )
     return PaginatedResponse[AgentUIEnvelope](
         items=items,
         total=total,

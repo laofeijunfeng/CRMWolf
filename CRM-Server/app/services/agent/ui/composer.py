@@ -83,11 +83,18 @@ class AgentUIComposer:
     def compose_follow_up_task_confirmations(
         self,
         dispatches: list[WorkflowDispatchResult],
+        *,
+        case_public_ids: list[str],
     ) -> AgentUIComposition:
         """Compose one compact message while preserving one signed action per Workflow."""
 
         if not dispatches:
             raise ValueError("follow-up task confirmation composition requires at least one dispatch")
+        if len(case_public_ids) != len(dispatches) or any(
+            not isinstance(case_public_id, str) or not case_public_id
+            for case_public_id in case_public_ids
+        ):
+            raise ValueError("follow-up task confirmation case IDs must match dispatches")
 
         blocks: list[AgentUIBlock] = []
         actions: list[AgentUIActionDraft] = []
@@ -100,6 +107,7 @@ class AgentUIComposer:
             block, action = self._interaction_block(
                 result.interaction,
                 continuation=dispatch.continuation,
+                follow_up_confirmation_case_public_id=case_public_ids[index - 1],
             )
             blocks.append(block.model_copy(update={"id": f"b_task_completion_{index}"}))
             actions.append(action)
@@ -310,6 +318,7 @@ class AgentUIComposer:
         interaction: WorkflowInteraction,
         *,
         continuation: WorkflowContinuation,
+        follow_up_confirmation_case_public_id: str | None = None,
     ) -> tuple[InteractionBlock, AgentUIActionDraft]:
         public_id = generate_public_id("act")
         compact_task_completion = (
@@ -376,6 +385,8 @@ class AgentUIComposer:
             "interaction_type": interaction.interaction_type,
             "business_action": interaction.business_action,
         }
+        if follow_up_confirmation_case_public_id is not None:
+            target["follow_up_confirmation_case_public_id"] = follow_up_confirmation_case_public_id
         if compact_task_completion:
             target["result_display"] = "STATE_UPDATE"
         if options:
