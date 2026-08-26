@@ -76,7 +76,7 @@ Customer Intelligence 的 checkpoint/blob/write 还必须满足：根 namespace�
 
 1. 停止前后端写入并创建、校验升级后紧急备份；在独立临时库完成恢复演练。
 2. 在克隆库重放 message migration，记录不可收敛原因；若不能无损收敛，取得明确的 Agent message history 丢失授权。
-3. 确认前后端、worker、定时任务和任何其他数据库写入方均已停止后，用新版本后端执行事故恢复工具，并传入 `--offline-confirmed`。生产 MySQL 上工具会在盘点前对全部 `crm_*` 表取得 `WRITE` 锁，避免盘点和删除之间出现新的 target/unknown runtime 或新格式消息；不能取得锁即失败，不能绕过。它只会删除已分类的 legacy Agent checkpoint、所有 Customer Intelligence run 均为终态时的 Customer Intelligence checkpoint，以及完全未迁移的 Agent message history；它不会删除 Customer Intelligence run 业务记录、相邻 workflow checkpoint、target runtime 或 unknown runtime。遇到 target/unknown/部分迁移消息/非终态 Customer Intelligence run/被其他表引用的 Agent message 必须失败。
+3. 确认前后端、worker、定时任务和任何其他数据库写入方均已停止后，用新版本后端执行事故恢复工具，并传入 `--offline-confirmed`。生产 MySQL 上工具会在盘点前对数据库中全部应用表取得 `WRITE` 锁，避免盘点和删除之间出现新的 target/unknown runtime 或新格式消息；不能取得锁即失败，不能绕过。它只会删除已分类的 legacy Agent checkpoint、所有 Customer Intelligence run 均为终态时的 Customer Intelligence checkpoint，以及完全未迁移的 Agent message history；它不会删除 Customer Intelligence run 业务记录、相邻 workflow checkpoint、target runtime 或 unknown runtime。遇到 target/unknown/部分迁移消息/非终态 Customer Intelligence run/被其他表引用的 Agent message 必须失败。
 4. 保存恢复工具的 JSON evidence 和 SHA-256；然后再次运行标准 checkpoint cutover，让标准 journal 验证最终空 legacy post-state。
 5. 仅在新版本健康检查与关键业务验收后清理旧应用镜像。
 

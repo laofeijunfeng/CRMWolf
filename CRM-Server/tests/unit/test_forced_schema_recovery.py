@@ -311,7 +311,7 @@ def test_recovery_cli_requires_every_explicit_acknowledgement() -> None:
     assert args.offline_confirmed is True
 
 
-def test_recovery_cli_locks_all_crm_tables_before_the_destructive_transaction(monkeypatch) -> None:
+def test_recovery_cli_locks_all_database_tables_before_the_destructive_transaction(monkeypatch) -> None:
     statements: list[str] = []
 
     class FakeConnection:
@@ -335,7 +335,7 @@ def test_recovery_cli_locks_all_crm_tables_before_the_destructive_transaction(mo
     class FakeInspector:
         @staticmethod
         def get_table_names() -> list[str]:
-            return ["alembic_version", "crm_agent_messages", "crm_langgraph_checkpoints"]
+            return ["agent_channel_sessions", "alembic_version", "crm_agent_messages", "crm_langgraph_checkpoints"]
 
     monkeypatch.setattr(recovery_cli, "inspect", lambda _connection: FakeInspector())
 
@@ -345,5 +345,6 @@ def test_recovery_cli_locks_all_crm_tables_before_the_destructive_transaction(mo
     lock_statement = next(statement for statement in statements if statement.startswith("LOCK TABLES"))
     assert "`crm_agent_messages` WRITE" in lock_statement
     assert "`crm_langgraph_checkpoints` WRITE" in lock_statement
-    assert "alembic_version" not in lock_statement
+    assert "`agent_channel_sessions` WRITE" in lock_statement
+    assert "`alembic_version` WRITE" in lock_statement
     assert "UNLOCK TABLES" in statements

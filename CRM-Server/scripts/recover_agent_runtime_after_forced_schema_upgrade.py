@@ -145,11 +145,9 @@ def _quote_identifier(identifier: str) -> str:
 
 
 def _mysql_lock_spec(connection: Connection) -> str:
-    table_names = sorted(
-        table_name for table_name in inspect(connection).get_table_names() if table_name.startswith("crm_")
-    )
+    table_names = sorted(inspect(connection).get_table_names())
     if not table_names:
-        raise ForcedSchemaRecoveryError("recovery:mysql_crm_tables_missing")
+        raise ForcedSchemaRecoveryError("recovery:mysql_tables_missing")
     return ", ".join(f"{_quote_identifier(table_name)} WRITE" for table_name in table_names)
 
 
@@ -157,9 +155,10 @@ def _mysql_lock_spec(connection: Connection) -> str:
 def _locked_recovery_connection(engine: Engine) -> Iterator[Connection]:
     """Yield a transaction that prevents concurrent CRM writers during recovery.
 
-    Production uses MySQL. `LOCK TABLES ... WRITE` is intentionally broad: it
-    blocks every CRM-table writer from creating target runtime or new-format
-    messages between the fail-closed inventory and the destructive delete. The
+    Production uses MySQL. `LOCK TABLES ... WRITE` covers every base table in
+    the application database: SQLAlchemy's foreign-key reflection needs that
+    breadth, and it prevents any application writer from creating target runtime
+    or new-format messages between the fail-closed inventory and the delete. The
     SQLite branch is solely for hermetic unit-test engines; production command
     invocations must use MySQL.
     """
