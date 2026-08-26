@@ -384,6 +384,8 @@ class AgentUIComposer:
             "interaction_id": interaction.interaction_id,
             "interaction_type": interaction.interaction_type,
             "business_action": interaction.business_action,
+            "submit_label": interaction.submit_label,
+            "submit_on_select": interaction.submit_on_select,
         }
         if follow_up_confirmation_case_public_id is not None:
             target["follow_up_confirmation_case_public_id"] = follow_up_confirmation_case_public_id
@@ -425,6 +427,7 @@ class AgentUIComposer:
                 max_selections=ui_max_selections,
                 allow_blank=interaction.allow_blank,
                 submit_on_select=interaction.submit_on_select,
+                submit_label=interaction.submit_label,
                 submit_action_id=public_id,
             ),
             AgentUIActionDraft(

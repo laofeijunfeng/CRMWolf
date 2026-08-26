@@ -503,7 +503,7 @@ const submit = async (): Promise<void> => {
       :disabled="controlsDisabled"
       @click="submit"
     >
-      {{ submitting ? '处理中…' : '提交' }}
+      {{ submitting ? `${block.submit_label}处理中…` : block.submit_label }}
     </Button>
   </section>
 </template>

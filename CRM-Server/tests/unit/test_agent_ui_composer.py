@@ -207,6 +207,8 @@ def test_waiting_workflow_composes_server_owned_action_with_exact_continuation()
         "interaction_id": "int_customer_1",
         "interaction_type": "choice",
         "business_action": "select_customer",
+        "submit_label": "提交",
+        "submit_on_select": False,
         "choices": [option.model_dump(mode="json") for option in interaction.options],
         "selection_mode": "single",
         "min_selections": 1,
@@ -269,6 +271,7 @@ def test_confirmation_preserves_canonical_workflow_options() -> None:
     interaction = composition.body.blocks[1]
     assert interaction.type == "interaction"
     assert interaction.interaction_type == "confirmation"
+    assert interaction.submit_label == "提交"
     assert [option.label for option in interaction.options] == ["确认创建", "取消"]
     assert composition.action_drafts[0].target["choices"] == [
         option.model_dump(mode="json") for option in interaction.options

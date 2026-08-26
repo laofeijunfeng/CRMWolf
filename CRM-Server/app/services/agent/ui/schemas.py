@@ -324,6 +324,7 @@ class InteractionBlock(AgentUIBlockBase):
     max_selections: int | None = Field(default=None, ge=1, le=50)
     allow_blank: bool | None = None
     submit_on_select: bool = False
+    submit_label: str = Field(default="提交", min_length=1, max_length=200)
     submit_action_id: str | None = Field(min_length=1, max_length=128)
 
     @model_validator(mode="after")

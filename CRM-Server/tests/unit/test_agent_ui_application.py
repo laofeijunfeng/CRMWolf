@@ -174,6 +174,39 @@ def _completed_workflow_dispatch(*, action_claim_id: str | None = None) -> Workf
     )
 
 
+def _confirmation_workflow_dispatch() -> WorkflowDispatchResult:
+    continuation = WorkflowContinuation(
+        workflow_ref=WorkflowRef(workflow_id="wf_customer_follow_up", interrupt_id="intr_confirm"),
+        parent_checkpoint_id="parent_cp_confirm",
+        subgraph_checkpoint_ns="workflow:customer_follow_up",
+        subgraph_checkpoint_id="child_cp_confirm",
+    )
+    interaction = WorkflowInteraction(
+        interaction_id="int_confirm_create",
+        interaction_type="confirmation",
+        business_action="create_customer_activity",
+        title="确认创建",
+        prompt="请确认是否创建这条客户活动？",  # noqa: RUF001
+        options=[
+            WorkflowInteractionOption(value="confirm", label="确认创建"),
+            WorkflowInteractionOption(value="cancel", label="取消"),
+        ],
+        selection_mode="single",
+        min_selections=1,
+        max_selections=1,
+    )
+    return WorkflowDispatchResult(
+        decision=_decision("WORKFLOW"),
+        workflow_result=WorkflowWaitingResult(
+            workflow_ref=continuation.workflow_ref,
+            assistant_text=interaction.prompt,
+            interaction=interaction,
+            progress=awaiting_required_input_progress(),
+        ),
+        continuation=continuation,
+    )
+
+
 def _waiting_workflow_dispatch() -> WorkflowDispatchResult:
     continuation = WorkflowContinuation(
         workflow_ref=WorkflowRef(workflow_id="wf_customer_follow_up", interrupt_id="intr_customer"),
@@ -715,6 +748,73 @@ async def test_entity_action_rejects_expired_result_set_before_dispatch(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("choice", "expected_content"),
+    [("confirm", "确认创建"), ("cancel", "取消")],
+)
+async def test_interaction_submission_persists_the_clicked_button_label(
+    application_harness,
+    choice: str,
+    expected_content: str,
+) -> None:
+    service, session_factory = application_harness
+    service.root_orchestrator = _FakeRootOrchestrator(_confirmation_workflow_dispatch())
+    initial = await _collect(
+        service,
+        request_input=TextAgentInput(type="text", text="创建跟进记录"),
+        client_request_id=UUID("3fa2e0e8-86d4-4d6c-a1b0-6490b2bf12be"),
+    )
+    session_id = initial[0]["session_id"]
+    interaction = next(
+        block for block in initial[1]["message"]["blocks"] if block["type"] == "interaction"
+    )
+    action_id = interaction["submit_action_id"]
+    action_repository = AgentUIActionRepository()
+
+    def claim_action(turn: RootTurnInput, runtime: RootRuntimeContext) -> None:
+        action_repository.begin_consumption(
+            runtime.db,
+            public_id=action_id,
+            team_id=turn.team_id,
+            user_id=turn.user_id,
+            session_id=turn.session_id,
+            client_request_id=turn.client_request_id,
+        )
+
+    service.root_orchestrator = _FakeRootOrchestrator(
+        _completed_workflow_dispatch(action_claim_id=action_id),
+        on_dispatch=claim_action,
+    )
+    request_id = UUID(
+        "4fa2e0e8-86d4-4d6c-a1b0-6490b2bf12be"
+        if choice == "confirm"
+        else "5fa2e0e8-86d4-4d6c-a1b0-6490b2bf12be"
+    )
+
+    await _collect(
+        service,
+        request_input=InteractionSubmissionInput(
+            type="interaction_submission",
+            action_id=action_id,
+            values={"choice": choice},
+        ),
+        client_request_id=request_id,
+        session_id=session_id,
+    )
+
+    with session_factory() as db:
+        user_message = (
+            db.query(AgentMessage)
+            .filter(AgentMessage.client_request_id == str(request_id))
+            .filter(AgentMessage.role == AgentMessageRole.USER)
+            .one()
+        )
+        assert user_message.content == expected_content
+        assert user_message.ui_json["blocks"][0]["text"] == expected_content
+        assert user_message.ui_json["metadata"]["accessibility_label"] == expected_content
+
+
+@pytest.mark.asyncio
 async def test_interaction_input_is_claimed_by_root_and_completed_by_application(
     application_harness,
 ) -> None:
@@ -760,6 +860,13 @@ async def test_interaction_input_is_claimed_by_root_and_completed_by_application
         assert action.status == AgentUIActionStatus.CONSUMED
         assert action.consumed_request_id == str(request_id)
         assert action.result_message_id == events[1]["message_id"]
+        user_message = (
+            db.query(AgentMessage)
+            .filter(AgentMessage.client_request_id == str(request_id))
+            .filter(AgentMessage.role == AgentMessageRole.USER)
+            .one()
+        )
+        assert user_message.content == "提交"
 
 
 @pytest.mark.asyncio

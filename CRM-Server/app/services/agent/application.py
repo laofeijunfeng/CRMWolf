@@ -104,6 +104,12 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
+class _InteractionSubmissionPresentation:
+    content: str
+    message_display: AgentUIMessageDisplay
+
+
+@dataclass(frozen=True)
 class _PreparedTurnInput:
     content: str
     root_input: TextTurnInput | InteractionTurnInput
@@ -532,20 +538,21 @@ class AgentApplicationService:
                 root_input=TextTurnInput(type="text", text=request_input.text),
             )
         if isinstance(request_input, InteractionSubmissionInput):
+            presentation = self._interaction_submission_presentation(
+                db,
+                request_input=request_input,
+                team_id=team_id,
+                user_id=user_id,
+                session_id=session_id,
+            )
             return _PreparedTurnInput(
-                content="提交交互操作",
+                content=presentation.content,
                 root_input=InteractionTurnInput(
                     type="interaction",
                     action_id=request_input.action_id,
                     values=request_input.values,
                 ),
-                message_display=self._interaction_message_display(
-                    db,
-                    action_id=request_input.action_id,
-                    team_id=team_id,
-                    user_id=user_id,
-                    session_id=session_id,
-                ),
+                message_display=presentation.message_display,
             )
         if not isinstance(request_input, EntityActionInput):
             raise TypeError("unsupported Agent input")
@@ -583,29 +590,74 @@ class AgentApplicationService:
             entity_action_claim_id=action.public_id,
         )
 
-    def _interaction_message_display(
+    def _interaction_submission_presentation(
         self,
         db: Session,
         *,
-        action_id: str,
+        request_input: InteractionSubmissionInput,
         team_id: int,
         user_id: int,
         session_id: int,
-    ) -> AgentUIMessageDisplay:
+    ) -> _InteractionSubmissionPresentation:
         action = self.action_repository.get_owned(
             db,
-            public_id=action_id,
+            public_id=request_input.action_id,
             team_id=team_id,
             user_id=user_id,
             session_id=session_id,
         )
-        if (
-            action is not None
-            and action.action_type == "submit_interaction"
-            and action.target.get("result_display") == "STATE_UPDATE"
+        if action is None or action.action_type != "submit_interaction":
+            return _InteractionSubmissionPresentation(
+                content="已提交",
+                message_display="MESSAGE",
+            )
+
+        target = action.target
+        message_display: AgentUIMessageDisplay = (
+            "STATE_UPDATE"
+            if target.get("result_display") == "STATE_UPDATE"
+            else "MESSAGE"
+        )
+        interaction_type = target.get("interaction_type")
+        submit_on_select = target.get("submit_on_select") is True
+        if interaction_type == "confirmation" or (
+            interaction_type == "choice" and submit_on_select
         ):
-            return "STATE_UPDATE"
-        return "MESSAGE"
+            choice_label = self._submitted_choice_label(
+                choices=target.get("choices"),
+                submitted_choice=request_input.values.get("choice"),
+            )
+            if choice_label is not None:
+                return _InteractionSubmissionPresentation(
+                    content=choice_label,
+                    message_display=message_display,
+                )
+
+        submit_label = target.get("submit_label")
+        return _InteractionSubmissionPresentation(
+            content=(
+                submit_label.strip()
+                if isinstance(submit_label, str) and submit_label.strip()
+                else "已提交"
+            ),
+            message_display=message_display,
+        )
+
+    @staticmethod
+    def _submitted_choice_label(
+        *,
+        choices: object,
+        submitted_choice: object,
+    ) -> str | None:
+        if not isinstance(choices, list) or not isinstance(submitted_choice, str):
+            return None
+        for choice in choices:
+            if not isinstance(choice, dict) or choice.get("value") != submitted_choice:
+                continue
+            label = choice.get("label")
+            if isinstance(label, str) and label.strip():
+                return label.strip()
+        return None
 
     @staticmethod
     def _with_message_display(
@@ -1099,9 +1151,19 @@ class AgentApplicationService:
         code: AgentErrorCode,
         message: str,
     ) -> AgentUIEnvelope:
-        user_content = "提交交互操作" if isinstance(
-            request_input, InteractionSubmissionInput
-        ) else "执行实体操作"
+        if isinstance(request_input, InteractionSubmissionInput):
+            presentation = self._interaction_submission_presentation(
+                db,
+                request_input=request_input,
+                team_id=team_id,
+                user_id=user_id,
+                session_id=session_id,
+            )
+            user_content = presentation.content
+            message_display = presentation.message_display
+        else:
+            user_content = "执行实体操作"
+            message_display = "MESSAGE"
         begin_result = self.turn_repository.begin(
             db,
             AgentTurnStart(
@@ -1111,7 +1173,10 @@ class AgentApplicationService:
                 client_request_id=client_request_id,
                 input_fingerprint=input_fingerprint,
                 content=user_content,
-                ui=self._user_message_body(user_content),
+                ui=self._user_message_body(
+                    user_content,
+                    display=message_display,
+                ),
             ),
         )
         if begin_result.outcome == "COMPLETED":

@@ -61,6 +61,7 @@ export const InteractionBlockObjectSchema = z.object({
   max_selections: z.number().int().min(1).max(50).nullable().optional(),
   allow_blank: z.boolean().nullable().optional(),
   submit_on_select: z.boolean().optional(),
+  submit_label: z.string().min(1).max(200).default('提交'),
   submit_action_id: z.string().min(1).max(128).nullable()
 }).strict()
 
