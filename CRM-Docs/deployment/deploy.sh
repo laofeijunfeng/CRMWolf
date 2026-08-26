@@ -139,7 +139,10 @@ echo "[停止] 停止旧 Docker 服务..."
 docker compose -f docker-compose.yml -f docker-compose.server.yml down || true
 
 echo "[迁移] 使用新镜像执行数据库迁移..."
-docker compose -f docker-compose.yml -f docker-compose.server.yml run --rm --no-deps backend python -m alembic upgrade head
+# `ssh <<HEREDOC` supplies the remote shell through stdin.  Compose `run` is
+# interactive by default; without this redirect it can consume the rest of the
+# deployment script after Alembic exits, leaving the stack stopped.
+docker compose -f docker-compose.yml -f docker-compose.server.yml run --rm --no-deps -T backend python -m alembic upgrade head </dev/null
 
 # 4. 迁移完成后再启动新服务。
 echo "[启动] 启动 Docker 服务..."
