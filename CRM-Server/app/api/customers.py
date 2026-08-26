@@ -1773,7 +1773,7 @@ def assign_customer(
             assign_data.opportunity_transfer_scope
         )
         return CustomerAssignResponse(
-            customer=updated_customer,
+            customer=_customer_response(db, updated_customer),
             transferred_opportunities=transferred_opportunities,
             transferred_contracts=transferred_contracts,
             message="客户已移交"
