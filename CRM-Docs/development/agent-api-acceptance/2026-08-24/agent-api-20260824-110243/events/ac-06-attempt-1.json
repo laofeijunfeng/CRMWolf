@@ -1,0 +1,81 @@
+{
+  "case_id": "AC-06",
+  "attempt": 1,
+  "request": {
+    "session_id": 878,
+    "client_request_id": "2eb04d99-0603-46a8-8e67-0d93e9536082",
+    "input": {
+      "type": "interaction_submission",
+      "action_id": "act_0d2ec60ac00b42dab6593e43714af4d3",
+      "values": {
+        "choice": "confirm"
+      }
+    }
+  },
+  "http_status": 200,
+  "elapsed_seconds": 0.536,
+  "events": [
+    {
+      "event": "session",
+      "session_id": 878,
+      "session_key": "agent_dc72f65f70ec47de83783d7418adba4d"
+    },
+    {
+      "event": "agent_ui",
+      "phase": "final",
+      "message_id": 2282,
+      "turn_id": "turn_fb1c7964bc784f7ea57d34af1cbbff20",
+      "sequence": 1,
+      "message": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 2282,
+        "turn_id": "turn_fb1c7964bc784f7ea57d34af1cbbff20",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_text_1",
+            "type": "text",
+            "format": "markdown",
+            "text": "已创建客户“API验收-110243-结构确认客户有限公司”。"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {
+          "route": "WORKFLOW",
+          "result_set_id": null,
+          "accessibility_label": "已创建客户“API验收-110243-结构确认客户有限公司”。"
+        }
+      }
+    },
+    {
+      "event": "done",
+      "session_id": 878
+    }
+  ],
+  "summary": {
+    "event_types": [
+      "session",
+      "agent_ui",
+      "done"
+    ],
+    "session_id": 878,
+    "message_id": 2282,
+    "route": "WORKFLOW",
+    "metadata": {
+      "route": "WORKFLOW",
+      "result_set_id": null,
+      "accessibility_label": "已创建客户“API验收-110243-结构确认客户有限公司”。"
+    },
+    "block_types": [
+      "text"
+    ],
+    "texts": [
+      "已创建客户“API验收-110243-结构确认客户有限公司”。"
+    ],
+    "interaction": null,
+    "errors": [],
+    "entity_count": 0,
+    "result_set_id": null
+  }
+}

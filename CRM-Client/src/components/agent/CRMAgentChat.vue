@@ -1,1028 +1,656 @@
 <template>
-  <section class="agent-chat" aria-label="AI Agent 聊天">
+  <section class="agent-chat relative grid h-full max-h-full min-h-0 overflow-hidden" aria-label="AI Agent 聊天">
     <MessageScroller
-      class="agent-chat__messages"
-      :content-style="messageContentStyle"
+      class="agent-chat__messages min-h-0"
       :items-count="messageScrollCount"
       :scroll-key="messageScrollKey"
     >
-      <div v-if="messages.length === 0" class="agent-chat__empty">
-        <Sparkles class="agent-chat__empty-icon" aria-hidden="true" />
-        <div class="agent-chat__empty-title">告诉我客户进展，我来帮你整理下一步</div>
-        <div class="agent-chat__examples">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            @click="useExample('今天和越秀金融的王总沟通了下项目进展，客户反馈还在立项评估阶段，暂时持续跟进，下周三再确认进展。')"
-          >
-            客户活动
+      <div v-if="showEmptyState" class="grid min-h-full place-items-center content-center gap-4 text-center text-muted-foreground">
+        <Sparkles class="h-9 w-9 text-primary" aria-hidden="true" />
+        <div class="text-base font-semibold text-foreground">告诉我你想查询或处理的 CRM 事项</div>
+        <div class="flex flex-wrap justify-center gap-2">
+          <Button type="button" variant="outline" size="sm" @click="useExample('我在上海有哪些客户？')">
+            查询上海客户
           </Button>
           <Button
             type="button"
             variant="outline"
             size="sm"
-            @click="useExample('帮我给越秀金融创建联系人王总，手机号 13800138000，职位总经理。')"
+            @click="useExample('今天和越秀金融的王总沟通了项目进展，下周三再确认。')"
+          >
+            记录客户跟进
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            @click="useExample('帮我给越秀金融创建联系人王总，手机号 13800138000。')"
           >
             创建联系人
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            @click="useExample('帮我给越秀金融添加售前张三，可跟进项目需求。')"
-          >
-            设置客户成员
           </Button>
         </div>
       </div>
 
-      <div v-for="message in messages" :key="message.id" class="agent-chat__turn">
-        <Message :role="message.role" class="agent-chat__message">
-          <Avatar v-if="message.role !== 'user'" class="agent-chat__avatar agent-chat__avatar--assistant">
-            <AvatarFallback class="agent-chat__avatar-fallback">AI</AvatarFallback>
+      <div v-for="message in messages" :key="message.message_id" class="grid w-full gap-2">
+        <Message :role="message.role" class="items-start">
+          <Avatar
+            v-if="message.role !== 'user'"
+            class="h-8 w-8 shrink-0 border border-primary/20 bg-primary/10 text-primary"
+          >
+            <AvatarFallback class="flex h-full w-full items-center justify-center font-semibold text-current">
+              AI
+            </AvatarFallback>
           </Avatar>
           <Bubble
-            :variant="message.role === 'user' ? 'sent' : 'received'"
-            :class="[
-              'agent-chat__bubble',
-              message.role === 'assistant' ? 'agent-chat__bubble--assistant' : 'agent-chat__bubble--user',
-            ]"
+            v-if="message.role === 'user'"
+            variant="sent"
+            class="min-w-0 break-words text-sm leading-5 text-primary-foreground"
           >
-            <div class="agent-chat__bubble-content">
-              <div v-if="message.role === 'assistant' && message.steps.length > 0" class="agent-chat__stream">
-                <button
-                  type="button"
-                  class="agent-chat__stream-summary"
-                  :aria-expanded="message.stepsExpanded === true"
-                  @click="message.stepsExpanded = !message.stepsExpanded"
-                >
-                  <span class="agent-chat__step-count">{{ message.steps.length }}</span>
-                  <component
-                    :is="message.stepsExpanded === true ? ChevronDown : ChevronRight"
-                    class="agent-chat__stream-chevron"
-                    aria-hidden="true"
-                  />
-                  <component
-                    :is="stepIcon(latestStep(message)?.kind)"
-                    class="agent-chat__stream-icon"
-                    :class="stepIconClass(latestStep(message)?.kind, message.isStreaming)"
-                    aria-hidden="true"
-                  />
-                  <span class="agent-chat__stream-latest">{{ latestStep(message)?.text }}</span>
-                </button>
-                <div v-if="message.stepsExpanded === true" class="agent-chat__stream-list">
-                  <div v-for="step in message.steps" :key="step.id" class="agent-chat__stream-step">
-                    <component
-                      :is="stepIcon(step.kind)"
-                      class="agent-chat__stream-icon"
-                      :class="stepIconClass(step.kind)"
-                      aria-hidden="true"
-                    />
-                    <span>{{ step.text }}</span>
-                  </div>
-                </div>
-              </div>
-              <AgentMessageBody :content="message.content" :format="message.contentFormat" />
-            </div>
+            <AgentUIMessage
+              :message="message"
+              :disabled="isStreaming"
+              :locked-action-ids="lockedInteractionActionIds"
+              @action="submitEntityAction"
+              @interaction="submitInteraction"
+              @open-entity="openEntity"
+            />
           </Bubble>
-          <Avatar v-if="message.role === 'user'" class="agent-chat__avatar agent-chat__avatar--user">
-            <AvatarFallback class="agent-chat__avatar-fallback">{{ userInitial }}</AvatarFallback>
+          <div
+            v-else
+            class="agent-chat__assistant-content min-w-0 max-w-[760px] flex-1 break-words py-1 text-sm leading-5 text-foreground"
+          >
+            <AgentUIMessage
+              :message="message"
+              :disabled="isStreaming"
+              :locked-action-ids="lockedInteractionActionIds"
+              @action="submitEntityAction"
+              @interaction="submitInteraction"
+              @open-entity="openEntity"
+            />
+          </div>
+          <Avatar v-if="message.role === 'user'" class="h-8 w-8 shrink-0 bg-primary text-primary-foreground">
+            <AvatarFallback class="flex h-full w-full items-center justify-center font-semibold text-current">
+              {{ userInitial }}
+            </AvatarFallback>
           </Avatar>
         </Message>
 
-        <section
-          v-if="operationsByMessageId.get(message.id)?.length"
-          class="agent-chat__operations"
-          aria-label="后台任务状态"
+        <Message
+          v-if="operationsByMessageId.get(String(message.message_id))?.length"
+          role="assistant"
+          class="items-start"
         >
-          <AgentAsyncOperationList :operations="operationsByMessageId.get(message.id) ?? []" />
-        </section>
-
-        <section
-          v-if="message.role === 'assistant' && message.linkedFollowUpTaskConfirmations.length > 0"
-          class="agent-chat__follow-up-confirmations"
-          aria-label="关联待办确认"
-        >
-          <AgentFollowUpTaskConfirmationCard
-            v-for="confirmation in message.linkedFollowUpTaskConfirmations"
-            :key="confirmation.case_public_id"
-            :confirmation="confirmation"
-            :submitting="confirmationStore.resolvingCaseId !== null"
-            @confirm-complete="confirmFollowUpTaskCompletion"
-          />
-        </section>
+          <span class="h-8 w-8 shrink-0" aria-hidden="true" />
+          <section
+            class="agent-chat__operations grid min-w-0 max-w-[760px] flex-1 gap-2"
+            aria-label="后台任务状态"
+          >
+            <AgentAsyncOperationList :operations="operationsByMessageId.get(String(message.message_id)) ?? []" />
+          </section>
+        </Message>
       </div>
 
-      <section v-if="unanchoredAsyncOperations.length > 0" class="agent-chat__operations" aria-label="未关联的后台任务状态">
-        <AgentAsyncOperationList :operations="unanchoredAsyncOperations" />
+      <Message v-if="pendingUserText !== null" role="user" class="items-start">
+        <Bubble variant="sent" class="min-w-0 break-words text-sm leading-5 text-primary-foreground">
+          <AgentMessageBody :content="pendingUserText" format="plain" />
+        </Bubble>
+        <Avatar class="h-8 w-8 shrink-0 bg-primary text-primary-foreground">
+          <AvatarFallback class="flex h-full w-full items-center justify-center font-semibold text-current">
+            {{ userInitial }}
+          </AvatarFallback>
+        </Avatar>
+      </Message>
+
+      <Message v-if="streamingMessage !== null || showProcessingState" role="assistant" class="items-start">
+        <Avatar class="h-8 w-8 shrink-0 border border-primary/20 bg-primary/10 text-primary">
+          <AvatarFallback class="flex h-full w-full items-center justify-center font-semibold text-current">
+            AI
+          </AvatarFallback>
+        </Avatar>
+        <div class="agent-chat__assistant-content min-w-0 max-w-[760px] flex-1 break-words py-1 text-sm leading-5 text-foreground">
+          <AgentUIMessage
+            v-if="streamingMessage !== null"
+            :message="streamingMessage"
+            :disabled="true"
+            :locked-action-ids="lockedInteractionActionIds"
+          />
+          <div v-else class="flex items-center gap-2 text-muted-foreground" role="status">
+            <Loader2 class="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+            <span>{{ pendingRequestLabel }}</span>
+          </div>
+        </div>
+      </Message>
+
+      <section
+        v-if="transportError !== null"
+        class="agent-chat__transport-error flex items-center gap-2 rounded-xl border border-destructive/25 bg-destructive/5 px-3 py-2 text-destructive"
+        role="alert"
+      >
+        <AlertTriangle aria-hidden="true" />
+        <span>{{ transportError }}</span>
       </section>
+
+      <Message
+        v-if="unanchoredAsyncOperations.length > 0"
+        role="assistant"
+        class="mt-2 items-start"
+      >
+        <span class="h-8 w-8 shrink-0" aria-hidden="true" />
+        <section class="agent-chat__operations grid min-w-0 max-w-[760px] flex-1 gap-2">
+          <AgentAsyncOperationList :operations="unanchoredAsyncOperations" />
+        </section>
+      </Message>
     </MessageScroller>
 
-    <AgentInteractionDrawer
-      v-if="activeInteraction !== null"
-      :interaction="activeInteraction"
-      :disabled="isStreaming"
-      @submit="sendInteractionMessage"
-      @cancel="cancelInteraction"
-      @height-change="interactionDrawerHeight = $event"
-    />
-
-    <form v-if="activeInteraction === null" class="agent-chat__composer" @submit.prevent="sendMessage">
-      <InputGroup class="agent-chat__input-group">
+    <form
+      class="agent-chat__composer flex items-center justify-center bg-transparent px-4 pb-4 pt-3 md:px-6"
+      @submit.prevent="sendMessage"
+    >
+      <InputGroup class="w-[min(100%,960px)] min-h-[60px] rounded-xl border-border/70 bg-card/95 shadow-none backdrop-blur">
         <InputGroupTextarea
           v-model="input"
-          class="agent-chat__textarea"
-          :auto-resize="true"
-          :min-rows="3"
-          :max-rows="10"
+          class="min-h-[72px] overflow-y-hidden pb-3.5 pr-14"
+          placeholder="输入客户跟进、查询或操作指令..."
           :disabled="isStreaming"
-          placeholder="让我帮你记录客户活动、补客户资料，顺手看看要不要推进商机..."
-          aria-label="输入 Agent 消息"
+          :auto-resize="true"
+          :min-rows="2"
+          :max-rows="6"
           @keydown.enter.exact.prevent="sendMessage"
         />
         <InputGroupButton
+          class="absolute bottom-3 right-3 h-11 min-h-11 w-11 min-w-11 rounded-full"
           type="submit"
-          size="icon-sm"
-          variant="default"
-          class="agent-chat__send"
+          size="icon-xs"
           :disabled="!canSend"
-          aria-label="发送消息"
+          aria-label="发送"
         >
-          <Loader2 v-if="isStreaming" class="h-4 w-4 animate-spin" aria-hidden="true" />
-          <ArrowUp v-else class="h-4 w-4" aria-hidden="true" />
+          <ArrowUp aria-hidden="true" />
         </InputGroupButton>
       </InputGroup>
     </form>
   </section>
+
+  <CustomerDetailSheet
+    v-model:visible="customerSheetVisible"
+    :customer-id="selectedCustomerId"
+  />
 </template>
 
 <script setup lang="ts">
-import { computed, onActivated, onBeforeUnmount, onMounted, ref, type Component } from "vue"
-import { toast } from "vue-sonner"
+import { computed, onActivated, onBeforeUnmount, onMounted, ref } from 'vue'
+import { AlertTriangle, ArrowUp, Loader2, Sparkles } from 'lucide-vue-next'
+import { toast } from 'vue-sonner'
+
 import {
-  AlertTriangle,
-  ArrowUp,
-  Brain,
-  CheckCircle2,
-  ChevronDown,
-  ChevronRight,
-  ClipboardCheck,
-  Database,
-  HelpCircle,
-  Loader2,
-  Search,
-  Sparkles,
-  UserCheck,
-  Wrench,
-} from "lucide-vue-next"
-import { useUserStore } from "@/stores/user"
-import {
+  AgentProtocolError,
   agentApi,
-  type AgentChatSSEEvent,
-  type AgentContentFormat,
-  type AgentEventType,
-  type AgentInteraction,
-  type AgentLinkedFollowUpTaskConfirmation,
-  type AgentMessageResponse,
-} from "@/api/agent"
-import type { FollowUpConfirmationResolveResponse } from "@/api/followUpTask"
-import { loadLatestAgentMessages, resolveInitialAgentSession } from "@/components/agent/agentHistory"
-import AgentMessageBody from "@/components/agent/AgentMessageBody.vue"
-import AgentInteractionDrawer from "@/components/agent/AgentInteractionDrawer.vue"
-import AgentAsyncOperationList from "@/components/agent/AgentAsyncOperationList.vue"
-import AgentFollowUpTaskConfirmationCard from "@/components/agent/AgentFollowUpTaskConfirmationCard.vue"
-import { groupAgentAsyncOperationsByMessage } from "@/components/agent/agentAsyncOperations"
-import { useAgentAsyncOperations } from "@/composables/useAgentAsyncOperations"
-import { useFollowUpConfirmationStore } from "@/stores/followUpConfirmation"
-import { confirmDialog } from "@/utils/confirmDialog"
-import { logger } from "@/utils/logger"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Bubble } from "@/components/ui/bubble"
-import { Button } from "@/components/ui/button"
-import { InputGroup, InputGroupButton, InputGroupTextarea } from "@/components/ui/input-group"
-import { Message } from "@/components/ui/message"
-import { MessageScroller } from "@/components/ui/message-scroller"
+  type AgentChatRequest,
+  type AgentStreamEvent,
+  type AgentUIEnvelope,
+} from '@/api/agent'
+import AgentAsyncOperationList from '@/components/agent/AgentAsyncOperationList.vue'
+import { groupAgentAsyncOperationsByMessage } from '@/components/agent/agentAsyncOperations'
+import {
+  compactTaskActionState,
+  findCompactTaskAction,
+  isCompactTaskCompletionAction,
+  optimisticallyCompleteCompactTask,
+  restoreCompactTaskAction,
+} from '@/components/agent/agentInteractionState'
+import { isVisibleAgentMessage, loadLatestAgentMessages, resolveInitialAgentSession } from '@/components/agent/agentHistory'
+import AgentMessageBody from '@/components/agent/AgentMessageBody.vue'
+import AgentUIMessage from '@/components/agent-ui/AgentUIMessage.vue'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Bubble } from '@/components/ui/bubble'
+import { Button } from '@/components/ui/button'
+import { InputGroup, InputGroupButton, InputGroupTextarea } from '@/components/ui/input-group'
+import { Message } from '@/components/ui/message'
+import { MessageScroller } from '@/components/ui/message-scroller'
+import { useAgentAsyncOperations } from '@/composables/useAgentAsyncOperations'
+import type { AgentChatInput, AgentUIBlock, EntityRef, JsonObject } from '@/schemas/agent-contracts'
+import { useUserStore } from '@/stores/user'
+import CustomerDetailSheet from '@/views/CustomerDetailSheet.vue'
 
-interface ChatMessage {
-  id: string
-  role: "user" | "assistant"
-  content: string
-  contentFormat: AgentContentFormat
-  steps: EventLog[]
-  linkedFollowUpTaskConfirmations: AgentLinkedFollowUpTaskConfirmation[]
-  isStreaming?: boolean
-  stepsExpanded?: boolean
-}
-
-interface EventLog {
-  id: string
-  text: string
-  kind: AgentEventType
-  interaction?: AgentInteraction
-}
+const LAST_SESSION_STORAGE_KEY = 'crm_agent_last_session_id'
 
 const userStore = useUserStore()
-const confirmationStore = useFollowUpConfirmationStore()
-const input = ref("")
+const input = ref('')
 const isStreaming = ref(false)
-const sessionId = ref<number | undefined>(undefined)
-const sessionKey = ref<string | undefined>(undefined)
-const messages = ref<ChatMessage[]>([])
 const isLoadingHistory = ref(false)
-const activeAssistantId = ref<string | null>(null)
-const activeUserMessageId = ref<string | null>(null)
-const activeInteraction = ref<AgentInteraction | null>(null)
-const shouldRefreshFollowUpConfirmationsAfterStream = ref(false)
-const interactionDrawerHeight = ref(0)
-const locallyResolvedFollowUpConfirmations = new Map<string, AgentLinkedFollowUpTaskConfirmation>()
+const sessionId = ref<number | undefined>()
+const sessionKey = ref<string | undefined>()
+const messages = ref<AgentUIEnvelope[]>([])
+const pendingUserText = ref<string | null>(null)
+const pendingRequestLabel = ref('正在处理...')
+const streamingBlocks = ref<AgentUIBlock[]>([])
+const activeStreamMessageId = ref<number | null>(null)
+const activeStreamTurnId = ref<string | null>(null)
+const activeStreamSequence = ref(0)
+const activeStreamFinalized = ref(false)
+const transportError = ref<string | null>(null)
 const messageScrollKey = ref(0)
+const selectedCustomerId = ref<string | null>(null)
+const lockedInteractionActionIds = ref<ReadonlySet<string>>(new Set())
+let messageLoadGeneration = 0
+
+interface AgentMessageLoadResult {
+  applied: boolean
+  messages: AgentUIEnvelope[]
+}
+
+const customerSheetVisible = computed({
+  get: () => selectedCustomerId.value !== null,
+  set: (visible: boolean) => {
+    if (!visible) selectedCustomerId.value = null
+  },
+})
+
+const loadSessionMessages = async (targetSessionId: number): Promise<AgentMessageLoadResult> => {
+  const generation = ++messageLoadGeneration
+  const loadedMessages = await loadLatestAgentMessages(agentApi.listMessages, targetSessionId)
+  const applied = generation === messageLoadGeneration && sessionId.value === targetSessionId
+  if (applied) {
+    messages.value = loadedMessages
+    pendingUserText.value = null
+    messageScrollKey.value += 1
+  }
+  return { applied, messages: loadedMessages }
+}
+
 const {
   operations: asyncOperations,
   loadSession: loadSessionOperations,
-  acknowledgeScheduled: acknowledgeScheduledOperation,
   resumePolling: resumeOperationPolling,
   dispose: disposeOperationPolling,
 } = useAgentAsyncOperations({
   onChanged: () => {
     messageScrollKey.value += 1
   },
-  onTerminal: (operation) => {
+  onTerminal: operation => {
     const targetSessionId = operation.session_id
-    if (
-      operation.operation_type !== "customer_activity_post_commit"
-      || typeof targetSessionId !== "number"
-      || targetSessionId !== sessionId.value
-    ) return
+    if (targetSessionId === null || targetSessionId === undefined || targetSessionId !== sessionId.value) return
     void loadSessionMessages(targetSessionId).catch(() => {
-      // The next normal message refresh can recover a delayed confirmation card.
+      // A later session refresh restores messages if the projection is not visible yet.
     })
   },
 })
 
-const LAST_SESSION_STORAGE_KEY = "crm_agent_last_session_id"
-
-const canSend = computed(() => input.value.trim().length > 0 && !isStreaming.value)
-const userInitial = computed(() => {
-  const name = userStore.userInfo?.name
-  return name !== undefined && name.length > 0 ? name.charAt(0) : "我"
-})
-const groupedAsyncOperations = computed(() => groupAgentAsyncOperationsByMessage(messages.value, asyncOperations.value))
+const messageAnchors = computed(() => messages.value.map(message => ({
+  id: String(message.message_id),
+  role: message.role === 'user' ? 'user' as const : 'assistant' as const,
+})))
+const groupedAsyncOperations = computed(() => (
+  groupAgentAsyncOperationsByMessage(messageAnchors.value, asyncOperations.value)
+))
 const operationsByMessageId = computed(() => groupedAsyncOperations.value.byMessageId)
 const unanchoredAsyncOperations = computed(() => groupedAsyncOperations.value.unanchored)
+const canSend = computed(() => input.value.trim().length > 0 && !isStreaming.value)
+const streamingMessage = computed(() => {
+  if (streamingBlocks.value.length === 0) return null
+  return {
+    schema_version: 'crm.agent.ui.v1',
+    message_id: activeStreamMessageId.value ?? Number.MAX_SAFE_INTEGER,
+    turn_id: activeStreamTurnId.value ?? 'turn_streaming',
+    role: 'assistant',
+    state: 'streaming',
+    blocks: streamingBlocks.value,
+    suggested_actions: [],
+    metadata: {
+      display: 'MESSAGE',
+      route: 'WORKFLOW',
+      accessibility_label: 'Agent 正在执行',
+    },
+  } as AgentUIEnvelope
+})
+const showProcessingState = computed(() => isStreaming.value && streamingBlocks.value.length === 0)
+const showEmptyState = computed(() => (
+  !isLoadingHistory.value
+  && messages.value.length === 0
+  && pendingUserText.value === null
+  && !isStreaming.value
+))
 const messageScrollCount = computed(() => (
   messages.value.length
-  + messages.value.reduce(
-    (total, message) => total + message.steps.length + message.linkedFollowUpTaskConfirmations.length,
-    0,
-  )
+  + (pendingUserText.value === null ? 0 : 1)
+  + (isStreaming.value ? 1 : 0)
   + asyncOperations.value.length
+  + (transportError.value === null ? 0 : 1)
 ))
-const messageContentStyle = computed(() => ({
-  paddingBottom: activeInteraction.value === null
-    ? undefined
-    : `max(calc(var(--agent-composer-height) + var(--agent-interaction-gap)), calc(${interactionDrawerHeight.value}px + var(--agent-interaction-gap)))`,
-}))
-
-const nextId = (prefix: string): string => `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`
-
-const FOLLOW_UP_TASK_CONFIRMATION_ACTION = "resolve_follow_up_task_confirmation_case"
-
-const isFollowUpTaskConfirmationInteraction = (interaction: AgentInteraction | undefined | null): boolean => (
-  interaction?.business_action === FOLLOW_UP_TASK_CONFIRMATION_ACTION
-)
-
-const isWaitingInteraction = (interaction: AgentInteraction | undefined | null): interaction is AgentInteraction => {
-  if (interaction === undefined || interaction === null) return false
-  if (interaction.status === undefined) return true
-  return interaction.status === "waiting_user_input" || interaction.status === "waiting_confirmation"
-}
-
-const isTerminalEvent = (event: AgentChatSSEEvent): boolean => {
-  return event.event === "task_completed"
-    || event.event === "task_cancelled"
-    || event.event === "task_failed"
-}
-
-const normalizeRole = (role: AgentChatSSEEvent["role"]): ChatMessage["role"] | null => {
-  const normalized = String(role ?? "").toLowerCase()
-  if (normalized === "user" || normalized === "assistant") return normalized
-  return null
-}
-
-const normalizeContentFormat = (format: unknown): AgentContentFormat => {
-  return format === "markdown" ? "markdown" : "text"
-}
-
-const payloadContentFormat = (payload?: Record<string, unknown> | null): AgentContentFormat => {
-  return normalizeContentFormat(payload?.["content_format"])
-}
-
-const addAssistantMessage = (
-  content: string,
-  id?: string | number,
-  contentFormat: AgentContentFormat = "text"
-): void => {
-  if (content.length === 0) return
-  const lastMessage = messages.value[messages.value.length - 1]
-  if (lastMessage?.role === "assistant" && lastMessage.content === content) return
-  messages.value.push({
-    id: String(id ?? nextId("assistant")),
-    role: "assistant",
-    content,
-    contentFormat,
-    steps: [],
-    linkedFollowUpTaskConfirmations: [],
-  })
-}
-
-const activeAssistantMessage = (): ChatMessage | null => {
-  const activeId = activeAssistantId.value
-  if (activeId === null) return null
-  return messages.value.find(message => message.id === activeId) ?? null
-}
-
-const startAssistantDraft = (): void => {
-  const id = nextId("assistant_stream")
-  messages.value.push({
-    id,
-    role: "assistant",
-    content: "正在理解你的 CRM 操作意图...",
-    contentFormat: "text",
-    steps: [],
-    linkedFollowUpTaskConfirmations: [],
-    isStreaming: true,
-  })
-  activeAssistantId.value = id
-}
-
-const updateAssistantDraft = (
-  content: string,
-  id?: string | number,
-  keepActive = false,
-  contentFormat?: AgentContentFormat
-): void => {
-  if (content.length === 0) return
-  const draft = activeAssistantMessage()
-  if (draft) {
-    draft.content = content
-    if (contentFormat !== undefined) draft.contentFormat = contentFormat
-    draft.isStreaming = false
-    if (id !== undefined) draft.id = String(id)
-    if (!keepActive) activeAssistantId.value = null
-    return
-  }
-  addAssistantMessage(content, id, contentFormat)
-}
-
-const payloadTraceEvents = (payload?: Record<string, unknown> | null): AgentChatSSEEvent[] => {
-  const traceEvents = payload?.["trace_events"]
-  if (!Array.isArray(traceEvents)) return []
-  return traceEvents
-    .filter((event): event is AgentChatSSEEvent => {
-      return typeof event === "object"
-        && event !== null
-        && "event" in event
-        && typeof (event as { event?: unknown }).event === "string"
-    })
-}
-
-const traceEventToStep = (event: AgentChatSSEEvent): EventLog | null => {
-  const text = eventToLogText(event)
-  if (text === null || text.length === 0) return null
-  const step: EventLog = {
-    id: nextId("evt"),
-    text,
-    kind: event.event,
-  }
-  if (event.interaction !== undefined) step.interaction = event.interaction
-  return step
-}
-
-const toChatMessage = (message: AgentMessageResponse): ChatMessage | null => {
-  const role = normalizeRole(message.role)
-  const content = message.content ?? ""
-  if (role === null || content.length === 0) return null
-  return {
-    id: String(message.id),
-    role,
-    content,
-    contentFormat: role === "assistant" ? payloadContentFormat(message.payload_json) : "text",
-    steps: role === "assistant"
-      ? payloadTraceEvents(message.payload_json).map(traceEventToStep).filter((step): step is EventLog => step !== null)
-      : [],
-    linkedFollowUpTaskConfirmations: role === "assistant"
-      ? message.linked_follow_up_task_confirmations ?? []
-      : [],
-  }
-}
-
-const mergeLocallyResolvedFollowUpConfirmations = (
-  loadedMessages: ChatMessage[],
-): ChatMessage[] => loadedMessages.map((message) => {
-  if (message.linkedFollowUpTaskConfirmations.length === 0) return message
-
-  let changed = false
-  const confirmations = message.linkedFollowUpTaskConfirmations.map((confirmation) => {
-    const locallyResolved = locallyResolvedFollowUpConfirmations.get(confirmation.case_public_id)
-    if (locallyResolved === undefined) return confirmation
-
-    if (confirmation.confirmation_status !== "PENDING" || confirmation.task_status !== "OPEN") {
-      locallyResolvedFollowUpConfirmations.delete(confirmation.case_public_id)
-      return confirmation
-    }
-
-    changed = true
-    return locallyResolved
-  })
-
-  return changed ? { ...message, linkedFollowUpTaskConfirmations: confirmations } : message
+const userInitial = computed(() => {
+  const name = userStore.userInfo?.name
+  return name !== undefined && name.length > 0 ? name.charAt(0) : '我'
 })
 
-const latestStep = (message: ChatMessage): EventLog | undefined => message.steps[message.steps.length - 1]
-
-const setActiveInteraction = (interaction: AgentInteraction | null): void => {
-  activeInteraction.value = interaction
-  if (interaction === null) interactionDrawerHeight.value = 0
+const storedSessionId = (): number | undefined => {
+  const raw = localStorage.getItem(LAST_SESSION_STORAGE_KEY)
+  if (raw === null) return undefined
+  const parsed = Number(raw)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined
 }
 
-const restoreInteractionFromMessages = (loadedMessages: ChatMessage[]): void => {
-  let restoredInteraction: AgentInteraction | null = null
-
-  for (const message of loadedMessages) {
-    if (message.role !== "assistant") continue
-    for (const step of message.steps) {
-      if (step.interaction !== undefined) {
-        restoredInteraction = isFollowUpTaskConfirmationInteraction(step.interaction)
-          ? null
-          : isWaitingInteraction(step.interaction) ? step.interaction : null
-      }
-      if (isTerminalEvent({ event: step.kind })) {
-        restoredInteraction = null
-      }
-    }
+const rememberSession = (id: number, key: string): void => {
+  if (sessionId.value !== undefined && sessionId.value !== id) {
+    lockedInteractionActionIds.value = new Set()
+    messageLoadGeneration += 1
   }
-
-  setActiveInteraction(restoredInteraction)
-}
-
-const loadSessionMessages = async (targetSessionId: number): Promise<boolean> => {
-  const loadedMessages = mergeLocallyResolvedFollowUpConfirmations(
-    (await loadLatestAgentMessages(agentApi.listMessages, targetSessionId))
-      .map(toChatMessage)
-      .filter((message): message is ChatMessage => message !== null),
-  )
-
-  messages.value = loadedMessages
-  activeAssistantId.value = null
-  restoreInteractionFromMessages(loadedMessages)
-  sessionId.value = targetSessionId
-  await loadSessionOperations(targetSessionId)
-  localStorage.setItem(LAST_SESSION_STORAGE_KEY, String(targetSessionId))
-  messageScrollKey.value += 1
-  return true
+  sessionId.value = id
+  sessionKey.value = key
+  localStorage.setItem(LAST_SESSION_STORAGE_KEY, String(id))
 }
 
 const loadInitialSession = async (): Promise<void> => {
-  if (!userStore.token || isLoadingHistory.value) return
-
   isLoadingHistory.value = true
   try {
-    const storedSessionId = Number(localStorage.getItem(LAST_SESSION_STORAGE_KEY))
-    const sessions = await agentApi.listSessions()
-    const latestSession = resolveInitialAgentSession(
-      sessions.items,
-      Number.isInteger(storedSessionId) && storedSessionId > 0 ? storedSessionId : undefined
-    )
-    if (latestSession === undefined) return
-
-    sessionKey.value = latestSession.session_key
-    await loadSessionMessages(latestSession.id)
+    const response = await agentApi.listSessions()
+    const session = resolveInitialAgentSession(response.items, storedSessionId())
+    if (session === undefined) return
+    rememberSession(session.id, session.session_key)
+    await Promise.all([
+      loadSessionMessages(session.id),
+      loadSessionOperations(session.id),
+    ])
   } catch (error) {
-    const message = error instanceof Error ? error.message : "加载 Agent 历史消息失败"
-    addEventLog(message, "error")
+    toast.error(error instanceof Error ? error.message : 'Agent 会话加载失败')
   } finally {
     isLoadingHistory.value = false
   }
 }
 
-const addEventLog = (text: string, kind: AgentEventType): void => {
-  const draft = activeAssistantMessage()
-  if (draft) {
-    draft.steps.push({ id: nextId("evt"), text, kind })
-    return
+const resetStreamProjection = (): void => {
+  streamingBlocks.value = []
+  activeStreamMessageId.value = null
+  activeStreamTurnId.value = null
+  activeStreamSequence.value = 0
+  activeStreamFinalized.value = false
+}
+
+const acceptStreamEvent = (event: Extract<AgentStreamEvent, { event: 'agent_ui' }>): boolean => {
+  if (activeStreamTurnId.value === null) {
+    if (event.sequence !== 1) {
+      throw new AgentProtocolError('Agent stream must start with sequence 1')
+    }
+    activeStreamMessageId.value = event.message_id
+    activeStreamTurnId.value = event.turn_id
+  } else {
+    if (activeStreamTurnId.value !== event.turn_id) {
+      throw new AgentProtocolError('Agent stream changed turn identity before final')
+    }
+    if (
+      activeStreamMessageId.value !== null
+      && event.message_id !== null
+      && activeStreamMessageId.value !== event.message_id
+    ) {
+      throw new AgentProtocolError('Agent stream changed message identity before final')
+    }
+    if (activeStreamMessageId.value === null && event.message_id !== null) {
+      activeStreamMessageId.value = event.message_id
+    }
   }
-  const lastAssistant = [...messages.value].reverse().find(message => message.role === "assistant")
-  if (lastAssistant) {
-    lastAssistant.steps.push({ id: nextId("evt"), text, kind })
+  if (event.sequence <= activeStreamSequence.value) return false
+  if (activeStreamFinalized.value) {
+    throw new AgentProtocolError('Agent stream emitted an event after final')
   }
-}
-
-const stepIcon = (kind?: AgentEventType): Component => {
-  switch (kind) {
-    case "agent_step":
-    case "semantic_parsed":
-    case "follow_up_quality_evaluated":
-    case "intent":
-    case "entity_parse":
-    case "business_suggestions":
-    case "action_review_started":
-    case "action_review_risk_classified":
-    case "action_review_confidence_scored":
-    case "action_review_decided":
-    case "action_review_finished":
-      return Brain
-    case "tool_result":
-    case "action_auto_execution_queued":
-      return Wrench
-    case "customer_candidates":
-    case "customer_selected":
-    case "customer_selection_required":
-      return Search
-    case "business_context_loaded":
-      return Database
-    case "confirmation_required":
-    case "opportunity_fields_required":
-    case "contact_fields_required":
-    case "invoice_title_fields_required":
-    case "deployment_info_fields_required":
-    case "customer_member_fields_required":
-    case "payment_fields_required":
-    case "business_selection_required":
-      return HelpCircle
-    case "opportunity_fields_completed":
-    case "contact_fields_completed":
-    case "invoice_title_fields_completed":
-    case "deployment_info_fields_completed":
-    case "customer_member_fields_completed":
-    case "payment_fields_completed":
-    case "business_selected":
-      return UserCheck
-    case "task_completed":
-    case "task_cancelled":
-      return CheckCircle2
-    case "task_failed":
-    case "error":
-    case "suggestion_failed":
-    case "follow_up_quality_failed":
-    case "customer_selection_failed":
-    case "business_selection_failed":
-      return AlertTriangle
-    default:
-      return ClipboardCheck
+  if (event.sequence !== activeStreamSequence.value + 1) {
+    throw new AgentProtocolError('Agent stream sequence contains a gap or is out of order')
   }
+  activeStreamSequence.value = event.sequence
+  return true
 }
 
-const stepIconClass = (kind?: AgentEventType, active = false): string => {
-  const statusClass = active ? "agent-chat__stream-icon--active" : ""
-  const normalizedKind = kind ?? ""
-  if (kind === "tool_result" || kind === "task_completed" || kind === "action_auto_execution_queued") return `agent-chat__stream-icon--success ${statusClass}`
-  if (kind === "error" || kind === "task_failed" || kind === "suggestion_failed" || normalizedKind.endsWith("_failed")) {
-    return `agent-chat__stream-icon--danger ${statusClass}`
-  }
-  if (normalizedKind.includes("required") || kind === "confirmation_required") return `agent-chat__stream-icon--warning ${statusClass}`
-  return `agent-chat__stream-icon--info ${statusClass}`
-}
+const applyDelta = (event: Extract<AgentStreamEvent, { event: 'agent_ui', phase: 'delta' }>): void => {
+  for (const operation of event.operations) {
+    if (operation.op === 'upsert_block') {
+      const index = streamingBlocks.value.findIndex(block => block.id === operation.block.id)
+      if (index < 0) streamingBlocks.value.push(operation.block)
+      else streamingBlocks.value[index] = operation.block
+      continue
+    }
 
-const stringifyValue = (value: unknown): string => {
-  if (value === null || value === undefined || value === "") return "-"
-  if (typeof value === "string") return value
-  if (typeof value === "number" || typeof value === "boolean") return String(value)
-  return JSON.stringify(value)
-}
-
-const formatCustomerNames = (customers?: Record<string, unknown>[]): string => {
-  if (!customers || customers.length === 0) return "未找到候选客户"
-  return customers
-    .slice(0, 5)
-    .map((customer, index) => `${index + 1}. ${stringifyValue(customer["account_name"])}`)
-    .join("；")
-}
-
-const AI_SOURCE_LABELS: Record<string, string> = {
-  langchain_structured_output: "结构化输出",
-  system_ai_json_object: "JSON 结构化输出",
-  test_parser: "测试解析器",
-}
-
-const formatAISource = (source: unknown): string => {
-  if (typeof source !== "string" || source.length === 0) return "-"
-  return AI_SOURCE_LABELS[source] ?? "AI 结构化输出"
-}
-
-const formatAITrace = (prefix: string, source: unknown, model: unknown, fallbackReason?: unknown): string => {
-  const hasFallbackReason = fallbackReason !== null && fallbackReason !== undefined && fallbackReason !== ""
-  const fallbackText = hasFallbackReason
-    ? "，已自动切换备用通道"
-    : ""
-  return `${prefix}：${formatAISource(source)}，模型：${stringifyValue(model)}${fallbackText}`
-}
-
-const TOOL_DISPLAY_LABELS: Record<string, string> = {
-  create_customer_activity: "记录跟进",
-  create_lead_follow_up: "记录线索跟进",
-  create_opportunity: "创建商机",
-  move_opportunity_stage: "推进商机阶段",
-  select_opportunity_for_stage_move: "选择商机",
-  create_payment_plan: "创建回款计划",
-  create_payment_record: "登记回款",
-  create_contact: "新增联系人",
-  create_invoice_title: "新增发票抬头",
-  create_deployment_info: "新增部署信息",
-  create_customer_member: "新增客户成员",
-  create_customer: "创建客户",
-  create_lead: "创建线索",
-  get_customer_context: "加载客户上下文",
-  search_customers: "搜索客户",
-  search_creation_duplicates: "检查重复客户和线索",
-}
-
-const formatToolResult = (event: AgentChatSSEEvent): string => {
-  if (typeof event.content === "string" && event.content.length > 0) return event.content
-  const toolName = typeof event.tool_name === "string" ? event.tool_name : ""
-  const label = TOOL_DISPLAY_LABELS[toolName] ?? "业务操作"
-  return event.success === true ? `${label}已完成` : `${label}失败`
-}
-
-const formatBusinessAction = (action: unknown): string => {
-  if (typeof action !== "string" || action.length === 0) return "业务操作"
-  return TOOL_DISPLAY_LABELS[action] ?? "业务操作"
-}
-
-const formatReviewRisk = (riskLevel: unknown): string => {
-  if (riskLevel === "low") return "低风险"
-  if (riskLevel === "medium") return "需谨慎"
-  if (riskLevel === "high") return "高风险"
-  return "待评估"
-}
-
-const formatPercent = (value: unknown): string => {
-  if (typeof value !== "number" || Number.isNaN(value)) return "-"
-  return `${Math.round(Math.max(0, Math.min(value, 1)) * 100)}%`
-}
-
-const formatReviewDecision = (event: AgentChatSSEEvent): string => {
-  switch (event.decision) {
-    case "auto_execute":
-      return "判断结果：可直接执行"
-    case "require_confirmation":
-      return `判断结果：需要确认${formatBusinessAction(event.action)}`
-    case "require_fields":
-      return "判断结果：需要补充信息"
-    case "require_choice":
-      return "判断结果：需要选择业务对象"
-    case "block":
-      return "判断结果：暂不执行"
-    default:
-      return "判断结果：继续按业务流程处理"
-  }
-}
-
-const eventToLogText = (event: AgentChatSSEEvent): string | null => {
-  switch (event.event) {
-    case "agent_step":
-      return `${event.status === "completed" ? "完成" : "开始"}：${stringifyValue(event.content ?? event.step)}`
-    case "semantic_parsed":
-      return formatAITrace("AI 语义解析", event.parse_source, event.model, event.fallback_reason)
-    case "follow_up_quality_evaluated":
-      return `${formatAITrace("AI 跟进质量评估", event.quality_source, event.model, event.fallback_reason)}，评分：${stringifyValue(event.score)}`
-    case "follow_up_quality_required":
-      return event.content !== undefined && event.content.length > 0 ? event.content : "需要补充客户活动信息"
-    case "intent":
-      return `识别意图：${stringifyValue(event.intent_label ?? event.intent)}`
-    case "entity_parse":
-      return "已解析客户、业务内容和下一步动作"
-    case "tool_result":
-      return formatToolResult(event)
-    case "customer_candidates":
-      return `找到候选客户：${formatCustomerNames(event.customers)}`
-    case "business_context_loaded":
-      return `已加载客户上下文：${stringifyValue(event.customer?.["account_name"])}`
-    case "business_suggestions":
-      return `${formatAITrace("AI 业务建议", event.suggestion_source, event.model, event.fallback_reason)}，建议：${formatSuggestionTitles(event.suggestions)}`
-    case "suggestion_failed":
-      return `AI 业务建议生成失败：${stringifyValue(event.message)}`
-    case "follow_up_quality_failed":
-      return `AI 跟进质量评估失败：${stringifyValue(event.message)}`
-    case "customer_selection_required":
-      return `需要选择客户：${formatCustomerNames(event.customers)}`
-    case "customer_selected":
-      return `已选择客户：${stringifyValue(event.customer?.["account_name"])}`
-    case "customer_selection_failed":
-      return event.content !== undefined && event.content.length > 0 ? event.content : "客户选择未匹配"
-    case "confirmation_required":
-      return `等待确认：${formatBusinessAction(event.action)}`
-    case "opportunity_fields_required":
-      return event.content !== undefined && event.content.length > 0 ? event.content : "需要补充商机信息"
-    case "opportunity_fields_completed":
-      return event.content !== undefined && event.content.length > 0 ? event.content : "商机信息已补齐"
-    case "contact_fields_required":
-      return event.content !== undefined && event.content.length > 0 ? event.content : "需要补充联系人信息"
-    case "contact_fields_completed":
-      return event.content !== undefined && event.content.length > 0 ? event.content : "联系人信息已补齐"
-    case "invoice_title_fields_required":
-      return event.content !== undefined && event.content.length > 0 ? event.content : "需要补充发票抬头信息"
-    case "invoice_title_fields_completed":
-      return event.content !== undefined && event.content.length > 0 ? event.content : "发票抬头信息已补齐"
-    case "deployment_info_fields_required":
-      return event.content !== undefined && event.content.length > 0 ? event.content : "需要补充部署信息"
-    case "deployment_info_fields_completed":
-      return event.content !== undefined && event.content.length > 0 ? event.content : "部署信息已补齐"
-    case "customer_member_fields_required":
-      return event.content !== undefined && event.content.length > 0 ? event.content : "需要补充客户成员信息"
-    case "customer_member_fields_completed":
-      return event.content !== undefined && event.content.length > 0 ? event.content : "客户成员信息已补齐"
-    case "payment_fields_required":
-      return event.content !== undefined && event.content.length > 0 ? event.content : "需要补充回款信息"
-    case "payment_fields_completed":
-      return event.content !== undefined && event.content.length > 0 ? event.content : "回款信息已补齐"
-    case "business_selection_required":
-      return event.content !== undefined && event.content.length > 0 ? event.content : "需要选择业务对象"
-    case "business_selected":
-      return event.content !== undefined && event.content.length > 0 ? event.content : "业务对象已选择"
-    case "business_selection_failed":
-      return event.content !== undefined && event.content.length > 0 ? event.content : "业务对象选择未匹配"
-    case "action_review_started":
-      return `校验执行策略：${formatBusinessAction(event.action)}`
-    case "action_review_risk_classified":
-      return `操作风险评估：${formatReviewRisk(event.risk_level)}`
-    case "action_review_confidence_scored":
-      return `执行置信度：${formatPercent(event.execution_confidence)}`
-    case "action_review_decided":
-      return formatReviewDecision(event)
-    case "action_review_finished":
-      return event.decision === "auto_execute" ? "执行策略已确认" : null
-    case "action_auto_execution_queued":
-      return event.content !== undefined && event.content.length > 0 ? event.content : `正在执行：${formatBusinessAction(event.action)}`
-    case "agent_root_customer_intelligence_refresh_scheduled":
-      return "客户活动已记录，客户档案将在后台更新，可继续进行其他操作"
-    case "agent_root_customer_intelligence_refresh_schedule_failed":
-      return "客户活动已记录，但客户档案后台更新暂未成功调度"
-    case "task_completed":
-      return event.content !== undefined && event.content.length > 0 ? event.content : "任务已完成"
-    case "task_failed":
-      return event.content !== undefined && event.content.length > 0 ? event.content : "任务执行失败"
-    case "task_cancelled":
-      return event.content !== undefined && event.content.length > 0 ? event.content : "已取消当前操作"
-    case "error":
-      return event.message ?? event.error_message ?? "Agent 服务异常"
-    default:
-      return null
-  }
-}
-
-const formatSuggestionTitles = (suggestions?: Record<string, unknown>[]): string => {
-  if (!suggestions || suggestions.length === 0) return "暂无建议"
-  return suggestions
-    .slice(0, 3)
-    .map((suggestion, index) => `${index + 1}. ${stringifyValue(suggestion["title"])}`)
-    .join("；")
-}
-
-const handleSSEEvent = (event: AgentChatSSEEvent): void => {
-  if (event.event === "session") {
-    sessionId.value = event.session_id
-    sessionKey.value = event.session_key
-    if (event.session_id !== undefined) {
-      localStorage.setItem(LAST_SESSION_STORAGE_KEY, String(event.session_id))
-      void loadSessionOperations(event.session_id).catch(() => {
-        // The session event remains authoritative; a later operation acknowledgement/history load retries delivery.
+    const existing = streamingBlocks.value.find(block => block.id === operation.block_id)
+    if (existing === undefined) {
+      streamingBlocks.value.push({
+        id: operation.block_id,
+        type: 'text',
+        format: 'plain',
+        text: operation.delta,
       })
-    }
-    return
-  }
-
-  if (event.event === "agent_root_customer_intelligence_refresh_scheduled") {
-    if (event.operation_public_id !== undefined && event.operation_public_id.length > 0) {
-      const operationSessionId = event.session_id ?? sessionId.value
-      acknowledgeScheduledOperation({
-        operationPublicId: event.operation_public_id,
-        ...(event.request_id !== undefined ? { requestId: event.request_id } : {}),
-        ...(operationSessionId !== undefined ? { sessionId: operationSessionId } : {}),
-        ...(event.customer_id !== undefined ? { customerId: event.customer_id } : {}),
-        ...(event.source_user_message_id !== undefined
-          ? { sourceUserMessageId: event.source_user_message_id }
-          : {}),
-      })
+    } else if (existing.type === 'text') {
+      existing.text += operation.delta
+    } else {
+      throw new AgentProtocolError('append_text operation targeted a non-text block')
     }
   }
-
-  if (event.event === "message") {
-    const role = normalizeRole(event.role)
-    if (role === "user" && event.message_id !== undefined) {
-      const activeUserMessage = activeUserMessageId.value === null
-        ? undefined
-        : messages.value.find(message => message.id === activeUserMessageId.value)
-      if (activeUserMessage !== undefined) {
-        activeUserMessage.id = String(event.message_id)
-        activeUserMessageId.value = activeUserMessage.id
-      }
-      return
-    }
-    if (role === "assistant" && event.content !== undefined) {
-      updateAssistantDraft(event.content, event.message_id, false, normalizeContentFormat(event.content_format))
-    }
-    return
-  }
-
-  if (event.event === "final") {
-    if (event.content !== undefined) {
-      updateAssistantDraft(event.content, undefined, true, normalizeContentFormat(event.content_format))
-    }
-    return
-  }
-
-  if (event.event === "done") {
-    const draft = activeAssistantMessage()
-    if (draft) draft.isStreaming = false
-    activeAssistantId.value = null
-    return
-  }
-
-  const text = eventToLogText(event)
-  if (text !== null && text.length > 0) addEventLog(text, event.event)
-  if (event.interaction !== undefined) {
-    const isFollowUpConfirmation = isFollowUpTaskConfirmationInteraction(event.interaction)
-    if (isFollowUpConfirmation) shouldRefreshFollowUpConfirmationsAfterStream.value = true
-    setActiveInteraction(
-      isFollowUpConfirmation
-        ? null
-        : isWaitingInteraction(event.interaction) ? event.interaction : null,
-    )
-    return
-  }
-  if (isTerminalEvent(event)) {
-    setActiveInteraction(null)
-  }
+  messageScrollKey.value += 1
 }
 
-const applyResolvedFollowUpTaskConfirmation = (
-  confirmation: AgentLinkedFollowUpTaskConfirmation,
-  response: FollowUpConfirmationResolveResponse,
-): void => {
-  const resolvedCase = response.case
-  const executionResult = response.application?.execution_results?.find((result) => (
-    result.task_public_id === confirmation.task_public_id
-  ))
-  const resolvedAction = resolvedCase?.resolved_action
-    ?? response.application?.action
-    ?? response.decision.action
-    ?? "COMPLETE"
-  const taskStatus = resolvedCase?.task?.status
-    ?? executionResult?.new_status
-    ?? (resolvedAction === "COMPLETE" ? "COMPLETED" : confirmation.task_status)
-  const resolvedAt = resolvedCase?.applied_at ?? new Date().toISOString()
-  const locallyResolved: AgentLinkedFollowUpTaskConfirmation = {
-    ...confirmation,
-    task_public_id: resolvedCase?.task?.public_id ?? confirmation.task_public_id,
-    task_title: resolvedCase?.task?.title ?? confirmation.task_title,
-    due_at: resolvedCase?.task?.due_at ?? confirmation.due_at ?? null,
-    task_status: taskStatus,
-    confirmation_status: resolvedCase?.status ?? "RESOLVED",
-    resolved_action: resolvedAction,
-    resolved_at: resolvedAt,
-    completed_at: taskStatus === "COMPLETED" ? resolvedAt : confirmation.completed_at ?? null,
+const upsertFinalMessage = (message: AgentUIEnvelope): void => {
+  const index = messages.value.findIndex(item => item.message_id === message.message_id)
+  if (!isVisibleAgentMessage(message)) {
+    if (index >= 0) messages.value.splice(index, 1)
+    return
+  }
+  if (index < 0) {
+    messages.value.push(message)
+  } else {
+    messages.value[index] = message
+  }
+  messageScrollKey.value += 1
+}
+
+const handleStreamEvent = (event: AgentStreamEvent): void => {
+  if (event.event === 'session') {
+    rememberSession(event.session_id, event.session_key)
+    return
+  }
+  if (event.event === 'transport_error') {
+    transportError.value = event.message
+    return
+  }
+  if (event.event === 'done') return
+
+  if (!acceptStreamEvent(event)) return
+  if (event.phase === 'delta') {
+    applyDelta(event)
+    return
   }
 
-  locallyResolvedFollowUpConfirmations.set(confirmation.case_public_id, locallyResolved)
-  messages.value = messages.value.map((message) => ({
-    ...message,
-    linkedFollowUpTaskConfirmations: message.linkedFollowUpTaskConfirmations.map((item) => (
-      item.case_public_id === confirmation.case_public_id ? locallyResolved : item
-    )),
-  }))
+  upsertFinalMessage(event.message)
+  streamingBlocks.value = []
+  activeStreamFinalized.value = true
 }
 
-const refreshAgentMessagesAfterFollowUpConfirmation = (
-  targetSessionId: number,
-  casePublicId: string,
-): void => {
-  void loadSessionMessages(targetSessionId).catch((error: unknown) => {
-    logger.warn('[CRMAgentChat]', 'followUpConfirmation:messageRefreshFailed', {
-      casePublicId,
-      sessionId: targetSessionId,
-      errorMessage: error instanceof Error ? error.message : String(error),
-    })
-  })
+const requestContext = (): Pick<AgentChatRequest, 'session_id' | 'session_key'> => {
+  if (sessionId.value !== undefined) return { session_id: sessionId.value }
+  if (sessionKey.value !== undefined) return { session_key: sessionKey.value }
+  return {}
 }
 
-const confirmFollowUpTaskCompletion = async (
-  confirmation: AgentLinkedFollowUpTaskConfirmation,
+const reloadAuthoritativeSessionState = async (): Promise<AgentMessageLoadResult | undefined> => {
+  const targetSessionId = sessionId.value
+  if (targetSessionId === undefined) return undefined
+  const [messageResult] = await Promise.all([
+    loadSessionMessages(targetSessionId),
+    loadSessionOperations(targetSessionId).catch(() => undefined),
+  ])
+  return messageResult
+}
+
+const submitInput = async (
+  agentInput: AgentChatInput,
+  options: { pendingText?: string, label: string },
 ): Promise<void> => {
-  if (confirmationStore.resolvingCaseId !== null) return
-
-  const confirmed = await confirmDialog(
-    "确认已完成该关联待办？完成后不能在此消息中撤销。",
-    "确认完成",
-    { confirmText: "确认完成" },
-  )
-  if (!confirmed) return
-
-  try {
-    const response = await confirmationStore.resolveCase(confirmation.case_public_id, "已完成")
-    if (!response.decision.resolved) {
-      toast.error("关联待办未能完成，请稍后重试。")
-      return
-    }
-
-    applyResolvedFollowUpTaskConfirmation(confirmation, response)
-    logger.info('[CRMAgentChat]', 'followUpConfirmation:resolved', {
-      casePublicId: confirmation.case_public_id,
-      sessionId: sessionId.value,
-    })
-    toast.success("关联待办已完成")
-
-    if (sessionId.value !== undefined) {
-      refreshAgentMessagesAfterFollowUpConfirmation(sessionId.value, confirmation.case_public_id)
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "确认关联待办失败"
-    logger.error('[CRMAgentChat]', 'followUpConfirmation:resolveFailed', {
-      casePublicId: confirmation.case_public_id,
-      error,
-    })
-    toast.error(message)
-  }
-}
-
-const sendMessageContent = async (content: string, interactionMetadata?: Record<string, unknown>): Promise<void> => {
-  if (content.length === 0 || isStreaming.value) return
-
+  if (isStreaming.value) return
   const token = userStore.token
   if (!token) {
-    toast.error("请先登录")
+    toast.error('请先登录')
     return
   }
 
-  const userMessageId = nextId("user")
-  messages.value.push({
-    id: userMessageId,
-    role: "user",
-    content,
-    contentFormat: "text",
-    steps: [],
-    linkedFollowUpTaskConfirmations: [],
-  })
-  activeUserMessageId.value = userMessageId
-  startAssistantDraft()
-  input.value = ""
-  setActiveInteraction(null)
-  shouldRefreshFollowUpConfirmationsAfterStream.value = false
+  transportError.value = null
+  resetStreamProjection()
+  pendingUserText.value = options.pendingText ?? null
+  pendingRequestLabel.value = options.label
   isStreaming.value = true
 
-  try {
-    const request = {
-      content,
-      ...(sessionId.value !== undefined ? { session_id: sessionId.value } : {}),
-      ...(sessionKey.value !== undefined ? { session_key: sessionKey.value } : {}),
-      ...(interactionMetadata !== undefined ? { interaction_metadata: interactionMetadata } : {}),
-    }
+  const request: AgentChatRequest = {
+    ...requestContext(),
+    client_request_id: crypto.randomUUID(),
+    input: agentInput,
+  }
 
-    await agentApi.chatStream(
-      request,
-      handleSSEEvent,
-      token
-    )
-    const completedSessionId = sessionId.value
-    if (completedSessionId !== undefined) {
-      try {
-        if (shouldRefreshFollowUpConfirmationsAfterStream.value) {
-          await loadSessionMessages(completedSessionId)
-        } else {
-          await loadSessionOperations(completedSessionId)
-        }
-      } catch {
-        // The streamed response remains usable; a later session refresh restores any delayed artifacts.
-      }
+  try {
+    await agentApi.chatStream(request, handleStreamEvent, token)
+    try {
+      await reloadAuthoritativeSessionState()
+    } catch {
+      // The final Agent UI message remains authoritative and visible until the next refresh.
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Agent 请求失败"
-    addEventLog(message, "error")
-    const draft = activeAssistantMessage()
-    if (draft) {
-      draft.content = "Agent 请求失败，请稍后重试。"
-      draft.isStreaming = false
-    }
+    const message = error instanceof Error ? error.message : 'Agent 请求失败'
+    if (transportError.value === null) transportError.value = message
     toast.error(message)
+    resetStreamProjection()
+    try {
+      await reloadAuthoritativeSessionState()
+    } catch {
+      // Preserve the original transport/protocol error; a later refresh can recover history.
+    }
   } finally {
-    const draft = activeAssistantMessage()
-    if (draft) draft.isStreaming = false
-    activeAssistantId.value = null
-    activeUserMessageId.value = null
     isStreaming.value = false
+    resetStreamProjection()
+    messageScrollKey.value += 1
   }
 }
 
 const sendMessage = async (): Promise<void> => {
-  await sendMessageContent(input.value.trim())
+  const text = input.value.trim()
+  if (text.length === 0 || isStreaming.value) return
+  input.value = ''
+  await submitInput({ type: 'text', text }, { pendingText: text, label: '正在理解并处理...' })
 }
 
-const sendInteractionMessage = async (content: string, metadata?: Record<string, unknown>): Promise<void> => {
-  await sendMessageContent(content.trim(), metadata)
+const unlockInteraction = (actionId: string): void => {
+  lockedInteractionActionIds.value = new Set(
+    [...lockedInteractionActionIds.value].filter(item => item !== actionId)
+  )
 }
 
-const cancelInteraction = async (): Promise<void> => {
-  await sendInteractionMessage("先不处理")
+const submitCompactTaskInteraction = async (actionId: string, values: JsonObject): Promise<void> => {
+  if (isStreaming.value || lockedInteractionActionIds.value.has(actionId)) return
+  const token = userStore.token
+  if (!token) {
+    toast.error('请先登录')
+    return
+  }
+
+  const actionRef = findCompactTaskAction(messages.value, actionId)
+  if (actionRef === undefined) return
+  const previousMessages = messages.value
+  lockedInteractionActionIds.value = new Set([...lockedInteractionActionIds.value, actionId])
+  messages.value = optimisticallyCompleteCompactTask(messages.value, actionId)
+  messageScrollKey.value += 1
+
+  let finalError: string | null = null
+  let successfulFinalReceived = false
+  let streamFailure: string | null = null
+  const request: AgentChatRequest = {
+    ...requestContext(),
+    client_request_id: crypto.randomUUID(),
+    input: { type: 'interaction_submission', action_id: actionId, values },
+  }
+
+  try {
+    await agentApi.chatStream(request, (event) => {
+      if (event.event === 'session') {
+        rememberSession(event.session_id, event.session_key)
+        return
+      }
+      if (event.event === 'transport_error') {
+        streamFailure = event.message
+        return
+      }
+      if (event.event !== 'agent_ui' || event.phase !== 'final') return
+
+      const errorBlock = event.message.blocks.find(block => block.type === 'error')
+      if (errorBlock?.type === 'error') {
+        finalError = errorBlock.message
+        return
+      }
+      if (event.message.metadata.display !== 'STATE_UPDATE') {
+        finalError = '待办状态响应无效'
+        return
+      }
+      successfulFinalReceived = true
+    }, token)
+  } catch (error) {
+    streamFailure = error instanceof Error ? error.message : '待办完成失败'
+  }
+
+  let authoritative: AgentMessageLoadResult | undefined
+  try {
+    authoritative = await reloadAuthoritativeSessionState()
+  } catch {
+    authoritative = undefined
+  }
+  const authoritativeState = authoritative?.applied === true
+    ? compactTaskActionState(authoritative.messages, actionRef)
+    : 'UNKNOWN'
+
+  if (successfulFinalReceived || authoritativeState === 'SUBMITTED') {
+    messages.value = optimisticallyCompleteCompactTask(messages.value, actionId)
+    unlockInteraction(actionId)
+    messageScrollKey.value += 1
+    return
+  }
+
+  if (finalError !== null) {
+    messages.value = restoreCompactTaskAction(
+      messages.value,
+      authoritativeState === 'ACTIVE'
+        ? authoritative?.messages ?? previousMessages
+        : previousMessages,
+      actionId,
+    )
+    unlockInteraction(actionId)
+    messageScrollKey.value += 1
+    toast.error(finalError)
+    return
+  }
+
+  if (authoritativeState === 'ACTIVE') {
+    messages.value = restoreCompactTaskAction(messages.value, authoritative?.messages ?? previousMessages, actionId)
+    unlockInteraction(actionId)
+    messageScrollKey.value += 1
+    toast.error(streamFailure ?? '待办完成失败')
+    return
+  }
+
+  toast.error('完成状态确认中，请刷新会话查看')
+}
+
+const submitInteraction = async (actionId: string, values: JsonObject): Promise<void> => {
+  if (isCompactTaskCompletionAction(messages.value, actionId)) {
+    await submitCompactTaskInteraction(actionId, values)
+    return
+  }
+  lockedInteractionActionIds.value = new Set([...lockedInteractionActionIds.value, actionId])
+  await submitInput(
+    { type: 'interaction_submission', action_id: actionId, values },
+    { label: '正在提交...' },
+  )
+}
+
+const submitEntityAction = async (actionId: string): Promise<void> => {
+  await submitInput(
+    { type: 'entity_action', action_id: actionId },
+    { label: '正在执行操作...' },
+  )
+}
+
+const openEntity = (entityRef: EntityRef): void => {
+  if (entityRef.resource === 'customer') {
+    selectedCustomerId.value = entityRef.public_id
+  }
 }
 
 const useExample = (example: string): void => {
@@ -1043,289 +671,24 @@ onBeforeUnmount(() => {
 })
 </script>
 
-<style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
-
+<style scoped>
 .agent-chat {
-  --agent-composer-height: #{$wolf-shell-footer-height-v2};
-  --agent-interaction-gap: #{$wolf-space-lg-v2};
-
-  position: relative;
-  display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
-  height: 100%;
-  max-height: 100%;
-  min-height: 0;
-  overflow: hidden;
-  border: 0;
-  background: transparent;
-  box-shadow: none;
 }
 
-.agent-chat__messages {
-  height: 100%;
-  max-height: 100%;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.agent-chat__turn {
-  display: grid;
-  gap: $wolf-space-md-v2;
-  width: 100%;
-}
-
-.agent-chat__message {
-  align-items: flex-start;
-}
-
-.agent-chat__operations,
-.agent-chat__follow-up-confirmations {
+.agent-chat__transport-error {
   width: min(calc(100% - 40px), 680px);
   margin-left: 40px;
 }
 
-.agent-chat__operations {
-  display: grid;
-  gap: $wolf-space-sm-v2;
-}
-
-.agent-chat__follow-up-confirmations {
-  display: grid;
-  gap: $wolf-space-sm-v2;
-}
-
-.agent-chat__avatar {
-  width: 32px;
-  height: 32px;
-  flex: 0 0 32px;
-}
-
-.agent-chat__avatar--assistant {
-  border: 1px solid rgba($wolf-primary-v2, 0.14);
-  background: rgba($wolf-primary-v2, 0.1);
-  color: $wolf-primary-v2;
-}
-
-.agent-chat__avatar--user {
-  background: $wolf-primary-v2;
-  color: $wolf-text-inverse-v2;
-}
-
-.agent-chat__avatar-fallback {
-  display: flex;
-  width: 100%;
-  height: 100%;
-  align-items: center;
-  justify-content: center;
-  color: inherit;
-  font-weight: $wolf-font-weight-semibold-v2;
-}
-
-.agent-chat__bubble {
-  overflow-wrap: anywhere;
-  font-size: $wolf-font-size-auxiliary-v2;
-  line-height: $wolf-line-height-body-v2;
-}
-
-.agent-chat__bubble--assistant {
-  border-color: rgba($wolf-primary-v2, 0.16);
-  background: #F8FBFF;
-  color: $wolf-text-primary-v2;
-  box-shadow: none;
-}
-
-.agent-chat__bubble--user {
-  color: $wolf-text-inverse-v2;
-}
-
-.agent-chat__bubble-content {
-  min-width: 0;
-}
-
-.agent-chat__stream {
-  display: grid;
-  gap: $wolf-space-xs-v2;
-  margin-bottom: $wolf-space-md-v2;
-  padding-bottom: $wolf-space-sm-v2;
-  border-bottom: 1px solid rgba($wolf-primary-v2, 0.12);
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  line-height: 1.5;
-}
-
-.agent-chat__stream-summary {
-  display: grid;
-  grid-template-columns: 28px 14px 16px minmax(0, 1fr);
-  align-items: center;
-  gap: $wolf-space-sm-v2;
-  width: 100%;
-  min-height: 24px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.agent-chat__step-count {
-  display: inline-grid;
-  place-items: center;
-  width: 28px;
-  height: 22px;
-  border-radius: $wolf-radius-full-v2;
-  background: rgba($wolf-primary-v2, 0.1);
-  color: $wolf-primary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-}
-
-.agent-chat__stream-chevron {
-  width: 14px;
-  height: 14px;
-  color: $wolf-text-tertiary-v2;
-}
-
-.agent-chat__stream-icon {
-  width: 15px;
-  height: 15px;
-  margin-top: 1px;
-  flex: 0 0 15px;
-}
-
-.agent-chat__stream-icon--active {
-  animation: agent-chat-pulse 1.2s ease-in-out infinite;
-}
-
-.agent-chat__stream-icon--info {
-  color: $wolf-primary-v2;
-}
-
-.agent-chat__stream-icon--success {
-  color: $wolf-success-v2;
-}
-
-.agent-chat__stream-icon--warning {
-  color: $wolf-warning-v2;
-}
-
-.agent-chat__stream-icon--danger {
-  color: $wolf-danger-v2;
-}
-
-.agent-chat__stream-latest {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agent-chat__stream-list {
-  display: grid;
-  gap: $wolf-space-sm-v2;
-  margin-top: $wolf-space-xs-v2;
-  padding-top: $wolf-space-xs-v2;
-  padding-left: $wolf-space-md-v2;
-  border-left: 1px solid rgba($wolf-primary-v2, 0.12);
-}
-
-.agent-chat__stream-step {
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
-  align-items: flex-start;
-  gap: $wolf-space-sm-v2;
-}
-
-@keyframes agent-chat-pulse {
-  0%,
-  100% {
-    opacity: 0.4;
-  }
-
-  50% {
-    opacity: 1;
-  }
-}
-
-.agent-chat__empty {
-  display: grid;
-  place-items: center;
-  align-content: center;
-  gap: $wolf-space-lg-v2;
-  min-height: 100%;
-  color: $wolf-text-secondary-v2;
-  text-align: center;
-}
-
-.agent-chat__empty-icon {
-  width: 36px;
-  height: 36px;
-  color: $wolf-primary-v2;
-}
-
-.agent-chat__empty-title {
-  font-size: $wolf-font-size-title-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  color: $wolf-text-primary-v2;
-}
-
-.agent-chat__examples {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: $wolf-space-sm-v2;
+.agent-chat__transport-error svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
 }
 
 .agent-chat__composer {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: var(--agent-composer-height);
-  padding: $wolf-space-md-v2 $wolf-page-padding-v2 $wolf-space-lg-v2;
-  border-top: 0;
-  background: transparent;
-}
-
-.agent-chat__input-group {
-  width: min(100%, 960px);
-  min-height: 60px;
-  border-color: rgba($wolf-border-default-v2, 0.72);
-  border-radius: $wolf-radius-xl-v2;
-  background: rgba($wolf-bg-card-v2, 0.98);
-  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08), 0 0 0 1px rgba(15, 23, 42, 0.03);
-  backdrop-filter: blur(12px);
-}
-
-.agent-chat__textarea {
-  min-height: 72px;
-  overflow-y: hidden;
-  padding-right: 56px;
-  padding-bottom: 14px;
-}
-
-.agent-chat__send {
-  position: absolute;
-  right: $wolf-space-md-v2;
-  bottom: $wolf-space-md-v2;
-  width: 32px;
-  min-width: 32px;
-  height: 32px;
-  min-height: 32px;
-  border-radius: $wolf-radius-full-v2;
-}
-
-@media (max-width: 767px) {
-  .agent-chat {
-    height: 100%;
-    min-height: 0;
-  }
-
-  .agent-chat__composer {
-    padding: $wolf-space-md-v2 $wolf-page-padding-mobile-v2 $wolf-space-md-v2;
-  }
-
+  min-height: calc(85px + env(safe-area-inset-bottom, 0px));
 }
 
 </style>

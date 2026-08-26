@@ -3,27 +3,37 @@
 import logging
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Sequence
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from sqlalchemy.orm import Session
 
-from app.crud.agent import agent_session_crud, agent_task_crud
+from app.crud.agent import agent_session_crud
 from app.crud.im_bot import im_inbound_event_crud
 from app.crud.sales_commitment import (
     follow_up_task_confirmation_case_crud,
     follow_up_task_confirmation_prompt_delivery_crud,
 )
-from app.models.agent import AgentTaskStatus
 from app.models.sales_commitment import (
     FollowUpTaskConfirmationDeliveryPurpose,
     FollowUpTaskConfirmationPromptStatus,
     FollowUpTaskConfirmationStatus,
 )
-from app.services.agent.confirmation_intent import agent_confirmation_intent_service
 from app.services.agent.im_conversation import agent_im_conversation_service
-from app.services.agent.input import AgentTurnInput
+from app.services.agent.input import AgentChannelContext, AgentInputKind
+from app.services.agent.ui.schemas import TextAgentInput
 from app.services.follow_up_task_confirmation_channel_service import FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION
 
 logger = logging.getLogger(__name__)
+
+
+def im_client_request_id(*, provider: str, provider_event_id: str) -> UUID:
+    """Derive one stable Agent turn idempotency key from the provider event identity."""
+
+    normalized_provider = provider.strip().lower()
+    normalized_event_id = provider_event_id.strip()
+    if not normalized_provider or not normalized_event_id:
+        raise ValueError("provider and provider_event_id are required")
+    return uuid5(NAMESPACE_URL, f"urn:crmwolf:agent:im:{normalized_provider}:{normalized_event_id}")
 
 
 @dataclass(frozen=True)
@@ -40,10 +50,9 @@ class IMConfirmationReplyTarget:
 class IMAgentGateway:
     """Normalize IM channel events before entering the Agent.
 
-    A reply is routed to an older Agent continuation only when the referenced
-    provider message carries a durable session/task or confirmation-delivery
-    binding. Chat recency and latest-interaction inference are deliberately not
-    routing authorities.
+    A reply re-enters a prior Agent session only when the referenced provider
+    message carries a durable session or confirmation-delivery binding. Chat
+    recency and latest-interaction inference are not routing authorities.
     """
 
     confirmation_emojis = {"Get", "Yes", "CheckMark", "OK", "THUMBSUP", "DONE", "JIAYI", "LGTM"}
@@ -56,6 +65,7 @@ class IMAgentGateway:
         team_id: int,
         user_id: int,
         provider: str,
+        provider_event_id: str,
         session_id: int,
         user_text: str,
         agent_content: str,
@@ -79,54 +89,64 @@ class IMAgentGateway:
             referenced_message_ids=referenced_ids,
         )
         if confirmation_target is not None:
-            turn_input = self._confirmation_turn_input(
+            channel_context = self._confirmation_channel_context(
                 confirmation_target,
                 provider=provider,
-                user_text=user_text,
                 metadata=reply_metadata,
             )
             return await agent_im_conversation_service.handle_message(
-                content=turn_input.content,
+                request_input=TextAgentInput(type="text", text=user_text),
+                client_request_id=im_client_request_id(
+                    provider=provider,
+                    provider_event_id=provider_event_id,
+                ),
+                channel_context=channel_context,
                 team_id=team_id,
                 user_id=user_id,
                 session_id=confirmation_target.session_id,
-                turn_input=turn_input,
             )
 
-        referenced_pending_session_id = self._resolve_referenced_pending_session_id(
+        referenced_session_id = self._resolve_referenced_session_id(
             db,
             team_id=team_id,
             user_id=user_id,
             provider=provider,
             referenced_message_ids=referenced_ids,
         )
-        if referenced_pending_session_id is not None:
-            direct_intent = agent_confirmation_intent_service._direct_confirmation_intent(user_text)
-            if direct_intent == "confirm":
-                turn_input = AgentTurnInput.confirm(source="im", provider=provider, metadata=reply_metadata)
-            elif direct_intent == "reject":
-                turn_input = AgentTurnInput.reject(source="im", provider=provider, metadata=reply_metadata)
-            else:
-                turn_input = AgentTurnInput.text(user_text, source="im", provider=provider, metadata=reply_metadata)
+        if referenced_session_id is not None:
             return await agent_im_conversation_service.handle_message(
-                content=turn_input.content,
+                request_input=TextAgentInput(type="text", text=user_text),
+                client_request_id=im_client_request_id(
+                    provider=provider,
+                    provider_event_id=provider_event_id,
+                ),
+                channel_context=AgentChannelContext(
+                    source="im",
+                    provider=provider,
+                    metadata=reply_metadata,
+                ),
                 team_id=team_id,
                 user_id=user_id,
-                session_id=referenced_pending_session_id,
-                turn_input=turn_input,
+                session_id=referenced_session_id,
             )
 
         return await agent_im_conversation_service.handle_message(
-            content=agent_content,
+            request_input=TextAgentInput(
+                type="text",
+                text=user_text if referenced_ids else agent_content,
+            ),
+            client_request_id=im_client_request_id(
+                provider=provider,
+                provider_event_id=provider_event_id,
+            ),
+            channel_context=AgentChannelContext(
+                source="im",
+                provider=provider,
+                metadata=reply_metadata if referenced_ids else {"raw_text": user_text},
+            ),
             team_id=team_id,
             user_id=user_id,
             session_id=session_id,
-            turn_input=AgentTurnInput.text(
-                agent_content,
-                source="im",
-                provider=provider,
-                metadata={"raw_text": user_text},
-            ),
         )
 
     async def handle_reaction(
@@ -136,6 +156,7 @@ class IMAgentGateway:
         team_id: int,
         user_id: int,
         provider: str,
+        provider_event_id: str,
         response_message_id: str,
         emoji_type: str,
     ) -> Optional[Dict[str, Any]]:
@@ -152,21 +173,24 @@ class IMAgentGateway:
         )
         if confirmation_target is not None:
             reply_text = "已完成" if intent == "confirm" else "先放着"
-            turn_input = self._confirmation_turn_input(
+            channel_context = self._confirmation_channel_context(
                 confirmation_target,
                 provider=provider,
-                user_text=reply_text,
                 metadata={
                     "emoji_type": emoji_type,
                     "response_message_id": response_message_id,
                 },
             )
             return await agent_im_conversation_service.handle_message(
-                content=turn_input.content,
+                request_input=TextAgentInput(type="text", text=reply_text),
+                client_request_id=im_client_request_id(
+                    provider=provider,
+                    provider_event_id=provider_event_id,
+                ),
+                channel_context=channel_context,
                 team_id=team_id,
                 user_id=user_id,
                 session_id=confirmation_target.session_id,
-                turn_input=turn_input,
             )
 
         session_id = self._session_id_for_response_message(
@@ -177,18 +201,28 @@ class IMAgentGateway:
             response_message_id=response_message_id,
         )
         if not session_id:
-            logger.info("IM 表情未命中精确机器人回复绑定，跳过: provider=%s message_id=%s", provider, response_message_id)
+            logger.info(
+                "IM 表情未命中精确机器人回复绑定，跳过: provider=%s message_id=%s", provider, response_message_id
+            )
             return None
         return await agent_im_conversation_service.handle_message(
-            content="确认" if intent == "confirm" else "取消",
+            request_input=TextAgentInput(
+                type="text",
+                text="确认" if intent == "confirm" else "取消",
+            ),
+            client_request_id=im_client_request_id(
+                provider=provider,
+                provider_event_id=provider_event_id,
+            ),
+            channel_context=AgentChannelContext(
+                source="im",
+                provider=provider,
+                input_kind=(AgentInputKind.CONFIRM if intent == "confirm" else AgentInputKind.REJECT),
+                metadata={"emoji_type": emoji_type},
+            ),
             team_id=team_id,
             user_id=user_id,
             session_id=session_id,
-            turn_input=(
-                AgentTurnInput.confirm(source="im", provider=provider, metadata={"emoji_type": emoji_type})
-                if intent == "confirm"
-                else AgentTurnInput.reject(source="im", provider=provider, metadata={"emoji_type": emoji_type})
-            ),
         )
 
     def intent_from_emoji(self, emoji_type: str) -> Optional[str]:
@@ -271,12 +305,15 @@ class IMAgentGateway:
         delivery_session_id = getattr(delivery, "agent_session_id", None)
         if not source_session_id or not delivery_session_id or source_session_id != delivery_session_id:
             return None
-        if agent_session_crud.get_by_id(
-            db,
-            source_session_id,
-            team_id=team_id,
-            user_id=user_id,
-        ) is None:
+        if (
+            agent_session_crud.get_by_id(
+                db,
+                source_session_id,
+                team_id=team_id,
+                user_id=user_id,
+            )
+            is None
+        ):
             return None
 
         source_interaction_id = self._clean_string(getattr(source_event, "agent_interaction_id", None))
@@ -296,7 +333,7 @@ class IMAgentGateway:
             prompt_delivery_key=source_prompt_key or delivery_prompt_key,
         )
 
-    def _resolve_referenced_pending_session_id(
+    def _resolve_referenced_session_id(
         self,
         db: Session,
         *,
@@ -319,16 +356,14 @@ class IMAgentGateway:
                 return session_id
         return None
 
-    def _confirmation_turn_input(
+    def _confirmation_channel_context(
         self,
         target: IMConfirmationReplyTarget,
         *,
         provider: str,
-        user_text: str,
         metadata: Dict[str, Any],
-    ) -> AgentTurnInput:
-        return AgentTurnInput.text(
-            user_text,
+    ) -> AgentChannelContext:
+        return AgentChannelContext(
             source="im",
             provider=provider,
             metadata={
@@ -364,51 +399,20 @@ class IMAgentGateway:
         if getattr(source_event, "confirmation_delivery_public_id", None):
             return None
 
-        bound_session_id = self._verified_bound_session_id(
+        session_id = getattr(source_event, "agent_session_id", None)
+        if session_id and agent_session_crud.get_by_id(
             db,
-            source_event=source_event,
+            session_id,
             team_id=team_id,
             user_id=user_id,
-        )
-        if bound_session_id:
-            return bound_session_id
-        if getattr(source_event, "agent_task_id", None):
-            logger.info(
-                "IM 回复命中的 Agent task 已不再等待用户，跳过旧回复绑定: provider=%s response_message_id=%s task_id=%s",
-                provider,
-                response_message_id,
-                source_event.agent_task_id,
-            )
-            return None
+        ):
+            return session_id
 
         logger.info(
-            "IM 回复消息缺少精确 Agent session/task 绑定，跳过: provider=%s response_message_id=%s",
+            "IM 回复消息缺少有效 Agent session 绑定，跳过: provider=%s response_message_id=%s",
             provider,
             response_message_id,
         )
-        return None
-
-    def _verified_bound_session_id(
-        self,
-        db: Session,
-        *,
-        source_event: Any,
-        team_id: int,
-        user_id: int,
-    ) -> Optional[int]:
-        session_id = getattr(source_event, "agent_session_id", None)
-        task_id = getattr(source_event, "agent_task_id", None)
-        if task_id:
-            task = agent_task_crud.get_by_id(db, task_id, team_id=team_id, user_id=user_id)
-            if (
-                task
-                and task.status == AgentTaskStatus.WAITING_USER
-                and (not session_id or task.session_id == session_id)
-            ):
-                return task.session_id
-            return None
-        if session_id and agent_session_crud.get_by_id(db, session_id, team_id=team_id, user_id=user_id):
-            return session_id
         return None
 
     @staticmethod

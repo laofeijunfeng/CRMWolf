@@ -1,0 +1,400 @@
+{
+  "query_spec": {
+    "resource": "customer",
+    "projection": [
+      "public_id",
+      "account_name",
+      "city",
+      "industry",
+      "status",
+      "owner"
+    ],
+    "filters": [
+      {
+        "field": "city",
+        "operator": "eq",
+        "value": "上海"
+      }
+    ],
+    "sorts": [
+      {
+        "field": "last_modified_time",
+        "direction": "desc"
+      }
+    ],
+    "metrics": [],
+    "group_by": [],
+    "scope": "accessible",
+    "page_size": 10,
+    "cursor": null
+  },
+  "query_result": {
+    "query_id": "qry_01JEXAMPLE",
+    "result_set_id": "rs_01JEXAMPLE",
+    "resource": "customer",
+    "status": "PARTIAL",
+    "rows": [
+      {
+        "public_id": "cus_01J1",
+        "account_name": "示例科技有限公司",
+        "city": "上海",
+        "industry": "软件和信息技术服务",
+        "status": "重点客户"
+      }
+    ],
+    "entity_refs": [
+      {
+        "ref_id": "eref_01J1",
+        "resource": "customer",
+        "public_id": "cus_01J1",
+        "display_name": "示例科技有限公司",
+        "result_set_id": "rs_01JEXAMPLE"
+      }
+    ],
+    "total": 18,
+    "next_cursor": "cursor_2",
+    "applied_filters": [
+      {
+        "field": "city",
+        "operator": "eq",
+        "value": "上海"
+      }
+    ],
+    "applied_sorts": [
+      {
+        "field": "last_modified_time",
+        "direction": "desc"
+      }
+    ],
+    "facts": [
+      {
+        "fact_id": "fact_total",
+        "label": "客户总数",
+        "value": 18,
+        "source": "CRM_API",
+        "source_ref": "GET /v1/customers/",
+        "entity_ref": null
+      }
+    ],
+    "warnings": [
+      {
+        "code": "RESULT_TRUNCATED",
+        "message": "当前仅返回前 10 条结果。",
+        "resource": "customer"
+      }
+    ]
+  },
+  "query_error": {
+    "code": "QUERY_INVALID",
+    "message": "字段不支持筛选。",
+    "retryable": false,
+    "field": "unknown_field",
+    "operator": "eq"
+  },
+  "agent_ui_envelope": {
+    "schema_version": "crm.agent.ui.v1",
+    "message_id": 12345,
+    "turn_id": "turn_01JEXAMPLE",
+    "role": "assistant",
+    "state": "final",
+    "blocks": [
+      {
+        "id": "b_text_1",
+        "type": "text",
+        "format": "plain",
+        "text": "共找到 18 家公司。"
+      },
+      {
+        "id": "b_customers_1",
+        "type": "entity_list",
+        "entity_type": "customer",
+        "result_set_id": "rs_01JEXAMPLE",
+        "items": [
+          {
+            "entity_ref": {
+              "ref_id": "eref_01J1",
+              "resource": "customer",
+              "public_id": "cus_01J1",
+              "display_name": "示例科技有限公司",
+              "result_set_id": "rs_01JEXAMPLE"
+            }
+          }
+        ],
+        "total": 18
+      },
+      {
+        "id": "b_page_1",
+        "type": "pagination",
+        "result_set_id": "rs_01JEXAMPLE",
+        "range_start": 1,
+        "range_end": 10,
+        "total": 18,
+        "next_action_id": "act_next_01J"
+      }
+    ],
+    "suggested_actions": [
+      {
+        "action_id": "act_filter_mine",
+        "type": "query_refinement",
+        "label": "只看我负责的客户"
+      }
+    ],
+    "metadata": {
+      "route": "QUERY",
+      "result_set_id": "rs_01JEXAMPLE",
+      "accessibility_label": "上海客户列表，共18家"
+    }
+  },
+  "chat_requests": [
+    {
+      "session_id": 123,
+      "client_request_id": "6fa2e0e8-86d4-4d6c-a1b0-6490b2bf12be",
+      "input": {
+        "type": "text",
+        "text": "我在上海有哪些客户"
+      }
+    },
+    {
+      "session_key": "web-session-01",
+      "client_request_id": "1310b4d1-3d5c-4b22-a1dd-d1e5a6aa9ac5",
+      "input": {
+        "type": "interaction_submission",
+        "action_id": "act_submit_1",
+        "values": {
+          "decision": "confirm"
+        }
+      }
+    },
+    {
+      "session_id": 123,
+      "client_request_id": "9d2e9d23-0b31-4dbe-ad31-b0ec33efdb86",
+      "input": {
+        "type": "entity_action",
+        "action_id": "act_open_1"
+      }
+    }
+  ],
+  "completed_work_request": {
+    "window": "today",
+    "customer_id": null,
+    "start_at": null,
+    "end_at": null,
+    "cursor": null,
+    "limit": 50
+  },
+  "completed_work_response": {
+    "items": [
+      {
+        "fact_id": "completed_follow_up_task:fut_01:2026-08-21T10:00:00",
+        "fact_type": "completed_follow_up_task",
+        "source_group": "task",
+        "source_table": "crm_follow_up_tasks",
+        "source_public_id": "fut_01",
+        "business_key": null,
+        "occurred_at": "2026-08-21T10:00:00",
+        "customer": {
+          "id": "cus_01",
+          "public_id": "cus_01",
+          "name": "示例客户",
+          "account_name": "示例客户"
+        },
+        "attribution": {
+          "user_id": "42",
+          "field": "owner_id",
+          "source": "crm_follow_up_tasks.owner_id"
+        },
+        "title": "完成方案确认",
+        "payload": {
+          "id": "fut_01",
+          "public_id": "fut_01",
+          "customer": {
+            "id": "cus_01",
+            "public_id": "cus_01",
+            "name": "示例客户",
+            "account_name": "示例客户"
+          },
+          "owner_id": "42",
+          "creator_id": "42",
+          "title": "完成方案确认",
+          "description": null,
+          "status": "COMPLETED",
+          "due_at": "2026-08-21T09:00:00",
+          "due_at_text": null,
+          "completed_at": "2026-08-21T10:00:00"
+        }
+      }
+    ],
+    "available_total": 1,
+    "returned_count": 1,
+    "truncated": false,
+    "next_cursor": null,
+    "source_counts": {
+      "completed_follow_up_task": 1,
+      "customer_activity": 0
+    },
+    "source_total_counts": {
+      "completed_follow_up_task": 1,
+      "customer_activity": 0
+    },
+    "source_status": {
+      "completed_tasks": "queried",
+      "customer_activities": "queried",
+      "business_events": "skipped"
+    },
+    "filters": {
+      "window": "today",
+      "starts_at": "2026-08-21T00:00:00",
+      "ends_at": "2026-08-22T00:00:00",
+      "starts_on": "2026-08-21",
+      "ends_before": "2026-08-22",
+      "timezone": "Asia/Shanghai",
+      "customer_id": null,
+      "include_tasks": true,
+      "include_activities": true,
+      "include_business_events": false
+    }
+  },
+  "completed_work_error": {
+    "code": "PERMISSION_DENIED",
+    "status_code": 403,
+    "detail": "无权查看该客户"
+  },
+  "agent_ui_stream_events": [
+    {
+      "event": "agent_ui",
+      "phase": "delta",
+      "message_id": 12345,
+      "turn_id": "turn_01JEXAMPLE",
+      "sequence": 1,
+      "operations": [
+        {
+          "op": "append_text",
+          "block_id": "b_text_1",
+          "delta": "你当前可访问的"
+        }
+      ]
+    },
+    {
+      "event": "agent_ui",
+      "phase": "final",
+      "message_id": 12345,
+      "turn_id": "turn_01JEXAMPLE",
+      "sequence": 2,
+      "message": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 12345,
+        "turn_id": "turn_01JEXAMPLE",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_text_1",
+            "type": "text",
+            "format": "plain",
+            "text": "共找到 18 家公司。"
+          },
+          {
+            "id": "b_customers_1",
+            "type": "entity_list",
+            "entity_type": "customer",
+            "result_set_id": "rs_01JEXAMPLE",
+            "items": [
+              {
+                "entity_ref": {
+                  "ref_id": "eref_01J1",
+                  "resource": "customer",
+                  "public_id": "cus_01J1",
+                  "display_name": "示例科技有限公司",
+                  "result_set_id": "rs_01JEXAMPLE"
+                }
+              }
+            ],
+            "total": 18
+          },
+          {
+            "id": "b_page_1",
+            "type": "pagination",
+            "result_set_id": "rs_01JEXAMPLE",
+            "range_start": 1,
+            "range_end": 10,
+            "total": 18,
+            "next_action_id": "act_next_01J"
+          }
+        ],
+        "suggested_actions": [
+          {
+            "action_id": "act_filter_mine",
+            "type": "query_refinement",
+            "label": "只看我负责的客户"
+          }
+        ],
+        "metadata": {
+          "route": "QUERY",
+          "result_set_id": "rs_01JEXAMPLE",
+          "accessibility_label": "上海客户列表，共18家"
+        }
+      }
+    }
+  ],
+  "root_decision": {
+    "task_relation": "NEW_TASK",
+    "route": "QUERY",
+    "risk": "READ_ONLY",
+    "context_policy": {
+      "selected_entity": "IGNORE",
+      "previous_query": "IGNORE",
+      "result_set": "IGNORE",
+      "active_workflow": "NONE"
+    },
+    "confidence": 0.98,
+    "reason_code": "NEW_READ_ONLY_QUERY",
+    "evidence": [
+      "用户明确指定上海客户"
+    ]
+  },
+  "root_context_snapshot": {
+    "previous_query": {
+      "resource": "customer",
+      "projection": [
+        "public_id",
+        "account_name",
+        "city",
+        "industry",
+        "status",
+        "owner"
+      ],
+      "filters": [
+        {
+          "field": "city",
+          "operator": "eq",
+          "value": "上海"
+        }
+      ],
+      "sorts": [
+        {
+          "field": "last_modified_time",
+          "direction": "desc"
+        }
+      ],
+      "metrics": [],
+      "group_by": [],
+      "scope": "accessible",
+      "page_size": 10,
+      "cursor": null
+    },
+    "result_set": {
+      "result_set_id": "rs_01JEXAMPLE",
+      "ordered_entity_refs": [
+        {
+          "ref_id": "eref_01J1",
+          "resource": "customer",
+          "public_id": "cus_01J1",
+          "display_name": "示例科技有限公司",
+          "result_set_id": "rs_01JEXAMPLE"
+        }
+      ]
+    },
+    "active_workflow": null,
+    "resumable_workflows": []
+  }
+}

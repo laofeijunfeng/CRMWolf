@@ -1,4 +1,5 @@
 """LangGraph-native orchestration for complete, grounded CRM work summaries."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -10,10 +11,6 @@ from langgraph.types import Command, RetryPolicy
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.services.agent.checkpointer import (
-    agent_checkpoint_saver,
-    is_checkpoint_storage_error,
-)
 from app.services.work_summary_grounding import CitationResolver
 from app.services.work_summary_models import (
     DEFAULT_WORK_SUMMARY_PAGE_SIZE,
@@ -35,7 +32,7 @@ if TYPE_CHECKING:
 
     from app.services.agent.types import JSONDict
 
-WORK_SUMMARY_CHECKPOINT_NS = "crm_agent_work_summary"
+WORK_SUMMARY_RUNTIME = "crm_agent_work_summary"
 DEFAULT_PAGE_SIZE = DEFAULT_WORK_SUMMARY_PAGE_SIZE
 DEFAULT_MAX_FACTS_PER_SUMMARY = 500
 DEFAULT_MAX_PAGES = 10
@@ -101,7 +98,7 @@ class WorkSummaryRuntimeContext:
 
 
 class WorkSummaryGraphService:
-    """Owns pagination, checkpointed state, grounding, coverage, and rendering."""
+    """Owns one ephemeral pagination, grounding, coverage, and rendering run."""
 
     def __init__(
         self,
@@ -113,7 +110,6 @@ class WorkSummaryGraphService:
         max_facts_per_summary: int = DEFAULT_MAX_FACTS_PER_SUMMARY,
         max_pages: int = DEFAULT_MAX_PAGES,
         chunk_size: int = DEFAULT_CHUNK_SIZE,
-        checkpointer: object | None = None,
     ) -> None:
         self.citation_resolver = citation_resolver or CitationResolver()
         self.fact_service = fact_service or WorkSummaryService()
@@ -133,16 +129,11 @@ class WorkSummaryGraphService:
             raise ValueError("chunk_size 必须大于 0")
         required_chunks = (max_facts_per_summary + chunk_size - 1) // chunk_size
         if required_chunks > DEFAULT_WORK_SUMMARY_SYNTHESIS_CHUNK_BUDGET:
-            raise ValueError(
-                "工作总结配置超出 synthesis chunk budget；"
-                "请增大 chunk_size 或降低 max_facts_per_summary"
-            )
+            raise ValueError("工作总结配置超出 synthesis chunk budget；请增大 chunk_size 或降低 max_facts_per_summary")
         self.chunk_size = chunk_size
-        self._checkpoint_enabled = checkpointer is not None
-        self._graph = self._build_graph(checkpointer)
-        self._fallback_graph = self._build_graph(None)
+        self._graph = self._build_graph()
 
-    def _build_graph(self, checkpointer: object | None) -> CompiledStateGraph:
+    def _build_graph(self) -> CompiledStateGraph:
         graph = StateGraph(WorkSummaryGraphState, context_schema=WorkSummaryRuntimeContext)
         graph.add_node(
             "fetch_fact_page",
@@ -179,9 +170,7 @@ class WorkSummaryGraphService:
             },
         )
         graph.add_edge("synthesize_snapshot", END)
-        if checkpointer is None:
-            return graph.compile()
-        return graph.compile(checkpointer=checkpointer)
+        return graph.compile()
 
     async def run(self, request: WorkSummaryGraphRequest) -> WorkSummaryOutcome:
         query = WorkSummaryQuery(
@@ -220,12 +209,7 @@ class WorkSummaryGraphService:
             session_id=request.session_id,
             invocation_id=request.invocation_id,
         )
-        try:
-            result = await self._graph.ainvoke(state, config, context=context)
-        except SQLAlchemyError as exc:
-            if not self._checkpoint_enabled or not is_checkpoint_storage_error(exc):
-                raise
-            result = await self._fallback_graph.ainvoke(state, config, context=context)
+        result = await self._graph.ainvoke(state, config, context=context)
         return WorkSummaryOutcome.model_validate(result.get("outcome") or {})
 
     def _fetch_fact_page(
@@ -260,11 +244,13 @@ class WorkSummaryGraphService:
 
         snapshot_query = query
         if not state.get("facts") and page.filters.get("starts_at") and page.filters.get("ends_at"):
-            snapshot_query = query.model_copy(update={
-                "window": "custom",
-                "start_at": str(page.filters["starts_at"]),
-                "end_at": str(page.filters["ends_at"]),
-            })
+            snapshot_query = query.model_copy(
+                update={
+                    "window": "custom",
+                    "start_at": str(page.filters["starts_at"]),
+                    "end_at": str(page.filters["ends_at"]),
+                }
+            )
 
         update: WorkSummaryGraphState = {
             "query": snapshot_query.model_dump(),
@@ -333,13 +319,15 @@ class WorkSummaryGraphService:
             },
         )
         chunk_results = list(state.get("chunk_results") or [])
-        chunk_results.append({
-            "result": narrative.result.model_dump(),
-            "summary_source": narrative.summary_source,
-            "model": narrative.model,
-            "fallback_reason": narrative.fallback_reason,
-            "fallback_error": narrative.fallback_error,
-        })
+        chunk_results.append(
+            {
+                "result": narrative.result.model_dump(),
+                "summary_source": narrative.summary_source,
+                "model": narrative.model,
+                "fallback_reason": narrative.fallback_reason,
+                "fallback_error": narrative.fallback_error,
+            }
+        )
         return {
             "chunk_index": chunk_index + len(chunk),
             "chunk_results": chunk_results,
@@ -349,11 +337,7 @@ class WorkSummaryGraphService:
         self,
         state: WorkSummaryGraphState,
     ) -> Literal["summarize_chunk", "synthesize"]:
-        return (
-            "summarize_chunk"
-            if int(state.get("chunk_index") or 0) < len(state.get("facts") or [])
-            else "synthesize"
-        )
+        return "summarize_chunk" if int(state.get("chunk_index") or 0) < len(state.get("facts") or []) else "synthesize"
 
     async def _synthesize_snapshot(
         self,
@@ -382,8 +366,7 @@ class WorkSummaryGraphService:
         }
         chunk_envelopes = list(state.get("chunk_results") or [])
         chunk_results = [
-            WorkSummaryNarrativeResult.model_validate(envelope.get("result") or {})
-            for envelope in chunk_envelopes
+            WorkSummaryNarrativeResult.model_validate(envelope.get("result") or {}) for envelope in chunk_envelopes
         ]
         if not chunk_results:
             narrative = await self.narrative_service.summarize_with_metadata(
@@ -452,17 +435,12 @@ def build_work_summary_graph_config(
     invocation_id: str,
 ) -> RunnableConfig:
     return {
-        "configurable": {
-            "thread_id": (
-                f"crm_agent_work_summary:{team_id}:{user_id}:{session_id}:{invocation_id}"
-            ),
-        },
         "metadata": {
             "team_id": team_id,
             "user_id": user_id,
             "session_id": session_id,
-            "runtime": "crm_agent_work_summary",
-            "runtime_namespace": WORK_SUMMARY_CHECKPOINT_NS,
+            "invocation_id": invocation_id,
+            "runtime": WORK_SUMMARY_RUNTIME,
         },
     }
 
@@ -508,4 +486,4 @@ def _optional_text(value: object) -> str | None:
     return text or None
 
 
-work_summary_graph_service = WorkSummaryGraphService(checkpointer=agent_checkpoint_saver)
+work_summary_graph_service = WorkSummaryGraphService()

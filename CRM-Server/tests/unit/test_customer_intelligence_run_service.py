@@ -61,6 +61,39 @@ def _input(**kwargs) -> CustomerIntelligenceRunInput:  # noqa: ANN003
     )
 
 
+def test_same_team_and_event_key_reuses_run_across_request_ids():
+    db = _session()
+
+    first = customer_intelligence_run_service.ensure_pending(
+        db,
+        _input(request_id="request-first", event_key="shared-event", team_id=2),
+    )
+    second = customer_intelligence_run_service.ensure_pending(
+        db,
+        _input(request_id="request-retry", event_key="shared-event", team_id=2),
+    )
+
+    assert second.id == first.id
+    assert second.request_id == "request-first"
+    assert db.query(CustomerIntelligenceRun).count() == 1
+
+
+def test_same_event_key_is_independent_across_teams():
+    db = _session()
+
+    first = customer_intelligence_run_service.ensure_pending(
+        db,
+        _input(request_id="request-team-2", event_key="shared-event", team_id=2),
+    )
+    second = customer_intelligence_run_service.ensure_pending(
+        db,
+        _input(request_id="request-team-3", event_key="shared-event", team_id=3),
+    )
+
+    assert second.id != first.id
+    assert db.query(CustomerIntelligenceRun).count() == 2
+
+
 def test_pending_run_is_claimed_once_and_live_lease_is_busy():
     db = _session()
     run_input = _input()

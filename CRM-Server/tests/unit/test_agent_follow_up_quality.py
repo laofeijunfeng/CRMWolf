@@ -79,9 +79,11 @@ def test_follow_up_quality_normalizes_threshold_behavior():
 
 @pytest.mark.asyncio
 async def test_follow_up_quality_uses_langchain_structured_output_path():
+    calls = {}
+
     class FakeChatModel:
         def __init__(self, **kwargs):
-            self.kwargs = kwargs
+            calls["chat_model_kwargs"] = kwargs
 
     class FakeAgent:
         async def ainvoke(self, payload):
@@ -97,8 +99,6 @@ async def test_follow_up_quality_uses_langchain_structured_output_path():
                 }),
             }
 
-    calls = {}
-
     def fake_agent_factory(**kwargs):
         calls["response_format"] = kwargs["response_format"]
         calls["system_prompt"] = kwargs["system_prompt"]
@@ -110,7 +110,7 @@ async def test_follow_up_quality_uses_langchain_structured_output_path():
     )._evaluate_with_langchain(
         api_host="https://ai.example.com/v1",
         api_key="test-key",
-        model="test-model",
+        model="qwen3.5-plus",
         user_message="今天睿狐科技说项目已立项，下周三前提供招标参数版本",
         semantic_json=semantic_result().model_dump_json(exclude_none=True),
         memory_json="{}",
@@ -121,4 +121,5 @@ async def test_follow_up_quality_uses_langchain_structured_output_path():
     assert calls["response_format"] is AgentFollowUpQualityResult
     assert "客户活动质检 Agent" in calls["system_prompt"]
     assert "测试原则" in calls["system_prompt"]
+    assert calls["chat_model_kwargs"]["extra_body"] == {"enable_thinking": False}
     assert result.score == 72

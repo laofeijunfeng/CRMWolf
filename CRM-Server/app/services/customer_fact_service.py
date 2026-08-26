@@ -3,20 +3,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
 from hashlib import sha256
-from typing import Literal, TypeAlias
-
-from sqlalchemy.orm import Session
+from typing import TYPE_CHECKING, Literal, TypeAlias
 
 from app.models.customer_fact import (
     CustomerFact,
-    CustomerFactReviewAudit,
     CustomerFactRevision,
     CustomerFactRevisionType,
     CustomerFactSource,
     CustomerFactStatus,
 )
+
+if TYPE_CHECKING:
+    from datetime import datetime
+
+    from sqlalchemy.orm import Session
 
 JsonScalar: TypeAlias = str | int | float | bool | None
 JsonValue: TypeAlias = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
@@ -34,8 +35,7 @@ CustomerFactType: TypeAlias = Literal[
     "preference",
     "summary",
 ]
-CustomerFactCandidateAction: TypeAlias = Literal["upsert", "review", "ignore"]
-CustomerFactReviewDecisionValue: TypeAlias = Literal["APPROVED", "REJECTED", "CANCELLED"]
+CustomerFactCandidateAction: TypeAlias = Literal["upsert", "ignore"]
 
 
 @dataclass(frozen=True)
@@ -83,25 +83,7 @@ class CustomerFactCandidateAssessment:
     conflict_reason: str | None = None
 
 
-@dataclass(frozen=True)
-class CustomerFactReviewAuditInput:
-    tenant_id: int
-    team_id: int
-    customer_id: int
-    event_key: str
-    fact_type: CustomerFactType
-    content: str
-    decision: CustomerFactReviewDecisionValue
-    subject: str | None = None
-    confidence: float = 0.0
-    reviewer_id: int | None = None
-    decision_source: str | None = None
-    reason: str | None = None
-    conflict_reason: str | None = None
-    evidence_quote: str | None = None
-    fact_id: int | None = None
-    existing_fact_id: int | None = None
-    existing_version: int | None = None
+DEFAULT_AUTO_FACT_CONFIDENCE_THRESHOLD = 0.88
 
 
 class CustomerFactService:
@@ -111,26 +93,62 @@ class CustomerFactService:
         candidate: CustomerFactCandidateInput,
         existing_facts: list[JsonObject],
     ) -> CustomerFactCandidateAssessment:
-        original_action = candidate.action
-        if original_action == "ignore":
+        """Apply the non-blocking customer-fact persistence policy.
+
+        Customer intelligence is a background enrichment path, not a user-review
+        workflow. Only well-evidenced facts above the automatic threshold are
+        persisted. Ambiguous or conflicting candidates are retained in the graph
+        result for auditability and ignored without creating an interaction.
+        """
+        auto_threshold = DEFAULT_AUTO_FACT_CONFIDENCE_THRESHOLD
+        if candidate.action == "ignore":
             return CustomerFactCandidateAssessment(action="ignore", reason="candidate_marked_ignore")
 
         content = candidate.content.strip()
         if not content:
             return CustomerFactCandidateAssessment(action="ignore", reason="empty_candidate_content")
 
+        evidence_quote = (candidate.evidence_quote or "").strip()
+        candidate_confidence = _clamp_confidence(candidate.confidence)
         existing = self._matching_active_fact(candidate=candidate, existing_facts=existing_facts)
         if existing is None:
-            return CustomerFactCandidateAssessment(action=original_action, reason="new_fact_candidate")
+            if candidate_confidence < auto_threshold:
+                return CustomerFactCandidateAssessment(action="ignore", reason="low_confidence_ignored")
+            if not evidence_quote:
+                return CustomerFactCandidateAssessment(action="ignore", reason="missing_evidence_ignored")
+            return CustomerFactCandidateAssessment(action="upsert", reason="high_confidence_new_fact")
 
         existing_content = str(existing.get("content") or "").strip()
         existing_confidence = _json_float(existing.get("confidence"))
         existing_version = _json_int(existing.get("version")) or 1
         existing_fact_id = _json_int(existing.get("id"))
+        if candidate_confidence < auto_threshold:
+            return CustomerFactCandidateAssessment(
+                action="ignore",
+                reason="low_confidence_or_conflicting_fact_ignored",
+                existing_fact_id=existing_fact_id,
+                existing_version=existing_version,
+                existing_content=existing_content,
+                existing_confidence=existing_confidence,
+                conflict_reason=(
+                    "候选事实与客户智能档案中的既有事实内容不同"
+                    if _normalize_content(existing_content) != _normalize_content(content)
+                    else None
+                ),
+            )
+        if not evidence_quote:
+            return CustomerFactCandidateAssessment(
+                action="ignore",
+                reason="missing_evidence_ignored",
+                existing_fact_id=existing_fact_id,
+                existing_version=existing_version,
+                existing_content=existing_content,
+                existing_confidence=existing_confidence,
+            )
         if _normalize_content(existing_content) == _normalize_content(content):
             return CustomerFactCandidateAssessment(
-                action=original_action,
-                reason="same_fact_content",
+                action="upsert",
+                reason="high_confidence_same_fact_content",
                 existing_fact_id=existing_fact_id,
                 existing_version=existing_version,
                 existing_content=existing_content,
@@ -138,20 +156,9 @@ class CustomerFactService:
             )
 
         conflict_reason = "候选事实与客户智能档案中的既有事实内容不同"
-        candidate_confidence = _clamp_confidence(candidate.confidence)
-        if original_action == "review":
-            action: CustomerFactCandidateAction = "review"
-            reason = "candidate_marked_review_with_existing_fact"
-        elif candidate_confidence >= 0.88 and candidate_confidence >= existing_confidence:
-            action = "upsert"
-            reason = "high_confidence_replaces_existing_fact"
-        else:
-            action = "review"
-            reason = "content_conflict_requires_review"
-
         return CustomerFactCandidateAssessment(
-            action=action,
-            reason=reason,
+            action="ignore",
+            reason="conflicting_fact_ignored",
             existing_fact_id=existing_fact_id,
             existing_version=existing_version,
             existing_content=existing_content,
@@ -237,43 +244,6 @@ class CustomerFactService:
         if fact_input.source is not None:
             self.attach_source(db, fact=fact, source=fact_input.source)
         return fact
-
-    def record_review_decision(
-        self,
-        db: Session,
-        audit_input: CustomerFactReviewAuditInput,
-    ) -> CustomerFactReviewAudit:
-        review_key = self.review_key(audit_input)
-        existing = (
-            db.query(CustomerFactReviewAudit)
-            .filter(CustomerFactReviewAudit.review_key == review_key)
-            .one_or_none()
-        )
-        if existing is None:
-            existing = CustomerFactReviewAudit(
-                review_key=review_key,
-                tenant_id=audit_input.tenant_id,
-                team_id=audit_input.team_id,
-                customer_id=audit_input.customer_id,
-                event_key=audit_input.event_key.strip(),
-                fact_type=audit_input.fact_type,
-                subject=_clean_optional_text(audit_input.subject),
-                candidate_content=audit_input.content.strip(),
-                candidate_confidence=_clamp_confidence(audit_input.confidence),
-                decision=audit_input.decision,
-            )
-            db.add(existing)
-
-        existing.fact_id = audit_input.fact_id
-        existing.existing_fact_id = audit_input.existing_fact_id
-        existing.existing_version = audit_input.existing_version
-        existing.decision_source = _clean_optional_text(audit_input.decision_source)
-        existing.reviewer_id = audit_input.reviewer_id
-        existing.reason = _clean_optional_text(audit_input.reason)
-        existing.conflict_reason = _clean_optional_text(audit_input.conflict_reason)
-        existing.evidence_quote = _clean_optional_text(audit_input.evidence_quote)
-        db.flush()
-        return existing
 
     def _record_revision(
         self,
@@ -388,15 +358,6 @@ class CustomerFactService:
 
     def fact_key(self, *, team_id: int, customer_id: int, fact_type: str, subject: str | None) -> str:
         raw = f"crmwolf/customer-fact/{team_id}/{customer_id}/{fact_type}/{_clean_optional_text(subject) or ''}"
-        return sha256(raw.encode("utf-8")).hexdigest()
-
-    def review_key(self, audit_input: CustomerFactReviewAuditInput) -> str:
-        raw = (
-            "crmwolf/customer-fact-review/"
-            f"{audit_input.team_id}/{audit_input.customer_id}/{audit_input.event_key.strip()}/"
-            f"{audit_input.fact_type}/{_clean_optional_text(audit_input.subject) or ''}/"
-            f"{_normalize_content(audit_input.content)}/{audit_input.decision}"
-        )
         return sha256(raw.encode("utf-8")).hexdigest()
 
     def _matching_active_fact(

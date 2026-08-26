@@ -13,6 +13,7 @@ from app.services.follow_up_task_reconciliation_evaluation_service import (
     FollowUpTaskReconciliationDecision,
     FollowUpTaskReconciliationEvaluationCase,
     FollowUpTaskReconciliationEvaluationService,
+    FollowUpTaskReconciliationTaskDecision,
     follow_up_task_reconciliation_evaluation_service,
 )
 
@@ -23,7 +24,7 @@ if TYPE_CHECKING:
 
 class FollowUpTaskTransitionActionType:
     COMPLETE = "COMPLETE"
-    DELAY = "DELAY"
+    POSTPONE = "POSTPONE"
     CANCEL = "CANCEL"
     KEEP_OPEN = "KEEP_OPEN"
     ASK_CONFIRMATION = "ASK_CONFIRMATION"
@@ -71,7 +72,6 @@ class FollowUpTaskTransitionPlan:
     decision: FollowUpTaskReconciliationDecision
     actions: tuple[FollowUpTaskTransitionAction, ...]
     plan_source: str
-    safety_failures: tuple[str, ...] = ()
     state_mutation_requested: bool = False
 
     @property
@@ -81,19 +81,20 @@ class FollowUpTaskTransitionPlan:
     def to_dict(self) -> dict[str, Any]:
         return {
             "decision": {
-                "decision": self.decision.decision,
-                "task_public_id": self.decision.task_public_id,
                 "candidate_public_ids": list(self.decision.candidate_public_ids),
-                "confidence": self.decision.confidence,
-                "needs_confirmation": self.decision.needs_confirmation,
-                "proposed_due_at": self.decision.proposed_due_at,
-                "forbid_auto_reasons": list(self.decision.forbid_auto_reasons),
-                "evidence_terms": list(self.decision.evidence_terms),
-                "state_mutation_requested": self.decision.state_mutation_requested,
+                "task_decisions": self.decision.task_decisions_to_dict(),
+                "empty_outcome": (
+                    {
+                        "reason": self.decision.empty_reason,
+                        "confidence": self.decision.empty_confidence,
+                        "evidence_terms": list(self.decision.empty_evidence_terms),
+                    }
+                    if not self.decision.task_decisions
+                    else None
+                ),
             },
             "actions": [action.to_dict() for action in self.actions],
             "plan_source": self.plan_source,
-            "safety_failures": list(self.safety_failures),
             "state_mutation_requested": self.state_mutation_requested,
         }
 
@@ -140,32 +141,61 @@ class FollowUpTaskTransitionPlanService:
         source_activity_public_id: str | None = None,
         plan_source: str = "reconciliation_decision",
     ) -> FollowUpTaskTransitionPlan:
-        safety_failures = self._safety_failures(decision, candidate_set, activity_owner_id=activity_owner_id)
-        action = self._action(
-            decision,
-            safety_failures=safety_failures,
-            source_activity_public_id=source_activity_public_id,
-        )
+        actions: list[FollowUpTaskTransitionAction] = []
+        for task_decision in decision.task_decisions:
+            safety_failures = self._safety_failures(
+                task_decision,
+                candidate_set,
+                activity_owner_id=activity_owner_id,
+            )
+            actions.append(
+                self._action(
+                    task_decision,
+                    safety_failures=safety_failures,
+                    source_activity_public_id=source_activity_public_id,
+                )
+            )
         return FollowUpTaskTransitionPlan(
             decision=decision,
-            actions=(action,),
+            actions=tuple(actions),
             plan_source=plan_source,
-            safety_failures=safety_failures,
             state_mutation_requested=False,
         )
 
     def _action(
         self,
-        decision: FollowUpTaskReconciliationDecision,
+        decision: FollowUpTaskReconciliationTaskDecision,
         *,
         safety_failures: tuple[str, ...],
         source_activity_public_id: str | None,
     ) -> FollowUpTaskTransitionAction:
         if decision.decision == "UNRELATED":
-            return self._noop_action(decision, reason="UNRELATED", source_activity_public_id=source_activity_public_id)
+            return FollowUpTaskTransitionAction(
+                action=FollowUpTaskTransitionActionType.ASK_CONFIRMATION,
+                task_public_id=decision.task_public_id,
+                confidence=decision.confidence,
+                executable=False,
+                requires_confirmation=True,
+                proposed_due_at=decision.proposed_due_at,
+                reason="UNRELATED_TASK_REQUIRES_CONFIRMATION",
+                forbid_auto_reasons=decision.forbid_auto_reasons,
+                evidence_terms=decision.evidence_terms,
+                source_activity_public_id=source_activity_public_id,
+            )
         if decision.decision == "KEEP_OPEN":
-            return self._noop_action(decision, reason="KEEP_OPEN", source_activity_public_id=source_activity_public_id)
-        if decision.decision == "ASK_CONFIRMATION" or decision.needs_confirmation:
+            return FollowUpTaskTransitionAction(
+                action=FollowUpTaskTransitionActionType.ASK_CONFIRMATION,
+                task_public_id=decision.task_public_id,
+                confidence=decision.confidence,
+                executable=False,
+                requires_confirmation=True,
+                proposed_due_at=decision.proposed_due_at,
+                reason="RELATED_TASK_REQUIRES_CONFIRMATION",
+                forbid_auto_reasons=decision.forbid_auto_reasons,
+                evidence_terms=decision.evidence_terms,
+                source_activity_public_id=source_activity_public_id,
+            )
+        if decision.decision == "ASK_CONFIRMATION":
             return FollowUpTaskTransitionAction(
                 action=FollowUpTaskTransitionActionType.ASK_CONFIRMATION,
                 task_public_id=decision.task_public_id,
@@ -178,7 +208,37 @@ class FollowUpTaskTransitionPlanService:
                 evidence_terms=decision.evidence_terms,
                 source_activity_public_id=source_activity_public_id,
             )
-        if decision.decision in AUTO_TRANSITION_DECISIONS and not safety_failures:
+        if decision.decision in {"POSTPONE", "CANCEL"}:
+            return FollowUpTaskTransitionAction(
+                action=decision.decision,
+                task_public_id=decision.task_public_id,
+                confidence=decision.confidence,
+                executable=False,
+                requires_confirmation=True,
+                proposed_due_at=decision.proposed_due_at,
+                reason="CONFIRMATION_REQUIRED",
+                forbid_auto_reasons=tuple(
+                    dict.fromkeys(
+                        (*decision.forbid_auto_reasons, *safety_failures, "MANUAL_TRANSITION_REQUIRED")
+                    )
+                ),
+                evidence_terms=decision.evidence_terms,
+                source_activity_public_id=source_activity_public_id,
+            )
+        if decision.decision == "COMPLETE" and (decision.needs_confirmation or safety_failures):
+            return FollowUpTaskTransitionAction(
+                action=decision.decision,
+                task_public_id=decision.task_public_id,
+                confidence=decision.confidence,
+                executable=False,
+                requires_confirmation=True,
+                proposed_due_at=decision.proposed_due_at,
+                reason="CONFIRMATION_REQUIRED",
+                forbid_auto_reasons=tuple(dict.fromkeys((*decision.forbid_auto_reasons, *safety_failures))),
+                evidence_terms=decision.evidence_terms,
+                source_activity_public_id=source_activity_public_id,
+            )
+        if decision.decision == "COMPLETE" and not safety_failures:
             return FollowUpTaskTransitionAction(
                 action=decision.decision,
                 task_public_id=decision.task_public_id,
@@ -190,19 +250,6 @@ class FollowUpTaskTransitionPlanService:
                 evidence_terms=decision.evidence_terms,
                 source_activity_public_id=source_activity_public_id,
             )
-        if decision.decision in AUTO_TRANSITION_DECISIONS:
-            return FollowUpTaskTransitionAction(
-                action=FollowUpTaskTransitionActionType.ASK_CONFIRMATION,
-                task_public_id=decision.task_public_id,
-                confidence=decision.confidence,
-                executable=False,
-                requires_confirmation=True,
-                proposed_due_at=decision.proposed_due_at,
-                reason="AUTO_TRANSITION_BLOCKED",
-                forbid_auto_reasons=tuple(dict.fromkeys((*decision.forbid_auto_reasons, *safety_failures))),
-                evidence_terms=decision.evidence_terms,
-                source_activity_public_id=source_activity_public_id,
-            )
         return self._noop_action(
             decision,
             reason="UNSUPPORTED_DECISION",
@@ -211,7 +258,7 @@ class FollowUpTaskTransitionPlanService:
 
     def _noop_action(
         self,
-        decision: FollowUpTaskReconciliationDecision,
+        decision: FollowUpTaskReconciliationTaskDecision,
         *,
         reason: str,
         source_activity_public_id: str | None,
@@ -231,7 +278,7 @@ class FollowUpTaskTransitionPlanService:
 
     def _safety_failures(
         self,
-        decision: FollowUpTaskReconciliationDecision,
+        decision: FollowUpTaskReconciliationTaskDecision,
         candidate_set: TaskReconciliationCandidateSet,
         *,
         activity_owner_id: str | None,
@@ -244,12 +291,8 @@ class FollowUpTaskTransitionPlanService:
             failures.append(f"decision_invalid:{decision.decision}")
         if decision.state_mutation_requested:
             failures.append("state_mutation_forbidden")
-
-        if decision.task_public_id and not decision.task_public_id.startswith("fut_"):
+        if not decision.task_public_id.startswith("fut_"):
             failures.append(f"task_public_id_invalid:{decision.task_public_id}")
-        for candidate_public_id in decision.candidate_public_ids:
-            if not candidate_public_id.startswith("fut_"):
-                failures.append(f"candidate_public_id_invalid:{candidate_public_id}")
 
         if decision.decision not in AUTO_TRANSITION_DECISIONS:
             return tuple(dict.fromkeys(failures))
@@ -262,9 +305,6 @@ class FollowUpTaskTransitionPlanService:
             failures.append(f"low_confidence_auto_transition_forbidden:{decision.confidence}")
         if not decision.evidence_terms:
             failures.append("missing_evidence")
-        if not decision.task_public_id:
-            failures.append("auto_transition_task_missing")
-            return tuple(dict.fromkeys(failures))
 
         selected = candidates_by_id.get(decision.task_public_id)
         if selected is None:
@@ -272,24 +312,28 @@ class FollowUpTaskTransitionPlanService:
         elif not selected.auto_transition_eligible:
             failures.append(selected.confirmation_required_reason or "cross_owner_auto_transition_forbidden")
 
-        if decision.decision == "DELAY":
+        if decision.decision == "POSTPONE":
             if not decision.proposed_due_at:
-                failures.append("delay_due_at_missing")
+                failures.append("postpone_due_at_missing")
             elif not self._is_valid_datetime(decision.proposed_due_at):
-                failures.append("delay_due_at_invalid")
+                failures.append("postpone_due_at_invalid")
 
         evaluation = self.evaluation_service.evaluate_case(
             FollowUpTaskReconciliationEvaluationCase(
                 name="transition_plan_guardrail",
                 activity_owner_id=resolved_activity_owner_id,
                 task_owner_by_public_id={candidate.public_id: candidate.owner_id for candidate in candidate_set.items},
-                result=decision,
+                result=FollowUpTaskReconciliationDecision(
+                    candidate_public_ids=(decision.task_public_id,),
+                    task_decisions=(decision,),
+                ),
                 allowed_decisions=set(FOLLOW_UP_TASK_RECONCILIATION_DECISIONS),
                 auto_confidence_threshold=self.auto_confidence_threshold,
             )
         )
         failures.extend(evaluation.failures)
         return tuple(dict.fromkeys(failures))
+
 
     def _is_valid_datetime(self, value: str) -> bool:
         try:

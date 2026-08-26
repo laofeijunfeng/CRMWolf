@@ -2,7 +2,6 @@ from app.crud.agent import (
     agent_idempotency_key_crud,
     agent_message_crud,
     agent_session_crud,
-    agent_task_crud,
     agent_tool_call_crud,
 )
 from app.crud.ai_config import ai_config_crud
@@ -24,14 +23,24 @@ from app.crud.team import team_crud, user_team_crud
 from app.crud.user import user_crud
 
 __all__ = [
-    "user_crud", "role_crud", "permission_crud", "team_crud", "user_team_crud",
-    "ai_config_crud", "conversation_log_crud",
+    "user_crud",
+    "role_crud",
+    "permission_crud",
+    "team_crud",
+    "user_team_crud",
+    "ai_config_crud",
+    "conversation_log_crud",
     "deployment_info_crud",
-    "agent_session_crud", "agent_message_crud", "agent_task_crud",
-    "agent_tool_call_crud", "agent_idempotency_key_crud",
-    "sales_commitment_crud", "follow_up_task_crud",
-    "follow_up_task_event_crud", "follow_up_task_llm_matcher_run_crud",
-    "follow_up_task_projection_run_crud", "follow_up_task_reconciliation_evaluation_run_crud",
+    "agent_session_crud",
+    "agent_message_crud",
+    "agent_tool_call_crud",
+    "agent_idempotency_key_crud",
+    "sales_commitment_crud",
+    "follow_up_task_crud",
+    "follow_up_task_event_crud",
+    "follow_up_task_llm_matcher_run_crud",
+    "follow_up_task_projection_run_crud",
+    "follow_up_task_reconciliation_evaluation_run_crud",
     "follow_up_task_reconciliation_run_crud",
     "follow_up_task_transition_policy_decision_log_crud",
 ]

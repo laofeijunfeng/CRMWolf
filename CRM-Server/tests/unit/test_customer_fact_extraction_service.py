@@ -25,7 +25,7 @@ def test_customer_fact_extraction_result_cleans_optional_text():
     assert fact.reason == "原文明确"
 
 
-def test_customer_fact_extraction_result_allows_review_and_ignore_actions():
+def test_customer_fact_extraction_result_allows_upsert_and_ignore_actions():
     result = CustomerFactExtractionResult(
         facts=[
             ExtractedCustomerFact(
@@ -33,7 +33,7 @@ def test_customer_fact_extraction_result_allows_review_and_ignore_actions():
                 subject=" ",
                 content="审批链较长。",
                 confidence=0.61,
-                action="review",
+                action="ignore",
                 evidence_quote="",
             ),
             ExtractedCustomerFact(
@@ -47,7 +47,7 @@ def test_customer_fact_extraction_result_allows_review_and_ignore_actions():
 
     assert result.facts[0].subject is None
     assert result.facts[0].evidence_quote is None
-    assert result.facts[0].action == "review"
+    assert result.facts[0].action == "ignore"
     assert result.facts[1].action == "ignore"
 
 

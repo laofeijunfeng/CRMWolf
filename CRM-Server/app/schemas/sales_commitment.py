@@ -77,7 +77,7 @@ FOLLOW_UP_TASK_CONFIRMATION_STATUSES = {
 }
 FOLLOW_UP_TASK_CONFIRMATION_RESOLUTION_ACTIONS = {
     FollowUpTaskConfirmationResolutionAction.COMPLETE,
-    FollowUpTaskConfirmationResolutionAction.DELAY,
+    FollowUpTaskConfirmationResolutionAction.POSTPONE,
     FollowUpTaskConfirmationResolutionAction.CANCEL,
     FollowUpTaskConfirmationResolutionAction.KEEP_OPEN,
     FollowUpTaskConfirmationResolutionAction.UNKNOWN,
@@ -434,13 +434,9 @@ class FollowUpTaskLLMMatcherRunInternalCreate(BaseModel):
     reconciliation_run_public_id: str | None = Field(None, max_length=64, description="reconciliation运行对外ID")
     status: str = Field(..., description="运行状态")
     source: str = Field(..., min_length=1, max_length=80, description="匹配结果来源")
-    decision: str | None = Field(None, max_length=30, description="归一化决策")
-    task_public_id: str | None = Field(None, max_length=64, description="候选任务对外ID")
     candidate_public_ids_json: list[str] | None = Field(None, description="候选任务对外ID快照")
-    confidence: float | None = Field(None, ge=0, le=1, description="归一化置信度")
-    needs_confirmation: bool = Field(False, description="是否需要用户确认")
-    forbid_auto_reasons_json: list[str] | None = Field(None, description="禁止自动迁移原因")
-    evidence_terms_json: list[str] | None = Field(None, description="证据词快照")
+    task_decisions_json: list[dict[str, Any]] | None = Field(None, description="逐任务语义决策快照")
+    empty_outcome_json: dict[str, Any] | None = Field(None, description="无候选任务时的明确结果")
     referenced_source_public_ids_json: list[str] | None = Field(None, description="引用来源对外ID")
     evaluation_failures_json: list[str] | None = Field(None, description="安全评测失败项")
     model_name: str | None = Field(None, max_length=120, description="LLM模型名")
@@ -471,8 +467,8 @@ class FollowUpTaskReconciliationEvaluationRunInternalCreate(BaseModel):
     failed_cases: int = Field(0, ge=0, description="失败样本数")
     false_close_count: int = Field(0, ge=0, description="误关闭样本数")
     false_close_rate: float = Field(0.0, ge=0, le=1, description="误关闭率")
-    false_delay_count: int = Field(0, ge=0, description="误延期样本数")
-    false_delay_rate: float = Field(0.0, ge=0, le=1, description="误延期率")
+    false_postpone_count: int = Field(0, ge=0, description="误延期样本数")
+    false_postpone_rate: float = Field(0.0, ge=0, le=1, description="误延期率")
     missed_confirmation_count: int = Field(0, ge=0, description="该追问未追问样本数")
     missed_confirmation_rate: float = Field(0.0, ge=0, le=1, description="该追问未追问率")
     over_confirmation_count: int = Field(0, ge=0, description="过度追问样本数")

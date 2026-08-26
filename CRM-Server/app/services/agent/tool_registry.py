@@ -187,15 +187,15 @@ class ResolveFollowUpTaskConfirmationCaseInput(BaseModel):
 
 
 class TransitionFollowUpTaskInput(BaseModel):
-    task_id: str = Field(..., min_length=1, pattern=r"^fut_[A-Za-z0-9]+$", description="跟进任务对外ID（fut_...）")
-    action: Literal["complete", "cancel", "delay", "keep_open"]
+    task_id: str = Field(..., min_length=1, pattern=r"^fut_[0-9a-f]{32}$", description="跟进任务对外ID（fut_...）")
+    action: Literal["complete", "cancel", "postpone", "keep_open"]
     proposed_due_at: Optional[str] = Field(None, description="延期到的新时间，ISO 日期时间")
     reason: Optional[str] = Field(None, max_length=500)
     idempotency_suffix: Optional[str] = None
 
     @model_validator(mode="after")
-    def validate_delay_due_at(self) -> "TransitionFollowUpTaskInput":
-        if self.action == "delay" and not self.proposed_due_at:
+    def validate_postpone_due_at(self) -> "TransitionFollowUpTaskInput":
+        if self.action == "postpone" and not self.proposed_due_at:
             raise ValueError("延期任务必须提供 proposed_due_at")
         return self
 

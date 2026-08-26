@@ -6,11 +6,10 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
 from app.models.customer import Customer
-from app.models.customer_fact import CustomerFact, CustomerFactReviewAudit, CustomerFactRevision, CustomerFactSource
+from app.models.customer_fact import CustomerFact, CustomerFactRevision, CustomerFactSource
 from app.services.customer_fact_service import (
     CustomerFactCandidateInput,
     CustomerFactInput,
-    CustomerFactReviewAuditInput,
     CustomerFactSourceInput,
     customer_fact_service,
 )
@@ -28,7 +27,6 @@ def _session():
         CustomerFact.__table__,
         CustomerFactSource.__table__,
         CustomerFactRevision.__table__,
-        CustomerFactReviewAudit.__table__,
     ])
     Session = sessionmaker(bind=engine)
     return Session()
@@ -161,7 +159,7 @@ def test_customer_fact_service_projects_context_payload_with_sources():
     assert payload[0]["sources"][0]["business_object_id"] == "301"
 
 
-def test_customer_fact_service_marks_conflicting_candidate_for_review():
+def test_customer_fact_service_ignores_low_confidence_conflicting_candidate():
     assessment = customer_fact_service.assess_candidate_against_context(
         candidate=CustomerFactCandidateInput(
             fact_type="stage",
@@ -181,37 +179,53 @@ def test_customer_fact_service_marks_conflicting_candidate_for_review():
         }],
     )
 
-    assert assessment.action == "review"
+    assert assessment.action == "ignore"
+    assert assessment.reason == "low_confidence_or_conflicting_fact_ignored"
     assert assessment.existing_fact_id == 501
     assert assessment.existing_version == 3
     assert assessment.conflict_reason == "候选事实与客户智能档案中的既有事实内容不同"
 
 
-def test_customer_fact_service_records_review_decision_idempotently():
-    db = _session()
-    _customer(db)
-    audit_input = CustomerFactReviewAuditInput(
-        tenant_id=2,
-        team_id=2,
-        customer_id=101,
-        event_key="event-1",
-        fact_type="risk",
-        subject="审批",
-        content="客户内部审批链可能较长。",
-        confidence=0.62,
-        decision="REJECTED",
-        reviewer_id=9,
-        decision_source="web",
-        reason="表达不够确定",
-        conflict_reason="候选事实与客户智能档案中的既有事实内容不同",
-        evidence_quote="需要再走内部流程",
+def test_customer_fact_service_ignores_high_confidence_candidate_without_evidence():
+    assessment = customer_fact_service.assess_candidate_against_context(
+        candidate=CustomerFactCandidateInput(
+            fact_type="need",
+            subject="私有化部署",
+            content="客户需要私有环境安装包和试用方案。",
+            confidence=0.96,
+            action="upsert",
+            evidence_quote=None,
+        ),
+        existing_facts=[],
     )
 
-    first = customer_fact_service.record_review_decision(db, audit_input)
-    second = customer_fact_service.record_review_decision(db, audit_input)
-    db.commit()
+    assert assessment.action == "ignore"
+    assert assessment.reason == "missing_evidence_ignored"
 
-    assert first.id == second.id
-    assert db.query(CustomerFactReviewAudit).count() == 1
-    assert second.decision == "REJECTED"
-    assert second.reviewer_id == 9
+
+def test_customer_fact_service_silently_ignores_high_confidence_conflict():
+    assessment = customer_fact_service.assess_candidate_against_context(
+        candidate=CustomerFactCandidateInput(
+            fact_type="stage",
+            subject="POC",
+            content="客户已经完成 POC，准备进入合同审批。",
+            confidence=0.97,
+            action="upsert",
+            evidence_quote="客户明确表示 POC 已完成",
+        ),
+        existing_facts=[{
+            "id": 501,
+            "fact_type": "stage",
+            "subject": "POC",
+            "content": "客户刚开始 POC。",
+            "confidence": 0.9,
+            "status": "ACTIVE",
+            "version": 3,
+        }],
+    )
+
+    assert assessment.action == "ignore"
+    assert assessment.reason == "conflicting_fact_ignored"
+    assert assessment.existing_fact_id == 501
+    assert assessment.existing_version == 3
+    assert assessment.conflict_reason == "候选事实与客户智能档案中的既有事实内容不同"

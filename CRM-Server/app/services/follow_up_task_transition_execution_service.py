@@ -1,4 +1,4 @@
-"""Gated executor for follow-up task transition plans."""
+"""Executor for already-approved follow-up task transition plans."""
 
 from __future__ import annotations
 
@@ -93,7 +93,6 @@ class CustomerVectorDocumentServiceProtocol(Protocol):
 class FollowUpTaskTransitionExecutionStatus:
     EXECUTED = "EXECUTED"
     SKIPPED = "SKIPPED"
-    DISABLED = "DISABLED"
     FAILED = "FAILED"
 
 
@@ -124,7 +123,7 @@ class FollowUpTaskTransitionExecutionResult:
 
 
 class FollowUpTaskTransitionExecutionService:
-    """Executes already-approved transition plans behind an explicit gate."""
+    """Executes transition plans after domain-level safety checks have approved them."""
 
     def __init__(
         self,
@@ -149,7 +148,6 @@ class FollowUpTaskTransitionExecutionService:
         plan: FollowUpTaskTransitionPlan,
         actor_id: str | None,
         expected_owner_id: str | None = None,
-        enabled: bool = False,
         commit: bool = True,
     ) -> list[FollowUpTaskTransitionExecutionResult]:
         results = [
@@ -160,13 +158,12 @@ class FollowUpTaskTransitionExecutionService:
                 plan=plan,
                 actor_id=actor_id,
                 expected_owner_id=expected_owner_id,
-                enabled=enabled,
                 commit=False,
             )
             for action in plan.actions
         ]
         has_executed_action = any(result.status == FollowUpTaskTransitionExecutionStatus.EXECUTED for result in results)
-        if enabled and commit and has_executed_action:
+        if commit and has_executed_action:
             db.commit()
         return results
 
@@ -179,26 +176,19 @@ class FollowUpTaskTransitionExecutionService:
         plan: FollowUpTaskTransitionPlan,
         actor_id: str | None,
         expected_owner_id: str | None = None,
-        enabled: bool = False,
         commit: bool = True,
     ) -> FollowUpTaskTransitionExecutionResult:
-        if not enabled:
-            return self._skipped(
-                action,
-                status=FollowUpTaskTransitionExecutionStatus.DISABLED,
-                reason="EXECUTOR_DISABLED",
-            )
         if plan.state_mutation_requested:
             return self._skipped(action, reason="PLAN_STATE_MUTATION_REQUESTED")
-        if plan.safety_failures:
-            return self._skipped(action, reason="PLAN_SAFETY_FAILURES")
+        if action.forbid_auto_reasons and plan.plan_source != "confirmation_case_reply":
+            return self._skipped(action, reason="ACTION_SAFETY_FAILURES")
         if not action.executable:
             return self._skipped(action, reason="ACTION_NOT_EXECUTABLE")
         if action.requires_confirmation:
             return self._skipped(action, reason="ACTION_REQUIRES_CONFIRMATION")
         if action.action not in {
             FollowUpTaskTransitionActionType.COMPLETE,
-            FollowUpTaskTransitionActionType.DELAY,
+            FollowUpTaskTransitionActionType.POSTPONE,
             FollowUpTaskTransitionActionType.CANCEL,
         }:
             return self._skipped(action, reason="ACTION_NOT_MUTATING")
@@ -225,7 +215,7 @@ class FollowUpTaskTransitionExecutionService:
         else:
             due_at = self._parse_due_at(action.proposed_due_at)
             if due_at is None:
-                return self._skipped(action, reason="DELAY_DUE_AT_INVALID", previous_status=previous_status)
+                return self._skipped(action, reason="POSTPONE_DUE_AT_INVALID", previous_status=previous_status)
             self.task_crud.update(
                 db,
                 task,
@@ -386,7 +376,7 @@ class FollowUpTaskTransitionExecutionService:
             "evidence_terms": list(action.evidence_terms),
             "source_activity_public_id": action.source_activity_public_id,
             "proposed_due_at": action.proposed_due_at,
-            "decision": plan.decision.decision,
+            "decision": action.action,
             "rollback": self._rollback_snapshot(action, task),
         }
 

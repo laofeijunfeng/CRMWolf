@@ -1,0 +1,1243 @@
+{
+  "case_id": "AC-07",
+  "attempt": 1,
+  "request": {
+    "session_id": 879,
+    "client_request_id": "63863b42-b312-4997-a6ce-0dd5c99830bf",
+    "input": {
+      "type": "text",
+      "text": "上海有哪些客户"
+    }
+  },
+  "http_status": 200,
+  "elapsed_seconds": 16.46,
+  "events": [
+    {
+      "event": "session",
+      "session_id": 879,
+      "session_key": "agent_b4c22b833b654b82a20a908dd9440856"
+    },
+    {
+      "event": "agent_ui",
+      "phase": "final",
+      "message_id": 2286,
+      "turn_id": "turn_9634918ffdac4ed88ffd5f672df0fe93",
+      "sequence": 1,
+      "message": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 2286,
+        "turn_id": "turn_9634918ffdac4ed88ffd5f672df0fe93",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_text_1",
+            "type": "text",
+            "format": "markdown",
+            "text": "按“城市=上海”查询，在当前可访问范围内命中 21 家客户；客户列表已展示。客户状态含义为：0=跟进中、1=已成交、2=已输单、3=已沉寂。"
+          },
+          {
+            "id": "b_entity_list_1",
+            "type": "entity_list",
+            "entity_type": "customer",
+            "items": [
+              {
+                "ref_id": "eref_customer_cus_ac67f8865d4c4ae281679ed81c88a127",
+                "title": "API验收-110243-结构确认客户有限公司",
+                "subtitle": null,
+                "fields": [
+                  {
+                    "key": "account_name",
+                    "label": "客户名称",
+                    "value": {
+                      "kind": "text",
+                      "value": "API验收-110243-结构确认客户有限公司",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "city",
+                    "label": "城市",
+                    "value": {
+                      "kind": "text",
+                      "value": "上海",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "industry",
+                    "label": "industry",
+                    "value": {
+                      "kind": "text",
+                      "value": "other",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "status",
+                    "label": "状态",
+                    "value": {
+                      "kind": "number",
+                      "value": 0,
+                      "display": null,
+                      "currency": null
+                    }
+                  }
+                ],
+                "actions": [
+                  {
+                    "action_id": "act_00c3dbdf4a7847fb83632a7e1df21950",
+                    "label": "创建跟进任务",
+                    "type": "start_workflow"
+                  }
+                ]
+              },
+              {
+                "ref_id": "eref_customer_cus_15f2a006c251459dbcf9d8ae1c50957c",
+                "title": "API验收-110243-上海客户01有限公司",
+                "subtitle": null,
+                "fields": [
+                  {
+                    "key": "account_name",
+                    "label": "客户名称",
+                    "value": {
+                      "kind": "text",
+                      "value": "API验收-110243-上海客户01有限公司",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "city",
+                    "label": "城市",
+                    "value": {
+                      "kind": "text",
+                      "value": "上海",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "industry",
+                    "label": "industry",
+                    "value": {
+                      "kind": "text",
+                      "value": "互联网",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "status",
+                    "label": "状态",
+                    "value": {
+                      "kind": "number",
+                      "value": 0,
+                      "display": null,
+                      "currency": null
+                    }
+                  }
+                ],
+                "actions": [
+                  {
+                    "action_id": "act_6bca349e2e0547558b7268768668ab2c",
+                    "label": "创建跟进任务",
+                    "type": "start_workflow"
+                  }
+                ]
+              },
+              {
+                "ref_id": "eref_customer_cus_662ba273420e4ed4be4e68f8353349ac",
+                "title": "API验收-110243-上海客户02有限公司",
+                "subtitle": null,
+                "fields": [
+                  {
+                    "key": "account_name",
+                    "label": "客户名称",
+                    "value": {
+                      "kind": "text",
+                      "value": "API验收-110243-上海客户02有限公司",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "city",
+                    "label": "城市",
+                    "value": {
+                      "kind": "text",
+                      "value": "上海",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "industry",
+                    "label": "industry",
+                    "value": {
+                      "kind": "text",
+                      "value": "other",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "status",
+                    "label": "状态",
+                    "value": {
+                      "kind": "number",
+                      "value": 1,
+                      "display": null,
+                      "currency": null
+                    }
+                  }
+                ],
+                "actions": [
+                  {
+                    "action_id": "act_5eccacec584a49349085b9b8506e44d2",
+                    "label": "创建跟进任务",
+                    "type": "start_workflow"
+                  }
+                ]
+              },
+              {
+                "ref_id": "eref_customer_cus_13a476ee5ed04d7bb16207a5414ceebc",
+                "title": "API验收-110243-上海客户03有限公司",
+                "subtitle": null,
+                "fields": [
+                  {
+                    "key": "account_name",
+                    "label": "客户名称",
+                    "value": {
+                      "kind": "text",
+                      "value": "API验收-110243-上海客户03有限公司",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "city",
+                    "label": "城市",
+                    "value": {
+                      "kind": "text",
+                      "value": "上海",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "industry",
+                    "label": "industry",
+                    "value": {
+                      "kind": "text",
+                      "value": "other",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "status",
+                    "label": "状态",
+                    "value": {
+                      "kind": "number",
+                      "value": 2,
+                      "display": null,
+                      "currency": null
+                    }
+                  }
+                ],
+                "actions": [
+                  {
+                    "action_id": "act_8eee35852d9d48b399c5525475f04ff1",
+                    "label": "创建跟进任务",
+                    "type": "start_workflow"
+                  }
+                ]
+              },
+              {
+                "ref_id": "eref_customer_cus_f846b7b493c74a349c4b66324870179f",
+                "title": "API验收-110243-上海客户04有限公司",
+                "subtitle": null,
+                "fields": [
+                  {
+                    "key": "account_name",
+                    "label": "客户名称",
+                    "value": {
+                      "kind": "text",
+                      "value": "API验收-110243-上海客户04有限公司",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "city",
+                    "label": "城市",
+                    "value": {
+                      "kind": "text",
+                      "value": "上海",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "industry",
+                    "label": "industry",
+                    "value": {
+                      "kind": "text",
+                      "value": "other",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "status",
+                    "label": "状态",
+                    "value": {
+                      "kind": "number",
+                      "value": 3,
+                      "display": null,
+                      "currency": null
+                    }
+                  }
+                ],
+                "actions": [
+                  {
+                    "action_id": "act_a3cd73231eee464f9a4f0e868f0c4422",
+                    "label": "创建跟进任务",
+                    "type": "start_workflow"
+                  }
+                ]
+              },
+              {
+                "ref_id": "eref_customer_cus_b9c2c4d4e7164ba6b6860093fb753056",
+                "title": "API验收-110243-上海客户05有限公司",
+                "subtitle": null,
+                "fields": [
+                  {
+                    "key": "account_name",
+                    "label": "客户名称",
+                    "value": {
+                      "kind": "text",
+                      "value": "API验收-110243-上海客户05有限公司",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "city",
+                    "label": "城市",
+                    "value": {
+                      "kind": "text",
+                      "value": "上海",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "industry",
+                    "label": "industry",
+                    "value": {
+                      "kind": "text",
+                      "value": "other",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "status",
+                    "label": "状态",
+                    "value": {
+                      "kind": "number",
+                      "value": 0,
+                      "display": null,
+                      "currency": null
+                    }
+                  }
+                ],
+                "actions": [
+                  {
+                    "action_id": "act_12f4e769ca8e435cbb446f1d477d083d",
+                    "label": "创建跟进任务",
+                    "type": "start_workflow"
+                  }
+                ]
+              },
+              {
+                "ref_id": "eref_customer_cus_de0155fb444c4eb58beaffdaa94d694f",
+                "title": "API验收-110243-上海客户06有限公司",
+                "subtitle": null,
+                "fields": [
+                  {
+                    "key": "account_name",
+                    "label": "客户名称",
+                    "value": {
+                      "kind": "text",
+                      "value": "API验收-110243-上海客户06有限公司",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "city",
+                    "label": "城市",
+                    "value": {
+                      "kind": "text",
+                      "value": "上海",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "industry",
+                    "label": "industry",
+                    "value": {
+                      "kind": "text",
+                      "value": "other",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "status",
+                    "label": "状态",
+                    "value": {
+                      "kind": "number",
+                      "value": 1,
+                      "display": null,
+                      "currency": null
+                    }
+                  }
+                ],
+                "actions": [
+                  {
+                    "action_id": "act_db9a4e33a34844b1a548d0ec6c344435",
+                    "label": "创建跟进任务",
+                    "type": "start_workflow"
+                  }
+                ]
+              },
+              {
+                "ref_id": "eref_customer_cus_440957f1250f48b3b03021c70f43a4d5",
+                "title": "API验收-110243-上海客户07有限公司",
+                "subtitle": null,
+                "fields": [
+                  {
+                    "key": "account_name",
+                    "label": "客户名称",
+                    "value": {
+                      "kind": "text",
+                      "value": "API验收-110243-上海客户07有限公司",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "city",
+                    "label": "城市",
+                    "value": {
+                      "kind": "text",
+                      "value": "上海",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "industry",
+                    "label": "industry",
+                    "value": {
+                      "kind": "text",
+                      "value": "other",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "status",
+                    "label": "状态",
+                    "value": {
+                      "kind": "number",
+                      "value": 2,
+                      "display": null,
+                      "currency": null
+                    }
+                  }
+                ],
+                "actions": [
+                  {
+                    "action_id": "act_caf480243dbf47bc99f6b9ee8e21dc7e",
+                    "label": "创建跟进任务",
+                    "type": "start_workflow"
+                  }
+                ]
+              },
+              {
+                "ref_id": "eref_customer_cus_9de8cd05b93a40fb8a1fdc57b8c41e1c",
+                "title": "API验收-110243-上海客户08有限公司",
+                "subtitle": null,
+                "fields": [
+                  {
+                    "key": "account_name",
+                    "label": "客户名称",
+                    "value": {
+                      "kind": "text",
+                      "value": "API验收-110243-上海客户08有限公司",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "city",
+                    "label": "城市",
+                    "value": {
+                      "kind": "text",
+                      "value": "上海",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "industry",
+                    "label": "industry",
+                    "value": {
+                      "kind": "text",
+                      "value": "other",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "status",
+                    "label": "状态",
+                    "value": {
+                      "kind": "number",
+                      "value": 3,
+                      "display": null,
+                      "currency": null
+                    }
+                  }
+                ],
+                "actions": [
+                  {
+                    "action_id": "act_956ee3eb034f4c1eaeb0575e3b3c4605",
+                    "label": "创建跟进任务",
+                    "type": "start_workflow"
+                  }
+                ]
+              },
+              {
+                "ref_id": "eref_customer_cus_4efbbad045434e2a96992ff9c582a1b8",
+                "title": "API验收-110243-上海客户09有限公司",
+                "subtitle": null,
+                "fields": [
+                  {
+                    "key": "account_name",
+                    "label": "客户名称",
+                    "value": {
+                      "kind": "text",
+                      "value": "API验收-110243-上海客户09有限公司",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "city",
+                    "label": "城市",
+                    "value": {
+                      "kind": "text",
+                      "value": "上海",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "industry",
+                    "label": "industry",
+                    "value": {
+                      "kind": "text",
+                      "value": "other",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "status",
+                    "label": "状态",
+                    "value": {
+                      "kind": "number",
+                      "value": 0,
+                      "display": null,
+                      "currency": null
+                    }
+                  }
+                ],
+                "actions": [
+                  {
+                    "action_id": "act_997d8138115a4203bff6baca33cc7fee",
+                    "label": "创建跟进任务",
+                    "type": "start_workflow"
+                  }
+                ]
+              },
+              {
+                "ref_id": "eref_customer_cus_118d0bb9c82c4d25937ffb4214d96e44",
+                "title": "API验收-110243-上海客户10有限公司",
+                "subtitle": null,
+                "fields": [
+                  {
+                    "key": "account_name",
+                    "label": "客户名称",
+                    "value": {
+                      "kind": "text",
+                      "value": "API验收-110243-上海客户10有限公司",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "city",
+                    "label": "城市",
+                    "value": {
+                      "kind": "text",
+                      "value": "上海",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "industry",
+                    "label": "industry",
+                    "value": {
+                      "kind": "text",
+                      "value": "other",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "status",
+                    "label": "状态",
+                    "value": {
+                      "kind": "number",
+                      "value": 1,
+                      "display": null,
+                      "currency": null
+                    }
+                  }
+                ],
+                "actions": [
+                  {
+                    "action_id": "act_ff5836e1b7fe44d79ecc78345936a8c3",
+                    "label": "创建跟进任务",
+                    "type": "start_workflow"
+                  }
+                ]
+              },
+              {
+                "ref_id": "eref_customer_cus_b55fe4998261455596d2610f3c3249d1",
+                "title": "API验收-110243-上海客户11有限公司",
+                "subtitle": null,
+                "fields": [
+                  {
+                    "key": "account_name",
+                    "label": "客户名称",
+                    "value": {
+                      "kind": "text",
+                      "value": "API验收-110243-上海客户11有限公司",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "city",
+                    "label": "城市",
+                    "value": {
+                      "kind": "text",
+                      "value": "上海",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "industry",
+                    "label": "industry",
+                    "value": {
+                      "kind": "text",
+                      "value": "互联网",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "status",
+                    "label": "状态",
+                    "value": {
+                      "kind": "number",
+                      "value": 2,
+                      "display": null,
+                      "currency": null
+                    }
+                  }
+                ],
+                "actions": [
+                  {
+                    "action_id": "act_2f5b43d467af4ab887c95a4f9a399cc2",
+                    "label": "创建跟进任务",
+                    "type": "start_workflow"
+                  }
+                ]
+              },
+              {
+                "ref_id": "eref_customer_cus_b406960b63af485f9d9fa68105a97cc0",
+                "title": "API验收-110243-上海客户12有限公司",
+                "subtitle": null,
+                "fields": [
+                  {
+                    "key": "account_name",
+                    "label": "客户名称",
+                    "value": {
+                      "kind": "text",
+                      "value": "API验收-110243-上海客户12有限公司",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "city",
+                    "label": "城市",
+                    "value": {
+                      "kind": "text",
+                      "value": "上海",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "industry",
+                    "label": "industry",
+                    "value": {
+                      "kind": "text",
+                      "value": "制造",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "status",
+                    "label": "状态",
+                    "value": {
+                      "kind": "number",
+                      "value": 3,
+                      "display": null,
+                      "currency": null
+                    }
+                  }
+                ],
+                "actions": [
+                  {
+                    "action_id": "act_63c268aba7c24ee9aece88fece6d54d9",
+                    "label": "创建跟进任务",
+                    "type": "start_workflow"
+                  }
+                ]
+              },
+              {
+                "ref_id": "eref_customer_cus_e54d10d46c6446f793d94013ccf957ff",
+                "title": "API验收-110243-上海客户13有限公司",
+                "subtitle": null,
+                "fields": [
+                  {
+                    "key": "account_name",
+                    "label": "客户名称",
+                    "value": {
+                      "kind": "text",
+                      "value": "API验收-110243-上海客户13有限公司",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "city",
+                    "label": "城市",
+                    "value": {
+                      "kind": "text",
+                      "value": "上海",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "industry",
+                    "label": "industry",
+                    "value": {
+                      "kind": "text",
+                      "value": "金融",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "status",
+                    "label": "状态",
+                    "value": {
+                      "kind": "number",
+                      "value": 0,
+                      "display": null,
+                      "currency": null
+                    }
+                  }
+                ],
+                "actions": [
+                  {
+                    "action_id": "act_219d8fc6f30f430aa257fc120699a1d6",
+                    "label": "创建跟进任务",
+                    "type": "start_workflow"
+                  }
+                ]
+              },
+              {
+                "ref_id": "eref_customer_cus_5e34a505538d4d1098646064611cfb63",
+                "title": "API验收-110243-上海客户14有限公司",
+                "subtitle": null,
+                "fields": [
+                  {
+                    "key": "account_name",
+                    "label": "客户名称",
+                    "value": {
+                      "kind": "text",
+                      "value": "API验收-110243-上海客户14有限公司",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "city",
+                    "label": "城市",
+                    "value": {
+                      "kind": "text",
+                      "value": "上海",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "industry",
+                    "label": "industry",
+                    "value": {
+                      "kind": "text",
+                      "value": "企业服务",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "status",
+                    "label": "状态",
+                    "value": {
+                      "kind": "number",
+                      "value": 1,
+                      "display": null,
+                      "currency": null
+                    }
+                  }
+                ],
+                "actions": [
+                  {
+                    "action_id": "act_82d9ace11a584abaaa6da0223253cfb3",
+                    "label": "创建跟进任务",
+                    "type": "start_workflow"
+                  }
+                ]
+              },
+              {
+                "ref_id": "eref_customer_cus_24cac5eced2247ff8d46f4cbd78e0c95",
+                "title": "API验收-110243-上海客户15有限公司",
+                "subtitle": null,
+                "fields": [
+                  {
+                    "key": "account_name",
+                    "label": "客户名称",
+                    "value": {
+                      "kind": "text",
+                      "value": "API验收-110243-上海客户15有限公司",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "city",
+                    "label": "城市",
+                    "value": {
+                      "kind": "text",
+                      "value": "上海",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "industry",
+                    "label": "industry",
+                    "value": {
+                      "kind": "text",
+                      "value": "零售",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "status",
+                    "label": "状态",
+                    "value": {
+                      "kind": "number",
+                      "value": 2,
+                      "display": null,
+                      "currency": null
+                    }
+                  }
+                ],
+                "actions": [
+                  {
+                    "action_id": "act_7a6baa19561b441eba2d97010b13394a",
+                    "label": "创建跟进任务",
+                    "type": "start_workflow"
+                  }
+                ]
+              },
+              {
+                "ref_id": "eref_customer_cus_a4a6c290574f4266bdf28082b3e8cbf0",
+                "title": "API验收-110243-上海客户16有限公司",
+                "subtitle": null,
+                "fields": [
+                  {
+                    "key": "account_name",
+                    "label": "客户名称",
+                    "value": {
+                      "kind": "text",
+                      "value": "API验收-110243-上海客户16有限公司",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "city",
+                    "label": "城市",
+                    "value": {
+                      "kind": "text",
+                      "value": "上海",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "industry",
+                    "label": "industry",
+                    "value": {
+                      "kind": "text",
+                      "value": "互联网",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "status",
+                    "label": "状态",
+                    "value": {
+                      "kind": "number",
+                      "value": 3,
+                      "display": null,
+                      "currency": null
+                    }
+                  }
+                ],
+                "actions": [
+                  {
+                    "action_id": "act_462bb92facec4441a21cf662c671a543",
+                    "label": "创建跟进任务",
+                    "type": "start_workflow"
+                  }
+                ]
+              },
+              {
+                "ref_id": "eref_customer_cus_acd24633207c429795a63794ee2cbcc3",
+                "title": "API验收-110243-上海客户17有限公司",
+                "subtitle": null,
+                "fields": [
+                  {
+                    "key": "account_name",
+                    "label": "客户名称",
+                    "value": {
+                      "kind": "text",
+                      "value": "API验收-110243-上海客户17有限公司",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "city",
+                    "label": "城市",
+                    "value": {
+                      "kind": "text",
+                      "value": "上海",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "industry",
+                    "label": "industry",
+                    "value": {
+                      "kind": "text",
+                      "value": "制造",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "status",
+                    "label": "状态",
+                    "value": {
+                      "kind": "number",
+                      "value": 0,
+                      "display": null,
+                      "currency": null
+                    }
+                  }
+                ],
+                "actions": [
+                  {
+                    "action_id": "act_2b19f3527e064e30994c404fa0e6a01f",
+                    "label": "创建跟进任务",
+                    "type": "start_workflow"
+                  }
+                ]
+              },
+              {
+                "ref_id": "eref_customer_cus_72abf68736ac42cb8e703018a9c70886",
+                "title": "API验收-110243-上海客户18有限公司",
+                "subtitle": null,
+                "fields": [
+                  {
+                    "key": "account_name",
+                    "label": "客户名称",
+                    "value": {
+                      "kind": "text",
+                      "value": "API验收-110243-上海客户18有限公司",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "city",
+                    "label": "城市",
+                    "value": {
+                      "kind": "text",
+                      "value": "上海",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "industry",
+                    "label": "industry",
+                    "value": {
+                      "kind": "text",
+                      "value": "金融",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "status",
+                    "label": "状态",
+                    "value": {
+                      "kind": "number",
+                      "value": 1,
+                      "display": null,
+                      "currency": null
+                    }
+                  }
+                ],
+                "actions": [
+                  {
+                    "action_id": "act_7c3bcecaf6c443c2816fe6f0f5c34f65",
+                    "label": "创建跟进任务",
+                    "type": "start_workflow"
+                  }
+                ]
+              },
+              {
+                "ref_id": "eref_customer_cus_4bdafe0bceb94b498f73f673df284af5",
+                "title": "API验收-110243-上海客户19有限公司",
+                "subtitle": null,
+                "fields": [
+                  {
+                    "key": "account_name",
+                    "label": "客户名称",
+                    "value": {
+                      "kind": "text",
+                      "value": "API验收-110243-上海客户19有限公司",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "city",
+                    "label": "城市",
+                    "value": {
+                      "kind": "text",
+                      "value": "上海",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "industry",
+                    "label": "industry",
+                    "value": {
+                      "kind": "text",
+                      "value": "企业服务",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "status",
+                    "label": "状态",
+                    "value": {
+                      "kind": "number",
+                      "value": 2,
+                      "display": null,
+                      "currency": null
+                    }
+                  }
+                ],
+                "actions": [
+                  {
+                    "action_id": "act_0d5aa3908195465781701e2709efd529",
+                    "label": "创建跟进任务",
+                    "type": "start_workflow"
+                  }
+                ]
+              },
+              {
+                "ref_id": "eref_customer_cus_a0609d506f15427c8d63b0831d77965f",
+                "title": "API验收-110243-上海客户20有限公司",
+                "subtitle": null,
+                "fields": [
+                  {
+                    "key": "account_name",
+                    "label": "客户名称",
+                    "value": {
+                      "kind": "text",
+                      "value": "API验收-110243-上海客户20有限公司",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "city",
+                    "label": "城市",
+                    "value": {
+                      "kind": "text",
+                      "value": "上海",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "industry",
+                    "label": "industry",
+                    "value": {
+                      "kind": "text",
+                      "value": "零售",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "status",
+                    "label": "状态",
+                    "value": {
+                      "kind": "number",
+                      "value": 3,
+                      "display": null,
+                      "currency": null
+                    }
+                  }
+                ],
+                "actions": [
+                  {
+                    "action_id": "act_6d285e233bc64d66856430817929f034",
+                    "label": "创建跟进任务",
+                    "type": "start_workflow"
+                  }
+                ]
+              }
+            ],
+            "total": 21,
+            "result_set_id": "rs_1837ce2b2d024a13bb0a16c272ccddbd"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {
+          "route": "QUERY",
+          "result_set_id": "rs_1837ce2b2d024a13bb0a16c272ccddbd",
+          "accessibility_label": "按“城市=上海”查询，在当前可访问范围内命中 21 家客户；客户列表已展示。客户状态含义为：0=跟进中、1=已成交、2=已输单、3=已沉寂。"
+        }
+      }
+    },
+    {
+      "event": "done",
+      "session_id": 879
+    }
+  ],
+  "summary": {
+    "event_types": [
+      "session",
+      "agent_ui",
+      "done"
+    ],
+    "session_id": 879,
+    "message_id": 2286,
+    "route": "QUERY",
+    "metadata": {
+      "route": "QUERY",
+      "result_set_id": "rs_1837ce2b2d024a13bb0a16c272ccddbd",
+      "accessibility_label": "按“城市=上海”查询，在当前可访问范围内命中 21 家客户；客户列表已展示。客户状态含义为：0=跟进中、1=已成交、2=已输单、3=已沉寂。"
+    },
+    "block_types": [
+      "text",
+      "entity_list"
+    ],
+    "texts": [
+      "按“城市=上海”查询，在当前可访问范围内命中 21 家客户；客户列表已展示。客户状态含义为：0=跟进中、1=已成交、2=已输单、3=已沉寂。",
+      "API验收-110243-结构确认客户有限公司",
+      "API验收-110243-上海客户01有限公司",
+      "API验收-110243-上海客户02有限公司",
+      "API验收-110243-上海客户03有限公司",
+      "API验收-110243-上海客户04有限公司",
+      "API验收-110243-上海客户05有限公司",
+      "API验收-110243-上海客户06有限公司",
+      "API验收-110243-上海客户07有限公司",
+      "API验收-110243-上海客户08有限公司",
+      "API验收-110243-上海客户09有限公司",
+      "API验收-110243-上海客户10有限公司",
+      "API验收-110243-上海客户11有限公司",
+      "API验收-110243-上海客户12有限公司",
+      "API验收-110243-上海客户13有限公司",
+      "API验收-110243-上海客户14有限公司",
+      "API验收-110243-上海客户15有限公司",
+      "API验收-110243-上海客户16有限公司",
+      "API验收-110243-上海客户17有限公司",
+      "API验收-110243-上海客户18有限公司",
+      "API验收-110243-上海客户19有限公司",
+      "API验收-110243-上海客户20有限公司"
+    ],
+    "interaction": null,
+    "errors": [],
+    "entity_count": 21,
+    "result_set_id": "rs_1837ce2b2d024a13bb0a16c272ccddbd"
+  }
+}

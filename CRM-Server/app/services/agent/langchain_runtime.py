@@ -44,6 +44,7 @@ class AgentLangChainRuntime:
         api_key: str,
         model: str,
         temperature: float,
+        enable_thinking: bool | None = None,
         system_prompt: str,
         user_prompt: str,
         response_model: type[StructuredResultT],
@@ -56,11 +57,17 @@ class AgentLangChainRuntime:
             return None
 
         try:
+            model_kwargs: dict[str, object] = {
+                "model": model,
+                "api_key": api_key,
+                "base_url": api_host,
+                "temperature": temperature,
+                "max_retries": 0,
+            }
+            if enable_thinking is not None:
+                model_kwargs["extra_body"] = {"enable_thinking": enable_thinking}
             chat_model = self.chat_model_factory(
-                model=model,
-                api_key=api_key,
-                base_url=api_host,
-                temperature=temperature,
+                **model_kwargs,
             )
             agent = self.agent_factory(
                 model=chat_model,
@@ -99,6 +106,15 @@ class AgentLangChainRuntime:
                 return response_model
             return ToolStrategy(response_model)
         return response_model
+
+
+def agent_model_enable_thinking(model_name: str) -> bool | None:
+    """Return explicit transport options required by known model families."""
+
+    normalized = model_name.strip().lower()
+    if normalized.startswith("qwen3"):
+        return False
+    return None
 
 
 def _safe_error_message(exc: BaseException, limit: int = 240) -> str:

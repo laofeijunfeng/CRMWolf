@@ -1,12 +1,16 @@
-import type { AgentMessageResponse, AgentSessionResponse } from "@/api/agent"
-import type { PaginatedResponse } from "@/types/pagination"
+import type { AgentSessionResponse, AgentUIEnvelope } from '@/api/agent'
+import type { PaginatedResponse } from '@/types/pagination'
 
 type ListAgentMessages = (
   sessionId: number,
   params: { page: number, page_size: number }
-) => Promise<PaginatedResponse<AgentMessageResponse>>
+) => Promise<PaginatedResponse<AgentUIEnvelope>>
 
 export const AGENT_HISTORY_PAGE_SIZE = 100
+
+export const isVisibleAgentMessage = (message: AgentUIEnvelope): boolean => (
+  message.metadata.display !== 'STATE_UPDATE'
+)
 
 export const resolveInitialAgentSession = (
   sessions: AgentSessionResponse[],
@@ -25,18 +29,23 @@ export const loadLatestAgentMessages = async (
   listMessages: ListAgentMessages,
   sessionId: number,
   pageSize = AGENT_HISTORY_PAGE_SIZE
-): Promise<AgentMessageResponse[]> => {
+): Promise<AgentUIEnvelope[]> => {
   const firstPage = await listMessages(sessionId, { page: 1, page_size: pageSize })
-  if (firstPage.total <= pageSize) return firstPage.items
+  if (firstPage.total <= pageSize) return firstPage.items.filter(isVisibleAgentMessage)
 
   const totalPages = Math.max(firstPage.total_pages, Math.ceil(firstPage.total / pageSize), 1)
-  const lastPage = await listMessages(sessionId, { page: totalPages, page_size: pageSize })
-  if (lastPage.items.length >= pageSize || totalPages <= 1) {
-    return lastPage.items.slice(-pageSize)
+  const visiblePages: AgentUIEnvelope[][] = []
+  let visibleCount = 0
+
+  for (let pageNumber = totalPages; pageNumber >= 1 && visibleCount < pageSize; pageNumber -= 1) {
+    const currentPage = pageNumber === 1
+      ? firstPage
+      : await listMessages(sessionId, { page: pageNumber, page_size: pageSize })
+    const visibleItems = currentPage.items.filter(isVisibleAgentMessage)
+    if (visibleItems.length === 0) continue
+    visiblePages.push(visibleItems)
+    visibleCount += visibleItems.length
   }
 
-  const previousPageItems = totalPages - 1 === 1
-    ? firstPage.items
-    : (await listMessages(sessionId, { page: totalPages - 1, page_size: pageSize })).items
-  return [...previousPageItems, ...lastPage.items].slice(-pageSize)
+  return visiblePages.reverse().flat().slice(-pageSize)
 }

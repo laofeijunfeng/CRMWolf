@@ -23,7 +23,7 @@ JsonScalar: TypeAlias = str | int | float | bool | None
 JsonValue: TypeAlias = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
 JsonObject: TypeAlias = dict[str, JsonValue]
 
-FactExtractionAction: TypeAlias = Literal["upsert", "review", "ignore"]
+FactExtractionAction: TypeAlias = Literal["upsert", "ignore"]
 
 
 class CustomerFactExtractionError(Exception):
@@ -35,7 +35,7 @@ class ExtractedCustomerFact(BaseModel):
     subject: str | None = Field(None, max_length=120, description="事实主体，例如 POC、预算、审批、竞品、关键人")
     content: str = Field(..., min_length=1, max_length=800, description="可沉淀的客户事实")
     confidence: float = Field(0.0, ge=0.0, le=1.0, description="事实可靠度")
-    action: FactExtractionAction = Field("upsert", description="upsert=可直接沉淀，review=需人工复核，ignore=不沉淀")
+    action: FactExtractionAction = Field("upsert", description="upsert=进入自动沉淀评估，ignore=不沉淀")
     evidence_quote: str | None = Field(None, max_length=300, description="来自触发事件或证据的短引用")
     reason: str = Field("", max_length=300, description="为什么提炼该事实")
 
@@ -149,7 +149,7 @@ def _system_prompt(current_date: date) -> str:
 - 不要把合同、商机、回款等系统字段改写成强事实；只沉淀客户别名、客户需求、风险、预算、阶段状态、关键人态度、竞品、下一步、偏好、摘要。
 - 如果证据明确表达客户的简称、别称、集团简称、机构简称或常用内部叫法，输出 fact_type=alias；subject 和 content 均使用该称呼本身，不要包含系统 ID 或代码。
 - 同一个 subject 下只输出当前最有价值的一条事实。
-- confidence >= 0.75 且证据清楚时 action=upsert；0.55 到 0.75 或存在冲突时 action=review；低于 0.55 或无业务价值时 action=ignore。
+- 只有证据清楚且置信度足够的候选才输出 action=upsert；证据不足、存在冲突或置信度不足时 action=ignore，不要输出 review。
 - 输出必须符合结构化 schema，不要输出 Markdown 或解释文字。"""
 
 

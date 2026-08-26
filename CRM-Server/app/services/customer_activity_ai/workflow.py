@@ -31,6 +31,7 @@ from app.services.customer_activity_ai.structuring_agent import (
     activity_structuring_agent,
 )
 from app.services.agent.temporal import agent_temporal_resolver
+from app.services.customer_activity_field_provenance import can_apply_ai_extracted_value
 from app.services.customer_activity_kinds import get_activity_kind_meta
 from app.services.customer_activity_write_service import customer_activity_write_service
 from app.services.industry_display_service import industry_display_service
@@ -165,6 +166,7 @@ class CustomerActivityAIWorkflow:
                 content_json=result.get("content_json") or {},
                 summary=result.get("summary"),
                 next_action=result.get("next_action"),
+                next_action_source="AI_EXTRACTED" if result.get("next_action") else None,
                 next_follow_time=next_follow_time,
                 next_follow_time_source="AI_EXTRACTED" if next_follow_time else None,
                 post_commit_trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_STRUCTURED_COMPLETED,
@@ -299,6 +301,7 @@ class CustomerActivityAIWorkflow:
             "next_follow_time": self._datetime(activity.next_follow_time),
             "next_follow_time_source": activity.next_follow_time_source,
             "next_action": activity.next_action,
+            "next_action_source": getattr(activity, "next_action_source", None),
             "occurred_at": self._datetime(activity.occurred_at),
         }
 
@@ -318,10 +321,10 @@ class CustomerActivityAIWorkflow:
         return datetime.fromisoformat(next_follow_time_iso) if next_follow_time_iso else None
 
     def _can_ai_update_next_follow_time(self, activity: CustomerActivity) -> bool:
-        source = activity.next_follow_time_source
-        if source in {"USER", "AGENT", "MIGRATED"}:
-            return False
-        return activity.next_follow_time is None or source in {None, "UI_DEFAULT", "AI_EXTRACTED"}
+        return can_apply_ai_extracted_value(
+            current_value=activity.next_follow_time,
+            current_source=activity.next_follow_time_source,
+        )
 
     def _loads(self, value: str | None) -> dict[str, Any] | None:
         if not value:

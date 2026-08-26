@@ -35,13 +35,17 @@ from app.models.sales_commitment import (
 )
 from app.schemas.sales_commitment import FollowUpTaskConfirmationCaseInternalCreate, FollowUpTaskInternalCreate
 from app.services.follow_up_task_confirmation_cleanup_service import FollowUpTaskConfirmationCancelReason
-from app.services.follow_up_task_reconciliation_evaluation_service import FollowUpTaskReconciliationDecision
+from app.services.follow_up_task_reconciliation_evaluation_service import (
+    FollowUpTaskReconciliationDecision,
+    FollowUpTaskReconciliationTaskDecision,
+)
 from app.services.follow_up_task_transition_execution_service import (
     FollowUpTaskTransitionExecutionService,
     FollowUpTaskTransitionExecutionStatus,
 )
 from app.services.follow_up_task_transition_plan_service import FollowUpTaskTransitionPlanService
 from app.services.task_reconciliation_service import TaskReconciliationCandidate, TaskReconciliationCandidateSet
+from tests.unit.support.reconciliation_decisions import single_task_reconciliation_decision
 
 
 @compiles(BigInteger, "sqlite")
@@ -136,7 +140,9 @@ def _create_task(db_session, *, owner_id: str = "2", task_hash: str = "task-hash
     )
 
 
-def _create_confirmation_case(db_session, task: FollowUpTask, *, confirmation_hash: str) -> FollowUpTaskConfirmationCase:
+def _create_confirmation_case(
+    db_session, task: FollowUpTask, *, confirmation_hash: str
+) -> FollowUpTaskConfirmationCase:
     return follow_up_task_confirmation_case_crud.create(
         db_session,
         FollowUpTaskConfirmationCaseInternalCreate(
@@ -190,10 +196,9 @@ def _candidate_set(task: FollowUpTask) -> TaskReconciliationCandidateSet:
 
 def _plan(task: FollowUpTask, *, decision: str = "COMPLETE", proposed_due_at: str | None = None):
     return FollowUpTaskTransitionPlanService().plan(
-        FollowUpTaskReconciliationDecision(
+        single_task_reconciliation_decision(
             decision=decision,
             task_public_id=task.public_id,
-            candidate_public_ids=(task.public_id,),
             confidence=0.94,
             proposed_due_at=proposed_due_at,
             evidence_terms=("预算已经通过", "确认客户预算"),
@@ -204,7 +209,19 @@ def _plan(task: FollowUpTask, *, decision: str = "COMPLETE", proposed_due_at: st
     )
 
 
-def test_transition_executor_is_disabled_by_default_and_does_not_mutate(db_session):
+def _confirmed_plan(task: FollowUpTask, *, decision: str, proposed_due_at: str | None = None):
+    plan = _plan(task, decision=decision, proposed_due_at=proposed_due_at)
+    action = replace(
+        plan.actions[0],
+        executable=True,
+        requires_confirmation=False,
+        reason="USER_CONFIRMATION_RESOLVED",
+        forbid_auto_reasons=(),
+    )
+    return replace(plan, actions=(action,), plan_source="confirmation_case_reply")
+
+
+def test_transition_executor_executes_an_approved_plan_without_a_runtime_feature_gate(db_session):
     task = _create_task(db_session)
     plan = _plan(task)
 
@@ -217,12 +234,12 @@ def test_transition_executor_is_disabled_by_default_and_does_not_mutate(db_sessi
     db_session.refresh(task)
     events, total = follow_up_task_event_crud.list_by_task(db_session, team_id=1, task_id=task.id)
 
-    assert results[0].status == FollowUpTaskTransitionExecutionStatus.DISABLED
-    assert results[0].skip_reason == "EXECUTOR_DISABLED"
-    assert task.status == FollowUpTaskStatus.OPEN
-    assert task.completed_at is None
-    assert events == []
-    assert total == 0
+    assert results[0].status == FollowUpTaskTransitionExecutionStatus.EXECUTED
+    assert results[0].skip_reason is None
+    assert task.status == FollowUpTaskStatus.COMPLETED
+    assert task.completed_at is not None
+    assert total == 1
+    assert events[0].event_type == FollowUpTaskEventType.COMPLETED
 
 
 def test_transition_executor_completes_open_same_owner_task_and_records_event(db_session):
@@ -234,7 +251,6 @@ def test_transition_executor_completes_open_same_owner_task_and_records_event(db
         team_id=1,
         plan=plan,
         actor_id="2",
-        enabled=True,
     )
     db_session.refresh(task)
     events, total = follow_up_task_event_crud.list_by_task(db_session, team_id=1, task_id=task.id)
@@ -277,14 +293,13 @@ def test_transition_executor_cancels_pending_confirmation_cases_when_task_is_clo
 ):
     task = _create_task(db_session, task_hash=f"cleanup-on-{decision.lower()}")
     case = _create_confirmation_case(db_session, task, confirmation_hash=f"cleanup-on-{decision.lower()}-case")
-    plan = _plan(task, decision=decision)
+    plan = _plan(task) if decision == "COMPLETE" else _confirmed_plan(task, decision=decision)
 
     results = FollowUpTaskTransitionExecutionService().execute_plan(
         db_session,
         team_id=1,
         plan=plan,
         actor_id="2",
-        enabled=True,
     )
     db_session.refresh(task)
     db_session.refresh(case)
@@ -296,17 +311,16 @@ def test_transition_executor_cancels_pending_confirmation_cases_when_task_is_clo
     assert case.cancelled_reason == expected_reason
 
 
-def test_transition_executor_delay_keeps_pending_confirmation_cases(db_session):
-    task = _create_task(db_session, task_hash="cleanup-on-delay")
-    case = _create_confirmation_case(db_session, task, confirmation_hash="cleanup-on-delay-case")
-    plan = _plan(task, decision="DELAY", proposed_due_at="2026-08-14T10:00:00")
+def test_transition_executor_postpone_keeps_pending_confirmation_cases(db_session):
+    task = _create_task(db_session, task_hash="cleanup-on-postpone")
+    case = _create_confirmation_case(db_session, task, confirmation_hash="cleanup-on-postpone-case")
+    plan = _confirmed_plan(task, decision="POSTPONE", proposed_due_at="2026-08-14T10:00:00")
 
     results = FollowUpTaskTransitionExecutionService().execute_plan(
         db_session,
         team_id=1,
         plan=plan,
         actor_id="2",
-        enabled=True,
     )
     db_session.refresh(case)
 
@@ -323,7 +337,6 @@ def test_transition_executor_blocks_owner_mismatch(db_session):
         team_id=1,
         plan=plan,
         actor_id="3",
-        enabled=True,
     )
     db_session.refresh(task)
     events, total = follow_up_task_event_crud.list_by_task(db_session, team_id=1, task_id=task.id)
@@ -335,37 +348,94 @@ def test_transition_executor_blocks_owner_mismatch(db_session):
     assert total == 0
 
 
-def test_transition_executor_blocks_plan_with_safety_failures_even_if_action_is_executable(db_session):
+def test_transition_executor_blocks_action_with_safety_failures_even_if_marked_executable(db_session):
     task = _create_task(db_session)
-    plan = replace(_plan(task), safety_failures=("LOW_CONFIDENCE",))
+    approved_plan = _plan(task)
+    blocked_action = replace(
+        approved_plan.actions[0],
+        forbid_auto_reasons=("LOW_CONFIDENCE",),
+    )
+    plan = replace(approved_plan, actions=(blocked_action,))
 
     results = FollowUpTaskTransitionExecutionService().execute_plan(
         db_session,
         team_id=1,
         plan=plan,
         actor_id="2",
-        enabled=True,
     )
     db_session.refresh(task)
     events, total = follow_up_task_event_crud.list_by_task(db_session, team_id=1, task_id=task.id)
 
     assert results[0].status == FollowUpTaskTransitionExecutionStatus.SKIPPED
-    assert results[0].skip_reason == "PLAN_SAFETY_FAILURES"
+    assert results[0].skip_reason == "ACTION_SAFETY_FAILURES"
     assert task.status == FollowUpTaskStatus.OPEN
     assert events == []
     assert total == 0
 
 
-def test_transition_executor_delays_task_without_closing_it(db_session):
-    task = _create_task(db_session)
-    plan = _plan(task, decision="DELAY", proposed_due_at="2026-08-14T10:00:00")
+def test_transition_executor_reconciles_each_historical_task_independently(db_session):
+    completed_task = _create_task(db_session, task_hash="independent-complete")
+    confirmation_task = _create_task(db_session, task_hash="independent-confirmation")
+    candidate_set = TaskReconciliationCandidateSet(
+        items=[_candidate(completed_task), _candidate(confirmation_task)],
+        total=2,
+        filters={"activity_owner_id": "2"},
+        usage_policy={
+            "state_source": "mysql.crm_follow_up_tasks",
+            "mutation": "forbidden",
+            "cross_owner": "confirmation_only",
+        },
+    )
+    plan = FollowUpTaskTransitionPlanService().plan(
+        FollowUpTaskReconciliationDecision(
+            candidate_public_ids=(completed_task.public_id, confirmation_task.public_id),
+            task_decisions=(
+                FollowUpTaskReconciliationTaskDecision(
+                    decision="COMPLETE",
+                    task_public_id=completed_task.public_id,
+                    confidence=0.96,
+                    evidence_terms=("已联系客户并完成上次跟进",),
+                ),
+                FollowUpTaskReconciliationTaskDecision(
+                    decision="COMPLETE",
+                    task_public_id=confirmation_task.public_id,
+                    confidence=0.61,
+                    needs_confirmation=True,
+                    forbid_auto_reasons=("LOW_CONFIDENCE",),
+                    evidence_terms=("可能与本次跟进有关",),
+                ),
+            ),
+        ),
+        candidate_set,
+        source_activity_public_id="act_22222222222222222222222222222222",
+        plan_source="unit_test_plan",
+    )
 
     results = FollowUpTaskTransitionExecutionService().execute_plan(
         db_session,
         team_id=1,
         plan=plan,
         actor_id="2",
-        enabled=True,
+    )
+    db_session.refresh(completed_task)
+    db_session.refresh(confirmation_task)
+
+    assert results[0].status == FollowUpTaskTransitionExecutionStatus.EXECUTED
+    assert completed_task.status == FollowUpTaskStatus.COMPLETED
+    assert results[1].status == FollowUpTaskTransitionExecutionStatus.SKIPPED
+    assert results[1].skip_reason == "ACTION_SAFETY_FAILURES"
+    assert confirmation_task.status == FollowUpTaskStatus.OPEN
+
+
+def test_transition_executor_postpones_task_without_closing_it(db_session):
+    task = _create_task(db_session)
+    plan = _confirmed_plan(task, decision="POSTPONE", proposed_due_at="2026-08-14T10:00:00")
+
+    results = FollowUpTaskTransitionExecutionService().execute_plan(
+        db_session,
+        team_id=1,
+        plan=plan,
+        actor_id="2",
     )
     db_session.refresh(task)
     events, total = follow_up_task_event_crud.list_by_task(db_session, team_id=1, task_id=task.id)
@@ -400,7 +470,6 @@ def test_transition_executor_event_has_public_id_and_rollback_snapshot_for_compl
         team_id=1,
         plan=plan,
         actor_id="2",
-        enabled=True,
     )
     events, _ = follow_up_task_event_crud.list_by_task(db_session, team_id=1, task_id=task.id)
 
@@ -420,7 +489,7 @@ def test_transition_executor_rolls_back_automatic_completion_by_event_public_id(
     task = _create_task(db_session)
     plan = _plan(task)
     service = FollowUpTaskTransitionExecutionService()
-    service.execute_plan(db_session, team_id=1, plan=plan, actor_id="2", enabled=True)
+    service.execute_plan(db_session, team_id=1, plan=plan, actor_id="2")
     events, _ = follow_up_task_event_crud.list_by_task(db_session, team_id=1, task_id=task.id)
 
     result = service.rollback_event(
@@ -451,11 +520,11 @@ def test_transition_executor_rolls_back_automatic_completion_by_event_public_id(
     assert "completed_at" not in document.metadata_json
 
 
-def test_transition_executor_rolls_back_automatic_cancellation_by_event_public_id(db_session):
+def test_transition_executor_does_not_rollback_user_confirmed_cancellation(db_session):
     task = _create_task(db_session)
-    plan = _plan(task, decision="CANCEL")
+    plan = _confirmed_plan(task, decision="CANCEL")
     service = FollowUpTaskTransitionExecutionService()
-    service.execute_plan(db_session, team_id=1, plan=plan, actor_id="2", enabled=True)
+    service.execute_plan(db_session, team_id=1, plan=plan, actor_id="2")
     events, _ = follow_up_task_event_crud.list_by_task(db_session, team_id=1, task_id=task.id)
 
     result = service.rollback_event(
@@ -466,16 +535,17 @@ def test_transition_executor_rolls_back_automatic_cancellation_by_event_public_i
     )
     db_session.refresh(task)
 
-    assert result.status == FollowUpTaskTransitionExecutionStatus.EXECUTED
-    assert task.status == FollowUpTaskStatus.OPEN
-    assert task.cancelled_at is None
+    assert result.status == FollowUpTaskTransitionExecutionStatus.SKIPPED
+    assert result.skip_reason == "EVENT_NOT_AUTOMATIC_TRANSITION"
+    assert task.status == FollowUpTaskStatus.CANCELLED
+    assert task.cancelled_at is not None
 
 
-def test_transition_executor_rolls_back_automatic_delay_to_previous_due_at(db_session):
+def test_transition_executor_does_not_rollback_user_confirmed_postpone(db_session):
     task = _create_task(db_session)
-    plan = _plan(task, decision="DELAY", proposed_due_at="2026-08-14T10:00:00")
+    plan = _confirmed_plan(task, decision="POSTPONE", proposed_due_at="2026-08-14T10:00:00")
     service = FollowUpTaskTransitionExecutionService()
-    service.execute_plan(db_session, team_id=1, plan=plan, actor_id="2", enabled=True)
+    service.execute_plan(db_session, team_id=1, plan=plan, actor_id="2")
     events, _ = follow_up_task_event_crud.list_by_task(db_session, team_id=1, task_id=task.id)
 
     result = service.rollback_event(
@@ -487,20 +557,20 @@ def test_transition_executor_rolls_back_automatic_delay_to_previous_due_at(db_se
     db_session.refresh(task)
     rollback_events, total = follow_up_task_event_crud.list_by_task(db_session, team_id=1, task_id=task.id)
 
-    assert result.status == FollowUpTaskTransitionExecutionStatus.EXECUTED
+    assert result.status == FollowUpTaskTransitionExecutionStatus.SKIPPED
+    assert result.skip_reason == "EVENT_NOT_AUTOMATIC_TRANSITION"
     assert task.status == FollowUpTaskStatus.OPEN
-    assert task.due_at == datetime(2026, 8, 5, 10, 0, 0)
-    assert task.due_at_text == "本周三"
-    assert total == 2
+    assert task.due_at == datetime(2026, 8, 14, 10, 0, 0)
+    assert task.due_at_text == "2026-08-14T10:00:00"
+    assert total == 1
     assert rollback_events[-1].event_type == FollowUpTaskEventType.UPDATED
-    assert rollback_events[-1].payload_json["reason"] == "RECONCILIATION_TRANSITION_ROLLBACK"
 
 
 def test_transition_executor_rollback_is_idempotent(db_session):
     task = _create_task(db_session)
     plan = _plan(task)
     service = FollowUpTaskTransitionExecutionService()
-    service.execute_plan(db_session, team_id=1, plan=plan, actor_id="2", enabled=True)
+    service.execute_plan(db_session, team_id=1, plan=plan, actor_id="2")
     events, _ = follow_up_task_event_crud.list_by_task(db_session, team_id=1, task_id=task.id)
 
     first = service.rollback_event(db_session, team_id=1, event_public_id=events[0].public_id, actor_id="2")
@@ -517,7 +587,7 @@ def test_transition_executor_does_not_rollback_manual_confirmation_event(db_sess
     task = _create_task(db_session)
     plan = replace(_plan(task), plan_source="confirmation_case_reply")
     service = FollowUpTaskTransitionExecutionService()
-    service.execute_plan(db_session, team_id=1, plan=plan, actor_id="2", enabled=True)
+    service.execute_plan(db_session, team_id=1, plan=plan, actor_id="2")
     events, _ = follow_up_task_event_crud.list_by_task(db_session, team_id=1, task_id=task.id)
 
     result = service.rollback_event(

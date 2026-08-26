@@ -19,6 +19,7 @@ from app.utils.time import business_now
 
 DEFAULT_RECONCILIATION_LOOKBACK_DAYS = 90
 DEFAULT_RECONCILIATION_LOOKAHEAD_DAYS = 30
+DEFAULT_RECONCILIATION_LIMIT = 100
 
 
 @dataclass(frozen=True)
@@ -93,7 +94,7 @@ class TaskReconciliationService:
         anchor_at: datetime | None = None,
         lookback_days: int = DEFAULT_RECONCILIATION_LOOKBACK_DAYS,
         lookahead_days: int = DEFAULT_RECONCILIATION_LOOKAHEAD_DAYS,
-        limit: int = 20,
+        limit: int = DEFAULT_RECONCILIATION_LIMIT,
     ) -> TaskReconciliationCandidateSet:
         activity = (
             db.query(CustomerActivity)
@@ -136,7 +137,7 @@ class TaskReconciliationService:
         anchor_at: datetime | None = None,
         lookback_days: int = DEFAULT_RECONCILIATION_LOOKBACK_DAYS,
         lookahead_days: int = DEFAULT_RECONCILIATION_LOOKAHEAD_DAYS,
-        limit: int = 20,
+        limit: int = DEFAULT_RECONCILIATION_LIMIT,
     ) -> TaskReconciliationCandidateSet:
         started_at = business_now()
         started_monotonic = perf_counter()
@@ -148,8 +149,6 @@ class TaskReconciliationService:
             FollowUpTask.team_id == team_id,
             FollowUpTask.customer_id == customer_id,
             FollowUpTask.status == FollowUpTaskStatus.OPEN,
-            FollowUpTask.due_at >= starts_at,
-            FollowUpTask.due_at <= ends_at,
         )
         if not include_cross_owner:
             query = query.filter(FollowUpTask.owner_id == activity_owner_id)
@@ -168,9 +167,16 @@ class TaskReconciliationService:
                 )
             )
 
+        due_in_window = and_(
+            FollowUpTask.due_at.is_not(None),
+            FollowUpTask.due_at >= starts_at,
+            FollowUpTask.due_at <= ends_at,
+        )
         rows = (
             query.order_by(
                 FollowUpTask.owner_id != activity_owner_id,
+                (~due_in_window),
+                FollowUpTask.due_at.is_(None),
                 FollowUpTask.due_at.asc(),
                 FollowUpTask.id.asc(),
             )
@@ -181,6 +187,10 @@ class TaskReconciliationService:
             self._candidate_payload(
                 task,
                 activity_owner_id=activity_owner_id,
+                due_window=(
+                    task.due_at is not None
+                    and starts_at <= task.due_at <= ends_at
+                ),
             )
             for task in rows
         ]
@@ -232,9 +242,14 @@ class TaskReconciliationService:
         task: FollowUpTask,
         *,
         activity_owner_id: str,
+        due_window: bool,
     ) -> TaskReconciliationCandidate:
         is_same_owner = task.owner_id == activity_owner_id
-        reasons = ["same_customer", "open_task", "due_window"]
+        reasons = ["same_customer", "open_task"]
+        if due_window:
+            reasons.append("due_window")
+        else:
+            reasons.append("historical_open_task")
         if is_same_owner:
             reasons.append("same_owner")
         else:

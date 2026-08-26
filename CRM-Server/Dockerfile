@@ -13,8 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir --target=/install -r requirements.txt
+COPY requirements.lock .
+RUN pip install --no-cache-dir --require-hashes --target=/install -r requirements.lock
 
 # Production stage
 FROM python:3.11-slim as production

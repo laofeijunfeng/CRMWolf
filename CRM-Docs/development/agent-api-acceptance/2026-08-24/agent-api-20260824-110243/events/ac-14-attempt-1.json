@@ -1,0 +1,99 @@
+{
+  "case_id": "AC-14",
+  "attempt": 1,
+  "request": {
+    "session_id": 880,
+    "client_request_id": "b3aebe5e-d5b1-4100-bc1d-7c0a99796ec1",
+    "input": {
+      "type": "text",
+      "text": "为API验收-110243-上海客户01有限公司记录跟进：已完成方案演示，客户认可权限隔离方案，下周三上午10点继续沟通采购流程"
+    }
+  },
+  "http_status": 200,
+  "elapsed_seconds": 20.458,
+  "events": [
+    {
+      "event": "session",
+      "session_id": 880,
+      "session_key": "agent_428c7633c7094477b16f8ab46ca062cc"
+    },
+    {
+      "event": "agent_ui",
+      "phase": "final",
+      "message_id": 2290,
+      "turn_id": "turn_ed2f37a36f16467081f05b6ac49e065b",
+      "sequence": 1,
+      "message": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 2290,
+        "turn_id": "turn_ed2f37a36f16467081f05b6ac49e065b",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_text_1",
+            "type": "text",
+            "format": "markdown",
+            "text": "创建跟进任务前需要先明确一个客户。"
+          },
+          {
+            "id": "b_error_1",
+            "type": "error",
+            "code": "INTERNAL_ERROR",
+            "title": "操作未完成",
+            "message": "创建跟进任务前需要先明确一个客户。",
+            "retryable": false,
+            "trace_id": null
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {
+          "route": "WORKFLOW",
+          "result_set_id": null,
+          "accessibility_label": "创建跟进任务前需要先明确一个客户。"
+        }
+      }
+    },
+    {
+      "event": "done",
+      "session_id": 880
+    }
+  ],
+  "summary": {
+    "event_types": [
+      "session",
+      "agent_ui",
+      "done"
+    ],
+    "session_id": 880,
+    "message_id": 2290,
+    "route": "WORKFLOW",
+    "metadata": {
+      "route": "WORKFLOW",
+      "result_set_id": null,
+      "accessibility_label": "创建跟进任务前需要先明确一个客户。"
+    },
+    "block_types": [
+      "text",
+      "error"
+    ],
+    "texts": [
+      "创建跟进任务前需要先明确一个客户。",
+      "操作未完成"
+    ],
+    "interaction": null,
+    "errors": [
+      {
+        "id": "b_error_1",
+        "type": "error",
+        "code": "INTERNAL_ERROR",
+        "title": "操作未完成",
+        "message": "创建跟进任务前需要先明确一个客户。",
+        "retryable": false,
+        "trace_id": null
+      }
+    ],
+    "entity_count": 0,
+    "result_set_id": null
+  }
+}

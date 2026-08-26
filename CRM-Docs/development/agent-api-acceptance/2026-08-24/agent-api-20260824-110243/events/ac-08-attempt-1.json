@@ -1,0 +1,99 @@
+{
+  "case_id": "AC-08",
+  "attempt": 1,
+  "request": {
+    "session_id": 879,
+    "client_request_id": "fe5739c8-f977-43f7-80d9-7a43974f1611",
+    "input": {
+      "type": "text",
+      "text": "继续刚才的任务"
+    }
+  },
+  "http_status": 200,
+  "elapsed_seconds": 18.841,
+  "events": [
+    {
+      "event": "session",
+      "session_id": 879,
+      "session_key": "agent_b4c22b833b654b82a20a908dd9440856"
+    },
+    {
+      "event": "agent_ui",
+      "phase": "final",
+      "message_id": 2288,
+      "turn_id": "turn_efab947d67944448b1d592646eeaf3d5",
+      "sequence": 1,
+      "message": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 2288,
+        "turn_id": "turn_efab947d67944448b1d592646eeaf3d5",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_text_1",
+            "type": "text",
+            "format": "markdown",
+            "text": "请说明要对刚才的任务执行什么操作（完成、取消、延期或保持待跟进），并提供任务编号或更具体的任务信息。"
+          },
+          {
+            "id": "b_error_1",
+            "type": "error",
+            "code": "INTERNAL_ERROR",
+            "title": "操作未完成",
+            "message": "请说明要对刚才的任务执行什么操作（完成、取消、延期或保持待跟进），并提供任务编号或更具体的任务信息。",
+            "retryable": false,
+            "trace_id": null
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {
+          "route": "WORKFLOW",
+          "result_set_id": null,
+          "accessibility_label": "请说明要对刚才的任务执行什么操作（完成、取消、延期或保持待跟进），并提供任务编号或更具体的任务信息。"
+        }
+      }
+    },
+    {
+      "event": "done",
+      "session_id": 879
+    }
+  ],
+  "summary": {
+    "event_types": [
+      "session",
+      "agent_ui",
+      "done"
+    ],
+    "session_id": 879,
+    "message_id": 2288,
+    "route": "WORKFLOW",
+    "metadata": {
+      "route": "WORKFLOW",
+      "result_set_id": null,
+      "accessibility_label": "请说明要对刚才的任务执行什么操作（完成、取消、延期或保持待跟进），并提供任务编号或更具体的任务信息。"
+    },
+    "block_types": [
+      "text",
+      "error"
+    ],
+    "texts": [
+      "请说明要对刚才的任务执行什么操作（完成、取消、延期或保持待跟进），并提供任务编号或更具体的任务信息。",
+      "操作未完成"
+    ],
+    "interaction": null,
+    "errors": [
+      {
+        "id": "b_error_1",
+        "type": "error",
+        "code": "INTERNAL_ERROR",
+        "title": "操作未完成",
+        "message": "请说明要对刚才的任务执行什么操作（完成、取消、延期或保持待跟进），并提供任务编号或更具体的任务信息。",
+        "retryable": false,
+        "trace_id": null
+      }
+    ],
+    "entity_count": 0,
+    "result_set_id": null
+  }
+}

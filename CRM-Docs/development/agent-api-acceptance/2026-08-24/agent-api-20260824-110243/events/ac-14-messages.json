@@ -1,0 +1,64 @@
+{
+  "case_id": "AC-14",
+  "session_id": 880,
+  "http_status": 200,
+  "response": {
+    "items": [
+      {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 2289,
+        "turn_id": "turn_ed2f37a36f16467081f05b6ac49e065b",
+        "role": "user",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_user_text_1",
+            "type": "text",
+            "format": "plain",
+            "text": "为API验收-110243-上海客户01有限公司记录跟进：已完成方案演示，客户认可权限隔离方案，下周三上午10点继续沟通采购流程"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {
+          "route": null,
+          "result_set_id": null,
+          "accessibility_label": "为API验收-110243-上海客户01有限公司记录跟进：已完成方案演示，客户认可权限隔离方案，下周三上午10点继续沟通采购流程"
+        }
+      },
+      {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 2290,
+        "turn_id": "turn_ed2f37a36f16467081f05b6ac49e065b",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_text_1",
+            "type": "text",
+            "format": "markdown",
+            "text": "创建跟进任务前需要先明确一个客户。"
+          },
+          {
+            "id": "b_error_1",
+            "type": "error",
+            "code": "INTERNAL_ERROR",
+            "title": "操作未完成",
+            "message": "创建跟进任务前需要先明确一个客户。",
+            "retryable": false,
+            "trace_id": null
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {
+          "route": "WORKFLOW",
+          "result_set_id": null,
+          "accessibility_label": "创建跟进任务前需要先明确一个客户。"
+        }
+      }
+    ],
+    "total": 2,
+    "page": 1,
+    "page_size": 200,
+    "total_pages": 1
+  }
+}

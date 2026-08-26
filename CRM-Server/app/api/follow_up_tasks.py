@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from app.core.database import get_db
-from app.core.list_query import optional_request_list_query, run_or_400
 from app.core.deps import get_current_active_user, get_current_user_team
+from app.core.list_query import optional_request_list_query, run_or_400
 from app.crud.permission import permission_crud
 from app.crud.sales_commitment import (
     follow_up_task_confirmation_case_crud,
@@ -22,6 +22,7 @@ from app.models.sales_commitment import (
     FollowUpTaskSourceType,
 )
 from app.schemas.sales_commitment import (
+    FollowUpTaskConfirmationCaseItemResponse,
     FollowUpTaskConfirmationCaseListResponse,
     FollowUpTaskConfirmationPendingCountResponse,
     FollowUpTaskConfirmationResolveRequest,
@@ -36,7 +37,10 @@ from app.services.follow_up_task_confirmation_channel_service import (
 )
 from app.services.follow_up_task_projection_service import follow_up_task_projection_service
 from app.services.follow_up_task_query_service import follow_up_task_query_service
-from app.services.follow_up_task_reconciliation_evaluation_service import FollowUpTaskReconciliationDecision
+from app.services.follow_up_task_reconciliation_evaluation_service import (
+    FollowUpTaskReconciliationDecision,
+    FollowUpTaskReconciliationTaskDecision,
+)
 from app.services.follow_up_task_transition_execution_service import (
     FollowUpTaskTransitionExecutionStatus,
     follow_up_task_transition_execution_service,
@@ -60,7 +64,7 @@ observability_router = APIRouter(prefix="/v1/follow-up-task-transition-observabi
 
 
 class FollowUpTaskTransitionRequest(BaseModel):
-    action: str = Field(..., description="complete/cancel/delay")
+    action: str = Field(..., description="complete/cancel/postpone")
     proposed_due_at: str | None = Field(None, description="延期后的 ISO 时间")
     reason: str | None = Field(None, max_length=500, description="操作原因")
 
@@ -143,6 +147,28 @@ def get_follow_up_task_confirmation_pending_count(
         limit=1,
     )
     return FollowUpTaskConfirmationPendingCountResponse(count=int(payload["total"]))
+
+
+@router.get(
+    "/confirmation-cases/{case_id}",
+    response_model=FollowUpTaskConfirmationCaseItemResponse,
+    summary="查询我的待确认跟进任务详情",
+)
+def get_follow_up_task_confirmation_case(
+    case_id: str,
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> FollowUpTaskConfirmationCaseItemResponse:
+    payload = follow_up_task_confirmation_channel_service.get_pending_case(
+        db,
+        team_id=team_id,
+        user_id=current_user.id,
+        case_public_id=case_id,
+    )
+    if payload is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="待确认事项不存在")
+    return FollowUpTaskConfirmationCaseItemResponse.model_validate(payload)
 
 
 @router.post(
@@ -241,21 +267,25 @@ def transition_follow_up_task(
     action_map = {
         "complete": FollowUpTaskTransitionActionType.COMPLETE,
         "cancel": FollowUpTaskTransitionActionType.CANCEL,
-        "delay": FollowUpTaskTransitionActionType.DELAY,
+        "postpone": FollowUpTaskTransitionActionType.POSTPONE,
     }
     normalized_action = action_map.get(payload.action.lower())
     if normalized_action is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="action 只支持 complete/cancel/delay")
-    if normalized_action == FollowUpTaskTransitionActionType.DELAY and not payload.proposed_due_at:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="action 只支持 complete/cancel/postpone")
+    if normalized_action == FollowUpTaskTransitionActionType.POSTPONE and not payload.proposed_due_at:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="延期操作必须提供 proposed_due_at")
 
     plan = FollowUpTaskTransitionPlan(
         decision=FollowUpTaskReconciliationDecision(
-            decision=normalized_action,
-            confidence=1.0,
-            task_public_id=task_id,
             candidate_public_ids=(task_id,),
-            proposed_due_at=payload.proposed_due_at,
+            task_decisions=(
+                FollowUpTaskReconciliationTaskDecision(
+                    decision=normalized_action,
+                    confidence=1.0,
+                    task_public_id=task_id,
+                    proposed_due_at=payload.proposed_due_at,
+                ),
+            ),
         ),
         actions=(
             FollowUpTaskTransitionAction(
@@ -277,7 +307,6 @@ def transition_follow_up_task(
         plan=plan,
         actor_id=str(current_user.id),
         expected_owner_id=str(current_user.id),
-        enabled=True,
     )
     if result.status != FollowUpTaskTransitionExecutionStatus.EXECUTED:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result.skip_reason or "任务状态更新失败")

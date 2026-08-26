@@ -47,19 +47,30 @@ def _bigint_to_sqlite_int(element, compiler, **kw):
     return "INTEGER"
 
 
+class FakeBackgroundTask:
+    def __init__(self):
+        self.callbacks = []
+
+    def add_done_callback(self, callback):
+        self.callbacks.append(callback)
+
+
 class FakeGraphService:
     def __init__(self, *, should_fail=False):
         self.calls = []
         self.should_fail = should_fail
 
-    async def run(self, input_state):
+    async def stream_events(self, input_state):
         self.calls.append(input_state)
         if self.should_fail:
             raise RuntimeError("graph failed")
         event = input_state["event"]
-        if event.trigger_type in {"customer_created", "customer_converted_from_lead"}:
-            return {"route": "refresh_profile"}
-        return {"route": "refresh_brief"}
+        route = (
+            "refresh_profile"
+            if event.trigger_type in {"customer_created", "customer_converted_from_lead"}
+            else "refresh_brief"
+        )
+        yield {"kind": "result", "result": {"route": route}}
 
 
 class FakeEventService:
@@ -151,7 +162,7 @@ class FakeEventService:
                 business_object_type="customer",
                 business_object_id=str(kwargs["customer_id"]),
             ),
-            summary="客户已创建，刷新客户智能档案",
+            summary="客户已创建，刷新客户智能档案",  # noqa: RUF001
             payload={
                 "refresh_scope": "full",
                 "source_lead_id": kwargs["source_lead_id"],
@@ -291,6 +302,7 @@ class FakeRunService:
             run,
         )
 
+
     def record_visible_progress_if_lease_owner(self, db, run_input, *, lease_token, progress):
         run = self._runs[run_input.request_id]
         if run.lease_token != lease_token or run.status != CustomerIntelligenceRunStatus.RUNNING:
@@ -394,7 +406,7 @@ async def test_customer_intelligence_refresh_service_schedules_manual_full_refre
     def fake_create_task(coro):
         scheduled.append(coro)
         coro.close()
-        return SimpleNamespace()
+        return FakeBackgroundTask()
 
     def fake_update_profile_status(db, customer_id, status, error_message=None, *, commit=True):
         status_calls.append(("profile", db, customer_id, status, error_message))
@@ -495,7 +507,7 @@ async def test_customer_intelligence_refresh_service_schedules_customer_lifecycl
     def fake_create_task(coro):
         scheduled.append(coro)
         coro.close()
-        return SimpleNamespace()
+        return FakeBackgroundTask()
 
     def fake_update_profile_status(db, customer_id, status, error_message=None, *, commit=True):
         status_calls.append(("profile", customer_id, status, error_message))
@@ -546,7 +558,7 @@ async def test_customer_intelligence_refresh_service_schedules_committed_busines
     def fake_create_task(coro):
         scheduled.append(coro)
         coro.close()
-        return SimpleNamespace()
+        return FakeBackgroundTask()
 
     def fake_update_profile_status(db, customer_id, status, error_message=None, *, commit=True):
         status_calls.append(("profile", customer_id, status, error_message))
@@ -642,7 +654,7 @@ async def test_customer_intelligence_refresh_service_isolates_committed_event_sc
     def fake_create_task(coro):
         scheduled.append(coro)
         coro.close()
-        return SimpleNamespace()
+        return FakeBackgroundTask()
 
     monkeypatch.setattr("app.services.customer_intelligence_refresh_service.asyncio.create_task", fake_create_task)
     monkeypatch.setattr(
@@ -687,7 +699,7 @@ async def test_customer_intelligence_refresh_service_builds_business_object_chan
     def fake_create_task(coro):
         scheduled.append(coro)
         coro.close()
-        return SimpleNamespace()
+        return FakeBackgroundTask()
 
     monkeypatch.setattr("app.services.customer_intelligence_refresh_service.asyncio.create_task", fake_create_task)
     monkeypatch.setattr(
@@ -764,10 +776,12 @@ def test_customer_intelligence_refresh_service_detects_customer_business_inputs(
     Session = sessionmaker(bind=engine)
     db = Session()
     for ddl in [
-        "CREATE TABLE crm_contacts (id INTEGER PRIMARY KEY, team_id INTEGER NOT NULL, customer_id INTEGER, name VARCHAR(100) NOT NULL, gender INTEGER, mobile VARCHAR(20) NOT NULL)",
+        "CREATE TABLE crm_contacts (id INTEGER PRIMARY KEY, team_id INTEGER NOT NULL, "
+        "customer_id INTEGER, name VARCHAR(100) NOT NULL, gender INTEGER, mobile VARCHAR(20) NOT NULL)",
         "CREATE TABLE crm_customer_activities (id INTEGER PRIMARY KEY, team_id INTEGER NOT NULL, customer_id INTEGER)",
         "CREATE TABLE crm_opportunities (id INTEGER PRIMARY KEY, team_id INTEGER NOT NULL, customer_id INTEGER)",
-        "CREATE TABLE crm_contracts (id INTEGER PRIMARY KEY, team_id INTEGER NOT NULL, customer_id INTEGER, deleted_at DATETIME)",
+        "CREATE TABLE crm_contracts (id INTEGER PRIMARY KEY, team_id INTEGER NOT NULL, "
+        "customer_id INTEGER, deleted_at DATETIME)",
         "CREATE TABLE crm_invoice_titles (id INTEGER PRIMARY KEY, team_id INTEGER NOT NULL, customer_id INTEGER)",
         "CREATE TABLE crm_invoice_applications (id INTEGER PRIMARY KEY, team_id INTEGER NOT NULL, customer_id INTEGER)",
         "CREATE TABLE crm_deployment_infos (id INTEGER PRIMARY KEY, team_id INTEGER NOT NULL, customer_id INTEGER)",
@@ -1271,6 +1285,51 @@ async def test_customer_intelligence_refresh_service_runs_committed_business_eve
 
 
 @pytest.mark.asyncio
+async def test_customer_intelligence_refresh_service_reclaims_pending_graph_execution(monkeypatch):
+    graph_service = FakeGraphService()
+    run_service = FakeRunService()
+    event = _business_event()
+    run_input = CustomerIntelligenceRunInput(
+        request_id="business-event-running-reclaim",
+        event=event,
+        scope="brief",
+    )
+    run = run_service.ensure_pending(FakeSession(), run_input)
+    run.status = CustomerIntelligenceRunStatus.RUNNING
+    run.attempt_count = 1
+    run.lease_token = "expired-lease"
+    run.lease_expires_at = business_now() - timedelta(minutes=5)
+    monkeypatch.setattr(
+        "app.services.customer_intelligence_refresh_service.SessionLocal",
+        FakeSession,
+    )
+    service = CustomerIntelligenceRefreshService(
+        graph_service=graph_service,
+        event_service=FakeEventService(),
+        run_service=run_service,
+        operation_projector=FakeOperationProjector(),
+    )
+
+    result = await service.run_committed_event_refresh(
+        CustomerIntelligenceCommittedEventRequest(
+            request_id=run_input.request_id,
+            event=event,
+            scope="brief",
+        )
+    )
+
+    assert result["success"] is True
+    assert run.attempt_count == 2
+    assert graph_service.calls == [{
+        "team_id": 2,
+        "user_id": 9,
+        "session_id": 0,
+        "event": event,
+        "resume_existing_execution": True,
+    }]
+
+
+@pytest.mark.asyncio
 async def test_customer_intelligence_refresh_service_schedules_batch_rebuild_through_same_graph_entry(monkeypatch):
     engine = create_engine(
         "sqlite:///:memory:",
@@ -1293,7 +1352,7 @@ async def test_customer_intelligence_refresh_service_schedules_batch_rebuild_thr
     def fake_create_task(coro):
         scheduled.append(coro)
         coro.close()
-        return SimpleNamespace()
+        return FakeBackgroundTask()
 
     def fake_update_profile_status(db_arg, customer_id, status, error_message=None, *, commit=True):
         status_calls.append(("profile", db_arg, customer_id, status, error_message))
@@ -1402,7 +1461,7 @@ async def test_customer_intelligence_refresh_service_schedules_missing_historica
     def fake_create_task(coro):
         scheduled.append(coro)
         coro.close()
-        return SimpleNamespace()
+        return FakeBackgroundTask()
 
     def fake_update_profile_status(db_arg, customer_id, status, error_message=None, *, commit=True):
         status_calls.append(("profile", customer_id, status, error_message))
@@ -1515,16 +1574,20 @@ async def test_customer_intelligence_refresh_service_recovers_before_historical_
     def fake_create_task(coro):
         scheduled.append(coro)
         coro.close()
-        return SimpleNamespace()
+        return FakeBackgroundTask()
 
     monkeypatch.setattr("app.services.customer_intelligence_refresh_service.asyncio.create_task", fake_create_task)
     monkeypatch.setattr(
         "app.services.customer_intelligence_refresh_service.customer_crud.update_profile_status",
-        lambda db_arg, customer_id, status, error_message=None, *, commit=True: status_calls.append(("profile", customer_id, status)),
+        lambda db_arg, customer_id, status, error_message=None, *, commit=True: status_calls.append(
+            ("profile", customer_id, status)
+        ),
     )
     monkeypatch.setattr(
         "app.services.customer_intelligence_refresh_service.customer_crud.update_customer_brief_status",
-        lambda db_arg, customer_id, status, error_message=None, *, commit=True: status_calls.append(("brief", customer_id, status)),
+        lambda db_arg, customer_id, status, error_message=None, *, commit=True: status_calls.append(
+            ("brief", customer_id, status)
+        ),
     )
     service = CustomerIntelligenceRefreshService(
         graph_service=FakeGraphService(),
@@ -1741,7 +1804,9 @@ async def test_customer_intelligence_refresh_service_filters_due_retries_by_team
 
 
 @pytest.mark.asyncio
-async def test_customer_intelligence_refresh_service_retries_committed_business_event_from_persisted_event_json(monkeypatch):
+async def test_customer_intelligence_refresh_service_retries_committed_business_event_from_persisted_event_json(
+    monkeypatch,
+):
     sessions = [FakeSession() for _ in range(6)]
     graph_service = FakeGraphService()
     run_service = FakeRunService()
@@ -1780,6 +1845,9 @@ async def test_customer_intelligence_refresh_service_retries_committed_business_
     assert graph_service.calls[0]["event"].event_key == "contact-event-1"
 
 
+@pytest.mark.asyncio
+@pytest.mark.asyncio
+@pytest.mark.asyncio
 class _LateBindingGraphService:
     def __init__(self) -> None:
         self.started = asyncio.Event()
@@ -1787,7 +1855,7 @@ class _LateBindingGraphService:
         self.release = asyncio.Event()
         self.inputs: list[dict[str, object]] = []
 
-    async def stream_run(self, input_state):
+    async def stream_events(self, input_state):
         self.inputs.append(input_state)
         self.started.set()
         yield {

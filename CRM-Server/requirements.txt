@@ -20,17 +20,11 @@ email-validator==2.3.0
 python-docx==1.1.2
 
 # AI Agent
-langchain>=0.3.0
-langchain-openai>=0.2.0
-langchain-anthropic>=0.3.0
-langchain-core>=0.3.0
-langgraph>=1.2.5
+langchain==1.3.9
+langchain-openai==1.4.0
+langchain-anthropic==1.4.6
+langchain-core==1.5.0
+langgraph==1.2.5
 qdrant-client==1.18.0
 
-# Development (add via pip install -e .[dev])
-# pytest>=8.0.0
-# pytest-asyncio>=0.23.0
-# pytest-cov>=4.1.0
-# ruff>=0.3.0
-# mypy>=1.9.0
-# types-redis>=4.6.0
+# Development and CI tools are pinned in requirements-dev.txt and requirements-dev.lock.

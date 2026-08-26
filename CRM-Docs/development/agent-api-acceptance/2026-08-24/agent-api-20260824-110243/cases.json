@@ -1,0 +1,113 @@
+{
+  "batch_id": "agent-api-20260824-110243",
+  "cases": [
+    {
+      "id": "AC-01",
+      "scenario": "页面当前选中广州客户时查询上海客户",
+      "input": "上海有哪些客户",
+      "expected": "判定为新查询，忽略页面客户，返回有权限的上海客户列表"
+    },
+    {
+      "id": "AC-02",
+      "scenario": "连续追问重点客户",
+      "input": "重点客户呢",
+      "expected": "继承上一轮上海范围，按已定义的重点客户规则筛选"
+    },
+    {
+      "id": "AC-03",
+      "scenario": "引用上一结果集第一项",
+      "input": "第一个客户最近跟进得怎么样",
+      "expected": "绑定上一结果集第一项并返回有 CRM 依据的近期跟进"
+    },
+    {
+      "id": "AC-04",
+      "scenario": "使用页面唯一选中客户",
+      "input": "这个客户负责人是谁",
+      "expected": "使用页面 selected entity 并返回当前负责人"
+    },
+    {
+      "id": "AC-05",
+      "scenario": "显式客户名称覆盖页面客户",
+      "input": "API验收-110243-上海客户01有限公司负责人是谁",
+      "expected": "按本轮显式客户名称解析，不沿用页面客户"
+    },
+    {
+      "id": "AC-06",
+      "scenario": "结构化确认恢复 Workflow",
+      "input": "创建客户后提交 interaction_submission confirm",
+      "expected": "确定性恢复原 Workflow，且仅产生一次业务副作用"
+    },
+    {
+      "id": "AC-07",
+      "scenario": "待确认 Workflow 中切换查询",
+      "input": "上海有哪些客户",
+      "expected": "挂起 Workflow，切换到 Query，不把查询当作确认回答"
+    },
+    {
+      "id": "AC-08",
+      "scenario": "恢复挂起 Workflow",
+      "input": "继续刚才的任务",
+      "expected": "恢复唯一挂起 Workflow 的原确认上下文"
+    },
+    {
+      "id": "AC-09",
+      "scenario": "客户列表 Entity Action 进入 Workflow",
+      "input": "点击第一项“创建跟进任务”",
+      "expected": "重新校验 Result Set/Entity/权限后，进入补字段与确认流程"
+    },
+    {
+      "id": "AC-10",
+      "scenario": "查询真实空结果",
+      "input": "月球有哪些客户",
+      "expected": "展示已理解条件与真实空结果，不返回系统错误"
+    },
+    {
+      "id": "AC-11",
+      "scenario": "无权访问目标客户",
+      "input": "查询其他团队客户",
+      "expected": "返回权限错误，不泄漏数据，也不伪装成普通空结果"
+    },
+    {
+      "id": "AC-12",
+      "scenario": "页面客户档案问答",
+      "input": "介绍一下这个客户",
+      "expected": "组合 CRM 事实与档案证据，不编造未知信息"
+    },
+    {
+      "id": "AC-13",
+      "scenario": "Query 工具失败或模型超时",
+      "input": "真实模型调用中的瞬态失败",
+      "expected": "明确错误、可审计、有 trace id，不生成虚假业务答案"
+    },
+    {
+      "id": "AC-14",
+      "scenario": "直接创建跟进记录",
+      "input": "为显式客户记录完整跟进内容",
+      "expected": "与升级前产品行为一致，能解析客户并进入确认/写入链路"
+    },
+    {
+      "id": "AC-15",
+      "scenario": "Workflow 取消、修改、恢复与幂等",
+      "input": "取消；重复提交；修改字段；恢复",
+      "expected": "取消/修改/恢复可用，重复请求不产生重复副作用"
+    },
+    {
+      "id": "AC-16",
+      "scenario": "前端客户列表卡片调整",
+      "input": "Agent UI schema/render tests",
+      "expected": "前端仅调整渲染，不修改 Agent 查询和业务逻辑"
+    },
+    {
+      "id": "AC-17",
+      "scenario": "不支持客户卡片的渠道",
+      "input": "IM channel projection",
+      "expected": "降级展示但不丢失关键实体信息"
+    },
+    {
+      "id": "AC-18",
+      "scenario": "生产代码和配置历史债扫描",
+      "input": "扫描旧 Root、查询 fallback、双协议、兼容 adapter、迁移开关",
+      "expected": "生产运行路径不存在旧实现或长期兼容机制"
+    }
+  ]
+}

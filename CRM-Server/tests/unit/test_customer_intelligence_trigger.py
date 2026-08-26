@@ -15,22 +15,14 @@ from app.models.deal_journey import (
     DealJourneyEventType,
     DealJourneySourceType,
 )
-from app.services.agent.customer_intelligence_trigger import (
-    AgentCustomerIntelligenceTurn,
-    CustomerIntelligenceTriggerPolicy,
-)
+from app.services.agent.customer_intelligence_trigger import CustomerIntelligenceTriggerPolicy
 
 
 class FakeEventService:
     def __init__(self):
-        self.question_calls = []
         self.activity_calls = []
         self.contact_calls = []
         self.deal_journey_calls = []
-
-    def agent_customer_question(self, **kwargs):
-        self.question_calls.append(kwargs)
-        return SimpleNamespace(event_key="question-event", customer_id=kwargs["customer_id"])
 
     def from_customer_activity(self, activity):
         self.activity_calls.append(activity)
@@ -43,84 +35,6 @@ class FakeEventService:
     def from_deal_journey_event(self, event):
         self.deal_journey_calls.append(event)
         return SimpleNamespace(event_key="deal-journey-event", customer_id=event.customer_id)
-
-
-def test_customer_intelligence_trigger_builds_agent_question_from_structured_new_flow_events():
-    event_service = FakeEventService()
-    policy = CustomerIntelligenceTriggerPolicy(event_service=event_service)
-
-    event = policy.from_new_flow_events(
-        [
-            {"event": "intent", "intent": "CRM_READ_QUERY"},
-            {"event": "business_context_loaded", "customer": {"id": 101, "account_name": "越秀金融"}},
-        ],
-        turn=AgentCustomerIntelligenceTurn(
-            team_id=2,
-            user_id=9,
-            session_id=77,
-            message_id=88,
-            content="总结一下这个客户",
-        ),
-    )
-
-    assert event.event_key == "question-event"
-    assert event.customer_id == 101
-    assert event_service.question_calls == [
-        {
-            "team_id": 2,
-            "customer_id": 101,
-            "actor_id": "9",
-            "session_id": 77,
-            "message_id": 88,
-            "question": "总结一下这个客户",
-        }
-    ]
-
-
-def test_customer_intelligence_trigger_uses_latest_loaded_customer_for_agent_question():
-    event_service = FakeEventService()
-    policy = CustomerIntelligenceTriggerPolicy(event_service=event_service)
-
-    event = policy.from_new_flow_events(
-        [
-            {"event": "intent", "intent": "CRM_READ_QUERY"},
-            {"event": "business_context_loaded", "customer": {"id": 101, "account_name": "旧客户"}},
-            {"event": "business_context_loaded", "customer": {"id": 202, "account_name": "中国科学院信息工程研究所"}},
-        ],
-        turn=AgentCustomerIntelligenceTurn(
-            team_id=2,
-            user_id=9,
-            session_id=77,
-            message_id=88,
-            content="中科院现在是什么情况",
-        ),
-    )
-
-    assert event.event_key == "question-event"
-    assert event.customer_id == 202
-    assert event_service.question_calls[0]["customer_id"] == 202
-
-
-def test_customer_intelligence_trigger_ignores_non_customer_query_new_flow_events():
-    event_service = FakeEventService()
-    policy = CustomerIntelligenceTriggerPolicy(event_service=event_service)
-
-    event = policy.from_new_flow_events(
-        [
-            {"event": "intent", "intent": "CREATE_OPPORTUNITY"},
-            {"event": "business_context_loaded", "customer_id": 101},
-        ],
-        turn=AgentCustomerIntelligenceTurn(
-            team_id=2,
-            user_id=9,
-            session_id=77,
-            message_id=88,
-            content="给这个客户建一个商机",
-        ),
-    )
-
-    assert event is None
-    assert event_service.question_calls == []
 
 
 def test_customer_intelligence_trigger_builds_activity_event_from_committed_tool_result(monkeypatch):

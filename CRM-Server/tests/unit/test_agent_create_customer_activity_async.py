@@ -58,7 +58,9 @@ class _RecordingClient:
             "source_content": json["source_content"],
             "durable_work": {
                 "post_commit_job_public_id": "pcj_async_001",
-                "customer_intelligence_request_id": None,
+                "customer_intelligence_request_id": "cir_async_001",
+                "customer_intelligence_scope": "full",
+                "customer_intelligence_event": {"customer_id": 101},
             },
         }
 
@@ -93,6 +95,20 @@ class _TimeoutAfterWriteClient(_RecordingClient):
                 }
             ]
         raise AssertionError(f"unexpected request {method} {path}")
+
+
+class _IntelligenceOnlyClient(_RecordingClient):
+    async def request(self, method, path, authorization, *, params=None, json=None, idempotency_key=None):
+        response = await super().request(
+            method,
+            path,
+            authorization,
+            params=params,
+            json=json,
+            idempotency_key=idempotency_key,
+        )
+        response["durable_work"]["post_commit_job_public_id"] = None
+        return response
 
 
 def _db_session(extra_tables=None):
@@ -151,7 +167,7 @@ async def test_create_customer_activity_uses_async_post_commit():
 
 
 @pytest.mark.asyncio
-async def test_create_customer_activity_timeout_after_write_reconciles_to_success():
+async def test_create_customer_activity_timeout_after_write_stays_ambiguous():
     engine, db = _db_session()
     client = _TimeoutAfterWriteClient(persisted=True)
     service = CRMAgentToolService(api_client=client)
@@ -164,14 +180,11 @@ async def test_create_customer_activity_timeout_after_write_reconciles_to_succes
             idempotency_suffix="msg-timeout-success",
         )
 
-        assert result.success is True
-        assert result.error_message is None
-        assert result.data["id"] == 241
-        assert result.data["source_content"] == SOURCE_CONTENT
-        assert [call["method"] for call in client.calls] == ["POST", "GET"]
+        assert result.success is False
+        assert result.error_message == "ReadTimeout"
+        assert [call["method"] for call in client.calls] == ["POST"]
         idempotency = db.query(AgentIdempotencyKey).one()
-        assert idempotency.status == AgentIdempotencyStatus.SUCCESS
-        assert idempotency.error_message is None
+        assert idempotency.status == AgentIdempotencyStatus.AMBIGUOUS
     finally:
         db.close()
         engine.dispose()
@@ -200,7 +213,7 @@ async def test_create_customer_activity_timeout_without_row_stays_ambiguous():
 
 
 @pytest.mark.asyncio
-async def test_create_customer_activity_binds_post_commit_async_operation():
+async def test_create_customer_activity_returns_both_durable_work_receipts_without_binding_ui_operations():
     engine, db = _db_session(extra_tables=[AgentAsyncOperation.__table__, AgentAsyncOperationEvent.__table__])
     client = _RecordingClient()
     service = CRMAgentToolService(api_client=client)
@@ -214,21 +227,43 @@ async def test_create_customer_activity_binds_post_commit_async_operation():
         )
 
         assert result.success is True
-        operation = db.query(AgentAsyncOperation).one()
-        assert operation.operation_type == "customer_activity_post_commit"
-        assert operation.request_id == "pcj_async_001"
-        assert operation.session_id == 3
-        assert operation.resource_id == 241
-        assert operation.source_user_message_id == 10
-        assert operation.status == "QUEUED"
-        assert "已记录" in (operation.summary or "")
+        assert db.query(AgentAsyncOperation).count() == 0
+        assert len(result.durable_work) == 1
+        receipt = result.durable_work[0]
+        assert receipt.type == "customer_activity"
+        assert receipt.activity_id == 241
+        assert receipt.post_commit_job_public_id == "pcj_async_001"
+        assert receipt.customer_intelligence_request_id == "cir_async_001"
     finally:
         db.close()
         engine.dispose()
 
 
 @pytest.mark.asyncio
-async def test_create_customer_activity_binds_post_commit_to_latest_user_message():
+async def test_create_customer_activity_rejects_incomplete_background_work_receipt() -> None:
+    engine, db = _db_session(extra_tables=[AgentAsyncOperation.__table__, AgentAsyncOperationEvent.__table__])
+    client = _IntelligenceOnlyClient()
+    service = CRMAgentToolService(api_client=client)
+    try:
+        result = await service.create_customer_activity(
+            _context(db),
+            customer_id="cus_101",
+            activity_kind="WECHAT",
+            source_content="技术经理反馈项目正在立项",
+        )
+
+        assert result.success is False
+        assert result.error_message == "客户活动写入结果缺少跟进任务对账回执"
+        assert db.query(AgentAsyncOperation).count() == 0
+        assert result.durable_work == ()
+        assert db.query(AgentIdempotencyKey).one().status == AgentIdempotencyStatus.AMBIGUOUS
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_create_customer_activity_does_not_infer_agent_binding_from_message_history():
     engine, db = _db_session(
         extra_tables=[
             AgentMessage.__table__,
@@ -260,8 +295,11 @@ async def test_create_customer_activity_binds_post_commit_to_latest_user_message
         )
 
         assert result.success is True
-        operation = db.query(AgentAsyncOperation).one()
-        assert operation.source_user_message_id == 10
+        assert db.query(AgentAsyncOperation).count() == 0
+        assert len(result.durable_work) == 1
+        receipt = result.durable_work[0]
+        assert receipt.post_commit_job_public_id == "pcj_async_001"
+        assert receipt.customer_intelligence_request_id == "cir_async_001"
     finally:
         db.close()
         engine.dispose()

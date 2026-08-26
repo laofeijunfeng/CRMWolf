@@ -10,6 +10,7 @@ from app.models.sales_commitment import FollowUpTaskConfirmationStatus
 from app.utils.time import business_now
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from datetime import datetime
 
     from sqlalchemy.orm import Session
@@ -57,6 +58,14 @@ class FollowUpTaskConfirmationCaseCleanupCrudProtocol(Protocol):
         limit: int = 500,
     ) -> tuple[list[FollowUpTaskConfirmationCase], int]: ...
 
+    def list_pending_by_source_activity_for_update(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        source_activity_id: int,
+    ) -> list[FollowUpTaskConfirmationCase]: ...
+
     def mark_cancelled(
         self,
         db: Session,
@@ -77,6 +86,8 @@ class FollowUpTaskConfirmationCancelReason:
     SOURCE_NEXT_STEP_REMOVED = "SOURCE_NEXT_STEP_REMOVED"
     SOURCE_TASK_SUPERSEDED = "SOURCE_TASK_SUPERSEDED"
     SOURCE_ACTIVITY_REVISION_SUPERSEDED = "SOURCE_ACTIVITY_REVISION_SUPERSEDED"
+    SOURCE_RECONCILIATION_SUPERSEDED = "SOURCE_RECONCILIATION_SUPERSEDED"
+    DUPLICATE_ACTIVE_CASE_SUPERSEDED = "DUPLICATE_ACTIVE_CASE_SUPERSEDED"
 
 
 @dataclass(frozen=True)
@@ -163,7 +174,7 @@ class FollowUpTaskConfirmationCleanupService:
         limit: int = 500,
         commit: bool = True,
     ) -> FollowUpTaskConfirmationCleanupResult:
-        cases, total = self.confirmation_case_crud.list_pending_by_task(
+        cases, _ = self.confirmation_case_crud.list_pending_by_task(
             db,
             team_id=team_id,
             task_id=task_id,
@@ -172,7 +183,6 @@ class FollowUpTaskConfirmationCleanupService:
         return self._cancel_cases(
             db,
             cases=cases,
-            total=total,
             actor_id=actor_id,
             reason=reason,
             cancelled_at=cancelled_at,
@@ -191,18 +201,46 @@ class FollowUpTaskConfirmationCleanupService:
         limit: int = 500,
         commit: bool = True,
     ) -> FollowUpTaskConfirmationCleanupResult:
-        cases, total = self.confirmation_case_crud.list_pending_by_source_activity(
+        cases = self.confirmation_case_crud.list_pending_by_source_activity_for_update(
             db,
             team_id=team_id,
             source_activity_id=source_activity_id,
-            limit=limit,
         )
         return self._cancel_cases(
             db,
             cases=cases,
-            total=total,
             actor_id=actor_id,
             reason=reason,
+            cancelled_at=cancelled_at,
+            commit=commit,
+        )
+
+    def supersede_pending_cases_for_source_activity(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        source_activity_id: int,
+        retained_case_public_ids: Iterable[str],
+        actor_id: str | None = None,
+        cancelled_at: datetime | None = None,
+        limit: int = 500,
+        commit: bool = True,
+    ) -> FollowUpTaskConfirmationCleanupResult:
+        """Cancel pending cases no longer produced by the latest successful reconciliation."""
+
+        cases = self.confirmation_case_crud.list_pending_by_source_activity_for_update(
+            db,
+            team_id=team_id,
+            source_activity_id=source_activity_id,
+        )
+        retained = set(retained_case_public_ids)
+        superseded_cases = [case for case in cases if case.public_id not in retained]
+        return self._cancel_cases(
+            db,
+            cases=superseded_cases,
+            actor_id=actor_id,
+            reason=FollowUpTaskConfirmationCancelReason.SOURCE_RECONCILIATION_SUPERSEDED,
             cancelled_at=cancelled_at,
             commit=commit,
         )
@@ -212,7 +250,6 @@ class FollowUpTaskConfirmationCleanupService:
         db: Session,
         *,
         cases: list[FollowUpTaskConfirmationCase],
-        total: int,
         actor_id: str | None,
         reason: str,
         cancelled_at: datetime | None,

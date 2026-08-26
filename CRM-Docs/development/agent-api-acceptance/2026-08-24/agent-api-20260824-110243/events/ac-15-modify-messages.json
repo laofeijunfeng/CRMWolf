@@ -1,0 +1,134 @@
+{
+  "case_id": "AC-15-modify",
+  "session_id": 882,
+  "http_status": 200,
+  "response": {
+    "items": [
+      {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 2295,
+        "turn_id": "turn_ffc6270f95b44870a6e5d2cda9da10d4",
+        "role": "user",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_user_text_1",
+            "type": "text",
+            "format": "plain",
+            "text": "创建客户API验收-110243-修改工作流客户有限公司，城市深圳，行业软件"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {
+          "route": null,
+          "result_set_id": null,
+          "accessibility_label": "创建客户API验收-110243-修改工作流客户有限公司，城市深圳，行业软件"
+        }
+      },
+      {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 2296,
+        "turn_id": "turn_ffc6270f95b44870a6e5d2cda9da10d4",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_text_1",
+            "type": "text",
+            "format": "markdown",
+            "text": "确认要创建客户“API验收-110243-修改工作流客户有限公司”吗?"
+          },
+          {
+            "id": "b_interaction_1",
+            "type": "interaction",
+            "interaction_id": "int_ec9fe3c2f05d4b6a95e183e37791917c",
+            "interaction_type": "confirmation",
+            "state": "ACTIVE",
+            "prompt": "确认要创建客户“API验收-110243-修改工作流客户有限公司”吗?",
+            "fields": [],
+            "options": [
+              {
+                "value": "confirm",
+                "label": "确认创建",
+                "description": null,
+                "disabled": false
+              },
+              {
+                "value": "cancel",
+                "label": "取消",
+                "description": null,
+                "disabled": false
+              }
+            ],
+            "selection_mode": "single",
+            "min_selections": null,
+            "max_selections": null,
+            "allow_blank": null,
+            "submit_action_id": "act_6029a049ca5b4c91be0d9f379daba421"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {
+          "route": "WORKFLOW",
+          "result_set_id": null,
+          "accessibility_label": "确认要创建客户“API验收-110243-修改工作流客户有限公司”吗?"
+        }
+      },
+      {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 2297,
+        "turn_id": "turn_186ee11b67dc403cb5ab414e7173ba43",
+        "role": "user",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_user_text_1",
+            "type": "text",
+            "format": "plain",
+            "text": "把城市改成广州，然后继续"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {
+          "route": null,
+          "result_set_id": null,
+          "accessibility_label": "把城市改成广州，然后继续"
+        }
+      },
+      {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 2298,
+        "turn_id": "turn_186ee11b67dc403cb5ab414e7173ba43",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_text_1",
+            "type": "text",
+            "format": "markdown",
+            "text": "请问要修改哪个客户的城市？另外，“继续”具体是要继续执行什么操作？"
+          },
+          {
+            "id": "b_error_1",
+            "type": "error",
+            "code": "INTERNAL_ERROR",
+            "title": "操作未完成",
+            "message": "请问要修改哪个客户的城市？另外，“继续”具体是要继续执行什么操作？",
+            "retryable": false,
+            "trace_id": null
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {
+          "route": "WORKFLOW",
+          "result_set_id": null,
+          "accessibility_label": "请问要修改哪个客户的城市？另外，“继续”具体是要继续执行什么操作？"
+        }
+      }
+    ],
+    "total": 4,
+    "page": 1,
+    "page_size": 200,
+    "total_pages": 1
+  }
+}

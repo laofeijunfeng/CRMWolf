@@ -31,15 +31,6 @@ from app.utils.public_id import is_opportunity_public_id
 from .types import JSONDict, coerce_json_dict
 
 
-@dataclass(frozen=True)
-class AgentCustomerIntelligenceTurn:
-    team_id: int
-    user_id: int
-    session_id: int
-    message_id: int
-    content: str
-
-
 class CustomerIntelligenceTriggerPolicy:
     """Build customer intelligence events from stable Agent/business signals."""
 
@@ -49,27 +40,6 @@ class CustomerIntelligenceTriggerPolicy:
         event_service: CustomerIntelligenceEventService | None = None,
     ) -> None:
         self.event_service = event_service or customer_intelligence_event_service
-
-    def from_new_flow_events(
-        self,
-        events: list[JSONDict],
-        *,
-        turn: AgentCustomerIntelligenceTurn,
-    ) -> CustomerIntelligenceEvent | None:
-        intent = _first_intent(events)
-        if intent != "CRM_READ_QUERY":
-            return None
-        customer_id = _latest_customer_id(events)
-        if customer_id is None:
-            return None
-        return self.event_service.agent_customer_question(
-            team_id=turn.team_id,
-            customer_id=customer_id,
-            actor_id=str(turn.user_id),
-            session_id=turn.session_id,
-            message_id=turn.message_id,
-            question=turn.content,
-        )
 
     def from_confirmed_tool_result(
         self,
@@ -255,29 +225,6 @@ def _resolve_opportunity_db_id(db: Session, *, team_id: int, value: object) -> i
         .first()
     )
     return int(opportunity.id) if opportunity is not None else None
-
-
-def _first_intent(events: list[JSONDict]) -> str | None:
-    for event in events:
-        if event.get("event") == "intent":
-            intent = event.get("intent")
-            if isinstance(intent, str) and intent:
-                return intent
-    return None
-
-
-def _latest_customer_id(events: list[JSONDict]) -> int | None:
-    for event in reversed(events):
-        if event.get("event") != "business_context_loaded":
-            continue
-        customer_id = _positive_int(event.get("customer_id"))
-        if customer_id is not None:
-            return customer_id
-        customer = coerce_json_dict(event.get("customer"))
-        customer_id = _positive_int(customer.get("id"))
-        if customer_id is not None:
-            return customer_id
-    return None
 
 
 def _positive_int(value: object) -> int | None:

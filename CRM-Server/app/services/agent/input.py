@@ -1,6 +1,7 @@
 """Channel-neutral Agent turn input contracts."""
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
@@ -11,6 +12,16 @@ class AgentInputKind(str, Enum):
     TEXT = "text"
     CONFIRM = "confirm"
     REJECT = "reject"
+
+
+@dataclass(frozen=True)
+class AgentChannelContext:
+    """Trusted channel metadata applied after typed input validation."""
+
+    source: str = "web"
+    provider: Optional[str] = None
+    input_kind: AgentInputKind = AgentInputKind.TEXT
+    metadata: dict[str, object] = field(default_factory=dict)
 
 
 class AgentTurnInput(BaseModel):

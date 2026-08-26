@@ -1,0 +1,99 @@
+{
+  "case_id": "AC-15-modify",
+  "attempt": 1,
+  "request": {
+    "session_id": 882,
+    "client_request_id": "0202dbdf-135e-42c3-9b48-3db40c2cfcbf",
+    "input": {
+      "type": "text",
+      "text": "把城市改成广州，然后继续"
+    }
+  },
+  "http_status": 200,
+  "elapsed_seconds": 22.618,
+  "events": [
+    {
+      "event": "session",
+      "session_id": 882,
+      "session_key": "agent_8ddbf3973cea482a9542405c99909dff"
+    },
+    {
+      "event": "agent_ui",
+      "phase": "final",
+      "message_id": 2298,
+      "turn_id": "turn_186ee11b67dc403cb5ab414e7173ba43",
+      "sequence": 1,
+      "message": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 2298,
+        "turn_id": "turn_186ee11b67dc403cb5ab414e7173ba43",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_text_1",
+            "type": "text",
+            "format": "markdown",
+            "text": "请问要修改哪个客户的城市？另外，“继续”具体是要继续执行什么操作？"
+          },
+          {
+            "id": "b_error_1",
+            "type": "error",
+            "code": "INTERNAL_ERROR",
+            "title": "操作未完成",
+            "message": "请问要修改哪个客户的城市？另外，“继续”具体是要继续执行什么操作？",
+            "retryable": false,
+            "trace_id": null
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {
+          "route": "WORKFLOW",
+          "result_set_id": null,
+          "accessibility_label": "请问要修改哪个客户的城市？另外，“继续”具体是要继续执行什么操作？"
+        }
+      }
+    },
+    {
+      "event": "done",
+      "session_id": 882
+    }
+  ],
+  "summary": {
+    "event_types": [
+      "session",
+      "agent_ui",
+      "done"
+    ],
+    "session_id": 882,
+    "message_id": 2298,
+    "route": "WORKFLOW",
+    "metadata": {
+      "route": "WORKFLOW",
+      "result_set_id": null,
+      "accessibility_label": "请问要修改哪个客户的城市？另外，“继续”具体是要继续执行什么操作？"
+    },
+    "block_types": [
+      "text",
+      "error"
+    ],
+    "texts": [
+      "请问要修改哪个客户的城市？另外，“继续”具体是要继续执行什么操作？",
+      "操作未完成"
+    ],
+    "interaction": null,
+    "errors": [
+      {
+        "id": "b_error_1",
+        "type": "error",
+        "code": "INTERNAL_ERROR",
+        "title": "操作未完成",
+        "message": "请问要修改哪个客户的城市？另外，“继续”具体是要继续执行什么操作？",
+        "retryable": false,
+        "trace_id": null
+      }
+    ],
+    "entity_count": 0,
+    "result_set_id": null
+  }
+}

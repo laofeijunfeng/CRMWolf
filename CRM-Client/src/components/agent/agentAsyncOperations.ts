@@ -20,6 +20,56 @@ export interface GroupedAgentAsyncOperations {
   unanchored: AgentAsyncOperation[]
 }
 
+export type AutomaticTaskTransitionAction = "COMPLETE" | "POSTPONE" | "CANCEL"
+
+export interface AutomaticTaskTransition {
+  taskPublicId: string
+  title: string
+  action: AutomaticTaskTransitionAction
+  label: string
+}
+
+const isJsonRecord = (value: unknown): value is Record<string, unknown> => (
+  typeof value === "object" && value !== null && !Array.isArray(value)
+)
+
+const automaticTaskTransitionLabel = (action: AutomaticTaskTransitionAction): string => ({
+  COMPLETE: "已自动完成",
+  POSTPONE: "已自动延期",
+  CANCEL: "已自动取消",
+})[action]
+
+const parseAutomaticTaskTransition = (value: unknown): AutomaticTaskTransition | null => {
+  if (!isJsonRecord(value)) return null
+
+  const taskPublicId = value["task_public_id"]
+  const title = value["title"]
+  const action = value["action"]
+  if (typeof taskPublicId !== "string" || taskPublicId.trim().length === 0) return null
+  if (typeof title !== "string" || title.trim().length === 0) return null
+  if (action !== "COMPLETE" && action !== "POSTPONE" && action !== "CANCEL") return null
+
+  return {
+    taskPublicId,
+    title: title.trim(),
+    action,
+    label: automaticTaskTransitionLabel(action),
+  }
+}
+
+export const getAutomaticTaskTransitions = (
+  operation: Pick<AgentAsyncOperation, "result">
+): AutomaticTaskTransition[] => {
+  const postCommit = operation.result["post_commit"]
+  if (!isJsonRecord(postCommit)) return []
+
+  const transitions = postCommit["automatic_task_transitions"]
+  if (!Array.isArray(transitions)) return []
+  return transitions
+    .map(parseAutomaticTaskTransition)
+    .filter((transition): transition is AutomaticTaskTransition => transition !== null)
+}
+
 export const AGENT_ASYNC_OPERATION_STATUS_META: Readonly<Record<AgentAsyncOperationStatus, AgentAsyncOperationStatusMeta>> = {
   QUEUED: {
     label: "已排队",

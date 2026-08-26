@@ -1,0 +1,99 @@
+{
+  "case_id": "AC-03",
+  "attempt": 1,
+  "request": {
+    "session_id": 872,
+    "client_request_id": "37163957-dcc6-4759-bea5-eea1ec406c86",
+    "input": {
+      "type": "text",
+      "text": "第一个客户最近跟进得怎么样"
+    }
+  },
+  "http_status": 200,
+  "elapsed_seconds": 17.603,
+  "events": [
+    {
+      "event": "session",
+      "session_id": 872,
+      "session_key": "agent_0ba5adc248ad48fb90f10b0e9757adb0"
+    },
+    {
+      "event": "agent_ui",
+      "phase": "final",
+      "message_id": 2262,
+      "turn_id": "turn_e7ee43eecd0d4f0ab967552785dd6d8a",
+      "sequence": 1,
+      "message": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 2262,
+        "turn_id": "turn_e7ee43eecd0d4f0ab967552785dd6d8a",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_text_1",
+            "type": "text",
+            "format": "markdown",
+            "text": "查询服务暂时不可用, 请稍后重试。"
+          },
+          {
+            "id": "b_error_1",
+            "type": "error",
+            "code": "INTERNAL_ERROR",
+            "title": "处理未完成",
+            "message": "查询服务暂时不可用, 请稍后重试。",
+            "retryable": true,
+            "trace_id": null
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {
+          "route": "QUERY",
+          "result_set_id": null,
+          "accessibility_label": "查询服务暂时不可用, 请稍后重试。"
+        }
+      }
+    },
+    {
+      "event": "done",
+      "session_id": 872
+    }
+  ],
+  "summary": {
+    "event_types": [
+      "session",
+      "agent_ui",
+      "done"
+    ],
+    "session_id": 872,
+    "message_id": 2262,
+    "route": "QUERY",
+    "metadata": {
+      "route": "QUERY",
+      "result_set_id": null,
+      "accessibility_label": "查询服务暂时不可用, 请稍后重试。"
+    },
+    "block_types": [
+      "text",
+      "error"
+    ],
+    "texts": [
+      "查询服务暂时不可用, 请稍后重试。",
+      "处理未完成"
+    ],
+    "interaction": null,
+    "errors": [
+      {
+        "id": "b_error_1",
+        "type": "error",
+        "code": "INTERNAL_ERROR",
+        "title": "处理未完成",
+        "message": "查询服务暂时不可用, 请稍后重试。",
+        "retryable": true,
+        "trace_id": null
+      }
+    ],
+    "entity_count": 0,
+    "result_set_id": null
+  }
+}

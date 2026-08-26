@@ -1,0 +1,113 @@
+{
+  "case_id": "AC-05",
+  "attempt": 1,
+  "request": {
+    "session_id": 873,
+    "client_request_id": "ed97a14f-dac0-4b46-8525-81dd7f4a2af1",
+    "input": {
+      "type": "text",
+      "text": "API验收-110243-上海客户01有限公司的负责人是谁"
+    }
+  },
+  "http_status": 200,
+  "elapsed_seconds": 13.995,
+  "events": [
+    {
+      "event": "session",
+      "session_id": 873,
+      "session_key": "agent_73dcb5cbec8b4af4875af267b276b5bd"
+    },
+    {
+      "event": "agent_ui",
+      "phase": "final",
+      "message_id": 2266,
+      "turn_id": "turn_850c5a26469e4442b8962d92305b47f0",
+      "sequence": 1,
+      "message": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 2266,
+        "turn_id": "turn_850c5a26469e4442b8962d92305b47f0",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_text_1",
+            "type": "text",
+            "format": "markdown",
+            "text": "API验收-110243-上海客户01有限公司的负责人是 Agent API 验收 110243。"
+          },
+          {
+            "id": "b_entity_list_1",
+            "type": "entity_list",
+            "entity_type": "customer",
+            "items": [
+              {
+                "ref_id": "eref_customer_cus_15f2a006c251459dbcf9d8ae1c50957c",
+                "title": "API验收-110243-上海客户01有限公司",
+                "subtitle": null,
+                "fields": [
+                  {
+                    "key": "account_name",
+                    "label": "客户名称",
+                    "value": {
+                      "kind": "text",
+                      "value": "API验收-110243-上海客户01有限公司",
+                      "display": null,
+                      "currency": null
+                    }
+                  }
+                ],
+                "actions": [
+                  {
+                    "action_id": "act_922806676c854a448257e0ec3b150b32",
+                    "label": "创建跟进任务",
+                    "type": "start_workflow"
+                  }
+                ]
+              }
+            ],
+            "total": 1,
+            "result_set_id": "rs_e1c560739cbb4db18e566526aca0786d"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {
+          "route": "QUERY",
+          "result_set_id": "rs_e1c560739cbb4db18e566526aca0786d",
+          "accessibility_label": "API验收-110243-上海客户01有限公司的负责人是 Agent API 验收 110243。"
+        }
+      }
+    },
+    {
+      "event": "done",
+      "session_id": 873
+    }
+  ],
+  "summary": {
+    "event_types": [
+      "session",
+      "agent_ui",
+      "done"
+    ],
+    "session_id": 873,
+    "message_id": 2266,
+    "route": "QUERY",
+    "metadata": {
+      "route": "QUERY",
+      "result_set_id": "rs_e1c560739cbb4db18e566526aca0786d",
+      "accessibility_label": "API验收-110243-上海客户01有限公司的负责人是 Agent API 验收 110243。"
+    },
+    "block_types": [
+      "text",
+      "entity_list"
+    ],
+    "texts": [
+      "API验收-110243-上海客户01有限公司的负责人是 Agent API 验收 110243。",
+      "API验收-110243-上海客户01有限公司"
+    ],
+    "interaction": null,
+    "errors": [],
+    "entity_count": 1,
+    "result_set_id": "rs_e1c560739cbb4db18e566526aca0786d"
+  }
+}

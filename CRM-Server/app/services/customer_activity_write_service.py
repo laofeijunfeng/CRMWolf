@@ -14,6 +14,10 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from app.crud.customer_activity import CustomerActivityCRUD, customer_activity_crud
+from app.services.customer_activity_field_provenance import (
+    AI_EXTRACTED_SOURCE,
+    can_apply_ai_extracted_value,
+)
 from app.services.customer_activity_post_commit_job_service import (
     CustomerActivityPostCommitJobRequest,
     CustomerActivityPostCommitJobService,
@@ -177,6 +181,7 @@ class CustomerActivityWriteService:
         content_json: dict,
         summary: str | None,
         next_action: str | None,
+        next_action_source: str | None,
         next_follow_time: datetime | None,
         next_follow_time_source: str | None,
         post_commit_trigger_type: str,
@@ -186,6 +191,21 @@ class CustomerActivityWriteService:
         if current is None:
             raise ValueError("客户活动不存在")
         previous_revision = int(current.post_commit_revision or 1)
+        resolved_next_action_source = next_action_source or AI_EXTRACTED_SOURCE
+        if next_action is not None and not can_apply_ai_extracted_value(
+            current_value=current.next_action,
+            current_source=getattr(current, "next_action_source", None),
+        ):
+            next_action = None
+            resolved_next_action_source = None
+
+        resolved_next_follow_time_source = next_follow_time_source or AI_EXTRACTED_SOURCE
+        if next_follow_time is not None and not can_apply_ai_extracted_value(
+            current_value=current.next_follow_time,
+            current_source=current.next_follow_time_source,
+        ):
+            next_follow_time = None
+            resolved_next_follow_time_source = None
 
         def mutate() -> CustomerActivity:
             updated = self.activity_crud.update_processed_content(
@@ -195,8 +215,9 @@ class CustomerActivityWriteService:
                 content_json=content_json,
                 summary=summary,
                 next_action=next_action,
+                next_action_source=resolved_next_action_source,
                 next_follow_time=next_follow_time,
-                next_follow_time_source=next_follow_time_source,
+                next_follow_time_source=resolved_next_follow_time_source,
                 commit=False,
             )
             if updated is None or int(updated.team_id) != int(team_id):

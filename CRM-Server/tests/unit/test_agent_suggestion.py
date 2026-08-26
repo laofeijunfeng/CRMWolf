@@ -6,7 +6,6 @@ from app.services.agent.prompts import CRM_AGENT_SUGGESTION_SYSTEM_PROMPT, build
 from app.services.agent.schemas import AgentSemanticParseResult, AgentSuggestionResult
 from app.services.agent.suggestion import AgentSuggestionGenerator, AgentSuggestionGeneratorError
 
-
 OPPORTUNITY_PUBLIC_ID = "opp_0c1f7324704544a2bd619df90635a67f"
 OTHER_OPPORTUNITY_PUBLIC_ID = "opp_9b2c8e1f4a5d4f0c9876543210abcdef"
 
@@ -48,62 +47,6 @@ def test_suggestion_prompt_contains_business_boundaries():
     assert "系统当前没有跟进提醒 tool" in CRM_AGENT_SUGGESTION_SYSTEM_PROMPT
     assert "FOLLOW_UP_REMINDER" not in CRM_AGENT_SUGGESTION_SYSTEM_PROMPT
     assert "【客户上下文】" in messages[1]["content"]
-
-
-def test_suggestion_parser_accepts_json_object_wrapped_in_code_fence():
-    result = AgentSuggestionGenerator().parse_raw_response("""
-```json
-{
-  "summary": "客户项目已进入采购准备阶段。",
-  "suggestions": [
-    {
-      "action": "CREATE_OPPORTUNITY",
-      "title": "创建商机",
-      "reason": "用户输入提到预算和采购人数。",
-      "priority": "high",
-      "requires_confirmation": true,
-      "missing_fields": ["预计成交日期"],
-      "related_object_type": null,
-      "related_object_id": null,
-      "risk_notes": [],
-      "confidence": 0.92
-    }
-  ],
-  "need_user_choice": true,
-  "clarification_question": null
-}
-```
-""")
-
-    assert result.summary == "客户项目已进入采购准备阶段。"
-    assert result.suggestions[0].action == "CREATE_OPPORTUNITY"
-    assert result.suggestions[0].missing_fields == ["预计成交日期"]
-
-
-def test_suggestion_parser_rejects_invalid_ai_output():
-    with pytest.raises(AgentSuggestionGeneratorError):
-        AgentSuggestionGenerator().parse_raw_response('{"summary":"x","suggestions":[{"action":"CREATE_CONTRACT"}]}')
-
-
-def test_suggestion_parser_rejects_follow_up_reminder_action():
-    with pytest.raises(AgentSuggestionGeneratorError):
-        AgentSuggestionGenerator().parse_raw_response("""
-{
-  "summary": "客户有下次跟进时间。",
-  "suggestions": [{
-    "action": "FOLLOW_UP_REMINDER",
-    "title": "设置下周三跟进提醒",
-    "reason": "用户提到下周三再问问。",
-    "priority": "medium",
-    "requires_confirmation": true,
-    "missing_fields": [],
-    "risk_notes": [],
-    "confidence": 0.9
-  }],
-  "need_user_choice": true,
-  "clarification_question": null
-}
-""")
 
 
 @pytest.mark.asyncio
@@ -519,3 +462,52 @@ def test_suggestion_guardrail_blocks_official_license_without_approved_contract(
 
     assert guarded.suggestions == []
     assert guarded.need_user_choice is False
+
+@pytest.mark.asyncio
+async def test_suggestion_generator_disables_qwen_thinking_and_never_uses_legacy_stream(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.services.agent import suggestion
+
+    class FakeChatModel:
+        calls = []
+
+        def __init__(self, **kwargs):
+            self.__class__.calls.append(kwargs)
+
+    class FailingAgent:
+        async def ainvoke(self, payload):
+            raise TimeoutError("structured call timed out")
+
+    monkeypatch.setattr(
+        suggestion.ai_config_crud,
+        "get_config",
+        lambda db, team_id: SimpleNamespace(
+            api_host="https://ai.example.com/v1",
+            model_name="qwen3.5-plus",
+            temperature=0.1,
+            max_tokens=1024,
+        ),
+    )
+    monkeypatch.setattr(
+        suggestion.ai_config_crud,
+        "get_decrypted_api_key",
+        lambda db, team_id: "test-key",
+    )
+
+    generator = AgentSuggestionGenerator(
+        agent_factory=lambda **kwargs: FailingAgent(),
+        chat_model_factory=FakeChatModel,
+    )
+
+    with pytest.raises(AgentSuggestionGeneratorError, match="LangChain suggestion structured output 调用失败"):
+        await generator.generate_with_metadata(
+            object(),
+            team_id=1,
+            user_message="今天睿狐科技提到项目已经立项成功",
+            semantic_result=semantic_result(),
+            customer_context={"customer": {"id": 1, "account_name": "睿狐科技"}},
+        )
+
+    assert FakeChatModel.calls[0]["extra_body"] == {"enable_thinking": False}
+    assert FakeChatModel.calls[0]["max_retries"] == 0

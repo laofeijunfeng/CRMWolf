@@ -1,4 +1,5 @@
 """Prompt templates for CRM AI Agent."""
+
 from __future__ import annotations
 
 from datetime import date
@@ -59,29 +60,21 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 的 CRM AI Agent �
 - CREATE_DEPLOYMENT_INFO：创建部署信息。
 - CREATE_CUSTOMER_MEMBER：添加或设置客户团队成员、协作成员、售前/交付/支持成员。
 - FOLLOW_UP_TASK_TRANSITION：将某个跟进任务标记完成、取消、延期或保持待跟进。
+- MOVE_OPPORTUNITY_STAGE：将指定商机推进到下一采购阶段或用户明确指定的后续采购阶段。
 - CRM_READ_QUERY：读取 CRM 事实，包括任务、工作总结、客户、合同、商机、回款、发票、License 等信息。
 - UNKNOWN：无法可靠判断。
 
 【输出 JSON Schema】
 {
-  "intent": "CUSTOMER_ACTIVITY|PAYMENT_RECORD|CREATE_LEAD|CREATE_CUSTOMER|CREATE_OPPORTUNITY|CREATE_CONTACT|CREATE_INVOICE_TITLE|CREATE_DEPLOYMENT_INFO|CREATE_CUSTOMER_MEMBER|FOLLOW_UP_TASK_TRANSITION|CRM_READ_QUERY|UNKNOWN",
+  "intent": "CUSTOMER_ACTIVITY|PAYMENT_RECORD|CREATE_LEAD|CREATE_CUSTOMER|CREATE_OPPORTUNITY|CREATE_CONTACT|CREATE_INVOICE_TITLE|CREATE_DEPLOYMENT_INFO|CREATE_CUSTOMER_MEMBER|FOLLOW_UP_TASK_TRANSITION|MOVE_OPPORTUNITY_STAGE|CRM_READ_QUERY|UNKNOWN",
   "intent_confidence": 0.0,
   "customer": {
     "name_text": "客户名称或简称，无法识别则为 null",
     "confidence": 0.0,
     "resolution_source": "EXPLICIT|MEMORY|NONE"
   },
-  "read_query": {
-    "type": "FOLLOW_UP_TASKS|WORK_SUMMARY|CUSTOMER_PROFILE|OPPORTUNITY|CONTRACT|PAYMENT|INVOICE|LICENSE|UNKNOWN_READ",
-    "status": "open|completed|cancelled|all|null",
-    "due_window": "today|this_week|next_week|overdue|null",
-    "work_window": "today|this_week|last_week|this_month|custom|null",
-    "owner_scope": "mine|customer|null",
-    "customer_name_text": "读取查询中的客户名称，无法识别则为 null",
-    "query_text": "读取查询中的语义条件，例如预算、试用反馈、合同卡点；无则为 null"
-  },
   "follow_up_task_transition": {
-    "action": "complete|cancel|delay|keep_open|null",
+    "action": "complete|cancel|postpone|keep_open|null",
     "task_id": "明确提到的跟进任务对外ID，格式 fut_...；没有则为 null",
     "task_reference_text": "用户原文中的任务指代表达，例如 这个任务、河南双汇那个任务；没有则为 null",
     "proposed_due_at_text": "延期场景下用户原文中的新时间；没有则为 null",
@@ -102,6 +95,11 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 的 CRM AI Agent �
     },
     "proposed_due_at_iso": null,
     "reason": "用户表达的状态变更原因；没有则为 null"
+  },
+  "opportunity_stage_transition": {
+    "opportunity_id": "用户本轮明确提到的商机对外 ID；没有则为 null",
+    "opportunity_reference_text": "用户原文中的商机名称或指代表达；没有则为 null",
+    "target_stage_name": "用户希望推进到的采购阶段名称；未指定则为 null"
   },
   "follow_up": {
     "content": "可沉淀为客户活动的业务事实，无法识别则为 null",
@@ -299,6 +297,8 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 的 CRM AI Agent �
 - 未明确访问级别时 access_level 默认可为 VIEW，不要追问；用户说“可跟进”映射 FOLLOW_UP，“可编辑”映射 EDIT。
 - 用户表达“这个任务完成了/把 fut_... 标记完成/取消这个待办/延期到明天再跟进”时，intent 必须为 FOLLOW_UP_TASK_TRANSITION，不要输出 CRM_READ_QUERY。
 - 用户表达“有哪些已完成任务/查询已完成任务/本周完成了哪些任务”时，intent 必须为 CRM_READ_QUERY，不要输出 FOLLOW_UP_TASK_TRANSITION。
+- 用户表达“推进商机/把某个商机推进到某阶段/进入下一采购阶段”时，intent 必须为 MOVE_OPPORTUNITY_STAGE，不要输出 CRM_READ_QUERY。
+- 商机阶段推进只提取用户明确表达的 opportunity_id、opportunity_reference_text 和 target_stage_name；禁止输出可信 stage_template_id，阶段 ID 必须由后续 CRM 权威资源解析。
 - 跟进任务状态变更时，task_id 只填写用户本轮明确提供的 fut_...；如果用户说“这个任务/刚才那个/某客户那个任务”，即使 recent_follow_up_tasks 中有候选，也先让 task_id 为 null，并用 task_reference_text 保留指代表达，后续由 LangGraph 引用解析节点决定是否可唯一绑定。
 - 延期任务时只输出结构化时间要素 follow_up_task_transition.proposed_due_at，不要自己换算最终日期；proposed_due_at_iso 必须输出 null。
 - intent_confidence 低于 0.75 时 need_clarification 必须为 true。
@@ -314,10 +314,11 @@ def render_semantic_system_prompt(
     names = [str(name).strip() for name in (source_names or _DEFAULT_ACQUISITION_SOURCE_NAMES) if str(name).strip()]
     if not names:
         names = list(_DEFAULT_ACQUISITION_SOURCE_NAMES)
-    fallback_name = (default_source_name or _DEFAULT_ACQUISITION_SOURCE_FALLBACK).strip() or _DEFAULT_ACQUISITION_SOURCE_FALLBACK
+    fallback_name = (
+        default_source_name or _DEFAULT_ACQUISITION_SOURCE_FALLBACK
+    ).strip() or _DEFAULT_ACQUISITION_SOURCE_FALLBACK
     return (
-        CRM_AGENT_SEMANTIC_SYSTEM_PROMPT_TEMPLATE
-        .replace("{source_enum}", "|".join(names))
+        CRM_AGENT_SEMANTIC_SYSTEM_PROMPT_TEMPLATE.replace("{source_enum}", "|".join(names))
         .replace("{source_names_text}", "、".join(names))
         .replace("{default_source_name}", fallback_name)
         .replace("{forbidden_source_name}", FORBIDDEN_SOURCE_NAME)
@@ -377,7 +378,7 @@ CRM_AGENT_SUGGESTION_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agent 业务�
   "summary": "对客户当前上下文和用户输入的简要判断",
   "suggestions": [
     {
-      "action": "CREATE_OPPORTUNITY|MOVE_OPPORTUNITY_STAGE|CREATE_CONTACT|CREATE_PAYMENT_PLAN|CREATE_PAYMENT_RECORD|CREATE_INVOICE_TITLE|CREATE_DEPLOYMENT_INFO|CREATE_LICENSE_APPLICATION|CUSTOMER_QUERY_SUMMARY|NO_ACTION",
+      "action": "CREATE_OPPORTUNITY|MOVE_OPPORTUNITY_STAGE|CREATE_CONTACT|CREATE_PAYMENT_PLAN|CREATE_PAYMENT_RECORD|CREATE_INVOICE_TITLE|CREATE_DEPLOYMENT_INFO|CREATE_LICENSE_APPLICATION|NO_ACTION",
       "title": "建议标题",
       "reason": "建议原因，必须基于用户输入或客户上下文",
       "priority": "high|medium|low",
@@ -430,7 +431,7 @@ CRM_AGENT_PENDING_INTERRUPTION_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agen
   "decision": "CONTINUE_PENDING|START_NEW_FLOW|ASK_USER",
   "confidence": 0.0,
   "detected_customer_name": "本轮明确提到的新客户名称，无法识别则为 null",
-  "detected_intent": "CUSTOMER_ACTIVITY|PAYMENT_RECORD|CREATE_LEAD|CREATE_CUSTOMER|CREATE_OPPORTUNITY|CREATE_CONTACT|CREATE_INVOICE_TITLE|CREATE_DEPLOYMENT_INFO|CREATE_CUSTOMER_MEMBER|FOLLOW_UP_TASK_TRANSITION|CRM_READ_QUERY|UNKNOWN|null",
+  "detected_intent": "CUSTOMER_ACTIVITY|PAYMENT_RECORD|CREATE_LEAD|CREATE_CUSTOMER|CREATE_OPPORTUNITY|CREATE_CONTACT|CREATE_INVOICE_TITLE|CREATE_DEPLOYMENT_INFO|CREATE_CUSTOMER_MEMBER|FOLLOW_UP_TASK_TRANSITION|MOVE_OPPORTUNITY_STAGE|CRM_READ_QUERY|UNKNOWN|null",
   "is_field_supplement": false,
   "reason": "一句话说明判断依据",
   "question": "需要用户确认时的问题；无需确认则为 null"
@@ -480,7 +481,7 @@ CRM_AGENT_TURN_RELATION_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agent 会�
   "confidence": 0.0,
   "target_task_id": 123,
   "detected_customer_name": "本轮明确提到的客户名称，无法识别则为 null",
-  "detected_intent": "CUSTOMER_ACTIVITY|PAYMENT_RECORD|CREATE_LEAD|CREATE_CUSTOMER|CREATE_OPPORTUNITY|CREATE_CONTACT|CREATE_INVOICE_TITLE|CREATE_DEPLOYMENT_INFO|CREATE_CUSTOMER_MEMBER|FOLLOW_UP_TASK_TRANSITION|CRM_READ_QUERY|UNKNOWN|null",
+  "detected_intent": "CUSTOMER_ACTIVITY|PAYMENT_RECORD|CREATE_LEAD|CREATE_CUSTOMER|CREATE_OPPORTUNITY|CREATE_CONTACT|CREATE_INVOICE_TITLE|CREATE_DEPLOYMENT_INFO|CREATE_CUSTOMER_MEMBER|FOLLOW_UP_TASK_TRANSITION|MOVE_OPPORTUNITY_STAGE|CRM_READ_QUERY|UNKNOWN|null",
   "reason": "一句话说明判断依据",
   "question": "需要用户确认时的问题；无需确认则为 null"
 }
@@ -497,6 +498,7 @@ CRM_AGENT_FOLLOW_UP_QUALITY_SYSTEM_PROMPT = """你是 CRMWolf 的客户活动质
 - 不能为了提高分数改写出用户没有表达的信息。
 - 无论是否通过，都要尽量输出 suggested_revision，作为最终入库前的克制整理稿。
 - suggested_revision 只能整理、合并、去重、调整语序；不得新增客户未表达的金额、时间、人员、阶段、承诺或判断。
+- 不得根据“当前日期”计算或补写绝对日期；原文使用“下周三”等相对时间时，suggested_revision 必须原样保留相对时间表达。
 - 如果原文包含多轮补充，不要保留“补充：”“用户补充”等过程性字样，要合并成一条自然的跟进记录。
 - 如果总分达到 60 分，passed 必须为 true，不要要求用户补充。
 - 如果总分低于 60 分，passed 必须为 false，只输出 1 个最关键的补充问题。
@@ -553,15 +555,9 @@ def build_semantic_messages(
 ) -> list[dict]:
     prompt_date = current_date or date.today()
     system = (
-        f"{render_semantic_system_prompt(source_names, default_source_name)}"
-        f"\n\n【当前日期】\n{prompt_date.isoformat()}"
+        f"{render_semantic_system_prompt(source_names, default_source_name)}\n\n【当前日期】\n{prompt_date.isoformat()}"
     )
-    user = (
-        "【会话记忆】\n"
-        f"{memory_json}\n\n"
-        "【用户输入】\n"
-        f"{user_message}"
-    )
+    user = f"【会话记忆】\n{memory_json}\n\n【用户输入】\n{user_message}"
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
@@ -573,14 +569,7 @@ def build_follow_up_quality_messages(
     principles_text: Optional[str] = None,
 ) -> list[dict]:
     system = build_follow_up_quality_system_prompt(current_date=current_date, principles_text=principles_text)
-    user = (
-        "【用户原文】\n"
-        f"{user_message}\n\n"
-        "【语义解析结果】\n"
-        f"{semantic_json}\n\n"
-        "【会话记忆】\n"
-        f"{memory_json}"
-    )
+    user = f"【用户原文】\n{user_message}\n\n【语义解析结果】\n{semantic_json}\n\n【会话记忆】\n{memory_json}"
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
@@ -592,14 +581,7 @@ def build_pending_interruption_messages(
 ) -> list[dict]:
     prompt_date = current_date or date.today()
     system = f"{CRM_AGENT_PENDING_INTERRUPTION_SYSTEM_PROMPT}\n\n【当前日期】\n{prompt_date.isoformat()}"
-    user = (
-        "【当前挂起任务】\n"
-        f"{pending_task_json}\n\n"
-        "【会话记忆】\n"
-        f"{memory_json}\n\n"
-        "【用户本轮输入】\n"
-        f"{user_message}"
-    )
+    user = f"【当前挂起任务】\n{pending_task_json}\n\n【会话记忆】\n{memory_json}\n\n【用户本轮输入】\n{user_message}"
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
@@ -625,44 +607,6 @@ def build_turn_relation_messages(
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
-CRM_AGENT_CONFIRMATION_INTENT_SYSTEM_PROMPT = """
-你是 CRM Agent 的确认意图分类器。你的任务非常窄：只判断用户本轮回复是否在确认或拒绝【当前待确认动作】。
-
-输出必须是 JSON：
-{
-  "intent": "confirm|reject|unknown",
-  "confidence": 0.0,
-  "reason": "一句话说明"
-}
-
-判断规则：
-- 用户明确表示同意、继续、执行、按当前方案处理，输出 confirm。
-- 用户明确表示取消、不要、先不处理、拒绝当前动作，输出 reject。
-- 用户补充字段、修改内容、纠正客户/联系人/电话/金额/日期，输出 unknown。
-- 用户提出新需求、闲聊、感谢、情绪表达、含义不明确，输出 unknown。
-- 不能执行任务，不能生成业务回复，只能分类。
-""".strip()
-
-
-def build_confirmation_intent_messages(
-    user_message: str,
-    pending_task_json: str,
-    memory_json: str,
-    current_date: Optional[date] = None,
-) -> list[dict]:
-    prompt_date = current_date or date.today()
-    system = f"{CRM_AGENT_CONFIRMATION_INTENT_SYSTEM_PROMPT}\n\n【当前日期】\n{prompt_date.isoformat()}"
-    user = (
-        "【当前待确认动作】\n"
-        f"{pending_task_json}\n\n"
-        "【会话记忆】\n"
-        f"{memory_json}\n\n"
-        "【用户本轮回复】\n"
-        f"{user_message}"
-    )
-    return [{"role": "system", "content": system}, {"role": "user", "content": user}]
-
-
 def build_suggestion_messages(
     user_message: str,
     semantic_json: str,
@@ -672,12 +616,7 @@ def build_suggestion_messages(
     prompt_date = current_date or date.today()
     system = f"{CRM_AGENT_SUGGESTION_SYSTEM_PROMPT}\n\n【当前日期】\n{prompt_date.isoformat()}"
     user = (
-        "【用户输入】\n"
-        f"{user_message}\n\n"
-        "【语义解析结果】\n"
-        f"{semantic_json}\n\n"
-        "【客户上下文】\n"
-        f"{customer_context_json}"
+        f"【用户输入】\n{user_message}\n\n【语义解析结果】\n{semantic_json}\n\n【客户上下文】\n{customer_context_json}"
     )
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
@@ -864,7 +803,9 @@ def build_customer_context_answer_messages(
 def build_semantic_chat_prompt():
     if ChatPromptTemplate is None:
         return None
-    return ChatPromptTemplate.from_messages([
-        ("system", render_semantic_system_prompt() + "\n\n【当前日期】\n{current_date}"),
-        ("user", "【会话记忆】\n{memory_json}\n\n【用户输入】\n{user_message}"),
-    ])
+    return ChatPromptTemplate.from_messages(
+        [
+            ("system", render_semantic_system_prompt() + "\n\n【当前日期】\n{current_date}"),
+            ("user", "【会话记忆】\n{memory_json}\n\n【用户输入】\n{user_message}"),
+        ]
+    )

@@ -432,6 +432,30 @@ def test_list_pending_confirmation_cases_only_returns_current_owner_cases(client
 
 
 
+def test_get_pending_confirmation_case_returns_authoritative_owned_projection(client, db_session):
+    task = _create_task(db_session, owner_id="2")
+    case = _create_confirmation_case(db_session, task=task)
+
+    response = client.get(f"/v1/follow-up-tasks/confirmation-cases/{case.public_id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == case.public_id
+    assert payload["public_id"] == case.public_id
+    assert payload["owner_id"] == "2"
+    assert payload["task"]["public_id"] == task.public_id
+    assert payload["customer"]["public_id"] == "cus_11111111111111111111111111111111"
+
+
+def test_get_pending_confirmation_case_does_not_disclose_another_owner_case(client, db_session):
+    task = _create_task(db_session, owner_id="9")
+    case = _create_confirmation_case(db_session, task=task, owner_id="9")
+
+    response = client.get(f"/v1/follow-up-tasks/confirmation-cases/{case.public_id}")
+
+    assert response.status_code == 404
+
+
 def test_pending_confirmation_cases_support_owner_scoped_pagination(client, db_session):
     first_task = _create_task(db_session, task_id=211, owner_id="2")
     first_case = _create_confirmation_case(
@@ -533,33 +557,12 @@ def test_get_follow_up_task_detail_returns_source_activity_context(client, db_se
     assert payload["source_activity"]["owner_info"]["name"] == "售前"
 
 
-def test_get_follow_up_task_detail_only_projects_pending_confirmations_for_current_owner_and_team(
+def test_get_follow_up_task_detail_projects_the_single_pending_confirmation(
     client,
     db_session,
 ):
     task = _create_task(db_session)
     owned_case = _create_confirmation_case(db_session, task=task)
-    _create_confirmation_case(
-        db_session,
-        task=task,
-        case_id=302,
-        public_id="fuc_22222222222222222222222222222222",
-        owner_id="9",
-    )
-    _create_confirmation_case(
-        db_session,
-        task=task,
-        case_id=303,
-        public_id="fuc_33333333333333333333333333333333",
-        team_id=2,
-    )
-    _create_confirmation_case(
-        db_session,
-        task=task,
-        case_id=304,
-        public_id="fuc_44444444444444444444444444444444",
-        customer_id=2,
-    )
 
     response = client.get(f"/v1/follow-up-tasks/{task.public_id}")
 
@@ -615,13 +618,13 @@ def test_transition_follow_up_task_can_close_owned_open_task(
     assert event.payload_json["execution_kind"] == "manual_ui"
 
 
-def test_transition_follow_up_task_can_delay_owned_open_task(client, db_session):
+def test_transition_follow_up_task_can_postpone_owned_open_task(client, db_session):
     task = _create_task(db_session)
 
     response = client.post(
         f"/v1/follow-up-tasks/{task.public_id}/transition",
         json={
-            "action": "delay",
+            "action": "postpone",
             "proposed_due_at": "2026-08-20T10:30:00",
             "reason": "客户要求下周再确认",
         },
@@ -646,22 +649,22 @@ def test_transition_follow_up_task_can_delay_owned_open_task(client, db_session)
     assert event.payload_json["execution_kind"] == "manual_ui"
 
 
-def test_transition_follow_up_task_rejects_invalid_action_and_missing_delay_time(client, db_session):
+def test_transition_follow_up_task_rejects_invalid_action_and_missing_postpone_time(client, db_session):
     task = _create_task(db_session)
 
     invalid_response = client.post(
         f"/v1/follow-up-tasks/{task.public_id}/transition",
         json={"action": "reopen"},
     )
-    missing_delay_response = client.post(
+    missing_postpone_response = client.post(
         f"/v1/follow-up-tasks/{task.public_id}/transition",
-        json={"action": "delay"},
+        json={"action": "postpone"},
     )
 
     assert invalid_response.status_code == 400
-    assert invalid_response.json()["detail"] == "action 只支持 complete/cancel/delay"
-    assert missing_delay_response.status_code == 400
-    assert missing_delay_response.json()["detail"] == "延期操作必须提供 proposed_due_at"
+    assert invalid_response.json()["detail"] == "action 只支持 complete/cancel/postpone"
+    assert missing_postpone_response.status_code == 400
+    assert missing_postpone_response.json()["detail"] == "延期操作必须提供 proposed_due_at"
 
 
 def test_transition_follow_up_task_blocks_non_owner(client, db_session):

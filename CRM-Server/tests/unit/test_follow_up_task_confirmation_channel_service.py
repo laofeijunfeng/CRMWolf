@@ -35,6 +35,7 @@ from app.services.follow_up_task_confirmation_service import FollowUpTaskConfirm
 from app.services.follow_up_task_reconciliation_evaluation_service import FollowUpTaskReconciliationDecision
 from app.services.follow_up_task_transition_plan_service import FollowUpTaskTransitionPlanService
 from app.services.task_reconciliation_service import TaskReconciliationCandidate, TaskReconciliationCandidateSet
+from tests.unit.support.reconciliation_decisions import single_task_reconciliation_decision
 
 
 @compiles(BigInteger, "sqlite")
@@ -81,40 +82,42 @@ def db_session():
 
 
 def _seed_customer_and_activity(db_session) -> None:
-    db_session.add_all([
-        Customer(
-            id=1,
-            public_id="cus_11111111111111111111111111111111",
-            team_id=1,
-            account_name="测试客户",
-            city="上海",
-            owner_id="9",
-            creator_id="9",
-        ),
-        CustomerActivity(
-            id=101,
-            team_id=1,
-            customer_id=1,
-            activity_kind="PHONE_FOLLOW_UP",
-            source_content="客户说预算还没进展。",
-            summary="客户预算还没进展。",
-            occurred_at=datetime(2026, 8, 6, 10, 0, 0),
-            owner_id="2",
-            creator_id="2",
-        ),
-        CustomerActivity(
-            id=190,
-            team_id=1,
-            customer_id=1,
-            activity_kind="PHONE_FOLLOW_UP",
-            source_content="客户确认预算已通过。",
-            summary="客户确认预算已通过。",
-            occurred_at=datetime(2026, 8, 6, 11, 0, 0),
-            owner_id="2",
-            creator_id="2",
-            post_commit_revision=1,
-        ),
-    ])
+    db_session.add_all(
+        [
+            Customer(
+                id=1,
+                public_id="cus_11111111111111111111111111111111",
+                team_id=1,
+                account_name="测试客户",
+                city="上海",
+                owner_id="9",
+                creator_id="9",
+            ),
+            CustomerActivity(
+                id=101,
+                team_id=1,
+                customer_id=1,
+                activity_kind="PHONE_FOLLOW_UP",
+                source_content="客户说预算还没进展。",
+                summary="客户预算还没进展。",
+                occurred_at=datetime(2026, 8, 6, 10, 0, 0),
+                owner_id="2",
+                creator_id="2",
+            ),
+            CustomerActivity(
+                id=190,
+                team_id=1,
+                customer_id=1,
+                activity_kind="PHONE_FOLLOW_UP",
+                source_content="客户确认预算已通过。",
+                summary="客户确认预算已通过。",
+                occurred_at=datetime(2026, 8, 6, 11, 0, 0),
+                owner_id="2",
+                creator_id="2",
+                post_commit_revision=1,
+            ),
+        ]
+    )
 
 
 def _create_task(
@@ -175,10 +178,9 @@ def _create_confirmation_case(
     source_activity_revision: int | None = None,
 ) -> FollowUpTaskConfirmationCase:
     plan = FollowUpTaskTransitionPlanService().plan(
-        FollowUpTaskReconciliationDecision(
+        single_task_reconciliation_decision(
             decision="COMPLETE",
             task_public_id=task.public_id,
-            candidate_public_ids=(task.public_id,),
             confidence=0.62,
             evidence_terms=("预算",),
         ),
@@ -195,17 +197,21 @@ def _create_confirmation_case(
         source_activity_public_id=source_activity_public_id,
         plan_source="unit_test_plan",
     )
-    return FollowUpTaskConfirmationService().create_case_from_plan_action(
-        db_session,
-        team_id=1,
-        task=task,
-        plan=plan,
-        action=plan.actions[0],
-        actor_id=task.owner_id,
-        source_activity_id=source_activity_id,
-        source_activity_revision=source_activity_revision,
-        source_public_id=source_activity_public_id,
-    ).case
+    return (
+        FollowUpTaskConfirmationService()
+        .create_case_from_plan_action(
+            db_session,
+            team_id=1,
+            task=task,
+            plan=plan,
+            action=plan.actions[0],
+            actor_id=task.owner_id,
+            source_activity_id=source_activity_id,
+            source_activity_revision=source_activity_revision,
+            source_public_id=source_activity_public_id,
+        )
+        .case
+    )
 
 
 def test_prompt_next_pending_case_records_delivery_and_interaction(db_session):
@@ -510,7 +516,6 @@ def test_prepare_case_prompt_queues_attempt_until_checkpoint_acknowledges_projec
     assert case.last_prompted_at is None
 
 
-
 def test_prepare_case_prompt_uses_bounded_deterministic_key_for_max_length_scope(db_session):
     task = _create_task(db_session)
     case = _create_confirmation_case(db_session, task)
@@ -552,15 +557,23 @@ def test_prepare_case_prompt_uses_bounded_deterministic_key_for_max_length_scope
     assert clarification_key.startswith("projection:")
     assert len(initial_key) <= 128
     assert len(clarification_key) <= 128
-    assert len(service._projection_prompt_key(
-        case_public_id="fuc_" + ("c" * 60),
-        interaction_scope=clarification_scope,
-    )) <= 128
-    assert service.mark_projection_projected(
-        db_session,
-        team_id=1,
-        prompt_key=initial_key,
-    ).status == FollowUpTaskConfirmationPromptStatus.PROJECTED
+    assert (
+        len(
+            service._projection_prompt_key(
+                case_public_id="fuc_" + ("c" * 60),
+                interaction_scope=clarification_scope,
+            )
+        )
+        <= 128
+    )
+    assert (
+        service.mark_projection_projected(
+            db_session,
+            team_id=1,
+            prompt_key=initial_key,
+        ).status
+        == FollowUpTaskConfirmationPromptStatus.PROJECTED
+    )
 
 
 def test_mark_projection_projected_transitions_queued_attempt_idempotently(db_session):
@@ -673,6 +686,7 @@ def test_case_pending_revalidation_cancels_superseded_source_activity_revision(d
     assert pending is False
     assert case.status == FollowUpTaskConfirmationStatus.CANCELLED
     assert case.cancelled_reason == "SOURCE_ACTIVITY_REVISION_SUPERSEDED"
+
 
 def test_web_visibility_ack_skips_superseded_source_activity_revision(db_session):
     task = _create_task(db_session)

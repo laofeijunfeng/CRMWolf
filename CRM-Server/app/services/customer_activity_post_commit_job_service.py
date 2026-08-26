@@ -22,9 +22,6 @@ from app.services.customer_activity_post_commit_operation_projector import (
     customer_activity_post_commit_operation_projector,
 )
 from app.services.customer_activity_post_commit_workflow import customer_activity_post_commit_workflow
-from app.services.follow_up_task_confirmation_agent_message_card_service import (
-    follow_up_task_confirmation_agent_message_card_service,
-)
 from app.utils.time import business_now
 
 if TYPE_CHECKING:
@@ -263,11 +260,6 @@ class CustomerActivityPostCommitJobService:
         try:
             projected = customer_activity_post_commit_operation_projector.project_job(db, job)
             if projected is not None:
-                follow_up_task_confirmation_agent_message_card_service.ensure_job_cards(
-                    db,
-                    job=job,
-                    commit=False,
-                )
                 db.commit()
         except Exception:
             db.rollback()
@@ -360,7 +352,6 @@ class CustomerActivityPostCommitJobService:
             "projection_result": state.get("projection_result"),
             "match_result": state.get("match_result"),
             "transition_plan": state.get("transition_plan"),
-            "policy_results": state.get("policy_results") or [],
             "execution_results": state.get("execution_results") or [],
             "confirmation_cases": state.get("confirmation_cases") or [],
             "post_commit": state.get("post_commit") or _empty_post_commit_outcome(),
@@ -421,6 +412,7 @@ class CustomerActivityPostCommitJobService:
 
 def _empty_post_commit_outcome() -> dict[str, object]:
     return {
+        "automatic_task_transitions": [],
         "needs_user_confirmation": False,
         "confirmation_case_public_ids": [],
         "confirmation_cases": [],

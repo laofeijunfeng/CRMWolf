@@ -21,6 +21,7 @@ from app.services.follow_up_task_reconciliation_evaluation_service import (
     FollowUpTaskReconciliationDecision,
     FollowUpTaskReconciliationEvaluationCase,
     FollowUpTaskReconciliationEvaluationResult,
+    FollowUpTaskReconciliationTaskDecision,
     follow_up_task_reconciliation_evaluation_service,
 )
 from app.services.task_reconciliation_service import (
@@ -32,13 +33,16 @@ from app.utils.time import business_now
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from datetime import datetime
 
     from sqlalchemy.orm import Session
+
+    from app.crud.sales_commitment import FollowUpTaskLLMMatcherRunCRUD
 
 
 ReconciliationDecisionLiteral = Literal[
     "COMPLETE",
-    "DELAY",
+    "POSTPONE",
     "CANCEL",
     "KEEP_OPEN",
     "UNRELATED",
@@ -51,48 +55,71 @@ class TaskReconciliationSemanticOutput(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    decision: ReconciliationDecisionLiteral
-    confidence: float = Field(ge=0, le=1)
-    task_public_id: str | None = None
-    candidate_public_ids: list[str] = Field(default_factory=list)
-    needs_confirmation: bool = False
-    proposed_due_at: str | None = None
-    forbid_auto_reasons: list[str] = Field(default_factory=list)
-    evidence_terms: list[str] = Field(default_factory=list)
     referenced_source_public_ids: list[str] = Field(default_factory=list)
-    state_mutation_requested: bool = False
+    tasks: list[TaskReconciliationTaskOutput] = Field(min_length=1)
 
-    @field_validator("task_public_id", mode="before")
-    @classmethod
-    def trim_optional_public_id(cls, value: object) -> str | None:
-        if value is None:
-            return None
-        value = str(value).strip()
-        return value or None
-
-    @field_validator("candidate_public_ids", "forbid_auto_reasons", "evidence_terms", "referenced_source_public_ids")
+    @field_validator("referenced_source_public_ids")
     @classmethod
     def trim_string_list(cls, values: list[object]) -> list[str]:
         return [str(value).strip() for value in values if str(value).strip()]
 
     @model_validator(mode="after")
-    def enforce_reconciliation_contract(self) -> TaskReconciliationSemanticOutput:
-        if self.task_public_id and not self.task_public_id.startswith("fut_"):
+    def reject_duplicate_task_decisions(self) -> TaskReconciliationSemanticOutput:
+        task_public_ids = [task.task_public_id for task in self.tasks]
+        duplicate_ids = sorted(
+            task_public_id
+            for task_public_id in set(task_public_ids)
+            if task_public_ids.count(task_public_id) > 1
+        )
+        if duplicate_ids:
+            raise ValueError(f"duplicate task_public_id: {', '.join(duplicate_ids)}")
+        return self
+
+
+class TaskReconciliationTaskOutput(BaseModel):
+    """Structured decision for one candidate task in a reconciliation batch."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    task_public_id: str
+    decision: ReconciliationDecisionLiteral
+    confidence: float = Field(ge=0, le=1)
+    needs_confirmation: bool = False
+    proposed_due_at: str | None = None
+    forbid_auto_reasons: list[str] = Field(default_factory=list)
+    evidence_terms: list[str] = Field(default_factory=list)
+    state_mutation_requested: bool = False
+
+    @field_validator("task_public_id", mode="before")
+    @classmethod
+    def trim_task_public_id(cls, value: object) -> str:
+        value = str(value).strip()
+        if not value:
+            raise ValueError("task_public_id is required")
+        return value
+
+    @field_validator("forbid_auto_reasons", "evidence_terms")
+    @classmethod
+    def trim_task_string_list(cls, values: list[object]) -> list[str]:
+        return [str(value).strip() for value in values if str(value).strip()]
+
+    @model_validator(mode="after")
+    def enforce_task_contract(self) -> TaskReconciliationTaskOutput:
+        if not self.task_public_id.startswith("fut_"):
             raise ValueError("task_public_id must be a follow-up task public_id")
-        invalid_candidate_ids = [
-            candidate_public_id
-            for candidate_public_id in self.candidate_public_ids
-            if not candidate_public_id.startswith("fut_")
-        ]
-        if invalid_candidate_ids:
-            raise ValueError("candidate_public_ids must contain only follow-up task public_ids")
-        if self.decision in AUTO_TRANSITION_DECISIONS and not self.task_public_id:
-            raise ValueError("auto transition decision requires task_public_id")
-        if self.decision == "DELAY" and not self.proposed_due_at:
-            raise ValueError("DELAY requires proposed_due_at")
+        if self.decision == "POSTPONE" and not self.proposed_due_at:
+            raise ValueError("POSTPONE requires proposed_due_at")
         if self.decision == "ASK_CONFIRMATION":
             self.needs_confirmation = True
         return self
+
+
+class TaskReconciliationUnavailableError(RuntimeError):
+    """Raised when historical-task reconciliation cannot produce a valid decision."""
+
+    def __init__(self, reason_code: str) -> None:
+        self.reason_code = reason_code
+        super().__init__(reason_code)
 
 
 class AIConfigLike(Protocol):
@@ -138,15 +165,17 @@ class TaskReconciliationSemanticMatchResult:
     def to_dict(self) -> dict[str, Any]:
         return {
             "decision": {
-                "decision": self.decision.decision,
-                "task_public_id": self.decision.task_public_id,
                 "candidate_public_ids": list(self.decision.candidate_public_ids),
-                "confidence": self.decision.confidence,
-                "needs_confirmation": self.decision.needs_confirmation,
-                "proposed_due_at": self.decision.proposed_due_at,
-                "forbid_auto_reasons": list(self.decision.forbid_auto_reasons),
-                "evidence_terms": list(self.decision.evidence_terms),
-                "state_mutation_requested": self.decision.state_mutation_requested,
+                "task_decisions": self.decision.task_decisions_to_dict(),
+                "empty_outcome": (
+                    {
+                        "reason": self.decision.empty_reason,
+                        "confidence": self.decision.empty_confidence,
+                        "evidence_terms": list(self.decision.empty_evidence_terms),
+                    }
+                    if not self.decision.task_decisions
+                    else None
+                ),
             },
             "candidate_set": self.candidate_set.to_dict(),
             "source": self.source,
@@ -167,7 +196,7 @@ class TaskReconciliationSemanticMatcher:
         evaluation_service: FollowUpTaskReconciliationEvaluationServiceProtocol = (
             follow_up_task_reconciliation_evaluation_service
         ),
-        matcher_run_crud: Any = follow_up_task_llm_matcher_run_crud,
+        matcher_run_crud: FollowUpTaskLLMMatcherRunCRUD = follow_up_task_llm_matcher_run_crud,
         auto_confidence_threshold: float = DEFAULT_AUTO_CONFIDENCE_THRESHOLD,
     ) -> None:
         self.runtime = runtime or AgentLangChainRuntime()
@@ -222,11 +251,9 @@ class TaskReconciliationSemanticMatcher:
         reconciliation_run_public_id = candidate_set.run_public_id
 
         if not candidate_set.items:
-            result = self._safe_result(
+            result = self._empty_result(
                 candidate_set,
-                activity_owner_id=activity_owner_id,
                 reason="NO_OPEN_CANDIDATES",
-                decision="UNRELATED",
                 confidence=1.0,
             )
             self._record_match_result(
@@ -245,45 +272,35 @@ class TaskReconciliationSemanticMatcher:
 
         config = self.config_crud.get_config(db, team_id)
         if not config:
-            result = self._safe_result(
-                candidate_set,
-                activity_owner_id=activity_owner_id,
-                reason="AI_CONFIG_MISSING",
-            )
-            self._record_match_result(
+            self._record_unavailable(
                 db,
                 team_id=team_id,
                 owner_id=activity_owner_id,
                 source_activity_id=source_activity_id,
                 source_public_id=source_public_id,
                 reconciliation_run_public_id=reconciliation_run_public_id,
-                result=result,
-                status=FollowUpTaskLLMMatcherRunStatus.SKIPPED,
+                candidate_public_ids=[candidate.public_id for candidate in candidate_set.items],
+                reason_code="AI_CONFIG_MISSING",
                 started_at=started_at,
                 started_monotonic=started_monotonic,
             )
-            return result
+            raise TaskReconciliationUnavailableError("AI_CONFIG_MISSING")
         api_key = self.config_crud.get_decrypted_api_key(db, team_id)
         if not api_key:
-            result = self._safe_result(
-                candidate_set,
-                activity_owner_id=activity_owner_id,
-                reason="AI_API_KEY_MISSING",
-            )
-            self._record_match_result(
+            self._record_unavailable(
                 db,
                 team_id=team_id,
                 owner_id=activity_owner_id,
                 source_activity_id=source_activity_id,
                 source_public_id=source_public_id,
                 reconciliation_run_public_id=reconciliation_run_public_id,
-                result=result,
-                status=FollowUpTaskLLMMatcherRunStatus.SKIPPED,
+                candidate_public_ids=[candidate.public_id for candidate in candidate_set.items],
+                reason_code="AI_API_KEY_MISSING",
                 model_name=config.model_name,
                 started_at=started_at,
                 started_monotonic=started_monotonic,
             )
-            return result
+            raise TaskReconciliationUnavailableError("AI_API_KEY_MISSING")
 
         try:
             output = await self.runtime.ainvoke_structured(
@@ -312,33 +329,23 @@ class TaskReconciliationSemanticMatcher:
                 started_at=started_at,
                 started_monotonic=started_monotonic,
             )
-            return self._safe_result(
-                candidate_set,
-                activity_owner_id=activity_owner_id,
-                reason="STRUCTURED_OUTPUT_FAILED",
-                evidence_terms=(str(exc)[:160],),
-            )
+            raise TaskReconciliationUnavailableError("STRUCTURED_OUTPUT_FAILED") from exc
         if output is None:
-            result = self._safe_result(
-                candidate_set,
-                activity_owner_id=activity_owner_id,
-                reason="LLM_UNAVAILABLE",
-            )
-            self._record_match_result(
+            self._record_unavailable(
                 db,
                 team_id=team_id,
                 owner_id=activity_owner_id,
                 source_activity_id=source_activity_id,
                 source_public_id=source_public_id,
                 reconciliation_run_public_id=reconciliation_run_public_id,
-                result=result,
-                status=FollowUpTaskLLMMatcherRunStatus.FAILED,
+                candidate_public_ids=[candidate.public_id for candidate in candidate_set.items],
+                reason_code="LLM_UNAVAILABLE",
                 model_name=config.model_name,
                 structured_output_strategy="tool",
                 started_at=started_at,
                 started_monotonic=started_monotonic,
             )
-            return result
+            raise TaskReconciliationUnavailableError("LLM_UNAVAILABLE")
 
         result = self._normalize_output(
             output,
@@ -369,125 +376,173 @@ class TaskReconciliationSemanticMatcher:
         activity_context: Mapping[str, Any],
         activity_owner_id: str,
     ) -> TaskReconciliationSemanticMatchResult:
+        """Normalize one structured decision for every candidate task."""
         candidates_by_id = {candidate.public_id: candidate for candidate in candidate_set.items}
-        selected = candidates_by_id.get(output.task_public_id or "")
         candidate_public_ids = tuple(candidate.public_id for candidate in candidate_set.items)
+        task_outputs_by_id: dict[str, TaskReconciliationTaskOutput] = {}
+        unknown_task_ids: list[str] = []
+        for task_output in output.tasks:
+            if task_output.task_public_id not in candidates_by_id:
+                unknown_task_ids.append(task_output.task_public_id)
+                continue
+            task_outputs_by_id.setdefault(task_output.task_public_id, task_output)
+
+        task_decisions: list[FollowUpTaskReconciliationTaskDecision] = []
+        evaluation_failures: list[str] = []
+        for candidate in candidate_set.items:
+            task_output = task_outputs_by_id.get(candidate.public_id)
+            if task_output is None:
+                task_decisions.append(
+                    FollowUpTaskReconciliationTaskDecision(
+                        decision="ASK_CONFIRMATION",
+                        confidence=0.0,
+                        task_public_id=candidate.public_id,
+                        needs_confirmation=True,
+                        forbid_auto_reasons=("TASK_NOT_ADDRESSED_BY_MODEL",),
+                    )
+                )
+                continue
+
+            task_decision = self._normalize_task_output(
+                task_output,
+                candidate=candidate,
+                activity_context=activity_context,
+            )
+            single_task_result = FollowUpTaskReconciliationDecision(
+                candidate_public_ids=(candidate.public_id,),
+                task_decisions=(task_decision,),
+            )
+            evaluation = self.evaluation_service.evaluate_case(
+                self._evaluation_case(single_task_result, candidate_set, activity_owner_id=activity_owner_id)
+            )
+            if not evaluation.passed:
+                evaluation_failures.extend(
+                    f"{candidate.public_id}:{failure}" for failure in evaluation.failures
+                )
+                task_decision = FollowUpTaskReconciliationTaskDecision(
+                    decision="ASK_CONFIRMATION",
+                    confidence=task_decision.confidence,
+                    task_public_id=task_decision.task_public_id,
+                    needs_confirmation=True,
+                    proposed_due_at=task_decision.proposed_due_at,
+                    forbid_auto_reasons=tuple(
+                        dict.fromkeys((*task_decision.forbid_auto_reasons, "CONTRACT_EVALUATION_FAILED"))
+                    ),
+                    evidence_terms=task_decision.evidence_terms,
+                    state_mutation_requested=False,
+                )
+            task_decisions.append(task_decision)
+
+        if unknown_task_ids:
+            evaluation_failures.extend(
+                f"unknown_task_candidate:{task_public_id}" for task_public_id in unknown_task_ids
+            )
+
+        task_decisions_tuple = tuple(task_decisions)
+        return TaskReconciliationSemanticMatchResult(
+            decision=self._batch_decision(
+                task_decisions_tuple,
+                candidate_public_ids=candidate_public_ids,
+            ),
+            candidate_set=candidate_set,
+            source="langchain_structured_output",
+            evaluation_failures=tuple(evaluation_failures),
+            referenced_source_public_ids=tuple(output.referenced_source_public_ids),
+        )
+
+    def _normalize_task_output(
+        self,
+        output: TaskReconciliationTaskOutput,
+        *,
+        candidate: TaskReconciliationCandidate | None,
+        activity_context: Mapping[str, Any],
+    ) -> FollowUpTaskReconciliationTaskDecision:
         decision = output.decision
-        task_public_id = output.task_public_id if output.task_public_id in candidates_by_id else None
         needs_confirmation = output.needs_confirmation
-        forbid_auto_reasons = list(dict.fromkeys(output.forbid_auto_reasons))
+        reasons = list(dict.fromkeys(output.forbid_auto_reasons))
         evidence_terms = tuple(dict.fromkeys(output.evidence_terms))
 
-        if output.task_public_id and task_public_id is None:
-            decision = "KEEP_OPEN"
-            forbid_auto_reasons.append("UNKNOWN_TASK_CANDIDATE")
-        elif decision in AUTO_TRANSITION_DECISIONS:
-            if selected and not selected.auto_transition_eligible:
-                decision = "ASK_CONFIRMATION"
+        if decision in AUTO_TRANSITION_DECISIONS:
+            if candidate is None:
+                decision = "KEEP_OPEN"
+                reasons.append("UNKNOWN_TASK_CANDIDATE")
+            elif not candidate.auto_transition_eligible:
                 needs_confirmation = True
-                forbid_auto_reasons.append(selected.confirmation_required_reason or "CROSS_OWNER")
+                reasons.append(candidate.confirmation_required_reason or "CROSS_OWNER")
             if output.confidence < self.auto_confidence_threshold:
-                decision = "ASK_CONFIRMATION"
                 needs_confirmation = True
-                forbid_auto_reasons.append("LOW_CONFIDENCE")
+                reasons.append("LOW_CONFIDENCE")
             if not evidence_terms:
-                decision = "ASK_CONFIRMATION"
                 needs_confirmation = True
-                forbid_auto_reasons.append("MISSING_EVIDENCE")
+                reasons.append("MISSING_EVIDENCE")
             elif not self._evidence_terms_are_grounded(
                 evidence_terms,
                 activity_context=activity_context,
-                candidate_set=candidate_set,
+                candidate=candidate,
             ):
-                decision = "ASK_CONFIRMATION"
                 needs_confirmation = True
-                forbid_auto_reasons.append("UNGROUNDED_EVIDENCE")
+                reasons.append("UNGROUNDED_EVIDENCE")
+
+        if decision == "KEEP_OPEN":
+            needs_confirmation = True
+            reasons.append("RELATED_TASK_REQUIRES_CONFIRMATION")
+
+        if decision in {"KEEP_OPEN", "UNRELATED"} and output.confidence < self.auto_confidence_threshold:
+            decision = "ASK_CONFIRMATION"
+            needs_confirmation = True
+            reasons.append("LOW_CONFIDENCE")
 
         if output.state_mutation_requested:
-            forbid_auto_reasons.append("STATE_MUTATION_FORBIDDEN")
+            reasons.append("STATE_MUTATION_FORBIDDEN")
             if decision in AUTO_TRANSITION_DECISIONS:
-                decision = "ASK_CONFIRMATION"
                 needs_confirmation = True
 
         if decision == "ASK_CONFIRMATION":
             needs_confirmation = True
-        if decision == "UNRELATED":
-            task_public_id = None
 
-        normalized = FollowUpTaskReconciliationDecision(
+        return FollowUpTaskReconciliationTaskDecision(
             decision=decision,
             confidence=output.confidence,
-            task_public_id=task_public_id,
-            candidate_public_ids=candidate_public_ids,
+            task_public_id=output.task_public_id,
             needs_confirmation=needs_confirmation,
             proposed_due_at=output.proposed_due_at,
-            forbid_auto_reasons=tuple(dict.fromkeys(forbid_auto_reasons)),
+            forbid_auto_reasons=tuple(dict.fromkeys(reasons)),
             evidence_terms=evidence_terms,
             state_mutation_requested=False,
         )
-        evaluation = self.evaluation_service.evaluate_case(
-            self._evaluation_case(normalized, candidate_set, activity_owner_id=activity_owner_id)
-        )
-        if evaluation.passed:
-            return TaskReconciliationSemanticMatchResult(
-                decision=normalized,
-                candidate_set=candidate_set,
-                source="langchain_structured_output",
-                referenced_source_public_ids=tuple(output.referenced_source_public_ids),
-            )
 
-        fallback = self._safe_result(
-            candidate_set,
-            activity_owner_id=activity_owner_id,
-            reason="CONTRACT_EVALUATION_FAILED",
-            task_public_id=normalized.task_public_id,
-            evidence_terms=tuple(evaluation.failures),
-            force_confirmation=bool(normalized.task_public_id),
-        )
-        return TaskReconciliationSemanticMatchResult(
-            decision=fallback.decision,
-            candidate_set=candidate_set,
-            source="guardrail_fallback",
-            evaluation_failures=tuple(evaluation.failures),
-            referenced_source_public_ids=tuple(output.referenced_source_public_ids),
-        )
-
-    def _safe_result(
+    def _empty_result(
         self,
         candidate_set: TaskReconciliationCandidateSet,
         *,
-        activity_owner_id: str,
         reason: str,
-        decision: str = "KEEP_OPEN",
         confidence: float = 0.0,
-        task_public_id: str | None = None,
         evidence_terms: tuple[str, ...] = (),
-        force_confirmation: bool = False,
     ) -> TaskReconciliationSemanticMatchResult:
-        if decision not in FOLLOW_UP_TASK_RECONCILIATION_DECISIONS:
-            decision = "KEEP_OPEN"
-        if force_confirmation:
-            decision = "ASK_CONFIRMATION"
-        candidate_public_ids = tuple(candidate.public_id for candidate in candidate_set.items)
         normalized = FollowUpTaskReconciliationDecision(
-            decision=decision,
-            confidence=confidence,
-            task_public_id=task_public_id,
-            candidate_public_ids=candidate_public_ids,
-            needs_confirmation=decision == "ASK_CONFIRMATION",
-            forbid_auto_reasons=(reason,),
-            evidence_terms=evidence_terms,
-            state_mutation_requested=False,
-        )
-        evaluation = self.evaluation_service.evaluate_case(
-            self._evaluation_case(normalized, candidate_set, activity_owner_id=activity_owner_id)
+            candidate_public_ids=(),
+            task_decisions=(),
+            empty_reason=reason,
+            empty_confidence=confidence,
+            empty_evidence_terms=evidence_terms,
         )
         return TaskReconciliationSemanticMatchResult(
             decision=normalized,
             candidate_set=candidate_set,
-            source="safe_fallback",
-            evaluation_failures=tuple(evaluation.failures),
+            source="deterministic_empty",
         )
+
+    @staticmethod
+    def _batch_decision(
+        task_decisions: tuple[FollowUpTaskReconciliationTaskDecision, ...],
+        *,
+        candidate_public_ids: tuple[str, ...],
+    ) -> FollowUpTaskReconciliationDecision:
+        return FollowUpTaskReconciliationDecision(
+            candidate_public_ids=candidate_public_ids,
+            task_decisions=task_decisions,
+        )
+
 
     def _evaluation_case(
         self,
@@ -506,21 +561,48 @@ class TaskReconciliationSemanticMatcher:
         )
 
     def _system_prompt(self) -> str:
-        return """你是 CRM 系统中的销售承诺 reconciliation Agent.
-
-任务: 判断一条新的客户跟进记录, 是否和候选的开放跟进任务存在完成、延期、取消、继续保持或无关关系.
-
-硬性边界:
-- 你只输出结构化 JSON, 不输出 Markdown 或解释文字.
-- 只能引用候选任务中的 public_id, 禁止输出数据库主键 id.
-- 你不能要求或执行任何状态写入; state_mutation_requested 必须为 false.
-- 跨 owner、证据不足、低置信、语义不确定时必须使用 ASK_CONFIRMATION 或 KEEP_OPEN。
-- COMPLETE 表示新活动已经明确完成候选任务要确认的事项。
-- DELAY 表示新活动明确把同一事项推迟到新的时间, 必须给 proposed_due_at.
-- CANCEL 表示新活动明确说明该事项不再处理。
-- KEEP_OPEN 表示相关但没有完成、延期或取消证据。
-- UNRELATED 表示新活动和候选任务都无关。
-- evidence_terms 必须列出来自新活动和候选任务的短证据词。"""
+        return "\n".join(
+            (
+                "你是 CRM 系统中的历史跟进待办对账 Agent。",
+                "",
+                "任务: 对每一条历史 OPEN 待办，判断本次客户跟进是否已经履行了该待办要求销售执行的动作。",
+                "",
+                "核心领域语义:",
+                "- 判断对象是历史待办要求销售执行的动作是否已履行，不是客户项目、立项、采购或 POC 是否最终结束。",
+                "- 项目或客户事项是否最终结束不是 COMPLETE 的判断对象。",
+                "- 例如历史待办是‘继续跟进立项流程’，本次已联系客户并取得立项进展，",
+                "  即表示这一次跟进行为已履行，应判为 COMPLETE；项目仍在立项中不构成 KEEP_OPEN。",
+                "- activity_execution_evidence 只描述本次已经发生的沟通和动作，",
+                "  是判断历史待办是否履行的事实证据。",
+                "- new_future_plan 表示本次跟进后新产生的未来待办。",
+                "  即使它与历史待办文字相同或相近，也代表新一轮跟进。",
+                "  不能据此把已履行的历史待办判为 KEEP_OPEN，也不能把新待办当作本轮候选任务。",
+                "- 如果历史待办要求联系、询问、确认、跟进或了解进展，",
+                "  只要 activity_execution_evidence 明确表明已实施该动作并取得反馈，就视为该历史动作已履行。",
+                "- 只有 activity_execution_evidence 没有表明历史待办动作已执行时，",
+                "  才可判为 KEEP_OPEN 或 ASK_CONFIRMATION。",
+                "",
+                "输出边界:",
+                "- 你只输出结构化 JSON，不输出 Markdown 或解释文字。",
+                "- 只能引用 historical_candidate_tasks 中的 public_id，禁止输出数据库主键 id。",
+                "- 你不能要求或执行任何状态写入；state_mutation_requested 必须为 false。",
+                "- 顶层只允许返回 referenced_source_public_ids 和 tasks，",
+                "  不允许返回单任务 decision/task_public_id 等旧字段。",
+                "- 你必须对每一个 historical_candidate_tasks 返回一个 tasks 项，不能只返回最相关的一项。",
+                "- 跨 owner、证据不足、置信度低于 0.85 或语义不确定时，",
+                "  必须标记 needs_confirmation=true；无法判断建议动作时使用 ASK_CONFIRMATION。",
+                "- COMPLETE：activity_execution_evidence 已明确证明历史待办要求的销售动作已经执行。",
+                "- POSTPONE：历史待办动作尚未执行，且本次记录明确将该历史动作延期到新时间；",
+                "  必须给 proposed_due_at。不要把已执行动作后产生的 new_future_plan 判为 POSTPONE。",
+                "- CANCEL：本次记录明确说明历史待办动作不再处理。",
+                "- KEEP_OPEN：与历史待办相关，但没有历史动作已执行、延期或取消的证据；",
+                "  必须 needs_confirmation=true。",
+                "- UNRELATED：本次已发生动作与历史待办无关。",
+                "- evidence_terms 必须同时包含 activity_execution_evidence 中的执行证据词",
+                "  和历史候选任务中的目标动作词。",
+                "- tasks 中每项只能引用一个历史候选任务 public_id。",
+            )
+        )
 
     def _user_prompt(
         self,
@@ -529,17 +611,36 @@ class TaskReconciliationSemanticMatcher:
     ) -> str:
         payload = {
             "current_date": business_now().date().isoformat(),
-            "current_activity": self._activity_prompt_context(activity_context),
-            "candidate_tasks": [self._candidate_prompt_context(candidate) for candidate in candidate_set.items],
+            "activity_execution_evidence": self._activity_execution_prompt_context(activity_context),
+            "new_future_plan": self._future_plan_prompt_context(activity_context),
+            "historical_candidate_tasks": [
+                self._candidate_prompt_context(candidate) for candidate in candidate_set.items
+            ],
             "usage_policy": candidate_set.usage_policy,
         }
         return json.dumps(payload, ensure_ascii=False, default=str)
 
-    def _activity_prompt_context(self, activity_context: Mapping[str, Any]) -> dict[str, Any]:
+    def _activity_execution_prompt_context(
+        self,
+        activity_context: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        excluded_keys = {
+            "owner_id",
+            "creator_id",
+            "customer_id",
+            "activity_id",
+            "id",
+            "next_action",
+            "next_action_source",
+            "next_follow_time",
+            "next_follow_time_source",
+        }
+        return {key: value for key, value in activity_context.items() if key not in excluded_keys}
+
+    def _future_plan_prompt_context(self, activity_context: Mapping[str, Any]) -> dict[str, Any]:
         return {
-            key: value
-            for key, value in activity_context.items()
-            if key not in {"owner_id", "creator_id", "customer_id", "activity_id", "id"}
+            "next_action": activity_context.get("next_action"),
+            "next_follow_time": activity_context.get("next_follow_time"),
         }
 
     def _candidate_prompt_context(self, candidate: TaskReconciliationCandidate) -> dict[str, Any]:
@@ -567,28 +668,37 @@ class TaskReconciliationSemanticMatcher:
         evidence_terms: tuple[str, ...],
         *,
         activity_context: Mapping[str, Any],
-        candidate_set: TaskReconciliationCandidateSet,
+        candidate: TaskReconciliationCandidate | None,
     ) -> bool:
-        searchable_text = "\n".join(
+        if candidate is None:
+            return False
+
+        execution_text = "\n".join(
             str(value)
-            for value in [
+            for value in (
+                activity_context.get("title"),
                 activity_context.get("source_content"),
                 activity_context.get("content_json"),
                 activity_context.get("summary"),
-                activity_context.get("next_action"),
-                *[
-                    part
-                    for candidate in candidate_set.items
-                    for part in (
-                        candidate.title,
-                        candidate.description,
-                        candidate.due_at_text,
-                    )
-                ],
-            ]
+            )
             if value
         ).lower()
-        return all(term.lower() in searchable_text for term in evidence_terms)
+        candidate_text = "\n".join(
+            str(value)
+            for value in (
+                candidate.title,
+                candidate.description,
+                candidate.due_at_text,
+            )
+            if value
+        ).lower()
+        normalized_terms = tuple(term.lower() for term in evidence_terms)
+        all_terms_are_grounded = all(
+            term in execution_text or term in candidate_text for term in normalized_terms
+        )
+        has_execution_evidence = any(term in execution_text for term in normalized_terms)
+        has_candidate_evidence = any(term in candidate_text for term in normalized_terms)
+        return all_terms_are_grounded and has_execution_evidence and has_candidate_evidence
 
     def _activity_context(self, activity: CustomerActivity) -> dict[str, Any]:
         return {
@@ -619,7 +729,7 @@ class TaskReconciliationSemanticMatcher:
         status: str | None = None,
         model_name: str | None = None,
         structured_output_strategy: str | None = None,
-        started_at: Any = None,
+        started_at: datetime | None = None,
         started_monotonic: float | None = None,
     ) -> None:
         self.matcher_run_crud.record_match_result(
@@ -650,7 +760,7 @@ class TaskReconciliationSemanticMatcher:
         error: Exception,
         model_name: str | None,
         structured_output_strategy: str,
-        started_at: Any,
+        started_at: datetime,
         started_monotonic: float,
     ) -> None:
         self.matcher_run_crud.record_schema_error(
@@ -662,6 +772,37 @@ class TaskReconciliationSemanticMatcher:
             reconciliation_run_public_id=reconciliation_run_public_id,
             candidate_public_ids=candidate_public_ids,
             error=error,
+            model_name=model_name,
+            structured_output_strategy=structured_output_strategy,
+            duration_ms=self._duration_ms(started_monotonic),
+            started_at=started_at,
+        )
+
+    def _record_unavailable(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        owner_id: str | None,
+        source_activity_id: int | None,
+        source_public_id: str | None,
+        reconciliation_run_public_id: str | None,
+        candidate_public_ids: list[str],
+        reason_code: str,
+        model_name: str | None = None,
+        structured_output_strategy: str | None = None,
+        started_at: datetime,
+        started_monotonic: float,
+    ) -> None:
+        self.matcher_run_crud.record_unavailable(
+            db,
+            team_id=team_id,
+            owner_id=owner_id or None,
+            source_activity_id=source_activity_id,
+            source_public_id=source_public_id,
+            reconciliation_run_public_id=reconciliation_run_public_id,
+            candidate_public_ids=candidate_public_ids,
+            reason_code=reason_code,
             model_name=model_name,
             structured_output_strategy=structured_output_strategy,
             duration_ms=self._duration_ms(started_monotonic),

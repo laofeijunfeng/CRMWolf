@@ -1,0 +1,13 @@
+{
+  "batch_id": "agent-api-20260824-110243",
+  "account_email": "agent.api.20260824.110243@example.com",
+  "user_id": 10,
+  "team_id": 3,
+  "team_name": "Agent API 验收团队 agent-api-20260824-110243",
+  "created_via": [
+    "POST /api/v1/auth/register-password",
+    "POST /api/v1/teams/"
+  ],
+  "credentials_persisted_in_evidence": false,
+  "test_data_retention": "保留至用户确认后再清理"
+}

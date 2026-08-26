@@ -1,4 +1,5 @@
 """CRUD helpers for IM bot integrations."""
+
 from typing import Optional
 
 from sqlalchemy.exc import IntegrityError
@@ -24,13 +25,17 @@ class AgentChannelSessionCRUD:
         session_create: AgentSessionCreate,
     ) -> AgentChannelSession:
         thread_id = thread_id or ""
-        channel_session = db.query(AgentChannelSession).filter(
-            AgentChannelSession.provider == provider,
-            AgentChannelSession.team_id == team_id,
-            AgentChannelSession.user_id == user_id,
-            AgentChannelSession.chat_id == chat_id,
-            AgentChannelSession.thread_id == thread_id,
-        ).first()
+        channel_session = (
+            db.query(AgentChannelSession)
+            .filter(
+                AgentChannelSession.provider == provider,
+                AgentChannelSession.team_id == team_id,
+                AgentChannelSession.user_id == user_id,
+                AgentChannelSession.chat_id == chat_id,
+                AgentChannelSession.thread_id == thread_id,
+            )
+            .first()
+        )
         if channel_session:
             return channel_session
 
@@ -61,13 +66,17 @@ class AgentChannelSessionCRUD:
         chat_id: str,
         thread_id: str = "",
     ) -> Optional[AgentChannelSession]:
-        return db.query(AgentChannelSession).filter(
-            AgentChannelSession.provider == provider,
-            AgentChannelSession.team_id == team_id,
-            AgentChannelSession.user_id == user_id,
-            AgentChannelSession.chat_id == chat_id,
-            AgentChannelSession.thread_id == (thread_id or ""),
-        ).first()
+        return (
+            db.query(AgentChannelSession)
+            .filter(
+                AgentChannelSession.provider == provider,
+                AgentChannelSession.team_id == team_id,
+                AgentChannelSession.user_id == user_id,
+                AgentChannelSession.chat_id == chat_id,
+                AgentChannelSession.thread_id == (thread_id or ""),
+            )
+            .first()
+        )
 
     def get_by_agent_session(
         self,
@@ -78,12 +87,16 @@ class AgentChannelSessionCRUD:
         provider: str,
         agent_session_id: int,
     ) -> Optional[AgentChannelSession]:
-        return db.query(AgentChannelSession).filter(
-            AgentChannelSession.provider == provider,
-            AgentChannelSession.team_id == team_id,
-            AgentChannelSession.user_id == user_id,
-            AgentChannelSession.agent_session_id == agent_session_id,
-        ).first()
+        return (
+            db.query(AgentChannelSession)
+            .filter(
+                AgentChannelSession.provider == provider,
+                AgentChannelSession.team_id == team_id,
+                AgentChannelSession.user_id == user_id,
+                AgentChannelSession.agent_session_id == agent_session_id,
+            )
+            .first()
+        )
 
     def list_by_chat(
         self,
@@ -94,13 +107,18 @@ class AgentChannelSessionCRUD:
         provider: str,
         chat_id: str,
     ) -> list[AgentChannelSession]:
-        return db.query(AgentChannelSession).filter(
-            AgentChannelSession.provider == provider,
-            AgentChannelSession.team_id == team_id,
-            AgentChannelSession.user_id == user_id,
-            AgentChannelSession.chat_id == chat_id,
-            AgentChannelSession.status == "active",
-        ).order_by(AgentChannelSession.updated_time.desc(), AgentChannelSession.id.desc()).all()
+        return (
+            db.query(AgentChannelSession)
+            .filter(
+                AgentChannelSession.provider == provider,
+                AgentChannelSession.team_id == team_id,
+                AgentChannelSession.user_id == user_id,
+                AgentChannelSession.chat_id == chat_id,
+                AgentChannelSession.status == "active",
+            )
+            .order_by(AgentChannelSession.updated_time.desc(), AgentChannelSession.id.desc())
+            .all()
+        )
 
     def mark_message(self, db: Session, db_obj: AgentChannelSession, message_id: str) -> AgentChannelSession:
         db_obj.last_message_id = message_id
@@ -136,10 +154,14 @@ class IMInboundEventCRUD:
             return db_obj, False
         except IntegrityError:
             db.rollback()
-            existing = db.query(IMInboundEvent).filter(
-                IMInboundEvent.provider == provider,
-                IMInboundEvent.event_id == event_id,
-            ).first()
+            existing = (
+                db.query(IMInboundEvent)
+                .filter(
+                    IMInboundEvent.provider == provider,
+                    IMInboundEvent.event_id == event_id,
+                )
+                .first()
+            )
             return existing, True
 
     def mark_status(
@@ -150,7 +172,6 @@ class IMInboundEventCRUD:
         *,
         response_message_id: Optional[str] = None,
         agent_session_id: Optional[int] = None,
-        agent_task_id: Optional[int] = None,
         agent_interaction_type: Optional[str] = None,
         confirmation_delivery_public_id: Optional[str] = None,
         confirmation_case_public_id: Optional[str] = None,
@@ -162,7 +183,6 @@ class IMInboundEventCRUD:
         db_obj.status = status
         db_obj.response_message_id = response_message_id
         db_obj.agent_session_id = agent_session_id
-        db_obj.agent_task_id = agent_task_id
         db_obj.agent_interaction_type = agent_interaction_type
         db_obj.confirmation_delivery_public_id = confirmation_delivery_public_id
         db_obj.confirmation_case_public_id = confirmation_case_public_id
@@ -213,7 +233,6 @@ class IMInboundEventCRUD:
             .order_by(IMInboundEvent.created_time.desc(), IMInboundEvent.id.desc())
             .first()
         )
-
 
 
 agent_channel_session_crud = AgentChannelSessionCRUD()

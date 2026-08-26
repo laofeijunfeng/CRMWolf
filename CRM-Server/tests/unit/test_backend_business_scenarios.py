@@ -5,10 +5,12 @@ stubbing only unstable external boundaries such as LLM parsing and Feishu
 notifications. They are intentionally broader than narrow unit tests: each
 parameterized case represents one CRM workflow scenario.
 """
+
 from datetime import date, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 from fastapi import FastAPI
@@ -30,17 +32,20 @@ from app.core import database, deps
 from app.core.database import Base
 from app.models.agent import (
     AgentIdempotencyKey,
+    AgentMemoryEntry,
     AgentMessage,
     AgentSession,
-    AgentTask,
-    AgentTaskStatus,
     AgentToolCall,
-    AgentMemoryEntry,
 )
-from app.models.approval import Approval, ApprovalFlow, ApprovalNode, ApprovalRecord, ApprovalStatus
+from app.models.agent_async_operation import AgentAsyncOperation, AgentAsyncOperationEvent
+from app.models.agent_persistence import AgentQueryResultSet, AgentUIAction
+from app.models.ai_config import AIConfig
+from app.models.approval import Approval, ApprovalAction, ApprovalFlow, ApprovalNode, ApprovalRecord, ApprovalStatus
 from app.models.contract import Contract, ContractStatus
 from app.models.customer import Contact, Customer, CustomerMember
-from app.models.customer_fact import CustomerFact, CustomerFactReviewAudit, CustomerFactRevision, CustomerFactSource
+from app.models.customer_activity import CustomerActivity
+from app.models.customer_activity_agent_origin import CustomerActivityAgentOrigin
+from app.models.customer_fact import CustomerFact, CustomerFactRevision, CustomerFactSource
 from app.models.customer_intelligence_run import CustomerIntelligenceRun
 from app.models.customer_vector_document import CustomerVectorDocument
 from app.models.deal_journey import CustomerDealJourney, CustomerDealJourneyEvent, DealJourneyEventType
@@ -55,9 +60,16 @@ from app.models.role_permission import RolePermission
 from app.models.user import User, UserStatus
 from app.models.user_role import UserRole
 from app.schemas.approval import ApprovalActionRequest
-from app.models.approval import ApprovalAction
-from app.services.agent.schemas import AgentFollowUpQualityResult, AgentSemanticParseResult
-from app.services.agent.tools.base import AgentToolResult
+from app.services.agent.orchestrator import (
+    ContextPolicy,
+    RootDecision,
+    RootRuntimeContext,
+    RootTurnInput,
+    WorkflowCompletedResult,
+    WorkflowDispatchResult,
+    WorkflowRef,
+)
+from app.services.agent.workflow.progress import execution_progress
 
 
 @compiles(BigInteger, "sqlite")
@@ -67,7 +79,8 @@ def _bigint_to_sqlite_int(element, compiler, **kw):  # noqa: ARG001
 
 def _create_checkpoint_tables(engine) -> None:
     with engine.begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             CREATE TABLE crm_langgraph_checkpoints (
                 thread_id VARCHAR(191) NOT NULL,
                 checkpoint_ns VARCHAR(191) NOT NULL DEFAULT '',
@@ -80,8 +93,10 @@ def _create_checkpoint_tables(engine) -> None:
                 created_time DATETIME DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id)
             )
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             CREATE TABLE crm_langgraph_checkpoint_blobs (
                 thread_id VARCHAR(191) NOT NULL,
                 checkpoint_ns VARCHAR(191) NOT NULL DEFAULT '',
@@ -92,8 +107,10 @@ def _create_checkpoint_tables(engine) -> None:
                 created_time DATETIME DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (thread_id, checkpoint_ns, channel, version)
             )
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             CREATE TABLE crm_langgraph_checkpoint_writes (
                 thread_id VARCHAR(191) NOT NULL,
                 checkpoint_ns VARCHAR(191) NOT NULL DEFAULT '',
@@ -107,39 +124,8 @@ def _create_checkpoint_tables(engine) -> None:
                 created_time DATETIME DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id, task_id, write_idx)
             )
-        """))
-
-
-class FakeSemanticParser:
-    def __init__(self, result):
-        self.results = result if isinstance(result, list) else [result]
-        self.calls = []
-
-    async def parse(self, db, *, team_id, user_message, memory=None, current_date=None):
-        self.calls.append({"team_id": team_id, "user_message": user_message, "memory": memory})
-        index = min(len(self.calls) - 1, len(self.results) - 1)
-        return AgentSemanticParseResult.model_validate(self.results[index])
-
-
-class FakeQualityEvaluator:
-    def __init__(self, result):
-        self.result = result
-        self.calls = []
-
-    async def evaluate_with_metadata(self, db, *, team_id, user_message, semantic_result, memory=None, current_date=None):
-        self.calls.append({"team_id": team_id, "user_message": user_message, "semantic_result": semantic_result})
-        quality = AgentFollowUpQualityResult.model_validate(self.result)
-
-        class Envelope:
-            quality_source = "scenario_fake_quality"
-            model = "scenario-model"
-            fallback_reason = None
-            fallback_error = None
-
-            def __init__(self, result):
-                self.result = result
-
-        return Envelope(quality)
+        """)
+        )
 
 
 @pytest.fixture()
@@ -158,6 +144,8 @@ def scenario_env(monkeypatch):
         Customer.__table__,
         Contact.__table__,
         CustomerMember.__table__,
+        CustomerActivity.__table__,
+        CustomerActivityAgentOrigin.__table__,
         CustomerDealJourney.__table__,
         CustomerDealJourneyEvent.__table__,
         Opportunity.__table__,
@@ -174,15 +162,18 @@ def scenario_env(monkeypatch):
         ApprovalRecord.__table__,
         AgentSession.__table__,
         AgentMessage.__table__,
-        AgentTask.__table__,
         AgentToolCall.__table__,
         AgentIdempotencyKey.__table__,
         AgentMemoryEntry.__table__,
+        AgentAsyncOperation.__table__,
+        AgentAsyncOperationEvent.__table__,
+        AgentQueryResultSet.__table__,
+        AgentUIAction.__table__,
+        AIConfig.__table__,
         CustomerVectorDocument.__table__,
         CustomerFact.__table__,
         CustomerFactSource.__table__,
         CustomerFactRevision.__table__,
-        CustomerFactReviewAudit.__table__,
         CustomerIntelligenceRun.__table__,
     ]
     renamed_indexes = []
@@ -201,7 +192,21 @@ def scenario_env(monkeypatch):
     db = Session()
 
     current_user = SimpleNamespace(id=1, name="财务张", status="active")
-    db.add(User(id=1, email="finance@example.com", name="财务张", status=UserStatus.ACTIVE))
+    db.add_all(
+        [
+            User(id=1, email="finance@example.com", name="财务张", status=UserStatus.ACTIVE),
+            AIConfig(
+                id=1,
+                team_id=1,
+                api_host="https://model.invalid/v1",
+                api_key_encrypted=AIConfig.encrypt_api_key("scenario-test-key"),
+                model_name="scenario-test-model",
+                temperature=0.1,
+                max_tokens=1024,
+                updated_by=1,
+            ),
+        ]
+    )
     db.commit()
 
     permissions = {
@@ -219,8 +224,12 @@ def scenario_env(monkeypatch):
 
     monkeypatch.setattr("app.core.deps.permission_crud.get_user_permissions", _permission_stub)
     monkeypatch.setattr("app.api.payments.permission_crud.get_user_permissions", _permission_stub)
-    monkeypatch.setattr("app.api.approvals.feishu_notification_service.notify_approval_pending", AsyncMock(return_value=None))
-    monkeypatch.setattr("app.api.payments.feishu_notification_service.notify_approval_pending", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        "app.api.approvals.feishu_notification_service.notify_approval_pending", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
+        "app.api.payments.feishu_notification_service.notify_approval_pending", AsyncMock(return_value=None)
+    )
 
     app = FastAPI()
     app.include_router(agent_api.router)
@@ -237,7 +246,7 @@ def scenario_env(monkeypatch):
         if hasattr(module, "get_current_active_user"):
             app.dependency_overrides[module.get_current_active_user] = lambda: current_user
 
-    monkeypatch.setattr(agent_api, "SessionLocal", lambda: Session())
+    monkeypatch.setattr(agent_api.agent_application_service, "session_factory", lambda: Session())
     monkeypatch.setattr("app.services.agent.checkpointer.agent_checkpoint_saver.engine", engine)
     with TestClient(app) as client:
         yield SimpleNamespace(
@@ -418,10 +427,14 @@ def submit_approval(env, entity_type, entity_id):
 
 
 def current_approval(env, entity_type, entity_id):
-    return env.db.query(Approval).filter(
-        Approval.business_type == entity_type,
-        Approval.business_id == entity_id,
-    ).one()
+    return (
+        env.db.query(Approval)
+        .filter(
+            Approval.business_type == entity_type,
+            Approval.business_id == entity_id,
+        )
+        .one()
+    )
 
 
 def agent_session(env, title="业务验收会话"):
@@ -433,7 +446,11 @@ def agent_session(env, title="业务验收会话"):
 def post_agent(env, session_id, content):
     return env.client.post(
         "/v1/agent/chat/stream",
-        json={"session_id": session_id, "content": content},
+        json={
+            "session_id": session_id,
+            "client_request_id": str(uuid4()),
+            "input": {"type": "text", "text": content},
+        },
         headers={"Authorization": "Bearer scenario-token"},
     )
 
@@ -442,26 +459,6 @@ def assert_sse_contains(response, *snippets):
     assert response.status_code == 200, response.text
     for snippet in snippets:
         assert snippet in response.text
-
-
-def _semantic(intent="CREATE_OPPORTUNITY", customer_name="广州睿狐科技有限公司"):
-    return {
-        "intent": intent,
-        "intent_confidence": 0.95,
-        "customer": {"name_text": customer_name, "confidence": 0.9, "resolution_source": "EXPLICIT"},
-        "follow_up": {},
-        "payment": {},
-        "opportunity": {},
-        "contact": {},
-        "invoice_title": {},
-        "deployment_info": {},
-        "business_signals": [],
-        "requested_actions": [],
-        "missing_fields": [],
-        "need_clarification": False,
-        "clarification_question": None,
-        "evidence": ["scenario"],
-    }
 
 
 def run_agent_session_created(env):
@@ -473,242 +470,57 @@ def run_agent_session_created(env):
 
 
 def run_agent_stream_persists_messages(env):
-    class FakeGraph:
-        async def stream_events(self, input_state):
-            yield {"event": "agent_step", "step": "semantic_parse", "content": "理解业务语义"}
-            yield {"event": "final", "content": f"已收到：{input_state['content']}"}
+    class FakeRootOrchestrator:
+        async def dispatch(
+            self,
+            turn: RootTurnInput,
+            *,
+            runtime: RootRuntimeContext,
+            on_progress=None,
+        ) -> WorkflowDispatchResult:
+            del runtime, on_progress
+            assert turn.input.type == "text"
+            return WorkflowDispatchResult(
+                decision=RootDecision(
+                    task_relation="NEW_TASK",
+                    route="WORKFLOW",
+                    risk="WRITE",
+                    context_policy=ContextPolicy(
+                        selected_entity="IGNORE",
+                        previous_query="IGNORE",
+                        result_set="IGNORE",
+                        active_workflow="NONE",
+                    ),
+                    confidence=1.0,
+                    reason_code="EXPLICIT_MUTATION",
+                    evidence=[],
+                ),
+                workflow_result=WorkflowCompletedResult(
+                    workflow_ref=WorkflowRef(workflow_id="wf_business_scenario"),
+                    assistant_text=f"已收到: {turn.input.text}",
+                    progress=execution_progress(
+                        confirmation_required=False,
+                        has_supplements=False,
+                        outcome="COMPLETED",
+                    ),
+                ),
+            )
 
-    env.monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraph())
+    env.monkeypatch.setattr(
+        agent_api.agent_application_service,
+        "root_orchestrator",
+        FakeRootOrchestrator(),
+    )
     session = agent_session(env)
-    response = post_agent(env, session["id"], "今天和客户确认了试用范围")
-    assert_sse_contains(response, "已收到", "今天和客户确认了试用范围")
-    messages = env.client.get(f"/v1/agent/sessions/{session['id']}/messages").json()
-    assert [item["role"] for item in messages["items"]] == ["USER", "ASSISTANT"]
-
-
-def run_agent_requires_follow_up_confirmation(env):
-    class FakeGraph:
-        async def stream_events(self, input_state):
-            yield {
-                "event": "confirmation_required",
-                "action": "create_customer_activity",
-                "customer": {"id": 101, "account_name": "越秀金融"},
-                "payload": {"customer_id": 101, "content": input_state["content"]},
-            }
-            yield {"event": "final", "content": "请确认是否创建跟进记录？"}
-
-    env.monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraph())
-    session = agent_session(env)
-    response = post_agent(env, session["id"], "今天和越秀金融沟通预算")
-    assert_sse_contains(response, "confirmation_required", "task_id")
-    task = env.db.query(AgentTask).one()
-    assert task.status == AgentTaskStatus.WAITING_USER
-
-
-def run_agent_confirm_executes_follow_up(env):
-    class FakeGraph:
-        async def stream_events(self, input_state):
-            yield {
-                "event": "confirmation_required",
-                "action": "create_customer_activity",
-                "customer": {"id": 101, "account_name": "越秀金融"},
-                "payload": {"customer_id": 101, "content": input_state["content"]},
-            }
-            yield {"event": "final", "content": "请确认是否创建跟进记录？"}
-
-    class FakeTools:
-        async def create_customer_activity(self, context, **kwargs):
-            return AgentToolResult("create_customer_activity", True, {"id": 9001, "customer_id": kwargs["customer_id"]}, 7001)
-
-    env.monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraph())
-    env.monkeypatch.setattr(agent_api, "CRMAgentToolService", lambda: FakeTools())
-    session = agent_session(env)
-    post_agent(env, session["id"], "今天和越秀金融沟通预算")
-    response = post_agent(env, session["id"], "是")
-    assert_sse_contains(response, "task_completed", "客户活动已记录")
-    assert env.db.query(AgentTask).one().status == AgentTaskStatus.COMPLETED
-
-
-def run_agent_reject_cancels_waiting_task(env):
-    class FakeGraph:
-        async def stream_events(self, input_state):
-            yield {"event": "confirmation_required", "action": "create_customer_activity", "payload": {"content": input_state["content"]}}
-            yield {"event": "final", "content": "请确认是否创建跟进记录？"}
-
-    env.monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraph())
-    session = agent_session(env)
-    post_agent(env, session["id"], "记录一条跟进")
-    response = post_agent(env, session["id"], "先不处理")
-    assert_sse_contains(response, "task_cancelled")
-    assert env.db.query(AgentTask).one().status == AgentTaskStatus.SUSPENDED
-
-
-def run_agent_opportunity_missing_fields_form(env):
-    class FakeGraph:
-        async def stream_events(self, input_state):
-            yield {
-                "event": "opportunity_fields_required",
-                "payload": {"missing_fields": ["total_amount", "user_count", "license_type", "expected_closing_date", "purchase_type"]},
-                "content": "还需要补充商机信息",
-            }
-            yield {"event": "final", "content": "还需要补充商机信息"}
-
-    env.monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraph())
-    session = agent_session(env)
-    response = post_agent(env, session["id"], "帮客户创建商机")
-    assert_sse_contains(response, "opportunity_fields_required", '"type": "form"', "预计成交日期")
-
-
-def run_agent_collects_opportunity_fields_without_rerun(env):
-    calls = []
-    customer = {"id": 101, "account_name": "广州睿狐科技有限公司", "owner_info": {"id": 1}, "collaborator_infos": []}
-
-    class FakeGraph:
-        async def stream_events(self, input_state):
-            calls.append(input_state)
-            yield {
-                "event": "opportunity_fields_required",
-                "action": "collect_opportunity_fields",
-                "customer": customer,
-                "payload": {
-                    "customer_id": 101,
-                    "opportunity": {"customer_id": 101, "total_amount": 50000, "user_count": 100, "license_type": "SUBSCRIPTION"},
-                    "missing_fields": ["purchase_type", "expected_closing_date", "subscription_years", "procurement_method_id"],
-                },
-            }
-            yield {"event": "final", "content": "请补充采购类型、预计成交日期、订阅年限和采购方式。"}
-
-    env.monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraph())
-    env.monkeypatch.setattr(agent_api, "agent_semantic_parser", FakeSemanticParser({
-        **_semantic(),
-        "opportunity": {
-            "purchase_type": "NEW",
-            "subscription_years": 1,
-            "procurement_method_id": 1,
-            "expected_closing_date": {
-                "raw_text": "8月30号",
-                "kind": "EXPLICIT_DATE",
-                "direction": "future",
-                "date_text": "2026-08-30",
-                "confidence": 0.9,
-            },
-        },
-    }))
-    session = agent_session(env)
-    post_agent(env, session["id"], "帮客户建 5 万商机")
-    response = post_agent(env, session["id"], "新购，订阅 1 年，8月30号成交，procurement_method_id=1")
-    assert_sse_contains(response, "confirmation_required", "商机信息齐了")
-    assert len(calls) == 1
-
-
-def run_agent_customer_context_memory(env):
-    customer = {"id": 101, "account_name": "广州睿狐科技有限公司", "owner_info": {"id": 1}, "collaborator_infos": []}
-    states = []
-
-    class FakeGraph:
-        async def stream_events(self, input_state):
-            states.append(input_state)
-            if len(states) == 1:
-                yield {"event": "business_context_loaded", "customer_id": 101, "customer": customer}
-            yield {"event": "final", "content": "已加载客户上下文"}
-
-    env.monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraph())
-    session = agent_session(env)
-    post_agent(env, session["id"], "睿狐科技今天回了 5 万")
-    post_agent(env, session["id"], "那继续建一个商机")
-    assert states[1]["session_context"]["current_customer"] == customer
-
-
-def run_agent_customer_selection_required(env):
-    class FakeGraph:
-        async def stream_events(self, input_state):
-            yield {
-                "event": "customer_selection_required",
-                "content": "找到多个客户，请选择",
-                "customers": [
-                    {"id": 1, "account_name": "广州睿狐科技有限公司"},
-                    {"id": 2, "account_name": "深圳睿狐科技有限公司"},
-                ],
-            }
-            yield {"event": "final", "content": "找到多个客户，请选择"}
-
-    env.monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraph())
-    session = agent_session(env)
-    response = post_agent(env, session["id"], "睿狐科技")
-    assert_sse_contains(response, "customer_selection_required", '"type": "choice"', "深圳睿狐科技有限公司")
-
-
-def run_agent_lead_follow_up_quality_chain(env):
-    class FakeGraph:
-        async def stream_events(self, input_state):
-            yield {
-                "event": "confirmation_required",
-                "action": "create_lead",
-                "payload": {
-                    "lead": {"lead_name": "广州睿狐科技", "city": "广州", "contact_name": "王总", "contact_phone": "13800138000"},
-                    "lead_follow_up": {"content": "客户有明确兴趣", "next_action": "下周三电话跟进"},
-                },
-            }
-            yield {"event": "final", "content": "请确认是否创建线索？"}
-
-    class FakeTools:
-        async def create_lead(self, context, **kwargs):
-            return AgentToolResult("create_lead", True, {"id": 8101}, 7001)
-
-        async def create_lead_follow_up(self, context, **kwargs):
-            return AgentToolResult("create_lead_follow_up", True, {"id": 8201}, 7002)
-
-    quality = FakeQualityEvaluator({
-        "score": 86,
-        "passed": True,
-        "reason": "达标",
-        "missing_aspects": [],
-        "supplement_question": None,
-        "suggested_revision": "客户有明确兴趣，计划下周三电话跟进。",
-        "principle_scores": {},
-    })
-    env.monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraph())
-    env.monkeypatch.setattr(agent_api, "CRMAgentToolService", lambda: FakeTools())
-    env.monkeypatch.setattr(agent_api, "agent_follow_up_quality_evaluator", quality)
-    session = agent_session(env)
-    post_agent(env, session["id"], "创建线索并记录跟进")
-    response = post_agent(env, session["id"], "是")
-    assert_sse_contains(response, "线索已创建", "next_task_id")
-    assert len(quality.calls) == 1
-
-
-def run_agent_opportunity_completion_terminal(env):
-    class FakeGraph:
-        async def stream_events(self, input_state):
-            yield {
-                "event": "confirmation_required",
-                "action": "create_opportunity",
-                "customer": {"id": 101, "account_name": "广州睿狐科技有限公司"},
-                "payload": {
-                    "opportunity": {
-                        "customer_id": 101,
-                        "total_amount": 50000,
-                        "user_count": 20,
-                        "license_type": "SUBSCRIPTION",
-                        "subscription_years": 1,
-                        "purchase_type": "NEW",
-                        "expected_closing_date": "2026-08-31",
-                    },
-                },
-            }
-            yield {"event": "final", "content": "请确认是否创建商机？"}
-
-    class FakeTools:
-        async def create_opportunity(self, context, **kwargs):
-            return AgentToolResult("create_opportunity", True, {"id": 3001}, 7001)
-
-    env.monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraph())
-    env.monkeypatch.setattr(agent_api, "CRMAgentToolService", lambda: FakeTools())
-    session = agent_session(env)
-    post_agent(env, session["id"], "创建商机")
-    response = post_agent(env, session["id"], "是")
-    assert_sse_contains(response, "task_completed", "商机已创建")
-    assert "继续处理" not in response.text
+    response = post_agent(env, session["id"], "帮我创建商机")
+    assert_sse_contains(response, '"event": "agent_ui"', '"phase": "final"', "已收到", "帮我创建商机")
+    messages_response = env.client.get(
+        f"/v1/agent/sessions/{session['id']}/messages",
+        headers={"Authorization": "Bearer scenario-token"},
+    )
+    assert messages_response.status_code == 200, messages_response.text
+    messages = messages_response.json()
+    assert [item["role"] for item in messages["items"]] == ["user", "assistant"]
 
 
 def run_approval_invoice_submit_pending(env):
@@ -757,7 +569,9 @@ def run_approval_role_mismatch_blocks_approve(env):
     seed_flow(env, BusinessType.INVOICE, role_code="FINANCE")
     invoice = seed_invoice(env)
     submit_approval(env, "INVOICE", invoice.id)
-    response = env.client.post(f"/v1/approvals/INVOICE/{invoice.id}/approve", json={"action": "APPROVE", "comment": "同意"})
+    response = env.client.post(
+        f"/v1/approvals/INVOICE/{invoice.id}/approve", json={"action": "APPROVE", "comment": "同意"}
+    )
     assert response.status_code == 403, response.text
 
 
@@ -766,7 +580,9 @@ def run_approval_self_invoice_without_perm_blocks(env):
     seed_role(env, "FINANCE")
     invoice = seed_invoice(env, applicant_id="1")
     submit_approval(env, "INVOICE", invoice.id)
-    response = env.client.post(f"/v1/approvals/INVOICE/{invoice.id}/approve", json={"action": "APPROVE", "comment": "同意"})
+    response = env.client.post(
+        f"/v1/approvals/INVOICE/{invoice.id}/approve", json={"action": "APPROVE", "comment": "同意"}
+    )
     assert response.status_code == 403, response.text
     assert "自己创建的发票" in response.json()["detail"]
 
@@ -806,7 +622,9 @@ def run_approval_invoice_reject_updates_status(env):
     seed_role(env, "FINANCE")
     invoice = seed_invoice(env, applicant_id="2")
     submit_approval(env, "INVOICE", invoice.id)
-    response = env.client.post(f"/v1/approvals/INVOICE/{invoice.id}/approve", json={"action": "REJECT", "comment": "资料不完整"})
+    response = env.client.post(
+        f"/v1/approvals/INVOICE/{invoice.id}/approve", json={"action": "REJECT", "comment": "资料不完整"}
+    )
     assert response.status_code == 200, response.text
     env.db.refresh(invoice)
     assert invoice.status == InvoiceApplicationStatus.REJECTED
@@ -885,11 +703,15 @@ def run_opportunity_approval_starts_business_journey_board(env):
         approver_name="销售总监",
     )
 
-    event = env.db.query(CustomerDealJourneyEvent).filter(
-        CustomerDealJourneyEvent.source_type == "opportunity",
-        CustomerDealJourneyEvent.source_id == opportunity.id,
-        CustomerDealJourneyEvent.event_type == DealJourneyEventType.OPPORTUNITY_APPROVED,
-    ).one()
+    event = (
+        env.db.query(CustomerDealJourneyEvent)
+        .filter(
+            CustomerDealJourneyEvent.source_type == "opportunity",
+            CustomerDealJourneyEvent.source_id == opportunity.id,
+            CustomerDealJourneyEvent.event_type == DealJourneyEventType.OPPORTUNITY_APPROVED,
+        )
+        .one()
+    )
     assert event.deal_journey_id == opportunity.deal_journey_id
 
     response = env.client.get("/v1/business-journey-board/")
@@ -960,7 +782,9 @@ def run_payment_record_update_pending_forbidden(env):
     record.approval_id = approval.id
     record.approval_phase = ApprovalPhase.PENDING_REVIEW
     env.db.commit()
-    response = env.client.put(f"/v1/payments/payment-records/{record.id}", json={"actual_amount": 30000, "payment_date": "2026-07-24"})
+    response = env.client.put(
+        f"/v1/payments/payment-records/{record.id}", json={"actual_amount": 30000, "payment_date": "2026-07-24"}
+    )
     assert response.status_code == 400, response.text
     assert response.json()["detail"] == "审批中的回款记录不能修改"
 
@@ -969,7 +793,12 @@ def run_license_create_and_list(env):
     customer = seed_customer(env)
     response = env.client.post(
         "/v1/license-applications/",
-        json={"customer_id": customer.id, "license_type": "TRIAL", "expiry_date": "2027-12-31", "remark": "客户试用申请"},
+        json={
+            "customer_id": customer.id,
+            "license_type": "TRIAL",
+            "expiry_date": "2027-12-31",
+            "remark": "客户试用申请",
+        },
     )
     assert response.status_code == 201, response.text
     list_response = env.client.get(f"/v1/license-applications/?customer_id={customer.id}")
@@ -997,15 +826,6 @@ def run_license_submit_without_flow_configuration_error(env):
 AGENT_SCENARIOS = [
     ("agent_session_created", run_agent_session_created),
     ("agent_stream_persists_messages", run_agent_stream_persists_messages),
-    ("agent_requires_follow_up_confirmation", run_agent_requires_follow_up_confirmation),
-    ("agent_confirm_executes_follow_up", run_agent_confirm_executes_follow_up),
-    ("agent_reject_cancels_waiting_task", run_agent_reject_cancels_waiting_task),
-    ("agent_opportunity_missing_fields_form", run_agent_opportunity_missing_fields_form),
-    ("agent_collects_opportunity_fields_without_rerun", run_agent_collects_opportunity_fields_without_rerun),
-    ("agent_customer_context_memory", run_agent_customer_context_memory),
-    ("agent_customer_selection_required", run_agent_customer_selection_required),
-    ("agent_lead_follow_up_quality_chain", run_agent_lead_follow_up_quality_chain),
-    ("agent_opportunity_completion_terminal", run_agent_opportunity_completion_terminal),
 ]
 
 APPROVAL_SCENARIOS = [
@@ -1045,6 +865,8 @@ def test_approval_backend_business_scenarios(scenario_env, scenario_name, runner
     runner(scenario_env)
 
 
-@pytest.mark.parametrize("scenario_name,runner", PAYMENT_LICENSE_SCENARIOS, ids=[name for name, _ in PAYMENT_LICENSE_SCENARIOS])
+@pytest.mark.parametrize(
+    "scenario_name,runner", PAYMENT_LICENSE_SCENARIOS, ids=[name for name, _ in PAYMENT_LICENSE_SCENARIOS]
+)
 def test_payment_license_backend_business_scenarios(scenario_env, scenario_name, runner):
     runner(scenario_env)

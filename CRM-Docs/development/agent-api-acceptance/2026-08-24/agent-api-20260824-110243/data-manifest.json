@@ -1,0 +1,682 @@
+{
+  "batch_id": "agent-api-20260824-110243",
+  "team_id": 3,
+  "user_id": 10,
+  "records": {
+    "customers": [
+      {
+        "id": 143,
+        "public_id": "cus_15f2a006c251459dbcf9d8ae1c50957c",
+        "account_name": "API验收-110243-上海客户01有限公司",
+        "city": "上海",
+        "status": 0,
+        "company_scale": "1-50人"
+      },
+      {
+        "id": 144,
+        "public_id": "cus_662ba273420e4ed4be4e68f8353349ac",
+        "account_name": "API验收-110243-上海客户02有限公司",
+        "city": "上海",
+        "status": 1,
+        "company_scale": "51-200人"
+      },
+      {
+        "id": 145,
+        "public_id": "cus_13a476ee5ed04d7bb16207a5414ceebc",
+        "account_name": "API验收-110243-上海客户03有限公司",
+        "city": "上海",
+        "status": 2,
+        "company_scale": "201-500人"
+      },
+      {
+        "id": 146,
+        "public_id": "cus_f846b7b493c74a349c4b66324870179f",
+        "account_name": "API验收-110243-上海客户04有限公司",
+        "city": "上海",
+        "status": 3,
+        "company_scale": "500+人"
+      },
+      {
+        "id": 147,
+        "public_id": "cus_b9c2c4d4e7164ba6b6860093fb753056",
+        "account_name": "API验收-110243-上海客户05有限公司",
+        "city": "上海",
+        "status": 0,
+        "company_scale": "1-50人"
+      },
+      {
+        "id": 148,
+        "public_id": "cus_de0155fb444c4eb58beaffdaa94d694f",
+        "account_name": "API验收-110243-上海客户06有限公司",
+        "city": "上海",
+        "status": 1,
+        "company_scale": "51-200人"
+      },
+      {
+        "id": 149,
+        "public_id": "cus_440957f1250f48b3b03021c70f43a4d5",
+        "account_name": "API验收-110243-上海客户07有限公司",
+        "city": "上海",
+        "status": 2,
+        "company_scale": "201-500人"
+      },
+      {
+        "id": 150,
+        "public_id": "cus_9de8cd05b93a40fb8a1fdc57b8c41e1c",
+        "account_name": "API验收-110243-上海客户08有限公司",
+        "city": "上海",
+        "status": 3,
+        "company_scale": "500+人"
+      },
+      {
+        "id": 151,
+        "public_id": "cus_4efbbad045434e2a96992ff9c582a1b8",
+        "account_name": "API验收-110243-上海客户09有限公司",
+        "city": "上海",
+        "status": 0,
+        "company_scale": "1-50人"
+      },
+      {
+        "id": 152,
+        "public_id": "cus_118d0bb9c82c4d25937ffb4214d96e44",
+        "account_name": "API验收-110243-上海客户10有限公司",
+        "city": "上海",
+        "status": 1,
+        "company_scale": "51-200人"
+      },
+      {
+        "id": 153,
+        "public_id": "cus_b55fe4998261455596d2610f3c3249d1",
+        "account_name": "API验收-110243-上海客户11有限公司",
+        "city": "上海",
+        "status": 2,
+        "company_scale": "201-500人"
+      },
+      {
+        "id": 154,
+        "public_id": "cus_b406960b63af485f9d9fa68105a97cc0",
+        "account_name": "API验收-110243-上海客户12有限公司",
+        "city": "上海",
+        "status": 3,
+        "company_scale": "500+人"
+      },
+      {
+        "id": 155,
+        "public_id": "cus_e54d10d46c6446f793d94013ccf957ff",
+        "account_name": "API验收-110243-上海客户13有限公司",
+        "city": "上海",
+        "status": 0,
+        "company_scale": "1-50人"
+      },
+      {
+        "id": 156,
+        "public_id": "cus_5e34a505538d4d1098646064611cfb63",
+        "account_name": "API验收-110243-上海客户14有限公司",
+        "city": "上海",
+        "status": 1,
+        "company_scale": "51-200人"
+      },
+      {
+        "id": 157,
+        "public_id": "cus_24cac5eced2247ff8d46f4cbd78e0c95",
+        "account_name": "API验收-110243-上海客户15有限公司",
+        "city": "上海",
+        "status": 2,
+        "company_scale": "201-500人"
+      },
+      {
+        "id": 158,
+        "public_id": "cus_a4a6c290574f4266bdf28082b3e8cbf0",
+        "account_name": "API验收-110243-上海客户16有限公司",
+        "city": "上海",
+        "status": 3,
+        "company_scale": "500+人"
+      },
+      {
+        "id": 159,
+        "public_id": "cus_acd24633207c429795a63794ee2cbcc3",
+        "account_name": "API验收-110243-上海客户17有限公司",
+        "city": "上海",
+        "status": 0,
+        "company_scale": "1-50人"
+      },
+      {
+        "id": 160,
+        "public_id": "cus_72abf68736ac42cb8e703018a9c70886",
+        "account_name": "API验收-110243-上海客户18有限公司",
+        "city": "上海",
+        "status": 1,
+        "company_scale": "51-200人"
+      },
+      {
+        "id": 161,
+        "public_id": "cus_4bdafe0bceb94b498f73f673df284af5",
+        "account_name": "API验收-110243-上海客户19有限公司",
+        "city": "上海",
+        "status": 2,
+        "company_scale": "201-500人"
+      },
+      {
+        "id": 162,
+        "public_id": "cus_a0609d506f15427c8d63b0831d77965f",
+        "account_name": "API验收-110243-上海客户20有限公司",
+        "city": "上海",
+        "status": 3,
+        "company_scale": "500+人"
+      },
+      {
+        "id": 163,
+        "public_id": "cus_8dac49de90624e46be4ade2397cb2995",
+        "account_name": "API验收-110243-广州客户01有限公司",
+        "city": "广州",
+        "status": 0,
+        "company_scale": "1-50人"
+      },
+      {
+        "id": 164,
+        "public_id": "cus_23248b640a2c42b4b808706560f68379",
+        "account_name": "API验收-110243-广州客户02有限公司",
+        "city": "广州",
+        "status": 1,
+        "company_scale": "51-200人"
+      },
+      {
+        "id": 165,
+        "public_id": "cus_718b5db2b29f44dbb23c30d0868b8bb0",
+        "account_name": "API验收-110243-广州客户03有限公司",
+        "city": "广州",
+        "status": 2,
+        "company_scale": "201-500人"
+      },
+      {
+        "id": 166,
+        "public_id": "cus_e8e2187ca0d34406be9e6316b912936c",
+        "account_name": "API验收-110243-广州客户04有限公司",
+        "city": "广州",
+        "status": 3,
+        "company_scale": "500+人"
+      },
+      {
+        "id": 167,
+        "public_id": "cus_579926ad929441b3ac5900e8dc322fc9",
+        "account_name": "API验收-110243-广州客户05有限公司",
+        "city": "广州",
+        "status": 0,
+        "company_scale": "1-50人"
+      },
+      {
+        "id": 168,
+        "public_id": "cus_3751c66d77ff49ccbc8115867e613e18",
+        "account_name": "API验收-110243-广州客户06有限公司",
+        "city": "广州",
+        "status": 1,
+        "company_scale": "51-200人"
+      },
+      {
+        "id": 169,
+        "public_id": "cus_4eaafe1f1fb04a5f8389e6a4dd110532",
+        "account_name": "API验收-110243-广州客户07有限公司",
+        "city": "广州",
+        "status": 2,
+        "company_scale": "201-500人"
+      },
+      {
+        "id": 170,
+        "public_id": "cus_da5dbec87845413baba9f28a7ebc77dc",
+        "account_name": "API验收-110243-广州客户08有限公司",
+        "city": "广州",
+        "status": 3,
+        "company_scale": "500+人"
+      },
+      {
+        "id": 171,
+        "public_id": "cus_5179602d24ff49bfb7c7baac04c74e30",
+        "account_name": "API验收-110243-广州客户09有限公司",
+        "city": "广州",
+        "status": 0,
+        "company_scale": "1-50人"
+      },
+      {
+        "id": 172,
+        "public_id": "cus_99646595f98c4d6d8e11c956c64a827e",
+        "account_name": "API验收-110243-广州客户10有限公司",
+        "city": "广州",
+        "status": 1,
+        "company_scale": "51-200人"
+      },
+      {
+        "id": 173,
+        "public_id": "cus_2c128ec39e3842fda07dd34491470206",
+        "account_name": "API验收-110243-深圳客户01有限公司",
+        "city": "深圳",
+        "status": 2,
+        "company_scale": "201-500人"
+      },
+      {
+        "id": 174,
+        "public_id": "cus_ed8f86eb84774fd18c9712e965061a3e",
+        "account_name": "API验收-110243-深圳客户02有限公司",
+        "city": "深圳",
+        "status": 3,
+        "company_scale": "500+人"
+      },
+      {
+        "id": 175,
+        "public_id": "cus_351b331c91144ecb8f4b276a85927176",
+        "account_name": "API验收-110243-深圳客户03有限公司",
+        "city": "深圳",
+        "status": 0,
+        "company_scale": "1-50人"
+      },
+      {
+        "id": 176,
+        "public_id": "cus_326b60d57fc1418cb76e8d64268090ae",
+        "account_name": "API验收-110243-深圳客户04有限公司",
+        "city": "深圳",
+        "status": 1,
+        "company_scale": "51-200人"
+      },
+      {
+        "id": 177,
+        "public_id": "cus_01a96212c4eb41da960c74afa85a13d0",
+        "account_name": "API验收-110243-深圳客户05有限公司",
+        "city": "深圳",
+        "status": 2,
+        "company_scale": "201-500人"
+      },
+      {
+        "id": 178,
+        "public_id": "cus_9abedaed4d8549dcb6f5add86aa692be",
+        "account_name": "API验收-110243-深圳客户06有限公司",
+        "city": "深圳",
+        "status": 3,
+        "company_scale": "500+人"
+      },
+      {
+        "id": 179,
+        "public_id": "cus_05f83efb4bfa40449f48ab79da58f439",
+        "account_name": "API验收-110243-深圳客户07有限公司",
+        "city": "深圳",
+        "status": 0,
+        "company_scale": "1-50人"
+      },
+      {
+        "id": 180,
+        "public_id": "cus_680d01ffaf0b4f78b0bf169cc0714fff",
+        "account_name": "API验收-110243-深圳客户08有限公司",
+        "city": "深圳",
+        "status": 1,
+        "company_scale": "51-200人"
+      },
+      {
+        "id": 181,
+        "public_id": "cus_df5de5a05ab64ae8b76cc08c85a5d4e9",
+        "account_name": "API验收-110243-深圳客户09有限公司",
+        "city": "深圳",
+        "status": 2,
+        "company_scale": "201-500人"
+      },
+      {
+        "id": 182,
+        "public_id": "cus_4f46d1bdb7ca45448a7638c0f17c3b1c",
+        "account_name": "API验收-110243-深圳客户10有限公司",
+        "city": "深圳",
+        "status": 3,
+        "company_scale": "500+人"
+      },
+      {
+        "id": 183,
+        "public_id": "cus_4b610ba1a09645288e97056d465de606",
+        "account_name": "API验收-110243-北京客户01有限公司",
+        "city": "北京",
+        "status": 0,
+        "company_scale": "1-50人"
+      },
+      {
+        "id": 184,
+        "public_id": "cus_5a5441aff18e4cbc8de0505d6b10e48d",
+        "account_name": "API验收-110243-北京客户02有限公司",
+        "city": "北京",
+        "status": 1,
+        "company_scale": "51-200人"
+      },
+      {
+        "id": 185,
+        "public_id": "cus_6043e4e935fa4b2fa9ce06d4fef26d04",
+        "account_name": "API验收-110243-北京客户03有限公司",
+        "city": "北京",
+        "status": 2,
+        "company_scale": "201-500人"
+      },
+      {
+        "id": 186,
+        "public_id": "cus_ca2168093cf34b6d95eb1f1e48c00b24",
+        "account_name": "API验收-110243-北京客户04有限公司",
+        "city": "北京",
+        "status": 3,
+        "company_scale": "500+人"
+      },
+      {
+        "id": 187,
+        "public_id": "cus_7f1a0226bdf54f2091e0b1fbf416a6a7",
+        "account_name": "API验收-110243-北京客户05有限公司",
+        "city": "北京",
+        "status": 0,
+        "company_scale": "1-50人"
+      },
+      {
+        "id": 188,
+        "public_id": "cus_0879bdac5be24bdb8b9836011331a6ef",
+        "account_name": "API验收-110243-北京客户06有限公司",
+        "city": "北京",
+        "status": 1,
+        "company_scale": "51-200人"
+      },
+      {
+        "id": 189,
+        "public_id": "cus_7b596475eef247c79333a71ce574e29d",
+        "account_name": "API验收-110243-北京客户07有限公司",
+        "city": "北京",
+        "status": 2,
+        "company_scale": "201-500人"
+      },
+      {
+        "id": 190,
+        "public_id": "cus_d359c19b8fea44a8a9b8e226e3d20ae3",
+        "account_name": "API验收-110243-北京客户08有限公司",
+        "city": "北京",
+        "status": 3,
+        "company_scale": "500+人"
+      },
+      {
+        "id": 191,
+        "public_id": "cus_ee8891fa88964dafa4b0c1c383c5ed00",
+        "account_name": "API验收-110243-北京客户09有限公司",
+        "city": "北京",
+        "status": 0,
+        "company_scale": "1-50人"
+      },
+      {
+        "id": 192,
+        "public_id": "cus_13e93c6318134a969eea591ec7db2afd",
+        "account_name": "API验收-110243-北京客户10有限公司",
+        "city": "北京",
+        "status": 1,
+        "company_scale": "51-200人"
+      },
+      {
+        "id": 193,
+        "public_id": "cus_167eccb3aafa4eb68d16631d97cbd5d9",
+        "account_name": "API验收-110243-杭州客户01有限公司",
+        "city": "杭州",
+        "status": 2,
+        "company_scale": "201-500人"
+      },
+      {
+        "id": 194,
+        "public_id": "cus_d995a534520149a191ee1af2e7b4408d",
+        "account_name": "API验收-110243-杭州客户02有限公司",
+        "city": "杭州",
+        "status": 3,
+        "company_scale": "500+人"
+      },
+      {
+        "id": 195,
+        "public_id": "cus_d04550e62ce14b058b5e7d5eb95826c7",
+        "account_name": "API验收-110243-杭州客户03有限公司",
+        "city": "杭州",
+        "status": 0,
+        "company_scale": "1-50人"
+      },
+      {
+        "id": 196,
+        "public_id": "cus_0fd1ccf8c3b74579b21b3f737328b8dd",
+        "account_name": "API验收-110243-杭州客户04有限公司",
+        "city": "杭州",
+        "status": 1,
+        "company_scale": "51-200人"
+      },
+      {
+        "id": 197,
+        "public_id": "cus_b186576997c2425f9a6998683e357afc",
+        "account_name": "API验收-110243-杭州客户05有限公司",
+        "city": "杭州",
+        "status": 2,
+        "company_scale": "201-500人"
+      },
+      {
+        "id": 198,
+        "public_id": "cus_3d4a639464104ad38826057b93c630ac",
+        "account_name": "API验收-110243-杭州客户06有限公司",
+        "city": "杭州",
+        "status": 3,
+        "company_scale": "500+人"
+      },
+      {
+        "id": 199,
+        "public_id": "cus_7c93dbdc76504f4ba63f7fec29d5f26f",
+        "account_name": "API验收-110243-杭州客户07有限公司",
+        "city": "杭州",
+        "status": 0,
+        "company_scale": "1-50人"
+      },
+      {
+        "id": 200,
+        "public_id": "cus_63ef41ec3b5a4a8daf7171b7445cd0d5",
+        "account_name": "API验收-110243-杭州客户08有限公司",
+        "city": "杭州",
+        "status": 1,
+        "company_scale": "51-200人"
+      },
+      {
+        "id": 201,
+        "public_id": "cus_b7686095ea2a4b8d92f5f9a613048d50",
+        "account_name": "API验收-110243-杭州客户09有限公司",
+        "city": "杭州",
+        "status": 2,
+        "company_scale": "201-500人"
+      },
+      {
+        "id": 202,
+        "public_id": "cus_1a660bf27850433fb9ef006d9025a18f",
+        "account_name": "API验收-110243-杭州客户10有限公司",
+        "city": "杭州",
+        "status": 3,
+        "company_scale": "500+人"
+      }
+    ],
+    "contacts": [
+      {
+        "id": 41,
+        "customer_id": 143,
+        "name": "验收联系人01"
+      },
+      {
+        "id": 42,
+        "customer_id": 144,
+        "name": "验收联系人02"
+      },
+      {
+        "id": 43,
+        "customer_id": 145,
+        "name": "验收联系人03"
+      },
+      {
+        "id": 44,
+        "customer_id": 146,
+        "name": "验收联系人04"
+      },
+      {
+        "id": 45,
+        "customer_id": 147,
+        "name": "验收联系人05"
+      },
+      {
+        "id": 46,
+        "customer_id": 148,
+        "name": "验收联系人06"
+      },
+      {
+        "id": 47,
+        "customer_id": 149,
+        "name": "验收联系人07"
+      },
+      {
+        "id": 48,
+        "customer_id": 150,
+        "name": "验收联系人08"
+      },
+      {
+        "id": 49,
+        "customer_id": 151,
+        "name": "验收联系人09"
+      },
+      {
+        "id": 50,
+        "customer_id": 152,
+        "name": "验收联系人10"
+      }
+    ],
+    "customer_activities": [
+      {
+        "id": 151,
+        "customer_id": 143,
+        "title": "第1次需求沟通",
+        "occurred_at": "2026-08-23T11:05:00"
+      },
+      {
+        "id": 152,
+        "customer_id": 144,
+        "title": "第2次需求沟通",
+        "occurred_at": "2026-08-22T11:05:00"
+      },
+      {
+        "id": 153,
+        "customer_id": 145,
+        "title": "第3次需求沟通",
+        "occurred_at": "2026-08-21T11:05:00"
+      },
+      {
+        "id": 154,
+        "customer_id": 146,
+        "title": "第4次需求沟通",
+        "occurred_at": "2026-08-20T11:05:00"
+      },
+      {
+        "id": 155,
+        "customer_id": 147,
+        "title": "第5次需求沟通",
+        "occurred_at": "2026-08-19T11:05:00"
+      },
+      {
+        "id": 156,
+        "customer_id": 148,
+        "title": "第6次需求沟通",
+        "occurred_at": "2026-08-18T11:05:00"
+      },
+      {
+        "id": 157,
+        "customer_id": 149,
+        "title": "第7次需求沟通",
+        "occurred_at": "2026-08-17T11:05:00"
+      },
+      {
+        "id": 158,
+        "customer_id": 150,
+        "title": "第8次需求沟通",
+        "occurred_at": "2026-08-16T11:05:00"
+      },
+      {
+        "id": 159,
+        "customer_id": 151,
+        "title": "第9次需求沟通",
+        "occurred_at": "2026-08-15T11:05:00"
+      },
+      {
+        "id": 160,
+        "customer_id": 152,
+        "title": "第10次需求沟通",
+        "occurred_at": "2026-08-14T11:05:00"
+      }
+    ],
+    "follow_up_tasks": [
+      {
+        "id": 26,
+        "public_id": "fut_de56bf1f11c549a4991d000b68275609",
+        "customer_id": 143,
+        "title": "跟进API验收-110243-上海客户01有限公司验收需求",
+        "status": "OPEN"
+      },
+      {
+        "id": 35,
+        "public_id": "fut_3cf1a3284bbd4a95b73361bae523a02f",
+        "customer_id": 152,
+        "title": "跟进API验收-110243-上海客户10有限公司验收需求",
+        "status": "OPEN"
+      },
+      {
+        "id": 27,
+        "public_id": "fut_e9c2b6511cbf49d1940d567073a580cb",
+        "customer_id": 144,
+        "title": "跟进API验收-110243-上海客户02有限公司验收需求",
+        "status": "OPEN"
+      },
+      {
+        "id": 28,
+        "public_id": "fut_b9c93c0cffea450591543210e5aea080",
+        "customer_id": 145,
+        "title": "跟进API验收-110243-上海客户03有限公司验收需求",
+        "status": "OPEN"
+      },
+      {
+        "id": 29,
+        "public_id": "fut_1b43425662ec43f9bda64afd4b03af8c",
+        "customer_id": 146,
+        "title": "跟进API验收-110243-上海客户04有限公司验收需求",
+        "status": "OPEN"
+      },
+      {
+        "id": 30,
+        "public_id": "fut_14386cedf57846008247822a5c99e5c4",
+        "customer_id": 147,
+        "title": "跟进API验收-110243-上海客户05有限公司验收需求",
+        "status": "OPEN"
+      },
+      {
+        "id": 31,
+        "public_id": "fut_426243a65a094977a9c32f6497a240e2",
+        "customer_id": 148,
+        "title": "跟进API验收-110243-上海客户06有限公司验收需求",
+        "status": "OPEN"
+      },
+      {
+        "id": 32,
+        "public_id": "fut_dcc9687821394dc2859c6a528cfe4c34",
+        "customer_id": 149,
+        "title": "跟进API验收-110243-上海客户07有限公司验收需求",
+        "status": "OPEN"
+      },
+      {
+        "id": 33,
+        "public_id": "fut_cd6912983ab8439e9d0e6413afeeaab1",
+        "customer_id": 150,
+        "title": "跟进API验收-110243-上海客户08有限公司验收需求",
+        "status": "OPEN"
+      },
+      {
+        "id": 34,
+        "public_id": "fut_85a80f479e3d4a65a15d1c0f95c3f170",
+        "customer_id": 151,
+        "title": "跟进API验收-110243-上海客户09有限公司验收需求",
+        "status": "OPEN"
+      }
+    ]
+  },
+  "counts": {
+    "customers": 60,
+    "contacts": 10,
+    "customer_activities": 10,
+    "follow_up_tasks": 10
+  },
+  "total_business_records": 90
+}

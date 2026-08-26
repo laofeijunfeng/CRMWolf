@@ -81,11 +81,11 @@
   - 避免节点之间互相覆盖过程信息
 - `Command`
   - 用于带状态更新的动态跳转
-  - 适合“分析后直接进入刷新 / 等待确认 / 跳过 / 后台重建”的分支
+  - 适合“分析后直接进入刷新 / 自动沉淀 / 静默忽略 / 后台重建”的分支
   - 同一段流程不要同时依赖静态边和 `Command` 跳转表达同一个路由意图
 - `Interrupt`
-  - 只用于必须人工参与的场景
-  - 中断点必须可恢复，用户回复后通过 `Command(resume=...)` 回到图内继续执行
+  - 保留为 LangGraph 的通用 Workflow 能力，只用于真正需要用户决策的写流程
+  - 客户事实沉淀不使用 interrupt：低置信、缺证据或冲突候选直接静默忽略
 - `Checkpointer`
   - 保存一次运行的短期状态、等待点、重试位置和恢复上下文
   - 不能当客户档案、客户事实或审计表使用
@@ -104,14 +104,14 @@
 - `Durable Execution`
   - 每个写入节点具备幂等键
   - 失败后能从 checkpoint 继续
-  - 用户确认、后台重试和运维诊断都能回到同一个 graph run
+  - 后台重试和运维诊断都能回到同一个 graph run
 - `Observability`
-  - 每次 graph run 要能看到输入、节点状态、LLM 结构化输出、工具调用、interrupt、resume、最终写入
+  - 每次 graph run 要能看到输入、节点状态、LLM 结构化输出、工具调用、事实门禁结果和最终写入
   - 生产环境需要接入 LangSmith 或等价 trace 系统做回放、评估和问题定位
 
 设计验收标准：
 
-- 如果一个流程没有 checkpoint、interrupt/resume、streaming、typed state、subgraph、store 边界，就不能称为 LangGraph-native。
+- LangGraph-native 不等于每张图都必须使用 interrupt；客户智能图应使用 typed state、checkpoint、streaming、subgraph 和 store 边界，而 interrupt 仅属于确实需要用户决策的 Workflow。
 - 如果用户可见步骤来自工具名或节点名直出，说明 trace 投影不合格。
 - 如果 LLM 自由文本结果被字符串解析后直接写库，说明结构化输出和确定性写入边界不合格。
 - 如果后台业务事件和前台对话各维护一套客户档案更新逻辑，说明子图复用不合格。
@@ -298,7 +298,7 @@ Agent Root Graph
   ├─ 合同子图
   ├─ 回款子图
   ├─ 跟进记录子图
-  └─ 用户确认 / 中断恢复
+  └─ Workflow 用户确认 / 中断恢复（不属于客户事实沉淀）
 ```
 
 客户智能子图负责客户档案相关的一切更新和问答支撑。
@@ -316,20 +316,16 @@ Agent Root Graph
   ↓
 LLM 抽取客户事实
   ↓
-事实合并、去重、冲突判断
-  ↓
-置信度评估
-  ↓
-决定更新范围
-  ↓
-需要确认则 interrupt
-  ↓
-写入客户知识库
+确定性事实门禁
+  ├─ 高置信 + 有证据 + 无冲突 → 自动沉淀
+  └─ 低置信 / 缺证据 / 有冲突 → 静默忽略
   ↓
 刷新客户档案 / 客户概况
   ↓
-输出执行轨迹
+只输出真实写入结果和执行轨迹
 ```
+
+客户事实沉淀是后台增强链路，不向用户创建确认卡，也不输出“候选事实”“需要确认”或“未达到沉淀标准”等提示。
 
 ### 4.1 Graph 状态模型
 
@@ -351,7 +347,7 @@ InternalState
   fact_conflicts
   confidence_report
   refresh_plan
-  pending_review
+  fact_assessments
   applied_updates
   execution_steps
   errors
@@ -370,7 +366,7 @@ OutputState
 - `retrieved_memories` 来自 LangGraph store 和向量检索
 - `extracted_facts` 是 LLM 结构化抽取结果
 - `refresh_plan` 是图根据事实、置信度、业务规则生成的更新计划
-- `pending_review` 是 interrupt 的用户确认载荷
+- `fact_assessments` 是确定性门禁对每条候选事实给出的 `upsert` / `ignore` 结果
 - `visible_trace` 是给 Web / IM 展示的中文执行过程
 
 状态更新规则：
@@ -440,7 +436,7 @@ LLM 结构化抽取
   保存客户、商机、合同、回款、业务流程等确定状态
 
 LangGraph Checkpointer
-  保存一次图执行的 thread state、interrupt 等待点、恢复位置、失败恢复状态
+  保存一次图执行的 thread state、节点进度、失败恢复位置和重试状态
 
 LangGraph Store
   保存跨会话可复用的客户长期记忆索引、阶段性摘要和偏好
@@ -450,7 +446,7 @@ Qdrant
   保存跟进、流程、摘要、证据文本的 embedding，用于语义召回
 
 审计表
-  保存客户智能事件、执行 run、用户确认、最终写入结果
+  保存客户智能事件、执行 run、事实门禁摘要和最终写入结果
 ```
 
 关键边界：
@@ -483,7 +479,6 @@ app/services/agent/customer_intelligence_nodes.py
 app/services/agent/customer_intelligence_edges.py
 app/services/agent/customer_intelligence_store.py
 app/services/agent/customer_intelligence_stream.py
-app/services/agent/customer_intelligence_interrupts.py
 ```
 
 模块职责：
@@ -498,8 +493,6 @@ app/services/agent/customer_intelligence_interrupts.py
   - 封装 LangGraph store 的 namespace、读写和召回
 - `customer_intelligence_stream.py`
   - 将 graph updates/subgraphs/messages 转成用户可读执行过程
-- `customer_intelligence_interrupts.py`
-  - 定义确认、改写、选择、补充信息等 interrupt payload
 - `customer_qdrant_index_service.py`
   - 封装 Qdrant collection、payload、upsert、delete、filter search
 - `customer_memory_store_service.py`
@@ -540,109 +533,74 @@ agent_memory_entries
 
 ### 7.1 StateGraph
 
-客户智能流程不写成一条长 service，而是拆成多个明确节点：
-
-- 收集上下文
-- 检索知识
-- 抽取事实
-- 合并事实
-- 判断冲突
-- 判断更新范围
-- 用户确认
-- 写入结果
-- 输出轨迹
-
-图结构建议：
+当前主干：
 
 ```text
 START
   ↓
-normalize_trigger
+normalize_event
   ↓
-load_context
+load_customer_context
   ↓
 retrieve_memory
   ↓
-extract_facts
-  ↓
-merge_facts
-  ↓
-score_confidence
-  ↓
 plan_refresh
   ↓
-route_refresh
-  ├─ skip
-  ├─ write_memory_only
-  ├─ refresh_dynamic_brief
-  ├─ refresh_base_profile
-  └─ request_review
-        ↓
-      apply_resume
+extract_facts
   ↓
-persist_results
+assess_fact_candidates
+  ├─ action=upsert → persist_facts
+  └─ action=ignore → 不写入、不提示
+  ↓
+refresh_profile / refresh_brief / write_memory
   ↓
 emit_trace
   ↓
 END
 ```
 
+`assess_fact_candidates` 必须是确定性节点，统一执行以下门禁：
+
+- 置信度达到自动沉淀阈值；
+- 候选事实带有可引用的 evidence quote；
+- 与既有有效事实不冲突；
+- 候选内容非空且事实类型合法。
+
+任一条件不满足时返回 `ignore`。忽略结果可留在内部运行审计中用于评估，但不得投影为用户消息或 Agent UI interaction。
+
 ### 7.2 Conditional Edge
 
 根据不同场景走不同分支：
 
-- 只写知识库
-- 刷新销售概况
-- 刷新基础档案
-- 触发人工确认
-- 跳过低价值事件
-- 延迟批量更新
-- 全量重建
+- 只写长期记忆；
+- 刷新销售概况；
+- 刷新基础档案；
+- 自动沉淀符合门禁的客户事实；
+- 静默忽略不符合门禁的候选事实；
+- 跳过低价值事件；
+- 延迟批量更新或全量重建。
 
-条件分支不只根据事件类型判断，还要结合：
-
-- 业务对象是否明确
-- 证据是否足够
-- 是否命中历史客户记忆
-- 是否存在新旧事实冲突
-- 是否涉及基础档案稳定字段
-- 更新影响范围是否较大
-- 置信度是否达到自动执行阈值
+条件分支需要结合事件类型、业务对象是否明确、证据是否充分、是否存在事实冲突、更新范围和置信度。客户事实分支不进入人工确认。
 
 ### 7.2.1 Command 路由
 
-客户智能图里的动态决策优先使用 `Command` 表达。
-
-适用场景：
-
-- 节点分析后需要同时更新 state 并决定下一个节点
-- LLM 结构化判断后进入不同业务分支
-- interrupt 恢复后根据用户选择继续写入、改写、跳过或重新分析
-- 后台事件根据风险等级转同步更新、异步重建或人工复核
+客户智能图里的动态决策优先使用 `Command` 表达，但只用于图内状态更新与节点跳转，不用于客户事实人工复核。
 
 典型路由：
 
 ```text
-score_confidence
-  ├─ Command(update=confidence_report, goto=plan_refresh)
-  ├─ Command(update=confidence_report, goto=request_review)
-  └─ Command(update=confidence_report, goto=skip_low_value)
-
-apply_resume
-  ├─ Command(update=user_review, goto=persist_results)
-  ├─ Command(update=user_review, goto=revise_summary)
-  └─ Command(update=user_review, goto=cancel_update)
+assess_fact_candidates
+  ├─ Command(update=fact_assessments, goto=persist_facts)
+  └─ Command(update=fact_assessments, goto=continue_without_fact_write)
 ```
 
 约束：
 
-- 同一个节点的分支意图只保留一种表达方式
-- 能用静态边清楚表达的固定流程使用 edge
-- 需要根据运行时判断跳转的流程使用 `Command`
-- `Command` 的 `goto` 目标必须是白名单节点，不能由 LLM 自由生成
-- `Command` 的 `update` 必须符合 typed state schema
-
-这样做的目的不是增加复杂度，而是让“分析后走哪个业务分支”成为图运行时的一部分，避免散落在 service 里的隐式 if/else。
+- 同一个节点的分支意图只保留一种表达方式；
+- `goto` 目标必须是白名单节点，不能由 LLM 自由生成；
+- `update` 必须符合 typed state schema；
+- LLM 只产生候选事实，不能决定绕过门禁；
+- 不为被忽略候选创建 review case、interrupt 或 interaction。
 
 ### 7.3 Checkpoint
 
@@ -652,8 +610,6 @@ apply_resume
 
 - LLM 抽取完成，但写入失败
 - 已经检索完上下文，但摘要生成失败
-- 用户确认前流程暂停
-- 用户确认后从中断点继续
 
 checkpoint 设计：
 
@@ -665,43 +621,22 @@ checkpoint 设计：
 - 需要跨多轮保持状态的客户智能子图才启用 per-thread subgraph checkpoint
 - 纯函数式分析子图使用 per-invocation checkpoint，避免同一子图多次调用产生状态污染
 
-### 7.4 Interrupt / Resume
+### 7.4 客户事实自动沉淀门禁
 
-只有在需要人工判断时才打断用户：
+客户智能图不使用 `interrupt()` 处理客户事实。正式策略只有两种结果：
 
-- 低置信度更新
-- 多个客户 / 商机 / 合同无法确定
-- 新旧事实冲突
-- 要覆盖稳定字段
-- 高影响业务建议
+1. **自动沉淀**：置信度不低于当前自动阈值（实现基线为 `0.88`）、证据引用完整、内容非空，且与既有有效事实无冲突；
+2. **静默忽略**：低置信、缺少 evidence quote、内容为空、候选主动标记 ignore，或与既有事实冲突。
 
-用户确认后，图从 checkpoint 继续运行。
+用户体验约束：
 
-interrupt 设计规则：
+- 不创建客户事实确认卡；
+- 不显示“1 条客户事实需要确认后再沉淀”；
+- 不显示被忽略候选的数量、原因或内部状态；
+- 只有真实写入事实时，才允许在结果中展示已沉淀内容；
+- 客户事实失败或忽略不得阻断跟进记录创建、历史任务对账等主业务流程。
 
-- interrupt payload 必须是 JSON 可序列化对象
-- payload 只包含用户能看懂的信息，不包含工具名、表名、内部 ID
-- 同一个节点里的 interrupt 顺序必须稳定
-- interrupt 之前的副作用必须可幂等重放
-- 涉及写库的节点不要在同一个节点里先写库再 interrupt
-- 用户确认后使用 `Command(resume=...)` 恢复
-- resume 内容进入 `apply_resume` 节点做结构化校验
-
-典型 interrupt 类型：
-
-```text
-confirm_update
-  确认是否更新客户档案或销售概况
-
-review_and_edit
-  让用户改写即将写入的摘要
-
-choose_target
-  多个客户、商机、合同候选无法可靠判断时让用户选择
-
-provide_missing_info
-  关键信息缺失时补充
-```
+LangGraph 的 interrupt/resume 仍可用于历史跟进任务确认等真正需要用户决策的 Workflow，但不属于客户事实沉淀链路。
 
 ### 7.5 Subgraph
 
@@ -732,8 +667,6 @@ customer_fact_resolution_subgraph
 customer_profile_refresh_subgraph
   局部刷新或全量重建客户档案
 
-customer_review_subgraph
-  处理用户确认、改写、选择、补充信息
 ```
 
 这几个子图后续也可以被商机推进、合同风险、回款预测等能力复用。
@@ -757,7 +690,7 @@ LLM 不能直接改数据库。
 - 候选对象解析由 resource resolution / customer intelligence 子图完成
 - 写工具必须带幂等键
 - 写工具必须返回业务结果和用户可读摘要
-- 工具错误要写入 state 的 `errors`，由图决定重试、降级或中断
+- 工具错误要写入 state 的 `errors`，由图决定重试、降级或结束本次增强链路
 - 所有工具调用都要进入审计记录和 execution trace
 
 ### 7.7 Execution Trace
@@ -782,8 +715,6 @@ Web / IM 端消费规则：
 - 使用 `messages` 展示 LLM 生成内容
 - 使用 `subgraphs=True` 保留子图内关键步骤
 - 只投影白名单步骤，屏蔽内部技术节点
-- interrupt 出现时立即展示待确认卡片或 IM 确认消息
-- resume 后继续追加后续步骤，不能新开一段割裂的流程
 
 推荐中文步骤映射：
 
@@ -805,7 +736,7 @@ emit_trace -> 整理执行结果
 - 需要展示 LLM 生成过程时消费 message 事件
 - 需要展示图状态变化时消费 update / value 事件
 - 需要展示子图过程时开启 subgraph 事件
-- interrupt 事件必须被即时投影为确认、选择、补充、改写等业务卡片
+- 客户事实门禁的 ignore 结果不得投影为卡片或提示
 - 后台任务不需要实时展示，但必须记录同等粒度的 trace 供诊断
 
 用户侧只展示业务动作，不展示：
@@ -839,7 +770,7 @@ request_id
 
 ### 7.9 Durable Execution 与重放
 
-客户智能更新可能包含 LLM、检索、数据库写入、用户确认和前端流式展示，必须按可重放方式设计。
+客户智能更新包含 LLM、检索、数据库写入和前端流式展示，必须按可重放方式设计。
 
 要求：
 
@@ -848,7 +779,6 @@ request_id
 - checkpoint 失败时显式返回降级状态
 - 失败重试从最近成功 checkpoint 继续
 - 后台事件失败可重新排队
-- 用户确认超时不丢失图状态
 - 运维可根据 thread_id 查看当时 state、候选、判断和错误
 
 生产持久化要求：
@@ -877,8 +807,7 @@ request_id
 - 每个节点的开始、结束、耗时和错误
 - LLM structured output
 - tool call 入参摘要和返回摘要
-- interrupt payload
-- resume payload
+- 事实门禁结果摘要
 - 最终写入结果
 - 用户可见 trace
 
@@ -888,15 +817,14 @@ request_id
 - 商机阶段变化后局部刷新
 - 合同创建后合作状态刷新
 - 回款逾期后风险刷新
-- 多事实冲突时触发确认
+- 多事实冲突时静默忽略冲突候选且不覆盖既有事实
 - 低置信度时不自动覆盖
-- 用户在 IM 回复“第一个 / 招标那个 / 张总说的那个”时能恢复并正确解析
 - 后台事件失败后可重试且不重复写入
 
 指标：
 
 - 自动更新准确率
-- 人工确认触发率
+- 高置信事实自动沉淀准确率
 - 低置信度误写率
 - 档案更新延迟
 - 重试成功率
@@ -942,7 +870,7 @@ CustomerConflict
 RefreshPlan
   scope
   target_sections
-  requires_review
+  persistence_action
   reason
   confidence
 
@@ -1026,7 +954,7 @@ LLM 不负责：
 
 - 用户在 Agent 中输入请求
 - 图需要快速返回可见进度
-- 可以同步完成轻量抽取、候选判断、必要确认
+- 可以同步完成轻量抽取、候选判断和自动沉淀门禁
 - 大段档案重建可以转后台继续执行
 
 后台路径：
@@ -1163,27 +1091,23 @@ app/models/customer_intelligence_run.py
 - `CustomerIntelligenceGraphService`
   - 作为客户智能 LangGraph runtime 主干
   - 使用 `StateGraph`、typed state、reducer、conditional edge、checkpoint 和 checkpoint fallback
-  - 当前已完成节点：事件标准化、客户上下文读取、长期记忆读取、刷新计划、LLM 事实提炼、事实复核、`interrupt()` 人工确认、客户事实沉淀、客户档案刷新、客户概况刷新、长期记忆写入、用户可见 trace
+  - 当前已完成节点：事件标准化、客户上下文读取、长期记忆读取、刷新计划、LLM 事实提炼、确定性事实门禁、客户事实沉淀、客户档案刷新、客户概况刷新、长期记忆写入、用户可见 trace
   - 已接入 `astream(..., stream_mode="updates")`，图内节点完成后实时投影 `visible_trace`，不再等整张图结束后批量补发执行过程
-  - 需复核事实会在图内暂停，用户确认后通过 `Command(resume=...)` 回到同一个客户智能图继续沉淀或跳过
-  - LLM 输出候选事实后，图内会调用确定性事实融合评估，把候选事实和 `strong_context.customer_facts` 中的当前强事实对齐；冲突、低置信或 LLM 标记复核的候选进入 HITL，不让 LLM 直接覆盖既有客户知识
-  - 用户采纳、驳回或取消事实复核后，图恢复并继续同一条执行链；采纳会写客户事实和审核审计，驳回 / 取消只写审核审计，不写客户事实
+  - LLM 输出候选事实后，确定性门禁与 `strong_context.customer_facts` 对齐；高置信、有证据且无冲突的候选自动沉淀，其余候选静默忽略
   - LLM 事实提炼失败时降级继续写客户记忆，不阻断 CRM 主业务事件
   - 手动刷新、客户生命周期刷新、联系人变化、业务流程刷新、批量重建和后台重试都通过同一张客户智能图进入，不能绕开图写散点 service
-- `AgentRootRuntime`
-  - 作为 Web / IM 共用的 Agent 运行时入口
-  - 已接入 `customer_intelligence_graph` 业务子图分支
-  - 客户智能子图产生的审核中断会投影为 root `current_interrupt`
-  - 用户确认、拒绝或取消后，root 使用同一套 `resume_interrupt(...)` 入口恢复，再路由回客户智能子图
-  - root 优先消费客户智能子图 streaming contract，并把 `visible_trace` 投影为用户可读执行步骤，避免前端直出内部节点名和工具名
+- `AgentApplicationService` 与客户智能事件入口
+  - Web / IM 共用统一 Application，业务写入成功后产生标准化客户智能事件
+  - 客户智能作为独立 job runtime 执行，不把事实沉淀状态放进 Root Workflow
+  - Application 消费客户智能 streaming contract，并把 `visible_trace` 投影为用户可读执行步骤，避免前端直出内部节点名和工具名
 - `CustomerIntelligenceTraceService`
   - 统一负责客户智能 `visible_trace` 到 Web / IM `agent_step` 的用户可见投影
-  - 客户智能图 streaming、root runtime 批量 fallback、后台 run 诊断后续都复用这一层，避免展示规则散落
+  - 客户智能图 streaming、Application 投影、后台 run 诊断都复用这一层，避免展示规则散落
 - `CustomerFactExtractionService`
   - 作为 LLM 结构化事实提炼边界
   - 基于 `CustomerIntelligenceEvent`、统一客户上下文、LangGraph Store 长期记忆生成候选事实
-  - 输出 `upsert` / `review` / `ignore` 三类动作，不直接写业务表
-  - 使用 LangChain structured output，失败时才降级到 JSON object 兼容路径
+  - 输出 `upsert` / `ignore` 两类动作，不直接写业务表
+  - 使用 LangChain structured output；结构化输出失败时本次事实提炼失败关闭，不解析自由文本写库
 - `CustomerMemoryStoreService`
   - 作为 MySQL-backed LangGraph Store 适配层
   - 实现 LangGraph `BaseStore` 的 `batch` / `abatch` / `get` / `put` / `search` / `delete` / `list_namespaces` contract
@@ -1194,8 +1118,7 @@ app/models/customer_intelligence_run.py
   - 使用 `customer_facts` 保存当前可用的结构化客户知识
   - 使用 `customer_fact_sources` 绑定来源业务对象和证据引用
   - 使用 `customer_fact_revisions` 保存事实创建和更新的版本审计
-  - 使用 `customer_fact_review_audits` 保存人工采纳、驳回、取消候选事实的持久审计，覆盖未落库的被驳回候选
-  - 支持幂等 upsert、来源绑定、版本递增、修订记录、候选事实融合评估、人工审核审计、上下文 payload 投影
+  - 支持幂等 upsert、来源绑定、版本递增、修订记录、候选事实融合评估和上下文 payload 投影
   - 重复写入同一事实内容只补来源，不制造新的事实版本
   - 事实库是客户知识层，不直接等同于客户、商机、合同、回款主业务表
 - `CustomerIntelligenceRunService`
@@ -1257,15 +1180,15 @@ app/models/customer_intelligence_run.py
   - 不通过关键词硬解析原始用户输入，避免 Web、IM、中文表达差异导致触发逻辑分叉
 - 新流程 Agent turn
   - 当语义理解输出 `CUSTOMER_QUERY`，且业务上下文已明确加载客户时，生成 `agent_customer_question` 事件
-  - 事件进入 root runtime 的 `customer_intelligence_graph` 子图
+  - 事件进入独立的 `CustomerIntelligenceGraphService` job runtime
 - 已确认 / 自动执行的业务工具结果
   - 当 `create_customer_activity` 已成功写入数据库后，从真实业务对象重新构造客户智能事件
   - 当建商机、推进商机阶段、创建回款计划、登记回款等 Agent 写工具已产生成交旅程事件后，从 `CustomerDealJourneyEvent` 转成客户智能事件
   - 不信任前端输入或工具返回的临时文本作为最终事实来源
-- `AgentRootRuntime`
-  - 在 new-flow、确认任务执行、自动执行三条路径中统一调用触发策略
-  - 通过 conditional edge 决定是否进入 `customer_intelligence_graph`
-  - 客户智能中断、恢复、可见执行轨迹和输出 payload 都从 root runtime 投影，Web 和 IM 不再各维护一套客户档案触发流程
+- `AgentApplicationService`
+  - 在 Query / Workflow 的已提交业务结果后统一调用客户智能触发策略
+  - 只传递已提交业务事件，不把客户智能 job 伪装成 Root Workflow continuation
+  - 可见执行轨迹和输出 payload 由统一 Application 投影，Web 和 IM 不再各维护一套客户档案触发流程
 
 已收拢的读取入口：
 
@@ -1276,15 +1199,14 @@ app/models/customer_intelligence_run.py
 - 客户智能 LangGraph 主干读取和写入客户级长期记忆 Store
 - 客户智能 LangGraph 主干通过 LLM 结构化提炼客户事实，并由确定性节点写入客户事实库
 - 客户智能 LangGraph 主干在写库前统一做候选事实融合评估
-  - 新事实：按候选动作自动沉淀或进入复核
+  - 新事实：达到门禁条件则自动沉淀，否则静默忽略
   - 与既有事实内容一致：幂等补来源，不制造新版本
-  - 与既有事实冲突：按置信度和候选动作决定自动更新或进入人工复核
-  - 复核结果通过 `Command(resume=...)` 回到同一张图继续沉淀、刷新概况和写长期记忆
-- 客户智能事实审核通过 root runtime 统一中断 / 恢复，Web 和 IM 不需要各维护一套确认流程
+  - 与既有事实冲突：静默忽略，不覆盖既有事实
+- 客户事实沉淀不进入 Root Workflow，不产生 Web / IM 交互卡片
 - 统一客户智能上下文读取结构化客户事实和事实来源
 - 客户智能 LangGraph 主干已加入客户档案和客户概况刷新写入节点
-  - `manual_refresh_requested` 进入 `refresh_profile`：读取上下文 / 记忆 -> 制定计划 -> 提炼事实 -> 必要时人工复核 -> 沉淀事实 -> 刷新客户档案 -> 刷新客户概况 -> 写入长期记忆
-  - 跟进记录和业务流程事件进入 `refresh_brief`：读取上下文 / 记忆 -> 制定计划 -> 提炼事实 -> 必要时人工复核 -> 沉淀事实 -> 刷新客户概况 -> 写入长期记忆
+  - `manual_refresh_requested` 进入 `refresh_profile`：读取上下文 / 记忆 -> 制定计划 -> 提炼事实 -> 事实门禁 -> 自动沉淀合格事实 -> 刷新客户档案 -> 刷新客户概况 -> 写入长期记忆
+  - 跟进记录和业务流程事件进入 `refresh_brief`：读取上下文 / 记忆 -> 制定计划 -> 提炼事实 -> 事实门禁 -> 自动沉淀合格事实 -> 刷新客户概况 -> 写入长期记忆
   - `CustomerProfileService.generate_profile(...)` 被图内节点调用时只刷新客户基础档案，不再自行异步触发客户概况；客户概况由 graph 显式编排，避免图内 / 图外重复刷新
 - 页面客户档案 / 客户概况手动刷新入口已接入 `CustomerIntelligenceRefreshService`
   - 页面接口只做权限校验、状态置为待生成、发出 `manual_refresh_requested` 事件
@@ -1329,14 +1251,14 @@ app/models/customer_intelligence_run.py
 下一阶段应继续补齐：
 
 - `customer_intelligence_event_service.py`：新增业务入口时继续优先发统一客户智能事件，不能在入口处直接编排 LLM、Qdrant 或客户档案生成服务
-- `customer_fact_service.py`：继续补齐更强的语义冲突评估、事实合并策略和复核后台查询能力
+- `customer_fact_service.py`：继续补齐更强的语义冲突评估和事实合并策略，但不新增人工复核入口
 - `customer_intelligence_trace_service.py`：继续保持 Web / IM / 后台 run 诊断共用同一套 trace 投影规则
 - 业务流程触发面：继续排查批量导入、数据修复、第三方同步等非交互路径，避免绕过事件入口；联系人、商机、合同、回款计划、回款记录、开票抬头、发票申请、部署信息、License 申请页面直接 CRUD 已接入 committed-event 入口
 - 后台刷新入口：定时补偿调度已接到 `CustomerIntelligenceRefreshService.run_due_retries(...)`，同时处理同步业务事件产生的 `PENDING` run 和失败后到期的 `RETRY_PENDING` run；批量重建已接到 `CustomerIntelligenceRefreshService.trigger_batch_rebuild(...)`
 
 ### 当前代码落地顺序
 
-后续实现按下面顺序推进，避免先做页面或 prompt 调优导致架构再次发散。前 7 项已作为当前底座落地：事实冲突融合、人工确认、采纳 / 驳回审计、事实沉淀、客户档案刷新节点、客户概况刷新节点、后台运行审计、retryable 失败补偿入口、批量重建入口、客户智能图实时 streaming trace、后台 trace 统一投影、运行诊断接口和团队隔离的重试调度入口都已接入。后续扩展重点转为更完整的业务触发面和事实语义合并质量：
+后续实现按下面顺序推进，避免先做页面或 prompt 调优导致架构再次发散。当前底座已经收口为确定性事实门禁、自动沉淀、客户档案刷新、客户概况刷新、后台运行审计、失败补偿、批量重建、streaming trace 和统一投影；后续重点是补齐业务触发面与事实语义合并质量：
 
 ```text
 1. CustomerIntelligenceEvent 标准化入口
@@ -1344,8 +1266,8 @@ app/models/customer_intelligence_run.py
 3. LangGraph Store MySQL-backed 长期记忆
 4. CustomerFact / FactSource 事实库
 5. LLM 结构化事实提炼节点并入 CustomerIntelligenceGraph
-6. 事实冲突融合、人工确认、客户档案和客户概况刷新节点并入 graph
-7. Web / IM 统一消费 visible trace、interrupt 和 customer intelligence payload
+6. 事实冲突融合、自动沉淀门禁、客户档案和客户概况刷新节点并入 graph
+7. Web / IM 统一消费 visible trace 和 customer intelligence payload；客户事实不产生 interaction
 ```
 
 ### 第一阶段：统一入口
@@ -1447,7 +1369,7 @@ app/models/customer_intelligence_run.py
 - 更新时间
 - 更新来源
 - 引用依据
-- 冲突确认
+- 冲突候选静默忽略与内部诊断
 - 手动刷新
 - 执行轨迹展示
 
@@ -1493,10 +1415,10 @@ Agent 自动理解
 - Memory
   - 使用 store 保存跨 thread 的长期记忆
 - Interrupts
-  - 使用 `interrupt()` 暂停图，通过 `Command(resume=...)` 恢复
-  - interrupt payload 保持 JSON 可序列化，中断前副作用必须可重放
+  - interrupt/resume 是 LangGraph 的通用 Workflow 能力
+  - 客户智能事实沉淀不使用 interrupt；历史跟进任务确认等 Workflow 才使用该能力
 - Streaming
-  - 使用事件流把节点进度、LLM 输出、子图过程和 interrupt 投影给 Web / IM
+  - 使用事件流把节点进度、LLM 输出和子图过程投影给 Web / IM；被忽略事实不生成用户提示
 - Subgraphs
   - 使用子图复用客户上下文、记忆检索、事实抽取、事实融合和档案刷新能力
 

@@ -1,0 +1,50 @@
+{
+  "executed_at": "2026-08-24",
+  "results": [
+    {
+      "name": "backend_targeted_agent_regression",
+      "command": "PYTHONPATH=. .venv/bin/pytest -q --no-cov tests/unit/test_agent_ui_application.py tests/unit/test_agent_root_orchestrator.py tests/unit/test_agent_query_agent.py tests/unit/test_agent_query_executor.py tests/unit/test_agent_workflow_subgraph.py tests/unit/test_agent_ui_api.py tests/unit/test_agent_im_conversation.py",
+      "status": "PASS",
+      "summary": "113 passed, 25 warnings in 5.09s"
+    },
+    {
+      "name": "backend_agent_unit_suite",
+      "command": "PYTHONPATH=. .venv/bin/pytest -q --no-cov tests/unit -k agent",
+      "status": "PASS",
+      "summary": "618 passed, 20 skipped, 861 deselected, 147 warnings in 9.19s",
+      "note": "20 skipped are real-model regression cases and are not counted as passed."
+    },
+    {
+      "name": "frontend_agent_ui_protocol",
+      "command": "npm run test:unit -- --run tests/components/AgentUIMessage.spec.ts tests/components/AgentMessageBody.spec.ts tests/components/CRMAgentChatProtocol.spec.ts tests/components/agentHistory.spec.ts",
+      "status": "PASS",
+      "summary": "4 test files passed, 21 tests passed"
+    },
+    {
+      "name": "frontend_type_check",
+      "command": "npm run type-check",
+      "status": "PASS",
+      "summary": "vue-tsc --noEmit exited 0"
+    },
+    {
+      "name": "mysql_agent_integration",
+      "command": "PYTHONPATH=. .venv/bin/pytest -q --no-cov tests/integration/test_agent_persistence_mysql.py tests/integration/test_agent_async_operation_mysql.py",
+      "status": "NOT_EXECUTED",
+      "summary": "12 skipped, 25 warnings in 2.59s",
+      "note": "Required integration environment variables were not explicitly enabled; this must not be reported as PASS."
+    },
+    {
+      "name": "real_model_query_integration",
+      "command": "PYTHONPATH=. .venv/bin/pytest -q --no-cov tests/integration/test_agent_query_real_model.py",
+      "status": "NOT_EXECUTED",
+      "summary": "1 skipped, 25 warnings in 2.54s",
+      "note": "The dedicated integration test was skipped. The public HTTP acceptance run itself did call the configured real model."
+    },
+    {
+      "name": "agent_protocol_and_legacy_scan",
+      "status": "PARTIAL",
+      "summary": "No old SSE consumer path was found in the public Agent UI transport; one-time migration/cutover facilities and legacy classifications remain in checkpoint_cutover.py, migration_inventory.py, and message_migration.py.",
+      "note": "UI text fallbacks and ordinary Python fallback parameters are not equivalent to an architectural runtime fallback. AC-18 remains partial until the TRD removal gate for one-time migration code is satisfied."
+    }
+  ]
+}

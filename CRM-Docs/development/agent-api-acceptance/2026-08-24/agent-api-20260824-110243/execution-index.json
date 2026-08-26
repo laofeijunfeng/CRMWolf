@@ -1,0 +1,982 @@
+{
+  "AC-01": {
+    "case_id": "AC-01",
+    "attempt": 1,
+    "http_status": 200,
+    "elapsed_seconds": 14.229,
+    "summary": {
+      "event_types": [
+        "session",
+        "agent_ui",
+        "done"
+      ],
+      "session_id": 872,
+      "message_id": 2258,
+      "route": "QUERY",
+      "metadata": {
+        "route": "QUERY",
+        "result_set_id": "rs_602404503d85488d9e95bdd606c4c76b",
+        "accessibility_label": "按城市“上海”查询，在当前可访问范围内共命中 20 家客户，结果已按客户名称排序展示。客户状态含义：0=跟进中、1=已成交、2=已输单、3=已沉寂。"
+      },
+      "block_types": [
+        "text",
+        "entity_list"
+      ],
+      "texts": [
+        "按城市“上海”查询，在当前可访问范围内共命中 20 家客户，结果已按客户名称排序展示。客户状态含义：0=跟进中、1=已成交、2=已输单、3=已沉寂。",
+        "API验收-110243-上海客户01有限公司",
+        "API验收-110243-上海客户02有限公司",
+        "API验收-110243-上海客户03有限公司",
+        "API验收-110243-上海客户04有限公司",
+        "API验收-110243-上海客户05有限公司",
+        "API验收-110243-上海客户06有限公司",
+        "API验收-110243-上海客户07有限公司",
+        "API验收-110243-上海客户08有限公司",
+        "API验收-110243-上海客户09有限公司",
+        "API验收-110243-上海客户10有限公司",
+        "API验收-110243-上海客户11有限公司",
+        "API验收-110243-上海客户12有限公司",
+        "API验收-110243-上海客户13有限公司",
+        "API验收-110243-上海客户14有限公司",
+        "API验收-110243-上海客户15有限公司",
+        "API验收-110243-上海客户16有限公司",
+        "API验收-110243-上海客户17有限公司",
+        "API验收-110243-上海客户18有限公司",
+        "API验收-110243-上海客户19有限公司",
+        "API验收-110243-上海客户20有限公司"
+      ],
+      "interaction": null,
+      "errors": [],
+      "entity_count": 20,
+      "result_set_id": "rs_602404503d85488d9e95bdd606c4c76b"
+    }
+  },
+  "AC-02": {
+    "case_id": "AC-02",
+    "attempt": 1,
+    "http_status": 200,
+    "elapsed_seconds": 12.581,
+    "summary": {
+      "event_types": [
+        "session",
+        "agent_ui",
+        "done"
+      ],
+      "session_id": 872,
+      "message_id": 2260,
+      "route": "QUERY",
+      "metadata": {
+        "route": "QUERY",
+        "result_set_id": null,
+        "accessibility_label": "“重点客户”没有系统内置判断标准，且客户状态不代表重要程度。请告诉我筛选标准（例如行业、规模、负责人、状态或名称关键词）；我会在当前“上海”条件基础上查询。"
+      },
+      "block_types": [
+        "text"
+      ],
+      "texts": [
+        "“重点客户”没有系统内置判断标准，且客户状态不代表重要程度。请告诉我筛选标准（例如行业、规模、负责人、状态或名称关键词）；我会在当前“上海”条件基础上查询。"
+      ],
+      "interaction": null,
+      "errors": [],
+      "entity_count": 0,
+      "result_set_id": null
+    }
+  },
+  "AC-03": {
+    "case_id": "AC-03",
+    "attempt": 1,
+    "http_status": 200,
+    "elapsed_seconds": 17.603,
+    "summary": {
+      "event_types": [
+        "session",
+        "agent_ui",
+        "done"
+      ],
+      "session_id": 872,
+      "message_id": 2262,
+      "route": "QUERY",
+      "metadata": {
+        "route": "QUERY",
+        "result_set_id": null,
+        "accessibility_label": "查询服务暂时不可用, 请稍后重试。"
+      },
+      "block_types": [
+        "text",
+        "error"
+      ],
+      "texts": [
+        "查询服务暂时不可用, 请稍后重试。",
+        "处理未完成"
+      ],
+      "interaction": null,
+      "errors": [
+        {
+          "id": "b_error_1",
+          "type": "error",
+          "code": "INTERNAL_ERROR",
+          "title": "处理未完成",
+          "message": "查询服务暂时不可用, 请稍后重试。",
+          "retryable": true,
+          "trace_id": null
+        }
+      ],
+      "entity_count": 0,
+      "result_set_id": null
+    }
+  },
+  "AC-01-03-history": {
+    "http_status": 200,
+    "total": 6,
+    "item_count": 6
+  },
+  "AC-04": {
+    "case_id": "AC-04",
+    "attempt": 1,
+    "http_status": 200,
+    "elapsed_seconds": 5.369,
+    "summary": {
+      "event_types": [
+        "session",
+        "agent_ui",
+        "done"
+      ],
+      "session_id": 873,
+      "message_id": 2264,
+      "route": "CLARIFY",
+      "metadata": {
+        "route": "CLARIFY",
+        "result_set_id": null,
+        "accessibility_label": "请明确你想继续当前任务, 还是开始一个新的查询或操作。"
+      },
+      "block_types": [
+        "text"
+      ],
+      "texts": [
+        "请明确你想继续当前任务, 还是开始一个新的查询或操作。"
+      ],
+      "interaction": null,
+      "errors": [],
+      "entity_count": 0,
+      "result_set_id": null
+    }
+  },
+  "AC-05": {
+    "case_id": "AC-05",
+    "attempt": 1,
+    "http_status": 200,
+    "elapsed_seconds": 13.995,
+    "summary": {
+      "event_types": [
+        "session",
+        "agent_ui",
+        "done"
+      ],
+      "session_id": 873,
+      "message_id": 2266,
+      "route": "QUERY",
+      "metadata": {
+        "route": "QUERY",
+        "result_set_id": "rs_e1c560739cbb4db18e566526aca0786d",
+        "accessibility_label": "API验收-110243-上海客户01有限公司的负责人是 Agent API 验收 110243。"
+      },
+      "block_types": [
+        "text",
+        "entity_list"
+      ],
+      "texts": [
+        "API验收-110243-上海客户01有限公司的负责人是 Agent API 验收 110243。",
+        "API验收-110243-上海客户01有限公司"
+      ],
+      "interaction": null,
+      "errors": [],
+      "entity_count": 1,
+      "result_set_id": "rs_e1c560739cbb4db18e566526aca0786d"
+    }
+  },
+  "AC-04-05-history": {
+    "http_status": 200,
+    "total": 4,
+    "item_count": 4
+  },
+  "AC-09-query": {
+    "case_id": "AC-09-query",
+    "attempt": 1,
+    "http_status": 200,
+    "elapsed_seconds": 17.485,
+    "summary": {
+      "event_types": [
+        "session",
+        "agent_ui",
+        "done"
+      ],
+      "session_id": 874,
+      "message_id": 2268,
+      "route": "QUERY",
+      "metadata": {
+        "route": "QUERY",
+        "result_set_id": "rs_c04272f461754997b62d48e34ca1f83d",
+        "accessibility_label": "按城市“上海”查询，在当前可访问范围内命中 20 家客户；客户列表已由界面展示。状态含义为：0=跟进中、1=已成交、2=已输单、3=已沉寂。"
+      },
+      "block_types": [
+        "text",
+        "entity_list"
+      ],
+      "texts": [
+        "按城市“上海”查询，在当前可访问范围内命中 20 家客户；客户列表已由界面展示。状态含义为：0=跟进中、1=已成交、2=已输单、3=已沉寂。",
+        "API验收-110243-上海客户01有限公司",
+        "API验收-110243-上海客户02有限公司",
+        "API验收-110243-上海客户03有限公司",
+        "API验收-110243-上海客户04有限公司",
+        "API验收-110243-上海客户05有限公司",
+        "API验收-110243-上海客户06有限公司",
+        "API验收-110243-上海客户07有限公司",
+        "API验收-110243-上海客户08有限公司",
+        "API验收-110243-上海客户09有限公司",
+        "API验收-110243-上海客户10有限公司",
+        "API验收-110243-上海客户11有限公司",
+        "API验收-110243-上海客户12有限公司",
+        "API验收-110243-上海客户13有限公司",
+        "API验收-110243-上海客户14有限公司",
+        "API验收-110243-上海客户15有限公司",
+        "API验收-110243-上海客户16有限公司",
+        "API验收-110243-上海客户17有限公司",
+        "API验收-110243-上海客户18有限公司",
+        "API验收-110243-上海客户19有限公司",
+        "API验收-110243-上海客户20有限公司"
+      ],
+      "interaction": null,
+      "errors": [],
+      "entity_count": 20,
+      "result_set_id": "rs_c04272f461754997b62d48e34ca1f83d"
+    }
+  },
+  "AC-09-action-id": "act_a8bba69b40774aa299f3f83fa8ee90d8",
+  "AC-09": {
+    "case_id": "AC-09",
+    "attempt": 1,
+    "http_status": 200,
+    "elapsed_seconds": 5.671,
+    "summary": {
+      "event_types": [
+        "session",
+        "agent_ui",
+        "done"
+      ],
+      "session_id": 874,
+      "message_id": 2270,
+      "route": "CLARIFY",
+      "metadata": {
+        "route": "CLARIFY",
+        "result_set_id": null,
+        "accessibility_label": "请明确你想继续当前任务, 还是开始一个新的查询或操作。"
+      },
+      "block_types": [
+        "text"
+      ],
+      "texts": [
+        "请明确你想继续当前任务, 还是开始一个新的查询或操作。"
+      ],
+      "interaction": null,
+      "errors": [],
+      "entity_count": 0,
+      "result_set_id": null
+    }
+  },
+  "AC-09-history": {
+    "http_status": 200,
+    "total": 4,
+    "item_count": 4
+  },
+  "AC-10": {
+    "case_id": "AC-10",
+    "attempt": 1,
+    "http_status": 200,
+    "elapsed_seconds": 9.788,
+    "summary": {
+      "event_types": [
+        "session",
+        "agent_ui",
+        "done"
+      ],
+      "session_id": 875,
+      "message_id": 2272,
+      "route": "QUERY",
+      "metadata": {
+        "route": "QUERY",
+        "result_set_id": "rs_306b5ab1b20542bda2fe2e4079b8949b",
+        "accessibility_label": "当前权限范围内未找到符合条件的客户。"
+      },
+      "block_types": [
+        "text",
+        "entity_list"
+      ],
+      "texts": [
+        "当前权限范围内未找到符合条件的客户。"
+      ],
+      "interaction": null,
+      "errors": [],
+      "entity_count": 0,
+      "result_set_id": "rs_306b5ab1b20542bda2fe2e4079b8949b"
+    }
+  },
+  "AC-10-history": {
+    "http_status": 200,
+    "total": 2,
+    "item_count": 2
+  },
+  "AC-11": {
+    "case_id": "AC-11",
+    "attempt": 1,
+    "http_status": 200,
+    "elapsed_seconds": 11.901,
+    "summary": {
+      "event_types": [
+        "session",
+        "agent_ui",
+        "done"
+      ],
+      "session_id": 876,
+      "message_id": 2274,
+      "route": "QUERY",
+      "metadata": {
+        "route": "QUERY",
+        "result_set_id": "rs_7ed144a9eb954357a6bd50ac0cf04bd0",
+        "accessibility_label": "当前权限范围内未找到符合条件的客户。"
+      },
+      "block_types": [
+        "text",
+        "entity_list"
+      ],
+      "texts": [
+        "当前权限范围内未找到符合条件的客户。"
+      ],
+      "interaction": null,
+      "errors": [],
+      "entity_count": 0,
+      "result_set_id": "rs_7ed144a9eb954357a6bd50ac0cf04bd0"
+    }
+  },
+  "AC-11-history": {
+    "http_status": 200,
+    "total": 2,
+    "item_count": 2
+  },
+  "AC-12-context": {
+    "case_id": "AC-12-context",
+    "attempt": 1,
+    "http_status": 200,
+    "elapsed_seconds": 5.201,
+    "summary": {
+      "event_types": [
+        "session",
+        "agent_ui",
+        "done"
+      ],
+      "session_id": 877,
+      "message_id": 2276,
+      "route": "CLARIFY",
+      "metadata": {
+        "route": "CLARIFY",
+        "result_set_id": null,
+        "accessibility_label": "请明确你想继续当前任务, 还是开始一个新的查询或操作。"
+      },
+      "block_types": [
+        "text"
+      ],
+      "texts": [
+        "请明确你想继续当前任务, 还是开始一个新的查询或操作。"
+      ],
+      "interaction": null,
+      "errors": [],
+      "entity_count": 0,
+      "result_set_id": null
+    }
+  },
+  "AC-12-explicit": {
+    "case_id": "AC-12-explicit",
+    "attempt": 1,
+    "http_status": 200,
+    "elapsed_seconds": 25.565,
+    "summary": {
+      "event_types": [
+        "session",
+        "agent_ui",
+        "done"
+      ],
+      "session_id": 877,
+      "message_id": 2278,
+      "route": "QUERY",
+      "metadata": {
+        "route": "QUERY",
+        "result_set_id": null,
+        "accessibility_label": "查询服务暂时不可用, 请稍后重试。"
+      },
+      "block_types": [
+        "text",
+        "error"
+      ],
+      "texts": [
+        "查询服务暂时不可用, 请稍后重试。",
+        "处理未完成"
+      ],
+      "interaction": null,
+      "errors": [
+        {
+          "id": "b_error_1",
+          "type": "error",
+          "code": "INTERNAL_ERROR",
+          "title": "处理未完成",
+          "message": "查询服务暂时不可用, 请稍后重试。",
+          "retryable": true,
+          "trace_id": null
+        }
+      ],
+      "entity_count": 0,
+      "result_set_id": null
+    }
+  },
+  "AC-12-history": {
+    "http_status": 200,
+    "total": 4,
+    "item_count": 4
+  },
+  "AC-06-wait": {
+    "case_id": "AC-06-wait",
+    "attempt": 1,
+    "http_status": 200,
+    "elapsed_seconds": 17.954,
+    "summary": {
+      "event_types": [
+        "session",
+        "agent_ui",
+        "done"
+      ],
+      "session_id": 878,
+      "message_id": 2280,
+      "route": "WORKFLOW",
+      "metadata": {
+        "route": "WORKFLOW",
+        "result_set_id": null,
+        "accessibility_label": "确认要创建客户“API验收-110243-结构确认客户有限公司”吗?"
+      },
+      "block_types": [
+        "text",
+        "interaction"
+      ],
+      "texts": [
+        "确认要创建客户“API验收-110243-结构确认客户有限公司”吗?"
+      ],
+      "interaction": {
+        "id": "b_interaction_1",
+        "type": "interaction",
+        "interaction_id": "int_bf60b204fd074ad3b228b9c18ca8977a",
+        "interaction_type": "confirmation",
+        "state": "ACTIVE",
+        "prompt": "确认要创建客户“API验收-110243-结构确认客户有限公司”吗?",
+        "fields": [],
+        "options": [
+          {
+            "value": "confirm",
+            "label": "确认创建",
+            "description": null,
+            "disabled": false
+          },
+          {
+            "value": "cancel",
+            "label": "取消",
+            "description": null,
+            "disabled": false
+          }
+        ],
+        "selection_mode": "single",
+        "min_selections": null,
+        "max_selections": null,
+        "allow_blank": null,
+        "submit_action_id": "act_0d2ec60ac00b42dab6593e43714af4d3"
+      },
+      "errors": [],
+      "entity_count": 0,
+      "result_set_id": null
+    }
+  },
+  "AC-06-submit-action-id": "act_0d2ec60ac00b42dab6593e43714af4d3",
+  "AC-06": {
+    "case_id": "AC-06",
+    "attempt": 1,
+    "http_status": 200,
+    "elapsed_seconds": 0.536,
+    "summary": {
+      "event_types": [
+        "session",
+        "agent_ui",
+        "done"
+      ],
+      "session_id": 878,
+      "message_id": 2282,
+      "route": "WORKFLOW",
+      "metadata": {
+        "route": "WORKFLOW",
+        "result_set_id": null,
+        "accessibility_label": "已创建客户“API验收-110243-结构确认客户有限公司”。"
+      },
+      "block_types": [
+        "text"
+      ],
+      "texts": [
+        "已创建客户“API验收-110243-结构确认客户有限公司”。"
+      ],
+      "interaction": null,
+      "errors": [],
+      "entity_count": 0,
+      "result_set_id": null
+    }
+  },
+  "AC-06-history": {
+    "http_status": 200,
+    "total": 4,
+    "item_count": 4
+  },
+  "AC-07-wait": {
+    "case_id": "AC-07-wait",
+    "attempt": 1,
+    "http_status": 200,
+    "elapsed_seconds": 17.02,
+    "summary": {
+      "event_types": [
+        "session",
+        "agent_ui",
+        "done"
+      ],
+      "session_id": 879,
+      "message_id": 2284,
+      "route": "WORKFLOW",
+      "metadata": {
+        "route": "WORKFLOW",
+        "result_set_id": null,
+        "accessibility_label": "确认要创建客户“API验收-110243-挂起恢复客户有限公司”吗?"
+      },
+      "block_types": [
+        "text",
+        "interaction"
+      ],
+      "texts": [
+        "确认要创建客户“API验收-110243-挂起恢复客户有限公司”吗?"
+      ],
+      "interaction": {
+        "id": "b_interaction_1",
+        "type": "interaction",
+        "interaction_id": "int_895e678d193d4dc791f8fa275ddb8519",
+        "interaction_type": "confirmation",
+        "state": "ACTIVE",
+        "prompt": "确认要创建客户“API验收-110243-挂起恢复客户有限公司”吗?",
+        "fields": [],
+        "options": [
+          {
+            "value": "confirm",
+            "label": "确认创建",
+            "description": null,
+            "disabled": false
+          },
+          {
+            "value": "cancel",
+            "label": "取消",
+            "description": null,
+            "disabled": false
+          }
+        ],
+        "selection_mode": "single",
+        "min_selections": null,
+        "max_selections": null,
+        "allow_blank": null,
+        "submit_action_id": "act_9bb7b2e963414991834778bdbb32b6af"
+      },
+      "errors": [],
+      "entity_count": 0,
+      "result_set_id": null
+    }
+  },
+  "AC-07": {
+    "case_id": "AC-07",
+    "attempt": 1,
+    "http_status": 200,
+    "elapsed_seconds": 16.46,
+    "summary": {
+      "event_types": [
+        "session",
+        "agent_ui",
+        "done"
+      ],
+      "session_id": 879,
+      "message_id": 2286,
+      "route": "QUERY",
+      "metadata": {
+        "route": "QUERY",
+        "result_set_id": "rs_1837ce2b2d024a13bb0a16c272ccddbd",
+        "accessibility_label": "按“城市=上海”查询，在当前可访问范围内命中 21 家客户；客户列表已展示。客户状态含义为：0=跟进中、1=已成交、2=已输单、3=已沉寂。"
+      },
+      "block_types": [
+        "text",
+        "entity_list"
+      ],
+      "texts": [
+        "按“城市=上海”查询，在当前可访问范围内命中 21 家客户；客户列表已展示。客户状态含义为：0=跟进中、1=已成交、2=已输单、3=已沉寂。",
+        "API验收-110243-结构确认客户有限公司",
+        "API验收-110243-上海客户01有限公司",
+        "API验收-110243-上海客户02有限公司",
+        "API验收-110243-上海客户03有限公司",
+        "API验收-110243-上海客户04有限公司",
+        "API验收-110243-上海客户05有限公司",
+        "API验收-110243-上海客户06有限公司",
+        "API验收-110243-上海客户07有限公司",
+        "API验收-110243-上海客户08有限公司",
+        "API验收-110243-上海客户09有限公司",
+        "API验收-110243-上海客户10有限公司",
+        "API验收-110243-上海客户11有限公司",
+        "API验收-110243-上海客户12有限公司",
+        "API验收-110243-上海客户13有限公司",
+        "API验收-110243-上海客户14有限公司",
+        "API验收-110243-上海客户15有限公司",
+        "API验收-110243-上海客户16有限公司",
+        "API验收-110243-上海客户17有限公司",
+        "API验收-110243-上海客户18有限公司",
+        "API验收-110243-上海客户19有限公司",
+        "API验收-110243-上海客户20有限公司"
+      ],
+      "interaction": null,
+      "errors": [],
+      "entity_count": 21,
+      "result_set_id": "rs_1837ce2b2d024a13bb0a16c272ccddbd"
+    }
+  },
+  "AC-08": {
+    "case_id": "AC-08",
+    "attempt": 1,
+    "http_status": 200,
+    "elapsed_seconds": 18.841,
+    "summary": {
+      "event_types": [
+        "session",
+        "agent_ui",
+        "done"
+      ],
+      "session_id": 879,
+      "message_id": 2288,
+      "route": "WORKFLOW",
+      "metadata": {
+        "route": "WORKFLOW",
+        "result_set_id": null,
+        "accessibility_label": "请说明要对刚才的任务执行什么操作（完成、取消、延期或保持待跟进），并提供任务编号或更具体的任务信息。"
+      },
+      "block_types": [
+        "text",
+        "error"
+      ],
+      "texts": [
+        "请说明要对刚才的任务执行什么操作（完成、取消、延期或保持待跟进），并提供任务编号或更具体的任务信息。",
+        "操作未完成"
+      ],
+      "interaction": null,
+      "errors": [
+        {
+          "id": "b_error_1",
+          "type": "error",
+          "code": "INTERNAL_ERROR",
+          "title": "操作未完成",
+          "message": "请说明要对刚才的任务执行什么操作（完成、取消、延期或保持待跟进），并提供任务编号或更具体的任务信息。",
+          "retryable": false,
+          "trace_id": null
+        }
+      ],
+      "entity_count": 0,
+      "result_set_id": null
+    }
+  },
+  "AC-07-08-history": {
+    "http_status": 200,
+    "total": 6,
+    "item_count": 6
+  },
+  "AC-14": {
+    "case_id": "AC-14",
+    "attempt": 1,
+    "http_status": 200,
+    "elapsed_seconds": 20.458,
+    "summary": {
+      "event_types": [
+        "session",
+        "agent_ui",
+        "done"
+      ],
+      "session_id": 880,
+      "message_id": 2290,
+      "route": "WORKFLOW",
+      "metadata": {
+        "route": "WORKFLOW",
+        "result_set_id": null,
+        "accessibility_label": "创建跟进任务前需要先明确一个客户。"
+      },
+      "block_types": [
+        "text",
+        "error"
+      ],
+      "texts": [
+        "创建跟进任务前需要先明确一个客户。",
+        "操作未完成"
+      ],
+      "interaction": null,
+      "errors": [
+        {
+          "id": "b_error_1",
+          "type": "error",
+          "code": "INTERNAL_ERROR",
+          "title": "操作未完成",
+          "message": "创建跟进任务前需要先明确一个客户。",
+          "retryable": false,
+          "trace_id": null
+        }
+      ],
+      "entity_count": 0,
+      "result_set_id": null
+    }
+  },
+  "AC-14-history": {
+    "http_status": 200,
+    "total": 2,
+    "item_count": 2
+  },
+  "AC-15-wait": {
+    "case_id": "AC-15-wait",
+    "attempt": 1,
+    "http_status": 200,
+    "elapsed_seconds": 17.463,
+    "summary": {
+      "event_types": [
+        "session",
+        "agent_ui",
+        "done"
+      ],
+      "session_id": 881,
+      "message_id": 2292,
+      "route": "WORKFLOW",
+      "metadata": {
+        "route": "WORKFLOW",
+        "result_set_id": null,
+        "accessibility_label": "确认要创建客户“API验收-110243-取消幂等客户有限公司”吗?"
+      },
+      "block_types": [
+        "text",
+        "interaction"
+      ],
+      "texts": [
+        "确认要创建客户“API验收-110243-取消幂等客户有限公司”吗?"
+      ],
+      "interaction": {
+        "id": "b_interaction_1",
+        "type": "interaction",
+        "interaction_id": "int_c32b066b7e5844c4bf90099a3a7bb89a",
+        "interaction_type": "confirmation",
+        "state": "ACTIVE",
+        "prompt": "确认要创建客户“API验收-110243-取消幂等客户有限公司”吗?",
+        "fields": [],
+        "options": [
+          {
+            "value": "confirm",
+            "label": "确认创建",
+            "description": null,
+            "disabled": false
+          },
+          {
+            "value": "cancel",
+            "label": "取消",
+            "description": null,
+            "disabled": false
+          }
+        ],
+        "selection_mode": "single",
+        "min_selections": null,
+        "max_selections": null,
+        "allow_blank": null,
+        "submit_action_id": "act_291075c3d33b4eaf8954a2291d88da1a"
+      },
+      "errors": [],
+      "entity_count": 0,
+      "result_set_id": null
+    }
+  },
+  "AC-15-submit-action-id": "act_291075c3d33b4eaf8954a2291d88da1a",
+  "AC-15-cancel": {
+    "case_id": "AC-15-cancel",
+    "attempt": 1,
+    "http_status": 200,
+    "elapsed_seconds": 0.106,
+    "summary": {
+      "event_types": [
+        "session",
+        "agent_ui",
+        "done"
+      ],
+      "session_id": 881,
+      "message_id": 2294,
+      "route": "WORKFLOW",
+      "metadata": {
+        "route": "WORKFLOW",
+        "result_set_id": null,
+        "accessibility_label": "已取消创建客户“API验收-110243-取消幂等客户有限公司”。"
+      },
+      "block_types": [
+        "text"
+      ],
+      "texts": [
+        "已取消创建客户“API验收-110243-取消幂等客户有限公司”。"
+      ],
+      "interaction": null,
+      "errors": [],
+      "entity_count": 0,
+      "result_set_id": null
+    }
+  },
+  "AC-15-replay": {
+    "case_id": "AC-15-replay",
+    "attempt": 1,
+    "http_status": 200,
+    "elapsed_seconds": 0.028,
+    "summary": {
+      "event_types": [
+        "session",
+        "agent_ui",
+        "done"
+      ],
+      "session_id": 881,
+      "message_id": 2294,
+      "route": "WORKFLOW",
+      "metadata": {
+        "route": "WORKFLOW",
+        "result_set_id": null,
+        "accessibility_label": "已取消创建客户“API验收-110243-取消幂等客户有限公司”。"
+      },
+      "block_types": [
+        "text"
+      ],
+      "texts": [
+        "已取消创建客户“API验收-110243-取消幂等客户有限公司”。"
+      ],
+      "interaction": null,
+      "errors": [],
+      "entity_count": 0,
+      "result_set_id": null
+    }
+  },
+  "AC-15-history": {
+    "http_status": 200,
+    "total": 4,
+    "item_count": 4
+  },
+  "AC-15-modify-wait": {
+    "case_id": "AC-15-modify-wait",
+    "attempt": 1,
+    "http_status": 200,
+    "elapsed_seconds": 21.933,
+    "summary": {
+      "event_types": [
+        "session",
+        "agent_ui",
+        "done"
+      ],
+      "session_id": 882,
+      "message_id": 2296,
+      "route": "WORKFLOW",
+      "metadata": {
+        "route": "WORKFLOW",
+        "result_set_id": null,
+        "accessibility_label": "确认要创建客户“API验收-110243-修改工作流客户有限公司”吗?"
+      },
+      "block_types": [
+        "text",
+        "interaction"
+      ],
+      "texts": [
+        "确认要创建客户“API验收-110243-修改工作流客户有限公司”吗?"
+      ],
+      "interaction": {
+        "id": "b_interaction_1",
+        "type": "interaction",
+        "interaction_id": "int_ec9fe3c2f05d4b6a95e183e37791917c",
+        "interaction_type": "confirmation",
+        "state": "ACTIVE",
+        "prompt": "确认要创建客户“API验收-110243-修改工作流客户有限公司”吗?",
+        "fields": [],
+        "options": [
+          {
+            "value": "confirm",
+            "label": "确认创建",
+            "description": null,
+            "disabled": false
+          },
+          {
+            "value": "cancel",
+            "label": "取消",
+            "description": null,
+            "disabled": false
+          }
+        ],
+        "selection_mode": "single",
+        "min_selections": null,
+        "max_selections": null,
+        "allow_blank": null,
+        "submit_action_id": "act_6029a049ca5b4c91be0d9f379daba421"
+      },
+      "errors": [],
+      "entity_count": 0,
+      "result_set_id": null
+    }
+  },
+  "AC-15-modify": {
+    "case_id": "AC-15-modify",
+    "attempt": 1,
+    "http_status": 200,
+    "elapsed_seconds": 22.618,
+    "summary": {
+      "event_types": [
+        "session",
+        "agent_ui",
+        "done"
+      ],
+      "session_id": 882,
+      "message_id": 2298,
+      "route": "WORKFLOW",
+      "metadata": {
+        "route": "WORKFLOW",
+        "result_set_id": null,
+        "accessibility_label": "请问要修改哪个客户的城市？另外，“继续”具体是要继续执行什么操作？"
+      },
+      "block_types": [
+        "text",
+        "error"
+      ],
+      "texts": [
+        "请问要修改哪个客户的城市？另外，“继续”具体是要继续执行什么操作？",
+        "操作未完成"
+      ],
+      "interaction": null,
+      "errors": [
+        {
+          "id": "b_error_1",
+          "type": "error",
+          "code": "INTERNAL_ERROR",
+          "title": "操作未完成",
+          "message": "请问要修改哪个客户的城市？另外，“继续”具体是要继续执行什么操作？",
+          "retryable": false,
+          "trace_id": null
+        }
+      ],
+      "entity_count": 0,
+      "result_set_id": null
+    }
+  },
+  "AC-15-modify-history": {
+    "http_status": 200,
+    "total": 4,
+    "item_count": 4
+  }
+}

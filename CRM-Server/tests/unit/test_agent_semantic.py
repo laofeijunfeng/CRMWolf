@@ -1,9 +1,21 @@
 """CRM AI Agent semantic parser tests."""
+
 import pytest
 
-from app.services.agent.prompts import CRM_AGENT_SEMANTIC_SYSTEM_PROMPT, build_semantic_messages, render_semantic_system_prompt
+from app.services.agent.prompts import (
+    CRM_AGENT_SEMANTIC_SYSTEM_PROMPT,
+    build_semantic_messages,
+    render_semantic_system_prompt,
+)
 from app.services.agent.semantic import AgentSemanticParser, AgentSemanticParserError
 from app.services.agent.schemas import AgentSemanticParseResult
+
+
+def test_semantic_prompt_declares_stage_transition_as_semantic_only():
+    assert "MOVE_OPPORTUNITY_STAGE" in CRM_AGENT_SEMANTIC_SYSTEM_PROMPT
+    assert '"opportunity_stage_transition"' in CRM_AGENT_SEMANTIC_SYSTEM_PROMPT
+    assert '"target_stage_name"' in CRM_AGENT_SEMANTIC_SYSTEM_PROMPT
+    assert "禁止输出可信 stage_template_id" in CRM_AGENT_SEMANTIC_SYSTEM_PROMPT
 
 
 def test_semantic_prompt_contains_business_and_boundary_rules():
@@ -20,52 +32,6 @@ def test_semantic_prompt_contains_business_and_boundary_rules():
     assert "【用户输入】" in messages[1]["content"]
 
 
-def test_semantic_parser_accepts_json_object_wrapped_in_code_fence():
-    result = AgentSemanticParser().parse_raw_response("""
-```json
-{
-  "intent": "CUSTOMER_ACTIVITY",
-  "intent_confidence": 0.95,
-  "customer": {"name_text": "越秀金融", "confidence": 0.95},
-  "follow_up": {
-    "content": "客户反馈项目还在立项评估阶段",
-    "method": "未指定",
-    "next_action": "下周三确认进展",
-    "next_follow_time_text": "下周三",
-    "next_follow_time": {
-      "raw_text": "下周三",
-      "kind": "RELATIVE_WEEKDAY",
-      "direction": "next",
-      "weekday": 3,
-      "confidence": 0.95
-    },
-    "next_follow_time_iso": null
-  },
-  "contact": {},
-  "invoice_title": {},
-  "deployment_info": {},
-  "business_signals": [],
-  "requested_actions": [],
-  "missing_fields": [],
-  "need_clarification": false,
-  "clarification_question": null,
-  "evidence": ["今天和越秀金融沟通了项目进展"]
-}
-```
-""")
-
-    assert result.intent == "CUSTOMER_ACTIVITY"
-    assert result.customer.name_text == "越秀金融"
-    assert result.follow_up.next_follow_time_text == "下周三"
-    assert result.follow_up.next_follow_time.weekday == 3
-    assert result.follow_up.next_follow_time_iso is None
-
-
-def test_semantic_parser_rejects_invalid_ai_output():
-    with pytest.raises(AgentSemanticParserError):
-        AgentSemanticParser().parse_raw_response('{"intent":"NOT_ALLOWED"}')
-
-
 @pytest.mark.asyncio
 async def test_semantic_parser_uses_langchain_structured_output_path():
     class FakeChatModel:
@@ -76,21 +42,23 @@ async def test_semantic_parser_uses_langchain_structured_output_path():
         async def ainvoke(self, payload):
             assert "messages" in payload
             return {
-                "structured_response": AgentSemanticParseResult.model_validate({
-                    "intent": "CUSTOMER_ACTIVITY",
-                    "intent_confidence": 0.95,
-                    "customer": {"name_text": "越秀金融", "confidence": 0.95},
-                    "follow_up": {"content": "客户还在立项评估阶段"},
-                    "contact": {},
-                    "invoice_title": {},
-                    "deployment_info": {},
-                    "business_signals": [],
-                    "requested_actions": [],
-                    "missing_fields": [],
-                    "need_clarification": False,
-                    "clarification_question": None,
-                    "evidence": ["客户还在立项评估阶段"],
-                }),
+                "structured_response": AgentSemanticParseResult.model_validate(
+                    {
+                        "intent": "CUSTOMER_ACTIVITY",
+                        "intent_confidence": 0.95,
+                        "customer": {"name_text": "越秀金融", "confidence": 0.95},
+                        "follow_up": {"content": "客户还在立项评估阶段"},
+                        "contact": {},
+                        "invoice_title": {},
+                        "deployment_info": {},
+                        "business_signals": [],
+                        "requested_actions": [],
+                        "missing_fields": [],
+                        "need_clarification": False,
+                        "clarification_question": None,
+                        "evidence": ["客户还在立项评估阶段"],
+                    }
+                ),
             }
 
     calls = {}
@@ -116,6 +84,7 @@ async def test_semantic_parser_uses_langchain_structured_output_path():
     assert "CRM AI Agent 语义解析器" in calls["system_prompt"]
     assert result.intent == "CUSTOMER_ACTIVITY"
 
+
 def test_semantic_prompt_injects_team_source_names_instead_of_hardcoded_enum():
     prompt = render_semantic_system_prompt(
         source_names=["线上注册", "未分类"],
@@ -135,3 +104,194 @@ def test_semantic_prompt_injects_team_source_names_instead_of_hardcoded_enum():
     assert "线上注册|市场活动|客户推荐|电话营销|网站咨询|展会|其他" not in prompt
     assert "获客来源只能输出当前团队启用项：线上注册、未分类" in messages[0]["content"]
 
+
+@pytest.mark.asyncio
+async def test_semantic_parser_uses_single_structured_path_and_disables_qwen_thinking(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.services.agent import semantic
+
+    class FakeChatModel:
+        calls = []
+
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self.__class__.calls.append(kwargs)
+
+    class FakeAgent:
+        async def ainvoke(self, payload):
+            return {
+                "structured_response": AgentSemanticParseResult.model_validate(
+                    {
+                        "intent": "CUSTOMER_ACTIVITY",
+                        "intent_confidence": 0.95,
+                        "customer": {"name_text": "越秀金融", "confidence": 0.95},
+                        "follow_up": {"content": "客户还在立项评估阶段"},
+                        "contact": {},
+                        "invoice_title": {},
+                        "deployment_info": {},
+                        "business_signals": [],
+                        "requested_actions": [],
+                        "missing_fields": [],
+                        "need_clarification": False,
+                        "clarification_question": None,
+                        "evidence": ["客户还在立项评估阶段"],
+                    }
+                ),
+            }
+
+    monkeypatch.setattr(
+        semantic.ai_config_crud,
+        "get_config",
+        lambda db, team_id: SimpleNamespace(
+            api_host="https://ai.example.com/v1",
+            model_name="qwen3.5-plus",
+            temperature=0.1,
+            max_tokens=1024,
+        ),
+    )
+    monkeypatch.setattr(
+        semantic.ai_config_crud,
+        "get_decrypted_api_key",
+        lambda db, team_id: "test-key",
+    )
+    monkeypatch.setattr(semantic, "format_active_source_names", lambda db, team_id: [])
+    monkeypatch.setattr(semantic, "default_source_name", lambda db, team_id: None)
+
+    envelope = await AgentSemanticParser(
+        agent_factory=lambda **kwargs: FakeAgent(),
+        chat_model_factory=FakeChatModel,
+    ).parse_with_metadata(
+        object(),
+        team_id=1,
+        user_message="今天和越秀金融沟通了项目进展",
+    )
+
+    assert envelope.parse_source == "langchain_structured_output"
+    assert FakeChatModel.calls[0]["extra_body"] == {"enable_thinking": False}
+    assert FakeChatModel.calls[0]["max_retries"] == 0
+
+
+@pytest.mark.asyncio
+async def test_semantic_parser_does_not_fallback_to_legacy_stream_after_structured_failure(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.services.agent import semantic
+
+    class FakeChatModel:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class FailingAgent:
+        async def ainvoke(self, payload):
+            raise TimeoutError("structured call timed out")
+
+    monkeypatch.setattr(
+        semantic.ai_config_crud,
+        "get_config",
+        lambda db, team_id: SimpleNamespace(
+            api_host="https://ai.example.com/v1",
+            model_name="qwen3.5-plus",
+            temperature=0.1,
+            max_tokens=1024,
+        ),
+    )
+    monkeypatch.setattr(
+        semantic.ai_config_crud,
+        "get_decrypted_api_key",
+        lambda db, team_id: "test-key",
+    )
+    monkeypatch.setattr(semantic, "format_active_source_names", lambda db, team_id: [])
+    monkeypatch.setattr(semantic, "default_source_name", lambda db, team_id: None)
+
+    parser = AgentSemanticParser(
+        agent_factory=lambda **kwargs: FailingAgent(),
+        chat_model_factory=FakeChatModel,
+    )
+
+    with pytest.raises(AgentSemanticParserError, match="LangChain structured output 调用失败"):
+        await parser.parse_with_metadata(
+            object(),
+            team_id=1,
+            user_message="今天和越秀金融沟通了项目进展",
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method_name", "kwargs"),
+    [
+        ("assess_pending_interruption", {"pending_task": {"id": 1}}),
+        (
+            "rank_resource_candidates",
+            {
+                "resource_kind": "contract",
+                "action_name": "CREATE_PAYMENT_PLAN",
+                "target": {"customer_id": 1},
+                "candidates": [{"id": 11, "name": "合同 A"}],
+            },
+        ),
+        (
+            "assess_turn_relation",
+            {"active_task": {"id": 1}, "suspended_tasks": []},
+        ),
+        (
+            "assess_turn_intent",
+            {
+                "current_interrupt": {"type": "write_confirmation"},
+                "active_task": {"id": 1},
+                "suspended_tasks": [],
+            },
+        ),
+    ],
+)
+async def test_semantic_decision_entrypoints_never_use_legacy_stream(
+    monkeypatch,
+    method_name,
+    kwargs,
+):
+    from types import SimpleNamespace
+
+    from app.services.agent import semantic
+
+    class FakeChatModel:
+        calls = []
+
+        def __init__(self, **call_kwargs):
+            self.__class__.calls.append(call_kwargs)
+
+    class FailingAgent:
+        async def ainvoke(self, payload):
+            raise TimeoutError("structured call timed out")
+
+    monkeypatch.setattr(
+        semantic.ai_config_crud,
+        "get_config",
+        lambda db, team_id: SimpleNamespace(
+            api_host="https://ai.example.com/v1",
+            model_name="qwen3.5-plus",
+            temperature=0.1,
+            max_tokens=1024,
+        ),
+    )
+    monkeypatch.setattr(
+        semantic.ai_config_crud,
+        "get_decrypted_api_key",
+        lambda db, team_id: "test-key",
+    )
+
+    parser = AgentSemanticParser(
+        agent_factory=lambda **agent_kwargs: FailingAgent(),
+        chat_model_factory=FakeChatModel,
+    )
+
+    with pytest.raises(AgentSemanticParserError, match="LangChain .* 调用失败"):
+        await getattr(parser, method_name)(
+            object(),
+            team_id=1,
+            user_message="确认",
+            **kwargs,
+        )
+
+    assert FakeChatModel.calls[0]["extra_body"] == {"enable_thinking": False}
+    assert FakeChatModel.calls[0]["max_retries"] == 0

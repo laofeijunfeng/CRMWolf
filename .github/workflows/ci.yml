@@ -64,8 +64,9 @@ jobs:
       - name: Install dependencies
         run: |
           cd CRM-Server
-          pip install -r requirements.txt
-          pip install ruff mypy
+          pip install --require-hashes -r requirements.lock -r requirements-dev.lock
+          python -m scripts.verify_agent_dependency_baseline --include-dev
+          python -m scripts.generate_agent_contract_schemas --check
 
       - name: Run Ruff
         run: cd CRM-Server && ruff check app/
@@ -109,17 +110,17 @@ jobs:
       - name: Install dependencies
         run: |
           cd CRM-Server
-          pip install -r requirements.txt
-          pip install pytest pytest-asyncio pytest-cov
+          pip install --require-hashes -r requirements.lock -r requirements-dev.lock
+          python -m scripts.verify_agent_dependency_baseline --include-dev
 
       - name: Run unit tests
-        run: cd CRM-Server && pytest tests/unit -v --cov=app --cov-report=xml
+        run: cd CRM-Server && python -m pytest tests/unit -v --cov=app --cov-report=xml
         env:
           DATABASE_URL: mysql+pymysql://root:test@localhost:3306/crm_test
           REDIS_URL: redis://localhost:6379
 
       - name: Run CRM Agent golden eval
-        run: cd CRM-Server && python scripts/run_customer_context_answer_eval.py
+        run: cd CRM-Server && python -m scripts.run_customer_context_answer_eval
         env:
           DATABASE_URL: mysql+pymysql://root:test@localhost:3306/crm_test
           REDIS_URL: redis://localhost:6379
@@ -136,37 +137,50 @@ jobs:
     needs: [frontend-lint, backend-lint]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve complete change range
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: bash .github/scripts/resolve-change-range.sh
 
       - name: Check TypeScript violations
         run: |
-          cd CRM-Client
+          set -euo pipefail
+          added_lines="$(
+            git diff --unified=0 "$DIFF_RANGE" -- 'CRM-Client/**/*.ts' 'CRM-Client/**/*.tsx' 'CRM-Client/**/*.vue' \
+              | sed -n '/^+++ /d; s/^+//p'
+          )"
 
-          # 检查新增的 : any
-          count_any=$(git diff HEAD~1 --name-only --diff-filter=A | xargs grep -l ": any" 2>/dev/null | wc -l)
-          if [ "$count_any" -gt 0 ]; then
-            echo "::error::Found TypeScript ': any' violations in new files"
+          if printf '%s\n' "$added_lines" | grep -Eq ':[[:space:]]*any([[:space:];,)=]|$)'; then
+            echo "::error::Found added TypeScript ': any' violations in the full change range"
             exit 1
           fi
 
-          # 检查新增的 as any
-          count_as_any=$(git diff HEAD~1 --name-only --diff-filter=A | xargs grep -l "as any" 2>/dev/null | wc -l)
-          if [ "$count_as_any" -gt 0 ]; then
-            echo "::error::Found TypeScript 'as any' violations in new files"
+          if printf '%s\n' "$added_lines" | grep -Eq '(^|[^[:alnum:]_])as[[:space:]]+any([^[:alnum:]_]|$)'; then
+            echo "::error::Found added TypeScript 'as any' violations in the full change range"
             exit 1
           fi
 
-          echo "✅ No TypeScript violations in new files"
+          echo "✅ No added TypeScript any violations in $DIFF_RANGE"
 
       - name: Check config lock
         run: |
-          # 检查配置文件是否被修改
-          if git diff HEAD~1 --name-only | grep -qE "(tsconfig.json|eslint.config.js|pyproject.toml)"; then
-            echo "::error::Config file modified without approval"
-            echo "Changes to config files require human approval via SPEC-CHANGELOG.md"
-            exit 1
+          # 受锁配置发生变化时，完整变更范围内必须追加永久审批记录
+          changed_files=$(git diff "$DIFF_RANGE" --name-only)
+          if echo "$changed_files" | grep -qE "(^|/)(tsconfig.json|eslint.config.js|pyproject.toml)$"; then
+            if ! echo "$changed_files" | grep -qx "CRM-Docs/development/config-change-approvals.md"; then
+              echo "::error::Config file modified without approval record"
+              echo "Append an approved entry to CRM-Docs/development/config-change-approvals.md in the same change"
+              exit 1
+            fi
+            echo "✅ Config change includes CRM-Docs/development/config-change-approvals.md approval record"
+          else
+            echo "✅ Protected config files not modified"
           fi
-
-          echo "✅ Config files not modified"
 
       - name: Generate compliance report
         run: |
@@ -186,12 +200,21 @@ jobs:
     needs: [frontend-test, backend-test]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve complete change range
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: bash .github/scripts/resolve-change-range.sh
 
       - name: Check API doc sync
         run: |
           # 检查 API 文件变更是否同步更新文档
-          api_changed=$(git diff HEAD~1 --name-only | grep -c "CRM-Client/src/api/" || echo "0")
-          doc_changed=$(git diff HEAD~1 --name-only | grep -c "CRM-Docs/05-API接口.md" || echo "0")
+          api_changed=$(git diff "$DIFF_RANGE" --name-only | grep -c "CRM-Client/src/api/" || true)
+          doc_changed=$(git diff "$DIFF_RANGE" --name-only | grep -c "CRM-Docs/05-API接口.md" || true)
 
           if [ "$api_changed" -gt 0 ] && [ "$doc_changed" -eq 0 ]; then
             echo "::warning::API files changed but API documentation not updated"
@@ -200,8 +223,8 @@ jobs:
       - name: Check TypeScript doc sync
         run: |
           # 检查类型变更是否同步更新文档
-          type_changed=$(git diff HEAD~1 --name-only | grep -c "CRM-Client/src/schemas/" || echo "0")
-          typescript_doc_changed=$(git diff HEAD~1 --name-only | grep -c "CRM-Client/docs/TYPESCRIPT.md" || echo "0")
+          type_changed=$(git diff "$DIFF_RANGE" --name-only | grep -c "CRM-Client/src/schemas/" || true)
+          typescript_doc_changed=$(git diff "$DIFF_RANGE" --name-only | grep -c "CRM-Client/docs/TYPESCRIPT.md" || true)
 
           if [ "$type_changed" -gt 0 ] && [ "$typescript_doc_changed" -eq 0 ]; then
             echo "::warning::Schema files changed but TYPESCRIPT.md not updated"

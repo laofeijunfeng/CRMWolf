@@ -8,7 +8,11 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.crud.ai_config import ai_config_crud
-from app.services.agent.langchain_runtime import AgentLangChainRuntime, AgentLangChainStructuredOutputError
+from app.services.agent.langchain_runtime import (
+    AgentLangChainRuntime,
+    AgentLangChainStructuredOutputError,
+    agent_model_enable_thinking,
+)
 from app.services.agent.prompts import build_follow_up_quality_system_prompt
 from app.services.agent.schemas import (
     AgentFollowUpQualityResult,
@@ -113,6 +117,7 @@ class AgentFollowUpQualityEvaluator:
                 user_prompt=user_prompt,
                 response_model=AgentFollowUpQualityResult,
                 error_prefix="LangChain 跟进质量 structured output",
+                enable_thinking=agent_model_enable_thinking(model),
             )
         except AgentLangChainStructuredOutputError as exc:
             message = str(exc).replace(

@@ -1,12 +1,126 @@
 """CRM AI Agent schemas."""
 
+from __future__ import annotations
+
 from datetime import datetime
-from typing import List, Optional, TypeAlias
+from typing import List, Literal, Optional, TypeAlias
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, RootModel, field_serializer, model_validator
 
+from app.services.agent.ui.schemas import AgentUIEnvelope, AgentUIStreamOperation
 
 JsonDict: TypeAlias = dict[str, object]
+
+AgentSSEErrorCode: TypeAlias = Literal[
+    "ROUTE_AMBIGUOUS",
+    "ENTITY_AMBIGUOUS",
+    "QUERY_INVALID",
+    "QUERY_UNSUPPORTED",
+    "QUERY_EMPTY",
+    "PERMISSION_DENIED",
+    "QUERY_LIMIT_EXCEEDED",
+    "UPSTREAM_TIMEOUT",
+    "CHECKPOINT_UNAVAILABLE",
+    "MODEL_OUTPUT_INVALID",
+    "RESULT_SET_EXPIRED",
+    "ACTION_ALREADY_CONSUMED",
+    "ACTION_EXPIRED",
+    "ACTION_INVALID",
+    "TURN_IN_PROGRESS",
+    "IDEMPOTENCY_KEY_REUSED",
+    "INTERNAL_ERROR",
+]
+
+
+class AgentSSESessionEvent(BaseModel):
+    """Announces the owned Agent session before turn events are streamed."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    event: Literal["session"]
+    session_id: int = Field(gt=0)
+    session_key: str = Field(min_length=1, max_length=64)
+
+
+class AgentSSEDoneEvent(BaseModel):
+    """Terminates an Agent SSE stream after its authoritative result."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    event: Literal["done"]
+    session_id: int = Field(gt=0)
+
+
+class AgentSSEAgentUIDeltaEvent(BaseModel):
+    """Temporary Agent UI projection; final remains authoritative."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    event: Literal["agent_ui"]
+    phase: Literal["delta"]
+    message_id: Optional[int] = Field(default=None, gt=0)
+    turn_id: str = Field(min_length=1, max_length=128)
+    sequence: int = Field(ge=1)
+    operations: List[AgentUIStreamOperation] = Field(min_length=1, max_length=100)
+
+
+class AgentSSEAgentUIFinalEvent(BaseModel):
+    """Authoritative persisted Agent UI message event."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    event: Literal["agent_ui"]
+    phase: Literal["final"]
+    message_id: int = Field(gt=0)
+    turn_id: str = Field(min_length=1, max_length=128)
+    sequence: int = Field(ge=1)
+    message: AgentUIEnvelope
+
+    @field_serializer("message")
+    def serialize_authoritative_message(self, message: AgentUIEnvelope) -> JsonDict:
+        return message.model_dump(mode="json")
+
+    @model_validator(mode="after")
+    def validate_authoritative_message(self) -> "AgentSSEAgentUIFinalEvent":
+        if self.message.state != "final":
+            raise ValueError("final stream message must have final state")
+        if self.message.message_id != self.message_id or self.message.turn_id != self.turn_id:
+            raise ValueError("final stream identity must match message envelope")
+        return self
+
+
+class AgentSSETransportErrorEvent(BaseModel):
+    """Transport or request-control failure, never a business result."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    event: Literal["transport_error"]
+    code: AgentSSEErrorCode
+    message: str = Field(min_length=1, max_length=10000)
+    retryable: bool
+    session_id: Optional[int] = Field(default=None, gt=0)
+    status_code: Optional[int] = Field(default=None, ge=400, le=599)
+
+
+AgentSSEEvent: TypeAlias = (
+    AgentSSESessionEvent
+    | AgentSSEAgentUIDeltaEvent
+    | AgentSSEAgentUIFinalEvent
+    | AgentSSETransportErrorEvent
+    | AgentSSEDoneEvent
+)
+
+
+class AgentSSEEventEnvelope(RootModel[AgentSSEEvent]):
+    """Pydantic root envelope over the closed Agent SSE event union."""
+
+    root: AgentSSEEvent
+
+    def __getitem__(self, key: str) -> object:
+        return self.model_dump(mode="python")[key]
+
+    def get(self, key: str, default: object = None) -> object:
+        return self.model_dump(mode="python").get(key, default)
 
 
 class AgentSessionCreate(BaseModel):
@@ -89,60 +203,11 @@ class AgentMessageResponse(BaseModel):
         from_attributes = True
 
 
-class AgentTaskCreate(BaseModel):
-    task_key: str = Field(..., min_length=1, max_length=64, description="Agent任务唯一标识")
-    team_id: int = Field(..., description="团队ID")
-    user_id: int = Field(..., description="系统用户ID")
-    session_id: int = Field(..., description="Agent会话ID")
-    intent: Optional[str] = Field(None, max_length=80, description="识别出的意图")
-    status: Optional[str] = Field(None, max_length=20, description="任务状态")
-    target_type: Optional[str] = Field(None, max_length=50, description="目标业务对象类型")
-    target_id: Optional[int] = Field(None, description="目标业务对象ID")
-    summary: Optional[str] = Field(None, description="任务摘要")
-    input_json: Optional[JsonDict] = Field(None, description="用户输入解析快照")
-    state_json: Optional[JsonDict] = Field(None, description="LangGraph状态快照")
-
-
-class AgentTaskUpdate(BaseModel):
-    intent: Optional[str] = Field(None, max_length=80, description="识别出的意图")
-    status: Optional[str] = Field(None, max_length=20, description="任务状态")
-    target_type: Optional[str] = Field(None, max_length=50, description="目标业务对象类型")
-    target_id: Optional[int] = Field(None, description="目标业务对象ID")
-    summary: Optional[str] = Field(None, description="任务摘要")
-    input_json: Optional[JsonDict] = Field(None, description="用户输入解析快照")
-    state_json: Optional[JsonDict] = Field(None, description="LangGraph状态快照")
-    result_json: Optional[JsonDict] = Field(None, description="任务结果快照")
-    error_message: Optional[str] = Field(None, description="错误信息")
-
-
-class AgentTaskResponse(BaseModel):
-    id: int = Field(..., description="主键")
-    task_key: str = Field(..., description="Agent任务唯一标识")
-    team_id: int = Field(..., description="团队ID")
-    user_id: int = Field(..., description="系统用户ID")
-    session_id: int = Field(..., description="Agent会话ID")
-    intent: Optional[str] = Field(None, description="识别出的意图")
-    status: str = Field(..., description="任务状态")
-    target_type: Optional[str] = Field(None, description="目标业务对象类型")
-    target_id: Optional[int] = Field(None, description="目标业务对象ID")
-    summary: Optional[str] = Field(None, description="任务摘要")
-    input_json: Optional[JsonDict] = Field(None, description="用户输入解析快照")
-    state_json: Optional[JsonDict] = Field(None, description="LangGraph状态快照")
-    result_json: Optional[JsonDict] = Field(None, description="任务结果快照")
-    error_message: Optional[str] = Field(None, description="错误信息")
-    created_time: datetime = Field(..., description="创建时间")
-    last_modified_time: datetime = Field(..., description="最后修改时间")
-
-    class Config:
-        from_attributes = True
-
-
 class AgentToolCallCreate(BaseModel):
     call_key: str = Field(..., min_length=1, max_length=64, description="Tool调用唯一标识")
     team_id: int = Field(..., description="团队ID")
     user_id: int = Field(..., description="系统用户ID")
     session_id: int = Field(..., description="Agent会话ID")
-    task_id: Optional[int] = Field(None, description="Agent任务ID")
     tool_name: str = Field(..., min_length=1, max_length=100, description="Tool名称")
     request_json: Optional[JsonDict] = Field(None, description="Tool请求参数快照")
 
@@ -161,7 +226,6 @@ class AgentToolCallResponse(BaseModel):
     team_id: int = Field(..., description="团队ID")
     user_id: int = Field(..., description="系统用户ID")
     session_id: int = Field(..., description="Agent会话ID")
-    task_id: Optional[int] = Field(None, description="Agent任务ID")
     tool_name: str = Field(..., description="Tool名称")
     status: str = Field(..., description="调用状态")
     request_json: Optional[JsonDict] = Field(None, description="Tool请求参数快照")
@@ -180,7 +244,6 @@ class AgentIdempotencyKeyCreate(BaseModel):
     team_id: int = Field(..., description="团队ID")
     user_id: int = Field(..., description="系统用户ID")
     session_id: Optional[int] = Field(None, description="Agent会话ID")
-    task_id: Optional[int] = Field(None, description="Agent任务ID")
     action_key: str = Field(..., min_length=1, max_length=160, description="幂等动作键")
     request_hash: Optional[str] = Field(None, max_length=64, description="请求内容Hash")
 
@@ -196,7 +259,6 @@ class AgentIdempotencyKeyResponse(BaseModel):
     team_id: int = Field(..., description="团队ID")
     user_id: int = Field(..., description="系统用户ID")
     session_id: Optional[int] = Field(None, description="Agent会话ID")
-    task_id: Optional[int] = Field(None, description="Agent任务ID")
     action_key: str = Field(..., description="幂等动作键")
     status: str = Field(..., description="幂等状态")
     request_hash: Optional[str] = Field(None, description="请求内容Hash")
@@ -216,7 +278,6 @@ class AgentWorkflowActionCreate(BaseModel):
     team_id: int = Field(..., description="团队ID")
     user_id: Optional[int] = Field(None, description="系统用户ID")
     session_id: Optional[int] = Field(None, description="Agent会话ID")
-    task_id: Optional[int] = Field(None, description="兼容挂起任务ID")
     source_message_id: Optional[int] = Field(None, description="来源消息ID")
     source_type: str = Field(..., min_length=1, max_length=80, description="动作来源")
     action_type: str = Field(..., min_length=1, max_length=100, description="动作类型")
@@ -239,7 +300,6 @@ class AgentWorkflowActionCreate(BaseModel):
 
 class AgentWorkflowActionUpdate(BaseModel):
     parent_action_id: Optional[str] = Field(None, max_length=64, description="父动作ID")
-    task_id: Optional[int] = Field(None, description="兼容挂起任务ID")
     source_message_id: Optional[int] = Field(None, description="来源消息ID")
     status: Optional[str] = Field(None, max_length=20, description="动作状态")
     target_type: Optional[str] = Field(None, max_length=50, description="目标业务对象类型")
@@ -263,7 +323,6 @@ class AgentWorkflowActionResponse(BaseModel):
     team_id: int = Field(..., description="团队ID")
     user_id: Optional[int] = Field(None, description="系统用户ID")
     session_id: Optional[int] = Field(None, description="Agent会话ID")
-    task_id: Optional[int] = Field(None, description="兼容挂起任务ID")
     source_message_id: Optional[int] = Field(None, description="来源消息ID")
     source_type: str = Field(..., description="动作来源")
     action_type: str = Field(..., description="动作类型")
@@ -292,101 +351,16 @@ class AgentWorkflowActionResponse(BaseModel):
         from_attributes = True
 
 
-class AgentWorkflowActionRetryRequest(BaseModel):
-    reason: Optional[str] = Field(None, max_length=500, description="重试原因")
-    retry_source: str = Field("manual_api", min_length=1, max_length=80, description="重试来源")
-
-
-class AgentWorkflowRetryRequest(BaseModel):
-    reason: Optional[str] = Field(None, max_length=500, description="工作流恢复原因")
-    retry_source: str = Field("manual_api", min_length=1, max_length=80, description="重试来源")
-
-
-class AgentWorkflowRecoveryScanRequest(BaseModel):
-    limit: int = Field(20, ge=1, le=200, description="扫描动作数量")
-    safe_action_types: List[str] = Field(default_factory=list, description="允许后台恢复的动作类型白名单")
-
-
-class AgentWorkflowRecoveryActionPolicyResponse(BaseModel):
-    action_id: str = Field(..., description="Agent动作ID")
-    action_type: str = Field(..., description="动作类型")
-    allowed: bool = Field(..., description="是否允许后台恢复")
-    reason: str = Field(..., description="策略判断原因")
-    execution_mode: str = Field(..., description="恢复执行模式")
-    requires_user_authorization: bool = Field(..., description="是否需要用户授权")
-    allows_background_recovery: bool = Field(False, description="动作契约是否允许后台恢复")
-    parallel_safe: bool = Field(False, description="动作契约是否允许并行执行")
-    requires_idempotency_key: bool = Field(False, description="动作契约是否要求幂等键")
-    capability_flags: List[str] = Field(default_factory=list, description="动作能力标记")
-
-
-class AgentWorkflowRecoveryDecisionResponse(BaseModel):
-    workflow_id: str = Field(..., description="Agent工作流ID")
-    eligible: bool = Field(..., description="是否具备后台恢复条件")
-    reason: str = Field(..., description="工作流级判断原因")
-    action_count: int = Field(..., description="工作流动作总数")
-    retryable_action_count: int = Field(..., description="可重试动作数量")
-    safe_action_count: int = Field(..., description="策略允许恢复动作数量")
-    policy_reasons: JsonDict = Field(default_factory=dict, description="动作策略拒绝原因聚合")
-    retryable_action_policies: List[AgentWorkflowRecoveryActionPolicyResponse] = Field(
-        default_factory=list,
-        description="可重试动作的逐项策略判断",
-    )
-
-
-class AgentWorkflowRecoveryScanResponse(BaseModel):
-    scanned_actions: int = Field(..., description="扫描到的失败/阻塞动作数量")
-    scanned_workflows: int = Field(..., description="扫描到的工作流数量")
-    eligible_workflows: int = Field(..., description="具备后台恢复条件的工作流数量")
-    retried_workflows: int = Field(..., description="实际触发恢复的工作流数量")
-    retried_actions: int = Field(..., description="实际触发恢复的动作数量")
-    dry_run: bool = Field(..., description="是否仅诊断不执行")
-    skipped: JsonDict = Field(default_factory=dict, description="工作流级跳过原因聚合")
-    policy_reasons: JsonDict = Field(default_factory=dict, description="动作策略拒绝原因聚合")
-    failed: int = Field(..., description="恢复过程中失败的工作流数量")
-    decisions: List[AgentWorkflowRecoveryDecisionResponse] = Field(
-        default_factory=list,
-        description="工作流级恢复决策明细",
-    )
-
-
 class AgentSessionDetailResponse(AgentSessionResponse):
     messages: List[AgentMessageResponse] = Field(default_factory=list, description="会话消息")
-    tasks: List[AgentTaskResponse] = Field(default_factory=list, description="会话任务")
 
 
-class AgentChatRequest(BaseModel):
-    content: str = Field(..., min_length=1, description="用户消息内容")
-    session_id: Optional[int] = Field(None, description="Agent会话ID")
-    session_key: Optional[str] = Field(None, max_length=64, description="Agent会话唯一标识")
-    interaction_metadata: Optional[JsonDict] = Field(None, description="前端结构化交互提交上下文")
-
-
-class AgentRuntimeCheckpointStateResponse(BaseModel):
-    session_id: int = Field(..., description="Agent会话ID")
-    session_key: str = Field(..., description="Agent会话唯一标识")
-    checkpoint_id: Optional[str] = Field(None, description="LangGraph checkpoint ID")
-    values: JsonDict = Field(default_factory=dict, description="LangGraph root checkpoint状态投影")
-
-
-class AgentRuntimeActionSummaryResponse(BaseModel):
+class AgentWorkflowActionSummaryResponse(BaseModel):
     total: int = Field(..., description="动作总数")
     by_status: JsonDict = Field(default_factory=dict, description="按动作状态聚合的数量")
     waiting_action_count: int = Field(0, description="等待用户决策的动作数量")
     failed_action_count: int = Field(0, description="失败动作数量")
     blocked_action_count: int = Field(0, description="阻塞动作数量")
-
-
-class AgentRuntimeOverviewResponse(BaseModel):
-    session_id: int = Field(..., description="Agent会话ID")
-    session_key: str = Field(..., description="Agent会话唯一标识")
-    runtime_status: Optional[str] = Field(None, description="LangGraph运行状态")
-    checkpoint_id: Optional[str] = Field(None, description="LangGraph checkpoint ID")
-    has_interrupt: bool = Field(False, description="当前是否存在待恢复interrupt")
-    current_interrupt: Optional[JsonDict] = Field(None, description="当前interrupt投影")
-    action_summary: AgentRuntimeActionSummaryResponse = Field(..., description="动作账本聚合")
-    recent_actions: List[AgentWorkflowActionResponse] = Field(default_factory=list, description="最近动作")
-    values: JsonDict = Field(default_factory=dict, description="LangGraph root checkpoint状态投影")
 
 
 class AgentWorkflowGraphEdgeResponse(BaseModel):
@@ -412,33 +386,10 @@ class AgentWorkflowDetailResponse(BaseModel):
     workflow_id: str = Field(..., description="Agent工作流ID")
     workflow_status: str = Field(..., description="工作流聚合状态")
     status_reason: Optional[str] = Field(None, description="工作流状态原因")
-    action_summary: AgentRuntimeActionSummaryResponse = Field(..., description="动作状态聚合")
+    action_summary: AgentWorkflowActionSummaryResponse = Field(..., description="动作状态聚合")
     nodes: List[AgentWorkflowGraphNodeResponse] = Field(default_factory=list, description="动作图节点")
     edges: List[AgentWorkflowGraphEdgeResponse] = Field(default_factory=list, description="动作图依赖边")
     actions: List[AgentWorkflowActionResponse] = Field(default_factory=list, description="动作明细")
-
-
-class AgentRuntimeHistoryItemResponse(BaseModel):
-    checkpoint_id: Optional[str] = Field(None, description="LangGraph checkpoint ID")
-    parent_checkpoint_id: Optional[str] = Field(None, description="父checkpoint ID")
-    thread_id: Optional[str] = Field(None, description="LangGraph thread ID")
-    checkpoint_ns: Optional[str] = Field(None, description="LangGraph checkpoint命名空间")
-    created_at: Optional[str] = Field(None, description="checkpoint创建时间")
-    source: Optional[str] = Field(None, description="LangGraph checkpoint来源")
-    step: Optional[int] = Field(None, description="LangGraph执行步序号")
-    next_nodes: List[str] = Field(default_factory=list, description="下一批待执行节点")
-    has_interrupt: bool = Field(False, description="该checkpoint是否存在待恢复interrupt")
-    interrupts: List[JsonDict] = Field(default_factory=list, description="interrupt payload投影")
-    values: JsonDict = Field(default_factory=dict, description="checkpoint状态投影")
-
-
-class AgentRuntimeHistoryResponse(BaseModel):
-    session_id: int = Field(..., description="Agent会话ID")
-    session_key: str = Field(..., description="Agent会话唯一标识")
-    items: List[AgentRuntimeHistoryItemResponse] = Field(default_factory=list, description="LangGraph checkpoint历史")
-    total: int = Field(..., description="返回数量")
-    before_checkpoint_id: Optional[str] = Field(None, description="本次查询的checkpoint游标")
-    limit: int = Field(..., description="本次查询限制")
 
 
 class AgentAsyncOperationEventResponse(BaseModel):

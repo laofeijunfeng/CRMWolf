@@ -9,83 +9,51 @@ from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
-from app.core.database import SessionLocal, get_db
+from app.core.database import get_db
 from app.core.deps import get_current_active_user, get_current_user_team, security
-from app.crud.agent import agent_message_crud, agent_session_crud, agent_workflow_action_crud
-from app.crud.sales_commitment import follow_up_task_confirmation_prompt_delivery_crud
+from app.crud.agent import agent_session_crud, agent_workflow_action_crud
+from app.crud.permission import permission_crud
 from app.models.user import User
 from app.schemas.agent import (
     AgentAsyncOperationResponse,
-    AgentChatRequest,
     AgentCreateSessionRequest,
-    AgentLinkedFollowUpTaskConfirmationResponse,
-    AgentMessageResponse,
-    AgentRuntimeActionSummaryResponse,
-    AgentRuntimeCheckpointStateResponse,
-    AgentRuntimeHistoryItemResponse,
-    AgentRuntimeHistoryResponse,
-    AgentRuntimeOverviewResponse,
     AgentSessionResponse,
+    AgentSSEEventEnvelope,
     AgentWorkflowActionResponse,
-    AgentWorkflowActionRetryRequest,
+    AgentWorkflowActionSummaryResponse,
     AgentWorkflowDetailResponse,
     AgentWorkflowGraphEdgeResponse,
     AgentWorkflowGraphNodeResponse,
-    AgentWorkflowRecoveryScanRequest,
-    AgentWorkflowRecoveryScanResponse,
-    AgentWorkflowRetryRequest,
 )
 from app.schemas.common import PaginatedResponse
-from app.services.agent import (
-    action_workflow,
-    confirmation_intent,
-    field_common,
-    follow_up_fields,
-    selection,
-    session_state,
-    task_execution,
-)
-from app.services.agent import application as agent_application_module
-from app.services.agent import interactions as agent_interactions
+from app.services.agent import action_workflow
 from app.services.agent.application import agent_application_service
 from app.services.agent.async_operation_service import (
     TERMINAL_OPERATION_STATUSES,
     AgentAsyncOperationProjection,
     agent_async_operation_service,
 )
-from app.services.agent.graph import crm_agent_graph_service
-from app.services.agent.input import AgentTurnInput
-from app.services.agent.interactions import (
-    _interaction_for_event as _service_interaction_for_event,
+from app.services.agent.durable_work import agent_durable_work_recovery_service
+from app.services.agent.follow_up_confirmation_projection import (
+    follow_up_confirmation_agent_ui_projection,
 )
-from app.services.agent.interactions import (
-    _procurement_method_options,
-)
-from app.services.agent.interactions import (
-    _with_interaction as _service_with_interaction,
-)
-from app.services.agent.quality import agent_follow_up_quality_evaluator
-from app.services.agent.root_runtime import agent_root_runtime
-from app.services.agent.semantic import agent_semantic_parser
-from app.services.agent.session_state import (
-    _build_session_create,
-    _get_owned_session,
-)
-from app.services.agent.tools import CRMAgentToolService
-from app.services.agent.workflow_recovery_service import agent_workflow_recovery_service
+from app.services.agent.sessions import build_session_create, require_owned_session
+from app.services.agent.turns import AgentTurnRepository
+from app.services.agent.ui.actions import AgentUIActionRepository
+from app.services.agent.ui.read_projection import project_interaction_action_states
+from app.services.agent.ui.schemas import AgentChatRequest, AgentUIEnvelope
 from app.services.customer_activity_post_commit_operation_projector import (
     customer_activity_post_commit_operation_projector,
 )
 from app.services.customer_intelligence_operation_projector import (
     customer_intelligence_operation_projector,
 )
-from app.services.follow_up_task_confirmation_agent_message_card_service import (
-    follow_up_task_confirmation_agent_message_card_service,
-)
 from app.utils.sse_encoder import SSEJsonEncoder
 
 router = APIRouter(prefix="/v1/agent", tags=["CRM AI Agent"])
 logger = logging.getLogger(__name__)
+agent_turn_repository = AgentTurnRepository()
+agent_ui_action_repository = AgentUIActionRepository()
 
 
 _WORKFLOW_TERMINAL_STATUSES = {"EXECUTED", "SKIPPED", "FAILED", "CANCELLED", "BLOCKED"}
@@ -168,36 +136,14 @@ def _read_repair_customer_activity_post_commit_operations(
     return repaired
 
 
-def _encode_sse(event: dict) -> str:
-    return f"data: {json.dumps(event, ensure_ascii=False, cls=SSEJsonEncoder)}\n\n"
+def _encode_sse(event: AgentSSEEventEnvelope) -> str:
+    payload = event.model_dump(mode="json", exclude_none=True)
+    return f"data: {json.dumps(payload, ensure_ascii=False, cls=SSEJsonEncoder)}\n\n"
 
 
 def _authorization_header(credentials: HTTPAuthorizationCredentials) -> str:
     return f"{credentials.scheme} {credentials.credentials}"
 
-
-def _sync_legacy_agent_overrides() -> None:
-    """Keep legacy API-level monkeypatch hooks wired to service modules."""
-    agent_application_module.SessionLocal = SessionLocal
-    agent_application_module.crm_agent_graph_service = crm_agent_graph_service
-    agent_root_runtime.new_flow_graph_service = crm_agent_graph_service
-    task_execution.CRMAgentToolService = CRMAgentToolService
-    selection.CRMAgentToolService = CRMAgentToolService
-    field_common.agent_semantic_parser = agent_semantic_parser
-    session_state.agent_semantic_parser = agent_semantic_parser
-    follow_up_fields.agent_follow_up_quality_evaluator = agent_follow_up_quality_evaluator
-    if hasattr(agent_semantic_parser, "assess_confirmation_intent"):
-        confirmation_intent.agent_semantic_parser = agent_semantic_parser
-
-
-def _interaction_for_event(event: dict, *, db: Optional[Session] = None, team_id: Optional[int] = None) -> Optional[dict]:
-    agent_interactions._procurement_method_options = _procurement_method_options
-    return _service_interaction_for_event(event, db=db, team_id=team_id)
-
-
-def _with_interaction(event: dict, *, db: Optional[Session] = None, team_id: Optional[int] = None) -> dict:
-    agent_interactions._procurement_method_options = _procurement_method_options
-    return _service_with_interaction(event, db=db, team_id=team_id)
 
 
 @router.post("/sessions", response_model=AgentSessionResponse, status_code=status.HTTP_201_CREATED)
@@ -209,7 +155,7 @@ async def create_agent_session(
 ):
     session = agent_session_crud.create(
         db,
-        _build_session_create(request, team_id=team_id, user_id=current_user.id),
+        build_session_create(request, team_id=team_id, user_id=current_user.id),
     )
     return session
 
@@ -256,7 +202,7 @@ async def list_agent_actions(
     db: Session = Depends(get_db),
 ):
     if session_id is not None:
-        _get_owned_session(db, team_id=team_id, user_id=current_user.id, session_id=session_id)
+        require_owned_session(db, team_id=team_id, user_id=current_user.id, session_id=session_id)
     skip = (page - 1) * page_size
     total = agent_workflow_action_crud.count_actions(
         db,
@@ -310,120 +256,6 @@ async def get_agent_workflow_detail(
     return _workflow_detail_response(workflow_id, actions)
 
 
-@router.post("/workflows/{workflow_id}/retry", response_model=AgentWorkflowDetailResponse)
-async def retry_agent_workflow(
-    workflow_id: str,
-    request: AgentWorkflowRetryRequest | None = None,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db),
-):
-    actions = agent_workflow_action_crud.list_by_workflow(
-        db,
-        workflow_id=workflow_id,
-        team_id=team_id,
-        user_id=current_user.id,
-        include_system_actions=True,
-    )
-    if not actions:
-        raise HTTPException(status_code=404, detail="Agent workflow not found")
-    session = None
-    try:
-        session_id = _workflow_session_id(actions)
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    if session_id is not None:
-        session = _get_owned_session(
-            db,
-            team_id=team_id,
-            user_id=current_user.id,
-            session_id=session_id,
-        )
-    retry_request = request or AgentWorkflowRetryRequest()
-    try:
-        refreshed_actions = await agent_root_runtime.retry_workflow(
-            db=db,
-            workflow_id=workflow_id,
-            actions=actions,
-            session=session,
-            team_id=team_id,
-            user_id=current_user.id,
-            authorization=_authorization_header(credentials),
-            retry_source=retry_request.retry_source,
-            reason=retry_request.reason,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return _workflow_detail_response(workflow_id, refreshed_actions)
-
-
-@router.post("/workflow-recovery/scan", response_model=AgentWorkflowRecoveryScanResponse)
-async def scan_agent_workflow_recovery(
-    request: AgentWorkflowRecoveryScanRequest | None = None,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
-    scan_request = request or AgentWorkflowRecoveryScanRequest()
-    return await agent_workflow_recovery_service.recover_once(
-        db,
-        limit=scan_request.limit,
-        dry_run=True,
-        safe_action_types=scan_request.safe_action_types,
-        team_id=team_id,
-        user_id=current_user.id,
-    )
-
-
-@router.post(
-    "/workflows/{workflow_id}/actions/{action_id}/retry",
-    response_model=AgentWorkflowActionResponse,
-)
-async def retry_agent_workflow_action(
-    workflow_id: str,
-    action_id: str,
-    request: AgentWorkflowActionRetryRequest | None = None,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db),
-):
-    action = agent_workflow_action_crud.get_by_workflow_action(
-        db,
-        workflow_id=workflow_id,
-        action_id=action_id,
-        team_id=team_id,
-        user_id=current_user.id,
-        include_system_actions=True,
-    )
-    if action is None:
-        raise HTTPException(status_code=404, detail="Agent workflow action not found")
-    retry_request = request or AgentWorkflowActionRetryRequest()
-    session = None
-    if action.session_id is not None:
-        session = _get_owned_session(
-            db,
-            team_id=team_id,
-            user_id=current_user.id,
-            session_id=action.session_id,
-        )
-    try:
-        action_result = await agent_root_runtime.retry_workflow_action(
-            db=db,
-            action=action,
-            session=session,
-            team_id=team_id,
-            user_id=current_user.id,
-            authorization=_authorization_header(credentials),
-            retry_source=retry_request.retry_source,
-            reason=retry_request.reason,
-        )
-        return _action_response(action_result)
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-
 @router.get("/sessions/{session_id}/operations", response_model=list[AgentAsyncOperationResponse])
 async def list_agent_async_operations(
     session_id: int,
@@ -432,7 +264,23 @@ async def list_agent_async_operations(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
-    _get_owned_session(db, team_id=team_id, user_id=current_user.id, session_id=session_id)
+    require_owned_session(db, team_id=team_id, user_id=current_user.id, session_id=session_id)
+    try:
+        recovered = agent_durable_work_recovery_service.recover_session(
+            db,
+            team_id=team_id,
+            user_id=current_user.id,
+            session_id=session_id,
+        )
+        if recovered:
+            db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception(
+            "读取 Agent 异步操作时恢复持久任务失败: session_id=%s",
+            session_id,
+        )
+
     operations = agent_async_operation_service.list_session_projections(
         db,
         team_id=team_id,
@@ -440,11 +288,10 @@ async def list_agent_async_operations(
         session_id=session_id,
         limit=limit,
     )
-    if (
-        _read_repair_customer_intelligence_operations(db, operations)
-        or _read_repair_customer_activity_post_commit_operations(db, operations)
-        or agent_async_operation_service.repair_unanchored_customer_activity_post_commit_sources(db, operations)
-    ):
+    repaired = _read_repair_customer_intelligence_operations(db, operations)
+    if _read_repair_customer_activity_post_commit_operations(db, operations):
+        repaired = True
+    if repaired:
         operations = agent_async_operation_service.list_session_projections(
             db,
             team_id=team_id,
@@ -470,11 +317,10 @@ async def get_agent_async_operation(
     )
     if operation is None:
         raise HTTPException(status_code=404, detail="Agent async operation not found")
-    if (
-        _read_repair_customer_intelligence_operations(db, [operation])
-        or _read_repair_customer_activity_post_commit_operations(db, [operation])
-        or agent_async_operation_service.repair_unanchored_customer_activity_post_commit_sources(db, [operation])
-    ):
+    repaired = _read_repair_customer_intelligence_operations(db, [operation])
+    if _read_repair_customer_activity_post_commit_operations(db, [operation]):
+        repaired = True
+    if repaired:
         operation = agent_async_operation_service.get_projection(
             db,
             team_id=team_id,
@@ -486,24 +332,46 @@ async def get_agent_async_operation(
     return operation
 
 
-@router.get("/sessions/{session_id}/messages", response_model=PaginatedResponse[AgentMessageResponse])
+@router.get(
+    "/sessions/{session_id}/messages",
+    response_model=PaginatedResponse[AgentUIEnvelope],
+)
 async def list_agent_messages(
     session_id: int,
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(100, ge=1, le=200, description="每页数量"),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
-    _get_owned_session(db, team_id=team_id, user_id=current_user.id, session_id=session_id)
-    follow_up_task_confirmation_agent_message_card_service.ensure_session_cards(
-        db,
-        team_id=team_id,
-        user_id=current_user.id,
-        session_id=session_id,
+    require_owned_session(db, team_id=team_id, user_id=current_user.id, session_id=session_id)
+    permission_codes = frozenset(
+        permission.code
+        for permission in permission_crud.get_user_permissions(
+            db,
+            user_id=current_user.id,
+            team_id=team_id,
+        )
+        if isinstance(getattr(permission, "code", None), str) and permission.code
     )
+    try:
+        await follow_up_confirmation_agent_ui_projection.project_pending(
+            db,
+            team_id=team_id,
+            user_id=current_user.id,
+            session_id=session_id,
+            authorization=f"Bearer {credentials.credentials}",
+            permission_codes=permission_codes,
+        )
+    except Exception:
+        db.rollback()
+        logger.exception(
+            "读取 Agent 历史时投影跟进任务确认失败: session_id=%s",
+            session_id,
+        )
     skip = (page - 1) * page_size
-    items, total = agent_message_crud.list_by_session(
+    records, total = agent_turn_repository.list_visible_by_session(
         db,
         session_id=session_id,
         team_id=team_id,
@@ -511,24 +379,25 @@ async def list_agent_messages(
         skip=skip,
         limit=page_size,
     )
-    message_cards_by_provider_id = follow_up_task_confirmation_prompt_delivery_crud.list_agent_message_cards(
-        db,
-        team_id=team_id,
-        owner_id=str(current_user.id),
-        agent_session_id=session_id,
-        provider_message_ids=[f"agent_message:{item.id}" for item in items],
-    )
-    response_items = []
-    for item in items:
-        response = AgentMessageResponse.model_validate(item)
-        response.linked_follow_up_task_confirmations = [
-            AgentLinkedFollowUpTaskConfirmationResponse.model_validate(card)
-            for card in message_cards_by_provider_id.get(f"agent_message:{item.id}", [])
-        ]
-        response_items.append(response)
-
-    return PaginatedResponse[AgentMessageResponse](
-        items=response_items,
+    items = [record.ui for record in records]
+    action_ids = {
+        block.submit_action_id
+        for item in items
+        for block in item.blocks
+        if getattr(block, "type", None) == "interaction"
+        and getattr(block, "submit_action_id", None) is not None
+    }
+    if action_ids:
+        actions = agent_ui_action_repository.list_owned_for_messages(
+            db,
+            team_id=team_id,
+            user_id=current_user.id,
+            session_id=session_id,
+            message_ids=[item.message_id for item in items],
+        )
+        items = project_interaction_action_states(items, actions)
+    return PaginatedResponse[AgentUIEnvelope](
+        items=items,
         total=total,
         page=page,
         page_size=page_size,
@@ -546,7 +415,7 @@ async def list_agent_workflow_actions(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
-    _get_owned_session(db, team_id=team_id, user_id=current_user.id, session_id=session_id)
+    require_owned_session(db, team_id=team_id, user_id=current_user.id, session_id=session_id)
     skip = (page - 1) * page_size
     total = agent_workflow_action_crud.count_by_session(
         db,
@@ -573,135 +442,6 @@ async def list_agent_workflow_actions(
     )
 
 
-@router.get("/sessions/{session_id}/runtime/overview", response_model=AgentRuntimeOverviewResponse)
-async def get_agent_runtime_overview(
-    session_id: int,
-    recent_action_limit: int = Query(10, ge=1, le=50, description="最近动作数量"),
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
-    session = _get_owned_session(db, team_id=team_id, user_id=current_user.id, session_id=session_id)
-    state = await agent_root_runtime.current_checkpoint_state(
-        team_id=team_id,
-        user_id=current_user.id,
-        session_id=session.id,
-        session_key=session.session_key,
-    )
-    action_counts = agent_workflow_action_crud.count_by_status_for_session(
-        db,
-        session_id=session.id,
-        team_id=team_id,
-        user_id=current_user.id,
-        include_system_actions=True,
-    )
-    recent_actions = agent_workflow_action_crud.list_actions(
-        db,
-        team_id=team_id,
-        user_id=current_user.id,
-        session_id=session.id,
-        skip=0,
-        limit=recent_action_limit,
-    )
-    current_interrupt = state.get("current_interrupt") if isinstance(state, dict) else None
-    checkpoint_id = state.get("checkpoint_id") if isinstance(state, dict) else None
-    runtime_status = state.get("runtime_status") if isinstance(state, dict) else None
-    return AgentRuntimeOverviewResponse(
-        session_id=session.id,
-        session_key=session.session_key,
-        runtime_status=runtime_status if isinstance(runtime_status, str) else None,
-        checkpoint_id=checkpoint_id if isinstance(checkpoint_id, str) else None,
-        has_interrupt=bool(current_interrupt),
-        current_interrupt=current_interrupt if isinstance(current_interrupt, dict) else None,
-        action_summary=AgentRuntimeActionSummaryResponse(
-            total=sum(action_counts.values()),
-            by_status=action_counts,
-            waiting_action_count=action_counts.get("WAITING_USER", 0),
-            failed_action_count=action_counts.get("FAILED", 0),
-            blocked_action_count=action_counts.get("BLOCKED", 0),
-        ),
-        recent_actions=recent_actions,
-        values=state,
-    )
-
-
-@router.get("/sessions/{session_id}/runtime/state", response_model=AgentRuntimeCheckpointStateResponse)
-async def get_agent_runtime_state(
-    session_id: int,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
-    session = _get_owned_session(db, team_id=team_id, user_id=current_user.id, session_id=session_id)
-    state = await agent_root_runtime.current_checkpoint_state(
-        team_id=team_id,
-        user_id=current_user.id,
-        session_id=session.id,
-        session_key=session.session_key,
-    )
-    return AgentRuntimeCheckpointStateResponse(
-        session_id=session.id,
-        session_key=session.session_key,
-        values=state,
-    )
-
-
-@router.get("/sessions/{session_id}/runtime/history", response_model=AgentRuntimeHistoryResponse)
-async def list_agent_runtime_history(
-    session_id: int,
-    before_checkpoint_id: Optional[str] = Query(None, description="从指定checkpoint之前继续读取"),
-    limit: int = Query(20, ge=1, le=100, description="返回checkpoint数量"),
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
-    session = _get_owned_session(db, team_id=team_id, user_id=current_user.id, session_id=session_id)
-    history = await agent_root_runtime.state_history(
-        team_id=team_id,
-        user_id=current_user.id,
-        session_id=session.id,
-        session_key=session.session_key,
-        before_checkpoint_id=before_checkpoint_id,
-        limit=limit,
-    )
-    items = [AgentRuntimeHistoryItemResponse(**item) for item in history]
-    return AgentRuntimeHistoryResponse(
-        session_id=session.id,
-        session_key=session.session_key,
-        items=items,
-        total=len(items),
-        before_checkpoint_id=before_checkpoint_id,
-        limit=limit,
-    )
-
-
-@router.get(
-    "/sessions/{session_id}/runtime/checkpoints/{checkpoint_id}",
-    response_model=AgentRuntimeCheckpointStateResponse,
-)
-async def get_agent_runtime_checkpoint_state(
-    session_id: int,
-    checkpoint_id: str,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
-    session = _get_owned_session(db, team_id=team_id, user_id=current_user.id, session_id=session_id)
-    state = await agent_root_runtime.checkpoint_state_at(
-        checkpoint_id=checkpoint_id,
-        team_id=team_id,
-        user_id=current_user.id,
-        session_id=session.id,
-        session_key=session.session_key,
-    )
-    return AgentRuntimeCheckpointStateResponse(
-        session_id=session.id,
-        session_key=session.session_key,
-        checkpoint_id=checkpoint_id,
-        values=state,
-    )
-
-
 @router.post("/chat/stream")
 async def stream_agent_chat(
     request: AgentChatRequest,
@@ -710,20 +450,15 @@ async def stream_agent_chat(
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ):
     user_id = current_user.id
-    _sync_legacy_agent_overrides()
-
     async def generate_sse():
         async for event in agent_application_service.stream_chat_events(
-            content=request.content,
+            request_input=request.input,
+            client_request_id=request.client_request_id,
             team_id=team_id,
             user_id=user_id,
             authorization=_authorization_header(credentials),
             session_id=request.session_id,
             session_key=request.session_key,
-            turn_input=AgentTurnInput.text(
-                request.content,
-                metadata=request.interaction_metadata or {},
-            ),
         ):
             yield _encode_sse(event)
 
@@ -753,7 +488,7 @@ def _workflow_detail_response(workflow_id: str, actions: list[object]) -> AgentW
         workflow_id=workflow_id,
         workflow_status=_derive_workflow_status(actions),
         status_reason=_derive_workflow_status_reason(actions),
-        action_summary=AgentRuntimeActionSummaryResponse(
+        action_summary=AgentWorkflowActionSummaryResponse(
             total=sum(action_counts.values()),
             by_status=action_counts,
             waiting_action_count=action_counts.get("WAITING_USER", 0),
@@ -815,11 +550,15 @@ def _derive_workflow_status(actions: list[object]) -> str:
 
 
 def _derive_workflow_status_reason(actions: list[object]) -> str | None:
-    for status in ("BLOCKED", "FAILED", "WAITING_USER"):
-        matching = [action for action in actions if getattr(action, "status", None) == status]
+    for workflow_status in ("BLOCKED", "FAILED", "WAITING_USER"):
+        matching = [
+            action
+            for action in actions
+            if getattr(action, "status", None) == workflow_status
+        ]
         if matching:
             action_ids = ", ".join(str(getattr(action, "action_id", "")) for action in matching[:3])
-            return f"{status}: {action_ids}"
+            return f"{workflow_status}: {action_ids}"
     return None
 
 

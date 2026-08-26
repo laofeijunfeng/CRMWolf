@@ -36,10 +36,10 @@ from app.services.follow_up_task_confirmation_cleanup_service import (
     FollowUpTaskConfirmationCleanupService,
 )
 from app.services.follow_up_task_confirmation_service import FollowUpTaskConfirmationService
-from app.services.follow_up_task_reconciliation_evaluation_service import FollowUpTaskReconciliationDecision
 from app.services.follow_up_task_transition_plan_service import FollowUpTaskTransitionPlanService
 from app.services.task_reconciliation_service import TaskReconciliationCandidate, TaskReconciliationCandidateSet
 from app.utils.public_id import is_follow_up_task_confirmation_case_public_id
+from tests.unit.support.reconciliation_decisions import single_task_reconciliation_decision
 
 
 @compiles(BigInteger, "sqlite")
@@ -83,28 +83,30 @@ def db_session():
 
 
 def _seed_customer_and_activity(db_session) -> None:
-    db_session.add_all([
-        Customer(
-            id=1,
-            public_id="cus_11111111111111111111111111111111",
-            team_id=1,
-            account_name="测试客户",
-            city="上海",
-            owner_id="9",
-            creator_id="9",
-        ),
-        CustomerActivity(
-            id=101,
-            team_id=1,
-            customer_id=1,
-            activity_kind="PHONE_FOLLOW_UP",
-            source_content="客户说预算还没进展。",
-            summary="客户预算还没进展。",
-            occurred_at=datetime(2026, 8, 6, 10, 0, 0),
-            owner_id="2",
-            creator_id="2",
-        ),
-    ])
+    db_session.add_all(
+        [
+            Customer(
+                id=1,
+                public_id="cus_11111111111111111111111111111111",
+                team_id=1,
+                account_name="测试客户",
+                city="上海",
+                owner_id="9",
+                creator_id="9",
+            ),
+            CustomerActivity(
+                id=101,
+                team_id=1,
+                customer_id=1,
+                activity_kind="PHONE_FOLLOW_UP",
+                source_content="客户说预算还没进展。",
+                summary="客户预算还没进展。",
+                occurred_at=datetime(2026, 8, 6, 10, 0, 0),
+                owner_id="2",
+                creator_id="2",
+            ),
+        ]
+    )
 
 
 def _create_task(db_session, *, task_hash: str = "task-hash") -> FollowUpTask:
@@ -158,10 +160,9 @@ def _confirmation_plan(
     source_activity_public_id: str = "act_22222222222222222222222222222222",
 ):
     return FollowUpTaskTransitionPlanService().plan(
-        FollowUpTaskReconciliationDecision(
+        single_task_reconciliation_decision(
             decision=decision,
             task_public_id=task.public_id,
-            candidate_public_ids=(task.public_id,),
             confidence=confidence,
             evidence_terms=("预算",),
             needs_confirmation=decision == "ASK_CONFIRMATION",
@@ -183,14 +184,18 @@ def _confirmation_plan(
 
 def _create_confirmation_case(db_session, task: FollowUpTask) -> FollowUpTaskConfirmationCase:
     plan = _confirmation_plan(task)
-    return FollowUpTaskConfirmationService().create_case_from_plan_action(
-        db_session,
-        team_id=1,
-        task=task,
-        plan=plan,
-        action=plan.actions[0],
-        actor_id="2",
-    ).case
+    return (
+        FollowUpTaskConfirmationService()
+        .create_case_from_plan_action(
+            db_session,
+            team_id=1,
+            task=task,
+            plan=plan,
+            action=plan.actions[0],
+            actor_id="2",
+        )
+        .case
+    )
 
 
 def _create_confirmation_case_with_status(
@@ -248,7 +253,7 @@ def test_confirmation_case_created_from_blocked_transition_plan_is_idempotent(db
     assert is_follow_up_task_confirmation_case_public_id(first.case.public_id)
     assert first.case.status == FollowUpTaskConfirmationStatus.PENDING
     assert first.case.suggested_action == FollowUpTaskConfirmationResolutionAction.COMPLETE
-    assert first.case.question_text == "上次安排的「确认客户预算是否通过」这次是否已经完成?"
+    assert first.case.question_text == "8 月 5 号待办的「确认客户预算是否通过」现在完成了吗?"
     response = FollowUpTaskConfirmationCaseResponse.from_model(
         first.case,
         task_public_id=task.public_id,
@@ -260,18 +265,43 @@ def test_confirmation_case_created_from_blocked_transition_plan_is_idempotent(db
     assert "source_plan_json" not in response.model_dump()
 
 
+def test_keep_open_confirmation_asks_whether_related_task_is_completed(db_session):
+    task = _create_task(db_session)
+    plan = _confirmation_plan(task, decision="KEEP_OPEN", confidence=0.99)
+
+    case = (
+        FollowUpTaskConfirmationService()
+        .create_case_from_plan_action(
+            db_session,
+            team_id=1,
+            task=task,
+            plan=plan,
+            action=plan.actions[0],
+            actor_id="2",
+        )
+        .case
+    )
+
+    assert case.suggested_action == FollowUpTaskConfirmationResolutionAction.KEEP_OPEN
+    assert case.question_text == "8 月 5 号待办的「确认客户预算是否通过」现在完成了吗?"
+
+
 def test_confirmation_case_does_not_inherit_task_source_activity_without_trigger_revision(db_session):
     task = _create_task(db_session)
     plan = _confirmation_plan(task)
 
-    case = FollowUpTaskConfirmationService().create_case_from_plan_action(
-        db_session,
-        team_id=1,
-        task=task,
-        plan=plan,
-        action=plan.actions[0],
-        actor_id="2",
-    ).case
+    case = (
+        FollowUpTaskConfirmationService()
+        .create_case_from_plan_action(
+            db_session,
+            team_id=1,
+            task=task,
+            plan=plan,
+            action=plan.actions[0],
+            actor_id="2",
+        )
+        .case
+    )
 
     assert case.source_activity_id is None
     assert case.source_activity_revision is None
@@ -327,20 +357,221 @@ def test_confirmation_case_reuses_source_activity_task_thread_and_upgrades_sugge
     assert cases[0].id == first.case.id
     assert first.case.suggested_action == FollowUpTaskConfirmationResolutionAction.COMPLETE
     assert first.case.confirmation_hash == second.confirmation_hash
-    assert first.case.question_text == "上次安排的「确认客户预算是否通过」这次是否已经完成?"
+    assert first.case.question_text == "8 月 5 号待办的「确认客户预算是否通过」现在完成了吗?"
 
 
-def test_confirmation_case_prompt_count_is_tracked(db_session):
+def test_confirmation_case_reuses_same_task_across_source_activities(db_session):
     task = _create_task(db_session)
-    plan = _confirmation_plan(task)
-    case = FollowUpTaskConfirmationService().create_case_from_plan_action(
+    service = FollowUpTaskConfirmationService()
+    first_plan = _confirmation_plan(
+        task,
+        decision="COMPLETE",
+        confidence=0.72,
+        source_activity_public_id="act_22222222222222222222222222222222",
+    )
+    second_plan = _confirmation_plan(
+        task,
+        decision="COMPLETE",
+        confidence=0.81,
+        source_activity_public_id="act_33333333333333333333333333333333",
+    )
+
+    first = service.create_case_from_plan_action(
         db_session,
+        team_id=1,
+        task=task,
+        plan=first_plan,
+        action=first_plan.actions[0],
+        actor_id="2",
+        source_activity_id=202,
+        source_activity_revision=1,
+        source_public_id="act_22222222222222222222222222222222",
+    )
+    original_confirmation_hash = first.case.confirmation_hash
+    second = service.create_case_from_plan_action(
+        db_session,
+        team_id=1,
+        task=task,
+        plan=second_plan,
+        action=second_plan.actions[0],
+        actor_id="2",
+        source_activity_id=203,
+        source_activity_revision=1,
+        source_public_id="act_33333333333333333333333333333333",
+    )
+
+    pending_cases, total = follow_up_task_confirmation_case_crud.list_pending_by_task(
+        db_session,
+        team_id=1,
+        task_id=task.id,
+    )
+    db_session.refresh(first.case)
+
+    assert first.created is True
+    assert second.created is False
+    assert second.case.id == first.case.id
+    assert total == 1
+    assert pending_cases == [first.case]
+    assert first.case.source_activity_id == 203
+    assert first.case.source_activity_revision == 1
+    assert first.case.source_public_id == "act_33333333333333333333333333333333"
+    assert first.case.confirmation_hash == original_confirmation_hash
+    assert second.confirmation_hash == original_confirmation_hash
+
+
+def test_confirmation_case_duplicate_cleanup_keeps_latest_case_when_hash_does_not_match():
+    task = FollowUpTask(
+        id=101,
+        public_id="fut_11111111111111111111111111111111",
+        team_id=1,
+        customer_id=1,
+        owner_id="2",
+        creator_id="2",
+        title="确认客户预算是否通过",
+        description="客户说本周确认预算。",
+        status=FollowUpTaskStatus.OPEN,
+        due_at=datetime(2026, 8, 22, 10, 0, 0),
+        due_at_text="本周五",
+        due_at_granularity=DueAtGranularity.DATETIME,
+        confidence=0.91,
+        source_type=FollowUpTaskSourceType.CUSTOMER_ACTIVITY,
+        source_activity_id=101,
+        source_public_id="act_11111111111111111111111111111111",
+        task_hash="task-hash",
+    )
+    plan = _confirmation_plan(
+        task,
+        decision="COMPLETE",
+        confidence=0.81,
+        source_activity_public_id="act_44444444444444444444444444444444",
+    )
+    older_case = FollowUpTaskConfirmationCase(
+        id=201,
+        public_id="fuc_11111111111111111111111111111111",
+        team_id=1,
+        task_id=task.id,
+        customer_id=task.customer_id,
+        owner_id=task.owner_id,
+        creator_id=task.owner_id,
+        status=FollowUpTaskConfirmationStatus.PENDING,
+        suggested_action=FollowUpTaskConfirmationResolutionAction.COMPLETE,
+        confirmation_hash="a" * 64,
+        question_text="旧问题",
+        source_plan_json=plan.to_dict(),
+        created_time=datetime(2026, 8, 20, 10, 0, 0),
+    )
+    latest_case = FollowUpTaskConfirmationCase(
+        id=202,
+        public_id="fuc_22222222222222222222222222222222",
+        team_id=1,
+        task_id=task.id,
+        customer_id=task.customer_id,
+        owner_id=task.owner_id,
+        creator_id=task.owner_id,
+        status=FollowUpTaskConfirmationStatus.PENDING,
+        suggested_action=FollowUpTaskConfirmationResolutionAction.COMPLETE,
+        confirmation_hash="b" * 64,
+        question_text="较新的问题",
+        source_plan_json=plan.to_dict(),
+        created_time=datetime(2026, 8, 21, 10, 0, 0),
+    )
+    older_case.task = task
+    latest_case.task = task
+
+    class FakeTaskCrud:
+        def get_by_id_for_update(self, db, *, task_id, team_id):
+            assert task_id == task.id
+            assert team_id == task.team_id
+            return task
+
+    class FakeConfirmationCaseCrud:
+        def __init__(self):
+            self.cancelled = []
+
+        def list_pending_by_task_for_update(self, db, *, team_id, task_id):
+            assert team_id == task.team_id
+            assert task_id == task.id
+            return [older_case, latest_case]
+
+        def mark_cancelled(
+            self,
+            db,
+            db_obj,
+            *,
+            cancelled_at=None,
+            cancelled_by_id=None,
+            cancelled_reason,
+            commit=True,
+        ):
+            db_obj.status = FollowUpTaskConfirmationStatus.CANCELLED
+            db_obj.cancelled_by_id = cancelled_by_id
+            db_obj.cancelled_reason = cancelled_reason
+            self.cancelled.append(db_obj)
+            return db_obj
+
+        def update(self, db, db_obj, obj_in, *, commit=True):
+            for key, value in obj_in.items():
+                setattr(db_obj, key, value)
+            return db_obj
+
+        def create(self, db, obj_in, *, commit=True):
+            raise AssertionError("existing pending Case must be reused")
+
+    class FakeSession:
+        def __init__(self):
+            self.commit_count = 0
+
+        def commit(self):
+            self.commit_count += 1
+
+        def refresh(self, db_obj):
+            return None
+
+    confirmation_case_crud = FakeConfirmationCaseCrud()
+    db = FakeSession()
+    result = FollowUpTaskConfirmationService(
+        confirmation_case_crud=confirmation_case_crud,
+        task_crud=FakeTaskCrud(),
+    ).create_case_from_plan_action(
+        db,
         team_id=1,
         task=task,
         plan=plan,
         action=plan.actions[0],
         actor_id="2",
-    ).case
+        source_activity_id=204,
+        source_activity_revision=1,
+        source_public_id="act_44444444444444444444444444444444",
+    )
+
+    assert result.created is False
+    assert result.case is latest_case
+    assert latest_case.status == FollowUpTaskConfirmationStatus.PENDING
+    assert latest_case.source_activity_id == 204
+    assert confirmation_case_crud.cancelled == [older_case]
+    assert older_case.status == FollowUpTaskConfirmationStatus.CANCELLED
+    assert (
+        older_case.cancelled_reason
+        == FollowUpTaskConfirmationCancelReason.DUPLICATE_ACTIVE_CASE_SUPERSEDED
+    )
+    assert db.commit_count == 1
+
+
+def test_confirmation_case_prompt_count_is_tracked(db_session):
+    task = _create_task(db_session)
+    plan = _confirmation_plan(task)
+    case = (
+        FollowUpTaskConfirmationService()
+        .create_case_from_plan_action(
+            db_session,
+            team_id=1,
+            task=task,
+            plan=plan,
+            action=plan.actions[0],
+            actor_id="2",
+        )
+        .case
+    )
 
     prompted = FollowUpTaskConfirmationService().mark_prompted(
         db_session,
@@ -356,14 +587,18 @@ def test_confirmation_case_defaults_to_expiring_reply_window(db_session):
     task = _create_task(db_session)
     plan = _confirmation_plan(task)
 
-    case = FollowUpTaskConfirmationService().create_case_from_plan_action(
-        db_session,
-        team_id=1,
-        task=task,
-        plan=plan,
-        action=plan.actions[0],
-        actor_id="2",
-    ).case
+    case = (
+        FollowUpTaskConfirmationService()
+        .create_case_from_plan_action(
+            db_session,
+            team_id=1,
+            task=task,
+            plan=plan,
+            action=plan.actions[0],
+            actor_id="2",
+        )
+        .case
+    )
 
     assert case.expires_at is not None
     assert case.expires_at > case.created_time
@@ -476,14 +711,14 @@ def test_confirmation_reply_interpretation_handles_common_sales_replies():
     complete = service.interpret_reply("已确认,预算通过了", base_date=base_date)
     cancel = service.interpret_reply("这个不管了", base_date=base_date)
     keep_open = service.interpret_reply("先放着,还没有进展", base_date=base_date)
-    delay = service.interpret_reply("今天联系了,还没有进展,下周五再说", base_date=base_date)
+    postpone = service.interpret_reply("今天联系了,还没有进展,下周五再说", base_date=base_date)
     unknown = service.interpret_reply("客户态度一般", base_date=base_date)
 
     assert complete.action == FollowUpTaskConfirmationResolutionAction.COMPLETE
     assert cancel.action == FollowUpTaskConfirmationResolutionAction.CANCEL
     assert keep_open.action == FollowUpTaskConfirmationResolutionAction.KEEP_OPEN
-    assert delay.action == FollowUpTaskConfirmationResolutionAction.DELAY
-    assert delay.proposed_due_at == datetime(2026, 8, 14, 10, 0, 0)
+    assert postpone.action == FollowUpTaskConfirmationResolutionAction.POSTPONE
+    assert postpone.proposed_due_at == datetime(2026, 8, 14, 10, 0, 0)
     assert unknown.action == FollowUpTaskConfirmationResolutionAction.UNKNOWN
 
 

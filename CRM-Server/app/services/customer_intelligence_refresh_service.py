@@ -11,12 +11,10 @@ import asyncio
 import logging
 from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Literal, cast
+from typing import TYPE_CHECKING, Literal, cast
 from uuid import uuid4
 
 from sqlalchemy import exists, func, or_
-from sqlalchemy.orm import Session
-from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.config import get_settings
 from app.core.database import SessionLocal
@@ -30,6 +28,7 @@ from app.models.deployment import DeploymentInfo
 from app.models.invoice import InvoiceApplication, InvoiceTitle
 from app.models.license_application import LicenseApplication
 from app.models.opportunity import Opportunity
+from app.services.agent.durable_work_contracts import AgentAsyncOperationBinding
 from app.services.agent.async_operation_service import (
     AgentAsyncOperationService,
     agent_async_operation_service,
@@ -68,6 +67,14 @@ from app.services.customer_vector_document_service import (
 )
 from app.utils.time import business_now
 
+if TYPE_CHECKING:
+    from collections.abc import Coroutine
+
+    from sqlalchemy.orm import Session
+    from sqlalchemy.sql.elements import ColumnElement
+
+    from app.models.agent_async_operation import AgentAsyncOperation
+
 logger = logging.getLogger(__name__)
 
 CustomerIntelligenceRefreshScope = Literal["full", "brief"]
@@ -90,15 +97,6 @@ class CustomerIntelligenceRefreshRequest:
     request_id: str
     trigger_type: CustomerIntelligenceRefreshTrigger = "manual_refresh_requested"
     source_lead_id: int | None = None
-
-
-@dataclass(frozen=True)
-class AgentAsyncOperationBinding:
-    team_id: int
-    user_id: int
-    session_id: int
-    source_user_message_id: int | None = None
-    source_assistant_message_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -160,6 +158,7 @@ class CustomerIntelligenceRefreshService:
             run_service=self.run_service,
             operation_service=self.async_operation_service,
         )
+        self._background_tasks: set[asyncio.Task[JSONDict]] = set()
 
     async def trigger_committed_event_refresh(
         self,
@@ -169,6 +168,7 @@ class CustomerIntelligenceRefreshService:
         scope: CustomerIntelligenceRefreshScope = "brief",
         agent_binding: AgentAsyncOperationBinding | None = None,
     ) -> CustomerIntelligenceCommittedEventRequest:
+        _ = db
         request = CustomerIntelligenceCommittedEventRequest(
             request_id=self._committed_event_request_id(event),
             event=event,
@@ -177,7 +177,7 @@ class CustomerIntelligenceRefreshService:
         )
         scheduled_request = self._schedule_committed_event_run(request)
         if scheduled_request.scheduled and scheduled_request.kick_required:
-            asyncio.create_task(self.run_committed_event_refresh(scheduled_request))
+            self._start_background_task(self.run_committed_event_refresh(scheduled_request))
         return scheduled_request
 
     def kick_committed_event_refresh(
@@ -186,8 +186,16 @@ class CustomerIntelligenceRefreshService:
     ) -> None:
         """Best-effort low-latency kick; durable run recovery remains authoritative."""
 
-        task = asyncio.create_task(self.run_committed_event_refresh(request))
-        task.add_done_callback(self._consume_background_task_exception)
+        self._start_background_task(self.run_committed_event_refresh(request))
+
+    def _start_background_task(self, coroutine: Coroutine[object, object, JSONDict]) -> None:
+        task = asyncio.create_task(coroutine)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._finish_background_task)
+
+    def _finish_background_task(self, task: asyncio.Task[JSONDict]) -> None:
+        self._background_tasks.discard(task)
+        self._consume_background_task_exception(task)
 
     @staticmethod
     def _committed_event_request_id(event: CustomerIntelligenceEvent) -> str:
@@ -239,7 +247,7 @@ class CustomerIntelligenceRefreshService:
         if run is None:
             raise ValueError("客户智能持久运行不存在")
         event_json = run.event_json if isinstance(run.event_json, dict) else {}
-        event = self.event_service.from_dict(cast(JsonObject, event_json))
+        event = self.event_service.from_dict(cast("JsonObject", event_json))
         if event is None:
             raise ValueError("客户智能持久事件快照无效")
         if (
@@ -256,7 +264,7 @@ class CustomerIntelligenceRefreshService:
         )
         if customer is None:
             raise ValueError("客户智能运行关联客户不存在")
-        scope = cast(CustomerIntelligenceRefreshScope, str(run.scope))
+        scope = cast("CustomerIntelligenceRefreshScope", str(run.scope))
         if scope not in {"full", "brief"}:
             raise ValueError("客户智能持久运行刷新范围无效")
         graph_thread_id = build_customer_intelligence_thread_id(
@@ -427,7 +435,7 @@ class CustomerIntelligenceRefreshService:
         self._mark_pending(db, request)
         self._ensure_pending_run(db, request)
         self._commit_pending_schedule(db, request)
-        asyncio.create_task(self.run_refresh(request))
+        self._start_background_task(self.run_refresh(request))
         return request
 
     async def trigger_customer_created_refresh(
@@ -459,7 +467,7 @@ class CustomerIntelligenceRefreshService:
         self._mark_pending(db, request)
         self._ensure_pending_run(db, request)
         self._commit_pending_schedule(db, request)
-        asyncio.create_task(self.run_refresh(request))
+        self._start_background_task(self.run_refresh(request))
         return request
 
     async def trigger_batch_rebuild(
@@ -500,7 +508,7 @@ class CustomerIntelligenceRefreshService:
                 request_id=request_id,
                 trigger_type="customer_intelligence_batch_rebuild_requested",
             )
-            asyncio.create_task(self.run_refresh(request))
+            self._start_background_task(self.run_refresh(request))
         return CustomerIntelligenceBatchRebuildResult(
             success=True,
             request_id=request_id,
@@ -555,7 +563,7 @@ class CustomerIntelligenceRefreshService:
             self._ensure_pending_run(db, request)
         if schedule_runs:
             for request in requests:
-                asyncio.create_task(self.run_refresh(request))
+                self._start_background_task(self.run_refresh(request))
         return CustomerIntelligenceHistoricalBackfillResult(
             success=True,
             request_id=request_id,
@@ -623,6 +631,25 @@ class CustomerIntelligenceRefreshService:
             )
             return self._claim_response(request_id=request_id, event=event, claim=claim)
 
+        graph_owner = (agent_binding.user_id, agent_binding.session_id) if agent_binding is not None else None
+        return await self._execute_claimed_run(
+            run_input=run_input,
+            claim=claim,
+            operation_public_id=operation_public_id,
+            graph_owner=graph_owner,
+        )
+
+    async def _execute_claimed_run(
+        self,
+        *,
+        run_input: CustomerIntelligenceRunInput,
+        claim: CustomerIntelligenceRunClaim,
+        operation_public_id: str | None,
+        graph_owner: tuple[int, int] | None,
+    ) -> JSONDict:
+        event = run_input.event
+        request_id = run_input.request_id
+        scope = cast("CustomerIntelligenceRefreshScope", run_input.scope)
         lease_token = claim.lease_token
         if lease_token is None:
             raise RuntimeError("客户智能运行已获取执行权但缺少租约令牌")
@@ -631,30 +658,35 @@ class CustomerIntelligenceRefreshService:
             run=claim.run,
             operation_public_id=operation_public_id,
         )
-        graph_user_id = int(operation.user_id) if operation is not None else _actor_user_id(event.actor_id)
-        graph_session_id = int(operation.session_id or 0) if operation is not None else 0
         try:
-            graph_input = {
+            if graph_owner is not None:
+                graph_user_id, graph_session_id = graph_owner
+            else:
+                graph_user_id = (
+                    int(operation.user_id)
+                    if operation is not None
+                    else _actor_user_id(event.actor_id)
+                )
+                graph_session_id = int(operation.session_id or 0) if operation is not None else 0
+            graph_input: JSONDict = {
                 "team_id": event.team_id,
                 "user_id": graph_user_id,
                 "session_id": graph_session_id,
                 "event": event,
             }
+            if int(claim.run.attempt_count or 0) > 1:
+                graph_input["resume_existing_execution"] = True
             result: JSONDict = {}
-            stream_run = getattr(self.graph_service, "stream_run", None)
-            if callable(stream_run):
-                async for chunk in stream_run(graph_input):
-                    if chunk.get("kind") == "event":
-                        self._record_operation_progress(
-                            run_input=run_input,
-                            lease_token=lease_token,
-                            operation_public_id=operation_public_id,
-                            event=chunk.get("event"),
-                        )
-                    elif chunk.get("kind") == "result":
-                        result = cast(JSONDict, chunk.get("result") or {})
-            else:
-                result = await self.graph_service.run(graph_input)
+            async for chunk in self.graph_service.stream_events(graph_input):
+                if chunk.get("kind") == "event":
+                    self._record_operation_progress(
+                        run_input=run_input,
+                        lease_token=lease_token,
+                        operation_public_id=operation_public_id,
+                        event=chunk.get("event"),
+                    )
+                elif chunk.get("kind") == "result":
+                    result = cast("JSONDict", chunk.get("result") or {})
 
             mutation = self._mark_run_succeeded(
                 run_input,
@@ -823,7 +855,7 @@ class CustomerIntelligenceRefreshService:
         *,
         run: CustomerIntelligenceRun,
         operation_public_id: str | None,
-    ):
+    ) -> AgentAsyncOperation | None:
         db = SessionLocal()
         try:
             projected = self.operation_projector.project_run(
@@ -1094,7 +1126,7 @@ class CustomerIntelligenceRefreshService:
             customer_ids=failed_customer_ids,
             team_id=team_id,
             status="FAILED",
-            error_message="客户智能档案刷新失败，等待下一次业务触发或重建。",
+            error_message="客户智能档案刷新失败，等待下一次业务触发或重建。",  # noqa: RUF001
         )
         return {
             "obsolete_historical_runs": obsolete_historical_runs,
@@ -1167,7 +1199,7 @@ class CustomerIntelligenceRefreshService:
                 self.async_operation_service.cancel(
                     db,
                     operation,
-                    summary="客户档案已由更新的数据生成，本次历史补齐任务已取消",
+                    summary="客户档案已由更新的数据生成，本次历史补齐任务已取消",  # noqa: RUF001
                     result={
                         "route": "historical_backfill_satisfied",
                         "reason": "customer_brief_already_available",
@@ -1397,7 +1429,8 @@ class CustomerIntelligenceRefreshService:
                     request.request_id,
                 )
             logger.exception(
-                "客户智能刷新调度失败，已隔离为非阻塞事件: team_id=%s, customer_id=%s, trigger_type=%s, scope=%s, request_id=%s",
+                "客户智能刷新调度失败，已隔离为非阻塞事件: "  # noqa: RUF001
+                "team_id=%s, customer_id=%s, trigger_type=%s, scope=%s, request_id=%s",
                 request.event.team_id,
                 request.event.customer_id,
                 request.event.trigger_type,
@@ -1435,7 +1468,7 @@ class CustomerIntelligenceRefreshService:
             return committed_event
         event_json = run.event_json if isinstance(run.event_json, dict) else {}
         payload = event_json.get("payload") if isinstance(event_json.get("payload"), dict) else {}
-        trigger_type = cast(CustomerIntelligenceRefreshTrigger, str(run.trigger_type))
+        trigger_type = cast("CustomerIntelligenceRefreshTrigger", str(run.trigger_type))
         if trigger_type not in {
             "manual_refresh_requested",
             "customer_intelligence_batch_rebuild_requested",
@@ -1444,7 +1477,7 @@ class CustomerIntelligenceRefreshService:
             "customer_converted_from_lead",
         }:
             trigger_type = "manual_refresh_requested"
-        scope = cast(CustomerIntelligenceRefreshScope, str(run.scope))
+        scope = cast("CustomerIntelligenceRefreshScope", str(run.scope))
         if scope not in {"full", "brief"}:
             scope = "full"
         return CustomerIntelligenceRefreshRequest(
@@ -1470,10 +1503,10 @@ class CustomerIntelligenceRefreshService:
         }:
             return None
         event_json = run.event_json if isinstance(run.event_json, dict) else {}
-        event = self.event_service.from_dict(cast(JsonObject, event_json))
+        event = self.event_service.from_dict(cast("JsonObject", event_json))
         if event is None:
             return None
-        scope = cast(CustomerIntelligenceRefreshScope, str(run.scope))
+        scope = cast("CustomerIntelligenceRefreshScope", str(run.scope))
         if scope not in {"full", "brief"}:
             scope = "brief"
         return CustomerIntelligenceCommittedEventRequest(

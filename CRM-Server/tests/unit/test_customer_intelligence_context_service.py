@@ -1,6 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import BigInteger, create_engine, event
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session, sessionmaker
@@ -15,7 +16,10 @@ from app.models.opportunity import Opportunity
 from app.models.payment import PaymentPlan, PaymentRecord
 from app.services.customer_brief_service import CustomerBriefService
 from app.services.customer_fact_service import CustomerFactInput, CustomerFactSourceInput, customer_fact_service
-from app.services.customer_intelligence_context_service import CustomerIntelligenceContextService
+from app.services.customer_intelligence_context_service import (
+    CustomerIntelligenceContextNotFound,
+    CustomerIntelligenceContextService,
+)
 from app.services.customer_profile_service import CustomerProfileService
 from app.services.customer_qdrant_index_service import CustomerEvidenceSearchResult, SourceType
 
@@ -323,6 +327,56 @@ def test_customer_intelligence_context_combines_strong_facts_and_semantic_eviden
         assert payload["usage_policy"]["grounding"]["ok"] == "可基于 citations 输出 grounded 回答。"
         assert embedding_service.queries == ["张总说今天开始 POC"]
         assert qdrant_index_service.searches[0][:4] == (2, 2, 101, [0.1, 0.2, 0.3])
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_customer_intelligence_context_resolves_team_scoped_public_id() -> None:
+    engine, db = _session()
+    embedding_service = FakeEmbeddingService()
+    qdrant_index_service = FakeQdrantIndexService()
+    service = CustomerIntelligenceContextService(
+        embedding_service=embedding_service,
+        qdrant_index_service=qdrant_index_service,
+    )
+    try:
+        customer = _seed_customer_context(db)
+
+        context = service.build_context_by_public_id(
+            db,
+            team_id=2,
+            customer_public_id=str(customer.public_id),
+            query_text="张总说今天开始 POC",
+            evidence_limit=4,
+        )
+
+        assert context.strong_context.customer.public_id == str(customer.public_id)
+        assert context.strong_context.customer.account_name == "越秀金融"
+        assert embedding_service.queries == ["张总说今天开始 POC"]
+        assert context.retrieval_state.requested_limit == 4
+        assert qdrant_index_service.searches[0][:5] == (2, 2, 101, [0.1, 0.2, 0.3], 12)
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_customer_intelligence_context_rejects_public_id_from_another_team() -> None:
+    engine, db = _session()
+    service = CustomerIntelligenceContextService(
+        embedding_service=FakeEmbeddingService(),
+        qdrant_index_service=FakeQdrantIndexService(),
+    )
+    try:
+        customer = _seed_customer_context(db)
+
+        with pytest.raises(CustomerIntelligenceContextNotFound):
+            service.build_context_by_public_id(
+                db,
+                team_id=3,
+                customer_public_id=str(customer.public_id),
+                query_text="客户情况",
+            )
     finally:
         db.close()
         engine.dispose()

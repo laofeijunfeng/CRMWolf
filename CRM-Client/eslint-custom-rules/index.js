@@ -130,7 +130,8 @@ const requireZodSchema = {
           ['get', 'post', 'put', 'delete'].includes(node.callee?.property?.name)
         ) {
           const parent = node.parent
-          if (parent?.type !== 'CallExpression' || parent.callee?.property?.name !== 'parse') {
+          const validationCall = parent?.type === 'AwaitExpression' ? parent.parent : parent
+          if (validationCall?.type !== 'CallExpression' || validationCall.callee?.property?.name !== 'parse') {
             // 仅警告，不阻止
             context.report({
               node,

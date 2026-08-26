@@ -1,11 +1,11 @@
 """Feishu bot adapter for IM Agent messages."""
 
 import base64
-from dataclasses import dataclass
 import hashlib
 import json
 import logging
 import re
+from dataclasses import dataclass
 from typing import Any, Dict, Optional
 from urllib.parse import quote
 
@@ -13,19 +13,18 @@ import httpx
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from sqlalchemy.orm import Session
 
-from app.crud.oauth import oauth_provider_config_crud, user_oauth_account_crud
 from app.crud.im_bot import agent_channel_session_crud, im_inbound_event_crud
+from app.crud.oauth import oauth_provider_config_crud, user_oauth_account_crud
 from app.models.im_bot import IMBotProvider, IMInboundEventStatus
 from app.models.oauth import OAuthProviderConfig
 from app.schemas.agent import AgentSessionCreate
 from app.services.agent import agent_copy
-from app.services.agent.task_factory import WAITING_TASK_EVENT_TYPES
+from app.services.agent.ui.actions import AgentUIActionRepository
 from app.services.follow_up_task_confirmation_channel_service import (
     FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION,
     follow_up_task_confirmation_channel_service,
 )
 from app.services.im_agent_gateway import im_agent_gateway
-
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +32,6 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class IMReplyBinding:
     agent_session_id: Optional[int] = None
-    agent_task_id: Optional[int] = None
     agent_interaction_type: Optional[str] = None
     confirmation_delivery_public_id: Optional[str] = None
     confirmation_case_public_id: Optional[str] = None
@@ -59,6 +57,9 @@ class FeishuBotEventError(Exception):
 class FeishuBotService:
     api_base_url = "https://open.feishu.cn/open-apis"
     receipt_emoji_type = "Get"
+
+    def __init__(self, *, action_repository: AgentUIActionRepository | None = None) -> None:
+        self.action_repository = action_repository or AgentUIActionRepository()
 
     async def handle_event(
         self,
@@ -124,9 +125,20 @@ class FeishuBotService:
             im_inbound_event_crud.mark_status(db, inbound_event, IMInboundEventStatus.PROCESSING)
             delivery = IMReplyDelivery(reply_to_message_id=message_id, text=None)
             if "reaction" in event_type:
-                delivery = await self._handle_reaction_event(db, integration_config, event, event_type)
+                delivery = await self._handle_reaction_event(
+                    db,
+                    integration_config,
+                    event_id,
+                    event,
+                    event_type,
+                )
             else:
-                delivery = await self._handle_message_event(db, integration_config, event)
+                delivery = await self._handle_message_event(
+                    db,
+                    integration_config,
+                    event_id,
+                    event,
+                )
             response_message_id = None
             binding = delivery.binding if delivery.text and delivery.reply_to_message_id else None
             if delivery.text and delivery.reply_to_message_id:
@@ -173,7 +185,6 @@ class FeishuBotService:
                 IMInboundEventStatus.PROCESSED,
                 response_message_id=response_message_id,
                 agent_session_id=persisted_binding.agent_session_id if persisted_binding else None,
-                agent_task_id=persisted_binding.agent_task_id if persisted_binding else None,
                 agent_interaction_type=persisted_binding.agent_interaction_type if persisted_binding else None,
                 confirmation_delivery_public_id=(
                     persisted_binding.confirmation_delivery_public_id if persisted_binding else None
@@ -200,7 +211,11 @@ class FeishuBotService:
             raise
 
     async def _handle_message_event(
-        self, db: Session, integration_config: OAuthProviderConfig, event: Dict[str, Any]
+        self,
+        db: Session,
+        integration_config: OAuthProviderConfig,
+        provider_event_id: str,
+        event: Dict[str, Any],
     ) -> IMReplyDelivery:
         message = event.get("message") or {}
         message_id = message.get("message_id")
@@ -284,6 +299,7 @@ class FeishuBotService:
             team_id=integration_config.team_id,
             user_id=account.user_id,
             provider=IMBotProvider.FEISHU,
+            provider_event_id=provider_event_id,
             session_id=channel_session.agent_session_id,
             user_text=content,
             agent_content=agent_content,
@@ -296,13 +312,19 @@ class FeishuBotService:
         return IMReplyDelivery(
             message_id,
             self._render_im_reply(result),
-            self._extract_reply_binding(result),
+            self._extract_reply_binding(
+                db,
+                result,
+                team_id=integration_config.team_id,
+                user_id=account.user_id,
+            ),
         )
 
     async def _handle_reaction_event(
         self,
         db: Session,
         integration_config: OAuthProviderConfig,
+        provider_event_id: str,
         event: Dict[str, Any],
         event_type: str,
     ) -> IMReplyDelivery:
@@ -350,12 +372,22 @@ class FeishuBotService:
             team_id=integration_config.team_id,
             user_id=account.user_id,
             provider=IMBotProvider.FEISHU,
+            provider_event_id=provider_event_id,
             response_message_id=message_id,
             emoji_type=emoji_type,
         )
         if not result:
             return IMReplyDelivery(None, None)
-        return IMReplyDelivery(message_id, self._render_im_reply(result), self._extract_reply_binding(result))
+        return IMReplyDelivery(
+            message_id,
+            self._render_im_reply(result),
+            self._extract_reply_binding(
+                db,
+                result,
+                team_id=integration_config.team_id,
+                user_id=account.user_id,
+            ),
+        )
 
     async def reply_text(
         self, db: Session, integration_config: OAuthProviderConfig, message_id: str, text: str
@@ -609,52 +641,55 @@ class FeishuBotService:
                 return True
         return False
 
-    def _extract_reply_binding(self, result: Dict[str, Any]) -> IMReplyBinding:
+    def _extract_reply_binding(
+        self,
+        db: Session,
+        result: Dict[str, Any],
+        *,
+        team_id: int,
+        user_id: int,
+    ) -> IMReplyBinding:
         session = result.get("session") or {}
         agent_session_id = self._safe_int(session.get("session_id"))
-        interactions: list[dict[str, Any]] = []
-        top_level_interaction = result.get("interaction")
-        if isinstance(top_level_interaction, dict):
-            interactions.append(top_level_interaction)
-        waiting_event = None
-        for event in result.get("events") or []:
-            if not isinstance(event, dict):
-                continue
-            event_interaction = event.get("interaction")
-            if isinstance(event_interaction, dict):
-                interactions.append(event_interaction)
-            if event.get("event") in WAITING_TASK_EVENT_TYPES and event.get("task_id"):
-                waiting_event = event
-
-        for interaction in interactions:
-            if interaction.get("business_action") != FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION:
-                continue
-            payload = interaction.get("payload") if isinstance(interaction.get("payload"), dict) else {}
-            case = payload.get("case") if isinstance(payload.get("case"), dict) else {}
-            case_public_id = self._clean_string(
-                payload.get("case_public_id") or case.get("public_id") or case.get("id")
-            )
-            delivery_public_id = self._clean_string(
-                payload.get("confirmation_delivery_public_id") or payload.get("delivery_public_id")
-            )
-            prompt_delivery_key = self._clean_string(payload.get("prompt_delivery_key"))
-            interaction_id = self._clean_string(interaction.get("interaction_id") or payload.get("interaction_id"))
-            if case_public_id and delivery_public_id:
-                return IMReplyBinding(
-                    agent_session_id=agent_session_id,
-                    agent_interaction_type=str(interaction.get("type") or "choice"),
-                    confirmation_delivery_public_id=delivery_public_id,
-                    confirmation_case_public_id=case_public_id,
-                    agent_interaction_id=interaction_id,
-                    prompt_delivery_key=prompt_delivery_key,
-                )
-
-        if not waiting_event:
+        interaction = result.get("interaction")
+        if not agent_session_id or not isinstance(interaction, dict):
             return IMReplyBinding(agent_session_id=agent_session_id)
+        action_id = self._clean_string(interaction.get("submit_action_id"))
+        if not action_id:
+            return IMReplyBinding(agent_session_id=agent_session_id)
+        action = self.action_repository.get_owned(
+            db,
+            public_id=action_id,
+            team_id=team_id,
+            user_id=user_id,
+            session_id=agent_session_id,
+        )
+        if action is None:
+            return IMReplyBinding(agent_session_id=agent_session_id)
+        target = action.target if isinstance(action.target, dict) else {}
+        interaction_type = str(interaction.get("interaction_type") or target.get("type") or "interaction")
+        payload = target.get("payload") if isinstance(target.get("payload"), dict) else {}
+        case = payload.get("case") if isinstance(payload.get("case"), dict) else {}
+        case_public_id = self._clean_string(payload.get("case_public_id") or case.get("public_id") or case.get("id"))
+        delivery_public_id = self._clean_string(
+            payload.get("confirmation_delivery_public_id") or payload.get("delivery_public_id")
+        )
+        if (
+            target.get("business_action") == FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION
+            and case_public_id
+            and delivery_public_id
+        ):
+            return IMReplyBinding(
+                agent_session_id=agent_session_id,
+                agent_interaction_type=interaction_type,
+                confirmation_delivery_public_id=delivery_public_id,
+                confirmation_case_public_id=case_public_id,
+                agent_interaction_id=self._clean_string(target.get("interaction_id") or payload.get("interaction_id")),
+                prompt_delivery_key=self._clean_string(payload.get("prompt_delivery_key")),
+            )
         return IMReplyBinding(
             agent_session_id=agent_session_id,
-            agent_task_id=self._safe_int(waiting_event.get("task_id")),
-            agent_interaction_type=waiting_event.get("event"),
+            agent_interaction_type=interaction_type,
         )
 
     @staticmethod
@@ -675,8 +710,8 @@ class FeishuBotService:
     def _render_im_reply(self, result: Dict[str, Any]) -> str:
         content = str(result.get("final_content") or "").strip()
         interaction = result.get("interaction") or {}
-        if interaction.get("type") == "choice" and "回复" not in content:
-            choices = interaction.get("choices") if isinstance(interaction.get("choices"), list) else []
+        if interaction.get("interaction_type") == "choice" and "回复" not in content:
+            choices = interaction.get("options") if isinstance(interaction.get("options"), list) else []
             labels = [
                 str(choice.get("label") or choice.get("value") or "").strip()
                 for choice in choices

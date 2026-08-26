@@ -23,6 +23,7 @@ class CustomerActivity(Base):
     next_follow_time = Column(DateTime, nullable=True, comment="计划下次跟进时间")
     next_follow_time_source = Column(String(30), nullable=True, comment="下次跟进时间来源：UI_DEFAULT/USER/AI_EXTRACTED/AGENT/MIGRATED")
     next_action = Column(Text, nullable=True, comment="下一步动作内容")
+    next_action_source = Column(String(30), nullable=True, comment="下一步动作来源: UI_DEFAULT/USER/AI_EXTRACTED/AGENT/MIGRATED")
     occurred_at = Column(DateTime, nullable=False, default=business_now, comment="活动发生时间")
     creator_id = Column(String(100), nullable=False, comment="记录创建人")
     owner_id = Column(String(100), nullable=False, comment="跟进归属人")

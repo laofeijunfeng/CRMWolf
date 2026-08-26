@@ -37,6 +37,7 @@ from app.services.follow_up_task_reconciliation_evaluation_service import Follow
 from app.services.follow_up_task_transition_execution_service import FollowUpTaskTransitionExecutionStatus
 from app.services.follow_up_task_transition_plan_service import FollowUpTaskTransitionPlanService
 from app.services.task_reconciliation_service import TaskReconciliationCandidate, TaskReconciliationCandidateSet
+from tests.unit.support.reconciliation_decisions import single_task_reconciliation_decision
 
 
 @compiles(BigInteger, "sqlite")
@@ -81,28 +82,30 @@ def db_session():
 
 
 def _seed_customer_and_activity(db_session) -> None:
-    db_session.add_all([
-        Customer(
-            id=1,
-            public_id="cus_11111111111111111111111111111111",
-            team_id=1,
-            account_name="测试客户",
-            city="上海",
-            owner_id="9",
-            creator_id="9",
-        ),
-        CustomerActivity(
-            id=101,
-            team_id=1,
-            customer_id=1,
-            activity_kind="PHONE_FOLLOW_UP",
-            source_content="客户说预算还没进展。",
-            summary="客户预算还没进展。",
-            occurred_at=datetime(2026, 8, 6, 10, 0, 0),
-            owner_id="2",
-            creator_id="2",
-        ),
-    ])
+    db_session.add_all(
+        [
+            Customer(
+                id=1,
+                public_id="cus_11111111111111111111111111111111",
+                team_id=1,
+                account_name="测试客户",
+                city="上海",
+                owner_id="9",
+                creator_id="9",
+            ),
+            CustomerActivity(
+                id=101,
+                team_id=1,
+                customer_id=1,
+                activity_kind="PHONE_FOLLOW_UP",
+                source_content="客户说预算还没进展。",
+                summary="客户预算还没进展。",
+                occurred_at=datetime(2026, 8, 6, 10, 0, 0),
+                owner_id="2",
+                creator_id="2",
+            ),
+        ]
+    )
 
 
 def _create_task(db_session, *, task_hash: str = "task-hash") -> FollowUpTask:
@@ -150,10 +153,9 @@ def _candidate(task: FollowUpTask) -> TaskReconciliationCandidate:
 
 def _confirmation_plan(task: FollowUpTask, *, decision: str = "COMPLETE"):
     return FollowUpTaskTransitionPlanService().plan(
-        FollowUpTaskReconciliationDecision(
+        single_task_reconciliation_decision(
             decision=decision,
             task_public_id=task.public_id,
-            candidate_public_ids=(task.public_id,),
             confidence=0.62,
             evidence_terms=("预算",),
         ),
@@ -174,14 +176,18 @@ def _confirmation_plan(task: FollowUpTask, *, decision: str = "COMPLETE"):
 
 def _create_confirmation_case(db_session, task: FollowUpTask, *, decision: str = "COMPLETE"):
     plan = _confirmation_plan(task, decision=decision)
-    return FollowUpTaskConfirmationService().create_case_from_plan_action(
-        db_session,
-        team_id=1,
-        task=task,
-        plan=plan,
-        action=plan.actions[0],
-        actor_id="2",
-    ).case
+    return (
+        FollowUpTaskConfirmationService()
+        .create_case_from_plan_action(
+            db_session,
+            team_id=1,
+            task=task,
+            plan=plan,
+            action=plan.actions[0],
+            actor_id="2",
+        )
+        .case
+    )
 
 
 def _task_events(db_session, task: FollowUpTask):
@@ -223,9 +229,9 @@ def test_confirmation_reply_completion_is_applied_through_transition_executor(db
     assert events[0].payload_json["plan_source"] == "confirmation_case_reply"
 
 
-def test_confirmation_reply_delay_keeps_task_open_and_updates_due_at(db_session):
+def test_confirmation_reply_postpone_keeps_task_open_and_updates_due_at(db_session):
     task = _create_task(db_session)
-    case = _create_confirmation_case(db_session, task, decision="DELAY")
+    case = _create_confirmation_case(db_session, task, decision="POSTPONE")
 
     _, decision, application = FollowUpTaskConfirmationApplicationService().resolve_reply_and_apply(
         db_session,
@@ -239,7 +245,7 @@ def test_confirmation_reply_delay_keeps_task_open_and_updates_due_at(db_session)
     db_session.refresh(case)
     events = _task_events(db_session, task)
 
-    assert decision.action == FollowUpTaskConfirmationResolutionAction.DELAY
+    assert decision.action == FollowUpTaskConfirmationResolutionAction.POSTPONE
     assert decision.proposed_due_at == datetime(2026, 8, 14, 10, 0, 0)
     assert application.status == FollowUpTaskConfirmationApplicationStatus.APPLIED
     assert task.status == FollowUpTaskStatus.OPEN

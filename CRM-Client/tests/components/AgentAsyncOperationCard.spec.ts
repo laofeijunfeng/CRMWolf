@@ -44,7 +44,7 @@ const degradedOperation: AgentAsyncOperation = {
       status: "RUNNING",
       event_key: "progress-1",
       step: "extract_customer_facts",
-      message: "提炼客户事实：提炼出 6 条可沉淀事实，1 条需复核事实",
+      message: "提炼客户事实：已识别 6 条可沉淀事实",
       payload: {},
       occurred_at: "2026-08-12T12:00:20",
     },
@@ -54,7 +54,7 @@ const degradedOperation: AgentAsyncOperation = {
       status: "RUNNING",
       event_key: "progress-2",
       step: "persist_customer_facts",
-      message: "沉淀客户事实：已沉淀 6 条客户事实，1 条保留复核",
+      message: "沉淀客户事实：已沉淀 6 条客户事实",
       payload: {},
       occurred_at: "2026-08-12T12:00:30",
     },
@@ -81,9 +81,11 @@ describe("AgentAsyncOperationCard", () => {
     await wrapper.get("button").trigger("click")
 
     expect(wrapper.get("button").attributes("aria-expanded")).toBe("true")
-    expect(wrapper.text()).toContain("提炼客户事实：提炼出 6 条可沉淀事实，1 条需复核事实")
-    expect(wrapper.text()).toContain("沉淀客户事实：已沉淀 6 条客户事实，1 条保留复核")
+    expect(wrapper.text()).toContain("提炼客户事实：已识别 6 条可沉淀事实")
+    expect(wrapper.text()).toContain("沉淀客户事实：已沉淀 6 条客户事实")
     expect(wrapper.text()).not.toContain("客户档案已更新，本次沉淀 0 条客户事实")
+    expect(wrapper.text()).not.toContain("复核")
+    expect(wrapper.text()).not.toContain("确认后再沉淀")
   })
 
   it.each([

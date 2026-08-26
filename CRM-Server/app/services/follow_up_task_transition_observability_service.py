@@ -407,17 +407,26 @@ class FollowUpTaskTransitionObservabilityService:
         self,
         runs: list[FollowUpTaskLLMMatcherRun],
     ) -> dict[str, Any]:
+        task_decisions = [
+            item
+            for run in runs
+            for item in self._json_list(run.task_decisions_json)
+            if isinstance(item, dict)
+        ]
         return {
             "total_runs": len(runs),
+            "task_decision_count": len(task_decisions),
             "by_status": self._count_by_attr(runs, "status"),
             "by_source": self._count_by_attr(runs, "source"),
-            "by_decision": self._count_by_attr(runs, "decision"),
-            "by_needs_confirmation": self._count_bool_attr(runs, "needs_confirmation"),
+            "by_decision": self._counter_dict(item.get("decision") for item in task_decisions),
+            "by_needs_confirmation": self._counter_dict(
+                str(bool(item.get("needs_confirmation"))).lower() for item in task_decisions
+            ),
             "by_schema_error_type": self._count_by_attr(runs, "schema_error_type"),
             "by_model": self._count_by_attr(runs, "model_name"),
             "schema_error_total": sum(1 for run in runs if run.schema_error_type),
             "evaluation_failure_total": sum(len(self._json_list(run.evaluation_failures_json)) for run in runs),
-            "confidence": self._number_attr_summary(runs, "confidence"),
+            "confidence": self._number_summary(item.get("confidence") for item in task_decisions),
             "duration_ms": self._number_attr_summary(runs, "duration_ms"),
         }
 
@@ -434,7 +443,7 @@ class FollowUpTaskTransitionObservabilityService:
             "case_count_total": sum(int(run.total_cases or 0) for run in runs),
             "failed_case_count_total": sum(int(run.failed_cases or 0) for run in runs),
             "false_close_count_total": sum(int(run.false_close_count or 0) for run in runs),
-            "false_delay_count_total": sum(int(run.false_delay_count or 0) for run in runs),
+            "false_postpone_count_total": sum(int(run.false_postpone_count or 0) for run in runs),
             "missed_confirmation_count_total": sum(int(run.missed_confirmation_count or 0) for run in runs),
             "over_confirmation_count_total": sum(int(run.over_confirmation_count or 0) for run in runs),
             "latest_run": self._latest_evaluation_run(latest_run),
@@ -459,7 +468,7 @@ class FollowUpTaskTransitionObservabilityService:
             "passed_cases": run.passed_cases,
             "failed_cases": run.failed_cases,
             "false_close_rate": run.false_close_rate,
-            "false_delay_rate": run.false_delay_rate,
+            "false_postpone_rate": run.false_postpone_rate,
             "missed_confirmation_rate": run.missed_confirmation_rate,
             "over_confirmation_rate": run.over_confirmation_rate,
             "fixture_hash": run.fixture_hash,
@@ -503,7 +512,9 @@ class FollowUpTaskTransitionObservabilityService:
         }
 
     def _number_attr_summary(self, rows: list[Any], attr: str) -> dict[str, float | int | None]:
-        values = [getattr(row, attr, None) for row in rows]
+        return self._number_summary(getattr(row, attr, None) for row in rows)
+
+    def _number_summary(self, values: Any) -> dict[str, float | int | None]:
         number_values = [float(value) for value in values if isinstance(value, int | float)]
         if not number_values:
             return {"count": 0, "avg": None, "min": None, "max": None}

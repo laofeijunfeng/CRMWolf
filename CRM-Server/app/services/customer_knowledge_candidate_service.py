@@ -159,8 +159,6 @@ class CustomerKnowledgeCandidateService:
                 "id": customer.public_id,
                 "account_name": customer.account_name,
                 "city": customer.city,
-                "owner_info": None,
-                "collaborator_infos": [],
                 "match": {
                     "source": "customer_knowledge",
                     "score": best_score,

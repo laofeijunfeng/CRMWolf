@@ -152,6 +152,7 @@ class CustomerAIConfirmedWriteService:
                 activity_kind=resolved_activity_kind,
                 source_content=normalized_content,
                 next_action=next_action,
+                next_action_source="AI_EXTRACTED" if next_action else None,
                 next_follow_time=resolved_next_follow_time,
                 next_follow_time_source="AI_EXTRACTED" if resolved_next_follow_time else None,
             )

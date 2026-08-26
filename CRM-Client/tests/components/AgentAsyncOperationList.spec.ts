@@ -61,6 +61,42 @@ describe("AgentAsyncOperationList", () => {
     expect(wrapper.text()).not.toContain("跟进已记录，任务对账处理中")
   })
 
+  it("uses the same full-width process-row sizing for automatic task results", () => {
+    const wrapper = mount(AgentAsyncOperationList, {
+      props: {
+        operations: [{
+          ...postCommitOperation,
+          status: "SUCCEEDED",
+          result: {
+            post_commit: {
+              automatic_task_transitions: [{
+                task_public_id: "fut_automatic",
+                title: "下周三继续跟进立项流程",
+                action: "COMPLETE",
+              }],
+            },
+          },
+        }],
+      },
+    })
+
+    const result = wrapper.get(".agent-async-operation-list__result")
+    const row = wrapper.get(".agent-async-operation-list__result-row")
+    expect(result.classes()).toEqual(expect.arrayContaining([
+      "rounded-xl",
+      "border",
+      "bg-muted/25",
+    ]))
+    expect(row.classes()).toEqual(expect.arrayContaining([
+      "min-h-11",
+      "w-full",
+      "rounded-xl",
+      "px-3",
+      "py-2",
+      "text-sm",
+    ]))
+  })
+
   it("reveals named operations after the list is expanded", async () => {
     const wrapper = mount(AgentAsyncOperationList, {
       props: {

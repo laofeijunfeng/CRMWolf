@@ -3,9 +3,10 @@
 This module only manages Agent-owned state. CRM business actions must go
 through existing API endpoints in the tool layer.
 """
+
 from typing import List, Optional, Tuple
 
-from sqlalchemy import func, or_
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -13,11 +14,8 @@ from app.models.agent import (
     AgentIdempotencyKey,
     AgentMessage,
     AgentSession,
-    AgentTask,
-    AgentTaskStatus,
     AgentToolCall,
     AgentWorkflowAction,
-    AgentWorkflowActionStatus,
 )
 from app.schemas.agent import (
     AgentIdempotencyKeyCreate,
@@ -25,8 +23,6 @@ from app.schemas.agent import (
     AgentMessageCreate,
     AgentSessionCreate,
     AgentSessionUpdate,
-    AgentTaskCreate,
-    AgentTaskUpdate,
     AgentToolCallCreate,
     AgentToolCallUpdate,
     AgentWorkflowActionCreate,
@@ -157,136 +153,14 @@ class AgentMessageCRUD:
             query = query.filter(AgentMessage.user_id == user_id)
 
         total = query.count()
-        items = (
-            query.order_by(AgentMessage.created_time.asc(), AgentMessage.id.asc())
-            .offset(skip)
-            .limit(limit)
-            .all()
-        )
-        return items, total
-
-
-class AgentTaskCRUD:
-    def get_by_id(
-        self,
-        db: Session,
-        task_id: int,
-        team_id: Optional[int] = None,
-        user_id: Optional[int] = None,
-    ) -> Optional[AgentTask]:
-        query = db.query(AgentTask).filter(AgentTask.id == task_id)
-        if team_id is not None:
-            query = query.filter(AgentTask.team_id == team_id)
-        if user_id is not None:
-            query = query.filter(AgentTask.user_id == user_id)
-        return query.first()
-
-    def get_by_id_for_update(
-        self,
-        db: Session,
-        task_id: int,
-        *,
-        team_id: int,
-        user_id: int,
-    ) -> Optional[AgentTask]:
-        return (
-            db.query(AgentTask)
-            .filter(
-                AgentTask.id == task_id,
-                AgentTask.team_id == team_id,
-                AgentTask.user_id == user_id,
+        if team_id is not None and user_id is not None:
+            query = query.with_hint(
+                AgentMessage,
+                "FORCE INDEX (idx_agent_message_history_owner_order)",
+                dialect_name="mysql",
             )
-            .populate_existing()
-            .with_for_update()
-            .first()
-        )
-
-    def get_by_key(
-        self,
-        db: Session,
-        task_key: str,
-        team_id: Optional[int] = None,
-        user_id: Optional[int] = None,
-    ) -> Optional[AgentTask]:
-        query = db.query(AgentTask).filter(AgentTask.task_key == task_key)
-        if team_id is not None:
-            query = query.filter(AgentTask.team_id == team_id)
-        if user_id is not None:
-            query = query.filter(AgentTask.user_id == user_id)
-        return query.first()
-
-    def create(self, db: Session, obj_in: AgentTaskCreate) -> AgentTask:
-        db_obj = AgentTask(**obj_in.model_dump())
-        db.add(db_obj)
-        db.commit()
-        db.refresh(db_obj)
-        return db_obj
-
-    def get_or_create_by_task_key(self, db: Session, obj_in: AgentTaskCreate) -> tuple[AgentTask, bool]:
-        """Return one globally unique task projection for a stable task key."""
-
-        existing = self.get_by_key(db, obj_in.task_key)
-        if existing is not None:
-            return existing, False
-        candidate = AgentTask(**obj_in.model_dump())
-        try:
-            with db.begin_nested():
-                db.add(candidate)
-                db.flush()
-        except IntegrityError:
-            existing = self.get_by_key(db, obj_in.task_key)
-            if existing is None:
-                raise
-            return existing, False
-        db.commit()
-        db.refresh(candidate)
-        return candidate, True
-
-    def list_by_session(
-        self,
-        db: Session,
-        session_id: int,
-        team_id: Optional[int] = None,
-        user_id: Optional[int] = None,
-    ) -> List[AgentTask]:
-        query = db.query(AgentTask).filter(AgentTask.session_id == session_id)
-        if team_id is not None:
-            query = query.filter(AgentTask.team_id == team_id)
-        if user_id is not None:
-            query = query.filter(AgentTask.user_id == user_id)
-        return query.order_by(AgentTask.created_time.desc(), AgentTask.id.desc()).all()
-
-    def get_latest_waiting(
-        self,
-        db: Session,
-        session_id: int,
-        team_id: int,
-        user_id: int,
-    ) -> Optional[AgentTask]:
-        return db.query(AgentTask).filter(
-            AgentTask.session_id == session_id,
-            AgentTask.team_id == team_id,
-            AgentTask.user_id == user_id,
-            AgentTask.status == AgentTaskStatus.WAITING_USER,
-        ).order_by(AgentTask.created_time.desc(), AgentTask.id.desc()).first()
-
-    def update(
-        self,
-        db: Session,
-        db_obj: AgentTask,
-        obj_in: AgentTaskUpdate,
-        *,
-        commit: bool = True,
-    ) -> AgentTask:
-        update_data = obj_in.model_dump(exclude_unset=True)
-        for field, value in update_data.items():
-            setattr(db_obj, field, value)
-        if commit:
-            db.commit()
-            db.refresh(db_obj)
-        else:
-            db.flush()
-        return db_obj
+        items = query.order_by(AgentMessage.created_time.asc(), AgentMessage.id.asc()).offset(skip).limit(limit).all()
+        return items, total
 
 
 class AgentToolCallCRUD:
@@ -325,20 +199,6 @@ class AgentToolCallCRUD:
         db.refresh(db_obj)
         return db_obj
 
-    def list_by_task(
-        self,
-        db: Session,
-        task_id: int,
-        team_id: Optional[int] = None,
-        user_id: Optional[int] = None,
-    ) -> List[AgentToolCall]:
-        query = db.query(AgentToolCall).filter(AgentToolCall.task_id == task_id)
-        if team_id is not None:
-            query = query.filter(AgentToolCall.team_id == team_id)
-        if user_id is not None:
-            query = query.filter(AgentToolCall.user_id == user_id)
-        return query.order_by(AgentToolCall.created_time.asc(), AgentToolCall.id.asc()).all()
-
 
 class AgentIdempotencyKeyCRUD:
     def get_by_action_key(
@@ -348,11 +208,15 @@ class AgentIdempotencyKeyCRUD:
         user_id: int,
         action_key: str,
     ) -> Optional[AgentIdempotencyKey]:
-        return db.query(AgentIdempotencyKey).filter(
-            AgentIdempotencyKey.team_id == team_id,
-            AgentIdempotencyKey.user_id == user_id,
-            AgentIdempotencyKey.action_key == action_key,
-        ).first()
+        return (
+            db.query(AgentIdempotencyKey)
+            .filter(
+                AgentIdempotencyKey.team_id == team_id,
+                AgentIdempotencyKey.user_id == user_id,
+                AgentIdempotencyKey.action_key == action_key,
+            )
+            .first()
+        )
 
     def create(
         self,
@@ -460,50 +324,6 @@ class AgentWorkflowActionCRUD:
             .first()
         )
 
-    def get_by_workflow_action(
-        self,
-        db: Session,
-        *,
-        workflow_id: str,
-        action_id: str,
-        team_id: Optional[int] = None,
-        user_id: Optional[int] = None,
-        include_system_actions: bool = False,
-    ) -> Optional[AgentWorkflowAction]:
-        query = db.query(AgentWorkflowAction).filter(
-            AgentWorkflowAction.workflow_id == workflow_id,
-            AgentWorkflowAction.action_id == action_id,
-        )
-        if team_id is not None:
-            query = query.filter(AgentWorkflowAction.team_id == team_id)
-        if user_id is not None:
-            if include_system_actions:
-                query = query.filter(or_(AgentWorkflowAction.user_id == user_id, AgentWorkflowAction.user_id.is_(None)))
-            else:
-                query = query.filter(AgentWorkflowAction.user_id == user_id)
-        return query.first()
-
-    def list_by_action_ids(
-        self,
-        db: Session,
-        action_ids: List[str],
-        team_id: Optional[int] = None,
-        user_id: Optional[int] = None,
-        include_system_actions: bool = False,
-    ) -> List[AgentWorkflowAction]:
-        normalized_ids = [action_id for action_id in action_ids if isinstance(action_id, str) and action_id]
-        if not normalized_ids:
-            return []
-        query = db.query(AgentWorkflowAction).filter(AgentWorkflowAction.action_id.in_(normalized_ids))
-        if team_id is not None:
-            query = query.filter(AgentWorkflowAction.team_id == team_id)
-        if user_id is not None:
-            if include_system_actions:
-                query = query.filter(or_(AgentWorkflowAction.user_id == user_id, AgentWorkflowAction.user_id.is_(None)))
-            else:
-                query = query.filter(AgentWorkflowAction.user_id == user_id)
-        return query.order_by(AgentWorkflowAction.created_time.asc(), AgentWorkflowAction.id.asc()).all()
-
     def create(
         self,
         db: Session,
@@ -519,18 +339,6 @@ class AgentWorkflowActionCRUD:
         else:
             db.flush()
         return db_obj
-
-    def get_or_create(
-        self,
-        db: Session,
-        obj_in: AgentWorkflowActionCreate,
-        *,
-        commit: bool = True,
-    ) -> AgentWorkflowAction:
-        db_obj = self.get_by_action_id(db, obj_in.action_id, team_id=obj_in.team_id, user_id=obj_in.user_id)
-        if db_obj:
-            return db_obj
-        return self.create(db, obj_in, commit=commit)
 
     def update(
         self,
@@ -588,26 +396,6 @@ class AgentWorkflowActionCRUD:
         if status is not None:
             query = query.filter(AgentWorkflowAction.status == status)
         return query.count()
-
-    def count_by_status_for_session(
-        self,
-        db: Session,
-        session_id: int,
-        team_id: Optional[int] = None,
-        user_id: Optional[int] = None,
-        include_system_actions: bool = False,
-    ) -> dict[str, int]:
-        query = db.query(AgentWorkflowAction.status, func.count(AgentWorkflowAction.id)).filter(
-            AgentWorkflowAction.session_id == session_id
-        )
-        if team_id is not None:
-            query = query.filter(AgentWorkflowAction.team_id == team_id)
-        if user_id is not None:
-            if include_system_actions:
-                query = query.filter(or_(AgentWorkflowAction.user_id == user_id, AgentWorkflowAction.user_id.is_(None)))
-            else:
-                query = query.filter(AgentWorkflowAction.user_id == user_id)
-        return {status: int(count) for status, count in query.group_by(AgentWorkflowAction.status).all()}
 
     def list_actions(
         self,
@@ -721,35 +509,9 @@ class AgentWorkflowActionCRUD:
                 query = query.filter(AgentWorkflowAction.user_id == user_id)
         return query.order_by(AgentWorkflowAction.created_time.asc(), AgentWorkflowAction.id.asc()).all()
 
-    def list_retryable_workflow_candidates(
-        self,
-        db: Session,
-        *,
-        team_id: Optional[int] = None,
-        user_id: Optional[int] = None,
-        include_system_actions: bool = True,
-        limit: int = 20,
-    ) -> List[AgentWorkflowAction]:
-        retryable_statuses = [
-            AgentWorkflowActionStatus.FAILED,
-            AgentWorkflowActionStatus.BLOCKED,
-        ]
-        query = db.query(AgentWorkflowAction).filter(AgentWorkflowAction.status.in_(retryable_statuses))
-        if team_id is not None:
-            query = query.filter(AgentWorkflowAction.team_id == team_id)
-        if user_id is not None:
-            if include_system_actions:
-                query = query.filter(or_(AgentWorkflowAction.user_id == user_id, AgentWorkflowAction.user_id.is_(None)))
-            else:
-                query = query.filter(AgentWorkflowAction.user_id == user_id)
-        return query.order_by(AgentWorkflowAction.last_modified_time.asc(), AgentWorkflowAction.id.asc()).limit(
-            max(1, limit)
-        ).all()
-
 
 agent_session_crud = AgentSessionCRUD()
 agent_message_crud = AgentMessageCRUD()
-agent_task_crud = AgentTaskCRUD()
 agent_tool_call_crud = AgentToolCallCRUD()
 agent_idempotency_key_crud = AgentIdempotencyKeyCRUD()
 agent_workflow_action_crud = AgentWorkflowActionCRUD()

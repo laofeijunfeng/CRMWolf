@@ -1,0 +1,87 @@
+{
+  "case_id": "AC-10",
+  "attempt": 1,
+  "request": {
+    "session_id": 875,
+    "client_request_id": "0ab647a0-0034-451d-9fd1-41e842a4a30a",
+    "input": {
+      "type": "text",
+      "text": "月球有哪些客户"
+    }
+  },
+  "http_status": 200,
+  "elapsed_seconds": 9.788,
+  "events": [
+    {
+      "event": "session",
+      "session_id": 875,
+      "session_key": "agent_5e0dd84eca04413b87ef3a5cb1f895e6"
+    },
+    {
+      "event": "agent_ui",
+      "phase": "final",
+      "message_id": 2272,
+      "turn_id": "turn_88259df13e364f339745ebcb8b41a5e3",
+      "sequence": 1,
+      "message": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 2272,
+        "turn_id": "turn_88259df13e364f339745ebcb8b41a5e3",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_text_1",
+            "type": "text",
+            "format": "markdown",
+            "text": "当前权限范围内未找到符合条件的客户。"
+          },
+          {
+            "id": "b_entity_list_1",
+            "type": "entity_list",
+            "entity_type": "customer",
+            "items": [],
+            "total": 0,
+            "result_set_id": "rs_306b5ab1b20542bda2fe2e4079b8949b"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {
+          "route": "QUERY",
+          "result_set_id": "rs_306b5ab1b20542bda2fe2e4079b8949b",
+          "accessibility_label": "当前权限范围内未找到符合条件的客户。"
+        }
+      }
+    },
+    {
+      "event": "done",
+      "session_id": 875
+    }
+  ],
+  "summary": {
+    "event_types": [
+      "session",
+      "agent_ui",
+      "done"
+    ],
+    "session_id": 875,
+    "message_id": 2272,
+    "route": "QUERY",
+    "metadata": {
+      "route": "QUERY",
+      "result_set_id": "rs_306b5ab1b20542bda2fe2e4079b8949b",
+      "accessibility_label": "当前权限范围内未找到符合条件的客户。"
+    },
+    "block_types": [
+      "text",
+      "entity_list"
+    ],
+    "texts": [
+      "当前权限范围内未找到符合条件的客户。"
+    ],
+    "interaction": null,
+    "errors": [],
+    "entity_count": 0,
+    "result_set_id": "rs_306b5ab1b20542bda2fe2e4079b8949b"
+  }
+}

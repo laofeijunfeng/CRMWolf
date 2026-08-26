@@ -187,7 +187,9 @@ class CustomerIntelligenceEventService:
                 "activity_kind": activity.activity_kind,
                 "title": activity.title,
                 "next_action": activity.next_action,
+                "next_action_source": getattr(activity, "next_action_source", None),
                 "next_follow_time": activity.next_follow_time.isoformat() if activity.next_follow_time else None,
+                "next_follow_time_source": getattr(activity, "next_follow_time_source", None),
             },
             actor_id=activity.creator_id,
         )

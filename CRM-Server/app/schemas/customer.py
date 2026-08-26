@@ -375,6 +375,30 @@ class CustomerListResponse(CustomerResponse):
     default_procurement_method_info: Optional[ProcurementMethodInfo] = Field(None, description="默认采购方式信息")
 
 
+class CustomerIdentityCandidateResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    account_name: str
+    city: Optional[str] = None
+    match: JsonObject = Field(default_factory=dict)
+
+
+class CustomerIdentityResolutionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal[
+        "auto_select",
+        "ranked_auto_selectable",
+        "requires_confirmation",
+        "no_match",
+        "semantic_related_only",
+    ]
+    items: List[CustomerIdentityCandidateResponse] = Field(default_factory=list)
+    related_customers: List[CustomerIdentityCandidateResponse] = Field(default_factory=list)
+    metadata: JsonObject = Field(default_factory=dict)
+
+
 class CustomerDetailResponse(BaseModel):
     id: str = Field(..., validation_alias="public_id")
     public_id: str

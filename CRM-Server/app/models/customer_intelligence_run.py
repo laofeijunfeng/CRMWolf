@@ -49,6 +49,6 @@ class CustomerIntelligenceRun(Base):
         UniqueConstraint("run_key", name="uq_customer_intelligence_run_key"),
         Index("idx_customer_intelligence_run_customer", "team_id", "customer_id", "created_time"),
         Index("idx_customer_intelligence_run_retry", "status", "next_retry_at", "lease_expires_at"),
-        Index("idx_customer_intelligence_run_event", "team_id", "event_key"),
+        UniqueConstraint("team_id", "event_key", name="uq_customer_intelligence_run_team_event"),
         {"comment": "客户智能 LangGraph 运行审计表"},
     )

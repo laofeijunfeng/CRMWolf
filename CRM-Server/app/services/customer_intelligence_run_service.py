@@ -233,6 +233,7 @@ class CustomerIntelligenceRunService:
         db.flush()
         return CustomerIntelligenceRunLeaseMutation(CustomerIntelligenceRunLeaseMutationStatus.APPLIED, run)
 
+
     def record_visible_progress_if_lease_owner(
         self,
         db: Session,
@@ -424,8 +425,7 @@ class CustomerIntelligenceRunService:
     def run_key(self, run_input: CustomerIntelligenceRunInput) -> str:
         raw = (
             "crmwolf/customer-intelligence-run/"
-            f"{run_input.event.team_id}/{run_input.event.customer_id}/"
-            f"{run_input.request_id}/{run_input.event.event_key}"
+            f"{run_input.event.team_id}/{run_input.event.event_key}"
         )
         return sha256(raw.encode("utf-8")).hexdigest()
 
@@ -503,18 +503,16 @@ def _merge_visible_trace(existing: object, incoming: list[JSONDict]) -> list[JSO
 
 
 def _result_summary(result: JSONDict) -> JSONDict:
-    review = coerce_json_dict(result.get("customer_fact_review"))
     brief_result = coerce_json_dict(result.get("brief_refresh_result"))
     persisted_refs = result.get("persisted_customer_fact_refs")
-    return {
+    summary: JSONDict = {
         "route": str(result.get("route") or ""),
         "event_key": str(coerce_json_dict(result.get("event")).get("event_key") or ""),
         "persisted_fact_count": len(persisted_refs) if isinstance(persisted_refs, list) else 0,
-        "review_status": str(review.get("status") or ""),
-        "has_interrupt": "__interrupt__" in result,
         "error_count": len(result.get("errors", [])) if isinstance(result.get("errors"), list) else 0,
         "degraded": result.get("degraded") is True or brief_result.get("degraded") is True,
     }
+    return summary
 
 
 def _run_diagnostic(run: CustomerIntelligenceRun) -> CustomerIntelligenceRunDiagnostic:

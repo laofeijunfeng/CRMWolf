@@ -352,6 +352,24 @@ def is_auto_execute_workflow(workflow: object) -> bool:
     )
 
 
+def mark_executed(workflow: Mapping[str, object], *, source: object = None) -> JSONDict:
+    copied = deepcopy(dict(workflow))
+    copied["status"] = STATUS_EXECUTED
+    if isinstance(source, str) and source.strip():
+        copied["status_source"] = source.strip()
+    return copied
+
+
+def mark_failed(workflow: Mapping[str, object], *, reason: object = None, source: object = None) -> JSONDict:
+    copied = deepcopy(dict(workflow))
+    copied["status"] = STATUS_FAILED
+    if isinstance(reason, str) and reason.strip():
+        copied["status_reason"] = reason.strip()
+    if isinstance(source, str) and source.strip():
+        copied["status_source"] = source.strip()
+    return copied
+
+
 def mark_skipped(workflow: Mapping[str, object], *, reason: object = None, source: object = None) -> JSONDict:
     copied = deepcopy(dict(workflow))
     copied["status"] = STATUS_SKIPPED

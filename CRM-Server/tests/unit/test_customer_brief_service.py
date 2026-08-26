@@ -83,3 +83,9 @@ def test_customer_brief_markdown_does_not_render_internal_industry_code() -> Non
     assert "政府/公共机构" in markdown
     assert "同行客户 A" in markdown
     assert "government_public" not in markdown
+
+
+def test_customer_brief_user_prompt_explicitly_requests_json_for_openai_compatible_providers() -> None:
+    prompt = CustomerBriefService()._build_prompt({"customer": {"account_name": "测试客户"}})
+
+    assert "JSON" in prompt

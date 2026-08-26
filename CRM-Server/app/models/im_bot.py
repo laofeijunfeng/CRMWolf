@@ -1,4 +1,5 @@
 """IM channel models for Agent conversations."""
+
 from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Index, JSON, String, Text, UniqueConstraint
 
 from app.core.database import Base
@@ -34,7 +35,9 @@ class AgentChannelSession(Base):
     external_tenant_key = Column(String(128), nullable=True, comment="外部租户标识")
     chat_id = Column(String(128), nullable=False, comment="外部会话ID")
     thread_id = Column(String(128), nullable=False, default="", comment="外部话题/线程ID")
-    agent_session_id = Column(BigInteger, ForeignKey("crm_agent_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    agent_session_id = Column(
+        BigInteger, ForeignKey("crm_agent_sessions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     last_message_id = Column(String(128), nullable=True, comment="最近处理的外部消息ID")
     status = Column(String(20), nullable=False, default="active", index=True, comment="状态")
     created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
@@ -68,14 +71,9 @@ class IMInboundEvent(Base):
     request_hash = Column(String(64), nullable=True, comment="请求Hash")
     response_message_id = Column(String(128), nullable=True, comment="回复消息ID")
     agent_session_id = Column(BigInteger, nullable=True, index=True, comment="回复绑定的Agent会话ID")
-    agent_task_id = Column(BigInteger, nullable=True, index=True, comment="回复绑定的Agent任务ID")
     agent_interaction_type = Column(String(80), nullable=True, comment="回复绑定的Agent交互事件类型")
-    confirmation_delivery_public_id = Column(
-        String(64), nullable=True, index=True, comment="精确绑定的确认提示投递ID"
-    )
-    confirmation_case_public_id = Column(
-        String(64), nullable=True, index=True, comment="精确绑定的确认Case ID"
-    )
+    confirmation_delivery_public_id = Column(String(64), nullable=True, index=True, comment="精确绑定的确认提示投递ID")
+    confirmation_case_public_id = Column(String(64), nullable=True, index=True, comment="精确绑定的确认Case ID")
     agent_interaction_id = Column(String(80), nullable=True, index=True, comment="精确绑定的Agent交互ID")
     prompt_delivery_key = Column(String(128), nullable=True, index=True, comment="确认提示幂等归因键")
     error_message = Column(Text, nullable=True, comment="错误信息")

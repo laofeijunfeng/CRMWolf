@@ -1,12 +1,16 @@
 import pytest
 
-from app.services.follow_up_task_reconciliation_evaluation_service import FollowUpTaskReconciliationDecision
+from app.services.follow_up_task_reconciliation_evaluation_service import (
+    FollowUpTaskReconciliationDecision,
+    FollowUpTaskReconciliationTaskDecision,
+)
 from app.services.follow_up_task_transition_plan_service import (
     FollowUpTaskTransitionActionType,
     FollowUpTaskTransitionPlanService,
 )
 from app.services.task_reconciliation_semantic_matcher import TaskReconciliationSemanticMatchResult
 from app.services.task_reconciliation_service import TaskReconciliationCandidate, TaskReconciliationCandidateSet
+from tests.unit.support.reconciliation_decisions import single_task_reconciliation_decision
 
 
 def _candidate(
@@ -52,10 +56,9 @@ def test_transition_plan_marks_same_owner_high_confidence_completion_executable(
     service = FollowUpTaskTransitionPlanService()
 
     plan = service.plan(
-        FollowUpTaskReconciliationDecision(
+        single_task_reconciliation_decision(
             decision="COMPLETE",
             task_public_id=task.public_id,
-            candidate_public_ids=(task.public_id,),
             confidence=0.94,
             evidence_terms=("预算已经通过", "确认客户预算"),
         ),
@@ -64,9 +67,9 @@ def test_transition_plan_marks_same_owner_high_confidence_completion_executable(
     )
 
     assert plan.state_mutation_requested is False
-    assert plan.safety_failures == ()
     assert len(plan.executable_actions) == 1
     action = plan.actions[0]
+    assert action.forbid_auto_reasons == ()
     assert action.action == FollowUpTaskTransitionActionType.COMPLETE
     assert action.task_public_id == task.public_id
     assert action.executable is True
@@ -74,15 +77,14 @@ def test_transition_plan_marks_same_owner_high_confidence_completion_executable(
     assert action.reason == "AUTO_TRANSITION_ELIGIBLE"
 
 
-def test_transition_plan_blocks_delay_without_valid_due_at():
+def test_transition_plan_blocks_postpone_without_valid_due_at():
     task = _candidate()
     service = FollowUpTaskTransitionPlanService()
 
     plan = service.plan(
-        FollowUpTaskReconciliationDecision(
-            decision="DELAY",
+        single_task_reconciliation_decision(
+            decision="POSTPONE",
             task_public_id=task.public_id,
-            candidate_public_ids=(task.public_id,),
             confidence=0.93,
             proposed_due_at="下周五",
             evidence_terms=("下周五", "确认客户预算"),
@@ -91,8 +93,8 @@ def test_transition_plan_blocks_delay_without_valid_due_at():
     )
 
     assert plan.executable_actions == ()
-    assert "delay_due_at_invalid" in plan.safety_failures
-    assert plan.actions[0].action == FollowUpTaskTransitionActionType.ASK_CONFIRMATION
+    assert "postpone_due_at_invalid" in plan.actions[0].forbid_auto_reasons
+    assert plan.actions[0].action == FollowUpTaskTransitionActionType.POSTPONE
     assert plan.actions[0].requires_confirmation is True
     assert plan.actions[0].executable is False
 
@@ -100,8 +102,35 @@ def test_transition_plan_blocks_delay_without_valid_due_at():
 @pytest.mark.parametrize(
     ("decision", "proposed_due_at"),
     [
+        ("POSTPONE", "2026-08-14T10:00:00"),
+        ("CANCEL", None),
+    ],
+)
+def test_transition_plan_requires_user_confirmation_for_non_completion_changes(decision, proposed_due_at):
+    task = _candidate()
+
+    plan = FollowUpTaskTransitionPlanService().plan(
+        single_task_reconciliation_decision(
+            decision=decision,
+            task_public_id=task.public_id,
+            confidence=0.96,
+            proposed_due_at=proposed_due_at,
+            evidence_terms=("客户明确提出调整", "确认客户预算"),
+        ),
+        _candidate_set(task),
+    )
+
+    assert plan.executable_actions == ()
+    assert plan.actions[0].requires_confirmation is True
+    assert plan.actions[0].reason == "CONFIRMATION_REQUIRED"
+    assert "MANUAL_TRANSITION_REQUIRED" in plan.actions[0].forbid_auto_reasons
+
+
+@pytest.mark.parametrize(
+    ("decision", "proposed_due_at"),
+    [
         ("COMPLETE", None),
-        ("DELAY", "2026-08-14T10:00:00"),
+        ("POSTPONE", "2026-08-14T10:00:00"),
         ("CANCEL", None),
     ],
 )
@@ -114,10 +143,9 @@ def test_transition_plan_blocks_cross_owner_and_low_confidence_auto_transition(d
     service = FollowUpTaskTransitionPlanService()
 
     plan = service.plan(
-        FollowUpTaskReconciliationDecision(
+        single_task_reconciliation_decision(
             decision=decision,
             task_public_id=task.public_id,
-            candidate_public_ids=(task.public_id,),
             confidence=0.62,
             proposed_due_at=proposed_due_at,
             evidence_terms=("预算已经通过",),
@@ -126,10 +154,10 @@ def test_transition_plan_blocks_cross_owner_and_low_confidence_auto_transition(d
     )
 
     assert plan.executable_actions == ()
-    assert "CROSS_OWNER" in plan.safety_failures
-    assert "low_confidence_auto_transition_forbidden:0.62" in plan.safety_failures
-    assert f"cross_owner_auto_transition_forbidden:{task.public_id}" in plan.safety_failures
-    assert plan.actions[0].action == FollowUpTaskTransitionActionType.ASK_CONFIRMATION
+    assert "CROSS_OWNER" in plan.actions[0].forbid_auto_reasons
+    assert "low_confidence_auto_transition_forbidden:0.62" in plan.actions[0].forbid_auto_reasons
+    assert f"cross_owner_auto_transition_forbidden:{task.public_id}" in plan.actions[0].forbid_auto_reasons
+    assert plan.actions[0].action == decision
 
 
 def test_transition_plan_blocks_forbid_reasons_and_unknown_candidates():
@@ -137,10 +165,9 @@ def test_transition_plan_blocks_forbid_reasons_and_unknown_candidates():
     service = FollowUpTaskTransitionPlanService()
 
     plan = service.plan(
-        FollowUpTaskReconciliationDecision(
+        single_task_reconciliation_decision(
             decision="CANCEL",
             task_public_id="fut_99999999999999999999999999999999",
-            candidate_public_ids=(task.public_id,),
             confidence=0.91,
             forbid_auto_reasons=("HIGH_VALUE_CUSTOMER_REVIEW_REQUIRED",),
             evidence_terms=("不用管了",),
@@ -149,40 +176,41 @@ def test_transition_plan_blocks_forbid_reasons_and_unknown_candidates():
     )
 
     assert plan.executable_actions == ()
-    assert "HIGH_VALUE_CUSTOMER_REVIEW_REQUIRED" in plan.safety_failures
-    assert "unknown_task_candidate:fut_99999999999999999999999999999999" in plan.safety_failures
-    assert plan.actions[0].action == FollowUpTaskTransitionActionType.ASK_CONFIRMATION
+    assert "HIGH_VALUE_CUSTOMER_REVIEW_REQUIRED" in plan.actions[0].forbid_auto_reasons
+    assert "unknown_task_candidate:fut_99999999999999999999999999999999" in plan.actions[0].forbid_auto_reasons
+    assert plan.actions[0].action == FollowUpTaskTransitionActionType.CANCEL
 
 
-def test_transition_plan_maps_keep_open_and_unrelated_to_noop():
+def test_transition_plan_requires_confirmation_for_related_keep_open_and_unrelated_history():
     task = _candidate()
     service = FollowUpTaskTransitionPlanService()
 
     keep_open_plan = service.plan(
-        FollowUpTaskReconciliationDecision(
+        single_task_reconciliation_decision(
             decision="KEEP_OPEN",
             task_public_id=task.public_id,
-            candidate_public_ids=(task.public_id,),
             confidence=0.88,
             evidence_terms=("还没有进展",),
         ),
         _candidate_set(task),
     )
     unrelated_plan = service.plan(
-        FollowUpTaskReconciliationDecision(
+        single_task_reconciliation_decision(
             decision="UNRELATED",
-            candidate_public_ids=(task.public_id,),
+            task_public_id=task.public_id,
             confidence=0.9,
             evidence_terms=("演示",),
         ),
         _candidate_set(task),
     )
 
-    assert keep_open_plan.actions[0].action == FollowUpTaskTransitionActionType.NOOP
-    assert keep_open_plan.actions[0].reason == "KEEP_OPEN"
-    assert unrelated_plan.actions[0].action == FollowUpTaskTransitionActionType.NOOP
-    assert unrelated_plan.actions[0].task_public_id is None
-    assert unrelated_plan.actions[0].reason == "UNRELATED"
+    assert keep_open_plan.actions[0].action == FollowUpTaskTransitionActionType.ASK_CONFIRMATION
+    assert keep_open_plan.actions[0].requires_confirmation is True
+    assert keep_open_plan.actions[0].reason == "RELATED_TASK_REQUIRES_CONFIRMATION"
+    assert unrelated_plan.actions[0].action == FollowUpTaskTransitionActionType.ASK_CONFIRMATION
+    assert unrelated_plan.actions[0].requires_confirmation is True
+    assert unrelated_plan.actions[0].task_public_id == task.public_id
+    assert unrelated_plan.actions[0].reason == "UNRELATED_TASK_REQUIRES_CONFIRMATION"
 
 
 def test_transition_plan_output_uses_public_ids_without_internal_owner_ids():
@@ -190,10 +218,9 @@ def test_transition_plan_output_uses_public_ids_without_internal_owner_ids():
     service = FollowUpTaskTransitionPlanService()
 
     plan = service.plan(
-        FollowUpTaskReconciliationDecision(
+        single_task_reconciliation_decision(
             decision="COMPLETE",
             task_public_id=task.public_id,
-            candidate_public_ids=(task.public_id,),
             confidence=0.94,
             evidence_terms=("预算已经通过",),
         ),
@@ -208,10 +235,9 @@ def test_transition_plan_output_uses_public_ids_without_internal_owner_ids():
 
 def test_transition_plan_can_be_built_from_semantic_match_result():
     task = _candidate()
-    decision = FollowUpTaskReconciliationDecision(
+    decision = single_task_reconciliation_decision(
         decision="COMPLETE",
         task_public_id=task.public_id,
-        candidate_public_ids=(task.public_id,),
         confidence=0.94,
         evidence_terms=("预算已经通过",),
     )
@@ -228,3 +254,43 @@ def test_transition_plan_can_be_built_from_semantic_match_result():
     assert plan.plan_source == "langchain_structured_output"
     assert plan.actions[0].source_activity_public_id == "act_22222222222222222222222222222222"
     assert plan.actions[0].executable is True
+
+
+def test_transition_plan_reconciles_multiple_tasks_independently():
+    completed = _candidate("fut_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+    needs_confirmation = _candidate("fut_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+    decision = FollowUpTaskReconciliationDecision(
+        candidate_public_ids=(completed.public_id, needs_confirmation.public_id),
+        task_decisions=(
+            FollowUpTaskReconciliationTaskDecision(
+                decision="COMPLETE",
+                task_public_id=completed.public_id,
+                confidence=0.96,
+                evidence_terms=("安装包已反馈",),
+            ),
+            FollowUpTaskReconciliationTaskDecision(
+                decision="COMPLETE",
+                task_public_id=needs_confirmation.public_id,
+                confidence=0.61,
+                needs_confirmation=True,
+                forbid_auto_reasons=("LOW_CONFIDENCE",),
+                evidence_terms=("POC 部署",),
+            ),
+        ),
+    )
+
+    plan = FollowUpTaskTransitionPlanService().plan(
+        decision,
+        _candidate_set(completed, needs_confirmation),
+    )
+
+    assert [action.task_public_id for action in plan.actions] == [
+        completed.public_id,
+        needs_confirmation.public_id,
+    ]
+    assert plan.actions[0].executable is True
+    assert plan.actions[0].action == FollowUpTaskTransitionActionType.COMPLETE
+    assert plan.actions[1].executable is False
+    assert plan.actions[1].requires_confirmation is True
+    assert plan.actions[1].action == FollowUpTaskTransitionActionType.COMPLETE
+    assert set(plan.to_dict()["decision"]) == {"candidate_public_ids", "task_decisions", "empty_outcome"}

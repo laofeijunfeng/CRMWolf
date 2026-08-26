@@ -1,0 +1,63 @@
+{
+  "case_id": "AC-10",
+  "session_id": 875,
+  "http_status": 200,
+  "response": {
+    "items": [
+      {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 2271,
+        "turn_id": "turn_88259df13e364f339745ebcb8b41a5e3",
+        "role": "user",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_user_text_1",
+            "type": "text",
+            "format": "plain",
+            "text": "月球有哪些客户"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {
+          "route": null,
+          "result_set_id": null,
+          "accessibility_label": "月球有哪些客户"
+        }
+      },
+      {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 2272,
+        "turn_id": "turn_88259df13e364f339745ebcb8b41a5e3",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_text_1",
+            "type": "text",
+            "format": "markdown",
+            "text": "当前权限范围内未找到符合条件的客户。"
+          },
+          {
+            "id": "b_entity_list_1",
+            "type": "entity_list",
+            "entity_type": "customer",
+            "items": [],
+            "total": 0,
+            "result_set_id": "rs_306b5ab1b20542bda2fe2e4079b8949b"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {
+          "route": "QUERY",
+          "result_set_id": "rs_306b5ab1b20542bda2fe2e4079b8949b",
+          "accessibility_label": "当前权限范围内未找到符合条件的客户。"
+        }
+      }
+    ],
+    "total": 2,
+    "page": 1,
+    "page_size": 200,
+    "total_pages": 1
+  }
+}

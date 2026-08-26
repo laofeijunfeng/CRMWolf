@@ -4,8 +4,8 @@ import request from '@/utils/request'
 
 export type FollowUpTaskStatus = 'OPEN' | 'COMPLETED' | 'CANCELLED' | string
 export type FollowUpTaskStatusFilter = 'all' | 'open' | 'completed' | 'cancelled'
-export type FollowUpTaskTransitionAction = 'complete' | 'cancel' | 'delay'
-export type FollowUpTaskConfirmationAction = 'COMPLETE' | 'DELAY' | 'CANCEL' | 'KEEP_OPEN' | 'UNKNOWN'
+export type FollowUpTaskTransitionAction = 'complete' | 'cancel' | 'postpone'
+export type FollowUpTaskConfirmationAction = 'COMPLETE' | 'POSTPONE' | 'CANCEL' | 'KEEP_OPEN' | 'UNKNOWN'
 
 export interface FollowUpTaskCustomer {
   id: string
@@ -112,7 +112,7 @@ export const followUpTaskApi = {
 }
 
 
-const NullableDateTimeSchema = z.string().datetime({ offset: true }).nullable().or(z.string().datetime().nullable())
+const NullableDateTimeSchema = z.string().datetime({ offset: true, local: true }).nullable()
 
 export const FollowUpConfirmationCustomerSchema = z.object({
   id: z.string(),

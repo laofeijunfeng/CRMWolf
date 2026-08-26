@@ -24,7 +24,12 @@ CUSTOMERS_LIST_QUERY_CATALOG = ListQueryCatalog(
             expression_builder=lambda _ctx: collaborators_name_expression(),
             predicate_builder=collaborators_predicate,
         ),
-        ListQueryField(key="city", type="text", expression=Customer.city),
+        ListQueryField(
+            key="city",
+            type="text",
+            expression=Customer.city,
+            allowed_ops=["eq", "neq", "contains", "not_contains", "in", "is_empty", "is_not_empty"],
+        ),
         ListQueryField(key="company_scale", type="enum", expression=Customer.company_scale),
         ListQueryField(
             key="status",
@@ -65,6 +70,11 @@ CUSTOMERS_LIST_QUERY_CATALOG = ListQueryCatalog(
             expression=user_name_expression(Customer.creator_id),
         ),
         ListQueryField(key="created_time", type="date", expression=Customer.created_time),
+        ListQueryField(
+            key="last_modified_time",
+            type="date",
+            expression=Customer.last_modified_time,
+        ),
         ListQueryField(key="returned_time", type="date", expression=Customer.returned_time),
     ],
     default_sorts=[SortCondition(field="created_time", direction="desc")],

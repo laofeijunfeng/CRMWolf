@@ -65,7 +65,7 @@ npm run test:unit
 cd CRM-Server
 python -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
+pip install --require-hashes -r requirements.lock -r requirements-dev.lock
 cp .env.example .env
 ./run.sh
 ```

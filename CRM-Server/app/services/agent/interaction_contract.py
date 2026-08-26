@@ -1,9 +1,8 @@
 """Stable Agent interaction contracts shared by web and IM channels."""
 from __future__ import annotations
 
-from typing import Optional
 import uuid
-
+from typing import Literal
 
 SCHEMA_VERSION = "agent.interaction.v1"
 
@@ -51,7 +50,7 @@ EVENT_TITLES = {
 }
 
 
-def event_business_action(event_name: Optional[str], fallback: Optional[str] = None) -> Optional[str]:
+def event_business_action(event_name: str | None, fallback: str | None = None) -> str | None:
     if fallback:
         return str(fallback)
     if not event_name:
@@ -59,7 +58,7 @@ def event_business_action(event_name: Optional[str], fallback: Optional[str] = N
     return EVENT_BUSINESS_ACTIONS.get(event_name)
 
 
-def event_title(event_name: Optional[str], fallback: Optional[str] = None) -> str:
+def event_title(event_name: str | None, fallback: str | None = None) -> str:
     if fallback:
         return str(fallback)
     if not event_name:
@@ -69,26 +68,30 @@ def event_title(event_name: Optional[str], fallback: Optional[str] = None) -> st
 
 def build_interaction(
     *,
-    event_name: Optional[str],
+    event_name: str | None,
     interaction_type: str,
     prompt: str,
     status: str,
-    choices: Optional[list[dict[str, object]]] = None,
-    fields: Optional[list[dict[str, object]]] = None,
-    placeholder: Optional[str] = None,
-    submit_label: Optional[str] = None,
+    choices: list[dict[str, object]] | None = None,
+    fields: list[dict[str, object]] | None = None,
+    selection_mode: Literal["single", "multiple"] | None = None,
+    min_selections: int | None = None,
+    max_selections: int | None = None,
+    placeholder: str | None = None,
+    submit_label: str | None = None,
     allow_free_text: bool = True,
     allow_cancel: bool = True,
-    title: Optional[str] = None,
-    business_action: Optional[str] = None,
-    payload: Optional[dict[str, object]] = None,
-    task_id: Optional[object] = None,
-    task_key: Optional[object] = None,
+    title: str | None = None,
+    business_action: str | None = None,
+    payload: dict[str, object] | None = None,
+    task_id: object | None = None,
+    task_key: object | None = None,
+    interaction_id: str | None = None,
 ) -> dict[str, object]:
     contract_payload = payload.copy() if isinstance(payload, dict) else {}
     interaction: dict[str, object] = {
         "schema_version": SCHEMA_VERSION,
-        "interaction_id": f"int_{uuid.uuid4().hex}",
+        "interaction_id": interaction_id or f"int_{uuid.uuid4().hex}",
         "type": interaction_type,
         "business_action": event_business_action(event_name, business_action),
         "status": status,
@@ -102,6 +105,31 @@ def build_interaction(
         interaction["task_id"] = task_id
     if task_key is not None:
         interaction["task_key"] = task_key
+    if interaction_type == INTERACTION_TYPE_CHOICE:
+        normalized_mode = selection_mode or "single"
+        if normalized_mode == "single":
+            normalized_min = 1 if min_selections is None else min_selections
+            normalized_max = 1 if max_selections is None else max_selections
+            if normalized_min != 1 or normalized_max != 1:
+                raise ValueError("single choice interactions require exactly one selection")
+        else:
+            if min_selections is None or max_selections is None:
+                raise ValueError("multiple choice interactions require explicit selection bounds")
+            normalized_min = min_selections
+            normalized_max = max_selections
+        choice_count = len(choices or [])
+        if (
+            normalized_min < 0
+            or normalized_max < 1
+            or normalized_min > normalized_max
+            or normalized_max > choice_count
+        ):
+            raise ValueError("choice interaction selection bounds are invalid")
+        interaction["selection_mode"] = normalized_mode
+        interaction["min_selections"] = normalized_min
+        interaction["max_selections"] = normalized_max
+    elif selection_mode is not None or min_selections is not None or max_selections is not None:
+        raise ValueError("selection bounds are only valid for choice interactions")
     if choices is not None:
         interaction["choices"] = choices
     if fields is not None:
@@ -113,9 +141,13 @@ def build_interaction(
     return interaction
 
 
-def payload_from_event(event: dict[str, object], *, extra: Optional[dict[str, object]] = None) -> dict[str, object]:
-    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
-    result = payload.copy()
+def payload_from_event(event: dict[str, object], *, extra: dict[str, object] | None = None) -> dict[str, object]:
+    result: dict[str, object] = {}
+    payload = event.get("payload")
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            if isinstance(key, str):
+                result[key] = value
     for key in ("action", "customer", "customers", "business", "contracts", "payment_plans"):
         value = event.get(key)
         if value is not None:

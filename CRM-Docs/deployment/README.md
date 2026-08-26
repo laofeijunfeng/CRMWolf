@@ -31,10 +31,12 @@ bash CRM-Docs/deployment/deploy.sh
 1. 在本地构建 `linux/amd64` 的前后端 Docker 镜像。
 2. 导出 `crm-images.tar`。
 3. 上传镜像包、本目录 `docker-compose.yml`、`docker-compose.server.yml` 和 `CRM-Docs/deployment/secrets/` 下的密钥文件。
-4. 在服务器执行 `docker compose -f docker-compose.yml -f docker-compose.server.yml up -d`。
-5. 执行 Alembic 数据库结构迁移。
+4. 停止旧版服务，并使用新后端镜像以一次性 Compose 容器执行 Alembic 数据库结构迁移。
+5. 迁移成功后，再执行 `docker compose -f docker-compose.yml -f docker-compose.server.yml up -d` 启动新版本。
 6. 执行销售承诺/跟进任务历史数据回填。
-7. 检查前后端健康状态。
+7. 检查前后端健康状态；检查成功后删除本次替换下来的旧后端、前端镜像（失败时保留，便于回滚）。
+
+先迁移后启动保证新代码依赖的新索引或字段已经存在，避免发布窗口内新后端先运行而查询失败。
 
 ## 前置条件
 
@@ -115,6 +117,10 @@ docker logs crm-backend --since 10m | grep -E '客户智能历史补档|客户�
 ```bash
 docker exec crm-backend python -c "from app.core.database import SessionLocal; from app.models.sales_commitment import FollowUpTask, SalesCommitment, FollowUpTaskProjectionRun; db=SessionLocal(); print('follow_up_tasks', db.query(FollowUpTask).count()); print('sales_commitments', db.query(SalesCommitment).count()); print('projection_runs', db.query(FollowUpTaskProjectionRun).count()); db.close()"
 ```
+
+## CRM Agent 架构迁移
+
+Root Orchestrator / Workflow Agent / Query Agent 单版本切换必须先执行 [CRM Agent 单版本架构切换门禁](agent-architecture-migration.md)。`deploy.sh` 不会自动执行历史消息写入或 destructive checkpoint cutover；两项操作必须在停流、固定 `--as-of` inventory、数据库备份与独立恢复演练全部通过后，由明确授权的维护窗口单独执行。证据不得提交到 Git。
 
 ## 文件说明
 

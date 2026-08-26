@@ -1,0 +1,11 @@
+{
+  "team_id": 3,
+  "api_host": "https://kdqg3pibeaitkd.hifox.ai/v1",
+  "model_name": "gpt-5.6-terra",
+  "temperature": 0.1,
+  "max_tokens": 1024,
+  "api_key_cipher_sha256": "3911a5a2693eb4ff21ecec486db9fa8753c0532fe9a545a683a0e524ebefb1ba",
+  "api_key_persisted": false,
+  "snapshot_hash": "04ebfda49fe21239272cb51c4fc801fe3384a11651d7ad2dc3748c6c9c6456d1",
+  "copied_from_current_dev_config_at": "2026-08-24T11:08:00+08:00"
+}

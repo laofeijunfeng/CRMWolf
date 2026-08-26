@@ -109,6 +109,17 @@ BACKUP_DIR="/root/CRMWolf-backups"
 
 echo "=== 服务器端部署脚本 ==="
 
+# Capture the currently tagged application images before docker load retags them.
+# They are removed only after the new stack passes health checks, preserving a
+# rollback image if the deployment fails before that point.
+OLD_IMAGE_IDS=()
+for image in crm-backend:amd64 crm-frontend:amd64; do
+    image_id=$(docker image inspect --format '{{.Id}}' "$image" 2>/dev/null || true)
+    if [ -n "$image_id" ]; then
+        OLD_IMAGE_IDS+=("$image_id")
+    fi
+done
+
 # 1. 备份旧版本镜像
 if docker images | grep -q "crm-backend.*amd64"; then
     echo "[备份] 保存旧版本镜像..."
@@ -122,20 +133,23 @@ echo "[加载] 加载新镜像..."
 cd "$DEPLOY_DIR"
 docker load -i crm-images.tar
 
-# 3. 重启服务
-echo "[重启] 重启 Docker 服务..."
+# 3. 停止旧服务后，先用新镜像执行数据库迁移。
+# 新代码可能依赖新增索引，因此不能在迁移前启动 crm-backend。
+echo "[停止] 停止旧 Docker 服务..."
+docker compose -f docker-compose.yml -f docker-compose.server.yml down || true
+
+echo "[迁移] 使用新镜像执行数据库迁移..."
+docker compose -f docker-compose.yml -f docker-compose.server.yml run --rm --no-deps backend python -m alembic upgrade head
+
+# 4. 迁移完成后再启动新服务。
+echo "[启动] 启动 Docker 服务..."
 # 使用新版 Docker 内置 compose 命令（docker compose 而非 docker-compose）
 # 使用 server 配置文件（依赖外部 mysql8/redis6）
-docker compose -f docker-compose.yml -f docker-compose.server.yml down || true
 docker compose -f docker-compose.yml -f docker-compose.server.yml up -d
 
-# 4. 等待后端容器启动
+# 5. 等待后端容器启动
 echo "[等待] 等待服务启动..."
 sleep 10
-
-# 5. 执行数据库迁移（如有）
-echo "[迁移] 执行数据库迁移..."
-docker exec crm-backend python -m alembic upgrade head
 
 # 6. 执行销售承诺/跟进任务历史回填
 echo "[回填] 执行销售承诺/跟进任务历史回填..."
@@ -154,6 +168,15 @@ if [ "$BACKEND_HEALTH" = "200" ] && [ "$FRONTEND_HEALTH" = "200" ]; then
     docker ps --format 'table {{.Names}}\t{{.Status}}' | grep -E 'crm-backend|crm-qdrant-dev' || true
     docker exec crm-backend python -c "from app.core.config import get_settings; s=get_settings(); print(f'QDRANT_ENABLED={s.QDRANT_ENABLED} QDRANT_HOST={s.QDRANT_HOST} QDRANT_PORT={s.QDRANT_PORT} QDRANT_VECTOR_SIZE={s.QDRANT_VECTOR_SIZE} CUSTOMER_EVIDENCE_EMBEDDING_MODEL={s.CUSTOMER_EVIDENCE_EMBEDDING_MODEL} CUSTOMER_EVIDENCE_EMBEDDING_DIMENSIONS={s.get_customer_evidence_embedding_dimensions()} CUSTOMER_EVIDENCE_EMBEDDING_BASE_URL={s.get_customer_evidence_embedding_base_url()} CUSTOMER_EVIDENCE_EMBEDDING_API_KEY_CONFIGURED={bool(s.get_customer_evidence_embedding_api_key())} AI_GENERATION_CONCURRENCY={s.AI_GENERATION_CONCURRENCY} CUSTOMER_INTELLIGENCE_BACKFILL_ENABLED={s.CUSTOMER_INTELLIGENCE_BACKFILL_ENABLED} CUSTOMER_INTELLIGENCE_BACKFILL_BATCH_SIZE={s.CUSTOMER_INTELLIGENCE_BACKFILL_BATCH_SIZE} CUSTOMER_INTELLIGENCE_RETRY_BATCH_SIZE={s.CUSTOMER_INTELLIGENCE_RETRY_BATCH_SIZE} CUSTOMER_EVIDENCE_SYNC_ENABLED={s.CUSTOMER_EVIDENCE_SYNC_ENABLED} CUSTOMER_EVIDENCE_SYNC_BATCH_SIZE={s.CUSTOMER_EVIDENCE_SYNC_BATCH_SIZE}')"
     docker logs crm-backend --since 10m | grep -E '客户智能历史补档|客户证据向量同步|Qdrant' || echo "未看到客户智能/Qdrant 启动日志，请检查 crm-backend 日志。"
+    echo ""
+    echo "[清理] 删除已不再被使用的旧应用镜像..."
+    for image_id in "${OLD_IMAGE_IDS[@]}"; do
+        if docker image rm "$image_id"; then
+            echo "✅ 已删除旧镜像: $image_id"
+        else
+            echo "⚠️ 旧镜像仍被容器引用或已不存在，保留: $image_id"
+        fi
+    done
     echo ""
     echo "=== 部署成功 ==="
     echo "访问地址: https://crm.apipark.cn"

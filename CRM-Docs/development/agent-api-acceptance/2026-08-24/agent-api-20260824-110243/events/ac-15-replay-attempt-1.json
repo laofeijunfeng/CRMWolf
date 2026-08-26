@@ -1,0 +1,81 @@
+{
+  "case_id": "AC-15-replay",
+  "attempt": 1,
+  "request": {
+    "session_id": 881,
+    "client_request_id": "8c384903-35f7-417a-b403-bd2f18ed2d57",
+    "input": {
+      "type": "interaction_submission",
+      "action_id": "act_291075c3d33b4eaf8954a2291d88da1a",
+      "values": {
+        "choice": "cancel"
+      }
+    }
+  },
+  "http_status": 200,
+  "elapsed_seconds": 0.028,
+  "events": [
+    {
+      "event": "session",
+      "session_id": 881,
+      "session_key": "agent_e94982bcbee24cc2b36ec54049a60a09"
+    },
+    {
+      "event": "agent_ui",
+      "phase": "final",
+      "message_id": 2294,
+      "turn_id": "turn_c5899ed583714994affce62c6909a544",
+      "sequence": 1,
+      "message": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 2294,
+        "turn_id": "turn_c5899ed583714994affce62c6909a544",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_text_1",
+            "type": "text",
+            "format": "markdown",
+            "text": "已取消创建客户“API验收-110243-取消幂等客户有限公司”。"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {
+          "route": "WORKFLOW",
+          "result_set_id": null,
+          "accessibility_label": "已取消创建客户“API验收-110243-取消幂等客户有限公司”。"
+        }
+      }
+    },
+    {
+      "event": "done",
+      "session_id": 881
+    }
+  ],
+  "summary": {
+    "event_types": [
+      "session",
+      "agent_ui",
+      "done"
+    ],
+    "session_id": 881,
+    "message_id": 2294,
+    "route": "WORKFLOW",
+    "metadata": {
+      "route": "WORKFLOW",
+      "result_set_id": null,
+      "accessibility_label": "已取消创建客户“API验收-110243-取消幂等客户有限公司”。"
+    },
+    "block_types": [
+      "text"
+    ],
+    "texts": [
+      "已取消创建客户“API验收-110243-取消幂等客户有限公司”。"
+    ],
+    "interaction": null,
+    "errors": [],
+    "entity_count": 0,
+    "result_set_id": null
+  }
+}

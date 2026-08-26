@@ -38,6 +38,7 @@ from app.services.follow_up_task_reconciliation_evaluation_service import Follow
 from app.services.follow_up_task_transition_plan_service import FollowUpTaskTransitionPlanService
 from app.services.task_reconciliation_service import TaskReconciliationCandidate, TaskReconciliationCandidateSet
 from app.tasks.follow_up_confirmation_delivery_recovery import FollowUpConfirmationDeliveryRecoveryScheduler
+from tests.unit.support.reconciliation_decisions import single_task_reconciliation_decision
 
 
 @compiles(BigInteger, "sqlite")
@@ -140,9 +141,7 @@ def _case(db):
         confirmation_required_reason=None,
     )
     plan = FollowUpTaskTransitionPlanService().plan(
-        FollowUpTaskReconciliationDecision(
-            decision="COMPLETE", task_public_id=task.public_id, candidate_public_ids=(task.public_id,), confidence=0.96
-        ),
+        single_task_reconciliation_decision(decision="COMPLETE", task_public_id=task.public_id, confidence=0.96),
         TaskReconciliationCandidateSet(items=[candidate], total=1, filters={}, usage_policy={}),
         source_activity_public_id="act_212",
         plan_source="test",
@@ -610,9 +609,7 @@ async def test_recovery_terminalizes_legacy_delivery_with_source_contract_mismat
         thread_id=workflow.thread_id(request),
     )
     delivery = (
-        db_session.query(FollowUpTaskConfirmationPromptDelivery)
-        .filter_by(public_id=queued.delivery_public_id)
-        .one()
+        db_session.query(FollowUpTaskConfirmationPromptDelivery).filter_by(public_id=queued.delivery_public_id).one()
     )
     delivery.source_activity_id = None
     delivery.expected_activity_revision = None
@@ -629,11 +626,7 @@ async def test_recovery_terminalizes_legacy_delivery_with_source_contract_mismat
     )
 
     db_session.expire_all()
-    refreshed = (
-        db_session.query(FollowUpTaskConfirmationPromptDelivery)
-        .filter_by(id=delivery.id)
-        .one()
-    )
+    refreshed = db_session.query(FollowUpTaskConfirmationPromptDelivery).filter_by(id=delivery.id).one()
     recovery_candidates = FollowUpTaskConfirmationPromptDeliveryCRUD().list_system_recovery_candidates(
         db_session,
         max_attempts=3,
@@ -730,9 +723,11 @@ async def test_live_delivery_lease_returns_busy_without_dispatch(db_session):
         prompt_key=workflow.prompt_key(request),
         thread_id=workflow.thread_id(request),
     )
-    delivery = db_session.query(FollowUpTaskConfirmationPromptDelivery).filter_by(
-        public_id=projection_result.delivery_public_id
-    ).one()
+    delivery = (
+        db_session.query(FollowUpTaskConfirmationPromptDelivery)
+        .filter_by(public_id=projection_result.delivery_public_id)
+        .one()
+    )
     delivery.lease_token = "other-worker"
     delivery.lease_expires_at = business_now() + timedelta(minutes=5)
     db_session.commit()
@@ -838,9 +833,11 @@ class LeaseStealingAdapter:
         del prompt
         session = self.session_factory()
         try:
-            delivery = session.query(FollowUpTaskConfirmationPromptDelivery).filter_by(
-                public_id=request.delivery_public_id
-            ).one()
+            delivery = (
+                session.query(FollowUpTaskConfirmationPromptDelivery)
+                .filter_by(public_id=request.delivery_public_id)
+                .one()
+            )
             delivery.lease_token = "other-worker"
             session.commit()
         finally:
@@ -890,9 +887,9 @@ def test_recovery_scan_includes_expired_max_attempt_delivery_for_terminalization
         prompt_key=workflow.prompt_key(request),
         thread_id=workflow.thread_id(request),
     )
-    delivery = db_session.query(FollowUpTaskConfirmationPromptDelivery).filter_by(
-        public_id=ensured.delivery_public_id
-    ).one()
+    delivery = (
+        db_session.query(FollowUpTaskConfirmationPromptDelivery).filter_by(public_id=ensured.delivery_public_id).one()
+    )
     delivery.attempt_count = 5
     delivery.lease_token = "crashed-worker"
     delivery.lease_expires_at = datetime(2026, 8, 15, 10, 0)
@@ -925,9 +922,9 @@ def test_recovery_scan_uses_case_identity_instead_of_payload_snapshot(db_session
         prompt_key=workflow.prompt_key(request),
         thread_id=workflow.thread_id(request),
     )
-    delivery = db_session.query(FollowUpTaskConfirmationPromptDelivery).filter_by(
-        public_id=ensured.delivery_public_id
-    ).one()
+    delivery = (
+        db_session.query(FollowUpTaskConfirmationPromptDelivery).filter_by(public_id=ensured.delivery_public_id).one()
+    )
     delivery.payload_json = {}
     db_session.commit()
 
@@ -959,9 +956,9 @@ async def test_exhausted_delivery_is_terminal_and_records_explicit_reason(db_ses
         prompt_key=workflow.prompt_key(request),
         thread_id=workflow.thread_id(request),
     )
-    delivery = db_session.query(FollowUpTaskConfirmationPromptDelivery).filter_by(
-        public_id=ensured.delivery_public_id
-    ).one()
+    delivery = (
+        db_session.query(FollowUpTaskConfirmationPromptDelivery).filter_by(public_id=ensured.delivery_public_id).one()
+    )
     delivery.status = FollowUpTaskConfirmationPromptStatus.FAILED
     delivery.attempt_count = 5
     delivery.reason_code = "TEMPORARY_UNAVAILABLE"
@@ -1007,9 +1004,9 @@ async def test_last_failed_delivery_attempt_becomes_terminal_immediately(db_sess
         prompt_key=workflow.prompt_key(request),
         thread_id=workflow.thread_id(request),
     )
-    delivery = db_session.query(FollowUpTaskConfirmationPromptDelivery).filter_by(
-        public_id=ensured.delivery_public_id
-    ).one()
+    delivery = (
+        db_session.query(FollowUpTaskConfirmationPromptDelivery).filter_by(public_id=ensured.delivery_public_id).one()
+    )
     delivery.attempt_count = 4
     db_session.commit()
 

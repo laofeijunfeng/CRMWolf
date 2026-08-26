@@ -1,0 +1,106 @@
+{
+  "case_id": "AC-12",
+  "session_id": 877,
+  "http_status": 200,
+  "response": {
+    "items": [
+      {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 2275,
+        "turn_id": "turn_b60e34d91d73405ea864b75c8b60d850",
+        "role": "user",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_user_text_1",
+            "type": "text",
+            "format": "plain",
+            "text": "介绍一下这个客户"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {
+          "route": null,
+          "result_set_id": null,
+          "accessibility_label": "介绍一下这个客户"
+        }
+      },
+      {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 2276,
+        "turn_id": "turn_b60e34d91d73405ea864b75c8b60d850",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_text_1",
+            "type": "text",
+            "format": "markdown",
+            "text": "请明确你想继续当前任务, 还是开始一个新的查询或操作。"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {
+          "route": "CLARIFY",
+          "result_set_id": null,
+          "accessibility_label": "请明确你想继续当前任务, 还是开始一个新的查询或操作。"
+        }
+      },
+      {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 2277,
+        "turn_id": "turn_89a382244e89409f829d6bb35f80708c",
+        "role": "user",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_user_text_1",
+            "type": "text",
+            "format": "plain",
+            "text": "介绍一下API验收-110243-上海客户01有限公司"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {
+          "route": null,
+          "result_set_id": null,
+          "accessibility_label": "介绍一下API验收-110243-上海客户01有限公司"
+        }
+      },
+      {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 2278,
+        "turn_id": "turn_89a382244e89409f829d6bb35f80708c",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_text_1",
+            "type": "text",
+            "format": "markdown",
+            "text": "查询服务暂时不可用, 请稍后重试。"
+          },
+          {
+            "id": "b_error_1",
+            "type": "error",
+            "code": "INTERNAL_ERROR",
+            "title": "处理未完成",
+            "message": "查询服务暂时不可用, 请稍后重试。",
+            "retryable": true,
+            "trace_id": null
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {
+          "route": "QUERY",
+          "result_set_id": null,
+          "accessibility_label": "查询服务暂时不可用, 请稍后重试。"
+        }
+      }
+    ],
+    "total": 4,
+    "page": 1,
+    "page_size": 200,
+    "total_pages": 1
+  }
+}

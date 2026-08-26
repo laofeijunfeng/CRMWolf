@@ -146,6 +146,37 @@ class FollowUpTaskConfirmationChannelService:
         self.max_prompts_per_case = max_prompts_per_case
         self._session_factory = session_factory
 
+    def get_pending_case(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_id: int,
+        case_public_id: str,
+    ) -> dict[str, Any] | None:
+        case = follow_up_task_confirmation_case_crud.get_by_public_id(
+            db,
+            case_public_id,
+            team_id=team_id,
+        )
+        now = business_now()
+        if (
+            case is None
+            or case.owner_id != str(user_id)
+            or case.status != FollowUpTaskConfirmationStatus.PENDING
+            or (case.expires_at is not None and case.expires_at <= now)
+        ):
+            return None
+        task = follow_up_task_crud.get_by_id(db, case.task_id, team_id=team_id)
+        customer = self._customers_by_id(
+            db,
+            team_id=team_id,
+            customer_ids=[case.customer_id],
+        ).get(case.customer_id)
+        if task is None or customer is None:
+            return None
+        return self._case_payload(case, task=task, customer=customer)
+
     def list_pending_cases(
         self,
         db: Session,
@@ -1367,7 +1398,7 @@ class FollowUpTaskConfirmationChannelService:
             action = decision.get("action")
             if action == "COMPLETE":
                 return "已确认完成, 并更新了这项跟进任务。"
-            if action == "DELAY":
+            if action == "POSTPONE":
                 return "已确认延期, 并更新了这项跟进任务。"
             if action == "CANCEL":
                 return "已确认取消, 并更新了这项跟进任务。"

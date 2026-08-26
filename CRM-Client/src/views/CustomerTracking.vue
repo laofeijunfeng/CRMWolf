@@ -69,11 +69,11 @@ const selectedTaskId = ref<string | null>(null)
 const selectedTask = ref<FollowUpTaskItem | null>(null)
 const detailLoading = ref(false)
 const followUpDialogOpen = ref(false)
-const delayDialogOpen = ref(false)
-const delaySubmitting = ref(false)
-const delayDate = ref<Date | null>(null)
-const delayReason = ref('')
-const delayConfirmationCaseId = ref<string | null>(null)
+const postponeDialogOpen = ref(false)
+const postponeSubmitting = ref(false)
+const postponeDate = ref<Date | null>(null)
+const postponeReason = ref('')
+const postponeConfirmationCaseId = ref<string | null>(null)
 
 const activeTab = ref<string>('open')
 const activeFilters = ref<ListFilterCondition[]>([])
@@ -221,51 +221,51 @@ async function transitionTask(task: FollowUpTaskItem, action: 'complete' | 'canc
 
 function openDelayDialog(task: FollowUpTaskItem, confirmationCaseId: string | null = null): void {
   selectedTask.value = task
-  delayConfirmationCaseId.value = confirmationCaseId
-  delayDate.value = task.due_at !== null && task.due_at !== undefined && task.due_at.trim().length > 0
+  postponeConfirmationCaseId.value = confirmationCaseId
+  postponeDate.value = task.due_at !== null && task.due_at !== undefined && task.due_at.trim().length > 0
     ? new Date(task.due_at)
     : new Date()
-  delayReason.value = ''
-  delayDialogOpen.value = true
+  postponeReason.value = ''
+  postponeDialogOpen.value = true
 }
 
 async function submitDelay(): Promise<void> {
-  if (!selectedTask.value || !delayDate.value) {
+  if (!selectedTask.value || !postponeDate.value) {
     toast.error('请选择延期时间')
     return
   }
-  delaySubmitting.value = true
+  postponeSubmitting.value = true
   try {
-    if (delayConfirmationCaseId.value !== null) {
-      const reason = delayReason.value.trim()
+    if (postponeConfirmationCaseId.value !== null) {
+      const reason = postponeReason.value.trim()
       const replyText = reason.length > 0
-        ? `延期到 ${formatLocalDate(delayDate.value)}，原因：${reason}`
-        : `延期到 ${formatLocalDate(delayDate.value)}`
+        ? `延期到 ${formatLocalDate(postponeDate.value)}，原因：${reason}`
+        : `延期到 ${formatLocalDate(postponeDate.value)}`
       const resolved = await resolvePendingConfirmation(
         selectedTask.value,
-        delayConfirmationCaseId.value,
+        postponeConfirmationCaseId.value,
         replyText,
       )
       if (resolved) {
-        delayDialogOpen.value = false
-        delayConfirmationCaseId.value = null
+        postponeDialogOpen.value = false
+        postponeConfirmationCaseId.value = null
       }
       return
     }
 
     const response = await followUpTaskApi.transition(selectedTask.value.public_id, {
-      action: 'delay',
-      proposed_due_at: formatLocalDate(delayDate.value),
-      reason: delayReason.value || 'manual_delay',
+      action: 'postpone',
+      proposed_due_at: formatLocalDate(postponeDate.value),
+      reason: postponeReason.value || 'manual_postpone',
     })
     selectedTask.value = response.task
-    delayDialogOpen.value = false
+    postponeDialogOpen.value = false
     toast.success('已延期')
     await fetchTasks()
   } catch (error) {
     handleApiError(error, '延期客户追踪')
   } finally {
-    delaySubmitting.value = false
+    postponeSubmitting.value = false
   }
 }
 
@@ -380,6 +380,16 @@ const getRowActions = (row: TrackingRow): TableRowActionSet => ({
 function openFollowUpDialog(task: FollowUpTaskItem): void {
   selectedTask.value = task
   followUpDialogOpen.value = true
+}
+
+async function handleFollowUpSuccess(completedTaskPublicId: string | null): Promise<void> {
+  await fetchTasks()
+  if (completedTaskPublicId === null || selectedTaskId.value !== completedTaskPublicId) return
+  try {
+    selectedTask.value = await followUpTaskApi.getDetail(completedTaskPublicId)
+  } catch (error) {
+    handleApiError(error, '刷新追踪详情')
+  }
 }
 
 function statusLabel(status: string): string {
@@ -793,26 +803,27 @@ watchEffect(() => {
     <FollowUpFormDialog
       v-if="selectedCustomerId"
       :customer-id="selectedCustomerId"
+      :source-task-public-id="selectedTask?.status === 'OPEN' ? selectedTask.public_id : null"
       :open="followUpDialogOpen"
       @update:open="followUpDialogOpen = $event"
-      @success="fetchTasks"
+      @success="handleFollowUpSuccess"
     />
 
-    <Dialog v-model:open="delayDialogOpen">
+    <Dialog v-model:open="postponeDialogOpen">
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{{ delayConfirmationCaseId ? '确认延期' : '延期客户追踪' }}</DialogTitle>
+          <DialogTitle>{{ postponeConfirmationCaseId ? '确认延期' : '延期客户追踪' }}</DialogTitle>
           <DialogDescription class="sr-only">选择新的追踪时间</DialogDescription>
         </DialogHeader>
-        <div class="tracking-delay-form">
+        <div class="tracking-postpone-form">
           <DateField
-            id="tracking-delay-date"
-            v-model="delayDate"
+            id="tracking-postpone-date"
+            v-model="postponeDate"
             label="新的追踪时间"
           />
           <TextareaField
-            id="tracking-delay-reason"
-            v-model="delayReason"
+            id="tracking-postpone-reason"
+            v-model="postponeReason"
             label="延期原因"
             :rows="3"
             placeholder="可选"
@@ -820,8 +831,8 @@ watchEffect(() => {
           />
         </div>
         <DialogFooter>
-          <Button variant="outline" @click="delayDialogOpen = false">取消</Button>
-          <Button :loading="delaySubmitting" @click="submitDelay">确认延期</Button>
+          <Button variant="outline" @click="postponeDialogOpen = false">取消</Button>
+          <Button :loading="postponeSubmitting" @click="submitDelay">确认延期</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -1166,7 +1177,7 @@ watchEffect(() => {
   }
 }
 
-.tracking-delay-form {
+.tracking-postpone-form {
   display: flex;
   flex-direction: column;
   gap: $wolf-space-md-v2;

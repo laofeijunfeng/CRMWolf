@@ -1,0 +1,134 @@
+{
+  "case_id": "AC-15-modify-wait",
+  "attempt": 1,
+  "request": {
+    "session_id": 882,
+    "client_request_id": "dcace417-359e-4463-b411-f7df7f431b9e",
+    "input": {
+      "type": "text",
+      "text": "创建客户API验收-110243-修改工作流客户有限公司，城市深圳，行业软件"
+    }
+  },
+  "http_status": 200,
+  "elapsed_seconds": 21.933,
+  "events": [
+    {
+      "event": "session",
+      "session_id": 882,
+      "session_key": "agent_8ddbf3973cea482a9542405c99909dff"
+    },
+    {
+      "event": "agent_ui",
+      "phase": "final",
+      "message_id": 2296,
+      "turn_id": "turn_ffc6270f95b44870a6e5d2cda9da10d4",
+      "sequence": 1,
+      "message": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 2296,
+        "turn_id": "turn_ffc6270f95b44870a6e5d2cda9da10d4",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_text_1",
+            "type": "text",
+            "format": "markdown",
+            "text": "确认要创建客户“API验收-110243-修改工作流客户有限公司”吗?"
+          },
+          {
+            "id": "b_interaction_1",
+            "type": "interaction",
+            "interaction_id": "int_ec9fe3c2f05d4b6a95e183e37791917c",
+            "interaction_type": "confirmation",
+            "state": "ACTIVE",
+            "prompt": "确认要创建客户“API验收-110243-修改工作流客户有限公司”吗?",
+            "fields": [],
+            "options": [
+              {
+                "value": "confirm",
+                "label": "确认创建",
+                "description": null,
+                "disabled": false
+              },
+              {
+                "value": "cancel",
+                "label": "取消",
+                "description": null,
+                "disabled": false
+              }
+            ],
+            "selection_mode": "single",
+            "min_selections": null,
+            "max_selections": null,
+            "allow_blank": null,
+            "submit_action_id": "act_6029a049ca5b4c91be0d9f379daba421"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {
+          "route": "WORKFLOW",
+          "result_set_id": null,
+          "accessibility_label": "确认要创建客户“API验收-110243-修改工作流客户有限公司”吗?"
+        }
+      }
+    },
+    {
+      "event": "done",
+      "session_id": 882
+    }
+  ],
+  "summary": {
+    "event_types": [
+      "session",
+      "agent_ui",
+      "done"
+    ],
+    "session_id": 882,
+    "message_id": 2296,
+    "route": "WORKFLOW",
+    "metadata": {
+      "route": "WORKFLOW",
+      "result_set_id": null,
+      "accessibility_label": "确认要创建客户“API验收-110243-修改工作流客户有限公司”吗?"
+    },
+    "block_types": [
+      "text",
+      "interaction"
+    ],
+    "texts": [
+      "确认要创建客户“API验收-110243-修改工作流客户有限公司”吗?"
+    ],
+    "interaction": {
+      "id": "b_interaction_1",
+      "type": "interaction",
+      "interaction_id": "int_ec9fe3c2f05d4b6a95e183e37791917c",
+      "interaction_type": "confirmation",
+      "state": "ACTIVE",
+      "prompt": "确认要创建客户“API验收-110243-修改工作流客户有限公司”吗?",
+      "fields": [],
+      "options": [
+        {
+          "value": "confirm",
+          "label": "确认创建",
+          "description": null,
+          "disabled": false
+        },
+        {
+          "value": "cancel",
+          "label": "取消",
+          "description": null,
+          "disabled": false
+        }
+      ],
+      "selection_mode": "single",
+      "min_selections": null,
+      "max_selections": null,
+      "allow_blank": null,
+      "submit_action_id": "act_6029a049ca5b4c91be0d9f379daba421"
+    },
+    "errors": [],
+    "entity_count": 0,
+    "result_set_id": null
+  }
+}

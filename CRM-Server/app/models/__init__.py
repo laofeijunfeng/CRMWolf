@@ -7,8 +7,6 @@ from app.models.agent import (
     AgentMessageRole,
     AgentSession,
     AgentSessionStatus,
-    AgentTask,
-    AgentTaskStatus,
     AgentToolCall,
     AgentToolCallStatus,
 )
@@ -17,18 +15,11 @@ from app.models.agent_async_operation import (
     AgentAsyncOperationEvent,
     AgentAsyncOperationStatus,
 )
-from app.models.agent_confirmed_application_step import (
-    AgentConfirmedApplicationStep,
-    AgentConfirmedApplicationStepStatus,
-)
-from app.models.agent_pending_application_step import (
-    AgentPendingApplicationStep,
-    AgentPendingApplicationStepStatus,
-)
-from app.models.agent_pending_interrupt_projection import (
-    AgentPendingInterruptDeliveryStatus,
-    AgentPendingInterruptProjection,
-    AgentPendingInterruptProjectionStatus,
+from app.models.agent_persistence import (
+    AgentQueryResultSet,
+    AgentUIAction,
+    AgentUIActionConsumptionMode,
+    AgentUIActionStatus,
 )
 from app.models.ai_config import AIConfig
 from app.models.approval import Approval, ApprovalFlow, ApprovalNode, ApprovalRecord
@@ -44,8 +35,6 @@ from app.models.customer_activity_post_commit_job import (
 from app.models.customer_context_answer_telemetry import CustomerContextAnswerTelemetry
 from app.models.customer_fact import (
     CustomerFact,
-    CustomerFactReviewAudit,
-    CustomerFactReviewDecision,
     CustomerFactRevision,
     CustomerFactRevisionType,
     CustomerFactSource,
@@ -147,20 +136,15 @@ __all__ = [
     "AgentAsyncOperation",
     "AgentIdempotencyKey",
     "AgentIdempotencyStatus",
-    "AgentConfirmedApplicationStep",
-    "AgentConfirmedApplicationStepStatus",
-    "AgentPendingApplicationStep",
-    "AgentPendingApplicationStepStatus",
-    "AgentPendingInterruptDeliveryStatus",
-    "AgentPendingInterruptProjection",
-    "AgentPendingInterruptProjectionStatus",
+    "AgentQueryResultSet",
+    "AgentUIAction",
+    "AgentUIActionConsumptionMode",
+    "AgentUIActionStatus",
     "AgentMemoryEntry",
     "AgentMessage",
     "AgentMessageRole",
     "AgentSession",
     "AgentSessionStatus",
-    "AgentTask",
-    "AgentTaskStatus",
     "AgentToolCall",
     "AgentToolCallStatus",
     "Approval",
@@ -182,8 +166,6 @@ __all__ = [
     "CustomerDealJourney",
     "CustomerDealJourneyEvent",
     "CustomerFact",
-    "CustomerFactReviewAudit",
-    "CustomerFactReviewDecision",
     "CustomerFactRevision",
     "CustomerFactRevisionType",
     "CustomerFactSource",

@@ -21,7 +21,6 @@ from app.services.customer_knowledge_candidate_service import CustomerVisibility
 IDENTITY_AUTO_SELECT_SCORE = 0.86
 IDENTITY_AMBIGUITY_GAP = 0.08
 IDENTITY_GENERATED_SCAN_LIMIT = 1000
-SEMANTIC_IDENTITY_PROMOTION_SCORE = IDENTITY_AUTO_SELECT_SCORE
 
 
 @dataclass(frozen=True)
@@ -151,17 +150,6 @@ class CustomerIdentityResolutionService:
             semantic_items=semantic_items,
             limit=limit,
         )
-        if (
-            not identity_items
-            and semantic_related
-            and _candidate_score(semantic_related[0]) >= SEMANTIC_IDENTITY_PROMOTION_SCORE
-        ):
-            promoted = dict(semantic_related.pop(0))
-            match = dict(promoted.get("match") or {})
-            match.setdefault("source", "customer_knowledge")
-            match.setdefault("reason", "客户知识库语义匹配")
-            promoted["match"] = match
-            identity_items.append(promoted)
         identity_items.sort(key=lambda item: _candidate_score(item), reverse=True)
         items = identity_items[:limit]
 
@@ -469,7 +457,9 @@ class CustomerIdentityResolutionService:
                 existing_match["evidence"] = evidence[:5]
                 existing["match"] = existing_match
             else:
-                related.append(semantic)
+                candidate = _project_identity_candidate(semantic)
+                if candidate is not None:
+                    related.append(candidate)
         return sorted(related, key=_candidate_score, reverse=True)[:limit]
 
 
@@ -649,6 +639,24 @@ def _strip_legal_suffix(value: str) -> str:
 
 def _remove_parenthetical(value: str) -> str:
     return re.sub(r"[(（][^()（）]+[)）]", "", value)
+
+
+def _project_identity_candidate(item: dict) -> dict | None:
+    """Project retrieval data onto the closed customer identity contract."""
+    customer_id = item.get("id")
+    account_name = item.get("account_name") or item.get("name")
+    if not isinstance(customer_id, (str, int)) or not str(customer_id):
+        return None
+    if not isinstance(account_name, str) or not account_name.strip():
+        return None
+    city = item.get("city")
+    match = item.get("match")
+    return {
+        "id": str(customer_id),
+        "account_name": account_name.strip(),
+        "city": str(city) if city else None,
+        "match": dict(match) if isinstance(match, dict) else {},
+    }
 
 
 def _candidate_score(item: dict) -> float:

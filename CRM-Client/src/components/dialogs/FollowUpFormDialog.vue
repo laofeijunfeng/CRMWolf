@@ -33,15 +33,8 @@ import {
   SegmentedChoiceControl,
   TextareaField,
 } from '@/components/crmwolf'
-import customerActivityApi from '@/api/customerActivity'
+import customerActivityApi, { type CustomerActivityCreate } from '@/api/customerActivity'
 import { formatLocalDate } from '@/utils/format'
-
-// Compute default date: 3 days from now
-function getDefaultNextFollowTime(): string {
-  const date = new Date()
-  date.setDate(date.getDate() + 3)
-  return formatLocalDate(date)
-}
 
 // Zod schema for form validation
 const schema = toTypedSchema(
@@ -56,12 +49,15 @@ const schema = toTypedSchema(
 interface Props {
   customerId: string
   open: boolean
+  sourceTaskPublicId?: string | null
 }
 
 interface Emits {
   (e: 'update:open', value: boolean): void
-  (e: 'success'): void
+  (e: 'success', completedTaskPublicId: string | null): void
 }
+
+type SubmitMode = 'activity' | 'activity_and_complete_tracking'
 
 const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
@@ -72,7 +68,7 @@ const { handleSubmit, resetForm, values } = useForm({
   initialValues: {
     method: '',
     content: '',
-    next_follow_time: getDefaultNextFollowTime(),
+    next_follow_time: '',
     next_action: ''
   }
 })
@@ -81,15 +77,18 @@ const { handleSubmit, resetForm, values } = useForm({
 const { value: methodValue, errorMessage: methodError } = useField<string>('method')
 
 // State
-const submitting = ref(false)
+const submittingMode = ref<SubmitMode | null>(null)
 const isDirty = ref(false)
-const nextFollowTimeTouched = ref(false)
 const showConfirmDialog = ref(false)
 
 // Computed property for dialog visibility
 const visible = computed({
   get: () => props.open,
   set: (val) => emit('update:open', val)
+})
+const canSubmitAndCompleteTracking = computed(() => {
+  const taskPublicId = props.sourceTaskPublicId
+  return taskPublicId !== null && taskPublicId !== undefined && taskPublicId.trim().length > 0
 })
 
 // Follow-up method options
@@ -115,44 +114,70 @@ watch(() => props.open, (newOpen) => {
       values: {
         method: '',
         content: '',
-        next_follow_time: getDefaultNextFollowTime(),
+        next_follow_time: '',
         next_action: ''
       }
     })
     isDirty.value = false
-    nextFollowTimeTouched.value = false
   }
 })
 
 function handleNextFollowTimeChange(
-  handleChange: (value: string | null) => void,
+  handleChange: (value: string) => void,
   date: Date | null
 ): void {
-  nextFollowTimeTouched.value = true
-  handleChange(date ? formatLocalDate(date) : null)
+  handleChange(date ? formatLocalDate(date) : '')
 }
 
-// Form submission
-const onSubmit = handleSubmit(async (formValues) => {
-  submitting.value = true
+function toOptionalText(value: string | undefined): string | null {
+  const normalizedValue = value?.trim()
+  return normalizedValue === undefined || normalizedValue.length === 0 ? null : normalizedValue
+}
+
+function activityPayload(formValues: Record<string, string | undefined>): CustomerActivityCreate {
+  const nextFollowTime = toOptionalText(formValues['next_follow_time'])
+  const nextAction = toOptionalText(formValues['next_action'])
+
+  return {
+    activity_kind: formValues['method'] ?? '',
+    source_content: formValues['content'] ?? '',
+    next_follow_time: nextFollowTime,
+    next_follow_time_source: nextFollowTime === null ? null : 'USER' as const,
+    next_action: nextAction,
+  }
+}
+
+async function submitActivity(
+  formValues: Record<string, string | undefined>,
+  mode: SubmitMode,
+): Promise<void> {
+  const activity = activityPayload(formValues)
+  submittingMode.value = mode
   try {
-    await customerActivityApi.createActivity(props.customerId, {
-      activity_kind: formValues['method'],
-      source_content: formValues['content'],
-      next_follow_time: formValues['next_follow_time'] ?? null,
-      next_follow_time_source: nextFollowTimeTouched.value ? 'USER' : 'UI_DEFAULT',
-      next_action: formValues['next_action'] ?? null
-    })
-    toast.success('客户活动添加成功')
+    if (mode === 'activity_and_complete_tracking') {
+      const taskPublicId = props.sourceTaskPublicId
+      if (taskPublicId === null || taskPublicId === undefined || taskPublicId.trim().length === 0) {
+        throw new Error('缺少要完成的追踪任务')
+      }
+      await customerActivityApi.createActivityAndCompleteTracking(props.customerId, taskPublicId, activity)
+      toast.success('客户活动已添加，追踪已完成')
+      emit('success', taskPublicId)
+    } else {
+      await customerActivityApi.createActivity(props.customerId, activity)
+      toast.success('客户活动添加成功')
+      emit('success', null)
+    }
     isDirty.value = false
     visible.value = false
-    emit('success')
   } catch {
-    toast.error('添加客户活动失败')
+    toast.error(mode === 'activity_and_complete_tracking' ? '提交并完成追踪失败' : '添加客户活动失败')
   } finally {
-    submitting.value = false
+    submittingMode.value = null
   }
-})
+}
+
+const onSubmit = handleSubmit(async (formValues) => submitActivity(formValues, 'activity'))
+const submitAndCompleteTracking = handleSubmit(async (formValues) => submitActivity(formValues, 'activity_and_complete_tracking'))
 
 // Cancel operation
 function handleCancel(): void {
@@ -222,8 +247,8 @@ function continueEditing(): void {
             <DateField
               id="follow-up-next-time"
               :model-value="value ? new Date(value as string) : null"
-              label="下次跟进时间"
-              placeholder="请选择下次跟进时间"
+              label="下次跟进时间（可选）"
+              placeholder="如有下一步安排，请选择时间"
               @update:model-value="(date: Date | null) => handleNextFollowTimeChange(handleChange, date)"
             />
             <FormMessage />
@@ -236,9 +261,9 @@ function continueEditing(): void {
             <TextareaField
               id="follow-up-next-action"
               :model-value="String(value ?? '')"
-              label="下一步动作"
+              label="下一步动作（可选）"
               :rows="3"
-              placeholder="请输入下一步动作（可选）"
+              placeholder="请输入下一步动作"
               control-class="resize-none"
               @update:model-value="handleChange"
             />
@@ -248,11 +273,25 @@ function continueEditing(): void {
 
         <!-- DialogFooter -->
         <DialogFooter class="mt-6 pt-4 border-t">
-          <Button variant="outline" type="button" @click="handleCancel">
+          <Button variant="outline" type="button" :disabled="submittingMode !== null" @click="handleCancel">
             取消
           </Button>
-          <Button type="submit" :loading="submitting">
+          <Button
+            variant="outline"
+            type="submit"
+            :loading="submittingMode === 'activity'"
+            :disabled="submittingMode !== null"
+          >
             提交
+          </Button>
+          <Button
+            v-if="canSubmitAndCompleteTracking"
+            type="button"
+            :loading="submittingMode === 'activity_and_complete_tracking'"
+            :disabled="submittingMode !== null"
+            @click="submitAndCompleteTracking"
+          >
+            提交并完成追踪
           </Button>
         </DialogFooter>
       </form>

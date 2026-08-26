@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.services.customer_activity_kinds import ACTIVITY_KIND_META, get_activity_kind_meta, normalize_activity_kind
 
-NEXT_FOLLOW_TIME_SOURCES = {"UI_DEFAULT", "USER", "AI_EXTRACTED", "AGENT", "MIGRATED"}
+CUSTOMER_ACTIVITY_FIELD_SOURCES = {"UI_DEFAULT", "USER", "AI_EXTRACTED", "AGENT", "MIGRATED"}
 
 
 class OwnerInfo(BaseModel):
@@ -43,6 +43,7 @@ class CustomerActivityBase(BaseModel):
     next_follow_time: Optional[datetime] = Field(None, description="计划下次跟进时间")
     next_follow_time_source: Optional[str] = Field(None, description="下次跟进时间来源")
     next_action: Optional[str] = Field(None, description="下一步动作内容")
+    next_action_source: Optional[str] = Field(None, description="下一步动作来源")
     occurred_at: Optional[datetime] = Field(None, description="活动发生时间")
 
     @field_validator("activity_kind")
@@ -60,11 +61,11 @@ class CustomerActivityBase(BaseModel):
             raise ValueError("活动内容不能为空")
         return value.strip()
 
-    @field_validator("next_follow_time_source")
+    @field_validator("next_follow_time_source", "next_action_source")
     @classmethod
-    def next_follow_time_source_must_be_known(cls, value: Optional[str]) -> Optional[str]:
-        if value is not None and value not in NEXT_FOLLOW_TIME_SOURCES:
-            raise ValueError("未知下次跟进时间来源")
+    def next_step_source_must_be_known(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and value not in CUSTOMER_ACTIVITY_FIELD_SOURCES:
+            raise ValueError("未知下一步字段来源")
         return value
 
 
@@ -81,6 +82,7 @@ class CustomerActivityUpdate(BaseModel):
     next_follow_time: Optional[datetime] = Field(None, description="计划下次跟进时间")
     next_follow_time_source: Optional[str] = Field(None, description="下次跟进时间来源")
     next_action: Optional[str] = Field(None, description="下一步动作内容")
+    next_action_source: Optional[str] = Field(None, description="下一步动作来源")
     occurred_at: Optional[datetime] = Field(None, description="活动发生时间")
 
     @field_validator("activity_kind")
@@ -95,12 +97,20 @@ class CustomerActivityUpdate(BaseModel):
             raise ValueError("活动内容不能为空")
         return value.strip() if value else value
 
-    @field_validator("next_follow_time_source")
+    @field_validator("next_follow_time_source", "next_action_source")
     @classmethod
-    def next_follow_time_source_must_be_known(cls, value: Optional[str]) -> Optional[str]:
-        if value is not None and value not in NEXT_FOLLOW_TIME_SOURCES:
-            raise ValueError("未知下次跟进时间来源")
+    def next_step_source_must_be_known(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and value not in CUSTOMER_ACTIVITY_FIELD_SOURCES:
+            raise ValueError("未知下一步字段来源")
         return value
+
+
+class CustomerActivityPostCommitTaskTransition(BaseModel):
+    task_public_id: str = Field(..., description="跟进任务对外ID")
+    title: str = Field(..., description="跟进任务标题")
+    action: str = Field(..., description="系统自动执行的状态动作")
+    previous_status: str | None = Field(None, description="执行前状态")
+    new_status: str | None = Field(None, description="执行后状态")
 
 
 class CustomerActivityPostCommitConfirmationCase(BaseModel):
@@ -128,6 +138,10 @@ class CustomerActivityPostCommitPromptPolicy(BaseModel):
 
 
 class CustomerActivityPostCommitOutcome(BaseModel):
+    automatic_task_transitions: list[CustomerActivityPostCommitTaskTransition] = Field(
+        default_factory=list,
+        description="本次已自动执行的历史跟进任务状态变更",
+    )
     needs_user_confirmation: bool = Field(..., description="是否需要用户确认历史任务状态")
     confirmation_case_public_ids: list[str] = Field(default_factory=list, description="需要提示的确认Case对外ID列表")
     confirmation_cases: list[CustomerActivityPostCommitConfirmationCase] = Field(
@@ -191,6 +205,7 @@ class CustomerActivityResponse(BaseModel):
     next_follow_time: Optional[datetime] = Field(None, description="计划下次跟进时间")
     next_follow_time_source: Optional[str] = Field(None, description="下次跟进时间来源")
     next_action: Optional[str] = Field(None, description="下一步动作内容")
+    next_action_source: Optional[str] = Field(None, description="下一步动作来源")
     occurred_at: datetime = Field(..., description="活动发生时间")
     creator_id: str = Field(..., description="创建人系统用户ID")
     owner_id: str = Field(..., description="跟进归属人系统用户ID")
@@ -214,6 +229,16 @@ class CustomerActivityResponse(BaseModel):
         None,
         description="与本次活动写入原子提交的持久后台工作",
     )
+
+
+class CustomerActivityCreateAndCompleteTrackingRequest(BaseModel):
+    task_public_id: str = Field(..., min_length=1, max_length=64, description="要完成的追踪任务对外ID")
+    activity: CustomerActivityCreate
+
+
+class CustomerActivityCreateAndCompleteTrackingResponse(BaseModel):
+    activity: CustomerActivityResponse
+    completed_task_public_id: str
 
 
 class CustomerActivityProcessResponse(BaseModel):

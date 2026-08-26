@@ -6,14 +6,16 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Optional
 
-from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.crud.ai_config import ai_config_crud
-from app.services.ai_service import ai_service
 from app.services.agent import business_rules
-from app.services.agent.langchain_runtime import AgentLangChainRuntime, AgentLangChainStructuredOutputError
-from app.services.agent.prompts import CRM_AGENT_SUGGESTION_SYSTEM_PROMPT, build_suggestion_messages
+from app.services.agent.langchain_runtime import (
+    AgentLangChainRuntime,
+    AgentLangChainStructuredOutputError,
+    agent_model_enable_thinking,
+)
+from app.services.agent.prompts import CRM_AGENT_SUGGESTION_SYSTEM_PROMPT
 from app.services.agent.schemas import AgentBusinessSuggestion, AgentSemanticParseResult, AgentSuggestionResult
 from app.utils.public_id import is_opportunity_public_id
 
@@ -28,9 +30,6 @@ class AgentSuggestionEnvelope:
     suggestion_source: str
     model: str
     structured_output_strategy: Optional[str] = None
-    fallback_reason: Optional[str] = None
-    fallback_error: Optional[str] = None
-    fallback_error_message: Optional[str] = None
 
 
 class AgentSuggestionGenerator:
@@ -43,12 +42,10 @@ class AgentSuggestionGenerator:
         "CREATE_INVOICE_TITLE",
         "CREATE_DEPLOYMENT_INFO",
         "CREATE_LICENSE_APPLICATION",
-        "CUSTOMER_QUERY_SUMMARY",
         "NO_ACTION",
     }
 
-    def __init__(self, ai_client=ai_service, agent_factory=None, chat_model_factory=None) -> None:
-        self.ai_client = ai_client
+    def __init__(self, agent_factory=None, chat_model_factory=None) -> None:
         self.langchain_runtime = AgentLangChainRuntime(
             agent_factory=agent_factory,
             chat_model_factory=chat_model_factory,
@@ -74,12 +71,8 @@ class AgentSuggestionGenerator:
 
         semantic_json = semantic_result.model_dump_json(exclude_none=True)
         context_json = json.dumps(customer_context, ensure_ascii=False, default=str)
-        fallback_reason = None
-        fallback_error = None
-        fallback_error_message = None
-        structured_output_strategy = "tool"
         try:
-            langchain_result = await self._generate_with_langchain(
+            result = await self._generate_with_langchain(
                 api_host=config.api_host,
                 api_key=api_key,
                 model=config.model_name,
@@ -92,35 +85,14 @@ class AgentSuggestionGenerator:
         except AgentSuggestionGeneratorError:
             raise
         except Exception as exc:
-            langchain_result = None
-            fallback_reason = "langchain_structured_output_failed"
-            fallback_error = exc.__class__.__name__
-            fallback_error_message = str(exc)
-        if langchain_result is not None:
-            return AgentSuggestionEnvelope(
-                result=self.apply_business_guardrails(langchain_result, semantic_result, customer_context),
-                suggestion_source="langchain_structured_output",
-                model=config.model_name,
-                structured_output_strategy=structured_output_strategy,
-            )
-
-        raw = await self.ai_client._stream_chat_collect(
-            api_host=config.api_host,
-            api_key=api_key,
-            model=config.model_name,
-            messages=build_suggestion_messages(user_message, semantic_json, context_json),
-            temperature=min(float(config.temperature or 0.1), 0.2),
-            max_tokens=max(int(config.max_tokens or 1024), 1500),
-            response_format={"type": "json_object"},
-        )
+            raise AgentSuggestionGeneratorError(str(exc)) from exc
+        if result is None:
+            raise AgentSuggestionGeneratorError("LangChain structured output 运行时不可用。")
         return AgentSuggestionEnvelope(
-            result=self.apply_business_guardrails(self.parse_raw_response(raw), semantic_result, customer_context),
-            suggestion_source="system_ai_json_object",
+            result=self.apply_business_guardrails(result, semantic_result, customer_context),
+            suggestion_source="langchain_structured_output",
             model=config.model_name,
-            structured_output_strategy=structured_output_strategy,
-            fallback_reason=fallback_reason or "langchain_unavailable",
-            fallback_error=fallback_error,
-            fallback_error_message=fallback_error_message,
+            structured_output_strategy="tool",
         )
 
     async def _generate_with_langchain(
@@ -151,6 +123,7 @@ class AgentSuggestionGenerator:
                 api_key=api_key,
                 model=model,
                 temperature=temperature,
+                enable_thinking=agent_model_enable_thinking(model),
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 response_model=AgentSuggestionResult,
@@ -163,28 +136,6 @@ class AgentSuggestionGenerator:
                 "LangChain suggestion structured output 无效",
             )
             raise AgentSuggestionGeneratorError(message) from exc
-
-    def parse_raw_response(self, raw: str) -> AgentSuggestionResult:
-        try:
-            parsed = json.loads(self._clean_json(raw))
-            return AgentSuggestionResult.model_validate(parsed)
-        except (json.JSONDecodeError, ValidationError) as exc:
-            raise AgentSuggestionGeneratorError(f"AI 业务建议结果无效：{str(exc)}") from exc
-
-    @staticmethod
-    def _clean_json(raw: str) -> str:
-        content = raw.strip()
-        if content.startswith("```json"):
-            content = content[7:].strip()
-        elif content.startswith("```"):
-            content = content[3:].strip()
-        if content.endswith("```"):
-            content = content[:-3].strip()
-        start = content.find("{")
-        end = content.rfind("}")
-        if start >= 0 and end >= start:
-            return content[start:end + 1]
-        return content
 
     @classmethod
     def apply_business_guardrails(
@@ -327,8 +278,6 @@ class AgentSuggestionGenerator:
             return None
 
         stage_context = valid_contexts[0]
-        stages = [stage for stage in stage_context.get("procurement_stages") or [] if isinstance(stage, dict)]
-        requested_stage = next((stage for stage in stages if stage.get("id") is not None and int(stage["id"]) == target_stage_id), None)
         target_stage = cls._stage_move_target(stage_context, target_stage_id)
         if not target_stage or target_stage.get("is_current"):
             return None
@@ -542,7 +491,7 @@ class AgentSuggestionGenerator:
             return [
                 suggestion
                 for suggestion in suggestions
-                if suggestion.action in {"NO_ACTION", "CUSTOMER_QUERY_SUMMARY"}
+                if suggestion.action == "NO_ACTION"
             ] + [AgentBusinessSuggestion(
                 action="NO_ACTION",
                 title="合同环节缺失",

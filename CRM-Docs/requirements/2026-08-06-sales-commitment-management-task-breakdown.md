@@ -687,7 +687,7 @@ Phase 2 需要在 Phase 1 真实数据跑稳定后逐步打开，不能直接开
 - 样本新增 `category` 元数据，仅用于评测覆盖审查，不进入 `FollowUpTaskReconciliationEvaluationCase` 业务契约。
 - 当前覆盖分布：
   - `same_owner_complete`：6 个。
-  - `same_owner_delay`：5 个。
+  - `same_owner_postpone`：5 个。
   - `unrelated_new_action`：5 个。
   - `cross_owner_confirmation`：5 个。
   - `low_confidence_confirmation`：6 个。
@@ -757,7 +757,7 @@ Phase 2 需要在 Phase 1 真实数据跑稳定后逐步打开，不能直接开
 - 使用 LangChain structured output，输出 `SCM-P2-00` 固定的结构。
 - 支持 decision：
   - `COMPLETE`
-  - `DELAY`
+  - `POSTPONE`
   - `CANCEL`
   - `KEEP_OPEN`
   - `UNRELATED`
@@ -775,11 +775,11 @@ Phase 2 需要在 Phase 1 真实数据跑稳定后逐步打开，不能直接开
 实现记录：
 
 - 新增 `CRM-Server/app/services/task_reconciliation_semantic_matcher.py`。
-- `TaskReconciliationSemanticOutput` 使用 LangChain structured output schema，强制 `task_public_id` / `candidate_public_ids` 只能使用 `fut_` public_id，`DELAY` 必须包含 `proposed_due_at`，自动流转建议必须引用候选任务。
+- `TaskReconciliationSemanticOutput` 使用 LangChain structured output schema，强制 `task_public_id` / `candidate_public_ids` 只能使用 `fut_` public_id，`POSTPONE` 必须包含 `proposed_due_at`，自动流转建议必须引用候选任务。
 - `TaskReconciliationSemanticMatcher.match_activity` 负责按 `activity_id` 读取活动和 `TaskReconciliationService` 候选；`match_candidates` 作为底层公共 seam，便于后续接向量召回、LangGraph 节点和评测 fixture。
 - 传给 LLM 的 prompt 不暴露活动 `owner_id` 或候选任务 `owner_id`；owner 判断只在内部候选服务和 evaluation service 使用。LLM 只看到 `owner_relation`、`auto_transition_eligible` 和 `confirmation_required_reason` 等语义标记。
 - LLM 输出先归一化为 `FollowUpTaskReconciliationDecision`，再通过 `FollowUpTaskReconciliationEvaluationService` 做确定性安全校验。
-- 同 owner、高置信、证据充分且没有状态写入请求时，可以返回 `COMPLETE` / `DELAY` / `CANCEL` 建议，但 `state_mutation_requested` 永远被压为 `False`。
+- 同 owner、高置信、证据充分且没有状态写入请求时，可以返回 `COMPLETE` / `POSTPONE` / `CANCEL` 建议，但 `state_mutation_requested` 永远被压为 `False`。
 - 自动流转类建议要求 `evidence_terms` 能在当前活动内容或候选任务标题、描述、原始时间文本中命中；缺少证据或证据无法落地时降级确认。
 - 跨 owner、低置信、缺少证据、证据无法落地、未知候选、LLM 请求状态写入、LLM 不可用、schema 失败或安全合同失败，统一降级为 `ASK_CONFIRMATION` 或 `KEEP_OPEN`，并写入 `forbid_auto_reasons`。
 - 当前实现不写 `crm_follow_up_tasks`、不写任务事件、不接入客户活动投影流程；只是 Phase 2 后续状态迁移计划的只读建议输入。
@@ -813,21 +813,21 @@ Phase 2 需要在 Phase 1 真实数据跑稳定后逐步打开，不能直接开
 - 新增 `CRM-Server/app/services/follow_up_task_transition_plan_service.py`，将 `SCM-P2-03` 的只读语义匹配结果转换为状态迁移计划。
 - 当前实现只生成 `FollowUpTaskTransitionPlan` / `FollowUpTaskTransitionAction`，不写 `crm_follow_up_tasks`，不写任务事件，不触发 rollback/reopen，也不接入自动执行。
 - 计划层输出只使用任务、活动 `public_id`，不向下游计划 payload 暴露内部 owner id 或数据库主键 id。
-- `COMPLETE` / `DELAY` / `CANCEL` 只有在同 owner、高置信、候选任务存在、无需确认、无 `forbid_auto_reasons`、有证据、未请求状态写入、且 evaluation guardrail 通过时才标记 `executable=true`。
-- `DELAY` 额外要求 `proposed_due_at` 是可解析 ISO datetime；缺失或无效时转为 `ASK_CONFIRMATION`，不允许自动延期。
+- `COMPLETE` / `POSTPONE` / `CANCEL` 只有在同 owner、高置信、候选任务存在、无需确认、无 `forbid_auto_reasons`、有证据、未请求状态写入、且 evaluation guardrail 通过时才标记 `executable=true`。
+- `POSTPONE` 额外要求 `proposed_due_at` 是可解析 ISO datetime；缺失或无效时转为 `ASK_CONFIRMATION`，不允许自动延期。
 - 跨 owner、低置信、未知候选、已有禁止自动原因、需要确认、LLM 请求状态写入或 guardrail 失败时统一输出不可执行的确认计划。
 - `KEEP_OPEN` / `UNRELATED` 统一输出 `NOOP`，不产生状态迁移。
 - 新增 `CRM-Server/tests/unit/test_follow_up_task_transition_plan_service.py`，覆盖同 owner 高置信完成可执行、无效延期时间阻断、跨 owner 和低置信阻断、未知候选阻断、KEEP_OPEN/UNRELATED no-op、计划输出不暴露内部 owner id、可从 semantic match result 构建计划。
 - 新增 `CRM-Server/app/services/follow_up_task_transition_execution_service.py`，作为受控状态迁移 executor。该服务默认 `enabled=false`，不接入投影流程、Agent 自动调用或 IM Bot 自动调用。
-- executor 只消费计划层 `executable=true` 且无需确认的 `COMPLETE` / `DELAY` / `CANCEL` action；执行前按 task `public_id` 回表校验 team、OPEN 状态和 owner。
-- `COMPLETE` / `CANCEL` 使用现有 `follow_up_task_crud.complete/cancel(commit=False)`，`DELAY` 使用 `follow_up_task_crud.update(commit=False)` 更新 `due_at` 并保持 `OPEN`。
+- executor 只消费计划层 `executable=true` 且无需确认的 `COMPLETE` / `POSTPONE` / `CANCEL` action；执行前按 task `public_id` 回表校验 team、OPEN 状态和 owner。
+- `COMPLETE` / `CANCEL` 使用现有 `follow_up_task_crud.complete/cancel(commit=False)`，`POSTPONE` 使用 `follow_up_task_crud.update(commit=False)` 更新 `due_at` 并保持 `OPEN`。
 - executor 通过 `follow_up_task_event_crud.record_status_change(commit=False)` 写事件，payload 包含 plan_source、action、task_public_id、confidence、evidence_terms、source_activity_public_id、proposed_due_at 和 decision，不暴露内部 owner id。
 - 新增 `CRM-Server/tests/unit/test_follow_up_task_transition_execution_service.py`，覆盖默认关闭不落库、启用后完成任务并写事件、owner mismatch 阻断、延期任务不关闭。
 - 新增 `CRM-Server/app/services/follow_up_task_transition_policy_service.py`，作为自动状态迁移的团队灰度策略服务；该服务只负责判断是否允许自动执行，不负责生成计划或写任务状态。
 - 灰度配置复用 `crm_system_configs`，新增 `ConfigType.AUTOMATION` 用于自动化策略类配置；当前配置键：
   - `follow_up_task_auto_transition_enabled`：团队总开关，缺失或非 bool 时失败关闭。
   - `follow_up_task_auto_transition_owner_allowlist`：owner allowlist，可选；缺失表示团队开启后不按 owner 限制，存在时必须是字符串数组，空数组表示不允许任何 owner 自动执行。
-  - `follow_up_task_auto_transition_action_allowlist`：action allowlist，可选；缺失时默认允许 `COMPLETE` / `DELAY` / `CANCEL`，存在时必须是上述 action 的字符串数组。
+  - `follow_up_task_auto_transition_action_allowlist`：action allowlist，可选；缺失时默认允许 `COMPLETE` / `POSTPONE` / `CANCEL`，存在时必须是上述 action 的字符串数组。
 - 策略服务失败关闭：配置缺失、JSON 解析失败、类型错误、未知 action、owner 不在 allowlist、action 不在 allowlist，均返回 `allowed=false`，调用方不得把 executor 打开。
 - 策略服务不暴露给 LLM，不进入 Agent prompt；后续投影链路、Agent Web 和 IM Bot 集成都必须先拿策略结果，再决定是否以 `enabled=true` 调用 executor。
 - 新增 `CRM-Server/tests/unit/test_follow_up_task_transition_policy_service.py`，覆盖配置缺失默认关闭、团队开启、团队关闭、owner allowlist、action allowlist、无效配置失败关闭。
@@ -878,15 +878,15 @@ Phase 2 需要在 Phase 1 真实数据跑稳定后逐步打开，不能直接开
 - `interpret_reply` 已覆盖常见销售回复：
   - “已确认/完成/通过了/已处理” -> `COMPLETE`。
   - “不管了/不用管/取消” -> `CANCEL`。
-  - “下周五再说/明天/后天/几天后”等带时间回复 -> `DELAY`，并解析 `resolved_due_at`。
+  - “下周五再说/明天/后天/几天后”等带时间回复 -> `POSTPONE`，并解析 `resolved_due_at`。
   - “先放着/还没有进展/继续跟进” -> `KEEP_OPEN`。
   - 无法判断时 -> `UNKNOWN`，不关闭确认 Case。
 - `resolve_case_from_reply` 只把 pending confirmation case 标记为 `RESOLVED` 并保存用户原始回复、解析动作、解析延期时间和处理人；它不调用 executor，不写任务事件，不改变任务状态。
 - 新增 `CRM-Server/app/services/follow_up_task_confirmation_application_service.py`，负责把已解析的确认 Case 转换为用户确认后的 transition plan，并统一调用 `FollowUpTaskTransitionExecutionService` 应用任务变更。
 - 确认应用服务在关闭 Case 前预校验 `actor_id == case.owner_id`，非 owner 回复不能关闭 Case，也不能修改任务；executor 仍会二次校验 team、task public_id、OPEN 状态和 owner。
 - 用户明确确认回复属于“人工确认后的操作”，不依赖自动流转灰度策略开关；自动流转策略仍只用于无需用户确认的自动完成、延期和取消。
-- `COMPLETE` / `DELAY` / `CANCEL` 会通过 executor 写正常任务事件；`KEEP_OPEN` 只关闭确认 Case 并记录应用结果，不改变任务状态；`UNKNOWN` 保持 pending，不关闭 Case，不写任务事件，只记录未解析回复 trace。
-- 确认应用结果写回 Case 后具备幂等性；同一 `case_public_id` 重放时直接返回已记录应用结果，不会再次调用 executor，尤其避免 `DELAY` 重放产生重复 `UPDATED` 事件。
+- `COMPLETE` / `POSTPONE` / `CANCEL` 会通过 executor 写正常任务事件；`KEEP_OPEN` 只关闭确认 Case 并记录应用结果，不改变任务状态；`UNKNOWN` 保持 pending，不关闭 Case，不写任务事件，只记录未解析回复 trace。
+- 确认应用结果写回 Case 后具备幂等性；同一 `case_public_id` 重放时直接返回已记录应用结果，不会再次调用 executor，尤其避免 `POSTPONE` 重放产生重复 `UPDATED` 事件。
 - 新增 `CRM-Server/app/services/follow_up_task_confirmation_channel_service.py`，作为 Web Agent、IM Agent 和后续页面按钮复用的业务通道服务。通道层只传 `case_public_id` 和用户原始回复，不复制确认解析、owner 校验或任务状态迁移逻辑。
 - 共享 Channel Service 在 `UNKNOWN` 回复时返回 `assistant_follow_up_prompt`，供 Web Agent / IM Agent 使用同一条追问建议，不在渠道层复制判断逻辑。
 - 新增 `FollowUpTaskConfirmationPromptDelivery` 模型和 `crm_follow_up_task_confirmation_prompt_deliveries` 表，记录确认问题每次被投递到 Web Agent / IM Bot 的事实。delivery log 使用 `fcp_` public_id，保存 `case_id`、`owner_id`、`channel`、`provider`、`agent_session_id`、`interaction_id`、`prompt_key`、`status`、`payload_json` 和 `prompted_at`。
@@ -957,7 +957,7 @@ Phase 2 需要在 Phase 1 真实数据跑稳定后逐步打开，不能直接开
 - 候选检索层保持只读：`TaskReconciliationService.list_candidates_for_activity` 默认只返回同客户、同活动 owner 的开放任务；只有调用方显式传 `include_cross_owner=True` 时才纳入跨 owner 候选。
 - 跨 owner 候选统一标记为 `auto_transition_eligible=False`、`confirmation_required_reason=CROSS_OWNER`，并在 `candidate_reasons` 中写入 `cross_owner_confirmation_only`；同 owner 候选仍按 due window、时间和 public_id 顺序稳定排序。
 - Reconciliation run trace 已记录 `include_cross_owner`、过滤条件、usage policy 和 `candidate_public_ids_json`；候选快照只保存任务 `public_id`，不保存任务数据库主键。
-- LLM semantic matcher 的 prompt 不暴露 `owner_id`，只暴露 `owner_relation=same_owner|cross_owner_confirmation_only`、`auto_transition_eligible` 和确认原因；模型即便返回跨 owner 的 `COMPLETE`、`DELAY` 或 `CANCEL`，本地 guardrail 也会降级为 `ASK_CONFIRMATION`。
+- LLM semantic matcher 的 prompt 不暴露 `owner_id`，只暴露 `owner_relation=same_owner|cross_owner_confirmation_only`、`auto_transition_eligible` 和确认原因；模型即便返回跨 owner 的 `COMPLETE`、`POSTPONE` 或 `CANCEL`，本地 guardrail 也会降级为 `ASK_CONFIRMATION`。
 - Transition plan 再次执行安全校验：跨 owner、低置信、缺证据、未知候选或非法 public_id 都不能生成 executable action；跨 owner mutating decision 统一转为 `ASK_CONFIRMATION`。
 - Confirmation application 以确认 Case owner 为业务权限边界；非 owner 即使拿到 case public_id 并回复“已完成”，也只返回 `CONFIRMATION_ACTOR_NOT_OWNER`，不会关闭 Case 或修改任务。
 - Executor 使用 `expected_owner_id or actor_id` 做最终 owner mismatch guardrail；即使上游 plan 异常把跨 owner action 标成 executable，执行层仍会跳过并返回 `TASK_OWNER_MISMATCH`。
@@ -1008,7 +1008,7 @@ Phase 2 需要在 Phase 1 真实数据跑稳定后逐步打开，不能直接开
 - `FollowUpTaskEventResponse` 已暴露事件 `id/public_id`，同时继续隐藏内部 `task_id` 和 `source_activity_id`。
 - 自动状态迁移 executor 写事件时，payload 中新增 `rollback` 快照：
   - `COMPLETE` / `CANCEL` 记录 `type=REOPEN`，保留 previous status 和 previous due_at 字段。
-  - `DELAY` 记录 `type=RESTORE_DUE_AT`，保留延期前的 `due_at`、`due_at_text`、`due_at_granularity` 和 `due_at_timezone`。
+  - `POSTPONE` 记录 `type=RESTORE_DUE_AT`，保留延期前的 `due_at`、`due_at_text`、`due_at_granularity` 和 `due_at_timezone`。
 - `FollowUpTaskTransitionExecutionService.rollback_event` 支持按 `event_public_id` 幂等撤销自动迁移事件；事件 payload 使用 `execution_kind` 区分 `automatic` 和 `manual_confirmation`，用户明确确认后的操作不走自动回滚入口。
   - 自动完成/取消通过 `reopen` 恢复为 `OPEN`，清空 `completed_at` / `cancelled_at`。
   - 自动延期恢复延期前 due_at 相关字段。
@@ -1088,7 +1088,7 @@ Phase 2 需要在 Phase 1 真实数据跑稳定后逐步打开，不能直接开
 - 接入任务状态变化入口：
   - `FollowUpTaskProjectionService` 取消同源任务时，同步取消该任务关联 pending Case。
   - `FollowUpTaskTransitionExecutionService` 自动完成/取消任务后，同步取消该任务关联 pending Case。
-  - `DELAY` 不取消 pending Case，因为任务仍保持 `OPEN`，用户确认问题仍可能有效。
+  - `POSTPONE` 不取消 pending Case，因为任务仍保持 `OPEN`，用户确认问题仍可能有效。
 
 验收：
 
@@ -1206,7 +1206,7 @@ metadata contract：
 - `FollowUpTaskTransitionExecutionService` 在以下真实执行路径中刷新任务 metadata：
   - `COMPLETE`：任务变为 `COMPLETED` 后刷新 `status`、`completed_at`。
   - `CANCEL`：任务变为 `CANCELLED` 后刷新 `status`、`cancelled_at`。
-  - `DELAY`：任务保持 `OPEN`，刷新 `due_at`、`due_at_text` 和证据快照。
+  - `POSTPONE`：任务保持 `OPEN`，刷新 `due_at`、`due_at_text` 和证据快照。
   - `ROLLBACK`：任务重开或恢复 due_at 后刷新当前任务 metadata。
 - 所有调用均使用 `commit=False`，由投影服务或状态执行器的外层事务统一 commit。
 - 本阶段不直接调用 Qdrant。服务只把 `crm_customer_vector_documents.sync_status` 置为 `PENDING`，实际写入 Qdrant 继续由 `CustomerVectorSyncService` 执行。
@@ -1610,7 +1610,7 @@ ticket：
 - `CRM-Server/app/crud/sales_commitment.py` 的评测运行持久化已兼容非 reconciliation 指标：
   - reconciliation 专用列继续保留。
   - work summary 指标完整保存到 `metrics_json`。
-  - 非 reconciliation 套件的 `false_close` / `false_delay` / `missed_confirmation` / `over_confirmation` 汇总列为 0。
+  - 非 reconciliation 套件的 `false_close` / `false_postpone` / `missed_confirmation` / `over_confirmation` 汇总列为 0。
 - 人工校正第一版不直接改事实、不直接改 prompt：
   - 校正以 `WorkSummaryHumanCorrection` 结构保存到评测样本或后续反馈表。
   - 支持 `missing_fact`、`remove_fact`、`reclassify_item`、`rewrite_summary`、`time_window_fix`、`owner_scope_fix`、`citation_fix`。

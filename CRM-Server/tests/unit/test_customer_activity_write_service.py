@@ -1,5 +1,6 @@
 """Architecture tests for the customer-activity transactional write seam."""
 
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
@@ -277,3 +278,133 @@ def test_activity_intelligence_event_identity_changes_with_revision_without_chan
     assert revision_one.event_key != revision_two.event_key
     assert revision_one.source.source_object_id == revision_two.source.source_object_id == "212"
     assert revision_two.payload["activity_revision"] == 2
+
+
+class _StructuredContentActivityCRUD(_FakeActivityCRUD):
+    def __init__(self, *, next_action, next_action_source, next_follow_time, next_follow_time_source) -> None:
+        super().__init__()
+        self.activity = SimpleNamespace(
+            id=212,
+            team_id=1,
+            customer_id=10,
+            creator_id="1",
+            post_commit_revision=1,
+            activity_kind="WECHAT_FOLLOW_UP",
+            title="原始跟进",
+            summary="原始跟进",
+            source_content="原始跟进",
+            next_action=next_action,
+            next_action_source=next_action_source,
+            next_follow_time=next_follow_time,
+            next_follow_time_source=next_follow_time_source,
+            occurred_at=None,
+        )
+        self.structured_content_calls = []
+
+    def get_by_id(self, db, activity_id, team_id=None):
+        if activity_id != self.activity.id:
+            return None
+        if team_id is not None and team_id != self.activity.team_id:
+            return None
+        return self.activity
+
+    def update_processed_content(self, db, activity_id, **kwargs):
+        assert kwargs["commit"] is False
+        self.structured_content_calls.append(kwargs)
+        for field in (
+            "title",
+            "summary",
+            "next_action",
+            "next_action_source",
+            "next_follow_time",
+            "next_follow_time_source",
+        ):
+            value = kwargs.get(field)
+            if value is not None:
+                setattr(self.activity, field, value)
+        self.activity.post_commit_revision += 1
+        return self.activity
+
+    def update_effectiveness_status(self, db, activity_id, status, *, commit):
+        assert activity_id == self.activity.id
+        assert status == "GENERATING"
+        assert commit is False
+        return self.activity
+
+
+def test_ai_structuring_preserves_agent_owned_next_step_fields():
+    explicit_time = datetime(2026, 8, 27, 9, 0, 0)
+    activity_crud = _StructuredContentActivityCRUD(
+        next_action="跟进客户 POC 环境部署情况",
+        next_action_source="AGENT",
+        next_follow_time=explicit_time,
+        next_follow_time_source="AGENT",
+    )
+    service = CustomerActivityWriteService(
+        activity_crud=activity_crud,
+        post_commit_job_service=_FakePostCommitJobs(),
+        intelligence_event_service=CustomerIntelligenceEventService(),
+        intelligence_refresh_service=_FakeIntelligenceRefresh(),
+        confirmation_cleanup_service=_FakeConfirmationCleanup(),
+    )
+
+    result = service.persist_structured_content(
+        _FakeSession(),
+        activity_id=212,
+        team_id=1,
+        title="AI 整理标题",
+        content_json={"content": "AI 整理正文"},
+        summary="AI 整理摘要",
+        next_action="提供私有环境安装包和试用方案",
+        next_action_source="AI_EXTRACTED",
+        next_follow_time=datetime(2026, 8, 28, 9, 0, 0),
+        next_follow_time_source="AI_EXTRACTED",
+        post_commit_trigger_type="ACTIVITY_STRUCTURED_COMPLETED",
+        actor_id=None,
+    )
+
+    assert result.activity.next_action == "跟进客户 POC 环境部署情况"
+    assert result.activity.next_action_source == "AGENT"
+    assert result.activity.next_follow_time == explicit_time
+    assert result.activity.next_follow_time_source == "AGENT"
+    assert activity_crud.structured_content_calls[0]["next_action"] is None
+    assert activity_crud.structured_content_calls[0]["next_action_source"] is None
+    assert activity_crud.structured_content_calls[0]["next_follow_time"] is None
+    assert activity_crud.structured_content_calls[0]["next_follow_time_source"] is None
+
+
+def test_ai_structuring_fills_empty_next_step_fields_with_ai_provenance():
+    ai_time = datetime(2026, 8, 27, 9, 0, 0)
+    activity_crud = _StructuredContentActivityCRUD(
+        next_action=None,
+        next_action_source=None,
+        next_follow_time=None,
+        next_follow_time_source=None,
+    )
+    service = CustomerActivityWriteService(
+        activity_crud=activity_crud,
+        post_commit_job_service=_FakePostCommitJobs(),
+        intelligence_event_service=CustomerIntelligenceEventService(),
+        intelligence_refresh_service=_FakeIntelligenceRefresh(),
+        confirmation_cleanup_service=_FakeConfirmationCleanup(),
+    )
+
+    result = service.persist_structured_content(
+        _FakeSession(),
+        activity_id=212,
+        team_id=1,
+        title="AI 整理标题",
+        content_json={"content": "AI 整理正文"},
+        summary="AI 整理摘要",
+        next_action="跟进客户 POC 环境部署情况",
+        next_action_source="AI_EXTRACTED",
+        next_follow_time=ai_time,
+        next_follow_time_source="AI_EXTRACTED",
+        post_commit_trigger_type="ACTIVITY_STRUCTURED_COMPLETED",
+        actor_id=None,
+    )
+
+    assert result.activity.next_action == "跟进客户 POC 环境部署情况"
+    assert result.activity.next_action_source == "AI_EXTRACTED"
+    assert result.activity.next_follow_time == ai_time
+    assert result.activity.next_follow_time_source == "AI_EXTRACTED"

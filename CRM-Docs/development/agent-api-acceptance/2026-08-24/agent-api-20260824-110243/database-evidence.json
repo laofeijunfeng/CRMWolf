@@ -1,0 +1,773 @@
+{
+  "captured_at": "2026-08-24T11:45:00+08:00",
+  "scope": {
+    "team_id": 3,
+    "user_id": 10,
+    "batch_id": "agent-api-20260824-110243"
+  },
+  "initial_manifest": {
+    "customers": 60,
+    "contacts": 10,
+    "customer_activities": 10,
+    "follow_up_tasks": 10,
+    "total_business_records": 90
+  },
+  "current_batch_counts": {
+    "current_customer_count": 61,
+    "current_shanghai_count": 21,
+    "min_customer_id": 143,
+    "max_customer_id": 203
+  },
+  "selected_entity_sessions": [
+    {
+      "id": 872,
+      "team_id": 3,
+      "user_id": 10,
+      "status": "ACTIVE",
+      "context_json": {
+        "selected_entity_ref": {
+          "ref_id": "eref_selected_guangzhou",
+          "resource": "customer",
+          "public_id": "cus_8dac49de90624e46be4ade2397cb2995",
+          "display_name": "API验收-110243-广州客户01有限公司"
+        }
+      },
+      "created_time": "2026-08-24T11:27:42"
+    },
+    {
+      "id": 873,
+      "team_id": 3,
+      "user_id": 10,
+      "status": "ACTIVE",
+      "context_json": {
+        "selected_entity_ref": {
+          "ref_id": "eref_selected_guangzhou",
+          "resource": "customer",
+          "public_id": "cus_8dac49de90624e46be4ade2397cb2995",
+          "display_name": "API验收-110243-广州客户01有限公司"
+        }
+      },
+      "created_time": "2026-08-24T11:28:27"
+    },
+    {
+      "id": 877,
+      "team_id": 3,
+      "user_id": 10,
+      "status": "ACTIVE",
+      "context_json": {
+        "selected_entity_ref": {
+          "ref_id": "eref_selected_guangzhou",
+          "resource": "customer",
+          "public_id": "cus_8dac49de90624e46be4ade2397cb2995",
+          "display_name": "API验收-110243-广州客户01有限公司"
+        }
+      },
+      "created_time": "2026-08-24T11:29:31"
+    }
+  ],
+  "side_effects": {
+    "ac06_created_customer_rows": [
+      {
+        "id": 203,
+        "public_id": "cus_ac67f8865d4c4ae281679ed81c88a127",
+        "team_id": 3,
+        "account_name": "API验收-110243-结构确认客户有限公司",
+        "city": "上海",
+        "industry": "other",
+        "status": 0,
+        "owner_id": "10",
+        "creator_id": "10",
+        "created_time": "2026-08-24T11:30:20"
+      }
+    ],
+    "ac06_created_customer_count": 1,
+    "ac14_matching_activity_rows": [],
+    "ac14_matching_activity_count": 0,
+    "ac15_cancelled_customer_rows": [],
+    "ac15_cancelled_customer_count": 0,
+    "ac15_modify_customer_rows": [],
+    "ac15_modify_customer_count": 0
+  },
+  "ui_action_evidence": [
+    {
+      "public_id": "act_a8bba69b40774aa299f3f83fa8ee90d8",
+      "session_id": 874,
+      "message_id": 2268,
+      "action_type": "start_workflow",
+      "status": "CONSUMED",
+      "consumed_request_id": "b8f5d308-6f15-4046-996b-1cbcd272c4eb",
+      "result_message_id": 2270,
+      "created_time": "2026-08-24T11:29:03",
+      "last_modified_time": "2026-08-24T11:29:09"
+    },
+    {
+      "public_id": "act_0d2ec60ac00b42dab6593e43714af4d3",
+      "session_id": 878,
+      "message_id": 2280,
+      "action_type": "submit_interaction",
+      "status": "CONSUMED",
+      "consumed_request_id": "2eb04d99-0603-46a8-8e67-0d93e9536082",
+      "result_message_id": 2282,
+      "created_time": "2026-08-24T11:30:20",
+      "last_modified_time": "2026-08-24T11:30:20"
+    },
+    {
+      "public_id": "act_291075c3d33b4eaf8954a2291d88da1a",
+      "session_id": 881,
+      "message_id": 2292,
+      "action_type": "submit_interaction",
+      "status": "CONSUMED",
+      "consumed_request_id": "8c384903-35f7-417a-b403-bd2f18ed2d57",
+      "result_message_id": 2294,
+      "created_time": "2026-08-24T11:31:51",
+      "last_modified_time": "2026-08-24T11:31:51"
+    },
+    {
+      "public_id": "act_6029a049ca5b4c91be0d9f379daba421",
+      "session_id": 882,
+      "message_id": 2296,
+      "action_type": "submit_interaction",
+      "status": "ACTIVE",
+      "consumed_request_id": null,
+      "result_message_id": null,
+      "created_time": "2026-08-24T11:32:13",
+      "last_modified_time": "2026-08-24T11:32:13"
+    }
+  ],
+  "workflow_action_evidence": [],
+  "result_set_evidence": [
+    {
+      "public_id": "rs_602404503d85488d9e95bdd606c4c76b",
+      "session_id": 872,
+      "source_message_id": 2258,
+      "resource": "customer",
+      "row_count": 20,
+      "query_json": {
+        "scope": "accessible",
+        "sorts": [
+          {
+            "field": "account_name",
+            "direction": "asc"
+          }
+        ],
+        "cursor": null,
+        "filters": [
+          {
+            "field": "city",
+            "value": "上海",
+            "operator": "eq"
+          }
+        ],
+        "metrics": [],
+        "group_by": [],
+        "resource": "customer",
+        "page_size": 50,
+        "projection": [
+          "public_id",
+          "account_name",
+          "city",
+          "industry",
+          "status",
+          "owner"
+        ]
+      },
+      "created_time": "2026-08-24T11:27:56"
+    },
+    {
+      "public_id": "rs_c04272f461754997b62d48e34ca1f83d",
+      "session_id": 874,
+      "source_message_id": 2268,
+      "resource": "customer",
+      "row_count": 20,
+      "query_json": {
+        "scope": "accessible",
+        "sorts": [],
+        "cursor": null,
+        "filters": [
+          {
+            "field": "city",
+            "value": "上海",
+            "operator": "eq"
+          }
+        ],
+        "metrics": [],
+        "group_by": [],
+        "resource": "customer",
+        "page_size": 50,
+        "projection": [
+          "public_id",
+          "account_name",
+          "city",
+          "industry",
+          "status",
+          "owner"
+        ]
+      },
+      "created_time": "2026-08-24T11:29:03"
+    },
+    {
+      "public_id": "rs_306b5ab1b20542bda2fe2e4079b8949b",
+      "session_id": 875,
+      "source_message_id": 2272,
+      "resource": "customer",
+      "row_count": 0,
+      "query_json": {
+        "scope": "accessible",
+        "sorts": [],
+        "cursor": null,
+        "filters": [
+          {
+            "field": "city",
+            "value": "月球",
+            "operator": "eq"
+          }
+        ],
+        "metrics": [],
+        "group_by": [],
+        "resource": "customer",
+        "page_size": 50,
+        "projection": [
+          "public_id",
+          "account_name",
+          "city",
+          "industry",
+          "status",
+          "owner"
+        ]
+      },
+      "created_time": "2026-08-24T11:29:19"
+    },
+    {
+      "public_id": "rs_7ed144a9eb954357a6bd50ac0cf04bd0",
+      "session_id": 876,
+      "source_message_id": 2274,
+      "resource": "customer",
+      "row_count": 0,
+      "query_json": {
+        "scope": "accessible",
+        "sorts": [],
+        "cursor": null,
+        "filters": [
+          {
+            "field": "account_name",
+            "value": "华米（北京）信息科技有限公司",
+            "operator": "eq"
+          }
+        ],
+        "metrics": [],
+        "group_by": [],
+        "resource": "customer",
+        "page_size": 50,
+        "projection": [
+          "public_id",
+          "account_name",
+          "city",
+          "industry",
+          "status",
+          "owner"
+        ]
+      },
+      "created_time": "2026-08-24T11:29:31"
+    },
+    {
+      "public_id": "rs_1837ce2b2d024a13bb0a16c272ccddbd",
+      "session_id": 879,
+      "source_message_id": 2286,
+      "resource": "customer",
+      "row_count": 21,
+      "query_json": {
+        "scope": "accessible",
+        "sorts": [],
+        "cursor": null,
+        "filters": [
+          {
+            "field": "city",
+            "value": "上海",
+            "operator": "eq"
+          }
+        ],
+        "metrics": [],
+        "group_by": [],
+        "resource": "customer",
+        "page_size": 50,
+        "projection": [
+          "public_id",
+          "account_name",
+          "city",
+          "industry",
+          "status",
+          "owner"
+        ]
+      },
+      "created_time": "2026-08-24T11:30:54"
+    },
+    {
+      "public_id": "rs_f68b8cd41eb34e29a29d058cae629c38",
+      "session_id": 883,
+      "source_message_id": 2302,
+      "resource": "customer",
+      "row_count": 1,
+      "query_json": {
+        "scope": "accessible",
+        "sorts": [],
+        "cursor": null,
+        "filters": [
+          {
+            "field": "account_name",
+            "value": "API验收-110243-上海客户01有限公司",
+            "operator": "eq"
+          }
+        ],
+        "metrics": [],
+        "group_by": [],
+        "resource": "customer",
+        "page_size": 50,
+        "projection": [
+          "public_id",
+          "account_name",
+          "city",
+          "industry",
+          "status",
+          "owner"
+        ]
+      },
+      "created_time": "2026-08-24T11:33:31"
+    }
+  ],
+  "message_diagnostics_evidence": [
+    {
+      "id": 2258,
+      "session_id": 872,
+      "role": "ASSISTANT",
+      "turn_id": "turn_f26f9ca936664fabb61a5066e58545f5",
+      "client_request_id": null,
+      "created_time": "2026-08-24T11:27:56",
+      "decision": {
+        "risk": "READ_ONLY",
+        "route": "QUERY",
+        "evidence": [
+          "用户提出独立的客户查询",
+          "查询明确限定城市为上海",
+          "当前未提供可继续的既有任务上下文",
+          "用户文本包含明确且独立的只读查询请求"
+        ],
+        "confidence": 1.0,
+        "reason_code": "EXPLICIT_INDEPENDENT_READ_QUERY",
+        "task_relation": "NEW_TASK",
+        "context_policy": {
+          "result_set": "IGNORE",
+          "previous_query": "IGNORE",
+          "active_workflow": "NONE",
+          "selected_entity": "IGNORE"
+        }
+      },
+      "failure": null,
+      "dispatch_type": "query"
+    },
+    {
+      "id": 2260,
+      "session_id": 872,
+      "role": "ASSISTANT",
+      "turn_id": "turn_358c66a04442473a869d4ed1136a6d76",
+      "client_request_id": null,
+      "created_time": "2026-08-24T11:28:09",
+      "decision": {
+        "risk": "READ_ONLY",
+        "route": "QUERY",
+        "evidence": [
+          "用户以“呢”追问重点客户，语义承接上一轮客户查询",
+          "当前上下文提供了上海客户的前序查询条件",
+          "用户未指定单个客户或新的城市条件"
+        ],
+        "confidence": 0.86,
+        "reason_code": "REFINE_PREVIOUS_QUERY",
+        "task_relation": "CONTINUE_TASK",
+        "context_policy": {
+          "result_set": "IGNORE",
+          "previous_query": "USE",
+          "active_workflow": "NONE",
+          "selected_entity": "IGNORE"
+        }
+      },
+      "failure": null,
+      "dispatch_type": "query"
+    },
+    {
+      "id": 2262,
+      "session_id": 872,
+      "role": "ASSISTANT",
+      "turn_id": "turn_e7ee43eecd0d4f0ab967552785dd6d8a",
+      "client_request_id": null,
+      "created_time": "2026-08-24T11:28:27",
+      "decision": {
+        "risk": "READ_ONLY",
+        "route": "QUERY",
+        "evidence": [
+          "用户以“第一个客户”明确指向当前结果集的首个条目",
+          "用户仅请求查看最近跟进情况，属于只读查询"
+        ],
+        "confidence": 0.99,
+        "reason_code": "FIRST_RESULT_FOLLOW_UP_QUERY",
+        "task_relation": "CONTINUE_TASK",
+        "context_policy": {
+          "result_set": "USE",
+          "previous_query": "IGNORE",
+          "active_workflow": "NONE",
+          "selected_entity": "IGNORE"
+        }
+      },
+      "failure": null,
+      "dispatch_type": "failure"
+    },
+    {
+      "id": 2264,
+      "session_id": 873,
+      "role": "ASSISTANT",
+      "turn_id": "turn_fef1b6b051704541a3cea4c4100e8ab3",
+      "client_request_id": null,
+      "created_time": "2026-08-24T11:28:32",
+      "decision": {
+        "risk": "READ_ONLY",
+        "route": "CLARIFY",
+        "evidence": [
+          "本轮询问使用“这个客户”，但未提供可识别的客户实体或上下文。"
+        ],
+        "confidence": 0.99,
+        "reason_code": "MISSING_CUSTOMER_CONTEXT",
+        "task_relation": "NEW_TASK",
+        "context_policy": {
+          "result_set": "IGNORE",
+          "previous_query": "IGNORE",
+          "active_workflow": "NONE",
+          "selected_entity": "IGNORE"
+        }
+      },
+      "failure": null,
+      "dispatch_type": "clarification"
+    },
+    {
+      "id": 2266,
+      "session_id": 873,
+      "role": "ASSISTANT",
+      "turn_id": "turn_850c5a26469e4442b8962d92305b47f0",
+      "client_request_id": null,
+      "created_time": "2026-08-24T11:28:46",
+      "decision": {
+        "risk": "READ_ONLY",
+        "route": "QUERY",
+        "evidence": [
+          "用户明确指定了客户名称“上海客户01有限公司”",
+          "用户询问该客户的负责人，属于信息查询",
+          "未提供可继续的活动工作流或上下文"
+        ],
+        "confidence": 0.99,
+        "reason_code": "CUSTOMER_OWNER_LOOKUP",
+        "task_relation": "NEW_TASK",
+        "context_policy": {
+          "result_set": "IGNORE",
+          "previous_query": "IGNORE",
+          "active_workflow": "NONE",
+          "selected_entity": "IGNORE"
+        }
+      },
+      "failure": null,
+      "dispatch_type": "query"
+    },
+    {
+      "id": 2270,
+      "session_id": 874,
+      "role": "ASSISTANT",
+      "turn_id": "turn_99172626adbf4e47b0908ee1d094ed3a",
+      "client_request_id": null,
+      "created_time": "2026-08-24T11:29:09",
+      "decision": {
+        "risk": "WRITE",
+        "route": "CLARIFY",
+        "evidence": [
+          "用户明确指定客户名称，且与当前选中客户一致",
+          "用户请求创建跟进任务，属于写操作",
+          "未提供跟进任务的具体内容或时间等必要信息"
+        ],
+        "confidence": 0.93,
+        "reason_code": "CREATE_FOLLOW_UP_DETAILS_MISSING",
+        "task_relation": "NEW_TASK",
+        "context_policy": {
+          "result_set": "IGNORE",
+          "previous_query": "IGNORE",
+          "active_workflow": "NONE",
+          "selected_entity": "USE"
+        }
+      },
+      "failure": null,
+      "dispatch_type": "clarification"
+    },
+    {
+      "id": 2272,
+      "session_id": 875,
+      "role": "ASSISTANT",
+      "turn_id": "turn_88259df13e364f339745ebcb8b41a5e3",
+      "client_request_id": null,
+      "created_time": "2026-08-24T11:29:19",
+      "decision": {
+        "risk": "READ_ONLY",
+        "route": "QUERY",
+        "evidence": [
+          "用户提出独立的客户查询",
+          "明确指定新的地点条件“月球”",
+          "没有可用的上下文或已选实体",
+          "用户文本包含明确且独立的只读查询请求"
+        ],
+        "confidence": 1.0,
+        "reason_code": "EXPLICIT_INDEPENDENT_READ_QUERY",
+        "task_relation": "NEW_TASK",
+        "context_policy": {
+          "result_set": "IGNORE",
+          "previous_query": "IGNORE",
+          "active_workflow": "NONE",
+          "selected_entity": "IGNORE"
+        }
+      },
+      "failure": null,
+      "dispatch_type": "query"
+    },
+    {
+      "id": 2274,
+      "session_id": 876,
+      "role": "ASSISTANT",
+      "turn_id": "turn_fecf516183f741ad8048ef6b549db093",
+      "client_request_id": null,
+      "created_time": "2026-08-24T11:29:31",
+      "decision": {
+        "risk": "READ_ONLY",
+        "route": "QUERY",
+        "evidence": [
+          "用户明确指定了新的公司名称“华米（北京）信息科技有限公司”",
+          "用户请求查询公司介绍和负责人信息，属于只读查询",
+          "当前未提供可继续的活动工作流或上下文实体"
+        ],
+        "confidence": 0.99,
+        "reason_code": "NEW_COMPANY_INFO_QUERY",
+        "task_relation": "NEW_TASK",
+        "context_policy": {
+          "result_set": "IGNORE",
+          "previous_query": "IGNORE",
+          "active_workflow": "NONE",
+          "selected_entity": "IGNORE"
+        }
+      },
+      "failure": null,
+      "dispatch_type": "query"
+    },
+    {
+      "id": 2288,
+      "session_id": 879,
+      "role": "ASSISTANT",
+      "turn_id": "turn_efab947d67944448b1d592646eeaf3d5",
+      "client_request_id": null,
+      "created_time": "2026-08-24T11:31:13",
+      "decision": {
+        "risk": "WRITE",
+        "route": "WORKFLOW",
+        "evidence": [
+          "用户明确要求“继续刚才的任务”",
+          "存在可恢复的活动工作流",
+          "未提供新的业务目标或对象"
+        ],
+        "confidence": 0.88,
+        "reason_code": "EXPLICIT_WORKFLOW_CONTINUATION",
+        "task_relation": "CONTINUE_TASK",
+        "context_policy": {
+          "result_set": "USE",
+          "previous_query": "USE",
+          "active_workflow": "RESUME",
+          "selected_entity": "IGNORE"
+        }
+      },
+      "failure": null,
+      "dispatch_type": "workflow"
+    },
+    {
+      "id": 2290,
+      "session_id": 880,
+      "role": "ASSISTANT",
+      "turn_id": "turn_ed2f37a36f16467081f05b6ac49e065b",
+      "client_request_id": null,
+      "created_time": "2026-08-24T11:31:33",
+      "decision": {
+        "risk": "WRITE",
+        "route": "WORKFLOW",
+        "evidence": [
+          "用户明确要求为指定客户记录跟进",
+          "请求将跟进内容写入CRM记录",
+          "未提供可延续的当前工作流或已选实体"
+        ],
+        "confidence": 0.99,
+        "reason_code": "CREATE_FOLLOW_UP",
+        "task_relation": "NEW_TASK",
+        "context_policy": {
+          "result_set": "IGNORE",
+          "previous_query": "IGNORE",
+          "active_workflow": "NONE",
+          "selected_entity": "IGNORE"
+        }
+      },
+      "failure": null,
+      "dispatch_type": "workflow"
+    },
+    {
+      "id": 2292,
+      "session_id": 881,
+      "role": "ASSISTANT",
+      "turn_id": "turn_081e3c5d9df54fb3af209257f94a26ec",
+      "client_request_id": null,
+      "created_time": "2026-08-24T11:31:51",
+      "decision": {
+        "risk": "WRITE",
+        "route": "WORKFLOW",
+        "evidence": [
+          "用户明确提出创建客户的业务目标",
+          "用户提供了客户名称、城市和行业字段",
+          "当前上下文未提供可继续的活动工作流"
+        ],
+        "confidence": 0.99,
+        "reason_code": "CREATE_CUSTOMER",
+        "task_relation": "NEW_TASK",
+        "context_policy": {
+          "result_set": "IGNORE",
+          "previous_query": "IGNORE",
+          "active_workflow": "NONE",
+          "selected_entity": "IGNORE"
+        }
+      },
+      "failure": null,
+      "dispatch_type": "workflow"
+    },
+    {
+      "id": 2294,
+      "session_id": 881,
+      "role": "ASSISTANT",
+      "turn_id": "turn_c5899ed583714994affce62c6909a544",
+      "client_request_id": null,
+      "created_time": "2026-08-24T11:31:51",
+      "decision": {
+        "risk": "WRITE",
+        "route": "WORKFLOW",
+        "evidence": [
+          "结构化交互已通过权威动作与工作流绑定校验"
+        ],
+        "confidence": 1.0,
+        "reason_code": "STRUCTURED_WORKFLOW_CONTINUATION",
+        "task_relation": "CONTINUE_TASK",
+        "context_policy": {
+          "result_set": "IGNORE",
+          "previous_query": "IGNORE",
+          "active_workflow": "RESUME",
+          "selected_entity": "IGNORE"
+        }
+      },
+      "failure": null,
+      "dispatch_type": "workflow"
+    },
+    {
+      "id": 2296,
+      "session_id": 882,
+      "role": "ASSISTANT",
+      "turn_id": "turn_ffc6270f95b44870a6e5d2cda9da10d4",
+      "client_request_id": null,
+      "created_time": "2026-08-24T11:32:13",
+      "decision": {
+        "risk": "WRITE",
+        "route": "WORKFLOW",
+        "evidence": [
+          "用户明确请求创建客户并提供名称、城市和行业",
+          "未提供可继续使用的上下文或已选实体"
+        ],
+        "confidence": 0.99,
+        "reason_code": "CREATE_CUSTOMER",
+        "task_relation": "NEW_TASK",
+        "context_policy": {
+          "result_set": "IGNORE",
+          "previous_query": "IGNORE",
+          "active_workflow": "NONE",
+          "selected_entity": "IGNORE"
+        }
+      },
+      "failure": null,
+      "dispatch_type": "workflow"
+    },
+    {
+      "id": 2298,
+      "session_id": 882,
+      "role": "ASSISTANT",
+      "turn_id": "turn_186ee11b67dc403cb5ab414e7173ba43",
+      "client_request_id": null,
+      "created_time": "2026-08-24T11:32:35",
+      "decision": {
+        "risk": "WRITE",
+        "route": "WORKFLOW",
+        "evidence": [
+          "用户明确指定将城市改为广州",
+          "用户明确要求继续当前任务",
+          "上下文存在活动工作流"
+        ],
+        "confidence": 0.9,
+        "reason_code": "UPDATE_CITY_AND_RESUME",
+        "task_relation": "CONTINUE_TASK",
+        "context_policy": {
+          "result_set": "IGNORE",
+          "previous_query": "IGNORE",
+          "active_workflow": "RESUME",
+          "selected_entity": "IGNORE"
+        }
+      },
+      "failure": null,
+      "dispatch_type": "workflow"
+    },
+    {
+      "id": 2300,
+      "session_id": 872,
+      "role": "ASSISTANT",
+      "turn_id": "turn_0abd85aaae334c00a6afbb0c9f084814",
+      "client_request_id": null,
+      "created_time": "2026-08-24T11:33:07",
+      "decision": null,
+      "failure": null,
+      "dispatch_type": "failure"
+    },
+    {
+      "id": 2302,
+      "session_id": 883,
+      "role": "ASSISTANT",
+      "turn_id": "turn_58dc5afba3ca4be3a8abb164329f86a8",
+      "client_request_id": null,
+      "created_time": "2026-08-24T11:33:31",
+      "decision": {
+        "risk": "READ_ONLY",
+        "route": "QUERY",
+        "evidence": [
+          "用户明确指定客户名称",
+          "请求为客户介绍信息查询",
+          "无可复用上下文或已选实体"
+        ],
+        "confidence": 0.99,
+        "reason_code": "NAMED_CUSTOMER_QUERY",
+        "task_relation": "NEW_TASK",
+        "context_policy": {
+          "result_set": "IGNORE",
+          "previous_query": "IGNORE",
+          "active_workflow": "NONE",
+          "selected_entity": "IGNORE"
+        }
+      },
+      "failure": null,
+      "dispatch_type": "query"
+    }
+  ],
+  "assertions": {
+    "ac06_exactly_one_customer_created": true,
+    "ac14_no_follow_up_activity_created": true,
+    "ac15_cancel_created_no_customer": true,
+    "ac15_modify_created_no_customer": true,
+    "ac15_replay_reused_result_message": true
+  }
+}

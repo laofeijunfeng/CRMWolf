@@ -513,7 +513,10 @@ JSON 结构：
 }"""
 
     def _build_prompt(self, context: Dict[str, Any]) -> str:
-        return "请基于以下客户销售侧上下文生成客户概况：\n" + json.dumps(context, ensure_ascii=False, default=str)
+        return (
+            "请基于以下客户销售侧上下文生成客户概况，并严格返回 JSON 对象：\n"
+            + json.dumps(context, ensure_ascii=False, default=str)
+        )
 
     def _parse_response(self, content: str) -> Dict[str, Any]:
         clean_content = content.strip()

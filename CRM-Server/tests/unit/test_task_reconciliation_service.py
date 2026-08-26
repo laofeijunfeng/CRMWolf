@@ -138,12 +138,12 @@ def test_reconciliation_candidates_return_same_owner_open_tasks_only_by_default(
     _create_task(db_session, customer_id=2, task_hash="other-customer")
     completed = _create_task(db_session, task_hash="completed")
     follow_up_task_crud.complete(db_session, completed)
-    _create_task(
+    too_old = _create_task(
         db_session,
         due_at=datetime(2026, 8, 6, 10, 0, 0) - timedelta(days=91),
         task_hash="too-old",
     )
-    _create_task(
+    too_far = _create_task(
         db_session,
         due_at=datetime(2026, 8, 6, 10, 0, 0) + timedelta(days=31),
         task_hash="too-far",
@@ -157,7 +157,7 @@ def test_reconciliation_candidates_return_same_owner_open_tasks_only_by_default(
     )
     payload = result.to_dict()
 
-    assert result.total == 1
+    assert result.total == 3
     assert payload["items"][0]["public_id"] == expected.public_id
     assert payload["items"][0]["id"] == expected.public_id
     assert payload["items"][0]["auto_transition_eligible"] is True
@@ -171,7 +171,7 @@ def test_reconciliation_candidates_return_same_owner_open_tasks_only_by_default(
     assert run.owner_id == "2"
     assert run.actor_id == "2"
     assert run.source_activity_id == 101
-    assert run.candidate_public_ids_json == [expected.public_id]
+    assert run.candidate_public_ids_json == [expected.public_id, too_old.public_id, too_far.public_id]
 
 
 def test_reconciliation_candidates_never_cross_customer_boundary(db_session):
@@ -284,3 +284,22 @@ def test_reconciliation_candidate_retrieval_requires_existing_activity(db_sessio
             activity_id=999,
             anchor_at=datetime(2026, 8, 6, 10, 0, 0),
         )
+
+
+def test_reconciliation_candidates_include_all_open_historical_tasks_not_just_due_window(db_session):
+    overdue = _create_task(
+        db_session,
+        due_at=datetime(2025, 1, 1, 10, 0, 0),
+        task_hash="old-open-task",
+    )
+
+    result = task_reconciliation_service.list_candidates_for_activity(
+        db_session,
+        team_id=1,
+        activity_id=101,
+        anchor_at=datetime(2026, 8, 6, 10, 0, 0),
+    )
+
+    candidate_ids = {item.public_id for item in result.items}
+    assert overdue.public_id in candidate_ids
+    assert any("due_window" not in item.candidate_reasons for item in result.items)

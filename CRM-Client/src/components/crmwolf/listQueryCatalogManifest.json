@@ -367,6 +367,7 @@
       "ops": [
         "contains",
         "eq",
+        "in",
         "is_empty",
         "is_not_empty",
         "neq",
@@ -452,6 +453,18 @@
         "neq",
         "not_contains",
         "not_in"
+      ]
+    },
+    "last_modified_time": {
+      "type": "date",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "after",
+        "before",
+        "eq",
+        "is_empty",
+        "is_not_empty"
       ]
     },
     "license_expiry_date": {

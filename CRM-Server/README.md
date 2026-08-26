@@ -22,7 +22,7 @@
 ### 安装依赖
 
 ```bash
-pip install -r requirements.txt
+pip install --require-hashes -r requirements.lock -r requirements-dev.lock
 ```
 
 ### 配置环境
@@ -66,7 +66,10 @@ CRM/
 ├── tests/                 # 测试脚本
 ├── scripts/               # 工具脚本
 ├── migrations/            # 数据库迁移
-└── requirements.txt       # 依赖包列表
+├── requirements.txt       # 生产锁文件输入依赖清单
+├── requirements.lock      # 带 hash 的生产依赖锁
+├── requirements-dev.txt   # 开发与 CI 锁文件输入依赖清单
+└── requirements-dev.lock  # 带 hash 的开发与 CI 工具依赖锁
 ```
 
 ## 🧪 测试

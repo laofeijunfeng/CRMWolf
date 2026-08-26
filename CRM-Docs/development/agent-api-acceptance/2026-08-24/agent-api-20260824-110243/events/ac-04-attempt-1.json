@@ -1,0 +1,78 @@
+{
+  "case_id": "AC-04",
+  "attempt": 1,
+  "request": {
+    "session_id": 873,
+    "client_request_id": "de3ffc5f-9ba4-40d8-a7bd-a6ad877bd382",
+    "input": {
+      "type": "text",
+      "text": "这个客户负责人是谁"
+    }
+  },
+  "http_status": 200,
+  "elapsed_seconds": 5.369,
+  "events": [
+    {
+      "event": "session",
+      "session_id": 873,
+      "session_key": "agent_73dcb5cbec8b4af4875af267b276b5bd"
+    },
+    {
+      "event": "agent_ui",
+      "phase": "final",
+      "message_id": 2264,
+      "turn_id": "turn_fef1b6b051704541a3cea4c4100e8ab3",
+      "sequence": 1,
+      "message": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 2264,
+        "turn_id": "turn_fef1b6b051704541a3cea4c4100e8ab3",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_text_1",
+            "type": "text",
+            "format": "markdown",
+            "text": "请明确你想继续当前任务, 还是开始一个新的查询或操作。"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {
+          "route": "CLARIFY",
+          "result_set_id": null,
+          "accessibility_label": "请明确你想继续当前任务, 还是开始一个新的查询或操作。"
+        }
+      }
+    },
+    {
+      "event": "done",
+      "session_id": 873
+    }
+  ],
+  "summary": {
+    "event_types": [
+      "session",
+      "agent_ui",
+      "done"
+    ],
+    "session_id": 873,
+    "message_id": 2264,
+    "route": "CLARIFY",
+    "metadata": {
+      "route": "CLARIFY",
+      "result_set_id": null,
+      "accessibility_label": "请明确你想继续当前任务, 还是开始一个新的查询或操作。"
+    },
+    "block_types": [
+      "text"
+    ],
+    "texts": [
+      "请明确你想继续当前任务, 还是开始一个新的查询或操作。"
+    ],
+    "interaction": null,
+    "errors": [],
+    "entity_count": 0,
+    "result_set_id": null
+  }
+}

@@ -67,7 +67,12 @@ def test_recall_groups_customer_evidence_and_loads_customer_master_data() -> Non
         _hit(customer_id=301, score=0.82, title="跟进记录", text="客户简称中科院信工所。"),
         _hit(customer_id=301, score=0.93, title="客户概况", text="中国科学院信息工程研究所有国产化需求。"),
     ])
-    customer = Customer(id=301, team_id=1, account_name="中国科学院信息工程研究所")
+    customer = Customer(
+        id=301,
+        public_id="cus_cas_iie_301",
+        team_id=1,
+        account_name="中国科学院信息工程研究所",
+    )
     service = CustomerKnowledgeCandidateService(
         embedding_service=embedding_service,
         qdrant_index_service=qdrant_service,
@@ -82,7 +87,8 @@ def test_recall_groups_customer_evidence_and_loads_customer_master_data() -> Non
         "status": "ok",
         "candidate_count": 1,
     }
-    assert result.candidates[0]["id"] == 301
+    assert result.candidates[0]["id"] == "cus_cas_iie_301"
+    assert set(result.candidates[0]) == {"id", "account_name", "city", "match"}
     assert result.candidates[0]["account_name"] == "中国科学院信息工程研究所"
     assert result.candidates[0]["match"] == {
         "source": "customer_knowledge",

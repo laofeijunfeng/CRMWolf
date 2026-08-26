@@ -17,7 +17,6 @@ from app.models.agent_async_operation import (
 )
 from app.models.customer_intelligence_run import CustomerIntelligenceRun, CustomerIntelligenceRunStatus
 from app.services.agent.types import coerce_json_dict
-from app.services.customer_activity_agent_origin_service import customer_activity_agent_origin_service
 from app.utils.time import business_now
 
 if TYPE_CHECKING:
@@ -49,6 +48,7 @@ class AgentAsyncOperationEventProjection:
 @dataclass(frozen=True)
 class AgentAsyncOperationProjection:
     public_id: str
+    operation_key: str
     request_id: str
     team_id: int
     user_id: int
@@ -144,150 +144,6 @@ class AgentAsyncOperationService:
         db.flush()
         return locked
 
-    def latest_session_user_message_id(
-        self,
-        db: Session,
-        *,
-        team_id: int,
-        user_id: int,
-        session_id: int,
-        created_at_or_before: datetime | None = None,
-    ) -> int | None:
-        """Return the latest user message that can own this session's async work."""
-
-        from app.models.agent import AgentMessage, AgentMessageRole
-
-        try:
-            query = db.query(AgentMessage).filter(
-                AgentMessage.team_id == team_id,
-                AgentMessage.user_id == user_id,
-                AgentMessage.session_id == session_id,
-                AgentMessage.role == AgentMessageRole.USER,
-            )
-            if created_at_or_before is not None:
-                query = query.filter(AgentMessage.created_time <= created_at_or_before)
-            message = query.order_by(AgentMessage.created_time.desc(), AgentMessage.id.desc()).first()
-        except Exception:
-            return None
-        return int(message.id) if message is not None else None
-
-    def bind_customer_activity_post_commit_assistant_message(
-        self,
-        db: Session,
-        *,
-        team_id: int,
-        user_id: int,
-        session_id: int,
-        source_user_message_id: int,
-        source_assistant_message_id: int,
-    ) -> int:
-        """Late-bind the persisted assistant message onto this turn's reconciliation cards."""
-
-        operations = (
-            db.query(AgentAsyncOperation)
-            .filter(
-                AgentAsyncOperation.team_id == team_id,
-                AgentAsyncOperation.user_id == user_id,
-                AgentAsyncOperation.session_id == session_id,
-                AgentAsyncOperation.operation_type == "customer_activity_post_commit",
-                AgentAsyncOperation.source_user_message_id == source_user_message_id,
-                AgentAsyncOperation.source_assistant_message_id.is_(None),
-            )
-            .all()
-        )
-        for operation in operations:
-            bound_operation = self.bind_source(
-                db,
-                operation_key=str(operation.operation_key),
-                request_id=str(operation.request_id),
-                team_id=int(operation.team_id),
-                user_id=int(operation.user_id),
-                session_id=int(operation.session_id),
-                source_user_message_id=source_user_message_id,
-                source_assistant_message_id=source_assistant_message_id,
-                operation_type=str(operation.operation_type),
-                resource_type=str(operation.resource_type),
-                resource_id=int(operation.resource_id) if operation.resource_id is not None else 0,
-                resource_public_id=(
-                    str(operation.resource_public_id) if operation.resource_public_id is not None else None
-                ),
-                graph_thread_id=(
-                    str(operation.graph_thread_id) if operation.graph_thread_id is not None else None
-                ),
-                summary=str(operation.summary) if operation.summary else "跟进已记录，任务对账处理中",
-            )
-            customer_activity_agent_origin_service.ensure_from_bound_operation(
-                db,
-                operation=bound_operation,
-            )
-        return len(operations)
-
-    def repair_unanchored_customer_activity_post_commit_sources(
-        self,
-        db: Session,
-        operations: list[AgentAsyncOperationProjection],
-    ) -> bool:
-        """Attach legacy reconciliation cards to the originating user turn."""
-
-        targets = [
-            operation
-            for operation in operations
-            if (
-                operation.operation_type == "customer_activity_post_commit"
-                and operation.session_id is not None
-                and operation.source_user_message_id is None
-            )
-        ]
-        if not targets:
-            return False
-
-        repaired = False
-        for operation in targets:
-            source_user_message_id = self.latest_session_user_message_id(
-                db,
-                team_id=operation.team_id,
-                user_id=operation.user_id,
-                session_id=int(operation.session_id),
-                created_at_or_before=operation.created_time,
-            )
-            if source_user_message_id is None:
-                continue
-            persisted = (
-                db.query(AgentAsyncOperation)
-                .filter(AgentAsyncOperation.public_id == operation.public_id)
-                .one_or_none()
-            )
-            if persisted is None or persisted.session_id is None:
-                continue
-            self.bind_source(
-                db,
-                operation_key=str(persisted.operation_key),
-                request_id=str(persisted.request_id),
-                team_id=int(persisted.team_id),
-                user_id=int(persisted.user_id),
-                session_id=int(persisted.session_id),
-                source_user_message_id=source_user_message_id,
-                source_assistant_message_id=(
-                    int(persisted.source_assistant_message_id)
-                    if persisted.source_assistant_message_id is not None
-                    else None
-                ),
-                operation_type=str(persisted.operation_type),
-                resource_type=str(persisted.resource_type),
-                resource_id=int(persisted.resource_id) if persisted.resource_id is not None else 0,
-                resource_public_id=(
-                    str(persisted.resource_public_id) if persisted.resource_public_id is not None else None
-                ),
-                graph_thread_id=(
-                    str(persisted.graph_thread_id) if persisted.graph_thread_id is not None else None
-                ),
-                summary=str(persisted.summary) if persisted.summary else "跟进已记录，任务对账处理中",
-            )
-            repaired = True
-        if repaired:
-            db.commit()
-        return repaired
-
     def project_customer_intelligence_run(
         self,
         db: Session,
@@ -363,6 +219,7 @@ class AgentAsyncOperationService:
             AgentAsyncOperationStatus.QUEUED: "SCHEDULED",
             AgentAsyncOperationStatus.RUNNING: "STARTED",
             AgentAsyncOperationStatus.RETRY_SCHEDULED: "RETRY_SCHEDULED",
+            AgentAsyncOperationStatus.WAITING_USER: "WAITING_USER",
             AgentAsyncOperationStatus.SUCCEEDED: "SUCCEEDED",
             AgentAsyncOperationStatus.DEGRADED: "DEGRADED",
             AgentAsyncOperationStatus.FAILED: "FAILED",
@@ -710,6 +567,27 @@ class AgentAsyncOperationService:
         )
         return self._projection(operation) if operation is not None else None
 
+    def list_by_operation_keys(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        operation_keys: set[str],
+    ) -> list[AgentAsyncOperationProjection]:
+        """Return team-owned operation projections for exact durable-work identities."""
+
+        if not operation_keys:
+            return []
+        operations = (
+            db.query(AgentAsyncOperation)
+            .filter(
+                AgentAsyncOperation.team_id == team_id,
+                AgentAsyncOperation.operation_key.in_(operation_keys),
+            )
+            .all()
+        )
+        return [self._projection(operation) for operation in operations]
+
     def list_session_projections(
         self,
         db: Session,
@@ -856,6 +734,7 @@ class AgentAsyncOperationService:
         )
         return AgentAsyncOperationProjection(
             public_id=str(operation.public_id),
+            operation_key=str(operation.operation_key),
             request_id=str(operation.request_id),
             team_id=int(operation.team_id),
             user_id=int(operation.user_id),

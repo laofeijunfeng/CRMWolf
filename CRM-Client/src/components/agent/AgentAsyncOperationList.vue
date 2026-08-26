@@ -38,6 +38,29 @@
         :operation="operation"
       />
     </div>
+
+    <ul
+      v-if="automaticTaskTransitions.length > 0"
+      class="agent-async-operation-list__results"
+      aria-label="历史任务处理结果"
+    >
+      <li
+        v-for="transition in automaticTaskTransitions"
+        :key="`${transition.taskPublicId}:${transition.action}`"
+        class="agent-async-operation-list__result rounded-xl border border-border/70 bg-muted/25"
+        :class="`agent-async-operation-list__result--${transition.action.toLowerCase()}`"
+      >
+        <div class="agent-async-operation-list__result-row grid min-h-11 w-full grid-cols-[16px_minmax(0,1fr)_auto] items-center gap-2 rounded-xl px-3 py-2 text-sm">
+          <component
+            :is="automaticTaskTransitionIcon(transition.action)"
+            class="agent-async-operation-list__result-icon"
+            aria-hidden="true"
+          />
+          <span class="agent-async-operation-list__result-title">{{ transition.title }}</span>
+          <span class="agent-async-operation-list__result-status">{{ transition.label }}</span>
+        </div>
+      </li>
+    </ul>
   </section>
 </template>
 
@@ -59,7 +82,9 @@ import type { AgentAsyncOperation } from "@/api/agent"
 import AgentAsyncOperationCard from "@/components/agent/AgentAsyncOperationCard.vue"
 import {
   getAgentAsyncOperationStatusMeta,
+  getAutomaticTaskTransitions,
   summarizeAgentAsyncOperations,
+  type AutomaticTaskTransitionAction,
 } from "@/components/agent/agentAsyncOperations"
 
 const props = defineProps<{
@@ -101,6 +126,16 @@ const statusIconAnimationClass = computed(() => {
   if (aggregateStatus.value === "QUEUED") return "agent-async-operation-list__status-icon--pulse"
   return ""
 })
+
+const automaticTaskTransitions = computed(() => (
+  props.operations.flatMap(getAutomaticTaskTransitions)
+))
+
+const automaticTaskTransitionIcon = (action: AutomaticTaskTransitionAction): Component => ({
+  COMPLETE: CheckCircle2,
+  POSTPONE: Clock3,
+  CANCEL: CircleSlash2,
+})[action]
 </script>
 
 <style scoped lang="scss">
@@ -190,6 +225,46 @@ const statusIconAnimationClass = computed(() => {
   padding-top: $wolf-space-xs-v2;
   padding-left: 16px;
   border-left: 1px solid rgba($wolf-primary-v2, 0.12);
+}
+
+.agent-async-operation-list__results {
+  display: grid;
+  gap: $wolf-space-sm-v2;
+  margin: $wolf-space-sm-v2 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-async-operation-list__result-icon,
+.agent-async-operation-list__result-status {
+  color: $wolf-success-v2;
+}
+
+.agent-async-operation-list__result--postpone .agent-async-operation-list__result-icon,
+.agent-async-operation-list__result--postpone .agent-async-operation-list__result-status {
+  color: $wolf-primary-v2;
+}
+
+.agent-async-operation-list__result--cancel .agent-async-operation-list__result-icon,
+.agent-async-operation-list__result--cancel .agent-async-operation-list__result-status {
+  color: $wolf-text-tertiary-v2;
+}
+
+.agent-async-operation-list__result-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.agent-async-operation-list__result-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: $wolf-text-primary-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+}
+
+.agent-async-operation-list__result-status {
+  font-size: $wolf-font-size-caption-v2;
+  white-space: nowrap;
 }
 
 @keyframes agent-async-operation-list-spin {

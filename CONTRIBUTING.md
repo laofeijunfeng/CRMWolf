@@ -82,6 +82,7 @@ def create_customer(data: CustomerCreate) -> CustomerResponse:
 - 查询必须过滤 `team_id`。
 - API 层负责从当前用户上下文取得团队信息并传入服务/CRUD。
 - 不在 API 层随意直接 `db.query(...)` 绕过既有 CRUD 规则。
+- 唯一例外是仅由 `scripts/` 入口执行、不会进入 API/运行时调用链的一次性离线迁移与全库盘点；此类代码可以跨团队扫描，但必须输出无业务内容的聚合证据、逐条校验记录中的 `team_id` 所有权，并在迁移发布门禁完成后删除。
 
 ### 数据库迁移
 
@@ -120,7 +121,7 @@ npm run test:unit
 cd CRM-Server
 python -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
+pip install --require-hashes -r requirements.lock -r requirements-dev.lock
 cp .env.example .env
 ./run.sh
 ```

@@ -84,6 +84,7 @@ POST_COMMIT_RELEVANT_FIELDS = frozenset(
         "next_follow_time",
         "next_follow_time_source",
         "next_action",
+        "next_action_source",
         "occurred_at",
         "owner_id",
         "customer_id",
@@ -189,6 +190,8 @@ class CustomerActivityCRUD:
         data["occurred_at"] = data.get("occurred_at") or business_now()
         if data.get("next_follow_time") is not None and not data.get("next_follow_time_source"):
             data["next_follow_time_source"] = "USER"
+        if data.get("next_action") and not data.get("next_action_source"):
+            data["next_action_source"] = "USER"
         if original_lead_id:
             data["original_lead_id"] = original_lead_id
 
@@ -274,6 +277,7 @@ class CustomerActivityCRUD:
                 next_follow_time=lead_follow_up.next_follow_time,
                 next_follow_time_source="MIGRATED" if lead_follow_up.next_follow_time else None,
                 next_action=lead_follow_up.next_action,
+                next_action_source="MIGRATED" if lead_follow_up.next_action else None,
                 occurred_at=lead_follow_up.created_time or business_now(),
                 creator_id=lead_follow_up.creator_id,
                 owner_id=lead_follow_up.creator_id,
@@ -305,6 +309,11 @@ class CustomerActivityCRUD:
             update_data["processed_at"] = None
         if "next_follow_time" in update_data and "next_follow_time_source" not in update_data:
             update_data["next_follow_time_source"] = "USER"
+        if "next_action" in update_data:
+            if update_data["next_action"] is None:
+                update_data["next_action_source"] = None
+            elif "next_action_source" not in update_data:
+                update_data["next_action_source"] = "USER"
         for field, value in update_data.items():
             setattr(db_obj, field, value)
         if revision_changed:
@@ -371,6 +380,7 @@ class CustomerActivityCRUD:
         content_json: JSONObject,
         summary: str | None,
         next_action: str | None = None,
+        next_action_source: str | None = None,
         next_follow_time: datetime | None = None,
         next_follow_time_source: str | None = None,
         commit: bool = True,
@@ -384,6 +394,7 @@ class CustomerActivityCRUD:
         }
         if next_action is not None:
             structured_values["next_action"] = next_action
+            structured_values["next_action_source"] = next_action_source or "AI_EXTRACTED"
         if next_follow_time is not None:
             structured_values["next_follow_time"] = next_follow_time
             structured_values["next_follow_time_source"] = next_follow_time_source or "AI_EXTRACTED"
@@ -393,6 +404,7 @@ class CustomerActivityCRUD:
         activity.summary = structured_values["summary"]
         if next_action is not None:
             activity.next_action = next_action
+            activity.next_action_source = str(structured_values["next_action_source"])
         if next_follow_time is not None:
             activity.next_follow_time = next_follow_time
             activity.next_follow_time_source = str(structured_values["next_follow_time_source"])

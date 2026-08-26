@@ -14,8 +14,8 @@ setup_logging(debug=debug_mode)
 logger = get_logger(__name__)
 
 from app.api import (
-    approval_ai,
     acquisition_sources,
+    approval_ai,
     approvals,
     auth,
     business_journey_board,
@@ -47,6 +47,7 @@ from app.api import (
     view_preferences,
 )
 from app.api.agent import router as agent_router
+from app.api.agent_query import router as agent_query_router
 from app.api.ai_config import router as ai_config_router
 from app.api.customer_ai import router as customer_ai_router
 from app.api.deployment import router as deployment_router  # 新增
@@ -143,6 +144,7 @@ api_router.include_router(license_application_router)  # 新增：License申请�
 # === AI 相关路由 ===
 api_router.include_router(ai_config_router)
 api_router.include_router(agent_router)
+api_router.include_router(agent_query_router)
 api_router.include_router(im_bots_router)
 api_router.include_router(frontend_logs_router)
 
@@ -173,10 +175,6 @@ async def startup_event():
     from app.tasks.customer_intelligence_backfill import start_customer_intelligence_backfill_scheduler
     start_customer_intelligence_backfill_scheduler()
 
-    logger.info("启动 Agent workflow 恢复扫描任务...")
-    from app.tasks.agent_workflow_recovery import start_agent_workflow_recovery_scheduler
-    start_agent_workflow_recovery_scheduler()
-
     logger.info("启动跟进确认投递恢复扫描任务...")
     from app.tasks.follow_up_confirmation_delivery_recovery import (
         start_follow_up_confirmation_delivery_recovery_scheduler,
@@ -195,20 +193,18 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """应用关闭时停止后台调度任务"""
-    from app.tasks.agent_workflow_recovery import stop_agent_workflow_recovery_scheduler
     from app.tasks.customer_activity_post_commit_recovery import (
         stop_customer_activity_post_commit_recovery_scheduler,
-    )
-    from app.tasks.follow_up_confirmation_delivery_recovery import (
-        stop_follow_up_confirmation_delivery_recovery_scheduler,
     )
     from app.tasks.customer_evidence_sync import stop_customer_evidence_sync_scheduler
     from app.tasks.customer_intelligence_backfill import stop_customer_intelligence_backfill_scheduler
     from app.tasks.customer_intelligence_refresh_retry import stop_customer_intelligence_refresh_retry_scheduler
+    from app.tasks.follow_up_confirmation_delivery_recovery import (
+        stop_follow_up_confirmation_delivery_recovery_scheduler,
+    )
 
     stop_customer_activity_post_commit_recovery_scheduler()
     stop_follow_up_confirmation_delivery_recovery_scheduler()
-    stop_agent_workflow_recovery_scheduler()
     stop_customer_intelligence_backfill_scheduler()
     stop_customer_intelligence_refresh_retry_scheduler()
     stop_customer_evidence_sync_scheduler()

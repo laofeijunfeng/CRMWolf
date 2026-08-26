@@ -288,7 +288,7 @@ def _add_policy_decision(
         reason=reason,
         enabled=enabled,
         owner_allowlist_configured=True,
-        allowed_actions_json=["COMPLETE", "DELAY"],
+        allowed_actions_json=["COMPLETE", "POSTPONE"],
         config_errors_json=config_errors_json,
         policy_result_json={
             "allowed": allowed,
@@ -361,13 +361,20 @@ def _add_llm_matcher_run(
         source_public_id=task.source_public_id,
         status=status,
         source=source,
-        decision=decision,
-        task_public_id=task.public_id,
         candidate_public_ids_json=[task.public_id],
-        confidence=0.94,
-        needs_confirmation=needs_confirmation,
-        forbid_auto_reasons_json=[],
-        evidence_terms_json=["预算已经通过"],
+        task_decisions_json=[
+            {
+                "decision": decision,
+                "task_public_id": task.public_id,
+                "confidence": 0.94,
+                "needs_confirmation": needs_confirmation,
+                "proposed_due_at": None,
+                "forbid_auto_reasons": [],
+                "evidence_terms": ["预算已经通过"],
+                "state_mutation_requested": False,
+            }
+        ],
+        empty_outcome_json=None,
         referenced_source_public_ids_json=[task.source_public_id] if task.source_public_id else [],
         evaluation_failures_json=evaluation_failures_json,
         model_name="test-model",
@@ -403,15 +410,15 @@ def _add_evaluation_run(
         failed_cases=1 if ok is False else 0,
         false_close_count=1 if ok is False else 0,
         false_close_rate=0.2 if ok is False else 0.0,
-        false_delay_count=0,
-        false_delay_rate=0.0,
+        false_postpone_count=0,
+        false_postpone_rate=0.0,
         missed_confirmation_count=1 if ok is False else 0,
         missed_confirmation_rate=0.2 if ok is False else 0.0,
         over_confirmation_count=0,
         over_confirmation_rate=0.0,
         metrics_json={
             "false_close": {"count": 1 if ok is False else 0, "rate": 0.2 if ok is False else 0.0},
-            "false_delay": {"count": 0, "rate": 0.0},
+            "false_postpone": {"count": 0, "rate": 0.0},
             "missed_confirmation": {"count": 1 if ok is False else 0, "rate": 0.2 if ok is False else 0.0},
             "over_confirmation": {"count": 0, "rate": 0.0},
         },
@@ -436,8 +443,8 @@ def test_observability_summary_counts_transition_confirmation_and_prompt_facts(d
         created_time=start_at + timedelta(hours=10),
         event_type=FollowUpTaskEventType.UPDATED,
         execution_kind="manual_confirmation",
-        action="DELAY",
-        decision="DELAY",
+        action="POSTPONE",
+        decision="POSTPONE",
         confidence=1.0,
     )
     _add_rollback_event(
@@ -450,7 +457,7 @@ def test_observability_summary_counts_transition_confirmation_and_prompt_facts(d
         db_session,
         task,
         created_time=start_at + timedelta(hours=8),
-        suggested_action=FollowUpTaskConfirmationResolutionAction.DELAY,
+        suggested_action=FollowUpTaskConfirmationResolutionAction.POSTPONE,
         unresolved_reply_count=2,
     )
     _add_confirmation_case(
@@ -484,7 +491,7 @@ def test_observability_summary_counts_transition_confirmation_and_prompt_facts(d
         created_time=start_at + timedelta(hours=10),
         allowed=False,
         reason="ACTION_NOT_ALLOWED",
-        action="DELAY",
+        action="POSTPONE",
     )
     _add_policy_decision(
         db_session,
@@ -532,13 +539,13 @@ def test_observability_summary_counts_transition_confirmation_and_prompt_facts(d
     assert summary["transition_events"]["manual_confirmation_transition_events"] == 1
     assert summary["transition_events"]["rollback_events"] == 1
     assert summary["transition_events"]["automatic_by_action"] == {"COMPLETE": 1}
-    assert summary["transition_events"]["manual_confirmation_by_action"] == {"DELAY": 1}
+    assert summary["transition_events"]["manual_confirmation_by_action"] == {"POSTPONE": 1}
     assert summary["transition_events"]["rollback_by_action"] == {"COMPLETE": 1}
     assert summary["transition_events"]["transition_ratio"]["automatic_percent"] == 0.5
     assert summary["transition_events"]["rollback_event_public_ids"][0].startswith("fte_")
     assert summary["confirmation_cases"]["created_cases"] == 2
     assert summary["confirmation_cases"]["resolved_cases"] == 1
-    assert summary["confirmation_cases"]["created_by_suggested_action"] == {"COMPLETE": 1, "DELAY": 1}
+    assert summary["confirmation_cases"]["created_by_suggested_action"] == {"COMPLETE": 1, "POSTPONE": 1}
     assert summary["confirmation_cases"]["resolved_by_action"] == {"COMPLETE": 1}
     assert summary["confirmation_cases"]["application_by_status"] == {"APPLIED": 1}
     assert summary["confirmation_cases"]["unresolved_reply_total"] == 2
@@ -554,7 +561,7 @@ def test_observability_summary_counts_transition_confirmation_and_prompt_facts(d
         "ALLOWED": 1,
         "CONFIG_INVALID": 1,
     }
-    assert summary["policy_decisions"]["by_action"] == {"COMPLETE": 2, "DELAY": 1}
+    assert summary["policy_decisions"]["by_action"] == {"COMPLETE": 2, "POSTPONE": 1}
     assert summary["policy_decisions"]["by_enabled"] == {"false": 1, "true": 2}
     assert summary["policy_decisions"]["config_error_total"] == 1
     assert summary["reconciliation_runs"]["total_runs"] == 2
@@ -562,7 +569,16 @@ def test_observability_summary_counts_transition_confirmation_and_prompt_facts(d
     assert summary["reconciliation_runs"]["by_include_cross_owner"] == {"false": 1, "true": 1}
     assert summary["reconciliation_runs"]["candidate_count_total"] == 1
     assert summary["llm_matcher_runs"]["total_runs"] == 2
+    assert summary["llm_matcher_runs"]["task_decision_count"] == 2
     assert summary["llm_matcher_runs"]["by_status"] == {"FAILED": 1, "SUCCESS": 1}
+    assert summary["llm_matcher_runs"]["by_decision"] == {"COMPLETE": 1, "KEEP_OPEN": 1}
+    assert summary["llm_matcher_runs"]["by_needs_confirmation"] == {"false": 2}
+    assert summary["llm_matcher_runs"]["confidence"] == {
+        "count": 2,
+        "min": 0.94,
+        "max": 0.94,
+        "avg": 0.94,
+    }
     assert summary["llm_matcher_runs"]["by_schema_error_type"] == {
         "AgentLangChainStructuredOutputError": 1,
         "UNKNOWN": 1,

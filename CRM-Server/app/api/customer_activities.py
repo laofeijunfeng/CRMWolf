@@ -13,9 +13,12 @@ from app.core.deps import (
     get_current_user_team,
 )
 from app.crud.customer_activity import customer_activity_crud
+from app.crud.sales_commitment import follow_up_task_crud
 from app.models.sales_commitment import FollowUpTaskProjectionTrigger
 from app.schemas.customer_activity import (
     CustomerActivityCreate,
+    CustomerActivityCreateAndCompleteTrackingRequest,
+    CustomerActivityCreateAndCompleteTrackingResponse,
     CustomerActivityProcessResponse,
     CustomerActivityResponse,
     CustomerActivityUpdate,
@@ -23,13 +26,26 @@ from app.schemas.customer_activity import (
     kind_infos,
 )
 from app.services.customer_activity_kinds import get_activity_kind_meta
-from app.services.customer_activity_processing_service import customer_activity_processing_service
 from app.services.customer_activity_post_commit_job_service import customer_activity_post_commit_job_service
+from app.services.customer_activity_processing_service import customer_activity_processing_service
 from app.services.customer_activity_write_service import (
     CustomerActivityWriteResult,
     customer_activity_write_service,
 )
 from app.services.follow_up_task_projection_service import follow_up_task_projection_service
+from app.services.follow_up_task_reconciliation_evaluation_service import (
+    FollowUpTaskReconciliationDecision,
+    FollowUpTaskReconciliationTaskDecision,
+)
+from app.services.follow_up_task_transition_execution_service import (
+    FollowUpTaskTransitionExecutionStatus,
+    follow_up_task_transition_execution_service,
+)
+from app.services.follow_up_task_transition_plan_service import (
+    FollowUpTaskTransitionAction,
+    FollowUpTaskTransitionActionType,
+    FollowUpTaskTransitionPlan,
+)
 
 router = APIRouter(prefix="/v1/customer-activities", tags=["客户活动"])
 
@@ -117,6 +133,7 @@ def _build_activity_response(
         "next_follow_time": activity.next_follow_time,
         "next_follow_time_source": activity.next_follow_time_source,
         "next_action": activity.next_action,
+        "next_action_source": activity.next_action_source,
         "occurred_at": activity.occurred_at,
         "creator_id": activity.creator_id,
         "owner_id": activity.owner_id,
@@ -161,6 +178,7 @@ def _update_touched_post_commit_fields(activity_update: CustomerActivityUpdate) 
         "content_json",
         "summary",
         "next_action",
+        "next_action_source",
         "next_follow_time",
         "next_follow_time_source",
         "occurred_at",
@@ -207,6 +225,86 @@ async def create_activity(
         write_result.activity,
         post_commit=post_commit,
         write_result=write_result,
+    )
+
+
+@router.post(
+    "/{customer_id}/submit-and-complete-tracking",
+    response_model=CustomerActivityCreateAndCompleteTrackingResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="提交客户活动并完成追踪",
+)
+async def create_activity_and_complete_tracking(
+    customer_id: str,
+    payload: CustomerActivityCreateAndCompleteTrackingRequest,
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    customer = check_customer_activity_permission(customer_id, team_id, current_user, db)
+    task = follow_up_task_crud.get_by_public_id(db, payload.task_public_id, team_id=team_id)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="追踪任务不存在")
+    if task.customer_id != customer.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="追踪任务不属于当前客户")
+
+    complete_action = FollowUpTaskTransitionAction(
+        action=FollowUpTaskTransitionActionType.COMPLETE,
+        task_public_id=payload.task_public_id,
+        confidence=1.0,
+        executable=True,
+        requires_confirmation=False,
+        reason="manual_ui_activity_submitted_and_task_completed",
+    )
+    complete_plan = FollowUpTaskTransitionPlan(
+        decision=FollowUpTaskReconciliationDecision(
+            candidate_public_ids=(payload.task_public_id,),
+            task_decisions=(
+                FollowUpTaskReconciliationTaskDecision(
+                    decision=FollowUpTaskTransitionActionType.COMPLETE,
+                    confidence=1.0,
+                    task_public_id=payload.task_public_id,
+                ),
+            ),
+        ),
+        actions=(complete_action,),
+        plan_source="manual_ui_activity_submission",
+    )
+
+    def complete_tracking_before_commit(_: CustomerActivityWriteResult) -> None:
+        transition_result = follow_up_task_transition_execution_service.execute_action(
+            db,
+            team_id=team_id,
+            action=complete_action,
+            plan=complete_plan,
+            actor_id=str(current_user.id),
+            expected_owner_id=str(current_user.id),
+            commit=False,
+        )
+        if transition_result.status != FollowUpTaskTransitionExecutionStatus.EXECUTED:
+            raise ValueError(transition_result.skip_reason or "追踪任务状态更新失败")
+
+    try:
+        write_result = customer_activity_write_service.create(
+            db,
+            obj_in=payload.activity,
+            customer_id=customer.id,
+            creator_id=str(current_user.id),
+            owner_id=str(current_user.id),
+            team_id=team_id,
+            operator_name=current_user.name,
+            post_commit_trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_CREATED_DETERMINISTIC,
+            actor_id=str(current_user.id),
+            before_commit=complete_tracking_before_commit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    customer_activity_write_service.kick(write_result)
+    await customer_activity_processing_service.trigger_processing(write_result.activity.id, team_id)
+    return CustomerActivityCreateAndCompleteTrackingResponse(
+        activity=_build_activity_response(db, write_result.activity, write_result=write_result),
+        completed_task_public_id=payload.task_public_id,
     )
 
 

@@ -1,0 +1,87 @@
+{
+  "case_id": "AC-11",
+  "attempt": 1,
+  "request": {
+    "session_id": 876,
+    "client_request_id": "861ab66b-ab46-4604-9543-bf1c5b2a1c7c",
+    "input": {
+      "type": "text",
+      "text": "请介绍华米（北京）信息科技有限公司，并告诉我负责人"
+    }
+  },
+  "http_status": 200,
+  "elapsed_seconds": 11.901,
+  "events": [
+    {
+      "event": "session",
+      "session_id": 876,
+      "session_key": "agent_6574c815e1844bdeaae40813bf41083d"
+    },
+    {
+      "event": "agent_ui",
+      "phase": "final",
+      "message_id": 2274,
+      "turn_id": "turn_fecf516183f741ad8048ef6b549db093",
+      "sequence": 1,
+      "message": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 2274,
+        "turn_id": "turn_fecf516183f741ad8048ef6b549db093",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_text_1",
+            "type": "text",
+            "format": "markdown",
+            "text": "当前权限范围内未找到符合条件的客户。"
+          },
+          {
+            "id": "b_entity_list_1",
+            "type": "entity_list",
+            "entity_type": "customer",
+            "items": [],
+            "total": 0,
+            "result_set_id": "rs_7ed144a9eb954357a6bd50ac0cf04bd0"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {
+          "route": "QUERY",
+          "result_set_id": "rs_7ed144a9eb954357a6bd50ac0cf04bd0",
+          "accessibility_label": "当前权限范围内未找到符合条件的客户。"
+        }
+      }
+    },
+    {
+      "event": "done",
+      "session_id": 876
+    }
+  ],
+  "summary": {
+    "event_types": [
+      "session",
+      "agent_ui",
+      "done"
+    ],
+    "session_id": 876,
+    "message_id": 2274,
+    "route": "QUERY",
+    "metadata": {
+      "route": "QUERY",
+      "result_set_id": "rs_7ed144a9eb954357a6bd50ac0cf04bd0",
+      "accessibility_label": "当前权限范围内未找到符合条件的客户。"
+    },
+    "block_types": [
+      "text",
+      "entity_list"
+    ],
+    "texts": [
+      "当前权限范围内未找到符合条件的客户。"
+    ],
+    "interaction": null,
+    "errors": [],
+    "entity_count": 0,
+    "result_set_id": "rs_7ed144a9eb954357a6bd50ac0cf04bd0"
+  }
+}

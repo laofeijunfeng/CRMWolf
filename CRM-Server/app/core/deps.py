@@ -785,37 +785,34 @@ def check_customer_activity_permission(
     customer_id: str,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-    from app.crud.customer import customer_crud
-
-    customer = _get_customer_by_identifier(db, customer_id, team_id)
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="客户不存在"
-        )
+    from app.services.customer_activity_access_policy import (
+        CustomerActivityAccessDeniedError,
+        CustomerActivityCustomerNotFoundError,
+        customer_activity_access_policy,
+    )
 
     user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
-    permission_codes = {p.code for p in user_permissions}
-
-    if "customer:edit:all" in permission_codes:
-        return customer
-
-    if _customer_member_has_access(db, team_id, customer.id, current_user.id, "FOLLOW_UP"):
-        return customer
-
-    if customer.owner_id == str(current_user.id) and (
-        "customer:activity:create" in permission_codes
-        or "customer:follow_up:create" in permission_codes
-        or "customer:edit:own" in permission_codes
-    ):
-        return customer
-
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="缺少客户活动权限"
-    )
+    permission_codes = frozenset(permission.code for permission in user_permissions)
+    try:
+        return customer_activity_access_policy.resolve_customer(
+            db,
+            customer_identifier=customer_id,
+            team_id=team_id,
+            user_id=current_user.id,
+            permission_codes=permission_codes,
+        )
+    except CustomerActivityCustomerNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="客户不存在",
+        ) from exc
+    except CustomerActivityAccessDeniedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="缺少客户活动权限",
+        ) from exc
 
 
 def check_follow_up_task_direct_view_permission(

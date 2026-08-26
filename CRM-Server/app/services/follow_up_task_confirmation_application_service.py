@@ -1,4 +1,4 @@
-"""Apply resolved confirmation cases through the gated transition executor."""
+"""Apply resolved confirmation cases through the transition executor."""
 
 from __future__ import annotations
 
@@ -14,7 +14,10 @@ from app.services.follow_up_task_confirmation_service import (
     FollowUpTaskConfirmationReplyDecision,
     follow_up_task_confirmation_service,
 )
-from app.services.follow_up_task_reconciliation_evaluation_service import FollowUpTaskReconciliationDecision
+from app.services.follow_up_task_reconciliation_evaluation_service import (
+    FollowUpTaskReconciliationDecision,
+    FollowUpTaskReconciliationTaskDecision,
+)
 from app.services.follow_up_task_transition_execution_service import (
     FollowUpTaskTransitionExecutionResult,
     FollowUpTaskTransitionExecutionService,
@@ -45,6 +48,14 @@ class FollowUpTaskConfirmationCaseCrudProtocol(Protocol):
         db: Session,
         public_id: str,
         team_id: int | None = None,
+    ) -> FollowUpTaskConfirmationCase | None: ...
+
+    def get_by_public_id_for_update(
+        self,
+        db: Session,
+        *,
+        public_id: str,
+        team_id: int,
     ) -> FollowUpTaskConfirmationCase | None: ...
 
     def mark_application_result(
@@ -91,7 +102,7 @@ class FollowUpTaskConfirmationApplicationService:
     mutating_actions = frozenset(
         {
             FollowUpTaskConfirmationResolutionAction.COMPLETE,
-            FollowUpTaskConfirmationResolutionAction.DELAY,
+            FollowUpTaskConfirmationResolutionAction.POSTPONE,
             FollowUpTaskConfirmationResolutionAction.CANCEL,
         }
     )
@@ -168,7 +179,11 @@ class FollowUpTaskConfirmationApplicationService:
         actor_id: str,
         commit: bool = True,
     ) -> FollowUpTaskConfirmationApplicationResult:
-        case = self.confirmation_case_crud.get_by_public_id(db, case_public_id, team_id=team_id)
+        case = self.confirmation_case_crud.get_by_public_id_for_update(
+            db,
+            public_id=case_public_id,
+            team_id=team_id,
+        )
         if case is None:
             return self._skipped(None, None, None, "CONFIRMATION_CASE_NOT_FOUND")
         if case.status != FollowUpTaskConfirmationStatus.RESOLVED:
@@ -197,7 +212,6 @@ class FollowUpTaskConfirmationApplicationService:
                 plan=plan,
                 actor_id=actor_id,
                 expected_owner_id=case.owner_id,
-                enabled=True,
                 commit=False,
             )
         )
@@ -228,14 +242,18 @@ class FollowUpTaskConfirmationApplicationService:
     ) -> FollowUpTaskTransitionPlan:
         proposed_due_at = case.resolved_due_at.isoformat() if case.resolved_due_at is not None else None
         decision = FollowUpTaskReconciliationDecision(
-            decision=case.resolved_action,
-            task_public_id=task.public_id,
             candidate_public_ids=(task.public_id,),
-            confidence=1.0,
-            needs_confirmation=False,
-            proposed_due_at=proposed_due_at,
-            evidence_terms=("user_confirmation",),
-            state_mutation_requested=False,
+            task_decisions=(
+                FollowUpTaskReconciliationTaskDecision(
+                    decision=case.resolved_action,
+                    task_public_id=task.public_id,
+                    confidence=1.0,
+                    needs_confirmation=False,
+                    proposed_due_at=proposed_due_at,
+                    evidence_terms=("user_confirmation",),
+                    state_mutation_requested=False,
+                ),
+            ),
         )
         action = FollowUpTaskTransitionAction(
             action=case.resolved_action,
@@ -252,7 +270,6 @@ class FollowUpTaskConfirmationApplicationService:
             decision=decision,
             actions=(action,),
             plan_source="confirmation_case_reply",
-            safety_failures=(),
             state_mutation_requested=False,
         )
 

@@ -1,0 +1,1473 @@
+{
+  "valid": [
+    {
+      "schema": "RootDecision",
+      "reason": "Root decision is closed, task-aware, context-explicit, and risk-typed",
+      "payload": {
+        "task_relation": "NEW_TASK",
+        "route": "QUERY",
+        "risk": "READ_ONLY",
+        "context_policy": {
+          "selected_entity": "IGNORE",
+          "previous_query": "IGNORE",
+          "result_set": "IGNORE",
+          "active_workflow": "NONE"
+        },
+        "confidence": 0.98,
+        "reason_code": "NEW_READ_ONLY_QUERY",
+        "evidence": []
+      }
+    },
+    {
+      "schema": "CRMQueryResult",
+      "reason": "query result preserves grounded rows, refs and warnings",
+      "payload": {
+        "query_id": "qry_01JEXAMPLE",
+        "result_set_id": "rs_01JEXAMPLE",
+        "resource": "customer",
+        "status": "PARTIAL",
+        "rows": [
+          {
+            "public_id": "cus_01J1",
+            "account_name": "示例科技有限公司",
+            "city": "上海",
+            "industry": "软件和信息技术服务",
+            "status": "重点客户"
+          }
+        ],
+        "entity_refs": [
+          {
+            "ref_id": "eref_01J1",
+            "resource": "customer",
+            "public_id": "cus_01J1",
+            "display_name": "示例科技有限公司",
+            "result_set_id": "rs_01JEXAMPLE"
+          }
+        ],
+        "total": 18,
+        "next_cursor": "cursor_2",
+        "applied_filters": [
+          {
+            "field": "city",
+            "operator": "eq",
+            "value": "上海"
+          }
+        ],
+        "applied_sorts": [
+          {
+            "field": "last_modified_time",
+            "direction": "desc"
+          }
+        ],
+        "facts": [
+          {
+            "fact_id": "fact_total",
+            "label": "客户总数",
+            "value": 18,
+            "source": "CRM_API",
+            "source_ref": "GET /v1/customers/",
+            "entity_ref": null
+          }
+        ],
+        "warnings": [
+          {
+            "code": "RESULT_TRUNCATED",
+            "message": "当前仅返回前 10 条结果。",
+            "resource": "customer"
+          }
+        ]
+      }
+    },
+    {
+      "schema": "QueryError",
+      "reason": "query errors use the frozen code and retry contract",
+      "payload": {
+        "code": "QUERY_INVALID",
+        "message": "字段不支持筛选。",
+        "retryable": false,
+        "field": "unknown_field",
+        "operator": "eq"
+      }
+    },
+    {
+      "schema": "AgentChatRequest",
+      "reason": "typed text input is the only chat request boundary",
+      "payload": {
+        "session_id": 123,
+        "client_request_id": "6fa2e0e8-86d4-4d6c-a1b0-6490b2bf12be",
+        "input": {
+          "type": "text",
+          "text": "我在上海有哪些客户"
+        }
+      }
+    },
+    {
+      "schema": "CRMQuerySpec",
+      "payload": {
+        "resource": "customer",
+        "projection": [
+          "public_id",
+          "account_name"
+        ],
+        "filters": [],
+        "sorts": [],
+        "metrics": [],
+        "group_by": [],
+        "scope": "accessible",
+        "page_size": 20,
+        "cursor": null
+      }
+    },
+    {
+      "schema": "InteractionBlock",
+      "payload": {
+        "id": "choice_1",
+        "type": "interaction",
+        "interaction_id": "int_choice_1",
+        "interaction_type": "choice",
+        "state": "ACTIVE",
+        "prompt": "请选择客户",
+        "fields": [],
+        "options": [
+          {
+            "value": "customer_1",
+            "label": "客户一",
+            "disabled": false
+          },
+          {
+            "value": "customer_2",
+            "label": "客户二",
+            "disabled": false
+          }
+        ],
+        "selection_mode": "multiple",
+        "min_selections": 1,
+        "max_selections": 2,
+        "allow_blank": null,
+        "submit_action_id": "act_choice_1"
+      }
+    },
+    {
+      "schema": "InteractionBlock",
+      "payload": {
+        "id": "text_1",
+        "type": "interaction",
+        "interaction_id": "int_text_1",
+        "interaction_type": "text_input",
+        "state": "ACTIVE",
+        "prompt": "请输入说明",
+        "fields": [
+          {
+            "key": "reason",
+            "label": "说明",
+            "field_type": "textarea",
+            "required": true,
+            "default_value": null,
+            "min_length": 1,
+            "max_length": 500,
+            "options": []
+          }
+        ],
+        "options": [],
+        "allow_blank": false,
+        "submit_action_id": "act_text_1"
+      }
+    },
+    {
+      "schema": "AgentUIEnvelope",
+      "reason": "markdown allowlist accepts paragraphs emphasis inline code lists and HTTPS links",
+      "payload": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 1,
+        "turn_id": "turn_markdown_allowed",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "turn_markdown_allowed",
+            "type": "text",
+            "format": "markdown",
+            "text": "**重点** 与 *说明*，使用 `public_id`。\n\n- 客户一\n- [查看客户](https://crm.example.com/customers/1)\n1. 下一步"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {}
+      }
+    },
+    {
+      "schema": "AgentUIEnvelope",
+      "reason": "plain text does not interpret markdown markers",
+      "payload": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 1,
+        "turn_id": "turn_plain_markers",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "turn_plain_markers",
+            "type": "text",
+            "format": "plain",
+            "text": "# 原样显示，不作为 Markdown"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {}
+      }
+    },
+    {
+      "schema": "AgentUIEnvelope",
+      "reason": "inline code may contain literal disallowed markers",
+      "payload": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 1,
+        "turn_id": "turn_markdown_inline_code",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "turn_markdown_inline_code",
+            "type": "text",
+            "format": "markdown",
+            "text": "`![不是图片](javascript:noop) ~~不是删除线~~`"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {}
+      }
+    },
+    {
+      "schema": "AgentUIEnvelope",
+      "reason": "plain text only applies the raw HTML boundary",
+      "payload": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 1,
+        "turn_id": "turn_plain_less_than",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "turn_plain_less_than",
+            "type": "text",
+            "format": "plain",
+            "text": "# 预算 < 5 万"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {}
+      }
+    },
+    {
+      "schema": "AgentUIStreamEvent",
+      "reason": "delta message_id may be omitted before the authoritative message is persisted",
+      "payload": {
+        "event": "agent_ui",
+        "phase": "delta",
+        "turn_id": "turn_stream_pending",
+        "sequence": 1,
+        "operations": [
+          {
+            "op": "append_text",
+            "block_id": "summary",
+            "delta": "正在处理"
+          }
+        ]
+      }
+    },
+    {
+      "schema": "AgentUIStreamEvent",
+      "reason": "delta events carry ordered append_text operations",
+      "payload": {
+        "event": "agent_ui",
+        "phase": "delta",
+        "message_id": 41,
+        "turn_id": "turn_stream_41",
+        "sequence": 1,
+        "operations": [
+          {
+            "op": "append_text",
+            "block_id": "summary",
+            "delta": "上海客户共 "
+          }
+        ]
+      }
+    },
+    {
+      "schema": "AgentUIStreamEvent",
+      "reason": "final events carry the authoritative envelope with matching identity",
+      "payload": {
+        "event": "agent_ui",
+        "phase": "final",
+        "message_id": 41,
+        "turn_id": "turn_stream_41",
+        "sequence": 2,
+        "message": {
+          "schema_version": "crm.agent.ui.v1",
+          "message_id": 41,
+          "turn_id": "turn_stream_41",
+          "role": "assistant",
+          "state": "final",
+          "blocks": [
+            {
+              "id": "summary",
+              "type": "text",
+              "format": "plain",
+              "text": "上海客户共 2 家。"
+            }
+          ],
+          "suggested_actions": [],
+          "metadata": {
+            "route": "QUERY"
+          }
+        }
+      }
+    },
+    {
+      "schema": "AgentUIBlock",
+      "payload": {
+        "id": "block_text",
+        "type": "text",
+        "format": "plain",
+        "text": "客户摘要"
+      }
+    },
+    {
+      "schema": "AgentUIBlock",
+      "payload": {
+        "id": "block_list",
+        "type": "entity_list",
+        "entity_type": "customer",
+        "items": [],
+        "total": 0
+      }
+    },
+    {
+      "schema": "AgentUIBlock",
+      "payload": {
+        "id": "block_card",
+        "type": "entity_card",
+        "entity_type": "customer",
+        "ref_id": "customer_1",
+        "title": "示例客户",
+        "sections": [],
+        "actions": []
+      }
+    },
+    {
+      "schema": "AgentUIBlock",
+      "payload": {
+        "id": "block_table",
+        "type": "table",
+        "columns": [
+          {
+            "key": "name",
+            "label": "客户"
+          }
+        ],
+        "rows": []
+      }
+    },
+    {
+      "schema": "AgentUIBlock",
+      "payload": {
+        "id": "block_timeline",
+        "type": "timeline",
+        "items": []
+      }
+    },
+    {
+      "schema": "AgentUIBlock",
+      "payload": {
+        "id": "block_metrics",
+        "type": "metric_group",
+        "metrics": [
+          {
+            "key": "count",
+            "label": "客户数",
+            "value": {
+              "kind": "number",
+              "value": 1
+            }
+          }
+        ]
+      }
+    },
+    {
+      "schema": "AgentUIBlock",
+      "payload": {
+        "id": "block_notice",
+        "type": "notice",
+        "tone": "info",
+        "text": "结果已更新"
+      }
+    },
+    {
+      "schema": "AgentUIBlock",
+      "payload": {
+        "id": "block_error",
+        "type": "error",
+        "code": "QUERY_INVALID",
+        "title": "查询失败",
+        "message": "请调整条件",
+        "retryable": false
+      }
+    },
+    {
+      "schema": "AgentUIBlock",
+      "payload": {
+        "id": "block_interaction",
+        "type": "interaction",
+        "interaction_id": "interaction_1",
+        "interaction_type": "choice",
+        "state": "ACTIVE",
+        "prompt": "请选择客户",
+        "options": [
+          {
+            "value": "customer_1",
+            "label": "示例客户"
+          }
+        ],
+        "selection_mode": "single",
+        "min_selections": 1,
+        "max_selections": 1,
+        "submit_action_id": "submit_1"
+      }
+    },
+    {
+      "schema": "AgentUIBlock",
+      "payload": {
+        "id": "block_action_result",
+        "type": "action_result",
+        "action_id": "action_1",
+        "status": "SUCCESS",
+        "title": "已完成",
+        "message": "操作成功"
+      }
+    },
+    {
+      "schema": "AgentUIBlock",
+      "payload": {
+        "id": "block_pagination",
+        "type": "pagination",
+        "result_set_id": "result_1",
+        "range_start": 1,
+        "range_end": 1,
+        "total": 1
+      }
+    },
+    {
+      "schema": "AgentUIAction",
+      "payload": {
+        "type": "open_entity",
+        "action_id": "open_1",
+        "label": "打开客户"
+      }
+    },
+    {
+      "schema": "AgentUIAction",
+      "payload": {
+        "type": "query_refinement",
+        "action_id": "refine_1",
+        "label": "缩小范围"
+      }
+    },
+    {
+      "schema": "AgentUIAction",
+      "payload": {
+        "type": "start_workflow",
+        "action_id": "workflow_1",
+        "label": "创建跟进"
+      }
+    },
+    {
+      "schema": "AgentUIAction",
+      "payload": {
+        "type": "submit_interaction",
+        "action_id": "submit_1",
+        "label": "提交"
+      }
+    },
+    {
+      "schema": "AgentUIAction",
+      "payload": {
+        "type": "retry",
+        "action_id": "retry_1",
+        "label": "重试"
+      }
+    },
+    {
+      "schema": "AgentTransportErrorEvent",
+      "reason": "action transport errors use a closed code and contain no legacy content payload",
+      "payload": {
+        "event": "transport_error",
+        "code": "ACTION_EXPIRED",
+        "message": "该操作已过期，请刷新会话后重新发起。",
+        "retryable": false,
+        "session_id": 123
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "schema": "RootDecision",
+      "reason": "Root decision is closed, task-aware, context-explicit, and risk-typed",
+      "payload": {
+        "task_relation": "NEW_TASK",
+        "route": "QUERY",
+        "risk": "READ_ONLY",
+        "context_policy": {
+          "selected_entity": "IGNORE",
+          "previous_query": "IGNORE",
+          "result_set": "IGNORE",
+          "active_workflow": "NONE"
+        },
+        "confidence": "0.98",
+        "reason_code": "NEW_READ_ONLY_QUERY",
+        "evidence": []
+      }
+    },
+    {
+      "schema": "CRMQueryResult",
+      "reason": "query result totals remain integers",
+      "payload": {
+        "query_id": "qry_01JEXAMPLE",
+        "result_set_id": "rs_01JEXAMPLE",
+        "resource": "customer",
+        "status": "PARTIAL",
+        "rows": [
+          {
+            "public_id": "cus_01J1",
+            "account_name": "示例科技有限公司",
+            "city": "上海",
+            "industry": "软件和信息技术服务",
+            "status": "重点客户"
+          }
+        ],
+        "entity_refs": [
+          {
+            "ref_id": "eref_01J1",
+            "resource": "customer",
+            "public_id": "cus_01J1",
+            "display_name": "示例科技有限公司",
+            "result_set_id": "rs_01JEXAMPLE"
+          }
+        ],
+        "total": "18",
+        "next_cursor": "cursor_2",
+        "applied_filters": [
+          {
+            "field": "city",
+            "operator": "eq",
+            "value": "上海"
+          }
+        ],
+        "applied_sorts": [
+          {
+            "field": "last_modified_time",
+            "direction": "desc"
+          }
+        ],
+        "facts": [
+          {
+            "fact_id": "fact_total",
+            "label": "客户总数",
+            "value": 18,
+            "source": "CRM_API",
+            "source_ref": "GET /v1/customers/",
+            "entity_ref": null
+          }
+        ],
+        "warnings": [
+          {
+            "code": "RESULT_TRUNCATED",
+            "message": "当前仅返回前 10 条结果。",
+            "resource": "customer"
+          }
+        ]
+      }
+    },
+    {
+      "schema": "QueryError",
+      "reason": "unknown query error codes are rejected",
+      "payload": {
+        "code": "LEGACY_QUERY_ERROR",
+        "message": "字段不支持筛选。",
+        "retryable": false,
+        "field": "unknown_field",
+        "operator": "eq"
+      }
+    },
+    {
+      "schema": "AgentChatRequest",
+      "reason": "legacy content cannot replace typed input",
+      "payload": {
+        "session_id": 123,
+        "client_request_id": "6fa2e0e8-86d4-4d6c-a1b0-6490b2bf12be",
+        "content": "旧协议"
+      }
+    },
+    {
+      "schema": "CRMQuerySpec",
+      "reason": "transport scalar coercion is forbidden",
+      "payload": {
+        "resource": "customer",
+        "projection": [
+          "public_id"
+        ],
+        "page_size": "20"
+      }
+    },
+    {
+      "schema": "AgentUIEnvelope",
+      "reason": "message_id must remain an integer",
+      "payload": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": "1",
+        "turn_id": "turn_1",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [],
+        "suggested_actions": [],
+        "metadata": {}
+      }
+    },
+    {
+      "schema": "InteractionBlock",
+      "reason": "choice must declare selection bounds",
+      "payload": {
+        "id": "choice_1",
+        "type": "interaction",
+        "interaction_id": "int_choice_1",
+        "interaction_type": "choice",
+        "state": "ACTIVE",
+        "prompt": "请选择客户",
+        "fields": [],
+        "options": [
+          {
+            "value": "customer_1",
+            "label": "客户一"
+          }
+        ],
+        "selection_mode": "single",
+        "submit_action_id": "act_choice_1"
+      }
+    },
+    {
+      "schema": "InteractionBlock",
+      "reason": "confirmation option values must be unique",
+      "payload": {
+        "id": "confirmation_1",
+        "type": "interaction",
+        "interaction_id": "int_confirmation_1",
+        "interaction_type": "confirmation",
+        "state": "ACTIVE",
+        "prompt": "确认吗？",
+        "fields": [],
+        "options": [
+          {
+            "value": "confirm",
+            "label": "确认"
+          },
+          {
+            "value": "cancel",
+            "label": "取消"
+          },
+          {
+            "value": "confirm",
+            "label": "再次确认"
+          }
+        ],
+        "selection_mode": "single",
+        "submit_action_id": "act_confirmation_1"
+      }
+    },
+    {
+      "schema": "InteractionBlock",
+      "reason": "text input must declare length bounds",
+      "payload": {
+        "id": "text_1",
+        "type": "interaction",
+        "interaction_id": "int_text_1",
+        "interaction_type": "text_input",
+        "state": "ACTIVE",
+        "prompt": "请输入说明",
+        "fields": [
+          {
+            "key": "reason",
+            "label": "说明",
+            "field_type": "textarea",
+            "required": true
+          }
+        ],
+        "options": [],
+        "allow_blank": false,
+        "submit_action_id": "act_text_1"
+      }
+    },
+    {
+      "schema": "AgentUIEnvelope",
+      "reason": "text blocks must reject raw HTML",
+      "payload": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 1,
+        "turn_id": "turn_unsafe_html",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "unsafe_html",
+            "type": "text",
+            "format": "markdown",
+            "text": "摘要<script>alert(1)</script>"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {}
+      }
+    },
+    {
+      "schema": "AgentUIEnvelope",
+      "reason": "markdown headings are not allowed",
+      "payload": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 1,
+        "turn_id": "turn_markdown_heading",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "turn_markdown_heading",
+            "type": "text",
+            "format": "markdown",
+            "text": "# 客户摘要"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {}
+      }
+    },
+    {
+      "schema": "AgentUIEnvelope",
+      "reason": "markdown blockquotes are not allowed",
+      "payload": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 1,
+        "turn_id": "turn_markdown_blockquote",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "turn_markdown_blockquote",
+            "type": "text",
+            "format": "markdown",
+            "text": "> 引用"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {}
+      }
+    },
+    {
+      "schema": "AgentUIEnvelope",
+      "reason": "fenced code blocks are not allowed",
+      "payload": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 1,
+        "turn_id": "turn_markdown_fence",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "turn_markdown_fence",
+            "type": "text",
+            "format": "markdown",
+            "text": "```json\n{}\n```"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {}
+      }
+    },
+    {
+      "schema": "AgentUIEnvelope",
+      "reason": "markdown images are not allowed",
+      "payload": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 1,
+        "turn_id": "turn_markdown_image",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "turn_markdown_image",
+            "type": "text",
+            "format": "markdown",
+            "text": "![客户](https://example.com/a.png)"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {}
+      }
+    },
+    {
+      "schema": "AgentUIEnvelope",
+      "reason": "task lists are not allowed",
+      "payload": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 1,
+        "turn_id": "turn_markdown_task",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "turn_markdown_task",
+            "type": "text",
+            "format": "markdown",
+            "text": "- [x] 已完成"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {}
+      }
+    },
+    {
+      "schema": "AgentUIEnvelope",
+      "reason": "strikethrough is not allowed",
+      "payload": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 1,
+        "turn_id": "turn_markdown_strike",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "turn_markdown_strike",
+            "type": "text",
+            "format": "markdown",
+            "text": "~~已删除~~"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {}
+      }
+    },
+    {
+      "schema": "AgentUIEnvelope",
+      "reason": "non-HTTP links are not allowed",
+      "payload": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 1,
+        "turn_id": "turn_markdown_js_link",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "turn_markdown_js_link",
+            "type": "text",
+            "format": "markdown",
+            "text": "[打开](javascript:alert(1))"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {}
+      }
+    },
+    {
+      "schema": "AgentUIEnvelope",
+      "reason": "relative links are not allowed",
+      "payload": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 1,
+        "turn_id": "turn_markdown_relative_link",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "turn_markdown_relative_link",
+            "type": "text",
+            "format": "markdown",
+            "text": "[详情](/customers/1)"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {}
+      }
+    },
+    {
+      "schema": "AgentUIEnvelope",
+      "reason": "reference-style links are not allowed",
+      "payload": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 1,
+        "turn_id": "turn_markdown_reference_link",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "turn_markdown_reference_link",
+            "type": "text",
+            "format": "markdown",
+            "text": "[详情][customer]\n\n[customer]: https://example.com"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {}
+      }
+    },
+    {
+      "schema": "AgentUIEnvelope",
+      "reason": "thematic breaks are not allowed",
+      "payload": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 1,
+        "turn_id": "turn_markdown_rule",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "turn_markdown_rule",
+            "type": "text",
+            "format": "markdown",
+            "text": "---"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {}
+      }
+    },
+    {
+      "schema": "AgentUIEnvelope",
+      "reason": "indented code blocks are not allowed",
+      "payload": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 1,
+        "turn_id": "turn_markdown_indented_code",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "turn_markdown_indented_code",
+            "type": "text",
+            "format": "markdown",
+            "text": "    print(1)"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {}
+      }
+    },
+    {
+      "schema": "AgentUIEnvelope",
+      "reason": "markdown tables are not allowed",
+      "payload": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 1,
+        "turn_id": "turn_markdown_table",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "turn_markdown_table",
+            "type": "text",
+            "format": "markdown",
+            "text": "客户 | 状态\n--- | ---\nA | 活跃"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {}
+      }
+    },
+    {
+      "schema": "AgentUIEnvelope",
+      "reason": "an even number of escapes does not disable strikethrough syntax",
+      "payload": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 1,
+        "turn_id": "turn_markdown_even_escape_strike",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "turn_markdown_even_escape_strike",
+            "type": "text",
+            "format": "markdown",
+            "text": "\\\\~~仍是删除线\\\\~~"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {}
+      }
+    },
+    {
+      "schema": "AgentUIEnvelope",
+      "reason": "HTTP links containing U+0085 next line whitespace are not allowed",
+      "payload": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 1,
+        "turn_id": "turn_markdown_url_u0085",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "turn_markdown_url_u0085",
+            "type": "text",
+            "format": "markdown",
+            "text": "[详情](https://crm.example.com/customers/1)"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {}
+      }
+    },
+    {
+      "schema": "AgentUIEnvelope",
+      "reason": "HTTP links containing U+FEFF zero width no-break space are not allowed",
+      "payload": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 1,
+        "turn_id": "turn_markdown_url_ufeff",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "turn_markdown_url_ufeff",
+            "type": "text",
+            "format": "markdown",
+            "text": "[详情](https://crm.example.com/customers/﻿1)"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {}
+      }
+    },
+    {
+      "schema": "AgentUIStreamEvent",
+      "reason": "delta events only support append_text operations",
+      "payload": {
+        "event": "agent_ui",
+        "phase": "delta",
+        "message_id": 41,
+        "turn_id": "turn_stream_41",
+        "sequence": 1,
+        "operations": [
+          {
+            "op": "replace_table",
+            "block_id": "summary",
+            "rows": []
+          }
+        ]
+      }
+    },
+    {
+      "schema": "AgentUIStreamEvent",
+      "reason": "stream sequence starts at one",
+      "payload": {
+        "event": "agent_ui",
+        "phase": "delta",
+        "message_id": 41,
+        "turn_id": "turn_stream_41",
+        "sequence": 0,
+        "operations": [
+          {
+            "op": "append_text",
+            "block_id": "summary",
+            "delta": "上海客户共 "
+          }
+        ]
+      }
+    },
+    {
+      "schema": "AgentUIStreamEvent",
+      "reason": "delta events require at least one operation",
+      "payload": {
+        "event": "agent_ui",
+        "phase": "delta",
+        "message_id": 41,
+        "turn_id": "turn_stream_41",
+        "sequence": 1,
+        "operations": []
+      }
+    },
+    {
+      "schema": "AgentUIStreamEvent",
+      "reason": "the authoritative final envelope must have final state",
+      "payload": {
+        "event": "agent_ui",
+        "phase": "final",
+        "message_id": 41,
+        "turn_id": "turn_stream_41",
+        "sequence": 2,
+        "message": {
+          "schema_version": "crm.agent.ui.v1",
+          "message_id": 41,
+          "turn_id": "turn_stream_41",
+          "role": "assistant",
+          "state": "streaming",
+          "blocks": [
+            {
+              "id": "summary",
+              "type": "text",
+              "format": "plain",
+              "text": "上海客户共 2 家。"
+            }
+          ],
+          "suggested_actions": [],
+          "metadata": {
+            "route": "QUERY"
+          }
+        }
+      }
+    },
+    {
+      "schema": "AgentUIStreamEvent",
+      "reason": "final event message_id must match its authoritative envelope",
+      "payload": {
+        "event": "agent_ui",
+        "phase": "final",
+        "message_id": 41,
+        "turn_id": "turn_stream_41",
+        "sequence": 2,
+        "message": {
+          "schema_version": "crm.agent.ui.v1",
+          "message_id": 42,
+          "turn_id": "turn_stream_41",
+          "role": "assistant",
+          "state": "final",
+          "blocks": [
+            {
+              "id": "summary",
+              "type": "text",
+              "format": "plain",
+              "text": "上海客户共 2 家。"
+            }
+          ],
+          "suggested_actions": [],
+          "metadata": {
+            "route": "QUERY"
+          }
+        }
+      }
+    },
+    {
+      "schema": "AgentUIStreamEvent",
+      "reason": "final event turn_id must match its authoritative envelope",
+      "payload": {
+        "event": "agent_ui",
+        "phase": "final",
+        "message_id": 41,
+        "turn_id": "turn_stream_41",
+        "sequence": 2,
+        "message": {
+          "schema_version": "crm.agent.ui.v1",
+          "message_id": 41,
+          "turn_id": "turn_stream_other",
+          "role": "assistant",
+          "state": "final",
+          "blocks": [
+            {
+              "id": "summary",
+              "type": "text",
+              "format": "plain",
+              "text": "上海客户共 2 家。"
+            }
+          ],
+          "suggested_actions": [],
+          "metadata": {
+            "route": "QUERY"
+          }
+        }
+      }
+    },
+    {
+      "schema": "AgentUIStreamEvent",
+      "reason": "final events cannot carry delta operations",
+      "payload": {
+        "event": "agent_ui",
+        "phase": "final",
+        "message_id": 41,
+        "turn_id": "turn_stream_41",
+        "sequence": 2,
+        "message": {
+          "schema_version": "crm.agent.ui.v1",
+          "message_id": 41,
+          "turn_id": "turn_stream_41",
+          "role": "assistant",
+          "state": "final",
+          "blocks": [
+            {
+              "id": "summary",
+              "type": "text",
+              "format": "plain",
+              "text": "上海客户共 2 家。"
+            }
+          ],
+          "suggested_actions": [],
+          "metadata": {
+            "route": "QUERY"
+          }
+        },
+        "operations": [
+          {
+            "op": "append_text",
+            "block_id": "summary",
+            "delta": "重复"
+          }
+        ]
+      }
+    },
+    {
+      "schema": "AgentUIStreamEvent",
+      "reason": "delta events cannot carry a final message envelope",
+      "payload": {
+        "event": "agent_ui",
+        "phase": "delta",
+        "message_id": 41,
+        "turn_id": "turn_stream_41",
+        "sequence": 1,
+        "operations": [
+          {
+            "op": "append_text",
+            "block_id": "summary",
+            "delta": "上海客户共 "
+          }
+        ],
+        "message": {
+          "schema_version": "crm.agent.ui.v1",
+          "message_id": 41,
+          "turn_id": "turn_stream_41",
+          "role": "assistant",
+          "state": "final",
+          "blocks": [
+            {
+              "id": "summary",
+              "type": "text",
+              "format": "plain",
+              "text": "上海客户共 2 家。"
+            }
+          ],
+          "suggested_actions": [],
+          "metadata": {
+            "route": "QUERY"
+          }
+        }
+      }
+    },
+    {
+      "schema": "AgentUIBlock",
+      "reason": "text block rejects undeclared fields",
+      "payload": {
+        "id": "block_text",
+        "type": "text",
+        "format": "plain",
+        "text": "客户摘要",
+        "legacy": true
+      }
+    },
+    {
+      "schema": "AgentUIBlock",
+      "reason": "entity_list block rejects undeclared fields",
+      "payload": {
+        "id": "block_list",
+        "type": "entity_list",
+        "entity_type": "customer",
+        "items": [],
+        "total": 0,
+        "legacy": true
+      }
+    },
+    {
+      "schema": "AgentUIBlock",
+      "reason": "entity_card block rejects undeclared fields",
+      "payload": {
+        "id": "block_card",
+        "type": "entity_card",
+        "entity_type": "customer",
+        "ref_id": "customer_1",
+        "title": "示例客户",
+        "sections": [],
+        "actions": [],
+        "legacy": true
+      }
+    },
+    {
+      "schema": "AgentUIBlock",
+      "reason": "table block rejects undeclared fields",
+      "payload": {
+        "id": "block_table",
+        "type": "table",
+        "columns": [
+          {
+            "key": "name",
+            "label": "客户"
+          }
+        ],
+        "rows": [],
+        "legacy": true
+      }
+    },
+    {
+      "schema": "AgentUIBlock",
+      "reason": "timeline block rejects undeclared fields",
+      "payload": {
+        "id": "block_timeline",
+        "type": "timeline",
+        "items": [],
+        "legacy": true
+      }
+    },
+    {
+      "schema": "AgentUIBlock",
+      "reason": "metric_group block rejects undeclared fields",
+      "payload": {
+        "id": "block_metrics",
+        "type": "metric_group",
+        "metrics": [
+          {
+            "key": "count",
+            "label": "客户数",
+            "value": {
+              "kind": "number",
+              "value": 1
+            }
+          }
+        ],
+        "legacy": true
+      }
+    },
+    {
+      "schema": "AgentUIBlock",
+      "reason": "notice block rejects undeclared fields",
+      "payload": {
+        "id": "block_notice",
+        "type": "notice",
+        "tone": "info",
+        "text": "结果已更新",
+        "legacy": true
+      }
+    },
+    {
+      "schema": "AgentUIBlock",
+      "reason": "error block rejects undeclared fields",
+      "payload": {
+        "id": "block_error",
+        "type": "error",
+        "code": "QUERY_INVALID",
+        "title": "查询失败",
+        "message": "请调整条件",
+        "retryable": false,
+        "legacy": true
+      }
+    },
+    {
+      "schema": "AgentUIBlock",
+      "reason": "interaction block rejects undeclared fields",
+      "payload": {
+        "id": "block_interaction",
+        "type": "interaction",
+        "interaction_id": "interaction_1",
+        "interaction_type": "choice",
+        "state": "ACTIVE",
+        "prompt": "请选择客户",
+        "options": [
+          {
+            "value": "customer_1",
+            "label": "示例客户"
+          }
+        ],
+        "selection_mode": "single",
+        "min_selections": 1,
+        "max_selections": 1,
+        "submit_action_id": "submit_1",
+        "legacy": true
+      }
+    },
+    {
+      "schema": "AgentUIBlock",
+      "reason": "action_result block rejects undeclared fields",
+      "payload": {
+        "id": "block_action_result",
+        "type": "action_result",
+        "action_id": "action_1",
+        "status": "SUCCESS",
+        "title": "已完成",
+        "message": "操作成功",
+        "legacy": true
+      }
+    },
+    {
+      "schema": "AgentUIBlock",
+      "reason": "pagination block rejects undeclared fields",
+      "payload": {
+        "id": "block_pagination",
+        "type": "pagination",
+        "result_set_id": "result_1",
+        "range_start": 1,
+        "range_end": 1,
+        "total": 1,
+        "legacy": true
+      }
+    },
+    {
+      "schema": "AgentUIAction",
+      "reason": "open_entity action rejects undeclared fields",
+      "payload": {
+        "type": "open_entity",
+        "action_id": "open_1",
+        "label": "打开客户",
+        "legacy": true
+      }
+    },
+    {
+      "schema": "AgentUIAction",
+      "reason": "query_refinement action rejects undeclared fields",
+      "payload": {
+        "type": "query_refinement",
+        "action_id": "refine_1",
+        "label": "缩小范围",
+        "legacy": true
+      }
+    },
+    {
+      "schema": "AgentUIAction",
+      "reason": "start_workflow action rejects undeclared fields",
+      "payload": {
+        "type": "start_workflow",
+        "action_id": "workflow_1",
+        "label": "创建跟进",
+        "legacy": true
+      }
+    },
+    {
+      "schema": "AgentUIAction",
+      "reason": "submit_interaction action rejects undeclared fields",
+      "payload": {
+        "type": "submit_interaction",
+        "action_id": "submit_1",
+        "label": "提交",
+        "legacy": true
+      }
+    },
+    {
+      "schema": "AgentUIAction",
+      "reason": "retry action rejects undeclared fields",
+      "payload": {
+        "type": "retry",
+        "action_id": "retry_1",
+        "label": "重试",
+        "legacy": true
+      }
+    },
+    {
+      "schema": "AgentTransportErrorEvent",
+      "reason": "transport errors reject legacy visible content fields",
+      "payload": {
+        "event": "transport_error",
+        "code": "ACTION_INVALID",
+        "message": "无效操作",
+        "retryable": false,
+        "session_id": 123,
+        "content": "旧协议内容"
+      }
+    }
+  ]
+}

@@ -1,0 +1,125 @@
+{
+  "case_id": "AC-06",
+  "session_id": 878,
+  "http_status": 200,
+  "response": {
+    "items": [
+      {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 2279,
+        "turn_id": "turn_d13e1d19a59949bbb1e0bf0335ea554b",
+        "role": "user",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_user_text_1",
+            "type": "text",
+            "format": "plain",
+            "text": "创建客户API验收-110243-结构确认客户有限公司，城市上海，行业软件"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {
+          "route": null,
+          "result_set_id": null,
+          "accessibility_label": "创建客户API验收-110243-结构确认客户有限公司，城市上海，行业软件"
+        }
+      },
+      {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 2280,
+        "turn_id": "turn_d13e1d19a59949bbb1e0bf0335ea554b",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_text_1",
+            "type": "text",
+            "format": "markdown",
+            "text": "确认要创建客户“API验收-110243-结构确认客户有限公司”吗?"
+          },
+          {
+            "id": "b_interaction_1",
+            "type": "interaction",
+            "interaction_id": "int_bf60b204fd074ad3b228b9c18ca8977a",
+            "interaction_type": "confirmation",
+            "state": "ACTIVE",
+            "prompt": "确认要创建客户“API验收-110243-结构确认客户有限公司”吗?",
+            "fields": [],
+            "options": [
+              {
+                "value": "confirm",
+                "label": "确认创建",
+                "description": null,
+                "disabled": false
+              },
+              {
+                "value": "cancel",
+                "label": "取消",
+                "description": null,
+                "disabled": false
+              }
+            ],
+            "selection_mode": "single",
+            "min_selections": null,
+            "max_selections": null,
+            "allow_blank": null,
+            "submit_action_id": "act_0d2ec60ac00b42dab6593e43714af4d3"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {
+          "route": "WORKFLOW",
+          "result_set_id": null,
+          "accessibility_label": "确认要创建客户“API验收-110243-结构确认客户有限公司”吗?"
+        }
+      },
+      {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 2281,
+        "turn_id": "turn_fb1c7964bc784f7ea57d34af1cbbff20",
+        "role": "user",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_user_text_1",
+            "type": "text",
+            "format": "plain",
+            "text": "提交交互操作"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {
+          "route": null,
+          "result_set_id": null,
+          "accessibility_label": "提交交互操作"
+        }
+      },
+      {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 2282,
+        "turn_id": "turn_fb1c7964bc784f7ea57d34af1cbbff20",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_text_1",
+            "type": "text",
+            "format": "markdown",
+            "text": "已创建客户“API验收-110243-结构确认客户有限公司”。"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {
+          "route": "WORKFLOW",
+          "result_set_id": null,
+          "accessibility_label": "已创建客户“API验收-110243-结构确认客户有限公司”。"
+        }
+      }
+    ],
+    "total": 4,
+    "page": 1,
+    "page_size": 200,
+    "total_pages": 1
+  }
+}

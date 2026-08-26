@@ -1,0 +1,279 @@
+{
+  "summary": {
+    "batch_id": "agent-api-20260824-110243",
+    "executed_at": "2026-08-24",
+    "environment": "local-dev",
+    "public_api": "POST /api/v1/agent/chat/stream",
+    "history_api": "GET /api/v1/agent/sessions/{id}/messages",
+    "strict_counts": {
+      "PASS": 7,
+      "PARTIAL": 4,
+      "FAIL": 7,
+      "NOT_EXECUTED": 0
+    },
+    "overall": "NOT_READY",
+    "release_blockers": [
+      "typed page selected entity",
+      "typed Entity Action -> Workflow trigger",
+      "durable Workflow resume/edit",
+      "business clarification projection",
+      "error trace_id",
+      "AC-02 product rule/PRD alignment"
+    ],
+    "notes": [
+      "测试账号与 90 条初始业务数据为隔离数据，暂未清理。",
+      "AC-06 额外创建 1 条上海客户，因此后续上海列表为 21 条。",
+      "专门 MySQL/real-model integration 测试因未显式启用环境变量而 skip，不能记为 PASS。"
+    ]
+  },
+  "results": [
+    {
+      "id": "AC-01",
+      "status": "PASS",
+      "session_ids": [
+        872
+      ],
+      "observed": "route=QUERY，返回 20 条上海客户和服务端签发的 Result Set；RootDecision 为 NEW_TASK/IGNORE。",
+      "caveat": "Text 输入协议未携带页面 selected entity，因此只能证明独立查询正确，不能完整证明页面上下文被显式忽略。",
+      "evidence": [
+        "events/ac-01-attempt-1.json",
+        "events/ac-01-03-messages.json"
+      ]
+    },
+    {
+      "id": "AC-02",
+      "status": "FAIL",
+      "session_ids": [
+        872
+      ],
+      "observed": "Agent 继承上海条件，但说明系统没有“重点客户”内置规则并要求补充标准。",
+      "caveat": "当前产品规则与 PRD 直接返回“上海重点客户”冲突；必须定义字段/规则或修订 PRD。",
+      "evidence": [
+        "events/ac-02-attempt-1.json",
+        "events/ac-01-03-messages.json"
+      ]
+    },
+    {
+      "id": "AC-03",
+      "status": "PARTIAL",
+      "session_ids": [
+        872,
+        866
+      ],
+      "observed": "Session 866 曾真实成功绑定第一项并返回 2026-08-23 跟进；本轮 Session 872 连续两次发生模型服务瞬态失败。",
+      "caveat": "功能存在成功证据，但当前模型调用稳定性不足。",
+      "evidence": [
+        "events/ac-03-attempt-1.json",
+        "events/ac-03-attempt-2.json",
+        "events/ac-03-earlier-pass-messages.json",
+        "events/ac-03-retry-messages.json"
+      ]
+    },
+    {
+      "id": "AC-04",
+      "status": "FAIL",
+      "session_ids": [
+        873
+      ],
+      "observed": "route=CLARIFY，reason_code=MISSING_CUSTOMER_CONTEXT；没有读取 Session.context_json 中的 selected_entity_ref。",
+      "caveat": "TextAgentInput/AgentChatRequest 缺少 typed selected entity，Application 也未把 Session context 注入 Text turn。",
+      "evidence": [
+        "events/ac-04-attempt-1.json",
+        "events/ac-04-05-messages.json",
+        "database-evidence.json"
+      ]
+    },
+    {
+      "id": "AC-05",
+      "status": "PASS",
+      "session_ids": [
+        873
+      ],
+      "observed": "route=QUERY，正确返回显式命名客户及负责人“Agent API 验收 110243”。",
+      "caveat": "证明显式名称解析可用；由于 selected entity 未接入，不能额外证明“覆盖页面实体”的协议行为。",
+      "evidence": [
+        "events/ac-05-attempt-1.json",
+        "events/ac-04-05-messages.json"
+      ]
+    },
+    {
+      "id": "AC-06",
+      "status": "PASS",
+      "session_ids": [
+        878
+      ],
+      "observed": "confirmation interaction 经 interaction_submission 恢复并创建客户；数据库仅 1 条，customer id=203，城市上海。",
+      "caveat": null,
+      "evidence": [
+        "events/ac-06-wait-attempt-1.json",
+        "events/ac-06-attempt-1.json",
+        "events/ac-06-messages.json",
+        "database-evidence.json"
+      ]
+    },
+    {
+      "id": "AC-07",
+      "status": "PASS",
+      "session_ids": [
+        879
+      ],
+      "observed": "待确认创建杭州客户时输入上海查询，route=QUERY，task_relation=SWITCH_TASK，active_workflow=SUSPEND，返回 21 条上海客户。",
+      "caveat": "21 条包含 AC-06 新创建的上海客户。",
+      "evidence": [
+        "events/ac-07-wait-attempt-1.json",
+        "events/ac-07-attempt-1.json",
+        "events/ac-07-08-messages.json"
+      ]
+    },
+    {
+      "id": "AC-08",
+      "status": "FAIL",
+      "session_ids": [
+        879
+      ],
+      "observed": "RootDecision 为 WORKFLOW/RESUME，但 Workflow 未恢复原创建杭州客户确认上下文，反而要求说明任务操作；UI 还投影为 INTERNAL_ERROR。",
+      "caveat": "路由决策正确，但 durable Workflow checkpoint 恢复语义未完成。",
+      "evidence": [
+        "events/ac-08-attempt-1.json",
+        "events/ac-07-08-messages.json"
+      ]
+    },
+    {
+      "id": "AC-09",
+      "status": "FAIL",
+      "session_ids": [
+        874
+      ],
+      "observed": "Result Set 与 Entity Action 校验后，被转换成普通 TextTurnInput，再次由 Root 分类为 CLARIFY，未进入 Workflow 补字段。",
+      "caveat": "权威 Entity Action 语义在 Application 边界被降级丢失。",
+      "evidence": [
+        "events/ac-09-query-attempt-1.json",
+        "events/ac-09-attempt-1.json",
+        "events/ac-09-messages.json",
+        "database-evidence.json"
+      ]
+    },
+    {
+      "id": "AC-10",
+      "status": "PASS",
+      "session_ids": [
+        875
+      ],
+      "observed": "route=QUERY，entity_list=0，返回“当前权限范围内未找到符合条件的客户”，无系统错误。",
+      "caveat": null,
+      "evidence": [
+        "events/ac-10-attempt-1.json",
+        "events/ac-10-messages.json"
+      ]
+    },
+    {
+      "id": "AC-11",
+      "status": "FAIL",
+      "session_ids": [
+        876
+      ],
+      "observed": "没有泄漏 Team 1 客户，但把无权访问结果显示为普通空结果。",
+      "caveat": "安全隔离通过；不符合 PRD 对权限错误显式区分的要求。",
+      "evidence": [
+        "events/ac-11-attempt-1.json",
+        "events/ac-11-messages.json"
+      ]
+    },
+    {
+      "id": "AC-12",
+      "status": "FAIL",
+      "session_ids": [
+        877,
+        883
+      ],
+      "observed": "“介绍一下这个客户”因 MISSING_CUSTOMER_REFERENCE 失败；显式客户名称控制组可正确组合档案、联系人、活动、风险等事实。",
+      "caveat": "Query/客户档案能力可用，但页面上下文原始验收场景失败。",
+      "evidence": [
+        "events/ac-12-context-attempt-1.json",
+        "events/ac-12-explicit-attempt-1.json",
+        "events/ac-12-explicit-attempt-2.json",
+        "events/ac-12-explicit-retry-messages.json",
+        "events/ac-12-messages.json"
+      ]
+    },
+    {
+      "id": "AC-13",
+      "status": "PARTIAL",
+      "session_ids": [
+        872,
+        883
+      ],
+      "observed": "真实模型瞬态失败时返回可重试错误，未生成虚假业务答案，failure diagnostics 已持久化。",
+      "caveat": "ErrorBlock.trace_id=null，不满足 TRD 的错误追踪要求。",
+      "evidence": [
+        "events/ac-03-attempt-1.json",
+        "events/ac-03-attempt-2.json",
+        "events/ac-12-explicit-attempt-1.json",
+        "database-evidence.json"
+      ]
+    },
+    {
+      "id": "AC-14",
+      "status": "FAIL",
+      "session_ids": [
+        880
+      ],
+      "observed": "Root 正确路由 CREATE_FOLLOW_UP，但 Planner 只认 selected_entity，未从显式客户名称建立权威绑定，返回“需要先明确一个客户”；数据库无新增匹配活动。",
+      "caveat": "业务补充/澄清被错误投影为 INTERNAL_ERROR。",
+      "evidence": [
+        "events/ac-14-attempt-1.json",
+        "events/ac-14-messages.json",
+        "database-evidence.json"
+      ]
+    },
+    {
+      "id": "AC-15",
+      "status": "PARTIAL",
+      "session_ids": [
+        881,
+        882,
+        879
+      ],
+      "observed": "取消正常；相同 client_request_id 重放返回同一 message_id=2294，未重复写入。字段修改与 Workflow 恢复失败。",
+      "caveat": "幂等和取消通过，修改/恢复不通过。",
+      "evidence": [
+        "events/ac-15-cancel-attempt-1.json",
+        "events/ac-15-replay-attempt-1.json",
+        "events/ac-15-modify-attempt-1.json",
+        "events/ac-15-messages.json",
+        "events/ac-15-modify-messages.json",
+        "database-evidence.json"
+      ]
+    },
+    {
+      "id": "AC-16",
+      "status": "PASS",
+      "session_ids": [],
+      "observed": "Agent UI/协议定向前端回归 4 files、21 tests 全部通过；TypeScript 类型检查通过。",
+      "caveat": "本轮验证为自动化组件/协议测试，不是视觉回归截图。",
+      "evidence": [
+        "regression-results.json"
+      ]
+    },
+    {
+      "id": "AC-17",
+      "status": "PASS",
+      "session_ids": [],
+      "observed": "IM conversation 定向后端测试通过，验证 IM 复用统一 typed Application 与 agent_ui final 投影。",
+      "caveat": "未连接真实飞书群聊做端到端发送验收。",
+      "evidence": [
+        "regression-results.json"
+      ]
+    },
+    {
+      "id": "AC-18",
+      "status": "PARTIAL",
+      "session_ids": [],
+      "observed": "统一 Agent UI 主运行路径未发现旧 SSE 双协议消费；但仓库仍存在 checkpoint_cutover、migration_inventory、message_migration 等一次性迁移设施及 legacy 分类。",
+      "caveat": "如果 TRD 要求发布前删除一次性迁移代码，则当前不能判完整通过；不得把普通 UI fallback 文案与架构 fallback 混为一谈。",
+      "evidence": [
+        "regression-results.json"
+      ]
+    }
+  ]
+}

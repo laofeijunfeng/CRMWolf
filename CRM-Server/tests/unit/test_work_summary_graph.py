@@ -175,10 +175,8 @@ def test_citation_resolver_enforces_reference_snapshot_and_limit_invariants():
                 "category": "completed_work",
                 "title": f"本周工作 {chunk_index}",
                 "summary": "已完成多项工作。",
-                "fact_ids": [
-                    fact["fact_id"]
-                    for fact in facts[chunk_index * 8 : (chunk_index + 1) * 8]
-                ] + (["hallucinated"] if chunk_index == 0 else []),
+                "fact_ids": [fact["fact_id"] for fact in facts[chunk_index * 8 : (chunk_index + 1) * 8]]
+                + (["hallucinated"] if chunk_index == 0 else []),
             }
             for chunk_index in range(5)
         ],
@@ -190,11 +188,7 @@ def test_citation_resolver_enforces_reference_snapshot_and_limit_invariants():
     assert len(resolved.highlights) == 5
     assert all(item.fact_ids for item in resolved.highlights)
     assert "hallucinated" not in resolved.highlights[0].fact_ids
-    referenced = {
-        fact_id
-        for item in [*resolved.highlights, *resolved.customer_summaries]
-        for fact_id in item.fact_ids
-    }
+    referenced = {fact_id for item in [*resolved.highlights, *resolved.customer_summaries] for fact_id in item.fact_ids}
     assert referenced == {citation.fact_id for citation in resolved.citations}
     assert referenced <= {fact["fact_id"] for fact in facts}
 
@@ -223,12 +217,14 @@ async def test_work_summary_graph_chunks_large_snapshots_before_synthesis():
             first = work_facts["items"][0]
             result = WorkSummaryNarrativeResult(
                 answer=f"分块包含 {len(work_facts['items'])} 条事实。",
-                highlights=[{
-                    "category": "process_record",
-                    "title": str(first["title"]),
-                    "summary": "已完成客户沟通。",
-                    "fact_ids": [str(first["fact_id"])],
-                }],
+                highlights=[
+                    {
+                        "category": "process_record",
+                        "title": str(first["title"]),
+                        "summary": "已完成客户沟通。",
+                        "fact_ids": [str(first["fact_id"])],
+                    }
+                ],
                 customer_summaries=[],
                 confidence=0.9,
                 narrative_mode="langchain_structured_output",
@@ -251,19 +247,17 @@ async def test_work_summary_graph_chunks_large_snapshots_before_synthesis():
             work_facts,
         ):
             self.synthesis_calls += 1
-            fact_ids = [
-                item.fact_ids[0]
-                for result in chunk_results
-                for item in result.highlights
-            ]
+            fact_ids = [item.fact_ids[0] for result in chunk_results for item in result.highlights]
             result = WorkSummaryNarrativeResult(
                 answer=f"### 工作总结\n已汇总 {len(work_facts['items'])} 条工作事实。",
-                highlights=[{
-                    "category": "process_record",
-                    "title": "客户沟通",
-                    "summary": "完成多项客户沟通。",
-                    "fact_ids": fact_ids,
-                }],
+                highlights=[
+                    {
+                        "category": "process_record",
+                        "title": "客户沟通",
+                        "summary": "完成多项客户沟通。",
+                        "fact_ids": fact_ids,
+                    }
+                ],
                 customer_summaries=[],
                 confidence=0.88,
                 narrative_mode="langchain_structured_output",
@@ -299,6 +293,7 @@ async def test_work_summary_graph_chunks_large_snapshots_before_synthesis():
     assert outcome.summary_source == "langchain_structured_output"
     assert outcome.coverage.summarized_total == 71
 
+
 class SnapshotAwarePagedWorkSummaryService(FakePagedWorkSummaryService):
     def __init__(self, facts: list[dict[str, Any]]) -> None:
         super().__init__(facts)
@@ -314,13 +309,15 @@ class SnapshotAwarePagedWorkSummaryService(FakePagedWorkSummaryService):
         self.queries.append(query)
         page = super().fetch_page(db, query=query, cursor=cursor)
         if cursor is None:
-            return page.model_copy(update={
-                "filters": {
-                    "starts_at": "2026-08-10T00:00:00",
-                    "ends_at": "2026-08-17T00:00:00",
-                    "timezone": "Asia/Shanghai",
+            return page.model_copy(
+                update={
+                    "filters": {
+                        "starts_at": "2026-08-10T00:00:00",
+                        "ends_at": "2026-08-17T00:00:00",
+                        "timezone": "Asia/Shanghai",
+                    }
                 }
-            })
+            )
         return page
 
 
@@ -421,14 +418,11 @@ async def test_work_summary_graph_does_not_hide_first_page_source_failure():
 
 
 @pytest.mark.asyncio
-async def test_work_summary_graph_isolates_checkpoint_state_between_runs_in_same_session():
-    from langgraph.checkpoint.memory import InMemorySaver
-
+async def test_work_summary_graph_scopes_state_to_each_invocation():
     fact_service = FakePagedWorkSummaryService([_fact(index) for index in range(71)])
     graph = WorkSummaryGraphService(
         fact_service=fact_service,
         narrative_service=WorkSummaryNarrativeService(config_crud=MissingConfigCrud()),
-        checkpointer=InMemorySaver(),
     )
     first_request = WorkSummaryGraphRequest(
         db=object(),

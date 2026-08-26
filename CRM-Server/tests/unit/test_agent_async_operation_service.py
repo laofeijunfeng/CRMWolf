@@ -11,7 +11,9 @@ from sqlalchemy.types import BigInteger
 from app.core.database import Base
 from app.models.agent import AgentSession
 from app.models.agent_async_operation import AgentAsyncOperation, AgentAsyncOperationEvent
+from app.models.customer_intelligence_run import CustomerIntelligenceRun, CustomerIntelligenceRunStatus
 from app.services.agent.async_operation_service import AgentAsyncOperationService
+from app.services.customer_intelligence_operation_projector import CustomerIntelligenceOperationProjector
 from app.utils.time import business_now
 
 
@@ -32,6 +34,7 @@ def _session_factory():
             AgentSession.__table__,
             AgentAsyncOperation.__table__,
             AgentAsyncOperationEvent.__table__,
+            CustomerIntelligenceRun.__table__,
         ],
     )
     return engine, sessionmaker(bind=engine)
@@ -127,6 +130,7 @@ def test_operation_lifecycle_is_durable_replayable_and_idempotent() -> None:
     finally:
         db.close()
         engine.dispose()
+
 
 
 def test_operation_retry_attempts_keep_distinct_lifecycle_events() -> None:

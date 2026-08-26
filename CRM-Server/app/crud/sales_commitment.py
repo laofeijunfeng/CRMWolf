@@ -5,7 +5,15 @@ from typing import TYPE_CHECKING, Any, TypeVar
 from sqlalchemy import and_, false, or_
 from sqlalchemy.exc import IntegrityError
 
-from app.models.customer import Customer
+from app.core.list_query import (
+    FilterCondition,
+    ListQueryContext,
+    SortCondition,
+    paginate_optional_list_query,
+    uses_unified_list_query,
+    without_filter_field,
+)
+from app.core.list_query.catalogs import FOLLOW_UP_TASKS_LIST_QUERY_CATALOG
 from app.models.sales_commitment import (
     FollowUpTask,
     FollowUpTaskConfirmationCase,
@@ -28,15 +36,6 @@ from app.models.sales_commitment import (
     SalesCommitmentStatus,
 )
 from app.schemas.system_recovery import FollowUpConfirmationDeliveryRecoveryCandidate
-from app.core.list_query import (
-    FilterCondition,
-    ListQueryContext,
-    SortCondition,
-    paginate_optional_list_query,
-    uses_unified_list_query,
-    without_filter_field,
-)
-from app.core.list_query.catalogs import FOLLOW_UP_TASKS_LIST_QUERY_CATALOG
 from app.utils.time import (
     DUE_AT_GRANULARITY_DATETIME,
     FOLLOW_UP_TASK_DUE_WINDOW_OVERDUE,
@@ -283,6 +282,24 @@ class FollowUpTaskCRUD:
             query = query.filter(FollowUpTask.team_id == team_id)
         return query.first()
 
+    def get_by_id_for_update(
+        self,
+        db: Session,
+        *,
+        task_id: int,
+        team_id: int,
+    ) -> FollowUpTask | None:
+        return (
+            db.query(FollowUpTask)
+            .filter(
+                FollowUpTask.id == task_id,
+                FollowUpTask.team_id == team_id,
+            )
+            .populate_existing()
+            .with_for_update()
+            .one_or_none()
+        )
+
     def list_public_ids_by_ids(self, db: Session, *, team_id: int, task_ids: Iterable[int]) -> list[str]:
         ids = list(dict.fromkeys(task_ids))
         if not ids:
@@ -294,6 +311,33 @@ class FollowUpTaskCRUD:
         )
         public_ids_by_id = {row.id: row.public_id for row in rows}
         return [public_ids_by_id[task_id] for task_id in ids if task_id in public_ids_by_id]
+
+    def list_for_owner_by_public_ids(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        owner_id: str,
+        public_ids: Iterable[str],
+    ) -> list[FollowUpTask]:
+        ordered_public_ids = list(dict.fromkeys(public_ids))
+        if not ordered_public_ids:
+            return []
+        rows = (
+            db.query(FollowUpTask)
+            .filter(
+                FollowUpTask.team_id == team_id,
+                FollowUpTask.owner_id == owner_id,
+                FollowUpTask.public_id.in_(ordered_public_ids),
+            )
+            .all()
+        )
+        tasks_by_public_id = {task.public_id: task for task in rows}
+        return [
+            tasks_by_public_id[public_id]
+            for public_id in ordered_public_ids
+            if public_id in tasks_by_public_id
+        ]
 
     def get_by_source_hash(
         self,
@@ -1001,6 +1045,26 @@ class FollowUpTaskConfirmationCaseCRUD:
         )
         return rows, total
 
+    def list_pending_by_task_for_update(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        task_id: int,
+    ) -> list[FollowUpTaskConfirmationCase]:
+        return (
+            db.query(FollowUpTaskConfirmationCase)
+            .filter(
+                FollowUpTaskConfirmationCase.team_id == team_id,
+                FollowUpTaskConfirmationCase.task_id == task_id,
+                FollowUpTaskConfirmationCase.status == FollowUpTaskConfirmationStatus.PENDING,
+            )
+            .order_by(FollowUpTaskConfirmationCase.created_time.asc(), FollowUpTaskConfirmationCase.id.asc())
+            .populate_existing()
+            .with_for_update()
+            .all()
+        )
+
     def list_pending_by_source_activity(
         self,
         db: Session,
@@ -1023,6 +1087,26 @@ class FollowUpTaskConfirmationCaseCRUD:
             .all()
         )
         return rows, total
+
+    def list_pending_by_source_activity_for_update(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        source_activity_id: int,
+    ) -> list[FollowUpTaskConfirmationCase]:
+        return (
+            db.query(FollowUpTaskConfirmationCase)
+            .filter(
+                FollowUpTaskConfirmationCase.team_id == team_id,
+                FollowUpTaskConfirmationCase.source_activity_id == source_activity_id,
+                FollowUpTaskConfirmationCase.status == FollowUpTaskConfirmationStatus.PENDING,
+            )
+            .order_by(FollowUpTaskConfirmationCase.created_time.asc(), FollowUpTaskConfirmationCase.id.asc())
+            .populate_existing()
+            .with_for_update()
+            .all()
+        )
 
     def create(
         self,
@@ -1300,61 +1384,6 @@ class FollowUpTaskConfirmationPromptDeliveryCRUD:
             db.commit()
             db.refresh(db_obj)
         return db_obj
-
-    def ensure_agent_message_card(
-        self,
-        db: Session,
-        *,
-        team_id: int,
-        case_id: int,
-        owner_id: str,
-        agent_session_id: int,
-        assistant_message_id: int,
-        source_activity_id: int | None,
-        expected_activity_revision: int | None,
-        commit: bool = True,
-    ) -> FollowUpTaskConfirmationPromptDelivery:
-        """Create one non-intrusive Agent-message visibility record per case/message.
-
-        The confirmation center remains the durable inbox. This record only
-        attaches that same case to the exact Web Agent assistant message, and
-        deliberately does not increment the user-prompt counter.
-        """
-
-        provider_message_id = f"agent_message:{assistant_message_id}"
-        prompt_key = f"agent-message-card:{team_id}:{case_id}:{assistant_message_id}"
-        delivery = self.ensure_queued(
-            db,
-            team_id=team_id,
-            case_id=case_id,
-            owner_id=owner_id,
-            channel="web",
-            purpose=FollowUpTaskConfirmationDeliveryPurpose.AGENT_MESSAGE_CARD,
-            provider="web-agent",
-            agent_session_id=agent_session_id,
-            interaction_id=f"agent-message-card:{assistant_message_id}",
-            prompt_key=prompt_key,
-            origin_turn_id=f"agent_session:{agent_session_id}",
-            origin_message_id=str(assistant_message_id),
-            source_activity_id=source_activity_id,
-            expected_activity_revision=expected_activity_revision,
-            payload_json={"case_id": case_id, "assistant_message_id": assistant_message_id},
-            reason_code="AGENT_MESSAGE_CARD_QUEUED",
-            commit=False,
-        )
-        if delivery.status == FollowUpTaskConfirmationPromptStatus.QUEUED:
-            delivery = self.acknowledge_sent(
-                db,
-                delivery,
-                provider_message_id=provider_message_id,
-                reason_code="AGENT_MESSAGE_CARD_VISIBLE",
-                record_case_prompt=False,
-                commit=False,
-            )
-        if commit:
-            db.commit()
-            db.refresh(delivery)
-        return delivery
 
     def create_attempt(
         self,
@@ -1743,98 +1772,6 @@ class FollowUpTaskConfirmationPromptDeliveryCRUD:
             db.refresh(delivery)
         return delivery
 
-    def list_agent_message_cards(
-        self,
-        db: Session,
-        *,
-        team_id: int,
-        owner_id: str,
-        agent_session_id: int,
-        provider_message_ids: Iterable[str],
-    ) -> dict[str, list[dict[str, Any]]]:
-        """Return current task projections for confirmation prompts shown in Agent messages.
-
-        ``provider_message_id`` is written only after the Web Agent assistant
-        message is persisted, so it is the durable message-to-case association.
-        The response intentionally reads the current case/task rows rather than
-        the original prompt payload snapshot: cards stay accurate after a task
-        was handled in another entry point.
-        """
-        message_ids = list(dict.fromkeys(provider_message_ids))
-        if not message_ids:
-            return {}
-
-        rows = (
-            db.query(
-                FollowUpTaskConfirmationPromptDelivery.provider_message_id,
-                FollowUpTaskConfirmationCase.public_id.label("case_public_id"),
-                FollowUpTaskConfirmationCase.status.label("confirmation_status"),
-                FollowUpTaskConfirmationCase.resolved_action,
-                FollowUpTaskConfirmationCase.resolved_at,
-                FollowUpTask.public_id.label("task_public_id"),
-                FollowUpTask.title.label("task_title"),
-                FollowUpTask.due_at,
-                FollowUpTask.status.label("task_status"),
-                FollowUpTask.completed_at,
-                Customer.account_name.label("customer_name"),
-            )
-            .join(
-                FollowUpTaskConfirmationCase,
-                and_(
-                    FollowUpTaskConfirmationCase.id == FollowUpTaskConfirmationPromptDelivery.case_id,
-                    FollowUpTaskConfirmationCase.team_id == FollowUpTaskConfirmationPromptDelivery.team_id,
-                ),
-            )
-            .join(
-                FollowUpTask,
-                and_(
-                    FollowUpTask.id == FollowUpTaskConfirmationCase.task_id,
-                    FollowUpTask.team_id == FollowUpTaskConfirmationCase.team_id,
-                ),
-            )
-            .outerjoin(
-                Customer,
-                and_(Customer.id == FollowUpTask.customer_id, Customer.team_id == FollowUpTask.team_id),
-            )
-            .filter(
-                FollowUpTaskConfirmationPromptDelivery.team_id == team_id,
-                FollowUpTaskConfirmationPromptDelivery.owner_id == owner_id,
-                FollowUpTaskConfirmationPromptDelivery.agent_session_id == agent_session_id,
-                FollowUpTaskConfirmationPromptDelivery.provider_message_id.in_(message_ids),
-            )
-            .order_by(
-                FollowUpTaskConfirmationPromptDelivery.created_time.asc(),
-                FollowUpTaskConfirmationPromptDelivery.id.asc(),
-            )
-            .all()
-        )
-
-        cards_by_provider_message_id: dict[str, list[dict[str, Any]]] = {}
-        seen_case_ids: set[tuple[str, str]] = set()
-        for row in rows:
-            provider_message_id = row.provider_message_id
-            if not provider_message_id:
-                continue
-            dedupe_key = (provider_message_id, row.case_public_id)
-            if dedupe_key in seen_case_ids:
-                continue
-            seen_case_ids.add(dedupe_key)
-            cards_by_provider_message_id.setdefault(provider_message_id, []).append(
-                {
-                    "case_public_id": row.case_public_id,
-                    "task_public_id": row.task_public_id,
-                    "task_title": row.task_title,
-                    "customer_name": row.customer_name,
-                    "due_at": row.due_at,
-                    "task_status": row.task_status,
-                    "confirmation_status": row.confirmation_status,
-                    "resolved_action": row.resolved_action,
-                    "resolved_at": row.resolved_at,
-                    "completed_at": row.completed_at,
-                }
-            )
-        return cards_by_provider_message_id
-
     def latest_for_owner_since(
         self,
         db: Session,
@@ -2197,10 +2134,20 @@ class FollowUpTaskLLMMatcherRunCRUD:
         commit: bool = True,
     ) -> FollowUpTaskLLMMatcherRun:
         decision = result.decision
+        task_decisions = decision.task_decisions_to_dict()
+        empty_outcome = (
+            None
+            if task_decisions
+            else {
+                "reason": decision.empty_reason,
+                "confidence": decision.empty_confidence,
+                "evidence_terms": list(decision.empty_evidence_terms),
+            }
+        )
         resolved_status = status or (
-            FollowUpTaskLLMMatcherRunStatus.SUCCESS
-            if result.source != "safe_fallback" or not decision.forbid_auto_reasons
-            else FollowUpTaskLLMMatcherRunStatus.SKIPPED
+            FollowUpTaskLLMMatcherRunStatus.SKIPPED
+            if result.source == "safe_fallback"
+            else FollowUpTaskLLMMatcherRunStatus.SUCCESS
         )
         return self.create(
             db,
@@ -2213,13 +2160,9 @@ class FollowUpTaskLLMMatcherRunCRUD:
                 "reconciliation_run_public_id": reconciliation_run_public_id,
                 "status": resolved_status,
                 "source": result.source,
-                "decision": decision.decision,
-                "task_public_id": decision.task_public_id,
                 "candidate_public_ids_json": list(decision.candidate_public_ids),
-                "confidence": decision.confidence,
-                "needs_confirmation": decision.needs_confirmation,
-                "forbid_auto_reasons_json": list(decision.forbid_auto_reasons),
-                "evidence_terms_json": list(decision.evidence_terms),
+                "task_decisions_json": task_decisions,
+                "empty_outcome_json": empty_outcome,
                 "referenced_source_public_ids_json": list(result.referenced_source_public_ids),
                 "evaluation_failures_json": list(result.evaluation_failures),
                 "model_name": model_name,
@@ -2260,16 +2203,58 @@ class FollowUpTaskLLMMatcherRunCRUD:
                 "reconciliation_run_public_id": reconciliation_run_public_id,
                 "status": FollowUpTaskLLMMatcherRunStatus.FAILED,
                 "source": "structured_output_error",
-                "decision": "KEEP_OPEN",
                 "candidate_public_ids_json": candidate_public_ids,
-                "confidence": 0.0,
-                "needs_confirmation": False,
-                "forbid_auto_reasons_json": ["STRUCTURED_OUTPUT_FAILED"],
+                "task_decisions_json": [],
+                "empty_outcome_json": None,
                 "evaluation_failures_json": [],
                 "model_name": model_name,
                 "structured_output_strategy": structured_output_strategy,
                 "schema_error_type": type(error).__name__,
                 "schema_error_message": str(error)[:4000],
+                "duration_ms": duration_ms,
+                "started_at": started_at,
+                "finished_at": business_now(),
+            },
+            commit=commit,
+        )
+
+    def record_unavailable(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        owner_id: str | None,
+        candidate_public_ids: list[str],
+        reason_code: str,
+        source_activity_id: int | None = None,
+        source_public_id: str | None = None,
+        actor_id: str | None = None,
+        reconciliation_run_public_id: str | None = None,
+        model_name: str | None = None,
+        structured_output_strategy: str | None = None,
+        duration_ms: int | None = None,
+        started_at: datetime | None = None,
+        commit: bool = True,
+    ) -> FollowUpTaskLLMMatcherRun:
+        return self.create(
+            db,
+            {
+                "team_id": team_id,
+                "owner_id": owner_id,
+                "actor_id": actor_id,
+                "source_activity_id": source_activity_id,
+                "source_public_id": source_public_id,
+                "reconciliation_run_public_id": reconciliation_run_public_id,
+                "status": FollowUpTaskLLMMatcherRunStatus.FAILED,
+                "source": "unavailable",
+                "candidate_public_ids_json": candidate_public_ids,
+                "task_decisions_json": [],
+                "empty_outcome_json": {"reason": reason_code, "confidence": 0.0, "evidence_terms": []},
+                "evaluation_failures_json": [],
+                "model_name": model_name,
+                "structured_output_strategy": structured_output_strategy,
+                "schema_error_type": None,
+                "schema_error_message": reason_code,
                 "duration_ms": duration_ms,
                 "started_at": started_at,
                 "finished_at": business_now(),
@@ -2309,7 +2294,7 @@ class FollowUpTaskReconciliationEvaluationRunCRUD:
     ) -> FollowUpTaskReconciliationEvaluationRun:
         metrics_snapshot = summary.metrics.to_dict() if hasattr(summary.metrics, "to_dict") else dict(summary.metrics)
         false_close_metric = _metric_snapshot(metrics_snapshot, "false_close")
-        false_delay_metric = _metric_snapshot(metrics_snapshot, "false_delay")
+        false_postpone_metric = _metric_snapshot(metrics_snapshot, "false_postpone")
         missed_confirmation_metric = _metric_snapshot(metrics_snapshot, "missed_confirmation")
         over_confirmation_metric = _metric_snapshot(metrics_snapshot, "over_confirmation")
         failure_cases = [
@@ -2342,8 +2327,8 @@ class FollowUpTaskReconciliationEvaluationRunCRUD:
                 "failed_cases": summary.failed,
                 "false_close_count": false_close_metric["count"],
                 "false_close_rate": false_close_metric["rate"],
-                "false_delay_count": false_delay_metric["count"],
-                "false_delay_rate": false_delay_metric["rate"],
+                "false_postpone_count": false_postpone_metric["count"],
+                "false_postpone_rate": false_postpone_metric["rate"],
                 "missed_confirmation_count": missed_confirmation_metric["count"],
                 "missed_confirmation_rate": missed_confirmation_metric["rate"],
                 "over_confirmation_count": over_confirmation_metric["count"],

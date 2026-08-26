@@ -12,6 +12,7 @@ AgentIntent = Literal[
     "CREATE_LEAD",
     "CREATE_CUSTOMER",
     "CREATE_OPPORTUNITY",
+    "MOVE_OPPORTUNITY_STAGE",
     "CREATE_CONTACT",
     "CREATE_INVOICE_TITLE",
     "CREATE_DEPLOYMENT_INFO",
@@ -20,18 +21,6 @@ AgentIntent = Literal[
     "CRM_READ_QUERY",
     "UNKNOWN",
 ]
-AgentReadQueryType = Literal[
-    "FOLLOW_UP_TASKS",
-    "WORK_SUMMARY",
-    "CUSTOMER_PROFILE",
-    "OPPORTUNITY",
-    "CONTRACT",
-    "PAYMENT",
-    "INVOICE",
-    "LICENSE",
-    "UNKNOWN_READ",
-]
-
 AgentHITLDecisionType = Literal["approve", "edit", "reject", "respond"]
 AgentPendingInterruptionDecisionType = Literal["CONTINUE_PENDING", "START_NEW_FLOW", "ASK_USER"]
 AgentTurnRelationDecisionType = Literal[
@@ -42,7 +31,6 @@ AgentTurnRelationDecisionType = Literal[
     "ASK_USER",
     "CHITCHAT",
 ]
-AgentConfirmationIntentType = Literal["confirm", "reject", "unknown"]
 AgentTurnIntentType = Literal[
     "SUBMIT_FIELDS",
     "CONFIRM_EXECUTION",
@@ -66,7 +54,6 @@ AgentSuggestionAction = Literal[
     "CREATE_INVOICE_TITLE",
     "CREATE_DEPLOYMENT_INFO",
     "CREATE_LICENSE_APPLICATION",
-    "CUSTOMER_QUERY_SUMMARY",
     "NO_ACTION",
 ]
 AgentTemporalKind = Literal[
@@ -89,7 +76,9 @@ AgentTemporalUnit = Literal["day", "week", "month", "year"]
 class AgentCustomerEntity(BaseModel):
     name_text: Optional[str] = Field(None, description="用户原文中的客户名称或简称")
     confidence: float = Field(0.0, ge=0.0, le=1.0, description="客户名称识别置信度")
-    resolution_source: Literal["EXPLICIT", "MEMORY", "NONE"] = Field("NONE", description="客户来源：用户明示、会话记忆或无")
+    resolution_source: Literal["EXPLICIT", "MEMORY", "NONE"] = Field(
+        "NONE", description="客户来源：用户明示、会话记忆或无"
+    )
 
 
 class AgentFollowUpEntity(BaseModel):
@@ -122,6 +111,12 @@ class AgentOpportunityEntity(BaseModel):
     expected_closing_date_text: Optional[str] = Field(None, description="用户原文中的预计成交日期表达")
     expected_closing_date: Optional["AgentTemporalExpression"] = Field(None, description="预计成交日期结构化时间")
     expected_closing_date_iso: Optional[str] = Field(None, description="系统计算字段，AI 必须返回 null")
+
+
+class AgentOpportunityStageTransitionEntity(BaseModel):
+    opportunity_id: Optional[str] = Field(None, description="用户明确提到的商机对外 ID；没有则为 null")
+    opportunity_reference_text: Optional[str] = Field(None, description="用户原文中的商机名称或指代表达")
+    target_stage_name: Optional[str] = Field(None, description="用户希望推进到的采购阶段名称；未指定则为 null")
 
 
 class AgentLeadEntity(BaseModel):
@@ -202,23 +197,15 @@ class AgentRequestedAction(BaseModel):
     reason: Optional[str] = Field(None, description="动作触发原因")
 
 
-class AgentReadQueryEntity(BaseModel):
-    type: AgentReadQueryType = Field("UNKNOWN_READ", description="CRM 读取查询类型")
-    status: Optional[Literal["open", "completed", "cancelled", "all"]] = Field(None, description="任务状态过滤")
-    due_window: Optional[Literal["today", "this_week", "next_week", "overdue"]] = Field(None, description="任务到期窗口")
-    work_window: Optional[Literal["today", "this_week", "last_week", "this_month", "custom"]] = Field(None, description="工作总结窗口")
-    owner_scope: Optional[Literal["mine", "customer"]] = Field(None, description="任务/事实归属范围")
-    customer_name_text: Optional[str] = Field(None, description="读取查询中的客户名称文本")
-    query_text: Optional[str] = Field(None, description="读取查询中的语义条件，例如预算、试用反馈、合同卡点")
-
-
 class AgentFollowUpTaskTransitionEntity(BaseModel):
-    action: Optional[Literal["complete", "cancel", "delay", "keep_open"]] = Field(
+    action: Optional[Literal["complete", "cancel", "postpone", "keep_open"]] = Field(
         None,
         description="用户希望对跟进任务执行的状态动作",
     )
     task_id: Optional[str] = Field(None, description="明确提到的跟进任务对外ID，格式 fut_...；没有则为 null")
-    task_reference_text: Optional[str] = Field(None, description="用户原文中的任务指代表达，例如 这个任务、河南双汇那个任务")
+    task_reference_text: Optional[str] = Field(
+        None, description="用户原文中的任务指代表达，例如 这个任务、河南双汇那个任务"
+    )
     proposed_due_at_text: Optional[str] = Field(None, description="延期场景下用户表达的新时间")
     proposed_due_at: Optional["AgentTemporalExpression"] = Field(None, description="延期场景下结构化时间要素")
     proposed_due_at_iso: Optional[str] = Field(None, description="系统计算字段，AI 必须返回 null")
@@ -229,7 +216,6 @@ class AgentSemanticParseResult(BaseModel):
     intent: AgentIntent = Field("UNKNOWN", description="归一化意图")
     intent_confidence: float = Field(0.0, ge=0.0, le=1.0)
     customer: AgentCustomerEntity = Field(default_factory=AgentCustomerEntity)
-    read_query: AgentReadQueryEntity = Field(default_factory=AgentReadQueryEntity)
     follow_up_task_transition: AgentFollowUpTaskTransitionEntity = Field(
         default_factory=AgentFollowUpTaskTransitionEntity
     )
@@ -238,6 +224,9 @@ class AgentSemanticParseResult(BaseModel):
     lead: AgentLeadEntity = Field(default_factory=AgentLeadEntity)
     customer_create: AgentCustomerCreateEntity = Field(default_factory=AgentCustomerCreateEntity)
     opportunity: AgentOpportunityEntity = Field(default_factory=AgentOpportunityEntity)
+    opportunity_stage_transition: AgentOpportunityStageTransitionEntity = Field(
+        default_factory=AgentOpportunityStageTransitionEntity
+    )
     contact: Dict[str, object] = Field(default_factory=dict)
     invoice_title: Dict[str, object] = Field(default_factory=dict)
     deployment_info: Dict[str, object] = Field(default_factory=dict)
@@ -249,16 +238,6 @@ class AgentSemanticParseResult(BaseModel):
     clarification_question: Optional[str] = Field(None)
     evidence: List[str] = Field(default_factory=list, description="用于解释判断的原文依据")
 
-    @model_validator(mode="before")
-    @classmethod
-    def normalize_legacy_customer_query(cls, data: object) -> object:
-        if not isinstance(data, dict):
-            return data
-        normalized = dict(data)
-        if normalized.get("intent") == "CUSTOMER_QUERY":
-            normalized["intent"] = "CRM_READ_QUERY"
-        return normalized
-
 
 class AgentBusinessSuggestion(BaseModel):
     action: AgentSuggestionAction = Field(..., description="建议动作")
@@ -267,9 +246,13 @@ class AgentBusinessSuggestion(BaseModel):
     priority: Literal["high", "medium", "low"] = Field("medium", description="建议优先级")
     requires_confirmation: bool = Field(True, description="执行前是否需要用户确认")
     missing_fields: List[str] = Field(default_factory=list, description="执行动作前仍需补充的字段")
-    related_object_type: Optional[str] = Field(None, description="依赖对象类型，例如 contract/payment_plan/deployment_info")
+    related_object_type: Optional[str] = Field(
+        None, description="依赖对象类型，例如 contract/payment_plan/deployment_info"
+    )
     related_object_id: Optional[Union[str, int]] = Field(None, description="依赖对象标识；商机使用对外ID")
-    execution_payload: Dict[str, object] = Field(default_factory=dict, description="建议执行所需的结构化参数，仍需代码校验和用户确认")
+    execution_payload: Dict[str, object] = Field(
+        default_factory=dict, description="建议执行所需的结构化参数，仍需代码校验和用户确认"
+    )
     risk_notes: List[str] = Field(default_factory=list, description="不确定性或风险提示")
     confidence: float = Field(0.0, ge=0.0, le=1.0)
 
@@ -366,17 +349,13 @@ class AgentTurnRelationDecision(BaseModel):
     question: Optional[str] = Field(None, description="需要用户确认时的问题")
 
 
-class AgentConfirmationIntentDecision(BaseModel):
-    intent: AgentConfirmationIntentType = Field("unknown", description="用户是否确认或拒绝当前待确认动作")
-    confidence: float = Field(0.0, ge=0.0, le=1.0)
-    reason: str = Field("", description="简短判断依据")
-
-
 class AgentTurnIntentDecision(BaseModel):
     intent: AgentTurnIntentType = Field("START_NEW_FLOW", description="用户本轮输入对当前 Agent 状态的归一化意图")
     confidence: float = Field(0.0, ge=0.0, le=1.0)
     target_task_id: Optional[int] = Field(None, description="本轮意图指向的 Agent task ID；无法确定则为 null")
-    normalized_action: Optional[str] = Field(None, description="可映射到 interrupt resume 的动作，例如 cancel/submit_fields/approve")
+    normalized_action: Optional[str] = Field(
+        None, description="可映射到 interrupt resume 的动作，例如 cancel/submit_fields/approve"
+    )
     reason: str = Field("", description="一句话说明判断依据")
     question: Optional[str] = Field(None, description="低置信度时需要追问用户的问题")
 

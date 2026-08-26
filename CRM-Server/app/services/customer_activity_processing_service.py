@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 def _empty_post_commit_outcome() -> Dict[str, Any]:
     return {
+        "automatic_task_transitions": [],
         "needs_user_confirmation": False,
         "confirmation_case_public_ids": [],
         "confirmation_cases": [],

@@ -18,27 +18,41 @@
       ]
     },
     "result": {
-      "decision": "COMPLETE",
-      "task_public_id": "fut_budget_check",
-      "candidate_public_ids": ["fut_budget_check"],
-      "confidence": 0.93,
-      "needs_confirmation": false,
-      "forbid_auto_reasons": [],
-      "evidence_terms": ["预算已经通过", "电话确认"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_budget_check"
+      ],
+      "task_decisions": [
+        {
+          "decision": "COMPLETE",
+          "task_public_id": "fut_budget_check",
+          "confidence": 0.93,
+          "needs_confirmation": false,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [],
+          "evidence_terms": [
+            "预算已经通过",
+            "电话确认"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
       "decision": "COMPLETE",
       "task_public_id": "fut_budget_check",
-      "required_candidate_public_ids": ["fut_budget_check"],
+      "required_candidate_public_ids": [
+        "fut_budget_check"
+      ],
       "min_confidence": 0.9,
       "forbid_confirmation": true,
-      "required_evidence_terms": ["预算"]
+      "required_evidence_terms": [
+        "预算"
+      ]
     }
   },
   {
-    "name": "same_owner_delay_budget_check",
-    "category": "same_owner_delay",
+    "name": "same_owner_postpone_budget_check",
+    "category": "same_owner_postpone",
     "source": "core",
     "execution": "static_decision",
     "input": {
@@ -55,23 +69,36 @@
       ]
     },
     "result": {
-      "decision": "DELAY",
-      "task_public_id": "fut_budget_check",
-      "candidate_public_ids": ["fut_budget_check"],
-      "confidence": 0.89,
-      "needs_confirmation": false,
-      "proposed_due_at": "2026-08-14T00:00:00",
-      "forbid_auto_reasons": [],
-      "evidence_terms": ["预算审批", "下周五"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_budget_check"
+      ],
+      "task_decisions": [
+        {
+          "decision": "POSTPONE",
+          "task_public_id": "fut_budget_check",
+          "confidence": 0.89,
+          "needs_confirmation": false,
+          "proposed_due_at": "2026-08-14T00:00:00",
+          "forbid_auto_reasons": [],
+          "evidence_terms": [
+            "预算审批",
+            "下周五"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
-      "decision": "DELAY",
+      "decision": "POSTPONE",
       "task_public_id": "fut_budget_check",
-      "required_candidate_public_ids": ["fut_budget_check"],
+      "required_candidate_public_ids": [
+        "fut_budget_check"
+      ],
       "min_confidence": 0.85,
       "forbid_confirmation": true,
-      "required_evidence_terms": ["下周五"]
+      "required_evidence_terms": [
+        "下周五"
+      ]
     }
   },
   {
@@ -93,20 +120,33 @@
       ]
     },
     "result": {
-      "decision": "UNRELATED",
-      "task_public_id": null,
-      "candidate_public_ids": ["fut_budget_check"],
-      "confidence": 0.87,
-      "needs_confirmation": false,
-      "forbid_auto_reasons": [],
-      "evidence_terms": ["产品演示"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_budget_check"
+      ],
+      "task_decisions": [
+        {
+          "decision": "UNRELATED",
+          "task_public_id": "fut_budget_check",
+          "confidence": 0.87,
+          "needs_confirmation": false,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [],
+          "evidence_terms": [
+            "产品演示"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
       "decision": "UNRELATED",
-      "required_candidate_public_ids": ["fut_budget_check"],
+      "required_candidate_public_ids": [
+        "fut_budget_check"
+      ],
       "forbid_confirmation": true,
-      "required_evidence_terms": ["演示"]
+      "required_evidence_terms": [
+        "演示"
+      ]
     }
   },
   {
@@ -128,22 +168,40 @@
       ]
     },
     "result": {
-      "decision": "ASK_CONFIRMATION",
-      "task_public_id": "fut_sales_budget",
-      "candidate_public_ids": ["fut_sales_budget"],
-      "confidence": 0.84,
-      "needs_confirmation": true,
-      "forbid_auto_reasons": ["CROSS_OWNER"],
-      "evidence_terms": ["替销售", "预算已经通过"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_sales_budget"
+      ],
+      "task_decisions": [
+        {
+          "decision": "ASK_CONFIRMATION",
+          "task_public_id": "fut_sales_budget",
+          "confidence": 0.84,
+          "needs_confirmation": true,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [
+            "CROSS_OWNER"
+          ],
+          "evidence_terms": [
+            "替销售",
+            "预算已经通过"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
       "decision": "ASK_CONFIRMATION",
       "task_public_id": "fut_sales_budget",
-      "required_candidate_public_ids": ["fut_sales_budget"],
+      "required_candidate_public_ids": [
+        "fut_sales_budget"
+      ],
       "require_confirmation": true,
-      "required_forbid_auto_reasons": ["CROSS_OWNER"],
-      "required_evidence_terms": ["预算"]
+      "required_forbid_auto_reasons": [
+        "CROSS_OWNER"
+      ],
+      "required_evidence_terms": [
+        "预算"
+      ]
     }
   },
   {
@@ -165,21 +223,34 @@
       ]
     },
     "result": {
-      "decision": "ASK_CONFIRMATION",
-      "task_public_id": "fut_trial_feedback",
-      "candidate_public_ids": ["fut_trial_feedback"],
-      "confidence": 0.58,
-      "needs_confirmation": true,
-      "forbid_auto_reasons": ["LOW_CONFIDENCE"],
-      "evidence_terms": ["先再看看"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_trial_feedback"
+      ],
+      "task_decisions": [
+        {
+          "decision": "ASK_CONFIRMATION",
+          "task_public_id": "fut_trial_feedback",
+          "confidence": 0.58,
+          "needs_confirmation": true,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [
+            "LOW_CONFIDENCE"
+          ],
+          "evidence_terms": [
+            "先再看看"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
       "decision": "ASK_CONFIRMATION",
       "task_public_id": "fut_trial_feedback",
       "max_confidence": 0.7,
       "require_confirmation": true,
-      "required_forbid_auto_reasons": ["LOW_CONFIDENCE"]
+      "required_forbid_auto_reasons": [
+        "LOW_CONFIDENCE"
+      ]
     }
   },
   {
@@ -201,22 +272,36 @@
       ]
     },
     "result": {
-      "decision": "COMPLETE",
-      "task_public_id": "fut_trial_feedback_sales2",
-      "candidate_public_ids": ["fut_trial_feedback_sales2"],
-      "confidence": 0.92,
-      "needs_confirmation": false,
-      "forbid_auto_reasons": [],
-      "evidence_terms": ["已经提交试用反馈", "功能满足"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_trial_feedback_sales2"
+      ],
+      "task_decisions": [
+        {
+          "decision": "COMPLETE",
+          "task_public_id": "fut_trial_feedback_sales2",
+          "confidence": 0.92,
+          "needs_confirmation": false,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [],
+          "evidence_terms": [
+            "已经提交试用反馈",
+            "功能满足"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
       "decision": "COMPLETE",
       "task_public_id": "fut_trial_feedback_sales2",
-      "required_candidate_public_ids": ["fut_trial_feedback_sales2"],
+      "required_candidate_public_ids": [
+        "fut_trial_feedback_sales2"
+      ],
       "min_confidence": 0.9,
       "forbid_confirmation": true,
-      "required_evidence_terms": ["试用反馈"]
+      "required_evidence_terms": [
+        "试用反馈"
+      ]
     }
   },
   {
@@ -238,22 +323,36 @@
       ]
     },
     "result": {
-      "decision": "COMPLETE",
-      "task_public_id": "fut_schedule_demo_sales2",
-      "candidate_public_ids": ["fut_schedule_demo_sales2"],
-      "confidence": 0.94,
-      "needs_confirmation": false,
-      "forbid_auto_reasons": [],
-      "evidence_terms": ["确认演示安排", "会议已发出"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_schedule_demo_sales2"
+      ],
+      "task_decisions": [
+        {
+          "decision": "COMPLETE",
+          "task_public_id": "fut_schedule_demo_sales2",
+          "confidence": 0.94,
+          "needs_confirmation": false,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [],
+          "evidence_terms": [
+            "确认演示安排",
+            "会议已发出"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
       "decision": "COMPLETE",
       "task_public_id": "fut_schedule_demo_sales2",
-      "required_candidate_public_ids": ["fut_schedule_demo_sales2"],
+      "required_candidate_public_ids": [
+        "fut_schedule_demo_sales2"
+      ],
       "min_confidence": 0.9,
       "forbid_confirmation": true,
-      "required_evidence_terms": ["演示"]
+      "required_evidence_terms": [
+        "演示"
+      ]
     }
   },
   {
@@ -275,22 +374,36 @@
       ]
     },
     "result": {
-      "decision": "COMPLETE",
-      "task_public_id": "fut_contract_terms_sales3",
-      "candidate_public_ids": ["fut_contract_terms_sales3"],
-      "confidence": 0.91,
-      "needs_confirmation": false,
-      "forbid_auto_reasons": [],
-      "evidence_terms": ["法务条款已确认", "无异议"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_contract_terms_sales3"
+      ],
+      "task_decisions": [
+        {
+          "decision": "COMPLETE",
+          "task_public_id": "fut_contract_terms_sales3",
+          "confidence": 0.91,
+          "needs_confirmation": false,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [],
+          "evidence_terms": [
+            "法务条款已确认",
+            "无异议"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
       "decision": "COMPLETE",
       "task_public_id": "fut_contract_terms_sales3",
-      "required_candidate_public_ids": ["fut_contract_terms_sales3"],
+      "required_candidate_public_ids": [
+        "fut_contract_terms_sales3"
+      ],
       "min_confidence": 0.9,
       "forbid_confirmation": true,
-      "required_evidence_terms": ["条款"]
+      "required_evidence_terms": [
+        "条款"
+      ]
     }
   },
   {
@@ -312,22 +425,36 @@
       ]
     },
     "result": {
-      "decision": "COMPLETE",
-      "task_public_id": "fut_invoice_info_sales3",
-      "candidate_public_ids": ["fut_invoice_info_sales3"],
-      "confidence": 0.95,
-      "needs_confirmation": false,
-      "forbid_auto_reasons": [],
-      "evidence_terms": ["已发开票资料", "抬头税号"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_invoice_info_sales3"
+      ],
+      "task_decisions": [
+        {
+          "decision": "COMPLETE",
+          "task_public_id": "fut_invoice_info_sales3",
+          "confidence": 0.95,
+          "needs_confirmation": false,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [],
+          "evidence_terms": [
+            "已发开票资料",
+            "抬头税号"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
       "decision": "COMPLETE",
       "task_public_id": "fut_invoice_info_sales3",
-      "required_candidate_public_ids": ["fut_invoice_info_sales3"],
+      "required_candidate_public_ids": [
+        "fut_invoice_info_sales3"
+      ],
       "min_confidence": 0.9,
       "forbid_confirmation": true,
-      "required_evidence_terms": ["开票资料"]
+      "required_evidence_terms": [
+        "开票资料"
+      ]
     }
   },
   {
@@ -349,27 +476,41 @@
       ]
     },
     "result": {
-      "decision": "COMPLETE",
-      "task_public_id": "fut_po_follow_sales4",
-      "candidate_public_ids": ["fut_po_follow_sales4"],
-      "confidence": 0.93,
-      "needs_confirmation": false,
-      "forbid_auto_reasons": [],
-      "evidence_terms": ["采购订单", "已经收到"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_po_follow_sales4"
+      ],
+      "task_decisions": [
+        {
+          "decision": "COMPLETE",
+          "task_public_id": "fut_po_follow_sales4",
+          "confidence": 0.93,
+          "needs_confirmation": false,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [],
+          "evidence_terms": [
+            "采购订单",
+            "已经收到"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
       "decision": "COMPLETE",
       "task_public_id": "fut_po_follow_sales4",
-      "required_candidate_public_ids": ["fut_po_follow_sales4"],
+      "required_candidate_public_ids": [
+        "fut_po_follow_sales4"
+      ],
       "min_confidence": 0.9,
       "forbid_confirmation": true,
-      "required_evidence_terms": ["采购订单"]
+      "required_evidence_terms": [
+        "采购订单"
+      ]
     }
   },
   {
-    "name": "same_owner_delay_procurement_meeting",
-    "category": "same_owner_delay",
+    "name": "same_owner_postpone_procurement_meeting",
+    "category": "same_owner_postpone",
     "source": "semi_real",
     "execution": "static_decision",
     "input": {
@@ -386,28 +527,41 @@
       ]
     },
     "result": {
-      "decision": "DELAY",
-      "task_public_id": "fut_procurement_result",
-      "candidate_public_ids": ["fut_procurement_result"],
-      "confidence": 0.9,
-      "needs_confirmation": false,
-      "proposed_due_at": "2026-08-11T00:00:00",
-      "forbid_auto_reasons": [],
-      "evidence_terms": ["采购会", "改到下周二"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_procurement_result"
+      ],
+      "task_decisions": [
+        {
+          "decision": "POSTPONE",
+          "task_public_id": "fut_procurement_result",
+          "confidence": 0.9,
+          "needs_confirmation": false,
+          "proposed_due_at": "2026-08-11T00:00:00",
+          "forbid_auto_reasons": [],
+          "evidence_terms": [
+            "采购会",
+            "改到下周二"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
-      "decision": "DELAY",
+      "decision": "POSTPONE",
       "task_public_id": "fut_procurement_result",
-      "required_candidate_public_ids": ["fut_procurement_result"],
+      "required_candidate_public_ids": [
+        "fut_procurement_result"
+      ],
       "min_confidence": 0.85,
       "forbid_confirmation": true,
-      "required_evidence_terms": ["下周二"]
+      "required_evidence_terms": [
+        "下周二"
+      ]
     }
   },
   {
-    "name": "same_owner_delay_trial_extension",
-    "category": "same_owner_delay",
+    "name": "same_owner_postpone_trial_extension",
+    "category": "same_owner_postpone",
     "source": "semi_real",
     "execution": "static_decision",
     "input": {
@@ -424,28 +578,41 @@
       ]
     },
     "result": {
-      "decision": "DELAY",
-      "task_public_id": "fut_trial_final_feedback",
-      "candidate_public_ids": ["fut_trial_final_feedback"],
-      "confidence": 0.88,
-      "needs_confirmation": false,
-      "proposed_due_at": "2026-08-12T00:00:00",
-      "forbid_auto_reasons": [],
-      "evidence_terms": ["再试用一周", "下周三"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_trial_final_feedback"
+      ],
+      "task_decisions": [
+        {
+          "decision": "POSTPONE",
+          "task_public_id": "fut_trial_final_feedback",
+          "confidence": 0.88,
+          "needs_confirmation": false,
+          "proposed_due_at": "2026-08-12T00:00:00",
+          "forbid_auto_reasons": [],
+          "evidence_terms": [
+            "再试用一周",
+            "下周三"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
-      "decision": "DELAY",
+      "decision": "POSTPONE",
       "task_public_id": "fut_trial_final_feedback",
-      "required_candidate_public_ids": ["fut_trial_final_feedback"],
+      "required_candidate_public_ids": [
+        "fut_trial_final_feedback"
+      ],
       "min_confidence": 0.85,
       "forbid_confirmation": true,
-      "required_evidence_terms": ["试用一周"]
+      "required_evidence_terms": [
+        "试用一周"
+      ]
     }
   },
   {
-    "name": "same_owner_delay_contract_signing",
-    "category": "same_owner_delay",
+    "name": "same_owner_postpone_contract_signing",
+    "category": "same_owner_postpone",
     "source": "semi_real",
     "execution": "static_decision",
     "input": {
@@ -462,28 +629,41 @@
       ]
     },
     "result": {
-      "decision": "DELAY",
-      "task_public_id": "fut_contract_sign_sales3",
-      "candidate_public_ids": ["fut_contract_sign_sales3"],
-      "confidence": 0.9,
-      "needs_confirmation": false,
-      "proposed_due_at": "2026-08-14T00:00:00",
-      "forbid_auto_reasons": [],
-      "evidence_terms": ["合同签署", "顺延到下周五"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_contract_sign_sales3"
+      ],
+      "task_decisions": [
+        {
+          "decision": "POSTPONE",
+          "task_public_id": "fut_contract_sign_sales3",
+          "confidence": 0.9,
+          "needs_confirmation": false,
+          "proposed_due_at": "2026-08-14T00:00:00",
+          "forbid_auto_reasons": [],
+          "evidence_terms": [
+            "合同签署",
+            "顺延到下周五"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
-      "decision": "DELAY",
+      "decision": "POSTPONE",
       "task_public_id": "fut_contract_sign_sales3",
-      "required_candidate_public_ids": ["fut_contract_sign_sales3"],
+      "required_candidate_public_ids": [
+        "fut_contract_sign_sales3"
+      ],
       "min_confidence": 0.85,
       "forbid_confirmation": true,
-      "required_evidence_terms": ["顺延"]
+      "required_evidence_terms": [
+        "顺延"
+      ]
     }
   },
   {
-    "name": "same_owner_delay_payment_schedule",
-    "category": "same_owner_delay",
+    "name": "same_owner_postpone_payment_schedule",
+    "category": "same_owner_postpone",
     "source": "semi_real",
     "execution": "static_decision",
     "input": {
@@ -500,23 +680,36 @@
       ]
     },
     "result": {
-      "decision": "DELAY",
-      "task_public_id": "fut_payment_follow_sales4",
-      "candidate_public_ids": ["fut_payment_follow_sales4"],
-      "confidence": 0.87,
-      "needs_confirmation": false,
-      "proposed_due_at": "2026-08-30T00:00:00",
-      "forbid_auto_reasons": [],
-      "evidence_terms": ["财务排款", "月底前一天"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_payment_follow_sales4"
+      ],
+      "task_decisions": [
+        {
+          "decision": "POSTPONE",
+          "task_public_id": "fut_payment_follow_sales4",
+          "confidence": 0.87,
+          "needs_confirmation": false,
+          "proposed_due_at": "2026-08-30T00:00:00",
+          "forbid_auto_reasons": [],
+          "evidence_terms": [
+            "财务排款",
+            "月底前一天"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
-      "decision": "DELAY",
+      "decision": "POSTPONE",
       "task_public_id": "fut_payment_follow_sales4",
-      "required_candidate_public_ids": ["fut_payment_follow_sales4"],
+      "required_candidate_public_ids": [
+        "fut_payment_follow_sales4"
+      ],
       "min_confidence": 0.85,
       "forbid_confirmation": true,
-      "required_evidence_terms": ["月底"]
+      "required_evidence_terms": [
+        "月底"
+      ]
     }
   },
   {
@@ -538,20 +731,34 @@
       ]
     },
     "result": {
-      "decision": "UNRELATED",
-      "task_public_id": null,
-      "candidate_public_ids": ["fut_budget_check_sales1"],
-      "confidence": 0.86,
-      "needs_confirmation": false,
-      "forbid_auto_reasons": [],
-      "evidence_terms": ["接口工作坊", "研发"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_budget_check_sales1"
+      ],
+      "task_decisions": [
+        {
+          "decision": "UNRELATED",
+          "task_public_id": "fut_budget_check_sales1",
+          "confidence": 0.86,
+          "needs_confirmation": false,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [],
+          "evidence_terms": [
+            "接口工作坊",
+            "研发"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
       "decision": "UNRELATED",
-      "required_candidate_public_ids": ["fut_budget_check_sales1"],
+      "required_candidate_public_ids": [
+        "fut_budget_check_sales1"
+      ],
       "forbid_confirmation": true,
-      "required_evidence_terms": ["工作坊"]
+      "required_evidence_terms": [
+        "工作坊"
+      ]
     }
   },
   {
@@ -573,20 +780,34 @@
       ]
     },
     "result": {
-      "decision": "UNRELATED",
-      "task_public_id": null,
-      "candidate_public_ids": ["fut_contract_terms_sales2"],
-      "confidence": 0.84,
-      "needs_confirmation": false,
-      "forbid_auto_reasons": [],
-      "evidence_terms": ["竞品报价", "差异说明"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_contract_terms_sales2"
+      ],
+      "task_decisions": [
+        {
+          "decision": "UNRELATED",
+          "task_public_id": "fut_contract_terms_sales2",
+          "confidence": 0.84,
+          "needs_confirmation": false,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [],
+          "evidence_terms": [
+            "竞品报价",
+            "差异说明"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
       "decision": "UNRELATED",
-      "required_candidate_public_ids": ["fut_contract_terms_sales2"],
+      "required_candidate_public_ids": [
+        "fut_contract_terms_sales2"
+      ],
       "forbid_confirmation": true,
-      "required_evidence_terms": ["竞品"]
+      "required_evidence_terms": [
+        "竞品"
+      ]
     }
   },
   {
@@ -608,20 +829,34 @@
       ]
     },
     "result": {
-      "decision": "UNRELATED",
-      "task_public_id": null,
-      "candidate_public_ids": ["fut_payment_schedule_sales4"],
-      "confidence": 0.82,
-      "needs_confirmation": false,
-      "forbid_auto_reasons": [],
-      "evidence_terms": ["管理员培训", "付款排期还没有聊到"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_payment_schedule_sales4"
+      ],
+      "task_decisions": [
+        {
+          "decision": "UNRELATED",
+          "task_public_id": "fut_payment_schedule_sales4",
+          "confidence": 0.82,
+          "needs_confirmation": false,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [],
+          "evidence_terms": [
+            "管理员培训",
+            "付款排期还没有聊到"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
       "decision": "UNRELATED",
-      "required_candidate_public_ids": ["fut_payment_schedule_sales4"],
+      "required_candidate_public_ids": [
+        "fut_payment_schedule_sales4"
+      ],
       "forbid_confirmation": true,
-      "required_evidence_terms": ["培训"]
+      "required_evidence_terms": [
+        "培训"
+      ]
     }
   },
   {
@@ -643,20 +878,34 @@
       ]
     },
     "result": {
-      "decision": "UNRELATED",
-      "task_public_id": null,
-      "candidate_public_ids": ["fut_trial_feedback_sales2_old"],
-      "confidence": 0.83,
-      "needs_confirmation": false,
-      "forbid_auto_reasons": [],
-      "evidence_terms": ["安全问卷", "试用反馈暂时未更新"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_trial_feedback_sales2_old"
+      ],
+      "task_decisions": [
+        {
+          "decision": "UNRELATED",
+          "task_public_id": "fut_trial_feedback_sales2_old",
+          "confidence": 0.83,
+          "needs_confirmation": false,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [],
+          "evidence_terms": [
+            "安全问卷",
+            "试用反馈暂时未更新"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
       "decision": "UNRELATED",
-      "required_candidate_public_ids": ["fut_trial_feedback_sales2_old"],
+      "required_candidate_public_ids": [
+        "fut_trial_feedback_sales2_old"
+      ],
       "forbid_confirmation": true,
-      "required_evidence_terms": ["安全问卷"]
+      "required_evidence_terms": [
+        "安全问卷"
+      ]
     }
   },
   {
@@ -678,22 +927,40 @@
       ]
     },
     "result": {
-      "decision": "ASK_CONFIRMATION",
-      "task_public_id": "fut_sales_poc_acceptance",
-      "candidate_public_ids": ["fut_sales_poc_acceptance"],
-      "confidence": 0.88,
-      "needs_confirmation": true,
-      "forbid_auto_reasons": ["CROSS_OWNER"],
-      "evidence_terms": ["帮销售", "验收通过"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_sales_poc_acceptance"
+      ],
+      "task_decisions": [
+        {
+          "decision": "ASK_CONFIRMATION",
+          "task_public_id": "fut_sales_poc_acceptance",
+          "confidence": 0.88,
+          "needs_confirmation": true,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [
+            "CROSS_OWNER"
+          ],
+          "evidence_terms": [
+            "帮销售",
+            "验收通过"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
       "decision": "ASK_CONFIRMATION",
       "task_public_id": "fut_sales_poc_acceptance",
-      "required_candidate_public_ids": ["fut_sales_poc_acceptance"],
+      "required_candidate_public_ids": [
+        "fut_sales_poc_acceptance"
+      ],
       "require_confirmation": true,
-      "required_forbid_auto_reasons": ["CROSS_OWNER"],
-      "required_evidence_terms": ["验收"]
+      "required_forbid_auto_reasons": [
+        "CROSS_OWNER"
+      ],
+      "required_evidence_terms": [
+        "验收"
+      ]
     }
   },
   {
@@ -715,26 +982,44 @@
       ]
     },
     "result": {
-      "decision": "ASK_CONFIRMATION",
-      "task_public_id": "fut_presales_solution_review",
-      "candidate_public_ids": ["fut_presales_solution_review"],
-      "confidence": 0.86,
-      "needs_confirmation": true,
-      "forbid_auto_reasons": ["CROSS_OWNER"],
-      "evidence_terms": ["售前方案", "评审已经过了"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_presales_solution_review"
+      ],
+      "task_decisions": [
+        {
+          "decision": "ASK_CONFIRMATION",
+          "task_public_id": "fut_presales_solution_review",
+          "confidence": 0.86,
+          "needs_confirmation": true,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [
+            "CROSS_OWNER"
+          ],
+          "evidence_terms": [
+            "售前方案",
+            "评审已经过了"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
       "decision": "ASK_CONFIRMATION",
       "task_public_id": "fut_presales_solution_review",
-      "required_candidate_public_ids": ["fut_presales_solution_review"],
+      "required_candidate_public_ids": [
+        "fut_presales_solution_review"
+      ],
       "require_confirmation": true,
-      "required_forbid_auto_reasons": ["CROSS_OWNER"],
-      "required_evidence_terms": ["评审"]
+      "required_forbid_auto_reasons": [
+        "CROSS_OWNER"
+      ],
+      "required_evidence_terms": [
+        "评审"
+      ]
     }
   },
   {
-    "name": "cross_owner_delay_procurement_needs_confirmation",
+    "name": "cross_owner_postpone_procurement_needs_confirmation",
     "category": "cross_owner_confirmation",
     "source": "semi_real",
     "execution": "static_decision",
@@ -752,23 +1037,40 @@
       ]
     },
     "result": {
-      "decision": "ASK_CONFIRMATION",
-      "task_public_id": "fut_sales_procurement_follow",
-      "candidate_public_ids": ["fut_sales_procurement_follow"],
-      "confidence": 0.85,
-      "needs_confirmation": true,
-      "proposed_due_at": "2026-08-12T00:00:00",
-      "forbid_auto_reasons": ["CROSS_OWNER"],
-      "evidence_terms": ["采购流程延期", "原来是销售在跟"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_sales_procurement_follow"
+      ],
+      "task_decisions": [
+        {
+          "decision": "ASK_CONFIRMATION",
+          "task_public_id": "fut_sales_procurement_follow",
+          "confidence": 0.85,
+          "needs_confirmation": true,
+          "proposed_due_at": "2026-08-12T00:00:00",
+          "forbid_auto_reasons": [
+            "CROSS_OWNER"
+          ],
+          "evidence_terms": [
+            "采购流程延期",
+            "原来是销售在跟"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
       "decision": "ASK_CONFIRMATION",
       "task_public_id": "fut_sales_procurement_follow",
-      "required_candidate_public_ids": ["fut_sales_procurement_follow"],
+      "required_candidate_public_ids": [
+        "fut_sales_procurement_follow"
+      ],
       "require_confirmation": true,
-      "required_forbid_auto_reasons": ["CROSS_OWNER"],
-      "required_evidence_terms": ["延期"]
+      "required_forbid_auto_reasons": [
+        "CROSS_OWNER"
+      ],
+      "required_evidence_terms": [
+        "延期"
+      ]
     }
   },
   {
@@ -790,22 +1092,41 @@
       ]
     },
     "result": {
-      "decision": "ASK_CONFIRMATION",
-      "task_public_id": "fut_presales_validation",
-      "candidate_public_ids": ["fut_presales_validation"],
-      "confidence": 0.81,
-      "needs_confirmation": true,
-      "forbid_auto_reasons": ["CROSS_OWNER", "CANCEL_REQUIRES_CONFIRMATION"],
-      "evidence_terms": ["统一采购", "可能不用继续"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_presales_validation"
+      ],
+      "task_decisions": [
+        {
+          "decision": "ASK_CONFIRMATION",
+          "task_public_id": "fut_presales_validation",
+          "confidence": 0.81,
+          "needs_confirmation": true,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [
+            "CROSS_OWNER",
+            "CANCEL_REQUIRES_CONFIRMATION"
+          ],
+          "evidence_terms": [
+            "统一采购",
+            "可能不用继续"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
       "decision": "ASK_CONFIRMATION",
       "task_public_id": "fut_presales_validation",
-      "required_candidate_public_ids": ["fut_presales_validation"],
+      "required_candidate_public_ids": [
+        "fut_presales_validation"
+      ],
       "require_confirmation": true,
-      "required_forbid_auto_reasons": ["CROSS_OWNER"],
-      "required_evidence_terms": ["统一采购"]
+      "required_forbid_auto_reasons": [
+        "CROSS_OWNER"
+      ],
+      "required_evidence_terms": [
+        "统一采购"
+      ]
     }
   },
   {
@@ -827,21 +1148,36 @@
       ]
     },
     "result": {
-      "decision": "ASK_CONFIRMATION",
-      "task_public_id": "fut_budget_check_sales1_vague",
-      "candidate_public_ids": ["fut_budget_check_sales1_vague"],
-      "confidence": 0.62,
-      "needs_confirmation": true,
-      "forbid_auto_reasons": ["LOW_CONFIDENCE", "AMBIGUOUS_EVIDENCE"],
-      "evidence_terms": ["好像", "差不多了"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_budget_check_sales1_vague"
+      ],
+      "task_decisions": [
+        {
+          "decision": "ASK_CONFIRMATION",
+          "task_public_id": "fut_budget_check_sales1_vague",
+          "confidence": 0.62,
+          "needs_confirmation": true,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [
+            "LOW_CONFIDENCE",
+            "AMBIGUOUS_EVIDENCE"
+          ],
+          "evidence_terms": [
+            "好像",
+            "差不多了"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
       "decision": "ASK_CONFIRMATION",
       "task_public_id": "fut_budget_check_sales1_vague",
       "max_confidence": 0.7,
       "require_confirmation": true,
-      "required_forbid_auto_reasons": ["LOW_CONFIDENCE"]
+      "required_forbid_auto_reasons": [
+        "LOW_CONFIDENCE"
+      ]
     }
   },
   {
@@ -863,21 +1199,36 @@
       ]
     },
     "result": {
-      "decision": "ASK_CONFIRMATION",
-      "task_public_id": "fut_trial_continue_sales2",
-      "candidate_public_ids": ["fut_trial_continue_sales2"],
-      "confidence": 0.55,
-      "needs_confirmation": true,
-      "forbid_auto_reasons": ["LOW_CONFIDENCE", "AMBIGUOUS_EVIDENCE"],
-      "evidence_terms": ["后面再看", "不确定"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_trial_continue_sales2"
+      ],
+      "task_decisions": [
+        {
+          "decision": "ASK_CONFIRMATION",
+          "task_public_id": "fut_trial_continue_sales2",
+          "confidence": 0.55,
+          "needs_confirmation": true,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [
+            "LOW_CONFIDENCE",
+            "AMBIGUOUS_EVIDENCE"
+          ],
+          "evidence_terms": [
+            "后面再看",
+            "不确定"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
       "decision": "ASK_CONFIRMATION",
       "task_public_id": "fut_trial_continue_sales2",
       "max_confidence": 0.7,
       "require_confirmation": true,
-      "required_forbid_auto_reasons": ["LOW_CONFIDENCE"]
+      "required_forbid_auto_reasons": [
+        "LOW_CONFIDENCE"
+      ]
     }
   },
   {
@@ -899,21 +1250,36 @@
       ]
     },
     "result": {
-      "decision": "ASK_CONFIRMATION",
-      "task_public_id": "fut_price_confirm_sales3",
-      "candidate_public_ids": ["fut_price_confirm_sales3"],
-      "confidence": 0.66,
-      "needs_confirmation": true,
-      "forbid_auto_reasons": ["LOW_CONFIDENCE", "AMBIGUOUS_EVIDENCE"],
-      "evidence_terms": ["价格还有点问题", "再商量一下"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_price_confirm_sales3"
+      ],
+      "task_decisions": [
+        {
+          "decision": "ASK_CONFIRMATION",
+          "task_public_id": "fut_price_confirm_sales3",
+          "confidence": 0.66,
+          "needs_confirmation": true,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [
+            "LOW_CONFIDENCE",
+            "AMBIGUOUS_EVIDENCE"
+          ],
+          "evidence_terms": [
+            "价格还有点问题",
+            "再商量一下"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
       "decision": "ASK_CONFIRMATION",
       "task_public_id": "fut_price_confirm_sales3",
       "max_confidence": 0.7,
       "require_confirmation": true,
-      "required_forbid_auto_reasons": ["LOW_CONFIDENCE"]
+      "required_forbid_auto_reasons": [
+        "LOW_CONFIDENCE"
+      ]
     }
   },
   {
@@ -935,21 +1301,36 @@
       ]
     },
     "result": {
-      "decision": "ASK_CONFIRMATION",
-      "task_public_id": "fut_project_launch_sales4",
-      "candidate_public_ids": ["fut_project_launch_sales4"],
-      "confidence": 0.6,
-      "needs_confirmation": true,
-      "forbid_auto_reasons": ["LOW_CONFIDENCE", "CANCEL_REQUIRES_CONFIRMATION"],
-      "evidence_terms": ["可能先不上", "最后拍板"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_project_launch_sales4"
+      ],
+      "task_decisions": [
+        {
+          "decision": "ASK_CONFIRMATION",
+          "task_public_id": "fut_project_launch_sales4",
+          "confidence": 0.6,
+          "needs_confirmation": true,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [
+            "LOW_CONFIDENCE",
+            "CANCEL_REQUIRES_CONFIRMATION"
+          ],
+          "evidence_terms": [
+            "可能先不上",
+            "最后拍板"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
       "decision": "ASK_CONFIRMATION",
       "task_public_id": "fut_project_launch_sales4",
       "max_confidence": 0.7,
       "require_confirmation": true,
-      "required_forbid_auto_reasons": ["LOW_CONFIDENCE"]
+      "required_forbid_auto_reasons": [
+        "LOW_CONFIDENCE"
+      ]
     }
   },
   {
@@ -971,22 +1352,40 @@
       ]
     },
     "result": {
-      "decision": "KEEP_OPEN",
-      "task_public_id": "fut_budget_check_manual_clear",
-      "candidate_public_ids": ["fut_budget_check_manual_clear"],
-      "confidence": 0.78,
-      "needs_confirmation": false,
-      "forbid_auto_reasons": ["NO_COMPLETION_EVIDENCE"],
-      "evidence_terms": ["清空了下次跟进动作", "没有新的进展"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_budget_check_manual_clear"
+      ],
+      "task_decisions": [
+        {
+          "decision": "KEEP_OPEN",
+          "task_public_id": "fut_budget_check_manual_clear",
+          "confidence": 0.78,
+          "needs_confirmation": false,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [
+            "NO_COMPLETION_EVIDENCE"
+          ],
+          "evidence_terms": [
+            "清空了下次跟进动作",
+            "没有新的进展"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
       "decision": "KEEP_OPEN",
       "task_public_id": "fut_budget_check_manual_clear",
-      "required_candidate_public_ids": ["fut_budget_check_manual_clear"],
+      "required_candidate_public_ids": [
+        "fut_budget_check_manual_clear"
+      ],
       "forbid_confirmation": true,
-      "required_forbid_auto_reasons": ["NO_COMPLETION_EVIDENCE"],
-      "required_evidence_terms": ["没有新的进展"]
+      "required_forbid_auto_reasons": [
+        "NO_COMPLETION_EVIDENCE"
+      ],
+      "required_evidence_terms": [
+        "没有新的进展"
+      ]
     }
   },
   {
@@ -1008,22 +1407,36 @@
       ]
     },
     "result": {
-      "decision": "CANCEL",
-      "task_public_id": "fut_wrong_activity_task",
-      "candidate_public_ids": ["fut_wrong_activity_task"],
-      "confidence": 0.98,
-      "needs_confirmation": false,
-      "forbid_auto_reasons": [],
-      "evidence_terms": ["删除误录入", "对应任务应取消"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_wrong_activity_task"
+      ],
+      "task_decisions": [
+        {
+          "decision": "CANCEL",
+          "task_public_id": "fut_wrong_activity_task",
+          "confidence": 0.98,
+          "needs_confirmation": false,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [],
+          "evidence_terms": [
+            "删除误录入",
+            "对应任务应取消"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
       "decision": "CANCEL",
       "task_public_id": "fut_wrong_activity_task",
-      "required_candidate_public_ids": ["fut_wrong_activity_task"],
+      "required_candidate_public_ids": [
+        "fut_wrong_activity_task"
+      ],
       "min_confidence": 0.95,
       "forbid_confirmation": true,
-      "required_evidence_terms": ["误录入"]
+      "required_evidence_terms": [
+        "误录入"
+      ]
     }
   },
   {
@@ -1045,22 +1458,36 @@
       ]
     },
     "result": {
-      "decision": "COMPLETE",
-      "task_public_id": "fut_contract_sign_manual_clear",
-      "candidate_public_ids": ["fut_contract_sign_manual_clear"],
-      "confidence": 0.91,
-      "needs_confirmation": false,
-      "forbid_auto_reasons": [],
-      "evidence_terms": ["清空下次跟进时间", "客户已签合同"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_contract_sign_manual_clear"
+      ],
+      "task_decisions": [
+        {
+          "decision": "COMPLETE",
+          "task_public_id": "fut_contract_sign_manual_clear",
+          "confidence": 0.91,
+          "needs_confirmation": false,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [],
+          "evidence_terms": [
+            "清空下次跟进时间",
+            "客户已签合同"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
       "decision": "COMPLETE",
       "task_public_id": "fut_contract_sign_manual_clear",
-      "required_candidate_public_ids": ["fut_contract_sign_manual_clear"],
+      "required_candidate_public_ids": [
+        "fut_contract_sign_manual_clear"
+      ],
       "min_confidence": 0.9,
       "forbid_confirmation": true,
-      "required_evidence_terms": ["已签合同"]
+      "required_evidence_terms": [
+        "已签合同"
+      ]
     }
   },
   {
@@ -1082,22 +1509,40 @@
       ]
     },
     "result": {
-      "decision": "ASK_CONFIRMATION",
-      "task_public_id": "fut_presales_wrong_activity_task",
-      "candidate_public_ids": ["fut_presales_wrong_activity_task"],
-      "confidence": 0.86,
-      "needs_confirmation": true,
-      "forbid_auto_reasons": ["CROSS_OWNER"],
-      "evidence_terms": ["删除", "候选任务归属售前"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_presales_wrong_activity_task"
+      ],
+      "task_decisions": [
+        {
+          "decision": "ASK_CONFIRMATION",
+          "task_public_id": "fut_presales_wrong_activity_task",
+          "confidence": 0.86,
+          "needs_confirmation": true,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [
+            "CROSS_OWNER"
+          ],
+          "evidence_terms": [
+            "删除",
+            "候选任务归属售前"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
       "decision": "ASK_CONFIRMATION",
       "task_public_id": "fut_presales_wrong_activity_task",
-      "required_candidate_public_ids": ["fut_presales_wrong_activity_task"],
+      "required_candidate_public_ids": [
+        "fut_presales_wrong_activity_task"
+      ],
       "require_confirmation": true,
-      "required_forbid_auto_reasons": ["CROSS_OWNER"],
-      "required_evidence_terms": ["归属售前"]
+      "required_forbid_auto_reasons": [
+        "CROSS_OWNER"
+      ],
+      "required_evidence_terms": [
+        "归属售前"
+      ]
     }
   },
   {
@@ -1124,21 +1569,55 @@
       ]
     },
     "result": {
-      "decision": "ASK_CONFIRMATION",
-      "task_public_id": null,
-      "candidate_public_ids": ["fut_budget_sales5", "fut_security_sales5"],
-      "confidence": 0.57,
-      "needs_confirmation": true,
-      "forbid_auto_reasons": ["LOW_CONFIDENCE", "MULTIPLE_CANDIDATES"],
-      "evidence_terms": ["两个事项", "一起看看"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_budget_sales5",
+        "fut_security_sales5"
+      ],
+      "task_decisions": [
+        {
+          "decision": "ASK_CONFIRMATION",
+          "task_public_id": "fut_budget_sales5",
+          "confidence": 0.57,
+          "needs_confirmation": true,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [
+            "LOW_CONFIDENCE",
+            "MULTIPLE_CANDIDATES"
+          ],
+          "evidence_terms": [
+            "两个事项",
+            "一起看看"
+          ],
+          "state_mutation_requested": false
+        },
+        {
+          "decision": "ASK_CONFIRMATION",
+          "task_public_id": "fut_security_sales5",
+          "confidence": 0.57,
+          "needs_confirmation": true,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [
+            "LOW_CONFIDENCE",
+            "MULTIPLE_CANDIDATES"
+          ],
+          "evidence_terms": [
+            "两个事项",
+            "一起看看"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
-      "decision": "ASK_CONFIRMATION",
-      "required_candidate_public_ids": ["fut_budget_sales5", "fut_security_sales5"],
+      "required_candidate_public_ids": [
+        "fut_budget_sales5",
+        "fut_security_sales5"
+      ],
       "max_confidence": 0.7,
       "require_confirmation": true,
-      "required_forbid_auto_reasons": ["MULTIPLE_CANDIDATES"]
+      "required_forbid_auto_reasons": [
+        "MULTIPLE_CANDIDATES"
+      ]
     }
   },
   {
@@ -1160,22 +1639,36 @@
       ]
     },
     "result": {
-      "decision": "CANCEL",
-      "task_public_id": "fut_trial_setup_sales2",
-      "candidate_public_ids": ["fut_trial_setup_sales2"],
-      "confidence": 0.91,
-      "needs_confirmation": false,
-      "forbid_auto_reasons": [],
-      "evidence_terms": ["明确说不再试用", "取消试用安排"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_trial_setup_sales2"
+      ],
+      "task_decisions": [
+        {
+          "decision": "CANCEL",
+          "task_public_id": "fut_trial_setup_sales2",
+          "confidence": 0.91,
+          "needs_confirmation": false,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [],
+          "evidence_terms": [
+            "明确说不再试用",
+            "取消试用安排"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
       "decision": "CANCEL",
       "task_public_id": "fut_trial_setup_sales2",
-      "required_candidate_public_ids": ["fut_trial_setup_sales2"],
+      "required_candidate_public_ids": [
+        "fut_trial_setup_sales2"
+      ],
       "min_confidence": 0.9,
       "forbid_confirmation": true,
-      "required_evidence_terms": ["不再试用"]
+      "required_evidence_terms": [
+        "不再试用"
+      ]
     }
   },
   {
@@ -1197,22 +1690,36 @@
       ]
     },
     "result": {
-      "decision": "CANCEL",
-      "task_public_id": "fut_duplicate_budget_old",
-      "candidate_public_ids": ["fut_duplicate_budget_old"],
-      "confidence": 0.9,
-      "needs_confirmation": false,
-      "forbid_auto_reasons": [],
-      "evidence_terms": ["重复", "旧任务不用保留"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_duplicate_budget_old"
+      ],
+      "task_decisions": [
+        {
+          "decision": "CANCEL",
+          "task_public_id": "fut_duplicate_budget_old",
+          "confidence": 0.9,
+          "needs_confirmation": false,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [],
+          "evidence_terms": [
+            "重复",
+            "旧任务不用保留"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
       "decision": "CANCEL",
       "task_public_id": "fut_duplicate_budget_old",
-      "required_candidate_public_ids": ["fut_duplicate_budget_old"],
+      "required_candidate_public_ids": [
+        "fut_duplicate_budget_old"
+      ],
       "min_confidence": 0.9,
       "forbid_confirmation": true,
-      "required_evidence_terms": ["重复"]
+      "required_evidence_terms": [
+        "重复"
+      ]
     }
   },
   {
@@ -1234,22 +1741,39 @@
       ]
     },
     "result": {
-      "decision": "KEEP_OPEN",
-      "task_public_id": "fut_budget_approval_sales1",
-      "candidate_public_ids": ["fut_budget_approval_sales1"],
-      "confidence": 0.8,
-      "needs_confirmation": false,
-      "forbid_auto_reasons": ["NO_COMPLETION_EVIDENCE"],
-      "evidence_terms": ["还没有审批结果"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_budget_approval_sales1"
+      ],
+      "task_decisions": [
+        {
+          "decision": "KEEP_OPEN",
+          "task_public_id": "fut_budget_approval_sales1",
+          "confidence": 0.8,
+          "needs_confirmation": false,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [
+            "NO_COMPLETION_EVIDENCE"
+          ],
+          "evidence_terms": [
+            "还没有审批结果"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
       "decision": "KEEP_OPEN",
       "task_public_id": "fut_budget_approval_sales1",
-      "required_candidate_public_ids": ["fut_budget_approval_sales1"],
+      "required_candidate_public_ids": [
+        "fut_budget_approval_sales1"
+      ],
       "forbid_confirmation": true,
-      "required_forbid_auto_reasons": ["NO_COMPLETION_EVIDENCE"],
-      "required_evidence_terms": ["还没有审批结果"]
+      "required_forbid_auto_reasons": [
+        "NO_COMPLETION_EVIDENCE"
+      ],
+      "required_evidence_terms": [
+        "还没有审批结果"
+      ]
     }
   },
   {
@@ -1271,22 +1795,40 @@
       ]
     },
     "result": {
-      "decision": "KEEP_OPEN",
-      "task_public_id": "fut_follow_decision_sales7",
-      "candidate_public_ids": ["fut_follow_decision_sales7"],
-      "confidence": 0.79,
-      "needs_confirmation": false,
-      "forbid_auto_reasons": ["NO_COMPLETION_EVIDENCE"],
-      "evidence_terms": ["只是同步了材料", "没有确认旧事项"],
-      "state_mutation_requested": false
+      "candidate_public_ids": [
+        "fut_follow_decision_sales7"
+      ],
+      "task_decisions": [
+        {
+          "decision": "KEEP_OPEN",
+          "task_public_id": "fut_follow_decision_sales7",
+          "confidence": 0.79,
+          "needs_confirmation": false,
+          "proposed_due_at": null,
+          "forbid_auto_reasons": [
+            "NO_COMPLETION_EVIDENCE"
+          ],
+          "evidence_terms": [
+            "只是同步了材料",
+            "没有确认旧事项"
+          ],
+          "state_mutation_requested": false
+        }
+      ]
     },
     "expected": {
       "decision": "KEEP_OPEN",
       "task_public_id": "fut_follow_decision_sales7",
-      "required_candidate_public_ids": ["fut_follow_decision_sales7"],
+      "required_candidate_public_ids": [
+        "fut_follow_decision_sales7"
+      ],
       "forbid_confirmation": true,
-      "required_forbid_auto_reasons": ["NO_COMPLETION_EVIDENCE"],
-      "required_evidence_terms": ["没有确认旧事项"]
+      "required_forbid_auto_reasons": [
+        "NO_COMPLETION_EVIDENCE"
+      ],
+      "required_evidence_terms": [
+        "没有确认旧事项"
+      ]
     }
   }
 ]

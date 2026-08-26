@@ -148,7 +148,7 @@ const taskFixture = (): FollowUpTaskItem => ({
   due_at: '2026-08-13T09:00:00+08:00',
   pending_confirmations: [{
     public_id: 'fuc_case_13',
-    question_text: '上次安排的「本周四反馈新的数据分级分类收集表给张雷雨」这次是否已经完成?',
+    question_text: '8 月 13 号待办的「本周四反馈新的数据分级分类收集表给张雷雨」现在完成了吗?',
     suggested_action: 'COMPLETE',
     created_time: '2026-08-12T04:13:48+08:00',
   }],
@@ -211,7 +211,7 @@ describe('CustomerTracking inline follow-up confirmations', () => {
     expect(topBarState.tabs.map(tab => tab.label)).not.toContain('待确认')
     const task = wrapper.get('[data-testid="task-fut_10"]')
     expect(task.text()).toContain('需确认')
-    expect(task.text()).toContain('上次安排的「本周四反馈新的数据分级分类收集表给张雷雨」这次是否已经完成?')
+    expect(task.text()).toContain('8 月 13 号待办的「本周四反馈新的数据分级分类收集表给张雷雨」现在完成了吗?')
     expect(task.get('[data-action="确认完成"]').exists()).toBe(true)
 
     const unrelatedTask = wrapper.get('[data-testid="task-fut_11"]')

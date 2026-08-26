@@ -1,4 +1,5 @@
 """CRM AI Agent tool adapter tests."""
+
 from datetime import date, datetime
 
 import pytest
@@ -16,7 +17,6 @@ from app.models.agent import (
     AgentIdempotencyStatus,
     AgentMessage,
     AgentSession,
-    AgentTask,
     AgentToolCall,
     AgentToolCallStatus,
 )
@@ -48,7 +48,6 @@ from app.models.sales_commitment import (
 from app.models.user import User
 from app.models.user_role import UserRole
 from app.services.acquisition_source_service import seed_default_sources
-from app.services.agent.middleware import build_langchain_hitl_middleware
 from app.services.agent.tool_registry import AgentToolRegistry
 from app.services.agent.tools.base import AgentToolContext
 from app.services.agent.tools.service import CRMAgentToolService
@@ -78,13 +77,15 @@ class FakeCRMAPIClient:
         self.calls = []
 
     async def request(self, method, path, authorization, *, params=None, json=None, idempotency_key=None):
-        self.calls.append({
-            "method": method,
-            "path": path,
-            "authorization": authorization,
-            "params": params,
-            "json": json,
-        })
+        self.calls.append(
+            {
+                "method": method,
+                "path": path,
+                "authorization": authorization,
+                "params": params,
+                "json": json,
+            }
+        )
         if method == "GET" and path == "/v1/customers/":
             return {"items": [{"id": 101, "account_name": "越秀金融"}], "total": 1}
         if method == "GET" and path == f"/v1/customers/{CUSTOMER_PUBLIC_ID}":
@@ -96,6 +97,10 @@ class FakeCRMAPIClient:
                 "source_content": json["source_content"],
                 "activity_kind": json["activity_kind"],
                 "next_follow_time": "2026-07-29T00:00:00",
+                "durable_work": {
+                    "post_commit_job_public_id": "pcj_9001",
+                    "customer_intelligence_request_id": "cir_9001",
+                },
             }
         if method == "POST" and path == "/v1/leads/":
             return {"id": 8101, "status": 0, **json}
@@ -116,12 +121,14 @@ class FakeCRMAPIClient:
         if method == "GET" and (path == "/v1/opportunities/" or path.startswith("/v1/opportunities/?customer_id=")):
             customer_id = params["customer_id"] if params else path.rsplit("=", 1)[1]
             return {
-                "items": [{
-                    "id": OPPORTUNITY_PUBLIC_ID,
-                    "customer_id": customer_id,
-                    "status": 0,
-                    "approval_phase": "approved",
-                }],
+                "items": [
+                    {
+                        "id": OPPORTUNITY_PUBLIC_ID,
+                        "customer_id": customer_id,
+                        "status": 0,
+                        "approval_phase": "approved",
+                    }
+                ],
                 "total": 1,
             }
         if method == "GET" and path == f"/v1/opportunities/{OPPORTUNITY_PUBLIC_ID}":
@@ -140,7 +147,10 @@ class FakeCRMAPIClient:
         if method == "POST" and path == f"/v1/opportunities/{OPPORTUNITY_PUBLIC_ID}/move-stage":
             return {
                 "id": OPPORTUNITY_PUBLIC_ID,
-                "current_stage_snapshot": {"procurement_stage_template_id": json["stage_template_id"], "stage_name": "招标准备"},
+                "current_stage_snapshot": {
+                    "procurement_stage_template_id": json["stage_template_id"],
+                    "stage_name": "招标准备",
+                },
             }
         if method == "POST" and path == "/v1/payments/contracts/201/payment-plans":
             return [{"id": 301, "contract_id": 201, **json["plans"][0]}]
@@ -151,13 +161,15 @@ class FakeCRMAPIClient:
 
 class EmptyCustomerSearchCRMAPIClient(FakeCRMAPIClient):
     async def request(self, method, path, authorization, *, params=None, json=None, idempotency_key=None):
-        self.calls.append({
-            "method": method,
-            "path": path,
-            "authorization": authorization,
-            "params": params,
-            "json": json,
-        })
+        self.calls.append(
+            {
+                "method": method,
+                "path": path,
+                "authorization": authorization,
+                "params": params,
+                "json": json,
+            }
+        )
         if method == "GET" and path == "/v1/customers/":
             return {"items": [], "total": 0}
         return await super().request(
@@ -176,13 +188,15 @@ class ExactCustomerSearchCRMAPIClient(FakeCRMAPIClient):
         self.item = item
 
     async def request(self, method, path, authorization, *, params=None, json=None, idempotency_key=None):
-        self.calls.append({
-            "method": method,
-            "path": path,
-            "authorization": authorization,
-            "params": params,
-            "json": json,
-        })
+        self.calls.append(
+            {
+                "method": method,
+                "path": path,
+                "authorization": authorization,
+                "params": params,
+                "json": json,
+            }
+        )
         if method == "GET" and path == "/v1/customers/":
             return {"items": [self.item], "total": 1}
         return await super().request(
@@ -220,14 +234,16 @@ class FakeCustomerQdrantIndexService:
         source_types=None,
         business_object_type=None,
     ):
-        self.team_queries.append({
-            "query_vector": query_vector,
-            "tenant_id": tenant_id,
-            "team_id": team_id,
-            "limit": limit,
-            "source_types": source_types,
-            "business_object_type": business_object_type,
-        })
+        self.team_queries.append(
+            {
+                "query_vector": query_vector,
+                "tenant_id": tenant_id,
+                "team_id": team_id,
+                "limit": limit,
+                "source_types": source_types,
+                "business_object_type": business_object_type,
+            }
+        )
         return self.results
 
 
@@ -265,7 +281,6 @@ def _db_session(extra_tables=None):
     tables = [
         AgentSession.__table__,
         AgentMessage.__table__,
-        AgentTask.__table__,
         AgentToolCall.__table__,
         AgentIdempotencyKey.__table__,
     ]
@@ -299,9 +314,10 @@ def _context(db):
 
 def _confirmed_context(db):
     context = _context(db)
-    context.task_id = 99
     context.confirmed_by_user = True
     context.hitl_decision = "approve"
+    context.workflow_id = "wf_test_confirmed_write"
+    context.action_id = "act_test_confirmed_write"
     context.allowed_tool_names = ["create_customer_activity"]
     context.allowed_customer_ids = [CUSTOMER_PUBLIC_ID]
     return context
@@ -309,9 +325,10 @@ def _confirmed_context(db):
 
 def _confirmed_context_for(db, tool_name, customer_id=CUSTOMER_PUBLIC_ID):
     context = _context(db)
-    context.task_id = 99
     context.confirmed_by_user = True
     context.hitl_decision = "approve"
+    context.workflow_id = f"wf_test_{tool_name}"
+    context.action_id = f"act_test_{tool_name}"
     context.allowed_tool_names = [tool_name]
     context.allowed_customer_ids = [customer_id]
     return context
@@ -364,26 +381,30 @@ def _sales_commitment_tables():
 
 
 def _seed_follow_up_task_customer(db, *, customer_owner_id="2", add_member=False):
-    db.add(Customer(
-        id=101,
-        public_id=CUSTOMER_PUBLIC_ID,
-        team_id=1,
-        account_name="越秀金融",
-        city="广州",
-        owner_id=customer_owner_id,
-        creator_id=customer_owner_id,
-    ))
-    if add_member:
-        db.add(CustomerMember(
-            id=201,
+    db.add(
+        Customer(
+            id=101,
+            public_id=CUSTOMER_PUBLIC_ID,
             team_id=1,
-            customer_id=101,
-            user_id="2",
-            member_role="PRESALES",
-            access_level="FOLLOW_UP",
-            created_by="9",
-            is_active=True,
-        ))
+            account_name="越秀金融",
+            city="广州",
+            owner_id=customer_owner_id,
+            creator_id=customer_owner_id,
+        )
+    )
+    if add_member:
+        db.add(
+            CustomerMember(
+                id=201,
+                team_id=1,
+                customer_id=101,
+                user_id="2",
+                member_role="PRESALES",
+                access_level="FOLLOW_UP",
+                created_by="9",
+                is_active=True,
+            )
+        )
     db.flush()
 
 
@@ -473,13 +494,15 @@ async def test_agent_tool_search_customers_calls_existing_api_and_audits():
 
         assert result.success is True
         assert result.data["total"] == 1
-        assert fake_client.calls == [{
-            "method": "GET",
-            "path": "/v1/customers/",
-            "authorization": "Bearer test-token",
-            "params": {"keyword": "越秀金融", "limit": 5, "scope": "accessible"},
-            "json": None,
-        }]
+        assert fake_client.calls == [
+            {
+                "method": "GET",
+                "path": "/v1/customers/",
+                "authorization": "Bearer test-token",
+                "params": {"keyword": "越秀金融", "limit": 5, "scope": "accessible"},
+                "json": None,
+            }
+        ]
 
         tool_call = db.query(AgentToolCall).one()
         assert tool_call.tool_name == "search_customers"
@@ -491,32 +514,36 @@ async def test_agent_tool_search_customers_calls_existing_api_and_audits():
 
 @pytest.mark.asyncio
 async def test_agent_tool_search_customers_uses_customer_knowledge_when_keyword_misses():
-    engine, db = _db_session([
-        User.__table__,
-        Role.__table__,
-        Permission.__table__,
-        RolePermission.__table__,
-        UserRole.__table__,
-        Customer.__table__,
-        CustomerMember.__table__,
-    ])
+    engine, db = _db_session(
+        [
+            User.__table__,
+            Role.__table__,
+            Permission.__table__,
+            RolePermission.__table__,
+            UserRole.__table__,
+            Customer.__table__,
+            CustomerMember.__table__,
+        ]
+    )
     fake_client = EmptyCustomerSearchCRMAPIClient()
     embedding_service = FakeCustomerEmbeddingService()
-    qdrant_service = FakeCustomerQdrantIndexService([
-        CustomerEvidenceSearchResult(
-            id="evidence-1",
-            score=0.88,
-            tenant_id=1,
-            team_id=1,
-            customer_id=501,
-            source_type="customer_brief",
-            source_object_id="brief_501",
-            business_object_type=None,
-            business_object_id=None,
-            title="客户概况",
-            text="中国科学院信息工程研究所，简称中科院信工所。",
-        )
-    ])
+    qdrant_service = FakeCustomerQdrantIndexService(
+        [
+            CustomerEvidenceSearchResult(
+                id="evidence-1",
+                score=0.88,
+                tenant_id=1,
+                team_id=1,
+                customer_id=501,
+                source_type="customer_brief",
+                source_object_id="brief_501",
+                business_object_type=None,
+                business_object_id=None,
+                title="客户概况",
+                text="中国科学院信息工程研究所，简称中科院信工所。",
+            )
+        ]
+    )
     service = CRMAgentToolService(
         api_client=fake_client,
         knowledge_candidate_service=CustomerKnowledgeCandidateService(
@@ -526,14 +553,16 @@ async def test_agent_tool_search_customers_uses_customer_knowledge_when_keyword_
     )
     try:
         _grant_permissions(db, user_id=2, team_id=1, permission_codes=["customer:view:all"])
-        db.add(Customer(
-            id=501,
-            team_id=1,
-            account_name="中国科学院信息工程研究所",
-            city="北京",
-            status=0,
-            creator_id="2",
-        ))
+        db.add(
+            Customer(
+                id=501,
+                team_id=1,
+                account_name="中国科学院信息工程研究所",
+                city="北京",
+                status=0,
+                creator_id="2",
+            )
+        )
         db.commit()
 
         result = await service.search_customers(_context(db), "中科院", limit=5)
@@ -554,15 +583,17 @@ async def test_agent_tool_search_customers_uses_customer_knowledge_when_keyword_
 
 @pytest.mark.asyncio
 async def test_agent_tool_search_customers_keeps_weak_semantic_hits_out_of_identity_candidates():
-    engine, db = _db_session([
-        User.__table__,
-        Role.__table__,
-        Permission.__table__,
-        RolePermission.__table__,
-        UserRole.__table__,
-        Customer.__table__,
-        CustomerMember.__table__,
-    ])
+    engine, db = _db_session(
+        [
+            User.__table__,
+            Role.__table__,
+            Permission.__table__,
+            RolePermission.__table__,
+            UserRole.__table__,
+            Customer.__table__,
+            CustomerMember.__table__,
+        ]
+    )
     exact_customer = {
         "id": "cus_exact",
         "account_name": "深圳矽递科技股份有限公司",
@@ -572,34 +603,36 @@ async def test_agent_tool_search_customers_keeps_weak_semantic_hits_out_of_ident
             "reason": "客户名称匹配",
         },
     }
-    qdrant_service = FakeCustomerQdrantIndexService([
-        CustomerEvidenceSearchResult(
-            id="evidence-401",
-            score=0.46,
-            tenant_id=1,
-            team_id=1,
-            customer_id=401,
-            source_type="follow_up",
-            source_object_id="activity_401",
-            business_object_type=None,
-            business_object_id=None,
-            title="跟进记录",
-            text="采购续订、ERP、供应商入库等流程相关描述。",
-        ),
-        CustomerEvidenceSearchResult(
-            id="evidence-402",
-            score=0.45,
-            tenant_id=1,
-            team_id=1,
-            customer_id=402,
-            source_type="customer_brief",
-            source_object_id="brief_402",
-            business_object_type=None,
-            business_object_id=None,
-            title="客户概况",
-            text="技术侧提单和续订采购相关。",
-        ),
-    ])
+    qdrant_service = FakeCustomerQdrantIndexService(
+        [
+            CustomerEvidenceSearchResult(
+                id="evidence-401",
+                score=0.46,
+                tenant_id=1,
+                team_id=1,
+                customer_id=401,
+                source_type="follow_up",
+                source_object_id="activity_401",
+                business_object_type=None,
+                business_object_id=None,
+                title="跟进记录",
+                text="采购续订、ERP、供应商入库等流程相关描述。",
+            ),
+            CustomerEvidenceSearchResult(
+                id="evidence-402",
+                score=0.45,
+                tenant_id=1,
+                team_id=1,
+                customer_id=402,
+                source_type="customer_brief",
+                source_object_id="brief_402",
+                business_object_type=None,
+                business_object_id=None,
+                title="客户概况",
+                text="技术侧提单和续订采购相关。",
+            ),
+        ]
+    )
     service = CRMAgentToolService(
         api_client=ExactCustomerSearchCRMAPIClient(exact_customer),
         knowledge_candidate_service=CustomerKnowledgeCandidateService(
@@ -609,26 +642,28 @@ async def test_agent_tool_search_customers_keeps_weak_semantic_hits_out_of_ident
     )
     try:
         _grant_permissions(db, user_id=2, team_id=1, permission_codes=["customer:view:all"])
-        db.add_all([
-            Customer(
-                id=401,
-                public_id="cus_noise_1",
-                team_id=1,
-                account_name="中国科学院信息工程研究所",
-                city="北京",
-                status=0,
-                creator_id="2",
-            ),
-            Customer(
-                id=402,
-                public_id="cus_noise_2",
-                team_id=1,
-                account_name="广州凡亚信息科技有限公司",
-                city="广州",
-                status=0,
-                creator_id="2",
-            ),
-        ])
+        db.add_all(
+            [
+                Customer(
+                    id=401,
+                    public_id="cus_noise_1",
+                    team_id=1,
+                    account_name="中国科学院信息工程研究所",
+                    city="北京",
+                    status=0,
+                    creator_id="2",
+                ),
+                Customer(
+                    id=402,
+                    public_id="cus_noise_2",
+                    team_id=1,
+                    account_name="广州凡亚信息科技有限公司",
+                    city="广州",
+                    status=0,
+                    creator_id="2",
+                ),
+            ]
+        )
         db.commit()
 
         result = await service.search_customers(_context(db), "矽递科技", limit=10)
@@ -650,30 +685,34 @@ async def test_agent_tool_search_customers_keeps_weak_semantic_hits_out_of_ident
 
 @pytest.mark.asyncio
 async def test_agent_tool_search_customers_does_not_promote_low_score_semantic_hits():
-    engine, db = _db_session([
-        User.__table__,
-        Role.__table__,
-        Permission.__table__,
-        RolePermission.__table__,
-        UserRole.__table__,
-        Customer.__table__,
-        CustomerMember.__table__,
-    ])
-    qdrant_service = FakeCustomerQdrantIndexService([
-        CustomerEvidenceSearchResult(
-            id="evidence-403",
-            score=0.45,
-            tenant_id=1,
-            team_id=1,
-            customer_id=403,
-            source_type="follow_up",
-            source_object_id="activity_403",
-            business_object_type=None,
-            business_object_id=None,
-            title="跟进记录",
-            text="续订采购流程相关，但没有客户身份文本。",
-        )
-    ])
+    engine, db = _db_session(
+        [
+            User.__table__,
+            Role.__table__,
+            Permission.__table__,
+            RolePermission.__table__,
+            UserRole.__table__,
+            Customer.__table__,
+            CustomerMember.__table__,
+        ]
+    )
+    qdrant_service = FakeCustomerQdrantIndexService(
+        [
+            CustomerEvidenceSearchResult(
+                id="evidence-403",
+                score=0.45,
+                tenant_id=1,
+                team_id=1,
+                customer_id=403,
+                source_type="follow_up",
+                source_object_id="activity_403",
+                business_object_type=None,
+                business_object_id=None,
+                title="跟进记录",
+                text="续订采购流程相关，但没有客户身份文本。",
+            )
+        ]
+    )
     service = CRMAgentToolService(
         api_client=EmptyCustomerSearchCRMAPIClient(),
         knowledge_candidate_service=CustomerKnowledgeCandidateService(
@@ -683,15 +722,17 @@ async def test_agent_tool_search_customers_does_not_promote_low_score_semantic_h
     )
     try:
         _grant_permissions(db, user_id=2, team_id=1, permission_codes=["customer:view:all"])
-        db.add(Customer(
-            id=403,
-            public_id="cus_low_score",
-            team_id=1,
-            account_name="上海叠纸互娱网络科技有限公司",
-            city="上海",
-            status=0,
-            creator_id="2",
-        ))
+        db.add(
+            Customer(
+                id=403,
+                public_id="cus_low_score",
+                team_id=1,
+                account_name="上海叠纸互娱网络科技有限公司",
+                city="上海",
+                status=0,
+                creator_id="2",
+            )
+        )
         db.commit()
 
         result = await service.search_customers(_context(db), "矽递科技", limit=10)
@@ -707,30 +748,34 @@ async def test_agent_tool_search_customers_does_not_promote_low_score_semantic_h
 
 @pytest.mark.asyncio
 async def test_agent_tool_search_customers_does_not_promote_medium_semantic_hits_to_identity():
-    engine, db = _db_session([
-        User.__table__,
-        Role.__table__,
-        Permission.__table__,
-        RolePermission.__table__,
-        UserRole.__table__,
-        Customer.__table__,
-        CustomerMember.__table__,
-    ])
-    qdrant_service = FakeCustomerQdrantIndexService([
-        CustomerEvidenceSearchResult(
-            id="evidence-404",
-            score=0.7,
-            tenant_id=1,
-            team_id=1,
-            customer_id=404,
-            source_type="follow_up",
-            source_object_id="activity_404",
-            business_object_type=None,
-            business_object_id=None,
-            title="跟进记录",
-            text="内容语义相关，但没有客户名称身份证据。",
-        )
-    ])
+    engine, db = _db_session(
+        [
+            User.__table__,
+            Role.__table__,
+            Permission.__table__,
+            RolePermission.__table__,
+            UserRole.__table__,
+            Customer.__table__,
+            CustomerMember.__table__,
+        ]
+    )
+    qdrant_service = FakeCustomerQdrantIndexService(
+        [
+            CustomerEvidenceSearchResult(
+                id="evidence-404",
+                score=0.7,
+                tenant_id=1,
+                team_id=1,
+                customer_id=404,
+                source_type="follow_up",
+                source_object_id="activity_404",
+                business_object_type=None,
+                business_object_id=None,
+                title="跟进记录",
+                text="内容语义相关，但没有客户名称身份证据。",
+            )
+        ]
+    )
     service = CRMAgentToolService(
         api_client=EmptyCustomerSearchCRMAPIClient(),
         knowledge_candidate_service=CustomerKnowledgeCandidateService(
@@ -740,15 +785,17 @@ async def test_agent_tool_search_customers_does_not_promote_medium_semantic_hits
     )
     try:
         _grant_permissions(db, user_id=2, team_id=1, permission_codes=["customer:view:all"])
-        db.add(Customer(
-            id=404,
-            public_id="cus_medium_score",
-            team_id=1,
-            account_name="上海叠纸互娱网络科技有限公司",
-            city="上海",
-            status=0,
-            creator_id="2",
-        ))
+        db.add(
+            Customer(
+                id=404,
+                public_id="cus_medium_score",
+                team_id=1,
+                account_name="上海叠纸互娱网络科技有限公司",
+                city="上海",
+                status=0,
+                creator_id="2",
+            )
+        )
         db.commit()
 
         result = await service.search_customers(_context(db), "矽递科技", limit=10)
@@ -764,30 +811,34 @@ async def test_agent_tool_search_customers_does_not_promote_medium_semantic_hits
 
 @pytest.mark.asyncio
 async def test_agent_tool_search_customers_filters_semantic_hits_by_customer_permission():
-    engine, db = _db_session([
-        User.__table__,
-        Role.__table__,
-        Permission.__table__,
-        RolePermission.__table__,
-        UserRole.__table__,
-        Customer.__table__,
-        CustomerMember.__table__,
-    ])
-    qdrant_service = FakeCustomerQdrantIndexService([
-        CustomerEvidenceSearchResult(
-            id="evidence-1",
-            score=0.93,
-            tenant_id=1,
-            team_id=1,
-            customer_id=502,
-            source_type="follow_up",
-            source_object_id="activity_502",
-            business_object_type=None,
-            business_object_id=None,
-            title="跟进记录",
-            text="客户内部简称中科院。",
-        )
-    ])
+    engine, db = _db_session(
+        [
+            User.__table__,
+            Role.__table__,
+            Permission.__table__,
+            RolePermission.__table__,
+            UserRole.__table__,
+            Customer.__table__,
+            CustomerMember.__table__,
+        ]
+    )
+    qdrant_service = FakeCustomerQdrantIndexService(
+        [
+            CustomerEvidenceSearchResult(
+                id="evidence-1",
+                score=0.93,
+                tenant_id=1,
+                team_id=1,
+                customer_id=502,
+                source_type="follow_up",
+                source_object_id="activity_502",
+                business_object_type=None,
+                business_object_id=None,
+                title="跟进记录",
+                text="客户内部简称中科院。",
+            )
+        ]
+    )
     service = CRMAgentToolService(
         api_client=EmptyCustomerSearchCRMAPIClient(),
         knowledge_candidate_service=CustomerKnowledgeCandidateService(
@@ -797,15 +848,17 @@ async def test_agent_tool_search_customers_filters_semantic_hits_by_customer_per
     )
     try:
         _grant_permissions(db, user_id=2, team_id=1, permission_codes=["customer:view:own"])
-        db.add(Customer(
-            id=502,
-            team_id=1,
-            account_name="中国科学院信息工程研究所",
-            city="北京",
-            status=0,
-            owner_id="9",
-            creator_id="9",
-        ))
+        db.add(
+            Customer(
+                id=502,
+                team_id=1,
+                account_name="中国科学院信息工程研究所",
+                city="北京",
+                status=0,
+                owner_id="9",
+                creator_id="9",
+            )
+        )
         db.commit()
 
         result = await service.search_customers(_context(db), "中科院", limit=5)
@@ -820,32 +873,36 @@ async def test_agent_tool_search_customers_filters_semantic_hits_by_customer_per
 
 @pytest.mark.asyncio
 async def test_agent_tool_search_customers_uses_customer_alias_fact_when_keyword_misses():
-    engine, db = _db_session([
-        User.__table__,
-        Role.__table__,
-        Permission.__table__,
-        RolePermission.__table__,
-        UserRole.__table__,
-        Customer.__table__,
-        CustomerMember.__table__,
-        CustomerFact.__table__,
-        CustomerFactSource.__table__,
-        CustomerFactRevision.__table__,
-    ])
+    engine, db = _db_session(
+        [
+            User.__table__,
+            Role.__table__,
+            Permission.__table__,
+            RolePermission.__table__,
+            UserRole.__table__,
+            Customer.__table__,
+            CustomerMember.__table__,
+            CustomerFact.__table__,
+            CustomerFactSource.__table__,
+            CustomerFactRevision.__table__,
+        ]
+    )
     service = CRMAgentToolService(
         api_client=EmptyCustomerSearchCRMAPIClient(),
         knowledge_candidate_service=DisabledCustomerKnowledgeCandidateService(),
     )
     try:
         _grant_permissions(db, user_id=2, team_id=1, permission_codes=["customer:view:all"])
-        db.add(Customer(
-            id=601,
-            team_id=1,
-            account_name="中国科学院信息工程研究所",
-            city="北京",
-            status=0,
-            creator_id="2",
-        ))
+        db.add(
+            Customer(
+                id=601,
+                team_id=1,
+                account_name="中国科学院信息工程研究所",
+                city="北京",
+                status=0,
+                creator_id="2",
+            )
+        )
         db.flush()
         customer_fact_service.upsert_fact(
             db,
@@ -876,33 +933,37 @@ async def test_agent_tool_search_customers_uses_customer_alias_fact_when_keyword
 
 @pytest.mark.asyncio
 async def test_agent_tool_search_customers_filters_alias_matches_by_customer_permission():
-    engine, db = _db_session([
-        User.__table__,
-        Role.__table__,
-        Permission.__table__,
-        RolePermission.__table__,
-        UserRole.__table__,
-        Customer.__table__,
-        CustomerMember.__table__,
-        CustomerFact.__table__,
-        CustomerFactSource.__table__,
-        CustomerFactRevision.__table__,
-    ])
+    engine, db = _db_session(
+        [
+            User.__table__,
+            Role.__table__,
+            Permission.__table__,
+            RolePermission.__table__,
+            UserRole.__table__,
+            Customer.__table__,
+            CustomerMember.__table__,
+            CustomerFact.__table__,
+            CustomerFactSource.__table__,
+            CustomerFactRevision.__table__,
+        ]
+    )
     service = CRMAgentToolService(
         api_client=EmptyCustomerSearchCRMAPIClient(),
         knowledge_candidate_service=DisabledCustomerKnowledgeCandidateService(),
     )
     try:
         _grant_permissions(db, user_id=2, team_id=1, permission_codes=["customer:view:own"])
-        db.add(Customer(
-            id=602,
-            team_id=1,
-            account_name="中国科学院信息工程研究所",
-            city="北京",
-            status=0,
-            owner_id="9",
-            creator_id="9",
-        ))
+        db.add(
+            Customer(
+                id=602,
+                team_id=1,
+                account_name="中国科学院信息工程研究所",
+                city="北京",
+                status=0,
+                owner_id="9",
+                creator_id="9",
+            )
+        )
         db.flush()
         customer_fact_service.upsert_fact(
             db,
@@ -930,29 +991,33 @@ async def test_agent_tool_search_customers_filters_alias_matches_by_customer_per
 
 @pytest.mark.asyncio
 async def test_agent_tool_search_customers_uses_generated_customer_name_alias_when_keyword_misses():
-    engine, db = _db_session([
-        User.__table__,
-        Role.__table__,
-        Permission.__table__,
-        RolePermission.__table__,
-        UserRole.__table__,
-        Customer.__table__,
-        CustomerMember.__table__,
-    ])
+    engine, db = _db_session(
+        [
+            User.__table__,
+            Role.__table__,
+            Permission.__table__,
+            RolePermission.__table__,
+            UserRole.__table__,
+            Customer.__table__,
+            CustomerMember.__table__,
+        ]
+    )
     service = CRMAgentToolService(
         api_client=EmptyCustomerSearchCRMAPIClient(),
         knowledge_candidate_service=DisabledCustomerKnowledgeCandidateService(),
     )
     try:
         _grant_permissions(db, user_id=2, team_id=1, permission_codes=["customer:view:all"])
-        db.add(Customer(
-            id=603,
-            team_id=1,
-            account_name="中国科学院信息工程研究所",
-            city="北京",
-            status=0,
-            creator_id="2",
-        ))
+        db.add(
+            Customer(
+                id=603,
+                team_id=1,
+                account_name="中国科学院信息工程研究所",
+                city="北京",
+                status=0,
+                creator_id="2",
+            )
+        )
         db.commit()
 
         result = await service.search_customers(_context(db), "中科院信工所", limit=5)
@@ -967,20 +1032,14 @@ async def test_agent_tool_search_customers_uses_generated_customer_name_alias_wh
 
 
 def test_generated_identity_terms_include_parenthetical_company_short_name():
-    terms = {
-        term
-        for term, _term_type in generated_identity_terms_for_customer_name("华米（北京）信息科技有限公司")
-    }
+    terms = {term for term, _term_type in generated_identity_terms_for_customer_name("华米（北京）信息科技有限公司")}
 
     assert "华米科技" in terms
     assert "华米信息科技" in terms
 
 
 def test_generated_identity_terms_include_institution_short_names():
-    terms = {
-        term
-        for term, _term_type in generated_identity_terms_for_customer_name("中国科学院信息工程研究所")
-    }
+    terms = {term for term, _term_type in generated_identity_terms_for_customer_name("中国科学院信息工程研究所")}
 
     assert "中科院" in terms
     assert "信工所" in terms
@@ -990,30 +1049,31 @@ def test_generated_identity_terms_include_institution_short_names():
 def test_customer_identity_rebuild_persists_generated_terms():
     from app.services.customer_identity_resolution_service import CustomerIdentityResolutionService
 
-    engine, db = _db_session([
-        Customer.__table__,
-        CustomerIdentityTerm.__table__,
-    ])
+    engine, db = _db_session(
+        [
+            Customer.__table__,
+            CustomerIdentityTerm.__table__,
+        ]
+    )
     service = CustomerIdentityResolutionService()
     try:
-        db.add(Customer(
-            id=607,
-            team_id=1,
-            account_name="华米（北京）信息科技有限公司",
-            city="北京",
-            status=0,
-            creator_id="2",
-        ))
+        db.add(
+            Customer(
+                id=607,
+                team_id=1,
+                account_name="华米（北京）信息科技有限公司",
+                city="北京",
+                status=0,
+                creator_id="2",
+            )
+        )
         db.commit()
 
         created = service.rebuild_customer_identity_terms(db, team_id=1, customer_id=607)
         db.commit()
 
         terms = {
-            row.term
-            for row in db.query(CustomerIdentityTerm)
-            .filter(CustomerIdentityTerm.customer_id == 607)
-            .all()
+            row.term for row in db.query(CustomerIdentityTerm).filter(CustomerIdentityTerm.customer_id == 607).all()
         }
         assert created > 0
         assert "华米科技" in terms
@@ -1024,33 +1084,37 @@ def test_customer_identity_rebuild_persists_generated_terms():
 
 @pytest.mark.asyncio
 async def test_agent_tool_search_customers_resolves_parenthetical_company_short_name():
-    engine, db = _db_session([
-        User.__table__,
-        Role.__table__,
-        Permission.__table__,
-        RolePermission.__table__,
-        UserRole.__table__,
-        Customer.__table__,
-        CustomerMember.__table__,
-        CustomerFact.__table__,
-        CustomerFactSource.__table__,
-        CustomerFactRevision.__table__,
-        CustomerIdentityTerm.__table__,
-    ])
+    engine, db = _db_session(
+        [
+            User.__table__,
+            Role.__table__,
+            Permission.__table__,
+            RolePermission.__table__,
+            UserRole.__table__,
+            Customer.__table__,
+            CustomerMember.__table__,
+            CustomerFact.__table__,
+            CustomerFactSource.__table__,
+            CustomerFactRevision.__table__,
+            CustomerIdentityTerm.__table__,
+        ]
+    )
     service = CRMAgentToolService(
         api_client=EmptyCustomerSearchCRMAPIClient(),
         knowledge_candidate_service=DisabledCustomerKnowledgeCandidateService(),
     )
     try:
         _grant_permissions(db, user_id=2, team_id=1, permission_codes=["customer:view:all"])
-        db.add(Customer(
-            id=604,
-            team_id=1,
-            account_name="华米（北京）信息科技有限公司",
-            city="北京",
-            status=0,
-            creator_id="2",
-        ))
+        db.add(
+            Customer(
+                id=604,
+                team_id=1,
+                account_name="华米（北京）信息科技有限公司",
+                city="北京",
+                status=0,
+                creator_id="2",
+            )
+        )
         db.commit()
 
         result = await service.search_customers(_context(db), "华米科技", limit=5)
@@ -1067,16 +1131,18 @@ async def test_agent_tool_search_customers_resolves_parenthetical_company_short_
 
 @pytest.mark.asyncio
 async def test_agent_tool_search_customers_uses_persisted_identity_term():
-    engine, db = _db_session([
-        User.__table__,
-        Role.__table__,
-        Permission.__table__,
-        RolePermission.__table__,
-        UserRole.__table__,
-        Customer.__table__,
-        CustomerMember.__table__,
-        CustomerIdentityTerm.__table__,
-    ])
+    engine, db = _db_session(
+        [
+            User.__table__,
+            Role.__table__,
+            Permission.__table__,
+            RolePermission.__table__,
+            UserRole.__table__,
+            Customer.__table__,
+            CustomerMember.__table__,
+            CustomerIdentityTerm.__table__,
+        ]
+    )
     from app.services.customer_identity_resolution_service import CustomerIdentityResolutionService
 
     service = CRMAgentToolService(
@@ -1086,14 +1152,16 @@ async def test_agent_tool_search_customers_uses_persisted_identity_term():
     )
     try:
         _grant_permissions(db, user_id=2, team_id=1, permission_codes=["customer:view:all"])
-        db.add(Customer(
-            id=608,
-            team_id=1,
-            account_name="华米（北京）信息科技有限公司",
-            city="北京",
-            status=0,
-            creator_id="2",
-        ))
+        db.add(
+            Customer(
+                id=608,
+                team_id=1,
+                account_name="华米（北京）信息科技有限公司",
+                city="北京",
+                status=0,
+                creator_id="2",
+            )
+        )
         db.commit()
         service.identity_resolution_service.rebuild_customer_identity_terms(db, team_id=1, customer_id=608)
         db.commit()
@@ -1111,16 +1179,18 @@ async def test_agent_tool_search_customers_uses_persisted_identity_term():
 
 @pytest.mark.asyncio
 async def test_agent_tool_search_customers_uses_persisted_institution_identity_terms():
-    engine, db = _db_session([
-        User.__table__,
-        Role.__table__,
-        Permission.__table__,
-        RolePermission.__table__,
-        UserRole.__table__,
-        Customer.__table__,
-        CustomerMember.__table__,
-        CustomerIdentityTerm.__table__,
-    ])
+    engine, db = _db_session(
+        [
+            User.__table__,
+            Role.__table__,
+            Permission.__table__,
+            RolePermission.__table__,
+            UserRole.__table__,
+            Customer.__table__,
+            CustomerMember.__table__,
+            CustomerIdentityTerm.__table__,
+        ]
+    )
     from app.services.customer_identity_resolution_service import CustomerIdentityResolutionService
 
     service = CRMAgentToolService(
@@ -1130,14 +1200,16 @@ async def test_agent_tool_search_customers_uses_persisted_institution_identity_t
     )
     try:
         _grant_permissions(db, user_id=2, team_id=1, permission_codes=["customer:view:all"])
-        db.add(Customer(
-            id=610,
-            team_id=1,
-            account_name="中国科学院信息工程研究所",
-            city="北京",
-            status=0,
-            creator_id="2",
-        ))
+        db.add(
+            Customer(
+                id=610,
+                team_id=1,
+                account_name="中国科学院信息工程研究所",
+                city="北京",
+                status=0,
+                creator_id="2",
+            )
+        )
         db.commit()
         service.identity_resolution_service.rebuild_customer_identity_terms(db, team_id=1, customer_id=610)
         db.commit()
@@ -1156,16 +1228,18 @@ async def test_agent_tool_search_customers_uses_persisted_institution_identity_t
 
 @pytest.mark.asyncio
 async def test_agent_tool_search_customers_resolves_short_core_customer_name():
-    engine, db = _db_session([
-        User.__table__,
-        Role.__table__,
-        Permission.__table__,
-        RolePermission.__table__,
-        UserRole.__table__,
-        Customer.__table__,
-        CustomerMember.__table__,
-        CustomerIdentityTerm.__table__,
-    ])
+    engine, db = _db_session(
+        [
+            User.__table__,
+            Role.__table__,
+            Permission.__table__,
+            RolePermission.__table__,
+            UserRole.__table__,
+            Customer.__table__,
+            CustomerMember.__table__,
+            CustomerIdentityTerm.__table__,
+        ]
+    )
     from app.services.customer_identity_resolution_service import CustomerIdentityResolutionService
 
     service = CRMAgentToolService(
@@ -1175,14 +1249,16 @@ async def test_agent_tool_search_customers_resolves_short_core_customer_name():
     )
     try:
         _grant_permissions(db, user_id=2, team_id=1, permission_codes=["customer:view:all"])
-        db.add(Customer(
-            id=609,
-            team_id=1,
-            account_name="华米（北京）信息科技有限公司",
-            city="北京",
-            status=0,
-            creator_id="2",
-        ))
+        db.add(
+            Customer(
+                id=609,
+                team_id=1,
+                account_name="华米（北京）信息科技有限公司",
+                city="北京",
+                status=0,
+                creator_id="2",
+            )
+        )
         db.commit()
         service.identity_resolution_service.rebuild_customer_identity_terms(db, team_id=1, customer_id=609)
         db.commit()
@@ -1201,40 +1277,44 @@ async def test_agent_tool_search_customers_resolves_short_core_customer_name():
 
 @pytest.mark.asyncio
 async def test_agent_tool_search_customers_marks_close_identity_matches_ambiguous():
-    engine, db = _db_session([
-        User.__table__,
-        Role.__table__,
-        Permission.__table__,
-        RolePermission.__table__,
-        UserRole.__table__,
-        Customer.__table__,
-        CustomerMember.__table__,
-        CustomerIdentityTerm.__table__,
-    ])
+    engine, db = _db_session(
+        [
+            User.__table__,
+            Role.__table__,
+            Permission.__table__,
+            RolePermission.__table__,
+            UserRole.__table__,
+            Customer.__table__,
+            CustomerMember.__table__,
+            CustomerIdentityTerm.__table__,
+        ]
+    )
     service = CRMAgentToolService(
         api_client=EmptyCustomerSearchCRMAPIClient(),
         knowledge_candidate_service=DisabledCustomerKnowledgeCandidateService(),
     )
     try:
         _grant_permissions(db, user_id=2, team_id=1, permission_codes=["customer:view:all"])
-        db.add_all([
-            Customer(
-                id=605,
-                team_id=1,
-                account_name="华米（北京）信息科技有限公司",
-                city="北京",
-                status=0,
-                creator_id="2",
-            ),
-            Customer(
-                id=606,
-                team_id=1,
-                account_name="华米科技股份有限公司",
-                city="合肥",
-                status=0,
-                creator_id="2",
-            ),
-        ])
+        db.add_all(
+            [
+                Customer(
+                    id=605,
+                    team_id=1,
+                    account_name="华米（北京）信息科技有限公司",
+                    city="北京",
+                    status=0,
+                    creator_id="2",
+                ),
+                Customer(
+                    id=606,
+                    team_id=1,
+                    account_name="华米科技股份有限公司",
+                    city="合肥",
+                    status=0,
+                    creator_id="2",
+                ),
+            ]
+        )
         db.commit()
 
         result = await service.search_customers(_context(db), "华米科技", limit=5)
@@ -1253,28 +1333,32 @@ async def test_agent_tool_search_customers_marks_close_identity_matches_ambiguou
 
 @pytest.mark.asyncio
 async def test_agent_tool_search_creation_duplicates_returns_visible_customer_name_without_api_call():
-    engine, db = _db_session([
-        User.__table__,
-        Role.__table__,
-        Permission.__table__,
-        RolePermission.__table__,
-        UserRole.__table__,
-        Customer.__table__,
-        CustomerMember.__table__,
-    ])
+    engine, db = _db_session(
+        [
+            User.__table__,
+            Role.__table__,
+            Permission.__table__,
+            RolePermission.__table__,
+            UserRole.__table__,
+            Customer.__table__,
+            CustomerMember.__table__,
+        ]
+    )
     fake_client = FakeCRMAPIClient()
     service = CRMAgentToolService(api_client=fake_client)
     try:
         _grant_permissions(db, user_id=2, team_id=1, permission_codes=["customer:view:own"])
-        db.add(Customer(
-            id=101,
-            public_id=CUSTOMER_PUBLIC_ID,
-            team_id=1,
-            account_name="东风康明斯发动机有限公司",
-            city="襄阳",
-            owner_id="2",
-            creator_id="2",
-        ))
+        db.add(
+            Customer(
+                id=101,
+                public_id=CUSTOMER_PUBLIC_ID,
+                team_id=1,
+                account_name="东风康明斯发动机有限公司",
+                city="襄阳",
+                owner_id="2",
+                creator_id="2",
+            )
+        )
         db.commit()
 
         result = await service.search_creation_duplicates(
@@ -1285,11 +1369,13 @@ async def test_agent_tool_search_creation_duplicates_returns_visible_customer_na
         )
 
         assert result.success is True
-        assert result.data["customers"] == [{
-            "id": CUSTOMER_PUBLIC_ID,
-            "account_name": "东风康明斯发动机有限公司",
-            "visible": True,
-        }]
+        assert result.data["customers"] == [
+            {
+                "id": CUSTOMER_PUBLIC_ID,
+                "account_name": "东风康明斯发动机有限公司",
+                "visible": True,
+            }
+        ]
         assert result.data["hidden_customer_count"] == 0
         assert fake_client.calls == []
         assert db.query(AgentToolCall).one().tool_name == "search_creation_duplicates"
@@ -1300,27 +1386,31 @@ async def test_agent_tool_search_creation_duplicates_returns_visible_customer_na
 
 @pytest.mark.asyncio
 async def test_agent_tool_search_creation_duplicates_hides_team_customer_without_view_access():
-    engine, db = _db_session([
-        User.__table__,
-        Role.__table__,
-        Permission.__table__,
-        RolePermission.__table__,
-        UserRole.__table__,
-        Customer.__table__,
-        CustomerMember.__table__,
-    ])
+    engine, db = _db_session(
+        [
+            User.__table__,
+            Role.__table__,
+            Permission.__table__,
+            RolePermission.__table__,
+            UserRole.__table__,
+            Customer.__table__,
+            CustomerMember.__table__,
+        ]
+    )
     fake_client = FakeCRMAPIClient()
     service = CRMAgentToolService(api_client=fake_client)
     try:
         _grant_permissions(db, user_id=2, team_id=1, permission_codes=["customer:view:own"])
-        db.add(Customer(
-            id=101,
-            team_id=1,
-            account_name="东风康明斯发动机有限公司",
-            city="襄阳",
-            owner_id="9",
-            creator_id="9",
-        ))
+        db.add(
+            Customer(
+                id=101,
+                team_id=1,
+                account_name="东风康明斯发动机有限公司",
+                city="襄阳",
+                owner_id="9",
+                creator_id="9",
+            )
+        )
         db.commit()
 
         result = await service.search_creation_duplicates(
@@ -1342,31 +1432,35 @@ async def test_agent_tool_search_creation_duplicates_hides_team_customer_without
 
 @pytest.mark.asyncio
 async def test_agent_tool_search_creation_duplicates_matches_visible_lead_by_keyword():
-    engine, db = _db_session([
-        User.__table__,
-        Role.__table__,
-        Permission.__table__,
-        RolePermission.__table__,
-        UserRole.__table__,
-        Lead.__table__,
-    ])
+    engine, db = _db_session(
+        [
+            User.__table__,
+            Role.__table__,
+            Permission.__table__,
+            RolePermission.__table__,
+            UserRole.__table__,
+            Lead.__table__,
+        ]
+    )
     fake_client = FakeCRMAPIClient()
     service = CRMAgentToolService(api_client=fake_client)
     try:
         _grant_permissions(db, user_id=2, team_id=1, permission_codes=["lead:view:own"])
-        db.add(Lead(
-            id=201,
-            public_id=LEAD_PUBLIC_ID,
-            team_id=1,
-            lead_name="湖北康明斯项目",
-            source=LeadSource.OTHER,
-            city="襄阳",
-            contact_name="赵坤",
-            contact_phone="18707276297",
-            owner_id="2",
-            creator_id="2",
-            status=LeadStatus.NEW,
-        ))
+        db.add(
+            Lead(
+                id=201,
+                public_id=LEAD_PUBLIC_ID,
+                team_id=1,
+                lead_name="湖北康明斯项目",
+                source=LeadSource.OTHER,
+                city="襄阳",
+                contact_name="赵坤",
+                contact_phone="18707276297",
+                owner_id="2",
+                creator_id="2",
+                status=LeadStatus.NEW,
+            )
+        )
         db.commit()
 
         result = await service.search_creation_duplicates(
@@ -1377,13 +1471,15 @@ async def test_agent_tool_search_creation_duplicates_matches_visible_lead_by_key
         )
 
         assert result.success is True
-        assert result.data["leads"] == [{
-            "id": LEAD_PUBLIC_ID,
-            "lead_name": "湖北康明斯项目",
-            "contact_name": "赵坤",
-            "contact_phone": "18707276297",
-            "visible": True,
-        }]
+        assert result.data["leads"] == [
+            {
+                "id": LEAD_PUBLIC_ID,
+                "lead_name": "湖北康明斯项目",
+                "contact_name": "赵坤",
+                "contact_phone": "18707276297",
+                "visible": True,
+            }
+        ]
         assert result.data["hidden_lead_count"] == 0
         assert fake_client.calls == []
     finally:
@@ -1393,44 +1489,48 @@ async def test_agent_tool_search_creation_duplicates_matches_visible_lead_by_key
 
 @pytest.mark.asyncio
 async def test_agent_tool_search_creation_duplicates_ignores_converted_and_invalid_leads():
-    engine, db = _db_session([
-        User.__table__,
-        Role.__table__,
-        Permission.__table__,
-        RolePermission.__table__,
-        UserRole.__table__,
-        Lead.__table__,
-    ])
+    engine, db = _db_session(
+        [
+            User.__table__,
+            Role.__table__,
+            Permission.__table__,
+            RolePermission.__table__,
+            UserRole.__table__,
+            Lead.__table__,
+        ]
+    )
     fake_client = FakeCRMAPIClient()
     service = CRMAgentToolService(api_client=fake_client)
     try:
         _grant_permissions(db, user_id=2, team_id=1, permission_codes=["lead:view:all"])
-        db.add_all([
-            Lead(
-                id=201,
-                team_id=1,
-                lead_name="东风康明斯",
-                source=LeadSource.OTHER,
-                city="襄阳",
-                contact_name="赵坤",
-                contact_phone="18707276297",
-                owner_id="2",
-                creator_id="2",
-                status=LeadStatus.CONVERTED,
-            ),
-            Lead(
-                id=202,
-                team_id=1,
-                lead_name="湖北康明斯",
-                source=LeadSource.OTHER,
-                city="襄阳",
-                contact_name="赵坤",
-                contact_phone="18707276297",
-                owner_id="2",
-                creator_id="2",
-                status=LeadStatus.INVALID,
-            ),
-        ])
+        db.add_all(
+            [
+                Lead(
+                    id=201,
+                    team_id=1,
+                    lead_name="东风康明斯",
+                    source=LeadSource.OTHER,
+                    city="襄阳",
+                    contact_name="赵坤",
+                    contact_phone="18707276297",
+                    owner_id="2",
+                    creator_id="2",
+                    status=LeadStatus.CONVERTED,
+                ),
+                Lead(
+                    id=202,
+                    team_id=1,
+                    lead_name="湖北康明斯",
+                    source=LeadSource.OTHER,
+                    city="襄阳",
+                    contact_name="赵坤",
+                    contact_phone="18707276297",
+                    owner_id="2",
+                    creator_id="2",
+                    status=LeadStatus.INVALID,
+                ),
+            ]
+        )
         db.commit()
 
         result = await service.search_creation_duplicates(
@@ -1455,15 +1555,17 @@ async def test_agent_tool_get_customer_context_fetches_opportunities_through_api
     fake_client = FakeCRMAPIClient()
     service = CRMAgentToolService(api_client=fake_client)
     try:
-        db.add(Customer(
-            id=101,
-            public_id=CUSTOMER_PUBLIC_ID,
-            team_id=1,
-            account_name="越秀金融",
-            city="广州",
-            owner_id="2",
-            creator_id="2",
-        ))
+        db.add(
+            Customer(
+                id=101,
+                public_id=CUSTOMER_PUBLIC_ID,
+                team_id=1,
+                account_name="越秀金融",
+                city="广州",
+                owner_id="2",
+                creator_id="2",
+            )
+        )
         db.commit()
 
         result = await service.get_customer_context(_context(db), CUSTOMER_PUBLIC_ID)
@@ -1641,50 +1743,52 @@ async def test_agent_tool_list_follow_up_tasks_uses_semantic_evidence_as_filtere
     budget_task_id = "fut_00000000000000000000000000001021"
     completed_task_id = "fut_00000000000000000000000000001022"
     other_owner_task_id = "fut_00000000000000000000000000001023"
-    qdrant_service = FakeCustomerQdrantIndexService([
-        CustomerEvidenceSearchResult(
-            id="task-hit-budget",
-            score=0.91,
-            tenant_id=1,
-            team_id=1,
-            customer_id=101,
-            source_type="follow_up_task",
-            source_object_id=budget_task_id,
-            business_object_type="follow_up_task",
-            business_object_id=budget_task_id,
-            title="跟进任务: 回访预算",
-            text="客户说本周确认预算，需要周五回访预算进展。",
-            metadata_json={"task_public_id": budget_task_id, "status": FollowUpTaskStatus.OPEN},
-        ),
-        CustomerEvidenceSearchResult(
-            id="task-hit-completed",
-            score=0.89,
-            tenant_id=1,
-            team_id=1,
-            customer_id=101,
-            source_type="follow_up_task",
-            source_object_id=completed_task_id,
-            business_object_type="follow_up_task",
-            business_object_id=completed_task_id,
-            title="跟进任务: 已完成预算确认",
-            text="客户预算已经确认。",
-            metadata_json={"task_public_id": completed_task_id, "status": FollowUpTaskStatus.OPEN},
-        ),
-        CustomerEvidenceSearchResult(
-            id="task-hit-other-owner",
-            score=0.87,
-            tenant_id=1,
-            team_id=1,
-            customer_id=101,
-            source_type="follow_up_task",
-            source_object_id=other_owner_task_id,
-            business_object_type="follow_up_task",
-            business_object_id=other_owner_task_id,
-            title="跟进任务: 其他人的预算任务",
-            text="售前需要确认预算技术口径。",
-            metadata_json={"task_public_id": other_owner_task_id, "status": FollowUpTaskStatus.OPEN},
-        ),
-    ])
+    qdrant_service = FakeCustomerQdrantIndexService(
+        [
+            CustomerEvidenceSearchResult(
+                id="task-hit-budget",
+                score=0.91,
+                tenant_id=1,
+                team_id=1,
+                customer_id=101,
+                source_type="follow_up_task",
+                source_object_id=budget_task_id,
+                business_object_type="follow_up_task",
+                business_object_id=budget_task_id,
+                title="跟进任务: 回访预算",
+                text="客户说本周确认预算，需要周五回访预算进展。",
+                metadata_json={"task_public_id": budget_task_id, "status": FollowUpTaskStatus.OPEN},
+            ),
+            CustomerEvidenceSearchResult(
+                id="task-hit-completed",
+                score=0.89,
+                tenant_id=1,
+                team_id=1,
+                customer_id=101,
+                source_type="follow_up_task",
+                source_object_id=completed_task_id,
+                business_object_type="follow_up_task",
+                business_object_id=completed_task_id,
+                title="跟进任务: 已完成预算确认",
+                text="客户预算已经确认。",
+                metadata_json={"task_public_id": completed_task_id, "status": FollowUpTaskStatus.OPEN},
+            ),
+            CustomerEvidenceSearchResult(
+                id="task-hit-other-owner",
+                score=0.87,
+                tenant_id=1,
+                team_id=1,
+                customer_id=101,
+                source_type="follow_up_task",
+                source_object_id=other_owner_task_id,
+                business_object_type="follow_up_task",
+                business_object_id=other_owner_task_id,
+                title="跟进任务: 其他人的预算任务",
+                text="售前需要确认预算技术口径。",
+                metadata_json={"task_public_id": other_owner_task_id, "status": FollowUpTaskStatus.OPEN},
+            ),
+        ]
+    )
     embedding_service = FakeCustomerEmbeddingService()
     service = CRMAgentToolService(
         api_client=FakeCRMAPIClient(),
@@ -1747,22 +1851,24 @@ async def test_agent_tool_list_follow_up_tasks_maps_commitment_semantic_hit_back
     engine, db = _db_session(_sales_commitment_tables())
     commitment_public_id = "scm_00000000000000000000000000003021"
     task_public_id = "fut_00000000000000000000000000003021"
-    qdrant_service = FakeCustomerQdrantIndexService([
-        CustomerEvidenceSearchResult(
-            id="commitment-hit-budget",
-            score=0.92,
-            tenant_id=1,
-            team_id=1,
-            customer_id=101,
-            source_type="sales_commitment",
-            source_object_id=commitment_public_id,
-            business_object_type="sales_commitment",
-            business_object_id=commitment_public_id,
-            title="销售承诺: 下周确认预算",
-            text="承诺下周三回访客户预算进展。",
-            metadata_json={"commitment_public_id": commitment_public_id, "status": "OPEN"},
-        )
-    ])
+    qdrant_service = FakeCustomerQdrantIndexService(
+        [
+            CustomerEvidenceSearchResult(
+                id="commitment-hit-budget",
+                score=0.92,
+                tenant_id=1,
+                team_id=1,
+                customer_id=101,
+                source_type="sales_commitment",
+                source_object_id=commitment_public_id,
+                business_object_type="sales_commitment",
+                business_object_id=commitment_public_id,
+                title="销售承诺: 下周确认预算",
+                text="承诺下周三回访客户预算进展。",
+                metadata_json={"commitment_public_id": commitment_public_id, "status": "OPEN"},
+            )
+        ]
+    )
     service = CRMAgentToolService(
         api_client=FakeCRMAPIClient(),
         follow_up_query_service=FollowUpTaskQueryService(
@@ -1818,22 +1924,24 @@ async def test_agent_tool_list_follow_up_tasks_maps_commitment_semantic_hit_back
 async def test_agent_tool_registry_accepts_follow_up_task_query_text():
     engine, db = _db_session(_sales_commitment_tables())
     task_public_id = "fut_00000000000000000000000000001031"
-    qdrant_service = FakeCustomerQdrantIndexService([
-        CustomerEvidenceSearchResult(
-            id="task-hit-trial",
-            score=0.9,
-            tenant_id=1,
-            team_id=1,
-            customer_id=101,
-            source_type="follow_up_task",
-            source_object_id=task_public_id,
-            business_object_type="follow_up_task",
-            business_object_id=task_public_id,
-            title="跟进任务: 试用反馈",
-            text="客户周五反馈试用体验。",
-            metadata_json={"task_public_id": task_public_id, "status": FollowUpTaskStatus.OPEN},
-        )
-    ])
+    qdrant_service = FakeCustomerQdrantIndexService(
+        [
+            CustomerEvidenceSearchResult(
+                id="task-hit-trial",
+                score=0.9,
+                tenant_id=1,
+                team_id=1,
+                customer_id=101,
+                source_type="follow_up_task",
+                source_object_id=task_public_id,
+                business_object_type="follow_up_task",
+                business_object_id=task_public_id,
+                title="跟进任务: 试用反馈",
+                text="客户周五反馈试用体验。",
+                metadata_json={"task_public_id": task_public_id, "status": FollowUpTaskStatus.OPEN},
+            )
+        ]
+    )
     service = CRMAgentToolService(
         api_client=FakeCRMAPIClient(),
         follow_up_query_service=FollowUpTaskQueryService(
@@ -1909,20 +2017,22 @@ async def test_agent_tool_get_follow_up_task_detail_uses_public_id_and_hides_int
     service = CRMAgentToolService(api_client=FakeCRMAPIClient())
     try:
         _seed_follow_up_task_customer(db)
-        db.add(CustomerActivity(
-            id=301,
-            team_id=1,
-            customer_id=101,
-            activity_kind="PHONE_FOLLOW_UP",
-            title="电话沟通预算",
-            source_content="客户说本周看预算，周五再联系",
-            summary="客户还在确认预算",
-            next_action="周五回访预算进展",
-            next_follow_time=datetime(2026, 8, 7, 9, 30, 0),
-            occurred_at=datetime(2026, 8, 6, 9, 0, 0),
-            owner_id="2",
-            creator_id="2",
-        ))
+        db.add(
+            CustomerActivity(
+                id=301,
+                team_id=1,
+                customer_id=101,
+                activity_kind="PHONE_FOLLOW_UP",
+                title="电话沟通预算",
+                source_content="客户说本周看预算，周五再联系",
+                summary="客户还在确认预算",
+                next_action="周五回访预算进展",
+                next_follow_time=datetime(2026, 8, 7, 9, 30, 0),
+                occurred_at=datetime(2026, 8, 6, 9, 0, 0),
+                owner_id="2",
+                creator_id="2",
+            )
+        )
         task = _seed_follow_up_task(
             db,
             task_id=1006,
@@ -1963,32 +2073,34 @@ async def test_agent_tool_list_completed_work_returns_completed_tasks_and_activi
             due_at=datetime(2026, 8, 5, 9, 30, 0),
             completed_at=datetime(2026, 8, 5, 17, 0, 0),
         )
-        db.add_all([
-            CustomerActivity(
-                id=302,
-                team_id=1,
-                customer_id=101,
-                activity_kind="WECHAT_FOLLOW_UP",
-                title="微信同步试用",
-                source_content="客户认可试用方案",
-                summary="客户认可试用方案",
-                occurred_at=datetime(2026, 8, 6, 9, 0, 0),
-                owner_id="2",
-                creator_id="2",
-            ),
-            CustomerActivity(
-                id=303,
-                team_id=1,
-                customer_id=101,
-                activity_kind="PHONE_FOLLOW_UP",
-                title="其他人的跟进",
-                source_content="其他销售的记录",
-                summary="其他销售的记录",
-                occurred_at=datetime(2026, 8, 6, 9, 0, 0),
-                owner_id="9",
-                creator_id="9",
-            ),
-        ])
+        db.add_all(
+            [
+                CustomerActivity(
+                    id=302,
+                    team_id=1,
+                    customer_id=101,
+                    activity_kind="WECHAT_FOLLOW_UP",
+                    title="微信同步试用",
+                    source_content="客户认可试用方案",
+                    summary="客户认可试用方案",
+                    occurred_at=datetime(2026, 8, 6, 9, 0, 0),
+                    owner_id="2",
+                    creator_id="2",
+                ),
+                CustomerActivity(
+                    id=303,
+                    team_id=1,
+                    customer_id=101,
+                    activity_kind="PHONE_FOLLOW_UP",
+                    title="其他人的跟进",
+                    source_content="其他销售的记录",
+                    summary="其他销售的记录",
+                    occurred_at=datetime(2026, 8, 6, 9, 0, 0),
+                    owner_id="9",
+                    creator_id="9",
+                ),
+            ]
+        )
         db.commit()
 
         result = await service.list_completed_work(_context(db), window="this_week")
@@ -2017,7 +2129,6 @@ async def test_agent_tool_summarize_completed_work_returns_graph_outcome(monkeyp
 
     summary_graph = WorkSummaryGraphService(
         narrative_service=WorkSummaryNarrativeService(config_crud=MissingConfigCrud()),
-        checkpointer=None,
     )
     service = CRMAgentToolService(
         api_client=FakeCRMAPIClient(),
@@ -2054,6 +2165,7 @@ async def test_agent_tool_summarize_completed_work_returns_graph_outcome(monkeyp
         db.close()
         engine.dispose()
 
+
 @pytest.mark.asyncio
 async def test_agent_tool_summarize_completed_work_fetches_all_71_facts(monkeypatch):
     fixed_now = datetime(2026, 8, 20, 17, 0, 0)
@@ -2069,7 +2181,6 @@ async def test_agent_tool_summarize_completed_work_fetches_all_71_facts(monkeypa
 
     summary_graph = WorkSummaryGraphService(
         narrative_service=WorkSummaryNarrativeService(config_crud=MissingConfigCrud()),
-        checkpointer=None,
     )
     service = CRMAgentToolService(
         api_client=FakeCRMAPIClient(),
@@ -2077,21 +2188,23 @@ async def test_agent_tool_summarize_completed_work_fetches_all_71_facts(monkeypa
     )
     try:
         _seed_follow_up_task_customer(db)
-        db.add_all([
-            CustomerActivity(
-                id=1000 + index,
-                team_id=1,
-                customer_id=101,
-                activity_kind="WECHAT_FOLLOW_UP",
-                title=f"上周客户沟通 {index}",
-                source_content=f"完成第 {index} 条客户沟通",
-                summary=f"完成第 {index} 条客户沟通",
-                occurred_at=datetime(2026, 8, 10 + (index % 7), 9, index % 60, 0),
-                owner_id="2",
-                creator_id="2",
-            )
-            for index in range(71)
-        ])
+        db.add_all(
+            [
+                CustomerActivity(
+                    id=1000 + index,
+                    team_id=1,
+                    customer_id=101,
+                    activity_kind="WECHAT_FOLLOW_UP",
+                    title=f"上周客户沟通 {index}",
+                    source_content=f"完成第 {index} 条客户沟通",
+                    summary=f"完成第 {index} 条客户沟通",
+                    occurred_at=datetime(2026, 8, 10 + (index % 7), 9, index % 60, 0),
+                    owner_id="2",
+                    creator_id="2",
+                )
+                for index in range(71)
+            ]
+        )
         db.commit()
 
         result = await service.summarize_completed_work(
@@ -2364,24 +2477,26 @@ async def test_agent_tool_move_opportunity_stage_calls_existing_api():
     fake_client = FakeCRMAPIClient()
     service = CRMAgentToolService(api_client=fake_client)
     try:
-        db.add(Opportunity(
-            id=7101,
-            public_id=OPPORTUNITY_PUBLIC_ID,
-            team_id=1,
-            opportunity_number="OPP-7101",
-            opportunity_name="越秀金融扩容",
-            customer_id=101,
-            total_amount=100000,
-            user_count=100,
-            unit_price=1000,
-            license_type="SUBSCRIPTION",
-            subscription_years=1,
-            purchase_type="NEW",
-            expected_closing_date=date(2026, 8, 31),
-            win_probability=20,
-            owner_id="2",
-            creator_id="2",
-        ))
+        db.add(
+            Opportunity(
+                id=7101,
+                public_id=OPPORTUNITY_PUBLIC_ID,
+                team_id=1,
+                opportunity_number="OPP-7101",
+                opportunity_name="越秀金融扩容",
+                customer_id=101,
+                total_amount=100000,
+                user_count=100,
+                unit_price=1000,
+                license_type="SUBSCRIPTION",
+                subscription_years=1,
+                purchase_type="NEW",
+                expected_closing_date=date(2026, 8, 31),
+                win_probability=20,
+                owner_id="2",
+                creator_id="2",
+            )
+        )
         db.commit()
 
         result = await service.move_opportunity_stage(
@@ -2543,14 +2658,16 @@ async def test_agent_tool_fails_closed_for_previously_dispatched_write():
         "next_action": None,
         "next_follow_time": None,
     }
-    db.add(AgentIdempotencyKey(
-        team_id=1,
-        user_id=2,
-        session_id=3,
-        action_key="create_customer_activity:3:msg-dispatched",
-        status=AgentIdempotencyStatus.DISPATCHED,
-        request_hash=service._hash_json(payload),
-    ))
+    db.add(
+        AgentIdempotencyKey(
+            team_id=1,
+            user_id=2,
+            session_id=3,
+            action_key="create_customer_activity:3:msg-dispatched",
+            status=AgentIdempotencyStatus.DISPATCHED,
+            request_hash=service._hash_json(payload),
+        )
+    )
     db.commit()
     try:
         result = await service.create_customer_activity(
@@ -2597,20 +2714,22 @@ async def test_agent_tool_create_lead_calls_existing_lead_api():
         )
 
         assert result.success is True
-        assert fake_client.calls == [{
-            "method": "POST",
-            "path": "/v1/leads/",
-            "authorization": "Bearer test-token",
-            "params": None,
-            "json": {
-                "lead_name": "广州睿狐科技",
-                "source_public_id": sources["OTHER"].public_id,
-                "city": "广州",
-                "contact_name": "王总",
-                "contact_phone": "13800138000",
-                "company_scale": "51-200人",
-            },
-        }]
+        assert fake_client.calls == [
+            {
+                "method": "POST",
+                "path": "/v1/leads/",
+                "authorization": "Bearer test-token",
+                "params": None,
+                "json": {
+                    "lead_name": "广州睿狐科技",
+                    "source_public_id": sources["OTHER"].public_id,
+                    "city": "广州",
+                    "contact_name": "王总",
+                    "contact_phone": "13800138000",
+                    "company_scale": "51-200人",
+                },
+            }
+        ]
         assert db.query(AgentToolCall).one().tool_name == "create_lead"
     finally:
         db.close()
@@ -2821,19 +2940,21 @@ async def test_agent_tool_create_deployment_info_calls_existing_api():
 
         assert result.success is True
         assert result.data["id"] == 6101
-        assert fake_client.calls == [{
-            "method": "POST",
-            "path": "/v1/deployment-infos/",
-            "authorization": "Bearer test-token",
-            "params": None,
-            "json": {
-                "customer_id": CUSTOMER_PUBLIC_ID,
-                "deployment_name": "生产环境",
-                "server_address": "https://crm.example.com",
-                "authorized_users": 100,
-                "is_default": True,
-            },
-        }]
+        assert fake_client.calls == [
+            {
+                "method": "POST",
+                "path": "/v1/deployment-infos/",
+                "authorization": "Bearer test-token",
+                "params": None,
+                "json": {
+                    "customer_id": CUSTOMER_PUBLIC_ID,
+                    "deployment_name": "生产环境",
+                    "server_address": "https://crm.example.com",
+                    "authorized_users": 100,
+                    "is_default": True,
+                },
+            }
+        ]
         assert db.query(AgentToolCall).one().tool_name == "create_deployment_info"
     finally:
         db.close()
@@ -3006,17 +3127,19 @@ async def test_agent_tool_create_customer_member_calls_existing_api():
 
         assert result.success is True
         assert result.data["id"] == 6201
-        assert fake_client.calls == [{
-            "method": "POST",
-            "path": f"/v1/customers/{CUSTOMER_PUBLIC_ID}/members",
-            "authorization": "Bearer test-token",
-            "params": None,
-            "json": {
-                "user_id": "9",
-                "member_role": "PRESALES",
-                "access_level": "FOLLOW_UP",
-            },
-        }]
+        assert fake_client.calls == [
+            {
+                "method": "POST",
+                "path": f"/v1/customers/{CUSTOMER_PUBLIC_ID}/members",
+                "authorization": "Bearer test-token",
+                "params": None,
+                "json": {
+                    "user_id": "9",
+                    "member_role": "PRESALES",
+                    "access_level": "FOLLOW_UP",
+                },
+            }
+        ]
         assert db.query(AgentToolCall).one().tool_name == "create_customer_member"
     finally:
         db.close()
@@ -3027,7 +3150,10 @@ async def test_agent_tool_create_customer_member_calls_existing_api():
 async def test_agent_tool_registry_exposes_langchain_structured_tools():
     engine, db = _db_session()
     fake_client = FakeCRMAPIClient()
-    service = CRMAgentToolService(api_client=fake_client)
+    service = CRMAgentToolService(
+        api_client=fake_client,
+        knowledge_candidate_service=DisabledCustomerKnowledgeCandidateService(),
+    )
     registry = AgentToolRegistry(tool_service=service)
     try:
         tools = {tool.name: tool for tool in registry.to_langchain_tools(_context(db))}
@@ -3074,10 +3200,14 @@ async def test_agent_tool_registry_blocks_write_without_hitl_confirmation():
     try:
         with pytest.raises(Exception) as exc_info:
             await registry.execute(
-            "create_customer_activity",
-            _context(db),
-            {"customer_id": CUSTOMER_PUBLIC_ID, "activity_kind": "OTHER_FOLLOW_UP", "source_content": "客户项目还在评估"},
-        )
+                "create_customer_activity",
+                _context(db),
+                {
+                    "customer_id": CUSTOMER_PUBLIC_ID,
+                    "activity_kind": "OTHER_FOLLOW_UP",
+                    "source_content": "客户项目还在评估",
+                },
+            )
 
         assert "HITL approve" in str(exc_info.value)
         assert fake_client.calls == []
@@ -3096,7 +3226,11 @@ async def test_agent_tool_registry_allows_confirmed_write():
         result = await registry.execute(
             "create_customer_activity",
             _confirmed_context(db),
-            {"customer_id": CUSTOMER_PUBLIC_ID, "activity_kind": "OTHER_FOLLOW_UP", "source_content": "客户项目还在评估"},
+            {
+                "customer_id": CUSTOMER_PUBLIC_ID,
+                "activity_kind": "OTHER_FOLLOW_UP",
+                "source_content": "客户项目还在评估",
+            },
         )
 
         assert result.success is True
@@ -3104,9 +3238,3 @@ async def test_agent_tool_registry_allows_confirmed_write():
     finally:
         db.close()
         engine.dispose()
-
-
-def test_agent_langchain_hitl_middleware_is_built_from_write_tools():
-    middleware = build_langchain_hitl_middleware()
-
-    assert middleware

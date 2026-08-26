@@ -1,315 +1,249 @@
-import request from "@/utils/request"
-import type { PaginatedResponse } from "@/types/pagination"
+import { z } from 'zod'
 
-/* eslint-disable crmwolf/require-zod-schema */
+import {
+  AgentChatRequestSchema,
+  AgentTransportErrorEventSchema,
+  AgentUIEnvelopeSchema,
+  AgentUIStreamEventSchema,
+  JsonObjectSchema,
+  type AgentChatRequest,
+  type AgentTransportErrorEvent,
+  type AgentUIEnvelope,
+  type AgentUIStreamEvent
+} from '@/schemas/agent-contracts'
+import type { PaginatedResponse } from '@/types/pagination'
+import request from '@/utils/request'
 
-export type AgentEventType =
-  | "session"
-  | "message"
-  | "agent_step"
-  | "intent"
-  | "semantic_parsed"
-  | "follow_up_quality_evaluated"
-  | "follow_up_quality_required"
-  | "follow_up_quality_completed"
-  | "follow_up_quality_failed"
-  | "entity_parse"
-  | "tool_result"
-  | "customer_candidates"
-  | "business_context_loaded"
-  | "business_suggestions"
-  | "suggestion_failed"
-  | "suspended_tasks_loaded"
-  | "turn_relation_classified"
-  | "turn_relation_clarification_required"
-  | "suspended_task_resumed"
-  | "confirmation_required"
-  | "customer_selection_required"
-  | "customer_selected"
-  | "customer_selection_failed"
-  | "opportunity_fields_required"
-  | "opportunity_fields_completed"
-  | "contact_fields_required"
-  | "contact_fields_completed"
-  | "invoice_title_fields_required"
-  | "invoice_title_fields_completed"
-  | "deployment_info_fields_required"
-  | "deployment_info_fields_completed"
-  | "customer_member_fields_required"
-  | "customer_member_fields_completed"
-  | "payment_fields_required"
-  | "payment_fields_completed"
-  | "business_selection_required"
-  | "business_selected"
-  | "business_selection_failed"
-  | "action_review_started"
-  | "action_review_risk_classified"
-  | "action_review_confidence_scored"
-  | "action_review_decided"
-  | "action_review_finished"
-  | "action_auto_execution_queued"
-  | "agent_root_customer_intelligence_refresh_scheduled"
-  | "agent_root_customer_intelligence_refresh_schedule_failed"
-  | "pending_interruption_confirmation_required"
-  | "pending_task_interrupted"
-  | "task_completed"
-  | "task_failed"
-  | "task_cancelled"
-  | "final"
-  | "done"
-  | "error"
+const AgentSessionResponseSchema = z.object({
+  id: z.number().int().positive(),
+  session_key: z.string().min(1),
+  team_id: z.number().int().positive(),
+  user_id: z.number().int().positive(),
+  title: z.string().nullable().optional(),
+  status: z.string().min(1),
+  summary: z.string().nullable().optional(),
+  context_json: JsonObjectSchema.nullable().optional(),
+  created_time: z.string().min(1),
+  last_modified_time: z.string().min(1)
+}).strict()
 
-export type AgentContentFormat = "text" | "markdown"
+const AgentAsyncOperationStatusSchema = z.enum([
+  'QUEUED',
+  'RUNNING',
+  'WAITING_USER',
+  'RETRY_SCHEDULED',
+  'SUCCEEDED',
+  'DEGRADED',
+  'FAILED',
+  'CANCELLED'
+])
 
-export type AgentAsyncOperationStatus =
-  | "QUEUED"
-  | "RUNNING"
-  | "WAITING_USER"
-  | "RETRY_SCHEDULED"
-  | "SUCCEEDED"
-  | "DEGRADED"
-  | "FAILED"
-  | "CANCELLED"
+const AgentAsyncOperationEventSchema = z.object({
+  sequence: z.number().int(),
+  event_type: z.string(),
+  status: z.string(),
+  event_key: z.string(),
+  step: z.string().nullable().optional(),
+  message: z.string().nullable().optional(),
+  payload: JsonObjectSchema,
+  occurred_at: z.string().min(1)
+}).strict()
 
-export interface AgentAsyncOperationEvent {
-  sequence: number
-  event_type: string
-  status: AgentAsyncOperationStatus | string
-  event_key: string
-  step?: string | null
-  message?: string | null
-  payload: Record<string, unknown>
-  occurred_at: string
+const AgentAsyncOperationSchema = z.object({
+  public_id: z.string().min(1),
+  request_id: z.string().min(1),
+  team_id: z.number().int().positive(),
+  user_id: z.number().int().positive(),
+  session_id: z.number().int().positive().nullable().optional(),
+  source_user_message_id: z.number().int().positive().nullable().optional(),
+  source_assistant_message_id: z.number().int().positive().nullable().optional(),
+  operation_type: z.string().min(1),
+  resource_type: z.string().min(1),
+  resource_id: z.number().int().nullable().optional(),
+  resource_public_id: z.string().nullable().optional(),
+  status: AgentAsyncOperationStatusSchema,
+  summary: z.string().nullable().optional(),
+  current_step: z.string().nullable().optional(),
+  graph_thread_id: z.string().nullable().optional(),
+  result: JsonObjectSchema,
+  error_message: z.string().nullable().optional(),
+  started_time: z.string().nullable().optional(),
+  finished_time: z.string().nullable().optional(),
+  next_retry_at: z.string().nullable().optional(),
+  attempt_count: z.number().int().nonnegative(),
+  created_time: z.string().min(1),
+  updated_time: z.string().min(1),
+  events: z.array(AgentAsyncOperationEventSchema)
+}).strict()
+
+const AgentSessionPageSchema = paginatedSchema(AgentSessionResponseSchema)
+const AgentMessagePageSchema = paginatedSchema(AgentUIEnvelopeSchema)
+const AgentAsyncOperationListSchema = z.array(AgentAsyncOperationSchema)
+
+const AgentSessionStreamEventSchema = z.object({
+  event: z.literal('session'),
+  session_id: z.number().int().positive(),
+  session_key: z.string().min(1).max(64)
+}).strict()
+
+const AgentDoneStreamEventSchema = z.object({
+  event: z.literal('done'),
+  session_id: z.number().int().positive()
+}).strict()
+
+const AgentStreamEventSchema = z.union([
+  AgentSessionStreamEventSchema,
+  AgentUIStreamEventSchema,
+  AgentTransportErrorEventSchema,
+  AgentDoneStreamEventSchema
+])
+
+export type AgentSessionResponse = z.infer<typeof AgentSessionResponseSchema>
+export type AgentAsyncOperationStatus = z.infer<typeof AgentAsyncOperationStatusSchema>
+export type AgentAsyncOperationEvent = z.infer<typeof AgentAsyncOperationEventSchema>
+export type AgentAsyncOperation = z.infer<typeof AgentAsyncOperationSchema>
+export type AgentSessionStreamEvent = z.infer<typeof AgentSessionStreamEventSchema>
+export type AgentDoneStreamEvent = z.infer<typeof AgentDoneStreamEventSchema>
+export type AgentStreamEvent = z.infer<typeof AgentStreamEventSchema>
+export type {
+  AgentChatRequest,
+  AgentTransportErrorEvent,
+  AgentUIEnvelope,
+  AgentUIStreamEvent
 }
 
-export interface AgentAsyncOperation {
-  public_id: string
-  request_id: string
-  team_id: number
-  user_id: number
-  session_id?: number | null
-  source_user_message_id?: number | null
-  source_assistant_message_id?: number | null
-  operation_type: string
-  resource_type: string
-  resource_id?: number | null
-  resource_public_id?: string | null
-  status: AgentAsyncOperationStatus
-  summary?: string | null
-  current_step?: string | null
-  graph_thread_id?: string | null
-  result: Record<string, unknown>
-  error_message?: string | null
-  started_time?: string | null
-  finished_time?: string | null
-  next_retry_at?: string | null
-  attempt_count: number
-  created_time: string
-  updated_time: string
-  events: AgentAsyncOperationEvent[]
+export class AgentProtocolError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'AgentProtocolError'
+  }
 }
 
-export interface AgentChatRequest {
-  content: string
-  session_id?: number
-  session_key?: string
-  interaction_metadata?: Record<string, unknown>
+function paginatedSchema<T extends z.ZodTypeAny>(itemSchema: T): z.ZodObject<{
+  items: z.ZodArray<T>
+  total: z.ZodNumber
+  page: z.ZodNumber
+  page_size: z.ZodNumber
+  total_pages: z.ZodNumber
+}> {
+  return z.object({
+    items: z.array(itemSchema),
+    total: z.number().int().nonnegative(),
+    page: z.number().int().positive(),
+    page_size: z.number().int().positive(),
+    total_pages: z.number().int().nonnegative()
+  }).strict()
 }
 
-export interface AgentSessionResponse {
-  id: number
-  session_key: string
-  title?: string | null
-  status: string
-  summary?: string | null
-  created_time: string
-  last_modified_time: string
+function parseAgentStreamEvent(payload: string): AgentStreamEvent {
+  let decoded: unknown
+  try {
+    decoded = JSON.parse(payload)
+  } catch (error) {
+    throw new AgentProtocolError(`Agent stream contains invalid JSON: ${error instanceof Error ? error.message : String(error)}`)
+  }
+
+  const parsed = AgentStreamEventSchema.safeParse(decoded)
+  if (!parsed.success) {
+    throw new AgentProtocolError(`Agent stream event does not match crm.agent.ui.v1: ${parsed.error.message}`)
+  }
+  return parsed.data
 }
 
-export interface AgentLinkedFollowUpTaskConfirmation {
-  case_public_id: string
-  task_public_id: string
-  task_title: string
-  customer_name?: string | null
-  due_at?: string | null
-  task_status: string
-  confirmation_status: string
-  resolved_action?: string | null
-  resolved_at?: string | null
-  completed_at?: string | null
-}
-
-export interface AgentMessageResponse {
-  id: number
-  role: "user" | "assistant" | "system" | string
-  event_type?: string | null
-  content?: string | null
-  payload_json?: Record<string, unknown> | null
-  linked_follow_up_task_confirmations?: AgentLinkedFollowUpTaskConfirmation[]
-  created_time: string
-}
-
-export interface AgentChatSSEEvent {
-  event: AgentEventType
-  content?: string
-  content_format?: AgentContentFormat | string
-  message?: string
-  role?: "user" | "assistant" | "system" | string
-  session_id?: number
-  session_key?: string
-  message_id?: number
-  task_id?: number
-  task_key?: string
-  intent?: string
-  technical_intent?: string
-  intent_label?: string
-  confidence?: number
-  execution_confidence?: number
-  risk_level?: "low" | "medium" | "high" | string
-  decision?: "auto_execute" | "require_confirmation" | "require_fields" | "require_choice" | "block" | string
-  reason?: string
-  source_event?: string
-  step?: string
-  status?: "started" | "completed" | string
-  parse_source?: string | null
-  model?: string | null
-  fallback_reason?: string | null
-  fallback_error?: string | null
-  fallback_error_message?: string | null
-  structured_output_strategy?: string | null
-  score?: number
-  passed?: boolean
-  quality_source?: string | null
-  missing_aspects?: string[]
-  action?: string
-  tool_name?: string
-  success?: boolean
-  customers?: Record<string, unknown>[]
-  customer?: Record<string, unknown>
-  parsed?: Record<string, unknown>
-  summary?: string
-  suggestions?: Record<string, unknown>[]
-  need_user_choice?: boolean
-  clarification_question?: string | null
-  suggestion_source?: string | null
-  payload?: Record<string, unknown>
-  interaction?: AgentInteraction
-  data?: unknown
-  error_message?: string | null
-  status_code?: number | null
-  request_id?: string
-  operation_public_id?: string
-  source_user_message_id?: number
-  event_key?: string
-  trigger_type?: string
-  customer_id?: number
-  scheduled?: boolean
-  mode?: string
-}
-
-export interface AgentInteractionChoice {
-  label: string
-  value: string
-  metadata?: Record<string, unknown>
-}
-
-export interface AgentInteractionField {
-  key: string
-  label: string
-  type: "text" | "number" | "date" | "select" | string
-  required?: boolean
-  placeholder?: string
-  default_value?: string | number | null
-  options?: AgentInteractionChoice[]
-}
-
-export interface AgentInteraction {
-  schema_version?: "agent.interaction.v1" | string
-  interaction_id?: string
-  task_id?: number | string
-  task_key?: string
-  type: "choice" | "form" | "text" | string
-  business_action?: string | null
-  status?: "waiting_user_input" | "waiting_confirmation" | "completed" | "cancelled" | "failed" | string
-  title?: string
-  prompt?: string
-  placeholder?: string
-  submit_label?: string
-  choices?: AgentInteractionChoice[]
-  fields?: AgentInteractionField[]
-  payload?: Record<string, unknown>
-  allow_free_text?: boolean
-  allow_cancel?: boolean
+function eventData(frame: string): string | null {
+  const dataLines = frame
+    .split(/\r?\n/)
+    .filter(line => line.startsWith('data:'))
+    .map(line => line.slice(5).trimStart())
+  return dataLines.length > 0 ? dataLines.join('\n') : null
 }
 
 export const agentApi = {
-  listSessions: (): Promise<PaginatedResponse<AgentSessionResponse>> => {
-    return request.get<PaginatedResponse<AgentSessionResponse>>("/v1/agent/sessions")
+  listSessions: async (): Promise<PaginatedResponse<AgentSessionResponse>> => {
+    return AgentSessionPageSchema.parse(await request.get<unknown>('/v1/agent/sessions'))
   },
 
-  listMessages: (sessionId: number, params?: { page?: number, page_size?: number }): Promise<PaginatedResponse<AgentMessageResponse>> => {
-    return request.get<PaginatedResponse<AgentMessageResponse>>(`/v1/agent/sessions/${sessionId}/messages`, { params })
+  listMessages: async (
+    sessionId: number,
+    params?: { page?: number, page_size?: number }
+  ): Promise<PaginatedResponse<AgentUIEnvelope>> => {
+    return AgentMessagePageSchema.parse(
+      await request.get<unknown>(`/v1/agent/sessions/${sessionId}/messages`, { params })
+    )
   },
 
-  listSessionOperations: (sessionId: number, params?: { limit?: number }): Promise<AgentAsyncOperation[]> => {
-    return request.get<AgentAsyncOperation[]>(`/v1/agent/sessions/${sessionId}/operations`, { params })
+  listSessionOperations: async (
+    sessionId: number,
+    params?: { limit?: number }
+  ): Promise<AgentAsyncOperation[]> => {
+    return AgentAsyncOperationListSchema.parse(
+      await request.get<unknown>(`/v1/agent/sessions/${sessionId}/operations`, { params })
+    )
   },
 
-  getOperation: (operationPublicId: string): Promise<AgentAsyncOperation> => {
-    return request.get<AgentAsyncOperation>(`/v1/agent/operations/${operationPublicId}`)
+  getOperation: async (operationPublicId: string): Promise<AgentAsyncOperation> => {
+    return AgentAsyncOperationSchema.parse(
+      await request.get<unknown>(`/v1/agent/operations/${operationPublicId}`)
+    )
   },
 
   chatStream: async (
     data: AgentChatRequest,
-    onEvent: (event: AgentChatSSEEvent) => void,
+    onEvent: (event: AgentStreamEvent) => void,
     token: string
   ): Promise<void> => {
-    const response = await fetch("/api/v1/agent/chat/stream", {
-      method: "POST",
+    const validatedRequest = AgentChatRequestSchema.parse(data)
+    const response = await fetch('/api/v1/agent/chat/stream', {
+      method: 'POST',
       headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
       },
-      body: JSON.stringify(data),
+      body: JSON.stringify(validatedRequest)
     })
 
     if (!response.ok) {
-      throw new Error(`HTTP error: ${response.status}`)
+      throw new Error(`Agent request failed with HTTP ${response.status}`)
     }
 
     const reader = response.body?.getReader()
-    if (!reader) {
-      throw new Error("No response body")
+    if (reader === undefined) {
+      throw new AgentProtocolError('Agent stream response has no body')
     }
 
     const decoder = new TextDecoder()
-    let buffer = ""
+    let buffer = ''
+    let completed = false
+    let transportErrorSeen = false
 
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-      const chunks = buffer.split("\n\n")
-      buffer = chunks.pop() ?? ""
-
-      for (const chunk of chunks) {
-        const dataLine = chunk
-          .split("\n")
-          .find(line => line.startsWith("data: "))
-
-        if (dataLine === undefined) continue
-
-        try {
-          const event = JSON.parse(dataLine.slice(6)) as AgentChatSSEEvent
-          onEvent(event)
-          if (event.event === "done" || event.event === "error") {
-            return
-          }
-        } catch {
-          // Ignore malformed SSE frames and continue reading.
-        }
+    const processFrame = (frame: string): boolean => {
+      const payload = eventData(frame)
+      if (payload === null) return false
+      const event = parseAgentStreamEvent(payload)
+      onEvent(event)
+      if (event.event === 'transport_error') transportErrorSeen = true
+      if (event.event === 'done') {
+        completed = true
+        return true
       }
+      return false
     }
-  },
+
+    while (!completed) {
+      const chunk = await reader.read()
+      if (chunk.done) break
+      buffer += decoder.decode(chunk.value, { stream: true })
+      const frames = buffer.split(/\r?\n\r?\n/)
+      buffer = frames.pop() ?? ''
+      if (frames.some(processFrame)) break
+    }
+
+    buffer += decoder.decode()
+    if (!completed && buffer.trim().length > 0) {
+      processFrame(buffer)
+    }
+    if (!completed && !transportErrorSeen) {
+      throw new AgentProtocolError('Agent stream ended before done')
+    }
+  }
 }

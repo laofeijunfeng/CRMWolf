@@ -1,0 +1,143 @@
+{
+  "case_id": "AC-12-explicit",
+  "attempt": 2,
+  "request": {
+    "session_id": 883,
+    "client_request_id": "141832e2-306c-42af-bdb7-66ed6aceff55",
+    "input": {
+      "type": "text",
+      "text": "介绍一下API验收-110243-上海客户01有限公司"
+    }
+  },
+  "http_status": 200,
+  "elapsed_seconds": 23.834,
+  "events": [
+    {
+      "event": "session",
+      "session_id": 883,
+      "session_key": "agent_9be3264ff31841ffa5bb6ef355a4b5d8"
+    },
+    {
+      "event": "agent_ui",
+      "phase": "final",
+      "message_id": 2302,
+      "turn_id": "turn_58dc5afba3ca4be3a8abb164329f86a8",
+      "sequence": 1,
+      "message": {
+        "schema_version": "crm.agent.ui.v1",
+        "message_id": 2302,
+        "turn_id": "turn_58dc5afba3ca4be3a8abb164329f86a8",
+        "role": "assistant",
+        "state": "final",
+        "blocks": [
+          {
+            "id": "b_text_1",
+            "type": "text",
+            "format": "markdown",
+            "text": "该客户位于上海，属于互联网行业，规模为 1–50 人，目前处于跟进中（status=0）。客户来源为“API验收数据”，由 Agent API 验收 110243 负责。\n\n客户是一家用于 CRM Agent 新架构验收的企业服务客户，主营企业数据分析与智能协作软件；当前正在评估销售协同与客户数据治理方案。已识别 1 位主要联系人“验收联系人01”，其职位为决策人。\n\n业务进展方面，已完成首次需求沟通：客户重点关注权限隔离、查询准确性和工作流确认；下一步建议安排方案演示。当前未显示商机、合同、回款计划或回款记录。\n\n需要留意的风险是预算审批周期尚未确定。"
+          },
+          {
+            "id": "b_entity_list_1",
+            "type": "entity_list",
+            "entity_type": "customer",
+            "items": [
+              {
+                "ref_id": "eref_customer_cus_15f2a006c251459dbcf9d8ae1c50957c",
+                "title": "API验收-110243-上海客户01有限公司",
+                "subtitle": null,
+                "fields": [
+                  {
+                    "key": "account_name",
+                    "label": "客户名称",
+                    "value": {
+                      "kind": "text",
+                      "value": "API验收-110243-上海客户01有限公司",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "city",
+                    "label": "城市",
+                    "value": {
+                      "kind": "text",
+                      "value": "上海",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "industry",
+                    "label": "industry",
+                    "value": {
+                      "kind": "text",
+                      "value": "互联网",
+                      "display": null,
+                      "currency": null
+                    }
+                  },
+                  {
+                    "key": "status",
+                    "label": "状态",
+                    "value": {
+                      "kind": "number",
+                      "value": 0,
+                      "display": null,
+                      "currency": null
+                    }
+                  }
+                ],
+                "actions": [
+                  {
+                    "action_id": "act_bc594cad4e884d42a4570d7b4edf9eb2",
+                    "label": "创建跟进任务",
+                    "type": "start_workflow"
+                  }
+                ]
+              }
+            ],
+            "total": 1,
+            "result_set_id": "rs_f68b8cd41eb34e29a29d058cae629c38"
+          }
+        ],
+        "suggested_actions": [],
+        "metadata": {
+          "route": "QUERY",
+          "result_set_id": "rs_f68b8cd41eb34e29a29d058cae629c38",
+          "accessibility_label": "该客户位于上海，属于互联网行业，规模为 1–50 人，目前处于跟进中（status=0）。客户来源为“API验收数据”，由 Agent API 验收 110243 负责。\n\n客户是一家用于 CRM Agent 新架构验收的企业服务客户，主营企业数据分析与智能协作软件；当前正在评估销售协同与客户数据治理方案。已识别 1 位主要联系人“验收联系人01”，其职位为决策人。\n\n业务进展方面，已完成首次需求沟通：客户重点关注权限隔离、查询准确性和工作流确认；下一步建议安排方案演示。当前未显示商机、合同、回款计划或回款记录。\n\n需要留意的风险是预算审批周期尚未确定。"
+        }
+      }
+    },
+    {
+      "event": "done",
+      "session_id": 883
+    }
+  ],
+  "summary": {
+    "event_types": [
+      "session",
+      "agent_ui",
+      "done"
+    ],
+    "session_id": 883,
+    "message_id": 2302,
+    "route": "QUERY",
+    "metadata": {
+      "route": "QUERY",
+      "result_set_id": "rs_f68b8cd41eb34e29a29d058cae629c38",
+      "accessibility_label": "该客户位于上海，属于互联网行业，规模为 1–50 人，目前处于跟进中（status=0）。客户来源为“API验收数据”，由 Agent API 验收 110243 负责。\n\n客户是一家用于 CRM Agent 新架构验收的企业服务客户，主营企业数据分析与智能协作软件；当前正在评估销售协同与客户数据治理方案。已识别 1 位主要联系人“验收联系人01”，其职位为决策人。\n\n业务进展方面，已完成首次需求沟通：客户重点关注权限隔离、查询准确性和工作流确认；下一步建议安排方案演示。当前未显示商机、合同、回款计划或回款记录。\n\n需要留意的风险是预算审批周期尚未确定。"
+    },
+    "block_types": [
+      "text",
+      "entity_list"
+    ],
+    "texts": [
+      "该客户位于上海，属于互联网行业，规模为 1–50 人，目前处于跟进中（status=0）。客户来源为“API验收数据”，由 Agent API 验收 110243 负责。\n\n客户是一家用于 CRM Agent 新架构验收的企业服务客户，主营企业数据分析与智能协作软件；当前正在评估销售协同与客户数据治理方案。已识别 1 位主要联系人“验收联系人01”，其职位为决策人。\n\n业务进展方面，已完成首次需求沟通：客户重点关注权限隔离、查询准确性和工作流确认；下一步建议安排方案演示。当前未显示商机、合同、回款计划或回款记录。\n\n需要留意的风险是预算审批周期尚未确定。",
+      "API验收-110243-上海客户01有限公司"
+    ],
+    "interaction": null,
+    "errors": [],
+    "entity_count": 1,
+    "result_set_id": "rs_f68b8cd41eb34e29a29d058cae629c38"
+  }
+}

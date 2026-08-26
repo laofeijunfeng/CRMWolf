@@ -125,13 +125,48 @@ def client(db_session, monkeypatch):
         "trigger_processing",
         _noop_processing,
     )
+    def _enqueue_post_commit_job(db, *, activity, trigger_type, actor_id=None):  # noqa: ARG001
+        return SimpleNamespace(
+            job_public_id="job_test",
+            team_id=int(activity.team_id),
+            trigger_type=trigger_type,
+            actor_id=actor_id,
+        )
+
+    def _kick_post_commit_workflow(write_result, *, include_post_commit=True):
+        job = write_result.post_commit_job
+        if not include_post_commit or job is None:
+            return
+        follow_up_task_projection_service.run_activity_projection(
+            db_session,
+            activity_id=write_result.activity.id,
+            team_id=job.team_id,
+            trigger_type=job.trigger_type,
+            actor_id=job.actor_id,
+        )
+
+    monkeypatch.setattr(
+        customer_activities.customer_activity_write_service.post_commit_job_service,
+        "enqueue_in_transaction",
+        _enqueue_post_commit_job,
+    )
+    monkeypatch.setattr(
+        customer_activities.customer_activity_write_service,
+        "kick",
+        _kick_post_commit_workflow,
+    )
+    monkeypatch.setattr(
+        customer_activities.customer_activity_write_service.intelligence_refresh_service,
+        "enqueue_committed_event_refresh",
+        lambda *args, **kwargs: None,
+    )
     monkeypatch.setattr(
         "app.crud.customer_activity._upsert_customer_activity_evidence",
-        lambda db, activity: None,
+        lambda db, activity, **kwargs: None,
     )
     monkeypatch.setattr(
         "app.crud.customer_activity._mark_customer_activity_evidence_deleted",
-        lambda db, activity: None,
+        lambda db, activity, **kwargs: None,
     )
     monkeypatch.setattr(
         "app.services.deal_journey_service.deal_journey_service.infer_for_customer",
@@ -330,3 +365,76 @@ def test_activity_update_clears_next_step_and_delete_cancel_open_task_with_runs(
     assert delete_runs[0].trigger_type == FollowUpTaskProjectionTrigger.ACTIVITY_DELETED
     assert delete_runs[0].status == FollowUpTaskProjectionStatus.SKIPPED
     assert delete_runs[0].skip_reason == FollowUpTaskProjectionSkipReason.SOURCE_ACTIVITY_DELETED
+
+
+def _create_open_tracking_task(db_session, *, owner_id: str = "1") -> FollowUpTask:
+    task = FollowUpTask(
+        team_id=1,
+        customer_id=1,
+        owner_id=owner_id,
+        creator_id=owner_id,
+        title="今天确认报价",
+        description="客户要求今天确认报价。",
+        status=FollowUpTaskStatus.OPEN,
+        due_at=datetime(2026, 8, 21, 16, 0, 0),
+        due_at_text="今天",
+        due_at_granularity="DATETIME",
+        due_at_timezone="Asia/Shanghai",
+        source_type="MANUAL",
+        source_key=f"manual-{owner_id}",
+        task_hash=f"task-hash-{owner_id}",
+    )
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    return task
+
+
+def test_submit_and_complete_tracking_creates_activity_and_completes_open_task_atomically(client, db_session):
+    task = _create_open_tracking_task(db_session)
+
+    response = client.post(
+        "/api/v1/customer-activities/cus_11111111111111111111111111111111/submit-and-complete-tracking",
+        json={
+            "task_public_id": task.public_id,
+            "activity": {
+                "activity_kind": "PHONE_FOLLOW_UP",
+                "source_content": "客户确认本轮报价不再继续。",
+                "next_action": None,
+                "next_follow_time": None,
+                "next_follow_time_source": None,
+            },
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["completed_task_public_id"] == task.public_id
+    assert response.json()["activity"]["source_content"] == "客户确认本轮报价不再继续。"
+    assert db_session.query(CustomerActivity).count() == 1
+
+    db_session.refresh(task)
+    assert task.status == FollowUpTaskStatus.COMPLETED
+    events, total = follow_up_task_event_crud.list_by_task(db_session, team_id=1, task_id=task.id)
+    assert total == 1
+    assert events[-1].event_type == FollowUpTaskEventType.COMPLETED
+    assert events[-1].payload_json["plan_source"] == "manual_ui_activity_submission"
+
+
+def test_submit_and_complete_tracking_rolls_back_activity_when_task_cannot_be_completed(client, db_session):
+    task = _create_open_tracking_task(db_session, owner_id="another-user")
+
+    response = client.post(
+        "/api/v1/customer-activities/cus_11111111111111111111111111111111/submit-and-complete-tracking",
+        json={
+            "task_public_id": task.public_id,
+            "activity": {
+                "activity_kind": "PHONE_FOLLOW_UP",
+                "source_content": "客户确认本轮报价不再继续。",
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    assert db_session.query(CustomerActivity).count() == 0
+    db_session.refresh(task)
+    assert task.status == FollowUpTaskStatus.OPEN

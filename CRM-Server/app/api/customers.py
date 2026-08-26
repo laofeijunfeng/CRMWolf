@@ -6,13 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.api.invoices import _invoice_title_response, _populate_application_info
 from app.core.database import get_db
-from app.core.list_query import (
-    enforce_owner_view_scope,
-    optional_request_list_query,
-    run_or_400,
-    uses_unified_list_query,
-)
 from app.core.deps import (
     check_customer_delete_permission,
     check_customer_edit_permission,
@@ -22,6 +17,12 @@ from app.core.deps import (
     get_current_user_team,
     require_permission,
 )
+from app.core.list_query import (
+    enforce_owner_view_scope,
+    optional_request_list_query,
+    run_or_400,
+    uses_unified_list_query,
+)
 from app.crud.contract import contract_crud
 from app.crud.customer import contact_crud, customer_crud
 from app.crud.customer_member import customer_member_crud
@@ -30,14 +31,6 @@ from app.crud.lead import lead_crud
 from app.crud.team import team_crud
 from app.crud.user import user_crud
 from app.models.customer import Contact
-from app.services.industry_display_service import industry_display_service
-from app.services.acquisition_source_service import (
-    AcquisitionSourceError,
-    build_source_info,
-    get_by_id,
-    map_sources_by_ids,
-    resolve_public_ids_to_ids,
-)
 from app.schemas.common import PaginatedResponse
 from app.schemas.contract import ContractListResponse, ContractStatusEnum
 from app.schemas.customer import (
@@ -51,6 +44,7 @@ from app.schemas.customer import (
     CustomerClaimRequest,
     CustomerCreate,
     CustomerDetailResponse,
+    CustomerIdentityResolutionResponse,
     CustomerIndustryOption,
     CustomerIntelligenceBatchRebuildRequest,
     CustomerIntelligenceBatchRebuildResponse,
@@ -76,10 +70,20 @@ from app.schemas.customer import (
 )
 from app.schemas.invoice import InvoiceApplicationResponse, InvoiceTitleResponse
 from app.schemas.payment import PaymentPlanResponse
+from app.services.acquisition_source_service import (
+    AcquisitionSourceError,
+    build_source_info,
+    get_by_id,
+    map_sources_by_ids,
+    resolve_public_ids_to_ids,
+)
 from app.services.customer_intelligence_event_service import CustomerIntelligenceEvent
 from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
 from app.services.customer_intelligence_run_service import CustomerIntelligenceRunDiagnostic
-from app.api.invoices import _invoice_title_response, _populate_application_info
+from app.services.customer_identity_resolution_application_service import (
+    customer_identity_resolution_application_service,
+)
+from app.services.industry_display_service import industry_display_service
 
 router = APIRouter(prefix="/v1/customers", tags=["客户管理"])
 logger = logging.getLogger(__name__)
@@ -866,7 +870,7 @@ def get_customers(
     keyword: str = Query(None, description="关键词搜索"),
     created_time_start: Optional[date] = Query(None, description="创建时间起始"),
     created_time_end: Optional[date] = Query(None, description="创建时间结束"),
-    order_by: str = Query(None, description="排序字段（created_time/account_name/city/status/industry）"),
+    order_by: str = Query(None, description="排序字段（created_time/last_modified_time/account_name/city/status/industry）"),
     order_dir: str = Query(None, description="排序方向（asc/desc）"),
     scope: Optional[str] = Query(None, description="客户范围：collaborated/accessible"),
     filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
@@ -1119,6 +1123,40 @@ def get_customers(
         page_size=limit,
         total_pages=total_pages
     )
+
+
+@router.get(
+    "/identity-resolution",
+    response_model=CustomerIdentityResolutionResponse,
+    summary="解析客户身份",
+)
+def resolve_customer_identity(
+    query: str = Query(..., min_length=1, max_length=255),
+    limit: int = Query(10, ge=1, le=50),
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    from app.crud.permission import permission_crud
+
+    permission_codes = {
+        permission.code
+        for permission in permission_crud.get_user_permissions(db, current_user.id, team_id)
+    }
+    resolution = customer_identity_resolution_application_service.resolve(
+        db,
+        team_id=team_id,
+        user_id=current_user.id,
+        permission_codes=permission_codes,
+        query_text=query.strip(),
+        limit=limit,
+    )
+    return {
+        "decision": resolution.metadata.get("identity_decision", "no_match"),
+        "items": resolution.items,
+        "related_customers": resolution.related_customers,
+        "metadata": resolution.metadata,
+    }
 
 
 def _can_manage_customer_members(db: Session, customer, team_id: int, current_user) -> bool:

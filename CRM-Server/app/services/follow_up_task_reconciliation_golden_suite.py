@@ -9,15 +9,13 @@ from app.services.follow_up_task_reconciliation_evaluation_service import (
     FollowUpTaskReconciliationDecision,
     FollowUpTaskReconciliationEvaluationCase,
     FollowUpTaskReconciliationEvaluationSummary,
+    FollowUpTaskReconciliationTaskDecision,
     follow_up_task_reconciliation_evaluation_service,
 )
 
 JsonObject = dict[str, object]
 DEFAULT_RECONCILIATION_GOLDEN_CASES_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "tests"
-    / "fixtures"
-    / "follow_up_task_reconciliation_golden_cases.json"
+    Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "follow_up_task_reconciliation_golden_cases.json"
 )
 
 
@@ -73,17 +71,43 @@ def _build_case(raw_case: JsonObject) -> FollowUpTaskReconciliationEvaluationCas
 
 
 def _build_decision(raw_result: JsonObject) -> FollowUpTaskReconciliationDecision:
-    return FollowUpTaskReconciliationDecision(
-        decision=_required_text(raw_result, "decision"),
-        task_public_id=_optional_text(raw_result.get("task_public_id")),
-        candidate_public_ids=tuple(_text_list(raw_result.get("candidate_public_ids"))),
-        confidence=_required_float(raw_result, "confidence"),
-        needs_confirmation=bool(raw_result.get("needs_confirmation")),
-        proposed_due_at=_optional_text(raw_result.get("proposed_due_at")),
-        forbid_auto_reasons=tuple(_text_list(raw_result.get("forbid_auto_reasons"))),
-        evidence_terms=tuple(_text_list(raw_result.get("evidence_terms"))),
-        state_mutation_requested=bool(raw_result.get("state_mutation_requested")),
+    candidate_public_ids = tuple(_required_text_list(raw_result, "candidate_public_ids"))
+    task_decisions = tuple(
+        FollowUpTaskReconciliationTaskDecision(
+            decision=_required_text(item, "decision"),
+            task_public_id=_required_text(item, "task_public_id"),
+            confidence=_required_float(item, "confidence"),
+            needs_confirmation=bool(item.get("needs_confirmation")),
+            proposed_due_at=_optional_text(item.get("proposed_due_at")),
+            forbid_auto_reasons=tuple(_text_list(item.get("forbid_auto_reasons"))),
+            evidence_terms=tuple(_text_list(item.get("evidence_terms"))),
+            state_mutation_requested=bool(item.get("state_mutation_requested")),
+        )
+        for item in _required_json_object_list(raw_result, "task_decisions")
     )
+    empty_outcome = _json_object(raw_result.get("empty_outcome"))
+    return FollowUpTaskReconciliationDecision(
+        candidate_public_ids=candidate_public_ids,
+        task_decisions=task_decisions,
+        empty_reason=_optional_text(empty_outcome.get("reason")),
+        empty_confidence=_optional_float(empty_outcome.get("confidence")) or 1.0,
+        empty_evidence_terms=tuple(_text_list(empty_outcome.get("evidence_terms"))),
+    )
+
+
+def _required_json_object_list(data: JsonObject, key: str) -> list[JsonObject]:
+    if key not in data or not isinstance(data[key], list):
+        raise ValueError(f"missing required object list field: {key}")
+    return [_json_object(item) for item in data[key]]
+
+
+def _required_text_list(data: JsonObject, key: str) -> list[str]:
+    if key not in data or not isinstance(data[key], list):
+        raise ValueError(f"missing required text list field: {key}")
+    values = _text_list(data[key])
+    if len(values) != len(data[key]):
+        raise ValueError(f"invalid text list field: {key}")
+    return values
 
 
 def _json_object(value: object) -> JsonObject:

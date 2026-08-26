@@ -34,6 +34,10 @@ JsonValue = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
 JsonObject = dict[str, JsonValue]
 
 
+class CustomerIntelligenceContextNotFound(ValueError):
+    """The requested customer is not visible within the owning team."""
+
+
 @dataclass(frozen=True)
 class CustomerFact:
     id: int
@@ -348,13 +352,57 @@ class CustomerIntelligenceContextService:
             .first()
         )
         if customer is None:
-            raise ValueError("客户不存在或无权访问")
+            raise CustomerIntelligenceContextNotFound("客户不存在或无权访问")
+        return self._build_context_for_customer(
+            db,
+            customer=customer,
+            team_id=team_id,
+            query_text=query_text,
+            evidence_limit=evidence_limit,
+            source_types=source_types,
+        )
 
+    def build_context_by_public_id(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        customer_public_id: str,
+        query_text: str | None = None,
+        evidence_limit: int = 8,
+        source_types: list[SourceType] | None = None,
+    ) -> CustomerIntelligenceContext:
+        customer = (
+            db.query(Customer)
+            .filter(Customer.public_id == customer_public_id, Customer.team_id == team_id)
+            .first()
+        )
+        if customer is None:
+            raise CustomerIntelligenceContextNotFound("客户不存在或无权访问")
+        return self._build_context_for_customer(
+            db,
+            customer=customer,
+            team_id=team_id,
+            query_text=query_text,
+            evidence_limit=evidence_limit,
+            source_types=source_types,
+        )
+
+    def _build_context_for_customer(
+        self,
+        db: Session,
+        *,
+        customer: Customer,
+        team_id: int,
+        query_text: str | None,
+        evidence_limit: int,
+        source_types: list[SourceType] | None,
+    ) -> CustomerIntelligenceContext:
         strong_context = self._build_strong_context(db, customer=customer, team_id=team_id)
         retrieval_result = self.evidence_retriever.retrieve_customer_evidence(
             db=db,
             team_id=team_id,
-            customer_id=customer_id,
+            customer_id=customer.id,
             query_text=query_text,
             evidence_limit=evidence_limit,
             source_types=source_types,

@@ -48,3 +48,6 @@ export {
 
 // Invoice
 export * from './invoice'
+
+// CRM Agent target protocol contracts
+export * from './agent-contracts'

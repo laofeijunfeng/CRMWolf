@@ -3,8 +3,11 @@
 These tables store Agent conversation state and audit data only. Business data
 must still be created or changed through existing CRM APIs.
 """
+
+from datetime import datetime
+
 from sqlalchemy import JSON, BigInteger, Boolean, Column, DateTime, ForeignKey, Index, String, Text, UniqueConstraint
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.utils.time import business_now
@@ -22,16 +25,6 @@ class AgentMessageRole:
     ASSISTANT = "ASSISTANT"
     SYSTEM = "SYSTEM"
     TOOL = "TOOL"
-
-
-class AgentTaskStatus:
-    PENDING = "PENDING"
-    WAITING_USER = "WAITING_USER"
-    RUNNING = "RUNNING"
-    COMPLETED = "COMPLETED"
-    FAILED = "FAILED"
-    CANCELLED = "CANCELLED"
-    SUSPENDED = "SUSPENDED"
 
 
 class AgentToolCallStatus:
@@ -107,7 +100,6 @@ class AgentSession(Base):
     )
 
     messages = relationship("AgentMessage", back_populates="session", cascade="all, delete-orphan")
-    tasks = relationship("AgentTask", back_populates="session", cascade="all, delete-orphan")
     workflow_actions = relationship("AgentWorkflowAction", back_populates="session", cascade="all, delete-orphan")
 
     __table_args__ = (
@@ -134,46 +126,37 @@ class AgentMessage(Base):
     )
     role = Column(String(20), nullable=False, comment="消息角色")
     event_type = Column(String(50), nullable=True, index=True, comment="SSE或业务事件类型")
-    content = Column(Text, nullable=True, comment="消息正文")
+    content: Mapped[str | None] = mapped_column(Text, nullable=True, comment="消息正文")
     payload_json = Column(JSON, nullable=True, comment="结构化消息载荷")
-    created_time = Column(DateTime, nullable=False, default=business_now, index=True, comment="创建时间")
-
-    session = relationship("AgentSession", back_populates="messages")
-
-    __table_args__ = (
-        Index("idx_agent_message_session_created", "session_id", "created_time"),
-        Index("idx_agent_message_team_user_created", "team_id", "user_id", "created_time"),
-        {"comment": "CRM AI Agent消息表"},
-    )
-
-
-class AgentTask(Base):
-    """Agent task tracked across turns."""
-
-    __tablename__ = "crm_agent_tasks"
-
-    id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
-    task_key = Column(String(64), nullable=False, unique=True, index=True, comment="Agent任务唯一标识")
-    team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
-    user_id = Column(BigInteger, nullable=False, index=True, comment="系统用户ID")
-    session_id = Column(
-        BigInteger,
-        ForeignKey("crm_agent_sessions.id", ondelete="CASCADE"),
-        nullable=False,
+    turn_id: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
         index=True,
-        comment="Agent会话ID",
+        comment="目标协议轮次ID, 迁移完成后非空",
     )
-    intent = Column(String(80), nullable=True, index=True, comment="识别出的意图")
-    status = Column(String(20), nullable=False, default=AgentTaskStatus.PENDING, index=True, comment="任务状态")
-    target_type = Column(String(50), nullable=True, index=True, comment="目标业务对象类型")
-    target_id = Column(BigInteger, nullable=True, index=True, comment="目标业务对象ID")
-    summary = Column(Text, nullable=True, comment="任务摘要")
-    input_json = Column(JSON, nullable=True, comment="用户输入解析快照")
-    state_json = Column(JSON, nullable=True, comment="LangGraph状态快照")
-    result_json = Column(JSON, nullable=True, comment="任务结果快照")
-    error_message = Column(Text, nullable=True, comment="错误信息")
-    created_time = Column(DateTime, nullable=False, default=business_now, index=True, comment="创建时间")
-    last_modified_time = Column(
+    client_request_id: Mapped[str | None] = mapped_column(
+        String(36),
+        nullable=True,
+        comment="用户请求幂等ID, 仅USER消息非空",
+    )
+    ui_json: Mapped[dict[str, object] | None] = mapped_column(
+        JSON,
+        nullable=True,
+        comment="crm.agent.ui.v1完整消息, 迁移完成后非空",
+    )
+    diagnostics_json: Mapped[dict[str, object] | None] = mapped_column(
+        JSON,
+        nullable=True,
+        comment="内部诊断与可观测性数据",
+    )
+    created_time: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=business_now,
+        index=True,
+        comment="创建时间",
+    )
+    last_modified_time: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
         default=business_now,
@@ -181,14 +164,27 @@ class AgentTask(Base):
         comment="最后修改时间",
     )
 
-    session = relationship("AgentSession", back_populates="tasks")
-    tool_calls = relationship("AgentToolCall", back_populates="task", cascade="all, delete-orphan")
-    workflow_actions = relationship("AgentWorkflowAction", back_populates="task")
+    session = relationship("AgentSession", back_populates="messages")
 
     __table_args__ = (
-        Index("idx_agent_task_session_status", "session_id", "status"),
-        Index("idx_agent_task_team_user_status", "team_id", "user_id", "status"),
-        {"comment": "CRM AI Agent任务表"},
+        UniqueConstraint(
+            "team_id",
+            "user_id",
+            "client_request_id",
+            name="uq_agent_message_owner_client_request",
+        ),
+        UniqueConstraint("session_id", "turn_id", "role", name="uq_agent_message_turn_role"),
+        Index("idx_agent_message_session_created", "session_id", "created_time", "id"),
+        Index(
+            "idx_agent_message_history_owner_order",
+            "team_id",
+            "user_id",
+            "session_id",
+            "created_time",
+            "id",
+        ),
+        Index("idx_agent_message_team_user_created", "team_id", "user_id", "created_time"),
+        {"comment": "CRM AI Agent消息表"},
     )
 
 
@@ -208,13 +204,6 @@ class AgentToolCall(Base):
         index=True,
         comment="Agent会话ID",
     )
-    task_id = Column(
-        BigInteger,
-        ForeignKey("crm_agent_tasks.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-        comment="Agent任务ID",
-    )
     tool_name = Column(String(100), nullable=False, index=True, comment="Tool名称")
     status = Column(String(20), nullable=False, default=AgentToolCallStatus.PENDING, index=True, comment="调用状态")
     request_json = Column(JSON, nullable=True, comment="Tool请求参数快照")
@@ -231,11 +220,8 @@ class AgentToolCall(Base):
         comment="最后修改时间",
     )
 
-    task = relationship("AgentTask", back_populates="tool_calls")
-
     __table_args__ = (
         Index("idx_agent_tool_call_session_created", "session_id", "created_time"),
-        Index("idx_agent_tool_call_task_status", "task_id", "status"),
         Index("idx_agent_tool_call_team_user_tool", "team_id", "user_id", "tool_name"),
         {"comment": "CRM AI Agent Tool调用审计表"},
     )
@@ -255,13 +241,6 @@ class AgentIdempotencyKey(Base):
         nullable=True,
         index=True,
         comment="Agent会话ID",
-    )
-    task_id = Column(
-        BigInteger,
-        ForeignKey("crm_agent_tasks.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-        comment="Agent任务ID",
     )
     action_key = Column(String(160), nullable=False, comment="幂等动作键")
     status = Column(
@@ -285,20 +264,14 @@ class AgentIdempotencyKey(Base):
 
     __table_args__ = (
         UniqueConstraint("team_id", "user_id", "action_key", name="uk_agent_idempotency_team_user_action"),
-        Index("idx_agent_idempotency_session_task", "session_id", "task_id"),
+        Index("idx_agent_idempotency_session", "session_id"),
         Index("idx_agent_idempotency_team_user_status", "team_id", "user_id", "status"),
         {"comment": "CRM AI Agent幂等键表"},
     )
 
 
 class AgentWorkflowAction(Base):
-    """Action ledger for Agent-planned business work.
-
-    AgentTask remains the compatibility projection for a waiting user turn.
-    This ledger is the durable action-level state: every suggested, confirmed,
-    skipped, executed, or failed CRM action can be audited independently from
-    the current UI's single pending-task shape.
-    """
+    """Durable audit ledger for workflow and system actions."""
 
     __tablename__ = "crm_agent_workflow_actions"
 
@@ -314,13 +287,6 @@ class AgentWorkflowAction(Base):
         nullable=True,
         index=True,
         comment="Agent会话ID",
-    )
-    task_id = Column(
-        BigInteger,
-        ForeignKey("crm_agent_tasks.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-        comment="兼容挂起任务ID",
     )
     source_message_id = Column(
         BigInteger,
@@ -364,13 +330,11 @@ class AgentWorkflowAction(Base):
     )
 
     session = relationship("AgentSession", back_populates="workflow_actions")
-    task = relationship("AgentTask", back_populates="workflow_actions")
 
     __table_args__ = (
         UniqueConstraint("workflow_id", "action_id", name="uk_agent_workflow_action_identity"),
         UniqueConstraint("action_id", name="uq_crm_agent_workflow_actions_action_id"),
         Index("idx_agent_workflow_action_session_status", "session_id", "status"),
-        Index("idx_agent_workflow_action_task_status", "task_id", "status"),
         Index("idx_agent_workflow_action_team_user_status", "team_id", "user_id", "status"),
         Index("idx_agent_workflow_action_workflow_created", "workflow_id", "created_time"),
         {"comment": "CRM AI Agent动作工作流账本"},

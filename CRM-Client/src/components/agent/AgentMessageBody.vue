@@ -12,13 +12,13 @@
 <script setup lang="ts">
 import { computed } from "vue"
 import MarkdownIt from "markdown-it"
-import type { AgentContentFormat } from "@/api/agent"
+type AgentMessageFormat = "plain" | "markdown"
 
 const props = withDefaults(defineProps<{
   content: string
-  format?: AgentContentFormat
+  format?: AgentMessageFormat
 }>(), {
-  format: "text",
+  format: "plain",
 })
 
 const markdown = new MarkdownIt({

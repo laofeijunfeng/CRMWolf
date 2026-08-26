@@ -10,6 +10,7 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.types import BigInteger
+from tests.unit.support.reconciliation_decisions import single_task_reconciliation_decision
 
 
 @compiles(BigInteger, "sqlite")
@@ -75,7 +76,6 @@ from app.services.follow_up_task_projection_service import (
     follow_up_task_projection_service,
 )
 from app.services.follow_up_task_reconciliation_evaluation_service import (
-    FollowUpTaskReconciliationDecision,
     FollowUpTaskReconciliationEvaluationCase,
     follow_up_task_reconciliation_evaluation_service,
 )
@@ -221,20 +221,26 @@ def test_sales_commitment_and_task_crud_use_public_ids_and_source_hash(db_sessio
     assert is_follow_up_task_public_id(task.public_id)
     assert sales_commitment_crud.get_by_public_id(db_session, commitment.public_id, 1).id == commitment.id
     assert follow_up_task_crud.get_by_public_id(db_session, task.public_id, 1).id == task.id
-    assert sales_commitment_crud.get_by_source_hash(
-        db_session,
-        team_id=1,
-        source_type=FollowUpTaskSourceType.CUSTOMER_ACTIVITY,
-        source_activity_id=10,
-        commitment_hash="commitment-hash-1",
-    ).id == commitment.id
-    assert follow_up_task_crud.get_by_source_hash(
-        db_session,
-        team_id=1,
-        source_type=FollowUpTaskSourceType.CUSTOMER_ACTIVITY,
-        source_activity_id=10,
-        task_hash="task-hash-1",
-    ).id == task.id
+    assert (
+        sales_commitment_crud.get_by_source_hash(
+            db_session,
+            team_id=1,
+            source_type=FollowUpTaskSourceType.CUSTOMER_ACTIVITY,
+            source_activity_id=10,
+            commitment_hash="commitment-hash-1",
+        ).id
+        == commitment.id
+    )
+    assert (
+        follow_up_task_crud.get_by_source_hash(
+            db_session,
+            team_id=1,
+            source_type=FollowUpTaskSourceType.CUSTOMER_ACTIVITY,
+            source_activity_id=10,
+            task_hash="task-hash-1",
+        ).id
+        == task.id
+    )
     assert commitment.source_key == "activity:10"
     assert task.source_key == "activity:10"
 
@@ -272,14 +278,17 @@ def test_source_key_supports_idempotency_when_source_activity_is_null(db_session
 
     assert task.source_activity_id is None
     assert task.source_key == "backfill:customer:1:owner:2:2026-08-06"
-    assert follow_up_task_crud.get_by_source_hash(
-        db_session,
-        team_id=1,
-        source_type=FollowUpTaskSourceType.HISTORICAL_BACKFILL,
-        source_activity_id=None,
-        source_key="backfill:customer:1:owner:2:2026-08-06",
-        task_hash="historical-task",
-    ).id == task.id
+    assert (
+        follow_up_task_crud.get_by_source_hash(
+            db_session,
+            team_id=1,
+            source_type=FollowUpTaskSourceType.HISTORICAL_BACKFILL,
+            source_activity_id=None,
+            source_key="backfill:customer:1:owner:2:2026-08-06",
+            task_hash="historical-task",
+        ).id
+        == task.id
+    )
 
 
 def test_source_key_unique_constraints_reject_duplicate_source_hashes(db_session):
@@ -318,19 +327,25 @@ def test_source_key_unique_constraints_reject_duplicate_source_hashes(db_session
         )
 
     db_session.rollback()
-    follow_up_task_crud.create(db_session, _task_create(source_activity_id=None, task_hash="duplicate-task").model_copy(
-        update={
-            "source_type": FollowUpTaskSourceType.HISTORICAL_BACKFILL,
-            "source_key": "backfill:customer:1:owner:2:latest",
-        }
-    ))
-    with pytest.raises(IntegrityError):
-        follow_up_task_crud.create(db_session, _task_create(source_activity_id=None, task_hash="duplicate-task").model_copy(
+    follow_up_task_crud.create(
+        db_session,
+        _task_create(source_activity_id=None, task_hash="duplicate-task").model_copy(
             update={
                 "source_type": FollowUpTaskSourceType.HISTORICAL_BACKFILL,
                 "source_key": "backfill:customer:1:owner:2:latest",
             }
-        ))
+        ),
+    )
+    with pytest.raises(IntegrityError):
+        follow_up_task_crud.create(
+            db_session,
+            _task_create(source_activity_id=None, task_hash="duplicate-task").model_copy(
+                update={
+                    "source_type": FollowUpTaskSourceType.HISTORICAL_BACKFILL,
+                    "source_key": "backfill:customer:1:owner:2:latest",
+                }
+            ),
+        )
 
 
 def test_crud_write_methods_can_flush_without_committing(db_session):
@@ -380,6 +395,41 @@ def test_follow_up_task_owner_listing_filters_team_status_customer_and_due_windo
 
     assert total == 1
     assert [row.id for row in rows] == [expected.id]
+
+
+def test_follow_up_task_public_id_listing_is_owner_scoped_and_preserves_requested_order(db_session):
+    _seed_customer_and_activity(db_session)
+    first = follow_up_task_crud.create(
+        db_session,
+        _task_create(task_hash="owner-first"),
+    )
+    second = follow_up_task_crud.create(
+        db_session,
+        _task_create(task_hash="owner-second"),
+    )
+    other_owner = follow_up_task_crud.create(
+        db_session,
+        _task_create(owner_id="3", task_hash="other-owner-ref"),
+    )
+    other_team = follow_up_task_crud.create(
+        db_session,
+        _task_create(team_id=2, task_hash="other-team-ref"),
+    )
+
+    rows = follow_up_task_crud.list_for_owner_by_public_ids(
+        db_session,
+        team_id=1,
+        owner_id="2",
+        public_ids=[
+            second.public_id,
+            other_owner.public_id,
+            other_team.public_id,
+            first.public_id,
+            second.public_id,
+        ],
+    )
+
+    assert [row.public_id for row in rows] == [second.public_id, first.public_id]
 
 
 def test_follow_up_task_named_due_windows_handle_date_and_datetime_overdue(db_session):
@@ -592,7 +642,9 @@ def test_reconciliation_and_llm_run_crud_default_started_at_when_none(db_session
             "owner_id": "2",
             "status": FollowUpTaskLLMMatcherRunStatus.SKIPPED,
             "source": "safe_fallback",
-            "needs_confirmation": False,
+            "candidate_public_ids_json": [],
+            "task_decisions_json": [],
+            "empty_outcome_json": {"reason": "NO_OPEN_CANDIDATES", "confidence": 1.0, "evidence_terms": []},
             "started_at": None,
         },
     )
@@ -603,6 +655,55 @@ def test_reconciliation_and_llm_run_crud_default_started_at_when_none(db_session
     assert matcher_run.finished_at is not None
 
 
+def test_llm_matcher_run_crud_records_batch_decision_contract(db_session):
+    _seed_customer_and_activity(db_session)
+    decision = single_task_reconciliation_decision(
+        decision="COMPLETE",
+        task_public_id="fut_11111111111111111111111111111111",
+        confidence=0.94,
+        evidence_terms=("预算已经通过",),
+    )
+
+    run = follow_up_task_llm_matcher_run_crud.record_match_result(
+        db_session,
+        team_id=1,
+        owner_id="2",
+        source_activity_id=10,
+        result=SimpleNamespace(
+            decision=decision,
+            source="langchain_structured_output",
+            referenced_source_public_ids=("act_11111111111111111111111111111111",),
+            evaluation_failures=(),
+        ),
+        model_name="test-model",
+        structured_output_strategy="tool",
+    )
+
+    assert run.candidate_public_ids_json == ["fut_11111111111111111111111111111111"]
+    assert run.task_decisions_json == [
+        {
+            "decision": "COMPLETE",
+            "task_public_id": "fut_11111111111111111111111111111111",
+            "confidence": 0.94,
+            "needs_confirmation": False,
+            "proposed_due_at": None,
+            "forbid_auto_reasons": [],
+            "evidence_terms": ["预算已经通过"],
+            "state_mutation_requested": False,
+        }
+    ]
+    assert run.empty_outcome_json is None
+    assert run.referenced_source_public_ids_json == ["act_11111111111111111111111111111111"]
+    assert {
+        "decision",
+        "task_public_id",
+        "confidence",
+        "needs_confirmation",
+        "forbid_auto_reasons_json",
+        "evidence_terms_json",
+    }.isdisjoint(FollowUpTaskLLMMatcherRun.__table__.columns.keys())
+
+
 def test_reconciliation_evaluation_run_crud_persists_quality_gate_metrics(db_session):
     summary = follow_up_task_reconciliation_evaluation_service.evaluate_many(
         [
@@ -610,26 +711,24 @@ def test_reconciliation_evaluation_run_crud_persists_quality_gate_metrics(db_ses
                 name="false_close_budget_case",
                 activity_owner_id="2",
                 task_owner_by_public_id={"fut_budget": "2"},
-                result=FollowUpTaskReconciliationDecision(
+                result=single_task_reconciliation_decision(
                     decision="COMPLETE",
                     confidence=0.96,
                     task_public_id="fut_budget",
-                    candidate_public_ids=("fut_budget",),
                 ),
                 allowed_decisions={"KEEP_OPEN"},
             ),
             FollowUpTaskReconciliationEvaluationCase(
-                name="correct_delay_case",
+                name="correct_postpone_case",
                 activity_owner_id="2",
                 task_owner_by_public_id={"fut_demo": "2"},
-                result=FollowUpTaskReconciliationDecision(
-                    decision="DELAY",
+                result=single_task_reconciliation_decision(
+                    decision="POSTPONE",
                     confidence=0.91,
                     task_public_id="fut_demo",
-                    candidate_public_ids=("fut_demo",),
                     proposed_due_at="2026-08-14T10:00:00",
                 ),
-                expected_decision="DELAY",
+                expected_decision="POSTPONE",
             ),
         ]
     )
@@ -666,7 +765,7 @@ def test_reconciliation_evaluation_run_crud_persists_quality_gate_metrics(db_ses
     assert run.failed_cases == 1
     assert run.false_close_count == 1
     assert run.false_close_rate == 0.5
-    assert run.false_delay_count == 0
+    assert run.false_postpone_count == 0
     assert run.metrics_json["false_close"]["case_names"] == ["false_close_budget_case"]
     assert run.failure_cases_json == [
         {
@@ -687,7 +786,7 @@ def test_reconciliation_evaluation_run_crud_persists_quality_gate_metrics(db_ses
 
     assert work_summary_run.ok is True
     assert work_summary_run.false_close_count == 0
-    assert work_summary_run.false_delay_count == 0
+    assert work_summary_run.false_postpone_count == 0
     assert work_summary_run.metrics_json["fact_recall"]["rate"] == 1.0
     assert work_summary_run.metrics_json["hallucination_rate"]["rate"] == 0.0
 
@@ -784,8 +883,14 @@ def test_projection_service_stages_commitment_and_task_vector_metadata(db_sessio
     assert documents[CustomerVectorDocumentSourceType.FOLLOW_UP_TASK].metadata_json["task_public_id"] == task.public_id
     assert documents[CustomerVectorDocumentSourceType.FOLLOW_UP_TASK].metadata_json["status"] == FollowUpTaskStatus.OPEN
     assert documents[CustomerVectorDocumentSourceType.SALES_COMMITMENT].source_object_id == commitment.public_id
-    assert documents[CustomerVectorDocumentSourceType.SALES_COMMITMENT].metadata_json["commitment_public_id"] == commitment.public_id
-    assert documents[CustomerVectorDocumentSourceType.SALES_COMMITMENT].sync_status == CustomerVectorDocumentSyncStatus.PENDING
+    assert (
+        documents[CustomerVectorDocumentSourceType.SALES_COMMITMENT].metadata_json["commitment_public_id"]
+        == commitment.public_id
+    )
+    assert (
+        documents[CustomerVectorDocumentSourceType.SALES_COMMITMENT].sync_status
+        == CustomerVectorDocumentSyncStatus.PENDING
+    )
 
 
 def test_projection_run_records_success_and_idempotent_retry(db_session):

@@ -67,6 +67,11 @@ export interface CustomerActivityResponse {
   effectiveness_error_message?: string | null
 }
 
+export interface CustomerActivityCreateAndCompleteTrackingResponse {
+  activity: CustomerActivityResponse
+  completed_task_public_id: string
+}
+
 export interface NextActivityTimeUpdate {
   next_follow_time: string
 }
@@ -75,6 +80,20 @@ const customerActivityApi = {
   createActivity: (customerId: string, data: CustomerActivityCreate): Promise<CustomerActivityResponse> => {
     return request.post<CustomerActivityResponse>(`/v1/customer-activities/${customerId}`, data)
       .then(normalizeActivity)
+  },
+
+  createActivityAndCompleteTracking: (
+    customerId: string,
+    taskPublicId: string,
+    activity: CustomerActivityCreate,
+  ): Promise<CustomerActivityCreateAndCompleteTrackingResponse> => {
+    return request.post<CustomerActivityCreateAndCompleteTrackingResponse>(
+      `/v1/customer-activities/${customerId}/submit-and-complete-tracking`,
+      { task_public_id: taskPublicId, activity },
+    ).then((response) => ({
+      ...response,
+      activity: normalizeActivity(response.activity),
+    }))
   },
 
   getActivities: (customerId: string): Promise<CustomerActivityResponse[]> => {

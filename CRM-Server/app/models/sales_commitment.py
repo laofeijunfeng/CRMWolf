@@ -11,6 +11,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 
 from app.core.database import Base
@@ -85,7 +86,7 @@ class FollowUpTaskConfirmationStatus:
 
 class FollowUpTaskConfirmationResolutionAction:
     COMPLETE = "COMPLETE"
-    DELAY = "DELAY"
+    POSTPONE = "POSTPONE"
     CANCEL = "CANCEL"
     KEEP_OPEN = "KEEP_OPEN"
     UNKNOWN = "UNKNOWN"
@@ -100,7 +101,6 @@ class FollowUpTaskConfirmationDeliveryPurpose:
     """Why a confirmation delivery exists and whether it is intrusive."""
 
     INBOX_VISIBILITY = "INBOX_VISIBILITY"
-    AGENT_MESSAGE_CARD = "AGENT_MESSAGE_CARD"
     AGENT_TURN_PROMPT = "AGENT_TURN_PROMPT"
     IM_PROMPT = "IM_PROMPT"
 
@@ -419,6 +419,12 @@ class FollowUpTaskConfirmationCase(Base):
 
     __table_args__ = (
         UniqueConstraint("team_id", "confirmation_hash", name="uq_follow_up_task_confirmation_hash"),
+        Index(
+            "uq_follow_up_task_confirmation_pending_task",
+            "team_id",
+            text("((CASE WHEN status = 'PENDING' THEN task_id ELSE NULL END))"),
+            unique=True,
+        ),
         Index("idx_follow_up_confirmation_owner_status", "team_id", "owner_id", "status", "created_time"),
         Index("idx_follow_up_confirmation_owner_status_expiry", "team_id", "owner_id", "status", "expires_at"),
         Index("idx_follow_up_confirmation_task_status", "team_id", "task_id", "status"),
@@ -662,13 +668,9 @@ class FollowUpTaskLLMMatcherRun(Base):
     reconciliation_run_public_id = Column(String(64), nullable=True, index=True, comment="reconciliation运行对外ID")
     status = Column(String(20), nullable=False, index=True, comment="运行状态")
     source = Column(String(80), nullable=False, index=True, comment="匹配结果来源")
-    decision = Column(String(30), nullable=True, index=True, comment="归一化决策")
-    task_public_id = Column(String(64), nullable=True, index=True, comment="候选任务对外ID")
     candidate_public_ids_json = Column(JSON, nullable=True, comment="候选任务对外ID快照")
-    confidence = Column(Float, nullable=True, comment="归一化置信度")
-    needs_confirmation = Column(Boolean, nullable=False, default=False, index=True, comment="是否需要用户确认")
-    forbid_auto_reasons_json = Column(JSON, nullable=True, comment="禁止自动迁移原因")
-    evidence_terms_json = Column(JSON, nullable=True, comment="证据词快照")
+    task_decisions_json = Column(JSON, nullable=True, comment="逐任务语义决策快照")
+    empty_outcome_json = Column(JSON, nullable=True, comment="无候选任务时的明确结果")
     referenced_source_public_ids_json = Column(JSON, nullable=True, comment="引用来源对外ID")
     evaluation_failures_json = Column(JSON, nullable=True, comment="安全评测失败项")
     model_name = Column(String(120), nullable=True, comment="LLM模型名")
@@ -683,7 +685,6 @@ class FollowUpTaskLLMMatcherRun(Base):
     __table_args__ = (
         Index("idx_follow_up_llm_matcher_owner_time", "team_id", "owner_id", "created_time"),
         Index("idx_follow_up_llm_matcher_status_time", "team_id", "status", "created_time"),
-        Index("idx_follow_up_llm_matcher_decision_time", "team_id", "decision", "created_time"),
         Index("idx_follow_up_llm_matcher_schema_time", "team_id", "schema_error_type", "created_time"),
         {"comment": "跟进任务LLM语义匹配运行日志表"},
     )
@@ -713,8 +714,8 @@ class FollowUpTaskReconciliationEvaluationRun(Base):
     failed_cases = Column(Integer, nullable=False, default=0, comment="失败样本数")
     false_close_count = Column(Integer, nullable=False, default=0, comment="误关闭样本数")
     false_close_rate = Column(Float, nullable=False, default=0.0, comment="误关闭率")
-    false_delay_count = Column(Integer, nullable=False, default=0, comment="误延期样本数")
-    false_delay_rate = Column(Float, nullable=False, default=0.0, comment="误延期率")
+    false_postpone_count = Column(Integer, nullable=False, default=0, comment="误延期样本数")
+    false_postpone_rate = Column(Float, nullable=False, default=0.0, comment="误延期率")
     missed_confirmation_count = Column(Integer, nullable=False, default=0, comment="该追问未追问样本数")
     missed_confirmation_rate = Column(Float, nullable=False, default=0.0, comment="该追问未追问率")
     over_confirmation_count = Column(Integer, nullable=False, default=0, comment="过度追问样本数")

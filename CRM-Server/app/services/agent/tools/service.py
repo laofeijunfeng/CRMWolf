@@ -1,4 +1,5 @@
 """Audited CRM AI Agent tools backed by existing CRM APIs."""
+
 from __future__ import annotations
 
 import hashlib
@@ -7,7 +8,6 @@ import logging
 import uuid
 from typing import Callable, List, Optional, Union
 
-import httpx
 from sqlalchemy import or_
 
 from app.crud.agent import agent_idempotency_key_crud, agent_tool_call_crud
@@ -23,7 +23,7 @@ from app.schemas.agent import (
     AgentToolCallUpdate,
 )
 from app.services.acquisition_source_service import resolve_write_fields_for_ai
-from app.services.agent.async_operation_service import agent_async_operation_service
+from app.services.agent.durable_work_contracts import CustomerActivityDurableWorkReceipt
 from app.services.agent.tools.api_client import CRMAPIClientError, InternalCRMAPIClient
 from app.services.agent.tools.base import AgentToolContext, AgentToolResult, JsonDict
 from app.services.agent.work_summary_graph import (
@@ -57,7 +57,10 @@ from app.services.follow_up_task_query_service import (
     FollowUpTaskQueryService,
     follow_up_task_query_service,
 )
-from app.services.follow_up_task_reconciliation_evaluation_service import FollowUpTaskReconciliationDecision
+from app.services.follow_up_task_reconciliation_evaluation_service import (
+    FollowUpTaskReconciliationDecision,
+    FollowUpTaskReconciliationTaskDecision,
+)
 from app.services.follow_up_task_transition_execution_service import (
     FollowUpTaskTransitionExecutionService,
     FollowUpTaskTransitionExecutionStatus,
@@ -157,7 +160,8 @@ class CRMAgentToolService:
     ) -> JsonDict:
         lexical_payload = lexical_data if isinstance(lexical_data, dict) else {}
         lexical_items = [
-            item for item in lexical_payload.get("items", [])
+            item
+            for item in lexical_payload.get("items", [])
             if isinstance(item, dict) and isinstance(item.get("id"), (str, int)) and str(item.get("id"))
         ]
         visibility_predicate = self._customer_visibility_predicate(context)
@@ -299,11 +303,13 @@ class CRMAgentToolService:
         hidden_customer_count = 0
         for customer in customers:
             if self._can_view_customer(context, customer, user_id, customer_view_all, customer_view_own):
-                visible_customers.append({
-                    "id": customer.public_id,
-                    "account_name": customer.account_name,
-                    "visible": True,
-                })
+                visible_customers.append(
+                    {
+                        "id": customer.public_id,
+                        "account_name": customer.account_name,
+                        "visible": True,
+                    }
+                )
             else:
                 hidden_customer_count += 1
 
@@ -311,13 +317,15 @@ class CRMAgentToolService:
         hidden_lead_count = 0
         for lead in leads:
             if lead_view_all or (lead_view_own and (lead.owner_id == user_id or lead.creator_id == user_id)):
-                visible_leads.append({
-                    "id": lead.public_id,
-                    "lead_name": lead.lead_name,
-                    "contact_name": lead.contact_name,
-                    "contact_phone": lead.contact_phone,
-                    "visible": True,
-                })
+                visible_leads.append(
+                    {
+                        "id": lead.public_id,
+                        "lead_name": lead.lead_name,
+                        "contact_name": lead.contact_name,
+                        "contact_phone": lead.contact_phone,
+                        "visible": True,
+                    }
+                )
             else:
                 hidden_lead_count += 1
 
@@ -341,11 +349,13 @@ class CRMAgentToolService:
             conditions.append(Customer.account_name_norm.like(f"%{keyword}%"))
         if phone:
             conditions.append(
-                context.db.query(Contact.id).filter(
+                context.db.query(Contact.id)
+                .filter(
                     Contact.team_id == context.team_id,
                     Contact.customer_id == Customer.id,
                     Contact.mobile == phone,
-                ).exists()
+                )
+                .exists()
             )
         if not conditions:
             return []
@@ -395,12 +405,17 @@ class CRMAgentToolService:
     ) -> bool:
         if customer_view_all or (customer_view_own and customer.owner_id == user_id):
             return True
-        return context.db.query(CustomerMember.id).filter(
-            CustomerMember.team_id == context.team_id,
-            CustomerMember.customer_id == customer.id,
-            CustomerMember.user_id == user_id,
-            CustomerMember.is_active.is_(True),
-        ).first() is not None
+        return (
+            context.db.query(CustomerMember.id)
+            .filter(
+                CustomerMember.team_id == context.team_id,
+                CustomerMember.customer_id == customer.id,
+                CustomerMember.user_id == user_id,
+                CustomerMember.is_active.is_(True),
+            )
+            .first()
+            is not None
+        )
 
     @staticmethod
     def _clean_keywords(keywords: List[str]) -> List[str]:
@@ -465,7 +480,9 @@ class CRMAgentToolService:
         }
 
         async def call_db():
-            customer_public_id = self._resolve_customer_public_id(context, customer_id) if customer_id is not None else None
+            customer_public_id = (
+                self._resolve_customer_public_id(context, customer_id) if customer_id is not None else None
+            )
             return self.follow_up_query_service.list_tasks(
                 context.db,
                 team_id=context.team_id,
@@ -526,7 +543,9 @@ class CRMAgentToolService:
         }
 
         async def call_db():
-            customer_public_id = self._resolve_customer_public_id(context, customer_id) if customer_id is not None else None
+            customer_public_id = (
+                self._resolve_customer_public_id(context, customer_id) if customer_id is not None else None
+            )
             return self.work_summary_service.list_completed_work(
                 context.db,
                 team_id=context.team_id,
@@ -570,9 +589,7 @@ class CRMAgentToolService:
 
         async def run_graph():
             customer_public_id = (
-                self._resolve_customer_public_id(context, customer_id)
-                if customer_id is not None
-                else None
+                self._resolve_customer_public_id(context, customer_id) if customer_id is not None else None
             )
             outcome = await self.work_summary_graph_service.run(
                 WorkSummaryGraphRequest(
@@ -693,13 +710,17 @@ class CRMAgentToolService:
     ) -> JsonDict:
         action_type = _follow_up_transition_action_type(action)
         decision = FollowUpTaskReconciliationDecision(
-            decision=action_type,
-            confidence=1.0,
-            task_public_id=task_id,
             candidate_public_ids=(task_id,),
-            needs_confirmation=False,
-            proposed_due_at=proposed_due_at,
-            evidence_terms=tuple(filter(None, [reason, "agent_confirmed_task_transition"])),
+            task_decisions=(
+                FollowUpTaskReconciliationTaskDecision(
+                    decision=action_type,
+                    confidence=1.0,
+                    task_public_id=task_id,
+                    needs_confirmation=False,
+                    proposed_due_at=proposed_due_at,
+                    evidence_terms=tuple(filter(None, [reason, "agent_confirmed_task_transition"])),
+                ),
+            ),
         )
         plan = FollowUpTaskTransitionPlan(
             decision=decision,
@@ -712,7 +733,7 @@ class CRMAgentToolService:
                     in {
                         FollowUpTaskTransitionActionType.COMPLETE,
                         FollowUpTaskTransitionActionType.CANCEL,
-                        FollowUpTaskTransitionActionType.DELAY,
+                        FollowUpTaskTransitionActionType.POSTPONE,
                     },
                     requires_confirmation=False,
                     proposed_due_at=proposed_due_at,
@@ -729,20 +750,19 @@ class CRMAgentToolService:
             plan=plan,
             actor_id=str(context.user_id),
             expected_owner_id=str(context.user_id),
-            enabled=True,
             commit=True,
         )
         return {
             "plan": plan.to_dict(),
             "results": [result.to_dict() for result in results],
-            "executed": any(
-                result.status == FollowUpTaskTransitionExecutionStatus.EXECUTED for result in results
-            ),
+            "executed": any(result.status == FollowUpTaskTransitionExecutionStatus.EXECUTED for result in results),
         }
 
     @staticmethod
     def _customer_internal_id(context: AgentToolContext, customer_public_id: Union[str, int]) -> int:
-        if isinstance(customer_public_id, int) or (isinstance(customer_public_id, str) and customer_public_id.isdecimal()):
+        if isinstance(customer_public_id, int) or (
+            isinstance(customer_public_id, str) and customer_public_id.isdecimal()
+        ):
             customer = (
                 context.db.query(Customer)
                 .filter(Customer.team_id == context.team_id, Customer.id == int(customer_public_id))
@@ -776,11 +796,7 @@ class CRMAgentToolService:
     @staticmethod
     def _resolve_lead_public_id(context: AgentToolContext, lead_id: Union[str, int]) -> str:
         if isinstance(lead_id, int) or (isinstance(lead_id, str) and lead_id.isdecimal()):
-            lead = (
-                context.db.query(Lead)
-                .filter(Lead.team_id == context.team_id, Lead.id == int(lead_id))
-                .first()
-            )
+            lead = context.db.query(Lead).filter(Lead.team_id == context.team_id, Lead.id == int(lead_id)).first()
             if lead is None:
                 raise CRMAPIClientError("线索不存在或无权限访问", status_code=404)
             return str(lead.public_id)
@@ -840,97 +856,53 @@ class CRMAgentToolService:
 
         async def call_api():
             customer_public_id = self._resolve_customer_public_id(context, customer_id)
-            try:
-                return await self.api_client.request(
-                    "POST",
-                    f"/v1/customer-activities/{customer_public_id}",
-                    context.authorization,
-                    idempotency_key=action_key,
-                    params={"post_commit_mode": "async"},
-                    json={
-                        "activity_kind": activity_kind,
-                        "source_content": source_content,
-                        "title": title,
-                        "next_action": next_action,
-                        "next_follow_time": next_follow_time,
-                        "next_follow_time_source": "AGENT" if next_follow_time else None,
-                    },
-                )
-            except httpx.TimeoutException:
-                reconciled = await self._reconcile_created_customer_activity(
-                    context,
-                    customer_public_id=customer_public_id,
-                    activity_kind=activity_kind,
-                    source_content=source_content,
-                )
-                if reconciled is not None:
-                    return reconciled
-                raise
-
-        result = await self._run_write_tool(context, "create_customer_activity", payload, action_key, call_api)
-        if result.success:
-            self._bind_customer_activity_post_commit_operation(context, result.data)
-        return result
-
-    async def _reconcile_created_customer_activity(
-        self,
-        context: AgentToolContext,
-        *,
-        customer_public_id: str,
-        activity_kind: str,
-        source_content: str,
-    ) -> Optional[JsonDict]:
-        try:
-            listed = await self.api_client.request(
-                "GET",
+            response = await self.api_client.request(
+                "POST",
                 f"/v1/customer-activities/{customer_public_id}",
                 context.authorization,
+                idempotency_key=action_key,
+                params={"post_commit_mode": "async"},
+                json={
+                    "activity_kind": activity_kind,
+                    "source_content": source_content,
+                    "title": title,
+                    "next_action": next_action,
+                    "next_action_source": "AGENT" if next_action else None,
+                    "next_follow_time": next_follow_time,
+                    "next_follow_time_source": "AGENT" if next_follow_time else None,
+                },
             )
-        except Exception:
-            return None
-        for item in self._extract_items(listed):
-            if item.get("source_content") == source_content and item.get("activity_kind") == activity_kind:
-                return item
-        return None
+            self._customer_activity_durable_work_receipt(response)
+            return response
 
-    def _bind_customer_activity_post_commit_operation(self, context: AgentToolContext, data: object) -> None:
+        result = await self._run_write_tool(context, "create_customer_activity", payload, action_key, call_api)
+        if not result.success:
+            return result
+        result.durable_work = (self._customer_activity_durable_work_receipt(result.data),)
+        return result
+
+    @staticmethod
+    def _customer_activity_durable_work_receipt(
+        data: object,
+    ) -> CustomerActivityDurableWorkReceipt:
         payload = data if isinstance(data, dict) else {}
-        durable_work = payload.get("durable_work") if isinstance(payload.get("durable_work"), dict) else {}
-        job_public_id = durable_work.get("post_commit_job_public_id")
         activity_id = payload.get("id")
-        if not isinstance(job_public_id, str) or not job_public_id:
-            return
-        if not isinstance(activity_id, int):
-            return
-        source_user_message_id = context.source_user_message_id
-        if source_user_message_id is None:
-            source_user_message_id = agent_async_operation_service.latest_session_user_message_id(
-                context.db,
-                team_id=context.team_id,
-                user_id=context.user_id,
-                session_id=context.session_id,
-            )
-        try:
-            agent_async_operation_service.bind_source(
-                context.db,
-                operation_key=f"customer-activity-post-commit:{job_public_id}",
-                request_id=job_public_id,
-                team_id=context.team_id,
-                user_id=context.user_id,
-                session_id=context.session_id,
-                source_user_message_id=source_user_message_id,
-                source_assistant_message_id=None,
-                operation_type="customer_activity_post_commit",
-                resource_type="customer_activity",
-                resource_id=activity_id,
-                summary="跟进已记录，任务对账处理中",
-            )
-        except Exception:
-            logger.exception(
-                "绑定客户活动后提交异步操作失败: session_id=%s job_public_id=%s",
-                context.session_id,
-                job_public_id,
-            )
+        durable_work = payload.get("durable_work")
+        if not isinstance(activity_id, int) or activity_id <= 0:
+            raise ValueError("客户活动写入结果缺少有效活动标识")
+        if not isinstance(durable_work, dict):
+            raise ValueError("客户活动写入结果缺少后台任务回执")
+        post_commit_job_public_id = durable_work.get("post_commit_job_public_id")
+        intelligence_request_id = durable_work.get("customer_intelligence_request_id")
+        if not isinstance(post_commit_job_public_id, str) or not post_commit_job_public_id:
+            raise ValueError("客户活动写入结果缺少跟进任务对账回执")
+        if not isinstance(intelligence_request_id, str) or not intelligence_request_id:
+            raise ValueError("客户活动写入结果缺少客户档案提炼回执")
+        return CustomerActivityDurableWorkReceipt(
+            activity_id=activity_id,
+            post_commit_job_public_id=post_commit_job_public_id,
+            customer_intelligence_request_id=intelligence_request_id,
+        )
 
     async def create_lead(
         self,
@@ -1160,7 +1132,9 @@ class CRMAgentToolService:
 
         return await self._run_read_tool(context, "list_customer_opportunities", payload, call_api)
 
-    async def get_opportunity_detail(self, context: AgentToolContext, opportunity_id: Union[str, int]) -> AgentToolResult:
+    async def get_opportunity_detail(
+        self, context: AgentToolContext, opportunity_id: Union[str, int]
+    ) -> AgentToolResult:
         payload = {"opportunity_id": opportunity_id}
 
         async def call_api():
@@ -1300,13 +1274,13 @@ class CRMAgentToolService:
         )
         return result
 
-    async def _get_active_opportunity_stage_context(self, context: AgentToolContext, opportunities_value: object) -> list[JsonDict]:
+    async def _get_active_opportunity_stage_context(
+        self, context: AgentToolContext, opportunities_value: object
+    ) -> list[JsonDict]:
         opportunities = self._extract_items(opportunities_value)
-        active_opportunities = [
-            opportunity
-            for opportunity in opportunities
-            if str(opportunity.get("status")) == "0"
-        ][:3]
+        active_opportunities = [opportunity for opportunity in opportunities if str(opportunity.get("status")) == "0"][
+            :3
+        ]
         stage_context: list[JsonDict] = []
         for opportunity in active_opportunities:
             opportunity_id = opportunity.get("id")
@@ -1324,16 +1298,20 @@ class CRMAgentToolService:
                     f"/v1/opportunities/{opportunity_public_id}/procurement-stages",
                     context.authorization,
                 )
-                stage_context.append({
-                    "opportunity": detail,
-                    "procurement_stages": stages if isinstance(stages, list) else [],
-                })
+                stage_context.append(
+                    {
+                        "opportunity": detail,
+                        "procurement_stages": stages if isinstance(stages, list) else [],
+                    }
+                )
             except CRMAPIClientError as exc:
-                stage_context.append({
-                    "opportunity_id": opportunity_id,
-                    "error": exc.message,
-                    "status_code": exc.status_code,
-                })
+                stage_context.append(
+                    {
+                        "opportunity_id": opportunity_id,
+                        "error": exc.message,
+                        "status_code": exc.status_code,
+                    }
+                )
         return stage_context
 
     @staticmethod
@@ -1391,7 +1369,9 @@ class CRMAgentToolService:
             )
             return AgentToolResult(tool_name=tool_name, success=True, data=data, tool_call_id=tool_call.id)
         except CRMAPIClientError as exc:
-            return self._mark_tool_failed(context, tool_call, tool_name, exc.message, exc.status_code, exc.response_json)
+            return self._mark_tool_failed(
+                context, tool_call, tool_name, exc.message, exc.status_code, exc.response_json
+            )
         except Exception as exc:
             return self._mark_tool_failed(context, tool_call, tool_name, _exception_message(exc), None, None)
 
@@ -1410,7 +1390,6 @@ class CRMAgentToolService:
                 team_id=context.team_id,
                 user_id=context.user_id,
                 session_id=context.session_id,
-                task_id=context.task_id,
                 action_key=action_key,
                 request_hash=request_hash,
             ),
@@ -1486,7 +1465,6 @@ class CRMAgentToolService:
                 team_id=context.team_id,
                 user_id=context.user_id,
                 session_id=context.session_id,
-                task_id=context.task_id,
                 tool_name=tool_name,
                 request_json=request_json,
             ),
@@ -1543,14 +1521,14 @@ def _compact_text(value: str | None, *, limit: int) -> str | None:
     compacted = " ".join(value.split())
     if len(compacted) <= limit:
         return compacted
-    return f"{compacted[:limit - 1]}..."
+    return f"{compacted[: limit - 1]}..."
 
 
 def _follow_up_transition_action_type(action: str) -> str:
     return {
         "complete": FollowUpTaskTransitionActionType.COMPLETE,
         "cancel": FollowUpTaskTransitionActionType.CANCEL,
-        "delay": FollowUpTaskTransitionActionType.DELAY,
+        "postpone": FollowUpTaskTransitionActionType.POSTPONE,
         "keep_open": FollowUpTaskTransitionActionType.KEEP_OPEN,
     }.get(str(action or "").strip(), FollowUpTaskTransitionActionType.NOOP)
 
