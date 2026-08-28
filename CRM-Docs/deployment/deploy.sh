@@ -65,7 +65,7 @@ upload_to_server() {
     ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "$SERVER" "mkdir -p $DEPLOY_DIR $BACKUP_DIR"
 
     # 上传文件（镜像包 + compose 配置 + secrets）
-    scp -i "$SSH_KEY" -o StrictHostKeyChecking=no \
+    scp -O -i "$SSH_KEY" -o StrictHostKeyChecking=no \
         "$PROJECT_DIR/crm-images.tar" \
         "$SCRIPT_DIR/docker-compose.yml" \
         "$SCRIPT_DIR/docker-compose.server.yml" \
@@ -73,7 +73,7 @@ upload_to_server() {
 
     # 上传 deployment/secrets 目录
     ssh -i "$SSH_KEY" "$SERVER" "mkdir -p $DEPLOY_DIR/secrets"
-    scp -i "$SSH_KEY" -o StrictHostKeyChecking=no \
+    scp -O -i "$SSH_KEY" -o StrictHostKeyChecking=no \
         "$SCRIPT_DIR/secrets/db_password.txt" \
         "$SCRIPT_DIR/secrets/secret_key.txt" \
         "$SCRIPT_DIR/secrets/customer_evidence_embedding_api_key.txt" \
