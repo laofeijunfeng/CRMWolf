@@ -177,18 +177,25 @@ class CRMReadToolRegistry:
             (
                 "query_customers",
                 "customer",
-                "查询权限范围内的客户列表。客户 status 仅表示 0=跟进中、1=已成交、2=已输单、3=已沉寂，不表示客户重要程度；“重点客户”没有内置字段或默认判断标准。",
+                (
+                    "查询权限范围内的客户列表。客户 status 仅表示 0=跟进中、1=已成交、"
+                    "2=已输单、3=已沉寂，不表示客户重要程度；“重点客户”没有内置字段或默认判断标准。"  # noqa: RUF001
+                ),
             ),
             ("query_customer_contacts", "contact", "查询单个客户的联系人。"),
             (
                 "query_customer_activities",
                 "customer_activity",
-                "查询单个客户的活动记录。询问最近跟进、最新进展或最近沟通时，使用 customer_id 精确过滤；得到 SUCCESS、PARTIAL 或 EMPTY 后直接回答，不要再查询任务或客户上下文。",
+                (
+                    "查询单个客户的活动记录。询问最近跟进、最新进展或最近沟通时，"  # noqa: RUF001
+                    "使用 customer_id 精确过滤；得到 SUCCESS、PARTIAL 或 EMPTY 后直接回答，"  # noqa: RUF001
+                    "不要再查询任务或客户上下文。"
+                ),
             ),
             (
                 "query_follow_up_tasks",
                 "follow_up_task",
-                "查询客户跟进任务；该工具只允许 scope=mine，不得使用 accessible。",
+                "查询客户跟进任务；该工具只允许 scope=mine，不得使用 accessible。",  # noqa: RUF001
             ),
             ("query_completed_work", "completed_work", "查询当前用户已完成的工作事实。"),
         )
@@ -255,10 +262,10 @@ def _query_tool_description(
     naming_hint = ""
     if definition.resource == "customer":
         naming_hint = (
-            " 客户名称字段是 account_name，不是 name；客户标识字段是 public_id，不是 id。"
-            "列表查询 page_size 使用 50，以一次返回本轮允许的完整结果；不要自行改成 20。"
-            "精确名称使用 account_name eq，模糊名称使用 account_name contains 或 keyword contains。"
-            "空结果表示当前权限范围内没有匹配项；空结果后不得放宽条件或重复查询。"
+            " 客户名称字段是 account_name，不是 name；客户标识字段是 public_id，不是 id。"  # noqa: RUF001
+            "列表查询 page_size 使用 50，以一次返回本轮允许的完整结果；不要自行改成 20。"  # noqa: RUF001
+            "精确名称使用 account_name eq，模糊名称使用 account_name contains 或 keyword contains。"  # noqa: RUF001
+            "空结果表示当前权限范围内没有匹配项；空结果后不得放宽条件或重复查询。"  # noqa: RUF001
         )
     return (
         f"{base_description} resource 固定为 {definition.resource}。"
@@ -266,7 +273,7 @@ def _query_tool_description(
         f"projection 仅可使用: {projections}。"
         f"filters 可使用: {filters or '无'}。"
         f"sorts 可使用: {sorts}。"
-        f"scope 可使用: {scopes}；默认 scope 为 {definition.default_scope}。"
+        f"scope 可使用: {scopes}；默认 scope 为 {definition.default_scope}。"  # noqa: RUF001
         f"必须提供的精确过滤字段: {exact_filters}。"
         f"{naming_hint}"
     )

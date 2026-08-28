@@ -15,7 +15,8 @@ from langchain.agents.middleware import before_model
 from langchain.agents.structured_output import StructuredOutputError, ToolStrategy
 from langchain_core.tools import StructuredTool
 from langchain_openai import ChatOpenAI
-from pydantic import Field, ValidationError, model_validator
+from openai import APIConnectionError, APIStatusError, APITimeoutError
+from pydantic import ConfigDict, Field, ValidationError, model_validator
 
 from app.services.agent.query.executor import CRMQueryExecutionError
 from app.services.agent.query.registry import (
@@ -58,26 +59,44 @@ QUERY_AGENT_SYSTEM_PROMPT = """你是 CRM Query Agent, 只负责本轮只读查�
 5. 回答必须在 evidence_refs 中引用本轮真实返回的 query_id、ref_id、fact_id 或 citation_id。
 6. 条件不足时返回 CLARIFICATION_REQUIRED, 不要猜测, 也不要调用无关工具。
 7. 不输出 Markdown 客户表格; 只返回规定的 structured output, 由 Agent UI 负责渲染。
-8. CRMQueryResult 为 SUCCESS、PARTIAL 或 EMPTY 时都表示工具调用成功。EMPTY 是当前权限范围内的权威空结果，必须立即回答，不得放宽条件、缩短关键词、替换字段或重复查询。
-9. PARTIAL 表示服务端已经按本轮预算返回可展示结果和 total；除非用户明确要求下一页，否则不得自动翻页。
-10. 客户列表的 answer 只概括查询条件、命中数量和必要提示，不得逐条复述客户；实体列表由 Agent UI 渲染。
-11. get_customer_context 只能使用 server_authoritative_entity_refs 中的客户引用，或本轮 query_customers 返回的真实 EntityRef；不得根据用户文本自行构造 EntityRef。
-12. server_authoritative_entity_refs 非空时，必须直接围绕这些实体查询；不得重新查询上一轮客户列表，也不得改选其他客户。
-13. 每个工具只能使用自身 schema 和说明允许的 scope；不得把一个资源的 scope 复制到另一个资源。query_follow_up_tasks 必须使用 scope=mine。
-14. 客户 status 仅表示 0=跟进中、1=已成交、2=已输单、3=已沉寂，不表示客户重要程度。用户只说“重点客户”而未给出可执行判断标准时，必须直接返回 CLARIFICATION_REQUIRED，不得猜测 status 或调用工具。
-15. 使用最少工具完成回答。同一工具不得重复调用，除非第一次明确返回 QUERY_INVALID 且仍有一次纠正预算，或用户明确要求下一页。
-16. 用户询问已选客户“最近跟进、最新进展、最近沟通”等活动事实时，只调用一次 query_customer_activities，以 customer_id 精确过滤；SUCCESS、PARTIAL 或 EMPTY 后立即回答。不要同时调用 get_customer_context、query_follow_up_tasks 或 query_completed_work。只有用户明确询问待办/跟进任务时才调用 query_follow_up_tasks。
+8. CRMQueryResult 为 SUCCESS、PARTIAL 或 EMPTY 时都表示工具调用成功。
+   EMPTY 是当前权限范围内的权威空结果, 必须立即回答, 不得放宽条件、缩短关键词、替换字段或重复查询。
+9. PARTIAL 表示服务端已经按本轮预算返回可展示结果和 total;
+   除非用户明确要求下一页, 否则不得自动翻页。
+10. 客户列表的 answer 只概括查询条件、命中数量和必要提示, 不得逐条复述客户;
+    实体列表由 Agent UI 渲染。
+11. get_customer_context 只能使用 server_authoritative_entity_refs 中的客户引用,
+    或本轮 query_customers 返回的真实 EntityRef; 不得根据用户文本自行构造 EntityRef。
+12. server_authoritative_entity_refs 非空时, 必须直接围绕这些实体查询;
+    不得重新查询上一轮客户列表, 也不得改选其他客户。
+13. 每个工具只能使用自身 schema 和说明允许的 scope;
+    不得把一个资源的 scope 复制到另一个资源。query_follow_up_tasks 必须使用 scope=mine。
+14. 客户 status 仅表示 0=跟进中、1=已成交、2=已输单、3=已沉寂, 不表示客户重要程度。
+    用户只说“重点客户”而未给出可执行判断标准时, 必须直接返回 CLARIFICATION_REQUIRED,
+    不得猜测 status 或调用工具。
+15. 使用最少工具完成回答。同一工具不得重复调用,
+    除非第一次明确返回 QUERY_INVALID 且仍有一次纠正预算, 或用户明确要求下一页。
+16. 用户询问已选客户“最近跟进、最新进展、最近沟通”等活动事实时,
+    只调用一次 query_customer_activities, 以 customer_id 精确过滤。
+    SUCCESS、PARTIAL 或 EMPTY 后立即回答。不要同时调用 get_customer_context、
+    query_follow_up_tasks 或 query_completed_work。只有用户明确询问待办/跟进任务时才调用
+    query_follow_up_tasks。
 """
 
 
 class CRMQueryAgentLimits(QueryContractModel):
     """Hard budgets enforced by code for one ephemeral Query Agent turn."""
 
+    model_config = ConfigDict(protected_namespaces=())
+
     max_tool_calls: int = Field(default=4, ge=1, le=20)
     max_rows_per_tool: int = Field(default=50, ge=1, le=100)
     max_total_entities: int = Field(default=100, ge=1, le=500)
     max_query_corrections: int = Field(default=1, ge=0, le=3)
     max_structured_output_corrections: int = Field(default=1, ge=0, le=3)
+    # Retries are delegated to the model transport only. The surrounding
+    # agent turn is never replayed, so CRM read tools cannot be duplicated.
+    model_retry_attempts: int = Field(default=2, ge=0, le=3)
     tool_timeout_seconds: float = Field(default=8, gt=0, le=60)
     # A query turn may require one model call to select a tool and another
     # model call to summarize its authoritative result. Twenty seconds was
@@ -205,6 +224,11 @@ class CRMQueryAgentResult(QueryContractModel):
     response: CRMQueryAgentResponse
     query_results: list[CRMQueryResult] = Field(default_factory=list, max_length=20)
     customer_context_results: list[CustomerContextResult] = Field(default_factory=list, max_length=20)
+    # These refs are injected by the Root Query execution boundary, never by
+    # the model. They preserve a deterministic customer binding even when the
+    # selected read tool returns contacts, activities, or tasks rather than
+    # customer rows.
+    authoritative_entity_refs: list[EntityRef] = Field(default_factory=list, max_length=20)
     trace: CRMQueryAgentTrace
 
 
@@ -333,34 +357,6 @@ class _TurnExecution:
                 evidence_refs=[result.query_id],
             )
 
-    def timeout_fallback_response(self) -> CRMQueryAgentResponse | None:
-        """Return a grounded answer when CRM data is ready but prose generation times out."""
-
-        with self._state_lock:
-            if self.terminal_error is not None:
-                return None
-            empty_response = self.authoritative_empty_response()
-            if empty_response is not None:
-                return empty_response
-            if not self.query_results and not self.customer_context_results:
-                return None
-
-            evidence_refs = sorted(_evidence_refs(self.query_results, self.customer_context_results))
-            total = sum(
-                result.total if result.total is not None else len(result.rows)
-                for result in self.query_results
-            )
-            if self.query_results:
-                resource_names = {_resource_display_name(result.resource) for result in self.query_results}
-                resource_label = "、".join(sorted(resource_names))
-                answer = f"已查询到 {total} 条{resource_label}。智能摘要暂时超时，以下展示已查询到的结构化结果。"
-            else:
-                answer = "已查询到相关客户信息。智能摘要暂时超时，以下展示已查询到的结构化结果。"
-            return CRMQueryAgentResponse(
-                status="ANSWERED",
-                answer=answer,
-                evidence_refs=evidence_refs,
-            )
 
     def remaining_timeout(self, stage_timeout: float) -> float:
         """Return the smaller of a stage budget and the request's remaining deadline."""
@@ -514,7 +510,7 @@ class CRMQueryAgent:
                 "api_key": model_config.api_key,
                 "base_url": model_config.api_host,
                 "temperature": model_config.temperature,
-                "max_retries": 0,
+                "max_retries": self._limits.model_retry_attempts,
             }
             if model_config.enable_thinking is not None:
                 model_kwargs["extra_body"] = {"enable_thinking": model_config.enable_thinking}
@@ -545,17 +541,10 @@ class CRMQueryAgent:
                     config={"recursion_limit": self._limits.max_tool_calls * 2 + 4},
                 )
         except TimeoutError as exc:
-            fallback_response = turn.timeout_fallback_response()
-            if fallback_response is not None:
-                logger.warning(
-                    "Query Agent summary timed out after authoritative results; returning deterministic fallback"
-                )
-                return CRMQueryAgentResult(
-                    response=fallback_response,
-                    query_results=turn.query_results,
-                    customer_context_results=turn.customer_context_results,
-                    trace=turn.trace("COMPLETED"),
-                )
+            # A CRM tool result is not a complete Query response.  The turn
+            # remains failed when the model cannot produce the typed answer,
+            # so callers never observe a successful response with an implicit
+            # or partially rendered fallback.
             raise execution_error(
                 QueryError(
                     code="UPSTREAM_TIMEOUT",
@@ -574,6 +563,14 @@ class CRMQueryAgent:
                 )
             ) from exc
         except Exception as exc:
+            model_error = _classify_model_transport_error(exc)
+            if model_error is not None:
+                logger.warning(
+                    "Query Agent model transport failed after bounded retries: type=%s status=%s",
+                    type(exc).__name__,
+                    getattr(exc, "status_code", None),
+                )
+                raise execution_error(model_error) from exc
             raise execution_error(
                 QueryError(
                     code="INTERNAL_ERROR",
@@ -597,7 +594,7 @@ class CRMQueryAgent:
                 turn.trace(),
             ) from exc
 
-        self._validate_grounding(response, turn)
+        response = self._validate_grounding(response, turn)
         stop_reason: CRMQueryAgentStopReason = (
             "CLARIFICATION_REQUIRED" if response.status == "CLARIFICATION_REQUIRED" else "COMPLETED"
         )
@@ -653,14 +650,11 @@ class CRMQueryAgent:
                 if spec.resource is not None:
                     page_size = kwargs.get("page_size")
                     if isinstance(page_size, int) and page_size > self._limits.max_rows_per_tool:
-                        error = QueryError(
-                            code="QUERY_LIMIT_EXCEEDED",
-                            message="Requested page_size exceeds the Query Agent row limit",
-                            retryable=False,
-                            field="page_size",
-                        )
-                        turn.record_error(spec.name, error, started_at=started_at)
-                        return _error_payload(error)
+                        # The model is allowed to over-request a page, but the
+                        # deterministic tool boundary owns the actual budget.
+                        # Clamp here instead of making an otherwise valid read
+                        # fail merely because a provider defaulted to 100 rows.
+                        kwargs["page_size"] = self._limits.max_rows_per_tool
                 try:
                     async with asyncio.timeout(turn.remaining_timeout(self._limits.tool_timeout_seconds)):
                         result = await self._registry.execute(spec.name, context, kwargs)
@@ -708,9 +702,9 @@ class CRMQueryAgent:
         )
 
     @staticmethod
-    def _validate_grounding(response: CRMQueryAgentResponse, turn: _TurnExecution) -> None:
+    def _validate_grounding(response: CRMQueryAgentResponse, turn: _TurnExecution) -> CRMQueryAgentResponse:
         if response.status == "CLARIFICATION_REQUIRED":
-            return
+            return response
         if not turn.query_results and not turn.customer_context_results:
             raise CRMQueryAgentExecutionError(
                 QueryError(
@@ -723,6 +717,9 @@ class CRMQueryAgent:
         allowed_refs = _evidence_refs(turn.query_results, turn.customer_context_results)
         unknown_refs = set(response.evidence_refs) - allowed_refs
         if unknown_refs:
+            # Evidence IDs are server-owned. Never repair, drop, or reinterpret
+            # a model-generated reference: doing so would hide a contract
+            # violation and could present an answer as grounded when it is not.
             raise CRMQueryAgentExecutionError(
                 QueryError(
                     code="MODEL_OUTPUT_INVALID",
@@ -731,6 +728,40 @@ class CRMQueryAgent:
                 ),
                 turn.trace(),
             )
+        return response
+
+
+def _classify_model_transport_error(error: Exception) -> QueryError | None:
+    """Map only model-provider transport failures to retryable query errors.
+
+    ChatOpenAI applies ``max_retries`` inside the model invocation boundary.
+    If those bounded retries are exhausted, this classifier preserves the
+    distinction between an unavailable provider and a non-retryable model or
+    application error.
+    """
+
+    if isinstance(error, (APITimeoutError, TimeoutError)):
+        return QueryError(
+            code="UPSTREAM_TIMEOUT",
+            message="Query Agent model timed out",
+            retryable=True,
+        )
+    if isinstance(error, APIConnectionError):
+        return QueryError(
+            code="UPSTREAM_UNAVAILABLE",
+            message="Query Agent model is temporarily unavailable",
+            retryable=True,
+        )
+    if isinstance(error, APIStatusError):
+        status_code = getattr(error, "status_code", None)
+        if status_code == 429 or (isinstance(status_code, int) and status_code >= 500):
+            return QueryError(
+                code="UPSTREAM_UNAVAILABLE",
+                message="Query Agent model is temporarily unavailable",
+                retryable=True,
+            )
+    return None
+
 
 
 def _resource_display_name(resource: str) -> str:

@@ -10,6 +10,8 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
 from app.crud.sales_commitment import FollowUpTaskConfirmationPromptDeliveryCRUD, follow_up_task_crud
+from app.models.agent import AgentMessage, AgentSession
+from app.models.agent_persistence import AgentUIAction
 from app.models.customer import Customer
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_vector_document import CustomerVectorDocument
@@ -59,6 +61,9 @@ def db_session(monkeypatch):
     Base.metadata.create_all(
         engine,
         tables=[
+            AgentSession.__table__,
+            AgentMessage.__table__,
+            AgentUIAction.__table__,
             Customer.__table__,
             CustomerActivity.__table__,
             CustomerVectorDocument.__table__,

@@ -13,10 +13,7 @@ from app.core.database import get_db
 from app.core.deps import get_current_active_user, get_current_user_team, security
 from app.crud.agent import agent_session_crud, agent_workflow_action_crud
 from app.crud.permission import permission_crud
-from app.crud.sales_commitment import (
-    follow_up_task_confirmation_case_crud,
-    follow_up_task_confirmation_prompt_delivery_crud,
-)
+from app.crud.sales_commitment import follow_up_task_confirmation_case_crud
 from app.models.user import User
 from app.schemas.agent import (
     AgentAsyncOperationResponse,
@@ -411,8 +408,12 @@ async def list_agent_messages(
             if isinstance(action.target.get("follow_up_confirmation_case_public_id"), str)
             and action.target.get("follow_up_confirmation_case_public_id")
         ]
-        legacy_actions = [action for action in follow_up_actions if action not in explicit_case_actions]
-        follow_up_case_statuses_by_action: dict[str, str] = {}
+        unbound_follow_up_actions = [
+            action for action in follow_up_actions if action not in explicit_case_actions
+        ]
+        follow_up_case_statuses_by_action: dict[str, str] = {
+            action.public_id: "READ_ONLY" for action in unbound_follow_up_actions
+        }
 
         if explicit_case_actions:
             explicit_case_ids = [
@@ -442,36 +443,6 @@ async def list_agent_messages(
                         "MISSING",
                     )
 
-        if legacy_actions:
-            try:
-                legacy_case_candidates = (
-                    follow_up_task_confirmation_prompt_delivery_crud.list_agent_message_case_statuses(
-                        db,
-                        team_id=team_id,
-                        session_id=session_id,
-                        message_ids=[item.message_id for item in items],
-                    )
-                )
-            except Exception:
-                db.rollback()
-                logger.exception(
-                    "读取 Agent 历史跟进确认投递状态失败，旧卡片降级为只读: session_id=%s",
-                    session_id,
-                )
-                follow_up_case_statuses_by_action.update(
-                    {action.public_id: "LOOKUP_FAILED" for action in legacy_actions}
-                )
-            else:
-                for action in legacy_actions:
-                    candidates = {case_id: status for case_id, status in legacy_case_candidates.get(
-                        action.message_id,
-                        [],
-                    )}
-                    if len(candidates) == 1:
-                        follow_up_case_statuses_by_action[action.public_id] = next(iter(candidates.values()))
-                    else:
-                        # Missing or ambiguous legacy delivery cannot identify the Case safely.
-                        follow_up_case_statuses_by_action[action.public_id] = "READ_ONLY"
         items = project_interaction_action_states(
             items,
             actions,

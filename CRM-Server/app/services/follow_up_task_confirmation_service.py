@@ -14,6 +14,10 @@ from app.models.sales_commitment import (
     FollowUpTaskConfirmationStatus,
 )
 from app.schemas.sales_commitment import FollowUpTaskConfirmationCaseInternalCreate
+from app.services.follow_up_confirmation_case_lifecycle_service import (
+    FollowUpConfirmationCaseLifecycleService,
+    follow_up_confirmation_case_lifecycle_service,
+)
 from app.services.follow_up_parser import follow_up_parser_service
 from app.services.follow_up_task_confirmation_cleanup_service import FollowUpTaskConfirmationCancelReason
 from app.services.follow_up_task_transition_plan_service import (
@@ -175,9 +179,18 @@ class FollowUpTaskConfirmationService:
         *,
         confirmation_case_crud: FollowUpTaskConfirmationCaseCrudProtocol = follow_up_task_confirmation_case_crud,
         task_crud: FollowUpTaskCrudProtocol = follow_up_task_crud,
+        case_lifecycle: FollowUpConfirmationCaseLifecycleService | None = None,
     ) -> None:
         self.confirmation_case_crud = confirmation_case_crud
         self.task_crud = task_crud
+        self.case_lifecycle = case_lifecycle or (
+            follow_up_confirmation_case_lifecycle_service
+            if confirmation_case_crud is follow_up_task_confirmation_case_crud
+            else FollowUpConfirmationCaseLifecycleService(
+                case_crud=confirmation_case_crud,
+                action_repository=None,
+            )
+        )
 
     def create_case_from_plan_action(
         self,
@@ -235,13 +248,12 @@ class FollowUpTaskConfirmationService:
             for duplicate_case in pending_cases:
                 if duplicate_case.id == case.id:
                     continue
-                self.confirmation_case_crud.mark_cancelled(
+                self.case_lifecycle.cancel_locked_case(
                     db,
-                    duplicate_case,
+                    team_id=team_id,
+                    case=duplicate_case,
                     cancelled_by_id=actor_id,
-                    cancelled_reason=(
-                        FollowUpTaskConfirmationCancelReason.DUPLICATE_ACTIVE_CASE_SUPERSEDED
-                    ),
+                    reason=FollowUpTaskConfirmationCancelReason.DUPLICATE_ACTIVE_CASE_SUPERSEDED,
                     commit=False,
                 )
             case = self._maybe_upgrade_pending_case(
@@ -357,9 +369,10 @@ class FollowUpTaskConfirmationService:
         if case is None or case.status != FollowUpTaskConfirmationStatus.PENDING:
             return case, decision
         if self._is_expired(case, now=base_date):
-            expired = self.confirmation_case_crud.mark_expired(
+            expired = self.case_lifecycle.expire_locked_case(
                 db,
-                case,
+                team_id=team_id,
+                case=case,
                 expired_at=base_date,
                 commit=commit,
             )

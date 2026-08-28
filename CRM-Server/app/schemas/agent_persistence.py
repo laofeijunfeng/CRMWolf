@@ -91,6 +91,7 @@ AgentUIActionType = Literal[
 AgentUIActionConsumptionMode = Literal["REUSABLE", "ONE_SHOT"]
 AgentUIActionStatus = Literal["ACTIVE", "CONSUMING", "CONSUMED", "EXPIRED", "REVOKED"]
 AgentUIActionConsumptionOutcome = Literal["ACQUIRED", "REPLAY", "REUSABLE"]
+AgentUIActionRootContextRole = Literal["RESUMABLE_WORKFLOW", "PENDING_CASE", "PROJECTION_ONLY"]
 
 
 class AgentUIActionRegistration(AgentPersistenceContract):
@@ -100,6 +101,7 @@ class AgentUIActionRegistration(AgentPersistenceContract):
     session_id: int = Field(gt=0)
     message_id: int = Field(gt=0)
     action_type: AgentUIActionType
+    root_context_role: AgentUIActionRootContextRole
     target: dict[str, JsonValue]
     consumption_mode: AgentUIActionConsumptionMode
     expires_at: datetime | None = None
@@ -118,6 +120,7 @@ class AgentUIActionRecord(AgentPersistenceContract):
     session_id: int = Field(gt=0)
     message_id: int = Field(gt=0)
     action_type: AgentUIActionType
+    root_context_role: AgentUIActionRootContextRole
     target: dict[str, JsonValue]
     consumption_mode: AgentUIActionConsumptionMode
     status: AgentUIActionStatus

@@ -8,7 +8,8 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
 from app.crud.sales_commitment import follow_up_task_confirmation_case_crud, follow_up_task_crud
-from app.models.agent import AgentWorkflowAction
+from app.models.agent import AgentMessage, AgentSession, AgentWorkflowAction
+from app.models.agent_persistence import AgentUIAction
 from app.models.customer import Customer
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_vector_document import CustomerVectorDocument
@@ -91,7 +92,10 @@ def db_session(monkeypatch):
             FollowUpTaskConfirmationCase.__table__,
             FollowUpTaskConfirmationPromptDelivery.__table__,
             FollowUpTaskReconciliationRun.__table__,
+            AgentSession.__table__,
+            AgentMessage.__table__,
             AgentWorkflowAction.__table__,
+            AgentUIAction.__table__,
         ],
     )
     Session = sessionmaker(bind=engine)

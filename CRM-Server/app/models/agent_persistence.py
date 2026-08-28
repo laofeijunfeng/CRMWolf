@@ -88,6 +88,14 @@ class AgentUIActionConsumptionMode:
     ONE_SHOT = "ONE_SHOT"
 
 
+class AgentUIActionRootContextRole:
+    """How an action participates in Root turn context resolution."""
+
+    RESUMABLE_WORKFLOW = "RESUMABLE_WORKFLOW"
+    PENDING_CASE = "PENDING_CASE"
+    PROJECTION_ONLY = "PROJECTION_ONLY"
+
+
 class AgentUIAction(Base):
     """Server-owned action target and one-shot consumption ledger."""
 
@@ -117,6 +125,11 @@ class AgentUIAction(Base):
         comment="Action所属消息ID",
     )
     action_type: Mapped[str] = mapped_column(String(40), nullable=False, comment="Agent UI Action类型")
+    root_context_role: Mapped[str] = mapped_column(
+        String(24),
+        nullable=False,
+        comment="Root上下文角色: 可恢复Workflow、待确认事项或仅展示投影",
+    )
     target_json: Mapped[JSONObject] = mapped_column(JSON, nullable=False, comment="服务端签发的不可变Action目标")
     consumption_mode: Mapped[str] = mapped_column(String(20), nullable=False, comment="REUSABLE或ONE_SHOT")
     status: Mapped[str] = mapped_column(

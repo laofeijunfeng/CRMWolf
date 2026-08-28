@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Final
+from typing import Final, Literal
 
 RAW_HTML_PATTERN: Final[str] = r"<(?:[A-Za-z][^>]*|/[A-Za-z][^>]*|![^>]*|\?[^>]*)>"
 _RAW_HTML_RE = re.compile(RAW_HTML_PATTERN)
@@ -151,6 +151,22 @@ def _split_gfm_table_row(line: str) -> list[str]:
         current.append("\\")
     cells.append("".join(current).strip())
     return cells
+
+
+def normalize_agent_markdown_for_ui(value: str) -> tuple[str, Literal["plain", "markdown"]]:
+    """Return model text in the closed Agent UI dialect without failing a turn.
+
+    Assistant prose is model output and may contain Markdown constructs that the
+    Agent UI intentionally does not support, such as reference-style links or
+    tables.  Those constructs must not invalidate the whole CRM response.  Keep
+    valid Markdown as-is; otherwise project it to safe plain text.
+    """
+
+    try:
+        validate_agent_markdown(value)
+    except ValueError:
+        return project_agent_markdown_to_plain_text(value), "plain"
+    return value, "markdown"
 
 
 def validate_agent_markdown(text: str) -> None:

@@ -34,6 +34,7 @@ def _mysql_integration_enabled() -> bool:
 
 def _continuation(workflow_ref: WorkflowRef) -> WorkflowContinuation:
     return WorkflowContinuation(
+        root_thread_id="crm_agent_turn:test",
         workflow_ref=workflow_ref,
         parent_checkpoint_id=f"cp_root_{workflow_ref.workflow_id}",
         subgraph_checkpoint_ns=f"workflow_subgraph:{workflow_ref.workflow_id}",
@@ -73,6 +74,7 @@ def _seed_confirmation_action(*, suffix: str) -> tuple[int, str]:
                 session_id=session.id,
                 message_id=message.id,
                 action_type="submit_interaction",
+                root_context_role="RESUMABLE_WORKFLOW",
                 target={
                     "interaction_type": "confirmation",
                     "workflow_continuation": _continuation(workflow_ref).model_dump(mode="json"),

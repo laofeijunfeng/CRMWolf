@@ -2,16 +2,20 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from sqlalchemy import inspect
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
 
 from app.models.customer import Customer
 from app.models.customer_fact import CustomerFact, CustomerFactStatus
-from app.services.customer_knowledge_candidate_service import CustomerVisibilityPredicate
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from sqlalchemy.orm import Session
+
+    from app.services.customer_knowledge_candidate_service import CustomerVisibilityPredicate
 
 
 @dataclass(frozen=True)
@@ -43,6 +47,40 @@ class CustomerAliasService:
         terms = [query, _normalize_text(query)]
         terms.extend(_split_terms(query))
         return _dedupe_non_empty(terms)[:limit]
+
+    def list_aliases_for_customer(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        customer_id: int,
+        account_name: str,
+        limit: int = 20,
+    ) -> list[str]:
+        """Return one canonical alias vocabulary for a known customer.
+
+        Generated variants provide deterministic recall for existing records.
+        Approved ``alias`` facts are added from the customer knowledge model,
+        so callers never need to maintain a second abbreviation algorithm.
+        Facts are recall signals only and remain team/customer scoped.
+        """
+
+        aliases = generated_aliases_for_customer_name(account_name)
+        facts = (
+            db.query(CustomerFact)
+            .filter(
+                CustomerFact.team_id == team_id,
+                CustomerFact.customer_id == customer_id,
+                CustomerFact.fact_type == self.fact_type,
+                CustomerFact.status == CustomerFactStatus.ACTIVE,
+            )
+            .order_by(CustomerFact.confidence.desc(), CustomerFact.updated_time.desc())
+            .limit(max(1, min(limit, 100)))
+            .all()
+        )
+        for fact in facts:
+            aliases.extend((fact.subject, fact.content))
+        return _dedupe_non_empty(aliases)[: max(1, min(limit, 100))]
 
     def recall(
         self,
@@ -88,8 +126,6 @@ class CustomerAliasService:
     ) -> list[CustomerAliasMatch]:
         terms = self.expand_query_terms(query)
         if not terms:
-            return []
-        if not _has_table(db, CustomerFact.__tablename__) or not _has_table(db, Customer.__tablename__):
             return []
         like_conditions = []
         for term in terms:
@@ -138,8 +174,6 @@ class CustomerAliasService:
         limit: int,
         visibility_predicate: CustomerVisibilityPredicate | None,
     ) -> list[CustomerAliasMatch]:
-        if not _has_table(db, Customer.__tablename__):
-            return []
         customers = (
             db.query(Customer)
             .filter(Customer.team_id == team_id)
@@ -281,7 +315,7 @@ def _split_by_org_words(value: str) -> list[str]:
 
 
 def _split_terms(value: str) -> list[str]:
-    return [part for part in re.split(r"[\s,，、/／()（）]+", value.strip()) if part]
+    return [part for part in re.split(r"[\s,\uFF0C\u3001/\uFF0F()\uFF08\uFF09]+", value.strip()) if part]
 
 
 def _matched_aliases(normalized_query: str, aliases: Iterable[str]) -> list[str]:
@@ -290,7 +324,11 @@ def _matched_aliases(normalized_query: str, aliases: Iterable[str]) -> list[str]
         normalized_alias = _normalize_text(alias)
         if not normalized_alias:
             continue
-        if normalized_query == normalized_alias or normalized_query in normalized_alias or normalized_alias in normalized_query:
+        if (
+            normalized_query == normalized_alias
+            or normalized_query in normalized_alias
+            or normalized_alias in normalized_query
+        ):
             matched.append(alias)
     return _dedupe_non_empty(matched)
 
@@ -310,7 +348,11 @@ def _clean_text(value: object) -> str:
 
 
 def _normalize_text(value: object) -> str:
-    return re.sub(r"[\s·,，、.。/／()（）【】\\-]+", "", str(value or "").strip().lower())
+    return re.sub(
+        r"[\s·,\uFF0C\u3001.\u3002/\uFF0F()\uFF08\uFF09\u3010\u3011\\-]+",
+        "",
+        str(value or "").strip().lower(),
+    )
 
 
 def _dedupe_non_empty(values: Iterable[object]) -> list[str]:
@@ -324,11 +366,6 @@ def _dedupe_non_empty(values: Iterable[object]) -> list[str]:
         seen.add(key)
         result.append(text)
     return result
-
-
-def _has_table(db: Session, table_name: str) -> bool:
-    bind = db.get_bind()
-    return bool(bind is not None and inspect(bind).has_table(table_name))
 
 
 _INSTITUTION_ROOT_ALIASES: tuple[tuple[str, str], ...] = (

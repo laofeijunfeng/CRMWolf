@@ -47,6 +47,7 @@ TARGET_ROOT_STATE_KEYS: Final[frozenset[str]] = frozenset(
         "workflow_input",
         "workflow_result",
         "dispatch_result",
+        "pending_case_public_id",
     }
 )
 TARGET_WORKFLOW_STATE_KEYS: Final[frozenset[str]] = frozenset(
@@ -188,6 +189,26 @@ def parse_target_root_thread(thread_id: str) -> tuple[int, int, int] | None:
     return team_id, user_id, session_id
 
 
+def parse_turn_root_thread(thread_id: str) -> tuple[int, int, int, str] | None:
+    """Parse the canonical per-turn Root checkpoint identity."""
+
+    parts = thread_id.split(":")
+    if len(parts) != 5 or parts[0] != "crm_agent_turn" or not parts[4]:
+        return None
+    try:
+        team_id, user_id, session_id = (int(part) for part in parts[1:4])
+    except ValueError:
+        return None
+    turn_token = parts[4]
+    if min(team_id, user_id, session_id) <= 0 or len(turn_token) != 32:
+        return None
+    try:
+        int(turn_token, 16)
+    except ValueError:
+        return None
+    return team_id, user_id, session_id, turn_token
+
+
 def parse_legacy_root_thread(thread_id: str) -> tuple[int, int, int, str] | None:
     parts = thread_id.split(":")
     if len(parts) != 5 or parts[0] != "crm_agent" or not parts[4]:
@@ -206,7 +227,7 @@ def classify_checkpoint_identity(*, thread_id: str, checkpoint_ns: str) -> Check
 
     family = thread_id.partition(":")[0]
     namespace_shape = checkpoint_namespace_shape(checkpoint_ns)
-    if parse_target_root_thread(thread_id) is not None:
+    if parse_turn_root_thread(thread_id) is not None or parse_target_root_thread(thread_id) is not None:
         if namespace_shape == "<root>":
             return "target_root"
         if namespace_shape.startswith("workflow_subgraph:"):
@@ -526,6 +547,13 @@ class AgentCheckpointMatrixReader:
         ).all():
             owners[int(row.id)] = (int(row.team_id), int(row.user_id), str(row.session_key))
         for identity in identities:
+            parsed_turn = parse_turn_root_thread(identity.thread_id)
+            if parsed_turn is not None:
+                team_id, user_id, session_id, _turn_token = parsed_turn
+                owner = owners.get(session_id)
+                if owner is None or owner[:2] != (team_id, user_id):
+                    blockers.add("target_root:owner_mismatch")
+                continue
             parsed_target = parse_target_root_thread(identity.thread_id)
             if parsed_target is not None:
                 team_id, user_id, session_id = parsed_target
@@ -934,16 +962,28 @@ class AgentCheckpointMatrixReader:
                 except ValidationError:
                     blockers.add("target_workflow:continuation_invalid")
                     continue
-                thread_id = f"crm_agent:{int(row.team_id)}:{int(row.user_id)}:{int(row.session_id)}"
+                root_thread_id = continuation.root_thread_id
+                parsed_root = parse_turn_root_thread(root_thread_id)
+                if parsed_root is None:
+                    blockers.add("target_workflow:root_thread_invalid")
+                    continue
+                root_team_id, root_user_id, root_session_id, _turn_token = parsed_root
+                if (root_team_id, root_user_id, root_session_id) != (
+                    int(row.team_id),
+                    int(row.user_id),
+                    int(row.session_id),
+                ):
+                    blockers.add("target_workflow:owner_mismatch")
+                    continue
                 locator = (
-                    thread_id,
+                    root_thread_id,
                     continuation.subgraph_checkpoint_ns,
                     continuation.subgraph_checkpoint_id,
                 )
                 action_locators[locator] += 1
                 if locator not in target_by_locator:
                     blockers.add("target_workflow:continuation_orphaned")
-                if (thread_id, continuation.parent_checkpoint_id) not in root_checkpoint_ids:
+                if (root_thread_id, continuation.parent_checkpoint_id) not in root_checkpoint_ids:
                     blockers.add("target_workflow:parent_missing")
         elif pending_interrupt_locators:
             blockers.add("target_workflow:action_registry_missing")

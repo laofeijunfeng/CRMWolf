@@ -401,6 +401,7 @@
         "PERMISSION_DENIED",
         "QUERY_LIMIT_EXCEEDED",
         "UPSTREAM_TIMEOUT",
+        "UPSTREAM_UNAVAILABLE",
         "CHECKPOINT_UNAVAILABLE",
         "MODEL_OUTPUT_INVALID",
         "RESULT_SET_EXPIRED",
@@ -426,6 +427,7 @@
             "PERMISSION_DENIED",
             "QUERY_LIMIT_EXCEEDED",
             "UPSTREAM_TIMEOUT",
+            "UPSTREAM_UNAVAILABLE",
             "CHECKPOINT_UNAVAILABLE",
             "MODEL_OUTPUT_INVALID",
             "RESULT_SET_EXPIRED",
@@ -1187,6 +1189,7 @@
                 "PERMISSION_DENIED",
                 "QUERY_LIMIT_EXCEEDED",
                 "UPSTREAM_TIMEOUT",
+                "UPSTREAM_UNAVAILABLE",
                 "CHECKPOINT_UNAVAILABLE",
                 "MODEL_OUTPUT_INVALID",
                 "RESULT_SET_EXPIRED",
@@ -1398,6 +1401,13 @@
                 }
               ],
               "title": "Submit Action Id"
+            },
+            "submit_label": {
+              "default": "提交",
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Submit Label",
+              "type": "string"
             },
             "submit_on_select": {
               "default": false,
@@ -2885,6 +2895,7 @@
                 "PERMISSION_DENIED",
                 "QUERY_LIMIT_EXCEEDED",
                 "UPSTREAM_TIMEOUT",
+                "UPSTREAM_UNAVAILABLE",
                 "CHECKPOINT_UNAVAILABLE",
                 "MODEL_OUTPUT_INVALID",
                 "RESULT_SET_EXPIRED",
@@ -3096,6 +3107,13 @@
                 }
               ],
               "title": "Submit Action Id"
+            },
+            "submit_label": {
+              "default": "提交",
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Submit Label",
+              "type": "string"
             },
             "submit_on_select": {
               "default": false,
@@ -4710,6 +4728,7 @@
                 "PERMISSION_DENIED",
                 "QUERY_LIMIT_EXCEEDED",
                 "UPSTREAM_TIMEOUT",
+                "UPSTREAM_UNAVAILABLE",
                 "CHECKPOINT_UNAVAILABLE",
                 "MODEL_OUTPUT_INVALID",
                 "RESULT_SET_EXPIRED",
@@ -4921,6 +4940,13 @@
                 }
               ],
               "title": "Submit Action Id"
+            },
+            "submit_label": {
+              "default": "提交",
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Submit Label",
+              "type": "string"
             },
             "submit_on_select": {
               "default": false,
@@ -6684,6 +6710,7 @@
                 "PERMISSION_DENIED",
                 "QUERY_LIMIT_EXCEEDED",
                 "UPSTREAM_TIMEOUT",
+                "UPSTREAM_UNAVAILABLE",
                 "CHECKPOINT_UNAVAILABLE",
                 "MODEL_OUTPUT_INVALID",
                 "RESULT_SET_EXPIRED",
@@ -6895,6 +6922,13 @@
                 }
               ],
               "title": "Submit Action Id"
+            },
+            "submit_label": {
+              "default": "提交",
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Submit Label",
+              "type": "string"
             },
             "submit_on_select": {
               "default": false,
@@ -8776,6 +8810,7 @@
                 "PERMISSION_DENIED",
                 "QUERY_LIMIT_EXCEEDED",
                 "UPSTREAM_TIMEOUT",
+                "UPSTREAM_UNAVAILABLE",
                 "CHECKPOINT_UNAVAILABLE",
                 "MODEL_OUTPUT_INVALID",
                 "RESULT_SET_EXPIRED",
@@ -8987,6 +9022,13 @@
                 }
               ],
               "title": "Submit Action Id"
+            },
+            "submit_label": {
+              "default": "提交",
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Submit Label",
+              "type": "string"
             },
             "submit_on_select": {
               "default": false,
@@ -10512,6 +10554,7 @@
                 "PERMISSION_DENIED",
                 "QUERY_LIMIT_EXCEEDED",
                 "UPSTREAM_TIMEOUT",
+                "UPSTREAM_UNAVAILABLE",
                 "CHECKPOINT_UNAVAILABLE",
                 "MODEL_OUTPUT_INVALID",
                 "RESULT_SET_EXPIRED",
@@ -10723,6 +10766,13 @@
                 }
               ],
               "title": "Submit Action Id"
+            },
+            "submit_label": {
+              "default": "提交",
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Submit Label",
+              "type": "string"
             },
             "submit_on_select": {
               "default": false,
@@ -15599,6 +15649,7 @@
             "PERMISSION_DENIED",
             "QUERY_LIMIT_EXCEEDED",
             "UPSTREAM_TIMEOUT",
+            "UPSTREAM_UNAVAILABLE",
             "CHECKPOINT_UNAVAILABLE",
             "MODEL_OUTPUT_INVALID",
             "RESULT_SET_EXPIRED",
@@ -16104,6 +16155,13 @@
             }
           ],
           "title": "Submit Action Id"
+        },
+        "submit_label": {
+          "default": "提交",
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Submit Label",
+          "type": "string"
         },
         "submit_on_select": {
           "default": false,
@@ -16672,6 +16730,7 @@
             "PERMISSION_DENIED",
             "QUERY_LIMIT_EXCEEDED",
             "UPSTREAM_TIMEOUT",
+            "UPSTREAM_UNAVAILABLE",
             "MODEL_OUTPUT_INVALID",
             "INTERNAL_ERROR"
           ],
@@ -17149,6 +17208,77 @@
           "type": "object"
         },
         "JsonValue": {},
+        "PendingCaseContext": {
+          "additionalProperties": false,
+          "description": "Read-only context for explicitly matching a pending confirmation Case.\n\nThe Root may use these fields to understand a user reference, but only the\nserver-side matcher can turn the reference into ``case_public_id``.",
+          "properties": {
+            "case_public_id": {
+              "pattern": "^fuc_[0-9a-f]{32}$",
+              "title": "Case Public Id",
+              "type": "string"
+            },
+            "customer_aliases": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 20,
+              "title": "Customer Aliases",
+              "type": "array"
+            },
+            "customer_name": {
+              "maxLength": 255,
+              "minLength": 1,
+              "title": "Customer Name",
+              "type": "string"
+            },
+            "due_at_text": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Due At Text"
+            },
+            "question_text": {
+              "maxLength": 20000,
+              "minLength": 1,
+              "title": "Question Text",
+              "type": "string"
+            },
+            "task_description": {
+              "anyOf": [
+                {
+                  "maxLength": 20000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Task Description"
+            },
+            "task_title": {
+              "maxLength": 255,
+              "minLength": 1,
+              "title": "Task Title",
+              "type": "string"
+            }
+          },
+          "required": [
+            "case_public_id",
+            "customer_name",
+            "task_title",
+            "question_text"
+          ],
+          "title": "PendingCaseContext",
+          "type": "object"
+        },
         "ResultSetContext": {
           "additionalProperties": false,
           "properties": {
@@ -17171,6 +17301,66 @@
             "result_set_id"
           ],
           "title": "ResultSetContext",
+          "type": "object"
+        },
+        "WorkflowContinuation": {
+          "additionalProperties": false,
+          "description": "Exact durable continuation for one native Workflow interrupt.\n\n``root_thread_id`` is the LangGraph thread that owns the checkpoint. A\nsession may contain many independent turns, so a resumed interaction must\nreturn to the owning thread instead of the current turn thread.",
+          "properties": {
+            "parent_checkpoint_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Parent Checkpoint Id",
+              "type": "string"
+            },
+            "root_thread_id": {
+              "maxLength": 512,
+              "minLength": 1,
+              "title": "Root Thread Id",
+              "type": "string"
+            },
+            "subgraph_checkpoint_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Subgraph Checkpoint Id",
+              "type": "string"
+            },
+            "subgraph_checkpoint_ns": {
+              "maxLength": 512,
+              "minLength": 1,
+              "title": "Subgraph Checkpoint Ns",
+              "type": "string"
+            },
+            "waiting_interaction_type": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "choice",
+                    "form",
+                    "confirmation",
+                    "text_input"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Waiting Interaction Type"
+            },
+            "workflow_ref": {
+              "$ref": "#/$defs/WorkflowRef"
+            }
+          },
+          "required": [
+            "workflow_ref",
+            "root_thread_id",
+            "parent_checkpoint_id",
+            "subgraph_checkpoint_ns",
+            "subgraph_checkpoint_id"
+          ],
+          "title": "WorkflowContinuation",
           "type": "object"
         },
         "WorkflowRef": {
@@ -17218,6 +17408,14 @@
           ],
           "default": null
         },
+        "pending_cases": {
+          "items": {
+            "$ref": "#/$defs/PendingCaseContext"
+          },
+          "maxItems": 100,
+          "title": "Pending Cases",
+          "type": "array"
+        },
         "previous_query": {
           "anyOf": [
             {
@@ -17239,6 +17437,14 @@
             }
           ],
           "default": null
+        },
+        "resumable_workflow_continuations": {
+          "items": {
+            "$ref": "#/$defs/WorkflowContinuation"
+          },
+          "maxItems": 20,
+          "title": "Resumable Workflow Continuations",
+          "type": "array"
         },
         "resumable_workflows": {
           "items": {
@@ -17319,6 +17525,31 @@
           "maxItems": 20,
           "title": "Evidence",
           "type": "array"
+        },
+        "pending_case_reference": {
+          "anyOf": [
+            {
+              "maxLength": 255,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pending Case Reference"
+        },
+        "pending_case_relation": {
+          "default": "NONE",
+          "enum": [
+            "NONE",
+            "EXPLICIT_REFERENCE",
+            "RELATED_TO_CURRENT_ACTIVITY",
+            "UNRELATED",
+            "AMBIGUOUS"
+          ],
+          "title": "Pending Case Relation",
+          "type": "string"
         },
         "reason_code": {
           "maxLength": 128,

@@ -673,6 +673,10 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .agent-chat {
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+  overflow: hidden;
   grid-template-rows: minmax(0, 1fr) auto;
 }
 

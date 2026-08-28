@@ -49,8 +49,9 @@ def _database():
     return engine, session_factory
 
 
-def _continuation(workflow_ref: WorkflowRef) -> WorkflowContinuation:
+def _continuation(workflow_ref: WorkflowRef, *, root_thread_id: str = "crm_agent_turn:test") -> WorkflowContinuation:
     return WorkflowContinuation(
+        root_thread_id=root_thread_id,
         workflow_ref=workflow_ref,
         parent_checkpoint_id=f"cp_root_{workflow_ref.workflow_id}",
         subgraph_checkpoint_ns=f"workflow_subgraph:{workflow_ref.workflow_id}",
@@ -62,6 +63,7 @@ def _seed_confirmation_action(
     session_factory,
     *,
     workflow_ref: WorkflowRef,
+    root_thread_id: str = "crm_agent_turn:test",
     valid_continuation: bool = True,
 ) -> int:
     db = session_factory()
@@ -87,10 +89,11 @@ def _seed_confirmation_action(
                 session_id=session.id,
                 message_id=message.id,
                 action_type="submit_interaction",
+                root_context_role="RESUMABLE_WORKFLOW",
                 target={
                     "interaction_type": "confirmation",
                     "workflow_continuation": (
-                        _continuation(workflow_ref).model_dump(mode="json")
+                        _continuation(workflow_ref, root_thread_id=root_thread_id).model_dump(mode="json")
                         if valid_continuation
                         else {"workflow_ref": workflow_ref.model_dump(mode="json")}
                     ),
@@ -204,6 +207,7 @@ async def test_database_interaction_resolver_rejects_invalid_continuation_and_re
         bound_ref = WorkflowRef(workflow_id="wf_bound", interrupt_id="int_bound")
         session_id = _seed_confirmation_action(
             session_factory,
+            root_thread_id="crm_agent_turn:test",
             workflow_ref=bound_ref,
             valid_continuation=False,
         )

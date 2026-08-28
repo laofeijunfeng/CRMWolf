@@ -62,13 +62,48 @@ vi.mock('@/components/crmwolf', () => ({
     name: 'DataTable',
     props: {
       data: { type: Array as PropType<Record<string, unknown>[]>, default: () => [] },
+      getRowActions: {
+        type: Function as PropType<(
+          row: Record<string, unknown>,
+          index: number,
+        ) => {
+          primaryActions?: Array<{
+            label: string
+            visible?: boolean
+            disabled?: boolean
+            handler: (row: Record<string, unknown>) => void
+          }>
+          secondaryActions?: Array<{
+            label: string
+            visible?: boolean
+            disabled?: boolean
+            handler: (row: Record<string, unknown>) => void
+          }>
+        } | null>,
+        default: undefined,
+      },
     },
     setup: (props, { slots }) => () => h('div', { 'data-testid': 'tracking-table' },
-      props.data.map(row => h('article', { 'data-testid': `task-${String(row['public_id'])}` }, [
-        slots['cell-tracking_content']?.({ row }),
-        slots['cell-status_label']?.({ row }),
-        slots['cell-actions']?.({ row }),
-      ])),
+      props.data.map((row, index) => {
+        const actions = props.getRowActions?.(row, index)
+        const rowActions = [
+          ...(actions?.primaryActions ?? []),
+          ...(actions?.secondaryActions ?? []),
+        ]
+        return h('article', { 'data-testid': `task-${String(row['public_id'])}` }, [
+          slots['cell-tracking_content']?.({ row }),
+          slots['cell-status_label']?.({ row }),
+          slots['cell-actions']?.({ row }),
+          ...rowActions
+            .filter(action => action.visible !== false)
+            .map(action => h('button', {
+              type: 'button',
+              'data-action': action.label,
+              disabled: action.disabled === true,
+              onClick: () => action.handler(row),
+            }, action.label)),
+        ])
+      }),
     ),
   }),
   HoverInfo: defineComponent({

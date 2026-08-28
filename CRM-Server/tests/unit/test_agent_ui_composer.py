@@ -122,6 +122,7 @@ def _progress(*, final_status: str = "COMPLETED") -> WorkflowProgress:
 
 def _continuation() -> WorkflowContinuation:
     return WorkflowContinuation(
+        root_thread_id="crm_agent_turn:test",
         workflow_ref=WorkflowRef(workflow_id="wf_1", interrupt_id="intr_1"),
         parent_checkpoint_id="parent_cp_1",
         subgraph_checkpoint_ns="workflow:abc",
@@ -455,3 +456,88 @@ def test_follow_up_confirmation_signs_case_public_id_for_read_time_projection() 
     )
 
     assert composition.action_drafts[0].target["follow_up_confirmation_case_public_id"] == "fuc_case_1"
+
+
+def test_model_reference_links_are_projected_to_safe_plain_text() -> None:
+    result = CRMQueryAgentResult.model_validate(
+        {
+            "response": {
+                "status": "ANSWERED",
+                "answer": (
+                    "河南双汇发展股份有限公司当前处于跟进阶段。"
+                    "\n\n[客户档案][customer-profile]\n\n"
+                    "[customer-profile]: https://example.com/customer/1"
+                ),
+                "evidence_refs": ["ctx_1"],
+            },
+            "query_results": [],
+            "customer_context_results": [],
+            "trace": {
+                "model": "test-model",
+                "tool_names": ["get_customer_context"],
+                "tool_calls": [],
+                "tool_call_count": 1,
+                "total_entity_count": 1,
+                "elapsed_ms": 1,
+                "stop_reason": "COMPLETED",
+            },
+        }
+    )
+    composition = AgentUIComposer().compose(
+        QueryDispatchResult(decision=_decision("QUERY"), query_result=result)
+    )
+
+    text_block = composition.body.blocks[0]
+    assert text_block.type == "text"
+    assert text_block.format == "plain"
+    assert "客户档案" in text_block.text
+    assert "[customer-profile]" not in text_block.text
+
+
+def test_customer_context_projects_the_authoritative_customer_as_clickable_entity() -> None:
+    result = CRMQueryAgentResult.model_validate(
+        {
+            "response": {
+                "status": "ANSWERED",
+                "answer": "河南双汇发展股份有限公司当前客户情况已整理。",
+                "evidence_refs": ["eref_customer_1"],
+            },
+            "query_results": [],
+            "customer_context_results": [
+                {
+                    "customer_ref": {
+                        "ref_id": "eref_customer_1",
+                        "resource": "customer",
+                        "public_id": "cus_1",
+                        "display_name": "河南双汇发展股份有限公司",
+                    },
+                    "sections": {"profile": {"city": "漯河"}},
+                    "citations": [],
+                    "coverage": {
+                        "requested": ["profile"],
+                        "returned": ["profile"],
+                        "unavailable": [],
+                    },
+                    "degraded_reasons": [],
+                }
+            ],
+            "trace": {
+                "model": "test-model",
+                "tool_names": ["get_customer_context"],
+                "tool_calls": [],
+                "tool_call_count": 1,
+                "total_entity_count": 1,
+                "elapsed_ms": 1,
+                "stop_reason": "COMPLETED",
+            },
+        }
+    )
+
+    composition = AgentUIComposer().compose(
+        QueryDispatchResult(decision=_decision("QUERY"), query_result=result)
+    )
+
+    assert composition.content == "河南双汇发展股份有限公司当前客户情况已整理。"
+    assert [block.type for block in composition.body.blocks] == ["text", "entity_list"]
+    entity_block = composition.body.blocks[1]
+    assert entity_block.items[0].entity_ref.display_name == "河南双汇发展股份有限公司"

@@ -176,6 +176,7 @@ def _completed_workflow_dispatch(*, action_claim_id: str | None = None) -> Workf
 
 def _confirmation_workflow_dispatch() -> WorkflowDispatchResult:
     continuation = WorkflowContinuation(
+        root_thread_id="crm_agent_turn:test",
         workflow_ref=WorkflowRef(workflow_id="wf_customer_follow_up", interrupt_id="intr_confirm"),
         parent_checkpoint_id="parent_cp_confirm",
         subgraph_checkpoint_ns="workflow:customer_follow_up",
@@ -209,6 +210,7 @@ def _confirmation_workflow_dispatch() -> WorkflowDispatchResult:
 
 def _waiting_workflow_dispatch() -> WorkflowDispatchResult:
     continuation = WorkflowContinuation(
+        root_thread_id="crm_agent_turn:test",
         workflow_ref=WorkflowRef(workflow_id="wf_customer_follow_up", interrupt_id="intr_customer"),
         parent_checkpoint_id="parent_cp_1",
         subgraph_checkpoint_ns="workflow:customer_follow_up",
@@ -417,6 +419,7 @@ async def _start_customer_action(service: AgentApplicationService) -> tuple[int,
                 session_id=session_id,
                 message_id=events[1]["message_id"],
                 action_type="start_workflow",
+                root_context_role="PROJECTION_ONLY",
                 target={
                     "workflow": "create_follow_up_task",
                     "result_set_id": "rs_query_application_test",

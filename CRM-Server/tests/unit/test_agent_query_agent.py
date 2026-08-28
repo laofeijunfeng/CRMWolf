@@ -7,10 +7,12 @@ import json
 from collections.abc import Awaitable, Callable
 from unittest.mock import Mock
 
+import httpx
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
+from openai import APIConnectionError
 
 from app.services.agent.query import (
     CRMFilter,
@@ -135,6 +137,10 @@ def _context() -> AgentToolContext:
     )
 
 
+def test_query_agent_limits_default_to_bounded_model_retries() -> None:
+    assert CRMQueryAgentLimits().model_retry_attempts == 2
+
+
 def _model_config() -> CRMQueryAgentModelConfig:
     return CRMQueryAgentModelConfig(
         api_host="https://ai.example.com/v1",
@@ -197,6 +203,28 @@ def _agent(
         ),
         factory,
     )
+
+
+@pytest.mark.asyncio
+async def test_query_agent_classifies_exhausted_transient_model_transport_as_retryable() -> None:
+    async def behavior(payload: dict[str, object], runtime: dict[str, object]) -> dict[str, object]:
+        raise APIConnectionError(
+            message="websocket disconnected",
+            request=httpx.Request("POST", "https://ai.example.com/v1/chat/completions"),
+        )
+
+    agent, factory = _agent(StubExecutor([]), behavior)
+
+    with pytest.raises(CRMQueryAgentExecutionError) as exc_info:
+        await agent.run(
+            CRMQueryAgentRequest(user_message="上海有哪些客户", allowed_tool_names=["query_customers"]),
+            _context(),
+            _model_config(),
+        )
+
+    assert exc_info.value.error.code == "UPSTREAM_UNAVAILABLE"
+    assert exc_info.value.error.retryable is True
+    assert factory.calls[0]["model"].kwargs["max_retries"] == 2
 
 
 @pytest.mark.asyncio
@@ -638,12 +666,12 @@ async def test_query_agent_allows_only_one_invalid_query_correction() -> None:
 @pytest.mark.asyncio
 async def test_query_agent_preserves_terminal_tool_error_when_turn_times_out() -> None:
     async def behavior(payload: dict[str, object], runtime: dict[str, object]) -> dict[str, object]:
-        result = await runtime["tools"][0].ainvoke(_query_payload(page_size=51))
+        result = await runtime["tools"][0].ainvoke(_query_payload(page_size=50))
         assert result["error"]["code"] == "QUERY_LIMIT_EXCEEDED"
         raise TimeoutError
 
     agent, _ = _agent(
-        StubExecutor([]),
+        StubExecutor([_query_result("qry_over_budget", count=51)]),
         behavior,
         limits=CRMQueryAgentLimits(max_rows_per_tool=50),
     )
@@ -661,12 +689,12 @@ async def test_query_agent_preserves_terminal_tool_error_when_turn_times_out() -
 @pytest.mark.asyncio
 async def test_query_agent_preserves_terminal_tool_error_when_model_fails() -> None:
     async def behavior(payload: dict[str, object], runtime: dict[str, object]) -> dict[str, object]:
-        result = await runtime["tools"][0].ainvoke(_query_payload(page_size=51))
+        result = await runtime["tools"][0].ainvoke(_query_payload(page_size=50))
         assert result["error"]["code"] == "QUERY_LIMIT_EXCEEDED"
         raise RuntimeError("model failed after terminal tool error")
 
     agent, _ = _agent(
-        StubExecutor([]),
+        StubExecutor([_query_result("qry_over_budget", count=51)]),
         behavior,
         limits=CRMQueryAgentLimits(max_rows_per_tool=50),
     )
@@ -706,23 +734,21 @@ async def test_query_agent_rejects_answer_without_authoritative_tool_evidence() 
 
 
 @pytest.mark.asyncio
-async def test_query_agent_enforces_requested_row_limit_before_execution() -> None:
-    executor = StubExecutor([_query_result("qry_too_large", count=51)])
+async def test_query_agent_rejects_unknown_evidence_even_with_authoritative_query_result() -> None:
+    executor = StubExecutor([_query_result("qry_authoritative")])
 
     async def behavior(payload: dict[str, object], runtime: dict[str, object]) -> dict[str, object]:
-        result = await runtime["tools"][0].ainvoke(_query_payload(page_size=51))
-        assert result["error"]["code"] == "QUERY_LIMIT_EXCEEDED"
+        await runtime["tools"][0].ainvoke(_query_payload())
         return {
             "structured_response": {
                 "status": "ANSWERED",
-                "answer": "done",
+                "answer": "已找到客户。",
                 "clarification_question": None,
-                "evidence_refs": ["qry_too_large"],
+                "evidence_refs": ["invented_query"],
             }
         }
 
-    agent, _ = _agent(executor, behavior, limits=CRMQueryAgentLimits(max_rows_per_tool=50))
-
+    agent, _ = _agent(executor, behavior)
     with pytest.raises(CRMQueryAgentExecutionError) as exc_info:
         await agent.run(
             CRMQueryAgentRequest(user_message="查客户", allowed_tool_names=["query_customers"]),
@@ -730,8 +756,35 @@ async def test_query_agent_enforces_requested_row_limit_before_execution() -> No
             _model_config(),
         )
 
-    assert exc_info.value.error.code == "QUERY_LIMIT_EXCEEDED"
-    assert executor.calls == []
+    assert exc_info.value.error.code == "MODEL_OUTPUT_INVALID"
+
+
+@pytest.mark.asyncio
+async def test_query_agent_clamps_model_requested_page_size_to_tool_row_limit() -> None:
+    executor = StubExecutor([_query_result("qry_clamped", count=50)])
+
+    async def behavior(payload: dict[str, object], runtime: dict[str, object]) -> dict[str, object]:
+        result = await runtime["tools"][0].ainvoke(_query_payload(page_size=51))
+        assert "error" not in result
+        return {
+            "structured_response": {
+                "status": "ANSWERED",
+                "answer": "done",
+                "clarification_question": None,
+                "evidence_refs": ["qry_clamped"],
+            }
+        }
+
+    agent, _ = _agent(executor, behavior, limits=CRMQueryAgentLimits(max_rows_per_tool=50))
+
+    result = await agent.run(
+        CRMQueryAgentRequest(user_message="查客户", allowed_tool_names=["query_customers"]),
+        _context(),
+        _model_config(),
+    )
+
+    assert result.response.status == "ANSWERED"
+    assert [call.page_size for call in executor.calls] == [50]
 
 
 def test_query_agent_default_turn_timeout_allows_tool_and_response_round_trip() -> None:
@@ -769,7 +822,7 @@ async def test_query_agent_enforces_whole_turn_timeout() -> None:
 
 
 @pytest.mark.asyncio
-async def test_query_agent_degrades_to_authoritative_results_when_summary_times_out() -> None:
+async def test_query_agent_fails_when_summary_times_out_after_authoritative_results() -> None:
     executor = StubExecutor([_query_result("qry_completed_week", count=2)])
 
     async def behavior(payload: dict[str, object], runtime: dict[str, object]) -> dict[str, object]:
@@ -784,17 +837,15 @@ async def test_query_agent_degrades_to_authoritative_results_when_summary_times_
         limits=CRMQueryAgentLimits(turn_timeout_seconds=0.01),
     )
 
-    result = await agent.run(
-        CRMQueryAgentRequest(user_message="本周我做了什么", allowed_tool_names=["query_customers"]),
-        _context(),
-        _model_config(),
-    )
+    with pytest.raises(CRMQueryAgentExecutionError) as exc_info:
+        await agent.run(
+            CRMQueryAgentRequest(user_message="本周我做了什么", allowed_tool_names=["query_customers"]),
+            _context(),
+            _model_config(),
+        )
 
-    assert result.response.status == "ANSWERED"
-    assert "已查询到" in (result.response.answer or "")
-    assert "摘要暂时超时" in (result.response.answer or "")
-    assert "qry_completed_week" in result.response.evidence_refs
-    assert result.query_results[0].query_id == "qry_completed_week"
+    assert exc_info.value.error.code == "UPSTREAM_TIMEOUT"
+    assert exc_info.value.error.retryable is True
 
 
 

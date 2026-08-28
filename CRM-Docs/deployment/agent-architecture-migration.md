@@ -35,8 +35,8 @@ CRM-Docs/requirements/2026-08-21-crm-agent-query-architecture-trd.md
 
 | 分类 | 身份 | Cutover 行为 |
 |---|---|---|
-| `target_root` | `crm_agent:{team_id}:{user_id}:{session_id}` + 根 namespace | 保留并严格校验 Root state/metadata |
-| `target_workflow` | 新 Root thread + `workflow_subgraph:*` | 保留并校验 interrupt、Workflow continuation、Action Registry |
+| `target_root` | 当前运行时生成的 `crm_agent_turn:{team_id}:{user_id}:{session_id}:{turn_token}` + 根 namespace | 保留并严格校验 Root state/metadata |
+| `target_workflow` | 当前 Root turn thread + `workflow_subgraph:*` | 保留并校验 interrupt、Workflow continuation、Action Registry |
 | `legacy_root` | 旧 5 段 `crm_agent:{team_id}:{user_id}:{session_id}:{session_key}` | 静默后删除 |
 | `legacy_query` | 旧 `query_agent:*` child | 删除；查询连续性只由 message/canonical query/result set 提供 |
 | `legacy_workflow` | 旧 `workflow_graph:*`、`crm_agent_new_flow:*` 等 | 静默后删除；可恢复业务状态直接阻断 |
@@ -45,6 +45,8 @@ CRM-Docs/requirements/2026-08-21-crm-agent-query-architecture-trd.md
 | `customer_intelligence` | `crm_agent_customer_intelligence:*` | 保留；校验物理链、active run、review case 和 interrupt barrier |
 | `adjacent_workflow` | customer activity 等非本次 Agent 所有权 | 字节级保留并纳入 checksum |
 | `unknown` | 无法归属的 thread/runtime/namespace/state/serde | 整体阻断 |
+
+说明：`crm_agent:{team_id}:{user_id}:{session_id}` 是上一版目标实现遗留的三段 Root identity，迁移分类器仍仅为盘点/切换识别保留该形状；当前运行时不会再生成或恢复它，不属于新版本的兼容执行路径。
 
 Legacy/unknown checkpoint 只允许通过 inert inspector 读取结构和 constructor identity，盘点与 cutover 都不得导入或执行历史应用构造器。Target Root/Workflow 与 Customer Intelligence 的 checkpoint、metadata、blob、write 和 review interrupt 必须先证明不存在应用自定义 constructor，再由 strict serializer 恢复允许的 LangGraph framework type。
 
@@ -285,3 +287,19 @@ Checkpoint cutover 成功后部署同一目标制品并执行：
 - `crm_agent_checkpoint_migration_journal` 表。
 
 删除前不得让这些设施进入请求运行时；删除时不得保留 forwarding module、alias 或兼容 wrapper。
+
+## 2026-08-27 实施收口补充
+
+本地目标架构的 Query 路径已按当前 typed Agent UI 合同完成一轮收口：
+
+- Root Orchestrator 负责 Session/Turn 任务关系、上下文策略和 Query/Workflow 路由；Pending Case 不作为普通新输入的隐式 Workflow 上下文。
+- Query Agent 使用 LangChain `create_agent`，只使用 CRM 只读工具；CRM Query Executor 负责 catalog、权限范围、分页、结果集和权威 API 适配。
+- Workflow 使用 LangGraph 原生可恢复 subgraph；跨轮等待、确认和写入不得退化为 Query 或无 checkpoint 的恢复。
+- Agent UI 是唯一前端语义协议；客户列表项只携带服务端签发的 `entity_ref`，由前端自行渲染并打开客户详情 Sheet。
+- 模型传输重试只发生在 `ChatOpenAI` 调用边界，默认 `max_retries=2`；不会重放整个 Agent Turn。
+- Query Executor 对 CRM API 408 返回 `UPSTREAM_TIMEOUT`，对 429/5xx 返回 `UPSTREAM_UNAVAILABLE`，对权限、查询错误和结构化响应错误保持独立分类。
+
+真实 Dev API 记录见：
+`CRM-Docs/development/agent-api-acceptance/2026-08-27/agent-query-20260827-1621/report.md`
+
+本地 API 验收新增的会话、消息和结果集均保留，未执行测试数据清理。上述验证不等于生产发布；生产仍需完成停流、inventory、备份恢复演练、单版本 checkpoint cutover、全量回归和用户明确授权。

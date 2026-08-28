@@ -146,8 +146,14 @@ class DefaultCRMQueryExecutor:
                 message=DefaultCRMQueryExecutor._safe_api_error_message(error, "invalid CRM query"),
                 retryable=False,
             )
-        if error.status_code is not None and error.status_code >= 500:
-            return QueryError(code="INTERNAL_ERROR", message="CRM API query failed", retryable=True)
+        if error.status_code == 408:
+            return QueryError(code="UPSTREAM_TIMEOUT", message="CRM API query timed out", retryable=True)
+        if error.status_code == 429 or (error.status_code is not None and error.status_code >= 500):
+            return QueryError(
+                code="UPSTREAM_UNAVAILABLE",
+                message="CRM API is temporarily unavailable",
+                retryable=True,
+            )
         return QueryError(code="INTERNAL_ERROR", message="CRM API query failed", retryable=False)
 
     @staticmethod

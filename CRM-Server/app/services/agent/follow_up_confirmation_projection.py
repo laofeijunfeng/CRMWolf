@@ -125,6 +125,7 @@ class FollowUpConfirmationAgentUIProjection:
                 if isinstance(dispatch, WorkflowDispatchResult) and dispatch.workflow_result.status == "WAITING":
                     dispatched.append((confirmation_case, dispatch))
 
+            dispatched = self._retain_current_pending_cases(db, dispatched)
             if not dispatched:
                 return 0
 
@@ -176,6 +177,7 @@ class FollowUpConfirmationAgentUIProjection:
                         session_id=session_id,
                         message_id=completed.message.id,
                         action_type=draft.action_type,
+                        root_context_role=draft.root_context_role,
                         target=draft.target,
                         consumption_mode=draft.consumption_mode,
                     ),
@@ -195,6 +197,44 @@ class FollowUpConfirmationAgentUIProjection:
         except Exception:
             db.rollback()
             raise
+
+    @staticmethod
+    def _retain_current_pending_cases(
+        db: Session,
+        dispatched: list[tuple[FollowUpTaskConfirmationCase, WorkflowDispatchResult]],
+    ) -> list[tuple[FollowUpTaskConfirmationCase, WorkflowDispatchResult]]:
+        """Recheck Case state before persisting any message or Action.
+
+        Root dispatch can cross a transaction boundary (for example when it
+        resolves a Case through the internal CRM API). A Case may therefore be
+        cancelled or expired after the initial selection. Re-locking the
+        authoritative rows immediately before projection makes message and
+        Action registration fail closed; the row lock also prevents a
+        concurrent cancellation from committing between this check and the
+        surrounding projection transaction.
+        """
+
+        now = business_now()
+        retained: list[tuple[FollowUpTaskConfirmationCase, WorkflowDispatchResult]] = []
+        for confirmation_case, dispatch in dispatched:
+            current_case = (
+                db.query(FollowUpTaskConfirmationCase)
+                .filter(
+                    FollowUpTaskConfirmationCase.id == confirmation_case.id,
+                    FollowUpTaskConfirmationCase.team_id == confirmation_case.team_id,
+                    FollowUpTaskConfirmationCase.status == FollowUpTaskConfirmationStatus.PENDING,
+                    (
+                        FollowUpTaskConfirmationCase.expires_at.is_(None)
+                        | (FollowUpTaskConfirmationCase.expires_at > now)
+                    ),
+                )
+                .populate_existing()
+                .with_for_update()
+                .one_or_none()
+            )
+            if current_case is not None:
+                retained.append((current_case, dispatch))
+        return retained
 
     @staticmethod
     def _unprojected_cases(

@@ -67,7 +67,7 @@ _EXPORTS: dict[str, str] = {
 __all__ = sorted(_EXPORTS)
 
 
-def __getattr__(name: str) -> Any:
+def __getattr__(name: str) -> Any:  # noqa: ANN401 - PEP 562 dynamic module export
     module_name = _EXPORTS.get(name)
     if module_name is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

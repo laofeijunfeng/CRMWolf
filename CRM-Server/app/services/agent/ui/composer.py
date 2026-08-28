@@ -9,17 +9,26 @@ if TYPE_CHECKING:
     from pydantic import JsonValue
 
     from app.services.agent.orchestrator import WorkflowContinuation
-    from app.services.agent.query.schemas import CRMQueryResult
+    from app.services.agent.query.registry import CustomerContextResult
+    from app.services.agent.query.schemas import CRMQueryResult, EntityRef
     from app.services.agent.workflow import WorkflowInteraction, WorkflowProgress
 
-from app.schemas.agent_persistence import AgentUIActionConsumptionMode, AgentUIActionType, AgentUIMessageBody
+from app.schemas.agent_persistence import (
+    AgentUIActionConsumptionMode,
+    AgentUIActionRootContextRole,
+    AgentUIActionType,
+    AgentUIMessageBody,
+)
 from app.services.agent.orchestrator import (
     FailureDispatchResult,
     QueryDispatchResult,
     RootDispatchResult,
     WorkflowDispatchResult,
 )
-from app.services.agent.ui.markdown import project_agent_markdown_to_plain_text
+from app.services.agent.ui.markdown import (
+    normalize_agent_markdown_for_ui,
+    project_agent_markdown_to_plain_text,
+)
 from app.services.agent.ui.schemas import (
     AgentErrorCode,
     AgentUIBlock,
@@ -46,6 +55,7 @@ _ALLOWED_ERROR_CODES = {
     "PERMISSION_DENIED",
     "QUERY_LIMIT_EXCEEDED",
     "UPSTREAM_TIMEOUT",
+    "UPSTREAM_UNAVAILABLE",
     "CHECKPOINT_UNAVAILABLE",
     "MODEL_OUTPUT_INVALID",
     "RESULT_SET_EXPIRED",
@@ -64,6 +74,7 @@ class AgentUIActionDraft:
 
     public_id: str
     action_type: AgentUIActionType
+    root_context_role: AgentUIActionRootContextRole
     target: dict[str, JsonValue]
     consumption_mode: AgentUIActionConsumptionMode
 
@@ -108,6 +119,7 @@ class AgentUIComposer:
                 result.interaction,
                 continuation=dispatch.continuation,
                 follow_up_confirmation_case_public_id=case_public_ids[index - 1],
+                root_context_role="PENDING_CASE",
             )
             blocks.append(block.model_copy(update={"id": f"b_task_completion_{index}"}))
             actions.append(action)
@@ -154,10 +166,19 @@ class AgentUIComposer:
             raise ValueError("Query result has no user-visible response")
 
         query_projection = self._query_block(dispatch.query_result.query_results)
+        context_projection = None
         if query_projection is None:
+            context_projection = self._authoritative_entity_block(
+                dispatch.query_result.authoritative_entity_refs
+            )
+        if context_projection is None and query_projection is None:
+            context_projection = self._customer_context_block(
+                dispatch.query_result.customer_context_results
+            )
+        block = query_projection or context_projection
+        if block is None:
             return self._composition(text=text, route="QUERY")
-        block = query_projection
-        if block.entity_type == "customer":
+        if query_projection is not None and block.entity_type == "customer":
             text = f"共找到 {block.total} 家公司。"
         return self._composition(
             text=text,
@@ -194,6 +215,11 @@ class AgentUIComposer:
         interaction_block, action = self._interaction_block(
             result.interaction,
             continuation=dispatch.continuation,
+            root_context_role=(
+                "PENDING_CASE"
+                if result.interaction.business_action == "resolve_follow_up_task_confirmation_case"
+                else "RESUMABLE_WORKFLOW"
+            ),
         )
         compact_task_completion = (
             result.interaction.business_action == "resolve_follow_up_task_confirmation_case"
@@ -247,14 +273,15 @@ class AgentUIComposer:
         include_text_block: bool = True,
     ) -> AgentUIComposition:
         projected_content = project_agent_markdown_to_plain_text(text)
+        safe_text, text_format = normalize_agent_markdown_for_ui(text)
         text_blocks: tuple[AgentUIBlock, ...] = ()
         if include_text_block:
             text_blocks = (
                 TextBlock(
                     id="b_text_1",
                     type="text",
-                    format="markdown",
-                    text=text,
+                    format=text_format,
+                    text=safe_text,
                 ),
             )
         return AgentUIComposition(
@@ -313,12 +340,55 @@ class AgentUIComposer:
             result_set_id=result.result_set_id,
         )
 
+    @staticmethod
+    def _authoritative_entity_block(
+        refs: list[EntityRef],
+    ) -> EntityListBlock | None:
+        if not refs:
+            return None
+        resources = {ref.resource for ref in refs}
+        if len(resources) != 1:
+            return None
+        unique_refs = []
+        seen: set[tuple[str, str]] = set()
+        for ref in refs:
+            key = (ref.resource, ref.public_id)
+            if key not in seen:
+                seen.add(key)
+                unique_refs.append(ref)
+        result_set_id = unique_refs[0].result_set_id
+        if any(ref.result_set_id != result_set_id for ref in unique_refs):
+            result_set_id = None
+            unique_refs = [
+                ref.model_copy(update={"result_set_id": None}) for ref in unique_refs
+            ]
+        return EntityListBlock(
+            id="b_entity_list_1",
+            type="entity_list",
+            entity_type=unique_refs[0].resource,
+            items=[EntityListItem(entity_ref=ref) for ref in unique_refs],
+            total=len(unique_refs),
+            result_set_id=result_set_id,
+        )
+
+    @classmethod
+    def _customer_context_block(
+        cls,
+        context_results: list[CustomerContextResult],
+    ) -> EntityListBlock | None:
+        """Expose customer-context targets as clickable entity references."""
+
+        return cls._authoritative_entity_block(
+            [result.customer_ref for result in context_results]
+        )
+
     def _interaction_block(
         self,
         interaction: WorkflowInteraction,
         *,
         continuation: WorkflowContinuation,
         follow_up_confirmation_case_public_id: str | None = None,
+        root_context_role: AgentUIActionRootContextRole,
     ) -> tuple[InteractionBlock, AgentUIActionDraft]:
         public_id = generate_public_id("act")
         compact_task_completion = (
@@ -433,6 +503,7 @@ class AgentUIComposer:
             AgentUIActionDraft(
                 public_id=public_id,
                 action_type="submit_interaction",
+                root_context_role=root_context_role,
                 target=target,
                 consumption_mode="ONE_SHOT",
             ),

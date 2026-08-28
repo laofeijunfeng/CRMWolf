@@ -5370,7 +5370,7 @@ async def test_independent_workflow_triggers_in_one_session_use_distinct_executi
         checkpoint = checkpointer.get_tuple(
             {
                 "configurable": {
-                    "thread_id": "crm_agent:1:2:923",
+                    "thread_id": continuation.root_thread_id,
                     "checkpoint_ns": continuation.subgraph_checkpoint_ns,
                     "checkpoint_id": continuation.subgraph_checkpoint_id,
                 }

@@ -57,6 +57,7 @@ def _create_action(*, suffix: str) -> tuple[int, int, str]:
                 session_id=session.id,
                 message_id=message.id,
                 action_type="start_workflow",
+                root_context_role="PROJECTION_ONLY",
                 target={"workflow": "create_follow_up"},
                 consumption_mode="ONE_SHOT",
             ),

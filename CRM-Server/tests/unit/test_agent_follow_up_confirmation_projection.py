@@ -106,6 +106,7 @@ class _FakeRootOrchestrator:
                 ),
             ),
             continuation=WorkflowContinuation(
+                root_thread_id="crm_agent_turn:test",
                 workflow_ref=workflow_ref,
                 parent_checkpoint_id=f"parent_cp_follow_up_confirmation_{resource_suffix}",
                 subgraph_checkpoint_ns=f"workflow:follow_up_confirmation_{resource_suffix}",
@@ -311,6 +312,69 @@ async def test_invalid_case_public_id_is_not_dispatched_or_projected(
         assert db.query(AgentMessage).count() == 0
         assert db.query(AgentUIAction).count() == 0
         assert db.query(FollowUpTaskConfirmationPromptDelivery).count() == 0
+
+
+class _CancellingRootOrchestrator(_FakeRootOrchestrator):
+    def __init__(self, case_public_id: str) -> None:
+        super().__init__()
+        self.case_public_id = case_public_id
+
+    async def dispatch(
+        self,
+        turn: RootTurnInput,
+        *,
+        runtime: RootRuntimeContext,
+    ) -> WorkflowDispatchResult:
+        db = runtime.db
+        case = (
+            db.query(FollowUpTaskConfirmationCase)
+            .filter(FollowUpTaskConfirmationCase.public_id == self.case_public_id)
+            .one()
+        )
+        case.status = FollowUpTaskConfirmationStatus.CANCELLED
+        case.cancelled_at = business_now()
+        case.cancelled_reason = "SOURCE_ACTIVITY_REVISION_SUPERSEDED"
+        db.flush()
+        return await super().dispatch(turn, runtime=runtime)
+
+
+@pytest.mark.asyncio
+async def test_case_cancelled_during_root_dispatch_is_not_projected(
+    projection_harness,
+) -> None:
+    case_public_id = "fuc_" + "3" * 32
+    orchestrator = _CancellingRootOrchestrator(case_public_id)
+    projection = FollowUpConfirmationAgentUIProjection(root_orchestrator=orchestrator)
+
+    with projection_harness() as db:
+        session = AgentSession(session_key="agent-session-projection-race", team_id=1, user_id=2)
+        db.add(session)
+        db.flush()
+        confirmation_case = _seed_projection_case(
+            db,
+            case_number=33,
+            session_id=int(session.id),
+        )
+        confirmation_case.public_id = case_public_id
+        db.flush()
+        db.commit()
+
+        projected = await projection.project_pending(
+            db,
+            team_id=1,
+            user_id=2,
+            session_id=int(session.id),
+            authorization="Bearer test-token",
+            permission_codes=frozenset({"follow_up_task:edit:own"}),
+        )
+
+        assert projected == 0
+        assert len(orchestrator.calls) == 1
+        assert db.query(AgentMessage).count() == 0
+        assert db.query(AgentUIAction).count() == 0
+        assert db.query(FollowUpTaskConfirmationPromptDelivery).count() == 0
+        db.refresh(confirmation_case)
+        assert confirmation_case.status == FollowUpTaskConfirmationStatus.CANCELLED
 
 
 class _FailingActionRepository:

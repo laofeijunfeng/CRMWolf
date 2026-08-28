@@ -67,6 +67,7 @@ export const QueryErrorSchema = z.object({
     'PERMISSION_DENIED',
     'QUERY_LIMIT_EXCEEDED',
     'UPSTREAM_TIMEOUT',
+    'UPSTREAM_UNAVAILABLE',
     'MODEL_OUTPUT_INVALID',
     'INTERNAL_ERROR'
   ]),

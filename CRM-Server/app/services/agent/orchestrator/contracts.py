@@ -21,6 +21,9 @@ from app.services.agent.workflow import (
 )
 
 TaskRelation: TypeAlias = Literal["NEW_TASK", "CONTINUE_TASK", "SWITCH_TASK"]
+PendingCaseRelation: TypeAlias = Literal[
+    "NONE", "EXPLICIT_REFERENCE", "RELATED_TO_CURRENT_ACTIVITY", "UNRELATED", "AMBIGUOUS"
+]
 Route: TypeAlias = Literal["QUERY", "WORKFLOW", "CLARIFY"]
 Risk: TypeAlias = Literal["READ_ONLY", "WRITE"]
 
@@ -78,13 +81,38 @@ class ResultSetContext(OrchestratorContractModel):
     ordered_entity_refs: list[EntityRef] = Field(default_factory=list, max_length=100)
 
 
+class PendingCaseContext(OrchestratorContractModel):
+    """Read-only context for explicitly matching a pending confirmation Case.
+
+    The Root may use these fields to understand a user reference, but only the
+    server-side matcher can turn the reference into ``case_public_id``.
+    """
+
+    case_public_id: str = Field(pattern=r"^fuc_[0-9a-f]{32}$")
+    customer_name: str = Field(min_length=1, max_length=255)
+    customer_aliases: list[str] = Field(default_factory=list, max_length=20)
+    task_title: str = Field(min_length=1, max_length=255)
+    task_description: str | None = Field(default=None, max_length=20000)
+    due_at_text: str | None = Field(default=None, max_length=255)
+    question_text: str = Field(min_length=1, max_length=20000)
+
+
 class WorkflowContinuation(OrchestratorContractModel):
-    """Exact durable continuation for one native Workflow interrupt."""
+    """Exact durable continuation for one native Workflow interrupt.
+
+    ``root_thread_id`` is the LangGraph thread that owns the checkpoint. A
+    session may contain many independent turns, so a resumed interaction must
+    return to the owning thread instead of the current turn thread.
+    """
 
     workflow_ref: WorkflowRef
+    root_thread_id: str = Field(min_length=1, max_length=512)
     parent_checkpoint_id: str = Field(min_length=1, max_length=128)
     subgraph_checkpoint_ns: str = Field(min_length=1, max_length=512)
     subgraph_checkpoint_id: str = Field(min_length=1, max_length=128)
+    waiting_interaction_type: Literal[
+        "choice", "form", "confirmation", "text_input"
+    ] | None = None
 
     @model_validator(mode="after")
     def require_interrupt_identity(self) -> Self:
@@ -137,6 +165,8 @@ class RootContextSnapshot(OrchestratorContractModel):
     result_set: ResultSetContext | None = None
     active_workflow: WorkflowRef | None = None
     resumable_workflows: list[WorkflowRef] = Field(default_factory=list, max_length=20)
+    resumable_workflow_continuations: list[WorkflowContinuation] = Field(default_factory=list, max_length=20)
+    pending_cases: list[PendingCaseContext] = Field(default_factory=list, max_length=100)
 
 
 class ContextPolicy(OrchestratorContractModel):
@@ -154,6 +184,8 @@ class RootDecision(OrchestratorContractModel):
     confidence: float = Field(ge=0, le=1)
     reason_code: str = Field(min_length=1, max_length=128)
     evidence: list[str] = Field(default_factory=list, max_length=20)
+    pending_case_relation: PendingCaseRelation = "NONE"
+    pending_case_reference: str | None = Field(default=None, max_length=255)
 
     @model_validator(mode="after")
     def validate_route_risk(self) -> RootDecision:
@@ -161,6 +193,48 @@ class RootDecision(OrchestratorContractModel):
             raise ValueError("QUERY route requires READ_ONLY risk")
         if self.route == "WORKFLOW" and self.risk != "WRITE":
             raise ValueError("WORKFLOW route requires WRITE risk")
+        return self
+
+
+class RootRoutingPlan(OrchestratorContractModel):
+    """Server-owned plan for the invocation that must follow Root preflight.
+
+    The plan is produced by the Root Graph, not by the application adapter.
+    It exists because a durable Workflow resume must be invoked with the
+    checkpoint locator owned by the original turn, while a new turn always
+    starts on its own isolated Root thread.
+    """
+
+    kind: Literal["INTERACTION_RESUME", "INTERACTION_REPLAY", "TEXT_WORKFLOW_RESUME"]
+    context: RootContextSnapshot
+    decision: RootDecision
+    resolved_action: ResolvedAgentAction | None = None
+    continuation: WorkflowContinuation | None = None
+
+    @model_validator(mode="after")
+    def validate_plan(self) -> Self:
+        if self.kind.startswith("INTERACTION") and self.resolved_action is None:
+            raise ValueError("interaction routing plan requires resolved action")
+        if (
+            self.kind == "INTERACTION_RESUME"
+            and self.resolved_action is not None
+            and self.resolved_action.claim_outcome != "ACQUIRED"
+        ):
+            raise ValueError("interaction resume requires an acquired action")
+        if (
+            self.kind == "INTERACTION_REPLAY"
+            and self.resolved_action is not None
+            and self.resolved_action.claim_outcome != "REPLAY"
+        ):
+            raise ValueError("interaction replay requires a replay action")
+        if self.kind == "TEXT_WORKFLOW_RESUME" and self.continuation is None:
+            raise ValueError("text Workflow resume requires continuation")
+        if (
+            self.continuation is not None
+            and self.resolved_action is not None
+            and self.continuation != self.resolved_action.continuation
+        ):
+            raise ValueError("routing continuation does not match resolved action")
         return self
 
 

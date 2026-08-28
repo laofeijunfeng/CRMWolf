@@ -7,6 +7,10 @@ from typing import TYPE_CHECKING, Protocol
 
 from app.crud.sales_commitment import follow_up_task_confirmation_case_crud
 from app.models.sales_commitment import FollowUpTaskConfirmationStatus
+from app.services.follow_up_confirmation_case_lifecycle_service import (
+    FollowUpConfirmationCaseLifecycleService,
+    follow_up_confirmation_case_lifecycle_service,
+)
 from app.utils.time import business_now
 
 if TYPE_CHECKING:
@@ -28,6 +32,23 @@ class FollowUpTaskConfirmationCaseCleanupCrudProtocol(Protocol):
         skip: int = 0,
         limit: int = 500,
     ) -> tuple[list[FollowUpTaskConfirmationCase], int]: ...
+
+    def list_expired_pending_for_update(
+        self,
+        db: Session,
+        *,
+        team_id: int | None = None,
+        before: datetime | None = None,
+        limit: int = 500,
+    ) -> tuple[list[FollowUpTaskConfirmationCase], int]: ...
+
+    def list_pending_by_task_for_update(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        task_id: int,
+    ) -> list[FollowUpTaskConfirmationCase]: ...
 
     def mark_expired(
         self,
@@ -119,8 +140,17 @@ class FollowUpTaskConfirmationCleanupService:
         confirmation_case_crud: FollowUpTaskConfirmationCaseCleanupCrudProtocol = (
             follow_up_task_confirmation_case_crud
         ),
+        case_lifecycle: FollowUpConfirmationCaseLifecycleService | None = None,
     ) -> None:
         self.confirmation_case_crud = confirmation_case_crud
+        self.case_lifecycle = case_lifecycle or (
+            follow_up_confirmation_case_lifecycle_service
+            if confirmation_case_crud is follow_up_task_confirmation_case_crud
+            else FollowUpConfirmationCaseLifecycleService(
+                case_crud=confirmation_case_crud,
+                action_repository=None,
+            )
+        )
 
     def expire_pending_cases(
         self,
@@ -132,7 +162,7 @@ class FollowUpTaskConfirmationCleanupService:
         commit: bool = True,
     ) -> FollowUpTaskConfirmationCleanupResult:
         resolved_before = before or business_now()
-        cases, total = self.confirmation_case_crud.list_expired_pending(
+        cases, total = self.confirmation_case_crud.list_expired_pending_for_update(
             db,
             team_id=team_id,
             before=resolved_before,
@@ -142,9 +172,10 @@ class FollowUpTaskConfirmationCleanupService:
         for case in cases:
             if case.status != FollowUpTaskConfirmationStatus.PENDING:
                 continue
-            self.confirmation_case_crud.mark_expired(
+            self.case_lifecycle.expire_locked_case(
                 db,
-                case,
+                team_id=int(case.team_id),
+                case=case,
                 expired_at=resolved_before,
                 commit=False,
             )
@@ -174,12 +205,11 @@ class FollowUpTaskConfirmationCleanupService:
         limit: int = 500,
         commit: bool = True,
     ) -> FollowUpTaskConfirmationCleanupResult:
-        cases, _ = self.confirmation_case_crud.list_pending_by_task(
+        cases = self.confirmation_case_crud.list_pending_by_task_for_update(
             db,
             team_id=team_id,
             task_id=task_id,
-            limit=limit,
-        )
+        )[:limit]
         return self._cancel_cases(
             db,
             cases=cases,
@@ -205,7 +235,7 @@ class FollowUpTaskConfirmationCleanupService:
             db,
             team_id=team_id,
             source_activity_id=source_activity_id,
-        )
+        )[:limit]
         return self._cancel_cases(
             db,
             cases=cases,
@@ -233,7 +263,7 @@ class FollowUpTaskConfirmationCleanupService:
             db,
             team_id=team_id,
             source_activity_id=source_activity_id,
-        )
+        )[:limit]
         retained = set(retained_case_public_ids)
         superseded_cases = [case for case in cases if case.public_id not in retained]
         return self._cancel_cases(
@@ -260,12 +290,13 @@ class FollowUpTaskConfirmationCleanupService:
         for case in cases:
             if case.status != FollowUpTaskConfirmationStatus.PENDING:
                 continue
-            self.confirmation_case_crud.mark_cancelled(
+            self.case_lifecycle.cancel_locked_case(
                 db,
-                case,
+                team_id=int(case.team_id),
+                case=case,
                 cancelled_at=resolved_cancelled_at,
                 cancelled_by_id=actor_id,
-                cancelled_reason=reason,
+                reason=reason,
                 commit=False,
             )
             cancelled_public_ids.append(case.public_id)

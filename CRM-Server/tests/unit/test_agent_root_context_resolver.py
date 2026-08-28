@@ -14,12 +14,13 @@ from sqlalchemy.types import BigInteger
 from app.core.database import Base
 from app.models.agent import AgentMessage, AgentMessageRole, AgentSession
 from app.models.agent_persistence import AgentQueryResultSet, AgentUIAction
+from app.models.customer import Customer
+from app.models.sales_commitment import FollowUpTask, FollowUpTaskConfirmationCase
 from app.schemas.agent_persistence import (
     AgentQueryResultSetCreate,
     AgentResultPage,
     AgentUIActionRegistration,
 )
-from app.services.agent.orchestrator.context import DatabaseRootContextResolver
 from app.services.agent.orchestrator import (
     RootContextUnavailableError,
     RootRuntimeContext,
@@ -28,6 +29,7 @@ from app.services.agent.orchestrator import (
     WorkflowContinuation,
     WorkflowRef,
 )
+from app.services.agent.orchestrator.context import DatabaseRootContextResolver
 from app.services.agent.query.result_sets import AgentQueryResultSetRepository
 from app.services.agent.query.schemas import CRMFilter, CRMQuerySpec, EntityRef
 from app.services.agent.ui.actions import AgentUIActionRepository
@@ -51,6 +53,9 @@ def _db_session():
             AgentMessage.__table__,
             AgentQueryResultSet.__table__,
             AgentUIAction.__table__,
+            Customer.__table__,
+            FollowUpTask.__table__,
+            FollowUpTaskConfirmationCase.__table__,
         ],
     )
     return engine, sessionmaker(bind=engine)()
@@ -113,6 +118,7 @@ async def test_database_context_resolver_loads_latest_owned_query_and_workflow()
             now=datetime(2026, 8, 23, 10, 0, 0),
         )
         continuation = WorkflowContinuation(
+            root_thread_id="crm_agent_turn:test",
             workflow_ref=WorkflowRef(
                 workflow_id="wf_context_follow_up",
                 interrupt_id="int_context_confirm",
@@ -130,9 +136,10 @@ async def test_database_context_resolver_loads_latest_owned_query_and_workflow()
                 session_id=session.id,
                 message_id=message.id,
                 action_type="submit_interaction",
+                root_context_role="RESUMABLE_WORKFLOW",
                 target={
                     "workflow_continuation": continuation.model_dump(mode="json"),
-                    "type": "confirmation",
+                    "interaction_type": "confirmation",
                 },
                 consumption_mode="ONE_SHOT",
             ),
@@ -156,6 +163,7 @@ async def test_database_context_resolver_loads_latest_owned_query_and_workflow()
         assert snapshot.result_set.ordered_entity_refs[0].result_set_id == "rs_context_latest"
         assert snapshot.active_workflow == continuation.workflow_ref
         assert snapshot.resumable_workflows == [continuation.workflow_ref]
+        assert snapshot.resumable_workflow_continuations[0].waiting_interaction_type == "confirmation"
     finally:
         db.close()
         engine.dispose()
@@ -215,3 +223,63 @@ async def test_database_context_resolver_requires_database_runtime() -> None:
 
     with pytest.raises(RootContextUnavailableError):
         await resolver.resolve(turn=_turn(session_id=1), runtime=RootRuntimeContext())
+
+
+async def test_pending_case_action_is_not_implicit_root_workflow_context() -> None:
+    engine, db = _db_session()
+    try:
+        session = AgentSession(session_key="root-context-pending-case", team_id=1, user_id=2)
+        db.add(session)
+        db.flush()
+        message = AgentMessage(
+            team_id=1,
+            user_id=2,
+            session_id=session.id,
+            role=AgentMessageRole.ASSISTANT,
+            content="有一个待确认待办",
+        )
+        db.add(message)
+        db.flush()
+        continuation = WorkflowContinuation(
+            root_thread_id="crm_agent_turn:test",
+            workflow_ref=WorkflowRef(
+                workflow_id="wf_pending_case_must_not_resume",
+                interrupt_id="int_pending_case",
+            ),
+            parent_checkpoint_id="cp_pending_case",
+            subgraph_checkpoint_ns="workflow_subgraph:pending-case",
+            subgraph_checkpoint_id="cp_pending_case_subgraph",
+        )
+        AgentUIActionRepository().register(
+            db,
+            AgentUIActionRegistration(
+                public_id="act_pending_case_context",
+                team_id=1,
+                user_id=2,
+                session_id=session.id,
+                message_id=message.id,
+                action_type="submit_interaction",
+                root_context_role="PENDING_CASE",
+                target={
+                    "workflow_continuation": continuation.model_dump(mode="json"),
+                    "follow_up_confirmation_case_public_id": "fuc_11111111111111111111111111111111",
+                },
+                consumption_mode="ONE_SHOT",
+            ),
+            now=datetime(2026, 8, 23, 10, 0, 0),
+        )
+        db.commit()
+
+        snapshot = await DatabaseRootContextResolver().resolve(
+            turn=_turn(session_id=session.id),
+            runtime=RootRuntimeContext(
+                db=db,
+                metadata={"now": datetime(2026, 8, 23, 10, 30, 0)},
+            ),
+        )
+
+        assert snapshot.active_workflow is None
+        assert snapshot.resumable_workflows == []
+    finally:
+        db.close()
+        engine.dispose()

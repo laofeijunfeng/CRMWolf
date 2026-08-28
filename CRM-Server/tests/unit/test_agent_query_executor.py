@@ -530,6 +530,44 @@ async def test_executor_passes_completed_work_cursor_through_without_offset_deco
     assert result.total == 0
 
 
+@pytest.mark.parametrize(
+    ("status_code", "expected_code"),
+    [
+        (408, "UPSTREAM_TIMEOUT"),
+        (429, "UPSTREAM_UNAVAILABLE"),
+        (500, "UPSTREAM_UNAVAILABLE"),
+        (503, "UPSTREAM_UNAVAILABLE"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_executor_maps_retryable_crm_api_statuses_to_stable_upstream_errors(
+    status_code: int, expected_code: str
+) -> None:
+    client = FakeAPIClient(error=CRMAPIClientError("upstream failure", status_code=status_code))
+    executor = DefaultCRMQueryExecutor(api_client=client)
+    spec = CRMQuerySpec(resource="customer", projection=["public_id", "account_name"])
+
+    with pytest.raises(CRMQueryExecutionError) as raised:
+        await executor.execute(spec, _context())
+
+    assert raised.value.error.code == expected_code
+    assert raised.value.error.retryable is True
+    assert raised.value.error.message not in {"upstream failure", "CRM API query failed"}
+
+
+@pytest.mark.asyncio
+async def test_executor_keeps_non_retryable_crm_api_status_as_internal_error() -> None:
+    client = FakeAPIClient(error=CRMAPIClientError("bad gateway input", status_code=409))
+    executor = DefaultCRMQueryExecutor(api_client=client)
+    spec = CRMQuerySpec(resource="customer", projection=["public_id", "account_name"])
+
+    with pytest.raises(CRMQueryExecutionError) as raised:
+        await executor.execute(spec, _context())
+
+    assert raised.value.error.code == "INTERNAL_ERROR"
+    assert raised.value.error.retryable is False
+
+
 @pytest.mark.asyncio
 async def test_executor_maps_malformed_authoritative_response_to_internal_error() -> None:
     client = FakeAPIClient({"items": "not-a-list"})

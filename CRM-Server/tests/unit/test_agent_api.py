@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 import pytest
@@ -31,9 +31,12 @@ from app.schemas.agent_persistence import AgentUIActionRegistration
 from app.services.agent.ui.actions import AgentUIActionRepository
 from app.services.agent.ui.schemas import TextAgentInput
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 
 @compiles(BigInteger, "sqlite")
-def _bigint_to_sqlite_int(element, compiler, **kw):  # noqa: ARG001
+def _bigint_to_sqlite_int(element, compiler, **kw):
     return "INTEGER"
 
 
@@ -175,7 +178,7 @@ def _persist_interaction_message(
             user_id=2,
             session_id=session_id,
             role=AgentMessageRole.ASSISTANT,
-            content="确认创建跟进吗？",
+            content="确认创建跟进吗\uFF1F",
             turn_id=f"turn_interaction_{action_status.lower()}",
         )
         db.add(row)
@@ -194,7 +197,7 @@ def _persist_interaction_message(
                     "interaction_id": "int_create_follow_up",
                     "interaction_type": "confirmation",
                     "state": "ACTIVE",
-                    "prompt": "确认创建跟进吗？",
+                    "prompt": "确认创建跟进吗\uFF1F",
                     "fields": [],
                     "options": [
                         {
@@ -218,7 +221,7 @@ def _persist_interaction_message(
             "metadata": {
                 "route": "WORKFLOW",
                 "result_set_id": None,
-                "accessibility_label": "确认创建跟进吗？",
+                "accessibility_label": "确认创建跟进吗\uFF1F",
             },
         }
         repository = AgentUIActionRepository()
@@ -231,6 +234,7 @@ def _persist_interaction_message(
                 session_id=session_id,
                 message_id=int(row.id),
                 action_type="submit_interaction",
+                root_context_role="RESUMABLE_WORKFLOW",
                 target=action_target or {"interaction_type": "confirmation"},
                 consumption_mode="ONE_SHOT",
             ),
@@ -378,12 +382,6 @@ def test_message_history_projects_follow_up_case_revision_replacement(
         "list_statuses_by_public_ids",
         lambda *args, **kwargs: {"fuc_old": "CANCELLED", "fuc_new": "PENDING"},
     )
-    monkeypatch.setattr(
-        agent_api.follow_up_task_confirmation_prompt_delivery_crud,
-        "list_agent_message_case_statuses",
-        lambda *args, **kwargs: {},
-    )
-
     response = client.get(
         f"/v1/agent/sessions/{created['id']}/messages",
         headers={"Authorization": "Bearer test-token"},
@@ -398,25 +396,15 @@ def test_message_history_projects_follow_up_case_revision_replacement(
     assert by_message_id[new_ui["message_id"]]["submit_action_id"] == new_ui["blocks"][0]["submit_action_id"]
 
 
-def test_message_history_projects_legacy_follow_up_card_from_delivery_case_status(
-    api_harness,
-    monkeypatch,
-) -> None:
+def test_message_history_fails_closed_for_unbound_follow_up_card(api_harness) -> None:
     client, session_factory = api_harness
     created = _create_session(client)
     _persist_interaction_message(
         session_factory,
         session_id=int(created["id"]),
-        action_status="LEGACY_CANCELLED",
+        action_status="UNBOUND_FOLLOW_UP",
         action_target={"business_action": "resolve_follow_up_task_confirmation_case"},
         consume_action=False,
-    )
-    with session_factory() as db:
-        message_id = db.query(AgentMessage.id).filter(AgentMessage.session_id == int(created["id"])).one()[0]
-    monkeypatch.setattr(
-        agent_api.follow_up_task_confirmation_prompt_delivery_crud,
-        "list_agent_message_case_statuses",
-        lambda *args, **kwargs: {message_id: [("fuc_legacy", "CANCELLED")]},
     )
 
     response = client.get(
@@ -426,30 +414,21 @@ def test_message_history_projects_legacy_follow_up_card_from_delivery_case_statu
 
     assert response.status_code == 200
     interaction = response.json()["items"][0]["blocks"][0]
-    assert interaction["state"] == "CANCELLED"
+    assert interaction["state"] == "READ_ONLY"
     assert interaction["submit_action_id"] is None
 
 
-def test_message_history_fail_closes_legacy_follow_up_card_when_case_mapping_is_ambiguous(
+def test_message_history_fails_closed_for_unbound_follow_up_card_without_case_lookup(
     api_harness,
-    monkeypatch,
 ) -> None:
     client, session_factory = api_harness
     created = _create_session(client)
     persisted_ui = _persist_interaction_message(
         session_factory,
         session_id=int(created["id"]),
-        action_status="LEGACY_AMBIGUOUS",
+        action_status="UNBOUND_FOLLOW_UP",
         action_target={"business_action": "resolve_follow_up_task_confirmation_case"},
-    )
-    with session_factory() as db:
-        message_id = db.query(AgentMessage.id).filter(AgentMessage.session_id == int(created["id"])).one()[0]
-    monkeypatch.setattr(
-        agent_api.follow_up_task_confirmation_prompt_delivery_crud,
-        "list_agent_message_case_statuses",
-        lambda *args, **kwargs: {
-            message_id: [("fuc_old", "CANCELLED"), ("fuc_new", "PENDING")],
-        },
+        consume_action=False,
     )
 
     response = client.get(
@@ -463,7 +442,8 @@ def test_message_history_fail_closes_legacy_follow_up_card_when_case_mapping_is_
     assert interaction["submit_action_id"] is None
     assert persisted_ui["blocks"][0]["state"] == "ACTIVE"
 
-def test_message_history_isolates_legacy_status_lookup_failures_from_new_cards(
+
+def test_message_history_keeps_explicit_case_state_independent_of_unbound_cards(
     api_harness,
     monkeypatch,
 ) -> None:
@@ -482,7 +462,7 @@ def test_message_history_isolates_legacy_status_lookup_failures_from_new_cards(
     _persist_interaction_message(
         session_factory,
         session_id=int(created["id"]),
-        action_status="LEGACY_LOOKUP_FAILED",
+        action_status="UNBOUND_FOLLOW_UP",
         action_target={"business_action": "resolve_follow_up_task_confirmation_case"},
         consume_action=False,
     )
@@ -490,15 +470,6 @@ def test_message_history_isolates_legacy_status_lookup_failures_from_new_cards(
         agent_api.follow_up_task_confirmation_case_crud,
         "list_statuses_by_public_ids",
         lambda *args, **kwargs: {"fuc_new": "PENDING"},
-    )
-
-    def raise_lookup_error(*args, **kwargs):
-        raise RuntimeError("database unavailable")
-
-    monkeypatch.setattr(
-        agent_api.follow_up_task_confirmation_prompt_delivery_crud,
-        "list_agent_message_case_statuses",
-        raise_lookup_error,
     )
 
     response = client.get(
@@ -510,8 +481,8 @@ def test_message_history_isolates_legacy_status_lookup_failures_from_new_cards(
     interactions = {item["turn_id"]: item["blocks"][0] for item in response.json()["items"]}
     assert interactions["turn_interaction_new_pending"]["state"] == "ACTIVE"
     assert interactions["turn_interaction_new_pending"]["submit_action_id"] == "act_interaction_new_pending"
-    assert interactions["turn_interaction_legacy_lookup_failed"]["state"] == "READ_ONLY"
-    assert interactions["turn_interaction_legacy_lookup_failed"]["submit_action_id"] is None
+    assert interactions["turn_interaction_unbound_follow_up"]["state"] == "READ_ONLY"
+    assert interactions["turn_interaction_unbound_follow_up"]["submit_action_id"] is None
 
 
 def test_message_history_rejects_unowned_session(api_harness) -> None:

@@ -1,5 +1,7 @@
 # LangGraph 原生运行时规范
 
+> **实施说明（2026-08-28）：**本文件保留 LangGraph 的通用状态、interrupt/resume、subgraph 和 checkpoint 设计原则。Root 的当前落地以 `app/services/agent/orchestrator/graph.py` 和 `runtime.py` 为准；旧版本中将 `root_runtime.py`、独立 pending/confirmed runtime 或 application fallback 作为正常路径的描述已废止。
+
 - **用途：**定义 CRM AI Agent 如何把 LangGraph 作为长期运行、有状态、可恢复的核心运行时。
 - **适用范围：**Agent 主入口、业务子图、HITL、跨轮恢复、工具执行、观测和回放。
 - **权威性：**本文件拥有 LangGraph runtime 采用规则；与旧 pending task 方案冲突时，以本文件为准。
@@ -51,6 +53,18 @@ CRMWolf 采用 LangGraph 的目标不是把流程节点图形化，而是使用�
 8. Agent 任务表是审计和展示投影，不是运行时真相。
 
    `crm_agent_tasks`、消息表和 session context 可以继续用于前端展示、审计和人工排查；运行时恢复以 LangGraph checkpoint + thread state 为准。正常入口和 checkpoint 故障隔离入口都不得扫描 `WAITING_USER` task 来恢复用户等待态。只有当当前 checkpoint interrupt 已经投影出明确 task id/key 时，图节点才能按该 id 精确加载业务审计记录，用于展示、校验或完成审计闭环。
+
+9. 会话边界与业务确认事项边界必须分离。
+
+   Agent Session 是消息容器和 Root thread 的边界；待确认 Case 是带有团队、负责人、客户和源活动版本的业务事实，不是某个会话的隐式 pending 状态。新会话可以在用户明确说出“完成上一个待办”“处理确认事项”或提供 Case 引用时，按负责人和权限读取并匹配仍为 `PENDING` 的 Case；但任何会话都不得因为存在 pending Case 自动恢复 Workflow、自动重复询问或把 Case 注入当前 Workflow checkpoint。用户忽略一张卡片后输入另一客户的跟进记录，必须启动新的 Workflow Text Start；历史任务是否完成由本轮跟进后的任务对账决定。
+
+10. Case 与 Agent UI Action 必须按权威状态收敛。
+
+   Case 是业务真相，Action 是可撤销的交互投影。Case 被取消、过期、解决或源活动版本替换时，必须在同一事务中撤销仍为 `ACTIVE/CONSUMING` 的 Action。投影写入消息和 Action 前必须再次锁定并校验 Case 仍为目标 `PENDING` 状态及源活动 revision；历史消息读取时重新按 Case/Action 状态投影。没有 Case public id 的历史确认卡片只能是 `READ_ONLY`，不得通过旧 delivery、旧 prompt 或消息内容恢复交互能力。
+
+11. 历史数据处理与在线运行时严格分离。
+
+   `message_migration`、`checkpoint_cutover`、`forced_schema_recovery` 和盘点/清理脚本只能作为一次性迁移或运维入口运行，不得从正常 API、Root graph、Query、Workflow 或 Agent UI projection 调用。在线路径不得增加 legacy delivery 查询、旧协议解析、双渲染或猜测性 hydration；无法确定性转换的历史记录保留为只读展示，并由一次性迁移工具处理。
 
 ## Root Graph 职责
 

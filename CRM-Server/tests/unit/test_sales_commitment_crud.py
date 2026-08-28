@@ -31,6 +31,8 @@ from app.crud.sales_commitment import (
     follow_up_task_reconciliation_run_crud,
     sales_commitment_crud,
 )
+from app.models.agent import AgentMessage, AgentSession
+from app.models.agent_persistence import AgentUIAction
 from app.models.customer import Customer, CustomerMember
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_vector_document import (
@@ -105,6 +107,9 @@ def db_session():
     Base.metadata.create_all(
         engine,
         tables=[
+            AgentSession.__table__,
+            AgentMessage.__table__,
+            AgentUIAction.__table__,
             Customer.__table__,
             CustomerMember.__table__,
             CustomerActivity.__table__,

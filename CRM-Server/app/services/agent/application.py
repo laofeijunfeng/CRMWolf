@@ -267,7 +267,7 @@ class AgentApplicationService:
                 input=prepared.root_input,
                 selected_entity_ref=prepared.selected_entity_ref,
             )
-            root_runtime = RootRuntimeContext(
+            runtime_context = RootRuntimeContext(
                 db=db,
                 authorization=authorization,
                 permission_codes=permission_codes,
@@ -280,7 +280,7 @@ class AgentApplicationService:
             dispatch_task = asyncio.create_task(
                 self.root_orchestrator.dispatch(
                     root_turn,
-                    runtime=root_runtime,
+                    runtime=runtime_context,
                     on_progress=progress_queue.put_nowait,
                 )
             )
@@ -368,6 +368,7 @@ class AgentApplicationService:
                             session_id=effective_session_id,
                             message_id=completed.message.id,
                             action_type=draft.action_type,
+                            root_context_role=draft.root_context_role,
                             target=draft.target,
                             consumption_mode=draft.consumption_mode,
                         ),

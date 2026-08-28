@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Annotated, Callable, TypedDict, TypeVar
+from typing import TYPE_CHECKING, Annotated, TypedDict, TypeVar
 from uuid import NAMESPACE_URL, uuid5
 
 from langgraph.graph import END, START, StateGraph
@@ -28,6 +28,7 @@ from app.services.agent.orchestrator.contracts import (
     RootDecision,
     RootDecisionClassifier,
     RootDispatchResult,
+    RootRoutingPlan,
     RootRuntimeContext,
     RootTurnInput,
     TextTurnInput,
@@ -47,7 +48,11 @@ from app.services.agent.orchestrator.errors import (
     WorkflowCheckpointUnavailableError,
     WorkflowExecutionFailedError,
 )
-from app.services.agent.orchestrator.query_executor import QueryExecutionConfigurationError
+from app.services.agent.orchestrator.pending_case_matcher import match_pending_case
+from app.services.agent.orchestrator.query_executor import (
+    QueryExecutionConfigurationError,
+    QueryIdentityResolutionUnavailableError,
+)
 from app.services.agent.orchestrator.result_set import (
     ResultSetReferenceError,
     resolve_result_set_entity,
@@ -56,14 +61,17 @@ from app.services.agent.orchestrator.risk import (
     has_context_dependent_reference,
     has_explicit_follow_up_record_intent,
     has_explicit_independent_read_intent,
+    has_explicit_workflow_continuation_intent,
     has_explicit_write_intent,
 )
 from app.services.agent.principal import AgentPrincipal
+from app.services.agent.query import CRMQueryAgentExecutionError
 from app.services.agent.workflow import (
     WorkflowInterruptPayload,
     WorkflowProgress,
     WorkflowReplayResult,
     WorkflowResourceStart,
+    WorkflowResumeInput,
     WorkflowTextStart,
     WorkflowTurnInput,
     WorkflowWaitingResult,
@@ -71,12 +79,27 @@ from app.services.agent.workflow import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.base import BaseCheckpointSaver
     from langgraph.graph.state import CompiledStateGraph
     from langgraph.runtime import Runtime
 
 logger = logging.getLogger(__name__)
+
+
+_QUERY_ERROR_MESSAGES = {
+    "QUERY_INVALID": "查询条件无法识别，请换一种说法或补充筛选条件。",  # noqa: RUF001
+    "QUERY_UNSUPPORTED": "暂不支持查询这类信息。",
+    "QUERY_EMPTY": "没有找到符合条件的数据。",
+    "PERMISSION_DENIED": "没有权限查看相关数据。",
+    "QUERY_LIMIT_EXCEEDED": "查询结果较多，已按系统上限返回。",  # noqa: RUF001
+    "UPSTREAM_TIMEOUT": "查询服务响应超时，请稍后重试。",  # noqa: RUF001
+    "UPSTREAM_UNAVAILABLE": "查询服务暂时不可用，请稍后重试。",  # noqa: RUF001
+    "MODEL_OUTPUT_INVALID": "查询结果生成失败，请重新描述查询条件。",  # noqa: RUF001
+    "INTERNAL_ERROR": "查询服务暂时不可用，请稍后重试。",  # noqa: RUF001
+}
 
 
 ROOT_RUNTIME_NAME = "crm_agent_root"
@@ -97,15 +120,31 @@ def _workflow_id_for_turn(turn: RootTurnInput) -> str:
 
 
 def build_root_graph_config(turn: RootTurnInput) -> RunnableConfig:
-    """Return the canonical checkpoint identity for one Root turn."""
+    """Return a checkpoint identity owned by exactly one Root turn.
+
+    A Session is a message container, not a LangGraph execution thread.  Using
+    the request identity here prevents a pending interaction or a previous
+    turn's state from becoming implicit state for an unrelated message in the
+    same session.
+    """
+
+    turn_identity = json.dumps(
+        [turn.team_id, turn.user_id, turn.session_id, turn.client_request_id],
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
+    turn_token = uuid5(NAMESPACE_URL, f"crm-agent-root-turn:{turn_identity}").hex
 
     return {
-        "configurable": {"thread_id": f"crm_agent:{turn.team_id}:{turn.user_id}:{turn.session_id}"},
+        "configurable": {
+            "thread_id": f"crm_agent_turn:{turn.team_id}:{turn.user_id}:{turn.session_id}:{turn_token}"
+        },
         "metadata": {
             "team_id": turn.team_id,
             "user_id": turn.user_id,
             "session_id": turn.session_id,
             "client_request_id": turn.client_request_id,
+            "turn_token": turn_token,
             "runtime": ROOT_RUNTIME_NAME,
             "runtime_namespace": ROOT_RUNTIME_NAMESPACE,
         },
@@ -128,7 +167,10 @@ class RootOrchestratorState(TypedDict, total=False):
     resolved_action: Annotated[dict[str, object] | None, _replace_state_value]
     workflow_input: Annotated[dict[str, object] | None, _replace_state_value]
     workflow_result: Annotated[dict[str, object] | None, _replace_state_value]
+    resumed_workflow_ref: Annotated[dict[str, object] | None, _replace_state_value]
     dispatch_result: Annotated[dict[str, object] | None, _replace_state_value]
+    pending_case_public_id: Annotated[str | None, _replace_state_value]
+    routing_plan: Annotated[dict[str, object] | None, _replace_state_value]
 
 
 class RootOrchestrator:
@@ -161,20 +203,21 @@ class RootOrchestrator:
     ) -> RootDispatchResult:
         config = build_root_graph_config(turn)
         try:
-            if isinstance(turn.input, InteractionTurnInput):
-                return await self._dispatch_interaction(
-                    turn=turn,
-                    runtime=runtime,
-                    config=config,
-                    on_progress=on_progress,
-                )
-
             state, continuation = await self._invoke_graph(
                 self._new_turn_state(turn),
                 config,
                 runtime=runtime,
                 on_progress=on_progress,
             )
+            routing_plan = self._routing_plan_from_state(state)
+            if routing_plan is not None:
+                return await self._execute_routing_plan(
+                    turn=turn,
+                    runtime=runtime,
+                    config=config,
+                    plan=routing_plan,
+                    on_progress=on_progress,
+                )
             return self._dispatch_result_from_state(state, continuation=continuation)
         except RootContextUnavailableError:
             return FailureDispatchResult(
@@ -214,58 +257,142 @@ class RootOrchestrator:
                 )
             )
 
-    async def _dispatch_interaction(
+    @staticmethod
+    def _routing_plan_from_state(
+        state: dict[str, object],
+    ) -> RootRoutingPlan | None:
+        raw_plan = state.get("routing_plan")
+        if raw_plan is None:
+            return None
+        try:
+            return RootRoutingPlan.model_validate(raw_plan)
+        except ValidationError as exc:
+            raise WorkflowExecutionFailedError("Root Graph returned an invalid routing plan") from exc
+
+    async def _execute_routing_plan(
         self,
         *,
         turn: RootTurnInput,
         runtime: RootRuntimeContext,
         config: RunnableConfig,
+        plan: RootRoutingPlan,
         on_progress: Callable[[WorkflowProgress], None] | None,
     ) -> RootDispatchResult:
-        context = await self._context_resolver.resolve(turn=turn, runtime=runtime)
-        resolution = await self._interaction_resolver.resolve(
-            turn=turn,
-            context=context,
-            runtime=runtime,
-        )
-        if resolution.status == "REJECTED":
-            return self._interaction_failure(resolution.reason_code)
-        resolved_action = resolution.resolved_action
-        if resolved_action is None:
-            raise InteractionResolutionUnavailableError("Resolved interaction is missing its canonical action")
+        """Execute a server-authorized plan selected by the Root Graph.
 
-        decision = self._interaction_workflow_decision(
-            turn=turn,
-            reason_code=resolution.reason_code,
-        )
-        if resolved_action.claim_outcome == "REPLAY":
-            if resolved_action.replay_message_id is None:
-                raise InteractionResolutionUnavailableError("Replayed action is missing its result message")
+        This adapter is deliberately limited to checkpoint mechanics.  Intent
+        recognition, interaction binding, pending Case matching, and decision
+        construction all happen in graph nodes before this method is reached.
+        """
+
+        if plan.kind == "INTERACTION_REPLAY":
+            action = plan.resolved_action
+            if action is None or action.replay_message_id is None:
+                raise InteractionResolutionUnavailableError(
+                    "Replayed action is missing its result message"
+                )
             return WorkflowDispatchResult(
-                decision=decision,
+                decision=plan.decision,
                 workflow_result=WorkflowReplayResult(
-                    workflow_ref=resolved_action.workflow_ref,
-                    message_id=resolved_action.replay_message_id,
+                    workflow_ref=action.workflow_ref,
+                    message_id=action.replay_message_id,
                 ),
             )
-
-        context = context.model_copy(update={"active_workflow": resolved_action.workflow_ref})
-        try:
-            continuation_config = self._config_for_continuation(
-                config,
-                resolved_action.continuation,
+        if plan.kind == "INTERACTION_RESUME":
+            return await self._resume_interaction_plan(
+                turn=turn,
+                runtime=runtime,
+                config=config,
+                plan=plan,
+                on_progress=on_progress,
             )
+        if plan.kind == "TEXT_WORKFLOW_RESUME":
+            return await self._resume_text_plan(
+                turn=turn,
+                runtime=runtime,
+                config=config,
+                plan=plan,
+                on_progress=on_progress,
+            )
+        raise WorkflowExecutionFailedError("Unsupported Root routing plan")
+
+    async def _resume_text_plan(
+        self,
+        *,
+        turn: RootTurnInput,
+        runtime: RootRuntimeContext,
+        config: RunnableConfig,
+        plan: RootRoutingPlan,
+        on_progress: Callable[[WorkflowProgress], None] | None,
+    ) -> RootDispatchResult:
+        if not isinstance(turn.input, TextTurnInput) or plan.continuation is None:
+            raise WorkflowExecutionFailedError("Text Workflow resume plan is invalid")
+        continuation_config = self._config_for_continuation(config, plan.continuation)
+        await self._require_continuation_checkpoint(continuation_config)
+        resume = WorkflowResumeInput(
+            kind="text",
+            content=turn.input.text,
+            source="agent_text",
+            metadata={"continuation": "explicit"},
+        )
+        try:
+            state, resumed_continuation = await self._invoke_graph(
+                Command(
+                    resume=resume.model_dump(mode="json"),
+                    update={
+                        # Keep the original Root workflow_input in the owning
+                        # checkpoint; only turn/context/decision are refreshed.
+                        "turn": turn.model_dump(mode="json"),
+                        "context_snapshot": plan.context.model_dump(mode="json"),
+                        "decision": plan.decision.model_dump(mode="json"),
+                        "resolved_action": None,
+                        "routing_plan": None,
+                        "resumed_workflow_ref": plan.continuation.workflow_ref.model_dump(mode="json"),
+                        "dispatch_result": None,
+                    },
+                ),
+                continuation_config,
+                runtime=runtime,
+                on_progress=on_progress,
+            )
+            result = self._dispatch_result_from_state(state, continuation=resumed_continuation)
+            if not isinstance(result, WorkflowDispatchResult):
+                raise WorkflowExecutionFailedError(
+                    "Text Workflow continuation returned a non-Workflow result"
+                )
+            return result
+        except WorkflowCheckpointUnavailableError:
+            return self._workflow_failure("WORKFLOW_CHECKPOINT_UNAVAILABLE")
+        except WorkflowExecutionFailedError:
+            logger.exception("Text Workflow continuation failed")
+            return self._workflow_failure("WORKFLOW_EXECUTION_FAILED")
+
+    async def _resume_interaction_plan(
+        self,
+        *,
+        turn: RootTurnInput,
+        runtime: RootRuntimeContext,
+        config: RunnableConfig,
+        plan: RootRoutingPlan,
+        on_progress: Callable[[WorkflowProgress], None] | None,
+    ) -> RootDispatchResult:
+        action = plan.resolved_action
+        if action is None:
+            raise InteractionResolutionUnavailableError(
+                "Interaction routing plan is missing its resolved action"
+            )
+        context = plan.context.model_copy(update={"active_workflow": action.workflow_ref})
+        try:
+            continuation_config = self._config_for_continuation(config, action.continuation)
             await self._require_continuation_checkpoint(continuation_config)
             state, continuation = await self._invoke_graph(
                 Command(
-                    resume=resolved_action.resume_payload,
+                    resume=action.resume_payload,
                     update=self._resettable_state(
                         turn=turn,
-                        context_snapshot=context.model_copy(
-                            update={"active_workflow": resolved_action.workflow_ref}
-                        ),
-                        decision=decision,
-                        resolved_action=resolved_action,
+                        context_snapshot=context,
+                        decision=plan.decision,
+                        resolved_action=action,
                     ),
                 ),
                 continuation_config,
@@ -280,14 +407,14 @@ class RootOrchestrator:
         except WorkflowCheckpointUnavailableError:
             return self._workflow_failure(
                 "WORKFLOW_CHECKPOINT_UNAVAILABLE",
-                action_claim_id=resolved_action.action_id,
+                action_claim_id=action.action_id,
             )
         except WorkflowExecutionFailedError:
             return self._workflow_failure(
                 "WORKFLOW_EXECUTION_FAILED",
-                action_claim_id=resolved_action.action_id,
+                action_claim_id=action.action_id,
             )
-        return result.model_copy(update={"action_claim_id": resolved_action.action_id})
+        return result.model_copy(update={"action_claim_id": action.action_id})
 
     @staticmethod
     def _new_turn_state(
@@ -311,8 +438,18 @@ class RootOrchestrator:
             "resolved_action": (resolved_action.model_dump(mode="json") if resolved_action is not None else None),
             "workflow_input": None,
             "workflow_result": None,
+            "resumed_workflow_ref": None,
             "dispatch_result": None,
+            "pending_case_public_id": None,
+            "routing_plan": None,
         }
+
+    @staticmethod
+    def _root_thread_id_from_config(config: RunnableConfig) -> str:
+        thread_id = _thread_id_or_none(config)
+        if thread_id is None:
+            raise WorkflowCheckpointUnavailableError("Workflow continuation has no owning Root thread")
+        return thread_id
 
     @staticmethod
     def _config_for_continuation(
@@ -320,6 +457,10 @@ class RootOrchestrator:
         continuation: WorkflowContinuation,
     ) -> RunnableConfig:
         configurable = dict(config.get("configurable", {}))
+        # Continuations are owned by the Root turn that created the interrupt.
+        # The current request has a fresh turn thread; resuming it would make
+        # LangGraph look for the old checkpoint in the wrong thread.
+        configurable["thread_id"] = continuation.root_thread_id
         configurable["checkpoint_id"] = continuation.parent_checkpoint_id
         configurable["checkpoint_map"] = {
             "": continuation.parent_checkpoint_id,
@@ -358,6 +499,7 @@ class RootOrchestrator:
         """Run one Root turn and capture the exact durable Workflow continuation."""
 
         final_state: dict[str, object] | None = None
+        root_thread_id: str | None = None
         parent_checkpoint_id: str | None = None
         subgraph_checkpoint_ns: str | None = None
         subgraph_checkpoint_id: str | None = None
@@ -385,6 +527,7 @@ class RootOrchestrator:
             checkpoint_config = payload.get("config")
             checkpoint_id = _checkpoint_id_or_none(checkpoint_config)
             if not namespace:
+                root_thread_id = _thread_id_or_none(checkpoint_config)
                 next_nodes = payload.get("next")
                 if checkpoint_id is not None and next_nodes == ["workflow_subgraph"]:
                     parent_checkpoint_id = checkpoint_id
@@ -401,11 +544,17 @@ class RootOrchestrator:
             return final_state, None
         if parent_checkpoint_id is None or subgraph_checkpoint_ns is None or subgraph_checkpoint_id is None:
             raise WorkflowCheckpointUnavailableError("Interrupted Workflow did not expose a durable continuation")
+        workflow_ref = self._workflow_ref_from_interrupts(interrupts)
+        interrupt_payload = WorkflowInterruptPayload.model_validate(
+            getattr(interrupts[0], "value", None)
+        )
         return final_state, WorkflowContinuation(
-            workflow_ref=self._workflow_ref_from_interrupts(interrupts),
+            workflow_ref=workflow_ref,
+            root_thread_id=root_thread_id or self._root_thread_id_from_config(config),
             parent_checkpoint_id=parent_checkpoint_id,
             subgraph_checkpoint_ns=subgraph_checkpoint_ns,
             subgraph_checkpoint_id=subgraph_checkpoint_id,
+            waiting_interaction_type=interrupt_payload.interaction.interaction_type,
         )
 
     def _dispatch_result_from_state(
@@ -474,15 +623,29 @@ class RootOrchestrator:
             context_schema=RootRuntimeContext,
         )
         graph.add_node("load_context", self._load_context)
+        graph.add_node("resolve_deterministic_continuation", self._resolve_deterministic_continuation)
         graph.add_node("decide", self._decide)
+        graph.add_node("validate_decision", self._validate_decision)
         graph.add_node("apply_context_policy", self._apply_context_policy)
         graph.add_node("query_agent", self._run_query)
         graph.add_node("workflow_subgraph", self._workflow_subgraph)
         graph.add_node("finalize_workflow", self._finalize_workflow)
         graph.add_node("build_clarification", self._build_clarification)
+        graph.add_node("finalize_dispatch", self._finalize_dispatch)
         graph.add_edge(START, "load_context")
-        graph.add_edge("load_context", "decide")
-        graph.add_edge("decide", "apply_context_policy")
+        graph.add_edge("load_context", "resolve_deterministic_continuation")
+        graph.add_conditional_edges(
+            "resolve_deterministic_continuation",
+            self._route_after_deterministic_continuation,
+            {
+                "DECIDE": "decide",
+                "VALIDATE": "validate_decision",
+                "ROUTING_PLAN": END,
+                "DISPATCH_RESULT": END,
+            },
+        )
+        graph.add_edge("decide", "validate_decision")
+        graph.add_edge("validate_decision", "apply_context_policy")
         graph.add_conditional_edges(
             "apply_context_policy",
             self._route_after_context_policy,
@@ -492,10 +655,11 @@ class RootOrchestrator:
                 "CLARIFY": "build_clarification",
             },
         )
-        graph.add_edge("query_agent", END)
+        graph.add_edge("query_agent", "finalize_dispatch")
         graph.add_edge("workflow_subgraph", "finalize_workflow")
-        graph.add_edge("finalize_workflow", END)
-        graph.add_edge("build_clarification", END)
+        graph.add_edge("finalize_workflow", "finalize_dispatch")
+        graph.add_edge("build_clarification", "finalize_dispatch")
+        graph.add_edge("finalize_dispatch", END)
         return graph.compile(checkpointer=self._checkpointer)
 
     async def _load_context(
@@ -509,6 +673,148 @@ class RootOrchestrator:
             runtime=runtime.context,
         )
         return {"context_snapshot": context.model_dump(mode="json")}
+
+    async def _resolve_deterministic_continuation(
+        self,
+        state: RootOrchestratorState,
+        runtime: Runtime[RootRuntimeContext],
+    ) -> RootOrchestratorState:
+        """Resolve resources that must never be selected by the decision model."""
+
+        turn = RootTurnInput.model_validate(state["turn"])
+        context = RootContextSnapshot.model_validate(state["context_snapshot"])
+
+        if isinstance(turn.input, InteractionTurnInput):
+            resolution = await self._interaction_resolver.resolve(
+                turn=turn,
+                context=context,
+                runtime=runtime.context,
+            )
+            if resolution.status == "REJECTED":
+                return {
+                    "dispatch_result": self._interaction_failure(
+                        resolution.reason_code
+                    ).model_dump(mode="json")
+                }
+            resolved_action = resolution.resolved_action
+            if resolved_action is None:
+                raise InteractionResolutionUnavailableError(
+                    "Resolved interaction is missing its canonical action"
+                )
+            decision = self._interaction_workflow_decision(
+                turn=turn,
+                reason_code=resolution.reason_code,
+            )
+            plan = RootRoutingPlan(
+                kind=(
+                    "INTERACTION_REPLAY"
+                    if resolved_action.claim_outcome == "REPLAY"
+                    else "INTERACTION_RESUME"
+                ),
+                context=context,
+                decision=decision,
+                resolved_action=resolved_action,
+                continuation=resolved_action.continuation,
+            )
+            return {"routing_plan": plan.model_dump(mode="json")}
+
+        if not isinstance(turn.input, TextTurnInput):
+            return {}
+
+        pending_match = match_pending_case(turn.input.text, context.pending_cases)
+        if pending_match.status == "MATCHED" and pending_match.case is not None:
+            decision = self._explicit_pending_case_decision(
+                has_active_workflow=context.active_workflow is not None,
+                reference=pending_match.reference,
+            )
+            return {
+                "decision": decision.model_dump(mode="json"),
+                "pending_case_public_id": pending_match.case.case_public_id,
+            }
+        if pending_match.status in {"AMBIGUOUS", "NOT_FOUND"}:
+            decision = self._pending_case_clarification_decision(
+                has_active_workflow=context.active_workflow is not None,
+                relation=(
+                    "AMBIGUOUS"
+                    if pending_match.status == "AMBIGUOUS"
+                    else "EXPLICIT_REFERENCE"
+                ),
+                reference=pending_match.reference,
+            )
+            return {"decision": decision.model_dump(mode="json")}
+
+        if not has_explicit_workflow_continuation_intent(turn.input.text):
+            return {}
+
+        continuations = context.resumable_workflow_continuations
+        if context.active_workflow is None:
+            decision = self._clarification_decision(
+                RootDecision(
+                    task_relation="NEW_TASK",
+                    route="WORKFLOW",
+                    risk="WRITE",
+                    context_policy=ContextPolicy(
+                        selected_entity="IGNORE",
+                        previous_query="IGNORE",
+                        result_set="IGNORE",
+                        active_workflow="NONE",
+                    ),
+                    confidence=1.0,
+                    reason_code="ACTIVE_WORKFLOW_CONTEXT_MISSING",
+                    evidence=["用户明确要求继续流程, 但当前会话没有可恢复的流程"],
+                ),
+                "ACTIVE_WORKFLOW_CONTEXT_MISSING",
+            )
+            return {"decision": decision.model_dump(mode="json")}
+        if len(continuations) != 1 or continuations[0].workflow_ref != context.active_workflow:
+            decision = self._clarification_decision(
+                RootDecision(
+                    task_relation="CONTINUE_TASK",
+                    route="WORKFLOW",
+                    risk="WRITE",
+                    context_policy=ContextPolicy(
+                        selected_entity="IGNORE",
+                        previous_query="IGNORE",
+                        result_set="IGNORE",
+                        active_workflow="RESUME",
+                    ),
+                    confidence=1.0,
+                    reason_code=(
+                        "ACTIVE_WORKFLOW_RESUME_AMBIGUOUS"
+                        if len(continuations) != 1
+                        else "ACTIVE_WORKFLOW_CONTINUATION_UNAVAILABLE"
+                    ),
+                    evidence=["用户明确要求继续流程, 但服务端无法唯一定位可恢复的流程"],
+                ),
+                "ACTIVE_WORKFLOW_RESUME_AMBIGUOUS",
+            )
+            return {"decision": decision.model_dump(mode="json")}
+
+        continuation = continuations[0]
+        if continuation.waiting_interaction_type != "text_input":
+            decision = self._clarification_decision(
+                self._explicit_workflow_continuation_decision(),
+                "WORKFLOW_CONFIRMATION_REQUIRES_STRUCTURED_ACTION",
+            )
+            return {"decision": decision.model_dump(mode="json")}
+
+        plan = RootRoutingPlan(
+            kind="TEXT_WORKFLOW_RESUME",
+            context=context,
+            decision=self._explicit_workflow_continuation_decision(),
+            continuation=continuation,
+        )
+        return {"routing_plan": plan.model_dump(mode="json")}
+
+    @staticmethod
+    def _route_after_deterministic_continuation(state: RootOrchestratorState) -> str:
+        if state.get("dispatch_result") is not None:
+            return "DISPATCH_RESULT"
+        if state.get("routing_plan") is not None:
+            return "ROUTING_PLAN"
+        if state.get("decision") is not None:
+            return "VALIDATE"
+        return "DECIDE"
 
     async def _decide(
         self,
@@ -557,6 +863,15 @@ class RootOrchestrator:
                 context=context,
                 runtime=runtime.context,
             )
+            # Pending Case identity is a server-owned binding.  A model may
+            # classify ordinary text, but it cannot promote its own
+            # ``pending_case_reference`` into a resumable resource.  Only the
+            # deterministic matcher above can do that.
+            if decision.pending_case_relation == "EXPLICIT_REFERENCE":
+                decision = self._clarification_decision(
+                    decision,
+                    "PENDING_CASE_REFERENCE_UNVERIFIED",
+                )
         return {"decision": decision.model_dump(mode="json")}
 
     @staticmethod
@@ -611,6 +926,22 @@ class RootOrchestrator:
         )
         return FailureDispatchResult(error=error)
 
+    def _validate_decision(
+        self,
+        state: RootOrchestratorState,
+    ) -> RootOrchestratorState:
+        """Apply deterministic Root invariants after model/deterministic routing."""
+
+        turn = RootTurnInput.model_validate(state["turn"])
+        context = RootContextSnapshot.model_validate(state["context_snapshot"])
+        decision = self._validated_decision(
+            RootDecision.model_validate(state["decision"]),
+            turn=turn,
+            context=context,
+        )
+        return {"decision": decision.model_dump(mode="json")}
+
+
     def _apply_context_policy(
         self,
         state: RootOrchestratorState,
@@ -619,11 +950,7 @@ class RootOrchestrator:
         turn = RootTurnInput.model_validate(state["turn"])
         runtime_context = runtime.context
         context = RootContextSnapshot.model_validate(state["context_snapshot"])
-        decision = self._validated_decision(
-            RootDecision.model_validate(state["decision"]),
-            turn=turn,
-            context=context,
-        )
+        decision = RootDecision.model_validate(state["decision"])
         if decision.route == "CLARIFY":
             return {"decision": decision.model_dump(mode="json")}
 
@@ -664,7 +991,15 @@ class RootOrchestrator:
                 ).model_dump(mode="json"),
             }
         if isinstance(turn.input, TextTurnInput):
-            workflow_start = WorkflowTextStart(kind="text", text=turn.input.text)
+            pending_case_public_id = state.get("pending_case_public_id")
+            if pending_case_public_id is not None:
+                workflow_start = WorkflowResourceStart(
+                    kind="resource",
+                    workflow="follow_up_task_confirmation",
+                    resource_id=str(pending_case_public_id),
+                )
+            else:
+                workflow_start = WorkflowTextStart(kind="text", text=turn.input.text)
         elif isinstance(turn.input, WorkflowTriggerTurnInput):
             workflow_start = WorkflowResourceStart(
                 kind="resource",
@@ -713,6 +1048,31 @@ class RootOrchestrator:
                     ),
                 ).model_dump(mode="json")
             }
+        except QueryIdentityResolutionUnavailableError:
+            return {
+                "dispatch_result": FailureDispatchResult(
+                    decision=decision,
+                    error=AgentExecutionError(
+                        code="QUERY_IDENTITY_UNAVAILABLE",
+                        message="客户识别服务暂时不可用, 请稍后重试。",
+                        retryable=True,
+                    ),
+                ).model_dump(mode="json")
+            }
+        except CRMQueryAgentExecutionError as exc:
+            query_error = exc.error
+            return {
+                "dispatch_result": FailureDispatchResult(
+                    decision=decision,
+                    error=AgentExecutionError(
+                        code=query_error.code,
+                        message=_QUERY_ERROR_MESSAGES.get(
+                            query_error.code, "查询服务暂时不可用，请稍后重试。"  # noqa: RUF001
+                        ),
+                        retryable=query_error.retryable,
+                    ),
+                ).model_dump(mode="json")
+            }
         except Exception:
             logger.exception(
                 "Root query execution failed",
@@ -746,7 +1106,12 @@ class RootOrchestrator:
             )
             workflow_input = (
                 WorkflowTurnInput.model_validate(state["workflow_input"])
-                if resolved_action is None
+                if resolved_action is None and state.get("resumed_workflow_ref") is None
+                else None
+            )
+            resumed_workflow_ref = (
+                WorkflowRef.model_validate(state["resumed_workflow_ref"])
+                if state.get("resumed_workflow_ref") is not None
                 else None
             )
         except (KeyError, ValidationError) as exc:
@@ -755,6 +1120,8 @@ class RootOrchestrator:
         expected_workflow_id = (
             resolved_action.workflow_ref.workflow_id
             if resolved_action is not None
+            else resumed_workflow_ref.workflow_id
+            if resumed_workflow_ref is not None
             else workflow_input.workflow_id
         )
         actual_workflow_ref = workflow_result.workflow_ref
@@ -803,6 +1170,19 @@ class RootOrchestrator:
         )
 
     @staticmethod
+    def _finalize_dispatch(state: RootOrchestratorState) -> RootOrchestratorState:
+        """Validate the typed result at the Root Graph's single output node."""
+
+        if state.get("dispatch_result") is None:
+            raise WorkflowExecutionFailedError("Root Graph finalized without a dispatch result")
+        try:
+            result = root_dispatch_result_adapter.validate_python(state["dispatch_result"])
+        except ValidationError as exc:
+            raise WorkflowExecutionFailedError("Root Graph produced an invalid dispatch result") from exc
+        return {"dispatch_result": result.model_dump(mode="json")}
+
+
+    @staticmethod
     def _build_clarification(state: RootOrchestratorState) -> RootOrchestratorState:
         decision = RootDecision.model_validate(state["decision"])
         return {"dispatch_result": RootOrchestrator._clarification_result(decision).model_dump(mode="json")}
@@ -834,8 +1214,30 @@ class RootOrchestrator:
             invalid_reason = "ACTIVE_WORKFLOW_CONTEXT_MISSING"
         elif (
             isinstance(turn.input, TextTurnInput)
+            and decision.route == "WORKFLOW"
+            and decision.task_relation == "CONTINUE_TASK"
+            and not has_explicit_workflow_continuation_intent(turn.input.text)
+            and (
+                decision.context_policy.active_workflow == "RESUME"
+                or (
+                    decision.context_policy.active_workflow == "NONE"
+                    and decision.context_policy.selected_entity == "IGNORE"
+                    and decision.context_policy.previous_query == "IGNORE"
+                    and decision.context_policy.result_set == "IGNORE"
+                )
+            )
+        ):
+            # ``CONTINUE_TASK`` is also useful when a new Workflow is scoped by
+            # an explicitly referenced entity/result set or when a Query keeps
+            # its conversational context.  Reject only a bare Workflow
+            # continuation: it has no context binding and would otherwise let
+            # the model manufacture a native checkpoint resume. Native resume
+            # is selected only by the deterministic explicit-continuation path.
+            invalid_reason = "MODEL_TRIED_TO_RESUME_WORKFLOW"
+        elif (
+            isinstance(turn.input, TextTurnInput)
             and policy.active_workflow == "RESUME"
-            and len(context.resumable_workflows) != 1
+            and len(context.resumable_workflow_continuations) != 1
         ):
             invalid_reason = "ACTIVE_WORKFLOW_RESUME_AMBIGUOUS"
         elif context.active_workflow is not None:
@@ -852,6 +1254,70 @@ class RootOrchestrator:
         if invalid_reason is None:
             return decision
         return self._clarification_decision(decision, invalid_reason)
+
+    @staticmethod
+    def _explicit_pending_case_decision(
+        *,
+        has_active_workflow: bool,
+        reference: str | None,
+    ) -> RootDecision:
+        return RootDecision(
+            task_relation=("SWITCH_TASK" if has_active_workflow else "NEW_TASK"),
+            route="WORKFLOW",
+            risk="WRITE",
+            context_policy=ContextPolicy(
+                selected_entity="IGNORE",
+                previous_query="IGNORE",
+                result_set="IGNORE",
+                active_workflow=("SUSPEND" if has_active_workflow else "NONE"),
+            ),
+            confidence=1.0,
+            reason_code="EXPLICIT_PENDING_CASE_REFERENCE",
+            evidence=[f"用户明确引用待办确认事项: {(reference or '')[:120]}"],
+            pending_case_relation="EXPLICIT_REFERENCE",
+            pending_case_reference=reference,
+        )
+
+    @staticmethod
+    def _pending_case_clarification_decision(
+        *,
+        has_active_workflow: bool,
+        relation: str,
+        reference: str | None,
+    ) -> RootDecision:
+        return RootDecision(
+            task_relation=("SWITCH_TASK" if has_active_workflow else "NEW_TASK"),
+            route="CLARIFY",
+            risk="WRITE",
+            context_policy=ContextPolicy(
+                selected_entity="IGNORE",
+                previous_query="IGNORE",
+                result_set="IGNORE",
+                active_workflow=("SUSPEND" if has_active_workflow else "NONE"),
+            ),
+            confidence=1.0,
+            reason_code=("PENDING_CASE_REFERENCE_AMBIGUOUS" if relation == "AMBIGUOUS" else "PENDING_CASE_NOT_FOUND"),
+            evidence=[f"用户明确引用待办, 但无法唯一匹配: {(reference or '')[:120]}"],
+            pending_case_relation=relation,
+            pending_case_reference=reference,
+        )
+
+    @staticmethod
+    def _explicit_workflow_continuation_decision() -> RootDecision:
+        return RootDecision(
+            task_relation="CONTINUE_TASK",
+            route="WORKFLOW",
+            risk="WRITE",
+            context_policy=ContextPolicy(
+                selected_entity="IGNORE",
+                previous_query="IGNORE",
+                result_set="IGNORE",
+                active_workflow="RESUME",
+            ),
+            confidence=1.0,
+            reason_code="EXPLICIT_WORKFLOW_CONTINUATION",
+            evidence=["用户明确要求继续当前会话中的工作流"],
+        )
 
     @staticmethod
     def _explicit_follow_up_workflow_decision(
@@ -911,7 +1377,19 @@ class RootOrchestrator:
             confidence=decision.confidence,
             reason_code=reason_code,
             evidence=decision.evidence,
+            pending_case_relation=decision.pending_case_relation,
+            pending_case_reference=decision.pending_case_reference,
         )
+
+
+def _thread_id_or_none(config: object) -> str | None:
+    if not isinstance(config, dict):
+        return None
+    configurable = config.get("configurable")
+    if not isinstance(configurable, dict):
+        return None
+    thread_id = configurable.get("thread_id")
+    return thread_id if isinstance(thread_id, str) and thread_id else None
 
 
 def _checkpoint_id_or_none(config: object) -> str | None:

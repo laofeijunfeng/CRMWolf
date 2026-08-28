@@ -28,7 +28,9 @@ ROOT_STATE_KEYS = {
     "workflow_input",
     "workflow_result",
     "dispatch_result",
+    "pending_case_public_id",
 }
+TARGET_THREAD_ID = "crm_agent_turn:1:2:3:0123456789abcdef0123456789abcdef"
 
 
 class _LegacyConstructorProbe(BaseModel):
@@ -335,7 +337,7 @@ def test_cutover_fails_closed_and_rolls_back_when_a_legacy_task_is_still_active(
         assert connection.execute(text("SELECT COUNT(*) FROM crm_agent_checkpoint_migration_journal")).scalar_one() == 0
 
 
-def test_cutover_rejects_target_root_state_outside_the_eight_field_contract() -> None:
+def test_cutover_rejects_target_root_state_outside_the_contract() -> None:
     engine = _engine()
     _put_session(engine)
     saver = SQLAlchemyCheckpointSaver(engine)
@@ -454,6 +456,7 @@ def _put_workflow_action(
                     {
                         "workflow_continuation": {
                             "workflow_ref": {"workflow_id": "flow-1", "interrupt_id": "interrupt-1"},
+                            "root_thread_id": TARGET_THREAD_ID,
                             "parent_checkpoint_id": parent_checkpoint_id,
                             "subgraph_checkpoint_ns": subgraph_checkpoint_ns,
                             "subgraph_checkpoint_id": subgraph_checkpoint_id,
@@ -470,7 +473,7 @@ def _put_waiting_target_workflow(engine) -> SQLAlchemyCheckpointSaver:
     saver = SQLAlchemyCheckpointSaver(engine)
     _put_checkpoint(
         saver,
-        thread_id="crm_agent:1:2:3",
+        thread_id=TARGET_THREAD_ID,
         checkpoint_ns="",
         checkpoint_id="root-parent",
         runtime="crm_agent_root",
@@ -479,7 +482,7 @@ def _put_waiting_target_workflow(engine) -> SQLAlchemyCheckpointSaver:
     )
     _put_checkpoint(
         saver,
-        thread_id="crm_agent:1:2:3",
+        thread_id=TARGET_THREAD_ID,
         checkpoint_ns="workflow_subgraph:flow-1",
         checkpoint_id="workflow-waiting",
         runtime="crm_agent_root",
@@ -488,7 +491,7 @@ def _put_waiting_target_workflow(engine) -> SQLAlchemyCheckpointSaver:
     )
     _put_interrupt(
         saver,
-        thread_id="crm_agent:1:2:3",
+        thread_id=TARGET_THREAD_ID,
         checkpoint_ns="workflow_subgraph:flow-1",
         checkpoint_id="workflow-waiting",
     )

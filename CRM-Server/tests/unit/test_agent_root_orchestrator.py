@@ -32,36 +32,43 @@ from app.services.agent.orchestrator import (
     WorkflowRef,
     build_root_graph_config,
 )
+from app.services.agent.orchestrator.contracts import PendingCaseContext
 from app.services.agent.query import (
     CRMFilter,
+    CRMQueryAgentExecutionError,
     CRMQueryAgentModelConfig,
     CRMQueryAgentResponse,
     CRMQueryAgentResult,
     CRMQueryAgentTrace,
     CRMQuerySpec,
     EntityRef,
+    QueryError,
 )
 from app.services.agent.workflow import WorkflowTurnInput
 from app.services.agent.workflow.progress import execution_progress
 
 
-def test_root_graph_config_has_one_stable_runtime_identity() -> None:
-    config = build_root_graph_config(
-        RootTurnInput(
-            team_id=9,
-            user_id=18,
-            session_id=556,
-            client_request_id="req_checkpoint_identity",
-            input=TextTurnInput(type="text", text="上海有哪些客户"),
-        )
+def test_root_graph_config_is_stable_per_turn_and_isolated_within_session() -> None:
+    first_turn = RootTurnInput(
+        team_id=9,
+        user_id=18,
+        session_id=556,
+        client_request_id="req_checkpoint_identity",
+        input=TextTurnInput(type="text", text="上海有哪些客户"),
     )
+    second_turn = first_turn.model_copy(update={"client_request_id": "req_other_turn"})
+    config = build_root_graph_config(first_turn)
+    second_config = build_root_graph_config(second_turn)
 
-    assert config["configurable"] == {"thread_id": "crm_agent:9:18:556"}
+    assert config["configurable"]["thread_id"].startswith("crm_agent_turn:9:18:556:")
+    assert config["configurable"]["thread_id"] == build_root_graph_config(first_turn)["configurable"]["thread_id"]
+    assert config["configurable"]["thread_id"] != second_config["configurable"]["thread_id"]
     assert config["metadata"] == {
         "team_id": 9,
         "user_id": 18,
         "session_id": 556,
         "client_request_id": "req_checkpoint_identity",
+        "turn_token": config["metadata"]["turn_token"],
         "runtime": "crm_agent_root",
         "runtime_namespace": "crm_agent",
     }
@@ -353,6 +360,168 @@ async def test_explicit_follow_up_record_overrides_invalid_model_clarification()
     assert result.decision.confidence == 1.0
     assert result.decision.reason_code == "EXPLICIT_FOLLOW_UP_WORKFLOW"
     assert len(workflow_calls) == 1
+
+
+async def test_normal_follow_up_does_not_resume_pending_confirmation_case() -> None:
+    workflow_calls: list[object] = []
+    pending_case = PendingCaseContext(
+        case_public_id="fuc_" + "1" * 32,
+        customer_name="广州凡亚信息科技有限公司",
+        customer_aliases=["凡亚信息"],
+        task_title="跟进 POC 环境部署情况",
+        task_description="确认客户 POC 环境部署进度",
+        due_at_text="周四",
+        question_text="是否完成该待办？",  # noqa: RUF001
+    )
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(RootContextSnapshot(pending_cases=[pending_case])),
+        decision_classifier=StubDecisionClassifier(
+            workflow_decision(
+                task_relation="CONTINUE_TASK",
+                active_workflow="RESUME",
+                reason_code="MODEL_TRIED_TO_RESUME_PENDING_CASE",
+            )
+        ),
+        query_executor=RecordingQueryExecutor(),
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=recording_workflow_subgraph(workflow_calls),
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=1,
+            session_id=556,
+            client_request_id="req_new_follow_up_with_pending_case",
+            input=TextTurnInput(type="text", text="今天联系了凡亚信息，客户反馈项目正在评估"),  # noqa: RUF001
+        ),
+        runtime=RootRuntimeContext(),
+    )
+
+    assert isinstance(result, WorkflowDispatchResult)
+    assert result.decision.pending_case_relation == "NONE"
+    assert result.decision.context_policy.active_workflow == "NONE"
+    assert workflow_calls[0]["start"] == {
+        "kind": "text",
+        "text": "今天联系了凡亚信息，客户反馈项目正在评估",  # noqa: RUF001
+    }
+
+
+async def test_model_cannot_turn_an_unrelated_text_turn_into_workflow_resume() -> None:
+    workflow_calls: list[object] = []
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(),
+        decision_classifier=StubDecisionClassifier(
+            workflow_decision(
+                task_relation="CONTINUE_TASK",
+                active_workflow="NONE",
+                reason_code="MODEL_TRIED_TO_RESUME_WORKFLOW",
+            )
+        ),
+        query_executor=RecordingQueryExecutor(),
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=recording_workflow_subgraph(workflow_calls),
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=1,
+            session_id=556,
+            client_request_id="req_model_resume_without_explicit_reference",
+            input=TextTurnInput(type="text", text="请处理这个客户的跟进情况"),
+        ),
+        runtime=RootRuntimeContext(),
+    )
+
+    assert isinstance(result, ClarificationDispatchResult)
+    assert result.decision.reason_code == "MODEL_TRIED_TO_RESUME_WORKFLOW"
+    assert workflow_calls == []
+
+
+async def test_text_continuation_cannot_bypass_confirmation_interaction() -> None:
+    workflow_ref = WorkflowRef(
+        workflow_id="wf_confirmation_waiting",
+        interrupt_id="int_confirmation_waiting",
+    )
+    continuation = WorkflowContinuation(
+        root_thread_id="crm_agent_turn:1:1:556:confirmation",
+        workflow_ref=workflow_ref,
+        parent_checkpoint_id="cp_root_confirmation",
+        subgraph_checkpoint_ns="workflow_subgraph:confirmation",
+        subgraph_checkpoint_id="cp_subgraph_confirmation",
+        waiting_interaction_type="confirmation",
+    )
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(
+            RootContextSnapshot(
+                active_workflow=workflow_ref,
+                resumable_workflows=[workflow_ref],
+                resumable_workflow_continuations=[continuation],
+            )
+        ),
+        decision_classifier=FailingClassifier(),
+        query_executor=RecordingQueryExecutor(),
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=failing_workflow_subgraph(),
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=1,
+            session_id=556,
+            client_request_id="req_text_cannot_confirm_workflow",
+            input=TextTurnInput(type="text", text="继续刚才的任务"),
+        ),
+        runtime=RootRuntimeContext(),
+    )
+
+    assert isinstance(result, ClarificationDispatchResult)
+    assert result.decision.reason_code == "WORKFLOW_CONFIRMATION_REQUIRES_STRUCTURED_ACTION"
+
+
+async def test_explicit_pending_case_reference_starts_resource_workflow() -> None:
+    workflow_calls: list[object] = []
+    pending_case = PendingCaseContext(
+        case_public_id="fuc_" + "1" * 32,
+        customer_name="广州凡亚信息科技有限公司",
+        customer_aliases=["凡亚信息"],
+        task_title="跟进 POC 环境部署情况",
+        task_description="确认客户 POC 环境部署进度",
+        due_at_text="周四",
+        question_text="是否完成该待办？",  # noqa: RUF001
+    )
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(RootContextSnapshot(pending_cases=[pending_case])),
+        decision_classifier=FailingClassifier(),
+        query_executor=RecordingQueryExecutor(),
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=recording_workflow_subgraph(workflow_calls),
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=1,
+            session_id=556,
+            client_request_id="req_explicit_pending_case",
+            input=TextTurnInput(type="text", text="完成凡亚信息的待办"),
+        ),
+        runtime=RootRuntimeContext(),
+    )
+
+    assert isinstance(result, WorkflowDispatchResult)
+    assert result.decision.pending_case_relation == "EXPLICIT_REFERENCE"
+    assert workflow_calls[0]["start"] == {
+        "kind": "resource",
+        "workflow": "follow_up_task_confirmation",
+        "resource_id": pending_case.case_public_id,
+    }
 
 
 async def test_text_resume_clarifies_when_multiple_workflows_are_resumable() -> None:
@@ -682,6 +851,7 @@ async def test_invalid_structured_interaction_returns_action_invalid_failure() -
 
 async def test_claimed_interaction_failure_preserves_action_claim_identity() -> None:
     continuation = WorkflowContinuation(
+        root_thread_id="crm_agent_turn:test",
         workflow_ref=WorkflowRef(
             workflow_id="wf_customer_follow_up",
             interrupt_id="intr_customer_choice",
@@ -1240,6 +1410,17 @@ class FailingQueryExecutor:
         raise RuntimeError("query backend failed")
 
 
+class TypedFailingQueryExecutor:
+    async def execute(self, request: object, *, runtime: object) -> CRMQueryAgentResult:
+        raise CRMQueryAgentExecutionError(
+            QueryError(
+                code="QUERY_INVALID",
+                message="internal query parser detail",
+                retryable=False,
+            )
+        )
+
+
 async def test_query_execution_error_returns_failure_with_root_decision() -> None:
     from app.services.agent.orchestrator import FailureDispatchResult
 
@@ -1268,6 +1449,36 @@ async def test_query_execution_error_returns_failure_with_root_decision() -> Non
     assert result.decision.route == "QUERY"
     assert result.error.code == "QUERY_EXECUTION_FAILED"
     assert result.error.retryable is True
+
+
+async def test_typed_query_execution_error_preserves_code_and_hides_internal_message() -> None:
+    from app.services.agent.orchestrator import FailureDispatchResult
+
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(),
+        decision_classifier=StubDecisionClassifier(query_decision()),
+        query_executor=TypedFailingQueryExecutor(),
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=failing_workflow_subgraph(),
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=1,
+            session_id=556,
+            client_request_id="req_typed_query_failure",
+            input=TextTurnInput(type="text", text="上海有哪些客户"),
+        ),
+        runtime=RootRuntimeContext(),
+    )
+
+    assert isinstance(result, FailureDispatchResult)
+    assert result.error.code == "QUERY_INVALID"
+    assert result.error.message == "查询条件无法识别，请换一种说法或补充筛选条件。"  # noqa: RUF001
+    assert result.error.message != "internal query parser detail"
+    assert result.error.retryable is False
 
 
 class UnavailableContextResolver:

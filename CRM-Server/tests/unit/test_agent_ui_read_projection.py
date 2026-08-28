@@ -18,7 +18,7 @@ def test_consumed_action_projects_interaction_as_submitted_and_non_actionable() 
             interaction_id="int_1",
             interaction_type="confirmation",
             state="ACTIVE",
-            prompt="确认创建吗？",
+            prompt="确认创建吗\uFF1F",
             options=[
                 InteractionOption(value="confirm", label="确认创建"),
                 InteractionOption(value="cancel", label="取消"),
@@ -33,6 +33,7 @@ def test_consumed_action_projects_interaction_as_submitted_and_non_actionable() 
     action = AgentUIActionRecord(
         public_id="act_1", team_id=1, user_id=2, session_id=3, message_id=10,
         action_type="submit_interaction", target={}, consumption_mode="ONE_SHOT",
+        root_context_role="RESUMABLE_WORKFLOW",
         status="CONSUMED", expires_at=now, consumed_at=now,
         consumed_request_id="6fa2e0e8-86d4-4d6c-a1b0-6490b2bf12be",
         result_message_id=11, lock_version=1, created_time=now, last_modified_time=now,
@@ -59,7 +60,7 @@ def test_elapsed_active_action_projects_interaction_as_expired_and_non_actionabl
             interaction_id="int_1",
             interaction_type="confirmation",
             state="ACTIVE",
-            prompt="确认创建吗？",
+            prompt="确认创建吗\uFF1F",
             options=[
                 InteractionOption(value="confirm", label="确认创建"),
                 InteractionOption(value="cancel", label="取消"),
@@ -73,6 +74,7 @@ def test_elapsed_active_action_projects_interaction_as_expired_and_non_actionabl
     action = AgentUIActionRecord(
         public_id="act_1", team_id=1, user_id=2, session_id=3, message_id=10,
         action_type="submit_interaction", target={}, consumption_mode="ONE_SHOT",
+        root_context_role="RESUMABLE_WORKFLOW",
         status="ACTIVE", expires_at=now - timedelta(seconds=1), consumed_at=None,
         consumed_request_id=None, result_message_id=None, lock_version=0,
         created_time=now - timedelta(hours=24), last_modified_time=now - timedelta(hours=24),
@@ -119,6 +121,7 @@ def test_grouped_interactions_project_each_action_state_independently() -> None:
         AgentUIActionRecord(
             public_id=f"act_{index}", team_id=1, user_id=2, session_id=3, message_id=10,
             action_type="submit_interaction", target={}, consumption_mode="ONE_SHOT",
+            root_context_role="RESUMABLE_WORKFLOW",
             status=status, expires_at=now + timedelta(days=1),
             consumed_at=now if status == "CONSUMED" else None,
             consumed_request_id=(
@@ -171,6 +174,7 @@ def test_cancelled_follow_up_confirmation_case_projects_active_card_as_cancelled
     action = AgentUIActionRecord(
         public_id="act_old_case", team_id=1, user_id=2, session_id=3, message_id=10,
         action_type="submit_interaction",
+        root_context_role="PENDING_CASE",
         target={"follow_up_confirmation_case_public_id": "fuc_old_case"},
         consumption_mode="ONE_SHOT", status="ACTIVE", expires_at=now + timedelta(hours=1),
         consumed_at=None, consumed_request_id=None, result_message_id=None,

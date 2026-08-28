@@ -14,6 +14,7 @@ from app.core.list_query import (
     without_filter_field,
 )
 from app.core.list_query.catalogs import FOLLOW_UP_TASKS_LIST_QUERY_CATALOG
+from app.models.customer import Customer
 from app.models.sales_commitment import (
     FollowUpTask,
     FollowUpTaskConfirmationCase,
@@ -990,6 +991,54 @@ class FollowUpTaskConfirmationCaseCRUD:
             .all()
         )
 
+    def list_pending_context_for_owner(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        owner_id: str,
+        limit: int = 100,
+        now: datetime | None = None,
+    ) -> list[tuple[FollowUpTaskConfirmationCase, int, str, str, str | None, str | None]]:
+        """Return bounded, display-safe context for explicit Case matching.
+
+        This is intentionally a separate read model from the generic Case API.
+        Root receives only fields needed to understand a user's reference; it
+        never receives a database object or is allowed to choose an ID itself.
+        """
+
+        resolved_now = now or business_now()
+        return (
+            db.query(
+                FollowUpTaskConfirmationCase,
+                FollowUpTaskConfirmationCase.customer_id,
+                Customer.account_name,
+                FollowUpTask.title,
+                FollowUpTask.description,
+                FollowUpTask.due_at_text,
+            )
+            .join(FollowUpTask, FollowUpTask.id == FollowUpTaskConfirmationCase.task_id)
+            .join(Customer, Customer.id == FollowUpTaskConfirmationCase.customer_id)
+            .filter(
+                FollowUpTaskConfirmationCase.team_id == team_id,
+                FollowUpTaskConfirmationCase.owner_id == owner_id,
+                FollowUpTaskConfirmationCase.status == FollowUpTaskConfirmationStatus.PENDING,
+                FollowUpTask.team_id == team_id,
+                FollowUpTask.owner_id == owner_id,
+                Customer.team_id == team_id,
+                or_(
+                    FollowUpTaskConfirmationCase.expires_at.is_(None),
+                    FollowUpTaskConfirmationCase.expires_at > resolved_now,
+                ),
+            )
+            .order_by(
+                FollowUpTaskConfirmationCase.created_time.asc(),
+                FollowUpTaskConfirmationCase.id.asc(),
+            )
+            .limit(max(1, min(limit, 100)))
+            .all()
+        )
+
     def list_pending_for_owner(
         self,
         db: Session,
@@ -1130,6 +1179,36 @@ class FollowUpTaskConfirmationCaseCRUD:
             .with_for_update()
             .all()
         )
+
+    def list_expired_pending_for_update(
+        self,
+        db: Session,
+        *,
+        team_id: int | None = None,
+        before: datetime | None = None,
+        limit: int = 500,
+    ) -> tuple[list[FollowUpTaskConfirmationCase], int]:
+        """Lock pending Cases selected for expiration in the same transaction."""
+        resolved_before = before or business_now()
+        query = db.query(FollowUpTaskConfirmationCase).filter(
+            FollowUpTaskConfirmationCase.status == FollowUpTaskConfirmationStatus.PENDING,
+            FollowUpTaskConfirmationCase.expires_at.is_not(None),
+            FollowUpTaskConfirmationCase.expires_at <= resolved_before,
+        )
+        if team_id is not None:
+            query = query.filter(FollowUpTaskConfirmationCase.team_id == team_id)
+        total = query.count()
+        rows = (
+            query.order_by(
+                FollowUpTaskConfirmationCase.expires_at.asc(),
+                FollowUpTaskConfirmationCase.id.asc(),
+            )
+            .limit(limit)
+            .populate_existing()
+            .with_for_update()
+            .all()
+        )
+        return rows, total
 
     def create(
         self,
@@ -1293,53 +1372,6 @@ class FollowUpTaskConfirmationPromptDeliveryCRUD:
     retry freely; only the first transition to SENT increments the case prompt
     counters.
     """
-
-    def list_agent_message_case_statuses(
-        self,
-        db: Session,
-        *,
-        team_id: int,
-        session_id: int,
-        message_ids: list[int],
-    ) -> dict[int, list[tuple[str, str]]]:
-        """Return follow-up Case states linked to historical Agent messages.
-
-        The explicit Case ID is signed into new actions. This delivery-backed
-        fallback keeps older persisted actions safe during the rollout.
-        """
-        normalized_ids = list(dict.fromkeys(message_id for message_id in message_ids if message_id > 0))
-        if not normalized_ids:
-            return {}
-        rows = (
-            db.query(
-                FollowUpTaskConfirmationPromptDelivery.origin_message_id,
-                FollowUpTaskConfirmationCase.public_id,
-                FollowUpTaskConfirmationCase.status,
-            )
-            .join(
-                FollowUpTaskConfirmationCase,
-                FollowUpTaskConfirmationCase.id == FollowUpTaskConfirmationPromptDelivery.case_id,
-            )
-            .filter(
-                FollowUpTaskConfirmationPromptDelivery.team_id == team_id,
-                FollowUpTaskConfirmationCase.team_id == team_id,
-                FollowUpTaskConfirmationPromptDelivery.agent_session_id == session_id,
-                FollowUpTaskConfirmationPromptDelivery.purpose
-                == FollowUpTaskConfirmationDeliveryPurpose.AGENT_TURN_PROMPT,
-                FollowUpTaskConfirmationPromptDelivery.origin_message_id.in_(
-                    [str(message_id) for message_id in normalized_ids]
-                ),
-            )
-            .all()
-        )
-        result: dict[int, list[tuple[str, str]]] = {}
-        for origin_message_id, case_public_id, status in rows:
-            try:
-                message_id = int(origin_message_id)
-            except (TypeError, ValueError):
-                continue
-            result.setdefault(message_id, []).append((str(case_public_id), str(status)))
-        return result
 
     def get_by_public_id(
         self,

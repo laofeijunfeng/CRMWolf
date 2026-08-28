@@ -673,3 +673,118 @@ async def test_switching_between_two_workflows_keeps_each_native_checkpoint_isol
     assert isinstance(completed_b.workflow_result, WorkflowCompletedResult)
     assert completed_b.workflow_result.workflow_ref.workflow_id == "wf_B"
     assert effects == ["wf_A", "wf_B"]
+
+class MutableContinuationContextResolver:
+    def __init__(self) -> None:
+        self.continuation: WorkflowContinuation | None = None
+
+    async def resolve(
+        self,
+        *,
+        turn: RootTurnInput,
+        runtime: RootRuntimeContext,
+    ) -> RootContextSnapshot:
+        if self.continuation is None:
+            return RootContextSnapshot()
+        return RootContextSnapshot(
+            active_workflow=self.continuation.workflow_ref,
+            resumable_workflows=[self.continuation.workflow_ref],
+            resumable_workflow_continuations=[self.continuation],
+        )
+
+
+def native_text_input_workflow(received: list[dict[str, object]]):
+    async def initialize(_state: NativeWorkflowState) -> NativeWorkflowState:
+        return {"workflow_id": "wf_native_text_input"}
+
+    async def request_input(state: NativeWorkflowState) -> NativeWorkflowState:
+        interaction = WorkflowInteraction(
+            interaction_id="interaction_text_input",
+            interaction_type="text_input",
+            business_action="supply_workflow_input",
+            title="补充信息",
+            prompt="请补充信息。",
+            allow_blank=False,
+            submit_label="提交",
+        )
+        raw_resume = interrupt(
+            WorkflowInterruptPayload(
+                workflow_id=state["workflow_id"],
+                interaction=interaction,
+                progress=awaiting_confirmation_progress(),
+            ).model_dump(mode="json")
+        )
+        assert isinstance(raw_resume, dict)
+        received.append(raw_resume)
+        return {
+            "workflow_result": WorkflowCompletedResult(
+                workflow_ref=WorkflowRef(workflow_id=state["workflow_id"]),
+                assistant_text="补充信息已接收。",
+                progress=execution_progress(
+                    confirmation_required=False,
+                    has_supplements=True,
+                    outcome="COMPLETED",
+                ),
+            ).model_dump(mode="json")
+        }
+
+    graph = StateGraph(NativeWorkflowState)
+    graph.add_node("initialize", initialize)
+    graph.add_node("request_input", request_input)
+    graph.add_edge(START, "initialize")
+    graph.add_edge("initialize", "request_input")
+    graph.add_edge("request_input", END)
+    return graph.compile(checkpointer=True)
+
+
+async def test_explicit_text_continuation_resumes_original_checkpoint_instead_of_starting_new_workflow() -> None:
+    received: list[dict[str, object]] = []
+    context_resolver = MutableContinuationContextResolver()
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=context_resolver,
+        decision_classifier=WorkflowDecisionClassifier(),
+        query_executor=FailingQueryExecutor(),
+        interaction_resolver=BoundInteractionResolver(),
+        workflow_subgraph=native_text_input_workflow(received),
+    )
+
+    waiting = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=2,
+            session_id=556,
+            client_request_id="req_start_text_input_workflow",
+            input=TextTurnInput(type="text", text="启动一个需要补充信息的流程"),
+        ),
+        runtime=RootRuntimeContext(),
+    )
+
+    assert isinstance(waiting, WorkflowDispatchResult)
+    assert isinstance(waiting.workflow_result, WorkflowWaitingResult)
+    assert waiting.continuation is not None
+    context_resolver.continuation = waiting.continuation
+
+    completed = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=2,
+            session_id=556,
+            client_request_id="req_resume_text_input_workflow",
+            input=TextTurnInput(type="text", text="补充刚才的信息：客户确认周四部署"),  # noqa: RUF001
+        ),
+        runtime=RootRuntimeContext(),
+    )
+
+    assert isinstance(completed, WorkflowDispatchResult)
+    assert isinstance(completed.workflow_result, WorkflowCompletedResult)
+    assert completed.workflow_result.assistant_text == "补充信息已接收。"
+    assert received == [
+        {
+            "kind": "text",
+            "content": "补充刚才的信息：客户确认周四部署",  # noqa: RUF001
+            "source": "agent_text",
+            "provider": None,
+            "metadata": {"continuation": "explicit"},
+        }
+    ]

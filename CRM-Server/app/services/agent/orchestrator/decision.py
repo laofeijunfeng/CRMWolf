@@ -39,6 +39,10 @@ ROOT_DECISION_SYSTEM_PROMPT = """你是 CRM Agent 的 Root Orchestrator 决策�
 - 存在 active workflow 不等于本轮一定继续. 无关的新查询或新写入必须是 SWITCH_TASK, 并将 active_workflow 设为 SUSPEND。
 - 只有明确继续当前任务时才能 CONTINUE_TASK + WORKFLOW + RESUME。
 - “继续”“好的”等低信息文本若无法唯一匹配当前任务, 必须 CLARIFY, 不得自动恢复。
+- pending_case_relation: NONE、EXPLICIT_REFERENCE、RELATED_TO_CURRENT_ACTIVITY、UNRELATED 或 AMBIGUOUS。
+- pending_case_reference 只填写用户原文中的待办引用, 不填写或猜测数据库 Case ID。
+- 普通新跟进记录不能因为 pending_cases 存在而恢复历史待办, 只有用户明确引用待办且服务端唯一匹配时才恢复。
+- “今天联系了客户……”是新的 Workflow Text Start, 历史待办是否自动完成由后续任务对账/语义匹配处理, 不由 Root 恢复旧 Case。
 - 独立查询“上海有哪些客户”必须忽略页面中已选中的其他客户。
 - reason_code 使用简短 UPPER_SNAKE_CASE; evidence 仅写本次判断依据, 不写业务事实。
 - 只返回 schema, 不输出 Markdown 或额外文本。
@@ -97,6 +101,29 @@ class LangChainRootDecisionClassifier:
             RootDecision,
             method="function_calling",
         )
+        context_payload = context.model_dump(
+            mode="json",
+            exclude_none=True,
+            exclude={"resumable_workflows", "resumable_workflow_continuations"},
+        )
+        # Empty optional indexes add noise to the model boundary and make the
+        # payload less stable.  A non-empty pending-case index is still sent so
+        # the classifier can distinguish an explicit reference from a normal
+        # activity; the server-side matcher remains authoritative for IDs.
+        if not context.pending_cases:
+            context_payload.pop("pending_cases", None)
+        else:
+            # Case IDs are internal binding material.  The deterministic
+            # matcher receives the full server-side snapshot, while the LLM
+            # only sees safe display context and the original reference.
+            context_payload["pending_cases"] = [
+                {
+                    key: value
+                    for key, value in pending_case.items()
+                    if key != "case_public_id"
+                }
+                for pending_case in context_payload["pending_cases"]
+            ]
         payload = json.dumps(
             {
                 "input": turn.input.model_dump(mode="json"),
@@ -105,11 +132,7 @@ class LangChainRootDecisionClassifier:
                     if turn.selected_entity_ref is not None
                     else None
                 ),
-                "context_snapshot": context.model_dump(
-                    mode="json",
-                    exclude_none=True,
-                    exclude={"resumable_workflows"},
-                ),
+                "context_snapshot": context_payload,
             },
             ensure_ascii=False,
             separators=(",", ":"),

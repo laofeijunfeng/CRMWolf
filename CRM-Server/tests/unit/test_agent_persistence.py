@@ -269,6 +269,7 @@ def test_ui_action_repository_atomically_claims_and_replays_one_shot_action(db_s
             session_id=message.session_id,
             message_id=message.id,
             action_type="start_workflow",
+            root_context_role="PROJECTION_ONLY",
             target={"entity_ref": "ref_customer_1", "workflow": "assign_owner"},
             consumption_mode="ONE_SHOT",
         ),
@@ -355,6 +356,7 @@ def test_ui_action_repository_leaves_reusable_action_active_and_expires_stale_ac
             session_id=message.session_id,
             message_id=message.id,
             action_type="open_entity",
+            root_context_role="PROJECTION_ONLY",
             target={"entity_ref": "ref_customer_1"},
             consumption_mode="REUSABLE",
         ),
@@ -369,6 +371,7 @@ def test_ui_action_repository_leaves_reusable_action_active_and_expires_stale_ac
             session_id=message.session_id,
             message_id=message.id,
             action_type="retry",
+            root_context_role="PROJECTION_ONLY",
             target={"turn_id": "turn_1"},
             consumption_mode="ONE_SHOT",
             expires_at=now - timedelta(seconds=1),
@@ -430,6 +433,7 @@ def test_ui_action_repository_leaves_reusable_action_active_and_expires_stale_ac
             session_id=other_session.id,
             message_id=other_message.id,
             action_type="retry",
+            root_context_role="PROJECTION_ONLY",
             target={"turn_id": "turn_team_2"},
             consumption_mode="ONE_SHOT",
             expires_at=now - timedelta(seconds=1),
@@ -449,6 +453,61 @@ def test_ui_action_repository_leaves_reusable_action_active_and_expires_stale_ac
 
     assert repository.purge_terminal(db_session, team_id=1, now=now + timedelta(days=31)) == 1
     assert db_session.query(AgentUIAction).filter(AgentUIAction.team_id == 2).count() == 1
+
+
+def test_ui_action_repository_revokes_only_actions_for_confirmation_case(db_session) -> None:
+    from app.schemas.agent_persistence import AgentUIActionRegistration
+    from app.services.agent.ui.actions import AgentUIActionRepository
+
+    message = _seed_message(db_session)
+    repository = AgentUIActionRepository()
+    now = datetime(2026, 8, 21, 10, 0, 0)
+    case_action = repository.register(
+        db_session,
+        AgentUIActionRegistration(
+            public_id="act_case_projection_1",
+            team_id=1,
+            user_id=2,
+            session_id=message.session_id,
+            message_id=message.id,
+            action_type="submit_interaction",
+            root_context_role="PENDING_CASE",
+            target={"follow_up_confirmation_case_public_id": "fuc_target"},
+            consumption_mode="ONE_SHOT",
+        ),
+        now=now,
+    )
+    unrelated_action = repository.register(
+        db_session,
+        AgentUIActionRegistration(
+            public_id="act_case_projection_2",
+            team_id=1,
+            user_id=2,
+            session_id=message.session_id,
+            message_id=message.id,
+            action_type="submit_interaction",
+            root_context_role="PENDING_CASE",
+            target={"follow_up_confirmation_case_public_id": "fuc_other"},
+            consumption_mode="ONE_SHOT",
+        ),
+        now=now,
+    )
+    db_session.commit()
+
+    assert (
+        repository.revoke_for_follow_up_confirmation_case(
+            db_session,
+            team_id=1,
+            case_public_id="fuc_target",
+            reason="SOURCE_ACTIVITY_REVISION_SUPERSEDED",
+            now=now,
+        )
+        == 1
+    )
+    db_session.commit()
+
+    assert db_session.query(AgentUIAction).filter_by(public_id=case_action.public_id).one().status == "REVOKED"
+    assert db_session.query(AgentUIAction).filter_by(public_id=unrelated_action.public_id).one().status == "ACTIVE"
 
 
 def test_result_set_contract_uses_one_based_inclusive_ranges() -> None:

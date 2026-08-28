@@ -17,6 +17,10 @@ from app.services.customer_activity_revision_fence import (
     CustomerActivityRevisionFence,
     customer_activity_revision_fence,
 )
+from app.services.follow_up_confirmation_case_lifecycle_service import (
+    FollowUpConfirmationCaseLifecycleService,
+    follow_up_confirmation_case_lifecycle_service,
+)
 from app.services.follow_up_task_confirmation_cleanup_service import (
     FollowUpTaskConfirmationCancelReason,
 )
@@ -59,8 +63,12 @@ class FollowUpConfirmationCaseRevisionGuard:
         self,
         *,
         revision_fence: CustomerActivityRevisionFence = customer_activity_revision_fence,
+        case_lifecycle: FollowUpConfirmationCaseLifecycleService = (
+            follow_up_confirmation_case_lifecycle_service
+        ),
     ) -> None:
         self._revision_fence = revision_fence
+        self._case_lifecycle = case_lifecycle
 
     def lock_and_validate(
         self,
@@ -192,8 +200,8 @@ class FollowUpConfirmationCaseRevisionGuard:
             return FollowUpConfirmationCaseRevisionReason.DELIVERY_ACTIVITY_REVISION_MISMATCH
         return None
 
-    @staticmethod
     def _cancel_invalidated_case(
+        self,
         db: Session,
         *,
         case: FollowUpTaskConfirmationCase,
@@ -201,11 +209,11 @@ class FollowUpConfirmationCaseRevisionGuard:
     ) -> None:
         if case.status != FollowUpTaskConfirmationStatus.PENDING:
             return
-        follow_up_task_confirmation_case_crud.mark_cancelled(
+        self._case_lifecycle.cancel_locked_case(
             db,
-            case,
-            cancelled_reason=cancelled_reason,
-            commit=False,
+            team_id=int(case.team_id),
+            case=case,
+            reason=cancelled_reason,
         )
 
 

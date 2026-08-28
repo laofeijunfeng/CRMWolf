@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -34,6 +35,7 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 _ACTION_TTL = timedelta(hours=24)
+logger = logging.getLogger(__name__)
 _ACTION_TERMINAL_RETENTION = timedelta(days=30)
 _ACTION_TYPE_ADAPTER: TypeAdapter[AgentUIActionType] = TypeAdapter(AgentUIActionType)
 _CONSUMPTION_MODE_ADAPTER: TypeAdapter[UIActionConsumptionMode] = TypeAdapter(UIActionConsumptionMode)
@@ -124,7 +126,13 @@ class AgentUIActionRepository:
         session_id: int,
         now: datetime | None = None,
     ) -> list[WorkflowContinuation]:
-        """Return the newest durable continuation for each active Workflow."""
+        """Return only explicitly resumable native Workflow continuations.
+
+        Pending confirmation Cases are deliberately excluded.  They are business
+        work items projected into the conversation, not an active conversational
+        Workflow.  A later turn may reference such a Case explicitly, but an
+        ignored card must never become implicit Root context.
+        """
 
         effective_now = now or business_now()
         rows = (
@@ -134,6 +142,7 @@ class AgentUIActionRepository:
                 AgentUIAction.user_id == user_id,
                 AgentUIAction.session_id == session_id,
                 AgentUIAction.action_type == "submit_interaction",
+                AgentUIAction.root_context_role == "RESUMABLE_WORKFLOW",
                 AgentUIAction.status == AgentUIActionStatus.ACTIVE,
                 AgentUIAction.expires_at > effective_now,
             )
@@ -147,15 +156,82 @@ class AgentUIActionRepository:
         continuations: list[WorkflowContinuation] = []
         seen_workflow_ids: set[str] = set()
         for row in rows:
+            target = row.target_json if isinstance(row.target_json, dict) else {}
             continuation = WorkflowContinuation.model_validate(
-                row.target_json.get("workflow_continuation")
+                target.get("workflow_continuation")
             )
+            # The action ledger owns the interaction contract. Enrich the
+            # checkpoint locator from the signed action target so Root can
+            # reject free-text resumes for confirmation/form/choice waits.
+            interaction_type = target.get("interaction_type")
+            if continuation.waiting_interaction_type is None and isinstance(
+                interaction_type, str
+            ):
+                continuation = continuation.model_copy(
+                    update={"waiting_interaction_type": interaction_type}
+                )
             workflow_id = continuation.workflow_ref.workflow_id
             if workflow_id in seen_workflow_ids:
                 continue
             seen_workflow_ids.add(workflow_id)
             continuations.append(continuation)
         return continuations
+
+    def revoke_for_follow_up_confirmation_case(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        case_public_id: str,
+        reason: str,
+        now: datetime | None = None,
+    ) -> int:
+        """Revoke live UI actions owned by one follow-up confirmation Case.
+
+        A Case is the authoritative business state. UI actions are only a
+        durable projection of that state, so cancellation must close every
+        still-live action without deleting the historical row. Target JSON is
+        intentionally not mutated: it is the signed, immutable action target.
+        """
+
+        revoked_at = now or business_now()
+        rows = (
+            db.query(AgentUIAction)
+            .filter(
+                AgentUIAction.team_id == team_id,
+                # The Case public id is part of the signed projection target.
+                # Filter it in SQL before locking rows; loading every live
+                # action for a team turns Case cancellation into an avoidable
+                # team-wide scan as Agent UI traffic grows.
+                AgentUIAction.target_json["follow_up_confirmation_case_public_id"].as_string()
+                == case_public_id,
+                AgentUIAction.status.in_(
+                    [AgentUIActionStatus.ACTIVE, AgentUIActionStatus.CONSUMING]
+                ),
+            )
+            .populate_existing()
+            .with_for_update()
+            .all()
+        )
+        revoked_count = 0
+        for row in rows:
+            row.status = AgentUIActionStatus.REVOKED
+            row.last_modified_time = revoked_at
+            row.lock_version = int(row.lock_version) + 1
+            revoked_count += 1
+
+        if revoked_count:
+            db.flush()
+            logger.info(
+                "Revoked Agent UI actions for follow-up confirmation Case",
+                extra={
+                    "team_id": team_id,
+                    "case_public_id": case_public_id,
+                    "reason": reason,
+                    "revoked_count": revoked_count,
+                },
+            )
+        return revoked_count
 
     def register(
         self,
@@ -179,6 +255,7 @@ class AgentUIActionRepository:
             session_id=request.session_id,
             message_id=request.message_id,
             action_type=request.action_type,
+            root_context_role=request.root_context_role,
             target_json=request.target,
             consumption_mode=request.consumption_mode,
             status=AgentUIActionStatus.ACTIVE,
@@ -417,6 +494,7 @@ class AgentUIActionRepository:
             session_id=int(row.session_id),
             message_id=int(row.message_id),
             action_type=_ACTION_TYPE_ADAPTER.validate_python(row.action_type),
+            root_context_role=row.root_context_role,
             target=row.target_json,
             consumption_mode=_CONSUMPTION_MODE_ADAPTER.validate_python(row.consumption_mode),
             status=_ACTION_STATUS_ADAPTER.validate_python(row.status),

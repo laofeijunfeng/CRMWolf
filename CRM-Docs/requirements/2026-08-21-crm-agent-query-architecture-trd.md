@@ -3,9 +3,9 @@
 | 项目 | 内容 |
 |---|---|
 | 文档类型 | TRD |
-| 状态 | 目标架构与单版本 checkpoint cutover 代码已实现；本地数据门禁仍阻断，未进入生产发布 |
-| 版本 | v2.4 |
-| 日期 | 2026-08-23 |
+| 状态 | 目标架构代码已实现；Query/Agent UI 定向验证通过，完整数据迁移与生产发布门禁仍未完成 |
+| 版本 | v2.8 |
+| 日期 | 2026-08-28 |
 | 对应 PRD | [CRM Agent 双执行路径与统一交互升级 PRD](https://apifox666.feishu.cn/wiki/TdkCwjcnAiUacWkCDuecQ0gUnUb) |
 | 代码仓库 | `laofeijunfeng/CRMWolf` |
 | 读者 | 后端、前端、测试、架构、实施 |
@@ -165,7 +165,7 @@ selected_entity_usage: Literal["USE_SELECTED", "IGNORE_SELECTED"]
 | Workflow 领域执行逻辑 | 迁移到新 Workflow package，不保留旧调用外壳 |
 | checkpoint migration 能力 | 仅作为一次性迁移设施，验收后删除 |
 
-### 2.6 当前实施状态（2026-08-23）
+### 2.6 当前实施状态（2026-08-28）
 
 目标代码已经完成单版本架构收口，但数据迁移、真实模型和真实 HTTP API 验收尚未完成，因此当前状态是“目标架构代码已实现，发布前验证未完成”，不得描述为“功能已全部验收”或“可以发布生产”。
 
@@ -179,10 +179,10 @@ selected_entity_usage: Literal["USE_SELECTED", "IGNORE_SELECTED"]
 | Agent Application / Agent UI | 已移出 Root；message、Result Set、Action 由应用投影层统一提交 |
 | Web / IM | 已统一消费 Agent Application 与 Agent UI 协议 |
 | 旧 Root / PendingTask / AgentTask Runtime | 代码、schema、ORM、调用引用已删除；未保留 alias、fallback 或双路径 |
-| Alembic schema 收口 | migration `101`、`102` 已实现，唯一 head 为 `102_drop_agent_task_compatibility`；本地 dev DB 仍停在 `100` |
+| Alembic schema 收口 | migration `101`–`109` 已实现，当前唯一 head 为 `109_agent_ui_action_root_context_role`；本地 dev DB 已在该 head |
 | 一次性 checkpoint/message 迁移 | message migration、inventory v2 与 checkpoint cutover v2 已实现；旧多阶段 checkpoint migration service/CLI/test 已删除；本地门禁有 blocker，禁止执行 destructive cutover |
-| 自动化验证 | checkpoint cutover、inventory、message migration 共 89 条定向测试通过；Agent 专项共 608 条，588 passed、20 skipped（未配置 real-model）；前端回归、真实模型与真实 HTTP API 验收仍未完成 |
-| MySQL / Redis / real-model / 50–100 条真实 HTTP API 验收 | 未完成 |
+| 自动化验证 | Agent unit/integration 专项共 739 条：709 passed、30 skipped（其中 real-model/MySQL 集成因环境门禁跳过）；Agent 相关新增 Ruff 定向检查通过；真实模型、真实 HTTP API 完整验收与前端全量回归仍未完成 |
+| MySQL / Redis / real-model / 50–100 条真实 HTTP API 验收 | Agent 专项中的 MySQL 与 real-model 集成仍未通过正式门禁；已有 Dev API 证据保留，但不替代完整验收 |
 | 生产发布 | 未授权、未执行 |
 
 在 inventory、数据迁移、真实 Workflow resume、固定模型 API 验收和完整 Standards/Spec review 全部通过前，不满足第 17 节 Definition of Done。
@@ -541,6 +541,16 @@ QueryExecutionInput 中不得出现广州客户 entity ref；工具输入必须�
 
 挂起不是复制工作流状态。唯一 truth 仍在 Workflow subgraph checkpoint；可恢复入口由 Agent UI Action Registry 保存精确 continuation，消息、结果集和动作状态仅作为检索、展示、幂等与审计投影，不再保留 AgentTask/PendingTask 运行时表。
 
+#### 5.5 Session 与 Pending Case 的边界
+
+Session 只负责承载消息、Root thread 和当前会话的 native Workflow continuation；`PENDING` confirmation Case 是负责人维度的业务事项，不属于任何会话的隐式 active workflow。其边界规则固定如下：
+
+1. 普通新跟进文本始终按新的 Workflow Text Start 处理，即使当前用户存在未处理 Case；不得自动 resume、重复追问或把旧 Case 当作本轮输入上下文。
+2. 用户明确引用“上一个/之前的待办”“确认事项”、客户和任务，或提供 Case public id 时，Root 才允许从权限范围内的 pending Case 索引做确定性匹配；匹配不唯一必须澄清，匹配成功后才通过 `Command(resume=...)` 进入对应 Workflow continuation。
+3. 显式引用可以跨 Session 工作，因为 Case 的业务归属是团队/负责人/客户，而不是消息容器；但只能读取当前负责人有权限且状态仍为 `PENDING` 的 Case，不能恢复其他用户或其他团队事项。
+4. 用户未处理某张卡片后继续输入其他客户的跟进记录，不得因 session、消息历史或 pending Case 列表而反复显示同一确认。确认卡片是否仍可操作由 Case 权威状态和 Action 投影状态共同决定。
+5. `list_pending_context_for_owner` 只提供显式引用所需的候选索引，不是 Workflow 恢复接口；该列表不得写入 Query Agent，不得作为 checkpoint 缺失时的恢复替代品。
+
 ## 6. LangGraph 状态与 Subgraph 组合
 
 ### 6.1 Root State
@@ -739,6 +749,10 @@ class CRMReadToolRegistry(Protocol):
 5. 输入输出均为 Pydantic schema；
 6. 返回权限、空结果、分页和错误的标准语义；
 7. 工具名称按业务能力命名，不按具体问句命名。
+
+单轮预算由服务端强制执行，不由模型决定：默认最多调用 4 个工具、每个工具最多返回 50 行、整轮最多累计 100 个实体。
+模型若请求超过 `max_rows_per_tool` 的 `page_size`，工具边界会先将参数截断到服务端预算再执行；只有真实工具结果超过预算时才返回 `QUERY_LIMIT_EXCEEDED`。
+这样既避免模型或供应商默认 `page_size=100` 使有效查询无故失败，也不放宽后端安全边界。
 
 ### 7.3 CRM Query 模块
 
@@ -992,36 +1006,35 @@ Web SSE、飞书及后续 IM 都进入同一 Application Service。Channel Adapt
 ## 12. 错误模型
 
 ```python
-class AgentExecutionError(BaseModel):
-    code: Literal[
-        "ROUTE_UNCERTAIN",
-        "CONTEXT_AMBIGUOUS",
-        "WORKFLOW_NOT_FOUND",
-        "WORKFLOW_RESUME_INVALID",
-        "QUERY_INVALID",
-        "QUERY_PERMISSION_DENIED",
-        "QUERY_EMPTY",
-        "QUERY_TOOL_FAILED",
-        "QUERY_MODEL_FAILED",
-        "RESULT_SET_EXPIRED",
-        "ACTION_INVALID",
-        "ACTION_ALREADY_CONSUMED",
-        "WORKFLOW_FAILED",
-        "CHECKPOINT_UNAVAILABLE",
-        "INTERNAL_ERROR",
-    ]
-    message: str
-    retryable: bool
-    details: dict[str, JsonValue] = Field(default_factory=dict)
+AgentErrorCode = Literal[
+    "ROUTE_AMBIGUOUS", "ENTITY_AMBIGUOUS",
+    "QUERY_INVALID", "QUERY_UNSUPPORTED", "QUERY_EMPTY",
+    "PERMISSION_DENIED", "QUERY_LIMIT_EXCEEDED",
+    "UPSTREAM_TIMEOUT", "UPSTREAM_UNAVAILABLE",
+    "CHECKPOINT_UNAVAILABLE", "MODEL_OUTPUT_INVALID",
+    "RESULT_SET_EXPIRED", "ACTION_ALREADY_CONSUMED",
+    "ACTION_EXPIRED", "ACTION_INVALID", "TURN_IN_PROGRESS",
+    "IDEMPOTENCY_KEY_REUSED", "INTERNAL_ERROR",
+]
+
+QueryError = {
+    "code": AgentErrorCode,
+    "message": str,
+    "retryable": bool,
+    "field": str | None,
+    "operator": str | None,
+}
 ```
 
-约束：
+错误必须在 Query、Application、Agent UI 和 SSE 使用同一组稳定 code，不允许由自然语言或 HTTP 状态码直接承担协议语义：
 
-- `QUERY_EMPTY` 不是错误页面，但必须与权限错误区分；
-- checkpoint 不可用时返回明确失败，不启动 no-checkpointer Workflow；
-- Query 模型失败不调用旧 Query；
-- Agent UI 生成失败不回退旧 Markdown 协议；
-- INTERNAL_ERROR 必须带 trace id，用户侧不暴露敏感实现细节。
+- `QUERY_EMPTY` 是当前权限范围内的权威空结果，不是异常；
+- `PERMISSION_DENIED`、`QUERY_INVALID`、`UPSTREAM_TIMEOUT` 和 `UPSTREAM_UNAVAILABLE` 必须区分；
+- Query Agent 的模型重试只发生在 `ChatOpenAI` 调用边界，默认最多重试 2 次；不得重放整个 Agent Turn，避免重复 CRM 工具调用或写入；
+- CRM API 的 408 映射为 `UPSTREAM_TIMEOUT`，429 和 5xx 映射为 `UPSTREAM_UNAVAILABLE`，均标记为可重试；
+- checkpoint 不可用时返回明确失败，不启动无 checkpoint 的 Workflow 恢复；
+- Query 模型失败不调用旧 Query；Agent UI 生成失败不回退旧 Markdown 协议；
+- 用户侧只显示安全消息，日志记录异常类型和上游状态码但不记录请求内容、密钥或业务数据。
 
 ## 13. 可观测性与验收证据
 
@@ -1292,6 +1305,9 @@ legacy_task:active
 - tool budget、row budget、timeout；
 - terminal tool error 不被模型覆盖；
 - evidence 中不存在模型虚构实体；
+- ChatOpenAI 仅在模型边界执行有限重试，不重放整个 Agent Turn；
+- `APITimeoutError`/408 → `UPSTREAM_TIMEOUT`，连接异常/429/5xx → `UPSTREAM_UNAVAILABLE`；
+- 非传输类模型错误保持不可重试的结构化错误；
 - `checkpointer=None`、`store=None`；
 - 无写工具、无任意 URL、无 SQL。
 
@@ -1405,6 +1421,9 @@ GET  /api/v1/agent/sessions/{session_id}/messages
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v2.8 | 2026-08-28 | 收口 Root 的 Session/Turn 边界与 Pending Case 显式引用规则；补齐 Case 版本替换时 Action 撤销、投影写入前二次校验及目标 Case 隔离回归测试；当前 Alembic head 为 `109_agent_ui_action_root_context_role`，Agent 专项验证为 709 passed、30 skipped。同步明确真实模型、完整 HTTP API 验收、数据迁移发布门禁和生产部署仍未完成。 |
+| v2.7 | 2026-08-27 | 补充 Query Agent 服务端行数预算归一化：模型超出 `max_rows_per_tool` 的 `page_size` 在只读工具边界截断，真实结果仍按预算校验；补齐 Query typed error 到 Root 稳定错误码的映射，并通过 103 条 Query/Root/UI 定向测试。 |
+| v2.6 | 2026-08-27 | 补齐 Query Agent 与 CRM API 上游错误分类和有限模型重试合同；真实 Dev API 验证 typed input、同 Session 多轮城市查询、Agent UI v1 entity list 与历史消息投影；修正评测脚本使用当前 `AgentChatRequest`，保留完整发布门禁和未清理 Dev 数据约束。 |
 | v2.5 | 2026-08-25 | 收口历史跟进任务逐项 Batch 对账、逐任务 Savepoint、自动结果与低置信确认并存；历史任务确认升级为 `submit_on_select` 一键单选；客户事实改为高置信自动沉淀、其余静默忽略，删除事实 Review runtime 与用户提示。 |
 | v2.4 | 2026-08-23 | checkpoint serde 收口为 inert inspection + framework-safe strict decode 两阶段合同，覆盖 target/CI checkpoint、metadata、blob、write 与 review interrupt；staged report 可在原事务回滚后安全重跑并比对删除证据；89 条迁移定向测试、588 条 Agent 测试通过；更新本地 30,949 rows、5,499 latest 与稳定 blocker |
 | v2.3 | 2026-08-23 | 完成 inventory v2、单事务 checkpoint cutover v2、durable staged report 与 Customer Intelligence 物理所有权/review barrier 门禁；删除旧多阶段 checkpoint migration 架构；记录本地 30,921 rows、5,495 latest、41 active legacy tasks 和四项稳定 blocker |
