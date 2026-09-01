@@ -30,6 +30,7 @@ from app.schemas.common import PaginatedResponse
 from app.schemas.opportunity import (
     MessageResponse,
     OpportunityCreate,
+    OpportunityDealJourneyUpdate,
     OpportunityDetailResponse,
     OpportunityListResponse,
     OpportunityLose,
@@ -138,6 +139,7 @@ def _opportunity_response_dict(db: Session, opportunity, team_id: Optional[int])
     return {
         "id": opportunity.public_id,
         "public_id": opportunity.public_id,
+        "deal_journey_id": opportunity.deal_journey_id,
         "opportunity_number": opportunity.opportunity_number,
         "opportunity_name": opportunity.opportunity_name,
         "customer_id": _customer_public_id(db, opportunity.customer_id, team_id),
@@ -191,10 +193,7 @@ async def _trigger_opportunity_intelligence_refresh(
     db: Session,
     change: CustomerBusinessObjectChangeRefreshInput,
 ) -> None:
-    await customer_business_object_intelligence_service.trigger_change_refresh(
-        db,
-        change,
-    )
+    customer_business_object_intelligence_service.enqueue_change_refresh_after_commit(change)
 
 
 
@@ -390,6 +389,7 @@ def get_opportunities(
         opp_dict = {
             "id": opp.public_id,
             "public_id": opp.public_id,
+            "deal_journey_id": opp.deal_journey_id,
             "opportunity_number": opp.opportunity_number,
             "opportunity_name": opp.opportunity_name,
             "customer_id": customer.public_id if customer else None,
@@ -511,6 +511,7 @@ def get_available_opportunities_for_contract(
         result.append(OpportunityListResponse(**{
             "id": opp.public_id,
             "public_id": opp.public_id,
+            "deal_journey_id": opp.deal_journey_id,
             "opportunity_number": opp.opportunity_number,
             "opportunity_name": opp.opportunity_name,
             "customer_id": customer_info["id"] if customer_info else None,
@@ -619,6 +620,7 @@ def get_opportunity(
     result = {
         "id": opportunity.public_id,
         "public_id": opportunity.public_id,
+        "deal_journey_id": opportunity.deal_journey_id,
         "opportunity_number": opportunity.opportunity_number,
         "opportunity_name": opportunity.opportunity_name,
         "customer_id": customer.public_id if customer else None,
@@ -732,6 +734,68 @@ async def update_opportunity(
     return OpportunityResponse(**_opportunity_response_dict(db, updated_opportunity, db_opportunity.team_id))
 
 
+@router.patch(
+    "/{opportunity_id}/deal-journey",
+    response_model=OpportunityResponse,
+    summary="调整商机业务旅程关联",
+    description="显式关联、迁移或解除商机的业务旅程；不会改写既有合同、回款、跟进和承诺的历史归属。",
+)
+async def update_opportunity_deal_journey(
+    opportunity_id: str,
+    journey_update: OpportunityDealJourneyUpdate,
+    db_opportunity=Depends(check_opportunity_edit_permission),
+    current_user=Depends(get_current_active_user),
+    db: Session=Depends(get_db),
+):
+    _ensure_opportunity_not_pending(db, db_opportunity, db_opportunity.team_id)
+
+    from app.services.deal_journey_service import (
+        OpportunityDealJourneyConflictError,
+        deal_journey_service,
+    )
+
+    try:
+        if journey_update.deal_journey_id is None:
+            deal_journey_service.detach_opportunity(
+                db,
+                db_opportunity,
+                actor_id=str(current_user.id),
+                expected_version=journey_update.expected_version,
+            )
+        else:
+            deal_journey_service.associate_opportunity(
+                db,
+                db_opportunity,
+                deal_journey_id=journey_update.deal_journey_id,
+                actor_id=str(current_user.id),
+                expected_version=journey_update.expected_version,
+            )
+        db.commit()
+        db.refresh(db_opportunity)
+    except OpportunityDealJourneyConflictError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "OPPORTUNITY_VERSION_CONFLICT",
+                "message": str(exc),
+                "details": {
+                    "opportunity_id": exc.opportunity_id,
+                    "expected_version": exc.expected_version,
+                    "current_version": exc.current_version,
+                },
+            },
+        ) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    # The association_changed event registered by DealJourneyService is the
+    # authoritative refresh trigger for this operation. Do not enqueue a
+    # second generic opportunity-updated run after commit.
+    return OpportunityResponse(**_opportunity_response_dict(db, db_opportunity, db_opportunity.team_id))
+
+
 @router.post("/{opportunity_id}/move-stage", response_model=OpportunityDetailResponse, summary="推进商机阶段", description="推进商机到下一阶段，使用新的采购阶段模板系统，创建阶段快照")
 async def move_opportunity_stage(
     opportunity_id: str,
@@ -808,6 +872,7 @@ async def move_opportunity_stage(
     result = {
         "id": updated_opportunity.public_id,
         "public_id": updated_opportunity.public_id,
+        "deal_journey_id": updated_opportunity.deal_journey_id,
         "opportunity_number": updated_opportunity.opportunity_number,
         "opportunity_name": updated_opportunity.opportunity_name,
         "customer_id": _customer_public_id(db, updated_opportunity.customer_id, updated_opportunity.team_id),

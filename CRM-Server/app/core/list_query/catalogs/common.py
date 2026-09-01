@@ -279,13 +279,32 @@ def payment_approval_status_expression(context: ListQueryContext):
 
 
 def payment_invoice_title_expression():
+    """Return the latest invoice title for a payment record.
+
+    Invoice applications are created against a payment plan.  The optional
+    ``payment_record_id`` is only populated when an application is tied to a
+    specific payment record, so records created from the plan-level invoice
+    flow must fall back to the same ``payment_plan_id``.  Prefer the explicit
+    record link whenever both forms exist.
+    """
+    is_explicit_record_link = InvoiceApplication.payment_record_id == PaymentRecord.id
     return (
         select(InvoiceApplication.invoice_title_text)
         .where(
-            InvoiceApplication.payment_record_id == PaymentRecord.id,
             InvoiceApplication.team_id == PaymentRecord.team_id,
+            or_(
+                is_explicit_record_link,
+                and_(
+                    InvoiceApplication.payment_record_id.is_(None),
+                    InvoiceApplication.payment_plan_id == PaymentRecord.payment_plan_id,
+                ),
+            ),
         )
-        .order_by(InvoiceApplication.created_time.desc(), InvoiceApplication.id.desc())
+        .order_by(
+            case((is_explicit_record_link, 0), else_=1),
+            InvoiceApplication.created_time.desc(),
+            InvoiceApplication.id.desc(),
+        )
         .limit(1)
         .correlate_except(InvoiceApplication)
         .scalar_subquery()

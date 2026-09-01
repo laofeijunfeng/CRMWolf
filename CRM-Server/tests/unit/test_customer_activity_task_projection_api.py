@@ -20,6 +20,7 @@ from app.crud.sales_commitment import (
 )
 from app.models.customer import Customer, CustomerMember
 from app.models.customer_activity import CustomerActivity
+from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
 from app.models.customer_vector_document import CustomerVectorDocument
 from app.models.sales_commitment import (
     FollowUpTask,
@@ -39,7 +40,7 @@ from app.services.follow_up_task_projection_service import (
 
 
 @compiles(BigInteger, "sqlite")
-def _bigint_to_sqlite_int(element, compiler, **kw):  # noqa: ARG001
+def _bigint_to_sqlite_int(element, compiler, **kw):
     return "INTEGER"
 
 
@@ -52,7 +53,7 @@ def db_session():
     )
 
     @event.listens_for(engine, "before_cursor_execute", retval=True)
-    def _skip_sqlite_indexes(conn, cursor, statement, parameters, context, executemany):  # noqa: ARG001
+    def _skip_sqlite_indexes(conn, cursor, statement, parameters, context, executemany):
         if statement.startswith("CREATE INDEX"):
             return "SELECT 1", ()
         return statement, parameters
@@ -63,6 +64,7 @@ def db_session():
             Customer.__table__,
             CustomerMember.__table__,
             CustomerActivity.__table__,
+            CustomerActivityDeletionTombstone.__table__,
             CustomerVectorDocument.__table__,
             SalesCommitment.__table__,
             FollowUpTask.__table__,
@@ -98,7 +100,7 @@ def client(db_session, monkeypatch):
     test_app.include_router(customer_activities.router, prefix="/api")
     customer = db_session.query(Customer).filter(Customer.id == 1).one()
 
-    def _allow_customer_activity(customer_id, team_id, current_user, db):  # noqa: ARG001
+    def _allow_customer_activity(customer_id, team_id, current_user, db):
         return customer
 
     async def _run_post_commit_now(*, activity_id, team_id, trigger_type, actor_id=None):
@@ -110,11 +112,11 @@ def client(db_session, monkeypatch):
             actor_id=actor_id,
         )
 
-    async def _noop_processing(activity_id, team_id):  # noqa: ARG001
+    async def _noop_processing(activity_id, team_id):
         return None
 
     monkeypatch.setattr(customer_activities, "check_customer_activity_permission", _allow_customer_activity)
-    monkeypatch.setattr(customer_activities, "_load_user_info", lambda db, user_id: None)  # noqa: ARG005
+    monkeypatch.setattr(customer_activities, "_load_user_info", lambda db, user_id: None)
     monkeypatch.setattr(
         customer_activities.customer_activity_processing_service,
         "trigger_post_commit_workflow",
@@ -125,7 +127,7 @@ def client(db_session, monkeypatch):
         "trigger_processing",
         _noop_processing,
     )
-    def _enqueue_post_commit_job(db, *, activity, trigger_type, actor_id=None):  # noqa: ARG001
+    def _enqueue_post_commit_job(db, *, activity, trigger_type, actor_id=None):
         return SimpleNamespace(
             job_public_id="job_test",
             team_id=int(activity.team_id),
@@ -183,7 +185,9 @@ def client(db_session, monkeypatch):
 
     test_app.dependency_overrides[deps.get_db] = lambda: db_session
     test_app.dependency_overrides[deps.get_current_user_team] = lambda: 1
-    test_app.dependency_overrides[deps.get_current_active_user] = lambda: SimpleNamespace(id=1, name="销售一", status="active")
+    test_app.dependency_overrides[deps.get_current_active_user] = lambda: SimpleNamespace(
+        id=1, name="销售一", status="active"
+    )
     with TestClient(test_app) as test_client:
         yield test_client
     test_app.dependency_overrides.clear()
@@ -309,7 +313,10 @@ def test_agent_activity_creation_uses_same_customer_activity_api_projection_path
     assert total == 1
     assert rows[0].title == "周五发送试用账号"
     assert rows[0].due_at == datetime(2026, 8, 7, 15, 0, 0)
-    assert _projection_runs(db_session, activity_id=response.json()["id"])[0].status == FollowUpTaskProjectionStatus.SUCCESS
+    assert (
+        _projection_runs(db_session, activity_id=response.json()["id"])[0].status
+        == FollowUpTaskProjectionStatus.SUCCESS
+    )
 
 
 def test_activity_update_clears_next_step_and_delete_cancel_open_task_with_runs(client, db_session):
@@ -438,3 +445,41 @@ def test_submit_and_complete_tracking_rolls_back_activity_when_task_cannot_be_co
     assert db_session.query(CustomerActivity).count() == 0
     db_session.refresh(task)
     assert task.status == FollowUpTaskStatus.OPEN
+
+
+def test_activity_projection_emits_sales_commitment_created_event(monkeypatch, client, db_session):
+    from app.services.customer_intelligence_event_service import customer_intelligence_event_service
+    from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
+
+    emitted = []
+
+    def _build_event(**kwargs):
+        emitted.append(kwargs)
+        return object()
+
+    monkeypatch.setattr(customer_intelligence_event_service, "sales_commitment_changed", _build_event)
+    monkeypatch.setattr(
+        customer_intelligence_refresh_service,
+        "enqueue_committed_event_refresh",
+        lambda *args, **kwargs: None,
+    )
+
+    response = client.post(
+        "/api/v1/customer-activities/cus_11111111111111111111111111111111",
+        json={
+            "activity_kind": "OTHER_FOLLOW_UP",
+            "source_content": "客户要求周五发试用账号。",
+            "next_action": "周五发送试用账号",
+            "next_follow_time": "2026-08-07T15:00:00",
+            "next_follow_time_source": "USER",
+            "occurred_at": "2026-08-06T10:00:00",
+        },
+    )
+
+    assert response.status_code == 201
+    assert len(emitted) == 1
+    assert emitted[0]["trigger_type"] == "sales_commitment_created"
+    assert emitted[0]["customer_id"] == 1
+    assert emitted[0]["payload"]["current"]["status"] == "OPEN"
+    assert emitted[0]["payload"]["previous"] is None
+    assert db_session.query(SalesCommitment).count() == 1

@@ -18,6 +18,7 @@ export interface PermissionQueryParams {
   limit?: number
   resource?: string
   action?: string
+  include_inactive?: boolean
 }
 
 export interface GetUserPermissionsParams {

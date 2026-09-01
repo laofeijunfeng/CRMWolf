@@ -124,14 +124,14 @@ def test_agent_operation_detail_repairs_terminal_customer_intelligence_projectio
                 customer_id=18,
                 actor_id="2",
                 trigger_type="customer_activity_created",
-                scope="brief",
+                scope="partial",
                 status=CustomerIntelligenceRunStatus.SUCCESS,
                 attempt_count=1,
                 max_attempts=3,
                 started_time=completed_at,
                 finished_time=completed_at,
-                route="refresh_brief",
-                result_json={"route": "refresh_brief", "degraded": False},
+                route="refresh_profile",
+                result_json={"route": "refresh_profile", "degraded": False},
             )
         )
         db.commit()

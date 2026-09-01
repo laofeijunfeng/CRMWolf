@@ -12,7 +12,7 @@
  * - V2 Design Tokens
  * - z-index: Sheet z-[200], Dialog z-[1000]
  */
-import { ref, reactive, watch } from 'vue'
+import { ref, reactive, computed, watch } from 'vue'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
@@ -50,12 +50,20 @@ import { useUserStore } from '@/stores/user'
 
 // ==================== Props & Emits ====================
 interface Props {
-  open: boolean
+  open?: boolean
+  active?: boolean
+  embedded?: boolean
 }
 
 type Emits = (e: 'update:open', value: boolean) => void
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  open: false,
+  active: false,
+  embedded: false,
+})
+const embedded = computed(() => props.embedded)
+const active = computed(() => embedded.value ? props.active : props.open)
 const emit = defineEmits<Emits>()
 const userStore = useUserStore()
 
@@ -113,7 +121,7 @@ const handleProviderChange = (provider: unknown): void => {
     resetForm({
       values: {
         api_host: defaults.api_host,
-        api_key: values.api_key || '',
+        api_key: values.api_key ?? '',
         model_name: defaults.model_name
       }
     })
@@ -183,7 +191,7 @@ const handleTest = async (): Promise<void> => {
         if (event.event === 'start') {
           toast.info('正在连接 AI 服务...')
         } else if (event.event === 'content') {
-          streamingContent.value += event.content || ''
+          streamingContent.value += event.content ?? ''
         } else if (event.event === 'done') {
           testResult.value = {
             success: event.success ?? false,
@@ -196,7 +204,7 @@ const handleTest = async (): Promise<void> => {
             success: false,
             message: event.message ?? '连接失败'
           }
-          toast.error(event.message || 'AI 连接测试失败')
+          toast.error(event.message ?? 'AI 连接测试失败')
           testing.value = false
         }
       },
@@ -213,17 +221,21 @@ const handleTest = async (): Promise<void> => {
 }
 
 // ==================== Lifecycle ====================
-watch(() => props.open, (open) => {
-  if (open) {
+watch(active, (isActive) => {
+  if (isActive) {
     fetchConfig()
   }
-})
+}, { immediate: true })
 </script>
 
 <template>
-  <Sheet :open="open" @update:open="emit('update:open', $event)">
-    <DetailSheetContent>
-      <SheetHeader class="system-config-sheet-header">
+  <component
+    :is="embedded ? 'div' : Sheet"
+    :open="embedded ? undefined : open"
+    @update:open="emit('update:open', $event)"
+  >
+    <component :is="embedded ? 'div' : DetailSheetContent">
+      <SheetHeader v-if="!embedded" class="system-config-sheet-header">
         <SheetTitle class="text-base font-semibold text-wolf-text-primary">AI 配置</SheetTitle>
         <SheetDescription class="text-sm text-wolf-text-secondary">配置大模型服务接口</SheetDescription>
       </SheetHeader>
@@ -431,8 +443,8 @@ watch(() => props.open, (open) => {
           </Card>
         </div>
       </ScrollArea>
-    </DetailSheetContent>
-  </Sheet>
+    </component>
+  </component>
 </template>
 
 <style scoped lang="scss">

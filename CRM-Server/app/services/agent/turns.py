@@ -391,6 +391,7 @@ class AgentTurnRepository:
         user_id: int,
         skip: int = 0,
         limit: int = 100,
+        exclude_message_ids: list[int] | None = None,
     ) -> tuple[list[AgentPersistedMessageRecord], int]:
         """Page only user-visible conversation messages."""
 
@@ -407,6 +408,8 @@ class AgentTurnRepository:
             AgentMessage.user_id == user_id,
             func.coalesce(display, "MESSAGE") != "STATE_UPDATE",
         )
+        if exclude_message_ids:
+            query = query.filter(AgentMessage.id.notin_(exclude_message_ids))
         total = int(query.count())
         query = query.with_hint(
             AgentMessage,
@@ -420,6 +423,41 @@ class AgentTurnRepository:
             .all()
         )
         return [self._to_record(row) for row in rows], total
+
+    def list_visible_message_ids_by_session(
+        self,
+        db: Session,
+        *,
+        session_id: int,
+        team_id: int,
+        user_id: int,
+    ) -> list[int]:
+        """Return visible message IDs for read-time history projections.
+
+        This intentionally returns IDs only.  Callers can use the IDs to
+        resolve immutable message actions before applying a projection, while
+        keeping the normal history query paginated.
+        """
+
+        self._require_owned_session(
+            db,
+            team_id=team_id,
+            user_id=user_id,
+            session_id=session_id,
+        )
+        display = AgentMessage.ui_json["metadata"]["display"].as_string()
+        rows = (
+            db.query(AgentMessage.id)
+            .filter(
+                AgentMessage.session_id == session_id,
+                AgentMessage.team_id == team_id,
+                AgentMessage.user_id == user_id,
+                func.coalesce(display, "MESSAGE") != "STATE_UPDATE",
+            )
+            .order_by(AgentMessage.created_time.asc(), AgentMessage.id.asc())
+            .all()
+        )
+        return [int(row[0]) for row in rows]
 
     def _replay_begin(
         self,

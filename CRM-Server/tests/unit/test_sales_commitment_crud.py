@@ -1223,6 +1223,148 @@ def test_projection_service_cancels_pending_confirmation_case_when_next_step_rem
     assert case.cancelled_reason == FollowUpTaskProjectionSkipReason.SOURCE_NEXT_STEP_REMOVED
 
 
+def test_confirmation_history_hides_only_revision_replaced_cases(db_session):
+    _seed_customer_and_activity(db_session)
+    created = follow_up_task_projection_service.project_activity(
+        db_session,
+        activity_id=10,
+        trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_CREATED_DETERMINISTIC,
+        actor_id="2",
+    )
+    task = follow_up_task_crud.get_by_id(db_session, created.created_task_ids[0], team_id=1)
+    old_case = follow_up_task_confirmation_case_crud.create(
+        db_session,
+        FollowUpTaskConfirmationCaseInternalCreate(
+            team_id=1,
+            task_id=task.id,
+            customer_id=task.customer_id,
+            owner_id=task.owner_id,
+            creator_id=task.owner_id,
+            status=FollowUpTaskConfirmationStatus.CANCELLED,
+            suggested_action=FollowUpTaskConfirmationResolutionAction.COMPLETE,
+            confirmation_hash="revision-replaced-old-case",
+            question_text="上次安排的任务是否已经完成?",
+            source_activity_id=10,
+            source_activity_revision=1,
+            source_public_id=task.source_public_id,
+        ),
+    )
+    old_case.cancelled_reason = "SOURCE_ACTIVITY_REVISION_SUPERSEDED"
+    new_case = follow_up_task_confirmation_case_crud.create(
+        db_session,
+        FollowUpTaskConfirmationCaseInternalCreate(
+            team_id=1,
+            task_id=task.id,
+            customer_id=task.customer_id,
+            owner_id=task.owner_id,
+            creator_id=task.owner_id,
+            status=FollowUpTaskConfirmationStatus.RESOLVED,
+            suggested_action=FollowUpTaskConfirmationResolutionAction.COMPLETE,
+            confirmation_hash="revision-replaced-new-case",
+            question_text="上次安排的任务是否已经完成?",
+            source_activity_id=10,
+            source_activity_revision=2,
+            source_public_id=task.source_public_id,
+        ),
+    )
+    db_session.commit()
+
+    hidden = follow_up_task_confirmation_case_crud.list_superseded_revision_case_public_ids(
+        db_session,
+        team_id=1,
+        public_ids=[old_case.public_id, new_case.public_id],
+    )
+
+    assert hidden == {old_case.public_id}
+
+    old_case.cancelled_reason = "USER_CANCELLED"
+    db_session.commit()
+    assert (
+        follow_up_task_confirmation_case_crud.list_superseded_revision_case_public_ids(
+            db_session,
+            team_id=1,
+            public_ids=[old_case.public_id, new_case.public_id],
+        )
+        == set()
+    )
+
+
+def test_confirmation_history_hides_duplicate_case_only_with_pending_replacement(db_session):
+    _seed_customer_and_activity(db_session)
+    created = follow_up_task_projection_service.project_activity(
+        db_session,
+        activity_id=10,
+        trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_CREATED_DETERMINISTIC,
+        actor_id="2",
+    )
+    task = follow_up_task_crud.get_by_id(db_session, created.created_task_ids[0], team_id=1)
+    old_case = follow_up_task_confirmation_case_crud.create(
+        db_session,
+        FollowUpTaskConfirmationCaseInternalCreate(
+            team_id=1,
+            task_id=task.id,
+            customer_id=task.customer_id,
+            owner_id=task.owner_id,
+            creator_id=task.owner_id,
+            status=FollowUpTaskConfirmationStatus.CANCELLED,
+            suggested_action=FollowUpTaskConfirmationResolutionAction.COMPLETE,
+            confirmation_hash="duplicate-old-case",
+            question_text="上次安排的任务是否已经完成?",
+            source_activity_id=10,
+            source_public_id=task.source_public_id,
+        ),
+    )
+    old_case.cancelled_reason = "DUPLICATE_ACTIVE_CASE_SUPERSEDED"
+    pending_case = follow_up_task_confirmation_case_crud.create(
+        db_session,
+        FollowUpTaskConfirmationCaseInternalCreate(
+            team_id=1,
+            task_id=task.id,
+            customer_id=task.customer_id,
+            owner_id=task.owner_id,
+            creator_id=task.owner_id,
+            status=FollowUpTaskConfirmationStatus.PENDING,
+            suggested_action=FollowUpTaskConfirmationResolutionAction.COMPLETE,
+            confirmation_hash="duplicate-pending-case",
+            question_text="上次安排的任务是否已经完成?",
+            source_activity_id=10,
+            source_public_id=task.source_public_id,
+        ),
+    )
+    db_session.commit()
+
+    hidden = follow_up_task_confirmation_case_crud.list_duplicate_active_case_public_ids(
+        db_session,
+        team_id=1,
+        public_ids=[old_case.public_id, pending_case.public_id],
+    )
+
+    assert hidden == {old_case.public_id}
+
+    pending_case.status = FollowUpTaskConfirmationStatus.RESOLVED
+    db_session.commit()
+    assert (
+        follow_up_task_confirmation_case_crud.list_duplicate_active_case_public_ids(
+            db_session,
+            team_id=1,
+            public_ids=[old_case.public_id, pending_case.public_id],
+        )
+        == set()
+    )
+
+    old_case.cancelled_reason = "USER_CANCELLED"
+    pending_case.status = FollowUpTaskConfirmationStatus.PENDING
+    db_session.commit()
+    assert (
+        follow_up_task_confirmation_case_crud.list_duplicate_active_case_public_ids(
+            db_session,
+            team_id=1,
+            public_ids=[old_case.public_id, pending_case.public_id],
+        )
+        == set()
+    )
+
+
 def test_projection_service_creates_commitment_only_without_due_at(db_session):
     _seed_customer_and_activity(db_session)
     activity = customer_activity_crud.get_by_id(db_session, 10)
@@ -1436,3 +1578,135 @@ def test_historical_backfill_projects_only_latest_due_activity_per_customer_owne
     assert total == 1
     assert rows[0].source_activity_id == 11
     assert rows[0].title == "下周五确认预算"
+
+
+def test_sales_commitment_revision_is_monotonic_and_ignores_noop_updates(db_session):
+    _seed_customer_and_activity(db_session)
+    commitment = sales_commitment_crud.create(
+        db_session,
+        SalesCommitmentInternalCreate(
+            team_id=1,
+            customer_id=1,
+            owner_id="2",
+            creator_id="1",
+            title="确认预算",
+            content="确认客户预算",
+            source_type=FollowUpTaskSourceType.CUSTOMER_ACTIVITY,
+            source_activity_id=10,
+            due_at=datetime(2026, 8, 12, 10, 0, 0),
+            due_at_granularity=DueAtGranularity.DATETIME,
+            commitment_hash="commitment-a",
+        ),
+    )
+
+    assert commitment.post_commit_revision == 1
+    sales_commitment_crud.update(
+        db_session,
+        commitment,
+        {"content": "确认客户预算"},
+    )
+    assert commitment.post_commit_revision == 1
+
+    sales_commitment_crud.update(
+        db_session,
+        commitment,
+        {"content": "确认客户预算和采购时间"},
+    )
+    assert commitment.post_commit_revision == 2
+    sales_commitment_crud.update(
+        db_session,
+        commitment,
+        {"content": "确认客户预算"},
+    )
+    assert commitment.post_commit_revision == 3
+
+
+def test_sales_commitment_a_b_a_transitions_have_distinct_customer_intelligence_event_keys(db_session):
+    _seed_customer_and_activity(db_session)
+    commitment = sales_commitment_crud.create(
+        db_session,
+        SalesCommitmentInternalCreate(
+            team_id=1,
+            customer_id=1,
+            owner_id="2",
+            creator_id="1",
+            title="确认预算",
+            content="A",
+            source_type=FollowUpTaskSourceType.CUSTOMER_ACTIVITY,
+            source_activity_id=10,
+            commitment_hash="commitment-a",
+        ),
+    )
+
+    from app.services.customer_intelligence_event_service import customer_intelligence_event_service
+
+    events = []
+    for content in ("A", "B", "A"):
+        if content != commitment.content:
+            previous = commitment.content
+            sales_commitment_crud.update(db_session, commitment, {"content": content})
+        else:
+            previous = None
+        events.append(
+            customer_intelligence_event_service.sales_commitment_changed(
+                team_id=1,
+                customer_id=1,
+                actor_id="2",
+                trigger_type="sales_commitment_updated",
+                commitment_id=commitment.id,
+                change_id=commitment.post_commit_revision,
+                deal_journey_id=None,
+                summary="承诺更新",
+                payload={"previous": previous, "current": content},
+            )
+        )
+
+    assert [event.source.source_version for event in events] == [1, 2, 3]
+    assert len({event.event_key for event in events}) == 3
+
+
+def test_activity_task_projection_publishes_created_updated_and_cancelled_events(db_session, monkeypatch):
+    _seed_customer_and_activity(db_session)
+    published = []
+
+    def _publish(db, *, task, task_event, scope="partial"):
+        published.append((task.id, task_event.event_type, task_event.id, scope))
+        return SimpleNamespace(error=None)
+
+    monkeypatch.setattr(
+        "app.services.customer_intelligence_task_event_service.customer_intelligence_task_event_service.publish",
+        _publish,
+    )
+
+    follow_up_task_projection_service.project_activity(
+        db_session,
+        activity_id=10,
+        trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_STRUCTURED_COMPLETED,
+        actor_id="2",
+    )
+    activity = customer_activity_crud.get_by_id(db_session, 10)
+    activity.next_action = "下周四回访采购进度"
+    activity.next_follow_time = datetime(2026, 8, 13, 10, 0, 0)
+    db_session.commit()
+    follow_up_task_projection_service.project_activity(
+        db_session,
+        activity_id=10,
+        trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_UPDATED,
+        actor_id="2",
+    )
+    activity.next_action = None
+    activity.next_follow_time = None
+    db_session.commit()
+    follow_up_task_projection_service.project_activity(
+        db_session,
+        activity_id=10,
+        trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_UPDATED,
+        actor_id="2",
+    )
+
+    assert [event_type for _, event_type, _, _ in published] == [
+        FollowUpTaskEventType.CREATED,
+        FollowUpTaskEventType.UPDATED,
+        FollowUpTaskEventType.CANCELLED,
+    ]
+    assert all(task_event_id is not None for _, _, task_event_id, _ in published)

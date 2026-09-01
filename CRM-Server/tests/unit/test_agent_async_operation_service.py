@@ -257,7 +257,7 @@ def test_operation_cancellation_is_terminal_and_idempotent() -> None:
             db,
             operation,
             summary="Newer customer profile exists; background operation cancelled",
-            result={"reason": "customer_brief_already_available"},
+            result={"reason": "customer_profile_projection_already_available"},
         )
         service.cancel(
             db,
@@ -271,7 +271,7 @@ def test_operation_cancellation_is_terminal_and_idempotent() -> None:
         assert projection is not None
         assert projection.status == "CANCELLED"
         assert projection.summary == "Newer customer profile exists; background operation cancelled"
-        assert projection.result == {"reason": "customer_brief_already_available"}
+        assert projection.result == {"reason": "customer_profile_projection_already_available"}
         assert projection.error_message is None
         assert projection.next_retry_at is None
         assert projection.finished_time is not None
@@ -307,7 +307,7 @@ def test_cancelled_operation_ignores_late_worker_start_and_completion() -> None:
             db,
             operation,
             summary="Historical backfill no longer required",
-            result={"reason": "customer_brief_already_available"},
+            result={"reason": "customer_profile_projection_already_available"},
         )
         service.mark_running(db, operation, summary="Late worker started")
         service.record_progress(
@@ -330,7 +330,7 @@ def test_cancelled_operation_ignores_late_worker_start_and_completion() -> None:
         assert projection is not None
         assert projection.status == "CANCELLED"
         assert projection.summary == "Historical backfill no longer required"
-        assert projection.result == {"reason": "customer_brief_already_available"}
+        assert projection.result == {"reason": "customer_profile_projection_already_available"}
         assert projection.attempt_count == 1
         assert [event.event_type for event in projection.events] == [
             "SCHEDULED",

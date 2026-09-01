@@ -15,8 +15,6 @@ EvidencePayload = dict[str, PayloadValue]
 
 SourceType = Literal[
     "customer",
-    "customer_profile",
-    "customer_brief",
     "follow_up",
     "sales_commitment",
     "follow_up_task",
@@ -27,6 +25,19 @@ SourceType = Literal[
     "contact",
     "agent_judgement",
 ]
+
+CUSTOMER_EVIDENCE_SOURCE_TYPES: tuple[SourceType, ...] = (
+    "customer",
+    "follow_up",
+    "sales_commitment",
+    "follow_up_task",
+    "business_flow",
+    "opportunity",
+    "contract",
+    "payment",
+    "contact",
+    "agent_judgement",
+)
 
 
 @dataclass(frozen=True)
@@ -299,11 +310,12 @@ class CustomerQdrantIndexService:
             self._match("team_id", team_id),
             self._match("customer_id", customer_id),
         ]
-        if source_types:
+        effective_source_types = self._effective_source_types(source_types)
+        if effective_source_types:
             conditions.append(
                 qmodels.FieldCondition(
                     key="source_type",
-                    match=qmodels.MatchAny(any=list(source_types)),
+                    match=qmodels.MatchAny(any=list(effective_source_types)),
                 )
             )
         if business_object_type:
@@ -321,11 +333,12 @@ class CustomerQdrantIndexService:
             self._match("tenant_id", tenant_id),
             self._match("team_id", team_id),
         ]
-        if source_types:
+        effective_source_types = self._effective_source_types(source_types)
+        if effective_source_types:
             conditions.append(
                 qmodels.FieldCondition(
                     key="source_type",
-                    match=qmodels.MatchAny(any=list(source_types)),
+                    match=qmodels.MatchAny(any=list(effective_source_types)),
                 )
             )
         if business_object_type:
@@ -352,6 +365,19 @@ class CustomerQdrantIndexService:
     @staticmethod
     def _match(key: str, value: str | int) -> qmodels.FieldCondition:
         return qmodels.FieldCondition(key=key, match=qmodels.MatchValue(value=value))
+
+    @staticmethod
+    def _effective_source_types(source_types: Sequence[SourceType] | None) -> tuple[SourceType, ...]:
+        if source_types is None:
+            return CUSTOMER_EVIDENCE_SOURCE_TYPES
+        allowed = set(CUSTOMER_EVIDENCE_SOURCE_TYPES)
+        invalid = [str(source_type) for source_type in source_types if source_type not in allowed]
+        if invalid:
+            raise ValueError(f"不支持的客户证据类型: {', '.join(invalid)}")
+        normalized = tuple(source_type for source_type in source_types if source_type in allowed)
+        if not normalized:
+            raise ValueError("source_types 不能为空")
+        return normalized
 
     @staticmethod
     def _to_point_id(raw_id: str) -> str:

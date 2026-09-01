@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, TypeVar
 
-from sqlalchemy import and_, false, or_
+from sqlalchemy import and_, exists, false, or_
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import aliased
 
 from app.core.list_query import (
     FilterCondition,
@@ -265,8 +266,12 @@ class SalesCommitmentCRUD:
         *,
         commit: bool = True,
     ) -> SalesCommitment:
-        for field, value in _dump(obj_in, exclude_unset=True).items():
+        data = _dump(obj_in, exclude_unset=True)
+        changed = any(getattr(db_obj, field, None) != value for field, value in data.items())
+        for field, value in data.items():
             setattr(db_obj, field, value)
+        if changed:
+            db_obj.post_commit_revision = int(getattr(db_obj, "post_commit_revision", None) or 0) + 1
         return _flush_or_commit(db, db_obj, commit=commit)
 
 
@@ -899,6 +904,89 @@ class FollowUpTaskConfirmationCaseCRUD:
         )
         return {str(public_id): str(status) for public_id, status in rows}
 
+    def list_superseded_revision_case_public_ids(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        public_ids: list[str],
+    ) -> set[str]:
+        """Return revision-replaced Cases that should be hidden from history.
+
+        A cancelled Case is normally useful audit history.  The one exception
+        is an activity-revision replacement: the same task/source produced a
+        newer Case, so rendering both the cancelled old prompt and the current
+        prompt makes one business event look duplicated to the user.
+        """
+
+        normalized_ids = list(dict.fromkeys(public_id for public_id in public_ids if public_id))
+        if not normalized_ids:
+            return set()
+
+        newer_case = aliased(FollowUpTaskConfirmationCase)
+        rows = (
+            db.query(FollowUpTaskConfirmationCase.public_id)
+            .filter(
+                FollowUpTaskConfirmationCase.team_id == team_id,
+                FollowUpTaskConfirmationCase.public_id.in_(normalized_ids),
+                FollowUpTaskConfirmationCase.status == FollowUpTaskConfirmationStatus.CANCELLED,
+                FollowUpTaskConfirmationCase.cancelled_reason == "SOURCE_ACTIVITY_REVISION_SUPERSEDED",
+                FollowUpTaskConfirmationCase.source_activity_id.is_not(None),
+                FollowUpTaskConfirmationCase.source_activity_revision.is_not(None),
+                exists().where(
+                    and_(
+                        newer_case.team_id == FollowUpTaskConfirmationCase.team_id,
+                        newer_case.task_id == FollowUpTaskConfirmationCase.task_id,
+                        newer_case.source_activity_id == FollowUpTaskConfirmationCase.source_activity_id,
+                        newer_case.source_activity_revision
+                        > FollowUpTaskConfirmationCase.source_activity_revision,
+                    )
+                ),
+            )
+            .all()
+        )
+        return {str(public_id) for (public_id,) in rows}
+
+    def list_duplicate_active_case_public_ids(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        public_ids: list[str],
+    ) -> set[str]:
+        """Return cancelled duplicate Cases that have a current pending replacement.
+
+        Duplicate-case cancellation is an implementation-level consistency
+        event, not a user-visible business outcome.  Once the same task has a
+        pending Case again, rendering the cancelled duplicate beside it makes
+        one confirmation prompt appear twice.  Keep the row for audit, but
+        hide only the stale Agent message.
+        """
+
+        normalized_ids = list(dict.fromkeys(public_id for public_id in public_ids if public_id))
+        if not normalized_ids:
+            return set()
+
+        current_case = aliased(FollowUpTaskConfirmationCase)
+        rows = (
+            db.query(FollowUpTaskConfirmationCase.public_id)
+            .filter(
+                FollowUpTaskConfirmationCase.team_id == team_id,
+                FollowUpTaskConfirmationCase.public_id.in_(normalized_ids),
+                FollowUpTaskConfirmationCase.status == FollowUpTaskConfirmationStatus.CANCELLED,
+                FollowUpTaskConfirmationCase.cancelled_reason == "DUPLICATE_ACTIVE_CASE_SUPERSEDED",
+                exists().where(
+                    and_(
+                        current_case.team_id == FollowUpTaskConfirmationCase.team_id,
+                        current_case.task_id == FollowUpTaskConfirmationCase.task_id,
+                        current_case.status == FollowUpTaskConfirmationStatus.PENDING,
+                    )
+                ),
+            )
+            .all()
+        )
+        return {str(public_id) for (public_id,) in rows}
+
     def get_by_public_id_for_update(
         self,
         db: Session,
@@ -977,6 +1065,7 @@ class FollowUpTaskConfirmationCaseCRUD:
                 FollowUpTaskConfirmationCase.customer_id == FollowUpTask.customer_id,
                 FollowUpTask.team_id == team_id,
                 FollowUpTask.owner_id == owner_id,
+                FollowUpTask.status == FollowUpTaskStatus.OPEN,
                 FollowUpTaskConfirmationCase.status == FollowUpTaskConfirmationStatus.PENDING,
                 or_(
                     FollowUpTaskConfirmationCase.expires_at.is_(None),
@@ -1025,6 +1114,7 @@ class FollowUpTaskConfirmationCaseCRUD:
                 FollowUpTaskConfirmationCase.status == FollowUpTaskConfirmationStatus.PENDING,
                 FollowUpTask.team_id == team_id,
                 FollowUpTask.owner_id == owner_id,
+                FollowUpTask.status == FollowUpTaskStatus.OPEN,
                 Customer.team_id == team_id,
                 or_(
                     FollowUpTaskConfirmationCase.expires_at.is_(None),
@@ -1050,14 +1140,21 @@ class FollowUpTaskConfirmationCaseCRUD:
         now: datetime | None = None,
     ) -> tuple[list[FollowUpTaskConfirmationCase], int]:
         resolved_now = now or business_now()
-        query = db.query(FollowUpTaskConfirmationCase).filter(
-            FollowUpTaskConfirmationCase.team_id == team_id,
-            FollowUpTaskConfirmationCase.owner_id == owner_id,
-            FollowUpTaskConfirmationCase.status == FollowUpTaskConfirmationStatus.PENDING,
-            or_(
-                FollowUpTaskConfirmationCase.expires_at.is_(None),
-                FollowUpTaskConfirmationCase.expires_at > resolved_now,
-            ),
+        query = (
+            db.query(FollowUpTaskConfirmationCase)
+            .join(FollowUpTask, FollowUpTask.id == FollowUpTaskConfirmationCase.task_id)
+            .filter(
+                FollowUpTaskConfirmationCase.team_id == team_id,
+                FollowUpTaskConfirmationCase.owner_id == owner_id,
+                FollowUpTask.team_id == team_id,
+                FollowUpTask.owner_id == owner_id,
+                FollowUpTask.status == FollowUpTaskStatus.OPEN,
+                FollowUpTaskConfirmationCase.status == FollowUpTaskConfirmationStatus.PENDING,
+                or_(
+                    FollowUpTaskConfirmationCase.expires_at.is_(None),
+                    FollowUpTaskConfirmationCase.expires_at > resolved_now,
+                ),
+            )
         )
         total = query.count()
         rows = (

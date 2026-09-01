@@ -7,18 +7,23 @@ that can help Agent reasoning and customer profile summarization.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
+from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.contract import Contract
 from app.models.customer import Contact, Customer
 from app.models.customer_activity import CustomerActivity
+from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
+from app.models.deal_journey import CustomerDealJourney, CustomerDealJourneyEvent
 from app.models.opportunity import Opportunity
 from app.models.payment import PaymentPlan, PaymentRecord
+from app.models.sales_commitment import FollowUpTask, FollowUpTaskEvent, SalesCommitment
 from app.services.customer_evidence_retriever import (
     CustomerEvidenceHit,
     CustomerEvidenceRetriever,
@@ -26,8 +31,10 @@ from app.services.customer_evidence_retriever import (
     customer_evidence_retriever,
 )
 from app.services.customer_fact_service import CustomerFactService, customer_fact_service
-from app.services.customer_qdrant_index_service import SourceType
 from app.services.industry_display_service import industry_display_service
+
+if TYPE_CHECKING:
+    from app.services.customer_qdrant_index_service import SourceType
 
 JsonScalar = str | int | float | bool | None
 JsonValue = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
@@ -54,13 +61,6 @@ class CustomerFact:
     returned_time: str | None
     return_reason: str | None
     loss_reason: str | None
-    profile_status: str | None
-    company_background: str | None
-    main_business: str | None
-    project_background: str | None
-    similar_customers: str | None
-    customer_brief_status: str | None
-    customer_brief_markdown: str | None
 
     def to_dict(self) -> JsonObject:
         return {
@@ -78,13 +78,6 @@ class CustomerFact:
             "returned_time": self.returned_time,
             "return_reason": self.return_reason,
             "loss_reason": self.loss_reason,
-            "profile_status": self.profile_status,
-            "company_background": self.company_background,
-            "main_business": self.main_business,
-            "project_background": self.project_background,
-            "similar_customers": self.similar_customers,
-            "customer_brief_status": self.customer_brief_status,
-            "customer_brief_markdown": self.customer_brief_markdown,
         }
 
 
@@ -129,6 +122,7 @@ class OpportunityFact:
     loss_reason: str | None
     created_time: str | None
     actual_closing_date: str | None
+    deal_journey_id: int | None = None
 
     def to_dict(self) -> JsonObject:
         return {
@@ -149,6 +143,7 @@ class OpportunityFact:
             "loss_reason": self.loss_reason,
             "created_time": self.created_time,
             "actual_closing_date": self.actual_closing_date,
+            "deal_journey_id": self.deal_journey_id,
         }
 
 
@@ -169,6 +164,7 @@ class ContractFact:
     signing_date: str | None
     effective_date: str | None
     created_time: str | None
+    deal_journey_id: int | None = None
 
     def to_dict(self) -> JsonObject:
         return {
@@ -187,6 +183,7 @@ class ContractFact:
             "signing_date": self.signing_date,
             "effective_date": self.effective_date,
             "created_time": self.created_time,
+            "deal_journey_id": self.deal_journey_id,
         }
 
 
@@ -247,6 +244,8 @@ class ActivityFact:
     next_action: str | None
     next_follow_time: str | None
     occurred_at: str | None
+    deal_journey_id: int | None = None
+    source_content: str | None = None
 
     def to_dict(self) -> JsonObject:
         return {
@@ -257,6 +256,8 @@ class ActivityFact:
             "next_action": self.next_action,
             "next_follow_time": self.next_follow_time,
             "occurred_at": self.occurred_at,
+            "deal_journey_id": self.deal_journey_id,
+            "source_content": self.source_content,
         }
 
 
@@ -271,6 +272,12 @@ class CustomerStrongContext:
     payment_records: list[PaymentRecordFact]
     recent_activities: list[ActivityFact]
     same_industry_customers: list[str]
+    deal_journeys: list[JsonObject] = field(default_factory=list)
+    deal_journey_events: list[JsonObject] = field(default_factory=list)
+    recorded_follow_ups: list[JsonObject] = field(default_factory=list)
+    sales_commitments: list[JsonObject] = field(default_factory=list)
+    follow_up_task_events: list[JsonObject] = field(default_factory=list)
+    source_watermarks: JsonObject = field(default_factory=dict)
 
     def to_dict(self) -> JsonObject:
         return {
@@ -283,6 +290,12 @@ class CustomerStrongContext:
             "payment_records": [item.to_dict() for item in self.payment_records],
             "recent_activities": [item.to_dict() for item in self.recent_activities],
             "same_industry_customers": self.same_industry_customers,
+            "deal_journeys": self.deal_journeys,
+            "deal_journey_events": self.deal_journey_events,
+            "recorded_follow_ups": self.recorded_follow_ups,
+            "sales_commitments": self.sales_commitments,
+            "follow_up_task_events": self.follow_up_task_events,
+            "source_watermarks": self.source_watermarks,
         }
 
 
@@ -291,12 +304,14 @@ class CustomerIntelligenceContext:
     strong_context: CustomerStrongContext
     evidence_hits: list[CustomerEvidenceHit]
     retrieval_state: EvidenceRetrievalState
+    source_watermark: JsonObject = field(default_factory=dict)
 
     def to_dict(self) -> JsonObject:
         return {
             "strong_context": self.strong_context.to_dict(),
             "semantic_evidence": [item.to_dict() for item in self.evidence_hits],
             "retrieval": self.retrieval_state.to_dict(),
+            "source_watermark": self.source_watermark or self.strong_context.source_watermarks,
         }
 
     def to_agent_payload(self) -> JsonObject:
@@ -411,6 +426,7 @@ class CustomerIntelligenceContextService:
             strong_context=strong_context,
             evidence_hits=retrieval_result.hits,
             retrieval_state=retrieval_result.state,
+            source_watermark=strong_context.source_watermarks or {},
         )
 
     def _build_strong_context(self, db: Session, *, customer: Customer, team_id: int) -> CustomerStrongContext:
@@ -439,9 +455,68 @@ class CustomerIntelligenceContextService:
         activities = (
             db.query(CustomerActivity)
             .filter(CustomerActivity.customer_id == customer.id, CustomerActivity.team_id == team_id)
-            .order_by(CustomerActivity.occurred_at.desc())
+            .order_by(CustomerActivity.occurred_at.desc(), CustomerActivity.id.desc())
             .limit(50)
             .all()
+        )
+        activity_deletions = (
+            db.query(CustomerActivityDeletionTombstone)
+            .filter(
+                CustomerActivityDeletionTombstone.customer_id == customer.id,
+                CustomerActivityDeletionTombstone.team_id == team_id,
+            )
+            .order_by(CustomerActivityDeletionTombstone.id.desc())
+            .limit(200)
+            .all()
+        )
+        deal_journeys = (
+            db.query(CustomerDealJourney)
+            .filter(CustomerDealJourney.customer_id == customer.id, CustomerDealJourney.team_id == team_id)
+            .order_by(
+                CustomerDealJourney.status.asc(),
+                CustomerDealJourney.last_event_at.desc(),
+                CustomerDealJourney.id.desc(),
+            )
+            .limit(50)
+            .all()
+        )
+        journey_ids = [int(item.id) for item in deal_journeys]
+        journey_events = (
+            db.query(CustomerDealJourneyEvent)
+            .filter(
+                CustomerDealJourneyEvent.customer_id == customer.id,
+                CustomerDealJourneyEvent.team_id == team_id,
+                CustomerDealJourneyEvent.deal_journey_id.in_(journey_ids),
+            )
+            .order_by(CustomerDealJourneyEvent.event_time.desc(), CustomerDealJourneyEvent.id.desc())
+            .limit(200)
+            .all()
+            if journey_ids
+            else []
+        )
+        commitments = (
+            db.query(SalesCommitment)
+            .filter(SalesCommitment.customer_id == customer.id, SalesCommitment.team_id == team_id)
+            .order_by(SalesCommitment.updated_time.desc(), SalesCommitment.id.desc())
+            .limit(100)
+            .all()
+        )
+        tasks = (
+            db.query(FollowUpTask)
+            .filter(FollowUpTask.customer_id == customer.id, FollowUpTask.team_id == team_id)
+            .order_by(FollowUpTask.updated_time.desc(), FollowUpTask.id.desc())
+            .limit(100)
+            .all()
+        )
+        task_ids = [int(item.id) for item in tasks]
+        task_events = (
+            db.query(FollowUpTaskEvent)
+            .filter(FollowUpTaskEvent.team_id == team_id, FollowUpTaskEvent.task_id.in_(task_ids))
+            .order_by(FollowUpTaskEvent.created_time.desc(), FollowUpTaskEvent.id.desc())
+            .limit(200)
+            .all()
+            if task_ids
+            else []
         )
         same_industry_rows = (
             db.query(Customer.account_name)
@@ -461,14 +536,40 @@ class CustomerIntelligenceContextService:
                 for record in sorted(plan.payment_records or [], key=lambda item: item.payment_date or date.min):
                     payment_records.append(self._payment_record_fact(record, plan.contract_id))
 
+        journey_payload = [_journey_to_dict(item) for item in deal_journeys]
+        journey_event_payload = [_journey_event_to_dict(item) for item in journey_events]
+        commitment_payload = [_commitment_to_dict(item) for item in commitments]
+        task_payload = [_task_to_dict(item) for item in tasks]
+        task_event_payload = [_task_event_to_dict(item) for item in task_events]
+        recorded_follow_ups = [*task_payload, *commitment_payload]
+        context_facts = self.fact_service.to_context_payload(
+            db, team_id=team_id, customer_id=int(customer.id), limit=50
+        )
+        watermarks = _source_watermarks(
+            customer=customer,
+            contacts=contacts,
+            opportunities=opportunities,
+            contracts=contracts,
+            payment_plans=[plan for contract in contracts for plan in (contract.payment_plans or [])],
+            payment_records=[
+                record
+                for contract in contracts
+                for plan in (contract.payment_plans or [])
+                for record in (plan.payment_records or [])
+            ],
+            activities=activities,
+            activity_deletions=activity_deletions,
+            facts=context_facts,
+            journeys=deal_journeys,
+            journey_events=journey_events,
+            tasks=tasks,
+            commitments=commitments,
+            task_events=task_events,
+        )
+
         return CustomerStrongContext(
             customer=self._customer_fact(db, customer),
-            customer_facts=self.fact_service.to_context_payload(
-                db,
-                team_id=team_id,
-                customer_id=int(customer.id),
-                limit=50,
-            ),
+            customer_facts=context_facts,
             contacts=[self._contact_fact(item) for item in contacts],
             opportunities=[self._opportunity_fact(item) for item in opportunities],
             contracts=[self._contract_fact(item) for item in contracts],
@@ -476,6 +577,12 @@ class CustomerIntelligenceContextService:
             payment_records=payment_records,
             recent_activities=[self._activity_fact(item) for item in activities],
             same_industry_customers=[str(row[0]) for row in same_industry_rows],
+            deal_journeys=journey_payload,
+            deal_journey_events=journey_event_payload,
+            recorded_follow_ups=recorded_follow_ups,
+            sales_commitments=commitment_payload,
+            follow_up_task_events=task_event_payload,
+            source_watermarks=watermarks,
         )
 
     def _customer_fact(self, db: Session, customer: Customer) -> CustomerFact:
@@ -494,13 +601,6 @@ class CustomerIntelligenceContextService:
             returned_time=self._datetime(customer.returned_time),
             return_reason=customer.return_reason,
             loss_reason=customer.loss_reason,
-            profile_status=customer.profile_status,
-            company_background=customer.company_background,
-            main_business=customer.main_business,
-            project_background=customer.project_background,
-            similar_customers=customer.similar_customers,
-            customer_brief_status=customer.customer_brief_status,
-            customer_brief_markdown=customer.customer_brief_markdown,
         )
 
     def _contact_fact(self, contact: Contact) -> ContactFact:
@@ -533,6 +633,7 @@ class CustomerIntelligenceContextService:
             loss_reason=opportunity.loss_reason,
             created_time=self._datetime(opportunity.created_time),
             actual_closing_date=self._date(opportunity.actual_closing_date),
+            deal_journey_id=self._optional_int(opportunity.deal_journey_id),
         )
 
     def _contract_fact(self, contract: Contract) -> ContractFact:
@@ -552,6 +653,7 @@ class CustomerIntelligenceContextService:
             signing_date=self._date(contract.signing_date),
             effective_date=self._date(contract.effective_date),
             created_time=self._datetime(contract.created_time),
+            deal_journey_id=self._optional_int(contract.deal_journey_id),
         )
 
     def _payment_plan_fact(self, plan: PaymentPlan) -> PaymentPlanFact:
@@ -587,6 +689,8 @@ class CustomerIntelligenceContextService:
             next_action=activity.next_action,
             next_follow_time=self._datetime(activity.next_follow_time),
             occurred_at=self._datetime(activity.occurred_at),
+            deal_journey_id=self._optional_int(activity.deal_journey_id),
+            source_content=activity.source_content,
         )
 
     @staticmethod
@@ -612,6 +716,161 @@ class CustomerIntelligenceContextService:
     @staticmethod
     def _datetime(value: datetime | None) -> str | None:
         return value.isoformat() if value else None
+
+
+def _iso(value: object) -> str | None:
+    return value.isoformat() if isinstance(value, (date, datetime)) else None
+
+
+def _json_metadata(value: object) -> JsonObject:
+    if not isinstance(value, str) or not value.strip():
+        return {}
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _journey_to_dict(journey: CustomerDealJourney) -> JsonObject:
+    return {
+        "id": int(journey.id),
+        "name": journey.name,
+        "status": journey.status,
+        "primary_opportunity_id": journey.primary_opportunity_id,
+        "started_at": _iso(journey.started_at),
+        "closed_at": _iso(journey.closed_at),
+        "last_event_at": _iso(journey.last_event_at),
+        "created_time": _iso(journey.created_time),
+        "updated_time": _iso(journey.updated_time),
+        "public_id": getattr(journey, "public_id", None),
+    }
+
+
+def _journey_event_to_dict(event: CustomerDealJourneyEvent) -> JsonObject:
+    return {
+        "id": int(event.id),
+        "deal_journey_id": int(event.deal_journey_id),
+        "event_type": event.event_type,
+        "event_time": _iso(event.event_time),
+        "source_type": event.source_type,
+        "source_id": event.source_id,
+        "summary": event.summary,
+        "metadata": _json_metadata(event.metadata_json),
+        "created_time": _iso(event.created_time),
+    }
+
+
+def _commitment_to_dict(commitment: SalesCommitment) -> JsonObject:
+    return {
+        "id": int(commitment.id),
+        "public_id": commitment.public_id,
+        "kind": "commitment",
+        "deal_journey_id": commitment.deal_journey_id,
+        "title": commitment.title,
+        "content": commitment.content,
+        "status": commitment.status,
+        "owner_id": commitment.owner_id,
+        "due_at": _iso(commitment.due_at),
+        "source_activity_id": commitment.source_activity_id,
+        "source_public_id": commitment.source_public_id,
+        "evidence": commitment.evidence_json if isinstance(commitment.evidence_json, dict) else {},
+        "created_time": _iso(commitment.created_time),
+        "updated_time": _iso(commitment.updated_time),
+    }
+
+
+def _task_to_dict(task: FollowUpTask) -> JsonObject:
+    return {
+        "id": int(task.id),
+        "public_id": task.public_id,
+        "kind": "task",
+        "task_id": int(task.id),
+        "commitment_id": task.commitment_id,
+        "deal_journey_id": task.deal_journey_id,
+        "title": task.title,
+        "description": task.description,
+        "status": task.status,
+        "owner_id": task.owner_id,
+        "due_at": _iso(task.due_at),
+        "completed_at": _iso(task.completed_at),
+        "cancelled_at": _iso(task.cancelled_at),
+        "source_activity_id": task.source_activity_id,
+        "source_public_id": task.source_public_id,
+        "evidence": task.evidence_json if isinstance(task.evidence_json, dict) else {},
+        "created_time": _iso(task.created_time),
+        "updated_time": _iso(task.updated_time),
+    }
+
+
+def _task_event_to_dict(event: FollowUpTaskEvent) -> JsonObject:
+    return {
+        "id": int(event.id),
+        "task_id": int(event.task_id),
+        "event_type": event.event_type,
+        "previous_status": event.previous_status,
+        "new_status": event.new_status,
+        "actor_id": event.actor_id,
+        "source_activity_id": event.source_activity_id,
+        "payload": event.payload_json if isinstance(event.payload_json, dict) else {},
+        "created_time": _iso(event.created_time),
+    }
+
+
+def _source_watermarks(
+    *,
+    customer: Customer,
+    contacts: list[Contact],
+    opportunities: list[Opportunity],
+    contracts: list[Contract],
+    payment_plans: list[PaymentPlan],
+    payment_records: list[PaymentRecord],
+    activities: list[CustomerActivity],
+    activity_deletions: list[CustomerActivityDeletionTombstone],
+    facts: list[JsonObject],
+    journeys: list[CustomerDealJourney],
+    journey_events: list[CustomerDealJourneyEvent],
+    tasks: list[FollowUpTask],
+    commitments: list[SalesCommitment],
+    task_events: list[FollowUpTaskEvent],
+) -> JsonObject:
+    return {
+        "customer_id": int(customer.id),
+        "customer_updated_at": _iso(customer.last_modified_time or customer.updated_time),
+        "contact_id": max((int(item.id) for item in contacts), default=0),
+        "opportunity_id": max((int(item.id) for item in opportunities), default=0),
+        "contract_id": max((int(item.id) for item in contracts), default=0),
+        "payment_plan_id": max((int(item.id) for item in payment_plans), default=0),
+        "payment_record_id": max((int(item.id) for item in payment_records), default=0),
+        "activity_id": max((int(item.id) for item in activities), default=0),
+        "activity_deletion_id": max((int(item.id) for item in activity_deletions), default=0),
+        "fact_id": max((int(item.get("id") or 0) for item in facts), default=0),
+        "journey_id": max((int(item.id) for item in journeys), default=0),
+        "journey_event_id": max((int(item.id) for item in journey_events), default=0),
+        "task_id": max((int(item.id) for item in tasks), default=0),
+        "commitment_id": max((int(item.id) for item in commitments), default=0),
+        "task_event_id": max((int(item.id) for item in task_events), default=0),
+        "latest_contact_at": max((_iso(item.created_time) or "" for item in contacts), default=None),
+        "latest_opportunity_at": max((_iso(item.last_modified_time) or "" for item in opportunities), default=None),
+        "latest_contract_at": max((_iso(item.last_modified_time) or "" for item in contracts), default=None),
+        "latest_payment_plan_at": max((_iso(item.last_modified_time) or "" for item in payment_plans), default=None),
+        "latest_payment_record_at": max((_iso(item.created_time) or "" for item in payment_records), default=None),
+        "latest_activity_at": max((_iso(item.occurred_at) or "" for item in activities), default=None),
+        "latest_activity_deleted_at": max(
+            (_iso(item.deleted_at) or "" for item in activity_deletions),
+            default=None,
+        ),
+        "latest_fact_at": max(
+            (str(item.get("updated_at") or item.get("extracted_at") or "") for item in facts),
+            default=None,
+        ),
+        "latest_journey_at": max((_iso(item.event_time) or "" for item in journey_events), default=None),
+        "latest_task_at": max((_iso(item.updated_time) or "" for item in tasks), default=None),
+        "latest_task_event_at": max((_iso(item.created_time) or "" for item in task_events), default=None),
+        "latest_commitment_at": max((_iso(item.updated_time) or "" for item in commitments), default=None),
+        "latest_journey_updated_at": max((_iso(item.updated_time) or "" for item in journeys), default=None),
+        "fact_version": max((int(item.get("version") or 0) for item in facts), default=0),
+    }
 
 
 customer_intelligence_context_service = CustomerIntelligenceContextService()

@@ -61,18 +61,30 @@ import userApi, { type UserSearchResult } from '@/api/user'
 import roleApi, { type RoleResponse } from '@/api/role'
 import { useUserStore } from '@/stores/user'
 import { useTeamStore } from '@/stores/team'
+import { usePermissionStore } from '@/stores/permissions'
+import { useSettingsAccess } from '@/composables/useSettingsAccess'
 
 // ==================== Props & Emits ====================
 interface Props {
-  open: boolean
+  open?: boolean
+  active?: boolean
+  embedded?: boolean
 }
 
 type Emits = (e: 'update:open', value: boolean) => void
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  open: false,
+  active: false,
+  embedded: false,
+})
+const embedded = computed(() => props.embedded === true)
+const active = computed(() => embedded.value ? props.active : props.open)
 const emit = defineEmits<Emits>()
 const userStore = useUserStore()
 const teamStore = useTeamStore()
+const permissionStore = usePermissionStore()
+const { isOwner } = useSettingsAccess()
 
 // ==================== State ====================
 const loading = ref(false)
@@ -142,10 +154,20 @@ const { handleSubmit: handleResetPasswordSubmit, resetForm: resetPasswordResetFo
 const currentUserId = computed(() => String(userStore.userInfo?.id ?? ''))
 const teamId = computed(() => teamStore.currentTeam?.id)
 
-const isTeamAdmin = computed(() => {
-  // TODO: Get current user roles in current team
-  return true // For now, allow all operations
+const canManageMembers = computed(() => {
+  if (isOwner.value || !permissionStore.initialized) return true
+  return permissionStore.hasAnyPermission([
+    'team:member:invite',
+    'team:member:update',
+    'team:member:password_reset',
+    'team:member:remove',
+    'role:manage',
+  ])
 })
+const canInviteMembers = computed(() => isOwner.value || !permissionStore.initialized || permissionStore.hasAnyPermission(['team:member:invite', 'role:manage']))
+const canUpdateMembers = computed(() => isOwner.value || !permissionStore.initialized || permissionStore.hasAnyPermission(['team:member:update', 'role:manage']))
+const canResetMemberPasswords = computed(() => isOwner.value || !permissionStore.initialized || permissionStore.hasAnyPermission(['team:member:password_reset', 'role:manage']))
+const canRemoveMembers = computed(() => isOwner.value || !permissionStore.initialized || permissionStore.hasAnyPermission(['team:member:remove', 'role:manage']))
 
 const filteredMembers = computed(() => {
   const search = searchText.value.trim().toLowerCase()
@@ -392,13 +414,13 @@ const handleCopyInviteLink = async (): Promise<void> => {
 }
 
 // ==================== Lifecycle ====================
-watch(() => props.open, (open) => {
-  if (open) {
+watch(active, (isActive) => {
+  if (isActive) {
     fetchTeamInfo()
     fetchMembers()
     fetchAvailableRoles()
   }
-})
+}, { immediate: true })
 
 // ==================== Helper Functions ====================
 function formatDate(dateStr: string): string {
@@ -425,9 +447,13 @@ function handleRoleChange(roleId: number, checked: boolean): void {
 </script>
 
 <template>
-  <Sheet :open="open" @update:open="emit('update:open', $event)">
-    <DetailSheetContent>
-      <SheetHeader class="system-config-sheet-header">
+  <component
+    :is="embedded === true ? 'div' : Sheet"
+    :open="embedded === true ? undefined : open"
+    @update:open="emit('update:open', $event)"
+  >
+    <component :is="embedded === true ? 'div' : DetailSheetContent" class="settings-embedded-content">
+      <SheetHeader v-if="!embedded" class="system-config-sheet-header">
         <SheetTitle class="text-base font-semibold text-wolf-text-primary">团队成员</SheetTitle>
         <SheetDescription class="text-sm text-wolf-text-secondary">管理团队成员与角色分配</SheetDescription>
       </SheetHeader>
@@ -440,7 +466,7 @@ function handleRoleChange(roleId: number, checked: boolean): void {
               <p class="text-sm text-muted-foreground">邀请码: {{ team?.code }}</p>
             </div>
             <div class="flex items-center gap-2">
-              <Button @click="showInviteDialog">
+              <Button v-if="canInviteMembers" @click="showInviteDialog">
                 <UserPlus class="w-4 h-4 mr-2" />
                 邀请成员
               </Button>
@@ -448,7 +474,7 @@ function handleRoleChange(roleId: number, checked: boolean): void {
                 <Copy class="w-4 h-4 mr-2" />
                 复制邀请链接
               </Button>
-              <Button variant="outline" :loading="codeLoading" @click="handleRegenerateCode">
+              <Button v-if="canManageMembers" variant="outline" :loading="codeLoading" @click="handleRegenerateCode">
                 <RefreshCw class="w-4 h-4 mr-2" />
                 重置邀请码
               </Button>
@@ -509,7 +535,7 @@ function handleRoleChange(roleId: number, checked: boolean): void {
 
             <template #itemActions="{ item }">
               <Button
-                v-if="item.id !== currentUserId && isTeamAdmin"
+                v-if="item.id !== currentUserId && canUpdateMembers"
                 variant="ghost"
                 size="icon"
                 title="修改用户名"
@@ -518,7 +544,7 @@ function handleRoleChange(roleId: number, checked: boolean): void {
                 <Pencil class="h-4 w-4" />
               </Button>
               <Button
-                v-if="item.id !== currentUserId && isTeamAdmin"
+                v-if="item.id !== currentUserId && canResetMemberPasswords"
                 variant="ghost"
                 size="icon"
                 title="重置密码"
@@ -527,7 +553,7 @@ function handleRoleChange(roleId: number, checked: boolean): void {
                 <Key class="h-4 w-4" />
               </Button>
               <Button
-                v-if="item.id !== currentUserId && isTeamAdmin"
+                v-if="item.id !== currentUserId && canManageMembers"
                 variant="ghost"
                 size="icon"
                 title="分配角色"
@@ -536,7 +562,7 @@ function handleRoleChange(roleId: number, checked: boolean): void {
                 <Shield class="h-4 w-4" />
               </Button>
               <Button
-                v-if="item.id !== currentUserId && isTeamAdmin"
+                v-if="item.id !== currentUserId && canRemoveMembers"
                 variant="ghost"
                 size="icon"
                 title="移除"
@@ -549,8 +575,8 @@ function handleRoleChange(roleId: number, checked: boolean): void {
           </ListCard>
         </div>
       </ScrollArea>
-    </DetailSheetContent>
-  </Sheet>
+    </component>
+  </component>
 
   <!-- 邀请成员 Dialog (z-[1000]) -->
   <Dialog v-model:open="inviteDialogOpen">

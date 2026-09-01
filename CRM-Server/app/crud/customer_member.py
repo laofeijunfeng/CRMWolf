@@ -75,11 +75,18 @@ class CustomerMemberCRUD:
         ).order_by(CustomerMember.id.desc()).first()
 
         if existing:
-            existing.member_role = obj_in.member_role.value
-            existing.access_level = obj_in.access_level.value
-            existing.remark = obj_in.remark
-            existing.created_by = created_by
-            existing.is_active = True
+            next_values = {
+                "member_role": obj_in.member_role.value,
+                "access_level": obj_in.access_level.value,
+                "remark": obj_in.remark,
+                "created_by": created_by,
+                "is_active": True,
+            }
+            changed = any(getattr(existing, field) != value for field, value in next_values.items())
+            for field, value in next_values.items():
+                setattr(existing, field, value)
+            if changed:
+                existing.post_commit_revision = int(getattr(existing, "post_commit_revision", None) or 0) + 1
             db.commit()
             db.refresh(existing)
             return existing
@@ -100,16 +107,22 @@ class CustomerMemberCRUD:
 
     def update(self, db: Session, db_obj: CustomerMember, obj_in: CustomerMemberUpdate) -> CustomerMember:
         update_data = obj_in.model_dump(exclude_unset=True)
+        normalized_data = {}
         for field, value in update_data.items():
-            if hasattr(value, "value"):
-                value = value.value
+            normalized_data[field] = value.value if hasattr(value, "value") else value
+        changed = any(getattr(db_obj, field, None) != value for field, value in normalized_data.items())
+        for field, value in normalized_data.items():
             setattr(db_obj, field, value)
+        if changed:
+            db_obj.post_commit_revision = int(getattr(db_obj, "post_commit_revision", None) or 0) + 1
         db.commit()
         db.refresh(db_obj)
         return db_obj
 
     def deactivate(self, db: Session, db_obj: CustomerMember) -> None:
-        db_obj.is_active = False
+        if db_obj.is_active:
+            db_obj.is_active = False
+            db_obj.post_commit_revision = int(getattr(db_obj, "post_commit_revision", None) or 0) + 1
         db.commit()
 
     def get_candidates(self, db: Session, team_id: int, customer_id: int) -> List[dict]:

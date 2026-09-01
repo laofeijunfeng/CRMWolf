@@ -27,6 +27,7 @@ from app.services.agent.orchestrator.contracts import (
     RootContextSnapshot,
     RootDecision,
     RootDecisionClassifier,
+    SemanticIntentResolver,
     RootDispatchResult,
     RootRoutingPlan,
     RootRuntimeContext,
@@ -52,6 +53,7 @@ from app.services.agent.orchestrator.pending_case_matcher import match_pending_c
 from app.services.agent.orchestrator.query_executor import (
     QueryExecutionConfigurationError,
     QueryIdentityResolutionUnavailableError,
+    QuerySemanticResolutionUnavailableError,
 )
 from app.services.agent.orchestrator.result_set import (
     ResultSetReferenceError,
@@ -63,6 +65,11 @@ from app.services.agent.orchestrator.risk import (
     has_explicit_independent_read_intent,
     has_explicit_workflow_continuation_intent,
     has_explicit_write_intent,
+)
+from app.services.agent.query.semantic_intent import (
+    CRMQuerySemanticIntent,
+    QuerySemanticIntentInvalidError,
+    QuerySemanticIntentUnavailableError,
 )
 from app.services.agent.principal import AgentPrincipal
 from app.services.agent.query import CRMQueryAgentExecutionError
@@ -164,6 +171,7 @@ class RootOrchestratorState(TypedDict, total=False):
     context_snapshot: Annotated[dict[str, object] | None, _replace_state_value]
     decision: Annotated[dict[str, object] | None, _replace_state_value]
     query_input: Annotated[dict[str, object] | None, _replace_state_value]
+    semantic_intent: Annotated[dict[str, object] | None, _replace_state_value]
     resolved_action: Annotated[dict[str, object] | None, _replace_state_value]
     workflow_input: Annotated[dict[str, object] | None, _replace_state_value]
     workflow_result: Annotated[dict[str, object] | None, _replace_state_value]
@@ -185,6 +193,7 @@ class RootOrchestrator:
         query_executor: QueryExecutor,
         interaction_resolver: InteractionResolver,
         workflow_subgraph: CompiledStateGraph,
+        semantic_intent_resolver: SemanticIntentResolver | None = None,
     ) -> None:
         self._checkpointer = checkpointer
         self._context_resolver = context_resolver
@@ -192,6 +201,7 @@ class RootOrchestrator:
         self._query_executor = query_executor
         self._interaction_resolver = interaction_resolver
         self._workflow_subgraph = workflow_subgraph
+        self._semantic_intent_resolver = semantic_intent_resolver
         self._graph = self._build_graph()
 
     async def dispatch(
@@ -435,6 +445,7 @@ class RootOrchestrator:
             "context_snapshot": (context_snapshot.model_dump(mode="json") if context_snapshot is not None else None),
             "decision": decision.model_dump(mode="json") if decision is not None else None,
             "query_input": None,
+            "semantic_intent": None,
             "resolved_action": (resolved_action.model_dump(mode="json") if resolved_action is not None else None),
             "workflow_input": None,
             "workflow_result": None,
@@ -806,6 +817,81 @@ class RootOrchestrator:
         )
         return {"routing_plan": plan.model_dump(mode="json")}
 
+    async def _try_resolve_semantic_query_intent(
+        self,
+        *,
+        turn: RootTurnInput,
+        context: RootContextSnapshot,
+        runtime: RootRuntimeContext,
+    ) -> CRMQuerySemanticIntent | None:
+        """Use one query semantic seam before Root model routing when safe.
+
+        This is deliberately a query-only preflight. It never runs for an
+        explicit write, result-set continuation, interaction, or pending-case
+        reference. A selected entity supplies identity context, but semantic
+        resource and temporal intent still need to be resolved. A recognized
+        query therefore cannot be mistaken for a customer-scoped workflow by
+        the Root classifier, while
+        ambiguous text still follows the normal Root decision model.
+        """
+
+        if (
+            self._semantic_intent_resolver is None
+            or runtime.query_model_config is None
+            or not isinstance(turn.input, TextTurnInput)
+            # Result-set ordinals/references are a higher-priority context
+            # binding and must be resolved by the deterministic result-set
+            # seam, not by an independent semantic query preflight.
+            or context.result_set is not None
+            or has_explicit_write_intent(turn.input.text)
+        ):
+            return None
+        try:
+            intent = await self._semantic_intent_resolver.resolve(
+                turn.input.text,
+                model_config=runtime.query_model_config,
+                runtime=runtime,
+            )
+        except (QuerySemanticIntentUnavailableError, QuerySemanticIntentInvalidError):
+            # Root remains available when the optional query preflight model is
+            # unavailable. If the Root model routes to QUERY, the Query seam
+            # will report its own typed semantic failure.
+            return None
+        if intent.scope not in {"global_work", "customer_scoped", "customer_list"}:
+            return None
+        if intent.confidence < 0.80:
+            return None
+        return intent
+
+    @staticmethod
+    def _semantic_query_decision(
+        *,
+        has_active_workflow: bool,
+        has_selected_entity: bool,
+        semantic_intent: CRMQuerySemanticIntent,
+    ) -> RootDecision:
+        return RootDecision(
+            task_relation=("SWITCH_TASK" if has_active_workflow else "NEW_TASK"),
+            route="QUERY",
+            risk="READ_ONLY",
+            context_policy=ContextPolicy(
+                selected_entity=(
+                    "USE"
+                    if has_selected_entity and semantic_intent.scope == "customer_scoped"
+                    else "IGNORE"
+                ),
+                previous_query="IGNORE",
+                result_set="IGNORE",
+                active_workflow=("SUSPEND" if has_active_workflow else "NONE"),
+            ),
+            confidence=semantic_intent.confidence,
+            reason_code="SEMANTIC_QUERY_INTENT",
+            evidence=[
+                f"语义解析识别为 {semantic_intent.scope}/{semantic_intent.resource or 'unknown'} 查询"
+            ],
+        )
+
+
     @staticmethod
     def _route_after_deterministic_continuation(state: RootOrchestratorState) -> str:
         if state.get("dispatch_result") is not None:
@@ -824,6 +910,7 @@ class RootOrchestrator:
         turn = RootTurnInput.model_validate(state["turn"])
         context = RootContextSnapshot.model_validate(state["context_snapshot"])
         has_active_workflow = context.active_workflow is not None
+        semantic_intent: CRMQuerySemanticIntent | None = None
         if isinstance(turn.input, WorkflowTriggerTurnInput):
             decision = RootDecision(
                 task_relation="SWITCH_TASK" if has_active_workflow else "NEW_TASK",
@@ -854,15 +941,40 @@ class RootOrchestrator:
             and has_explicit_independent_read_intent(turn.input.text)
             and not has_explicit_write_intent(turn.input.text)
         ):
-            decision = self._explicit_read_decision(
-                has_active_workflow=has_active_workflow,
-            )
-        else:
-            decision = await self._decision_classifier.classify(
+            semantic_intent = await self._try_resolve_semantic_query_intent(
                 turn=turn,
                 context=context,
                 runtime=runtime.context,
             )
+            decision = (
+                self._semantic_query_decision(
+                    has_active_workflow=has_active_workflow,
+                    has_selected_entity=turn.selected_entity_ref is not None,
+                    semantic_intent=semantic_intent,
+                )
+                if semantic_intent is not None
+                else self._explicit_read_decision(
+                    has_active_workflow=has_active_workflow,
+                )
+            )
+        else:
+            semantic_intent = await self._try_resolve_semantic_query_intent(
+                turn=turn,
+                context=context,
+                runtime=runtime.context,
+            )
+            if semantic_intent is not None:
+                decision = self._semantic_query_decision(
+                    has_active_workflow=has_active_workflow,
+                    has_selected_entity=turn.selected_entity_ref is not None,
+                    semantic_intent=semantic_intent,
+                )
+            else:
+                decision = await self._decision_classifier.classify(
+                    turn=turn,
+                    context=context,
+                    runtime=runtime.context,
+                )
             # Pending Case identity is a server-owned binding.  A model may
             # classify ordinary text, but it cannot promote its own
             # ``pending_case_reference`` into a resumable resource.  Only the
@@ -872,7 +984,14 @@ class RootOrchestrator:
                     decision,
                     "PENDING_CASE_REFERENCE_UNVERIFIED",
                 )
-        return {"decision": decision.model_dump(mode="json")}
+        return {
+            "decision": decision.model_dump(mode="json"),
+            "semantic_intent": (
+                semantic_intent.model_dump(mode="json")
+                if semantic_intent is not None
+                else None
+            ),
+        }
 
     @staticmethod
     def _workflow_failure(
@@ -988,6 +1107,11 @@ class RootOrchestrator:
                         context.previous_query if decision.context_policy.previous_query == "USE" else None
                     ),
                     result_set=result_set,
+                    semantic_intent=(
+                        CRMQuerySemanticIntent.model_validate(state["semantic_intent"])
+                        if state.get("semantic_intent") is not None
+                        else None
+                    ),
                 ).model_dump(mode="json"),
             }
         if isinstance(turn.input, TextTurnInput):
@@ -1055,6 +1179,17 @@ class RootOrchestrator:
                     error=AgentExecutionError(
                         code="QUERY_IDENTITY_UNAVAILABLE",
                         message="客户识别服务暂时不可用, 请稍后重试。",
+                        retryable=True,
+                    ),
+                ).model_dump(mode="json")
+            }
+        except QuerySemanticResolutionUnavailableError:
+            return {
+                "dispatch_result": FailureDispatchResult(
+                    decision=decision,
+                    error=AgentExecutionError(
+                        code="QUERY_SEMANTIC_INTENT_UNAVAILABLE",
+                        message="查询语义解析服务暂时不可用, 请稍后重试。",
                         retryable=True,
                     ),
                 ).model_dump(mode="json")

@@ -11,6 +11,7 @@ from pydantic import TypeAdapter, ValidationError
 from app.schemas.common import PaginatedResponse
 from app.schemas.customer import ContactResponse, CustomerDetailResponse, CustomerListResponse
 from app.schemas.customer_activity import CustomerActivityResponse
+from app.schemas.deployment import DeploymentInfoResponse
 from app.schemas.sales_commitment import FollowUpTaskListResponse
 from app.services.agent.query.completed_work_contracts import CompletedWorkQueryResponse
 from app.services.agent.query.cursor import decode_offset_cursor, encode_offset_cursor
@@ -53,6 +54,7 @@ _CUSTOMER_PAGE_ADAPTER = TypeAdapter(PaginatedResponse[CustomerListResponse])
 _CUSTOMER_DETAIL_ADAPTER = TypeAdapter(CustomerDetailResponse)
 _CONTACT_LIST_ADAPTER = TypeAdapter(list[ContactResponse])
 _ACTIVITY_LIST_ADAPTER = TypeAdapter(list[CustomerActivityResponse])
+_DEPLOYMENT_INFO_LIST_ADAPTER = TypeAdapter(list[DeploymentInfoResponse])
 _CUSTOMER_FILTER_FIELD_MAP = {"acquisition_source": "source"}
 _CUSTOMER_PROJECTION_FIELD_MAP = {
     "owner": "owner_info",
@@ -252,6 +254,40 @@ class CustomerActivitiesAPIAdapter:
         next_cursor = encode_offset_cursor(offset + len(rows)) if len(rows) == spec.page_size else None
         warnings = [_truncation_warning("customer_activity", len(rows), None)] if next_cursor else []
         return CRMQueryAdapterPage(rows, [], None, next_cursor, warnings)
+
+
+class DeploymentInfosAPIAdapter:
+    """Map a customer-scoped deployment read to the deployment API."""
+
+    def __init__(self, api_client: InternalCRMAPIClient) -> None:
+        self._api_client = api_client
+
+    async def execute(self, spec: CRMQuerySpec, context: AgentToolContext) -> CRMQueryAdapterPage:
+        customer_id = _exact_string_filter(spec, "customer_id")
+        if customer_id is None:
+            raise ValueError("customer_id is required")
+        payload = await self._api_client.request(
+            "GET",
+            "/v1/deployment-infos/",
+            context.authorization,
+            params={"customer_id": customer_id},
+        )
+        try:
+            deployments = _DEPLOYMENT_INFO_LIST_ADAPTER.validate_python(payload)
+        except ValidationError as exc:
+            raise CRMQueryAdapterResponseError("deployment infos API returned an invalid response") from exc
+        raw_items = [item.model_dump(mode="json") for item in deployments]
+        rows = [_project(item, spec.projection) for item in raw_items]
+        entity_refs = [
+            EntityRef(
+                ref_id=f"eref_deployment_info_{item['id']}",
+                resource="deployment_info",
+                public_id=str(item["id"]),
+                display_name=str(item["deployment_name"]),
+            )
+            for item in raw_items
+        ]
+        return CRMQueryAdapterPage(rows, entity_refs, len(rows), None, [])
 
 
 class FollowUpTasksAPIAdapter:

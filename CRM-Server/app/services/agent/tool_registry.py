@@ -127,7 +127,7 @@ class GetCustomerContextInput(BaseModel):
 
 class ListFollowUpTasksInput(BaseModel):
     status: Literal["open", "completed", "cancelled", "all"] = "open"
-    due_window: Optional[Literal["today", "this_week", "next_week", "overdue"]] = None
+    due_window: Optional[Literal["today", "tomorrow", "this_week", "next_week", "overdue"]] = None
     customer_id: Optional[CustomerIdentifier] = Field(None, description="客户对外ID；兼容历史任务中的数据库ID")
     owner_scope: Literal["mine", "customer"] = "mine"
     query_text: Optional[str] = Field(None, min_length=1, description="可选语义条件，例如预算、试用反馈、合同卡点")

@@ -1,18 +1,22 @@
 """Build reusable customer evidence documents from CRM business events."""
 
+from __future__ import annotations
+
 import json
 from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
+from typing import TYPE_CHECKING
 from uuid import NAMESPACE_URL, uuid5
 
-from app.models.customer import Customer
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_vector_document import CustomerVectorDocumentSourceType
 from app.models.deal_journey import CustomerDealJourneyEvent
 from app.models.sales_commitment import FollowUpTask, SalesCommitment
 from app.services.customer_activity_kinds import get_activity_kind_meta
-from app.services.customer_alias_service import generated_aliases_for_customer_name
+
+if TYPE_CHECKING:
+    from app.models.customer import Customer
 
 JSONPrimitive = str | int | float | bool | None
 JSONValue = JSONPrimitive | list["JSONValue"] | dict[str, "JSONValue"]
@@ -42,47 +46,6 @@ class BuiltCustomerEvidence:
 
 class CustomerEvidenceBuilder:
     metadata_version = 2
-
-    def from_customer_profile(
-        self,
-        customer: Customer,
-        *,
-        industry_display_name: str | None = None,
-    ) -> BuiltCustomerEvidence | None:
-        text = self._customer_profile_text(customer, industry_display_name=industry_display_name)
-        if not text:
-            return None
-        source_object_id = str(customer.id)
-        return self._build_customer_evidence(
-            team_id=int(customer.team_id),
-            customer_id=int(customer.id),
-            source_type=CustomerVectorDocumentSourceType.CUSTOMER_PROFILE,
-            source_object_id=source_object_id,
-            business_object_type="customer_profile",
-            business_object_id=source_object_id,
-            title=f"客户档案: {customer.account_name}"[:255],
-            text=text,
-            occurred_at=customer.profile_generated_time,
-            confidence=0.85,
-        )
-
-    def from_customer_brief(self, customer: Customer) -> BuiltCustomerEvidence | None:
-        text = self._customer_brief_text(customer)
-        if not text:
-            return None
-        source_object_id = str(customer.id)
-        return self._build_customer_evidence(
-            team_id=int(customer.team_id),
-            customer_id=int(customer.id),
-            source_type=CustomerVectorDocumentSourceType.CUSTOMER_BRIEF,
-            source_object_id=source_object_id,
-            business_object_type="customer_brief",
-            business_object_id=source_object_id,
-            title=f"客户概况: {customer.account_name}"[:255],
-            text=text,
-            occurred_at=customer.customer_brief_generated_time,
-            confidence=0.8,
-        )
 
     def from_deal_journey_event(self, event: CustomerDealJourneyEvent) -> BuiltCustomerEvidence | None:
         if event.id is None:
@@ -245,40 +208,6 @@ class CustomerEvidenceBuilder:
         if activity.next_follow_time:
             sections.append(f"下次跟进时间: {activity.next_follow_time.isoformat()}")
 
-        return "\n".join(section for section in sections if section.strip())
-
-    def _customer_profile_text(self, customer: Customer, *, industry_display_name: str | None = None) -> str:
-        sections: list[str] = [f"客户名称: {customer.account_name}"]
-        aliases = [
-            alias for alias in generated_aliases_for_customer_name(str(customer.account_name or ""))
-            if alias != customer.account_name
-        ]
-        if aliases:
-            sections.append(f"常用简称候选: {'、'.join(aliases[:6])}")
-        if industry_display_name:
-            sections.append(f"行业: {industry_display_name}")
-        if customer.city:
-            sections.append(f"城市: {customer.city}")
-        if customer.company_scale:
-            sections.append(f"公司规模: {customer.company_scale}")
-        if customer.company_background:
-            sections.append(f"企业背景: {customer.company_background}")
-        if customer.main_business:
-            sections.append(f"主营业务: {customer.main_business}")
-        if customer.project_background:
-            sections.append(f"项目背景: {customer.project_background}")
-        if customer.similar_customers:
-            sections.append(f"相似客户: {customer.similar_customers}")
-        return "\n".join(section for section in sections if section.strip())
-
-    def _customer_brief_text(self, customer: Customer) -> str:
-        sections: list[str] = [f"客户名称: {customer.account_name}"]
-        if customer.customer_brief_markdown:
-            sections.append(f"客户概况: {customer.customer_brief_markdown}")
-        if customer.customer_brief_json:
-            parsed = self._parse_object(customer.customer_brief_json)
-            if parsed:
-                sections.append(f"结构化概况: {self._structured_content_text(parsed)}")
         return "\n".join(section for section in sections if section.strip())
 
     def _deal_journey_event_text(self, event: CustomerDealJourneyEvent) -> str:

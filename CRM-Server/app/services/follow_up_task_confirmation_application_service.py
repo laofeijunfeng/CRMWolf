@@ -168,6 +168,7 @@ class FollowUpTaskConfirmationApplicationService:
         )
         if commit and (case is not None or application.status == FollowUpTaskConfirmationApplicationStatus.APPLIED):
             db.commit()
+            self._kick_execution_results(application.execution_results)
         return case, decision, application
 
     def apply_resolved_case(
@@ -233,7 +234,10 @@ class FollowUpTaskConfirmationApplicationService:
             action=case.resolved_action,
             execution_results=execution_results,
         )
-        return self._persist_application_result(db, case=case, result=result, actor_id=actor_id, commit=commit)
+        persisted = self._persist_application_result(db, case=case, result=result, actor_id=actor_id, commit=commit)
+        if commit:
+            self._kick_execution_results(persisted.execution_results)
+        return persisted
 
     def _plan_from_case(
         self,
@@ -272,6 +276,20 @@ class FollowUpTaskConfirmationApplicationService:
             plan_source="confirmation_case_reply",
             state_mutation_requested=False,
         )
+
+    def _kick_execution_results(
+        self,
+        execution_results: tuple[FollowUpTaskTransitionExecutionResult, ...],
+    ) -> None:
+        """Kick only events produced by committed task transitions.
+
+        The executor builds the customer-intelligence event inside the task
+        transaction.  Reusing its post-commit hook here prevents confirmation
+        replies from constructing or dispatching a second event.
+        """
+        for result in execution_results:
+            if result.status == FollowUpTaskTransitionExecutionStatus.EXECUTED:
+                self.execution_service.kick_customer_intelligence_refresh(result)
 
     def _skipped(
         self,

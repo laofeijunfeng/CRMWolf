@@ -171,6 +171,10 @@ class _TransitionExecutionService(Protocol):
         commit: bool = True,
     ) -> FollowUpTaskTransitionExecutionResult: ...
 
+    def kick_customer_intelligence_refresh(
+        self, result: FollowUpTaskTransitionExecutionResult
+    ) -> None: ...
+
 
 class _ConfirmationService(Protocol):
     def create_case_from_plan_action(
@@ -603,6 +607,7 @@ class CustomerActivityPostCommitWorkflow:
                     **self._revision_fence_failure(state, node="execute_transition", fence=fence),
                 }
             result_payloads: list[dict[str, Any]] = []
+            execution_results: list[FollowUpTaskTransitionExecutionResult] = []
             for action in plan.actions:
                 task_public_id = str(action.task_public_id or "")
                 task = self._task_by_public_id(db, state["team_id"], action.task_public_id)
@@ -636,6 +641,7 @@ class CustomerActivityPostCommitWorkflow:
                         }
                     )
                     continue
+                execution_results.append(result)
                 result_payloads.append(
                     {
                         **result.to_dict(),
@@ -643,6 +649,24 @@ class CustomerActivityPostCommitWorkflow:
                     }
                 )
             db.commit()
+            kick_customer_intelligence_refresh = getattr(
+                self.execution_service,
+                "kick_customer_intelligence_refresh",
+                None,
+            )
+            if callable(kick_customer_intelligence_refresh):
+                for result in execution_results:
+                    if result.status == "EXECUTED":
+                        try:
+                            kick_customer_intelligence_refresh(result)
+                        except Exception:
+                            # The durable run was committed above. Low-latency
+                            # kicking is best effort and must not turn a
+                            # successful post-commit workflow into a failure.
+                            logger.exception(
+                                "任务状态迁移后的客户智能刷新 kick 失败: task_public_id=%s",
+                                result.task_public_id,
+                            )
             return {
                 "execution_results": result_payloads,
                 "events": [

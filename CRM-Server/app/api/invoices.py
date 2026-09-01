@@ -103,7 +103,7 @@ def _enqueue_invoice_business_object_intelligence_refresh(
 ) -> None:
     if change is None:
         return
-    customer_business_object_intelligence_service.enqueue_change_refresh(db, change)
+    customer_business_object_intelligence_service.enqueue_change_refresh_after_commit(change)
 
 
 def _build_invoice_application_intelligence_change(

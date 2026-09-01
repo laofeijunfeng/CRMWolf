@@ -110,20 +110,20 @@ def test_customer_context_answer_cleaning_preserves_markdown_section_breaks():
     assert "当前情况 ### 1." not in cleaned.answer
 
 
-def test_customer_context_answer_fallback_uses_completed_customer_profile():
+def test_customer_context_answer_fallback_uses_structured_customer_context():
     result = CustomerContextAnswerService.fallback_answer(
         question="汇川技术现在是什么情况",
         customer_context={
             "strong_context": {
                 "customer": {
                     "account_name": "汇川技术",
-                    "profile_status": "COMPLETED",
-                    "company_background": "工业自动化控制与新能源领域的上市公司。",
-                    "main_business": "主营工业自动化、新能源汽车电驱与轨道交通牵引系统。",
-                    "project_background": "正在评估 CRM 用于规范大客户销售过程。",
-                    "customer_brief_markdown": "## 客户概况\n客户重点关注销售过程管理和项目预测。",
+                    "industry_name": "工业自动化",
+                    "city": "深圳",
+                    "company_scale": "1000人以上",
                 },
-                "customer_facts": [],
+                "customer_facts": [
+                    {"content": "客户正在评估 CRM 用于规范大客户销售过程。"},
+                ],
                 "opportunities": [],
                 "contracts": [],
                 "payment_plans": [],
@@ -135,16 +135,14 @@ def test_customer_context_answer_fallback_uses_completed_customer_profile():
         customer_memory={},
     )
 
-    assert "工业自动化控制与新能源领域的上市公司" in result.answer
-    assert "主营工业自动化、新能源汽车电驱与轨道交通牵引系统" in result.answer
-    assert "正在评估 CRM 用于规范大客户销售过程" in result.answer
-    assert "客户重点关注销售过程管理和项目预测" in result.answer
+    assert "工业自动化" in result.answer
+    assert "深圳" in result.answer
+    assert "客户正在评估 CRM 用于规范大客户销售过程" in result.answer
     assert result.confidence > 0.45
-    assert "profile" in result.used_sections
+    assert "facts" in result.used_sections
     assert result.missing_context == []
     assert result.answer_mode == "degraded"
     assert result.citations == []
-
 
 def test_customer_context_answer_low_confidence_uses_fallback_policy():
     result = CustomerContextAnswerService.fallback_answer(
@@ -153,7 +151,6 @@ def test_customer_context_answer_low_confidence_uses_fallback_policy():
             "strong_context": {
                 "customer": {
                     "account_name": "越秀金融",
-                    "customer_brief_markdown": "## 客户概况\n客户正在推进 POC。",
                 },
                 "customer_facts": [],
                 "opportunities": [{"name": "CRM 项目", "stage": "POC"}],
@@ -172,10 +169,10 @@ def test_customer_context_answer_low_confidence_uses_fallback_policy():
         customer_memory={},
     )
 
-    assert result.answer_mode == "fallback"
+    assert result.answer_mode == "insufficient"
     assert result.citations == []
-    assert result.confidence == 0.74
-    assert "可引用的高置信度语义证据" in result.missing_context
+    assert result.confidence == 0.45
+    assert "客户近期跟进、商机、合同或回款资料" in result.missing_context
 
 
 def test_customer_context_answer_metadata_rejects_hallucinated_citations_without_auto_replacement():

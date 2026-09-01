@@ -870,6 +870,26 @@ def test_mark_projection_failed_records_acknowledgement_failure(db_session):
     assert delivery.delivered_at is None
 
 
+def test_prepare_case_prompt_skips_case_when_task_is_closed(db_session):
+    task = _create_task(db_session)
+    case = _create_confirmation_case(db_session, task)
+    task.status = FollowUpTaskStatus.COMPLETED
+    db_session.commit()
+
+    event = FollowUpTaskConfirmationChannelService().prepare_case_prompt_by_public_ids(
+        db_session,
+        team_id=1,
+        user_id=2,
+        case_public_ids=[case.public_id],
+        interaction_scope="crm_agent:1:2:33:closed-task",
+    )
+
+    delivery = db_session.query(FollowUpTaskConfirmationPromptDelivery).one()
+    assert event is None
+    assert delivery.status == FollowUpTaskConfirmationPromptStatus.SKIPPED
+    assert delivery.reason_code == "TASK_NOT_OPEN"
+
+
 def test_prepare_case_prompt_records_owner_mismatch_as_skipped(db_session):
     task = _create_task(db_session, owner_id="9")
     case = _create_confirmation_case(db_session, task)

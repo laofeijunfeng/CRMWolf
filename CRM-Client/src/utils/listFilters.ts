@@ -31,7 +31,7 @@ export function getFilterValues(
 export function getDelimitedFilterValues(
   filters: ListFilterCondition[],
   field: string,
-  operators: ListFilterCondition['op'][] = ['eq', 'contains']
+  operators: ListFilterCondition['op'][] = ['eq', 'contains', 'in']
 ): string | null {
   const values = getFilterValues(filters, field, operators)
   return values.length > 0 ? values.join(',') : null

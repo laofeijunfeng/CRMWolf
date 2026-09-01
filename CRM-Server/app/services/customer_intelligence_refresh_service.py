@@ -1,7 +1,7 @@
 """Customer intelligence refresh entrypoint.
 
 Page buttons, background retries, and future admin jobs should emit a customer
-intelligence event here instead of orchestrating profile and brief services
+intelligence event here instead of orchestrating the projection workflow
 directly. The LangGraph runtime owns the refresh sequence.
 """
 
@@ -14,30 +14,37 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Literal, cast
 from uuid import uuid4
 
-from sqlalchemy import exists, func, or_
+from sqlalchemy import exists, or_
 
 from app.core.config import get_settings
 from app.core.database import SessionLocal
-from app.crud.customer import customer_crud
 from app.crud.team import team_crud
 from app.models.contract import Contract
 from app.models.customer import Contact, Customer
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_intelligence_run import CustomerIntelligenceRun, CustomerIntelligenceRunStatus
+from app.models.customer_profile_projection import (
+    CUSTOMER_PROFILE_READABLE_PUBLICATION_STATUSES,
+    CustomerProfileCurrent,
+    CustomerProfileProjectionVersion,
+)
 from app.models.deployment import DeploymentInfo
 from app.models.invoice import InvoiceApplication, InvoiceTitle
 from app.models.license_application import LicenseApplication
 from app.models.opportunity import Opportunity
-from app.services.agent.durable_work_contracts import AgentAsyncOperationBinding
 from app.services.agent.async_operation_service import (
     AgentAsyncOperationService,
     agent_async_operation_service,
 )
-from app.services.agent.customer_intelligence_graph import (
-    CustomerIntelligenceGraphService,
-    build_customer_intelligence_thread_id,
-    customer_intelligence_graph_service,
+from app.services.agent.customer_profile_projection_graph import (
+    CustomerProfileProjectionInput,
+    build_customer_profile_thread_id,
 )
+from app.services.agent.customer_profile_projection_workflow import (
+    CustomerProfileProjectionWorkflow,
+    CustomerProfileProjectionWorkflowRunner,
+)
+from app.services.agent.durable_work_contracts import AgentAsyncOperationBinding
 from app.services.agent.types import JSONDict, coerce_json_dict
 from app.services.customer_identity_resolution_service import (
     CustomerIdentityResolutionService,
@@ -61,9 +68,10 @@ from app.services.customer_intelligence_run_service import (
     CustomerIntelligenceRunService,
     customer_intelligence_run_service,
 )
-from app.services.customer_vector_document_service import (
-    CustomerVectorDocumentService,
-    customer_vector_document_service,
+from app.services.customer_profile_projection_service import (
+    PROFILE_SCHEMA_VERSION,
+    CustomerProfileProjectionService,
+    customer_profile_projection_service,
 )
 from app.utils.time import business_now
 
@@ -77,7 +85,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-CustomerIntelligenceRefreshScope = Literal["full", "brief"]
+CustomerIntelligenceRefreshScope = Literal["full", "partial"]
+_VALID_REFRESH_SCOPES = frozenset(("full", "partial"))
+
+
+def _validate_refresh_scope(scope: str) -> CustomerIntelligenceRefreshScope:
+    if scope not in _VALID_REFRESH_SCOPES:
+        raise ValueError(f"客户智能刷新范围无效: {scope}")
+    return cast("CustomerIntelligenceRefreshScope", scope)
+
+
 CustomerIntelligenceRefreshTrigger = Literal[
     "manual_refresh_requested",
     "customer_intelligence_batch_rebuild_requested",
@@ -85,7 +102,6 @@ CustomerIntelligenceRefreshTrigger = Literal[
     "customer_created",
     "customer_converted_from_lead",
 ]
-CustomerIntelligenceBusinessObjectChangeType = Literal["created", "updated", "deleted"]
 
 
 @dataclass(frozen=True)
@@ -98,6 +114,9 @@ class CustomerIntelligenceRefreshRequest:
     trigger_type: CustomerIntelligenceRefreshTrigger = "manual_refresh_requested"
     source_lead_id: int | None = None
 
+    def __post_init__(self) -> None:
+        _validate_refresh_scope(self.scope)
+
 
 @dataclass(frozen=True)
 class CustomerIntelligenceCommittedEventRequest:
@@ -109,6 +128,9 @@ class CustomerIntelligenceCommittedEventRequest:
     schedule_error: str | None = None
     operation_public_id: str | None = None
     agent_binding: AgentAsyncOperationBinding | None = None
+
+    def __post_init__(self) -> None:
+        _validate_refresh_scope(self.scope)
 
 
 @dataclass(frozen=True)
@@ -130,8 +152,6 @@ class CustomerIntelligenceHistoricalBackfillResult:
     total: int
     scheduled: int
     customer_ids: list[int]
-    profile_vector_reindexed: int = 0
-    profile_vector_customer_ids: tuple[int, ...] = ()
     identity_terms_reindexed: int = 0
     identity_term_customer_ids: tuple[int, ...] = ()
 
@@ -140,20 +160,20 @@ class CustomerIntelligenceRefreshService:
     def __init__(
         self,
         *,
-        graph_service: CustomerIntelligenceGraphService | None = None,
         event_service: CustomerIntelligenceEventService | None = None,
         run_service: CustomerIntelligenceRunService | None = None,
-        vector_document_service: CustomerVectorDocumentService | None = None,
         identity_resolution_service: CustomerIdentityResolutionService | None = None,
         async_operation_service: AgentAsyncOperationService | None = None,
         operation_projector: CustomerIntelligenceOperationProjector | None = None,
+        profile_projection_service: CustomerProfileProjectionService | None = None,
+        profile_workflow: CustomerProfileProjectionWorkflowRunner | None = None,
     ) -> None:
-        self.graph_service = graph_service or customer_intelligence_graph_service
+        self.profile_workflow = profile_workflow or CustomerProfileProjectionWorkflow()
         self.event_service = event_service or customer_intelligence_event_service
         self.run_service = run_service or customer_intelligence_run_service
-        self.vector_document_service = vector_document_service or customer_vector_document_service
         self.identity_resolution_service = identity_resolution_service or customer_identity_resolution_service
         self.async_operation_service = async_operation_service or agent_async_operation_service
+        self.profile_projection_service = profile_projection_service or customer_profile_projection_service
         self.operation_projector = operation_projector or CustomerIntelligenceOperationProjector(
             run_service=self.run_service,
             operation_service=self.async_operation_service,
@@ -165,9 +185,10 @@ class CustomerIntelligenceRefreshService:
         db: Session,
         *,
         event: CustomerIntelligenceEvent,
-        scope: CustomerIntelligenceRefreshScope = "brief",
+        scope: CustomerIntelligenceRefreshScope = "partial",
         agent_binding: AgentAsyncOperationBinding | None = None,
     ) -> CustomerIntelligenceCommittedEventRequest:
+        _validate_refresh_scope(scope)
         _ = db
         request = CustomerIntelligenceCommittedEventRequest(
             request_id=self._committed_event_request_id(event),
@@ -184,8 +205,24 @@ class CustomerIntelligenceRefreshService:
         self,
         request: CustomerIntelligenceCommittedEventRequest,
     ) -> None:
-        """Best-effort low-latency kick; durable run recovery remains authoritative."""
+        """Best-effort low-latency kick; durable run recovery remains authoritative.
 
+        Unscheduled requests are returned to callers as an explicit signal that
+        durable registration failed. They must not start a graph run without a
+        corresponding persisted run row; reconciliation owns their recovery.
+        """
+
+        if not request.scheduled or not request.kick_required:
+            return
+        # Transition endpoints may run in a synchronous worker thread. Do not
+        # create a coroutine there: it cannot be scheduled and would emit an
+        # un-awaited-coroutine warning. The durable run is still available for
+        # the recovery worker; async callers get the low-latency kick.
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            logger.debug("当前线程没有运行中的事件循环, 延迟由客户智能恢复任务执行")
+            return
         self._start_background_task(self.run_committed_event_refresh(request))
 
     def _start_background_task(self, coroutine: Coroutine[object, object, JSONDict]) -> None:
@@ -215,16 +252,79 @@ class CustomerIntelligenceRefreshService:
         db: Session,
         *,
         event: CustomerIntelligenceEvent,
-        scope: CustomerIntelligenceRefreshScope = "brief",
+        scope: CustomerIntelligenceRefreshScope = "partial",
     ) -> CustomerIntelligenceCommittedEventRequest:
+        """Register one event in the caller's transaction.
+
+        This is the in-transaction half of the scheduler seam.  It deliberately
+        shares the same registration core as the async and post-commit paths so
+        stale marking, pending status, and durable run creation cannot drift
+        between business-object modules.  It does not kick the workflow: the
+        caller owns the source transaction and must kick only after commit.
+        """
+
+        _validate_refresh_scope(scope)
         request = CustomerIntelligenceCommittedEventRequest(
             request_id=self._committed_event_request_id(event),
             event=event,
             scope=scope,
         )
-        self._mark_pending_event(db, request)
-        self._ensure_pending_event_run(db, request)
-        return request
+        return self._register_committed_event(db, request)
+
+    def enqueue_committed_event_refresh_after_commit(
+        self,
+        *,
+        event: CustomerIntelligenceEvent,
+        scope: CustomerIntelligenceRefreshScope = "partial",
+    ) -> CustomerIntelligenceCommittedEventRequest:
+        """Persist a refresh request in a new transaction after the source commit.
+
+        Task/activity transition services may build the intelligence event while
+        their business transaction is still open.  This method is the explicit
+        post-commit seam: it owns a short-lived session, commits the durable run,
+        and leaves the low-latency kick to the caller.  A profile scheduling
+        failure therefore cannot roll back the already-committed business write.
+        """
+
+        request = CustomerIntelligenceCommittedEventRequest(
+            request_id=self._committed_event_request_id(event),
+            event=event,
+            scope=scope,
+        )
+        db: Session | None = None
+        try:
+            db = SessionLocal()
+            request = self.enqueue_committed_event_refresh(db, event=event, scope=scope)
+            db.commit()
+            return request
+        except Exception as exc:
+            if db is not None:
+                try:
+                    db.rollback()
+                except Exception:
+                    logger.exception(
+                        "回滚客户智能提交后调度事务失败: customer_id=%s, request_id=%s",
+                        event.customer_id,
+                        request.request_id,
+                    )
+            logger.exception(
+                "客户智能提交后调度失败，已隔离为非阻塞事件: "  # noqa: RUF001
+                "team_id=%s, customer_id=%s, trigger_type=%s, scope=%s, request_id=%s",
+                event.team_id,
+                event.customer_id,
+                event.trigger_type,
+                scope,
+                request.request_id,
+            )
+            return replace(
+                request,
+                scheduled=False,
+                kick_required=False,
+                schedule_error=str(exc),
+            )
+        finally:
+            if db is not None:
+                db.close()
 
     def bind_committed_event_to_agent(
         self,
@@ -258,18 +358,17 @@ class CustomerIntelligenceRefreshService:
         ):
             raise ValueError("客户智能持久运行身份校验失败")
         customer = (
-            db.query(Customer)
-            .filter(Customer.team_id == team_id, Customer.id == event.customer_id)
-            .one_or_none()
+            db.query(Customer).filter(Customer.team_id == team_id, Customer.id == event.customer_id).one_or_none()
         )
         if customer is None:
             raise ValueError("客户智能运行关联客户不存在")
         scope = cast("CustomerIntelligenceRefreshScope", str(run.scope))
-        if scope not in {"full", "brief"}:
+        if scope not in {"full", "partial"}:
             raise ValueError("客户智能持久运行刷新范围无效")
-        graph_thread_id = build_customer_intelligence_thread_id(
+        graph_thread_id = build_customer_profile_thread_id(
             team_id=binding.team_id,
-            event_key=event.event_key,
+            customer_id=int(event.customer_id),
+            run_id=int(run.id),
         )
         operation = self.async_operation_service.bind_source(
             db,
@@ -337,84 +436,6 @@ class CustomerIntelligenceRefreshService:
             )
         return tuple(bound)
 
-    async def trigger_business_object_change_refresh(
-        self,
-        db: Session,
-        *,
-        team_id: int,
-        customer_id: int,
-        actor_id: str | None,
-        source_type: str,
-        source_id: int,
-        change_type: CustomerIntelligenceBusinessObjectChangeType,
-        summary: str,
-        payload: JsonObject | None = None,
-    ) -> CustomerIntelligenceCommittedEventRequest:
-        trigger_type = self._business_object_change_trigger_type(change_type)
-        event = self.event_service.business_object_changed(
-            team_id=team_id,
-            customer_id=customer_id,
-            actor_id=actor_id,
-            trigger_type=trigger_type,
-            source_type=source_type,
-            source_id=source_id,
-            change_id=uuid4().hex,
-            summary=summary,
-            payload=payload,
-            occurred_at=business_now(),
-        )
-        return await self.trigger_committed_event_refresh(
-            db,
-            event=event,
-            scope="brief",
-        )
-
-    def enqueue_business_object_change_refresh(
-        self,
-        db: Session,
-        *,
-        team_id: int,
-        customer_id: int,
-        actor_id: str | None,
-        source_type: str,
-        source_id: int,
-        change_type: CustomerIntelligenceBusinessObjectChangeType,
-        summary: str,
-        payload: JsonObject | None = None,
-    ) -> CustomerIntelligenceCommittedEventRequest:
-        trigger_type = self._business_object_change_trigger_type(change_type)
-        event = self.event_service.business_object_changed(
-            team_id=team_id,
-            customer_id=customer_id,
-            actor_id=actor_id,
-            trigger_type=trigger_type,
-            source_type=source_type,
-            source_id=source_id,
-            change_id=uuid4().hex,
-            summary=summary,
-            payload=payload,
-            occurred_at=business_now(),
-        )
-        return self.enqueue_committed_event_refresh(
-            db,
-            event=event,
-            scope="brief",
-        )
-
-    def _business_object_change_trigger_type(
-        self,
-        change_type: CustomerIntelligenceBusinessObjectChangeType,
-    ) -> Literal[
-        "customer_business_object_created",
-        "customer_business_object_updated",
-        "customer_business_object_deleted",
-    ]:
-        if change_type == "created":
-            return "customer_business_object_created"
-        if change_type == "updated":
-            return "customer_business_object_updated"
-        return "customer_business_object_deleted"
-
     async def trigger_manual_refresh(
         self,
         db: Session,
@@ -424,6 +445,7 @@ class CustomerIntelligenceRefreshService:
         actor_id: str | None,
         scope: CustomerIntelligenceRefreshScope,
     ) -> CustomerIntelligenceRefreshRequest:
+        _validate_refresh_scope(scope)
         request = CustomerIntelligenceRefreshRequest(
             team_id=team_id,
             customer_id=customer_id,
@@ -432,8 +454,8 @@ class CustomerIntelligenceRefreshService:
             request_id=f"manual-refresh-{uuid4().hex}",
             trigger_type="manual_refresh_requested",
         )
-        self._mark_pending(db, request)
         self._ensure_pending_run(db, request)
+        self._mark_profile_stale(db, self._build_event(request))
         self._commit_pending_schedule(db, request)
         self._start_background_task(self.run_refresh(request))
         return request
@@ -464,8 +486,8 @@ class CustomerIntelligenceRefreshService:
             team_id=team_id,
             customer_id=customer_id,
         )
-        self._mark_pending(db, request)
         self._ensure_pending_run(db, request)
+        self._mark_profile_stale(db, self._build_event(request))
         self._commit_pending_schedule(db, request)
         self._start_background_task(self.run_refresh(request))
         return request
@@ -480,6 +502,7 @@ class CustomerIntelligenceRefreshService:
         customer_ids: list[int] | None = None,
         limit: int = 100,
     ) -> CustomerIntelligenceBatchRebuildResult:
+        _validate_refresh_scope(scope)
         target_customer_ids = self._select_batch_customer_ids(
             db,
             team_id=team_id,
@@ -496,8 +519,8 @@ class CustomerIntelligenceRefreshService:
                 request_id=request_id,
                 trigger_type="customer_intelligence_batch_rebuild_requested",
             )
-            self._mark_pending(db, request)
             self._ensure_pending_run(db, request)
+            self._mark_profile_stale(db, self._build_event(request))
         self._commit_pending_schedule(db, request_id=request_id)
         for customer_id in target_customer_ids:
             request = CustomerIntelligenceRefreshRequest(
@@ -528,12 +551,6 @@ class CustomerIntelligenceRefreshService:
         schedule_runs: bool = True,
     ) -> CustomerIntelligenceHistoricalBackfillResult:
         self.recover_stale_runtime_state(db, team_id=team_id)
-        profile_vector_customer_ids = self.vector_document_service.rebuild_stale_customer_profiles(
-            db,
-            team_id=team_id,
-            limit=limit,
-            commit=False,
-        )
         identity_term_customer_ids = self.identity_resolution_service.rebuild_team_identity_terms(
             db,
             team_id=team_id,
@@ -559,8 +576,8 @@ class CustomerIntelligenceRefreshService:
                 trigger_type="customer_intelligence_historical_backfill_requested",
             )
             requests.append(request)
-            self._mark_pending(db, request)
             self._ensure_pending_run(db, request)
+            self._mark_profile_stale(db, self._build_event(request))
         if schedule_runs:
             for request in requests:
                 self._start_background_task(self.run_refresh(request))
@@ -571,13 +588,12 @@ class CustomerIntelligenceRefreshService:
             total=len(requests),
             scheduled=len(requests),
             customer_ids=[request.customer_id for request in requests],
-            profile_vector_reindexed=len(profile_vector_customer_ids),
-            profile_vector_customer_ids=tuple(profile_vector_customer_ids),
             identity_terms_reindexed=len(identity_term_customer_ids),
             identity_term_customer_ids=tuple(identity_term_customer_ids),
         )
 
     async def run_refresh(self, request: CustomerIntelligenceRefreshRequest) -> JSONDict:
+        _validate_refresh_scope(request.scope)
         event = self._build_event(request)
         return await self._run_event_refresh(
             request_id=request.request_id,
@@ -586,6 +602,7 @@ class CustomerIntelligenceRefreshService:
         )
 
     async def run_committed_event_refresh(self, request: CustomerIntelligenceCommittedEventRequest) -> JSONDict:
+        _validate_refresh_scope(request.scope)
         return await self._run_event_refresh(
             request_id=request.request_id,
             event=request.event,
@@ -603,6 +620,7 @@ class CustomerIntelligenceRefreshService:
         agent_binding: AgentAsyncOperationBinding | None = None,
         operation_public_id: str | None = None,
     ) -> JSONDict:
+        _validate_refresh_scope(scope)
         settings = get_settings()
         run_input = CustomerIntelligenceRunInput(
             request_id=request_id,
@@ -662,22 +680,19 @@ class CustomerIntelligenceRefreshService:
             if graph_owner is not None:
                 graph_user_id, graph_session_id = graph_owner
             else:
-                graph_user_id = (
-                    int(operation.user_id)
-                    if operation is not None
-                    else _actor_user_id(event.actor_id)
-                )
+                graph_user_id = int(operation.user_id) if operation is not None else _actor_user_id(event.actor_id)
                 graph_session_id = int(operation.session_id or 0) if operation is not None else 0
-            graph_input: JSONDict = {
+            graph_input: CustomerProfileProjectionInput = {
                 "team_id": event.team_id,
                 "user_id": graph_user_id,
                 "session_id": graph_session_id,
                 "event": event,
+                "run_id": int(claim.run.id),
             }
             if int(claim.run.attempt_count or 0) > 1:
                 graph_input["resume_existing_execution"] = True
             result: JSONDict = {}
-            async for chunk in self.graph_service.stream_events(graph_input):
+            async for chunk in self.profile_workflow.stream_events(graph_input):
                 if chunk.get("kind") == "event":
                     self._record_operation_progress(
                         run_input=run_input,
@@ -688,6 +703,11 @@ class CustomerIntelligenceRefreshService:
                 elif chunk.get("kind") == "result":
                     result = cast("JSONDict", chunk.get("result") or {})
 
+            # A workflow result is a protocol message, not merely a stream
+            # completion signal.  A graph can return a structured publication
+            # failure without raising (for example after a handled contract
+            # rejection); never record that run as SUCCESS.
+            self._assert_workflow_result_publishable(result)
             mutation = self._mark_run_succeeded(
                 run_input,
                 lease_token=lease_token,
@@ -737,7 +757,7 @@ class CustomerIntelligenceRefreshService:
                     run=mutation.run,
                     operation_public_id=operation_public_id,
                 )
-                self._project_customer_failure(event=event, scope=scope, run=mutation.run)
+                self._project_customer_failure(event=event, run=mutation.run)
             return {
                 "success": False,
                 "request_id": request_id,
@@ -745,6 +765,27 @@ class CustomerIntelligenceRefreshService:
                 "superseded": mutation.status == CustomerIntelligenceRunLeaseMutationStatus.STALE_LEASE,
                 "run_status": str(mutation.run.status),
             }
+
+    @staticmethod
+    def _assert_workflow_result_publishable(result: JSONDict) -> None:
+        """Enforce the workflow-to-runner terminal result contract.
+
+        The dedicated profile workflow normally raises on a hard publication
+        failure, but it may also return a structured failure.  The durable run
+        service must not infer success from reaching the end of a stream.
+        """
+
+        if "profile_projection_result" not in result:
+            raise ValueError("客户档案工作流结果缺少 profile_projection_result")
+        profile_result = coerce_json_dict(result.get("profile_projection_result"))
+        if profile_result.get("success") is True:
+            return
+        error = str(
+            profile_result.get("error")
+            or profile_result.get("error_code")
+            or "客户档案工作流未发布可读版本"
+        )
+        raise RuntimeError(f"客户档案工作流发布失败: {error}")
 
     @staticmethod
     def _claim_response(
@@ -793,6 +834,13 @@ class CustomerIntelligenceRefreshService:
                 run_input,
                 lease_seconds=lease_seconds,
             )
+            if claim.status == CustomerIntelligenceRunClaimStatus.CLAIMED:
+                self._mark_profile_updating(
+                    db,
+                    team_id=run_input.event.team_id,
+                    customer_id=run_input.event.customer_id,
+                    run_id=int(claim.run.id),
+                )
             db.commit()
             self._detach(db, claim.run)
             return claim
@@ -801,6 +849,34 @@ class CustomerIntelligenceRefreshService:
             raise
         finally:
             db.close()
+
+    def _mark_profile_stale(self, db: Session, event: CustomerIntelligenceEvent) -> None:
+        self.profile_projection_service.mark_stale(
+            db,
+            team_id=event.team_id,
+            customer_id=event.customer_id,
+            source_watermark={
+                "event_key": event.event_key,
+                "trigger_type": event.trigger_type,
+                "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
+            },
+            reason="存在尚未纳入档案的业务事件",
+        )
+
+    def _mark_profile_updating(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        customer_id: int,
+        run_id: int,
+    ) -> None:
+        self.profile_projection_service.mark_updating(
+            db,
+            team_id=team_id,
+            customer_id=customer_id,
+            run_id=run_id,
+        )
 
     def _mark_run_succeeded(
         self,
@@ -947,29 +1023,37 @@ class CustomerIntelligenceRefreshService:
         self,
         *,
         event: CustomerIntelligenceEvent,
-        scope: CustomerIntelligenceRefreshScope,
         run: CustomerIntelligenceRun,
     ) -> None:
         db = SessionLocal()
         try:
             status = str(run.status)
             if status == CustomerIntelligenceRunStatus.RETRY_PENDING:
-                projected_status = "PENDING"
-                error_message = None
-            else:
-                projected_status = "FAILED"
-                error_message = str(run.error_message or "客户智能档案刷新失败")
-            if scope == "full":
-                customer_crud.update_profile_status(
-                    db, event.customer_id, projected_status, error_message, commit=False
+                self.profile_projection_service.mark_stale(
+                    db,
+                    team_id=event.team_id,
+                    customer_id=event.customer_id,
+                    source_watermark={
+                        "event_key": event.event_key,
+                        "trigger_type": event.trigger_type,
+                        "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
+                    },
+                    reason="本次刷新失败，等待自动重试",  # noqa: RUF001
+                    run_id=int(run.id),
                 )
-            customer_crud.update_customer_brief_status(
-                db, event.customer_id, projected_status, error_message, commit=False
-            )
+            else:
+                self.profile_projection_service.mark_failed(
+                    db,
+                    team_id=event.team_id,
+                    customer_id=event.customer_id,
+                    run_id=int(run.id),
+                    reason=str(run.error_message or "客户智能档案刷新失败"),
+                )
             db.commit()
         except Exception:
             db.rollback()
-            logger.exception("投影客户智能客户状态失败: request_id=%s", run.request_id)
+            logger.exception("写入客户档案投影失败状态失败: request_id=%s", run.request_id)
+            raise
         finally:
             db.close()
 
@@ -981,17 +1065,23 @@ class CustomerIntelligenceRefreshService:
         except Exception:
             return
 
-    async def run_manual_refresh(self, request: CustomerIntelligenceRefreshRequest) -> JSONDict:
-        return await self.run_refresh(request)
-
     async def run_due_retries(self, *, team_id: int | None = None, limit: int = 20) -> JSONDict:
         db = SessionLocal()
         try:
             recovered = self.recover_stale_runtime_state(db, team_id=team_id)
-            db.commit()
             retry_requests = []
             for run in self.run_service.list_due(db, team_id=team_id, limit=limit):
-                retry_request = self._request_from_run(run)
+                try:
+                    retry_request = self._request_from_run(run)
+                except ValueError as exc:
+                    mutation = self.run_service.mark_unrunnable(
+                        db,
+                        team_id=int(run.team_id),
+                        run_id=int(run.id),
+                        error_message=str(exc),
+                    )
+                    self.operation_projector.project_run(db, run=mutation.run)
+                    continue
                 if isinstance(retry_request, CustomerIntelligenceCommittedEventRequest):
                     try:
                         operation = self.async_operation_service.get_by_request_id(
@@ -1022,6 +1112,7 @@ class CustomerIntelligenceRefreshService:
                             ),
                         )
                 retry_requests.append(retry_request)
+            db.commit()
         finally:
             db.close()
 
@@ -1083,51 +1174,43 @@ class CustomerIntelligenceRefreshService:
             team_id=team_id,
             limit=200,
         )
-        expired_running_runs = [
-            run
-            for run in due_runs
-            if str(run.status) == CustomerIntelligenceRunStatus.RUNNING
-        ]
+        expired_running_runs = [run for run in due_runs if str(run.status) == CustomerIntelligenceRunStatus.RUNNING]
         for run in due_runs:
             self.operation_projector.project_run(db, run=run)
 
-        retryable_customer_ids = self._customer_ids_with_runs(
-            db,
-            statuses=[
-                CustomerIntelligenceRunStatus.PENDING,
-                CustomerIntelligenceRunStatus.RETRY_PENDING,
-            ],
-            team_id=team_id,
-        ) | {int(run.customer_id) for run in expired_running_runs}
-        active_customer_ids = self._customer_ids_with_runs(
-            db,
-            statuses=[
-                CustomerIntelligenceRunStatus.PENDING,
-                CustomerIntelligenceRunStatus.RUNNING,
-                CustomerIntelligenceRunStatus.RETRY_PENDING,
-            ],
-            team_id=team_id,
+        latest_runs = (
+            db.query(CustomerIntelligenceRun)
+            .filter(
+                CustomerIntelligenceRun.team_id == team_id,
+                CustomerIntelligenceRun.status.in_(
+                    [
+                        CustomerIntelligenceRunStatus.PENDING,
+                        CustomerIntelligenceRunStatus.RUNNING,
+                        CustomerIntelligenceRunStatus.RETRY_PENDING,
+                        CustomerIntelligenceRunStatus.FAILED,
+                    ]
+                ),
+            )
+            .order_by(CustomerIntelligenceRun.id.desc())
+            .all()
         )
-        failed_customer_ids = self._customer_ids_with_runs(
-            db,
-            statuses=[CustomerIntelligenceRunStatus.FAILED],
-            team_id=team_id,
-        ) - active_customer_ids
+        latest_by_customer: dict[int, CustomerIntelligenceRun] = {}
+        for run in latest_runs:
+            latest_by_customer.setdefault(int(run.customer_id), run)
 
-        pending_updates = self._reset_generating_customers(
-            db,
-            customer_ids=retryable_customer_ids,
-            team_id=team_id,
-            status="PENDING",
-            error_message=None,
-        )
-        failed_updates = self._reset_generating_customers(
-            db,
-            customer_ids=failed_customer_ids,
-            team_id=team_id,
-            status="FAILED",
-            error_message="客户智能档案刷新失败，等待下一次业务触发或重建。",  # noqa: RUF001
-        )
+        pending_updates = 0
+        failed_updates = 0
+        for run in latest_by_customer.values():
+            changed = self._reconcile_profile_projection_for_run(db, run)
+            if not changed:
+                continue
+            if str(run.status) in {
+                CustomerIntelligenceRunStatus.PENDING,
+                CustomerIntelligenceRunStatus.RETRY_PENDING,
+            }:
+                pending_updates += 1
+            elif str(run.status) == CustomerIntelligenceRunStatus.FAILED:
+                failed_updates += 1
         return {
             "obsolete_historical_runs": obsolete_historical_runs,
             "reconciled_operations": reconciliation.projected,
@@ -1143,10 +1226,10 @@ class CustomerIntelligenceRefreshService:
         team_id: int | None,
         finished_at: datetime,
     ) -> int:
-        """Close historical backfill runs already satisfied by a customer brief.
+        """Close historical backfill runs already satisfied by a published projection.
 
         Historical backfill is a gap-filling runtime. If a newer run or manual
-        refresh has already written a non-empty customer brief, old backfill
+        refresh has already published a readable projection, old backfill
         runs must stop owning retry/runtime decisions for that customer.
         """
         active_statuses = [
@@ -1164,8 +1247,7 @@ class CustomerIntelligenceRefreshService:
             .filter(
                 CustomerIntelligenceRun.trigger_type == "customer_intelligence_historical_backfill_requested",
                 CustomerIntelligenceRun.status.in_(active_statuses),
-                Customer.customer_brief_markdown.isnot(None),
-                func.length(func.trim(Customer.customer_brief_markdown)) > 0,
+                self._has_published_v2_profile_filter(),
             )
         )
         if team_id is not None:
@@ -1173,11 +1255,7 @@ class CustomerIntelligenceRefreshService:
 
         closed = 0
         for run in (
-            query.order_by(CustomerIntelligenceRun.id.asc())
-            .limit(500)
-            .populate_existing()
-            .with_for_update()
-            .all()
+            query.order_by(CustomerIntelligenceRun.id.asc()).limit(500).populate_existing().with_for_update().all()
         ):
             run.status = CustomerIntelligenceRunStatus.CANCELLED
             run.finished_time = finished_at
@@ -1188,7 +1266,7 @@ class CustomerIntelligenceRefreshService:
             run.route = run.route or "historical_backfill_satisfied"
             run.result_json = {
                 "route": "historical_backfill_satisfied",
-                "reason": "customer_brief_already_available",
+                "reason": "customer_profile_projection_already_available",
             }
             operation = self.async_operation_service.get_by_request_id(
                 db,
@@ -1202,7 +1280,7 @@ class CustomerIntelligenceRefreshService:
                     summary="客户档案已由更新的数据生成，本次历史补齐任务已取消",  # noqa: RUF001
                     result={
                         "route": "historical_backfill_satisfied",
-                        "reason": "customer_brief_already_available",
+                        "reason": "customer_profile_projection_already_available",
                     },
                 )
             closed += 1
@@ -1210,51 +1288,56 @@ class CustomerIntelligenceRefreshService:
             db.flush()
         return closed
 
-    def _customer_ids_with_runs(
+    def _reconcile_profile_projection_for_run(
         self,
         db: Session,
-        *,
-        statuses: list[str],
-        team_id: int | None,
-    ) -> set[int]:
-        query = db.query(CustomerIntelligenceRun.customer_id).filter(
-            CustomerIntelligenceRun.status.in_(statuses),
+        run: CustomerIntelligenceRun,
+    ) -> bool:
+        current = self.profile_projection_service.ensure_current(
+            db,
+            team_id=int(run.team_id),
+            customer_id=int(run.customer_id),
         )
-        if team_id is not None:
-            query = query.filter(CustomerIntelligenceRun.team_id == team_id)
-        return {int(row[0]) for row in query.all()}
-
-    def _reset_generating_customers(
-        self,
-        db: Session,
-        *,
-        customer_ids: set[int],
-        team_id: int | None,
-        status: str,
-        error_message: str | None,
-    ) -> int:
-        if not customer_ids:
-            return 0
-        query = db.query(Customer).filter(Customer.id.in_(sorted(customer_ids)))
-        if team_id is not None:
-            query = query.filter(Customer.team_id == team_id)
-        customers = query.all()
-        updated = 0
-        for customer in customers:
-            touched = False
-            if customer.profile_status == "GENERATING":
-                customer.profile_status = status
-                customer.profile_error_message = error_message
-                touched = True
-            if customer.customer_brief_status == "GENERATING":
-                customer.customer_brief_status = status
-                customer.customer_brief_error_message = error_message
-                touched = True
-            if touched:
-                customer.version = int(customer.version or 0) + 1
-                updated += 1
-        db.flush()
-        return updated
+        before = (str(current.profile_status), current.active_run_id)
+        status = str(run.status)
+        if status == CustomerIntelligenceRunStatus.RUNNING:
+            self.profile_projection_service.mark_updating(
+                db,
+                team_id=int(run.team_id),
+                customer_id=int(run.customer_id),
+                run_id=int(run.id),
+            )
+        elif status in {
+            CustomerIntelligenceRunStatus.PENDING,
+            CustomerIntelligenceRunStatus.RETRY_PENDING,
+        }:
+            self.profile_projection_service.mark_stale(
+                db,
+                team_id=int(run.team_id),
+                customer_id=int(run.customer_id),
+                source_watermark={
+                    "event_key": str(run.event_key),
+                    "trigger_type": str(run.trigger_type),
+                },
+                reason=(
+                    "存在尚未纳入档案的业务事件"
+                    if status == CustomerIntelligenceRunStatus.PENDING
+                    else "本次刷新失败，等待自动重试"  # noqa: RUF001
+                ),
+                run_id=int(run.id),
+            )
+        elif status == CustomerIntelligenceRunStatus.FAILED:
+            self.profile_projection_service.mark_failed(
+                db,
+                team_id=int(run.team_id),
+                customer_id=int(run.customer_id),
+                run_id=int(run.id),
+                reason=str(run.error_message or "客户智能档案刷新失败"),
+            )
+        else:
+            return False
+        after = (str(current.profile_status), current.active_run_id)
+        return before != after
 
     def _build_event(self, request: CustomerIntelligenceRefreshRequest) -> CustomerIntelligenceEvent:
         occurred_at = business_now()
@@ -1293,16 +1376,6 @@ class CustomerIntelligenceRefreshService:
             source_lead_id=request.source_lead_id,
             occurred_at=occurred_at,
         )
-
-    def _mark_pending(self, db: Session, request: CustomerIntelligenceRefreshRequest) -> None:
-        if request.scope == "full":
-            customer_crud.update_profile_status(db, request.customer_id, "PENDING", commit=False)
-        customer_crud.update_customer_brief_status(db, request.customer_id, "PENDING", commit=False)
-
-    def _mark_pending_event(self, db: Session, request: CustomerIntelligenceCommittedEventRequest) -> None:
-        if request.scope == "full":
-            customer_crud.update_profile_status(db, request.event.customer_id, "PENDING", commit=False)
-        customer_crud.update_customer_brief_status(db, request.event.customer_id, "PENDING", commit=False)
 
     def _ensure_pending_run(self, db: Session, request: CustomerIntelligenceRefreshRequest) -> None:
         event = self._build_event(request)
@@ -1357,65 +1430,37 @@ class CustomerIntelligenceRefreshService:
                 logger.exception("客户智能批量刷新调度提交失败: request_id=%s", request_id)
             raise
 
+    def _register_committed_event(
+        self,
+        db: Session,
+        request: CustomerIntelligenceCommittedEventRequest,
+    ) -> CustomerIntelligenceCommittedEventRequest:
+        """Apply the durable event-registration invariants in one transaction.
+
+        The scheduler is the sole owner of the transition from a committed
+        business event to a stale customer profile and a pending intelligence
+        run.  Callers choose only *when* this transaction is allowed to commit;
+        they do not reimplement these steps.
+        """
+
+        self._ensure_pending_event_run(db, request)
+        self._mark_profile_stale(db, request.event)
+        return request
+
     def _schedule_committed_event_run(
         self,
         request: CustomerIntelligenceCommittedEventRequest,
     ) -> CustomerIntelligenceCommittedEventRequest:
         db = SessionLocal()
         try:
-            self._mark_pending_event(db, request)
-            self._ensure_pending_event_run(db, request)
-            scheduled_request = request
+            scheduled_request = self._register_committed_event(db, request)
             binding = request.agent_binding
             if binding is not None:
-                customer_public_id = (
-                    db.query(Customer.public_id)
-                    .filter(
-                        Customer.team_id == request.event.team_id,
-                        Customer.id == request.event.customer_id,
-                    )
-                    .scalar()
-                )
-                graph_thread_id = build_customer_intelligence_thread_id(
-                    team_id=binding.team_id,
-                    event_key=request.event.event_key,
-                )
-                operation = self.async_operation_service.bind_source(
-                    db,
-                    operation_key=f"customer-intelligence:{request.request_id}",
-                    request_id=request.request_id,
-                    team_id=binding.team_id,
-                    user_id=binding.user_id,
-                    session_id=binding.session_id,
-                    source_user_message_id=binding.source_user_message_id,
-                    source_assistant_message_id=binding.source_assistant_message_id,
-                    operation_type="customer_intelligence_refresh",
-                    resource_type="customer",
-                    resource_id=request.event.customer_id,
-                    resource_public_id=str(customer_public_id) if customer_public_id else None,
-                    summary="客户档案后台更新",
-                    graph_thread_id=graph_thread_id,
-                )
-                run = self.run_service.get_by_request_id(
+                scheduled_request = self.bind_committed_event_to_agent(
                     db,
                     team_id=request.event.team_id,
                     request_id=request.request_id,
-                )
-                if run is None:
-                    raise RuntimeError("客户智能持久运行调度后不可见")
-                projected_operation = self.operation_projector.project_run(
-                    db,
-                    run=run,
-                    operation_public_id=str(operation.public_id),
-                )
-                if projected_operation is None:
-                    raise RuntimeError("客户智能异步操作调度后投影不可见")
-                operation = projected_operation
-                scheduled_request = replace(
-                    request,
-                    scheduled=True,
-                    kick_required=self._run_can_be_kicked(run),
-                    operation_public_id=str(operation.public_id),
+                    binding=binding,
                 )
             db.commit()
             return scheduled_request
@@ -1468,18 +1513,19 @@ class CustomerIntelligenceRefreshService:
             return committed_event
         event_json = run.event_json if isinstance(run.event_json, dict) else {}
         payload = event_json.get("payload") if isinstance(event_json.get("payload"), dict) else {}
-        trigger_type = cast("CustomerIntelligenceRefreshTrigger", str(run.trigger_type))
-        if trigger_type not in {
+        raw_trigger_type = str(run.trigger_type)
+        if raw_trigger_type not in {
             "manual_refresh_requested",
             "customer_intelligence_batch_rebuild_requested",
             "customer_intelligence_historical_backfill_requested",
             "customer_created",
             "customer_converted_from_lead",
         }:
-            trigger_type = "manual_refresh_requested"
+            raise ValueError(f"持久化客户智能运行触发类型无效: {raw_trigger_type}")
+        trigger_type = cast("CustomerIntelligenceRefreshTrigger", raw_trigger_type)
         scope = cast("CustomerIntelligenceRefreshScope", str(run.scope))
-        if scope not in {"full", "brief"}:
-            scope = "full"
+        if scope not in {"full", "partial"}:
+            raise ValueError(f"持久化客户智能运行刷新范围无效: {run.scope}")
         return CustomerIntelligenceRefreshRequest(
             team_id=int(run.team_id),
             customer_id=int(run.customer_id),
@@ -1505,45 +1551,15 @@ class CustomerIntelligenceRefreshService:
         event_json = run.event_json if isinstance(run.event_json, dict) else {}
         event = self.event_service.from_dict(cast("JsonObject", event_json))
         if event is None:
-            return None
+            raise ValueError("持久化客户智能业务事件快照无效")
         scope = cast("CustomerIntelligenceRefreshScope", str(run.scope))
-        if scope not in {"full", "brief"}:
-            scope = "brief"
+        if scope not in {"full", "partial"}:
+            raise ValueError(f"持久化客户智能运行刷新范围无效: {run.scope}")
         return CustomerIntelligenceCommittedEventRequest(
             request_id=str(run.request_id),
             event=event,
             scope=scope,
         )
-
-    def _mark_failed(self, request: CustomerIntelligenceRefreshRequest, error_message: str) -> None:
-        self._mark_failed_event(
-            event=self._build_event(request),
-            scope=request.scope,
-            request_id=request.request_id,
-            error_message=error_message,
-        )
-
-    def _mark_failed_event(
-        self,
-        *,
-        event: CustomerIntelligenceEvent,
-        scope: CustomerIntelligenceRefreshScope,
-        request_id: str,
-        error_message: str,
-    ) -> None:
-        db = SessionLocal()
-        try:
-            if scope == "full":
-                customer_crud.update_profile_status(db, event.customer_id, "FAILED", error_message)
-            customer_crud.update_customer_brief_status(db, event.customer_id, "FAILED", error_message)
-        except Exception:
-            logger.exception(
-                "标记客户智能手动刷新失败状态失败: customer_id=%s, request_id=%s",
-                event.customer_id,
-                request_id,
-            )
-        finally:
-            db.close()
 
     def _select_batch_customer_ids(
         self,
@@ -1569,7 +1585,7 @@ class CustomerIntelligenceRefreshService:
         limit: int,
     ) -> list[int]:
         query = db.query(Customer.id).filter(
-            self._missing_customer_intelligence_brief_filter(),
+            self._missing_customer_profile_v2_filter(),
             self._has_customer_business_data_filter(),
             ~self._has_active_customer_intelligence_run_filter(),
         )
@@ -1594,10 +1610,26 @@ class CustomerIntelligenceRefreshService:
             return None
         return int(row[0])
 
-    def _missing_customer_intelligence_brief_filter(self) -> ColumnElement[bool]:
-        return or_(
-            Customer.customer_brief_markdown.is_(None),
-            func.length(func.trim(Customer.customer_brief_markdown)) == 0,
+    def _has_published_v2_profile_filter(self) -> ColumnElement[bool]:
+        return exists().where(
+            CustomerProfileCurrent.team_id == CustomerIntelligenceRun.team_id,
+            CustomerProfileCurrent.customer_id == CustomerIntelligenceRun.customer_id,
+            CustomerProfileCurrent.current_profile_version_id == CustomerProfileProjectionVersion.id,
+            CustomerProfileProjectionVersion.team_id == CustomerIntelligenceRun.team_id,
+            CustomerProfileProjectionVersion.customer_id == CustomerIntelligenceRun.customer_id,
+            CustomerProfileProjectionVersion.schema_version == PROFILE_SCHEMA_VERSION,
+            CustomerProfileProjectionVersion.publication_status.in_(CUSTOMER_PROFILE_READABLE_PUBLICATION_STATUSES),
+        )
+
+    def _missing_customer_profile_v2_filter(self) -> ColumnElement[bool]:
+        return ~exists().where(
+            CustomerProfileCurrent.team_id == Customer.team_id,
+            CustomerProfileCurrent.customer_id == Customer.id,
+            CustomerProfileCurrent.current_profile_version_id == CustomerProfileProjectionVersion.id,
+            CustomerProfileProjectionVersion.team_id == Customer.team_id,
+            CustomerProfileProjectionVersion.customer_id == Customer.id,
+            CustomerProfileProjectionVersion.schema_version == PROFILE_SCHEMA_VERSION,
+            CustomerProfileProjectionVersion.publication_status.in_(CUSTOMER_PROFILE_READABLE_PUBLICATION_STATUSES),
         )
 
     def _has_active_customer_intelligence_run_filter(self) -> ColumnElement[bool]:

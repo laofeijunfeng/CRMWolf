@@ -133,7 +133,7 @@ def _intelligence_request() -> CustomerIntelligenceCommittedEventRequest:
     return CustomerIntelligenceCommittedEventRequest(
         request_id="business-event-customer_activity_created-exact",
         event=event,
-        scope="brief",
+        scope="partial",
     )
 
 
@@ -176,7 +176,7 @@ async def test_confirmed_ai_write_uses_transactional_write_seam_and_persists_ful
     assert snapshot["activity_revision"] == 2
     assert snapshot["post_commit_job_public_id"] == "pcj_exact"
     assert snapshot["customer_intelligence_request_id"] == result.durable_work.customer_intelligence_request.request_id
-    assert snapshot["customer_intelligence_scope"] == "brief"
+    assert snapshot["customer_intelligence_scope"] == "partial"
     assert snapshot["customer_intelligence_event"]["customer_id"] == 144
 
 
@@ -196,7 +196,7 @@ async def test_confirmed_ai_write_replays_exact_durable_metadata_without_recreat
             "activity_revision": 2,
             "post_commit_job_public_id": "pcj_exact",
             "customer_intelligence_request_id": request_id,
-            "customer_intelligence_scope": "brief",
+            "customer_intelligence_scope": "partial",
             "customer_intelligence_event": {"event_key": "activity-event-exact"},
             "next_follow_time": "2026-10-10T09:00:00",
         },
@@ -211,7 +211,7 @@ async def test_confirmed_ai_write_replays_exact_durable_metadata_without_recreat
             request_id=request_id,
             team_id=1,
             customer_id=144,
-            scope="brief",
+            scope="partial",
             event_json={
                 "event_key": "activity-event-exact",
                 "tenant_id": 1,

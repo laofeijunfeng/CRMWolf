@@ -60,12 +60,24 @@ import ApprovalFlowAIDialog from '@/components/ApprovalFlowAIDialog.vue'
 
 // ==================== Props & Emits ====================
 interface Props {
-  open: boolean
+  open?: boolean
+  active?: boolean
+  embedded?: boolean
+  action?: 'create' | 'edit' | ''
+  recordId?: string
 }
 
 type Emits = (e: 'update:open', value: boolean) => void
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  open: false,
+  active: false,
+  embedded: false,
+  action: '',
+  recordId: '',
+})
+const embedded = computed(() => props.embedded)
+const active = computed(() => embedded.value ? props.active : props.open)
 const emit = defineEmits<Emits>()
 
 // ==================== State ====================
@@ -217,9 +229,17 @@ const handleAICreated = (): void => {
 }
 
 // ==================== Lifecycle ====================
-watch(() => props.open, (open) => {
-  if (open) {
+watch(active, (isActive) => {
+  if (isActive) {
     fetchApprovalFlows()
+    if (props.action === 'create') handleManualCreate()
+  }
+}, { immediate: true })
+
+watch(() => [props.action, props.recordId, approvalFlows.value.length] as const, ([action, recordId]) => {
+  if (action === 'edit' && recordId !== '') {
+    const flow = approvalFlows.value.find(item => String(item.id) === recordId)
+    if (flow !== undefined) handleEdit(flow)
   }
 })
 
@@ -243,9 +263,13 @@ function getSortedNodes(nodes: ApprovalNode[] | undefined): ApprovalNode[] {
 </script>
 
 <template>
-  <Sheet :open="open" @update:open="emit('update:open', $event)">
-    <DetailSheetContent>
-      <SheetHeader class="system-config-sheet-header">
+  <component
+    :is="embedded ? 'div' : Sheet"
+    :open="embedded ? undefined : open"
+    @update:open="emit('update:open', $event)"
+  >
+    <component :is="embedded ? 'div' : DetailSheetContent">
+      <SheetHeader v-if="!embedded" class="system-config-sheet-header">
         <SheetTitle class="text-base font-semibold text-wolf-text-primary">审批流程管理</SheetTitle>
         <SheetDescription class="text-sm text-wolf-text-secondary">配置审批流程与节点</SheetDescription>
       </SheetHeader>
@@ -367,8 +391,8 @@ function getSortedNodes(nodes: ApprovalNode[] | undefined): ApprovalNode[] {
           </ListCard>
         </div>
       </ScrollArea>
-    </DetailSheetContent>
-  </Sheet>
+    </component>
+  </component>
 
   <!-- 流程详情 Dialog (z-[1000]) -->
   <Dialog v-model:open="detailDialogOpen">

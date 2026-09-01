@@ -16,10 +16,18 @@ def get_permissions(
     limit: int = Query(100, ge=1, le=100, description="返回记录数"),
     resource: Optional[str] = Query(None, description="资源类型"),
     action: Optional[str] = Query(None, description="操作类型"),
+    include_inactive: bool = Query(False, description="是否包含已停用权限，仅用于审计"),
     current_user = Depends(require_permission("permission:manage")),
     db: Session = Depends(get_db)
 ):
-    permissions = permission_crud.get_multi(db, skip=skip, limit=limit, resource=resource, action=action)
+    permissions = permission_crud.get_multi(
+        db,
+        skip=skip,
+        limit=limit,
+        resource=resource,
+        action=action,
+        include_inactive=include_inactive,
+    )
     return permissions
 
 

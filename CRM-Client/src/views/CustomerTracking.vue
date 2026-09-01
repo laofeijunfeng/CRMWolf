@@ -82,6 +82,7 @@ const activeColumns = ref<ViewPreferenceConfig['columns']>([])
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
+let latestTaskListRequest = 0
 
 const tabs = computed<TabItem[]>(() => [
   { key: 'all', label: '所有追踪' },
@@ -165,6 +166,7 @@ function taskStatusForTab(tab: string): FollowUpTaskStatusFilter {
 }
 
 async function fetchTasks(): Promise<void> {
+  const requestId = ++latestTaskListRequest
   const status = taskStatusForTab(activeTab.value)
   const effectiveFilters = status === 'all'
     ? activeFilters.value
@@ -179,12 +181,17 @@ async function fetchTasks(): Promise<void> {
       limit: pageSize.value,
       ...serializeListQuery({ filters: effectiveFilters, sorts: activeSorts.value })
     })
+    // A list request started before a transition may finish after the
+    // post-transition refresh. Never let that stale response put the closed
+    // task back into the current table.
+    if (requestId !== latestTaskListRequest) return
     tasks.value = response.items
     total.value = response.total
   } catch (error) {
+    if (requestId !== latestTaskListRequest) return
     handleApiError(error, '获取客户追踪')
   } finally {
-    loading.value = false
+    if (requestId === latestTaskListRequest) loading.value = false
   }
 }
 
@@ -205,13 +212,22 @@ async function openDetail(row: TrackingRow): Promise<void> {
   }
 }
 
+function clearSelectedTask(): void {
+  selectedTaskId.value = null
+  selectedTask.value = null
+}
+
 async function transitionTask(task: FollowUpTaskItem, action: 'complete' | 'cancel'): Promise<void> {
   const actionText = action === 'complete' ? '完成' : '关闭'
   const confirmed = await confirmDialog(`确认${actionText}这条客户追踪吗？`, `确认${actionText}`)
   if (!confirmed) return
   try {
     const response = await followUpTaskApi.transition(task.public_id, { action, reason: `manual_${action}` })
-    selectedTask.value = response.task
+    if (selectedTaskId.value === task.public_id) {
+      clearSelectedTask()
+    } else {
+      selectedTask.value = response.task
+    }
     toast.success(`已${actionText}`)
     await fetchTasks()
   } catch (error) {
@@ -299,6 +315,10 @@ async function resolvePendingConfirmation(
         description: result.assistant_follow_up_prompt ?? '请提供更明确的处理结果。',
       })
       return false
+    }
+    const terminalAction = result.decision.action === 'COMPLETE' || result.decision.action === 'CANCEL'
+    if (terminalAction && selectedTaskId.value === task.public_id) {
+      clearSelectedTask()
     }
     await refreshTaskReadModels(task.public_id)
     toast.success('追踪状态已更新', postResolveRefreshError.value !== null

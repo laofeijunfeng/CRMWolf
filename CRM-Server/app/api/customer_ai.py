@@ -211,8 +211,7 @@ async def create_customer_from_ai(
             "public_id": customer.public_id,
             "account_name": customer.account_name,
             "city": customer.city,
-            "status": customer.status,
-            "profile_status": customer.profile_status
+            "status": customer.status
         }
     
     except ValueError as e:

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text
+from sqlalchemy import Boolean, Column, Integer, String, DateTime, Text
 from sqlalchemy.sql import func
 from app.core.database import Base
 
@@ -13,6 +13,7 @@ class Permission(Base):
     action = Column(String(50), nullable=False, comment="操作类型")
     scope = Column(String(50), comment="权限范围")
     description = Column(Text, comment="权限描述")
+    is_active = Column(Boolean, nullable=False, default=True, server_default="1", comment="是否可用于新授权")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), comment="更新时间")
 

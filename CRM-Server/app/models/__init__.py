@@ -27,6 +27,7 @@ from app.models.contract import Contract, ContractStatus, PaymentStatus
 from app.models.conversation_log import ConversationLog
 from app.models.customer import Contact, Customer, CustomerMember
 from app.models.customer_activity import CustomerActivity
+from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
 from app.models.customer_activity_agent_origin import CustomerActivityAgentOrigin
 from app.models.customer_activity_post_commit_job import (
     CustomerActivityPostCommitJob,
@@ -47,6 +48,12 @@ from app.models.customer_identity_term import (
     CustomerIdentityTermType,
 )
 from app.models.customer_intelligence_run import CustomerIntelligenceRun, CustomerIntelligenceRunStatus
+from app.models.customer_profile_projection import (
+    CustomerProfileCurrent,
+    CustomerProfileProjectionVersion,
+    CustomerProfilePublicationStatus,
+    CustomerProfileStatus,
+)
 from app.models.customer_vector_document import (
     CustomerVectorDocument,
     CustomerVectorDocumentSourceType,
@@ -159,6 +166,7 @@ __all__ = [
     "ConversationLog",
     "Customer",
     "CustomerActivity",
+    "CustomerActivityDeletionTombstone",
     "CustomerActivityAgentOrigin",
     "CustomerActivityPostCommitJob",
     "CustomerActivityPostCommitJobStatus",
@@ -176,6 +184,10 @@ __all__ = [
     "CustomerIdentityTermType",
     "CustomerIntelligenceRun",
     "CustomerIntelligenceRunStatus",
+    "CustomerProfileCurrent",
+    "CustomerProfileProjectionVersion",
+    "CustomerProfilePublicationStatus",
+    "CustomerProfileStatus",
     "CustomerMember",
     "CustomerVectorDocument",
     "CustomerVectorDocumentSourceType",

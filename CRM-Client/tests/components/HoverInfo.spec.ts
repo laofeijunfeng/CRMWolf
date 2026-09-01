@@ -38,7 +38,7 @@ describe('HoverInfo', () => {
       attachTo: document.body,
       props: { openDelay: 0, closeDelay: 0 },
       slots: {
-        trigger: '<span class="customer-brief-citation" tabindex="0" data-testid="hover-trigger">[1]</span>',
+        trigger: '<span class="customer-profile-citation" tabindex="0" data-testid="hover-trigger">[1]</span>',
         default: '<div data-testid="hover-content">索引内容：客户活动摘录</div>',
       },
     })
@@ -66,7 +66,7 @@ describe('HoverInfo', () => {
           },
         }, {
           trigger: () => h('span', {
-            class: 'customer-brief-citation',
+            class: 'customer-profile-citation',
             tabindex: '0',
             'data-testid': 'hover-trigger',
           }, '[1]'),

@@ -8,6 +8,7 @@ from app.core.database import Base
 from app.models.customer import Customer
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_intelligence_run import CustomerIntelligenceRun, CustomerIntelligenceRunStatus
+from app.models.customer_profile_projection import CustomerProfileCurrent, CustomerProfileProjectionVersion
 from app.models.customer_vector_document import CustomerVectorDocument, CustomerVectorDocumentSyncStatus
 from app.models.deal_journey import (
     CustomerDealJourney,
@@ -15,7 +16,6 @@ from app.models.deal_journey import (
     DealJourneyEventType,
     DealJourneyStatus,
 )
-from app.models.industry import Industry
 from app.models.sales_commitment import (
     DueAtGranularity,
     FollowUpTask,
@@ -31,7 +31,6 @@ from app.services.customer_vector_document_service import customer_vector_docume
 from app.services.customer_vector_evidence_reconciliation_service import CustomerVectorEvidenceReconciliationService
 from app.services.customer_vector_sync_service import CustomerVectorSyncService
 from app.services.deal_journey_service import deal_journey_service
-from app.services.industry_display_service import industry_display_service
 
 
 @compiles(BigInteger, "sqlite")
@@ -50,7 +49,8 @@ def _session():
         CustomerDealJourneyEvent.__table__,
         CustomerVectorDocument.__table__,
         CustomerIntelligenceRun.__table__,
-        Industry.__table__,
+        CustomerProfileProjectionVersion.__table__,
+        CustomerProfileCurrent.__table__,
     ])
     Session = sessionmaker(bind=engine)
     return Session()
@@ -353,149 +353,6 @@ def test_vector_evidence_reconciliation_is_idempotent_for_current_metadata():
     assert db.query(CustomerVectorDocument).count() == 1
 
 
-def test_service_upserts_customer_profile_metadata():
-    db = _session()
-    government = Industry(id=1, level=1, code="government", name="政府", sort_order=1, is_active=1)
-    public = Industry(
-        id=2,
-        level=2,
-        parent_id=1,
-        code="government_public",
-        name="公共机构",
-        sort_order=1,
-        is_active=1,
-    )
-    customer = Customer(
-        team_id=2,
-        account_name="越秀金融",
-        industry="government_public",
-        city="广州",
-        company_background="地方金融控股集团。",
-        main_business="金融控股与投资管理。",
-        project_background="希望规范采购流程。",
-        creator_id="9",
-        profile_generated_time=datetime(2026, 8, 2, 11, 0, 0),
-    )
-    db.add_all([government, public, customer])
-    db.commit()
-    db.refresh(customer)
-
-    document = customer_vector_document_service.upsert_customer_profile(db, customer)
-
-    assert document is not None
-    assert document.source_type == "customer_profile"
-    assert document.business_object_type == "customer_profile"
-    assert "行业: 政府/公共机构" in document.text
-    assert "government_public" not in document.text
-    assert "地方金融控股集团" in document.text
-    assert document.sync_status == CustomerVectorDocumentSyncStatus.PENDING
-
-
-def test_service_rebuilds_stale_customer_profile_metadata_for_alias_aware_evidence():
-    db = _session()
-    stale_customer = Customer(
-        id=101,
-        team_id=2,
-        account_name="中国科学院信息工程研究所",
-        city="北京",
-        creator_id="9",
-    )
-    fresh_customer = Customer(
-        id=102,
-        team_id=2,
-        account_name="越秀金融控股集团",
-        city="广州",
-        creator_id="9",
-    )
-    missing_document_customer = Customer(
-        id=103,
-        team_id=2,
-        account_name="上海数据交易所",
-        city="上海",
-        creator_id="9",
-    )
-    db.add_all([stale_customer, fresh_customer, missing_document_customer])
-    db.commit()
-    stale_document = customer_vector_document_service.upsert_customer_profile(db, stale_customer)
-    fresh_document = customer_vector_document_service.upsert_customer_profile(db, fresh_customer)
-    assert stale_document is not None
-    assert fresh_document is not None
-    stale_document.metadata_version = 1
-    stale_document.sync_status = CustomerVectorDocumentSyncStatus.SYNCED
-    fresh_document.metadata_version = customer_evidence_builder.metadata_version
-    fresh_document.sync_status = CustomerVectorDocumentSyncStatus.SYNCED
-    db.commit()
-
-    rebuilt_customer_ids = customer_vector_document_service.rebuild_stale_customer_profiles(
-        db,
-        team_id=2,
-        limit=10,
-        commit=False,
-    )
-
-    assert rebuilt_customer_ids == [101, 103]
-    rebuilt_documents = {
-        int(document.customer_id): document
-        for document in db.query(CustomerVectorDocument).order_by(CustomerVectorDocument.customer_id.asc()).all()
-    }
-    assert rebuilt_documents[101].metadata_version == customer_evidence_builder.metadata_version
-    assert rebuilt_documents[101].sync_status == CustomerVectorDocumentSyncStatus.PENDING
-    assert "常用简称候选" in rebuilt_documents[101].text
-    assert rebuilt_documents[102].sync_status == CustomerVectorDocumentSyncStatus.SYNCED
-    assert rebuilt_documents[103].metadata_version == customer_evidence_builder.metadata_version
-    assert rebuilt_documents[103].sync_status == CustomerVectorDocumentSyncStatus.PENDING
-
-
-def test_industry_display_service_sanitizes_legacy_customer_brief_markdown():
-    db = _session()
-    government = Industry(id=1, level=1, code="government", name="政府", sort_order=1, is_active=1)
-    public = Industry(
-        id=2,
-        level=2,
-        parent_id=1,
-        code="government_public",
-        name="公共机构",
-        sort_order=1,
-        is_active=1,
-    )
-    db.add_all([government, public])
-    db.commit()
-
-    markdown = "### 行业与同行客户\ngovernment_public"
-    sanitized = industry_display_service.sanitize_markdown(db, markdown, industry_code="government_public")
-
-    assert sanitized == "### 同行业客户\n政府/公共机构"
-
-
-def test_service_upserts_customer_brief_metadata_idempotently():
-    db = _session()
-    customer = Customer(
-        team_id=2,
-        account_name="越秀金融",
-        city="广州",
-        creator_id="9",
-        customer_brief_markdown="## 客户概况\n客户已进入 POC。",
-        customer_brief_json='{"overview":{"procurement_progress":{"content":"客户已进入 POC。"}}}',
-        customer_brief_generated_time=datetime(2026, 8, 2, 11, 30, 0),
-    )
-    db.add(customer)
-    db.commit()
-    db.refresh(customer)
-
-    first = customer_vector_document_service.upsert_customer_brief(db, customer)
-    customer.customer_brief_markdown = "## 客户概况\n客户计划签合同。"
-    db.commit()
-    db.refresh(customer)
-    second = customer_vector_document_service.upsert_customer_brief(db, customer)
-
-    assert first is not None
-    assert second is not None
-    assert first.id == second.id
-    assert second.source_type == "customer_brief"
-    assert "客户计划签合同" in second.text
-    assert db.query(CustomerVectorDocument).count() == 1
-
-
 def test_service_upserts_deal_journey_event_metadata():
     db = _session()
     customer = Customer(team_id=2, account_name="越秀金融", city="广州", creator_id="9")
@@ -574,7 +431,7 @@ def test_deal_journey_record_event_stages_business_flow_evidence_without_committ
     assert run.status == CustomerIntelligenceRunStatus.PENDING
     assert run.trigger_type == "deal_journey_event_recorded"
     assert run.customer_id == customer.id
-    assert run.scope == "brief"
+    assert run.scope == "partial"
     assert run.event_json["source"]["source_type"] == "deal_journey_event"
 
 

@@ -27,6 +27,7 @@ class DealJourneyEventType:
     INVOICE_ISSUED = "invoice_issued"
     ACTIVITY_ADDED = "activity_added"
     FOLLOW_UP_ADDED = "follow_up_added"
+    ASSOCIATION_CHANGED = "association_changed"
 
 
 class DealJourneySourceType:

@@ -7,7 +7,7 @@
  *
  * 导航：使用 ContextTabs（Segmented Control 模式）放在 Header
  */
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import {
   Sheet,
   SheetHeader,
@@ -15,18 +15,9 @@ import {
 } from '@/components/ui/sheet'
 import { DetailSheetContent } from '@/components/ui/detail-sheet'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { ContextTabs, HoverInfo } from '@/components/crmwolf'
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle
-} from '@/components/ui/empty'
+import { ContextTabs } from '@/components/crmwolf'
 
 // Panels
 import FollowUpPanel from '@/components/panels/FollowUpPanel.vue'
@@ -37,6 +28,7 @@ import LicensePanel from '@/components/panels/LicensePanel.vue'
 import CustomerMembersPanel from '@/components/panels/CustomerMembersPanel.vue'
 import OpportunityDetailContent from '@/components/panels/OpportunityDetailContent.vue'
 import ContractDetailContent from '@/components/panels/ContractDetailContent.vue'
+import CustomerProfileContent from '@/components/panels/CustomerProfileContent.vue'
 
 // Dialogs
 import FollowUpFormDialog from '@/components/dialogs/FollowUpFormDialog.vue'
@@ -52,10 +44,12 @@ import EditRecordDialog from '@/components/dialogs/EditRecordDialog.vue'
 import PaymentPlanDetailSheet from '@/views/PaymentPlanDetailSheet.vue'
 import PaymentRecordDetailSheet from '@/views/PaymentRecordDetailSheet.vue'
 
-import { Plus, Pencil, RefreshCw, Loader2, Sparkles } from 'lucide-vue-next'
+import { Plus, Pencil } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { handleApiError } from '@/utils/errorHandler'
 import customerApi, { type CustomerDetailResponse, type ContactResponse, type CustomerMemberResponse } from '@/api/customer'
+import customerProfileApi from '@/api/customerProfile'
+import type { CustomerProfileEvidence, CustomerProfileResponse } from '@/schemas/customerProfile'
 import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
 import customerActivityApi, { type CustomerActivityResponse } from '@/api/customerActivity'
 import { opportunityApi, type OpportunityListResponse } from '@/api/opportunity'
@@ -72,7 +66,7 @@ import approvalGenericApi from '@/api/approvalGeneric'
 import { confirmDelete } from '@/utils/confirmDialog'
 
 // ==================== Props & Emits ====================
-type CustomerDetailPanel = 'customer-brief' | 'customer-info' | 'followup' | 'opportunities'
+type CustomerDetailPanel = 'customer-profile' | 'customer-info' | 'followup' | 'opportunities'
 
 interface Props {
   customerId: string | null
@@ -94,8 +88,8 @@ const approvalStore = useApprovalStore()
 
 // ==================== State ====================
 const loading = ref(false)  // TODO: Task 3 - 加载客户详情数据时使用
-const activePanel = ref('customer-brief')  // Sidebar 导航切换
-const regeneratingBrief = ref(false)
+const activePanel = ref('customer-profile')  // Sidebar 导航切换
+const refreshingCustomerProfile = ref(false)
 
 // ==================== Dialog States ====================
 const followUpDialogOpen = ref(false)
@@ -155,6 +149,8 @@ const opportunityDetailContentRef = ref<OpportunityDetailContentExpose | null>(n
 
 // ==================== Data Loading State ====================
 const customer = ref<CustomerDetailResponse | null>(null)
+const customerProfile = ref<CustomerProfileResponse | null>(null)
+const customerProfileEvidence = ref<CustomerProfileEvidence[]>([])
 const followUps = ref<CustomerActivityResponse[]>([])
 const opportunities = ref<OpportunityListResponse[]>([])
 const contracts = ref<ContractListResponse[]>([])
@@ -163,191 +159,10 @@ const invoiceTitles = ref<InvoiceTitleResponse[]>([])
 const deployments = ref<DeploymentInfoResponse[]>([])
 const customerMembers = ref<CustomerMemberResponse[]>([])
 let latestLoadRequestId = 0
+let profileRefreshPollGeneration = 0
 
-interface CustomerBriefCitation {
-  source_type?: string
-  source_id?: string
-  title?: string
-  excerpt?: string
-}
-
-type CustomerBriefCitationMap = Record<string, CustomerBriefCitation>
-
-interface CustomerBriefInlineNode {
-  type: 'text' | 'strong' | 'citation'
-  text: string
-  citationKey?: string
-  citation?: CustomerBriefCitation
-  sourceLabel?: string
-}
-
-interface CustomerBriefBlock {
-  type: 'h2' | 'h3' | 'p' | 'ul' | 'ol'
-  nodes?: CustomerBriefInlineNode[]
-  items?: CustomerBriefInlineNode[][]
-}
-
-const getCitationSourceLabel = (sourceType: string | undefined): string => {
-  const labels: Record<string, string> = {
-    customer: '客户',
-    customer_profile: '客户档案',
-    contact: '联系人',
-    opportunity: '商机',
-    contract: '合同',
-    payment_plan: '回款计划',
-    payment_record: '回款记录',
-    follow_up: '客户活动'
-  }
-  return sourceType !== undefined && sourceType !== '' ? labels[sourceType] ?? sourceType : '来源'
-}
-
-const parseInlineMarkdown = (value: string, citationMap: CustomerBriefCitationMap): CustomerBriefInlineNode[] => {
-  const nodes: CustomerBriefInlineNode[] = []
-  const pattern = /(\*\*([^*]+)\*\*|\[(\d+)\])/g
-  let lastIndex = 0
-  let match: RegExpExecArray | null
-
-  while ((match = pattern.exec(value)) !== null) {
-    if (match.index > lastIndex) {
-      nodes.push({ type: 'text', text: value.slice(lastIndex, match.index) })
-    }
-
-    const strongText = match[2]
-    const citationKey = match[3]
-    if (strongText !== undefined) {
-      nodes.push({ type: 'strong', text: strongText })
-    } else if (citationKey !== undefined) {
-      const citation = citationMap[citationKey]
-      if (citation === undefined) {
-        nodes.push({ type: 'text', text: match[0] })
-      } else {
-        nodes.push({
-          type: 'citation',
-          text: `[${citationKey}]`,
-          citationKey,
-          citation,
-          sourceLabel: getCitationSourceLabel(citation.source_type)
-        })
-      }
-    }
-
-    lastIndex = pattern.lastIndex
-  }
-
-  if (lastIndex < value.length) {
-    nodes.push({ type: 'text', text: value.slice(lastIndex) })
-  }
-
-  return nodes
-}
-
-const parseSimpleMarkdown = (value: string, citationMap: CustomerBriefCitationMap): CustomerBriefBlock[] => {
-  const lines = value.split('\n')
-  const blocks: CustomerBriefBlock[] = []
-  let listType: 'ul' | 'ol' | null = null
-  let listItems: CustomerBriefInlineNode[][] = []
-
-  const closeList = (): void => {
-    if (listType !== null) {
-      blocks.push({ type: listType, items: listItems })
-      listType = null
-      listItems = []
-    }
-  }
-
-  for (const line of lines) {
-    const text = line.trim()
-    if (text === '') {
-      closeList()
-      continue
-    }
-
-    if (text.startsWith('## ')) {
-      closeList()
-      blocks.push({ type: 'h2', nodes: parseInlineMarkdown(text.slice(3), citationMap) })
-      continue
-    }
-
-    if (text.startsWith('### ')) {
-      closeList()
-      blocks.push({ type: 'h3', nodes: parseInlineMarkdown(text.slice(4), citationMap) })
-      continue
-    }
-
-    if (/^- /.test(text)) {
-      if (listType !== 'ul') {
-        closeList()
-        listType = 'ul'
-      }
-      listItems.push(parseInlineMarkdown(text.slice(2), citationMap))
-      continue
-    }
-
-    const orderedMatch = text.match(/^\d+\.\s+(.+)$/)
-    if (orderedMatch !== null) {
-      if (listType !== 'ol') {
-        closeList()
-        listType = 'ol'
-      }
-      listItems.push(parseInlineMarkdown(orderedMatch[1] ?? '', citationMap))
-      continue
-    }
-
-    closeList()
-    blocks.push({ type: 'p', nodes: parseInlineMarkdown(text, citationMap) })
-  }
-
-  closeList()
-  return blocks
-}
-
-const customerBriefCitationMap = computed<CustomerBriefCitationMap>(() => {
-  const rawCitations = customer.value?.customer_brief_citations
-  if (rawCitations === undefined || rawCitations === null || rawCitations.trim() === '') return {}
-
-  try {
-    const parsed = JSON.parse(rawCitations) as unknown
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
-    return parsed as CustomerBriefCitationMap
-  } catch {
-    return {}
-  }
-})
-
-const renderedCustomerBrief = computed<CustomerBriefBlock[]>(() => {
-  const markdownText = customer.value?.customer_brief_markdown?.trim()
-  if (markdownText === undefined || markdownText === null || markdownText === '') return []
-  return parseSimpleMarkdown(markdownText, customerBriefCitationMap.value)
-})
-
-const hasCustomerBriefContent = computed(() => renderedCustomerBrief.value.length > 0)
-const hasCustomerIntelligenceInputs = computed(() => {
-  if (customer.value === null) return false
-  if (customer.value.customer_intelligence_has_inputs !== undefined) {
-    return customer.value.customer_intelligence_has_inputs
-  }
-  return (
-    (customer.value.contacts ?? []).length > 0 ||
-    followUps.value.length > 0 ||
-    opportunities.value.length > 0 ||
-    contracts.value.length > 0 ||
-    paymentPlans.value.length > 0 ||
-    invoiceTitles.value.length > 0 ||
-    deployments.value.length > 0
-  )
-})
-const isCustomerBriefRefreshing = computed(() => (
-  regeneratingBrief.value || customer.value?.customer_brief_status === 'GENERATING'
-))
-const isCustomerBriefAwaitingAutoBuild = computed(() => (
-  !hasCustomerBriefContent.value &&
-  hasCustomerIntelligenceInputs.value &&
-  (
-    customer.value?.customer_brief_status === 'PENDING' ||
-    customer.value?.customer_brief_status === undefined ||
-    customer.value?.customer_brief_status === null
-  )
-))
+const PROFILE_REFRESH_POLL_INTERVAL_MS = 2000
+const PROFILE_REFRESH_POLL_TIMEOUT_MS = 120000
 
 // ==================== Navigation Tabs ====================
 interface NavTabItem {
@@ -356,7 +171,7 @@ interface NavTabItem {
 }
 
 const navTabs: NavTabItem[] = [
-  { key: 'customer-brief', label: '客户档案' },
+  { key: 'customer-profile', label: '客户档案' },
   { key: 'customer-info', label: '客户信息' },
   { key: 'followup', label: '客户活动' },
   { key: 'opportunities', label: '项目旅程' }
@@ -404,7 +219,7 @@ const handleEdit = (): void => {
 }
 
 const resetLocalNavigation = (): void => {
-  activePanel.value = 'customer-brief'
+  activePanel.value = 'customer-profile'
   selectedOpportunityId.value = null
   highlightedOpportunityId.value = null
   restoreFocusOpportunityId.value = null
@@ -451,27 +266,6 @@ const getLicenseStatusClass = (licenseType: string | null | undefined, expiryDat
   if (licenseType === 'TRIAL') return 'license-badge--trial'
   return 'license-badge--official'
 }
-
-const getCustomerBriefStatusLabel = (status: string | null | undefined): string => {
-  if (status === 'COMPLETED') return '已整理'
-  if (status === 'GENERATING') return '整理中'
-  if (status === 'PENDING') return '待整理'
-  if (status === 'FAILED') return '需关注'
-  return '暂无档案'
-}
-
-const getCustomerBriefStatusClass = (status: string | null | undefined): string => {
-  if (status === 'COMPLETED') return 'brief-status-badge--completed'
-  if (status === 'GENERATING') return 'brief-status-badge--generating'
-  if (status === 'FAILED') return 'brief-status-badge--failed'
-  return 'brief-status-badge--pending'
-}
-
-const customerBriefUpdatedText = computed(() => {
-  const generatedTime = customer.value?.customer_brief_generated_time
-  if (generatedTime === undefined || generatedTime === null || generatedTime.trim() === '') return ''
-  return `更新于 ${formatDate(generatedTime)}`
-})
 
 const canManageCustomerMembers = computed(() => {
   if (!customer.value) return false
@@ -536,7 +330,9 @@ const loadAllData = async (customerId: string): Promise<void> => {
       contractsData,
       invoiceTitlesData,
       deploymentsData,
-      customerMembersData
+      customerMembersData,
+      customerProfileData,
+      customerProfileEvidenceData
     ] = await Promise.all([
       customerApi.getCustomerDetail(customerId),
       customerActivityApi.getActivities(customerId).catch(() => []),
@@ -544,7 +340,9 @@ const loadAllData = async (customerId: string): Promise<void> => {
       contractApi.getCustomerContracts(customerId).catch(() => []),
       invoiceApi.getInvoiceTitles(customerId).catch(() => ({ invoice_titles: [] })),
       deploymentApi.list(customerId).catch(() => []),
-      customerApi.getCustomerMembers(customerId).catch(() => [])
+      customerApi.getCustomerMembers(customerId).catch(() => []),
+      customerProfileApi.getProfile(customerId).catch(() => null),
+      customerProfileApi.getEvidence(customerId).catch(() => [])
     ])
 
     if (loadRequestId !== latestLoadRequestId) {
@@ -552,6 +350,8 @@ const loadAllData = async (customerId: string): Promise<void> => {
     }
 
     customer.value = customerDetail
+    customerProfile.value = customerProfileData
+    customerProfileEvidence.value = customerProfileEvidenceData
     followUps.value = followUpsData
     opportunities.value = normalizePaginatedResponse(opportunitiesData).items
     contracts.value = contractsData
@@ -593,17 +393,68 @@ const refreshCustomerMembers = async (): Promise<void> => {
   }
 }
 
-const handleRegenerateBrief = async (): Promise<void> => {
+const waitForCustomerProfileRefresh = async (
+  customerId: string,
+  pollGeneration: number
+): Promise<CustomerProfileResponse['profile_status'] | null> => {
+  const deadline = Date.now() + PROFILE_REFRESH_POLL_TIMEOUT_MS
+
+  while (Date.now() < deadline) {
+    await new Promise<void>((resolve) => {
+      window.setTimeout(resolve, PROFILE_REFRESH_POLL_INTERVAL_MS)
+    })
+
+    if (
+      pollGeneration !== profileRefreshPollGeneration
+      || !props.visible
+      || props.customerId !== customerId
+    ) {
+      return null
+    }
+
+    try {
+      const [profileData, evidenceData] = await Promise.all([
+        customerProfileApi.getProfile(customerId),
+        customerProfileApi.getEvidence(customerId)
+      ])
+      customerProfile.value = profileData
+      customerProfileEvidence.value = evidenceData
+
+      if (['READY', 'PARTIAL', 'FAILED'].includes(profileData.profile_status)) {
+        return profileData.profile_status
+      }
+    } catch {
+      // 后台任务运行期间接口可能短暂不可用，继续下一轮轮询。
+    }
+  }
+
+  return null
+}
+
+const handleRefreshCustomerProfile = async (): Promise<void> => {
   if (props.customerId === null) return
-  regeneratingBrief.value = true
+  const customerId = props.customerId
+  const pollGeneration = ++profileRefreshPollGeneration
+  refreshingCustomerProfile.value = true
   try {
-    await customerApi.regenerateCustomerIntelligence(props.customerId, 'full')
-    toast.success('客户智能档案正在刷新')
-    await loadAllData(props.customerId)
+    await customerProfileApi.refresh(customerId, { scope: 'full', reason: 'manual_refresh' })
+    toast.info('客户档案正在更新，完成后会自动展示最新内容')
+    await loadAllData(customerId)
+    const status = await waitForCustomerProfileRefresh(customerId, pollGeneration)
+
+    if (status === 'READY' || status === 'PARTIAL') {
+      toast.success('客户档案已更新')
+    } else if (status === 'FAILED') {
+      toast.error('客户档案更新失败，请稍后重试')
+    } else if (pollGeneration === profileRefreshPollGeneration && props.visible && props.customerId === customerId) {
+      toast.info('客户档案仍在后台更新，请稍后重新查看')
+    }
   } catch (error) {
     handleApiError(error, '刷新客户智能档案')
   } finally {
-    regeneratingBrief.value = false
+    if (pollGeneration === profileRefreshPollGeneration) {
+      refreshingCustomerProfile.value = false
+    }
   }
 }
 
@@ -1046,6 +897,11 @@ const handlePaymentPlanDetailViewApproval = (record: PaymentRecordInfo): void =>
 
 // ==================== Watch ====================
 watch(() => props.visible, (visible): void => {
+  if (!visible) {
+    profileRefreshPollGeneration += 1
+    refreshingCustomerProfile.value = false
+  }
+
   if (visible && props.customerId !== null) {
     resetLocalNavigation()
     applyNavigationTarget()
@@ -1054,6 +910,8 @@ watch(() => props.visible, (visible): void => {
     // 清理状态
     resetLocalNavigation()
     customer.value = null
+    customerProfile.value = null
+    customerProfileEvidence.value = []
     followUps.value = []
     opportunities.value = []
     contracts.value = []
@@ -1073,6 +931,10 @@ watch(() => props.visible, (visible): void => {
 }, { immediate: true })
 
 watch(() => props.customerId, (customerId, previousCustomerId): void => {
+  if (customerId !== previousCustomerId) {
+    profileRefreshPollGeneration += 1
+    refreshingCustomerProfile.value = false
+  }
   if (!props.visible || customerId === null || customerId === previousCustomerId) return
   resetLocalNavigation()
   applyNavigationTarget()
@@ -1090,6 +952,10 @@ watch(() => props.targetPanel, (panel): void => {
   if (!props.visible || panel === undefined || panel === null || hasTargetOpportunity) return
   activePanel.value = panel
 })
+onBeforeUnmount(() => {
+  profileRefreshPollGeneration += 1
+})
+
 </script>
 
 <template>
@@ -1141,172 +1007,15 @@ watch(() => props.targetPanel, (panel): void => {
         <!-- Content -->
         <ScrollArea class="flex-1">
           <div class="p-6 space-y-6">
-            <template v-if="activePanel === 'customer-brief'">
-              <!-- 客户档案卡片 -->
-              <Card class="customer-brief-card">
-                <CardContent class="p-0">
-                  <div class="brief-card-header">
-                    <div class="brief-card-title">
-                      <Sparkles class="h-4 w-4 text-wolf-primary-v2 flex-shrink-0" aria-hidden="true" />
-                      <h3 class="text-sm font-semibold text-wolf-text-primary-v2 truncate">客户档案</h3>
-                      <Badge
-                        variant="outline"
-                        class="brief-status-badge"
-                        :class="getCustomerBriefStatusClass(customer?.customer_brief_status)"
-                      >
-                        {{ getCustomerBriefStatusLabel(customer?.customer_brief_status) }}
-                      </Badge>
-                      <span v-if="customerBriefUpdatedText" class="brief-card-meta">
-                        {{ customerBriefUpdatedText }}
-                      </span>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      class="h-8 w-8 text-wolf-text-tertiary-v2 hover:text-wolf-primary-v2"
-                      :disabled="isCustomerBriefRefreshing"
-                      @click="handleRegenerateBrief"
-                    >
-                      <RefreshCw
-                        class="h-4 w-4"
-                        :class="{ 'animate-spin': isCustomerBriefRefreshing }"
-                        aria-hidden="true"
-                      />
-                      <span class="sr-only">刷新智能档案</span>
-                    </Button>
-                  </div>
-
-                  <div class="p-4">
-                    <div
-                      v-if="hasCustomerBriefContent"
-                      class="customer-brief-content"
-                    >
-                      <template v-for="(block, blockIndex) in renderedCustomerBrief" :key="blockIndex">
-                        <component :is="block.type" v-if="block.type === 'h2' || block.type === 'h3' || block.type === 'p'">
-                          <template v-for="(node, nodeIndex) in block.nodes" :key="`${blockIndex}-${nodeIndex}`">
-                            <strong v-if="node.type === 'strong'">{{ node.text }}</strong>
-                            <HoverInfo
-                              v-else-if="node.type === 'citation' && node.citation"
-                              side="top"
-                              align="center"
-                              content-class="customer-brief-citation-hover-card"
-                            >
-                              <template #trigger>
-                                <span
-                                  class="customer-brief-citation"
-                                  tabindex="0"
-                                  :aria-label="`引用 ${node.citationKey}，${node.sourceLabel}`"
-                                >
-                                  {{ node.text }}
-                                </span>
-                              </template>
-                              <div class="customer-brief-citation-card">
-                                <div class="customer-brief-citation-title">
-                                  {{ node.citation.title?.trim() || node.sourceLabel }}
-                                </div>
-                                <div
-                                  v-if="node.citation.excerpt?.trim()"
-                                  class="customer-brief-citation-excerpt"
-                                >
-                                  {{ node.citation.excerpt.trim() }}
-                                </div>
-                              </div>
-                            </HoverInfo>
-                            <span v-else>{{ node.text }}</span>
-                          </template>
-                        </component>
-                        <component :is="block.type" v-else-if="block.type === 'ul' || block.type === 'ol'">
-                          <li v-for="(item, itemIndex) in block.items" :key="`${blockIndex}-${itemIndex}`">
-                            <template v-for="(node, nodeIndex) in item" :key="`${blockIndex}-${itemIndex}-${nodeIndex}`">
-                              <strong v-if="node.type === 'strong'">{{ node.text }}</strong>
-                              <HoverInfo
-                                v-else-if="node.type === 'citation' && node.citation"
-                                side="top"
-                                align="center"
-                                content-class="customer-brief-citation-hover-card"
-                              >
-                                <template #trigger>
-                                  <span
-                                    class="customer-brief-citation"
-                                    tabindex="0"
-                                    :aria-label="`引用 ${node.citationKey}，${node.sourceLabel}`"
-                                  >
-                                    {{ node.text }}
-                                  </span>
-                                </template>
-                                <div class="customer-brief-citation-card">
-                                  <div class="customer-brief-citation-title">
-                                    {{ node.citation.title?.trim() || node.sourceLabel }}
-                                  </div>
-                                  <div
-                                    v-if="node.citation.excerpt?.trim()"
-                                    class="customer-brief-citation-excerpt"
-                                  >
-                                    {{ node.citation.excerpt.trim() }}
-                                  </div>
-                                </div>
-                              </HoverInfo>
-                              <span v-else>{{ node.text }}</span>
-                            </template>
-                          </li>
-                        </component>
-                      </template>
-                    </div>
-                    <div
-                      v-else-if="customer?.customer_brief_status === 'GENERATING' || isCustomerBriefAwaitingAutoBuild"
-                      class="brief-inline-state"
-                    >
-                      <Loader2
-                        v-if="customer?.customer_brief_status === 'GENERATING'"
-                        class="h-4 w-4 animate-spin text-wolf-primary-v2"
-                        aria-hidden="true"
-                      />
-                      <Sparkles
-                        v-else
-                        class="h-4 w-4 text-wolf-primary-v2"
-                        aria-hidden="true"
-                      />
-                      <span>客户智能档案正在整理，会根据客户活动和业务进展自动更新</span>
-                    </div>
-                    <Empty
-                      v-else-if="customer?.customer_brief_status === 'FAILED'"
-                      class="min-h-[160px] border-0 py-4"
-                    >
-                      <EmptyHeader>
-                        <EmptyMedia variant="icon">
-                          <Sparkles class="h-5 w-5" aria-hidden="true" />
-                        </EmptyMedia>
-                        <EmptyTitle class="text-sm font-medium">客户智能档案暂未刷新成功</EmptyTitle>
-                        <EmptyDescription>
-                          {{ customer?.customer_brief_error_message || '可稍后重试' }}
-                        </EmptyDescription>
-                      </EmptyHeader>
-                      <EmptyContent>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          :disabled="regeneratingBrief"
-                          @click="handleRegenerateBrief"
-                        >
-                          <RefreshCw class="w-4 h-4 mr-2" :class="{ 'animate-spin': regeneratingBrief }" />
-                          重新整理
-                        </Button>
-                      </EmptyContent>
-                    </Empty>
-                    <Empty v-else class="min-h-[160px] border-0 py-4">
-                      <EmptyHeader>
-                        <EmptyMedia variant="icon">
-                          <Sparkles class="h-5 w-5" aria-hidden="true" />
-                        </EmptyMedia>
-                        <EmptyTitle class="text-sm font-medium">暂无客户智能档案</EmptyTitle>
-                        <EmptyDescription>
-                          有客户活动、商机、合同、回款等业务进展后，这里会自动更新
-                        </EmptyDescription>
-                      </EmptyHeader>
-                    </Empty>
-                  </div>
-                </CardContent>
-              </Card>
+            <template v-if="activePanel === 'customer-profile'">
+              <CustomerProfileContent
+                :profile="customerProfile"
+                :evidence="customerProfileEvidence"
+                :customer="customer"
+                :customer-name="customer?.account_name ?? '客户'"
+                :refreshing="refreshingCustomerProfile"
+                @refresh="handleRefreshCustomerProfile"
+              />
             </template>
 
             <template v-if="activePanel === 'customer-info'">
@@ -1446,7 +1155,7 @@ watch(() => props.targetPanel, (panel): void => {
 
         <!-- Footer -->
         <SheetFooter
-          v-if="activePanel !== 'customer-brief'"
+          v-if="activePanel !== 'customer-profile'"
           class="customer-detail-sheet__footer p-4 border-t border-wolf-border-default-v2"
         >
           <template v-if="activePanel === 'customer-info'">
@@ -1684,181 +1393,6 @@ watch(() => props.targetPanel, (panel): void => {
   color: $wolf-text-tertiary-v2;
   background: $wolf-bg-muted-v2;
   border-color: $wolf-border-light-v2;
-}
-
-// Customer brief card styles
-.customer-brief-card {
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-surface-v2;
-  background: $wolf-bg-card-v2;
-}
-
-.brief-card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: $wolf-space-md-v2;
-  padding: $wolf-space-lg-v2;
-  border-bottom: 1px solid $wolf-border-light-v2;
-}
-
-.brief-card-title {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  align-items: center;
-  gap: $wolf-space-sm-v2;
-}
-
-.brief-card-meta {
-  min-width: fit-content;
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  line-height: $wolf-line-height-body-v2;
-}
-
-.brief-status-badge {
-  flex-shrink: 0;
-  height: 22px;
-  border-radius: $wolf-radius-v2;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-}
-
-.brief-status-badge--completed {
-  color: $wolf-success-text-v2;
-  background: $wolf-success-bg-v2;
-  border-color: $wolf-success-bg-v2;
-}
-
-.brief-status-badge--generating {
-  color: $wolf-warning-text-v2;
-  background: $wolf-warning-bg-v2;
-  border-color: $wolf-warning-bg-v2;
-}
-
-.brief-status-badge--failed {
-  color: $wolf-danger-text-v2;
-  background: $wolf-danger-bg-v2;
-  border-color: $wolf-danger-bg-v2;
-}
-
-.brief-status-badge--pending {
-  color: $wolf-text-tertiary-v2;
-  background: $wolf-bg-muted-v2;
-  border-color: $wolf-border-light-v2;
-}
-
-.brief-inline-state {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-sm-v2;
-  min-height: 96px;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-body-v2;
-}
-
-.customer-brief-content {
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-body-v2;
-  line-height: $wolf-line-height-body-v2;
-}
-
-.customer-brief-content h2 {
-  margin: 0 0 $wolf-space-sm-v2;
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-title-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  line-height: $wolf-line-height-title-v2;
-}
-
-.customer-brief-content h3 {
-  margin: $wolf-space-lg-v2 0 $wolf-space-sm-v2;
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  line-height: $wolf-line-height-body-v2;
-}
-
-.customer-brief-content h2:first-child,
-.customer-brief-content h3:first-child {
-  margin-top: 0;
-}
-
-.customer-brief-content p {
-  margin: 0 0 $wolf-space-sm-v2;
-}
-
-.customer-brief-content ul,
-.customer-brief-content ol {
-  margin: 0 0 $wolf-space-md-v2;
-  padding-left: $wolf-space-xl-v2;
-}
-
-.customer-brief-content li {
-  margin: $wolf-space-xs-v2 0;
-}
-
-.customer-brief-content strong {
-  color: $wolf-text-primary-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-}
-
-.customer-brief-citation {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  margin-left: 2px;
-  padding: 0 4px;
-  border-radius: $wolf-radius-sm-v2;
-  background: $wolf-primary-light-v2;
-  color: $wolf-primary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  line-height: 1;
-  cursor: help;
-  vertical-align: baseline;
-}
-
-.customer-brief-citation:hover,
-.customer-brief-citation:focus-visible {
-  background: $wolf-bg-hover-v2;
-  color: $wolf-primary-hover-v2;
-  outline: none;
-}
-
-:global(.customer-brief-citation-hover-card) {
-  max-width: 280px;
-  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
-}
-
-.customer-brief-citation-card {
-  display: grid;
-  gap: $wolf-space-xs-v2;
-}
-
-.customer-brief-citation-title {
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-}
-
-.customer-brief-citation-excerpt {
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  line-height: $wolf-line-height-body-v2;
-  white-space: pre-line;
-}
-
-.customer-brief-content blockquote {
-  margin: $wolf-space-md-v2 0;
-  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
-  border-left: 3px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-sm-v2;
-  background: $wolf-bg-muted-v2;
-  color: $wolf-text-secondary-v2;
 }
 
 </style>

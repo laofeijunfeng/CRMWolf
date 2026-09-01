@@ -12,8 +12,10 @@ from sqlalchemy import and_, exists
 from app.crud.sales_commitment import follow_up_task_confirmation_prompt_delivery_crud
 from app.models.customer_activity_agent_origin import CustomerActivityAgentOrigin
 from app.models.sales_commitment import (
+    FollowUpTask,
     FollowUpTaskConfirmationCase,
     FollowUpTaskConfirmationDeliveryPurpose,
+    FollowUpTaskStatus,
     FollowUpTaskConfirmationPromptDelivery,
     FollowUpTaskConfirmationStatus,
 )
@@ -219,10 +221,14 @@ class FollowUpConfirmationAgentUIProjection:
         for confirmation_case, dispatch in dispatched:
             current_case = (
                 db.query(FollowUpTaskConfirmationCase)
+                .join(FollowUpTask, FollowUpTask.id == FollowUpTaskConfirmationCase.task_id)
                 .filter(
                     FollowUpTaskConfirmationCase.id == confirmation_case.id,
                     FollowUpTaskConfirmationCase.team_id == confirmation_case.team_id,
                     FollowUpTaskConfirmationCase.status == FollowUpTaskConfirmationStatus.PENDING,
+                    FollowUpTask.team_id == confirmation_case.team_id,
+                    FollowUpTask.owner_id == str(confirmation_case.owner_id),
+                    FollowUpTask.status == FollowUpTaskStatus.OPEN,
                     (
                         FollowUpTaskConfirmationCase.expires_at.is_(None)
                         | (FollowUpTaskConfirmationCase.expires_at > now)
@@ -281,6 +287,7 @@ class FollowUpConfirmationAgentUIProjection:
         now = business_now()
         return (
             db.query(FollowUpTaskConfirmationCase)
+            .join(FollowUpTask, FollowUpTask.id == FollowUpTaskConfirmationCase.task_id)
             .join(
                 CustomerActivityAgentOrigin,
                 CustomerActivityAgentOrigin.activity_id == FollowUpTaskConfirmationCase.source_activity_id,
@@ -292,6 +299,9 @@ class FollowUpConfirmationAgentUIProjection:
                 FollowUpTaskConfirmationCase.team_id == team_id,
                 FollowUpTaskConfirmationCase.owner_id == str(user_id),
                 FollowUpTaskConfirmationCase.status == FollowUpTaskConfirmationStatus.PENDING,
+                FollowUpTask.team_id == team_id,
+                FollowUpTask.owner_id == str(user_id),
+                FollowUpTask.status == FollowUpTaskStatus.OPEN,
                 (FollowUpTaskConfirmationCase.expires_at.is_(None) | (FollowUpTaskConfirmationCase.expires_at > now)),
                 ~exists().where(
                     and_(

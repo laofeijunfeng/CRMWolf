@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol
@@ -9,6 +10,9 @@ from typing import TYPE_CHECKING, Any, Protocol
 from app.crud.sales_commitment import follow_up_task_crud, follow_up_task_event_crud
 from app.models.sales_commitment import FollowUpTaskEventType, FollowUpTaskStatus
 from app.schemas.sales_commitment import FollowUpTaskInternalUpdate
+from app.services.customer_intelligence_task_event_service import (
+    customer_intelligence_task_event_service,
+)
 from app.services.customer_vector_document_service import customer_vector_document_service
 from app.services.follow_up_task_confirmation_cleanup_service import (
     FollowUpTaskConfirmationCancelReason,
@@ -20,10 +24,14 @@ from app.services.follow_up_task_transition_plan_service import (
     FollowUpTaskTransitionPlan,
 )
 
+logger = logging.getLogger(__name__)
+
+
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
     from app.models.sales_commitment import FollowUpTask, FollowUpTaskEvent
+    from app.services.customer_intelligence_event_service import CustomerIntelligenceEvent
 
 
 class FollowUpTaskCrudProtocol(Protocol):
@@ -108,6 +116,9 @@ class FollowUpTaskTransitionExecutionResult:
     skip_reason: str | None = None
     event_type: str | None = None
     payload_json: dict[str, Any] | None = None
+    # Built inside the task transaction and kicked only after the caller commits.
+    customer_intelligence_event: CustomerIntelligenceEvent | None = None
+    customer_intelligence_error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -119,6 +130,7 @@ class FollowUpTaskTransitionExecutionResult:
             "skip_reason": self.skip_reason,
             "event_type": self.event_type,
             "payload_json": self.payload_json,
+            "customer_intelligence_error": self.customer_intelligence_error,
         }
 
 
@@ -165,6 +177,7 @@ class FollowUpTaskTransitionExecutionService:
         has_executed_action = any(result.status == FollowUpTaskTransitionExecutionStatus.EXECUTED for result in results)
         if commit and has_executed_action:
             db.commit()
+            self._kick_customer_intelligence_refreshes(results)
         return results
 
     def execute_action(
@@ -229,9 +242,9 @@ class FollowUpTaskTransitionExecutionService:
                 ),
                 commit=False,
             )
-            event_type = FollowUpTaskEventType.UPDATED
+            event_type = FollowUpTaskEventType.POSTPONED
 
-        self.event_crud.record_status_change(
+        task_event = self.event_crud.record_status_change(
             db,
             task=task,
             event_type=event_type,
@@ -239,6 +252,13 @@ class FollowUpTaskTransitionExecutionService:
             previous_status=previous_status,
             payload_json=payload,
             commit=False,
+        )
+        customer_intelligence_event, customer_intelligence_error = self._build_customer_intelligence_event(
+            task=task, task_event=task_event
+        )
+        customer_intelligence_error = (
+            self._persist_customer_intelligence_event(db, customer_intelligence_event)
+            or customer_intelligence_error
         )
         if action.action in {
             FollowUpTaskTransitionActionType.COMPLETE,
@@ -260,6 +280,10 @@ class FollowUpTaskTransitionExecutionService:
         if commit:
             db.commit()
             db.refresh(task)
+            customer_intelligence_error = (
+                self._kick_customer_intelligence_event(customer_intelligence_event)
+                or customer_intelligence_error
+            )
 
         return FollowUpTaskTransitionExecutionResult(
             status=FollowUpTaskTransitionExecutionStatus.EXECUTED,
@@ -269,6 +293,8 @@ class FollowUpTaskTransitionExecutionService:
             new_status=task.status,
             event_type=event_type,
             payload_json=payload,
+            customer_intelligence_event=customer_intelligence_event,
+            customer_intelligence_error=customer_intelligence_error,
         )
 
     def rollback_event(
@@ -336,7 +362,7 @@ class FollowUpTaskTransitionExecutionService:
             "restored_due_at": task.due_at.isoformat() if task.due_at else None,
             "restored_due_at_text": task.due_at_text,
         }
-        self.event_crud.record_status_change(
+        rollback_event = self.event_crud.record_status_change(
             db,
             task=task,
             event_type=event_type,
@@ -346,9 +372,20 @@ class FollowUpTaskTransitionExecutionService:
             commit=False,
         )
         self.vector_document_service.upsert_follow_up_task(db, task, commit=False)
+        customer_intelligence_event, customer_intelligence_error = self._build_customer_intelligence_event(
+            task=task, task_event=rollback_event
+        )
+        customer_intelligence_error = (
+            self._persist_customer_intelligence_event(db, customer_intelligence_event)
+            or customer_intelligence_error
+        )
         if commit:
             db.commit()
             db.refresh(task)
+            customer_intelligence_error = (
+                self._kick_customer_intelligence_event(customer_intelligence_event)
+                or customer_intelligence_error
+            )
 
         return FollowUpTaskTransitionExecutionResult(
             status=FollowUpTaskTransitionExecutionStatus.EXECUTED,
@@ -358,7 +395,56 @@ class FollowUpTaskTransitionExecutionService:
             new_status=task.status,
             event_type=event_type,
             payload_json=rollback_payload,
+            customer_intelligence_event=customer_intelligence_event,
+            customer_intelligence_error=customer_intelligence_error,
         )
+
+    def _build_customer_intelligence_event(
+        self,
+        *,
+        task: FollowUpTask,
+        task_event: FollowUpTaskEvent,
+    ) -> tuple[CustomerIntelligenceEvent | None, str | None]:
+        return customer_intelligence_task_event_service.build_event(task=task, task_event=task_event)
+
+    def _persist_customer_intelligence_event(
+        self, db: Session, event: CustomerIntelligenceEvent | None
+    ) -> str | None:
+        """Persist the profile refresh intent inside the business transaction.
+
+        The post-commit kick remains a latency optimization, but the durable
+        run is now registered before the task transaction commits.  A nested
+        transaction isolates a read-model schema or persistence failure so a
+        profile problem cannot roll back the task transition; reconciliation
+        remains the fallback for that exceptional case.
+        """
+
+        return customer_intelligence_task_event_service.persist_event(
+            db,
+            event=event,
+            scope="partial",
+        )
+
+    def _kick_customer_intelligence_event(self, event: CustomerIntelligenceEvent | None) -> str | None:
+        return customer_intelligence_task_event_service.kick_after_commit(
+            event=event,
+            scope="partial",
+        )
+
+    def _kick_customer_intelligence_refreshes(
+        self,
+        results: list[FollowUpTaskTransitionExecutionResult],
+    ) -> None:
+        for result in results:
+            self._kick_customer_intelligence_event(result.customer_intelligence_event)
+
+    def kick_customer_intelligence_refresh(
+        self,
+        result: FollowUpTaskTransitionExecutionResult,
+    ) -> None:
+        """Kick a refresh after an outer transaction commits."""
+
+        self._kick_customer_intelligence_event(result.customer_intelligence_event)
 
     def _event_payload(
         self,

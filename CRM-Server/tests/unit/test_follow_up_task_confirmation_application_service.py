@@ -253,7 +253,7 @@ def test_confirmation_reply_postpone_keeps_task_open_and_updates_due_at(db_sessi
     assert case.resolved_due_at == datetime(2026, 8, 14, 10, 0, 0)
     assert case.application_status == FollowUpTaskConfirmationApplicationStatus.APPLIED
     assert len(events) == 1
-    assert events[0].event_type == FollowUpTaskEventType.UPDATED
+    assert events[0].event_type == FollowUpTaskEventType.POSTPONED
 
     replay = FollowUpTaskConfirmationApplicationService().apply_resolved_case(
         db_session,

@@ -89,24 +89,6 @@ class Customer(Base):
     last_modified_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="最后修改时间")
     version = Column(Integer, nullable=False, default=1, comment="版本号（乐观锁）")
 
-    # 客户档案字段（AI生成）
-    company_background = Column(Text, nullable=True, comment="企业背景（AI生成）")
-    company_website = Column(String(500), nullable=True, comment="公司官网（AI生成）")
-    main_business = Column(Text, nullable=True, comment="主营业务（AI生成）")
-    similar_customers = Column(Text, nullable=True, comment="同行业客户列表（JSON格式，AI生成）")
-    project_background = Column(Text, nullable=True, comment="项目需求背景（从线索跟进记录分析生成）")
-    profile_status = Column(String(20), nullable=True, default="PENDING", comment="档案生成状态：PENDING/GENERATING/COMPLETED/FAILED")
-    profile_generated_time = Column(DateTime, nullable=True, comment="档案生成完成时间")
-    profile_error_message = Column(Text, nullable=True, comment="档案生成失败原因")
-
-    # 客户概况字段（AI生成，销售侧经营视图）
-    customer_brief_json = Column(Text, nullable=True, comment="客户概况结构化内容（JSON格式，AI生成）")
-    customer_brief_markdown = Column(Text, nullable=True, comment="客户概况 Markdown 内容（AI生成）")
-    customer_brief_citations = Column(Text, nullable=True, comment="客户概况引用来源映射（JSON格式）")
-    customer_brief_status = Column(String(20), nullable=True, default="PENDING", comment="客户概况生成状态：PENDING/GENERATING/COMPLETED/FAILED")
-    customer_brief_generated_time = Column(DateTime, nullable=True, comment="客户概况生成完成时间")
-    customer_brief_error_message = Column(Text, nullable=True, comment="客户概况生成失败原因")
-
     license_expiry_date = Column(Date, nullable=True, comment="客户 License 最晚到期时间（自动更新）")
     license_type = Column(String(20), nullable=True, comment="客户 License 类型（自动更新）：TRIAL/OFFICIAL")
 
@@ -167,7 +149,9 @@ class Contact(Base):
     remark = Column(Text, nullable=True, comment="备注")
     reports_to = Column(BigInteger, nullable=True, comment="汇报对象联系人ID")
     is_primary = Column(Integer, nullable=False, default=0, comment="是否主联系人：0:否, 1:是")
+    post_commit_revision = Column(Integer, nullable=False, default=1, comment="客户智能后提交事件修订号")
     created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
+    updated_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="更新时间")
 
     customer = relationship("Customer", back_populates="contacts")
 
@@ -194,6 +178,7 @@ class CustomerMember(Base):
     created_by = Column(String(100), nullable=False, comment="创建人")
     created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
     updated_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="更新时间")
+    post_commit_revision = Column(Integer, nullable=False, default=1, comment="客户智能后提交事件修订号")
     is_active = Column(Boolean, nullable=False, default=True, comment="是否有效")
 
     customer = relationship("Customer", back_populates="members")

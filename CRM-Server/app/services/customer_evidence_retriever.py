@@ -23,25 +23,12 @@ from app.services.customer_qdrant_index_service import (
 logger = logging.getLogger(__name__)
 
 DEFAULT_MIN_SCORE = 0.45
-DEFAULT_SOURCE_WEIGHTS: dict[str, float] = {
-    "follow_up": 1.08,
-    "business_flow": 1.06,
-    "opportunity": 1.05,
-    "contract": 1.04,
-    "payment": 1.04,
-    "customer_brief": 1.02,
-    "customer_profile": 1.0,
-    "customer": 0.98,
-    "contact": 0.96,
-    "agent_judgement": 0.94,
-}
 
 
 @dataclass(frozen=True)
 class CustomerEvidenceHit:
     evidence_id: str
     score: float
-    adjusted_score: float
     source_type: str | None
     source_object_id: str | None
     business_object_type: str | None
@@ -53,7 +40,6 @@ class CustomerEvidenceHit:
         return {
             "evidence_id": self.evidence_id,
             "score": round(self.score, 4),
-            "adjusted_score": round(self.adjusted_score, 4),
             "source_type": self.source_type,
             "source_object_id": self.source_object_id,
             "business_object_type": self.business_object_type,
@@ -66,7 +52,6 @@ class CustomerEvidenceHit:
         return {
             "evidence_id": self.evidence_id,
             "score": round(self.score, 4),
-            "adjusted_score": round(self.adjusted_score, 4),
             "source_type": self.source_type,
             "source_object_id": self.source_object_id,
             "business_object_type": self.business_object_type,
@@ -90,7 +75,6 @@ class EvidenceRetrievalState:
     min_score: float | None = None
     source_types: list[str] | None = None
     strategy: str = "customer_semantic_qdrant"
-    source_weights: dict[str, float] | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -106,7 +90,6 @@ class EvidenceRetrievalState:
             "min_score": self.min_score,
             "source_types": self.source_types or [],
             "strategy": self.strategy,
-            "source_weights": self.source_weights or {},
         }
 
 
@@ -124,12 +107,10 @@ class CustomerEvidenceRetriever:
         embedding_service: CustomerEmbeddingService | None = None,
         qdrant_index_service: CustomerQdrantIndexService | None = None,
         min_score: float = DEFAULT_MIN_SCORE,
-        source_weights: dict[str, float] | None = None,
     ) -> None:
         self.embedding_service = embedding_service or customer_embedding_service
         self.qdrant_index_service = qdrant_index_service or customer_qdrant_index_service
         self.min_score = min_score
-        self.source_weights = source_weights or DEFAULT_SOURCE_WEIGHTS
 
     def retrieve_customer_evidence(
         self,
@@ -192,7 +173,7 @@ class CustomerEvidenceRetriever:
             )
 
         accepted = [self._evidence_hit(item) for item in raw_results if item.score >= self.min_score]
-        hits = sorted(accepted, key=lambda item: item.adjusted_score, reverse=True)[:evidence_limit]
+        hits = sorted(accepted, key=lambda item: item.score, reverse=True)[:evidence_limit]
         top_score = max((item.score for item in raw_results), default=None)
         status = "ok" if hits else "low_confidence" if raw_results else "empty"
         state = EvidenceRetrievalState(
@@ -206,8 +187,7 @@ class CustomerEvidenceRetriever:
             top_score=top_score,
             min_score=self.min_score,
             source_types=requested_source_types,
-            strategy="customer_semantic_qdrant_source_weighted",
-            source_weights=self.source_weights,
+            strategy="customer_semantic_qdrant",
         )
         return CustomerEvidenceRetrievalResult(hits=hits, state=state)
 
@@ -231,7 +211,6 @@ class CustomerEvidenceRetriever:
                 requested_limit=evidence_limit,
                 min_score=self.min_score,
                 source_types=source_types,
-                source_weights=self.source_weights,
             ),
         )
 
@@ -240,7 +219,6 @@ class CustomerEvidenceRetriever:
         return CustomerEvidenceHit(
             evidence_id=result.id,
             score=score,
-            adjusted_score=score * self.source_weights.get(str(result.source_type or ""), 1.0),
             source_type=result.source_type,
             source_object_id=result.source_object_id,
             business_object_type=result.business_object_type,

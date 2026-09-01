@@ -14,6 +14,7 @@ from app.services.agent.query import (  # noqa: TC001
     CRMQuerySpec,
     EntityRef,
 )
+from app.services.agent.query.semantic_intent import CRMQuerySemanticIntent
 from app.services.agent.workflow import (
     WorkflowRef,
     WorkflowResult,
@@ -239,11 +240,14 @@ class RootRoutingPlan(OrchestratorContractModel):
 
 
 class QueryExecutionInput(OrchestratorContractModel):
+    """Server-authorized query input, optionally carrying Root semantic preflight."""
+
     text: str = Field(min_length=1, max_length=20_000)
     principal: AgentPrincipal
     selected_entity: EntityRef | None = None
     previous_query: CRMQuerySpec | None = None
     result_set: ResultSetContext | None = None
+    semantic_intent: CRMQuerySemanticIntent | None = None
 
 
 class ClarificationRequest(OrchestratorContractModel):
@@ -331,6 +335,16 @@ class RootDecisionClassifier(Protocol):
         context: RootContextSnapshot,
         runtime: RootRuntimeContext,
     ) -> RootDecision: ...
+
+
+class SemanticIntentResolver(Protocol):
+    async def resolve(
+        self,
+        text: str,
+        *,
+        model_config: CRMQueryAgentModelConfig,
+        runtime: RootRuntimeContext,
+    ) -> CRMQuerySemanticIntent: ...
 
 
 class QueryExecutor(Protocol):

@@ -12,11 +12,13 @@ from app.crud.im_bot import im_inbound_event_crud
 from app.crud.sales_commitment import (
     follow_up_task_confirmation_case_crud,
     follow_up_task_confirmation_prompt_delivery_crud,
+    follow_up_task_crud,
 )
 from app.models.sales_commitment import (
     FollowUpTaskConfirmationDeliveryPurpose,
     FollowUpTaskConfirmationPromptStatus,
     FollowUpTaskConfirmationStatus,
+    FollowUpTaskStatus,
 )
 from app.services.agent.im_conversation import agent_im_conversation_service
 from app.services.agent.input import AgentChannelContext, AgentInputKind
@@ -299,6 +301,18 @@ class IMAgentGateway:
         if delivery.status != FollowUpTaskConfirmationPromptStatus.SENT:
             return None
         if case.status != FollowUpTaskConfirmationStatus.PENDING:
+            return None
+
+        task = follow_up_task_crud.get_by_id(
+            db,
+            case.task_id,
+            team_id=team_id,
+        )
+        if (
+            task is None
+            or task.owner_id != str(user_id)
+            or task.status != FollowUpTaskStatus.OPEN
+        ):
             return None
 
         source_session_id = getattr(source_event, "agent_session_id", None)

@@ -10,17 +10,18 @@ from app.core.database import Base
 from app.models.contract import Contract
 from app.models.customer import Contact, Customer
 from app.models.customer_activity import CustomerActivity
+from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
 from app.models.customer_fact import CustomerFact, CustomerFactRevision, CustomerFactSource
 from app.models.industry import Industry
+from app.models.deal_journey import CustomerDealJourney, CustomerDealJourneyEvent
 from app.models.opportunity import Opportunity
 from app.models.payment import PaymentPlan, PaymentRecord
-from app.services.customer_brief_service import CustomerBriefService
+from app.models.sales_commitment import FollowUpTask, FollowUpTaskEvent, SalesCommitment
 from app.services.customer_fact_service import CustomerFactInput, CustomerFactSourceInput, customer_fact_service
 from app.services.customer_intelligence_context_service import (
     CustomerIntelligenceContextNotFound,
     CustomerIntelligenceContextService,
 )
-from app.services.customer_profile_service import CustomerProfileService
 from app.services.customer_qdrant_index_service import CustomerEvidenceSearchResult, SourceType
 
 
@@ -127,6 +128,12 @@ def _session():
             PaymentPlan.__table__,
             PaymentRecord.__table__,
             CustomerActivity.__table__,
+            CustomerActivityDeletionTombstone.__table__,
+            CustomerDealJourney.__table__,
+            CustomerDealJourneyEvent.__table__,
+            SalesCommitment.__table__,
+            FollowUpTask.__table__,
+            FollowUpTaskEvent.__table__,
             CustomerFact.__table__,
             CustomerFactSource.__table__,
             CustomerFactRevision.__table__,
@@ -162,12 +169,6 @@ def _seed_customer_context(db: Session) -> Customer:
         company_scale="1000人以上",
         source="客户推荐",
         creator_id="9",
-        profile_status="COMPLETED",
-        company_background="地方金融控股集团。",
-        main_business="金融控股与投资管理。",
-        project_background="希望规范合同和采购流程。",
-        customer_brief_status="COMPLETED",
-        customer_brief_markdown="## 客户概况\n客户正在推进 POC，并关注合同与采购流程规范。",
     )
     db.add(customer)
     db.flush()
@@ -308,12 +309,6 @@ def test_customer_intelligence_context_combines_strong_facts_and_semantic_eviden
         payload = context.to_agent_payload()
 
         assert payload["strong_context"]["customer"]["account_name"] == "越秀金融"
-        assert payload["strong_context"]["customer"]["company_background"] == "地方金融控股集团。"
-        assert payload["strong_context"]["customer"]["main_business"] == "金融控股与投资管理。"
-        assert payload["strong_context"]["customer"]["project_background"] == "希望规范合同和采购流程。"
-        assert payload["strong_context"]["customer"]["customer_brief_markdown"] == (
-            "## 客户概况\n客户正在推进 POC，并关注合同与采购流程规范。"
-        )
         assert payload["strong_context"]["customer_facts"][0]["content"] == "客户已经进入 POC，需要准备试用环境。"
         assert payload["strong_context"]["opportunities"][0]["stage"] == "POC"
         assert payload["strong_context"]["payment_records"][0]["actual_amount"] == "30000.00"
@@ -433,127 +428,6 @@ def test_customer_intelligence_context_marks_low_confidence_evidence() -> None:
         assert payload["retrieval"]["returned_count"] == 0
         assert payload["retrieval"]["dropped_count"] == 1
         assert payload["retrieval"]["top_score"] == 0.21
-    finally:
-        db.close()
-        engine.dispose()
-
-
-def test_customer_brief_context_uses_unified_customer_intelligence(monkeypatch) -> None:
-    engine, db = _session()
-    embedding_service = FakeEmbeddingService()
-    qdrant_index_service = FakeQdrantIndexService()
-    intelligence_service = CustomerIntelligenceContextService(
-        embedding_service=embedding_service,
-        qdrant_index_service=qdrant_index_service,
-    )
-    monkeypatch.setattr(
-        "app.services.customer_brief_service.customer_intelligence_context_service",
-        intelligence_service,
-    )
-    try:
-        customer = _seed_customer_context(db)
-        db.add(
-            Customer(
-                id=102,
-                team_id=2,
-                account_name="同业客户",
-                industry="金融",
-                city="广州",
-                creator_id="9",
-            )
-        )
-        db.commit()
-
-        context = CustomerBriefService()._build_context(db, customer, team_id=2)
-
-        assert context["context_source"] == "customer_intelligence"
-        assert context["customer"]["account_name"] == "越秀金融"
-        assert context["opportunities"][0]["stage"] == "POC"
-        assert context["payment_records"][0]["actual_amount"] == 30000.0
-        assert context["semantic_evidence"][0]["text"] == "张总确认本周开始 POC。"
-        assert context["same_industry_customers"] == ["同业客户"]
-        assert embedding_service.queries == [CustomerBriefService.BRIEF_RETRIEVAL_QUERY]
-    finally:
-        db.close()
-        engine.dispose()
-
-
-def test_customer_brief_context_resolves_industry_code_for_user_facing_output(monkeypatch) -> None:
-    engine, db = _session()
-    embedding_service = FakeEmbeddingService()
-    qdrant_index_service = FakeQdrantIndexService()
-    intelligence_service = CustomerIntelligenceContextService(
-        embedding_service=embedding_service,
-        qdrant_index_service=qdrant_index_service,
-    )
-    monkeypatch.setattr(
-        "app.services.customer_brief_service.customer_intelligence_context_service",
-        intelligence_service,
-    )
-    try:
-        _seed_industries(db)
-        customer = Customer(
-            id=901,
-            team_id=2,
-            account_name="广州公共服务中心",
-            industry="government_public",
-            city="广州",
-            creator_id="9",
-        )
-        peer = Customer(
-            id=902,
-            team_id=2,
-            account_name="同业公共客户",
-            industry="government_public",
-            city="广州",
-            creator_id="9",
-        )
-        db.add_all([customer, peer])
-        db.commit()
-
-        context = CustomerBriefService()._build_context(db, customer, team_id=2)
-        brief = CustomerBriefService()._normalize_brief({"overview": {}, "opportunity_summaries": []}, context)
-        markdown = CustomerBriefService()._render_markdown(brief)
-
-        assert context["customer"]["industry_code"] == "government_public"
-        assert context["customer"]["industry_name"] == "政府/公共机构"
-        assert "### 同行业客户" in markdown
-        assert "政府/公共机构" in markdown
-        assert "同业公共客户" in markdown
-        assert "government_public" not in markdown
-    finally:
-        db.close()
-        engine.dispose()
-
-
-def test_customer_profile_prompt_uses_unified_customer_intelligence() -> None:
-    engine, db = _session()
-    service = CustomerIntelligenceContextService(
-        embedding_service=FakeEmbeddingService(),
-        qdrant_index_service=FakeQdrantIndexService(),
-    )
-    try:
-        _seed_customer_context(db)
-        intelligence_context = service.build_context(
-            db,
-            team_id=2,
-            customer_id=101,
-            query_text=CustomerProfileService.PROFILE_RETRIEVAL_QUERY,
-        )
-
-        prompt = CustomerProfileService()._build_prompt_for_profile(
-            "越秀金融",
-            "finance",
-            {"finance": {"name": "金融", "children": []}},
-            ["同业客户"],
-            None,
-            intelligence_context,
-        )
-
-        assert "CRM 统一客户智能上下文" in prompt
-        assert "越秀金融采购项目" in prompt
-        assert "张总确认本周开始 POC。" in prompt
-        assert "业务字段以结构化事实为准" in prompt
     finally:
         db.close()
         engine.dispose()

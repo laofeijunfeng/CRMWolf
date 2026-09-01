@@ -38,6 +38,7 @@ FOLLOW_UP_TASK_SOURCE_TYPES = {
 FOLLOW_UP_TASK_EVENT_TYPES = {
     FollowUpTaskEventType.CREATED,
     FollowUpTaskEventType.UPDATED,
+    FollowUpTaskEventType.POSTPONED,
     FollowUpTaskEventType.COMPLETED,
     FollowUpTaskEventType.CANCELLED,
     FollowUpTaskEventType.REOPENED,
@@ -121,6 +122,7 @@ class _PublicIdResponse(BaseModel):
 class SalesCommitmentInternalCreate(BaseModel):
     team_id: int = Field(..., description="团队ID")
     customer_id: int = Field(..., description="客户内部ID")
+    deal_journey_id: int | None = Field(None, description="业务旅程内部ID")
     owner_id: str = Field(..., description="承诺归属人系统用户ID")
     creator_id: str = Field(..., description="承诺创建人系统用户ID")
     title: str = Field(..., min_length=1, max_length=255, description="承诺标题")
@@ -162,6 +164,7 @@ class SalesCommitmentInternalCreate(BaseModel):
 
 
 class SalesCommitmentInternalUpdate(BaseModel):
+    deal_journey_id: int | None = Field(None, description="业务旅程内部ID")
     title: str | None = Field(None, min_length=1, max_length=255, description="承诺标题")
     content: str | None = Field(None, min_length=1, description="承诺内容")
     commitment_type: str | None = Field(None, max_length=50, description="承诺类型")
@@ -215,6 +218,7 @@ class FollowUpTaskInternalCreate(BaseModel):
     team_id: int = Field(..., description="团队ID")
     customer_id: int = Field(..., description="客户内部ID")
     commitment_id: int | None = Field(None, description="关联承诺内部ID")
+    deal_journey_id: int | None = Field(None, description="业务旅程内部ID")
     owner_id: str = Field(..., description="任务归属人系统用户ID")
     creator_id: str = Field(..., description="任务创建人系统用户ID")
     title: str = Field(..., min_length=1, max_length=255, description="任务标题")
@@ -256,6 +260,7 @@ class FollowUpTaskInternalCreate(BaseModel):
 
 class FollowUpTaskInternalUpdate(BaseModel):
     commitment_id: int | None = Field(None, description="关联承诺内部ID")
+    deal_journey_id: int | None = Field(None, description="业务旅程内部ID")
     title: str | None = Field(None, min_length=1, max_length=255, description="任务标题")
     description: str | None = Field(None, description="任务描述")
     status: str | None = Field(None, description="任务状态")
@@ -456,7 +461,7 @@ class FollowUpTaskLLMMatcherRunInternalCreate(BaseModel):
 
 
 class FollowUpTaskReconciliationEvaluationRunInternalCreate(BaseModel):
-    team_id: int | None = Field(None, description="团队ID；系统级评测可为空")
+    team_id: int | None = Field(None, description="团队ID；系统级评测可为空")  # noqa: RUF001
     suite_name: str = Field(..., min_length=1, max_length=120, description="评测套件名称")
     fixture_path: str | None = Field(None, max_length=500, description="评测样本路径")
     fixture_hash: str | None = Field(None, max_length=64, description="评测样本内容hash")

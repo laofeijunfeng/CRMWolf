@@ -4,6 +4,27 @@
 所有权限的完整列表，用于初始化新数据库
 """
 
+# 历史 API 权限。
+#
+# 这些权限曾用于一套独立的开放 API 授权模型，但当前系统没有对应的
+# API Key/开放平台功能。保留编码清单用于数据迁移和兼容读取，禁止重新
+# 加入 ALL_PERMISSIONS，避免权限同步脚本再次创建。
+DEPRECATED_PERMISSION_CODES = frozenset({
+    "apikey:manage",
+    "lead:api:list",
+    "lead:api:read",
+    "customer:api:list",
+    "customer:api:read",
+    "opportunity:api:list",
+    "opportunity:api:read",
+    "contract:api:list",
+    "contract:api:read",
+    "payment:api:create",
+    "payment:api:list",
+    "payment:api:read",
+    "invoice:api:list",
+})
+
 # 所有系统权限定义
 ALL_PERMISSIONS = [
     # 客户相关权限
@@ -22,6 +43,12 @@ ALL_PERMISSIONS = [
     {"name": "创建客户活动", "code": "customer:activity:create", "resource": "customer_activity", "action": "create"},
     {"name": "编辑客户活动", "code": "customer:activity:edit", "resource": "customer_activity", "action": "edit"},
     {"name": "删除客户活动", "code": "customer:activity:delete", "resource": "customer_activity", "action": "delete"},
+
+    {"name": "查看客户档案", "code": "customer_profile:view", "resource": "customer_profile", "action": "view"},
+    {"name": "刷新客户档案", "code": "customer_profile:refresh", "resource": "customer_profile", "action": "refresh"},
+    {"name": "查看客户档案历史", "code": "customer_profile:history", "resource": "customer_profile", "action": "history"},
+    {"name": "纠正客户档案事实", "code": "customer_profile:correct", "resource": "customer_profile", "action": "correct"},
+    {"name": "重建客户档案", "code": "customer_profile:rebuild", "resource": "customer_profile", "action": "rebuild"},
 
     # 线索相关权限
     {"name": "查看所有线索", "code": "lead:view:all", "resource": "lead", "action": "view", "scope": "all"},
@@ -191,6 +218,7 @@ ROLE_PERMISSIONS_MAPPING = {
         "customer:return", "customer:claim", "customer:assign",
         "customer:contact:create", "customer:contact:edit", "customer:contact:delete",
         "customer:activity:create", "customer:activity:edit", "customer:activity:delete",
+        "customer_profile:view", "customer_profile:refresh", "customer_profile:history",
         "opportunity:view:all", "opportunity:view:own", "opportunity:create",
         "opportunity:edit:own", "opportunity:edit:all", "opportunity:delete:own", "opportunity:delete:all",
         "opportunity:stage", "opportunity:win", "opportunity:lose", "opportunity:assign",
@@ -219,6 +247,7 @@ ROLE_PERMISSIONS_MAPPING = {
         "customer:return", "customer:claim",
         "customer:contact:create", "customer:contact:edit", "customer:contact:delete",
         "customer:activity:create", "customer:activity:edit", "customer:activity:delete",
+        "customer_profile:view", "customer_profile:refresh", "customer_profile:history",
         "opportunity:view:own", "opportunity:create", "opportunity:edit:own",
         "opportunity:delete:own",  # ← 补充删除权限
         "opportunity:stage", "opportunity:win", "opportunity:lose",

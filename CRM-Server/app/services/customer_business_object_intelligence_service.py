@@ -2,22 +2,39 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Callable, Literal, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 from sqlalchemy.orm import Session
 
 from app.models.contract import Contract
 from app.models.payment import PaymentPlan
-from app.services.customer_intelligence_event_service import JsonObject, JsonValue
-from app.services.customer_intelligence_refresh_service import (
-    CustomerIntelligenceCommittedEventRequest,
-    customer_intelligence_refresh_service,
+from app.services.customer_intelligence_event_publication_service import (
+    CustomerIntelligenceEventPublicationService,
+    customer_intelligence_event_publication_service,
+)
+from app.services.customer_intelligence_event_service import (
+    CustomerIntelligenceBusinessObjectChangeType,
+    CustomerIntelligenceEvent,
+    JsonObject,
+    JsonValue,
+    customer_business_object_trigger_for_change,
+    customer_intelligence_event_service,
 )
 
+if TYPE_CHECKING:
+    from app.services.customer_intelligence_refresh_service import (
+        CustomerIntelligenceCommittedEventRequest,
+        CustomerIntelligenceRefreshScope,
+    )
+
 CustomerBusinessObjectSourceType = Literal[
+    "customer",
+    "customer_member",
+    "customer_contact",
     "opportunity",
     "contract",
     "payment_plan",
@@ -27,7 +44,7 @@ CustomerBusinessObjectSourceType = Literal[
     "deployment_info",
     "license_application",
 ]
-CustomerBusinessObjectChangeType = Literal["created", "updated", "deleted"]
+CustomerBusinessObjectChangeType = CustomerIntelligenceBusinessObjectChangeType
 
 
 @dataclass(frozen=True)
@@ -39,7 +56,10 @@ class CustomerBusinessObjectChangeRefreshInput:
     source_id: int
     change_type: CustomerBusinessObjectChangeType
     object_name: str
+    source_version: int | str | None = None
     payload: JsonObject = field(default_factory=dict)
+    summary: str | None = None
+    scope: CustomerIntelligenceRefreshScope = "partial"
 
 
 CustomerObjectNameBuilder = Callable[[Session | None, object], str]
@@ -57,8 +77,34 @@ class CustomerBusinessObjectIntelligenceSpec:
 
 
 class CustomerBusinessObjectIntelligenceService:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        publication_service: CustomerIntelligenceEventPublicationService | None = None,
+    ) -> None:
+        self.publication_service = publication_service or customer_intelligence_event_publication_service
         self._specs: dict[CustomerBusinessObjectSourceType, CustomerBusinessObjectIntelligenceSpec] = {
+            "customer": CustomerBusinessObjectIntelligenceSpec(
+                source_type="customer",
+                label="客户主数据",
+                object_name=lambda _db, obj: _string_attr(obj, "account_name"),
+                customer_id=lambda _db, obj: _int_attr(obj, "id"),
+                payload=_customer_payload,
+            ),
+            "customer_member": CustomerBusinessObjectIntelligenceSpec(
+                source_type="customer_member",
+                label="客户团队成员",
+                object_name=lambda _db, obj: _string_attr(obj, "user_id"),
+                customer_id=lambda _db, obj: _int_attr(obj, "customer_id"),
+                payload=_customer_member_payload,
+            ),
+            "customer_contact": CustomerBusinessObjectIntelligenceSpec(
+                source_type="customer_contact",
+                label="客户联系人",
+                object_name=lambda _db, obj: _string_attr(obj, "name"),
+                customer_id=lambda _db, obj: _int_attr(obj, "customer_id"),
+                payload=_customer_contact_payload,
+            ),
             "opportunity": CustomerBusinessObjectIntelligenceSpec(
                 source_type="opportunity",
                 label="商机",
@@ -140,6 +186,7 @@ class CustomerBusinessObjectIntelligenceService:
             source_id=source_id,
             change_type=change_type,
             object_name=spec.object_name(db, business_object) or spec.label,
+            source_version=_source_version_for_object(business_object, change_type=change_type),
             payload=spec.payload(db, business_object),
         )
 
@@ -171,6 +218,9 @@ class CustomerBusinessObjectIntelligenceService:
         business_object: object,
         change_type: CustomerBusinessObjectChangeType,
         actor_id: str | None,
+        summary: str | None = None,
+        payload: JsonObject | None = None,
+        scope: CustomerIntelligenceRefreshScope = "partial",
     ) -> CustomerIntelligenceCommittedEventRequest | None:
         change = self.build_change(
             db,
@@ -181,28 +231,60 @@ class CustomerBusinessObjectIntelligenceService:
         )
         if change is None:
             return None
+        if summary is not None or payload is not None or scope != change.scope:
+            change = replace(
+                change,
+                summary=summary if summary is not None else change.summary,
+                payload={**change.payload, **(payload or {})},
+                scope=scope,
+            )
         return self.enqueue_change_refresh(db, change)
+
+    def enqueue_object_change_refresh_after_commit(
+        self,
+        *,
+        source_type: CustomerBusinessObjectSourceType,
+        business_object: object,
+        change_type: CustomerBusinessObjectChangeType,
+        actor_id: str | None,
+        summary: str | None = None,
+        payload: JsonObject | None = None,
+        scope: CustomerIntelligenceRefreshScope = "partial",
+    ) -> CustomerIntelligenceCommittedEventRequest | None:
+        """Build a change from a committed domain object and persist its receipt.
+
+        This is the public post-commit seam for CRUD endpoints that
+        commit internally.  Callers do not construct event payloads or
+        trigger types themselves; the object registry remains the single place
+        that defines source identity and the default payload.
+        """
+        change = self.build_change(
+            None,
+            source_type=source_type,
+            business_object=business_object,
+            change_type=change_type,
+            actor_id=actor_id,
+        )
+        if change is None:
+            return None
+        change = replace(
+            change,
+            summary=summary if summary is not None else change.summary,
+            payload={**change.payload, **(payload or {})},
+            scope=scope,
+        )
+        return self.enqueue_change_refresh_after_commit(change)
 
     async def trigger_change_refresh(
         self,
         db: Session,
         change: CustomerBusinessObjectChangeRefreshInput,
     ) -> CustomerIntelligenceCommittedEventRequest:
-        return await customer_intelligence_refresh_service.trigger_business_object_change_refresh(
+        """Run the async projection path for one canonical business event."""
+        return await self.publication_service.trigger_committed_event_refresh(
             db,
-            team_id=change.team_id,
-            customer_id=change.customer_id,
-            actor_id=change.actor_id,
-            source_type=change.source_type,
-            source_id=change.source_id,
-            change_type=change.change_type,
-            summary=self._summary(change),
-            payload={
-                **change.payload,
-                "object_type": change.source_type,
-                "object_name": change.object_name,
-                "change_type": change.change_type,
-            },
+            event=self._build_intelligence_event(change),
+            scope=change.scope,
         )
 
     def enqueue_change_refresh(
@@ -210,21 +292,115 @@ class CustomerBusinessObjectIntelligenceService:
         db: Session,
         change: CustomerBusinessObjectChangeRefreshInput,
     ) -> CustomerIntelligenceCommittedEventRequest:
-        return customer_intelligence_refresh_service.enqueue_business_object_change_refresh(
+        """Publish a business-object event inside the source transaction.
+
+        The object registry and event builder own business meaning; the
+        publication service owns durable registration and savepoint isolation.
+        This keeps this boundary independent from the refresh scheduler's
+        object-specific scheduler methods.
+        """
+        event = self._build_intelligence_event(change)
+        request = self.publication_service.persist_in_transaction_request(
             db,
+            event=event,
+            scope=change.scope,
+        )
+        if request is None:  # event is always present, keep the seam defensive.
+            raise RuntimeError("客户智能事件未构造")
+        return request
+
+    def enqueue_customer_lifecycle_refresh_after_commit(
+        self,
+        *,
+        customer: object,
+        actor_id: str | None,
+        trigger_type: Literal["customer_created", "customer_converted_from_lead"],
+        source_lead_id: int | None = None,
+        scope: CustomerIntelligenceRefreshScope = "full",
+    ) -> CustomerIntelligenceCommittedEventRequest:
+        """Enqueue a customer lifecycle event without leaking scheduler details.
+
+        Customer creation and lead conversion are lifecycle events rather than
+        ordinary CRUD mutations, but they still use the same durable post-commit
+        seam as every other customer intelligence refresh.
+        """
+        team_id = _int_attr(customer, "team_id")
+        customer_id = _int_attr(customer, "id")
+        if team_id is None or customer_id is None:
+            raise ValueError("客户生命周期事件缺少团队或客户身份")
+        source_version = _source_version_for_object(customer, change_type="created")
+        version_key = str(source_version or "initial")
+        request_id = f"customer-lifecycle-{trigger_type}:{customer_id}:{source_lead_id or customer_id}:{version_key}"
+        event = customer_intelligence_event_service.customer_lifecycle_refresh_requested(
+            team_id=team_id,
+            customer_id=customer_id,
+            actor_id=actor_id,
+            request_id=request_id,
+            trigger_type=trigger_type,
+            source_lead_id=source_lead_id,
+        )
+        return self._enqueue_event_after_commit(event, scope=scope)
+
+    def enqueue_change_refresh_after_commit(
+        self,
+        change: CustomerBusinessObjectChangeRefreshInput,
+    ) -> CustomerIntelligenceCommittedEventRequest:
+        """Persist and kick a durable refresh after the source transaction commits.
+
+        This is the post-commit bridge for CRUD methods that
+        commit internally.  It deliberately uses a new short-lived session so
+        an expired/deleted ORM object is never re-read from the request session.
+        The business API must call this only after its source write has
+        succeeded.
+        """
+        return self._enqueue_event_after_commit(
+            self._build_intelligence_event(change),
+            scope=change.scope,
+        )
+
+    def _enqueue_event_after_commit(
+        self,
+        event: CustomerIntelligenceEvent,
+        *,
+        scope: CustomerIntelligenceRefreshScope,
+    ) -> CustomerIntelligenceCommittedEventRequest:
+        request = self.publication_service.enqueue_after_commit(
+            event=event,
+            scope=scope,
+        )
+        return request
+
+    def _build_intelligence_event(
+        self,
+        change: CustomerBusinessObjectChangeRefreshInput,
+    ) -> CustomerIntelligenceEvent:
+        payload: JsonObject = {
+            **change.payload,
+            "object_type": change.source_type,
+            "object_name": change.object_name,
+            "change_type": change.change_type,
+            "refresh_scope": change.scope,
+        }
+        source_version = change.source_version
+        change_id = (
+            f"{change.source_type}:{change.source_id}:{source_version}"
+            if source_version is not None
+            else f"{change.source_type}:{change.source_id}:{change.change_type}"
+        )
+        return customer_intelligence_event_service.business_object_changed(
             team_id=change.team_id,
             customer_id=change.customer_id,
             actor_id=change.actor_id,
+            trigger_type=customer_business_object_trigger_for_change(
+                change.change_type,
+                source_type=change.source_type,
+            ),
             source_type=change.source_type,
             source_id=change.source_id,
-            change_type=change.change_type,
-            summary=self._summary(change),
-            payload={
-                **change.payload,
-                "object_type": change.source_type,
-                "object_name": change.object_name,
-                "change_type": change.change_type,
-            },
+            change_id=change_id,
+            summary=change.summary or self._summary(change),
+            source_version=source_version,
+            payload=payload,
         )
 
     def _summary(self, change: CustomerBusinessObjectChangeRefreshInput) -> str:
@@ -237,6 +413,40 @@ class CustomerBusinessObjectIntelligenceService:
         name = change.object_name.strip() or object_label
         return f"{object_label}{action_label}: {name}"
 
+
+
+
+def _source_version_for_object(
+    business_object: object,
+    *,
+    change_type: CustomerBusinessObjectChangeType,
+) -> int | str | None:
+    """Return a stable business revision for event idempotency.
+
+    Opportunity already exposes an optimistic-lock version.  Other
+    business objects expose timestamps, so use the deletion timestamp for a
+    delete and otherwise the last-modified/created timestamp.  The value is
+    deliberately metadata only; it never becomes a business status.
+    """
+
+    if change_type == "deleted":
+        deleted_at = _raw_attr(business_object, "deleted_at")
+        if deleted_at is not None:
+            return _date_iso_attr(business_object, "deleted_at")
+    version = _raw_attr(business_object, "version")
+    if version is None:
+        version = _raw_attr(business_object, "post_commit_revision")
+    if isinstance(version, bool):
+        version = None
+    if isinstance(version, int) and version >= 0:
+        return version
+    if isinstance(version, str) and version.strip():
+        return version.strip()
+    for field_name in ("last_modified_time", "updated_time", "created_time"):
+        value = _raw_attr(business_object, field_name)
+        if value is not None:
+            return _date_iso_attr(business_object, field_name)
+    return None
 
 def _raw_attr(obj: object, name: str) -> object:
     return getattr(obj, name, None)
@@ -295,6 +505,44 @@ def _has_attr_value(obj: object, name: str) -> bool:
 
 def _payload(values: dict[str, JsonValue]) -> JsonObject:
     return values
+
+
+def _customer_payload(_db: Session | None, customer: object) -> JsonObject:
+    return _payload({
+        "account_name": _string_attr(customer, "account_name"),
+        "industry": _string_attr(customer, "industry") or None,
+        "city": _string_attr(customer, "city") or None,
+        "address": _string_attr(customer, "address") or None,
+        "company_scale": _string_attr(customer, "company_scale") or None,
+        "source": _string_attr(customer, "source") or None,
+        "status": _int_attr(customer, "status"),
+        "owner_id": _string_attr(customer, "owner_id") or None,
+        "return_reason": _string_attr(customer, "return_reason") or None,
+        "loss_reason": _string_attr(customer, "loss_reason") or None,
+    })
+
+
+def _customer_contact_payload(_db: Session | None, contact: object) -> JsonObject:
+    return _payload({
+        "name": _string_attr(contact, "name"),
+        "gender": _string_attr(contact, "gender") or None,
+        "position": _string_attr(contact, "position") or None,
+        "is_decision_maker": bool(_raw_attr(contact, "is_decision_maker")),
+        "is_primary": bool(_raw_attr(contact, "is_primary")),
+        "reports_to": _string_attr(contact, "reports_to") or None,
+        "remark": _string_attr(contact, "remark") or None,
+    })
+
+
+def _customer_member_payload(_db: Session | None, member: object) -> JsonObject:
+    return _payload({
+        "member_id": _int_attr(member, "id"),
+        "user_id": _string_attr(member, "user_id"),
+        "member_role": _string_attr(member, "member_role"),
+        "access_level": _string_attr(member, "access_level"),
+        "remark": _string_attr(member, "remark") or None,
+        "is_active": bool(_raw_attr(member, "is_active")),
+    })
 
 
 def _opportunity_payload(_db: Session | None, opportunity: object) -> JsonObject:

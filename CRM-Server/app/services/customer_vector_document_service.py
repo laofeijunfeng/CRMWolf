@@ -1,6 +1,5 @@
 """Persistence service for customer evidence metadata."""
 
-from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from app.models.customer import Customer
@@ -13,7 +12,7 @@ from app.models.customer_vector_document import (
 from app.models.deal_journey import CustomerDealJourneyEvent
 from app.models.sales_commitment import FollowUpTask, SalesCommitment
 from app.services.customer_evidence_builder import BuiltCustomerEvidence, customer_evidence_builder
-from app.services.industry_display_service import industry_display_service
+from app.services.customer_qdrant_index_service import CUSTOMER_EVIDENCE_SOURCE_TYPES
 from app.utils.time import business_now
 
 
@@ -28,7 +27,8 @@ class CustomerVectorDocumentService:
                         CustomerVectorDocumentSyncStatus.FAILED,
                         CustomerVectorDocumentSyncStatus.DELETE_PENDING,
                     ]
-                )
+                ),
+                CustomerVectorDocument.source_type.in_(CUSTOMER_EVIDENCE_SOURCE_TYPES),
             )
             .order_by(CustomerVectorDocument.updated_time.asc(), CustomerVectorDocument.id.asc())
             .limit(limit)
@@ -44,7 +44,8 @@ class CustomerVectorDocumentService:
                         CustomerVectorDocumentSyncStatus.SYNCED,
                         CustomerVectorDocumentSyncStatus.FAILED,
                     ]
-                )
+                ),
+                CustomerVectorDocument.source_type.in_(CUSTOMER_EVIDENCE_SOURCE_TYPES),
             )
             .all()
         )
@@ -59,69 +60,6 @@ class CustomerVectorDocumentService:
             else:
                 db.flush()
         return len(documents)
-
-    def list_stale_customer_profile_customers(
-        self,
-        db: Session,
-        *,
-        team_id: int | None = None,
-        metadata_version: int | None = None,
-        limit: int = 100,
-    ) -> list[Customer]:
-        target_metadata_version = metadata_version or customer_evidence_builder.metadata_version
-        profile_document_join = and_(
-            CustomerVectorDocument.team_id == Customer.team_id,
-            CustomerVectorDocument.customer_id == Customer.id,
-            CustomerVectorDocument.source_type == CustomerVectorDocumentSourceType.CUSTOMER_PROFILE,
-        )
-        query = (
-            db.query(Customer)
-            .outerjoin(CustomerVectorDocument, profile_document_join)
-            .filter(
-                Customer.account_name.isnot(None),
-                Customer.account_name != "",
-                (
-                    (CustomerVectorDocument.id.is_(None))
-                    | (CustomerVectorDocument.metadata_version < target_metadata_version)
-                    | (
-                        CustomerVectorDocument.sync_status.in_([
-                            CustomerVectorDocumentSyncStatus.FAILED,
-                            CustomerVectorDocumentSyncStatus.DELETED,
-                        ])
-                    )
-                ),
-            )
-        )
-        if team_id is not None:
-            query = query.filter(Customer.team_id == team_id)
-        return query.order_by(Customer.id.asc()).limit(max(1, min(limit, 500))).all()
-
-    def rebuild_stale_customer_profiles(
-        self,
-        db: Session,
-        *,
-        team_id: int | None = None,
-        metadata_version: int | None = None,
-        limit: int = 100,
-        commit: bool = True,
-    ) -> list[int]:
-        customers = self.list_stale_customer_profile_customers(
-            db,
-            team_id=team_id,
-            metadata_version=metadata_version,
-            limit=limit,
-        )
-        rebuilt_customer_ids: list[int] = []
-        for customer in customers:
-            document = self.upsert_customer_profile(db, customer, commit=False)
-            if document is not None:
-                rebuilt_customer_ids.append(int(customer.id))
-        if rebuilt_customer_ids:
-            if commit:
-                db.commit()
-            else:
-                db.flush()
-        return rebuilt_customer_ids
 
     def upsert_evidence_metadata(
         self,
@@ -198,33 +136,6 @@ class CustomerVectorDocumentService:
         commit: bool = True,
     ) -> CustomerVectorDocument | None:
         evidence = customer_evidence_builder.from_customer_activity(activity)
-        if evidence is None:
-            return None
-        return self.upsert_evidence_metadata(db, evidence, commit=commit)
-
-    def upsert_customer_profile(
-        self,
-        db: Session,
-        customer: Customer,
-        *,
-        commit: bool = True,
-    ) -> CustomerVectorDocument | None:
-        evidence = customer_evidence_builder.from_customer_profile(
-            customer,
-            industry_display_name=industry_display_service.display_name(db, customer.industry),
-        )
-        if evidence is None:
-            return None
-        return self.upsert_evidence_metadata(db, evidence, commit=commit)
-
-    def upsert_customer_brief(
-        self,
-        db: Session,
-        customer: Customer,
-        *,
-        commit: bool = True,
-    ) -> CustomerVectorDocument | None:
-        evidence = customer_evidence_builder.from_customer_brief(customer)
         if evidence is None:
             return None
         return self.upsert_evidence_metadata(db, evidence, commit=commit)

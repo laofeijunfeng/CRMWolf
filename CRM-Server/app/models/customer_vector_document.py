@@ -6,8 +6,6 @@ from app.utils.time import business_now
 
 class CustomerVectorDocumentSourceType:
     CUSTOMER = "customer"
-    CUSTOMER_PROFILE = "customer_profile"
-    CUSTOMER_BRIEF = "customer_brief"
     FOLLOW_UP = "follow_up"
     SALES_COMMITMENT = "sales_commitment"
     FOLLOW_UP_TASK = "follow_up_task"

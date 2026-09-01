@@ -24,6 +24,7 @@ from app.models.sales_commitment import (
     FollowUpTaskConfirmationPromptDelivery,
     FollowUpTaskConfirmationPromptStatus,
     FollowUpTaskConfirmationStatus,
+    FollowUpTaskStatus,
 )
 from app.services.agent.interaction_contract import (
     INTERACTION_TYPE_CHOICE,
@@ -159,15 +160,21 @@ class FollowUpTaskConfirmationChannelService:
             case_public_id,
             team_id=team_id,
         )
+        task = (
+            follow_up_task_crud.get_by_id(db, case.task_id, team_id=team_id)
+            if case is not None
+            else None
+        )
         now = business_now()
         if (
             case is None
+            or task is None
+            or task.status != FollowUpTaskStatus.OPEN
             or case.owner_id != str(user_id)
             or case.status != FollowUpTaskConfirmationStatus.PENDING
             or (case.expires_at is not None and case.expires_at <= now)
         ):
             return None
-        task = follow_up_task_crud.get_by_id(db, case.task_id, team_id=team_id)
         customer = self._customers_by_id(
             db,
             team_id=team_id,
@@ -276,6 +283,9 @@ class FollowUpTaskConfirmationChannelService:
         if case is None or case.owner_id != str(user_id):
             return False
         if case.status != FollowUpTaskConfirmationStatus.PENDING:
+            return False
+        task = follow_up_task_crud.get_by_id(db, case.task_id, team_id=team_id)
+        if task is None or task.owner_id != str(user_id) or task.status != FollowUpTaskStatus.OPEN:
             return False
         return case.expires_at is None or case.expires_at > business_now()
 
@@ -762,6 +772,23 @@ class FollowUpTaskConfirmationChannelService:
                 )
                 continue
             task = follow_up_task_crud.get_by_id(db, case.task_id, team_id=team_id)
+            if (
+                task is None
+                or task.owner_id != owner_id
+                or task.status != FollowUpTaskStatus.OPEN
+            ):
+                self._record_projection_attempt(
+                    db,
+                    case=case,
+                    owner_id=owner_id,
+                    interaction_id=interaction_id,
+                    prompt_key=prompt_key,
+                    interaction_scope=interaction_scope,
+                    turn_scope=turn_scope,
+                    status=FollowUpTaskConfirmationPromptStatus.SKIPPED,
+                    reason_code="TASK_NOT_OPEN",
+                )
+                continue
             customer = self._customers_by_id(
                 db,
                 team_id=team_id,

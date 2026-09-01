@@ -18,6 +18,7 @@ from langchain_openai import ChatOpenAI
 from openai import APIConnectionError, APIStatusError, APITimeoutError
 from pydantic import ConfigDict, Field, ValidationError, model_validator
 
+from app.services.agent.query.authority import CRMQueryAuthority, CRMQueryAuthorityError
 from app.services.agent.query.executor import CRMQueryExecutionError
 from app.services.agent.query.registry import (
     CRMReadToolInputError,
@@ -121,6 +122,8 @@ class CRMQueryAgentRequest(QueryContractModel):
     previous_query: CRMQuerySpec | None = None
     entity_refs: list[EntityRef] = Field(default_factory=list, max_length=100)
     allowed_tool_names: list[str] | None = Field(default=None, min_length=1, max_length=20)
+    authoritative_filters: list[CRMFilter] = Field(default_factory=list, max_length=10)
+    authoritative_scope: Literal["accessible", "mine", "team"] | None = None
 
     @model_validator(mode="after")
     def require_unique_references_and_tool_names(self) -> CRMQueryAgentRequest:
@@ -159,6 +162,11 @@ def _query_agent_user_content(request: CRMQueryAgentRequest) -> str:
                 ref.model_dump(mode="json", exclude_none=True)
                 for ref in request.entity_refs
             ],
+            "server_authoritative_filters": [
+                condition.model_dump(mode="json", exclude_none=True)
+                for condition in request.authoritative_filters
+            ],
+            "server_authoritative_scope": request.authoritative_scope,
             "instruction": " ".join(instructions),
         },
         ensure_ascii=False,
@@ -473,12 +481,18 @@ class CRMQueryAgent:
             limits=self._limits,
             deadline_at=tool_context.deadline_at,
         )
+        authority = CRMQueryAuthority(
+            entity_refs=tuple(request.entity_refs),
+            filters=tuple(request.authoritative_filters),
+            scope=request.authoritative_scope,
+        )
         tools = [
             self._build_tool(
                 spec,
                 tool_context,
                 turn,
                 previous_query=request.previous_query,
+                authority=authority,
             )
             for spec in specs
         ]
@@ -636,17 +650,26 @@ class CRMQueryAgent:
         turn: _TurnExecution,
         *,
         previous_query: CRMQuerySpec | None,
+        authority: CRMQueryAuthority,
     ) -> StructuredTool:
         async def coroutine(**kwargs: object) -> dict[str, object]:
             async with turn.execution_lock:
                 started_at = monotonic()
-                kwargs = _inherit_previous_query_filters(
-                    previous_query=previous_query,
-                    resource=spec.resource,
-                    tool_input=kwargs,
-                )
                 if not turn.begin_call(spec.name):
                     return turn.blocked_call_payload()
+                try:
+                    kwargs = _inherit_previous_query_filters(
+                        previous_query=previous_query,
+                        resource=spec.resource,
+                        tool_input=kwargs,
+                    )
+                    if spec.resource is not None:
+                        kwargs = authority.constrain_query(spec.resource, kwargs)
+                    else:
+                        kwargs = authority.constrain_context(kwargs)
+                except CRMQueryAuthorityError as exc:
+                    error = QueryError(code="QUERY_INVALID", message=str(exc), retryable=False)
+                    return turn.record_query_invalid(spec.name, error, started_at=started_at)
                 if spec.resource is not None:
                     page_size = kwargs.get("page_size")
                     if isinstance(page_size, int) and page_size > self._limits.max_rows_per_tool:
@@ -729,6 +752,7 @@ class CRMQueryAgent:
                 turn.trace(),
             )
         return response
+
 
 
 def _classify_model_transport_error(error: Exception) -> QueryError | None:

@@ -39,8 +39,6 @@ class StubIntelligenceContext:
                     "account_name": "上海睿狐科技",
                     "city": "上海",
                     "owner_id": "42",
-                    "customer_brief_status": "READY",
-                    "customer_brief_markdown": "客户正在推进续约。",
                 },
                 "customer_facts": [
                     {"id": 901, "customer_id": 101, "content": "本周确认续约范围"}
@@ -134,7 +132,7 @@ async def test_customer_context_reader_authorizes_public_id_and_removes_internal
     )
 
     result = await reader.read(
-        _request("profile", "brief", "contacts", "contracts", "payments", "activities", "evidence"),
+        _request("profile", "contacts", "contracts", "payments", "activities", "evidence"),
         _context(),
     )
 
@@ -156,7 +154,6 @@ async def test_customer_context_reader_authorizes_public_id_and_removes_internal
     assert result.coverage.unavailable == []
     assert result.coverage.returned == [
         "profile",
-        "brief",
         "contacts",
         "contracts",
         "payments",
@@ -187,9 +184,9 @@ async def test_customer_context_reader_exposes_qdrant_degradation_without_fake_e
         context_service=RecordingContextService(DegradedContext()),
     )
 
-    result = await reader.read(_request("brief", "evidence"), _context())
+    result = await reader.read(_request("profile", "evidence"), _context())
 
-    assert result.coverage.returned == ["brief"]
+    assert result.coverage.returned == ["profile"]
     assert result.coverage.unavailable == ["evidence"]
     assert result.degraded_reasons == ["customer_intelligence:embedding_unavailable"]
     assert all(citation.source != "QDRANT" for citation in result.citations)

@@ -46,8 +46,6 @@ class CustomerIntelligenceBackfillScheduler:
                 "total": result.total,
                 "scheduled": result.scheduled,
                 "customer_ids": result.customer_ids,
-                "profile_vector_reindexed": result.profile_vector_reindexed,
-                "profile_vector_customer_ids": list(result.profile_vector_customer_ids),
             }
         except Exception:
             db.rollback()

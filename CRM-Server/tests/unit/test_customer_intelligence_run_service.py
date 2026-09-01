@@ -15,6 +15,7 @@ from app.services.customer_intelligence_run_service import (
     CustomerIntelligenceRunClaimStatus,
     CustomerIntelligenceRunInput,
     CustomerIntelligenceRunLeaseMutationStatus,
+    _result_summary,
     customer_intelligence_run_service,
 )
 
@@ -56,7 +57,7 @@ def _input(**kwargs) -> CustomerIntelligenceRunInput:  # noqa: ANN003
     return CustomerIntelligenceRunInput(
         request_id=request_id,
         event=_event(request_id=request_id, **kwargs),
-        scope="brief",
+        scope="partial",
         max_attempts=max_attempts,
     )
 
@@ -143,7 +144,7 @@ def test_terminal_run_is_never_restarted_by_ensure_or_claim():
         run_input,
         lease_token=str(claim.lease_token),
         result={
-            "route": "refresh_brief",
+            "route": "refresh_profile",
             "event": {"event_key": "event-1"},
             "visible_trace": [{"title": "提炼客户事实", "content": "提炼出 6 条可沉淀事实"}],
         },
@@ -186,13 +187,13 @@ def test_stale_lease_cannot_overwrite_new_owner_success():
         db,
         run_input,
         lease_token=str(owner.lease_token),
-        result={"route": "refresh_brief"},
+        result={"route": "refresh_profile"},
         finished_at=now + timedelta(seconds=33),
     )
 
     assert stale_result.status == CustomerIntelligenceRunLeaseMutationStatus.STALE_LEASE
     assert owner_result.status == CustomerIntelligenceRunLeaseMutationStatus.APPLIED
-    assert owner_result.run.route == "refresh_brief"
+    assert owner_result.run.route == "refresh_profile"
 
 
 def test_failure_schedules_retry_then_exhaustion_becomes_terminal():
@@ -294,3 +295,67 @@ def test_lease_mutation_cannot_lock_cross_team_row_even_with_same_run_key():
     assert cross_team_run.team_id == 3
     assert cross_team_run.status == CustomerIntelligenceRunStatus.RUNNING
     assert cross_team_run.route is None
+
+
+def test_result_summary_reports_only_profile_sections_updated_by_projection():
+    summary = _result_summary(
+        {
+            "route": "refresh_profile",
+            "event": {"event_key": "activity:1:updated"},
+            "profile_projection_draft": {
+                "sections": {
+                    "current_situation": {},
+                    "current_journeys": [],
+                    "important_changes": [],
+                },
+                "evidence_refs": [],
+            },
+            "profile_projection_result": {
+                "success": True,
+                "target_sections": ["recorded_follow_ups"],
+                "changed_sections": ["recorded_follow_ups"],
+            },
+        }
+    )
+
+    assert summary["target_sections"] == ["recorded_follow_ups"]
+    assert summary["changed_sections"] == ["recorded_follow_ups"]
+
+
+def test_result_summary_preserves_profile_version_and_explicit_scope_diff():
+    summary = _result_summary(
+        {
+            "route": "refresh_profile",
+            "event": {"event_key": "activity:2:updated"},
+            "profile_projection_result": {
+                "success": True,
+                "profile_version": 12,
+                "profile_version_id": "cpv_12",
+                "target_sections": ["current_situation", "follow_up_process"],
+                "changed_sections": ["current_situation"],
+            },
+        }
+    )
+
+    assert summary["profile_version"] == 12
+    assert summary["profile_version_id"] == "cpv_12"
+    assert summary["target_sections"] == ["current_situation", "follow_up_process"]
+    assert summary["changed_sections"] == ["current_situation"]
+
+
+def test_result_summary_keeps_duplicate_publication_without_section_changes():
+    summary = _result_summary(
+        {
+            "route": "refresh_profile",
+            "profile_projection_result": {
+                "success": True,
+                "deduplicated": True,
+                "profile_version": "7",
+                "target_sections": ["current_situation"],
+                "changed_sections": [],
+            },
+        }
+    )
+
+    assert summary["profile_version"] == 7
+    assert summary["changed_sections"] == []

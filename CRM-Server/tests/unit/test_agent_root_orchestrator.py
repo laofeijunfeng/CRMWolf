@@ -45,6 +45,7 @@ from app.services.agent.query import (
     QueryError,
 )
 from app.services.agent.workflow import WorkflowTurnInput
+from app.services.agent.query.semantic_intent import CRMQuerySemanticIntent, QueryTemporalIntent
 from app.services.agent.workflow.progress import execution_progress
 
 
@@ -108,6 +109,16 @@ class StubDecisionClassifier:
 class FailingClassifier:
     async def classify(self, **kwargs: object) -> RootDecision:
         raise AssertionError("deterministic interaction must not call decision model")
+
+
+class RecordingSemanticIntentResolver:
+    def __init__(self, intent: CRMQuerySemanticIntent) -> None:
+        self.intent = intent
+        self.calls: list[str] = []
+
+    async def resolve(self, text: str, *, model_config: object, runtime: object) -> CRMQuerySemanticIntent:
+        self.calls.append(text)
+        return self.intent
 
 
 class FailingInteractionResolver:
@@ -928,6 +939,11 @@ class RecordingCRMQueryAgent:
         )
 
 
+class StubRootSemanticIntentResolver:
+    async def resolve(self, text: str, **kwargs: object) -> CRMQuerySemanticIntent:
+        return CRMQuerySemanticIntent(scope="customer_list", resource="customers", confidence=1)
+
+
 async def test_root_query_route_uses_existing_stateless_query_agent_contract() -> None:
     query_agent = RecordingCRMQueryAgent()
     query_model_config = CRMQueryAgentModelConfig(
@@ -940,7 +956,10 @@ async def test_root_query_route_uses_existing_stateless_query_agent_contract() -
         checkpointer=InMemorySaver(),
         context_resolver=StaticContextResolver(),
         decision_classifier=StubDecisionClassifier(query_decision(reason_code="NEW_CITY_CUSTOMER_QUERY")),
-        query_executor=CRMQueryAgentExecutor(query_agent=query_agent),
+        query_executor=CRMQueryAgentExecutor(
+            query_agent=query_agent,
+            semantic_intent_resolver=StubRootSemanticIntentResolver(),
+        ),
         interaction_resolver=FailingInteractionResolver(),
         workflow_subgraph=failing_workflow_subgraph(),
     )
@@ -1274,6 +1293,129 @@ class UnavailableDecisionClassifier:
         from app.services.agent.orchestrator import RootDecisionModelUnavailableError
 
         raise RootDecisionModelUnavailableError("decision model unavailable")
+
+
+async def test_global_follow_up_query_bypasses_unavailable_decision_model() -> None:
+    query_executor = RecordingQueryExecutor()
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(),
+        decision_classifier=UnavailableDecisionClassifier(),
+        query_executor=query_executor,
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=failing_workflow_subgraph(),
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=1,
+            session_id=556,
+            client_request_id="req_global_follow_up_query_without_root_model",
+            input=TextTurnInput(type="text", text="这周有哪些事情要做"),
+        ),
+        runtime=RootRuntimeContext(),
+    )
+
+    assert isinstance(result, FailureDispatchResult)
+    assert result.error.code == "ROOT_DECISION_MODEL_UNAVAILABLE"
+    assert query_executor.calls == []
+
+
+async def test_semantic_query_preflight_routes_global_work_before_root_classifier() -> None:
+    query_executor = RecordingQueryExecutor()
+    semantic_resolver = RecordingSemanticIntentResolver(
+        CRMQuerySemanticIntent(
+            scope="global_work",
+            resource="follow_up_tasks",
+            temporal=QueryTemporalIntent(kind="this_week"),
+            confidence=0.97,
+        )
+    )
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(),
+        decision_classifier=UnavailableDecisionClassifier(),
+        query_executor=query_executor,
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=failing_workflow_subgraph(),
+        semantic_intent_resolver=semantic_resolver,
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=1,
+            session_id=556,
+            client_request_id="req_semantic_global_work_preflight",
+            input=TextTurnInput(type="text", text="这周有哪些事情要做"),
+        ),
+        runtime=RootRuntimeContext(
+            query_model_config=CRMQueryAgentModelConfig(
+                api_host="https://ai.example.com/v1",
+                api_key="key",
+                model="query-model",
+                temperature=0.0,
+            )
+        ),
+    )
+
+    assert isinstance(result, QueryDispatchResult)
+    assert result.decision.reason_code == "SEMANTIC_QUERY_INTENT"
+    assert semantic_resolver.calls == ["这周有哪些事情要做"]
+    assert len(query_executor.calls) == 1
+    assert query_executor.calls[0].semantic_intent == semantic_resolver.intent
+
+
+async def test_selected_customer_semantic_query_uses_selected_entity_without_customer_text() -> None:
+    selected_customer = EntityRef(
+        ref_id="eref_customer_selected_semantic",
+        resource="customer",
+        public_id="cus_selected_semantic",
+        display_name="广州睿狐科技有限公司",
+    )
+    query_executor = RecordingQueryExecutor()
+    semantic_resolver = RecordingSemanticIntentResolver(
+        CRMQuerySemanticIntent(
+            scope="customer_scoped",
+            resource="follow_up_tasks",
+            temporal=QueryTemporalIntent(kind="this_week"),
+            confidence=0.97,
+        )
+    )
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(),
+        decision_classifier=UnavailableDecisionClassifier(),
+        query_executor=query_executor,
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=failing_workflow_subgraph(),
+        semantic_intent_resolver=semantic_resolver,
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=1,
+            session_id=556,
+            client_request_id="req_selected_customer_semantic_query",
+            input=TextTurnInput(type="text", text="这周有哪些待办"),
+            selected_entity_ref=selected_customer,
+        ),
+        runtime=RootRuntimeContext(
+            query_model_config=CRMQueryAgentModelConfig(
+                api_host="https://ai.example.com/v1",
+                api_key="key",
+                model="query-model",
+                temperature=0.0,
+            )
+        ),
+    )
+
+    assert isinstance(result, QueryDispatchResult)
+    assert result.decision.context_policy.selected_entity == "USE"
+    assert query_executor.calls[0].selected_entity == selected_customer
+    assert query_executor.calls[0].semantic_intent == semantic_resolver.intent
 
 
 async def test_explicit_query_bypasses_unavailable_decision_model() -> None:

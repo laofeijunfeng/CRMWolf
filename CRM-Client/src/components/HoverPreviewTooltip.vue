@@ -48,8 +48,8 @@ const props = withDefaults(defineProps<Props>(), {
 }
 
 .hover-preview-tooltip {
+  max-width: 380px;
   font-size: $wolf-font-size-caption-v2;
-  white-space: nowrap;
 }
 
 .tooltip-row {
@@ -65,5 +65,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 .tooltip-value {
   color: $wolf-text-primary-v2;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 </style>

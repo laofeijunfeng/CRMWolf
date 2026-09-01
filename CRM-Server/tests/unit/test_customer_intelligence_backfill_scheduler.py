@@ -91,8 +91,6 @@ async def test_customer_intelligence_backfill_scheduler_runs_missing_backfill_wi
 
     assert result["success"] is True
     assert result["scheduled"] == 1
-    assert result["profile_vector_reindexed"] == 0
-    assert result["profile_vector_customer_ids"] == []
     assert refresh_service.calls == [{
         "db": fake_session,
         "team_id": None,

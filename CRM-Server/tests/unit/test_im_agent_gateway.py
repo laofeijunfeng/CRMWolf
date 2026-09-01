@@ -5,11 +5,77 @@ import pytest
 import app.services.im_agent_gateway as gateway_module
 import app.services.im_feishu as feishu_module
 from app.services.agent.input import AgentInputKind
+from app.models.sales_commitment import (
+    FollowUpTaskConfirmationDeliveryPurpose,
+    FollowUpTaskConfirmationPromptStatus,
+    FollowUpTaskConfirmationStatus,
+    FollowUpTaskStatus,
+)
 from app.services.follow_up_task_confirmation_channel_service import (
     FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION,
 )
 from app.services.im_agent_gateway import IMAgentGateway
 from app.services.im_feishu import FeishuBotService
+
+
+def test_im_gateway_rejects_confirmation_reply_for_closed_task(monkeypatch):
+    gateway = IMAgentGateway()
+    monkeypatch.setattr(
+        gateway_module.im_inbound_event_crud,
+        "get_by_response_message_id",
+        lambda *args, **kwargs: SimpleNamespace(
+            confirmation_delivery_public_id="fud_1",
+            confirmation_case_public_id="fuc_1",
+            agent_session_id=9,
+            agent_interaction_id="interaction_1",
+            prompt_delivery_key="prompt_1",
+        ),
+    )
+    monkeypatch.setattr(
+        gateway_module.follow_up_task_confirmation_prompt_delivery_crud,
+        "get_by_public_id",
+        lambda *args, **kwargs: SimpleNamespace(
+            id=11,
+            case_id=22,
+            owner_id="2",
+            provider="feishu",
+            purpose=FollowUpTaskConfirmationDeliveryPurpose.IM_PROMPT,
+            status=FollowUpTaskConfirmationPromptStatus.SENT,
+            agent_session_id=9,
+            interaction_id="interaction_1",
+            prompt_key="prompt_1",
+            public_id="fud_1",
+        ),
+    )
+    monkeypatch.setattr(
+        gateway_module.follow_up_task_confirmation_case_crud,
+        "get_by_public_id",
+        lambda *args, **kwargs: SimpleNamespace(
+            id=22,
+            task_id=101,
+            owner_id="2",
+            status=FollowUpTaskConfirmationStatus.PENDING,
+            public_id="fuc_1",
+        ),
+    )
+    monkeypatch.setattr(
+        gateway_module.follow_up_task_crud,
+        "get_by_id",
+        lambda *args, **kwargs: SimpleNamespace(
+            owner_id="2",
+            status=FollowUpTaskStatus.COMPLETED,
+        ),
+    )
+
+    target = gateway._resolve_confirmation_target_for_response_message(
+        object(),
+        team_id=1,
+        user_id=2,
+        provider="feishu",
+        response_message_id="om_reply",
+    )
+
+    assert target is None
 
 
 @pytest.mark.asyncio

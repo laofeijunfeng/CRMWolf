@@ -279,15 +279,6 @@ class CustomerResponse(BaseModel):
     created_time: datetime = Field(..., description="创建时间")
     last_modified_time: datetime = Field(..., description="最后修改时间")
     version: int = Field(..., description="版本号（乐观锁，防止并发修改冲突）")
-    # 档案字段
-    company_background: Optional[str] = Field(None, description="企业背景")
-    company_website: Optional[str] = Field(None, description="公司官网")
-    main_business: Optional[str] = Field(None, description="主营业务")
-    similar_customers: Optional[str] = Field(None, description="同行业客户")
-    project_background: Optional[str] = Field(None, description="项目需求背景")
-    profile_status: Optional[str] = Field(None, description="档案生成状态")
-    profile_generated_time: Optional[datetime] = Field(None, description="档案生成完成时间")
-    profile_error_message: Optional[str] = Field(None, description="档案生成失败原因")
     # License 授权字段
     license_expiry_date: Optional[date] = Field(None, description="客户 License 最晚到期时间")
     license_type: Optional[str] = Field(None, description="客户 License 类型：TRIAL/OFFICIAL")
@@ -425,22 +416,6 @@ class CustomerDetailResponse(BaseModel):
     contacts: List[ContactResponse] = []
     owner_info: Optional[OwnerInfo] = Field(None, description="负责人信息")
     creator_info: Optional[OwnerInfo] = Field(None, description="创建人信息")
-    # 档案字段
-    company_background: Optional[str] = None
-    company_website: Optional[str] = None
-    main_business: Optional[str] = None
-    similar_customers: Optional[str] = None
-    project_background: Optional[str] = None
-    profile_status: Optional[str] = None
-    profile_generated_time: Optional[datetime] = None
-    profile_error_message: Optional[str] = None
-    # 客户概况字段
-    customer_brief_json: Optional[str] = None
-    customer_brief_markdown: Optional[str] = None
-    customer_brief_citations: Optional[str] = None
-    customer_brief_status: Optional[str] = None
-    customer_brief_generated_time: Optional[datetime] = None
-    customer_brief_error_message: Optional[str] = None
     customer_intelligence_has_inputs: bool = Field(False, description="是否存在可用于整理客户智能档案的业务输入")
     # License 授权字段
     license_expiry_date: Optional[date] = Field(None, description="客户 License 最晚到期时间")
@@ -460,19 +435,19 @@ class MessageResponse(BaseModel):
 
 
 class CustomerIntelligenceBatchRebuildRequest(BaseModel):
-    scope: Literal["full", "brief"] = Field("full", description="重建范围：full=客户档案和客户概况，brief=客户概况")
+    scope: Literal["full", "partial"] = Field("full", description="重建范围：full=完整客户档案，partial=按业务事件更新受影响部分")
     customer_ids: Optional[List[str]] = Field(None, description="指定客户对外ID；为空时按团队批量重建")
     limit: int = Field(100, ge=1, le=500, description="本次最多调度的客户数")
 
 
 class CustomerIntelligenceRegenerateRequest(BaseModel):
-    scope: Literal["full", "brief"] = Field("full", description="重建范围：full=客户档案和客户概况，brief=客户概况")
+    scope: Literal["full", "partial"] = Field("full", description="重建范围：full=完整客户档案，partial=按业务事件更新受影响部分")
 
 
 class CustomerIntelligenceBatchRebuildResponse(BaseModel):
     message: str = Field(..., description="响应消息")
     request_id: str = Field(..., description="批量重建请求ID")
-    scope: Literal["full", "brief"] = Field(..., description="重建范围")
+    scope: Literal["full", "partial"] = Field(..., description="重建范围")
     total: int = Field(..., description="匹配客户数")
     scheduled: int = Field(..., description="已调度客户数")
     customer_ids: List[str] = Field(..., description="已调度的客户对外ID")

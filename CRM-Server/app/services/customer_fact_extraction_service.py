@@ -37,6 +37,11 @@ class ExtractedCustomerFact(BaseModel):
     confidence: float = Field(0.0, ge=0.0, le=1.0, description="事实可靠度")
     action: FactExtractionAction = Field("upsert", description="upsert=进入自动沉淀评估，ignore=不沉淀")
     evidence_quote: str | None = Field(None, max_length=300, description="来自触发事件或证据的短引用")
+    evidence_keys: list[str] = Field(
+        default_factory=list,
+        max_length=8,
+        description="支持该事实的上下文证据键，只能使用输入上下文中存在的键",
+    )
     reason: str = Field("", max_length=300, description="为什么提炼该事实")
 
     @field_validator("subject", "evidence_quote", mode="before")
@@ -46,6 +51,13 @@ class ExtractedCustomerFact(BaseModel):
             cleaned = value.strip()
             return cleaned or None
         return value
+
+    @field_validator("evidence_keys", mode="before")
+    @classmethod
+    def _clean_evidence_keys(cls, value: object) -> object:
+        if not isinstance(value, list):
+            return []
+        return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))[:8]
 
     @field_validator("reason")
     @classmethod
@@ -137,7 +149,8 @@ class CustomerFactExtractionService:
 
 
 def _system_prompt(current_date: date) -> str:
-    return f"""你是 CRM 客户智能档案的事实提炼 Agent。
+    return (
+        f"""你是 CRM 客户智能档案的事实提炼 Agent。
 
 当前日期：{current_date.isoformat()}
 
@@ -146,11 +159,18 @@ def _system_prompt(current_date: date) -> str:
 原则：
 - 只能提炼有明确依据的事实，不要编造。
 - MySQL strong_context 是强事实；semantic_evidence 只是辅助证据。
-- 不要把合同、商机、回款等系统字段改写成强事实；只沉淀客户别名、客户需求、风险、预算、阶段状态、关键人态度、竞品、下一步、偏好、摘要。
-- 如果证据明确表达客户的简称、别称、集团简称、机构简称或常用内部叫法，输出 fact_type=alias；subject 和 content 均使用该称呼本身，不要包含系统 ID 或代码。
+- 不要把合同、商机、回款等系统字段改写成强事实；只沉淀客户别名、客户需求、
+  风险、预算、阶段状态、关键人态度、竞品、下一步、偏好、摘要。
+- 如果证据明确表达客户的简称、别称、集团简称、机构简称或常用内部叫法，
+  输出 fact_type=alias；subject 和 content 均使用该称呼本身，不要包含系统 ID 或代码。
 - 同一个 subject 下只输出当前最有价值的一条事实。
-- 只有证据清楚且置信度足够的候选才输出 action=upsert；证据不足、存在冲突或置信度不足时 action=ignore，不要输出 review。
+- 每条事实必须填写 evidence_keys，且只能引用输入上下文中已经出现的
+  evidence_key、evidence_id、source_key 或结构化记录键（如 activity:123、
+  journey_event:456、task:789）。不得编造证据键。
+- 只有证据清楚且置信度足够的候选才输出 action=upsert；证据不足、存在冲突或
+  置信度不足时 action=ignore，不要输出 review。
 - 输出必须符合结构化 schema，不要输出 Markdown 或解释文字。"""
+    )
 
 
 def _build_user_prompt(

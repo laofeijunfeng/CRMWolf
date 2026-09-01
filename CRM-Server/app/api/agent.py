@@ -371,6 +371,74 @@ async def list_agent_messages(
             "读取 Agent 历史时投影跟进任务确认失败: session_id=%s",
             session_id,
         )
+
+    # Activity revisions intentionally keep the old Case and its Agent message
+    # for auditability.  They are not two independent prompts, however: once a
+    # newer Case exists, showing the old "已取消" card beside the new card is a
+    # confusing duplicate in the conversation.  Resolve those message IDs
+    # before pagination so hiding one does not make page totals drift.
+    hidden_message_ids: set[int] = set()
+    try:
+        visible_message_ids = agent_turn_repository.list_visible_message_ids_by_session(
+            db,
+            session_id=session_id,
+            team_id=team_id,
+            user_id=current_user.id,
+        )
+        history_actions = agent_ui_action_repository.list_owned_for_messages(
+            db,
+            team_id=team_id,
+            user_id=current_user.id,
+            session_id=session_id,
+            message_ids=visible_message_ids,
+        )
+        history_case_ids = [
+            str(action.target["follow_up_confirmation_case_public_id"])
+            for action in history_actions
+            if isinstance(action.target.get("follow_up_confirmation_case_public_id"), str)
+            and action.target.get("follow_up_confirmation_case_public_id")
+        ]
+        superseded_case_ids = (
+            follow_up_task_confirmation_case_crud.list_superseded_revision_case_public_ids(
+                db,
+                team_id=team_id,
+                public_ids=history_case_ids,
+            )
+            if history_case_ids
+            else set()
+        )
+        # Duplicate-case cleanup was introduced after the activity-revision
+        # path. Keep it independently best-effort: a partially migrated test
+        # database (or an old deployment without the confirmation table) must
+        # not make us lose the already-computable revision hiding decision.
+        duplicate_case_ids: set[str] = set()
+        if history_case_ids:
+            try:
+                duplicate_case_ids = follow_up_task_confirmation_case_crud.list_duplicate_active_case_public_ids(
+                    db,
+                    team_id=team_id,
+                    public_ids=history_case_ids,
+                )
+            except Exception:
+                db.rollback()
+                logger.warning(
+                    "读取重复跟进确认 Case 失败，跳过重复消息隐藏: session_id=%s",
+                    session_id,
+                    exc_info=True,
+                )
+        hidden_case_ids = superseded_case_ids | duplicate_case_ids
+        hidden_message_ids = {
+            action.message_id
+            for action in history_actions
+            if action.target.get("follow_up_confirmation_case_public_id") in hidden_case_ids
+        }
+    except Exception:
+        db.rollback()
+        logger.exception(
+            "读取 Agent 历史时识别已被新修订替代的跟进确认消息失败，保留原消息: session_id=%s",
+            session_id,
+        )
+
     skip = (page - 1) * page_size
     records, total = agent_turn_repository.list_visible_by_session(
         db,
@@ -379,6 +447,7 @@ async def list_agent_messages(
         user_id=current_user.id,
         skip=skip,
         limit=page_size,
+        exclude_message_ids=list(hidden_message_ids),
     )
     items = [record.ui for record in records]
     action_ids = {

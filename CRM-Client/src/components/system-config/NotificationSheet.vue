@@ -43,12 +43,20 @@ import { notificationConfigApi, type NotificationConfigResponse, type Notificati
 
 // ==================== Props & Emits ====================
 interface Props {
-  open: boolean
+  open?: boolean
+  active?: boolean
+  embedded?: boolean
 }
 
 type Emits = (e: 'update:open', value: boolean) => void
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  open: false,
+  active: false,
+  embedded: false,
+})
+const embedded = computed(() => props.embedded)
+const active = computed(() => embedded.value ? props.active : props.open)
 const emit = defineEmits<Emits>()
 
 // ==================== State ====================
@@ -98,10 +106,10 @@ const canTest = computed(() => {
 })
 
 const testDisabledReason = computed(() => {
-  if (!values.feishu_webhook_enabled) {
+  if (values.feishu_webhook_enabled !== true) {
     return '请先开启「启用通知」开关'
   }
-  if (!values.feishu_webhook_url) {
+  if (values.feishu_webhook_url === undefined || values.feishu_webhook_url === null || values.feishu_webhook_url === '') {
     return '请先填写 Webhook URL'
   }
   if (values.feishu_webhook_url !== savedUrl.value) {
@@ -143,7 +151,7 @@ const fetchConfig = async (): Promise<void> => {
   try {
     const response = await notificationConfigApi.getConfig({ skipErrorNotification: true })
     configInfo.value = response
-    if (response) {
+    if (response !== null && response !== undefined) {
       resetForm({
         values: {
           feishu_webhook_enabled: response.feishu_webhook_enabled ?? false,
@@ -170,24 +178,24 @@ const onSubmit = handleSubmit(async (formValues) => {
     const updateData: NotificationConfigUpdate = {
       notification_method: 'webhook'
     }
-    if (formValues.feishu_webhook_url) {
+    if (formValues.feishu_webhook_url !== undefined && formValues.feishu_webhook_url !== null && formValues.feishu_webhook_url !== '') {
       updateData.feishu_webhook_url = formValues.feishu_webhook_url
     }
     if (formValues.feishu_webhook_enabled !== undefined) {
       updateData.feishu_webhook_enabled = formValues.feishu_webhook_enabled
     }
-    if (formValues.notification_group_name) {
+    if (formValues.notification_group_name !== undefined && formValues.notification_group_name !== null && formValues.notification_group_name !== '') {
       updateData.notification_group_name = formValues.notification_group_name
     }
     const response = await notificationConfigApi.updateConfig(updateData)
 
     configInfo.value = response
-    savedUrl.value = formValues.feishu_webhook_url || ''
+    savedUrl.value = formValues.feishu_webhook_url ?? ''
     toast.success('通知配置保存成功')
     saving.value = false
 
     // 保存成功后询问是否测试
-    if (formValues.feishu_webhook_enabled && formValues.feishu_webhook_url) {
+    if (formValues.feishu_webhook_enabled === true && formValues.feishu_webhook_url !== undefined && formValues.feishu_webhook_url !== null && formValues.feishu_webhook_url !== '') {
       handleTest()
     }
   } catch (error) {
@@ -219,17 +227,21 @@ const handleTest = async (): Promise<void> => {
 }
 
 // ==================== Lifecycle ====================
-watch(() => props.open, (open) => {
-  if (open) {
+watch(active, (isActive) => {
+  if (isActive) {
     fetchConfig()
   }
-})
+}, { immediate: true })
 </script>
 
 <template>
-  <Sheet :open="open" @update:open="emit('update:open', $event)">
-    <DetailSheetContent>
-      <SheetHeader class="system-config-sheet-header">
+  <component
+    :is="embedded ? 'div' : Sheet"
+    :open="embedded ? undefined : open"
+    @update:open="emit('update:open', $event)"
+  >
+    <component :is="embedded ? 'div' : DetailSheetContent">
+      <SheetHeader v-if="!embedded" class="system-config-sheet-header">
         <SheetTitle class="text-base font-semibold text-wolf-text-primary">通知配置</SheetTitle>
         <SheetDescription class="text-sm text-wolf-text-secondary">配置审批流程的飞书群通知</SheetDescription>
       </SheetHeader>
@@ -447,8 +459,8 @@ watch(() => props.open, (open) => {
           </Card>
         </div>
       </ScrollArea>
-    </DetailSheetContent>
-  </Sheet>
+    </component>
+  </component>
 </template>
 
 <style scoped lang="scss">

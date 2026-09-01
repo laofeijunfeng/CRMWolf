@@ -40,6 +40,7 @@ class FollowUpTaskSourceType:
 class FollowUpTaskEventType:
     CREATED = "CREATED"
     UPDATED = "UPDATED"
+    POSTPONED = "POSTPONED"
     COMPLETED = "COMPLETED"
     CANCELLED = "CANCELLED"
     REOPENED = "REOPENED"
@@ -148,6 +149,13 @@ class SalesCommitment(Base):
         index=True,
         comment="客户ID",
     )
+    deal_journey_id = Column(
+        BigInteger,
+        ForeignKey("crm_customer_deal_journeys.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="业务旅程ID",
+    )
     owner_id = Column(String(100), nullable=False, index=True, comment="承诺归属人")
     creator_id = Column(String(100), nullable=False, index=True, comment="承诺创建人")
     title = Column(String(255), nullable=False, comment="承诺标题")
@@ -171,6 +179,12 @@ class SalesCommitment(Base):
     due_at_timezone = Column(String(64), nullable=False, default="Asia/Shanghai", comment="到期时间业务时区")
     evidence_json = Column(JSON, nullable=True, comment="抽取证据和上下文")
     commitment_hash = Column(String(64), nullable=False, index=True, comment="承诺幂等哈希")
+    post_commit_revision = Column(
+        Integer,
+        nullable=False,
+        default=1,
+        comment="客户智能后提交事件修订号",
+    )
     created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
     updated_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="更新时间")
 
@@ -184,6 +198,7 @@ class SalesCommitment(Base):
         ),
         Index("idx_sales_commitment_owner_status_due", "team_id", "owner_id", "status", "due_at"),
         Index("idx_sales_commitment_customer_status_due", "team_id", "customer_id", "status", "due_at"),
+        Index("idx_sales_commitment_customer_journey", "team_id", "customer_id", "deal_journey_id", "status"),
         {"comment": "销售承诺表"},
     )
 
@@ -215,6 +230,13 @@ class FollowUpTask(Base):
         nullable=True,
         index=True,
         comment="关联承诺ID",
+    )
+    deal_journey_id = Column(
+        BigInteger,
+        ForeignKey("crm_customer_deal_journeys.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="业务旅程ID",
     )
     owner_id = Column(String(100), nullable=False, index=True, comment="任务归属人")
     creator_id = Column(String(100), nullable=False, index=True, comment="任务创建人")
@@ -253,6 +275,7 @@ class FollowUpTask(Base):
         ),
         Index("idx_follow_up_task_owner_status_due", "team_id", "owner_id", "status", "due_at"),
         Index("idx_follow_up_task_customer_status_due", "team_id", "customer_id", "status", "due_at"),
+        Index("idx_follow_up_task_customer_journey", "team_id", "customer_id", "deal_journey_id", "status"),
         Index("idx_follow_up_task_source", "team_id", "source_type", "source_key"),
         {"comment": "客户跟进任务表"},
     )

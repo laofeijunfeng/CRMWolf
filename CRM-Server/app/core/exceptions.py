@@ -4,6 +4,7 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 import logging
+from uuid import uuid4
 
 from app.core.logging import get_logger, log_with_fields
 
@@ -68,6 +69,63 @@ class UnauthorizedException(AppException):
         )
 
 
+def _is_customer_profile_path(request: Request) -> bool:
+    path = request.url.path.rstrip("/")
+    return "/v1/customers/" in path and "/profile" in path
+
+
+def _profile_request_id(request: Request) -> str:
+    request_id = request.headers.get("X-Request-ID") or request.headers.get("x-request-id")
+    return request_id.strip() if request_id and request_id.strip() else f"req_profile_{uuid4().hex}"
+
+
+def _profile_response(
+    request: Request,
+    *,
+    status_code: int,
+    code: str,
+    message: str,
+    details: dict[str, object] | None = None,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "request_id": _profile_request_id(request),
+            "data": None,
+            "error": {"code": code, "message": message, "details": details},
+        },
+    )
+
+
+def _profile_http_error_code(status_code: int) -> str:
+    return {
+        status.HTTP_400_BAD_REQUEST: "PROFILE_SCHEMA_INVALID",
+        status.HTTP_401_UNAUTHORIZED: "PROFILE_UNAUTHORIZED",
+        status.HTTP_403_FORBIDDEN: "PROFILE_FORBIDDEN",
+        status.HTTP_404_NOT_FOUND: "PROFILE_NOT_FOUND",
+        status.HTTP_409_CONFLICT: "PROFILE_REFRESH_IN_PROGRESS",
+        status.HTTP_422_UNPROCESSABLE_ENTITY: "PROFILE_SCHEMA_INVALID",
+    }.get(status_code, "PROFILE_INTERNAL_ERROR")
+
+
+async def http_exception_handler(request: Request, exc: HTTPException):
+    if not _is_customer_profile_path(request):
+        content = {"detail": exc.detail}
+        return JSONResponse(status_code=exc.status_code, content=content, headers=exc.headers)
+    detail = exc.detail if isinstance(exc.detail, dict) else {}
+    code = str(detail.get("code") or _profile_http_error_code(exc.status_code))
+    message = str(detail.get("message") or detail.get("detail") or exc.detail or "请求失败")
+    raw_details = detail.get("details")
+    details = raw_details if isinstance(raw_details, dict) else None
+    return _profile_response(
+        request,
+        status_code=exc.status_code,
+        code=code,
+        message=message,
+        details=details,
+    )
+
+
 async def app_exception_handler(request: Request, exc: AppException):
     log_with_fields(
         logger, logging.ERROR,
@@ -76,6 +134,13 @@ async def app_exception_handler(request: Request, exc: AppException):
         error_code=exc.error_code,
         status_code=exc.status_code
     )
+    if _is_customer_profile_path(request):
+        return _profile_response(
+            request,
+            status_code=exc.status_code,
+            code=exc.error_code,
+            message=exc.detail,
+        )
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -104,6 +169,14 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             "type": error["type"]
         })
 
+    if _is_customer_profile_path(request):
+        return _profile_response(
+            request,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            code="PROFILE_SCHEMA_INVALID",
+            message="请求参数验证失败",
+            details={"fields": errors},
+        )
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={
@@ -132,6 +205,14 @@ async def pydantic_validation_exception_handler(request: Request, exc: Validatio
             "type": error["type"]
         })
 
+    if _is_customer_profile_path(request):
+        return _profile_response(
+            request,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            code="PROFILE_SCHEMA_INVALID",
+            message="数据验证失败",
+            details={"fields": errors},
+        )
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={
@@ -153,6 +234,13 @@ async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
             "error_type": type(exc).__name__
         }}
     )
+    if _is_customer_profile_path(request):
+        return _profile_response(
+            request,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            code="PROFILE_DATA_UNAVAILABLE",
+            message="客户档案数据暂时不可用",
+        )
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
@@ -174,6 +262,13 @@ async def generic_exception_handler(request: Request, exc: Exception):
             "message": str(exc)
         }}
     )
+    if _is_customer_profile_path(request):
+        return _profile_response(
+            request,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            code="PROFILE_INTERNAL_ERROR",
+            message="客户档案服务暂时不可用",
+        )
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={

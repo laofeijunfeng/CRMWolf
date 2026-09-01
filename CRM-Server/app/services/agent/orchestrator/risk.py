@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+
 _EXPLICIT_MUTATION_PATTERNS = (
     re.compile(
         r"^(?:(?:我想|我要|请|麻烦)?(?:帮我)?(?:新建|创建|新增|添加|修改|更新|删除|移除|变更|调整|设置|推进|取消|拒绝|提交|保存|录入|分配|转移|关闭|标记))"
@@ -15,9 +16,7 @@ _EXPLICIT_MUTATION_PATTERNS = (
 _CONTEXT_DEPENDENT_REFERENCES = re.compile(
     r"(?:这个|那个|这些|那些|该|当前|上述|上面|刚才|上次|前面|其中|第[一二三四五六七八九十\d]+(?:个|条|家)?)"
 )
-_CRM_READ_RESOURCES = (
-    r"(?:客户|公司|联系人|跟进记录|跟进任务|待办|商机|合同|回款计划|回款|发票|授权|许可)"
-)
+_CRM_READ_RESOURCES = r"(?:客户|公司|联系人|部署信息|部署|跟进记录|跟进任务|待办|商机|合同|回款计划|回款|发票|授权|许可)"
 _EXPLICIT_READ_QUERY_PATTERNS = (
     re.compile(rf"(?:查询|查找|筛选|列出|查看|看看|看下).{{0,24}}{_CRM_READ_RESOURCES}"),
     re.compile(rf"(?:有哪些|有多少|多少(?:个|家|条)?).{{0,12}}{_CRM_READ_RESOURCES}"),

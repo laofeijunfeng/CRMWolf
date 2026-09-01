@@ -15,11 +15,15 @@ from app.models.agent import AgentMessage, AgentMessageRole, AgentSession
 from app.models.agent_persistence import AgentUIAction
 from app.models.customer_activity_agent_origin import CustomerActivityAgentOrigin
 from app.models.sales_commitment import (
+    DueAtGranularity,
+    FollowUpTask,
     FollowUpTaskConfirmationCase,
     FollowUpTaskConfirmationDeliveryPurpose,
     FollowUpTaskConfirmationPromptDelivery,
     FollowUpTaskConfirmationPromptStatus,
     FollowUpTaskConfirmationStatus,
+    FollowUpTaskSourceType,
+    FollowUpTaskStatus,
 )
 from app.services.agent.follow_up_confirmation_projection import (
     FollowUpConfirmationAgentUIProjection,
@@ -139,6 +143,7 @@ def projection_harness():
             AgentMessage.__table__,
             AgentUIAction.__table__,
             CustomerActivityAgentOrigin.__table__,
+            FollowUpTask.__table__,
             FollowUpTaskConfirmationCase.__table__,
             FollowUpTaskConfirmationPromptDelivery.__table__,
         ],
@@ -148,6 +153,30 @@ def projection_harness():
         yield session_factory
     finally:
         engine.dispose()
+
+
+def _seed_projection_task(db, *, task_id: int, status: str = FollowUpTaskStatus.OPEN, owner_id: str = "2") -> None:
+    db.add(
+        FollowUpTask(
+            id=task_id,
+            public_id=f"fut_{task_id:032x}",
+            team_id=1,
+            customer_id=300 + task_id,
+            owner_id=owner_id,
+            creator_id=owner_id,
+            title="确认跟进任务",
+            description="投影测试任务",
+            status=status,
+            due_at=business_now(),
+            due_at_granularity=DueAtGranularity.DATETIME,
+            source_type=FollowUpTaskSourceType.CUSTOMER_ACTIVITY,
+            source_key=f"projection-test:{task_id}",
+            source_activity_id=500 + task_id,
+            confidence=1.0,
+            task_hash=f"projection-task-hash-{task_id}",
+        )
+    )
+    db.flush()
 
 
 @pytest.mark.asyncio
@@ -161,6 +190,7 @@ async def test_pending_case_projects_one_native_workflow_prompt_without_fake_use
         session = AgentSession(session_key="agent-session-confirmation", team_id=1, user_id=2)
         db.add(session)
         db.flush()
+        _seed_projection_task(db, task_id=101)
         confirmation_case = FollowUpTaskConfirmationCase(
             public_id="fuc_1234567890abcdef1234567890abcdef",
             team_id=1,
@@ -268,6 +298,7 @@ async def test_invalid_case_public_id_is_not_dispatched_or_projected(
         session = AgentSession(session_key="agent-session-invalid-case", team_id=1, user_id=2)
         db.add(session)
         db.flush()
+        _seed_projection_task(db, task_id=102)
         confirmation_case = FollowUpTaskConfirmationCase(
             public_id="invalid-case-id",
             team_id=1,
@@ -397,6 +428,7 @@ async def test_action_registration_failure_rolls_back_entire_projection(
         session = AgentSession(session_key="agent-session-action-failure", team_id=1, user_id=2)
         db.add(session)
         db.flush()
+        _seed_projection_task(db, task_id=103)
         confirmation_case = FollowUpTaskConfirmationCase(
             public_id="fuc_2234567890abcdef1234567890abcdef",
             team_id=1,
@@ -458,6 +490,12 @@ def _seed_projection_case(
     origin_session_id: int | None = None,
 ) -> FollowUpTaskConfirmationCase:
     activity_id = 600 + case_number
+    _seed_projection_task(
+        db,
+        task_id=200 + case_number,
+        status=FollowUpTaskStatus.OPEN,
+        owner_id=case_owner_id,
+    )
     confirmation_case = FollowUpTaskConfirmationCase(
         public_id=f"fuc_{case_number:032x}",
         team_id=case_team_id,
@@ -488,6 +526,38 @@ def _seed_projection_case(
             )
         )
     return confirmation_case
+
+
+@pytest.mark.asyncio
+async def test_pending_case_for_closed_task_is_not_projected(projection_harness) -> None:
+    orchestrator = _FakeRootOrchestrator()
+    projection = FollowUpConfirmationAgentUIProjection(root_orchestrator=orchestrator)
+
+    with projection_harness() as db:
+        session = AgentSession(session_key="agent-session-closed-task", team_id=1, user_id=2)
+        db.add(session)
+        db.flush()
+        confirmation_case = _seed_projection_case(
+            db,
+            case_number=40,
+            session_id=int(session.id),
+        )
+        task = db.query(FollowUpTask).filter(FollowUpTask.id == confirmation_case.task_id).one()
+        task.status = FollowUpTaskStatus.COMPLETED
+        db.commit()
+
+        projected = await projection.project_pending(
+            db,
+            team_id=1,
+            user_id=2,
+            session_id=int(session.id),
+            authorization="Bearer test-token",
+            permission_codes=frozenset({"follow_up_task:edit:own"}),
+        )
+
+        assert projected == 0
+        assert orchestrator.calls == []
+        assert db.query(AgentMessage).count() == 0
 
 
 @pytest.mark.asyncio

@@ -17,6 +17,7 @@ from app.services.agent.query.identity import (
     CustomerQueryIdentityBinder,
     CustomerQueryIntent,
 )
+from app.services.agent.query.semantic_intent import CRMQuerySemanticIntent, QueryTemporalIntent
 
 
 class FakeIdentityService:
@@ -49,21 +50,19 @@ def _context() -> object:
     )
 
 
-def test_customer_scoped_classifier_does_not_bind_city_customer_list() -> None:
+def test_identity_binder_accepts_only_structured_customer_intent() -> None:
     binder = CustomerQueryIdentityBinder(identity_service=FakeIdentityService("no_match", []))
 
-    assert binder.classify("上海有哪些客户") is None
-
-
-def test_customer_scoped_classifier_extracts_full_name_and_resource() -> None:
-    binder = CustomerQueryIdentityBinder(identity_service=FakeIdentityService("no_match", []))
-
-    intent = binder.classify("广东智通人才连锁股份有限公司有哪些商机?")
-
-    assert intent == CustomerQueryIntent(
-        tool_name="get_customer_context",
-        customer_text="广东智通人才连锁股份有限公司",
+    binding = binder.bind(
+        CustomerQueryIntent(
+            tool_name="query_follow_up_tasks",
+            customer_text="凡亚信息",
+        ),
+        _context(),
     )
+
+    assert binding.status == "NOT_FOUND"
+
 
 
 def test_binder_uses_authorized_identity_resolution_and_issues_entity_ref() -> None:
@@ -73,8 +72,7 @@ def test_binder_uses_authorized_identity_resolution_and_issues_entity_ref() -> N
     )
     binder = CustomerQueryIdentityBinder(identity_service=service)
 
-    intent = binder.classify("凡亚信息有哪些联系人?")
-    assert intent is not None
+    intent = CustomerQueryIntent(tool_name="query_customer_contacts", customer_text="凡亚信息")
     binding = binder.bind(intent, _context())
 
     assert binding.status == "BOUND"
@@ -87,6 +85,69 @@ def test_binder_uses_authorized_identity_resolution_and_issues_entity_ref() -> N
     assert service.calls[0]["query_text"] == "凡亚信息"
     assert service.calls[0]["team_id"] == 7
     assert service.calls[0]["user_id"] == 42
+
+
+class StubSemanticIntentResolver:
+    def __init__(self, intents: dict[str, CRMQuerySemanticIntent] | None = None) -> None:
+        self.intents = intents or {}
+        self.calls: list[str] = []
+
+    async def resolve(self, text: str, **kwargs: object) -> CRMQuerySemanticIntent:
+        self.calls.append(text)
+        return self.intents.get(
+            text,
+            CRMQuerySemanticIntent(
+                scope="customer_scoped",
+                resource="customer_contacts",
+                customer_text="凡亚信息",
+                confidence=1,
+            ),
+        )
+
+
+def _semantic_resolver() -> StubSemanticIntentResolver:
+    return StubSemanticIntentResolver(
+        {
+            "这周有哪些事情要做": CRMQuerySemanticIntent(
+                scope="global_work", resource="follow_up_tasks",
+                temporal=QueryTemporalIntent(kind="this_week"), confidence=1,
+            ),
+            "下周需要跟进什么": CRMQuerySemanticIntent(
+                scope="global_work", resource="follow_up_tasks",
+                temporal=QueryTemporalIntent(kind="next_week"), confidence=1,
+            ),
+            "凡亚信息下周有哪些待办": CRMQuerySemanticIntent(
+                scope="customer_scoped", resource="follow_up_tasks", customer_text="凡亚信息",
+                temporal=QueryTemporalIntent(kind="next_week"), confidence=1,
+            ),
+            "当前客户这周有哪些待办": CRMQuerySemanticIntent(
+                scope="customer_scoped", resource="follow_up_tasks",
+                temporal=QueryTemporalIntent(kind="this_week"), confidence=1,
+            ),
+            "凡亚信息最近两周有哪些待办": CRMQuerySemanticIntent(
+                scope="customer_scoped", resource="follow_up_tasks", customer_text="凡亚信息",
+                temporal=QueryTemporalIntent(
+                    kind="custom", start_at="2026-08-24", end_at="2026-09-07"
+                ), confidence=1,
+            ),
+            "凡亚信息本月完成了什么": CRMQuerySemanticIntent(
+                scope="customer_scoped", resource="completed_work", customer_text="凡亚信息",
+                temporal=QueryTemporalIntent(kind="this_month"), confidence=1,
+            ),
+            "凡亚信息完成了什么": CRMQuerySemanticIntent(
+                scope="customer_scoped", resource="completed_work", customer_text="凡亚信息",
+                temporal=QueryTemporalIntent(kind="unspecified"), confidence=0.5,
+            ),
+            "未来两周有哪些事情要做": CRMQuerySemanticIntent(
+                scope="global_work", resource="follow_up_tasks",
+                temporal=QueryTemporalIntent(kind="unspecified"), confidence=0.3,
+            ),
+            "这周我完成了什么": CRMQuerySemanticIntent(
+                scope="global_work", resource="completed_work",
+                temporal=QueryTemporalIntent(kind="this_week"), confidence=1,
+            ),
+        }
+    )
 
 
 class RecordingQueryAgent:
@@ -110,6 +171,15 @@ class RecordingQueryAgent:
                 stop_reason="COMPLETED",
             ),
         )
+
+
+class GlobalQueryBinder:
+    def __init__(self) -> None:
+        self.classify_calls: list[str] = []
+
+    def classify(self, text: str):
+        self.classify_calls.append(text)
+        return None
 
 
 class StubBinder:
@@ -141,6 +211,82 @@ def _runtime() -> RootRuntimeContext:
 
 
 @pytest.mark.asyncio
+async def test_query_execution_reuses_root_semantic_intent_without_resolving_again() -> None:
+    query_agent = RecordingQueryAgent()
+    resolver = _semantic_resolver()
+    executor = CRMQueryAgentExecutor(
+        query_agent=query_agent,
+        identity_binder=GlobalQueryBinder(),
+        semantic_intent_resolver=resolver,
+    )
+
+    result = await executor.execute(
+        QueryExecutionInput(
+            text="这周有哪些事情要做",
+            principal=AgentPrincipal(team_id=7, user_id=42, session_id=11),
+            semantic_intent=CRMQuerySemanticIntent(
+                scope="global_work",
+                resource="follow_up_tasks",
+                temporal=QueryTemporalIntent(kind="this_week"),
+                confidence=0.95,
+            ),
+        ),
+        runtime=_runtime(),
+    )
+
+    assert result.response.status == "ANSWERED"
+    assert resolver.calls == []
+
+
+@pytest.mark.asyncio
+async def test_unknown_semantic_intent_fails_closed_without_query_agent_call() -> None:
+    query_agent = RecordingQueryAgent()
+    executor = CRMQueryAgentExecutor(
+        query_agent=query_agent,
+        identity_binder=GlobalQueryBinder(),
+        semantic_intent_resolver=_semantic_resolver(),
+    )
+
+    result = await executor.execute(
+        QueryExecutionInput(
+            text="帮我看看最近的情况",
+            principal=AgentPrincipal(team_id=7, user_id=42, session_id=11),
+            semantic_intent=CRMQuerySemanticIntent(scope="unknown", confidence=0.35),
+        ),
+        runtime=_runtime(),
+    )
+
+    assert result.response.status == "CLARIFICATION_REQUIRED"
+    assert result.response.clarification_question
+    assert query_agent.calls == []
+
+
+@pytest.mark.asyncio
+async def test_customer_list_semantic_intent_restricts_query_agent_to_customer_list() -> None:
+    query_agent = RecordingQueryAgent()
+    executor = CRMQueryAgentExecutor(
+        query_agent=query_agent,
+        identity_binder=GlobalQueryBinder(),
+        semantic_intent_resolver=_semantic_resolver(),
+    )
+
+    await executor.execute(
+        QueryExecutionInput(
+            text="上海有哪些客户",
+            principal=AgentPrincipal(team_id=7, user_id=42, session_id=11),
+            semantic_intent=CRMQuerySemanticIntent(
+                scope="customer_list", resource="customers", confidence=0.96
+            ),
+        ),
+        runtime=_runtime(),
+    )
+
+    request, _context_value, _model_config = query_agent.calls[0]
+    assert request.allowed_tool_names == ["query_customers"]
+
+
+
+@pytest.mark.asyncio
 async def test_query_execution_binds_customer_before_model_and_restricts_tool_surface() -> None:
     customer_ref = EntityRef(
         ref_id="eref_customer_cus_1",
@@ -152,6 +298,7 @@ async def test_query_execution_binds_customer_before_model_and_restricts_tool_su
     executor = CRMQueryAgentExecutor(
         query_agent=query_agent,
         identity_binder=StubBinder(CustomerBinding(status="BOUND", entity_ref=customer_ref)),
+        semantic_intent_resolver=_semantic_resolver(),
     )
 
     result = await executor.execute(
@@ -193,6 +340,7 @@ async def test_query_execution_stops_on_ambiguous_identity_without_model_call() 
                 query_text="凡亚信息",
             )
         ),
+        semantic_intent_resolver=_semantic_resolver(),
     )
 
     result = await executor.execute(
@@ -206,4 +354,316 @@ async def test_query_execution_stops_on_ambiguous_identity_without_model_call() 
     assert result.response.status == "CLARIFICATION_REQUIRED"
     assert "广州凡亚信息" in (result.response.clarification_question or "")
     assert "深圳凡亚信息" in (result.response.clarification_question or "")
+    assert query_agent.calls == []
+
+
+@pytest.mark.asyncio
+async def test_selected_customer_query_keeps_customer_scope_and_applies_temporal_filter() -> None:
+    query_agent = RecordingQueryAgent()
+    executor = CRMQueryAgentExecutor(
+        query_agent=query_agent,
+        identity_binder=GlobalQueryBinder(),
+        semantic_intent_resolver=_semantic_resolver(),
+    )
+    selected_customer = EntityRef(
+        ref_id="eref_customer_selected",
+        resource="customer",
+        public_id="cus_selected",
+        display_name="凡亚信息",
+    )
+
+    await executor.execute(
+        QueryExecutionInput(
+            text="这周有哪些待办",
+            principal=AgentPrincipal(team_id=7, user_id=42, session_id=11),
+            selected_entity=selected_customer,
+            semantic_intent=CRMQuerySemanticIntent(
+                scope="customer_scoped",
+                resource="follow_up_tasks",
+                temporal=QueryTemporalIntent(kind="this_week"),
+                confidence=1,
+            ),
+        ),
+        runtime=_runtime(),
+    )
+
+    request, _context_value, _model_config = query_agent.calls[0]
+    assert request.entity_refs == [selected_customer]
+    assert request.allowed_tool_names == ["query_follow_up_tasks"]
+    assert [filter_.model_dump() for filter_ in request.authoritative_filters] == [
+        {"field": "status", "operator": "eq", "value": "open"},
+        {"field": "due_window", "operator": "eq", "value": "this_week"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_selected_customer_query_resolves_semantics_when_root_did_not_supply_intent() -> None:
+    query_agent = RecordingQueryAgent()
+    resolver = _semantic_resolver()
+    executor = CRMQueryAgentExecutor(
+        query_agent=query_agent,
+        identity_binder=GlobalQueryBinder(),
+        semantic_intent_resolver=resolver,
+    )
+    selected_customer = EntityRef(
+        ref_id="eref_customer_selected",
+        resource="customer",
+        public_id="cus_selected",
+        display_name="凡亚信息",
+    )
+
+    await executor.execute(
+        QueryExecutionInput(
+            text="当前客户这周有哪些待办",
+            principal=AgentPrincipal(team_id=7, user_id=42, session_id=11),
+            selected_entity=selected_customer,
+        ),
+        runtime=_runtime(),
+    )
+
+    request, _context_value, _model_config = query_agent.calls[0]
+    assert resolver.calls == ["当前客户这周有哪些待办"]
+    assert request.entity_refs == [selected_customer]
+    assert request.allowed_tool_names == ["query_follow_up_tasks"]
+    assert [filter_.model_dump() for filter_ in request.authoritative_filters] == [
+        {"field": "status", "operator": "eq", "value": "open"},
+        {"field": "due_window", "operator": "eq", "value": "this_week"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_global_follow_up_query_restricts_query_agent_to_follow_up_tasks() -> None:
+    query_agent = RecordingQueryAgent()
+    executor = CRMQueryAgentExecutor(
+        query_agent=query_agent,
+        identity_binder=GlobalQueryBinder(),
+        semantic_intent_resolver=_semantic_resolver(),
+    )
+
+    await executor.execute(
+        QueryExecutionInput(
+            text="这周有哪些事情要做",
+            principal=AgentPrincipal(team_id=7, user_id=42, session_id=11),
+        ),
+        runtime=_runtime(),
+    )
+
+    request, _context_value, _model_config = query_agent.calls[0]
+    assert request.allowed_tool_names == ["query_follow_up_tasks"]
+    assert request.authoritative_scope == "mine"
+    assert [filter_.model_dump() for filter_ in request.authoritative_filters] == [
+        {"field": "status", "operator": "eq", "value": "open"},
+        {"field": "due_window", "operator": "eq", "value": "this_week"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_global_follow_up_query_uses_the_detected_next_week_window() -> None:
+    query_agent = RecordingQueryAgent()
+    executor = CRMQueryAgentExecutor(
+        query_agent=query_agent,
+        identity_binder=GlobalQueryBinder(),
+        semantic_intent_resolver=_semantic_resolver(),
+    )
+
+    await executor.execute(
+        QueryExecutionInput(
+            text="下周需要跟进什么",
+            principal=AgentPrincipal(team_id=7, user_id=42, session_id=11),
+        ),
+        runtime=_runtime(),
+    )
+
+    request, _context_value, _model_config = query_agent.calls[0]
+    assert request.authoritative_filters[-1].model_dump() == {
+        "field": "due_window",
+        "operator": "eq",
+        "value": "next_week",
+    }
+
+
+@pytest.mark.asyncio
+async def test_unsupported_global_work_window_fails_closed_without_model_call() -> None:
+    query_agent = RecordingQueryAgent()
+    executor = CRMQueryAgentExecutor(
+        query_agent=query_agent,
+        identity_binder=GlobalQueryBinder(),
+        semantic_intent_resolver=_semantic_resolver(),
+    )
+
+    result = await executor.execute(
+        QueryExecutionInput(
+            text="未来两周有哪些事情要做",
+            principal=AgentPrincipal(team_id=7, user_id=42, session_id=11),
+        ),
+        runtime=_runtime(),
+    )
+
+    assert result.response.status == "CLARIFICATION_REQUIRED"
+    assert "无法确定时间范围" in (result.response.clarification_question or "")
+    assert result.trace.stop_reason == "CLARIFICATION_REQUIRED"
+    assert query_agent.calls == []
+
+
+@pytest.mark.asyncio
+async def test_global_completed_work_query_restricts_query_agent_to_completed_work() -> None:
+    query_agent = RecordingQueryAgent()
+    executor = CRMQueryAgentExecutor(
+        query_agent=query_agent,
+        identity_binder=GlobalQueryBinder(),
+        semantic_intent_resolver=_semantic_resolver(),
+    )
+
+    await executor.execute(
+        QueryExecutionInput(
+            text="这周我完成了什么",
+            principal=AgentPrincipal(team_id=7, user_id=42, session_id=11),
+        ),
+        runtime=_runtime(),
+    )
+
+    request, _context_value, _model_config = query_agent.calls[0]
+    assert request.allowed_tool_names == ["query_completed_work"]
+    assert request.authoritative_scope == "mine"
+    assert [filter_.model_dump() for filter_ in request.authoritative_filters] == [
+        {"field": "window", "operator": "eq", "value": "this_week"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_customer_follow_up_query_authoritatively_applies_customer_time_window() -> None:
+    query_agent = RecordingQueryAgent()
+    executor = CRMQueryAgentExecutor(
+        query_agent=query_agent,
+        identity_binder=StubBinder(
+            CustomerBinding(
+                status="BOUND",
+                entity_ref=EntityRef(
+                    ref_id="eref_customer_cus_1",
+                    resource="customer",
+                    public_id="cus_1",
+                    display_name="凡亚信息",
+                ),
+            )
+        ),
+        semantic_intent_resolver=_semantic_resolver(),
+    )
+
+    await executor.execute(
+        QueryExecutionInput(
+            text="凡亚信息下周有哪些待办",
+            principal=AgentPrincipal(team_id=7, user_id=42, session_id=11),
+        ),
+        runtime=_runtime(),
+    )
+
+    request, _context_value, _model_config = query_agent.calls[0]
+    assert request.allowed_tool_names == ["query_follow_up_tasks"]
+    assert request.authoritative_scope is None
+    assert [filter_.model_dump() for filter_ in request.authoritative_filters] == [
+        {"field": "status", "operator": "eq", "value": "open"},
+        {"field": "due_window", "operator": "eq", "value": "next_week"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_customer_follow_up_query_authoritatively_applies_custom_time_range() -> None:
+    query_agent = RecordingQueryAgent()
+    executor = CRMQueryAgentExecutor(
+        query_agent=query_agent,
+        identity_binder=StubBinder(
+            CustomerBinding(
+                status="BOUND",
+                entity_ref=EntityRef(
+                    ref_id="eref_customer_cus_1",
+                    resource="customer",
+                    public_id="cus_1",
+                    display_name="凡亚信息",
+                ),
+            )
+        ),
+        semantic_intent_resolver=_semantic_resolver(),
+    )
+
+    await executor.execute(
+        QueryExecutionInput(
+            text="凡亚信息最近两周有哪些待办",
+            principal=AgentPrincipal(team_id=7, user_id=42, session_id=11),
+        ),
+        runtime=_runtime(),
+    )
+
+    request, _context_value, _model_config = query_agent.calls[0]
+    assert [filter_.model_dump() for filter_ in request.authoritative_filters] == [
+        {"field": "status", "operator": "eq", "value": "open"},
+        {
+            "field": "tracking_time",
+            "operator": "between",
+            "value": ["2026-08-24", "2026-09-07"],
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_customer_completed_work_query_authoritatively_applies_time_window() -> None:
+    query_agent = RecordingQueryAgent()
+    executor = CRMQueryAgentExecutor(
+        query_agent=query_agent,
+        identity_binder=StubBinder(
+            CustomerBinding(
+                status="BOUND",
+                entity_ref=EntityRef(
+                    ref_id="eref_customer_cus_1",
+                    resource="customer",
+                    public_id="cus_1",
+                    display_name="凡亚信息",
+                ),
+            )
+        ),
+        semantic_intent_resolver=_semantic_resolver(),
+    )
+
+    await executor.execute(
+        QueryExecutionInput(
+            text="凡亚信息本月完成了什么",
+            principal=AgentPrincipal(team_id=7, user_id=42, session_id=11),
+        ),
+        runtime=_runtime(),
+    )
+
+    request, _context_value, _model_config = query_agent.calls[0]
+    assert request.allowed_tool_names == ["query_completed_work"]
+    assert [filter_.model_dump() for filter_ in request.authoritative_filters] == [
+        {"field": "window", "operator": "eq", "value": "this_month"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_customer_completed_work_without_time_does_not_use_api_this_week_default() -> None:
+    query_agent = RecordingQueryAgent()
+    executor = CRMQueryAgentExecutor(
+        query_agent=query_agent,
+        identity_binder=StubBinder(
+            CustomerBinding(
+                status="BOUND",
+                entity_ref=EntityRef(
+                    ref_id="eref_customer_cus_1",
+                    resource="customer",
+                    public_id="cus_1",
+                    display_name="凡亚信息",
+                ),
+            )
+        ),
+        semantic_intent_resolver=_semantic_resolver(),
+    )
+
+    result = await executor.execute(
+        QueryExecutionInput(
+            text="凡亚信息完成了什么",
+            principal=AgentPrincipal(team_id=7, user_id=42, session_id=11),
+        ),
+        runtime=_runtime(),
+    )
+
+    assert result.response.status == "CLARIFICATION_REQUIRED"
     assert query_agent.calls == []

@@ -502,10 +502,18 @@ class PaymentRecordCRUD:
         has_invoice_application_table = inspect(db.bind).has_table(InvoiceApplication.__tablename__) if db.bind else True
         latest_invoice_title_expr = None
         if has_invoice_application_table:
+            is_explicit_record_link = InvoiceApplication.payment_record_id == PaymentRecord.id
             latest_invoice_title_expr = db.query(InvoiceApplication.invoice_title_text).filter(
-                InvoiceApplication.payment_record_id == PaymentRecord.id,
                 InvoiceApplication.team_id == team_id,
+                or_(
+                    is_explicit_record_link,
+                    and_(
+                        InvoiceApplication.payment_record_id.is_(None),
+                        InvoiceApplication.payment_plan_id == PaymentRecord.payment_plan_id,
+                    ),
+                ),
             ).order_by(
+                case((is_explicit_record_link, 0), else_=1),
                 InvoiceApplication.created_time.desc(),
                 InvoiceApplication.id.desc(),
             ).limit(1).correlate(PaymentRecord).scalar_subquery()

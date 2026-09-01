@@ -77,13 +77,19 @@ from app.services.acquisition_source_service import (
     map_sources_by_ids,
     resolve_public_ids_to_ids,
 )
-from app.services.customer_intelligence_event_service import CustomerIntelligenceEvent
-from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
-from app.services.customer_intelligence_run_service import CustomerIntelligenceRunDiagnostic
 from app.services.customer_identity_resolution_application_service import (
     customer_identity_resolution_application_service,
 )
-from app.services.industry_display_service import industry_display_service
+from app.services.customer_business_object_intelligence_service import (
+    CustomerBusinessObjectChangeType,
+    CustomerBusinessObjectSourceType,
+    customer_business_object_intelligence_service,
+)
+from app.services.customer_intelligence_refresh_service import (
+    CustomerIntelligenceCommittedEventRequest,
+    customer_intelligence_refresh_service,
+)
+from app.services.customer_intelligence_run_service import CustomerIntelligenceRunDiagnostic
 
 router = APIRouter(prefix="/v1/customers", tags=["客户管理"])
 logger = logging.getLogger(__name__)
@@ -177,39 +183,31 @@ def _get_editable_customer(db: Session, customer_public_id: str, team_id: int, c
     return check_customer_edit_permission(customer_public_id, team_id, current_user, db)
 
 
-async def _schedule_contact_intelligence_refresh(
-    db: Session,
-    contact: Contact,
+def _persist_customer_business_object_refresh_after_commit(
     *,
-    trigger_type: Literal[
-        "customer_contact_created",
-        "customer_contact_updated",
-        "customer_contact_deleted",
-    ],
-    actor_id: str,
-) -> None:
-    from app.services.customer_intelligence_event_service import customer_intelligence_event_service
+    business_object: object,
+    source_type: CustomerBusinessObjectSourceType,
+    actor_id: str | None,
+    change_type: CustomerBusinessObjectChangeType = "updated",
+    summary: str | None = None,
+    payload: dict | None = None,
+    scope: Literal["full", "partial"] = "partial",
+) -> CustomerIntelligenceCommittedEventRequest | None:
+    """Register a committed change through the shared object registry.
 
-    event = customer_intelligence_event_service.from_contact(
-        contact,
-        trigger_type=trigger_type,
+    CRUD endpoints only provide the changed domain object and an optional
+    business-specific delta.  Source identity, default payload, event key and
+    trigger type stay in CustomerBusinessObjectIntelligenceService.
+    """
+
+    return customer_business_object_intelligence_service.enqueue_object_change_refresh_after_commit(
+        source_type=source_type,
+        business_object=business_object,
+        change_type=change_type,
         actor_id=actor_id,
-    )
-    if event is None:
-        return
-    await _schedule_customer_intelligence_event_refresh(db, event)
-
-
-async def _schedule_customer_intelligence_event_refresh(
-    db: Session,
-    event: CustomerIntelligenceEvent,
-) -> None:
-    from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
-
-    await customer_intelligence_refresh_service.trigger_committed_event_refresh(
-        db,
-        event=event,
-        scope="brief",
+        summary=summary,
+        payload=payload,
+        scope=scope,
     )
 
 
@@ -329,14 +327,6 @@ def _customer_response(db: Session, customer) -> CustomerResponse:
         "created_time": customer.created_time,
         "last_modified_time": customer.last_modified_time,
         "version": customer.version,
-        "company_background": customer.company_background,
-        "company_website": customer.company_website,
-        "main_business": customer.main_business,
-        "similar_customers": customer.similar_customers,
-        "project_background": customer.project_background,
-        "profile_status": customer.profile_status,
-        "profile_generated_time": customer.profile_generated_time,
-        "profile_error_message": customer.profile_error_message,
         "license_expiry_date": customer.license_expiry_date,
         "license_type": customer.license_type,
     })
@@ -381,8 +371,6 @@ def _customer_intelligence_run_response(
 def _customer_intelligence_route_label(route: str | None) -> Optional[str]:
     if route == "refresh_profile":
         return "刷新客户档案"
-    if route == "refresh_brief":
-        return "刷新客户概况"
     if route == "answer_customer_question":
         return "回答客户问题"
     return None
@@ -417,7 +405,6 @@ async def convert_from_lead(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
     from app.services.feishu import feishu_service
 
     source_lead = lead_crud.get_by_public_id(db, data.lead_id, team_id)
@@ -445,15 +432,13 @@ async def convert_from_lead(
             team_id=team_id
         )
 
-        # 设置档案状态为 PENDING
-        customer_crud.update_profile_status(db, customer.id, "PENDING")
-
-        # 触发客户智能档案生成（异步，进入 LangGraph 统一编排）
-        await customer_intelligence_refresh_service.trigger_customer_created_refresh(
-            db,
-            team_id=team_id,
-            customer_id=customer.id,
+        # 线索转化属于客户生命周期事件，但仍通过统一的提交后持久化
+        # seam 进入 Customer Intelligence，不让 API 直接编排刷新任务。
+        db.refresh(customer)
+        customer_business_object_intelligence_service.enqueue_customer_lifecycle_refresh_after_commit(
+            customer=customer,
             actor_id=str(current_user.id),
+            trigger_type="customer_converted_from_lead",
             source_lead_id=source_lead.id,
         )
 
@@ -814,8 +799,6 @@ async def create_customer(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
-
     _ensure_customer_name_available(db, customer.account_name, team_id)
 
     try:
@@ -837,16 +820,16 @@ async def create_customer(
             is_primary=True
         )
 
-    # 设置档案状态为 PENDING
-    customer_crud.update_profile_status(db, new_customer.id, "PENDING")
-
-    # 触发客户智能档案生成（异步，进入 LangGraph 统一编排）
-    await customer_intelligence_refresh_service.trigger_customer_created_refresh(
-        db,
-        team_id=team_id,
-        customer_id=new_customer.id,
+    # 客户创建完成后，通过统一业务对象事件边界进入档案投影流水线。
+    # 这里使用 full scope，确保企业基础信息、旅程和历史上下文一次性建立。
+    db.refresh(new_customer)
+    customer_business_object_intelligence_service.enqueue_object_change_refresh_after_commit(
+        source_type="customer",
+        business_object=new_customer,
+        change_type="created",
         actor_id=str(current_user.id),
-        source_lead_id=None,
+        summary="客户已创建，生成客户档案",
+        scope="full",
     )
 
     return _customer_response(db, new_customer)
@@ -1255,6 +1238,21 @@ def add_customer_member(
         obj_in=member_in,
         created_by=str(current_user.id),
     )
+    _persist_customer_business_object_refresh_after_commit(
+        business_object=member,
+        source_type="customer_member",
+        summary="客户访问成员已更新，刷新客户智能档案可见性",
+        change_type="created",
+        actor_id=str(current_user.id),
+        payload={
+            "change_type": "member_upserted",
+            "member_id": member.id,
+            "user_id": member.user_id,
+            "access_level": member.access_level,
+            "member_role": member.member_role,
+            "is_active": bool(member.is_active),
+        },
+    )
     return _build_customer_member_response(db, member, customer.public_id, True)
 
 
@@ -1275,6 +1273,20 @@ def update_customer_member(
             detail="客户团队成员不存在"
         )
     updated = customer_member_crud.update(db, member, member_in)
+    _persist_customer_business_object_refresh_after_commit(
+        business_object=updated,
+        source_type="customer_member",
+        summary="客户访问成员权限已更新，刷新客户智能档案可见性",
+        actor_id=str(current_user.id),
+        payload={
+            "change_type": "member_updated",
+            "member_id": updated.id,
+            "user_id": updated.user_id,
+            "access_level": updated.access_level,
+            "member_role": updated.member_role,
+            "is_active": bool(updated.is_active),
+        },
+    )
     return _build_customer_member_response(db, updated, customer.public_id, True)
 
 
@@ -1294,6 +1306,19 @@ def remove_customer_member(
             detail="客户团队成员不存在"
         )
     customer_member_crud.deactivate(db, member)
+    _persist_customer_business_object_refresh_after_commit(
+        business_object=member,
+        source_type="customer_member",
+        summary="客户访问成员已移除，刷新客户智能档案可见性",
+        change_type="deleted",
+        actor_id=str(current_user.id),
+        payload={
+            "change_type": "member_deactivated",
+            "member_id": member.id,
+            "user_id": member.user_id,
+            "is_active": False,
+        },
+    )
     return MessageResponse(message="移除成功")
 
 
@@ -1371,11 +1396,6 @@ def get_customer(
         "public_id": customer.public_id,
         **_customer_source_fields(db, customer),
         "source_lead_id": source_lead.public_id if (source_lead := lead_crud.get_by_id(db, customer.source_lead_id, team_id)) else None,
-        "customer_brief_markdown": industry_display_service.sanitize_markdown(
-            db,
-            customer.customer_brief_markdown,
-            industry_code=customer.industry,
-        ),
     }
 
     return CustomerDetailResponse(
@@ -1410,6 +1430,14 @@ def update_customer(
         updated = customer_crud.update(db, customer, customer_update)
     except AcquisitionSourceError as exc:
         _raise_source_error(exc)
+    if updated.version != customer.version or customer_update.model_fields_set:
+        _persist_customer_business_object_refresh_after_commit(
+            business_object=updated,
+            source_type="customer",
+            summary="客户主数据已更新，刷新客户智能档案",
+            actor_id=str(current_user.id),
+            payload={"change_type": "updated", "changed_fields": sorted(customer_update.model_fields_set)},
+        )
     return _customer_response(db, updated)
 
 
@@ -1426,7 +1454,15 @@ async def update_customer_status(
     customer = _get_editable_customer(db, customer_id, team_id, current_user)
 
     new_status = status_update.status
+    previous_status = customer.status
     updated_customer = customer_crud.update_status(db, customer, new_status)
+    _persist_customer_business_object_refresh_after_commit(
+        business_object=updated_customer,
+        source_type="customer",
+        summary="客户状态已更新，刷新客户智能档案",
+        actor_id=str(current_user.id),
+        payload={"change_type": "status_updated", "previous_status": previous_status, "new_status": new_status},
+    )
 
     if new_status == 1:
         await feishu_service.notify_account_status_won(
@@ -1460,8 +1496,21 @@ async def mark_customer_as_lost(
             detail="该客户已标记为输单"
         )
 
+    previous_status = customer.status
     updated_customer = customer_crud.mark_as_lost(
         db, customer, lose_data.loss_reason, str(current_user.id), current_user.name
+    )
+    _persist_customer_business_object_refresh_after_commit(
+        business_object=updated_customer,
+        source_type="customer",
+        summary="客户已标记输单，刷新客户智能档案",
+        actor_id=str(current_user.id),
+        payload={
+            "change_type": "lost",
+            "previous_status": previous_status,
+            "new_status": updated_customer.status,
+            "loss_reason": lose_data.loss_reason,
+        },
     )
 
     await feishu_service.notify_account_status_lost(
@@ -1479,6 +1528,9 @@ def delete_customer(
     db: Session = Depends(get_db)
 ):
     try:
+        # 客户删除会由数据库级联清理客户档案投影；这里不再发起普通
+        # Customer Intelligence refresh，避免对已不存在的客户重算。
+        # 删除审计由 customer_crud.delete() 的操作日志负责。
         customer_crud.delete(db, customer, str(customer.owner_id) if customer.owner_id else None)
         return MessageResponse(message="删除成功")
     except ValueError as e:
@@ -1499,10 +1551,10 @@ async def create_contact(
     customer = _get_editable_customer(db, customer_id, team_id, current_user)
 
     created_contact = contact_crud.create(db, contact, customer.id, team_id)
-    await _schedule_contact_intelligence_refresh(
-        db,
-        created_contact,
-        trigger_type="customer_contact_created",
+    _persist_customer_business_object_refresh_after_commit(
+        business_object=created_contact,
+        source_type="customer_contact",
+        change_type="created",
         actor_id=str(current_user.id),
     )
     return _contact_response(created_contact, customer.public_id)
@@ -1537,10 +1589,10 @@ async def update_contact(
     customer = _get_editable_customer(db, contact.customer_id, team_id, current_user)
 
     updated_contact = contact_crud.update(db, contact, contact_update)
-    await _schedule_contact_intelligence_refresh(
-        db,
-        updated_contact,
-        trigger_type="customer_contact_updated",
+    _persist_customer_business_object_refresh_after_commit(
+        business_object=updated_contact,
+        source_type="customer_contact",
+        change_type="updated",
         actor_id=str(current_user.id),
     )
     return _contact_response(updated_contact, customer.public_id)
@@ -1562,10 +1614,10 @@ async def set_primary_contact(
     customer = _get_editable_customer(db, contact.customer_id, team_id, current_user)
 
     updated_contact = contact_crud.set_primary(db, contact, team_id)
-    await _schedule_contact_intelligence_refresh(
-        db,
-        updated_contact,
-        trigger_type="customer_contact_updated",
+    _persist_customer_business_object_refresh_after_commit(
+        business_object=updated_contact,
+        source_type="customer_contact",
+        change_type="updated",
         actor_id=str(current_user.id),
     )
     return _contact_response(updated_contact, customer.public_id)
@@ -1586,17 +1638,14 @@ async def delete_contact(
         )
     _get_editable_customer(db, contact.customer_id, team_id, current_user)
 
-    from app.services.customer_intelligence_event_service import customer_intelligence_event_service
-
-    deleted_event = customer_intelligence_event_service.from_contact(
-        contact,
-        trigger_type="customer_contact_deleted",
-        actor_id=str(current_user.id),
-    )
     try:
         contact_crud.delete(db, contact)
-        if deleted_event is not None:
-            await _schedule_customer_intelligence_event_refresh(db, deleted_event)
+        _persist_customer_business_object_refresh_after_commit(
+            business_object=contact,
+            source_type="customer_contact",
+            change_type="deleted",
+            actor_id=str(current_user.id),
+        )
         return MessageResponse(message="删除成功")
     except ValueError as e:
         raise HTTPException(
@@ -1660,6 +1709,18 @@ async def return_customer_to_pool(
 
     updated_customer = customer_crud.return_to_pool(
         db, customer, return_data.return_reason, team_id, return_data.detailed_reason
+    )
+    _persist_customer_business_object_refresh_after_commit(
+        business_object=updated_customer,
+        source_type="customer",
+        summary="客户已退回公海，刷新客户智能档案",
+        actor_id=str(current_user.id),
+        payload={
+            "change_type": "returned_to_pool",
+            "previous_owner_id": previous_owner,
+            "new_owner_id": None,
+            "return_reason": updated_customer.return_reason,
+        },
     )
 
     from app.services.feishu import feishu_service
@@ -1731,6 +1792,17 @@ def claim_customer(
         updated_customer = customer_crud.claim_customer(
             db, customer, claim_data.owner_id, team_id
         )
+        _persist_customer_business_object_refresh_after_commit(
+            business_object=updated_customer,
+            source_type="customer",
+            summary="客户已被领取，刷新客户智能档案",
+            actor_id=str(current_user.id),
+            payload={
+                "change_type": "claimed",
+                "previous_owner_id": None,
+                "new_owner_id": updated_customer.owner_id,
+            },
+        )
         return _customer_response(db, updated_customer)
     except ValueError as e:
         raise HTTPException(
@@ -1765,12 +1837,27 @@ def assign_customer(
     customer = _get_customer_or_404(db, customer_id, team_id)
 
     try:
+        previous_owner = customer.owner_id
         updated_customer, transferred_opportunities, transferred_contracts = customer_crud.assign_customer(
             db,
             customer,
             assign_data.owner_id,
             team_id,
             assign_data.opportunity_transfer_scope
+        )
+        _persist_customer_business_object_refresh_after_commit(
+            business_object=updated_customer,
+            source_type="customer",
+            summary="客户负责人已变更，刷新客户智能档案",
+            actor_id=str(_current_user.id),
+            payload={
+                "change_type": "assigned",
+                "previous_owner_id": previous_owner,
+                "new_owner_id": updated_customer.owner_id,
+                "opportunity_transfer_scope": assign_data.opportunity_transfer_scope,
+                "transferred_opportunities": transferred_opportunities,
+                "transferred_contracts": transferred_contracts,
+            },
         )
         return CustomerAssignResponse(
             customer=_customer_response(db, updated_customer),
@@ -1783,27 +1870,6 @@ def assign_customer(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
-
-
-@router.post("/{customer_id}/regenerate-brief", response_model=MessageResponse, summary="重新生成客户概况", description="AI重新生成销售侧客户概况")
-async def regenerate_customer_brief(
-    customer_id: str,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
-
-    customer = _get_viewable_customer(db, customer_id, team_id, current_user)
-    await customer_intelligence_refresh_service.trigger_manual_refresh(
-        db,
-        team_id=team_id,
-        customer_id=customer.id,
-        actor_id=str(current_user.id),
-        scope="brief",
-    )
-
-    return MessageResponse(message="客户概况正在生成")
 
 
 @router.post(

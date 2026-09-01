@@ -18,6 +18,7 @@ from app.models.agent_async_operation import (
 )
 from app.models.customer import Customer
 from app.models.customer_intelligence_run import CustomerIntelligenceRun, CustomerIntelligenceRunStatus
+from app.models.customer_profile_projection import CustomerProfileCurrent, CustomerProfileProjectionVersion
 from app.services.agent.async_operation_service import AgentAsyncOperationService
 from app.services.agent.customer_intelligence_graph import build_customer_intelligence_graph_config
 from app.services.customer_intelligence_event_service import (
@@ -31,6 +32,7 @@ from app.services.customer_intelligence_refresh_service import (
     CustomerIntelligenceRefreshRequest,
     CustomerIntelligenceRefreshService,
 )
+from app.services.customer_profile_projection_service import CustomerProfileProjectionService
 from app.services.customer_intelligence_run_service import (
     CustomerIntelligenceRunClaim,
     CustomerIntelligenceRunClaimStatus,
@@ -68,9 +70,15 @@ class FakeGraphService:
         route = (
             "refresh_profile"
             if event.trigger_type in {"customer_created", "customer_converted_from_lead"}
-            else "refresh_brief"
+            else "refresh_profile"
         )
-        yield {"kind": "result", "result": {"route": route}}
+        yield {
+            "kind": "result",
+            "result": {
+                "route": route,
+                "profile_projection_result": {"success": True},
+            },
+        }
 
 
 class FakeEventService:
@@ -212,6 +220,83 @@ def _business_event() -> CustomerIntelligenceEvent:
     )
 
 
+def _add_published_profile(db, *, customer_id: int, team_id: int = 2, profile_version: int = 1) -> None:
+    version = CustomerProfileProjectionVersion(
+        id=400 + customer_id,
+        team_id=team_id,
+        customer_id=customer_id,
+        schema_version="v2",
+        profile_version=profile_version,
+        publication_status="PUBLISHED",
+        current_situation_json={"summary": "已有结构化档案"},
+        current_journeys_json=[],
+        important_changes_json=[],
+        long_term_context_json={},
+        follow_up_process_json=[],
+        recorded_follow_ups_json=[],
+        evidence_refs_json=[],
+        source_watermark_json={},
+        source_watermark_hash="a" * 64,
+        fact_watermark=0,
+        journey_watermark=0,
+        task_watermark=0,
+        commitment_watermark=0,
+        graph_version="customer-profile-v2",
+        content_hash="b" * 64,
+    )
+    db.add(version)
+    db.flush()
+    db.add(
+        CustomerProfileCurrent(
+            id=500 + customer_id,
+            team_id=team_id,
+            customer_id=customer_id,
+            current_profile_version_id=version.id,
+            last_successful_version=profile_version,
+        )
+    )
+
+
+class FakeProfileProjectionService:
+    def __init__(self):
+        self.stale_calls = []
+        self.updating_calls = []
+        self.failed_calls = []
+        self.current = SimpleNamespace(profile_status="NOT_READY", stale_reason=None, active_run_id=None)
+
+    def ensure_current(self, db, *, team_id, customer_id):
+        return self.current
+
+    def mark_stale(self, db, **kwargs):
+        self.stale_calls.append({"db": db, **kwargs})
+        self.current.profile_status = "STALE"
+        self.current.stale_reason = kwargs.get("reason")
+        return self.current
+
+    def mark_updating(self, db, **kwargs):
+        self.updating_calls.append({"db": db, **kwargs})
+        self.current.profile_status = "UPDATING"
+        self.current.active_run_id = kwargs.get("run_id")
+        return self.current
+
+    def mark_failed(self, db, **kwargs):
+        self.failed_calls.append({"db": db, **kwargs})
+        self.current.profile_status = "FAILED"
+        self.current.active_run_id = None
+        self.current.stale_reason = kwargs.get("reason")
+        return self.current
+
+
+@pytest.fixture(autouse=True)
+def _fake_default_profile_projection_service(monkeypatch):
+    projection_service = FakeProfileProjectionService()
+    monkeypatch.setattr(
+        "app.services.customer_intelligence_refresh_service.customer_profile_projection_service",
+        projection_service,
+    )
+    return projection_service
+
+
 class FakeSession:
     def __init__(self):
         self.closed = False
@@ -226,6 +311,16 @@ class FakeSession:
 
     def close(self):
         self.closed = True
+
+    class _NestedTransaction:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            return False
+
+    def begin_nested(self):
+        return self._NestedTransaction()
 
 
 class FakeOperationProjector:
@@ -373,30 +468,6 @@ class FakeIdentityResolutionService:
         return ()
 
 
-class FakeVectorDocumentService:
-    def __init__(self, rebuilt_customer_ids: list[int] | None = None):
-        self.rebuilt_customer_ids = rebuilt_customer_ids or []
-        self.calls = []
-
-    def rebuild_stale_customer_profiles(
-        self,
-        db,
-        *,
-        team_id: int | None = None,
-        metadata_version: int | None = None,
-        limit: int = 100,
-        commit: bool = True,
-    ) -> list[int]:
-        self.calls.append({
-            "db": db,
-            "team_id": team_id,
-            "metadata_version": metadata_version,
-            "limit": limit,
-            "commit": commit,
-        })
-        return self.rebuilt_customer_ids
-
-
 @pytest.mark.asyncio
 async def test_customer_intelligence_refresh_service_schedules_manual_full_refresh_and_marks_pending(monkeypatch):
     scheduled = []
@@ -411,20 +482,9 @@ async def test_customer_intelligence_refresh_service_schedules_manual_full_refre
     def fake_update_profile_status(db, customer_id, status, error_message=None, *, commit=True):
         status_calls.append(("profile", db, customer_id, status, error_message))
 
-    def fake_update_customer_brief_status(db, customer_id, status, error_message=None, *, commit=True):
-        status_calls.append(("brief", db, customer_id, status, error_message))
-
     monkeypatch.setattr("app.services.customer_intelligence_refresh_service.asyncio.create_task", fake_create_task)
-    monkeypatch.setattr(
-        "app.services.customer_intelligence_refresh_service.customer_crud.update_profile_status",
-        fake_update_profile_status,
-    )
-    monkeypatch.setattr(
-        "app.services.customer_intelligence_refresh_service.customer_crud.update_customer_brief_status",
-        fake_update_customer_brief_status,
-    )
     service = CustomerIntelligenceRefreshService(
-        graph_service=FakeGraphService(),
+        profile_workflow=FakeGraphService(),
         event_service=FakeEventService(),
         run_service=FakeRunService(),
     )
@@ -441,8 +501,6 @@ async def test_customer_intelligence_refresh_service_schedules_manual_full_refre
     assert request.customer_id == 101
     assert request.scope == "full"
     assert request.request_id.startswith("manual-refresh-")
-    assert [call[0] for call in status_calls] == ["profile", "brief"]
-    assert [call[3] for call in status_calls] == ["PENDING", "PENDING"]
     assert fake_session.committed is True
     assert len(scheduled) == 1
 
@@ -458,17 +516,17 @@ async def test_customer_intelligence_refresh_service_runs_manual_refresh_through
         lambda: fake_session,
     )
     service = CustomerIntelligenceRefreshService(
-        graph_service=graph_service,
+        profile_workflow=graph_service,
         event_service=event_service,
         run_service=run_service,
     )
 
-    result = await service.run_manual_refresh(
+    result = await service.run_refresh(
         CustomerIntelligenceRefreshRequest(
             team_id=2,
             customer_id=101,
             actor_id="9",
-            scope="brief",
+            scope="partial",
             request_id="manual-refresh-test",
         )
     )
@@ -477,14 +535,14 @@ async def test_customer_intelligence_refresh_service_runs_manual_refresh_through
         "success": True,
         "request_id": "manual-refresh-test",
         "event_key": "manual-event-1",
-        "route": "refresh_brief",
+        "route": "refresh_profile",
     }
     assert event_service.calls == [{
         "team_id": 2,
         "customer_id": 101,
         "actor_id": "9",
         "request_id": "manual-refresh-test",
-        "refresh_scope": "brief",
+        "refresh_scope": "partial",
         "occurred_at": event_service.calls[0]["occurred_at"],
     }]
     assert "db" not in graph_service.calls[0]
@@ -493,7 +551,7 @@ async def test_customer_intelligence_refresh_service_runs_manual_refresh_through
     assert graph_service.calls[0]["session_id"] == 0
     assert graph_service.calls[0]["event"].event_key == "manual-event-1"
     assert run_service.running[0]["run_input"].request_id == "manual-refresh-test"
-    assert run_service.succeeded[0]["result"]["route"] == "refresh_brief"
+    assert run_service.succeeded[0]["result"]["route"] == "refresh_profile"
     assert run_service.failed == []
     assert fake_session.closed is True
 
@@ -512,20 +570,9 @@ async def test_customer_intelligence_refresh_service_schedules_customer_lifecycl
     def fake_update_profile_status(db, customer_id, status, error_message=None, *, commit=True):
         status_calls.append(("profile", customer_id, status, error_message))
 
-    def fake_update_customer_brief_status(db, customer_id, status, error_message=None, *, commit=True):
-        status_calls.append(("brief", customer_id, status, error_message))
-
     monkeypatch.setattr("app.services.customer_intelligence_refresh_service.asyncio.create_task", fake_create_task)
-    monkeypatch.setattr(
-        "app.services.customer_intelligence_refresh_service.customer_crud.update_profile_status",
-        fake_update_profile_status,
-    )
-    monkeypatch.setattr(
-        "app.services.customer_intelligence_refresh_service.customer_crud.update_customer_brief_status",
-        fake_update_customer_brief_status,
-    )
     service = CustomerIntelligenceRefreshService(
-        graph_service=FakeGraphService(),
+        profile_workflow=FakeGraphService(),
         event_service=FakeEventService(),
         run_service=FakeRunService(),
         identity_resolution_service=FakeIdentityResolutionService(),
@@ -542,7 +589,6 @@ async def test_customer_intelligence_refresh_service_schedules_customer_lifecycl
     assert request.scope == "full"
     assert request.trigger_type == "customer_converted_from_lead"
     assert request.source_lead_id == 501
-    assert [call[0] for call in status_calls] == ["profile", "brief"]
     assert fake_session.committed is True
     assert len(scheduled) == 1
 
@@ -563,24 +609,13 @@ async def test_customer_intelligence_refresh_service_schedules_committed_busines
     def fake_update_profile_status(db, customer_id, status, error_message=None, *, commit=True):
         status_calls.append(("profile", customer_id, status, error_message))
 
-    def fake_update_customer_brief_status(db, customer_id, status, error_message=None, *, commit=True):
-        status_calls.append(("brief", customer_id, status, error_message))
-
     monkeypatch.setattr("app.services.customer_intelligence_refresh_service.asyncio.create_task", fake_create_task)
     monkeypatch.setattr(
         "app.services.customer_intelligence_refresh_service.SessionLocal",
         lambda: fake_session,
     )
-    monkeypatch.setattr(
-        "app.services.customer_intelligence_refresh_service.customer_crud.update_profile_status",
-        fake_update_profile_status,
-    )
-    monkeypatch.setattr(
-        "app.services.customer_intelligence_refresh_service.customer_crud.update_customer_brief_status",
-        fake_update_customer_brief_status,
-    )
     service = CustomerIntelligenceRefreshService(
-        graph_service=FakeGraphService(),
+        profile_workflow=FakeGraphService(),
         event_service=FakeEventService(),
         run_service=run_service,
     )
@@ -588,7 +623,7 @@ async def test_customer_intelligence_refresh_service_schedules_committed_busines
     request = await service.trigger_committed_event_refresh(
         object(),
         event=event,
-        scope="brief",
+        scope="partial",
     )
 
     assert isinstance(request, CustomerIntelligenceCommittedEventRequest)
@@ -596,10 +631,56 @@ async def test_customer_intelligence_refresh_service_schedules_committed_busines
     assert request.event is event
     assert request.scheduled is True
     assert request.schedule_error is None
-    assert [call[0] for call in status_calls] == ["brief"]
     assert fake_session.committed is True
     assert run_service.pending[0]["run_input"].event is event
     assert len(scheduled) == 1
+
+
+def test_customer_intelligence_refresh_service_isolates_after_commit_enqueue_failure(monkeypatch):
+    fake_session = FakeSession()
+    event = _business_event()
+
+    monkeypatch.setattr(
+        "app.services.customer_intelligence_refresh_service.SessionLocal",
+        lambda: fake_session,
+    )
+    service = CustomerIntelligenceRefreshService(
+        profile_workflow=FakeGraphService(),
+        event_service=FakeEventService(),
+        run_service=FailingRunService(),
+    )
+
+    request = service.enqueue_committed_event_refresh_after_commit(
+        event=event,
+        scope="partial",
+    )
+
+    assert request.request_id == "business-event-customer_contact_updated-contact-event-1"
+    assert request.event is event
+    assert request.scheduled is False
+    assert request.kick_required is False
+    assert request.schedule_error == "customer intelligence run table unavailable"
+    assert fake_session.rolled_back is True
+    assert fake_session.closed is True
+
+
+def test_customer_intelligence_refresh_service_does_not_kick_unscheduled_request(monkeypatch):
+    service = CustomerIntelligenceRefreshService()
+    started = []
+    monkeypatch.setattr(service, "_start_background_task", started.append)
+    event = _business_event()
+    request = CustomerIntelligenceCommittedEventRequest(
+        request_id="failed-request",
+        event=event,
+        scope="partial",
+        scheduled=False,
+        kick_required=False,
+        schedule_error="queue unavailable",
+    )
+
+    service.kick_committed_event_refresh(request)
+
+    assert started == []
 
 
 def test_customer_intelligence_refresh_service_enqueues_committed_business_event_without_scheduling(monkeypatch):
@@ -611,20 +692,9 @@ def test_customer_intelligence_refresh_service_enqueues_committed_business_event
     def fake_update_profile_status(db, customer_id, status, error_message=None, *, commit=True):
         status_calls.append(("profile", customer_id, status, error_message))
 
-    def fake_update_customer_brief_status(db, customer_id, status, error_message=None, *, commit=True):
-        status_calls.append(("brief", customer_id, status, error_message))
-
     monkeypatch.setattr("app.services.customer_intelligence_refresh_service.asyncio.create_task", scheduled.append)
-    monkeypatch.setattr(
-        "app.services.customer_intelligence_refresh_service.customer_crud.update_profile_status",
-        fake_update_profile_status,
-    )
-    monkeypatch.setattr(
-        "app.services.customer_intelligence_refresh_service.customer_crud.update_customer_brief_status",
-        fake_update_customer_brief_status,
-    )
     service = CustomerIntelligenceRefreshService(
-        graph_service=FakeGraphService(),
+        profile_workflow=FakeGraphService(),
         event_service=FakeEventService(),
         run_service=run_service,
     )
@@ -632,7 +702,7 @@ def test_customer_intelligence_refresh_service_enqueues_committed_business_event
     request = service.enqueue_committed_event_refresh(
         object(),
         event=event,
-        scope="brief",
+        scope="partial",
     )
 
     assert isinstance(request, CustomerIntelligenceCommittedEventRequest)
@@ -640,7 +710,6 @@ def test_customer_intelligence_refresh_service_enqueues_committed_business_event
     assert request.event is event
     assert request.scheduled is True
     assert request.schedule_error is None
-    assert [call[0] for call in status_calls] == ["brief"]
     assert run_service.pending[0]["run_input"].event is event
     assert scheduled == []
 
@@ -661,16 +730,8 @@ async def test_customer_intelligence_refresh_service_isolates_committed_event_sc
         "app.services.customer_intelligence_refresh_service.SessionLocal",
         lambda: fake_session,
     )
-    monkeypatch.setattr(
-        "app.services.customer_intelligence_refresh_service.customer_crud.update_profile_status",
-        lambda db, customer_id, status, error_message=None, *, commit=True: None,
-    )
-    monkeypatch.setattr(
-        "app.services.customer_intelligence_refresh_service.customer_crud.update_customer_brief_status",
-        lambda db, customer_id, status, error_message=None, *, commit=True: None,
-    )
     service = CustomerIntelligenceRefreshService(
-        graph_service=FakeGraphService(),
+        profile_workflow=FakeGraphService(),
         event_service=FakeEventService(),
         run_service=FailingRunService(),
     )
@@ -678,7 +739,7 @@ async def test_customer_intelligence_refresh_service_isolates_committed_event_sc
     request = await service.trigger_committed_event_refresh(
         object(),
         event=event,
-        scope="brief",
+        scope="partial",
     )
 
     assert request.request_id.startswith("business-event-customer_contact_updated-")
@@ -688,82 +749,6 @@ async def test_customer_intelligence_refresh_service_isolates_committed_event_sc
     assert fake_session.rolled_back is True
     assert fake_session.closed is True
     assert scheduled == []
-
-
-@pytest.mark.asyncio
-async def test_customer_intelligence_refresh_service_builds_business_object_change_event(monkeypatch):
-    scheduled = []
-    run_service = FakeRunService()
-    event_service = FakeEventService()
-
-    def fake_create_task(coro):
-        scheduled.append(coro)
-        coro.close()
-        return FakeBackgroundTask()
-
-    monkeypatch.setattr("app.services.customer_intelligence_refresh_service.asyncio.create_task", fake_create_task)
-    monkeypatch.setattr(
-        "app.services.customer_intelligence_refresh_service.customer_crud.update_customer_brief_status",
-        lambda db, customer_id, status, error_message=None, *, commit=True: None,
-    )
-    service = CustomerIntelligenceRefreshService(
-        graph_service=FakeGraphService(),
-        event_service=event_service,
-        run_service=run_service,
-    )
-
-    request = await service.trigger_business_object_change_refresh(
-        object(),
-        team_id=2,
-        customer_id=101,
-        actor_id="9",
-        source_type="contract",
-        source_id=401,
-        change_type="deleted",
-        summary="合同已删除: 企业版采购合同",
-        payload={"object_name": "企业版采购合同"},
-    )
-
-    assert request.request_id.startswith("business-event-customer_business_object_deleted-")
-    assert request.event.trigger_type == "customer_business_object_deleted"
-    assert request.event.summary == "合同已删除: 企业版采购合同"
-    assert event_service.calls[0]["source_type"] == "contract"
-    assert event_service.calls[0]["change_id"]
-    assert run_service.pending[0]["run_input"].event.event_key == "business-object-change-1"
-    assert len(scheduled) == 1
-
-
-def test_customer_intelligence_refresh_service_enqueues_created_business_object_change(monkeypatch):
-    run_service = FakeRunService()
-    event_service = FakeEventService()
-
-    monkeypatch.setattr(
-        "app.services.customer_intelligence_refresh_service.customer_crud.update_customer_brief_status",
-        lambda db, customer_id, status, error_message=None, *, commit=True: None,
-    )
-    service = CustomerIntelligenceRefreshService(
-        graph_service=FakeGraphService(),
-        event_service=event_service,
-        run_service=run_service,
-    )
-
-    request = service.enqueue_business_object_change_refresh(
-        object(),
-        team_id=2,
-        customer_id=101,
-        actor_id="9",
-        source_type="invoice_title",
-        source_id=801,
-        change_type="created",
-        summary="开票抬头已新增: 越秀金融科技有限公司",
-        payload={"object_name": "越秀金融科技有限公司"},
-    )
-
-    assert request.request_id.startswith("business-event-customer_business_object_created-")
-    assert request.event.trigger_type == "customer_business_object_created"
-    assert event_service.calls[0]["source_type"] == "invoice_title"
-    assert event_service.calls[0]["change_id"]
-    assert run_service.pending[0]["run_input"].event is request.event
 
 
 def test_customer_intelligence_refresh_service_detects_customer_business_inputs():
@@ -798,7 +783,7 @@ def test_customer_intelligence_refresh_service_detects_customer_business_inputs(
     ))
     db.commit()
     service = CustomerIntelligenceRefreshService(
-        graph_service=FakeGraphService(),
+        profile_workflow=FakeGraphService(),
         event_service=FakeEventService(),
         run_service=FakeRunService(),
     )
@@ -821,6 +806,8 @@ def test_customer_intelligence_refresh_service_recovers_expired_lease_without_st
         engine,
         tables=[
             Customer.__table__,
+            CustomerProfileProjectionVersion.__table__,
+            CustomerProfileCurrent.__table__,
             CustomerIntelligenceRun.__table__,
             AgentAsyncOperation.__table__,
             AgentAsyncOperationEvent.__table__,
@@ -846,8 +833,6 @@ def test_customer_intelligence_refresh_service_recovers_expired_lease_without_st
             account_name="卡住的客户",
             city="广州",
             creator_id="9",
-            profile_status="GENERATING",
-            customer_brief_status="GENERATING",
         )
     )
     db.add(
@@ -887,10 +872,11 @@ def test_customer_intelligence_refresh_service_recovers_expired_lease_without_st
     operation_service.mark_running(db, operation)
     db.commit()
     service = CustomerIntelligenceRefreshService(
-        graph_service=FakeGraphService(),
+        profile_workflow=FakeGraphService(),
         event_service=FakeEventService(),
         run_service=run_service,
         async_operation_service=operation_service,
+        profile_projection_service=CustomerProfileProjectionService(),
     )
     try:
         result = service.recover_stale_runtime_state(db, team_id=2)
@@ -908,11 +894,14 @@ def test_customer_intelligence_refresh_service_recovers_expired_lease_without_st
             "obsolete_historical_runs": 0,
             "reconciled_operations": 0,
             "stale_runs": 1,
-            "pending_customers": 1,
+            "pending_customers": 0,
             "failed_customers": 0,
         }
-        assert customer.profile_status == "PENDING"
-        assert customer.customer_brief_status == "PENDING"
+        profile_current = db.query(CustomerProfileCurrent).filter(
+            CustomerProfileCurrent.team_id == 2, CustomerProfileCurrent.customer_id == 101
+        ).one()
+        assert profile_current.profile_status == "UPDATING"
+        assert profile_current.active_run_id == 301
         assert recovered_run.status == CustomerIntelligenceRunStatus.RUNNING
         assert recovered_run.next_retry_at is None
         assert recovered_run.lease_token == original_lease_token
@@ -949,6 +938,8 @@ def test_customer_intelligence_refresh_service_does_not_recover_live_lease():
         engine,
         tables=[
             Customer.__table__,
+            CustomerProfileProjectionVersion.__table__,
+            CustomerProfileCurrent.__table__,
             CustomerIntelligenceRun.__table__,
             AgentAsyncOperation.__table__,
             AgentAsyncOperationEvent.__table__,
@@ -972,8 +963,6 @@ def test_customer_intelligence_refresh_service_does_not_recover_live_lease():
             account_name="正在更新的客户",
             city="广州",
             creator_id="9",
-            profile_status="GENERATING",
-            customer_brief_status="GENERATING",
         )
     )
     db.add(
@@ -999,7 +988,7 @@ def test_customer_intelligence_refresh_service_does_not_recover_live_lease():
     )
     db.commit()
     service = CustomerIntelligenceRefreshService(
-        graph_service=FakeGraphService(),
+        profile_workflow=FakeGraphService(),
         event_service=FakeEventService(),
         run_service=run_service,
     )
@@ -1019,8 +1008,6 @@ def test_customer_intelligence_refresh_service_does_not_recover_live_lease():
         "pending_customers": 0,
         "failed_customers": 0,
     }
-    assert customer.profile_status == "GENERATING"
-    assert customer.customer_brief_status == "GENERATING"
     assert run.status == CustomerIntelligenceRunStatus.RUNNING
     assert run.lease_token == "live-lease-owner"
     assert run.lease_expires_at == live_until
@@ -1039,6 +1026,8 @@ async def test_customer_intelligence_refresh_service_exhausts_attempts_only_at_c
         engine,
         tables=[
             Customer.__table__,
+            CustomerProfileProjectionVersion.__table__,
+            CustomerProfileCurrent.__table__,
             CustomerIntelligenceRun.__table__,
             AgentAsyncOperation.__table__,
             AgentAsyncOperationEvent.__table__,
@@ -1063,8 +1052,6 @@ async def test_customer_intelligence_refresh_service_exhausts_attempts_only_at_c
             account_name="重试耗尽的客户",
             city="广州",
             creator_id="9",
-            profile_status="GENERATING",
-            customer_brief_status="GENERATING",
         )
     )
     db.add(
@@ -1104,7 +1091,7 @@ async def test_customer_intelligence_refresh_service_exhausts_attempts_only_at_c
     operation_service.mark_running(db, operation)
     db.commit()
     service = CustomerIntelligenceRefreshService(
-        graph_service=graph_service,
+        profile_workflow=graph_service,
         event_service=FakeEventService(),
         run_service=run_service,
         async_operation_service=operation_service,
@@ -1162,6 +1149,8 @@ def test_customer_intelligence_refresh_service_closes_obsolete_historical_runs()
         engine,
         tables=[
             Customer.__table__,
+            CustomerProfileProjectionVersion.__table__,
+            CustomerProfileCurrent.__table__,
             CustomerIntelligenceRun.__table__,
             AgentAsyncOperation.__table__,
             AgentAsyncOperationEvent.__table__,
@@ -1177,8 +1166,6 @@ def test_customer_intelligence_refresh_service_closes_obsolete_historical_runs()
             account_name="已有智能档案客户",
             city="广州",
             creator_id="9",
-            customer_brief_markdown="## 客户概览\n已有内容",
-            customer_brief_status="COMPLETED",
         )
     )
     db.add(
@@ -1198,6 +1185,7 @@ def test_customer_intelligence_refresh_service_closes_obsolete_historical_runs()
             started_time=datetime.now() - timedelta(minutes=15),
         )
     )
+    _add_published_profile(db, customer_id=101)
     db.commit()
     operation = operation_service.ensure_scheduled(
         db,
@@ -1214,7 +1202,7 @@ def test_customer_intelligence_refresh_service_closes_obsolete_historical_runs()
     operation_service.mark_running(db, operation)
     db.commit()
     service = CustomerIntelligenceRefreshService(
-        graph_service=FakeGraphService(),
+        profile_workflow=FakeGraphService(),
         event_service=FakeEventService(),
         run_service=FakeRunService(),
         async_operation_service=operation_service,
@@ -1240,10 +1228,10 @@ def test_customer_intelligence_refresh_service_closes_obsolete_historical_runs()
     assert result["stale_runs"] == 0
     assert run_status == CustomerIntelligenceRunStatus.CANCELLED
     assert route == "historical_backfill_satisfied"
-    assert result_json["reason"] == "customer_brief_already_available"
+    assert result_json["reason"] == "customer_profile_projection_already_available"
     assert operation_projection is not None
     assert operation_projection.status == AgentAsyncOperationStatus.CANCELLED
-    assert operation_projection.result["reason"] == "customer_brief_already_available"
+    assert operation_projection.result["reason"] == "customer_profile_projection_already_available"
     assert operation_projection.events[-1].event_type == "CANCELLED"
 
 
@@ -1258,7 +1246,7 @@ async def test_customer_intelligence_refresh_service_runs_committed_business_eve
         lambda: fake_session,
     )
     service = CustomerIntelligenceRefreshService(
-        graph_service=graph_service,
+        profile_workflow=graph_service,
         event_service=FakeEventService(),
         run_service=run_service,
     )
@@ -1267,7 +1255,7 @@ async def test_customer_intelligence_refresh_service_runs_committed_business_eve
         CustomerIntelligenceCommittedEventRequest(
             request_id="business-event-test",
             event=event,
-            scope="brief",
+            scope="partial",
         )
     )
 
@@ -1275,7 +1263,7 @@ async def test_customer_intelligence_refresh_service_runs_committed_business_eve
         "success": True,
         "request_id": "business-event-test",
         "event_key": "contact-event-1",
-        "route": "refresh_brief",
+        "route": "refresh_profile",
     }
     assert graph_service.calls[0]["event"] is event
     assert graph_service.calls[0]["team_id"] == 2
@@ -1292,7 +1280,7 @@ async def test_customer_intelligence_refresh_service_reclaims_pending_graph_exec
     run_input = CustomerIntelligenceRunInput(
         request_id="business-event-running-reclaim",
         event=event,
-        scope="brief",
+        scope="partial",
     )
     run = run_service.ensure_pending(FakeSession(), run_input)
     run.status = CustomerIntelligenceRunStatus.RUNNING
@@ -1304,7 +1292,7 @@ async def test_customer_intelligence_refresh_service_reclaims_pending_graph_exec
         FakeSession,
     )
     service = CustomerIntelligenceRefreshService(
-        graph_service=graph_service,
+        profile_workflow=graph_service,
         event_service=FakeEventService(),
         run_service=run_service,
         operation_projector=FakeOperationProjector(),
@@ -1314,7 +1302,7 @@ async def test_customer_intelligence_refresh_service_reclaims_pending_graph_exec
         CustomerIntelligenceCommittedEventRequest(
             request_id=run_input.request_id,
             event=event,
-            scope="brief",
+            scope="partial",
         )
     )
 
@@ -1325,6 +1313,7 @@ async def test_customer_intelligence_refresh_service_reclaims_pending_graph_exec
         "user_id": 9,
         "session_id": 0,
         "event": event,
+        "run_id": 30,
         "resume_existing_execution": True,
     }]
 
@@ -1357,20 +1346,9 @@ async def test_customer_intelligence_refresh_service_schedules_batch_rebuild_thr
     def fake_update_profile_status(db_arg, customer_id, status, error_message=None, *, commit=True):
         status_calls.append(("profile", db_arg, customer_id, status, error_message))
 
-    def fake_update_customer_brief_status(db_arg, customer_id, status, error_message=None, *, commit=True):
-        status_calls.append(("brief", db_arg, customer_id, status, error_message))
-
     monkeypatch.setattr("app.services.customer_intelligence_refresh_service.asyncio.create_task", fake_create_task)
-    monkeypatch.setattr(
-        "app.services.customer_intelligence_refresh_service.customer_crud.update_profile_status",
-        fake_update_profile_status,
-    )
-    monkeypatch.setattr(
-        "app.services.customer_intelligence_refresh_service.customer_crud.update_customer_brief_status",
-        fake_update_customer_brief_status,
-    )
     service = CustomerIntelligenceRefreshService(
-        graph_service=FakeGraphService(),
+        profile_workflow=FakeGraphService(),
         event_service=FakeEventService(),
         run_service=run_service,
     )
@@ -1393,7 +1371,6 @@ async def test_customer_intelligence_refresh_service_schedules_batch_rebuild_thr
     assert result.total == 2
     assert result.scheduled == 2
     assert len(scheduled) == 2
-    assert [call[2] for call in status_calls] == [101, 101, 102, 102]
     assert [item["run_input"].request_id for item in run_service.pending] == [
         result.request_id,
         result.request_id,
@@ -1418,6 +1395,8 @@ async def test_customer_intelligence_refresh_service_schedules_missing_historica
         engine,
         tables=[
             Customer.__table__,
+            CustomerProfileProjectionVersion.__table__,
+            CustomerProfileCurrent.__table__,
             CustomerIntelligenceRun.__table__,
             AgentAsyncOperation.__table__,
             AgentAsyncOperationEvent.__table__,
@@ -1433,8 +1412,6 @@ async def test_customer_intelligence_refresh_service_schedules_missing_historica
             account_name="已有档案",
             city="广州",
             creator_id="9",
-            customer_brief_markdown="已整理内容",
-            customer_brief_status="COMPLETED",
         ),
         Customer(id=104, team_id=2, account_name="已有运行", city="广州", creator_id="9"),
     ])
@@ -1456,7 +1433,6 @@ async def test_customer_intelligence_refresh_service_schedules_missing_historica
     scheduled = []
     status_calls = []
     run_service = FakeRunService()
-    vector_document_service = FakeVectorDocumentService(rebuilt_customer_ids=[102])
 
     def fake_create_task(coro):
         scheduled.append(coro)
@@ -1466,23 +1442,11 @@ async def test_customer_intelligence_refresh_service_schedules_missing_historica
     def fake_update_profile_status(db_arg, customer_id, status, error_message=None, *, commit=True):
         status_calls.append(("profile", customer_id, status, error_message))
 
-    def fake_update_customer_brief_status(db_arg, customer_id, status, error_message=None, *, commit=True):
-        status_calls.append(("brief", customer_id, status, error_message))
-
     monkeypatch.setattr("app.services.customer_intelligence_refresh_service.asyncio.create_task", fake_create_task)
-    monkeypatch.setattr(
-        "app.services.customer_intelligence_refresh_service.customer_crud.update_profile_status",
-        fake_update_profile_status,
-    )
-    monkeypatch.setattr(
-        "app.services.customer_intelligence_refresh_service.customer_crud.update_customer_brief_status",
-        fake_update_customer_brief_status,
-    )
     service = CustomerIntelligenceRefreshService(
-        graph_service=FakeGraphService(),
+        profile_workflow=FakeGraphService(),
         event_service=FakeEventService(),
         run_service=run_service,
-        vector_document_service=vector_document_service,
     )
     monkeypatch.setattr(
         service,
@@ -1498,21 +1462,10 @@ async def test_customer_intelligence_refresh_service_schedules_missing_historica
     assert result.success is True
     assert result.request_id.startswith("historical-backfill-")
     assert result.scope == "full"
-    assert result.customer_ids == [101]
-    assert result.total == 1
-    assert result.scheduled == 1
-    assert result.profile_vector_reindexed == 1
-    assert result.profile_vector_customer_ids == (102,)
-    assert vector_document_service.calls == [{
-        "db": db,
-        "team_id": 2,
-        "metadata_version": None,
-        "limit": 20,
-        "commit": False,
-    }]
-    assert len(scheduled) == 1
-    assert [call[0] for call in status_calls] == ["profile", "brief"]
-    assert [call[1] for call in status_calls] == [101, 101]
+    assert result.customer_ids == [101, 102]
+    assert result.total == 2
+    assert result.scheduled == 2
+    assert len(scheduled) == 2
     assert run_service.pending[0]["run_input"].event.trigger_type == (
         "customer_intelligence_historical_backfill_requested"
     )
@@ -1529,6 +1482,8 @@ async def test_customer_intelligence_refresh_service_recovers_before_historical_
         engine,
         tables=[
             Customer.__table__,
+            CustomerProfileProjectionVersion.__table__,
+            CustomerProfileCurrent.__table__,
             CustomerIntelligenceRun.__table__,
             AgentAsyncOperation.__table__,
             AgentAsyncOperationEvent.__table__,
@@ -1543,11 +1498,10 @@ async def test_customer_intelligence_refresh_service_recovers_before_historical_
             account_name="已有档案但旧补档未收口",
             city="广州",
             creator_id="9",
-            customer_brief_markdown="已有智能档案",
-            customer_brief_status="COMPLETED",
         ),
         Customer(id=102, team_id=2, account_name="缺档客户", city="广州", creator_id="9"),
     ])
+    _add_published_profile(db, customer_id=101)
     db.add(
         CustomerIntelligenceRun(
             id=301,
@@ -1569,7 +1523,6 @@ async def test_customer_intelligence_refresh_service_recovers_before_historical_
     scheduled = []
     status_calls = []
     run_service = FakeRunService()
-    vector_document_service = FakeVectorDocumentService()
 
     def fake_create_task(coro):
         scheduled.append(coro)
@@ -1577,23 +1530,10 @@ async def test_customer_intelligence_refresh_service_recovers_before_historical_
         return FakeBackgroundTask()
 
     monkeypatch.setattr("app.services.customer_intelligence_refresh_service.asyncio.create_task", fake_create_task)
-    monkeypatch.setattr(
-        "app.services.customer_intelligence_refresh_service.customer_crud.update_profile_status",
-        lambda db_arg, customer_id, status, error_message=None, *, commit=True: status_calls.append(
-            ("profile", customer_id, status)
-        ),
-    )
-    monkeypatch.setattr(
-        "app.services.customer_intelligence_refresh_service.customer_crud.update_customer_brief_status",
-        lambda db_arg, customer_id, status, error_message=None, *, commit=True: status_calls.append(
-            ("brief", customer_id, status)
-        ),
-    )
     service = CustomerIntelligenceRefreshService(
-        graph_service=FakeGraphService(),
+        profile_workflow=FakeGraphService(),
         event_service=FakeEventService(),
         run_service=run_service,
-        vector_document_service=vector_document_service,
         identity_resolution_service=FakeIdentityResolutionService(),
     )
     monkeypatch.setattr(
@@ -1612,7 +1552,6 @@ async def test_customer_intelligence_refresh_service_recovers_before_historical_
     assert old_run_status == CustomerIntelligenceRunStatus.CANCELLED
     assert result.customer_ids == [102]
     assert result.scheduled == 1
-    assert [call[1] for call in status_calls] == [102, 102]
     assert len(scheduled) == 1
 
 
@@ -1627,7 +1566,7 @@ async def test_customer_intelligence_refresh_service_runs_customer_lifecycle_ref
         lambda: fake_session,
     )
     service = CustomerIntelligenceRefreshService(
-        graph_service=graph_service,
+        profile_workflow=graph_service,
         event_service=event_service,
         run_service=run_service,
     )
@@ -1664,6 +1603,57 @@ async def test_customer_intelligence_refresh_service_runs_customer_lifecycle_ref
 
 
 @pytest.mark.asyncio
+async def test_customer_intelligence_refresh_service_does_not_mark_structured_profile_failure_success(monkeypatch):
+    fake_session = FakeSession()
+    event_service = FakeEventService()
+    run_service = FakeRunService()
+    status_calls = []
+
+    def fake_update_profile_status(db, customer_id, status, error_message=None, *, commit=True):
+        status_calls.append(("profile", customer_id, status, error_message))
+
+    class StructuredFailureGraph(FakeGraphService):
+        async def stream_events(self, input_state):
+            self.calls.append(input_state)
+            yield {
+                "kind": "result",
+                "result": {
+                    "route": "refresh_profile",
+                    "profile_projection_result": {
+                        "success": False,
+                        "error_code": "PROFILE_PUBLISH_FAILED",
+                    },
+                },
+            }
+
+    monkeypatch.setattr(
+        "app.services.customer_intelligence_refresh_service.SessionLocal",
+        lambda: fake_session,
+    )
+    service = CustomerIntelligenceRefreshService(
+        profile_workflow=StructuredFailureGraph(),
+        event_service=event_service,
+        run_service=run_service,
+    )
+
+    result = await service.run_refresh(
+        CustomerIntelligenceRefreshRequest(
+            team_id=2,
+            customer_id=101,
+            actor_id="9",
+            scope="full",
+            request_id="structured-profile-failure",
+        )
+    )
+
+    assert result["success"] is False
+    assert run_service.succeeded == []
+    assert run_service.failed[0]["error_message"] == (
+        "客户档案工作流发布失败: PROFILE_PUBLISH_FAILED"
+    )
+
+
+@pytest.mark.asyncio
 async def test_customer_intelligence_refresh_service_records_failed_run_and_marks_customer_failed(monkeypatch):
     fake_session = FakeSession()
     event_service = FakeEventService()
@@ -1673,23 +1663,12 @@ async def test_customer_intelligence_refresh_service_records_failed_run_and_mark
     def fake_update_profile_status(db, customer_id, status, error_message=None, *, commit=True):
         status_calls.append(("profile", customer_id, status, error_message))
 
-    def fake_update_customer_brief_status(db, customer_id, status, error_message=None, *, commit=True):
-        status_calls.append(("brief", customer_id, status, error_message))
-
     monkeypatch.setattr(
         "app.services.customer_intelligence_refresh_service.SessionLocal",
         lambda: fake_session,
     )
-    monkeypatch.setattr(
-        "app.services.customer_intelligence_refresh_service.customer_crud.update_profile_status",
-        fake_update_profile_status,
-    )
-    monkeypatch.setattr(
-        "app.services.customer_intelligence_refresh_service.customer_crud.update_customer_brief_status",
-        fake_update_customer_brief_status,
-    )
     service = CustomerIntelligenceRefreshService(
-        graph_service=FakeGraphService(should_fail=True),
+        profile_workflow=FakeGraphService(should_fail=True),
         event_service=event_service,
         run_service=run_service,
     )
@@ -1708,8 +1687,6 @@ async def test_customer_intelligence_refresh_service_records_failed_run_and_mark
     assert result["request_id"] == "manual-refresh-failed"
     assert run_service.running[0]["run_input"].request_id == "manual-refresh-failed"
     assert run_service.failed[0]["error_message"] == "graph failed"
-    assert [call[0] for call in status_calls] == ["profile", "brief"]
-    assert [call[2] for call in status_calls] == ["FAILED", "FAILED"]
     assert fake_session.closed is True
 
 
@@ -1724,10 +1701,10 @@ async def test_customer_intelligence_refresh_service_runs_due_retries(monkeypatc
             team_id=2,
             customer_id=101,
             actor_id="9",
-            scope="brief",
+            scope="partial",
             request_id="manual-refresh-retry",
             trigger_type="manual_refresh_requested",
-            event_json={"payload": {"refresh_scope": "brief"}},
+            event_json={"payload": {"refresh_scope": "partial"}},
         )
     ]
 
@@ -1739,7 +1716,7 @@ async def test_customer_intelligence_refresh_service_runs_due_retries(monkeypatc
         fake_session_local,
     )
     service = CustomerIntelligenceRefreshService(
-        graph_service=graph_service,
+        profile_workflow=graph_service,
         event_service=event_service,
         run_service=run_service,
         operation_projector=FakeOperationProjector(),
@@ -1766,19 +1743,19 @@ async def test_customer_intelligence_refresh_service_filters_due_retries_by_team
             team_id=2,
             customer_id=101,
             actor_id="9",
-            scope="brief",
+            scope="partial",
             request_id="team-2-retry",
             trigger_type="manual_refresh_requested",
-            event_json={"payload": {"refresh_scope": "brief"}},
+            event_json={"payload": {"refresh_scope": "partial"}},
         ),
         SimpleNamespace(
             team_id=3,
             customer_id=201,
             actor_id="10",
-            scope="brief",
+            scope="partial",
             request_id="team-3-retry",
             trigger_type="manual_refresh_requested",
-            event_json={"payload": {"refresh_scope": "brief"}},
+            event_json={"payload": {"refresh_scope": "partial"}},
         ),
     ]
 
@@ -1790,7 +1767,7 @@ async def test_customer_intelligence_refresh_service_filters_due_retries_by_team
         fake_session_local,
     )
     service = CustomerIntelligenceRefreshService(
-        graph_service=graph_service,
+        profile_workflow=graph_service,
         event_service=event_service,
         run_service=run_service,
         operation_projector=FakeOperationProjector(),
@@ -1816,7 +1793,7 @@ async def test_customer_intelligence_refresh_service_retries_committed_business_
             team_id=2,
             customer_id=101,
             actor_id="9",
-            scope="brief",
+            scope="partial",
             request_id="business-event-retry",
             trigger_type="customer_contact_updated",
             event_json=event.to_dict(),
@@ -1831,7 +1808,7 @@ async def test_customer_intelligence_refresh_service_retries_committed_business_
         fake_session_local,
     )
     service = CustomerIntelligenceRefreshService(
-        graph_service=graph_service,
+        profile_workflow=graph_service,
         event_service=FakeEventService(),
         run_service=run_service,
         operation_projector=FakeOperationProjector(),
@@ -1867,8 +1844,9 @@ class _LateBindingGraphService:
         yield {
             "kind": "result",
             "result": {
-                "route": "refresh_brief",
+                "route": "refresh_profile",
                 "degraded": False,
+                "profile_projection_result": {"success": True},
                 "visible_trace": [
                     {"title": "提炼客户事实", "content": "提炼出 2 条可沉淀事实"},
                 ],
@@ -1906,6 +1884,8 @@ async def test_committed_event_late_agent_binding_converges_to_terminal_operatio
         engine,
         tables=[
             Customer.__table__,
+            CustomerProfileProjectionVersion.__table__,
+            CustomerProfileCurrent.__table__,
             CustomerIntelligenceRun.__table__,
             AgentAsyncOperation.__table__,
             AgentAsyncOperationEvent.__table__,
@@ -1916,7 +1896,7 @@ async def test_committed_event_late_agent_binding_converges_to_terminal_operatio
     run_service = CustomerIntelligenceRunService()
     operation_service = AgentAsyncOperationService()
     service = CustomerIntelligenceRefreshService(
-        graph_service=graph_service,
+        profile_workflow=graph_service,
         event_service=CustomerIntelligenceEventService(),
         run_service=run_service,
         async_operation_service=operation_service,
@@ -1942,7 +1922,7 @@ async def test_committed_event_late_agent_binding_converges_to_terminal_operatio
         request = CustomerIntelligenceCommittedEventRequest(
             request_id=request_id,
             event=event,
-            scope="brief",
+            scope="partial",
         )
         service._ensure_pending_event_run(setup_db, request)
         setup_db.commit()
@@ -2020,6 +2000,8 @@ def test_recover_stale_runtime_state_reconciles_terminal_run_projection(monkeypa
         engine,
         tables=[
             Customer.__table__,
+            CustomerProfileProjectionVersion.__table__,
+            CustomerProfileCurrent.__table__,
             CustomerIntelligenceRun.__table__,
             AgentAsyncOperation.__table__,
             AgentAsyncOperationEvent.__table__,
@@ -2034,7 +2016,7 @@ def test_recover_stale_runtime_state_reconciles_terminal_run_projection(monkeypa
     run_input = CustomerIntelligenceRunInput(
         request_id=request_id,
         event=event,
-        scope="brief",
+        scope="partial",
     )
     completed_at = business_now()
     db.add(
@@ -2044,7 +2026,6 @@ def test_recover_stale_runtime_state_reconciles_terminal_run_projection(monkeypa
             account_name="终态投影修复客户",
             city="广州",
             creator_id="9",
-            customer_brief_status="COMPLETED",
         )
     )
     db.add(
@@ -2058,14 +2039,14 @@ def test_recover_stale_runtime_state_reconciles_terminal_run_projection(monkeypa
             customer_id=101,
             actor_id=event.actor_id,
             trigger_type=event.trigger_type,
-            scope="brief",
+            scope="partial",
             status=CustomerIntelligenceRunStatus.SUCCESS,
             attempt_count=1,
             max_attempts=3,
             started_time=completed_at - timedelta(seconds=10),
             finished_time=completed_at,
-            route="refresh_brief",
-            result_json={"route": "refresh_brief", "degraded": False},
+            route="refresh_profile",
+            result_json={"route": "refresh_profile", "degraded": False},
             visible_trace_json=[
                 {"title": "提炼客户事实", "content": "提炼出 2 条可沉淀事实"},
             ],
@@ -2087,7 +2068,7 @@ def test_recover_stale_runtime_state_reconciles_terminal_run_projection(monkeypa
     operation_service.mark_running(db, operation)
     db.commit()
     service = CustomerIntelligenceRefreshService(
-        graph_service=FakeGraphService(),
+        profile_workflow=FakeGraphService(),
         event_service=CustomerIntelligenceEventService(),
         run_service=run_service,
         async_operation_service=operation_service,
@@ -2115,3 +2096,132 @@ def test_recover_stale_runtime_state_reconciles_terminal_run_projection(monkeypa
     finally:
         db.close()
         engine.dispose()
+
+
+def test_customer_intelligence_refresh_failure_updates_only_new_projection(monkeypatch):
+    fake_session = FakeSession()
+    projection = FakeProfileProjectionService()
+    run = SimpleNamespace(
+        id=77,
+        status=CustomerIntelligenceRunStatus.FAILED,
+        error_message="graph failed",
+        request_id="failed-request-1",
+    )
+    monkeypatch.setattr(
+        "app.services.customer_intelligence_refresh_service.SessionLocal",
+        lambda: fake_session,
+    )
+    service = CustomerIntelligenceRefreshService(profile_projection_service=projection)
+
+    service._project_customer_failure(event=_business_event(), run=run)
+
+    assert projection.failed_calls == [{
+        "db": fake_session,
+        "team_id": 2,
+        "customer_id": 101,
+        "run_id": 77,
+        "reason": "graph failed",
+    }]
+    assert fake_session.committed is True
+    assert fake_session.closed is True
+
+
+@pytest.mark.asyncio
+async def test_customer_intelligence_refresh_service_routes_profile_run_through_explicit_workflow():
+    run_service = FakeRunService()
+
+    class FakeProfileWorkflow:
+        def __init__(self):
+            self.calls = []
+
+        async def stream_events(self, input_state):
+            self.calls.append(input_state)
+            yield {
+                "kind": "result",
+                "result": {
+                    "route": "refresh_profile",
+                    "profile_projection_result": {"success": True},
+                },
+            }
+
+    profile_workflow = FakeProfileWorkflow()
+    service = CustomerIntelligenceRefreshService(
+        profile_workflow=profile_workflow,
+        event_service=FakeEventService(),
+        run_service=run_service,
+    )
+
+    event = _business_event()
+    result = await service.run_committed_event_refresh(
+        CustomerIntelligenceCommittedEventRequest(
+            request_id="profile-workflow-route",
+            event=event,
+            scope="partial",
+        )
+    )
+
+    assert result["success"] is True
+    assert len(profile_workflow.calls) == 1
+    assert profile_workflow.calls[0]["event"] is event
+    assert profile_workflow.calls[0]["run_id"] == len("profile-workflow-route")
+
+
+@pytest.mark.asyncio
+async def test_customer_intelligence_refresh_service_uses_default_profile_workflow_namespace(monkeypatch):
+    profile_graph = FakeGraphService()
+    monkeypatch.setattr(
+        "app.services.agent.customer_profile_projection_workflow.customer_profile_projection_graph_service",
+        profile_graph,
+    )
+    service = CustomerIntelligenceRefreshService(
+        event_service=FakeEventService(),
+        run_service=FakeRunService(),
+    )
+
+    event = _business_event()
+    result = await service.run_committed_event_refresh(
+        CustomerIntelligenceCommittedEventRequest(
+            request_id="profile-workflow-default",
+            event=event,
+            scope="partial",
+        )
+    )
+
+    assert result["success"] is True
+    assert len(profile_graph.calls) == 1
+    assert profile_graph.calls[0]["run_id"] == len("profile-workflow-default")
+
+
+@pytest.mark.parametrize("scope", ["brief", "light", "profile", "dynamic_brief"])
+def test_customer_intelligence_refresh_contract_rejects_retired_scopes(scope):
+    with pytest.raises(ValueError, match="刷新范围无效"):
+        CustomerIntelligenceRefreshRequest(
+            team_id=1,
+            customer_id=1,
+            actor_id=None,
+            scope=scope,
+            request_id="retired-scope",
+        )
+
+    with pytest.raises(ValueError, match="刷新范围无效"):
+        CustomerIntelligenceCommittedEventRequest(
+            request_id="retired-scope",
+            event=CustomerIntelligenceEvent(
+                event_key="retired-scope-event",
+                trigger_type="manual_refresh_requested",
+                tenant_id=1,
+                team_id=1,
+                customer_id=1,
+                occurred_at=None,
+                source=CustomerIntelligenceSource(
+                    source_type="manual_refresh",
+                    source_object_id="retired-scope",
+                    business_object_type="customer",
+                    business_object_id="1",
+                ),
+                summary="测试事件",
+                payload={},
+                actor_id=None,
+            ),
+            scope=scope,
+        )

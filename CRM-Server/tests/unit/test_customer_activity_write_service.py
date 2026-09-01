@@ -1,5 +1,6 @@
 """Architecture tests for the customer-activity transactional write seam."""
 
+from contextlib import nullcontext
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -25,6 +26,9 @@ class _FakeSession:
 
     def refresh(self, value) -> None:
         self.refreshes.append(value)
+
+    def begin_nested(self):
+        return nullcontext()
 
 
 class _FakeActivityCRUD:
@@ -69,11 +73,14 @@ class _FakePostCommitJobs:
 
 
 class _FakeIntelligenceRefresh:
-    def __init__(self) -> None:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
         self.calls = []
 
     def enqueue_committed_event_refresh(self, db, *, event, scope):
         self.calls.append((event, scope))
+        if self.fail:
+            raise RuntimeError("customer intelligence outbox unavailable")
         return CustomerIntelligenceCommittedEventRequest(
             request_id=f"business-event-{event.trigger_type}-{event.event_key[:16]}",
             event=event,
@@ -180,6 +187,40 @@ def test_create_rolls_back_activity_when_durable_post_commit_enqueue_fails():
 
     assert db.commits == 0
     assert db.rollbacks == 1
+
+
+def test_create_commits_activity_when_customer_intelligence_enqueue_fails():
+    db = _FakeSession()
+    intelligence = _FakeIntelligenceRefresh(fail=True)
+    service = CustomerActivityWriteService(
+        activity_crud=_FakeActivityCRUD(),
+        post_commit_job_service=_FakePostCommitJobs(),
+        intelligence_event_service=CustomerIntelligenceEventService(),
+        intelligence_refresh_service=intelligence,
+    )
+
+    result = service.create(
+        db,
+        obj_in=_activity_create(),
+        customer_id=10,
+        creator_id="1",
+        owner_id="1",
+        team_id=1,
+        operator_name="Eddie",
+        post_commit_trigger_type="ACTIVITY_CREATED_DETERMINISTIC",
+        actor_id="1",
+    )
+
+    assert result.activity.id == 212
+    assert result.customer_intelligence_request is not None
+    assert result.customer_intelligence_request.scheduled is False
+    assert result.customer_intelligence_request.kick_required is False
+    assert result.customer_intelligence_request.schedule_error == (
+        "RuntimeError: customer intelligence outbox unavailable"
+    )
+    assert db.commits == 1
+    assert db.rollbacks == 0
+    assert len(intelligence.calls) == 1
 
 
 def test_revision_change_cancels_superseded_confirmation_cases_in_same_write_transaction():

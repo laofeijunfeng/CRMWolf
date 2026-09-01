@@ -238,22 +238,6 @@ export interface CustomerDetailResponse {
   contacts: ContactResponse[]
   owner_info?: UserBasicInfo
   creator_info?: UserBasicInfo
-  // 档案字段
-  company_background: string | null
-  company_website: string | null
-  main_business: string | null
-  similar_customers: string | null  // JSON string
-  project_background: string | null
-  profile_status: string | null  // PENDING | GENERATING | COMPLETED | FAILED
-  profile_generated_time: string | null
-  profile_error_message: string | null
-  // 客户概况字段
-  customer_brief_json?: string | null
-  customer_brief_markdown?: string | null
-  customer_brief_citations?: string | null
-  customer_brief_status?: string | null
-  customer_brief_generated_time?: string | null
-  customer_brief_error_message?: string | null
   customer_intelligence_has_inputs?: boolean
 }
 
@@ -507,10 +491,7 @@ const customerApi = {
   getCustomerDetail: (customerId: string): Promise<CustomerDetailResponse> =>
     api.get('/v1/customers/' + customerId, undefined, CustomerDetailResponseSchema),
 
-  regenerateCustomerBrief: (customerId: string): Promise<{ message: string }> =>
-    api.post('/v1/customers/' + customerId + '/regenerate-brief'),
-
-  regenerateCustomerIntelligence: (customerId: string, scope: 'full' | 'brief' = 'full'): Promise<{ message: string }> =>
+  regenerateCustomerIntelligence: (customerId: string, scope: 'full' | 'partial' = 'full'): Promise<{ message: string }> =>
     api.post('/v1/customers/' + customerId + '/regenerate-intelligence', { scope }),
 
   updateCustomer: (customerId: string, data: CustomerUpdate): Promise<CustomerResponse> =>

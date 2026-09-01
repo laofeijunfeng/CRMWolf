@@ -18,7 +18,8 @@ class PermissionCRUD:
         skip: int = 0,
         limit: int = 100,
         resource: Optional[str] = None,
-        action: Optional[str] = None
+        action: Optional[str] = None,
+        include_inactive: bool = False
     ) -> List[Permission]:
         query = db.query(Permission)
         
@@ -26,6 +27,8 @@ class PermissionCRUD:
             query = query.filter(Permission.resource == resource)
         if action:
             query = query.filter(Permission.action == action)
+        if not include_inactive:
+            query = query.filter(Permission.is_active.is_(True))
         
         return query.offset(skip).limit(limit).all()
 

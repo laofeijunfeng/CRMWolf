@@ -10,6 +10,7 @@ from app.services.agent.orchestrator.decision import LangChainRootDecisionClassi
 from app.services.agent.orchestrator.graph import RootOrchestrator
 from app.services.agent.orchestrator.interaction import DatabaseInteractionResolver
 from app.services.agent.orchestrator.query_executor import CRMQueryAgentExecutor
+from app.services.agent.query.semantic_intent import LLMQuerySemanticIntentResolver
 from app.services.agent.query import (
     CRMQueryAgent,
     CRMReadToolRegistry,
@@ -25,6 +26,7 @@ from app.services.agent.workflow.planning import CRMWorkflowPlanner
 def get_root_orchestrator() -> RootOrchestrator:
     """Build the one production execution graph used by every Agent channel."""
 
+    semantic_intent_resolver = LLMQuerySemanticIntentResolver()
     query_agent = CRMQueryAgent(
         CRMReadToolRegistry(
             executor=DefaultCRMQueryExecutor(),
@@ -39,7 +41,11 @@ def get_root_orchestrator() -> RootOrchestrator:
         checkpointer=agent_checkpoint_saver,
         context_resolver=DatabaseRootContextResolver(),
         decision_classifier=LangChainRootDecisionClassifier(),
-        query_executor=CRMQueryAgentExecutor(query_agent=query_agent),
+        query_executor=CRMQueryAgentExecutor(
+            query_agent=query_agent,
+            semantic_intent_resolver=semantic_intent_resolver,
+        ),
         interaction_resolver=DatabaseInteractionResolver(),
         workflow_subgraph=workflow_subgraph,
+        semantic_intent_resolver=semantic_intent_resolver,
     )

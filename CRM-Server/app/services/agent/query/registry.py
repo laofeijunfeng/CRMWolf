@@ -25,7 +25,6 @@ if TYPE_CHECKING:
 
 CustomerContextSection: TypeAlias = Literal[
     "profile",
-    "brief",
     "contacts",
     "opportunities",
     "contracts",
@@ -191,6 +190,11 @@ class CRMReadToolRegistry:
                     "使用 customer_id 精确过滤；得到 SUCCESS、PARTIAL 或 EMPTY 后直接回答，"  # noqa: RUF001
                     "不要再查询任务或客户上下文。"
                 ),
+            ),
+            (
+                "query_customer_deployment_infos",
+                "deployment_info",
+                "查询单个客户的部署信息。",
             ),
             (
                 "query_follow_up_tasks",

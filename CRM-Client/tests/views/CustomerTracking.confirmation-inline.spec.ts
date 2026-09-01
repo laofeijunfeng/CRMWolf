@@ -17,7 +17,7 @@ const followUpConfirmationApi = vi.hoisted(() => ({
   resolve: vi.fn(),
 }))
 const headerStore = vi.hoisted(() => ({ activeTab: '' }))
-const topBarState = vi.hoisted(() => ({ tabs: [] as TabItem[] }))
+const topBarState = vi.hoisted(() => ({ tabs: [] as TabItem[], actions: [] as Array<{ handler: () => void }> }))
 const toast = vi.hoisted(() => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn() }))
 
 vi.mock('vue-router', () => ({
@@ -36,8 +36,9 @@ vi.mock('@/api/followUpTask', async (importOriginal) => {
 vi.mock('@/stores/header', () => ({ useHeaderStore: () => headerStore }))
 vi.mock('@/composables/usePageTitle', () => ({ usePageTitle: vi.fn() }))
 vi.mock('@/composables/useTopBarRegistration', () => ({
-  useTopBarRegistration: (options: { tabs?: unknown }): void => {
+  useTopBarRegistration: (options: { tabs?: unknown; actions?: unknown }): void => {
     topBarState.tabs = options.tabs === undefined ? [] : toValue(options.tabs as never)
+    topBarState.actions = typeof options.actions === 'function' ? options.actions() as Array<{ handler: () => void }> : []
   },
 }))
 vi.mock('@/composables/useCustomFilterViews', () => ({
@@ -83,14 +84,18 @@ vi.mock('@/components/crmwolf', () => ({
         default: undefined,
       },
     },
-    setup: (props, { slots }) => () => h('div', { 'data-testid': 'tracking-table' },
+    emits: ['row-click'],
+    setup: (props, { emit, slots }) => () => h('div', { 'data-testid': 'tracking-table' },
       props.data.map((row, index) => {
         const actions = props.getRowActions?.(row, index)
         const rowActions = [
           ...(actions?.primaryActions ?? []),
           ...(actions?.secondaryActions ?? []),
         ]
-        return h('article', { 'data-testid': `task-${String(row['public_id'])}` }, [
+        return h('article', {
+          'data-testid': `task-${String(row['public_id'])}`,
+          onClick: () => emit('row-click', row),
+        }, [
           slots['cell-tracking_content']?.({ row }),
           slots['cell-status_label']?.({ row }),
           slots['cell-actions']?.({ row }),
@@ -100,7 +105,10 @@ vi.mock('@/components/crmwolf', () => ({
               type: 'button',
               'data-action': action.label,
               disabled: action.disabled === true,
-              onClick: () => action.handler(row),
+              onClick: (event: Event) => {
+                event.stopPropagation()
+                action.handler(row)
+              },
             }, action.label)),
         ])
       }),
@@ -152,7 +160,13 @@ vi.mock('@/components/ui/dialog', () => ({
   DialogTitle: defineComponent({ name: 'DialogTitle', setup: (_, { slots }) => () => h('h2', slots.default?.()) }),
 }))
 vi.mock('@/components/ui/sheet', () => ({
-  Sheet: defineComponent({ name: 'Sheet', setup: (_, { slots }) => () => h('aside', slots.default?.()) }),
+  Sheet: defineComponent({
+    name: 'Sheet',
+    props: { open: { type: Boolean, default: false } },
+    setup: (props, { slots }) => () => props.open
+      ? h('aside', { 'data-testid': 'tracking-detail-sheet' }, slots.default?.())
+      : null,
+  }),
   SheetFooter: defineComponent({ name: 'SheetFooter', setup: (_, { slots }) => () => h('footer', slots.default?.()) }),
   SheetHeader: defineComponent({ name: 'SheetHeader', setup: (_, { slots }) => () => h('header', slots.default?.()) }),
   SheetTitle: defineComponent({ name: 'SheetTitle', setup: (_, { slots }) => () => h('h2', slots.default?.()) }),
@@ -206,6 +220,23 @@ const unrelatedTaskFixture = (): FollowUpTaskItem => ({
   pending_confirmations: [],
 })
 
+const regularTaskFixture = (): FollowUpTaskItem => ({
+  id: '12',
+  public_id: 'fut_12',
+  customer: {
+    id: 'customer_3',
+    public_id: 'cus_3',
+    name: '普通客户',
+    account_name: '普通客户',
+  },
+  owner_id: '1',
+  creator_id: '1',
+  title: '确认部署时间',
+  status: 'OPEN',
+  due_at: '2026-08-20T09:00:00+08:00',
+  pending_confirmations: [],
+})
+
 const resolvedResponse = {
   case: null,
   decision: {
@@ -231,8 +262,14 @@ const resolvedResponse = {
 describe('CustomerTracking inline follow-up confirmations', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    followUpTaskApi.list.mockReset()
+    followUpTaskApi.getDetail.mockReset()
+    followUpTaskApi.transition.mockReset()
+    followUpConfirmationApi.resolve.mockReset()
+    followUpConfirmationApi.getPendingCount.mockReset()
     headerStore.activeTab = ''
     topBarState.tabs = []
+    topBarState.actions = []
     followUpTaskApi.list.mockResolvedValue({ items: [taskFixture(), unrelatedTaskFixture()], total: 2 })
     followUpTaskApi.getDetail.mockResolvedValue(taskFixture())
     followUpConfirmationApi.getPendingCount.mockResolvedValue(1)
@@ -265,5 +302,93 @@ describe('CustomerTracking inline follow-up confirmations', () => {
     expect(followUpConfirmationApi.resolve).toHaveBeenCalledWith('fuc_case_13', { reply_text: '已完成' })
     expect(followUpTaskApi.transition).not.toHaveBeenCalled()
     expect(followUpTaskApi.list).toHaveBeenCalledTimes(2)
+  })
+
+  it('closes the detail sheet after manually completing the selected task', async () => {
+    const task = regularTaskFixture()
+    const completedTask = { ...task, status: 'COMPLETED' }
+    followUpTaskApi.list
+      .mockResolvedValueOnce({ items: [task], total: 1 })
+      .mockResolvedValueOnce({ items: [], total: 0 })
+    followUpTaskApi.getDetail.mockResolvedValue(task)
+    followUpTaskApi.transition.mockResolvedValue({
+      executed: true,
+      result: {},
+      task: completedTask,
+    })
+
+    const wrapper = mount(CustomerTracking, { global: { plugins: [createPinia()] } })
+    await flushPromises()
+
+    await wrapper.get('[data-testid="task-fut_12"]').trigger('click')
+    await flushPromises()
+    const completeButton = wrapper.get('[data-testid="tracking-detail-sheet"]').findAll('button').find(button => button.text() === '完成')
+    expect(completeButton).toBeDefined()
+    await completeButton!.trigger('click')
+    await flushPromises()
+
+    expect(followUpTaskApi.transition).toHaveBeenCalledWith('fut_12', {
+      action: 'complete',
+      reason: 'manual_complete',
+    })
+    expect(wrapper.find('[data-testid="tracking-detail-sheet"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="task-fut_12"]').exists()).toBe(false)
+  })
+
+  it('closes the detail sheet after completing a pending confirmation', async () => {
+    followUpTaskApi.list
+      .mockResolvedValueOnce({ items: [taskFixture(), unrelatedTaskFixture()], total: 2 })
+      .mockResolvedValueOnce({ items: [unrelatedTaskFixture()], total: 1 })
+    followUpTaskApi.getDetail.mockResolvedValue(taskFixture())
+
+    const wrapper = mount(CustomerTracking, { global: { plugins: [createPinia()] } })
+    await flushPromises()
+
+    await wrapper.get('[data-testid="task-fut_10"]').trigger('click')
+    await flushPromises()
+    const confirmButton = wrapper.get('[data-testid="tracking-detail-sheet"]').findAll('button').find(button => button.text() === '确认完成')
+    expect(confirmButton).toBeDefined()
+    await confirmButton!.trigger('click')
+    await flushPromises()
+
+    expect(followUpConfirmationApi.resolve).toHaveBeenCalledWith('fuc_case_13', { reply_text: '已完成' })
+    expect(wrapper.find('[data-testid="tracking-detail-sheet"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="task-fut_10"]').exists()).toBe(false)
+    expect(followUpTaskApi.getDetail).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not let an older list response restore a completed task', async () => {
+    const task = regularTaskFixture()
+    let resolveOldList: ((response: { items: FollowUpTaskItem[]; total: number }) => void) | undefined
+    const oldList = new Promise<{ items: FollowUpTaskItem[]; total: number }>((resolve) => {
+      resolveOldList = resolve
+    })
+    followUpTaskApi.list
+      .mockResolvedValueOnce({ items: [task], total: 1 })
+      .mockReturnValueOnce(oldList)
+      .mockResolvedValueOnce({ items: [], total: 0 })
+    followUpTaskApi.getDetail.mockResolvedValue(task)
+    followUpTaskApi.transition.mockResolvedValue({
+      executed: true,
+      result: {},
+      task: { ...task, status: 'COMPLETED' },
+    })
+
+    const wrapper = mount(CustomerTracking, { global: { plugins: [createPinia()] } })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="task-fut_12"]').exists()).toBe(true)
+
+    topBarState.actions[0]?.handler()
+    await Promise.resolve()
+    await wrapper.get('[data-action="完成"]').trigger('click')
+    await flushPromises()
+
+    expect(followUpTaskApi.list).toHaveBeenCalledTimes(3)
+    expect(wrapper.find('[data-testid="task-fut_12"]').exists()).toBe(false)
+
+    resolveOldList?.({ items: [task], total: 1 })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="task-fut_12"]').exists()).toBe(false)
   })
 })

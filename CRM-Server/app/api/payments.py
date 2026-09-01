@@ -3,7 +3,7 @@ from datetime import date
 from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import inspect
+from sqlalchemy import and_, case, inspect, or_
 from sqlalchemy.orm import Session
 
 from app.constants.approval_phase import ApprovalPhase
@@ -78,7 +78,7 @@ async def _trigger_payment_plan_intelligence_refresh(
 ) -> None:
     if change is None:
         return
-    await customer_business_object_intelligence_service.trigger_change_refresh(db, change)
+    customer_business_object_intelligence_service.enqueue_change_refresh_after_commit(change)
 
 
 def _build_payment_record_intelligence_change(
@@ -103,10 +103,7 @@ async def _trigger_payment_record_intelligence_refresh(
 ) -> None:
     if change is None:
         return
-    await customer_business_object_intelligence_service.trigger_change_refresh(
-        db,
-        change,
-    )
+    customer_business_object_intelligence_service.enqueue_change_refresh_after_commit(change)
 
 
 def _customer_public_id(customer) -> Optional[str]:
@@ -1270,23 +1267,40 @@ def list_payment_records(
         from app.models.user import User
 
         record_ids = [record.id for record in records]
+        record_ids_by_plan: dict[int, list[int]] = {}
+        for record in records:
+            record_ids_by_plan.setdefault(record.payment_plan_id, []).append(record.id)
+
         latest_invoice_title_by_record: dict[int, str] = {}
         has_invoice_application_table = inspect(db.bind).has_table(InvoiceApplication.__tablename__) if db.bind else True
         if record_ids and has_invoice_application_table:
+            plan_ids = list(record_ids_by_plan)
+            explicit_record_link = InvoiceApplication.payment_record_id.in_(record_ids)
+            plan_level_link = and_(
+                InvoiceApplication.payment_record_id.is_(None),
+                InvoiceApplication.payment_plan_id.in_(plan_ids),
+            )
             invoice_rows = db.query(
                 InvoiceApplication.payment_record_id,
+                InvoiceApplication.payment_plan_id,
                 InvoiceApplication.invoice_title_text,
             ).filter(
                 InvoiceApplication.team_id == team_id,
-                InvoiceApplication.payment_record_id.in_(record_ids),
+                or_(explicit_record_link, plan_level_link),
             ).order_by(
-                InvoiceApplication.payment_record_id,
+                case((explicit_record_link, 0), else_=1),
                 InvoiceApplication.created_time.desc(),
                 InvoiceApplication.id.desc(),
             ).all()
-            for payment_record_id, invoice_title_text_value in invoice_rows:
-                if payment_record_id not in latest_invoice_title_by_record:
-                    latest_invoice_title_by_record[payment_record_id] = invoice_title_text_value
+            for payment_record_id, payment_plan_id, invoice_title_text_value in invoice_rows:
+                target_record_ids = (
+                    [payment_record_id]
+                    if payment_record_id is not None
+                    else record_ids_by_plan.get(payment_plan_id, [])
+                )
+                for target_record_id in target_record_ids:
+                    if target_record_id not in latest_invoice_title_by_record:
+                        latest_invoice_title_by_record[target_record_id] = invoice_title_text_value
 
         owner_id_by_record: dict[int, str] = {}
         for record in records:

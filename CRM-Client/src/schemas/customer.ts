@@ -112,21 +112,6 @@ export const CustomerDetailResponseSchema = CustomerResponseSchema.extend({
     is_primary: z.boolean(),
     created_time: z.string()
   })),
-  // 档案字段
-  company_background: z.string().nullable(),
-  company_website: z.string().nullable(),
-  main_business: z.string().nullable(),
-  similar_customers: z.string().nullable(),
-  project_background: z.string().nullable(),
-  profile_status: z.string().nullable(),
-  profile_generated_time: z.string().nullable(),
-  profile_error_message: z.string().nullable(),
-  customer_brief_json: z.string().nullable().optional(),
-  customer_brief_markdown: z.string().nullable().optional(),
-  customer_brief_citations: z.string().nullable().optional(),
-  customer_brief_status: z.string().nullable().optional(),
-  customer_brief_generated_time: z.string().nullable().optional(),
-  customer_brief_error_message: z.string().nullable().optional(),
   customer_intelligence_has_inputs: z.boolean().optional(),
   // 输单原因
   loss_reason: z.string().nullable()

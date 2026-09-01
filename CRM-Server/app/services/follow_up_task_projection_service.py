@@ -33,6 +33,13 @@ from app.schemas.sales_commitment import (
     FollowUpTaskProjectionRunInternalCreate,
     SalesCommitmentInternalCreate,
 )
+from app.services.customer_intelligence_event_publication_service import (
+    CustomerIntelligenceEventPublicationService,
+    customer_intelligence_event_publication_service,
+)
+from app.services.customer_intelligence_task_event_service import (
+    customer_intelligence_task_event_service,
+)
 from app.services.customer_vector_document_service import customer_vector_document_service
 from app.services.follow_up_task_confirmation_cleanup_service import (
     FollowUpTaskConfirmationCancelReason,
@@ -81,6 +88,13 @@ class FollowUpTaskProjectionResult:
 
 
 class FollowUpTaskProjectionService:
+    def __init__(
+        self,
+        *,
+        publication_service: CustomerIntelligenceEventPublicationService | None = None,
+    ) -> None:
+        self.publication_service = publication_service or customer_intelligence_event_publication_service
+
     def run_activity_projection(
         self,
         db: Session,
@@ -440,6 +454,7 @@ class FollowUpTaskProjectionService:
                 "commitment": commitment_projection,
                 "task": task_projection,
                 "owner_id": activity.owner_id,
+                "deal_journey_id": _activity_deal_journey_id(activity),
             }
         )
 
@@ -452,6 +467,7 @@ class FollowUpTaskProjectionService:
             due_at_text=due_at_text,
             confidence=confidence,
             evidence_json=evidence_json,
+            actor_id=actor_id,
         )
 
         if normalized_due_at.due_at is None:
@@ -551,6 +567,7 @@ class FollowUpTaskProjectionService:
                     evidence_json=evidence_json,
                     task_hash=task_hash,
                     commitment_id=commitment_id,
+                    deal_journey_id=_activity_deal_journey_id(activity),
                 ):
                     previous_status = task.status
                     previous_payload = _task_event_payload(task)
@@ -559,6 +576,7 @@ class FollowUpTaskProjectionService:
                         task,
                         {
                             "commitment_id": commitment_id,
+                            "deal_journey_id": _activity_deal_journey_id(activity),
                             "title": title,
                             "description": description,
                             "due_at": normalized_due_at.due_at,
@@ -571,7 +589,7 @@ class FollowUpTaskProjectionService:
                         },
                         commit=False,
                     )
-                    follow_up_task_event_crud.record_status_change(
+                    self._record_task_event(
                         db,
                         task=task,
                         event_type=FollowUpTaskEventType.UPDATED,
@@ -582,7 +600,6 @@ class FollowUpTaskProjectionService:
                             "previous": previous_payload,
                             "current": _task_event_payload(task),
                         },
-                        commit=False,
                     )
                     updated_task_ids.append(task.id)
                 cancelled_task_ids.extend(
@@ -651,6 +668,7 @@ class FollowUpTaskProjectionService:
         due_at_text: str | None,
         confidence: float,
         evidence_json: dict[str, Any],
+        actor_id: str | None,
     ) -> tuple[list[int], list[int]]:
         source_key = _activity_source_key(activity)
         commitment_hash = _stable_hash(
@@ -660,6 +678,7 @@ class FollowUpTaskProjectionService:
                 "due_at": normalized_due_at.due_at.isoformat() if normalized_due_at.due_at else None,
                 "due_at_text": due_at_text,
                 "due_at_granularity": normalized_due_at.due_at_granularity,
+                "deal_journey_id": _activity_deal_journey_id(activity),
             }
         )
         existing_commitments = sales_commitment_crud.get_open_by_source(
@@ -681,7 +700,9 @@ class FollowUpTaskProjectionService:
                 confidence=confidence,
                 evidence_json=evidence_json,
                 commitment_hash=commitment_hash,
+                deal_journey_id=_activity_deal_journey_id(activity),
             ):
+                previous_snapshot = _commitment_event_snapshot(commitment)
                 sales_commitment_crud.update(
                     db,
                     commitment,
@@ -695,8 +716,17 @@ class FollowUpTaskProjectionService:
                         "confidence": confidence,
                         "evidence_json": evidence_json,
                         "commitment_hash": commitment_hash,
+                        "deal_journey_id": _activity_deal_journey_id(activity),
                     },
                     commit=False,
+                )
+                self._enqueue_commitment_change_event(
+                    db,
+                    commitment=commitment,
+                    actor_id=actor_id,
+                    trigger_type="sales_commitment_updated",
+                    change_id=commitment.post_commit_revision,
+                    previous=previous_snapshot,
                 )
                 return [], [commitment.id]
             return [], []
@@ -720,10 +750,69 @@ class FollowUpTaskProjectionService:
                 confidence=confidence,
                 evidence_json=evidence_json,
                 commitment_hash=commitment_hash,
+                deal_journey_id=_activity_deal_journey_id(activity),
             ),
             commit=False,
         )
+        self._enqueue_commitment_change_event(
+            db,
+            commitment=commitment,
+            actor_id=actor_id,
+            trigger_type="sales_commitment_created",
+            change_id=commitment.post_commit_revision,
+            previous=None,
+        )
         return [commitment.id], []
+
+    def _enqueue_commitment_change_event(
+        self,
+        db: Session,
+        *,
+        commitment: SalesCommitment,
+        actor_id: str | None,
+        trigger_type: str,
+        change_id: str,
+        previous: dict[str, Any] | None,
+    ) -> None:
+        try:
+            from app.services.customer_intelligence_event_service import customer_intelligence_event_service
+
+            event = customer_intelligence_event_service.sales_commitment_changed(
+                team_id=int(commitment.team_id),
+                customer_id=int(commitment.customer_id),
+                actor_id=actor_id,
+                trigger_type=trigger_type,
+                commitment_id=int(commitment.id),
+                change_id=change_id,
+                deal_journey_id=_positive_int(getattr(commitment, "deal_journey_id", None)),
+                summary=f"销售承诺状态已记录: {commitment.title}",
+                payload={
+                    "commitment_id": int(commitment.id),
+                    "status": commitment.status,
+                    "previous": previous,
+                    "current": _commitment_event_snapshot(commitment),
+                },
+                occurred_at=getattr(commitment, "updated_time", None),
+            )
+            # Commitment projection is the business-side write. The profile
+            # refresh request is optional read-model work and is isolated in a
+            # savepoint so an unavailable queue/table cannot poison the outer
+            # task/commitment transaction. Reconciliation repairs the profile.
+            self.publication_service.persist_in_transaction(
+                db,
+                event=event,
+                scope="partial",
+            )
+        except Exception:
+            # Commitment projection is a business-side read model.  A missing
+            # refresh table or transient queue error must not roll back the
+            # activity/task projection; reconciliation will repair the profile.
+            logger.exception(
+                "销售承诺客户智能事件入队失败: commitment_id=%s team_id=%s customer_id=%s",
+                getattr(commitment, "id", None),
+                getattr(commitment, "team_id", None),
+                getattr(commitment, "customer_id", None),
+            )
 
     def _create_task(
         self,
@@ -748,6 +837,7 @@ class FollowUpTaskProjectionService:
                 team_id=activity.team_id,
                 customer_id=activity.customer_id,
                 commitment_id=commitment_id,
+                deal_journey_id=_activity_deal_journey_id(activity),
                 owner_id=activity.owner_id,
                 creator_id=activity.creator_id,
                 title=title,
@@ -765,16 +855,54 @@ class FollowUpTaskProjectionService:
             ),
             commit=False,
         )
-        follow_up_task_event_crud.record_status_change(
+        self._record_task_event(
             db,
             task=task,
             event_type=FollowUpTaskEventType.CREATED,
             actor_id=actor_id,
             previous_status=None,
             payload_json={"reason": "SOURCE_ACTIVITY_PROJECTED", "current": _task_event_payload(task)},
-            commit=False,
         )
         return task
+
+    def _record_task_event(
+        self,
+        db: Session,
+        *,
+        task: FollowUpTask,
+        event_type: str,
+        actor_id: str | None,
+        previous_status: str | None,
+        payload_json: dict[str, Any] | None = None,
+    ) -> None:
+        """Record a task event and publish it through the CI boundary.
+
+        Task projection is a source-of-truth write.  Customer Intelligence is
+        a read model, so a publish failure is logged by the shared publisher
+        and intentionally does not abort the activity projection.
+        """
+
+        task_event = follow_up_task_event_crud.record_status_change(
+            db,
+            task=task,
+            event_type=event_type,
+            actor_id=actor_id,
+            previous_status=previous_status,
+            payload_json=payload_json,
+            commit=False,
+        )
+        publish_result = customer_intelligence_task_event_service.publish(
+            db,
+            task=task,
+            task_event=task_event,
+        )
+        if publish_result.error:
+            logger.warning(
+                "客户智能任务事件已记录但发布失败: task_id=%s task_event_id=%s error=%s",
+                getattr(task, "id", None),
+                getattr(task_event, "id", None),
+                publish_result.error,
+            )
 
     def _cancel_open_source_state(
         self,
@@ -789,7 +917,7 @@ class FollowUpTaskProjectionService:
         source_key = _activity_source_key(activity)
         input_snapshot_hash = _stable_hash(_activity_snapshot(activity))
         cancelled_task_ids = self._cancel_open_tasks(db, activity=activity, actor_id=actor_id, reason=reason)
-        updated_commitment_ids = self._cancel_open_commitments(db, activity=activity)
+        updated_commitment_ids = self._cancel_open_commitments(db, activity=activity, actor_id=actor_id)
         self._sync_vector_documents(db, task_ids=cancelled_task_ids, commitment_ids=updated_commitment_ids)
         if commit:
             db.commit()
@@ -839,14 +967,13 @@ class FollowUpTaskProjectionService:
             previous_status = task.status
             previous_payload = _task_event_payload(task)
             follow_up_task_crud.cancel(db, task, commit=False)
-            follow_up_task_event_crud.record_status_change(
+            self._record_task_event(
                 db,
                 task=task,
                 event_type=FollowUpTaskEventType.CANCELLED,
                 actor_id=actor_id,
                 previous_status=previous_status,
                 payload_json={"reason": reason, "previous": previous_payload},
-                commit=False,
             )
             follow_up_task_confirmation_cleanup_service.cancel_pending_cases_for_task(
                 db,
@@ -859,7 +986,13 @@ class FollowUpTaskProjectionService:
             cancelled_task_ids.append(task.id)
         return cancelled_task_ids
 
-    def _cancel_open_commitments(self, db: Session, *, activity: CustomerActivity) -> list[int]:
+    def _cancel_open_commitments(
+        self,
+        db: Session,
+        *,
+        activity: CustomerActivity,
+        actor_id: str | None,
+    ) -> list[int]:
         commitments = sales_commitment_crud.get_open_by_source(
             db,
             team_id=activity.team_id,
@@ -868,11 +1001,20 @@ class FollowUpTaskProjectionService:
         )
         updated_commitment_ids: list[int] = []
         for commitment in commitments:
+            previous_snapshot = _commitment_event_snapshot(commitment)
             sales_commitment_crud.update(
                 db,
                 commitment,
                 {"status": SalesCommitmentStatus.CANCELLED},
                 commit=False,
+            )
+            self._enqueue_commitment_change_event(
+                db,
+                commitment=commitment,
+                actor_id=actor_id,
+                trigger_type="sales_commitment_cancelled",
+                change_id=commitment.post_commit_revision,
+                previous=previous_snapshot,
             )
             updated_commitment_ids.append(commitment.id)
         return updated_commitment_ids
@@ -907,6 +1049,7 @@ class FollowUpTaskProjectionService:
         evidence_json: dict[str, Any],
         task_hash: str,
         commitment_id: int | None,
+        deal_journey_id: int | None,
     ) -> bool:
         return any(
             [
@@ -920,6 +1063,7 @@ class FollowUpTaskProjectionService:
                 task.evidence_json != evidence_json,
                 task.task_hash != task_hash,
                 task.commitment_id != commitment_id,
+                task.deal_journey_id != deal_journey_id,
             ]
         )
 
@@ -936,6 +1080,7 @@ class FollowUpTaskProjectionService:
         confidence: float,
         evidence_json: dict[str, Any],
         commitment_hash: str,
+        deal_journey_id: int | None,
     ) -> bool:
         return any(
             [
@@ -948,8 +1093,42 @@ class FollowUpTaskProjectionService:
                 commitment.confidence != confidence,
                 commitment.evidence_json != evidence_json,
                 commitment.commitment_hash != commitment_hash,
+                commitment.deal_journey_id != deal_journey_id,
             ]
         )
+
+
+def _commitment_event_snapshot(commitment: SalesCommitment) -> dict[str, Any]:
+    return {
+        "title": commitment.title,
+        "content": commitment.content,
+        "status": commitment.status,
+        "due_at": commitment.due_at.isoformat() if commitment.due_at else None,
+        "due_at_text": commitment.due_at_text,
+        "deal_journey_id": commitment.deal_journey_id,
+        "post_commit_revision": getattr(commitment, "post_commit_revision", None),
+    }
+
+
+def _positive_int(value: object) -> int | None:
+    try:
+        parsed = int(value) if value is not None else 0
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _activity_deal_journey_id(activity: CustomerActivity) -> int | None:
+    """Use only explicit source ownership; never infer journey by text similarity."""
+
+    value = getattr(activity, "deal_journey_id", None)
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
 
 
 def _activity_source_key(activity: CustomerActivity) -> str:

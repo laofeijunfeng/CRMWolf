@@ -10,6 +10,7 @@ export const PermissionResponseSchema = z.object({
   action: z.string(),
   scope: NullableStringSchema,
   description: NullableStringSchema,
+  is_active: z.boolean().default(true),
   created_at: z.string(),
   updated_at: z.string(),
 }).passthrough()

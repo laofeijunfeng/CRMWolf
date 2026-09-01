@@ -294,10 +294,7 @@ async def _trigger_contract_intelligence_refresh(
     db: Session,
     change: CustomerBusinessObjectChangeRefreshInput,
 ) -> None:
-    await customer_business_object_intelligence_service.trigger_change_refresh(
-        db,
-        change,
-    )
+    customer_business_object_intelligence_service.enqueue_change_refresh_after_commit(change)
 
 
 @router.post("/", response_model=ContractResponse, status_code=status.HTTP_201_CREATED, summary="创建合同", description="""

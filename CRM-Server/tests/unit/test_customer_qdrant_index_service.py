@@ -207,7 +207,7 @@ def test_search_team_customer_evidence_filters_by_tenant_team_without_customer()
         query_vector=[0.1, 0.2, 0.3],
         tenant_id=1,
         team_id=2,
-        source_types=["customer", "customer_brief"],
+        source_types=["customer", "follow_up"],
     )
 
     assert results[0].customer_id == 3
@@ -218,6 +218,30 @@ def test_search_team_customer_evidence_filters_by_tenant_team_without_customer()
         "source_type",
     ]
 
+
+
+
+def test_search_customer_evidence_rejects_legacy_or_empty_source_types() -> None:
+    fake_client = FakeQdrantClient()
+    service = CustomerQdrantIndexService(client=fake_client, collection_name="crm_customer_evidence", vector_size=3)
+
+    with pytest.raises(ValueError, match="不支持的客户证据类型"):
+        service.search_customer_evidence(
+            query_vector=[0.1, 0.2, 0.3],
+            tenant_id=1,
+            team_id=2,
+            customer_id=3,
+            source_types=["customer_brief"],  # type: ignore[list-item]
+        )
+
+    with pytest.raises(ValueError, match="source_types 不能为空"):
+        service.search_customer_evidence(
+            query_vector=[0.1, 0.2, 0.3],
+            tenant_id=1,
+            team_id=2,
+            customer_id=3,
+            source_types=[],
+        )
 
 def test_delete_by_source_uses_source_filter() -> None:
     fake_client = FakeQdrantClient()

@@ -8,6 +8,7 @@ callers may kick the returned requests after commit for low latency.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
@@ -38,6 +39,8 @@ from app.services.follow_up_task_confirmation_cleanup_service import (
     follow_up_task_confirmation_cleanup_service,
 )
 
+logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
     from datetime import datetime
 
@@ -52,6 +55,12 @@ class CustomerActivityWriteResult:
     activity: CustomerActivity
     activity_revision: int
     post_commit_job: CustomerActivityPostCommitJobRequest | None
+    customer_intelligence_request: CustomerIntelligenceCommittedEventRequest | None
+
+
+@dataclass(frozen=True)
+class CustomerActivityDeleteResult:
+    activity_id: int
     customer_intelligence_request: CustomerIntelligenceCommittedEventRequest | None
 
 
@@ -240,6 +249,63 @@ class CustomerActivityWriteService:
             previous_revision=previous_revision,
         )
 
+    def delete(
+        self,
+        db: Session,
+        *,
+        activity: CustomerActivity,
+        actor_id: str | None,
+    ) -> CustomerActivityDeleteResult:
+        """Delete an activity and register its negative intelligence evidence.
+
+        Deletion is a source mutation, not an API concern. The projection,
+        tombstone, durable intelligence event, and commit therefore live
+        behind the same application seam as create/update. The caller only
+        needs to kick the returned request after this method succeeds.
+        """
+
+        from app.models.sales_commitment import FollowUpTaskProjectionTrigger
+        from app.services.follow_up_task_projection_service import follow_up_task_projection_service
+
+        activity_id = int(activity.id)
+        try:
+            follow_up_task_projection_service.run_activity_projection(
+                db,
+                activity_id=activity.id,
+                activity_snapshot=activity,
+                trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_DELETED,
+                actor_id=actor_id,
+                team_id=int(activity.team_id),
+                commit=False,
+            )
+            intelligence_request = self._enqueue_customer_intelligence(
+                db,
+                activity=activity,
+                trigger_type="customer_activity_deleted",
+            )
+            self.activity_crud.delete(
+                db,
+                activity,
+                commit=False,
+                deleted_by=actor_id,
+            )
+            db.commit()
+            return CustomerActivityDeleteResult(
+                activity_id=activity_id,
+                customer_intelligence_request=intelligence_request,
+            )
+        except Exception:
+            db.rollback()
+            raise
+
+    def kick_delete(self, result: CustomerActivityDeleteResult) -> None:
+        """Kick intelligence work only after the delete transaction commits."""
+
+        if result.customer_intelligence_request is not None:
+            self.intelligence_refresh_service.kick_committed_event_refresh(
+                result.customer_intelligence_request
+            )
+
     def kick(self, result: CustomerActivityWriteResult, *, include_post_commit: bool = True) -> None:
         """Kick already-committed work without making process liveness a correctness dependency."""
 
@@ -319,11 +385,34 @@ class CustomerActivityWriteService:
         )
         if event is None:
             return None
-        return self.intelligence_refresh_service.enqueue_committed_event_refresh(
-            db,
-            event=event,
-            scope="brief",
-        )
+        try:
+            # Customer intelligence is an asynchronous read model. Keep its
+            # durable enqueue inside a savepoint so a missing/temporarily
+            # unavailable intelligence table cannot roll back the activity
+            # write or its task/commitment projection. Reconciliation repairs
+            # the missed enqueue from the committed business state.
+            with db.begin_nested():
+                return self.intelligence_refresh_service.enqueue_committed_event_refresh(
+                    db,
+                    event=event,
+                    scope="partial",
+                )
+        except Exception as exc:
+            schedule_error = f"{type(exc).__name__}: {exc}"
+            logger.exception(
+                "客户活动客户智能事件入队失败,将由对账机制补偿: activity_id=%s team_id=%s customer_id=%s",
+                getattr(activity, "id", None),
+                getattr(activity, "team_id", None),
+                getattr(activity, "customer_id", None),
+            )
+            return CustomerIntelligenceCommittedEventRequest(
+                request_id=f"business-event-{event.trigger_type}-{event.event_key[:16]}",
+                event=event,
+                scope="partial",
+                scheduled=False,
+                kick_required=False,
+                schedule_error=schedule_error,
+            )
 
 
 customer_activity_write_service = CustomerActivityWriteService()

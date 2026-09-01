@@ -277,16 +277,6 @@ class CustomerContextAnswerService:
         if profile_line:
             parts.append(f"- **基础信息**：{profile_line}。")
 
-        profile_details = _profile_detail_line(customer)
-        if profile_details:
-            used_sections.append("profile")
-            parts.append(f"- **客户档案**：{profile_details}。")
-
-        brief = _brief_line(customer)
-        if brief:
-            used_sections.append("customer_brief")
-            parts.append(f"- **客户概况**：{brief}。")
-
         facts = _object_list(strong_context.get("customer_facts"))
         if facts:
             used_sections.append("facts")
@@ -335,10 +325,7 @@ class CustomerContextAnswerService:
             parts.append("- 目前系统里还没有足够的客户业务资料。")
 
         answer = cls._normalize_markdown_answer(cls._remove_technical_tokens("\n".join(parts)))
-        has_business_context = len(parts) > 2 or any(
-            section in used_sections
-            for section in ("profile", "customer_brief")
-        )
+        has_business_context = len(parts) > 2
         missing_context = [] if has_business_context else ["客户近期跟进、商机、合同或回款资料"]
         retrieval = coerce_json_dict(customer_context.get("retrieval"))
         retrieval_status = _text(retrieval.get("status"))
@@ -613,25 +600,6 @@ def _memory_line(item: JsonObject) -> str:
             return summary.strip()
         return json.dumps(value, ensure_ascii=False, default=str)
     return _text(value)
-
-
-def _profile_detail_line(customer: JsonObject) -> str:
-    fields = [
-        _label_value("企业背景", customer.get("company_background")),
-        _label_value("主营业务", customer.get("main_business")),
-        _label_value("项目背景", customer.get("project_background")),
-        _label_value("同行客户参考", customer.get("similar_customers")),
-    ]
-    return "; ".join(item for item in fields if item)
-
-
-def _brief_line(customer: JsonObject) -> str:
-    brief = _text(customer.get("customer_brief_markdown"))
-    if not brief:
-        return ""
-    without_headings = re.sub(r"^#{1,6}\s*", "", brief, flags=re.MULTILINE)
-    compact = re.sub(r"\s+", " ", without_headings).strip()
-    return compact[:500].rstrip()
 
 
 def _unique_texts(values: list[str]) -> list[str]:

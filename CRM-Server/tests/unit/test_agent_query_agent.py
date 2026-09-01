@@ -277,6 +277,70 @@ async def test_query_agent_uses_selected_read_tools_and_returns_authoritative_re
 
 
 @pytest.mark.asyncio
+async def test_query_agent_cannot_widen_server_constrained_work_query() -> None:
+    from app.services.agent.query import CRMFilter
+
+    result = CRMQueryResult(
+        query_id="qry_follow_up_week",
+        resource="follow_up_task",
+        status="EMPTY",
+        rows=[],
+        entity_refs=[],
+        total=0,
+        applied_filters=[],
+        applied_sorts=[],
+    )
+    executor = StubExecutor([result])
+
+    async def behavior(payload: dict[str, object], runtime: dict[str, object]) -> dict[str, object]:
+        tools = {tool.name: tool for tool in runtime["tools"]}
+        tool_result = await tools["query_follow_up_tasks"].ainvoke(
+            {
+                "resource": "follow_up_task",
+                "projection": ["public_id", "title", "status"],
+                "filters": [{"field": "status", "operator": "eq", "value": "completed"}],
+                "sorts": [],
+                "metrics": [],
+                "group_by": [],
+                "scope": "accessible",
+                "page_size": 20,
+                "cursor": None,
+            }
+        )
+        assert tool_result["query_id"] == "qry_follow_up_week"
+        return {
+            "structured_response": {
+                "status": "ANSWERED",
+                "answer": "本周没有待办。",
+                "clarification_question": None,
+                "evidence_refs": ["qry_follow_up_week"],
+            }
+        }
+
+    agent, _ = _agent(executor, behavior)
+    await agent.run(
+        CRMQueryAgentRequest(
+            user_message="这周有哪些事情要做",
+            allowed_tool_names=["query_follow_up_tasks"],
+            authoritative_scope="mine",
+            authoritative_filters=[
+                CRMFilter(field="status", operator="eq", value="open"),
+                CRMFilter(field="due_window", operator="eq", value="this_week"),
+            ],
+        ),
+        _context(),
+        _model_config(),
+    )
+
+    executed = executor.calls[0]
+    assert executed.scope == "mine"
+    assert executed.filters == [
+        CRMFilter(field="status", operator="eq", value="open"),
+        CRMFilter(field="due_window", operator="eq", value="this_week"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_query_agent_passes_canonical_previous_query_to_the_model() -> None:
     previous_query = CRMQuerySpec(
         resource="customer",
@@ -760,6 +824,71 @@ async def test_query_agent_rejects_unknown_evidence_even_with_authoritative_quer
 
 
 @pytest.mark.asyncio
+async def test_query_agent_answers_customer_deployment_query_with_grounded_read_result() -> None:
+    deployment_result = CRMQueryResult(
+        query_id="qry_deployment_01",
+        resource="deployment_info",
+        status="SUCCESS",
+        rows=[
+            {
+                "deployment_name": "生产环境",
+                "server_address": "https://crm.example.com",
+                "is_default": True,
+            }
+        ],
+        entity_refs=[],
+        total=1,
+    )
+
+    async def behavior(payload: dict[str, object], runtime: dict[str, object]) -> dict[str, object]:
+        tool = next(tool for tool in runtime["tools"] if tool.name == "query_customer_deployment_infos")
+        result = await tool.ainvoke(
+            {
+                "resource": "deployment_info",
+                "projection": ["deployment_name", "server_address", "is_default"],
+                "filters": [{"field": "customer_id", "operator": "eq", "value": "cus_01"}],
+                "sorts": [],
+                "metrics": [],
+                "group_by": [],
+                "scope": "accessible",
+                "page_size": 50,
+                "cursor": None,
+            }
+        )
+        assert result["query_id"] == "qry_deployment_01"
+        return {
+            "structured_response": {
+                "status": "ANSWERED",
+                "answer": "该客户有一个生产环境部署，服务器地址为 https://crm.example.com。",
+                "clarification_question": None,
+                "evidence_refs": ["qry_deployment_01"],
+            }
+        }
+
+    agent, _ = _agent(StubExecutor([deployment_result]), behavior)
+
+    result = await agent.run(
+        CRMQueryAgentRequest(
+            user_message="深圳矽递科技股份有限公司部署信息是什么?",
+            entity_refs=[
+                EntityRef(
+                    ref_id="eref_customer_cus_01",
+                    resource="customer",
+                    public_id="cus_01",
+                    display_name="深圳矽递科技股份有限公司",
+                )
+            ],
+            allowed_tool_names=["query_customer_deployment_infos"],
+        ),
+        _context(),
+        _model_config(),
+    )
+
+    assert result.response.status == "ANSWERED"
+    assert result.response.evidence_refs == ["qry_deployment_01"]
+
+
+@pytest.mark.asyncio
 async def test_query_agent_clamps_model_requested_page_size_to_tool_row_limit() -> None:
     executor = StubExecutor([_query_result("qry_clamped", count=50)])
 
@@ -850,6 +979,115 @@ async def test_query_agent_fails_when_summary_times_out_after_authoritative_resu
 
 
 @pytest.mark.asyncio
+async def test_query_agent_forces_selected_customer_into_customer_scoped_query() -> None:
+    executor = StubExecutor([_query_result("qry_customer_activities")])
+    customer_ref = EntityRef(
+        ref_id="eref_customer_authoritative",
+        resource="customer",
+        public_id="cus_authoritative",
+        display_name="权威客户",
+    )
+
+    async def behavior(payload: dict[str, object], runtime: dict[str, object]) -> dict[str, object]:
+        tool_result = await runtime["tools"][0].ainvoke(
+            {
+                "resource": "customer_activity",
+                "projection": ["id", "customer_id", "summary"],
+                "filters": [{"field": "customer_id", "operator": "eq", "value": "cus_fabricated"}],
+                "sorts": [],
+                "metrics": [],
+                "group_by": [],
+                "scope": "accessible",
+                "page_size": 20,
+                "cursor": None,
+            }
+        )
+        assert tool_result["query_id"] == "qry_customer_activities"
+        return {
+            "structured_response": {
+                "status": "ANSWERED",
+                "answer": "客户最近有一条跟进。",
+                "clarification_question": None,
+                "evidence_refs": ["qry_customer_activities"],
+            }
+        }
+
+    agent, _ = _agent(executor, behavior)
+    await agent.run(
+        CRMQueryAgentRequest(
+            user_message="这个客户最近跟进如何",
+            entity_refs=[customer_ref],
+            allowed_tool_names=["query_customer_activities"],
+        ),
+        _context(),
+        _model_config(),
+    )
+
+    assert executor.calls[0].filters == [
+        CRMFilter(field="customer_id", operator="eq", value="cus_authoritative"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_query_agent_rejects_customer_context_outside_authoritative_scope() -> None:
+    customer_ref = EntityRef(
+        ref_id="eref_customer_authoritative",
+        resource="customer",
+        public_id="cus_authoritative",
+        display_name="权威客户",
+    )
+
+    class ContextReader:
+        async def read(
+            self,
+            request: CustomerContextRequest,
+            context: AgentToolContext,
+        ) -> CustomerContextResult:
+            raise AssertionError("reader must not receive a customer outside Root authority")
+
+    async def behavior(payload: dict[str, object], runtime: dict[str, object]) -> dict[str, object]:
+        result = await runtime["tools"][0].ainvoke(
+            {
+                "customer_ref": EntityRef(
+                    ref_id="eref_customer_fabricated",
+                    resource="customer",
+                    public_id="cus_fabricated",
+                    display_name="伪造客户",
+                ).model_dump(mode="json"),
+                "sections": ["profile"],
+                "question": "客户情况",
+                "evidence_limit": 6,
+            }
+        )
+        assert result["error"]["code"] == "QUERY_INVALID"
+        return {
+            "structured_response": {
+                "status": "CLARIFICATION_REQUIRED",
+                "answer": None,
+                "clarification_question": "无法查询该客户",
+                "evidence_refs": [],
+            }
+        }
+
+    agent = CRMQueryAgent(
+        CRMReadToolRegistry(StubExecutor([]), ContextReader()),
+        agent_factory=CapturingAgentFactory(behavior),
+        chat_model_factory=FakeChatModel,
+    )
+    result = await agent.run(
+        CRMQueryAgentRequest(
+            user_message="客户情况",
+            entity_refs=[customer_ref],
+            allowed_tool_names=["get_customer_context"],
+        ),
+        _context(),
+        _model_config(),
+    )
+
+    assert result.response.status == "CLARIFICATION_REQUIRED"
+
+
+@pytest.mark.asyncio
 async def test_query_agent_collects_customer_context_and_validates_citations() -> None:
     from app.services.agent.query import CustomerContextCitation
 
@@ -868,12 +1106,12 @@ async def test_query_agent_collects_customer_context_and_validates_citations() -
         ) -> CustomerContextResult:
             return CustomerContextResult(
                 customer_ref=request.customer_ref,
-                sections={"brief": {"summary": "客户正在推进续约"}},
+                sections={"profile": {"summary": "客户正在推进续约"}},
                 citations=[
                     CustomerContextCitation(
                         citation_id="cite_customer_9",
                         source="CUSTOMER_INTELLIGENCE",
-                        source_ref="customer-brief:9",
+                        source_ref="customer-profile:9",
                         label="客户简报",
                     )
                 ],
@@ -888,7 +1126,7 @@ async def test_query_agent_collects_customer_context_and_validates_citations() -
         result = await runtime["tools"][0].ainvoke(
             {
                 "customer_ref": customer_ref.model_dump(mode="json"),
-                "sections": ["brief"],
+                "sections": ["profile"],
                 "question": "这个客户目前是什么情况?",
                 "evidence_limit": 6,
             }
@@ -912,6 +1150,7 @@ async def test_query_agent_collects_customer_context_and_validates_citations() -
     result = await agent.run(
         CRMQueryAgentRequest(
             user_message="这个客户目前是什么情况?",
+            entity_refs=[customer_ref],
             allowed_tool_names=["get_customer_context"],
         ),
         _context(),
@@ -1062,7 +1301,7 @@ async def test_query_agent_treats_reader_value_error_as_terminal_internal_error(
         result = await runtime["tools"][0].ainvoke(
             {
                 "customer_ref": customer_ref.model_dump(mode="json"),
-                "sections": ["brief"],
+                "sections": ["profile"],
                 "question": None,
                 "evidence_limit": 6,
             }
@@ -1085,7 +1324,18 @@ async def test_query_agent_treats_reader_value_error_as_terminal_internal_error(
 
     with pytest.raises(CRMQueryAgentExecutionError) as exc_info:
         await agent.run(
-            CRMQueryAgentRequest(user_message="客户情况", allowed_tool_names=["get_customer_context"]),
+            CRMQueryAgentRequest(
+                user_message="客户情况",
+                entity_refs=[
+                    EntityRef(
+                        ref_id="eref_customer_context_error",
+                        resource="customer",
+                        public_id="cus_context_error",
+                        display_name="异常客户",
+                    )
+                ],
+                allowed_tool_names=["get_customer_context"],
+            ),
             _context(),
             _model_config(),
         )

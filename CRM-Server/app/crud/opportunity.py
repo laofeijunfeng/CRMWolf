@@ -46,6 +46,11 @@ def _split_int_csv(value: Optional[str]) -> List[int]:
     return values
 
 
+def _bump_opportunity_version(opportunity: Opportunity) -> None:
+    """Advance the aggregate version after a persisted opportunity mutation."""
+    opportunity.version = int(getattr(opportunity, "version", 1) or 1) + 1
+
+
 class OpportunityStageCRUD:
     def get_by_id(self, db: Session, stage_id: int) -> Optional[OpportunityStage]:
         return db.query(OpportunityStage).filter(OpportunityStage.id == stage_id).first()
@@ -455,6 +460,7 @@ class OpportunityCRUD:
         
         for field, value in update_data.items():
             setattr(db_obj, field, value)
+        _bump_opportunity_version(db_obj)
         db.commit()
         db.refresh(db_obj)
         return db_obj
@@ -532,6 +538,7 @@ class OpportunityCRUD:
         opportunity.current_win_probability = new_snapshot.win_probability
         opportunity.current_stage_entered_at = new_snapshot.entered_at
         opportunity.win_probability = new_snapshot.win_probability
+        _bump_opportunity_version(opportunity)
 
         from app.services.deal_journey_service import deal_journey_service
         deal_journey_service.record_opportunity_stage_changed(db, opportunity, new_snapshot, operator_id)
@@ -555,6 +562,7 @@ class OpportunityCRUD:
             opportunity.actual_amount = win_data.actual_amount
             opportunity.actual_closing_date = win_data.actual_closing_date
             opportunity.win_probability = 100
+            _bump_opportunity_version(opportunity)
             
             db.commit()
             db.refresh(opportunity)
@@ -644,6 +652,7 @@ class OpportunityCRUD:
         opportunity.current_stage_name = new_snapshot.stage_name
         opportunity.current_win_probability = new_snapshot.win_probability
         opportunity.current_stage_entered_at = new_snapshot.entered_at
+        _bump_opportunity_version(opportunity)
 
         db.commit()
         db.refresh(opportunity)
@@ -699,6 +708,7 @@ class OpportunityCRUD:
         db_obj.actual_amount = win_data.actual_amount
         db_obj.actual_closing_date = win_data.actual_closing_date
         db_obj.win_probability = 100
+        _bump_opportunity_version(db_obj)
         from app.services.deal_journey_service import deal_journey_service
         deal_journey_service.mark_won(db, db_obj, operator_id)
         db.commit()
@@ -750,6 +760,7 @@ class OpportunityCRUD:
         db_obj.status = OpportunityStatus.LOST.value
         db_obj.loss_reason = lose_data.loss_reason
         db_obj.win_probability = 0
+        _bump_opportunity_version(db_obj)
         from app.services.deal_journey_service import deal_journey_service
         deal_journey_service.mark_lost(db, db_obj, operator_id)
         db.commit()

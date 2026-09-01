@@ -137,22 +137,25 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'roles',
         name: 'Roles',
-        redirect: '/system-config'
+        redirect: '/settings/roles'
       },
       {
         path: 'approval-flows',
         name: 'ApprovalFlows',
-        redirect: '/system-config'
+        redirect: '/settings/approval-flows'
       },
       {
         path: 'approval-flows/create',
         name: 'ApprovalFlowCreate',
-        redirect: '/system-config'
+        redirect: '/settings/approval-flows?action=create'
       },
       {
         path: 'approval-flows/:id/edit',
         name: 'ApprovalFlowEdit',
-        redirect: '/system-config'
+        redirect: to => ({
+          path: '/settings/approval-flows',
+          query: { action: 'edit', id: String(to.params['id']) }
+        })
       },
       {
         path: 'payments',
@@ -187,57 +190,101 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'procurement-methods',
         name: 'ProcurementMethods',
-        redirect: '/system-config'
+        redirect: '/settings/procurement-methods'
       },
       {
         path: 'procurement-methods/create',
         name: 'ProcurementMethodCreate',
-        redirect: '/system-config'
+        redirect: '/settings/procurement-methods?action=create'
       },
       {
         path: 'procurement-methods/:id/edit',
         name: 'ProcurementMethodEdit',
-        redirect: '/system-config'
+        redirect: to => ({
+          path: '/settings/procurement-methods',
+          query: { action: 'edit', id: String(to.params['id']) }
+        })
       },
       {
         path: 'procurement-methods/:methodId/stages',
         name: 'ProcurementStageTemplates',
-        redirect: '/system-config'
+        redirect: to => ({
+          path: '/settings/procurement-methods',
+          query: { methodId: String(to.params['methodId']) }
+        })
       },
       {
         path: 'settings',
         name: 'Settings',
-        redirect: '/system-config'
+        redirect: '/settings/account'
       },
       {
-        path: 'system-config',
-        name: 'SystemConfig',
-        component: () => import(
-          /* webpackChunkName: "system-config" */
-          '@/views/SystemConfig.vue'
-        ),
-        meta: { requiresAuth: true, title: '系统配置' }
-      },
-      {
-        path: 'account',
-        name: 'AccountSettings',
+        path: 'settings/account',
+        name: 'SettingsAccount',
         component: () => import('@/views/AccountSettings.vue'),
         meta: { requiresAuth: true, title: '账户设置' }
       },
       {
+        path: 'settings/team',
+        name: 'SettingsTeam',
+        component: () => import('@/views/TeamSettings.vue'),
+        meta: { requiresAuth: true, title: '团队信息与安全', settingsKey: 'team' }
+      },
+      {
+        path: 'settings/procurement-methods',
+        name: 'SettingsProcurementMethods',
+        component: () => import('@/views/SettingsModulePage.vue'),
+        meta: { requiresAuth: true, title: '采购方式管理', settingsKey: 'procurement' },
+        props: { module: 'procurement' }
+      },
+      {
+        path: 'settings/procurement-methods/:methodId/stages',
+        name: 'SettingsProcurementStages',
+        component: () => import('@/views/ProcurementStagesSettings.vue'),
+        meta: { requiresAuth: true, title: '采购阶段模板', settingsKey: 'procurement' }
+      },
+      {
+        path: 'settings/procurement',
+        name: 'SettingsProcurementLegacy',
+        redirect: '/settings/procurement-methods'
+      },
+      {
+        path: 'settings/procurement/stages/:methodId',
+        name: 'SettingsProcurementStagesLegacy',
+        redirect: to => ({
+          path: `/settings/procurement-methods/${String(to.params['methodId'])}/stages`
+        })
+      },
+      {
+        path: 'settings/:module',
+        name: 'SettingsModule',
+        component: () => import('@/views/SettingsModulePage.vue'),
+        meta: { requiresAuth: true, title: '系统设置' }
+      },
+      {
+        path: 'system-config',
+        name: 'SystemConfig',
+        redirect: '/settings/account'
+      },
+      {
+        path: 'account',
+        name: 'AccountSettings',
+        redirect: '/settings/account'
+      },
+      {
         path: 'ai-config',
         name: 'AIConfig',
-        redirect: '/system-config'
+        redirect: '/settings/ai'
       },
       {
         path: 'notification-config',
         name: 'NotificationConfig',
-        redirect: '/system-config'
+        redirect: '/settings/notifications'
       },
       {
         path: 'team-members',
         name: 'TeamMembers',
-        redirect: '/system-config'
+        redirect: '/settings/members'
       },
       // 审批中心（Phase C / Task C3）：取代自写按钮的
       // FinanceInvoiceApprovals / FinancePaymentConfirmations，INVOICE 与 PAYMENT

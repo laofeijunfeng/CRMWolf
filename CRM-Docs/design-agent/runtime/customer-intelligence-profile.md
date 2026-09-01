@@ -1,539 +1,1301 @@
-# 客户智能档案整体方案
+# 客户智能档案优化 PRD
 
-## 1. 方案结论
+> 文档定位：客户档案产品需求、业务闭环和 Agent 实现约束。
+> 文档状态：优化版
+> 核心范围：档案投影契约、业务事件闭环、前端阅读契约、历史数据重建
+> 关联文档：`CRM-Docs/design-agent/foundations/product-positioning.md`、`CRM-Docs/design-agent/foundations/architecture-boundary.md`
 
-将“客户档案”升级为 **客户智能中枢**。
+---
 
-它不再只是客户详情页里的 AI 生成字段，而是由 Agent 统一维护、由业务事件持续触发、由知识库沉淀上下文、由 LangGraph 编排分析与更新流程的客户记忆系统。
+## 1. 结论与产品定位
 
-最终目标：
+### 1.1 方案结论
 
-- 客户档案自动保持更新
-- Agent 能理解客户现状
-- Agent 能解释判断依据
-- 跟进、商机、合同、回款、业务流程都能触发客户档案更新
-- 客户知识能反哺商机推进、合同处理、回款风险、销售建议和 IM 问答
+客户档案不再是一次性生成的 AI 文本，也不是客户、商机、合同、回款等数据的简单汇总。
 
-## 2. 当前业务架构
+客户档案应建设为一份由业务事实持续供给、由 Agent 协助归纳、能够回看证据、能够查看变化的 **客户阅读记录**。
 
-当前客户相关信息分散在多个模块：
+本次优化不以“让系统直接指导销售行动”为目标。平台的职责是帮助销售更快理解客户，保留真实业务过程和客户状态；销售如何联系客户、如何经营关系、如何选择时机，仍然属于销售自身判断或独立的 Agent 对话能力，不进入客户档案的自动生成闭环。
 
-- 客户基础信息
-- 跟进记录
-- 商机
-- 合同
-- 回款
-- 联系人 / 客户成员
-- 业务流程
-- Agent 对话与工具调用
+### 1.2 客户档案要回答的问题
 
-目前已有能力：
+客户档案打开后，销售应当能够快速回答：
 
-- `customer_profile_service.py`
-  - 生成公司背景、官网、主营业务、相似客户、项目背景等字段
-- `customer_brief_service.py`
-  - 结合客户、联系人、商机、合同、回款、跟进记录生成销售侧客户概况
-- `deal_journey_service.py`
-  - 记录商机创建、审批通过、阶段推进、赢单、输单等业务事件
-- Agent runtime
-  - 已具备 LangGraph 化的图编排、确认、中断恢复、工具调用、执行轨迹能力
+1. 这个客户当前是什么情况？
+2. 当前最重要的业务旅程是什么？处于什么阶段？
+3. 客户为什么产生这次需求，需求在跟进中发生过什么变化？
+4. 最近一段时间，客户和销售之间发生了哪些关键过程？
+5. 销售或客户已经明确记录了哪些后续事项？这些事项处于什么状态？
+6. 页面中的重要判断，分别来自哪些跟进、旅程事件、商机、合同或回款记录？
+7. 与上一次查看相比，客户发生了哪些重要变化？
 
-当前主要问题：
+### 1.3 三条契约的关系
 
-- 客户档案偏静态，像“某次生成出来的资料”
-- 客户档案生成和 Agent 架构还没有完全统一
-- 跟进、商机、合同、回款、流程事件没有统一沉淀为客户知识
-- Agent 使用客户上下文时，缺少统一的客户记忆底座
-- 档案更新缺少来源、置信度、版本和审计
+本 PRD 不是把客户档案拆成更多字段，而是把“业务数据如何变成一份可阅读档案”定义成三个相互约束的契约：
 
-## 2.1 LangGraph 对齐原则
+| 契约 | 解决的问题 | 必须守住的边界 |
+|---|---|---|
+| 档案投影契约 | 档案是什么、展示哪些内容、内容是否新鲜 | 档案是只读投影，不是业务状态真相 |
+| 业务事件闭环 | 什么业务变化会进入档案、如何重试和回放 | 业务事务先成功，智能更新可异步；重复消费不能重复写入 |
+| 前端阅读契约 | 销售先看什么、如何判断可信、如何回看依据 | 先讲当前情况，再讲过程和证据，不把页面写成 AI 报告 |
 
-客户智能档案不能只是把现有 service 包一层图。LangGraph 在这里要承担“运行时”的职责：
-
-- 图负责流程状态、分支、中断、恢复、执行轨迹
-- service 负责确定性的业务能力，比如查询客户、写入事实、刷新字段
-- LLM 只进入需要语义理解、归纳、冲突判断和置信度评估的节点
-- checkpoint 保存一次 Agent 执行中的短期状态
-- store 保存跨会话、跨入口复用的长期客户记忆
-- 向量库保存可语义召回的证据文本和摘要
-- 业务数据库仍然是客户、商机、合同、回款等强业务状态的事实来源
-
-对应到实现原则：
-
-- 每个子图必须定义清晰的 input state、internal state、output state
-- 图 state 不使用松散字典承载核心业务数据
-- 执行步骤、候选对象、抽取事实、置信度结果用 reducer 累积
-- 最终决策、当前阶段、刷新范围用明确字段覆盖
-- 节点可以失败、重跑、恢复，所以写库和外部副作用必须具备幂等键
-- 用户可见内容必须由执行轨迹投影生成，不能直接暴露工具名和节点名
-
-### 2.2 LangGraph 能力映射
-
-客户智能档案必须按 LangGraph 官方能力设计，而不是只使用 `StateGraph` 的外壳。
-
-能力映射：
-
-- `StateGraph`
-  - 承载客户智能更新的流程状态、节点、条件边和子图
-  - 每个节点只做一类事情，返回结构化 state 更新
-- `Reducers`
-  - 累积执行步骤、证据、抽取事实、错误、候选对象
-  - 避免节点之间互相覆盖过程信息
-- `Command`
-  - 用于带状态更新的动态跳转
-  - 适合“分析后直接进入刷新 / 自动沉淀 / 静默忽略 / 后台重建”的分支
-  - 同一段流程不要同时依赖静态边和 `Command` 跳转表达同一个路由意图
-- `Interrupt`
-  - 保留为 LangGraph 的通用 Workflow 能力，只用于真正需要用户决策的写流程
-  - 客户事实沉淀不使用 interrupt：低置信、缺证据或冲突候选直接静默忽略
-- `Checkpointer`
-  - 保存一次运行的短期状态、等待点、重试位置和恢复上下文
-  - 不能当客户档案、客户事实或审计表使用
-- `Store`
-  - 保存跨会话、跨入口复用的长期客户记忆
-  - 不能替代业务数据库和向量数据库
-- `Subgraphs`
-  - 把客户上下文读取、记忆检索、事实抽取、事实融合、档案刷新拆成可复用能力
-  - 被跟进、商机、合同、回款、IM、Web Agent 共同调用
-- `Streaming`
-  - 前台 Agent 必须实时输出用户可理解的执行过程
-  - 子图内部关键步骤需要透出，技术节点需要屏蔽
-- `Runtime Context`
-  - 传递租户、用户、入口、权限、时区、graph 版本和 request id
-  - 不把运行时身份信息混入 LLM 自然语言提示词
-- `Durable Execution`
-  - 每个写入节点具备幂等键
-  - 失败后能从 checkpoint 继续
-  - 后台重试和运维诊断都能回到同一个 graph run
-- `Observability`
-  - 每次 graph run 要能看到输入、节点状态、LLM 结构化输出、工具调用、事实门禁结果和最终写入
-  - 生产环境需要接入 LangSmith 或等价 trace 系统做回放、评估和问题定位
-
-设计验收标准：
-
-- LangGraph-native 不等于每张图都必须使用 interrupt；客户智能图应使用 typed state、checkpoint、streaming、subgraph 和 store 边界，而 interrupt 仅属于确实需要用户决策的 Workflow。
-- 如果用户可见步骤来自工具名或节点名直出，说明 trace 投影不合格。
-- 如果 LLM 自由文本结果被字符串解析后直接写库，说明结构化输出和确定性写入边界不合格。
-- 如果后台业务事件和前台对话各维护一套客户档案更新逻辑，说明子图复用不合格。
-- 如果客户长期记忆只存在会话上下文里，说明 Store / 向量库 / 业务事实库边界不合格。
-
-## 3. 目标业务架构
-
-客户档案应升级为四层结构。
-
-### 3.1 基础档案层
-
-保存相对稳定的信息：
-
-- 公司背景
-- 官网
-- 所属行业
-- 主营业务
-- 公司规模
-- 相似客户
-- 项目背景
-
-这类信息不应频繁覆盖，只有在证据明确、用户主动刷新或发生重大变化时更新。
-
-### 3.2 销售动态层
-
-保存销售过程中持续变化的信息：
-
-- 当前客户诉求
-- 当前采购进展
-- 当前商机状态
-- 关键人态度
-- 决策链关系
-- 风险点
-- 下一步建议
-- 最近重要变化
-
-这部分应该随着业务动作持续更新。
-
-### 3.3 客户知识层
-
-沉淀客户级事实，不直接等同于页面字段。
-
-每条客户知识包含：
-
-- `customer_id`
-- 来源类型：跟进、商机、合同、回款、审批、业务流程、IM 消息
-- 来源对象
-- 事实类型：需求、预算、风险、阶段、联系人态度、竞品、下一步
-- 事实内容
-- 置信度
-- 生效状态
-- 发生时间
-- 提取时间
-- 引用证据
-
-### 3.4 语义检索层
-
-使用向量数据库管理可检索内容。推荐实现使用 **Qdrant**。
-
-- 跟进记录原文
-- 业务流程记录
-- 商机变化摘要
-- 合同摘要
-- 回款摘要
-- 客户阶段性总结
-- 历史 Agent 判断依据
-
-结构化事实库负责准确状态，向量检索层负责语义召回。
-
-Qdrant 在本方案中的定位：
-
-- 只保存可语义召回的证据文本、摘要和历史判断依据
-- 不保存商机阶段、合同状态、回款金额等强业务事实
-- 不作为客户档案页面的最终展示来源
-- 不直接决定是否更新客户档案
-- 检索结果只作为 Agent 判断、归纳、引用依据的证据输入
-
-推荐 collection：
+三者的依赖关系是：
 
 ```text
-crm_customer_evidence
+业务对象与业务事件
+        ↓
+事实 / 状态 / 证据
+        ↓
+档案投影契约
+        ↓
+前端阅读契约
 ```
 
-每条向量文档包含：
+Agent 只负责在事实和证据之上完成归纳，不拥有“把什么写进业务系统”或“销售应该做什么”的最终决定权。
+
+### 1.4 明确不做的事情
+
+客户档案不负责：
+
+- 自动生成销售应该采取的行动；
+- 自动推荐联系对象、联系时间、沟通话术或关系经营方式；
+- 自动判断客户已经认可、需求已经解决或关系已经改善；
+- 代替业务旅程页面保存完整交易流水；
+- 代替跟进任务模块进行提醒、分派和任务管理；
+- 代替商机、合同、回款等业务对象成为状态真相；
+- 使用一段自然语言覆盖强业务字段；
+- 通过模型猜测缺失的业务状态、金额、阶段或对象 ID。
+
+档案中允许出现“下一步”相关内容，但只能来自业务记录中已经明确出现的内容，统一命名为：
+
+- 已记录后续事项；
+- 销售已承诺事项；
+- 客户已表达的后续安排；
+- 未完成事项。
+
+不得把系统生成的建议写入客户档案正文。
+
+---
+
+## 2. 当前问题与优化目标
+
+### 2.1 当前主要问题
+
+当前系统已经具备客户事实、证据、业务旅程、任务、承诺、Agent 运行审计等底层能力，但各层还没有形成统一的档案投影。
+
+主要问题如下：
+
+1. **客户档案曾以旧式 Markdown 为主**
+   历史实现把企业背景、项目背景、采购进度、风险、下一步等内容平铺在一段文本中，阅读者需要自行拼接上下文。新版档案已改为结构化 Projection，前端只读取当前 Projection 版本。
+
+2. **事实层和页面叙事层没有真正打通**
+   `CustomerFact` 已经可以沉淀需求、预算、风险、阶段、联系人态度等事实，但这些事实尚未稳定映射为“当前情况、重要变化、跟进过程”等页面内容。
+
+3. **跟进中的需求无法持续演化**
+   当前容易把最近一条跟进直接用于生成需求背景，缺少需求事实的合并、前后变化和有效性管理。
+
+4. **业务旅程没有成为客户档案的交易主线**
+   `CustomerDealJourney` 和 `CustomerDealJourneyEvent` 已有基础，但客户智能上下文、档案主视图、任务和承诺尚未围绕旅程形成统一归属。
+
+5. **任务完成没有回流到客户档案**
+   任务自身有状态和事件，但任务完成、延期、取消、重开等状态变化尚未稳定地更新“已记录后续事项”和“跟进过程”。
+
+6. **档案投影与历史字段边界不清**
+   `Customer` 表中的历史 AI 字段与事实、运行、旅程体系同时存在，需要明确新版 Projection 是唯一运行时来源，历史字段不再参与档案读取、生成或发布。
+
+7. **档案更新没有独立的发布契约**
+   当前有 Agent run、重试、批量重建，但尚未完整定义“新档案如何校验、何时发布、失败时如何保留上一版本”。
+
+### 2.2 当前实现与目标方案的差异
+
+以下差异是本 PRD 的开发依据，避免把“已有底层能力”误认为“客户档案已经具备完整闭环”：
+
+| 能力 | 当前系统情况 | 本 PRD 目标 |
+|---|---|---|
+| 客户档案存储 | 已迁移到独立结构化 Projection 表 | Projection 是唯一运行时来源，历史字段和旧生成链路已删除 |
+| 客户事实 | 已有 `CustomerFact`、来源和修订记录 | 事实按客户/旅程/商机归属，并参与段落投影 |
+| 客户智能事件 | 已有客户活动、业务对象、旅程事件等事件契约 | 补齐任务、承诺事件，并统一进入可恢复运行 |
+| Agent Graph | 已有上下文加载、事实提炼和记忆能力 | 收敛为唯一 `CustomerProfileProjectionGraphService`，增加确定性状态投影、段落编排和校验节点 |
+| 上下文读取 | 当前主要包含客户、联系人、商机、合同、回款、活动；尚未完整包含旅程、任务、承诺 | 统一读取客户、旅程、事实、任务、承诺和证据 |
+| 业务旅程 | 已有旅程及旅程事件，也有独立旅程看板 | 档案引用旅程主线，多旅程不丢失，完整流水仍留在旅程模块 |
+| 任务/承诺 | 已有任务、任务事件、承诺和投影运行记录 | 状态变化回流档案；任务完成只代表销售事项完成 |
+| 前端读取 | `CustomerDetailSheet` 仍包含历史概况读取路径 | 主视图只读取结构化 Profile API，按契约下钻原始记录 |
+| 失败与历史数据 | 已有运行审计和补档调度 | 失败保留上一成功版本，按版本判断并后台分批重建 |
+
+因此，P0 不是简单替换 Markdown，而是先建立一条“事件可追踪、投影可发布、前端可读取”的最小闭环。
+
+### 2.3 优化目标
+
+本次优化目标不是继续增加更多摘要字段，而是完成以下三个契约：
+
+```text
+档案投影契约
+    定义档案是什么、包含什么、状态如何表达、来源如何绑定
+
+业务事件闭环
+    定义业务动作如何进入档案、哪些状态确定性更新、哪些内容由 Agent 归纳
+
+前端阅读契约
+    定义销售先看什么、如何阅读、如何下钻证据、如何区分事实和推断
+```
+
+### 2.4 成功标准
+
+优化后，客户档案应满足：
+
+- 销售第一屏能看懂客户当前情况，而不是先阅读一份报告；
+- 当前业务旅程、历史旅程和客户长期背景边界清楚；
+- 需求背景来自多条跟进事实的持续归纳，而不是只引用最近一条记录；
+- 任务和承诺状态变化能够回到档案；
+- 重要内容都能回看证据；
+- 档案失败或重建期间不丢失上一份成功内容；
+- 历史客户通过统一 Projection 链路完成版本化重建，不影响原始业务流程；
+- Agent 能辅助归纳，但不能改变业务系统的强状态或替销售做决定。
+
+### 2.5 范围与优先级矩阵
+
+本 PRD 的范围以“能否让销售更快、稳定地读懂客户”为判断标准，而不是以“能否再生成更多 AI 内容”为判断标准。
+
+| 范围 | P0 必须形成闭环 | P1 提升质量 | 本期明确不做 |
+|---|---|---|---|
+| 档案投影 | 结构化段落、版本快照、当前指针、数据水位、原子发布 | 段落级差异、人工纠错、质量抽检 | 继续扩展旧 Markdown 字段 |
+| 业务旅程 | 读取旅程和关键事件、多旅程不丢失、明确未归属 | 主旅程人工指定、旅程归属补齐、主题化阶段变化 | 用档案替代旅程完整流水 |
+| 跟进与事实 | 跟进证据进入上下文，需求可由多条记录归纳 | 事实有效期、冲突处理、事实修订可视化 | 只根据最近一条跟进覆盖历史理解 |
+| 任务与承诺 | 创建/完成/取消/延期/重开回流档案事项 | 承诺拆分履行、事项替代链 | 将完成状态解释为客户结果 |
+| Agent | 受控生成候选事实和叙事，统一运行审计 | 回放、评估、人工反馈闭环 | Customer Intelligence 成为第三个顶层自主 Agent |
+| 前端阅读 | 第一屏先结论，按需下钻证据 | 变化时间线、段落级展开策略 | 把所有来源平铺成报告或运行监控台 |
+
+**P0 完成定义：**至少有一条真实业务事件能够经过“事件入队 → 上下文读取 → 确定性状态投影/事实归纳 → 档案校验 → 新版本发布 → 前端读取”全链路，并能在失败、重复消费、并发新事件和权限变化下保持可解释行为。
+
+### 2.6 方案成熟度判断
+
+本方案已经从“生成一份更完整的客户摘要”收敛为可实施的产品契约，但成熟度必须区分“设计成熟”和“系统已实现”：
+
+| 维度 | 当前判断 | 结论 |
+|---|---|---|
+| 产品定位 | 已明确客户档案帮助理解客户，不替销售决策 | 可作为长期边界 |
+| 档案结构 | 已有段落、scope、状态、证据、版本和水位 | 可进入接口设计 |
+| 业务闭环 | 活动/旅程已有基础，任务/承诺回流仍需补齐 | P0 实现重点 |
+| 数据可信 | 已定义真相来源、证据和负向重算 | 需用真实客户样本验证 |
+| 前端阅读 | 已定义首屏顺序、密度、下钻和文案边界 | 可进入交互设计 |
+| 迁移方案 | 已明确按版本懒迁移 + 后台分批重建 | 可执行，但需并发验收 |
+| Agent 架构 | 与 Root/Query/Workflow 边界一致，不新增顶层 Agent | 可作为子能力接入 |
+
+因此，本 PRD **可以作为产品、后端、前端和测试的共同基线**；但在 `CustomerProfileCurrent`、任务/承诺事件回流、旅程归属和删除负向重算完成前，不能宣称客户档案闭环已经完成。
+
+---
+
+## 3. 领域模型与数据边界
+
+### 3.1 三层模型
+
+客户档案由三层内容组成：
+
+```text
+事实层：发生了什么
+状态层：当前处于什么状态
+叙事层：如何让销售快速理解
+```
+
+| 层次 | 主要来源 | 负责内容 | Agent 权限 |
+|---|---|---|---|
+| 事实层 | 跟进、商机、合同、回款、联系人、旅程、任务、承诺 | 客户表达、销售记录、业务事件、引用片段 | 只能提炼候选，不能编造 |
+| 状态层 | 业务对象和确定性规则 | 商机阶段、旅程状态、合同状态、回款状态、任务状态、承诺状态 | 不能自由覆盖 |
+| 叙事层 | 事实层 + 状态层 + 证据 | 当前情况、需求背景、重要变化、跟进过程摘要 | 可以归纳，必须可追溯 |
+
+### 3.2 各模块职责
+
+#### 客户主数据
+
+保存客户名称、行业、城市、负责人等相对稳定的结构化信息，是客户身份的业务真相。
+
+#### 客户事实库
+
+保存从业务记录中提炼出的可复用事实，以及事实来源、置信度、有效状态和版本变化。
+
+#### 业务旅程
+
+保存某个客户业务机会从开始到结束的完整交易过程，包括商机阶段、合同、回款和关键流程事件。
+
+#### 跟进任务与销售承诺
+
+保存销售或客户已经明确提出的后续事项，以及事项的生命周期和履行记录。
+
+#### 客户档案
+
+是上述信息的销售阅读投影，不直接复制所有底层数据，也不是业务状态的替代来源。
+
+#### Agent Store / 向量库
+
+- LangGraph Store：保存跨会话长期记忆、阶段性摘要和索引；不作为业务状态真相；
+- Qdrant：保存可语义召回的证据文本；不作为商机阶段、合同状态或回款金额的真相；
+- MySQL 业务表：保存正式业务对象、客户事实、任务、承诺、旅程和档案投影。
+
+### 3.3 客户级事实与旅程级事实
+
+所有可演化事实都必须明确作用范围：
+
+```text
+customer：客户长期事实
+journey：某个业务旅程中的事实
+opportunity：某个商机中的事实
+```
+
+示例：
+
+- “客户是一家气象智能装备研究机构”可以是客户级事实；
+- “本次项目需要支持线上服务器部署”通常属于某个业务旅程或商机；
+- “预算预计在本季度确认”属于特定旅程，不应直接成为客户长期预算；
+- “张某是本项目的技术推动人”属于特定旅程中的联系人关系，不一定等同于客户级决策人。
+
+没有范围归属的事实不得直接进入长期客户背景。
+
+---
+
+## 4. 档案投影契约
+
+> 本节是数据和页面共同依赖的产品契约。字段可以在实现中调整命名，但语义、归属、状态和证据要求不能被弱化。
+
+### 4.1 档案对象定义
+
+P0 必须新增独立的客户档案投影对象，不再把新版档案继续堆叠为 `Customer` 表中的多个文本字段。档案投影是面向销售阅读的只读投影，不是事实表，也不是在 `Customer` 上不断覆盖的一段长文本。
+
+推荐名称：
+
+```text
+CustomerProfileProjectionVersion
+CustomerProfileCurrent
+```
+
+P0 采用“**不可变快照表 + 当前指针表**”两张表，而不是在一张大表上反复更新 `current` 标记。
+
+### 快照表 `crm_customer_profile_projection_versions`
+
+每次可发布的档案都形成一条不可变快照，至少包含：
 
 ```text
 id
-tenant_id
 team_id
 customer_id
+schema_version
+profile_version
+publication_status       # DRAFT/PUBLISHED/SUPERSEDED/FAILED
+current_situation_json
+current_journeys_json
+long_term_context_json
+important_changes_json
+follow_up_process_json
+recorded_follow_ups_json
+evidence_refs_json
+source_watermark_json
+fact_watermark
+journey_watermark
+task_watermark
+commitment_watermark
+generated_at
+published_at
+run_id
+graph_version
+created_at
+```
+
+### 当前指针表 `crm_customer_profile_current`
+
+每个 `team_id + customer_id` 只有一条，用于稳定读取当前对前端可见的版本：
+
+```text
+id
+team_id
+customer_id
+current_profile_version_id
+profile_status            # NOT_READY/READY/UPDATING/STALE/PARTIAL/FAILED
+last_successful_version
+last_successful_published_at
+latest_source_watermark_json
+latest_fact_watermark
+latest_journey_watermark
+latest_task_watermark
+latest_commitment_watermark
+stale_reason
+active_run_id
+updated_at
+```
+
+存储要求：
+
+- 快照表只追加，不修改已经发布版本的业务内容；修订通过新版本完成；
+- 当前指针切换必须在同一事务内完成，使用唯一约束保证同一客户只有一个当前版本；
+- `profile_status` 属于当前指针表，`publication_status` 属于快照表，不能混用；
+- 没有可用版本时 `current_profile_version_id` 允许为空，但必须返回明确空态；
+- 快照发布失败时保留失败运行记录，不替换当前指针；
+- `Customer` 上的历史档案字段已从运行时模型和数据库移除，不得重新加入读取、写入或回退逻辑；
+- 档案新鲜度只由 Projection 当前指针和各类业务水位判断；
+- 快照内容使用 Pydantic/JSON Schema 校验，禁止前端通过解析 Markdown 猜测段落结构。
+
+### 版本发布语义
+
+```text
+生成 draft 快照
+  ↓
+校验 schema / 权限 / 证据 / 水位
+  ↓
+锁定当前指针
+  ↓
+仅当 draft 水位不低于当前已处理水位时原子切换
+  ↓
+旧当前版本标记 SUPERSEDED
+```
+
+若发现新事件已经产生更高水位，当前运行只能：
+
+- 放弃发布并重新排队；或
+- 发布后立即创建覆盖增量运行；
+
+不得让旧运行把新版本降级覆盖。
+
+### 4.2 档案状态
+
+档案状态建议统一为：
+
+```text
+NOT_READY       尚未生成
+READY           已有可用版本
+UPDATING        正在更新，页面继续展示上一成功版本
+STALE           有新业务数据尚未反映
+PARTIAL         部分段落更新成功
+FAILED          本次更新失败，继续展示上一成功版本
+```
+
+状态不能覆盖业务对象自身状态。
+
+例如：
+
+- 档案 `READY` 不代表商机一定处于推进状态；
+- 档案 `FAILED` 不代表客户业务失败；
+- 档案 `STALE` 只代表档案投影落后于业务事实。
+
+#### 4.2.1 状态转换
+
+状态转换由档案投影服务根据运行结果和数据水位确定，前端不自行推断：
+
+```text
+NOT_READY → UPDATING → READY
+READY → STALE → UPDATING → READY
+READY → UPDATING → FAILED（继续展示上一成功版本）
+READY → UPDATING → PARTIAL（部分段落更新成功）
+PARTIAL → UPDATING → READY|PARTIAL|FAILED
+```
+
+`STALE` 表示已有新业务数据尚未纳入，`UPDATING` 表示存在运行中的投影作业，二者可以在接口中同时表达（例如状态为 `UPDATING`，并返回 `stale_reason`）。状态变化必须关联 `run_id`，不能因为模型生成失败而把业务对象状态改成失败。
+
+### 4.3 档案内容契约
+
+#### 4.3.0 所有段落的共同结构
+
+每个可展示段落都应具备统一的最小结构，避免前端再次解析自然语言：
+
+```json
+{
+  "section_id": "current_situation",
+  "scope_type": "customer|journey|opportunity",
+  "scope_id": "",
+  "status": "AVAILABLE|INSUFFICIENT_EVIDENCE|CONFLICTED|STALE",
+  "as_of": "2026-08-28T10:30:00+08:00",
+  "content": "销售可直接阅读的结论",
+  "items": [],
+  "evidence_refs": [],
+  "source_count": 0,
+  "last_changed_at": ""
+}
+```
+
+约束：
+
+- `section_id` 稳定，前端按段落读取，不按标题猜结构；
+- `scope_type/scope_id` 必须存在，客户级内容不能悄悄混入某个旅程；
+- `status` 表示档案段落是否可用，不表示商机或客户业务状态；
+- `as_of` 表示该段落覆盖到的业务事实时间；
+- `last_changed_at` 表示该段落内容最近一次发生有效变化的时间；
+- `items` 中的每个重要观点都必须能够关联证据，证据不足则进入“尚未确认”，不能只留下空字符串；
+- 段落没有有效变化时沿用上一版本，不为了“更新时间变化”重复改写；
+- 客户关系、态度和沟通偏好只能记录业务记录中明确表达的内容，不得由互动频率、措辞或任务完成情况自动推断。
+
+
+#### 4.3.1 当前情况 `current_situation`
+
+回答客户当前整体状态，需求背景是其中的固定子块，而不是与企业背景、采购进度、风险并列的另一份报告。建议包含：
+
+```json
+{
+  "content": "自然语言概括",
+  "needs_context": {
+    "content": "客户为什么产生当前需求、当前需要解决什么、有哪些约束",
+    "origin": [],
+    "current_needs": [],
+    "usage_scenarios": [],
+    "constraints": [],
+    "evolution": [],
+    "open_questions": [],
+    "evidence_refs": []
+  },
+  "confirmed_points": [],
+  "unconfirmed_points": [],
+  "evidence_refs": [],
+  "as_of": "2026-08-28T10:30:00+08:00"
+}
+```
+
+`needs_context` 的信息必须来自多条有效跟进、客户活动、旅程事件或业务对象事实的合并；不能因为最新一条跟进提到“服务器”就覆盖此前的使用场景、规模和约束。若不同跟进记录存在演化，应在 `evolution` 或“重要变化”中表达前后关系。
+
+写作要求：
+
+- 优先写当前仍然有效的内容；
+- 先写客户当前处于什么状态，再写原因和依据；
+- 不把多个商机的内容混成一个结论；
+- 不把推测写成确定事实；
+- 没有足够证据时使用“目前记录显示”“尚未确认”等表达。
+
+#### 4.3.2 当前业务旅程 `current_journeys`
+
+建议包含：
+
+```json
+{
+  "journeys": [
+    {
+      "journey_id": "",
+      "journey_name": "",
+      "status": "ACTIVE",
+      "current_stage": "",
+      "started_at": "",
+      "last_key_event_at": "",
+      "summary": "",
+      "key_milestones": [],
+      "open_recorded_follow_ups": [],
+      "evidence_refs": []
+    }
+  ],
+  "selection_basis": "人工指定|确定性规则|多旅程并列",
+  "evidence_refs": []
+}
+```
+
+`current_journeys.journeys` 必须是数组；单一主旅程只是数组中排序第一项，不应把客户的多个进行中旅程压成一个结论。新版数据模型和前端主视图只使用 `current_journeys_json`，不提供单一旅程别名，也不把单一旅程当成客户唯一交易主线。
+
+主旅程排序必须由确定性规则产生，并把排序依据返回给前端；若存在人工指定的主旅程，人工指定优先。没有人工指定且存在多个开放旅程时，必须并列展示，不得假装客户只有一个项目。
+
+#### 4.3.3 客户长期情况 `long_term_context`
+
+适合放入：
+
+- 客户身份和组织背景；
+- 主营业务和长期业务特征；
+- 已经多次被证实的客户级需求；
+- 稳定的联系人关系；
+- 已验证的沟通偏好；
+- 已结束旅程中仍然对客户理解有价值的长期事实。
+
+不适合放入：
+
+- 单个项目的临时预算；
+- 某个旅程的阶段判断；
+- 已失效的采购时间；
+- 没有证据支持的客户性格或关系判断。
+
+#### 4.3.4 重要变化 `important_changes`
+
+每条变化至少包含：
+
+```json
+{
+  "change_type": "need|stage|stakeholder|risk|commercial|relationship",
+  "before": "变化前",
+  "after": "变化后",
+  "occurred_at": "",
+  "scope_type": "customer|journey|opportunity",
+  "scope_id": "",
+  "impact": "对当前理解的影响",
+  "still_valid": true,
+  "evidence_refs": []
+}
+```
+
+重要变化不是每一次字段更新，而是已经改变销售对客户理解的变化。确定性代码负责筛选变化候选，Agent 负责自然语言表达。
+
+#### 4.3.5 跟进过程 `follow_up_process`
+
+跟进过程不是逐条复制客户活动，而是按时间和业务主题形成连续叙事：
+
+```text
+客户表达了什么
+→ 销售做了什么
+→ 客户如何反馈
+→ 双方形成了什么共识
+→ 后续发生了什么变化
+```
+
+建议每个过程单元包含：
+
+```json
+{
+  "period": "2026-08-01～2026-08-28",
+  "summary": "自然语言叙事",
+  "key_points": [],
+  "process_nodes": [
+    {
+      "node_type": "customer_expression|sales_follow_up|customer_feedback|sales_fulfillment|journey_event",
+      "summary": "过程节点",
+      "occurred_at": "",
+      "source_type": "customer_activity|follow_up_task_event|deal_journey_event",
+      "source_id": "",
+      "evidence_refs": []
+    }
+  ],
+  "related_journey_id": "",
+  "related_fact_ids": [],
+  "evidence_refs": []
+}
+```
+
+其中 `sales_fulfillment` 只表示销售事项已履行，不表示客户已经接受或需求已经解决。
+
+#### 4.3.6 已记录后续事项 `recorded_follow_ups`
+
+只展示历史记录中已经明确出现的事项：
+
+```json
+{
+  "id": "",
+  "content": "补充线上服务器部署方案",
+  "source_type": "sales_commitment|follow_up_task|customer_activity",
+  "source_id": "",
+  "scope_type": "journey|opportunity|customer",
+  "scope_id": "",
+  "owner_id": "",
+  "due_at": "",
+  "status": "OPEN",
+  "status_label": "待完成",
+  "completed_at": "",
+  "cancelled_at": "",
+  "superseded_by": "",
+  "evidence_refs": []
+}
+```
+
+事项状态建议包括：
+
+```text
+MENTIONED     记录中提到，但尚未形成任务或承诺
+OPEN          待完成
+COMPLETED     已完成
+CANCELLED     已取消
+EXPIRED       已过期
+SUPERSEDED    已被替代
+```
+
+客户活动中的 `next_action` 不能直接当作跟进任务。没有对应任务或销售承诺时，档案只能以“记录中提到的后续安排”展示，状态为 `MENTIONED`；只有已经形成可追踪对象或明确未完成事项，才能展示为 `OPEN`。
+
+页面文案统一使用：
+
+- 已记录后续事项；
+- 销售已承诺；
+- 客户已表达；
+- 已完成；
+- 已取消；
+- 已被替代。
+
+不要使用“系统建议下一步”。
+
+### 4.4 事实、状态和推断的展示标识
+
+页面必须能区分：
+
+```text
+已确认事实
+系统状态
+基于多条记录的归纳
+暂未确认
+```
+
+不建议在正文中展示模型置信度数字。置信度主要用于后台门禁和质量评估；前台使用自然语言表达确定性差异。
+
+示例：
+
+```text
+已确认：客户已提出线上服务器使用需求。
+当前状态：关联商机处于方案沟通阶段。
+归纳：近期跟进主要围绕部署方式和使用规模展开。
+暂未确认：最终采购时间尚未在记录中明确。
+```
+
+### 4.5 证据引用契约
+
+任何对客户理解有影响的结论，都应支持查看依据。
+
+证据来源包括：
+
+- 客户活动和跟进记录；
+- 业务旅程事件；
+- 商机及阶段变化；
+- 合同和回款状态；
+- 联系人记录；
+- 销售承诺和跟进任务事件；
+- Agent 产生的事实来源。
+
+每条证据至少包含：
+
+```text
 source_type
-source_object_id
+source_id
 business_object_type
 business_object_id
 title
-text
-text_hash
 occurred_at
-created_at
-updated_at
-confidence
-visibility_scope
-metadata_version
+excerpt
+route
 ```
 
-检索策略：
+前端要求：
 
-- 先按 `tenant_id`、`team_id`、`customer_id` 做强过滤
-- 再按 `source_type`、`business_object_type`、时间范围缩小候选
-- 最后做语义 Top-K 召回
-- 返回结果必须带来源对象和证据片段
-- Agent 回答和档案刷新必须引用 evidence refs
+- 观点旁边显示轻量引用标记；
+- 点击后显示来源标题、时间和原文片段；
+- 能跳转到原始业务对象；
+- 一个观点可以绑定多条证据；
+- 证据不存在或已删除时显示“原始记录不可用”，不能自动补写。
 
-这样可以避免跨租户、跨团队、跨客户污染，也能让用户看到“这个判断来自哪条跟进、哪个流程、哪个商机变化”。
+---
 
-### 3.5 LangGraph 长期记忆层
+### 4.6 档案版本、变化记录与可回退
 
-客户智能档案需要使用 LangGraph store 承载跨会话记忆，并和业务事实库、向量库保持清晰边界。
+档案投影至少区分三类时间：
 
-LangGraph Store 不是一款固定数据库，而是 LangGraph 的长期记忆接口。CRMWolf 不需要为了 Store 再引入一套新数据库，推荐使用 MySQL-backed Store 实现。
+| 时间 | 含义 |
+|---|---|
+| `occurred_at` | 原始业务事实发生时间 |
+| `as_of` / 数据水位 | 本次档案实际纳入的业务数据范围 |
+| `published_at` | 本次档案版本对前端可见的时间 |
 
-建议命名空间：
+`important_changes` 是销售阅读用的变化摘要，不等同于完整审计日志。系统仍必须保留：
+
+- 档案版本之间的段落差异；
+- 产生变化的来源事件和事实修订；
+- 变化前、变化后内容；
+- 触发运行 `run_id`、Graph 版本和发布时间。
+
+前端默认只展示最近一段时间或最近若干条“重要变化”；查看完整历史时通过 `/changes` 分页下钻，不把全部版本差异堆在档案正文中。
+
+### 4.7 档案投影不变量
+
+任何实现都必须满足以下不变量：
+
+1. 档案只能引用当前用户有权限访问的业务事实和证据；
+2. 档案不能反向修改客户、商机、合同、回款、任务或旅程状态；
+3. 新版本未通过 schema、权限、证据和水位校验时，不得替换上一成功版本；
+4. 同一 `team_id + customer_id` 在同一时刻只有一个前端可见版本；
+5. 同一来源事件重复消费，结果必须幂等；
+6. 结构化字段和状态由代码生成，叙事内容由 Agent 生成但必须受结构化契约约束；
+7. 删除或失去权限的来源，不得被模型重新补写为“仍然存在的证据”。
+
+---
+
+## 5. 前端阅读契约
+
+### 5.1 总体阅读原则
+
+客户档案的排版必须遵循：
 
 ```text
-(tenant_id, "customer", customer_id, "facts")
-(tenant_id, "customer", customer_id, "summaries")
-(tenant_id, "customer", customer_id, "preferences")
-(tenant_id, "customer", customer_id, "retrieval")
+先让销售知道客户现在怎么样
+再让销售知道为什么是这样
+最后让销售按需回看证据和完整过程
 ```
 
-存储职责：
+页面不应像一份 AI 报告，也不应把所有信息平铺成大量字段卡片。
 
-- `facts`
-  - 保存 Agent 提炼出的客户事实索引，指向业务事实库记录
-- `summaries`
-  - 保存阶段性客户摘要，供后续 Agent 快速读取
-- `preferences`
-  - 保存客户级沟通偏好、销售关注点等长期信息
-- `retrieval`
-  - 保存语义检索元数据，指向向量库文档
+### 5.2 第一屏结构
 
-这样 Agent 在 Web、IM、业务流程中进入同一个客户时，可以读取同一套长期客户记忆，而不是依赖某个会话里的聊天历史。
-
-Store 与其他存储的边界：
-
-- MySQL 业务表保存正式业务数据和客户事实
-- Qdrant 保存可语义召回的证据文本
-- LangGraph Store 保存 Agent 长期记忆、摘要、偏好和检索索引
-- Store 中的 `facts` 只保存事实索引，不复制完整业务事实
-- Store 中的 `retrieval` 只保存向量文档索引，不复制完整向量文本
-
-推荐 MySQL-backed Store 表：
+建议客户档案主视图按以下顺序呈现：
 
 ```text
-agent_memory_entries
+客户当前情况
+当前业务旅程
+重要变化
 ```
 
-核心字段：
+第一屏只解决“现在是什么情况”。
+
+不要在第一屏堆放：
+
+- 全部企业背景字段；
+- 全量联系人；
+- 全部商机；
+- 所有历史跟进；
+- 所有任务和承诺；
+- 技术执行过程。
+
+### 5.2.1 页面排版约束
+
+为了让档案像“销售可读的客户记录”，而不是内容整理报告，主视图遵循以下排版约束：
+
+- 每个段落先有一句可独立理解的结论，再展示不超过 3～5 条支撑信息；
+- 重要变化用时间线或变化条目承载，不把每一条跟进记录都做成同等权重的卡片；
+- 当前情况与当前旅程只各自承担一个问题，不能重复描述同一批内容；
+- 第一屏不出现“AI 生成”“模型判断”“置信度 0.xx”等技术文案；
+- 证据以轻量引用标记出现，原文、完整时间线和运行细节通过下钻查看；
+- 没有足够信息时保留清晰的空态或“尚未确认”，不使用大量空字段占位；
+- 默认只展开当前有效内容，历史变化和完整跟进过程按需展开；
+- 视觉层级应体现“当前情况 > 当前旅程 > 重要变化 > 长期背景 > 完整过程”，不能把所有模块做成平铺的同级信息卡。
+
+### 5.3 第二层结构
+
+继续向下阅读时呈现：
 
 ```text
-id
-tenant_id
-namespace
-key
-value_json
-version
-created_at
-updated_at
-expires_at
-```
-
-其中 `namespace` 保存 LangGraph Store namespace，`key` 保存记忆键，`value_json` 保存 JSON 可序列化的长期记忆内容。
-
-## 4. 实现后的 Agent 架构
-
-Agent 需要新增一个客户智能子图：
-
-```text
-Agent Root Graph
-  ├─ 意图识别
-  ├─ 业务对象解析
-  ├─ 客户智能子图 Customer Intelligence Graph
-  ├─ 商机子图
-  ├─ 合同子图
-  ├─ 回款子图
-  ├─ 跟进记录子图
-  └─ Workflow 用户确认 / 中断恢复（不属于客户事实沉淀）
-```
-
-客户智能子图负责客户档案相关的一切更新和问答支撑。
-
-核心流程：
-
-```text
-触发事件进入
-  ↓
-识别客户与业务对象
-  ↓
-加载结构化业务上下文
-  ↓
-向量检索历史语义证据
-  ↓
-LLM 抽取客户事实
-  ↓
-确定性事实门禁
-  ├─ 高置信 + 有证据 + 无冲突 → 自动沉淀
-  └─ 低置信 / 缺证据 / 有冲突 → 静默忽略
-  ↓
-刷新客户档案 / 客户概况
-  ↓
-只输出真实写入结果和执行轨迹
-```
-
-客户事实沉淀是后台增强链路，不向用户创建确认卡，也不输出“候选事实”“需要确认”或“未达到沉淀标准”等提示。
-
-### 4.1 Graph 状态模型
-
-客户智能子图的状态应拆成三类 schema。
-
-```text
-InputState
-  trigger_event
-  user_message
-  customer_hint
-  source_object_hint
-
-InternalState
-  runtime_context
-  customer_context
-  business_context
-  retrieved_memories
-  extracted_facts
-  fact_conflicts
-  confidence_report
-  refresh_plan
-  fact_assessments
-  applied_updates
-  execution_steps
-  errors
-
-OutputState
-  user_summary
-  updated_sections
-  evidence_refs
-  next_action
-  visible_trace
+客户长期情况
+跟进过程
+已记录后续事项
 ```
 
 其中：
 
-- `trigger_event` 是业务事件入口
-- `retrieved_memories` 来自 LangGraph store 和向量检索
-- `extracted_facts` 是 LLM 结构化抽取结果
-- `refresh_plan` 是图根据事实、置信度、业务规则生成的更新计划
-- `fact_assessments` 是确定性门禁对每条候选事实给出的 `upsert` / `ignore` 结果
-- `visible_trace` 是给 Web / IM 展示的中文执行过程
+- 长期情况用于建立稳定认知；
+- 跟进过程用于理解客户关系和业务推进过程；
+- 已记录后续事项用于回看已经写入记录的事项状态。
 
-状态更新规则：
+### 5.4 下钻结构
 
-- `execution_steps`、`extracted_facts`、`errors` 使用追加 reducer
-- `customer_context`、`business_context` 使用覆盖更新
-- `refresh_plan`、`confidence_report` 使用单次决策覆盖
-- `messages` 如需要保留对话上下文，使用消息专用 reducer
-
-## 5. 业务触发架构
-
-统一定义 `CustomerIntelligenceEvent`，所有客户相关业务事件都进入客户智能图处理。
-
-触发来源包括：
-
-- 客户创建
-- 线索转客户
-- 新增跟进记录
-- 修改跟进记录
-- 创建商机
-- 修改商机
-- 商机阶段推进
-- 商机赢单
-- 商机输单
-- 合同创建
-- 合同审批通过
-- 合同签署
-- 回款计划创建
-- 回款到账
-- 回款逾期
-- 新增联系人
-- 修改联系人角色
-- 业务流程节点完成
-- 用户手动刷新客户档案
-- Agent 对话中识别到客户关键信息
-
-业务模块不直接各自更新客户档案，而是统一发事件，由客户智能图判断如何更新。
-
-## 6. 技术架构
-
-整体技术链路：
+完整数据通过下钻获取：
 
 ```text
-业务系统
-  ↓
-Domain Event / Business Flow Event
-  ↓
-Customer Intelligence Event Bus
-  ↓
-Customer Intelligence LangGraph
-  ↓
-结构化数据查询
-  ↓
-向量检索
-  ↓
-LLM 结构化抽取
-  ↓
-客户事实库
-  ↓
-客户档案 / 客户概况 / Agent Memory
+客户档案摘要
+  → 业务旅程详情
+  → 旅程完整时间线
+  → 跟进原文
+  → 任务/承诺详情
+  → 商机/合同/回款详情
 ```
 
-运行时数据边界：
+档案正文不复制业务模块全部内容。
+
+### 5.5 文案原则
+
+#### 先结论，后依据
+
+推荐：
+
+> 当前客户主要围绕线上服务器使用方式推进方案确认，具体采购时间尚未明确。依据为 8 月 20 日和 8 月 26 日的跟进记录。
+
+不推荐：
+
+> 8 月 20 日进行了跟进，8 月 26 日进行了跟进，客户提出了一些使用需求，目前有一些采购相关内容。
+
+#### 使用过程性表达
+
+推荐：
+
+> 客户最初关注使用规模，后续进一步明确了线上服务器部署需求，目前销售已记录补充部署方案的事项。
+
+不推荐：
+
+> 客户需要服务器，销售需要继续跟进。
+
+#### 明确事实边界
+
+推荐：
+
+> 目前记录显示客户倾向线上部署，最终部署方式尚未确认。
+
+不推荐：
+
+> 客户已经确定采用线上部署。
+
+#### 不做无依据评价
+
+关系、态度和人情内容是销售判断的重要背景，但档案只记录“业务记录明确出现过的表达”，不把模型推断写成结论。例如可以记录“跟进记录中客户表示需要内部讨论”，不能写成“客户关系一般”“对接人认可度较高”。
+
+不生成：
+
+- 客户意向很高；
+- 客户关系良好；
+- 客户比较难搞；
+- 客户大概率会成交；
+- 建议重点维护某位联系人。
+
+除非这些内容有明确业务记录，并且属于可追溯的事实表达。
+
+### 5.6 空态和异常态
+
+必须区分以下状态：
+
+| 状态 | 页面表达 |
+|---|---|
+| 没有任何输入 | 暂无足够业务记录形成客户档案 |
+| 有业务数据但暂无稳定结论 | 已有业务记录，正在整理客户情况 |
+| 正在更新 | 正在根据最新业务记录更新，当前显示上一版本 |
+| 更新失败 | 本次更新未完成，当前显示上一版本 |
+| 部分更新 | 部分内容已更新，其余内容沿用上一版本 |
+| 档案过期 | 有新的业务记录尚未反映 |
+| 证据不足 | 暂未确认，不补写结论 |
+| 数据冲突 | 当前存在不同记录，以原始记录为准 |
+
+异常状态不能用“暂无客户信息”掩盖已有数据，也不能把 AI 失败呈现为业务失败。
+
+### 5.7 档案更新时间
+
+页面至少展示：
 
 ```text
-业务数据库
-  保存客户、商机、合同、回款、业务流程等确定状态
-
-LangGraph Checkpointer
-  保存一次图执行的 thread state、节点进度、失败恢复位置和重试状态
-
-LangGraph Store
-  保存跨会话可复用的客户长期记忆索引、阶段性摘要和偏好
-  推荐使用 MySQL-backed Store，不额外引入新的 Store 数据库
-
-Qdrant
-  保存跟进、流程、摘要、证据文本的 embedding，用于语义召回
-
-审计表
-  保存客户智能事件、执行 run、事实门禁摘要和最终写入结果
+档案更新时间
+本次纳入的最新业务记录时间
+当前档案版本
+档案是否落后于最新业务数据
 ```
 
-关键边界：
+不要只展示模型生成时间，因为生成时间不等于数据覆盖时间。
 
-- Checkpoint 不是业务数据表，不作为客户档案最终展示来源
-- Store 不是强业务事实来源，只保存 Agent 长期记忆和检索索引
-- 向量库不是业务状态来源，只负责语义召回
-- 客户档案页面优先展示业务库和客户事实库中的稳定结果
-- Agent 回答时可以结合结构化事实、store 摘要和向量证据
+### 5.8 前端阅读验收量化标准
 
-建议新增模块：
+以下是 P0 的默认验收基线，具体数值可以通过可用性测试调整，但不能取消“首屏结论、低密度、按需下钻”的原则：
+
+- 首屏默认展示 3 个主段落：当前情况、当前业务旅程、重要变化；
+- 当前情况默认 1 个主结论，最多 3 条支撑点；主结论建议不超过 120 个汉字；
+- 每个进行中旅程默认展示 1 条摘要、当前阶段和最多 3 个关键里程碑；
+- 重要变化默认展示最近 3 条，按“改变理解的程度 + 时间”排序；
+- 已记录后续事项默认只展示未完成事项和最近完成事项，首屏不超过 5 条；
+- 跟进过程默认按主题/时间聚合，首屏不逐条展开原始跟进；
+- 每段内容最多保留一个主标题和一个辅助状态，不使用连续的同级小标题；
+- 所有长文本、完整引用和历史版本默认折叠；用户一次点击可以下钻到原始业务对象；
+- “尚未确认”必须是短句空态，不用空字段、`暂无` 列表或模型技术信息填充版面。
+
+可用性验收至少验证：销售能否在 30 秒内说出当前情况、当前旅程和最近一次重要变化；能否在 2 次点击内打开支撑当前结论的原始记录。
+
+---
+
+## 6. 业务事件闭环
+
+### 6.1 统一事件链路
+
+所有影响客户理解的业务动作，都进入统一客户智能事件：
 
 ```text
-app/services/agent/customer_intelligence_graph.py
-app/services/agent/customer_memory_state.py
-app/services/customer_intelligence_event_service.py
-app/services/customer_fact_service.py
-app/services/customer_vector_memory_service.py
-app/services/customer_profile_refresh_service.py
-app/services/customer_intelligence_trace_service.py
-app/services/customer_qdrant_index_service.py
-app/services/customer_memory_store_service.py
+业务事务提交
+  ↓
+CustomerIntelligenceEvent
+  ↓
+CustomerIntelligenceEventPublicationService
+  （事务内 durable 登记 / 提交后登记 / 低延迟唤醒 / 失败隔离）
+  ↓
+CustomerIntelligenceRun
+  ↓
+确定性状态投影
+  ↓
+事实提炼与合并
+  ↓
+档案段落刷新
+  ↓
+校验并发布档案版本
+  ↓
+更新证据和运行审计
 ```
 
-建议新增 Agent runtime 支撑模块：
+业务模块不直接调用 LLM，也不各自维护一套档案刷新逻辑。
+
+### 6.2 事件契约与一致性要求
+
+客户智能事件不是业务对象本身，而是业务对象提交成功后发送给客户智能运行时的“变化通知”。每个事件至少包含：
+
+```json
+{
+  "event_key": "幂等键",
+  "trigger_type": "customer_activity_created",
+  "tenant_id": 1,
+  "team_id": 1,
+  "customer_id": 1,
+  "occurred_at": "2026-08-28T10:30:00+08:00",
+  "source": {
+    "source_type": "customer_activity",
+    "source_object_id": "act_xxx",
+    "business_object_type": "deal_journey",
+    "business_object_id": "journey_xxx"
+  },
+  "payload": {},
+  "actor_id": ""
+}
+```
+
+要求：
+
+- 业务对象写入和事件入队应通过事务内 durable 登记，或现有 post-commit durable job + recovery 等价机制关联；不能只依赖进程内 `asyncio.create_task`；
+- 业务模块只能构造事实事件并调用 `CustomerIntelligenceEventPublicationService`，不得自行决定 durable request、trigger type、post-commit kick 或失败补偿策略；
+- 事务内登记与提交后登记必须是两个明确 seam：前者使用 savepoint 保护源事务，后者使用独立会话并在提交后唤醒；
+- 事件投递至少一次，消费端必须幂等；
+- 事件入队失败不能回滚用户已经成功提交的业务事务，但必须进入可恢复补偿；
+- 事件处理失败不能阻断客户活动、任务、商机等主业务写入；
+- 删除、修改等事件必须携带变更前后版本或可重新读取的来源版本，避免旧内容继续作为有效事实；
+- 事件只表达“发生了变化”，不在事件中直接写入未经校验的最终档案正文。
+
+### 6.3 事件类型与落地状态
+
+事件类型分为三组，避免把“当前代码已有”和“目标需要新增”混在同一列表中。
+
+#### A. 当前事件服务已支持或已有调用路径
 
 ```text
-app/services/agent/customer_intelligence_state.py
-app/services/agent/customer_intelligence_nodes.py
-app/services/agent/customer_intelligence_edges.py
-app/services/agent/customer_intelligence_store.py
-app/services/agent/customer_intelligence_stream.py
+customer_created
+customer_converted_from_lead
+customer_activity_created
+customer_activity_updated
+customer_activity_deleted
+customer_contact_created
+customer_contact_updated
+customer_contact_deleted
+customer_business_object_created
+customer_business_object_updated
+customer_business_object_deleted
+deal_journey_event_recorded
+manual_refresh_requested
+customer_intelligence_batch_rebuild_requested
+customer_intelligence_historical_backfill_requested
+agent_customer_question
 ```
 
-模块职责：
+历史档案生成事件不属于新版事件契约；档案刷新只接受业务事实变化事件、人工刷新事件和重建事件。历史事件不得转换为新版请求。
 
-- `customer_intelligence_state.py`
-  - 定义 InputState、InternalState、OutputState、reducer 和 runtime context
-- `customer_intelligence_nodes.py`
-  - 实现图节点，节点只返回状态更新或 Command
-- `customer_intelligence_edges.py`
-  - 实现条件分支和路由规则
-- `customer_intelligence_store.py`
-  - 封装 LangGraph store 的 namespace、读写和召回
-- `customer_intelligence_stream.py`
-  - 将 graph updates/subgraphs/messages 转成用户可读执行过程
-- `customer_qdrant_index_service.py`
-  - 封装 Qdrant collection、payload、upsert、delete、filter search
-- `customer_memory_store_service.py`
-  - 实现 LangGraph Store 的 MySQL-backed 读写适配
-
-建议新增数据表：
+#### B. 目标需要补齐的业务事件
 
 ```text
-customer_facts
-customer_fact_sources
-customer_profile_snapshots
-customer_intelligence_events
-customer_vector_documents
-customer_intelligence_runs
-agent_memory_entries
+follow_up_task_created
+follow_up_task_updated
+follow_up_task_completed
+follow_up_task_cancelled
+follow_up_task_postponed
+follow_up_task_reopened
+sales_commitment_created
+sales_commitment_updated
+sales_commitment_fulfilled
+sales_commitment_cancelled
+sales_commitment_superseded
+deal_journey_association_changed
+customer_profile_correction_recorded
 ```
 
-表职责：
+当前代码中的任务投影触发器或任务事件表，不能自动视为客户智能事件已经闭环；必须通过统一 post-commit 事件入口接入，并有可恢复补偿。
 
-- `customer_facts`
-  - 保存结构化客户事实
-- `customer_fact_sources`
-  - 绑定事实来源证据
-- `customer_profile_snapshots`
-  - 保存每次档案生成后的快照
-- `customer_intelligence_events`
-  - 保存触发事件
-- `customer_vector_documents`
-  - 保存向量化内容索引元数据
-- `customer_intelligence_runs`
-  - 保存客户智能图执行记录
-- `agent_memory_entries`
-  - 保存 LangGraph Store 长期记忆内容
+#### C. 事实生命周期事件
 
-## 7. LangGraph 使用方式
+```text
+customer_fact_superseded
+customer_fact_invalidated
+customer_fact_reactivated
+customer_fact_conflict_recorded
+```
 
-客户智能流程需要充分使用 LangGraph 的核心能力。
+这组事件用于事实层变化，不要求每次都重新调用 LLM，但必须触发受影响档案段落的负向重算或局部重投影。
 
-### 7.1 StateGraph
+所有事件必须具备：
 
-当前主干：
+- 稳定 `event_key`，同一来源版本重复投递不重复产生事实、事项或档案发布；
+- `source_type + source_id + source_version`，修改和删除能够定位旧内容；
+- `customer_id`、可选 `deal_journey_id`、`occurred_at`、`actor_id`；
+- 事件产生前后的必要摘要或可重新读取的来源版本；
+- 事件类型、payload schema 和 graph version 可审计。
+
+### 6.4 确定性投影与 Agent 归纳的分工
+
+#### 确定性投影负责
+
+- 任务状态；
+- 销售承诺状态；
+- 商机当前阶段；
+- 业务旅程状态；
+- 合同状态；
+- 回款状态；
+- 时间、排序、过滤和归属；
+- 数据水位；
+- 档案版本发布；
+- 证据来源绑定。
+
+#### Agent 负责
+
+- 从跟进原文中提炼候选事实；
+- 合并同一需求的多次表达；
+- 归纳需求背景；
+- 识别前后变化的自然语言表达；
+- 总结一段时间内的跟进过程；
+- 判断是否存在足够证据支持某个叙事结论。
+
+#### Agent 不负责
+
+- 自由修改商机、合同、回款和任务状态；
+- 自由选择客户、旅程或商机 ID；
+- 把任务完成解释成客户认可；
+- 把销售承诺履行解释成需求解决；
+- 生成并写入销售行动建议。
+
+---
+
+## 7. 跟进、任务与销售承诺闭环
+
+### 7.1 新增或修改跟进记录
+
+```text
+新增/修改跟进
+  ↓
+保存原始记录和结构化字段
+  ↓
+写入客户活动证据
+  ↓
+产生客户智能事件
+  ↓
+提炼需求、态度、阶段、风险、承诺候选
+  ↓
+确定性门禁
+  ↓
+更新事实、跟进过程和相关档案段落
+```
+
+修改跟进记录时，应按活动版本处理：
+
+- 新版本生效；
+- 旧版本不再作为当前事实依据；
+- 由旧版本产生的待确认事项需要取消或标记为被替代；
+- 事实来源和档案变化都保留审计记录。
+
+### 7.2 任务、承诺与档案事项的对应关系
+
+三类对象必须明确区分：
+
+| 对象 | 代表什么 | 是否可直接显示在档案 | 状态来源 |
+|---|---|---|---|
+| 客户活动 | 发生过的一次沟通或业务记录 | 作为跟进过程和证据 | 客户活动记录 |
+| 销售承诺 | 销售明确表示要完成的事项 | 作为“销售已承诺”事项 | 承诺生命周期 |
+| 跟进任务 | 对承诺或后续事项的可执行拆分 | 作为“已记录后续事项” | 任务生命周期 |
+
+一个档案事项必须带有稳定的 `source_type + source_id`，并可选关联 `commitment_id`、`task_id`、`deal_journey_id`。多个任务对应一个承诺时，档案显示承诺整体状态，同时允许下钻查看任务完成情况。
+
+任务和承诺当前若只有 `customer_id` 而没有旅程归属，目标模型应允许新增 nullable `deal_journey_id`（必要时同步保留 `opportunity_id`），并保留“未归属旅程”状态。迁移时优先从 `source_activity_id` 回填，无法确定的记录不强行归属。
+
+统一归属优先级为：
+
+```text
+显式 deal_journey_id
+→ source_activity.deal_journey_id
+→ source 对象可唯一确定的 deal_journey_id
+→ 未归属旅程
+```
+
+禁止使用文本相似度、最近旅程或 LLM 自由选择作为最终归属；候选匹配只能作为内部待确认信息。没有旅程归属的任务或承诺统一展示为“客户级已记录事项”，后续补齐归属后再重投影。旅程归属变化必须留下前后值和操作者，并触发 `deal_journey_association_changed`。
+
+### 7.3 任务完成
+
+任务完成后的标准闭环：
+
+```text
+FollowUpTask.status = COMPLETED
+  ↓
+写入 FollowUpTaskEvent
+  ↓
+产生 follow_up_task_completed
+  ↓
+将档案中的对应已记录事项改为已完成
+  ↓
+沉淀一条销售跟进过程事件
+  ↓
+根据完整履行规则更新销售承诺
+  ↓
+触发轻量档案刷新
+```
+
+任务完成只能说明销售完成了这件事，不能自动说明：
+
+- 客户已经认可；
+- 需求已经解决；
+- 商机阶段已经推进；
+- 客户已经决定采购；
+- 关系已经改善。
+
+任务完成产生的是“销售事项履行记录”，不是新的客户活动，也不是客户事实。它可以进入“跟进过程”作为内部过程节点，例如“销售已完成补充部署方案”，但不能改写成“客户已接受部署方案”。只有真实发生的客户沟通、客户反馈或业务对象状态变化，才能通过对应来源事件进入客户活动、事实或旅程状态。
+
+如果任务完成后有新的客户反馈，应通过新的跟进记录或客户活动事件提炼事实，不从任务状态本身推断客户结果。
+
+### 7.4 任务延期、取消和重开
+
+| 任务事件 | 档案处理 |
+|---|---|
+| 创建 | 增加已记录后续事项，状态为待完成 |
+| 修改时间 | 更新事项计划时间，保留变更记录 |
+| 完成 | 标记为已完成，沉淀销售跟进过程 |
+| 取消 | 标记为已取消，不删除历史事项 |
+| 延期 | 更新计划时间，保留原计划和新计划 |
+| 重开 | 恢复为待完成，保留重开原因和时间 |
+| 被替代 | 原事项标记为已被替代，并关联新事项 |
+
+### 7.5 销售承诺
+
+销售承诺是销售在跟进过程中明确表达的事项，不等同于客户需求，也不等同于客户下一步安排。
+
+建议在档案中分开表达：
+
+```text
+销售已承诺：销售将补充部署方案
+客户已表达：客户计划内部确认使用规模
+```
+
+一个承诺拆分成多个任务时，单个任务完成不能直接关闭承诺，只有满足完整履行规则后才更新为 `FULFILLED`。
+
+---
+
+## 8. 业务旅程与客户档案的关系
+
+### 8.1 业务旅程是交易主线
+
+业务旅程负责串起：
+
+```text
+商机创建
+→ 商机审批
+→ 阶段变化
+→ 需求/方案沟通
+→ 合同
+→ 回款
+→ 赢单/输单/结束
+```
+
+客户档案引用业务旅程，但不复制业务旅程全部流水。
+
+### 8.2 当前主旅程选择
+
+当前 `infer_for_customer` 在存在多个开放旅程时无法给出唯一结果，这只能作为“单一旅程时的兜底”，不能作为新版档案的主选择逻辑。需要定义明确的主旅程选择规则：
+
+1. 人工指定的当前主旅程优先；
+2. 没有人工指定时，优先选择仍开放且最近有关键事件的旅程；
+3. 如果多个旅程都在推进，按照列表并列展示，不静默隐藏；
+4. 已赢单、已输单、已完成旅程进入历史旅程；
+5. 没有旅程的活动保留在客户级跟进过程，不强行归属；
+6. 活动和事实一旦明确归属于某旅程，后续档案叙事优先在该旅程范围内使用；
+7. 需要一个可审计的人工主旅程字段或客户级偏好记录，记录设置人和设置时间；
+8. 自动排序至少返回“开放状态、最近关键事件、创建时间”等排序依据，不能只返回一个黑盒结果。
+
+主旅程选择规则必须由代码完成，不能交给 LLM 自由决定。
+
+### 8.3 旅程事件筛选
+
+不是所有旅程事件都进入客户档案正文。
+
+应分为：
+
+```text
+关键事件：进入当前旅程和重要变化
+普通事件：保留在旅程时间线
+技术同步事件：只进入审计，不进入销售阅读内容
+```
+
+建议进入档案正文的关键事件包括：
+
+- 商机创建和立项；
+- 商机阶段变化；
+- 客户明确提出或改变需求；
+- 预算、采购方式、招标等关键变化；
+- 合同签署；
+- 重要回款节点；
+- 赢单、输单或旅程结束；
+- 与客户形成明确共识的跟进过程。
+
+### 8.4 旅程与事实归属
+
+事实写入时必须携带：
+
+```text
+business_object_type
+business_object_id
+deal_journey_id
+scope_type
+scope_id
+```
+
+如果无法确定旅程归属：
+
+- 可以先作为客户级候选证据保留；
+- 不得直接写入某个旅程的确定性结论；
+- 等后续业务对象明确后再归属；
+- 页面使用“尚未归属具体业务旅程”等表达。
+
+---
+
+### 8.5 状态真相矩阵
+
+| 页面内容 | 唯一真相来源 | 档案能否改写 | 档案负责的工作 |
+|---|---|---:|---|
+| 客户名称、负责人、客户状态 | 客户主数据 | 否 | 组织展示和引用 |
+| 商机阶段、金额、赢单/输单 | 商机及其状态变更 | 否 | 按旅程范围呈现 |
+| 合同、回款、发票状态 | 对应业务对象 | 否 | 提取影响客户理解的关键节点 |
+| 旅程状态和旅程事件 | `CustomerDealJourney` / `CustomerDealJourneyEvent` | 否 | 串联交易过程、提供时间线入口 |
+| 任务和承诺状态 | `FollowUpTask` / `SalesCommitment` 及事件表 | 否 | 显示已记录事项及履行过程 |
+| 需求、偏好、风险等语义事实 | `CustomerFact` + 来源 + 修订 | 否 | 归纳有效事实并展示证据 |
+| 当前情况、跟进过程、重要变化 | 档案投影版本 | 仅生成新投影 | 组织成销售可读叙事 |
+
+如果某个页面结论无法在矩阵中找到唯一真相来源，必须先补充来源或将该结论降级为“尚未确认”，不得依靠模型自行补齐。
+
+---
+
+## 9. Agent 与系统架构
+
+### 9.1 架构边界
+
+```text
+业务 API / CRUD
+  负责权限、校验、业务状态和事务
+
+Customer Intelligence Event
+  负责统一表达业务变化
+
+Customer Intelligence Graph
+  负责加载上下文、语义提炼、事实门禁和档案刷新编排
+
+Customer Profile Projection Service
+  负责档案结构化投影、校验、版本和发布
+
+前端档案页面
+  只读取已发布投影和可访问证据
+```
+
+Agent tool 不直接访问业务 model、table 或 CRUD；写入业务对象必须经过现有 CRM API 和 HITL 规则。
+
+### 9.1.1 运行时唯一 Projection 链路
+
+客户档案只允许存在一条从业务事件到当前版本的运行时链路：
+
+```text
+业务模块完成源数据事务
+  ↓
+构造 CustomerIntelligenceEvent
+  ↓
+CustomerIntelligenceEventPublicationService
+  ↓
+CustomerIntelligenceRefreshService 统一登记、合并、调度与恢复
+  ↓
+CustomerProfileProjectionWorkflow
+  ↓
+CustomerProfileProjectionGraphService
+  ↓
+CustomerProfileProjectionService.publish()
+  ↓
+Projection Version / Current
+  ↓
+Profile API / 前端读取
+```
+
+职责边界固定如下：
+
+- `CustomerProfileProjectionGraphService` 是唯一档案 Graph Owner，负责上下文编排、事实候选提炼、叙事草稿和投影校验输入；不直接发布版本。
+- `CustomerProfileProjectionService.publish()` 是唯一档案发布入口，负责 schema、证据、水位、版本和 current CAS；任何其他 Graph、Service 或 API 都不得写入 Projection Version / Current。
+- `CustomerIntelligenceEventPublicationService` 负责事件发布边界及事务/post-commit 生命周期；不构造业务对象状态，不生成档案正文。
+- `CustomerIntelligenceRefreshService` 负责运行登记、合并、租约、重试、恢复和 Workflow 调度；不重复构造业务事件，不直接调用 LLM，不直接发布档案。
+- 历史 `CustomerIntelligenceGraph` 不参与客户档案投影、校验或发布；档案调用方只能进入上述新版 Workflow。
+
+档案质量诊断属于运行审计信息，不属于档案正文：质量 warning 可以让版本以 `PUBLISHED_WITH_WARNINGS` 发布，硬约束错误才拒绝发布。
+
+### 9.2 建议的客户智能图
 
 ```text
 START
@@ -542,892 +1304,793 @@ normalize_event
   ↓
 load_customer_context
   ↓
-retrieve_memory
+load_deal_journeys
   ↓
-plan_refresh
+load_follow_up_tasks_and_commitments
   ↓
-extract_facts
+retrieve_evidence_and_memory
+  ↓
+plan_refresh_scope
+  ↓
+extract_fact_candidates
   ↓
 assess_fact_candidates
-  ├─ action=upsert → persist_facts
-  └─ action=ignore → 不写入、不提示
+  ├─ upsert → persist_facts
+  └─ ignore → continue_without_fact_write
   ↓
-refresh_profile / refresh_brief / write_memory
+project_deterministic_states
   ↓
-emit_trace
+compose_profile_sections
+  ↓
+validate_profile_projection
+  ↓
+publish_profile_version
+  ↓
+write_memory_and_trace
   ↓
 END
 ```
 
-`assess_fact_candidates` 必须是确定性节点，统一执行以下门禁：
+### 9.3 Graph State
 
-- 置信度达到自动沉淀阈值；
-- 候选事实带有可引用的 evidence quote；
-- 与既有有效事实不冲突；
-- 候选内容非空且事实类型合法。
-
-任一条件不满足时返回 `ignore`。忽略结果可留在内部运行审计中用于评估，但不得投影为用户消息或 Agent UI interaction。
-
-### 7.2 Conditional Edge
-
-根据不同场景走不同分支：
-
-- 只写长期记忆；
-- 刷新销售概况；
-- 刷新基础档案；
-- 自动沉淀符合门禁的客户事实；
-- 静默忽略不符合门禁的候选事实；
-- 跳过低价值事件；
-- 延迟批量更新或全量重建。
-
-条件分支需要结合事件类型、业务对象是否明确、证据是否充分、是否存在事实冲突、更新范围和置信度。客户事实分支不进入人工确认。
-
-### 7.2.1 Command 路由
-
-客户智能图里的动态决策优先使用 `Command` 表达，但只用于图内状态更新与节点跳转，不用于客户事实人工复核。
-
-典型路由：
+Graph state 至少包含：
 
 ```text
-assess_fact_candidates
-  ├─ Command(update=fact_assessments, goto=persist_facts)
-  └─ Command(update=fact_assessments, goto=continue_without_fact_write)
-```
-
-约束：
-
-- 同一个节点的分支意图只保留一种表达方式；
-- `goto` 目标必须是白名单节点，不能由 LLM 自由生成；
-- `update` 必须符合 typed state schema；
-- LLM 只产生候选事实，不能决定绕过门禁；
-- 不为被忽略候选创建 review case、interrupt 或 interaction。
-
-### 7.3 Checkpoint
-
-客户智能图需要支持可恢复执行。
-
-典型场景：
-
-- LLM 抽取完成，但写入失败
-- 已经检索完上下文，但摘要生成失败
-
-checkpoint 设计：
-
-- Web 对话使用 `thread_id = agent_session_id`
-- IM 对话使用 `thread_id = im_channel + im_user_id + conversation_id`
-- 后台业务事件使用 `thread_id = customer_intelligence_event_id`
-- 同一客户的异步刷新使用 `customer_id + refresh_batch_id`
-- 子图默认继承父图 checkpointer
-- 需要跨多轮保持状态的客户智能子图才启用 per-thread subgraph checkpoint
-- 纯函数式分析子图使用 per-invocation checkpoint，避免同一子图多次调用产生状态污染
-
-### 7.4 客户事实自动沉淀门禁
-
-客户智能图不使用 `interrupt()` 处理客户事实。正式策略只有两种结果：
-
-1. **自动沉淀**：置信度不低于当前自动阈值（实现基线为 `0.88`）、证据引用完整、内容非空，且与既有有效事实无冲突；
-2. **静默忽略**：低置信、缺少 evidence quote、内容为空、候选主动标记 ignore，或与既有事实冲突。
-
-用户体验约束：
-
-- 不创建客户事实确认卡；
-- 不显示“1 条客户事实需要确认后再沉淀”；
-- 不显示被忽略候选的数量、原因或内部状态；
-- 只有真实写入事实时，才允许在结果中展示已沉淀内容；
-- 客户事实失败或忽略不得阻断跟进记录创建、历史任务对账等主业务流程。
-
-LangGraph 的 interrupt/resume 仍可用于历史跟进任务确认等真正需要用户决策的 Workflow，但不属于客户事实沉淀链路。
-
-### 7.5 Subgraph
-
-客户智能子图需要被多个业务流程复用：
-
-- 跟进记录子图
-- 商机子图
-- 合同子图
-- 回款子图
-- IM Agent
-- Web Agent
-
-子图拆分：
-
-```text
-customer_context_subgraph
-  读取客户、联系人、商机、合同、回款、流程事件
-
-customer_memory_retrieval_subgraph
-  读取 LangGraph store 和向量库证据
-
-customer_fact_extraction_subgraph
-  LLM 结构化抽取事实
-
-customer_fact_resolution_subgraph
-  合并、去重、冲突判断、置信度评估
-
-customer_profile_refresh_subgraph
-  局部刷新或全量重建客户档案
-
-```
-
-这几个子图后续也可以被商机推进、合同风险、回款预测等能力复用。
-
-### 7.6 Tool Calling
-
-LLM 不能直接改数据库。
-
-它只能通过受控工具：
-
-- 查询客户上下文
-- 查询业务对象
-- 写入客户事实
-- 刷新客户档案
-- 创建更新事件
-- 输出执行轨迹
-
-工具设计原则：
-
-- 工具入参必须是业务语义字段，不要求用户提供内部 ID
-- 候选对象解析由 resource resolution / customer intelligence 子图完成
-- 写工具必须带幂等键
-- 写工具必须返回业务结果和用户可读摘要
-- 工具错误要写入 state 的 `errors`，由图决定重试、降级或结束本次增强链路
-- 所有工具调用都要进入审计记录和 execution trace
-
-### 7.7 Execution Trace
-
-每次客户智能更新都要输出用户能看懂的执行过程：
-
-```text
-读取客户上下文
-分析跟进内容
-识别采购进展
-更新客户知识
-刷新客户概况
-```
-
-不要暴露技术名，比如 `create_customer_activity`、`customer_intelligence_graph`。
-
-执行过程需要使用 graph streaming 实时输出，而不是流程结束后一次性拼接。
-
-Web / IM 端消费规则：
-
-- 使用 `updates` 展示节点级进度
-- 使用 `messages` 展示 LLM 生成内容
-- 使用 `subgraphs=True` 保留子图内关键步骤
-- 只投影白名单步骤，屏蔽内部技术节点
-
-推荐中文步骤映射：
-
-```text
-normalize_trigger -> 理解触发来源
-load_context -> 读取客户上下文
-retrieve_memory -> 检索客户历史信息
-extract_facts -> 分析客户关键信息
-merge_facts -> 合并客户知识
-score_confidence -> 评估更新可信度
-plan_refresh -> 制定档案更新计划
-persist_results -> 保存客户档案更新
-emit_trace -> 整理执行结果
-```
-
-事件流实现要求：
-
-- 新前台入口优先消费 `stream_events`
-- 需要展示 LLM 生成过程时消费 message 事件
-- 需要展示图状态变化时消费 update / value 事件
-- 需要展示子图过程时开启 subgraph 事件
-- 客户事实门禁的 ignore 结果不得投影为卡片或提示
-- 后台任务不需要实时展示，但必须记录同等粒度的 trace 供诊断
-
-用户侧只展示业务动作，不展示：
-
-- Python 模块名
-- graph 节点名
-- tool 名
-- 数据表名
-- 内部 ID
-- LLM 原始 JSON
-- checkpoint / thread / namespace 等运行时术语
-
-### 7.8 Runtime Context
-
-图调用必须传入 runtime context，用于隔离租户、权限、入口和版本。
-
-```text
-tenant_id
-user_id
-channel
-agent_session_id
-conversation_id
-permissions
-locale
-timezone
-graph_version
-request_id
-```
-
-节点通过 runtime context 获取调用身份、权限、store 和 stream writer。不要把这些运行时信息混入 LLM prompt 或业务字段。
-
-### 7.9 Durable Execution 与重放
-
-客户智能更新包含 LLM、检索、数据库写入和前端流式展示，必须按可重放方式设计。
-
-要求：
-
-- 每个外部副作用都有幂等键
-- 每个写入节点能识别重复执行
-- checkpoint 失败时显式返回降级状态
-- 失败重试从最近成功 checkpoint 继续
-- 后台事件失败可重新排队
-- 运维可根据 thread_id 查看当时 state、候选、判断和错误
-
-生产持久化要求：
-
-- 本地开发可以使用内存 checkpointer
-- 测试环境使用可清理的数据库 checkpointer
-- 生产环境必须使用数据库持久化 checkpointer
-- 生产环境 Store 必须是数据库持久化或等价可靠存储
-- graph version 升级需要保留兼容读取策略
-- 重放时不能重复创建客户事实、快照、事件和向量文档
-
-### 7.10 Observability 与评估
-
-客户智能档案是长期演进能力，不能只靠线上用户反馈判断好坏。
-
-每次运行需要记录：
-
-- graph name
-- graph version
-- thread id
-- tenant id
-- user id
-- channel
-- trigger event
-- input state 摘要
-- 每个节点的开始、结束、耗时和错误
-- LLM structured output
-- tool call 入参摘要和返回摘要
-- 事实门禁结果摘要
-- 最终写入结果
-- 用户可见 trace
-
-评估样本需要覆盖：
-
-- 新增跟进后轻量更新
-- 商机阶段变化后局部刷新
-- 合同创建后合作状态刷新
-- 回款逾期后风险刷新
-- 多事实冲突时静默忽略冲突候选且不覆盖既有事实
-- 低置信度时不自动覆盖
-- 后台事件失败后可重试且不重复写入
-
-指标：
-
-- 自动更新准确率
-- 高置信事实自动沉淀准确率
-- 低置信度误写率
-- 档案更新延迟
-- 重试成功率
-- 重复写入率
-- 用户可见 trace 完整率
-- IM / Web 恢复成功率
-
-这些观测数据用于调 prompt、调阈值、调检索、调子图，而不是把问题分散修在各个业务流程里。
-
-## 8. LLM 参与节点
-
-LLM 只参与需要语义判断的节点：
-
-- 从自然语言中抽取客户事实
-- 判断事实类型
-- 判断客户需求、风险、态度、下一步
-- 根据候选业务对象做语义匹配
-- 归纳客户概况
-- 生成销售建议
-- 判断新旧信息是否冲突
-- 评估置信度
-
-LLM 输出必须使用结构化输出协议，不能依赖自由文本解析。
-
-核心 schema：
-
-```text
-ExtractedCustomerFact
-  fact_type
-  content
-  source_refs
-  confidence
-  freshness
-  business_impact
-
-CustomerConflict
-  field
-  previous_value
-  new_value
-  conflict_reason
-  suggested_action
-
-RefreshPlan
-  scope
-  target_sections
-  persistence_action
-  reason
-  confidence
-
-CustomerSummaryDraft
-  section
-  content
+InputState
+  event
+  customer_hint
+  source_object_hint
+  requested_scope
+
+InternalState
+  runtime_context
+  customer_context
+  journey_context
+  task_context
+  commitment_context
+  retrieved_evidence
+  extracted_facts
+  fact_assessments
+  deterministic_projection
+  profile_draft
+  profile_validation
+  source_watermark
+  errors
+
+OutputState
+  published_profile_version
+  changed_sections
   evidence_refs
-  confidence
+  visible_trace
+  publication_result
 ```
 
-这些结构化结果进入 state，由后续节点判断分支和落库。
+核心业务数据不能继续以无约束的松散字典作为长期接口。应逐步使用 typed schema / Pydantic schema 约束档案投影和事件 payload。
 
-LLM 不负责：
+### 9.4 LLM 使用边界
 
-- 直接改数据库
-- 决定权限
-- 绕过业务流程
-- 伪造业务状态
-- 直接覆盖强结构化字段
-- 替代确定性业务规则
+LLM 可以参与：
 
-## 9. 更新策略
+- 从自然语言中抽取客户事实；
+- 识别需求、预算、风险、态度和竞品信息；
+- 合并同一事实的不同表达；
+- 归纳需求背景和跟进过程；
+- 生成重要变化的自然语言描述；
+- 为叙事内容绑定候选证据。
 
-客户档案不能每次事件都全量重生成。
+LLM 不可以：
 
-### 9.1 轻量更新
+- 直接改数据库；
+- 直接决定任务、承诺、商机或旅程状态；
+- 自由生成对象 ID；
+- 用推断结果覆盖强结构化字段；
+- 生成销售行动建议并写入客户档案；
+- 在缺少证据时补写内容。
+
+### 9.5 事实门禁
+
+自动沉淀至少满足：
+
+- 置信度达到当前自动阈值；
+- 有完整来源和 evidence quote；
+- 内容非空且类型合法；
+- 与既有有效事实没有未解决冲突；
+- 归属范围明确，或明确标记为客户级候选；
+- 不违反业务对象状态和权限边界。
+
+不满足时：
+
+```text
+内部记录 ignore 原因
+不写入正式事实
+不创建人工确认卡
+不向销售展示内部门禁细节
+不阻断主业务事务
+```
+
+如果冲突会影响销售理解，不应只静默丢弃；可以在档案中显示“当前记录存在不同表述，请查看原始记录”，但不能擅自选择一条作为确定事实。
+
+### 9.6 人工纠错与自动重建优先级
+
+客户档案必须允许销售对“事实”提出纠错，而不是直接编辑一整段 AI 文案。P1 至少支持：
+
+- 对事实标记“不准确”“已失效”“归属错误”“与另一条记录冲突”；
+- 查看人工纠错前后的内容、操作者、时间、原因和证据；
+- 将纠错写入 `CustomerFactRevision` 或独立的纠错记录，并产生 `customer_profile_correction_recorded`；
+- 后续 Agent 重建优先读取人工确认的事实；无新证据时不得覆盖人工确认结果；
+- 人工纠错不能绕过客户权限，也不能直接修改商机、合同、回款、任务或旅程强状态。
+
+人工确认的优先级不是“永远不可改变”：后续出现更高优先级、可访问且明确的新业务记录时，可以生成冲突待处理状态，但必须保留原人工修正，不得静默覆盖。
+
+### 9.7 删除、撤回和权限变化的负向重算
+
+删除、编辑、撤回或权限变化不是普通的追加事件，必须支持负向影响：
+
+```text
+来源对象变化
+  ↓
+标记旧来源事实/证据失效
+  ↓
+重新读取受影响范围内的有效事实和强状态
+  ↓
+重算受影响段落
+  ↓
+生成新快照并校验发布
+```
+
+至少覆盖：
+
+| 变化 | 必须重算的内容 |
+|---|---|
+| 客户活动修改/删除/撤回 | 需求背景、跟进过程、重要变化、相关事项来源 |
+| 事实失效/被替代 | 对应事实、长期情况、当前情况和变化链 |
+| 旅程归属变更 | 当前旅程、旅程级事实、相关跟进和事项 |
+| 联系人删除/权限变化 | 联系人相关事实、证据可见性和文案 |
+| 商机输单/重开 | 当前旅程、当前情况、历史变化 |
+| 合同撤销/回款冲正 | 商业状态、关键里程碑和相关叙事 |
+| 客户转移团队/负责人变化 | 当前指针、证据权限和可见内容 |
+
+重算必须以“当前仍有效的数据集合”为输入，不能只追加一条“已删除”文案；证据不可见时只保留不泄露原文的状态提示。
+
+---
+
+## 10. 档案更新策略
+
+### 10.1 轻量更新
 
 适用于：
 
-- 新增跟进
-- IM 中提到客户新信息
-- 联系人态度变化
-- 下一步计划变化
+- 新增跟进；
+- 任务或承诺状态变化；
+- 联系人信息变化；
+- 客户明确提出新需求；
+- 单个旅程关键事件。
 
-处理方式：
+处理：
 
-- 抽取事实
-- 写入客户知识
-- 局部刷新销售动态层
+- 读取相关增量上下文；
+- 生成事实候选；
+- 更新确定性事项状态；
+- 刷新受影响的档案段落；
+- 保留未受影响段落的上一版本。
 
-### 9.2 局部刷新
-
-适用于：
-
-- 商机阶段变化
-- 合同状态变化
-- 回款状态变化
-- 业务流程节点完成
-
-处理方式：
-
-- 更新相关事实
-- 刷新采购进展、合作状态、风险、下一步等相关段落
-
-### 9.3 全量重建
+### 10.2 局部刷新
 
 适用于：
 
-- 新客户初始化
-- 线索转客户
-- 用户手动刷新
-- 长时间未更新
-- 累积变化较多
-- 事实冲突较多
-- 模型或档案结构升级
+- 商机阶段变化；
+- 合同签署；
+- 回款节点变化；
+- 旅程状态变化；
+- 多条跟进累积后需求发生变化。
 
-### 9.4 防抖与幂等
+处理：
+
+- 更新相关事实和旅程事件；
+- 刷新当前情况、当前旅程、重要变化或跟进过程；
+- 不重新生成与本次变化无关的长期背景。
+
+### 10.3 全量重建
+
+适用于：
+
+- 新客户初始化；
+- 线索转客户；
+- 用户手动刷新；
+- 长期没有成功档案；
+- 档案 schema 升级；
+- 历史数据补齐；
+- 事实关系或业务旅程归属规则发生重大变化。
+
+### 10.4 防抖、幂等和并发
 
 需要支持：
 
-- 同一客户短时间多个事件合并处理
-- 同一业务对象重复事件去重
-- 低价值事件只记录，不触发 LLM
-- 使用 `customer_id + source_event_id + graph_version` 做幂等键
+- 同一客户短时间多个事件合并；
+- 同一来源对象重复事件去重；
+- 同一客户不同事件按数据水位有序处理；
+- 低价值事件只记录不触发 LLM；
+- 使用 `team_id + customer_id + source_event_id + graph_version` 形成幂等标识；
+- 新事件到达时不能被正在进行的旧重建覆盖；
+- 同一客户同时只有一个可发布的档案版本。
 
-### 9.5 前台路径与后台路径
+### 10.5 档案发布流程
 
-客户智能更新分两种运行方式。
+```text
+读取输入水位
+  ↓
+生成结构化草稿
+  ↓
+校验 schema
+  ↓
+校验强状态
+  ↓
+校验证据引用
+  ↓
+校验对象权限和归属
+  ↓
+校验生成期间是否出现更新数据
+  ↓
+生成新 profile_version
+  ↓
+原子发布
+```
 
-前台路径：
+发布失败时：
 
-- 用户在 Agent 中输入请求
-- 图需要快速返回可见进度
-- 可以同步完成轻量抽取、候选判断和自动沉淀门禁
-- 大段档案重建可以转后台继续执行
+- 保留上一份成功档案；
+- 新版本标记失败；
+- 页面显示“本次更新未完成，当前显示上一版本”；
+- 记录 `run_id` 和错误分类；
+- 支持后台重试或指定客户重放。
 
-后台路径：
+---
 
-- 业务事件自动触发
-- 图以事件为 thread 运行
-- 多个事件可以合并成批处理
-- 更新完成后写客户档案、客户知识和通知
-- 失败时进入重试队列和诊断记录
+### 10.6 事件到档案段落的刷新矩阵
 
-前台路径重体验，后台路径重稳定。
+| 业务变化 | 确定性更新 | 需要 Agent 归纳的段落 | 默认策略 |
+|---|---|---|---|
+| 新增/修改跟进 | 来源、时间、事项关联 | 当前情况、需求背景、跟进过程、重要变化 | 增量刷新 |
+| 任务完成/取消/延期/重开 | 事项状态和时间 | 跟进过程（仅记录状态变化） | 轻量刷新 |
+| 承诺状态变化 | 承诺状态及任务汇总 | 已记录后续事项 | 轻量刷新 |
+| 旅程关键事件 | 旅程阶段、状态、里程碑 | 当前旅程、当前情况、重要变化 | 局部刷新 |
+| 合同/回款事件 | 合同和回款强状态 | 当前旅程、当前情况 | 局部刷新 |
+| 客户基础资料变化 | 客户主数据 | 长期情况 | 局部刷新 |
+| 删除/撤回/权限变化 | 失效来源、重新计算有效集合 | 受影响段落和证据可见性 | 负向重算 |
+| 旅程归属变化 | 重新解析 scope 和关联 | 当前旅程、需求背景、跟进过程、事项 | 局部重建 |
+| schema 或归属规则变化 | 全量重新计算 | 全部段落 | 全量重建 |
 
-## 10. 用户体验设计
+“默认策略”只代表调度范围，不代表一定同步完成。前端必须依据档案状态和数据水位显示是否仍在更新。
 
-页面上不暴露技术概念。
+---
 
-客户详情页展示：
+## 11. 历史数据重建与版本演进
+
+### 11.1 迁移策略
+
+采用：
+
+```text
+按版本懒迁移
++
+后台分批重建
+```
+
+这不会破坏现有客户智能事件触发逻辑，前提是新版重建和实时事件使用同一套事件、运行审计、Graph 和发布机制。
+
+### 11.2 懒迁移
+
+懒迁移的主触发点是“该客户下一次发生客户智能更新或用户明确请求刷新”，不是要求用户打开页面时同步等待生成。页面访问可以做补充触发，但不能把阅读动作变成高成本生成动作。
+
+触发后：
+
+1. 保留并展示上一份可用档案；
+2. 判断 `schema_version`、`profile_version` 和数据水位是否落后；
+3. 以新版 schema 创建一次幂等重建运行；
+4. 标记档案为 `STALE` / `UPDATING`；
+5. 后台完成重建并通过统一发布流程替换；
+6. 新事件到达时按水位合并或追加增量刷新，不允许旧重建覆盖新结果。
+
+### 11.3 后台分批重建
+
+后台重建逐客户执行：
+
+```text
+选择客户
+  ↓
+读取完整历史业务数据
+  ↓
+重建事实和事实来源
+  ↓
+重建业务旅程关联
+  ↓
+重建任务/承诺投影
+  ↓
+生成新版档案
+  ↓
+校验并发布
+  ↓
+记录成功水位或失败原因
+```
+
+后台重建只修改事实、证据和档案投影，不修改客户、商机、合同、回款等原始业务数据。
+
+### 11.4 历史字段退出运行时链路
+
+历史 `customer_brief_*`、旧 Markdown/JSON 和旧档案生成入口已退出客户档案运行时：
+
+- Profile API 只读取 `CustomerProfileCurrent` 指向的已发布 `CustomerProfileProjectionVersion`；
+- Projection Workflow、Graph 和 Publication Service 不读取历史字段，也不向历史字段写回；
+- 历史字段由 migration 删除，不作为档案空态、失败态或生成输入；
+- 历史 `CustomerIntelligenceGraph` 不触发档案刷新，不写入 Projection Version / Current；
+- 删除动作只清理档案旧存储和旧证据，不改变客户、商机、合同、回款、旅程、任务或承诺等原始业务数据。
+
+### 11.5 水位要求
+
+档案必须保存至少以下水位：
+
+```text
+schema_version
+profile_version
+fact_watermark
+journey_watermark
+task_watermark
+source_watermark
+last_successful_version
+last_successful_generated_at
+```
+
+如果生成期间出现更晚的事件：
+
+- 不发布过期结果；或
+- 发布后立即投递增量刷新；
+- 不能让旧重建结果覆盖新事件产生的档案。
+
+---
+
+## 12. API 与前端交付范围
+
+### 12.1 读取 API
+
+前端主视图应优先使用一个聚合读取接口，避免页面同时请求多个模块后自行拼装叙事：
+
+```text
+GET /v1/customers/{customer_id}/profile
+```
+
+建议返回稳定的结构化协议：
+
+```json
+{
+  "customer_id": "cus_xxx",
+  "profile_status": "READY|UPDATING|STALE|PARTIAL|FAILED|NOT_READY",
+  "current_profile_version": "pv_xxx",
+  "schema_version": "v2",
+  "freshness": {
+    "profile_as_of": "2026-08-28T10:30:00+08:00",
+    "latest_business_event_at": "2026-08-28T11:00:00+08:00",
+    "is_stale": true,
+    "stale_reason": "存在尚未纳入档案的跟进记录"
+  },
+  "sections": {
+    "current_situation": {},
+    "current_journeys": {},
+    "important_changes": {},
+    "long_term_context": {},
+    "follow_up_process": {},
+    "recorded_follow_ups": {}
+  },
+  "links": {
+    "changes": "...",
+    "evidence": "...",
+    "journeys": "...",
+    "follow_ups": "..."
+  }
+}
+```
+
+当 `profile_status` 为 `STALE`、`UPDATING`、`PARTIAL` 或 `FAILED` 时，接口必须同时返回当前可见版本和新鲜度信息；前端不能把“实时业务对象字段”和“较旧档案叙事”拼成没有标识的单一结论。
+
+建议新增统一档案读取接口：
+
+```text
+GET /v1/customers/{customer_id}/profile
+GET /v1/customers/{customer_id}/profile/changes
+GET /v1/customers/{customer_id}/profile/evidence
+GET /v1/customers/{customer_id}/profile/journeys
+GET /v1/customers/{customer_id}/profile/follow-ups
+```
+
+其中：
+
+- `/profile` 返回一次完整的已发布档案投影、档案状态、数据水位和段落状态；
+- `/changes` 返回重要变化和事实修订；
+- `/evidence` 返回可访问的证据详情；
+- `/journeys` 返回客户相关业务旅程摘要；
+- `/follow-ups` 返回已记录后续事项及其状态。
+
+不建议继续把新版档案拆散塞入旧 `CustomerDetailResponse` 的多个文本字段中。
+
+### 12.2 更新 API
+
+保留现有手动刷新和后台重建入口，但统一返回：
+
+```text
+request_id
+run_id
+profile_status
+current_profile_version
+scheduled_at
+```
+
+接口只负责权限校验、创建事件和调度，不在请求内同步执行完整 LLM 生成。
+
+### 12.3 前端交付
+
+第一阶段前端必须完成：
+
+- 新版档案主视图；
+- 当前情况、当前业务旅程、重要变化；
+- 长期情况、跟进过程、已记录后续事项；
+- 观点级证据查看；
+- 任务事项状态展示；
+- 档案更新时间和数据新鲜度；
+- 更新中、失败、部分更新、空态；
+- 从档案下钻到原始业务记录；
+- 多业务旅程并列展示。
+
+历史 Markdown 解析器不属于客户档案运行时；前端主视图统一读取 Profile API 返回的结构化 Projection。
+
+---
+
+## 13. 质量、审计和可观测性
+
+### 13.1 每次档案运行记录
+
+至少记录：
+
+- graph name / version；
+- request id / run id；
+- team、customer、actor；
+- trigger event；
+- 输入数据水位；
+- 实际读取的旅程、任务、承诺数量；
+- LLM structured output 摘要；
+- 事实门禁结果；
+- 生成的档案版本；
+- 发布或回退结果；
+- 使用的 evidence refs；
+- 节点耗时和错误分类；
+- 用户可见 trace。
+
+### 13.2 质量指标
+
+建议新增：
+
+```text
+档案发布成功率
+档案更新延迟
+档案过期率
+任务完成回流成功率
+业务旅程归属准确率
+需求事实合并准确率
+重要观点证据覆盖率
+无证据观点率
+旧版本被错误覆盖次数
+重复事件重复写入率
+失败重试成功率
+档案页面有效阅读率
+```
+
+不建议把“销售建议质量”作为客户档案的核心指标。更合适的指标是：
+
+- 销售是否更快理解客户；
+- 关键事实是否容易找到；
+- 事实是否能回看来源；
+- 变化是否清楚；
+- 档案是否稳定更新。
+
+### 13.3 评估样本
+
+至少覆盖：
+
+1. 单条跟进中同时出现需求、使用场景和后续事项；
+2. 多条跟进逐步补充同一需求；
+3. 新旧跟进内容存在冲突；
+4. 多个业务旅程同时推进；
+5. 任务完成但客户没有反馈；
+6. 任务完成后客户反馈需求变化；
+7. 销售承诺拆分成多个任务；
+8. 旅程关闭后仍有客户级长期事实；
+9. 档案生成期间出现新事件；
+10. 新版档案生成失败；
+11. 历史客户 Projection 重建；
+12. 证据对象被删除或权限不可见。
+
+---
+
+## 14. 权限、性能与可靠性要求
+
+### 14.1 权限
+
+- 所有读取和下钻接口都必须按 `team_id`、客户权限和来源对象权限过滤；
+- 证据被删除或当前用户不可见时，档案可以保留“该结论曾有来源”，但不能展示越权原文；
+- 共享客户、转移负责人和客户退回公海时，档案访问权限跟随 CRM 现有规则，不由 Agent 自行判断；
+- 后台重建使用系统身份，但发布结果仍必须经过团队归属和来源权限校验。
+
+### 14.2 性能与可靠性
+
+- 客户详情首屏只读取已发布投影，不同步等待 LLM；
+- 档案更新采用异步执行，主业务事务不依赖模型服务可用；
+- 单客户事件可合并，但不得跳过高价值的删除、状态变化和旅程关闭事件；
+- 运行必须支持租约、超时、重试、死信/人工重放和旧运行回收；
+- 发布采用原子切换，页面永远能拿到“当前成功版本”或明确空态；
+- 对外 ID、团队隔离和权限判断必须在 API 层完成，Agent 生成的内容不得绕过这些校验。
+
+---
+
+## 15. 分阶段实施范围
+
+### P0：形成档案投影和事件闭环
+
+目标：让新版档案真正可用。
+
+交付：
+
+1. `CustomerProfileProjectionVersion` 快照表 + `CustomerProfileCurrent` 当前指针表，以及结构化、版本化投影；
+2. 新版档案读取 API；
+3. 当前情况、当前业务旅程、重要变化、长期情况、跟进过程、已记录后续事项六类内容；
+4. 事实和状态的三层模型；
+5. 任务完成、取消、延期、重开事件接入，并区分销售履行记录与客户活动；
+6. 任务/承诺状态回流档案；
+7. 业务旅程直接进入客户智能上下文；
+8. 档案版本、状态、水位；
+9. 新结果校验和原子发布；
+10. 失败保留上一成功版本；
+11. 前端新版主视图；
+12. 删除档案正文中的“下一步建议”语义；
+13. 历史档案字段与生成入口退出运行时；
+
+### P1：提升内容质量和多旅程能力
+
+交付：
+
+1. 需求事实合并和需求变化链；
+2. 事实有效期、失效、替代；
+3. 客户级/旅程级/商机级事实隔离；
+4. 多旅程并列展示和主旅程规则；
+5. 销售承诺完整履行规则；
+6. 事实冲突表达；
+7. 证据点击跳转原始对象；
+8. 重要变化时间线；
+9. 跟进过程按主题和时间聚合；
+10. 档案质量评估和抽检。
+
+### P2：平台化和跨模块复用
+
+交付：
+
+1. 客户档案统一上下文服务；
+2. Agent 查询与客户档案共用事实、旅程和证据；
+3. 商机、合同、回款页面复用客户档案摘要；
+4. Web/IM 统一读取档案投影；
+5. 后台档案质量运营台；
+6. 模型、Prompt、Graph 版本评估；
+7. 完整运行回放和数据修复工具。
+
+---
+
+## 16. 验收标准
+
+### 16.1 档案投影
+
+- 新版档案不依赖 Markdown 作为主数据结构；
+- 页面可以分别读取当前情况、多个当前旅程、长期情况、变化、跟进过程和已记录事项；
+- 档案版本和段落差异可被审计和回退，当前发布版本不会覆盖历史版本；
+- 每个重要观点至少有一个可访问证据，或明确标记暂未确认；
+- 档案内容带 schema version、profile version 和数据水位；
+- 版本发布为原子操作；
+- 失败不会清空上一份成功档案。
+
+### 16.2 业务闭环
+
+- 新增跟进能够触发客户事实和相关档案段落更新；
+- 跟进修改能够处理旧版本事实和事项；
+- 任务完成能够把对应档案事项改为已完成；
+- 任务完成不会自动生成客户认可或需求解决结论；
+- 承诺只有在完整履行规则满足后才变为已履行；
+- 业务旅程关键事件能够更新当前旅程和重要变化；
+- 业务旅程完整流水仍保留在业务旅程模块；
+- 新事件不会被后台旧重建覆盖；
+- 所有事件重复处理不产生重复事实、重复事项或重复档案版本。
+
+### 16.3 前端阅读
+
+- 第一屏先展示当前情况和当前旅程；
+- 页面不存在“系统建议下一步”类档案内容；
+- 已记录事项和系统建议在文案和数据结构上完全区分；
+- 销售可以从观点下钻到原始记录；
+- 页面能区分客户级内容和旅程级内容；
+- 多个开放旅程不会被静默隐藏；
+- 更新中、失败、过期和部分更新有清晰表达；
+- 档案读起来像客户记录，而不是 AI 报告。
+
+### 16.4 权限、性能和可靠性
+
+- 越权用户无法通过档案或证据接口读取其他团队内容；
+- 客户详情首屏不等待模型生成；
+- 业务事务在模型不可用时仍能成功提交；
+- 事件可重复消费、运行可恢复，且不会产生重复事项或重复版本；
+- 旧运行无法覆盖更新水位更高的新版本；
+- 删除或无权限证据不会在前端暴露原文。
+
+### 16.5 历史数据重建与版本演进
+
+- 现有客户按 `schema_version` 和业务水位判断是否需要新版 Projection 重建；
+- 后台可分批重建，懒迁移与批量重建均进入唯一的 `CustomerIntelligenceRefreshService → CustomerProfileProjectionWorkflow`；
+- 所有档案发布均通过 `CustomerProfileProjectionService.publish()`，历史字段不会参与读取、生成或发布；
+- 重建期间原始业务数据不被修改；
+- 后台重建失败可以重试，新增事件通过统一事件收据进入后续运行；
+- 旧运行或低水位重建结果不能覆盖更高水位的当前版本。
+
+---
+
+## 17. 与现有系统的对应关系
+
+### 17.1 已有能力继续复用
+
+当前以下能力可以继续作为基础：
+
+```text
+CustomerIntelligenceEventService
+CustomerIntelligenceContextService
+CustomerFactService
+CustomerFactSource / CustomerFactRevision
+CustomerIntelligenceRunService
+CustomerIntelligenceRefreshService
+CustomerDealJourney / CustomerDealJourneyEvent
+FollowUpTask / FollowUpTaskEvent
+SalesCommitment
+CustomerMemoryStoreService
+CustomerVectorDocumentService
+CustomerProfileProjectionGraphService
+```
+
+### 17.2 必须调整的现有链路
+
+#### 已删除的旧档案链路
+
+`CustomerBriefService`、`CustomerProfileService`、旧客户档案字段、旧档案 API 和旧档案向量证据类型均已删除。它们不再作为实现、回退、兼容适配或数据读取路径存在。
+
+#### 新版唯一链路
+
+客户档案刷新统一从 `CustomerIntelligenceRefreshService` 进入
+`CustomerProfileProjectionWorkflow`，由 `CustomerProfileProjectionGraphService` 编排事实提炼和结构化叙事草稿，再由 `CustomerProfileProjectionService` 校验、持久化并原子发布版本。
+
+- 只生成结构化叙事草稿；
+- 不生成销售建议；
+- 不决定业务状态；
+- 不直接写入业务对象；
+- 由客户档案投影服务统一校验和发布。
+
+#### `CustomerIntelligenceContextService`
+
+必须补充：
+
+- 业务旅程和旅程事件；
+- 跟进任务和任务事件；
+- 销售承诺；
+- 事实修订历史；
+- 当前档案版本和水位。
+
+#### `CustomerProfileProjectionGraphService`
+
+作为唯一档案 Graph Owner，负责把权限过滤后的业务上下文编排为可发布的结构化 Projection 草稿：
+
+- `load_deal_journeys`；
+- `load_follow_up_tasks_and_commitments`；
+- `project_deterministic_states`；
+- `compose_profile_sections`；
+- `validate_profile_projection`；
+- `publish_profile_version` 不属于 Graph，Graph 只返回通过校验的 draft；
+- 业务对象、旅程、任务和承诺的源事实写入仍由各自业务服务负责；
+- 历史 `CustomerIntelligenceGraph` 不参与档案 Projection。
+
+#### `CustomerDetailSheet.vue`
+
+只读取新版 Profile API，页面不解析 Markdown，也不读取已删除的历史档案字段。
+
+#### 跟进任务状态服务
+
+`FollowUpTaskTransitionExecutionService` 和任务投影现在通过 `CustomerIntelligenceTaskEventService` / `CustomerIntelligenceEventPublicationService` 回流客户智能事件。完成、取消、延期、重开后，任务状态仍是源事实；档案刷新是可恢复的投影副作用，回流失败不能影响任务状态提交。后续仍需补齐履行记录、替代链和对账指标。
+
+### 17.3 与 Agent 整体架构的关系
+
+客户档案使用 Agent runtime，但不把客户档案变成一个可以自由执行销售动作的 Agent。
+
+```text
+Agent Runtime
+  负责理解事件、运行图、生成候选事实和叙事
+
+CRM 业务 API
+  负责真实业务状态和写入
+
+客户档案投影
+  负责把事实和状态组织成销售可读记录
+
+业务旅程
+  负责完整交易过程
+
+跟进任务/承诺
+  负责已记录事项生命周期
+```
+
+这几个边界必须长期保持清晰。
+
+### 17.4 实施差异矩阵
+
+| PRD 目标 | 当前代码基线 | 实现状态 | 需要新增/调整 | 优先级 | 验收方式 |
+|---|---|---|---|---|---|
+| 独立版本化档案 | `CustomerProfileProjectionVersion` + `CustomerProfileCurrent` | 已实现 | 继续完善并发发布、失败回退和版本回读 | P0 | 并发发布、失败回退、版本回读测试 |
+| 统一上下文 | Context 已有客户、活动、商机、合同、回款、事实 | 部分实现 | 接入旅程事件、任务/承诺、事实修订和水位 | P0 | 端到端上下文快照测试 |
+| 事件闭环 | 活动、业务对象、旅程、任务/承诺均有标准事件入口 | 基础闭环已实现 | 持续补齐对账指标、失败重试和跨源水位审计 | P0 | 重复投递、入队失败、提交后唤醒失败、重试测试 |
+| 需求演化 | 已有事实与来源/修订模型 | 部分实现 | 多记录合并、失效/冲突/变化链、负向重算 | P1 | 多次跟进冲突样本回放 |
+| 旅程主线 | 有 `CustomerDealJourney` 和看板，档案读取未统一 | 部分实现 | `current_journeys_json`、多旅程并列、归属规则 | P0/P1 | 多旅程、不归属、归属变更测试 |
+| 任务完成回流 | 任务/任务事件通过统一发布契约回流客户智能 | 已实现事件回流 | 补充履行记录、替代链和旅程归属边界 | P0 | 完成不制造客户活动、重复事件幂等、失败补偿测试 |
+| 承诺生命周期 | 有 `SalesCommitment`，完整履行规则未成为档案契约 | 部分实现 | 承诺-任务汇总和替代链 | P1 | 多任务拆分履行测试 |
+| 前端阅读 | `CustomerDetailSheet.vue` 读取结构化 profile API | 已切换 | 按阅读契约完善六段视图、下钻和状态展示 | P0 | 30 秒理解/2 次点击证据测试 |
+| 历史数据重建 | 已有新版重建/重试调度 | 已实现 | 执行删除迁移并完成全量后台重建 | P0 | 重建中事件并发与失败重试测试 |
+| 人工纠错 | 有事实修订基础 | 未形成产品闭环 | 事实级纠错、人工优先、审计 | P1 | 人工修正不被重建覆盖测试 |
+| Agent 架构边界 | 已有 Root/Query/Workflow 新架构 | 可复用 | 档案作为 Customer Intelligence 子能力接入，不新增顶层 Agent | P0 | 架构删除测试和调用链审计 |
+
+本矩阵是开发拆分和验收的依据；“已有底层模型/服务”不能直接计为“档案能力已完成”。
+
+---
+
+## 18. 最终形态
+
+优化完成后，客户档案不是下面这种结构：
 
 ```text
 客户概况
-最近更新：今天 15:20
-更新来源：跟进记录、商机阶段变更
+企业背景
+研发团队规模
+项目需求背景
+采购进度
+客户活动进展
+风险
+下一步建议
 ```
 
-客户档案内容：
-
-- 客户当前情况
-- 当前需求
-- 采购进展
-- 关键联系人
-- 风险点
-- 下一步建议
-- 相关商机
-- 最近重要变化
-
-重要结论支持查看依据：
+而是：
 
 ```text
-“客户已进入 POC 阶段”
-依据：8月1日跟进记录，张总提到本周开始产品试用。
+客户当前情况
+  当前客户发生了什么
+  当前最明确的事实是什么
+  哪些内容尚未确认
+
+当前业务旅程
+  当前主旅程/多个进行中旅程
+  当前阶段
+  关键里程碑
+
+重要变化
+  需求、阶段、联系人、风险和商业条件的前后变化
+
+客户长期情况
+  客户身份、长期背景和已验证的客户级事实
+
+跟进过程
+  客户表达 → 销售跟进 → 客户反馈 → 双方共识 → 后续变化
+
+已记录后续事项
+  销售已承诺、客户已表达、待完成、已完成、已取消、已替代
+
+证据
+  每个重要观点都可以回到原始业务记录
 ```
 
-Agent 对话示例：
+最终目标可以概括为：
 
-```text
-用户：总结一下这个客户现在什么情况
-
-Agent：
-这个客户当前处于试用推进阶段，张总是主要推动人。
-目前重点是完成 POC 验证，风险在于预算和招标方式还没有完全明确。
-建议下一步确认试用验收标准和预计采购时间。
-```
-
-## 11. 与现有功能的关系
-
-现有功能不推倒重来，而是升级归位。
-
-### 11.1 `customer_profile_service.py`
-
-从独立异步生成服务降级为客户智能图里的基础档案刷新引擎。
-
-它只保留 `generate_profile(...)` 这类被图节点调用的业务生成能力，不再负责：
-
-- 自己创建后台任务
-- 自己决定何时刷新
-- 自己级联触发客户概况
-- 自己承担失败重试和运行审计
-
-这些运行时职责统一收归 `CustomerIntelligenceRefreshService`、`CustomerIntelligenceRunService` 和 `CustomerIntelligenceGraphService`。
-
-### 11.2 `customer_brief_service.py`
-
-从客户概况生成服务降级为销售动态摘要刷新引擎。
-
-它只负责根据统一客户智能上下文生成并写入 `customer_brief_markdown`，不再提供图外后台触发入口。客户概况刷新必须由客户智能图的 `refresh_brief_fields` 节点进入。
-
-### 11.3 `deal_journey_service.py`
-
-作为客户智能事件的重要来源。
-
-### 11.4 现有 Agent 架构
-
-增加 `customer_intelligence_graph`，让客户档案进入统一 Agent runtime。
-
-### 11.5 现有业务流程
-
-业务流程不直接写客户档案，而是发客户智能事件，由 Agent 图统一判断和更新。
-
-## 12. 分阶段落地
-
-### 当前已落地的底座
-
-第一轮实现已经完成“统一读取 + 证据沉淀 + 异步同步”的底座，后续 LangGraph 客户智能子图必须基于这些边界继续做，不能再绕开另起一套客户上下文。
-
-已落地模块：
-
-```text
-app/services/customer_intelligence_context_service.py
-app/services/customer_intelligence_event_service.py
-app/services/customer_evidence_builder.py
-app/services/customer_fact_extraction_service.py
-app/services/customer_fact_service.py
-app/services/customer_intelligence_refresh_service.py
-app/services/customer_intelligence_run_service.py
-app/services/customer_intelligence_trace_service.py
-app/services/customer_vector_document_service.py
-app/services/customer_vector_sync_service.py
-app/services/customer_qdrant_index_service.py
-app/services/customer_memory_store_service.py
-app/services/agent/customer_intelligence_graph.py
-app/services/agent/customer_intelligence_trigger.py
-app/tasks/customer_evidence_sync.py
-app/tasks/customer_intelligence_refresh_retry.py
-app/core/qdrant.py
-app/models/agent.py
-app/models/customer_fact.py
-app/models/customer_vector_document.py
-app/models/customer_intelligence_run.py
-```
-
-已落地的数据边界：
-
-- `CustomerIntelligenceContextService`
-  - 作为客户智能统一读侧
-  - 从 MySQL 读取客户、联系人、商机、合同、回款、跟进、同业客户等强业务事实
-  - 从 Qdrant 召回客户级语义证据
-  - 输出 `strong_context`、`semantic_evidence`、`retrieval`
-  - 明确 `strong_context` 是业务事实，`semantic_evidence` 只做可引用证据和语义线索
-- `CustomerIntelligenceEventService`
-  - 作为客户智能统一事件入口
-  - 把客户创建、线索转客户、客户跟进、联系人变化、客户档案、客户概况、业务流程事件、手动刷新、批量重建、Agent 客户问答标准化为 `CustomerIntelligenceEvent`
-  - 输出稳定 `event_key` 和 `thread_id`，供 LangGraph checkpoint、重试、审计和幂等使用
-  - 事件 payload 只承载业务语义，不要求用户或 IM 输入内部 ID
-- `CustomerIntelligenceGraphService`
-  - 作为客户智能 LangGraph runtime 主干
-  - 使用 `StateGraph`、typed state、reducer、conditional edge、checkpoint 和 checkpoint fallback
-  - 当前已完成节点：事件标准化、客户上下文读取、长期记忆读取、刷新计划、LLM 事实提炼、确定性事实门禁、客户事实沉淀、客户档案刷新、客户概况刷新、长期记忆写入、用户可见 trace
-  - 已接入 `astream(..., stream_mode="updates")`，图内节点完成后实时投影 `visible_trace`，不再等整张图结束后批量补发执行过程
-  - LLM 输出候选事实后，确定性门禁与 `strong_context.customer_facts` 对齐；高置信、有证据且无冲突的候选自动沉淀，其余候选静默忽略
-  - LLM 事实提炼失败时降级继续写客户记忆，不阻断 CRM 主业务事件
-  - 手动刷新、客户生命周期刷新、联系人变化、业务流程刷新、批量重建和后台重试都通过同一张客户智能图进入，不能绕开图写散点 service
-- `AgentApplicationService` 与客户智能事件入口
-  - Web / IM 共用统一 Application，业务写入成功后产生标准化客户智能事件
-  - 客户智能作为独立 job runtime 执行，不把事实沉淀状态放进 Root Workflow
-  - Application 消费客户智能 streaming contract，并把 `visible_trace` 投影为用户可读执行步骤，避免前端直出内部节点名和工具名
-- `CustomerIntelligenceTraceService`
-  - 统一负责客户智能 `visible_trace` 到 Web / IM `agent_step` 的用户可见投影
-  - 客户智能图 streaming、Application 投影、后台 run 诊断都复用这一层，避免展示规则散落
-- `CustomerFactExtractionService`
-  - 作为 LLM 结构化事实提炼边界
-  - 基于 `CustomerIntelligenceEvent`、统一客户上下文、LangGraph Store 长期记忆生成候选事实
-  - 输出 `upsert` / `ignore` 两类动作，不直接写业务表
-  - 使用 LangChain structured output；结构化输出失败时本次事实提炼失败关闭，不解析自由文本写库
-- `CustomerMemoryStoreService`
-  - 作为 MySQL-backed LangGraph Store 适配层
-  - 实现 LangGraph `BaseStore` 的 `batch` / `abatch` / `get` / `put` / `search` / `delete` / `list_namespaces` contract
-  - 使用客户级 namespace 保存 `facts`、`summaries`、`preferences`、`retrieval`
-  - Store 只保存长期摘要、偏好、事实引用和证据引用，不复制 MySQL 强业务事实或 Qdrant 证据全文
-- `CustomerFactService`
-  - 作为客户智能事实库写入和读取边界
-  - 使用 `customer_facts` 保存当前可用的结构化客户知识
-  - 使用 `customer_fact_sources` 绑定来源业务对象和证据引用
-  - 使用 `customer_fact_revisions` 保存事实创建和更新的版本审计
-  - 支持幂等 upsert、来源绑定、版本递增、修订记录、候选事实融合评估和上下文 payload 投影
-  - 重复写入同一事实内容只补来源，不制造新的事实版本
-  - 事实库是客户知识层，不直接等同于客户、商机、合同、回款主业务表
-- `CustomerIntelligenceRunService`
-  - 作为客户智能 graph 后台运行审计、同步事件入队和失败补偿边界
-  - 使用 `customer_intelligence_runs` 记录每次客户智能刷新请求、事件快照、运行状态、尝试次数、最大尝试次数、下次重试时间、route、结果摘要和用户可见 trace
-  - 页面手动刷新、批量重建、客户创建、线索转客户等后台 run 在进入 graph 前标记 `RUNNING`，成功后标记 `SUCCESS`，失败后标记 `RETRY_PENDING` 或 `FAILED`
-  - 同步业务事务内产生的客户智能事件先落为 `PENDING` run，事务提交后由后台调度器读取并进入同一套 `CustomerIntelligenceGraphService`
-  - `CustomerIntelligenceRefreshService.run_due_retries(...)` 可以从审计表中读取 `PENDING` 和到期的 `RETRY_PENDING` run，重建请求并重新进入同一套 `CustomerIntelligenceGraphService`
-  - 已提供团队隔离的运行诊断查询、单 run 详情和到期重试调度入口，后台排查复用同一份 `visible_trace`
-  - 运行审计只保存事件快照、结果摘要和可见轨迹，不替代 LangGraph checkpoint，不保存无界 graph state
-- `CustomerIntelligenceRefreshService`
-  - 作为页面、后台、业务服务触发客户智能图的统一调度边界
-  - 手动刷新、客户生命周期刷新、批量重建、已提交业务事件都通过这里进入 `CustomerIntelligenceGraphService`
-  - 已提交业务事件使用 `trigger_committed_event_refresh(...)`，API 层只负责权限校验和业务写库，不直接编排 LangGraph 节点
-  - 同步业务事件使用 `enqueue_committed_event_refresh(...)`，只在当前业务事务内创建幂等 `PENDING` run，不直接启动异步任务，避免 graph 早于业务事务提交运行
-- 商机、合同、回款计划、回款记录、开票抬头、发票申请、部署信息、License 申请这类普通页面 CRUD 变更使用 `trigger_business_object_change_refresh(...)` 或同步安全的 `enqueue_business_object_change_refresh(...)` 生成通用业务对象变更事件，再进入同一套 committed-event 调度入口
-  - 后台待运行和失败重试都从 `customer_intelligence_runs.event_json` 恢复原始 `CustomerIntelligenceEvent`，不会把联系人、跟进、业务流程事件退化成手动刷新
-- `CustomerBusinessObjectIntelligenceService`
-- 作为商机、合同、回款计划、回款记录、开票抬头、发票申请、部署信息、License 申请直接 CRUD 的客户智能触发边界
-  - API 层只在业务写入成功后发布对象类型、业务对象、变更类型和操作者，不再各自拼客户智能快照
-  - 服务层通过类型化 `CustomerBusinessObjectIntelligenceSpec` 统一解析客户 ID、对象名、安全 payload 和业务可读摘要
-  - 删除场景必须在删除前保留业务对象，删除成功后再投递快照事件，不能在提交后继续依赖已删除 ORM 对象读取客户上下文
-  - API 层不拼接 graph 节点、不写 Qdrant、不暴露内部 ID 给用户；开票抬头、部署地址、License 授权码等敏感资料只传摘要和布尔完整性信息，强业务明细仍以 MySQL 权限查询为准
-  - 服务统一生成业务可读摘要，例如“商机已更新”“合同已删除”“回款计划已更新”，并交给 `CustomerIntelligenceRefreshService`
-  - 后续新增合同附件、实施交付、回款异常、第三方同步等客户相关业务对象时，只扩展同一个 spec registry，不能在 API / CRUD 中重新散落拼事件逻辑
-- `CustomerApprovalIntelligenceService`
-  - 作为通用审批引擎到客户智能刷新之间的旁路触发边界
-  - 当前接入发票申请、License 申请的审批通过、驳回、撤回和多级审批流转
-  - 审批主流程成功后再入队客户智能刷新；刷新入队失败只记录日志并回滚刷新副作用，不反向阻断审批结果
-  - 只传审批状态、审批动作和业务对象摘要，不把审批内部节点 ID 或敏感业务内容暴露到用户侧
-- `CustomerVectorDocumentService`
-  - 作为向量证据元数据写入边界
-  - 只写 MySQL 元数据和同步状态，不在业务事务中直接调用 Qdrant
-  - 支持 `commit=False`，让业务流程事件可以把证据元数据纳入同一个业务事务
-- `CustomerVectorSyncService`
-  - 负责把待同步元数据异步写入 Qdrant
-  - Qdrant / embedding 故障只影响语义检索，不阻塞 CRM 主业务写入
-- `CustomerEvidenceBuilder`
-  - 统一把客户活动、客户基础档案、客户概况、业务流程事件转换成可检索证据
-  - 使用稳定 `document_key` 和 `qdrant_point_id` 保证幂等 upsert
-
-已接入的业务触发：
-
-- 新建客户后，生成 `customer_created` 事件并进入客户智能图全量刷新客户档案、客户概况和长期记忆
-- 线索转客户后，生成 `customer_converted_from_lead` 事件并进入客户智能图全量刷新客户档案、客户概况和长期记忆
-- 新增或更新跟进记录后，沉淀客户活动证据
-- Agent 创建联系人、页面新增联系人、页面更新联系人、设置主联系人、删除联系人后，都会生成联系人事件并通过 committed-event 调度入口进入客户智能图刷新客户概况和长期记忆
-- 页面直接编辑或删除商机、合同、回款计划、回款记录，以及新增、编辑、设置默认或删除开票抬头、发票申请、部署信息、License 申请后，都会通过 `CustomerBusinessObjectIntelligenceService` 统一生成业务对象变更快照，再通过 committed-event 调度入口进入客户智能图刷新客户概况和长期记忆；同步 API 只创建 `PENDING` run，由后台调度进入 LangGraph，避免异步任务抢跑业务事务
-- 通用审批引擎完成发票申请、License 申请审批状态变化后，会通过 `CustomerApprovalIntelligenceService` 入队业务对象变更刷新；客户智能刷新失败不阻断审批成功结果
-- 客户基础档案生成完成后，沉淀客户档案证据
-- 客户概况生成完成后，沉淀客户概况证据
-- `DealJourneyService.record_event(...)` 记录商机、合同、回款、审批相关业务流程事件后，先沉淀业务流程证据，再把 `CustomerDealJourneyEvent` 标准化为 `deal_journey_event_recorded` 客户智能事件，并同步入队 `PENDING` run，由后台调度进入客户智能图刷新客户概况、事实库和长期记忆；重复业务流程事件会幂等补齐证据和 run，不重复创建运行记录
-
-已接入的 Agent 运行时触发：
-
-- `CustomerIntelligenceTriggerPolicy`
-  - 作为 Web / IM / 后台 Agent 共用的客户智能触发策略
-  - 只消费已经结构化的 Agent 运行时事件和已经提交成功的业务写入结果
-  - 不通过关键词硬解析原始用户输入，避免 Web、IM、中文表达差异导致触发逻辑分叉
-- 新流程 Agent turn
-  - 当语义理解输出 `CUSTOMER_QUERY`，且业务上下文已明确加载客户时，生成 `agent_customer_question` 事件
-  - 事件进入独立的 `CustomerIntelligenceGraphService` job runtime
-- 已确认 / 自动执行的业务工具结果
-  - 当 `create_customer_activity` 已成功写入数据库后，从真实业务对象重新构造客户智能事件
-  - 当建商机、推进商机阶段、创建回款计划、登记回款等 Agent 写工具已产生成交旅程事件后，从 `CustomerDealJourneyEvent` 转成客户智能事件
-  - 不信任前端输入或工具返回的临时文本作为最终事实来源
-- `AgentApplicationService`
-  - 在 Query / Workflow 的已提交业务结果后统一调用客户智能触发策略
-  - 只传递已提交业务事件，不把客户智能 job 伪装成 Root Workflow continuation
-  - 可见执行轨迹和输出 payload 由统一 Application 投影，Web 和 IM 不再各维护一套客户档案触发流程
-
-已收拢的读取入口：
-
-- Agent `get_customer_context` 读取统一客户智能上下文
-- 客户概况生成读取统一客户智能上下文
-- 客户基础档案生成读取统一客户智能上下文
-- 客户智能 LangGraph 主干读取统一客户智能上下文
-- 客户智能 LangGraph 主干读取和写入客户级长期记忆 Store
-- 客户智能 LangGraph 主干通过 LLM 结构化提炼客户事实，并由确定性节点写入客户事实库
-- 客户智能 LangGraph 主干在写库前统一做候选事实融合评估
-  - 新事实：达到门禁条件则自动沉淀，否则静默忽略
-  - 与既有事实内容一致：幂等补来源，不制造新版本
-  - 与既有事实冲突：静默忽略，不覆盖既有事实
-- 客户事实沉淀不进入 Root Workflow，不产生 Web / IM 交互卡片
-- 统一客户智能上下文读取结构化客户事实和事实来源
-- 客户智能 LangGraph 主干已加入客户档案和客户概况刷新写入节点
-  - `manual_refresh_requested` 进入 `refresh_profile`：读取上下文 / 记忆 -> 制定计划 -> 提炼事实 -> 事实门禁 -> 自动沉淀合格事实 -> 刷新客户档案 -> 刷新客户概况 -> 写入长期记忆
-  - 跟进记录和业务流程事件进入 `refresh_brief`：读取上下文 / 记忆 -> 制定计划 -> 提炼事实 -> 事实门禁 -> 自动沉淀合格事实 -> 刷新客户概况 -> 写入长期记忆
-  - `CustomerProfileService.generate_profile(...)` 被图内节点调用时只刷新客户基础档案，不再自行异步触发客户概况；客户概况由 graph 显式编排，避免图内 / 图外重复刷新
-- 页面客户档案 / 客户概况手动刷新入口已接入 `CustomerIntelligenceRefreshService`
-  - 页面接口只做权限校验、状态置为待生成、发出 `manual_refresh_requested` 事件
-  - 后台 run 统一进入 `CustomerIntelligenceGraphService`
-  - 后台 run 同步写入 `customer_intelligence_runs`，失败后保留 retry metadata，可由补偿入口重放
-  - `refresh_scope=full` 刷新客户档案和客户概况；`refresh_scope=brief` 只刷新客户概况和长期记忆
-- 客户智能批量重建入口已接入 `CustomerIntelligenceRefreshService`
-  - 后台接口 `POST /v1/customers/intelligence/batch-rebuild` 只做权限校验和参数收口
-  - `CustomerIntelligenceRefreshService.trigger_batch_rebuild(...)` 选择目标客户、标记待刷新、创建运行审计并调度后台 graph run
-  - 每个客户仍复用同一套 `CustomerIntelligenceGraphService`、`CustomerIntelligenceRunService`、失败重试和可见 trace 投影，不另起批处理专用链路
-  - API 返回调度结果和 request_id；内部 source object id、数据库 id 只留在服务端审计和事件 payload，不作为用户输入要求
-- 客户智能运行诊断入口已接入 `CustomerIntelligenceRunService`
-  - `GET /v1/customers/intelligence/runs` 查询当前团队下的客户智能运行记录，可按客户、request、状态过滤
-  - `GET /v1/customers/intelligence/runs/{run_id}` 查询单次运行详情和可回放执行轨迹
-  - `POST /v1/customers/intelligence/retries/run-due` 只调度当前团队已到期的 retryable run，避免跨团队重试
-  - 诊断接口只投影用户可读 trace、中文运行类型、结果摘要和错误信息，不把 LangGraph checkpoint state 或内部 graph route 作为业务 API 暴露
-- 客户创建 / 线索转客户 / AI 解析创建客户入口已接入 `CustomerIntelligenceRefreshService`
-  - API 和 AI parser 只负责完成客户主数据写入并发出客户生命周期刷新请求
-  - 后台 run 统一进入 `CustomerIntelligenceGraphService`
-  - 客户生命周期 run 使用同一套运行审计和失败补偿，不再只依赖日志排查
-  - `customer_created` 和 `customer_converted_from_lead` 都进入 `refresh_profile`，由图内节点刷新客户档案、客户概况和长期记忆
-
-当前实现约束：
-
-- Qdrant 中只放可检索证据，不放商机阶段、合同状态、回款金额等强业务事实
-- 页面最终展示字段仍来自 MySQL 客户档案 / 客户概况字段
-- 页面客户档案 / 客户概况字段的刷新由 `CustomerIntelligenceGraphService` 编排，生成服务只保留确定性写库职责
-- Agent 回答客户问题时必须优先引用 `strong_context`
-- Store 不是强业务事实源，不能直接覆盖商机、合同、回款、客户主数据
-- 客户事实库保存 Agent 可复用的客户知识，不替代商机阶段、合同状态、回款金额等业务状态
-- 语义证据检索失败时返回降级状态，不让客户档案、概况、业务流程失败
-- 业务流程事件是多点触发的当前中心入口，后续新增触发点优先接入业务事件 / 客户智能事件，不直接在 CRUD 中散落调用 LLM
-
-下一阶段不能做的事：
-
-- 不能在商机、合同、回款 CRUD 中直接写 Qdrant
-- 不能让 LLM 自由文本结果直接覆盖客户强业务字段
-- 不能把客户长期记忆继续塞进会话上下文
-- 不能让 Web 和 IM 各维护一套客户档案逻辑
-- 不能把工具名、节点名、内部 ID 暴露给用户作为执行过程
-
-下一阶段应继续补齐：
-
-- `customer_intelligence_event_service.py`：新增业务入口时继续优先发统一客户智能事件，不能在入口处直接编排 LLM、Qdrant 或客户档案生成服务
-- `customer_fact_service.py`：继续补齐更强的语义冲突评估和事实合并策略，但不新增人工复核入口
-- `customer_intelligence_trace_service.py`：继续保持 Web / IM / 后台 run 诊断共用同一套 trace 投影规则
-- 业务流程触发面：继续排查批量导入、数据修复、第三方同步等非交互路径，避免绕过事件入口；联系人、商机、合同、回款计划、回款记录、开票抬头、发票申请、部署信息、License 申请页面直接 CRUD 已接入 committed-event 入口
-- 后台刷新入口：定时补偿调度已接到 `CustomerIntelligenceRefreshService.run_due_retries(...)`，同时处理同步业务事件产生的 `PENDING` run 和失败后到期的 `RETRY_PENDING` run；批量重建已接到 `CustomerIntelligenceRefreshService.trigger_batch_rebuild(...)`
-
-### 当前代码落地顺序
-
-后续实现按下面顺序推进，避免先做页面或 prompt 调优导致架构再次发散。当前底座已经收口为确定性事实门禁、自动沉淀、客户档案刷新、客户概况刷新、后台运行审计、失败补偿、批量重建、streaming trace 和统一投影；后续重点是补齐业务触发面与事实语义合并质量：
-
-```text
-1. CustomerIntelligenceEvent 标准化入口
-2. CustomerIntelligenceGraph typed state / subgraph / streaming
-3. LangGraph Store MySQL-backed 长期记忆
-4. CustomerFact / FactSource 事实库
-5. LLM 结构化事实提炼节点并入 CustomerIntelligenceGraph
-6. 事实冲突融合、自动沉淀门禁、客户档案和客户概况刷新节点并入 graph
-7. Web / IM 统一消费 visible trace 和 customer intelligence payload；客户事实不产生 interaction
-```
-
-### 第一阶段：统一入口
-
-目标：
-
-- 把客户档案生成、客户概况生成收拢到 Agent 的客户智能子图
-- 先复用现有字段和服务能力
-- 让 Agent 成为客户档案更新的统一入口
-
-交付：
-
-- `Customer Intelligence Graph`
-- 客户档案刷新工具
-- 客户概况刷新工具
-- Agent 执行轨迹统一展示
-
-### 第二阶段：建设客户事实库
-
-目标：
-
-- 新增客户事实、来源、快照、事件表
-- 让客户档案从“生成文本”变成“基于证据的客户记忆”
-
-交付：
-
-- `customer_facts`
-- `customer_fact_sources`
-- `customer_profile_snapshots`
-- `customer_intelligence_events`
-- 事实合并与冲突判断逻辑
-
-### 第三阶段：接入多点触发
-
-目标：
-
-- 接入跟进、商机、合同、回款、联系人、业务流程事件
-- 形成自动更新机制
-
-交付：
-
-- 跟进触发：已接入客户活动事件和 Agent 跟进写入结果触发
-- 商机触发：已通过成交旅程事件和 Agent 商机工具结果触发
-- 合同触发：已通过成交旅程事件和 Agent 合同工具结果触发
-- 回款触发：已通过成交旅程事件和 Agent 回款工具结果触发
-- 联系人触发：已接入 Agent 写入、页面新增、页面更新、设置主联系人、页面删除后的联系人事件触发
-- 业务流程触发：已接入 `DealJourneyService.record_event(...)` 统一业务流程事件触发；同步事务内只创建客户智能 `PENDING` run，后台调度在事务提交后进入 LangGraph
-- 直接 CRUD 触发：商机编辑 / 删除、合同编辑 / 删除、回款计划编辑 / 删除、回款记录编辑 / 删除、开票抬头新增 / 编辑 / 设默认 / 删除、发票申请新增 / 编辑 / 删除 / 标记已开票、部署信息新增 / 编辑 / 设默认 / 删除、License 申请新增 / 编辑 / 删除 / 提交 / 发放已通过 `CustomerBusinessObjectIntelligenceService` 接入通用业务对象变更快照事件；删除场景不依赖删除后的 ORM 对象恢复上下文
-- 审批状态触发：发票申请和 License 申请的通用审批流转已通过 `CustomerApprovalIntelligenceService` 接入客户智能刷新，审批写入成功后触发，刷新失败不阻断审批主流程
-
-继续补齐：
-
-- 对批量导入、数据修复、第三方同步这类非交互路径，统一发 `CustomerIntelligenceEvent`，不要直接调用 LLM 或 Qdrant
-- 为后台运营继续补充更细的失败处理动作，例如指定 request 或指定客户的重放入口，复用 `customer_intelligence_runs` 和 `visible_trace`
-
-### 第四阶段：接入向量检索
-
-目标：
-
-- 把跟进原文、业务事件摘要、历史客户总结向量化
-- 支撑 Agent 问答、归纳和上下文补全
-- 使用 Qdrant 建设客户级语义证据库
-
-交付：
-
-- Qdrant collection：`crm_customer_evidence`
-- Qdrant payload filter：租户、团队、客户、来源、业务对象、时间范围
-- 客户向量文档索引
-- 客户级语义检索工具
-- 业务事件到向量文档的增量同步
-- 向量文档删除 / 重建 / 幂等 upsert
-- RAG 上下文组装
-- 证据引用能力
-
-### 第四点五阶段：接入 LangGraph Store 持久化
-
-目标：
-
-- 把客户长期记忆从会话上下文中独立出来
-- Web、IM、后台事件共享同一套客户级 Agent 记忆
-- 不新增独立 Store 数据库，优先使用 MySQL-backed Store
-
-交付：
-
-- `agent_memory_entries`
-- `customer_memory_store_service.py`
-- LangGraph Store namespace 规范
-- 客户摘要、客户偏好、事实索引、检索索引读写能力
-- Store 与 Qdrant / 客户事实库之间的引用关系
-
-### 第五阶段：优化前端体验
-
-目标：
-
-- 让用户看到可信、自然、可解释的客户档案
-
-交付：
-
-- 更新时间
-- 更新来源
-- 引用依据
-- 冲突候选静默忽略与内部诊断
-- 手动刷新
-- 执行轨迹展示
-
-## 13. 最终形态
-
-最终客户档案模块会变成：
-
-```text
-业务动作发生
-  ↓
-Agent 自动理解
-  ↓
-沉淀客户知识
-  ↓
-更新客户档案
-  ↓
-支撑销售问答
-  ↓
-反哺商机、合同、回款、流程推进
-```
-
-客户档案不再是一个孤立页面，而是整个 CRM Agent 的客户记忆底座。
-
-这套架构会同时提升：
-
-- 客户档案质量
-- Agent 理解能力
-- 商机推进准确性
-- 销售建议质量
-- IM 端问答体验
-- 业务流程自动化能力
-
-## 14. 官方能力依据
-
-本方案对齐的 LangGraph 能力：
-
-- Overview
-  - LangGraph 是低层编排框架和长期运行 Agent runtime，适合确定性步骤和 Agent 步骤混合的复杂流程
-- Graph API
-  - 使用 `StateGraph`、typed state、reducers、conditional edges、`Command` 和 runtime context
-- Persistence
-  - 使用 checkpointer 保存 thread 内短期状态、中断点和恢复上下文
-- Memory
-  - 使用 store 保存跨 thread 的长期记忆
-- Interrupts
-  - interrupt/resume 是 LangGraph 的通用 Workflow 能力
-  - 客户智能事实沉淀不使用 interrupt；历史跟进任务确认等 Workflow 才使用该能力
-- Streaming
-  - 使用事件流把节点进度、LLM 输出和子图过程投影给 Web / IM；被忽略事实不生成用户提示
-- Subgraphs
-  - 使用子图复用客户上下文、记忆检索、事实抽取、事实融合和档案刷新能力
-
-官方文档：
-
-- https://docs.langchain.com/oss/python/langgraph/overview
-- https://docs.langchain.com/oss/python/langgraph/graph-api
-- https://docs.langchain.com/oss/python/langgraph/persistence
-- https://docs.langchain.com/oss/python/langgraph/add-memory
-- https://docs.langchain.com/oss/python/langgraph/interrupts
-- https://docs.langchain.com/oss/python/langgraph/streaming
-- https://docs.langchain.com/oss/python/langgraph/use-subgraphs
+> **让业务事实持续进入，让业务状态准确呈现，让 Agent 帮助归纳，让销售能够快速阅读和回看；但不替销售做销售决策。**

@@ -287,94 +287,6 @@ class CustomerCRUD:
         db.refresh(customer)
         return customer
 
-    def update_profile_status(
-        self,
-        db: Session,
-        customer_id: int,
-        status: str,
-        error_message: Optional[str] = None,
-        *,
-        commit: bool = True,
-    ) -> Customer:
-        """更新档案生成状态"""
-        customer = db.query(Customer).filter(Customer.id == customer_id).first()
-        if not customer:
-            raise ValueError("客户不存在")
-
-        customer.profile_status = status
-        if status == "FAILED" and error_message:
-            customer.profile_error_message = error_message
-        if status == "COMPLETED":
-            customer.profile_generated_time = business_now()
-
-        customer.version += 1
-        if commit:
-            db.commit()
-            db.refresh(customer)
-        else:
-            db.flush()
-        return customer
-
-    def update_profile(self, db: Session, customer_id: int, profile_data: dict) -> Customer:
-        """写入客户智能图生成的基础档案字段"""
-        customer = db.query(Customer).filter(Customer.id == customer_id).first()
-        if not customer:
-            raise ValueError("客户不存在")
-
-        for field, value in profile_data.items():
-            if hasattr(customer, field):
-                setattr(customer, field, value)
-
-        customer.version += 1
-        db.commit()
-        db.refresh(customer)
-        return customer
-
-    def update_customer_brief_status(
-        self,
-        db: Session,
-        customer_id: int,
-        status: str,
-        error_message: Optional[str] = None,
-        *,
-        commit: bool = True,
-    ) -> Customer:
-        """更新客户概况生成状态"""
-        customer = db.query(Customer).filter(Customer.id == customer_id).first()
-        if not customer:
-            raise ValueError("客户不存在")
-
-        customer.customer_brief_status = status
-        if status != "FAILED":
-            customer.customer_brief_error_message = None
-        if status == "FAILED" and error_message:
-            customer.customer_brief_error_message = error_message
-        if status == "COMPLETED":
-            customer.customer_brief_generated_time = business_now()
-
-        customer.version += 1
-        if commit:
-            db.commit()
-            db.refresh(customer)
-        else:
-            db.flush()
-        return customer
-
-    def update_customer_brief(self, db: Session, customer_id: int, brief_data: dict) -> Customer:
-        """更新客户概况内容"""
-        customer = db.query(Customer).filter(Customer.id == customer_id).first()
-        if not customer:
-            raise ValueError("客户不存在")
-
-        for field, value in brief_data.items():
-            if hasattr(customer, field):
-                setattr(customer, field, value)
-
-        customer.version += 1
-        db.commit()
-        db.refresh(customer)
-        return customer
-
     def delete(
         self, db: Session, db_obj: Customer, operator_id: Optional[str] = None, team_id: Optional[int] = None
     ) -> Customer:
@@ -491,7 +403,6 @@ class CustomerCRUD:
             team_id=team_id,
             default_procurement_method_id=default_procurement_method_id,
             creator_id=creator_id,
-            profile_status="PENDING",
         )
 
         db.add(customer)
@@ -828,8 +739,11 @@ class ContactCRUD:
         update_data = obj_in.model_dump(exclude_unset=True)
 
         if update_data:
+            changed = any(getattr(db_obj, field, None) != value for field, value in update_data.items())
             for field, value in update_data.items():
                 setattr(db_obj, field, value)
+            if changed:
+                db_obj.post_commit_revision = int(getattr(db_obj, "post_commit_revision", None) or 1) + 1
 
             db.commit()
             db.refresh(db_obj)
@@ -852,8 +766,13 @@ class ContactCRUD:
         existing_primary = self.get_primary_by_customer_id(db, customer_id, team_id)
         if existing_primary and existing_primary.id != contact.id:
             existing_primary.is_primary = 0
+            existing_primary.post_commit_revision = int(
+                getattr(existing_primary, "post_commit_revision", None) or 1
+            ) + 1
 
-        contact.is_primary = 1
+        if not contact.is_primary:
+            contact.is_primary = 1
+            contact.post_commit_revision = int(getattr(contact, "post_commit_revision", None) or 1) + 1
         db.commit()
         db.refresh(contact)
         return contact

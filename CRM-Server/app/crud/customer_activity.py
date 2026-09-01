@@ -7,6 +7,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models.customer_activity import CustomerActivity
+from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
 from app.models.lead import LeadFollowUp
 from app.schemas.customer_activity import CustomerActivityCreate, CustomerActivityUpdate
 from app.services.customer_activity_kinds import FOLLOW_UP_METHOD_TO_KIND, CustomerActivityKind, get_activity_kind_meta
@@ -473,10 +474,38 @@ class CustomerActivityCRUD:
         db.refresh(activity)
         return activity
 
-    def delete(self, db: Session, db_obj: CustomerActivity) -> CustomerActivity:
+    def delete(
+        self,
+        db: Session,
+        db_obj: CustomerActivity,
+        *,
+        commit: bool = True,
+        deleted_by: str | None = None,
+    ) -> CustomerActivity:
         _mark_customer_activity_evidence_deleted(db, db_obj)
+        # The operational activity row is hard-deleted, so keep a durable
+        # source-side tombstone in the same transaction.  Its monotonically
+        # increasing ID is included in the customer context watermark; if the
+        # async profile enqueue is lost after commit, reconciliation still
+        # observes this deletion and rebuilds the profile without the row.
+        if db_obj.customer_id is not None:
+            db.add(
+                CustomerActivityDeletionTombstone(
+                    team_id=db_obj.team_id,
+                    customer_id=db_obj.customer_id,
+                    activity_id=db_obj.id,
+                    deal_journey_id=db_obj.deal_journey_id,
+                    activity_occurred_at=db_obj.occurred_at,
+                    activity_revision=db_obj.post_commit_revision,
+                    deleted_by=deleted_by,
+                )
+            )
+            db.flush()
         db.delete(db_obj)
-        db.commit()
+        if commit:
+            db.commit()
+        else:
+            db.flush()
         return db_obj
 
     def build_title(self, activity_kind: str, content_json: JSONObject) -> str:

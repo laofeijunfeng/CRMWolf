@@ -7,7 +7,7 @@ class FakeEmbeddingService:
         return [0.1, 0.2, 0.3]
 
 
-class WeightedQdrantIndexService:
+class FakeQdrantIndexService:
     enabled = True
 
     def __init__(self) -> None:
@@ -17,16 +17,16 @@ class WeightedQdrantIndexService:
         self.calls.append(kwargs)
         return [
             CustomerEvidenceSearchResult(
-                id="brief",
+                id="profile",
                 score=0.80,
                 tenant_id=2,
                 team_id=2,
                 customer_id=101,
-                source_type="customer_brief",
-                source_object_id="brief-1",
+                source_type="follow_up",
+                source_object_id="activity-0",
                 business_object_type=None,
                 business_object_id=None,
-                title="客户概况",
+                title="电话跟进",
                 text="客户正在推进 POC。",
             ),
             CustomerEvidenceSearchResult(
@@ -45,8 +45,8 @@ class WeightedQdrantIndexService:
         ]
 
 
-def test_customer_evidence_retriever_overfetches_and_reranks_by_source_weight() -> None:
-    qdrant = WeightedQdrantIndexService()
+def test_customer_evidence_retriever_overfetches_and_ranks_by_vector_score() -> None:
+    qdrant = FakeQdrantIndexService()
     retriever = CustomerEvidenceRetriever(
         embedding_service=FakeEmbeddingService(),
         qdrant_index_service=qdrant,
@@ -63,6 +63,8 @@ def test_customer_evidence_retriever_overfetches_and_reranks_by_source_weight() 
 
     assert qdrant.calls[0]["limit"] == 3
     assert result.state.status == "ok"
-    assert result.state.strategy == "customer_semantic_qdrant_source_weighted"
-    assert result.hits[0].evidence_id == "follow-up"
-    assert result.hits[0].adjusted_score > 0.80
+    assert result.state.strategy == "customer_semantic_qdrant"
+    assert result.hits[0].evidence_id == "profile"
+    assert result.hits[0].score == 0.80
+    assert "adjusted_score" not in result.hits[0].to_dict()
+    assert "source_weights" not in result.state.to_dict()

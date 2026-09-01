@@ -164,7 +164,6 @@ class DefaultCustomerContextReader:
 
 _STRONG_SECTION_KEYS: dict[str, tuple[str, ...]] = {
     "profile": ("customer", "same_industry_customers"),
-    "brief": ("customer_facts",),
     "contacts": ("contacts",),
     "opportunities": ("opportunities",),
     "contracts": ("contracts",),
@@ -211,14 +210,6 @@ def _project_sections(
             value: JsonValue = {
                 "customer": strong_context.get("customer", {}),
                 "same_industry_customers": strong_context.get("same_industry_customers", []),
-            }
-        elif section == "brief":
-            customer = strong_context.get("customer")
-            customer_profile = customer if isinstance(customer, dict) else {}
-            value = {
-                "customer_brief_status": customer_profile.get("customer_brief_status"),
-                "customer_brief_markdown": customer_profile.get("customer_brief_markdown"),
-                "customer_facts": strong_context.get("customer_facts", []),
             }
         elif len(keys) == 1:
             value = strong_context.get(keys[0], [])

@@ -1,6 +1,6 @@
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
@@ -50,6 +50,7 @@ from app.api.agent import router as agent_router
 from app.api.agent_query import router as agent_query_router
 from app.api.ai_config import router as ai_config_router
 from app.api.customer_ai import router as customer_ai_router
+from app.api.customer_profiles import router as customer_profiles_router
 from app.api.deployment import router as deployment_router  # 新增
 
 # Frontend Logs 路由
@@ -61,6 +62,7 @@ from app.core.exceptions import (
     AppException,
     app_exception_handler,
     generic_exception_handler,
+    http_exception_handler,
     pydantic_validation_exception_handler,
     sqlalchemy_exception_handler,
     validation_exception_handler,
@@ -85,6 +87,7 @@ app.add_middleware(
 )
 
 app.add_exception_handler(AppException, app_exception_handler)
+app.add_exception_handler(HTTPException, http_exception_handler)
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_exception_handler(ValidationError, pydantic_validation_exception_handler)
 app.add_exception_handler(SQLAlchemyError, sqlalchemy_exception_handler)
@@ -111,6 +114,7 @@ api_router.include_router(procurement_ai.router)
 api_router.include_router(approval_ai.router)
 api_router.include_router(customers.router)
 api_router.include_router(customer_ai_router)
+api_router.include_router(customer_profiles_router)
 api_router.include_router(industry.router)
 api_router.include_router(customer_procurement.router)
 api_router.include_router(customer_activities.router)
@@ -175,6 +179,10 @@ async def startup_event():
     from app.tasks.customer_intelligence_backfill import start_customer_intelligence_backfill_scheduler
     start_customer_intelligence_backfill_scheduler()
 
+    logger.info("启动客户智能档案对账任务...")
+    from app.tasks.customer_intelligence_reconciliation import start_customer_intelligence_reconciliation_scheduler
+    start_customer_intelligence_reconciliation_scheduler()
+
     logger.info("启动跟进确认投递恢复扫描任务...")
     from app.tasks.follow_up_confirmation_delivery_recovery import (
         start_follow_up_confirmation_delivery_recovery_scheduler,
@@ -206,6 +214,8 @@ async def shutdown_event():
     stop_customer_activity_post_commit_recovery_scheduler()
     stop_follow_up_confirmation_delivery_recovery_scheduler()
     stop_customer_intelligence_backfill_scheduler()
+    from app.tasks.customer_intelligence_reconciliation import stop_customer_intelligence_reconciliation_scheduler
+    stop_customer_intelligence_reconciliation_scheduler()
     stop_customer_intelligence_refresh_retry_scheduler()
     stop_customer_evidence_sync_scheduler()
 

@@ -306,7 +306,7 @@ class CustomerAIConfirmedWriteService:
             if event is None or int(event.team_id) != int(team_id) or int(event.tenant_id) != int(team_id):
                 raise ValueError("幂等回放的客户智能事件快照无效")
             scope = str(run.scope)
-            if scope not in {"full", "brief"}:
+            if scope not in {"full", "partial"}:
                 raise ValueError("幂等回放的客户智能刷新范围无效")
             intelligence_request = CustomerIntelligenceCommittedEventRequest(
                 request_id=request_id,

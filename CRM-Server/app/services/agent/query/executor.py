@@ -14,6 +14,7 @@ from app.services.agent.query.adapters import (
     CustomerActivitiesAPIAdapter,
     CustomerContactsAPIAdapter,
     CustomersAPIAdapter,
+    DeploymentInfosAPIAdapter,
     FollowUpTasksAPIAdapter,
 )
 from app.services.agent.query.catalog import CRMQueryCatalog
@@ -60,6 +61,7 @@ class DefaultCRMQueryExecutor:
             "customers_api": CustomersAPIAdapter(client),
             "customer_contacts_api": CustomerContactsAPIAdapter(client),
             "customer_activities_api": CustomerActivitiesAPIAdapter(client),
+            "deployment_infos_api": DeploymentInfosAPIAdapter(client),
             "follow_up_tasks_api": FollowUpTasksAPIAdapter(client),
             "completed_work_api": CompletedWorkAPIAdapter(client),
         }

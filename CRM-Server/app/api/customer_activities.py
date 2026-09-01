@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -32,12 +33,12 @@ from app.services.customer_activity_write_service import (
     CustomerActivityWriteResult,
     customer_activity_write_service,
 )
-from app.services.follow_up_task_projection_service import follow_up_task_projection_service
 from app.services.follow_up_task_reconciliation_evaluation_service import (
     FollowUpTaskReconciliationDecision,
     FollowUpTaskReconciliationTaskDecision,
 )
 from app.services.follow_up_task_transition_execution_service import (
+    FollowUpTaskTransitionExecutionResult,
     FollowUpTaskTransitionExecutionStatus,
     follow_up_task_transition_execution_service,
 )
@@ -46,6 +47,8 @@ from app.services.follow_up_task_transition_plan_service import (
     FollowUpTaskTransitionActionType,
     FollowUpTaskTransitionPlan,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/customer-activities", tags=["客户活动"])
 
@@ -165,6 +168,9 @@ def _durable_work_response(write_result: CustomerActivityWriteResult | None) -> 
         ),
         "customer_intelligence_request_id": intelligence.request_id if intelligence is not None else None,
         "customer_intelligence_scope": intelligence.scope if intelligence is not None else None,
+        "customer_intelligence_schedule_error": (
+            intelligence.schedule_error if intelligence is not None else None
+        ),
         "customer_intelligence_event": intelligence.event.to_dict() if intelligence is not None else None,
     }
 
@@ -271,6 +277,8 @@ async def create_activity_and_complete_tracking(
         plan_source="manual_ui_activity_submission",
     )
 
+    transition_result_holder: dict[str, object] = {}
+
     def complete_tracking_before_commit(_: CustomerActivityWriteResult) -> None:
         transition_result = follow_up_task_transition_execution_service.execute_action(
             db,
@@ -283,6 +291,7 @@ async def create_activity_and_complete_tracking(
         )
         if transition_result.status != FollowUpTaskTransitionExecutionStatus.EXECUTED:
             raise ValueError(transition_result.skip_reason or "追踪任务状态更新失败")
+        transition_result_holder["result"] = transition_result
 
     try:
         write_result = customer_activity_write_service.create(
@@ -301,6 +310,9 @@ async def create_activity_and_complete_tracking(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     customer_activity_write_service.kick(write_result)
+    transition_result = transition_result_holder.get("result")
+    if isinstance(transition_result, FollowUpTaskTransitionExecutionResult):
+        follow_up_task_transition_execution_service.kick_customer_intelligence_refresh(transition_result)
     await customer_activity_processing_service.trigger_processing(write_result.activity.id, team_id)
     return CustomerActivityCreateAndCompleteTrackingResponse(
         activity=_build_activity_response(db, write_result.activity, write_result=write_result),
@@ -423,13 +435,10 @@ def delete_activity(
     if activity.creator_id != str(current_user.id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权删除此客户活动")
     check_customer_activity_permission(activity.customer_id, team_id, current_user, db)
-    follow_up_task_projection_service.run_activity_projection(
+    result = customer_activity_write_service.delete(
         db,
-        activity_id=activity.id,
-        activity_snapshot=activity,
-        trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_DELETED,
+        activity=activity,
         actor_id=str(current_user.id),
-        team_id=team_id,
     )
-    customer_activity_crud.delete(db, activity)
+    customer_activity_write_service.kick_delete(result)
     return MessageResponse(message="删除成功")

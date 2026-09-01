@@ -1,5 +1,7 @@
 <template>
-  <Sidebar collapsible="icon" variant="inset">
+  <SettingsSidebar v-if="isSettingsContext" />
+
+  <Sidebar v-else collapsible="icon" variant="inset">
     <SidebarHeader>
       <SidebarMenu>
         <SidebarMenuItem>
@@ -59,10 +61,12 @@ import { useFollowUpConfirmationStore } from '@/stores/followUpConfirmation'
 import { logger } from '@/utils/logger'
 import NavMain, { type NavMainGroup } from './NavMain.vue'
 import NavUser from './NavUser.vue'
+import SettingsSidebar from './SettingsSidebar.vue'
 
 const router = useRouter()
 const route = useRoute()
 const permissionStore = usePermissionStore()
+const isSettingsContext = computed(() => route.path.startsWith('/settings'))
 const confirmationStore = useFollowUpConfirmationStore()
 const { pendingCount: pendingConfirmationCount } = storeToRefs(confirmationStore)
 const { fetchPendingCount } = confirmationStore

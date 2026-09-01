@@ -29,17 +29,18 @@ async def test_create_contact_triggers_customer_intelligence_refresh(monkeypatch
     contact = _contact()
     scheduled = []
 
-    monkeypatch.setattr(customers_api, "_get_editable_customer", lambda db, customer_id, team_id, current_user: object())
+    monkeypatch.setattr(
+        customers_api,
+        "_get_editable_customer",
+        lambda db, customer_id, team_id, current_user: SimpleNamespace(id=101, public_id="cus_101"),
+    )
     monkeypatch.setattr(customers_api.contact_crud, "create", lambda db, obj_in, customer_id, team_id: contact)
 
-    async def fake_schedule(db, scheduled_contact, *, trigger_type, actor_id):
-        scheduled.append({
-            "contact": scheduled_contact,
-            "trigger_type": trigger_type,
-            "actor_id": actor_id,
-        })
+    def fake_persist(**kwargs):
+        scheduled.append(kwargs)
+        return None
 
-    monkeypatch.setattr(customers_api, "_schedule_contact_intelligence_refresh", fake_schedule)
+    monkeypatch.setattr(customers_api, "_persist_customer_business_object_refresh_after_commit", fake_persist)
 
     result = await customers_api.create_contact(
         101,
@@ -49,10 +50,11 @@ async def test_create_contact_triggers_customer_intelligence_refresh(monkeypatch
         db=object(),
     )
 
-    assert result is contact
+    assert result.id == contact.id
     assert scheduled == [{
-        "contact": contact,
-        "trigger_type": "customer_contact_created",
+        "business_object": contact,
+        "source_type": "customer_contact",
+        "change_type": "created",
         "actor_id": "9",
     }]
 
@@ -63,13 +65,18 @@ async def test_update_contact_triggers_customer_intelligence_refresh(monkeypatch
     scheduled = []
 
     monkeypatch.setattr(customers_api.contact_crud, "get_by_id", lambda db, contact_id, team_id: contact)
-    monkeypatch.setattr(customers_api, "_get_editable_customer", lambda db, customer_id, team_id, current_user: object())
+    monkeypatch.setattr(
+        customers_api,
+        "_get_editable_customer",
+        lambda db, customer_id, team_id, current_user: SimpleNamespace(id=101, public_id="cus_101"),
+    )
     monkeypatch.setattr(customers_api.contact_crud, "update", lambda db, db_obj, obj_in: contact)
 
-    async def fake_schedule(db, scheduled_contact, *, trigger_type, actor_id):
-        scheduled.append((scheduled_contact, trigger_type, actor_id))
+    def fake_persist(**kwargs):
+        scheduled.append(kwargs)
+        return None
 
-    monkeypatch.setattr(customers_api, "_schedule_contact_intelligence_refresh", fake_schedule)
+    monkeypatch.setattr(customers_api, "_persist_customer_business_object_refresh_after_commit", fake_persist)
 
     result = await customers_api.update_contact(
         601,
@@ -79,8 +86,13 @@ async def test_update_contact_triggers_customer_intelligence_refresh(monkeypatch
         db=object(),
     )
 
-    assert result is contact
-    assert scheduled == [(contact, "customer_contact_updated", "9")]
+    assert result.id == contact.id
+    assert scheduled == [{
+        "business_object": contact,
+        "source_type": "customer_contact",
+        "change_type": "updated",
+        "actor_id": "9",
+    }]
 
 
 @pytest.mark.asyncio
@@ -89,13 +101,18 @@ async def test_set_primary_contact_triggers_customer_intelligence_refresh(monkey
     scheduled = []
 
     monkeypatch.setattr(customers_api.contact_crud, "get_by_id", lambda db, contact_id, team_id: contact)
-    monkeypatch.setattr(customers_api, "_get_editable_customer", lambda db, customer_id, team_id, current_user: object())
+    monkeypatch.setattr(
+        customers_api,
+        "_get_editable_customer",
+        lambda db, customer_id, team_id, current_user: SimpleNamespace(id=101, public_id="cus_101"),
+    )
     monkeypatch.setattr(customers_api.contact_crud, "set_primary", lambda db, db_obj, team_id: contact)
 
-    async def fake_schedule(db, scheduled_contact, *, trigger_type, actor_id):
-        scheduled.append((scheduled_contact, trigger_type, actor_id))
+    def fake_persist(**kwargs):
+        scheduled.append(kwargs)
+        return None
 
-    monkeypatch.setattr(customers_api, "_schedule_contact_intelligence_refresh", fake_schedule)
+    monkeypatch.setattr(customers_api, "_persist_customer_business_object_refresh_after_commit", fake_persist)
 
     result = await customers_api.set_primary_contact(
         601,
@@ -104,8 +121,13 @@ async def test_set_primary_contact_triggers_customer_intelligence_refresh(monkey
         db=object(),
     )
 
-    assert result is contact
-    assert scheduled == [(contact, "customer_contact_updated", "9")]
+    assert result.id == contact.id
+    assert scheduled == [{
+        "business_object": contact,
+        "source_type": "customer_contact",
+        "change_type": "updated",
+        "actor_id": "9",
+    }]
 
 
 @pytest.mark.asyncio
@@ -114,13 +136,18 @@ async def test_delete_contact_triggers_customer_intelligence_refresh_after_succe
     scheduled = []
 
     monkeypatch.setattr(customers_api.contact_crud, "get_by_id", lambda db, contact_id, team_id: contact)
-    monkeypatch.setattr(customers_api, "_get_editable_customer", lambda db, customer_id, team_id, current_user: object())
+    monkeypatch.setattr(
+        customers_api,
+        "_get_editable_customer",
+        lambda db, customer_id, team_id, current_user: SimpleNamespace(id=101, public_id="cus_101"),
+    )
     monkeypatch.setattr(customers_api.contact_crud, "delete", lambda db, db_obj: contact)
 
-    async def fake_schedule_event(db, event):
-        scheduled.append(event)
+    def fake_persist(**kwargs):
+        scheduled.append(kwargs)
+        return None
 
-    monkeypatch.setattr(customers_api, "_schedule_customer_intelligence_event_refresh", fake_schedule_event)
+    monkeypatch.setattr(customers_api, "_persist_customer_business_object_refresh_after_commit", fake_persist)
 
     result = await customers_api.delete_contact(
         601,
@@ -130,9 +157,12 @@ async def test_delete_contact_triggers_customer_intelligence_refresh_after_succe
     )
 
     assert result.message == "删除成功"
-    assert len(scheduled) == 1
-    assert scheduled[0].trigger_type == "customer_contact_deleted"
-    assert scheduled[0].customer_id == 101
+    assert scheduled == [{
+        "business_object": contact,
+        "source_type": "customer_contact",
+        "change_type": "deleted",
+        "actor_id": "9",
+    }]
 
 
 @pytest.mark.asyncio
@@ -144,9 +174,17 @@ async def test_delete_contact_does_not_trigger_customer_intelligence_refresh_whe
         raise ValueError("不能删除主联系人")
 
     monkeypatch.setattr(customers_api.contact_crud, "get_by_id", lambda db, contact_id, team_id: contact)
-    monkeypatch.setattr(customers_api, "_get_editable_customer", lambda db, customer_id, team_id, current_user: object())
+    monkeypatch.setattr(
+        customers_api,
+        "_get_editable_customer",
+        lambda db, customer_id, team_id, current_user: SimpleNamespace(id=101, public_id="cus_101"),
+    )
     monkeypatch.setattr(customers_api.contact_crud, "delete", fake_delete)
-    monkeypatch.setattr(customers_api, "_schedule_customer_intelligence_event_refresh", lambda db, event: scheduled.append(event))
+    monkeypatch.setattr(
+        customers_api,
+        "_persist_customer_business_object_refresh_after_commit",
+        lambda **kwargs: scheduled.append(kwargs),
+    )
 
     with pytest.raises(customers_api.HTTPException):
         await customers_api.delete_contact(

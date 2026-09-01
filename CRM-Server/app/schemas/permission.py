@@ -23,6 +23,7 @@ class PermissionUpdate(BaseModel):
 
 class PermissionResponse(PermissionBase):
     id: int
+    is_active: bool = Field(True, description="是否可用于新授权")
     created_at: datetime
     updated_at: datetime
 

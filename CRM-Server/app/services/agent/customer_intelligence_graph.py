@@ -19,7 +19,6 @@ from langgraph.graph import END, START, StateGraph
 from app.core.database import SessionLocal
 from app.services.agent.checkpointer import agent_checkpoint_saver
 from app.services.agent.types import coerce_json_dict
-from app.services.customer_brief_service import customer_brief_service
 from app.services.customer_context_answer_service import (
     customer_context_answer_service,
 )
@@ -52,7 +51,6 @@ from app.services.customer_memory_store_service import (
     CustomerMemoryStoreService,
     customer_memory_store_service,
 )
-from app.services.customer_profile_service import customer_profile_service
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable, Iterator
@@ -70,8 +68,6 @@ JSONDict: TypeAlias = dict[str, JSONValue]
 
 CustomerIntelligenceRoute = Literal[
     "answer_context",
-    "refresh_profile",
-    "refresh_brief",
     "write_memory",
     "skip",
 ]
@@ -113,8 +109,6 @@ class CustomerIntelligenceGraphState(TypedDict, total=False):
     customer_memory: JSONDict
     extracted_customer_facts: list[JSONDict]
     persisted_customer_fact_refs: list[JSONDict]
-    profile_refresh_result: JSONDict
-    brief_refresh_result: JSONDict
     customer_context_answer: JSONDict
     assistant_content: str
     retrieval_state: JSONDict
@@ -145,21 +139,6 @@ class CustomerIntelligenceGraphStreamChunk(TypedDict, total=False):
     event: JSONDict
     result: CustomerIntelligenceGraphResult
 
-
-class CustomerProfileRefreshService(Protocol):
-    async def generate_profile(
-        self,
-        customer_id: int,
-        account_name: str,
-        source_lead_id: int | None = None,
-        team_id: int | None = None,
-    ) -> JSONDict:
-        pass
-
-
-class CustomerBriefRefreshService(Protocol):
-    async def generate_brief(self, customer_id: int, team_id: int) -> JSONDict:
-        pass
 
 
 class CustomerContextAnswerGenerationService(Protocol):
@@ -225,8 +204,6 @@ class CustomerIntelligenceGraphService:
         memory_store_service: CustomerMemoryStoreService | None = None,
         fact_extraction_service: CustomerFactExtractionService | None = None,
         fact_service: CustomerFactService | None = None,
-        profile_refresh_service: CustomerProfileRefreshService | None = None,
-        brief_refresh_service: CustomerBriefRefreshService | None = None,
         answer_service: CustomerContextAnswerGenerationService | None = None,
         checkpointer: object | None,
         session_factory: Callable[[], Session] = SessionLocal,
@@ -235,14 +212,6 @@ class CustomerIntelligenceGraphService:
         self.memory_store_service = memory_store_service or customer_memory_store_service
         self.fact_extraction_service = fact_extraction_service or customer_fact_extraction_service
         self.fact_service = fact_service or customer_fact_service
-        self.profile_refresh_service = profile_refresh_service or cast(
-            "CustomerProfileRefreshService",
-            customer_profile_service,
-        )
-        self.brief_refresh_service = brief_refresh_service or cast(
-            "CustomerBriefRefreshService",
-            customer_brief_service,
-        )
         self.answer_service = answer_service or cast(
             "CustomerContextAnswerGenerationService",
             customer_context_answer_service,
@@ -284,8 +253,6 @@ class CustomerIntelligenceGraphService:
         graph.add_node("extract_facts", self._extract_facts)
         graph.add_node("assess_facts", self._assess_facts)
         graph.add_node("persist_facts", self._persist_facts)
-        graph.add_node("refresh_profile_fields", self._refresh_profile_fields)
-        graph.add_node("refresh_brief_fields", self._refresh_brief_fields)
         graph.add_node("answer_context", self._answer_context)
         graph.add_node("write_memory", self._write_memory)
         graph.add_node("emit_trace", self._emit_trace)
@@ -316,13 +283,9 @@ class CustomerIntelligenceGraphService:
             "persist_facts",
             self._route_after_persist_facts,
             {
-                "refresh_profile_fields": "refresh_profile_fields",
-                "refresh_brief_fields": "refresh_brief_fields",
                 "write_memory": "write_memory",
             },
         )
-        graph.add_edge("refresh_profile_fields", "refresh_brief_fields")
-        graph.add_edge("refresh_brief_fields", "write_memory")
         graph.add_edge("answer_context", "emit_trace")
         graph.add_edge("write_memory", "emit_trace")
         graph.add_edge("emit_trace", END)
@@ -336,6 +299,10 @@ class CustomerIntelligenceGraphService:
         event = input_state.get("event")
         if not isinstance(event, CustomerIntelligenceEvent):
             raise ValueError("customer intelligence execution requires an event")
+        if _is_profile_refresh_event(event.to_dict()):
+            raise ValueError(
+                "客户档案更新必须通过 CustomerProfileProjectionWorkflow 执行"
+            )
         checkpoint_state = _checkpoint_state_from_input(input_state)
         event_key = _event_key(checkpoint_state)
         graph_input: CustomerIntelligenceGraphState | None = checkpoint_state
@@ -411,15 +378,11 @@ class CustomerIntelligenceGraphService:
         stream_interrupts: object | None,
     ) -> CustomerIntelligenceGraphResult:
         if not hasattr(graph, "aget_state"):
-            raise RuntimeError(
-                "customer intelligence checkpoint state reader is unavailable"
-            )
+            raise RuntimeError("customer intelligence checkpoint state reader is unavailable")
         snapshot = await graph.aget_state(config)
         values = getattr(snapshot, "values", None)
         if not isinstance(values, dict):
-            raise RuntimeError(
-                "customer intelligence checkpoint final state is unavailable"
-            )
+            raise RuntimeError("customer intelligence checkpoint final state is unavailable")
         result = _result_with_interrupts(
             _merge_final_stream_state(
                 streamed_state=streamed_state,
@@ -455,6 +418,13 @@ class CustomerIntelligenceGraphService:
         if not event.get("customer_id") or not event.get("team_id"):
             return "skip"
         return ["load_context", "retrieve_memory"]
+
+
+
+
+
+
+
 
     def _load_customer_context(
         self,
@@ -552,7 +522,7 @@ class CustomerIntelligenceGraphService:
         route = _route_for_event(event)
         refresh_plan = {
             "route": route,
-            "requires_llm_extraction": route in {"refresh_profile", "refresh_brief", "write_memory"},
+            "requires_llm_extraction": route == "write_memory",
             "requires_review": False,
             "target_sections": _target_sections(route),
             "reason": _plan_reason(trigger_type, route),
@@ -566,7 +536,7 @@ class CustomerIntelligenceGraphService:
 
     def _route_after_plan(self, state: CustomerIntelligenceGraphState) -> str:
         route = state.get("route")
-        if route in {"refresh_profile", "refresh_brief", "write_memory"}:
+        if route == "write_memory":
             refresh_plan = coerce_json_dict(state.get("refresh_plan"))
             if refresh_plan.get("requires_llm_extraction") is True:
                 return "extract_facts"
@@ -858,93 +828,8 @@ class CustomerIntelligenceGraphService:
         }
 
     def _route_after_persist_facts(self, state: CustomerIntelligenceGraphState) -> str:
-        route = state.get("route")
-        if route == "refresh_profile":
-            return "refresh_profile_fields"
-        if route == "refresh_brief":
-            return "refresh_brief_fields"
         return "write_memory"
 
-    async def _refresh_profile_fields(
-        self,
-        state: CustomerIntelligenceGraphState,
-        runtime: Runtime[CustomerIntelligenceRuntimeContext],
-    ) -> CustomerIntelligenceGraphState:
-        event = coerce_json_dict(state.get("event"))
-        customer_context = coerce_json_dict(state.get("customer_context"))
-        customer_id = _positive_int(event.get("customer_id"))
-        team_id = _positive_int(event.get("team_id")) or runtime.context.team_id
-        account_name = _customer_account_name(customer_context)
-        source_lead_id = _customer_source_lead_id(customer_context)
-        if customer_id is None or team_id <= 0 or not account_name:
-            return {
-                "profile_refresh_result": {"success": False, "error": "invalid_customer_context"},
-                "errors": [{"event": "customer_profile_refresh_failed", "message": "invalid_customer_context"}],
-                "visible_trace": [_trace_step("刷新客户档案", "客户档案刷新缺少必要上下文")],
-            }
-
-        result = coerce_json_dict(
-            await self.profile_refresh_service.generate_profile(
-                customer_id=customer_id,
-                account_name=account_name,
-                source_lead_id=source_lead_id,
-                team_id=team_id,
-            )
-        )
-        if result.get("success") is not True:
-            return {
-                "profile_refresh_result": result,
-                "errors": [
-                    {
-                        "event": "customer_profile_refresh_failed",
-                        "message": str(result.get("error") or "unknown_error"),
-                    }
-                ],
-                "visible_trace": [_trace_step("刷新客户档案", "客户档案暂未刷新成功，已继续处理客户概况")],  # noqa: RUF001
-            }
-        return {
-            "profile_refresh_result": result,
-            "visible_trace": [_trace_step("刷新客户档案", "已刷新客户基础档案")],
-            "events": [{"event": "customer_profile_refreshed", "customer_id": customer_id}],
-        }
-
-    async def _refresh_brief_fields(
-        self,
-        state: CustomerIntelligenceGraphState,
-        runtime: Runtime[CustomerIntelligenceRuntimeContext],
-    ) -> CustomerIntelligenceGraphState:
-        event = coerce_json_dict(state.get("event"))
-        customer_id = _positive_int(event.get("customer_id"))
-        team_id = _positive_int(event.get("team_id")) or runtime.context.team_id
-        if customer_id is None or team_id <= 0:
-            return {
-                "brief_refresh_result": {"success": False, "error": "invalid_customer_event"},
-                "errors": [{"event": "customer_brief_refresh_failed", "message": "invalid_customer_event"}],
-                "visible_trace": [_trace_step("刷新客户概况", "客户概况刷新缺少必要信息")],
-            }
-
-        result = coerce_json_dict(
-            await self.brief_refresh_service.generate_brief(
-                customer_id=customer_id,
-                team_id=team_id,
-            )
-        )
-        if result.get("success") is not True:
-            return {
-                "brief_refresh_result": result,
-                "errors": [
-                    {
-                        "event": "customer_brief_refresh_failed",
-                        "message": str(result.get("error") or "unknown_error"),
-                    }
-                ],
-                "visible_trace": [_trace_step("刷新客户概况", "客户概况暂未刷新成功，已继续更新客户记忆")],  # noqa: RUF001
-            }
-        return {
-            "brief_refresh_result": result,
-            "visible_trace": [_trace_step("刷新客户概况", "已刷新销售侧客户概况")],
-            "events": [{"event": "customer_brief_refreshed", "customer_id": customer_id}],
-        }
 
     def _write_memory(
         self,
@@ -1028,6 +913,12 @@ class CustomerIntelligenceGraphService:
         }
 
 
+
+
+
+
+
+
 def _checkpoint_state_from_input(input_state: CustomerIntelligenceGraphInput) -> CustomerIntelligenceGraphState:
     event = input_state.get("event")
     event_payload = event.to_dict() if isinstance(event, CustomerIntelligenceEvent) else {}
@@ -1042,8 +933,6 @@ def _checkpoint_state_from_input(input_state: CustomerIntelligenceGraphInput) ->
         "customer_memory": {},
         "extracted_customer_facts": [],
         "persisted_customer_fact_refs": [],
-        "profile_refresh_result": {},
-        "brief_refresh_result": {},
         "customer_context_answer": {},
         "assistant_content": "",
         "retrieval_state": {},
@@ -1115,45 +1004,42 @@ def _positive_int(value: object) -> int | None:
     return None
 
 
+_PROFILE_REFRESH_TRIGGER_TYPES = frozenset({
+    "manual_refresh_requested",
+    "customer_intelligence_batch_rebuild_requested",
+    "customer_intelligence_historical_backfill_requested",
+    "customer_intelligence_reconciliation_requested",
+    "customer_created",
+    "customer_converted_from_lead",
+})
+
+
+def _is_profile_refresh_event(event: JSONDict) -> bool:
+    return str(event.get("trigger_type") or "") in _PROFILE_REFRESH_TRIGGER_TYPES
+
+
 def _route_for_event(event: JSONDict) -> CustomerIntelligenceRoute:
-    trigger_type = str(event.get("trigger_type") or "")
-    if trigger_type in {
-        "manual_refresh_requested",
-        "customer_intelligence_batch_rebuild_requested",
-        "customer_intelligence_historical_backfill_requested",
-    }:
-        payload = coerce_json_dict(event.get("payload"))
-        refresh_scope = str(payload.get("refresh_scope") or "full")
-        if refresh_scope == "brief":
-            return "refresh_brief"
-        return "refresh_profile"
-    return _route_for_trigger(trigger_type)
+    return _route_for_trigger(str(event.get("trigger_type") or ""))
 
 
 def _route_for_trigger(trigger_type: str) -> CustomerIntelligenceRoute:
     if trigger_type == "agent_customer_question":
         return "answer_context"
-    if trigger_type in {"customer_created", "customer_converted_from_lead"}:
-        return "refresh_profile"
-    if trigger_type == "customer_profile_generated":
-        return "write_memory"
-    if trigger_type == "customer_brief_generated":
-        return "write_memory"
     if trigger_type in CUSTOMER_INTELLIGENCE_COMMITTED_EVENT_TRIGGER_TYPES:
-        return "refresh_brief"
+        return "write_memory"
     return "skip"
 
 
 def _target_sections(route: CustomerIntelligenceRoute) -> list[str]:
     if route == "answer_context":
         return ["customer_context"]
-    if route == "refresh_profile":
-        return ["base_profile", "dynamic_brief", "memory"]
-    if route == "refresh_brief":
-        return ["dynamic_brief", "memory"]
     if route == "write_memory":
         return ["memory"]
     return []
+
+
+
+
 
 
 def _query_text_from_event(event: JSONDict) -> str:
@@ -1180,12 +1066,11 @@ def _trigger_label(event: JSONDict) -> str:
         "customer_business_object_created": "识别到新的业务信息",
         "customer_business_object_updated": "识别到业务信息更新",
         "customer_business_object_deleted": "识别到业务信息删除",
-        "customer_profile_generated": "识别到客户档案更新",
-        "customer_brief_generated": "识别到客户概况更新",
-        "deal_journey_event_recorded": "识别到业务流程进展",
+                "deal_journey_event_recorded": "识别到业务流程进展",
         "manual_refresh_requested": "识别到手动刷新请求",
         "customer_intelligence_batch_rebuild_requested": "识别到批量重建请求",
         "customer_intelligence_historical_backfill_requested": "识别到历史客户补档任务",
+        "customer_intelligence_reconciliation_requested": "对账发现客户档案存在未纳入的业务变化",
         "agent_customer_question": "识别到客户信息查询",
     }
     trigger_type = str(event.get("trigger_type") or "")
@@ -1201,19 +1086,8 @@ def _context_loaded_label(customer_context: JSONDict) -> str:
     return "已读取客户上下文"
 
 
-def _customer_account_name(customer_context: JSONDict) -> str:
-    strong_context = coerce_json_dict(customer_context.get("strong_context"))
-    customer = coerce_json_dict(strong_context.get("customer"))
-    account_name = customer.get("account_name")
-    if isinstance(account_name, str):
-        return account_name.strip()
-    return ""
 
 
-def _customer_source_lead_id(customer_context: JSONDict) -> int | None:
-    strong_context = coerce_json_dict(customer_context.get("strong_context"))
-    customer = coerce_json_dict(strong_context.get("customer"))
-    return _positive_int(customer.get("source_lead_id"))
 
 
 def _existing_customer_facts(state: CustomerIntelligenceGraphState) -> list[JSONDict]:
@@ -1235,16 +1109,6 @@ def _memory_loaded_label(customer_memory: JSONDict) -> str:
 def _plan_reason(trigger_type: str, route: CustomerIntelligenceRoute) -> str:
     if route == "answer_context":
         return "本次只需要支撑客户问答，不自动刷新档案"  # noqa: RUF001
-    if route == "refresh_profile":
-        if trigger_type in {"customer_created", "customer_converted_from_lead"}:
-            return "客户生命周期发生变化，需要生成客户档案和销售概况"  # noqa: RUF001
-        if trigger_type == "customer_intelligence_batch_rebuild_requested":
-            return "批量重建任务触发，需要重建客户档案和销售概况"  # noqa: RUF001
-        if trigger_type == "customer_intelligence_historical_backfill_requested":
-            return "系统发现历史客户存在业务数据但缺少智能档案，需要自动补齐客户档案和销售概况"  # noqa: RUF001
-        return "用户主动刷新，允许重建客户基础档案和销售概况"  # noqa: RUF001
-    if route == "refresh_brief":
-        return "业务动态发生变化，优先刷新销售动态和客户记忆"  # noqa: RUF001
     if route == "write_memory":
         return "生成结果已产生，作为客户长期记忆和语义证据索引"  # noqa: RUF001
     return f"暂不处理该客户智能事件: {trigger_type}"
@@ -1254,8 +1118,6 @@ def _refresh_plan_label(refresh_plan: JSONDict) -> str:
     route = cast("CustomerIntelligenceRoute", refresh_plan.get("route") or "skip")
     labels = {
         "answer_context": "准备用于回答客户问题",
-        "refresh_profile": "准备刷新客户档案和客户概况",
-        "refresh_brief": "准备刷新客户概况和客户记忆",
         "write_memory": "准备沉淀为客户记忆",
         "skip": "本次不需要刷新客户档案",
     }
@@ -1507,8 +1369,6 @@ def _fact_type_label(fact_type: str) -> str:
         "summary": "摘要",
     }
     return labels.get(fact_type, "客户事实")
-
-
 
 
 customer_intelligence_graph_service = CustomerIntelligenceGraphService(checkpointer=agent_checkpoint_saver)

@@ -75,8 +75,6 @@ class CustomerIdentityResolutionApplicationService:
             limit=limit,
             source_types=[
                 "customer",
-                "customer_profile",
-                "customer_brief",
                 "follow_up",
                 "business_flow",
                 "opportunity",

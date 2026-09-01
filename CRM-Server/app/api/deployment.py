@@ -59,13 +59,15 @@ def _enqueue_deployment_intelligence_refresh(
     change_type: CustomerBusinessObjectChangeType,
     actor_id: str | None,
 ) -> None:
-    customer_business_object_intelligence_service.enqueue_object_change_refresh(
+    change = customer_business_object_intelligence_service.build_change(
         db,
         source_type="deployment_info",
         business_object=deployment,
         change_type=change_type,
         actor_id=actor_id,
     )
+    if change is not None:
+        customer_business_object_intelligence_service.enqueue_change_refresh_after_commit(change)
 
 
 @router.post("/", response_model=DeploymentInfoResponse, status_code=status.HTTP_201_CREATED, summary="创建部署信息")

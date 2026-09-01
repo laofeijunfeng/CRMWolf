@@ -152,6 +152,39 @@ _CUSTOMER_ACTIVITY = CRMQueryResourceDefinition(
     required_exact_filters=frozenset({"customer_id"}),
 )
 
+_DEPLOYMENT_INFO = CRMQueryResourceDefinition(
+    resource="deployment_info",
+    adapter_key="deployment_infos_api",
+    default_projection=(
+        "id",
+        "customer_id",
+        "deployment_name",
+        "server_address",
+        "authorized_users",
+        "is_default",
+        "created_time",
+        "last_modified_time",
+    ),
+    projection_fields=frozenset(
+        {
+            "id",
+            "customer_id",
+            "deployment_name",
+            "server_address",
+            "authorized_users",
+            "is_default",
+            "created_time",
+            "last_modified_time",
+        }
+    ),
+    filterable_fields=MappingProxyType({"customer_id": frozenset({"eq"})}),
+    sortable_fields=frozenset(),
+    relations=frozenset({"customer"}),
+    default_scope="accessible",
+    allowed_scopes=frozenset({"accessible"}),
+    required_exact_filters=frozenset({"customer_id"}),
+)
+
 _FOLLOW_UP_TASK = CRMQueryResourceDefinition(
     resource="follow_up_task",
     adapter_key="follow_up_tasks_api",
@@ -217,6 +250,7 @@ _DEFAULT_DEFINITIONS: Mapping[CRMResource, CRMQueryResourceDefinition] = Mapping
         "customer": _CUSTOMER,
         "contact": _CONTACT,
         "customer_activity": _CUSTOMER_ACTIVITY,
+        "deployment_info": _DEPLOYMENT_INFO,
         "follow_up_task": _FOLLOW_UP_TASK,
         "completed_work": _COMPLETED_WORK,
     }

@@ -57,16 +57,34 @@ import roleApi, {
   type PermissionResponse
 } from '@/api/role'
 import permissionApi from '@/api/permissions'
+import { usePermissionStore } from '@/stores/permissions'
+import { useSettingsAccess } from '@/composables/useSettingsAccess'
+import {
+  getPermissionActionName,
+  getPermissionResourceName,
+  isAssignablePermission,
+  mergePermissionIdsPreservingDeprecated,
+} from '@/constants/permissions'
 
 // ==================== Props & Emits ====================
 interface Props {
-  open: boolean
+  open?: boolean
+  active?: boolean
+  embedded?: boolean
 }
 
 type Emits = (e: 'update:open', value: boolean) => void
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  open: false,
+  active: false,
+  embedded: false,
+})
+const embedded = computed(() => props.embedded === true)
+const active = computed(() => embedded.value ? props.active : props.open)
 const emit = defineEmits<Emits>()
+const permissionStore = usePermissionStore()
+const { isOwner } = useSettingsAccess()
 
 // ==================== State ====================
 const loading = ref(false)
@@ -118,23 +136,10 @@ const { handleSubmit, resetForm } = useForm({
   }
 })
 
-// ==================== Resource Name Mapping ====================
-const resourceNames: Record<string, string> = {
-  lead: '线索',
-  customer: '客户',
-  opportunity: '商机',
-  contract: '合同',
-  invoice: '发票',
-  product: '产品',
-  user: '用户',
-  role: '角色',
-  permission: '权限',
-  system: '系统'
-}
-
-function getResourceName(resource: string): string {
-  return resourceNames[resource] ?? resource
-}
+// ==================== Permission display names ====================
+// 权限 code/resource/action 是系统内部稳定标识，展示统一走权限目录的中文映射。
+const getResourceName = getPermissionResourceName
+const getActionName = getPermissionActionName
 
 // ==================== Computed ====================
 const filteredRoles = computed(() => {
@@ -147,11 +152,13 @@ const filteredRoles = computed(() => {
 })
 
 const listTitle = computed(() => `角色列表（${filteredRoles.value.length}）`)
+const canManageRoles = computed(() => isOwner.value || !permissionStore.initialized || permissionStore.hasPermission('role:manage'))
+const canManageRolePermissions = computed(() => isOwner.value || !permissionStore.initialized || permissionStore.hasAnyPermission(['permission:manage', 'role:manage']))
 
 // 权限分组（按资源分组）
 const permissionGroups = computed(() => {
   const groups: Record<string, PermissionResponse[]> = {}
-  allPermissions.value.forEach(permission => {
+  allPermissions.value.filter(isAssignablePermission).forEach(permission => {
     const resource = permission.resource
     if (!groups[resource]) {
       groups[resource] = []
@@ -319,7 +326,11 @@ const handleSavePermissions = async (): Promise<void> => {
 
   permissionsDialogSubmitting.value = true
   try {
-    await roleApi.updateRolePermissions(currentRole.value.id, selectedPermissionIds.value)
+    const permissionIds = mergePermissionIdsPreservingDeprecated(
+      selectedPermissionIds.value,
+      currentRole.value.permissions,
+    )
+    await roleApi.updateRolePermissions(currentRole.value.id, permissionIds)
     toast.success('权限配置保存成功')
     permissionsDialogOpen.value = false
   } catch (error) {
@@ -330,11 +341,11 @@ const handleSavePermissions = async (): Promise<void> => {
 }
 
 // ==================== Lifecycle ====================
-watch(() => props.open, (open) => {
-  if (open) {
+watch(active, (isActive) => {
+  if (isActive) {
     fetchRoles()
   }
-})
+}, { immediate: true })
 
 // ==================== Helper Functions ====================
 function formatDate(dateStr: string): string {
@@ -351,9 +362,13 @@ function formatDate(dateStr: string): string {
 </script>
 
 <template>
-  <Sheet :open="open" @update:open="emit('update:open', $event)">
-    <DetailSheetContent>
-      <SheetHeader class="system-config-sheet-header">
+  <component
+    :is="embedded === true ? 'div' : Sheet"
+    :open="embedded === true ? undefined : open"
+    @update:open="emit('update:open', $event)"
+  >
+    <component :is="embedded === true ? 'div' : DetailSheetContent" class="settings-embedded-content">
+      <SheetHeader v-if="!embedded" class="system-config-sheet-header">
         <SheetTitle class="text-base font-semibold text-wolf-text-primary">角色管理</SheetTitle>
         <SheetDescription class="text-sm text-wolf-text-secondary">配置系统角色与权限</SheetDescription>
       </SheetHeader>
@@ -368,7 +383,7 @@ function formatDate(dateStr: string): string {
               class="pl-10"
             />
           </div>
-          <Button @click="showCreateDialog">
+          <Button v-if="canManageRoles" @click="showCreateDialog">
             <Plus class="w-4 h-4 mr-2" />
             新建角色
           </Button>
@@ -402,6 +417,7 @@ function formatDate(dateStr: string): string {
                   variant="ghost"
                   size="sm"
                   class="h-8 px-2"
+                  v-if="canManageRoles"
                   @click="handleEdit(item)"
                 >
                   <Pencil class="w-3.5 h-3.5 mr-1" />
@@ -411,6 +427,7 @@ function formatDate(dateStr: string): string {
                   variant="ghost"
                   size="sm"
                   class="h-8 px-2"
+                  v-if="canManageRolePermissions"
                   @click="handleConfigPermissions(item)"
                 >
                   <Settings class="w-3.5 h-3.5 mr-1" />
@@ -420,6 +437,7 @@ function formatDate(dateStr: string): string {
                   variant="ghost"
                   size="sm"
                   class="h-8 px-2 text-destructive hover:text-destructive"
+                  v-if="canManageRoles"
                   @click="handleDelete(item)"
                 >
                   <Trash2 class="w-3.5 h-3.5 mr-1" />
@@ -430,8 +448,8 @@ function formatDate(dateStr: string): string {
           </ListCard>
         </div>
       </ScrollArea>
-    </DetailSheetContent>
-  </Sheet>
+    </component>
+  </component>
 
   <!-- 新建/编辑角色 Dialog (z-[1000]) -->
   <Dialog v-model:open="roleDialogOpen">
@@ -582,9 +600,10 @@ function formatDate(dateStr: string): string {
                   class="flex items-center gap-2 cursor-pointer"
                 >
                   <Badge variant="outline" class="text-xs">
-                    {{ permission.action }}
+                    {{ getActionName(permission.action) }}
                   </Badge>
                   <span class="text-sm">{{ permission.name }}</span>
+                  <code class="text-xs text-muted-foreground">{{ permission.code }}</code>
                 </Label>
               </div>
             </div>

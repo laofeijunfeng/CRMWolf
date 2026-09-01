@@ -11,6 +11,7 @@ CRMResource: TypeAlias = Literal[
     "customer",
     "contact",
     "customer_activity",
+    "deployment_info",
     "follow_up_task",
     "completed_work",
     "opportunity",

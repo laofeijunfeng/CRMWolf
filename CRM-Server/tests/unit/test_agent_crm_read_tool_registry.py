@@ -39,12 +39,12 @@ class FakeCustomerContextReader:
         self.calls.append((request, context))
         return CustomerContextResult(
             customer_ref=request.customer_ref,
-            sections={"brief": {"summary": "客户关注交付周期"}},
+            sections={"profile": {"summary": "客户关注交付周期"}},
             citations=[],
             coverage=CustomerContextCoverage(
                 requested=request.sections,
-                returned=["brief"],
-                unavailable=[section for section in request.sections if section != "brief"],
+                returned=["profile"],
+                unavailable=[section for section in request.sections if section != "profile"],
             ),
         )
 
@@ -59,13 +59,14 @@ def _context() -> AgentToolContext:
     )
 
 
-def test_registry_exposes_only_the_six_frozen_read_tools_and_no_write_tools() -> None:
+def test_registry_exposes_only_the_frozen_read_tools_and_no_write_tools() -> None:
     registry = CRMReadToolRegistry(FakeExecutor(), FakeCustomerContextReader())
 
     assert tuple(registry.list_specs()) == (
         "query_customers",
         "query_customer_contacts",
         "query_customer_activities",
+        "query_customer_deployment_infos",
         "query_follow_up_tasks",
         "query_completed_work",
         "get_customer_context",
@@ -104,7 +105,7 @@ async def test_registry_dispatches_customer_context_to_dedicated_reader() -> Non
             public_id="cus_01",
             display_name="示例客户",
         ),
-        sections=["brief", "evidence"],
+        sections=["profile", "evidence"],
         question="客户最关注什么?",
     )
 
@@ -143,6 +144,15 @@ def test_registry_describes_resource_specific_query_fields_to_the_model() -> Non
     assert "客户标识字段是 public_id，不是 id" in description
 
 
+def test_registry_exposes_customer_deployment_read_tool() -> None:
+    registry = CRMReadToolRegistry(FakeExecutor(), FakeCustomerContextReader())
+
+    spec = registry.get("query_customer_deployment_infos")
+
+    assert spec.resource == "deployment_info"
+    assert "customer_id(eq)" in spec.description
+
+
 def test_customer_context_contract_rejects_invalid_reference_sections_and_coverage() -> None:
     non_customer = EntityRef(
         ref_id="eref_contact_01",
@@ -158,8 +168,8 @@ def test_customer_context_contract_rejects_invalid_reference_sections_and_covera
     )
 
     with pytest.raises(ValidationError):
-        CustomerContextRequest(customer_ref=non_customer, sections=["brief"])
+        CustomerContextRequest(customer_ref=non_customer, sections=["profile"])
     with pytest.raises(ValidationError):
         CustomerContextRequest(customer_ref=customer, sections=[])
     with pytest.raises(ValidationError):
-        CustomerContextCoverage(requested=["brief"], returned=[], unavailable=[])
+        CustomerContextCoverage(requested=["profile"], returned=[], unavailable=[])

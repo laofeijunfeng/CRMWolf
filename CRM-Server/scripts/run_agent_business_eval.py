@@ -15,7 +15,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, TypeAlias
 from uuid import uuid4
 
 import httpx
@@ -40,6 +40,7 @@ from app.schemas.agent import AgentSSEEventEnvelope
 
 
 JSONDict = dict[str, Any]
+IdentityExpectation: TypeAlias = Literal["BOUND", "AMBIGUOUS", "NOT_FOUND"]
 
 @dataclass
 class EvalCase:
@@ -53,6 +54,7 @@ class EvalCase:
     forbidden_terms: list[str] = field(default_factory=list)
     confirm: bool = False
     second_turn: str = "确认执行"
+    expected_identity: IdentityExpectation | None = None
 
 
 @dataclass
@@ -65,6 +67,7 @@ class CaseResult:
     session_id: int | None
     events_seen: list[str]
     routes_seen: list[str]
+    identity_status_seen: IdentityExpectation | None
     block_types_seen: list[str]
     action_statuses_seen: list[str]
     final_answer: str
@@ -159,6 +162,7 @@ def main() -> None:
                         "passed": result.passed,
                         "reasons": result.reasons,
                         "routes": result.routes_seen,
+                        "identity": result.identity_status_seen,
                         "blocks": result.block_types_seen,
                     },
                     ensure_ascii=False,
@@ -342,9 +346,33 @@ def build_cases(snapshot: JSONDict, *, limit: int, confirm_writes: bool) -> list
         name = customer["account_name"]
         cases.extend(
             [
-                EvalCase(f"read_summary_{customer['id']}", "read_customer_summary", f"请总结一下{name}当前客户情况，包括业务背景、最近进展和下一步建议", "QUERY", name, required_terms=[short_name(name)]),
-                EvalCase(f"read_contacts_{customer['id']}", "read_contacts", f"{name}现在有哪些联系人和关键决策人？", "QUERY", name, required_terms=[short_name(name), "联系人"]),
-                EvalCase(f"read_followups_{customer['id']}", "read_followups", f"帮我看下{name}最近跟进记录和待办下一步", "QUERY", name, required_terms=[short_name(name)]),
+                EvalCase(
+                    f"read_summary_{customer['id']}",
+                    "read_customer_summary",
+                    f"请总结一下{name}当前客户情况，包括业务背景、最近进展和下一步建议",
+                    "QUERY",
+                    name,
+                    expected_identity="BOUND",
+                    required_terms=[short_name(name)],
+                ),
+                EvalCase(
+                    f"read_contacts_{customer['id']}",
+                    "read_contacts",
+                    f"{name}现在有哪些联系人和关键决策人？",
+                    "QUERY",
+                    name,
+                    expected_identity="BOUND",
+                    required_terms=[short_name(name), "联系人"],
+                ),
+                EvalCase(
+                    f"read_followups_{customer['id']}",
+                    "read_followups",
+                    f"帮我看下{name}最近跟进记录和待办下一步",
+                    "QUERY",
+                    name,
+                    expected_identity="BOUND",
+                    required_terms=[short_name(name)],
+                ),
             ]
         )
         if len(cases) >= 24:
@@ -365,7 +393,17 @@ def build_cases(snapshot: JSONDict, *, limit: int, confirm_writes: bool) -> list
                 continue
             seen.add(customer["id"])
             name = customer["account_name"]
-            cases.append(EvalCase(f"read_{key}_{customer['id']}", f"read_{key}", template.format(name=name), "QUERY", name, required_terms=[term]))
+            cases.append(
+                EvalCase(
+                    f"read_{key}_{customer['id']}",
+                    f"read_{key}",
+                    template.format(name=name),
+                    "QUERY",
+                    name,
+                    expected_identity="BOUND",
+                    required_terms=[term],
+                )
+            )
             if len(seen) >= 3:
                 break
 
@@ -381,6 +419,19 @@ def build_cases(snapshot: JSONDict, *, limit: int, confirm_writes: bool) -> list
         ("write_deployment", f"给{test_name}新增部署信息：评测环境{stamp}，服务器地址 https://eval-{stamp}.crmwolf.local，设为默认部署。"),
         ("write_member", f"把 {member_name} 加到{test_name}客户团队，角色售前，可跟进，备注本地 Agent 评测 {stamp}。"),
     ]
+    cases.extend(
+        [
+            EvalCase("global_this_week_tasks", "global_work_query", "这周有哪些事情要做？", "QUERY"),
+            EvalCase("global_next_week_tasks", "global_work_query", "下周有哪些事情要做？", "QUERY"),
+            EvalCase("global_this_week_followups", "global_work_query", "本周有哪些待办？", "QUERY"),
+            EvalCase("global_next_week_followups", "global_work_query", "下周有哪些待跟进客户？", "QUERY"),
+            EvalCase("global_completed_recent", "global_work_query", "最近完成了哪些事情？", "QUERY"),
+            EvalCase("global_today_tasks", "global_work_query", "今天有哪些事情要做？", "QUERY"),
+            EvalCase("global_overdue_tasks", "global_work_query", "现在有哪些逾期的跟进任务？", "QUERY"),
+            EvalCase("global_completed_work", "global_work_query", "最近完成了哪些客户工作？", "QUERY"),
+        ]
+    )
+
     for category, content in write_templates:
         cases.append(
             EvalCase(
@@ -388,6 +439,7 @@ def build_cases(snapshot: JSONDict, *, limit: int, confirm_writes: bool) -> list
                 category,
                 content,
                 expected_customer_name=test_name,
+                expected_identity="BOUND",
                 expected_route="WORKFLOW",
                 expected_action_status="SUCCESS" if confirm_writes else None,
                 confirm=confirm_writes,
@@ -396,9 +448,29 @@ def build_cases(snapshot: JSONDict, *, limit: int, confirm_writes: bool) -> list
 
     cases.extend(
         [
-            EvalCase("ambiguous_test_company", "ambiguous_resolution", "帮我看下测试公司现在的客户情况", "QUERY", None, required_terms=["测试公司"]),
-            EvalCase("unknown_customer", "unknown_customer", f"帮我查一下不存在的本地评测客户{stamp}的合同和回款", "QUERY", None, forbidden_terms=["已成交", "合同金额"]),
-            EvalCase("generic_customer_query", "clarification", "这个客户最近怎么样？", "CLARIFY", None),
+            EvalCase(
+                "ambiguous_test_company",
+                "ambiguous_resolution",
+                "帮我看下测试公司现在的客户情况",
+                "CLARIFY",
+                expected_identity="AMBIGUOUS",
+                required_terms=["测试公司"],
+            ),
+            EvalCase(
+                "unknown_customer",
+                "unknown_customer",
+                f"帮我查一下不存在的本地评测客户{stamp}的合同和回款",
+                "CLARIFY",
+                expected_identity="NOT_FOUND",
+                forbidden_terms=["已成交", "合同金额"],
+            ),
+            EvalCase(
+                "generic_customer_query",
+                "clarification",
+                "这个客户最近怎么样？",
+                "CLARIFY",
+                expected_identity="NOT_FOUND",
+            ),
         ]
     )
     return cases[:limit]
@@ -470,6 +542,13 @@ def evaluate_case(
     )
     final_answer = extract_final_answer(events)
     entity_names = extract_entity_names(events)
+    customer_entity_names = extract_entity_names(events, resource="customer")
+    identity_status_seen = infer_identity_status(
+        routes=routes,
+        final_answer=final_answer,
+        customer_entity_names=customer_entity_names,
+        blocks=blocks,
+    )
     reasons: list[str] = []
 
     if "http_error" in names:
@@ -489,8 +568,23 @@ def evaluate_case(
         reasons.append("未收到 done 事件")
     if case.expected_route and case.expected_route not in routes:
         reasons.append(f"未看到期望路由 {case.expected_route}")
-    if case.expected_customer_name and not expected_customer_resolved(case, events):
+    if "error" in block_types:
+        reasons.append("Agent 返回 error block")
+    if (
+        case.expected_customer_name
+        and case.expected_identity != "BOUND"
+        and not expected_customer_resolved(case, events)
+    ):
         reasons.append(f"未解析到期望客户：{case.expected_customer_name}")
+    reasons.extend(
+        identity_expectation_errors(
+            case,
+            routes=routes,
+            identity_status=identity_status_seen,
+            customer_entity_names=customer_entity_names,
+            final_answer=final_answer,
+        )
+    )
     for term in case.required_terms:
         if term and term not in final_answer and not any(term in name for name in entity_names):
             reasons.append(f"回复缺少关键词：{term}")
@@ -511,6 +605,7 @@ def evaluate_case(
         session_id=extract_session_id(events),
         events_seen=names,
         routes_seen=routes,
+        identity_status_seen=identity_status_seen,
         block_types_seen=block_types,
         action_statuses_seen=action_statuses,
         final_answer=final_answer[:2000],
@@ -564,7 +659,7 @@ def unique_strings(values: Any) -> list[str]:
     return result
 
 
-def extract_entity_names(events: list[JSONDict]) -> list[str]:
+def extract_entity_names(events: list[JSONDict], *, resource: str | None = None) -> list[str]:
     names: list[str] = []
     for envelope in final_envelopes(events):
         for block in envelope.get("blocks", []):
@@ -574,17 +669,105 @@ def extract_entity_names(events: list[JSONDict]) -> list[str]:
                 items = block.get("items", [])
                 for item in items if isinstance(items, list) else []:
                     entity_ref = item.get("entity_ref") if isinstance(item, dict) else None
+                    if resource and (not isinstance(entity_ref, dict) or entity_ref.get("resource") != resource):
+                        continue
                     display_name = entity_ref.get("display_name") if isinstance(entity_ref, dict) else None
                     if display_name:
                         names.append(str(display_name))
-            elif block.get("type") == "entity_card" and block.get("title"):
+            elif (
+                block.get("type") == "entity_card"
+                and block.get("title")
+                and (not resource or block.get("entity_type") == resource)
+            ):
                 names.append(str(block["title"]))
             elif block.get("type") == "action_result":
                 entity_ref = block.get("entity_ref")
+                if resource and (not isinstance(entity_ref, dict) or entity_ref.get("resource") != resource):
+                    continue
                 display_name = entity_ref.get("display_name") if isinstance(entity_ref, dict) else None
                 if display_name:
                     names.append(str(display_name))
     return unique_strings(names)
+
+
+def infer_identity_status(
+    *,
+    routes: list[str],
+    final_answer: str,
+    customer_entity_names: list[str],
+    blocks: list[JSONDict],
+) -> IdentityExpectation | None:
+    """Infer the public identity outcome from the final UI contract.
+
+    Identity status is not currently a dedicated UI metadata field.  The
+    evaluator therefore uses the public signals that the Agent does expose:
+    authoritative entity references for ``BOUND``, the clarification route and
+    identity wording/error code for ``AMBIGUOUS`` or ``NOT_FOUND``.
+    """
+    error_codes = {
+        str(block.get("code"))
+        for block in blocks
+        if block.get("type") == "error" and block.get("code")
+    }
+    if "ENTITY_AMBIGUOUS" in error_codes or _has_ambiguous_identity_signal(final_answer):
+        return "AMBIGUOUS"
+    if "CLARIFY" in routes and _has_not_found_identity_signal(final_answer):
+        return "NOT_FOUND"
+    if customer_entity_names and "CLARIFY" not in routes:
+        return "BOUND"
+    return None
+
+
+def identity_expectation_errors(
+    case: EvalCase,
+    *,
+    routes: list[str],
+    identity_status: IdentityExpectation | None,
+    customer_entity_names: list[str],
+    final_answer: str,
+) -> list[str]:
+    """Check identity outcomes without treating every query as a bound query."""
+    expected = case.expected_identity
+    if expected is None:
+        return []
+
+    if expected == "BOUND":
+        if not case.expected_customer_name:
+            return ["BOUND 身份预期缺少 expected_customer_name"]
+        if (
+            case.expected_customer_name not in customer_entity_names
+            and case.expected_customer_name not in final_answer
+        ):
+            return [f"未满足 BOUND 身份预期, 未看到期望客户: {case.expected_customer_name}"]
+        if "CLARIFY" in routes:
+            return ["未满足 BOUND 身份预期: 回复仍要求澄清身份"]
+        return []
+
+    if "CLARIFY" not in routes:
+        return [f"未满足 {expected} 身份预期: 未进入 CLARIFY 路由"]
+    if identity_status != expected:
+        return [f"未满足 {expected} 身份预期, 实际推断为: {identity_status or 'UNKNOWN'}"]
+    if expected != "BOUND" and customer_entity_names:
+        return [f"未满足 {expected} 身份预期: 澄清回复不应绑定客户实体"]
+    return []
+
+
+def _has_ambiguous_identity_signal(text: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:请确认|请选择|选择).{0,20}(?:哪家客户|哪个客户|客户)|(?:多个|多家).{0,20}客户",
+            text,
+        )
+    )
+
+
+def _has_not_found_identity_signal(text: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:未找到|没有找到|找不到).{0,40}(?:客户|匹配|结果)|不存在.{0,20}客户",
+            text,
+        )
+    )
 
 
 def extract_session_id(events: list[JSONDict]) -> int | None:

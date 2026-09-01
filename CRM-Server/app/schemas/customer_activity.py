@@ -181,6 +181,10 @@ class CustomerActivityDurableWork(BaseModel):
     post_commit_job_public_id: str | None = Field(None, description="精确后提交任务ID")
     customer_intelligence_request_id: str | None = Field(None, description="精确客户智能请求ID")
     customer_intelligence_scope: str | None = Field(None, description="客户智能刷新范围")
+    customer_intelligence_schedule_error: str | None = Field(
+        None,
+        description="客户智能请求登记失败原因；主业务已提交，由对账机制补偿",
+    )
     customer_intelligence_event: CustomerActivityDurableIntelligenceEvent | None = Field(
         None,
         description="已原子持久化的客户智能事件快照",

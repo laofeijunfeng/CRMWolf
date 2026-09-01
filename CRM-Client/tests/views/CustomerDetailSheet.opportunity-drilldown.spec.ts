@@ -57,6 +57,13 @@ vi.mock('@/api/opportunity', () => ({ opportunityApi }))
 vi.mock('@/api/contract', () => ({ default: contractApi }))
 vi.mock('@/api/invoice', () => ({ default: invoiceApi }))
 vi.mock('@/api/deployment', () => ({ default: deploymentApi }))
+vi.mock('@/api/customerProfile', () => ({
+  default: {
+    getProfile: vi.fn().mockResolvedValue(null),
+    getEvidence: vi.fn().mockResolvedValue([]),
+    refresh: vi.fn().mockResolvedValue({}),
+  },
+}))
 vi.mock('@/utils/errorHandler', () => ({ handleApiError }))
 vi.mock('vue-sonner', () => ({ toast }))
 
@@ -184,14 +191,6 @@ const customerFixture = (overrides: Partial<CustomerDetailResponse> = {}): Custo
   last_modified_time: '2026-07-15T00:00:00.000Z',
   version: 1,
   contacts: [],
-  company_background: null,
-  company_website: null,
-  main_business: null,
-  similar_customers: null,
-  project_background: null,
-  profile_status: null,
-  profile_generated_time: null,
-  profile_error_message: null,
   ...overrides,
 })
 
@@ -424,7 +423,7 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
 
     await flushPromises()
 
-    expect(wrapper.get('[data-testid="tab-customer-brief"]').attributes('data-active')).toBe('true')
+    expect(wrapper.get('[data-testid="tab-customer-profile"]').attributes('data-active')).toBe('true')
     expect(wrapper.find('[data-testid="opportunities-panel"]').exists()).toBe(false)
   })
 
@@ -481,7 +480,7 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-testid="opportunity-detail-content"]').exists()).toBe(false)
-    expect(wrapper.get('[data-testid="tab-customer-brief"]').attributes('data-active')).toBe('true')
+    expect(wrapper.get('[data-testid="tab-customer-profile"]').attributes('data-active')).toBe('true')
   })
 
   it('returns to the opportunities list locally without changing the route query', async () => {

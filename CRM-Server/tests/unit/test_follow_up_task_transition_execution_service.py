@@ -1,5 +1,6 @@
 from dataclasses import replace
 from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import BigInteger, create_engine, event
@@ -226,6 +227,39 @@ def _confirmed_plan(task: FollowUpTask, *, decision: str, proposed_due_at: str |
     return replace(plan, actions=(action,), plan_source="confirmation_case_reply")
 
 
+def test_transition_executor_persists_profile_refresh_intent_in_same_transaction(db_session, monkeypatch):
+    calls = []
+
+    class FakeRefreshService:
+        def enqueue_committed_event_refresh(self, db, *, event, scope):
+            calls.append((event, scope, db))
+            return SimpleNamespace(schedule_error=None)
+
+    monkeypatch.setattr(
+        "app.services.customer_intelligence_refresh_service.customer_intelligence_refresh_service",
+        FakeRefreshService(),
+    )
+
+    task = _create_task(db_session)
+    plan = _plan(task)
+
+    result = FollowUpTaskTransitionExecutionService().execute_action(
+        db_session,
+        team_id=1,
+        action=plan.actions[0],
+        plan=plan,
+        actor_id="2",
+        commit=False,
+    )
+
+    assert result.status == FollowUpTaskTransitionExecutionStatus.EXECUTED
+    assert result.customer_intelligence_error is None
+    assert len(calls) == 1
+    assert calls[0][0].trigger_type == "follow_up_task_completed"
+    assert calls[0][1] == "partial"
+    assert calls[0][2] is db_session
+
+
 def test_transition_executor_executes_an_approved_plan_without_a_runtime_feature_gate(db_session):
     task = _create_task(db_session)
     plan = _plan(task)
@@ -450,7 +484,7 @@ def test_transition_executor_postpones_task_without_closing_it(db_session):
     assert task.due_at == datetime(2026, 8, 14, 10, 0, 0)
     assert task.due_at_text == "2026-08-14T10:00:00"
     assert total == 1
-    assert events[0].event_type == FollowUpTaskEventType.UPDATED
+    assert events[0].event_type == FollowUpTaskEventType.POSTPONED
     assert events[0].previous_status == FollowUpTaskStatus.OPEN
     assert events[0].new_status == FollowUpTaskStatus.OPEN
     document = (
@@ -568,7 +602,7 @@ def test_transition_executor_does_not_rollback_user_confirmed_postpone(db_sessio
     assert task.due_at == datetime(2026, 8, 14, 10, 0, 0)
     assert task.due_at_text == "2026-08-14T10:00:00"
     assert total == 1
-    assert rollback_events[-1].event_type == FollowUpTaskEventType.UPDATED
+    assert rollback_events[-1].event_type == FollowUpTaskEventType.POSTPONED
 
 
 def test_transition_executor_rollback_is_idempotent(db_session):

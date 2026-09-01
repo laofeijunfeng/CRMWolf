@@ -11,26 +11,31 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
 from hashlib import sha256
-from typing import TypeAlias
+from typing import TYPE_CHECKING, TypeAlias
 from uuid import uuid4
 
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
 
 from app.models.customer_intelligence_run import CustomerIntelligenceRun, CustomerIntelligenceRunStatus
 from app.services.agent.types import coerce_json_dict
-from app.services.customer_intelligence_event_service import CustomerIntelligenceEvent
 from app.services.customer_intelligence_trace_service import visible_trace_events
 from app.utils.time import business_now
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
+    from app.services.customer_intelligence_event_service import CustomerIntelligenceEvent
 
 JSONScalar: TypeAlias = str | int | float | bool | None
 JSONValue: TypeAlias = JSONScalar | list["JSONValue"] | dict[str, "JSONValue"]
 JSONDict: TypeAlias = dict[str, JSONValue]
-TERMINAL_RUN_STATUSES = frozenset({
-    CustomerIntelligenceRunStatus.SUCCESS,
-    CustomerIntelligenceRunStatus.FAILED,
-    CustomerIntelligenceRunStatus.CANCELLED,
-})
+TERMINAL_RUN_STATUSES = frozenset(
+    {
+        CustomerIntelligenceRunStatus.SUCCESS,
+        CustomerIntelligenceRunStatus.FAILED,
+        CustomerIntelligenceRunStatus.CANCELLED,
+    }
+)
 
 
 class CustomerIntelligenceRunClaimStatus(StrEnum):
@@ -122,6 +127,32 @@ class CustomerIntelligenceRunService:
                 run.event_json = run_input.event.to_dict()
         db.flush()
         return run
+
+    def has_active_for_customer(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        customer_id: int,
+        scopes: tuple[str, ...] = ("full", "partial"),
+    ) -> bool:
+        """Return whether a non-terminal profile-capable run already exists.
+
+        Reconciliation can observe the same unprojected watermark on every
+        scheduler tick while the first refresh is still pending or retrying.
+        The refresh itself reads the latest context when it runs, so another
+        full/partial run would only duplicate work and create noisy queue
+        entries.
+        """
+
+        query = db.query(CustomerIntelligenceRun.id).filter(
+            CustomerIntelligenceRun.team_id == team_id,
+            CustomerIntelligenceRun.customer_id == customer_id,
+            CustomerIntelligenceRun.status.not_in(tuple(TERMINAL_RUN_STATUSES)),
+        )
+        if scopes:
+            query = query.filter(CustomerIntelligenceRun.scope.in_(scopes))
+        return query.first() is not None
 
     def get_by_request_id(
         self,
@@ -233,7 +264,6 @@ class CustomerIntelligenceRunService:
         db.flush()
         return CustomerIntelligenceRunLeaseMutation(CustomerIntelligenceRunLeaseMutationStatus.APPLIED, run)
 
-
     def record_visible_progress_if_lease_owner(
         self,
         db: Session,
@@ -284,17 +314,45 @@ class CustomerIntelligenceRunService:
         completed_at = finished_at or business_now()
         attempts = int(run.attempt_count or 0)
         retryable = attempts < max(1, int(run.max_attempts or 1))
-        run.status = (
-            CustomerIntelligenceRunStatus.RETRY_PENDING
-            if retryable
-            else CustomerIntelligenceRunStatus.FAILED
-        )
+        run.status = CustomerIntelligenceRunStatus.RETRY_PENDING if retryable else CustomerIntelligenceRunStatus.FAILED
         run.finished_time = completed_at
         run.last_duration_ms = _duration_ms(run.started_time, completed_at)
         run.next_retry_at = _next_retry_at(completed_at, attempts) if retryable else None
         run.error_message = error_message[:2000]
         run.lease_token = None
         run.lease_expires_at = None
+        db.flush()
+        return CustomerIntelligenceRunLeaseMutation(CustomerIntelligenceRunLeaseMutationStatus.APPLIED, run)
+
+    def mark_unrunnable(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        run_id: int,
+        error_message: str,
+        route: str = "invalid_persisted_run",
+    ) -> CustomerIntelligenceRunLeaseMutation:
+        """Close a persisted run that cannot be reconstructed as a valid request."""
+
+        run = (
+            db.query(CustomerIntelligenceRun)
+            .filter(CustomerIntelligenceRun.team_id == team_id, CustomerIntelligenceRun.id == run_id)
+            .with_for_update()
+            .one()
+        )
+        if str(run.status) in TERMINAL_RUN_STATUSES:
+            return CustomerIntelligenceRunLeaseMutation(CustomerIntelligenceRunLeaseMutationStatus.TERMINAL, run)
+
+        finished_at = business_now()
+        run.status = CustomerIntelligenceRunStatus.FAILED
+        run.finished_time = finished_at
+        run.next_retry_at = None
+        run.lease_token = None
+        run.lease_expires_at = None
+        run.error_message = error_message[:2000]
+        run.route = route
+        run.result_json = {"route": route, "error": error_message[:2000]}
         db.flush()
         return CustomerIntelligenceRunLeaseMutation(CustomerIntelligenceRunLeaseMutationStatus.APPLIED, run)
 
@@ -423,10 +481,7 @@ class CustomerIntelligenceRunService:
         return [_run_diagnostic(run) for run in runs]
 
     def run_key(self, run_input: CustomerIntelligenceRunInput) -> str:
-        raw = (
-            "crmwolf/customer-intelligence-run/"
-            f"{run_input.event.team_id}/{run_input.event.event_key}"
-        )
+        raw = f"crmwolf/customer-intelligence-run/{run_input.event.team_id}/{run_input.event.event_key}"
         return sha256(raw.encode("utf-8")).hexdigest()
 
     def _get_by_key(
@@ -475,6 +530,18 @@ def _next_retry_at(finished_at: datetime, attempts: int) -> datetime:
     return finished_at + timedelta(seconds=delay_seconds)
 
 
+def _positive_int_or_none(value: object) -> int | None:
+    """Normalize optional numeric publication versions from JSON results."""
+
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
 def _visible_trace(result: JSONDict) -> list[JSONDict]:
     trace = result.get("visible_trace")
     if not isinstance(trace, list):
@@ -503,14 +570,57 @@ def _merge_visible_trace(existing: object, incoming: list[JSONDict]) -> list[JSO
 
 
 def _result_summary(result: JSONDict) -> JSONDict:
-    brief_result = coerce_json_dict(result.get("brief_refresh_result"))
+    profile_result = coerce_json_dict(result.get("profile_projection_result"))
+    draft = coerce_json_dict(result.get("profile_projection_draft"))
+    context = coerce_json_dict(result.get("customer_context"))
     persisted_refs = result.get("persisted_customer_fact_refs")
+    errors = result.get("errors")
+    profile_success = profile_result.get("success") is True
+    evidence_refs = draft.get("evidence_refs")
+    input_watermark = draft.get("source_watermark")
+    if not isinstance(input_watermark, dict):
+        input_watermark = context.get("source_watermark")
+    target_sections = profile_result.get("target_sections")
+    if not isinstance(target_sections, list):
+        target_sections = []
+    else:
+        target_sections = [str(section) for section in target_sections if str(section).strip()]
+    changed_sections = profile_result.get("changed_sections")
+    if not isinstance(changed_sections, list):
+        changed_sections = []
+    else:
+        changed_sections = [str(section) for section in changed_sections if str(section).strip()]
+    error_code = profile_result.get("error_code")
+    if error_code is not None:
+        error_code = str(error_code)
+    quality_report = profile_result.get("quality_report")
+    if not isinstance(quality_report, dict):
+        quality_report = {}
+    quality_issues = quality_report.get("issues")
     summary: JSONDict = {
         "route": str(result.get("route") or ""),
         "event_key": str(coerce_json_dict(result.get("event")).get("event_key") or ""),
         "persisted_fact_count": len(persisted_refs) if isinstance(persisted_refs, list) else 0,
-        "error_count": len(result.get("errors", [])) if isinstance(result.get("errors"), list) else 0,
-        "degraded": result.get("degraded") is True or brief_result.get("degraded") is True,
+        "error_count": len(errors) if isinstance(errors, list) else 0,
+        "degraded": result.get("degraded") is True,
+        "profile_version_id": str(
+            profile_result.get("profile_version_id") or profile_result.get("profile_version_public_id") or ""
+        )
+        or None,
+        "profile_version": _positive_int_or_none(profile_result.get("profile_version")),
+        "published": profile_success,
+        "publication_status": str(
+            profile_result.get("publication_status") or ("PUBLISHED" if profile_success else "FAILED")
+        ),
+        "input_watermark": input_watermark if isinstance(input_watermark, dict) else {},
+        "target_sections": target_sections,
+        "changed_sections": changed_sections,
+        "evidence_count": len(evidence_refs) if isinstance(evidence_refs, list) else 0,
+        "fact_changes": len(persisted_refs) if isinstance(persisted_refs, list) else 0,
+        "stale_after_run": profile_result.get("stale_after_run") is True,
+        "error_code": error_code,
+        "quality_warning_count": len(quality_issues) if isinstance(quality_issues, list) else 0,
+        "quality_report": quality_report,
     }
     return summary
 

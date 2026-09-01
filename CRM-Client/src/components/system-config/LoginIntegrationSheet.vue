@@ -18,12 +18,20 @@ import { oauthApi, type OAuthProviderConfigResponse, type OAuthProviderConfigUpd
 import { handleApiError } from '@/utils/errorHandler'
 
 interface Props {
-  open: boolean
+  open?: boolean
+  active?: boolean
+  embedded?: boolean
 }
 
 type Emits = (e: 'update:open', value: boolean) => void
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  open: false,
+  active: false,
+  embedded: false,
+})
+const embedded = computed(() => props.embedded)
+const active = computed(() => embedded.value ? props.active : props.open)
 const emit = defineEmits<Emits>()
 
 const loading = ref(false)
@@ -155,15 +163,19 @@ const copyBotEncryptKey = async (): Promise<void> => {
   }
 }
 
-watch(() => props.open, (open) => {
-  if (open) void fetchConfig()
-})
+watch(active, (isActive) => {
+  if (isActive) void fetchConfig()
+}, { immediate: true })
 </script>
 
 <template>
-  <Sheet :open="open" @update:open="emit('update:open', $event)">
-    <DetailSheetContent>
-      <SheetHeader class="system-config-sheet-header">
+  <component
+    :is="embedded ? 'div' : Sheet"
+    :open="embedded ? undefined : open"
+    @update:open="emit('update:open', $event)"
+  >
+    <component :is="embedded ? 'div' : DetailSheetContent">
+      <SheetHeader v-if="!embedded" class="system-config-sheet-header">
         <SheetTitle class="text-base font-semibold text-wolf-text-primary">第三方集成</SheetTitle>
         <SheetDescription class="text-sm text-wolf-text-secondary">配置当前团队的飞书应用能力</SheetDescription>
       </SheetHeader>
@@ -348,8 +360,8 @@ watch(() => props.open, (open) => {
           </div>
         </form>
       </ScrollArea>
-    </DetailSheetContent>
-  </Sheet>
+    </component>
+  </component>
 </template>
 
 <style scoped lang="scss">

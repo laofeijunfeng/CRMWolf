@@ -155,6 +155,21 @@ class OpportunityUpdate(BaseModel):
         return values
 
 
+class OpportunityDealJourneyUpdate(BaseModel):
+    """显式调整商机当前业务旅程；传 null 表示解除关联。"""
+
+    deal_journey_id: int | None = Field(
+        ...,
+        ge=1,
+        description="目标业务旅程内部ID；传 null 表示解除当前关联",
+    )
+    expected_version: int | None = Field(
+        None,
+        ge=1,
+        description="客户端读取到的商机版本；用于避免并发操作覆盖，省略则由服务端行锁保护",
+    )
+
+
 class OpportunityStageUpdate(BaseModel):
     stage_template_id: int = Field(..., description="目标采购阶段模板ID（推进到下一阶段）")
 
@@ -181,6 +196,7 @@ class OpportunityLose(BaseModel):
 
 class OpportunityResponse(BaseModel):
     id: str = Field(..., description="商机对外ID")
+    deal_journey_id: int | None = Field(None, description="当前业务旅程ID")
     public_id: str = Field(..., description="商机对外ID")
     opportunity_number: str = Field(..., description="商机编号")
     opportunity_name: str = Field(..., description="商机名称（项目名称）")

@@ -382,18 +382,81 @@ def test_message_history_projects_follow_up_case_revision_replacement(
         "list_statuses_by_public_ids",
         lambda *args, **kwargs: {"fuc_old": "CANCELLED", "fuc_new": "PENDING"},
     )
+    monkeypatch.setattr(
+        agent_api.follow_up_task_confirmation_case_crud,
+        "list_superseded_revision_case_public_ids",
+        lambda *args, **kwargs: {"fuc_old"},
+    )
     response = client.get(
         f"/v1/agent/sessions/{created['id']}/messages",
         headers={"Authorization": "Bearer test-token"},
     )
 
     assert response.status_code == 200
-    items = response.json()["items"]
+    payload = response.json()
+    assert payload["total"] == 1
+    items = payload["items"]
     by_message_id = {item["message_id"]: item["blocks"][0] for item in items}
-    assert by_message_id[old_ui["message_id"]]["state"] == "CANCELLED"
-    assert by_message_id[old_ui["message_id"]]["submit_action_id"] is None
+    assert old_ui["message_id"] not in by_message_id
     assert by_message_id[new_ui["message_id"]]["state"] == "ACTIVE"
     assert by_message_id[new_ui["message_id"]]["submit_action_id"] == new_ui["blocks"][0]["submit_action_id"]
+
+
+def test_message_history_hides_cancelled_duplicate_case_when_pending_replacement_exists(
+    api_harness,
+    monkeypatch,
+) -> None:
+    client, session_factory = api_harness
+    created = _create_session(client)
+    old_ui = _persist_interaction_message(
+        session_factory,
+        session_id=int(created["id"]),
+        action_status="DUPLICATE_CASE",
+        action_target={
+            "business_action": "resolve_follow_up_task_confirmation_case",
+            "follow_up_confirmation_case_public_id": "fuc_duplicate_old",
+        },
+        consume_action=False,
+    )
+    new_ui = _persist_interaction_message(
+        session_factory,
+        session_id=int(created["id"]),
+        action_status="CURRENT_CASE",
+        action_target={
+            "business_action": "resolve_follow_up_task_confirmation_case",
+            "follow_up_confirmation_case_public_id": "fuc_duplicate_new",
+        },
+        consume_action=False,
+    )
+    monkeypatch.setattr(
+        agent_api.follow_up_task_confirmation_case_crud,
+        "list_statuses_by_public_ids",
+        lambda *args, **kwargs: {
+            "fuc_duplicate_old": "CANCELLED",
+            "fuc_duplicate_new": "PENDING",
+        },
+    )
+    monkeypatch.setattr(
+        agent_api.follow_up_task_confirmation_case_crud,
+        "list_superseded_revision_case_public_ids",
+        lambda *args, **kwargs: set(),
+    )
+    monkeypatch.setattr(
+        agent_api.follow_up_task_confirmation_case_crud,
+        "list_duplicate_active_case_public_ids",
+        lambda *args, **kwargs: {"fuc_duplicate_old"},
+    )
+
+    response = client.get(
+        f"/v1/agent/sessions/{created['id']}/messages",
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 1
+    assert [item["message_id"] for item in payload["items"]] == [new_ui["message_id"]]
+    assert old_ui["message_id"] not in [item["message_id"] for item in payload["items"]]
 
 
 def test_message_history_fails_closed_for_unbound_follow_up_card(api_harness) -> None:

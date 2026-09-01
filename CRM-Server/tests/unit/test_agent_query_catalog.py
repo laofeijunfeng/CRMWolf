@@ -131,6 +131,7 @@ def test_policy_accepts_team_scope_when_server_context_has_view_all() -> None:
     [
         ("contact", "customer_contacts_api", "accessible"),
         ("customer_activity", "customer_activities_api", "accessible"),
+        ("deployment_info", "deployment_infos_api", "accessible"),
         ("follow_up_task", "follow_up_tasks_api", "mine"),
         ("completed_work", "completed_work_api", "mine"),
     ],

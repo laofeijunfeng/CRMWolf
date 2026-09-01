@@ -11,11 +11,13 @@ DUE_AT_GRANULARITY_WEEK = "WEEK"
 DUE_AT_GRANULARITY_MONTH = "MONTH"
 DUE_AT_GRANULARITY_UNKNOWN = "UNKNOWN"
 FOLLOW_UP_TASK_DUE_WINDOW_TODAY = "today"
+FOLLOW_UP_TASK_DUE_WINDOW_TOMORROW = "tomorrow"
 FOLLOW_UP_TASK_DUE_WINDOW_THIS_WEEK = "this_week"
 FOLLOW_UP_TASK_DUE_WINDOW_NEXT_WEEK = "next_week"
 FOLLOW_UP_TASK_DUE_WINDOW_OVERDUE = "overdue"
 FOLLOW_UP_TASK_DUE_WINDOWS = {
     FOLLOW_UP_TASK_DUE_WINDOW_TODAY,
+    FOLLOW_UP_TASK_DUE_WINDOW_TOMORROW,
     FOLLOW_UP_TASK_DUE_WINDOW_THIS_WEEK,
     FOLLOW_UP_TASK_DUE_WINDOW_NEXT_WEEK,
     FOLLOW_UP_TASK_DUE_WINDOW_OVERDUE,
@@ -112,6 +114,9 @@ def calculate_follow_up_task_due_window(
     if window == FOLLOW_UP_TASK_DUE_WINDOW_TODAY:
         starts_at = today_start
         ends_at = today_start + timedelta(days=1)
+    elif window == FOLLOW_UP_TASK_DUE_WINDOW_TOMORROW:
+        starts_at = today_start + timedelta(days=1)
+        ends_at = today_start + timedelta(days=2)
     elif window == FOLLOW_UP_TASK_DUE_WINDOW_THIS_WEEK:
         starts_at = this_week_start
         ends_at = this_week_start + timedelta(days=7)

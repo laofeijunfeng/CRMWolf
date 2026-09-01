@@ -212,6 +212,44 @@ async def test_executor_uses_customer_detail_endpoint_for_exact_public_id() -> N
 
 
 @pytest.mark.asyncio
+async def test_executor_maps_customer_deployment_query_to_deployment_api() -> None:
+    client = FakeAPIClient(
+        [
+            {
+                "id": 101,
+                "customer_id": "cus_01",
+                "team_id": 7,
+                "deployment_name": "生产环境",
+                "server_address": "https://crm.example.com",
+                "authorized_users": 12,
+                "is_default": True,
+                "created_time": "2026-08-01T10:00:00",
+                "last_modified_time": "2026-08-21T10:00:00",
+            }
+        ]
+    )
+    executor = DefaultCRMQueryExecutor(api_client=client)
+    spec = CRMQuerySpec(
+        resource="deployment_info",
+        projection=["deployment_name", "server_address", "is_default"],
+        filters=[CRMFilter(field="customer_id", operator="eq", value="cus_01")],
+    )
+
+    result = await executor.execute(spec, _context())
+
+    assert client.calls[0]["path"] == "/v1/deployment-infos/"
+    assert client.calls[0]["params"] == {"customer_id": "cus_01"}
+    assert result.rows == [
+        {
+            "deployment_name": "生产环境",
+            "server_address": "https://crm.example.com",
+            "is_default": True,
+        }
+    ]
+    assert result.entity_refs[0].resource == "deployment_info"
+
+
+@pytest.mark.asyncio
 async def test_executor_maps_hidden_or_missing_exact_customer_to_permission_boundary() -> None:
     client = FakeAPIClient(
         error=CRMAPIClientError(

@@ -12,11 +12,14 @@ from sqlalchemy.pool import StaticPool
 from app.api import follow_up_tasks
 from app.core.database import Base
 from app.crud.sales_commitment import (
+    follow_up_task_confirmation_case_crud,
     follow_up_task_crud,
     follow_up_task_projection_run_crud,
     sales_commitment_crud,
 )
+from app.models.agent_persistence import AgentUIAction
 from app.models.customer import Customer, CustomerMember
+from app.models.customer_intelligence_run import CustomerIntelligenceRun
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_vector_document import CustomerVectorDocument
 from app.models.sales_commitment import (
@@ -69,6 +72,8 @@ def db_session():
         engine,
         tables=[
             User.__table__,
+            AgentUIAction.__table__,
+            CustomerIntelligenceRun.__table__,
             Customer.__table__,
             CustomerMember.__table__,
             CustomerActivity.__table__,
@@ -406,6 +411,44 @@ def test_list_follow_up_tasks_projects_pending_confirmations_onto_the_matching_t
     assert items_by_public_id[other_task.public_id]["pending_confirmations"] == []
 
 
+def test_pending_confirmation_is_hidden_when_task_is_already_completed(client, db_session):
+    completed_task = _create_task(db_session, task_id=203, status=FollowUpTaskStatus.COMPLETED)
+    _create_confirmation_case(
+        db_session,
+        task=completed_task,
+        case_id=303,
+        public_id="fuc_33333333333333333333333333333333",
+    )
+
+    task_response = client.get("/v1/follow-up-tasks?status=all")
+    confirmation_response = client.get("/v1/follow-up-tasks/confirmation-cases")
+
+    assert task_response.status_code == 200
+    completed_item = next(item for item in task_response.json()["items"] if item["public_id"] == completed_task.public_id)
+    assert completed_item["pending_confirmations"] == []
+    assert confirmation_response.status_code == 200
+    assert confirmation_response.json()["total"] == 0
+    assert confirmation_response.json()["items"] == []
+
+    detail_response = client.get(
+        "/v1/follow-up-tasks/confirmation-cases/fuc_33333333333333333333333333333333"
+    )
+    assert detail_response.status_code == 404
+
+
+def test_pending_confirmation_context_is_hidden_when_task_is_already_completed(db_session):
+    task = _create_task(db_session, status=FollowUpTaskStatus.COMPLETED)
+    _create_confirmation_case(db_session, task=task)
+
+    rows = follow_up_task_confirmation_case_crud.list_pending_context_for_owner(
+        db_session,
+        team_id=1,
+        owner_id="2",
+    )
+
+    assert rows == []
+
+
 def test_list_pending_confirmation_cases_only_returns_current_owner_cases(client, db_session):
     owned_task = _create_task(db_session, task_id=201, owner_id="2")
     owned_case = _create_confirmation_case(db_session, task=owned_task)
@@ -618,6 +661,41 @@ def test_transition_follow_up_task_can_close_owned_open_task(
     assert event.payload_json["execution_kind"] == "manual_ui"
 
 
+def test_completing_task_removes_pending_confirmation_from_tracking_and_confirmation_inbox(
+    client, db_session
+):
+    task = _create_task(db_session)
+    case = _create_confirmation_case(db_session, task=task)
+
+    response = client.post(
+        f"/v1/follow-up-tasks/{task.public_id}/transition",
+        json={"action": "complete", "reason": "已完成跟进"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["task"]["status"] == FollowUpTaskStatus.COMPLETED
+
+    open_response = client.get("/v1/follow-up-tasks?status=open")
+    all_response = client.get("/v1/follow-up-tasks?status=all")
+    confirmation_response = client.get("/v1/follow-up-tasks/confirmation-cases")
+
+    assert open_response.status_code == 200
+    assert all(item["public_id"] != task.public_id for item in open_response.json()["items"])
+    assert all_response.status_code == 200
+    completed_item = next(
+        item for item in all_response.json()["items"] if item["public_id"] == task.public_id
+    )
+    assert completed_item["status"] == FollowUpTaskStatus.COMPLETED
+    assert completed_item["pending_confirmations"] == []
+    assert confirmation_response.status_code == 200
+    assert confirmation_response.json()["items"] == []
+    assert confirmation_response.json()["total"] == 0
+
+    db_session.refresh(case)
+    assert case.status == "CANCELLED"
+    assert case.cancelled_reason == "TASK_COMPLETED"
+
+
 def test_transition_follow_up_task_can_postpone_owned_open_task(client, db_session):
     task = _create_task(db_session)
 
@@ -644,7 +722,7 @@ def test_transition_follow_up_task_can_postpone_owned_open_task(client, db_sessi
         .order_by(FollowUpTaskEvent.id.desc())
         .first()
     )
-    assert event.event_type == FollowUpTaskEventType.UPDATED
+    assert event.event_type == FollowUpTaskEventType.POSTPONED
     assert event.payload_json["proposed_due_at"] == "2026-08-20T10:30:00"
     assert event.payload_json["execution_kind"] == "manual_ui"
 

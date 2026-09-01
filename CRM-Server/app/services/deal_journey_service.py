@@ -13,29 +13,65 @@ from app.models.deal_journey import (
     DealJourneySourceType,
     DealJourneyStatus,
 )
+from app.services.customer_intelligence_event_publication_service import (
+    CustomerIntelligenceEventPublicationService,
+    customer_intelligence_event_publication_service,
+)
 from app.services.customer_intelligence_event_service import JsonObject
 from app.utils.time import business_now
 
 logger = logging.getLogger(__name__)
 
 
+class OpportunityDealJourneyConflictError(ValueError):
+    """Raised when an opportunity changed before an association update committed."""
+
+    def __init__(self, *, opportunity_id: int, expected_version: int, current_version: int):
+        self.opportunity_id = opportunity_id
+        self.expected_version = expected_version
+        self.current_version = current_version
+        super().__init__(
+            f"商机已被其他操作更新，请刷新后重试（期望版本 {expected_version}，当前版本 {current_version}）"
+        )
+
+
 class DealJourneyService:
+    def __init__(
+        self,
+        *,
+        publication_service: CustomerIntelligenceEventPublicationService | None = None,
+    ) -> None:
+        self.publication_service = publication_service or customer_intelligence_event_publication_service
+
     def ensure_for_opportunity(
         self,
         db: Session,
         opportunity,
-        actor_id: Optional[str] = None,
+        actor_id: str | None = None,
     ) -> CustomerDealJourney:
+        previous_deal_journey_id = self._positive_int(getattr(opportunity, "deal_journey_id", None))
         journey = None
-        if getattr(opportunity, "deal_journey_id", None):
-            journey = db.query(CustomerDealJourney).filter(
-                CustomerDealJourney.id == opportunity.deal_journey_id
-            ).first()
+        if previous_deal_journey_id:
+            journey = (
+                db.query(CustomerDealJourney)
+                .filter(
+                    CustomerDealJourney.id == previous_deal_journey_id,
+                    CustomerDealJourney.team_id == opportunity.team_id,
+                    CustomerDealJourney.customer_id == opportunity.customer_id,
+                )
+                .first()
+            )
 
         if journey is None:
-            journey = db.query(CustomerDealJourney).filter(
-                CustomerDealJourney.primary_opportunity_id == opportunity.id
-            ).first()
+            journey = (
+                db.query(CustomerDealJourney)
+                .filter(
+                    CustomerDealJourney.primary_opportunity_id == opportunity.id,
+                    CustomerDealJourney.team_id == opportunity.team_id,
+                    CustomerDealJourney.customer_id == opportunity.customer_id,
+                )
+                .first()
+            )
 
         if journey is None:
             journey = CustomerDealJourney(
@@ -52,9 +88,245 @@ class DealJourneyService:
             db.flush()
 
         opportunity.deal_journey_id = journey.id
+        if previous_deal_journey_id != int(journey.id):
+            self.record_event(
+                db,
+                deal_journey_id=journey.id,
+                team_id=opportunity.team_id,
+                customer_id=opportunity.customer_id,
+                event_type=DealJourneyEventType.ASSOCIATION_CHANGED,
+                source_type=DealJourneySourceType.OPPORTUNITY,
+                source_id=opportunity.id,
+                event_time=business_now(),
+                actor_id=actor_id,
+                summary=f"商机已关联业务旅程: {journey.name}",
+                metadata={
+                    "association_reason": "ENSURE_FOR_OPPORTUNITY",
+                    "opportunity_id": opportunity.id,
+                    "previous_deal_journey_id": previous_deal_journey_id,
+                    "new_deal_journey_id": journey.id,
+                },
+            )
         return journey
 
-    def infer_for_customer(self, db: Session, customer_id: int, team_id: int) -> Optional[CustomerDealJourney]:
+    def associate_opportunity(
+        self,
+        db: Session,
+        opportunity,
+        *,
+        deal_journey_id: int,
+        actor_id: str | None = None,
+        association_reason: str = "EXPLICIT_ASSOCIATION",
+        expected_version: int | None = None,
+    ) -> CustomerDealJourney:
+        """Move an opportunity between journeys without rewriting history.
+
+        The opportunity's association is the current routing state. Existing
+        contracts, payments, activities, tasks, and commitments keep their
+        original journey IDs so the profile can explain what happened before
+        and after the move instead of silently changing historical evidence.
+        Both sides receive an association event, allowing the old journey to
+        be negatively re-projected and the new journey to be populated.
+        """
+        opportunity = self._lock_opportunity(db, opportunity)
+        current_version = int(getattr(opportunity, "version", 1) or 1)
+        if expected_version is not None and current_version != expected_version:
+            raise OpportunityDealJourneyConflictError(
+                opportunity_id=int(opportunity.id),
+                expected_version=expected_version,
+                current_version=current_version,
+            )
+
+        target = (
+            db.query(CustomerDealJourney)
+            .filter(
+                CustomerDealJourney.id == deal_journey_id,
+                CustomerDealJourney.team_id == opportunity.team_id,
+                CustomerDealJourney.customer_id == opportunity.customer_id,
+            )
+            .first()
+        )
+        if target is None:
+            raise ValueError("目标业务旅程不存在，或不属于当前客户")
+        if target.status == DealJourneyStatus.ARCHIVED:
+            raise ValueError("已归档的业务旅程不能关联商机")
+
+        previous_id = self._positive_int(getattr(opportunity, "deal_journey_id", None))
+        if previous_id == int(target.id):
+            return target
+
+        previous = None
+        if previous_id is not None:
+            previous = (
+                db.query(CustomerDealJourney)
+                .filter(
+                    CustomerDealJourney.id == previous_id,
+                    CustomerDealJourney.team_id == opportunity.team_id,
+                    CustomerDealJourney.customer_id == opportunity.customer_id,
+                )
+                .first()
+            )
+            if previous is not None and previous.primary_opportunity_id == opportunity.id:
+                previous.primary_opportunity_id = None
+                # ``primary_opportunity_id`` is unique.  Flush the release
+                # before assigning the target so databases that execute ORM
+                # updates in a batch do not transiently see both journeys
+                # pointing at the same opportunity during A -> B moves.
+                db.flush()
+
+        opportunity.deal_journey_id = target.id
+        if target.primary_opportunity_id is None:
+            target.primary_opportunity_id = opportunity.id
+        opportunity.version = current_version + 1
+        db.flush()
+
+        transition = {
+            "transition_id": self._transition_id(
+                opportunity_id=int(opportunity.id),
+                previous_deal_journey_id=previous_id,
+                new_deal_journey_id=int(target.id),
+                expected_version=expected_version if expected_version is not None else current_version,
+            ),
+            "association_reason": association_reason,
+            "opportunity_id": int(opportunity.id),
+            "previous_deal_journey_id": previous_id,
+            "new_deal_journey_id": int(target.id),
+        }
+        if previous is not None:
+            self.record_event(
+                db,
+                deal_journey_id=previous.id,
+                team_id=opportunity.team_id,
+                customer_id=opportunity.customer_id,
+                event_type=DealJourneyEventType.ASSOCIATION_CHANGED,
+                source_type=DealJourneySourceType.OPPORTUNITY,
+                source_id=opportunity.id,
+                event_time=business_now(),
+                actor_id=actor_id,
+                summary=f"商机已移出业务旅程：{previous.name}",
+                metadata={**transition, "journey_side": "previous"},
+            )
+        self.record_event(
+            db,
+            deal_journey_id=target.id,
+            team_id=opportunity.team_id,
+            customer_id=opportunity.customer_id,
+            event_type=DealJourneyEventType.ASSOCIATION_CHANGED,
+            source_type=DealJourneySourceType.OPPORTUNITY,
+            source_id=opportunity.id,
+            event_time=business_now(),
+            actor_id=actor_id,
+            summary=f"商机已关联业务旅程：{target.name}",
+            metadata={**transition, "journey_side": "new"},
+        )
+        return target
+
+    def detach_opportunity(
+        self,
+        db: Session,
+        opportunity,
+        *,
+        actor_id: str | None = None,
+        association_reason: str = "EXPLICIT_DETACH",
+        expected_version: int | None = None,
+    ) -> CustomerDealJourney | None:
+        """Remove the current journey association and retain all evidence."""
+        opportunity = self._lock_opportunity(db, opportunity)
+        current_version = int(getattr(opportunity, "version", 1) or 1)
+        if expected_version is not None and current_version != expected_version:
+            raise OpportunityDealJourneyConflictError(
+                opportunity_id=int(opportunity.id),
+                expected_version=expected_version,
+                current_version=current_version,
+            )
+
+        previous_id = self._positive_int(getattr(opportunity, "deal_journey_id", None))
+        if previous_id is None:
+            return None
+
+        previous = (
+            db.query(CustomerDealJourney)
+            .filter(
+                CustomerDealJourney.id == previous_id,
+                CustomerDealJourney.team_id == opportunity.team_id,
+                CustomerDealJourney.customer_id == opportunity.customer_id,
+            )
+            .first()
+        )
+        if previous is not None and previous.primary_opportunity_id == opportunity.id:
+            previous.primary_opportunity_id = None
+
+        opportunity.deal_journey_id = None
+        opportunity.version = current_version + 1
+        db.flush()
+        if previous is not None:
+            self.record_event(
+                db,
+                deal_journey_id=previous.id,
+                team_id=opportunity.team_id,
+                customer_id=opportunity.customer_id,
+                event_type=DealJourneyEventType.ASSOCIATION_CHANGED,
+                source_type=DealJourneySourceType.OPPORTUNITY,
+                source_id=opportunity.id,
+                event_time=business_now(),
+                actor_id=actor_id,
+                summary=f"商机已解除业务旅程关联：{previous.name}",
+                metadata={
+                    "transition_id": self._transition_id(
+                        opportunity_id=int(opportunity.id),
+                        previous_deal_journey_id=previous_id,
+                        new_deal_journey_id=None,
+                        expected_version=expected_version if expected_version is not None else current_version,
+                    ),
+                    "association_reason": association_reason,
+                    "opportunity_id": int(opportunity.id),
+                    "previous_deal_journey_id": previous_id,
+                    "new_deal_journey_id": None,
+                    "journey_side": "previous",
+                },
+            )
+        return previous
+
+    @staticmethod
+    def _transition_id(
+        *,
+        opportunity_id: int,
+        previous_deal_journey_id: int | None,
+        new_deal_journey_id: int | None,
+        expected_version: int,
+    ) -> str:
+        return (
+            f"journey-association:{opportunity_id}:"
+            f"{previous_deal_journey_id or 0}:{new_deal_journey_id or 0}:{expected_version}"
+        )
+
+    @staticmethod
+    def _lock_opportunity(db: Session, opportunity):
+        """Lock a persisted opportunity when the caller passes an ORM entity.
+
+        Service-level tests and import/replay callers may pass a lightweight
+        object, so locking is intentionally best-effort for non-ORM inputs.
+        On MySQL this becomes SELECT ... FOR UPDATE; on SQLite it remains a
+        normal SELECT because SQLite does not implement row-level locks.
+        """
+        from app.models.opportunity import Opportunity
+
+        if not isinstance(opportunity, Opportunity):
+            return opportunity
+
+        locked = (
+            db.query(Opportunity)
+            .filter(
+                Opportunity.id == opportunity.id,
+                Opportunity.team_id == opportunity.team_id,
+                Opportunity.customer_id == opportunity.customer_id,
+            )
+            .with_for_update()
+            .one_or_none()
+        )
+        return locked or opportunity
+
+    def infer_for_customer(self, db: Session, customer_id: int, team_id: int) -> CustomerDealJourney | None:
         journeys = db.query(CustomerDealJourney).filter(
             CustomerDealJourney.customer_id == customer_id,
             CustomerDealJourney.team_id == team_id,
@@ -68,14 +340,14 @@ class DealJourneyService:
         self,
         db: Session,
         *,
-        deal_journey_id: Optional[int],
+        deal_journey_id: int | None,
         team_id: int,
         customer_id: int,
         event_type: str,
         source_type: str,
         source_id: Optional[int],
         event_time: date | datetime | None = None,
-        actor_id: Optional[str] = None,
+        actor_id: str | None = None,
         summary: Optional[str] = None,
         metadata: JsonObject | None = None,
         enqueue_customer_intelligence: bool = True,
@@ -84,12 +356,26 @@ class DealJourneyService:
             return None
 
         normalized_event_time = self._as_datetime(event_time) or business_now()
-        existing = db.query(CustomerDealJourneyEvent).filter(
+        event_query = db.query(CustomerDealJourneyEvent).filter(
             CustomerDealJourneyEvent.deal_journey_id == deal_journey_id,
             CustomerDealJourneyEvent.event_type == event_type,
             CustomerDealJourneyEvent.source_type == source_type,
             CustomerDealJourneyEvent.source_id == source_id,
-        ).first()
+        )
+        existing = event_query.first()
+        if event_type == DealJourneyEventType.ASSOCIATION_CHANGED and metadata:
+            # The same opportunity may move A -> B -> A.  Association history
+            # must retain each distinct transition while retries of one
+            # transition remain idempotent.
+            desired_metadata = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+            existing = next(
+                (
+                    candidate
+                    for candidate in event_query.order_by(CustomerDealJourneyEvent.id.desc()).all()
+                    if candidate.metadata_json == desired_metadata
+                ),
+                None,
+            )
         if existing:
             self._upsert_event_evidence(db, existing)
             if enqueue_customer_intelligence:
@@ -106,7 +392,7 @@ class DealJourneyService:
             source_id=source_id,
             actor_id=actor_id,
             summary=summary,
-            metadata_json=json.dumps(metadata, ensure_ascii=False) if metadata else None,
+            metadata_json=json.dumps(metadata, ensure_ascii=False, sort_keys=True) if metadata else None,
         )
         db.add(event)
         db.flush()
@@ -123,25 +409,37 @@ class DealJourneyService:
         try:
             from app.services.customer_vector_document_service import customer_vector_document_service
 
-            customer_vector_document_service.upsert_deal_journey_event(db, event, commit=False)
+            # Evidence is a projection-side read model. Isolate it from the
+            # journey event transaction so vector indexing/schema drift cannot
+            # invalidate the business-flow event itself.
+            with db.begin_nested():
+                customer_vector_document_service.upsert_deal_journey_event(db, event, commit=False)
         except Exception:
             logger.exception("成交旅程事件证据元数据写入失败: event_id=%s", event.id)
 
     def _enqueue_customer_intelligence_refresh(self, db: Session, event: CustomerDealJourneyEvent) -> None:
         try:
             from app.services.customer_intelligence_event_service import customer_intelligence_event_service
-            from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
 
             intelligence_event = customer_intelligence_event_service.from_deal_journey_event(event)
             if intelligence_event is None:
                 return
-            customer_intelligence_refresh_service.enqueue_committed_event_refresh(
+            # The journey event remains the source-of-truth business event.
+            # Only the asynchronous profile-refresh enqueue is optional; a
+            # failed enqueue is repaired by reconciliation from the journey
+            # watermark and must not roll back the journey mutation.
+            self.publication_service.persist_in_transaction(
                 db,
                 event=intelligence_event,
-                scope="brief",
+                scope="partial",
             )
         except Exception:
-            logger.exception("成交旅程事件客户智能刷新入队失败: event_id=%s", event.id)
+            logger.exception(
+                "成交旅程事件客户智能刷新入队失败,将由对账机制补偿: event_id=%s team_id=%s customer_id=%s",
+                getattr(event, "id", None),
+                getattr(event, "team_id", None),
+                getattr(event, "customer_id", None),
+            )
 
     def record_opportunity_created(self, db: Session, opportunity, actor_id: Optional[str] = None) -> None:
         journey = self.ensure_for_opportunity(db, opportunity, actor_id)
@@ -291,6 +589,13 @@ class DealJourneyService:
             getattr(opportunity, "actual_closing_date", None)
             or getattr(opportunity, "last_modified_time", None)
         )
+
+    def _positive_int(self, value: object) -> Optional[int]:
+        try:
+            parsed = int(value) if value is not None else 0
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed > 0 else None
 
     def _as_datetime(self, value: date | datetime | None) -> Optional[datetime]:
         if value is None:
