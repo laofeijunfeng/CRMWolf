@@ -10,7 +10,7 @@ CRMWolf **应该引入工作流/自动化能力**，但不建议现在直接把 
 
 推荐方向是：
 
-> **先建设 CRM-native Automation（以 CRM 业务对象、领域事件和权限模型为中心的自动化层），再通过标准 Webhook/API/Connector 对接 Activepieces 或 n8n；核心事务流程继续由 CRM API + LangGraph 负责。**
+> **从一开始直接采用 Activepieces 作为自动化编排运行时；CRMWolf 负责 CRM 业务 API、事件契约、权限、审批和 Agent 能力，通过官方 CRMWolf Piece/API/Webhook 接入 Activepieces。**
 
 这不是“要不要工作流”的问题，而是要把不同性质的流程分层：
 
@@ -89,15 +89,17 @@ CRMWolf **应该引入工作流/自动化能力**，但不建议现在直接把 
 
 这些是平台化阶段的问题，不是“提醒和数据流转”MVP 的问题。
 
-### 2.4 基础设施也应分阶段
+### 2.4 基础设施边界：不自研执行层，但要把集成边界做深
 
-产品体验可以先轻，底层可靠性按风险逐步增强：
+既然决定从一开始引入 Activepieces，就不应在 CRMWolf 内再做一套平行的规则执行器。CRMWolf 需要建设的是集成边界：
 
-- **MVP：**复用 CRMWolf 现有后台任务、Redis 和恢复扫描能力，增加持久化的规则、计划时间、启停状态和执行日志；
-- **增长期：**对高价值事件补充 Transactional Outbox、签名 Webhook、幂等和死信；
-- **平台期：**当出现大量跨系统长流程，再评估 Activepieces/n8n/Temporal 等专门运行时。
+- Activepieces 负责 Flow 定义、调度、步骤执行、等待、重试和运行历史；
+- CRMWolf 负责 CRM 业务事实、权限、审批、Agent checkpoint 和核心 API；
+- CRMWolf 提供可靠的领域事件出口、签名 Webhook、幂等 API 和执行回链；
+- CRM 的高价值写入和审批结果仍必须回到 CRMWolf；
+- 需要 Outbox 时，在 CRM 事件出口增加 Outbox，而不是另造工作流运行时。
 
-也就是说，不能因为未来可能需要 Outbox 和 durable execution，就把第一版产品做成复杂工作流平台。
+第一天就要把租户映射、身份传播、事件版本、幂等键、凭证引用和 trace_id 设计好；但不需要自己实现画布、scheduler、worker、sleep、retry 或 dead-letter engine。
 
 ## 三、为什么 CRMWolf 现在确实需要工作流
 
@@ -254,7 +256,7 @@ Activepieces 官方产品和文档采用 Flow、Trigger、Action、Piece 等概�
 - **必须可靠执行数小时到数月、支持恢复/信号/补偿：**Temporal 或继续增强 LangGraph runtime；
 - **只想快速验证少数外部集成：**先用 Webhook/API 接入 Activepieces、n8n 或 Pipedream，不把执行引擎内化。
 
-我的建议是：**产品层先做与引擎无关的 CRM Automation Contract，技术层先用 CRMWolf 自有 worker/scheduler 跑最小闭环，外围用 Activepieces/n8n 验证需求。**
+我的建议是：**不要自研自动化画布、调度器和执行引擎；从一开始把 Activepieces 作为独立自动化运行时，CRMWolf 只建设稳定的 CRM Integration Kit（Piece、API、事件、身份、幂等和审计回链）。**
 
 ## 五、CRMWolf 推荐目标架构
 
@@ -470,22 +472,22 @@ Agent 只负责建议和草稿；最终写入/发送继续走现有工具、API 
 
 ## 八、推荐分阶段路线图
 
-### Phase 0：轻量 Automation MVP
+### Phase 0：Activepieces 集成 MVP
 
-目标是先验证“用户能否自己配置出有价值的主动提醒和数据流转”，而不是先建设通用工作流平台。
+目标是从一开始使用 Activepieces 的 Flow Runtime，CRMWolf 不自研第二套执行层。
 
-1. 提供对象事件、时间触发和 Webhook 三类触发；
-2. 提供条件筛选、延迟和五类白名单动作；
-3. 增加“商机阶段变化 → 延迟提醒”内置模板；
-4. 保存启停状态、下次执行时间、运行结果和失败原因；
-5. 使用现有后台任务能力跑通闭环；
-6. 对外提供一个简单 Webhook，先验证 Activepieces/n8n 是否有接入价值。
+1. 独立部署 Activepieces，并完成 CRMWolf 租户/用户/项目映射；
+2. 开发第一个官方 CRMWolf Piece，提供对象事件 Trigger 和 CRM Action；
+3. 提供签名 Webhook、API Key/OAuth、幂等键和 trace_id；
+4. 提供“商机阶段变化 → 延迟 3 个工作日 → 飞书提醒”模板；
+5. 提供“客户创建 → Webhook 同步外部系统”模板；
+6. 在 CRMWolf 中展示 Flow 入口、运行状态和失败跳转，而不是复制 Flow 编辑器。
 
 验收重点：事件不丢、重复不产生重复业务结果、权限不越界、失败可见且可恢复。
 
-### Phase 1：CRM 内置 Automation MVP
+### Phase 1：CRMWolf 产品化集成体验
 
-加入最小管理界面：
+先通过 Activepieces 的 Builder/Embed 或单点登录入口提供配置体验，CRMWolf 自己只做 CRM 语义层、模板、权限和执行回链。加入：
 
 - 选择触发对象和事件；
 - 配置简单条件；
@@ -535,11 +537,11 @@ Agent 只负责建议和草稿；最终写入/发送继续走现有工具、API 
 
 ### 建议的产品决策
 
-1. **现在就做工作流能力，但先做 CRM-native Automation Contract。**
-2. **Activepieces 先以外部扩展引擎接入，而不是核心依赖。**
-3. **核心 CRM 写入和 Agent HITL 继续由 CRM API + LangGraph 承担。**
-4. **用事件、Webhook、Connector 和执行记录建立引擎无关的扩展面。**
-5. **先以提醒和通知验证需求，再扩展到双向数据同步和 Agent 动作。**
+1. **从一开始引入 Activepieces，但以独立自动化运行时的方式接入。**
+2. **不自研画布、调度器、worker 和重试引擎，避免重复造轮子。**
+3. **CRMWolf 建设一等 CRMWolf Piece、API、事件、身份、幂等和审计回链。**
+4. **核心 CRM 写入和 Agent HITL 继续由 CRM API + LangGraph 承担。**
+5. **先用提醒、任务和 Webhook 三类场景验证，再逐步开放双向同步和 Agent 动作。**
 
 ### 验证指标
 
@@ -565,10 +567,10 @@ CRMWolf 不应该把自己定位成另一个通用 Zapier。更有价值的产�
 - **生态开放：**Webhook、OAuth、Connector、公开 API，以及与 Activepieces/n8n/Make/Zapier 的互操作；
 - **逐步产品化：**先模板化自动化，再开放条件/延迟，最后根据真实需求提供画布和更多连接器。
 
-如果只能选择一个下一步，我建议不是立刻部署 Activepieces，而是先实现：
+如果只能选择一个下一步，我建议直接部署 Activepieces POC，并同步实现 CRMWolf 的最小集成边界：
 
-> `Automation 配置器 + 规则持久化 + 定时/事件触发 + 执行日志 + 一个“商机阶段变化后 3 天提醒”的内置模板`。
+> `Activepieces 独立运行时 + CRMWolf Piece + 签名事件/Webhook + 幂等 CRM API + “商机阶段变化后 3 天提醒”模板`。
 >
-> Outbox、签名 Webhook 和更强的执行可靠性作为增长期基础设施逐步补上，而不是第一版产品的前置条件。
+> 重点不是复制 Activepieces，而是让 CRMWolf 从第一天就以一等业务系统接入它；Outbox、更多连接器和嵌入式 Builder 可以在这条边界上持续增强。
 
 这条路径既能验证用户是否真正需要工作流，也能为后续接入 Activepieces、n8n、Agent Node 和更强的 durable execution 保留清晰的技术演进空间。
