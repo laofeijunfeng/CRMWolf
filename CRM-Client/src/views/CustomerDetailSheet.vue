@@ -312,6 +312,7 @@ const canSetDefaultInvoiceTitle = computed(() =>
   canEditCurrentCustomer.value && permissionStore.hasPermission('invoice:title:set_default')
 )
 const canCreateDeployment = computed(() => canEditCurrentCustomer.value)
+const canDeleteDeployment = computed(() => canEditCurrentCustomer.value)
 const canCreateOpportunityForCustomer = computed(() => (
   permissionStore.hasPermission('opportunity:create') && canEditCurrentCustomer.value
 ))
@@ -765,6 +766,22 @@ const handleDeploymentSuccess = (): void => {
   }
 }
 
+const handleDeleteDeployment = async (deploymentId: number): Promise<void> => {
+  if (!canDeleteDeployment.value) {
+    toast.error('你没有删除该客户部署信息的权限')
+    return
+  }
+  try {
+    await deploymentApi.deleteDeployment(deploymentId)
+    toast.success('部署信息已删除')
+    if (props.customerId !== null) {
+      loadAllData(props.customerId)
+    }
+  } catch (error) {
+    handleApiError(error, '删除部署信息')
+  }
+}
+
 // Contract detail sheet handlers (Task 6)
 const handleViewContract = (contractId: number): void => {
   selectedContractId.value = contractId
@@ -1117,7 +1134,9 @@ onBeforeUnmount(() => {
                 :deployments="deployments"
                 :show-license-applications="false"
                 :show-add-deployment="canCreateDeployment"
+                :can-delete-deployment="canDeleteDeployment"
                 @add-deployment="handleCreateDeployment"
+                @delete-deployment="handleDeleteDeployment"
               />
 
               <CustomerMembersPanel

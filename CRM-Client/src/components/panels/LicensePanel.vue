@@ -7,7 +7,7 @@
  * 无障碍：所有图标按钮均有 aria-label
  */
 import { ref } from 'vue'
-import { Plus, Server, FileText, Download, Calendar, Hash, Loader2 } from 'lucide-vue-next'
+import { Plus, Server, FileText, Download, Calendar, Hash, Loader2, Trash2 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import ListCard from '@/components/crmwolf/ListCard.vue'
@@ -28,6 +28,8 @@ interface Props {
   showDeployments?: boolean
   showLicenseApplications?: boolean
   showAddDeployment?: boolean
+  canDeleteDeployment?: boolean
+  canDeleteApplication?: boolean
   showApply?: boolean
 }
 
@@ -37,11 +39,15 @@ const props = withDefaults(defineProps<Props>(), {
   showDeployments: true,
   showLicenseApplications: true,
   showAddDeployment: true,
+  canDeleteDeployment: true,
+  canDeleteApplication: false,
   showApply: true
 })
 
 const emit = defineEmits<{
   'add-deployment': []
+  'delete-deployment': [deploymentId: number]
+  'delete-application': [applicationId: number]
   'apply': []
 }>()
 
@@ -50,6 +56,14 @@ const downloadingApplicationId = ref<number | null>(null)
 // ==================== Methods ====================
 const handleAddDeployment = (): void => {
   emit('add-deployment')
+}
+
+const handleDeleteDeployment = (deploymentId: number): void => {
+  emit('delete-deployment', deploymentId)
+}
+
+const handleDeleteApplication = (applicationId: number): void => {
+  emit('delete-application', applicationId)
 }
 
 const handleApply = (): void => {
@@ -180,6 +194,18 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
           默认
         </Badge>
       </template>
+
+      <template #itemActions="{ item }">
+        <Button
+          v-if="canDeleteDeployment"
+          variant="ghost"
+          size="sm"
+          :aria-label="`删除部署信息 ${item.deployment_name}`"
+          @click.stop="handleDeleteDeployment(item.id)"
+        >
+          <Trash2 class="w-4 h-4 text-wolf-danger-text-v2" />
+        </Button>
+      </template>
     </ListCard>
 
     <!-- License Applications Section -->
@@ -270,6 +296,16 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
           </template>
           <span class="license-action-hover-text">下载 License</span>
         </HoverInfo>
+        <Button
+          v-if="canDeleteApplication && item.status === 'DRAFT'"
+          variant="ghost"
+          size="icon"
+          class="license-action-button"
+          :aria-label="`删除许可证申请 ${item.application_number}`"
+          @click.stop="handleDeleteApplication(item.id)"
+        >
+          <Trash2 class="w-4 h-4 text-wolf-danger-text-v2" />
+        </Button>
       </template>
     </ListCard>
   </div>

@@ -11,6 +11,7 @@ import { Pencil, Trophy, XCircle } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { handleApiError } from '@/utils/errorHandler'
 import { formatLocalDate } from '@/utils/format'
+import { confirmDelete } from '@/utils/confirmDialog'
 import { AmountText } from '@/components/crmwolf'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -140,6 +141,7 @@ const paymentPlanToDelete = ref<PaymentPlanResponse | null>(null)
 const paymentPlanDeleting = ref(false)
 const invoiceApplicationDialogOpen = ref(false)
 const licenseApplicationDialogOpen = ref(false)
+const deletingLicenseApplicationId = ref<number | null>(null)
 
 // 编辑弹窗状态
 const editDialogOpen = ref(false)
@@ -242,6 +244,7 @@ const canCreateRelatedContract = computed(() =>
     && relatedContract.value === null
 )
 const canCreateLicenseApplication = computed(() => resolvedCanEditCustomerContext.value)
+const canDeleteLicenseApplication = computed(() => resolvedCanEditCustomerContext.value)
 const relatedContractTotalAmount = computed(() => Number(relatedContract.value?.total_amount ?? 0))
 const plannedPaymentAmount = computed(() =>
   paymentPlans.value.reduce((total, plan) => total + Number(plan.planned_amount ?? 0), 0)
@@ -715,6 +718,35 @@ function handleApplyLicense(): void {
   licenseApplicationDialogOpen.value = true
 }
 
+async function handleDeleteLicenseApplication(applicationId: number): Promise<void> {
+  if (!canDeleteLicenseApplication.value) {
+    toast.error('你没有删除该许可证申请的权限')
+    return
+  }
+
+  const application = licenseApplications.value.find(item => item.id === applicationId)
+  if (application === undefined || application.status !== 'DRAFT') {
+    toast.warning('仅草稿状态的许可证申请可以删除')
+    return
+  }
+  if (deletingLicenseApplicationId.value !== null) return
+
+  const confirmed = await confirmDelete(`许可证申请"${application.application_number}"`)
+  if (!confirmed) return
+
+  deletingLicenseApplicationId.value = applicationId
+  try {
+    await licenseApplicationApi.deleteApplication(applicationId)
+    toast.success('许可证申请已删除')
+    await fetchOpportunityDetail()
+    emit('refresh')
+  } catch (error) {
+    handleApiError(error, '删除许可证申请')
+  } finally {
+    deletingLicenseApplicationId.value = null
+  }
+}
+
 function handleLicenseApplicationDialogOpenChange(open: boolean): void {
   licenseApplicationDialogOpen.value = open
 }
@@ -1180,7 +1212,9 @@ watch(approvalPhase, phase => {
               :load-error="licenseApplicationsLoadError"
               :show-deployments="false"
               :show-apply="canCreateLicenseApplication"
+              :can-delete-application="canDeleteLicenseApplication"
               @add-deployment="handleAddDeployment"
+              @delete-application="handleDeleteLicenseApplication"
               @apply="handleApplyLicense"
             />
           </template>
