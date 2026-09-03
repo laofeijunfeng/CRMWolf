@@ -45,6 +45,16 @@ def job_session_factory(monkeypatch):
     engine.dispose()
 
 
+def test_kick_without_running_event_loop_is_best_effort(job_session_factory):
+    service = CustomerActivityPostCommitJobService()
+    request = CustomerActivityPostCommitJobRequest(job_public_id="pcj_sync_endpoint", team_id=1)
+
+    # Synchronous FastAPI endpoints may call the post-commit hook without an
+    # event loop. The durable row is already committed, so immediate
+    # scheduling is only an optimization and must not make the API fail.
+    service.kick(request)
+
+
 @pytest.mark.asyncio
 async def test_exhausted_job_is_terminal_instead_of_reported_as_busy(job_session_factory):
     session = job_session_factory()
@@ -110,7 +120,7 @@ async def test_job_passes_persisted_activity_revision_to_workflow(job_session_fa
         lambda db, activity_id, team_id: SimpleNamespace(
             id=activity_id,
             team_id=team_id,
-            post_commit_revision=7,
+            activity_revision=7,
         ),
     )
     captured = {}
@@ -171,7 +181,7 @@ async def test_last_crashing_attempt_is_persisted_and_returned_as_exhausted(job_
 
     monkeypatch.setattr(
         "app.services.customer_activity_post_commit_job_service.customer_activity_crud.get_by_id",
-        lambda db, activity_id, team_id: SimpleNamespace(id=activity_id, team_id=team_id, post_commit_revision=1),
+        lambda db, activity_id, team_id: SimpleNamespace(id=activity_id, team_id=team_id, activity_revision=1),
     )
 
     async def _crash(**kwargs):
@@ -223,7 +233,7 @@ async def test_last_workflow_error_attempt_becomes_terminal_immediately(job_sess
 
     monkeypatch.setattr(
         "app.services.customer_activity_post_commit_job_service.customer_activity_crud.get_by_id",
-        lambda db, activity_id, team_id: SimpleNamespace(id=activity_id, team_id=team_id, post_commit_revision=1),
+        lambda db, activity_id, team_id: SimpleNamespace(id=activity_id, team_id=team_id, activity_revision=1),
     )
 
     async def _workflow_error(**kwargs):
@@ -354,7 +364,7 @@ async def test_completed_job_projects_bound_async_operation(monkeypatch):
         lambda db, activity_id, team_id: SimpleNamespace(
             id=activity_id,
             team_id=team_id,
-            post_commit_revision=1,
+            activity_revision=1,
         ),
     )
 
@@ -465,7 +475,7 @@ async def test_superseded_job_does_not_complete_operation_until_successor_finish
         lambda db, activity_id, team_id: SimpleNamespace(
             id=activity_id,
             team_id=team_id,
-            post_commit_revision=2,
+            activity_revision=2,
         ),
     )
 

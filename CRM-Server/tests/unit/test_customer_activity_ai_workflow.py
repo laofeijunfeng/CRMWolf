@@ -47,8 +47,6 @@ class FakeEvaluationAgent:
 
 class WorkflowHarness(CustomerActivityAIWorkflow):
     def __init__(self, *, structuring_agent, evaluation_agent, checkpointer=None) -> None:
-        self.persisted_structures: list[dict[str, Any]] = []
-        self.persisted_evaluations: list[dict[str, Any]] = []
         self.context = {
             "current_activity": {
                 "id": 1,
@@ -75,54 +73,35 @@ class WorkflowHarness(CustomerActivityAIWorkflow):
     def _load_context(self, state):
         return {"context": self.context, "events": [{"event": "activity_context_loaded"}]}
 
-    def _persist_structured_content(self, state):
-        self.persisted_structures.append(state["structure_result"])
-        self.context = {
-            **self.context,
-            "current_activity": {
-                **self.context["current_activity"],
-                "title": state["structure_result"]["title"],
-                "content_json": state["structure_result"]["content_json"],
-                "summary": state["structure_result"]["summary"],
-                "next_action": state["structure_result"]["next_action"],
-            },
-        }
-        return {"context": self.context, "events": [{"event": "structured_content_persisted"}]}
-
-    def _persist_evaluation_result(self, state):
-        self.persisted_evaluations.append(state["evaluation_result"])
-        return {"events": [{"event": "evaluation_result_persisted"}]}
-
-
 @pytest.mark.asyncio
-async def test_process_mode_structures_then_evaluates_meeting_with_meeting_rubric():
+async def test_workflow_structures_then_evaluates_meeting_with_meeting_rubric():
     structuring_agent = FakeStructuringAgent()
     evaluation_agent = FakeEvaluationAgent()
     workflow = WorkflowHarness(structuring_agent=structuring_agent, evaluation_agent=evaluation_agent)
 
-    state = await workflow.run(activity_id=1, team_id=2, mode="process", run_id="test-process")
+    state = await workflow.run(activity_id=1, team_id=2, run_id="test-process")
 
     assert len(structuring_agent.calls) == 1
     assert len(evaluation_agent.calls) == 1
     assert evaluation_agent.calls[0]["rubric"].score_rule == "meeting"
-    assert workflow.persisted_structures[0]["content_json"]["meeting_subject"] == "方案沟通会"
-    assert workflow.persisted_evaluations[0]["score"] == 80
+    assert state["structure_result"]["content_json"]["meeting_subject"] == "方案沟通会"
     assert state["evaluation_result"]["is_valid"] is True
+    assert evaluation_agent.calls[0]["context"]["current_activity"]["summary"] == "客户关注预算和交付周期。"
 
 
 @pytest.mark.asyncio
-async def test_evaluate_mode_skips_structuring_and_uses_existing_context():
+async def test_workflow_always_structures_before_evaluating():
     structuring_agent = FakeStructuringAgent()
     evaluation_agent = FakeEvaluationAgent()
     workflow = WorkflowHarness(structuring_agent=structuring_agent, evaluation_agent=evaluation_agent)
 
-    state = await workflow.run(activity_id=1, team_id=2, mode="evaluate", run_id="test-evaluate")
+    state = await workflow.run(activity_id=1, team_id=2, run_id="test-finalization")
 
-    assert structuring_agent.calls == []
+    assert len(structuring_agent.calls) == 1
     assert len(evaluation_agent.calls) == 1
-    assert workflow.persisted_structures == []
-    assert workflow.persisted_evaluations[0]["score"] == 80
+    assert state["structure_result"]["summary"] == "客户关注预算和交付周期。"
     assert state["evaluation_result"]["score"] == 80
+    assert evaluation_agent.calls[0]["context"]["current_activity"]["content_json"]["meeting_subject"] == "方案沟通会"
 
 
 def test_ai_structured_next_follow_time_overrides_ui_default_only():
@@ -144,7 +123,7 @@ def test_ai_structured_next_follow_time_overrides_ui_default_only():
 
     resolved = workflow._resolve_structured_next_follow_time(result, activity)
 
-    assert resolved == datetime(2026, 8, 5, 10, 0, 0)
+    assert resolved == datetime(2026, 8, 5, 9, 0, 0)
 
 
 def test_ai_structured_next_follow_time_does_not_override_user_time():
@@ -222,9 +201,9 @@ async def test_workflow_persists_langgraph_checkpoints_with_sqlalchemy_saver():
         checkpointer=checkpointer,
     )
 
-    await workflow.run(activity_id=1, team_id=2, mode="process", run_id="sql-checkpoint")
+    await workflow.run(activity_id=1, team_id=2, run_id="sql-checkpoint")
 
-    thread_id = "customer_activity:1:process:sql-checkpoint"
+    thread_id = "customer_activity:1:sql-checkpoint"
     with engine.begin() as conn:
         checkpoint_count = conn.execute(
             text("SELECT COUNT(*) FROM crm_langgraph_checkpoints WHERE thread_id = :thread_id"),

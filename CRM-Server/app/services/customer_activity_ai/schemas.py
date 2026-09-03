@@ -1,7 +1,8 @@
 """Structured output schemas for customer activity AI workflows."""
 from __future__ import annotations
 
-from typing import Any, Literal, Optional, TypedDict
+from datetime import datetime
+from typing import Any, Optional, TypedDict
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -88,11 +89,28 @@ class ActivityEvaluationResult(BaseModel):
         return value[:120] or "缺少可接力的关键信息或明确下一步动作。"
 
 
+class CustomerActivityAIFinalResult(BaseModel):
+    """Pure-computation output consumed by the atomic activity write seam."""
+
+    title: str | None = None
+    content_json: dict[str, Any] = Field(default_factory=dict)
+    summary: str | None = None
+    next_action: str | None = None
+    next_action_source: str | None = None
+    next_follow_time: datetime | None = None
+    next_follow_time_source: str | None = None
+    effectiveness_score: int = Field(ge=0, le=100)
+    effectiveness_is_valid: bool
+    effectiveness_reason: str
+    effectiveness_detail: dict[str, Any] = Field(default_factory=dict)
+
+
 class CustomerActivityAIState(TypedDict, total=False):
     activity_id: int
     team_id: int
     run_id: str
-    mode: Literal["process", "evaluate"]
+    expected_activity_revision: int | None
+    original_context: dict[str, Any]
     context: dict[str, Any]
     structure_result: dict[str, Any]
     evaluation_result: dict[str, Any]

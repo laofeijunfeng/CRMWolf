@@ -1,8 +1,9 @@
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.services.customer_activity_contracts import CustomerActivitySubmissionSource
 from app.services.customer_activity_kinds import ACTIVITY_KIND_META, get_activity_kind_meta, normalize_activity_kind
 
 CUSTOMER_ACTIVITY_FIELD_SOURCES = {"UI_DEFAULT", "USER", "AI_EXTRACTED", "AGENT", "MIGRATED"}
@@ -38,6 +39,11 @@ class CustomerActivityBase(BaseModel):
     activity_kind: str = Field(..., min_length=1, max_length=50, description="活动分类")
     title: Optional[str] = Field(None, max_length=255, description="活动标题")
     source_content: str = Field(..., min_length=1, description="原始输入内容")
+    submission_source: str = Field(
+        default=CustomerActivitySubmissionSource.FORM.value,
+        description="活动提交来源：AGENT/FORM/CUTOVER_MIGRATION",
+    )
+    submission_id: Optional[str] = Field(None, max_length=120, description="页面提交幂等ID")
     content_json: Optional[Dict[str, Any]] = Field(None, description="结构化活动内容")
     summary: Optional[str] = Field(None, description="列表摘要")
     next_follow_time: Optional[datetime] = Field(None, description="计划下次跟进时间")
@@ -45,6 +51,13 @@ class CustomerActivityBase(BaseModel):
     next_action: Optional[str] = Field(None, description="下一步动作内容")
     next_action_source: Optional[str] = Field(None, description="下一步动作来源")
     occurred_at: Optional[datetime] = Field(None, description="活动发生时间")
+
+    @field_validator("submission_source")
+    @classmethod
+    def submission_source_must_be_known(cls, value: str) -> str:
+        if value not in {item.value for item in CustomerActivitySubmissionSource}:
+            raise ValueError("未知活动提交来源")
+        return value
 
     @field_validator("activity_kind")
     @classmethod
@@ -73,36 +86,21 @@ class CustomerActivityCreate(CustomerActivityBase):
     pass
 
 
-class CustomerActivityUpdate(BaseModel):
-    activity_kind: Optional[str] = Field(None, min_length=1, max_length=50, description="活动分类")
-    title: Optional[str] = Field(None, max_length=255, description="活动标题")
-    source_content: Optional[str] = Field(None, min_length=1, description="原始输入内容")
-    content_json: Optional[Dict[str, Any]] = Field(None, description="结构化活动内容")
-    summary: Optional[str] = Field(None, description="列表摘要")
-    next_follow_time: Optional[datetime] = Field(None, description="计划下次跟进时间")
-    next_follow_time_source: Optional[str] = Field(None, description="下次跟进时间来源")
-    next_action: Optional[str] = Field(None, description="下一步动作内容")
-    next_action_source: Optional[str] = Field(None, description="下一步动作来源")
-    occurred_at: Optional[datetime] = Field(None, description="活动发生时间")
+class CustomerActivityAgentFinalizedCreate(CustomerActivityCreate):
+    """Agent-only request carrying the already-computed final score."""
 
-    @field_validator("activity_kind")
-    @classmethod
-    def activity_kind_must_be_known(cls, value: Optional[str]) -> Optional[str]:
-        return normalize_activity_kind(value) if value is not None else value
+    effectiveness_score: int = Field(..., ge=0, le=100, description="Agent 最终质量评分")
+    effectiveness_is_valid: bool = Field(..., description="Agent 最终评分是否通过")
+    effectiveness_reason: str = Field(..., min_length=1, max_length=500, description="Agent 最终评分理由")
+    effectiveness_detail_json: Dict[str, Any] = Field(default_factory=dict, description="Agent 最终评分明细")
 
-    @field_validator("source_content")
-    @classmethod
-    def source_content_must_not_be_empty(cls, value: Optional[str]) -> Optional[str]:
-        if value is not None and (not value or not value.strip()):
-            raise ValueError("活动内容不能为空")
-        return value.strip() if value else value
+    @model_validator(mode="after")
+    def require_passing_final_evaluation(self) -> "CustomerActivityAgentFinalizedCreate":
+        """Keep the Agent-only write boundary fail-closed."""
 
-    @field_validator("next_follow_time_source", "next_action_source")
-    @classmethod
-    def next_step_source_must_be_known(cls, value: Optional[str]) -> Optional[str]:
-        if value is not None and value not in CUSTOMER_ACTIVITY_FIELD_SOURCES:
-            raise ValueError("未知下一步字段来源")
-        return value
+        if self.effectiveness_score < 60 or not self.effectiveness_is_valid:
+            raise ValueError("Agent 最终评分未通过，不能写入客户活动")
+        return self
 
 
 class CustomerActivityPostCommitTaskTransition(BaseModel):
@@ -178,8 +176,10 @@ class CustomerActivityDurableIntelligenceEvent(BaseModel):
 
 class CustomerActivityDurableWork(BaseModel):
     activity_revision: int = Field(..., description="本次活动语义修订号")
+    ai_job_public_id: str | None = Field(None, description="页面活动 AI 最终化任务ID")
     post_commit_job_public_id: str | None = Field(None, description="精确后提交任务ID")
     customer_intelligence_request_id: str | None = Field(None, description="精确客户智能请求ID")
+    opportunity_suggestion_job_public_id: str | None = Field(None, description="Agent 商机建议任务ID")
     customer_intelligence_scope: str | None = Field(None, description="客户智能刷新范围")
     customer_intelligence_schedule_error: str | None = Field(
         None,
@@ -201,6 +201,8 @@ class CustomerActivityResponse(BaseModel):
     activity_label: str = Field(..., description="活动展示名称")
     title: Optional[str] = Field(None, description="活动标题")
     source_content: str = Field(..., description="原始输入内容")
+    submission_source: str = Field(..., description="活动提交来源")
+    submission_id: Optional[str] = Field(None, description="页面提交幂等ID")
     content_json: Optional[Dict[str, Any]] = Field(None, description="结构化活动内容")
     summary: Optional[str] = Field(None, description="列表摘要")
     processing_status: str = Field(..., description="整理状态")
@@ -243,10 +245,6 @@ class CustomerActivityCreateAndCompleteTrackingRequest(BaseModel):
 class CustomerActivityCreateAndCompleteTrackingResponse(BaseModel):
     activity: CustomerActivityResponse
     completed_task_public_id: str
-
-
-class CustomerActivityProcessResponse(BaseModel):
-    message: str
 
 
 class MessageResponse(BaseModel):

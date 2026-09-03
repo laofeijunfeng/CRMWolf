@@ -24,7 +24,7 @@ import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { ViewPreferenceConfig } from '@/api/viewPreference'
-import { confirmDelete } from '@/utils/confirmDialog'
+import { confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
 import contractApi, {
   type ContractListResponse,
@@ -39,6 +39,7 @@ import { usePageTitle } from '@/composables/usePageTitle'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { normalizePaginatedResponse } from '@/types/pagination'
+import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
 import ContractDetailSheet from '@/views/ContractDetailSheet.vue'
@@ -52,6 +53,8 @@ const headerStore = useHeaderStore()
 
 // ==================== State ====================
 const loading = ref(false)
+const loadError = ref<FeedbackError | null>(null)
+const listRequestId = ref<number>(0)
 const tableData = ref<ContractListResponse[]>([])
 const ownerFilterOptions = ref<OwnerFilterOption[]>([])
 const activeTab = ref('all')
@@ -59,6 +62,7 @@ const showCreateDialog = ref(false)
 const showEditDialog = ref(false)
 const editingContract = ref<ContractListResponse | null>(null)
 const viewingContractId = ref<number | null>(null)
+const deletingContractIds = ref<Set<number>>(new Set())
 
 const pagination = reactive({
   current: 1,
@@ -226,6 +230,8 @@ const fetchOwnerFilterOptions = async (): Promise<void> => {
 }
 
 const fetchContractList = async (): Promise<void> => {
+  const requestId = ++listRequestId.value
+  loadError.value = null
   loading.value = true
   try {
     const tabStatus = ['DRAFT', 'PENDING_REVIEW', 'SIGNED'].includes(activeTab.value)
@@ -243,15 +249,18 @@ const fetchContractList = async (): Promise<void> => {
 
     const response = await contractApi.getContracts(params)
     const normalized = normalizePaginatedResponse(response)
+    if (requestId !== listRequestId.value) return
     tableData.value = normalized.items
     pagination.total = normalized.total
   } catch (error) {
-    handleApiError(error, '获取合同列表')
+    if (requestId !== listRequestId.value) return
+    loadError.value = toFeedbackError(error, '合同列表')
   } finally {
-    loading.value = false
+    if (requestId === listRequestId.value) {
+      loading.value = false
+    }
   }
 }
-
 const customFilterViews = useCustomFilterViews({
   viewKey: 'contracts.list',
   activeTab,
@@ -358,16 +367,29 @@ const handleEditSuccess = (): void => {
   fetchContractList()
 }
 
+const isContractDeleting = (contractId: number): boolean => deletingContractIds.value.has(contractId)
+
 const handleDelete = async (record: ContractListResponse): Promise<void> => {
-  const confirmed = await confirmDelete(`合同 "${record.contract_name}"`)
+  if (isContractDeleting(record.id)) return
+
+  const confirmed = await confirmDialog(
+    `确定删除合同“${record.contract_name}”吗？删除仅适用于草稿合同，审批中或已签署的合同不能删除。删除后合同将从列表中移除。`,
+    '删除合同',
+    { variant: 'destructive', confirmText: '删除' },
+  )
   if (!confirmed) return
 
+  deletingContractIds.value = new Set(deletingContractIds.value).add(record.id)
   try {
     await contractApi.deleteContract(record.id)
-    toast.success('合同删除成功')
-    fetchContractList()
+    toast.success(`合同“${record.contract_name}”已删除`)
+    void fetchContractList()
   } catch (error) {
     handleApiError(error, '删除合同')
+  } finally {
+    const nextIds = new Set(deletingContractIds.value)
+    nextIds.delete(record.id)
+    deletingContractIds.value = nextIds
   }
 }
 
@@ -386,17 +408,20 @@ const getRowActions = (row: ContractListResponse): TableRowActionSet => ({
   primaryActions: [
     {
       label: '查看',
+      kind: 'detail',
       icon: Eye,
       handler: () => handleViewDetail(row)
     },
     {
       label: '编辑',
+      desktopPrimary: true,
       handler: () => handleEdit(row),
       icon: Edit,
       visible: canEditRow(row)
     },
     {
       label: '提交审批',
+      desktopPrimary: true,
       handler: () => handleSubmitApproval(row),
       icon: Send,
       visible: canSubmitApproval(row)
@@ -405,7 +430,8 @@ const getRowActions = (row: ContractListResponse): TableRowActionSet => ({
   secondaryActions: [
     {
       label: '删除',
-      handler: () => handleDelete(row),
+      handler: (): void => { void handleDelete(row) },
+      disabled: isContractDeleting(row.id),
       icon: Trash2,
       destructive: true,
       separator: true,
@@ -506,12 +532,18 @@ watchEffect(() => {
       :fields="fields"
       :data="tableData"
       :loading="loading"
+      :load-error="loadError"
       :page="pagination.current"
       :page-size="pagination.pageSize"
       :total="pagination.total"
       height="calc(100vh - 121px)"
+      height-strategy="fill"
+      scroll-mode="contained"
+      compact-pagination
       empty-title="暂无合同"
       row-interactive
+      detail-column-key="contract_name"
+      :get-row-label="(row) => `合同 ${row.contract_name || row.id}`"
       :get-row-actions="getRowActions"
       mobile-title-key="contract_name"
       mobile-subtitle-key="customer_name"
@@ -533,6 +565,7 @@ watchEffect(() => {
       @update:sorts="activeSorts = $event"
       @sort-apply="handleSortApply"
       @sort-reset="handleSortReset"
+      @retry="fetchContractList"
       @column-config-current-change="handleColumnConfigCurrentChange"
       @column-config-save="handleColumnConfigSave"
       @column-config-reset="handleColumnConfigReset"

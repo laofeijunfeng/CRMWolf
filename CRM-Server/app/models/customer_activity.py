@@ -1,6 +1,11 @@
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 
 from app.core.database import Base
+from app.services.customer_activity_contracts import (
+    CustomerActivityEffectivenessStatus,
+    CustomerActivityProcessingStatus,
+    CustomerActivitySubmissionSource,
+)
 from app.utils.time import business_now
 
 
@@ -17,7 +22,20 @@ class CustomerActivity(Base):
     source_content = Column(Text, nullable=False, comment="原始输入内容")
     content_json = Column(Text, nullable=True, comment="结构化活动内容JSON")
     summary = Column(Text, nullable=True, comment="列表摘要缓存")
-    processing_status = Column(String(20), nullable=False, default="PENDING", comment="整理状态：PENDING/PROCESSING/COMPLETED/FAILED")
+    submission_source = Column(
+        String(30),
+        nullable=False,
+        default=CustomerActivitySubmissionSource.FORM.value,
+        comment="活动提交来源：AGENT/FORM/CUTOVER_MIGRATION",
+    )
+    submission_id = Column(String(120), nullable=True, comment="页面提交幂等ID；Agent 使用 command 幂等")
+    submission_fingerprint = Column(String(64), nullable=True, comment="页面提交请求指纹")
+    processing_status = Column(
+        String(20),
+        nullable=False,
+        default=CustomerActivityProcessingStatus.PENDING.value,
+        comment="整理状态：PENDING/PROCESSING/COMPLETED/FAILED",
+    )
     processing_error = Column(Text, nullable=True, comment="整理失败原因")
     processed_at = Column(DateTime, nullable=True, comment="整理完成时间")
     next_follow_time = Column(DateTime, nullable=True, comment="计划下次跟进时间")
@@ -33,12 +51,30 @@ class CustomerActivity(Base):
     effectiveness_is_valid = Column(Boolean, nullable=True, comment="AI评估是否有效")
     effectiveness_reason = Column(Text, nullable=True, comment="AI评估原因摘要")
     effectiveness_detail_json = Column(Text, nullable=True, comment="AI评估分项明细JSON")
-    effectiveness_status = Column(String(20), nullable=True, default="PENDING", comment="AI评估状态：PENDING/GENERATING/COMPLETED/FAILED")
+    effectiveness_status = Column(
+        String(20),
+        nullable=True,
+        default=CustomerActivityEffectivenessStatus.PENDING.value,
+        comment="AI评估状态：PENDING/GENERATING/COMPLETED/FAILED",
+    )
     effectiveness_evaluated_time = Column(DateTime, nullable=True, comment="AI评估完成时间")
     effectiveness_error_message = Column(Text, nullable=True, comment="AI评估失败原因")
-    post_commit_revision = Column(Integer, nullable=False, default=1, comment="后提交工作流修订号")
+    activity_revision = Column(Integer, nullable=False, default=1, comment="活动语义修订号")
 
     __table_args__ = (
+        CheckConstraint(
+            "submission_source IN ('AGENT', 'FORM', 'CUTOVER_MIGRATION')",
+            name="ck_customer_activity_submission_source",
+        ),
+        CheckConstraint(
+            "processing_status IN ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED')",
+            name="ck_customer_activity_processing_status",
+        ),
+        CheckConstraint(
+            "effectiveness_status IS NULL OR effectiveness_status IN ('PENDING', 'GENERATING', 'COMPLETED', 'FAILED')",
+            name="ck_customer_activity_effectiveness_status",
+        ),
+        UniqueConstraint("team_id", "submission_id", name="uq_customer_activity_submission"),
         Index("idx_customer_activity_customer", "customer_id"),
         Index("idx_customer_activity_deal_journey", "deal_journey_id"),
         Index("idx_customer_activity_original_lead", "original_lead_id"),

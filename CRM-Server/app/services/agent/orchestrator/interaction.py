@@ -13,6 +13,7 @@ from app.services.agent.orchestrator.contracts import (
     InteractionTurnInput,
     ResolvedAgentAction,
     WorkflowContinuation,
+    WorkflowTriggerTurnInput,
 )
 from app.services.agent.orchestrator.errors import InteractionResolutionUnavailableError
 from app.services.agent.ui.actions import (
@@ -107,8 +108,8 @@ class DatabaseInteractionResolver:
                     reason_code="ACTION_REQUEST_ID_INVALID",
                 )
 
-            continuation, rejection = self._resolve_continuation(consumption)
-            if rejection is not None or continuation is None:
+            continuation, workflow_trigger, rejection = self._resolve_binding(consumption)
+            if rejection is not None or (continuation is None and workflow_trigger is None):
                 self._release_if_acquired(db, turn=turn, consumption=consumption)
                 db.commit()
                 return InteractionResolution(
@@ -129,15 +130,45 @@ class DatabaseInteractionResolver:
                     reason_code="ACTION_VALUES_INVALID",
                 )
 
+            if workflow_trigger is not None:
+                # ``content`` is deliberately user-facing (for example,
+                # ``确认``/``取消``). Use the resolver's typed protocol kind
+                # instead of comparing display text so a signed confirmation
+                # can safely authorize a server-side trigger.
+                if resolved_input.kind not in {"confirm", "reject"}:
+                    self._release_if_acquired(db, turn=turn, consumption=consumption)
+                    db.commit()
+                    return InteractionResolution(
+                        status="REJECTED",
+                        reason_code="ACTION_VALUES_INVALID",
+                    )
+                workflow_trigger = workflow_trigger.model_copy(
+                    update={
+                        "action": (
+                            workflow_trigger.action
+                            if resolved_input.kind == "confirm"
+                            else "CANCEL"
+                        )
+                    }
+                )
+                reason_code = "SERVER_WORKFLOW_TRIGGER"
+            else:
+                reason_code = "STRUCTURED_WORKFLOW_CONTINUATION"
+
             resolution = InteractionResolution(
                 status="RESOLVED",
-                reason_code="STRUCTURED_WORKFLOW_CONTINUATION",
+                reason_code=reason_code,
                 resolved_action=ResolvedAgentAction(
                     action_id=consumption.action.public_id,
                     action_type="submit_interaction",
                     continuation=continuation,
+                    workflow_trigger=workflow_trigger,
                     claim_outcome=cast("str", consumption.outcome),
-                    resume_payload=resolved_input.model_dump(mode="json"),
+                    resume_payload=(
+                        {}
+                        if workflow_trigger is not None
+                        else resolved_input.model_dump(mode="json")
+                    ),
                     replay_message_id=consumption.action.result_message_id,
                 ),
             )
@@ -153,19 +184,32 @@ class DatabaseInteractionResolver:
             db.close()
 
     @staticmethod
-    def _resolve_continuation(
+    def _resolve_binding(
         consumption: AgentUIActionConsumption,
-    ) -> tuple[WorkflowContinuation | None, str | None]:
+    ) -> tuple[WorkflowContinuation | None, WorkflowTriggerTurnInput | None, str | None]:
         action = consumption.action
         if action.action_type != "submit_interaction":
-            return None, "ACTION_TYPE_INVALID"
+            return None, None, "ACTION_TYPE_INVALID"
+
+        raw_trigger = action.target.get("workflow_trigger")
+        if raw_trigger is not None:
+            try:
+                trigger = WorkflowTriggerTurnInput.model_validate(raw_trigger)
+            except ValidationError:
+                return None, None, "ACTION_WORKFLOW_BINDING_INVALID"
+            if trigger.workflow != "customer_opportunity_suggestion":
+                return None, None, "ACTION_WORKFLOW_BINDING_INVALID"
+            if trigger.action not in {"CREATE_OPPORTUNITY", "MOVE_OPPORTUNITY_STAGE"}:
+                return None, None, "ACTION_WORKFLOW_BINDING_INVALID"
+            return None, trigger, None
+
         try:
             continuation = WorkflowContinuation.model_validate(
                 action.target.get("workflow_continuation")
             )
         except ValidationError:
-            return None, "ACTION_WORKFLOW_BINDING_INVALID"
-        return continuation, None
+            return None, None, "ACTION_WORKFLOW_BINDING_INVALID"
+        return continuation, None, None
 
     def _release_if_acquired(
         self,

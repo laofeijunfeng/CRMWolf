@@ -19,6 +19,8 @@ export { default as BottomNav } from './BottomNav.vue'
 export { default as BottomNavItem } from './BottomNavItem.vue'
 export { default as BottomNavOverflow } from './BottomNavOverflow.vue'
 export { default as ContextTabs } from './ContextTabs.vue'
+export { default as DetailContextHeader } from './DetailContextHeader.vue'
+export { default as DetailContextHost } from './DetailContextHost.vue'
 export { default as TopBarTabs } from './TopBarTabs.vue'
 
 // Data display components
@@ -35,16 +37,20 @@ export { default as MultiSelect } from './MultiSelect.vue'
 export { default as TableToolbarButton } from './TableToolbarButton.vue'
 export { default as TableToolbarBuilderPanel } from './TableToolbarBuilderPanel.vue'
 export { default as TableRowActions } from './TableRowActions.vue'
+export { default as DesktopTableRowActions } from './DesktopTableRowActions.vue'
 export { default as HoverInfo } from './HoverInfo.vue'
 export { default as StatusBadge } from '../StatusBadge.vue'
 
 // Export types
 export type { ActionConfig } from './tableRowActionTypes'
-export type { TableRowActionSet, TableRowActionGroup } from './tableRowActionGroups'
+export type { DesktopTableRowActionProjection, TableRowActionSet, TableRowActionGroup } from './tableRowActionGroups'
 export {
   groupTableRowActions,
   hasVisibleTableRowActions,
-  shouldShowTableRowActionGroupLabels
+  shouldShowTableRowActionGroupLabels,
+  getDesktopTableRowActions,
+  getDesktopTableRowActionsWidth,
+  isDetailTableRowAction
 } from './tableRowActionGroups'
 export type { ColumnConfigOption } from './columnConfigTypes'
 export type { ListFieldDefinition, ListFieldColumnConfig, ListFieldQueryConfig } from './listFieldCatalog'
@@ -54,9 +60,11 @@ export type { ListSortCondition, ListSortField } from './listSortTypes'
 
 // Feedback components (§8 MEDIUM Priority)
 export { default as LoadingSkeleton } from './LoadingSkeleton.vue'
+export { default as LiveRegion } from './LiveRegion.vue'
 export { default as SearchCard } from './SearchCard.vue'
 export { default as ConfirmDialog } from './ConfirmDialog.vue'
 export { default as RenameDialog } from './RenameDialog.vue'
+export { default as FormErrorSummary } from './FormErrorSummary.vue'
 
 // Re-export shadcn-vue primitives for convenience
 // Core components

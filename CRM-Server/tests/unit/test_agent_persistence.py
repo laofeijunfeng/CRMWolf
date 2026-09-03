@@ -320,6 +320,7 @@ def test_ui_action_repository_atomically_claims_and_replays_one_shot_action(db_s
         session_id=message.session_id,
         client_request_id="6fa2e0e8-86d4-4d6c-a1b0-6490b2bf12be",
         result_message_id=result_message.id,
+        submitted_values={"text": "已与河南双汇技术经理沟通 POC 部署。"},
         now=now + timedelta(seconds=1),
     )
     db_session.commit()
@@ -337,6 +338,9 @@ def test_ui_action_repository_atomically_claims_and_replays_one_shot_action(db_s
     )
     assert replay_after_completion.outcome == "REPLAY"
     assert replay_after_completion.action.result_message_id == result_message.id
+    assert replay_after_completion.action.submitted_values == {
+        "text": "已与河南双汇技术经理沟通 POC 部署。",
+    }
     assert db_session.query(AgentUIAction).count() == 1
 
 
@@ -708,3 +712,67 @@ def test_result_set_repository_loads_only_latest_active_owned_snapshot(db_sessio
         )
         is None
     )
+
+
+def test_visible_history_normalizes_legacy_follow_up_confirmation_prompt_without_rewriting_storage(db_session) -> None:
+    from app.schemas.agent_persistence import AgentUIMessageBody
+    from app.services.agent.turns import AgentTurnRepository
+    from app.services.agent.ui.schemas import AgentUIMetadata, InteractionBlock, InteractionOption
+
+    session = AgentSession(session_key="legacy-confirmation-history", team_id=1, user_id=2)
+    db_session.add(session)
+    db_session.flush()
+    old_prompt = "9 月 9 号待办的「确认技术评估结论」现在完成了吗?"
+    envelope = AgentUIMessageBody(
+        state="final",
+        blocks=[
+            InteractionBlock(
+                id="b_legacy_confirmation",
+                type="interaction",
+                interaction_id="int_legacy_confirmation",
+                interaction_type="choice",
+                presentation="COMPACT_TASK_COMPLETION",
+                state="ACTIVE",
+                prompt=old_prompt,
+                options=[InteractionOption(value="已完成", label="标记完成")],
+                selection_mode="single",
+                min_selections=1,
+                max_selections=1,
+                submit_on_select=True,
+                submit_action_id="act_legacy_confirmation",
+            )
+        ],
+        suggested_actions=[],
+        metadata=AgentUIMetadata(route="WORKFLOW"),
+    )
+    message = AgentMessage(
+        team_id=1,
+        user_id=2,
+        session_id=session.id,
+        role=AgentMessageRole.ASSISTANT,
+        content=old_prompt,
+        turn_id="turn_legacy_confirmation",
+        ui_json={
+            "schema_version": "crm.agent.ui.v1",
+            "message_id": 1,
+            "turn_id": "turn_legacy_confirmation",
+            "role": "assistant",
+            **envelope.model_dump(mode="json"),
+        },
+        created_time=datetime(2026, 9, 3, 10),
+        last_modified_time=datetime(2026, 9, 3, 10),
+    )
+    db_session.add(message)
+    db_session.commit()
+
+    records, total = AgentTurnRepository().list_visible_by_session(
+        db_session,
+        session_id=session.id,
+        team_id=1,
+        user_id=2,
+    )
+
+    assert total == 1
+    assert records[0].ui.blocks[0].prompt == old_prompt
+    db_session.refresh(message)
+    assert message.ui_json["blocks"][0]["prompt"] == old_prompt

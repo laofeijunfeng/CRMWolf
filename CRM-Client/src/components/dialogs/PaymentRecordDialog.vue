@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
-import type { PaymentRecordCreate } from '@/api/payment'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
+import type { PaymentPlanResponse, PaymentRecordCreate } from '@/api/payment'
 import paymentApi from '@/api/payment'
 import customerApi, {
   type CustomerMemberAccessLevel,
@@ -8,7 +8,10 @@ import customerApi, {
   type CustomerMemberRole,
 } from '@/api/customer'
 import { useUserStore } from '@/stores/user'
+import FormErrorSummary from '@/components/crmwolf/FormErrorSummary.vue'
 import { handleApiError } from '@/utils/errorHandler'
+import { confirmDialog } from '@/utils/confirmDialog'
+import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 import {
   customerMemberAccessOptions,
   customerMemberRoleOptions,
@@ -108,6 +111,8 @@ const errors = reactive<PaymentRecordErrors>({
 })
 
 const loadingCommissionMembers = ref(false)
+const commissionMembersRequestId = ref(0)
+const commissionMembersError = ref<FeedbackError | null>(null)
 const paymentCustomerId = ref<string | null>(null)
 const commissionMemberOptions = ref<CommissionMemberOption[]>([])
 const commissionMemberSelectOptions = computed(() =>
@@ -125,6 +130,7 @@ const addMemberForm = reactive<AddCustomerMemberForm>({
 })
 const roleOptions = customerMemberRoleOptions
 const accessOptions = customerMemberAccessOptions
+const initialFormSnapshot = ref('')
 
 const visible = computed({
   get: (): boolean => props.open,
@@ -132,11 +138,38 @@ const visible = computed({
 })
 
 const isSubmitting = computed((): boolean => props.submitting === true)
+const paymentPlanContext = ref<PaymentPlanResponse | null>(null)
+const closeGuardPending = ref(false)
+const hasFormChanges = computed(() =>
+  JSON.stringify({
+    actualAmount: form.actualAmount,
+    actualPayerName: form.actualPayerName,
+    paymentDate: form.paymentDate,
+    proofAttachment: form.proofAttachment,
+    commissionMemberId: form.commissionMemberId,
+    notes: form.notes,
+  }) !== initialFormSnapshot.value
+)
+const paymentPlanStatusLabel = computed(() => {
+  const status = paymentPlanContext.value?.status
+  if (status === 'PENDING') return '待登记'
+  if (status === 'PARTIAL') return '部分回款'
+  if (status === 'COMPLETED') return '已登记'
+  if (status === 'OVERDUE') return '已逾期'
+  return '未知'
+})
 const hasAmountError = computed((): boolean => errors.actualAmount.length > 0)
 const hasActualPayerNameError = computed((): boolean => errors.actualPayerName.length > 0)
 const hasPaymentDateError = computed((): boolean => errors.paymentDate.length > 0)
 const hasCommissionMemberError = computed((): boolean => errors.commissionMemberId.length > 0)
 const hasNotesError = computed((): boolean => errors.notes.length > 0)
+const validationErrorItems = computed(() => [
+  { field: 'actualAmount', label: '回款金额', message: errors.actualAmount, targetId: 'payment-record-amount' },
+  { field: 'actualPayerName', label: '实际付款方', message: errors.actualPayerName, targetId: 'payment-record-payer-name' },
+  { field: 'paymentDate', label: '回款日期', message: errors.paymentDate, targetId: 'payment-record-date' },
+  { field: 'commissionMemberId', label: '团队成员', message: errors.commissionMemberId, targetId: 'payment-record-commission-member' },
+  { field: 'notes', label: '备注', message: errors.notes, targetId: 'payment-record-notes' },
+].filter((item): item is { field: string; label: string; message: string; targetId: string } => item.message.length > 0))
 
 function getLocalDateString(date: Date = new Date()): string {
   const year = date.getFullYear()
@@ -181,6 +214,8 @@ function resetForm(): void {
   form.notes = ''
   resetPendingCustomerMember()
   clearErrors()
+  commissionMembersError.value = null
+  initialFormSnapshot.value = JSON.stringify({ ...form })
 }
 
 function resetPendingCustomerMember(): void {
@@ -234,14 +269,38 @@ function validateForm(): boolean {
     && !hasNotesError.value
 }
 
+async function focusFirstError(): Promise<void> {
+  await nextTick()
+  const fieldIds: [keyof PaymentRecordErrors, string][] = [
+    ['actualAmount', 'payment-record-amount'],
+    ['actualPayerName', 'payment-record-payer-name'],
+    ['paymentDate', 'payment-record-date'],
+    ['commissionMemberId', 'payment-record-commission-member'],
+    ['notes', 'payment-record-notes'],
+  ]
+
+  for (const [field, id] of fieldIds) {
+    if (errors[field].length === 0) continue
+    const element = document.getElementById(id)
+    if (element instanceof HTMLElement) {
+      element.focus()
+      return
+    }
+  }
+}
+
 function handleSubmit(): void {
   if (
     isSubmitting.value
     || loadingCommissionMembers.value
     || addMemberDialogOpen.value
     || addingCustomerMember.value
-    || !validateForm()
   ) {
+    return
+  }
+
+  if (!validateForm()) {
+    void focusFirstError()
     return
   }
 
@@ -266,8 +325,30 @@ function handleSubmit(): void {
 }
 
 function closeDialog(): void {
-  if (!isSubmitting.value) {
+  void handleOpenChange(false)
+}
+
+async function handleOpenChange(open: boolean): Promise<void> {
+  if (open) {
+    visible.value = true
+    return
+  }
+  if (isSubmitting.value || addMemberDialogOpen.value || addingCustomerMember.value || closeGuardPending.value) return
+  if (!hasFormChanges.value) {
     visible.value = false
+    return
+  }
+
+  closeGuardPending.value = true
+  try {
+    const confirmed = await confirmDialog(
+      '已填写回款信息，关闭后这些内容不会保存。确定关闭吗？',
+      '放弃本次回款登记？',
+      { variant: 'destructive', confirmText: '放弃并关闭' },
+    )
+    if (confirmed) visible.value = false
+  } finally {
+    closeGuardPending.value = false
   }
 }
 
@@ -365,15 +446,24 @@ async function confirmAddCustomerMember(): Promise<void> {
 }
 
 async function loadCommissionMembers(): Promise<void> {
+  const requestId = commissionMembersRequestId.value + 1
+  commissionMembersRequestId.value = requestId
+
   if (!props.open || props.paymentPlanId === null) {
+    commissionMembersError.value = null
+    paymentPlanContext.value = null
     paymentCustomerId.value = null
     commissionMemberOptions.value = mergeCommissionMemberOptions([])
     return
   }
 
   loadingCommissionMembers.value = true
+  commissionMembersError.value = null
   try {
     const plan = await paymentApi.getPaymentPlanDetail(props.paymentPlanId)
+    if (requestId !== commissionMembersRequestId.value || !props.open) return
+
+    paymentPlanContext.value = plan
     if (plan.customer_id === undefined || plan.customer_id === null) {
       paymentCustomerId.value = null
       commissionMemberOptions.value = mergeCommissionMemberOptions([])
@@ -381,13 +471,21 @@ async function loadCommissionMembers(): Promise<void> {
     }
     paymentCustomerId.value = plan.customer_id
     const candidates = await customerApi.getCustomerMemberCandidates(plan.customer_id)
+    if (requestId !== commissionMembersRequestId.value || !props.open) return
+
     commissionMemberOptions.value = mergeCommissionMemberOptions(candidates)
   } catch (error) {
+    if (requestId !== commissionMembersRequestId.value || !props.open) return
+
+    paymentPlanContext.value = null
     paymentCustomerId.value = null
     commissionMemberOptions.value = mergeCommissionMemberOptions([])
+    commissionMembersError.value = toFeedbackError(error, '回款计划和团队成员')
     handleApiError(error, '加载团队成员')
   } finally {
-    loadingCommissionMembers.value = false
+    if (requestId === commissionMembersRequestId.value) {
+      loadingCommissionMembers.value = false
+    }
   }
 }
 
@@ -398,7 +496,11 @@ watch(
       resetForm()
       void loadCommissionMembers()
     } else {
+      commissionMembersRequestId.value += 1
+      loadingCommissionMembers.value = false
+      paymentPlanContext.value = null
       paymentCustomerId.value = null
+      commissionMembersError.value = null
       addMemberDialogOpen.value = false
       resetPendingCustomerMember()
       clearErrors()
@@ -409,7 +511,7 @@ watch(
 </script>
 
 <template>
-  <Dialog v-model:open="visible">
+  <Dialog :open="props.open" @update:open="handleOpenChange">
     <DialogContent class="payment-record-dialog">
       <DialogHeader>
         <DialogTitle>登记回款</DialogTitle>
@@ -417,6 +519,41 @@ watch(
           填写实际到账金额、回款日期和可选凭证信息，用于创建回款记录。
         </DialogDescription>
       </DialogHeader>
+
+      <FormErrorSummary :items="validationErrorItems" />
+
+      <div v-if="paymentPlanContext" class="payment-record-dialog__context" aria-label="回款计划上下文">
+        <div class="payment-record-dialog__context-heading">本次登记对应计划</div>
+        <div class="payment-record-dialog__context-grid">
+          <div class="payment-record-dialog__context-item">
+            <span>客户</span>
+            <strong>{{ paymentPlanContext.customer_name || '未知客户' }}</strong>
+          </div>
+          <div class="payment-record-dialog__context-item">
+            <span>合同</span>
+            <strong>{{ paymentPlanContext.contract_name || '未知合同' }}</strong>
+          </div>
+          <div class="payment-record-dialog__context-item">
+            <span>回款计划</span>
+            <strong>{{ paymentPlanContext.stage_name }}</strong>
+          </div>
+          <div class="payment-record-dialog__context-item">
+            <span>计划编号</span>
+            <strong>{{ paymentPlanContext.plan_number || '-' }}</strong>
+          </div>
+          <div class="payment-record-dialog__context-item">
+            <span>计划金额</span>
+            <strong>¥{{ paymentPlanContext.planned_amount.toFixed(2) }}</strong>
+          </div>
+          <div class="payment-record-dialog__context-item">
+            <span>已回款 / 待回款</span>
+            <strong>¥{{ (paymentPlanContext.paid_amount ?? 0).toFixed(2) }} / ¥{{ (paymentPlanContext.remaining_amount ?? paymentPlanContext.planned_amount).toFixed(2) }}</strong>
+          </div>
+        </div>
+        <p class="payment-record-dialog__context-impact">
+          当前状态：{{ paymentPlanStatusLabel }}。提交后系统会重新计算该计划及合同的回款状态。
+        </p>
+      </div>
 
       <form class="payment-record-dialog__form" novalidate @submit.prevent="handleSubmit">
         <InputField
@@ -471,10 +608,14 @@ watch(
           </Label>
           <Select
             :model-value="form.commissionMemberId"
-            :disabled="isSubmitting || loadingCommissionMembers"
+            :disabled="isSubmitting || loadingCommissionMembers || commissionMembersError !== null"
             @update:model-value="handleCommissionMemberSelect"
           >
-            <SelectTrigger id="payment-record-commission-member">
+            <SelectTrigger
+              id="payment-record-commission-member"
+              :aria-invalid="errors.commissionMemberId.length > 0 ? 'true' : undefined"
+              :aria-describedby="errors.commissionMemberId.length > 0 ? 'payment-record-commission-member-error' : undefined"
+            >
               <SelectValue :placeholder="loadingCommissionMembers ? '加载成员中...' : '请选择团队成员'" />
             </SelectTrigger>
             <SelectContent>
@@ -483,10 +624,28 @@ watch(
               </SelectItem>
             </SelectContent>
           </Select>
-          <p v-if="errors.commissionMemberId" class="m-0 text-wolf-caption font-wolf-medium text-wolf-danger" role="alert">
+          <div v-if="commissionMembersError" class="payment-record-dialog__load-error" role="alert">
+            <strong>{{ commissionMembersError.title }}</strong>
+            <span>{{ commissionMembersError.description }}</span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              :disabled="loadingCommissionMembers"
+              @click="loadCommissionMembers"
+            >
+              {{ loadingCommissionMembers ? '重试中...' : '重新加载团队成员' }}
+            </Button>
+          </div>
+          <p
+            v-if="errors.commissionMemberId"
+            id="payment-record-commission-member-error"
+            class="m-0 text-wolf-caption font-wolf-medium text-wolf-danger"
+            role="alert"
+          >
             {{ errors.commissionMemberId }}
           </p>
-          <p v-else class="m-0 text-wolf-caption text-wolf-text-secondary">
+          <p v-else-if="commissionMembersError === null" class="m-0 text-wolf-caption text-wolf-text-secondary">
             可选择团队成员；未在客户团队中的成员需要先添加。
           </p>
         </div>
@@ -521,7 +680,7 @@ watch(
             type="button"
             variant="outline"
             class="payment-record-dialog__button min-h-11"
-            :disabled="isSubmitting"
+            :disabled="isSubmitting || closeGuardPending"
             @click="closeDialog"
           >
             取消
@@ -529,7 +688,7 @@ watch(
           <Button
             type="submit"
             class="payment-record-dialog__button min-h-11"
-            :disabled="isSubmitting || loadingCommissionMembers || addMemberDialogOpen || addingCustomerMember"
+            :disabled="isSubmitting || loadingCommissionMembers || commissionMembersError !== null || addMemberDialogOpen || addingCustomerMember"
           >
             {{ isSubmitting ? '提交中...' : '确定' }}
           </Button>
@@ -601,6 +760,8 @@ watch(
 .payment-record-dialog {
   max-height: $wolf-modal-height-mobile-v2;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-bottom: calc($wolf-space-xl-v2 + $wolf-safe-area-bottom-v2);
 }
 
 .payment-record-dialog__form {
@@ -609,10 +770,101 @@ watch(
   gap: $wolf-form-item-gap-v2;
 }
 
+.payment-record-dialog__context {
+  display: flex;
+  flex-direction: column;
+  gap: $wolf-space-sm-v2;
+  padding: $wolf-space-md-v2;
+  border: 1px solid $wolf-border-default-v2;
+  border-radius: $wolf-radius-v2;
+  background: $wolf-bg-muted-v2;
+}
+
+.payment-record-dialog__error-summary {
+  display: flex;
+  flex-direction: column;
+  gap: $wolf-space-xs-v2;
+  padding: $wolf-space-md-v2;
+  border: 1px solid $wolf-danger-v2;
+  border-radius: $wolf-radius-v2;
+  background: $wolf-danger-bg-v2;
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  line-height: $wolf-line-height-body-v2;
+}
+
+.payment-record-dialog__error-summary strong {
+  color: $wolf-text-primary-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+}
+
+.payment-record-dialog__error-summary ul {
+  margin: 0;
+  padding-left: $wolf-space-lg-v2;
+}
+
+.payment-record-dialog__context-heading {
+  color: $wolf-text-primary-v2;
+  font-size: $wolf-font-size-body-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+}
+
+.payment-record-dialog__context-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: $wolf-space-sm-v2 $wolf-space-lg-v2;
+}
+
+.payment-record-dialog__context-item {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.payment-record-dialog__context-item > span {
+  color: $wolf-text-tertiary-v2;
+  font-size: $wolf-font-size-caption-v2;
+}
+
+.payment-record-dialog__context-item > strong {
+  overflow: hidden;
+  color: $wolf-text-primary-v2;
+  font-size: $wolf-font-size-body-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.payment-record-dialog__context-impact {
+  margin: 0;
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  line-height: $wolf-line-height-body-v2;
+}
+
 .payment-record-dialog__field {
   display: flex;
   flex-direction: column;
   gap: $wolf-space-sm-v2;
+}
+
+.payment-record-dialog__load-error {
+  display: flex;
+  flex-direction: column;
+  gap: $wolf-space-xs-v2;
+  padding: $wolf-space-md-v2;
+  border: 1px solid $wolf-danger-v2;
+  border-radius: $wolf-radius-v2;
+  background: $wolf-danger-bg-v2;
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  line-height: $wolf-line-height-body-v2;
+}
+
+.payment-record-dialog__load-error strong {
+  color: $wolf-text-primary-v2;
+  font-weight: $wolf-font-weight-medium-v2;
 }
 
 .payment-record-dialog__button {
@@ -631,6 +883,10 @@ watch(
 }
 
 @media (max-width: $wolf-breakpoint-sm-v2) {
+  .payment-record-dialog__context-grid {
+    grid-template-columns: 1fr;
+  }
+
   .payment-record-dialog__button {
     width: 100%;
   }

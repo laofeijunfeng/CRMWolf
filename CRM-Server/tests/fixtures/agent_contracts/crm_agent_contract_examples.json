@@ -348,6 +348,16 @@
     },
     "confidence": 0.98,
     "reason_code": "NEW_READ_ONLY_QUERY",
+    "semantic_plan": {
+      "speech_act": "ASK_FACT",
+      "business_object": "CUSTOMER",
+      "operation": "READ",
+      "user_goal": "查询上海客户",
+      "confidence": 0.98,
+      "evidence": [
+        "用户明确指定上海客户"
+      ]
+    },
     "evidence": [
       "用户明确指定上海客户"
     ]

@@ -28,6 +28,7 @@ from app.services.agent.orchestrator import (
     WorkflowInterruptPayload,
     WorkflowWaitingResult,
 )
+from app.services.agent.semantic_plan import AgentSemanticPlan
 from app.services.agent.workflow import WorkflowRef, WorkflowTextStart, WorkflowTurnInput
 from app.services.agent.workflow.progress import (
     awaiting_confirmation_progress,
@@ -72,6 +73,59 @@ class WorkflowDecisionClassifier:
             ),
             confidence=1.0,
             reason_code="CREATE_FOLLOW_UP",
+            semantic_plan=AgentSemanticPlan(
+                speech_act="REQUEST_ACTION", business_object="CUSTOMER_ACTIVITY", operation="CREATE", confidence=1.0
+            ),
+        )
+
+
+class TextContinuationDecisionClassifier:
+    """Test double for model-selected text continuation.
+
+    The production path deliberately does not infer continuation from text
+    keywords. The classifier must explicitly return CONTINUE_TASK + RESUME.
+    """
+
+    async def classify(
+        self,
+        *,
+        turn: RootTurnInput,
+        context: RootContextSnapshot,
+        runtime: RootRuntimeContext,
+    ) -> RootDecision:
+        if context.active_workflow is None:
+            return RootDecision(
+                task_relation="NEW_TASK",
+                route="WORKFLOW",
+                risk="WRITE",
+                context_policy=ContextPolicy(
+                    selected_entity="IGNORE",
+                    previous_query="IGNORE",
+                    result_set="IGNORE",
+                    active_workflow="NONE",
+                ),
+                confidence=1.0,
+                reason_code="START_TEXT_INPUT_WORKFLOW",
+                semantic_plan=AgentSemanticPlan(
+                    speech_act="REQUEST_ACTION", business_object="CUSTOMER_ACTIVITY", operation="CREATE", confidence=1.0
+                ),
+            )
+        return RootDecision(
+            task_relation="CONTINUE_TASK",
+            route="WORKFLOW",
+            risk="WRITE",
+            context_policy=ContextPolicy(
+                selected_entity="IGNORE",
+                previous_query="IGNORE",
+                result_set="IGNORE",
+                active_workflow="RESUME",
+            ),
+            confidence=1.0,
+            reason_code="CONTINUE_ACTIVE_WORKFLOW",
+            evidence=["模型判断本轮文本是在补充当前挂起任务"],
+            semantic_plan=AgentSemanticPlan(
+                speech_act="PROVIDE_SUPPLEMENT", business_object="CUSTOMER_ACTIVITY", operation="CREATE", confidence=1.0
+            ),
         )
 
 
@@ -415,6 +469,9 @@ class SwitchAwareDecisionClassifier:
                 ),
                 confidence=1.0,
                 reason_code="SWITCH_TO_QUERY",
+                semantic_plan=AgentSemanticPlan(
+                    speech_act="ASK_FACT", business_object="CUSTOMER", operation="READ", confidence=1.0
+                ),
             )
         return RootDecision(
             task_relation="SWITCH_TASK" if context.active_workflow is not None else "NEW_TASK",
@@ -428,6 +485,9 @@ class SwitchAwareDecisionClassifier:
             ),
             confidence=1.0,
             reason_code="START_NAMED_WORKFLOW",
+            semantic_plan=AgentSemanticPlan(
+                speech_act="REQUEST_ACTION", business_object="CUSTOMER_ACTIVITY", operation="CREATE", confidence=1.0
+            ),
         )
 
 
@@ -737,13 +797,13 @@ def native_text_input_workflow(received: list[dict[str, object]]):
     return graph.compile(checkpointer=True)
 
 
-async def test_explicit_text_continuation_resumes_original_checkpoint_instead_of_starting_new_workflow() -> None:
+async def test_model_selected_text_continuation_resumes_original_checkpoint() -> None:
     received: list[dict[str, object]] = []
     context_resolver = MutableContinuationContextResolver()
     orchestrator = RootOrchestrator(
         checkpointer=InMemorySaver(),
         context_resolver=context_resolver,
-        decision_classifier=WorkflowDecisionClassifier(),
+        decision_classifier=TextContinuationDecisionClassifier(),
         query_executor=FailingQueryExecutor(),
         interaction_resolver=BoundInteractionResolver(),
         workflow_subgraph=native_text_input_workflow(received),

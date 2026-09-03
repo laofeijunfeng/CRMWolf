@@ -20,16 +20,15 @@ from app.schemas.customer_activity import (
     CustomerActivityCreate,
     CustomerActivityCreateAndCompleteTrackingRequest,
     CustomerActivityCreateAndCompleteTrackingResponse,
-    CustomerActivityProcessResponse,
+    CustomerActivityAgentFinalizedCreate,
     CustomerActivityResponse,
-    CustomerActivityUpdate,
     MessageResponse,
     kind_infos,
 )
 from app.services.customer_activity_kinds import get_activity_kind_meta
-from app.services.customer_activity_post_commit_job_service import customer_activity_post_commit_job_service
-from app.services.customer_activity_processing_service import customer_activity_processing_service
 from app.services.customer_activity_write_service import (
+    CustomerActivityFinalization,
+    CustomerActivitySubmissionConflictError,
     CustomerActivityWriteResult,
     customer_activity_write_service,
 )
@@ -128,6 +127,8 @@ def _build_activity_response(
         "activity_label": meta["label"],
         "title": activity.title,
         "source_content": activity.source_content,
+        "submission_source": activity.submission_source,
+        "submission_id": activity.submission_id,
         "content_json": _loads(activity.content_json),
         "summary": activity.summary,
         "processing_status": activity.processing_status,
@@ -161,8 +162,9 @@ def _durable_work_response(write_result: CustomerActivityWriteResult | None) -> 
     if write_result is None:
         return None
     intelligence = write_result.customer_intelligence_request
-    return {
+    durable_work = {
         "activity_revision": write_result.activity_revision,
+        "ai_job_public_id": write_result.ai_job.job_public_id if write_result.ai_job is not None else None,
         "post_commit_job_public_id": (
             write_result.post_commit_job.job_public_id if write_result.post_commit_job is not None else None
         ),
@@ -173,23 +175,12 @@ def _durable_work_response(write_result: CustomerActivityWriteResult | None) -> 
         ),
         "customer_intelligence_event": intelligence.event.to_dict() if intelligence is not None else None,
     }
+    if write_result.opportunity_suggestion_job is not None:
+        durable_work["opportunity_suggestion_job_public_id"] = (
+            write_result.opportunity_suggestion_job.job_public_id
+        )
+    return durable_work
 
-
-def _update_touched_post_commit_fields(activity_update: CustomerActivityUpdate) -> bool:
-    update_data = activity_update.model_dump(exclude_unset=True)
-    post_commit_fields = {
-        "activity_kind",
-        "title",
-        "source_content",
-        "content_json",
-        "summary",
-        "next_action",
-        "next_action_source",
-        "next_follow_time",
-        "next_follow_time_source",
-        "occurred_at",
-    }
-    return any(field in update_data for field in post_commit_fields)
 
 
 @router.get("/kinds", summary="客户活动分类元数据")
@@ -201,37 +192,71 @@ def get_activity_kinds():
 async def create_activity(
     customer_id: str,
     activity: CustomerActivityCreate,
-    post_commit_mode: str = Query("async", pattern="^(async|sync)$", description="活动后处理模式"),
     team_id: int = Depends(get_current_user_team),
     current_user=Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
     customer = check_customer_activity_permission(customer_id, team_id, current_user, db)
-    write_result = customer_activity_write_service.create(
-        db,
-        obj_in=activity,
-        customer_id=customer.id,
-        creator_id=str(current_user.id),
-        owner_id=str(current_user.id),
-        team_id=team_id,
-        operator_name=current_user.name,
-        post_commit_trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_CREATED_DETERMINISTIC,
-        actor_id=str(current_user.id),
+    try:
+        write_result = customer_activity_write_service.create_pending_from_form(
+            db,
+            obj_in=activity,
+            customer_id=customer.id,
+            creator_id=str(current_user.id),
+            owner_id=str(current_user.id),
+            team_id=team_id,
+            operator_name=current_user.name,
+        )
+    except CustomerActivitySubmissionConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    customer_activity_write_service.kick(write_result)
+    return _build_activity_response(db, write_result.activity, write_result=write_result)
+
+
+@router.post(
+    "/{customer_id}/agent-finalized",
+    response_model=CustomerActivityResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="创建 Agent 已完成评估的客户活动",
+)
+def create_agent_finalized_activity(
+    customer_id: str,
+    activity: CustomerActivityAgentFinalizedCreate,
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    customer = check_customer_activity_permission(customer_id, team_id, current_user, db)
+    finalization = CustomerActivityFinalization(
+        title=activity.title or activity.source_content,
+        content_json=activity.content_json or {"content": activity.title or activity.source_content},
+        summary=activity.summary or activity.source_content[:200],
+        next_action=activity.next_action,
+        next_action_source=activity.next_action_source or ("AGENT" if activity.next_action else None),
+        next_follow_time=activity.next_follow_time,
+        next_follow_time_source=activity.next_follow_time_source or ("AGENT" if activity.next_follow_time else None),
+        effectiveness_score=activity.effectiveness_score,
+        effectiveness_is_valid=activity.effectiveness_is_valid,
+        effectiveness_reason=activity.effectiveness_reason,
+        effectiveness_detail_json=json.dumps(activity.effectiveness_detail_json, ensure_ascii=False),
     )
-    post_commit: dict[str, Any] | None = None
-    if post_commit_mode == "sync" and write_result.post_commit_job is not None:
-        post_commit_result = await customer_activity_post_commit_job_service.run(write_result.post_commit_job)
-        post_commit = post_commit_result.get("post_commit")
-        customer_activity_write_service.kick(write_result, include_post_commit=False)
-    else:
-        customer_activity_write_service.kick(write_result)
-    await customer_activity_processing_service.trigger_processing(write_result.activity.id, team_id)
-    return _build_activity_response(
-        db,
-        write_result.activity,
-        post_commit=post_commit,
-        write_result=write_result,
-    )
+    try:
+        write_result = customer_activity_write_service.create_final_from_agent(
+            db,
+            obj_in=activity,
+            finalization=finalization,
+            customer_id=customer.id,
+            creator_id=str(current_user.id),
+            owner_id=str(current_user.id),
+            team_id=team_id,
+            operator_name=current_user.name,
+            post_commit_trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_CREATED_DETERMINISTIC,
+            actor_id=str(current_user.id),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    customer_activity_write_service.kick(write_result)
+    return _build_activity_response(db, write_result.activity, write_result=write_result)
 
 
 @router.post(
@@ -294,7 +319,7 @@ async def create_activity_and_complete_tracking(
         transition_result_holder["result"] = transition_result
 
     try:
-        write_result = customer_activity_write_service.create(
+        write_result = customer_activity_write_service.create_pending_from_form(
             db,
             obj_in=payload.activity,
             customer_id=customer.id,
@@ -302,8 +327,6 @@ async def create_activity_and_complete_tracking(
             owner_id=str(current_user.id),
             team_id=team_id,
             operator_name=current_user.name,
-            post_commit_trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_CREATED_DETERMINISTIC,
-            actor_id=str(current_user.id),
             before_commit=complete_tracking_before_commit,
         )
     except ValueError as exc:
@@ -313,7 +336,6 @@ async def create_activity_and_complete_tracking(
     transition_result = transition_result_holder.get("result")
     if isinstance(transition_result, FollowUpTaskTransitionExecutionResult):
         follow_up_task_transition_execution_service.kick_customer_intelligence_refresh(transition_result)
-    await customer_activity_processing_service.trigger_processing(write_result.activity.id, team_id)
     return CustomerActivityCreateAndCompleteTrackingResponse(
         activity=_build_activity_response(db, write_result.activity, write_result=write_result),
         completed_task_public_id=payload.task_public_id,
@@ -338,88 +360,6 @@ def get_activities(
         limit=limit,
     )
     return [_build_activity_response(db, item) for item in activities]
-
-
-@router.put("/{activity_id}", response_model=CustomerActivityResponse, summary="更新客户活动")
-async def update_activity(
-    activity_id: int,
-    activity_update: CustomerActivityUpdate,
-    team_id: int = Depends(get_current_user_team),
-    current_user=Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
-    activity = customer_activity_crud.get_by_id(db, activity_id, team_id)
-    if not activity:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="客户活动不存在")
-    if activity.creator_id != str(current_user.id):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权更新此客户活动")
-    check_customer_activity_permission(activity.customer_id, team_id, current_user, db)
-    write_result = customer_activity_write_service.update(
-        db,
-        activity=activity,
-        obj_in=activity_update,
-        post_commit_trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_UPDATED,
-        actor_id=str(current_user.id),
-    )
-    customer_activity_write_service.kick(write_result)
-    await customer_activity_processing_service.trigger_processing(write_result.activity.id, team_id)
-    return _build_activity_response(db, write_result.activity, write_result=write_result)
-
-
-@router.patch("/{activity_id}/next-time", response_model=CustomerActivityResponse, summary="更新下次跟进时间")
-async def update_next_time(
-    activity_id: int,
-    next_time: CustomerActivityUpdate,
-    team_id: int = Depends(get_current_user_team),
-    current_user=Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
-    activity = customer_activity_crud.get_by_id(db, activity_id, team_id)
-    if not activity:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="客户活动不存在")
-    check_customer_activity_permission(activity.customer_id, team_id, current_user, db)
-    if next_time.next_follow_time:
-        write_result = customer_activity_write_service.update_next_follow_time(
-            db,
-            activity=activity,
-            next_follow_time=next_time.next_follow_time,
-            post_commit_trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_UPDATED,
-            actor_id=str(current_user.id),
-        )
-        customer_activity_write_service.kick(write_result)
-        await customer_activity_processing_service.trigger_evaluation(write_result.activity.id, team_id)
-        return _build_activity_response(db, write_result.activity, write_result=write_result)
-    return _build_activity_response(db, activity)
-
-
-@router.post("/{activity_id}/process", response_model=CustomerActivityProcessResponse, summary="重新整理客户活动")
-async def process_activity(
-    activity_id: int,
-    team_id: int = Depends(get_current_user_team),
-    current_user=Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
-    activity = customer_activity_crud.get_by_id(db, activity_id, team_id)
-    if not activity:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="客户活动不存在")
-    check_customer_activity_permission(activity.customer_id, team_id, current_user, db)
-    await customer_activity_processing_service.trigger_processing(activity.id, team_id)
-    return CustomerActivityProcessResponse(message="已开始重新整理")
-
-
-@router.post("/{activity_id}/evaluate", response_model=CustomerActivityProcessResponse, summary="重新评估客户活动")
-async def evaluate_activity(
-    activity_id: int,
-    team_id: int = Depends(get_current_user_team),
-    current_user=Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
-    activity = customer_activity_crud.get_by_id(db, activity_id, team_id)
-    if not activity:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="客户活动不存在")
-    check_customer_activity_permission(activity.customer_id, team_id, current_user, db)
-    await customer_activity_processing_service.trigger_evaluation(activity.id, team_id)
-    return CustomerActivityProcessResponse(message="已开始重新评估")
 
 
 @router.delete("/{activity_id}", response_model=MessageResponse, summary="删除客户活动")

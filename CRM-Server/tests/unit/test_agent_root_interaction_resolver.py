@@ -187,7 +187,7 @@ async def test_database_interaction_resolver_rejects_a_second_submission_after_c
             runtime=RootRuntimeContext(),
         )
 
-        assert first.status == "RESOLVED"
+        assert first.status == "RESOLVED", first.reason_code
         assert second.status == "REJECTED"
         assert second.reason_code == "ACTION_ALREADY_CONSUMED"
         assert second.resolved_action is None
@@ -275,3 +275,174 @@ async def test_database_interaction_resolver_fails_closed_when_claim_transaction
         pass
     else:
         raise AssertionError("unavailable action ledger must fail closed")
+
+
+def _seed_opportunity_trigger_action(session_factory) -> tuple[int, int]:
+    db = session_factory()
+    try:
+        session = AgentSession(session_key="opportunity-trigger", team_id=1, user_id=2)
+        db.add(session)
+        db.flush()
+        message = AgentMessage(
+            team_id=1,
+            user_id=2,
+            session_id=session.id,
+            role=AgentMessageRole.ASSISTANT,
+            content="是否创建商机？",  # noqa: RUF001
+        )
+        db.add(message)
+        db.flush()
+        AgentUIActionRepository().register(
+            db,
+            AgentUIActionRegistration(
+                public_id="act_opportunity_trigger",
+                team_id=1,
+                user_id=2,
+                session_id=session.id,
+                message_id=message.id,
+                action_type="submit_interaction",
+                root_context_role="PROJECTION_ONLY",
+                target={
+                    "interaction_type": "confirmation",
+                    "workflow_trigger": {
+                        "type": "workflow_trigger",
+                        "workflow": "customer_opportunity_suggestion",
+                        "job_public_id": "cosj_trigger_1",
+                        "action": "CREATE_OPPORTUNITY",
+                    },
+                    "selection_mode": "single",
+                    "choices": [
+                        {"value": "confirm", "label": "是", "disabled": False},
+                        {"value": "cancel", "label": "否", "disabled": False},
+                    ],
+                },
+                consumption_mode="ONE_SHOT",
+            ),
+        )
+        db.commit()
+        return int(session.id), int(message.id)
+    finally:
+        db.close()
+
+
+async def test_opportunity_trigger_cancel_resolves_to_cancel_action() -> None:
+    engine, session_factory = _database()
+    try:
+        session_id, _ = _seed_opportunity_trigger_action(session_factory)
+        resolver = DatabaseInteractionResolver(session_factory=session_factory)
+
+        resolution = await resolver.resolve(
+            turn=RootTurnInput(
+                team_id=1,
+                user_id=2,
+                session_id=session_id,
+                client_request_id=str(uuid4()),
+                input=InteractionTurnInput(
+                    type="interaction",
+                    action_id="act_opportunity_trigger",
+                    values={"choice": "cancel"},
+                ),
+            ),
+            context=RootContextSnapshot(),
+            runtime=RootRuntimeContext(),
+        )
+
+        assert resolution.status == "RESOLVED", resolution.reason_code
+        assert resolution.resolved_action is not None
+        assert resolution.resolved_action.workflow_trigger is not None
+        assert resolution.resolved_action.workflow_trigger.action == "CANCEL"
+    finally:
+        engine.dispose()
+
+
+async def test_opportunity_trigger_replay_cannot_reexecute_and_other_request_cannot_claim() -> None:
+    engine, session_factory = _database()
+    try:
+        session_id, source_message_id = _seed_opportunity_trigger_action(session_factory)
+        resolver = DatabaseInteractionResolver(session_factory=session_factory)
+        client_request_id = str(uuid4())
+        first = await resolver.resolve(
+            turn=RootTurnInput(
+                team_id=1,
+                user_id=2,
+                session_id=session_id,
+                client_request_id=client_request_id,
+                input=InteractionTurnInput(
+                    type="interaction",
+                    action_id="act_opportunity_trigger",
+                    values={"choice": "confirm"},
+                ),
+            ),
+            context=RootContextSnapshot(),
+            runtime=RootRuntimeContext(),
+        )
+        assert first.status == "RESOLVED", first.reason_code
+        assert first.resolved_action is not None
+        assert first.resolved_action.claim_outcome == "ACQUIRED"
+        assert first.resolved_action.workflow_trigger is not None
+        assert first.resolved_action.workflow_trigger.job_public_id == "cosj_trigger_1"
+
+        db = session_factory()
+        try:
+            result_message = AgentMessage(
+                team_id=1,
+                user_id=2,
+                session_id=session_id,
+                role=AgentMessageRole.ASSISTANT,
+                content="已启动商机工作流",
+            )
+            db.add(result_message)
+            db.flush()
+            AgentUIActionRepository().complete_consumption(
+                db,
+                public_id="act_opportunity_trigger",
+                team_id=1,
+                user_id=2,
+                session_id=session_id,
+                client_request_id=client_request_id,
+                result_message_id=int(result_message.id),
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        replay = await resolver.resolve(
+            turn=RootTurnInput(
+                team_id=1,
+                user_id=2,
+                session_id=session_id,
+                client_request_id=client_request_id,
+                input=InteractionTurnInput(
+                    type="interaction",
+                    action_id="act_opportunity_trigger",
+                    values={"choice": "confirm"},
+                ),
+            ),
+            context=RootContextSnapshot(),
+            runtime=RootRuntimeContext(),
+        )
+        assert replay.status == "RESOLVED"
+        assert replay.resolved_action is not None
+        assert replay.resolved_action.claim_outcome == "REPLAY"
+        assert replay.resolved_action.replay_message_id is not None
+
+        rejected = await resolver.resolve(
+            turn=RootTurnInput(
+                team_id=1,
+                user_id=2,
+                session_id=session_id,
+                client_request_id=str(uuid4()),
+                input=InteractionTurnInput(
+                    type="interaction",
+                    action_id="act_opportunity_trigger",
+                    values={"choice": "confirm"},
+                ),
+            ),
+            context=RootContextSnapshot(),
+            runtime=RootRuntimeContext(),
+        )
+        assert rejected.status == "REJECTED"
+        assert rejected.reason_code == "ACTION_ALREADY_CONSUMED"
+        assert source_message_id > 0
+    finally:
+        engine.dispose()

@@ -39,7 +39,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   'add': []
   'record': [plan: PaymentPlanResponse]
-  'view': [planId: number]
+  'view': [planId: number, plan: PaymentPlanResponse]
   'edit': [plan: PaymentPlanResponse]
   'delete': [plan: PaymentPlanResponse]
 }>()
@@ -53,7 +53,7 @@ const handleRecord = (plan: PaymentPlanResponse): void => {
 }
 
 const handleView = (plan: PaymentPlanResponse): void => {
-  emit('view', plan.id)
+  emit('view', plan.id, plan)
 }
 
 const handleEdit = (plan: PaymentPlanResponse): void => {

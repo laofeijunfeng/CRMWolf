@@ -417,6 +417,38 @@ class AgentAsyncOperationService:
         db.flush()
         return event
 
+    def wait_for_user(
+        self,
+        db: Session,
+        operation: AgentAsyncOperation,
+        *,
+        summary: str,
+        result: JSONDict | None = None,
+    ) -> AgentAsyncOperation:
+        """Expose a durable result that now needs an Agent UI continuation."""
+
+        locked_operation = self._lock_operation(db, operation.id)
+        if str(locked_operation.status) in TERMINAL_OPERATION_STATUSES:
+            return locked_operation
+        locked_operation.status = AgentAsyncOperationStatus.WAITING_USER
+        locked_operation.summary = summary
+        locked_operation.result_json = result or {}
+        locked_operation.error_message = None
+        locked_operation.next_retry_at = None
+        locked_operation.finished_time = None
+        self._append_event(
+            db,
+            locked_operation,
+            event_key="lifecycle:waiting_user",
+            event_type="WAITING_USER",
+            status=AgentAsyncOperationStatus.WAITING_USER,
+            step=locked_operation.current_step,
+            message=summary,
+            payload=result,
+        )
+        db.flush()
+        return locked_operation
+
     def complete(
         self,
         db: Session,

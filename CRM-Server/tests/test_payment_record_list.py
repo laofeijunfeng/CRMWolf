@@ -13,7 +13,7 @@ Task 1.4: PaymentRecord List Endpoint with approval_status filtering
 import pytest
 from datetime import date, datetime
 
-from sqlalchemy import create_engine
+from sqlalchemy import MetaData, create_engine
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.types import BigInteger
 from sqlalchemy.orm import sessionmaker
@@ -39,6 +39,8 @@ from app.models.approval import (
     ApprovalStatus,
 )
 from app.models.contract import Contract, ContractStatus
+from app.models.customer import Customer
+from app.models.opportunity import Opportunity
 from app.models.payment import (
     PaymentPlan, PaymentRecord, PaymentPlanStatus, PaymentConfirmationStatus,
 )
@@ -71,6 +73,21 @@ def db_session():
         Approval.__table__,
         ApprovalRecord.__table__,
     ]
+    # The production query joins customer/opportunity and eager-loads their
+    # complete ORM rows.  Create those two support tables from the model
+    # definitions, but without indexes: both models contain a legacy
+    # ``idx_owner_id`` name that collides in SQLite's global index namespace.
+    support_metadata = MetaData()
+    for model in (Customer, Opportunity):
+        support_table = model.__table__.to_metadata(support_metadata)
+        support_table.indexes.clear()
+        # These are join-only support tables in this focused test.  Omit
+        # unrelated production foreign keys so SQLite does not require the
+        # rest of the CRM schema just to compile the fixture.
+        for foreign_key_constraint in list(support_table.foreign_key_constraints):
+            support_table.constraints.remove(foreign_key_constraint)
+        support_table.foreign_keys.clear()
+    support_metadata.create_all(engine)
     Base.metadata.create_all(engine, tables=tables)
     Session = sessionmaker(bind=engine)
     session = Session()
@@ -187,6 +204,7 @@ def seed_contract_plan(db_session):
     plan = PaymentPlan(
         team_id=1,
         contract_id=contract.id,
+        plan_number="PLAN-2026-001",
         stage_name="首付款",
         planned_amount=50000,
         due_date=date(2026, 8, 1),
@@ -236,6 +254,7 @@ def seed_payment_records(db_session, seed_contract_plan, seed_payment_flow, curr
     rec1 = PaymentRecord(
         team_id=1,
         payment_plan_id=plan.id,
+        record_number="PAY202607010001",
         actual_amount=10000,
         payment_date=date(2026, 7, 1),
         creator_id="1",
@@ -251,6 +270,7 @@ def seed_payment_records(db_session, seed_contract_plan, seed_payment_flow, curr
     rec2 = PaymentRecord(
         team_id=1,
         payment_plan_id=plan.id,
+        record_number="PAY202607020001",
         actual_amount=20000,
         payment_date=date(2026, 7, 2),
         creator_id="1",
@@ -280,6 +300,7 @@ def seed_payment_records(db_session, seed_contract_plan, seed_payment_flow, curr
     rec3 = PaymentRecord(
         team_id=1,
         payment_plan_id=plan.id,
+        record_number="PAY202607030001",
         actual_amount=30000,
         payment_date=date(2026, 7, 3),
         creator_id="1",
@@ -296,6 +317,7 @@ def seed_payment_records(db_session, seed_contract_plan, seed_payment_flow, curr
     rec4 = PaymentRecord(
         team_id=1,
         payment_plan_id=plan.id,
+        record_number="PAY202607040001",
         actual_amount=5000,
         payment_date=date(2026, 7, 4),
         creator_id="1",
@@ -328,7 +350,7 @@ def seed_payment_records(db_session, seed_contract_plan, seed_payment_flow, curr
 
 def test_payment_record_list_all(client, patched_deps):
     """Test PaymentRecord list endpoint returns all records"""
-    patched_deps(["payment:view"])
+    patched_deps(["payment:view:all"])
     response = client.get("/v1/payments/payment-records")
     assert response.status_code == 200, response.text
     data = response.json()
@@ -370,14 +392,59 @@ def test_payment_record_list_includes_record_number(
 
     response = client.get("/v1/payments/payment-records")
     assert response.status_code == 200, response.text
-    assert response.json()["items"][0]["record_number"] == record.record_number
+    item = response.json()["items"][0]
+    assert item["record_number"] == record.record_number
+    assert item["updated_time"] is None
+    # The public list contract requires the compatibility timestamp even for
+    # legacy ORM objects that only expose created_time.
+    assert item["last_modified_time"] == record.created_time.isoformat()
+
+
+def test_payment_record_list_uses_updated_time_for_last_modified_time(
+    client, patched_deps, monkeypatch
+):
+    """列表响应应优先返回 updated_time 作为最后更新时间。"""
+    patched_deps(["payment:view:all"])
+    created_time = datetime(2026, 7, 13, 10, 0, 0)
+    updated_time = datetime(2026, 7, 14, 11, 30, 0)
+    record = SimpleNamespace(
+        id=1,
+        payment_plan_id=1,
+        record_number="PAY202607130001",
+        actual_amount=10000,
+        payment_date=date(2026, 7, 13),
+        proof_attachment=None,
+        notes=None,
+        creator_id="1",
+        creator_name="销售李",
+        confirmation_status=PaymentConfirmationStatus.PENDING,
+        created_time=created_time,
+        updated_time=updated_time,
+        approval_id=None,
+        approval=None,
+        payment_plan=None,
+    )
+    monkeypatch.setattr(
+        "app.api.payments.payment_record_crud.list_records",
+        lambda *args, **kwargs: ([record], 1),
+    )
+    monkeypatch.setattr(
+        "app.api.payments.query_pending_approval_me",
+        lambda *args, **kwargs: 0,
+    )
+
+    response = client.get("/v1/payments/payment-records")
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    assert item["updated_time"] == updated_time.isoformat()
+    assert item["last_modified_time"] == updated_time.isoformat()
 
 
 def test_payment_record_list_filter_pending_submit(
     client, seed_payment_records, patched_deps
 ):
     """Test filtering by pending_submit approval status"""
-    patched_deps(["payment:view"])
+    patched_deps(["payment:view:all"])
     response = client.get("/v1/payments/payment-records?approval_status=pending_submit")
     assert response.status_code == 200, response.text
     data = response.json()
@@ -392,7 +459,7 @@ def test_payment_record_list_filter_pending_approval(
     client, seed_payment_records, patched_deps
 ):
     """Test filtering by pending_approval approval status"""
-    patched_deps(["payment:view"])
+    patched_deps(["payment:view:all"])
     response = client.get("/v1/payments/payment-records?approval_status=pending_approval")
     assert response.status_code == 200, response.text
     data = response.json()
@@ -409,7 +476,7 @@ def test_payment_record_list_filter_approved(
     client, seed_payment_records, patched_deps
 ):
     """Test filtering by approved status"""
-    patched_deps(["payment:view"])
+    patched_deps(["payment:view:all"])
     response = client.get("/v1/payments/payment-records?approval_status=approved")
     assert response.status_code == 200, response.text
     data = response.json()
@@ -423,7 +490,7 @@ def test_payment_record_list_filter_rejected(
     client, seed_payment_records, patched_deps
 ):
     """Test filtering by rejected status"""
-    patched_deps(["payment:view"])
+    patched_deps(["payment:view:all"])
     response = client.get("/v1/payments/payment-records?approval_status=rejected")
     assert response.status_code == 200, response.text
     data = response.json()
@@ -438,7 +505,7 @@ def test_payment_record_list_pending_approval_me_count(
     client, seed_payment_records, patched_deps, user_role_finance
 ):
     """Test pending_approval_me_count calculation"""
-    patched_deps(["payment:view"], ["FINANCE"])
+    patched_deps(["payment:view:all"], ["FINANCE"])
     response = client.get("/v1/payments/payment-records")
     assert response.status_code == 200, response.text
     data = response.json()
@@ -456,7 +523,7 @@ def test_payment_record_list_includes_approval_info(
     client, seed_payment_records, patched_deps
 ):
     """Test that approval info is included in response"""
-    patched_deps(["payment:view"])
+    patched_deps(["payment:view:all"])
     response = client.get("/v1/payments/payment-records")
     assert response.status_code == 200, response.text
     data = response.json()

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import {
   AlertCircle,
@@ -81,7 +81,7 @@ import {
 import type { FileAttachmentItem } from '@/types/fileAttachment'
 import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
-import { confirmDelete } from '@/utils/confirmDialog'
+import { confirmDialog } from '@/utils/confirmDialog'
 import { handleApiError } from '@/utils/errorHandler'
 import { buildInvoiceDownloadFileName } from '@/utils/invoiceFileName'
 import { logger } from '@/utils/logger'
@@ -126,6 +126,9 @@ const redOffsetFileUrl = ref<string>('')
 const completeReissueRedFileError = ref<string>('')
 const completeReissueNewFileError = ref<string>('')
 const redOffsetFileError = ref<string>('')
+const redOffsetReasonError = ref<string>('')
+const redOffsetNumberError = ref<string>('')
+const redOffsetCloseGuardPending = ref<boolean>(false)
 type ReissueFormState = Omit<
   InvoiceReissueApplicationCreate,
   'invoice_bank_name' | 'invoice_bank_account' | 'invoice_address' | 'invoice_phone'
@@ -406,6 +409,8 @@ const resetRedOffsetUploadForm = (): void => {
     file: null,
   }
   redOffsetFileError.value = ''
+  redOffsetReasonError.value = ''
+  redOffsetNumberError.value = ''
 }
 
 const loadInvoiceFilePreviewUrl = async (
@@ -705,10 +710,38 @@ const handleOpenRedOffset = (): void => {
   redOffsetDialogOpen.value = true
 }
 
-const handleRedOffsetDialogOpenChange = (open: boolean): void => {
-  redOffsetDialogOpen.value = open
-  if (!open) {
+const hasRedOffsetFormChanges = computed<boolean>(() => {
+  const form = redOffsetForm.value
+  return form.reason.trim() !== '' || form.red_invoice_number.trim() !== '' || form.file !== null
+})
+
+const handleRedOffsetDialogOpenChange = async (open: boolean): Promise<void> => {
+  if (open) {
+    redOffsetDialogOpen.value = true
+    return
+  }
+
+  if (redOffsetting.value || redOffsetCloseGuardPending.value) return
+
+  if (!hasRedOffsetFormChanges.value) {
+    redOffsetDialogOpen.value = false
     resetRedOffsetUploadForm()
+    return
+  }
+
+  redOffsetCloseGuardPending.value = true
+  try {
+    const confirmed = await confirmDialog(
+      '已填写冲红信息，关闭后这些内容不会保存。确定关闭吗？',
+      '放弃本次冲红？',
+      { variant: 'destructive', confirmText: '放弃并关闭' },
+    )
+    if (confirmed) {
+      redOffsetDialogOpen.value = false
+      resetRedOffsetUploadForm()
+    }
+  } finally {
+    redOffsetCloseGuardPending.value = false
   }
 }
 
@@ -731,20 +764,37 @@ const handleRedOffsetFileError = (message: string): void => {
 const handleRedOffsetInvoice = async (): Promise<void> => {
   const invoice = invoiceInfo.value
   if (invoice === null) return
-  if (redOffsetForm.value.file === null) {
-    toast.warning('请上传红字发票文件')
+
+  redOffsetReasonError.value = ''
+  redOffsetNumberError.value = ''
+  redOffsetFileError.value = ''
+  const reason = redOffsetForm.value.reason.trim()
+  const redInvoiceNumber = redOffsetForm.value.red_invoice_number.trim()
+  if (reason.length > 500) redOffsetReasonError.value = '冲红原因不能超过 500 字'
+  if (redInvoiceNumber.length > 50) redOffsetNumberError.value = '红字发票号码不能超过 50 个字符'
+  if (redOffsetForm.value.file === null) redOffsetFileError.value = '请上传红字发票文件'
+
+  if (redOffsetReasonError.value || redOffsetNumberError.value || redOffsetFileError.value) {
+    await nextTick()
+    const firstInvalid = document.querySelector<HTMLElement>(
+      '#red-offset-reason[aria-invalid="true"], #red-offset-number[aria-invalid="true"], [data-red-offset-file-error="true"]',
+    )
+    firstInvalid?.focus()
     return
   }
 
   redOffsetting.value = true
   try {
+    const file = redOffsetForm.value.file
+    if (file === null) return
     await invoiceApi.redOffsetInvoice(invoice.id, {
-      file: redOffsetForm.value.file,
-      red_invoice_number: redOffsetForm.value.red_invoice_number,
-      reason: redOffsetForm.value.reason,
+      file,
+      red_invoice_number: redInvoiceNumber,
+      reason,
     })
     toast.success('发票已冲红')
-    handleRedOffsetDialogOpenChange(false)
+    redOffsetDialogOpen.value = false
+    resetRedOffsetUploadForm()
     await fetchInvoiceDetail(invoice.id)
     emit('refresh')
   } catch (error: unknown) {
@@ -832,13 +882,19 @@ const handleDelete = async (): Promise<void> => {
   const invoice = invoiceInfo.value
   if (invoice === null) return
 
-  const confirmed = await confirmDelete(`发票申请"${invoice.application_number}"`)
+  if (deleting.value) return
+
+  const confirmed = await confirmDialog(
+    `确定删除发票申请“${invoice.application_number}”吗？仅草稿或已拒绝的申请可以删除，删除后无法恢复。`,
+    '删除发票申请',
+    { variant: 'destructive', confirmText: '删除' },
+  )
   if (!confirmed) return
 
   deleting.value = true
   try {
     await invoiceApi.deleteInvoiceApplication(invoice.id)
-    toast.success('发票申请已删除')
+    toast.success(`发票申请“${invoice.application_number}”已删除`)
     emit('refresh')
     closeSheet()
   } catch (error: unknown) {
@@ -1412,24 +1468,78 @@ onBeforeUnmount((): void => {
   />
 
   <Dialog :open="redOffsetDialogOpen" @update:open="handleRedOffsetDialogOpenChange">
-    <DialogContent class="sm:max-w-[520px]">
+    <DialogContent class="sm:max-w-[560px]">
       <DialogHeader>
         <DialogTitle>冲红发票</DialogTitle>
-        <DialogDescription>上传红字发票后，原蓝字发票将标记为已冲红。</DialogDescription>
+        <DialogDescription>核对原发票信息并上传红字发票。提交成功后，原蓝字发票将标记为已冲红。</DialogDescription>
       </DialogHeader>
+
+      <div v-if="invoiceInfo" class="red-offset-context" aria-label="原发票信息">
+        <div class="red-offset-context__heading">原发票</div>
+        <div class="red-offset-context__grid">
+          <div class="red-offset-context__item">
+            <span>发票申请</span>
+            <strong>{{ invoiceInfo.application_number }}</strong>
+          </div>
+          <div class="red-offset-context__item">
+            <span>蓝字发票号码</span>
+            <strong>{{ formatText(invoiceInfo.invoice_number) }}</strong>
+          </div>
+          <div class="red-offset-context__item">
+            <span>客户</span>
+            <strong>{{ formatText(invoiceInfo.customer_name) }}</strong>
+          </div>
+          <div class="red-offset-context__item">
+            <span>开票金额</span>
+            <AmountText :value="Number(invoiceInfo.invoice_amount)" size="sm" tone="warning" />
+          </div>
+          <div class="red-offset-context__item">
+            <span>当前状态</span>
+            <StatusBadge :status="mapInvoiceStatus(invoiceInfo.status)" type="invoice" size="small" />
+          </div>
+        </div>
+        <p class="red-offset-context__impact">提交后原发票状态将变更为“已冲红”，后续不可再次发起手工冲红。</p>
+      </div>
+
       <div class="dialog-form">
         <div class="form-field">
-          <Label for="red-offset-reason">冲红原因</Label>
+          <Label for="red-offset-reason">
+            冲红原因
+            <span class="field-optional">（可选）</span>
+          </Label>
           <Textarea
             id="red-offset-reason"
             v-model="redOffsetForm.reason"
             rows="3"
+            maxlength="500"
+            placeholder="请填写冲红原因"
+            :aria-invalid="redOffsetReasonError !== ''"
+            :aria-describedby="redOffsetReasonError !== '' ? 'red-offset-reason-error' : undefined"
             :disabled="redOffsetting"
+            @update:model-value="redOffsetForm.reason = String($event); redOffsetReasonError = ''"
           />
+          <p v-if="redOffsetReasonError" id="red-offset-reason-error" class="form-error" role="alert">
+            {{ redOffsetReasonError }}
+          </p>
         </div>
         <div class="form-field">
-          <Label for="red-offset-number">红字发票号码</Label>
-          <Input id="red-offset-number" v-model="redOffsetForm.red_invoice_number" :disabled="redOffsetting" />
+          <Label for="red-offset-number">
+            红字发票号码
+            <span class="field-optional">（可选）</span>
+          </Label>
+          <Input
+            id="red-offset-number"
+            v-model="redOffsetForm.red_invoice_number"
+            maxlength="50"
+            placeholder="请输入红字发票号码"
+            :aria-invalid="redOffsetNumberError !== ''"
+            :aria-describedby="redOffsetNumberError !== '' ? 'red-offset-number-error' : undefined"
+            :disabled="redOffsetting"
+            @update:model-value="redOffsetForm.red_invoice_number = String($event); redOffsetNumberError = ''"
+          />
+          <p v-if="redOffsetNumberError" id="red-offset-number-error" class="form-error" role="alert">
+            {{ redOffsetNumberError }}
+          </p>
         </div>
         <FileAttachment
           title="红字发票文件"
@@ -1443,14 +1553,17 @@ onBeforeUnmount((): void => {
           :disabled="redOffsetting"
           :allow-download="false"
           empty-text="暂无红字发票文件"
+          :data-red-offset-file-error="redOffsetFileError !== '' ? 'true' : undefined"
           @upload="handleRedOffsetFileUpload"
           @remove="setRedOffsetFile(null)"
           @error="handleRedOffsetFileError"
         />
-        <p v-if="redOffsetFileError" class="text-sm text-destructive" role="alert">{{ redOffsetFileError }}</p>
+        <p v-if="redOffsetFileError" data-red-offset-file-error="true" class="form-error" role="alert" tabindex="-1">
+          {{ redOffsetFileError }}
+        </p>
       </div>
       <DialogFooter>
-        <Button variant="outline" type="button" :disabled="redOffsetting" @click="handleRedOffsetDialogOpenChange(false)">
+        <Button variant="outline" type="button" :disabled="redOffsetting || redOffsetCloseGuardPending" @click="handleRedOffsetDialogOpenChange(false)">
           取消
         </Button>
         <Button type="button" :disabled="redOffsetting" @click="handleRedOffsetInvoice">
@@ -1898,6 +2011,64 @@ $invoice-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
   gap: $wolf-space-md-v2;
 }
 
+.red-offset-context {
+  display: flex;
+  flex-direction: column;
+  gap: $wolf-space-sm-v2;
+  padding: $wolf-space-md-v2;
+  border: 1px solid $wolf-border-default-v2;
+  border-radius: $wolf-radius-v2;
+  background: $wolf-bg-muted-v2;
+}
+
+.red-offset-context__heading {
+  color: $wolf-text-primary-v2;
+  font-size: $wolf-font-size-body-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+}
+
+.red-offset-context__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: $wolf-space-sm-v2 $wolf-space-lg-v2;
+}
+
+.red-offset-context__item {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.red-offset-context__item > span {
+  color: $wolf-text-tertiary-v2;
+  font-size: $wolf-font-size-caption-v2;
+}
+
+.red-offset-context__item > strong {
+  overflow: hidden;
+  color: $wolf-text-primary-v2;
+  font-size: $wolf-font-size-body-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.red-offset-context__impact {
+  margin: 0;
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  line-height: $wolf-line-height-body-v2;
+}
+
+.form-error {
+  margin: 0;
+  color: $wolf-danger-text-v2;
+  font-size: $wolf-font-size-caption-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+  line-height: $wolf-line-height-body-v2;
+}
+
 .dialog-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1918,7 +2089,20 @@ $invoice-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
   color: $wolf-danger-text-v2;
 }
 
+.field-optional {
+  margin-left: 2px;
+  color: $wolf-text-tertiary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  font-weight: $wolf-font-weight-normal-v2;
+}
+
 .form-field--full {
   grid-column: 1 / -1;
+}
+
+@media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  .red-offset-context__grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

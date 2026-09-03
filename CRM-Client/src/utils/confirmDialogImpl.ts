@@ -14,7 +14,11 @@ export interface ConfirmDialogOptions {
   variant: 'default' | 'destructive'
 }
 
-// 全局确认对话框状态
+type ConfirmDialogRequest = ConfirmDialogOptions & {
+  resolve: (value: boolean) => void
+}
+
+// 全局确认对话框状态。请求按顺序展示，避免并发调用覆盖 Promise 的 resolve。
 const confirmDialogState = ref<{
   visible: boolean
   options: ConfirmDialogOptions
@@ -31,12 +35,45 @@ const confirmDialogState = ref<{
   resolve: null,
 })
 
+const queuedRequests: ConfirmDialogRequest[] = []
+
+function showNextRequest(): void {
+  const next = queuedRequests.shift()
+  if (next === undefined) return
+
+  confirmDialogState.value = {
+    visible: true,
+    options: {
+      message: next.message,
+      title: next.title,
+      confirmText: next.confirmText,
+      cancelText: next.cancelText,
+      variant: next.variant,
+    },
+    resolve: next.resolve,
+  }
+}
+
+function settleCurrent(result: boolean): void {
+  const currentResolve = confirmDialogState.value.resolve
+  confirmDialogState.value.resolve = null
+  confirmDialogState.value.visible = false
+  currentResolve?.(result)
+  showNextRequest()
+}
+
 /**
  * 创建确认对话框
- * 通过 Promise 实现异步调用
+ * 通过 Promise 实现异步调用；多个请求会排队展示。
  */
 export function createConfirmDialog(options: ConfirmDialogOptions): Promise<boolean> {
   return new Promise((resolve) => {
+    const request: ConfirmDialogRequest = { ...options, resolve }
+    if (confirmDialogState.value.visible || confirmDialogState.value.resolve !== null) {
+      queuedRequests.push(request)
+      return
+    }
+
     confirmDialogState.value = {
       visible: true,
       options,
@@ -56,14 +93,14 @@ export function useConfirmDialogState(): Ref<typeof confirmDialogState.value> {
  * 处理确认
  */
 export function handleConfirm(): void {
-  confirmDialogState.value.resolve?.(true)
-  confirmDialogState.value.visible = false
+  if (!confirmDialogState.value.visible) return
+  settleCurrent(true)
 }
 
 /**
  * 处理取消
  */
 export function handleCancel(): void {
-  confirmDialogState.value.resolve?.(false)
-  confirmDialogState.value.visible = false
+  if (!confirmDialogState.value.visible) return
+  settleCurrent(false)
 }

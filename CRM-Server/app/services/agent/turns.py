@@ -21,7 +21,7 @@ from app.schemas.agent_persistence import (
     AgentTurnStart,
     AgentUIMessageBody,
 )
-from app.services.agent.ui.schemas import AgentUIEnvelope
+from app.services.agent.ui.schemas import AgentUIEnvelope, InteractionBlock
 from app.utils.public_id import generate_public_id
 from app.utils.time import business_now
 
@@ -613,7 +613,23 @@ class AgentTurnRepository:
     def _validated_envelope(row: AgentMessage) -> AgentUIEnvelope:
         if row.ui_json is None:
             raise AgentTurnPersistenceError("target message is missing ui_json")
-        return AgentUIEnvelope.model_validate(row.ui_json)
+        envelope = AgentUIEnvelope.model_validate(row.ui_json)
+        if row.role != AgentMessageRole.ASSISTANT:
+            return envelope
+
+        blocks = [
+            block.model_copy(
+                update={
+                    "prompt": block.prompt,
+                }
+            )
+            if isinstance(block, InteractionBlock) and block.presentation == "COMPACT_TASK_COMPLETION"
+            else block
+            for block in envelope.blocks
+        ]
+        if blocks == envelope.blocks:
+            return envelope
+        return envelope.model_copy(update={"blocks": blocks})
 
     @staticmethod
     def _to_snapshot(row: AgentMessage) -> AgentTurnMessageSnapshot:

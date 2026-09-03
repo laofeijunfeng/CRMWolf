@@ -32,6 +32,7 @@ class CustomerActivityDurableWorkReceipt(DurableWorkReceiptModel):
     activity_id: int = Field(gt=0)
     post_commit_job_public_id: str = Field(min_length=1, max_length=64)
     customer_intelligence_request_id: str = Field(min_length=1, max_length=160)
+    opportunity_suggestion_job_public_id: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 AgentDurableWorkReceipt: TypeAlias = Annotated[

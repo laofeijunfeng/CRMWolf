@@ -9,6 +9,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import contractApi, { type ContractListResponse } from '@/api/contract'
 import customerApi, { type CustomerResponse } from '@/api/customer'
@@ -22,6 +32,7 @@ import invoiceApi, {
 import paymentApi, { type PaymentPlanResponse } from '@/api/payment'
 import approvalGenericApi from '@/api/approvalGeneric'
 import { handleApiError } from '@/utils/errorHandler'
+import { useDialogCloseGuard } from '@/composables/useDialogCloseGuard'
 import { formatCurrency } from '@/utils/format'
 import { normalizePaginatedResponse } from '@/types/pagination'
 import InvoiceTypeSegmentedControl from '@/components/invoice/InvoiceTypeSegmentedControl.vue'
@@ -100,6 +111,8 @@ const form = reactive<InvoiceApplicationForm>({
   invoiceAmount: '',
 })
 
+const initialForm = ref<InvoiceApplicationForm>({ ...form })
+
 const errors = reactive<InvoiceApplicationFormErrors>({
   customerId: '',
   contractId: '',
@@ -118,6 +131,18 @@ const isRejectedEditMode = computed<boolean>(() => !isCreateMode.value && props.
 const hasFixedCustomer = computed<boolean>(() => props.fixedCustomer !== null)
 const hasFixedInvoiceTitle = computed<boolean>(() => props.fixedInvoiceTitle !== null)
 const hasFixedContract = computed<boolean>(() => props.fixedContractId !== null)
+const hasFormChanges = computed<boolean>(() => {
+  return Object.keys(form).some((key) => {
+    const field = key as keyof InvoiceApplicationForm
+    return form[field] !== initialForm.value[field]
+  })
+})
+const closeGuard = useDialogCloseGuard({
+  isDirty: hasFormChanges,
+  submitting,
+  emitOpen: (open) => emit('update:open', open),
+})
+const showConfirmDialog = closeGuard.showConfirmDialog
 const title = computed<string>(() => {
   if (isCreateMode.value) return '申请发票'
   return isRejectedEditMode.value ? '修改并重新提交发票申请' : '编辑发票申请'
@@ -240,6 +265,7 @@ function resetForm(keepCurrentCreatePaymentPlan = false): void {
     ? String(application.invoice_amount)
     : shouldKeepCreatePaymentPlan ? previousInvoiceAmount : ''
   clearErrors()
+  initialForm.value = { ...form }
 }
 
 function validateForm(): boolean {
@@ -461,6 +487,7 @@ async function handleSubmit(): Promise<void> {
       }
     }
 
+    closeGuard.approveClose()
     visible.value = false
     emit('success')
   } catch (error: unknown) {
@@ -470,10 +497,20 @@ async function handleSubmit(): Promise<void> {
   }
 }
 
+function handleOpenChange(open: boolean): void {
+  closeGuard.handleOpenChange(open)
+}
+
 function handleCancel(): void {
-  if (!submitting.value) {
-    visible.value = false
-  }
+  closeGuard.requestClose()
+}
+
+function continueEditing(): void {
+  closeGuard.continueEditing()
+}
+
+function confirmCancel(): void {
+  closeGuard.confirmDiscard()
 }
 
 function customerOptionLabel(customer: CustomerResponse): string {
@@ -505,12 +542,15 @@ watch(
   () => [props.open, props.mode, props.application?.id, props.fixedCustomer?.id, props.fixedInvoiceTitle?.id, props.fixedContractId] as const,
   ([open], previousValues) => {
     if (!open) {
+      if (closeGuard.handleParentClose()) return
+      closeGuard.reset()
       invoiceTitleDialogOpen.value = false
       clearErrors()
       customerSearchKeyword.value = ''
       return
     }
 
+    closeGuard.reset()
     customerSearchKeyword.value = ''
     resetForm(previousValues?.[0] === true)
     void fetchCustomers(customerSearchKeyword.value)
@@ -530,8 +570,8 @@ watch(
 </script>
 
 <template>
-  <Dialog v-model:open="visible">
-    <DialogContent class="invoice-application-dialog">
+  <Dialog :open="props.open" @update:open="handleOpenChange">
+    <DialogContent class="invoice-application-dialog w-[calc(100vw-2rem)] max-h-[min(90vh,90dvh)] overflow-y-auto overscroll-contain [scroll-padding-bottom:calc(5rem+env(safe-area-inset-bottom,0px))]">
       <DialogHeader>
         <DialogTitle>{{ title }}</DialogTitle>
         <DialogDescription>{{ description }}</DialogDescription>
@@ -691,6 +731,20 @@ watch(
     @update:open="invoiceTitleDialogOpen = $event"
     @success="handleInvoiceTitleSuccess"
   />
+  <AlertDialog :open="showConfirmDialog" @update:open="closeGuard.handleConfirmOpenChange">
+    <AlertDialogContent>
+      <AlertDialogHeader>
+        <AlertDialogTitle>放弃填写发票申请？</AlertDialogTitle>
+        <AlertDialogDescription>
+          当前已填写或调整发票申请内容，关闭后这些未保存内容会丢失。
+        </AlertDialogDescription>
+      </AlertDialogHeader>
+      <AlertDialogFooter>
+        <AlertDialogCancel @click="continueEditing">继续编辑</AlertDialogCancel>
+        <AlertDialogAction @click="confirmCancel">放弃填写</AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>
 </template>
 
 <style scoped lang="scss">

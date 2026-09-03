@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Annotated, Literal, Protocol, Self, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, model_validator
@@ -14,9 +14,11 @@ from app.services.agent.query import (  # noqa: TC001
     CRMQuerySpec,
     EntityRef,
 )
-from app.services.agent.query.semantic_intent import CRMQuerySemanticIntent
+from app.services.agent.query.semantic_intent import CRMQuerySemanticIntent  # noqa: TC001
+from app.services.agent.semantic_plan import AgentSemanticPlan
 from app.services.agent.workflow import (
     WorkflowRef,
+    WorkflowResolvedCustomer,
     WorkflowResult,
     WorkflowRuntimeContext,
 )
@@ -27,6 +29,9 @@ PendingCaseRelation: TypeAlias = Literal[
 ]
 Route: TypeAlias = Literal["QUERY", "WORKFLOW", "CLARIFY"]
 Risk: TypeAlias = Literal["READ_ONLY", "WRITE"]
+# Backwards-compatible names for callers of the Root contract module.
+RootSemanticPlan = AgentSemanticPlan
+
 
 
 class OrchestratorContractModel(BaseModel):
@@ -47,11 +52,28 @@ class InteractionTurnInput(OrchestratorContractModel):
 
 
 class WorkflowTriggerTurnInput(OrchestratorContractModel):
-    """Internal typed trigger for starting one authoritative system Workflow."""
+    """Internal typed trigger for starting one authoritative system Workflow.
+
+    Follow-up confirmation and opportunity-suggestion triggers deliberately
+    share one transport shape.  The workflow-specific fields are validated
+    together here so callers cannot manufacture a partially bound trigger.
+    """
 
     type: Literal["workflow_trigger"]
-    workflow: Literal["follow_up_task_confirmation"]
-    resource_id: str = Field(pattern=r"^fuc_[0-9a-f]{32}$")
+    workflow: Literal["follow_up_task_confirmation", "customer_opportunity_suggestion"]
+    resource_id: str | None = Field(default=None, pattern=r"^fuc_[0-9a-f]{32}$")
+    job_public_id: str | None = Field(default=None, pattern=r"^cosj_[A-Za-z0-9_-]+$")
+    action: Literal["CREATE_OPPORTUNITY", "MOVE_OPPORTUNITY_STAGE", "CANCEL"] | None = None
+
+    @model_validator(mode="after")
+    def validate_workflow_binding(self) -> Self:
+        if self.workflow == "follow_up_task_confirmation":
+            if self.resource_id is None or self.job_public_id is not None or self.action is not None:
+                raise ValueError("follow-up trigger requires only resource_id")
+            return self
+        if self.resource_id is not None or self.job_public_id is None or self.action is None:
+            raise ValueError("opportunity suggestion trigger requires job_public_id and action")
+        return self
 
 
 RootUserInput: TypeAlias = Annotated[
@@ -98,6 +120,30 @@ class PendingCaseContext(OrchestratorContractModel):
     question_text: str = Field(min_length=1, max_length=20000)
 
 
+class ConversationMessageContext(OrchestratorContractModel):
+    """Small, owned slice of recent conversation supplied to Root LLM."""
+
+    role: Literal["USER", "ASSISTANT"]
+    content: str = Field(min_length=1, max_length=6000)
+
+
+class RootConversationMemory(OrchestratorContractModel):
+    """Durable short-term memory for one Agent session.
+
+    This is a working memory, not a CRM fact store.  CRM identity is still
+    revalidated by the Workflow planner before any business mutation.
+    """
+
+    schema_version: Literal["crm.agent.root-memory.v1"] = "crm.agent.root-memory.v1"
+    resolved_customer: WorkflowResolvedCustomer | None = None
+    current_task: str | None = Field(default=None, max_length=1000)
+    known_activity_content: str | None = Field(default=None, max_length=12000)
+    known_next_action: str | None = Field(default=None, max_length=4000)
+    pending_question: str | None = Field(default=None, max_length=4000)
+    last_agent_plan: str | None = Field(default=None, max_length=1000)
+    user_corrections: list[str] = Field(default_factory=list, max_length=20)
+
+
 class WorkflowContinuation(OrchestratorContractModel):
     """Exact durable continuation for one native Workflow interrupt.
 
@@ -127,17 +173,20 @@ class ResolvedAgentAction(OrchestratorContractModel):
 
     action_id: str = Field(min_length=1, max_length=128)
     action_type: Literal["submit_interaction"]
-    continuation: WorkflowContinuation
+    continuation: WorkflowContinuation | None = None
+    workflow_trigger: WorkflowTriggerTurnInput | None = None
     claim_outcome: Literal["ACQUIRED", "REPLAY"]
-    resume_payload: dict[str, JsonValue]
+    resume_payload: dict[str, JsonValue] = Field(default_factory=dict)
     replay_message_id: int | None = Field(default=None, gt=0)
 
     @property
-    def workflow_ref(self) -> WorkflowRef:
-        return self.continuation.workflow_ref
+    def workflow_ref(self) -> WorkflowRef | None:
+        return self.continuation.workflow_ref if self.continuation is not None else None
 
     @model_validator(mode="after")
-    def validate_replay(self) -> Self:
+    def validate_binding(self) -> Self:
+        if (self.continuation is None) == (self.workflow_trigger is None):
+            raise ValueError("action requires exactly one Workflow continuation or server trigger")
         if self.claim_outcome == "REPLAY" and self.replay_message_id is None:
             raise ValueError("replayed action requires replay_message_id")
         if self.claim_outcome == "ACQUIRED" and self.replay_message_id is not None:
@@ -168,6 +217,8 @@ class RootContextSnapshot(OrchestratorContractModel):
     resumable_workflows: list[WorkflowRef] = Field(default_factory=list, max_length=20)
     resumable_workflow_continuations: list[WorkflowContinuation] = Field(default_factory=list, max_length=20)
     pending_cases: list[PendingCaseContext] = Field(default_factory=list, max_length=100)
+    conversation_memory: RootConversationMemory = Field(default_factory=RootConversationMemory)
+    recent_messages: list[ConversationMessageContext] = Field(default_factory=list, max_length=12)
 
 
 class ContextPolicy(OrchestratorContractModel):
@@ -175,6 +226,7 @@ class ContextPolicy(OrchestratorContractModel):
     previous_query: Literal["USE", "IGNORE"]
     result_set: Literal["USE", "IGNORE"]
     active_workflow: Literal["RESUME", "SUSPEND", "NONE"]
+    conversation_memory: Literal["USE", "IGNORE"] = "USE"
 
 
 class RootDecision(OrchestratorContractModel):
@@ -185,6 +237,14 @@ class RootDecision(OrchestratorContractModel):
     confidence: float = Field(ge=0, le=1)
     reason_code: str = Field(min_length=1, max_length=128)
     evidence: list[str] = Field(default_factory=list, max_length=20)
+    # The semantic plan is required on every decision. It is the only
+    # model-authored meaning shared by Root and the selected capability; a
+    # missing plan must fail closed instead of silently becoming a read.
+    semantic_plan: RootSemanticPlan
+    # The model may provide one user-facing question when it deliberately
+    # chooses CLARIFY. It is guidance only: the server still owns all
+    # capability, entity, permission, and checkpoint validation.
+    clarification_question: str | None = Field(default=None, max_length=2000)
     pending_case_relation: PendingCaseRelation = "NONE"
     pending_case_reference: str | None = Field(default=None, max_length=255)
 
@@ -233,6 +293,7 @@ class RootRoutingPlan(OrchestratorContractModel):
         if (
             self.continuation is not None
             and self.resolved_action is not None
+            and self.resolved_action.continuation is not None
             and self.continuation != self.resolved_action.continuation
         ):
             raise ValueError("routing continuation does not match resolved action")
@@ -248,6 +309,7 @@ class QueryExecutionInput(OrchestratorContractModel):
     previous_query: CRMQuerySpec | None = None
     result_set: ResultSetContext | None = None
     semantic_intent: CRMQuerySemanticIntent | None = None
+    resolved_customer: WorkflowResolvedCustomer | None = None
 
 
 class ClarificationRequest(OrchestratorContractModel):
@@ -311,11 +373,23 @@ root_dispatch_result_adapter: TypeAdapter[RootDispatchResult] = TypeAdapter(Root
 
 @dataclass(frozen=True)
 class RootRuntimeContext(WorkflowRuntimeContext):
-    """Root-specific runtime dependencies layered on the Workflow context."""
+    """Root-specific runtime dependencies layered on the Workflow context.
+
+    The semantic resolver is shared by Root and Query during one turn. These
+    run-scoped registers prevent a failed preflight from being called again by
+    Query, while keeping the cache isolated from other concurrent turns.
+    """
 
     permission_codes: frozenset[str] = frozenset()
     root_model_config: RootDecisionModelConfig | None = None
     query_model_config: CRMQueryAgentModelConfig | None = None
+    semantic_intent_cache: dict[str, CRMQuerySemanticIntent] = field(default_factory=dict)
+    semantic_intent_failures: set[str] = field(default_factory=set)
+    # A single turn may pass through Root validation more than once. Keep the
+    # canonical intake result run-scoped so recovery never causes a second
+    # semantic interpretation for the same user message.
+    semantic_plan_cache: dict[str, AgentSemanticPlan] = field(default_factory=dict)
+    semantic_plan_failures: set[str] = field(default_factory=set)
 
 
 class RootContextResolver(Protocol):
@@ -345,6 +419,18 @@ class SemanticIntentResolver(Protocol):
         model_config: CRMQueryAgentModelConfig,
         runtime: RootRuntimeContext,
     ) -> CRMQuerySemanticIntent: ...
+
+
+class SemanticPlanResolver(Protocol):
+    """Resolve the canonical business meaning used to recover Root routing."""
+
+    async def resolve(
+        self,
+        *,
+        turn: RootTurnInput,
+        context: RootContextSnapshot,
+        runtime: RootRuntimeContext,
+    ) -> AgentSemanticPlan | None: ...
 
 
 class QueryExecutor(Protocol):

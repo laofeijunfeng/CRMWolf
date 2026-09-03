@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
+import { onBeforeRouteLeave, useRouter, useRoute } from 'vue-router'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { toast } from 'vue-sonner'
@@ -25,9 +25,21 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Input } from '@/components/ui/input'
+import ErrorState from '@/components/ErrorState.vue'
 import { customerFormSchema, companyScaleOptions, type CustomerForm } from '@/schemas/customer-form'
 import { useAcquisitionSourceOptions } from '@/composables/useAcquisitionSourceOptions'
+import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 
 usePageTitle()
 
@@ -35,16 +47,14 @@ const router = useRouter()
 const route = useRoute()
 const headerStore = useHeaderStore()
 
-onMounted(() => {
-  headerStore.setBack(true)
-})
-
-onUnmounted(() => {
-  headerStore.clear()
-})
-
 const loading = ref(false)
+const loadError = ref<FeedbackError | null>(null)
+const optionsError = ref<FeedbackError | null>(null)
+const optionsLoading = ref(false)
+const optionsLoaded = ref(false)
+const submitError = ref<FeedbackError | null>(null)
 const submitting = ref(false)
+const loadedVersion = ref<number | null>(null)
 const procurementMethodOptions = ref<ProcurementMethodOption[]>([])
 const {
   formSelectOptions: sourceSelectOptions,
@@ -53,10 +63,14 @@ const {
 } = useAcquisitionSourceOptions()
 
 const customerId = computed(() => String(route.params['id'] ?? ''))
+const optionsReady = computed(() => optionsLoaded.value)
 const isEdit = computed(() => !!customerId.value)
+const showLeaveConfirm = ref(false)
+const pendingNavigationPath = ref<string | null>(null)
+const allowNextNavigation = ref(false)
 
 // VeeValidate form setup
-const { handleSubmit, setValues } = useForm({
+const { handleSubmit, setFieldError, errors, meta, resetForm, validate } = useForm({
   validationSchema: toTypedSchema(customerFormSchema),
   initialValues: {
     account_name: '',
@@ -68,6 +82,8 @@ const { handleSubmit, setValues } = useForm({
   } as unknown as CustomerForm
 })
 
+const isDirty = computed(() => meta.value.dirty)
+
 function normalizeCompanyScale(value: string | null): CustomerForm['company_scale'] | undefined {
   return companyScaleOptions.some(option => option.value === value)
     ? value as CustomerForm['company_scale']
@@ -78,54 +94,174 @@ function emptyToNull(value: string | null | undefined): string | null {
   return value === undefined || value === null || value === '' ? null : value
 }
 
+function isCompleteCustomerForm(value: Partial<CustomerForm> | undefined): value is CustomerForm {
+  return value !== undefined
+    && typeof value.account_name === 'string'
+    && typeof value.city === 'string'
+    && typeof value.company_scale === 'string'
+    && typeof value.source_public_id === 'string'
+    && typeof value.default_procurement_method_id === 'number'
+}
+
+function toFormValues(res: { account_name: string; city: string; address: string | null; company_scale: string | null; source_info?: { public_id: string } | null; default_procurement_method_id: number | null }): Partial<CustomerForm> {
+  const companyScale = normalizeCompanyScale(res.company_scale)
+  const sourcePublicId = res.source_info?.public_id
+  const procurementMethodId = res.default_procurement_method_id ?? undefined
+
+  return {
+    account_name: res.account_name ?? '',
+    city: res.city ?? '',
+    address: res.address ?? '',
+    ...(companyScale === undefined ? {} : { company_scale: companyScale }),
+    ...(sourcePublicId === undefined ? {} : { source_public_id: sourcePublicId }),
+    ...(procurementMethodId === undefined ? {} : { default_procurement_method_id: procurementMethodId }),
+  }
+}
+
 const fetchCustomerDetail = async (): Promise<void> => {
   if (!isEdit.value) return
 
+  loadError.value = null
   loading.value = true
   try {
     const res = await customerApi.getCustomerDetail(customerId.value)
     ensureOption(res.source_info)
-    setValues({
-      account_name: res.account_name ?? '',
-      city: res.city ?? '',
-      address: res.address ?? '',
-      company_scale: normalizeCompanyScale(res.company_scale),
-      source_public_id: res.source_info?.public_id,
-      default_procurement_method_id: res.default_procurement_method_id ?? undefined
-    } as Partial<CustomerForm>)
+    loadedVersion.value = res.version
+    resetForm({ values: toFormValues(res) })
   } catch (error: unknown) {
-    handleApiError(error, '获取客户详情')
-    router.back()
+    loadError.value = toFeedbackError(error, '客户详情')
   } finally {
     loading.value = false
   }
 }
 
+const optionsErrorFields = ref<string[]>([])
+const optionFieldLabels: Record<string, string> = {
+  source_public_id: '获客来源',
+  default_procurement_method_id: '采购方式',
+}
+
 const fetchOptions = async (): Promise<void> => {
+  optionsError.value = null
+  optionsErrorFields.value = []
+  optionsLoaded.value = false
+  optionsLoading.value = true
+  procurementMethodOptions.value = []
+
+  const [procurementResult, sourceResult] = await Promise.allSettled([
+    procurementApi.getProcurementMethodOptions(),
+    loadFormOptions({ throwOnError: true, notifyOnError: false }),
+  ])
+
+  const failedFields: string[] = []
+  if (procurementResult.status === 'fulfilled') {
+    procurementMethodOptions.value = procurementResult.value
+  } else {
+    failedFields.push('default_procurement_method_id')
+  }
+  if (sourceResult.status === 'rejected') {
+    failedFields.push('source_public_id')
+  }
+
+  if (failedFields.length > 0) {
+    optionsErrorFields.value = failedFields
+    const firstFailure: unknown = procurementResult.status === 'rejected'
+      ? procurementResult.reason
+      : sourceResult.status === 'rejected'
+        ? sourceResult.reason
+        : new Error('表单选项加载失败')
+    optionsError.value = toFeedbackError(firstFailure, '表单选项')
+    logger.error('[CustomerEdit]', '获取选项失败', { failedFields, error: firstFailure })
+  } else {
+    optionsLoaded.value = true
+  }
+  optionsLoading.value = false
+}
+
+const customerStatusLabel = (status: number): string => {
+  const labels: Record<number, string> = {
+    0: '跟进中',
+    1: '已成交',
+    2: '已流失',
+    3: '非激活',
+  }
+  return labels[status] ?? '未知状态'
+}
+
+const errorSummary = computed(() => Object.entries(errors.value)
+  .filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1] !== '')
+  .map(([field, message]) => ({ field, message })))
+
+const fieldLabels: Record<string, string> = {
+  account_name: '客户名称',
+  city: '所在城市',
+  address: '公司地址',
+  company_scale: '公司规模',
+  source_public_id: '获客来源',
+  default_procurement_method_id: '采购方式',
+}
+
+const getFieldLabel = (field: string): string => fieldLabels[field] ?? field
+
+const focusFirstError = async (): Promise<void> => {
+  await nextTick()
+  const firstError = errorSummary.value[0]
+  if (!firstError || typeof document === 'undefined') return
+
+  const field = document.getElementsByName(firstError.field)[0]
+  if (field instanceof HTMLElement) {
+    field.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    field.focus({ preventScroll: true })
+  }
+}
+
+const applyServerFieldErrors = async (feedback: FeedbackError): Promise<void> => {
+  for (const fieldError of feedback.fieldErrors ?? []) {
+    if (fieldError.field in fieldLabels) {
+      setFieldError(fieldError.field as keyof CustomerForm, fieldError.message)
+    }
+  }
+  await focusFirstError()
+}
+
+const refreshConflict = async (preserveInput: boolean): Promise<void> => {
+  if (!isEdit.value || submitting.value) return
+
+  submitError.value = null
+  loading.value = true
   try {
-    const procurementRes = await procurementApi.getProcurementMethodOptions()
-    procurementMethodOptions.value = procurementRes
-    await loadFormOptions()
-  } catch (error) {
-    logger.error('[CustomerEdit]', '获取选项失败', { error })
+    const latest = await customerApi.getCustomerDetail(customerId.value)
+    loadedVersion.value = latest.version
+    if (!preserveInput) {
+      ensureOption(latest.source_info)
+      resetForm({ values: toFormValues(latest) })
+    }
+  } catch (error: unknown) {
+    submitError.value = toFeedbackError(error, '客户最新版本')
+  } finally {
+    loading.value = false
   }
 }
 
 // Form submission
-const onSubmit = handleSubmit(async (formValues: CustomerForm) => {
+const submitCustomer = async (formValues: CustomerForm, navigateAfterSuccess: boolean): Promise<boolean> => {
+  submitError.value = null
   submitting.value = true
   try {
     if (isEdit.value) {
       const updateData = {
+        expected_version: loadedVersion.value,
         account_name: emptyToNull(formValues.account_name),
         city: emptyToNull(formValues.city),
         address: emptyToNull(formValues.address),
         company_scale: formValues.company_scale ?? null,
         source_public_id: formValues.source_public_id,
-        default_procurement_method_id: formValues.default_procurement_method_id ?? null
-      } as CustomerUpdate
-      await customerApi.updateCustomer(customerId.value, updateData)
-      toast.success('客户更新成功')
+        default_procurement_method_id: formValues.default_procurement_method_id ?? null,
+      } satisfies CustomerUpdate
+      const updatedCustomer = await customerApi.updateCustomer(customerId.value, updateData)
+      loadedVersion.value = updatedCustomer.version
+      resetForm({ values: formValues })
+      toast.success(`客户「${updatedCustomer.account_name}」更新成功，当前状态：${customerStatusLabel(updatedCustomer.status)}`)
     } else {
       const createData = {
         account_name: formValues.account_name,
@@ -133,18 +269,40 @@ const onSubmit = handleSubmit(async (formValues: CustomerForm) => {
         address: emptyToNull(formValues.address),
         company_scale: formValues.company_scale ?? null,
         source_public_id: formValues.source_public_id,
-        default_procurement_method_id: formValues.default_procurement_method_id ?? null
-      } as CustomerCreate
-      await customerApi.createCustomer(createData)
-      toast.success('客户创建成功')
+        default_procurement_method_id: formValues.default_procurement_method_id ?? null,
+      } satisfies CustomerCreate
+      const createdCustomer = await customerApi.createCustomer(createData)
+      toast.success(`客户「${createdCustomer.account_name}」创建成功，当前状态：${customerStatusLabel(createdCustomer.status)}`)
     }
-    router.back()
+    if (navigateAfterSuccess) {
+      allowNextNavigation.value = true
+      router.back()
+    }
+    return true
   } catch (error: unknown) {
-    handleApiError(error, isEdit.value ? '更新客户' : '创建客户')
+    submitError.value = toFeedbackError(error, isEdit.value ? '更新客户' : '创建客户', { operation: 'write' })
+    if (submitError.value.fieldErrors && submitError.value.fieldErrors.length > 0) {
+      await applyServerFieldErrors(submitError.value)
+    }
+    if (submitError.value.kind !== 'conflict') {
+      handleApiError(error, isEdit.value ? '更新客户' : '创建客户')
+    }
+    return false
   } finally {
     submitting.value = false
   }
+}
+
+const onSubmit = handleSubmit(async (formValues: CustomerForm) => {
+  await submitCustomer(formValues, true)
 })
+
+const retryLoad = async (): Promise<void> => {
+  if (isEdit.value) {
+    await fetchCustomerDetail()
+  }
+  await fetchOptions()
+}
 
 const handleGoBack = (): void => {
   if (window.history.length > 1) {
@@ -154,27 +312,149 @@ const handleGoBack = (): void => {
   }
 }
 
+const continueEditing = (): void => {
+  showLeaveConfirm.value = false
+  pendingNavigationPath.value = null
+}
+
+const navigateAfterLeaveDecision = async (path: string): Promise<void> => {
+  allowNextNavigation.value = true
+  try {
+    await router.push(path)
+  } catch (error: unknown) {
+    allowNextNavigation.value = false
+    logger.error('[CustomerEdit]', '离开编辑页失败', { error })
+  }
+}
+
+const discardAndLeave = async (): Promise<void> => {
+  const path = pendingNavigationPath.value
+  showLeaveConfirm.value = false
+  pendingNavigationPath.value = null
+  if (path !== null) await navigateAfterLeaveDecision(path)
+}
+
+const saveAndLeave = async (): Promise<void> => {
+  const path = pendingNavigationPath.value
+  if (path === null || submitting.value) return
+
+  const validation = await validate()
+  if (!validation.valid || !isCompleteCustomerForm(validation.values)) {
+    showLeaveConfirm.value = false
+    await focusFirstError()
+    return
+  }
+
+  showLeaveConfirm.value = false
+  const saved = await submitCustomer(validation.values, false)
+  if (saved) {
+    pendingNavigationPath.value = null
+    await navigateAfterLeaveDecision(path)
+  }
+}
+
+const handleLeaveDialogOpenChange = (open: boolean): void => {
+  if (!open) continueEditing()
+}
+
+const handleBeforeUnload = (event: BeforeUnloadEvent): void => {
+  if (!isDirty.value || submitting.value) return
+  event.preventDefault()
+  event.returnValue = ''
+}
+
+onBeforeRouteLeave((to) => {
+  if (allowNextNavigation.value) {
+    allowNextNavigation.value = false
+    return true
+  }
+  if (!isDirty.value) return true
+
+  pendingNavigationPath.value = to.fullPath
+  showLeaveConfirm.value = true
+  return false
+})
+
 onMounted(async () => {
+  headerStore.setBack(true)
+  window.addEventListener('beforeunload', handleBeforeUnload)
   await fetchOptions()
   if (isEdit.value) {
     await fetchCustomerDetail()
   }
+})
+
+onUnmounted(() => {
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+  headerStore.clear()
 })
 </script>
 
 <template>
   <div class="customer-edit-page">
     <!-- Loading State -->
-    <div v-if="loading" class="loading-container">
+    <div v-if="loading" class="loading-container" aria-busy="true" aria-live="polite">
       <div class="loading-spinner" />
+    </div>
+
+    <div v-else-if="loadError" class="state-container">
+      <ErrorState
+        :variant="loadError.variant ?? 'error'"
+        :title="loadError.title"
+        :description="loadError.description"
+      >
+        <template #action>
+          <Button v-if="loadError.retryable !== false" type="button" @click="retryLoad">
+            重新加载
+          </Button>
+        </template>
+      </ErrorState>
     </div>
 
     <!-- Form Content -->
     <div v-else class="form-container">
+      <div v-if="optionsError" class="form-feedback" role="alert">
+        <ErrorState
+          :variant="optionsError.variant ?? 'error'"
+          :title="optionsError.title"
+          :description="optionsError.description"
+        >
+          <template #action>
+            <div class="options-error-action">
+              <span v-if="optionsErrorFields.length > 0" class="options-error-fields">
+                受影响字段：{{ optionsErrorFields.map(field => optionFieldLabels[field] ?? field).join('、') }}
+              </span>
+              <Button v-if="optionsError.retryable !== false" type="button" variant="outline" size="sm" @click="fetchOptions">
+                重试加载选项
+              </Button>
+            </div>
+          </template>
+        </ErrorState>
+      </div>
+      <div v-if="submitError" class="submit-feedback" role="alert">
+        <strong>{{ submitError.title }}</strong>
+        <span>{{ submitError.description }}</span>
+        <div v-if="submitError.kind === 'conflict'" class="submit-feedback__actions">
+          <Button type="button" variant="outline" size="sm" @click="refreshConflict(false)">
+            使用最新数据
+          </Button>
+          <Button type="button" variant="outline" size="sm" @click="refreshConflict(true)">
+            保留当前输入并继续编辑
+          </Button>
+        </div>
+      </div>
+      <div v-if="errorSummary.length > 0" class="form-error-summary" role="alert" aria-live="assertive">
+        <strong>请先修正以下内容</strong>
+        <ul>
+          <li v-for="error in errorSummary" :key="error.field">
+            {{ getFieldLabel(error.field) }}：{{ error.message }}
+          </li>
+        </ul>
+      </div>
       <!-- Basic Info Card -->
       <div class="form-card">
         <div class="card-title">基本信息</div>
-        <form class="space-y-4" @submit="onSubmit">
+        <form id="customer-edit-form" class="space-y-4" @submit="onSubmit">
           <div class="form-grid">
             <!-- Customer Name -->
             <FormField v-slot="{ componentField }" name="account_name">
@@ -212,7 +492,7 @@ onMounted(async () => {
             <FormField v-slot="{ componentField }" name="source_public_id">
               <FormItem>
                 <FormLabel>客户来源 <span class="text-destructive">*</span></FormLabel>
-                <Select v-bind="componentField as any">
+                <Select v-bind="componentField as any" :disabled="optionsLoading || optionsErrorFields.includes('source_public_id')">
                   <FormControl>
                     <SelectTrigger class="h-11 sm:h-8">
                       <SelectValue placeholder="请选择客户来源" />
@@ -229,6 +509,9 @@ onMounted(async () => {
                   </SelectContent>
                 </Select>
                 <FormMessage />
+                <p v-if="optionsErrorFields.includes('source_public_id')" class="form-option-error">
+                  获客来源加载失败，请点击上方“重试加载选项”。
+                </p>
               </FormItem>
             </FormField>
 
@@ -262,7 +545,7 @@ onMounted(async () => {
             <FormField v-slot="{ componentField }" name="default_procurement_method_id">
               <FormItem>
                 <FormLabel>采购方式 <span class="text-destructive">*</span></FormLabel>
-                <Select v-bind="componentField as any">
+                <Select v-bind="componentField as any" :disabled="optionsLoading || optionsErrorFields.includes('default_procurement_method_id')">
                   <FormControl>
                     <SelectTrigger class="h-11 sm:h-8">
                       <SelectValue placeholder="请选择采购方式" />
@@ -279,6 +562,9 @@ onMounted(async () => {
                   </SelectContent>
                 </Select>
                 <FormMessage />
+                <p v-if="optionsErrorFields.includes('default_procurement_method_id')" class="form-option-error">
+                  采购方式加载失败，请点击上方“重试加载选项”。
+                </p>
               </FormItem>
             </FormField>
 
@@ -305,11 +591,38 @@ onMounted(async () => {
         <Button variant="outline" type="button" @click="handleGoBack">
           取消
         </Button>
-        <Button type="submit" :loading="submitting" @click="onSubmit">
+        <Button
+          type="submit"
+          form="customer-edit-form"
+          :loading="submitting"
+          :disabled="optionsLoading || optionsError !== null || !optionsReady"
+        >
           {{ isEdit ? '保存' : '创建' }}
         </Button>
       </div>
     </div>
+
+    <AlertDialog :open="showLeaveConfirm" @update:open="handleLeaveDialogOpenChange">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>离开前处理未保存更改？</AlertDialogTitle>
+          <AlertDialogDescription>
+            当前页面有尚未保存的更改。您可以保存后离开，或放弃更改。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter class="leave-confirm-footer">
+          <AlertDialogCancel @click="continueEditing">
+            继续编辑
+          </AlertDialogCancel>
+          <Button type="button" variant="outline" @click="saveAndLeave">
+            保存并离开
+          </Button>
+          <AlertDialogAction class="bg-wolf-danger hover:bg-wolf-danger/90" @click="discardAndLeave">
+            放弃修改
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </div>
 </template>
 
@@ -329,6 +642,71 @@ onMounted(async () => {
   align-items: center;
   min-height: 400px;
   padding: $wolf-page-padding-v2;
+}
+
+.state-container {
+  display: flex;
+  justify-content: center;
+  padding: $wolf-page-padding-v2;
+}
+
+.form-feedback {
+  margin-bottom: $wolf-space-lg-v2;
+}
+
+.options-error-action {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: $wolf-space-sm-v2;
+}
+
+.options-error-fields {
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-auxiliary-v2;
+}
+
+.form-option-error {
+  margin-top: $wolf-space-xs-v2;
+  color: $wolf-danger-v2;
+  font-size: $wolf-font-size-auxiliary-v2;
+}
+
+.submit-feedback {
+  display: flex;
+  flex-direction: column;
+  gap: $wolf-space-xs-v2;
+  margin-bottom: $wolf-space-lg-v2;
+  padding: $wolf-space-md-v2;
+  border: 1px solid $wolf-danger-v2;
+  border-radius: $wolf-radius-control-v2;
+  background: rgba($wolf-danger-v2, 0.08);
+  color: $wolf-text-primary-v2;
+}
+
+.submit-feedback__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $wolf-space-sm-v2;
+  margin-top: $wolf-space-sm-v2;
+}
+
+.form-error-summary {
+  margin-bottom: $wolf-space-lg-v2;
+  padding: $wolf-space-md-v2;
+  border: 1px solid $wolf-danger-v2;
+  border-radius: $wolf-radius-control-v2;
+  background: rgba($wolf-danger-v2, 0.08);
+  color: $wolf-text-primary-v2;
+}
+
+.form-error-summary ul {
+  margin: $wolf-space-xs-v2 0 0;
+  padding-left: $wolf-space-lg-v2;
+}
+
+.leave-confirm-footer {
+  flex-wrap: wrap;
 }
 
 .loading-spinner {

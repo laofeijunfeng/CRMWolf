@@ -2,6 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { acquisitionSourceApi } from '@/api/acquisition-source'
 import { useAcquisitionSourceOptions } from '../useAcquisitionSourceOptions'
 
+const handleApiError = vi.hoisted(() => vi.fn())
+
+vi.mock('@/utils/errorHandler', () => ({ handleApiError }))
+
 vi.mock('@/api/acquisition-source', () => ({
   acquisitionSourceApi: {
     listOptions: vi.fn(),
@@ -56,6 +60,16 @@ describe('useAcquisitionSourceOptions', () => {
       { value: 'acq_referral', label: '客户推荐' },
       { value: 'acq_exhibition', label: '展会' },
     ])
+  })
+
+  it('can rethrow without emitting a duplicate toast for page-level recovery UI', async () => {
+    const error = new Error('source service unavailable')
+    mockedListOptions.mockRejectedValue(error)
+
+    const { loadFormOptions } = useAcquisitionSourceOptions()
+
+    await expect(loadFormOptions({ throwOnError: true, notifyOnError: false })).rejects.toBe(error)
+    expect(handleApiError).not.toHaveBeenCalled()
   })
 
   it('keeps the current inactive source visible when editing a record', async () => {

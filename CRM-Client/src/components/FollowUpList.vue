@@ -210,7 +210,7 @@ import {
   EmptyTitle,
   EmptyDescription,
 } from '@/components/ui/empty'
-import { confirmDelete } from '@/utils/confirmDialog'
+import { confirmDialog } from '@/utils/confirmDialog'
 
 interface FollowUp {
   id: number
@@ -380,7 +380,14 @@ const canProcess = (followUp: FollowUp): boolean => {
 }
 
 const handleDelete = async (followUp: FollowUp): Promise<void> => {
-  const confirmed = await confirmDelete(`这条${recordLabel}`)
+  const method = getText(followUp.method) || '该条活动'
+  const content = getPrimaryContent(followUp).trim()
+  const summary = content.length > 0 ? `“${content.slice(0, 40)}${content.length > 40 ? '…' : ''}”` : method
+  const confirmed = await confirmDialog(
+    `确定删除${recordLabel}吗？${method}，${summary}。删除后无法恢复。`,
+    `删除${recordLabel}`,
+    { variant: 'destructive', confirmText: '删除' },
+  )
   if (confirmed) {
     emit('delete', followUp)
   }

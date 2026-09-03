@@ -1,9 +1,12 @@
 """Thin deterministic Root Orchestrator graph."""
 
+# ruff: noqa: RUF001
+
 from __future__ import annotations
 
 import json
 import logging
+import math
 from typing import TYPE_CHECKING, Annotated, TypedDict, TypeVar
 from uuid import NAMESPACE_URL, uuid5
 
@@ -27,11 +30,12 @@ from app.services.agent.orchestrator.contracts import (
     RootContextSnapshot,
     RootDecision,
     RootDecisionClassifier,
-    SemanticIntentResolver,
     RootDispatchResult,
     RootRoutingPlan,
     RootRuntimeContext,
     RootTurnInput,
+    SemanticIntentResolver,
+    SemanticPlanResolver,
     TextTurnInput,
     WorkflowContinuation,
     WorkflowDispatchResult,
@@ -59,24 +63,26 @@ from app.services.agent.orchestrator.result_set import (
     ResultSetReferenceError,
     resolve_result_set_entity,
 )
-from app.services.agent.orchestrator.risk import (
-    has_context_dependent_reference,
-    has_explicit_follow_up_record_intent,
-    has_explicit_independent_read_intent,
-    has_explicit_workflow_continuation_intent,
-    has_explicit_write_intent,
-)
+from app.services.agent.principal import AgentPrincipal
+from app.services.agent.query import CRMQueryAgentExecutionError
 from app.services.agent.query.semantic_intent import (
     CRMQuerySemanticIntent,
     QuerySemanticIntentInvalidError,
     QuerySemanticIntentUnavailableError,
 )
-from app.services.agent.principal import AgentPrincipal
-from app.services.agent.query import CRMQueryAgentExecutionError
+from app.services.agent.semantic_plan import (
+    AgentSemanticPlan,
+    query_intent_from_semantic_plan,
+    semantic_plan_is_read,
+    semantic_plan_is_write,
+    semantic_plan_supports_workflow_write,
+)
 from app.services.agent.workflow import (
     WorkflowInterruptPayload,
+    WorkflowOpportunitySuggestionStart,
     WorkflowProgress,
     WorkflowReplayResult,
+    WorkflowResolvedCustomer,
     WorkflowResourceStart,
     WorkflowResumeInput,
     WorkflowTextStart,
@@ -97,15 +103,15 @@ logger = logging.getLogger(__name__)
 
 
 _QUERY_ERROR_MESSAGES = {
-    "QUERY_INVALID": "查询条件无法识别，请换一种说法或补充筛选条件。",  # noqa: RUF001
+    "QUERY_INVALID": "我还没看懂你要查什么，请补充客户、时间或内容。",
     "QUERY_UNSUPPORTED": "暂不支持查询这类信息。",
     "QUERY_EMPTY": "没有找到符合条件的数据。",
     "PERMISSION_DENIED": "没有权限查看相关数据。",
-    "QUERY_LIMIT_EXCEEDED": "查询结果较多，已按系统上限返回。",  # noqa: RUF001
-    "UPSTREAM_TIMEOUT": "查询服务响应超时，请稍后重试。",  # noqa: RUF001
-    "UPSTREAM_UNAVAILABLE": "查询服务暂时不可用，请稍后重试。",  # noqa: RUF001
-    "MODEL_OUTPUT_INVALID": "查询结果生成失败，请重新描述查询条件。",  # noqa: RUF001
-    "INTERNAL_ERROR": "查询服务暂时不可用，请稍后重试。",  # noqa: RUF001
+    "QUERY_LIMIT_EXCEEDED": "查询结果较多，已按系统上限返回。",
+    "UPSTREAM_TIMEOUT": "查询响应超时了，请再试一次。",
+    "UPSTREAM_UNAVAILABLE": "查询暂时没有回应，请稍后再试。",
+    "MODEL_OUTPUT_INVALID": "我还没看懂你要查什么，请换一种说法试试。",
+    "INTERNAL_ERROR": "查询暂时没完成，请稍后再试。",
 }
 
 
@@ -124,6 +130,50 @@ def _workflow_id_for_turn(turn: RootTurnInput) -> str:
         separators=(",", ":"),
     )
     return f"wf_{uuid5(NAMESPACE_URL, f'crm-agent-workflow:{identity}').hex}"
+
+
+def _workflow_id_for_server_trigger(
+    turn: RootTurnInput,
+    trigger: WorkflowTriggerTurnInput,
+) -> str:
+    """Derive a stable Workflow identity from the durable server trigger."""
+
+    identity = json.dumps(
+        [
+            turn.team_id,
+            turn.user_id,
+            turn.session_id,
+            trigger.workflow,
+            trigger.resource_id or trigger.job_public_id,
+            trigger.action,
+        ],
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
+    return f"wf_{uuid5(NAMESPACE_URL, f'crm-agent-server-workflow:{identity}').hex}"
+
+
+def _workflow_input_payload(request: WorkflowTurnInput) -> dict[str, object]:
+    """Serialize Workflow input without adding optional semantic noise.
+
+    Legacy checkpoints and test doubles intentionally omit the optional Root
+    plan when no structured plan was supplied.  Known plans remain persisted
+    for the selected Workflow to consume.
+    """
+
+    payload = request.model_dump(mode="json")
+    start = payload.get("start")
+    if isinstance(start, dict):
+        plan = start.get("semantic_plan")
+        if plan is None or (
+            isinstance(plan, dict)
+            and plan.get("speech_act") == "UNKNOWN"
+            and plan.get("business_object") == "UNKNOWN"
+            and plan.get("operation") == "UNKNOWN"
+            and float(plan.get("confidence", 0.0) or 0.0) == 0.0
+        ):
+            start.pop("semantic_plan", None)
+    return payload
 
 
 def build_root_graph_config(turn: RootTurnInput) -> RunnableConfig:
@@ -194,6 +244,8 @@ class RootOrchestrator:
         interaction_resolver: InteractionResolver,
         workflow_subgraph: CompiledStateGraph,
         semantic_intent_resolver: SemanticIntentResolver | None = None,
+        semantic_plan_resolver: SemanticPlanResolver | None = None,
+        pending_case_ranker: object | None = None,
     ) -> None:
         self._checkpointer = checkpointer
         self._context_resolver = context_resolver
@@ -202,6 +254,8 @@ class RootOrchestrator:
         self._interaction_resolver = interaction_resolver
         self._workflow_subgraph = workflow_subgraph
         self._semantic_intent_resolver = semantic_intent_resolver
+        self._semantic_plan_resolver = semantic_plan_resolver
+        self._pending_case_ranker = pending_case_ranker
         self._graph = self._build_graph()
 
     async def dispatch(
@@ -221,19 +275,37 @@ class RootOrchestrator:
             )
             routing_plan = self._routing_plan_from_state(state)
             if routing_plan is not None:
-                return await self._execute_routing_plan(
+                result = await self._execute_routing_plan(
                     turn=turn,
                     runtime=runtime,
                     config=config,
                     plan=routing_plan,
                     on_progress=on_progress,
                 )
-            return self._dispatch_result_from_state(state, continuation=continuation)
+                self._persist_conversation_memory(
+                    turn=turn,
+                    context=routing_plan.context,
+                    decision=result.decision,
+                    state=state,
+                    result=result,
+                    runtime=runtime,
+                )
+                return result
+            result = self._dispatch_result_from_state(state, continuation=continuation)
+            self._persist_conversation_memory(
+                turn=turn,
+                context=RootContextSnapshot.model_validate(state["context_snapshot"]),
+                decision=getattr(result, "decision", None),
+                state=state,
+                result=result,
+                runtime=runtime,
+            )
+            return result
         except RootContextUnavailableError:
             return FailureDispatchResult(
                 error=AgentExecutionError(
                     code="ROOT_CONTEXT_UNAVAILABLE",
-                    message="会话上下文服务暂时不可用, 请稍后重试。",
+                    message="当前对话状态没加载出来，请刷新后再试。",
                     retryable=True,
                 )
             )
@@ -241,7 +313,7 @@ class RootOrchestrator:
             return FailureDispatchResult(
                 error=AgentExecutionError(
                     code="INTERACTION_RESOLUTION_UNAVAILABLE",
-                    message="当前操作暂时无法验证, 请刷新后重试。",
+                    message="这个操作没接上，请刷新后再试。",
                     retryable=True,
                 )
             )
@@ -249,12 +321,20 @@ class RootOrchestrator:
             return self._workflow_failure("WORKFLOW_CHECKPOINT_UNAVAILABLE")
         except WorkflowExecutionFailedError:
             return self._workflow_failure("WORKFLOW_EXECUTION_FAILED")
-        except RootDecisionModelUnavailableError:
+        except RootDecisionModelUnavailableError as exc:
             logger.exception("Root decision model is unavailable")
+            if exc.reason == "TIMEOUT":
+                return FailureDispatchResult(
+                    error=AgentExecutionError(
+                        code="ROOT_DECISION_MODEL_TIMEOUT",
+                        message="AI 刚才响应超时了，请再试一次。",
+                        retryable=True,
+                    )
+                )
             return FailureDispatchResult(
                 error=AgentExecutionError(
                     code="ROOT_DECISION_MODEL_UNAVAILABLE",
-                    message="任务识别服务暂时不可用, 请稍后重试。",
+                    message="AI 暂时没有回应，请稍后再试。",
                     retryable=True,
                 )
             )
@@ -262,9 +342,83 @@ class RootOrchestrator:
             return FailureDispatchResult(
                 error=AgentExecutionError(
                     code="ROOT_DECISION_INVALID_OUTPUT",
-                    message="任务识别结果无效, 请重新描述你的需求。",
+                    message="我还没理解这句话，请换一种说法试试。",
                     retryable=False,
                 )
+            )
+
+    def _persist_conversation_memory(
+        self,
+        *,
+        turn: RootTurnInput,
+        context: RootContextSnapshot,
+        decision: RootDecision | None,
+        state: dict[str, object],
+        result: RootDispatchResult,
+        runtime: RootRuntimeContext,
+    ) -> None:
+        """Best-effort write of short-term memory; never changes turn outcome."""
+
+        persister = getattr(self._context_resolver, "persist_conversation_memory", None)
+        if persister is None or decision is None or runtime.db is None:
+            return
+        memory = context.conversation_memory
+        updates: dict[str, object] = {
+            "last_agent_plan": f"{decision.route}:{decision.reason_code}",
+        }
+        workflow_input = state.get("workflow_input")
+        parsed_workflow_input: WorkflowTurnInput | None = None
+        if workflow_input is not None:
+            try:
+                parsed_workflow_input = WorkflowTurnInput.model_validate(workflow_input)
+            except ValidationError:
+                parsed_workflow_input = None
+
+        # Only an ordinary text-start Workflow contributes activity working
+        # memory.  A new task replaces the previous draft; a model-confirmed
+        # continuation appends to it.  This keeps one stale sentence from
+        # leaking into a later independent customer/task.
+        if (
+            isinstance(turn.input, TextTurnInput)
+            and decision.route == "WORKFLOW"
+            and parsed_workflow_input is not None
+            and isinstance(parsed_workflow_input.start, WorkflowTextStart)
+        ):
+            updates["current_task"] = "customer_activity"
+            if decision.task_relation == "CONTINUE_TASK" and memory.known_activity_content:
+                updates["known_activity_content"] = (
+                    f"{memory.known_activity_content}\n{turn.input.text}"
+                )[-12000:]
+            else:
+                updates["known_activity_content"] = turn.input.text[:12000]
+
+        if parsed_workflow_input is not None and parsed_workflow_input.resolved_customer is not None:
+            updates["resolved_customer"] = parsed_workflow_input.resolved_customer
+        if (
+            isinstance(turn.input, TextTurnInput)
+            and turn.selected_entity_ref is not None
+            and turn.selected_entity_ref.resource == "customer"
+        ):
+            updates["resolved_customer"] = WorkflowResolvedCustomer(
+                customer_id=turn.selected_entity_ref.public_id,
+                customer_name=turn.selected_entity_ref.display_name,
+                lookup_name=turn.selected_entity_ref.display_name,
+            )
+        if isinstance(result, WorkflowDispatchResult):
+            if result.workflow_result.status == "WAITING":
+                updates["pending_question"] = result.workflow_result.interaction.prompt
+            else:
+                updates["pending_question"] = None
+        elif isinstance(result, ClarificationDispatchResult):
+            updates["pending_question"] = result.clarification.question
+        next_memory = memory.model_copy(update=updates)
+        try:
+            persister(runtime.db, turn=turn, memory=next_memory)
+        except Exception:
+            logger.warning(
+                "Failed to persist Root conversation memory",
+                extra={"session_id": turn.session_id, "client_request_id": turn.client_request_id},
+                exc_info=True,
             )
 
     @staticmethod
@@ -304,7 +458,12 @@ class RootOrchestrator:
             return WorkflowDispatchResult(
                 decision=plan.decision,
                 workflow_result=WorkflowReplayResult(
-                    workflow_ref=action.workflow_ref,
+                    workflow_ref=(
+                        action.workflow_ref
+                        or WorkflowRef(
+                            workflow_id=_workflow_id_for_server_trigger(turn, action.workflow_trigger)
+                        )
+                    ),
                     message_id=action.replay_message_id,
                 ),
             )
@@ -349,16 +508,13 @@ class RootOrchestrator:
             state, resumed_continuation = await self._invoke_graph(
                 Command(
                     resume=resume.model_dump(mode="json"),
-                    update={
-                        # Keep the original Root workflow_input in the owning
-                        # checkpoint; only turn/context/decision are refreshed.
-                        "turn": turn.model_dump(mode="json"),
-                        "context_snapshot": plan.context.model_dump(mode="json"),
-                        "decision": plan.decision.model_dump(mode="json"),
-                        "resolved_action": None,
-                        "routing_plan": None,
+                    update=self._resettable_state(
+                        turn=turn,
+                        context_snapshot=plan.context,
+                        decision=plan.decision,
+                    )
+                    | {
                         "resumed_workflow_ref": plan.continuation.workflow_ref.model_dump(mode="json"),
-                        "dispatch_result": None,
                     },
                 ),
                 continuation_config,
@@ -655,7 +811,14 @@ class RootOrchestrator:
                 "DISPATCH_RESULT": END,
             },
         )
-        graph.add_edge("decide", "validate_decision")
+        graph.add_conditional_edges(
+            "decide",
+            self._route_after_decision,
+            {
+                "VALIDATE": "validate_decision",
+                "ROUTING_PLAN": END,
+            },
+        )
         graph.add_edge("validate_decision", "apply_context_policy")
         graph.add_conditional_edges(
             "apply_context_policy",
@@ -712,6 +875,28 @@ class RootOrchestrator:
                 raise InteractionResolutionUnavailableError(
                     "Resolved interaction is missing its canonical action"
                 )
+            if resolved_action.workflow_trigger is not None:
+                if resolved_action.claim_outcome == "REPLAY":
+                    decision = self._server_workflow_trigger_decision(
+                        context=context,
+                        trigger=resolved_action.workflow_trigger,
+                    )
+                    plan = RootRoutingPlan(
+                        kind="INTERACTION_REPLAY",
+                        context=context,
+                        decision=decision,
+                        resolved_action=resolved_action,
+                    )
+                    return {"routing_plan": plan.model_dump(mode="json")}
+                decision = self._server_workflow_trigger_decision(
+                    context=context,
+                    trigger=resolved_action.workflow_trigger,
+                )
+                return {
+                    "decision": decision.model_dump(mode="json"),
+                    "resolved_action": resolved_action.model_dump(mode="json"),
+                }
+
             decision = self._interaction_workflow_decision(
                 turn=turn,
                 reason_code=resolution.reason_code,
@@ -729,93 +914,59 @@ class RootOrchestrator:
             )
             return {"routing_plan": plan.model_dump(mode="json")}
 
-        if not isinstance(turn.input, TextTurnInput):
-            return {}
+        # Free text is intentionally not matched here. The Root Decision model
+        # is the only semantic authority for ordinary language. This node remains
+        # limited to typed interaction bindings; text Case/checkpoint validation
+        # happens after Root classification.
+        return {}
 
-        pending_match = match_pending_case(turn.input.text, context.pending_cases)
-        if pending_match.status == "MATCHED" and pending_match.case is not None:
-            decision = self._explicit_pending_case_decision(
-                has_active_workflow=context.active_workflow is not None,
-                reference=pending_match.reference,
-            )
-            return {
-                "decision": decision.model_dump(mode="json"),
-                "pending_case_public_id": pending_match.case.case_public_id,
-            }
-        if pending_match.status in {"AMBIGUOUS", "NOT_FOUND"}:
-            decision = self._pending_case_clarification_decision(
-                has_active_workflow=context.active_workflow is not None,
-                relation=(
-                    "AMBIGUOUS"
-                    if pending_match.status == "AMBIGUOUS"
-                    else "EXPLICIT_REFERENCE"
-                ),
-                reference=pending_match.reference,
-            )
-            return {"decision": decision.model_dump(mode="json")}
+    async def _try_resolve_canonical_semantic_plan(
+        self,
+        *,
+        turn: RootTurnInput,
+        context: RootContextSnapshot,
+        runtime: RootRuntimeContext,
+    ) -> AgentSemanticPlan | None:
+        """Resolve canonical business meaning before capability routing.
 
-        if not has_explicit_workflow_continuation_intent(turn.input.text):
-            return {}
+        Root remains the owner of task relation and context policy. The domain
+        semantic intake is a bounded semantic safety seam: when available, it
+        runs before the query-only parser so a write assertion cannot be
+        downgraded into a historical read. In degraded runtimes it is also
+        retained as recovery for a QUERY/CLARIFY candidate. It receives the
+        whole utterance and returns structured meaning; no lexical shortcut or
+        query result is involved.
+        """
 
-        continuations = context.resumable_workflow_continuations
-        if context.active_workflow is None:
-            decision = self._clarification_decision(
-                RootDecision(
-                    task_relation="NEW_TASK",
-                    route="WORKFLOW",
-                    risk="WRITE",
-                    context_policy=ContextPolicy(
-                        selected_entity="IGNORE",
-                        previous_query="IGNORE",
-                        result_set="IGNORE",
-                        active_workflow="NONE",
-                    ),
-                    confidence=1.0,
-                    reason_code="ACTIVE_WORKFLOW_CONTEXT_MISSING",
-                    evidence=["用户明确要求继续流程, 但当前会话没有可恢复的流程"],
-                ),
-                "ACTIVE_WORKFLOW_CONTEXT_MISSING",
+        if not isinstance(turn.input, TextTurnInput) or self._semantic_plan_resolver is None:
+            return None
+        text = turn.input.text
+        if text in runtime.semantic_plan_cache:
+            return runtime.semantic_plan_cache[text]
+        if text in runtime.semantic_plan_failures:
+            return None
+        try:
+            plan = await self._semantic_plan_resolver.resolve(
+                turn=turn,
+                context=context,
+                runtime=runtime,
             )
-            return {"decision": decision.model_dump(mode="json")}
-        if len(continuations) != 1 or continuations[0].workflow_ref != context.active_workflow:
-            decision = self._clarification_decision(
-                RootDecision(
-                    task_relation="CONTINUE_TASK",
-                    route="WORKFLOW",
-                    risk="WRITE",
-                    context_policy=ContextPolicy(
-                        selected_entity="IGNORE",
-                        previous_query="IGNORE",
-                        result_set="IGNORE",
-                        active_workflow="RESUME",
-                    ),
-                    confidence=1.0,
-                    reason_code=(
-                        "ACTIVE_WORKFLOW_RESUME_AMBIGUOUS"
-                        if len(continuations) != 1
-                        else "ACTIVE_WORKFLOW_CONTINUATION_UNAVAILABLE"
-                    ),
-                    evidence=["用户明确要求继续流程, 但服务端无法唯一定位可恢复的流程"],
-                ),
-                "ACTIVE_WORKFLOW_RESUME_AMBIGUOUS",
+        except Exception:
+            # Recovery must never make the Agent unavailable. The original Root
+            # decision still flows into the existing fail-closed validation.
+            runtime.semantic_plan_failures.add(text)
+            logger.warning(
+                "Canonical semantic intake unavailable during Root route recovery",
+                extra={"session_id": turn.session_id, "client_request_id": turn.client_request_id},
+                exc_info=True,
             )
-            return {"decision": decision.model_dump(mode="json")}
+            return None
+        if plan is None:
+            runtime.semantic_plan_failures.add(text)
+            return None
+        runtime.semantic_plan_cache[text] = plan
+        return plan
 
-        continuation = continuations[0]
-        if continuation.waiting_interaction_type != "text_input":
-            decision = self._clarification_decision(
-                self._explicit_workflow_continuation_decision(),
-                "WORKFLOW_CONFIRMATION_REQUIRES_STRUCTURED_ACTION",
-            )
-            return {"decision": decision.model_dump(mode="json")}
-
-        plan = RootRoutingPlan(
-            kind="TEXT_WORKFLOW_RESUME",
-            context=context,
-            decision=self._explicit_workflow_continuation_decision(),
-            continuation=continuation,
-        )
-        return {"routing_plan": plan.model_dump(mode="json")}
 
     async def _try_resolve_semantic_query_intent(
         self,
@@ -824,73 +975,49 @@ class RootOrchestrator:
         context: RootContextSnapshot,
         runtime: RootRuntimeContext,
     ) -> CRMQuerySemanticIntent | None:
-        """Use one query semantic seam before Root model routing when safe.
+        """Resolve query parameters after Root has selected the Query capability.
 
-        This is deliberately a query-only preflight. It never runs for an
-        explicit write, result-set continuation, interaction, or pending-case
-        reference. A selected entity supplies identity context, but semantic
-        resource and temporal intent still need to be resolved. A recognized
-        query therefore cannot be mistaken for a customer-scoped workflow by
-        the Root classifier, while
-        ambiguous text still follows the normal Root decision model.
+        This is a query-only semantic enrichment, not a top-level router. It
+        fills the closed Query contract when Root did not provide complete
+        query slots. Unknown, low-confidence, or unavailable results remain a
+        Query failure/clarification; they cannot redirect a turn into or out of
+        a Workflow. Result-set references remain owned by the deterministic
+        result-set binding seam and therefore bypass this enrichment.
         """
 
+        if not isinstance(turn.input, TextTurnInput):
+            return None
         if (
             self._semantic_intent_resolver is None
             or runtime.query_model_config is None
-            or not isinstance(turn.input, TextTurnInput)
-            # Result-set ordinals/references are a higher-priority context
-            # binding and must be resolved by the deterministic result-set
-            # seam, not by an independent semantic query preflight.
             or context.result_set is not None
-            or has_explicit_write_intent(turn.input.text)
         ):
             return None
-        try:
-            intent = await self._semantic_intent_resolver.resolve(
-                turn.input.text,
-                model_config=runtime.query_model_config,
-                runtime=runtime,
-            )
-        except (QuerySemanticIntentUnavailableError, QuerySemanticIntentInvalidError):
-            # Root remains available when the optional query preflight model is
-            # unavailable. If the Root model routes to QUERY, the Query seam
-            # will report its own typed semantic failure.
+        text = turn.input.text
+        intent = runtime.semantic_intent_cache.get(text)
+        if intent is None and text in runtime.semantic_intent_failures:
             return None
+        if intent is None:
+            try:
+                intent = await self._semantic_intent_resolver.resolve(
+                    text,
+                    model_config=runtime.query_model_config,
+                    runtime=runtime,
+                )
+            except (QuerySemanticIntentUnavailableError, QuerySemanticIntentInvalidError):
+                runtime.semantic_intent_failures.add(text)
+                # Root remains available when the optional query preflight model
+                # is unavailable. If Root selects QUERY, the Query seam will
+                # report the same typed semantic failure without replaying the
+                # provider call in this turn.
+                return None
+            runtime.semantic_intent_cache[text] = intent
+
         if intent.scope not in {"global_work", "customer_scoped", "customer_list"}:
             return None
         if intent.confidence < 0.80:
             return None
         return intent
-
-    @staticmethod
-    def _semantic_query_decision(
-        *,
-        has_active_workflow: bool,
-        has_selected_entity: bool,
-        semantic_intent: CRMQuerySemanticIntent,
-    ) -> RootDecision:
-        return RootDecision(
-            task_relation=("SWITCH_TASK" if has_active_workflow else "NEW_TASK"),
-            route="QUERY",
-            risk="READ_ONLY",
-            context_policy=ContextPolicy(
-                selected_entity=(
-                    "USE"
-                    if has_selected_entity and semantic_intent.scope == "customer_scoped"
-                    else "IGNORE"
-                ),
-                previous_query="IGNORE",
-                result_set="IGNORE",
-                active_workflow=("SUSPEND" if has_active_workflow else "NONE"),
-            ),
-            confidence=semantic_intent.confidence,
-            reason_code="SEMANTIC_QUERY_INTENT",
-            evidence=[
-                f"语义解析识别为 {semantic_intent.scope}/{semantic_intent.resource or 'unknown'} 查询"
-            ],
-        )
-
 
     @staticmethod
     def _route_after_deterministic_continuation(state: RootOrchestratorState) -> str:
@@ -902,88 +1029,311 @@ class RootOrchestrator:
             return "VALIDATE"
         return "DECIDE"
 
+    async def _select_pending_case_semantically(
+        self,
+        *,
+        turn: RootTurnInput,
+        context: RootContextSnapshot,
+        match: object,
+        runtime: RootRuntimeContext,
+    ) -> str | None:
+        """Select an authorized pending Case without substring heuristics."""
+
+        ranker = self._pending_case_ranker
+        candidates = getattr(match, "candidates", ())
+        if ranker is None or runtime.db is None or len(candidates) < 2:
+            return None
+        rows = [
+            {
+                "id": index,
+                "customer_name": case.customer_name,
+                "customer_aliases": case.customer_aliases,
+                "task_title": case.task_title,
+                "task_description": case.task_description,
+                "due_at": case.due_at_text,
+                "question": case.question_text,
+            }
+            for index, case in enumerate(candidates, start=1)
+        ]
+        try:
+            rankings = await ranker.rank_resource_candidates(
+                runtime.db,
+                team_id=turn.team_id,
+                user_message=turn.input.text if isinstance(turn.input, TextTurnInput) else "",
+                resource_kind="pending_follow_up_confirmation",
+                action_name="CONFIRM_FOLLOW_UP_TASK",
+                target={
+                    # The current utterance is already passed separately. Keep
+                    # this target limited to the model-authorized reference and
+                    # neutral session context; an old activity draft must not
+                    # bias selection toward the wrong pending Case.
+                    "pending_case_reference": getattr(match, "reference", None),
+                    "current_task": context.conversation_memory.current_task,
+                    "pending_question": context.conversation_memory.pending_question,
+                },
+                candidates=rows,
+                current_date=None,
+            )
+        except Exception:
+            # Semantic ranking improves ambiguous references, but must never
+            # make the Root unavailable. The existing signed/clarification
+            # path remains the safe fallback.
+            return None
+
+        if not isinstance(rankings, list):
+            return None
+
+        valid: list[tuple[int, float]] = []
+        candidate_ids = {int(row["id"]) for row in rows}
+        for ranking in rankings:
+            if not isinstance(ranking, dict):
+                continue
+            resource_id = ranking.get("resource_id")
+            confidence = ranking.get("confidence")
+            if isinstance(resource_id, bool) or not isinstance(resource_id, int):
+                continue
+            if resource_id not in candidate_ids or not isinstance(confidence, (int, float)):
+                continue
+            confidence_value = float(confidence)
+            if not math.isfinite(confidence_value) or not 0.0 <= confidence_value <= 1.0:
+                continue
+            valid.append((resource_id, confidence_value))
+        valid.sort(key=lambda item: item[1], reverse=True)
+        if not valid or valid[0][1] < 0.90:
+            return None
+        if len(valid) > 1 and valid[0][1] - valid[1][1] < 0.10:
+            return None
+        return candidates[valid[0][0] - 1].case_public_id
+
     async def _decide(
         self,
         state: RootOrchestratorState,
         runtime: Runtime[RootRuntimeContext],
     ) -> RootOrchestratorState:
+        """Route one ordinary text turn through the semantic safety boundary.
+
+        Typed UI interactions and server triggers are handled deterministically
+        before this node. Text first gets a canonical domain-semantic safety
+        check when available; Root still owns task relation and context policy,
+        while Query/Workflow modules only parse or execute the capability
+        selected after the closed-world projection.
+        """
+
         turn = RootTurnInput.model_validate(state["turn"])
         context = RootContextSnapshot.model_validate(state["context_snapshot"])
-        has_active_workflow = context.active_workflow is not None
         semantic_intent: CRMQuerySemanticIntent | None = None
+
         if isinstance(turn.input, WorkflowTriggerTurnInput):
-            decision = RootDecision(
-                task_relation="SWITCH_TASK" if has_active_workflow else "NEW_TASK",
-                route="WORKFLOW",
-                risk="WRITE",
-                context_policy=ContextPolicy(
-                    selected_entity="IGNORE",
-                    previous_query="IGNORE",
-                    result_set="IGNORE",
-                    active_workflow="SUSPEND" if has_active_workflow else "NONE",
-                ),
-                confidence=1.0,
-                reason_code="FOLLOW_UP_TASK_CONFIRMATION_TRIGGER",
-                evidence=["服务端触发跟进任务确认工作流"],
-            )
-        elif isinstance(turn.input, TextTurnInput) and has_explicit_follow_up_record_intent(
-            turn.input.text
-        ):
-            decision = self._explicit_follow_up_workflow_decision(
-                has_active_workflow=has_active_workflow,
-                use_selected_entity=(
-                    turn.selected_entity_ref is not None
-                    and has_context_dependent_reference(turn.input.text)
-                ),
-            )
-        elif (
-            isinstance(turn.input, TextTurnInput)
-            and has_explicit_independent_read_intent(turn.input.text)
-            and not has_explicit_write_intent(turn.input.text)
-        ):
-            semantic_intent = await self._try_resolve_semantic_query_intent(
-                turn=turn,
-                context=context,
-                runtime=runtime.context,
-            )
-            decision = (
-                self._semantic_query_decision(
-                    has_active_workflow=has_active_workflow,
-                    has_selected_entity=turn.selected_entity_ref is not None,
-                    semantic_intent=semantic_intent,
-                )
-                if semantic_intent is not None
-                else self._explicit_read_decision(
-                    has_active_workflow=has_active_workflow,
-                )
-            )
-        else:
-            semantic_intent = await self._try_resolve_semantic_query_intent(
-                turn=turn,
-                context=context,
-                runtime=runtime.context,
-            )
-            if semantic_intent is not None:
-                decision = self._semantic_query_decision(
-                    has_active_workflow=has_active_workflow,
-                    has_selected_entity=turn.selected_entity_ref is not None,
-                    semantic_intent=semantic_intent,
+            if turn.input.workflow == "customer_opportunity_suggestion":
+                decision = self._server_workflow_trigger_decision(
+                    context=context,
+                    trigger=turn.input,
                 )
             else:
-                decision = await self._decision_classifier.classify(
+                has_active_workflow = context.active_workflow is not None
+                decision = RootDecision(
+                    task_relation="SWITCH_TASK" if has_active_workflow else "NEW_TASK",
+                    route="WORKFLOW",
+                    risk="WRITE",
+                    context_policy=ContextPolicy(
+                        selected_entity="IGNORE",
+                        previous_query="IGNORE",
+                        result_set="IGNORE",
+                        active_workflow="SUSPEND" if has_active_workflow else "NONE",
+                    ),
+                    confidence=1.0,
+                    reason_code="FOLLOW_UP_TASK_CONFIRMATION_TRIGGER",
+                    evidence=["服务端触发跟进任务确认工作流"],
+                    semantic_plan=AgentSemanticPlan(
+                        speech_act="CONFIRM_ACTION",
+                        business_object="FOLLOW_UP_TASK",
+                        operation="TRANSITION",
+                        confidence=1.0,
+                    ),
+                )
+        elif isinstance(turn.input, TextTurnInput):
+            # Root is the only top-level semantic router.  Query and canonical
+            # parsers are capability-specific enrichers/recovery seams and must
+            # never run before Root has selected the task boundary.  This is
+            # important for both correctness (an event assertion must reach the
+            # Activity Workflow) and availability (a normal query must not pay
+            # for several independent model calls before it can execute).
+            decision = await self._decision_classifier.classify(
+                turn=turn,
+                context=context,
+                runtime=runtime.context,
+            )
+
+            root_plan = decision.semantic_plan
+            root_plan_is_reliable_read = (
+                root_plan.confidence >= 0.80 and semantic_plan_is_read(root_plan)
+            )
+            root_plan_is_reliable_write = (
+                root_plan.confidence >= 0.80 and semantic_plan_is_write(root_plan)
+            )
+
+            # Recovery is deliberately bounded.  A reliable Root semantic plan
+            # is authoritative for an otherwise valid turn, so a second
+            # top-level parser is not allowed to reinterpret it.  There is one
+            # structural exception: a model-selected Workflow continuation
+            # cannot be valid when the server supplied no active Workflow. In
+            # that case, use canonical domain intake to recover the complete
+            # business meaning. Query-specific enrichment is deliberately not
+            # involved because it is not authorized to decide the top-level
+            # capability.
+            root_context_policy_is_impossible = (
+                decision.route == "WORKFLOW"
+                and decision.task_relation == "CONTINUE_TASK"
+                and decision.context_policy.active_workflow == "RESUME"
+                and context.active_workflow is None
+            )
+            canonical_plan: AgentSemanticPlan | None = None
+            if root_context_policy_is_impossible:
+                # A missing continuation is a context inconsistency, not
+                # evidence that the user asked for a read.  Re-run the
+                # canonical business-semantic intake first and project that
+                # result onto the capability.  The Query semantic resolver is
+                # intentionally *not* allowed to repair Root routing here:
+                # it is a query-only parser and a query-biased interpretation
+                # could downgrade a new activity assertion into a read.
+                #
+                # If canonical intake is unavailable, the safe outcome is the
+                # existing fail-closed clarification for the impossible
+                # continuation.  It is better to ask once than to execute the
+                # wrong read-only capability or lose a requested write.
+                canonical_plan = await self._try_resolve_canonical_semantic_plan(
                     turn=turn,
                     context=context,
                     runtime=runtime.context,
                 )
-            # Pending Case identity is a server-owned binding.  A model may
-            # classify ordinary text, but it cannot promote its own
-            # ``pending_case_reference`` into a resumable resource.  Only the
-            # deterministic matcher above can do that.
-            if decision.pending_case_relation == "EXPLICIT_REFERENCE":
-                decision = self._clarification_decision(
-                    decision,
-                    "PENDING_CASE_REFERENCE_UNVERIFIED",
+            elif not root_plan_is_reliable_read and not root_plan_is_reliable_write:
+                canonical_plan = await self._try_resolve_canonical_semantic_plan(
+                    turn=turn,
+                    context=context,
+                    runtime=runtime.context,
                 )
+
+            canonical_is_reliable = (
+                canonical_plan is not None and canonical_plan.confidence >= 0.80
+            )
+            if canonical_is_reliable and (
+                semantic_plan_is_write(canonical_plan)
+                or semantic_plan_is_read(canonical_plan)
+            ):
+                # Keep Root's semantic meaning, but project the recovered
+                # structured meaning onto the capability before validation.
+                # _normalize_semantic_route owns the closed-world route/risk
+                # projection and unsupported-write clarification.
+                decision = decision.model_copy(
+                    update={
+                        "semantic_plan": canonical_plan,
+                        "confidence": max(decision.confidence, canonical_plan.confidence),
+                    }
+                )
+                if root_context_policy_is_impossible:
+                    # The original CONTINUE_TASK/RESUME policy was based on a
+                    # continuation that the server has just proved absent. A
+                    # recovered meaning—whether read or write—must start as a
+                    # fresh task; carrying RESUME forward would make the later
+                    # context guard turn a valid request into a misleading
+                    # clarification.
+                    decision = decision.model_copy(
+                        update={
+                            "task_relation": "NEW_TASK",
+                            "context_policy": decision.context_policy.model_copy(
+                                update={
+                                    "active_workflow": "NONE",
+                                    "previous_query": "IGNORE",
+                                    "result_set": "IGNORE",
+                                }
+                            ),
+                        }
+                    )
+
+            # Query semantics are resolved only after Root (and any bounded
+            # recovery) has selected QUERY.  The resolved intent is stored in
+            # state and passed to the Query executor, so the executor performs
+            # no second provider call for this turn.
+            decision = self._normalize_semantic_route(decision, preserve_clarify=False)
+            if decision.route == "QUERY" and semantic_intent is None:
+                # Prefer complete query slots from the same Root semantic
+                # intake.  The specialized Query parser is only a fallback for
+                # older/incomplete Root outputs, never a second unconditional
+                # router.
+                semantic_intent = query_intent_from_semantic_plan(decision.semantic_plan)
+            if decision.route == "QUERY" and semantic_intent is None:
+                semantic_intent = await self._try_resolve_semantic_query_intent(
+                    turn=turn,
+                    context=context,
+                    runtime=runtime.context,
+                )
+
+            # Pending Case IDs are server-owned bindings. The model can say
+            # that the utterance is about a pending case, but it cannot invent
+            # the Case identity. Match only after Root has selected that
+            # capability, then either bind a unique case or clarify.
+            if decision.pending_case_relation == "EXPLICIT_REFERENCE":
+                if decision.route != "WORKFLOW":
+                    decision = self._clarification_decision(
+                        decision, "PENDING_CASE_ROUTE_MISMATCH"
+                    )
+                pending_match = match_pending_case(
+                    turn.input.text,
+                    context.pending_cases,
+                    semantic_reference_authorized=True,
+                )
+                pending_case_public_id = None
+                if pending_match.status == "MATCHED" and pending_match.case is not None:
+                    pending_case_public_id = pending_match.case.case_public_id
+                elif pending_match.status == "AMBIGUOUS":
+                    pending_case_public_id = await self._select_pending_case_semantically(
+                        turn=turn,
+                        context=context,
+                        match=pending_match,
+                        runtime=runtime.context,
+                    )
+                if pending_case_public_id is not None:
+                    return {
+                        "decision": decision.model_dump(mode="json"),
+                        "pending_case_public_id": pending_case_public_id,
+                        "semantic_intent": None,
+                    }
+                reason_code = (
+                    "PENDING_CASE_REFERENCE_AMBIGUOUS"
+                    if pending_match.status == "AMBIGUOUS"
+                    else "PENDING_CASE_NOT_FOUND"
+                )
+                decision = self._clarification_decision(decision, reason_code)
+
+            if (
+                decision.route == "WORKFLOW"
+                and decision.task_relation == "CONTINUE_TASK"
+                and decision.context_policy.active_workflow == "RESUME"
+            ):
+                continuation_result = self._text_continuation_routing(
+                    context=context,
+                    decision=decision,
+                )
+                if continuation_result.get("routing_plan") is not None:
+                    return {
+                        **continuation_result,
+                        "semantic_intent": (
+                            semantic_intent.model_dump(mode="json")
+                            if semantic_intent is not None
+                            else None
+                        ),
+                    }
+                decision = RootDecision.model_validate(continuation_result["decision"])
+
+        else:
+            # Defensive fallback: current non-text inputs are resolved before
+            # Root classification.
+            decision = await self._decision_classifier.classify(
+                turn=turn,
+                context=context,
+                runtime=runtime.context,
+            )
+
         return {
             "decision": decision.model_dump(mode="json"),
             "semantic_intent": (
@@ -992,6 +1342,42 @@ class RootOrchestrator:
                 else None
             ),
         }
+
+    def _text_continuation_routing(
+        self,
+        *,
+        context: RootContextSnapshot,
+        decision: RootDecision,
+    ) -> dict[str, object]:
+        """Validate a model-selected text continuation without re-routing it."""
+
+        if context.active_workflow is None:
+            return {
+                "decision": self._clarification_decision(
+                    decision, "ACTIVE_WORKFLOW_CONTEXT_MISSING"
+                ).model_dump(mode="json")
+            }
+        continuations = context.resumable_workflow_continuations
+        if len(continuations) != 1 or continuations[0].workflow_ref != context.active_workflow:
+            return {
+                "decision": self._clarification_decision(
+                    decision, "ACTIVE_WORKFLOW_RESUME_AMBIGUOUS"
+                ).model_dump(mode="json")
+            }
+        continuation = continuations[0]
+        if continuation.waiting_interaction_type != "text_input":
+            return {
+                "decision": self._clarification_decision(
+                    decision, "WORKFLOW_CONFIRMATION_REQUIRES_STRUCTURED_ACTION"
+                ).model_dump(mode="json")
+            }
+        plan = RootRoutingPlan(
+            kind="TEXT_WORKFLOW_RESUME",
+            context=context,
+            decision=decision,
+            continuation=continuation,
+        )
+        return {"routing_plan": plan.model_dump(mode="json")}
 
     @staticmethod
     def _workflow_failure(
@@ -1002,13 +1388,13 @@ class RootOrchestrator:
         if code == "WORKFLOW_CHECKPOINT_UNAVAILABLE":
             error = AgentExecutionError(
                 code=code,
-                message="工作流状态服务暂时不可用, 请稍后重试。",
+                message="刚才的操作没接上，请重新说一下要做什么。",
                 retryable=True,
             )
         else:
             error = AgentExecutionError(
                 code="WORKFLOW_EXECUTION_FAILED",
-                message="工作流执行暂时失败, 请稍后重试。",
+                message="这次操作没完成，请稍后再试。",
                 retryable=True,
             )
         return FailureDispatchResult(
@@ -1080,6 +1466,14 @@ class RootOrchestrator:
             permission_codes=sorted(runtime_context.permission_codes),
         )
         selected_entity = turn.selected_entity_ref if decision.context_policy.selected_entity == "USE" else None
+        remembered_customer = (
+            context.conversation_memory.resolved_customer
+            if (
+                decision.context_policy.conversation_memory == "USE"
+                and decision.task_relation == "CONTINUE_TASK"
+            )
+            else None
+        )
         result_set = context.result_set if decision.context_policy.result_set == "USE" else None
         if isinstance(turn.input, TextTurnInput) and result_set is not None:
             try:
@@ -1092,6 +1486,34 @@ class RootOrchestrator:
             if resolved_entity is not None:
                 selected_entity = resolved_entity
                 result_set = None
+        # A freshly selected result-set entity remains the authoritative
+        # binding for this turn. Cached memory is only a supplement when the
+        # user did not select/bind another entity; the Workflow planner then
+        # revalidates the cached customer before mutation.
+        resolved_customer = remembered_customer if selected_entity is None else None
+        resolved_action = (
+            ResolvedAgentAction.model_validate(state["resolved_action"])
+            if state.get("resolved_action") is not None
+            else None
+        )
+        server_trigger = resolved_action.workflow_trigger if resolved_action is not None else None
+        if isinstance(turn.input, WorkflowTriggerTurnInput):
+            server_trigger = turn.input
+        if server_trigger is not None and server_trigger.workflow == "customer_opportunity_suggestion":
+            workflow_start = WorkflowOpportunitySuggestionStart(
+                kind="opportunity_suggestion",
+                action=server_trigger.action or "CANCEL",
+                job_public_id=server_trigger.job_public_id or "",
+            )
+            return {
+                "decision": decision.model_dump(mode="json"),
+                "workflow_input": _workflow_input_payload(WorkflowTurnInput(
+                    workflow_id=_workflow_id_for_server_trigger(turn, server_trigger),
+                    start=workflow_start,
+                    principal=principal,
+                    selected_entity=selected_entity,
+                )),
+            }
         if decision.route == "QUERY":
             if not isinstance(turn.input, TextTurnInput):
                 return {
@@ -1112,6 +1534,7 @@ class RootOrchestrator:
                         if state.get("semantic_intent") is not None
                         else None
                     ),
+                    resolved_customer=resolved_customer,
                 ).model_dump(mode="json"),
             }
         if isinstance(turn.input, TextTurnInput):
@@ -1123,8 +1546,16 @@ class RootOrchestrator:
                     resource_id=str(pending_case_public_id),
                 )
             else:
-                workflow_start = WorkflowTextStart(kind="text", text=turn.input.text)
+                workflow_start = WorkflowTextStart(
+                    kind="text",
+                    text=turn.input.text,
+                    semantic_plan=decision.semantic_plan,
+                )
         elif isinstance(turn.input, WorkflowTriggerTurnInput):
+            if turn.input.workflow != "follow_up_task_confirmation" or turn.input.resource_id is None:
+                return {
+                    "decision": self._clarification_decision(decision, "WORKFLOW_START_INVALID").model_dump(mode="json")
+                }
             workflow_start = WorkflowResourceStart(
                 kind="resource",
                 workflow=turn.input.workflow,
@@ -1136,13 +1567,20 @@ class RootOrchestrator:
             }
         return {
             "decision": decision.model_dump(mode="json"),
-            "workflow_input": WorkflowTurnInput(
+            "workflow_input": _workflow_input_payload(WorkflowTurnInput(
                 workflow_id=_workflow_id_for_turn(turn),
                 start=workflow_start,
                 principal=principal,
                 selected_entity=selected_entity,
-            ).model_dump(mode="json"),
+                resolved_customer=resolved_customer,
+            )),
         }
+
+    @staticmethod
+    def _route_after_decision(state: RootOrchestratorState) -> str:
+        """Stop before validation when the Root selected a checkpoint plan."""
+
+        return "ROUTING_PLAN" if state.get("routing_plan") is not None else "VALIDATE"
 
     @staticmethod
     def _route_after_context_policy(state: RootOrchestratorState) -> str:
@@ -1178,7 +1616,7 @@ class RootOrchestrator:
                     decision=decision,
                     error=AgentExecutionError(
                         code="QUERY_IDENTITY_UNAVAILABLE",
-                        message="客户识别服务暂时不可用, 请稍后重试。",
+                        message="暂时没法确认客户信息，请稍后再试。",
                         retryable=True,
                     ),
                 ).model_dump(mode="json")
@@ -1189,7 +1627,7 @@ class RootOrchestrator:
                     decision=decision,
                     error=AgentExecutionError(
                         code="QUERY_SEMANTIC_INTENT_UNAVAILABLE",
-                        message="查询语义解析服务暂时不可用, 请稍后重试。",
+                        message="查询条件暂时没解析出来，请稍后再试。",
                         retryable=True,
                     ),
                 ).model_dump(mode="json")
@@ -1202,7 +1640,7 @@ class RootOrchestrator:
                     error=AgentExecutionError(
                         code=query_error.code,
                         message=_QUERY_ERROR_MESSAGES.get(
-                            query_error.code, "查询服务暂时不可用，请稍后重试。"  # noqa: RUF001
+                            query_error.code, "查询服务暂时不可用，请稍后重试。"
                         ),
                         retryable=query_error.retryable,
                     ),
@@ -1218,7 +1656,7 @@ class RootOrchestrator:
                     decision=decision,
                     error=AgentExecutionError(
                         code="QUERY_EXECUTION_FAILED",
-                        message="查询服务暂时不可用, 请稍后重试。",
+                        message="查询暂时没完成，请稍后再试。",
                         retryable=True,
                     ),
                 ).model_dump(mode="json")
@@ -1241,7 +1679,7 @@ class RootOrchestrator:
             )
             workflow_input = (
                 WorkflowTurnInput.model_validate(state["workflow_input"])
-                if resolved_action is None and state.get("resumed_workflow_ref") is None
+                if state.get("workflow_input") is not None
                 else None
             )
             resumed_workflow_ref = (
@@ -1253,14 +1691,20 @@ class RootOrchestrator:
             raise WorkflowExecutionFailedError("Workflow subgraph returned an invalid result") from exc
 
         expected_workflow_id = (
-            resolved_action.workflow_ref.workflow_id
-            if resolved_action is not None
+            resolved_action.continuation.workflow_ref.workflow_id
+            if resolved_action is not None and resolved_action.continuation is not None
+            else workflow_input.workflow_id
+            if workflow_input is not None and resumed_workflow_ref is None
             else resumed_workflow_ref.workflow_id
             if resumed_workflow_ref is not None
-            else workflow_input.workflow_id
+            else None
         )
         actual_workflow_ref = workflow_result.workflow_ref
-        if actual_workflow_ref is None or actual_workflow_ref.workflow_id != expected_workflow_id:
+        if (
+            expected_workflow_id is None
+            or actual_workflow_ref is None
+            or actual_workflow_ref.workflow_id != expected_workflow_id
+        ):
             raise WorkflowExecutionFailedError(
                 "Workflow subgraph result does not match the requested execution identity"
             )
@@ -1268,8 +1712,57 @@ class RootOrchestrator:
             "dispatch_result": WorkflowDispatchResult(
                 decision=RootDecision.model_validate(state["decision"]),
                 workflow_result=workflow_result,
+                action_claim_id=(
+                    resolved_action.action_id
+                    if resolved_action is not None and resolved_action.claim_outcome == "ACQUIRED"
+                    else None
+                ),
             ).model_dump(mode="json")
         }
+
+    @staticmethod
+    def _server_workflow_trigger_decision(
+        *,
+        context: RootContextSnapshot,
+        trigger: WorkflowTriggerTurnInput,
+    ) -> RootDecision:
+        action = trigger.action or "CANCEL"
+        return RootDecision(
+            task_relation="SWITCH_TASK" if context.active_workflow is not None else "NEW_TASK",
+            route="WORKFLOW",
+            risk="WRITE",
+            context_policy=ContextPolicy(
+                selected_entity="IGNORE",
+                previous_query="IGNORE",
+                result_set="IGNORE",
+                active_workflow="SUSPEND" if context.active_workflow is not None else "NONE",
+                conversation_memory="IGNORE",
+            ),
+            confidence=1.0,
+            reason_code=(
+                "CUSTOMER_OPPORTUNITY_SUGGESTION_TRIGGER"
+                if trigger.workflow == "customer_opportunity_suggestion"
+                else "SERVER_WORKFLOW_TRIGGER"
+            ),
+            evidence=[f"服务端触发独立工作流: {trigger.workflow}/{action}"],
+            semantic_plan=AgentSemanticPlan(
+                speech_act="CONFIRM_ACTION",
+                business_object=(
+                    "OPPORTUNITY"
+                    if trigger.workflow == "customer_opportunity_suggestion"
+                    else "FOLLOW_UP_TASK"
+                ),
+                operation=(
+                    "CREATE"
+                    if action == "CREATE_OPPORTUNITY"
+                    else "TRANSITION"
+                    if action == "MOVE_OPPORTUNITY_STAGE"
+                    else "NONE"
+                ),
+                confidence=1.0,
+            ),
+        )
+
 
     @staticmethod
     def _interaction_workflow_decision(
@@ -1286,10 +1779,17 @@ class RootOrchestrator:
                 previous_query="IGNORE",
                 result_set="IGNORE",
                 active_workflow="RESUME",
+                conversation_memory="IGNORE",
             ),
             confidence=1.0,
             reason_code=reason_code,
             evidence=["结构化交互已通过权威动作与工作流绑定校验"],
+            semantic_plan=AgentSemanticPlan(
+                speech_act="CONFIRM_ACTION",
+                business_object="UNKNOWN",
+                operation="UNKNOWN",
+                confidence=1.0,
+            ),
         )
 
     @staticmethod
@@ -1299,10 +1799,46 @@ class RootOrchestrator:
         return ClarificationDispatchResult(
             decision=decision,
             clarification=ClarificationRequest(
-                question="请明确你想继续当前任务, 还是开始一个新的查询或操作。",
+                question=(
+                    decision.clarification_question
+                    or RootOrchestrator._clarification_question_for_reason(decision.reason_code)
+                ),
                 reason_code=decision.reason_code,
             ),
         )
+
+    @staticmethod
+    def _clarification_question_for_reason(reason_code: str) -> str:
+        """Return a narrow, user-facing fallback for server-side guardrails.
+
+        Root is intentionally model-led for meaning. These messages are not
+        an intent router; they are fail-safe UX for cases where a model claim
+        cannot be executed because the required server-owned context is absent
+        or ambiguous. Keeping them reason-specific prevents every safety
+        boundary from collapsing into the old generic Workflow question.
+        """
+
+        return {
+            "LOW_CONFIDENCE": "我还不能确定你想查询什么或执行什么操作，请补充客户、对象和你的具体目的。",
+            "SELECTED_ENTITY_CONTEXT_MISSING": "请重新选择要操作的客户，或直接在消息中写明客户名称。",
+            "PREVIOUS_QUERY_CONTEXT_MISSING": "我找不到上一条查询条件，请重新描述你要查询的内容。",
+            "RESULT_SET_CONTEXT_MISSING": "我找不到上一轮查询结果，请重新说明要操作的客户或对象。",
+            "RESULT_SET_REFERENCE_OUT_OF_RANGE": (
+                "这个序号不在当前查询结果中，请选择结果里的有效序号，或直接说出客户名称。"
+            ),
+            "ACTIVE_WORKFLOW_CONTEXT_MISSING": "我找不到可继续的待处理任务，请直接说明你要查询或执行的事情。",
+            "ACTIVE_WORKFLOW_RESUME_AMBIGUOUS": "当前有多个待处理任务，请说明要继续哪一个，或直接补充客户和操作。",
+            "ACTIVE_WORKFLOW_RESUME_POLICY_INVALID": "请补充你要继续的具体任务内容，我不会替你猜测要恢复哪一步。",
+            "ACTIVE_WORKFLOW_SWITCH_POLICY_INVALID": "请说明你要开始的新的查询或操作，以及对应的客户或对象。",
+            "WORKFLOW_CONFIRMATION_REQUIRES_STRUCTURED_ACTION": (
+                "这一步需要使用页面中的确认或选择按钮完成；如果要开始新操作，请直接描述你的需求。"
+            ),
+            "PENDING_CASE_ROUTE_MISMATCH": "请说明你是要查询这条待办的状态，还是要变更它的状态。",
+            "PENDING_CASE_REFERENCE_AMBIGUOUS": "匹配到多条相似待办，请补充客户名称、待办标题或待办编号。",
+            "PENDING_CASE_NOT_FOUND": "没有匹配到对应的历史待办，请补充客户名称、待办标题或待办编号。",
+            "QUERY_REQUIRES_TEXT": "请用文字描述你要查询的内容。",
+            "WORKFLOW_START_INVALID": "请重新描述你要执行的具体操作和对应客户。",
+        }.get(reason_code, "请补充你要查询或执行的具体内容。")
 
     @staticmethod
     def _finalize_dispatch(state: RootOrchestratorState) -> RootOrchestratorState:
@@ -1329,17 +1865,13 @@ class RootOrchestrator:
         turn: RootTurnInput,
         context: RootContextSnapshot,
     ) -> RootDecision:
+        decision = self._normalize_semantic_route(decision)
+        decision = self._normalize_query_context_policy(decision, context=context)
         policy = decision.context_policy
         if decision.route == "CLARIFY":
             return decision
         invalid_reason: str | None = None
-        if (
-            isinstance(turn.input, TextTurnInput)
-            and decision.route == "QUERY"
-            and has_explicit_write_intent(turn.input.text)
-        ):
-            invalid_reason = "WRITE_INTENT_ROUTE_MISMATCH"
-        elif policy.selected_entity == "USE" and turn.selected_entity_ref is None:
+        if policy.selected_entity == "USE" and turn.selected_entity_ref is None:
             invalid_reason = "SELECTED_ENTITY_CONTEXT_MISSING"
         elif policy.previous_query == "USE" and context.previous_query is None:
             invalid_reason = "PREVIOUS_QUERY_CONTEXT_MISSING"
@@ -1347,28 +1879,6 @@ class RootOrchestrator:
             invalid_reason = "RESULT_SET_CONTEXT_MISSING"
         elif context.active_workflow is None and policy.active_workflow != "NONE":
             invalid_reason = "ACTIVE_WORKFLOW_CONTEXT_MISSING"
-        elif (
-            isinstance(turn.input, TextTurnInput)
-            and decision.route == "WORKFLOW"
-            and decision.task_relation == "CONTINUE_TASK"
-            and not has_explicit_workflow_continuation_intent(turn.input.text)
-            and (
-                decision.context_policy.active_workflow == "RESUME"
-                or (
-                    decision.context_policy.active_workflow == "NONE"
-                    and decision.context_policy.selected_entity == "IGNORE"
-                    and decision.context_policy.previous_query == "IGNORE"
-                    and decision.context_policy.result_set == "IGNORE"
-                )
-            )
-        ):
-            # ``CONTINUE_TASK`` is also useful when a new Workflow is scoped by
-            # an explicitly referenced entity/result set or when a Query keeps
-            # its conversational context.  Reject only a bare Workflow
-            # continuation: it has no context binding and would otherwise let
-            # the model manufacture a native checkpoint resume. Native resume
-            # is selected only by the deterministic explicit-continuation path.
-            invalid_reason = "MODEL_TRIED_TO_RESUME_WORKFLOW"
         elif (
             isinstance(turn.input, TextTurnInput)
             and policy.active_workflow == "RESUME"
@@ -1391,114 +1901,189 @@ class RootOrchestrator:
         return self._clarification_decision(decision, invalid_reason)
 
     @staticmethod
-    def _explicit_pending_case_decision(
+    def _normalize_query_context_policy(
+        decision: RootDecision,
         *,
-        has_active_workflow: bool,
-        reference: str | None,
+        context: RootContextSnapshot,
     ) -> RootDecision:
-        return RootDecision(
-            task_relation=("SWITCH_TASK" if has_active_workflow else "NEW_TASK"),
-            route="WORKFLOW",
-            risk="WRITE",
-            context_policy=ContextPolicy(
-                selected_entity="IGNORE",
-                previous_query="IGNORE",
-                result_set="IGNORE",
-                active_workflow=("SUSPEND" if has_active_workflow else "NONE"),
-            ),
-            confidence=1.0,
-            reason_code="EXPLICIT_PENDING_CASE_REFERENCE",
-            evidence=[f"用户明确引用待办确认事项: {(reference or '')[:120]}"],
-            pending_case_relation="EXPLICIT_REFERENCE",
-            pending_case_reference=reference,
-        )
+        """Keep a confirmed read independent from stale Workflow context.
+
+        The Root model decides meaning, but its context-policy fields are an
+        execution hint rather than a second authority. Once the semantic plan
+        has been projected to QUERY, a read cannot resume a write Workflow. A
+        global-work query also has no customer/result/query carry-over by
+        definition, so those context slots must be ignored even when the model
+        accidentally retains them.
+
+        This is a structural invariant over the typed decision and context; it
+        does not inspect the user's words and does not affect Workflow routes.
+        """
+
+        if decision.route != "QUERY":
+            return decision
+
+        updates: dict[str, object] = {}
+        if context.active_workflow is not None:
+            updates.update(
+                task_relation="SWITCH_TASK",
+                context_policy=decision.context_policy.model_copy(
+                    update={"active_workflow": "SUSPEND"}
+                ),
+            )
+        elif decision.context_policy.active_workflow != "NONE":
+            updates["context_policy"] = decision.context_policy.model_copy(
+                update={"active_workflow": "NONE"}
+            )
+
+        query_plan = decision.semantic_plan.query_plan
+        if query_plan is not None and query_plan.scope == "global_work":
+            current_policy = updates.get("context_policy", decision.context_policy)
+            updates["context_policy"] = current_policy.model_copy(
+                update={
+                    "selected_entity": "IGNORE",
+                    "previous_query": "IGNORE",
+                    "result_set": "IGNORE",
+                }
+            )
+
+        if not updates:
+            return decision
+        return decision.model_copy(update=updates)
+
 
     @staticmethod
-    def _pending_case_clarification_decision(
+    def _normalize_semantic_route(
+        decision: RootDecision,
         *,
-        has_active_workflow: bool,
-        relation: str,
-        reference: str | None,
+        preserve_clarify: bool = True,
     ) -> RootDecision:
-        return RootDecision(
-            task_relation=("SWITCH_TASK" if has_active_workflow else "NEW_TASK"),
-            route="CLARIFY",
-            risk="WRITE",
-            context_policy=ContextPolicy(
-                selected_entity="IGNORE",
-                previous_query="IGNORE",
-                result_set="IGNORE",
-                active_workflow=("SUSPEND" if has_active_workflow else "NONE"),
-            ),
-            confidence=1.0,
-            reason_code=("PENDING_CASE_REFERENCE_AMBIGUOUS" if relation == "AMBIGUOUS" else "PENDING_CASE_NOT_FOUND"),
-            evidence=[f"用户明确引用待办, 但无法唯一匹配: {(reference or '')[:120]}"],
-            pending_case_relation=relation,
-            pending_case_reference=reference,
+        """Project one model-produced semantic plan onto an authorized capability.
+
+        The Root model owns language understanding.  This method is deliberately
+        limited to a closed-world projection from the *structured* plan to the
+        only capabilities this graph can dispatch; it never looks for words in
+        the user message.  That keeps an activity assertion from falling into a
+        read-only Query branch while avoiding a second classifier in the graph.
+
+        A low-confidence semantic write must not be silently treated as a read.
+        In that case the safe result is CLARIFY, because executing Query would be
+        both semantically wrong and capable of hiding the user's requested write.
+        """
+
+        plan = decision.semantic_plan
+
+        # A deliberate clarification remains terminal during later validation
+        # passes (for example, after a continuation policy guard fires). During
+        # the initial text decision pass, callers set ``preserve_clarify=False``
+        # so a reliable structured activity assertion can recover a model that
+        # emitted CLARIFY and would otherwise bypass the Workflow.
+        if preserve_clarify and decision.route == "CLARIFY":
+            return decision
+
+        expected_route: str | None = None
+        expected_risk: str | None = None
+        reason_code: str | None = None
+
+        is_read = semantic_plan_is_read(plan)
+        is_write = semantic_plan_is_write(plan)
+        supported_write = semantic_plan_supports_workflow_write(plan)
+        if decision.route == "CLARIFY" and not (is_write and supported_write):
+            return decision
+
+        if is_read:
+            expected_route = "QUERY"
+            expected_risk = "READ_ONLY"
+            reason_code = (
+                "SEMANTIC_ACTIVITY_QUERY"
+                if plan.business_object == "CUSTOMER_ACTIVITY"
+                else "SEMANTIC_READ_ROUTE"
+            )
+        elif is_write:
+            expected_route = "WORKFLOW"
+            expected_risk = "WRITE"
+            reason_code = (
+                "SEMANTIC_ACTIVITY_WRITE"
+                if plan.business_object == "CUSTOMER_ACTIVITY"
+                else "SEMANTIC_WRITE_ROUTE"
+            )
+
+        # QUERY is executable only when the model explicitly produced a
+        # sufficiently reliable read plan.  A reliable write plan is handled
+        # by the projection below, even if the model's coarse route was QUERY;
+        # otherwise the exact activity assertion bug we are guarding against
+        # would still be allowed to enter Query.  Any plan that is neither a
+        # reliable read nor a reliable write fails closed to clarification.
+        if is_write and not supported_write:
+            return RootOrchestrator._clarification_decision(
+                decision,
+                "SEMANTIC_WRITE_UNSUPPORTED",
+                clarification_question=(
+                    "当前 Agent 只支持客户、客户活动、商机及商机阶段推进；请补充这几个范围内的具体操作。"
+                ),
+            )
+
+        if decision.route == "QUERY" and not is_read and is_write and plan.confidence < 0.80:
+            return RootOrchestrator._clarification_decision(
+                decision,
+                "SEMANTIC_ROUTE_AMBIGUOUS",
+                clarification_question=(
+                    "我理解到一个可能的业务操作，但还不能确定你是要查询已有信息，还是记录/执行这次操作，请补充你的具体目的。"
+                ),
+            )
+        if decision.route == "QUERY" and not is_read and not is_write:
+            return RootOrchestrator._clarification_decision(
+                decision,
+                "SEMANTIC_QUERY_PLAN_REQUIRED",
+                clarification_question=(
+                    "我还不能确定你是在查询已有信息，还是要记录/执行这次业务操作，请补充你的具体目的。"
+                ),
+            )
+
+        if expected_route is None:
+            return decision
+
+        route_matches = decision.route == expected_route and decision.risk == expected_risk
+        if route_matches:
+            return decision
+
+        # The server may only project a sufficiently reliable semantic claim.
+        # For a weaker write claim, clarification is safer than allowing the
+        # model's contradictory QUERY route to execute a read-only branch.
+        if plan.confidence < 0.80:
+            return RootOrchestrator._clarification_decision(
+                decision,
+                "SEMANTIC_ROUTE_AMBIGUOUS",
+                clarification_question=(
+                    "我理解到一个可能的业务操作，但还不能确定你是要查询已有信息，还是记录/执行这次操作，请补充你的具体目的。"
+                ),
+            )
+
+        return decision.model_copy(
+            update={
+                "route": expected_route,
+                "risk": expected_risk,
+                "reason_code": reason_code,
+                "context_policy": decision.context_policy.model_copy(
+                    update=(
+                        {"previous_query": "IGNORE", "result_set": "IGNORE"}
+                        if expected_route == "WORKFLOW"
+                        else {}
+                    )
+                ),
+                "evidence": [
+                    *decision.evidence,
+                    "结构化语义计划与初始路由冲突，已按业务语义纠正能力路由",
+                ][:20],
+            }
         )
 
     @staticmethod
-    def _explicit_workflow_continuation_decision() -> RootDecision:
-        return RootDecision(
-            task_relation="CONTINUE_TASK",
-            route="WORKFLOW",
-            risk="WRITE",
-            context_policy=ContextPolicy(
-                selected_entity="IGNORE",
-                previous_query="IGNORE",
-                result_set="IGNORE",
-                active_workflow="RESUME",
-            ),
-            confidence=1.0,
-            reason_code="EXPLICIT_WORKFLOW_CONTINUATION",
-            evidence=["用户明确要求继续当前会话中的工作流"],
-        )
-
-    @staticmethod
-    def _explicit_follow_up_workflow_decision(
+    def _clarification_decision(
+        decision: RootDecision,
+        reason_code: str,
         *,
-        has_active_workflow: bool,
-        use_selected_entity: bool,
+        clarification_question: str | None = None,
     ) -> RootDecision:
-        evidence = ["用户文本包含已完成的客户沟通及业务进展或后续跟进计划"]
-        return RootDecision(
-            task_relation=("SWITCH_TASK" if has_active_workflow else "NEW_TASK"),
-            route="WORKFLOW",
-            risk="WRITE",
-            context_policy=ContextPolicy(
-                selected_entity=("USE" if use_selected_entity else "IGNORE"),
-                previous_query="IGNORE",
-                result_set="IGNORE",
-                active_workflow=("SUSPEND" if has_active_workflow else "NONE"),
-            ),
-            confidence=1.0,
-            reason_code="EXPLICIT_FOLLOW_UP_WORKFLOW",
-            evidence=evidence[-20:],
-        )
-
-    @staticmethod
-    def _explicit_read_decision(
-        *,
-        has_active_workflow: bool,
-    ) -> RootDecision:
-        evidence = ["用户文本包含明确且独立的只读查询请求"]
-        return RootDecision(
-            task_relation=("SWITCH_TASK" if has_active_workflow else "NEW_TASK"),
-            route="QUERY",
-            risk="READ_ONLY",
-            context_policy=ContextPolicy(
-                selected_entity="IGNORE",
-                previous_query="IGNORE",
-                result_set="IGNORE",
-                active_workflow=("SUSPEND" if has_active_workflow else "NONE"),
-            ),
-            confidence=1.0,
-            reason_code="EXPLICIT_INDEPENDENT_READ_QUERY",
-            evidence=evidence[-20:],
-        )
-
-    @staticmethod
-    def _clarification_decision(decision: RootDecision, reason_code: str) -> RootDecision:
         return RootDecision(
             task_relation=decision.task_relation,
             route="CLARIFY",
@@ -1508,10 +2093,17 @@ class RootOrchestrator:
                 previous_query="IGNORE",
                 result_set="IGNORE",
                 active_workflow=("SUSPEND" if decision.context_policy.active_workflow != "NONE" else "NONE"),
+                conversation_memory="IGNORE",
             ),
             confidence=decision.confidence,
             reason_code=reason_code,
             evidence=decision.evidence,
+            semantic_plan=decision.semantic_plan,
+            clarification_question=(
+                clarification_question
+                if clarification_question is not None
+                else RootOrchestrator._clarification_question_for_reason(reason_code)
+            ),
             pending_case_relation=decision.pending_case_relation,
             pending_case_reference=decision.pending_case_reference,
         )

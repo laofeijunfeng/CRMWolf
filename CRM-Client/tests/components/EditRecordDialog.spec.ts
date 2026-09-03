@@ -5,6 +5,14 @@ import { defineComponent, h, nextTick } from 'vue'
 import EditRecordDialog from '@/components/dialogs/EditRecordDialog.vue'
 import type { PaymentRecordResponse } from '@/api/payment'
 
+const { confirmDialogMock } = vi.hoisted(() => ({
+  confirmDialogMock: vi.fn(),
+}))
+
+vi.mock('@/utils/confirmDialog', () => ({
+  confirmDialog: confirmDialogMock,
+}))
+
 vi.mock('@/components/ui/dialog', () => {
   const passthrough = (name: string, tag = 'div') => defineComponent({
     name,
@@ -41,6 +49,64 @@ vi.mock('@/components/ui/button', () => ({
     ),
   }),
 }))
+
+vi.mock('@/components/crmwolf', () => {
+  const inputField = defineComponent({
+    name: 'InputField',
+    props: { modelValue: [String, Number], disabled: Boolean, error: String },
+    emits: ['update:modelValue'],
+    setup: (props, { emit, attrs }) => () => h('div', [
+      h('input', {
+        ...attrs,
+        value: props.modelValue ?? '',
+        disabled: props.disabled,
+        'aria-invalid': props.error ? 'true' : undefined,
+        onInput: (event: Event) => emit('update:modelValue', (event.target as HTMLInputElement).value),
+      }),
+      props.error ? h('p', { role: 'alert' }, props.error) : null,
+    ]),
+  })
+
+  const textareaField = defineComponent({
+    name: 'TextareaField',
+    props: { modelValue: [String, Number], disabled: Boolean, error: String },
+    emits: ['update:modelValue'],
+    setup: (props, { emit, attrs }) => () => h('div', [
+      h('textarea', {
+        ...attrs,
+        value: props.modelValue ?? '',
+        disabled: props.disabled,
+        'aria-invalid': props.error ? 'true' : undefined,
+        onInput: (event: Event) => emit('update:modelValue', (event.target as HTMLTextAreaElement).value),
+      }),
+      props.error ? h('p', { role: 'alert' }, props.error) : null,
+    ]),
+  })
+
+  const dateField = defineComponent({
+    name: 'DateField',
+    props: { modelValue: Date, disabled: Boolean, error: String },
+    emits: ['update:modelValue'],
+    setup: (props, { emit, attrs }) => () => h('div', [
+      h('input', {
+        ...attrs,
+        value: props.modelValue instanceof Date && !Number.isNaN(props.modelValue.getTime())
+          ? `${props.modelValue.getFullYear()}-${String(props.modelValue.getMonth() + 1).padStart(2, '0')}-${String(props.modelValue.getDate()).padStart(2, '0')}`
+          : '',
+        disabled: props.disabled,
+        'aria-invalid': props.error ? 'true' : undefined,
+        onInput: (event: Event) => {
+          const value = (event.target as HTMLInputElement).value
+          const [year, month, day] = value.split('-').map(Number)
+          emit('update:modelValue', value === '' ? null : new Date(year, month - 1, day))
+        },
+      }),
+      props.error ? h('p', { role: 'alert' }, props.error) : null,
+    ]),
+  })
+
+  return { InputField: inputField, TextareaField: textareaField, DateField: dateField }
+})
 
 vi.mock('@/components/ui/input', () => ({
   Input: defineComponent({
@@ -86,6 +152,7 @@ const recordFixture = (): PaymentRecordResponse => ({
   record_number: 'REC-2026-001',
   actual_amount: 8800.5,
   payment_date: '2026-07-12',
+  actual_payer_name: '原付款方',
   proof_attachment: 'https://example.com/old-proof.pdf',
   notes: '原备注',
   creator_id: 'u-1',
@@ -109,7 +176,7 @@ describe('EditRecordDialog', () => {
     })
 
     const amountInput = wrapper.get('input[name="actual_amount"]').element as HTMLInputElement
-    const dateInput = wrapper.get('input[name="payment_date"]').element as HTMLInputElement
+    const dateInput = wrapper.get('#edit-record-date input').element as HTMLInputElement
     const proofInput = wrapper.get('input[name="proof_attachment"]').element as HTMLInputElement
     const notesInput = wrapper.get('textarea[name="notes"]').element as HTMLTextAreaElement
 
@@ -119,7 +186,8 @@ describe('EditRecordDialog', () => {
     expect(notesInput.value).toBe('原备注')
 
     await wrapper.get('input[name="actual_amount"]').setValue('9900')
-    await wrapper.get('input[name="payment_date"]').setValue('2026-07-16')
+    await wrapper.get('input[name="actual_payer_name"]').setValue('新的付款方')
+    await wrapper.get('#edit-record-date input').setValue('2026-07-16')
     await wrapper.get('input[name="proof_attachment"]').setValue('https://example.com/new-proof.pdf')
     await wrapper.get('textarea[name="notes"]').setValue('更新备注')
     await wrapper.get('form').trigger('submit')
@@ -128,6 +196,7 @@ describe('EditRecordDialog', () => {
     expect(wrapper.emitted('submit')?.[0]).toEqual([77, {
       actual_amount: 9900,
       payment_date: '2026-07-16',
+      actual_payer_name: '新的付款方',
       proof_attachment: 'https://example.com/new-proof.pdf',
       notes: '更新备注',
     }])
@@ -142,7 +211,7 @@ describe('EditRecordDialog', () => {
     })
 
     await wrapper.get('input[name="actual_amount"]').setValue('-1')
-    await wrapper.get('input[name="payment_date"]').setValue('')
+    await wrapper.get('#edit-record-date input').setValue('')
     await wrapper.get('form').trigger('submit')
     await nextTick()
 
@@ -150,8 +219,32 @@ describe('EditRecordDialog', () => {
     expect(wrapper.text()).toContain('请输入大于 0 的回款金额')
     expect(wrapper.text()).toContain('请选择回款日期')
     expect(wrapper.get('input[name="actual_amount"]').attributes('aria-invalid')).toBe('true')
-    expect(wrapper.get('input[name="payment_date"]').attributes('aria-invalid')).toBe('true')
-    expect(wrapper.findAll('[role="alert"]')).toHaveLength(2)
+    expect(wrapper.get('#edit-record-date input').attributes('aria-invalid')).toBe('true')
+    expect(wrapper.findAll('[role="alert"]')).toHaveLength(3)
+    expect(wrapper.get('.edit-record-dialog__error-summary').text()).toContain('请先修正以下字段：')
+  })
+
+  it('protects modified content before closing and does not add a guard for untouched content', async () => {
+    confirmDialogMock.mockResolvedValue(false)
+    const wrapper = mount(EditRecordDialog, {
+      props: {
+        open: true,
+        record: recordFixture(),
+      },
+    })
+
+    await wrapper.get('textarea[name="notes"]').setValue('新的备注')
+    await wrapper.get('button[type="button"]').trigger('click')
+    expect(confirmDialogMock).toHaveBeenCalledWith(
+      '已修改回款记录，关闭后这些修改不会保存。确定关闭吗？',
+      '放弃本次修改？',
+      { variant: 'destructive', confirmText: '放弃并关闭' },
+    )
+    expect(wrapper.emitted('update:open')).toBeUndefined()
+
+    confirmDialogMock.mockResolvedValue(true)
+    await wrapper.get('button[type="button"]').trigger('click')
+    expect(wrapper.emitted('update:open')).toEqual([[false]])
   })
 
   it('uses shadcn-vue V2 primitives without unsafe TypeScript escapes', () => {
@@ -159,8 +252,7 @@ describe('EditRecordDialog', () => {
 
     expect(source).toContain('@/components/ui/dialog')
     expect(source).toContain('@/components/ui/button')
-    expect(source).toContain('@/components/ui/input')
-    expect(source).toContain('@/components/ui/textarea')
+    expect(source).toContain('@/components/crmwolf')
     expect(source).toContain('DialogDescription')
     expect(source).toContain('variables-v2.scss')
     expect(source).not.toContain('as any')

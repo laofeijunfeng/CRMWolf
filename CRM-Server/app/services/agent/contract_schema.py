@@ -154,6 +154,7 @@ def build_agent_contract_schema_bundle() -> dict[str, JsonValue]:
             "AgentChatInput": _adapter_schema(TypeAdapter(AgentChatInput)),
         }
     )
+    schemas = dict(sorted(schemas.items()))
     return {
         "bundle_version": AGENT_CONTRACT_SCHEMA_BUNDLE_VERSION,
         "schemas": schemas,

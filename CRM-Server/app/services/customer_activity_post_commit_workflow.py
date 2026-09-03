@@ -332,7 +332,7 @@ class CustomerActivityPostCommitWorkflow:
                     "skip_reason": CustomerActivityPostCommitSkipReason.ACTIVITY_NOT_FOUND,
                     "events": [{"event": "activity_not_found", "activity_id": state["activity_id"]}],
                 }
-            actual_revision = int(activity.post_commit_revision or 1)
+            actual_revision = int(activity.activity_revision or 1)
             if actual_revision != state["expected_activity_revision"]:
                 return {
                     "skip_reason": CustomerActivityPostCommitSkipReason.SUPERSEDED_ACTIVITY_REVISION,
@@ -1079,7 +1079,7 @@ def _activity_payload(activity: CustomerActivity) -> dict[str, Any]:
         "id": activity.id,
         "public_id": getattr(activity, "public_id", None),
         "team_id": activity.team_id,
-        "post_commit_revision": int(activity.post_commit_revision or 1),
+        "activity_revision": int(activity.activity_revision or 1),
         "customer_id": activity.customer_id,
         "owner_id": activity.owner_id,
         "creator_id": activity.creator_id,

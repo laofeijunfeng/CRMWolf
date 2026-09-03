@@ -11,7 +11,7 @@
  * License 发放等动作由对应业务页面或审批中心 footer 承载。
  */
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import type { PropType } from 'vue'
 import { toast } from 'vue-sonner'
 import {
@@ -30,6 +30,7 @@ import ApprovalStatusBadge from './ApprovalStatusBadge.vue'
 import ApprovalProcessStepper from './ApprovalProcessStepper.vue'
 import ErrorState from './ErrorState.vue'
 import { Button } from '@/components/ui/button'
+import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 import {
   Empty,
   EmptyContent,
@@ -103,12 +104,15 @@ const store = useApprovalStore()
 
 // ===== 本地 UI 状态（必须 ref<Type>(...) 显式类型）=====
 const detail = ref<ApprovalDetail | null>(null)
-const loadError = ref<boolean>(false)
+const loadError = ref<FeedbackError | null>(null)
+const actionError = ref<FeedbackError | null>(null)
 const notFound = ref<boolean>(false)
 const actionPending = ref<boolean>(false)
 const rejectDialogVisible = ref<boolean>(false)
 const withdrawDialogVisible = ref<boolean>(false)
 const rejectForm = ref<{ reason: string }>({ reason: '' })
+const rejectReasonError = ref<string>('')
+const rejectReasonInput = ref<{ focus?: () => void } | null>(null)
 const conflictNotice = ref<string>('')
 const detailRequestId = ref<number>(0)
 
@@ -128,6 +132,27 @@ const submitPermissionCodes = computed<string[]>(() => SUBMIT_PERMISSIONS[props.
 const approvalTitle = computed<string>(() =>
   props.title.trim().length > 0 ? props.title.trim() : detail.value?.flow_name ?? '审批进度'
 )
+const approvalObjectLabel = computed<string>(() => {
+  const name = detail.value?.entity_name?.trim()
+  const number = detail.value?.application_number?.trim()
+  if (name !== undefined && name.length > 0 && number !== undefined && number.length > 0) {
+    return `${name}（${number}）`
+  }
+  return name !== undefined && name.length > 0
+    ? name
+    : number !== undefined && number.length > 0
+      ? number
+      : approvalTitle.value
+})
+const approvalStatusLabel = computed<string>(() => {
+  const map: Record<ApprovalDetail['status'], string> = {
+    PENDING: '审批中',
+    APPROVED: '已通过',
+    REJECTED: '已驳回',
+    CANCELLED: '已撤回'
+  }
+  return status.value ? map[status.value] : '未知状态'
+})
 
 // ===== 错误识别：仅匹配 axios 风格 error.response.status，不用 any =====
 const isAxiosStatus = (err: unknown, code: number): boolean => {
@@ -135,12 +160,21 @@ const isAxiosStatus = (err: unknown, code: number): boolean => {
   return typeof r?.status === 'number' && r.status === code
 }
 
+const focusRejectReason = (): void => {
+  const input = rejectReasonInput.value
+  if (input && typeof input.focus === 'function') {
+    input.focus()
+    return
+  }
+  document.querySelector<HTMLElement>('#reject-reason')?.focus()
+}
+
 // ===== 方法（必须参数和返回类型）=====
 const loadDetail = async (): Promise<void> => {
   const requestId = detailRequestId.value + 1
   detailRequestId.value = requestId
 
-  loadError.value = false
+  loadError.value = null
   notFound.value = false
   conflictNotice.value = ''
   detail.value = null
@@ -154,13 +188,14 @@ const loadDetail = async (): Promise<void> => {
     if (isAxiosStatus(err, 404)) {
       notFound.value = true
     } else {
-      loadError.value = true
+      loadError.value = toFeedbackError(err, '审批信息')
     }
   }
 }
 
 const handleSubmit = async (): Promise<void> => {
   if (actionPending.value || isLocked.value) return
+  actionError.value = null
   actionPending.value = true
   try {
     await store.submitEntity(props.entityType, props.entityId)
@@ -168,6 +203,7 @@ const handleSubmit = async (): Promise<void> => {
     emit('submitted')
     await loadDetail()
   } catch (error: unknown) {
+    actionError.value = toFeedbackError(error, '提交审批', { operation: 'write' })
     handleApiError(error, '提交审批')
   } finally {
     actionPending.value = false
@@ -177,6 +213,7 @@ const handleSubmit = async (): Promise<void> => {
 const handleApprove = async (): Promise<void> => {
   if (actionPending.value || isLocked.value || !isPending.value) return
   if (detail.value == null) return
+  actionError.value = null
   actionPending.value = true
   try {
     const updatedDetail = await store.approveEntity(
@@ -192,8 +229,10 @@ const handleApprove = async (): Promise<void> => {
       if (!isPending.value) {
         conflictNotice.value = '该审批已由他人处理，无需重复操作'
       }
+    } else {
+      actionError.value = toFeedbackError(err, '审批操作', { operation: 'write' })
+      handleApiError(err, '审批操作')
     }
-    // 其他错误：拦截器已 toast，不抛
   } finally {
     actionPending.value = false
   }
@@ -201,17 +240,29 @@ const handleApprove = async (): Promise<void> => {
 
 const openRejectDialog = (): void => {
   // 不在此处重置 reason：C-DSG-7 条8 冲突后保留已输入
+  rejectReasonError.value = ''
   rejectDialogVisible.value = true
+  void nextTick(focusRejectReason)
+}
+
+const handleRejectDialogOpenChange = (open: boolean): void => {
+  if (!open && actionPending.value) return
+  rejectDialogVisible.value = open
+  if (open) void nextTick(focusRejectReason)
 }
 
 const confirmReject = async (): Promise<void> => {
   if (actionPending.value || isLocked.value) return
   // 同步必填守卫（条2）：action 入口必须先校验
   if (!rejectForm.value.reason.trim()) {
+    rejectReasonError.value = '请填写驳回理由'
     toast.warning('请填写驳回理由，提交人将据此修改')
+    void nextTick(focusRejectReason)
     return
   }
+  rejectReasonError.value = ''
   if (detail.value == null) return
+  actionError.value = null
   actionPending.value = true
   try {
     const updatedDetail = await store.approveEntity(
@@ -231,8 +282,11 @@ const confirmReject = async (): Promise<void> => {
       if (!isPending.value) {
         conflictNotice.value = '该审批已由他人处理，无需重复操作'
       }
+    } else {
+      actionError.value = toFeedbackError(err, '驳回审批', { operation: 'write' })
+      handleApiError(err, '驳回审批')
+      void nextTick(focusRejectReason)
     }
-    // 其他错误：拦截器已 toast，不抛、不关弹窗、不清理由
   } finally {
     actionPending.value = false
   }
@@ -244,6 +298,7 @@ const openWithdrawDialog = (): void => {
 
 const confirmWithdraw = async (): Promise<void> => {
   if (actionPending.value || isLocked.value || !isPending.value) return
+  actionError.value = null
   actionPending.value = true
   try {
     await store.cancelEntity(props.entityType, props.entityId)
@@ -252,8 +307,18 @@ const confirmWithdraw = async (): Promise<void> => {
     withdrawDialogVisible.value = false
     emit('withdrawn')
     await loadDetail()
-  } catch {
-    // 错误 toast 由拦截器统一处理
+  } catch (error: unknown) {
+    if (isAxiosStatus(error, 409)) {
+      withdrawDialogVisible.value = false
+      toast.warning('该审批已被他人处理，已为你刷新最新状态')
+      await loadDetail()
+      if (!isPending.value) {
+        conflictNotice.value = '该审批已由他人处理，无需重复操作'
+      }
+    } else {
+      actionError.value = toFeedbackError(error, '撤回审批', { operation: 'write' })
+      handleApiError(error, '撤回审批')
+    }
   } finally {
     actionPending.value = false
   }
@@ -290,7 +355,7 @@ watch(
 <template>
   <div class="approval-process-generic">
     <!-- 加载骨架（C-DSG-4 Loading） -->
-    <div v-if="loadError === false && notFound === false && detail === null" class="space-y-2">
+    <div v-if="loadError === null && notFound === false && detail === null" class="space-y-2">
       <Skeleton class="h-8 w-full" />
       <Skeleton class="h-20 w-full" />
     </div>
@@ -298,11 +363,12 @@ watch(
     <!-- 错误态（C-DSG-4 Error） -->
     <ErrorState
       v-else-if="loadError && !notFound"
-      title="审批信息加载失败"
-      description="可点击下方按钮重新加载，若持续失败请联系管理员"
+      :variant="loadError.variant ?? 'error'"
+      :title="loadError.title"
+      :description="loadError.description"
     >
       <template #action>
-        <Button data-testid="reload-detail-btn" @click="loadDetail">
+        <Button v-if="loadError.retryable !== false" data-testid="reload-detail-btn" :loading="store.detailLoading" @click="loadDetail">
           重新加载
         </Button>
       </template>
@@ -326,9 +392,9 @@ watch(
           size="sm"
           data-testid="submit-approval-btn"
           :disabled="actionPending"
+          :loading="actionPending"
           @click="handleSubmit"
         >
-          <Loader2 v-if="actionPending" class="mr-2 h-4 w-4 animate-spin" />
           提交审批
         </Button>
       </EmptyContent>
@@ -347,6 +413,13 @@ watch(
         <AlertTriangle class="h-4 w-4" />
         <span>{{ conflictNotice }}</span>
       </div>
+
+      <ErrorState
+        v-if="actionError"
+        :variant="actionError.variant ?? 'error'"
+        :title="actionError.title"
+        :description="actionError.description"
+      />
 
       <!-- 当前节点意见 -->
       <div v-if="detail?.current_node_name && records.length === 0" class="approval-process-generic__current-node">
@@ -370,9 +443,9 @@ watch(
           size="sm"
           data-testid="withdraw-btn"
           :disabled="actionPending || isLocked"
+          :loading="actionPending"
           @click="openWithdrawDialog"
         >
-          <Loader2 v-if="actionPending" class="mr-2 h-4 w-4 animate-spin" />
           撤回审批
         </Button>
         <Button
@@ -380,9 +453,9 @@ watch(
           size="sm"
           data-testid="resubmit-btn"
           :disabled="actionPending || isLocked"
+          :loading="actionPending"
           @click="handleResubmitAction"
         >
-          <Loader2 v-if="actionPending" class="mr-2 h-4 w-4 animate-spin" />
           {{ isCancelled ? '重新提交审批' : '修改并重新提交' }}
         </Button>
         <Button
@@ -390,9 +463,9 @@ watch(
           size="sm"
           data-testid="approve-btn"
           :disabled="actionPending || isLocked"
+          :loading="actionPending"
           @click="handleApprove"
         >
-          <Loader2 v-if="actionPending" class="mr-2 h-4 w-4 animate-spin" />
           同意
         </Button>
         <Button
@@ -403,14 +476,13 @@ watch(
           :disabled="actionPending || isLocked"
           @click="openRejectDialog"
         >
-          <Loader2 v-if="actionPending" class="mr-2 h-4 w-4 animate-spin" />
           驳回
         </Button>
 
       </div>
 
       <!-- 驳回弹窗：reason 必填，C-DSG-7 条2 -->
-      <Dialog v-model:open="rejectDialogVisible">
+      <Dialog :open="rejectDialogVisible" @update:open="handleRejectDialogOpenChange">
         <DialogContent class="sm:max-w-[480px]">
           <DialogHeader>
             <DialogTitle>驳回审批</DialogTitle>
@@ -422,27 +494,40 @@ watch(
           <div class="space-y-4">
             <Textarea
               v-model="rejectForm.reason"
+              ref="rejectReasonInput"
+              id="reject-reason"
               data-testid="reject-reason"
               placeholder="请填写驳回理由，提交人将据此修改"
               :rows="4"
               :maxlength="500"
+              :aria-invalid="rejectReasonError.length > 0 ? 'true' : undefined"
+              :aria-describedby="rejectReasonError.length > 0 ? 'reject-reason-error' : undefined"
+              @update:model-value="rejectReasonError = ''"
             />
+            <p
+              v-if="rejectReasonError"
+              id="reject-reason-error"
+              class="text-sm text-destructive"
+              role="alert"
+            >
+              {{ rejectReasonError }}
+            </p>
             <p class="text-sm text-muted-foreground text-right">
               {{ rejectForm.reason.length }} / 500
             </p>
           </div>
 
           <DialogFooter>
-            <Button variant="ghost" @click="rejectDialogVisible = false">
+            <Button variant="ghost" :disabled="actionPending" @click="handleRejectDialogOpenChange(false)">
               取消
             </Button>
             <Button
               variant="destructive"
               data-testid="reject-confirm-btn"
               :disabled="!rejectForm.reason.trim() || actionPending || isLocked"
+              :loading="actionPending"
               @click="confirmReject"
             >
-              <Loader2 v-if="actionPending" class="mr-2 h-4 w-4 animate-spin" />
               确定
             </Button>
           </DialogFooter>
@@ -455,7 +540,7 @@ watch(
           <AlertDialogHeader>
             <AlertDialogTitle>撤回审批</AlertDialogTitle>
             <AlertDialogDescription>
-              撤回后审批中止，需重新提交。确定撤回？
+              确定撤回“{{ approvalObjectLabel }}”的审批吗？当前状态：{{ approvalStatusLabel }}。撤回后审批将终止，需要修改后重新提交。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -464,9 +549,10 @@ watch(
             </AlertDialogCancel>
             <AlertDialogAction
               :disabled="actionPending"
+              :loading="actionPending"
               @click="confirmWithdraw"
             >
-              <Loader2 v-if="actionPending" class="mr-2 h-4 w-4 animate-spin" />
+              <Loader2 v-if="actionPending" class="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
               确定撤回
             </AlertDialogAction>
           </AlertDialogFooter>

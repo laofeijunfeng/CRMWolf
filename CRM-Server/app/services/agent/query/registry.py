@@ -51,6 +51,26 @@ class CustomerContextRequest(QueryContractModel):
         return self
 
 
+class FollowUpTaskDetailRequest(QueryContractModel):
+    """A detail lookup bound to a server-issued follow-up task reference."""
+
+    task_ref: EntityRef
+
+    @model_validator(mode="after")
+    def validate_task_ref(self) -> Self:
+        if self.task_ref.resource != "follow_up_task":
+            raise ValueError("task_ref must reference a follow-up task")
+        return self
+
+
+class FollowUpTaskDetailReader(Protocol):
+    async def read(
+        self,
+        request: FollowUpTaskDetailRequest,
+        context: AgentToolContext,
+    ) -> CRMQueryResult: ...
+
+
 class CustomerContextCitation(QueryContractModel):
     """One evidence reference returned by Customer Intelligence."""
 
@@ -109,6 +129,7 @@ class CRMReadToolSpec:
     is_write: Literal[False]
     resource: CRMResource | None
     runner: CRMReadToolRunner
+    authority_kind: Literal["query", "customer_context", "task_detail"] = "query"
 
 
 class CRMReadToolInputError(ValueError):
@@ -122,9 +143,11 @@ class CRMReadToolRegistry:
         self,
         executor: CRMQueryExecutor,
         customer_context_reader: CustomerContextReader,
+        follow_up_task_detail_reader: FollowUpTaskDetailReader | None = None,
     ) -> None:
         self._executor = executor
         self._customer_context_reader = customer_context_reader
+        self._follow_up_task_detail_reader = follow_up_task_detail_reader
         self._catalog = CRMQueryCatalog()
         self._tools = self._build_tools()
         if self.write_tool_count != 0:
@@ -230,6 +253,28 @@ class CRMReadToolRegistry:
                 runner=_query_runner,
             )
 
+        if self._follow_up_task_detail_reader is not None:
+
+            async def _follow_up_task_detail_runner(
+                context: AgentToolContext,
+                model: BaseModel,
+            ) -> CRMQueryResult:
+                request = FollowUpTaskDetailRequest.model_validate(model.model_dump(mode="json"))
+                return await self._follow_up_task_detail_reader.read(request, context)
+
+            tools["get_follow_up_task_detail"] = CRMReadToolSpec(
+                name="get_follow_up_task_detail",
+                description=(
+                    "读取一个已由服务端确认的跟进任务详情，包括当前状态、完成时间和取消时间。"
+                    "只能使用 query_follow_up_tasks 返回或 Root 传入的 task_ref；这是只读查询，不会改变任务状态。"
+                ),
+                input_model=FollowUpTaskDetailRequest,
+                is_write=False,
+                resource=None,
+                authority_kind="task_detail",
+                runner=_follow_up_task_detail_runner,
+            )
+
         async def _customer_context_runner(
             context: AgentToolContext,
             model: BaseModel,
@@ -243,6 +288,7 @@ class CRMReadToolRegistry:
             input_model=CustomerContextRequest,
             is_write=False,
             resource=None,
+            authority_kind="customer_context",
             runner=_customer_context_runner,
         )
         return tools

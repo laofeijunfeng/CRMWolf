@@ -114,8 +114,13 @@ class CRMQuerySpec(QueryContractModel):
 class GroundedFact(QueryContractModel):
     """A user-visible fact tied to a deterministic or cited source."""
 
-    fact_id: str = Field(min_length=1, max_length=128)
-    label: str = Field(min_length=1, max_length=200)
+    # ``completed_work`` is a closed, server-owned HTTP contract and permits
+    # fact ids up to 512 characters and titles up to 500 characters. Keep the
+    # normalized query contract at the same boundary: rejecting a valid
+    # returned fact here incorrectly turns an upstream data-shape problem
+    # into a QuerySpec correction.
+    fact_id: str = Field(min_length=1, max_length=512)
+    label: str = Field(min_length=1, max_length=500)
     value: JsonValue
     source: Literal["CRM_API", "CUSTOMER_INTELLIGENCE", "DERIVED"]
     source_ref: str | None = Field(default=None, min_length=1, max_length=512)

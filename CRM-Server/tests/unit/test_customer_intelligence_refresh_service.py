@@ -928,6 +928,103 @@ def test_customer_intelligence_refresh_service_recovers_expired_lease_without_st
         engine.dispose()
 
 
+
+def test_customer_intelligence_refresh_service_ignores_failed_run_behind_newer_success():
+    """A historical failed run must not break recovery or overwrite a newer success."""
+    engine = create_engine(
+        "sqlite:///:memory:",
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            Customer.__table__,
+            CustomerProfileProjectionVersion.__table__,
+            CustomerProfileCurrent.__table__,
+            CustomerIntelligenceRun.__table__,
+            AgentAsyncOperation.__table__,
+            AgentAsyncOperationEvent.__table__,
+        ],
+    )
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    run_service = CustomerIntelligenceRunService()
+    old_event = _business_event()
+    new_event = CustomerIntelligenceEvent(
+        event_key="newer-event-101",
+        trigger_type=old_event.trigger_type,
+        tenant_id=old_event.tenant_id,
+        team_id=old_event.team_id,
+        customer_id=old_event.customer_id,
+        occurred_at=business_now() + timedelta(minutes=1),
+        source=old_event.source,
+        summary="更新后的客户事件",
+        payload=old_event.payload,
+        actor_id=old_event.actor_id,
+    )
+    db.add(Customer(id=101, team_id=2, account_name="有更新的客户", city="广州", creator_id="9"))
+    db.add_all(
+        [
+            CustomerIntelligenceRun(
+                id=300,
+                run_key="failed-old-run-101",
+                request_id="failed-old-request-101",
+                event_key=old_event.event_key,
+                event_json=old_event.to_dict(),
+                tenant_id=2,
+                team_id=2,
+                customer_id=101,
+                actor_id="9",
+                trigger_type=old_event.trigger_type,
+                scope="partial",
+                status=CustomerIntelligenceRunStatus.FAILED,
+                attempt_count=3,
+                max_attempts=3,
+                error_message="旧运行失败",
+            ),
+            CustomerIntelligenceRun(
+                id=301,
+                run_key="success-new-run-101",
+                request_id="success-new-request-101",
+                event_key=new_event.event_key,
+                event_json=new_event.to_dict(),
+                tenant_id=2,
+                team_id=2,
+                customer_id=101,
+                actor_id="9",
+                trigger_type=new_event.trigger_type,
+                scope="partial",
+                status=CustomerIntelligenceRunStatus.SUCCESS,
+                attempt_count=1,
+                max_attempts=3,
+                route="refresh_profile",
+            ),
+        ]
+    )
+    db.add(CustomerProfileCurrent(team_id=2, customer_id=101, profile_status="READY", active_run_id=None))
+    db.commit()
+
+    service = CustomerIntelligenceRefreshService(
+        profile_workflow=FakeGraphService(),
+        event_service=FakeEventService(),
+        run_service=run_service,
+        profile_projection_service=CustomerProfileProjectionService(),
+    )
+    try:
+        result = service.recover_stale_runtime_state(db, team_id=2)
+        db.commit()
+        current = db.query(CustomerProfileCurrent).filter(
+            CustomerProfileCurrent.team_id == 2,
+            CustomerProfileCurrent.customer_id == 101,
+        ).one()
+        assert result["failed_customers"] == 0
+        assert current.profile_status == "READY"
+        assert current.active_run_id is None
+    finally:
+        db.close()
+        engine.dispose()
+
 def test_customer_intelligence_refresh_service_does_not_recover_live_lease():
     engine = create_engine(
         "sqlite:///:memory:",

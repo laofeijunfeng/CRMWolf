@@ -108,6 +108,9 @@ class PaymentRecord(Base):
 
     # 新增：记录编号
     record_number = Column(String(50), unique=True, nullable=False, comment="回款记录编号（系统自动生成）")
+    # 客户端重试标识：仅用于回款登记写入幂等，普通用户不可见。
+    idempotency_key = Column(String(128), nullable=True, comment="回款登记幂等键")
+    idempotency_fingerprint = Column(String(64), nullable=True, comment="回款登记请求指纹")
 
     payment_plan_id = Column(BigInteger, ForeignKey('crm_contract_payment_plans.id', ondelete='CASCADE'), nullable=False, comment="关联的回款计划ID")
     deal_journey_id = Column(BigInteger, ForeignKey('crm_customer_deal_journeys.id', ondelete='SET NULL'), nullable=True, comment="成交旅程ID（系统自动关联）")
@@ -132,6 +135,13 @@ class PaymentRecord(Base):
     confirmed_time = Column(DateTime, comment="确认入账时间")
     confirmation_notes = Column(Text, comment="确认备注")
     created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
+    updated_time = Column(
+        DateTime,
+        nullable=False,
+        default=business_now,
+        onupdate=business_now,
+        comment="最后更新时间",
+    )
 
     # 审批关联
     approval_id = Column(BigInteger, ForeignKey('crm_contract_approvals.id', ondelete='SET NULL'), nullable=True, comment="审批实例ID")
@@ -143,6 +153,7 @@ class PaymentRecord(Base):
     __table_args__ = (
         Index('idx_payment_record_team_id', 'team_id'),
         Index('idx_payment_record_number', 'record_number'),
+        Index('uq_payment_record_idempotency', 'team_id', 'idempotency_key', unique=True),
         Index('idx_payment_record_deal_journey_id', 'deal_journey_id'),
     )
 

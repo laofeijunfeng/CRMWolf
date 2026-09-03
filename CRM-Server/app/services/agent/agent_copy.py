@@ -40,8 +40,15 @@ def no_pending_confirmation() -> str:
     return "好嘞，目前没有等待确认的操作。"
 
 
-def service_error(message: str) -> str:
-    return f"处理时遇到点问题：{message}"
+def service_error(message: str | None = None) -> str:
+    """Return safe copy for an unexpected Agent exception.
+
+    ``message`` is retained for call-site compatibility, but exception text
+    can contain provider, SQL, or Python implementation details.  Those belong
+    in server logs, never in the persisted Agent message shown to users.
+    """
+    del message
+    return "这次没处理成，请稍后再试。"  # noqa: RUF001
 
 
 def im_identity_missing(provider_label: str = "IM") -> str:

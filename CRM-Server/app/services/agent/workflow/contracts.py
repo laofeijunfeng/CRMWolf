@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Annotated, Literal, Self, TypeAlias
+from typing import TYPE_CHECKING, Annotated, Literal, Self, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, model_serializer, model_validator
 
 from app.services.agent.durable_work_contracts import AgentDurableWorkReceipt  # noqa: TC001
 from app.services.agent.principal import AgentPrincipal  # noqa: TC001
 from app.services.agent.query.schemas import EntityRef  # noqa: TC001
+from app.services.agent.semantic_plan import AgentSemanticPlan  # noqa: TC001
+
+if TYPE_CHECKING:
+    from pydantic.functional_serializers import SerializerFunctionWrapHandler
 
 
 class WorkflowContractModel(BaseModel):
@@ -181,9 +185,35 @@ class WorkflowSupplement(WorkflowContractModel):
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
 
 
+class WorkflowResolvedCustomer(WorkflowContractModel):
+    """Customer identity cached in the Workflow checkpoint after resolution.
+
+    ``lookup_name`` is only a comparison hint for deciding whether a later
+    supplement still refers to this customer. Authorization and existence are
+    revalidated by the CRM resolver before the next plan is built.
+    """
+
+    customer_id: str = Field(pattern=r"^cus_[A-Za-z0-9_-]+$", min_length=5, max_length=128)
+    customer_name: str = Field(min_length=1, max_length=255)
+    lookup_name: str | None = Field(default=None, min_length=1, max_length=255)
+
+
 class WorkflowTextStart(WorkflowContractModel):
     kind: Literal["text"]
     text: str = Field(min_length=1, max_length=20_000)
+    # The Root has already understood this turn.  The Workflow may use this
+    # hint for consistency, but still owns detailed field extraction and CRM
+    # command validation.
+    semantic_plan: AgentSemanticPlan | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_without_empty_plan(
+        self, handler: SerializerFunctionWrapHandler
+    ) -> dict[str, object]:
+        payload = handler(self)
+        if self.semantic_plan is None:
+            payload.pop("semantic_plan", None)
+        return payload
 
 
 class WorkflowResourceStart(WorkflowContractModel):
@@ -192,8 +222,16 @@ class WorkflowResourceStart(WorkflowContractModel):
     resource_id: str = Field(pattern=r"^fuc_[0-9a-f]{32}$")
 
 
+class WorkflowOpportunitySuggestionStart(WorkflowContractModel):
+    """Start a customer-scoped opportunity action from a durable suggestion."""
+
+    kind: Literal["opportunity_suggestion"]
+    action: Literal["CREATE_OPPORTUNITY", "MOVE_OPPORTUNITY_STAGE", "CANCEL"]
+    job_public_id: str = Field(pattern=r"^cosj_[A-Za-z0-9_-]+$", min_length=6, max_length=128)
+
+
 WorkflowStart: TypeAlias = Annotated[
-    WorkflowTextStart | WorkflowResourceStart,
+    WorkflowTextStart | WorkflowResourceStart | WorkflowOpportunitySuggestionStart,
     Field(discriminator="kind"),
 ]
 
@@ -205,6 +243,7 @@ class WorkflowTurnInput(WorkflowContractModel):
     start: WorkflowStart
     principal: AgentPrincipal
     selected_entity: EntityRef | None = None
+    resolved_customer: WorkflowResolvedCustomer | None = None
     supplements: list[WorkflowSupplement] = Field(default_factory=list, max_length=20)
 
 
@@ -244,6 +283,20 @@ class WorkflowCancelledResult(WorkflowContractModel):
     workflow_ref: WorkflowRef
     assistant_text: str = Field(min_length=1, max_length=10_000)
     progress: WorkflowProgress
+
+
+class WorkflowSkippedResult(WorkflowContractModel):
+    """A successful no-op when the target has already changed or been handled.
+
+    Skips are intentionally not user-facing business messages.  The progress
+    snapshot remains available to the UI and audit layers, while the composer
+    renders no assistant text.
+    """
+
+    status: Literal["SKIPPED"] = "SKIPPED"
+    workflow_ref: WorkflowRef
+    progress: WorkflowProgress
+    reason: str = Field(min_length=1, max_length=2_000)
 
 
 class WorkflowCommandBinding(WorkflowContractModel):
@@ -316,13 +369,29 @@ class WorkflowActionPlan(WorkflowContractModel):
     execution_authorization: Literal["CONFIRMATION_REQUIRED", "AUTO_EXECUTE_AUTHORIZED", "RESUME_AUTHORIZED"]
     risk_level: Literal["LOW", "MEDIUM", "HIGH"] | None = None
     authorization_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
-    commands: list[WorkflowCommand] = Field(min_length=1, max_length=20)
+    commands: list[WorkflowCommand] = Field(default_factory=list, max_length=20)
+    terminal_outcome: Literal["CANCELLED", "SKIPPED"] | None = None
     interaction: WorkflowInteraction | None = None
-    completed_text: str = Field(min_length=1, max_length=10_000)
-    cancelled_text: str = Field(min_length=1, max_length=10_000)
+    completed_text: str = Field(default="", max_length=10_000)
+    cancelled_text: str = Field(default="", max_length=10_000)
+    terminal_reason: str | None = Field(default=None, max_length=2_000)
 
     @model_validator(mode="after")
     def validate_command_order(self) -> Self:
+        if self.terminal_outcome in {"CANCELLED", "SKIPPED"}:
+            if self.commands or self.interaction is not None:
+                raise ValueError("terminal no-op plans cannot carry commands or interactions")
+            if self.execution_authorization != "RESUME_AUTHORIZED":
+                raise ValueError("terminal no-op plans require resume authorization")
+            if self.terminal_outcome == "CANCELLED" and not self.cancelled_text.strip():
+                raise ValueError("cancelled plans require cancelled text")
+            if self.terminal_outcome == "SKIPPED" and not self.terminal_reason:
+                raise ValueError("skipped plans require a terminal reason")
+            return self
+        if not self.commands:
+            raise ValueError("non-terminal Workflow plans require at least one command")
+        if not self.completed_text.strip() or not self.cancelled_text.strip():
+            raise ValueError("non-terminal Workflow plans require terminal texts")
         if self.execution_authorization == "CONFIRMATION_REQUIRED":
             if self.interaction is None or self.interaction.interaction_type != "confirmation":
                 raise ValueError("confirmation-authorized plans require a confirmation interaction")
@@ -383,6 +452,7 @@ WorkflowResult: TypeAlias = Annotated[
     WorkflowWaitingResult
     | WorkflowCompletedResult
     | WorkflowCancelledResult
+    | WorkflowSkippedResult
     | WorkflowFailedResult
     | WorkflowReplayResult,
     Field(discriminator="status"),

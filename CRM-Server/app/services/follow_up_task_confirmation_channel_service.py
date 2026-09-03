@@ -1368,9 +1368,7 @@ class FollowUpTaskConfirmationChannelService:
     def _assistant_follow_up_prompt(resolved: bool) -> str | None:
         if resolved:
             return None
-        return (
-            "我还不能判断这项跟进是已完成、延期、取消, 还是先保留。请直接回复例如: 已完成、先放着、不管了、下周五再说。"
-        )
+        return "我还不能判断这项跟进是否已完成。请直接回复例如: 已完成、先放着或不管了。"
 
     def _prompt_interaction_for_case_payload(self, case_payload: dict[str, Any], prompt: str) -> dict[str, object]:
         case_public_id = str(case_payload["public_id"])

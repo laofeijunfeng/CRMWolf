@@ -4,6 +4,8 @@ from sqlalchemy.orm import contains_eager, joinedload
 from typing import Any, Dict, Optional, List, Tuple
 from datetime import date, datetime
 from decimal import Decimal
+import hashlib
+import json
 
 from app.models.payment import PaymentPlan, PaymentRecord, PaymentPlanStatus, PaymentConfirmationStatus
 from app.models.contract import Contract, ContractStatus, PaymentStatus
@@ -432,7 +434,38 @@ class PaymentPlanCRUD:
         return plans
 
 
+class PaymentRecordIdempotencyConflict(ValueError):
+    """同一幂等键被用于不同的回款登记请求。"""
+
+
+class PaymentRecordIdempotentReplay(ValueError):
+    """并发请求已完成同一回款登记，调用方应直接返回已有记录。"""
+
+    def __init__(self, record: PaymentRecord):
+        super().__init__("回款登记已完成")
+        self.record = record
+
+
+def payment_record_request_fingerprint(plan_id: int, obj_in: PaymentRecordCreate) -> str:
+    """生成稳定的回款登记请求指纹，避免重试时重复写入或错用幂等键。"""
+    payload = {"plan_id": plan_id, **obj_in.model_dump(mode="json")}
+    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 class PaymentRecordCRUD:
+    def get_by_idempotency_key(
+        self, db: Session, team_id: int, idempotency_key: str
+    ) -> Optional[PaymentRecord]:
+        return (
+            db.query(PaymentRecord)
+            .filter(
+                PaymentRecord.team_id == team_id,
+                PaymentRecord.idempotency_key == idempotency_key,
+            )
+            .first()
+        )
+
     def get_by_id(self, db: Session, record_id: int, team_id: Optional[int] = None) -> Optional[PaymentRecord]:
         query = db.query(PaymentRecord).filter(PaymentRecord.id == record_id)
         if team_id is not None:
@@ -706,20 +739,61 @@ class PaymentRecordCRUD:
 
         return records, total
     
-    def create(self, db: Session, plan_id: int, obj_in: PaymentRecordCreate, creator_id: str, creator_name: str, team_id: int) -> PaymentRecord:
+    def create(
+        self,
+        db: Session,
+        plan_id: int,
+        obj_in: PaymentRecordCreate,
+        creator_id: str,
+        creator_name: str,
+        team_id: int,
+        idempotency_key: Optional[str] = None,
+    ) -> PaymentRecord:
         from app.crud.user import user_crud
         from app.crud.customer import customer_crud
         from app.services.operation_log_service import operation_log_service
 
-        plan = db.query(PaymentPlan).filter(PaymentPlan.id == plan_id).first()
+        fingerprint = payment_record_request_fingerprint(plan_id, obj_in)
+        if idempotency_key:
+            existing = self.get_by_idempotency_key(db, team_id, idempotency_key)
+            if existing:
+                if existing.idempotency_fingerprint != fingerprint:
+                    raise PaymentRecordIdempotencyConflict("幂等键已用于其他回款登记请求")
+                return existing
+
+        # 锁住计划及其已有记录，保证并发登记不能同时通过金额校验。
+        plan = (
+            db.query(PaymentPlan)
+            .filter(PaymentPlan.id == plan_id, PaymentPlan.team_id == team_id)
+            .with_for_update()
+            .first()
+        )
         if not plan:
             raise ValueError("回款计划不存在")
 
-        total_paid = sum(float(r.actual_amount) for r in plan.payment_records)
-        planned = float(plan.planned_amount)
+        # 计划行锁释放前再次检查幂等键。并发请求可能在第一次查询时看不到
+        # 已提交结果，但等待计划锁后必须复用第一笔记录，不能因金额已占满而误报超额。
+        if idempotency_key:
+            existing = self.get_by_idempotency_key(db, team_id, idempotency_key)
+            if existing:
+                if existing.idempotency_fingerprint != fingerprint:
+                    raise PaymentRecordIdempotencyConflict("幂等键已用于其他回款登记请求")
+                raise PaymentRecordIdempotentReplay(existing)
 
-        if total_paid + obj_in.actual_amount > planned:
-            raise ValueError(f"回款金额超出计划，计划金额: {planned}，已登记: {total_paid}，本次: {obj_in.actual_amount}")
+        records = (
+            db.query(PaymentRecord.actual_amount)
+            .filter(PaymentRecord.payment_plan_id == plan_id, PaymentRecord.team_id == team_id)
+            .with_for_update()
+            .all()
+        )
+        total_paid = sum((Decimal(str(amount)) for (amount,) in records), Decimal("0.00"))
+        planned = Decimal(str(plan.planned_amount))
+        requested_amount = Decimal(str(obj_in.actual_amount))
+
+        if total_paid + requested_amount > planned:
+            raise ValueError(
+                f"回款金额超出计划，计划金额: {planned}，已登记: {total_paid}，本次: {requested_amount}"
+            )
 
         # 生成记录编号
         record_number = BusinessNumberGenerator.generate('PAY', db)
@@ -734,6 +808,8 @@ class PaymentRecordCRUD:
             payment_plan_id=plan_id,
             team_id=team_id,
             record_number=record_number,
+            idempotency_key=idempotency_key,
+            idempotency_fingerprint=fingerprint if idempotency_key else None,
             deal_journey_id=plan.deal_journey_id,
             **record_data,
             commission_member_id=commission_member_id,
@@ -806,9 +882,14 @@ class PaymentRecordCRUD:
                     "commissionMemberName": db_record.commission_member_name,
                     "customerId": contract.customer_id,
                     "customerName": customer.account_name if customer else None
-                }
+                },
+                commit=False,
             )
 
+        # 回款记录、审批实例、计划/合同状态、旅程事件和操作日志在同一
+        # 业务事务中提交；任一主流程失败都由调用方 rollback。
+        db.commit()
+        db.refresh(db_record)
         return db_record
     
     def update(self, db: Session, db_obj: PaymentRecord, obj_in: PaymentRecordUpdate) -> PaymentRecord:
@@ -816,7 +897,38 @@ class PaymentRecordCRUD:
 
         update_data = obj_in.model_dump(exclude_unset=True)
         commission_member_id = update_data.pop("commission_member_id", None)
-        
+        plan = None
+
+        if "actual_amount" in update_data:
+            # 锁住计划，串行化“修改金额 -> 重算累计金额”的关键区段。
+            plan = (
+                db.query(PaymentPlan)
+                .filter(
+                    PaymentPlan.id == db_obj.payment_plan_id,
+                    PaymentPlan.team_id == db_obj.team_id,
+                )
+                .with_for_update()
+                .first()
+            )
+            if not plan:
+                raise ValueError("回款计划不存在")
+            records = (
+                db.query(PaymentRecord.actual_amount)
+                .filter(
+                    PaymentRecord.payment_plan_id == db_obj.payment_plan_id,
+                    PaymentRecord.team_id == db_obj.team_id,
+                    PaymentRecord.id != db_obj.id,
+                )
+                .with_for_update()
+                .all()
+            )
+            other_amount = sum((Decimal(str(amount)) for (amount,) in records), Decimal("0.00"))
+            new_amount = Decimal(str(update_data["actual_amount"]))
+            if other_amount + new_amount > Decimal(str(plan.planned_amount)):
+                raise ValueError(
+                    f"回款金额超出计划，计划金额: {plan.planned_amount}，其他已登记: {other_amount}，本次: {new_amount}"
+                )
+
         for field, value in update_data.items():
             setattr(db_obj, field, value)
 
@@ -825,18 +937,24 @@ class PaymentRecordCRUD:
             commission_member = user_crud.get_by_id(db, int(commission_member_id))
             db_obj.commission_member_id = commission_member_id
             db_obj.commission_member_name = commission_member.name if commission_member else None
-        
-        db.commit()
-        
+
         from app.crud.payment import payment_plan_crud
-        plan = db.query(PaymentPlan).filter(PaymentPlan.id == db_obj.payment_plan_id).first()
+        if plan is None:
+            plan = db.query(PaymentPlan).filter(
+                PaymentPlan.id == db_obj.payment_plan_id,
+                PaymentPlan.team_id == db_obj.team_id,
+            ).first()
         if plan:
-            payment_plan_crud.update_status(db, plan)
-            self._update_contract_payment_status(db, plan.contract_id)
-            from app.services.deal_journey_service import deal_journey_service
-            deal_journey_service.refresh_closure_status(db, plan.deal_journey_id)
-            db.commit()
-        
+            # 回款记录、计划状态、合同状态和成交旅程状态在一个事务中落库。
+            payment_plan_crud.update_status(db, plan, commit=False)
+            self._update_contract_payment_status(db, plan.contract_id, commit=False)
+            # 测试数据/历史记录可能没有成交旅程；没有旅程时无需刷新，
+            # 也不能让与回款更新无关的投影查询阻断主事务。
+            if plan.deal_journey_id is not None:
+                from app.services.deal_journey_service import deal_journey_service
+                deal_journey_service.refresh_closure_status(db, plan.deal_journey_id)
+
+        db.commit()
         db.refresh(db_obj)
         return db_obj
     
@@ -864,8 +982,11 @@ class PaymentRecordCRUD:
         if plan:
             payment_plan_crud.update_status(db, plan)
             self._update_contract_payment_status(db, plan.contract_id)
-            from app.services.deal_journey_service import deal_journey_service
-            deal_journey_service.refresh_closure_status(db, plan.deal_journey_id)
+            # 历史回款记录可能没有成交旅程；删除回款本身不应依赖
+            # 不存在的可选关联对象。
+            if plan.deal_journey_id is not None:
+                from app.services.deal_journey_service import deal_journey_service
+                deal_journey_service.refresh_closure_status(db, plan.deal_journey_id)
 
         db.commit()
         return True
@@ -976,14 +1097,13 @@ class PaymentRecordCRUD:
         流程：
         1. 调用 match_flow_generic 匹配 PAYMENT 审批流程
         2. 未匹配 -> 报错（强制走审批流程）
-        3. 匹配 -> create_approval_generic 创建审批实例
-        4. 发送飞书通知给审批人（通过 notification_service）
+        3. 匹配 -> create_approval_only 创建审批实例
+        4. 由调用方在同一事务中完成提交，通知在 API 层异步发送
 
         注意：所有回款必须走审批流程，审批通过后自动确认入账。
         """
         from app.crud.approval import approval_crud, approval_flow_crud
         from app.models.approval import BusinessType
-        from app.services.notification import NotificationService
 
         # 匹配 PAYMENT 审批流程（金额=回款金额）
         flow, error_msg = approval_flow_crud.match_flow_generic(
@@ -998,16 +1118,22 @@ class PaymentRecordCRUD:
         if flow is None:
             raise ValueError(error_msg or "未找到匹配的回款审批流程，请联系管理员配置完整的审批流程覆盖范围")
 
-        # 创建审批实例
-        approval = approval_crud.create_approval_generic(
+        # 与回款记录、计划/合同状态放在同一事务提交，避免出现“回款已写入但审批未创建”。
+        approval = approval_crud.create_approval_only(
             db,
             business_type=BusinessType.PAYMENT,
             business_id=record.id,
             team_id=record.team_id,
             flow=flow,
             submitter_id=creator_id,
-            submitter_name=creator_name
+            submitter_name=creator_name,
         )
+        from app.constants.approval_phase import ApprovalPhase
+        from app.services.approval_adapter import get_adapter
+        record.approval_phase = ApprovalPhase.PENDING_REVIEW.value
+        get_adapter(BusinessType.PAYMENT).on_submit(db, record)
+        db.flush()
+        db.refresh(approval)
 
         # 注意：通知发送移至 API 层（异步上下文）
         # CRUD 层不再包含异步通知逻辑，避免 "no running event loop" 错误

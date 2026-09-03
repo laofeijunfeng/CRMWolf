@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import type { PaymentRecordInfo, PaymentRecordResponse, PaymentRecordUpdate } from '@/api/payment'
 import {
   Dialog,
@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { confirmDialog } from '@/utils/confirmDialog'
 import {
   DateField,
   InputField,
@@ -58,6 +59,9 @@ const form = reactive<EditRecordForm>({
   notes: '',
 })
 
+const initialForm = ref<EditRecordForm | null>(null)
+const closeGuardPending = ref(false)
+
 const errors = reactive<EditRecordErrors>({
   actualAmount: '',
   actualPayerName: '',
@@ -75,6 +79,12 @@ const hasAmountError = computed((): boolean => errors.actualAmount.length > 0)
 const hasActualPayerNameError = computed((): boolean => errors.actualPayerName.length > 0)
 const hasPaymentDateError = computed((): boolean => errors.paymentDate.length > 0)
 const hasNotesError = computed((): boolean => errors.notes.length > 0)
+const validationErrorMessages = computed((): string[] => [
+  errors.actualAmount,
+  errors.actualPayerName,
+  errors.paymentDate,
+  errors.notes,
+].filter((message): message is string => message.length > 0))
 
 function clearErrors(): void {
   errors.actualAmount = ''
@@ -89,6 +99,7 @@ function normalizeDateString(value: string): string {
 }
 
 function resetForm(): void {
+  initialForm.value = null
   form.actualAmount = ''
   form.actualPayerName = ''
   form.paymentDate = ''
@@ -103,6 +114,7 @@ function populateForm(record: EditablePaymentRecord): void {
   form.paymentDate = normalizeDateString(record.payment_date)
   form.proofAttachment = record.proof_attachment ?? ''
   form.notes = record.notes ?? ''
+  initialForm.value = { ...form }
   clearErrors()
 }
 
@@ -157,8 +169,32 @@ function validateForm(): boolean {
   return !hasAmountError.value && !hasActualPayerNameError.value && !hasPaymentDateError.value && !hasNotesError.value
 }
 
+async function focusFirstError(): Promise<void> {
+  await nextTick()
+  const fieldIds: [keyof EditRecordErrors, string][] = [
+    ['actualAmount', 'edit-record-amount'],
+    ['actualPayerName', 'edit-record-payer-name'],
+    ['paymentDate', 'edit-record-date'],
+    ['notes', 'edit-record-notes'],
+  ]
+
+  for (const [field, id] of fieldIds) {
+    if (errors[field].length === 0) continue
+    const element = document.getElementById(id)
+    if (element instanceof HTMLElement) {
+      element.focus()
+      return
+    }
+  }
+}
+
 function handleSubmit(): void {
-  if (isSubmitting.value || props.record === null || !validateForm()) {
+  if (isSubmitting.value || props.record === null) {
+    return
+  }
+
+  if (!validateForm()) {
+    void focusFirstError()
     return
   }
 
@@ -173,10 +209,45 @@ function handleSubmit(): void {
   emit('submit', props.record.id, payload)
 }
 
-function closeDialog(): void {
-  if (!isSubmitting.value) {
-    visible.value = false
+const hasFormChanges = computed(() => {
+  const initial = initialForm.value
+  if (initial === null) return false
+
+  return form.actualAmount.trim() !== initial.actualAmount.trim()
+    || form.actualPayerName.trim() !== initial.actualPayerName.trim()
+    || form.paymentDate !== initial.paymentDate
+    || form.proofAttachment.trim() !== initial.proofAttachment.trim()
+    || form.notes.trim() !== initial.notes.trim()
+})
+
+async function handleOpenChange(open: boolean): Promise<void> {
+  if (open) {
+    visible.value = true
+    return
   }
+
+  if (isSubmitting.value || closeGuardPending.value) return
+
+  if (!hasFormChanges.value) {
+    visible.value = false
+    return
+  }
+
+  closeGuardPending.value = true
+  try {
+    const confirmed = await confirmDialog(
+      '已修改回款记录，关闭后这些修改不会保存。确定关闭吗？',
+      '放弃本次修改？',
+      { variant: 'destructive', confirmText: '放弃并关闭' },
+    )
+    if (confirmed) visible.value = false
+  } finally {
+    closeGuardPending.value = false
+  }
+}
+
+function closeDialog(): void {
+  void handleOpenChange(false)
 }
 
 watch(
@@ -194,7 +265,7 @@ watch(
 </script>
 
 <template>
-  <Dialog v-model:open="visible">
+  <Dialog :open="props.open" @update:open="handleOpenChange">
     <DialogContent class="edit-record-dialog">
       <DialogHeader>
         <DialogTitle>修改回款记录</DialogTitle>
@@ -202,6 +273,18 @@ watch(
           修改已登记的回款金额、日期和凭证备注，保存后由上层流程继续处理审批。
         </DialogDescription>
       </DialogHeader>
+
+      <div
+        v-if="validationErrorMessages.length > 0"
+        class="edit-record-dialog__error-summary"
+        role="alert"
+        aria-live="assertive"
+      >
+        <strong>请先修正以下字段：</strong>
+        <ul>
+          <li v-for="message in validationErrorMessages" :key="message">{{ message }}</li>
+        </ul>
+      </div>
 
       <form class="edit-record-dialog__form" novalidate @submit.prevent="handleSubmit">
         <InputField
@@ -279,7 +362,7 @@ watch(
             type="button"
             variant="outline"
             class="edit-record-dialog__button min-h-11"
-            :disabled="isSubmitting"
+            :disabled="isSubmitting || closeGuardPending"
             @click="closeDialog"
           >
             取消
@@ -303,12 +386,37 @@ watch(
 .edit-record-dialog {
   max-height: $wolf-modal-height-mobile-v2;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-bottom: calc($wolf-space-xl-v2 + $wolf-safe-area-bottom-v2);
 }
 
 .edit-record-dialog__form {
   display: flex;
   flex-direction: column;
   gap: $wolf-form-item-gap-v2;
+}
+
+.edit-record-dialog__error-summary {
+  display: flex;
+  flex-direction: column;
+  gap: $wolf-space-xs-v2;
+  padding: $wolf-space-md-v2;
+  border: 1px solid $wolf-danger-v2;
+  border-radius: $wolf-radius-v2;
+  background: $wolf-danger-bg-v2;
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  line-height: $wolf-line-height-body-v2;
+}
+
+.edit-record-dialog__error-summary strong {
+  color: $wolf-text-primary-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+}
+
+.edit-record-dialog__error-summary ul {
+  margin: 0;
+  padding-left: $wolf-space-lg-v2;
 }
 
 .edit-record-dialog__field {

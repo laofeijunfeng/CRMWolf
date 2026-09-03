@@ -6,7 +6,7 @@
  * - 表头固定（sticky）
  * - 底部分页固定
  * - 固定左侧识别列，右侧默认不固定，中间横向滚动
- * - 桌面行操作走右键菜单，不占用操作列
+ * - 桌面行操作采用“主操作 + 更多菜单”，右键作为快捷入口
  * - 统一样式（行高 44px、语义表头背景等）
  */
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
@@ -23,9 +23,14 @@ import {
   Empty,
   EmptyDescription,
   EmptyHeader,
-  EmptyTitle
+  EmptyTitle,
+  EmptyContent
 } from '@/components/ui/empty'
 import LoadingSkeleton from './LoadingSkeleton.vue'
+import LiveRegion from './LiveRegion.vue'
+import ErrorState from '@/components/ErrorState.vue'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import ColumnConfigPopover from './ColumnConfigPopover.vue'
 import ListFilterPopover from './ListFilterPopover.vue'
 import ListSortPopover from './ListSortPopover.vue'
@@ -42,10 +47,19 @@ import {
   ContextMenuTrigger
 } from '@/components/ui/context-menu'
 import TableRowContextMenuContent from './TableRowContextMenuContent.vue'
+import DesktopTableRowActions from './DesktopTableRowActions.vue'
 import {
+  getDesktopTableRowActionsWidth,
   hasVisibleTableRowActions,
   type TableRowActionSet
 } from './tableRowActionGroups'
+import {
+  getEmptyStateCopy,
+  resolveDataViewState,
+  type DataViewState,
+  type EmptyStateReason,
+  type FeedbackError
+} from '@/types/feedback'
 
 // ==================== Props ====================
 interface Props {
@@ -55,8 +69,20 @@ interface Props {
   data: T[]
   /** 行标识字段 */
   rowKey?: keyof T
-  /** 加载状态 */
+  /** 是否启用行选择 */
+  selectable?: boolean
+  /** 当前已选行标识 */
+  selectedRowKeys?: (string | number)[]
+  /** 是否允许选择某一行 */
+  getRowSelectable?: (row: T, index: number) => boolean
+  /** 兼容旧页面的加载状态；有既有数据时会显示刷新态而不是替换整个表格 */
   loading?: boolean
+  /** 可选的统一读取状态，逐步替代 loading 布尔值 */
+  viewState?: DataViewState | null
+  /** 首次加载或刷新失败时的结构化错误 */
+  loadError?: FeedbackError | null
+  /** 空状态原因；未传入时根据当前筛选条件推断 */
+  emptyReason?: EmptyStateReason | null
   /** 总条数（用于分页） */
   total: number
   /** 当前页码 */
@@ -65,8 +91,14 @@ interface Props {
   pageSize: number
   /** 每页条数选项 */
   pageSizes?: number[]
-  /** 卡片高度（默认 calc(100vh - 200px)） */
+  /** 兼容旧页面的固定高度；新页面优先使用 heightStrategy */
   height?: string
+  /** 表格卡片高度策略 */
+  heightStrategy?: 'legacy' | 'fill' | 'page' | 'auto'
+  /** 纵向滚动责任 */
+  scrollMode?: 'contained' | 'page' | 'none' | undefined
+  /** 窄屏分页使用紧凑布局 */
+  compactPagination?: boolean
   /** 空状态标题 */
   emptyTitle?: string
   /** 空状态说明 */
@@ -75,9 +107,13 @@ interface Props {
   fixedLeftCount?: number
   /** 默认固定右侧列数（默认 0，优先级低于 column.fixed） */
   fixedRightCount?: number
-  /** 行是否可作为整体交互目标 */
+  /** 行是否可作为整体交互目标（指针增强；标准 table 行不进入 Tab 顺序） */
   rowInteractive?: boolean
-  /** 桌面行右键 / 键盘菜单的动作来源；不传则不打开行菜单 */
+  /** 详情入口承载列；未提供时使用首个可见数据列 */
+  detailColumnKey?: string
+  /** 用于生成详情入口的对象识别文案，不传时读取详情列值 */
+  getRowLabel?: (row: T, index: number) => string
+  /** 桌面行操作与右键 / 键盘菜单的动作来源；不传则不显示行操作 */
   getRowActions?: (row: T, index: number) => TableRowActionSet | null | undefined
   /** 当前筛选条件 */
   filters?: ListFilterCondition[]
@@ -109,15 +145,26 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   rowKey: 'id',
+  selectable: false,
+  selectedRowKeys: () => [],
+  getRowSelectable: () => true,
   loading: false,
+  viewState: null,
+  loadError: null,
   pageSizes: () => [10, 20, 50, 100],
   height: 'calc(100vh - 200px)',
+  heightStrategy: 'legacy',
+  scrollMode: undefined,
+  compactPagination: false,
   emptyTitle: '暂无数据',
+  emptyReason: null,
   emptyDescription: '',
   fixedLeftCount: 1,
   fixedRightCount: 0,
   rowInteractive: false,
-  getRowActions: () => null,
+  detailColumnKey: '',
+  getRowLabel: () => '',
+  getRowActions: () => undefined,
   filters: () => [],
   sorts: () => [],
   mobileMode: 'card',
@@ -137,6 +184,8 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   'update:page': [value: number]
   'update:page-size': [value: number]
+  'update:selectedRowKeys': [value: (string | number)[]]
+  retry: []
   'row-click': [row: T, index: number]
   'update:filters': [value: ListFilterCondition[]]
   'filter-apply': [value: ListFilterCondition[]]
@@ -151,7 +200,76 @@ const emit = defineEmits<{
 }>()
 
 // ==================== Computed ====================
+const selectedRowKeySet = computed<Set<string | number>>(() => new Set(props.selectedRowKeys))
+const selectableRows = computed(() => props.data
+  .map((row, index) => ({ row, index, key: getRowKey(row, index) }))
+  .filter(({ row, index }) => props.selectable && props.getRowSelectable(row, index)))
+const allSelectableRowsSelected = computed<boolean>(() =>
+  selectableRows.value.length > 0 && selectableRows.value.every(({ key }) => selectedRowKeySet.value.has(key))
+)
+const someSelectableRowsSelected = computed<boolean>(() =>
+  selectableRows.value.some(({ key }) => selectedRowKeySet.value.has(key)) && !allSelectableRowsSelected.value
+)
 const totalPages = computed<number>(() => Math.ceil(props.total / props.pageSize))
+const effectiveViewState = computed<DataViewState>(() =>
+  resolveDataViewState({
+    loading: props.loading,
+    dataCount: props.data.length,
+    hasError: props.loadError !== null,
+    explicitState: props.viewState
+  })
+)
+const effectiveScrollMode = computed<'contained' | 'page' | 'none'>(() => {
+  if (props.scrollMode !== undefined) return props.scrollMode
+  if (props.heightStrategy === 'page' || props.heightStrategy === 'auto') return 'page'
+  return 'contained'
+})
+const rowActionSets = computed(() => props.data.map((row, index) => resolveRowActions(row, index)))
+const hasDesktopRowActions = computed(() =>
+  rowActionSets.value.some((actions) => hasVisibleTableRowActions(actions))
+)
+const desktopActionsColumnWidth = computed(() =>
+  getDesktopTableRowActionsWidth(rowActionSets.value)
+)
+const tableCardStyle = computed<Record<string, string>>(() => {
+  const style: Record<string, string> = {}
+  if (props.heightStrategy === 'page' || props.heightStrategy === 'auto') {
+    // no-op: 页面高度由外层布局负责
+  } else {
+    // 固定高度优先于 fill：列表页显式传入的 height 是防止页面随行数增长的
+    // 关键约束。fill 只负责让表格内容区在这个固定卡片内占满剩余空间。
+    style['height'] = props.height
+  }
+  if (hasDesktopRowActions.value) {
+    style['--data-table-actions-width'] = `${desktopActionsColumnWidth.value}px`
+  }
+  return style
+})
+const tableCardClass = computed(() => ({
+  'data-table-card--fill': props.heightStrategy === 'fill',
+  'data-table-card--page': effectiveScrollMode.value === 'page',
+  'data-table-card--auto': props.heightStrategy === 'auto',
+  'data-table-card--no-scroll': effectiveScrollMode.value === 'none',
+  'data-table-card--compact-pagination': props.compactPagination,
+  'has-desktop-row-actions': hasDesktopRowActions.value
+}))
+const isInitialLoading = computed(() => effectiveViewState.value === 'loading')
+const isRefreshing = computed(() => effectiveViewState.value === 'refreshing')
+const hasBlockingError = computed(() =>
+  effectiveViewState.value === 'error' && props.data.length === 0
+)
+const hasRefreshError = computed(() =>
+  effectiveViewState.value === 'error' && props.data.length > 0
+)
+const emptyReason = computed<EmptyStateReason>(() =>
+  props.emptyReason ?? (props.filters.length > 0 ? 'filtered' : 'no-data')
+)
+const emptyCopy = computed(() =>
+  getEmptyStateCopy(emptyReason.value, {
+    ...(props.emptyTitle !== '暂无数据' ? { title: props.emptyTitle } : {}),
+    ...(props.emptyDescription !== '' ? { description: props.emptyDescription } : {})
+  })
+)
 const paginationEntries = computed<PaginationEntry[]>(() =>
   buildPaginationEntries(props.page, totalPages.value)
 )
@@ -301,6 +419,25 @@ const fallbackSubtitleColumn = computed(() =>
 const fallbackStatusColumn = computed(() =>
   dataColumns.value.find((col) => col.key === props.mobileStatusKey)
 )
+const detailColumn = computed(() =>
+  dataColumns.value.find((column) => column.key === props.detailColumnKey) ?? dataColumns.value[0]
+)
+
+function getDetailLabel(row: T, index: number): string {
+  const configuredLabel = props.getRowLabel(row, index).trim()
+  if (configuredLabel.length > 0) return `查看${configuredLabel}详情`
+
+  const value: unknown = detailColumn.value === undefined ? undefined : row[detailColumn.value.key]
+  const fallbackLabel = value === null || value === undefined || String(value).trim() === ''
+    ? `第 ${index + 1} 行`
+    : String(value).trim()
+  return `查看${fallbackLabel}详情`
+}
+
+function isDetailColumn(column: ProcessedColumn): boolean {
+  return props.rowInteractive && detailColumn.value?.key === column.key
+}
+
 const fallbackMetaColumns = computed(() => {
   const explicit = props.mobileMetaKeys
     .map((key) => dataColumns.value.find((col) => col.key === key))
@@ -321,7 +458,7 @@ const fallbackMetaColumns = computed(() => {
 const getFixedOffset = (col: { index: number; width?: string; fixed?: 'left' | 'right' | undefined }): string | undefined => {
   if (col.fixed === 'left') {
     // 累加前面所有左侧固定列的宽度
-    let offset = 0
+    let offset = props.selectable ? 44 : 0
     for (let i = 0; i < col.index; i++) {
       const prevCol = processedColumns.value[i]
       if (!prevCol) continue
@@ -336,16 +473,18 @@ const getFixedOffset = (col: { index: number; width?: string; fixed?: 'left' | '
 
   if (col.fixed === 'right') {
     // 累加后面所有右侧固定列的宽度
-    let offset = 0
+    // 桌面操作列位于最右侧，避免与业务固定列重叠；窄屏操作列隐藏后
+    // 通过 CSS 将 --data-table-actions-width 重置为 0。
+    let offset = 'var(--data-table-actions-width, 0px)'
     for (let i = processedColumns.value.length - 1; i > col.index; i--) {
       const nextCol = processedColumns.value[i]
       if (!nextCol) continue
       if (nextCol.fixed === 'right') {
         const widthValue = parseInt(nextCol.width?.replace('px', '') ?? '120', 10)
-        offset += widthValue
+        offset += ` + ${widthValue}px`
       }
     }
-    return `${offset}px`
+    return `calc(${offset})`
   }
 
   return undefined
@@ -401,6 +540,7 @@ function toActionRow(row: T | null): Record<string, unknown> {
 }
 
 const rowMenuActionRow = computed<Record<string, unknown>>(() => toActionRow(rowMenuRow.value))
+const rowMenuFocusTarget = ref<HTMLElement | null>(null)
 
 function isNativeContextMenuTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false
@@ -408,7 +548,7 @@ function isNativeContextMenuTarget(target: EventTarget | null): boolean {
 }
 
 function resolveRowActions(row: T, index: number): TableRowActionSet | null {
-  return props.getRowActions(row, index) ?? null
+  return props.getRowActions?.(row, index) ?? null
 }
 
 function handleRowMenuOpenChange(open: boolean): void {
@@ -418,6 +558,11 @@ function handleRowMenuOpenChange(open: boolean): void {
     return
   }
   unlockRowClickSoon()
+  const focusTarget = rowMenuFocusTarget.value
+  rowMenuFocusTarget.value = null
+  if (focusTarget !== null && focusTarget.isConnected) {
+    void nextTick(() => focusTarget.focus({ preventScroll: true }))
+  }
 }
 
 function getRowMenuTrigger(): HTMLElement | null {
@@ -425,13 +570,19 @@ function getRowMenuTrigger(): HTMLElement | null {
   return trigger instanceof HTMLElement ? trigger : null
 }
 
-async function openRowMenu(event: MouseEvent, row: T, index: number): Promise<void> {
+async function openRowMenu(
+  event: MouseEvent,
+  row: T,
+  index: number,
+  focusTarget: HTMLElement | null = null,
+): Promise<void> {
   const actions = resolveRowActions(row, index)
   if (!hasVisibleTableRowActions(actions)) return
   event.preventDefault()
   event.stopPropagation()
   rowMenuRow.value = row
   rowMenuActions.value = actions
+  rowMenuFocusTarget.value = focusTarget
   lockRowClick()
   await nextTick()
   const trigger = getRowMenuTrigger()
@@ -477,39 +628,29 @@ function handleCardClick(event: MouseEvent, row: T, index: number): void {
 }
 
 function handleRowKeydown(event: KeyboardEvent, row: T, index: number): void {
-  if (!props.rowInteractive) return
   const isContextMenuKey = event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)
-  if (isContextMenuKey) {
-    const actions = resolveRowActions(row, index)
-    if (!hasVisibleTableRowActions(actions)) return
-    event.preventDefault()
-    const currentTarget = event.currentTarget
-    const rect = currentTarget instanceof HTMLElement
-      ? currentTarget.getBoundingClientRect()
-      : { right: 0, top: 0, height: 0 }
-    const synthetic = new MouseEvent('contextmenu', {
-      bubbles: true,
-      cancelable: true,
-      clientX: rect.right - 8,
-      clientY: rect.top + rect.height / 2
-    })
-    void openRowMenu(synthetic, row, index)
-    return
-  }
-  if (event.key === 'Enter') {
-    if (ignoreRowClick.value || rowMenuOpen.value) return
-    emit('row-click', row, index)
-    return
-  }
-  if (event.key === ' ') {
-    event.preventDefault()
-    if (ignoreRowClick.value || rowMenuOpen.value) return
-    emit('row-click', row, index)
-  }
+  if (!isContextMenuKey) return
+
+  const target = event.target instanceof HTMLElement
+    ? event.target.closest('.data-table-row-detail-trigger, .data-table-mobile-detail-trigger')
+    : null
+  if (!(target instanceof HTMLElement)) return
+
+  const actions = resolveRowActions(row, index)
+  if (!hasVisibleTableRowActions(actions)) return
+
+  event.preventDefault()
+  const rect = target.getBoundingClientRect()
+  const synthetic = new MouseEvent('contextmenu', {
+    bubbles: true,
+    cancelable: true,
+    clientX: rect.right - 8,
+    clientY: rect.top + rect.height / 2,
+  })
+  void openRowMenu(synthetic, row, index, target)
 }
 
 function handleCardKeydown(event: KeyboardEvent, row: T, index: number): void {
-  if (isNestedInteractiveElement(event.target, event.currentTarget)) return
   handleRowKeydown(event, row, index)
 }
 
@@ -629,6 +770,32 @@ async function handleColumnConfigReset(scope: ViewPreferenceScope): Promise<void
   }
 }
 
+function isRowSelectable(row: T, index: number): boolean {
+  return props.selectable && props.getRowSelectable(row, index)
+}
+
+function isRowSelected(row: T, index: number): boolean {
+  return selectedRowKeySet.value.has(getRowKey(row, index))
+}
+
+function toggleRowSelection(row: T, index: number, checked: boolean): void {
+  if (!isRowSelectable(row, index)) return
+  const key = getRowKey(row, index)
+  const next = new Set(props.selectedRowKeys)
+  if (checked) next.add(key)
+  else next.delete(key)
+  emit('update:selectedRowKeys', Array.from(next))
+}
+
+function toggleAllRows(checked: boolean): void {
+  const next = new Set(props.selectedRowKeys)
+  for (const { key } of selectableRows.value) {
+    if (checked) next.add(key)
+    else next.delete(key)
+  }
+  emit('update:selectedRowKeys', Array.from(next))
+}
+
 function getRowKey(row: T, index: number): string | number {
   const key = props.rowKey as string
   const value: unknown = row[key]
@@ -699,7 +866,7 @@ onBeforeUnmount(() => {
   <div class="data-table-wrapper">
     <!-- 加载状态 -->
     <LoadingSkeleton
-      v-if="loading"
+      v-if="isInitialLoading"
       type="list"
       :rows="10"
       show-avatar
@@ -709,9 +876,10 @@ onBeforeUnmount(() => {
     <div
       v-else
       ref="tableCardRef"
+      :aria-busy="isRefreshing ? 'true' : undefined"
       class="data-table-card"
-      :class="{ 'has-mobile-cards': mobileMode === 'card' }"
-      :style="{ height }"
+      :class="[{ 'has-mobile-cards': mobileMode === 'card' }, tableCardClass]"
+      :style="tableCardStyle"
     >
       <ContextMenu @update:open="handleRowMenuOpenChange">
         <ContextMenuTrigger as-child>
@@ -768,21 +936,88 @@ onBeforeUnmount(() => {
 
       <!-- 表格内容区（可滚动） -->
       <div
+        v-if="hasBlockingError"
+        class="data-table-state"
+      >
+        <ErrorState
+          :variant="loadError?.variant ?? 'error'"
+          :title="loadError?.title ?? '列表加载失败'"
+          :description="loadError?.description ?? '请重新加载后重试'"
+        >
+          <template #action>
+            <Button
+              v-if="loadError?.retryable !== false"
+              type="button"
+              data-testid="data-table-retry"
+              @click="emit('retry')"
+            >
+              重新加载
+            </Button>
+          </template>
+        </ErrorState>
+      </div>
+      <div
+        v-else
         class="data-table-content"
-        :class="{ 'has-mobile-cards': mobileMode === 'card' }"
+        :class="[
+          { 'has-mobile-cards': mobileMode === 'card' },
+          `data-table-content--${effectiveScrollMode}`
+        ]"
         @scroll="handleScroll"
       >
+        <LiveRegion
+          v-if="isRefreshing"
+          class="data-table-refreshing"
+        >
+          <span class="data-table-refreshing-indicator" aria-hidden="true" />
+          <span>正在刷新列表…</span>
+        </LiveRegion>
+        <div
+          v-if="hasRefreshError"
+          class="data-table-inline-error"
+          role="alert"
+        >
+          <div class="data-table-inline-error-copy">
+            <strong>{{ loadError?.title ?? '刷新失败' }}</strong>
+            <span>{{ loadError?.description ?? '当前显示的是上一次成功加载的数据' }}</span>
+          </div>
+          <Button
+            v-if="loadError?.retryable !== false"
+            type="button"
+            variant="outline"
+            size="sm"
+            data-testid="data-table-refresh-retry"
+            @click="emit('retry')"
+          >
+            重试
+          </Button>
+        </div>
         <div v-if="mobileMode === 'card'" class="data-table-mobile-list">
           <div
             v-for="(row, index) in data"
             :key="getRowKey(row, index)"
             class="data-table-mobile-card"
             :class="{ 'is-interactive': rowInteractive }"
-            :role="rowInteractive ? 'button' : undefined"
-            :tabindex="rowInteractive ? 0 : undefined"
             @click="handleCardClick($event, row, index)"
             @keydown="handleCardKeydown($event, row, index)"
           >
+            <button
+              v-if="rowInteractive"
+              type="button"
+              class="data-table-mobile-detail-trigger"
+              :aria-label="getDetailLabel(row, index)"
+              @click.stop="handleRowClick(row, index)"
+            >
+              {{ getDetailLabel(row, index) }}
+            </button>
+            <div v-if="selectable" class="data-table-mobile-card-selection" @click.stop>
+              <Checkbox
+                :checked="isRowSelected(row, index)"
+                :disabled="!isRowSelectable(row, index)"
+                :aria-label="`选择第 ${index + 1} 行`"
+                @update:checked="toggleRowSelection(row, index, $event)"
+              />
+            </div>
             <slot name="mobile-card" :row="row" :index="index">
               <div class="data-table-mobile-card-header">
                 <div class="data-table-mobile-card-title">
@@ -813,11 +1048,16 @@ onBeforeUnmount(() => {
           <div v-if="data.length === 0" class="data-table-mobile-empty">
             <Empty class="border-0">
               <EmptyHeader>
-                <EmptyTitle>{{ emptyTitle ?? '暂无数据' }}</EmptyTitle>
-                <EmptyDescription v-if="emptyDescription">
-                  {{ emptyDescription }}
+                <EmptyTitle>{{ emptyCopy.title }}</EmptyTitle>
+                <EmptyDescription v-if="emptyCopy.description">
+                  {{ emptyCopy.description }}
                 </EmptyDescription>
               </EmptyHeader>
+              <EmptyContent v-if="emptyReason === 'filtered'">
+                <Button type="button" variant="outline" data-testid="data-table-clear-filters" @click="emit('filter-reset')">
+                  清除筛选
+                </Button>
+              </EmptyContent>
             </Empty>
           </div>
         </div>
@@ -825,6 +1065,15 @@ onBeforeUnmount(() => {
         <table class="data-table">
           <thead class="data-table-header">
             <tr>
+              <th v-if="selectable" class="data-table-header-cell data-table-selection-cell">
+                <Checkbox
+                  :checked="allSelectableRowsSelected"
+                  :indeterminate="someSelectableRowsSelected"
+                  :disabled="selectableRows.length === 0"
+                  aria-label="选择当前页全部可操作记录"
+                  @update:checked="toggleAllRows"
+                />
+              </th>
               <th
                 v-for="col in processedColumns"
                 :key="col.key"
@@ -846,6 +1095,13 @@ onBeforeUnmount(() => {
               >
                 {{ col.title }}
               </th>
+              <th
+                v-if="hasDesktopRowActions"
+                class="data-table-header-cell data-table-actions-header"
+                aria-label="行操作"
+              >
+                操作
+              </th>
             </tr>
           </thead>
           <tbody class="data-table-body">
@@ -854,17 +1110,24 @@ onBeforeUnmount(() => {
               :key="getRowKey(row, index)"
               class="data-table-row"
               :class="{ 'is-interactive': rowInteractive }"
-              :role="rowInteractive ? 'button' : undefined"
-              :tabindex="rowInteractive ? 0 : undefined"
               @click="handleRowClick(row, index)"
               @contextmenu="handleRowContextMenu($event, row, index)"
               @keydown="handleRowKeydown($event, row, index)"
             >
+              <td v-if="selectable" class="data-table-cell data-table-selection-cell" @click.stop>
+                <Checkbox
+                  :checked="isRowSelected(row, index)"
+                  :disabled="!isRowSelectable(row, index)"
+                  :aria-label="`选择第 ${index + 1} 行`"
+                  @update:checked="toggleRowSelection(row, index, $event)"
+                />
+              </td>
               <td
                 v-for="col in processedColumns"
                 :key="col.key"
                 class="data-table-cell"
                 :class="[
+                  isDetailColumn(col) ? 'data-table-cell--detail' : '',
                   getAlignClass(col.align),
                   col.fixed ? `fixed-${col.fixed}` : '',
                   col.fixed === 'left' && showLeftShadow ? 'has-shadow' : '',
@@ -878,20 +1141,45 @@ onBeforeUnmount(() => {
                   } : {})
                 }"
               >
+                <button
+                  v-if="isDetailColumn(col)"
+                  type="button"
+                  class="data-table-row-detail-trigger"
+                  :aria-label="getDetailLabel(row, index)"
+                  @click.stop="handleRowClick(row, index)"
+                >
+                  {{ getDetailLabel(row, index) }}
+                </button>
                 <slot :name="`cell-${col.key}`" :row="row" :value="row[col.key]">
                   {{ row[col.key] ?? '-' }}
                 </slot>
               </td>
+              <td
+                v-if="hasDesktopRowActions"
+                class="data-table-cell data-table-actions-cell"
+                @click.stop
+                @pointerdown.stop
+              >
+                <DesktopTableRowActions
+                  :row="toActionRow(row)"
+                  :actions="resolveRowActions(row, index)"
+                />
+              </td>
             </tr>
             <tr v-if="data.length === 0" class="data-table-empty-row">
-              <td :colspan="processedColumns.length" class="data-table-empty-cell">
+              <td :colspan="processedColumns.length + (selectable ? 1 : 0) + (hasDesktopRowActions ? 1 : 0)" class="data-table-empty-cell">
                 <Empty class="border-0">
                   <EmptyHeader>
-                    <EmptyTitle>{{ emptyTitle ?? '暂无数据' }}</EmptyTitle>
-                    <EmptyDescription v-if="emptyDescription">
-                      {{ emptyDescription }}
+                    <EmptyTitle>{{ emptyCopy.title }}</EmptyTitle>
+                    <EmptyDescription v-if="emptyCopy.description">
+                      {{ emptyCopy.description }}
                     </EmptyDescription>
                   </EmptyHeader>
+                  <EmptyContent v-if="emptyReason === 'filtered'">
+                    <Button type="button" variant="outline" data-testid="data-table-clear-filters" @click="emit('filter-reset')">
+                      清除筛选
+                    </Button>
+                  </EmptyContent>
                 </Empty>
               </td>
             </tr>
@@ -900,7 +1188,7 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- 分页区（固定在卡片底部） -->
-      <div class="data-table-footer">
+      <div class="data-table-footer" :class="{ 'data-table-footer--compact': compactPagination }">
         <span class="total-text">共 {{ total }} 条</span>
         <Pagination
           :page="page"
@@ -942,6 +1230,67 @@ onBeforeUnmount(() => {
 @use '@/styles/variables-v2.scss' as *;
 
 // ==================== 表格容器 ====================
+.data-table-state {
+  flex: 1;
+  min-height: 240px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: $wolf-bg-card-v2;
+  border: 1px solid $wolf-border-default-v2;
+  border-radius: $wolf-radius-xl-v2;
+}
+
+.data-table-refreshing {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-xs-v2;
+  min-height: 32px;
+  padding: 0 $wolf-space-md-v2;
+  border-bottom: 1px solid $wolf-border-light-v2;
+  background: $wolf-bg-page-v2;
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-caption-v2;
+}
+
+.data-table-refreshing-indicator {
+  width: 12px;
+  height: 12px;
+  border: 2px solid $wolf-border-default-v2;
+  border-top-color: $wolf-text-secondary-v2;
+  border-radius: 50%;
+  animation: data-table-refresh-spin 300ms linear infinite;
+}
+
+@keyframes data-table-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.data-table-inline-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $wolf-space-md-v2;
+  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
+  border-bottom: 1px solid $wolf-border-light-v2;
+  background: $wolf-warning-bg-v2;
+  color: $wolf-text-primary-v2;
+}
+
+.data-table-inline-error-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: $wolf-space-xs-v2;
+  font-size: $wolf-font-size-caption-v2;
+}
+
+.data-table-inline-error-copy span {
+  color: $wolf-text-secondary-v2;
+}
+
 .data-table-wrapper {
   flex: 1;
   display: flex;
@@ -959,6 +1308,7 @@ onBeforeUnmount(() => {
 
 // ==================== 表格卡片（固定高度）====================
 .data-table-card {
+  --data-table-actions-width: 0px;
   background: $wolf-bg-card-v2;
   border: 1px solid $wolf-border-default-v2;
   border-radius: $wolf-radius-xl-v2;
@@ -968,11 +1318,33 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
+.data-table-card--fill {
+  min-height: 0;
+}
+
+.data-table-card--page,
+.data-table-card--auto {
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+.data-table-card--no-scroll {
+  overflow: visible;
+}
+
 // ==================== 表格内容区（可滚动）====================
 .data-table-content {
   flex: 1;
   overflow-y: auto;
   overflow-x: auto;  // 支持横向滚动（固定列模式）
+}
+
+.data-table-content--page {
+  overflow-y: visible;
+}
+
+.data-table-content--none {
+  overflow: visible;
 }
 
 // ==================== 表格样式 ====================
@@ -988,6 +1360,99 @@ onBeforeUnmount(() => {
   display: none;
 }
 
+/*
+ * The row remains a pointer enhancement, not a focusable table row.
+ * This control is intentionally quiet in the visual design: sighted users
+ * still use the existing row click, while keyboard and screen-reader users
+ * get a real, named details entry in the tab order.
+ */
+.data-table-row-detail-trigger,
+.data-table-mobile-detail-trigger {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  white-space: nowrap;
+  border: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+}
+
+.data-table-row-detail-trigger:focus-visible,
+.data-table-mobile-detail-trigger:focus-visible {
+  position: static;
+  width: auto;
+  height: $wolf-touch-target-min-v2;
+  min-height: $wolf-touch-target-min-v2;
+  max-width: 100%;
+  padding: 0 $wolf-space-sm-v2;
+  margin: 0 $wolf-space-xs-v2 $wolf-space-xs-v2 0;
+  overflow: visible;
+  clip: auto;
+  clip-path: none;
+  border: 1px solid $wolf-border-default-v2;
+  border-radius: $wolf-radius-v2;
+  background: $wolf-bg-card-v2;
+  color: $wolf-text-primary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+  outline: $wolf-focus-ring-width-strong-v2 solid $wolf-focus-ring-color-v2;
+  outline-offset: $wolf-focus-ring-offset-v2;
+}
+
+.data-table-row-detail-trigger:hover,
+.data-table-mobile-detail-trigger:hover {
+  background: $wolf-bg-table-hover-v2;
+}
+
+.data-table-cell--detail {
+  position: relative;
+}
+
+.data-table-mobile-detail-trigger:focus-visible {
+  display: inline-flex;
+  align-items: center;
+}
+
+.data-table-mobile-card-selection {
+  display: flex;
+  justify-content: flex-end;
+  min-height: 24px;
+  margin-bottom: $wolf-space-xs-v2;
+}
+
+.data-table-selection-cell {
+  width: 44px;
+  min-width: 44px;
+  padding-left: $wolf-space-sm-v2;
+  padding-right: $wolf-space-sm-v2;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.data-table-header-cell.data-table-selection-cell {
+  position: sticky;
+  left: 0;
+  z-index: 50;
+  background: $wolf-bg-table-header-v2;
+}
+
+.data-table-row .data-table-selection-cell {
+  position: sticky;
+  left: 0;
+  z-index: 7;
+  background: $wolf-bg-card-v2;
+}
+
+.data-table-row:hover .data-table-selection-cell {
+  background: $wolf-bg-table-hover-v2;
+}
+
 .data-table-mobile-card {
   background: $wolf-bg-card-v2;
   border: 1px solid $wolf-border-light-v2;
@@ -999,10 +1464,6 @@ onBeforeUnmount(() => {
     cursor: pointer;
   }
 
-  &.is-interactive:focus-visible {
-    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
-    outline-offset: $wolf-focus-ring-offset-v2;
-  }
 }
 
 .data-table-mobile-card-header {
@@ -1173,6 +1634,44 @@ onBeforeUnmount(() => {
   }
 }
 
+.data-table-actions-header,
+.data-table-actions-cell {
+  position: sticky;
+  right: 0;
+  width: var(--data-table-actions-width);
+  min-width: var(--data-table-actions-width);
+  max-width: var(--data-table-actions-width);
+  // 操作列是固定宽度的功能列，标题和按钮保持同一视觉轴线，避免右贴边显得突兀。
+  text-align: center;
+  background: $wolf-bg-card-v2;
+  box-shadow: -1px 0 0 $wolf-border-light-v2, -8px 0 12px rgba(15, 23, 42, 0.04);
+  z-index: 7;
+}
+
+.data-table-card.has-desktop-row-actions {
+  --data-table-actions-width: 176px;
+}
+
+.data-table-actions-header {
+  z-index: 46;
+  background: $wolf-bg-table-header-v2;
+}
+
+.data-table-row:hover .data-table-actions-cell {
+  background: $wolf-bg-table-hover-v2;
+}
+
+@media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  .data-table-card.has-desktop-row-actions {
+    --data-table-actions-width: 0px;
+  }
+
+  .data-table-actions-header,
+  .data-table-actions-cell {
+    display: none;
+  }
+}
+
 .data-table-empty-row {
   height: 180px;
 
@@ -1221,6 +1720,10 @@ onBeforeUnmount(() => {
   }
 }
 
+.data-table-footer--compact {
+  gap: $wolf-space-sm-v2;
+}
+
 // ==================== 响应式（MASTER.md §10）====================
 @media (max-width: $wolf-breakpoint-md-v2 - 1) {
   // 表格内容区：横向滚动 + 固定列（touch 优化）
@@ -1266,8 +1769,13 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  .data-table-card.has-mobile-cards {
+    // 移动端卡片列表由页面主体负责纵向滚动，避免页面 + DataTable 双滚动。
+    overflow: visible;
+  }
+
   .data-table-content.has-mobile-cards {
-    overflow-x: hidden;
+    overflow: visible;
     padding: 0;
     background: $wolf-bg-page-v2;
   }
@@ -1309,12 +1817,21 @@ onBeforeUnmount(() => {
   .data-table-footer .page-size-field {
     display: none;
   }
+
+  .data-table-footer--compact {
+    align-items: stretch;
+  }
 }
 
 // ==================== Reduced Motion（MASTER.md §8.3）====================
 @media (prefers-reduced-motion: reduce) {
   .data-table-row {
     transition-duration: $wolf-reduced-motion-duration-v2;
+  }
+
+  .data-table-refreshing-indicator {
+    animation-duration: $wolf-reduced-motion-duration-v2;
+    animation-iteration-count: 1;
   }
 }
 </style>

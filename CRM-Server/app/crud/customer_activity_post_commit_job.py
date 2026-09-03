@@ -315,6 +315,53 @@ class CustomerActivityPostCommitJobCRUD:
             db.flush()
         return job
 
+    def mark_unfinished_skipped_for_activity(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        activity_id: int,
+        reason: str,
+        commit: bool = True,
+    ) -> int:
+        """Terminalize unfinished post-commit work before source deletion.
+
+        The job row remains as durable evidence. Existing terminal records are
+        not rewritten, while queued/running/retryable work is made permanently
+        non-recoverable and carries the deletion reason.
+        """
+
+        jobs = (
+            db.query(CustomerActivityPostCommitJob)
+            .filter(
+                CustomerActivityPostCommitJob.team_id == team_id,
+                CustomerActivityPostCommitJob.activity_id == activity_id,
+                CustomerActivityPostCommitJob.status.notin_(CustomerActivityPostCommitJobStatus.TERMINAL),
+            )
+            .with_for_update()
+            .all()
+        )
+        finished_at = business_now()
+        for job in jobs:
+            result_json = dict(job.result_json or {})
+            result_json["skip_reason"] = reason
+            result_json["source_activity_deleted"] = True
+            if job.error_message:
+                result_json.setdefault("previous_error", job.error_message)
+            job.status = CustomerActivityPostCommitJobStatus.SKIPPED
+            job.result_json = result_json
+            job.error_message = reason
+            job.next_attempt_at = None
+            job.lease_token = None
+            job.lease_expires_at = None
+            job.finished_at = finished_at
+            db.add(job)
+        if commit:
+            db.commit()
+        else:
+            db.flush()
+        return len(jobs)
+
     def list_system_recovery_candidates(
         self,
         db: Session,

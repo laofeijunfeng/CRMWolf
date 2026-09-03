@@ -90,7 +90,7 @@ class FakeCRMAPIClient:
             return {"items": [{"id": 101, "account_name": "越秀金融"}], "total": 1}
         if method == "GET" and path == f"/v1/customers/{CUSTOMER_PUBLIC_ID}":
             return {"id": CUSTOMER_PUBLIC_ID, "account_name": "越秀金融"}
-        if method == "POST" and path == f"/v1/customer-activities/{CUSTOMER_PUBLIC_ID}":
+        if method == "POST" and path == f"/v1/customer-activities/{CUSTOMER_PUBLIC_ID}/agent-finalized":
             return {
                 "id": 9001,
                 "customer_id": CUSTOMER_PUBLIC_ID,
@@ -2533,6 +2533,9 @@ async def test_agent_tool_create_customer_activity_is_idempotent():
             customer_name="越秀金融",
             activity_kind="PHONE_FOLLOW_UP",
             source_content="今天和王总沟通了项目进展",
+            effectiveness_score=82,
+            effectiveness_is_valid=True,
+            effectiveness_reason="信息完整，已完成最终评估。",
             next_action="下周三确认进展",
             next_follow_time="2026-07-29T09:00:00",
             idempotency_suffix="msg-001",
@@ -2543,6 +2546,9 @@ async def test_agent_tool_create_customer_activity_is_idempotent():
             customer_name="越秀金融",
             activity_kind="PHONE_FOLLOW_UP",
             source_content="今天和王总沟通了项目进展",
+            effectiveness_score=82,
+            effectiveness_is_valid=True,
+            effectiveness_reason="信息完整，已完成最终评估。",
             next_action="下周三确认进展",
             next_follow_time="2026-07-29T09:00:00",
             idempotency_suffix="msg-001",
@@ -2552,8 +2558,8 @@ async def test_agent_tool_create_customer_activity_is_idempotent():
         assert second.success is True
         assert second.idempotent_replay is True
         assert len(fake_client.calls) == 1
-        assert fake_client.calls[0]["path"] == f"/v1/customer-activities/{CUSTOMER_PUBLIC_ID}"
-        assert fake_client.calls[0]["params"] == {"post_commit_mode": "async"}
+        assert fake_client.calls[0]["path"] == f"/v1/customer-activities/{CUSTOMER_PUBLIC_ID}/agent-finalized"
+        assert fake_client.calls[0]["params"] is None
         assert fake_client.calls[0]["json"]["next_follow_time"] == "2026-07-29T09:00:00"
         assert db.query(AgentIdempotencyKey).count() == 1
         assert db.query(AgentToolCall).count() == 1
@@ -2599,6 +2605,9 @@ async def test_agent_write_tool_propagates_stable_action_key_to_internal_api():
             customer_name="越秀金融",
             activity_kind="PHONE_FOLLOW_UP",
             source_content="稳定动作键透传",
+            effectiveness_score=82,
+            effectiveness_is_valid=True,
+            effectiveness_reason="信息完整，已完成最终评估。",
             idempotency_suffix="act_123",
         )
 
@@ -2622,6 +2631,9 @@ async def test_agent_tool_rejects_same_idempotency_key_with_changed_payload():
             customer_name="越秀金融",
             activity_kind="PHONE_FOLLOW_UP",
             source_content="第一次内容",
+            effectiveness_score=82,
+            effectiveness_is_valid=True,
+            effectiveness_reason="信息完整，已完成最终评估。",
             idempotency_suffix="msg-contract",
         )
         conflict = await service.create_customer_activity(
@@ -2630,6 +2642,9 @@ async def test_agent_tool_rejects_same_idempotency_key_with_changed_payload():
             customer_name="越秀金融",
             activity_kind="PHONE_FOLLOW_UP",
             source_content="第二次不同内容",
+            effectiveness_score=82,
+            effectiveness_is_valid=True,
+            effectiveness_reason="信息完整，已完成最终评估。",
             idempotency_suffix="msg-contract",
         )
 
@@ -2638,6 +2653,86 @@ async def test_agent_tool_rejects_same_idempotency_key_with_changed_payload():
         assert conflict.status_code == 409
         assert conflict.error_message == "idempotency_request_mismatch"
         assert len(fake_client.calls) == 1
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_reconciles_dispatched_write_from_existing_activity():
+    class ReconcileCRMAPIClient(FakeCRMAPIClient):
+        async def request(self, method, path, authorization, *, params=None, json=None, idempotency_key=None):
+            if method == "GET" and path == f"/v1/customer-activities/{CUSTOMER_PUBLIC_ID}":
+                self.calls.append({"method": method, "path": path, "params": params, "json": json})
+                return {
+                    "items": [{
+                        "id": 9010,
+                        "customer_id": CUSTOMER_PUBLIC_ID,
+                        "activity_kind": "PHONE_FOLLOW_UP",
+                        "source_content": "可能已写入的内容",
+                        "submission_id": "create_customer_activity:3:msg-reconcile",
+                        "durable_work": {
+                            "post_commit_job_public_id": "pcj_9010",
+                            "customer_intelligence_request_id": "cir_9010",
+                        },
+                    }],
+                    "total": 1,
+                }
+            return await super().request(
+                method, path, authorization, params=params, json=json, idempotency_key=idempotency_key
+            )
+
+    engine, db = _db_session()
+    fake_client = ReconcileCRMAPIClient()
+    service = CRMAgentToolService(api_client=fake_client)
+    context = _context(db)
+    action_key = "create_customer_activity:3:msg-reconcile"
+    payload = {
+        "customer_id": CUSTOMER_PUBLIC_ID,
+        "customer_name": "越秀金融",
+        "activity_kind": "PHONE_FOLLOW_UP",
+        "source_content": "可能已写入的内容",
+        "title": None,
+        "content_json": None,
+        "summary": None,
+        "next_action": None,
+        "next_action_source": None,
+        "next_follow_time": None,
+        "next_follow_time_source": None,
+        "effectiveness_score": 82,
+        "effectiveness_is_valid": True,
+        "effectiveness_reason": "信息完整，已完成最终评估。",
+        "effectiveness_detail_json": {},
+    }
+    db.add(
+        AgentIdempotencyKey(
+            team_id=1,
+            user_id=2,
+            session_id=3,
+            action_key=action_key,
+            status=AgentIdempotencyStatus.DISPATCHED,
+            request_hash=service._hash_json(payload),
+        )
+    )
+    db.commit()
+    try:
+        result = await service.create_customer_activity(
+            context,
+            customer_id=CUSTOMER_PUBLIC_ID,
+            customer_name="越秀金融",
+            activity_kind="PHONE_FOLLOW_UP",
+            source_content="可能已写入的内容",
+            effectiveness_score=82,
+            effectiveness_is_valid=True,
+            effectiveness_reason="信息完整，已完成最终评估。",
+            idempotency_suffix="msg-reconcile",
+        )
+
+        assert result.success is True
+        assert result.idempotent_replay is True
+        assert result.data["id"] == 9010
+        assert len(fake_client.calls) == 1
+        assert db.query(AgentIdempotencyKey).one().status == AgentIdempotencyStatus.SUCCESS
     finally:
         db.close()
         engine.dispose()
@@ -2655,8 +2750,16 @@ async def test_agent_tool_fails_closed_for_previously_dispatched_write():
         "activity_kind": "PHONE_FOLLOW_UP",
         "source_content": "可能已写入的内容",
         "title": None,
+        "content_json": None,
+        "summary": None,
         "next_action": None,
+        "next_action_source": None,
         "next_follow_time": None,
+        "next_follow_time_source": None,
+        "effectiveness_score": 82,
+        "effectiveness_is_valid": True,
+        "effectiveness_reason": "信息完整，已完成最终评估。",
+        "effectiveness_detail_json": {},
     }
     db.add(
         AgentIdempotencyKey(
@@ -2676,13 +2779,16 @@ async def test_agent_tool_fails_closed_for_previously_dispatched_write():
             customer_name="越秀金融",
             activity_kind="PHONE_FOLLOW_UP",
             source_content="可能已写入的内容",
+            effectiveness_score=82,
+            effectiveness_is_valid=True,
+            effectiveness_reason="信息完整，已完成最终评估。",
             idempotency_suffix="msg-dispatched",
         )
 
         assert result.success is False
         assert result.status_code == 409
         assert result.error_message == "idempotency_execution_ambiguous"
-        assert fake_client.calls == []
+        assert [call["method"] for call in fake_client.calls] == ["GET"]
         assert db.query(AgentToolCall).count() == 0
     finally:
         db.close()
@@ -3206,6 +3312,9 @@ async def test_agent_tool_registry_blocks_write_without_hitl_confirmation():
                     "customer_id": CUSTOMER_PUBLIC_ID,
                     "activity_kind": "OTHER_FOLLOW_UP",
                     "source_content": "客户项目还在评估",
+                    "effectiveness_score": 82,
+                    "effectiveness_is_valid": True,
+                    "effectiveness_reason": "信息完整，已完成最终评估。",
                 },
             )
 
@@ -3230,11 +3339,14 @@ async def test_agent_tool_registry_allows_confirmed_write():
                 "customer_id": CUSTOMER_PUBLIC_ID,
                 "activity_kind": "OTHER_FOLLOW_UP",
                 "source_content": "客户项目还在评估",
+                "effectiveness_score": 82,
+                "effectiveness_is_valid": True,
+                "effectiveness_reason": "信息完整，已完成最终评估。",
             },
         )
 
         assert result.success is True
-        assert fake_client.calls[0]["path"] == f"/v1/customer-activities/{CUSTOMER_PUBLIC_ID}"
+        assert fake_client.calls[0]["path"] == f"/v1/customer-activities/{CUSTOMER_PUBLIC_ID}/agent-finalized"
     finally:
         db.close()
         engine.dispose()

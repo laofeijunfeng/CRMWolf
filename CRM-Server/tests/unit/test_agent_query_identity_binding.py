@@ -211,6 +211,34 @@ def _runtime() -> RootRuntimeContext:
 
 
 @pytest.mark.asyncio
+async def test_query_execution_marks_task_reference_search_on_server_context() -> None:
+    query_agent = RecordingQueryAgent()
+    executor = CRMQueryAgentExecutor(
+        query_agent=query_agent,
+        identity_binder=GlobalQueryBinder(),
+        semantic_intent_resolver=_semantic_resolver(),
+    )
+
+    await executor.execute(
+        QueryExecutionInput(
+            text="找一下发送方案的待办",
+            principal=AgentPrincipal(team_id=7, user_id=42, session_id=11),
+            semantic_intent=CRMQuerySemanticIntent(
+                scope="global_work",
+                resource="follow_up_tasks",
+                query_goal="search",
+                task_text="发送方案",
+                confidence=0.95,
+            ),
+        ),
+        runtime=_runtime(),
+    )
+
+    _request, tool_context, _model_config = query_agent.calls[0]
+    assert tool_context.query_retrieval_mode == "semantic_filter"
+
+
+@pytest.mark.asyncio
 async def test_query_execution_reuses_root_semantic_intent_without_resolving_again() -> None:
     query_agent = RecordingQueryAgent()
     resolver = _semantic_resolver()
@@ -500,7 +528,7 @@ async def test_unsupported_global_work_window_fails_closed_without_model_call() 
     )
 
     assert result.response.status == "CLARIFICATION_REQUIRED"
-    assert "无法确定时间范围" in (result.response.clarification_question or "")
+    assert "还不能确定你要查询哪类 CRM 信息" in (result.response.clarification_question or "")
     assert result.trace.stop_reason == "CLARIFICATION_REQUIRED"
     assert query_agent.calls == []
 

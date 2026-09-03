@@ -143,11 +143,30 @@ export interface PaymentRecordResponse {
   creator_id?: string
   creator_name?: string
   approval_phase?: 'draft' | 'pending_review' | 'approved' | 'rejected'
+  confirmation_status?: PaymentConfirmationStatus | null
   invoice_title_text?: string | null
   owner_id?: string | null
   owner_name?: string | null
   created_time: string
+  updated_time?: string | null
   last_modified_time: string
+}
+
+export interface PaymentPlanStatusSummary {
+  id: number
+  plan_number?: string | null
+  stage_name: string
+  planned_amount: number
+  paid_amount: number
+  remaining_amount: number
+  due_date: string
+  status: PaymentPlanStatus
+  last_modified_time: string
+}
+
+export interface PaymentRecordDetailResponse extends PaymentRecordWithDetails {
+  updated_time?: string | null
+  payment_plan: PaymentPlanStatusSummary
 }
 
 export interface PaymentPlanUpdate {
@@ -293,8 +312,59 @@ const paymentApi = {
     return request.get<PaymentRecordInfo[]>(`/v1/payments/payment-plans/${planId}/records`)
   },
 
-  createPaymentRecord: (planId: number, data: PaymentRecordCreate) => {
-    return request.post<PaymentRecordResponse>(`/v1/payments/payment-plans/${planId}/records`, data)
+  getPaymentRecordDetail: (recordId: number): Promise<PaymentRecordDetailResponse> => {
+    return request.get<PaymentRecordDetailResponse>(`/v1/payments/payment-records/${recordId}`)
+  },
+
+  resolvePaymentRecord: (idempotencyKey: string): Promise<PaymentRecordDetailResponse> => {
+    return request.get<PaymentRecordDetailResponse>('/v1/payments/payment-records/resolve', {
+      params: { idempotency_key: idempotencyKey },
+    })
+  },
+
+  resolvePaymentRecordWithRetry: async (
+    idempotencyKey: string,
+    options: { attempts?: number; delaysMs?: number[] } = {},
+  ): Promise<PaymentRecordDetailResponse> => {
+    const attempts = Math.max(1, options.attempts ?? 3)
+    const delaysMs = options.delaysMs ?? [500, 1000]
+    let lastError: unknown
+
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        return await paymentApi.resolvePaymentRecord(idempotencyKey)
+      } catch (error: unknown) {
+        lastError = error
+        const isLastAttempt = attempt === attempts - 1
+        const responseStatus =
+          typeof error === 'object' && error !== null
+            ? (error as { response?: { status?: number } }).response?.status
+            : undefined
+
+        if (isLastAttempt || responseStatus !== 404) {
+          throw error
+        }
+
+        const delayMs = delaysMs[attempt] ?? delaysMs[delaysMs.length - 1] ?? 0
+        if (delayMs > 0) {
+          await new Promise<void>((resolve) => {
+            globalThis.setTimeout(resolve, delayMs)
+          })
+        }
+      }
+    }
+
+    throw lastError ?? new Error('回款登记结果尚未确认')
+  },
+
+  createPaymentRecord: (planId: number, data: PaymentRecordCreate, idempotencyKey?: string) => {
+    return request.post<PaymentRecordResponse>(
+      `/v1/payments/payment-plans/${planId}/records`,
+      data,
+      idempotencyKey !== undefined && idempotencyKey.length > 0
+        ? { headers: { 'Idempotency-Key': idempotencyKey } }
+        : undefined,
+    )
   },
 
   updatePaymentRecord: (recordId: number, data: PaymentRecordUpdate) => {

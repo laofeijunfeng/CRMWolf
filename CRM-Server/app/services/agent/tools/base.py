@@ -30,6 +30,9 @@ class AgentToolContext:
     allowed_customer_ids: list[str] | None = None
     source_user_message_id: int | None = None
     deadline_at: float | None = None
+    # Server-owned hint for a read-only task search.  It is deliberately kept
+    # outside CRMQuerySpec so the model cannot widen or select retrieval modes.
+    query_retrieval_mode: str | None = None
 
 
 @dataclass

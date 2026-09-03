@@ -219,6 +219,7 @@ ProcessItemStatus: TypeAlias = Literal[
     "WAITING",
     "FAILED",
     "CANCELLED",
+    "SKIPPED",
 ]
 
 
@@ -327,6 +328,7 @@ class InteractionBlock(AgentUIBlockBase):
     submit_on_select: bool = False
     submit_label: str = Field(default="提交", min_length=1, max_length=200)
     submit_action_id: str | None = Field(min_length=1, max_length=128)
+    submitted_values: dict[str, JsonValue] | None = None
 
     @model_validator(mode="after")
     def validate_interaction_shape(self) -> Self:

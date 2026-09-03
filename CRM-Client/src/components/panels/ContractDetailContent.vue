@@ -52,11 +52,13 @@ import type { FileAttachmentItem } from '@/types/fileAttachment'
 interface Props {
   contractId: number
   embedded?: boolean
+  showBreadcrumb?: boolean
   canApprove?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   embedded: false,
+  showBreadcrumb: true,
   canApprove: false
 })
 
@@ -65,6 +67,7 @@ const emit = defineEmits<{
   'close': []
   'approve': [contractId: number]
   'reject': [contractId: number]
+  'view-payment-plan': [plan: import('@/api/payment').PaymentPlanResponse]
   'refresh': []
 }>()
 
@@ -282,6 +285,10 @@ const handleEditSuccess = async (): Promise<void> => {
   emit('refresh')
 }
 
+const handleViewPaymentPlan = (plan: import('@/api/payment').PaymentPlanResponse): void => {
+  emit('view-payment-plan', plan)
+}
+
 const handlePaymentPlanUpdated = async (): Promise<void> => {
   await refreshCurrentContract()
   emit('refresh')
@@ -419,7 +426,7 @@ onBeforeUnmount((): void => {
   <div class="contract-detail-content">
     <!-- Header -->
     <SheetHeader class="p-6 pb-4 border-b border-wolf-border-default-v2">
-      <Breadcrumb v-if="embedded" class="detail-breadcrumb">
+      <Breadcrumb v-if="embedded && showBreadcrumb" class="detail-breadcrumb">
         <BreadcrumbList>
           <BreadcrumbItem>
             <BreadcrumbLink as-child>
@@ -613,6 +620,7 @@ onBeforeUnmount((): void => {
               :contract-status="contractInfo.status"
               :contract-info="paymentContractInfo"
               @plan-updated="handlePaymentPlanUpdated"
+              @view-plan="handleViewPaymentPlan"
             />
             <Card v-else class="state-card">
               <CardContent class="payment-placeholder-content">

@@ -25,7 +25,7 @@ import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { ViewPreferenceConfig } from '@/api/viewPreference'
-import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
+import { confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { opportunityApi, type Opportunity, type OpportunityListParams, type OpportunityListResponse, type OwnerFilterOption } from '@/api/opportunity'
 import procurementApi from '@/api/procurement'
@@ -39,6 +39,7 @@ import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
 import { customerDetailRoute } from '@/utils/customerRoutes'
 import { normalizePaginatedResponse } from '@/types/pagination'
+import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 import OpportunityDetailSheet from './OpportunityDetailSheet.vue'
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
 import OpportunityWinDialog from '@/components/dialogs/OpportunityWinDialog.vue'
@@ -55,6 +56,8 @@ const headerStore = useHeaderStore()
 
 // ==================== State ====================
 const loading = ref(false)
+const loadError = ref<FeedbackError | null>(null)
+const listRequestId = ref<number>(0)
 const tableData = ref<OpportunityListResponse[]>([])
 const ownerFilterOptions = ref<OwnerFilterOption[]>([])
 
@@ -76,6 +79,7 @@ const selectedOpportunityIdForWin = ref<string | null>(null)
 // 输单弹窗
 const loseDialogOpen = ref(false)
 const selectedOpportunityIdForLose = ref<string | null>(null)
+const deletingOpportunityIds = ref<Set<string>>(new Set())
 
 const pagination = reactive({
   current: 1,
@@ -270,6 +274,8 @@ const fetchOwnerFilterOptions = async (): Promise<void> => {
 }
 
 const fetchOpportunities = async (): Promise<void> => {
+  const requestId = ++listRequestId.value
+  loadError.value = null
   loading.value = true
   try {
     const tabStatus = activeTab.value === 'active'
@@ -291,15 +297,18 @@ const fetchOpportunities = async (): Promise<void> => {
 
     const response = await opportunityApi.getOpportunities(params)
     const normalized = normalizePaginatedResponse(response)
+    if (requestId !== listRequestId.value) return
     tableData.value = normalized.items
     pagination.total = normalized.total
   } catch (error) {
-    handleApiError(error, '获取商机列表')
+    if (requestId !== listRequestId.value) return
+    loadError.value = toFeedbackError(error, '商机列表')
   } finally {
-    loading.value = false
+    if (requestId === listRequestId.value) {
+      loading.value = false
+    }
   }
 }
-
 const customFilterViews = useCustomFilterViews({
   viewKey: 'opportunities.list',
   activeTab,
@@ -428,16 +437,29 @@ const openEditDialog = async (row: OpportunityListResponse): Promise<void> => {
   }
 }
 
+const isOpportunityDeleting = (opportunityId: string): boolean => deletingOpportunityIds.value.has(opportunityId)
+
 const handleDelete = async (record: OpportunityListResponse): Promise<void> => {
-  const confirmed = await confirmDelete(`商机 "${record.opportunity_name}"`)
+  if (isOpportunityDeleting(record.id)) return
+
+  const confirmed = await confirmDialog(
+    `确定删除商机“${record.opportunity_name}”吗？删除后该商机将从列表中移除，关联客户信息不会被删除。`,
+    '删除商机',
+    { variant: 'destructive', confirmText: '删除' },
+  )
   if (!confirmed) return
 
+  deletingOpportunityIds.value = new Set(deletingOpportunityIds.value).add(record.id)
   try {
     await opportunityApi.deleteOpportunity(record.id)
-    toast.success('商机删除成功')
-    fetchOpportunities()
+    toast.success(`商机“${record.opportunity_name}”已删除`)
+    void fetchOpportunities()
   } catch (error) {
     handleApiError(error, '删除商机')
+  } finally {
+    const nextIds = new Set(deletingOpportunityIds.value)
+    nextIds.delete(record.id)
+    deletingOpportunityIds.value = nextIds
   }
 }
 
@@ -533,17 +555,20 @@ const getRowActions = (row: OpportunityListResponse): TableRowActionSet => ({
   primaryActions: [
     {
       label: '查看',
+      kind: 'detail',
       icon: Eye,
       handler: () => handleViewDetail(row)
     },
     {
       label: '编辑',
+      desktopPrimary: true,
       icon: Pencil,
       handler: () => openEditDialog(row),
       visible: canEditRow(row) && !isApprovalPending(row)
     },
     {
       label: '推进阶段',
+      desktopPrimary: true,
       icon: ArrowRight,
       handler: () => handleAdvanceStage(row),
       visible: row.status === 0 && isApprovalApproved(row)
@@ -565,7 +590,8 @@ const getRowActions = (row: OpportunityListResponse): TableRowActionSet => ({
     {
       label: '删除',
       icon: Trash2,
-      handler: () => handleDelete(row),
+      handler: (): void => { void handleDelete(row) },
+      disabled: isOpportunityDeleting(row.id),
       visible: canDeleteRow(row),
       destructive: true,
       separator: true
@@ -683,12 +709,17 @@ watchEffect(() => {
       :fields="fields"
       :data="tableData"
       :loading="loading"
+      :load-error="loadError"
       :page="pagination.current"
       :page-size="pagination.pageSize"
       :total="pagination.total"
       height="calc(100vh - 121px)"
+      height-strategy="fill"
+      scroll-mode="contained"
       empty-title="暂无商机"
       row-interactive
+      detail-column-key="opportunity_name"
+      :get-row-label="(row) => `商机 ${row.opportunity_name || row.id}`"
       :get-row-actions="getRowActions"
       mobile-title-key="opportunity_name"
       mobile-subtitle-key="customer_name"
@@ -713,6 +744,7 @@ watchEffect(() => {
       @column-config-save="handleColumnConfigSave"
       @column-config-reset="handleColumnConfigReset"
       @row-click="handleViewDetail"
+      @retry="fetchOpportunities"
     >
       <template #mobile-card="{ row }">
         <div class="opportunity-mobile-card-header">

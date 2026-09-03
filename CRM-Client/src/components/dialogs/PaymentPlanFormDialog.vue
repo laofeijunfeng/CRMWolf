@@ -9,6 +9,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import {
   DateField,
@@ -25,6 +35,7 @@ import paymentApi, {
   type PaymentPlanUpdate,
 } from '@/api/payment'
 import { handleApiError } from '@/utils/errorHandler'
+import { useDialogCloseGuard } from '@/composables/useDialogCloseGuard'
 import { normalizePaginatedResponse } from '@/types/pagination'
 
 interface Props {
@@ -76,6 +87,15 @@ const contractsLoading = ref(false)
 const submitting = ref(false)
 const customerSearchKeyword = ref('')
 
+const initialForm = ref<PaymentPlanForm>({
+  customerId: '',
+  contractId: '',
+  stageName: '',
+  plannedAmount: '',
+  dueDate: '',
+  notes: '',
+})
+
 const form = reactive<PaymentPlanForm>({
   customerId: '',
   contractId: '',
@@ -100,6 +120,18 @@ const visible = computed({
 
 const isCreateMode = computed<boolean>(() => props.mode === 'create')
 const hasFixedContract = computed<boolean>(() => props.fixedContract !== null)
+const hasFormChanges = computed<boolean>(() => {
+  return Object.keys(form).some((key) => {
+    const field = key as keyof PaymentPlanForm
+    return form[field] !== initialForm.value[field]
+  })
+})
+const closeGuard = useDialogCloseGuard({
+  isDirty: hasFormChanges,
+  submitting,
+  emitOpen: (open) => emit('update:open', open),
+})
+const showConfirmDialog = closeGuard.showConfirmDialog
 const title = computed<string>(() => isCreateMode.value ? '新建回款计划' : '编辑回款计划')
 const description = computed<string>(() => {
   if (isCreateMode.value && hasFixedContract.value) {
@@ -149,6 +181,7 @@ function resetForm(): void {
   form.dueDate = plan?.due_date ?? ''
   form.notes = plan?.notes ?? ''
   clearErrors()
+  initialForm.value = { ...form }
 }
 
 function isValidLocalDate(value: string): boolean {
@@ -324,6 +357,7 @@ async function handleSubmit(): Promise<void> {
       toast.success('回款计划更新成功')
     }
 
+    closeGuard.approveClose()
     visible.value = false
     emit('success')
   } catch (error: unknown) {
@@ -333,10 +367,20 @@ async function handleSubmit(): Promise<void> {
   }
 }
 
+function handleOpenChange(open: boolean): void {
+  closeGuard.handleOpenChange(open)
+}
+
 function handleCancel(): void {
-  if (!submitting.value) {
-    visible.value = false
-  }
+  closeGuard.requestClose()
+}
+
+function continueEditing(): void {
+  closeGuard.continueEditing()
+}
+
+function confirmCancel(): void {
+  closeGuard.confirmDiscard()
 }
 
 function contractOptionLabel(contract: PaymentPlanContractOption): string {
@@ -362,6 +406,7 @@ watch(
   () => [props.open, props.mode, props.plan?.id, props.fixedContract?.id] as const,
   ([open]) => {
     if (open) {
+      closeGuard.reset()
       customerSearchKeyword.value = ''
       resetForm()
       void fetchCustomers(customerSearchKeyword.value)
@@ -370,6 +415,8 @@ watch(
         void fetchContracts(customerId)
       }
     } else {
+      if (closeGuard.handleParentClose()) return
+      closeGuard.reset()
       clearErrors()
       customerSearchKeyword.value = ''
     }
@@ -387,8 +434,8 @@ watch(
 </script>
 
 <template>
-  <Dialog v-model:open="visible">
-    <DialogContent class="payment-plan-form-dialog">
+  <Dialog :open="props.open" @update:open="handleOpenChange">
+    <DialogContent class="payment-plan-form-dialog w-[calc(100vw-2rem)] max-h-[min(90vh,90dvh)] overflow-y-auto overscroll-contain [scroll-padding-bottom:calc(5rem+env(safe-area-inset-bottom,0px))]">
       <DialogHeader>
         <DialogTitle>{{ title }}</DialogTitle>
         <DialogDescription>{{ description }}</DialogDescription>
@@ -499,6 +546,20 @@ watch(
       </form>
     </DialogContent>
   </Dialog>
+  <AlertDialog :open="showConfirmDialog" @update:open="closeGuard.handleConfirmOpenChange">
+    <AlertDialogContent>
+      <AlertDialogHeader>
+        <AlertDialogTitle>放弃填写回款计划？</AlertDialogTitle>
+        <AlertDialogDescription>
+          当前已填写或调整回款计划内容，关闭后这些未保存内容会丢失。
+        </AlertDialogDescription>
+      </AlertDialogHeader>
+      <AlertDialogFooter>
+        <AlertDialogCancel @click="continueEditing">继续编辑</AlertDialogCancel>
+        <AlertDialogAction @click="confirmCancel">放弃填写</AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>
 </template>
 
 <style scoped lang="scss">

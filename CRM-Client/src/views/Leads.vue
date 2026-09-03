@@ -61,6 +61,7 @@ import { normalizePaginatedResponse } from '@/types/pagination'
 import { serializeListQuery } from '@/utils/listQuery'
 import { useAcquisitionSourceOptions } from '@/composables/useAcquisitionSourceOptions'
 import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
+import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -71,6 +72,8 @@ const headerStore = useHeaderStore()
 
 // ==================== State ====================
 const loading = ref(false)
+const loadError = ref<FeedbackError | null>(null)
+const listRequestId = ref<number>(0)
 const tableData = ref<Lead[]>([])
 const userOptions = ref<UserResponse[]>([])
 const ownerFilterOptions = ref<LeadOwnerFilterOption[]>([])
@@ -226,6 +229,8 @@ const canConvertRow = (row: Lead): boolean => {
 
 // ==================== Methods ====================
 const fetchLeadList = async (): Promise<void> => {
+  const requestId = ++listRequestId.value
+  loadError.value = null
   loading.value = true
   try {
     const params: LeadListParams = {
@@ -238,15 +243,18 @@ const fetchLeadList = async (): Promise<void> => {
       ? await leadApi.getPublicLeads(params)
       : await leadApi.getLeadList(params)
     const normalized = normalizePaginatedResponse(response)
+    if (requestId !== listRequestId.value) return
     tableData.value = normalized.items
     pagination.total = normalized.total
   } catch (error) {
-    handleApiError(error, '获取线索列表')
+    if (requestId !== listRequestId.value) return
+    loadError.value = toFeedbackError(error, '线索列表')
   } finally {
-    loading.value = false
+    if (requestId === listRequestId.value) {
+      loading.value = false
+    }
   }
 }
-
 const customFilterViews = useCustomFilterViews({
   viewKey: 'leads.list',
   activeTab,
@@ -465,12 +473,14 @@ const getRowActions = (row: Lead): TableRowActionSet => {
     primaryActions: [
       {
         label: '编辑',
+        desktopPrimary: true,
         handler: (): void => { void handleEdit(row) },
         visible: canEditRow(row),
         icon: Pencil
       },
       {
         label: '转化为客户',
+        desktopPrimary: true,
         handler: (): void => { void handleConvert(row) },
         visible: canConvertRow(row),
         icon: CircleCheck
@@ -584,12 +594,17 @@ watchEffect(() => {
       :fields="fields"
       :data="tableData"
       :loading="loading"
+      :load-error="loadError"
       :page="pagination.current"
       :page-size="pagination.pageSize"
       :total="pagination.total"
       height="calc(100vh - 121px)"
+      height-strategy="fill"
+      scroll-mode="contained"
       empty-title="暂无线索"
       row-interactive
+      detail-column-key="lead_name"
+      :get-row-label="(row) => `线索 ${row.lead_name || row.id}`"
       :get-row-actions="getRowActions"
       mobile-title-key="lead_name"
       mobile-subtitle-key="contact_name"
@@ -611,6 +626,7 @@ watchEffect(() => {
       @update:sorts="activeSorts = $event"
       @sort-apply="handleSortApply"
       @sort-reset="handleSortReset"
+      @retry="fetchLeadList"
       @column-config-current-change="handleColumnConfigCurrentChange"
       @column-config-save="handleColumnConfigSave"
       @column-config-reset="handleColumnConfigReset"

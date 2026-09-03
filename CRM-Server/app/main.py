@@ -162,10 +162,11 @@ async def startup_event():
     logger.info("应用启动，开始初始化角色权限...")
     init_roles_permissions()
 
-    logger.info("恢复未完成客户活动 AI workflow...")
-    from app.services.customer_activity_processing_service import customer_activity_processing_service
-    recovered_count = await customer_activity_processing_service.recover_unfinished()
-    logger.info("已重新派发 %s 个未完成客户活动 AI workflow", recovered_count)
+    logger.info("启动客户活动 AI 持久任务恢复扫描...")
+    from app.tasks.customer_activity_ai_job_recovery import (
+        start_customer_activity_ai_job_recovery_scheduler,
+    )
+    start_customer_activity_ai_job_recovery_scheduler()
 
     logger.info("启动客户证据向量同步任务...")
     from app.tasks.customer_evidence_sync import start_customer_evidence_sync_scheduler
@@ -195,14 +196,26 @@ async def startup_event():
     )
     start_customer_activity_post_commit_recovery_scheduler()
 
+    logger.info("启动 Agent 商机建议持久任务恢复扫描...")
+    from app.tasks.customer_opportunity_suggestion_recovery import (
+        start_customer_opportunity_suggestion_recovery_scheduler,
+    )
+    start_customer_opportunity_suggestion_recovery_scheduler()
+
     logger.info("审批超时自动催办任务已停用，催办改为审批中心手动触发")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """应用关闭时停止后台调度任务"""
+    from app.tasks.customer_activity_ai_job_recovery import (
+        stop_customer_activity_ai_job_recovery_scheduler,
+    )
     from app.tasks.customer_activity_post_commit_recovery import (
         stop_customer_activity_post_commit_recovery_scheduler,
+    )
+    from app.tasks.customer_opportunity_suggestion_recovery import (
+        stop_customer_opportunity_suggestion_recovery_scheduler,
     )
     from app.tasks.customer_evidence_sync import stop_customer_evidence_sync_scheduler
     from app.tasks.customer_intelligence_backfill import stop_customer_intelligence_backfill_scheduler
@@ -211,7 +224,9 @@ async def shutdown_event():
         stop_follow_up_confirmation_delivery_recovery_scheduler,
     )
 
+    stop_customer_activity_ai_job_recovery_scheduler()
     stop_customer_activity_post_commit_recovery_scheduler()
+    stop_customer_opportunity_suggestion_recovery_scheduler()
     stop_follow_up_confirmation_delivery_recovery_scheduler()
     stop_customer_intelligence_backfill_scheduler()
     from app.tasks.customer_intelligence_reconciliation import stop_customer_intelligence_reconciliation_scheduler

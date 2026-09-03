@@ -6,7 +6,9 @@ from typing import TYPE_CHECKING, Literal, Protocol
 from uuid import uuid4
 
 import httpx
+from pydantic import ValidationError
 
+from app.schemas.sales_commitment import FollowUpTaskDetailResponse
 from app.services.agent.query.adapters import (
     CompletedWorkAPIAdapter,
     CRMQueryAdapter,
@@ -17,10 +19,11 @@ from app.services.agent.query.adapters import (
     DeploymentInfosAPIAdapter,
     FollowUpTasksAPIAdapter,
 )
+from app.services.agent.query.registry import FollowUpTaskDetailRequest
 from app.services.agent.query.catalog import CRMQueryCatalog
 from app.services.agent.query.cursor import CRMQueryCursorError
 from app.services.agent.query.policy import QueryPolicyError, QueryPolicyValidator
-from app.services.agent.query.schemas import CRMQueryResult, CRMQuerySpec, QueryError
+from app.services.agent.query.schemas import CRMQueryResult, CRMQuerySpec, EntityRef, GroundedFact, QueryError
 from app.services.agent.tools.api_client import CRMAPIClientError, InternalCRMAPIClient
 
 if TYPE_CHECKING:
@@ -41,6 +44,95 @@ class CRMQueryExecutionError(RuntimeError):
     def __init__(self, error: QueryError) -> None:
         super().__init__(error.message)
         self.error = error
+
+
+class FollowUpTaskDetailAPIAdapter:
+    """Read one server-authorized task through the existing detail endpoint."""
+
+    def __init__(self, api_client: InternalCRMAPIClient) -> None:
+        self._api_client = api_client
+
+    async def read(
+        self,
+        request: FollowUpTaskDetailRequest,
+        context: AgentToolContext,
+    ) -> CRMQueryResult:
+        task_ref = request.task_ref
+        query_id = f"qry_{uuid4().hex}"
+        try:
+            payload = await self._api_client.request(
+                "GET",
+                f"/v1/follow-up-tasks/{task_ref.public_id}",
+                context.authorization,
+            )
+            detail = FollowUpTaskDetailResponse.model_validate(payload)
+        except CRMAPIClientError as exc:
+            if exc.status_code == 404:
+                return CRMQueryResult(
+                    query_id=query_id,
+                    resource="follow_up_task",
+                    status="EMPTY",
+                    rows=[],
+                    entity_refs=[],
+                    total=0,
+                )
+            if exc.status_code == 403:
+                raise CRMQueryExecutionError(
+                    QueryError(
+                        code="PERMISSION_DENIED",
+                        message="无权查看该待办，或待办已不在当前权限范围内。",
+                        retryable=False,
+                    )
+                ) from exc
+            if exc.status_code == 408 or exc.status_code == 504:
+                raise CRMQueryExecutionError(
+                    QueryError(code="UPSTREAM_TIMEOUT", message="CRM API query timed out", retryable=True)
+                ) from exc
+            if exc.status_code == 429 or (exc.status_code is not None and exc.status_code >= 500):
+                raise CRMQueryExecutionError(
+                    QueryError(
+                        code="UPSTREAM_UNAVAILABLE",
+                        message="CRM API is temporarily unavailable",
+                        retryable=True,
+                    )
+                ) from exc
+            raise CRMQueryExecutionError(
+                QueryError(code="INTERNAL_ERROR", message="CRM API query failed", retryable=False)
+            ) from exc
+        except ValidationError as exc:
+            raise CRMQueryExecutionError(
+                QueryError(
+                    code="INTERNAL_ERROR",
+                    message="CRM API returned an invalid response",
+                    retryable=False,
+                )
+            ) from exc
+
+        row = detail.model_dump(mode="json")
+        entity_ref = EntityRef(
+            ref_id=task_ref.ref_id,
+            resource="follow_up_task",
+            public_id=task_ref.public_id,
+            display_name=detail.title,
+        )
+        return CRMQueryResult(
+            query_id=query_id,
+            resource="follow_up_task",
+            status="SUCCESS",
+            rows=[row],
+            entity_refs=[entity_ref],
+            total=1,
+            facts=[
+                GroundedFact(
+                    fact_id=f"fact_{task_ref.public_id}",
+                    label=detail.title,
+                    value=row,
+                    source="CRM_API",
+                    source_ref=task_ref.public_id,
+                    entity_ref=entity_ref,
+                )
+            ],
+        )
 
 
 class DefaultCRMQueryExecutor:
@@ -125,6 +217,7 @@ class DefaultCRMQueryExecutor:
             next_cursor=page.next_cursor,
             applied_filters=validated.filters,
             applied_sorts=validated.sorts,
+            facts=page.facts,
             warnings=page.warnings,
         )
 

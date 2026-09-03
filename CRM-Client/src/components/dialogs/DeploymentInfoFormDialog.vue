@@ -9,6 +9,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
@@ -16,6 +26,7 @@ import { InputField } from '@/components/crmwolf'
 import deploymentApi, { type DeploymentInfoResponse } from '@/api/deployment'
 import type { DeploymentInfoCreate } from '@/schemas/deployment'
 import { handleApiError } from '@/utils/errorHandler'
+import { useDialogCloseGuard } from '@/composables/useDialogCloseGuard'
 
 interface Props {
   open: boolean
@@ -48,6 +59,7 @@ const form = reactive<DeploymentForm>({
   serverAddress: '',
   isDefault: false,
 })
+const initialFormSnapshot = ref(JSON.stringify(form))
 
 const errors = reactive<DeploymentFormErrors>({
   deploymentName: '',
@@ -58,6 +70,14 @@ const visible = computed({
   get: (): boolean => props.open,
   set: (value: boolean): void => emit('update:open', value),
 })
+const isDirty = computed(() => JSON.stringify(form) !== initialFormSnapshot.value)
+
+const closeGuard = useDialogCloseGuard({
+  isDirty,
+  submitting,
+  emitOpen: (open) => emit('update:open', open),
+})
+const showConfirmDialog = closeGuard.showConfirmDialog
 
 function clearErrors(): void {
   errors.deploymentName = ''
@@ -69,6 +89,7 @@ function resetForm(): void {
   form.serverAddress = ''
   form.isDefault = false
   clearErrors()
+  initialFormSnapshot.value = JSON.stringify(form)
 }
 
 function validateForm(): boolean {
@@ -106,6 +127,7 @@ async function handleSubmit(): Promise<void> {
   try {
     const createdDeployment = await deploymentApi.create(payload)
     toast.success('部署信息已新增')
+    closeGuard.approveClose()
     visible.value = false
     emit('success', createdDeployment)
   } catch (error: unknown) {
@@ -116,26 +138,40 @@ async function handleSubmit(): Promise<void> {
 }
 
 function handleCancel(): void {
-  if (!submitting.value) {
-    visible.value = false
-  }
+  closeGuard.requestClose()
+}
+
+function handleOpenChange(open: boolean): void {
+  closeGuard.handleOpenChange(open)
+}
+
+function confirmCancel(): void {
+  closeGuard.confirmDiscard()
+}
+
+function continueEditing(): void {
+  closeGuard.continueEditing()
 }
 
 watch(
   () => props.open,
   (open) => {
     if (open) {
+      closeGuard.reset()
       resetForm()
     } else {
+      if (closeGuard.handleParentClose()) return
+      closeGuard.reset()
       clearErrors()
     }
   },
   { immediate: true }
 )
+
 </script>
 
 <template>
-  <Dialog v-model:open="visible">
+  <Dialog :open="props.open" @update:open="handleOpenChange">
     <DialogContent class="deployment-dialog">
       <DialogHeader>
         <DialogTitle>新增部署信息</DialogTitle>
@@ -186,6 +222,21 @@ watch(
       </form>
     </DialogContent>
   </Dialog>
+
+  <AlertDialog :open="showConfirmDialog" @update:open="closeGuard.handleConfirmOpenChange">
+    <AlertDialogContent>
+      <AlertDialogHeader>
+        <AlertDialogTitle>放弃更改？</AlertDialogTitle>
+        <AlertDialogDescription>
+          已填写部署信息，关闭后这些内容不会保存。
+        </AlertDialogDescription>
+      </AlertDialogHeader>
+      <AlertDialogFooter>
+        <AlertDialogCancel @click="continueEditing">继续编辑</AlertDialogCancel>
+        <AlertDialogAction @click="confirmCancel">放弃更改</AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>
 </template>
 
 <style scoped lang="scss">

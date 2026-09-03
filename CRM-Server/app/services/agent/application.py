@@ -11,7 +11,7 @@ from time import monotonic
 from typing import TYPE_CHECKING
 
 from fastapi import HTTPException
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 
 from app.core.config import get_settings
 from app.core.database import SessionLocal
@@ -771,7 +771,7 @@ class AgentApplicationService:
     def _action_claim_succeeded(dispatch: RootDispatchResult) -> bool:
         return (
             isinstance(dispatch, WorkflowDispatchResult)
-            and dispatch.workflow_result.status in {"WAITING", "COMPLETED", "CANCELLED"}
+            and dispatch.workflow_result.status in {"WAITING", "COMPLETED", "CANCELLED", "SKIPPED"}
         )
 
     def _settle_action_claim(
@@ -798,6 +798,11 @@ class AgentApplicationService:
                 session_id=session_id,
                 client_request_id=client_request_id,
                 result_message_id=result_message_id,
+                submitted_values=(
+                    prepared.root_input.values
+                    if isinstance(prepared.root_input, InteractionTurnInput)
+                    else None
+                ),
             )
             return
         self.action_repository.release_consumption(
@@ -819,6 +824,7 @@ class AgentApplicationService:
         session_id: int,
         client_request_id: UUID | str,
         result_message_id: int,
+        submitted_values: dict[str, JsonValue] | None = None,
     ) -> None:
         """Make one successfully submitted action permanently read-only."""
 
@@ -838,6 +844,7 @@ class AgentApplicationService:
             session_id=session_id,
             client_request_id=client_request_id,
             result_message_id=result_message_id,
+            submitted_values=submitted_values,
         )
 
     def _late_bind_durable_work(

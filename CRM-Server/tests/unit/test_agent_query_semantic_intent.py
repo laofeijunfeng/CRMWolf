@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from app.services.agent.orchestrator.contracts import RootRuntimeContext
+from app.services.agent.query import semantic_intent as semantic_intent_module
 from app.services.agent.query.agent import CRMQueryAgentModelConfig
 from app.services.agent.query.semantic_intent import (
     CRMQuerySemanticIntent,
@@ -140,6 +141,32 @@ async def test_unspecified_semantic_time_is_not_silently_treated_as_this_week() 
     result = await resolver.resolve("以后我要做什么", model_config=_config(), runtime=RootRuntimeContext())
 
     assert result.temporal.kind == "unspecified"
+
+
+@pytest.mark.asyncio
+async def test_resolver_default_budget_matches_provider_latency_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    budgets: list[float] = []
+
+    class RecordingTimeout:
+        def __init__(self, timeout: float) -> None:
+            budgets.append(timeout)
+
+        async def __aenter__(self) -> RecordingTimeout:
+            return self
+
+        async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> bool:
+            return False
+
+    monkeypatch.setattr(semantic_intent_module.asyncio, "timeout", RecordingTimeout)
+    resolver = LLMQuerySemanticIntentResolver(chat_model_factory=FakeModelFactory({
+        "scope": "global_work",
+        "resource": "follow_up_tasks",
+        "confidence": 0.95,
+    }))
+
+    await resolver.resolve("查询我接下来要做什么", model_config=_config(), runtime=RootRuntimeContext())
+
+    assert budgets == [30.0]
 
 
 class RaisingModelFactory:

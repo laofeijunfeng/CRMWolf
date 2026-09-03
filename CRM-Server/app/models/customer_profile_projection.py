@@ -62,7 +62,7 @@ class CustomerProfileProjectionVersion(Base):
     )
     schema_version: Mapped[str] = mapped_column(String(20), nullable=False, comment="档案Schema版本")
     profile_version: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="客户内单调递增版本号")
-    publication_status: Mapped[str] = mapped_column(String(20), nullable=False, comment="发布状态")
+    publication_status: Mapped[str] = mapped_column(String(32), nullable=False, comment="发布状态")
     current_situation_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, comment="当前情况")
     current_journeys_json: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False, comment="当前业务旅程")
     important_changes_json: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False, comment="重要变化")

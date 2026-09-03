@@ -12,12 +12,14 @@ from pydantic import ValidationError
 from app.services.agent.workflow.contracts import (
     WorkflowActionPlan,
     WorkflowCancelledResult,
+    WorkflowSkippedResult,
     WorkflowCompletedResult,
     WorkflowEffectResult,
     WorkflowFailedResult,
     WorkflowInteraction,
     WorkflowInterruptPayload,
     WorkflowRef,
+    WorkflowResolvedCustomer,
     WorkflowResumeInput,
     WorkflowRuntimeContext,
     WorkflowSupplement,
@@ -38,6 +40,7 @@ from app.services.agent.workflow.progress import (
     planning_progress,
     required_input_cancelled_progress,
     required_input_failed_progress,
+    skipped_progress,
     understanding_progress,
 )
 
@@ -98,6 +101,8 @@ class WorkflowSubgraph:
         graph.add_node("await_confirmation", self._await_confirmation)
         graph.add_node("execute", self._execute)
         graph.add_node("cancel", self._cancel)
+        graph.add_node("cancel_terminal", self._cancel_terminal)
+        graph.add_node("skip_terminal", self._skip_terminal)
         graph.add_edge(START, "initialize")
         graph.add_edge("initialize", "plan")
         graph.add_conditional_edges(
@@ -107,6 +112,8 @@ class WorkflowSubgraph:
                 "NEEDS_INPUT": "await_required_input",
                 "CONFIRM": "await_confirmation",
                 "EXECUTE": "execute",
+                "CANCELLED": "cancel_terminal",
+                "SKIPPED": "skip_terminal",
                 "END": END,
             },
         )
@@ -132,6 +139,8 @@ class WorkflowSubgraph:
         )
         graph.add_edge("execute", END)
         graph.add_edge("cancel", END)
+        graph.add_edge("cancel_terminal", END)
+        graph.add_edge("skip_terminal", END)
         # Inherit Root's checkpointer so LangGraph assigns a task-scoped child
         # namespace to every Workflow execution. ``checkpointer=True`` creates a
         # shared ``workflow_subgraph`` namespace and allows independent suspended
@@ -213,6 +222,11 @@ class WorkflowSubgraph:
         except WorkflowPlanningNeedsInput as exc:
             writer(awaiting_required_input_progress().model_dump(mode="json"))
             return {
+                "workflow_input": (
+                    exc.checkpoint_request.model_dump(mode="json")
+                    if exc.checkpoint_request is not None
+                    else raw_request
+                ),
                 "workflow_plan": None,
                 "workflow_interaction": exc.interaction.model_dump(mode="json"),
                 "workflow_resume": None,
@@ -241,12 +255,42 @@ class WorkflowSubgraph:
                     outcome="RUNNING",
                 ).model_dump(mode="json")
             )
+        request = self._cache_resolved_customer(request, plan)
         return {
+            "workflow_input": request.model_dump(mode="json"),
             "workflow_plan": plan.model_dump(mode="json"),
             "workflow_interaction": None,
             "workflow_resume": None,
             "workflow_result": None,
         }
+
+    @staticmethod
+    def _cache_resolved_customer(
+        request: WorkflowTurnInput,
+        plan: WorkflowActionPlan,
+    ) -> WorkflowTurnInput:
+        """Persist the resolved customer in checkpoint state, not in tool payloads."""
+
+        for command in plan.commands:
+            customer_id = command.payload.get("customer_id")
+            customer_name = command.payload.get("customer_name")
+            if not isinstance(customer_id, str) or not customer_id.startswith("cus_"):
+                continue
+            if not isinstance(customer_name, str) or not customer_name.strip():
+                continue
+            lookup_name = request.resolved_customer.lookup_name if request.resolved_customer else None
+            if lookup_name is None:
+                lookup_name = customer_name.strip()
+            return request.model_copy(
+                update={
+                    "resolved_customer": WorkflowResolvedCustomer(
+                        customer_id=customer_id,
+                        customer_name=customer_name.strip(),
+                        lookup_name=lookup_name,
+                    )
+                }
+            )
+        return request
 
     @staticmethod
     def _route_after_plan(state: WorkflowSubgraphState) -> str:
@@ -258,6 +302,10 @@ class WorkflowSubgraph:
             plan = WorkflowActionPlan.model_validate(state["workflow_plan"])
         except (KeyError, ValidationError):
             return "END"
+        if plan.terminal_outcome == "CANCELLED":
+            return "CANCELLED"
+        if plan.terminal_outcome == "SKIPPED":
+            return "SKIPPED"
         if plan.execution_authorization == "CONFIRMATION_REQUIRED":
             return "CONFIRM"
         if plan.execution_authorization in {"AUTO_EXECUTE_AUTHORIZED", "RESUME_AUTHORIZED"}:
@@ -492,6 +540,50 @@ class WorkflowSubgraph:
                 message=effect_result.message,
                 retryable=effect_result.retryable,
                 progress=failed_progress,
+            ).model_dump(mode="json")
+        }
+
+    @staticmethod
+    def _cancel_terminal(state: WorkflowSubgraphState) -> WorkflowSubgraphState:
+        workflow_id = state["workflow_id"]
+        try:
+            plan = WorkflowActionPlan.model_validate(state["workflow_plan"])
+        except (KeyError, ValidationError):
+            return {
+                "workflow_result": WorkflowFailedResult(
+                    workflow_ref=WorkflowRef(workflow_id=workflow_id),
+                    code="WORKFLOW_PLAN_INVALID",
+                    message="工作流计划无效。",
+                    progress=planning_failed_progress(),
+                ).model_dump(mode="json")
+            }
+        return {
+            "workflow_result": WorkflowCancelledResult(
+                workflow_ref=WorkflowRef(workflow_id=workflow_id),
+                assistant_text=plan.cancelled_text,
+                progress=confirmation_cancelled_progress(),
+            ).model_dump(mode="json")
+        }
+
+    @staticmethod
+    def _skip_terminal(state: WorkflowSubgraphState) -> WorkflowSubgraphState:
+        workflow_id = state["workflow_id"]
+        try:
+            plan = WorkflowActionPlan.model_validate(state["workflow_plan"])
+        except (KeyError, ValidationError):
+            return {
+                "workflow_result": WorkflowFailedResult(
+                    workflow_ref=WorkflowRef(workflow_id=workflow_id),
+                    code="WORKFLOW_PLAN_INVALID",
+                    message="工作流计划无效。",
+                    progress=planning_failed_progress(),
+                ).model_dump(mode="json")
+            }
+        return {
+            "workflow_result": WorkflowSkippedResult(
+                workflow_ref=WorkflowRef(workflow_id=workflow_id),
+                progress=skipped_progress(),
+                reason=plan.terminal_reason or "workflow_terminal_noop",
             ).model_dump(mode="json")
         }
 

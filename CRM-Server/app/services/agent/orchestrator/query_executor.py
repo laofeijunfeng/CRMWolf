@@ -106,6 +106,13 @@ class CRMQueryAgentExecutor:
         # did not provide its preflight result; otherwise a selected customer
         # could silently fall through to an unconstrained Query Agent call.
         if semantic_intent is None:
+            if request.text in runtime.semantic_intent_cache:
+                semantic_intent = runtime.semantic_intent_cache[request.text]
+            elif request.text in runtime.semantic_intent_failures:
+                raise QuerySemanticResolutionUnavailableError(
+                    "Query semantic intent resolution is unavailable"
+                )
+        if semantic_intent is None:
             try:
                 semantic_intent = await self._semantic_intent_resolver.resolve(
                     request.text,
@@ -113,9 +120,22 @@ class CRMQueryAgentExecutor:
                     runtime=runtime,
                 )
             except (QuerySemanticIntentUnavailableError, QuerySemanticIntentInvalidError) as exc:
+                runtime.semantic_intent_failures.add(request.text)
                 raise QuerySemanticResolutionUnavailableError(
                     "Query semantic intent resolution is unavailable"
                 ) from exc
+            runtime.semantic_intent_cache[request.text] = semantic_intent
+
+        # This is a server-owned execution hint, not a model-controlled query
+        # field. It is derived only after the semantic contract has been
+        # resolved and only enables semantic retrieval for task-reference
+        # queries. Ordinary structured QuerySpec calls remain unchanged.
+        if (
+            semantic_intent.resource == "follow_up_tasks"
+            and semantic_intent.query_goal in {"search", "get_detail", "get_status"}
+            and semantic_intent.task_text is not None
+        ):
+            tool_context.query_retrieval_mode = "semantic_filter"
 
         allowed_tool_names: list[str] | None = None
         authoritative_filters: list[CRMFilter] = []
@@ -152,6 +172,19 @@ class CRMQueryAgentExecutor:
                 return self._unsupported_global_work_clarification(
                     runtime.query_model_config.model,
                 )
+            if semantic_intent.resource == "follow_up_tasks" and self._task_reference_is_specific(semantic_intent):
+                task_refs = [ref for ref in entity_refs if ref.resource == "follow_up_task"]
+                if len(task_refs) > 1:
+                    return self._task_reference_ambiguity_clarification(
+                        runtime.query_model_config.model,
+                    )
+                if len(task_refs) == 1:
+                    allowed_tool_names = ["get_follow_up_task_detail"]
+                    authoritative_filters = []
+                elif semantic_intent.task_text is None:
+                    return self._task_reference_clarification(runtime.query_model_config.model)
+                else:
+                    allowed_tool_names = ["query_follow_up_tasks", "get_follow_up_task_detail"]
 
         if semantic_intent is not None and semantic_intent.scope == "customer_scoped":
             tool_name = self._customer_tool_name(semantic_intent)
@@ -181,6 +214,20 @@ class CRMQueryAgentExecutor:
                 )
             authoritative_filters.extend(customer_filters)
 
+            if semantic_intent.resource == "follow_up_tasks" and self._task_reference_is_specific(semantic_intent):
+                task_refs = [ref for ref in entity_refs if ref.resource == "follow_up_task"]
+                if len(task_refs) > 1:
+                    return self._task_reference_ambiguity_clarification(
+                        runtime.query_model_config.model,
+                    )
+                if len(task_refs) == 1:
+                    allowed_tool_names = ["get_follow_up_task_detail"]
+                    authoritative_filters = []
+                elif semantic_intent.task_text is None:
+                    return self._task_reference_clarification(runtime.query_model_config.model)
+                else:
+                    allowed_tool_names = ["query_follow_up_tasks", "get_follow_up_task_detail"]
+
         result = await self._query_agent.run(
             CRMQueryAgentRequest(
                 user_message=request.text,
@@ -189,6 +236,8 @@ class CRMQueryAgentExecutor:
                 allowed_tool_names=allowed_tool_names,
                 authoritative_filters=authoritative_filters,
                 authoritative_scope=authoritative_scope,
+                query_goal=semantic_intent.query_goal if semantic_intent is not None else "list",
+                task_text=semantic_intent.task_text if semantic_intent is not None else None,
             ),
             tool_context,
             runtime.query_model_config,
@@ -210,31 +259,46 @@ class CRMQueryAgentExecutor:
         return mapping[intent.resource or "customer_context"]
 
     @staticmethod
-    def _customer_work_constraints(intent: CRMQuerySemanticIntent) -> list[CRMFilter] | None:
-        """Turn customer-scoped work time into server-owned filters.
+    def _task_reference_is_specific(intent: CRMQuerySemanticIntent) -> bool:
+        return intent.query_goal in {"search", "get_detail", "get_status"}
 
-        Customer identity is bound separately, but the Query Agent must not be
-        left to reinterpret the temporal part of a customer work question.
-        ``None`` means the closed contract is too ambiguous to execute safely;
-        an empty list is a valid unbounded customer task query.
-        """
+    @classmethod
+    def _follow_up_task_constraints(cls, intent: CRMQuerySemanticIntent) -> list[CRMFilter]:
+        """Build safe task filters without deciding meaning from lexical rules."""
+
+        filters: list[CRMFilter] = [
+            CRMFilter(
+                field="status",
+                operator="eq",
+                value="all" if cls._task_reference_is_specific(intent) else "open",
+            )
+        ]
+        if intent.task_text is not None:
+            filters.append(
+                CRMFilter(field="tracking_content", operator="contains", value=intent.task_text)
+            )
+
+        temporal = intent.temporal
+        if temporal.kind == "custom":
+            filters.append(
+                CRMFilter(
+                    field="tracking_time",
+                    operator="between",
+                    value=[temporal.start_at, temporal.end_at],
+                )
+            )
+        elif temporal.kind in {"today", "tomorrow", "this_week", "next_week", "overdue"}:
+            filters.append(CRMFilter(field="due_window", operator="eq", value=temporal.kind))
+        elif temporal.kind != "unspecified":
+            raise ValueError(f"unsupported task temporal kind: {temporal.kind}")
+        return filters
+
+    @classmethod
+    def _customer_work_constraints(cls, intent: CRMQuerySemanticIntent) -> list[CRMFilter] | None:
+        """Turn customer-scoped work meaning into server-owned constraints."""
 
         if intent.resource == "follow_up_tasks":
-            filters = [CRMFilter(field="status", operator="eq", value="open")]
-            temporal = intent.temporal
-            if temporal.kind == "custom":
-                filters.append(
-                    CRMFilter(
-                        field="tracking_time",
-                        operator="between",
-                        value=[temporal.start_at, temporal.end_at],
-                    )
-                )
-            elif temporal.kind in {"today", "tomorrow", "this_week", "next_week", "overdue"}:
-                filters.append(CRMFilter(field="due_window", operator="eq", value=temporal.kind))
-            elif temporal.kind not in {"unspecified"}:
-                return None
-            return filters
+            return cls._follow_up_task_constraints(intent)
 
         if intent.resource == "completed_work":
             temporal = intent.temporal
@@ -248,34 +312,19 @@ class CRMQueryAgentExecutor:
                 ]
             if temporal.kind in {"today", "this_week", "last_week", "this_month"}:
                 return [CRMFilter(field="window", operator="eq", value=temporal.kind)]
-            # completed-work API has a this_week default. Do not let that
-            # implementation default answer an underspecified question.
             if temporal.kind == "unspecified":
-                return None
+                return [CRMFilter(field="window", operator="eq", value="this_week")]
             return None
 
         return []
 
-    @staticmethod
-    def _global_work_constraints(intent: CRMQuerySemanticIntent) -> tuple[list[str], list[CRMFilter]]:
-        temporal = intent.temporal
+    @classmethod
+    def _global_work_constraints(cls, intent: CRMQuerySemanticIntent) -> tuple[list[str], list[CRMFilter]]:
         if intent.resource == "follow_up_tasks":
-            filters = [CRMFilter(field="status", operator="eq", value="open")]
-            if temporal.kind == "custom":
-                filters.append(
-                    CRMFilter(
-                        field="tracking_time",
-                        operator="between",
-                        value=[temporal.start_at, temporal.end_at],
-                    )
-                )
-            elif temporal.kind in {"today", "tomorrow", "this_week", "next_week", "overdue"}:
-                filters.append(CRMFilter(field="due_window", operator="eq", value=temporal.kind))
-            else:
-                return [], []
-            return ["query_follow_up_tasks"], filters
+            return ["query_follow_up_tasks"], cls._follow_up_task_constraints(intent)
 
         if intent.resource == "completed_work":
+            temporal = intent.temporal
             if temporal.kind == "custom":
                 return ["query_completed_work"], [
                     CRMFilter(
@@ -286,9 +335,49 @@ class CRMQueryAgentExecutor:
                 ]
             if temporal.kind in {"today", "this_week", "last_week", "this_month"}:
                 return ["query_completed_work"], [
-                    CRMFilter(field="window", operator="eq", value=temporal.kind),
+                    CRMFilter(field="window", operator="eq", value=temporal.kind)
+                ]
+            if temporal.kind == "unspecified":
+                return ["query_completed_work"], [
+                    CRMFilter(field="window", operator="eq", value="this_week")
                 ]
         return [], []
+
+    @staticmethod
+    def _task_reference_ambiguity_clarification(model: str) -> CRMQueryAgentResult:
+        return CRMQueryAgentResult(
+            response=CRMQueryAgentResponse(
+                status="CLARIFICATION_REQUIRED",
+                clarification_question="我找到了多个相近的待办，请补充待办名称或内容，我再帮你确认。",
+            ),
+            trace=CRMQueryAgentTrace(
+                model=model,
+                tool_names=[],
+                tool_calls=[],
+                tool_call_count=0,
+                total_entity_count=0,
+                elapsed_ms=0,
+                stop_reason="CLARIFICATION_REQUIRED",
+            ),
+        )
+
+    @staticmethod
+    def _task_reference_clarification(model: str) -> CRMQueryAgentResult:
+        return CRMQueryAgentResult(
+            response=CRMQueryAgentResponse(
+                status="CLARIFICATION_REQUIRED",
+                clarification_question="请补充待办的名称或内容，我再帮你确认当前状态。",
+            ),
+            trace=CRMQueryAgentTrace(
+                model=model,
+                tool_names=[],
+                tool_calls=[],
+                tool_call_count=0,
+                total_entity_count=0,
+                elapsed_ms=0,
+                stop_reason="CLARIFICATION_REQUIRED",
+            ),
+        )
 
     @staticmethod
     def _ambiguous_semantic_intent_clarification(model: str) -> CRMQueryAgentResult:
@@ -296,7 +385,7 @@ class CRMQueryAgentExecutor:
             response=CRMQueryAgentResponse(
                 status="CLARIFICATION_REQUIRED",
                 clarification_question=(
-                    "我还不能确定你要查询哪类 CRM 信息，请补充客户、事项或时间范围。"
+                    "我还不能确定你要查询哪类 CRM 信息，请补充客户、事项或时间范围。"  # noqa: RUF001
                 ),
             ),
             trace=CRMQueryAgentTrace(

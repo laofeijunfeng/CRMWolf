@@ -182,9 +182,30 @@ class ApprovalTransactionManager:
             if entity is None:
                 return (None, "业务单据不存在")
 
-            # 2. 验证 approval_phase 必须 = DRAFT 或 REJECTED
+            # 锁住业务单据行，串行化“检查状态 -> 创建审批”的关键区段。
+            # 这样两个并发提交不会都在 DRAFT 状态下创建审批实例。
+            entity_model = type(entity)
+            if hasattr(entity_model, "__table__") and hasattr(entity_model, "id"):
+                entity_query = db.query(entity_model).filter(entity_model.id == entity_id)
+                if hasattr(entity_model, "team_id"):
+                    entity_query = entity_query.filter(entity_model.team_id == team_id)
+                locked_entity = entity_query.with_for_update().first()
+                if locked_entity is not None:
+                    entity = locked_entity
+
+            # 2. 已在审批中的单据：幂等返回现有实例。
+            #    这条路径用于网络重试/用户重复点击，不改变正常用户路径，
+            #    也不会重复创建审批或重复发送通知。
             if hasattr(entity, 'approval_phase'):
                 approval_phase = self._approval_phase_value(entity.approval_phase)
+                if approval_phase == ApprovalPhase.PENDING_REVIEW.value:
+                    pending_approval = approval_crud.get_pending_by_entity(
+                        db, business_type, entity_id, team_id
+                    )
+                    if pending_approval is not None:
+                        return (pending_approval, "审批已在处理中")
+                    return (None, "单据正在审批中，但未找到审批实例，请刷新后确认结果")
+
                 allowed_phases = {
                     ApprovalPhase.DRAFT.value,
                     ApprovalPhase.REJECTED.value,

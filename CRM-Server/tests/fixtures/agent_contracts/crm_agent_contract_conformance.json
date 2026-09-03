@@ -15,7 +15,14 @@
         },
         "confidence": 0.98,
         "reason_code": "NEW_READ_ONLY_QUERY",
-        "evidence": []
+        "evidence": [],
+        "semantic_plan": {
+          "speech_act": "ASK_FACT",
+          "business_object": "CUSTOMER",
+          "operation": "READ",
+          "confidence": 0.98,
+          "evidence": []
+        }
       }
     },
     {

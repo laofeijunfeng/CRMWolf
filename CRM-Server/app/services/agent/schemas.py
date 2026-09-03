@@ -71,6 +71,7 @@ AgentTemporalKind = Literal[
 ]
 AgentTemporalDirection = Literal["past", "current", "next", "future"]
 AgentTemporalUnit = Literal["day", "week", "month", "year"]
+AgentNextActionStatus = Literal["CLEAR", "EXPLICITLY_NONE", "MISSING", "VAGUE"]
 
 
 class AgentCustomerEntity(BaseModel):
@@ -199,6 +200,13 @@ class AgentFollowUpQualityResult(BaseModel):
     missing_aspects: List[str] = Field(default_factory=list, description="需要用户补充的关键信息点")
     supplement_question: Optional[str] = Field(None, description="低于阈值时，只问一个补充问题")
     suggested_revision: Optional[str] = Field(None, description="不编造事实前提下的建议优化版本")
+    next_action_status: AgentNextActionStatus = Field(
+        "MISSING",
+        description=(
+            "下一步行动门禁状态：CLEAR=明确行动；EXPLICITLY_NONE=明确暂无下一步；"
+            "MISSING=未表达；VAGUE=只有无法执行的泛化表达"
+        ),
+    )
     principle_scores: Dict[str, AgentFollowUpPrincipleScore] = Field(default_factory=dict)
 
 

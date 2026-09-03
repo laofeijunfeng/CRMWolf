@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from typing import TYPE_CHECKING, Protocol
 
 from pydantic import TypeAdapter, ValidationError
@@ -20,6 +21,7 @@ from app.services.agent.query.schemas import (
     CRMQuerySpec,
     CRMResource,
     EntityRef,
+    GroundedFact,
     JsonDict,
     QueryWarning,
 )
@@ -40,6 +42,7 @@ class CRMQueryAdapterPage:
     total: int | None
     next_cursor: str | None
     warnings: list[QueryWarning]
+    facts: list[GroundedFact] = dataclass_field(default_factory=list)
 
 
 class CRMQueryAdapter(Protocol):
@@ -293,7 +296,7 @@ class DeploymentInfosAPIAdapter:
 class FollowUpTasksAPIAdapter:
     """Map follow-up task QuerySpec values to the existing list endpoint."""
 
-    _DEDICATED_FIELDS = frozenset({"status", "due_window", "customer_id"})
+    _DEDICATED_FIELDS = frozenset({"status", "due_window", "customer_id", "tracking_content"})
 
     def __init__(self, api_client: InternalCRMAPIClient) -> None:
         self._api_client = api_client
@@ -314,10 +317,32 @@ class FollowUpTasksAPIAdapter:
             params["customer_id"] = customer_id
             params["owner_scope"] = "customer"
 
+        semantic_task_text = None
+        if context.query_retrieval_mode == "semantic_filter":
+            semantic_task_text = next(
+                (
+                    condition.value
+                    for condition in spec.filters
+                    if condition.field == "tracking_content"
+                    and condition.operator in {"eq", "contains"}
+                ),
+                None,
+            )
+        if semantic_task_text is not None:
+            if not isinstance(semantic_task_text, str) or not semantic_task_text.strip():
+                raise ValueError("tracking_content semantic filter requires non-empty text")
+            params["query_text"] = semantic_task_text.strip()
+            params["retrieval_mode"] = "semantic_filter"
+
+        dedicated_fields = self._DEDICATED_FIELDS
+        if semantic_task_text is None:
+            # Preserve the legacy structured-filter transport unless the
+            # server explicitly enabled semantic retrieval for this turn.
+            dedicated_fields = dedicated_fields - {"tracking_content"}
         filters = [
             transported
             for item in spec.filters
-            if item.field not in self._DEDICATED_FIELDS
+            if item.field not in dedicated_fields
             for transported in self._list_filters(item)
         ]
         if filters:
@@ -402,5 +427,28 @@ class CompletedWorkAPIAdapter:
             raise CRMQueryAdapterResponseError("completed-work API returned an invalid response") from exc
         raw_items = [item.model_dump(mode="json") for item in page.items]
         rows = [_project(item, spec.projection) for item in raw_items]
+        try:
+            facts = [
+                GroundedFact(
+                    fact_id=item.fact_id,
+                    label=item.title,
+                    value=raw_item,
+                    source="CRM_API",
+                    source_ref=item.source_public_id,
+                )
+                for item, raw_item in zip(page.items, raw_items, strict=True)
+            ]
+        except ValidationError as exc:
+            # This is a response-contract failure, not a malformed query. Do
+            # not let the Query Agent spend a correction turn changing a
+            # perfectly valid QuerySpec because CRM returned unusable data.
+            raise CRMQueryAdapterResponseError("completed-work API returned an invalid response") from exc
         warnings = [_truncation_warning("completed_work", len(rows), page.available_total)] if page.truncated else []
-        return CRMQueryAdapterPage(rows, [], page.available_total, page.next_cursor, warnings)
+        return CRMQueryAdapterPage(
+            rows,
+            [],
+            page.available_total,
+            page.next_cursor,
+            warnings,
+            facts,
+        )

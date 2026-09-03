@@ -1,9 +1,10 @@
 import logging
-from datetime import date
+from datetime import date, datetime
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import and_, case, inspect, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.constants.approval_phase import ApprovalPhase
@@ -20,7 +21,14 @@ from app.core.deps import (
 )
 from app.crud.approval import approval_crud, approval_flow_crud
 from app.crud.customer_member import customer_member_crud
-from app.crud.payment import payment_plan_crud, payment_record_crud, query_pending_approval_me
+from app.crud.payment import (
+    PaymentRecordIdempotencyConflict,
+    PaymentRecordIdempotentReplay,
+    payment_plan_crud,
+    payment_record_crud,
+    payment_record_request_fingerprint,
+    query_pending_approval_me,
+)
 from app.crud.permission import permission_crud
 from app.crud.role import role_crud
 from app.crud.user import user_crud
@@ -33,8 +41,10 @@ from app.schemas.payment import (
     PaymentPlanResponse,
     PaymentPlanUpdate,
     PaymentRecordCreate,
+    PaymentRecordDetailResponse,
     PaymentRecordInfo,
     PaymentRecordListItem,
+    PaymentPlanStatusSummary,
     PaymentRecordListResponse,
     PaymentRecordResponse,
     PaymentRecordUpdate,
@@ -51,9 +61,21 @@ from app.services.customer_business_object_intelligence_service import (
     customer_business_object_intelligence_service,
 )
 from app.services.feishu_notification import feishu_notification_service
+from app.services.approval_transaction_manager import approval_transaction_manager
 
 router = APIRouter(prefix="/v1/payments", tags=["回款管理"])
 logger = logging.getLogger(__name__)
+
+
+def _payment_record_last_modified_time(record: PaymentRecord) -> datetime:
+    """Return the public last-modified timestamp for a payment record.
+
+    ``last_modified_time`` is the compatibility name used by the public
+    payment schemas, while the ORM stores the value as ``updated_time``.
+    Legacy records or lightweight test doubles may not expose ``updated_time``;
+    in that case creation time is the stable fallback.
+    """
+    return getattr(record, "updated_time", None) or record.created_time
 
 
 def _build_payment_plan_intelligence_change(
@@ -190,6 +212,16 @@ def _payment_record_response(record: PaymentRecord) -> PaymentRecordResponse:
         "owner_name": getattr(record, "owner_name", None),
         "commission_member_id": record.commission_member_id,
         "commission_member_name": record.commission_member_name,
+        "confirmation_status": (
+            record.confirmation_status.value
+            if hasattr(record.confirmation_status, "value")
+            else record.confirmation_status
+        ),
+        "updated_time": getattr(record, "updated_time", None),
+        # PaymentRecord historically exposed last_modified_time while the model
+        # uses updated_time. Keep the public response backward-compatible and
+        # always provide the required timestamp, including legacy rows.
+        "last_modified_time": _payment_record_last_modified_time(record),
     })
 
 
@@ -903,6 +935,7 @@ async def create_payment_record(
     record_data: PaymentRecordCreate,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(require_permission("payment:register")),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     db: Session = Depends(get_db)
 ):
     """
@@ -913,7 +946,29 @@ async def create_payment_record(
     2. 创建回款记录（CRUD 层）
     3. 发送审批通知（API 层 - 异步）
     """
+    # 直接调用该函数的内部任务/单元测试不会经过 FastAPI 依赖注入，
+    # 此时默认值可能是 Header 对象而不是字符串；按“未提供幂等键”处理。
+    if not isinstance(idempotency_key, str):
+        idempotency_key = None
+    if idempotency_key is not None:
+        idempotency_key = idempotency_key.strip()
+        if not idempotency_key or len(idempotency_key) > 128:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Idempotency-Key 必须为 1-128 个字符",
+            )
+
     plan = check_payment_view_permission(plan_id, team_id, current_user, db)
+    if idempotency_key:
+        existing = payment_record_crud.get_by_idempotency_key(db, team_id, idempotency_key)
+        if existing:
+            if existing.idempotency_fingerprint != payment_record_request_fingerprint(plan_id, record_data):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="幂等键已用于其他回款登记请求，请勿复用",
+                )
+            return _payment_record_response(existing)
+
     _validate_payment_commission_member(
         db,
         team_id=team_id,
@@ -936,7 +991,8 @@ async def create_payment_record(
             record_data,
             str(current_user.id),
             current_user.name,
-            team_id
+            team_id,
+            idempotency_key=idempotency_key,
         )
         await _trigger_payment_record_intelligence_refresh(
             db,
@@ -987,6 +1043,23 @@ async def create_payment_record(
 
         return _payment_record_response(record)
 
+    except PaymentRecordIdempotentReplay as e:
+        # 并发请求在计划锁后发现首个请求已提交，直接复用结果，
+        # 不重新触发智能刷新或审批通知。
+        db.rollback()
+        return _payment_record_response(e.record)
+    except PaymentRecordIdempotencyConflict as e:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except IntegrityError:
+        db.rollback()
+        # 并发重试可能由唯一索引拦截；若已有同一请求结果，直接返回它。
+        if idempotency_key:
+            existing = payment_record_crud.get_by_idempotency_key(db, team_id, idempotency_key)
+            if existing and existing.idempotency_fingerprint == payment_record_request_fingerprint(plan_id, record_data):
+                return _payment_record_response(existing)
+        logger.error("[Payment] 回款登记唯一性冲突", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="回款登记发生并发冲突，请刷新后确认结果")
     except ValueError as e:
         db.rollback()
         raise HTTPException(
@@ -1011,7 +1084,168 @@ def get_payment_records(
 ):
     check_payment_view_permission(plan_id, team_id, current_user, db)
     
-    return [_payment_record_response(record) for record in payment_record_crud.get_by_plan_id(db, plan_id)]
+    return [
+        _payment_record_response(record)
+        for record in payment_record_crud.get_by_plan_id(db, plan_id, team_id)
+    ]
+
+
+def _payment_approval_info(
+    db: Session, approval: Approval | None, team_id: int
+) -> dict | None:
+    """构建回款详情需要的审批状态，避免前端自行推断最终状态。"""
+    if approval is None:
+        return None
+
+    approval_records = (
+        db.query(ApprovalRecord)
+        .filter(
+            ApprovalRecord.approval_id == approval.id,
+            ApprovalRecord.team_id == team_id,
+        )
+        .order_by(ApprovalRecord.created_time)
+        .all()
+    )
+    nodes_info = []
+    if approval.flow_id:
+        flow_nodes = (
+            db.query(ApprovalNode)
+            .filter(ApprovalNode.flow_id == approval.flow_id)
+            .order_by(ApprovalNode.node_order)
+            .all()
+        )
+        for node in flow_nodes:
+            node_records = [record for record in approval_records if record.node_id == node.id]
+            final_record = node_records[-1] if node_records else None
+            node_status = "PENDING"
+            if final_record is not None:
+                node_status = {
+                    "SUBMIT": "SUBMIT",
+                    "APPROVE": "APPROVE",
+                    "REJECT": "REJECT",
+                }.get(final_record.action, final_record.action)
+
+            approver_id = final_record.approver_id if final_record else None
+            approver_name = final_record.approver_name if final_record else None
+            if node_status == "APPROVE":
+                approve_record = next(
+                    (record for record in reversed(node_records) if record.action == "APPROVE"),
+                    None,
+                )
+                if approve_record is not None:
+                    approver_id = approve_record.approver_id
+                    approver_name = approve_record.approver_name
+
+            nodes_info.append({
+                "id": node.id,
+                "node_order": node.node_order,
+                "node_name": node.node_name,
+                "approve_role": node.approve_role,
+                "status": node_status,
+                "approver_id": approver_id,
+                "approver_name": approver_name,
+                "comment": final_record.comment if final_record else None,
+            })
+
+    return {
+        "id": approval.id,
+        "status": approval.status,
+        "current_approver_name": _get_current_approver_names(db, approval, team_id),
+        "nodes": nodes_info,
+    }
+
+
+def _payment_record_detail_response(
+    record: PaymentRecord,
+    team_id: int,
+    current_user,
+    db: Session,
+) -> PaymentRecordDetailResponse:
+    """Build the authoritative payment detail response used by recovery flows."""
+    check_payment_view_permission(record.payment_plan_id, team_id, current_user, db)
+    plan = record.payment_plan
+    if plan is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="回款记录所属计划不存在，请联系管理员处理",
+        )
+
+    approval = record.approval
+    if approval is None:
+        approval = (
+            db.query(Approval)
+            .filter(
+                Approval.business_type == BusinessType.PAYMENT,
+                Approval.business_id == record.id,
+                Approval.team_id == team_id,
+            )
+            .order_by(Approval.created_time.desc())
+            .first()
+        )
+
+    response = _payment_record_response(record).model_dump()
+    response["approval_id"] = approval.id if approval else record.approval_id
+    response["approval"] = _payment_approval_info(db, approval, team_id)
+    response["confirmation_status"] = (
+        record.confirmation_status.value
+        if hasattr(record.confirmation_status, "value")
+        else record.confirmation_status
+    )
+    response["updated_time"] = getattr(record, "updated_time", None)
+    response["payment_plan"] = PaymentPlanStatusSummary(
+        id=plan.id,
+        plan_number=plan.plan_number,
+        stage_name=plan.stage_name,
+        planned_amount=float(plan.planned_amount),
+        paid_amount=float(plan.paid_amount),
+        remaining_amount=float(plan.remaining_amount),
+        due_date=plan.due_date,
+        status=plan.status,
+        last_modified_time=plan.last_modified_time,
+    )
+    return PaymentRecordDetailResponse(**response)
+
+
+@router.get(
+    "/payment-records/resolve",
+    response_model=PaymentRecordDetailResponse,
+    summary="按幂等键确认回款登记结果",
+    description="按系统生成的幂等键查询回款登记是否已落库，用于请求超时后的结果确认。",
+)
+def resolve_payment_record(
+    idempotency_key: str = Query(..., min_length=1, max_length=128),
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    record = payment_record_crud.get_by_idempotency_key(db, team_id, idempotency_key.strip())
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="回款登记结果尚未确认",
+        )
+    return _payment_record_detail_response(record, team_id, current_user, db)
+
+
+@router.get(
+    "/payment-records/{record_id}",
+    response_model=PaymentRecordDetailResponse,
+    summary="查询回款记录详情",
+    description="查询单条回款记录及审批、所属计划汇总状态，用于详情展示和请求超时后的最终状态确认。",
+)
+def get_payment_record_detail(
+    record_id: int,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    record = payment_record_crud.get_by_id(db, record_id, team_id)
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="回款记录不存在",
+        )
+    return _payment_record_detail_response(record, team_id, current_user, db)
 
 
 @router.put("/payment-records/{record_id}", response_model=PaymentRecordResponse, summary="更新回款记录", description="更新指定的回款记录。更新后会自动重新计算相关金额、计划状态和合同回款状态。支持修改回款金额、回款日期、凭证附件和备注信息。")
@@ -1363,6 +1597,8 @@ def list_payment_records(
                 "approval_phase": record.approval_phase.value if hasattr(getattr(record, "approval_phase", None), 'value') else getattr(record, "approval_phase", None),
                 "confirmation_status": record.confirmation_status,
                 "created_time": record.created_time.isoformat(),
+                "updated_time": getattr(record, "updated_time", None),
+                "last_modified_time": _payment_record_last_modified_time(record).isoformat(),
                 "contract_id": record.contract_id,
                 "contract_name": record.contract_name,
                 "stage_name": record.stage_name,
@@ -1529,44 +1765,29 @@ def submit_payment_approval(
     """
     record = payment_record_crud.get_by_id(db, record_id, team_id)
     if not record:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="回款记录不存在"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="回款记录不存在")
     check_payment_view_permission(record.payment_plan_id, team_id, current_user, db)
 
-    # 匹配 PAYMENT 审批流程
-    flow, error_msg = approval_flow_crud.match_flow_generic(
-        db, BusinessType.PAYMENT, team_id, record.actual_amount, None
+    approval, error_msg = approval_transaction_manager.submit_for_approval(
+        db=db,
+        business_type=BusinessType.PAYMENT,
+        entity_id=record.id,
+        team_id=team_id,
+        submitter_id=str(current_user.id),
+        submitter_name=current_user.name,
+        send_notification=False,
     )
-
-    # 未匹配审批流时统一报错
-    if flow is None:
+    if approval is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=error_msg or "未找到匹配的回款审批流程，请联系管理员配置完整的审批流程覆盖范围"
+            detail=error_msg or "提交回款审批失败",
         )
-
-    # 经适配器取提交人（PaymentRecordAdapter.get_submitter → creator_id, creator_name）
-    adapter = get_adapter(BusinessType.PAYMENT)
-    submitter_id, submitter_name = adapter.get_submitter(record)
-
-    approval = approval_crud.create_approval_generic(
-        db,
-        BusinessType.PAYMENT,
-        record.id,
-        record.team_id,
-        flow,
-        submitter_id,
-        submitter_name,
-    )
 
     return {
         "approval_id": approval.id,
         "status": approval.status,
-        "message": "回款审批已提交"
+        "message": "回款审批已提交" if error_msg is None else "回款审批已在处理中",
     }
-
 
 # ========== 已废弃：财务直接确认 API（统一走审批流程）==========
 # 所有回款必须走审批流程，审批通过后自动确认入账。

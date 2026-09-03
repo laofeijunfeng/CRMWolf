@@ -9,7 +9,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { Pencil, Trophy, XCircle } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
-import { handleApiError } from '@/utils/errorHandler'
+import { handleApiError, handleOutcomeUnknown, isOutcomeUnknown } from '@/utils/errorHandler'
 import { formatLocalDate } from '@/utils/format'
 import { confirmDelete } from '@/utils/confirmDialog'
 import { AmountText } from '@/components/crmwolf'
@@ -74,12 +74,14 @@ interface CustomerContext {
 interface Props {
   opportunityId: string
   embedded?: boolean
+  showBreadcrumb?: boolean
   customerContext?: CustomerContext | null
   canEditCustomerContext?: boolean | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
   embedded: false,
+  showBreadcrumb: true,
   customerContext: null,
   canEditCustomerContext: null
 })
@@ -93,6 +95,8 @@ const emit = defineEmits<{
   'submit-contract-approval': [contract: ContractListResponse]
   'withdraw-contract-approval': [contract: ContractListResponse]
   'delete-contract': [contract: ContractListResponse]
+  'view-contract': [contractId: number]
+  'view-payment-plan': [planId: number, plan: PaymentPlanResponse]
   'create-contract': [{
     opportunityId: string
     customerId: string
@@ -136,6 +140,7 @@ const paymentPlanDialogMode = ref<'create' | 'edit'>('create')
 const editingPaymentPlan = ref<PaymentPlanResponse | null>(null)
 const selectedPaymentPlan = ref<PaymentPlanResponse | null>(null)
 const paymentRecordDialogOpen = ref(false)
+const paymentRecordIdempotencyKey = ref<string | null>(null)
 const paymentRecordSubmitting = ref(false)
 const paymentPlanToDelete = ref<PaymentPlanResponse | null>(null)
 const paymentPlanDeleting = ref(false)
@@ -536,8 +541,9 @@ function handleCreateContract(): void {
   })
 }
 
-function handleViewContract(_contractId?: number): void {
-  toast.info('请在合同列表查看合同详情')
+function handleViewContract(contractId?: number): void {
+  if (contractId === undefined) return
+  emit('view-contract', contractId)
 }
 
 function handleEditContract(contract: ContractListResponse): void {
@@ -556,8 +562,11 @@ function handleDeleteContract(contract: ContractListResponse): void {
   emit('delete-contract', contract)
 }
 
-function handleViewPaymentPlan(_planId?: number): void {
-  toast.info('回款计划详情下钻将统一接入')
+function handleViewPaymentPlan(planId?: number, plan?: PaymentPlanResponse): void {
+  if (planId === undefined) return
+  const paymentPlan = plan ?? paymentPlans.value.find(item => item.id === planId)
+  if (paymentPlan === undefined) return
+  emit('view-payment-plan', planId, paymentPlan)
 }
 
 function canRecordPaymentPlan(plan: PaymentPlanResponse): boolean {
@@ -632,12 +641,14 @@ function handleRecordPayment(plan: PaymentPlanResponse): void {
   if (!canRecordPaymentPlan(plan)) return
   selectedPaymentPlan.value = plan
   paymentRecordDialogOpen.value = true
+  paymentRecordIdempotencyKey.value = crypto.randomUUID()
 }
 
 function handlePaymentRecordDialogOpenChange(open: boolean): void {
   paymentRecordDialogOpen.value = open
   if (!open && !paymentRecordSubmitting.value) {
     selectedPaymentPlan.value = null
+    paymentRecordIdempotencyKey.value = null
   }
 }
 
@@ -647,10 +658,26 @@ async function handlePaymentRecordSubmit(payload: PaymentRecordCreate): Promise<
 
   paymentRecordSubmitting.value = true
   try {
-    await paymentApi.createPaymentRecord(plan.id, payload)
+    const idempotencyKey = paymentRecordIdempotencyKey.value ?? crypto.randomUUID()
+    paymentRecordIdempotencyKey.value = idempotencyKey
+    try {
+      await paymentApi.createPaymentRecord(plan.id, payload, idempotencyKey)
+    } catch (error: unknown) {
+      if (!isOutcomeUnknown(error)) throw error
+
+      // 请求可能已在服务端落库但响应丢失；用同一个隐藏幂等键确认，
+      // 不让用户通过重复填写/提交制造第二笔回款。
+      try {
+        await paymentApi.resolvePaymentRecordWithRetry(idempotencyKey)
+      } catch {
+        handleOutcomeUnknown('回款登记')
+        return
+      }
+    }
     toast.success('回款登记成功')
     paymentRecordDialogOpen.value = false
     selectedPaymentPlan.value = null
+    paymentRecordIdempotencyKey.value = null
     await fetchOpportunityDetail()
     emit('refresh')
   } catch (error) {
@@ -910,7 +937,7 @@ watch(approvalPhase, phase => {
     :data-opportunity-id="opportunityId"
   >
     <div class="opportunity-detail-header p-6 pb-4 border-b border-wolf-border-default-v2">
-      <Breadcrumb v-if="embedded" class="detail-breadcrumb">
+      <Breadcrumb v-if="embedded && showBreadcrumb" class="detail-breadcrumb">
         <BreadcrumbList>
           <BreadcrumbItem>
             <BreadcrumbLink as-child>

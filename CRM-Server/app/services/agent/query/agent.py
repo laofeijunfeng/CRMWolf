@@ -82,6 +82,15 @@ QUERY_AGENT_SYSTEM_PROMPT = """你是 CRM Query Agent, 只负责本轮只读查�
     SUCCESS、PARTIAL 或 EMPTY 后立即回答。不要同时调用 get_customer_context、
     query_follow_up_tasks 或 query_completed_work。只有用户明确询问待办/跟进任务时才调用
     query_follow_up_tasks。
+17. 当前请求若提供 query_goal=search/get_detail/get_status 且有 task_text，先用
+    query_follow_up_tasks 按描述寻找任务；结果唯一且包含真实 EntityRef 时，再调用
+    get_follow_up_task_detail 获取完整状态。不得自行填写 task_ref。多个候选时返回
+    CLARIFICATION_REQUIRED，让用户选择或补充描述；不要随机挑选。
+18. get_follow_up_task_detail 只接受服务端提供的 task_ref，返回的 status、completed_at、
+    cancelled_at 是判断任务状态的唯一依据。查询指定任务状态不等于修改状态。
+19. “我有哪些待办”表示当前未完成待办列表；“我本周做了什么”表示已完成工作汇总。
+    未给时间的当前待办由服务端使用全部 open 任务；未给时间的已完成工作由服务端使用
+    本周默认范围。回答必须说明采用的范围，不要因缺少时间再次追问。
 """
 
 
@@ -124,6 +133,11 @@ class CRMQueryAgentRequest(QueryContractModel):
     allowed_tool_names: list[str] | None = Field(default=None, min_length=1, max_length=20)
     authoritative_filters: list[CRMFilter] = Field(default_factory=list, max_length=10)
     authoritative_scope: Literal["accessible", "mine", "team"] | None = None
+    # Semantic hints are produced by Root/Query and never grant authority.
+    # They tell the read-only agent whether it is listing work or resolving a
+    # natural-language task reference before it calls the detail reader.
+    query_goal: Literal["list", "search", "get_detail", "get_status", "summarize"] = "list"
+    task_text: str | None = Field(default=None, min_length=1, max_length=1000)
 
     @model_validator(mode="after")
     def require_unique_references_and_tool_names(self) -> CRMQueryAgentRequest:
@@ -136,7 +150,15 @@ class CRMQueryAgentRequest(QueryContractModel):
 
 
 def _query_agent_user_content(request: CRMQueryAgentRequest) -> str:
-    if request.previous_query is None and not request.entity_refs:
+    has_server_hints = bool(
+        request.previous_query
+        or request.entity_refs
+        or request.authoritative_filters
+        or request.authoritative_scope
+        or request.task_text
+        or request.query_goal != "list"
+    )
+    if not has_server_hints:
         return request.user_message
 
     instructions: list[str] = []
@@ -167,6 +189,8 @@ def _query_agent_user_content(request: CRMQueryAgentRequest) -> str:
                 for condition in request.authoritative_filters
             ],
             "server_authoritative_scope": request.authoritative_scope,
+            "query_goal": request.query_goal,
+            "task_text": request.task_text,
             "instruction": " ".join(instructions),
         },
         ensure_ascii=False,
@@ -417,6 +441,17 @@ class _TurnExecution:
         if len(self.tool_calls) < self.limits.max_tool_calls + 1:
             self.tool_calls.append(trace)
 
+    def entity_refs_for(self, resource: str) -> tuple[EntityRef, ...]:
+        """Return entity references returned by authoritative tools in this turn."""
+
+        with self._state_lock:
+            refs: dict[tuple[str, str], EntityRef] = {}
+            for result in self.query_results:
+                for ref in result.entity_refs:
+                    if ref.resource == resource:
+                        refs[(ref.resource, ref.public_id)] = ref
+            return tuple(refs.values())
+
     def trace(self, stop_reason: CRMQueryAgentStopReason = "COMPLETED") -> CRMQueryAgentTrace:
         with self._state_lock:
             return CRMQueryAgentTrace(
@@ -663,10 +698,22 @@ class CRMQueryAgent:
                         resource=spec.resource,
                         tool_input=kwargs,
                     )
-                    if spec.resource is not None:
-                        kwargs = authority.constrain_query(spec.resource, kwargs)
-                    else:
+                    if spec.authority_kind == "task_detail":
+                        # A task found by the read-only search is a server-issued
+                        # reference too. Include refs accumulated earlier in this
+                        # turn, while retaining the original Root bindings.
+                        task_refs = (*authority.task_refs, *turn.entity_refs_for("follow_up_task"))
+                        task_authority = CRMQueryAuthority(
+                            entity_refs=task_refs,
+                            filters=authority.filters,
+                            scope=authority.scope,
+                        )
+                        kwargs = task_authority.constrain_task_detail(kwargs)
+                    elif spec.authority_kind == "customer_context":
                         kwargs = authority.constrain_context(kwargs)
+                    else:
+                        assert spec.resource is not None
+                        kwargs = authority.constrain_query(spec.resource, kwargs)
                 except CRMQueryAuthorityError as exc:
                     error = QueryError(code="QUERY_INVALID", message=str(exc), retryable=False)
                     return turn.record_query_invalid(spec.name, error, started_at=started_at)

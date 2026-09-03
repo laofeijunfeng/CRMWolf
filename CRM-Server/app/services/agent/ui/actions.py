@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from pydantic import TypeAdapter
+from pydantic import JsonValue, TypeAdapter
 from sqlalchemy import or_
 
 from app.models.agent import AgentMessage
@@ -329,6 +329,7 @@ class AgentUIActionRepository:
         session_id: int,
         client_request_id: UUID | str,
         result_message_id: int,
+        submitted_values: dict[str, JsonValue] | None = None,
         now: datetime | None = None,
     ) -> AgentUIActionRecord:
         completed_at = now or business_now()
@@ -356,6 +357,7 @@ class AgentUIActionRepository:
             session_id=session_id,
         )
         row.status = AgentUIActionStatus.CONSUMED
+        row.submitted_values = submitted_values
         row.result_message_id = result_message_id
         row.consumed_at = completed_at
         row.last_modified_time = completed_at
@@ -500,6 +502,7 @@ class AgentUIActionRepository:
             status=_ACTION_STATUS_ADAPTER.validate_python(row.status),
             expires_at=row.expires_at,
             consumed_at=row.consumed_at,
+            submitted_values=row.submitted_values,
             consumed_request_id=row.consumed_request_id,
             result_message_id=int(row.result_message_id) if row.result_message_id is not None else None,
             lock_version=int(row.lock_version),

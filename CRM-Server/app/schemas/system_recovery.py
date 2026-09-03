@@ -5,6 +5,24 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict
 
 
+class CustomerActivityAIJobRecoveryCandidate(BaseModel):
+    """Minimal routing identity emitted by the customer-activity AI job scan."""
+
+    model_config = ConfigDict(frozen=True)
+
+    team_id: int
+    job_public_id: str
+
+
+class CustomerOpportunitySuggestionJobRecoveryCandidate(BaseModel):
+    """Minimal routing identity emitted by the Agent opportunity scan."""
+
+    model_config = ConfigDict(frozen=True)
+
+    team_id: int
+    job_public_id: str
+
+
 class CustomerActivityPostCommitRecoveryCandidate(BaseModel):
     """Minimal routing identity emitted by the system post-commit scan."""
 

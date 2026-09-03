@@ -24,6 +24,7 @@ from app.services.agent.query import (
     QueryError,
     QueryWarning,
 )
+from app.services.agent.semantic_plan import AgentSemanticPlan
 
 
 def test_root_decision_and_context_snapshot_use_explicit_context_policy() -> None:
@@ -54,6 +55,12 @@ def test_root_decision_and_context_snapshot_use_explicit_context_policy() -> Non
         confidence=0.98,
         reason_code="NEW_READ_ONLY_QUERY",
         evidence=["用户明确指定上海客户"],
+        semantic_plan=AgentSemanticPlan(
+            speech_act="ASK_FACT",
+            business_object="CUSTOMER",
+            operation="READ",
+            confidence=0.98,
+        ),
     )
     context = RootContextSnapshot(
         previous_query=query,

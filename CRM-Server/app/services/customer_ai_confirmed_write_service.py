@@ -19,15 +19,10 @@ from app.crud.agent import AgentIdempotencyKeyCRUD, agent_idempotency_key_crud
 from app.crud.customer_activity import CustomerActivityCRUD, customer_activity_crud
 from app.models.agent import AgentIdempotencyStatus
 from app.models.customer_activity import CustomerActivity
-from app.models.sales_commitment import FollowUpTaskProjectionTrigger
 from app.schemas.agent import AgentIdempotencyKeyCreate, AgentIdempotencyKeyUpdate
 from app.schemas.customer_activity import CustomerActivityCreate
 from app.services.agent.temporal import agent_temporal_resolver
 from app.services.customer_activity_kinds import infer_activity_kind
-from app.services.customer_activity_processing_service import (
-    CustomerActivityProcessingService,
-    customer_activity_processing_service,
-)
 from app.services.customer_activity_post_commit_job_service import CustomerActivityPostCommitJobRequest
 from app.services.customer_activity_write_service import (
     CustomerActivityWriteResult,
@@ -64,14 +59,12 @@ class CustomerAIConfirmedWriteService:
         *,
         activity_write_service: CustomerActivityWriteService | None = None,
         activity_crud: CustomerActivityCRUD | None = None,
-        processing_service: CustomerActivityProcessingService | None = None,
         idempotency_crud: AgentIdempotencyKeyCRUD | None = None,
         intelligence_run_service: CustomerIntelligenceRunService | None = None,
         intelligence_event_service: CustomerIntelligenceEventService | None = None,
     ) -> None:
         self.activity_write_service = activity_write_service or customer_activity_write_service
         self.activity_crud = activity_crud or customer_activity_crud
-        self.processing_service = processing_service or customer_activity_processing_service
         self.idempotency_crud = idempotency_crud or agent_idempotency_key_crud
         self.intelligence_run_service = intelligence_run_service or customer_intelligence_run_service
         self.intelligence_event_service = intelligence_event_service or customer_intelligence_event_service
@@ -151,6 +144,7 @@ class CustomerAIConfirmedWriteService:
             activity_create = CustomerActivityCreate(
                 activity_kind=resolved_activity_kind,
                 source_content=normalized_content,
+                submission_id=action_key,
                 next_action=next_action,
                 next_action_source="AI_EXTRACTED" if next_action else None,
                 next_follow_time=resolved_next_follow_time,
@@ -190,7 +184,7 @@ class CustomerAIConfirmedWriteService:
                     commit=False,
                 )
 
-            write_result = self.activity_write_service.create(
+            write_result = self.activity_write_service.create_pending_from_form(
                 db,
                 obj_in=activity_create,
                 customer_id=customer_id,
@@ -198,12 +192,9 @@ class CustomerAIConfirmedWriteService:
                 owner_id=str(normalized_user_id),
                 team_id=team_id,
                 operator_name=operator_name,
-                post_commit_trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_CREATED_DETERMINISTIC,
-                actor_id=str(normalized_user_id),
                 before_commit=complete_idempotency,
             )
             self.activity_write_service.kick(write_result)
-            await self.processing_service.trigger_processing(write_result.activity.id, team_id)
             return ConfirmedAIActivityWriteResult(
                 activity=write_result.activity,
                 next_follow_time_iso=next_follow_time_iso,
@@ -281,7 +272,7 @@ class CustomerAIConfirmedWriteService:
             return None
         activity_revision = result_json.get("activity_revision")
         if not isinstance(activity_revision, int):
-            activity_revision = int(getattr(activity, "post_commit_revision", None) or 1)
+            activity_revision = int(getattr(activity, "activity_revision", None) or 1)
 
         post_commit_job = None
         post_commit_job_public_id = result_json.get("post_commit_job_public_id")

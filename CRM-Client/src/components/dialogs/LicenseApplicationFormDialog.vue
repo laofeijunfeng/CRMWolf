@@ -9,6 +9,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import {
   DateField,
@@ -24,6 +34,7 @@ import type { LicenseApplicationCreate } from '@/schemas/licenseApplication'
 import type { ContractListResponse } from '@/api/contract'
 import type { DeploymentInfoResponse } from '@/api/deployment'
 import { handleApiError } from '@/utils/errorHandler'
+import { useDialogCloseGuard } from '@/composables/useDialogCloseGuard'
 
 const APPROVED_CONTRACT_STATUSES = ['SIGNED']
 
@@ -80,6 +91,8 @@ const form = reactive<LicenseForm>({
   expiryDate: '',
   remark: '',
 })
+
+const initialForm = ref<LicenseForm>({ ...form })
 
 const errors = reactive<LicenseFormErrors>({
   deploymentId: '',
@@ -140,6 +153,18 @@ const selectedDeploymentSummaryItems = computed(() => {
 
 const hasDeployments = computed<boolean>(() => availableDeployments.value.length > 0)
 const hasFixedContract = computed<boolean>(() => props.fixedContractId !== null)
+const hasFormChanges = computed<boolean>(() => {
+  return Object.keys(form).some((key) => {
+    const field = key as keyof LicenseForm
+    return form[field] !== initialForm.value[field]
+  })
+})
+const closeGuard = useDialogCloseGuard({
+  isDirty: hasFormChanges,
+  submitting,
+  emitOpen: (open) => emit('update:open', open),
+})
+const showConfirmDialog = closeGuard.showConfirmDialog
 const defaultApprovedContract = computed<ContractListResponse | null>(() => {
   if (props.defaultContractId === null) return null
   return approvedContracts.value.find((contract) => contract.id === props.defaultContractId) ?? null
@@ -216,6 +241,7 @@ function resetForm(): void {
   form.expiryDate = ''
   form.remark = ''
   clearErrors()
+  initialForm.value = { ...form }
 }
 
 function validateForm(): boolean {
@@ -272,6 +298,7 @@ async function handleSubmit(): Promise<void> {
     const created = await licenseApplicationApi.create(payload)
     await licenseApplicationApi.submitApplication(created.id)
     toast.success('License 申请已提交')
+    closeGuard.approveClose()
     visible.value = false
     emit('success')
   } catch (error: unknown) {
@@ -281,10 +308,20 @@ async function handleSubmit(): Promise<void> {
   }
 }
 
+function handleOpenChange(open: boolean): void {
+  closeGuard.handleOpenChange(open)
+}
+
 function handleCancel(): void {
-  if (!submitting.value) {
-    visible.value = false
-  }
+  closeGuard.requestClose()
+}
+
+function continueEditing(): void {
+  closeGuard.continueEditing()
+}
+
+function confirmCancel(): void {
+  closeGuard.confirmDiscard()
 }
 
 function handleAddDeployment(): void {
@@ -349,8 +386,11 @@ watch(
   ] as const,
   ([open]) => {
     if (open) {
+      closeGuard.reset()
       resetForm()
     } else {
+      if (closeGuard.handleParentClose()) return
+      closeGuard.reset()
       deploymentDialogOpen.value = false
       locallyCreatedDeployments.value = []
       clearErrors()
@@ -361,8 +401,8 @@ watch(
 </script>
 
 <template>
-  <Dialog v-model:open="visible">
-    <DialogContent class="license-application-dialog">
+  <Dialog :open="props.open" @update:open="handleOpenChange">
+    <DialogContent class="license-application-dialog w-[calc(100vw-2rem)] max-h-[min(90vh,90dvh)] overflow-y-auto overscroll-contain [scroll-padding-bottom:calc(5rem+env(safe-area-inset-bottom,0px))]">
       <DialogHeader>
         <DialogTitle>申请 License</DialogTitle>
         <DialogDescription>选择部署信息、License 类型和有效期，提交后进入审批流程。</DialogDescription>
@@ -478,6 +518,20 @@ watch(
     @update:open="deploymentDialogOpen = $event"
     @success="handleDeploymentSuccess"
   />
+  <AlertDialog :open="showConfirmDialog" @update:open="closeGuard.handleConfirmOpenChange">
+    <AlertDialogContent>
+      <AlertDialogHeader>
+        <AlertDialogTitle>放弃填写 License 申请？</AlertDialogTitle>
+        <AlertDialogDescription>
+          当前已填写或调整 License 申请内容，关闭后这些未保存内容会丢失。
+        </AlertDialogDescription>
+      </AlertDialogHeader>
+      <AlertDialogFooter>
+        <AlertDialogCancel @click="continueEditing">继续编辑</AlertDialogCancel>
+        <AlertDialogAction @click="confirmCancel">放弃填写</AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>
 </template>
 
 <style scoped lang="scss">

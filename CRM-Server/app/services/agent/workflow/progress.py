@@ -127,3 +127,14 @@ def execution_progress(
     if outcome == "COMPLETED":
         steps.append(_step("prepare_result", "整理执行结果", "COMPLETED"))
     return WorkflowProgress(steps=steps)
+
+
+def skipped_progress() -> WorkflowProgress:
+    """Progress for a deliberately silent, non-mutating Workflow completion."""
+    return WorkflowProgress(
+        steps=[
+            _step("understand_request", "理解业务操作", "COMPLETED"),
+            _step("prepare_plan", "生成执行计划", "COMPLETED"),
+            _step("execute_action", "执行 CRM 操作", "SKIPPED"),
+        ]
+    )

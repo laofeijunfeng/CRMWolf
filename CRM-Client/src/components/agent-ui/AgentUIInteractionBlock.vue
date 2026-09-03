@@ -87,6 +87,27 @@ const controlsDisabled = computed(() => (
   || submitting.value
 ))
 
+const submittedTextField = computed(() => {
+  if (props.block.state !== 'SUBMITTED' || props.block.submitted_values === null || props.block.submitted_values === undefined) {
+    return null
+  }
+
+  const candidateField = props.block.interaction_type === 'text_input'
+    ? props.block.fields[0]
+    : props.block.interaction_type === 'form' && props.block.fields.length === 1
+      ? props.block.fields[0]
+      : undefined
+  if (candidateField === undefined || !['text', 'textarea'].includes(candidateField.field_type)) {
+    return null
+  }
+
+  const submittedKey = props.block.interaction_type === 'text_input' ? 'text' : candidateField.key
+  const value = props.block.submitted_values[submittedKey]
+  return typeof value === 'string'
+    ? { label: candidateField.label, value }
+    : null
+})
+
 const optionSelected = (value: string): boolean => selectedValues.value.includes(value)
 
 const toggleOption = (value: string): void => {
@@ -322,13 +343,13 @@ const submit = async (): Promise<void> => {
       <span class="shrink-0 text-xs text-muted-foreground">{{ stateLabel }}</span>
     </header>
 
-    <div
-      v-if="block.interaction_type === 'choice' || block.interaction_type === 'confirmation'"
-      class="grid gap-2"
-      role="group"
-      :aria-invalid="selectionError !== null"
-      :aria-describedby="selectionError === null ? undefined : `${block.id}-selection-error`"
-    >
+    <template v-if="block.interaction_type === 'choice' || block.interaction_type === 'confirmation'">
+      <div
+        class="grid gap-2"
+        role="group"
+        :aria-invalid="selectionError !== null"
+        :aria-describedby="selectionError === null ? undefined : `${block.id}-selection-error`"
+      >
       <Button
         v-for="(option, index) in block.options"
         :key="option.value"
@@ -346,14 +367,23 @@ const submit = async (): Promise<void> => {
           {{ option.description }}
         </small>
       </Button>
-      <p
-        v-if="selectionError !== null"
-        :id="`${block.id}-selection-error`"
-        class="m-0 text-sm text-destructive"
-        role="alert"
-      >
-        {{ selectionError }}
-      </p>
+        <p
+          v-if="selectionError !== null"
+          :id="`${block.id}-selection-error`"
+          class="m-0 text-sm text-destructive"
+          role="alert"
+        >
+          {{ selectionError }}
+        </p>
+      </div>
+    </template>
+
+    <div
+      v-else-if="submittedTextField !== null"
+      class="rounded-lg border border-border/70 bg-background/70 px-3 py-2 text-sm text-foreground"
+      data-agent-ui-submitted-text
+    >
+      <span class="font-medium">{{ submittedTextField.label }}：</span>{{ submittedTextField.value }}
     </div>
 
     <form v-else class="grid gap-3" novalidate @submit.prevent="submit">

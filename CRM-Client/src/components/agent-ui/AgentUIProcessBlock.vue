@@ -28,6 +28,7 @@ const statusLabel = (status: ProcessItem['status']): string => ({
   WAITING: '等待中',
   FAILED: '失败',
   CANCELLED: '已取消',
+  SKIPPED: '已跳过',
 })[status]
 
 const statusIcon = (status: ProcessItem['status']): Component => ({
@@ -37,11 +38,12 @@ const statusIcon = (status: ProcessItem['status']): Component => ({
   WAITING: Circle,
   FAILED: AlertCircle,
   CANCELLED: XCircle,
+  SKIPPED: CircleDashed,
 })[status]
 
 const statusClass = (status: ProcessItem['status']): string => {
   if (status === 'FAILED') return 'text-destructive'
-  if (status === 'CANCELLED' || status === 'PENDING') return 'text-muted-foreground'
+  if (status === 'CANCELLED' || status === 'PENDING' || status === 'SKIPPED') return 'text-muted-foreground'
   if (status === 'WAITING' || status === 'RUNNING') return 'text-primary'
   return 'text-emerald-600 dark:text-emerald-400'
 }

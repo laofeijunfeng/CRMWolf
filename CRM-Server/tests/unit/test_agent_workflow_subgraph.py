@@ -22,10 +22,12 @@ from sqlalchemy import (
 )
 from sqlalchemy.pool import StaticPool
 
+import app.services.agent.workflow.planning as planning_module
 from app.services.agent.checkpoint_serde_inspection import CheckpointSerdeInspector
 from app.services.agent.durable_work_contracts import CustomerActivityDurableWorkReceipt
 from app.services.agent.guardrails import AgentToolGuardrailError
 from app.services.agent.input import AgentTurnInput
+from app.services.agent.principal import AgentPrincipal
 from app.services.agent.orchestrator import (
     ContextPolicy,
     InteractionResolution,
@@ -47,14 +49,16 @@ from app.services.agent.orchestrator import (
     WorkflowWaitingResult,
 )
 from app.services.agent.orchestrator.errors import WorkflowExecutionFailedError
+from app.services.agent.quality import AgentFollowUpQualityEnvelope
 from app.services.agent.query import (
     CRMQueryAgentResponse,
     CRMQueryAgentResult,
     CRMQueryAgentTrace,
     EntityRef,
 )
-from app.services.agent.schemas import AgentSemanticParseResult
+from app.services.agent.schemas import AgentFollowUpQualityResult, AgentSemanticParseResult
 from app.services.agent.semantic import AgentSemanticParseEnvelope
+from app.services.agent.semantic_plan import AgentSemanticPlan
 from app.services.agent.tools.base import AgentToolContext, AgentToolResult
 from app.services.agent.workflow.contracts import (
     WorkflowActionPlan,
@@ -64,6 +68,8 @@ from app.services.agent.workflow.contracts import (
     WorkflowInteraction,
     WorkflowInteractionOption,
     WorkflowRuntimeContext,
+    WorkflowResolvedCustomer,
+    WorkflowTextStart,
     WorkflowTurnInput,
 )
 from app.services.agent.workflow.execution import CRMWorkflowEffectExecutor
@@ -212,6 +218,27 @@ class CreateFollowUpDecisionClassifier:
             ),
             confidence=1.0,
             reason_code="CREATE_FOLLOW_UP_TASK",
+            semantic_plan=AgentSemanticPlan(
+                confidence=0.0,
+            ),
+        )
+
+
+class SemanticCustomerFollowUpDecisionClassifier(CreateFollowUpDecisionClassifier):
+    async def classify(
+        self,
+        *,
+        turn: RootTurnInput,
+        context: RootContextSnapshot,
+        runtime: RootRuntimeContext,
+    ) -> RootDecision:
+        decision = await super().classify(turn=turn, context=context, runtime=runtime)
+        return decision.model_copy(
+            update={
+                "context_policy": decision.context_policy.model_copy(
+                    update={"selected_entity": "IGNORE"}
+                )
+            }
         )
 
 
@@ -270,6 +297,144 @@ class CanonicalRejectionResolver:
         )
 
 
+class DeterministicFollowUpQualityEvaluator:
+    """Test-only evaluator; production always uses the canonical AI evaluator."""
+
+    def __init__(
+        self,
+        *,
+        score: int = 80,
+        passed: bool = True,
+        next_action_status: str = "CLEAR",
+    ) -> None:
+        self.score = score
+        self.passed = passed
+        self.next_action_status = next_action_status
+        self.calls: list[dict[str, object]] = []
+
+    async def evaluate_with_metadata(
+        self,
+        db: object,
+        *,
+        team_id: int,
+        user_message: str,
+        semantic_result: object,
+        memory: object = None,
+        current_date: object = None,
+    ) -> AgentFollowUpQualityEnvelope:
+        self.calls.append({"team_id": team_id, "user_message": user_message, "semantic_result": semantic_result})
+        return AgentFollowUpQualityEnvelope(
+            result=AgentFollowUpQualityResult(
+                score=self.score,
+                passed=self.passed,
+                reason="测试质量评估结果。",
+                supplement_question="请补充客户当前进展、阻碍和下一步行动。" if not self.passed else None,
+                suggested_revision=None,
+                next_action_status=self.next_action_status,
+            ),
+            quality_source="test",
+            model="test-model",
+        )
+
+
+@pytest.fixture(autouse=True)
+def patch_default_follow_up_quality_evaluator(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Workflow tests use a sentinel DB and must inject a deterministic evaluator
+    # rather than relying on the production database/LLM configuration.
+    monkeypatch.setattr(planning_module, "agent_follow_up_quality_evaluator", DeterministicFollowUpQualityEvaluator())
+
+
+class RootPlanProjectionProbePlanner(CRMWorkflowPlanner):
+    """Expose the public planner seam while recording Root capability projection."""
+
+    def __init__(self, semantic_parser: object) -> None:
+        super().__init__(semantic_parser=semantic_parser)
+        self.routed_intent: str | None = None
+
+    def _probe(self, intent: str) -> WorkflowActionPlan:
+        self.routed_intent = intent
+        return WorkflowActionPlan(
+            action_id="act_root_plan_projection_probe",
+            execution_authorization="RESUME_AUTHORIZED",
+            terminal_outcome="SKIPPED",
+            terminal_reason=intent,
+        )
+
+    async def _plan_customer_activity(self, *args: object, **kwargs: object) -> WorkflowActionPlan:
+        return self._probe("CUSTOMER_ACTIVITY")
+
+    def _plan_customer(self, *args: object, **kwargs: object) -> WorkflowActionPlan:
+        return self._probe("CREATE_CUSTOMER")
+
+    async def _plan_opportunity(self, *args: object, **kwargs: object) -> WorkflowActionPlan:
+        return self._probe("CREATE_OPPORTUNITY")
+
+    async def _plan_opportunity_stage_transition(
+        self, *args: object, **kwargs: object
+    ) -> WorkflowActionPlan:
+        return self._probe("MOVE_OPPORTUNITY_STAGE")
+
+    async def _plan_follow_up_task_transition(
+        self, *args: object, **kwargs: object
+    ) -> WorkflowActionPlan:
+        return self._probe("FOLLOW_UP_TASK_TRANSITION")
+
+
+@pytest.mark.parametrize(
+    ("business_object", "operation", "expected_intent"),
+    [
+        ("CUSTOMER_ACTIVITY", "CREATE", "CUSTOMER_ACTIVITY"),
+        ("CUSTOMER", "CREATE", "CREATE_CUSTOMER"),
+        ("OPPORTUNITY", "CREATE", "CREATE_OPPORTUNITY"),
+        ("OPPORTUNITY", "TRANSITION", "MOVE_OPPORTUNITY_STAGE"),
+        ("FOLLOW_UP_TASK", "TRANSITION", "FOLLOW_UP_TASK_TRANSITION"),
+    ],
+)
+async def test_workflow_preserves_root_write_capability_when_second_parser_disagrees(
+    business_object: str,
+    operation: str,
+    expected_intent: str,
+) -> None:
+    # The second parser deliberately claims this is an activity. Root's
+    # already-authorized structured capability must remain authoritative for
+    # Workflow dispatch; the second pass may fill fields but cannot change the
+    # business operation.
+    parser = StaticSemanticParser(
+        AgentSemanticParseResult.model_validate(
+            {
+                "intent": "CUSTOMER_ACTIVITY",
+                "intent_confidence": 0.99,
+                "follow_up": {"content": "错误的二次意图"},
+            }
+        )
+    )
+    planner = RootPlanProjectionProbePlanner(parser)
+    root_plan = AgentSemanticPlan(
+        speech_act=("ASSERT_EVENT" if business_object == "CUSTOMER_ACTIVITY" else "REQUEST_ACTION"),
+        business_object=business_object,
+        operation=operation,
+        confidence=0.96,
+    )
+    request = WorkflowTurnInput(
+        workflow_id="wf_" + "b" * 32,
+        start=WorkflowTextStart(
+            kind="text",
+            text="用户原始输入",
+            semantic_plan=root_plan,
+        ),
+        principal=AgentPrincipal(team_id=1, user_id=2, session_id=999),
+    )
+
+    plan = await planner.plan(
+        request,
+        workflow_id=request.workflow_id,
+        runtime=WorkflowRuntimeContext(db=object(), authorization="Bearer test-token"),
+    )
+
+    assert plan.terminal_reason == expected_intent
+    assert planner.routed_intent == expected_intent
+
+
 class FakeSemanticParser:
     def __init__(self, *, intent_confidence: float = 0.99) -> None:
         self.intent_confidence = intent_confidence
@@ -298,6 +463,7 @@ class FakeSemanticParser:
                     "follow_up": {
                         "content": "确认技术评估结论",
                         "method": "电话",
+                        "next_action": "确认技术评估结论",
                         "next_follow_time_text": "下周三上午10点",
                         "next_follow_time": {
                             "raw_text": "下周三上午10点",
@@ -508,6 +674,7 @@ async def test_customer_lookup_name_is_resolved_without_page_selected_entity() -
                 "follow_up": {
                     "content": "技术经理张总反馈项目正在走立项流程",
                     "method": "微信",
+                    "next_action": "继续跟进立项流程",
                     "next_action": "继续跟进立项流程",
                     "next_follow_time_text": "下周三",
                     "next_follow_time": {
@@ -743,6 +910,7 @@ async def test_ambiguous_explicit_customer_selection_executes_follow_up_record_w
                 "follow_up": {
                     "content": "项目正在走立项流程",
                     "method": "微信",
+                    "next_action": "继续跟进立项流程",
                     "next_follow_time_text": "下周三",
                     "next_follow_time": {
                         "raw_text": "下周三",
@@ -1109,6 +1277,7 @@ class MissingContentThenCompleteSemanticParser:
                     "follow_up": {
                         "content": content,
                         "method": "电话",
+                        "next_action": "确认技术评估结论" if content else None,
                         "next_follow_time_text": "下周三上午10点",
                         "next_follow_time": {
                             "raw_text": "下周三上午10点",
@@ -1259,6 +1428,7 @@ class TwoSupplementsThenCompleteSemanticParser:
                     "follow_up": {
                         "content": content,
                         "method": "电话",
+                        "next_action": "确认技术评估结论" if content else None,
                         "next_follow_time_text": "下周三上午10点",
                         "next_follow_time": {
                             "raw_text": "下周三上午10点",
@@ -1299,6 +1469,12 @@ class SwitchingAfterMultipleSupplementsClassifier:
                 ),
                 confidence=1.0,
                 reason_code="SWITCH_TO_CITY_CUSTOMER_QUERY",
+                semantic_plan=AgentSemanticPlan(
+                    speech_act="ASK_FACT",
+                    business_object="CUSTOMER",
+                    operation="READ",
+                    confidence=1.0,
+                ),
             )
         return await CreateFollowUpDecisionClassifier().classify(
             turn=turn,
@@ -1472,6 +1648,9 @@ class CreateStandaloneWriteDecisionClassifier:
             ),
             confidence=1.0,
             reason_code=self.reason_code,
+            semantic_plan=AgentSemanticPlan(
+                confidence=0.0,
+            ),
         )
 
 
@@ -5044,7 +5223,7 @@ class FollowUpConfirmationCaseResolver:
             case_id="fuc_00000000000000000000000000000001",
             status="PENDING",
             owner_id="2",
-            question_text="跟进任务“确认技术评估结论”是否已经完成?",
+            question_text="9 月 9 号待办的「确认技术评估结论」现在完成了吗?",
             suggested_action="COMPLETE",
             customer_id="cus_shanghai_001",
             task_id="fut_00000000000000000000000000000001",
@@ -5146,6 +5325,8 @@ async def test_follow_up_confirmation_case_reply_resumes_native_workflow_without
     assert isinstance(waiting.workflow_result, WorkflowWaitingResult)
     assert waiting.workflow_result.interaction.interaction_type == "choice"
     assert waiting.workflow_result.interaction.submit_on_select is True
+    assert waiting.workflow_result.interaction.prompt == "9 月 9 号待办的「确认技术评估结论」现在完成了吗?"
+    assert "延期" not in waiting.workflow_result.interaction.prompt
     assert [option.value for option in waiting.workflow_result.interaction.options] == [
         "已完成",
         "先放着",
@@ -5451,6 +5632,12 @@ def test_root_rejects_terminal_workflow_result_from_another_execution() -> None:
         ),
         confidence=1.0,
         reason_code="FOLLOW_UP_TASK_CONFIRMATION_TRIGGER",
+        semantic_plan=AgentSemanticPlan(
+            speech_act="CONFIRM_ACTION",
+            business_object="FOLLOW_UP_TASK",
+            operation="TRANSITION",
+            confidence=1.0,
+        ),
     )
 
     with pytest.raises(WorkflowExecutionFailedError):
@@ -5462,3 +5649,411 @@ def test_root_rejects_terminal_workflow_result_from_another_execution() -> None:
                 "workflow_result": workflow_result.model_dump(mode="json"),
             }
         )
+
+class CacheAwareWorkflowCustomerResolver:
+    def __init__(self) -> None:
+        self.resolve_calls: list[str | None] = []
+        self.validate_cached_calls: list[str] = []
+
+    async def resolve(
+        self,
+        *,
+        customer_lookup_name: str | None,
+        trusted_context_customer: EntityRef | None,
+        selected_customer_id: str | None,
+        authorization: str,
+    ) -> object:
+        self.resolve_calls.append(customer_lookup_name)
+        assert authorization == "Bearer test-token"
+        assert customer_lookup_name == CUSTOMER_REF.display_name
+        return SimpleNamespace(
+            status="RESOLVED",
+            customer=SimpleNamespace(
+                customer_id=CUSTOMER_REF.public_id,
+                customer_name=CUSTOMER_REF.display_name,
+            ),
+            candidates=(),
+        )
+
+    async def validate_cached(self, *, customer_id: str, authorization: str) -> object:
+        self.validate_cached_calls.append(customer_id)
+        assert authorization == "Bearer test-token"
+        assert customer_id == CUSTOMER_REF.public_id
+        return SimpleNamespace(
+            status="RESOLVED",
+            customer=SimpleNamespace(
+                customer_id=CUSTOMER_REF.public_id,
+                customer_name=CUSTOMER_REF.display_name,
+            ),
+            candidates=(),
+        )
+
+
+class SequencedFollowUpQualityEvaluator:
+    def __init__(self, *results: AgentFollowUpQualityResult) -> None:
+        self.results = list(results)
+        self.calls: list[dict[str, object]] = []
+
+    async def evaluate_with_metadata(
+        self,
+        db: object,
+        *,
+        team_id: int,
+        user_message: str,
+        semantic_result: object,
+        memory: object = None,
+        current_date: object = None,
+    ) -> AgentFollowUpQualityEnvelope:
+        self.calls.append({"team_id": team_id, "user_message": user_message, "semantic_result": semantic_result})
+        if not self.results:
+            raise AssertionError("quality evaluator received more calls than expected")
+        return AgentFollowUpQualityEnvelope(
+            result=self.results.pop(0),
+            quality_source="test",
+            model="test-model",
+        )
+
+
+class QualitySupplementResolver:
+    def __init__(self) -> None:
+        self.continuation: WorkflowContinuation | None = None
+
+    async def resolve(
+        self,
+        *,
+        turn: RootTurnInput,
+        context: RootContextSnapshot,
+        runtime: RootRuntimeContext,
+    ) -> InteractionResolution:
+        assert isinstance(turn.input, InteractionTurnInput)
+        assert self.continuation is not None
+        return InteractionResolution(
+            status="RESOLVED",
+            reason_code="STRUCTURED_WORKFLOW_CONTINUATION",
+            resolved_action=ResolvedAgentAction(
+                action_id=turn.input.action_id,
+                action_type="submit_interaction",
+                continuation=self.continuation,
+                claim_outcome="ACQUIRED",
+                resume_payload=AgentTurnInput.text(
+                    "客户确认下周三由张总提供接口清单",
+                    source="web",
+                ).model_dump(mode="json"),
+            ),
+        )
+
+
+def _activity_semantic(*, content: str, next_action: str) -> AgentSemanticParseResult:
+    return AgentSemanticParseResult.model_validate(
+        {
+            "intent": "CUSTOMER_ACTIVITY",
+            "intent_confidence": 0.99,
+            "customer": {
+                "name_text": CUSTOMER_REF.display_name,
+                "confidence": 0.99,
+                "resolution_source": "EXPLICIT",
+            },
+            "follow_up": {
+                "content": content,
+                "method": "电话",
+                "next_action": next_action,
+                "next_follow_time_text": "下周三",
+                "next_follow_time": {
+                    "raw_text": "下周三",
+                    "kind": "RELATIVE_WEEKDAY",
+                    "direction": "next",
+                    "weekday": 3,
+                    "confidence": 0.99,
+                },
+            },
+        }
+    )
+
+
+async def test_quality_supplement_reparses_full_semantics_and_reuses_checkpoint_customer() -> None:
+    original_content = "客户反馈接口联调已完成，等待内部评审。"
+    supplemented_content = "客户反馈接口联调已完成，等待内部评审；客户确认下周三由张总提供接口清单。"
+    semantic_parser = SequencedSemanticParser(
+        _activity_semantic(content=original_content, next_action="确认技术评估结论"),
+        _activity_semantic(content=supplemented_content, next_action="确认接口清单并安排联调"),
+    )
+    quality_evaluator = SequencedFollowUpQualityEvaluator(
+        AgentFollowUpQualityResult(
+            score=45,
+            passed=False,
+            reason="缺少可执行的后续安排。",
+            supplement_question="请补充下一步由谁在什么时间做什么。",
+        ),
+        AgentFollowUpQualityResult(
+            score=82,
+            passed=True,
+            reason="已包含事实、进展和可执行的下一步。",
+            next_action_status="CLEAR",
+        ),
+    )
+    customer_resolver = CacheAwareWorkflowCustomerResolver()
+    tool_registry = CapturingToolRegistry()
+    interaction_resolver = QualitySupplementResolver()
+    orchestrator = RootOrchestrator(
+        checkpointer=json_safe_checkpointer(),
+        context_resolver=EmptyContextResolver(),
+        decision_classifier=SemanticCustomerFollowUpDecisionClassifier(),
+        query_executor=FailingQueryExecutor(),
+        interaction_resolver=interaction_resolver,
+        workflow_subgraph=build_workflow_subgraph(
+            planner=CRMWorkflowPlanner(
+                semantic_parser=semantic_parser,
+                temporal_resolver=FixedTemporalResolver(),
+                follow_up_quality_evaluator=quality_evaluator,
+                customer_resolver=customer_resolver,
+            ),
+            effect_executor=CRMWorkflowEffectExecutor(tool_registry=tool_registry),
+        ),
+    )
+    runtime = RootRuntimeContext(
+        db=object(),
+        authorization="Bearer test-token",
+        metadata={"current_datetime": datetime(2026, 8, 23, 9, 0, 0)},
+    )
+
+    waiting = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=2,
+            session_id=558,
+            client_request_id="req_quality_supplement_start",
+            input=TextTurnInput(
+                type="text",
+                text=f"记录{CUSTOMER_REF.display_name}的跟进：{original_content}",
+            ),
+        ),
+        runtime=runtime,
+    )
+
+    assert isinstance(waiting, WorkflowDispatchResult)
+    assert isinstance(waiting.workflow_result, WorkflowWaitingResult)
+    assert waiting.workflow_result.interaction.business_action == "supplement_follow_up_quality"
+    assert waiting.continuation is not None
+    interaction_resolver.continuation = waiting.continuation
+    assert tool_registry.calls == []
+    assert customer_resolver.resolve_calls == [CUSTOMER_REF.display_name]
+
+    completed = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=2,
+            session_id=558,
+            client_request_id="req_quality_supplement_resume",
+            input=InteractionTurnInput(type="interaction", action_id="act_supply_follow_up_quality"),
+        ),
+        runtime=runtime,
+    )
+
+    assert isinstance(completed, WorkflowDispatchResult)
+    assert isinstance(completed.workflow_result, WorkflowCompletedResult)
+    assert completed.continuation is None
+    assert len(semantic_parser.messages) == 2
+    assert semantic_parser.messages[0].startswith(f"记录{CUSTOMER_REF.display_name}的跟进：")
+    assert "补充信息: 客户确认下周三由张总提供接口清单" in semantic_parser.messages[1]
+    assert len(quality_evaluator.calls) == 2
+    assert quality_evaluator.calls[0]["user_message"] != quality_evaluator.calls[1]["user_message"]
+    assert customer_resolver.resolve_calls == [CUSTOMER_REF.display_name]
+    assert customer_resolver.validate_cached_calls == [CUSTOMER_REF.public_id]
+    assert len(tool_registry.calls) == 1
+    assert tool_registry.calls[0]["payload"]["source_content"] == supplemented_content
+    assert tool_registry.calls[0]["payload"]["effectiveness_score"] == 82
+
+
+async def test_vague_next_action_is_a_gate_and_does_not_write_activity() -> None:
+    semantic_parser = StaticSemanticParser(
+        _activity_semantic(
+            content="客户表示项目仍在内部评估。",
+            next_action="继续跟进",
+        )
+    )
+    tool_registry = CapturingToolRegistry()
+    orchestrator = RootOrchestrator(
+        checkpointer=json_safe_checkpointer(),
+        context_resolver=EmptyContextResolver(),
+        decision_classifier=SemanticCustomerFollowUpDecisionClassifier(),
+        query_executor=FailingQueryExecutor(),
+        interaction_resolver=CanonicalConfirmationResolver(),
+        workflow_subgraph=build_workflow_subgraph(
+            planner=CRMWorkflowPlanner(
+                semantic_parser=semantic_parser,
+                temporal_resolver=FixedTemporalResolver(),
+                follow_up_quality_evaluator=DeterministicFollowUpQualityEvaluator(
+                    next_action_status="VAGUE",
+                ),
+                customer_resolver=CacheAwareWorkflowCustomerResolver(),
+            ),
+            effect_executor=CRMWorkflowEffectExecutor(tool_registry=tool_registry),
+        ),
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=2,
+            session_id=559,
+            client_request_id="req_vague_next_action",
+            input=TextTurnInput(type="text", text=f"记录{CUSTOMER_REF.display_name}的跟进"),
+        ),
+        runtime=RootRuntimeContext(
+            db=object(),
+            authorization="Bearer test-token",
+            metadata={"current_datetime": datetime(2026, 8, 23, 9, 0, 0)},
+        ),
+    )
+
+    assert isinstance(result, WorkflowDispatchResult)
+    assert isinstance(result.workflow_result, WorkflowWaitingResult)
+    assert result.workflow_result.interaction.business_action == "supplement_follow_up_next_action"
+    assert tool_registry.calls == []
+
+
+@pytest.mark.parametrize("next_action_status", ["MISSING", "VAGUE"])
+async def test_next_action_gate_consumes_structured_quality_status_without_phrase_matching(
+    next_action_status: str,
+) -> None:
+    semantic_parser = StaticSemanticParser(
+        _activity_semantic(
+            content="客户表示项目仍在内部评估。",
+            next_action="一个模型认为这是下一步，另一个模型可能认为不是",
+        )
+    )
+    tool_registry = CapturingToolRegistry()
+    orchestrator = RootOrchestrator(
+        checkpointer=json_safe_checkpointer(),
+        context_resolver=EmptyContextResolver(),
+        decision_classifier=SemanticCustomerFollowUpDecisionClassifier(),
+        query_executor=FailingQueryExecutor(),
+        interaction_resolver=CanonicalConfirmationResolver(),
+        workflow_subgraph=build_workflow_subgraph(
+            planner=CRMWorkflowPlanner(
+                semantic_parser=semantic_parser,
+                temporal_resolver=FixedTemporalResolver(),
+                follow_up_quality_evaluator=DeterministicFollowUpQualityEvaluator(
+                    next_action_status=next_action_status,
+                ),
+                customer_resolver=CacheAwareWorkflowCustomerResolver(),
+            ),
+            effect_executor=CRMWorkflowEffectExecutor(tool_registry=tool_registry),
+        ),
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=2,
+            session_id=560,
+            client_request_id=f"req_structured_next_action_{next_action_status.lower()}",
+            input=TextTurnInput(type="text", text=f"记录{CUSTOMER_REF.display_name}的跟进"),
+        ),
+        runtime=RootRuntimeContext(
+            db=object(),
+            authorization="Bearer test-token",
+            metadata={"current_datetime": datetime(2026, 8, 23, 9, 0, 0)},
+        ),
+    )
+
+    assert isinstance(result, WorkflowDispatchResult)
+    assert isinstance(result.workflow_result, WorkflowWaitingResult)
+    assert result.workflow_result.interaction.business_action == "supplement_follow_up_next_action"
+    assert tool_registry.calls == []
+
+
+@pytest.mark.parametrize(
+    ("next_action_status", "next_action"),
+    [("CLEAR", "由售前确认接口清单"), ("EXPLICITLY_NONE", None)],
+)
+async def test_next_action_gate_allows_clear_or_explicitly_none(
+    next_action_status: str,
+    next_action: str | None,
+) -> None:
+    semantic_parser = StaticSemanticParser(
+        _activity_semantic(
+            content="客户表示项目仍在内部评估。",
+            next_action=next_action,
+        )
+    )
+    tool_registry = CapturingToolRegistry()
+    orchestrator = RootOrchestrator(
+        checkpointer=json_safe_checkpointer(),
+        context_resolver=EmptyContextResolver(),
+        decision_classifier=SemanticCustomerFollowUpDecisionClassifier(),
+        query_executor=FailingQueryExecutor(),
+        interaction_resolver=CanonicalConfirmationResolver(),
+        workflow_subgraph=build_workflow_subgraph(
+            planner=CRMWorkflowPlanner(
+                semantic_parser=semantic_parser,
+                temporal_resolver=FixedTemporalResolver(),
+                follow_up_quality_evaluator=DeterministicFollowUpQualityEvaluator(
+                    next_action_status=next_action_status,
+                ),
+                customer_resolver=CacheAwareWorkflowCustomerResolver(),
+            ),
+            effect_executor=CRMWorkflowEffectExecutor(tool_registry=tool_registry),
+        ),
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=2,
+            session_id=561,
+            client_request_id=f"req_structured_next_action_allowed_{next_action_status.lower()}",
+            input=TextTurnInput(type="text", text=f"记录{CUSTOMER_REF.display_name}的跟进"),
+        ),
+        runtime=RootRuntimeContext(
+            db=object(),
+            authorization="Bearer test-token",
+            metadata={"current_datetime": datetime(2026, 8, 23, 9, 0, 0)},
+        ),
+    )
+
+    assert isinstance(result, WorkflowDispatchResult)
+    assert isinstance(result.workflow_result, WorkflowCompletedResult)
+    assert len(tool_registry.calls) == 1
+
+async def test_cached_customer_identity_is_reused_without_name_string_matching() -> None:
+    semantic = _activity_semantic(
+        content="客户反馈项目仍在评估。",
+        next_action="由售前确认技术方案",
+    )
+    # Simulate a later semantic parse using an alias/abbreviation rather than
+    # the canonical customer name. Root has already authorized continuation;
+    # planner must rely on the bound ID, not compare free-text names.
+    semantic.customer.name_text = "凡亚信息"
+    customer_resolver = CacheAwareWorkflowCustomerResolver()
+    tool_registry = CapturingToolRegistry()
+    planner = CRMWorkflowPlanner(
+        semantic_parser=StaticSemanticParser(semantic),
+        temporal_resolver=FixedTemporalResolver(),
+        follow_up_quality_evaluator=DeterministicFollowUpQualityEvaluator(),
+        customer_resolver=customer_resolver,
+    )
+    request = WorkflowTurnInput(
+        workflow_id="wf_" + "a" * 32,
+        start=WorkflowTextStart(kind="text", text="补充这条跟进"),
+        principal=AgentPrincipal(team_id=1, user_id=2, session_id=562),
+        resolved_customer=WorkflowResolvedCustomer(
+            customer_id=CUSTOMER_REF.public_id,
+            customer_name=CUSTOMER_REF.display_name,
+            lookup_name=CUSTOMER_REF.display_name,
+        ),
+    )
+
+    plan = await planner.plan(
+        request,
+        workflow_id=request.workflow_id,
+        runtime=WorkflowRuntimeContext(
+            db=object(),
+            authorization="Bearer test-token",
+            metadata={"current_datetime": datetime(2026, 8, 23, 9, 0, 0)},
+        ),
+    )
+
+    assert plan.commands[0].tool_name == "create_customer_activity"
+    assert customer_resolver.validate_cached_calls == [CUSTOMER_REF.public_id]
+    assert customer_resolver.resolve_calls == []

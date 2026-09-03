@@ -18,6 +18,7 @@ from app.services.agent.workflow.contracts import (
     WorkflowActionPlan,
     WorkflowCommand,
     WorkflowEffectResult,
+    WorkflowOpportunitySuggestionStart,
     WorkflowRuntimeContext,
     WorkflowTurnInput,
 )
@@ -30,6 +31,7 @@ from app.services.agent.workflow.resources import (
     OpportunityStageResolver,
     WorkflowResourceResolutionError,
 )
+
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -76,7 +78,11 @@ class CRMWorkflowEffectExecutor:
             (
                 command
                 for command in plan.commands
-                if not _is_supported_write_command(command, plan.execution_authorization)
+                if not _is_supported_write_command(
+                    command,
+                    plan.execution_authorization,
+                    request.start,
+                )
             ),
             None,
         )
@@ -118,6 +124,7 @@ class CRMWorkflowEffectExecutor:
                 authorization=authorization,
                 user_id=user_id,
                 allowed_customer_ids=allowed_customer_ids,
+                suggestion_trigger=isinstance(request.start, WorkflowOpportunitySuggestionStart),
             )
             if resource_validation is not None:
                 return resource_validation
@@ -134,6 +141,15 @@ class CRMWorkflowEffectExecutor:
                 hitl_decision = None
                 confirmed_by_user = False
                 auto_execute_authorized = True
+            elif isinstance(request.start, WorkflowOpportunitySuggestionStart):
+                # The Agent UI yes/submit action is the confirmation boundary for
+                # this separate suggestion workflow.  Keep it explicit for the
+                # tool guardrail without opening a second confirmation prompt.
+                execution_policy = None
+                authorization_source = "workflow_suggestion_user_confirmed"
+                hitl_decision = "approve"
+                confirmed_by_user = True
+                auto_execute_authorized = False
             else:
                 execution_policy = None
                 authorization_source = "workflow_resume_authorized"
@@ -187,6 +203,7 @@ class CRMWorkflowEffectExecutor:
         authorization: str,
         user_id: int,
         allowed_customer_ids: list[str],
+        suggestion_trigger: bool = False,
     ) -> WorkflowEffectResult | None:
         if command.tool_name == "resolve_follow_up_task_confirmation_case":
             return await self._validate_follow_up_confirmation_case(
@@ -243,6 +260,11 @@ class CRMWorkflowEffectExecutor:
             or resolution.target_stage is None
             or resolution.target_stage.stage_template_id != stage_template_id
         ):
+            if suggestion_trigger:
+                return WorkflowEffectResult(
+                    success=True,
+                    message="商机状态已变化，本次不再重复推进。",
+                )
             return WorkflowEffectResult(
                 success=False,
                 code="WORKFLOW_RESOURCE_STALE",
@@ -421,6 +443,7 @@ class CRMWorkflowEffectExecutor:
 def _is_supported_write_command(
     command: WorkflowCommand,
     execution_authorization: str,
+    start: object,
 ) -> bool:
     capability = action_workflow.action_capability(command.tool_name)
     if (
@@ -434,6 +457,8 @@ def _is_supported_write_command(
     if execution_authorization == "AUTO_EXECUTE_AUTHORIZED":
         return command.tool_name == "create_customer_activity"
     if execution_authorization == "RESUME_AUTHORIZED":
+        if isinstance(start, WorkflowOpportunitySuggestionStart):
+            return command.tool_name in {"create_opportunity", "move_opportunity_stage"}
         return not capability.requires_confirmation
     return False
 

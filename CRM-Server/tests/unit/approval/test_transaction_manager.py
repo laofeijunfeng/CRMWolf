@@ -173,6 +173,41 @@ class TestApprovalTransactionManager:
         # TODO: 实现测试逻辑
         pass
 
+    def test_submit_for_approval_pending_is_idempotent(self, transaction_manager, mock_db):
+        """重复提交审批中的单据时复用现有审批实例，不创建第二条。"""
+        entity = Mock()
+        entity.id = 30
+        entity.approval_phase = ApprovalPhase.PENDING_REVIEW.value
+        pending_approval = Mock(spec=Approval)
+        pending_approval.id = 99
+
+        class FakeAdapter:
+            def get_entity(self, db, entity_id, team_id):
+                return entity
+
+        with patch.object(transaction_manager_module, "get_adapter", return_value=FakeAdapter()), \
+            patch.object(
+                transaction_manager_module.approval_crud,
+                "get_pending_by_entity",
+                return_value=pending_approval,
+            ) as mock_get_pending, \
+            patch.object(transaction_manager_module.approval_crud, "create_approval_only") as mock_create:
+            approval, error = transaction_manager.submit_for_approval(
+                mock_db,
+                business_type=BusinessType.PAYMENT,
+                entity_id=30,
+                team_id=2,
+                submitter_id="user-1",
+                submitter_name="张三",
+                send_notification=False,
+            )
+
+        assert approval is pending_approval
+        assert error == "审批已在处理中"
+        mock_get_pending.assert_called_once_with(mock_db, BusinessType.PAYMENT, 30, 2)
+        mock_create.assert_not_called()
+        mock_db.commit.assert_not_called()
+
     def test_submit_for_approval_resubmit_after_rejected(self, transaction_manager, mock_db, mock_flow):
         """
         测试：驳回后重新提交审批

@@ -27,8 +27,10 @@ from app.models.contract import Contract, ContractStatus, PaymentStatus
 from app.models.conversation_log import ConversationLog
 from app.models.customer import Contact, Customer, CustomerMember
 from app.models.customer_activity import CustomerActivity
-from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
 from app.models.customer_activity_agent_origin import CustomerActivityAgentOrigin
+from app.models.customer_activity_ai_job import CustomerActivityAIJob
+from app.models.customer_activity_cutover_run import CustomerActivityCutoverRun
+from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
 from app.models.customer_activity_post_commit_job import (
     CustomerActivityPostCommitJob,
     CustomerActivityPostCommitJobStatus,
@@ -48,6 +50,7 @@ from app.models.customer_identity_term import (
     CustomerIdentityTermType,
 )
 from app.models.customer_intelligence_run import CustomerIntelligenceRun, CustomerIntelligenceRunStatus
+from app.models.customer_opportunity_suggestion_job import CustomerOpportunitySuggestionJob
 from app.models.customer_profile_projection import (
     CustomerProfileCurrent,
     CustomerProfileProjectionVersion,
@@ -135,25 +138,25 @@ from app.models.user_role import UserRole
 from app.models.view_preference import ViewPreference, ViewPreferenceScope
 
 __all__ = [
-    "AcquisitionSource",
     "AIConfig",
-    "AgentChannelSession",
-    "AgentAsyncOperationStatus",
-    "AgentAsyncOperationEvent",
+    "AcquisitionSource",
     "AgentAsyncOperation",
+    "AgentAsyncOperationEvent",
+    "AgentAsyncOperationStatus",
+    "AgentChannelSession",
     "AgentIdempotencyKey",
     "AgentIdempotencyStatus",
-    "AgentQueryResultSet",
-    "AgentUIAction",
-    "AgentUIActionConsumptionMode",
-    "AgentUIActionStatus",
     "AgentMemoryEntry",
     "AgentMessage",
     "AgentMessageRole",
+    "AgentQueryResultSet",
     "AgentSession",
     "AgentSessionStatus",
     "AgentToolCall",
     "AgentToolCallStatus",
+    "AgentUIAction",
+    "AgentUIActionConsumptionMode",
+    "AgentUIActionStatus",
     "Approval",
     "ApprovalFlow",
     "ApprovalNode",
@@ -166,8 +169,10 @@ __all__ = [
     "ConversationLog",
     "Customer",
     "CustomerActivity",
-    "CustomerActivityDeletionTombstone",
+    "CustomerActivityAIJob",
     "CustomerActivityAgentOrigin",
+    "CustomerActivityCutoverRun",
+    "CustomerActivityDeletionTombstone",
     "CustomerActivityPostCommitJob",
     "CustomerActivityPostCommitJobStatus",
     "CustomerContextAnswerTelemetry",
@@ -184,11 +189,12 @@ __all__ = [
     "CustomerIdentityTermType",
     "CustomerIntelligenceRun",
     "CustomerIntelligenceRunStatus",
+    "CustomerMember",
+    "CustomerOpportunitySuggestionJob",
     "CustomerProfileCurrent",
     "CustomerProfileProjectionVersion",
     "CustomerProfilePublicationStatus",
     "CustomerProfileStatus",
-    "CustomerMember",
     "CustomerVectorDocument",
     "CustomerVectorDocumentSourceType",
     "CustomerVectorDocumentSyncStatus",

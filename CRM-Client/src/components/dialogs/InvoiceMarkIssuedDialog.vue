@@ -5,7 +5,7 @@
  * 审批通过后，上传发票文件和填写发票号码。
  * 使用 vee-validate + Zod 进行表单校验。
  */
-import { ref, computed, watch, onUnmounted } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
@@ -29,8 +29,10 @@ import {
   InputField,
 } from '@/components/crmwolf'
 import invoiceApi from '@/api/invoice'
+import { confirmDialog } from '@/utils/confirmDialog'
 import { handleApiError } from '@/utils/errorHandler'
 import type { FileAttachmentItem } from '@/types/fileAttachment'
+import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 
 // Constants
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
@@ -56,7 +58,7 @@ const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 
 // VeeValidate form setup
-const { handleSubmit } = useForm({
+const { handleSubmit, resetForm, values } = useForm({
   validationSchema: schema,
   initialValues: {
     invoice_number: ''
@@ -65,9 +67,11 @@ const { handleSubmit } = useForm({
 
 // State
 const submitting = ref(false)
+const closeGuardPending = ref(false)
 const selectedFile = ref<File | null>(null)
 const fileError = ref<string | null>(null)
 const selectedFileUrl = ref<string>('')
+const submitError = ref<FeedbackError | null>(null)
 
 // File info for display
 const selectedFileItems = computed<FileAttachmentItem[]>(() => {
@@ -120,6 +124,7 @@ const handleFileError = (message: string): void => {
 
 // Form submission
 const onSubmit = handleSubmit(async (formValues) => {
+  submitError.value = null
   submitting.value = true
 
   try {
@@ -138,28 +143,56 @@ const onSubmit = handleSubmit(async (formValues) => {
     emit('issued')
     emit('update:open', false)
   } catch (error) {
+    submitError.value = toFeedbackError(error, '开票', { operation: 'write' })
     handleApiError(error, '开票')
   } finally {
     submitting.value = false
   }
 })
 
-// Reset state when dialog closes
-const handleDialogClose = (open: boolean): void => {
-  if (!open) {
-    // Reset form state
-    removeFile()
+const resetState = (): void => {
+  resetForm({ values: { invoice_number: '' } })
+  removeFile()
+  fileError.value = null
+  submitError.value = null
+}
+
+const hasFormChanges = computed(() =>
+  selectedFile.value !== null || String(values.invoice_number ?? '').trim().length > 0,
+)
+
+// 关闭前保护已选择的文件或已填写的发票号码，避免误丢失上传上下文。
+const handleDialogClose = async (open: boolean): Promise<void> => {
+  if (open) {
+    emit('update:open', true)
+    return
   }
-  emit('update:open', open)
+
+  if (submitting.value || closeGuardPending.value) return
+
+  if (!hasFormChanges.value) {
+    emit('update:open', false)
+    return
+  }
+
+  closeGuardPending.value = true
+  try {
+    const confirmed = await confirmDialog(
+      '已填写或选择发票信息，关闭后这些内容不会保存。确定关闭吗？',
+      '放弃本次开票？',
+      { variant: 'destructive', confirmText: '放弃并关闭' },
+    )
+    if (confirmed) emit('update:open', false)
+  } finally {
+    closeGuardPending.value = false
+  }
 }
 
 watch(
   (): boolean => props.open,
   (open): void => {
-    if (!open) {
-      removeFile()
-    }
-  }
+    if (!open) resetState()
+  },
 )
 
 onUnmounted(() => {
@@ -174,6 +207,19 @@ onUnmounted(() => {
         <DialogTitle>开票</DialogTitle>
         <DialogDescription>上传发票文件和填写发票号码（均为可选）</DialogDescription>
       </DialogHeader>
+
+      <div
+        v-if="submitError"
+        class="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm"
+        role="alert"
+        aria-live="assertive"
+      >
+        <strong class="block">{{ submitError.title }}</strong>
+        <span class="text-muted-foreground">{{ submitError.description }}</span>
+        <span v-if="submitError.outcomeUnknown" class="mt-1 block text-muted-foreground">
+          请先查询发票申请的最新状态，确认未开票后再重试，避免重复操作。
+        </span>
+      </div>
 
       <form class="grid gap-4 py-4" @submit="onSubmit">
         <FileAttachment
@@ -213,15 +259,15 @@ onUnmounted(() => {
       <DialogFooter class="flex-col gap-2 sm:flex-row">
         <Button
           variant="outline"
-          :disabled="submitting"
+          :disabled="submitting || closeGuardPending"
           class="w-full sm:w-auto"
-          @click="emit('update:open', false)"
+          @click="handleDialogClose(false)"
         >
           取消
         </Button>
         <Button
           type="submit"
-          :disabled="submitting"
+          :disabled="submitting || closeGuardPending"
           :loading="submitting"
           class="w-full sm:w-auto"
           @click="onSubmit"

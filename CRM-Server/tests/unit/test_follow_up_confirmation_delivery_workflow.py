@@ -36,7 +36,6 @@ from app.services.follow_up_confirmation_delivery_workflow import (
     FollowUpConfirmationDeliveryWorkflow,
 )
 from app.services.follow_up_task_confirmation_service import FollowUpTaskConfirmationService
-from app.services.follow_up_task_reconciliation_evaluation_service import FollowUpTaskReconciliationDecision
 from app.services.follow_up_task_transition_plan_service import FollowUpTaskTransitionPlanService
 from app.services.task_reconciliation_service import TaskReconciliationCandidate, TaskReconciliationCandidateSet
 from app.tasks.follow_up_confirmation_delivery_recovery import FollowUpConfirmationDeliveryRecoveryScheduler
@@ -213,6 +212,31 @@ def test_delivery_identity_is_scoped_to_source_activity_revision():
     )
 
 
+def test_delivery_projection_uses_canonical_completion_question(db_session):
+    case = _case(db_session)
+    case.question_text = "8 月 12 号待办的「反馈资料」现在完成了吗?"
+    db_session.commit()
+    workflow = _workflow_for_session(db_session, SuccessfulAdapter())
+    request = ConfirmationDeliveryInput(
+        case_public_id=case.public_id,
+        team_id=1,
+        owner_id="2",
+        channel="web",
+        provider="confirmation_center",
+    )
+
+    result = workflow.projection.ensure_and_validate(
+        request,
+        prompt_key=workflow.prompt_key(request),
+        thread_id=workflow.thread_id(request),
+    )
+
+    assert result.prompt is not None
+    assert result.prompt["question_text"] == "8 月 12 号待办的「反馈资料」现在完成了吗?"
+    db_session.refresh(case)
+    assert case.question_text == result.prompt["question_text"]
+
+
 class SuccessfulAdapter:
     async def dispatch(self, request, *, prompt):
         return ConfirmationDispatchResult.sent(provider_message_id=f"inbox:{request.case_public_id}")
@@ -233,7 +257,7 @@ class RevisionSupersedingAdapter:
         session = self.session_factory()
         try:
             activity = session.query(CustomerActivity).filter_by(id=212, team_id=1).one()
-            activity.post_commit_revision = 2
+            activity.activity_revision = 2
             session.commit()
         finally:
             session.close()
@@ -392,7 +416,7 @@ async def test_failed_dispatch_is_audited_without_claiming_user_delivery(db_sess
 async def test_delivery_fences_superseded_source_activity_revision_before_dispatch(db_session):
     case = _case(db_session)
     activity = db_session.query(CustomerActivity).filter_by(id=212, team_id=1).one()
-    activity.post_commit_revision = 2
+    activity.activity_revision = 2
     db_session.commit()
     adapter = CountingAdapter()
     workflow = FollowUpConfirmationDeliveryWorkflow(

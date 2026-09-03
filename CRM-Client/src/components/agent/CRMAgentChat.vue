@@ -266,6 +266,13 @@ const {
   onChanged: () => {
     messageScrollKey.value += 1
   },
+  onWaitingUser: operation => {
+    const targetSessionId = operation.session_id
+    if (targetSessionId === null || targetSessionId === undefined || targetSessionId !== sessionId.value) return
+    void loadSessionMessages(targetSessionId).catch(() => {
+      // A later session refresh restores messages if the projection is not visible yet.
+    })
+  },
   onTerminal: operation => {
     const targetSessionId = operation.session_id
     if (targetSessionId === null || targetSessionId === undefined || targetSessionId !== sessionId.value) return

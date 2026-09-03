@@ -60,6 +60,8 @@ import procurementApi, {
 // ==================== Props & Emits ====================
 interface Props {
   active?: boolean
+  /** 页面化设置壳层统一传入；采购方式组件本身始终以内嵌面板渲染。 */
+  embedded?: boolean
   action?: 'create' | 'edit' | undefined
   recordId?: string | undefined
 }

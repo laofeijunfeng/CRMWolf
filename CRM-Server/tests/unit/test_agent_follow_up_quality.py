@@ -47,6 +47,8 @@ def test_follow_up_quality_prompt_contains_six_principles_and_threshold():
     assert "如果总分达到 60 分" in CRM_AGENT_FOLLOW_UP_QUALITY_SYSTEM_PROMPT
     assert "suggested_revision 只能整理、合并、去重、调整语序" in CRM_AGENT_FOLLOW_UP_QUALITY_SYSTEM_PROMPT
     assert "不要保留“补充：”“用户补充”等过程性字样" in CRM_AGENT_FOLLOW_UP_QUALITY_SYSTEM_PROMPT
+    assert "next_action_status" in CRM_AGENT_FOLLOW_UP_QUALITY_SYSTEM_PROMPT
+    assert "不能用固定词表机械匹配" in CRM_AGENT_FOLLOW_UP_QUALITY_SYSTEM_PROMPT
     assert "【语义解析结果】" in messages[1]["content"]
 
 
@@ -59,6 +61,7 @@ def test_follow_up_quality_normalizes_threshold_behavior():
         "reason": "基本可接力",
         "missing_aspects": ["决策链"],
         "supplement_question": "请补充决策链。",
+        "next_action_status": "CLEAR",
         "principle_scores": {},
     }))
     blocked = evaluator.normalize_result(AgentFollowUpQualityResult.model_validate({
@@ -67,6 +70,7 @@ def test_follow_up_quality_normalizes_threshold_behavior():
         "reason": "下一步不清楚",
         "missing_aspects": ["下一步动作", "时间", "责任人", "异议"],
         "supplement_question": None,
+        "next_action_status": "VAGUE",
         "principle_scores": {},
     }))
 
@@ -75,6 +79,18 @@ def test_follow_up_quality_normalizes_threshold_behavior():
     assert blocked.passed is False
     assert blocked.missing_aspects == ["下一步动作", "时间", "责任人"]
     assert blocked.supplement_question == "这条跟进还差一点关键信息，请补充下一步由谁在什么时间做什么。"
+
+
+def test_follow_up_quality_preserves_structured_next_action_status():
+    result = AgentFollowUpQualityEvaluator().normalize_result(
+        AgentFollowUpQualityResult(
+            score=80,
+            passed=True,
+            next_action_status="EXPLICITLY_NONE",
+        )
+    )
+
+    assert result.next_action_status == "EXPLICITLY_NONE"
 
 
 @pytest.mark.asyncio
@@ -95,6 +111,7 @@ async def test_follow_up_quality_uses_langchain_structured_output_path():
                     "reason": "有事实、预算、下一步动作和时间。",
                     "missing_aspects": [],
                     "supplement_question": None,
+                    "next_action_status": "CLEAR",
                     "principle_scores": {},
                 }),
             }

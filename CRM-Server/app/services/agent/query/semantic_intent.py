@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
 
 QueryIntentScope = Literal["global_work", "customer_scoped", "customer_list", "unknown"]
+QueryIntentGoal = Literal["list", "search", "get_detail", "get_status", "summarize"]
 QueryIntentResource = Literal[
     "follow_up_tasks",
     "completed_work",
@@ -111,6 +112,8 @@ class CRMQuerySemanticIntent(QueryContractModel):
 
     scope: QueryIntentScope
     resource: QueryIntentResource | None = None
+    query_goal: QueryIntentGoal = "list"
+    task_text: str | None = Field(default=None, min_length=1, max_length=1000)
     customer_text: str | None = Field(default=None, min_length=1, max_length=255)
     temporal: QueryTemporalIntent = Field(default_factory=QueryTemporalIntent)
     confidence: float = Field(ge=0, le=1)
@@ -138,6 +141,14 @@ class CRMQuerySemanticIntent(QueryContractModel):
             raise ValueError("customer_list requires the customers resource")
         if self.scope == "unknown" and self.resource is not None:
             raise ValueError("unknown intent must not select a resource")
+        if self.task_text is not None and self.resource != "follow_up_tasks":
+            raise ValueError("task_text is only allowed for follow_up_tasks")
+        if self.query_goal in {"get_detail", "get_status"} and self.resource != "follow_up_tasks":
+            raise ValueError("task detail and status goals require follow_up_tasks")
+        if self.query_goal == "summarize" and self.resource != "completed_work":
+            raise ValueError("summarize goal requires completed_work")
+        if self.task_text is not None and self.query_goal not in {"search", "get_detail", "get_status"}:
+            raise ValueError("task_text requires a task search, detail, or status goal")
         return self
 
 
@@ -154,6 +165,15 @@ QUERY_SEMANTIC_INTENT_SYSTEM_PROMPT = """
 1. 先理解语义, 不要按固定关键词或固定句式匹配。口语、同义表达、倒装、省略都要按含义判断。
 2. global_work 的 resource 只能是 follow_up_tasks 或 completed_work。
    未来/当前要做的事归 follow_up_tasks; 已经做过的事归 completed_work。
+   query_goal 表示用户真正要做的查询：
+   - list：列出一组记录；
+   - search：按自然语言描述寻找记录；
+   - get_detail：查看明确记录的详情；
+   - get_status：确认明确待办的当前状态；
+   - summarize：汇总一段时间内已完成的工作。
+   “这个待办完成了吗/上次那个跟进现在怎样”属于 get_status 或 get_detail，
+   不要因为“历史/上次”就只查 completed_work。task_text 只填写用户对待办的自然语言描述，
+   不要填写数据库 ID；明确的服务端实体引用由系统提供。
 3. temporal.kind 只能填写标准语义: today、tomorrow、this_week、next_week、last_week、this_month、
    overdue、custom、unspecified。
    “未来两周”“最近几天”“截至月底”“9月上旬”等表达, 若能从原话明确得到边界,
@@ -165,7 +185,9 @@ QUERY_SEMANTIC_INTENT_SYSTEM_PROMPT = """
 6. 不要根据公司名称、行业或上下文猜客户。没有明确客户提及时 customer_text 必须为空。
 7. completed_work 只能表达已经发生的工作; 未来时间与 completed_work 冲突时,
    返回 unknown 或把语义改为 follow_up_tasks。
-8. confidence 反映语义判断把握, 不是业务事实可信度。
+8. 如果用户没有给出时间范围，当前待办查询使用全部未完成待办；已完成工作查询使用安全的近期默认范围，
+   不要仅因为时间省略就追问。回答中应明确告知实际采用的范围。
+9. confidence 反映语义判断把握, 不是业务事实可信度。
 """
 
 
@@ -184,7 +206,7 @@ class LLMQuerySemanticIntentResolver:
         self,
         *,
         chat_model_factory: Callable[..., Any] = ChatOpenAI,
-        timeout_seconds: float = 8.0,
+        timeout_seconds: float = 30.0,
         now_factory: Callable[[], datetime] = business_now,
     ) -> None:
         if timeout_seconds <= 0:

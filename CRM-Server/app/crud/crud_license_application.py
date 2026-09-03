@@ -474,7 +474,7 @@ class LicenseApplicationCRUD:
             submitter_name or ""
         )
 
-        if error_msg:
+        if error_msg and error_msg != "审批已在处理中":
             raise ValueError(error_msg)
 
         db.refresh(application)

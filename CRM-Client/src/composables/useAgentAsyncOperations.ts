@@ -23,6 +23,7 @@ interface UseAgentAsyncOperationsOptions {
   api?: AgentAsyncOperationsApi
   pollIntervalMs?: number
   onChanged?: () => void
+  onWaitingUser?: (operation: AgentAsyncOperation) => void
   onTerminal?: (operation: AgentAsyncOperation) => void
 }
 
@@ -110,10 +111,21 @@ export const useAgentAsyncOperations = (
     pollTimers.clear()
   }
 
+  const notifyWaitingUserTransition = (
+    previous: AgentAsyncOperation | undefined,
+    next: AgentAsyncOperation,
+  ): void => {
+    if (next.status !== "WAITING_USER" || previous?.status === "WAITING_USER") return
+    options.onWaitingUser?.(next)
+  }
+
   const upsert = (operation: AgentAsyncOperation): void => {
+    const previous = operations.value.find(item => item.public_id === operation.public_id)
     const next = upsertAgentAsyncOperation(operations.value, operation)
     if (next === operations.value) return
     operations.value = next
+    const updated = next.find(item => item.public_id === operation.public_id)
+    if (updated !== undefined) notifyWaitingUserTransition(previous, updated)
     notifyChanged()
   }
 
@@ -161,7 +173,12 @@ export const useAgentAsyncOperations = (
     const targetGeneration = generation
     const sessionOperations = await api.listSessionOperations(sessionId)
     if (targetGeneration !== generation || activeSessionId !== sessionId) return
-    operations.value = mergeOperationLists(operations.value, sessionOperations)
+    const previousOperations = new Map(operations.value.map(operation => [operation.public_id, operation]))
+    const mergedOperations = mergeOperationLists(operations.value, sessionOperations)
+    operations.value = mergedOperations
+    for (const operation of mergedOperations) {
+      notifyWaitingUserTransition(previousOperations.get(operation.public_id), operation)
+    }
     notifyChanged()
     for (const operation of operations.value) ensurePolling(operation)
   }

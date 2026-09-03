@@ -688,7 +688,7 @@ async def test_create_payment_record_triggers_business_object_intelligence(monke
     monkeypatch.setattr(
         payments_api.payment_record_crud,
         "create",
-        lambda db, plan_id, record_data, creator_id, creator_name, team_id: record,
+        lambda db, plan_id, record_data, creator_id, creator_name, team_id, **kwargs: record,
     )
 
     async def fake_trigger(db, change):

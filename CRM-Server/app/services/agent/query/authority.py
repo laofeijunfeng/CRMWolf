@@ -38,6 +38,27 @@ class CRMQueryAuthority:
     def customer_refs(self) -> tuple[EntityRef, ...]:
         return tuple(ref for ref in self.entity_refs if ref.resource == "customer")
 
+    @property
+    def task_refs(self) -> tuple[EntityRef, ...]:
+        return tuple(ref for ref in self.entity_refs if ref.resource == "follow_up_task")
+
+    def constrain_task_detail(self, payload: dict[str, object]) -> dict[str, object]:
+        """Bind a detail lookup to a task EntityRef issued by the server."""
+
+        raw_ref = payload.get("task_ref")
+        if isinstance(raw_ref, EntityRef):
+            public_id = raw_ref.public_id
+        elif isinstance(raw_ref, dict):
+            public_id = raw_ref.get("public_id")
+        else:
+            raise CRMQueryAuthorityError("task_ref must be selected by the server")
+        if not isinstance(public_id, str) or not public_id.strip():
+            raise CRMQueryAuthorityError("task_ref must contain a server-issued public_id")
+        matching = next((ref for ref in self.task_refs if ref.public_id == public_id), None)
+        if matching is None:
+            raise CRMQueryAuthorityError("task_ref is outside the server-authoritative task scope")
+        return {**payload, "task_ref": matching.model_dump(mode="json")}
+
     def constrain_query(self, resource: CRMResource, payload: dict[str, object]) -> dict[str, object]:
         """Return a tool payload that cannot widen Root's authority."""
 

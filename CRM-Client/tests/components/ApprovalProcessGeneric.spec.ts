@@ -97,12 +97,12 @@ vi.mock('@/components/ui/alert-dialog', () => {
 vi.mock('@/components/ui/button', () => ({
   Button: defineComponent({
     name: 'Button',
-    props: { type: String, variant: String, size: String, disabled: Boolean },
+    props: { type: String, variant: String, size: String, disabled: Boolean, loading: Boolean },
     setup: (props, { slots, attrs }) => () => h('button', {
       ...attrs,
       type: props.type ?? 'button',
       disabled: props.disabled,
-    }, slots.default?.()),
+    }, [props.loading ? h('span', { class: 'animate-spin' }) : null, slots.default?.()]),
   }),
 }))
 
@@ -182,6 +182,8 @@ const baseDetail: ApprovalDetail = {
   updated_time: '2026-07-01T10:00:00',
   flow_is_active: true,
   flow_disabled_warning: null,
+  application_number: 'INV-001',
+  entity_name: 'Acme 发票申请',
   records: [
     {
       id: 1,
@@ -223,7 +225,8 @@ const mountComp = (props: Record<string, unknown>) =>
     global: {
       directives: {
         // no-op：始终保留元素（权限由 mock hasPermission=true 决定）
-        permission: { mounted: () => undefined, updated: () => undefined }
+        permission: { mounted: () => undefined, updated: () => undefined },
+        'any-permission': { mounted: () => undefined, updated: () => undefined }
       }
     }
   })
@@ -280,6 +283,22 @@ describe('ApprovalProcessGeneric', () => {
     expect(w.find('[data-testid="withdraw-btn"]').exists()).toBe(true)
     expect(w.find('[data-testid="approve-btn"]').exists()).toBe(false)
     expect(w.find('[data-testid="reject-btn"]').exists()).toBe(false)
+  })
+
+  it('shows the approval object and current status in the withdraw confirmation', async () => {
+    api.getApprovalDetail.mockResolvedValue(buildDetail({ status: 'PENDING' }))
+    const w = mountComp({
+      entityType: 'INVOICE',
+      entityId: 7,
+      canApprove: false,
+      isSubmitter: true
+    })
+    await flushPromises()
+
+    await w.find('[data-testid="withdraw-btn"]').trigger('click')
+    expect(w.text()).toContain('Acme 发票申请（INV-001）')
+    expect(w.text()).toContain('当前状态：审批中')
+    expect(w.text()).toContain('需要修改后重新提交')
   })
 
   it('reject confirm stays disabled without a reason', async () => {

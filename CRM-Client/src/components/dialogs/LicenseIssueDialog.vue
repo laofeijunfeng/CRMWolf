@@ -5,7 +5,7 @@
  * 收集 License 信息和备注，遵循无障碍和动效规范。
  * 使用 vee-validate + Zod 进行表单校验。
  */
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
@@ -25,8 +25,10 @@ import {
 } from '@/components/ui/form'
 import { Button } from '@/components/ui/button'
 import { TextareaField } from '@/components/crmwolf'
+import { confirmDialog } from '@/utils/confirmDialog'
 import { handleApiError } from '@/utils/errorHandler'
 import licenseApplicationApi from '@/api/licenseApplication'
+import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 
 // Zod schema for form validation
 const schema = toTypedSchema(
@@ -56,7 +58,7 @@ const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 
 // VeeValidate form setup
-const { handleSubmit, setFieldValue } = useForm({
+const { handleSubmit, resetForm, setFieldValue, values } = useForm({
   validationSchema: schema,
   initialValues: {
     license_info: '',
@@ -66,17 +68,53 @@ const { handleSubmit, setFieldValue } = useForm({
 
 // State
 const submitting = ref(false)
+const closeGuardPending = ref(false)
+const submitError = ref<FeedbackError | null>(null)
+
+const hasFormChanges = computed(() =>
+  String(values.license_info ?? '').trim().length > 0
+  || String(values.comment ?? '').trim().length > 0,
+)
 
 // Watch for dialog open to reset form
 watch(() => props.open, (newOpen) => {
   if (newOpen) {
+    submitError.value = null
+    resetForm({ values: { license_info: '', comment: '' } })
     setFieldValue('license_info', '')
     setFieldValue('comment', '')
   }
 })
 
+const handleDialogOpenChange = async (open: boolean): Promise<void> => {
+  if (open) {
+    emit('update:open', true)
+    return
+  }
+
+  if (submitting.value || closeGuardPending.value) return
+
+  if (!hasFormChanges.value) {
+    emit('update:open', false)
+    return
+  }
+
+  closeGuardPending.value = true
+  try {
+    const confirmed = await confirmDialog(
+      '已填写 License 信息，关闭后这些内容不会保存。确定关闭吗？',
+      '放弃本次发放？',
+      { variant: 'destructive', confirmText: '放弃并关闭' },
+    )
+    if (confirmed) emit('update:open', false)
+  } finally {
+    closeGuardPending.value = false
+  }
+}
+
 // Form submission
 const onSubmit = handleSubmit(async (formValues) => {
+  submitError.value = null
   submitting.value = true
   try {
     // Build payload conditionally to satisfy exactOptionalPropertyTypes
@@ -93,6 +131,7 @@ const onSubmit = handleSubmit(async (formValues) => {
     emit('issued')
     emit('update:open', false)
   } catch (error) {
+    submitError.value = toFeedbackError(error, '发放 License', { operation: 'write' })
     handleApiError(error, '发放 License')
   } finally {
     submitting.value = false
@@ -101,12 +140,25 @@ const onSubmit = handleSubmit(async (formValues) => {
 </script>
 
 <template>
-  <Dialog :open="props.open" @update:open="emit('update:open', $event)">
+  <Dialog :open="props.open" @update:open="handleDialogOpenChange">
     <DialogContent class="sm:max-w-[525px] max-w-full">
       <DialogHeader>
         <DialogTitle>发放 License</DialogTitle>
         <DialogDescription>请输入 License 信息完成发放</DialogDescription>
       </DialogHeader>
+
+      <div
+        v-if="submitError"
+        class="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm"
+        role="alert"
+        aria-live="assertive"
+      >
+        <strong class="block">{{ submitError.title }}</strong>
+        <span class="text-muted-foreground">{{ submitError.description }}</span>
+        <span v-if="submitError.outcomeUnknown" class="mt-1 block text-muted-foreground">
+          请先查询申请的最新状态，确认尚未发放后再重试，避免重复操作。
+        </span>
+      </div>
 
       <form class="grid gap-4 py-4" @submit="onSubmit">
         <!-- License 信息 -->
@@ -119,7 +171,8 @@ const onSubmit = handleSubmit(async (formValues) => {
               required
               :rows="8"
               placeholder="请输入 License 信息"
-              :disabled="submitting"
+              :disabled="submitting || closeGuardPending"
+              maxlength="10000"
               control-class="resize-none"
               @update:model-value="handleChange"
             />
@@ -141,7 +194,8 @@ const onSubmit = handleSubmit(async (formValues) => {
               label="备注"
               :rows="3"
               placeholder="请输入备注（可选）"
-              :disabled="submitting"
+              :disabled="submitting || closeGuardPending"
+              maxlength="500"
               control-class="resize-none"
               @update:model-value="handleChange"
             />
@@ -158,15 +212,15 @@ const onSubmit = handleSubmit(async (formValues) => {
       <DialogFooter class="flex-col gap-2 sm:flex-row">
         <Button
           variant="outline"
-          :disabled="submitting"
+          :disabled="submitting || closeGuardPending"
           class="w-full sm:w-auto"
-          @click="emit('update:open', false)"
+          @click="handleDialogOpenChange(false)"
         >
           取消
         </Button>
         <Button
           type="submit"
-          :disabled="submitting"
+          :disabled="submitting || closeGuardPending"
           :loading="submitting"
           class="w-full sm:w-auto"
           @click="onSubmit"

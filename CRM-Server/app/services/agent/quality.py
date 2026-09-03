@@ -132,10 +132,12 @@ class AgentFollowUpQualityEvaluator:
         supplement_question = result.supplement_question if not passed else None
         if not passed and not supplement_question:
             supplement_question = "这条跟进还差一点关键信息，请补充下一步由谁在什么时间做什么。"
+        next_action_status = result.next_action_status
         return result.model_copy(update={
             "score": score,
             "passed": passed,
             "supplement_question": supplement_question,
+            "next_action_status": next_action_status,
             "missing_aspects": result.missing_aspects[:3],
             "reason": (result.reason or "跟进记录信息还不够完整。")[:80],
         })

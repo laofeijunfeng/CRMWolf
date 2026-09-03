@@ -180,7 +180,7 @@ describe('ContactFormDialog gender contract', () => {
   it('maps backend female code 2 to the 女 option when editing a contact', async () => {
     const wrapper = mount(ContactFormDialog, {
       props: {
-        customerId: 19,
+        customerId: '19',
         open: true,
         contact: contactFixture(2),
       },
@@ -195,18 +195,19 @@ describe('ContactFormDialog gender contract', () => {
   it('submits selected male and female genders as backend enum codes', async () => {
     const wrapper = mount(ContactFormDialog, {
       props: {
-        customerId: 19,
+        customerId: '19',
         open: true,
       },
     })
 
-    await wrapper.get('input[name="name"]').setValue('李四')
-    await wrapper.get('input[name="mobile"]').setValue('18627965322')
+    await wrapper.get('input#contact-name').setValue('李四')
+    await wrapper.get('input#contact-mobile').setValue('18627965322')
+    await wrapper.get('input#contact-position').setValue('研发经理')
     await wrapper.get('[data-testid="gender-男"]').trigger('click')
     await wrapper.get('form').trigger('submit')
 
     await vi.waitFor(() => {
-      expect(customerApi.createContact).toHaveBeenCalledWith(19, expect.objectContaining({ gender: '1' }))
+      expect(customerApi.createContact).toHaveBeenCalledWith('19', expect.objectContaining({ gender: '1' }))
     })
 
     customerApi.createContact.mockClear()
@@ -214,7 +215,7 @@ describe('ContactFormDialog gender contract', () => {
     await wrapper.get('form').trigger('submit')
 
     await vi.waitFor(() => {
-      expect(customerApi.createContact).toHaveBeenCalledWith(19, expect.objectContaining({ gender: '2' }))
+      expect(customerApi.createContact).toHaveBeenCalledWith('19', expect.objectContaining({ gender: '2' }))
     })
   })
 })

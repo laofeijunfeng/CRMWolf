@@ -270,6 +270,28 @@ def test_confirmation_case_created_from_blocked_transition_plan_is_idempotent(db
     assert "source_plan_json" not in response.model_dump()
 
 
+@pytest.mark.parametrize("decision", ["KEEP_OPEN", "POSTPONE", "CANCEL", "ASK_CONFIRMATION"])
+def test_confirmation_case_always_asks_about_completion(db_session, decision):
+    task = _create_task(db_session, task_hash=f"task-hash-{decision.lower()}")
+    plan = _confirmation_plan(task, decision=decision, confidence=0.99)
+
+    case = (
+        FollowUpTaskConfirmationService()
+        .create_case_from_plan_action(
+            db_session,
+            team_id=1,
+            task=task,
+            plan=plan,
+            action=plan.actions[0],
+            actor_id="2",
+        )
+        .case
+    )
+
+    assert case.question_text == "8 月 5 号待办的「确认客户预算是否通过」现在完成了吗?"
+    assert "延期" not in case.question_text
+
+
 def test_keep_open_confirmation_asks_whether_related_task_is_completed(db_session):
     task = _create_task(db_session)
     plan = _confirmation_plan(task, decision="KEEP_OPEN", confidence=0.99)

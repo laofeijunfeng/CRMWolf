@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from app.services.agent.orchestrator.contracts import PendingCaseContext
 from app.services.agent.orchestrator.pending_case_matcher import match_pending_case
-from app.services.agent.orchestrator.risk import has_explicit_workflow_continuation_intent
 
 
 def _case(
@@ -48,7 +47,7 @@ def test_explicit_case_id_matches_only_server_context() -> None:
 
 def test_customer_alias_matches_unique_pending_case() -> None:
     case = _case()
-    result = match_pending_case("完成凡亚信息的待办", [case])
+    result = match_pending_case("完成凡亚信息的待办", [case], semantic_reference_authorized=True)
 
     assert result.status == "MATCHED"
     assert result.case == case
@@ -57,7 +56,7 @@ def test_customer_alias_matches_unique_pending_case() -> None:
 def test_multiple_cases_for_same_customer_require_clarification() -> None:
     first = _case()
     second = _case("fuc_" + "2" * 32, title="跟进立项流程")
-    result = match_pending_case("完成凡亚信息的待办", [first, second])
+    result = match_pending_case("完成凡亚信息的待办", [first, second], semantic_reference_authorized=True)
 
     assert result.status == "AMBIGUOUS"
     assert result.case is None
@@ -84,14 +83,10 @@ def test_normal_follow_up_task_transition_is_not_pending_case_reference() -> Non
 
 
 
-def test_pending_case_completion_is_not_workflow_continuation() -> None:
-    assert not has_explicit_workflow_continuation_intent("完成上面的任务")
-
-
 
 def test_generic_previous_task_reference_matches_only_when_unique() -> None:
     case = _case()
-    result = match_pending_case("完成上面的待办", [case])
+    result = match_pending_case("完成上面的待办", [case], semantic_reference_authorized=True)
 
     assert result.status == "MATCHED"
     assert result.case == case
@@ -100,7 +95,7 @@ def test_generic_previous_task_reference_matches_only_when_unique() -> None:
 def test_generic_previous_task_reference_is_ambiguous_with_multiple_cases() -> None:
     first = _case()
     second = _case("fuc_" + "2" * 32, title="跟进立项流程")
-    result = match_pending_case("完成上面的任务", [first, second])
+    result = match_pending_case("完成上面的任务", [first, second], semantic_reference_authorized=True)
 
     assert result.status == "AMBIGUOUS"
     assert result.candidates == (first, second)

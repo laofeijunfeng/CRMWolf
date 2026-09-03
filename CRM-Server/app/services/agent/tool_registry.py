@@ -206,8 +206,17 @@ class CreateCustomerActivityInput(BaseModel):
     activity_kind: str = "OTHER_FOLLOW_UP"
     source_content: str = Field(..., min_length=1)
     title: Optional[str] = None
+    content_json: Optional[dict[str, object]] = None
+    summary: Optional[str] = None
     next_action: Optional[str] = None
+    next_action_source: Optional[str] = None
     next_follow_time: Optional[str] = None
+    next_follow_time_source: Optional[str] = None
+    # Agent 工具只接受 Planner 已完成的最终评估，不提供历史默认值。
+    effectiveness_score: int = Field(..., ge=0, le=100)
+    effectiveness_is_valid: bool = Field(...)
+    effectiveness_reason: str = Field(..., min_length=1, max_length=500)
+    effectiveness_detail_json: dict[str, object] = Field(default_factory=dict)
     idempotency_suffix: Optional[str] = None
 
 
@@ -488,8 +497,16 @@ class AgentToolRegistry:
                 activity_kind=model.activity_kind,
                 source_content=model.source_content,
                 title=model.title,
+                content_json=model.content_json,
+                summary=model.summary,
                 next_action=model.next_action,
+                next_action_source=model.next_action_source,
                 next_follow_time=model.next_follow_time,
+                next_follow_time_source=model.next_follow_time_source,
+                effectiveness_score=model.effectiveness_score,
+                effectiveness_is_valid=model.effectiveness_is_valid,
+                effectiveness_reason=model.effectiveness_reason,
+                effectiveness_detail_json=model.effectiveness_detail_json,
                 idempotency_suffix=model.idempotency_suffix,
             )
 

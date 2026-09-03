@@ -1187,7 +1187,9 @@ class CustomerIntelligenceRefreshService:
                         CustomerIntelligenceRunStatus.PENDING,
                         CustomerIntelligenceRunStatus.RUNNING,
                         CustomerIntelligenceRunStatus.RETRY_PENDING,
+                        CustomerIntelligenceRunStatus.SUCCESS,
                         CustomerIntelligenceRunStatus.FAILED,
+                        CustomerIntelligenceRunStatus.CANCELLED,
                     ]
                 ),
             )

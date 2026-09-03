@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from pydantic import TypeAdapter, ValidationError
 
 from app.crud.customer_activity_post_commit_job import customer_activity_post_commit_job_crud
+from app.crud.customer_opportunity_suggestion_job import customer_opportunity_suggestion_job_crud
 from app.services.agent.async_operation_service import (
     AgentAsyncOperationService,
     agent_async_operation_service,
@@ -30,6 +31,10 @@ from app.services.customer_intelligence_refresh_service import (
     CustomerIntelligenceRefreshService,
     customer_intelligence_refresh_service,
 )
+from app.services.customer_opportunity_suggestion_operation_projector import (
+    CustomerOpportunitySuggestionOperationProjector,
+    customer_opportunity_suggestion_operation_projector,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -48,12 +53,16 @@ class AgentDurableWorkBinder:
         *,
         operation_service: AgentAsyncOperationService | None = None,
         post_commit_projector: CustomerActivityPostCommitOperationProjector | None = None,
+        opportunity_suggestion_projector: CustomerOpportunitySuggestionOperationProjector | None = None,
         intelligence_service: CustomerIntelligenceRefreshService | None = None,
         activity_origin_service: CustomerActivityAgentOriginService | None = None,
     ) -> None:
         self.operation_service = operation_service or agent_async_operation_service
         self.post_commit_projector = (
             post_commit_projector or customer_activity_post_commit_operation_projector
+        )
+        self.opportunity_suggestion_projector = (
+            opportunity_suggestion_projector or customer_opportunity_suggestion_operation_projector
         )
         self.intelligence_service = intelligence_service or customer_intelligence_refresh_service
         self.activity_origin_service = activity_origin_service or customer_activity_agent_origin_service
@@ -67,7 +76,7 @@ class AgentDurableWorkBinder:
     ) -> None:
         """Bind de-duplicated receipts inside the caller-owned short transaction."""
 
-        seen: set[tuple[str, int, str | None, str | None]] = set()
+        seen: set[tuple[str, int, str | None, str | None, str | None]] = set()
         for receipt in receipts:
             if not isinstance(receipt, CustomerActivityDurableWorkReceipt):
                 raise TypeError("unsupported Agent durable-work receipt")
@@ -76,6 +85,7 @@ class AgentDurableWorkBinder:
                 receipt.activity_id,
                 receipt.post_commit_job_public_id,
                 receipt.customer_intelligence_request_id,
+                receipt.opportunity_suggestion_job_public_id,
             )
             if identity in seen:
                 continue
@@ -133,6 +143,40 @@ class AgentDurableWorkBinder:
             request_id=receipt.customer_intelligence_request_id,
             binding=binding,
         )
+
+        if receipt.opportunity_suggestion_job_public_id:
+            suggestion_job = customer_opportunity_suggestion_job_crud.get_by_public_id(
+                db,
+                team_id=binding.team_id,
+                public_id=receipt.opportunity_suggestion_job_public_id,
+            )
+            if suggestion_job is None:
+                raise ValueError("客户商机建议任务不存在")
+            if int(suggestion_job.activity_id) != receipt.activity_id:
+                raise ValueError("客户商机建议任务与回执不匹配")
+            suggestion_operation = self.operation_service.bind_source(
+                db,
+                operation_key=f"customer-opportunity-suggestion:{receipt.opportunity_suggestion_job_public_id}",
+                request_id=receipt.opportunity_suggestion_job_public_id,
+                team_id=binding.team_id,
+                user_id=binding.user_id,
+                session_id=binding.session_id,
+                source_user_message_id=binding.source_user_message_id,
+                source_assistant_message_id=binding.source_assistant_message_id,
+                operation_type="customer_opportunity_suggestion",
+                resource_type="customer_activity",
+                resource_id=receipt.activity_id,
+                resource_public_id=receipt.opportunity_suggestion_job_public_id,
+                graph_thread_id=str(suggestion_job.graph_thread_id) if suggestion_job.graph_thread_id else None,
+                summary="正在分析是否需要推进商机",
+            )
+            projected_suggestion = self.opportunity_suggestion_projector.project_job(
+                db,
+                suggestion_job,
+                operation_public_id=str(suggestion_operation.public_id),
+            )
+            if projected_suggestion is None:
+                raise RuntimeError("客户商机建议异步操作绑定后投影不可见")
 
 
 class AgentDurableWorkRecoveryService:
@@ -237,6 +281,10 @@ class AgentDurableWorkRecoveryService:
             f"customer-activity-post-commit:{receipt.post_commit_job_public_id}",
             f"customer-intelligence:{receipt.customer_intelligence_request_id}",
         ]
+        if receipt.opportunity_suggestion_job_public_id:
+            operation_keys.append(
+                f"customer-opportunity-suggestion:{receipt.opportunity_suggestion_job_public_id}"
+            )
         operations = self.operation_service.list_by_operation_keys(
             db,
             team_id=binding.team_id,

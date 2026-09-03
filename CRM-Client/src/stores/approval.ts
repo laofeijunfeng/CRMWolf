@@ -13,7 +13,7 @@
  */
 
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import approvalGenericApi, {
   type ApprovalEntityId,
   type UpdatedTimesMap
@@ -38,7 +38,24 @@ import {
 export const useApprovalStore = defineStore('approvalGeneric', () => {
   // ===== State =====
   const currentApprovalDetail = ref<ApprovalDetail | null>(null)
-  const loading = ref<boolean>(false)
+  // 读取详情、列表和写操作分离，避免一个请求把无关区域误标记为 loading。
+  const detailPendingCount = ref(0)
+  const listPendingCount = ref(0)
+  const actionPendingCount = ref(0)
+  // 同类请求可能并发，使用计数而不是 boolean，避免先结束的请求提前清除 loading。
+  const detailLoading = computed<boolean>(() => detailPendingCount.value > 0)
+  const listLoading = computed<boolean>(() => listPendingCount.value > 0)
+  const actionLoading = computed<boolean>(() => actionPendingCount.value > 0)
+  // 兼容旧调用方：loading 表示任一审批请求仍在进行。
+  const loading = computed<boolean>(() => detailLoading.value || listLoading.value || actionLoading.value)
+
+  const beginPending = (counter: { value: number }): void => {
+    counter.value += 1
+  }
+
+  const endPending = (counter: { value: number }): void => {
+    counter.value = Math.max(0, counter.value - 1)
+  }
   // FinanceApprovalCenter 列表（Task C3）
   const approvalList = ref<ApprovalListItem[]>([])
   const approvalListTotal = ref<number>(0)
@@ -52,14 +69,14 @@ export const useApprovalStore = defineStore('approvalGeneric', () => {
    * Zod 校验失败抛错，detail 不被污染。
    */
   const fetchDetail = async (entityType: EntityType, entityId: ApprovalEntityId): Promise<ApprovalDetail> => {
-    loading.value = true
+    beginPending(detailPendingCount)
     try {
       const raw = await approvalGenericApi.getApprovalDetail(entityType, entityId)
       const parsed = ApprovalDetailSchema.parse(raw)
       currentApprovalDetail.value = parsed
       return parsed
     } finally {
-      loading.value = false
+      endPending(detailPendingCount)
     }
   }
 
@@ -71,12 +88,12 @@ export const useApprovalStore = defineStore('approvalGeneric', () => {
     entityId: ApprovalEntityId,
     comment?: string
   ): Promise<ApprovalSubmitResponse> => {
-    loading.value = true
+    beginPending(actionPendingCount)
     try {
       const raw = await approvalGenericApi.submitApproval(entityType, entityId, comment)
       return ApprovalSubmitResponseSchema.parse(raw)
     } finally {
-      loading.value = false
+      endPending(actionPendingCount)
     }
   }
 
@@ -91,7 +108,7 @@ export const useApprovalStore = defineStore('approvalGeneric', () => {
     comment: string,
     updatedTime?: string
   ): Promise<ApprovalDetail> => {
-    loading.value = true
+    beginPending(actionPendingCount)
     try {
       const raw = await approvalGenericApi.approveEntity(
         entityType, entityId, action, comment, updatedTime
@@ -100,7 +117,7 @@ export const useApprovalStore = defineStore('approvalGeneric', () => {
       currentApprovalDetail.value = parsed
       return parsed
     } finally {
-      loading.value = false
+      endPending(actionPendingCount)
     }
   }
 
@@ -111,14 +128,14 @@ export const useApprovalStore = defineStore('approvalGeneric', () => {
     entityType: EntityType,
     entityId: ApprovalEntityId
   ): Promise<MessageResponse> => {
-    loading.value = true
+    beginPending(actionPendingCount)
     try {
       const raw = await approvalGenericApi.cancelApproval(entityType, entityId)
       const parsed = MessageResponseSchema.parse(raw)
       currentApprovalDetail.value = null
       return parsed
     } finally {
-      loading.value = false
+      endPending(actionPendingCount)
     }
   }
 
@@ -129,12 +146,12 @@ export const useApprovalStore = defineStore('approvalGeneric', () => {
     entityType: EntityType,
     entityId: ApprovalEntityId
   ): Promise<MessageResponse> => {
-    loading.value = true
+    beginPending(actionPendingCount)
     try {
       const raw = await approvalGenericApi.remindApproval(entityType, entityId)
       return MessageResponseSchema.parse(raw)
     } finally {
-      loading.value = false
+      endPending(actionPendingCount)
     }
   }
 
@@ -149,14 +166,14 @@ export const useApprovalStore = defineStore('approvalGeneric', () => {
     comment: string,
     updatedTimes?: UpdatedTimesMap
   ): Promise<BulkApproveResponse> => {
-    loading.value = true
+    beginPending(actionPendingCount)
     try {
       const raw = await approvalGenericApi.bulkApprove(
         entityType, ids, action, comment, updatedTimes
       )
       return BulkApproveResponseSchema.parse(raw)
     } finally {
-      loading.value = false
+      endPending(actionPendingCount)
     }
   }
 
@@ -173,7 +190,7 @@ export const useApprovalStore = defineStore('approvalGeneric', () => {
    * 待办数（后端在任意 tab 响应中带 pending_count）。
    */
   const fetchList = async (query: ApprovalListQuery): Promise<ApprovalListResponse> => {
-    loading.value = true
+    beginPending(listPendingCount)
     try {
       const raw = await approvalGenericApi.listApprovals(query)
       const parsed = ApprovalListResponseSchema.parse(raw)
@@ -182,7 +199,7 @@ export const useApprovalStore = defineStore('approvalGeneric', () => {
       pendingCount.value = parsed.pending_count
       return parsed
     } finally {
-      loading.value = false
+      endPending(listPendingCount)
     }
   }
 
@@ -195,6 +212,9 @@ export const useApprovalStore = defineStore('approvalGeneric', () => {
   return {
     currentApprovalDetail,
     loading,
+    detailLoading,
+    listLoading,
+    actionLoading,
     approvalList,
     approvalListTotal,
     pendingCount,

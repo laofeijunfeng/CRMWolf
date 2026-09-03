@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, nextTick, watch } from 'vue'
 import { useForm, useField } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
@@ -33,8 +33,10 @@ import {
   SegmentedChoiceControl,
   TextareaField,
 } from '@/components/crmwolf'
+import FormErrorSummary from '@/components/crmwolf/FormErrorSummary.vue'
 import customerActivityApi, { type CustomerActivityCreate } from '@/api/customerActivity'
 import { formatLocalDate } from '@/utils/format'
+import { useDialogCloseGuard } from '@/composables/useDialogCloseGuard'
 
 // Zod schema for form validation
 const schema = toTypedSchema(
@@ -63,7 +65,7 @@ const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 
 // VeeValidate form setup
-const { handleSubmit, resetForm, values } = useForm({
+const { handleSubmit, resetForm, meta, errors } = useForm({
   validationSchema: schema,
   initialValues: {
     method: '',
@@ -78,18 +80,42 @@ const { value: methodValue, errorMessage: methodError } = useField<string>('meth
 
 // State
 const submittingMode = ref<SubmitMode | null>(null)
-const isDirty = ref(false)
-const showConfirmDialog = ref(false)
 
 // Computed property for dialog visibility
 const visible = computed({
   get: () => props.open,
   set: (val) => emit('update:open', val)
 })
+const submitting = computed(() => submittingMode.value !== null)
+const isDirty = computed(() => meta.value.dirty)
+const closeGuard = useDialogCloseGuard({
+  isDirty,
+  submitting,
+  emitOpen: (open) => emit('update:open', open),
+})
+const showConfirmDialog = closeGuard.showConfirmDialog
 const canSubmitAndCompleteTracking = computed(() => {
   const taskPublicId = props.sourceTaskPublicId
   return taskPublicId !== null && taskPublicId !== undefined && taskPublicId.trim().length > 0
 })
+
+const validationErrorItems = computed(() => [
+  { field: 'method', label: '活动类型', message: errors.value.method ?? '', targetId: 'follow-up-method-PHONE_FOLLOW_UP' },
+  { field: 'content', label: '活动内容', message: errors.value.content ?? '', targetId: 'follow-up-content' },
+  { field: 'next_follow_time', label: '下次跟进时间', message: errors.value.next_follow_time ?? '', targetId: 'follow-up-next-time' },
+  { field: 'next_action', label: '下一步动作', message: errors.value.next_action ?? '', targetId: 'follow-up-next-action' },
+].filter((item): item is { field: string; label: string; message: string; targetId: string } => item.message.length > 0))
+
+async function focusFirstError(): Promise<void> {
+  await nextTick()
+  const firstError = validationErrorItems.value[0]
+  if (firstError === undefined || typeof document === 'undefined') return
+
+  const target = document.getElementById(firstError.targetId)
+  if (!(target instanceof HTMLElement)) return
+  target.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+  target.focus({ preventScroll: true })
+}
 
 // Follow-up method options
 const methodOptions: { value: string; label: string }[] = [
@@ -102,13 +128,14 @@ const methodOptions: { value: string; label: string }[] = [
   { value: 'OTHER_FOLLOW_UP', label: '其他' }
 ]
 
-// Watch for form changes
-watch(values, () => {
-  isDirty.value = true
-}, { deep: true })
-
 // Reset form when dialog opens
 watch(() => props.open, (newOpen) => {
+  if (!newOpen) {
+    if (closeGuard.handleParentClose()) return
+    closeGuard.reset()
+    return
+  }
+
   if (newOpen) {
     resetForm({
       values: {
@@ -118,7 +145,7 @@ watch(() => props.open, (newOpen) => {
         next_action: ''
       }
     })
-    isDirty.value = false
+    closeGuard.reset()
   }
 })
 
@@ -167,7 +194,7 @@ async function submitActivity(
       toast.success('客户活动添加成功')
       emit('success', null)
     }
-    isDirty.value = false
+    closeGuard.approveClose()
     visible.value = false
   } catch {
     toast.error(mode === 'activity_and_complete_tracking' ? '提交并完成追踪失败' : '添加客户活动失败')
@@ -176,39 +203,50 @@ async function submitActivity(
   }
 }
 
-const onSubmit = handleSubmit(async (formValues) => submitActivity(formValues, 'activity'))
-const submitAndCompleteTracking = handleSubmit(async (formValues) => submitActivity(formValues, 'activity_and_complete_tracking'))
+const onInvalidSubmit = (): void => {
+  void focusFirstError()
+}
+
+const onSubmit = handleSubmit(
+  async (formValues) => submitActivity(formValues, 'activity'),
+  onInvalidSubmit
+)
+const submitAndCompleteTracking = handleSubmit(
+  async (formValues) => submitActivity(formValues, 'activity_and_complete_tracking'),
+  onInvalidSubmit
+)
 
 // Cancel operation
 function handleCancel(): void {
-  if (isDirty.value) {
-    showConfirmDialog.value = true
-  } else {
-    visible.value = false
-  }
+  closeGuard.requestClose()
 }
 
 // Confirm discard changes
 function confirmCancel(): void {
-  showConfirmDialog.value = false
-  visible.value = false
+  closeGuard.confirmDiscard()
 }
 
 // Continue editing
 function continueEditing(): void {
-  showConfirmDialog.value = false
+  closeGuard.continueEditing()
+}
+
+function handleOpenChange(open: boolean): void {
+  closeGuard.handleOpenChange(open)
 }
 </script>
 
 <template>
-  <Dialog v-model:open="visible">
-    <DialogContent>
+  <Dialog :open="props.open" @update:open="handleOpenChange">
+    <DialogContent class="w-[calc(100vw-2rem)] max-h-[min(90vh,90dvh)] overflow-y-auto overscroll-contain [scroll-padding-bottom:calc(5rem+env(safe-area-inset-bottom,0px))]">
       <DialogHeader>
         <DialogTitle>添加客户活动</DialogTitle>
         <DialogDescription class="sr-only">记录本次客户活动的详细信息</DialogDescription>
       </DialogHeader>
 
       <form class="space-y-4" @submit="onSubmit">
+        <FormErrorSummary :items="validationErrorItems" />
+
         <!-- Follow-up Method (RadioGroup) -->
         <div class="space-y-2">
           <p id="follow-up-method-label" class="text-wolf-caption font-wolf-medium text-wolf-text-primary">
@@ -219,9 +257,11 @@ function continueEditing(): void {
             :options="methodOptions"
             labelled-by="follow-up-method-label"
             id-prefix="follow-up-method"
+            :invalid="Boolean(methodError)"
+            described-by="follow-up-method-error"
             style="--segmented-choice-columns: 4;"
           />
-          <p v-if="methodError" class="text-sm text-destructive">{{ methodError }}</p>
+          <p v-if="methodError" id="follow-up-method-error" class="text-sm text-destructive" role="alert">{{ methodError }}</p>
         </div>
 
         <!-- Follow-up Content (Textarea, required) -->
@@ -299,7 +339,7 @@ function continueEditing(): void {
   </Dialog>
 
   <!-- Confirm discard changes dialog -->
-  <AlertDialog v-model:open="showConfirmDialog">
+  <AlertDialog :open="showConfirmDialog" @update:open="closeGuard.handleConfirmOpenChange">
     <AlertDialogContent>
       <AlertDialogHeader>
         <AlertDialogTitle>放弃更改？</AlertDialogTitle>

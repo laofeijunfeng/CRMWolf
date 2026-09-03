@@ -2,6 +2,7 @@
 
 from app.services.agent.workflow.contracts import (
     WorkflowCancelledResult,
+    WorkflowSkippedResult,
     WorkflowCompletedResult,
     WorkflowFailedResult,
     WorkflowInteraction,
@@ -11,8 +12,10 @@ from app.services.agent.workflow.contracts import (
     WorkflowProgress,
     WorkflowProgressStep,
     WorkflowRef,
+    WorkflowResolvedCustomer,
     WorkflowReplayResult,
     WorkflowResourceStart,
+    WorkflowOpportunitySuggestionStart,
     WorkflowResult,
     WorkflowResumeInput,
     WorkflowRuntimeContext,
@@ -25,6 +28,7 @@ from app.services.agent.workflow.contracts import (
 
 __all__ = [
     "WorkflowCancelledResult",
+    "WorkflowSkippedResult",
     "WorkflowCompletedResult",
     "WorkflowFailedResult",
     "WorkflowInteraction",
@@ -34,8 +38,10 @@ __all__ = [
     "WorkflowProgress",
     "WorkflowProgressStep",
     "WorkflowRef",
+    "WorkflowResolvedCustomer",
     "WorkflowReplayResult",
     "WorkflowResourceStart",
+    "WorkflowOpportunitySuggestionStart",
     "WorkflowResult",
     "WorkflowResumeInput",
     "WorkflowRuntimeContext",

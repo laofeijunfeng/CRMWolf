@@ -724,7 +724,7 @@ async def test_post_commit_workflow_fences_stale_revision_before_task_transition
                 include_cross_owner=include_cross_owner,
             )
             activity = db.query(CustomerActivity).filter_by(id=activity_id, team_id=team_id).one()
-            activity.post_commit_revision = 2
+            activity.activity_revision = 2
             db.commit()
             return result
 
@@ -806,7 +806,7 @@ async def test_post_commit_workflow_cancels_case_when_revision_changes_before_de
         def create_case_from_plan_action(self, db, **kwargs):
             result = self.delegate.create_case_from_plan_action(db, **kwargs)
             activity = db.query(CustomerActivity).filter_by(id=190, team_id=1).one()
-            activity.post_commit_revision = 2
+            activity.activity_revision = 2
             return result
 
     class DeliveryMustNotRun:

@@ -23,16 +23,6 @@ export interface CustomerActivityCreate {
   next_action?: string | null
 }
 
-export interface CustomerActivityUpdate {
-  activity_kind?: string | null
-  source_content?: string | null
-  title?: string | null
-  occurred_at?: string | null
-  next_follow_time?: string | null
-  next_follow_time_source?: 'UI_DEFAULT' | 'USER' | 'AI_EXTRACTED' | 'AGENT' | 'MIGRATED' | null
-  next_action?: string | null
-}
-
 export interface CustomerActivityResponse {
   id: number
   customer_id: string | null
@@ -72,10 +62,6 @@ export interface CustomerActivityCreateAndCompleteTrackingResponse {
   completed_task_public_id: string
 }
 
-export interface NextActivityTimeUpdate {
-  next_follow_time: string
-}
-
 const customerActivityApi = {
   createActivity: (customerId: string, data: CustomerActivityCreate): Promise<CustomerActivityResponse> => {
     return request.post<CustomerActivityResponse>(`/v1/customer-activities/${customerId}`, data)
@@ -101,22 +87,8 @@ const customerActivityApi = {
       .then((items) => items.map(normalizeActivity))
   },
 
-  updateActivity: (activityId: number, data: CustomerActivityUpdate): Promise<CustomerActivityResponse> => {
-    return request.put<CustomerActivityResponse>(`/v1/customer-activities/${activityId}`, data)
-      .then(normalizeActivity)
-  },
-
-  updateNextActivityTime: (activityId: number, data: NextActivityTimeUpdate): Promise<CustomerActivityResponse> => {
-    return request.patch<CustomerActivityResponse>(`/v1/customer-activities/${activityId}/next-time`, data)
-      .then(normalizeActivity)
-  },
-
   deleteActivity: (activityId: number): Promise<{ message: string }> => {
     return request.delete<{ message: string }>(`/v1/customer-activities/${activityId}`)
-  },
-
-  processActivity: (activityId: number): Promise<{ message: string }> => {
-    return request.post<{ message: string }>(`/v1/customer-activities/${activityId}/process`)
   },
 
   getKinds: (): Promise<{ value: string; category: string; label: string; agent_schema: string; score_rule: string }[]> => {

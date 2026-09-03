@@ -14,6 +14,7 @@ from app.services.agent.orchestrator import (
     WorkflowDispatchResult,
 )
 from app.services.agent.query import CRMQueryAgentResult
+from app.services.agent.semantic_plan import AgentSemanticPlan
 from app.services.agent.ui.composer import AgentUIComposer
 from app.services.agent.workflow import (
     WorkflowCompletedResult,
@@ -42,6 +43,12 @@ def _decision(route: str) -> RootDecision:
         confidence=1.0,
         reason_code=f"{route}_TEST",
         evidence=[],
+        semantic_plan=AgentSemanticPlan(
+            speech_act="REQUEST_ACTION" if route == "WORKFLOW" else "ASK_FACT",
+            business_object="CUSTOMER_ACTIVITY" if route == "WORKFLOW" else "CUSTOMER",
+            operation="CREATE" if route == "WORKFLOW" else "READ",
+            confidence=1.0,
+        ),
     )
 
 
@@ -350,6 +357,43 @@ def test_clarification_is_text_only() -> None:
     assert composition.body.metadata.route == "CLARIFY"
     assert [block.type for block in composition.body.blocks] == ["text"]
     assert composition.content == "你想查询客户，还是创建跟进任务？"  # noqa: RUF001
+
+
+def test_root_model_timeout_uses_human_facing_message_and_title() -> None:
+    composition = AgentUIComposer().compose(
+        FailureDispatchResult(
+            error=AgentExecutionError(
+                code="ROOT_DECISION_MODEL_TIMEOUT",
+                message="AI 刚才响应超时了，请再试一次。",  # noqa: RUF001
+                retryable=True,
+            )
+        )
+    )
+
+    error = composition.body.blocks[0]
+    assert error.type == "error"
+    assert error.title == "这次没处理成"
+    assert error.message == "AI 刚才响应超时了，请再试一次。"  # noqa: RUF001
+    assert error.code == "UPSTREAM_TIMEOUT"
+    assert error.retryable is True
+
+
+def test_query_failure_uses_query_title_for_canonical_error_code() -> None:
+    composition = AgentUIComposer().compose(
+        FailureDispatchResult(
+            decision=_decision("QUERY"),
+            error=AgentExecutionError(
+                code="QUERY_INVALID",
+                message="我还没看懂你要查什么，请补充客户、时间或内容。",  # noqa: RUF001
+                retryable=False,
+            ),
+        )
+    )
+
+    error = composition.body.blocks[0]
+    assert error.type == "error"
+    assert error.title == "查询没完成"
+    assert error.code == "QUERY_INVALID"
 
 
 def test_root_failure_is_composed_as_structured_error_block() -> None:

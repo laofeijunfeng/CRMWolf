@@ -143,7 +143,7 @@ def _context(db, *, source_user_message_id=None):
 
 
 @pytest.mark.asyncio
-async def test_create_customer_activity_uses_async_post_commit():
+async def test_create_customer_activity_uses_agent_finalized_endpoint():
     engine, db = _db_session()
     client = _RecordingClient()
     service = CRMAgentToolService(api_client=client)
@@ -153,14 +153,43 @@ async def test_create_customer_activity_uses_async_post_commit():
             customer_id=CUSTOMER_PUBLIC_ID,
             activity_kind="WECHAT_FOLLOW_UP",
             source_content=SOURCE_CONTENT,
+            effectiveness_score=82,
+            effectiveness_is_valid=True,
+            effectiveness_reason="信息完整，已完成最终评估。",
             title="确认放款进度",
             idempotency_suffix="msg-async",
         )
 
         assert result.success is True
-        assert client.calls[0]["params"] == {"post_commit_mode": "async"}
+        assert client.calls[0]["params"] is None
         assert client.calls[0]["method"] == "POST"
+        assert client.calls[0]["path"] == f"/v1/customer-activities/{CUSTOMER_PUBLIC_ID}/agent-finalized"
+        assert client.calls[0]["json"]["effectiveness_score"] == 82
         assert db.query(AgentIdempotencyKey).one().status == AgentIdempotencyStatus.SUCCESS
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_create_customer_activity_rejects_missing_final_evaluation_before_dispatch():
+    engine, db = _db_session()
+    client = _RecordingClient()
+    service = CRMAgentToolService(api_client=client)
+    try:
+        result = await service.create_customer_activity(
+            _context(db),
+            customer_id=CUSTOMER_PUBLIC_ID,
+            activity_kind="WECHAT_FOLLOW_UP",
+            source_content=SOURCE_CONTENT,
+            idempotency_suffix="msg-missing-evaluation",
+        )
+
+        assert result.success is False
+        assert result.status_code == 400
+        assert result.error_message == "客户活动写入缺少 Agent 最终评分"
+        assert client.calls == []
+        assert db.query(AgentIdempotencyKey).count() == 0
     finally:
         db.close()
         engine.dispose()
@@ -177,6 +206,9 @@ async def test_create_customer_activity_timeout_after_write_stays_ambiguous():
             customer_id=CUSTOMER_PUBLIC_ID,
             activity_kind="WECHAT_FOLLOW_UP",
             source_content=SOURCE_CONTENT,
+            effectiveness_score=82,
+            effectiveness_is_valid=True,
+            effectiveness_reason="信息完整，已完成最终评估。",
             idempotency_suffix="msg-timeout-success",
         )
 
@@ -201,6 +233,9 @@ async def test_create_customer_activity_timeout_without_row_stays_ambiguous():
             customer_id=CUSTOMER_PUBLIC_ID,
             activity_kind="WECHAT_FOLLOW_UP",
             source_content=SOURCE_CONTENT,
+            effectiveness_score=82,
+            effectiveness_is_valid=True,
+            effectiveness_reason="信息完整，已完成最终评估。",
             idempotency_suffix="msg-timeout-missing",
         )
 
@@ -223,6 +258,9 @@ async def test_create_customer_activity_returns_both_durable_work_receipts_witho
             customer_id=CUSTOMER_PUBLIC_ID,
             activity_kind="WECHAT_FOLLOW_UP",
             source_content=SOURCE_CONTENT,
+            effectiveness_score=82,
+            effectiveness_is_valid=True,
+            effectiveness_reason="信息完整，已完成最终评估。",
             idempotency_suffix="msg-bind",
         )
 
@@ -250,6 +288,9 @@ async def test_create_customer_activity_rejects_incomplete_background_work_recei
             customer_id="cus_101",
             activity_kind="WECHAT",
             source_content="技术经理反馈项目正在立项",
+            effectiveness_score=82,
+            effectiveness_is_valid=True,
+            effectiveness_reason="信息完整，已完成最终评估。",
         )
 
         assert result.success is False
@@ -291,6 +332,9 @@ async def test_create_customer_activity_does_not_infer_agent_binding_from_messag
             customer_id=CUSTOMER_PUBLIC_ID,
             activity_kind="WECHAT_FOLLOW_UP",
             source_content=SOURCE_CONTENT,
+            effectiveness_score=82,
+            effectiveness_is_valid=True,
+            effectiveness_reason="信息完整，已完成最终评估。",
             idempotency_suffix="msg-bind-fallback",
         )
 

@@ -2,7 +2,7 @@
 /**
  * TableRowActions.vue - 窄视口卡片行操作
  *
- * 桌面 DataTable 行操作改走右键 Context Menu，不再用本组件把高频操作放在表格行外。
+ * 桌面 DataTable 行操作采用主操作 + 更多菜单；本组件只服务移动端卡片。
  * 本组件只服务 `#mobile-actions`：主按钮常显，低频操作收入 DropdownMenu。
  *
  * 设计规范强制要求：
@@ -21,6 +21,7 @@ import {
   DropdownMenuSeparator
 } from '@/components/ui/dropdown-menu'
 import type { ActionConfig } from './tableRowActionTypes'
+import { isDetailTableRowAction } from './tableRowActionGroups'
 
 export type { ActionConfig }
 
@@ -45,11 +46,11 @@ const props = withDefaults(defineProps<TableRowActionsProps>(), {
  * 过滤可见的操作
  */
 const visiblePrimaryActions = computed(() =>
-  props.primaryActions.filter(action => action.visible !== false)
+  props.primaryActions.filter(action => action.visible !== false && !isDetailTableRowAction(action))
 )
 
 const visibleSecondaryActions = computed(() =>
-  props.secondaryActions.filter(action => action.visible !== false)
+  props.secondaryActions.filter(action => action.visible !== false && !isDetailTableRowAction(action))
 )
 
 /**
@@ -60,6 +61,11 @@ const showDropdownMenu = computed(() => visibleSecondaryActions.value.length > 0
 /**
  * 执行操作（阻止事件冒泡）
  */
+const getActionLabel = (action: ActionConfig): string => {
+  if (action.disabledReason === undefined || action.disabledReason.trim() === '') return action.label
+  return `${action.label}（${action.disabledReason}）`
+}
+
 const executeAction = (action: ActionConfig): void => {
   if (action.disabled === true) return
   action.handler(props.row)
@@ -70,14 +76,15 @@ const executeAction = (action: ActionConfig): void => {
   <div class="table-row-actions">
     <!-- 高频操作按钮（行外） -->
     <Button
-      v-for="action in visiblePrimaryActions"
-      :key="action.label"
+      v-for="(action, actionIndex) in visiblePrimaryActions"
+      :key="`${action.label}-${actionIndex}`"
       :size="size"
       variant="ghost"
       :disabled="action.disabled === true"
       :class="['action-button', { 'action-destructive': action.destructive }]"
       @click.stop="executeAction(action)"
-      :aria-label="action.label"
+      :aria-label="getActionLabel(action)"
+      :title="getActionLabel(action)"
     >
       <component :is="action.icon" v-if="action.icon" class="action-icon" aria-hidden="true" />
       {{ action.label }}
@@ -98,7 +105,7 @@ const executeAction = (action: ActionConfig): void => {
       </DropdownMenuTrigger>
 
       <DropdownMenuContent align="end" class="dropdown-content">
-        <template v-for="action in visibleSecondaryActions" :key="action.label">
+        <template v-for="(action, actionIndex) in visibleSecondaryActions" :key="`${action.label}-${actionIndex}`">
           <!-- 分隔线 -->
           <DropdownMenuSeparator v-if="action.separator" />
 
@@ -106,6 +113,8 @@ const executeAction = (action: ActionConfig): void => {
           <DropdownMenuItem
             :disabled="action.disabled === true"
             :class="['dropdown-item', { 'dropdown-item-destructive': action.destructive }]"
+            :title="getActionLabel(action)"
+            :aria-label="getActionLabel(action)"
             @click.stop="executeAction(action)"
           >
             <component :is="action.icon" v-if="action.icon" class="dropdown-icon" aria-hidden="true" />

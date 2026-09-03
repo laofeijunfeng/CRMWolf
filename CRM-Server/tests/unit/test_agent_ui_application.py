@@ -31,13 +31,16 @@ from app.services.agent.orchestrator import (
     ContextPolicy,
     FailureDispatchResult,
     QueryDispatchResult,
+    RootConversationMemory,
     RootDecision,
     RootRuntimeContext,
     RootTurnInput,
     WorkflowContinuation,
     WorkflowDispatchResult,
 )
+from app.services.agent.orchestrator.context import DatabaseRootContextResolver
 from app.services.agent.query import CRMQueryAgentResult
+from app.services.agent.semantic_plan import AgentSemanticPlan
 from app.services.agent.ui.actions import ActionAlreadyConsumedError, AgentUIActionRepository
 from app.services.agent.ui.schemas import (
     EntityActionInput,
@@ -88,6 +91,12 @@ def _decision(route: str, *, relation: str = "NEW_TASK") -> RootDecision:
         ),
         confidence=1.0,
         reason_code=f"{route}_TEST",
+        semantic_plan=AgentSemanticPlan(
+            speech_act="REQUEST_ACTION" if route == "WORKFLOW" else "ASK_FACT",
+            business_object="CUSTOMER_ACTIVITY" if route == "WORKFLOW" else "CUSTOMER",
+            operation="CREATE" if route == "WORKFLOW" else "READ",
+            confidence=1.0,
+        ),
         evidence=[],
     )
 
@@ -1351,6 +1360,47 @@ async def test_completed_request_replays_same_persisted_final_without_dispatch(
 
 
 @pytest.mark.asyncio
+async def test_application_commits_root_memory_with_final_turn(application_harness) -> None:
+    service, session_factory = application_harness
+    memory = RootConversationMemory(
+        resolved_customer={
+            "customer_id": "cus_00000000000000000000000000000001",
+            "customer_name": "河南双汇实业有限公司",
+            "lookup_name": "河南双汇",
+        },
+        current_task="customer_activity",
+    )
+
+    def persist_memory(turn: RootTurnInput, runtime: RootRuntimeContext) -> None:
+        DatabaseRootContextResolver().persist_conversation_memory(
+            runtime.db,
+            turn=turn,
+            memory=memory,
+        )
+
+    service.root_orchestrator = _FakeRootOrchestrator(
+        _query_dispatch(),
+        on_dispatch=persist_memory,
+    )
+    events = await _collect(
+        service,
+        request_input=TextAgentInput(type="text", text="刚刚和河南双汇沟通了 POC 部署"),
+        client_request_id=UUID("6fa2e0e8-86d4-4d6c-a1b0-6490b2bf12cf"),
+    )
+
+    assert events[-1]["event"] == "done"
+    session_id = events[0]["session_id"]
+    with session_factory() as db:
+        session = db.get(AgentSession, session_id)
+        assert session is not None
+        assert session.context_json["_root_conversation_memory"]["current_task"] == "customer_activity"
+        assert (
+            session.context_json["_root_conversation_memory"]["resolved_customer"]["customer_name"]
+            == "河南双汇实业有限公司"
+        )
+        assert db.query(AgentMessage).filter(AgentMessage.session_id == session_id).count() == 2
+
+
 async def test_request_id_reuse_with_different_typed_input_is_transport_error(
     application_harness,
 ) -> None:

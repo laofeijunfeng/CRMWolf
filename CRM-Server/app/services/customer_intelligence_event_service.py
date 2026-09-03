@@ -236,7 +236,7 @@ class CustomerIntelligenceEventService:
         if activity.customer_id is None:
             return None
         source_object_id = str(activity.id)
-        activity_revision = int(getattr(activity, "post_commit_revision", None) or 1)
+        activity_revision = int(getattr(activity, "activity_revision", None) or 1)
         event_identity = f"{source_object_id}:revision:{activity_revision}"
         return CustomerIntelligenceEvent(
             event_key=self._event_key(

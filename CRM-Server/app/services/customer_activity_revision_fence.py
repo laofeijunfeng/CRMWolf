@@ -62,7 +62,7 @@ class CustomerActivityRevisionFence:
                 reason=CustomerActivityRevisionFenceReason.ACTIVITY_NOT_FOUND,
             )
 
-        actual_revision = int(activity.post_commit_revision or 1)
+        actual_revision = int(activity.activity_revision or 1)
         if actual_revision != expected_revision:
             return CustomerActivityRevisionFenceResult(
                 activity=activity,

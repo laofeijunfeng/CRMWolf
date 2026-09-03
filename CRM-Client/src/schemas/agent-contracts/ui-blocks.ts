@@ -94,7 +94,7 @@ const TimelineBlockObjectSchema = z.object({
 export const ProcessItemSchema = z.object({
   key: z.string().min(1).max(128).regex(/^[a-z][a-z0-9_]*$/),
   title: z.string().min(1).max(200),
-  status: z.enum(['PENDING', 'RUNNING', 'COMPLETED', 'WAITING', 'FAILED', 'CANCELLED']),
+  status: z.enum(['PENDING', 'RUNNING', 'COMPLETED', 'WAITING', 'FAILED', 'CANCELLED', 'SKIPPED']),
   description: z.string().max(2000).nullable().optional()
 }).strict()
 

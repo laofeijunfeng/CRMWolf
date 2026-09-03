@@ -22,6 +22,7 @@ from app.models.customer_activity_post_commit_job import (
     CustomerActivityPostCommitJob,
     CustomerActivityPostCommitJobStatus,
 )
+from app.models.customer_opportunity_suggestion_job import CustomerOpportunitySuggestionJob
 from app.services.agent.async_operation_service import AgentAsyncOperationService
 from app.services.agent.durable_work import (
     AgentDurableWorkBinder,
@@ -33,6 +34,9 @@ from app.services.agent.durable_work_contracts import (
 )
 from app.services.customer_activity_post_commit_operation_projector import (
     CustomerActivityPostCommitOperationProjector,
+)
+from app.services.customer_opportunity_suggestion_operation_projector import (
+    CustomerOpportunitySuggestionOperationProjector,
 )
 
 
@@ -100,6 +104,7 @@ def _session():
             AgentAsyncOperation.__table__,
             AgentAsyncOperationEvent.__table__,
             CustomerActivityPostCommitJob.__table__,
+            CustomerOpportunitySuggestionJob.__table__,
         ],
     )
     Session = sessionmaker(bind=engine)
@@ -351,6 +356,69 @@ def test_bind_rejects_post_commit_job_from_another_team() -> None:
 
         with pytest.raises(ValueError, match="后提交任务不存在"):
             binder.bind(db, receipts=[_receipt()], binding=_binding(team_id=1))
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_agent_receipt_binds_opportunity_suggestion_as_a_separate_operation() -> None:
+    engine, db = _session()
+    operation_service = AgentAsyncOperationService()
+    intelligence_service = _IntelligenceProjectionService(operation_service)
+    origin_service = _OriginService()
+    binder = AgentDurableWorkBinder(
+        operation_service=operation_service,
+        post_commit_projector=CustomerActivityPostCommitOperationProjector(
+            operation_service=operation_service
+        ),
+        opportunity_suggestion_projector=CustomerOpportunitySuggestionOperationProjector(
+            operation_service=operation_service
+        ),
+        intelligence_service=intelligence_service,
+        activity_origin_service=origin_service,
+    )
+    try:
+        db.add(_job())
+        db.add(
+            CustomerOpportunitySuggestionJob(
+                public_id="cosj_async_001",
+                team_id=1,
+                activity_id=241,
+                activity_revision=1,
+                submission_source="AGENT",
+                status="COMPLETED",
+                attempt_count=1,
+                run_id="run-cosj-async-001",
+                graph_thread_id="thread-cosj-async-001",
+                result_json={
+                    "success": True,
+                    "decision": "CREATE_OPPORTUNITY",
+                    "suggestion": {"title": "新商机"},
+                },
+            )
+        )
+        db.commit()
+        receipt = CustomerActivityDurableWorkReceipt(
+            activity_id=241,
+            post_commit_job_public_id="pcj_async_001",
+            customer_intelligence_request_id="cir_async_001",
+            opportunity_suggestion_job_public_id="cosj_async_001",
+        )
+        binder.bind(db, receipts=[receipt], binding=_binding())
+        db.commit()
+
+        operations = db.query(AgentAsyncOperation).all()
+        assert {operation.operation_type for operation in operations} == {
+            "customer_activity_post_commit",
+            "customer_intelligence_refresh",
+            "customer_opportunity_suggestion",
+        }
+        suggestion_operation = next(
+            operation for operation in operations
+            if operation.operation_type == "customer_opportunity_suggestion"
+        )
+        assert suggestion_operation.status == AgentAsyncOperationStatus.WAITING_USER
+        assert suggestion_operation.result_json["continuation_kind"] == "create_opportunity"
     finally:
         db.close()
         engine.dispose()

@@ -6,7 +6,7 @@ import hashlib
 import json
 import logging
 import uuid
-from typing import Callable, List, Optional, Union
+from typing import Awaitable, Callable, List, Optional, Union
 
 from sqlalchemy import or_
 
@@ -837,18 +837,42 @@ class CRMAgentToolService:
         source_content: str,
         customer_name: Optional[str] = None,
         title: Optional[str] = None,
+        content_json: Optional[JsonDict] = None,
+        summary: Optional[str] = None,
         next_action: Optional[str] = None,
+        next_action_source: Optional[str] = None,
         next_follow_time: Optional[str] = None,
+        next_follow_time_source: Optional[str] = None,
+        effectiveness_score: Optional[int] = None,
+        effectiveness_is_valid: Optional[bool] = None,
+        effectiveness_reason: Optional[str] = None,
+        effectiveness_detail_json: Optional[JsonDict] = None,
         idempotency_suffix: Optional[str] = None,
     ) -> AgentToolResult:
+        if effectiveness_score is None or effectiveness_is_valid is None or not effectiveness_reason:
+            return AgentToolResult(
+                tool_name="create_customer_activity",
+                success=False,
+                error_message="客户活动写入缺少 Agent 最终评分",
+                status_code=400,
+            )
+
         payload = {
             "customer_id": customer_id,
             "customer_name": customer_name,
             "activity_kind": activity_kind,
             "source_content": source_content,
             "title": title,
+            "content_json": content_json,
+            "summary": summary,
             "next_action": next_action,
+            "next_action_source": next_action_source,
             "next_follow_time": next_follow_time,
+            "next_follow_time_source": next_follow_time_source,
+            "effectiveness_score": effectiveness_score,
+            "effectiveness_is_valid": effectiveness_is_valid,
+            "effectiveness_reason": effectiveness_reason,
+            "effectiveness_detail_json": effectiveness_detail_json or {},
         }
         action_key = self._action_key("create_customer_activity", context, payload, idempotency_suffix)
 
@@ -856,24 +880,53 @@ class CRMAgentToolService:
             customer_public_id = self._resolve_customer_public_id(context, customer_id)
             response = await self.api_client.request(
                 "POST",
-                f"/v1/customer-activities/{customer_public_id}",
+                f"/v1/customer-activities/{customer_public_id}/agent-finalized",
                 context.authorization,
                 idempotency_key=action_key,
-                params={"post_commit_mode": "async"},
                 json={
                     "activity_kind": activity_kind,
                     "source_content": source_content,
+                    "submission_id": action_key,
                     "title": title,
+                    "content_json": content_json,
+                    "summary": summary,
                     "next_action": next_action,
-                    "next_action_source": "AGENT" if next_action else None,
+                    "next_action_source": next_action_source or ("AGENT" if next_action else None),
                     "next_follow_time": next_follow_time,
-                    "next_follow_time_source": "AGENT" if next_follow_time else None,
+                    "next_follow_time_source": next_follow_time_source or ("AGENT" if next_follow_time else None),
+                    "effectiveness_score": effectiveness_score,
+                    "effectiveness_is_valid": effectiveness_is_valid,
+                    "effectiveness_reason": effectiveness_reason,
+                    "effectiveness_detail_json": effectiveness_detail_json or {},
                 },
             )
             self._customer_activity_durable_work_receipt(response)
             return response
 
-        result = await self._run_write_tool(context, "create_customer_activity", payload, action_key, call_api)
+        async def reconcile():
+            customer_public_id = self._resolve_customer_public_id(context, customer_id)
+            response = await self.api_client.request(
+                "GET",
+                f"/v1/customer-activities/{customer_public_id}",
+                context.authorization,
+                params={"skip": 0, "limit": 100},
+            )
+            items = response if isinstance(response, list) else (response.get("items", []) if isinstance(response, dict) else [])
+            if not isinstance(items, list):
+                return None
+            return next(
+                (item for item in items if isinstance(item, dict) and item.get("submission_id") == action_key),
+                None,
+            )
+
+        result = await self._run_write_tool(
+            context,
+            "create_customer_activity",
+            payload,
+            action_key,
+            call_api,
+            reconcile=reconcile,
+        )
         if not result.success:
             return result
         result.durable_work = (self._customer_activity_durable_work_receipt(result.data),)
@@ -892,6 +945,7 @@ class CRMAgentToolService:
             raise ValueError("客户活动写入结果缺少后台任务回执")
         post_commit_job_public_id = durable_work.get("post_commit_job_public_id")
         intelligence_request_id = durable_work.get("customer_intelligence_request_id")
+        opportunity_suggestion_job_public_id = durable_work.get("opportunity_suggestion_job_public_id")
         if not isinstance(post_commit_job_public_id, str) or not post_commit_job_public_id:
             raise ValueError("客户活动写入结果缺少跟进任务对账回执")
         if not isinstance(intelligence_request_id, str) or not intelligence_request_id:
@@ -900,6 +954,11 @@ class CRMAgentToolService:
             activity_id=activity_id,
             post_commit_job_public_id=post_commit_job_public_id,
             customer_intelligence_request_id=intelligence_request_id,
+            opportunity_suggestion_job_public_id=(
+                opportunity_suggestion_job_public_id
+                if isinstance(opportunity_suggestion_job_public_id, str) and opportunity_suggestion_job_public_id
+                else None
+            ),
         )
 
     async def create_lead(
@@ -1379,7 +1438,8 @@ class CRMAgentToolService:
         tool_name: str,
         request_json: JsonDict,
         action_key: str,
-        call_api: Callable[[], object],
+        call_api: Callable[[], Awaitable[object]],
+        reconcile: Callable[[], Awaitable[object | None]] | None = None,
     ) -> AgentToolResult:
         request_hash = self._hash_json(request_json)
         idempotency, created = agent_idempotency_key_crud.ensure(
@@ -1407,6 +1467,32 @@ class CRMAgentToolService:
                 idempotent_replay=True,
             )
         if not created:
+            if reconcile is not None and idempotency.status in {
+                AgentIdempotencyStatus.PENDING,
+                AgentIdempotencyStatus.DISPATCHED,
+                AgentIdempotencyStatus.AMBIGUOUS,
+            }:
+                try:
+                    reconciled_data = await reconcile()
+                except Exception:  # reconciliation is best-effort; never duplicate the write
+                    logger.exception("Agent 写入结果对账失败: action_key=%s", action_key)
+                    reconciled_data = None
+                if reconciled_data is not None:
+                    agent_idempotency_key_crud.update(
+                        context.db,
+                        idempotency,
+                        AgentIdempotencyKeyUpdate(
+                            status=AgentIdempotencyStatus.SUCCESS,
+                            result_json=reconciled_data,
+                            error_message=None,
+                        ),
+                    )
+                    return AgentToolResult(
+                        tool_name=tool_name,
+                        success=True,
+                        data=reconciled_data,
+                        idempotent_replay=True,
+                    )
             if idempotency.status == AgentIdempotencyStatus.PENDING:
                 agent_idempotency_key_crud.update(
                     context.db,

@@ -69,6 +69,7 @@ from app.services.agent.orchestrator import (
     WorkflowDispatchResult,
     WorkflowRef,
 )
+from app.services.agent.semantic_plan import AgentSemanticPlan
 from app.services.agent.workflow.progress import execution_progress
 
 
@@ -494,6 +495,12 @@ def run_agent_stream_persists_messages(env):
                     confidence=1.0,
                     reason_code="EXPLICIT_MUTATION",
                     evidence=[],
+                    semantic_plan=AgentSemanticPlan(
+                        speech_act="REQUEST_ACTION",
+                        business_object="CUSTOMER_ACTIVITY",
+                        operation="CREATE",
+                        confidence=1.0,
+                    ),
                 ),
                 workflow_result=WorkflowCompletedResult(
                     workflow_ref=WorkflowRef(workflow_id="wf_business_scenario"),

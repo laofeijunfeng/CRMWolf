@@ -361,7 +361,7 @@ $wolf-table-cell-padding-mobile-v2: 8px 4px; // 移动端单元格 padding（更
 // ========== 移动端 Modal/Sheet ==========
 
 // UI/UX Pro Max: Modals/sheets animate from bottom on mobile
-$wolf-modal-height-mobile-v2: 90vh;     // 移动端 Modal 最大高度
+$wolf-modal-height-mobile-v2: min(90vh, 90dvh);     // 移动端 Modal 最大高度
 $wolf-modal-radius-mobile-v2: $wolf-radius-overlay-v2; // 移动端 Modal 圆角（顶部圆角）
 $wolf-sheet-height-v2: auto;            // Sheet 高度（自适应内容）
 

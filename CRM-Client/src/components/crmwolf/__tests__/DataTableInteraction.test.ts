@@ -30,19 +30,22 @@ describe('DataTable row interaction', () => {
     expect(row.attributes('tabindex')).toBeUndefined()
   })
 
-  it('emits once for click, Enter, and Space on interactive rows', async () => {
+  it('keeps native row semantics and exposes one named detail control', async () => {
     const wrapper = mountTable(true)
     const row = wrapper.get('tbody tr')
-    expect(row.attributes('role')).toBe('button')
-    expect(row.attributes('tabindex')).toBe('0')
+    const detailTrigger = wrapper.get('.data-table-row-detail-trigger')
+
+    expect(row.attributes('role')).toBeUndefined()
+    expect(row.attributes('tabindex')).toBeUndefined()
+    expect(detailTrigger.attributes('type')).toBe('button')
+    expect(detailTrigger.attributes('aria-label')).toBe('查看审批单详情')
 
     await row.trigger('click')
+    await detailTrigger.trigger('click')
     await row.trigger('keydown', { key: 'Enter' })
-    const spaceEvent = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })
-    row.element.dispatchEvent(spaceEvent)
+    await row.trigger('keydown', { key: ' ' })
 
-    expect(spaceEvent.defaultPrevented).toBe(true)
-    expect(wrapper.emitted('row-click')).toHaveLength(3)
+    expect(wrapper.emitted('row-click')).toHaveLength(2)
   })
 
   it('renders fallback mobile cards from column metadata', () => {
@@ -84,10 +87,16 @@ describe('DataTable row interaction', () => {
       }
     })
 
-    await wrapper.get('.data-table-mobile-card').trigger('click')
-    await wrapper.get('.nested-action').trigger('click')
+    const card = wrapper.get('.data-table-mobile-card')
+    expect(card.attributes('role')).toBeUndefined()
+    expect(card.attributes('tabindex')).toBeUndefined()
+    expect(wrapper.get('.data-table-mobile-detail-trigger').attributes('aria-label')).toBe('查看审批单详情')
 
-    expect(wrapper.emitted('row-click')).toHaveLength(1)
+    await card.trigger('click')
+    await wrapper.get('.nested-action').trigger('click')
+    await wrapper.get('.data-table-mobile-detail-trigger').trigger('click')
+
+    expect(wrapper.emitted('row-click')).toHaveLength(2)
   })
 
   it('emits kebab-case page size updates and resets to the first page', async () => {
@@ -112,10 +121,10 @@ describe('DataTable row interaction', () => {
   })
 
   it('keeps standard list pages aligned with the sidebar layout vertical inset', () => {
-    const listViews = [
-      'ApprovalCenter',
+    const fixedHeightViews = [
       'Contracts',
       'Customers',
+      'CustomerTracking',
       'Invoices',
       'Leads',
       'Opportunities',
@@ -123,12 +132,17 @@ describe('DataTable row interaction', () => {
       'PaymentRecords'
     ]
 
-    for (const viewName of listViews) {
+    for (const viewName of fixedHeightViews) {
       const source = readView(viewName)
-      const expectedHeight = viewName === 'ApprovalCenter'
-        ? 'height="calc(100vh - 108px)"'
-        : 'height="calc(100vh - 121px)"'
+      const expectedHeight = 'height="calc(100vh - 121px)"'
       expect(source).toContain(expectedHeight)
+    }
+
+    const approvalSource = readView('ApprovalCenter')
+    expect(approvalSource).toContain('height="calc(100vh - 108px)"')
+
+    for (const viewName of [...fixedHeightViews, 'ApprovalCenter']) {
+      const source = readView(viewName)
       expect(source).not.toContain('height="calc(100vh - 104px)"')
       expect(source).not.toContain('height="calc(100vh - 120px)"')
       expect(source).not.toContain('height="calc(100vh - 136px)"')
@@ -228,25 +242,82 @@ describe('DataTable row context menu', () => {
     expect(wrapper.emitted('row-click')).toBeUndefined()
   })
 
-  it('does not render row action buttons or overflow triggers', async () => {
-    const wrapper = mountActionTable()
-    await wrapper.get('tbody tr').trigger('mouseenter')
-    expect(wrapper.find('tbody button').exists()).toBe(false)
-    expect(wrapper.find('[aria-label="更多操作"]').exists()).toBe(false)
+  it('does not open row detail when clicking the edit action among multiple primary actions', async () => {
+    const wrapper = mountActionTable({
+      getRowActions: () => ({
+        primaryActions: [
+          { label: '新建商机', handler: rowActionHandlers.edit, desktopPrimary: true },
+          { label: '编辑', handler: rowActionHandlers.edit, desktopPrimary: true }
+        ],
+        secondaryActions: []
+      })
+    })
+
+    await wrapper.get('.desktop-table-row-action:nth-of-type(2)').trigger('click')
+
+    expect(rowActionHandlers.edit).toHaveBeenCalledTimes(1)
+    expect(rowActionHandlers.edit).toHaveBeenCalledWith(data[0])
+    expect(wrapper.emitted('row-click')).toBeUndefined()
   })
 
-  it('opens the same menu from Shift+F10', async () => {
+  it('renders a discoverable desktop primary action and more menu', async () => {
     const wrapper = mountActionTable()
-    const row = wrapper.get('tbody tr')
+    expect(wrapper.get('th.data-table-actions-header').text()).toBe('操作')
+    expect(wrapper.get('.data-table-actions-cell').text()).toContain('编辑')
+    expect(wrapper.get('[aria-label="更多操作"]').attributes('title')).toBe('更多操作')
+    expect(wrapper.get('.data-table-actions-cell').findAll('button')).toHaveLength(2)
+
+    await wrapper.get('.data-table-actions-cell button').trigger('click')
+    expect(rowActionHandlers.edit).toHaveBeenCalledWith(data[0])
+    expect(wrapper.emitted('row-click')).toBeUndefined()
+  })
+
+  it('does not reserve an actions column when every row action is hidden', () => {
+    const wrapper = mountActionTable({
+      getRowActions: () => ({
+        primaryActions: [{ label: '编辑', handler: rowActionHandlers.edit, visible: false }],
+        secondaryActions: []
+      })
+    })
+
+    expect(wrapper.find('th.data-table-actions-header').exists()).toBe(false)
+    expect(wrapper.find('.data-table-actions-cell').exists()).toBe(false)
+  })
+
+  it('keeps a third primary action in the more menu', async () => {
+    const wrapper = mountActionTable({
+      getRowActions: () => ({
+        primaryActions: [
+          { label: '编辑', handler: rowActionHandlers.edit, desktopPrimary: true },
+          { label: '推进', handler: rowActionHandlers.edit, desktopPrimary: true },
+          { label: '转交', handler: rowActionHandlers.edit, desktopPrimary: true }
+        ],
+        secondaryActions: []
+      })
+    })
+
+    expect(wrapper.get('.data-table-actions-cell').text()).toContain('编辑')
+    expect(wrapper.get('.data-table-actions-cell').text()).toContain('推进')
+    expect(wrapper.get('.data-table-actions-cell').text()).not.toContain('转交')
+
+    await wrapper.get('[aria-label="更多操作"]').trigger('click')
+    await flushPromises()
+    expect(document.querySelector('.desktop-table-row-menu')?.textContent).toContain('转交')
+  })
+
+  it('opens the same menu from Shift+F10 on the named detail control', async () => {
+    const wrapper = mountActionTable()
+    const detailTrigger = wrapper.get('.data-table-row-detail-trigger')
     const event = new KeyboardEvent('keydown', {
       key: 'F10',
       shiftKey: true,
       bubbles: true,
       cancelable: true
     })
-    row.element.dispatchEvent(event)
+    detailTrigger.element.dispatchEvent(event)
     await flushPromises()
     await wrapper.vm.$nextTick()
+    expect(event.defaultPrevented).toBe(true)
     expect(menuEl()?.textContent).toContain('编辑')
   })
 
@@ -272,14 +343,14 @@ describe('DataTable row context menu', () => {
         secondaryActions: []
       })
     })
-    const row = wrapper.get('tbody tr')
+    const detailTrigger = wrapper.get('.data-table-row-detail-trigger')
     const event = new KeyboardEvent('keydown', {
       key: 'F10',
       shiftKey: true,
       bubbles: true,
       cancelable: true
     })
-    row.element.dispatchEvent(event)
+    detailTrigger.element.dispatchEvent(event)
     await flushPromises()
     expect(event.defaultPrevented).toBe(false)
     expect(menuEl()).toBeNull()
@@ -366,6 +437,28 @@ describe('DataTable row context menu', () => {
     expect(headers[0]?.classes()).toContain('fixed-left')
     expect(headers[1]?.classes()).not.toContain('fixed-right')
     expect(headers[1]?.attributes('style') ?? '').not.toContain('position: sticky')
+  })
+
+  it('keeps business fixed-right columns behind the desktop actions column', () => {
+    const wrapper = mount(DataTable, {
+      props: {
+        fields: [
+          { key: 'name', label: '名称', type: 'text', column: { width: '160px' } },
+          { key: 'status', label: '状态', type: 'text', column: { width: '120px', fixed: 'right' } }
+        ] satisfies ListFieldDefinition[],
+        data: [{ id: 1, name: '审批单', status: '审批中' }],
+        total: 1,
+        page: 1,
+        pageSize: 10,
+        getRowActions: () => ({
+          primaryActions: [{ label: '编辑', handler: rowActionHandlers.edit }],
+          secondaryActions: []
+        })
+      }
+    })
+
+    const statusHeader = wrapper.findAll('th').find((header) => header.text() === '状态')
+    expect(statusHeader?.attributes('style') ?? '').toContain('right: calc(var(--data-table-actions-width, 0px))')
   })
 
   it('invokes the original action handler from a destructive menu item', async () => {

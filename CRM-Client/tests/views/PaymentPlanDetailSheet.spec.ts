@@ -2,14 +2,17 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { flushPromises, mount, type DOMWrapper, type VueWrapper } from '@vue/test-utils'
 import { defineComponent, h, type PropType } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
 import type { PaymentPlanResponse, PaymentRecordInfo, PaymentRecordCreate, PaymentRecordUpdate } from '@/api/payment'
 
 const paymentApi = vi.hoisted(() => ({
   getPaymentPlanDetail: vi.fn(),
   createPaymentRecord: vi.fn(),
   updatePaymentRecord: vi.fn(),
+  resolvePaymentRecordWithRetry: vi.fn(),
 }))
 const handleApiError = vi.hoisted(() => vi.fn())
+const handleOutcomeUnknown = vi.hoisted(() => vi.fn())
 const toast = vi.hoisted(() => ({
   success: vi.fn(),
   error: vi.fn(),
@@ -26,7 +29,11 @@ vi.mock('@/api/payment', async (importOriginal) => {
   }
 })
 
-vi.mock('@/utils/errorHandler', () => ({ handleApiError }))
+vi.mock('@/utils/errorHandler', () => ({
+  handleApiError,
+  handleOutcomeUnknown,
+  isOutcomeUnknown: () => false,
+}))
 
 vi.mock('vue-sonner', () => ({ toast }))
 
@@ -254,7 +261,7 @@ const paymentRecordFixture = (): PaymentRecordInfo => ({
 const paymentPlanFixture = (overrides: Partial<PaymentPlanResponse> = {}): PaymentPlanResponse => ({
   id: 101,
   contract_id: 202,
-  customer_id: 303,
+  customer_id: '303',
   latest_approval: null,
   plan_number: 'PAY-2026-001',
   stage_name: '二期尾款',
@@ -281,10 +288,10 @@ const getButtonByText = (wrapper: VueWrapper, text: string): DOMWrapper<Element>
   return button
 }
 
-const sourceText = (): string => readFileSync(
+const sourceText = (): string => [
   `${process.cwd()}/src/views/PaymentPlanDetailSheet.vue`,
-  'utf8'
-)
+  `${process.cwd()}/src/components/panels/PaymentPlanDetailContent.vue`,
+].map((filePath) => readFileSync(filePath, 'utf8')).join('\n')
 
 describe('PaymentPlanDetailSheet', () => {
   beforeEach(() => {
@@ -292,6 +299,8 @@ describe('PaymentPlanDetailSheet', () => {
     paymentApi.getPaymentPlanDetail.mockResolvedValue(paymentPlanFixture())
     paymentApi.createPaymentRecord.mockResolvedValue({ id: 601 })
     paymentApi.updatePaymentRecord.mockResolvedValue({ id: 501 })
+    paymentApi.resolvePaymentRecordWithRetry.mockResolvedValue({ id: 601 })
+    setActivePinia(createPinia())
     approvalStore.submitEntity.mockResolvedValue({ approval_id: 100, status: 'PENDING' })
   })
 
@@ -335,7 +344,7 @@ describe('PaymentPlanDetailSheet', () => {
     await wrapper.get('[aria-label="查看合同 年度服务合同"]').trigger('click')
     await wrapper.get('[data-testid="record-click"]').trigger('click')
 
-    expect(wrapper.emitted('view-customer')?.[0]).toEqual([303, plan])
+    expect(wrapper.emitted('view-customer')?.[0]).toEqual(['303', plan])
     expect(wrapper.emitted('view-contract')?.[0]).toEqual([202, plan])
     expect(wrapper.emitted('record-click')?.[0]).toEqual([plan.payment_records[0]])
   })
@@ -364,8 +373,14 @@ describe('PaymentPlanDetailSheet', () => {
     await flushPromises()
 
     // Should call API
-    expect(paymentApi.createPaymentRecord).toHaveBeenCalledWith(101, { actual_amount: 50000, payment_date: '2026-07-15' })
-    expect(toast.success).toHaveBeenCalledWith('回款登记成功')
+    expect(paymentApi.createPaymentRecord).toHaveBeenCalledWith(
+      101,
+      { actual_amount: 50000, payment_date: '2026-07-15' },
+      expect.any(String),
+    )
+    expect(toast.success).toHaveBeenCalledWith(
+      '回款登记成功，本次登记 ¥50000.00，剩余 ¥60000.00，计划状态：部分回款',
+    )
 
     // Should reload and emit refresh
     expect(paymentApi.getPaymentPlanDetail).toHaveBeenCalledTimes(2)

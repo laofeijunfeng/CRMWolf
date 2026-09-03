@@ -24,7 +24,7 @@ import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { ViewPreferenceConfig } from '@/api/viewPreference'
-import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
+import { confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
 import InvoiceDetailSheet from '@/views/InvoiceDetailSheet.vue'
 import InvoiceApplicationFormDialog from '@/components/dialogs/InvoiceApplicationFormDialog.vue'
@@ -49,6 +49,7 @@ import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCu
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { buildInvoiceDownloadFileName } from '@/utils/invoiceFileName'
 import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
+import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -58,6 +59,8 @@ const headerStore = useHeaderStore()
 
 // ==================== State ====================
 const loading = ref(false)
+const loadError = ref<FeedbackError | null>(null)
+const listRequestId = ref<number>(0)
 const tableData = ref<InvoiceApplicationResponse[]>([])
 const customerOptions = ref<CustomerResponse[]>([])
 const invoiceApplicationDialogOpen = ref(false)
@@ -65,6 +68,7 @@ const invoiceApplicationDialogMode = ref<'create' | 'edit'>('create')
 const editingInvoiceApplication = ref<InvoiceApplicationResponse | null>(null)
 const selectedInvoiceId = ref<number | null>(null)
 const invoiceDetailSheetVisible = ref(false)
+const deletingInvoiceIds = ref<Set<number>>(new Set())
 
 const markIssuedDialogOpen = ref(false)
 const issuingInvoiceApplication = ref<InvoiceApplicationResponse | null>(null)
@@ -177,6 +181,8 @@ const fetchCustomers = async (): Promise<void> => {
 }
 
 const fetchInvoiceApplications = async (): Promise<void> => {
+  const requestId = ++listRequestId.value
+  loadError.value = null
   loading.value = true
   try {
     const tabStatus = activeTab.value === 'pending'
@@ -197,15 +203,18 @@ const fetchInvoiceApplications = async (): Promise<void> => {
     }
 
     const response = await invoiceApi.getInvoiceApplications(params)
+    if (requestId !== listRequestId.value) return
     tableData.value = response.items ?? []
     pagination.total = response.total ?? 0
   } catch (error) {
-    handleApiError(error, '获取发票申请列表')
+    if (requestId !== listRequestId.value) return
+    loadError.value = toFeedbackError(error, '发票申请列表')
   } finally {
-    loading.value = false
+    if (requestId === listRequestId.value) {
+      loading.value = false
+    }
   }
 }
-
 const customFilterViews = useCustomFilterViews({
   viewKey: 'invoices.list',
   activeTab,
@@ -357,16 +366,29 @@ const handleWithdraw = async (record: InvoiceApplicationResponse): Promise<void>
   }
 }
 
+const isInvoiceDeleting = (invoiceId: number): boolean => deletingInvoiceIds.value.has(invoiceId)
+
 const handleDelete = async (record: InvoiceApplicationResponse): Promise<void> => {
-  const confirmed = await confirmDelete('该发票申请')
+  if (isInvoiceDeleting(record.id)) return
+
+  const confirmed = await confirmDialog(
+    `确定删除发票申请“${record.application_number}”吗？仅草稿或已拒绝的申请可以删除，删除后无法恢复。`,
+    '删除发票申请',
+    { variant: 'destructive', confirmText: '删除' },
+  )
   if (!confirmed) return
 
+  deletingInvoiceIds.value = new Set(deletingInvoiceIds.value).add(record.id)
   try {
     await invoiceApi.deleteInvoiceApplication(record.id)
-    toast.success('发票申请已删除')
-    fetchInvoiceApplications()
+    toast.success(`发票申请“${record.application_number}”已删除`)
+    void fetchInvoiceApplications()
   } catch (error) {
     handleApiError(error, '删除发票申请')
+  } finally {
+    const nextIds = new Set(deletingInvoiceIds.value)
+    nextIds.delete(record.id)
+    deletingInvoiceIds.value = nextIds
   }
 }
 
@@ -411,17 +433,20 @@ const getRowActions = (row: InvoiceApplicationResponse): TableRowActionSet => ({
   primaryActions: [
     {
       label: '查看',
+      kind: 'detail',
       handler: viewInvoiceRow,
       icon: Eye
     },
     {
       label: '编辑',
+      desktopPrimary: true,
       handler: editInvoiceRow,
       visible: (row.status === 'DRAFT' || row.status === 'REJECTED') && canCreateInvoice.value,
       icon: Pencil
     },
     {
       label: '下载',
+      desktopPrimary: true,
       handler: downloadInvoiceRow,
       visible: hasDownloadableInvoiceFile(row),
       icon: Download
@@ -430,18 +455,21 @@ const getRowActions = (row: InvoiceApplicationResponse): TableRowActionSet => ({
   secondaryActions: [
     {
       label: '提交',
+      desktopPrimary: true,
       handler: submitInvoiceRow,
       visible: row.status === 'DRAFT' && canCreateInvoice.value,
       icon: Send
     },
     {
       label: '撤回',
+      desktopPrimary: true,
       handler: withdrawInvoiceRow,
       visible: row.status === 'PENDING_REVIEW',
       icon: RotateCcw
     },
     {
       label: '开票',
+      desktopPrimary: true,
       handler: markIssuedInvoiceRow,
       visible: row.status === 'APPROVED' && canMarkInvoiced.value,
       icon: Stamp
@@ -449,6 +477,7 @@ const getRowActions = (row: InvoiceApplicationResponse): TableRowActionSet => ({
     {
       label: '删除',
       handler: deleteInvoiceRow,
+      disabled: isInvoiceDeleting(row.id),
       visible: canDeleteInvoiceApplicationRow(row),
       icon: Trash2,
       destructive: true,
@@ -615,12 +644,17 @@ watchEffect(() => {
       :fields="fields"
       :data="tableData"
       :loading="loading"
+      :load-error="loadError"
       :page="pagination.current"
       :page-size="pagination.pageSize"
       :total="pagination.total"
       height="calc(100vh - 121px)"
+      height-strategy="fill"
+      scroll-mode="contained"
       empty-title="暂无发票申请"
       row-interactive
+      detail-column-key="application_number"
+      :get-row-label="(row) => `发票申请 ${row.application_number || row.id}`"
       :get-row-actions="getRowActions"
       mobile-title-key="application_number"
       mobile-subtitle-key="customer_name"
@@ -641,6 +675,7 @@ watchEffect(() => {
       @filter-save-view="handleSaveFilterView"
       @sort-apply="handleSortApply"
       @sort-reset="handleSortReset"
+      @retry="fetchInvoiceApplications"
       @column-config-current-change="handleColumnConfigCurrentChange"
       @column-config-save="handleColumnConfigSave"
       @column-config-reset="handleColumnConfigReset"

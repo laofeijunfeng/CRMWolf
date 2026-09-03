@@ -59,7 +59,7 @@ class CustomerActivityPostCommitJobService:
             db,
             team_id=int(activity.team_id),
             activity_id=int(activity.id),
-            activity_revision=int(activity.post_commit_revision or 1),
+            activity_revision=int(activity.activity_revision or 1),
             trigger_type=trigger_type,
             actor_id=actor_id,
             commit=False,
@@ -83,7 +83,7 @@ class CustomerActivityPostCommitJobService:
             activity = customer_activity_crud.get_by_id(db, activity_id, team_id)
             if activity is None:
                 raise ValueError("客户活动不存在")
-            revision = int(activity_revision or activity.post_commit_revision or 1)
+            revision = int(activity_revision or activity.activity_revision or 1)
             job = customer_activity_post_commit_job_crud.enqueue(
                 db,
                 team_id=team_id,
@@ -157,7 +157,7 @@ class CustomerActivityPostCommitJobService:
                 )
                 self._project_bound_operation(db, updated or job)
                 return result
-            if int(activity.post_commit_revision or 1) != int(job.activity_revision):
+            if int(activity.activity_revision or 1) != int(job.activity_revision):
                 result = self._skipped_result(job.activity_id, "SUPERSEDED_ACTIVITY_REVISION")
                 updated = customer_activity_post_commit_job_crud.mark_completed_if_lease_owner(
                     db,
@@ -271,7 +271,18 @@ class CustomerActivityPostCommitJobService:
     def kick(self, request: CustomerActivityPostCommitJobRequest) -> None:
         """Best-effort latency optimization; durable recovery remains authoritative."""
 
-        task = asyncio.create_task(self._run_guarded(request))
+        # Some FastAPI endpoints are synchronous and may invoke this hook from
+        # a worker thread without a running event loop. The durable job was
+        # already committed before this method is called, so immediate
+        # scheduling must remain an optimization rather than a correctness
+        # dependency. Do not create the coroutine until a loop is available.
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.debug("当前线程没有运行中的事件循环, 客户活动后提交任务交由恢复器执行")
+            return
+
+        task = loop.create_task(self._run_guarded(request))
         task.add_done_callback(self._consume_task_exception)
 
     async def _run_guarded(self, request: CustomerActivityPostCommitJobRequest) -> None:

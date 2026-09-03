@@ -34,6 +34,46 @@ export interface ApiErrorInfo {
 }
 
 /**
+ * 判断写入请求是否处于结果未知状态。
+ *
+ * 请求可能已经在服务端提交成功，但客户端在收到响应前发生超时或断网。
+ * 这类错误不能直接引导用户重新创建数据，应优先通过业务幂等键确认最终状态。
+ */
+export function isOutcomeUnknown(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false
+
+  const candidate = error as { code?: string; message?: string }
+  const message = candidate.message?.toLowerCase() ?? ''
+
+  return (
+    candidate.code === 'ECONNABORTED' ||
+    candidate.code === 'ERR_NETWORK' ||
+    message.includes('timeout') ||
+    message.includes('network error')
+  )
+}
+
+/**
+ * 判断结果确认接口是否因为记录尚未可见而返回 404。
+ * 仅对该情况做短暂重试，避免把真实权限/服务端错误隐藏起来。
+ */
+export function isNotFoundError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false
+
+  const response = (error as { response?: { status?: number } }).response
+  return response?.status === 404
+}
+
+/**
+ * 写入请求结果仍未确认时的统一提示。保留当前表单和幂等键，避免用户重复创建。
+ */
+export function handleOutcomeUnknown(context = '回款登记'): void {
+  toast.warning('登记结果暂未确认', {
+    description: `${context}请求可能已提交，系统暂时无法确认最终状态。请稍后点击重试，不要重复填写或提交。`,
+  })
+}
+
+/**
  * Axios 响应数据接口
  */
 interface AxiosResponseData {

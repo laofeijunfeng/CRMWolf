@@ -452,6 +452,42 @@ class OpportunityStageResolver(Protocol):
 class CRMWorkflowCustomerResolver:
     """Resolve user language or page context to one authorized CRM customer."""
 
+    async def validate_cached(
+        self,
+        *,
+        customer_id: str,
+        authorization: str,
+    ) -> WorkflowCustomerResolution:
+        """Revalidate a checkpoint identity without running name search."""
+
+        try:
+            payload = await self._api_client.request(
+                "GET",
+                f"/v1/customers/{customer_id}",
+                authorization,
+            )
+        except CRMAPIClientError as exc:
+            if exc.status_code == 404:
+                return WorkflowCustomerResolution(status="NOT_FOUND")
+            retryable = exc.status_code is None or exc.status_code in {408, 429} or exc.status_code >= 500
+            raise WorkflowResourceResolutionError(
+                "客户信息暂时无法读取。" if retryable else exc.message,
+                retryable=retryable,
+            ) from exc
+        if not isinstance(payload, dict):
+            raise WorkflowResourceResolutionError("客户查询结果无效。", retryable=False)
+        public_id = payload.get("public_id") or payload.get("id")
+        account_name = payload.get("account_name")
+        if str(public_id) != customer_id or not isinstance(account_name, str) or not account_name.strip():
+            raise WorkflowResourceResolutionError("客户查询结果无效。", retryable=False)
+        return WorkflowCustomerResolution(
+            status="RESOLVED",
+            customer=WorkflowCustomerCandidate(
+                customer_id=customer_id,
+                customer_name=account_name.strip(),
+            ),
+        )
+
     def __init__(self, *, api_client: InternalCRMAPIClient | None = None) -> None:
         self._api_client = api_client or InternalCRMAPIClient()
 
@@ -673,6 +709,7 @@ class CRMOpportunityStageResolver:
 
         selected_target = self._select_target_stage(
             future_steps,
+            all_stages=stages,
             target_stage_name=target_stage_name,
             selected_stage_id=selected_stage_id,
             opportunity=selected_opportunity,
@@ -827,8 +864,15 @@ class CRMOpportunityStageResolver:
                     status="OPPORTUNITY_SELECTION_REQUIRED",
                     opportunity_candidates=matches,
                 )
-            if opportunity_id is not None or len(candidates) != 1:
+            if opportunity_id is not None:
                 return OpportunityStageResolution(status="NOT_FOUND")
+            # Keep all authorized opportunities available for semantic
+            # ranking. A failed substring match is not proof that no
+            # opportunity exists.
+            return OpportunityStageResolution(
+                status="OPPORTUNITY_SELECTION_REQUIRED",
+                opportunity_candidates=candidates,
+            )
         if len(candidates) == 1:
             return candidates[0]
         return OpportunityStageResolution(
@@ -865,6 +909,7 @@ class CRMOpportunityStageResolver:
     def _select_target_stage(
         future_steps: tuple[OpportunityStageTransitionStep, ...],
         *,
+        all_stages: tuple[OpportunityStagePayload, ...],
         target_stage_name: str | None,
         selected_stage_id: int | None,
         opportunity: OpportunityStageCandidate,
@@ -883,6 +928,38 @@ class CRMOpportunityStageResolver:
             )
         if target_stage_name is None:
             return future_steps[0]
+
+        # A natural-language paraphrase should be ranked against future
+        # stages, but an explicit name (or unambiguous fragment) of the
+        # current/previous stage must never be silently redirected to a later
+        # stage. Keep this no-op guard deterministic and independent of the
+        # model's ranking.
+        all_matches = _name_matches(
+            all_stages,
+            target_stage_name,
+            name=lambda item: item.stage_name,
+        )
+        future_stage_ids = {step.stage_template_id for step in future_steps}
+        non_future_stages = tuple(stage for stage in all_stages if stage.id not in future_stage_ids)
+        if all_matches and all(stage.id not in future_stage_ids for stage in all_matches):
+            return OpportunityStageResolution(
+                status="NOT_FOUND",
+                opportunity=opportunity,
+            )
+        # A short, unambiguous fragment that can only describe the current or
+        # a previous stage is also a no-op request. This check is a safety
+        # rejection only; it never selects a stage and never routes a task.
+        normalized_target = _normalize_name(target_stage_name)
+        if normalized_target and any(
+            normalized_target in _normalize_name(stage.stage_name)
+            or _normalize_name(stage.stage_name) in normalized_target
+            for stage in non_future_stages
+        ):
+            return OpportunityStageResolution(
+                status="NOT_FOUND",
+                opportunity=opportunity,
+            )
+
         matches = _name_matches(future_steps, target_stage_name, name=lambda item: item.stage_name)
         if len(matches) == 1:
             return matches[0]
@@ -892,9 +969,13 @@ class CRMOpportunityStageResolver:
                 opportunity=opportunity,
                 stage_candidates=matches,
             )
+        # The stage name came from natural language and did not exactly bind
+        # to an authorized stage. Preserve the full future-stage set for the
+        # semantic selector instead of treating a paraphrase as non-existent.
         return OpportunityStageResolution(
-            status="NOT_FOUND",
+            status="STAGE_SELECTION_REQUIRED",
             opportunity=opportunity,
+            stage_candidates=future_steps,
         )
 
     @staticmethod
@@ -1085,9 +1166,12 @@ class CRMFollowUpTaskResolver:
         )
         if task_reference_text:
             matched = _follow_up_task_matches(candidates, task_reference_text)
-            if not matched:
-                return FollowUpTaskResolution(status="NOT_FOUND")
-            candidates = matched
+            if matched:
+                candidates = matched
+            # A natural-language reference that is not an exact identity must
+            # remain a candidate-selection problem. Returning NOT_FOUND here
+            # discarded valid tasks before the Agent could understand the
+            # user's context.
         if len(candidates) == 1:
             return FollowUpTaskResolution(status="RESOLVED", task=candidates[0])
         if not candidates:
@@ -1207,28 +1291,15 @@ def _follow_up_task_matches(
     normalized_query = _normalize_name(query)
     if not normalized_query:
         return ()
-    exact = tuple(
+    # Only exact task identity is safe to bind here. Fragments, aliases and
+    # business descriptions go through semantic candidate ranking.
+    return tuple(
         candidate
         for candidate in candidates
         if normalized_query in {
             _normalize_name(candidate.task_id),
             _normalize_name(candidate.title),
         }
-    )
-    if exact:
-        return exact
-    return tuple(
-        candidate
-        for candidate in candidates
-        if normalized_query in _normalize_name(candidate.title)
-        or _normalize_name(candidate.title) in normalized_query
-        or (
-            candidate.customer_name is not None
-            and (
-                normalized_query in _normalize_name(candidate.customer_name)
-                or _normalize_name(candidate.customer_name) in normalized_query
-            )
-        )
     )
 
 
@@ -1252,14 +1323,9 @@ def _name_matches(
     normalized_query = _normalize_name(query)
     if not normalized_query:
         return ()
-    exact = tuple(candidate for candidate in candidates if _normalize_name(name(candidate)) == normalized_query)
-    if exact:
-        return exact
-    return tuple(
-        candidate
-        for candidate in candidates
-        if normalized_query in _normalize_name(name(candidate)) or _normalize_name(name(candidate)) in normalized_query
-    )
+    # Approximate identity is an Agent responsibility, not a resolver
+    # shortcut. Exact normalized names remain a safe deterministic binding.
+    return tuple(candidate for candidate in candidates if _normalize_name(name(candidate)) == normalized_query)
 
 
 def _normalize_name(value: str) -> str:

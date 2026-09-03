@@ -20,6 +20,7 @@ from app.services.follow_up_confirmation_case_lifecycle_service import (
 )
 from app.services.follow_up_parser import follow_up_parser_service
 from app.services.follow_up_task_confirmation_cleanup_service import FollowUpTaskConfirmationCancelReason
+from app.services.follow_up_task_confirmation_questions import build_follow_up_task_confirmation_question
 from app.services.follow_up_task_transition_plan_service import (
     FollowUpTaskTransitionAction,
     FollowUpTaskTransitionActionType,
@@ -572,19 +573,11 @@ class FollowUpTaskConfirmationService:
         plan: FollowUpTaskTransitionPlan,
         action: FollowUpTaskTransitionAction,
     ) -> str:
-        title = task.title or "这项跟进任务"
-        task_label = self._task_label(task)
-        suggested_action = self._suggested_action(plan, action)
-        if suggested_action in {
-            FollowUpTaskConfirmationResolutionAction.COMPLETE,
-            FollowUpTaskConfirmationResolutionAction.KEEP_OPEN,
-        }:
-            return f"{task_label}的「{title}」现在完成了吗?"
-        if suggested_action == FollowUpTaskConfirmationResolutionAction.POSTPONE:
-            return f"{task_label}的「{title}」需要延期吗?"
-        if suggested_action == FollowUpTaskConfirmationResolutionAction.CANCEL:
-            return f"{task_label}的「{title}」不需要继续跟进了吗?"
-        return f"{task_label}的「{title}」现在完成了吗?"
+        del plan, action
+        return build_follow_up_task_confirmation_question(
+            task_label=self._task_label(task),
+            title=task.title or "这项跟进任务",
+        )
 
     def _task_label(self, task: FollowUpTask) -> str:
         due_at = getattr(task, "due_at", None)

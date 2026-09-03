@@ -39,6 +39,7 @@ import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
 import { formatLocalDate } from '@/utils/format'
 import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
+import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 
 usePageTitle()
 
@@ -64,6 +65,7 @@ const confirmationStore = useFollowUpConfirmationStore()
 const { resolvingCaseId, postResolveRefreshError } = storeToRefs(confirmationStore)
 const { resolveCase } = confirmationStore
 const loading = ref(false)
+const loadError = ref<FeedbackError | null>(null)
 const tasks = ref<FollowUpTaskItem[]>([])
 const selectedTaskId = ref<string | null>(null)
 const selectedTask = ref<FollowUpTaskItem | null>(null)
@@ -172,6 +174,7 @@ async function fetchTasks(): Promise<void> {
     ? activeFilters.value
     : withoutFilterFields(activeFilters.value, ['status_label'])
 
+  loadError.value = null
   loading.value = true
   try {
     const response = await followUpTaskApi.list({
@@ -189,7 +192,7 @@ async function fetchTasks(): Promise<void> {
     total.value = response.total
   } catch (error) {
     if (requestId !== latestTaskListRequest) return
-    handleApiError(error, '获取客户追踪')
+    loadError.value = toFeedbackError(error, '客户追踪')
   } finally {
     if (requestId === latestTaskListRequest) loading.value = false
   }
@@ -337,12 +340,14 @@ const primaryActions = (row: TrackingRow): ActionConfig[] => {
     return [
       {
         label: '确认完成',
+        desktopPrimary: true,
         icon: CheckCircle2,
         disabled: resolvingCaseId.value === confirmation.public_id,
         handler: () => void resolvePendingConfirmation(row, confirmation.public_id, confirmationReply.complete),
       },
       {
         label: '延期',
+        desktopPrimary: true,
         icon: Clock3,
         disabled: resolvingCaseId.value === confirmation.public_id,
         handler: () => openDelayDialog(row, confirmation.public_id),
@@ -350,8 +355,8 @@ const primaryActions = (row: TrackingRow): ActionConfig[] => {
     ]
   }
   return [
-    { label: '完成', icon: CheckCircle2, visible: row.status === 'OPEN', handler: () => void transitionTask(row, 'complete') },
-    { label: '延期', icon: Clock3, visible: row.status === 'OPEN', handler: () => openDelayDialog(row) },
+    { label: '完成', desktopPrimary: true, icon: CheckCircle2, visible: row.status === 'OPEN', handler: () => void transitionTask(row, 'complete') },
+    { label: '延期', desktopPrimary: true, icon: Clock3, visible: row.status === 'OPEN', handler: () => openDelayDialog(row) },
   ]
 }
 
@@ -577,12 +582,18 @@ watchEffect(() => {
       :fields="fields"
       :data="rows"
       :loading="loading"
+      :load-error="loadError"
       :page="page"
       :page-size="pageSize"
       :total="total"
       height="calc(100vh - 121px)"
+      height-strategy="fill"
+      scroll-mode="contained"
+      compact-pagination
       row-key="public_id"
       row-interactive
+      detail-column-key="customer_name"
+      :get-row-label="(row) => `客户跟进 ${row.customer_name || row.public_id}`"
       :get-row-actions="getRowActions"
       empty-title="暂无客户追踪"
       mobile-title-key="customer_name"
@@ -608,6 +619,7 @@ watchEffect(() => {
       @column-config-save="handleColumnConfigSave"
       @column-config-reset="handleColumnConfigReset"
       @row-click="openDetail"
+      @retry="fetchTasks"
     >
       <template #cell-customer_name="{ row }">
         <span class="tracking-cell-strong">{{ row.customer_name }}</span>

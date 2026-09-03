@@ -41,6 +41,7 @@ import {
   SegmentedChoiceControl,
 } from '@/components/crmwolf'
 import { handleApiError } from '@/utils/errorHandler'
+import { useDialogCloseGuard } from '@/composables/useDialogCloseGuard'
 import invoiceApi, {
   type InvoiceTitleResponse,
   type InvoiceTitleCreate,
@@ -77,7 +78,7 @@ const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 
 // ==================== VeeValidate Setup ====================
-const { handleSubmit, resetForm, setValues, values } = useForm({
+const { handleSubmit, resetForm, meta } = useForm({
   validationSchema: schema,
   initialValues: {
     title_type: 'COMPANY' as TitleType,
@@ -95,8 +96,6 @@ const { value: titleTypeValue } = useField<TitleType>('title_type')
 
 // ==================== State ====================
 const submitting = ref(false)
-const isDirty = ref(false)
-const showConfirmDialog = ref(false)
 
 // ==================== Computed ====================
 const isEdit = computed(() => !!props.invoiceTitle)
@@ -105,29 +104,41 @@ const visible = computed({
   get: () => props.open,
   set: (val) => emit('update:open', val)
 })
+const isDirty = computed(() => meta.value.dirty)
+
+const closeGuard = useDialogCloseGuard({
+  isDirty,
+  submitting,
+  emitOpen: (open) => emit('update:open', open),
+})
+const showConfirmDialog = closeGuard.showConfirmDialog
 
 const titleTypeOptions = [
   { value: 'COMPANY', label: '企业', tone: 'primary' as const },
   { value: 'PERSONAL', label: '个人', tone: 'success' as const },
 ]
 
-// ==================== Watchers ====================
-watch(values, () => {
-  isDirty.value = true
-}, { deep: true })
-
 watch(() => props.open, (newOpen) => {
+  if (!newOpen) {
+    if (closeGuard.handleParentClose()) return
+    closeGuard.reset()
+    return
+  }
+
   if (newOpen) {
+    closeGuard.reset()
     if (props.invoiceTitle) {
       // Edit mode: populate form
-      setValues({
-        title_type: props.invoiceTitle.title_type,
-        title: props.invoiceTitle.title,
-        taxpayer_id: props.invoiceTitle.taxpayer_id,
-        bank_name: props.invoiceTitle.bank_name ?? '',
-        bank_account: props.invoiceTitle.bank_account ?? '',
-        address: props.invoiceTitle.address ?? '',
-        phone: props.invoiceTitle.phone ?? ''
+      resetForm({
+        values: {
+          title_type: props.invoiceTitle.title_type,
+          title: props.invoiceTitle.title,
+          taxpayer_id: props.invoiceTitle.taxpayer_id,
+          bank_name: props.invoiceTitle.bank_name ?? '',
+          bank_account: props.invoiceTitle.bank_account ?? '',
+          address: props.invoiceTitle.address ?? '',
+          phone: props.invoiceTitle.phone ?? ''
+        }
       })
     } else {
       // Create mode: reset form
@@ -143,10 +154,6 @@ watch(() => props.open, (newOpen) => {
         }
       })
     }
-    // Reset dirty state after form is populated/reset
-    setTimeout(() => {
-      isDirty.value = false
-    }, 100)
   }
 })
 
@@ -169,7 +176,7 @@ const onSubmit = handleSubmit(async (formValues) => {
       : await invoiceApi.createInvoiceTitle(props.customerId, data as InvoiceTitleCreate)
 
     toast.success(isEdit.value ? '发票抬头更新成功' : '发票抬头创建成功')
-    isDirty.value = false
+    closeGuard.approveClose()
     visible.value = false
     emit('success', savedInvoiceTitle)
   } catch (error) {
@@ -180,26 +187,25 @@ const onSubmit = handleSubmit(async (formValues) => {
 })
 
 function handleCancel(): void {
-  if (isDirty.value) {
-    showConfirmDialog.value = true
-  } else {
-    visible.value = false
-  }
+  closeGuard.requestClose()
 }
 
 function confirmCancel(): void {
-  showConfirmDialog.value = false
-  visible.value = false
+  closeGuard.confirmDiscard()
 }
 
 function continueEditing(): void {
-  showConfirmDialog.value = false
+  closeGuard.continueEditing()
+}
+
+function handleOpenChange(open: boolean): void {
+  closeGuard.handleOpenChange(open)
 }
 </script>
 
 <template>
-  <Dialog v-model:open="visible">
-    <DialogContent>
+  <Dialog :open="props.open" @update:open="handleOpenChange">
+    <DialogContent class="w-[calc(100vw-2rem)] max-h-[min(90vh,90dvh)] overflow-y-auto overscroll-contain [scroll-padding-bottom:calc(5rem+env(safe-area-inset-bottom,0px))]">
       <DialogHeader>
         <DialogTitle>{{ isEdit ? '编辑发票抬头' : '新建发票抬头' }}</DialogTitle>
       </DialogHeader>
@@ -306,7 +312,7 @@ function continueEditing(): void {
 
         <!-- DialogFooter -->
         <DialogFooter class="mt-6 pt-4 border-t">
-          <Button variant="outline" type="button" @click="handleCancel">
+          <Button variant="outline" type="button" :disabled="submitting" @click="handleCancel">
             取消
           </Button>
           <Button type="submit" :loading="submitting">
@@ -318,7 +324,7 @@ function continueEditing(): void {
   </Dialog>
 
   <!-- Confirm discard changes dialog -->
-  <AlertDialog v-model:open="showConfirmDialog">
+  <AlertDialog :open="showConfirmDialog" @update:open="closeGuard.handleConfirmOpenChange">
     <AlertDialogContent>
       <AlertDialogHeader>
         <AlertDialogTitle>放弃更改？</AlertDialogTitle>

@@ -46,6 +46,47 @@ from app.services.agent.ui.schemas import (
 from app.utils.public_id import generate_public_id
 
 AgentUIRoute = Literal["QUERY", "WORKFLOW", "CLARIFY"]
+_UI_ERROR_CODE_BY_INTERNAL_CODE = {
+    "ROOT_DECISION_MODEL_TIMEOUT": "UPSTREAM_TIMEOUT",
+    "ROOT_DECISION_MODEL_UNAVAILABLE": "UPSTREAM_UNAVAILABLE",
+    "ROOT_DECISION_INVALID_OUTPUT": "MODEL_OUTPUT_INVALID",
+    "ROOT_CONTEXT_UNAVAILABLE": "CHECKPOINT_UNAVAILABLE",
+    "WORKFLOW_CHECKPOINT_UNAVAILABLE": "CHECKPOINT_UNAVAILABLE",
+    "INTERACTION_RESOLUTION_UNAVAILABLE": "ACTION_INVALID",
+    "QUERY_SEMANTIC_INTENT_UNAVAILABLE": "UPSTREAM_UNAVAILABLE",
+    "QUERY_IDENTITY_UNAVAILABLE": "UPSTREAM_UNAVAILABLE",
+    "QUERY_EXECUTION_FAILED": "UPSTREAM_UNAVAILABLE",
+    "WORKFLOW_EXECUTION_FAILED": "UPSTREAM_UNAVAILABLE",
+}
+
+_FAILURE_TITLE_BY_CODE = {
+    "ROOT_DECISION_MODEL_TIMEOUT": "这次没处理成",
+    "ROOT_DECISION_MODEL_UNAVAILABLE": "这次没处理成",
+    "ROOT_DECISION_INVALID_OUTPUT": "还没理解清楚",
+    "ROOT_CONTEXT_UNAVAILABLE": "对话没接上",
+    "WORKFLOW_CHECKPOINT_UNAVAILABLE": "操作没接上",
+    "INTERACTION_RESOLUTION_UNAVAILABLE": "操作没接上",
+    "QUERY_SEMANTIC_INTENT_UNAVAILABLE": "查询没完成",
+    "QUERY_IDENTITY_UNAVAILABLE": "客户没确认",
+    "QUERY_EXECUTION_FAILED": "查询没完成",
+    "WORKFLOW_EXECUTION_FAILED": "操作没完成",
+    "WORKFLOW_CUSTOMER_NOT_FOUND": "没找到这个客户",
+    "WORKFLOW_CRM_API_UNAVAILABLE": "操作没完成",
+    "WORKFLOW_CRM_API_REJECTED": "操作没完成",
+    # Canonical query errors can arrive after the query executor has already
+    # normalized an internal provider/validation failure.  Keep their title
+    # user-facing even though the UI code is intentionally generic.
+    "QUERY_INVALID": "查询没完成",
+    "QUERY_UNSUPPORTED": "查询没完成",
+    "QUERY_EMPTY": "查询没完成",
+    "QUERY_LIMIT_EXCEEDED": "查询没完成",
+    "UPSTREAM_TIMEOUT": "这次没处理成",
+    "UPSTREAM_UNAVAILABLE": "这次没处理成",
+    "MODEL_OUTPUT_INVALID": "还没理解清楚",
+    "INTERNAL_ERROR": "这次没处理成",
+}
+
+
 _ALLOWED_ERROR_CODES = {
     "ROUTE_AMBIGUOUS",
     "ENTITY_AMBIGUOUS",
@@ -138,6 +179,86 @@ class AgentUIComposer:
             include_text_block=False,
         )
 
+    def compose_customer_opportunity_suggestion(
+        self,
+        *,
+        decision: str,
+        job_public_id: str,
+        action_public_id: str,
+    ) -> AgentUIComposition:
+        """Project a completed opportunity suggestion into a server-triggered choice.
+
+        This interaction deliberately has no native Workflow continuation yet: the
+        background suggestion job is not a waiting Workflow. The signed action
+        target carries the durable suggestion identity and the Root server trigger
+        starts the independent opportunity Workflow only after the user chooses.
+        """
+        if decision not in {"CREATE_OPPORTUNITY", "MOVE_OPPORTUNITY_STAGE"}:
+            raise ValueError("unsupported opportunity suggestion decision")
+        if not job_public_id or not action_public_id:
+            raise ValueError("opportunity suggestion projection IDs are required")
+
+        is_create = decision == "CREATE_OPPORTUNITY"
+        prompt = (
+            "我看到有一个比较明确的商机，是否帮你直接创建？"  # noqa: RUF001
+            if is_create
+            else "我看到这个商机有明确的推进机会，是否帮你推进？"  # noqa: RUF001
+        )
+        interaction_id = f"int_{job_public_id}_opportunity_suggestion"
+        target: dict[str, JsonValue] = {
+            "workflow_trigger": {
+                "type": "workflow_trigger",
+                "workflow": "customer_opportunity_suggestion",
+                "job_public_id": job_public_id,
+                "action": decision,
+            },
+            "interaction_id": interaction_id,
+            "interaction_type": "choice",
+            "business_action": "customer_opportunity_suggestion",
+            "submit_label": "提交",
+            "submit_on_select": True,
+            "choices": [
+                {"value": "confirm", "label": "是"},
+                {"value": "cancel", "label": "否"},
+            ],
+            "selection_mode": "single",
+            "min_selections": 1,
+            "max_selections": 1,
+        }
+        block = InteractionBlock(
+            id="b_opportunity_suggestion",
+            type="interaction",
+            interaction_id=interaction_id,
+            interaction_type="choice",
+            state="ACTIVE",
+            prompt=prompt,
+            fields=[],
+            options=[
+                InteractionOption(value="confirm", label="是"),
+                InteractionOption(value="cancel", label="否"),
+            ],
+            selection_mode="single",
+            min_selections=1,
+            max_selections=1,
+            allow_blank=None,
+            submit_on_select=True,
+            submit_label="提交",
+            submit_action_id=action_public_id,
+        )
+        action = AgentUIActionDraft(
+            public_id=action_public_id,
+            action_type="submit_interaction",
+            root_context_role="PROJECTION_ONLY",
+            target=target,
+            consumption_mode="ONE_SHOT",
+        )
+        return self._composition(
+            text=prompt,
+            route="WORKFLOW",
+            blocks=(block,),
+            actions=(action,),
+        )
+
     def compose(self, dispatch: RootDispatchResult) -> AgentUIComposition:
         if isinstance(dispatch, QueryDispatchResult):
             return self._compose_query(dispatch)
@@ -149,7 +270,7 @@ class AgentUIComposer:
                 route=self._route(dispatch),
                 block=self._error_block(
                     code=dispatch.error.code,
-                    title="处理未完成",
+                    title=self._failure_title(dispatch),
                     message=dispatch.error.message,
                     retryable=dispatch.error.retryable,
                 ),
@@ -198,11 +319,18 @@ class AgentUIComposer:
                 route="WORKFLOW",
                 block=self._error_block(
                     code=result.code,
-                    title="操作未完成",
+                    title=_FAILURE_TITLE_BY_CODE.get(result.code, "操作没完成"),
                     message=result.message,
                     retryable=result.retryable,
                 ),
                 blocks=(process_block,),
+            )
+        if result.status == "SKIPPED":
+            return self._composition(
+                text="",
+                route="WORKFLOW",
+                leading_blocks=(process_block,),
+                include_text_block=False,
             )
         if result.status != "WAITING":
             return self._composition(
@@ -238,6 +366,30 @@ class AgentUIComposer:
         if dispatch.decision is None:
             return None
         return dispatch.decision.route
+
+    @classmethod
+    def _failure_title(cls, dispatch: FailureDispatchResult) -> str:
+        # Query execution reuses canonical transport/model error codes that
+        # are also valid for Root.  The route is the only reliable way to
+        # keep the title truthful without exposing internal exception names.
+        if (
+            dispatch.decision is not None
+            and dispatch.decision.route == "QUERY"
+            and dispatch.error.code in {
+                "QUERY_INVALID",
+                "QUERY_UNSUPPORTED",
+                "QUERY_EMPTY",
+                "QUERY_LIMIT_EXCEEDED",
+                "QUERY_SEMANTIC_INTENT_UNAVAILABLE",
+                "QUERY_IDENTITY_UNAVAILABLE",
+                "QUERY_EXECUTION_FAILED",
+                "UPSTREAM_TIMEOUT",
+                "UPSTREAM_UNAVAILABLE",
+                "MODEL_OUTPUT_INVALID",
+            }
+        ):
+            return "查询没完成"
+        return _FAILURE_TITLE_BY_CODE.get(dispatch.error.code, "这次没处理成")
 
     @staticmethod
     def _error_composition(
@@ -517,7 +669,11 @@ class AgentUIComposer:
         message: str,
         retryable: bool,
     ) -> ErrorBlock:
-        normalized = cast("AgentErrorCode", code if code in _ALLOWED_ERROR_CODES else "INTERNAL_ERROR")
+        normalized_code = _UI_ERROR_CODE_BY_INTERNAL_CODE.get(code, code)
+        normalized = cast(
+            "AgentErrorCode",
+            normalized_code if normalized_code in _ALLOWED_ERROR_CODES else "INTERNAL_ERROR",
+        )
         return ErrorBlock(
             id="b_error_1",
             type="error",

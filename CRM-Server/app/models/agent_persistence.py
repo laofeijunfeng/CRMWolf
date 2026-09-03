@@ -140,6 +140,11 @@ class AgentUIAction(Base):
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, comment="Action失效时间")
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="消费完成时间")
+    submitted_values: Mapped[JSONObject | None] = mapped_column(
+        JSON,
+        nullable=True,
+        comment="一次性交互最终提交值(只读展示快照)",
+    )
     consumed_request_id: Mapped[str | None] = mapped_column(
         String(36),
         nullable=True,

@@ -16,6 +16,7 @@ const { api } = vi.hoisted(() => ({
     cancelApproval: vi.fn(),
     remindApproval: vi.fn(),
     getApprovalDetail: vi.fn(),
+    listApprovals: vi.fn(),
     bulkApprove: vi.fn()
   }
 }))
@@ -27,6 +28,7 @@ vi.mock('@/api/approvalGeneric', () => ({
   cancelApproval: api.cancelApproval,
   remindApproval: api.remindApproval,
   getApprovalDetail: api.getApprovalDetail,
+  listApprovals: api.listApprovals,
   bulkApprove: api.bulkApprove
 }))
 
@@ -74,6 +76,7 @@ describe('useApprovalStore', () => {
     api.cancelApproval.mockReset()
     api.remindApproval.mockReset()
     api.getApprovalDetail.mockReset()
+    api.listApprovals.mockReset()
     api.bulkApprove.mockReset()
   })
 
@@ -114,6 +117,48 @@ describe('useApprovalStore', () => {
 
       const store = useApprovalStore()
       await expect(store.fetchDetail('INVOICE', 7)).rejects.toThrow()
+    })
+  })
+
+  describe('loading concurrency', () => {
+    it('keeps detail loading until all concurrent detail requests settle', async () => {
+      let resolveFirst: (value: typeof validDetail) => void = () => undefined
+      let resolveSecond: (value: typeof validDetail) => void = () => undefined
+      api.getApprovalDetail
+        .mockReturnValueOnce(new Promise<typeof validDetail>((resolve) => { resolveFirst = resolve }))
+        .mockReturnValueOnce(new Promise<typeof validDetail>((resolve) => { resolveSecond = resolve }))
+
+      const store = useApprovalStore()
+      const first = store.fetchDetail('INVOICE', 7)
+      const second = store.fetchDetail('INVOICE', 8)
+
+      expect(store.detailLoading).toBe(true)
+      resolveFirst(validDetail)
+      await first
+      expect(store.detailLoading).toBe(true)
+      resolveSecond({ ...validDetail, business_id: 8 })
+      await second
+      expect(store.detailLoading).toBe(false)
+    })
+
+    it('keeps action loading until all concurrent write actions settle', async () => {
+      let resolveFirst: (value: { message: string }) => void = () => undefined
+      let resolveSecond: (value: { message: string }) => void = () => undefined
+      api.remindApproval
+        .mockReturnValueOnce(new Promise<{ message: string }>((resolve) => { resolveFirst = resolve }))
+        .mockReturnValueOnce(new Promise<{ message: string }>((resolve) => { resolveSecond = resolve }))
+
+      const store = useApprovalStore()
+      const first = store.remindEntity('INVOICE', 7)
+      const second = store.remindEntity('INVOICE', 8)
+
+      expect(store.actionLoading).toBe(true)
+      resolveFirst({ message: '已发送催办通知' })
+      await first
+      expect(store.actionLoading).toBe(true)
+      resolveSecond({ message: '已发送催办通知' })
+      await second
+      expect(store.actionLoading).toBe(false)
     })
   })
 

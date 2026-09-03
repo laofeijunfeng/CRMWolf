@@ -52,6 +52,7 @@ vi.mock('@/components/ui/dialog', () => {
     DialogContent: passthrough('DialogContent'),
     DialogHeader: passthrough('DialogHeader'),
     DialogTitle: passthrough('DialogTitle'),
+    DialogDescription: passthrough('DialogDescription'),
     DialogFooter: passthrough('DialogFooter'),
   }
 })
@@ -226,9 +227,10 @@ describe('OpportunityFormDialog customer lock behavior', () => {
     await wrapper.setProps({ open: true })
     await nextTick()
 
-    expect(wrapper.text()).toContain('上海测试客户')
+    const lockedCustomerInput = wrapper.find('input#opportunity-customer-locked')
+    expect(lockedCustomerInput.exists()).toBe(true)
+    expect(lockedCustomerInput.element.value).toBe('上海测试客户')
     expect(customerApi.getCustomerDetail).toHaveBeenCalledWith(42)
-    expect(wrapper.findAll('[data-testid="select"]')[0]?.attributes('data-disabled')).toBe('true')
 
     resolveDetail(customerDetail(42, '上海测试客户'))
     await flushPromises()
@@ -249,8 +251,9 @@ describe('OpportunityFormDialog customer lock behavior', () => {
     await nextTick()
 
     expect(customerApi.getCustomers).toHaveBeenCalledWith({ limit: 50 })
-    expect(wrapper.text()).toContain('可选择客户')
-    expect(wrapper.findAll('[data-testid="select"]')[0]?.attributes('data-disabled')).toBe('false')
+    const customerSelect = wrapper.findComponent({ name: 'SearchableSelectField' })
+    expect(customerSelect.exists()).toBe(true)
+    expect(customerSelect.props('options')).toEqual([{ value: 7, label: '可选择客户' }])
   })
 
   it('searches customers from the unlocked customer dropdown search input', async () => {
@@ -268,14 +271,14 @@ describe('OpportunityFormDialog customer lock behavior', () => {
     await flushPromises()
     await nextTick()
 
-    const searchInput = wrapper.find('input[placeholder="搜索客户名称"]')
-    expect(searchInput.exists()).toBe(true)
+    const customerSelect = wrapper.findComponent({ name: 'SearchableSelectField' })
+    expect(customerSelect.exists()).toBe(true)
 
-    await searchInput.setValue('搜索')
+    await customerSelect.vm.$emit('update:searchValue', '搜索')
     await flushPromises()
     await nextTick()
 
     expect(customerApi.getCustomers).toHaveBeenLastCalledWith({ limit: 50, keyword: '搜索' })
-    expect(wrapper.text()).toContain('搜索客户')
+    expect(customerSelect.props('options')).toEqual([{ value: 8, label: '搜索客户' }])
   })
 })

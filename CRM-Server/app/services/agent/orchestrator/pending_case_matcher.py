@@ -1,54 +1,25 @@
-"""Explicit pending confirmation Case matching for the Root Orchestrator."""
+"""Server-side binding of an LLM-authorized pending confirmation Case."""
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+
+from app.services.agent.orchestrator.risk import extract_case_public_id
 
 if TYPE_CHECKING:
     from app.services.agent.orchestrator.contracts import PendingCaseContext
 
-_PENDING_ACTION_REFERENCE = re.compile(
-    r"(?:完成|标记完成|确认完成|处理|延期|推迟|保留|取消|忽略|关闭|恢复)"
-    r".{0,12}(?:待办|确认事项|确认卡片)"
-    r"|(?:待办|确认事项|确认卡片).{0,12}"
-    r"(?:完成|标记完成|确认完成|处理|延期|推迟|保留|取消|忽略|关闭|恢复)"
-)
-
-_CASE_ID_PATTERN = re.compile(r"fuc_[0-9a-f]{32}", re.IGNORECASE)
-_GENERIC_PENDING_REFERENCE = re.compile(
-    r"(?:完成|标记完成|确认完成|处理|延期|推迟|保留|取消|忽略|关闭|恢复)"
-    r".{0,12}(?:上面|上一个|之前|历史)的?(?:待办|跟进任务|任务|确认事项|确认卡片)"
-    r"|(?:上面|上一个|之前|历史)的?(?:待办|跟进任务|任务|确认事项|确认卡片)"
-    r".{0,12}(?:完成|标记完成|确认完成|处理|延期|推迟|保留|取消|忽略|关闭|恢复)"
-)
-
-
-def _normalize(value: str) -> str:
-    # This is a conservative candidate scorer, not a general Chinese tokenizer.
-    normalized = re.sub(r"[\W_]", "", value, flags=re.UNICODE).lower()
-    for glue in ("的", "那个", "这", "该", "当前", "上面", "之前", "历史"):
-        normalized = normalized.replace(glue, "")
-    return normalized
-
 
 def is_explicit_pending_case_reference(text: str) -> bool:
-    """Require both a Case noun and an action/reference marker.
+    """Return whether text contains a structurally valid Case public ID.
 
-    A normal activity such as "今天联系了凡亚信息" must not enter the pending
-    Case flow merely because pending Cases exist in the same session.
+    This helper intentionally does not inspect verbs such as "完成" or nouns
+    such as "待办". Whether the turn concerns a pending Case belongs to the
+    Root LLM decision.
     """
 
-    normalized = text.strip()
-    if not normalized:
-        return False
-    if _CASE_ID_PATTERN.search(normalized) is not None:
-        return True
-    return (
-        _PENDING_ACTION_REFERENCE.search(normalized) is not None
-        or _GENERIC_PENDING_REFERENCE.search(normalized) is not None
-    )
+    return extract_case_public_id(text) is not None
 
 
 @dataclass(frozen=True)
@@ -59,54 +30,46 @@ class PendingCaseMatch:
     reference: str | None = None
 
 
-def match_pending_case(text: str, cases: list[PendingCaseContext]) -> PendingCaseMatch:
-    """Match only an explicit user reference against server-provided candidates."""
+def match_pending_case(
+    text: str,
+    cases: list[PendingCaseContext],
+    *,
+    semantic_reference_authorized: bool = False,
+) -> PendingCaseMatch:
+    """Bind an LLM-authorized reference to owned server-side candidates.
 
-    if not is_explicit_pending_case_reference(text):
-        return PendingCaseMatch(status="NONE")
+    The Root classifier authorizes the semantic relationship. This function
+    only performs identifier validation and candidate/entity binding; it never
+    decides from natural-language action keywords whether the user meant a
+    pending Case.
+    """
 
-    normalized_text = _normalize(text)
-    explicit_id = _CASE_ID_PATTERN.search(text)
-    if explicit_id is not None:
-        case_id = explicit_id.group(0).lower()
+    case_id = extract_case_public_id(text)
+    if case_id is not None:
         exact = tuple(case for case in cases if case.case_public_id.lower() == case_id)
         if len(exact) == 1:
-            return PendingCaseMatch(status="MATCHED", case=exact[0], reference=explicit_id.group(0))
-        return PendingCaseMatch(status="AMBIGUOUS" if len(exact) > 1 else "NOT_FOUND", reference=explicit_id.group(0))
+            return PendingCaseMatch(status="MATCHED", case=exact[0], reference=case_id)
+        return PendingCaseMatch(
+            status="AMBIGUOUS" if len(exact) > 1 else "NOT_FOUND",
+            reference=case_id,
+        )
 
-    if _GENERIC_PENDING_REFERENCE.search(text):
-        if len(cases) == 1:
-            return PendingCaseMatch(status="MATCHED", case=cases[0], reference=text.strip()[:255])
-        if len(cases) > 1:
-            return PendingCaseMatch(
-                status="AMBIGUOUS",
-                candidates=tuple(cases),
-                reference=text.strip()[:255],
-            )
+    if not semantic_reference_authorized:
+        return PendingCaseMatch(status="NONE")
+    if not cases:
         return PendingCaseMatch(status="NOT_FOUND", reference=text.strip()[:255])
 
-    scored: list[tuple[int, PendingCaseContext]] = []
-    for case in cases:
-        customer = _normalize(case.customer_name)
-        aliases = [_normalize(alias) for alias in case.customer_aliases]
-        title = _normalize(case.task_title)
-        description = _normalize(case.task_description or "")
-        score = 0
-        if customer and customer in normalized_text:
-            score += 100
-        if any(alias and alias in normalized_text for alias in aliases):
-            score = max(score, 100)
-        if title and title in normalized_text:
-            score += 50
-        if description and len(description) >= 8 and description in normalized_text:
-            score += 25
-        if score:
-            scored.append((score, case))
-
-    if not scored:
-        return PendingCaseMatch(status="NOT_FOUND", reference=text.strip()[:255])
-    highest = max(score for score, _ in scored)
-    matches = tuple(case for score, case in scored if score == highest)
-    if len(matches) == 1:
-        return PendingCaseMatch(status="MATCHED", case=matches[0], reference=text.strip()[:255])
-    return PendingCaseMatch(status="AMBIGUOUS", candidates=matches, reference=text.strip()[:255])
+    # The Root model has already authorized that this turn concerns a pending
+    # Case. Do not let a substring score silently bind one of several cases:
+    # phrases such as a customer alias or a generic task title are not an
+    # authoritative identity. Keep the complete owned candidate set so the
+    # semantic selector can compare the user's whole utterance and context.
+    # A single candidate remains safe to reuse and avoids an unnecessary
+    # confirmation round.
+    if len(cases) == 1:
+        return PendingCaseMatch(status="MATCHED", case=cases[0], reference=text.strip()[:255])
+    return PendingCaseMatch(
+        status="AMBIGUOUS",
+        candidates=tuple(cases),
+        reference=text.strip()[:255],
+    )

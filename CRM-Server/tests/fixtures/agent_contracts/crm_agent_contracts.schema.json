@@ -30,6 +30,7 @@
                 "customer",
                 "contact",
                 "customer_activity",
+                "deployment_info",
                 "follow_up_task",
                 "completed_work",
                 "opportunity",
@@ -908,6 +909,7 @@
                 "customer",
                 "contact",
                 "customer_activity",
+                "deployment_info",
                 "follow_up_task",
                 "completed_work",
                 "opportunity",
@@ -1037,6 +1039,7 @@
                 "customer",
                 "contact",
                 "customer_activity",
+                "deployment_info",
                 "follow_up_task",
                 "completed_work",
                 "opportunity",
@@ -1140,6 +1143,7 @@
                 "customer",
                 "contact",
                 "customer_activity",
+                "deployment_info",
                 "follow_up_task",
                 "completed_work",
                 "opportunity",
@@ -1413,6 +1417,21 @@
               "default": false,
               "title": "Submit On Select",
               "type": "boolean"
+            },
+            "submitted_values": {
+              "anyOf": [
+                {
+                  "additionalProperties": {
+                    "$ref": "#/$defs/JsonValue"
+                  },
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Submitted Values"
             },
             "type": {
               "const": "interaction",
@@ -1878,7 +1897,8 @@
                 "COMPLETED",
                 "WAITING",
                 "FAILED",
-                "CANCELLED"
+                "CANCELLED",
+                "SKIPPED"
               ],
               "title": "Status",
               "type": "string"
@@ -2614,6 +2634,7 @@
                 "customer",
                 "contact",
                 "customer_activity",
+                "deployment_info",
                 "follow_up_task",
                 "completed_work",
                 "opportunity",
@@ -2743,6 +2764,7 @@
                 "customer",
                 "contact",
                 "customer_activity",
+                "deployment_info",
                 "follow_up_task",
                 "completed_work",
                 "opportunity",
@@ -2846,6 +2868,7 @@
                 "customer",
                 "contact",
                 "customer_activity",
+                "deployment_info",
                 "follow_up_task",
                 "completed_work",
                 "opportunity",
@@ -3119,6 +3142,21 @@
               "default": false,
               "title": "Submit On Select",
               "type": "boolean"
+            },
+            "submitted_values": {
+              "anyOf": [
+                {
+                  "additionalProperties": {
+                    "$ref": "#/$defs/JsonValue"
+                  },
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Submitted Values"
             },
             "type": {
               "const": "interaction",
@@ -3584,7 +3622,8 @@
                 "COMPLETED",
                 "WAITING",
                 "FAILED",
-                "CANCELLED"
+                "CANCELLED",
+                "SKIPPED"
               ],
               "title": "Status",
               "type": "string"
@@ -4447,6 +4486,7 @@
                 "customer",
                 "contact",
                 "customer_activity",
+                "deployment_info",
                 "follow_up_task",
                 "completed_work",
                 "opportunity",
@@ -4576,6 +4616,7 @@
                 "customer",
                 "contact",
                 "customer_activity",
+                "deployment_info",
                 "follow_up_task",
                 "completed_work",
                 "opportunity",
@@ -4679,6 +4720,7 @@
                 "customer",
                 "contact",
                 "customer_activity",
+                "deployment_info",
                 "follow_up_task",
                 "completed_work",
                 "opportunity",
@@ -4952,6 +4994,21 @@
               "default": false,
               "title": "Submit On Select",
               "type": "boolean"
+            },
+            "submitted_values": {
+              "anyOf": [
+                {
+                  "additionalProperties": {
+                    "$ref": "#/$defs/JsonValue"
+                  },
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Submitted Values"
             },
             "type": {
               "const": "interaction",
@@ -5417,7 +5474,8 @@
                 "COMPLETED",
                 "WAITING",
                 "FAILED",
-                "CANCELLED"
+                "CANCELLED",
+                "SKIPPED"
               ],
               "title": "Status",
               "type": "string"
@@ -6429,6 +6487,7 @@
                 "customer",
                 "contact",
                 "customer_activity",
+                "deployment_info",
                 "follow_up_task",
                 "completed_work",
                 "opportunity",
@@ -6558,6 +6617,7 @@
                 "customer",
                 "contact",
                 "customer_activity",
+                "deployment_info",
                 "follow_up_task",
                 "completed_work",
                 "opportunity",
@@ -6661,6 +6721,7 @@
                 "customer",
                 "contact",
                 "customer_activity",
+                "deployment_info",
                 "follow_up_task",
                 "completed_work",
                 "opportunity",
@@ -6934,6 +6995,21 @@
               "default": false,
               "title": "Submit On Select",
               "type": "boolean"
+            },
+            "submitted_values": {
+              "anyOf": [
+                {
+                  "additionalProperties": {
+                    "$ref": "#/$defs/JsonValue"
+                  },
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Submitted Values"
             },
             "type": {
               "const": "interaction",
@@ -7399,7 +7475,8 @@
                 "COMPLETED",
                 "WAITING",
                 "FAILED",
-                "CANCELLED"
+                "CANCELLED",
+                "SKIPPED"
               ],
               "title": "Status",
               "type": "string"
@@ -8529,6 +8606,7 @@
                 "customer",
                 "contact",
                 "customer_activity",
+                "deployment_info",
                 "follow_up_task",
                 "completed_work",
                 "opportunity",
@@ -8658,6 +8736,7 @@
                 "customer",
                 "contact",
                 "customer_activity",
+                "deployment_info",
                 "follow_up_task",
                 "completed_work",
                 "opportunity",
@@ -8761,6 +8840,7 @@
                 "customer",
                 "contact",
                 "customer_activity",
+                "deployment_info",
                 "follow_up_task",
                 "completed_work",
                 "opportunity",
@@ -9034,6 +9114,21 @@
               "default": false,
               "title": "Submit On Select",
               "type": "boolean"
+            },
+            "submitted_values": {
+              "anyOf": [
+                {
+                  "additionalProperties": {
+                    "$ref": "#/$defs/JsonValue"
+                  },
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Submitted Values"
             },
             "type": {
               "const": "interaction",
@@ -9499,7 +9594,8 @@
                 "COMPLETED",
                 "WAITING",
                 "FAILED",
-                "CANCELLED"
+                "CANCELLED",
+                "SKIPPED"
               ],
               "title": "Status",
               "type": "string"
@@ -10273,6 +10369,7 @@
                 "customer",
                 "contact",
                 "customer_activity",
+                "deployment_info",
                 "follow_up_task",
                 "completed_work",
                 "opportunity",
@@ -10402,6 +10499,7 @@
                 "customer",
                 "contact",
                 "customer_activity",
+                "deployment_info",
                 "follow_up_task",
                 "completed_work",
                 "opportunity",
@@ -10505,6 +10603,7 @@
                 "customer",
                 "contact",
                 "customer_activity",
+                "deployment_info",
                 "follow_up_task",
                 "completed_work",
                 "opportunity",
@@ -10778,6 +10877,21 @@
               "default": false,
               "title": "Submit On Select",
               "type": "boolean"
+            },
+            "submitted_values": {
+              "anyOf": [
+                {
+                  "additionalProperties": {
+                    "$ref": "#/$defs/JsonValue"
+                  },
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Submitted Values"
             },
             "type": {
               "const": "interaction",
@@ -11243,7 +11357,8 @@
                 "COMPLETED",
                 "WAITING",
                 "FAILED",
-                "CANCELLED"
+                "CANCELLED",
+                "SKIPPED"
               ],
               "title": "Status",
               "type": "string"
@@ -12096,6 +12211,7 @@
                 "customer",
                 "contact",
                 "customer_activity",
+                "deployment_info",
                 "follow_up_task",
                 "completed_work",
                 "opportunity",
@@ -12187,6 +12303,7 @@
                 "customer",
                 "contact",
                 "customer_activity",
+                "deployment_info",
                 "follow_up_task",
                 "completed_work",
                 "opportunity",
@@ -12314,6 +12431,7 @@
                     "customer",
                     "contact",
                     "customer_activity",
+                    "deployment_info",
                     "follow_up_task",
                     "completed_work",
                     "opportunity",
@@ -12412,6 +12530,7 @@
             "customer",
             "contact",
             "customer_activity",
+            "deployment_info",
             "follow_up_task",
             "completed_work",
             "opportunity",
@@ -12660,6 +12779,7 @@
             "customer",
             "contact",
             "customer_activity",
+            "deployment_info",
             "follow_up_task",
             "completed_work",
             "opportunity",
@@ -12703,6 +12823,7 @@
         "customer",
         "contact",
         "customer_activity",
+        "deployment_info",
         "follow_up_task",
         "completed_work",
         "opportunity",
@@ -14586,6 +14707,15 @@
           "title": "Active Workflow",
           "type": "string"
         },
+        "conversation_memory": {
+          "default": "USE",
+          "enum": [
+            "USE",
+            "IGNORE"
+          ],
+          "title": "Conversation Memory",
+          "type": "string"
+        },
         "previous_query": {
           "enum": [
             "USE",
@@ -15367,6 +15497,7 @@
             "customer",
             "contact",
             "customer_activity",
+            "deployment_info",
             "follow_up_task",
             "completed_work",
             "opportunity",
@@ -15466,6 +15597,7 @@
                 "customer",
                 "contact",
                 "customer_activity",
+                "deployment_info",
                 "follow_up_task",
                 "completed_work",
                 "opportunity",
@@ -15510,6 +15642,7 @@
             "customer",
             "contact",
             "customer_activity",
+            "deployment_info",
             "follow_up_task",
             "completed_work",
             "opportunity",
@@ -15600,6 +15733,7 @@
             "customer",
             "contact",
             "customer_activity",
+            "deployment_info",
             "follow_up_task",
             "completed_work",
             "opportunity",
@@ -15748,6 +15882,7 @@
                 "customer",
                 "contact",
                 "customer_activity",
+                "deployment_info",
                 "follow_up_task",
                 "completed_work",
                 "opportunity",
@@ -16167,6 +16302,21 @@
           "default": false,
           "title": "Submit On Select",
           "type": "boolean"
+        },
+        "submitted_values": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/JsonValue"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Submitted Values"
         },
         "type": {
           "const": "interaction",
@@ -16820,6 +16970,7 @@
                 "customer",
                 "contact",
                 "customer_activity",
+                "deployment_info",
                 "follow_up_task",
                 "completed_work",
                 "opportunity",
@@ -16875,6 +17026,7 @@
                 "customer",
                 "contact",
                 "customer_activity",
+                "deployment_info",
                 "follow_up_task",
                 "completed_work",
                 "opportunity",
@@ -17080,6 +17232,7 @@
                 "customer",
                 "contact",
                 "customer_activity",
+                "deployment_info",
                 "follow_up_task",
                 "completed_work",
                 "opportunity",
@@ -17144,6 +17297,32 @@
           "title": "CRMSort",
           "type": "object"
         },
+        "ConversationMessageContext": {
+          "additionalProperties": false,
+          "description": "Small, owned slice of recent conversation supplied to Root LLM.",
+          "properties": {
+            "content": {
+              "maxLength": 6000,
+              "minLength": 1,
+              "title": "Content",
+              "type": "string"
+            },
+            "role": {
+              "enum": [
+                "USER",
+                "ASSISTANT"
+              ],
+              "title": "Role",
+              "type": "string"
+            }
+          },
+          "required": [
+            "role",
+            "content"
+          ],
+          "title": "ConversationMessageContext",
+          "type": "object"
+        },
         "EntityRef": {
           "additionalProperties": false,
           "description": "Server-issued reference to a CRM entity visible in a result set.",
@@ -17171,6 +17350,7 @@
                 "customer",
                 "contact",
                 "customer_activity",
+                "deployment_info",
                 "follow_up_task",
                 "completed_work",
                 "opportunity",
@@ -17303,6 +17483,107 @@
           "title": "ResultSetContext",
           "type": "object"
         },
+        "RootConversationMemory": {
+          "additionalProperties": false,
+          "description": "Durable short-term memory for one Agent session.\n\nThis is a working memory, not a CRM fact store.  CRM identity is still\nrevalidated by the Workflow planner before any business mutation.",
+          "properties": {
+            "current_task": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Current Task"
+            },
+            "known_activity_content": {
+              "anyOf": [
+                {
+                  "maxLength": 12000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Known Activity Content"
+            },
+            "known_next_action": {
+              "anyOf": [
+                {
+                  "maxLength": 4000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Known Next Action"
+            },
+            "last_agent_plan": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Last Agent Plan"
+            },
+            "pending_question": {
+              "anyOf": [
+                {
+                  "maxLength": 4000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Pending Question"
+            },
+            "resolved_customer": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/WorkflowResolvedCustomer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "schema_version": {
+              "const": "crm.agent.root-memory.v1",
+              "default": "crm.agent.root-memory.v1",
+              "enum": [
+                "crm.agent.root-memory.v1"
+              ],
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "user_corrections": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 20,
+              "title": "User Corrections",
+              "type": "array"
+            }
+          },
+          "title": "RootConversationMemory",
+          "type": "object"
+        },
         "WorkflowContinuation": {
           "additionalProperties": false,
           "description": "Exact durable continuation for one native Workflow interrupt.\n\n``root_thread_id`` is the LangGraph thread that owns the checkpoint. A\nsession may contain many independent turns, so a resumed interaction must\nreturn to the owning thread instead of the current turn thread.",
@@ -17393,6 +17674,45 @@
           ],
           "title": "WorkflowRef",
           "type": "object"
+        },
+        "WorkflowResolvedCustomer": {
+          "additionalProperties": false,
+          "description": "Customer identity cached in the Workflow checkpoint after resolution.\n\n``lookup_name`` is only a comparison hint for deciding whether a later\nsupplement still refers to this customer. Authorization and existence are\nrevalidated by the CRM resolver before the next plan is built.",
+          "properties": {
+            "customer_id": {
+              "maxLength": 128,
+              "minLength": 5,
+              "pattern": "^cus_[A-Za-z0-9_-]+$",
+              "title": "Customer Id",
+              "type": "string"
+            },
+            "customer_name": {
+              "maxLength": 255,
+              "minLength": 1,
+              "title": "Customer Name",
+              "type": "string"
+            },
+            "lookup_name": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Lookup Name"
+            }
+          },
+          "required": [
+            "customer_id",
+            "customer_name"
+          ],
+          "title": "WorkflowResolvedCustomer",
+          "type": "object"
         }
       },
       "additionalProperties": false,
@@ -17407,6 +17727,9 @@
             }
           ],
           "default": null
+        },
+        "conversation_memory": {
+          "$ref": "#/$defs/RootConversationMemory"
         },
         "pending_cases": {
           "items": {
@@ -17426,6 +17749,14 @@
             }
           ],
           "default": null
+        },
+        "recent_messages": {
+          "items": {
+            "$ref": "#/$defs/ConversationMessageContext"
+          },
+          "maxItems": 12,
+          "title": "Recent Messages",
+          "type": "array"
         },
         "result_set": {
           "anyOf": [
@@ -17460,6 +17791,259 @@
     },
     "RootDecision": {
       "$defs": {
+        "AgentQueryPlan": {
+          "additionalProperties": false,
+          "description": "Closed query capability details carried by the Root semantic plan.",
+          "properties": {
+            "customer_text": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Customer Text"
+            },
+            "resource": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "follow_up_tasks",
+                    "completed_work",
+                    "customer_context",
+                    "customer_activities",
+                    "customer_contacts",
+                    "deployment_info",
+                    "customers"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Resource"
+            },
+            "scope": {
+              "enum": [
+                "global_work",
+                "customer_scoped",
+                "customer_list",
+                "unknown"
+              ],
+              "title": "Scope",
+              "type": "string"
+            },
+            "temporal": {
+              "$ref": "#/$defs/AgentQueryTemporalPlan"
+            }
+          },
+          "required": [
+            "scope"
+          ],
+          "title": "AgentQueryPlan",
+          "type": "object"
+        },
+        "AgentQueryTemporalPlan": {
+          "additionalProperties": false,
+          "description": "Query slots Root may provide when it owns the complete semantic intake.",
+          "properties": {
+            "end_at": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "End At"
+            },
+            "kind": {
+              "default": "unspecified",
+              "enum": [
+                "today",
+                "tomorrow",
+                "this_week",
+                "next_week",
+                "last_week",
+                "this_month",
+                "overdue",
+                "custom",
+                "unspecified"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "start_at": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Start At"
+            },
+            "timezone": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Timezone"
+            }
+          },
+          "title": "AgentQueryTemporalPlan",
+          "type": "object"
+        },
+        "AgentSemanticPlan": {
+          "additionalProperties": false,
+          "description": "LLM-produced meaning shared by routing and the selected capability.\n\nThis is not a tool authorization.  The Root uses it to select a capability,\nwhile the Workflow or Query boundary still validates the concrete command,\ncustomer binding, permissions, and side effects.",
+          "properties": {
+            "activity_content": {
+              "anyOf": [
+                {
+                  "maxLength": 20000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Activity Content"
+            },
+            "business_object": {
+              "default": "UNKNOWN",
+              "enum": [
+                "CUSTOMER_ACTIVITY",
+                "FOLLOW_UP_TASK",
+                "CUSTOMER",
+                "OPPORTUNITY",
+                "PAYMENT_RECORD",
+                "CONTRACT",
+                "LEAD",
+                "CONTACT",
+                "INVOICE_TITLE",
+                "DEPLOYMENT_INFO",
+                "CUSTOMER_MEMBER",
+                "UNKNOWN"
+              ],
+              "title": "Business Object",
+              "type": "string"
+            },
+            "confidence": {
+              "default": 0.0,
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Confidence",
+              "type": "number"
+            },
+            "customer_reference": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Customer Reference"
+            },
+            "evidence": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 20,
+              "title": "Evidence",
+              "type": "array"
+            },
+            "operation": {
+              "default": "UNKNOWN",
+              "enum": [
+                "CREATE",
+                "READ",
+                "TRANSITION",
+                "DELETE",
+                "NONE",
+                "UNKNOWN"
+              ],
+              "title": "Operation",
+              "type": "string"
+            },
+            "query_plan": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AgentQueryPlan"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "query_target": {
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Query Target"
+            },
+            "speech_act": {
+              "default": "UNKNOWN",
+              "enum": [
+                "ASSERT_EVENT",
+                "ASK_FACT",
+                "REQUEST_ACTION",
+                "CONFIRM_ACTION",
+                "PROVIDE_SUPPLEMENT",
+                "CANCEL",
+                "UNKNOWN"
+              ],
+              "title": "Speech Act",
+              "type": "string"
+            },
+            "user_goal": {
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "User Goal"
+            }
+          },
+          "title": "AgentSemanticPlan",
+          "type": "object"
+        },
         "ContextPolicy": {
           "additionalProperties": false,
           "properties": {
@@ -17470,6 +18054,15 @@
                 "NONE"
               ],
               "title": "Active Workflow",
+              "type": "string"
+            },
+            "conversation_memory": {
+              "default": "USE",
+              "enum": [
+                "USE",
+                "IGNORE"
+              ],
+              "title": "Conversation Memory",
               "type": "string"
             },
             "previous_query": {
@@ -17509,6 +18102,19 @@
       },
       "additionalProperties": false,
       "properties": {
+        "clarification_question": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Clarification Question"
+        },
         "confidence": {
           "maximum": 1.0,
           "minimum": 0.0,
@@ -17574,6 +18180,9 @@
           "title": "Route",
           "type": "string"
         },
+        "semantic_plan": {
+          "$ref": "#/$defs/AgentSemanticPlan"
+        },
         "task_relation": {
           "enum": [
             "NEW_TASK",
@@ -17590,7 +18199,8 @@
         "risk",
         "context_policy",
         "confidence",
-        "reason_code"
+        "reason_code",
+        "semantic_plan"
       ],
       "title": "RootDecision",
       "type": "object"

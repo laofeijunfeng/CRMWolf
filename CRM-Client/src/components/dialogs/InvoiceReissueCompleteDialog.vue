@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
+import { confirmDialog } from '@/utils/confirmDialog'
 import {
   Dialog,
   DialogContent,
@@ -31,6 +32,7 @@ const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 
 const submitting = ref(false)
+const closeGuardPending = ref(false)
 const redInvoiceNumber = ref('')
 const newInvoiceNumber = ref('')
 const redFile = ref<File | null>(null)
@@ -108,9 +110,37 @@ const reset = (): void => {
   newFileError.value = null
 }
 
-const handleDialogOpenChange = (open: boolean): void => {
-  if (!open) reset()
-  emit('update:open', open)
+const hasFormChanges = computed(() =>
+  redFile.value !== null
+  || newFile.value !== null
+  || redInvoiceNumber.value.trim().length > 0
+  || newInvoiceNumber.value.trim().length > 0,
+)
+
+const handleDialogOpenChange = async (open: boolean): Promise<void> => {
+  if (open) {
+    emit('update:open', true)
+    return
+  }
+
+  if (submitting.value || closeGuardPending.value) return
+
+  if (!hasFormChanges.value) {
+    emit('update:open', false)
+    return
+  }
+
+  closeGuardPending.value = true
+  try {
+    const confirmed = await confirmDialog(
+      '已填写发票号码或选择发票文件，关闭后这些内容不会保存。确定关闭吗？',
+      '放弃本次重开？',
+      { variant: 'destructive', confirmText: '放弃并关闭' },
+    )
+    if (confirmed) emit('update:open', false)
+  } finally {
+    closeGuardPending.value = false
+  }
 }
 
 const submit = async (): Promise<void> => {
@@ -218,14 +248,14 @@ onUnmounted(() => {
       <DialogFooter class="flex-col gap-2 sm:flex-row">
         <Button
           variant="outline"
-          :disabled="submitting"
+          :disabled="submitting || closeGuardPending"
           class="w-full sm:w-auto"
-          @click="emit('update:open', false)"
+          @click="handleDialogOpenChange(false)"
         >
           取消
         </Button>
         <Button
-          :disabled="submitting"
+          :disabled="submitting || closeGuardPending"
           :loading="submitting"
           class="w-full sm:w-auto"
           @click="submit"

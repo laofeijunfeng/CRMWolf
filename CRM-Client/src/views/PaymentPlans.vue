@@ -16,7 +16,7 @@
  */
 import { ref, reactive, computed, onMounted, watch, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
-import { handleApiError } from '@/utils/errorHandler'
+import { handleApiError, handleOutcomeUnknown, isOutcomeUnknown } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Eye, Pencil, CheckCircle, Trash2 } from 'lucide-vue-next'
 import { AmountText, DataTable, TableRowActions, type TableRowActionSet } from '@/components/crmwolf'
@@ -24,7 +24,7 @@ import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { ViewPreferenceConfig } from '@/api/viewPreference'
-import { confirmDelete } from '@/utils/confirmDialog'
+import { confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
 import PaymentPlanDetailSheet from '@/views/PaymentPlanDetailSheet.vue'
 import PaymentRecordDialog from '@/components/dialogs/PaymentRecordDialog.vue'
@@ -40,6 +40,7 @@ import { usePageTitle } from '@/composables/usePageTitle'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
+import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -50,12 +51,16 @@ const route = useRoute()
 
 // ==================== State ====================
 const loading = ref(false)
+const loadError = ref<FeedbackError | null>(null)
+const listRequestId = ref<number>(0)
 const tableData = ref<PaymentPlanWithDetails[]>([])
 const selectedPlanId = ref<number | null>(null)
 const planSheetVisible = ref(false)
 const selectedConfirmPlan = ref<PaymentPlanWithDetails | null>(null)
+const paymentRecordIdempotencyKey = ref<string | null>(null)
 const registerDialogOpen = ref(false)
 const registerSubmitting = ref(false)
+const deletingPlanIds = ref<Set<number>>(new Set())
 const planFormDialogOpen = ref(false)
 const planFormMode = ref<'create' | 'edit'>('create')
 const editingPlan = ref<PaymentPlanWithDetails | null>(null)
@@ -135,6 +140,8 @@ const registerDefaultPayerName = computed<string>(() => selectedConfirmPlan.valu
 
 // ==================== Methods ====================
 const fetchPaymentPlans = async (): Promise<void> => {
+  const requestId = ++listRequestId.value
+  loadError.value = null
   loading.value = true
   try {
     const tabStatus = activeTab.value === 'pending'
@@ -155,15 +162,18 @@ const fetchPaymentPlans = async (): Promise<void> => {
     }
 
     const data = await paymentApi.listPaymentPlans(params)
+    if (requestId !== listRequestId.value) return
     tableData.value = data.items
     pagination.total = data.total
   } catch (error) {
-    handleApiError(error, '获取回款计划列表')
+    if (requestId !== listRequestId.value) return
+    loadError.value = toFeedbackError(error, '回款计划列表')
   } finally {
-    loading.value = false
+    if (requestId === listRequestId.value) {
+      loading.value = false
+    }
   }
 }
-
 const customFilterViews = useCustomFilterViews({
   viewKey: 'payment-plans.list',
   activeTab,
@@ -277,6 +287,7 @@ const handleEdit = (row: PaymentPlanWithDetails): void => {
 const handleConfirmPayment = (row: PaymentPlanWithDetails): void => {
   selectedConfirmPlan.value = row
   registerDialogOpen.value = true
+  paymentRecordIdempotencyKey.value = crypto.randomUUID()
 }
 
 const handlePlanSheetVisibleChange = (visible: boolean): void => {
@@ -302,6 +313,7 @@ const handleRegisterDialogOpenChange = (open: boolean): void => {
   registerDialogOpen.value = open
   if (!open && !registerSubmitting.value) {
     selectedConfirmPlan.value = null
+    paymentRecordIdempotencyKey.value = null
   }
 }
 
@@ -311,10 +323,40 @@ const handleRegisterSubmit = async (payload: PaymentRecordCreate): Promise<void>
 
   registerSubmitting.value = true
   try {
-    await paymentApi.createPaymentRecord(plan.id, payload)
-    toast.success('回款登记成功')
+    const idempotencyKey = paymentRecordIdempotencyKey.value ?? crypto.randomUUID()
+    paymentRecordIdempotencyKey.value = idempotencyKey
+    try {
+      await paymentApi.createPaymentRecord(plan.id, payload, idempotencyKey)
+    } catch (error: unknown) {
+      if (!isOutcomeUnknown(error)) throw error
+
+      // The write may have committed even when the response timed out. Resolve by
+      // the same hidden idempotency key before asking the user to do anything else.
+      try {
+        await paymentApi.resolvePaymentRecordWithRetry(idempotencyKey)
+      } catch {
+        handleOutcomeUnknown()
+        return
+      }
+    }
+    let resultMessage = `本次登记 ¥${payload.actual_amount.toFixed(2)}`
+    try {
+      const updatedPlan = await paymentApi.getPaymentPlanDetail(plan.id)
+      const statusLabel = updatedPlan.status === 'COMPLETED'
+        ? '已登记'
+        : updatedPlan.status === 'PARTIAL'
+          ? '部分回款'
+          : updatedPlan.status === 'OVERDUE'
+            ? '已逾期'
+            : '待登记'
+      resultMessage += `，剩余 ¥${(updatedPlan.remaining_amount ?? 0).toFixed(2)}，计划状态：${statusLabel}`
+    } catch {
+      // 写入已成功；列表刷新仍会展示最终状态，避免把刷新失败误报为登记失败。
+    }
+    toast.success(`回款登记成功，${resultMessage}`)
     registerDialogOpen.value = false
     selectedConfirmPlan.value = null
+    paymentRecordIdempotencyKey.value = null
     fetchPaymentPlans()
   } catch (error) {
     handleApiError(error, '登记回款')
@@ -323,16 +365,29 @@ const handleRegisterSubmit = async (payload: PaymentRecordCreate): Promise<void>
   }
 }
 
+const isPlanDeleting = (planId: number): boolean => deletingPlanIds.value.has(planId)
+
 const handleDelete = async (row: PaymentPlanWithDetails): Promise<void> => {
-  const confirmed = await confirmDelete(`回款计划 "${row.stage_name}"`)
+  if (isPlanDeleting(row.id)) return
+
+  const confirmed = await confirmDialog(
+    `确定删除回款计划“${row.stage_name}”吗？${row.payment_records.length > 0 ? '该计划已存在关联回款记录，当前不可删除。' : '删除后无法恢复，相关合同回款状态将重新计算。'}`,
+    '删除回款计划',
+    { variant: 'destructive', confirmText: '删除' },
+  )
   if (!confirmed) return
 
+  deletingPlanIds.value = new Set(deletingPlanIds.value).add(row.id)
   try {
     await paymentApi.deletePaymentPlan(row.id)
-    toast.success('回款计划删除成功')
-    fetchPaymentPlans()
+    toast.success(`回款计划“${row.stage_name}”已删除`)
+    void fetchPaymentPlans()
   } catch (error) {
     handleApiError(error, '删除回款计划')
+  } finally {
+    const nextIds = new Set(deletingPlanIds.value)
+    nextIds.delete(row.id)
+    deletingPlanIds.value = nextIds
   }
 }
 
@@ -340,11 +395,13 @@ const getRowActions = (row: PaymentPlanWithDetails): TableRowActionSet => ({
   primaryActions: [
     {
       label: '查看',
+      kind: 'detail',
       handler: () => handleViewDetail(row),
       icon: Eye
     },
     {
       label: '确认回款',
+      desktopPrimary: true,
       handler: () => handleConfirmPayment(row),
       visible: canConfirmPayment.value && row.status !== 'COMPLETED',
       icon: CheckCircle
@@ -360,6 +417,7 @@ const getRowActions = (row: PaymentPlanWithDetails): TableRowActionSet => ({
     {
       label: '删除',
       handler: (): void => { void handleDelete(row) },
+      disabled: isPlanDeleting(row.id),
       visible: canDeletePlan.value,
       icon: Trash2,
       destructive: true,
@@ -435,6 +493,7 @@ watch(
       :fields="fields"
       :data="tableData"
       :loading="loading"
+      :load-error="loadError"
       :page="pagination.current"
       :page-size="pagination.pageSize"
       :total="pagination.total"
@@ -446,8 +505,13 @@ watch(
       filter-view-save-enabled
       :filter-view-save-loading="customFilterViewSaving"
       height="calc(100vh - 121px)"
+      height-strategy="fill"
+      scroll-mode="contained"
+      compact-pagination
       empty-title="暂无回款计划"
       row-interactive
+      detail-column-key="plan_number"
+      :get-row-label="(row) => `回款计划 ${row.plan_number || row.id}`"
       :get-row-actions="getRowActions"
       mobile-title-key="plan_number"
       mobile-subtitle-key="contract_name"
@@ -464,6 +528,7 @@ watch(
       @column-config-current-change="handleColumnConfigCurrentChange"
       @column-config-save="handleColumnConfigSave"
       @column-config-reset="handleColumnConfigReset"
+      @retry="fetchPaymentPlans"
       @row-click="handleViewDetail"
     >
       <template #mobile-card="{ row }">

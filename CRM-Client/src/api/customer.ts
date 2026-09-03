@@ -121,6 +121,7 @@ export interface CustomerCreate {
 }
 
 export interface CustomerUpdate {
+  expected_version?: number | null
   account_name?: string | null
   city?: string | null
   address?: string | null

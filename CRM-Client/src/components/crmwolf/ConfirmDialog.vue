@@ -7,7 +7,7 @@
  * - 函数式调用（通过 confirmDialog）
  * - 支持键盘操作（Enter 确认，Escape 取消）
  * - Focus 自动聚焦到确认按钮
- * - 点击遮罩层关闭
+ * - 通过取消按钮或 Escape 取消，避免误触遮罩层
  */
 import { useConfirmDialogState, handleConfirm, handleCancel } from '@/utils/confirmDialogImpl'
 import {
@@ -17,20 +17,25 @@ import {
   AlertDialogDescription,
   AlertDialogAction,
   AlertDialogCancel,
+  AlertDialogFooter,
 } from '@/components/ui/alert-dialog'
 
 const state = useConfirmDialogState()
+
+const handleDialogOpenChange = (open: boolean): void => {
+  if (!open) handleCancel()
+}
 </script>
 
 <template>
-  <AlertDialog :open="state.visible">
+  <AlertDialog :open="state.visible" @update:open="handleDialogOpenChange">
     <AlertDialogContent>
       <AlertDialogTitle>{{ state.options.title }}</AlertDialogTitle>
       <AlertDialogDescription>
         {{ state.options.message }}
       </AlertDialogDescription>
 
-      <div class="flex justify-end gap-wolf-sm mt-wolf-lg">
+      <AlertDialogFooter>
         <AlertDialogCancel @click="handleCancel">
           {{ state.options.cancelText }}
         </AlertDialogCancel>
@@ -42,7 +47,7 @@ const state = useConfirmDialogState()
         >
           {{ state.options.confirmText }}
         </AlertDialogAction>
-      </div>
+      </AlertDialogFooter>
     </AlertDialogContent>
   </AlertDialog>
 </template>

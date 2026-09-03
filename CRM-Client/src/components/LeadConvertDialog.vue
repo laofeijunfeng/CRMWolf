@@ -7,7 +7,7 @@
  * - V2 Design Tokens
  * - 替代 LeadConvert.vue 页面跳转
  */
-import { ref, reactive, watch, computed } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import { Building2 } from 'lucide-vue-next'
 import {
@@ -28,6 +28,7 @@ import {
 import { leadApi, type LeadDetail } from '@/api/lead'
 import customerApi from '@/api/customer'
 import procurementApi from '@/api/procurement'
+import { confirmDialog } from '@/utils/confirmDialog'
 import { handleApiError } from '@/utils/errorHandler'
 
 interface Props {
@@ -46,8 +47,16 @@ const emit = defineEmits<Emits>()
 // ==================== State ====================
 const loading = ref(false)
 const submitting = ref(false)
+const closeGuardPending = ref(false)
 const leadData = ref<LeadDetail | null>(null)
 const procurementMethodOptions = ref<{ id: number; name: string }[]>([])
+const loadRequestId = ref(0)
+const initialForm = ref({
+  account_name: '',
+  city: '',
+  address: '',
+  default_procurement_method_id: '' as string | number,
+})
 
 // 表单数据
 const formValues = reactive({
@@ -69,25 +78,34 @@ const procurementSelectOptions = computed(() =>
   }))
 )
 
+const hasFormChanges = computed(() =>
+  formValues.account_name.trim() !== String(initialForm.value.account_name).trim()
+  || formValues.city.trim() !== String(initialForm.value.city).trim()
+  || formValues.address.trim() !== String(initialForm.value.address).trim()
+  || String(formValues.default_procurement_method_id) !== String(initialForm.value.default_procurement_method_id)
+)
+
 // ==================== Methods ====================
 
 // 加载线索详情
-const fetchLeadDetail = async (): Promise<void> => {
-  if (props.leadId === undefined || props.leadId === null) return
-
+const fetchLeadDetail = async (leadId: string, requestId: number): Promise<void> => {
   loading.value = true
   try {
-    const res = await leadApi.getLeadDetail(props.leadId)
-    leadData.value = res
+    const res = await leadApi.getLeadDetail(leadId)
+    if (requestId !== loadRequestId.value || !props.open || props.leadId !== leadId) return
 
-    // 预填充表单
+    leadData.value = res
     formValues.account_name = res.lead_name ?? ''
     formValues.city = res.city ?? ''
+    formValues.address = ''
+    formValues.default_procurement_method_id = ''
+    initialForm.value = { ...formValues }
   } catch {
+    if (requestId !== loadRequestId.value || !props.open || props.leadId !== leadId) return
     toast.error('获取线索详情失败')
-    visible.value = false
+    emit('update:open', false)
   } finally {
-    loading.value = false
+    if (requestId === loadRequestId.value) loading.value = false
   }
 }
 
@@ -103,7 +121,7 @@ const fetchProcurementMethodOptions = async (): Promise<void> => {
 
 // 提交转化
 const handleSubmit = async (): Promise<void> => {
-  if (props.leadId === undefined || props.leadId === null) return
+  if (props.leadId === undefined || props.leadId === null || submitting.value) return
 
   // 简单校验
   if (!formValues.account_name.trim()) {
@@ -114,7 +132,9 @@ const handleSubmit = async (): Promise<void> => {
     toast.error('请输入所在城市')
     return
   }
-  if (formValues.default_procurement_method_id === null || formValues.default_procurement_method_id === undefined) {
+  if (formValues.default_procurement_method_id === null
+    || formValues.default_procurement_method_id === undefined
+    || String(formValues.default_procurement_method_id).trim() === '') {
     toast.error('请选择默认采购方式')
     return
   }
@@ -123,8 +143,8 @@ const handleSubmit = async (): Promise<void> => {
   try {
     const data = {
       lead_id: props.leadId,
-      account_name: formValues.account_name.trim().length > 0 ? formValues.account_name : null,
-      address: formValues.address.trim().length > 0 ? formValues.address : null,
+      account_name: formValues.account_name.trim().length > 0 ? formValues.account_name.trim() : null,
+      address: formValues.address.trim().length > 0 ? formValues.address.trim() : null,
       default_procurement_method_id: Number(formValues.default_procurement_method_id)
     }
     await customerApi.convertLeadToCustomer(data)
@@ -140,35 +160,69 @@ const handleSubmit = async (): Promise<void> => {
 }
 
 // 关闭弹窗
-const handleClose = (): void => {
-  visible.value = false
+const handleClose = async (): Promise<void> => {
+  if (submitting.value || closeGuardPending.value) return
+
+  if (!hasFormChanges.value) {
+    visible.value = false
+    return
+  }
+
+  closeGuardPending.value = true
+  try {
+    const confirmed = await confirmDialog(
+      '已填写客户信息，关闭后这些内容不会保存。确定关闭吗？',
+      '放弃本次转化？',
+      { variant: 'destructive', confirmText: '放弃并关闭' },
+    )
+    if (confirmed) visible.value = false
+  } finally {
+    closeGuardPending.value = false
+  }
+}
+
+const handleDialogOpenChange = async (open: boolean): Promise<void> => {
+  if (open) {
+    visible.value = true
+    return
+  }
+  await handleClose()
 }
 
 // ==================== Watch ====================
 watch(
-  () => props.open,
-  (open) => {
-    if (open === true && props.leadId !== undefined && props.leadId !== null) {
-      fetchProcurementMethodOptions()
-      fetchLeadDetail()
+  () => [props.open, props.leadId] as const,
+  ([open, leadId]) => {
+    if (!open || leadId === null) {
+      loadRequestId.value += 1
+      return
     }
-  }
+
+    const requestId = ++loadRequestId.value
+    void fetchProcurementMethodOptions()
+    void fetchLeadDetail(leadId, requestId)
+  },
+  { immediate: true },
 )
 
 // 重置状态
-watch(visible, (val) => {
-  if (!val) {
-    formValues.account_name = ''
-    formValues.city = ''
-    formValues.address = ''
-    formValues.default_procurement_method_id = ''
-    leadData.value = null
-  }
-})
+watch(
+  () => props.open,
+  (open) => {
+    if (!open) {
+      formValues.account_name = ''
+      formValues.city = ''
+      formValues.address = ''
+      formValues.default_procurement_method_id = ''
+      initialForm.value = { ...formValues }
+      leadData.value = null
+    }
+  },
+)
 </script>
 
 <template>
-  <Dialog v-model:open="visible">
+  <Dialog :open="props.open" @update:open="handleDialogOpenChange">
     <DialogContent class="sm:max-w-[600px]">
       <DialogHeader>
         <DialogTitle>转化为客户</DialogTitle>
@@ -238,6 +292,7 @@ watch(visible, (val) => {
               class="form-item"
               label="客户公司名称"
               required
+              :disabled="submitting || loading || closeGuardPending"
               placeholder="请输入客户公司名称（默认使用线索名称）"
             />
 
@@ -249,6 +304,7 @@ watch(visible, (val) => {
                 class="form-item"
                 label="所在城市"
                 required
+                :disabled="submitting || loading || closeGuardPending"
                 placeholder="请输入所在城市"
               />
 
@@ -258,6 +314,7 @@ watch(visible, (val) => {
                 class="form-item"
                 label="默认采购方式"
                 required
+                :disabled="submitting || loading || closeGuardPending"
                 :options="procurementSelectOptions"
                 placeholder="请选择默认采购方式"
               />
@@ -269,6 +326,7 @@ watch(visible, (val) => {
               v-model="formValues.address"
               class="form-item"
               label="公司地址"
+              :disabled="submitting || loading || closeGuardPending"
               placeholder="请输入公司地址（可选）"
             />
           </div>
@@ -276,7 +334,7 @@ watch(visible, (val) => {
       </div>
 
       <DialogFooter>
-        <Button variant="outline" @click="handleClose">
+        <Button variant="outline" :disabled="submitting || closeGuardPending" @click="handleClose">
           取消
         </Button>
         <Button

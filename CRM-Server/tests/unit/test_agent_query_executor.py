@@ -31,13 +31,14 @@ class FakeAPIClient:
         return self.response
 
 
-def _context() -> AgentToolContext:
+def _context(*, query_retrieval_mode: str | None = None) -> AgentToolContext:
     return AgentToolContext(
         db=Mock(),
         team_id=7,
         user_id=42,
         session_id=11,
         authorization="Bearer signed-token",
+        query_retrieval_mode=query_retrieval_mode,
     )
 
 
@@ -385,6 +386,7 @@ async def test_executor_maps_customer_activities_with_authoritative_skip_limit()
                 "activity_label": "客户跟进",
                 "title": "需求确认",
                 "source_content": "已确认需求",
+                "submission_source": "FORM",
                 "content_json": None,
                 "summary": "客户确认采购范围",
                 "processing_status": "COMPLETED",
@@ -503,6 +505,51 @@ async def test_executor_maps_follow_up_task_scope_filters_sorts_and_page() -> No
 
 
 @pytest.mark.asyncio
+async def test_executor_maps_server_owned_task_semantics_to_semantic_retrieval() -> None:
+    client = FakeAPIClient(
+        {
+            "items": [],
+            "total": 0,
+            "filters": {
+                "status": "all",
+                "due_window": None,
+                "customer_id": None,
+                "owner_scope": "mine",
+                "retrieval_mode": "semantic_filter",
+                "query_text": "发送方案",
+                "query_text_ignored_reason": None,
+            },
+            "customer_summary": [],
+            "semantic_retrieval": {},
+            "usage_policy": {
+                "task_state_source": "mysql",
+                "semantic_evidence_source": "none",
+                "rule": "semantic_filter",
+            },
+        }
+    )
+    executor = DefaultCRMQueryExecutor(api_client=client)
+    spec = CRMQuerySpec(
+        resource="follow_up_task",
+        projection=["public_id", "title"],
+        filters=[
+            CRMFilter(field="status", operator="eq", value="all"),
+            CRMFilter(field="tracking_content", operator="contains", value="发送方案"),
+        ],
+        scope="mine",
+        page_size=10,
+    )
+
+    await executor.execute(spec, _context(query_retrieval_mode="semantic_filter"))
+
+    params = client.calls[0]["params"]
+    assert isinstance(params, dict)
+    assert params["retrieval_mode"] == "semantic_filter"
+    assert params["query_text"] == "发送方案"
+    assert "filters" not in params
+
+
+@pytest.mark.asyncio
 async def test_executor_passes_completed_work_cursor_through_without_offset_decoding() -> None:
     client = FakeAPIClient(
         {
@@ -566,6 +613,172 @@ async def test_executor_passes_completed_work_cursor_through_without_offset_deco
     }
     assert result.status == "EMPTY"
     assert result.total == 0
+
+
+@pytest.mark.asyncio
+async def test_executor_exposes_completed_work_facts_for_answer_grounding() -> None:
+    client = FakeAPIClient(
+        {
+            "items": [
+                {
+                    "fact_id": "fact_task_001",
+                    "fact_type": "completed_follow_up_task",
+                    "source_group": "task",
+                    "source_table": "crm_follow_up_tasks",
+                    "source_public_id": "fut_001",
+                    "business_key": None,
+                    "occurred_at": "2026-09-02T10:00:00",
+                    "customer": {
+                        "id": "101",
+                        "public_id": "cus_001",
+                        "name": "上海示例科技",
+                        "account_name": "上海示例科技有限公司",
+                    },
+                    "attribution": {
+                        "user_id": "42",
+                        "field": "owner_id",
+                        "source": "crm_follow_up_tasks.owner_id",
+                    },
+                    "title": "发送 POC 方案",
+                    "payload": {
+                        "id": "501",
+                        "public_id": "fut_001",
+                        "customer": {
+                            "id": "101",
+                            "public_id": "cus_001",
+                            "name": "上海示例科技",
+                            "account_name": "上海示例科技有限公司",
+                        },
+                        "owner_id": "42",
+                        "creator_id": "42",
+                        "title": "发送 POC 方案",
+                        "description": "向客户发送 POC 部署方案",
+                        "status": "COMPLETED",
+                        "due_at": "2026-09-02T09:00:00",
+                        "due_at_text": "2026-09-02 09:00",
+                        "completed_at": "2026-09-02T10:00:00",
+                    },
+                }
+            ],
+            "available_total": 1,
+            "returned_count": 1,
+            "truncated": False,
+            "next_cursor": None,
+            "source_counts": {"completed_follow_up_task": 1, "customer_activity": 0},
+            "source_total_counts": {"completed_follow_up_task": 1, "customer_activity": 0},
+            "source_status": {
+                "completed_tasks": "queried",
+                "customer_activities": "queried",
+                "business_events": "skipped",
+            },
+            "filters": {
+                "window": "this_week",
+                "starts_at": "2026-09-01T00:00:00",
+                "ends_at": "2026-09-08T00:00:00",
+                "starts_on": "2026-09-01",
+                "ends_before": "2026-09-08",
+                "timezone": "Asia/Shanghai",
+                "customer_id": None,
+                "include_tasks": True,
+                "include_activities": True,
+                "include_business_events": False,
+            },
+        }
+    )
+    executor = DefaultCRMQueryExecutor(api_client=client)
+
+    result = await executor.execute(
+        CRMQuerySpec(
+            resource="completed_work",
+            projection=["fact_id", "title", "occurred_at", "customer"],
+            scope="mine",
+        ),
+        _context(),
+    )
+
+    assert len(result.facts) == 1
+    fact = result.facts[0]
+    assert fact.fact_id == "fact_task_001"
+    assert fact.label == "发送 POC 方案"
+    assert fact.source == "CRM_API"
+    assert fact.source_ref == "fut_001"
+    assert isinstance(fact.value, dict)
+    assert fact.value["fact_id"] == "fact_task_001"
+
+
+@pytest.mark.asyncio
+async def test_executor_accepts_completed_work_fact_ids_allowed_by_http_contract() -> None:
+    """A long server-issued fact id is data, not an invalid QuerySpec."""
+
+    long_fact_id = "customer_activity:" + "x" * 180 + ":2026-09-02T23:48:36"
+    client = FakeAPIClient(
+        {
+            "items": [
+                {
+                    "fact_id": long_fact_id,
+                    "fact_type": "customer_activity",
+                    "source_group": "activity",
+                    "source_table": "crm_customer_activities",
+                    "source_public_id": None,
+                    "business_key": None,
+                    "occurred_at": "2026-09-02T23:48:36",
+                    "customer": None,
+                    "attribution": {
+                        "user_id": "42",
+                        "field": "owner_id",
+                        "source": "crm_customer_activities.owner_id",
+                    },
+                    "title": "客户沟通记录" + "x" * 220,
+                    "payload": {
+                        "customer": None,
+                        "activity_kind": "communication",
+                        "title": "客户沟通记录" + "x" * 220,
+                        "summary": "已完成客户沟通",
+                        "next_action": None,
+                        "next_follow_time": None,
+                        "occurred_at": "2026-09-02T23:48:36",
+                        "owner_id": "42",
+                    },
+                }
+            ],
+            "available_total": 1,
+            "returned_count": 1,
+            "truncated": False,
+            "next_cursor": None,
+            "source_counts": {"completed_follow_up_task": 0, "customer_activity": 1},
+            "source_total_counts": {"completed_follow_up_task": 0, "customer_activity": 1},
+            "source_status": {
+                "completed_tasks": "queried",
+                "customer_activities": "queried",
+                "business_events": "skipped",
+            },
+            "filters": {
+                "window": "this_week",
+                "starts_at": "2026-09-01T00:00:00",
+                "ends_at": "2026-09-08T00:00:00",
+                "starts_on": "2026-09-01",
+                "ends_before": "2026-09-08",
+                "timezone": "Asia/Shanghai",
+                "customer_id": None,
+                "include_tasks": True,
+                "include_activities": True,
+                "include_business_events": False,
+            },
+        }
+    )
+    executor = DefaultCRMQueryExecutor(api_client=client)
+
+    result = await executor.execute(
+        CRMQuerySpec(
+            resource="completed_work",
+            projection=["fact_id", "title", "occurred_at", "customer", "payload"],
+            scope="mine",
+        ),
+        _context(),
+    )
+
+    assert result.facts[0].fact_id == long_fact_id
+    assert len(result.facts[0].label) == 226
 
 
 @pytest.mark.parametrize(

@@ -1,19 +1,40 @@
 """Durable execution records for customer-activity post-commit workflows."""
 
-from sqlalchemy import JSON, BigInteger, Column, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 
 from app.core.database import Base
+from app.services.customer_activity_contracts import CustomerActivityAIJobStatus
 from app.utils.public_id import generate_public_id
 from app.utils.time import business_now
 
 
 class CustomerActivityPostCommitJobStatus:
-    QUEUED = "QUEUED"
-    RUNNING = "RUNNING"
-    COMPLETED = "COMPLETED"
+    """Compatibility facade for the existing post-commit executor.
+
+    The values are sourced from the canonical durable-job contract.  FAILED is
+    retained here because post-commit retries currently expose that projection
+    state, while the activity AI job will use RETRY_PENDING directly.
+    """
+
+    QUEUED = CustomerActivityAIJobStatus.QUEUED.value
+    RUNNING = CustomerActivityAIJobStatus.RUNNING.value
+    RETRY_PENDING = CustomerActivityAIJobStatus.RETRY_PENDING.value
+    COMPLETED = CustomerActivityAIJobStatus.COMPLETED.value
     FAILED = "FAILED"
-    SKIPPED = "SKIPPED"
-    EXHAUSTED = "EXHAUSTED"
+    SKIPPED = CustomerActivityAIJobStatus.SKIPPED.value
+    EXHAUSTED = CustomerActivityAIJobStatus.EXHAUSTED.value
 
     TERMINAL = frozenset({COMPLETED, SKIPPED, EXHAUSTED})
 
@@ -35,7 +56,10 @@ class CustomerActivityPostCommitJob(Base):
     team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
     activity_id = Column(
         BigInteger,
-        ForeignKey("crm_customer_activities.id", ondelete="CASCADE"),
+        ForeignKey(
+            "crm_customer_activities.id",
+            name="fk_customer_activity_post_commit_jobs_activity",
+        ),
         nullable=False,
         index=True,
         comment="客户活动ID",
@@ -64,6 +88,10 @@ class CustomerActivityPostCommitJob(Base):
     finished_at = Column(DateTime, nullable=True, comment="结束时间")
 
     __table_args__ = (
+        CheckConstraint(
+            "status IN ('QUEUED', 'RUNNING', 'RETRY_PENDING', 'COMPLETED', 'FAILED', 'SKIPPED', 'EXHAUSTED')",
+            name="ck_customer_activity_post_commit_job_status",
+        ),
         UniqueConstraint(
             "team_id",
             "activity_id",

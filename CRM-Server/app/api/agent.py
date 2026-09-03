@@ -49,6 +49,12 @@ from app.services.customer_activity_post_commit_operation_projector import (
 from app.services.customer_intelligence_operation_projector import (
     customer_intelligence_operation_projector,
 )
+from app.services.customer_opportunity_suggestion_operation_projector import (
+    customer_opportunity_suggestion_operation_projector,
+)
+from app.services.customer_opportunity_suggestion_agent_ui_projection import (
+    customer_opportunity_suggestion_agent_ui_projection,
+)
 from app.utils.sse_encoder import SSEJsonEncoder
 
 router = APIRouter(prefix="/v1/agent", tags=["CRM AI Agent"])
@@ -104,6 +110,41 @@ def _read_repair_customer_intelligence_operations(
             )
             db.commit()
             repaired = True
+    return repaired
+
+
+def _read_repair_customer_opportunity_suggestion_operations(
+    db: Session,
+    operations: list[AgentAsyncOperationProjection],
+) -> bool:
+    repaired = False
+    for operation in operations:
+        if (
+            operation.operation_type != "customer_opportunity_suggestion"
+            or operation.status in TERMINAL_OPERATION_STATUSES
+        ):
+            continue
+        try:
+            projected = customer_opportunity_suggestion_operation_projector.project_request(
+                db,
+                team_id=operation.team_id,
+                request_id=operation.request_id,
+                operation_public_id=operation.public_id,
+            )
+            if projected is not None:
+                if projected.status == "WAITING_USER":
+                    customer_opportunity_suggestion_agent_ui_projection.project_operation(
+                        db,
+                        operation=projected,
+                    )
+                db.commit()
+                repaired = True
+        except Exception:
+            db.rollback()
+            logger.exception(
+                "读取 Agent 异步操作时修复商机建议投影失败: operation_public_id=%s",
+                operation.public_id,
+            )
     return repaired
 
 
@@ -292,6 +333,8 @@ async def list_agent_async_operations(
     repaired = _read_repair_customer_intelligence_operations(db, operations)
     if _read_repair_customer_activity_post_commit_operations(db, operations):
         repaired = True
+    if _read_repair_customer_opportunity_suggestion_operations(db, operations):
+        repaired = True
     if repaired:
         operations = agent_async_operation_service.list_session_projections(
             db,
@@ -320,6 +363,8 @@ async def get_agent_async_operation(
         raise HTTPException(status_code=404, detail="Agent async operation not found")
     repaired = _read_repair_customer_intelligence_operations(db, [operation])
     if _read_repair_customer_activity_post_commit_operations(db, [operation]):
+        repaired = True
+    if _read_repair_customer_opportunity_suggestion_operations(db, [operation]):
         repaired = True
     if repaired:
         operation = agent_async_operation_service.get_projection(

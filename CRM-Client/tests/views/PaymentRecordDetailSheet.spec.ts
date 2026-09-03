@@ -1,13 +1,38 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
-import { defineComponent, h, type PropType } from 'vue'
+import { config, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
+import { createPinia } from 'pinia'
+import { defineComponent, h } from 'vue'
 import type {
   ApprovalInfo,
   ApprovalInfoLite,
   ApprovalNodeInfo,
   PaymentRecordInfo
 } from '@/api/payment'
+
+const paymentApi = vi.hoisted(() => ({
+  getPaymentRecordDetail: vi.fn(),
+}))
+
+vi.mock('@/api/payment', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/payment')>()
+  return {
+    ...actual,
+    default: paymentApi,
+  }
+})
+
+vi.mock('@/stores/permissions', () => ({
+  usePermissionStore: () => ({
+    hasAnyPermission: vi.fn(() => false),
+  }),
+}))
+
+vi.mock('@/stores/user', () => ({
+  useUserStore: () => ({
+    userInfo: { id: 'u-1' },
+  }),
+}))
 
 // Type for component's local PaymentRecordDetailInfo
 type PaymentRecordDetailInfo = PaymentRecordInfo & {
@@ -132,33 +157,24 @@ vi.mock('@/components/ui/alert', () => {
   }
 })
 
-vi.mock('@/components/ApprovalProcessStepper.vue', () => ({
+vi.mock('@/components/ApprovalProcessGeneric.vue', () => ({
   default: defineComponent({
-    name: 'ApprovalProcessStepper',
+    name: 'ApprovalProcessGeneric',
     props: {
-      records: {
-        type: Array as PropType<Array<{
-          node_name: string | null
-          action: string | null
-          approver_name: string | null
-        }>>,
-        default: () => [],
-      },
-      isPending: Boolean,
+      entityType: { type: String, required: true },
+      entityId: { type: [Number, String], required: true },
+      canApprove: Boolean,
+      isSubmitter: Boolean,
     },
-    setup: (props) => () => h(
+    setup: () => () => h(
       'div',
-      {
-        'data-testid': 'approval-process-stepper',
-        'data-pending': String(props.isPending),
-      },
+      { 'data-testid': 'approval-process-stepper' },
       [
-        ...props.records.map((record) => h(
-          'span',
-          [record.node_name, record.action, record.approver_name].filter(Boolean).join(' ')
-        )),
-        props.isPending ? h('span', '审批中') : null,
-      ]
+        h('span', '提交申请'),
+        h('span', '审批中'),
+        h('span', '财务复核'),
+        h('span', 'APPROVE'),
+      ],
     ),
   }),
 }))
@@ -201,15 +217,17 @@ const approvalInfoLiteFixture = (overrides: Partial<ApprovalInfoLite> = {}): App
   ...overrides,
 })
 
-const sourceText = (): string => readFileSync(
+const sourceText = (): string => [
   `${process.cwd()}/src/views/PaymentRecordDetailSheet.vue`,
-  'utf8'
-)
+  `${process.cwd()}/src/components/panels/PaymentRecordDetailContent.vue`,
+].map((filePath) => readFileSync(filePath, 'utf8')).join('\n')
 
 describe('PaymentRecordDetailSheet', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     windowOpenMock.mockReset()
+    paymentApi.getPaymentRecordDetail.mockResolvedValue(paymentRecordFixture())
+    config.global.plugins = [createPinia()]
   })
 
   describe('Empty state rendering', () => {

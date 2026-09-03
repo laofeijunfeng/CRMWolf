@@ -7,6 +7,7 @@ import { toast } from 'vue-sonner'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -35,6 +36,7 @@ import {
   SelectField,
 } from '@/components/crmwolf'
 import { handleApiError } from '@/utils/errorHandler'
+import { useDialogCloseGuard } from '@/composables/useDialogCloseGuard'
 import contractApi, { type ContractCreate, type ContractUpdate, type ContractResponse, type LicenseType } from '@/api/contract'
 import { opportunityApi } from '@/api/opportunity'
 import customerApi, { type ContactResponse, type CustomerResponse, type CustomerDetailResponse } from '@/api/customer'
@@ -97,7 +99,6 @@ const { handleSubmit, resetForm, setValues, setFieldValue, values } = useForm({
 // State
 const submitting = ref(false)
 const isDirty = ref(false)
-const showConfirmDialog = ref(false)
 const opportunities = ref<ContractOpportunityOption[]>([])
 const contacts = ref<ContactResponse[]>([])
 const loadingOpportunities = ref(false)
@@ -173,6 +174,13 @@ const visible = computed({
   get: () => props.open,
   set: (val) => emit('update:open', val)
 })
+
+const closeGuard = useDialogCloseGuard({
+  isDirty: isDirty,
+  submitting,
+  emitOpen: (open) => emit('update:open', open),
+})
+const showConfirmDialog = closeGuard.showConfirmDialog
 
 // License type options
 const licenseTypeOptions = [
@@ -290,7 +298,7 @@ async function handleCustomerSearch(keyword: string | number): Promise<void> {
 // Watch for form changes
 watch(values, () => {
   isDirty.value = true
-}, { deep: true })
+}, { deep: true, flush: 'sync' })
 
 watch(() => values.contract_name, (contractName) => {
   if (isApplyingGeneratedName.value) return
@@ -382,8 +390,16 @@ function handleOpportunityChange(value: unknown): void {
 
 // Reset or populate form when dialog opens
 watch(() => props.open, async (newOpen) => {
+  if (!newOpen) {
+    if (closeGuard.handleParentClose()) return
+    closeGuard.reset()
+    return
+  }
+
   if (newOpen) {
     customerSearchKeyword.value = ''
+
+    closeGuard.reset()
 
     if (props.contract) {
       selectedContractFile.value = null
@@ -531,6 +547,7 @@ const onSubmit = handleSubmit(async (formValues) => {
     }
 
     isDirty.value = false
+    closeGuard.approveClose()
     visible.value = false
     emit('success')
   } catch (error) {
@@ -541,31 +558,31 @@ const onSubmit = handleSubmit(async (formValues) => {
 })
 
 // Cancel operation
+function handleOpenChange(open: boolean): void {
+  closeGuard.handleOpenChange(open)
+}
+
 function handleCancel(): void {
-  if (isDirty.value) {
-    showConfirmDialog.value = true
-  } else {
-    visible.value = false
-  }
+  closeGuard.requestClose()
 }
 
 // Confirm discard changes
 function confirmCancel(): void {
-  showConfirmDialog.value = false
-  visible.value = false
+  closeGuard.confirmDiscard()
 }
 
 // Continue editing
 function continueEditing(): void {
-  showConfirmDialog.value = false
+  closeGuard.continueEditing()
 }
 </script>
 
 <template>
-  <Dialog v-model:open="visible">
-    <DialogContent class="max-h-[90vh] overflow-y-auto">
+  <Dialog :open="props.open" @update:open="handleOpenChange">
+    <DialogContent class="w-[calc(100vw-2rem)] max-w-[720px] max-h-[min(90vh,90dvh)] overflow-y-auto overscroll-contain [scroll-padding-bottom:calc(5rem+env(safe-area-inset-bottom,0px))]">
       <DialogHeader>
         <DialogTitle>{{ isEdit ? '编辑合同' : '新建合同' }}</DialogTitle>
+        <DialogDescription class="sr-only">填写合同基本信息、授权信息和签署日期</DialogDescription>
       </DialogHeader>
 
       <form class="space-y-4" @submit="onSubmit">
@@ -767,7 +784,7 @@ function continueEditing(): void {
 
         <!-- DialogFooter -->
         <DialogFooter class="mt-6 pt-4 border-t">
-          <Button variant="outline" type="button" @click="handleCancel">
+          <Button variant="outline" type="button" :disabled="submitting" @click="handleCancel">
             取消
           </Button>
           <Button type="submit" :loading="submitting" :disabled="!canSubmit">
@@ -779,7 +796,7 @@ function continueEditing(): void {
   </Dialog>
 
   <!-- Confirm discard changes dialog -->
-  <AlertDialog v-model:open="showConfirmDialog">
+  <AlertDialog :open="showConfirmDialog" @update:open="closeGuard.handleConfirmOpenChange">
     <AlertDialogContent>
       <AlertDialogHeader>
         <AlertDialogTitle>放弃更改？</AlertDialogTitle>

@@ -14,6 +14,7 @@ from app.services.agent.orchestrator.contracts import (
     ResultSetContext,
     RootContextResolver,
     RootContextSnapshot,
+    RootConversationMemory,
     RootDecision,
     RootDecisionModelConfig,
     RootDispatchResult,
@@ -52,6 +53,7 @@ from app.services.agent.workflow import (
     WorkflowInterruptPayload,
     WorkflowReplayResult,
     WorkflowResult,
+    WorkflowSkippedResult,
     WorkflowWaitingResult,
 )
 
@@ -74,6 +76,7 @@ __all__ = [
     "RootContextResolver",
     "RootContextSnapshot",
     "RootContextUnavailableError",
+    "RootConversationMemory",
     "RootDecision",
     "RootDecisionInvalidOutputError",
     "RootDecisionModelConfig",
@@ -98,6 +101,7 @@ __all__ = [
     "WorkflowRef",
     "WorkflowReplayResult",
     "WorkflowResult",
+    "WorkflowSkippedResult",
     "WorkflowTriggerTurnInput",
     "WorkflowWaitingResult",
     "build_root_graph_config",

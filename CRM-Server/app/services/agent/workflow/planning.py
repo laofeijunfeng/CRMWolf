@@ -2,15 +2,25 @@
 
 from __future__ import annotations
 
+import math
 from datetime import date, datetime
 from typing import Protocol
 
+from app.models.customer import Customer
+from app.models.customer_activity import CustomerActivity
+from app.models.customer_opportunity_suggestion_job import CustomerOpportunitySuggestionJob
 from app.services.acquisition_source_service import resolve_write_fields_for_ai
 from app.services.agent import business_rules
+from app.services.agent.quality import (
+    AgentFollowUpQualityEnvelope,
+    AgentFollowUpQualityEvaluatorError,
+    agent_follow_up_quality_evaluator,
+)
 from app.services.agent.semantic import (
     AgentSemanticParserError,
     agent_semantic_parser,
 )
+from app.services.agent.semantic_plan import workflow_intent_from_semantic_plan
 from app.services.agent.temporal import agent_temporal_resolver
 from app.services.agent.workflow.contracts import (
     WorkflowActionPlan,
@@ -21,6 +31,8 @@ from app.services.agent.workflow.contracts import (
     WorkflowInteraction,
     WorkflowInteractionField,
     WorkflowInteractionOption,
+    WorkflowOpportunitySuggestionStart,
+    WorkflowResolvedCustomer,
     WorkflowResourceStart,
     WorkflowRuntimeContext,
     WorkflowSupplement,
@@ -47,6 +59,10 @@ from app.services.agent.workflow.resources import (
     WorkflowCustomerResolver,
     WorkflowResourceResolutionError,
 )
+from app.services.customer_activity_contracts import (
+    CustomerActivitySubmissionSource,
+    CustomerActivitySuggestionJobStatus,
+)
 from app.services.customer_activity_kinds import infer_activity_kind
 
 
@@ -63,9 +79,15 @@ class WorkflowPlanningError(ValueError):
 class WorkflowPlanningNeedsInput(Exception):
     """Planning paused because a recoverable business field is missing."""
 
-    def __init__(self, interaction: WorkflowInteraction) -> None:
+    def __init__(
+        self,
+        interaction: WorkflowInteraction,
+        *,
+        checkpoint_request: WorkflowTurnInput | None = None,
+    ) -> None:
         super().__init__(interaction.prompt)
         self.interaction = interaction
+        self.checkpoint_request = checkpoint_request
 
 
 class WorkflowSemanticParser(Protocol):
@@ -78,6 +100,34 @@ class WorkflowSemanticParser(Protocol):
         memory: object = None,
         current_date: date | None = None,
     ) -> object: ...
+
+
+class WorkflowResourceRanker(Protocol):
+    async def rank_resource_candidates(
+        self,
+        db: object,
+        *,
+        team_id: int,
+        user_message: str,
+        resource_kind: str,
+        action_name: str,
+        target: dict[str, object],
+        candidates: list[dict[str, object]],
+        current_date: date | None = None,
+    ) -> list[dict[str, object]]: ...
+
+
+class WorkflowFollowUpQualityEvaluator(Protocol):
+    async def evaluate_with_metadata(
+        self,
+        db: object,
+        *,
+        team_id: int,
+        user_message: str,
+        semantic_result: object,
+        memory: object = None,
+        current_date: date | None = None,
+    ) -> AgentFollowUpQualityEnvelope: ...
 
 
 class WorkflowTemporalResolver(Protocol):
@@ -105,7 +155,9 @@ class CRMWorkflowPlanner:
         self,
         *,
         semantic_parser: WorkflowSemanticParser | None = None,
+        resource_ranker: WorkflowResourceRanker | None = None,
         temporal_resolver: WorkflowTemporalResolver | None = None,
+        follow_up_quality_evaluator: WorkflowFollowUpQualityEvaluator | None = None,
         customer_resolver: WorkflowCustomerResolver | None = None,
         customer_member_resolver: CustomerMemberResolver | None = None,
         follow_up_task_resolver: FollowUpTaskResolver | None = None,
@@ -114,7 +166,13 @@ class CRMWorkflowPlanner:
         opportunity_stage_resolver: OpportunityStageResolver | None = None,
     ) -> None:
         self._semantic_parser = semantic_parser or agent_semantic_parser
+        self._resource_ranker = resource_ranker or (
+            self._semantic_parser
+            if hasattr(self._semantic_parser, "rank_resource_candidates")
+            else None
+        )
         self._temporal_resolver = temporal_resolver or agent_temporal_resolver
+        self._follow_up_quality_evaluator = follow_up_quality_evaluator or agent_follow_up_quality_evaluator
         self._customer_resolver = customer_resolver or CRMWorkflowCustomerResolver()
         self._customer_member_resolver = customer_member_resolver or CRMCustomerMemberResolver()
         self._follow_up_task_resolver = follow_up_task_resolver or CRMFollowUpTaskResolver()
@@ -126,6 +184,73 @@ class CRMWorkflowPlanner:
         )
         self._opportunity_stage_resolver = opportunity_stage_resolver or CRMOpportunityStageResolver()
 
+    async def _select_semantic_resource(
+        self,
+        *,
+        runtime: WorkflowRuntimeContext,
+        user_message: str,
+        resource_kind: str,
+        action_name: str,
+        target: dict[str, object],
+        candidates: list[dict[str, object]],
+        team_id: int,
+        current_date: date,
+    ) -> dict[str, object] | None:
+        """Let the configured model resolve ambiguous business resources.
+
+        Resource resolvers remain authoritative for ownership and freshness,
+        but they should not decide a natural-language reference by substring
+        matching alone.  The LLM receives only the already-authorized
+        candidates and returns an opaque ordinal; low-confidence or malformed
+        output deliberately falls back to the existing UI choice.
+        """
+
+        if runtime.db is None or len(candidates) < 2:
+            return None
+        if self._resource_ranker is None:
+            return None
+        try:
+            rankings = await self._resource_ranker.rank_resource_candidates(
+                runtime.db,
+                team_id=team_id,
+                user_message=user_message,
+                resource_kind=resource_kind,
+                action_name=action_name,
+                target=target,
+                candidates=candidates,
+                current_date=current_date,
+            )
+        except Exception:
+            # Candidate ranking is an experience improvement, never an
+            # availability dependency.  The signed choice interaction remains
+            # the safe fallback when the model/provider is unavailable.
+            return None
+
+        if not isinstance(rankings, list):
+            return None
+
+        valid: list[tuple[int, float]] = []
+        candidate_ids = {int(candidate["id"]) for candidate in candidates}
+        for ranking in rankings:
+            if not isinstance(ranking, dict):
+                continue
+            resource_id = ranking.get("resource_id")
+            confidence = ranking.get("confidence")
+            if isinstance(resource_id, bool) or not isinstance(resource_id, int):
+                continue
+            if resource_id not in candidate_ids or not isinstance(confidence, (int, float)):
+                continue
+            confidence_value = float(confidence)
+            if not math.isfinite(confidence_value) or not 0.0 <= confidence_value <= 1.0:
+                continue
+            valid.append((resource_id, confidence_value))
+        valid.sort(key=lambda item: item[1], reverse=True)
+        if not valid or valid[0][1] < 0.90:
+            return None
+        if len(valid) > 1 and valid[0][1] - valid[1][1] < 0.10:
+            return None
+        return next(candidate for candidate in candidates if int(candidate["id"]) == valid[0][0])
+
     async def plan(
         self,
         request: WorkflowTurnInput,
@@ -135,6 +260,12 @@ class CRMWorkflowPlanner:
     ) -> WorkflowActionPlan:
         if isinstance(request.start, WorkflowResourceStart):
             return await self._plan_follow_up_confirmation_case(
+                request,
+                workflow_id=workflow_id,
+                runtime=runtime,
+            )
+        if isinstance(request.start, WorkflowOpportunitySuggestionStart):
+            return await self._plan_opportunity_suggestion(
                 request,
                 workflow_id=workflow_id,
                 runtime=runtime,
@@ -170,6 +301,27 @@ class CRMWorkflowPlanner:
             ) from exc
 
         semantic = getattr(envelope, "result", None)
+        root_semantic_plan = request.start.semantic_plan
+        expected_intent = self._workflow_intent_from_root_plan(root_semantic_plan)
+        # Root and Workflow share the same model-produced semantic plan. The
+        # detailed parser still extracts fields needed for the command, but it
+        # must not turn an already-authorized activity assertion into a
+        # different business intent on a second pass.
+        if (
+            expected_intent is not None
+            and root_semantic_plan is not None
+            and root_semantic_plan.confidence >= 0.80
+            and hasattr(semantic, "model_copy")
+        ):
+            semantic = semantic.model_copy(
+                update={
+                    "intent": expected_intent,
+                    "intent_confidence": max(
+                        float(getattr(semantic, "intent_confidence", 0.0) or 0.0),
+                        root_semantic_plan.confidence,
+                    ),
+                }
+            )
         intent = getattr(semantic, "intent", None)
         confidence = getattr(semantic, "intent_confidence", 0.0)
         if not isinstance(confidence, (int, float)) or confidence < 0.75:
@@ -184,6 +336,7 @@ class CRMWorkflowPlanner:
                 workflow_id=workflow_id,
                 runtime=runtime,
                 current_datetime=current_datetime,
+                user_message=text,
             )
         if intent == "CREATE_LEAD":
             return self._plan_lead(
@@ -243,6 +396,8 @@ class CRMWorkflowPlanner:
                 request=request,
                 workflow_id=workflow_id,
                 runtime=runtime,
+                current_datetime=current_datetime,
+                user_message=text,
             )
         if intent == "FOLLOW_UP_TASK_TRANSITION":
             return await self._plan_follow_up_task_transition(
@@ -257,6 +412,12 @@ class CRMWorkflowPlanner:
             "当前工作流尚不能可靠执行这个写入请求。",
         )
 
+    @staticmethod
+    def _workflow_intent_from_root_plan(plan: object) -> str | None:
+        """Project Root's authorized write capability into a Workflow intent."""
+
+        return workflow_intent_from_semantic_plan(plan)
+
     async def _plan_customer_activity(
         self,
         semantic: object,
@@ -265,12 +426,19 @@ class CRMWorkflowPlanner:
         workflow_id: str,
         runtime: WorkflowRuntimeContext,
         current_datetime: datetime,
+        user_message: str,
     ) -> WorkflowActionPlan:
         customer_id, customer_name = await self._resolve_customer(
             semantic,
             request=request,
             workflow_id=workflow_id,
             runtime=runtime,
+        )
+        checkpoint_request = self._with_resolved_customer(
+            request,
+            semantic=semantic,
+            customer_id=customer_id,
+            customer_name=customer_name,
         )
         follow_up = getattr(semantic, "follow_up", None)
         content = getattr(follow_up, "content", None)
@@ -281,25 +449,90 @@ class CRMWorkflowPlanner:
                 business_action="provide_follow_up_content",
                 title="补充跟进内容",
                 prompt="请补充本次客户跟进的具体内容。",
+                checkpoint_request=checkpoint_request,
             )
         content = content.strip()
         method = getattr(follow_up, "method", None)
         next_action = getattr(follow_up, "next_action", None)
+        next_action = next_action.strip() if isinstance(next_action, str) and next_action.strip() else None
         next_follow_time = self._temporal_resolver.resolve_follow_up_time(
             getattr(follow_up, "next_follow_time", None),
             base_datetime=current_datetime,
         )
+        try:
+            quality_envelope = await self._follow_up_quality_evaluator.evaluate_with_metadata(
+                runtime.db,
+                team_id=request.principal.team_id,
+                user_message=user_message,
+                semantic_result=semantic,
+                current_date=current_datetime.date(),
+            )
+        except AgentFollowUpQualityEvaluatorError as exc:
+            raise WorkflowPlanningError(
+                "WORKFLOW_FOLLOW_UP_QUALITY_EVALUATION_FAILED",
+                "暂时无法完成跟进质量评估，请稍后重试。",  # noqa: RUF001
+                retryable=True,
+            ) from exc
+
+        quality = quality_envelope.result
+        if not quality.passed:
+            raise WorkflowPlanningNeedsInput(
+                WorkflowInteraction(
+                    interaction_id=f"int_{workflow_id.removeprefix('wf_')}_follow_up_quality",
+                    interaction_type="text_input",
+                    business_action="supplement_follow_up_quality",
+                    title="补充跟进信息",
+                    prompt=(
+                        quality.supplement_question
+                        or "这条跟进还差一点关键信息，请补充下一步由谁在什么时间做什么。"  # noqa: RUF001
+                    ),
+                    allow_blank=False,
+                    submit_label="继续评估",
+                ),
+                checkpoint_request=checkpoint_request,
+            )
+        next_action_status = getattr(quality, "next_action_status", "MISSING")
+        # The evaluator is the semantic authority for this gate.  The only
+        # deterministic safeguard here is structural: a model cannot mark a
+        # record as CLEAR while the parsed activity contains no action at all.
+        if next_action_status == "CLEAR" and not next_action:
+            next_action_status = "MISSING"
+        if next_action_status in {"MISSING", "VAGUE"}:
+            raise WorkflowPlanningNeedsInput(
+                WorkflowInteraction(
+                    interaction_id=f"int_{workflow_id.removeprefix('wf_')}_follow_up_next_action",
+                    interaction_type="text_input",
+                    business_action="supplement_follow_up_next_action",
+                    title="补充下一步行动",
+                    prompt="这条跟进还没有明确的下一步行动，请补充下一步由谁在什么时间做什么。",  # noqa: RUF001
+                    allow_blank=False,
+                    submit_label="继续评估",
+                ),
+                checkpoint_request=checkpoint_request,
+            )
+
+        final_content = (quality.suggested_revision or content).strip()
+        persisted_next_action = None if next_action_status == "EXPLICITLY_NONE" else next_action
         payload: dict[str, object] = {
             "customer_id": customer_id,
             "customer_name": customer_name,
-            "activity_kind": infer_activity_kind(method, content),
+            "activity_kind": infer_activity_kind(method, final_content),
             "source_content": content,
-            "title": content,
+            "title": final_content,
+            "content_json": {"content": final_content},
+            "summary": final_content[:200],
+            "next_action": persisted_next_action,
+            "next_action_source": "AGENT",
+            "next_follow_time": next_follow_time,
+            "next_follow_time_source": "AGENT" if next_follow_time else None,
+            "effectiveness_score": quality.score,
+            "effectiveness_is_valid": quality.passed,
+            "effectiveness_reason": quality.reason,
+            "effectiveness_detail_json": {
+                key: value.model_dump(mode="json")
+                for key, value in quality.principle_scores.items()
+            },
         }
-        if isinstance(next_action, str) and next_action.strip():
-            payload["next_action"] = next_action.strip()
-        if next_follow_time:
-            payload["next_follow_time"] = next_follow_time
         intent_confidence = float(getattr(semantic, "intent_confidence", 0.0) or 0.0)
         if intent_confidence >= 0.85:
             return self._auto_execute_plan(
@@ -844,6 +1077,28 @@ class CRMWorkflowPlanner:
             semantic,
             current_datetime=current_datetime,
         )
+        return await self._plan_opportunity_for_customer(
+            customer_id=customer_id,
+            customer_name=customer_name,
+            opportunity=opportunity,
+            request=request,
+            workflow_id=workflow_id,
+            runtime=runtime,
+            require_confirmation=True,
+        )
+
+    async def _plan_opportunity_for_customer(
+        self,
+        *,
+        customer_id: str,
+        customer_name: str,
+        opportunity: dict[str, object],
+        request: WorkflowTurnInput,
+        workflow_id: str,
+        runtime: WorkflowRuntimeContext,
+        require_confirmation: bool,
+    ) -> WorkflowActionPlan:
+        opportunity = dict(opportunity)
         opportunity.update(self._latest_opportunity_form_values(request))
         if opportunity.get("license_type") == "PERPETUAL":
             opportunity.pop("subscription_years", None)
@@ -926,6 +1181,20 @@ class CRMWorkflowPlanner:
             if value is not None:
                 payload[optional_field] = value
         summary = business_rules.format_opportunity_summary(payload)
+        if not require_confirmation:
+            return self._resume_commands_plan(
+                workflow_id=workflow_id,
+                commands=[
+                    WorkflowCommand(
+                        command_id="create_opportunity",
+                        tool_name="create_opportunity",
+                        payload={"opportunity": payload},
+                        authorization_scope=WorkflowAuthorizationScope(customer_ids=[customer_id]),
+                    )
+                ],
+                completed_text=f"已为{customer_name}创建商机。",
+                cancelled_text="已取消创建商机。",
+            )
         return self._confirmation_plan(
             workflow_id=workflow_id,
             action_type="create_opportunity",
@@ -942,6 +1211,199 @@ class CRMWorkflowPlanner:
             cancelled_text="已取消创建商机。",
         )
 
+    async def _plan_opportunity_suggestion(
+        self,
+        request: WorkflowTurnInput,
+        *,
+        workflow_id: str,
+        runtime: WorkflowRuntimeContext,
+    ) -> WorkflowActionPlan:
+        start = request.start
+        if not isinstance(start, WorkflowOpportunitySuggestionStart):
+            raise WorkflowPlanningError("WORKFLOW_START_INVALID", "工作流启动参数无效。")
+        db = runtime.db
+        if db is None:
+            raise WorkflowPlanningError(
+                "WORKFLOW_DATABASE_REQUIRED",
+                "工作流暂时无法读取业务数据。",
+                retryable=True,
+            )
+        job = (
+            db.query(CustomerOpportunitySuggestionJob)
+            .filter(
+                CustomerOpportunitySuggestionJob.team_id == request.principal.team_id,
+                CustomerOpportunitySuggestionJob.public_id == start.job_public_id,
+            )
+            .one_or_none()
+        )
+        if job is None:
+            raise WorkflowPlanningError(
+                "WORKFLOW_SUGGESTION_NOT_FOUND",
+                "商机建议不存在或已失效。",
+            )
+        if start.action == "CANCEL":
+            return self._terminal_cancel_plan(
+                workflow_id=workflow_id,
+                completed_text="已取消本次商机操作。",
+                cancelled_text="已取消本次商机操作。",
+            )
+        if str(job.status) != CustomerActivitySuggestionJobStatus.COMPLETED.value:
+            raise WorkflowPlanningError(
+                "WORKFLOW_SUGGESTION_NOT_READY",
+                "商机建议还在处理中，请稍后再试。",  # noqa: RUF001
+                retryable=True,
+            )
+        result = job.result_json if isinstance(job.result_json, dict) else {}
+        if str(result.get("decision")) != start.action:
+            raise WorkflowPlanningError(
+                "WORKFLOW_SUGGESTION_STALE",
+                "这条商机建议已失效，无需重复执行。",  # noqa: RUF001
+            )
+        activity = (
+            db.query(CustomerActivity)
+            .filter(
+                CustomerActivity.id == int(job.activity_id),
+                CustomerActivity.team_id == request.principal.team_id,
+            )
+            .one_or_none()
+        )
+        if activity is None:
+            raise WorkflowPlanningError(
+                "WORKFLOW_SUGGESTION_SOURCE_DELETED",
+                "源跟进已删除，本次商机操作不再执行。",  # noqa: RUF001
+            )
+        if (
+            int(activity.activity_revision or 1) != int(job.activity_revision)
+            or str(activity.submission_source) != CustomerActivitySubmissionSource.AGENT.value
+            or activity.customer_id is None
+        ):
+            raise WorkflowPlanningError(
+                "WORKFLOW_SUGGESTION_SOURCE_STALE",
+                "源跟进已变化，本次商机操作不再执行。",  # noqa: RUF001
+            )
+        customer = (
+            db.query(Customer)
+            .filter(
+                Customer.id == int(activity.customer_id),
+                Customer.team_id == request.principal.team_id,
+            )
+            .one_or_none()
+        )
+        if customer is None:
+            raise WorkflowPlanningError(
+                "WORKFLOW_CUSTOMER_NOT_FOUND",
+                "没有匹配客户。",
+            )
+        customer_id = str(customer.public_id)
+        customer_name = str(customer.account_name).strip()
+        cached_resolution = await self._validate_cached_customer(
+            WorkflowResolvedCustomer(
+                customer_id=customer_id,
+                customer_name=customer_name,
+                lookup_name=customer_name,
+            ),
+            runtime=runtime,
+        )
+        if (
+            getattr(cached_resolution, "status", None) != "RESOLVED"
+            or getattr(cached_resolution, "customer", None) is None
+        ):
+            raise WorkflowPlanningError("WORKFLOW_CUSTOMER_NOT_FOUND", "没有匹配客户。")
+        resolved_customer = cached_resolution.customer
+        customer_id = resolved_customer.customer_id
+        customer_name = resolved_customer.customer_name
+        suggestion = result.get("suggestion")
+        if not isinstance(suggestion, dict):
+            raise WorkflowPlanningError("WORKFLOW_SUGGESTION_INVALID", "商机建议结果无效。")
+        if start.action == "CREATE_OPPORTUNITY":
+            execution_payload = suggestion.get("execution_payload")
+            if not isinstance(execution_payload, dict):
+                execution_payload = {}
+            allowed = {
+                "total_amount",
+                "user_count",
+                "license_type",
+                "subscription_years",
+                "purchase_type",
+                "decision_maker_count",
+                "expected_closing_date",
+            }
+            try:
+                opportunity = self._validated_opportunity_form_values(
+                    {key: value for key, value in execution_payload.items() if key in allowed}
+                )
+            except WorkflowPlanningError as exc:
+                raise WorkflowPlanningError(
+                    "WORKFLOW_SUGGESTION_INVALID",
+                    "商机建议中的业务字段无效。",
+                ) from exc
+            return await self._plan_opportunity_for_customer(
+                customer_id=customer_id,
+                customer_name=customer_name,
+                opportunity=opportunity,
+                request=request,
+                workflow_id=workflow_id,
+                runtime=runtime,
+                require_confirmation=False,
+            )
+
+        execution_payload = suggestion.get("execution_payload")
+        if not isinstance(execution_payload, dict):
+            execution_payload = {}
+        opportunity_id = suggestion.get("related_object_id") or execution_payload.get("opportunity_id")
+        stage_template_id = execution_payload.get("stage_template_id")
+        if not isinstance(opportunity_id, str) or not opportunity_id.strip():
+            raise WorkflowPlanningError("WORKFLOW_SUGGESTION_INVALID", "商机建议缺少目标商机。")
+        try:
+            stage_template_id = int(stage_template_id)
+        except (TypeError, ValueError) as exc:
+            raise WorkflowPlanningError("WORKFLOW_SUGGESTION_INVALID", "商机建议缺少目标阶段。") from exc
+        try:
+            resolution = await self._opportunity_stage_resolver.resolve(
+                customer_id=customer_id,
+                authorization=self._authorization(runtime),
+                opportunity_id=opportunity_id,
+                opportunity_reference_text=None,
+                target_stage_name=None,
+                selected_opportunity_id=opportunity_id,
+                selected_stage_id=stage_template_id,
+            )
+        except WorkflowResourceResolutionError as exc:
+            raise WorkflowPlanningError(
+                "WORKFLOW_OPPORTUNITY_STAGE_RESOLUTION_FAILED",
+                exc.message,
+                retryable=exc.retryable,
+            ) from exc
+        if resolution.status != "RESOLVED" or resolution.opportunity is None or not resolution.steps:
+            # The suggestion was evaluated against an earlier opportunity state.
+            # If that state is no longer current, this turn is a successful no-op:
+            # do not overwrite the newer state, retry the mutation, or prompt the
+            # user to reconcile a race they did not cause.
+            return self._terminal_skip_plan(
+                workflow_id=workflow_id,
+                reason="opportunity_state_changed",
+            )
+        commands = [
+            WorkflowCommand(
+                command_id=f"move_opportunity_stage_{index}",
+                tool_name="move_opportunity_stage",
+                payload={
+                    "opportunity_id": resolution.opportunity.opportunity_id,
+                    "stage_template_id": step.stage_template_id,
+                },
+                authorization_scope=WorkflowAuthorizationScope(customer_ids=[customer_id]),
+            )
+            for index, step in enumerate(resolution.steps, start=1)
+        ]
+        return self._resume_commands_plan(
+            workflow_id=workflow_id,
+            commands=commands,
+            completed_text=(
+                f"已将商机“{resolution.opportunity.opportunity_name}”推进到“{resolution.target_stage.stage_name}”。"
+            ),
+            cancelled_text="已取消推进商机。",
+        )
+
     async def _plan_opportunity_stage_transition(
         self,
         semantic: object,
@@ -949,6 +1411,8 @@ class CRMWorkflowPlanner:
         request: WorkflowTurnInput,
         workflow_id: str,
         runtime: WorkflowRuntimeContext,
+        current_datetime: datetime,
+        user_message: str,
     ) -> WorkflowActionPlan:
         customer_id, customer_name = await self._resolve_customer(
             semantic,
@@ -990,20 +1454,104 @@ class CRMWorkflowPlanner:
             ) from exc
 
         if resolution.status == "OPPORTUNITY_SELECTION_REQUIRED":
-            raise WorkflowPlanningNeedsInput(
-                self._opportunity_stage_opportunity_choice(
-                    workflow_id=workflow_id,
-                    customer_name=customer_name,
-                    resolution=resolution,
-                )
+            candidate_rows = [
+                {
+                    "id": index,
+                    "name": candidate.opportunity_name,
+                    "current_stage": candidate.current_stage_name,
+                }
+                for index, candidate in enumerate(resolution.opportunity_candidates, start=1)
+            ]
+            ranked = await self._select_semantic_resource(
+                runtime=runtime,
+                user_message=user_message,
+                resource_kind="opportunity",
+                action_name="MOVE_OPPORTUNITY_STAGE",
+                target={
+                    "customer_name": customer_name,
+                    "opportunity_reference": opportunity_reference_text,
+                    "target_stage": target_stage_name,
+                },
+                candidates=candidate_rows,
+                team_id=request.principal.team_id,
+                current_date=current_datetime.date(),
             )
+            if ranked is not None:
+                ranked_index = int(ranked["id"]) - 1
+                selected = resolution.opportunity_candidates[ranked_index]
+                try:
+                    resolution = await self._opportunity_stage_resolver.resolve(
+                        customer_id=customer_id,
+                        authorization=self._authorization(runtime),
+                        opportunity_id=opportunity_id,
+                        opportunity_reference_text=opportunity_reference_text,
+                        target_stage_name=target_stage_name,
+                        selected_opportunity_id=selected.opportunity_id,
+                        selected_stage_id=selected_stage_id,
+                    )
+                except WorkflowResourceResolutionError as exc:
+                    raise WorkflowPlanningError(
+                        "WORKFLOW_OPPORTUNITY_STAGE_RESOLUTION_FAILED",
+                        exc.message,
+                        retryable=exc.retryable,
+                    ) from exc
+            if resolution.status == "OPPORTUNITY_SELECTION_REQUIRED":
+                raise WorkflowPlanningNeedsInput(
+                    self._opportunity_stage_opportunity_choice(
+                        workflow_id=workflow_id,
+                        customer_name=customer_name,
+                        resolution=resolution,
+                    )
+                )
         if resolution.status == "STAGE_SELECTION_REQUIRED":
-            raise WorkflowPlanningNeedsInput(
-                self._opportunity_stage_choice(
-                    workflow_id=workflow_id,
-                    resolution=resolution,
-                )
+            candidate_rows = [
+                {"id": index, "name": candidate.stage_name}
+                for index, candidate in enumerate(resolution.stage_candidates, start=1)
+            ]
+            ranked = await self._select_semantic_resource(
+                runtime=runtime,
+                user_message=user_message,
+                resource_kind="opportunity_stage",
+                action_name="MOVE_OPPORTUNITY_STAGE",
+                target={
+                    "customer_name": customer_name,
+                    "opportunity_name": (
+                        resolution.opportunity.opportunity_name
+                        if resolution.opportunity is not None
+                        else None
+                    ),
+                    "target_stage": target_stage_name,
+                },
+                candidates=candidate_rows,
+                team_id=request.principal.team_id,
+                current_date=current_datetime.date(),
             )
+            if ranked is not None and resolution.opportunity is not None:
+                ranked_index = int(ranked["id"]) - 1
+                selected = resolution.stage_candidates[ranked_index]
+                try:
+                    resolution = await self._opportunity_stage_resolver.resolve(
+                        customer_id=customer_id,
+                        authorization=self._authorization(runtime),
+                        opportunity_id=resolution.opportunity.opportunity_id,
+                        opportunity_reference_text=None,
+                        target_stage_name=target_stage_name,
+                        selected_opportunity_id=resolution.opportunity.opportunity_id,
+                        selected_stage_id=selected.stage_template_id,
+                    )
+                except WorkflowResourceResolutionError as exc:
+                    raise WorkflowPlanningError(
+                        "WORKFLOW_OPPORTUNITY_STAGE_RESOLUTION_FAILED",
+                        exc.message,
+                        retryable=exc.retryable,
+                    ) from exc
+            if resolution.status == "STAGE_SELECTION_REQUIRED":
+                raise WorkflowPlanningNeedsInput(
+                    self._opportunity_stage_choice(
+                        workflow_id=workflow_id,
+                        resolution=resolution,
+                    )
+                )
         if resolution.status == "NOT_FOUND":
             raise WorkflowPlanningError(
                 "WORKFLOW_OPPORTUNITY_STAGE_NOT_FOUND",
@@ -1081,20 +1629,62 @@ class CRMWorkflowPlanner:
                 retryable=exc.retryable,
             ) from exc
 
+        task = resolution.task
         if resolution.status == "SELECTION_REQUIRED":
-            raise WorkflowPlanningNeedsInput(
-                self._follow_up_task_choice(
-                    workflow_id=workflow_id,
-                    resolution=resolution,
-                    stale_selection=selected_task_id is not None,
-                )
+            candidate_rows = [
+                {
+                    "id": index,
+                    "name": candidate.title,
+                    "customer_name": candidate.customer_name,
+                    "due_at": candidate.due_at,
+                }
+                for index, candidate in enumerate(resolution.candidates, start=1)
+            ]
+            ranked = await self._select_semantic_resource(
+                runtime=runtime,
+                user_message=self._planning_text(request.start.text, request.supplements),
+                resource_kind="follow_up_task",
+                action_name=f"FOLLOW_UP_TASK_{action.upper()}",
+                target={
+                    "task_reference": task_reference_text,
+                    "requested_action": action,
+                },
+                candidates=candidate_rows,
+                team_id=request.principal.team_id,
+                current_date=current_datetime.date(),
             )
-        if resolution.status == "NOT_FOUND" or resolution.task is None:
+            if ranked is not None:
+                selected_candidate = resolution.candidates[int(ranked["id"]) - 1]
+                # The LLM only chooses an ordinal from the snapshot. Re-read
+                # that task by its server-owned public ID before planning any
+                # mutation so ownership, open status, and freshness are still
+                # authoritative at the decision boundary.
+                try:
+                    resolution = await self._follow_up_task_resolver.resolve(
+                        authorization=self._authorization(runtime),
+                        user_id=request.principal.user_id,
+                        selected_task_id=selected_candidate.task_id,
+                    )
+                except WorkflowResourceResolutionError as exc:
+                    raise WorkflowPlanningError(
+                        "WORKFLOW_FOLLOW_UP_TASK_RESOLUTION_FAILED",
+                        exc.message,
+                        retryable=exc.retryable,
+                    ) from exc
+                task = resolution.task
+            else:
+                raise WorkflowPlanningNeedsInput(
+                    self._follow_up_task_choice(
+                        workflow_id=workflow_id,
+                        resolution=resolution,
+                        stale_selection=selected_task_id is not None,
+                    )
+                )
+        if resolution.status == "NOT_FOUND" or task is None:
             raise WorkflowPlanningError(
                 "WORKFLOW_FOLLOW_UP_TASK_NOT_FOUND",
                 "没有找到仍可更新的本人待跟进任务。",
             )
-        task = resolution.task
 
         proposed_due_at: str | None = None
         if action == "postpone":
@@ -1600,6 +2190,51 @@ class CRMWorkflowPlanner:
             cancelled_text=cancelled_text,
         )
 
+    @staticmethod
+    def _resume_commands_plan(
+        *,
+        workflow_id: str,
+        commands: list[WorkflowCommand],
+        completed_text: str,
+        cancelled_text: str,
+    ) -> WorkflowActionPlan:
+        return WorkflowActionPlan(
+            action_id=f"act_{workflow_id.removeprefix('wf_')}",
+            execution_authorization="RESUME_AUTHORIZED",
+            commands=commands,
+            completed_text=completed_text,
+            cancelled_text=cancelled_text,
+        )
+
+    @staticmethod
+    def _terminal_cancel_plan(
+        *,
+        workflow_id: str,
+        completed_text: str,
+        cancelled_text: str,
+    ) -> WorkflowActionPlan:
+        return WorkflowActionPlan(
+            action_id=f"act_{workflow_id.removeprefix('wf_')}",
+            execution_authorization="RESUME_AUTHORIZED",
+            terminal_outcome="CANCELLED",
+            completed_text=completed_text,
+            cancelled_text=cancelled_text,
+        )
+
+    @staticmethod
+    def _terminal_skip_plan(
+        *,
+        workflow_id: str,
+        reason: str,
+    ) -> WorkflowActionPlan:
+        """Build a terminal no-op plan without a user-facing business message."""
+        return WorkflowActionPlan(
+            action_id=f"act_{workflow_id.removeprefix('wf_')}",
+            execution_authorization="RESUME_AUTHORIZED",
+            terminal_outcome="SKIPPED",
+            terminal_reason=reason,
+        )
+
     @classmethod
     def _confirmation_plan(
         cls,
@@ -1678,6 +2313,7 @@ class CRMWorkflowPlanner:
         business_action: str,
         title: str,
         prompt: str,
+        checkpoint_request: WorkflowTurnInput | None = None,
     ) -> WorkflowPlanningNeedsInput:
         return WorkflowPlanningNeedsInput(
             WorkflowInteraction(
@@ -1688,7 +2324,67 @@ class CRMWorkflowPlanner:
                 prompt=prompt,
                 allow_blank=False,
                 submit_label="继续",
-            )
+            ),
+            checkpoint_request=checkpoint_request,
+        )
+
+    @staticmethod
+    def _with_resolved_customer(
+        request: WorkflowTurnInput,
+        *,
+        semantic: object,
+        customer_id: str,
+        customer_name: str,
+    ) -> WorkflowTurnInput:
+        semantic_customer = getattr(semantic, "customer", None)
+        lookup_name = getattr(semantic_customer, "name_text", None)
+        if not isinstance(lookup_name, str) or not lookup_name.strip():
+            lookup_name = customer_name
+        return request.model_copy(
+            update={
+                "resolved_customer": WorkflowResolvedCustomer(
+                    customer_id=customer_id,
+                    customer_name=customer_name,
+                    lookup_name=lookup_name.strip(),
+                )
+            }
+        )
+
+    async def _validate_cached_customer(
+        self,
+        cached_customer: object,
+        *,
+        runtime: WorkflowRuntimeContext,
+    ) -> object:
+        validator = getattr(self._customer_resolver, "validate_cached", None)
+        if callable(validator):
+            try:
+                return await validator(
+                    customer_id=cached_customer.customer_id,
+                    authorization=self._authorization(runtime),
+                )
+            except WorkflowResourceResolutionError as exc:
+                raise WorkflowPlanningError(
+                    "WORKFLOW_CUSTOMER_RESOLUTION_FAILED",
+                    exc.message,
+                    retryable=exc.retryable,
+                ) from exc
+        # Test doubles and alternate resolvers without the optional validation
+        # seam can still use the server-issued checkpoint identity without a
+        # name search. Production CRMWorkflowCustomerResolver implements the
+        # authoritative validation call below.
+        from app.services.agent.query.schemas import EntityRef
+
+        return await self._customer_resolver.resolve(
+            customer_lookup_name=None,
+            trusted_context_customer=EntityRef(
+                ref_id=f"eref_customer_{cached_customer.customer_id}",
+                resource="customer",
+                public_id=cached_customer.customer_id,
+                display_name=cached_customer.customer_name,
+            ),
+            selected_customer_id=None,
+            authorization=self._authorization(runtime),
         )
 
     async def _resolve_customer(
@@ -1699,6 +2395,31 @@ class CRMWorkflowPlanner:
         workflow_id: str,
         runtime: WorkflowRuntimeContext,
     ) -> tuple[str, str]:
+        cached_customer = request.resolved_customer
+        # The Root decision has already determined whether this turn
+        # continues the active task.  A resolved_customer is therefore a
+        # server-bound identity, not a name cache to compare with another
+        # piece of free text.  Requiring string equality here caused harmless
+        # aliases/abbreviations in later turns to trigger a fresh search.
+        # Switching to another customer starts a new task and arrives without
+        # this binding; the authoritative validator still runs before any
+        # mutation.
+        if cached_customer is not None:
+            resolution = await self._validate_cached_customer(
+                cached_customer,
+                runtime=runtime,
+            )
+            if resolution.status == "RESOLVED" and resolution.customer is not None:
+                return resolution.customer.customer_id, resolution.customer.customer_name
+            if resolution.status == "NOT_FOUND":
+                raise self._needs_text(
+                    workflow_id=workflow_id,
+                    field="customer_name",
+                    business_action="provide_workflow_customer",
+                    title="重新确认客户",
+                    prompt="没有匹配客户，请提供更完整的客户名称。",  # noqa: RUF001
+                )
+
         trusted_context_customer = (
             request.selected_entity
             if request.selected_entity is not None and request.selected_entity.resource == "customer"

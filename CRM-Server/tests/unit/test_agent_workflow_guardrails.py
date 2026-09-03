@@ -56,6 +56,9 @@ def _payload(*, customer_id: str = CUSTOMER_ID) -> dict[str, object]:
         "customer_id": customer_id,
         "activity_kind": "PHONE_FOLLOW_UP",
         "source_content": "确认技术评估结论",
+        "effectiveness_score": 80,
+        "effectiveness_is_valid": True,
+        "effectiveness_reason": "已确认技术评估结论",
     }
 
 

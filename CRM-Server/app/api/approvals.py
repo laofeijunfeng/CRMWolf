@@ -1851,35 +1851,37 @@ async def submit_generic_approval(
             detail=error_msg or "提交审批失败",
         )
 
-    log_approval_operation(
-        operation="Submit",
-        approval_id=ap.id,
-        flow_name=ap.flow.flow_name if ap.flow else None,
-        node_name=ap.current_node.node_name if ap.current_node else None,
-        operator=current_user.name,
-        flow_direction="submitted",
-        business_type=entity_type,
-        business_id=resolved_entity_id,
-    )
-
-    notification_result = await approval_transaction_manager.send_notification(
-        db,
-        ap,
-        adapter.get_entity(db, resolved_entity_id, team_id) or entity,
-        team_id,
-    )
-    if ap.current_node:
+    # 幂等重试只返回现有审批实例，不重复写提交日志或发送通知。
+    if error_msg is None:
         log_approval_operation(
             operation="Submit",
             approval_id=ap.id,
             flow_name=ap.flow.flow_name if ap.flow else None,
-            node_name=ap.current_node.node_name,
+            node_name=ap.current_node.node_name if ap.current_node else None,
             operator=current_user.name,
             flow_direction="submitted",
-            notification_status=_feishu_notification_status(notification_result),
             business_type=entity_type,
             business_id=resolved_entity_id,
         )
+
+        notification_result = await approval_transaction_manager.send_notification(
+            db,
+            ap,
+            adapter.get_entity(db, resolved_entity_id, team_id) or entity,
+            team_id,
+        )
+        if ap.current_node:
+            log_approval_operation(
+                operation="Submit",
+                approval_id=ap.id,
+                flow_name=ap.flow.flow_name if ap.flow else None,
+                node_name=ap.current_node.node_name,
+                operator=current_user.name,
+                flow_direction="submitted",
+                notification_status=_feishu_notification_status(notification_result),
+                business_type=entity_type,
+                business_id=resolved_entity_id,
+            )
 
     return GenericApprovalSubmitResponse(approval_id=ap.id, status=ap.status)
 

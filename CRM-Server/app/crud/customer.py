@@ -11,6 +11,7 @@ from app.schemas.customer import CustomerCreate, CustomerUpdate, CustomerStatusE
 from app.crud.operation_log import operation_log_crud
 from app.services.acquisition_source_service import get_by_id, resolve_source_for_entity_write
 from app.utils.time import business_now
+from app.core.exceptions import ConflictException
 from app.core.list_query import (
     FilterCondition,
     ListQueryContext,
@@ -245,7 +246,26 @@ class CustomerCRUD:
         return db_obj
 
     def update(self, db: Session, db_obj: Customer, obj_in: CustomerUpdate) -> Customer:
-        update_data = obj_in.model_dump(exclude_unset=True, exclude={"source_public_id", "source"})
+        if obj_in.expected_version is not None:
+            locked_customer = (
+                db.query(Customer)
+                .filter(
+                    Customer.id == db_obj.id,
+                    Customer.team_id == db_obj.team_id,
+                )
+                .with_for_update()
+                .first()
+            )
+            if locked_customer is None:
+                raise ConflictException("客户已不存在，请刷新后确认最新状态")
+            if locked_customer.version != obj_in.expected_version:
+                raise ConflictException("客户已发生变化，请刷新后确认最新状态")
+            db_obj = locked_customer
+
+        update_data = obj_in.model_dump(
+            exclude_unset=True,
+            exclude={"expected_version", "source_public_id", "source"},
+        )
         fields_set = obj_in.model_fields_set
         if "source_public_id" in fields_set or "source" in fields_set:
             source_row = resolve_source_for_entity_write(

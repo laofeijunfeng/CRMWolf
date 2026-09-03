@@ -223,6 +223,11 @@ class CustomerCreate(CustomerBase):
 
 
 class CustomerUpdate(BaseModel):
+    expected_version: Optional[int] = Field(
+        None,
+        ge=1,
+        description="客户端读取到的客户版本号（用于乐观锁，未传入时保持兼容行为）",
+    )
     account_name: Optional[str] = Field(None, min_length=1, max_length=255, description="客户公司名称")
     industry: Optional[str] = Field(None, max_length=100, description="所属行业")
     city: Optional[str] = Field(None, min_length=1, max_length=100, description="所在城市")

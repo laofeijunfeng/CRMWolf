@@ -175,9 +175,29 @@ class PaymentRecordResponse(PaymentRecordBase):
     owner_name: Optional[str] = Field(None, description="负责人姓名")
     commission_member_id: Optional[str] = Field(None, description="提成协作成员用户ID")
     commission_member_name: Optional[str] = Field(None, description="提成协作成员姓名")
+    confirmation_status: Optional[str] = Field(
+        None, description="确认状态：PENDING/CONFIRMED/DISPUTED"
+    )
+    updated_time: Optional[datetime] = Field(None, description="最后更新时间")
+    # Backward-compatible public timestamp used by existing list/detail clients.
+    last_modified_time: datetime = Field(..., description="最后更新时间（兼容字段）")
 
     class Config:
         from_attributes = True
+
+
+class PaymentPlanStatusSummary(BaseModel):
+    """用于最终状态确认的回款计划摘要。"""
+
+    id: int
+    plan_number: Optional[str] = None
+    stage_name: str
+    planned_amount: float
+    paid_amount: float
+    remaining_amount: float
+    due_date: date
+    status: PaymentPlanStatusEnum
+    last_modified_time: datetime
 
 
 class ContractPaymentSummary(BaseModel):
@@ -264,6 +284,12 @@ class PaymentRecordListItem(PaymentRecordResponse):
     confirmation_status: PaymentConfirmationStatusEnum = Field(..., description="确认状态")
     approval_id: Optional[int] = Field(None, description="审批ID")
     approval: Optional[ApprovalInfo] = Field(None, description="审批信息")
+
+
+class PaymentRecordDetailResponse(PaymentRecordListItem):
+    """回款记录详情，支持超时后的最终状态确认。"""
+
+    payment_plan: PaymentPlanStatusSummary
 
 
 class PaymentRecordListResponse(BaseModel, Generic[T]):

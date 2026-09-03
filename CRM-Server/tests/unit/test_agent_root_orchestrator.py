@@ -32,7 +32,12 @@ from app.services.agent.orchestrator import (
     WorkflowRef,
     build_root_graph_config,
 )
-from app.services.agent.orchestrator.contracts import PendingCaseContext
+from app.services.agent.orchestrator.contracts import (
+    ConversationMessageContext,
+    PendingCaseContext,
+    RootConversationMemory,
+    WorkflowTriggerTurnInput,
+)
 from app.services.agent.query import (
     CRMFilter,
     CRMQueryAgentExecutionError,
@@ -44,8 +49,13 @@ from app.services.agent.query import (
     EntityRef,
     QueryError,
 )
+from app.services.agent.query.semantic_intent import (
+    CRMQuerySemanticIntent,
+    QuerySemanticIntentUnavailableError,
+    QueryTemporalIntent,
+)
+from app.services.agent.semantic_plan import AgentQueryPlan, AgentSemanticPlan
 from app.services.agent.workflow import WorkflowTurnInput
-from app.services.agent.query.semantic_intent import CRMQuerySemanticIntent, QueryTemporalIntent
 from app.services.agent.workflow.progress import execution_progress
 
 
@@ -79,6 +89,7 @@ class StaticContextResolver:
     def __init__(self, snapshot: RootContextSnapshot | None = None) -> None:
         self.snapshot = snapshot or RootContextSnapshot()
         self.calls: list[RootTurnInput] = []
+        self.persisted: list[RootConversationMemory] = []
 
     async def resolve(
         self,
@@ -88,6 +99,16 @@ class StaticContextResolver:
     ) -> RootContextSnapshot:
         self.calls.append(turn)
         return self.snapshot
+
+    def persist_conversation_memory(
+        self,
+        db: object,
+        *,
+        turn: RootTurnInput,
+        memory: RootConversationMemory,
+    ) -> None:
+        del db, turn
+        self.persisted.append(memory)
 
 
 class StubDecisionClassifier:
@@ -121,6 +142,15 @@ class RecordingSemanticIntentResolver:
         return self.intent
 
 
+class CountingUnavailableSemanticIntentResolver:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def resolve(self, text: str, **kwargs: object) -> CRMQuerySemanticIntent:
+        self.calls.append(text)
+        raise QuerySemanticIntentUnavailableError("provider timeout")
+
+
 class FailingInteractionResolver:
     async def resolve(self, **kwargs: object) -> InteractionResolution:
         raise AssertionError("text turn must not resolve an interaction")
@@ -140,6 +170,23 @@ class RecordingInteractionResolver:
     ) -> InteractionResolution:
         self.calls.append((turn, context))
         return self.resolution
+
+
+class RecordingSemanticPlanResolver:
+    def __init__(self, plan: AgentSemanticPlan) -> None:
+        self.plan = plan
+        self.calls: list[RootTurnInput] = []
+
+    async def resolve(
+        self,
+        *,
+        turn: RootTurnInput,
+        context: RootContextSnapshot,
+        runtime: RootRuntimeContext,
+    ) -> AgentSemanticPlan:
+        del context, runtime
+        self.calls.append(turn)
+        return self.plan
 
 
 class RecordingQueryExecutor:
@@ -214,7 +261,17 @@ def query_decision(
     result_set: str = "IGNORE",
     confidence: float = 0.99,
     reason_code: str = "NEW_QUERY",
+    pending_case_relation: str = "NONE",
+    pending_case_reference: str | None = None,
+    conversation_memory: str = "USE",
+    semantic_plan: AgentSemanticPlan | None = None,
 ) -> RootDecision:
+    semantic_plan = semantic_plan or AgentSemanticPlan(
+        speech_act="ASK_FACT",
+        business_object="CUSTOMER",
+        operation="READ",
+        confidence=confidence,
+    )
     return RootDecision.model_validate(
         {
             "task_relation": task_relation,
@@ -225,9 +282,13 @@ def query_decision(
                 "previous_query": previous_query,
                 "result_set": result_set,
                 "active_workflow": active_workflow,
+                "conversation_memory": conversation_memory,
             },
             "confidence": confidence,
             "reason_code": reason_code,
+            "pending_case_relation": pending_case_relation,
+            "pending_case_reference": pending_case_reference,
+            "semantic_plan": semantic_plan,
         }
     )
 
@@ -240,7 +301,17 @@ def workflow_decision(
     result_set: str = "IGNORE",
     confidence: float = 0.99,
     reason_code: str = "NEW_WORKFLOW",
+    pending_case_relation: str = "NONE",
+    pending_case_reference: str | None = None,
+    conversation_memory: str = "USE",
+    semantic_plan: AgentSemanticPlan | None = None,
 ) -> RootDecision:
+    semantic_plan = semantic_plan or AgentSemanticPlan(
+        speech_act="REQUEST_ACTION",
+        business_object="CUSTOMER_ACTIVITY",
+        operation="CREATE",
+        confidence=confidence,
+    )
     return RootDecision.model_validate(
         {
             "task_relation": task_relation,
@@ -251,11 +322,201 @@ def workflow_decision(
                 "previous_query": "IGNORE",
                 "result_set": result_set,
                 "active_workflow": active_workflow,
+                "conversation_memory": conversation_memory,
             },
             "confidence": confidence,
             "reason_code": reason_code,
+            "pending_case_relation": pending_case_relation,
+            "pending_case_reference": pending_case_reference,
+            "semantic_plan": semantic_plan,
         }
     )
+
+
+async def test_root_decision_payload_includes_short_term_memory_and_recent_messages() -> None:
+    memory = RootConversationMemory(
+        resolved_customer={
+            "customer_id": "cus_00000000000000000000000000000001",
+            "customer_name": "河南双汇实业有限公司",
+            "lookup_name": "河南双汇",
+        },
+        current_task="customer_activity",
+        known_activity_content="刚刚和河南双汇沟通了 POC 部署",
+    )
+    context = RootContextSnapshot(
+        conversation_memory=memory,
+        recent_messages=[
+            ConversationMessageContext(role="USER", content="刚刚和河南双汇沟通了 POC 部署"),
+            ConversationMessageContext(role="ASSISTANT", content="已识别客户河南双汇实业有限公司"),
+        ],
+    )
+    structured_model = RecordingStructuredDecisionModel(query_decision())
+    chat_model = RecordingDecisionChatModel(structured_model)
+
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(context),
+        decision_classifier=LangChainRootDecisionClassifier(
+            chat_model_factory=lambda **kwargs: chat_model,
+        ),
+        query_executor=RecordingQueryExecutor(),
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=failing_workflow_subgraph(),
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=2,
+            session_id=556,
+            client_request_id="req_memory_payload",
+            input=TextTurnInput(type="text", text="下周五再联系"),
+        ),
+        runtime=RootRuntimeContext(
+            root_model_config=RootDecisionModelConfig(
+                api_host="https://ai.example.com/v1",
+                api_key="test-key",
+                model="test-model",
+            ),
+        ),
+    )
+
+    assert isinstance(result, QueryDispatchResult)
+    payload = json.loads(structured_model.calls[0][1]["content"])
+    assert (
+        payload["context_snapshot"]["conversation_memory"]["resolved_customer"]["customer_name"]
+        == "河南双汇实业有限公司"
+    )
+    assert payload["context_snapshot"]["recent_messages"][0]["content"] == "刚刚和河南双汇沟通了 POC 部署"
+
+
+async def test_workflow_reuses_memory_customer_when_no_entity_is_selected() -> None:
+    customer = {
+        "customer_id": "cus_00000000000000000000000000000001",
+        "customer_name": "河南双汇实业有限公司",
+        "lookup_name": "河南双汇",
+    }
+    resolver = StaticContextResolver(
+        RootContextSnapshot(
+            conversation_memory=RootConversationMemory(
+                resolved_customer=customer,
+                current_task="customer_activity",
+            )
+        )
+    )
+    workflow_calls: list[object] = []
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=resolver,
+        decision_classifier=StubDecisionClassifier(
+            workflow_decision(task_relation="CONTINUE_TASK", conversation_memory="USE", reason_code="CONTINUE_ACTIVITY")
+        ),
+        query_executor=RecordingQueryExecutor(),
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=recording_workflow_subgraph(workflow_calls),
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=2,
+            session_id=556,
+            client_request_id="req_memory_customer_reuse",
+            input=TextTurnInput(type="text", text="客户预计下周完成测试,我们下周五再联系"),
+        ),
+        runtime=RootRuntimeContext(db=object()),
+    )
+
+    assert isinstance(result, WorkflowDispatchResult)
+    assert workflow_calls[0]["resolved_customer"] == customer
+    assert resolver.persisted[-1].resolved_customer is not None
+    assert resolver.persisted[-1].resolved_customer.customer_name == "河南双汇实业有限公司"
+
+
+async def test_selected_customer_overrides_memory_customer_for_new_task() -> None:
+    resolver = StaticContextResolver(
+        RootContextSnapshot(
+            conversation_memory=RootConversationMemory(
+                resolved_customer={
+                    "customer_id": "cus_old",
+                    "customer_name": "旧客户",
+                    "lookup_name": "旧客户",
+                }
+            )
+        )
+    )
+    selected = EntityRef(
+        ref_id="eref_new_customer",
+        resource="customer",
+        public_id="cus_new",
+        display_name="新客户",
+    )
+    workflow_calls: list[object] = []
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=resolver,
+        decision_classifier=StubDecisionClassifier(
+            workflow_decision(selected_entity="USE", conversation_memory="USE")
+        ),
+        query_executor=RecordingQueryExecutor(),
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=recording_workflow_subgraph(workflow_calls),
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=2,
+            session_id=556,
+            client_request_id="req_memory_customer_switch",
+            input=TextTurnInput(type="text", text="记录这个客户的新进展"),
+            selected_entity_ref=selected,
+        ),
+        runtime=RootRuntimeContext(),
+    )
+
+    assert isinstance(result, WorkflowDispatchResult)
+    assert workflow_calls[0]["selected_entity"]["public_id"] == "cus_new"
+    assert workflow_calls[0]["resolved_customer"] is None
+
+
+async def test_query_can_ignore_memory_customer_without_becoming_workflow() -> None:
+    resolver = StaticContextResolver(
+        RootContextSnapshot(
+            conversation_memory=RootConversationMemory(
+                resolved_customer={
+                    "customer_id": "cus_old",
+                    "customer_name": "旧客户",
+                    "lookup_name": "旧客户",
+                }
+            )
+        )
+    )
+    query_executor = RecordingQueryExecutor()
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=resolver,
+        decision_classifier=StubDecisionClassifier(
+            query_decision(conversation_memory="IGNORE", reason_code="INDEPENDENT_QUERY")
+        ),
+        query_executor=query_executor,
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=failing_workflow_subgraph(),
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=2,
+            session_id=556,
+            client_request_id="req_memory_independent_query",
+            input=TextTurnInput(type="text", text="上海有哪些客户"),
+        ),
+        runtime=RootRuntimeContext(),
+    )
+
+    assert isinstance(result, QueryDispatchResult)
+    assert query_executor.calls[0].resolved_customer is None
 
 
 async def test_explicit_customer_query_overrides_misclassified_session_context() -> None:
@@ -276,10 +537,10 @@ async def test_explicit_customer_query_overrides_misclassified_session_context()
         context_resolver=StaticContextResolver(RootContextSnapshot(previous_query=previous_query)),
         decision_classifier=StubDecisionClassifier(
             query_decision(
-                task_relation="CONTINUE_TASK",
-                selected_entity="USE",
-                previous_query="USE",
-                reason_code="MISCLASSIFIED_CONTEXT_CONTINUATION",
+                task_relation="NEW_TASK",
+                selected_entity="IGNORE",
+                previous_query="IGNORE",
+                reason_code="NEW_CITY_CUSTOMER_QUERY",
             )
         ),
         query_executor=query_executor,
@@ -314,7 +575,7 @@ async def test_explicit_customer_query_overrides_misclassified_session_context()
     assert query_request.result_set is None
 
 
-async def test_explicit_follow_up_record_overrides_invalid_model_clarification() -> None:
+async def test_root_does_not_override_model_clarification_for_follow_up_text() -> None:
     workflow_calls: list[object] = []
     orchestrator = RootOrchestrator(
         checkpointer=InMemorySaver(),
@@ -333,6 +594,13 @@ async def test_explicit_follow_up_record_overrides_invalid_model_clarification()
                     },
                     "confidence": 0.99,
                     "reason_code": "ACTIVE_WORKFLOW_CONTEXT_MISSING",
+                    "semantic_plan": {
+                        "speech_act": "UNKNOWN",
+                        "business_object": "UNKNOWN",
+                        "operation": "UNKNOWN",
+                        "confidence": 0.0,
+                    },
+                    "clarification_question": "你是要记录这次凡亚信息的沟通，还是查询已有待办？",  # noqa: RUF001
                 }
             )
         ),
@@ -358,19 +626,10 @@ async def test_explicit_follow_up_record_overrides_invalid_model_clarification()
         runtime=RootRuntimeContext(),
     )
 
-    assert isinstance(result, WorkflowDispatchResult)
-    assert result.decision.task_relation == "NEW_TASK"
-    assert result.decision.route == "WORKFLOW"
-    assert result.decision.risk == "WRITE"
-    assert result.decision.context_policy == ContextPolicy(
-        selected_entity="IGNORE",
-        previous_query="IGNORE",
-        result_set="IGNORE",
-        active_workflow="NONE",
-    )
-    assert result.decision.confidence == 1.0
-    assert result.decision.reason_code == "EXPLICIT_FOLLOW_UP_WORKFLOW"
-    assert len(workflow_calls) == 1
+    assert isinstance(result, ClarificationDispatchResult)
+    assert result.decision.reason_code == "ACTIVE_WORKFLOW_CONTEXT_MISSING"
+    assert result.clarification.question == "你是要记录这次凡亚信息的沟通，还是查询已有待办？"  # noqa: RUF001
+    assert workflow_calls == []
 
 
 async def test_normal_follow_up_does_not_resume_pending_confirmation_case() -> None:
@@ -389,9 +648,9 @@ async def test_normal_follow_up_does_not_resume_pending_confirmation_case() -> N
         context_resolver=StaticContextResolver(RootContextSnapshot(pending_cases=[pending_case])),
         decision_classifier=StubDecisionClassifier(
             workflow_decision(
-                task_relation="CONTINUE_TASK",
-                active_workflow="RESUME",
-                reason_code="MODEL_TRIED_TO_RESUME_PENDING_CASE",
+                task_relation="NEW_TASK",
+                active_workflow="NONE",
+                reason_code="NEW_ACTIVITY_WORKFLOW",
             )
         ),
         query_executor=RecordingQueryExecutor(),
@@ -416,6 +675,7 @@ async def test_normal_follow_up_does_not_resume_pending_confirmation_case() -> N
     assert workflow_calls[0]["start"] == {
         "kind": "text",
         "text": "今天联系了凡亚信息，客户反馈项目正在评估",  # noqa: RUF001
+        "semantic_plan": workflow_decision().semantic_plan.model_dump(mode="json"),
     }
 
 
@@ -427,8 +687,8 @@ async def test_model_cannot_turn_an_unrelated_text_turn_into_workflow_resume() -
         decision_classifier=StubDecisionClassifier(
             workflow_decision(
                 task_relation="CONTINUE_TASK",
-                active_workflow="NONE",
-                reason_code="MODEL_TRIED_TO_RESUME_WORKFLOW",
+                active_workflow="RESUME",
+                reason_code="MODEL_SELECTED_RESUME",
             )
         ),
         query_executor=RecordingQueryExecutor(),
@@ -448,7 +708,7 @@ async def test_model_cannot_turn_an_unrelated_text_turn_into_workflow_resume() -
     )
 
     assert isinstance(result, ClarificationDispatchResult)
-    assert result.decision.reason_code == "MODEL_TRIED_TO_RESUME_WORKFLOW"
+    assert result.decision.reason_code == "ACTIVE_WORKFLOW_CONTEXT_MISSING"
     assert workflow_calls == []
 
 
@@ -474,7 +734,13 @@ async def test_text_continuation_cannot_bypass_confirmation_interaction() -> Non
                 resumable_workflow_continuations=[continuation],
             )
         ),
-        decision_classifier=FailingClassifier(),
+        decision_classifier=StubDecisionClassifier(
+            workflow_decision(
+                task_relation="CONTINUE_TASK",
+                active_workflow="RESUME",
+                reason_code="MODEL_SELECTED_RESUME",
+            )
+        ),
         query_executor=RecordingQueryExecutor(),
         interaction_resolver=FailingInteractionResolver(),
         workflow_subgraph=failing_workflow_subgraph(),
@@ -509,7 +775,13 @@ async def test_explicit_pending_case_reference_starts_resource_workflow() -> Non
     orchestrator = RootOrchestrator(
         checkpointer=InMemorySaver(),
         context_resolver=StaticContextResolver(RootContextSnapshot(pending_cases=[pending_case])),
-        decision_classifier=FailingClassifier(),
+        decision_classifier=StubDecisionClassifier(
+            workflow_decision(
+                pending_case_relation="EXPLICIT_REFERENCE",
+                pending_case_reference="完成凡亚信息的待办",
+                reason_code="PENDING_CASE_CONFIRMATION",
+            )
+        ),
         query_executor=RecordingQueryExecutor(),
         interaction_resolver=FailingInteractionResolver(),
         workflow_subgraph=recording_workflow_subgraph(workflow_calls),
@@ -533,6 +805,43 @@ async def test_explicit_pending_case_reference_starts_resource_workflow() -> Non
         "workflow": "follow_up_task_confirmation",
         "resource_id": pending_case.case_public_id,
     }
+
+
+async def test_server_opportunity_trigger_bypasses_root_decision_model() -> None:
+    workflow_calls: list[object] = []
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(),
+        decision_classifier=FailingClassifier(),
+        query_executor=RecordingQueryExecutor(),
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=recording_workflow_subgraph(workflow_calls),
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=1,
+            session_id=556,
+            client_request_id="req_server_opportunity_trigger",
+            input=WorkflowTriggerTurnInput(
+                type="workflow_trigger",
+                workflow="customer_opportunity_suggestion",
+                job_public_id="cosj_test",
+                action="CREATE_OPPORTUNITY",
+            ),
+        ),
+        runtime=RootRuntimeContext(),
+    )
+
+    assert isinstance(result, WorkflowDispatchResult)
+    assert result.decision.reason_code == "CUSTOMER_OPPORTUNITY_SUGGESTION_TRIGGER"
+    assert workflow_calls[0]["start"] == {
+        "kind": "opportunity_suggestion",
+        "action": "CREATE_OPPORTUNITY",
+        "job_public_id": "cosj_test",
+    }
+
 
 
 async def test_text_resume_clarifies_when_multiple_workflows_are_resumable() -> None:
@@ -633,10 +942,10 @@ async def test_explicit_query_suspends_active_workflow_even_when_model_requests_
             RootContextSnapshot(active_workflow=active_workflow)
         ),
         decision_classifier=StubDecisionClassifier(
-            workflow_decision(
-                task_relation="CONTINUE_TASK",
-                active_workflow="RESUME",
-                reason_code="MISCLASSIFIED_WORKFLOW_RESUME",
+            query_decision(
+                task_relation="SWITCH_TASK",
+                active_workflow="SUSPEND",
+                reason_code="NEW_INDEPENDENT_QUERY",
             )
         ),
         query_executor=query_executor,
@@ -1159,10 +1468,11 @@ async def test_out_of_range_result_set_ordinal_clarifies_before_workflow() -> No
     assert result.decision.route == "CLARIFY"
     assert result.decision.reason_code == "RESULT_SET_REFERENCE_OUT_OF_RANGE"
     assert result.clarification.reason_code == "RESULT_SET_REFERENCE_OUT_OF_RANGE"
+    assert result.clarification.question == "这个序号不在当前查询结果中，请选择结果里的有效序号，或直接说出客户名称。"  # noqa: RUF001
     assert workflow_calls == []
 
 
-async def test_write_intent_cannot_be_executed_as_read_only_query() -> None:
+async def test_root_decision_is_authoritative_for_mixed_language() -> None:
     query_executor = RecordingQueryExecutor()
     workflow_calls: list[object] = []
     orchestrator = RootOrchestrator(
@@ -1188,13 +1498,13 @@ async def test_write_intent_cannot_be_executed_as_read_only_query() -> None:
         runtime=RootRuntimeContext(),
     )
 
-    assert isinstance(result, ClarificationDispatchResult)
-    assert result.decision.reason_code == "WRITE_INTENT_ROUTE_MISMATCH"
-    assert query_executor.calls == []
+    assert isinstance(result, QueryDispatchResult)
+    assert result.decision.reason_code == "MISCLASSIFIED_READ_QUERY"
+    assert len(query_executor.calls) == 1
     assert workflow_calls == []
 
 
-async def test_opportunity_stage_write_intent_cannot_be_routed_to_query() -> None:
+async def test_root_does_not_use_regex_to_override_opportunity_decision() -> None:
     query_executor = RecordingQueryExecutor()
     workflow_calls: list[object] = []
     orchestrator = RootOrchestrator(
@@ -1220,9 +1530,9 @@ async def test_opportunity_stage_write_intent_cannot_be_routed_to_query() -> Non
         runtime=RootRuntimeContext(),
     )
 
-    assert isinstance(result, ClarificationDispatchResult)
-    assert result.decision.reason_code == "WRITE_INTENT_ROUTE_MISMATCH"
-    assert query_executor.calls == []
+    assert isinstance(result, QueryDispatchResult)
+    assert result.decision.reason_code == "MISCLASSIFIED_OPPORTUNITY_STAGE_QUERY"
+    assert len(query_executor.calls) == 1
     assert workflow_calls == []
 
 
@@ -1289,13 +1599,490 @@ async def test_follow_up_query_inherits_previous_canonical_query() -> None:
 
 
 class UnavailableDecisionClassifier:
+    def __init__(self, *, reason: str = "UNAVAILABLE") -> None:
+        self.reason = reason
+
     async def classify(self, **kwargs: object) -> RootDecision:
         from app.services.agent.orchestrator import RootDecisionModelUnavailableError
 
-        raise RootDecisionModelUnavailableError("decision model unavailable")
+        raise RootDecisionModelUnavailableError("decision model unavailable", reason=self.reason)
 
 
-async def test_global_follow_up_query_bypasses_unavailable_decision_model() -> None:
+async def test_every_ordinary_text_turn_reaches_root_classifier_before_capability_parsers() -> None:
+    workflow_calls: list[object] = []
+    classifier = StubDecisionClassifier(workflow_decision(reason_code="ROOT_ACTIVITY_WRITE"))
+    semantic_resolver = CountingUnavailableSemanticIntentResolver()
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(),
+        decision_classifier=classifier,
+        query_executor=RecordingQueryExecutor(),
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=recording_workflow_subgraph(workflow_calls),
+        semantic_intent_resolver=semantic_resolver,
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=1,
+            session_id=556,
+            client_request_id="req_root_first_activity",
+            input=TextTurnInput(
+                type="text",
+                text="刚刚和河南双汇技术经理沟通了 POC 部署的问题",
+            ),
+        ),
+        runtime=RootRuntimeContext(),
+    )
+
+    assert isinstance(result, WorkflowDispatchResult)
+    assert len(classifier.calls) == 1
+    assert semantic_resolver.calls == []
+    assert workflow_calls[0]["start"] == {
+        "kind": "text",
+        "text": "刚刚和河南双汇技术经理沟通了 POC 部署的问题",
+        "semantic_plan": workflow_decision().semantic_plan.model_dump(mode="json"),
+    }
+
+
+async def test_explicit_customer_list_query_is_not_swallowed_by_misclassified_workflow_resume() -> None:
+    query_executor = RecordingQueryExecutor()
+    # Recovery must use the canonical business-semantic intake. The
+    # query-only resolver is deliberately not a second top-level router.
+    semantic_plan_resolver = RecordingSemanticPlanResolver(
+        AgentSemanticPlan(
+            speech_act="ASK_FACT",
+            business_object="CUSTOMER",
+            operation="READ",
+            query_plan=AgentQueryPlan(
+                scope="customer_list",
+                resource="customers",
+            ),
+            confidence=0.97,
+        )
+    )
+    semantic_resolver = RecordingSemanticIntentResolver(
+        CRMQuerySemanticIntent(
+            scope="customer_list",
+            resource="customers",
+            confidence=0.97,
+        )
+    )
+    # This reproduces the production regression: Root incorrectly treats an
+    # independent customer query as a continuation, even though no Workflow
+    # is active. The query semantic seam must protect the capability boundary.
+    root_classifier = StubDecisionClassifier(
+        workflow_decision(
+            task_relation="CONTINUE_TASK",
+            active_workflow="RESUME",
+            reason_code="MISCLASSIFIED_QUERY_RESUME",
+        )
+    )
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(),
+        decision_classifier=root_classifier,
+        query_executor=query_executor,
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=failing_workflow_subgraph(),
+        semantic_intent_resolver=semantic_resolver,
+        semantic_plan_resolver=semantic_plan_resolver,
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=1,
+            session_id=556,
+            client_request_id="req_customer_list_query_route_regression",
+            input=TextTurnInput(type="text", text="有哪些上海的客户"),
+        ),
+        runtime=RootRuntimeContext(
+            query_model_config=CRMQueryAgentModelConfig(
+                api_host="https://ai.example.com/v1",
+                api_key="key",
+                model="query-model",
+                temperature=0.0,
+            )
+        ),
+    )
+
+    assert isinstance(result, QueryDispatchResult)
+    assert result.decision.route == "QUERY"
+    assert result.decision.reason_code == "SEMANTIC_READ_ROUTE"
+    assert semantic_resolver.calls == []
+    assert [turn.input.text for turn in semantic_plan_resolver.calls] == ["有哪些上海的客户"]
+    assert len(query_executor.calls) == 1
+    assert len(root_classifier.calls) == 1
+
+
+async def test_root_classifies_before_query_semantic_enrichment() -> None:
+    """A normal query must not invoke a second router before Root decides."""
+
+    events: list[str] = []
+
+    class OrderedClassifier(StubDecisionClassifier):
+        async def classify(
+            self,
+            *,
+            turn: RootTurnInput,
+            context: RootContextSnapshot,
+            runtime: RootRuntimeContext,
+        ) -> RootDecision:
+            events.append("root")
+            return await super().classify(turn=turn, context=context, runtime=runtime)
+
+    class OrderedSemanticResolver(RecordingSemanticIntentResolver):
+        async def resolve(
+            self,
+            text: str,
+            *,
+            model_config: object,
+            runtime: object,
+        ) -> CRMQuerySemanticIntent:
+            events.append("query_semantic")
+            return await super().resolve(text, model_config=model_config, runtime=runtime)
+
+    query_semantic_resolver = OrderedSemanticResolver(
+        CRMQuerySemanticIntent(
+            scope="customer_list",
+            resource="customers",
+            confidence=0.99,
+        )
+    )
+    root_classifier = OrderedClassifier(query_decision())
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(),
+        decision_classifier=root_classifier,
+        query_executor=RecordingQueryExecutor(),
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=failing_workflow_subgraph(),
+        semantic_intent_resolver=query_semantic_resolver,
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=1,
+            session_id=556,
+            client_request_id="req_root_precedes_query_semantic",
+            input=TextTurnInput(type="text", text="有哪些上海的客户"),
+        ),
+        runtime=RootRuntimeContext(
+            query_model_config=CRMQueryAgentModelConfig(
+                api_host="https://ai.example.com/v1",
+                api_key="key",
+                model="query-model",
+                temperature=0.0,
+            )
+        ),
+    )
+
+    assert isinstance(result, QueryDispatchResult)
+    assert events == ["root", "query_semantic"]
+    assert len(query_semantic_resolver.calls) == 1
+
+
+
+async def test_complete_root_query_plan_avoids_specialized_query_model_call() -> None:
+    """A complete Root query intake is sufficient for one-turn Query execution."""
+
+    query_executor = RecordingQueryExecutor()
+    semantic_resolver = CountingUnavailableSemanticIntentResolver()
+    root_plan = AgentSemanticPlan(
+        speech_act="ASK_FACT",
+        business_object="CUSTOMER",
+        operation="READ",
+        query_plan=AgentQueryPlan(
+            scope="customer_list",
+            resource="customers",
+        ),
+        confidence=0.99,
+    )
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(),
+        decision_classifier=StubDecisionClassifier(query_decision(semantic_plan=root_plan)),
+        query_executor=query_executor,
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=failing_workflow_subgraph(),
+        semantic_intent_resolver=semantic_resolver,
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=1,
+            session_id=556,
+            client_request_id="req_complete_root_query_plan",
+            input=TextTurnInput(type="text", text="有哪些上海的客户"),
+        ),
+        runtime=RootRuntimeContext(),
+    )
+
+    assert isinstance(result, QueryDispatchResult)
+    assert semantic_resolver.calls == []
+    assert len(query_executor.calls) == 1
+    assert query_executor.calls[0].semantic_intent is not None
+    assert query_executor.calls[0].semantic_intent.scope == "customer_list"
+    assert query_executor.calls[0].semantic_intent.resource == "customers"
+
+
+
+async def test_global_work_query_ignores_stale_customer_and_workflow_context() -> None:
+    """A global read stays independent even when Root returns stale policy hints."""
+
+    active_workflow = WorkflowRef(
+        workflow_id="wf_active_activity",
+        interrupt_id="int_active_activity",
+    )
+    selected_customer = EntityRef(
+        ref_id="eref_stale_customer",
+        resource="customer",
+        public_id="cus_stale_customer",
+        display_name="河南双汇发展股份有限公司",
+    )
+    query_executor = RecordingQueryExecutor()
+    workflow_calls: list[object] = []
+    root_plan = AgentSemanticPlan(
+        speech_act="ASK_FACT",
+        business_object="FOLLOW_UP_TASK",
+        operation="READ",
+        query_plan=AgentQueryPlan(
+            scope="global_work",
+            resource="completed_work",
+            query_goal="summarize",
+            temporal={"kind": "this_week"},
+        ),
+        confidence=0.98,
+    )
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(
+            RootContextSnapshot(active_workflow=active_workflow)
+        ),
+        decision_classifier=StubDecisionClassifier(
+            query_decision(
+                task_relation="CONTINUE_TASK",
+                active_workflow="RESUME",
+                selected_entity="USE",
+                previous_query="USE",
+                result_set="USE",
+                reason_code="ROOT_STALE_CONTINUATION_POLICY",
+                semantic_plan=root_plan,
+            )
+        ),
+        query_executor=query_executor,
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=recording_workflow_subgraph(workflow_calls),
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=1,
+            session_id=556,
+            client_request_id="req_global_work_stale_context",
+            input=TextTurnInput(type="text", text="我本周做了什么"),
+            selected_entity_ref=selected_customer,
+        ),
+        runtime=RootRuntimeContext(),
+    )
+
+    assert isinstance(result, QueryDispatchResult)
+    assert result.decision.route == "QUERY"
+    assert result.decision.task_relation == "SWITCH_TASK"
+    assert result.decision.context_policy.active_workflow == "SUSPEND"
+    assert result.decision.context_policy.selected_entity == "IGNORE"
+    assert result.decision.context_policy.previous_query == "IGNORE"
+    assert result.decision.context_policy.result_set == "IGNORE"
+    assert query_executor.calls[0].selected_entity is None
+    assert query_executor.calls[0].previous_query is None
+    assert query_executor.calls[0].result_set is None
+    assert query_executor.calls[0].semantic_intent is not None
+    assert query_executor.calls[0].semantic_intent.scope == "global_work"
+    assert query_executor.calls[0].semantic_intent.resource == "completed_work"
+    assert query_executor.calls[0].semantic_intent.temporal.kind == "this_week"
+    assert workflow_calls == []
+
+
+async def test_canonical_recovery_cannot_swallow_activity_event_into_query() -> None:
+    query_executor = RecordingQueryExecutor()
+    workflow_calls: list[object] = []
+    semantic_plan_resolver = RecordingSemanticPlanResolver(
+        AgentSemanticPlan(
+            speech_act="ASSERT_EVENT",
+            business_object="CUSTOMER_ACTIVITY",
+            operation="CREATE",
+            customer_reference="河南双汇",
+            activity_content="刚刚和技术经理沟通 POC 部署的问题",
+            confidence=0.96,
+        )
+    )
+    query_semantic_resolver = RecordingSemanticIntentResolver(
+        CRMQuerySemanticIntent(
+            scope="customer_list",
+            resource="customers",
+            confidence=0.99,
+        )
+    )
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(),
+        decision_classifier=StubDecisionClassifier(
+            query_decision(
+                reason_code="ROOT_MISCLASSIFIED_ACTIVITY",
+                semantic_plan=AgentSemanticPlan(
+                    speech_act="UNKNOWN",
+                    business_object="UNKNOWN",
+                    operation="UNKNOWN",
+                    confidence=0.30,
+                ),
+            )
+        ),
+        query_executor=query_executor,
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=recording_workflow_subgraph(workflow_calls),
+        semantic_intent_resolver=query_semantic_resolver,
+        semantic_plan_resolver=semantic_plan_resolver,
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=1,
+            session_id=556,
+            client_request_id="req_canonical_recovery_activity_route",
+            input=TextTurnInput(text="刚刚和河南双汇技术经理沟通了 POC 部署的问题", type="text"),
+        ),
+        runtime=RootRuntimeContext(
+            query_model_config=CRMQueryAgentModelConfig(
+                api_host="https://ai.example.com/v1",
+                api_key="key",
+                model="query-model",
+                temperature=0.0,
+            )
+        ),
+    )
+
+    assert isinstance(result, WorkflowDispatchResult)
+    assert result.decision.route == "WORKFLOW"
+    assert result.decision.reason_code == "SEMANTIC_ACTIVITY_WRITE"
+    assert semantic_plan_resolver.calls
+    assert query_semantic_resolver.calls == []
+    assert query_executor.calls == []
+    assert len(workflow_calls) == 1
+
+
+async def test_explicit_root_read_wins_over_conflicting_canonical_activity_parse() -> None:
+    """A query mentioning activities must not be turned into a write by a noisy parser."""
+
+    query_executor = RecordingQueryExecutor()
+    semantic_plan_resolver = RecordingSemanticPlanResolver(
+        AgentSemanticPlan(
+            speech_act="ASSERT_EVENT",
+            business_object="CUSTOMER_ACTIVITY",
+            operation="CREATE",
+            customer_reference="河南双汇",
+            activity_content="查询客户最近的活动记录",
+            confidence=0.96,
+        )
+    )
+    query_semantic_resolver = RecordingSemanticIntentResolver(
+        CRMQuerySemanticIntent(
+            scope="customer_scoped",
+            resource="customer_activities",
+            customer_text="河南双汇",
+            confidence=0.99,
+        )
+    )
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(),
+        decision_classifier=StubDecisionClassifier(
+            query_decision(reason_code="ROOT_EXPLICIT_ACTIVITY_QUERY")
+        ),
+        query_executor=query_executor,
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=failing_workflow_subgraph(),
+        semantic_intent_resolver=query_semantic_resolver,
+        semantic_plan_resolver=semantic_plan_resolver,
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=1,
+            session_id=556,
+            client_request_id="req_activity_query_parser_conflict",
+            input=TextTurnInput(type="text", text="查询河南双汇最近的活动记录"),
+        ),
+        runtime=RootRuntimeContext(
+            query_model_config=CRMQueryAgentModelConfig(
+                api_host="https://ai.example.com/v1",
+                api_key="key",
+                model="query-model",
+                temperature=0.0,
+            )
+        ),
+    )
+
+    assert isinstance(result, QueryDispatchResult)
+    assert result.decision.route == "QUERY"
+    assert result.decision.risk == "READ_ONLY"
+    assert query_semantic_resolver.calls == ["查询河南双汇最近的活动记录"]
+    assert len(query_executor.calls) == 1
+
+
+async def test_root_routes_query_before_semantic_enrichment() -> None:
+    classifier = StubDecisionClassifier(query_decision(reason_code="ROOT_QUERY"))
+    semantic_resolver = RecordingSemanticIntentResolver(
+        CRMQuerySemanticIntent(
+            scope="customer_scoped",
+            resource="follow_up_tasks",
+            customer_text="河南双汇",
+            confidence=0.95,
+        )
+    )
+    query_executor = RecordingQueryExecutor()
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(),
+        decision_classifier=classifier,
+        query_executor=query_executor,
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=failing_workflow_subgraph(),
+        semantic_intent_resolver=semantic_resolver,
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=1,
+            session_id=556,
+            client_request_id="req_root_first_query",
+            input=TextTurnInput(type="text", text="查一下河南双汇最近的跟进记录"),
+        ),
+        runtime=RootRuntimeContext(
+            query_model_config=CRMQueryAgentModelConfig(
+                api_host="https://ai.example.com/v1",
+                api_key="key",
+                model="query-model",
+                temperature=0.0,
+            )
+        ),
+    )
+
+    assert isinstance(result, QueryDispatchResult)
+    assert len(classifier.calls) == 1
+    assert result.decision.reason_code == "ROOT_QUERY"
+    assert semantic_resolver.calls == ["查一下河南双汇最近的跟进记录"]
+    assert query_executor.calls[0].semantic_intent == semantic_resolver.intent
+
+
+async def test_global_follow_up_query_requires_root_decision_model() -> None:
     query_executor = RecordingQueryExecutor()
     orchestrator = RootOrchestrator(
         checkpointer=InMemorySaver(),
@@ -1322,7 +2109,7 @@ async def test_global_follow_up_query_bypasses_unavailable_decision_model() -> N
     assert query_executor.calls == []
 
 
-async def test_semantic_query_preflight_routes_global_work_before_root_classifier() -> None:
+async def test_root_selected_global_work_query_uses_semantic_enrichment() -> None:
     query_executor = RecordingQueryExecutor()
     semantic_resolver = RecordingSemanticIntentResolver(
         CRMQuerySemanticIntent(
@@ -1332,10 +2119,11 @@ async def test_semantic_query_preflight_routes_global_work_before_root_classifie
             confidence=0.97,
         )
     )
+    root_classifier = StubDecisionClassifier(query_decision(reason_code="ROOT_SELECTED_QUERY"))
     orchestrator = RootOrchestrator(
         checkpointer=InMemorySaver(),
         context_resolver=StaticContextResolver(),
-        decision_classifier=UnavailableDecisionClassifier(),
+        decision_classifier=root_classifier,
         query_executor=query_executor,
         interaction_resolver=FailingInteractionResolver(),
         workflow_subgraph=failing_workflow_subgraph(),
@@ -1347,7 +2135,7 @@ async def test_semantic_query_preflight_routes_global_work_before_root_classifie
             team_id=1,
             user_id=1,
             session_id=556,
-            client_request_id="req_semantic_global_work_preflight",
+            client_request_id="req_semantic_global_work_enrichment",
             input=TextTurnInput(type="text", text="这周有哪些事情要做"),
         ),
         runtime=RootRuntimeContext(
@@ -1361,10 +2149,51 @@ async def test_semantic_query_preflight_routes_global_work_before_root_classifie
     )
 
     assert isinstance(result, QueryDispatchResult)
-    assert result.decision.reason_code == "SEMANTIC_QUERY_INTENT"
+    assert result.decision.reason_code == "ROOT_SELECTED_QUERY"
+    assert len(root_classifier.calls) == 1
     assert semantic_resolver.calls == ["这周有哪些事情要做"]
     assert len(query_executor.calls) == 1
     assert query_executor.calls[0].semantic_intent == semantic_resolver.intent
+
+
+async def test_query_semantic_failure_is_not_replayed_by_query_executor() -> None:
+    semantic_resolver = CountingUnavailableSemanticIntentResolver()
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(),
+        decision_classifier=StubDecisionClassifier(query_decision(reason_code="FALLBACK_QUERY")),
+        query_executor=CRMQueryAgentExecutor(
+            query_agent=RecordingCRMQueryAgent(),
+            semantic_intent_resolver=semantic_resolver,
+        ),
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=failing_workflow_subgraph(),
+        semantic_intent_resolver=semantic_resolver,
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=1,
+            session_id=556,
+            client_request_id="req_semantic_enrichment_no_replay",
+            input=TextTurnInput(type="text", text="查询河南双汇发展最近的跟进记录"),
+        ),
+        runtime=RootRuntimeContext(
+            db=object(),
+            authorization="Bearer test-token",
+            query_model_config=CRMQueryAgentModelConfig(
+                api_host="https://ai.example.com/v1",
+                api_key="key",
+                model="query-model",
+                temperature=0.0,
+            ),
+        ),
+    )
+
+    assert isinstance(result, FailureDispatchResult)
+    assert result.error.code == "QUERY_SEMANTIC_INTENT_UNAVAILABLE"
+    assert semantic_resolver.calls == ["查询河南双汇发展最近的跟进记录"]
 
 
 async def test_selected_customer_semantic_query_uses_selected_entity_without_customer_text() -> None:
@@ -1386,7 +2215,13 @@ async def test_selected_customer_semantic_query_uses_selected_entity_without_cus
     orchestrator = RootOrchestrator(
         checkpointer=InMemorySaver(),
         context_resolver=StaticContextResolver(),
-        decision_classifier=UnavailableDecisionClassifier(),
+        decision_classifier=StubDecisionClassifier(
+            query_decision(
+                task_relation="NEW_TASK",
+                selected_entity="USE",
+                reason_code="ROOT_SELECTED_CUSTOMER_QUERY",
+            )
+        ),
         query_executor=query_executor,
         interaction_resolver=FailingInteractionResolver(),
         workflow_subgraph=failing_workflow_subgraph(),
@@ -1418,7 +2253,7 @@ async def test_selected_customer_semantic_query_uses_selected_entity_without_cus
     assert query_executor.calls[0].semantic_intent == semantic_resolver.intent
 
 
-async def test_explicit_query_bypasses_unavailable_decision_model() -> None:
+async def test_explicit_query_requires_root_decision_model() -> None:
     query_executor = RecordingQueryExecutor()
     orchestrator = RootOrchestrator(
         checkpointer=InMemorySaver(),
@@ -1440,12 +2275,12 @@ async def test_explicit_query_bypasses_unavailable_decision_model() -> None:
         runtime=RootRuntimeContext(),
     )
 
-    assert isinstance(result, QueryDispatchResult)
-    assert result.decision.reason_code == "EXPLICIT_INDEPENDENT_READ_QUERY"
-    assert len(query_executor.calls) == 1
+    assert isinstance(result, FailureDispatchResult)
+    assert result.error.code == "ROOT_DECISION_MODEL_UNAVAILABLE"
+    assert query_executor.calls == []
 
 
-async def test_explicit_follow_up_bypasses_unavailable_decision_model() -> None:
+async def test_explicit_follow_up_requires_root_decision_model() -> None:
     workflow_calls: list[object] = []
     orchestrator = RootOrchestrator(
         checkpointer=InMemorySaver(),
@@ -1473,9 +2308,9 @@ async def test_explicit_follow_up_bypasses_unavailable_decision_model() -> None:
         runtime=RootRuntimeContext(),
     )
 
-    assert isinstance(result, WorkflowDispatchResult)
-    assert result.decision.reason_code == "EXPLICIT_FOLLOW_UP_WORKFLOW"
-    assert len(workflow_calls) == 1
+    assert isinstance(result, FailureDispatchResult)
+    assert result.error.code == "ROOT_DECISION_MODEL_UNAVAILABLE"
+    assert workflow_calls == []
 
 
 async def test_ambiguous_intent_with_unavailable_decision_model_returns_typed_failure() -> None:
@@ -1504,6 +2339,34 @@ async def test_ambiguous_intent_with_unavailable_decision_model_returns_typed_fa
     assert isinstance(result, FailureDispatchResult)
     assert result.decision is None
     assert result.error.code == "ROOT_DECISION_MODEL_UNAVAILABLE"
+    assert result.error.message == "AI 暂时没有回应，请稍后再试。"  # noqa: RUF001
+    assert result.error.retryable is True
+
+
+async def test_root_model_timeout_returns_explicit_human_facing_failure() -> None:
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(),
+        decision_classifier=UnavailableDecisionClassifier(reason="TIMEOUT"),
+        query_executor=RecordingQueryExecutor(),
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=failing_workflow_subgraph(),
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=1,
+            session_id=556,
+            client_request_id="req_root_model_timeout",
+            input=TextTurnInput(type="text", text="刚刚和河南双汇技术经理沟通了 POC 部署"),
+        ),
+        runtime=RootRuntimeContext(),
+    )
+
+    assert isinstance(result, FailureDispatchResult)
+    assert result.error.code == "ROOT_DECISION_MODEL_TIMEOUT"
+    assert result.error.message == "AI 刚才响应超时了，请再试一次。"  # noqa: RUF001
     assert result.error.retryable is True
 
 
@@ -1544,6 +2407,7 @@ async def test_invalid_structured_decision_returns_typed_failure() -> None:
 
     assert isinstance(result, FailureDispatchResult)
     assert result.error.code == "ROOT_DECISION_INVALID_OUTPUT"
+    assert result.error.message == "我还没理解这句话，请换一种说法试试。"  # noqa: RUF001
     assert result.error.retryable is False
 
 
@@ -1618,7 +2482,7 @@ async def test_typed_query_execution_error_preserves_code_and_hides_internal_mes
 
     assert isinstance(result, FailureDispatchResult)
     assert result.error.code == "QUERY_INVALID"
-    assert result.error.message == "查询条件无法识别，请换一种说法或补充筛选条件。"  # noqa: RUF001
+    assert result.error.message == "我还没看懂你要查什么，请补充客户、时间或内容。"  # noqa: RUF001
     assert result.error.message != "internal query parser detail"
     assert result.error.retryable is False
 
@@ -1781,3 +2645,602 @@ async def test_workflow_execution_error_returns_typed_failure() -> None:
     assert isinstance(result, FailureDispatchResult)
     assert result.error.code == "WORKFLOW_EXECUTION_FAILED"
     assert result.error.retryable is True
+
+async def test_activity_event_semantics_override_a_misclassified_query_route() -> None:
+    query_executor = RecordingQueryExecutor()
+    workflow_calls: list[object] = []
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(),
+        decision_classifier=StubDecisionClassifier(
+            RootDecision.model_validate(
+                {
+                    "task_relation": "NEW_TASK",
+                    "route": "QUERY",
+                    "risk": "READ_ONLY",
+                    "context_policy": {
+                        "selected_entity": "IGNORE",
+                        "previous_query": "IGNORE",
+                        "result_set": "IGNORE",
+                        "active_workflow": "NONE",
+                        "conversation_memory": "USE",
+                    },
+                    "confidence": 0.98,
+                    "reason_code": "MODEL_MISCLASSIFIED_ACTIVITY",
+                    "semantic_plan": {
+                        "speech_act": "ASSERT_EVENT",
+                        "business_object": "CUSTOMER_ACTIVITY",
+                        "operation": "CREATE",
+                        "user_goal": "记录刚刚发生的客户沟通",
+                        "customer_reference": "河南双汇",
+                        "activity_content": "与技术经理沟通 POC 部署的问题",
+                        "confidence": 0.97,
+                    },
+                }
+            )
+        ),
+        query_executor=query_executor,
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=recording_workflow_subgraph(workflow_calls),
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=1,
+            session_id=556,
+            client_request_id="req_activity_semantic_route_guard",
+            input=TextTurnInput(
+                type="text",
+                text="刚刚和河南双汇技术经理沟通了 POC 部署的问题",
+            ),
+        ),
+        runtime=RootRuntimeContext(),
+    )
+
+    assert isinstance(result, WorkflowDispatchResult)
+    assert result.decision.route == "WORKFLOW"
+    assert result.decision.risk == "WRITE"
+    assert result.decision.reason_code == "SEMANTIC_ACTIVITY_WRITE"
+    assert query_executor.calls == []
+    assert len(workflow_calls) == 1
+    assert workflow_calls[0]["start"]["semantic_plan"]["business_object"] == "CUSTOMER_ACTIVITY"
+    assert workflow_calls[0]["start"]["semantic_plan"]["operation"] == "CREATE"
+
+
+async def test_missing_continuation_prefers_canonical_write_over_query_enrichment() -> None:
+    """A query-only resolver must not downgrade a clear write during recovery."""
+
+    query_executor = RecordingQueryExecutor()
+    workflow_calls: list[object] = []
+    semantic_plan_resolver = RecordingSemanticPlanResolver(
+        AgentSemanticPlan(
+            speech_act="ASSERT_EVENT",
+            business_object="CUSTOMER_ACTIVITY",
+            operation="CREATE",
+            user_goal="记录刚刚发生的客户沟通",
+            customer_reference="河南双汇",
+            activity_content="与技术经理沟通 POC 部署的问题",
+            confidence=0.96,
+        )
+    )
+    decision = workflow_decision(
+        task_relation="CONTINUE_TASK",
+        active_workflow="RESUME",
+        reason_code="MODEL_STALE_CONTINUATION",
+        semantic_plan=AgentSemanticPlan(
+            speech_act="UNKNOWN",
+            business_object="UNKNOWN",
+            operation="UNKNOWN",
+            confidence=0.20,
+        ),
+    )
+    query_semantic_resolver = RecordingSemanticIntentResolver(
+        CRMQuerySemanticIntent(
+            scope="customer_list",
+            resource="customers",
+            confidence=0.99,
+        )
+    )
+
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(),
+        decision_classifier=StubDecisionClassifier(decision),
+        semantic_plan_resolver=semantic_plan_resolver,
+        semantic_intent_resolver=query_semantic_resolver,
+        query_executor=query_executor,
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=recording_workflow_subgraph(workflow_calls),
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=1,
+            session_id=556,
+            client_request_id="req_missing_continuation_write_recovery",
+            input=TextTurnInput(type="text", text="刚刚和河南双汇技术经理沟通了 POC 部署的问题"),
+        ),
+        runtime=RootRuntimeContext(
+            query_model_config=CRMQueryAgentModelConfig(
+                api_host="https://ai.example.com/v1",
+                api_key="key",
+                model="query-model",
+                temperature=0.0,
+            )
+        ),
+    )
+
+    assert isinstance(result, WorkflowDispatchResult)
+    assert result.decision.route == "WORKFLOW"
+    assert result.decision.task_relation == "NEW_TASK"
+    assert result.decision.context_policy.active_workflow == "NONE"
+    assert query_executor.calls == []
+    assert query_semantic_resolver.calls == []
+    assert len(semantic_plan_resolver.calls) == 1
+    assert len(workflow_calls) == 1
+
+
+async def test_activity_query_semantics_keep_read_route() -> None:
+    query_executor = RecordingQueryExecutor()
+    workflow_calls: list[object] = []
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(),
+        decision_classifier=StubDecisionClassifier(
+            RootDecision.model_validate(
+                {
+                    "task_relation": "NEW_TASK",
+                    "route": "WORKFLOW",
+                    "risk": "WRITE",
+                    "context_policy": {
+                        "selected_entity": "IGNORE",
+                        "previous_query": "IGNORE",
+                        "result_set": "IGNORE",
+                        "active_workflow": "NONE",
+                        "conversation_memory": "USE",
+                    },
+                    "confidence": 0.98,
+                    "reason_code": "MODEL_MISCLASSIFIED_QUERY",
+                    "semantic_plan": {
+                        "speech_act": "ASK_FACT",
+                        "business_object": "CUSTOMER_ACTIVITY",
+                        "operation": "READ",
+                        "user_goal": "查询客户最近的跟进记录",
+                        "customer_reference": "河南双汇",
+                        "query_target": "最近的跟进记录",
+                        "confidence": 0.97,
+                    },
+                }
+            )
+        ),
+        query_executor=query_executor,
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=recording_workflow_subgraph(workflow_calls),
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=1,
+            session_id=556,
+            client_request_id="req_activity_semantic_query_guard",
+            input=TextTurnInput(type="text", text="查询河南双汇最近的跟进记录"),
+        ),
+        runtime=RootRuntimeContext(),
+    )
+
+    assert isinstance(result, QueryDispatchResult)
+    assert result.decision.route == "QUERY"
+    assert result.decision.risk == "READ_ONLY"
+    assert result.decision.reason_code == "SEMANTIC_ACTIVITY_QUERY"
+    assert len(query_executor.calls) == 1
+    assert workflow_calls == []
+
+
+async def test_clarify_candidate_is_recovered_when_it_contains_a_supported_activity_write() -> None:
+    """CLARIFY must not become a silent escape hatch around Customer Activity Workflow."""
+
+    query_executor = RecordingQueryExecutor()
+    workflow_calls: list[object] = []
+    semantic_plan_resolver = RecordingSemanticPlanResolver(
+        AgentSemanticPlan(
+            speech_act="ASSERT_EVENT",
+            business_object="CUSTOMER_ACTIVITY",
+            operation="CREATE",
+            user_goal="记录刚刚与客户技术经理沟通 POC 部署的事实",
+            customer_reference="河南双汇",
+            activity_content="与技术经理沟通 POC 部署的问题",
+            confidence=0.96,
+        )
+    )
+    decision = RootDecision.model_validate(
+        {
+            "task_relation": "NEW_TASK",
+            "route": "CLARIFY",
+            "risk": "READ_ONLY",
+            "context_policy": {
+                "selected_entity": "IGNORE",
+                "previous_query": "IGNORE",
+                "result_set": "IGNORE",
+                "active_workflow": "NONE",
+                "conversation_memory": "USE",
+            },
+            "confidence": 0.66,
+            "reason_code": "MODEL_UNCERTAIN",
+            "clarification_question": "请说明你想查询还是记录这次沟通。",
+            "semantic_plan": {
+                "speech_act": "UNKNOWN",
+                "business_object": "UNKNOWN",
+                "operation": "UNKNOWN",
+                "confidence": 0.0,
+            },
+        }
+    )
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(),
+        decision_classifier=StubDecisionClassifier(decision),
+        semantic_plan_resolver=semantic_plan_resolver,
+        query_executor=query_executor,
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=recording_workflow_subgraph(workflow_calls),
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=1,
+            session_id=556,
+            client_request_id="req_activity_semantic_clarify_guard",
+            input=TextTurnInput(type="text", text="刚刚和河南双汇技术经理沟通了 POC 部署的问题"),
+        ),
+        runtime=RootRuntimeContext(),
+    )
+
+    assert isinstance(result, WorkflowDispatchResult)
+    assert result.decision.route == "WORKFLOW"
+    assert result.decision.risk == "WRITE"
+    assert result.decision.reason_code == "SEMANTIC_ACTIVITY_WRITE"
+    assert query_executor.calls == []
+    assert len(semantic_plan_resolver.calls) == 1
+    assert workflow_calls[0]["start"]["semantic_plan"]["business_object"] == "CUSTOMER_ACTIVITY"
+
+
+async def test_canonical_write_is_fallback_when_query_semantic_evidence_is_unavailable() -> None:
+    """A reliable write must not be downgraded to a read without query evidence."""
+
+    query_executor = RecordingQueryExecutor()
+    workflow_calls: list[object] = []
+    semantic_plan_resolver = RecordingSemanticPlanResolver(
+        AgentSemanticPlan(
+            speech_act="ASSERT_EVENT",
+            business_object="CUSTOMER_ACTIVITY",
+            operation="CREATE",
+            user_goal="记录刚刚与客户技术经理沟通 POC 部署的事实",
+            customer_reference="河南双汇",
+            activity_content="刚刚和河南双汇技术经理沟通了 POC 部署的问题",
+            confidence=0.96,
+            evidence=["用户陈述刚刚发生的客户沟通事实"],
+        )
+    )
+    # Simulate the production failure: Root cannot establish a reliable
+    # semantic plan. Canonical domain intake is the bounded recovery seam.
+    misclassified_decision = query_decision(
+        previous_query="USE",
+        result_set="USE",
+        reason_code="ROOT_SEMANTIC_PLAN_UNCERTAIN",
+        semantic_plan=AgentSemanticPlan(
+            speech_act="UNKNOWN",
+            business_object="UNKNOWN",
+            operation="UNKNOWN",
+            confidence=0.30,
+        ),
+    )
+    context = RootContextSnapshot(
+        previous_query=CRMQuerySpec(
+            resource="customer_activity",
+            projection=["content"],
+            filters=[],
+        ),
+        result_set=ResultSetContext(
+            result_set_id="rs_previous_activity",
+            ordered_entity_refs=[],
+        ),
+    )
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(context),
+        decision_classifier=StubDecisionClassifier(misclassified_decision),
+        semantic_plan_resolver=semantic_plan_resolver,
+        query_executor=query_executor,
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=recording_workflow_subgraph(workflow_calls),
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=1,
+            session_id=556,
+            client_request_id="req_activity_query_bypass_regression",
+            input=TextTurnInput(
+                type="text",
+                text="刚刚和河南双汇技术经理沟通了 POC 部署的问题",
+            ),
+        ),
+        runtime=RootRuntimeContext(),
+    )
+
+    assert isinstance(result, WorkflowDispatchResult)
+    assert result.decision.route == "WORKFLOW"
+    assert result.decision.reason_code == "SEMANTIC_ACTIVITY_WRITE"
+    assert result.decision.semantic_plan == semantic_plan_resolver.plan
+    assert len(semantic_plan_resolver.calls) == 1
+    assert query_executor.calls == []
+    assert len(workflow_calls) == 1
+    assert workflow_calls[0]["start"]["semantic_plan"] == semantic_plan_resolver.plan.model_dump(mode="json")
+
+
+async def test_low_confidence_semantic_write_cannot_fall_through_to_query() -> None:
+    query_executor = RecordingQueryExecutor()
+    workflow_calls: list[object] = []
+    decision = RootDecision.model_validate(
+        {
+            "task_relation": "NEW_TASK",
+            "route": "QUERY",
+            "risk": "READ_ONLY",
+            "context_policy": {
+                "selected_entity": "IGNORE",
+                "previous_query": "USE",
+                "result_set": "USE",
+                "active_workflow": "NONE",
+                "conversation_memory": "USE",
+            },
+            "confidence": 0.99,
+            "reason_code": "MODEL_CONFLICT",
+            "semantic_plan": {
+                "speech_act": "ASSERT_EVENT",
+                "business_object": "CUSTOMER_ACTIVITY",
+                "operation": "CREATE",
+                "confidence": 0.61,
+            },
+        }
+    )
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(),
+        decision_classifier=StubDecisionClassifier(decision),
+        query_executor=query_executor,
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=recording_workflow_subgraph(workflow_calls),
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=1,
+            session_id=556,
+            client_request_id="req_low_confidence_semantic_write",
+            input=TextTurnInput(type="text", text="刚刚和客户沟通了一下"),
+        ),
+        runtime=RootRuntimeContext(),
+    )
+
+    assert isinstance(result, ClarificationDispatchResult)
+    assert result.decision.route == "CLARIFY"
+    assert result.decision.reason_code == "SEMANTIC_ROUTE_AMBIGUOUS"
+    assert result.decision.semantic_plan.operation == "CREATE"
+    assert query_executor.calls == []
+    assert workflow_calls == []
+
+
+async def test_unsupported_canonical_write_cannot_fall_through_to_query() -> None:
+    """Unsupported mutations fail closed even when a query model guesses a read."""
+
+    query_executor = RecordingQueryExecutor()
+    query_semantic_resolver = RecordingSemanticIntentResolver(
+        CRMQuerySemanticIntent(
+            scope="customer_scoped",
+            resource="customer_activities",
+            customer_text="河南双汇",
+            confidence=0.99,
+        )
+    )
+    workflow_calls: list[object] = []
+    semantic_plan_resolver = RecordingSemanticPlanResolver(
+        AgentSemanticPlan(
+            speech_act="REQUEST_ACTION",
+            business_object="PAYMENT_RECORD",
+            operation="CREATE",
+            user_goal="记录客户回款",
+            confidence=0.96,
+        )
+    )
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(),
+        decision_classifier=StubDecisionClassifier(
+            query_decision(
+                reason_code="ROOT_SEMANTIC_PLAN_UNCERTAIN",
+                semantic_plan=AgentSemanticPlan(
+                    speech_act="UNKNOWN",
+                    business_object="UNKNOWN",
+                    operation="UNKNOWN",
+                    confidence=0.30,
+                ),
+            )
+        ),
+        query_executor=query_executor,
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=recording_workflow_subgraph(workflow_calls),
+        semantic_intent_resolver=query_semantic_resolver,
+        semantic_plan_resolver=semantic_plan_resolver,
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=1,
+            session_id=556,
+            client_request_id="req_unsupported_canonical_write",
+            input=TextTurnInput(type="text", text="河南双汇已经回款，帮我记录下来"),  # noqa: RUF001
+        ),
+        runtime=RootRuntimeContext(
+            query_model_config=CRMQueryAgentModelConfig(
+                api_host="https://ai.example.com/v1",
+                api_key="key",
+                model="query-model",
+                temperature=0.0,
+            )
+        ),
+    )
+
+    assert isinstance(result, ClarificationDispatchResult)
+    assert result.decision.reason_code == "SEMANTIC_WRITE_UNSUPPORTED"
+    assert query_semantic_resolver.calls == []
+    assert query_executor.calls == []
+    assert workflow_calls == []
+
+
+async def test_structured_semantic_plan_projects_opportunity_write_to_workflow() -> None:
+    query_executor = RecordingQueryExecutor()
+    workflow_calls: list[object] = []
+    decision = RootDecision.model_validate(
+        {
+            "task_relation": "NEW_TASK",
+            "route": "QUERY",
+            "risk": "READ_ONLY",
+            "context_policy": {
+                "selected_entity": "IGNORE",
+                "previous_query": "IGNORE",
+                "result_set": "IGNORE",
+                "active_workflow": "NONE",
+                "conversation_memory": "USE",
+            },
+            "confidence": 0.99,
+            "reason_code": "MODEL_CONFLICT",
+            "semantic_plan": {
+                "speech_act": "REQUEST_ACTION",
+                "business_object": "OPPORTUNITY",
+                "operation": "CREATE",
+                "user_goal": "创建一个商机",
+                "confidence": 0.96,
+            },
+        }
+    )
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(),
+        decision_classifier=StubDecisionClassifier(decision),
+        query_executor=query_executor,
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=recording_workflow_subgraph(workflow_calls),
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=1,
+            session_id=556,
+            client_request_id="req_opportunity_semantic_write",
+            input=TextTurnInput(type="text", text="帮我创建一个商机"),
+        ),
+        runtime=RootRuntimeContext(),
+    )
+
+    assert isinstance(result, WorkflowDispatchResult)
+    assert result.decision.route == "WORKFLOW"
+    assert result.decision.risk == "WRITE"
+    assert result.decision.reason_code == "SEMANTIC_WRITE_ROUTE"
+    assert query_executor.calls == []
+    assert len(workflow_calls) == 1
+
+
+async def test_canonical_semantic_intake_is_cached_for_repeated_text_in_one_runtime() -> None:
+    query_executor = RecordingQueryExecutor()
+    semantic_plan_resolver = RecordingSemanticPlanResolver(
+        AgentSemanticPlan(
+            speech_act="ASK_FACT",
+            business_object="UNKNOWN",
+            operation="READ",
+            user_goal="查询客户信息",
+            confidence=0.96,
+        )
+    )
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(),
+        decision_classifier=StubDecisionClassifier(
+            query_decision(
+                semantic_plan=AgentSemanticPlan(
+                    speech_act="UNKNOWN",
+                    business_object="UNKNOWN",
+                    operation="UNKNOWN",
+                    confidence=0.30,
+                )
+            )
+        ),
+        semantic_plan_resolver=semantic_plan_resolver,
+        query_executor=query_executor,
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=failing_workflow_subgraph(),
+    )
+    runtime = RootRuntimeContext()
+    text = "河南双汇最近的客户情况"
+
+    for request_id in ("req_cached_1", "req_cached_2"):
+        result = await orchestrator.dispatch(
+            RootTurnInput(
+                team_id=1,
+                user_id=1,
+                session_id=556,
+                client_request_id=request_id,
+                input=TextTurnInput(type="text", text=text),
+            ),
+            runtime=runtime,
+        )
+        assert isinstance(result, QueryDispatchResult)
+
+    assert len(semantic_plan_resolver.calls) == 1
+    assert len(query_executor.calls) == 2
+
+
+async def test_unsupported_structured_write_is_clarified_instead_of_entering_workflow() -> None:
+    query_executor = RecordingQueryExecutor()
+    workflow_calls: list[object] = []
+    decision = workflow_decision(
+        reason_code="MODEL_SELECTED_UNSUPPORTED_WRITE",
+        semantic_plan=AgentSemanticPlan(
+            speech_act="REQUEST_ACTION",
+            business_object="PAYMENT_RECORD",
+            operation="CREATE",
+            user_goal="记录回款",
+            confidence=0.97,
+        ),
+    )
+    orchestrator = RootOrchestrator(
+        checkpointer=InMemorySaver(),
+        context_resolver=StaticContextResolver(),
+        decision_classifier=StubDecisionClassifier(decision),
+        query_executor=query_executor,
+        interaction_resolver=FailingInteractionResolver(),
+        workflow_subgraph=recording_workflow_subgraph(workflow_calls),
+    )
+
+    result = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=1,
+            session_id=556,
+            client_request_id="req_unsupported_payment",
+            input=TextTurnInput(type="text", text="客户已经回款，帮我记录一下"),  # noqa: RUF001
+        ),
+        runtime=RootRuntimeContext(),
+    )
+
+    assert isinstance(result, ClarificationDispatchResult)
+    assert result.decision.reason_code == "SEMANTIC_WRITE_UNSUPPORTED"
+    assert query_executor.calls == []
+    assert workflow_calls == []

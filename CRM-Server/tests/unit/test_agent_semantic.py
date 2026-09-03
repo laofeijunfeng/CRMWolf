@@ -1,14 +1,28 @@
 """CRM AI Agent semantic parser tests."""
 
+from typing import ClassVar
+
 import pytest
 
+from app.services.agent.orchestrator.contracts import (
+    RootContextSnapshot,
+    RootRuntimeContext,
+    RootTurnInput,
+    TextTurnInput,
+)
+from app.services.agent.orchestrator.runtime import CRMRootSemanticPlanResolver
 from app.services.agent.prompts import (
     CRM_AGENT_SEMANTIC_SYSTEM_PROMPT,
     build_semantic_messages,
     render_semantic_system_prompt,
 )
 from app.services.agent.schemas import AgentSemanticParseResult
-from app.services.agent.semantic import AgentSemanticParser, AgentSemanticParserError
+from app.services.agent.semantic import (
+    AgentSemanticParseEnvelope,
+    AgentSemanticParser,
+    AgentSemanticParserError,
+)
+from app.services.agent.semantic_plan import semantic_plan_from_result
 
 
 def test_semantic_prompt_declares_stage_transition_as_semantic_only():
@@ -16,6 +30,109 @@ def test_semantic_prompt_declares_stage_transition_as_semantic_only():
     assert '"opportunity_stage_transition"' in CRM_AGENT_SEMANTIC_SYSTEM_PROMPT
     assert '"target_stage_name"' in CRM_AGENT_SEMANTIC_SYSTEM_PROMPT
     assert "禁止输出可信 stage_template_id" in CRM_AGENT_SEMANTIC_SYSTEM_PROMPT
+
+
+def test_semantic_prompt_distinguishes_event_assertion_from_activity_query():
+    assert "刚刚和河南双汇技术经理沟通了 POC 部署的问题" in CRM_AGENT_SEMANTIC_SYSTEM_PROMPT
+    assert "事件陈述中出现“沟通、跟进记录、客户活动、POC”等业务词，不代表用户在查询" in CRM_AGENT_SEMANTIC_SYSTEM_PROMPT  # noqa: RUF001
+
+
+def test_domain_semantic_result_projects_to_root_plan_without_lexical_rules():
+    result = AgentSemanticParseResult.model_validate(
+        {
+            "intent": "CUSTOMER_ACTIVITY",
+            "intent_confidence": 0.96,
+            "customer": {"name_text": "河南双汇", "confidence": 0.94},
+            "follow_up": {
+                "content": "刚刚和河南双汇技术经理沟通了 POC 部署的问题"
+            },
+            "evidence": ["用户陈述刚刚发生的客户沟通事实"],
+        }
+    )
+
+    plan = semantic_plan_from_result(result)
+
+    assert plan.speech_act == "ASSERT_EVENT"
+    assert plan.business_object == "CUSTOMER_ACTIVITY"
+    assert plan.operation == "CREATE"
+    assert plan.customer_reference == "河南双汇"
+    assert plan.confidence == 0.96
+
+
+class StubRootSemanticParser:
+    def __init__(self, result: AgentSemanticParseResult) -> None:
+        self.result = result
+        self.calls: ClassVar[list[dict[str, object]]] = []
+
+    async def parse_with_metadata(
+        self,
+        db: object,
+        *,
+        team_id: int,
+        user_message: str,
+    ) -> AgentSemanticParseEnvelope:
+        self.calls.append({"db": db, "team_id": team_id, "user_message": user_message})
+        return AgentSemanticParseEnvelope(
+            result=self.result,
+            parse_source="test",
+            model="test-model",
+        )
+
+
+@pytest.mark.asyncio
+async def test_root_semantic_resolver_projects_activity_without_reinterpreting_text():
+    parser = StubRootSemanticParser(
+        AgentSemanticParseResult.model_validate(
+            {
+                "intent": "CUSTOMER_ACTIVITY",
+                "intent_confidence": 0.96,
+                "customer": {"name_text": "河南双汇", "confidence": 0.94},
+                "follow_up": {"content": "沟通了 POC 部署"},
+            }
+        )
+    )
+    resolver = CRMRootSemanticPlanResolver(parser)
+    turn = RootTurnInput(
+        team_id=7,
+        user_id=8,
+        session_id=9,
+        client_request_id="req_semantic_resolver",
+        input=TextTurnInput(type="text", text="刚刚和河南双汇技术经理沟通了 POC 部署的问题"),
+    )
+
+    plan = await resolver.resolve(
+        turn=turn,
+        context=RootContextSnapshot(),
+        runtime=RootRuntimeContext(db=object()),
+    )
+
+    assert plan is not None
+    assert plan.speech_act == "ASSERT_EVENT"
+    assert plan.business_object == "CUSTOMER_ACTIVITY"
+    assert plan.operation == "CREATE"
+    assert parser.calls[0]["team_id"] == 7
+    assert parser.calls[0]["user_message"] == turn.input.text
+
+
+@pytest.mark.asyncio
+async def test_root_semantic_resolver_returns_none_without_database_or_text():
+    parser = StubRootSemanticParser(
+        AgentSemanticParseResult.model_validate({"intent": "CUSTOMER_ACTIVITY", "intent_confidence": 1.0})
+    )
+    resolver = CRMRootSemanticPlanResolver(parser)
+    runtime = RootRuntimeContext()
+    text_turn = RootTurnInput(
+        team_id=1,
+        user_id=1,
+        session_id=1,
+        client_request_id="req_no_db",
+        input=TextTurnInput(type="text", text="记录一次沟通"),
+    )
+
+    assert await resolver.resolve(
+        turn=text_turn, context=RootContextSnapshot(), runtime=runtime
+    ) is None
+    assert parser.calls == []
 
 
 def test_semantic_prompt_contains_business_and_boundary_rules():
@@ -116,12 +233,12 @@ def test_semantic_prompt_injects_team_source_names_instead_of_hardcoded_enum():
         default_source_name="未分类",
     )
 
-    assert "获客来源只能输出当前团队启用项：线上注册、未分类" in prompt
+    assert "获客来源只能输出当前团队启用项：线上注册、未分类" in prompt  # noqa: RUF001
     assert "禁止输出“线索转化”" in prompt
     assert '"source": "线上注册|未分类|null"' in prompt
     assert "用户未明确来源时默认可输出“未分类”" in prompt
     assert "线上注册|市场活动|客户推荐|电话营销|网站咨询|展会|其他" not in prompt
-    assert "获客来源只能输出当前团队启用项：线上注册、未分类" in messages[0]["content"]
+    assert "获客来源只能输出当前团队启用项：线上注册、未分类" in messages[0]["content"]  # noqa: RUF001
 
 
 @pytest.mark.asyncio
@@ -131,7 +248,7 @@ async def test_semantic_parser_uses_single_structured_path_and_disables_qwen_thi
     from app.services.agent import semantic
 
     class FakeChatModel:
-        calls = []
+        calls: ClassVar[list[dict[str, object]]] = []
 
         def __init__(self, **kwargs):
             self.kwargs = kwargs
@@ -271,7 +388,7 @@ async def test_semantic_decision_entrypoints_never_use_legacy_stream(
     from app.services.agent import semantic
 
     class FakeChatModel:
-        calls = []
+        calls: ClassVar[list[dict[str, object]]] = []
 
         def __init__(self, **call_kwargs):
             self.__class__.calls.append(call_kwargs)
@@ -301,7 +418,7 @@ async def test_semantic_decision_entrypoints_never_use_legacy_stream(
         chat_model_factory=FakeChatModel,
     )
 
-    with pytest.raises(AgentSemanticParserError, match="LangChain .* 调用失败"):
+    with pytest.raises(AgentSemanticParserError, match=r"LangChain .* 调用失败"):
         await getattr(parser, method_name)(
             object(),
             team_id=1,
@@ -311,3 +428,20 @@ async def test_semantic_decision_entrypoints_never_use_legacy_stream(
 
     assert FakeChatModel.calls[0]["extra_body"] == {"enable_thinking": False}
     assert FakeChatModel.calls[0]["max_retries"] == 0
+
+
+def test_semantic_result_keeps_unsupported_capability_identity_for_root_boundary():
+    payment_result = AgentSemanticParseResult.model_validate(
+        {"intent": "PAYMENT_RECORD", "intent_confidence": 0.93}
+    )
+    lead_result = AgentSemanticParseResult.model_validate(
+        {"intent": "CREATE_LEAD", "intent_confidence": 0.91}
+    )
+
+    payment_plan = semantic_plan_from_result(payment_result)
+    lead_plan = semantic_plan_from_result(lead_result)
+
+    assert payment_plan.business_object == "PAYMENT_RECORD"
+    assert lead_plan.business_object == "LEAD"
+    assert payment_plan.operation == "CREATE"
+    assert lead_plan.operation == "CREATE"

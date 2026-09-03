@@ -5,6 +5,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import CustomerDetailSheet from '@/views/CustomerDetailSheet.vue'
 import type { CustomerDetailResponse } from '@/api/customer'
 import type { OpportunityListResponse } from '@/api/opportunity'
+import type { ContractListResponse } from '@/api/contract'
 import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
 
@@ -21,6 +22,7 @@ const customerApi = vi.hoisted(() => ({
 const customerActivityApi = vi.hoisted(() => ({ getActivities: vi.fn() }))
 const opportunityApi = vi.hoisted(() => ({ getOpportunities: vi.fn() }))
 const contractApi = vi.hoisted(() => ({ getCustomerContracts: vi.fn() }))
+const paymentApi = vi.hoisted(() => ({ getPaymentPlans: vi.fn() }))
 const invoiceApi = vi.hoisted(() => ({ getInvoiceTitles: vi.fn() }))
 const deploymentApi = vi.hoisted(() => ({ list: vi.fn() }))
 const handleApiError = vi.hoisted(() => vi.fn())
@@ -55,6 +57,7 @@ vi.mock('@/api/customer', () => ({ default: customerApi }))
 vi.mock('@/api/customerActivity', () => ({ default: customerActivityApi }))
 vi.mock('@/api/opportunity', () => ({ opportunityApi }))
 vi.mock('@/api/contract', () => ({ default: contractApi }))
+vi.mock('@/api/payment', () => ({ default: paymentApi }))
 vi.mock('@/api/invoice', () => ({ default: invoiceApi }))
 vi.mock('@/api/deployment', () => ({ default: deploymentApi }))
 vi.mock('@/api/customerProfile', () => ({
@@ -68,6 +71,41 @@ vi.mock('@/utils/errorHandler', () => ({ handleApiError }))
 vi.mock('vue-sonner', () => ({ toast }))
 
 vi.mock('@/components/crmwolf', () => ({
+  InputField: defineComponent({
+    name: 'InputField',
+    inheritAttrs: false,
+    props: {
+      modelValue: { type: String, default: '' },
+      id: String,
+      label: String,
+      error: String,
+      disabled: Boolean,
+    },
+    emits: ['update:modelValue'],
+    setup: (props, { emit, attrs }) => () => h('input', {
+      ...attrs,
+      id: props.id,
+      value: props.modelValue,
+      disabled: props.disabled,
+      'aria-label': props.label,
+      'aria-invalid': props.error !== undefined && props.error !== '' ? 'true' : undefined,
+      onInput: (event: Event) => emit('update:modelValue', (event.target as HTMLInputElement).value),
+    }),
+  }),
+  Switch: defineComponent({
+    name: 'Switch',
+    props: { checked: Boolean, disabled: Boolean, id: String },
+    emits: ['update:checked'],
+    setup: (props, { emit, attrs }) => () => h('button', {
+      ...attrs,
+      id: props.id,
+      type: 'button',
+      role: 'switch',
+      'aria-checked': String(props.checked),
+      disabled: props.disabled,
+      onClick: () => emit('update:checked', !props.checked),
+    }),
+  }),
   ContextTabs: defineComponent({
     name: 'ContextTabs',
     props: { tabs: Array, activeTab: String },
@@ -141,10 +179,34 @@ vi.mock('@/components/panels/OpportunitiesPanel.vue', () => ({
     ]),
   }),
 }))
-vi.mock('@/components/panels/ContractsPanel.vue', () => ({ default: defineComponent({ name: 'ContractsPanel', setup: () => () => h('div', 'contracts') }) }))
+vi.mock('@/components/panels/ContractsPanel.vue', () => ({
+  default: defineComponent({
+    name: 'ContractsPanel',
+    props: { contracts: { type: Array, default: () => [] } },
+    emits: ['view'],
+    setup: (props, { emit }) => () => h('div', {
+      'data-testid': 'contracts-panel',
+      'data-contract-count': String((props.contracts as ContractListResponse[]).length),
+    }, [
+      h('button', { type: 'button', 'data-testid': 'view-contract', onClick: () => emit('view', 701) }, 'view contract'),
+    ]),
+  }),
+}))
 vi.mock('@/components/panels/PaymentsPanel.vue', () => ({ default: defineComponent({ name: 'PaymentsPanel', setup: () => () => h('div', 'payments') }) }))
 vi.mock('@/components/panels/InvoicesPanel.vue', () => ({ default: defineComponent({ name: 'InvoicesPanel', setup: () => () => h('div', 'invoices') }) }))
 vi.mock('@/components/panels/LicensePanel.vue', () => ({ default: defineComponent({ name: 'LicensePanel', setup: () => () => h('div', 'license') }) }))
+vi.mock('@/components/panels/ContractDetailContent.vue', () => ({
+  default: defineComponent({
+    name: 'ContractDetailContent',
+    props: { contractId: Number, embedded: Boolean },
+    setup: (props) => () => h('div', {
+      'data-testid': 'contract-detail-content',
+      'data-contract-id': String(props.contractId),
+      'data-embedded': String(props.embedded),
+    }),
+  }),
+}))
+
 vi.mock('@/components/panels/OpportunityDetailContent.vue', () => ({
   default: defineComponent({
     name: 'OpportunityDetailContent',
@@ -172,6 +234,20 @@ vi.mock('@/components/dialogs/ContactFormDialog.vue', () => ({ default: defineCo
 vi.mock('@/components/dialogs/OpportunityFormDialog.vue', () => ({ default: defineComponent({ name: 'OpportunityFormDialog', setup: () => () => null }) }))
 vi.mock('@/components/dialogs/ContractFormDialog.vue', () => ({ default: defineComponent({ name: 'ContractFormDialog', setup: () => () => null }) }))
 vi.mock('@/components/dialogs/InvoiceTitleFormDialog.vue', () => ({ default: defineComponent({ name: 'InvoiceTitleFormDialog', setup: () => () => null }) }))
+vi.mock('@/components/dialogs/DeploymentInfoFormDialog.vue', () => ({
+  default: defineComponent({
+    name: 'DeploymentInfoFormDialog',
+    props: {
+      open: Boolean,
+      customerId: String,
+    },
+    setup: (props) => () => h('div', {
+      'data-testid': 'deployment-dialog',
+      'data-open': String(props.open),
+      'data-customer-id': props.customerId,
+    }),
+  }),
+}))
 
 const customerFixture = (overrides: Partial<CustomerDetailResponse> = {}): CustomerDetailResponse => ({
   id: 'cus_test_19',
@@ -215,6 +291,31 @@ const opportunityFixture = (): OpportunityListResponse => ({
   last_modified_time: '2026-07-15T00:00:00.000Z',
 })
 
+const contractFixture = (): ContractListResponse => ({
+  id: 701,
+  contract_number: 'CON-701',
+  contract_name: 'CRM 升级合同',
+  customer_id: 'cus_test_19',
+  customer_name: '上海测试客户',
+  opportunity_id: 'opp_test_88',
+  opportunity_name: 'CRM 升级项目',
+  signing_contact_id: 1,
+  user_count: 20,
+  total_amount: '320000',
+  license_type: 'SUBSCRIPTION',
+  subscription_years: 1,
+  standard_unit_price: '16000',
+  status: 'SIGNED',
+  approval_phase: 'approved',
+  signing_date: '2026-08-01',
+  effective_date: '2026-08-01',
+  expiry_date: '2027-08-01',
+  owner_id: '9',
+  creator_id: '9',
+  created_time: '2026-07-15T00:00:00.000Z',
+  last_modified_time: '2026-07-15T00:00:00.000Z',
+})
+
 describe('CustomerDetailSheet opportunity drilldown', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -233,6 +334,7 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
     customerActivityApi.getActivities.mockResolvedValue([])
     opportunityApi.getOpportunities.mockResolvedValue([opportunityFixture()])
     contractApi.getCustomerContracts.mockResolvedValue([])
+    paymentApi.getPaymentPlans.mockResolvedValue([])
     invoiceApi.getInvoiceTitles.mockResolvedValue({ invoice_titles: [] })
     deploymentApi.list.mockResolvedValue([])
     customerApi.getCustomerMembers.mockResolvedValue([])
@@ -269,6 +371,29 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
 
     expect(wrapper.get('[data-testid="tab-opportunities"]').attributes('data-active')).toBe('true')
     expect(wrapper.find('[data-testid="opportunities-panel"]').exists()).toBe(true)
+  })
+
+  it('opens a contract from the customer info panel inside the same detail sheet', async () => {
+    contractApi.getCustomerContracts.mockResolvedValue([contractFixture()])
+
+    const wrapper = mount(CustomerDetailSheet, {
+      props: {
+        customerId: 'cus_test_19',
+        visible: true,
+      },
+    })
+
+    await flushPromises()
+    await wrapper.get('[data-testid="tab-customer-info"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.get('[data-testid="contracts-panel"]').attributes('data-contract-count')).toBe('1')
+    await wrapper.get('[data-testid="view-contract"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.findAll('[data-testid="sheet-root"]')).toHaveLength(1)
+    expect(wrapper.get('[data-testid="contract-detail-content"]').attributes('data-contract-id')).toBe('701')
+    expect(wrapper.get('[data-testid="contract-detail-content"]').attributes('data-embedded')).toBe('true')
   })
 
   it('renders opportunity detail content inside the current customer sheet when an opportunity is selected', async () => {
@@ -369,6 +494,30 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
     expect(invoiceApi.getInvoiceTitles).toHaveBeenCalledWith('cus_test_42')
     expect(deploymentApi.list).toHaveBeenCalledWith('cus_test_42')
     expect(customerApi.getCustomerMembers).toHaveBeenCalledWith('cus_test_42')
+  })
+
+  it('closes the deployment dialog when customerId changes while visible', async () => {
+    const wrapper = mount(CustomerDetailSheet, {
+      props: {
+        customerId: 'cus_test_19',
+        visible: true,
+      },
+    })
+
+    await flushPromises()
+    await wrapper.get('[data-testid="tab-customer-info"]').trigger('click')
+    await nextTick()
+
+    const createDeploymentButton = wrapper.findAll('button').find(button => button.text() === '新建部署')
+    expect(createDeploymentButton).toBeDefined()
+    await createDeploymentButton!.trigger('click')
+    await nextTick()
+    expect(wrapper.get('[data-testid="deployment-dialog"]').attributes('data-open')).toBe('true')
+
+    await wrapper.setProps({ customerId: 'cus_test_42' })
+    await nextTick()
+
+    expect(wrapper.get('[data-testid="deployment-dialog"]').attributes('data-open')).toBe('false')
   })
 
   it('keeps the latest customer detail data when an older load resolves after a customerId change', async () => {

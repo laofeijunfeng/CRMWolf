@@ -24,7 +24,7 @@ import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { ViewPreferenceConfig } from '@/api/viewPreference'
-import { confirmDelete } from '@/utils/confirmDialog'
+import { confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
 import PaymentRecordDetailSheet from '@/views/PaymentRecordDetailSheet.vue'
 import EditRecordDialog from '@/components/dialogs/EditRecordDialog.vue'
@@ -41,6 +41,7 @@ import { usePageTitle } from '@/composables/usePageTitle'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
+import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -53,11 +54,14 @@ const userStore = useUserStore()
 
 // ==================== State ====================
 const loading = ref(false)
+const loadError = ref<FeedbackError | null>(null)
+const listRequestId = ref<number>(0)
 const tableData = ref<PaymentRecordWithDetails[]>([])
 const selectedRecord = ref<PaymentRecordWithDetails | null>(null)
 const detailSheetVisible = ref(false)
 const editDialogOpen = ref(false)
 const editSubmitting = ref(false)
+const deletingRecordIds = ref<Set<number>>(new Set())
 const isResubmitMode = ref(false)
 const activeFilters = ref<ListFilterCondition[]>([])
 const activeSorts = ref<ListSortCondition[]>([])
@@ -155,6 +159,8 @@ const canDeleteRecordRow = (row: PaymentRecordWithDetails): boolean => {
 
 // ==================== Methods ====================
 const fetchPaymentRecords = async (): Promise<void> => {
+  const requestId = ++listRequestId.value
+  loadError.value = null
   loading.value = true
   try {
     const tabApprovalStatus = activeTab.value === 'confirmed'
@@ -175,15 +181,18 @@ const fetchPaymentRecords = async (): Promise<void> => {
     }
 
     const data = await paymentApi.listPaymentRecords(params)
+    if (requestId !== listRequestId.value) return
     tableData.value = data.items
     pagination.total = data.total
   } catch (error) {
-    handleApiError(error, '获取回款管理列表')
+    if (requestId !== listRequestId.value) return
+    loadError.value = toFeedbackError(error, '回款管理列表')
   } finally {
-    loading.value = false
+    if (requestId === listRequestId.value) {
+      loading.value = false
+    }
   }
 }
-
 const customFilterViews = useCustomFilterViews({
   viewKey: 'payment-records.list',
   activeTab,
@@ -355,20 +364,33 @@ const handleEditSubmit = async (recordId: number, data: PaymentRecordUpdate): Pr
   }
 }
 
+const isRecordDeleting = (recordId: number): boolean => deletingRecordIds.value.has(recordId)
+
 const handleDelete = async (record: PaymentRecordWithDetails): Promise<void> => {
+  if (isRecordDeleting(record.id)) return
+
   const hasRecordNumber = (record.record_number?.trim().length ?? 0) > 0
   const recordLabel = hasRecordNumber && record.record_number !== undefined
     ? record.record_number
     : String(record.id)
-  const confirmed = await confirmDelete(`回款记录 "${recordLabel}"`)
+  const confirmed = await confirmDialog(
+    `确定删除回款记录“${recordLabel}”吗？删除后会重新计算回款计划和合同的回款状态，审批中或已确认的记录可能无法删除。`,
+    '删除回款记录',
+    { variant: 'destructive', confirmText: '删除' },
+  )
   if (!confirmed) return
 
+  deletingRecordIds.value = new Set(deletingRecordIds.value).add(record.id)
   try {
     await paymentApi.deletePaymentRecord(record.id)
-    toast.success('回款记录删除成功')
-    fetchPaymentRecords()
+    toast.success(`回款记录“${recordLabel}”已删除`)
+    void fetchPaymentRecords()
   } catch (error) {
     handleApiError(error, '删除回款记录')
+  } finally {
+    const nextIds = new Set(deletingRecordIds.value)
+    nextIds.delete(record.id)
+    deletingRecordIds.value = nextIds
   }
 }
 
@@ -380,11 +402,13 @@ const getRowActions = (row: PaymentRecordWithDetails): TableRowActionSet => ({
   primaryActions: [
     {
       label: '查看',
+      kind: 'detail',
       handler: handleViewAction,
       icon: Eye
     },
     {
       label: '编辑',
+      desktopPrimary: true,
       handler: handleEditAction,
       visible: canEditRecordRow(row),
       icon: Pencil
@@ -394,6 +418,7 @@ const getRowActions = (row: PaymentRecordWithDetails): TableRowActionSet => ({
     {
       label: '删除',
       handler: handleDeleteAction,
+      disabled: isRecordDeleting(row.id),
       visible: canDeleteRecordRow(row),
       icon: Trash2,
       destructive: true
@@ -462,6 +487,7 @@ watchEffect(() => {
       :fields="fields"
       :data="tableData"
       :loading="loading"
+      :load-error="loadError"
       :page="pagination.current"
       :page-size="pagination.pageSize"
       :total="pagination.total"
@@ -472,8 +498,13 @@ watchEffect(() => {
       filter-view-save-enabled
       :filter-view-save-loading="customFilterViewSaving"
       height="calc(100vh - 121px)"
+      height-strategy="fill"
+      scroll-mode="contained"
+      compact-pagination
       empty-title="暂无回款记录"
       row-interactive
+      detail-column-key="record_number"
+      :get-row-label="(row) => `回款记录 ${row.record_number || row.id}`"
       :get-row-actions="getRowActions"
       mobile-title-key="record_number"
       mobile-subtitle-key="customer_name"
@@ -489,6 +520,7 @@ watchEffect(() => {
       @column-config-current-change="handleColumnConfigCurrentChange"
       @column-config-save="handleColumnConfigSave"
       @column-config-reset="handleColumnConfigReset"
+      @retry="fetchPaymentRecords"
       @row-click="handleViewDetail"
     >
       <template #mobile-card="{ row }">

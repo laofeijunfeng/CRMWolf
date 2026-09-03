@@ -1430,13 +1430,14 @@ def update_customer(
         updated = customer_crud.update(db, customer, customer_update)
     except AcquisitionSourceError as exc:
         _raise_source_error(exc)
-    if updated.version != customer.version or customer_update.model_fields_set:
+    changed_fields = customer_update.model_fields_set - {"expected_version"}
+    if changed_fields:
         _persist_customer_business_object_refresh_after_commit(
             business_object=updated,
             source_type="customer",
             summary="客户主数据已更新，刷新客户智能档案",
             actor_id=str(current_user.id),
-            payload={"change_type": "updated", "changed_fields": sorted(customer_update.model_fields_set)},
+            payload={"change_type": "updated", "changed_fields": sorted(changed_fields)},
         )
     return _customer_response(db, updated)
 

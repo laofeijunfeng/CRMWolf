@@ -9,6 +9,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
 import {
@@ -34,6 +35,7 @@ import {
   SelectField,
 } from '@/components/crmwolf'
 import { handleApiError } from '@/utils/errorHandler'
+import { useDialogCloseGuard } from '@/composables/useDialogCloseGuard'
 import { opportunityApi, type Opportunity, type OpportunityCreate, type OpportunityUpdate, LicenseType, PurchaseType } from '@/api/opportunity'
 import procurementApi, { type ProcurementMethodOption } from '@/api/procurement'
 import customerApi, { type CustomerResponse, type CustomerDetailResponse } from '@/api/customer'
@@ -116,7 +118,6 @@ const { handleSubmit, resetForm, values, setFieldValue } = useForm({
 // State
 const submitting = ref(false)
 const isDirty = ref(false)
-const showConfirmDialog = ref(false)
 const procurementMethods = ref<ProcurementMethodOption[]>([])
 const loadingMethods = ref(false)
 const customers = ref<CustomerOption[]>([])
@@ -128,6 +129,13 @@ const visible = computed({
   get: () => props.open,
   set: (val) => emit('update:open', val)
 })
+
+const closeGuard = useDialogCloseGuard({
+  isDirty: isDirty,
+  submitting,
+  emitOpen: (open) => emit('update:open', open),
+})
+const showConfirmDialog = closeGuard.showConfirmDialog
 
 // Computed property for edit mode
 const isEdit = computed(() => !!props.opportunity)
@@ -265,7 +273,7 @@ async function handleCustomerSearch(keyword: string | number): Promise<void> {
 // Watch for form changes
 watch(values, () => {
   isDirty.value = true
-}, { deep: true })
+}, { deep: true, flush: 'sync' })
 
 const initializeForm = async (): Promise<void> => {
   customerSearchKeyword.value = ''
@@ -367,7 +375,14 @@ const initializeForm = async (): Promise<void> => {
 
 // Reset form when dialog opens
 watch(() => props.open, (newOpen) => {
+  if (!newOpen) {
+    if (closeGuard.handleParentClose()) return
+    closeGuard.reset()
+    return
+  }
+
   if (newOpen) {
+    closeGuard.reset()
     void initializeForm()
   }
 }, { immediate: true })
@@ -403,6 +418,7 @@ const onSubmit = handleSubmit(async (formValues) => {
     }
 
     isDirty.value = false
+    closeGuard.approveClose()
     visible.value = false
     emit('success')
   } catch (error) {
@@ -413,31 +429,31 @@ const onSubmit = handleSubmit(async (formValues) => {
 })
 
 // Cancel operation
+function handleOpenChange(open: boolean): void {
+  closeGuard.handleOpenChange(open)
+}
+
 function handleCancel(): void {
-  if (isDirty.value) {
-    showConfirmDialog.value = true
-  } else {
-    visible.value = false
-  }
+  closeGuard.requestClose()
 }
 
 // Confirm discard changes
 function confirmCancel(): void {
-  showConfirmDialog.value = false
-  visible.value = false
+  closeGuard.confirmDiscard()
 }
 
 // Continue editing
 function continueEditing(): void {
-  showConfirmDialog.value = false
+  closeGuard.continueEditing()
 }
 </script>
 
 <template>
-  <Dialog v-model:open="visible">
-    <DialogContent class="max-h-[90vh] overflow-y-auto">
+  <Dialog :open="props.open" @update:open="handleOpenChange">
+    <DialogContent class="w-[calc(100vw-2rem)] max-w-[640px] max-h-[min(90vh,90dvh)] overflow-y-auto overscroll-contain [scroll-padding-bottom:calc(5rem+env(safe-area-inset-bottom,0px))]">
       <DialogHeader>
         <DialogTitle>{{ resolvedDialogTitle }}</DialogTitle>
+        <DialogDescription class="sr-only">填写商机金额、授权和预计成交信息</DialogDescription>
       </DialogHeader>
 
       <form class="space-y-4" @submit="onSubmit">
@@ -447,13 +463,13 @@ function continueEditing(): void {
             <InputField
               v-if="customerLocked === true"
               id="opportunity-customer-locked"
-                :model-value="selectedCustomerName"
+              :model-value="selectedCustomerName"
               label="所属客户"
               required
-                readonly
+              readonly
               control-class="bg-wolf-bg-muted-v2 text-wolf-text-primary-v2"
-                aria-readonly="true"
-              />
+              aria-readonly="true"
+            />
             <SearchableSelectField
               v-else
               id="opportunity-customer"
@@ -594,7 +610,7 @@ function continueEditing(): void {
 
         <!-- DialogFooter -->
         <DialogFooter class="mt-6 pt-4 border-t">
-          <Button variant="outline" type="button" @click="handleCancel">
+          <Button variant="outline" type="button" :disabled="submitting" @click="handleCancel">
             取消
           </Button>
           <Button type="submit" :loading="submitting">
@@ -606,7 +622,7 @@ function continueEditing(): void {
   </Dialog>
 
   <!-- Confirm discard changes dialog -->
-  <AlertDialog v-model:open="showConfirmDialog">
+  <AlertDialog :open="showConfirmDialog" @update:open="closeGuard.handleConfirmOpenChange">
     <AlertDialogContent>
       <AlertDialogHeader>
         <AlertDialogTitle>放弃更改？</AlertDialogTitle>

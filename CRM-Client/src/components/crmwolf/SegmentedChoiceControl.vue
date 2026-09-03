@@ -17,12 +17,16 @@ interface Props {
   disabled?: boolean
   labelledBy?: string | undefined
   idPrefix?: string | undefined
+  invalid?: boolean
+  describedBy?: string | undefined
 }
 
 const props = withDefaults(defineProps<Props>(), {
   disabled: false,
   labelledBy: undefined,
   idPrefix: undefined,
+  invalid: false,
+  describedBy: undefined,
 })
 
 const emit = defineEmits<{
@@ -38,9 +42,19 @@ const controlIdPrefix = computed(() =>
   props.idPrefix ?? `segmented-choice-${Math.random().toString(36).slice(2, 9)}`
 )
 const isDisabled = computed(() => props.disabled === true)
-const ariaBindings = computed(() =>
-  props.labelledBy !== undefined && props.labelledBy.trim().length > 0 ? { 'aria-labelledby': props.labelledBy } : {}
-)
+const ariaBindings = computed<Record<string, string>>(() => {
+  const bindings: Record<string, string> = {}
+  if (props.labelledBy !== undefined && props.labelledBy.trim().length > 0) {
+    bindings['aria-labelledby'] = props.labelledBy
+  }
+  if (props.invalid) {
+    bindings['aria-invalid'] = 'true'
+  }
+  if (props.describedBy !== undefined && props.describedBy.trim().length > 0) {
+    bindings['aria-describedby'] = props.describedBy
+  }
+  return bindings
+})
 
 function optionId(value: string): string {
   return `${controlIdPrefix.value}-${value.replace(/[^a-zA-Z0-9_-]/g, '-')}`

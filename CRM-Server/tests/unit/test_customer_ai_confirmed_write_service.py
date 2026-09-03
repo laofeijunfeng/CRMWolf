@@ -62,7 +62,7 @@ class _FakeActivityWriteService:
         self.create_calls = []
         self.kick_calls = []
 
-    def create(self, db, *, before_commit=None, **kwargs):  # noqa: ANN001, ANN003
+    def create_pending_from_form(self, db, *, before_commit=None, **kwargs):  # noqa: ANN001, ANN003
         self.create_calls.append(kwargs)
         result = CustomerActivityWriteResult(
             activity=self.activity,
@@ -76,14 +76,6 @@ class _FakeActivityWriteService:
 
     def kick(self, result):  # noqa: ANN001
         self.kick_calls.append(result)
-
-
-class _FakeProcessingService:
-    def __init__(self) -> None:
-        self.processing_calls = []
-
-    async def trigger_processing(self, activity_id, team_id):  # noqa: ANN001
-        self.processing_calls.append({"activity_id": activity_id, "team_id": team_id})
 
 
 class _FakeRunService:
@@ -141,13 +133,11 @@ def _intelligence_request() -> CustomerIntelligenceCommittedEventRequest:
 async def test_confirmed_ai_write_uses_transactional_write_seam_and_persists_full_durable_snapshot(monkeypatch):
     fake_idempotency = _FakeIdempotencyCRUD()
     fake_write = _FakeActivityWriteService()
-    fake_processing = _FakeProcessingService()
     monkeypatch.setattr(write_module, "business_now", lambda: datetime(2026, 8, 10, 0, 45, 25))
 
     result = await CustomerAIConfirmedWriteService(
         idempotency_crud=fake_idempotency,
         activity_write_service=fake_write,
-        processing_service=fake_processing,
     ).create_customer_activity(
         db=SimpleNamespace(),
         customer_id=144,
@@ -167,7 +157,6 @@ async def test_confirmed_ai_write_uses_transactional_write_seam_and_persists_ful
     assert created_payload.next_follow_time == datetime(2026, 10, 10, 9, 0, 0)
     assert created_payload.next_follow_time_source == "AI_EXTRACTED"
     assert fake_write.kick_calls == [result.durable_work]
-    assert fake_processing.processing_calls == [{"activity_id": 9001, "team_id": 1}]
     assert fake_idempotency.created[0]["commit"] is False
     update = fake_idempotency.updated[0]
     assert update["commit"] is False
@@ -205,7 +194,6 @@ async def test_confirmed_ai_write_replays_exact_durable_metadata_without_recreat
     fake_activity = _FakeActivityCRUD()
     fake_activity.by_id[9001] = existing_activity
     fake_write = _FakeActivityWriteService(activity=existing_activity)
-    fake_processing = _FakeProcessingService()
     fake_run = _FakeRunService(
         SimpleNamespace(
             request_id=request_id,
@@ -226,7 +214,6 @@ async def test_confirmed_ai_write_replays_exact_durable_metadata_without_recreat
         idempotency_crud=fake_idempotency,
         activity_crud=fake_activity,
         activity_write_service=fake_write,
-        processing_service=fake_processing,
         intelligence_run_service=fake_run,
         intelligence_event_service=_FakeEventService(),
     ).create_customer_activity(
@@ -251,4 +238,3 @@ async def test_confirmed_ai_write_replays_exact_durable_metadata_without_recreat
     assert fake_run.calls == [{"team_id": 1, "request_id": request_id}]
     assert fake_write.create_calls == []
     assert fake_write.kick_calls == []
-    assert fake_processing.processing_calls == []

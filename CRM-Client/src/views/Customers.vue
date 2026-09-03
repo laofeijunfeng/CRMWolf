@@ -27,7 +27,16 @@ import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { ViewPreferenceConfig } from '@/api/viewPreference'
 import { Button } from '@/components/ui/button'
-import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { SelectField, TextareaField } from '@/components/crmwolf'
+import { confirmDialog } from '@/utils/confirmDialog'
 import CustomerFormDialog from '@/components/dialogs/CustomerFormDialog.vue'
 import CustomerTransferDialog from '@/components/dialogs/CustomerTransferDialog.vue'
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
@@ -53,6 +62,7 @@ import { useAcquisitionSourceOptions } from '@/composables/useAcquisitionSourceO
 import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
 import { serializeListQuery } from '@/utils/listQuery'
 import { LICENSE_STATUS_LABELS, licenseStatusClass, licenseStatusLabel } from '@/utils/licenseStatus'
+import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -65,6 +75,8 @@ type CustomerTableRow = CustomerResponse
 
 // ==================== State ====================
 const loading = ref(false)
+const loadError = ref<FeedbackError | null>(null)
+const listRequestId = ref<number>(0)
 const tableData = ref<CustomerTableRow[]>([])
 const ownerFilterOptions = ref<OwnerFilterOption[]>([])
 const industryFilterOptions = ref<{ value: string; label: string }[]>([])
@@ -77,6 +89,7 @@ const transferCustomer = ref<CustomerResponse | null>(null)
 const transferDialogOpen = ref(false)
 const showCustomerForm = ref(false)
 const editingCustomerId = ref<string | null>(null)
+const deletingCustomerIds = ref<Set<string>>(new Set())
 
 const selectedCustomerId = ref<string | null>(null)
 const targetOpportunityId = ref<string | null>(null)
@@ -131,6 +144,10 @@ const returnForm = reactive<CustomerReturnRequest>({
 
 // 标记输单弹窗
 const loseModalVisible = ref(false)
+const returnSubmitting = ref(false)
+const loseSubmitting = ref(false)
+const returnErrors = reactive({ return_reason: '', detailed_reason: '' })
+const loseErrors = reactive({ loss_reason: '' })
 const loseForm = reactive<CustomerLoseRequest>({
   loss_reason: ''
 })
@@ -352,6 +369,7 @@ const getRowActions = (row: CustomerResponse): TableRowActionSet => {
       primaryActions: [
         {
           label: '领取',
+          desktopPrimary: true,
           handler: asCustomerActionHandler(handleClaim),
           visible: canAccessPublic.value
         }
@@ -363,12 +381,14 @@ const getRowActions = (row: CustomerResponse): TableRowActionSet => {
     primaryActions: [
       {
         label: '新建商机',
+        desktopPrimary: true,
         handler: asCustomerActionHandler(handleCreateOpportunity),
         visible: canCreateOpportunityForRow(row),
         icon: Sparkles as Component
       },
       {
         label: '编辑',
+        desktopPrimary: true,
         handler: asCustomerActionHandler(handleEdit),
         visible: canEditRow(row),
         icon: Pencil as Component
@@ -411,6 +431,7 @@ const getRowActions = (row: CustomerResponse): TableRowActionSet => {
       {
         label: '删除',
         handler: asCustomerActionHandler(handleDelete),
+        disabled: isCustomerDeleting(row.id),
         visible: canDeleteRow(row),
         icon: Trash2 as Component,
         destructive: true
@@ -453,6 +474,8 @@ const fetchIndustryFilterOptions = async (): Promise<void> => {
 }
 
 const fetchCustomerList = async (): Promise<void> => {
+  const requestId = ++listRequestId.value
+  loadError.value = null
   loading.value = true
   try {
     const params = {
@@ -464,6 +487,7 @@ const fetchCustomerList = async (): Promise<void> => {
     if (activeTab.value === 'public') {
       const response = await customerApi.getPublicCustomers(params)
       const normalized = normalizeCustomerListResponse(response)
+      if (requestId !== listRequestId.value) return
       tableData.value = normalized.items
       pagination.total = normalized.total
     } else {
@@ -472,16 +496,19 @@ const fetchCustomerList = async (): Promise<void> => {
         ...(activeTab.value === 'collaborated' ? { scope: 'collaborated' as const } : {})
       })
       const normalized = normalizeCustomerListResponse(response)
+      if (requestId !== listRequestId.value) return
       tableData.value = normalized.items
       pagination.total = normalized.total
     }
   } catch (error) {
-    handleApiError(error, '获取客户列表')
+    if (requestId !== listRequestId.value) return
+    loadError.value = toFeedbackError(error, '客户列表')
   } finally {
-    loading.value = false
+    if (requestId === listRequestId.value) {
+      loading.value = false
+    }
   }
 }
-
 const customFilterViews = useCustomFilterViews({
   viewKey: 'customers.list',
   activeTab,
@@ -623,7 +650,59 @@ const handleReturn = (record: CustomerResponse): void => {
   selectedCustomer.value = record
   returnForm.return_reason = '' as ReturnReasonEnum
   returnForm.detailed_reason = ''
+  returnErrors.return_reason = ''
+  returnErrors.detailed_reason = ''
   returnModalVisible.value = true
+}
+
+const hasReturnDraft = computed(() =>
+  Boolean(returnForm.return_reason) || returnForm.detailed_reason.trim() !== ''
+)
+
+const hasLoseDraft = computed(() => loseForm.loss_reason.trim() !== '')
+
+const closeReturnDialog = (): void => {
+  returnModalVisible.value = false
+  selectedCustomer.value = null
+}
+
+const closeLoseDialog = (): void => {
+  loseModalVisible.value = false
+  selectedCustomer.value = null
+}
+
+const handleReturnDialogOpenChange = async (open: boolean): Promise<void> => {
+  if (open) {
+    returnModalVisible.value = true
+    return
+  }
+  if (returnSubmitting.value) return
+  if (!hasReturnDraft.value) {
+    closeReturnDialog()
+    return
+  }
+  const confirmed = await confirmDialog('已填写的退回原因尚未提交，关闭后内容会丢失。', '放弃填写？', {
+    confirmText: '放弃填写',
+    variant: 'destructive',
+  })
+  if (confirmed) closeReturnDialog()
+}
+
+const handleLoseDialogOpenChange = async (open: boolean): Promise<void> => {
+  if (open) {
+    loseModalVisible.value = true
+    return
+  }
+  if (loseSubmitting.value) return
+  if (!hasLoseDraft.value) {
+    closeLoseDialog()
+    return
+  }
+  const confirmed = await confirmDialog('已填写的输单原因尚未提交，关闭后内容会丢失。', '放弃填写？', {
+    confirmText: '放弃填写',
+    variant: 'destructive',
+  })
+  if (confirmed) closeLoseDialog()
 }
 
 const handleTransfer = (record: CustomerResponse): void => {
@@ -644,19 +723,24 @@ const handleTransferSuccess = (): void => {
 }
 
 const handleReturnModalOk = async (): Promise<void> => {
-  if (!selectedCustomer.value) return
-  if (!returnForm.return_reason || !returnForm.detailed_reason) {
-    toast.error('请填写退回原因和详细说明')
-    return
-  }
+  if (!selectedCustomer.value || returnSubmitting.value) return
+  returnErrors.return_reason = returnForm.return_reason ? '' : '请选择退回原因'
+  returnErrors.detailed_reason = returnForm.detailed_reason.trim() ? '' : '请填写详细说明'
+  if (returnErrors.return_reason || returnErrors.detailed_reason) return
 
+  returnSubmitting.value = true
   try {
-    await customerApi.returnToPool(selectedCustomer.value.id, returnForm)
+    await customerApi.returnToPool(selectedCustomer.value.id, {
+      ...returnForm,
+      detailed_reason: returnForm.detailed_reason.trim(),
+    })
     toast.success('客户已退回公海')
-    returnModalVisible.value = false
-    fetchCustomerList()
+    closeReturnDialog()
+    void fetchCustomerList()
   } catch (error) {
     handleApiError(error, '退回公海')
+  } finally {
+    returnSubmitting.value = false
   }
 }
 
@@ -676,23 +760,27 @@ const handleWin = async (record: CustomerResponse): Promise<void> => {
 const handleLose = (record: CustomerResponse): void => {
   selectedCustomer.value = record
   loseForm.loss_reason = ''
+  loseErrors.loss_reason = ''
   loseModalVisible.value = true
 }
 
 const handleLoseModalOk = async (): Promise<void> => {
-  if (!selectedCustomer.value) return
-  if (!loseForm.loss_reason) {
-    toast.error('请输入输单原因')
-    return
-  }
+  if (!selectedCustomer.value || loseSubmitting.value) return
+  loseErrors.loss_reason = loseForm.loss_reason.trim() ? '' : '请输入输单原因'
+  if (loseErrors.loss_reason) return
 
+  loseSubmitting.value = true
   try {
-    await customerApi.markAsLost(selectedCustomer.value.id, loseForm)
+    await customerApi.markAsLost(selectedCustomer.value.id, {
+      loss_reason: loseForm.loss_reason.trim(),
+    })
     toast.success('客户已标记为输单')
-    loseModalVisible.value = false
-    fetchCustomerList()
+    closeLoseDialog()
+    void fetchCustomerList()
   } catch (error) {
     handleApiError(error, '标记输单')
+  } finally {
+    loseSubmitting.value = false
   }
 }
 
@@ -709,16 +797,29 @@ const handleInvalid = async (record: CustomerResponse): Promise<void> => {
   }
 }
 
+const isCustomerDeleting = (customerId: string): boolean => deletingCustomerIds.value.has(customerId)
+
 const handleDelete = async (record: CustomerResponse): Promise<void> => {
-  const confirmed = await confirmDelete(`客户 "${record.account_name}"`)
+  if (isCustomerDeleting(record.id)) return
+
+  const confirmed = await confirmDialog(
+    `确定删除客户“${record.account_name}”吗？如果存在关联合同，系统会阻止删除；删除成功后客户将从列表中移除，来源线索可能恢复为“跟进中”。`,
+    '删除客户',
+    { variant: 'destructive', confirmText: '删除' },
+  )
   if (!confirmed) return
 
+  deletingCustomerIds.value = new Set(deletingCustomerIds.value).add(record.id)
   try {
     await customerApi.deleteCustomer(record.id)
-    toast.success('客户删除成功')
-    fetchCustomerList()
+    toast.success(`客户“${record.account_name}”已删除`)
+    void fetchCustomerList()
   } catch (error) {
     handleApiError(error, '删除客户')
+  } finally {
+    const nextIds = new Set(deletingCustomerIds.value)
+    nextIds.delete(record.id)
+    deletingCustomerIds.value = nextIds
   }
 }
 
@@ -817,12 +918,18 @@ watchEffect(() => {
       :fields="fields"
       :data="tableData"
       :loading="loading"
+      :load-error="loadError"
       :page="pagination.current"
       :page-size="pagination.pageSize"
       :total="pagination.total"
       height="calc(100vh - 121px)"
+      height-strategy="fill"
+      scroll-mode="contained"
+      compact-pagination
       empty-title="暂无客户"
       row-interactive
+      detail-column-key="account_name"
+      :get-row-label="(row) => `客户 ${row.account_name || row.id}`"
       :get-row-actions="getRowActions"
       mobile-title-key="account_name"
       mobile-status-key="status"
@@ -846,6 +953,7 @@ watchEffect(() => {
       @column-config-save="handleColumnConfigSave"
       @column-config-reset="handleColumnConfigReset"
       @row-click="handleViewDetail"
+      @retry="fetchCustomerList"
     >
       <template #mobile-card="{ row }">
         <div class="customer-mobile-card-header">
@@ -976,57 +1084,78 @@ watchEffect(() => {
 
     </DataTable>
 
-    <!-- 退回公海弹窗（临时样式，后续替换为 shadcn-vue Dialog）-->
-    <div v-if="returnModalVisible" class="modal-overlay" @click="returnModalVisible = false">
-      <div class="modal-content" @click.stop>
-        <h3 class="modal-title">退回公海</h3>
-        <div class="modal-body">
-          <label class="form-label">退回原因 *</label>
-          <select v-model="returnForm.return_reason" class="form-select">
-            <option value="" disabled>请选择退回原因</option>
-            <option value="丢单">丢单 - 客户已选择竞争对手</option>
-            <option value="无意向">无意向 - 客户明确表示无合作意向</option>
-            <option value="信息错误">信息错误 - 客户信息不准确或无效</option>
-            <option value="长期未跟进">长期未跟进 - 超过规定时间未跟进</option>
-            <option value="预算不足">预算不足 - 客户预算无法匹配产品价格</option>
-            <option value="其他">其他</option>
-          </select>
-          <label class="form-label">详细原因 *</label>
-          <textarea
+    <!-- 退回公海：保留原有理由填写流程，统一使用设计系统 Dialog -->
+    <Dialog :open="returnModalVisible" @update:open="handleReturnDialogOpenChange">
+      <DialogContent class="w-[calc(100%-2rem)] max-w-lg">
+        <DialogHeader>
+          <DialogTitle>退回公海</DialogTitle>
+          <DialogDescription>
+            请填写退回“{{ selectedCustomer?.account_name ?? '该客户' }}”的原因，提交后客户将从当前负责人名下移除。
+          </DialogDescription>
+        </DialogHeader>
+        <div class="grid gap-wolf-md">
+          <SelectField
+            id="customer-return-reason"
+            v-model="returnForm.return_reason"
+            label="退回原因"
+            required
+            :options="[
+              { value: '丢单', label: '丢单 - 客户已选择竞争对手' },
+              { value: '无意向', label: '无意向 - 客户明确表示无合作意向' },
+              { value: '信息错误', label: '信息错误 - 客户信息不准确或无效' },
+              { value: '长期未跟进', label: '长期未跟进 - 超过规定时间未跟进' },
+              { value: '预算不足', label: '预算不足 - 客户预算无法匹配产品价格' },
+              { value: '其他', label: '其他' },
+            ]"
+            placeholder="请选择退回原因"
+            :error="returnErrors.return_reason"
+            :disabled="returnSubmitting"
+          />
+          <TextareaField
+            id="customer-return-detail"
             v-model="returnForm.detailed_reason"
-            class="form-textarea"
+            label="详细原因"
+            required
             placeholder="请输入详细原因说明"
-            rows="4"
-            maxlength="500"
+            :maxlength="500"
+            :rows="4"
+            :error="returnErrors.detailed_reason"
+            :disabled="returnSubmitting"
           />
         </div>
-        <div class="modal-footer">
-          <Button variant="outline" @click="returnModalVisible = false">取消</Button>
-          <Button type="button" @click="handleReturnModalOk">确定</Button>
-        </div>
-      </div>
-    </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" :disabled="returnSubmitting" @click="handleReturnDialogOpenChange(false)">取消</Button>
+          <Button type="button" :loading="returnSubmitting" @click="handleReturnModalOk">提交</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
-    <!-- 标记输单弹窗 -->
-    <div v-if="loseModalVisible" class="modal-overlay" @click="loseModalVisible = false">
-      <div class="modal-content" @click.stop>
-        <h3 class="modal-title">标记输单</h3>
-        <div class="modal-body">
-          <label class="form-label">输单原因 *</label>
-          <textarea
-            v-model="loseForm.loss_reason"
-            class="form-textarea"
-            placeholder="请输入输单原因说明"
-            rows="4"
-            maxlength="500"
-          />
-        </div>
-        <div class="modal-footer">
-          <Button variant="outline" @click="loseModalVisible = false">取消</Button>
-          <Button type="button" @click="handleLoseModalOk">确定</Button>
-        </div>
-      </div>
-    </div>
+    <!-- 标记输单：保留原有理由填写流程，统一使用设计系统 Dialog -->
+    <Dialog :open="loseModalVisible" @update:open="handleLoseDialogOpenChange">
+      <DialogContent class="w-[calc(100%-2rem)] max-w-lg">
+        <DialogHeader>
+          <DialogTitle>标记输单</DialogTitle>
+          <DialogDescription>
+            请填写“{{ selectedCustomer?.account_name ?? '该客户' }}”的输单原因，提交后客户状态将变更为已输单。
+          </DialogDescription>
+        </DialogHeader>
+        <TextareaField
+          id="customer-lose-reason"
+          v-model="loseForm.loss_reason"
+          label="输单原因"
+          required
+          placeholder="请输入输单原因说明"
+          :maxlength="500"
+          :rows="4"
+          :error="loseErrors.loss_reason"
+          :disabled="loseSubmitting"
+        />
+        <DialogFooter>
+          <Button type="button" variant="outline" :disabled="loseSubmitting" @click="handleLoseDialogOpenChange(false)">取消</Button>
+          <Button type="button" :loading="loseSubmitting" @click="handleLoseModalOk">提交</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <!-- 手动创建/编辑客户弹窗 -->
     <CustomerFormDialog
@@ -1167,70 +1296,4 @@ watchEffect(() => {
   color: $wolf-text-tertiary-v2;
 }
 
-// 简易弹窗样式（临时使用，后续替换为 shadcn-vue Dialog）
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.modal-content {
-  background: $wolf-bg-card-v2;
-  border-radius: $wolf-radius-overlay-v2;
-  padding: $wolf-space-lg-v2;
-  min-width: 400px;
-  max-width: 500px;
-}
-
-.modal-title {
-  font-size: $wolf-font-size-title-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  color: $wolf-text-primary-v2;
-  margin-bottom: $wolf-space-md-v2;
-}
-
-.modal-body {
-  margin-bottom: $wolf-space-lg-v2;
-}
-
-.form-label {
-  display: block;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  color: $wolf-text-secondary-v2;
-  margin-bottom: $wolf-space-xs-v2;
-}
-
-.form-select,
-.form-textarea {
-  width: 100%;
-  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-v2;
-  font-size: $wolf-font-size-body-v2;
-  color: $wolf-text-primary-v2;
-  margin-bottom: $wolf-space-md-v2;
-
-  &:focus {
-    outline: $wolf-focus-ring-width-v2 solid $wolf-primary-v2;
-    outline-offset: $wolf-focus-ring-offset-v2;
-  }
-}
-
-.form-textarea {
-  resize: vertical;
-}
-
-.modal-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: $wolf-space-sm-v2;
-}
 </style>

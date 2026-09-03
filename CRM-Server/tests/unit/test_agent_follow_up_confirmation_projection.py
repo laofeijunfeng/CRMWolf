@@ -47,6 +47,7 @@ from app.services.agent.workflow.progress import (
     awaiting_confirmation_progress,
     execution_progress,
 )
+from app.services.agent.semantic_plan import AgentSemanticPlan
 from app.utils.time import business_now
 
 
@@ -86,6 +87,12 @@ class _FakeRootOrchestrator:
                 confidence=1.0,
                 reason_code="FOLLOW_UP_TASK_CONFIRMATION_TRIGGER",
                 evidence=["服务端触发跟进任务确认工作流"],
+                semantic_plan=AgentSemanticPlan(
+                    speech_act="CONFIRM_ACTION",
+                    business_object="FOLLOW_UP_TASK",
+                    operation="TRANSITION",
+                    confidence=1.0,
+                ),
             ),
             workflow_result=WorkflowWaitingResult(
                 workflow_ref=workflow_ref,

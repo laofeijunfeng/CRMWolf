@@ -71,7 +71,13 @@ def project_interaction_action_states(
                 if state is None and follow_up_confirmation_case_statuses is not None:
                     state = _case_state_for_action(action, follow_up_confirmation_case_statuses)
             blocks.append(
-                block.model_copy(update={"state": state, "submit_action_id": None})
+                block.model_copy(
+                    update={
+                        "state": state,
+                        "submit_action_id": None,
+                        "submitted_values": action.submitted_values if state == "SUBMITTED" else None,
+                    }
+                )
                 if state is not None
                 else block
             )

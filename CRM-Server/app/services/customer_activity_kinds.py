@@ -1,8 +1,6 @@
 """Canonical customer activity kind metadata."""
 from __future__ import annotations
 
-from typing import Any, Dict
-
 
 class CustomerActivityKind:
     PHONE_FOLLOW_UP = "PHONE_FOLLOW_UP"
@@ -14,7 +12,7 @@ class CustomerActivityKind:
     OTHER_FOLLOW_UP = "OTHER_FOLLOW_UP"
 
 
-ACTIVITY_KIND_META: Dict[str, Dict[str, Any]] = {
+ACTIVITY_KIND_META: dict[str, dict[str, object]] = {
     CustomerActivityKind.PHONE_FOLLOW_UP: {
         "category": "FOLLOW_UP",
         "label": "电话跟进",
@@ -60,7 +58,10 @@ ACTIVITY_KIND_META: Dict[str, Dict[str, Any]] = {
 }
 
 
-FOLLOW_UP_METHOD_TO_KIND = {
+# These are user-language hints accepted by Agent semantic parsing.  They are
+# not a compatibility map for persisted legacy database fields; legacy
+# ``LeadFollowUp.method`` conversion lives in ``legacy_customer_activity_adapter``.
+_AGENT_ACTIVITY_KIND_HINTS: dict[str, str] = {
     "电话": CustomerActivityKind.PHONE_FOLLOW_UP,
     "电话跟进": CustomerActivityKind.PHONE_FOLLOW_UP,
     "微信": CustomerActivityKind.WECHAT_FOLLOW_UP,
@@ -80,6 +81,7 @@ FOLLOW_UP_METHOD_TO_KIND = {
     "AI录入": CustomerActivityKind.OTHER_FOLLOW_UP,
     "其他": CustomerActivityKind.OTHER_FOLLOW_UP,
 }
+
 
 _OFFLINE_MEETING_KEYWORDS = ("线下会议", "现场会议", "线下交流会", "线下沟通会")
 _ONLINE_MEETING_KEYWORDS = (
@@ -103,11 +105,11 @@ _MEETING_STRUCTURE_KEYWORDS = (
     "会议主题",
     "参会",
     "参会成员",
-    "我方：",
+    "我方：",  # noqa: RUF001
     "我方:",
-    "对接方：",
+    "对接方：",  # noqa: RUF001
     "对接方:",
-    "客户方：",
+    "客户方：",  # noqa: RUF001
     "客户方:",
 )
 
@@ -122,8 +124,6 @@ def normalize_activity_kind(value: str | None) -> str:
     normalized = value.strip()
     if normalized in ACTIVITY_KIND_META:
         return normalized
-    if normalized in FOLLOW_UP_METHOD_TO_KIND:
-        return FOLLOW_UP_METHOD_TO_KIND[normalized]
     if _contains_any(normalized, _ONLINE_MEETING_KEYWORDS):
         return CustomerActivityKind.ONLINE_MEETING
     if _contains_any(normalized, _OFFLINE_MEETING_KEYWORDS):
@@ -150,10 +150,14 @@ def infer_activity_kind(method: str | None, content: str | None = None) -> str:
     if has_meeting_structure:
         return CustomerActivityKind.ONLINE_MEETING
 
-    return normalize_activity_kind(method_text)
+    if method_text in ACTIVITY_KIND_META:
+        return method_text
+    if method_text in _AGENT_ACTIVITY_KIND_HINTS:
+        return _AGENT_ACTIVITY_KIND_HINTS[method_text]
+    return CustomerActivityKind.OTHER_FOLLOW_UP
 
 
-def get_activity_kind_meta(activity_kind: str) -> Dict[str, Any]:
+def get_activity_kind_meta(activity_kind: str) -> dict[str, object]:
     kind = normalize_activity_kind(activity_kind)
     return {"value": kind, **ACTIVITY_KIND_META[kind]}
 

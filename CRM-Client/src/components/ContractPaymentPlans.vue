@@ -51,7 +51,7 @@ import paymentApi, {
 } from '@/api/payment'
 import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
-import { handleApiError } from '@/utils/errorHandler'
+import { handleApiError, handleOutcomeUnknown, isOutcomeUnknown } from '@/utils/errorHandler'
 import { formatCurrency, formatLocalDate } from '@/utils/format'
 import { logger } from '@/utils/logger'
 
@@ -73,6 +73,7 @@ interface Props {
 const props = defineProps<Props>()
 const emit = defineEmits<{
   'plan-updated': []
+  'view-plan': [plan: PaymentPlanResponse]
 }>()
 const permissionStore = usePermissionStore()
 const userStore = useUserStore()
@@ -89,6 +90,7 @@ const createdRecord = ref<PaymentRecordResponse | null>(null)
 const planFormDialogOpen = ref<boolean>(false)
 const planFormMode = ref<'create' | 'edit'>('create')
 const recordDialogOpen = ref<boolean>(false)
+const paymentRecordIdempotencyKey = ref<string | null>(null)
 const recordsDialogOpen = ref<boolean>(false)
 const editRecordDialogOpen = ref<boolean>(false)
 const nextStepDialogOpen = ref<boolean>(false)
@@ -231,6 +233,14 @@ function showRecords(plan: PaymentPlanResponse): void {
 function showPaymentDialog(plan: PaymentPlanResponse): void {
   currentPlan.value = plan
   recordDialogOpen.value = true
+  paymentRecordIdempotencyKey.value = crypto.randomUUID()
+}
+
+function handleRecordDialogOpenChange(open: boolean): void {
+  recordDialogOpen.value = open
+  if (!open && !submittingRecord.value) {
+    paymentRecordIdempotencyKey.value = null
+  }
 }
 
 async function handleCreateRecord(payload: PaymentRecordCreate): Promise<void> {
@@ -239,10 +249,27 @@ async function handleCreateRecord(payload: PaymentRecordCreate): Promise<void> {
 
   submittingRecord.value = true
   try {
-    const record = await paymentApi.createPaymentRecord(plan.id, payload)
+    const idempotencyKey = paymentRecordIdempotencyKey.value ?? crypto.randomUUID()
+    paymentRecordIdempotencyKey.value = idempotencyKey
+    let record: PaymentRecordResponse
+    try {
+      record = await paymentApi.createPaymentRecord(plan.id, payload, idempotencyKey)
+    } catch (error: unknown) {
+      if (!isOutcomeUnknown(error)) throw error
+
+      // 写入可能已成功但响应在网络层丢失，使用同一个隐藏幂等键确认最终状态。
+      try {
+        record = await paymentApi.resolvePaymentRecordWithRetry(idempotencyKey)
+      } catch (resolveError: unknown) {
+        logger.error('[ContractPaymentPlans]', '确认回款登记结果失败', { error: resolveError })
+        handleOutcomeUnknown()
+        return
+      }
+    }
     toast.success('登记成功')
     createdRecord.value = record
     recordDialogOpen.value = false
+    paymentRecordIdempotencyKey.value = null
     nextStepDialogOpen.value = true
     await fetchPlans()
     notifyUpdated()
@@ -391,6 +418,8 @@ watch(
     :items="plans"
     :loading="loading"
     empty-text="暂无回款计划"
+    row-interactive
+    @row-click="(plan) => emit('view-plan', plan)"
   >
     <template #headerActions>
       <Button size="sm" type="button" @click="handleCreatePlan">
@@ -515,7 +544,7 @@ watch(
       :default-amount="registerDefaultAmount"
       :default-payer-name="registerDefaultPayerName"
       :submitting="submittingRecord"
-      @update:open="recordDialogOpen = $event"
+      @update:open="handleRecordDialogOpenChange"
       @submit="handleCreateRecord"
     />
 

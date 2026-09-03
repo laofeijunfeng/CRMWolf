@@ -119,7 +119,7 @@ def _seed_customer_and_activity(db_session) -> None:
                 occurred_at=datetime(2026, 8, 6, 11, 0, 0),
                 owner_id="2",
                 creator_id="2",
-                post_commit_revision=1,
+                activity_revision=1,
             ),
         ]
     )
@@ -251,6 +251,27 @@ def test_prompt_next_pending_case_records_delivery_and_interaction(db_session):
     assert delivery.payload_json["case_public_id"] == case.public_id
     assert case.prompt_count == 1
     assert case.last_prompted_at == now
+
+
+def test_prompt_legacy_postpone_case_uses_completion_question_and_no_postpone_prompt(db_session):
+    task = _create_task(db_session)
+    case = _create_confirmation_case(db_session, task)
+    case.question_text = "8 月 5 号待办的「确认客户预算是否通过」现在完成了吗?"
+    db_session.commit()
+
+    event = FollowUpTaskConfirmationChannelService().prompt_next_pending_case(
+        db_session,
+        team_id=1,
+        user_id=2,
+        channel="web",
+        agent_session_id=33,
+        now=datetime(2026, 8, 6, 11, 0, 0),
+    )
+
+    assert event is not None
+    question_text = event["interaction"]["payload"]["case"]["question_text"]
+    assert question_text == "8 月 5 号待办的「确认客户预算是否通过」现在完成了吗?"
+    assert "延期" not in event["interaction"]["prompt"]
 
 
 def test_prompt_cases_by_public_ids_prompts_requested_owner_cases_without_owner_cooldown(db_session):
@@ -462,6 +483,14 @@ def test_prompt_next_pending_case_respects_case_prompt_limit(db_session):
     assert db_session.query(FollowUpTaskConfirmationPromptDelivery).count() == 1
 
 
+def test_unresolved_confirmation_prompt_does_not_suggest_postponement():
+    prompt = FollowUpTaskConfirmationChannelService._assistant_follow_up_prompt(False)
+
+    assert prompt is not None
+    assert "延期" not in prompt
+    assert "是否已完成" in prompt
+
+
 def test_resolve_reply_applies_confirmation_case_for_agent_tool_boundary(db_session):
     task = _create_task(db_session)
     case = _create_confirmation_case(db_session, task)
@@ -622,7 +651,7 @@ def test_mark_projection_projected_skips_superseded_source_activity_revision(db_
     )
     prompt_key = event["interaction"]["payload"]["prompt_delivery_key"]
     activity = db_session.query(CustomerActivity).filter(CustomerActivity.id == 101).one()
-    activity.post_commit_revision = 2
+    activity.activity_revision = 2
     db_session.commit()
 
     delivery = service.mark_projection_projected(db_session, team_id=1, prompt_key=prompt_key)
@@ -676,7 +705,7 @@ def test_case_pending_revalidation_cancels_superseded_source_activity_revision(d
         source_activity_revision=1,
     )
     activity = db_session.query(CustomerActivity).filter(CustomerActivity.id == 101).one()
-    activity.post_commit_revision = 2
+    activity.activity_revision = 2
     db_session.commit()
 
     pending = FollowUpTaskConfirmationChannelService(
@@ -714,7 +743,7 @@ def test_web_visibility_ack_skips_superseded_source_activity_revision(db_session
     assert projected.status == FollowUpTaskConfirmationPromptStatus.PROJECTED
 
     activity = db_session.query(CustomerActivity).filter(CustomerActivity.id == 101).one()
-    activity.post_commit_revision = 2
+    activity.activity_revision = 2
     db_session.commit()
 
     delivery = service.acknowledge_web_message_visible(
@@ -920,7 +949,7 @@ def test_prepare_case_prompt_cancels_superseded_source_activity_revision(db_sess
         source_activity_revision=1,
     )
     activity = db_session.query(CustomerActivity).filter_by(id=101, team_id=1).one()
-    activity.post_commit_revision = 2
+    activity.activity_revision = 2
     db_session.commit()
 
     event = FollowUpTaskConfirmationChannelService().prepare_case_prompt_by_public_ids(

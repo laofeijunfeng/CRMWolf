@@ -503,6 +503,28 @@ class ApprovalCRUD:
             query = query.filter(Approval.team_id == team_id)
         return query.order_by(Approval.id.desc()).first()
 
+    def get_pending_by_entity(
+        self,
+        db: Session,
+        business_type: str,
+        business_id: int,
+        team_id: Optional[int] = None,
+    ) -> Optional[Approval]:
+        """Return the active pending approval for a business entity, if any.
+
+        A retry of the same submit action must reuse the existing workflow
+        instance rather than creating a second approval.  Historical rejected
+        or cancelled instances are intentionally excluded.
+        """
+        query = db.query(Approval).filter(
+            Approval.business_type == business_type,
+            Approval.business_id == business_id,
+            Approval.status == ApprovalStatus.PENDING,
+        )
+        if team_id is not None:
+            query = query.filter(Approval.team_id == team_id)
+        return query.order_by(Approval.id.desc()).first()
+
     def get_by_contract_id(self, db: Session, contract_id: int, team_id: Optional[int] = None) -> Optional[Approval]:
         """
         根据合同ID查询审批实例（合同专用 thin wrapper，A5 解耦后保留以兼容现有调用方）

@@ -44,6 +44,7 @@ _EXPORTS: dict[str, str] = {
     "CRMQueryExecutionError": "app.services.agent.query.executor",
     "CRMQueryExecutor": "app.services.agent.query.executor",
     "DefaultCRMQueryExecutor": "app.services.agent.query.executor",
+    "FollowUpTaskDetailAPIAdapter": "app.services.agent.query.executor",
     "CRMQuerySemanticIntent": "app.services.agent.query.semantic_intent",
     "QuerySemanticIntentInvalidError": "app.services.agent.query.semantic_intent",
     "QuerySemanticIntentUnavailableError": "app.services.agent.query.semantic_intent",

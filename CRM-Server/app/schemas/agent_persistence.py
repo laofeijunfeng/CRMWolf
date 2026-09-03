@@ -126,6 +126,7 @@ class AgentUIActionRecord(AgentPersistenceContract):
     status: AgentUIActionStatus
     expires_at: datetime
     consumed_at: datetime | None = None
+    submitted_values: dict[str, JsonValue] | None = None
     consumed_request_id: str | None = Field(default=None, min_length=36, max_length=36)
     result_message_id: int | None = Field(default=None, gt=0)
     lock_version: int = Field(ge=0)

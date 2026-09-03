@@ -37,6 +37,7 @@ import {
   TextareaField,
 } from '@/components/crmwolf'
 import { handleApiError } from '@/utils/errorHandler'
+import { useDialogCloseGuard } from '@/composables/useDialogCloseGuard'
 import customerApi, { type ContactResponse, type ContactCreate, type ContactUpdate } from '@/api/customer'
 
 // Zod schema for form validation
@@ -113,7 +114,6 @@ const reportsToOptions = computed(() =>
 // State
 const submitting = ref(false)
 const isDirty = ref(false)
-const showConfirmDialog = ref(false)
 
 // Computed property for edit mode
 const isEdit = computed(() => !!props.contact)
@@ -123,6 +123,13 @@ const visible = computed({
   get: () => props.open,
   set: (val) => emit('update:open', val)
 })
+
+const closeGuard = useDialogCloseGuard({
+  isDirty: isDirty,
+  submitting,
+  emitOpen: (open) => emit('update:open', open),
+})
+const showConfirmDialog = closeGuard.showConfirmDialog
 
 function mapContactGenderToForm(gender: number | null): '男' | '女' | undefined {
   if (gender === 1) return '男'
@@ -144,11 +151,18 @@ function normalizeOptionalText(value: string | null | undefined): string | null 
 // Watch for form changes
 watch(values, () => {
   isDirty.value = true
-}, { deep: true })
+}, { deep: true, flush: 'sync' })
 
 // Reset or populate form when dialog opens
 watch(() => props.open, (newOpen) => {
+  if (!newOpen) {
+    if (closeGuard.handleParentClose()) return
+    closeGuard.reset()
+    return
+  }
+
   if (newOpen) {
+    closeGuard.reset()
     if (props.contact) {
       // Edit mode: populate form with contact data
       const formGender = mapContactGenderToForm(props.contact.gender)
@@ -210,6 +224,7 @@ const onSubmit = handleSubmit(async (formValues) => {
     }
 
     isDirty.value = false
+    closeGuard.approveClose()
     visible.value = false
     emit('success')
   } catch (error) {
@@ -220,29 +235,28 @@ const onSubmit = handleSubmit(async (formValues) => {
 })
 
 // Cancel operation
+function handleOpenChange(open: boolean): void {
+  closeGuard.handleOpenChange(open)
+}
+
 function handleCancel(): void {
-  if (isDirty.value) {
-    showConfirmDialog.value = true
-  } else {
-    visible.value = false
-  }
+  closeGuard.requestClose()
 }
 
 // Confirm discard changes
 function confirmCancel(): void {
-  showConfirmDialog.value = false
-  visible.value = false
+  closeGuard.confirmDiscard()
 }
 
 // Continue editing
 function continueEditing(): void {
-  showConfirmDialog.value = false
+  closeGuard.continueEditing()
 }
 </script>
 
 <template>
-  <Dialog v-model:open="visible">
-    <DialogContent>
+  <Dialog :open="props.open" @update:open="handleOpenChange">
+    <DialogContent class="w-[calc(100vw-2rem)] max-h-[min(90vh,90dvh)] overflow-y-auto overscroll-contain [scroll-padding-bottom:calc(5rem+env(safe-area-inset-bottom,0px))]">
       <DialogHeader>
         <DialogTitle>{{ isEdit ? '编辑联系人' : '新建联系人' }}</DialogTitle>
         <DialogDescription class="sr-only">填写联系人信息</DialogDescription>
@@ -377,7 +391,7 @@ function continueEditing(): void {
 
         <!-- DialogFooter -->
         <DialogFooter class="mt-6 pt-4 border-t">
-          <Button variant="outline" type="button" @click="handleCancel">
+          <Button variant="outline" type="button" :disabled="submitting" @click="handleCancel">
             取消
           </Button>
           <Button type="submit" :loading="submitting">
@@ -389,7 +403,7 @@ function continueEditing(): void {
   </Dialog>
 
   <!-- Confirm discard changes dialog -->
-  <AlertDialog v-model:open="showConfirmDialog">
+  <AlertDialog :open="showConfirmDialog" @update:open="closeGuard.handleConfirmOpenChange">
     <AlertDialogContent>
       <AlertDialogHeader>
         <AlertDialogTitle>放弃更改？</AlertDialogTitle>
