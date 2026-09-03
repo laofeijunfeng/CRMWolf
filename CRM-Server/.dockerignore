@@ -1,0 +1,23 @@
+# Local development environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Runtime/generated data (created inside the image/container as needed)
+logs/
+uploads/
+
+# Tests and local-only files are not part of the production image
+tests/
+.artifacts-*
+.env
+.env.*
+.git/
+.gitignore

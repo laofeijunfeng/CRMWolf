@@ -1,0 +1,12 @@
+# Local dependencies and build output (installed/built inside Docker)
+node_modules/
+dist/
+.vite/
+coverage/
+
+# Local-only files
+.env
+.env.*
+.git/
+.gitignore
+*.log
