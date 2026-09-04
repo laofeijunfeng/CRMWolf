@@ -1,6 +1,6 @@
 <template>
   <!-- UI/UX Pro Max §8: Toast notification container (global position) -->
-  <Toast position="top-center" :duration="4000" />
+  <Toast position="bottom-center" :duration="4000" />
   <!-- UI/UX Pro Max §8: Confirm dialog container (global) -->
   <ConfirmDialog />
   <RenameDialog />

@@ -71,6 +71,10 @@ export function useDialogCloseGuard({
 
   function handleOpenChange(open: boolean): void {
     if (open) {
+      // Radix can emit a stale `true` while a controlled close is still
+      // propagating to the parent. Once closing has been approved, do not
+      // turn that event into a second open request.
+      if (closeApproved.value) return
       emitOpen(true)
       return
     }
