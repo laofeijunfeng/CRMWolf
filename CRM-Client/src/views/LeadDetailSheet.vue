@@ -371,7 +371,7 @@ watch(() => props.visible, (visible): void => {
           <CheckCircle class="w-4 h-4 mr-2" />
           转化为客户
         </Button>
-        <Button variant="outline" @click="showEditDialog = true">
+        <Button variant="outline" :disabled="leadData === null || loading" @click="showEditDialog = true">
           <Pencil class="w-4 h-4 mr-2" />
           编辑
         </Button>
@@ -442,9 +442,12 @@ watch(() => props.visible, (visible): void => {
 
   <!-- 编辑线索弹窗 -->
   <LeadFormDialog
+    v-if="leadData !== null"
+    :key="leadData.id"
     v-model:open="showEditDialog"
     mode="edit"
     :lead-id="leadId ?? undefined"
+    :lead="leadData"
     @success="handleEditSuccess"
   />
 

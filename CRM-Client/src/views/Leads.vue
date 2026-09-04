@@ -49,7 +49,7 @@ import LeadFormDialog from '@/components/LeadFormDialog.vue'
 import LeadConvertDialog from '@/components/LeadConvertDialog.vue'
 import LeadDetailSheet from './LeadDetailSheet.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
-import { leadApi, type Lead, type LeadListParams, type LeadOwnerFilterOption } from '@/api/lead'
+import { leadApi, type Lead, type LeadDetail, type LeadListParams, type LeadOwnerFilterOption } from '@/api/lead'
 import userApi, { type UserResponse, UserStatus } from '@/api/user'
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
@@ -87,6 +87,7 @@ const sheetVisible = ref(false)
 const selectedLeadId = ref<string | undefined>(undefined)
 const showLeadCreateDialog = ref(false)
 const showLeadEditDialog = ref(false)
+const editingLead = ref<LeadDetail | null>(null)
 
 // 转化为客户弹窗状态
 const showConvertDialog = ref(false)
@@ -341,9 +342,21 @@ const handleViewDetail = (record: Lead): void => {
   sheetVisible.value = true
 }
 
-const handleEdit = (record: Lead): void => {
-  selectedLeadId.value = record.id
-  showLeadEditDialog.value = true
+const handleEdit = async (record: Lead): Promise<void> => {
+  try {
+    // Load before opening so the dialog's first paint already has stable form content.
+    const lead = await leadApi.getLeadDetail(record.id)
+    selectedLeadId.value = lead.id
+    editingLead.value = lead
+    showLeadEditDialog.value = true
+  } catch (error) {
+    handleApiError(error, '获取线索详情')
+  }
+}
+
+const handleLeadEditDialogOpenChange = (open: boolean): void => {
+  showLeadEditDialog.value = open
+  if (!open) editingLead.value = null
 }
 
 const handleClaim = async (record: Lead): Promise<void> => {
@@ -812,9 +825,13 @@ watchEffect(() => {
 
     <!-- 编辑线索弹窗 -->
     <LeadFormDialog
-      v-model:open="showLeadEditDialog"
+      v-if="editingLead !== null"
+      :key="editingLead.id"
+      :open="showLeadEditDialog"
       mode="edit"
       :lead-id="selectedLeadId ?? undefined"
+      :lead="editingLead"
+      @update:open="handleLeadEditDialogOpenChange"
       @success="fetchLeadList"
     />
 

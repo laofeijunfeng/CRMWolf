@@ -31,7 +31,7 @@ import {
   SelectField,
   TextareaField,
 } from '@/components/crmwolf'
-import { leadApi, type LeadCreate, type LeadUpdate } from '@/api/lead'
+import { leadApi, type LeadCreate, type LeadDetail, type LeadUpdate } from '@/api/lead'
 import { leadSchema, type LeadForm } from '@/schemas/lead-form'
 import { useAcquisitionSourceOptions } from '@/composables/useAcquisitionSourceOptions'
 
@@ -39,6 +39,8 @@ interface Props {
   open: boolean
   mode: 'create' | 'edit'
   leadId?: string | undefined
+  /** Optional prefetched detail keeps edit opening synchronous and avoids a loading-layout jump. */
+  lead?: LeadDetail | null
 }
 
 interface Emits {
@@ -51,10 +53,11 @@ const emit = defineEmits<Emits>()
 
 // 状态
 const submitting = ref(false)
-const loading = ref(false)
+const loading = ref(props.open && props.mode === 'edit' && props.lead?.id !== props.leadId)
 const initialValues = ref<Partial<LeadForm>>({})
 const isDirty = ref(false)
 const showConfirmDialog = ref(false)
+let loadRequestId = 0
 
 // 计算属性
 const visible = computed({
@@ -81,36 +84,69 @@ watch(initialValues, (): void => {
   isDirty.value = true
 }, { deep: true })
 
-// 编辑模式：加载线索详情
-watch([(): boolean => props.open, (): string | undefined => props.leadId], async ([open, leadId]): Promise<void> => {
-  if (open) {
-    await loadFormOptions()
+function applyLeadDetail(lead: LeadDetail): void {
+  ensureOption(lead.source_info)
+  initialValues.value = {
+    lead_name: lead.lead_name,
+    source_public_id: lead.source_info?.public_id ?? '',
+    city: lead.city,
+    company_scale: lead.company_scale as LeadForm['company_scale'] | undefined,
+    contact_name: lead.contact_name,
+    contact_phone: lead.contact_phone
+    // remark is optional - will be undefined if not supported by API yet
+  }
+  // Loading values is not a user edit.
+  isDirty.value = false
+}
+
+// 编辑模式：优先消费父层预加载的详情，避免弹窗打开后再经历空表单/加载态切换。
+watch([
+  (): boolean => props.open,
+  (): string | undefined => props.leadId,
+  (): 'create' | 'edit' => props.mode,
+  (): LeadDetail | null | undefined => props.lead,
+], async ([open, leadId, mode, prefetchedLead]): Promise<void> => {
+  const requestId = ++loadRequestId
+
+  if (!open) {
+    loading.value = false
+    return
   }
 
-  if (open && props.mode === 'edit' && leadId !== undefined && leadId !== null) {
-    loading.value = true
-    try {
-      const lead = await leadApi.getLeadDetail(leadId)
-      ensureOption(lead.source_info)
-      initialValues.value = {
-        lead_name: lead.lead_name,
-        source_public_id: lead.source_info?.public_id ?? '',
-        city: lead.city,
-        company_scale: lead.company_scale as LeadForm['company_scale'] | undefined,
-        contact_name: lead.contact_name,
-        contact_phone: lead.contact_phone
-        // remark is optional - will be undefined if not supported by API yet
-      }
-      // 重置 dirty 状态
-      setTimeout(() => {
-        isDirty.value = false
-      }, 100)
-    } catch {
-      toast.error('加载线索详情失败')
-      visible.value = false
-    } finally {
-      loading.value = false
-    }
+  if (mode === 'create') {
+    loading.value = false
+    void loadFormOptions()
+    return
+  }
+
+  if (leadId === undefined || leadId === null) {
+    loading.value = false
+    return
+  }
+
+  if (prefetchedLead !== null && prefetchedLead !== undefined && prefetchedLead.id === leadId) {
+    applyLeadDetail(prefetchedLead)
+    loading.value = false
+    // The selected source is already ensured above; options can load without blocking first paint.
+    void loadFormOptions()
+    return
+  }
+
+  // Set this before the first await so the dialog can never paint an empty edit form.
+  loading.value = true
+  try {
+    const [lead] = await Promise.all([
+      leadApi.getLeadDetail(leadId),
+      loadFormOptions(),
+    ])
+    if (requestId !== loadRequestId) return
+    applyLeadDetail(lead)
+  } catch {
+    if (requestId !== loadRequestId) return
+    toast.error('加载线索详情失败')
+    visible.value = false
+  } finally {
+    if (requestId === loadRequestId) loading.value = false
   }
 }, { immediate: true })
 
