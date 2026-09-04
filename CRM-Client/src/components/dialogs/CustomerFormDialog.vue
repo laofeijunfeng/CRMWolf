@@ -47,6 +47,7 @@ import {
 import { useAcquisitionSourceOptions } from '@/composables/useAcquisitionSourceOptions'
 import ErrorState from '@/components/ErrorState.vue'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
+import type { FormSuccessPayload } from '@/types/actionOutcome'
 
 interface Props {
   open: boolean
@@ -58,7 +59,7 @@ interface Props {
 
 interface Emits {
   (e: 'update:open', value: boolean): void
-  (e: 'success'): void
+  (e: 'success', payload?: FormSuccessPayload): void
 }
 
 const props = defineProps<Props>()
@@ -374,8 +375,21 @@ const onSubmit = handleSubmit(async (formValues): Promise<void> => {
           is_decision_maker: false
         }
       }
-      await customerApi.createCustomer(data)
+      const createdCustomer = await customerApi.createCustomer(data)
       toast.success('客户创建成功')
+
+      const successPayload: FormSuccessPayload = {
+        entityType: 'customer',
+        entityId: createdCustomer.id,
+        operation: 'create',
+        outcome: 'success',
+        stateSyncRequested: true,
+      }
+      isDirty.value = false
+      closeGuard.approveClose()
+      visible.value = false
+      emit('success', successPayload)
+      return
     } else if (props.customerId !== undefined) {
       // Cast to CustomerForm for edit mode with profile fields
       const editData = formValues as CustomerForm
@@ -391,12 +405,21 @@ const onSubmit = handleSubmit(async (formValues): Promise<void> => {
       const updatedCustomer = await customerApi.updateCustomer(props.customerId, data)
       loadedVersion.value = updatedCustomer.version
       toast.success('客户更新成功')
+
+      const successPayload: FormSuccessPayload = {
+        entityType: 'customer',
+        entityId: updatedCustomer.id,
+        operation: 'update',
+        outcome: 'success',
+        stateSyncRequested: true,
+      }
+      isDirty.value = false
+      closeGuard.approveClose()
+      visible.value = false
+      emit('success', successPayload)
+      return
     }
 
-    isDirty.value = false
-    closeGuard.approveClose()
-    visible.value = false
-    emit('success')
   } catch (error) {
     submitError.value = toFeedbackError(error, props.mode === 'create' ? '创建客户' : '更新客户', { operation: 'write' })
     for (const fieldError of submitError.value.fieldErrors ?? []) {

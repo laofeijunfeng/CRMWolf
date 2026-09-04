@@ -205,9 +205,6 @@ const customFilterViews = useCustomFilterViews({
   onViewApplySuccess: (tabKey) => headerStore.setActiveTab(tabKey),
 })
 const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
-const activeViewLabel = computed(() =>
-  allTabs.value.find((tab) => tab.key === activeTab.value)?.label ?? '当前列表'
-)
 const effectiveFilters = computed(() => {
   const tabApprovalStatus = activeTab.value === 'confirmed'
     ? 'approved'
@@ -335,12 +332,13 @@ const handleDetailSheetVisibleChange = (visible: boolean): void => {
   }
 }
 
-const refreshRecordsAndSyncSelection = async (): Promise<void> => {
+const refreshRecordsAndSyncSelection = async (): Promise<boolean> => {
   const selectedId = selectedRecord.value?.id
-  await fetchPaymentRecords()
+  const refreshed = await fetchPaymentRecords()
   if (selectedId !== undefined) {
     selectedRecord.value = tableData.value.find((record) => record.id === selectedId) ?? selectedRecord.value
   }
+  return refreshed
 }
 
 const handleDetailApprovalChanged = async (): Promise<void> => {
@@ -363,15 +361,21 @@ const handleEditSubmit = async (recordId: number, data: PaymentRecordUpdate): Pr
   editSubmitting.value = true
   try {
     await paymentApi.updatePaymentRecord(recordId, data)
+    let actionMessage: string
     if (isResubmitMode.value) {
       const res = await approvalStore.submitEntity('PAYMENT', recordId)
-      toast.success(res.approval_id === 0 ? '未配置审批流，已转为财务确认' : '已重新提交审批')
+      actionMessage = res.approval_id === 0 ? '未配置审批流，已转为财务确认' : '已重新提交审批'
     } else {
-      toast.success('回款记录更新成功')
+      actionMessage = '回款记录更新成功'
     }
     editDialogOpen.value = false
     isResubmitMode.value = false
-    await refreshRecordsAndSyncSelection()
+    const refreshed = await refreshRecordsAndSyncSelection()
+    toast.success(actionMessage, {
+      description: refreshed
+        ? '当前记录和列表已同步'
+        : '操作已完成，但列表刷新失败，请稍后重试。',
+    })
     if (!detailSheetVisible.value) {
       selectedRecord.value = null
     }
@@ -401,8 +405,16 @@ const handleDelete = async (record: PaymentRecordWithDetails): Promise<void> => 
   deletingRecordIds.value = new Set(deletingRecordIds.value).add(record.id)
   try {
     await paymentApi.deletePaymentRecord(record.id)
-    toast.success(`回款记录“${recordLabel}”已删除`)
-    void fetchPaymentRecords()
+    if (selectedRecord.value?.id === record.id) {
+      detailSheetVisible.value = false
+      editDialogOpen.value = false
+      isResubmitMode.value = false
+      selectedRecord.value = null
+    }
+    const refreshed = await fetchPaymentRecords()
+    toast.success(`回款记录“${recordLabel}”已删除`, refreshed ? undefined : {
+      description: '回款记录已删除，但列表刷新失败，请稍后重试。',
+    })
   } catch (error) {
     handleApiError(error, '删除回款记录')
   } finally {
@@ -419,14 +431,17 @@ const handleDeleteAction = (row: Record<string, unknown>): void => {
 const getRowActions = (row: PaymentRecordWithDetails): TableRowActionSet => ({
   primaryActions: [
     {
-      label: '查看',
+      id: 'detail',
+      label: '查看详情',
       kind: 'detail',
       handler: handleViewAction,
       icon: Eye
     },
     {
+      id: 'edit',
       label: '编辑',
       desktopPrimary: true,
+      resultType: 'entity-updated',
       handler: handleEditAction,
       visible: canEditRecordRow(row),
       icon: Pencil
@@ -434,9 +449,13 @@ const getRowActions = (row: PaymentRecordWithDetails): TableRowActionSet => ({
   ],
   secondaryActions: [
     {
+      id: 'delete',
       label: '删除',
       handler: handleDeleteAction,
       disabled: isRecordDeleting(row.id),
+      disabledReason: isRecordDeleting(row.id) ? '删除处理中' : undefined,
+      risk: 'destructive',
+      resultType: 'entity-deleted',
       visible: canDeleteRecordRow(row),
       icon: Trash2,
       destructive: true
@@ -514,7 +533,6 @@ watchEffect(() => {
       :page-size="pagination.pageSize"
       :total="pagination.total"
       view-key="payment-records.list"
-      :view-label="activeViewLabel"
       :effective-filters="effectiveFilters"
       :view-applying="customFilterViews.applying.value"
       :view-apply-error="customFilterViews.applyError.value"

@@ -2,7 +2,7 @@ import { defineComponent, h, nextTick, ref, type VNode } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import PaymentPlanFormDialog from '../PaymentPlanFormDialog.vue'
-import paymentApi from '@/api/payment'
+import paymentApi, { type PaymentPlanResponse } from '@/api/payment'
 
 const passthrough = defineComponent({
   inheritAttrs: false,
@@ -88,7 +88,7 @@ describe('PaymentPlanFormDialog', () => {
   })
 
   it('does not reopen after a successful create when the parent controls open state', async () => {
-    vi.spyOn(paymentApi, 'createPaymentPlans').mockResolvedValue([])
+    vi.spyOn(paymentApi, 'createPaymentPlans').mockResolvedValue([{ id: 1 } as PaymentPlanResponse])
 
     const open = ref(true)
     const Parent = defineComponent({
@@ -107,8 +107,32 @@ describe('PaymentPlanFormDialog', () => {
     wrapper.unmount()
   })
 
+  it('emits an object-level success outcome after create', async () => {
+    vi.spyOn(paymentApi, 'createPaymentPlans').mockResolvedValue([{ id: 1 } as PaymentPlanResponse])
+
+    const wrapper = mount(PaymentPlanFormDialog, {
+      props: {
+        open: true,
+        mode: 'create',
+        fixedContract: { id: 1, contract_name: '合同', total_amount: 100 },
+      },
+      global: { stubs: formStubs },
+    })
+
+    await fillAndSubmit(wrapper)
+
+    expect(wrapper.emitted('success')).toEqual([[{
+      entityType: 'payment-plan',
+      entityId: 1,
+      operation: 'create',
+      outcome: 'success',
+      stateSyncRequested: true,
+    }]])
+    wrapper.unmount()
+  })
+
   it('ignores a stale open event while the successful save close is pending', async () => {
-    vi.spyOn(paymentApi, 'createPaymentPlans').mockResolvedValue([])
+    vi.spyOn(paymentApi, 'createPaymentPlans').mockResolvedValue([{ id: 1 } as PaymentPlanResponse])
 
     const wrapper = mount(PaymentPlanFormDialog, {
       props: {

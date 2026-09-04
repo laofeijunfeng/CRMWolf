@@ -37,6 +37,7 @@ import paymentApi, {
 import { handleApiError } from '@/utils/errorHandler'
 import { useDialogCloseGuard } from '@/composables/useDialogCloseGuard'
 import { normalizePaginatedResponse } from '@/types/pagination'
+import type { FormSuccessPayload } from '@/types/actionOutcome'
 
 interface Props {
   open: boolean
@@ -47,7 +48,7 @@ interface Props {
 
 interface Emits {
   (event: 'update:open', value: boolean): void
-  (event: 'success'): void
+  (event: 'success', payload?: FormSuccessPayload): void
 }
 
 interface PaymentPlanForm {
@@ -347,19 +348,37 @@ async function handleSubmit(): Promise<void> {
 
   submitting.value = true
   try {
+    let entityId: number
+    let operation: FormSuccessPayload['operation']
     if (isCreateMode.value) {
-      await paymentApi.createPaymentPlans(Number(form.contractId), {
+      const createdPlans = await paymentApi.createPaymentPlans(Number(form.contractId), {
         plans: [buildCreatePayload()],
       })
+      const createdPlan = createdPlans[0]
+      if (createdPlan === undefined) {
+        throw new Error('回款计划创建结果为空')
+      }
+      entityId = createdPlan.id
+      operation = 'create'
       toast.success('回款计划创建成功')
     } else if (props.plan !== null) {
-      await paymentApi.updatePaymentPlan(props.plan.id, buildUpdatePayload())
+      const updatedPlan = await paymentApi.updatePaymentPlan(props.plan.id, buildUpdatePayload())
+      entityId = updatedPlan.id
+      operation = 'update'
       toast.success('回款计划更新成功')
+    } else {
+      throw new Error('缺少待更新的回款计划')
     }
 
     closeGuard.approveClose()
     visible.value = false
-    emit('success')
+    emit('success', {
+      entityType: 'payment-plan',
+      entityId,
+      operation,
+      outcome: 'success',
+      stateSyncRequested: true,
+    })
   } catch (error: unknown) {
     handleApiError(error, isCreateMode.value ? '创建回款计划' : '更新回款计划')
   } finally {

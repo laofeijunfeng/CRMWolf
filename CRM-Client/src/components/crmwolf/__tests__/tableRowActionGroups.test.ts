@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { ActionConfig } from '../tableRowActionTypes'
 import {
+  getTableRowActionKey,
   groupTableRowActions,
   getDesktopTableRowActions,
+  getMobileTableRowActions,
+  getTableRowActionLabel,
   getDesktopTableRowActionsWidth,
   hasVisibleTableRowActions,
   shouldShowTableRowActionGroupLabels
@@ -14,7 +17,32 @@ const action = (label: string, extra: Partial<ActionConfig> = {}): ActionConfig 
   ...extra
 })
 
+describe('shared action semantics', () => {
+  it('uses one disabled explanation for all action surfaces', () => {
+    expect(getTableRowActionLabel(action('删除', {
+      id: 'delete',
+      disabledReason: '删除处理中'
+    }))).toBe('删除（删除处理中）')
+  })
+
+  it('keeps destructive mobile actions behind the more menu', () => {
+    const deleteAction = action('删除', { id: 'delete', risk: 'destructive', destructive: true })
+    const projection = getMobileTableRowActions({
+      primaryActions: [action('编辑', { id: 'edit' }), deleteAction],
+      secondaryActions: [action('移交', { id: 'transfer' })]
+    })
+
+    expect(projection.primaryActions.map((item) => item.id)).toEqual(['edit'])
+    expect(projection.secondaryActions.map((item) => item.id)).toEqual(['transfer', 'delete'])
+  })
+})
+
 describe('groupTableRowActions', () => {
+  it('uses the stable action id as the rendered key when available', () => {
+    expect(getTableRowActionKey(action('修改'), 0)).toBe('修改-0')
+    expect(getTableRowActionKey(action('修改', { id: 'edit' }), 0)).toBe('edit-0')
+  })
+
   it('puts visible non-destructive primary actions into 常用', () => {
     const groups = groupTableRowActions({
       primaryActions: [action('编辑'), action('推进阶段')],
@@ -63,6 +91,15 @@ describe('groupTableRowActions', () => {
 
     expect(groups.map((group) => group.key)).toEqual(['common', 'danger'])
     expect(groups[1]?.items.map((item) => item.label)).toEqual(['输单'])
+  })
+
+  it('treats the semantic destructive risk as dangerous even without the legacy flag', () => {
+    const groups = groupTableRowActions({
+      primaryActions: [action('删除', { id: 'delete', risk: 'destructive' })],
+      secondaryActions: []
+    })
+
+    expect(groups.map((group) => group.key)).toEqual(['danger'])
   })
 
   it('omits hidden actions and empty groups', () => {
@@ -134,6 +171,21 @@ describe('getDesktopTableRowActions', () => {
 
     expect(projection.primaryActions.map((item) => item.label)).toEqual(['编辑', '推进阶段'])
     expect(projection.menuGroups.flatMap((group) => group.items.map((item) => item.label))).toEqual(['移交', '删除'])
+  })
+
+  it('keeps a visible state transition in the primary slot when three actions compete', () => {
+    const projection = getDesktopTableRowActions({
+      primaryActions: [
+        action('编辑', { id: 'edit', desktopPrimary: true }),
+        action('下载', { id: 'download', desktopPrimary: true })
+      ],
+      secondaryActions: [
+        action('提交', { id: 'submit', desktopPrimary: true, risk: 'approval' })
+      ]
+    })
+
+    expect(projection.primaryActions.map((item) => item.id)).toEqual(['edit', 'submit'])
+    expect(projection.menuGroups.flatMap((group) => group.items.map((item) => item.id))).toEqual(['download'])
   })
 
   it('does not duplicate the row detail action and provides a fallback primary action', () => {
@@ -208,6 +260,15 @@ describe('getDesktopTableRowActions', () => {
 
     expect(projection.primaryActions.map((item) => item.label)).toEqual(['编辑'])
     expect(projection.menuGroups).toEqual([])
+  })
+
+  it('uses detail action id as the canonical detail semantic', () => {
+    const projection = getDesktopTableRowActions({
+      primaryActions: [action('打开详情', { id: 'detail' }), action('修改', { id: 'edit' })],
+      secondaryActions: []
+    })
+
+    expect(projection.primaryActions.map((item) => item.id)).toEqual(['edit'])
   })
 
   it('does not expose detail actions in context-menu groups', () => {

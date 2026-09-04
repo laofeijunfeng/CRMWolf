@@ -28,6 +28,12 @@ jobs:
       - name: Run TypeScript check
         run: cd CRM-Client && npm run type-check
 
+      - name: Run design-system governance tests
+        run: cd CRM-Client && npm run test:governance
+
+      - name: Audit design-system migration baseline
+        run: cd CRM-Client && npm run lint:design-system:all
+
   # ===== 前端测试 =====
   frontend-test:
     runs-on: ubuntu-latest

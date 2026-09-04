@@ -34,11 +34,7 @@
         :page-size="pageSize"
         :loading="listLoading"
         :load-error="loadError"
-        :selectable="activeTab === 'pending'"
-        :selected-row-keys="selectedRowKeys"
-        :get-row-selectable="isRowSelectable"
         view-key="approval-center.list"
-        :view-label="activeViewLabel"
         :effective-filters="effectiveFilters"
         column-config-enabled
         height="calc(100vh - 108px)"
@@ -60,32 +56,6 @@
         @row-click="openDetail"
         @retry="reload"
       >
-        <template #tableTools>
-          <div v-if="selectedApprovals.length > 0" class="approval-bulk-toolbar" role="region" aria-label="批量审批操作">
-            <span class="approval-bulk-toolbar__count">已选 {{ selectedApprovals.length }} 条{{ selectedBusinessType ? `（${businessTypeLabel(selectedBusinessType)}）` : '' }}</span>
-            <Button
-              size="sm"
-              data-testid="bulk-approve-btn"
-              :loading="bulkPending"
-              :disabled="bulkPending"
-              @click="openBulkAction('APPROVE')"
-            >
-              批量同意
-            </Button>
-            <Button
-              variant="destructive"
-              size="sm"
-              data-testid="bulk-reject-btn"
-              :disabled="bulkPending"
-              @click="openBulkAction('REJECT')"
-            >
-              批量驳回
-            </Button>
-            <Button variant="ghost" size="sm" :disabled="bulkPending" @click="clearSelection">
-              清除选择
-            </Button>
-          </div>
-        </template>
 
         <!-- 单号列：mono font + 点击复制 -->
         <template #cell-application_number="{ row }">
@@ -186,6 +156,7 @@
               size="lg"
               class="approval-mobile-action"
               data-testid="mobile-preview-btn"
+              data-action-id="preview"
               :loading="attachmentPreviewPendingId === row.id"
               @click.stop="handlePreviewAttachment(row)"
             >
@@ -196,6 +167,7 @@
               size="lg"
               class="approval-mobile-action"
               data-testid="mobile-reject-btn"
+              data-action-id="reject"
               :loading="quickRejectPendingId === row.id"
               :disabled="quickActionPending"
               @click.stop="handleQuickReject(row)"
@@ -207,11 +179,12 @@
               size="lg"
               class="approval-mobile-action"
               data-testid="mobile-approve-btn"
+              data-action-id="approve"
               :loading="quickApprovePendingId === row.id"
               :disabled="quickActionPending"
               @click.stop="handleQuickApprove(row)"
             >
-              通过
+              同意
             </Button>
             <Button
               v-if="!hasAttachment(row)"
@@ -219,9 +192,10 @@
               size="lg"
               class="approval-mobile-action"
               data-testid="mobile-detail-btn"
+              data-action-id="detail"
               @click.stop="openDetail(row, index)"
             >
-              详情
+              查看详情
             </Button>
           </div>
           <div class="approval-mobile-actions" v-else-if="activeTab === 'submitted' && row.status === 'REJECTED'">
@@ -230,6 +204,7 @@
               size="lg"
               class="approval-mobile-action approval-mobile-action-wide"
               data-testid="mobile-resubmit-btn"
+              data-action-id="resubmit"
               :loading="resubmitPendingId === row.id"
               @click.stop="handleResubmit(row)"
             >
@@ -242,6 +217,7 @@
               size="lg"
               class="approval-mobile-action"
               data-testid="mobile-remind-btn"
+              data-action-id="remind"
               :loading="remindPendingId === row.id"
               @click.stop="handleRemind(row)"
             >
@@ -254,6 +230,7 @@
               size="lg"
               class="approval-mobile-action"
               data-testid="mobile-preview-btn"
+              data-action-id="preview"
               :loading="attachmentPreviewPendingId === row.id"
               @click.stop="handlePreviewAttachment(row)"
             >
@@ -264,9 +241,10 @@
               size="lg"
               class="approval-mobile-action"
               data-testid="mobile-detail-btn"
+              data-action-id="detail"
               @click.stop="openDetail(row, index)"
             >
-              详情
+              查看详情
             </Button>
           </div>
           <div class="approval-mobile-actions" v-else>
@@ -276,6 +254,7 @@
               size="lg"
               class="approval-mobile-action"
               data-testid="mobile-preview-btn"
+              data-action-id="preview"
               :loading="attachmentPreviewPendingId === row.id"
               @click.stop="handlePreviewAttachment(row)"
             >
@@ -286,9 +265,10 @@
               size="lg"
               class="approval-mobile-action"
               data-testid="mobile-detail-btn"
+              data-action-id="detail"
               @click.stop="openDetail(row, index)"
             >
-              详情
+              查看详情
             </Button>
           </div>
         </template>
@@ -484,78 +464,6 @@
       </DialogContent>
     </Dialog>
 
-    <!-- 批量审批确认与结果弹窗：保留失败项，允许单独重试 -->
-    <Dialog v-model:open="bulkDialogVisible">
-      <DialogContent class="max-w-[560px]">
-        <DialogHeader>
-          <DialogTitle>{{ bulkAction === 'REJECT' ? '批量驳回审批' : '批量同意审批' }}</DialogTitle>
-          <DialogDescription v-if="bulkResult === null">
-            将处理 {{ selectedApprovals.length }} 条{{ selectedBusinessType ? businessTypeLabel(selectedBusinessType) : '' }}审批；每条记录独立处理，部分失败不会回滚已成功项。
-          </DialogDescription>
-          <DialogDescription v-else>
-            本次已成功处理 {{ bulkResult.success_count }} 条，失败 {{ bulkResult.failed.length }} 条。
-          </DialogDescription>
-        </DialogHeader>
-
-        <template v-if="bulkResult === null">
-          <Textarea
-            v-if="bulkAction === 'REJECT'"
-            v-model="bulkComment"
-            data-testid="bulk-reject-reason"
-            placeholder="请填写驳回理由，提交人将据此修改"
-            :rows="4"
-            :maxlength="500"
-          />
-          <p v-if="bulkAction === 'REJECT'" class="text-sm text-muted-foreground text-right">
-            {{ bulkComment.length }} / 500
-          </p>
-          <ErrorState
-            v-if="bulkError"
-            :variant="bulkError.variant ?? 'error'"
-            :title="bulkError.title"
-            :description="bulkError.description"
-          />
-        </template>
-        <template v-else>
-          <div v-if="bulkResult.failed.length > 0" class="approval-bulk-result" role="alert">
-            <p class="font-medium">以下记录未处理成功：</p>
-            <ul class="approval-bulk-result__list">
-              <li v-for="item in bulkResult.failed" :key="item.id">
-                <span>{{ bulkFailureLabel(item.id) }}</span>
-                <span class="text-muted-foreground">{{ item.reason }}</span>
-              </li>
-            </ul>
-          </div>
-          <p v-else class="text-sm text-muted-foreground">全部记录已处理成功。</p>
-        </template>
-
-        <DialogFooter>
-          <Button variant="ghost" :disabled="bulkPending" @click="bulkDialogVisible = false">
-            {{ bulkResult === null ? '取消' : '关闭' }}
-          </Button>
-          <Button
-            v-if="bulkResult === null"
-            :variant="bulkAction === 'REJECT' ? 'destructive' : 'default'"
-            data-testid="bulk-confirm-btn"
-            :loading="bulkPending"
-            :disabled="bulkPending || (bulkAction === 'REJECT' && !bulkComment.trim())"
-            @click="confirmBulkAction"
-          >
-            确定处理
-          </Button>
-          <Button
-            v-else-if="bulkResult.failed.length > 0"
-            data-testid="bulk-retry-btn"
-            :loading="bulkPending"
-            :disabled="bulkPending"
-            @click="retryBulkFailures"
-          >
-            重试失败项
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-
     <!-- 移动端快速驳回弹窗 -->
     <Dialog :open="quickRejectVisible" @update:open="handleQuickRejectOpenChange">
       <DialogContent class="max-w-[90vw]">
@@ -666,7 +574,7 @@ import { customerDetailRoute } from '@/utils/customerRoutes'
 import approvalGenericApi from '@/api/approvalGeneric'
 import contractApi from '@/api/contract'
 import invoiceApi, { type InvoiceApplicationResponse } from '@/api/invoice'
-import type { EntityType, ApprovalCustomerInfo, ApprovalDetail, ApprovalListItem, ApprovalListQuery, ApprovalAction, BulkApproveResponse } from '@/schemas/approvalGeneric'
+import type { EntityType, ApprovalCustomerInfo, ApprovalDetail, ApprovalListItem, ApprovalListQuery } from '@/schemas/approvalGeneric'
 import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
 import type { ContractResponse } from '@/api/contract'
 
@@ -731,16 +639,6 @@ const quickRejectPendingId = ref<number | null>(null)
 const quickRejectReasonError = ref<string>('')
 const quickActionError = ref<FeedbackError | null>(null)
 
-// 批量审批状态：只允许同一业务类型，避免后端将不同实体混在一次事务中
-const selectedRowKeys = ref<(string | number)[]>([])
-const bulkDialogVisible = ref<boolean>(false)
-const bulkAction = ref<ApprovalAction | null>(null)
-const bulkComment = ref<string>('')
-const bulkPending = ref<boolean>(false)
-const bulkError = ref<FeedbackError | null>(null)
-const bulkResult = ref<BulkApproveResponse | null>(null)
-// 保存批量结果中的失败项快照，失败项不应受当前页/筛选变化影响而丢失重试入口。
-const bulkRetryItems = ref<ApprovalListItem[]>([])
 
 const attachmentPreviewVisible = ref<boolean>(false)
 const attachmentPreviewPendingId = ref<number | null>(null)
@@ -748,11 +646,6 @@ const attachmentPreviewRow = ref<ApprovalListItem | null>(null)
 const attachmentPreviewUrl = ref<string>('')
 
 // ==================== 计算属性 ====================
-const selectedApprovals = computed<ApprovalListItem[]>(() => rows.value.filter((row) => selectedRowKeys.value.includes(row.id)))
-const selectedBusinessType = computed<EntityType | null>(() => {
-  const first = selectedApprovals.value[0]
-  return first?.business_type ?? null
-})
 const quickActionPending = computed<boolean>(() =>
   quickApprovePendingId.value !== null || quickRejectPendingId.value !== null
 )
@@ -1230,9 +1123,6 @@ const tabs = computed(() => {
     { key: 'submitted', label: '我提交的' }
   ]
 })
-const activeViewLabel = computed(() =>
-  tabs.value.find((tab) => tab.key === activeTab.value)?.label ?? '审批列表'
-)
 const effectiveFilters = computed(() => activeTab.value === 'pending'
   ? withoutFilterFields(activeFilters.value, ['status'])
   : activeFilters.value
@@ -1330,12 +1220,6 @@ const getApprovalSubjectLabel = (row: ApprovalListItem): string => {
   return `${type}审批单 ${subject}`
 }
 
-const bulkFailureLabel = (businessId: number): string => {
-  const row = bulkRetryItems.value.find((item) => item.business_id === businessId)
-    ?? rows.value.find((item) => item.business_id === businessId)
-  return row ? getApprovalSubjectLabel(row) : `业务单据 #${businessId}`
-}
-
 const isAxiosStatus = (error: unknown, code: number): boolean => {
   const response = (error as { response?: { status?: number } } | null)?.response
   return response?.status === code
@@ -1351,10 +1235,9 @@ const customerStatusLabel = (status?: number | null): string => {
   return status == null ? '-' : (map[status] ?? String(status))
 }
 
-const fetchList = async (): Promise<void> => {
+const fetchList = async (): Promise<boolean> => {
   const requestId = ++listRequestId.value
   loadError.value = null
-  selectedRowKeys.value = []
   listLoading.value = true
   try {
     const effectiveFilters = activeTab.value === 'pending'
@@ -1367,12 +1250,14 @@ const fetchList = async (): Promise<void> => {
       ...serializeListQuery({ filters: effectiveFilters, sorts: activeSorts.value })
     }
     const res = await store.fetchList(query)
-    if (requestId !== listRequestId.value) return
+    if (requestId !== listRequestId.value) return false
     rows.value = res.items
     total.value = res.total
+    return true
   } catch (err) {
-    if (requestId !== listRequestId.value) return
+    if (requestId !== listRequestId.value) return false
     loadError.value = toFeedbackError(err, '审批中心')
+    return false
   } finally {
     if (requestId === listRequestId.value) {
       listLoading.value = false
@@ -1405,100 +1290,6 @@ const handleSortReset = (): void => {
   activeSorts.value = []
   page.value = 1
   fetchList()
-}
-
-const isRowSelectable = (row: ApprovalListItem): boolean => {
-  if (activeTab.value !== 'pending' || row.status !== 'PENDING') return false
-  if (selectedBusinessType.value !== null && row.business_type !== selectedBusinessType.value) return false
-  return true
-}
-
-const clearSelection = (): void => {
-  selectedRowKeys.value = []
-}
-
-const openBulkAction = (action: ApprovalAction): void => {
-  if (selectedApprovals.value.length === 0 || selectedBusinessType.value === null) return
-  bulkAction.value = action
-  bulkComment.value = ''
-  bulkError.value = null
-  bulkResult.value = null
-  bulkRetryItems.value = []
-  bulkDialogVisible.value = true
-}
-
-const getBulkUpdatedTimes = (items: ApprovalListItem[]): Record<string, string> => Object.fromEntries(
-  items
-    .filter((item): item is ApprovalListItem & { updated_time: string } => typeof item.updated_time === 'string')
-    .map((item) => [String(item.business_id), item.updated_time])
-)
-
-const executeBulkAction = async (items: ApprovalListItem[], action: ApprovalAction, comment: string): Promise<BulkApproveResponse | null> => {
-  const entityType = items[0]?.business_type
-  if (!entityType || items.some((item) => item.business_type !== entityType)) return null
-  bulkPending.value = true
-  bulkError.value = null
-  try {
-    return await store.bulkApprove(
-      entityType,
-      items.map((item) => item.business_id),
-      action,
-      comment,
-      getBulkUpdatedTimes(items)
-    )
-  } catch (error: unknown) {
-    bulkError.value = toFeedbackError(error, '批量审批', { operation: 'write' })
-    handleApiError(error, '批量审批')
-    return null
-  } finally {
-    bulkPending.value = false
-  }
-}
-
-const updateBulkRetryItems = (sourceItems: ApprovalListItem[], result: BulkApproveResponse): void => {
-  const failedIds = new Set(result.failed.map((item) => item.id))
-  const latestByBusinessId = new Map(rows.value.map((row) => [row.business_id, row]))
-  bulkRetryItems.value = sourceItems
-    .filter((item) => failedIds.has(item.business_id))
-    .map((item) => latestByBusinessId.get(item.business_id) ?? item)
-}
-
-const syncBulkSelection = (items: ApprovalListItem[]): void => {
-  const visibleIds = new Set(items.map((item) => item.id))
-  selectedRowKeys.value = rows.value
-    .filter((row) => visibleIds.has(row.id))
-    .map((row) => row.id)
-}
-
-const confirmBulkAction = async (): Promise<void> => {
-  if (bulkAction.value === null) return
-  if (bulkAction.value === 'REJECT' && !bulkComment.value.trim()) {
-    toast.warning('请填写驳回理由，提交人将据此修改')
-    return
-  }
-  const items = [...selectedApprovals.value]
-  const result = await executeBulkAction(items, bulkAction.value, bulkComment.value.trim())
-  if (result === null) return
-  bulkResult.value = result
-  await fetchList()
-  updateBulkRetryItems(items, result)
-  syncBulkSelection(bulkRetryItems.value)
-  if (result.failed.length === 0) {
-    bulkDialogVisible.value = false
-  }
-}
-
-const retryBulkFailures = async (): Promise<void> => {
-  if (bulkAction.value === null || bulkResult.value === null) return
-  const items = [...bulkRetryItems.value]
-  if (items.length === 0) return
-  const result = await executeBulkAction(items, bulkAction.value, bulkComment.value.trim())
-  if (result === null) return
-  bulkResult.value = result
-  await fetchList()
-  updateBulkRetryItems(items, result)
-  syncBulkSelection(bulkRetryItems.value)
-  if (result.failed.length === 0) bulkDialogVisible.value = false
 }
 
 const copyNumber = async (num: string): Promise<void> => {
@@ -1563,28 +1354,40 @@ const onSheetClosed = (): void => {
   triggerRowIndex.value = -1
 }
 
-const onApprovalActionDone = (): void => {
+const onApprovalActionDone = async (): Promise<void> => {
   // 审批完成（同意/驳回/撤回/提交）后刷新列表 + 关抽屉
   sheetVisible.value = false
-  fetchList()
+  const refreshed = await fetchList()
+  if (!refreshed) {
+    toast.warning('审批操作已提交，但列表刷新失败，请稍后重试。')
+  }
 }
 
-const handleInvoiceFileUploaded = (): void => {
+const handleInvoiceFileUploaded = async (): Promise<void> => {
   markIssuedDialogVisible.value = false
   sheetVisible.value = false
-  fetchList()
+  const refreshed = await fetchList()
+  if (!refreshed) {
+    toast.warning('发票操作已完成，但审批列表刷新失败，请稍后重试。')
+  }
 }
 
-const handleInvoiceReissueCompleted = (): void => {
+const handleInvoiceReissueCompleted = async (): Promise<void> => {
   reissueCompleteDialogVisible.value = false
   sheetVisible.value = false
-  fetchList()
+  const refreshed = await fetchList()
+  if (!refreshed) {
+    toast.warning('发票重开已完成，但审批列表刷新失败，请稍后重试。')
+  }
 }
 
-const handleLicenseIssued = (): void => {
+const handleLicenseIssued = async (): Promise<void> => {
   licenseIssueDialogVisible.value = false
   sheetVisible.value = false
-  fetchList()
+  const refreshed = await fetchList()
+  if (!refreshed) {
+    toast.warning('License 发放已完成，但审批列表刷新失败，请稍后重试。')
+  }
 }
 
 // 条4：REJECTED 行修改并重新提交。
@@ -1669,11 +1472,13 @@ const handleResubmit = async (row: ApprovalListItem): Promise<void> => {
 }
 
 // 合同编辑成功回调
-const handleContractEditSuccess = (): void => {
+const handleContractEditSuccess = async (): Promise<void> => {
   contractEditVisible.value = false
   editingContract.value = null
-  toast.success('合同已修改，请重新提交审批')
-  fetchList()
+  const refreshed = await fetchList()
+  toast.success('合同已修改，请重新提交审批', refreshed ? undefined : {
+    description: '合同已修改，但审批列表刷新失败，请稍后重试。',
+  })
 }
 
 const handleInvoiceEditDialogOpenChange = (open: boolean): void => {
@@ -1683,11 +1488,14 @@ const handleInvoiceEditDialogOpenChange = (open: boolean): void => {
   }
 }
 
-const handleInvoiceEditSuccess = (): void => {
+const handleInvoiceEditSuccess = async (): Promise<void> => {
   invoiceEditDialogVisible.value = false
   editingInvoiceApplication.value = null
   sheetVisible.value = false
-  fetchList()
+  const refreshed = await fetchList()
+  toast.success('发票申请已修改，请重新提交审批', refreshed ? undefined : {
+    description: '发票申请已修改，但审批列表刷新失败，请稍后重试。',
+  })
 }
 
 const handleInvoiceDetailSheetVisibleChange = (visible: boolean): void => {
@@ -1697,8 +1505,11 @@ const handleInvoiceDetailSheetVisibleChange = (visible: boolean): void => {
   }
 }
 
-const handleInvoiceDetailRefresh = (): void => {
-  fetchList()
+const handleInvoiceDetailRefresh = async (): Promise<void> => {
+  const refreshed = await fetchList()
+  if (!refreshed) {
+    toast.warning('发票详情已更新，但审批列表刷新失败，请稍后重试。')
+  }
 }
 
 const getOriginalInvoiceApplicationId = (row: ApprovalListItem): number | null => {
@@ -1710,6 +1521,7 @@ const getOriginalInvoiceApplicationId = (row: ApprovalListItem): number | null =
 }
 
 const handleRemind = async (row: ApprovalListItem): Promise<void> => {
+  if (remindPendingId.value === row.id) return
   const entityId = requireApprovalEntityRouteId(row)
   if (entityId === null) return
 
@@ -1750,34 +1562,46 @@ const handlePreviewAttachment = async (row: ApprovalListItem): Promise<void> => 
 const getRowActions = (row: ApprovalListItem): TableRowActionSet => {
   const primaryActions: ActionConfig[] = [
     {
-      label: '详情',
+      id: 'detail',
+      label: '查看详情',
       kind: 'detail',
       handler: () => openDetail(row)
     }
   ]
   if (hasAttachment(row)) {
     primaryActions.push({
+      id: 'preview',
       label: '预览',
       desktopPrimary: true,
       handler: () => { void handlePreviewAttachment(row) },
-      disabled: attachmentPreviewPendingId.value === row.id
+      disabled: attachmentPreviewPendingId.value === row.id,
+      disabledReason: attachmentPreviewPendingId.value === row.id ? '预览处理中' : undefined,
+      resultType: 'none'
     })
   }
   if (activeTab.value === 'submitted' && row.status === 'REJECTED') {
     primaryActions.push({
+      id: 'resubmit',
       label: '修改并重新提交',
       desktopPrimary: true,
       handler: () => { void handleResubmit(row) },
-      disabled: resubmitPendingId.value === row.id
+      disabled: resubmitPendingId.value === row.id,
+      disabledReason: resubmitPendingId.value === row.id ? '提交处理中' : undefined,
+      risk: 'approval',
+      resultType: 'status-changed'
     })
   }
   if (activeTab.value === 'submitted' && row.status === 'PENDING') {
     primaryActions.push({
+      id: 'remind',
       label: '催办',
       desktopPrimary: true,
       icon: BellRing,
       handler: () => { void handleRemind(row) },
-      disabled: remindPendingId.value === row.id
+      disabled: remindPendingId.value === row.id,
+      disabledReason: remindPendingId.value === row.id ? '催办处理中' : undefined,
+      risk: 'approval',
+      resultType: 'none'
     })
   }
   return { primaryActions, secondaryActions: [] }
@@ -1825,9 +1649,11 @@ const handleQuickApprove = async (row: ApprovalListItem): Promise<void> => {
       '审批通过',
       row.updated_time
     )
-    toast.success('已同意')
+    const refreshed = await fetchList()
+    toast.success('已同意', refreshed ? undefined : {
+      description: '审批已同意，但列表刷新失败，请稍后重试。',
+    })
     // 刷新列表（移除该行）
-    await fetchList()
   } catch (error: unknown) {
     if (isAxiosStatus(error, 409)) {
       await fetchList()
@@ -1885,13 +1711,15 @@ const confirmQuickReject = async (): Promise<void> => {
       reason,
       row.updated_time
     )
-    toast.success('已驳回，申请人可修改后重新提交')
     quickRejectVisible.value = false
     quickRejectRow.value = null
     quickRejectReason.value = ''
     quickRejectReasonError.value = ''
     quickActionError.value = null
-    await fetchList()
+    const refreshed = await fetchList()
+    toast.success('已驳回，申请人可修改后重新提交', refreshed ? undefined : {
+      description: '审批已驳回，但列表刷新失败，请稍后重试。',
+    })
   } catch (error: unknown) {
     if (isAxiosStatus(error, 409)) {
       await fetchList()
@@ -1985,47 +1813,6 @@ watch(rows, async () => {
   gap: $wolf-section-gap-v2;
   min-height: 0;
   flex: 1;
-}
-
-.approval-bulk-toolbar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: $wolf-space-sm-v2;
-  margin-left: auto;
-}
-
-.approval-bulk-toolbar__count {
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  white-space: nowrap;
-}
-
-.approval-bulk-result {
-  display: flex;
-  flex-direction: column;
-  gap: $wolf-space-sm-v2;
-  max-height: 280px;
-  overflow-y: auto;
-  padding: $wolf-space-md-v2;
-  border: 1px solid $wolf-border-light-v2;
-  border-radius: $wolf-radius-surface-v2;
-  background: $wolf-bg-page-v2;
-}
-
-.approval-bulk-result__list {
-  display: flex;
-  flex-direction: column;
-  gap: $wolf-space-xs-v2;
-  margin: 0;
-  padding-left: $wolf-space-lg-v2;
-  font-size: $wolf-font-size-caption-v2;
-}
-
-.approval-bulk-result__list li {
-  display: flex;
-  justify-content: space-between;
-  gap: $wolf-space-md-v2;
 }
 
 // 超时徽章（DataTable 内使用 Badge 组件）

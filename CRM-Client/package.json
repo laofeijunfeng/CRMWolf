@@ -15,7 +15,10 @@
     "test:unit": "vitest run",
     "test:unit:watch": "vitest",
     "coverage": "vitest run --coverage",
-    "prepare": "cd .. && husky install .husky"
+    "prepare": "cd .. && husky install .husky",
+    "lint:design-system": "node scripts/check-design-system-governance.mjs",
+    "lint:design-system:all": "node scripts/check-design-system-governance.mjs --all",
+    "test:governance": "node --test scripts/tests/*.test.mjs"
   },
   "dependencies": {
     "@arco-design/web-vue": "^2.50.0",

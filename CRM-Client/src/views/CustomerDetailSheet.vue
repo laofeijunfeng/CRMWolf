@@ -509,7 +509,7 @@ const runPanelRequest = async <T>(
   context: string,
   request: () => Promise<T>,
   apply: (value: T) => void,
-): Promise<void> => {
+): Promise<boolean> => {
   const requestId = panelRequestIds[panel] + 1
   panelRequestIds[panel] = requestId
   setPanelLoading(panel, true)
@@ -517,11 +517,13 @@ const runPanelRequest = async <T>(
 
   try {
     const value = await request()
-    if (requestId !== panelRequestIds[panel]) return
+    if (requestId !== panelRequestIds[panel]) return false
     apply(value)
+    return true
   } catch (error) {
-    if (requestId !== panelRequestIds[panel]) return
+    if (requestId !== panelRequestIds[panel]) return false
     setPanelError(panel, toFeedbackError(error, context))
+    return false
   } finally {
     if (requestId === panelRequestIds[panel]) {
       setPanelLoading(panel, false)
@@ -531,15 +533,15 @@ const runPanelRequest = async <T>(
 
 const loadPaymentPlansForContracts = async (
   contractList: ContractListResponse[],
-): Promise<void> => {
+): Promise<boolean> => {
   if (contractList.length === 0) {
     paymentPlans.value = []
     setPanelError('paymentPlans', null)
     setPanelLoading('paymentPlans', false)
-    return
+    return true
   }
 
-  await runPanelRequest(
+  return runPanelRequest(
     'paymentPlans',
     '回款计划',
     async () => {
@@ -556,7 +558,7 @@ const loadPaymentPlansForContracts = async (
   )
 }
 
-const loadAllData = async (customerId: string): Promise<void> => {
+const loadAllData = async (customerId: string): Promise<boolean> => {
   const loadRequestId = latestLoadRequestId + 1
   latestLoadRequestId = loadRequestId
   panelErrors.value = {}
@@ -607,12 +609,24 @@ const loadAllData = async (customerId: string): Promise<void> => {
     ])
 
     if (customerDetailResult.status === 'rejected') {
-      throw customerDetailResult.reason
+      detailError.value = toFeedbackError(customerDetailResult.reason, '客户详情')
+      return false
     }
 
-    if (loadRequestId !== latestLoadRequestId) return
+    if (loadRequestId !== latestLoadRequestId) return false
 
     customer.value = customerDetailResult.value
+    const panelLoadSucceeded: Record<CustomerDetailPanelKey, boolean> = {
+      followUps: followUpsResult.status === 'fulfilled' && isCurrentPanelLoad('followUps'),
+      opportunities: opportunitiesResult.status === 'fulfilled' && isCurrentPanelLoad('opportunities'),
+      contracts: contractsResult.status === 'fulfilled' && isCurrentPanelLoad('contracts'),
+      invoiceTitles: invoiceTitlesResult.status === 'fulfilled' && isCurrentPanelLoad('invoiceTitles'),
+      deployments: deploymentsResult.status === 'fulfilled' && isCurrentPanelLoad('deployments'),
+      customerMembers: customerMembersResult.status === 'fulfilled' && isCurrentPanelLoad('customerMembers'),
+      customerProfile: customerProfileResult.status === 'fulfilled' && isCurrentPanelLoad('customerProfile'),
+      customerProfileEvidence: customerProfileEvidenceResult.status === 'fulfilled' && isCurrentPanelLoad('customerProfileEvidence'),
+      paymentPlans: false,
+    }
     const followUpsData = readPanel(followUpsResult, 'followUps', '客户活动', followUps.value)
     const opportunitiesData = readPanel(opportunitiesResult, 'opportunities', '商机', opportunities.value)
     const contractsData = readPanel(contractsResult, 'contracts', '合同', contracts.value)
@@ -635,16 +649,19 @@ const loadAllData = async (customerId: string): Promise<void> => {
     })
 
     if (contractsResult.status === 'fulfilled' && isCurrentPanelLoad('contracts')) {
-      await loadPaymentPlansForContracts(contractsData)
+      panelLoadSucceeded.paymentPlans = await loadPaymentPlansForContracts(contractsData)
     } else if (contractsResult.status === 'rejected' && isCurrentPanelLoad('contracts')) {
       // 合同请求失败时，回款计划无法可靠读取，避免把旧数据误显示成当前客户数据。
       paymentPlans.value = []
       setPanelError('paymentPlans', toFeedbackError(contractsResult.reason, '回款计划'))
       setPanelLoading('paymentPlans', false)
     }
+
+    return Object.values(panelLoadSucceeded).every(Boolean)
   } catch (error) {
-    if (loadRequestId !== latestLoadRequestId) return
+    if (loadRequestId !== latestLoadRequestId) return false
     detailError.value = toFeedbackError(error, '客户详情')
+    return false
   } finally {
     if (loadRequestId === latestLoadRequestId) {
       loading.value = false
@@ -655,8 +672,19 @@ const loadAllData = async (customerId: string): Promise<void> => {
   }
 }
 
-const retryPanel = async (panel: CustomerDetailPanelKey): Promise<void> => {
-  if (props.customerId === null) return
+/**
+ * Allow the owning list page to refresh this customer when a sibling dialog
+ * saves the same entity. The sheet keeps ownership of its panel read models.
+ */
+defineExpose({
+  refresh: async (): Promise<boolean> => {
+    if (props.customerId === null) return false
+    return loadAllData(props.customerId)
+  }
+})
+
+const retryPanel = async (panel: CustomerDetailPanelKey): Promise<boolean> => {
+  if (props.customerId === null) return false
   activePanel.value = panel === 'followUps' ? 'followup'
     : panel === 'opportunities' ? 'opportunities'
       : panel === 'customerProfile' || panel === 'customerProfileEvidence' ? 'customer-profile'
@@ -665,40 +693,35 @@ const retryPanel = async (panel: CustomerDetailPanelKey): Promise<void> => {
   const customerId = props.customerId
   switch (panel) {
     case 'followUps':
-      await runPanelRequest(panel, '客户活动', () => customerActivityApi.getActivities(customerId), (data) => { followUps.value = data })
-      return
+      return runPanelRequest(panel, '客户活动', () => customerActivityApi.getActivities(customerId), (data) => { followUps.value = data })
     case 'opportunities':
-      await runPanelRequest(panel, '商机', () => opportunityApi.getOpportunities({ customer_id: customerId }), (data) => {
+      return runPanelRequest(panel, '商机', () => opportunityApi.getOpportunities({ customer_id: customerId }), (data) => {
         opportunities.value = normalizePaginatedResponse(data).items
       })
-      return
-    case 'contracts':
-      await runPanelRequest(panel, '合同', () => contractApi.getCustomerContracts(customerId), (data) => { contracts.value = data })
-      if (!panelErrors.value.contracts) await loadPaymentPlansForContracts(contracts.value)
-      return
+    case 'contracts': {
+      const contractsLoaded = await runPanelRequest(panel, '合同', () => contractApi.getCustomerContracts(customerId), (data) => { contracts.value = data })
+      if (!contractsLoaded) return false
+      return loadPaymentPlansForContracts(contracts.value)
+    }
     case 'invoiceTitles':
-      await runPanelRequest(panel, '发票抬头', () => invoiceApi.getInvoiceTitles(customerId), (data) => { invoiceTitles.value = data.invoice_titles ?? [] })
-      return
+      return runPanelRequest(panel, '发票抬头', () => invoiceApi.getInvoiceTitles(customerId), (data) => { invoiceTitles.value = data.invoice_titles ?? [] })
     case 'deployments':
-      await runPanelRequest(panel, '部署信息', () => deploymentApi.list(customerId), (data) => { deployments.value = data })
-      return
+      return runPanelRequest(panel, '部署信息', () => deploymentApi.list(customerId), (data) => { deployments.value = data })
     case 'customerMembers':
-      await runPanelRequest(panel, '客户团队', () => customerApi.getCustomerMembers(customerId), (data) => { customerMembers.value = data })
-      return
+      return runPanelRequest(panel, '客户团队', () => customerApi.getCustomerMembers(customerId), (data) => { customerMembers.value = data })
     case 'customerProfile':
-      await runPanelRequest(panel, '客户档案', () => customerProfileApi.getProfile(customerId), (data) => { customerProfile.value = data })
-      return
+      return runPanelRequest(panel, '客户档案', () => customerProfileApi.getProfile(customerId), (data) => { customerProfile.value = data })
     case 'customerProfileEvidence':
-      await runPanelRequest(panel, '客户档案证据', () => customerProfileApi.getEvidence(customerId), (data) => { customerProfileEvidence.value = data })
-      return
+      return runPanelRequest(panel, '客户档案证据', () => customerProfileApi.getEvidence(customerId), (data) => { customerProfileEvidence.value = data })
     case 'paymentPlans':
-      await loadPaymentPlansForContracts(contracts.value)
-      return
+      return loadPaymentPlansForContracts(contracts.value)
   }
 }
 
 const refreshCustomerMembers = async (): Promise<void> => {
-  await retryPanel('customerMembers')
+  const refreshed = await retryPanel('customerMembers')
+  warnIfCustomerDetailRefreshFailed(refreshed, '客户团队操作')
+  emit('refresh')
 }
 
 const waitForCustomerProfileRefresh = async (
@@ -767,25 +790,34 @@ const handleRefreshCustomerProfile = async (): Promise<void> => {
 }
 
 // ==================== Dialog Handlers ====================
-const handleCustomerEditSuccess = (): void => {
+const warnIfCustomerDetailRefreshFailed = (refreshed: boolean, action: string): void => {
+  if (!refreshed) {
+    toast.warning(`${action}已完成，但客户详情刷新失败，请稍后重试。`)
+  }
+}
+
+const handleCustomerEditSuccess = async (): Promise<void> => {
   customerEditDialogOpen.value = false
   if (props.customerId !== null) {
-    void loadAllData(props.customerId)
+    const refreshed = await loadAllData(props.customerId)
+    warnIfCustomerDetailRefreshFailed(refreshed, '客户信息更新')
   }
   emit('refresh')
 }
 
 // FollowUp handlers
-const handleFollowUpSuccess = (): void => {
+const handleFollowUpSuccess = async (): Promise<void> => {
   followUpDialogOpen.value = false
   if (props.customerId !== null) {
-    loadAllData(props.customerId)
+    const refreshed = await loadAllData(props.customerId)
+    warnIfCustomerDetailRefreshFailed(refreshed, '客户活动更新')
     window.setTimeout(() => {
       if (props.visible && props.customerId !== null) {
-        loadAllData(props.customerId)
+        void loadAllData(props.customerId)
       }
     }, 3000)
   }
+  emit('refresh')
 }
 
 const handleFollowUpDelete = async (followUp: { id: number }): Promise<void> => {
@@ -793,8 +825,10 @@ const handleFollowUpDelete = async (followUp: { id: number }): Promise<void> => 
     await customerActivityApi.deleteActivity(followUp.id)
     toast.success('客户活动已删除')
     if (props.customerId !== null) {
-      await loadAllData(props.customerId)
+      const refreshed = await loadAllData(props.customerId)
+      warnIfCustomerDetailRefreshFailed(refreshed, '客户活动删除')
     }
+    emit('refresh')
   } catch (error) {
     handleApiError(error, '删除客户活动')
   }
@@ -817,12 +851,14 @@ const handleContactDialogClose = (open: boolean): void => {
   }
 }
 
-const handleContactSuccess = (): void => {
+const handleContactSuccess = async (): Promise<void> => {
   contactDialogOpen.value = false
   editingContact.value = null
   if (props.customerId !== null) {
-    loadAllData(props.customerId)
+    const refreshed = await loadAllData(props.customerId)
+    warnIfCustomerDetailRefreshFailed(refreshed, '联系人更新')
   }
+  emit('refresh')
 }
 
 const handleDeleteContact = async (contactId: number): Promise<void> => {
@@ -834,8 +870,10 @@ const handleDeleteContact = async (contactId: number): Promise<void> => {
     await customerApi.deleteContact(contactId)
     toast.success('联系人已删除')
     if (props.customerId !== null) {
-      loadAllData(props.customerId)
+      const refreshed = await loadAllData(props.customerId)
+      warnIfCustomerDetailRefreshFailed(refreshed, '联系人删除')
     }
+    emit('refresh')
   } catch (error) {
     handleApiError(error, '删除联系人')
   }
@@ -850,19 +888,23 @@ const handleSetPrimaryContact = async (contactId: number): Promise<void> => {
     await customerApi.setPrimaryContact(contactId)
     toast.success('已设为主要联系人')
     if (props.customerId !== null) {
-      loadAllData(props.customerId)
+      const refreshed = await loadAllData(props.customerId)
+      warnIfCustomerDetailRefreshFailed(refreshed, '主要联系人设置')
     }
+    emit('refresh')
   } catch (error) {
     handleApiError(error, '设置主要联系人')
   }
 }
 
 // Opportunity handlers
-const handleOpportunitySuccess = (): void => {
+const handleOpportunitySuccess = async (): Promise<void> => {
   opportunityDialogOpen.value = false
   if (props.customerId !== null) {
-    loadAllData(props.customerId)
+    const refreshed = await loadAllData(props.customerId)
+    warnIfCustomerDetailRefreshFailed(refreshed, '商机更新')
   }
+  emit('refresh')
 }
 
 const handleViewOpportunity = (opportunityId: string): void => {
@@ -962,10 +1004,12 @@ const handleContextClose = (): void => {
   emit('update:visible', false)
 }
 
-const handleOpportunityDetailRefresh = (): void => {
+const handleOpportunityDetailRefresh = async (): Promise<void> => {
   if (props.customerId !== null) {
-    void loadAllData(props.customerId)
+    const refreshed = await loadAllData(props.customerId)
+    warnIfCustomerDetailRefreshFailed(refreshed, '商机操作')
   }
+  emit('refresh')
 }
 
 const handleOpportunityDetailCreateContract = (payload: CreateContractPayload): void => {
@@ -990,17 +1034,21 @@ const handleContractDialogClose = (open: boolean): void => {
   }
 }
 
-const handleContractSuccess = (): void => {
+const handleContractSuccess = async (): Promise<void> => {
   contractDialogOpen.value = false
   editingContract.value = null
   fixedContractOpportunity.value = null
   void opportunityDetailContentRef.value?.refresh()
-  void retryPanel('contracts')
+  const refreshed = await retryPanel('contracts')
+  warnIfCustomerDetailRefreshFailed(refreshed, '合同更新')
+  emit('refresh')
 }
 
-const refreshContractRelations = (): void => {
+const refreshContractRelations = async (): Promise<void> => {
   void opportunityDetailContentRef.value?.refresh()
-  void retryPanel('contracts')
+  const refreshed = await retryPanel('contracts')
+  warnIfCustomerDetailRefreshFailed(refreshed, '合同操作')
+  emit('refresh')
 }
 
 const handleEditContract = async (contract: ContractListResponse): Promise<void> => {
@@ -1018,8 +1066,12 @@ const handleDeleteContract = async (contract: ContractListResponse): Promise<voi
 
   try {
     await contractApi.deleteContract(contract.id)
+    if (detailContextStack.current.value?.type === 'contract' && detailContextStack.current.value.id === String(contract.id)) {
+      detailContextStack.pop()
+      syncNavigationFromContext()
+    }
     toast.success('合同删除成功')
-    refreshContractRelations()
+    await refreshContractRelations()
   } catch (error) {
     handleApiError(error, '删除合同')
   }
@@ -1029,7 +1081,7 @@ const handleSubmitContractApproval = async (contract: ContractListResponse): Pro
   try {
     await approvalGenericApi.submitApproval('CONTRACT', contract.id)
     toast.success('合同已提交审批')
-    refreshContractRelations()
+    await refreshContractRelations()
   } catch (error) {
     handleApiError(error, '提交审批')
   }
@@ -1039,7 +1091,7 @@ const handleWithdrawContractApproval = async (contract: ContractListResponse): P
   try {
     await approvalGenericApi.cancelApproval('CONTRACT', contract.id)
     toast.success('合同审批已撤回')
-    refreshContractRelations()
+    await refreshContractRelations()
   } catch (error) {
     handleApiError(error, '撤回审批')
   }
@@ -1062,10 +1114,12 @@ const handleInvoiceTitleDialogClose = (open: boolean): void => {
   }
 }
 
-const handleInvoiceTitleSuccess = (): void => {
+const handleInvoiceTitleSuccess = async (): Promise<void> => {
   invoiceTitleDialogOpen.value = false
   editingInvoiceTitle.value = null
-  void retryPanel('invoiceTitles')
+  const refreshed = await retryPanel('invoiceTitles')
+  warnIfCustomerDetailRefreshFailed(refreshed, '发票抬头更新')
+  emit('refresh')
 }
 
 const handleDeleteInvoiceTitle = async (titleId: number): Promise<void> => {
@@ -1076,7 +1130,9 @@ const handleDeleteInvoiceTitle = async (titleId: number): Promise<void> => {
   try {
     await invoiceApi.deleteInvoiceTitle(titleId)
     toast.success('发票抬头已删除')
-    void retryPanel('invoiceTitles')
+    const refreshed = await retryPanel('invoiceTitles')
+    warnIfCustomerDetailRefreshFailed(refreshed, '发票抬头删除')
+    emit('refresh')
   } catch (error) {
     handleApiError(error, '删除发票抬头')
   }
@@ -1090,7 +1146,9 @@ const handleSetDefaultInvoiceTitle = async (titleId: number): Promise<void> => {
   try {
     await invoiceApi.setDefaultInvoiceTitle(titleId)
     toast.success('已设为默认发票抬头')
-    void retryPanel('invoiceTitles')
+    const refreshed = await retryPanel('invoiceTitles')
+    warnIfCustomerDetailRefreshFailed(refreshed, '默认发票抬头设置')
+    emit('refresh')
   } catch (error) {
     handleApiError(error, '设置默认发票抬头')
   }
@@ -1105,9 +1163,11 @@ const handleCreateDeployment = (): void => {
   deploymentDialogOpen.value = true
 }
 
-const handleDeploymentSuccess = (): void => {
+const handleDeploymentSuccess = async (): Promise<void> => {
   deploymentDialogOpen.value = false
-  void retryPanel('deployments')
+  const refreshed = await retryPanel('deployments')
+  warnIfCustomerDetailRefreshFailed(refreshed, '部署信息更新')
+  emit('refresh')
 }
 
 const handleDeleteDeployment = async (deploymentId: number): Promise<void> => {
@@ -1118,7 +1178,9 @@ const handleDeleteDeployment = async (deploymentId: number): Promise<void> => {
   try {
     await deploymentApi.deleteDeployment(deploymentId)
     toast.success('部署信息已删除')
-    void retryPanel('deployments')
+    const refreshed = await retryPanel('deployments')
+    warnIfCustomerDetailRefreshFailed(refreshed, '部署信息删除')
+    emit('refresh')
   } catch (error) {
     handleApiError(error, '删除部署信息')
   }
@@ -1192,13 +1254,20 @@ const handleViewPaymentPlanFromContract = (plan: PaymentPlanResponse): void => {
   handleViewPaymentPlan(plan.id, plan)
 }
 
-const handleContractSheetRefresh = (): void => {
-  void retryPanel('contracts')
+const handleContractSheetRefresh = async (): Promise<void> => {
+  const refreshed = await retryPanel('contracts')
+  warnIfCustomerDetailRefreshFailed(refreshed, '合同操作')
+  emit('refresh')
 }
 
 const handlePlanDetailRefresh = async (): Promise<void> => {
-  await retryPanel('paymentPlans')
-  syncSelectedPaymentRecord()
+  const refreshed = await retryPanel('paymentPlans')
+  if (refreshed) {
+    syncSelectedPaymentRecord()
+    closeMissingPaymentPlanContext()
+  }
+  warnIfCustomerDetailRefreshFailed(refreshed, '回款计划操作')
+  emit('refresh')
 }
 
 // Payment record detail navigation.
@@ -1233,13 +1302,34 @@ const syncSelectedPaymentRecord = (): void => {
     item.payment_records?.some(record => record.id === selected.record.id)
   )
   const updatedRecord = plan?.payment_records?.find(record => record.id === selected.record.id)
-  if (updatedRecord === undefined) return
+  if (updatedRecord === undefined) {
+    // The record may have been removed or is no longer visible after a state
+    // transition. Do not leave the detail host showing a stale record.
+    selectedRecord.value = null
+    if (detailContextStack.current.value?.type === 'payment-record') {
+      detailContextStack.pop()
+      syncNavigationFromContext()
+    }
+    return
+  }
   selectedRecord.value = {
     record: updatedRecord,
     stageName: plan?.stage_name ?? selected.stageName,
     approval: updatedRecord.approval ?? (plan?.latest_record_id === updatedRecord.id ? plan.latest_approval : null) ?? null,
     planId: plan?.id ?? selected.planId
   }
+}
+
+const closeMissingPaymentPlanContext = (): void => {
+  const planId = selectedPlanId.value
+  if (planId === null || paymentPlans.value.some(plan => plan.id === planId)) return
+
+  selectedRecord.value = null
+  while (detailContextStack.current.value?.type === 'payment-record' || detailContextStack.current.value?.type === 'payment-plan') {
+    detailContextStack.pop()
+  }
+  syncNavigationFromContext()
+  toast.info('该回款计划已不存在，已返回上一层详情。')
 }
 
 const handleRecordResubmit = (): void => {
@@ -1282,14 +1372,14 @@ const handleRecordEditSubmit = async (recordId: number, payload: PaymentRecordUp
 }
 
 // Contract detail approval handlers (Task 6 fix)
-const handleContractApprove = (): void => {
+const handleContractApprove = async (): Promise<void> => {
   // ContractDetailContent handles the action internally, just refresh parent data
-  handleContractSheetRefresh()
+  await handleContractSheetRefresh()
 }
 
-const handleContractReject = (): void => {
+const handleContractReject = async (): Promise<void> => {
   // ContractDetailContent handles the action internally, just refresh parent data
-  handleContractSheetRefresh()
+  await handleContractSheetRefresh()
 }
 
 // Payment-plan actions that keep the same detail host.

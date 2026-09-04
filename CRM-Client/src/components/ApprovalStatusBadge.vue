@@ -32,7 +32,7 @@ interface StatusConfig {
 
 const props = defineProps({
   status: {
-    type: String as PropType<ApprovalStatus>,
+    type: String as PropType<ApprovalStatus | string>,
     required: true
   },
   size: {
@@ -43,7 +43,7 @@ const props = defineProps({
 
 // ==================== Status Config ====================
 // 使用 Tailwind wolf 颜色配置：浅底色 + 同色系文字
-const STATUS_CONFIG: Record<ApprovalStatus, StatusConfig> = {
+const STATUS_CONFIG: Record<string, StatusConfig> = {
   PENDING: {
     label: '待审批',
     icon: Clock,
@@ -71,7 +71,15 @@ const STATUS_CONFIG: Record<ApprovalStatus, StatusConfig> = {
 }
 
 // ==================== Computed ====================
-const config = computed<StatusConfig>(() => STATUS_CONFIG[props.status])
+// API 可能在后端新增状态。未知状态必须保留可读文本和图标，不能因为映射缺失导致渲染异常。
+const UNKNOWN_STATUS_CONFIG: StatusConfig = {
+  label: '未知状态',
+  icon: MinusCircle,
+  textClass: 'text-wolf-text-tertiary',
+  bgClass: 'bg-wolf-bg-muted'
+}
+
+const config = computed<StatusConfig>(() => STATUS_CONFIG[props.status] ?? UNKNOWN_STATUS_CONFIG)
 
 const ariaLabel = computed<string>(() => config.value.label)
 </script>

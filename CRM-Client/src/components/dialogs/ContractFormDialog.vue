@@ -42,6 +42,7 @@ import { opportunityApi } from '@/api/opportunity'
 import customerApi, { type ContactResponse, type CustomerResponse, type CustomerDetailResponse } from '@/api/customer'
 import { formatLocalDate } from '@/utils/format'
 import type { FileAttachmentItem } from '@/types/fileAttachment'
+import type { FormSuccessPayload } from '@/types/actionOutcome'
 
 // Zod schema for form validation - use coerce for number fields
 const schema = toTypedSchema(
@@ -70,7 +71,7 @@ interface Props {
 
 interface Emits {
   (e: 'update:open', value: boolean): void
-  (e: 'success'): void
+  (e: 'success', payload?: FormSuccessPayload): void
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -506,6 +507,8 @@ watch(() => values.customer_id, async (newCustomerId) => {
 const onSubmit = handleSubmit(async (formValues) => {
   submitting.value = true
   try {
+    let entityId: number
+    let operation: FormSuccessPayload['operation']
     if (isEdit.value && props.contract) {
       // Edit mode: use update
       const data: ContractUpdate = {
@@ -518,7 +521,9 @@ const onSubmit = handleSubmit(async (formValues) => {
         signing_date: formValues['signing_date'] ?? null,
         effective_date: formValues['effective_date'] ?? null
       }
-      await contractApi.updateContract(props.contract.id, data)
+      const updatedContract = await contractApi.updateContract(props.contract.id, data)
+      entityId = updatedContract.id
+      operation = 'update'
       toast.success('合同更新成功')
     } else {
       if (selectedContractFile.value === null) {
@@ -539,17 +544,25 @@ const onSubmit = handleSubmit(async (formValues) => {
         signing_date: formValues['signing_date'] ?? null,
         effective_date: formValues['effective_date'] ?? null
       }
-      await contractApi.createContract({
+      const createdContract = await contractApi.createContract({
         data,
         file: selectedContractFile.value
       })
+      entityId = createdContract.id
+      operation = 'create'
       toast.success('合同创建成功')
     }
 
     isDirty.value = false
     closeGuard.approveClose()
     visible.value = false
-    emit('success')
+    emit('success', {
+      entityType: 'contract',
+      entityId,
+      operation,
+      outcome: 'success',
+      stateSyncRequested: true,
+    })
   } catch (error) {
     handleApiError(error, isEdit.value ? '更新合同' : '创建合同')
   } finally {

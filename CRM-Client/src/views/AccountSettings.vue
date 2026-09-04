@@ -5,9 +5,6 @@ import { toTypedSchema } from '@vee-validate/zod'
 import { ErrorMessage, useForm } from 'vee-validate'
 import { toast } from 'vue-sonner'
 import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
   Avatar,
   AvatarFallback,
   AvatarImage,
@@ -16,6 +13,7 @@ import {
   Card,
   CardContent,
   CardHeader,
+  DataViewStatePanel,
   Dialog,
   DialogContent,
   DialogFooter,
@@ -28,12 +26,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/crmwolf'
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle
-} from '@/components/ui/empty'
 import { FormControl, FormDescription, FormField, FormItem, FormLabel } from '@/components/ui/form'
 import { authApi } from '@/api/auth'
 import { oauthApi, type OAuthBindingStatusResponse } from '@/api/oauth'
@@ -47,7 +39,7 @@ const userStore = useUserStore()
 const headerStore = useHeaderStore()
 const { userInfo } = storeToRefs(userStore)
 
-const isInitialLoad = ref<boolean>(false)
+const isInitialLoad = ref<boolean>(userInfo.value === null)
 const loadError = ref<boolean>(false)
 const avatarFailed = ref<boolean>(false)
 const passwordDialogOpen = ref<boolean>(false)
@@ -195,29 +187,30 @@ onMounted(() => {
 
 <template>
   <main class="account-settings account-settings--system" aria-label="账户设置">
-    <div v-if="isInitialLoad" class="account-settings__cards" aria-label="正在加载账户信息">
-      <Card v-for="index in 3" :key="index">
-        <CardHeader><Skeleton class="h-6 w-32" /></CardHeader>
-        <CardContent class="space-y-3"><Skeleton class="h-10 w-full" /><Skeleton class="h-10 w-full" /></CardContent>
-      </Card>
-    </div>
+    <DataViewStatePanel
+      :state="isInitialLoad ? 'loading' : loadError ? 'error' : userInfo === null ? 'empty' : 'ready'"
+      error-title="账户信息加载失败"
+      error-description="请检查网络后重试。"
+      empty-title="暂无账户信息"
+      empty-description="暂时无法显示账户资料，请稍后重试。"
+      class="account-settings__state"
+      @retry="loadUser"
+    >
+      <template #loading>
+        <div class="account-settings__cards" aria-label="正在加载账户信息">
+          <Card v-for="index in 3" :key="index">
+            <CardHeader><Skeleton class="h-6 w-32" /></CardHeader>
+            <CardContent class="space-y-3"><Skeleton class="h-10 w-full" /><Skeleton class="h-10 w-full" /></CardContent>
+          </Card>
+        </div>
+      </template>
 
-    <Alert v-else-if="loadError" variant="destructive">
-      <AlertTitle>账户信息加载失败</AlertTitle>
-      <AlertDescription class="flex items-center justify-between gap-4">
-        请检查网络后重试。
+      <template #error-action>
         <Button data-testid="account-retry" variant="outline" @click="loadUser">重试</Button>
-      </AlertDescription>
-    </Alert>
+      </template>
 
-    <Empty v-else-if="userInfo === null" class="min-h-[220px] border-0">
-      <EmptyHeader>
-        <EmptyTitle>暂无账户信息</EmptyTitle>
-        <EmptyDescription>暂时无法显示账户资料，请稍后重试。</EmptyDescription>
-      </EmptyHeader>
-    </Empty>
-
-    <div v-else class="account-settings__cards">
+      <template #default>
+        <div v-if="userInfo" class="account-settings__cards">
       <Card>
         <CardHeader><h2>个人信息</h2></CardHeader>
         <CardContent class="account-settings__profile">
@@ -288,7 +281,9 @@ onMounted(() => {
           </Button>
         </CardContent>
       </Card>
-    </div>
+        </div>
+      </template>
+    </DataViewStatePanel>
 
     <Dialog :open="passwordDialogOpen" @update:open="handlePasswordDialogOpenChange">
       <DialogContent>

@@ -1,13 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { ChevronRight, CircleAlert } from 'lucide-vue-next'
-import { AmountText, Badge, Button, HoverInfo, Progress, Skeleton } from '@/components/crmwolf'
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from '@/components/ui/empty'
+import { ChevronRight } from 'lucide-vue-next'
+import { AmountText, Badge, Button, DataViewStatePanel, HoverInfo, Progress, Skeleton } from '@/components/crmwolf'
 import { Separator } from '@/components/ui/separator'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { OpportunityStatus, opportunityApi, type OpportunityListResponse } from '@/api/opportunity'
@@ -131,93 +125,95 @@ const handleViewAll = (): void => {
         </Badge>
       </header>
 
-      <div v-if="loading" class="space-y-wolf-md px-wolf-md pb-wolf-md" aria-live="polite" aria-label="正在加载客户商机">
-        <div v-for="index in 2" :key="index" class="space-y-wolf-sm rounded-wolf bg-wolf-bg-muted-v2 p-wolf-md">
-          <Skeleton class="h-4 w-2/5" />
-          <Skeleton class="h-8 w-3/5" />
-          <Skeleton class="h-1.5 w-full" />
-          <Skeleton class="h-4 w-1/2" />
-        </div>
-      </div>
+      <DataViewStatePanel
+        :state="loading ? 'loading' : loadFailed ? 'error' : loaded && opportunities.length === 0 ? 'empty' : 'ready'"
+        error-title="商机加载失败"
+        error-description="请稍后重试"
+        empty-title="暂无商机"
+        empty-description="该客户暂未关联商机"
+        class="customer-opportunity-state"
+        @retry="retryLoad"
+      >
+        <template #loading>
+          <div class="space-y-wolf-md px-wolf-md pb-wolf-md" aria-label="正在加载客户商机">
+            <div v-for="index in 2" :key="index" class="space-y-wolf-sm rounded-wolf bg-wolf-bg-muted-v2 p-wolf-md">
+              <Skeleton class="h-4 w-2/5" />
+              <Skeleton class="h-8 w-3/5" />
+              <Skeleton class="h-1.5 w-full" />
+              <Skeleton class="h-4 w-1/2" />
+            </div>
+          </div>
+        </template>
 
-      <Empty v-else-if="loadFailed" class="border-0 px-wolf-md py-wolf-2xl">
-        <EmptyHeader>
-          <CircleAlert class="h-4 w-4 text-wolf-danger-text-v2" aria-hidden="true" />
-          <EmptyTitle class="text-wolf-body">商机加载失败</EmptyTitle>
-          <EmptyDescription class="text-wolf-caption">请稍后重试</EmptyDescription>
-        </EmptyHeader>
-        <Button variant="outline" size="sm" class="mt-wolf-md" @click="retryLoad">
-          重试
-        </Button>
-      </Empty>
-
-      <Empty v-else-if="loaded && opportunities.length === 0" class="border-0 px-wolf-md py-wolf-2xl">
-        <EmptyHeader>
-          <EmptyTitle class="text-wolf-body">暂无商机</EmptyTitle>
-          <EmptyDescription class="text-wolf-caption">该客户暂未关联商机</EmptyDescription>
-        </EmptyHeader>
-      </Empty>
-
-      <ScrollArea v-else-if="loaded" class="max-h-[420px]">
-        <div class="space-y-wolf-md px-wolf-md pb-wolf-md">
-          <Button
-            v-for="opportunity in opportunities"
-            :key="opportunity.id"
-            variant="ghost"
-            class="group h-auto w-full items-stretch justify-start rounded-wolf bg-wolf-bg-muted-v2 p-wolf-md text-left hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-wolf-focus"
-            :data-testid="`customer-opportunity-${opportunity.id}`"
-            @click="handleSelectOpportunity(opportunity.id)"
-          >
-            <span class="flex w-full min-w-0 flex-col">
-              <span class="flex min-w-0 items-start justify-between gap-wolf-md">
-                <span class="truncate text-wolf-body font-wolf-medium text-wolf-text-secondary-v2" :title="opportunity.opportunity_name">
-                  {{ opportunity.opportunity_name }}
-                </span>
-                <Badge
-                  variant="outline"
-                  class="shrink-0 border-blue-100 bg-blue-50 text-blue-700 hover:bg-blue-50"
-                  :data-testid="`customer-opportunity-stage-${opportunity.id}`"
-                  :title="`业务旅程当前状态：${getStageName(opportunity)}`"
-                >
-                  {{ getStageName(opportunity) }}
-                </Badge>
-              </span>
-              <AmountText
-                :value="opportunity.total_amount"
-                size="lg"
-                tone="primary"
-                class="mt-wolf-md self-start text-wolf-text-primary-v2"
-              />
-              <Progress
-                :model-value="getWinProbability(opportunity)"
-                class="mt-wolf-md h-1.5 bg-wolf-bg-card"
-                :aria-label="`${opportunity.opportunity_name} 赢率 ${getWinProbability(opportunity)}%`"
-              />
-              <span class="mt-wolf-sm flex items-center justify-between gap-wolf-md text-wolf-body">
-                <span class="font-wolf-medium text-wolf-text-secondary-v2">
-                  赢率 {{ getWinProbability(opportunity) }}%
-                </span>
-                <ChevronRight class="h-4 w-4 shrink-0 text-wolf-text-tertiary-v2 group-hover:text-sidebar-accent-foreground" aria-hidden="true" />
-              </span>
-            </span>
+        <template #error-action>
+          <Button variant="outline" size="sm" class="mt-wolf-md" @click="retryLoad">
+            重试
           </Button>
-        </div>
-      </ScrollArea>
+        </template>
 
-      <template v-if="loaded && hasMore">
-        <Separator />
-        <div class="p-wolf-md">
-          <Button
-            variant="ghost"
-            size="sm"
-            class="w-full justify-between text-wolf-text-secondary-v2 hover:text-wolf-primary-v2"
-            @click="handleViewAll"
-          >
-            查看全部商机
-            <ChevronRight class="h-4 w-4" aria-hidden="true" />
-          </Button>
-        </div>
-      </template>
+        <template #default>
+          <ScrollArea v-if="loaded" class="max-h-[420px]">
+            <div class="space-y-wolf-md px-wolf-md pb-wolf-md">
+              <Button
+                v-for="opportunity in opportunities"
+                :key="opportunity.id"
+                variant="ghost"
+                class="group h-auto w-full items-stretch justify-start rounded-wolf bg-wolf-bg-muted-v2 p-wolf-md text-left hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-wolf-focus"
+                :data-testid="`customer-opportunity-${opportunity.id}`"
+                @click="handleSelectOpportunity(opportunity.id)"
+              >
+                <span class="flex w-full min-w-0 flex-col">
+                  <span class="flex min-w-0 items-start justify-between gap-wolf-md">
+                    <span class="truncate text-wolf-body font-wolf-medium text-wolf-text-secondary-v2" :title="opportunity.opportunity_name">
+                      {{ opportunity.opportunity_name }}
+                    </span>
+                    <Badge
+                      variant="outline"
+                      class="shrink-0 border-blue-100 bg-blue-50 text-blue-700 hover:bg-blue-50"
+                      :data-testid="`customer-opportunity-stage-${opportunity.id}`"
+                      :title="`业务旅程当前状态：${getStageName(opportunity)}`"
+                    >
+                      {{ getStageName(opportunity) }}
+                    </Badge>
+                  </span>
+                  <AmountText
+                    :value="opportunity.total_amount"
+                    size="lg"
+                    tone="primary"
+                    class="mt-wolf-md self-start text-wolf-text-primary-v2"
+                  />
+                  <Progress
+                    :model-value="getWinProbability(opportunity)"
+                    class="mt-wolf-md h-1.5 bg-wolf-bg-card"
+                    :aria-label="`${opportunity.opportunity_name} 赢率 ${getWinProbability(opportunity)}%`"
+                  />
+                  <span class="mt-wolf-sm flex items-center justify-between gap-wolf-md text-wolf-body">
+                    <span class="font-wolf-medium text-wolf-text-secondary-v2">
+                      赢率 {{ getWinProbability(opportunity) }}%
+                    </span>
+                    <ChevronRight class="h-4 w-4 shrink-0 text-wolf-text-tertiary-v2 group-hover:text-sidebar-accent-foreground" aria-hidden="true" />
+                  </span>
+                </span>
+              </Button>
+            </div>
+          </ScrollArea>
+
+          <template v-if="loaded && hasMore">
+            <Separator />
+            <div class="p-wolf-md">
+              <Button
+                variant="ghost"
+                size="sm"
+                class="w-full justify-between text-wolf-text-secondary-v2 hover:text-wolf-primary-v2"
+                @click="handleViewAll"
+              >
+                查看全部商机
+                <ChevronRight class="h-4 w-4" aria-hidden="true" />
+              </Button>
+            </div>
+          </template>
+        </template>
+      </DataViewStatePanel>
     </section>
   </HoverInfo>
 </template>

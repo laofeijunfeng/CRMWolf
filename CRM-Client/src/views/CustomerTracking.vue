@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watchEffect } from 'vue'
+import { computed, nextTick, onMounted, ref, watch, watchEffect } from 'vue'
 import { storeToRefs } from 'pinia'
 import { CheckCircle2, Clock3, FileText, PauseCircle, Plus, RefreshCw, XCircle } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
@@ -76,6 +76,10 @@ const postponeSubmitting = ref(false)
 const postponeDate = ref<Date | null>(null)
 const postponeReason = ref('')
 const postponeConfirmationCaseId = ref<string | null>(null)
+const postponeTaskPublicId = ref<string | null>(null)
+const transitioningTaskIds = ref<Set<string>>(new Set())
+const detailTriggerIndex = ref(-1)
+const focusedDetailTrigger = ref<HTMLElement | null>(null)
 
 const activeTab = ref<string>('open')
 const activeFilters = ref<ListFilterCondition[]>([])
@@ -141,9 +145,6 @@ const customFilterViews = useCustomFilterViews({
   onViewApplySuccess: (tabKey) => headerStore.setActiveTab(tabKey),
 })
 const allTabs = computed(() => customFilterViews.mergeTabs(tabs.value))
-const activeViewLabel = computed(() =>
-  allTabs.value.find((tab) => tab.key === activeTab.value)?.label ?? '当前列表'
-)
 const activeColumnPreferenceConfig = computed<ViewPreferenceConfig>(() => ({ version: 1, columns: activeColumns.value }))
 const columnPreferenceMode = computed<'default' | 'custom'>(() => isCustomFilterViewTab(activeTab.value) ? 'custom' : 'default')
 
@@ -215,7 +216,10 @@ async function refreshActiveView(): Promise<void> {
   await fetchTasks()
 }
 
-async function openDetail(row: TrackingRow): Promise<void> {
+async function openDetail(row: TrackingRow, index?: number): Promise<void> {
+  const rowIndex = index ?? rows.value.findIndex((item) => item.public_id === row.public_id)
+  detailTriggerIndex.value = rowIndex
+  focusedDetailTrigger.value = getDetailTrigger(rowIndex)
   selectedTaskId.value = row.public_id
   selectedTask.value = row
   detailLoading.value = true
@@ -233,26 +237,77 @@ function clearSelectedTask(): void {
   selectedTask.value = null
 }
 
+function getVisibleDetailTriggers(): HTMLElement[] {
+  const desktopTriggers = Array.from(document.querySelectorAll<HTMLElement>(
+    'table.data-table .data-table-row-detail-trigger'
+  ))
+  const desktopTable = document.querySelector<HTMLTableElement>('table.data-table')
+  const desktopVisible = desktopTable === null
+    || typeof window === 'undefined'
+    || window.getComputedStyle(desktopTable).display !== 'none'
+  if (desktopVisible && desktopTriggers.length > 0) return desktopTriggers
+  return Array.from(document.querySelectorAll<HTMLElement>(
+    '.data-table-mobile-list .data-table-mobile-detail-trigger'
+  ))
+}
+
+function getDetailTrigger(index: number): HTMLElement | null {
+  const triggers = getVisibleDetailTriggers()
+  return triggers[index] ?? triggers[Math.min(Math.max(index, 0), triggers.length - 1)] ?? null
+}
+
+function handleTrackingSheetOpenChange(open: boolean): void {
+  if (!open) clearSelectedTask()
+}
+
+async function handleTrackingSheetClosed(): Promise<void> {
+  await nextTick()
+  const target = focusedDetailTrigger.value?.isConnected === true
+    ? focusedDetailTrigger.value
+    : getDetailTrigger(detailTriggerIndex.value)
+  target?.focus({ preventScroll: true })
+  focusedDetailTrigger.value = null
+  detailTriggerIndex.value = -1
+}
+
+function isPostponingTask(taskPublicId: string): boolean {
+  return postponeSubmitting.value && postponeTaskPublicId.value === taskPublicId
+}
+
 async function transitionTask(task: FollowUpTaskItem, action: 'complete' | 'cancel'): Promise<void> {
+  if (transitioningTaskIds.value.has(task.public_id)) return
+
   const actionText = action === 'complete' ? '完成' : '关闭'
   const confirmed = await confirmDialog(`确认${actionText}这条客户追踪吗？`, `确认${actionText}`)
   if (!confirmed) return
+
+  transitioningTaskIds.value = new Set(transitioningTaskIds.value).add(task.public_id)
   try {
     const response = await followUpTaskApi.transition(task.public_id, { action, reason: `manual_${action}` })
     if (selectedTaskId.value === task.public_id) {
       clearSelectedTask()
-    } else {
-      selectedTask.value = response.task
     }
-    toast.success(`已${actionText}`)
-    await fetchTasks()
+    const refreshed = await fetchTasks()
+    const finalState = statusLabel(response.task.status)
+    toast.success(`已${actionText}`, {
+      description: refreshed
+        ? `当前状态：${finalState}`
+        : `当前状态已写入为“${finalState}”，但列表刷新失败，请稍后重试。`,
+    })
   } catch (error) {
     handleApiError(error, `${actionText}客户追踪`)
+  } finally {
+    const nextIds = new Set(transitioningTaskIds.value)
+    nextIds.delete(task.public_id)
+    transitioningTaskIds.value = nextIds
   }
 }
 
 function openDelayDialog(task: FollowUpTaskItem, confirmationCaseId: string | null = null): void {
+  if (postponeSubmitting.value) return
+
   selectedTask.value = task
+  postponeTaskPublicId.value = task.public_id
   postponeConfirmationCaseId.value = confirmationCaseId
   postponeDate.value = task.due_at !== null && task.due_at !== undefined && task.due_at.trim().length > 0
     ? new Date(task.due_at)
@@ -292,12 +347,17 @@ async function submitDelay(): Promise<void> {
     })
     selectedTask.value = response.task
     postponeDialogOpen.value = false
-    toast.success('已延期')
-    await fetchTasks()
+    const refreshed = await fetchTasks()
+    toast.success('已延期', {
+      description: refreshed
+        ? `当前状态：${statusLabel(response.task.status)}`
+        : '延期已写入，但列表刷新失败，请稍后重试。',
+    })
   } catch (error) {
     handleApiError(error, '延期客户追踪')
   } finally {
     postponeSubmitting.value = false
+    postponeTaskPublicId.value = null
   }
 }
 
@@ -309,13 +369,17 @@ function hasPendingConfirmation(task: FollowUpTaskItem | null | undefined): bool
   return firstPendingConfirmation(task) !== null
 }
 
-async function refreshTaskReadModels(taskPublicId: string): Promise<void> {
-  await fetchTasks()
-  if (selectedTaskId.value !== taskPublicId) return
+async function refreshTaskReadModels(taskPublicId: string): Promise<{ listRefreshed: boolean; detailRefreshed: boolean }> {
+  const listRefreshed = await fetchTasks()
+  if (selectedTaskId.value !== taskPublicId) {
+    return { listRefreshed, detailRefreshed: true }
+  }
   try {
     selectedTask.value = await followUpTaskApi.getDetail(taskPublicId)
+    return { listRefreshed, detailRefreshed: true }
   } catch (error) {
     handleApiError(error, '刷新追踪详情')
+    return { listRefreshed, detailRefreshed: false }
   }
 }
 
@@ -336,9 +400,13 @@ async function resolvePendingConfirmation(
     if (terminalAction && selectedTaskId.value === task.public_id) {
       clearSelectedTask()
     }
-    await refreshTaskReadModels(task.public_id)
-    toast.success('追踪状态已更新', postResolveRefreshError.value !== null
-      ? { description: postResolveRefreshError.value }
+    const refreshed = await refreshTaskReadModels(task.public_id)
+    const refreshWarnings: string[] = []
+    if (!refreshed.listRefreshed) refreshWarnings.push('客户追踪列表刷新失败，请稍后重试')
+    if (!refreshed.detailRefreshed) refreshWarnings.push('追踪详情刷新失败，请稍后重试')
+    if (postResolveRefreshError.value !== null) refreshWarnings.push(postResolveRefreshError.value)
+    toast.success('追踪状态已更新', refreshWarnings.length > 0
+      ? { description: refreshWarnings.join('；') }
       : undefined)
     return true
   } catch (error) {
@@ -352,31 +420,41 @@ const primaryActions = (row: TrackingRow): ActionConfig[] => {
   if (confirmation !== null) {
     return [
       {
+        id: 'complete-confirmation',
         label: '确认完成',
         desktopPrimary: true,
+        risk: 'state-transition',
+        resultType: 'status-changed',
         icon: CheckCircle2,
         disabled: resolvingCaseId.value === confirmation.public_id,
+        disabledReason: resolvingCaseId.value === confirmation.public_id ? '处理中' : undefined,
         handler: () => void resolvePendingConfirmation(row, confirmation.public_id, confirmationReply.complete),
       },
       {
+        id: 'defer',
         label: '延期',
         desktopPrimary: true,
+        risk: 'state-transition',
+        resultType: 'status-changed',
         icon: Clock3,
-        disabled: resolvingCaseId.value === confirmation.public_id,
+        disabled: resolvingCaseId.value === confirmation.public_id || isPostponingTask(row.public_id),
+        disabledReason: resolvingCaseId.value === confirmation.public_id || isPostponingTask(row.public_id) ? '处理中' : undefined,
         handler: () => openDelayDialog(row, confirmation.public_id),
       },
     ]
   }
   return [
-    { label: '完成', desktopPrimary: true, icon: CheckCircle2, visible: row.status === 'OPEN', handler: () => void transitionTask(row, 'complete') },
-    { label: '延期', desktopPrimary: true, icon: Clock3, visible: row.status === 'OPEN', handler: () => openDelayDialog(row) },
+    { id: 'complete', label: '完成', desktopPrimary: true, risk: 'state-transition', resultType: 'status-changed', icon: CheckCircle2, visible: row.status === 'OPEN', disabled: transitioningTaskIds.value.has(row.public_id), disabledReason: transitioningTaskIds.value.has(row.public_id) ? '处理中' : undefined, handler: () => void transitionTask(row, 'complete') },
+    { id: 'defer', label: '延期', desktopPrimary: true, risk: 'state-transition', resultType: 'status-changed', icon: Clock3, visible: row.status === 'OPEN', disabled: isPostponingTask(row.public_id), disabledReason: isPostponingTask(row.public_id) ? '处理中' : undefined, handler: () => openDelayDialog(row) },
   ]
 }
 
 const secondaryActions = (row: TrackingRow): ActionConfig[] => {
   const confirmation = firstPendingConfirmation(row)
   const addFollowUpAction = {
+    id: 'add-follow-up' as const,
     label: '添加跟进记录',
+    resultType: 'entity-created' as const,
     icon: Plus,
     visible: Boolean(row.customer?.id),
     handler: (): void => openFollowUpDialog(row),
@@ -385,23 +463,31 @@ const secondaryActions = (row: TrackingRow): ActionConfig[] => {
     const resolving = resolvingCaseId.value === confirmation.public_id
     return [
       {
+        id: 'keep-open',
         label: '保持待处理',
+        risk: 'state-transition',
+        resultType: 'status-changed',
         icon: PauseCircle,
         disabled: resolving,
+        disabledReason: resolving ? '处理中' : undefined,
         handler: () => void resolvePendingConfirmation(row, confirmation.public_id, confirmationReply.keepOpen),
       },
       {
+        id: 'close-tracking',
         label: '关闭追踪',
+        risk: 'destructive',
+        resultType: 'status-changed',
         icon: XCircle,
         destructive: true,
         disabled: resolving,
+        disabledReason: resolving ? '处理中' : undefined,
         handler: () => void resolvePendingConfirmation(row, confirmation.public_id, confirmationReply.cancel),
       },
       addFollowUpAction,
     ]
   }
   return [
-    { label: '关闭', icon: XCircle, visible: row.status === 'OPEN', destructive: true, handler: () => void transitionTask(row, 'cancel') },
+    { id: 'cancel', label: '关闭', risk: 'destructive', resultType: 'status-changed', icon: XCircle, visible: row.status === 'OPEN', destructive: true, disabled: transitioningTaskIds.value.has(row.public_id), disabledReason: transitioningTaskIds.value.has(row.public_id) ? '处理中' : undefined, handler: () => void transitionTask(row, 'cancel') },
     addFollowUpAction,
   ]
 }
@@ -421,12 +507,20 @@ function openFollowUpDialog(task: FollowUpTaskItem): void {
 }
 
 async function handleFollowUpSuccess(completedTaskPublicId: string | null): Promise<void> {
-  await fetchTasks()
-  if (completedTaskPublicId === null || selectedTaskId.value !== completedTaskPublicId) return
+  const listRefreshed = await fetchTasks()
+  if (completedTaskPublicId === null || selectedTaskId.value !== completedTaskPublicId) {
+    if (!listRefreshed) toast.warning('跟进记录已保存，但客户追踪列表刷新失败，请稍后重试。')
+    return
+  }
+  let detailRefreshed = true
   try {
     selectedTask.value = await followUpTaskApi.getDetail(completedTaskPublicId)
   } catch (error) {
+    detailRefreshed = false
     handleApiError(error, '刷新追踪详情')
+  }
+  if (!listRefreshed || !detailRefreshed) {
+    toast.warning('跟进记录已保存，但最新追踪状态未完全同步，请稍后重试。')
   }
 }
 
@@ -576,6 +670,19 @@ useTopBarRegistration({
   ],
 })
 
+watch(tasks, async () => {
+  if (detailTriggerIndex.value >= 0) {
+    detailTriggerIndex.value = Math.min(
+      detailTriggerIndex.value,
+      Math.max(rows.value.length - 1, 0),
+    )
+  }
+  await nextTick()
+  if (selectedTaskId.value === null && focusedDetailTrigger.value?.isConnected !== true) {
+    focusedDetailTrigger.value = getDetailTrigger(detailTriggerIndex.value)
+  }
+}, { flush: 'post' })
+
 watchEffect(() => {
   if (headerStore.activeTab !== null && headerStore.activeTab !== undefined && headerStore.activeTab !== '' && headerStore.activeTab !== activeTab.value) {
     page.value = 1
@@ -620,7 +727,6 @@ watchEffect(() => {
       v-model:filters="activeFilters"
       v-model:sorts="activeSorts"
       view-key="customer-tracking.list"
-      :view-label="activeViewLabel"
       :effective-filters="effectiveFilters"
       :view-applying="customFilterViews.applying.value"
       :view-apply-error="customFilterViews.applyError.value"
@@ -726,7 +832,11 @@ watchEffect(() => {
       </template>
     </DataTable>
 
-    <Sheet :open="selectedTaskId !== null" @update:open="(open) => { if (!open) selectedTaskId = null }">
+    <Sheet
+      :open="selectedTaskId !== null"
+      @update:open="handleTrackingSheetOpenChange"
+      @closed="handleTrackingSheetClosed"
+    >
       <DetailSheetContent>
         <SheetHeader class="tracking-sheet-header p-6 border-b border-wolf-border-default-v2">
           <div class="tracking-sheet-title">
@@ -846,9 +956,9 @@ watchEffect(() => {
             </Button>
           </template>
           <template v-else-if="selectedTask?.status === 'OPEN'">
-            <Button variant="outline" @click="openDelayDialog(selectedTask)">延期</Button>
-            <Button variant="outline" @click="transitionTask(selectedTask, 'cancel')">关闭追踪</Button>
-            <Button @click="transitionTask(selectedTask, 'complete')">完成</Button>
+            <Button variant="outline" :disabled="isPostponingTask(selectedTask.public_id)" @click="openDelayDialog(selectedTask)">延期</Button>
+            <Button variant="outline" :disabled="transitioningTaskIds.has(selectedTask.public_id) || isPostponingTask(selectedTask.public_id)" @click="transitionTask(selectedTask, 'cancel')">关闭追踪</Button>
+            <Button :disabled="transitioningTaskIds.has(selectedTask.public_id) || isPostponingTask(selectedTask.public_id)" @click="transitionTask(selectedTask, 'complete')">完成</Button>
           </template>
         </SheetFooter>
       </DetailSheetContent>

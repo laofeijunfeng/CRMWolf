@@ -51,6 +51,23 @@ vi.mock('@/components/crmwolf', () => ({
     props: { modelValue: Number },
     setup: (props, { attrs }) => () => h('div', { ...attrs, 'data-progress': String(props.modelValue) }),
   }),
+  DataViewStatePanel: defineComponent({
+    name: 'DataViewStatePanel',
+    inheritAttrs: false,
+    props: {
+      state: { type: String, required: true },
+      errorTitle: { type: String, default: '' },
+      errorDescription: { type: String, default: '' },
+      emptyTitle: { type: String, default: '' },
+      emptyDescription: { type: String, default: '' },
+    },
+    setup: (props, { attrs, slots }) => () => {
+      if (props.state === 'loading') return h('div', attrs, slots.loading?.())
+      if (props.state === 'error') return h('div', attrs, [h('span', props.errorTitle), h('span', props.errorDescription), slots['error-action']?.()])
+      if (props.state === 'empty') return h('div', attrs, [h('span', props.emptyTitle), h('span', props.emptyDescription)])
+      return h('div', attrs, slots.default?.())
+    },
+  }),
   Skeleton: defineComponent({ name: 'Skeleton', setup: () => () => h('div') }),
 }))
 

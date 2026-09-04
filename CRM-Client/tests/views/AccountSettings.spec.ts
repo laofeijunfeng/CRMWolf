@@ -45,12 +45,25 @@ vi.mock('@/components/crmwolf', async () => {
   const button = defineComponent({ name: 'Button', inheritAttrs: false, template: '<button v-bind="$attrs"><slot /></button>' })
   const { Input } = await import('@/components/ui/input')
   const avatarImage = defineComponent({ name: 'AvatarImage', inheritAttrs: false, template: '<img v-bind="$attrs" />' })
+  const dataViewStatePanel = defineComponent({
+    name: 'DataViewStatePanel',
+    inheritAttrs: false,
+    props: { state: { type: String, required: true } },
+    emits: ['retry'],
+    setup: (props, { attrs, slots }) => () => h('div', attrs, props.state === 'loading'
+      ? slots.loading?.()
+      : props.state === 'error'
+        ? slots['error-action']?.()
+        : props.state === 'empty'
+          ? slots['empty-action']?.()
+          : slots.default?.()),
+  })
 
   return {
     Alert: passthrough('Alert'), AlertDescription: passthrough('AlertDescription'), AlertTitle: passthrough('AlertTitle'),
     Avatar: passthrough('Avatar'), AvatarFallback: passthrough('AvatarFallback'), AvatarImage: avatarImage,
     Badge: passthrough('Badge'), Button: button, Card: passthrough('Card'), CardContent: passthrough('CardContent'),
-    CardHeader: passthrough('CardHeader'), Dialog: defineComponent({
+    CardHeader: passthrough('CardHeader'), DataViewStatePanel: dataViewStatePanel, Dialog: defineComponent({
       name: 'Dialog', props: { open: Boolean }, setup: (props, { slots }) => () => props.open ? h('div', { role: 'dialog' }, slots.default?.()) : null,
     }),
     DialogContent: passthrough('DialogContent'), DialogFooter: passthrough('DialogFooter'), DialogHeader: passthrough('DialogHeader'),

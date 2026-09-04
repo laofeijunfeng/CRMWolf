@@ -42,14 +42,32 @@
 
 ---
 
-## 四、Element Plus 使用现状
+## 四、迁移治理基线
 
-**验证方法**：`grep -rI "el-" CRM-Client/src --include="*.vue" | wc -l`
+| 项目 | 状态 | 验证日期 |
+|------|------|----------|
+| Element Plus 运行时依赖 | `package.json` 未发现依赖 | 2026-09-04 |
+| Element Plus 组件调用 | 核心源码审计未发现真实 `el-*` 模板调用 | 2026-09-04 |
+| P2-04 文件级迁移台账 | 已建立，详见 [P2-04 台账](./p2-pkg-04-inventory.md) | 2026-09-04 |
+| P2-04 新增代码门禁 | 已提供 `npm run lint:design-system` | 2026-09-04 |
 
-**结果**：项目中存在大量 Element Plus 组件使用（分布在 AppLayout、LicenseManagement、各视图文件等）。
+Element Plus 迁移文档保留为历史背景，不代表当前仍存在对应运行时依赖。设计系统治理优先关注新增 raw color、旧 Token、状态组合分叉以及共享组件契约。
 
-**说明**：具体迁移优先级见 [element-plus-to-shadcn-vue.md](./element-plus-to-shadcn-vue.md)。
+## 五、P2-04 文件级验证证据
+
+| 入口 | 当前证据 | 状态 | 验证日期 |
+|------|----------|------|----------|
+| `MetricCard` | 边框、背景、tone 和文本已改用 shadcn CSS variables | 已验证 | 2026-09-04 |
+| `TopBarTabs` | 激活、hover、focus、危险操作改用语义 CSS variables | 已验证 | 2026-09-04 |
+| `DataViewStatePanel` + `PaymentPlanDetailContent` | loading/error/empty/ready 组合已接入，保留回款动作 | 已验证 | 2026-09-04 |
+| `StatusBadge` + `ApprovalStatusBadge` | 生命周期/审批契约有未知状态兜底和组件测试 | 已验证 | 2026-09-04 |
+| `SalesDashboard` | 页面 UI 边框、错误提示和分隔线已迁移；图表序列色保留登记例外 | 部分验证 | 2026-09-04 |
+| `AppLayout` | 壳层背景、分隔线、标题、focus 和危险操作改用 shadcn CSS variables | 已验证 | 2026-09-04 |
+| `AccountSettings` | 账户页面 loading/error/empty/ready 统一由 `DataViewStatePanel` 承载，保留密码与飞书授权动作 | 已验证 | 2026-09-04 |
+| `CustomerOpportunityHoverCard` | 客户商机浮层 loading/error/empty/ready 统一由 `DataViewStatePanel` 承载，保留预览与跳转动作；商机阶段蓝色标签例外登记为 `DS-EX-003` | 已验证 | 2026-09-04 |
+
+验证命令：`npm run type-check`、`npm run build`、`npm run test:governance`、`npm run test:unit -- --run tests/components/StatusBadge.spec.ts tests/components/ApprovalStatusBadge.spec.ts tests/components/DataViewStatePanel.spec.ts`、`npm run lint:design-system -- --worktree`。详细字段以 [P2-04 台账](./p2-pkg-04-inventory.md) 为准。
 
 ---
 
-**最后更新**：2026-07-28
+**最后更新**：2026-09-04

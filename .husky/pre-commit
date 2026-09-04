@@ -24,6 +24,15 @@ for config in $LOCKED_CONFIGS; do
   fi
 done
 
+# ===== 前端增量检查：设计系统门禁覆盖暂存的 vue/scss/css；ESLint 只处理脚本文件 =====
+STAGED_UI=$(git diff --cached --name-only --diff-filter=d | grep -E '^CRM-Client/src/.*\.(vue|scss|css)$' || true)
+if [ -n "$STAGED_UI" ]; then
+  cd CRM-Client
+  echo "🎨 Design-system governance (staged additions)..."
+  npm run lint:design-system || { echo "::error::Design-system governance check failed"; exit 1; }
+  cd ..
+fi
+
 # ===== 前端增量检查：只对暂存的 src/**/*.{ts,vue,tsx} 跑 ESLint（硬阻断）=====
 STAGED_FE=$(git diff --cached --name-only --diff-filter=d | grep -E '^CRM-Client/src/.*\.(ts|vue|tsx)$' || true)
 if [ -n "$STAGED_FE" ]; then

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "P2-04 Design System Migration Inventory",
+  "type": "object",
+  "required": ["version", "package", "lastVerified", "entries"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "type": "string" },
+    "package": { "const": "P2-04" },
+    "lastVerified": { "type": "string", "format": "date" },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id", "file", "symbol", "category", "current", "target",
+          "exception", "owner", "batch", "risk", "verification", "status", "lastVerified"
+        ],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "file": { "type": "string", "minLength": 1 },
+          "symbol": { "type": "string", "minLength": 1 },
+          "category": { "type": "string", "minLength": 1 },
+          "current": { "type": "string" },
+          "target": { "type": "string" },
+          "exception": { "type": "boolean" },
+          "owner": { "type": "string", "minLength": 1 },
+          "batch": { "type": "string", "minLength": 1 },
+          "risk": { "type": "string", "minLength": 1 },
+          "verification": { "type": "string", "minLength": 1 },
+          "status": { "type": "string", "minLength": 1 },
+          "lastVerified": { "type": "string", "format": "date" }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": false
+}

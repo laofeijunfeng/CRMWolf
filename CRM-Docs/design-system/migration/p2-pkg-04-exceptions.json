@@ -1,0 +1,43 @@
+{
+  "$schema": "./p2-pkg-04-exceptions.schema.json",
+  "version": "1.0",
+  "lastVerified": "2026-09-04",
+  "exceptions": [
+    {
+      "id": "DS-EX-001",
+      "category": "raw-color",
+      "files": [
+        "CRM-Client/src/views/SalesDashboard.vue"
+      ],
+      "match": "trend series colors|background:#2563eb|background:#60a5fa|fillColor",
+      "reason": "图表序列色属于数据可视化编码，不是页面 UI 主题色；迁移为变量会改变图例和历史数据视觉含义。",
+      "owner": "frontend",
+      "reviewDate": "2026-12-04",
+      "status": "active"
+    },
+    {
+      "id": "DS-EX-002",
+      "category": "raw-color",
+      "files": [
+        "CRM-Client/src/components/panels/PaymentPlanDetailContent.vue"
+      ],
+      "match": "rgba\\(#64748B",
+      "reason": "该值仅用于详情面板阴影透明度，保留原有层级，不作为主题色入口。",
+      "owner": "frontend",
+      "reviewDate": "2026-12-04",
+      "status": "active"
+    },
+    {
+      "id": "DS-EX-003",
+      "category": "status-color",
+      "files": [
+        "CRM-Client/src/components/customer/CustomerOpportunityHoverCard.vue"
+      ],
+      "match": "border-blue-100 bg-blue-50 text-blue-700",
+      "reason": "商机阶段是浮层中的业务标签/阶段编码，不属于统一生命周期状态；当前蓝色标签用于与主体状态徽章区分。待建立阶段专用 Badge 契约后再单独评估迁移。",
+      "owner": "frontend-platform",
+      "reviewDate": "2026-12-04",
+      "status": "active"
+    }
+  ]
+}

@@ -64,6 +64,7 @@ import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
 import { serializeListQuery } from '@/utils/listQuery'
 import { LICENSE_STATUS_LABELS, licenseStatusClass, licenseStatusLabel } from '@/utils/licenseStatus'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
+import type { FormSuccessPayload } from '@/types/actionOutcome'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -86,6 +87,12 @@ const {
   loadFilterOptions: loadSourceFilterOptions,
 } = useAcquisitionSourceOptions()
 const selectedCustomer = ref<CustomerResponse | null>(null)
+
+interface CustomerDetailSheetExpose {
+  refresh: () => Promise<boolean>
+}
+
+const customerDetailSheetRef = ref<CustomerDetailSheetExpose | null>(null)
 const transferCustomer = ref<CustomerResponse | null>(null)
 const transferDialogOpen = ref(false)
 const showCustomerForm = ref(false)
@@ -370,8 +377,11 @@ const getRowActions = (row: CustomerResponse): TableRowActionSet => {
     return {
       primaryActions: [
         {
+          id: 'claim',
           label: '领取',
           desktopPrimary: true,
+          risk: 'state-transition',
+          resultType: 'status-changed',
           handler: asCustomerActionHandler(handleClaim),
           visible: canAccessPublic.value
         }
@@ -382,15 +392,19 @@ const getRowActions = (row: CustomerResponse): TableRowActionSet => {
   return {
     primaryActions: [
       {
+        id: 'create-opportunity',
         label: '新建商机',
         desktopPrimary: true,
+        resultType: 'entity-created',
         handler: asCustomerActionHandler(handleCreateOpportunity),
         visible: canCreateOpportunityForRow(row),
         icon: Sparkles as Component
       },
       {
+        id: 'edit',
         label: '编辑',
         desktopPrimary: true,
+        resultType: 'entity-updated',
         handler: asCustomerActionHandler(handleEdit),
         visible: canEditRow(row),
         icon: Pencil as Component
@@ -398,25 +412,37 @@ const getRowActions = (row: CustomerResponse): TableRowActionSet => {
     ],
     secondaryActions: [
       {
+        id: 'transfer',
         label: '移交客户',
+        risk: 'state-transition',
+        resultType: 'entity-updated',
         handler: asCustomerActionHandler(handleTransfer),
         visible: canAssignCustomer.value,
         icon: UserRoundCheck as Component
       },
       {
+        id: 'return-to-public-pool',
         label: '退回公海',
+        risk: 'state-transition',
+        resultType: 'status-changed',
         handler: asCustomerActionHandler(handleReturn),
         visible: canReturnRow(row),
         icon: ArrowRightLeft as Component
       },
       {
+        id: 'win',
         label: '赢单',
+        risk: 'state-transition',
+        resultType: 'status-changed',
         handler: asCustomerActionHandler(handleWin),
         visible: canEditRow(row),
         icon: TrendingUp as Component
       },
       {
+        id: 'lose',
         label: '输单',
+        risk: 'destructive',
+        resultType: 'status-changed',
         handler: asCustomerActionHandler(handleLose),
         visible: canEditRow(row),
         icon: TrendingDown as Component,
@@ -424,16 +450,23 @@ const getRowActions = (row: CustomerResponse): TableRowActionSet => {
         separator: true
       },
       {
+        id: 'invalidate',
         label: '失效',
+        risk: 'destructive',
+        resultType: 'status-changed',
         handler: asCustomerActionHandler(handleInvalid),
         visible: canEditRow(row),
         icon: XCircle as Component,
         destructive: true
       },
       {
+        id: 'delete',
         label: '删除',
         handler: asCustomerActionHandler(handleDelete),
         disabled: isCustomerDeleting(row.id),
+        disabledReason: isCustomerDeleting(row.id) ? '删除处理中' : undefined,
+        risk: 'destructive',
+        resultType: 'entity-deleted',
         visible: canDeleteRow(row),
         icon: Trash2 as Component,
         destructive: true
@@ -525,9 +558,6 @@ const customFilterViews = useCustomFilterViews({
   onViewApplySuccess: (tabKey) => headerStore.setActiveTab(tabKey),
 })
 const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
-const activeViewLabel = computed(() =>
-  allTabs.value.find((tab) => tab.key === activeTab.value)?.label ?? '当前列表'
-)
 const customFilterViewSaving = computed(() => customFilterViews.saving.value)
 const activeColumnPreferenceConfig = computed<ViewPreferenceConfig>(() => ({
   version: 1,
@@ -627,9 +657,44 @@ const handleCustomerFormOpenChange = (open: boolean): void => {
   }
 }
 
-const handleCustomerFormSuccess = (): void => {
+const handleCustomerFormSuccess = async (payload?: FormSuccessPayload): Promise<void> => {
   handleCustomerFormOpenChange(false)
-  fetchCustomerList()
+  if (payload?.entityType === 'customer' && payload.operation === 'update') {
+    const customerId = String(payload.entityId)
+    if (tableData.value.some(row => row.id === customerId)) {
+      // Keep the visible row fresh immediately, then re-query to preserve
+      // server-side sorting and filtering semantics.
+      try {
+        const detail = await customerApi.getCustomerDetail(customerId)
+        const currentIndex = tableData.value.findIndex(row => row.id === customerId)
+        const currentRow = tableData.value[currentIndex]
+        if (currentIndex >= 0 && currentRow !== undefined) {
+          tableData.value[currentIndex] = { ...currentRow, ...detail }
+        }
+        if (selectedCustomer.value?.id === detail.id && selectedCustomer.value !== null) {
+          selectedCustomer.value = { ...selectedCustomer.value, ...detail }
+        }
+      } catch {
+        // The save already succeeded; the list reload below is the recovery
+        // path rather than turning a detail read failure into a save failure.
+      }
+    }
+  }
+
+  const refreshed = await fetchCustomerList()
+  const detailMatches = payload?.entityType === 'customer'
+    && selectedCustomerId.value !== null
+    && String(payload.entityId) === String(selectedCustomerId.value)
+  const detailRefreshed = detailMatches
+    ? await (customerDetailSheetRef.value?.refresh() ?? Promise.resolve(false))
+    : true
+
+  if (!refreshed || !detailRefreshed) {
+    const failedScopes: string[] = []
+    if (!refreshed) failedScopes.push('客户列表')
+    if (!detailRefreshed) failedScopes.push('客户详情')
+    toast.warning(`客户已保存，但${failedScopes.join('和')}刷新失败，请稍后重试。`)
+  }
 }
 
 const clearOpportunityCustomer = (): void => {
@@ -968,7 +1033,6 @@ watchEffect(() => {
       v-model:filters="activeFilters"
       v-model:sorts="activeSorts"
       view-key="customers.list"
-      :view-label="activeViewLabel"
       :view-applying="customFilterViews.applying.value"
       :view-apply-error="customFilterViews.applyError.value"
       @retry-view-apply="customFilterViews.retryViewApply"
@@ -1201,6 +1265,7 @@ watchEffect(() => {
 
     <!-- 客户详情抽屉 -->
     <CustomerDetailSheet
+      ref="customerDetailSheetRef"
       v-model:visible="sheetVisible"
       :customer-id="selectedCustomerId ?? null"
       :target-opportunity-id="targetOpportunityId"

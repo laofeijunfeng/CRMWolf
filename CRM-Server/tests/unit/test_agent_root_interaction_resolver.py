@@ -277,7 +277,11 @@ async def test_database_interaction_resolver_fails_closed_when_claim_transaction
         raise AssertionError("unavailable action ledger must fail closed")
 
 
-def _seed_opportunity_trigger_action(session_factory) -> tuple[int, int]:
+def _seed_opportunity_trigger_action(
+    session_factory,
+    *,
+    interaction_type: str = "confirmation",
+) -> tuple[int, int]:
     db = session_factory()
     try:
         session = AgentSession(session_key="opportunity-trigger", team_id=1, user_id=2)
@@ -303,7 +307,7 @@ def _seed_opportunity_trigger_action(session_factory) -> tuple[int, int]:
                 action_type="submit_interaction",
                 root_context_role="PROJECTION_ONLY",
                 target={
-                    "interaction_type": "confirmation",
+                    "interaction_type": interaction_type,
                     "workflow_trigger": {
                         "type": "workflow_trigger",
                         "workflow": "customer_opportunity_suggestion",
@@ -311,6 +315,8 @@ def _seed_opportunity_trigger_action(session_factory) -> tuple[int, int]:
                         "action": "CREATE_OPPORTUNITY",
                     },
                     "selection_mode": "single",
+                    "min_selections": 1 if interaction_type == "choice" else None,
+                    "max_selections": 1 if interaction_type == "choice" else None,
                     "choices": [
                         {"value": "confirm", "label": "是", "disabled": False},
                         {"value": "cancel", "label": "否", "disabled": False},
@@ -329,6 +335,40 @@ async def test_opportunity_trigger_cancel_resolves_to_cancel_action() -> None:
     engine, session_factory = _database()
     try:
         session_id, _ = _seed_opportunity_trigger_action(session_factory)
+        resolver = DatabaseInteractionResolver(session_factory=session_factory)
+
+        resolution = await resolver.resolve(
+            turn=RootTurnInput(
+                team_id=1,
+                user_id=2,
+                session_id=session_id,
+                client_request_id=str(uuid4()),
+                input=InteractionTurnInput(
+                    type="interaction",
+                    action_id="act_opportunity_trigger",
+                    values={"choice": "cancel"},
+                ),
+            ),
+            context=RootContextSnapshot(),
+            runtime=RootRuntimeContext(),
+        )
+
+        assert resolution.status == "RESOLVED", resolution.reason_code
+        assert resolution.resolved_action is not None
+        assert resolution.resolved_action.workflow_trigger is not None
+        assert resolution.resolved_action.workflow_trigger.action == "CANCEL"
+    finally:
+        engine.dispose()
+
+
+async def test_legacy_opportunity_choice_cancel_resolves_to_cancel_action() -> None:
+    """Old projected cards must remain executable after the protocol cutover."""
+    engine, session_factory = _database()
+    try:
+        session_id, _ = _seed_opportunity_trigger_action(
+            session_factory,
+            interaction_type="choice",
+        )
         resolver = DatabaseInteractionResolver(session_factory=session_factory)
 
         resolution = await resolver.resolve(

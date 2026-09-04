@@ -4,6 +4,7 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
 import { toast } from 'vue-sonner'
+import type { FormSuccessPayload } from '@/types/actionOutcome'
 import {
   Dialog,
   DialogContent,
@@ -77,7 +78,7 @@ interface Props {
 
 interface Emits {
   (e: 'update:open', value: boolean): void
-  (e: 'success'): void
+  (e: 'success', payload?: FormSuccessPayload): void
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -407,10 +408,16 @@ const onSubmit = handleSubmit(async (formValues) => {
       procurement_method_id: formValues['procurement_method_id'] ?? null
     }
 
+    let entityId: string
+    let operation: FormSuccessPayload['operation']
     if (isEdit.value && props.opportunity) {
-      await opportunityApi.updateOpportunity(props.opportunity.id, data)
+      const updatedOpportunity = await opportunityApi.updateOpportunity(props.opportunity.id, data)
+      entityId = updatedOpportunity.id
+      operation = 'update'
     } else {
-      await opportunityApi.createOpportunity(data as OpportunityCreate)
+      const createdOpportunity = await opportunityApi.createOpportunity(data as OpportunityCreate)
+      entityId = createdOpportunity.id
+      operation = 'create'
     }
 
     if (resolvedSuccessMessage.value !== null && resolvedSuccessMessage.value !== '') {
@@ -420,7 +427,13 @@ const onSubmit = handleSubmit(async (formValues) => {
     isDirty.value = false
     closeGuard.approveClose()
     visible.value = false
-    emit('success')
+    emit('success', {
+      entityType: 'opportunity',
+      entityId,
+      operation,
+      outcome: 'success',
+      stateSyncRequested: true,
+    })
   } catch (error) {
     handleApiError(error, isEdit.value ? '更新商机' : '创建商机')
   } finally {

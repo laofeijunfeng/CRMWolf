@@ -212,7 +212,7 @@ function handleDelete(tab: TabItem): void {
   height: 28px;
   min-height: 28px;
   margin-left: -4px;
-  color: $wolf-primary-v2;
+  color: hsl(var(--primary));
 }
 
 :global(.tab-menu-content) {
@@ -224,7 +224,7 @@ function handleDelete(tab: TabItem): void {
 }
 
 :global(.tab-menu-item--danger) {
-  color: $wolf-danger-v2;
+  color: hsl(var(--destructive));
 }
 
 :global(.tab-menu-icon) {
@@ -268,15 +268,15 @@ function handleDelete(tab: TabItem): void {
   // ========== Hover 状态（用户需求 2）==========
   // 鼠标 hover 时显示浅 blue 背景（非激活态）
   &:hover:not([data-state="active"]):not(:disabled) {
-    background: $wolf-bg-hover-v2;  // #EFF6FF（blue-50）
-    color: hsl(var(--sidebar-accent-foreground));
+    background: hsl(var(--accent));  // #EFF6FF（blue-50）
+    color: hsl(var(--accent-foreground));
   }
 
   // ========== Active 状态（用户需求 1）==========
   // 选中时文字显示系统主题色
   &[data-state="active"] {
     // 文字主色
-    color: $wolf-primary-v2;
+    color: hsl(var(--primary));
 
     // 字重加粗
     font-weight: $wolf-font-weight-semibold-v2;  // 600
@@ -290,7 +290,7 @@ function handleDelete(tab: TabItem): void {
     // Hover 时保持激活态样式
     &:hover {
       background: transparent;
-      color: $wolf-primary-v2;
+      color: hsl(var(--primary));
     }
   }
 
@@ -303,7 +303,7 @@ function handleDelete(tab: TabItem): void {
 
   // ========== Focus 状态（MASTER.md §8.2）==========
   &:focus-visible {
-    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;  // 2px rgba(#2563EB, 0.5)
+    outline: $wolf-focus-ring-width-v2 solid hsl(var(--ring) / 0.5);  // 2px rgba(#2563EB, 0.5)
     outline-offset: $wolf-focus-ring-offset-v2;  // 2px
   }
 

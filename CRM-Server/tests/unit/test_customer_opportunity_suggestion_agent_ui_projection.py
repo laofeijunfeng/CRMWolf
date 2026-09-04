@@ -122,6 +122,8 @@ def test_create_suggestion_projects_one_agent_message_and_action_idempotently():
         assert action.root_context_role == "PROJECTION_ONLY"
         assert action.target_json["workflow_trigger"]["job_public_id"] == "cosj_ui_001"
         assert action.target_json["workflow_trigger"]["action"] == "CREATE_OPPORTUNITY"
+        assert action.target_json["interaction_type"] == "confirmation"
+        assert action.target_json["submit_on_select"] is True
 
         replay_id = projector.project_operation(db, operation=operation)
         db.commit()
@@ -142,6 +144,7 @@ def test_move_suggestion_projects_separate_agent_choice():
         message = db.get(AgentMessage, message_id)
         action = db.query(AgentUIAction).one()
         assert "推进机会" in message.content
+        assert action.target_json["interaction_type"] == "confirmation"
         assert action.target_json["workflow_trigger"]["action"] == "MOVE_OPPORTUNITY_STAGE"
     finally:
         db.close()

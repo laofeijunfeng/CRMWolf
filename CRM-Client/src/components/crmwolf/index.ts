@@ -43,13 +43,16 @@ export { default as StatusBadge } from '../StatusBadge.vue'
 
 // Export types
 export type { ActionConfig } from './tableRowActionTypes'
-export type { DesktopTableRowActionProjection, TableRowActionSet, TableRowActionGroup } from './tableRowActionGroups'
+export type { DesktopTableRowActionProjection, MobileTableRowActionProjection, TableRowActionSet, TableRowActionGroup } from './tableRowActionGroups'
 export {
   groupTableRowActions,
   hasVisibleTableRowActions,
   shouldShowTableRowActionGroupLabels,
   getDesktopTableRowActions,
   getDesktopTableRowActionsWidth,
+  getMobileTableRowActions,
+  getTableRowActionLabel,
+  isDestructiveTableRowAction,
   isDetailTableRowAction
 } from './tableRowActionGroups'
 export type { ColumnConfigOption } from './columnConfigTypes'
@@ -60,6 +63,8 @@ export type { ListSortCondition, ListSortField } from './listSortTypes'
 
 // Feedback components (§8 MEDIUM Priority)
 export { default as LoadingSkeleton } from './LoadingSkeleton.vue'
+export { default as DataViewStatePanel } from './DataViewStatePanel.vue'
+export type { DataViewState } from './DataViewStatePanel.vue'
 export { default as LiveRegion } from './LiveRegion.vue'
 export { default as SearchCard } from './SearchCard.vue'
 export { default as ConfirmDialog } from './ConfirmDialog.vue'

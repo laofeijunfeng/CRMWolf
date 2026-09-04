@@ -227,9 +227,6 @@ const customFilterViews = useCustomFilterViews({
   onViewApplySuccess: (tabKey) => headerStore.setActiveTab(tabKey),
 })
 const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
-const activeViewLabel = computed(() =>
-  allTabs.value.find((tab) => tab.key === activeTab.value)?.label ?? '当前列表'
-)
 const effectiveFilters = computed(() => {
   const tabStatus = activeTab.value === 'pending'
     ? 'PENDING_REVIEW'
@@ -450,21 +447,26 @@ const deleteInvoiceRow = (row: Record<string, unknown>): void => {
 const getRowActions = (row: InvoiceApplicationResponse): TableRowActionSet => ({
   primaryActions: [
     {
-      label: '查看',
+      id: 'detail',
+      label: '查看详情',
       kind: 'detail',
       handler: viewInvoiceRow,
       icon: Eye
     },
     {
+      id: 'edit',
       label: '编辑',
       desktopPrimary: true,
+      resultType: 'entity-updated',
       handler: editInvoiceRow,
       visible: (row.status === 'DRAFT' || row.status === 'REJECTED') && canCreateInvoice.value,
       icon: Pencil
     },
     {
+      id: 'download',
       label: '下载',
       desktopPrimary: true,
+      resultType: 'none',
       handler: downloadInvoiceRow,
       visible: hasDownloadableInvoiceFile(row),
       icon: Download
@@ -472,30 +474,43 @@ const getRowActions = (row: InvoiceApplicationResponse): TableRowActionSet => ({
   ],
   secondaryActions: [
     {
+      id: 'submit',
       label: '提交',
       desktopPrimary: true,
+      risk: 'approval',
+      resultType: 'status-changed',
       handler: submitInvoiceRow,
       visible: row.status === 'DRAFT' && canCreateInvoice.value,
       icon: Send
     },
     {
+      id: 'withdraw',
       label: '撤回',
       desktopPrimary: true,
+      risk: 'state-transition',
+      resultType: 'status-changed',
       handler: withdrawInvoiceRow,
       visible: row.status === 'PENDING_REVIEW',
       icon: RotateCcw
     },
     {
+      id: 'issue-invoice',
       label: '开票',
       desktopPrimary: true,
+      risk: 'state-transition',
+      resultType: 'status-changed',
       handler: markIssuedInvoiceRow,
       visible: row.status === 'APPROVED' && canMarkInvoiced.value,
       icon: Stamp
     },
     {
+      id: 'delete',
       label: '删除',
       handler: deleteInvoiceRow,
       disabled: isInvoiceDeleting(row.id),
+      disabledReason: isInvoiceDeleting(row.id) ? '删除处理中' : undefined,
+      risk: 'destructive',
+      resultType: 'entity-deleted',
       visible: canDeleteInvoiceApplicationRow(row),
       icon: Trash2,
       destructive: true,
@@ -685,7 +700,6 @@ watchEffect(() => {
       v-model:filters="activeFilters"
       v-model:sorts="activeSorts"
       view-key="invoices.list"
-      :view-label="activeViewLabel"
       :effective-filters="effectiveFilters"
       :view-applying="customFilterViews.applying.value"
       :view-apply-error="customFilterViews.applyError.value"

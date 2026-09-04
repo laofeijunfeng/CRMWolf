@@ -407,13 +407,21 @@ class InteractionBlock(AgentUIBlockBase):
                 raise ValueError("text_input requires one bounded text field and allow_blank")
             if not self.allow_blank and field.min_length == 0:
                 raise ValueError("non-blank text_input requires min_length greater than zero")
-        if self.submit_on_select and (
-            self.interaction_type != "choice"
-            or self.selection_mode != "single"
-            or self.min_selections != 1
-            or self.max_selections != 1
-        ):
-            raise ValueError("submit_on_select requires an exact single-choice interaction")
+        if self.submit_on_select:
+            if self.interaction_type == "choice":
+                valid_submit_shape = (
+                    self.selection_mode == "single"
+                    and self.min_selections == 1
+                    and self.max_selections == 1
+                )
+            elif self.interaction_type == "confirmation":
+                # A confirmation is intrinsically a single binary decision; it
+                # does not need the generic choice selection bounds.
+                valid_submit_shape = self.selection_mode == "single"
+            else:
+                valid_submit_shape = False
+            if not valid_submit_shape:
+                raise ValueError("submit_on_select requires an exact single-choice interaction")
         return self
 
 

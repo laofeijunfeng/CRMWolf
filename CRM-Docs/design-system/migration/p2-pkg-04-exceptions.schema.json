@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "P2-04 Design System Governance Exceptions",
+  "type": "object",
+  "required": ["version", "lastVerified", "exceptions"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "type": "string" },
+    "lastVerified": { "type": "string", "format": "date" },
+    "exceptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "category", "files", "match", "reason", "owner", "reviewDate", "status"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "category": { "type": "string", "minLength": 1 },
+          "files": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+          "match": { "type": "string", "minLength": 1 },
+          "reason": { "type": "string", "minLength": 1 },
+          "owner": { "type": "string", "minLength": 1 },
+          "reviewDate": { "type": "string", "format": "date" },
+          "status": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": false
+}

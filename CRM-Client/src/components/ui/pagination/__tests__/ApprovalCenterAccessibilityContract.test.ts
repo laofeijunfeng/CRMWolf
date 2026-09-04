@@ -12,4 +12,15 @@ describe('ApprovalCenter accessibility contract', () => {
     expect(source).toMatch(/<Copy[^>]*aria-hidden="true"/)
     expect(source).toContain('@click.stop="copyNumber(row.application_number)"')
   })
+
+  it('keeps approval actions strictly single-instance', () => {
+    expect(source).not.toContain(':selectable=')
+    expect(source).not.toContain(':selected-row-keys=')
+    expect(source).not.toContain(':get-row-selectable=')
+    expect(source).not.toContain('批量')
+    expect(source).not.toContain('selectedRowKeys')
+    expect(source).not.toContain('bulkApprove')
+    expect(source).toContain('data-testid="mobile-approve-btn"')
+    expect(source).toContain('data-testid="mobile-reject-btn"')
+  })
 })

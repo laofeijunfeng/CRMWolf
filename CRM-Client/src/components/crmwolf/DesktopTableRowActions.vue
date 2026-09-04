@@ -18,6 +18,9 @@ import {
 } from '@/components/ui/dropdown-menu'
 import type { ActionConfig } from './tableRowActionTypes'
 import {
+  getTableRowActionKey,
+  getTableRowActionLabel,
+  isDestructiveTableRowAction,
   getDesktopTableRowActions,
   shouldShowTableRowActionGroupLabels,
   type TableRowActionSet
@@ -33,11 +36,6 @@ const props = withDefaults(defineProps<{
 const desktopActions = computed(() => getDesktopTableRowActions(props.actions))
 const showGroupLabels = computed(() => shouldShowTableRowActionGroupLabels(desktopActions.value.groups))
 const hasMenuActions = computed(() => desktopActions.value.menuGroups.length > 0)
-
-function getActionLabel(action: ActionConfig): string {
-  if (action.disabledReason === undefined || action.disabledReason.trim() === '') return action.label
-  return `${action.label}（${action.disabledReason}）`
-}
 
 function executeAction(event: Event, action: ActionConfig): void {
   // Stop at the action itself before running user code. The action cell lives
@@ -58,15 +56,15 @@ function executeAction(event: Event, action: ActionConfig): void {
   >
     <Button
       v-for="(action, actionIndex) in desktopActions.primaryActions"
-      :key="`${action.label}-${actionIndex}`"
+      :key="getTableRowActionKey(action, actionIndex)"
       type="button"
       variant="ghost"
       size="sm"
       class="desktop-table-row-action"
       :disabled="action.disabled === true"
-      :class="{ 'is-destructive': action.destructive === true }"
-      :aria-label="getActionLabel(action)"
-      :title="getActionLabel(action)"
+      :class="{ 'is-destructive': isDestructiveTableRowAction(action) }"
+      :aria-label="getTableRowActionLabel(action)"
+      :title="getTableRowActionLabel(action)"
       @click="executeAction($event, action)"
     >
       <component :is="action.icon" v-if="action.icon" class="desktop-table-row-action-icon" aria-hidden="true" />
@@ -94,11 +92,11 @@ function executeAction(event: Event, action: ActionConfig): void {
           </DropdownMenuLabel>
           <DropdownMenuItem
             v-for="(action, actionIndex) in group.items"
-            :key="`${group.key}-${action.label}-${actionIndex}`"
+            :key="`${group.key}-${getTableRowActionKey(action, actionIndex)}`"
             :disabled="action.disabled === true"
-            :class="{ 'is-destructive': action.destructive === true }"
-            :title="getActionLabel(action)"
-            :aria-label="getActionLabel(action)"
+            :class="{ 'is-destructive': isDestructiveTableRowAction(action) }"
+            :title="getTableRowActionLabel(action)"
+            :aria-label="getTableRowActionLabel(action)"
             @select="executeAction($event, action)"
           >
             <component :is="action.icon" v-if="action.icon" class="desktop-table-row-menu-icon" aria-hidden="true" />

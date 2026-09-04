@@ -7,6 +7,9 @@ import {
 } from '@/components/ui/context-menu'
 import type { ActionConfig } from './tableRowActionTypes'
 import {
+  getTableRowActionKey,
+  getTableRowActionLabel,
+  isDestructiveTableRowAction,
   groupTableRowActions,
   shouldShowTableRowActionGroupLabels,
   type TableRowActionSet
@@ -19,11 +22,6 @@ const props = defineProps<{
 
 const groups = computed(() => groupTableRowActions(props.actions))
 const showGroupLabels = computed(() => shouldShowTableRowActionGroupLabels(groups.value))
-
-function getActionLabel(action: ActionConfig): string {
-  if (action.disabledReason === undefined || action.disabledReason.trim() === '') return action.label
-  return `${action.label}（${action.disabledReason}）`
-}
 
 function executeAction(action: ActionConfig): void {
   if (action.disabled === true) return
@@ -39,11 +37,11 @@ function executeAction(action: ActionConfig): void {
     </ContextMenuLabel>
     <ContextMenuItem
       v-for="(action, actionIndex) in group.items"
-      :key="`${group.key}-${action.label}-${actionIndex}`"
+      :key="`${group.key}-${getTableRowActionKey(action, actionIndex)}`"
       :disabled="action.disabled === true"
-      :class="['table-row-context-menu-item', { 'is-destructive': action.destructive === true }]"
-      :title="getActionLabel(action)"
-      :aria-label="getActionLabel(action)"
+      :class="['table-row-context-menu-item', { 'is-destructive': isDestructiveTableRowAction(action) }]"
+      :title="getTableRowActionLabel(action)"
+      :aria-label="getTableRowActionLabel(action)"
       @select="executeAction(action)"
     >
       <component :is="action.icon" v-if="action.icon" class="table-row-context-menu-icon" aria-hidden="true" />

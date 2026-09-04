@@ -21,7 +21,12 @@ import {
   DropdownMenuSeparator
 } from '@/components/ui/dropdown-menu'
 import type { ActionConfig } from './tableRowActionTypes'
-import { isDetailTableRowAction } from './tableRowActionGroups'
+import {
+  getMobileTableRowActions,
+  getTableRowActionKey,
+  getTableRowActionLabel,
+  isDestructiveTableRowAction
+} from './tableRowActionGroups'
 
 export type { ActionConfig }
 
@@ -43,15 +48,15 @@ const props = withDefaults(defineProps<TableRowActionsProps>(), {
 })
 
 /**
- * 过滤可见的操作
+ * 过滤详情入口，并确保危险动作不会绕过“更多”层级直接平铺。
  */
-const visiblePrimaryActions = computed(() =>
-  props.primaryActions.filter(action => action.visible !== false && !isDetailTableRowAction(action))
-)
+const mobileActions = computed(() => getMobileTableRowActions({
+  primaryActions: props.primaryActions,
+  secondaryActions: props.secondaryActions
+}))
 
-const visibleSecondaryActions = computed(() =>
-  props.secondaryActions.filter(action => action.visible !== false && !isDetailTableRowAction(action))
-)
+const visiblePrimaryActions = computed(() => mobileActions.value.primaryActions)
+const visibleSecondaryActions = computed(() => mobileActions.value.secondaryActions)
 
 /**
  * 是否显示 DropdownMenu（有 secondaryActions 时才显示）
@@ -61,12 +66,8 @@ const showDropdownMenu = computed(() => visibleSecondaryActions.value.length > 0
 /**
  * 执行操作（阻止事件冒泡）
  */
-const getActionLabel = (action: ActionConfig): string => {
-  if (action.disabledReason === undefined || action.disabledReason.trim() === '') return action.label
-  return `${action.label}（${action.disabledReason}）`
-}
-
-const executeAction = (action: ActionConfig): void => {
+const executeAction = (event: Event, action: ActionConfig): void => {
+  event.stopPropagation()
   if (action.disabled === true) return
   action.handler(props.row)
 }
@@ -77,14 +78,14 @@ const executeAction = (action: ActionConfig): void => {
     <!-- 高频操作按钮（行外） -->
     <Button
       v-for="(action, actionIndex) in visiblePrimaryActions"
-      :key="`${action.label}-${actionIndex}`"
+      :key="getTableRowActionKey(action, actionIndex)"
       :size="size"
       variant="ghost"
       :disabled="action.disabled === true"
-      :class="['action-button', { 'action-destructive': action.destructive }]"
-      @click.stop="executeAction(action)"
-      :aria-label="getActionLabel(action)"
-      :title="getActionLabel(action)"
+      :class="['action-button', { 'action-destructive': isDestructiveTableRowAction(action) }]"
+      @click="executeAction($event, action)"
+      :aria-label="getTableRowActionLabel(action)"
+      :title="getTableRowActionLabel(action)"
     >
       <component :is="action.icon" v-if="action.icon" class="action-icon" aria-hidden="true" />
       {{ action.label }}
@@ -105,17 +106,17 @@ const executeAction = (action: ActionConfig): void => {
       </DropdownMenuTrigger>
 
       <DropdownMenuContent align="end" class="dropdown-content">
-        <template v-for="(action, actionIndex) in visibleSecondaryActions" :key="`${action.label}-${actionIndex}`">
+        <template v-for="(action, actionIndex) in visibleSecondaryActions" :key="getTableRowActionKey(action, actionIndex)">
           <!-- 分隔线 -->
           <DropdownMenuSeparator v-if="action.separator" />
 
           <!-- 操作项 -->
           <DropdownMenuItem
             :disabled="action.disabled === true"
-            :class="['dropdown-item', { 'dropdown-item-destructive': action.destructive }]"
-            :title="getActionLabel(action)"
-            :aria-label="getActionLabel(action)"
-            @click.stop="executeAction(action)"
+            :class="['dropdown-item', { 'dropdown-item-destructive': isDestructiveTableRowAction(action) }]"
+            :title="getTableRowActionLabel(action)"
+            :aria-label="getTableRowActionLabel(action)"
+            @select="executeAction($event, action)"
           >
             <component :is="action.icon" v-if="action.icon" class="dropdown-icon" aria-hidden="true" />
             {{ action.label }}

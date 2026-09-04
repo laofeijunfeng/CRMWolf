@@ -185,7 +185,7 @@ function calculatePlanProgress(plan: PaymentPlanResponse): number {
   return Math.min(100, Math.round(((plan.paid_amount ?? 0) / plan.planned_amount) * 100))
 }
 
-async function fetchPlans(): Promise<void> {
+async function fetchPlans(): Promise<boolean> {
   loading.value = true
   const selectedPlanId = currentPlan.value?.id
 
@@ -196,9 +196,11 @@ async function fetchPlans(): Promise<void> {
     if (selectedPlanId !== undefined) {
       currentPlan.value = nextPlans.find((plan) => plan.id === selectedPlanId) ?? null
     }
+    return true
   } catch (error: unknown) {
     logger.error('[ContractPaymentPlans]', '获取回款计划失败', { error })
     handleApiError(error, '获取回款计划')
+    return false
   } finally {
     loading.value = false
   }
@@ -221,8 +223,11 @@ function handleEditPlan(plan: PaymentPlanResponse): void {
 }
 
 async function handlePlanFormSuccess(): Promise<void> {
-  await fetchPlans()
+  const refreshed = await fetchPlans()
   notifyUpdated()
+  if (!refreshed) {
+    toast.warning('回款计划已保存，但详情中的计划列表刷新失败，请稍后重试。')
+  }
 }
 
 function showRecords(plan: PaymentPlanResponse): void {
@@ -266,13 +271,17 @@ async function handleCreateRecord(payload: PaymentRecordCreate): Promise<void> {
         return
       }
     }
-    toast.success('登记成功')
     createdRecord.value = record
     recordDialogOpen.value = false
     paymentRecordIdempotencyKey.value = null
     nextStepDialogOpen.value = true
-    await fetchPlans()
+    const refreshed = await fetchPlans()
     notifyUpdated()
+    toast.success('登记成功', {
+      description: refreshed
+        ? '回款计划和当前合同详情已同步。'
+        : '回款已登记，但详情中的计划列表刷新失败，请稍后重试。',
+    })
   } catch (error: unknown) {
     logger.error('[ContractPaymentPlans]', '登记回款失败', { error })
     handleApiError(error, '登记回款')
@@ -290,11 +299,15 @@ async function handleEditRecordSubmit(recordId: number, payload: PaymentRecordUp
   editingRecord.value = true
   try {
     await paymentApi.updatePaymentRecord(recordId, payload)
-    toast.success('回款记录已更新')
     editRecordDialogOpen.value = false
     selectedRecord.value = null
-    await fetchPlans()
+    const refreshed = await fetchPlans()
     notifyUpdated()
+    toast.success('回款记录已更新', {
+      description: refreshed
+        ? '回款计划和当前合同详情已同步。'
+        : '回款记录已更新，但详情中的计划列表刷新失败，请稍后重试。',
+    })
   } catch (error: unknown) {
     logger.error('[ContractPaymentPlans]', '更新回款记录失败', { error })
     handleApiError(error, '更新回款记录')
@@ -314,10 +327,12 @@ async function handleDeleteRecord(): Promise<void> {
   deletingRecord.value = true
   try {
     await paymentApi.deletePaymentRecord(record.id)
-    toast.success('回款记录已删除')
     recordToDelete.value = null
-    await fetchPlans()
+    const refreshed = await fetchPlans()
     notifyUpdated()
+    toast.success('回款记录已删除', refreshed ? undefined : {
+      description: '回款记录已删除，但详情中的计划列表刷新失败，请稍后重试。',
+    })
   } catch (error: unknown) {
     logger.error('[ContractPaymentPlans]', '删除回款记录失败', { error })
     handleApiError(error, '删除回款记录')
@@ -342,10 +357,12 @@ async function handleDeletePlan(): Promise<void> {
   deletingPlan.value = true
   try {
     await paymentApi.deletePaymentPlan(plan.id)
-    toast.success('回款计划已删除')
     planToDelete.value = null
-    await fetchPlans()
+    const refreshed = await fetchPlans()
     notifyUpdated()
+    toast.success('回款计划已删除', refreshed ? undefined : {
+      description: '回款计划已删除，但详情中的计划列表刷新失败，请稍后重试。',
+    })
   } catch (error: unknown) {
     logger.error('[ContractPaymentPlans]', '删除回款计划失败', { error })
     handleApiError(error, '删除回款计划')
@@ -371,8 +388,11 @@ function handleNextStepClose(open: boolean): void {
 }
 
 async function handleNextStepSubmitted(): Promise<void> {
-  await fetchPlans()
+  const refreshed = await fetchPlans()
   notifyUpdated()
+  if (!refreshed) {
+    toast.warning('下一步操作已完成，但详情中的计划列表刷新失败，请稍后重试。')
+  }
 }
 
 function closeEditRecordDialog(open: boolean): void {
@@ -394,8 +414,8 @@ function closeDeleteRecordDialog(open: boolean): void {
   }
 }
 
-function refresh(): void {
-  void fetchPlans()
+async function refresh(): Promise<boolean> {
+  return fetchPlans()
 }
 
 defineExpose({

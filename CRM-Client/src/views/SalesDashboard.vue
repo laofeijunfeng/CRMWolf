@@ -385,7 +385,7 @@ onMounted(() => {
   min-height: 0;
   overflow: hidden;
   padding: $wolf-page-padding-v2;
-  background: $wolf-bg-page-v2;
+  background: hsl(var(--background));
 }
 
 .dashboard-scroll {
@@ -408,9 +408,9 @@ onMounted(() => {
 .trend-range-select {
   width: 104px;
   height: 32px;
-  border-color: rgba($wolf-border-default-v2, 0.95);
-  background: $wolf-bg-card-v2;
-  color: $wolf-text-secondary-v2;
+  border-color: hsl(var(--border) / 0.95);
+  background: hsl(var(--card));
+  color: hsl(var(--muted-foreground));
   font-size: $wolf-font-size-caption-v2;
 }
 
@@ -443,9 +443,9 @@ onMounted(() => {
   gap: $wolf-space-sm-v2;
   min-height: 40px;
   padding: 0 $wolf-space-md-v2;
-  color: $wolf-danger-text-v2;
-  background: $wolf-danger-bg-v2;
-  border: 1px solid rgba($wolf-danger-v2, 0.18);
+  color: hsl(var(--destructive));
+  background: hsl(var(--destructive) / 0.1);
+  border: 1px solid hsl(var(--destructive) / 0.18);
   border-radius: $wolf-radius-v2;
   font-size: $wolf-font-size-caption-v2;
 }
@@ -463,7 +463,7 @@ onMounted(() => {
 }
 
 .metric-secondary-value {
-  color: $wolf-accent-v2;
+  color: hsl(var(--success));
   font-family: $wolf-font-mono-v2;
   font-weight: $wolf-font-weight-semibold-v2;
   font-variant-numeric: tabular-nums;
@@ -471,7 +471,7 @@ onMounted(() => {
 
 .metric-footer-title {
   min-width: 0;
-  color: #0f172a;
+  color: hsl(var(--foreground));
   font-weight: $wolf-font-weight-semibold-v2;
 }
 
@@ -480,7 +480,7 @@ onMounted(() => {
   grid-template-columns: minmax(0, 1fr) minmax(44px, max-content);
   align-items: center;
   gap: 16px;
-  color: $wolf-text-secondary-v2;
+  color: hsl(var(--muted-foreground));
   font-size: $wolf-font-size-caption-v2;
   line-height: 1.6;
 }
@@ -494,7 +494,7 @@ onMounted(() => {
 
 :global(.sales-follow-tooltip__member strong) {
   justify-self: end;
-  color: $wolf-text-primary-v2;
+  color: hsl(var(--foreground));
   font-family: $wolf-font-mono-v2;
   font-weight: $wolf-font-weight-semibold-v2;
   font-variant-numeric: tabular-nums;
@@ -503,7 +503,7 @@ onMounted(() => {
 :global(.sales-follow-tooltip__divider) {
   height: 1px;
   margin: 8px 0;
-  background: rgba($wolf-border-default-v2, 0.8);
+  background: hsl(var(--border) / 0.8);
 }
 
 :global(.sales-follow-tooltip__members) {
@@ -514,7 +514,7 @@ onMounted(() => {
 }
 
 :global(.sales-follow-tooltip__empty) {
-  color: $wolf-text-tertiary-v2;
+  color: hsl(var(--muted-foreground));
   font-size: $wolf-font-size-caption-v2;
 }
 

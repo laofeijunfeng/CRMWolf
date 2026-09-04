@@ -41,7 +41,7 @@ interface ContractOpportunityContext {
 }
 
 interface OpportunityDetailContentExpose {
-  refresh: () => Promise<void>
+  refresh: () => Promise<boolean>
 }
 
 interface Props {
@@ -75,6 +75,12 @@ function closeSheet(): void {
 function handleRefresh(): void {
   emit('refresh')
 }
+
+async function refresh(): Promise<boolean> {
+  return opportunityDetailContentRef.value?.refresh() ?? false
+}
+
+defineExpose({ refresh })
 
 function handleCreateContract(payload: CreateContractPayload): void {
   // Open contract dialog with locked customer
@@ -111,8 +117,10 @@ async function handleEditContract(contract: ContractListResponse): Promise<void>
 async function handleSubmitContractApproval(contract: ContractListResponse): Promise<void> {
   try {
     await approvalGenericApi.submitApproval('CONTRACT', contract.id)
-    toast.success('合同已提交审批')
-    void opportunityDetailContentRef.value?.refresh()
+    const refreshed = await opportunityDetailContentRef.value?.refresh() ?? false
+    toast.success('合同已提交审批', refreshed ? undefined : {
+      description: '合同审批已提交，但商机详情刷新失败，请稍后重试。',
+    })
     handleRefresh()
   } catch (error) {
     handleApiError(error, '提交审批')
@@ -122,8 +130,10 @@ async function handleSubmitContractApproval(contract: ContractListResponse): Pro
 async function handleWithdrawContractApproval(contract: ContractListResponse): Promise<void> {
   try {
     await approvalGenericApi.cancelApproval('CONTRACT', contract.id)
-    toast.success('合同审批已撤回')
-    void opportunityDetailContentRef.value?.refresh()
+    const refreshed = await opportunityDetailContentRef.value?.refresh() ?? false
+    toast.success('合同审批已撤回', refreshed ? undefined : {
+      description: '合同审批已撤回，但商机详情刷新失败，请稍后重试。',
+    })
     handleRefresh()
   } catch (error) {
     handleApiError(error, '撤回审批')
@@ -136,19 +146,24 @@ async function handleDeleteContract(contract: ContractListResponse): Promise<voi
 
   try {
     await contractApi.deleteContract(contract.id)
-    toast.success('合同删除成功')
-    void opportunityDetailContentRef.value?.refresh()
+    const refreshed = await opportunityDetailContentRef.value?.refresh() ?? false
+    toast.success('合同删除成功', refreshed ? undefined : {
+      description: '合同已删除，但商机详情刷新失败，请稍后重试。',
+    })
     handleRefresh()
   } catch (error) {
     handleApiError(error, '删除合同')
   }
 }
 
-function handleContractSuccess(): void {
+async function handleContractSuccess(): Promise<void> {
   showContractDialog.value = false
   editingContract.value = null
   contractDialogOpportunity.value = null
-  void opportunityDetailContentRef.value?.refresh()
+  const refreshed = await opportunityDetailContentRef.value?.refresh() ?? false
+  if (!refreshed) {
+    toast.warning('合同已保存，但商机详情刷新失败，请稍后重试。')
+  }
   // Refresh opportunity data if needed
   handleRefresh()
 }

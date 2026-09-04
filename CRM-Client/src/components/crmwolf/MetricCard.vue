@@ -77,12 +77,12 @@ withDefaults(defineProps<Props>(), {
   position: relative;
   min-width: 0;
   overflow: hidden;
-  border-color: rgba($wolf-border-default-v2, 0.9);
+  border-color: hsl(var(--border) / 0.9);
   border-radius: $wolf-radius-xl-v2;
   background:
-    linear-gradient(0deg, rgba($wolf-primary-v2, 0.06) 0%, rgba($wolf-primary-v2, 0.025) 34%, rgba(255, 255, 255, 0) 70%),
-    linear-gradient(135deg, rgba($wolf-bg-muted-v2, 0.88) 0%, $wolf-bg-card-v2 46%, $wolf-bg-card-v2 100%);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+    linear-gradient(0deg, hsl(var(--primary) / 0.06) 0%, hsl(var(--primary) / 0.025) 34%, hsl(var(--background) / 0) 70%),
+    linear-gradient(135deg, hsl(var(--muted) / 0.88) 0%, hsl(var(--card)) 46%, hsl(var(--card)) 100%);
+  box-shadow: 0 1px 2px hsl(var(--foreground) / 0.03);
 }
 
 .metric-card::before {
@@ -91,19 +91,19 @@ withDefaults(defineProps<Props>(), {
   pointer-events: none;
   content: '';
   border-radius: inherit;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  box-shadow: inset 0 1px 0 hsl(var(--background) / 0.85);
 }
 
 .metric-card[data-tone='positive'] {
   background:
-    linear-gradient(0deg, rgba($wolf-primary-v2, 0.06) 0%, rgba($wolf-primary-v2, 0.025) 34%, rgba(255, 255, 255, 0) 70%),
-    linear-gradient(135deg, rgba($wolf-bg-muted-v2, 0.92) 0%, $wolf-bg-card-v2 46%, $wolf-bg-card-v2 100%);
+    linear-gradient(0deg, hsl(var(--primary) / 0.06) 0%, hsl(var(--primary) / 0.025) 34%, hsl(var(--background) / 0) 70%),
+    linear-gradient(135deg, hsl(var(--muted) / 0.92) 0%, hsl(var(--card)) 46%, hsl(var(--card)) 100%);
 }
 
 .metric-card[data-tone='negative'] {
   background:
-    linear-gradient(0deg, rgba($wolf-primary-v2, 0.055) 0%, rgba($wolf-primary-v2, 0.022) 34%, rgba(255, 255, 255, 0) 70%),
-    linear-gradient(135deg, rgba($wolf-bg-muted-v2, 0.92) 0%, $wolf-bg-card-v2 46%, $wolf-bg-card-v2 100%);
+    linear-gradient(0deg, hsl(var(--primary) / 0.055) 0%, hsl(var(--primary) / 0.022) 34%, hsl(var(--background) / 0) 70%),
+    linear-gradient(135deg, hsl(var(--muted) / 0.92) 0%, hsl(var(--card)) 46%, hsl(var(--card)) 100%);
 }
 
 .metric-card__header {
@@ -123,7 +123,7 @@ withDefaults(defineProps<Props>(), {
 
 .metric-card__label {
   min-width: 0;
-  color: #475569;
+  color: hsl(var(--muted-foreground));
   font-size: $wolf-font-size-caption-v2;
   font-weight: $wolf-font-weight-semibold-v2;
   line-height: 1.4;
@@ -137,10 +137,10 @@ withDefaults(defineProps<Props>(), {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  border-color: rgba(15, 23, 42, 0.12);
+  border-color: hsl(var(--foreground) / 0.12);
   border-radius: $wolf-radius-full-v2;
-  color: #334155;
-  background: rgba(255, 255, 255, 0.72);
+  color: hsl(var(--card-foreground));
+  background: hsl(var(--background) / 0.72);
   font-size: $wolf-font-size-caption-v2;
   font-weight: $wolf-font-weight-semibold-v2;
   line-height: 22px;
@@ -148,20 +148,20 @@ withDefaults(defineProps<Props>(), {
 }
 
 .metric-card[data-tone='positive'] .metric-card__badge {
-  color: #047857;
-  background: rgba(236, 253, 245, 0.9);
-  border-color: rgba($wolf-success-v2, 0.24);
+  color: hsl(var(--success));
+  background: hsl(var(--success) / 0.1);
+  border-color: hsl(var(--success) / 0.24);
 }
 
 .metric-card[data-tone='negative'] .metric-card__badge {
-  color: #b91c1c;
-  background: rgba(254, 242, 242, 0.92);
-  border-color: rgba($wolf-danger-v2, 0.24);
+  color: hsl(var(--destructive));
+  background: hsl(var(--destructive) / 0.1);
+  border-color: hsl(var(--destructive) / 0.24);
 }
 
 .metric-card__value {
   min-width: 0;
-  color: $wolf-text-primary-v2;
+  color: hsl(var(--foreground));
   font-family: $wolf-font-mono-v2;
   font-size: 30px;
   font-weight: 700;
@@ -176,7 +176,7 @@ withDefaults(defineProps<Props>(), {
   align-items: center;
   min-width: 0;
   min-height: 20px;
-  color: #334155;
+  color: hsl(var(--card-foreground));
   font-size: $wolf-font-size-caption-v2;
   line-height: 1.4;
 }
@@ -192,27 +192,27 @@ withDefaults(defineProps<Props>(), {
   flex-direction: column;
   min-width: 0;
   gap: 3px;
-  color: $wolf-text-tertiary-v2;
+  color: hsl(var(--muted-foreground));
   font-size: $wolf-font-size-caption-v2;
   line-height: 1.45;
 }
 
 .metric-card__footer-title {
   min-width: 0;
-  color: #0f172a;
+  color: hsl(var(--foreground));
   font-weight: $wolf-font-weight-semibold-v2;
 }
 
 .metric-card__footer-note {
   min-width: 0;
-  color: #64748b;
+  color: hsl(var(--muted-foreground));
 }
 
 .metric-card__skeleton {
   display: block;
   width: 72%;
   height: 12px;
-  background: $wolf-bg-muted-v2;
+  background: hsl(var(--muted));
   border-radius: $wolf-radius-sm-v2;
 }
 

@@ -5,6 +5,7 @@
  * 仅负责合同详情内容、数据加载与业务动作意图，不包含 Sheet 外壳。
  * 可被 ContractDetailSheet 和 CustomerDetailSheet 内部下钻复用。
  */
+import { toast } from 'vue-sonner'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { AlertCircle, FileText, Pencil, ReceiptText, RefreshCw, X } from 'lucide-vue-next'
@@ -222,7 +223,7 @@ const loadContractFilePreviewUrl = async (
 }
 
 // ==================== Data Loading ====================
-const fetchContractDetail = async (contractId: number): Promise<void> => {
+const fetchContractDetail = async (contractId: number): Promise<boolean> => {
   const requestId = activeRequestId.value + 1
   activeRequestId.value = requestId
 
@@ -232,16 +233,18 @@ const fetchContractDetail = async (contractId: number): Promise<void> => {
 
   try {
     const data = await contractApi.getContract(contractId)
-    if (requestId !== activeRequestId.value) return
+    if (requestId !== activeRequestId.value) return false
 
     contractInfo.value = data
     void loadContractFilePreviewUrl(data, requestId)
+    return true
   } catch (error) {
-    if (requestId !== activeRequestId.value) return
+    if (requestId !== activeRequestId.value) return false
 
     contractInfo.value = null
     errorMessage.value = '合同信息加载失败，请稍后重试'
     handleApiError(error, '获取合同详情')
+    return false
   } finally {
     if (requestId === activeRequestId.value) {
       loading.value = false
@@ -267,12 +270,19 @@ const handleRetry = (): void => {
   void fetchContractDetail(props.contractId)
 }
 
-const refreshCurrentContract = async (): Promise<void> => {
+const refreshCurrentContractState = async (): Promise<boolean> => {
   const contractId = contractInfo.value?.id
-  if (contractId !== undefined) {
-    await fetchContractDetail(contractId)
-  }
+  if (contractId === undefined) return false
+  return fetchContractDetail(contractId)
 }
+
+const refreshCurrentContract = (): Promise<boolean> => {
+  return refreshCurrentContractState()
+}
+
+defineExpose({
+  refresh: refreshCurrentContract
+})
 
 const handleEditContract = (): void => {
   if (!canEditContract.value) return
@@ -281,7 +291,10 @@ const handleEditContract = (): void => {
 
 const handleEditSuccess = async (): Promise<void> => {
   editDialogOpen.value = false
-  await refreshCurrentContract()
+  const refreshed = await refreshCurrentContractState()
+  if (!refreshed) {
+    toast.warning('合同已保存，但详情刷新失败，请稍后重试。')
+  }
   emit('refresh')
 }
 
@@ -290,12 +303,18 @@ const handleViewPaymentPlan = (plan: import('@/api/payment').PaymentPlanResponse
 }
 
 const handlePaymentPlanUpdated = async (): Promise<void> => {
-  await refreshCurrentContract()
+  const refreshed = await refreshCurrentContractState()
+  if (!refreshed) {
+    toast.warning('回款计划操作已完成，但合同详情刷新失败，请稍后重试。')
+  }
   emit('refresh')
 }
 
 const handleApprovalActionDone = async (): Promise<void> => {
-  await refreshCurrentContract()
+  const refreshed = await refreshCurrentContractState()
+  if (!refreshed) {
+    toast.warning('审批操作已完成，但合同详情刷新失败，请稍后重试。')
+  }
   emit('refresh')
 }
 

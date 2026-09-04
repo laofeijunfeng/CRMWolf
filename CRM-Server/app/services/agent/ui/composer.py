@@ -186,7 +186,7 @@ class AgentUIComposer:
         job_public_id: str,
         action_public_id: str,
     ) -> AgentUIComposition:
-        """Project a completed opportunity suggestion into a server-triggered choice.
+        """Project a completed opportunity suggestion into a server-triggered confirmation.
 
         This interaction deliberately has no native Workflow continuation yet: the
         background suggestion job is not a waiting Workflow. The signed action
@@ -213,7 +213,7 @@ class AgentUIComposer:
                 "action": decision,
             },
             "interaction_id": interaction_id,
-            "interaction_type": "choice",
+            "interaction_type": "confirmation",
             "business_action": "customer_opportunity_suggestion",
             "submit_label": "提交",
             "submit_on_select": True,
@@ -222,14 +222,12 @@ class AgentUIComposer:
                 {"value": "cancel", "label": "否"},
             ],
             "selection_mode": "single",
-            "min_selections": 1,
-            "max_selections": 1,
         }
         block = InteractionBlock(
             id="b_opportunity_suggestion",
             type="interaction",
             interaction_id=interaction_id,
-            interaction_type="choice",
+            interaction_type="confirmation",
             state="ACTIVE",
             prompt=prompt,
             fields=[],
@@ -238,8 +236,6 @@ class AgentUIComposer:
                 InteractionOption(value="cancel", label="否"),
             ],
             selection_mode="single",
-            min_selections=1,
-            max_selections=1,
             allow_blank=None,
             submit_on_select=True,
             submit_label="提交",

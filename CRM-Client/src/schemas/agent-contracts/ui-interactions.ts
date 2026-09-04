@@ -137,17 +137,20 @@ export function validateInteractionBlock(
     }
   }
 
-  if (block.submit_on_select === true && (
-    block.interaction_type !== 'choice' ||
-    block.selection_mode !== 'single' ||
-    block.min_selections !== 1 ||
-    block.max_selections !== 1
-  )) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'submit_on_select requires an exact single-choice interaction',
-      path: ['submit_on_select']
-    })
+  if (block.submit_on_select === true) {
+    const validSubmitShape = block.interaction_type === 'confirmation'
+      ? block.selection_mode === 'single'
+      : block.interaction_type === 'choice'
+        && block.selection_mode === 'single'
+        && block.min_selections === 1
+        && block.max_selections === 1
+    if (!validSubmitShape) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'submit_on_select requires an exact single-choice interaction',
+        path: ['submit_on_select']
+      })
+    }
   }
 }
 

@@ -331,7 +331,7 @@ function syncStageStateFromOpportunity(opportunityData: Opportunity): void {
   stageAccordionValue.value = isComplete ? '' : 'stage'
 }
 
-async function fetchOpportunityDetail(): Promise<void> {
+async function fetchOpportunityDetail(): Promise<boolean> {
   loading.value = true
   loadError.value = false
   try {
@@ -340,10 +340,12 @@ async function fetchOpportunityDetail(): Promise<void> {
     syncStageStateFromOpportunity(data)
     await fetchRelatedContract(data.id)
     await fetchRelatedBusinessData(data)
+    return true
   } catch (error) {
     loadError.value = true
     opportunity.value = null
     handleApiError(error, '获取商机详情')
+    return false
   } finally {
     loading.value = false
   }
@@ -495,27 +497,39 @@ async function handleEditSuccess(): Promise<void> {
     }
   }
 
-  await fetchOpportunityDetail()
+  const refreshed = await fetchOpportunityDetail()
   approvalProcessReloadKey.value += 1
+  if (!refreshed) {
+    toast.warning('商机已保存，但详情刷新失败，请稍后重试。')
+  }
   emit('refresh')
 }
 
 // 赢单成功回调
-function handleWinSuccess(): void {
+async function handleWinSuccess(): Promise<void> {
   winDialogOpen.value = false
-  fetchOpportunityDetail()
+  const refreshed = await fetchOpportunityDetail()
+  if (!refreshed) {
+    toast.warning('商机已标记为赢单，但详情刷新失败，请稍后重试。')
+  }
   emit('refresh')
 }
 
-function handleStageAdvanced(): void {
-  fetchOpportunityDetail()
+async function handleStageAdvanced(): Promise<void> {
+  const refreshed = await fetchOpportunityDetail()
+  if (!refreshed) {
+    toast.warning('商机阶段已推进，但详情刷新失败，请稍后重试。')
+  }
   emit('refresh')
 }
 
 // 输单成功回调
-function handleLoseSuccess(): void {
+async function handleLoseSuccess(): Promise<void> {
   loseDialogOpen.value = false
-  fetchOpportunityDetail()
+  const refreshed = await fetchOpportunityDetail()
+  if (!refreshed) {
+    toast.warning('商机已标记为输单，但详情刷新失败，请稍后重试。')
+  }
   emit('refresh')
 }
 
@@ -614,9 +628,11 @@ async function handleDeletePaymentPlan(): Promise<void> {
   paymentPlanDeleting.value = true
   try {
     await paymentApi.deletePaymentPlan(plan.id)
-    toast.success('回款计划删除成功')
     paymentPlanToDelete.value = null
-    await fetchOpportunityDetail()
+    const refreshed = await fetchOpportunityDetail()
+    toast.success('回款计划删除成功', refreshed ? undefined : {
+      description: '回款计划已删除，但商机详情刷新失败，请稍后重试。',
+    })
     emit('refresh')
   } catch (error) {
     handleApiError(error, '删除回款计划')
@@ -633,7 +649,10 @@ function handlePaymentPlanDialogOpenChange(open: boolean): void {
 }
 
 async function handlePaymentPlanSaved(): Promise<void> {
-  await fetchOpportunityDetail()
+  const refreshed = await fetchOpportunityDetail()
+  if (!refreshed) {
+    toast.warning('回款计划已保存，但商机详情刷新失败，请稍后重试。')
+  }
   emit('refresh')
 }
 
@@ -674,11 +693,15 @@ async function handlePaymentRecordSubmit(payload: PaymentRecordCreate): Promise<
         return
       }
     }
-    toast.success('回款登记成功')
     paymentRecordDialogOpen.value = false
     selectedPaymentPlan.value = null
     paymentRecordIdempotencyKey.value = null
-    await fetchOpportunityDetail()
+    const refreshed = await fetchOpportunityDetail()
+    toast.success('回款登记成功', {
+      description: refreshed
+        ? '商机详情已同步。'
+        : '回款已登记，但商机详情刷新失败，请稍后重试。',
+    })
     emit('refresh')
   } catch (error) {
     handleApiError(error, '登记回款')
@@ -716,7 +739,10 @@ function handleInvoiceApplicationDialogOpenChange(open: boolean): void {
 
 async function handleInvoiceApplicationSuccess(): Promise<void> {
   invoiceApplicationDialogOpen.value = false
-  await fetchOpportunityDetail()
+  const refreshed = await fetchOpportunityDetail()
+  if (!refreshed) {
+    toast.warning('发票申请已保存，但商机详情刷新失败，请稍后重试。')
+  }
   emit('refresh')
 }
 
@@ -764,8 +790,10 @@ async function handleDeleteLicenseApplication(applicationId: number): Promise<vo
   deletingLicenseApplicationId.value = applicationId
   try {
     await licenseApplicationApi.deleteApplication(applicationId)
-    toast.success('许可证申请已删除')
-    await fetchOpportunityDetail()
+    const refreshed = await fetchOpportunityDetail()
+    toast.success('许可证申请已删除', refreshed ? undefined : {
+      description: '许可证申请已删除，但商机详情刷新失败，请稍后重试。',
+    })
     emit('refresh')
   } catch (error) {
     handleApiError(error, '删除许可证申请')
@@ -787,7 +815,10 @@ function handleLicenseDeploymentCreated(deployment: DeploymentInfoResponse): voi
 
 async function handleLicenseApplicationSuccess(): Promise<void> {
   licenseApplicationDialogOpen.value = false
-  await fetchOpportunityDetail()
+  const refreshed = await fetchOpportunityDetail()
+  if (!refreshed) {
+    toast.warning('许可证申请已保存，但商机详情刷新失败，请稍后重试。')
+  }
   emit('refresh')
 }
 

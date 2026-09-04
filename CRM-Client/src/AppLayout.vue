@@ -345,7 +345,7 @@ $z-index-bottom-nav: 100;
 .app-layout {
   display: flex;
   min-height: 100dvh;  // UI/UX Pro Max §5: Dynamic viewport height
-  background: $wolf-bg-sidebar-v2;
+  background: hsl(var(--sidebar-background));
 
   @supports not (min-height: 100dvh) {
     min-height: 100vh;
@@ -373,7 +373,7 @@ $z-index-bottom-nav: 100;
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
-  background: $wolf-bg-card-v2;
+  background: hsl(var(--card));
 }
 
 .main-content.main-content--contained {
@@ -444,8 +444,8 @@ $z-index-bottom-nav: 100;
   flex-shrink: 0;
   height: $wolf-topbar-height-v2;  // 56px
   padding: 0 $wolf-space-lg-v2;
-  border-bottom: 1px solid $wolf-border-default-v2;
-  background: $wolf-bg-card-v2;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
   box-shadow: none;
   position: sticky;
   top: 0;
@@ -508,7 +508,7 @@ $z-index-bottom-nav: 100;
 
 .sidebar-trigger-separator {
   height: 16px;
-  background: $wolf-border-default-v2;
+  background: hsl(var(--border));
 }
 
 // Header Center（仅显示页面标题）
@@ -529,7 +529,7 @@ $z-index-bottom-nav: 100;
   font-size: $wolf-font-size-title-v2;  // 16px → 20px（MASTER.md 6.2）
   font-weight: $wolf-font-weight-semibold-v2;  // 600
   letter-spacing: -0.02em;
-  color: $wolf-text-primary-v2;  // #020817
+  color: hsl(var(--foreground));  // #020817
   margin: 0;
   max-width: 100%;
   overflow: hidden;
@@ -575,7 +575,7 @@ $z-index-bottom-nav: 100;
   justify-content: center;
 
   &:focus-visible {
-    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
+    outline: $wolf-focus-ring-width-v2 solid hsl(var(--ring) / 0.5);
     outline-offset: $wolf-focus-ring-offset-v2;
   }
 }
@@ -608,7 +608,7 @@ $z-index-bottom-nav: 100;
 }
 
 .header-more-item--danger {
-  color: $wolf-danger-v2;
+  color: hsl(var(--destructive));
 }
 
 .header-more-icon {
@@ -620,7 +620,7 @@ $z-index-bottom-nav: 100;
 .header-divider {
   width: 1px;
   height: 24px;
-  background: $wolf-border-default-v2;
+  background: hsl(var(--border));
   margin: 0 $wolf-space-sm-v2;  // 0 8px
 }
 

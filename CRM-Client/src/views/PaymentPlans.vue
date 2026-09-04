@@ -41,6 +41,7 @@ import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCu
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
+import type { FormSuccessPayload } from '@/types/actionOutcome'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -186,9 +187,6 @@ const customFilterViews = useCustomFilterViews({
   onViewApplySuccess: (tabKey) => headerStore.setActiveTab(tabKey),
 })
 const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
-const activeViewLabel = computed(() =>
-  allTabs.value.find((tab) => tab.key === activeTab.value)?.label ?? '当前列表'
-)
 const effectiveFilters = computed(() => {
   const tabStatus = activeTab.value === 'pending'
     ? 'PENDING'
@@ -310,14 +308,23 @@ const handleConfirmPayment = (row: PaymentPlanWithDetails): void => {
 
 const handlePlanSheetVisibleChange = (visible: boolean): void => {
   planSheetVisible.value = visible
+  if (!visible) {
+    selectedPlanId.value = null
+  }
 }
 
-const handlePlanSheetRefresh = (): void => {
-  fetchPaymentPlans()
+const handlePlanSheetRefresh = async (): Promise<void> => {
+  const refreshed = await fetchPaymentPlans()
+  if (!refreshed) {
+    toast.warning('操作已完成，但回款计划列表刷新失败，请稍后重试。')
+  }
 }
 
-const handlePlanFormSuccess = (): void => {
-  fetchPaymentPlans()
+const handlePlanFormSuccess = async (_payload?: FormSuccessPayload): Promise<void> => {
+  const refreshed = await fetchPaymentPlans()
+  if (!refreshed) {
+    toast.warning('回款计划已保存，但列表刷新失败，请稍后重试。')
+  }
 }
 
 const handlePlanFormOpenChange = (open: boolean): void => {
@@ -371,11 +378,15 @@ const handleRegisterSubmit = async (payload: PaymentRecordCreate): Promise<void>
     } catch {
       // 写入已成功；列表刷新仍会展示最终状态，避免把刷新失败误报为登记失败。
     }
-    toast.success(`回款登记成功，${resultMessage}`)
     registerDialogOpen.value = false
     selectedConfirmPlan.value = null
     paymentRecordIdempotencyKey.value = null
-    fetchPaymentPlans()
+    const refreshed = await fetchPaymentPlans()
+    toast.success(`回款登记成功，${resultMessage}`, {
+      description: refreshed
+        ? '回款计划列表已同步。'
+        : '回款已登记，但列表刷新失败，请稍后重试。',
+    })
   } catch (error) {
     handleApiError(error, '登记回款')
   } finally {
@@ -398,8 +409,14 @@ const handleDelete = async (row: PaymentPlanWithDetails): Promise<void> => {
   deletingPlanIds.value = new Set(deletingPlanIds.value).add(row.id)
   try {
     await paymentApi.deletePaymentPlan(row.id)
-    toast.success(`回款计划“${row.stage_name}”已删除`)
-    void fetchPaymentPlans()
+    if (selectedPlanId.value === row.id) {
+      planSheetVisible.value = false
+      selectedPlanId.value = null
+    }
+    const refreshed = await fetchPaymentPlans()
+    toast.success(`回款计划“${row.stage_name}”已删除`, refreshed ? undefined : {
+      description: '回款计划已删除，但列表刷新失败，请稍后重试。',
+    })
   } catch (error) {
     handleApiError(error, '删除回款计划')
   } finally {
@@ -412,14 +429,18 @@ const handleDelete = async (row: PaymentPlanWithDetails): Promise<void> => {
 const getRowActions = (row: PaymentPlanWithDetails): TableRowActionSet => ({
   primaryActions: [
     {
-      label: '查看',
+      id: 'detail',
+      label: '查看详情',
       kind: 'detail',
       handler: () => handleViewDetail(row),
       icon: Eye
     },
     {
+      id: 'confirm-payment',
       label: '确认回款',
       desktopPrimary: true,
+      risk: 'state-transition',
+      resultType: 'status-changed',
       handler: () => handleConfirmPayment(row),
       visible: canConfirmPayment.value && row.status !== 'COMPLETED',
       icon: CheckCircle
@@ -427,15 +448,21 @@ const getRowActions = (row: PaymentPlanWithDetails): TableRowActionSet => ({
   ],
   secondaryActions: [
     {
+      id: 'edit',
       label: '编辑',
+      resultType: 'entity-updated',
       handler: () => handleEdit(row),
       visible: canEditPlan.value,
       icon: Pencil
     },
     {
+      id: 'delete',
       label: '删除',
       handler: (): void => { void handleDelete(row) },
       disabled: isPlanDeleting(row.id),
+      disabledReason: isPlanDeleting(row.id) ? '删除处理中' : undefined,
+      risk: 'destructive',
+      resultType: 'entity-deleted',
       visible: canDeletePlan.value,
       icon: Trash2,
       destructive: true,
@@ -521,7 +548,6 @@ watch(
       :total="pagination.total"
       :sorts="activeSorts"
       view-key="payment-plans.list"
-      :view-label="activeViewLabel"
       :effective-filters="effectiveFilters"
       :view-applying="customFilterViews.applying.value"
       :view-apply-error="customFilterViews.applyError.value"

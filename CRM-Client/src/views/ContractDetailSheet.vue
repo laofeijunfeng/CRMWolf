@@ -5,7 +5,7 @@
  * 仅负责 Sheet 容器与外层显隐，详情内容由
  * ContractDetailContent.vue 复用组件承载。
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { Sheet } from '@/components/ui/sheet'
 import { DetailSheetContent } from '@/components/ui/detail-sheet'
 import ContractDetailContent from '@/components/panels/ContractDetailContent.vue'
@@ -33,6 +33,13 @@ const visibleModel = computed({
 })
 
 const canApproveValue = computed<boolean>(() => props.canApprove ?? false)
+const contractDetailContentRef = ref<{ refresh: () => Promise<boolean> } | null>(null)
+
+async function refresh(): Promise<boolean> {
+  return contractDetailContentRef.value?.refresh() ?? false
+}
+
+defineExpose({ refresh })
 
 function closeSheet(): void {
   emit('update:visible', false)
@@ -44,6 +51,7 @@ function closeSheet(): void {
     <DetailSheetContent>
       <ContractDetailContent
         v-if="contractId !== null"
+        ref="contractDetailContentRef"
         :contract-id="contractId"
         :can-approve="canApproveValue"
         @close="closeSheet"

@@ -18,7 +18,7 @@
 import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
-import { Plus, Eye, Edit, Send, Trash2 } from 'lucide-vue-next'
+import { Plus, Eye, Pencil, Send, Trash2 } from 'lucide-vue-next'
 import { AmountText, DataTable, TableRowActions, type TableRowActionSet } from '@/components/crmwolf'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
@@ -40,9 +40,14 @@ import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCu
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { normalizePaginatedResponse } from '@/types/pagination'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
+import type { FormSuccessPayload } from '@/types/actionOutcome'
 import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
 import ContractDetailSheet from '@/views/ContractDetailSheet.vue'
+
+interface ContractDetailSheetExpose {
+  refresh: () => Promise<boolean>
+}
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -62,7 +67,9 @@ const showCreateDialog = ref(false)
 const showEditDialog = ref(false)
 const editingContract = ref<ContractListResponse | null>(null)
 const viewingContractId = ref<number | null>(null)
+const contractDetailSheetRef = ref<ContractDetailSheetExpose | null>(null)
 const deletingContractIds = ref<Set<number>>(new Set())
+const submittingApprovalIds = ref<Set<number>>(new Set())
 
 const pagination = reactive({
   current: 1,
@@ -273,9 +280,6 @@ const customFilterViews = useCustomFilterViews({
   onViewApplySuccess: (tabKey) => headerStore.setActiveTab(tabKey),
 })
 const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
-const activeViewLabel = computed(() =>
-  allTabs.value.find((tab) => tab.key === activeTab.value)?.label ?? '当前列表'
-)
 const effectiveFilters = computed(() => {
   const tabStatus = ['DRAFT', 'PENDING_REVIEW', 'SIGNED'].includes(activeTab.value)
     ? activeTab.value
@@ -362,12 +366,41 @@ const handleCreate = (): void => {
   showCreateDialog.value = true
 }
 
-const handleCreateSuccess = (): void => {
-  fetchContractList()
+const handleCreateSuccess = async (_payload?: FormSuccessPayload): Promise<void> => {
+  const refreshed = await fetchContractList()
+  if (!refreshed) {
+    toast.warning('合同已保存，但列表刷新失败，请稍后重试。')
+  }
 }
 
 const handleViewDetail = (record: ContractListResponse): void => {
   viewingContractId.value = record.id
+}
+
+async function refreshContractDetailIfOpen(contractId: number | null): Promise<boolean> {
+  if (contractId === null || viewingContractId.value !== contractId) return true
+  return contractDetailSheetRef.value?.refresh() ?? false
+}
+
+function getRefreshFailureDescription(listRefreshed: boolean, detailRefreshed: boolean): string | undefined {
+  if (listRefreshed && detailRefreshed) return undefined
+  if (!listRefreshed && !detailRefreshed) return '列表和详情刷新失败，请稍后重试。'
+  if (!listRefreshed) return '列表刷新失败，请稍后重试。'
+  return '详情刷新失败，请稍后重试。'
+}
+
+function warnIfRefreshFailed(actionMessage: string, listRefreshed: boolean, detailRefreshed: boolean): void {
+  const description = getRefreshFailureDescription(listRefreshed, detailRefreshed)
+  if (description !== undefined) {
+    toast.warning(`${actionMessage}，但${description}`)
+  }
+}
+
+const handleContractSheetRefresh = async (): Promise<void> => {
+  const refreshed = await fetchContractList()
+  if (!refreshed) {
+    toast.warning('合同详情已更新，但列表刷新失败，请稍后重试。')
+  }
 }
 
 const handleEdit = (record: ContractListResponse): void => {
@@ -375,10 +408,13 @@ const handleEdit = (record: ContractListResponse): void => {
   showEditDialog.value = true
 }
 
-const handleEditSuccess = (): void => {
+const handleEditSuccess = async (_payload?: FormSuccessPayload): Promise<void> => {
+  const editedContractId = editingContract.value?.id ?? null
   showEditDialog.value = false
   editingContract.value = null
-  fetchContractList()
+  const refreshed = await fetchContractList()
+  const detailRefreshed = await refreshContractDetailIfOpen(editedContractId)
+  warnIfRefreshFailed('合同已保存', refreshed, detailRefreshed)
 }
 
 const isContractDeleting = (contractId: number): boolean => deletingContractIds.value.has(contractId)
@@ -396,8 +432,13 @@ const handleDelete = async (record: ContractListResponse): Promise<void> => {
   deletingContractIds.value = new Set(deletingContractIds.value).add(record.id)
   try {
     await contractApi.deleteContract(record.id)
-    toast.success(`合同“${record.contract_name}”已删除`)
-    void fetchContractList()
+    if (viewingContractId.value === record.id) {
+      viewingContractId.value = null
+    }
+    const refreshed = await fetchContractList()
+    toast.success(`合同“${record.contract_name}”已删除`, refreshed ? undefined : {
+      description: '合同已删除，但列表刷新失败，请稍后重试。',
+    })
   } catch (error) {
     handleApiError(error, '删除合同')
   } finally {
@@ -408,12 +449,25 @@ const handleDelete = async (record: ContractListResponse): Promise<void> => {
 }
 
 const handleSubmitApproval = async (record: ContractListResponse): Promise<void> => {
+  if (submittingApprovalIds.value.has(record.id)) return
+
+  submittingApprovalIds.value = new Set(submittingApprovalIds.value).add(record.id)
   try {
     await approvalGenericApi.submitApproval('CONTRACT', record.id)
-    toast.success('合同已提交审批')
-    fetchContractList()
+    const refreshed = await fetchContractList()
+    const detailRefreshed = await refreshContractDetailIfOpen(record.id)
+    const refreshFailure = getRefreshFailureDescription(refreshed, detailRefreshed)
+    toast.success('合同已提交审批', {
+      description: refreshFailure !== undefined
+        ? `审批提交已完成，但${refreshFailure}`
+        : '当前状态：审批中',
+    })
   } catch (error) {
     handleApiError(error, '提交审批')
+  } finally {
+    const nextIds = new Set(submittingApprovalIds.value)
+    nextIds.delete(record.id)
+    submittingApprovalIds.value = nextIds
   }
 }
 
@@ -421,31 +475,43 @@ const handleSubmitApproval = async (record: ContractListResponse): Promise<void>
 const getRowActions = (row: ContractListResponse): TableRowActionSet => ({
   primaryActions: [
     {
-      label: '查看',
+      id: 'detail',
+      label: '查看详情',
       kind: 'detail',
       icon: Eye,
       handler: () => handleViewDetail(row)
     },
     {
+      id: 'edit',
       label: '编辑',
       desktopPrimary: true,
+      resultType: 'entity-updated',
       handler: () => handleEdit(row),
-      icon: Edit,
+      icon: Pencil,
       visible: canEditRow(row)
     },
     {
+      id: 'submit-approval',
       label: '提交审批',
       desktopPrimary: true,
+      risk: 'approval',
+      resultType: 'status-changed',
       handler: () => handleSubmitApproval(row),
+      disabled: submittingApprovalIds.value.has(row.id),
+      disabledReason: submittingApprovalIds.value.has(row.id) ? '提交审批处理中' : undefined,
       icon: Send,
       visible: canSubmitApproval(row)
     }
   ],
   secondaryActions: [
     {
+      id: 'delete',
       label: '删除',
       handler: (): void => { void handleDelete(row) },
       disabled: isContractDeleting(row.id),
+      disabledReason: isContractDeleting(row.id) ? '删除处理中' : undefined,
+      risk: 'destructive',
+      resultType: 'entity-deleted',
       icon: Trash2,
       destructive: true,
       separator: true,
@@ -570,7 +636,6 @@ watchEffect(() => {
       v-model:filters="activeFilters"
       :sorts="activeSorts"
       view-key="contracts.list"
-      :view-label="activeViewLabel"
       :effective-filters="effectiveFilters"
       :view-applying="customFilterViews.applying.value"
       :view-apply-error="customFilterViews.applyError.value"
@@ -734,9 +799,11 @@ watchEffect(() => {
 
     <!-- Contract Detail Sheet -->
     <ContractDetailSheet
+      ref="contractDetailSheetRef"
       :contract-id="viewingContractId"
       :visible="viewingContractId !== null"
       @update:visible="(v: boolean) => { if (!v) viewingContractId = null }"
+      @refresh="handleContractSheetRefresh"
     />
   </div>
 </template>

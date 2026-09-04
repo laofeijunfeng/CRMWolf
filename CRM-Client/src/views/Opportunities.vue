@@ -40,10 +40,15 @@ import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
 import { customerDetailRoute } from '@/utils/customerRoutes'
 import { normalizePaginatedResponse } from '@/types/pagination'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
+import type { FormSuccessPayload } from '@/types/actionOutcome'
 import OpportunityDetailSheet from './OpportunityDetailSheet.vue'
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
 import OpportunityWinDialog from '@/components/dialogs/OpportunityWinDialog.vue'
 import OpportunityLoseDialog from '@/components/dialogs/OpportunityLoseDialog.vue'
+
+interface OpportunityDetailSheetExpose {
+  refresh: () => Promise<boolean>
+}
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -64,6 +69,7 @@ const ownerFilterOptions = ref<OwnerFilterOption[]>([])
 // 抽屉状态
 const sheetVisible = ref(false)
 const selectedOpportunityId = ref<string | null>(null)
+const opportunityDetailSheetRef = ref<OpportunityDetailSheetExpose | null>(null)
 
 // 新建商机弹窗状态
 const opportunityDialogOpen = ref(false)
@@ -80,6 +86,7 @@ const selectedOpportunityIdForWin = ref<string | null>(null)
 const loseDialogOpen = ref(false)
 const selectedOpportunityIdForLose = ref<string | null>(null)
 const deletingOpportunityIds = ref<Set<string>>(new Set())
+const advancingOpportunityIds = ref<Set<string>>(new Set())
 
 const pagination = reactive({
   current: 1,
@@ -321,9 +328,6 @@ const customFilterViews = useCustomFilterViews({
   onViewApplySuccess: (tabKey) => headerStore.setActiveTab(tabKey),
 })
 const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
-const activeViewLabel = computed(() =>
-  allTabs.value.find((tab) => tab.key === activeTab.value)?.label ?? '当前列表'
-)
 const effectiveFilters = computed(() => {
   const tabStatus = activeTab.value === 'active'
     ? 0
@@ -426,23 +430,51 @@ const openOpportunityFromRoute = (): void => {
   }
 }
 
+async function refreshOpportunityDetailIfOpen(opportunityId: string | null): Promise<boolean> {
+  if (!sheetVisible.value || opportunityId === null || selectedOpportunityId.value !== opportunityId) return true
+  return opportunityDetailSheetRef.value?.refresh() ?? false
+}
+
+function getRefreshFailureDescription(listRefreshed: boolean, detailRefreshed: boolean): string | undefined {
+  if (listRefreshed && detailRefreshed) return undefined
+  if (!listRefreshed && !detailRefreshed) return '列表和详情刷新失败，请稍后重试。'
+  if (!listRefreshed) return '列表刷新失败，请稍后重试。'
+  return '详情刷新失败，请稍后重试。'
+}
+
+function warnIfRefreshFailed(actionMessage: string, listRefreshed: boolean, detailRefreshed: boolean): void {
+  const description = getRefreshFailureDescription(listRefreshed, detailRefreshed)
+  if (description !== undefined) {
+    toast.warning(`${actionMessage}，但${description}`)
+  }
+}
+
 // 抽屉刷新后刷新列表
-const handleSheetRefresh = (): void => {
-  fetchOpportunities()
+const handleSheetRefresh = async (): Promise<void> => {
+  const refreshed = await fetchOpportunities()
+  if (!refreshed) {
+    toast.warning('商机详情已更新，但列表刷新失败，请稍后重试。')
+  }
 }
 
 // 新建商机成功回调
-const handleOpportunitySuccess = (): void => {
+const handleOpportunitySuccess = async (payload?: FormSuccessPayload): Promise<void> => {
   opportunityDialogOpen.value = false
-  toast.success('商机已创建并提交审批')
-  fetchOpportunities()
+  toast.success(payload?.operation === 'update' ? '商机更新成功' : '商机已创建并提交审批')
+  const refreshed = await fetchOpportunities()
+  if (!refreshed) {
+    toast.warning('商机已保存，但列表刷新失败，请稍后重试。')
+  }
 }
 
 // 编辑商机成功回调
-const handleEditSuccess = (): void => {
+const handleEditSuccess = async (_payload?: FormSuccessPayload): Promise<void> => {
+  const editedOpportunityId = editingOpportunity.value?.id ?? null
   editDialogOpen.value = false
   editingOpportunity.value = null
-  fetchOpportunities()
+  const refreshed = await fetchOpportunities()
+  const detailRefreshed = await refreshOpportunityDetailIfOpen(editedOpportunityId)
+  warnIfRefreshFailed('商机已保存', refreshed, detailRefreshed)
 }
 
 // 打开编辑商机弹窗
@@ -470,8 +502,14 @@ const handleDelete = async (record: OpportunityListResponse): Promise<void> => {
   deletingOpportunityIds.value = new Set(deletingOpportunityIds.value).add(record.id)
   try {
     await opportunityApi.deleteOpportunity(record.id)
-    toast.success(`商机“${record.opportunity_name}”已删除`)
-    void fetchOpportunities()
+    if (selectedOpportunityId.value === record.id) {
+      sheetVisible.value = false
+      selectedOpportunityId.value = null
+    }
+    const refreshed = await fetchOpportunities()
+    toast.success(`商机“${record.opportunity_name}”已删除`, refreshed ? undefined : {
+      description: '商机已删除，但列表刷新失败，请稍后重试。',
+    })
   } catch (error) {
     handleApiError(error, '删除商机')
   } finally {
@@ -482,6 +520,9 @@ const handleDelete = async (record: OpportunityListResponse): Promise<void> => {
 }
 
 const handleAdvanceStage = async (record: OpportunityListResponse): Promise<void> => {
+  if (advancingOpportunityIds.value.has(record.id)) return
+
+  advancingOpportunityIds.value = new Set(advancingOpportunityIds.value).add(record.id)
   try {
     // 1. 获取可推进阶段
     const stages = await procurementApi.getOpportunityProcurementStages(record.id)
@@ -513,8 +554,14 @@ const handleAdvanceStage = async (record: OpportunityListResponse): Promise<void
         stage_template_id: defaultStage.id
       })
 
-      toast.success('起始阶段已设置')
-      fetchOpportunities()
+      const refreshed = await fetchOpportunities()
+      const detailRefreshed = await refreshOpportunityDetailIfOpen(record.id)
+      const refreshFailure = getRefreshFailureDescription(refreshed, detailRefreshed)
+      toast.success('起始阶段已设置', {
+        description: refreshFailure !== undefined
+          ? `阶段已写入为“${defaultStage.stage_name}”，但${refreshFailure}`
+          : `当前阶段：${defaultStage.stage_name}`,
+      })
       return
     }
 
@@ -541,10 +588,20 @@ const handleAdvanceStage = async (record: OpportunityListResponse): Promise<void
       stage_template_id: nextStage.id
     })
 
-    toast.success('阶段已推进')
-    fetchOpportunities()
+    const refreshed = await fetchOpportunities()
+    const detailRefreshed = await refreshOpportunityDetailIfOpen(record.id)
+    const refreshFailure = getRefreshFailureDescription(refreshed, detailRefreshed)
+    toast.success('阶段已推进', {
+      description: refreshFailure !== undefined
+        ? `阶段已写入为“${nextStage.stage_name}”，但${refreshFailure}`
+        : `当前阶段：${nextStage.stage_name}`,
+    })
   } catch (error) {
     handleApiError(error, '推进阶段')
+  } finally {
+    const nextIds = new Set(advancingOpportunityIds.value)
+    nextIds.delete(record.id)
+    advancingOpportunityIds.value = nextIds
   }
 }
 
@@ -558,58 +615,84 @@ const handleMarkAsLost = (record: OpportunityListResponse): void => {
   loseDialogOpen.value = true
 }
 
-const handleWinSuccess = (): void => {
+const handleWinSuccess = async (): Promise<void> => {
+  const opportunityId = selectedOpportunityIdForWin.value
   winDialogOpen.value = false
-  fetchOpportunities()
+  selectedOpportunityIdForWin.value = null
+  const refreshed = await fetchOpportunities()
+  const detailRefreshed = await refreshOpportunityDetailIfOpen(opportunityId)
+  warnIfRefreshFailed('商机已标记为赢单', refreshed, detailRefreshed)
 }
 
-const handleLoseSuccess = (): void => {
+const handleLoseSuccess = async (): Promise<void> => {
+  const opportunityId = selectedOpportunityIdForLose.value
   loseDialogOpen.value = false
-  fetchOpportunities()
+  selectedOpportunityIdForLose.value = null
+  const refreshed = await fetchOpportunities()
+  const detailRefreshed = await refreshOpportunityDetailIfOpen(opportunityId)
+  warnIfRefreshFailed('商机已标记为输单', refreshed, detailRefreshed)
 }
 
 // ==================== TableRowActions 配置 ====================
 const getRowActions = (row: OpportunityListResponse): TableRowActionSet => ({
   primaryActions: [
     {
-      label: '查看',
+      id: 'detail',
+      label: '查看详情',
       kind: 'detail',
       icon: Eye,
       handler: () => handleViewDetail(row)
     },
     {
+      id: 'edit',
       label: '编辑',
       desktopPrimary: true,
+      resultType: 'entity-updated',
       icon: Pencil,
       handler: () => openEditDialog(row),
       visible: canEditRow(row) && !isApprovalPending(row)
     },
     {
+      id: 'advance-stage',
       label: '推进阶段',
       desktopPrimary: true,
+      risk: 'state-transition',
+      resultType: 'status-changed',
       icon: ArrowRight,
       handler: () => handleAdvanceStage(row),
+      disabled: advancingOpportunityIds.value.has(row.id),
+      disabledReason: advancingOpportunityIds.value.has(row.id) ? '推进处理中' : undefined,
       visible: row.status === 0 && isApprovalApproved(row)
     }
   ],
   secondaryActions: [
     {
+      id: 'win',
       label: '赢单',
+      risk: 'state-transition',
+      resultType: 'status-changed',
       icon: Trophy,
       handler: () => handleMarkAsWon(row),
       visible: row.status === 0 && isApprovalApproved(row)
     },
     {
+      id: 'lose',
       label: '输单',
+      risk: 'destructive',
+      resultType: 'status-changed',
       icon: XCircle,
       handler: () => handleMarkAsLost(row),
       visible: row.status === 0 && isApprovalApproved(row)
     },
     {
+      id: 'delete',
       label: '删除',
       icon: Trash2,
       handler: (): void => { void handleDelete(row) },
       disabled: isOpportunityDeleting(row.id),
+      disabledReason: isOpportunityDeleting(row.id) ? '删除处理中' : undefined,
+      risk: 'destructive',
+      resultType: 'entity-deleted',
       visible: canDeleteRow(row),
       destructive: true,
       separator: true
@@ -750,7 +833,6 @@ watchEffect(() => {
       v-model:filters="activeFilters"
       v-model:sorts="activeSorts"
       view-key="opportunities.list"
-      :view-label="activeViewLabel"
       :effective-filters="effectiveFilters"
       :view-applying="customFilterViews.applying.value"
       :view-apply-error="customFilterViews.applyError.value"
@@ -895,6 +977,7 @@ watchEffect(() => {
     <!-- 商机详情抽屉 -->
     <OpportunityDetailSheet
       v-model:visible="sheetVisible"
+      ref="opportunityDetailSheetRef"
       :opportunity-id="selectedOpportunityId"
       @refresh="handleSheetRefresh"
     />
@@ -912,6 +995,7 @@ watchEffect(() => {
       :open="editDialogOpen"
       :opportunity="editingOpportunity"
       customer-locked
+      :success-message="null"
       @update:open="editDialogOpen = $event"
       @success="handleEditSuccess"
     />

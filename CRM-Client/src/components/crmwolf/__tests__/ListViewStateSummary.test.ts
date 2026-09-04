@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest'
 import ListViewStateSummary from '../ListViewStateSummary.vue'
 
 const baseProps = {
-  viewLabel: '重点客户',
   filters: [{
     id: 'filter:name:contains:0',
     field: 'name',
@@ -25,11 +24,11 @@ const baseProps = {
 }
 
 describe('ListViewStateSummary', () => {
-  it('keeps the current view state visible after tools are closed', () => {
+  it('keeps the active list state visible after tools are closed', () => {
     const wrapper = mount(ListViewStateSummary, { props: baseProps })
 
-    expect(wrapper.text()).toContain('当前视图')
-    expect(wrapper.text()).toContain('重点客户')
+    expect(wrapper.text()).not.toContain('当前视图')
+    expect(wrapper.text()).not.toContain('重点客户')
     expect(wrapper.text()).toContain('客户名称 包含')
     expect(wrapper.text()).toContain('“Acme”')
     expect(wrapper.text()).toContain('排序：更新时间 ↓')

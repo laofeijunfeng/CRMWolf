@@ -116,10 +116,6 @@ interface Props {
   getRowLabel?: (row: T, index: number) => string
   /** 桌面行操作与右键 / 键盘菜单的动作来源；不传则不显示行操作 */
   getRowActions?: (row: T, index: number) => TableRowActionSet | null | undefined
-  /** 当前视图名称，用于让列表范围可持续确认 */
-  viewLabel?: string
-  /** 当前业务范围名称；不伪造为普通筛选条件 */
-  scopeLabel?: string
   /** 视图应用中 */
   viewApplying?: boolean
   /** 视图应用失败 */
@@ -189,8 +185,6 @@ const props = withDefaults(defineProps<Props>(), {
   columnPreferenceMode: 'default',
   filterViewSaveEnabled: false,
   filterViewSaveLoading: false,
-  viewLabel: '当前列表',
-  scopeLabel: '',
   viewApplying: false,
   viewApplyError: null,
   effectiveFilters: undefined,
@@ -994,8 +988,6 @@ onBeforeUnmount(() => {
       </div>
 
       <ListViewStateSummary
-        :view-label="viewLabel ?? '当前列表'"
-        :scope-label="scopeLabel ?? ''"
         :filters="filterSummaryItems"
         :sorts="sortSummaryItems"
         :hidden-column-count="hiddenColumnCount"

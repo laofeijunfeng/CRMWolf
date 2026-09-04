@@ -3,7 +3,6 @@ import { computed, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import {
   AlertCircle,
-  FileText,
   Loader2,
   ReceiptText,
   RefreshCw,
@@ -28,14 +27,6 @@ import {
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle
-} from '@/components/ui/empty'
-import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import StatusBadge, { type PaymentPlanStatus as PaymentPlanBadgeStatus } from '@/components/StatusBadge.vue'
 import ApprovalProcessStepper from '@/components/ApprovalProcessStepper.vue'
@@ -57,7 +48,7 @@ import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
 import { handleApiError, handleOutcomeUnknown, isOutcomeUnknown } from '@/utils/errorHandler'
 import { formatLocalDate } from '@/utils/format'
-import { AmountText } from '@/components/crmwolf'
+import { AmountText, DataViewStatePanel } from '@/components/crmwolf'
 
 interface Props {
   planId: number | null
@@ -86,6 +77,7 @@ const userStore = useUserStore()
 
 const loading = ref<boolean>(false)
 const errorMessage = ref<string>('')
+const refreshErrorMessage = ref<string>('')
 const paymentPlan = ref<PaymentPlanResponse | null>(null)
 const activeRequestId = ref<number>(0)
 
@@ -201,21 +193,34 @@ const paymentProgress = computed<number>(() => {
   return Math.min(100, Math.round((paidAmount / plan.planned_amount) * 100))
 })
 
-const fetchPaymentPlanDetail = async (planId: number): Promise<void> => {
+const fetchPaymentPlanDetail = async (
+  planId: number,
+  options: { preserveExisting?: boolean } = {},
+): Promise<boolean> => {
   const requestId = activeRequestId.value + 1
   activeRequestId.value = requestId
+  const preserveExisting = options.preserveExisting === true && paymentPlan.value !== null
   loading.value = true
   errorMessage.value = ''
-  paymentPlan.value = null
+  refreshErrorMessage.value = ''
+  if (!preserveExisting) {
+    paymentPlan.value = null
+  }
 
   try {
     const data = await paymentApi.getPaymentPlanDetail(planId)
-    if (requestId !== activeRequestId.value) return
+    if (requestId !== activeRequestId.value) return false
     paymentPlan.value = data
+    return true
   } catch (error: unknown) {
-    if (requestId !== activeRequestId.value) return
-    errorMessage.value = '回款计划加载失败，请稍后重试'
+    if (requestId !== activeRequestId.value) return false
+    if (preserveExisting) {
+      refreshErrorMessage.value = '回款计划已完成操作，但详情刷新失败，请重新加载。'
+    } else {
+      errorMessage.value = '回款计划加载失败，请稍后重试'
+    }
     handleApiError(error, '获取回款计划详情')
+    return false
   } finally {
     if (requestId === activeRequestId.value) {
       loading.value = false
@@ -227,6 +232,7 @@ const resetState = (): void => {
   activeRequestId.value += 1
   loading.value = false
   errorMessage.value = ''
+  refreshErrorMessage.value = ''
   paymentPlan.value = null
 }
 
@@ -238,7 +244,7 @@ const closeSheet = (): void => {
 
 const handleRetry = (): void => {
   if (props.planId !== null) {
-    void fetchPaymentPlanDetail(props.planId)
+    void fetchPaymentPlanDetail(props.planId, { preserveExisting: paymentPlan.value !== null })
   }
 }
 
@@ -279,7 +285,7 @@ const handleRegisterSubmit = async (payload: PaymentRecordCreate): Promise<void>
     }
     registerDialogOpen.value = false
     paymentRecordIdempotencyKey.value = null
-    await fetchPaymentPlanDetail(plan.id)
+    const refreshed = await fetchPaymentPlanDetail(plan.id, { preserveExisting: true })
     const updatedPlan = paymentPlan.value
     const statusLabel = updatedPlan?.status === 'COMPLETED'
       ? '已登记'
@@ -290,6 +296,11 @@ const handleRegisterSubmit = async (payload: PaymentRecordCreate): Promise<void>
           : '待登记'
     toast.success(
       `回款登记成功，本次登记 ¥${payload.actual_amount.toFixed(2)}，剩余 ¥${(updatedPlan?.remaining_amount ?? 0).toFixed(2)}，计划状态：${statusLabel}`,
+      {
+        description: refreshed
+          ? '回款计划详情已同步。'
+          : '回款已登记，但计划详情刷新失败，请稍后重试。',
+      },
     )
     emit('refresh')
   } catch (error: unknown) {
@@ -318,21 +329,23 @@ const handleEditSubmit = async (recordId: number, payload: PaymentRecordUpdate):
     await paymentApi.updatePaymentRecord(recordId, payload)
 
     // If resubmit mode, also submit approval
+    let actionMessage: string
     if (isResubmitMode.value) {
       const res = await approvalStore.submitEntity('PAYMENT', recordId)
-      if (res.approval_id === 0) {
-        toast.success('未配置审批流，已转为财务确认')
-      } else {
-        toast.success('已重新提交审批')
-      }
+      actionMessage = res.approval_id === 0 ? '未配置审批流，已转为财务确认' : '已重新提交审批'
     } else {
-      toast.success('回款记录已更新')
+      actionMessage = '回款记录已更新'
     }
 
     editDialogOpen.value = false
     selectedRecord.value = null
     isResubmitMode.value = false
-    await fetchPaymentPlanDetail(plan.id)
+    const refreshed = await fetchPaymentPlanDetail(plan.id, { preserveExisting: true })
+    toast.success(actionMessage, {
+      description: refreshed
+        ? '回款计划详情已同步。'
+        : '操作已完成，但计划详情刷新失败，请稍后重试。',
+    })
     emit('refresh')
   } catch (error: unknown) {
     handleApiError(error, isResubmitMode.value ? '重新提交审批' : '修改回款记录')
@@ -366,12 +379,15 @@ const handleSubmitApproval = async (): Promise<void> => {
   approvalSubmitting.value = true
   try {
     const res = await approvalStore.submitEntity('PAYMENT', record.id)
-    if (res.approval_id === 0) {
-      toast.success('未配置审批流，已转为财务确认')
-    } else {
-      toast.success('已提交审批，等待审批人处理')
-    }
-    await fetchPaymentPlanDetail(plan.id)
+    const actionMessage = res.approval_id === 0
+      ? '未配置审批流，已转为财务确认'
+      : '已提交审批，等待审批人处理'
+    const refreshed = await fetchPaymentPlanDetail(plan.id, { preserveExisting: true })
+    toast.success(actionMessage, {
+      description: refreshed
+        ? '回款计划详情已同步。'
+        : '操作已完成，但计划详情刷新失败，请稍后重试。',
+    })
     emit('refresh')
   } catch (error: unknown) {
     handleApiError(error, '提交审批')
@@ -503,161 +519,162 @@ watch(
 
       <ScrollArea class="flex-1">
         <div class="sheet-body">
-          <template v-if="loading">
-            <div class="loading-stack" aria-live="polite" aria-busy="true">
-              <Skeleton class="h-28 w-full" />
-              <Skeleton class="h-48 w-full" />
-              <Skeleton class="h-64 w-full" />
-            </div>
-          </template>
+          <DataViewStatePanel
+            :state="loading && !paymentPlan ? 'loading' : errorMessage ? 'error' : paymentPlan ? 'ready' : 'empty'"
+            :error-title="errorMessage || '回款计划加载失败'"
+            error-description="请检查网络连接后重试。"
+            empty-title="暂无回款计划信息"
+            empty-description="请选择一个回款计划查看详情。"
+            @retry="handleRetry"
+          >
+            <template #loading>
+              <div class="loading-stack">
+                <div class="h-28 w-full animate-pulse rounded-md bg-muted" />
+                <div class="h-48 w-full animate-pulse rounded-md bg-muted" />
+                <div class="h-64 w-full animate-pulse rounded-md bg-muted" />
+              </div>
+            </template>
 
-          <template v-else-if="errorMessage">
-            <Card class="state-card">
-              <CardContent class="state-card-content">
-                <Empty>
-                  <EmptyHeader>
-                    <EmptyMedia variant="icon">
-                      <AlertCircle aria-hidden="true" />
-                    </EmptyMedia>
-                    <EmptyTitle>{{ errorMessage }}</EmptyTitle>
-                    <EmptyDescription>请检查网络连接后重试。</EmptyDescription>
-                  </EmptyHeader>
-                </Empty>
-                <Button variant="outline" type="button" @click="handleRetry">
-                  <RefreshCw data-icon="inline-start" aria-hidden="true" />
-                  重新加载
-                </Button>
-              </CardContent>
-            </Card>
-          </template>
+            <template #error-action>
+              <Button variant="outline" type="button" @click="handleRetry">
+                <RefreshCw data-icon="inline-start" aria-hidden="true" />
+                重新加载
+              </Button>
+            </template>
 
-          <template v-else-if="paymentPlan">
-            <Card class="info-card">
-              <CardHeader class="section-heading">
-                <CardTitle class="section-title">基本信息</CardTitle>
-                <CardDescription>客户、合同、计划日期与发票汇总。</CardDescription>
-              </CardHeader>
-              <CardContent class="section-content">
-                <div class="attributes-grid">
-                  <div class="attribute-item">
-                    <span class="attribute-label">客户名称</span>
-                    <Button
-                      v-if="paymentPlan.customer_id !== null && paymentPlan.customer_id !== undefined && paymentPlan.customer_id !== ''"
-                      variant="link"
-                      type="button"
-                      class="attribute-link"
-                      :aria-label="`查看客户 ${paymentPlan.customer_name ?? '未知客户'}`"
-                      @click="handleViewCustomer"
-                    >
-                      {{ formatText(paymentPlan.customer_name) }}
-                    </Button>
-                    <span v-else class="attribute-value">{{ formatText(paymentPlan.customer_name) }}</span>
-                  </div>
-                  <div class="attribute-item">
-                    <span class="attribute-label">合同名称</span>
-                    <Button
-                      variant="link"
-                      type="button"
-                      class="attribute-link"
-                      :aria-label="`查看合同 ${paymentPlan.contract_name ?? '未知合同'}`"
-                      @click="handleViewContract"
-                    >
-                      {{ formatText(paymentPlan.contract_name) }}
-                    </Button>
-                  </div>
-                  <div class="attribute-item">
-                    <span class="attribute-label">计划日期</span>
-                    <span class="attribute-value">{{ formatDate(paymentPlan.due_date) }}</span>
-                  </div>
-                  <div class="attribute-item">
-                    <span class="attribute-label">计划编号</span>
-                    <span class="attribute-value mono-value">{{ formatText(paymentPlan.plan_number) }}</span>
-                  </div>
-                  <div class="attribute-item">
-                    <span class="attribute-label">待回款金额</span>
-                    <span class="attribute-value">
-                      <AmountText :value="paymentPlan.remaining_amount ?? 0" tone="primary" />
-                    </span>
-                  </div>
-                  <div class="attribute-item">
-                    <span class="attribute-label">已开票金额</span>
-                    <span class="attribute-value">
-                      <AmountText :value="paymentPlan.invoiced_amount ?? 0" tone="warning" />
-                    </span>
-                  </div>
-                  <div class="attribute-item">
-                    <span class="attribute-label">发票数量</span>
-                    <span class="attribute-value mono-value">{{ formatInvoiceCount(paymentPlan.invoice_count) }}</span>
-                  </div>
-                  <div class="attribute-item">
-                    <span class="attribute-label">完成度</span>
-                    <span class="attribute-value mono-value">{{ paymentProgress }}%</span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+            <template #default>
+              <div
+                v-if="loading && paymentPlan"
+                class="mb-4 flex items-center gap-2 text-sm text-muted-foreground"
+                role="status"
+                aria-live="polite"
+              >
+                <Loader2 class="size-4 animate-spin" aria-hidden="true" />
+                正在同步回款计划详情…
+              </div>
+              <Alert v-if="refreshErrorMessage" class="mb-4" role="status" aria-live="polite">
+                <AlertCircle aria-hidden="true" />
+                <AlertTitle>详情刷新失败</AlertTitle>
+                <AlertDescription class="flex flex-wrap items-center gap-2">
+                  <span>{{ refreshErrorMessage }}</span>
+                  <Button variant="outline" size="sm" type="button" @click="handleRetry">
+                    重新加载
+                  </Button>
+                </AlertDescription>
+              </Alert>
+              <template v-if="paymentPlan">
+                <Card class="info-card">
+                  <CardHeader class="section-heading">
+                    <CardTitle class="section-title">基本信息</CardTitle>
+                    <CardDescription>客户、合同、计划日期与发票汇总。</CardDescription>
+                  </CardHeader>
+                  <CardContent class="section-content">
+                    <div class="attributes-grid">
+                      <div class="attribute-item">
+                        <span class="attribute-label">客户名称</span>
+                        <Button
+                          v-if="paymentPlan.customer_id !== null && paymentPlan.customer_id !== undefined && paymentPlan.customer_id !== ''"
+                          variant="link"
+                          type="button"
+                          class="attribute-link"
+                          :aria-label="`查看客户 ${paymentPlan.customer_name ?? '未知客户'}`"
+                          @click="handleViewCustomer"
+                        >
+                          {{ formatText(paymentPlan.customer_name) }}
+                        </Button>
+                        <span v-else class="attribute-value">{{ formatText(paymentPlan.customer_name) }}</span>
+                      </div>
+                      <div class="attribute-item">
+                        <span class="attribute-label">合同名称</span>
+                        <Button
+                          variant="link"
+                          type="button"
+                          class="attribute-link"
+                          :aria-label="`查看合同 ${paymentPlan.contract_name ?? '未知合同'}`"
+                          @click="handleViewContract"
+                        >
+                          {{ formatText(paymentPlan.contract_name) }}
+                        </Button>
+                      </div>
+                      <div class="attribute-item">
+                        <span class="attribute-label">计划日期</span>
+                        <span class="attribute-value">{{ formatDate(paymentPlan.due_date) }}</span>
+                      </div>
+                      <div class="attribute-item">
+                        <span class="attribute-label">计划编号</span>
+                        <span class="attribute-value mono-value">{{ formatText(paymentPlan.plan_number) }}</span>
+                      </div>
+                      <div class="attribute-item">
+                        <span class="attribute-label">待回款金额</span>
+                        <span class="attribute-value">
+                          <AmountText :value="paymentPlan.remaining_amount ?? 0" tone="primary" />
+                        </span>
+                      </div>
+                      <div class="attribute-item">
+                        <span class="attribute-label">已开票金额</span>
+                        <span class="attribute-value">
+                          <AmountText :value="paymentPlan.invoiced_amount ?? 0" tone="warning" />
+                        </span>
+                      </div>
+                      <div class="attribute-item">
+                        <span class="attribute-label">发票数量</span>
+                        <span class="attribute-value mono-value">{{ formatInvoiceCount(paymentPlan.invoice_count) }}</span>
+                      </div>
+                      <div class="attribute-item">
+                        <span class="attribute-label">完成度</span>
+                        <span class="attribute-value mono-value">{{ paymentProgress }}%</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
 
-            <PaymentRecordList
-              :records="paymentPlan.payment_records"
-              :can-register="canRegisterPayment"
-              :can-edit-record="canEditRecord"
-              @register="handleRegisterPayment"
-              @record-click="handleRecordClick"
-              @edit-record="handleEditRecord"
-              @view-approval="handleViewApproval"
-            />
-
-            <Card v-if="latestApproval" class="approval-card">
-              <CardHeader class="section-heading approval-heading">
-                <div>
-                  <CardTitle class="section-title">审批进度</CardTitle>
-                  <CardDescription>最新回款记录的审批状态。</CardDescription>
-                </div>
-                <Badge :class="['approval-status-badge', getApprovalBadgeClass(latestApproval.status)]">
-                  {{ getApprovalStatusLabel(latestApproval.status) }}
-                </Badge>
-              </CardHeader>
-              <CardContent class="section-content approval-content">
-                <Alert v-if="hasRejectedApproval" variant="destructive">
-                  <AlertCircle aria-hidden="true" />
-                  <AlertTitle>审批被驳回</AlertTitle>
-                  <AlertDescription>{{ rejectionReason ?? '请查看驳回原因并修正后重新提交' }}</AlertDescription>
-                </Alert>
-
-                <div class="approval-summary-grid">
-                  <div class="attribute-item">
-                    <span class="attribute-label">审批人</span>
-                    <span class="attribute-value">{{ currentApproverName }}</span>
-                  </div>
-                  <div class="attribute-item">
-                    <span class="attribute-label">提交时间</span>
-                    <span class="attribute-value mono-value">{{ formatDateTime(latestApproval.created_time) }}</span>
-                  </div>
-                </div>
-
-                <ApprovalProcessStepper
-                  :records="approvalStepperRecords"
-                  :is-pending="hasPendingApproval"
+                <PaymentRecordList
+                  :records="paymentPlan.payment_records"
+                  :can-register="canRegisterPayment"
+                  :can-edit-record="canEditRecord"
+                  @register="handleRegisterPayment"
+                  @record-click="handleRecordClick"
+                  @edit-record="handleEditRecord"
+                  @view-approval="handleViewApproval"
                 />
-              </CardContent>
-            </Card>
-          </template>
 
-          <template v-else>
-            <Card class="state-card">
-              <CardContent class="state-card-content">
-                <Empty>
-                  <EmptyHeader>
-                    <EmptyMedia variant="icon">
-                      <FileText aria-hidden="true" />
-                    </EmptyMedia>
-                    <EmptyTitle>暂无回款计划信息</EmptyTitle>
-                    <EmptyDescription>请选择一个回款计划查看详情。</EmptyDescription>
-                  </EmptyHeader>
-                </Empty>
-              </CardContent>
-            </Card>
-          </template>
+                <Card v-if="latestApproval" class="approval-card">
+                  <CardHeader class="section-heading approval-heading">
+                    <div>
+                      <CardTitle class="section-title">审批进度</CardTitle>
+                      <CardDescription>最新回款记录的审批状态。</CardDescription>
+                    </div>
+                    <Badge :class="['approval-status-badge', getApprovalBadgeClass(latestApproval.status)]">
+                      {{ getApprovalStatusLabel(latestApproval.status) }}
+                    </Badge>
+                  </CardHeader>
+                  <CardContent class="section-content approval-content">
+                    <Alert v-if="hasRejectedApproval" variant="destructive">
+                      <AlertCircle aria-hidden="true" />
+                      <AlertTitle>审批被驳回</AlertTitle>
+                      <AlertDescription>{{ rejectionReason ?? '请查看驳回原因并修正后重新提交' }}</AlertDescription>
+                    </Alert>
+
+                    <div class="approval-summary-grid">
+                      <div class="attribute-item">
+                        <span class="attribute-label">审批人</span>
+                        <span class="attribute-value">{{ currentApproverName }}</span>
+                      </div>
+                      <div class="attribute-item">
+                        <span class="attribute-label">提交时间</span>
+                        <span class="attribute-value mono-value">{{ formatDateTime(latestApproval.created_time) }}</span>
+                      </div>
+                    </div>
+
+                    <ApprovalProcessStepper
+                      :records="approvalStepperRecords"
+                      :is-pending="hasPendingApproval"
+                    />
+                  </CardContent>
+                </Card>
+              </template>
+            </template>
+          </DataViewStatePanel>
         </div>
       </ScrollArea>
 

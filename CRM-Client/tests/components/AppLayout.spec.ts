@@ -77,14 +77,14 @@ describe('AppLayout user menu', () => {
     if (wrapper === null) throw new Error('AppLayout 未挂载')
     const trigger = wrapper.get('button[aria-label="用户设置"]')
     await trigger.trigger('mouseenter')
-    expect(document.body.querySelector('[role="menuitem"][aria-label="账户设置"]')).toBeNull()
+    expect(document.body.querySelector('[role="menuitem"][aria-label="系统设置"]')).toBeNull()
 
     await trigger.trigger('click')
-    expect(document.body.querySelector('[role="menuitem"][aria-label="账户设置"]')).not.toBeNull()
+    expect(document.body.querySelector('[role="menuitem"][aria-label="系统设置"]')).not.toBeNull()
 
-    const accountItem = document.body.querySelector('[role="menuitem"][aria-label="账户设置"]') as HTMLElement
+    const accountItem = document.body.querySelector('[role="menuitem"][aria-label="系统设置"]') as HTMLElement
     accountItem.click()
-    expect(router.push).toHaveBeenCalledWith('/account')
+    expect(router.push).toHaveBeenCalledWith('/settings/account')
   })
 })
 
@@ -162,9 +162,9 @@ describe('AppLayout sidebar visibility CSS contract', () => {
 
     expect(appLayoutSource).toContain('<Separator orientation="vertical" class="sidebar-trigger-separator" />')
     expect(appLayoutSource).toContain("import { Separator } from '@/components/ui/separator'")
-    expect(appLayoutSource).toMatch(/\.top-bar\s*\{[^}]*background:\s*\$wolf-bg-card-v2/s)
+    expect(appLayoutSource).toMatch(/\.top-bar\s*\{[^}]*background:\s*hsl\(var\(--card\)\)/s)
     expect(appLayoutSource).toMatch(/\.top-bar\s*\{[^}]*box-shadow:\s*none/s)
-    expect(appLayoutSource).toMatch(/\.top-bar\s*\{[^}]*border-bottom:\s*1px solid \$wolf-border-default-v2/s)
+    expect(appLayoutSource).toMatch(/\.top-bar\s*\{[^}]*border-bottom:\s*1px solid hsl\(var\(--border\)\)/s)
     expect(appLayoutSource).toMatch(/\.sidebar-trigger-separator\s*\{[^}]*height:\s*16px/s)
   })
 

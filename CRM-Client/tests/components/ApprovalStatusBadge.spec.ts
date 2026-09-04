@@ -53,4 +53,11 @@ describe('ApprovalStatusBadge', () => {
     expect(w.classes()).toContain('text-wolf-success-text')
     expect(w.classes()).toContain('bg-wolf-success-bg')
   })
+
+  it('renders a readable fallback for an unknown backend status', () => {
+    const w = mountBadge({ status: 'ARCHIVED' })
+    expect(w.text()).toContain('未知状态')
+    expect(w.attributes('aria-label')).toBe('未知状态')
+    expect(w.find('svg').exists()).toBe(true)
+  })
 })

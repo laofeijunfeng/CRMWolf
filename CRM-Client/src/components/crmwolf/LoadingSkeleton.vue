@@ -16,12 +16,15 @@ interface Props {
   type?: 'list' | 'card' | 'table'
   /** Show avatar placeholder */
   showAvatar?: boolean
+  /** Whether this skeleton owns the screen-reader loading announcement. */
+  announce?: boolean
 }
 
 withDefaults(defineProps<Props>(), {
   rows: 3,
   type: 'list',
   showAvatar: false,
+  announce: true,
 })
 
 const containerClasses = computed((): string =>
@@ -34,7 +37,12 @@ const containerClasses = computed((): string =>
 </script>
 
 <template>
-  <div :class="containerClasses" role="status" aria-label="加载中" aria-live="polite">
+  <div
+    :class="containerClasses"
+    :role="announce ? 'status' : 'presentation'"
+    :aria-label="announce ? '加载中' : undefined"
+    :aria-live="announce ? 'polite' : undefined"
+  >
     <!-- List skeleton -->
     <template v-if="type === 'list'">
       <div

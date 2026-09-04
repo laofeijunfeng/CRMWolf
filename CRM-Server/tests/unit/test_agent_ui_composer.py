@@ -271,6 +271,7 @@ def test_confirmation_preserves_canonical_workflow_options() -> None:
             selection_mode="single",
             min_selections=1,
             max_selections=1,
+            submit_on_select=True,
         )
     )
 
@@ -279,6 +280,7 @@ def test_confirmation_preserves_canonical_workflow_options() -> None:
     interaction = composition.body.blocks[1]
     assert interaction.type == "interaction"
     assert interaction.interaction_type == "confirmation"
+    assert interaction.submit_on_select is True
     assert interaction.submit_label == "提交"
     assert [option.label for option in interaction.options] == ["确认创建", "取消"]
     assert composition.action_drafts[0].target["choices"] == [

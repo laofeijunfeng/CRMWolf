@@ -267,9 +267,6 @@ const customFilterViews = useCustomFilterViews({
   onViewApplySuccess: (tabKey) => headerStore.setActiveTab(tabKey),
 })
 const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
-const activeViewLabel = computed(() =>
-  allTabs.value.find((tab) => tab.key === activeTab.value)?.label ?? '当前列表'
-)
 const customFilterViewSaving = computed(() => customFilterViews.saving.value)
 const activeColumnPreferenceConfig = computed<ViewPreferenceConfig>(() => ({
   version: 1,
@@ -467,7 +464,10 @@ const getRowActions = (row: Lead): TableRowActionSet => {
     return {
       primaryActions: [
         {
+          id: 'claim',
           label: '领取',
+          risk: 'state-transition',
+          resultType: 'status-changed',
           handler: (): void => { void handleClaim(row) },
           visible: canAccessPublic.value
         }
@@ -478,15 +478,20 @@ const getRowActions = (row: Lead): TableRowActionSet => {
   return {
     primaryActions: [
       {
+        id: 'edit',
         label: '编辑',
         desktopPrimary: true,
+        resultType: 'entity-updated',
         handler: (): void => { void handleEdit(row) },
         visible: canEditRow(row),
         icon: Pencil
       },
       {
+        id: 'convert-to-customer',
         label: '转化为客户',
         desktopPrimary: true,
+        risk: 'state-transition',
+        resultType: 'entity-created',
         handler: (): void => { void handleConvert(row) },
         visible: canConvertRow(row),
         icon: CircleCheck
@@ -494,25 +499,37 @@ const getRowActions = (row: Lead): TableRowActionSet => {
     ],
     secondaryActions: [
       {
+        id: 'claim',
         label: '领取',
+        risk: 'state-transition',
+        resultType: 'status-changed',
         handler: (): void => { void handleClaim(row) },
         visible: canClaimLead.value && row.status === 0 && (row.owner_id === null || row.owner_id === undefined || row.owner_id === ''),
         icon: UserPlus
       },
       {
+        id: 'assign',
         label: '分配',
+        risk: 'state-transition',
+        resultType: 'entity-updated',
         handler: (): void => { void handleAssignModal(row) },
         visible: canAssignLead.value,
         icon: UserPlus
       },
       {
+        id: 'return-to-public-pool',
         label: '退回公海',
+        risk: 'state-transition',
+        resultType: 'status-changed',
         handler: (): void => { void handleReturn(row) },
         visible: canReturnRow(row),
         icon: ArrowRightLeft
       },
       {
+        id: 'mark-invalid',
         label: '标记无效',
+        risk: 'destructive',
+        resultType: 'status-changed',
         handler: (): void => { void handleMarkInvalid(row) },
         visible: canEditRow(row) && row.status !== 2,
         icon: XCircle,
@@ -520,7 +537,10 @@ const getRowActions = (row: Lead): TableRowActionSet => {
         separator: true
       },
       {
+        id: 'delete',
         label: '删除',
+        risk: 'destructive',
+        resultType: 'entity-deleted',
         handler: (): void => { void handleDelete(row) },
         visible: canDeleteRow(row),
         icon: Trash2,
@@ -623,7 +643,6 @@ watchEffect(() => {
       v-model:filters="activeFilters"
       :sorts="activeSorts"
       view-key="leads.list"
-      :view-label="activeViewLabel"
       :view-applying="customFilterViews.applying.value"
       :view-apply-error="customFilterViews.applyError.value"
       @retry-view-apply="customFilterViews.retryViewApply"

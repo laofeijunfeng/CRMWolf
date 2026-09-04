@@ -5,15 +5,12 @@ import type { FeedbackError } from '@/types/feedback'
 import type { FilterSummaryItem, SortSummaryItem } from './listViewState'
 
 withDefaults(defineProps<{
-  viewLabel: string
-  scopeLabel?: string
   filters: FilterSummaryItem[]
   sorts: SortSummaryItem[]
   hiddenColumnCount: number
   applying?: boolean
   applyError?: FeedbackError | null
 }>(), {
-  scopeLabel: '',
   applying: false,
   applyError: null,
 })
@@ -28,12 +25,6 @@ const emit = defineEmits<{
 <template>
   <section class="list-view-state-summary" aria-label="当前列表状态">
     <div class="list-view-state-summary-main">
-      <div class="list-view-state-summary-context">
-        <span class="list-view-state-summary-label">当前视图</span>
-        <strong class="list-view-state-summary-view">{{ viewLabel }}</strong>
-        <span v-if="scopeLabel" class="list-view-state-summary-scope">· {{ scopeLabel }}</span>
-      </div>
-
       <div class="list-view-state-summary-filters" aria-live="polite">
         <span v-if="filters.length === 0" class="list-view-state-summary-muted">
           无额外筛选
@@ -124,7 +115,6 @@ const emit = defineEmits<{
   gap: 6px 12px;
 }
 
-.list-view-state-summary-context,
 .list-view-state-summary-filters,
 .list-view-state-summary-secondary,
 .list-view-state-summary-feedback,
@@ -136,20 +126,11 @@ const emit = defineEmits<{
   gap: 6px;
 }
 
-.list-view-state-summary-context {
-  flex-shrink: 0;
-}
 
-.list-view-state-summary-label,
-.list-view-state-summary-muted,
-.list-view-state-summary-scope {
+.list-view-state-summary-muted {
   color: $wolf-text-tertiary-v2;
 }
 
-.list-view-state-summary-view {
-  color: $wolf-text-primary-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-}
 
 .list-view-state-summary-filter {
   display: inline-flex;

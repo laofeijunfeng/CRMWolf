@@ -125,13 +125,21 @@ class WorkflowInteraction(WorkflowContractModel):
             raise ValueError("text input interactions require allow_blank")
         if self.interaction_type != "text_input" and self.allow_blank is not None:
             raise ValueError("allow_blank is only valid for text input interactions")
-        if self.submit_on_select and (
-            self.interaction_type != "choice"
-            or self.selection_mode != "single"
-            or self.min_selections != 1
-            or self.max_selections != 1
-        ):
-            raise ValueError("submit_on_select requires an exact single-choice interaction")
+        if self.submit_on_select:
+            if self.interaction_type == "choice":
+                valid_submit_shape = (
+                    self.selection_mode == "single"
+                    and self.min_selections == 1
+                    and self.max_selections == 1
+                )
+            elif self.interaction_type == "confirmation":
+                # A confirmation is intrinsically a single binary decision; it
+                # does not need the generic choice selection bounds.
+                valid_submit_shape = self.selection_mode == "single"
+            else:
+                valid_submit_shape = False
+            if not valid_submit_shape:
+                raise ValueError("submit_on_select requires an exact single-choice interaction")
         return self
 
 

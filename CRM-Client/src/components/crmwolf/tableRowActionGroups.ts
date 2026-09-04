@@ -11,6 +11,11 @@ export interface DesktopTableRowActionProjection {
   groups: TableRowActionGroup[]
 }
 
+export interface MobileTableRowActionProjection {
+  primaryActions: ActionConfig[]
+  secondaryActions: ActionConfig[]
+}
+
 export interface TableRowActionGroup {
   key: 'common' | 'more' | 'danger'
   label: string
@@ -30,9 +35,72 @@ function isVisibleAction(action: ActionConfig): boolean {
 
 const LEGACY_VIEW_ACTION_LABELS = new Set(['查看', '详情'])
 
+export function getTableRowActionKey(action: ActionConfig, index: number): string {
+  return `${action.id ?? action.label}-${index}`
+}
+
 export function isDetailTableRowAction(action: ActionConfig): boolean {
   // kind 是新的稳定语义；保留旧文案判断只用于兼容尚未迁移的页面。
-  return action.kind === 'detail' || (action.kind === undefined && LEGACY_VIEW_ACTION_LABELS.has(action.label))
+  return action.id === 'detail' || action.kind === 'detail' ||
+    (action.id === undefined && action.kind === undefined && LEGACY_VIEW_ACTION_LABELS.has(action.label))
+}
+
+function getVisibleNonDetailActions(actions: ActionConfig[] | undefined): ActionConfig[] {
+  return (actions ?? []).filter((action) => isVisibleAction(action) && !isDetailTableRowAction(action))
+}
+
+/**
+ * 为窄视口卡片生成与桌面一致的动作层级。
+ *
+ * 移动端没有桌面操作列的宽度约束，但危险动作仍不得因为调用方把它
+ * 放进 primaryActions 就直接成为卡片上的常显按钮。
+ */
+export function getMobileTableRowActions(
+  actions: TableRowActionSet | null | undefined
+): MobileTableRowActionProjection {
+  const primaryActions = getVisibleNonDetailActions(actions?.primaryActions)
+  const secondaryActions = getVisibleNonDetailActions(actions?.secondaryActions)
+  const safePrimaryActions = primaryActions.filter((action) => !isDestructiveTableRowAction(action))
+  const destructivePrimaryActions = primaryActions.filter(isDestructiveTableRowAction)
+
+  return {
+    primaryActions: safePrimaryActions,
+    secondaryActions: [...secondaryActions, ...destructivePrimaryActions]
+  }
+}
+
+export function isDestructiveTableRowAction(action: ActionConfig): boolean {
+  return action.destructive === true || action.risk === 'destructive'
+}
+
+export function getTableRowActionLabel(action: ActionConfig): string {
+  if (action.disabledReason === undefined || action.disabledReason.trim() === '') return action.label
+  return `${action.label}（${action.disabledReason}）`
+}
+
+function isStateAction(action: ActionConfig): boolean {
+  return action.risk === 'state-transition' || action.risk === 'approval'
+}
+
+function selectExplicitPrimaryActions(actions: ActionConfig[]): ActionConfig[] {
+  if (actions.length <= 2) return actions
+
+  // 当多个候选动作竞争主操作位时，至少保留一个当前状态迁移动作；
+  // 这样“提交/撤回/开票”等不会因为被放在 secondaryActions 而永远
+  // 排在编辑、下载之后。其余动作仍然进入更多菜单，不改变可达性。
+  const stateAction = actions.find(isStateAction)
+  const normalActions = actions.filter((action) => !isStateAction(action))
+  const selected = normalActions.slice(0, stateAction === undefined ? 2 : 1)
+  if (stateAction !== undefined) selected.push(stateAction)
+
+  if (selected.length < 2) {
+    for (const action of actions) {
+      if (!selected.includes(action)) selected.push(action)
+      if (selected.length === 2) break
+    }
+  }
+
+  return selected
 }
 
 function getActionButtonWidth(action: ActionConfig): number {
@@ -77,16 +145,16 @@ export function getDesktopTableRowActions(
   const actionable = allActions.filter((action) => !isDetailTableRowAction(action))
   const explicitlyPrimary = actionable.filter((action) =>
     action.desktopPrimary === true &&
-    action.destructive !== true &&
+    !isDestructiveTableRowAction(action) &&
     canRenderAsDesktopPrimary(action)
   )
   const fallbackPrimary = actionable.find((action) =>
     primaryActions.includes(action) &&
-    action.destructive !== true &&
+    !isDestructiveTableRowAction(action) &&
     canRenderAsDesktopPrimary(action)
   )
   const promoted = explicitlyPrimary.length > 0
-    ? explicitlyPrimary.slice(0, 2)
+    ? selectExplicitPrimaryActions(explicitlyPrimary)
     : fallbackPrimary === undefined ? [] : [fallbackPrimary]
   const promotedSet = new Set(promoted)
   let menuActions = actionable.filter((action) => !promotedSet.has(action))
@@ -135,9 +203,9 @@ export function groupTableRowActions(
     isVisibleAction(action) && !isDetailTableRowAction(action)
   )
 
-  const common = primaryActions.filter((action) => action.destructive !== true)
-  const more = secondaryActions.filter((action) => action.destructive !== true)
-  const danger = [...primaryActions, ...secondaryActions].filter((action) => action.destructive === true)
+  const common = primaryActions.filter((action) => !isDestructiveTableRowAction(action))
+  const more = secondaryActions.filter((action) => !isDestructiveTableRowAction(action))
+  const danger = [...primaryActions, ...secondaryActions].filter(isDestructiveTableRowAction)
 
   const groups: TableRowActionGroup[] = []
   if (common.length > 0) {
