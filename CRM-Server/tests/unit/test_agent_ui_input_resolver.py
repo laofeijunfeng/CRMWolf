@@ -56,6 +56,25 @@ def _confirmation_target() -> dict:
     }
 
 
+def _legacy_workflow_choice_target() -> dict:
+    return {
+        "interaction_type": "choice",
+        "workflow_trigger": {
+            "type": "workflow_trigger",
+            "workflow": "customer_opportunity_suggestion",
+            "job_public_id": "cosj_legacy_1",
+            "action": "MOVE_OPPORTUNITY_STAGE",
+        },
+        "selection_mode": "single",
+        "min_selections": 1,
+        "max_selections": 1,
+        "choices": [
+            {"value": "confirm", "label": "是", "disabled": False},
+            {"value": "cancel", "label": "否", "disabled": False},
+        ],
+    }
+
+
 def _form_target() -> dict:
     return {
         "interaction_type": "form",
@@ -153,6 +172,40 @@ def test_single_choice_returns_canonical_workflow_resume_input() -> None:
             "customer_public_id": "cus_1",
         },
     )
+
+
+@pytest.mark.parametrize(
+    ("choice", "kind", "content"),
+    [("confirm", "confirm", "确认"), ("cancel", "reject", "取消")],
+)
+def test_legacy_binary_workflow_choice_uses_typed_confirmation_protocol(
+    choice: str,
+    kind: str,
+    content: str,
+) -> None:
+    resolved = InteractionInputResolver().resolve_interaction_values(
+        _legacy_workflow_choice_target(),
+        {"choice": choice},
+    )
+
+    assert resolved.kind == kind
+    assert resolved.content == content
+
+
+def test_general_choice_with_confirmation_values_stays_text_without_workflow_trigger() -> None:
+    target = _choice_target()
+    target["choices"] = [
+        {"value": "confirm", "label": "确认客户", "disabled": False},
+        {"value": "cancel", "label": "取消选择", "disabled": False},
+    ]
+
+    resolved = InteractionInputResolver().resolve_interaction_values(
+        target,
+        {"choice": "confirm"},
+    )
+
+    assert resolved.kind == "text"
+    assert resolved.content == "confirm"
 
 
 def test_multiple_choice_preserves_authorized_selection_order_and_metadata() -> None:

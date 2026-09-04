@@ -6,6 +6,7 @@ import json
 import math
 from collections.abc import Mapping
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import JsonValue, ValidationError
 
@@ -30,6 +31,14 @@ class InteractionInputResolver:
         if interaction_type == "choice":
             content, choice_metadata = self._resolve_choice(target, values)
             metadata.update(choice_metadata)
+            workflow_decision = self._workflow_choice_decision(target, content)
+            if workflow_decision is not None:
+                return WorkflowResumeInput(
+                    kind=workflow_decision,
+                    content="确认" if workflow_decision == "confirm" else "取消",
+                    source="web",
+                    metadata=metadata,
+                )
             return WorkflowResumeInput(
                 kind="text",
                 content=content,
@@ -221,6 +230,51 @@ class InteractionInputResolver:
             "selected_values": selected_values,
             "selected_choices": selected_choice_metadata,
         }
+
+    @staticmethod
+    def _workflow_choice_decision(
+        target: Mapping[str, JsonValue],
+        submitted_value: str,
+    ) -> Literal["confirm", "reject"] | None:
+        """Translate a legacy binary workflow choice into the canonical protocol.
+
+        ``choice`` is a general-purpose interaction used for selecting customers,
+        opportunities, members, and other domain values.  Only a server-signed
+        workflow trigger with the exact binary ``confirm``/``cancel`` contract is
+        allowed to enter the typed confirmation channel.  The decision is based
+        on signed protocol values, never on button order or display labels.
+        """
+        workflow_trigger = target.get("workflow_trigger")
+        if not isinstance(workflow_trigger, Mapping):
+            return None
+        trigger_action = workflow_trigger.get("action")
+        if (
+            workflow_trigger.get("type") != "workflow_trigger"
+            or workflow_trigger.get("workflow") != "customer_opportunity_suggestion"
+            or not isinstance(trigger_action, str)
+            or trigger_action not in {"CREATE_OPPORTUNITY", "MOVE_OPPORTUNITY_STAGE"}
+        ):
+            return None
+        if target.get("selection_mode") != "single":
+            return None
+        raw_choices = target.get("choices")
+        if not isinstance(raw_choices, list):
+            return None
+        choice_values: set[str] = set()
+        for choice in raw_choices:
+            if not isinstance(choice, Mapping):
+                return None
+            choice_value = choice.get("value")
+            if not isinstance(choice_value, str):
+                return None
+            choice_values.add(choice_value)
+        if choice_values != {"confirm", "cancel"}:
+            return None
+        if submitted_value == "confirm":
+            return "confirm"
+        if submitted_value == "cancel":
+            return "reject"
+        return None
 
     @classmethod
     def _validated_form_values(

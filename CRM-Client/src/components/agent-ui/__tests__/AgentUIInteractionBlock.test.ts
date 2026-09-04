@@ -102,3 +102,89 @@ it('renders submitted text input as immutable text instead of an empty editor', 
   expect(wrapper.find('textarea').exists()).toBe(false)
   expect(wrapper.find('button').exists()).toBe(false)
 })
+
+it('highlights only the selected choice instead of the first option', async () => {
+  const block = InteractionBlockSchema.parse({
+    id: 'b_opportunity_confirmation',
+    type: 'interaction',
+    interaction_id: 'int_opportunity_confirmation',
+    interaction_type: 'confirmation',
+    selection_mode: 'single',
+    state: 'ACTIVE',
+    prompt: '是否推进商机？',
+    fields: [],
+    options: [
+      { value: 'confirm', label: '是', description: null, disabled: false },
+      { value: 'cancel', label: '否', description: null, disabled: false },
+    ],
+    submit_label: '提交',
+    submit_action_id: 'act_opportunity_confirmation',
+  })
+
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+  const buttons = wrapper.findAll('button')
+
+  expect(buttons[0]?.attributes('aria-pressed')).toBe('false')
+  expect(buttons[1]?.attributes('aria-pressed')).toBe('false')
+  expect(buttons[0]?.classes()).not.toContain('bg-primary')
+
+  await buttons[1]?.trigger('click')
+
+  expect(buttons[0]?.attributes('aria-pressed')).toBe('false')
+  expect(buttons[1]?.attributes('aria-pressed')).toBe('true')
+  expect(buttons[0]?.classes()).not.toContain('bg-primary')
+  expect(buttons[1]?.classes()).toContain('bg-accent')
+})
+
+it('submits a confirmation immediately when the signed contract opts in', async () => {
+  const block = InteractionBlockSchema.parse({
+    id: 'b_opportunity_confirmation_submit',
+    type: 'interaction',
+    interaction_id: 'int_opportunity_confirmation_submit',
+    interaction_type: 'confirmation',
+    selection_mode: 'single',
+    submit_on_select: true,
+    state: 'ACTIVE',
+    prompt: '是否推进商机？',
+    fields: [],
+    options: [
+      { value: 'confirm', label: '是', description: null, disabled: false },
+      { value: 'cancel', label: '否', description: null, disabled: false },
+    ],
+    submit_label: '提交',
+    submit_action_id: 'act_opportunity_confirmation_submit',
+  })
+
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+  await wrapper.findAll('button')[1]?.trigger('click')
+
+  expect(wrapper.emitted('submit')).toEqual([
+    ['act_opportunity_confirmation_submit', { choice: 'cancel' }],
+  ])
+})
+
+it('renders a submitted choice as immutable text and keeps the final choice visible', () => {
+  const block = InteractionBlockSchema.parse({
+    id: 'b_opportunity_confirmation_submitted',
+    type: 'interaction',
+    interaction_id: 'int_opportunity_confirmation_submitted',
+    interaction_type: 'confirmation',
+    selection_mode: 'single',
+    state: 'SUBMITTED',
+    prompt: '是否推进商机？',
+    fields: [],
+    options: [
+      { value: 'confirm', label: '是', description: null, disabled: false },
+      { value: 'cancel', label: '否', description: null, disabled: false },
+    ],
+    submit_label: '提交',
+    submit_action_id: null,
+    submitted_values: { choice: 'cancel' },
+  })
+
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+
+  expect(wrapper.get('[data-agent-ui-submitted-choice]').text()).toContain('已选择：否')
+  expect(wrapper.text()).toContain('已提交')
+  expect(wrapper.findAll('button')).toHaveLength(0)
+})

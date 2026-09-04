@@ -36,8 +36,27 @@ const fieldValues = ref<Record<string, JsonValue>>({})
 const validationAttempted = ref(false)
 const submitting = ref(false)
 
+const submittedChoiceValue = computed<string | null>(() => {
+  if (props.block.state !== 'SUBMITTED' ||
+      (props.block.interaction_type !== 'choice' && props.block.interaction_type !== 'confirmation') ||
+      props.block.submitted_values === null ||
+      props.block.submitted_values === undefined) {
+    return null
+  }
+
+  const value = props.block.submitted_values['choice']
+  return typeof value === 'string' && value.length > 0 ? value : null
+})
+
+const submittedChoiceOption = computed(() => {
+  const value = submittedChoiceValue.value
+  return value === null
+    ? null
+    : props.block.options.find(option => option.value === value) ?? null
+})
+
 const resetValues = (): void => {
-  selectedValues.value = []
+  selectedValues.value = submittedChoiceValue.value === null ? [] : [submittedChoiceValue.value]
   fieldValues.value = Object.fromEntries(
     props.block.fields.map(field => [field.key, field.default_value])
   )
@@ -46,7 +65,12 @@ const resetValues = (): void => {
 }
 
 watch(
-  () => [props.block.interaction_id, props.block.state, props.block.submit_action_id] as const,
+  () => [
+    props.block.interaction_id,
+    props.block.state,
+    props.block.submit_action_id,
+    submittedChoiceValue.value,
+  ] as const,
   resetValues,
   { immediate: true }
 )
@@ -122,12 +146,11 @@ const toggleOption = (value: string): void => {
 }
 
 const submitsOnOptionClick = computed(() => (
+  // Confirmation cards historically submitted on option click even when old
+  // persisted payloads omitted submit_on_select. Keep that compatibility while
+  // making the explicit flag authoritative for generic single choices.
   props.block.interaction_type === 'confirmation'
-  || (
-    props.block.interaction_type === 'choice'
-    && props.block.selection_mode === 'single'
-    && props.block.submit_on_select === true
-  )
+  || props.block.submit_on_select === true
 ))
 
 const handleOptionClick = (value: string): void => {
@@ -343,7 +366,15 @@ const submit = async (): Promise<void> => {
       <span class="shrink-0 text-xs text-muted-foreground">{{ stateLabel }}</span>
     </header>
 
-    <template v-if="block.interaction_type === 'choice' || block.interaction_type === 'confirmation'">
+    <div
+      v-if="submittedChoiceValue !== null"
+      class="rounded-lg border border-border/70 bg-background/70 px-3 py-2 text-sm text-foreground"
+      data-agent-ui-submitted-choice
+    >
+      <span class="font-medium">已选择：</span>{{ submittedChoiceOption?.label ?? submittedChoiceValue }}
+    </div>
+
+    <template v-else-if="block.interaction_type === 'choice' || block.interaction_type === 'confirmation'">
       <div
         class="grid gap-2"
         role="group"
@@ -354,7 +385,7 @@ const submit = async (): Promise<void> => {
         v-for="(option, index) in block.options"
         :key="option.value"
         type="button"
-        :variant="index === 0 ? 'default' : 'outline'"
+        :variant="optionSelected(option.value) ? 'default' : 'outline'"
         class="grid min-h-11 h-auto w-full justify-start gap-1 px-3 py-2 text-left"
         :class="{ 'border-primary bg-accent text-accent-foreground': optionSelected(option.value) }"
         :aria-pressed="optionSelected(option.value)"
