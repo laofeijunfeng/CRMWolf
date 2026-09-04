@@ -38,6 +38,8 @@
         :selected-row-keys="selectedRowKeys"
         :get-row-selectable="isRowSelectable"
         view-key="approval-center.list"
+        :view-label="activeViewLabel"
+        :effective-filters="effectiveFilters"
         column-config-enabled
         height="calc(100vh - 108px)"
         height-strategy="fill"
@@ -1228,6 +1230,13 @@ const tabs = computed(() => {
     { key: 'submitted', label: '我提交的' }
   ]
 })
+const activeViewLabel = computed(() =>
+  tabs.value.find((tab) => tab.key === activeTab.value)?.label ?? '审批列表'
+)
+const effectiveFilters = computed(() => activeTab.value === 'pending'
+  ? withoutFilterFields(activeFilters.value, ['status'])
+  : activeFilters.value
+)
 
 // ==================== 列表字段注册表 ====================
 const approvalBusinessTypeOptions = [

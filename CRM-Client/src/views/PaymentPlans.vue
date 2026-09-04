@@ -139,7 +139,7 @@ const registerDefaultAmount = computed<number | null>(() => {
 const registerDefaultPayerName = computed<string>(() => selectedConfirmPlan.value?.customer_name?.trim() ?? '')
 
 // ==================== Methods ====================
-const fetchPaymentPlans = async (): Promise<void> => {
+const fetchPaymentPlans = async (): Promise<boolean> => {
   const requestId = ++listRequestId.value
   loadError.value = null
   loading.value = true
@@ -162,12 +162,14 @@ const fetchPaymentPlans = async (): Promise<void> => {
     }
 
     const data = await paymentApi.listPaymentPlans(params)
-    if (requestId !== listRequestId.value) return
+    if (requestId !== listRequestId.value) return false
     tableData.value = data.items
     pagination.total = data.total
+    return true
   } catch (error) {
-    if (requestId !== listRequestId.value) return
+    if (requestId !== listRequestId.value) return false
     loadError.value = toFeedbackError(error, '回款计划列表')
+    return false
   } finally {
     if (requestId === listRequestId.value) {
       loading.value = false
@@ -181,8 +183,24 @@ const customFilterViews = useCustomFilterViews({
   activeSorts,
   activeColumns,
   refresh: fetchPaymentPlans,
+  onViewApplySuccess: (tabKey) => headerStore.setActiveTab(tabKey),
 })
 const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
+const activeViewLabel = computed(() =>
+  allTabs.value.find((tab) => tab.key === activeTab.value)?.label ?? '当前列表'
+)
+const effectiveFilters = computed(() => {
+  const tabStatus = activeTab.value === 'pending'
+    ? 'PENDING'
+    : activeTab.value === 'partial'
+      ? 'PARTIAL'
+      : activeTab.value === 'completed'
+        ? 'COMPLETED'
+        : null
+  return tabStatus === null
+    ? activeFilters.value
+    : withoutFilterFields(activeFilters.value, ['status'])
+})
 const customFilterViewSaving = computed(() => customFilterViews.saving.value)
 const activeColumnPreferenceConfig = computed<ViewPreferenceConfig>(() => ({
   version: 1,
@@ -465,6 +483,10 @@ useTopBarRegistration({
 watchEffect(() => {
   if (headerStore.activeTab && headerStore.activeTab !== activeTab.value) {
     pagination.current = 1
+    if (customFilterViews.consumeFailedViewApply(headerStore.activeTab)) {
+      headerStore.activeTab = activeTab.value
+      return
+    }
     if (customFilterViews.applyCustomViewTab(headerStore.activeTab)) {
       return
     }
@@ -499,6 +521,11 @@ watch(
       :total="pagination.total"
       :sorts="activeSorts"
       view-key="payment-plans.list"
+      :view-label="activeViewLabel"
+      :effective-filters="effectiveFilters"
+      :view-applying="customFilterViews.applying.value"
+      :view-apply-error="customFilterViews.applyError.value"
+      @retry-view-apply="customFilterViews.retryViewApply"
       column-config-enabled
       :column-preference-config="activeColumnPreferenceConfig"
       :column-preference-mode="columnPreferenceMode"

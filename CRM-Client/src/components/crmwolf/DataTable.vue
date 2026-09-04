@@ -31,13 +31,14 @@ import LiveRegion from './LiveRegion.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import ColumnConfigPopover from './ColumnConfigPopover.vue'
 import ListFilterPopover from './ListFilterPopover.vue'
-import ListSortPopover from './ListSortPopover.vue'
+import ListAdvancedTools from './ListAdvancedTools.vue'
+import ListViewStateSummary from './ListViewStateSummary.vue'
 import SelectField from './SelectField.vue'
 import { viewPreferenceApi, type ViewPreferenceConfig, type ViewPreferenceScope } from '@/api/viewPreference'
 import type { ColumnConfigOption } from './columnConfigTypes'
 import type { ListFilterCondition } from './listFilterTypes'
+import { buildFilterSummaryItems, buildSortSummaryItems, countHiddenColumns } from './listViewState'
 import type { ListSortCondition } from './listSortTypes'
 import { projectListFieldCatalog, type DataTableColumn, type ListFieldDefinition } from './listFieldCatalog'
 import { buildPaginationEntries, type PaginationEntry } from './paginationWindow'
@@ -115,8 +116,18 @@ interface Props {
   getRowLabel?: (row: T, index: number) => string
   /** 桌面行操作与右键 / 键盘菜单的动作来源；不传则不显示行操作 */
   getRowActions?: (row: T, index: number) => TableRowActionSet | null | undefined
-  /** 当前筛选条件 */
+  /** 当前视图名称，用于让列表范围可持续确认 */
+  viewLabel?: string
+  /** 当前业务范围名称；不伪造为普通筛选条件 */
+  scopeLabel?: string
+  /** 视图应用中 */
+  viewApplying?: boolean
+  /** 视图应用失败 */
+  viewApplyError?: FeedbackError | null
+  /** 当前筛选条件（用户设置） */
   filters?: ListFilterCondition[]
+  /** 当前请求实际生效的筛选条件；用于状态摘要和空状态判断 */
+  effectiveFilters?: ListFilterCondition[] | undefined
   /** 当前排序条件 */
   sorts?: ListSortCondition[]
   /** 窄视口展示模式 */
@@ -178,6 +189,11 @@ const props = withDefaults(defineProps<Props>(), {
   columnPreferenceMode: 'default',
   filterViewSaveEnabled: false,
   filterViewSaveLoading: false,
+  viewLabel: '当前列表',
+  scopeLabel: '',
+  viewApplying: false,
+  viewApplyError: null,
+  effectiveFilters: undefined,
 })
 
 // ==================== Emits ====================
@@ -197,6 +213,9 @@ const emit = defineEmits<{
   'column-config-current-change': [value: ViewPreferenceConfig]
   'column-config-save': [value: ViewPreferenceConfig]
   'column-config-reset': []
+  'remove-filter': [id: string]
+  'clear-filters': []
+  'retry-view-apply': []
 }>()
 
 // ==================== Computed ====================
@@ -262,7 +281,7 @@ const hasRefreshError = computed(() =>
   effectiveViewState.value === 'error' && props.data.length > 0
 )
 const emptyReason = computed<EmptyStateReason>(() =>
-  props.emptyReason ?? (props.filters.length > 0 ? 'filtered' : 'no-data')
+  props.emptyReason ?? (effectiveFilters.value.length > 0 ? 'filtered' : 'no-data')
 )
 const emptyCopy = computed(() =>
   getEmptyStateCopy(emptyReason.value, {
@@ -277,12 +296,23 @@ const projectedFields = computed(() => projectListFieldCatalog(props.fields))
 const tableColumns = computed<DataTableColumn[]>(() => projectedFields.value.columns)
 const normalizedFilterFields = computed(() => projectedFields.value.filterFields)
 const normalizedFilters = computed<ListFilterCondition[]>(() => props.filters ?? [])
+const effectiveFilters = computed<ListFilterCondition[]>(() => props.effectiveFilters ?? normalizedFilters.value)
 const filterViewSaveAvailable = computed(() => props.filterViewSaveEnabled === true)
 const filterViewSaving = computed(() => props.filterViewSaveLoading === true)
 const normalizedSortFields = computed(() => projectedFields.value.sortFields)
 const normalizedSorts = computed<ListSortCondition[]>(() => props.sorts ?? [])
+const filterSummaryItems = computed(() =>
+  buildFilterSummaryItems(effectiveFilters.value, normalizedFilterFields.value)
+)
+const sortSummaryItems = computed(() =>
+  buildSortSummaryItems(normalizedSorts.value, normalizedSortFields.value)
+)
+const hiddenColumnCount = computed(() => countHiddenColumns(columnConfigOptions.value))
+const hasAdvancedTools = computed(() =>
+  normalizedSortFields.value.length > 0 || isColumnConfigAvailable.value
+)
 const hasTableTools = computed(() =>
-  normalizedFilterFields.value.length > 0 || normalizedSortFields.value.length > 0 || isColumnConfigAvailable.value
+  normalizedFilterFields.value.length > 0 || hasAdvancedTools.value
 )
 const pageSizeOptions = computed(() =>
   props.pageSizes.map((size) => ({
@@ -670,6 +700,37 @@ function handleFilterSaveView(filters: ListFilterCondition[]): void {
   emit('filter-save-view', filters)
 }
 
+function areFilterValuesEqual(
+  left: ListFilterCondition['value'],
+  right: ListFilterCondition['value'],
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+function handleRemoveFilter(id: string): void {
+  const summary = filterSummaryItems.value.find((item) => item.id === id)
+  if (!summary) return
+
+  const isEmptyOperator = summary.operator === 'is_empty' || summary.operator === 'is_not_empty'
+  const index = normalizedFilters.value.findIndex((filter) => (
+    filter.field === summary.field
+    && filter.op === summary.operator
+    && (isEmptyOperator || areFilterValuesEqual(filter.value, summary.value))
+  ))
+  if (index < 0) return
+
+  const nextFilters = normalizedFilters.value.filter((_, filterIndex) => filterIndex !== index)
+  emit('update:filters', nextFilters)
+  emit('filter-apply', nextFilters)
+  emit('remove-filter', id)
+}
+
+function handleClearFilters(): void {
+  emit('update:filters', [])
+  emit('filter-reset')
+  emit('clear-filters')
+}
+
 function handleSortUpdate(sorts: ListSortCondition[]): void {
   emit('update:sorts', sorts)
 }
@@ -910,29 +971,40 @@ onBeforeUnmount(() => {
           @reset="handleFilterReset"
           @save-view="handleFilterSaveView"
         />
-        <ListSortPopover
-          v-if="normalizedSortFields.length > 0"
-          :model-value="normalizedSorts"
-          :fields="normalizedSortFields"
-          @update:model-value="handleSortUpdate"
-          @apply="handleSortApply"
-          @reset="handleSortReset"
-        />
-        <ColumnConfigPopover
-          v-if="isColumnConfigAvailable"
+        <ListAdvancedTools
+          v-if="hasAdvancedTools"
+          :sorts="normalizedSorts"
+          :sort-fields="normalizedSortFields"
           :columns="columnConfigOptions"
-          :active="columnConfigActive"
-          :active-count="columnConfigActiveCount"
-          :scope="activeColumnConfigScope"
-          :scope-editable="columnPreferenceMode === 'default'"
-          :loading="columnConfigLoading"
-          :saving="columnConfigSaving"
-          @change="handleColumnConfigChange"
-          @save="handleColumnConfigSave"
-          @reset="handleColumnConfigReset"
+          :column-config-enabled="isColumnConfigAvailable"
+          :column-config-active="columnConfigActive"
+          :column-config-active-count="columnConfigActiveCount"
+          :column-config-scope="activeColumnConfigScope"
+          :column-preference-mode="columnPreferenceMode ?? 'default'"
+          :column-config-loading="columnConfigLoading"
+          :column-config-saving="columnConfigSaving"
+          @update:sorts="handleSortUpdate"
+          @sort-apply="handleSortApply"
+          @sort-reset="handleSortReset"
+          @column-config-change="handleColumnConfigChange"
+          @column-config-save="handleColumnConfigSave"
+          @column-config-reset="handleColumnConfigReset(activeColumnConfigScope)"
         />
         <slot name="tableTools" />
       </div>
+
+      <ListViewStateSummary
+        :view-label="viewLabel ?? '当前列表'"
+        :scope-label="scopeLabel ?? ''"
+        :filters="filterSummaryItems"
+        :sorts="sortSummaryItems"
+        :hidden-column-count="hiddenColumnCount"
+        :applying="viewApplying ?? false"
+        :apply-error="viewApplyError ?? null"
+        @remove-filter="handleRemoveFilter"
+        @clear-filters="handleClearFilters"
+        @retry-view-apply="emit('retry-view-apply')"
+      />
 
       <!-- 表格内容区（可滚动） -->
       <div

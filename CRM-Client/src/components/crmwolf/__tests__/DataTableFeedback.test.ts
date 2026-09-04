@@ -142,3 +142,39 @@ describe('DataTable feedback states', () => {
   })
 
 })
+
+describe('DataTable list-state summary actions', () => {
+  it('removes the matching effective filter without using the effective-list index', async () => {
+    const wrapper = mount(DataTable, {
+      props: {
+        ...baseProps,
+        fields: [
+          {
+            key: 'status',
+            label: '状态',
+            type: 'enum' as const,
+            column: true,
+            options: [{ value: 'open', label: '处理中' }],
+          },
+          { key: 'name', label: '名称', type: 'text' as const, column: true },
+        ],
+        data: [{ status: 'open', name: 'Acme' }],
+        filters: [
+          { field: 'status', op: 'eq', value: 'open' },
+          { field: 'name', op: 'contains', value: 'Acme' },
+        ],
+        effectiveFilters: [
+          { field: 'name', op: 'contains', value: 'Acme' },
+        ],
+      },
+    })
+
+    await wrapper.get('[aria-label="移除筛选：名称"]').trigger('click')
+    expect(wrapper.emitted('update:filters')?.[0]?.[0]).toEqual([
+      { field: 'status', op: 'eq', value: 'open' },
+    ])
+    expect(wrapper.emitted('filter-apply')?.[0]?.[0]).toEqual([
+      { field: 'status', op: 'eq', value: 'open' },
+    ])
+  })
+})

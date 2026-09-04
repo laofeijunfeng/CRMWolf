@@ -138,8 +138,12 @@ const customFilterViews = useCustomFilterViews({
   activeSorts,
   activeColumns,
   refresh: fetchTasks,
+  onViewApplySuccess: (tabKey) => headerStore.setActiveTab(tabKey),
 })
 const allTabs = computed(() => customFilterViews.mergeTabs(tabs.value))
+const activeViewLabel = computed(() =>
+  allTabs.value.find((tab) => tab.key === activeTab.value)?.label ?? '当前列表'
+)
 const activeColumnPreferenceConfig = computed<ViewPreferenceConfig>(() => ({ version: 1, columns: activeColumns.value }))
 const columnPreferenceMode = computed<'default' | 'custom'>(() => isCustomFilterViewTab(activeTab.value) ? 'custom' : 'default')
 
@@ -167,7 +171,14 @@ function taskStatusForTab(tab: string): FollowUpTaskStatusFilter {
   return 'open'
 }
 
-async function fetchTasks(): Promise<void> {
+const effectiveFilters = computed(() => {
+  const status = taskStatusForTab(activeTab.value)
+  return status === 'all'
+    ? activeFilters.value
+    : withoutFilterFields(activeFilters.value, ['status_label'])
+})
+
+async function fetchTasks(): Promise<boolean> {
   const requestId = ++latestTaskListRequest
   const status = taskStatusForTab(activeTab.value)
   const effectiveFilters = status === 'all'
@@ -187,12 +198,14 @@ async function fetchTasks(): Promise<void> {
     // A list request started before a transition may finish after the
     // post-transition refresh. Never let that stale response put the closed
     // task back into the current table.
-    if (requestId !== latestTaskListRequest) return
+    if (requestId !== latestTaskListRequest) return false
     tasks.value = response.items
     total.value = response.total
+    return true
   } catch (error) {
-    if (requestId !== latestTaskListRequest) return
+    if (requestId !== latestTaskListRequest) return false
     loadError.value = toFeedbackError(error, '客户追踪')
+    return false
   } finally {
     if (requestId === latestTaskListRequest) loading.value = false
   }
@@ -566,6 +579,10 @@ useTopBarRegistration({
 watchEffect(() => {
   if (headerStore.activeTab !== null && headerStore.activeTab !== undefined && headerStore.activeTab !== '' && headerStore.activeTab !== activeTab.value) {
     page.value = 1
+    if (customFilterViews.consumeFailedViewApply(headerStore.activeTab)) {
+      headerStore.activeTab = activeTab.value
+      return
+    }
     if (customFilterViews.applyCustomViewTab(headerStore.activeTab)) return
     const restoredBuiltInState = customFilterViews.applyBuiltInTab(headerStore.activeTab)
     if (!restoredBuiltInState) {
@@ -603,6 +620,11 @@ watchEffect(() => {
       v-model:filters="activeFilters"
       v-model:sorts="activeSorts"
       view-key="customer-tracking.list"
+      :view-label="activeViewLabel"
+      :effective-filters="effectiveFilters"
+      :view-applying="customFilterViews.applying.value"
+      :view-apply-error="customFilterViews.applyError.value"
+      @retry-view-apply="customFilterViews.retryViewApply"
       column-config-enabled
       :column-preference-config="activeColumnPreferenceConfig"
       :column-preference-mode="columnPreferenceMode"

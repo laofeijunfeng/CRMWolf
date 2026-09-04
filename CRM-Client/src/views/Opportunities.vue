@@ -273,7 +273,7 @@ const fetchOwnerFilterOptions = async (): Promise<void> => {
   }
 }
 
-const fetchOpportunities = async (): Promise<void> => {
+const fetchOpportunities = async (): Promise<boolean> => {
   const requestId = ++listRequestId.value
   loadError.value = null
   loading.value = true
@@ -297,12 +297,14 @@ const fetchOpportunities = async (): Promise<void> => {
 
     const response = await opportunityApi.getOpportunities(params)
     const normalized = normalizePaginatedResponse(response)
-    if (requestId !== listRequestId.value) return
+    if (requestId !== listRequestId.value) return false
     tableData.value = normalized.items
     pagination.total = normalized.total
+    return true
   } catch (error) {
-    if (requestId !== listRequestId.value) return
+    if (requestId !== listRequestId.value) return false
     loadError.value = toFeedbackError(error, '商机列表')
+    return false
   } finally {
     if (requestId === listRequestId.value) {
       loading.value = false
@@ -316,8 +318,24 @@ const customFilterViews = useCustomFilterViews({
   activeSorts,
   activeColumns,
   refresh: fetchOpportunities,
+  onViewApplySuccess: (tabKey) => headerStore.setActiveTab(tabKey),
 })
 const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
+const activeViewLabel = computed(() =>
+  allTabs.value.find((tab) => tab.key === activeTab.value)?.label ?? '当前列表'
+)
+const effectiveFilters = computed(() => {
+  const tabStatus = activeTab.value === 'active'
+    ? 0
+    : activeTab.value === 'won'
+      ? 1
+      : activeTab.value === 'lost'
+        ? 2
+        : null
+  return tabStatus === null
+    ? activeFilters.value
+    : withoutFilterFields(activeFilters.value, ['status'])
+})
 const customFilterViewSaving = computed(() => customFilterViews.saving.value)
 const activeColumnPreferenceConfig = computed<ViewPreferenceConfig>(() => ({
   version: 1,
@@ -687,6 +705,10 @@ useTopBarRegistration({
 watchEffect(() => {
   if (headerStore.activeTab && headerStore.activeTab !== activeTab.value) {
     pagination.current = 1
+    if (customFilterViews.consumeFailedViewApply(headerStore.activeTab)) {
+      headerStore.activeTab = activeTab.value
+      return
+    }
     if (customFilterViews.applyCustomViewTab(headerStore.activeTab)) {
       return
     }
@@ -728,6 +750,11 @@ watchEffect(() => {
       v-model:filters="activeFilters"
       v-model:sorts="activeSorts"
       view-key="opportunities.list"
+      :view-label="activeViewLabel"
+      :effective-filters="effectiveFilters"
+      :view-applying="customFilterViews.applying.value"
+      :view-apply-error="customFilterViews.applyError.value"
+      @retry-view-apply="customFilterViews.retryViewApply"
       column-config-enabled
       :column-preference-config="activeColumnPreferenceConfig"
       :column-preference-mode="columnPreferenceMode"

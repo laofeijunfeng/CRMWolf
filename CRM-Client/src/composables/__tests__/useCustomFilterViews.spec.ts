@@ -184,6 +184,117 @@ describe('useCustomFilterViews', () => {
     })
   })
 
+
+  it('rolls back the previous view state when applying a custom view fails and retries the target', async () => {
+    const activeTab = ref('all')
+    const activeFilters = ref<ListFilterCondition[]>([
+      { field: 'owner_id', op: 'eq', value: 1 },
+    ])
+    const activeSorts = ref<ListSortCondition[]>([
+      { field: 'updated_time', direction: 'desc' },
+    ])
+    const activeColumns = ref<ViewPreferenceItem['config']['columns']>([
+      { key: 'account_name', order: 0, visible: true },
+    ])
+    const refresh = vi.fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true)
+    const customFilterViews = useCustomFilterViews({
+      viewKey: 'customers.list',
+      activeTab,
+      activeFilters,
+      activeSorts,
+      activeColumns,
+      refresh,
+    })
+    customFilterViews.customViews.value = [customView]
+
+    expect(customFilterViews.applyCustomViewTab('custom-view:1')).toBe(true)
+    await Promise.resolve()
+
+    expect(activeTab.value).toBe('all')
+    expect(activeFilters.value).toEqual([{ field: 'owner_id', op: 'eq', value: 1 }])
+    expect(customFilterViews.applyError.value).not.toBeNull()
+    expect(customFilterViews.applying.value).toBe(false)
+
+    await customFilterViews.retryViewApply()
+
+    expect(activeTab.value).toBe('custom-view:1')
+    expect(activeFilters.value).toEqual(customView.config.filters)
+    expect(customFilterViews.applyError.value).toBeNull()
+    expect(refresh).toHaveBeenCalledTimes(2)
+  })
+
+  it('drops stale custom-view responses when views are switched quickly', async () => {
+    const activeTab = ref('all')
+    const activeFilters = ref<ListFilterCondition[]>([])
+    const activeSorts = ref<ListSortCondition[]>([])
+    const activeColumns = ref<ViewPreferenceItem['config']['columns']>([])
+    let resolveFirst: (value: boolean) => void = () => undefined
+    const firstRequest = new Promise<boolean>((resolve) => {
+      resolveFirst = resolve
+    })
+    const refresh = vi.fn()
+      .mockReturnValueOnce(firstRequest)
+      .mockResolvedValueOnce(true)
+    const customFilterViews = useCustomFilterViews({
+      viewKey: 'customers.list',
+      activeTab,
+      activeFilters,
+      activeSorts,
+      activeColumns,
+      refresh,
+    })
+    const secondView = { ...customView, id: 2, name: '视图 2' }
+    customFilterViews.customViews.value = [customView, secondView]
+
+    customFilterViews.applyCustomViewTab('custom-view:1')
+    customFilterViews.applyCustomViewTab('custom-view:2')
+    resolveFirst(false)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(activeTab.value).toBe('custom-view:2')
+    expect(customFilterViews.applyError.value).toBeNull()
+    expect(customFilterViews.applying.value).toBe(false)
+    expect(refresh).toHaveBeenCalledTimes(2)
+  })
+
+  it('cancels an in-flight custom-view apply when switching to a built-in tab', async () => {
+    const activeTab = ref('all')
+    const builtInFilters: ListFilterCondition[] = [{ field: 'owner_id', op: 'eq', value: 1 }]
+    const activeFilters = ref<ListFilterCondition[]>(builtInFilters)
+    const activeSorts = ref<ListSortCondition[]>([])
+    const activeColumns = ref<ViewPreferenceItem['config']['columns']>([])
+    let resolveRequest: (value: boolean) => void = () => undefined
+    const request = new Promise<boolean>((resolve) => {
+      resolveRequest = resolve
+    })
+    const refresh = vi.fn().mockReturnValue(request)
+    const onViewApplySuccess = vi.fn()
+    const customFilterViews = useCustomFilterViews({
+      viewKey: 'customers.list',
+      activeTab,
+      activeFilters,
+      activeSorts,
+      activeColumns,
+      refresh,
+      onViewApplySuccess,
+    })
+    customFilterViews.customViews.value = [customView]
+
+    customFilterViews.applyCustomViewTab('custom-view:1')
+    customFilterViews.applyBuiltInTab('public')
+    resolveRequest(true)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(activeTab.value).toBe('public')
+    expect(activeFilters.value).toEqual(builtInFilters)
+    expect(customFilterViews.applying.value).toBe(false)
+    expect(onViewApplySuccess).not.toHaveBeenCalled()
+  })
+
   it('updates the active custom view with filters, sorts, and columns together', async () => {
     const activeTab = ref('custom-view:1')
     const activeFilters = ref<ListFilterCondition[]>([

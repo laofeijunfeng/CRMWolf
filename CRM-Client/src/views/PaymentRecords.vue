@@ -158,7 +158,7 @@ const canDeleteRecordRow = (row: PaymentRecordWithDetails): boolean => {
 }
 
 // ==================== Methods ====================
-const fetchPaymentRecords = async (): Promise<void> => {
+const fetchPaymentRecords = async (): Promise<boolean> => {
   const requestId = ++listRequestId.value
   loadError.value = null
   loading.value = true
@@ -181,12 +181,14 @@ const fetchPaymentRecords = async (): Promise<void> => {
     }
 
     const data = await paymentApi.listPaymentRecords(params)
-    if (requestId !== listRequestId.value) return
+    if (requestId !== listRequestId.value) return false
     tableData.value = data.items
     pagination.total = data.total
+    return true
   } catch (error) {
-    if (requestId !== listRequestId.value) return
+    if (requestId !== listRequestId.value) return false
     loadError.value = toFeedbackError(error, '回款管理列表')
+    return false
   } finally {
     if (requestId === listRequestId.value) {
       loading.value = false
@@ -200,8 +202,24 @@ const customFilterViews = useCustomFilterViews({
   activeSorts,
   activeColumns,
   refresh: fetchPaymentRecords,
+  onViewApplySuccess: (tabKey) => headerStore.setActiveTab(tabKey),
 })
 const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
+const activeViewLabel = computed(() =>
+  allTabs.value.find((tab) => tab.key === activeTab.value)?.label ?? '当前列表'
+)
+const effectiveFilters = computed(() => {
+  const tabApprovalStatus = activeTab.value === 'confirmed'
+    ? 'approved'
+    : activeTab.value === 'pending_submit'
+      || activeTab.value === 'pending_approval'
+      || activeTab.value === 'rejected'
+        ? activeTab.value
+        : null
+  return tabApprovalStatus === null
+    ? activeFilters.value
+    : withoutFilterFields(activeFilters.value, ['approval_status'])
+})
 const customFilterViewSaving = computed(() => customFilterViews.saving.value)
 const activeColumnPreferenceConfig = computed<ViewPreferenceConfig>(() => ({
   version: 1,
@@ -463,6 +481,10 @@ useTopBarRegistration({
 watchEffect(() => {
   if (headerStore.activeTab && headerStore.activeTab !== activeTab.value) {
     pagination.current = 1
+    if (customFilterViews.consumeFailedViewApply(headerStore.activeTab)) {
+      headerStore.activeTab = activeTab.value
+      return
+    }
     if (customFilterViews.applyCustomViewTab(headerStore.activeTab)) {
       return
     }
@@ -492,6 +514,11 @@ watchEffect(() => {
       :page-size="pagination.pageSize"
       :total="pagination.total"
       view-key="payment-records.list"
+      :view-label="activeViewLabel"
+      :effective-filters="effectiveFilters"
+      :view-applying="customFilterViews.applying.value"
+      :view-apply-error="customFilterViews.applyError.value"
+      @retry-view-apply="customFilterViews.retryViewApply"
       column-config-enabled
       :column-preference-config="activeColumnPreferenceConfig"
       :column-preference-mode="columnPreferenceMode"

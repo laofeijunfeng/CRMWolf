@@ -1,4 +1,4 @@
-import { computed, ref, type ComputedRef, type Ref } from 'vue'
+import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { toast } from 'vue-sonner'
 import { viewPreferenceApi, type ViewPreferenceConfig, type ViewPreferenceItem } from '@/api/viewPreference'
 import type { TabItem } from '@/stores/header'
@@ -6,6 +6,7 @@ import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import { confirmDelete } from '@/utils/confirmDialog'
 import { renameDialog } from '@/utils/renameDialog'
+import type { FeedbackError } from '@/types/feedback'
 
 const CUSTOM_VIEW_TAB_PREFIX = 'custom-view:'
 
@@ -15,7 +16,8 @@ interface UseCustomFilterViewsOptions {
   activeFilters: Ref<ListFilterCondition[]>
   activeSorts: Ref<ListSortCondition[]>
   activeColumns: Ref<ViewPreferenceConfig['columns']>
-  refresh: () => void | Promise<void>
+  refresh: () => boolean | undefined | Promise<unknown>
+  onViewApplySuccess?: (tabKey: string) => void
 }
 
 interface UseCustomFilterViewsReturn {
@@ -27,6 +29,10 @@ interface UseCustomFilterViewsReturn {
   saveAsCustomView: (filters: ListFilterCondition[]) => Promise<void>
   mergeTabs: (builtInTabs: TabItem[]) => TabItem[]
   applyCustomViewTab: (tabKey: string) => boolean
+  applying: Ref<boolean>
+  applyError: Ref<FeedbackError | null>
+  retryViewApply: () => Promise<void>
+  consumeFailedViewApply: (tabKey: string) => boolean
   applyBuiltInTab: (tabKey: string) => boolean
   updateActiveCustomViewConfig: () => Promise<void>
   saveActiveCustomViewColumns: (columns: ViewPreferenceConfig['columns']) => Promise<void>
@@ -57,11 +63,83 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
   const customViews = ref<ViewPreferenceItem[]>([])
   const loading = ref(false)
   const saving = ref(false)
-  const builtInViewSnapshot = ref<{
+  const applying = ref(false)
+  const applyError = ref<FeedbackError | null>(null)
+  const failedViewTab = ref<string | null>(null)
+  const builtInViewSnapshot = ref<ViewApplySnapshot | null>(null)
+  const committedViewSnapshot = ref<ViewApplySnapshot | null>(null)
+  const pendingViewApply = ref<PendingViewApply | null>(null)
+  let viewApplySequence = 0
+
+  interface ViewApplySnapshot {
+    activeTab: string
     filters: ListFilterCondition[]
     sorts: ListSortCondition[]
     columns: ViewPreferenceConfig['columns']
-  } | null>(null)
+  }
+
+  interface PendingViewApply {
+    target: ViewApplySnapshot
+    previous: ViewApplySnapshot
+  }
+
+  function cloneFilters(filters: ListFilterCondition[]): ListFilterCondition[] {
+    return filters.map((filter) => ({
+      ...filter,
+      ...(Array.isArray(filter.value) ? { value: [...filter.value] } : {}),
+    }))
+  }
+
+  function cloneSnapshot(snapshot: ViewApplySnapshot): ViewApplySnapshot {
+    return {
+      activeTab: snapshot.activeTab,
+      filters: cloneFilters(snapshot.filters),
+      sorts: snapshot.sorts.map((sort) => ({ ...sort })),
+      columns: snapshot.columns.map((column) => ({ ...column })),
+    }
+  }
+
+  function captureCurrentSnapshot(): ViewApplySnapshot {
+    return {
+      activeTab: options.activeTab.value,
+      filters: cloneFilters(options.activeFilters.value),
+      sorts: options.activeSorts.value.map((sort) => ({ ...sort })),
+      columns: options.activeColumns.value.map((column) => ({ ...column })),
+    }
+  }
+
+  function captureCommittedSnapshot(): ViewApplySnapshot {
+    if (committedViewSnapshot.value === null) {
+      committedViewSnapshot.value = captureCurrentSnapshot()
+    }
+    return cloneSnapshot(committedViewSnapshot.value)
+  }
+
+  function restoreSnapshot(snapshot: ViewApplySnapshot): void {
+    options.activeTab.value = snapshot.activeTab
+    options.activeFilters.value = cloneFilters(snapshot.filters)
+    options.activeSorts.value = snapshot.sorts.map((sort) => ({ ...sort }))
+    options.activeColumns.value = snapshot.columns.map((column) => ({ ...column }))
+  }
+
+  watch(
+    [options.activeTab, options.activeFilters, options.activeSorts, options.activeColumns],
+    () => {
+      if (applying.value) return
+      committedViewSnapshot.value = captureCurrentSnapshot()
+    },
+    { deep: true },
+  )
+
+  function viewApplyFailure(): FeedbackError {
+    return {
+      title: '视图应用失败',
+      description: '当前仍显示上一次成功加载的列表，可重试应用该视图',
+      kind: 'unknown',
+      retryable: true,
+      variant: 'error',
+    }
+  }
 
   function buildCustomViewTab(view: ViewPreferenceItem): TabItem {
     return {
@@ -155,27 +233,78 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
     }
   }
 
+  async function performViewApply(target: ViewApplySnapshot, previous: ViewApplySnapshot): Promise<void> {
+    const sequence = ++viewApplySequence
+    pendingViewApply.value = { target: cloneSnapshot(target), previous: cloneSnapshot(previous) }
+    applyError.value = null
+    failedViewTab.value = null
+    applying.value = true
+    restoreSnapshot(target)
+
+    try {
+      const result = await options.refresh()
+      if (sequence !== viewApplySequence) return
+      if (result === false) {
+        restoreSnapshot(previous)
+        applyError.value = viewApplyFailure()
+        failedViewTab.value = target.activeTab
+        pendingViewApply.value = { target: cloneSnapshot(target), previous: cloneSnapshot(previous) }
+      } else {
+        committedViewSnapshot.value = cloneSnapshot(target)
+        pendingViewApply.value = null
+        options.onViewApplySuccess?.(target.activeTab)
+      }
+    } catch {
+      if (sequence !== viewApplySequence) return
+      restoreSnapshot(previous)
+      applyError.value = viewApplyFailure()
+      failedViewTab.value = target.activeTab
+      pendingViewApply.value = { target: cloneSnapshot(target), previous: cloneSnapshot(previous) }
+    } finally {
+      if (sequence === viewApplySequence) applying.value = false
+    }
+  }
+
   function applyCustomViewTab(tabKey: string): boolean {
     const view = findViewByTabKey(tabKey)
     if (!view) return false
 
-    if (!isCustomFilterViewTab(options.activeTab.value)) {
-      builtInViewSnapshot.value = {
-        filters: [...options.activeFilters.value],
-        sorts: [...options.activeSorts.value],
-        columns: [...options.activeColumns.value],
-      }
+    const previous = captureCommittedSnapshot()
+    if (!isCustomFilterViewTab(previous.activeTab)) {
+      builtInViewSnapshot.value = cloneSnapshot(previous)
     }
-    options.activeTab.value = tabKey
-    options.activeFilters.value = (view.config.filters ?? []) as unknown as ListFilterCondition[]
-    options.activeSorts.value = (view.config.sorts ?? []) as unknown as ListSortCondition[]
-    options.activeColumns.value = view.config.columns ?? []
-    void options.refresh()
+    const target: ViewApplySnapshot = {
+      activeTab: tabKey,
+      filters: (view.config.filters ?? []) as unknown as ListFilterCondition[],
+      sorts: (view.config.sorts ?? []) as unknown as ListSortCondition[],
+      columns: view.config.columns ?? [],
+    }
+    void performViewApply(target, previous)
+    return true
+  }
+
+  async function retryViewApply(): Promise<void> {
+    const pending = pendingViewApply.value
+    if (!pending) return
+    await performViewApply(pending.target, pending.previous)
+  }
+
+  function consumeFailedViewApply(tabKey: string): boolean {
+    if (failedViewTab.value !== tabKey) return false
+    failedViewTab.value = null
     return true
   }
 
   function applyBuiltInTab(tabKey: string): boolean {
     if (isCustomFilterViewTab(tabKey)) return false
+
+    // 内置 Tab 是同步切换路径。若用户在自定义视图请求尚未完成时切回内置 Tab，
+    // 必须使旧请求失效，避免它返回后再次提交已过期的自定义视图状态。
+    viewApplySequence += 1
+    applying.value = false
+    pendingViewApply.value = null
+    applyError.value = null
+    failedViewTab.value = null
 
     const wasCustomViewTab = isCustomFilterViewTab(options.activeTab.value)
     options.activeTab.value = tabKey
@@ -185,6 +314,7 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
       options.activeColumns.value = builtInViewSnapshot.value?.columns ?? []
       builtInViewSnapshot.value = null
     }
+    committedViewSnapshot.value = captureCurrentSnapshot()
     return wasCustomViewTab
   }
 
@@ -278,6 +408,10 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
     saveAsCustomView,
     mergeTabs,
     applyCustomViewTab,
+    applying,
+    applyError,
+    retryViewApply,
+    consumeFailedViewApply,
     applyBuiltInTab,
     updateActiveCustomViewConfig,
     saveActiveCustomViewColumns,
