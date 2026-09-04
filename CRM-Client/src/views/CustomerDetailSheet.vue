@@ -1857,6 +1857,7 @@ onBeforeUnmount(() => {
     v-if="customerId !== null"
     mode="edit"
     :customer-id="customerId"
+    :customer="customer ?? null"
     :open="customerEditDialogOpen"
     @update:open="customerEditDialogOpen = $event"
     @success="handleCustomerEditSuccess"

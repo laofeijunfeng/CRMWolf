@@ -16,7 +16,7 @@
 import { ref, reactive, watch } from 'vue'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
-import { Plus, Pencil } from 'lucide-vue-next'
+import { CheckCircle, Pencil, Plus, TrendingUp } from 'lucide-vue-next'
 import LeadFormDialog from '@/components/LeadFormDialog.vue'
 import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
 import LeadConvertDialog from '@/components/LeadConvertDialog.vue'

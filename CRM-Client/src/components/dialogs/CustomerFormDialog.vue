@@ -35,7 +35,7 @@ import {
 import FormErrorSummary from '@/components/crmwolf/FormErrorSummary.vue'
 import { handleApiError } from '@/utils/errorHandler'
 import { useDialogCloseGuard } from '@/composables/useDialogCloseGuard'
-import customerApi, { type CustomerCreate, type CustomerUpdate } from '@/api/customer'
+import customerApi, { type CustomerCreate, type CustomerDetailResponse, type CustomerUpdate } from '@/api/customer'
 import procurementApi, { type ProcurementMethodOption } from '@/api/procurement'
 import {
   customerFormSchema,
@@ -52,6 +52,8 @@ interface Props {
   open: boolean
   mode: 'create' | 'edit'
   customerId?: string
+  /** Optional prefetched detail keeps edit opening synchronous and avoids a loading-layout jump. */
+  customer?: CustomerDetailResponse | null
 }
 
 interface Emits {
@@ -70,7 +72,7 @@ const schema = computed(() =>
 )
 
 // VeeValidate form setup
-const { handleSubmit, resetForm, setValues, setFieldError, errors, values } = useForm<CustomerForm | CustomerCreateForm>({
+const { handleSubmit, resetForm, setValues, setFieldError, setErrors, errors, values } = useForm<CustomerForm | CustomerCreateForm>({
   validationSchema: schema,
   initialValues: {
     account_name: '',
@@ -147,8 +149,17 @@ const fieldLabels: Record<string, string> = {
   contact_gender: '性别',
 }
 
+// Contact fields only exist in create mode. Errors can survive while the
+// dialog component stays mounted between create and edit, so never surface
+// them in an edit form.
+const contactFields = new Set(['contact_name', 'contact_mobile', 'contact_position', 'contact_gender'])
+
 const errorSummary = computed(() => Object.entries(errors.value)
-  .filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1] !== '')
+  .filter((entry): entry is [string, string] => {
+    const [field, message] = entry
+    if (props.mode === 'edit' && contactFields.has(field)) return false
+    return typeof message === 'string' && message !== ''
+  })
   .map(([field, message]) => ({
     field,
     label: fieldLabels[field] ?? field,
@@ -205,27 +216,34 @@ function retryOptions(): void {
   if (sourceOptionsError.value !== null) void fetchSourceOptions()
 }
 
+async function applyCustomerDetail(customer: CustomerDetailResponse): Promise<void> {
+  loadedVersion.value = customer.version
+  ensureOption(customer.source_info)
+  // Reset validation state when entering edit mode. The dialog is kept
+  // mounted, so create-mode contact errors must not leak into this form.
+  setErrors({})
+  applyingFormValues.value = true
+  setValues({
+    account_name: customer.account_name,
+    city: customer.city,
+    address: customer.address ?? '',
+    company_scale: normalizeCompanyScale(customer.company_scale),
+    source_public_id: customer.source_info?.public_id,
+    default_procurement_method_id: customer.default_procurement_method_id ?? undefined
+  } as Partial<CustomerForm>)
+  // Loading existing values establishes the clean baseline.
+  isDirty.value = false
+  await nextTick()
+  applyingFormValues.value = false
+}
+
 async function loadCustomerDetail(customerId: string): Promise<void> {
   loadError.value = null
   submitError.value = null
   loading.value = true
   try {
     const customer = await customerApi.getCustomerDetail(customerId)
-    loadedVersion.value = customer.version
-    ensureOption(customer.source_info)
-    applyingFormValues.value = true
-    setValues({
-      account_name: customer.account_name,
-      city: customer.city,
-      address: customer.address ?? '',
-      company_scale: normalizeCompanyScale(customer.company_scale),
-      source_public_id: customer.source_info?.public_id,
-      default_procurement_method_id: customer.default_procurement_method_id ?? undefined
-    } as Partial<CustomerForm>)
-    // Loading existing values establishes the clean baseline.
-    isDirty.value = false
-    await nextTick()
-    applyingFormValues.value = false
+    await applyCustomerDetail(customer)
   } catch (error) {
     loadError.value = toFeedbackError(error, '客户详情', { operation: 'read' })
     handleApiError(error, '加载客户详情')
@@ -286,7 +304,10 @@ function handleProcurementMethodChange(value: string, handleChange: (value: numb
 }
 
 // Load customer detail in edit mode
-watch([(): boolean => props.open, (): string | undefined => props.customerId], async ([open, customerId]): Promise<void> => {
+watch([
+  (): boolean => props.open,
+  (): string | undefined => props.customerId,
+], async ([open, customerId]): Promise<void> => {
   if (!open) {
     if (closeGuard.handleParentClose()) return
     closeGuard.reset()
@@ -302,7 +323,12 @@ watch([(): boolean => props.open, (): string | undefined => props.customerId], a
   loadError.value = null
 
   if (open && props.mode === 'edit' && customerId !== undefined && customerId !== null) {
-    await loadCustomerDetail(customerId)
+    const prefetchedCustomer = props.customer
+    if (prefetchedCustomer !== null && prefetchedCustomer !== undefined && prefetchedCustomer.id === customerId) {
+      await applyCustomerDetail(prefetchedCustomer)
+    } else {
+      await loadCustomerDetail(customerId)
+    }
   } else if (open && props.mode === 'create') {
     // Reset form for create mode
     applyingFormValues.value = true

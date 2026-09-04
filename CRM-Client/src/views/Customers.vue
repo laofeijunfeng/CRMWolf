@@ -45,6 +45,7 @@ import CustomerOpportunityHoverCard from '@/components/customer/CustomerOpportun
 import StatusBadge from '@/components/StatusBadge.vue'
 import customerApi, {
   type CustomerResponse,
+  type CustomerDetailResponse,
   type CustomerStatus,
   type CustomerReturnRequest,
   type ReturnReasonEnum,
@@ -89,6 +90,7 @@ const transferCustomer = ref<CustomerResponse | null>(null)
 const transferDialogOpen = ref(false)
 const showCustomerForm = ref(false)
 const editingCustomerId = ref<string | null>(null)
+const editingCustomer = ref<CustomerDetailResponse | null>(null)
 const deletingCustomerIds = ref<Set<string>>(new Set())
 
 const selectedCustomerId = ref<string | null>(null)
@@ -451,7 +453,8 @@ const customerFormDialogProps = computed(() => {
   return {
     open: showCustomerForm.value,
     mode: 'edit' as const,
-    customerId: editingCustomerId.value
+    customerId: editingCustomerId.value,
+    customer: editingCustomer.value
   }
 })
 
@@ -595,14 +598,30 @@ const handleSheetRefresh = (): void => {
   fetchCustomerList()
 }
 
-const handleEdit = (record: CustomerResponse): void => {
-  editingCustomerId.value = record.id
-  showCustomerForm.value = true
+const handleEdit = async (record: CustomerResponse): Promise<void> => {
+  try {
+    // Match the opportunity edit flow: resolve the detail before opening the
+    // modal, so the dialog does not animate from a short loading state to the
+    // full form and visibly jump.
+    const customer = await customerApi.getCustomerDetail(record.id)
+    editingCustomer.value = customer
+    editingCustomerId.value = customer.id
+    showCustomerForm.value = true
+  } catch (error) {
+    handleApiError(error, '获取客户详情')
+  }
+}
+
+const handleCustomerFormOpenChange = (open: boolean): void => {
+  showCustomerForm.value = open
+  if (!open) {
+    editingCustomerId.value = null
+    editingCustomer.value = null
+  }
 }
 
 const handleCustomerFormSuccess = (): void => {
-  showCustomerForm.value = false
-  editingCustomerId.value = null
+  handleCustomerFormOpenChange(false)
   fetchCustomerList()
 }
 
@@ -884,6 +903,7 @@ useTopBarRegistration({
       type: 'default',
       handler: (): void => {
         editingCustomerId.value = null
+        editingCustomer.value = null
         showCustomerForm.value = true
       },
       visible: canCreateCustomer.value,
@@ -1160,7 +1180,7 @@ watchEffect(() => {
     <!-- 手动创建/编辑客户弹窗 -->
     <CustomerFormDialog
       v-bind="customerFormDialogProps"
-      @update:open="showCustomerForm = $event"
+      @update:open="handleCustomerFormOpenChange"
       @success="handleCustomerFormSuccess"
     />
 

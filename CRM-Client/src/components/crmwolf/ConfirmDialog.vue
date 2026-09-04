@@ -23,7 +23,16 @@ import {
 const state = useConfirmDialogState()
 
 const handleDialogOpenChange = (open: boolean): void => {
-  if (!open) handleCancel()
+  if (open) return
+
+  // AlertDialogAction/Cancel 先触发底层 DialogClose，再触发按钮自身的 click
+  // 监听器。如果这里同步按“关闭”处理，会把“确定”误判成“取消”，导致
+  // confirmDialog() 得到 false，调用方自然不会继续执行后续 API。
+  // 延迟到当前 click 事件完成后再兜底处理 Escape 等无按钮关闭场景；如果
+  // 确定/取消按钮已经结算，visible 会变为 false，此处不会重复结算。
+  Promise.resolve().then(() => {
+    if (state.value.visible) handleCancel()
+  })
 }
 </script>
 
