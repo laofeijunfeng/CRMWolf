@@ -54,7 +54,11 @@ from app.services.agent.query.semantic_intent import (
     QuerySemanticIntentUnavailableError,
     QueryTemporalIntent,
 )
-from app.services.agent.semantic_plan import AgentQueryPlan, AgentSemanticPlan
+from app.services.agent.semantic_plan import (
+    AgentQueryPlan,
+    AgentSemanticPlan,
+    workflow_intent_from_semantic_plan,
+)
 from app.services.agent.workflow import WorkflowTurnInput
 from app.services.agent.workflow.progress import execution_progress
 
@@ -3207,6 +3211,56 @@ async def test_canonical_semantic_intake_is_cached_for_repeated_text_in_one_runt
     assert len(query_executor.calls) == 2
 
 
+async def test_customer_profile_writes_enter_workflow_instead_of_being_rejected() -> None:
+    cases = (
+        ("CONTACT", "CREATE_CONTACT", "给客户添加联系人"),
+        ("INVOICE_TITLE", "CREATE_INVOICE_TITLE", "给客户创建发票抬头"),
+        ("DEPLOYMENT_INFO", "CREATE_DEPLOYMENT_INFO", "给客户创建部署信息"),
+        ("CUSTOMER_MEMBER", "CREATE_CUSTOMER_MEMBER", "给客户添加团队成员"),
+    )
+
+    for business_object, expected_intent, text in cases:
+        query_executor = RecordingQueryExecutor()
+        workflow_calls: list[object] = []
+        decision = workflow_decision(
+            reason_code="MODEL_SELECTED_CUSTOMER_PROFILE_WRITE",
+            semantic_plan=AgentSemanticPlan(
+                speech_act="REQUEST_ACTION",
+                business_object=business_object,
+                operation="CREATE",
+                user_goal=text,
+                confidence=0.97,
+            ),
+        )
+        assert workflow_intent_from_semantic_plan(decision.semantic_plan) == expected_intent
+        orchestrator = RootOrchestrator(
+            checkpointer=InMemorySaver(),
+            context_resolver=StaticContextResolver(),
+            decision_classifier=StubDecisionClassifier(decision),
+            query_executor=query_executor,
+            interaction_resolver=FailingInteractionResolver(),
+            workflow_subgraph=recording_workflow_subgraph(workflow_calls),
+        )
+
+        result = await orchestrator.dispatch(
+            RootTurnInput(
+                team_id=1,
+                user_id=1,
+                session_id=556,
+                client_request_id=f"req_{expected_intent.lower()}",
+                input=TextTurnInput(type="text", text=text),
+            ),
+            runtime=RootRuntimeContext(),
+        )
+
+        assert isinstance(result, WorkflowDispatchResult)
+        assert result.decision.reason_code == "MODEL_SELECTED_CUSTOMER_PROFILE_WRITE"
+        assert query_executor.calls == []
+        assert len(workflow_calls) == 1
+        assert workflow_calls[0]["start"]["semantic_plan"]["business_object"] == business_object
+        assert workflow_calls[0]["start"]["semantic_plan"]["operation"] == "CREATE"
+
+
 async def test_unsupported_structured_write_is_clarified_instead_of_entering_workflow() -> None:
     query_executor = RecordingQueryExecutor()
     workflow_calls: list[object] = []
@@ -3242,5 +3296,9 @@ async def test_unsupported_structured_write_is_clarified_instead_of_entering_wor
 
     assert isinstance(result, ClarificationDispatchResult)
     assert result.decision.reason_code == "SEMANTIC_WRITE_UNSUPPORTED"
+    assert result.clarification.question == (
+        "当前 Agent 可以处理客户、客户资料\uff08联系人、发票抬头、部署信息、客户成员\uff09、"
+        "客户活动、商机及商机阶段推进\uff1b线索、回款、合同、License、发票申请等操作暂不支持。"
+    )
     assert query_executor.calls == []
     assert workflow_calls == []

@@ -125,6 +125,12 @@ WRITE_SPEECH_ACTS = frozenset({
 _WORKFLOW_INTENT_BY_CAPABILITY: dict[tuple[str, str], str] = {
     ("CUSTOMER_ACTIVITY", "CREATE"): "CUSTOMER_ACTIVITY",
     ("CUSTOMER", "CREATE"): "CREATE_CUSTOMER",
+    # Customer profile maintenance remains a standalone write capability.
+    # These commands must not be folded into the customer-activity workflow.
+    ("CONTACT", "CREATE"): "CREATE_CONTACT",
+    ("INVOICE_TITLE", "CREATE"): "CREATE_INVOICE_TITLE",
+    ("DEPLOYMENT_INFO", "CREATE"): "CREATE_DEPLOYMENT_INFO",
+    ("CUSTOMER_MEMBER", "CREATE"): "CREATE_CUSTOMER_MEMBER",
     ("OPPORTUNITY", "CREATE"): "CREATE_OPPORTUNITY",
     ("OPPORTUNITY", "TRANSITION"): "MOVE_OPPORTUNITY_STAGE",
     ("FOLLOW_UP_TASK", "TRANSITION"): "FOLLOW_UP_TASK_TRANSITION",

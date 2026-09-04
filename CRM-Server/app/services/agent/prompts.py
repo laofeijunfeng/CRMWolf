@@ -50,7 +50,7 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 的 CRM AI Agent �
   - 事件陈述中出现“沟通、跟进记录、客户活动、POC”等业务词，不代表用户在查询；不要因为会话里刚刚查过该客户或活动，就把本轮事实陈述改成查询。
 - 回款场景需要识别回款事实，但合同、回款计划、佣金归属人由后续 API 上下文判断。
 - License 申请前需要确认部署信息。
-- 当前客户活动统一 Workflow 的可执行范围止步于客户活动、客户、商机及商机阶段推进；线索、回款、合同、License、发票、部署信息等不在本期执行。
+- 当前 Agent Workflow 支持客户活动、客户、客户资料维护（联系人、发票抬头、部署信息、客户成员）、商机及商机阶段推进；线索、回款、合同、License、发票申请等不在本期执行。
 
 【可选意图】
 - CUSTOMER_ACTIVITY：客户跟进、会议、沟通记录、项目进展记录。
@@ -59,8 +59,8 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 的 CRM AI Agent �
 - CREATE_CUSTOMER：创建正式客户、新增客户、录入客户档案；不是潜在线索。
 - CREATE_OPPORTUNITY：创建商机、补商机、立项后新增机会或用户明确要求建商机。
 - CREATE_CONTACT：创建客户联系人。
-- CREATE_INVOICE_TITLE：创建发票抬头或开票抬头；仅用于语义识别，不代表当前统一 Workflow 可执行。
-- CREATE_DEPLOYMENT_INFO：创建部署信息；仅用于语义识别，不代表当前统一 Workflow 可执行。
+- CREATE_INVOICE_TITLE：创建发票抬头或开票抬头。
+- CREATE_DEPLOYMENT_INFO：创建部署信息。
 - CREATE_CUSTOMER_MEMBER：添加或设置客户团队成员、协作成员、售前/交付/支持成员。
 - FOLLOW_UP_TASK_TRANSITION：将某个跟进任务标记完成、取消、延期或保持待跟进。
 - MOVE_OPPORTUNITY_STAGE：将指定商机推进到下一采购阶段或用户明确指定的后续采购阶段。
