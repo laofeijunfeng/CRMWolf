@@ -687,7 +687,7 @@ class AgentToolRegistry:
                 True,
                 transition_follow_up_task,
             ),
-            AgentToolSpec("create_customer_activity", "创建客户活动记录", CreateCustomerActivityInput, True, True, create_customer_activity),
+            AgentToolSpec("create_customer_activity", "创建客户活动记录", CreateCustomerActivityInput, True, False, create_customer_activity),
             AgentToolSpec("create_lead", "通过现有线索 API 创建线索", CreateLeadInput, True, True, create_lead),
             AgentToolSpec("create_customer", "通过现有客户 API 创建客户", CreateCustomerInput, True, True, create_customer),
             AgentToolSpec("create_lead_follow_up", "通过现有线索 API 创建线索跟进记录", CreateLeadFollowUpInput, True, True, create_lead_follow_up),

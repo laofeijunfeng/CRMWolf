@@ -453,7 +453,10 @@ def _is_supported_write_command(
     ):
         return False
     if execution_authorization == "CONFIRMATION_REQUIRED":
-        return capability.requires_confirmation
+        # An explicit Workflow confirmation is itself the authorization
+        # boundary.  Low-risk activity may normally auto-execute, but a
+        # planner can still ask for confirmation when confidence is low.
+        return capability.requires_user_authorization
     if execution_authorization == "AUTO_EXECUTE_AUTHORIZED":
         return command.tool_name == "create_customer_activity"
     if execution_authorization == "RESUME_AUTHORIZED":

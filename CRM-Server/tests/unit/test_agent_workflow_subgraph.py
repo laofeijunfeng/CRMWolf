@@ -1053,6 +1053,76 @@ async def test_create_follow_up_workflow_auto_executes_high_confidence_low_risk_
     assert result.workflow_result.durable_work[0].activity_id == 241
 
 
+async def test_create_follow_up_workflow_confirms_low_confidence_activity_then_executes() -> None:
+    tool_registry = CapturingToolRegistry()
+    interaction_resolver = CanonicalConfirmationResolver()
+    orchestrator = RootOrchestrator(
+        checkpointer=json_safe_checkpointer(),
+        context_resolver=EmptyContextResolver(),
+        decision_classifier=CreateFollowUpDecisionClassifier(),
+        query_executor=FailingQueryExecutor(),
+        interaction_resolver=interaction_resolver,
+        workflow_subgraph=build_workflow_subgraph(
+            planner=CRMWorkflowPlanner(
+                semantic_parser=FakeSemanticParser(intent_confidence=0.80),
+                temporal_resolver=FixedTemporalResolver(),
+                customer_resolver=ContextWorkflowCustomerResolver(),
+            ),
+            effect_executor=CRMWorkflowEffectExecutor(tool_registry=tool_registry),
+        ),
+    )
+    runtime = RootRuntimeContext(
+        db=object(),
+        authorization="Bearer test-token",
+        metadata={"current_datetime": datetime(2026, 8, 23, 9, 0, 0)},
+    )
+
+    waiting = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=2,
+            session_id=557,
+            client_request_id="req_create_follow_up_low_confidence_waiting",
+            input=TextTurnInput(
+                type="text",
+                text="为上海星云科技创建跟进任务,内容是确认技术评估结论,下周三上午10点跟进",
+            ),
+            selected_entity_ref=CUSTOMER_REF,
+        ),
+        runtime=runtime,
+    )
+
+    assert isinstance(waiting, WorkflowDispatchResult)
+    assert isinstance(waiting.workflow_result, WorkflowWaitingResult)
+    assert waiting.workflow_result.interaction.business_action == "create_customer_activity"
+    assert waiting.continuation is not None
+    assert tool_registry.calls == []
+    interaction_resolver.continuation = waiting.continuation
+
+    completed = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=2,
+            session_id=557,
+            client_request_id="req_create_follow_up_low_confidence_confirmed",
+            input=InteractionTurnInput(
+                type="interaction",
+                action_id="act_confirm_create_follow_up",
+            ),
+        ),
+        runtime=runtime,
+    )
+
+    assert isinstance(completed, WorkflowDispatchResult)
+    assert isinstance(completed.workflow_result, WorkflowCompletedResult)
+    assert [call["name"] for call in tool_registry.calls] == ["create_customer_activity"]
+    context = tool_registry.calls[0]["context"]
+    assert isinstance(context, AgentToolContext)
+    assert context.execution_policy == "requires_confirmation"
+    assert context.authorization_source == "workflow_structured_confirmation"
+    assert context.confirmed_by_user is True
+
+
 async def test_create_follow_up_workflow_rejects_without_executing_effect() -> None:
     tool_registry = CapturingToolRegistry()
     workflow_subgraph = build_workflow_subgraph(

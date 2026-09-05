@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.services.agent import action_workflow
 from app.services.agent.guardrails import AgentToolExecutionPolicy, AgentToolGuardrailError
 from app.services.agent.tool_registry import AgentToolRegistry
 from app.services.agent.tools.base import AgentToolContext, AgentToolResult
@@ -134,3 +135,17 @@ async def test_registry_blocks_native_workflow_customer_outside_confirmed_scope(
         )
 
     assert service.calls == []
+
+
+def test_customer_activity_is_low_risk_auto_execute_exception_but_other_writes_require_confirmation() -> None:
+    activity = action_workflow.action_capability("create_customer_activity")
+    assert activity.is_write is True
+    assert activity.requires_confirmation is False
+
+    for action_type in (
+        "create_customer",
+        "create_contact",
+        "create_opportunity",
+        "create_payment_record",
+    ):
+        assert action_workflow.action_capability(action_type).requires_confirmation is True
