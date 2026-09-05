@@ -155,7 +155,7 @@ const currentUserId = computed(() => String(userStore.userInfo?.id ?? ''))
 const teamId = computed(() => teamStore.currentTeam?.id)
 
 const canManageMembers = computed(() => {
-  if (isOwner.value || !permissionStore.initialized) return true
+  if (isOwner.value) return true
   return permissionStore.hasAnyPermission([
     'team:member:invite',
     'team:member:update',
@@ -164,10 +164,10 @@ const canManageMembers = computed(() => {
     'role:manage',
   ])
 })
-const canInviteMembers = computed(() => isOwner.value || !permissionStore.initialized || permissionStore.hasAnyPermission(['team:member:invite', 'role:manage']))
-const canUpdateMembers = computed(() => isOwner.value || !permissionStore.initialized || permissionStore.hasAnyPermission(['team:member:update', 'role:manage']))
-const canResetMemberPasswords = computed(() => isOwner.value || !permissionStore.initialized || permissionStore.hasAnyPermission(['team:member:password_reset', 'role:manage']))
-const canRemoveMembers = computed(() => isOwner.value || !permissionStore.initialized || permissionStore.hasAnyPermission(['team:member:remove', 'role:manage']))
+const canInviteMembers = computed(() => isOwner.value || permissionStore.hasAnyPermission(['team:member:invite', 'role:manage']))
+const canUpdateMembers = computed(() => isOwner.value || permissionStore.hasAnyPermission(['team:member:update', 'role:manage']))
+const canResetMemberPasswords = computed(() => isOwner.value || permissionStore.hasAnyPermission(['team:member:password_reset', 'role:manage']))
+const canRemoveMembers = computed(() => isOwner.value || permissionStore.hasAnyPermission(['team:member:remove', 'role:manage']))
 
 const filteredMembers = computed(() => {
   const search = searchText.value.trim().toLowerCase()

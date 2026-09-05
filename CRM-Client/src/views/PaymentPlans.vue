@@ -17,6 +17,15 @@
 import { ref, reactive, computed, onMounted, watch, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
 import { handleApiError, handleOutcomeUnknown, isOutcomeUnknown } from '@/utils/errorHandler'
+import {
+  createCommandRequestOptions,
+  isNetworkOrTimeoutError,
+  isPendingCommandResponse,
+  operationIdFromError,
+  pollCommandStatus,
+  type CommandExecutionResponse,
+  type CommandRequestOptions,
+} from '@/api/command'
 import { toast } from 'vue-sonner'
 import { Plus, Eye, Pencil, CheckCircle, Trash2 } from 'lucide-vue-next'
 import { AmountText, DataTable, TableRowActions, type TableRowActionSet } from '@/components/crmwolf'
@@ -31,6 +40,7 @@ import PaymentRecordDialog from '@/components/dialogs/PaymentRecordDialog.vue'
 import PaymentPlanFormDialog from '@/components/dialogs/PaymentPlanFormDialog.vue'
 import paymentApi, {
   type PaymentRecordCreate,
+  type PaymentRecordResponse,
   type PaymentPlanWithDetails,
   type PaymentPlanListParams
 } from '@/api/payment'
@@ -59,6 +69,7 @@ const selectedPlanId = ref<number | null>(null)
 const planSheetVisible = ref(false)
 const selectedConfirmPlan = ref<PaymentPlanWithDetails | null>(null)
 const paymentRecordIdempotencyKey = ref<string | null>(null)
+const paymentRecordCommandOptions = ref<CommandRequestOptions | null>(null)
 const registerDialogOpen = ref(false)
 const registerSubmitting = ref(false)
 const deletingPlanIds = ref<Set<number>>(new Set())
@@ -303,7 +314,9 @@ const handleEdit = (row: PaymentPlanWithDetails): void => {
 const handleConfirmPayment = (row: PaymentPlanWithDetails): void => {
   selectedConfirmPlan.value = row
   registerDialogOpen.value = true
-  paymentRecordIdempotencyKey.value = crypto.randomUUID()
+  const commandOptions = createCommandRequestOptions()
+  paymentRecordCommandOptions.value = commandOptions
+  paymentRecordIdempotencyKey.value = commandOptions.idempotencyKey ?? null
 }
 
 const handlePlanSheetVisibleChange = (visible: boolean): void => {
@@ -339,6 +352,43 @@ const handleRegisterDialogOpenChange = (open: boolean): void => {
   if (!open && !registerSubmitting.value) {
     selectedConfirmPlan.value = null
     paymentRecordIdempotencyKey.value = null
+    paymentRecordCommandOptions.value = null
+  }
+}
+
+function paymentRecordFromCommand(result: CommandExecutionResponse): PaymentRecordResponse | null {
+  if (result.status !== 'SUCCEEDED') return null
+  const data = result.data
+  if (typeof data !== 'object' || data === null) return null
+  if (!('id' in data) || typeof data.id !== 'number') return null
+  return data as PaymentRecordResponse
+}
+
+async function recoverPaymentRecord(options: CommandRequestOptions): Promise<PaymentRecordResponse | null> {
+  try {
+    const result = await pollCommandStatus(options.operationId ?? '', { attempts: 8, intervalMs: 500 })
+    const response = paymentRecordFromCommand(result)
+    if (response !== null) return response
+    if (result.status === 'PENDING' || result.status === 'UNKNOWN') {
+      handleOutcomeUnknown('回款登记')
+      return null
+    }
+    toast.error('回款登记失败', { description: result.error?.message ?? '请稍后重试' })
+    return null
+  } catch {
+    // Keep the existing idempotency-key resolver as a compatibility fallback
+    // for records created before the durable command endpoint was introduced.
+    const idempotencyKey = options.idempotencyKey
+    if (idempotencyKey === undefined || idempotencyKey === null || idempotencyKey.length === 0) {
+      handleOutcomeUnknown('回款登记')
+      return null
+    }
+    try {
+      return await paymentApi.resolvePaymentRecordWithRetry(idempotencyKey)
+    } catch {
+      handleOutcomeUnknown('回款登记')
+      return null
+    }
   }
 }
 
@@ -347,23 +397,30 @@ const handleRegisterSubmit = async (payload: PaymentRecordCreate): Promise<void>
   if (plan === null) return
 
   registerSubmitting.value = true
+  const commandOptions = paymentRecordCommandOptions.value ?? createCommandRequestOptions()
+  paymentRecordCommandOptions.value = commandOptions
+  paymentRecordIdempotencyKey.value = commandOptions.idempotencyKey ?? null
   try {
-    const idempotencyKey = paymentRecordIdempotencyKey.value ?? crypto.randomUUID()
-    paymentRecordIdempotencyKey.value = idempotencyKey
+    let response: PaymentRecordResponse | null = null
     try {
-      await paymentApi.createPaymentRecord(plan.id, payload, idempotencyKey)
+      const result = await paymentApi.createPaymentRecord(plan.id, payload, commandOptions)
+      if (isPendingCommandResponse(result)) {
+        response = await recoverPaymentRecord(commandOptions)
+      } else {
+        response = result
+      }
     } catch (error: unknown) {
-      if (!isOutcomeUnknown(error)) throw error
-
-      // The write may have committed even when the response timed out. Resolve by
-      // the same hidden idempotency key before asking the user to do anything else.
-      try {
-        await paymentApi.resolvePaymentRecordWithRetry(idempotencyKey)
-      } catch {
-        handleOutcomeUnknown()
-        return
+      const operationId = operationIdFromError(error)
+      if (isNetworkOrTimeoutError(error) || operationId !== null || isOutcomeUnknown(error)) {
+        response = await recoverPaymentRecord(
+          operationId === null ? commandOptions : { ...commandOptions, operationId },
+        )
+      } else {
+        throw error
       }
     }
+    if (response === null) return
+
     let resultMessage = `本次登记 ¥${payload.actual_amount.toFixed(2)}`
     try {
       const updatedPlan = await paymentApi.getPaymentPlanDetail(plan.id)
@@ -381,6 +438,7 @@ const handleRegisterSubmit = async (payload: PaymentRecordCreate): Promise<void>
     registerDialogOpen.value = false
     selectedConfirmPlan.value = null
     paymentRecordIdempotencyKey.value = null
+    paymentRecordCommandOptions.value = null
     const refreshed = await fetchPaymentPlans()
     toast.success(`回款登记成功，${resultMessage}`, {
       description: refreshed

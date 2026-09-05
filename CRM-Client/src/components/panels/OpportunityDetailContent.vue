@@ -57,7 +57,20 @@ import { opportunityApi, type Opportunity } from '@/api/opportunity'
 import approvalGenericApi from '@/api/approvalGeneric'
 import customerApi, { type CustomerDetailResponse, type CustomerMemberResponse } from '@/api/customer'
 import contractApi, { type ContractListResponse, type ContractStatus } from '@/api/contract'
-import paymentApi, { type PaymentPlanResponse, type PaymentRecordCreate } from '@/api/payment'
+import {
+  createCommandRequestOptions,
+  isNetworkOrTimeoutError,
+  isPendingCommandResponse,
+  operationIdFromError,
+  pollCommandStatus,
+  type CommandExecutionResponse,
+  type CommandRequestOptions,
+} from '@/api/command'
+import paymentApi, {
+  type PaymentPlanResponse,
+  type PaymentRecordCreate,
+  type PaymentRecordResponse,
+} from '@/api/payment'
 import invoiceApi, { type InvoiceApplicationResponse } from '@/api/invoice'
 import licenseApplicationApi, { type LicenseApplicationResponse, type LicenseType as LicenseApplicationType } from '@/api/licenseApplication'
 import deploymentApi, { type DeploymentInfoResponse } from '@/api/deployment'
@@ -141,6 +154,7 @@ const editingPaymentPlan = ref<PaymentPlanResponse | null>(null)
 const selectedPaymentPlan = ref<PaymentPlanResponse | null>(null)
 const paymentRecordDialogOpen = ref(false)
 const paymentRecordIdempotencyKey = ref<string | null>(null)
+const paymentRecordCommandOptions = ref<CommandRequestOptions | null>(null)
 const paymentRecordSubmitting = ref(false)
 const paymentPlanToDelete = ref<PaymentPlanResponse | null>(null)
 const paymentPlanDeleting = ref(false)
@@ -660,7 +674,9 @@ function handleRecordPayment(plan: PaymentPlanResponse): void {
   if (!canRecordPaymentPlan(plan)) return
   selectedPaymentPlan.value = plan
   paymentRecordDialogOpen.value = true
-  paymentRecordIdempotencyKey.value = crypto.randomUUID()
+  const commandOptions = createCommandRequestOptions()
+  paymentRecordCommandOptions.value = commandOptions
+  paymentRecordIdempotencyKey.value = commandOptions.idempotencyKey ?? null
 }
 
 function handlePaymentRecordDialogOpenChange(open: boolean): void {
@@ -668,6 +684,41 @@ function handlePaymentRecordDialogOpenChange(open: boolean): void {
   if (!open && !paymentRecordSubmitting.value) {
     selectedPaymentPlan.value = null
     paymentRecordIdempotencyKey.value = null
+    paymentRecordCommandOptions.value = null
+  }
+}
+
+function paymentRecordFromCommand(result: CommandExecutionResponse): PaymentRecordResponse | null {
+  if (result.status !== 'SUCCEEDED') return null
+  const data = result.data
+  if (typeof data !== 'object' || data === null) return null
+  if (!('id' in data) || typeof data.id !== 'number') return null
+  return data as PaymentRecordResponse
+}
+
+async function recoverPaymentRecord(options: CommandRequestOptions): Promise<PaymentRecordResponse | null> {
+  try {
+    const result = await pollCommandStatus(options.operationId ?? '', { attempts: 8, intervalMs: 500 })
+    const response = paymentRecordFromCommand(result)
+    if (response !== null) return response
+    if (result.status === 'PENDING' || result.status === 'UNKNOWN') {
+      handleOutcomeUnknown('回款登记')
+      return null
+    }
+    toast.error('回款登记失败', { description: result.error?.message ?? '请稍后重试' })
+    return null
+  } catch {
+    const idempotencyKey = options.idempotencyKey
+    if (idempotencyKey === undefined || idempotencyKey === null || idempotencyKey.length === 0) {
+      handleOutcomeUnknown('回款登记')
+      return null
+    }
+    try {
+      return await paymentApi.resolvePaymentRecordWithRetry(idempotencyKey)
+    } catch {
+      handleOutcomeUnknown('回款登记')
+      return null
+    }
   }
 }
 
@@ -677,25 +728,30 @@ async function handlePaymentRecordSubmit(payload: PaymentRecordCreate): Promise<
 
   paymentRecordSubmitting.value = true
   try {
-    const idempotencyKey = paymentRecordIdempotencyKey.value ?? crypto.randomUUID()
-    paymentRecordIdempotencyKey.value = idempotencyKey
+    const commandOptions = paymentRecordCommandOptions.value ?? createCommandRequestOptions()
+    paymentRecordCommandOptions.value = commandOptions
+    paymentRecordIdempotencyKey.value = commandOptions.idempotencyKey ?? null
+    let response: PaymentRecordResponse | null = null
     try {
-      await paymentApi.createPaymentRecord(plan.id, payload, idempotencyKey)
+      const result = await paymentApi.createPaymentRecord(plan.id, payload, commandOptions)
+      response = isPendingCommandResponse(result)
+        ? await recoverPaymentRecord(commandOptions)
+        : result
     } catch (error: unknown) {
-      if (!isOutcomeUnknown(error)) throw error
-
-      // 请求可能已在服务端落库但响应丢失；用同一个隐藏幂等键确认，
-      // 不让用户通过重复填写/提交制造第二笔回款。
-      try {
-        await paymentApi.resolvePaymentRecordWithRetry(idempotencyKey)
-      } catch {
-        handleOutcomeUnknown('回款登记')
-        return
+      const operationId = operationIdFromError(error)
+      if (isNetworkOrTimeoutError(error) || operationId !== null || isOutcomeUnknown(error)) {
+        response = await recoverPaymentRecord(
+          operationId === null ? commandOptions : { ...commandOptions, operationId },
+        )
+      } else {
+        throw error
       }
     }
+    if (response === null) return
     paymentRecordDialogOpen.value = false
     selectedPaymentPlan.value = null
     paymentRecordIdempotencyKey.value = null
+    paymentRecordCommandOptions.value = null
     const refreshed = await fetchOpportunityDetail()
     toast.success('回款登记成功', {
       description: refreshed

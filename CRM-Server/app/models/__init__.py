@@ -23,6 +23,7 @@ from app.models.agent_persistence import (
 )
 from app.models.ai_config import AIConfig
 from app.models.approval import Approval, ApprovalFlow, ApprovalNode, ApprovalRecord
+from app.models.command_execution import CommandExecution, CommandExecutionStatus
 from app.models.contract import Contract, ContractStatus, PaymentStatus
 from app.models.conversation_log import ConversationLog
 from app.models.customer import Contact, Customer, CustomerMember
@@ -164,6 +165,8 @@ __all__ = [
     "CompanyScale",
     "ConfigType",
     "Contact",
+    "CommandExecution",
+    "CommandExecutionStatus",
     "Contract",
     "ContractStatus",
     "ConversationLog",

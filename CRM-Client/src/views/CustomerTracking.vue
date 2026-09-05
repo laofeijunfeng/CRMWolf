@@ -29,7 +29,17 @@ import {
   type FollowUpTaskItem,
   type FollowUpTaskPendingConfirmation,
   type FollowUpTaskStatusFilter,
+  type FollowUpTaskTransitionResponse,
 } from '@/api/followUpTask'
+import {
+  createCommandRequestOptions,
+  isNetworkOrTimeoutError,
+  isPendingCommandResponse,
+  operationIdFromError,
+  pollCommandStatus,
+  type CommandExecutionResponse,
+  type CommandRequestOptions,
+} from '@/api/command'
 import { handleApiError } from '@/utils/errorHandler'
 import { confirmDialog } from '@/utils/confirmDialog'
 import { useHeaderStore, type TabItem } from '@/stores/header'
@@ -78,6 +88,7 @@ const postponeReason = ref('')
 const postponeConfirmationCaseId = ref<string | null>(null)
 const postponeTaskPublicId = ref<string | null>(null)
 const transitioningTaskIds = ref<Set<string>>(new Set())
+const activeCommandOptions = ref<Map<string, CommandRequestOptions>>(new Map())
 const detailTriggerIndex = ref(-1)
 const focusedDetailTrigger = ref<HTMLElement | null>(null)
 
@@ -274,6 +285,98 @@ function isPostponingTask(taskPublicId: string): boolean {
   return postponeSubmitting.value && postponeTaskPublicId.value === taskPublicId
 }
 
+function setActiveCommand(taskPublicId: string, options: CommandRequestOptions | null): void {
+  const next = new Map(activeCommandOptions.value)
+  if (options === null) next.delete(taskPublicId)
+  else next.set(taskPublicId, options)
+  activeCommandOptions.value = next
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function isFollowUpTask(value: unknown): value is FollowUpTaskItem {
+  return isRecord(value) && typeof value['public_id'] === 'string' && typeof value['status'] === 'string'
+}
+
+function transitionResponseFromCommand(result: CommandExecutionResponse): FollowUpTaskTransitionResponse | null {
+  if (!isRecord(result.data)) return null
+  const taskValue = result.data['task']
+  if (!isFollowUpTask(taskValue)) return null
+  const resultValue = result.data['result']
+  const transitionResult = isRecord(resultValue) ? resultValue : {}
+  return {
+    executed: result.data['executed'] === true,
+    result: transitionResult,
+    task: taskValue,
+    operation_id: result.operation_id,
+    status: result.status,
+  }
+}
+
+function showCommandResultFailure(result: CommandExecutionResponse, context: string): void {
+  const message = result.error?.message ?? '操作结果暂未确认，请刷新后确认当前状态。'
+  if (result.status === 'PENDING' || result.status === 'UNKNOWN') {
+    toast.warning('操作结果暂未确认', { description: `${context}：${message}` })
+    return
+  }
+  toast.error(`${context}失败`, { description: message })
+}
+
+async function recoverTransition(
+  options: CommandRequestOptions,
+  context: string,
+): Promise<FollowUpTaskTransitionResponse | null> {
+  toast.info('正在确认操作结果', { description: '网络响应中断，系统不会重复提交，请稍候。' })
+  try {
+    const result = await pollCommandStatus(options.operationId ?? '', { attempts: 8, intervalMs: 500 })
+    if (result.status !== 'SUCCEEDED') {
+      showCommandResultFailure(result, context)
+      return null
+    }
+    const response = transitionResponseFromCommand(result)
+    if (response === null) {
+      toast.warning('操作结果格式异常', { description: '请刷新列表确认客户追踪当前状态。' })
+      return null
+    }
+    return response
+  } catch {
+    // Keep the task context and the stable operation id available in the
+    // warning. The user can safely refresh; they must not repeat the write.
+    toast.warning('操作结果暂未确认', {
+      description: `${context}可能已经提交，暂时无法确认最终状态。请刷新后确认，操作编号：${options.operationId}`,
+    })
+    return null
+  }
+}
+
+async function executeTaskTransition(
+  task: FollowUpTaskItem,
+  payload: Parameters<typeof followUpTaskApi.transition>[1],
+  context: string,
+): Promise<FollowUpTaskTransitionResponse | null> {
+  const options = activeCommandOptions.value.get(task.public_id) ?? createCommandRequestOptions()
+  setActiveCommand(task.public_id, options)
+  try {
+    const response = await followUpTaskApi.transition(task.public_id, payload, options)
+    if (isPendingCommandResponse(response)) {
+      return await recoverTransition(options, context)
+    }
+    return response
+  } catch (error) {
+    const operationId = operationIdFromError(error)
+    if (isNetworkOrTimeoutError(error) || operationId !== null) {
+      const recoveryOptions = operationId === null ? options : { ...options, operationId }
+      return await recoverTransition(recoveryOptions, context)
+    }
+    handleApiError(error, context)
+    return null
+  } finally {
+    setActiveCommand(task.public_id, null)
+  }
+}
+
 async function transitionTask(task: FollowUpTaskItem, action: 'complete' | 'cancel'): Promise<void> {
   if (transitioningTaskIds.value.has(task.public_id)) return
 
@@ -283,7 +386,12 @@ async function transitionTask(task: FollowUpTaskItem, action: 'complete' | 'canc
 
   transitioningTaskIds.value = new Set(transitioningTaskIds.value).add(task.public_id)
   try {
-    const response = await followUpTaskApi.transition(task.public_id, { action, reason: `manual_${action}` })
+    const response = await executeTaskTransition(
+      task,
+      { action, reason: `manual_${action}` },
+      `${actionText}客户追踪`,
+    )
+    if (response === null) return
     if (selectedTaskId.value === task.public_id) {
       clearSelectedTask()
     }
@@ -294,8 +402,6 @@ async function transitionTask(task: FollowUpTaskItem, action: 'complete' | 'canc
         ? `当前状态：${finalState}`
         : `当前状态已写入为“${finalState}”，但列表刷新失败，请稍后重试。`,
     })
-  } catch (error) {
-    handleApiError(error, `${actionText}客户追踪`)
   } finally {
     const nextIds = new Set(transitioningTaskIds.value)
     nextIds.delete(task.public_id)
@@ -340,11 +446,17 @@ async function submitDelay(): Promise<void> {
       return
     }
 
-    const response = await followUpTaskApi.transition(selectedTask.value.public_id, {
-      action: 'postpone',
-      proposed_due_at: formatLocalDate(postponeDate.value),
-      reason: postponeReason.value || 'manual_postpone',
-    })
+    const task = selectedTask.value
+    const response = await executeTaskTransition(
+      task,
+      {
+        action: 'postpone',
+        proposed_due_at: formatLocalDate(postponeDate.value),
+        reason: postponeReason.value || 'manual_postpone',
+      },
+      '延期客户追踪',
+    )
+    if (response === null) return
     selectedTask.value = response.task
     postponeDialogOpen.value = false
     const refreshed = await fetchTasks()
@@ -353,8 +465,6 @@ async function submitDelay(): Promise<void> {
         ? `当前状态：${statusLabel(response.task.status)}`
         : '延期已写入，但列表刷新失败，请稍后重试。',
     })
-  } catch (error) {
-    handleApiError(error, '延期客户追踪')
   } finally {
     postponeSubmitting.value = false
     postponeTaskPublicId.value = null

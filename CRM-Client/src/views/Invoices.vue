@@ -217,6 +217,18 @@ const fetchInvoiceApplications = async (): Promise<boolean> => {
     }
   }
 }
+const refreshInvoiceListAfterMutation = async (operationLabel: string): Promise<boolean> => {
+  const refreshed = await fetchInvoiceApplications()
+  if (!refreshed) {
+    toast.warning(`${operationLabel}已成功，但发票申请列表刷新失败，请稍后重试。`)
+  }
+  return refreshed
+}
+
+const handleInvoiceMutationSuccess = async (operationLabel = '发票申请保存'): Promise<void> => {
+  await refreshInvoiceListAfterMutation(operationLabel)
+}
+
 const customFilterViews = useCustomFilterViews({
   viewKey: 'invoices.list',
   activeTab,
@@ -335,10 +347,10 @@ const handleInvoiceApplicationDialogClose = (open: boolean): void => {
   }
 }
 
-const handleInvoiceApplicationSuccess = (): void => {
+const handleInvoiceApplicationSuccess = async (): Promise<void> => {
   invoiceApplicationDialogOpen.value = false
   editingInvoiceApplication.value = null
-  fetchInvoiceApplications()
+  await handleInvoiceMutationSuccess('发票申请保存')
 }
 
 const handleInvoiceDetailSheetVisibleChange = (visible: boolean): void => {
@@ -348,8 +360,8 @@ const handleInvoiceDetailSheetVisibleChange = (visible: boolean): void => {
   }
 }
 
-const handleInvoiceDetailRefresh = (): void => {
-  fetchInvoiceApplications()
+const handleInvoiceDetailRefresh = async (): Promise<void> => {
+  await handleInvoiceMutationSuccess('发票申请更新')
 }
 
 const handleSubmitApproval = async (record: InvoiceApplicationResponse): Promise<void> => {
@@ -362,7 +374,7 @@ const handleSubmitApproval = async (record: InvoiceApplicationResponse): Promise
       toast.success('发票申请已提交审批')
     }
 
-    fetchInvoiceApplications()
+    await refreshInvoiceListAfterMutation('发票申请提交')
   } catch (error) {
     handleApiError(error, '提交审批')
   }
@@ -375,7 +387,7 @@ const handleWithdraw = async (record: InvoiceApplicationResponse): Promise<void>
   try {
     await approvalGenericApi.cancelApproval('INVOICE', record.id)
     toast.success('发票申请已撤回')
-    fetchInvoiceApplications()
+    await refreshInvoiceListAfterMutation('发票申请撤回')
   } catch (error) {
     handleApiError(error, '撤回审批')
   }
@@ -397,7 +409,7 @@ const handleDelete = async (record: InvoiceApplicationResponse): Promise<void> =
   try {
     await invoiceApi.deleteInvoiceApplication(record.id)
     toast.success(`发票申请“${record.application_number}”已删除`)
-    void fetchInvoiceApplications()
+    await refreshInvoiceListAfterMutation('发票申请删除')
   } catch (error) {
     handleApiError(error, '删除发票申请')
   } finally {
@@ -526,10 +538,10 @@ const handleMarkIssuedDialogOpenChange = (open: boolean): void => {
   }
 }
 
-const handleInvoiceIssued = (): void => {
+const handleInvoiceIssued = async (): Promise<void> => {
   markIssuedDialogOpen.value = false
   issuingInvoiceApplication.value = null
-  fetchInvoiceApplications()
+  await handleInvoiceMutationSuccess('发票开票状态更新')
 }
 
 const downloadInvoiceFile = async (row: InvoiceApplicationResponse): Promise<void> => {

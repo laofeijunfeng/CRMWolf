@@ -18,6 +18,7 @@
  * - 交互状态：hover 阴影、active scale 反馈
  */
 import { computed, onMounted, ref, defineAsyncComponent } from 'vue'
+import { toast } from 'vue-sonner'
 import { usePermissionStore } from '@/stores/permissions'
 import { authApi, type RoleResponse } from '@/api/auth'
 import { Card, CardContent } from '@/components/ui/card'
@@ -70,6 +71,7 @@ const showAcquisitionSourceSheet = ref(false)
 // 用户角色（用于判断是否为 TEAM_ADMIN）
 const userRoles = ref<RoleResponse[]>([])
 const rolesLoaded = ref(false)
+const rolesLoadError = ref<unknown | null>(null)
 
 // 权限判断
 const canManageRoles = computed(() => permissionStore.hasPermission('role:manage'))
@@ -79,16 +81,35 @@ const canManageAcquisitionSources = computed(() => permissionStore.hasPermission
 const canManageAIConfig = computed(() => permissionStore.hasAnyPermission(['system:config', 'ai:manage']))
 const canManageTeam = computed(() => userRoles.value?.some(r => r.code === 'TEAM_ADMIN') ?? false)
 const canAccessPage = computed(() => canAccessSystemConfig(permissionStore, userRoles.value))
+const permissionsLoading = computed(() => permissionStore.loadState === 'idle' || permissionStore.loadState === 'loading')
+const permissionsUnavailable = computed(() => permissionStore.loadState === 'error')
+const rolesUnavailable = computed(() => rolesLoadError.value !== null)
+const pageLoading = computed(() => !rolesLoaded.value || permissionsLoading.value)
 
 // 获取用户角色
 const fetchUserRoles = async (): Promise<void> => {
   try {
     const response = await authApi.getUserRoles()
     userRoles.value = response ?? []
-  } catch {
-    // 获取用户角色失败，静默处理
+  } catch (error) {
+    userRoles.value = []
+    rolesLoadError.value = error
   } finally {
     rolesLoaded.value = true
+  }
+}
+
+const retryAccessState = async (): Promise<void> => {
+  rolesLoaded.value = false
+  rolesLoadError.value = null
+  try {
+    await Promise.all([
+      fetchUserRoles(),
+      permissionStore.refreshPermissions(),
+    ])
+    toast.success('权限信息已刷新')
+  } catch {
+    toast.error('权限信息刷新失败', { description: '请检查网络后再次重试。' })
   }
 }
 
@@ -132,7 +153,7 @@ onMounted(() => {
 <template>
   <div class="system-config-page">
     <!-- 配置卡片网格 -->
-    <div v-if="canAccessPage" class="system-config-grid">
+    <div v-if="canAccessPage && !pageLoading" class="system-config-grid">
       <!-- 角色管理 -->
       <Card
         v-if="canManageRoles"
@@ -237,8 +258,25 @@ onMounted(() => {
       </Card>
 
     </div>
+    <div v-else-if="pageLoading" class="system-config-loading" role="status" aria-live="polite">
+      <div class="system-config-loading__bar" />
+      <div class="system-config-loading__bar system-config-loading__bar--short" />
+      <p>正在确认系统配置权限…</p>
+    </div>
     <ErrorState
-      v-else-if="rolesLoaded"
+      v-else-if="permissionsUnavailable || rolesUnavailable"
+      variant="error"
+      :title="permissionsUnavailable ? '权限信息暂不可用' : '团队角色信息暂不可用'"
+      :description="permissionsUnavailable
+        ? '为避免误操作，系统配置入口暂时隐藏。请同步权限后再试。'
+        : '暂时无法确认你的系统配置角色，请重试后再继续。'"
+    >
+      <template #action>
+        <Button variant="outline" type="button" @click="retryAccessState">重试权限同步</Button>
+      </template>
+    </ErrorState>
+    <ErrorState
+      v-else
       variant="forbidden"
       title="你没有系统配置的访问权限"
       description="如需调整团队成员、审批流程或系统参数，请联系团队管理员。"
@@ -263,6 +301,35 @@ onMounted(() => {
   background: $wolf-bg-page-v2;
   min-height: 100%;
   padding: $wolf-page-padding-v2;
+}
+
+.system-config-loading {
+  display: flex;
+  min-height: 200px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: $wolf-space-sm-v2;
+  color: $wolf-text-secondary-v2;
+}
+
+.system-config-loading__bar {
+  width: min(360px, 80%);
+  height: 12px;
+  border-radius: $wolf-radius-sm-v2;
+  background: $wolf-bg-muted-v2;
+  animation: system-config-pulse 1.2s ease-in-out infinite;
+}
+
+.system-config-loading__bar--short {
+  width: min(220px, 55%);
+  animation-delay: 120ms;
+}
+
+@keyframes system-config-pulse {
+  0%,
+  100% { opacity: 0.55; }
+  50% { opacity: 1; }
 }
 
 // 配置卡片网格

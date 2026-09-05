@@ -41,6 +41,15 @@ import PaymentNextStepDialog from '@/components/PaymentNextStepDialog.vue'
 import EditRecordDialog from '@/components/dialogs/EditRecordDialog.vue'
 import PaymentPlanFormDialog from '@/components/dialogs/PaymentPlanFormDialog.vue'
 import PaymentRecordDialog from '@/components/dialogs/PaymentRecordDialog.vue'
+import {
+  createCommandRequestOptions,
+  isNetworkOrTimeoutError,
+  isPendingCommandResponse,
+  operationIdFromError,
+  pollCommandStatus,
+  type CommandExecutionResponse,
+  type CommandRequestOptions,
+} from '@/api/command'
 import paymentApi, {
   type PaymentPlanResponse,
   type PaymentPlanStatus,
@@ -91,6 +100,7 @@ const planFormDialogOpen = ref<boolean>(false)
 const planFormMode = ref<'create' | 'edit'>('create')
 const recordDialogOpen = ref<boolean>(false)
 const paymentRecordIdempotencyKey = ref<string | null>(null)
+const paymentRecordCommandOptions = ref<CommandRequestOptions | null>(null)
 const recordsDialogOpen = ref<boolean>(false)
 const editRecordDialogOpen = ref<boolean>(false)
 const nextStepDialogOpen = ref<boolean>(false)
@@ -238,13 +248,50 @@ function showRecords(plan: PaymentPlanResponse): void {
 function showPaymentDialog(plan: PaymentPlanResponse): void {
   currentPlan.value = plan
   recordDialogOpen.value = true
-  paymentRecordIdempotencyKey.value = crypto.randomUUID()
+  const commandOptions = createCommandRequestOptions()
+  paymentRecordCommandOptions.value = commandOptions
+  paymentRecordIdempotencyKey.value = commandOptions.idempotencyKey ?? null
 }
 
 function handleRecordDialogOpenChange(open: boolean): void {
   recordDialogOpen.value = open
   if (!open && !submittingRecord.value) {
     paymentRecordIdempotencyKey.value = null
+    paymentRecordCommandOptions.value = null
+  }
+}
+
+function paymentRecordFromCommand(result: CommandExecutionResponse): PaymentRecordResponse | null {
+  if (result.status !== 'SUCCEEDED') return null
+  const data = result.data
+  if (typeof data !== 'object' || data === null) return null
+  if (!('id' in data) || typeof data.id !== 'number') return null
+  return data as PaymentRecordResponse
+}
+
+async function recoverPaymentRecord(options: CommandRequestOptions): Promise<PaymentRecordResponse | null> {
+  try {
+    const result = await pollCommandStatus(options.operationId ?? '', { attempts: 8, intervalMs: 500 })
+    const response = paymentRecordFromCommand(result)
+    if (response !== null) return response
+    if (result.status === 'PENDING' || result.status === 'UNKNOWN') {
+      handleOutcomeUnknown('回款登记')
+      return null
+    }
+    toast.error('回款登记失败', { description: result.error?.message ?? '请稍后重试' })
+    return null
+  } catch {
+    const idempotencyKey = options.idempotencyKey
+    if (idempotencyKey === undefined || idempotencyKey === null || idempotencyKey.length === 0) {
+      handleOutcomeUnknown('回款登记')
+      return null
+    }
+    try {
+      return await paymentApi.resolvePaymentRecordWithRetry(idempotencyKey)
+    } catch {
+      handleOutcomeUnknown('回款登记')
+      return null
+    }
   }
 }
 
@@ -254,26 +301,30 @@ async function handleCreateRecord(payload: PaymentRecordCreate): Promise<void> {
 
   submittingRecord.value = true
   try {
-    const idempotencyKey = paymentRecordIdempotencyKey.value ?? crypto.randomUUID()
-    paymentRecordIdempotencyKey.value = idempotencyKey
-    let record: PaymentRecordResponse
+    const commandOptions = paymentRecordCommandOptions.value ?? createCommandRequestOptions()
+    paymentRecordCommandOptions.value = commandOptions
+    paymentRecordIdempotencyKey.value = commandOptions.idempotencyKey ?? null
+    let record: PaymentRecordResponse | null = null
     try {
-      record = await paymentApi.createPaymentRecord(plan.id, payload, idempotencyKey)
+      const result = await paymentApi.createPaymentRecord(plan.id, payload, commandOptions)
+      record = isPendingCommandResponse(result)
+        ? await recoverPaymentRecord(commandOptions)
+        : result
     } catch (error: unknown) {
-      if (!isOutcomeUnknown(error)) throw error
-
-      // 写入可能已成功但响应在网络层丢失，使用同一个隐藏幂等键确认最终状态。
-      try {
-        record = await paymentApi.resolvePaymentRecordWithRetry(idempotencyKey)
-      } catch (resolveError: unknown) {
-        logger.error('[ContractPaymentPlans]', '确认回款登记结果失败', { error: resolveError })
-        handleOutcomeUnknown()
-        return
+      const operationId = operationIdFromError(error)
+      if (isNetworkOrTimeoutError(error) || operationId !== null || isOutcomeUnknown(error)) {
+        record = await recoverPaymentRecord(
+          operationId === null ? commandOptions : { ...commandOptions, operationId },
+        )
+      } else {
+        throw error
       }
     }
+    if (record === null) return
     createdRecord.value = record
     recordDialogOpen.value = false
     paymentRecordIdempotencyKey.value = null
+    paymentRecordCommandOptions.value = null
     nextStepDialogOpen.value = true
     const refreshed = await fetchPlans()
     notifyUpdated()

@@ -1,4 +1,10 @@
 import request from '@/utils/request'
+import {
+  CommandExecutionResponseSchema,
+  createCommandRequestOptions,
+  type CommandExecutionResponse,
+  type CommandRequestOptions,
+} from '@/api/command'
 import { z } from 'zod'
 import type { PaginatedResponse } from '@/types/pagination'
 import { logger } from '@/utils/logger'
@@ -9,7 +15,7 @@ import {
   CustomerDetailResponseSchema,
   ContactResponseSchema,
   CustomerStatisticsSchema,
-  CustomerReturnResponseSchema
+  CustomerAssignmentPreviewResponseSchema,
 } from '@/schemas/customer'
 
 /**
@@ -100,12 +106,24 @@ export interface ConvertLeadToCustomer {
   account_name?: string | null
   address?: string | null
   default_procurement_method_id?: number | null
+  contact_name?: string | null
+  contact_phone?: string | null
+  industry?: string | null
 }
 
 export interface ConvertResponse {
-  customer_id: string
-  contact_id: number
-  message: string
+  operation_id?: string
+  status?: 'PENDING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN' | 'CONFLICT' | 'PARTIAL'
+  customer_id?: string
+  contact_id?: number
+  message?: string
+  data?: Record<string, unknown> | null
+  effects?: Record<string, unknown>[]
+  next_actions?: Record<string, unknown>[]
+  retryable?: boolean
+  queryable?: boolean
+  error?: Record<string, unknown> | null
+  correlation_id?: string | null
 }
 
 export type { AcquisitionSourceInfo }
@@ -316,6 +334,7 @@ export type ReturnReasonEnum = '丢单' | '无意向' | '信息错误' | '长期
 export interface CustomerReturnRequest {
   return_reason: ReturnReasonEnum
   detailed_reason: string
+  expected_version?: number
 }
 
 export interface CustomerReturnResponse {
@@ -328,13 +347,22 @@ export interface CustomerReturnResponse {
 
 export interface CustomerClaimRequest {
   owner_id: string
+  expected_version?: number
 }
 
 export type CustomerOpportunityTransferScope = 'none' | 'following' | 'all'
 
+export type CustomerTransferScope =
+  | 'customer_only'
+  | 'customer_and_opportunities'
+  | 'customer_opportunities_and_contracts'
+
 export interface CustomerAssignRequest {
   owner_id: string
-  opportunity_transfer_scope: CustomerOpportunityTransferScope
+  opportunity_transfer_scope?: CustomerOpportunityTransferScope
+  transfer_scope?: CustomerTransferScope
+  expected_version?: number
+  reason?: string
   remark?: string
 }
 
@@ -480,8 +508,11 @@ export interface InvoiceApplicationResponse {
 }
 
 const customerApi = {
-  convertLeadToCustomer: (data: ConvertLeadToCustomer): Promise<ConvertResponse> =>
-    api.post('/v1/customers/convert-from-lead', data, undefined, ConvertResponseSchema),
+  convertLeadToCustomer: (
+    data: ConvertLeadToCustomer,
+    commandOptions: CommandRequestOptions = createCommandRequestOptions(),
+  ): Promise<ConvertResponse> =>
+    api.post('/v1/customers/convert-from-lead', data, commandOptions, ConvertResponseSchema),
 
   createCustomer: (data: CustomerCreate): Promise<CustomerResponse> =>
     api.post('/v1/customers/', data, undefined, CustomerResponseSchema),
@@ -507,14 +538,40 @@ const customerApi = {
   deleteCustomer: (customerId: string): Promise<{ message: string }> =>
     api.delete('/v1/customers/' + customerId),
 
-  returnToPool: (customerId: string, data: CustomerReturnRequest): Promise<CustomerReturnResponse> =>
-    api.post('/v1/customers/' + customerId + '/return-to-pool', data, undefined, CustomerReturnResponseSchema),
+  returnToPool: (
+    customerId: string,
+    data: CustomerReturnRequest,
+    commandOptions: CommandRequestOptions = data.expected_version === undefined
+      ? createCommandRequestOptions()
+      : createCommandRequestOptions({ expectedVersion: data.expected_version }),
+  ): Promise<CommandExecutionResponse> =>
+    api.post('/v1/customers/' + customerId + '/return-to-pool', data, commandOptions, CommandExecutionResponseSchema),
 
-  claimCustomer: (customerId: string, data: CustomerClaimRequest): Promise<CustomerResponse> =>
-    api.post('/v1/customers/' + customerId + '/claim', data, undefined, CustomerResponseSchema),
+  claimCustomer: (
+    customerId: string,
+    data: CustomerClaimRequest,
+    commandOptions: CommandRequestOptions = data.expected_version === undefined
+      ? createCommandRequestOptions()
+      : createCommandRequestOptions({ expectedVersion: data.expected_version }),
+  ): Promise<CommandExecutionResponse> =>
+    api.post('/v1/customers/' + customerId + '/claim', data, commandOptions, CommandExecutionResponseSchema),
 
-  assignCustomer: (customerId: string, data: CustomerAssignRequest): Promise<CustomerAssignResponse> =>
-    api.post<CustomerAssignResponse>('/v1/customers/' + customerId + '/assign', data),
+  assignCustomer: (
+    customerId: string,
+    data: CustomerAssignRequest,
+    commandOptions: CommandRequestOptions = createCommandRequestOptions(),
+  ): Promise<CommandExecutionResponse> =>
+    api.post('/v1/customers/' + customerId + '/assign', data, commandOptions, CommandExecutionResponseSchema),
+
+  getAssignmentPreview: (
+    customerId: string,
+    transferScope: CustomerTransferScope,
+  ): Promise<import('@/schemas/customer').CustomerAssignmentPreviewResponse> =>
+    api.get(
+      '/v1/customers/' + customerId + '/assignment-preview',
+      { params: { transfer_scope: transferScope } },
+      CustomerAssignmentPreviewResponseSchema,
+    ),
 
   getPublicCustomers: (params?: PublicCustomerQueryParams): Promise<CustomerResponse[] | PaginatedResponse<CustomerResponse>> =>
     api.get<CustomerResponse[] | PaginatedResponse<CustomerResponse>>('/v1/customers/public/list', { params }),

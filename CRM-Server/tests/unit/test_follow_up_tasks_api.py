@@ -18,6 +18,7 @@ from app.crud.sales_commitment import (
     sales_commitment_crud,
 )
 from app.models.agent_persistence import AgentUIAction
+from app.models.command_execution import CommandExecution
 from app.models.customer import Customer, CustomerMember
 from app.models.customer_intelligence_run import CustomerIntelligenceRun
 from app.models.customer_activity import CustomerActivity
@@ -72,6 +73,7 @@ def db_session():
         engine,
         tables=[
             User.__table__,
+            CommandExecution.__table__,
             AgentUIAction.__table__,
             CustomerIntelligenceRun.__table__,
             Customer.__table__,

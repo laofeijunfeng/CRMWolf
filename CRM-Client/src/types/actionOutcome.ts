@@ -4,7 +4,7 @@
  * 这是前端 UI 层的结果模型，不等同于后端 API 响应。列表页、详情 Sheet
  * 和表单通过它传递“做了什么、作用于谁、结果是否确定以及是否需要同步”。
  */
-export type ActionOutcomeStatus = 'success' | 'unknown'
+export type ActionOutcomeStatus = 'success' | 'pending' | 'failed' | 'unknown' | 'conflict' | 'partial'
 
 export type ActionEntityType =
   | 'customer'
@@ -41,6 +41,17 @@ export interface ActionOutcome {
   recoveryAction?: 'query' | 'retry' | 'manual-confirm'
   stateSync?: 'synced' | 'pending-refresh' | 'refresh-failed'
   stateLabel?: string
+  operationId?: string
+  effects?: {
+    type: string
+    publicId?: string
+    status: string
+    detail?: string
+  }[]
+  errorCode?: string
+  retryable?: boolean
+  queryable?: boolean
+  currentVersion?: string | number
 }
 
 /** 表单保存成功后传给父页面的最小结果。 */

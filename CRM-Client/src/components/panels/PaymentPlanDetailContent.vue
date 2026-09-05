@@ -33,12 +33,22 @@ import ApprovalProcessStepper from '@/components/ApprovalProcessStepper.vue'
 import PaymentRecordList from '@/components/PaymentRecordList.vue'
 import PaymentRecordDialog from '@/components/dialogs/PaymentRecordDialog.vue'
 import EditRecordDialog from '@/components/dialogs/EditRecordDialog.vue'
+import {
+  createCommandRequestOptions,
+  isNetworkOrTimeoutError,
+  isPendingCommandResponse,
+  operationIdFromError,
+  pollCommandStatus,
+  type CommandExecutionResponse,
+  type CommandRequestOptions,
+} from '@/api/command'
 import paymentApi, {
   type ApprovalInfo,
   type ApprovalStatus,
   type PaymentPlanResponse,
   type PaymentPlanStatus,
   type PaymentRecordInfo,
+  type PaymentRecordResponse,
   type PaymentRecordCreate,
   type PaymentRecordUpdate
 } from '@/api/payment'
@@ -84,6 +94,7 @@ const activeRequestId = ref<number>(0)
 // Dialog state
 const registerDialogOpen = ref<boolean>(false)
 const paymentRecordIdempotencyKey = ref<string | null>(null)
+const paymentRecordCommandOptions = ref<CommandRequestOptions | null>(null)
 const editDialogOpen = ref<boolean>(false)
 const selectedRecord = ref<PaymentRecordInfo | null>(null)
 const registerSubmitting = ref<boolean>(false)
@@ -251,13 +262,50 @@ const handleRetry = (): void => {
 const handleRegisterPayment = (): void => {
   if (paymentPlan.value === null || !canRegisterPayment.value) return
   registerDialogOpen.value = true
-  paymentRecordIdempotencyKey.value = crypto.randomUUID()
+  const commandOptions = createCommandRequestOptions()
+  paymentRecordCommandOptions.value = commandOptions
+  paymentRecordIdempotencyKey.value = commandOptions.idempotencyKey ?? null
 }
 
 const handleRegisterDialogOpenChange = (open: boolean): void => {
   registerDialogOpen.value = open
   if (!open && !registerSubmitting.value) {
     paymentRecordIdempotencyKey.value = null
+    paymentRecordCommandOptions.value = null
+  }
+}
+
+function paymentRecordFromCommand(result: CommandExecutionResponse): PaymentRecordResponse | null {
+  if (result.status !== 'SUCCEEDED') return null
+  const data = result.data
+  if (typeof data !== 'object' || data === null) return null
+  if (!('id' in data) || typeof data.id !== 'number') return null
+  return data as PaymentRecordResponse
+}
+
+async function recoverPaymentRecord(options: CommandRequestOptions): Promise<PaymentRecordResponse | null> {
+  try {
+    const result = await pollCommandStatus(options.operationId ?? '', { attempts: 8, intervalMs: 500 })
+    const response = paymentRecordFromCommand(result)
+    if (response !== null) return response
+    if (result.status === 'PENDING' || result.status === 'UNKNOWN') {
+      handleOutcomeUnknown('回款登记')
+      return null
+    }
+    toast.error('回款登记失败', { description: result.error?.message ?? '请稍后重试' })
+    return null
+  } catch {
+    const idempotencyKey = options.idempotencyKey
+    if (idempotencyKey === undefined || idempotencyKey === null || idempotencyKey.length === 0) {
+      handleOutcomeUnknown('回款登记')
+      return null
+    }
+    try {
+      return await paymentApi.resolvePaymentRecordWithRetry(idempotencyKey)
+    } catch {
+      handleOutcomeUnknown('回款登记')
+      return null
+    }
   }
 }
 
@@ -267,24 +315,29 @@ const handleRegisterSubmit = async (payload: PaymentRecordCreate): Promise<void>
 
   registerSubmitting.value = true
   try {
-    const idempotencyKey = paymentRecordIdempotencyKey.value ?? crypto.randomUUID()
-    paymentRecordIdempotencyKey.value = idempotencyKey
+    const commandOptions = paymentRecordCommandOptions.value ?? createCommandRequestOptions()
+    paymentRecordCommandOptions.value = commandOptions
+    paymentRecordIdempotencyKey.value = commandOptions.idempotencyKey ?? null
+    let response: PaymentRecordResponse | null = null
     try {
-      await paymentApi.createPaymentRecord(plan.id, payload, idempotencyKey)
+      const result = await paymentApi.createPaymentRecord(plan.id, payload, commandOptions)
+      response = isPendingCommandResponse(result)
+        ? await recoverPaymentRecord(commandOptions)
+        : result
     } catch (error: unknown) {
-      if (!isOutcomeUnknown(error)) throw error
-
-      // The write may have committed even when the response timed out. Resolve by
-      // the same hidden idempotency key before asking the user to do anything else.
-      try {
-        await paymentApi.resolvePaymentRecordWithRetry(idempotencyKey)
-      } catch {
-        handleOutcomeUnknown()
-        return
+      const operationId = operationIdFromError(error)
+      if (isNetworkOrTimeoutError(error) || operationId !== null || isOutcomeUnknown(error)) {
+        response = await recoverPaymentRecord(
+          operationId === null ? commandOptions : { ...commandOptions, operationId },
+        )
+      } else {
+        throw error
       }
     }
+    if (response === null) return
     registerDialogOpen.value = false
     paymentRecordIdempotencyKey.value = null
+    paymentRecordCommandOptions.value = null
     const refreshed = await fetchPaymentPlanDetail(plan.id, { preserveExisting: true })
     const updatedPlan = paymentPlan.value
     const statusLabel = updatedPlan?.status === 'COMPLETED'

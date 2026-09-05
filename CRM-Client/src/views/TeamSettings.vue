@@ -20,7 +20,7 @@ usePageTitle()
 
 const teamStore = useTeamStore()
 const permissionStore = usePermissionStore()
-const { isOwner, canAccess } = useSettingsAccess()
+const { isOwner, permissionsUnavailable, canAccess } = useSettingsAccess()
 const teamSettings = getSettingsNavigationItem('team')
 
 const team = ref<TeamResponse | null>(null)
@@ -31,8 +31,14 @@ const loadError = ref(false)
 const teamName = ref('')
 
 const hasAccess = computed(() => teamSettings !== undefined && canAccess(teamSettings))
-const canUpdateTeam = computed(() => isOwner.value || !permissionStore.initialized || permissionStore.hasAnyPermission(['team:settings:update', 'team:manage']))
-const canManageInvite = computed(() => isOwner.value || !permissionStore.initialized || permissionStore.hasAnyPermission(['team:invite:manage', 'team:manage']))
+const canUpdateTeam = computed(() => isOwner.value || permissionStore.hasAnyPermission(['team:settings:update', 'team:manage']))
+const canManageInvite = computed(() => isOwner.value || permissionStore.hasAnyPermission(['team:invite:manage', 'team:manage']))
+const retryingPermissions = computed(() => permissionStore.loadState === 'loading')
+
+const retryPermissions = async (): Promise<void> => {
+  await teamStore.retryPermissionSync()
+}
+
 const inviteLink = computed(() => {
   const code = team.value?.code
   return code === undefined || code.length === 0 ? '' : `${window.location.origin}/invite/${code}`
@@ -118,7 +124,19 @@ onMounted(() => {
     </div>
 
     <ErrorState
-      v-if="!hasAccess"
+      v-if="permissionsUnavailable"
+      variant="error"
+      title="权限信息暂不可用"
+      description="暂时无法确认你的团队设置权限。请重试权限同步，避免在权限不明确时继续操作。"
+    >
+      <template #action>
+        <Button :loading="retryingPermissions" @click="retryPermissions">
+          {{ retryingPermissions ? '同步中…' : '重试权限同步' }}
+        </Button>
+      </template>
+    </ErrorState>
+    <ErrorState
+      v-else-if="!hasAccess"
       variant="forbidden"
       title="暂无访问权限"
       description="你没有访问团队设置的权限，请联系团队所有者或管理员。"

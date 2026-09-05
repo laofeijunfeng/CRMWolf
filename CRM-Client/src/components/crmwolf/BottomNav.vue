@@ -83,7 +83,7 @@ const canViewSalesDashboard = computed(() => permissionStore.hasAnyPermission([
 const overflowItems = computed<NavItem[]>(() => {
   return baseOverflowItems.filter(item => {
     if (item.kind === 'route' && item.route === '/sales-dashboard') {
-      return canViewSalesDashboard.value
+      return permissionStore.loadState === 'ready' && canViewSalesDashboard.value
     }
     return true
   })

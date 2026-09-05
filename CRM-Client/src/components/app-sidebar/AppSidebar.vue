@@ -117,7 +117,7 @@ const canViewSalesDashboard = computed(() => permissionStore.hasAnyPermission([
 ]))
 
 const shouldShowDashboardGroup = computed(() => {
-  return !permissionStore.initialized || canViewSalesDashboard.value
+  return permissionStore.loadState === 'ready' && canViewSalesDashboard.value
 })
 
 const navGroups = computed<NavMainGroup[]>(() => [

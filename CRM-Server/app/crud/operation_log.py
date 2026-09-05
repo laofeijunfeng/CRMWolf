@@ -102,7 +102,14 @@ class OperationLogCRUD:
 
         return logs, total
 
-    def migrate_lead_logs_to_customer(self, db: Session, lead_id: int, customer_id: int):
+    def migrate_lead_logs_to_customer(
+        self,
+        db: Session,
+        lead_id: int,
+        customer_id: int,
+        *,
+        commit: bool = True,
+    ):
         """
         将线索的操作记录迁移到客户
 
@@ -123,7 +130,10 @@ class OperationLogCRUD:
                 if log.secondary_resource_id == lead_id:
                     log.secondary_resource_id = customer_id
 
-        db.commit()
+        if commit:
+            db.commit()
+        else:
+            db.flush()
 
         return len(logs)
 

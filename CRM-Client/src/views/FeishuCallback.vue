@@ -9,6 +9,7 @@ import { oauthApi } from '@/api/oauth'
 import { useTeamStore } from '@/stores/team'
 import { useUserStore } from '@/stores/user'
 import { handleApiError } from '@/utils/errorHandler'
+import { consumeOAuthReturnPath, createAuthReturnQuery } from '@/utils/authRecovery'
 
 const route = useRoute()
 const router = useRouter()
@@ -19,7 +20,7 @@ const loading = ref(true)
 const failed = ref(false)
 const message = ref('正在完成飞书授权')
 
-const finishInviteLogin = async (token: string): Promise<void> => {
+const finishInviteLogin = async (token: string, returnPath: string | null): Promise<void> => {
   userStore.setToken(token)
   const user = await authApi.getUserInfo()
   try {
@@ -28,8 +29,18 @@ const finishInviteLogin = async (token: string): Promise<void> => {
   } catch {
     userStore.setUserInfo(user)
   }
-  await teamStore.fetchUserTeams()
-  await router.replace('/leads')
+  try {
+    await teamStore.fetchUserTeams()
+  } catch {
+    await router.replace({ name: 'TeamUnavailable', query: createAuthReturnQuery(returnPath) })
+    return
+  }
+
+  if (teamStore.hasTeam()) {
+    await router.replace(returnPath ?? '/leads')
+  } else {
+    await router.replace({ name: 'Onboarding', query: createAuthReturnQuery(returnPath) })
+  }
 }
 
 const firstQueryValue = (value: unknown): string => {
@@ -56,13 +67,13 @@ const handleCallback = async (): Promise<void> => {
       }
       message.value = '飞书登录成功'
       toast.success('飞书登录成功')
-      await finishInviteLogin(response.login.access_token)
+      await finishInviteLogin(response.login.access_token, consumeOAuthReturnPath())
       return
     }
 
     message.value = response.message
     toast.success(response.message)
-    await router.replace('/account')
+    await router.replace(consumeOAuthReturnPath() ?? '/settings/account')
   } catch (error) {
     failed.value = true
     message.value = '飞书授权失败'

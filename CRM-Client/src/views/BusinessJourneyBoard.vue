@@ -39,11 +39,15 @@ const headerStore = useHeaderStore()
 const loading = ref(false)
 const errorMessage = ref('')
 const board = ref<BusinessJourneyBoardResponse | null>(null)
+const boardRequestSequence = ref(0)
 const activeFilters = ref<ListFilterCondition[]>([])
 const activeSorts = ref<ListSortCondition[]>([])
 const activeColumns = ref<ViewPreferenceConfig['columns']>([])
 const activeTab = ref('all')
 const ownerFilterOptions = ref<{ value: string; label: string }[]>([])
+const ownerFilterLoading = ref(false)
+const ownerFilterError = ref('')
+const ownerFilterRequestSequence = ref(0)
 const selectedCustomerId = ref<string | null>(null)
 const sheetVisible = computed({
   get: () => selectedCustomerId.value !== null,
@@ -73,6 +77,7 @@ const filterFields = computed<ListFilterField[]>(() => [
 ])
 
 const columns = computed<BusinessJourneyBoardColumn[]>(() => board.value?.columns ?? [])
+const hasBoardData = computed(() => board.value !== null)
 
 const stagePalette: Record<BusinessJourneyBoardStageKey, { column: string; countBadge: string; emphasisBadge: string }> = {
   early_communication: {
@@ -163,36 +168,61 @@ const handleSheetRefresh = (): void => {
 }
 
 const loadBoard = async (): Promise<void> => {
+  const requestId = boardRequestSequence.value + 1
+  boardRequestSequence.value = requestId
   loading.value = true
   errorMessage.value = ''
   try {
     const lastEventBounds = getDateBounds(activeFilters.value, 'last_event_at')
     const ownerId = getDelimitedFilterValues(activeFilters.value, 'owner_id')
-    board.value = await businessJourneyBoardApi.getBoard({
+    const nextBoard = await businessJourneyBoardApi.getBoard({
       start_date: lastEventBounds.start ?? null,
       end_date: lastEventBounds.end ?? null,
       owner_id: ownerId,
       limit: 500
     })
+    if (requestId !== boardRequestSequence.value) return
+    board.value = nextBoard
   } catch (error) {
+    if (requestId !== boardRequestSequence.value) return
     logger.error('[BusinessJourneyBoard]', '加载业务看板失败', { error })
-    errorMessage.value = '业务看板加载失败'
-    toast.error('业务看板加载失败')
+    errorMessage.value = hasBoardData.value
+      ? '业务看板刷新失败，当前显示上次成功加载的数据'
+      : '业务看板加载失败，请重试'
+    toast.warning('业务看板加载失败', {
+      description: hasBoardData.value
+        ? '当前仍显示上次成功加载的数据，你可以重试。'
+        : '请检查网络连接后重试。'
+    })
   } finally {
-    loading.value = false
+    if (requestId === boardRequestSequence.value) {
+      loading.value = false
+    }
   }
 }
 
 const fetchOwnerFilterOptions = async (): Promise<void> => {
+  const requestId = ownerFilterRequestSequence.value + 1
+  ownerFilterRequestSequence.value = requestId
+  ownerFilterLoading.value = true
+  ownerFilterError.value = ''
   try {
     const response = await businessJourneyBoardApi.getOwnerFilterOptions()
+    if (requestId !== ownerFilterRequestSequence.value) return
     ownerFilterOptions.value = response.data.map((owner) => ({
       value: owner.id,
       label: owner.name
     }))
   } catch (error) {
+    if (requestId !== ownerFilterRequestSequence.value) return
     logger.error('[BusinessJourneyBoard]', '获取负责人筛选项失败', { error })
-    ownerFilterOptions.value = []
+    ownerFilterError.value = ownerFilterOptions.value.length > 0
+      ? '负责人筛选项加载失败，当前仍保留已有选项'
+      : '负责人筛选项加载失败，请重试'
+  } finally {
+    if (requestId === ownerFilterRequestSequence.value) {
+      ownerFilterLoading.value = false
+    }
   }
 }
 
@@ -270,21 +300,69 @@ watchEffect(() => {
       </TableToolbarButton>
     </div>
 
-    <div v-if="errorMessage" class="business-board-error" role="alert">
+    <div
+      v-if="ownerFilterError"
+      class="business-board-inline-error business-board-inline-error--toolbar"
+      role="alert"
+      aria-live="polite"
+    >
+      <AlertCircle class="error-icon" aria-hidden="true" />
+      <span>{{ ownerFilterError }}</span>
+      <TableToolbarButton
+        class="business-board-inline-retry"
+        :disabled="ownerFilterLoading"
+        @click="fetchOwnerFilterOptions"
+      >
+        {{ ownerFilterLoading ? '重试中…' : '重试' }}
+      </TableToolbarButton>
+    </div>
+
+    <div
+      v-if="errorMessage && hasBoardData"
+      class="business-board-error"
+      role="alert"
+      aria-live="polite"
+    >
       <AlertCircle class="error-icon" aria-hidden="true" />
       <span>{{ errorMessage }}</span>
+      <TableToolbarButton
+        class="business-board-inline-retry"
+        :disabled="loading"
+        @click="loadBoard"
+      >
+        重试
+      </TableToolbarButton>
+    </div>
+
+    <div
+      v-if="loading && hasBoardData"
+      class="business-board-refreshing"
+      role="status"
+      aria-live="polite"
+    >
+      <RefreshCw class="refreshing-icon spinning" aria-hidden="true" />
+      <span>正在刷新，当前显示上次成功加载的数据</span>
     </div>
 
     <Card class="business-board-surface">
       <CardContent class="business-board-surface-content">
         <div class="business-board-scroll">
-          <div v-if="loading && columns.length === 0" class="business-board-skeleton" aria-label="业务看板加载中">
+          <div v-if="loading && !hasBoardData" class="business-board-skeleton" aria-label="业务看板加载中">
             <section v-for="index in 5" :key="index" class="business-board-column">
               <Skeleton class="h-8 w-24" />
               <Skeleton class="h-28 w-full" />
               <Skeleton class="h-28 w-full" />
               <Skeleton class="h-28 w-full" />
             </section>
+          </div>
+
+          <div v-else-if="!hasBoardData" class="business-board-blocking-error" role="alert">
+            <AlertCircle class="blocking-error-icon" aria-hidden="true" />
+            <strong>{{ errorMessage || '业务看板暂时无法加载' }}</strong>
+            <span>请检查网络连接后重试。</span>
+            <TableToolbarButton :disabled="loading" @click="loadBoard">
+              {{ loading ? '加载中…' : '重新加载' }}
+            </TableToolbarButton>
           </div>
 
           <div v-else class="business-board-columns">
@@ -413,17 +491,68 @@ watchEffect(() => {
   animation: business-board-spin 0.8s linear infinite;
 }
 
-.business-board-error {
+.business-board-error,
+.business-board-inline-error,
+.business-board-refreshing {
   display: flex;
   align-items: center;
   gap: $wolf-space-sm-v2;
   min-height: 40px;
   padding: 0 $wolf-space-md-v2;
-  border: 1px solid rgba($wolf-danger-v2, 0.18);
   border-radius: $wolf-radius-v2;
+  font-size: $wolf-font-size-caption-v2;
+}
+
+.business-board-error,
+.business-board-inline-error {
+  border: 1px solid rgba($wolf-danger-v2, 0.18);
   color: $wolf-danger-text-v2;
   background: $wolf-danger-bg-v2;
-  font-size: $wolf-font-size-caption-v2;
+}
+
+.business-board-inline-error--toolbar {
+  flex-shrink: 0;
+}
+
+.business-board-refreshing {
+  color: $wolf-text-secondary-v2;
+  background: $wolf-bg-muted-v2;
+}
+
+.business-board-inline-retry {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.refreshing-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.business-board-blocking-error {
+  display: flex;
+  flex: 1;
+  min-width: 280px;
+  min-height: 240px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: $wolf-space-sm-v2;
+  padding: $wolf-space-xl-v2;
+  color: $wolf-text-secondary-v2;
+  text-align: center;
+}
+
+.business-board-blocking-error strong {
+  color: $wolf-text-primary-v2;
+  font-size: $wolf-font-size-body-v2;
+}
+
+.blocking-error-icon {
+  width: 24px;
+  height: 24px;
+  color: $wolf-danger-text-v2;
 }
 
 .error-icon {

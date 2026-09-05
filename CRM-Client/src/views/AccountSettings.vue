@@ -31,11 +31,14 @@ import { authApi } from '@/api/auth'
 import { oauthApi, type OAuthBindingStatusResponse } from '@/api/oauth'
 import { changePasswordSchema, type ChangePasswordFormValues } from '@/schemas/account-settings'
 import { useUserStore } from '@/stores/user'
+import { useRoute } from 'vue-router'
 import { useHeaderStore } from '@/stores/header'
 import { handleApiError } from '@/utils/errorHandler'
+import { rememberOAuthReturnPath } from '@/utils/authRecovery'
 import { Link2, Loader2, Unlink } from 'lucide-vue-next'
 
 const userStore = useUserStore()
+const route = useRoute()
 const headerStore = useHeaderStore()
 const { userInfo } = storeToRefs(userStore)
 
@@ -153,6 +156,9 @@ const bindFeishu = async (): Promise<void> => {
   oauthSubmitting.value = true
   try {
     const response = await oauthApi.getFeishuBindUrl()
+    // The provider returns to a fresh callback route. Persist the current
+    // settings context so binding never drops the user at a fixed page.
+    rememberOAuthReturnPath(route.fullPath)
     window.location.href = response.auth_url
   } catch (error: unknown) {
     oauthSubmitting.value = false

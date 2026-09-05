@@ -17,6 +17,16 @@
       title="设置模块不存在"
       description="请从左侧设置菜单选择有效的配置模块。"
     />
+    <div v-else-if="accessLoading" class="settings-access-loading" role="status" aria-live="polite">
+      <div class="settings-access-loading__bar" />
+      <p>正在确认设置权限…</p>
+    </div>
+    <ErrorState
+      v-else-if="accessUnavailable"
+      variant="error"
+      title="权限信息暂不可用"
+      description="为避免误操作，该设置模块暂时不可用。请在顶部重试权限同步后再继续。"
+    />
     <ErrorState
       v-else-if="!hasAccess"
       variant="forbidden"
@@ -69,7 +79,7 @@ interface Props {
 
 const props = defineProps<Props>()
 const route = useRoute()
-const { canAccess } = useSettingsAccess()
+const { canAccess, permissionsUnavailable, permissionsPending } = useSettingsAccess()
 const legacyOpen = ref(false)
 
 const legacyComponents: Record<string, Component> = {
@@ -134,6 +144,8 @@ const legacyProps = computed<Record<string, unknown>>(() => {
   return props
 })
 const hasAccess = computed(() => moduleItem.value !== undefined && canAccess(moduleItem.value))
+const accessLoading = computed(() => moduleItem.value?.scope === 'team' && permissionsPending.value)
+const accessUnavailable = computed(() => moduleItem.value?.scope === 'team' && permissionsUnavailable.value && !hasAccess.value)
 
 const queryAction = computed<'create' | 'edit' | null>(() => {
   const action = route.query['action']
@@ -162,3 +174,30 @@ watch(
   { immediate: true },
 )
 </script>
+
+
+<style scoped>
+.settings-access-loading {
+  display: flex;
+  min-height: 200px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.settings-access-loading__bar {
+  width: min(320px, 80%);
+  height: 12px;
+  border-radius: 999px;
+  background: hsl(var(--muted));
+  animation: settings-access-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes settings-access-pulse {
+  0%,
+  100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+</style>

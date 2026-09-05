@@ -143,6 +143,8 @@
         </div>
       </header>
 
+      <PermissionStatusBanner />
+
       <div class="main-view" :class="mainViewClass">
         <router-view v-slot="{ Component, route: currentRoute }">
           <KeepAlive>
@@ -197,6 +199,7 @@ import {
   MoreHorizontal,
 } from 'lucide-vue-next'
 import ApprovalIcon from '@/components/ApprovalIcon.vue'
+import PermissionStatusBanner from '@/components/PermissionStatusBanner.vue'
 import AppSidebar from '@/components/app-sidebar/AppSidebar.vue'
 import { TopBarTabs } from '@/components/crmwolf'
 import { logger } from '@/utils/logger'
@@ -245,7 +248,12 @@ const getRouteViewKey = (currentRoute: RouteLocationNormalizedLoaded): string =>
     .sort()
     .join('|')
 
-  return params === '' ? routeName : `${routeName}|${params}`
+  const teamRevision = typeof teamStore.switchRevision === 'number' ? teamStore.switchRevision : 0
+  const routeKey = params === '' ? routeName : `${routeName}|${params}`
+  // Recreate only the routed business view after a team switch. The app shell,
+  // URL, query filters, and sidebar state stay intact; unlike router.go(0),
+  // this does not reload the whole document or discard browser route context.
+  return `${routeKey}|team:${teamRevision}`
 }
 
 /**
@@ -302,7 +310,7 @@ onMounted(async () => {
       if (!teamStore.hasAnyTeam()) {
         await teamStore.fetchUserTeams()
       }
-      if (!permissionStore.initialized) {
+      if (permissionStore.loadState !== 'ready') {
         await permissionStore.fetchPermissions()
       }
     } catch (error) {

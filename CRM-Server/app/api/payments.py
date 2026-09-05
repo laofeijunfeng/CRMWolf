@@ -33,7 +33,9 @@ from app.crud.permission import permission_crud
 from app.crud.role import role_crud
 from app.crud.user import user_crud
 from app.models.approval import Approval, ApprovalNode, ApprovalRecord, ApprovalStatus
+from app.models.command_execution import CommandExecutionStatus
 from app.models.payment import PaymentConfirmationStatus, PaymentPlan, PaymentPlanStatus, PaymentRecord
+from app.schemas.command import CommandEffect, CommandResource
 from app.schemas.payment import (
     ContractPaymentSummary,
     PaginatedResponse,
@@ -62,9 +64,26 @@ from app.services.customer_business_object_intelligence_service import (
 )
 from app.services.feishu_notification import feishu_notification_service
 from app.services.approval_transaction_manager import approval_transaction_manager
+from app.services.command_execution_service import (
+    CommandAlreadyInProgress,
+    CommandIdempotencyConflict,
+    CommandOperationConflict,
+    command_execution_service,
+    request_fingerprint,
+)
 
 router = APIRouter(prefix="/v1/payments", tags=["回款管理"])
 logger = logging.getLogger(__name__)
+
+
+def _payment_record_request_data(record_data: object) -> object:
+    """Serialize request data while keeping direct API-call test doubles compatible."""
+    model_dump = getattr(record_data, "model_dump", None)
+    if callable(model_dump):
+        return model_dump(mode="json")
+    if hasattr(record_data, "__dict__"):
+        return vars(record_data)
+    return record_data
 
 
 def _payment_record_last_modified_time(record: PaymentRecord) -> datetime:
@@ -182,7 +201,12 @@ def _payment_plan_response(plan: PaymentPlan) -> PaymentPlanResponse:
     })
 
 
-def _payment_record_response(record: PaymentRecord) -> PaymentRecordResponse:
+def _payment_record_response(
+    record: PaymentRecord,
+    *,
+    operation_id: str | None = None,
+    status: str | None = None,
+) -> PaymentRecordResponse:
     plan = record.payment_plan
     contract = plan.contract if plan else None
     customer = contract.customer if contract and getattr(contract, "customer", None) else None
@@ -222,7 +246,85 @@ def _payment_record_response(record: PaymentRecord) -> PaymentRecordResponse:
         # uses updated_time. Keep the public response backward-compatible and
         # always provide the required timestamp, including legacy rows.
         "last_modified_time": _payment_record_last_modified_time(record),
+        "operation_id": operation_id,
+        "status": status,
     })
+
+
+def _payment_record_from_command_replay(execution) -> PaymentRecordResponse:
+    """Return a previously committed payment response without replaying writes."""
+    payload = command_execution_service.to_response_payload(execution)
+    if execution.status == CommandExecutionStatus.SUCCEEDED:
+        data = payload.get("data")
+        if isinstance(data, dict):
+            return PaymentRecordResponse(**data)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "operation_id": execution.operation_id,
+                "message": "操作结果格式异常，请通过操作编号查询结果",
+            },
+        )
+    if execution.status == CommandExecutionStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_202_ACCEPTED,
+            detail={
+                "operation_id": execution.operation_id,
+                "message": "回款登记正在处理中，请稍候查询结果",
+            },
+        )
+    error = payload.get("error")
+    message = error.get("message") if isinstance(error, dict) else "回款登记未成功"
+    response_status = status.HTTP_409_CONFLICT if execution.status == CommandExecutionStatus.CONFLICT else status.HTTP_400_BAD_REQUEST
+    raise HTTPException(
+        status_code=response_status,
+        detail={"operation_id": execution.operation_id, "message": message},
+    )
+
+
+def _persist_payment_command_failure(
+    db: Session,
+    *,
+    team_id: int,
+    actor_id: str,
+    command_type: str,
+    resource_type: str,
+    resource_public_id: str,
+    operation_id: str,
+    idempotency_key: str | None,
+    fingerprint: str,
+    correlation_id: str | None,
+    error_code: str,
+    error_message: str,
+    command_status: str = CommandExecutionStatus.FAILED,
+) -> None:
+    """Persist a failure after the business transaction has been rolled back."""
+    try:
+        execution, replay = command_execution_service.begin(
+            db,
+            team_id=team_id,
+            actor_id=actor_id,
+            command_type=command_type,
+            resource_type=resource_type,
+            resource_public_id=resource_public_id,
+            operation_id=operation_id,
+            idempotency_key=idempotency_key,
+            fingerprint=fingerprint,
+            correlation_id=correlation_id,
+        )
+        if not replay:
+            command_execution_service.fail(
+                db,
+                execution,
+                status=command_status,
+                error_code=error_code,
+                error_message=error_message,
+                retryable=command_status == CommandExecutionStatus.UNKNOWN,
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.error("[Payment] 无法持久化回款操作失败结果", exc_info=True)
 
 
 def _get_current_approver_names(db: Session, approval: Approval, team_id: int) -> Optional[str]:
@@ -936,20 +1038,29 @@ async def create_payment_record(
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(require_permission("payment:register")),
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
-    db: Session = Depends(get_db)
+    operation_id: Optional[str] = Header(None, alias="X-Operation-Id"),
+    correlation_id: Optional[str] = Header(None, alias="X-Correlation-Id"),
+    db: Session = Depends(get_db),
 ):
-    """
-    登记回款（异步版本 - 正确处理通知）
+    """登记回款，并为结果提供可查询的操作记录。
 
-    流程：
-    1. 验证回款计划存在
-    2. 创建回款记录（CRUD 层）
-    3. 发送审批通知（API 层 - 异步）
+    回款写入属于财务事实：业务事务和命令结果在同一个事务中提交。
+    因网络超时或刷新导致结果不可见时，客户端只能查询 operation_id，不能
+    重新创建另一笔回款。
     """
-    # 直接调用该函数的内部任务/单元测试不会经过 FastAPI 依赖注入，
-    # 此时默认值可能是 Header 对象而不是字符串；按“未提供幂等键”处理。
     if not isinstance(idempotency_key, str):
         idempotency_key = None
+    if not isinstance(operation_id, str):
+        operation_id = None
+    elif not operation_id.strip() or len(operation_id.strip()) > 64:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="X-Operation-Id 必须为 1-64 个字符",
+        )
+    else:
+        operation_id = operation_id.strip()
+    if not isinstance(correlation_id, str):
+        correlation_id = None
     if idempotency_key is not None:
         idempotency_key = idempotency_key.strip()
         if not idempotency_key or len(idempotency_key) > 128:
@@ -960,14 +1071,56 @@ async def create_payment_record(
 
     plan = check_payment_view_permission(plan_id, team_id, current_user, db)
     if idempotency_key:
-        existing = payment_record_crud.get_by_idempotency_key(db, team_id, idempotency_key)
-        if existing:
-            if existing.idempotency_fingerprint != payment_record_request_fingerprint(plan_id, record_data):
+        existing_record = payment_record_crud.get_by_idempotency_key(db, team_id, idempotency_key)
+        if existing_record:
+            if existing_record.idempotency_fingerprint != payment_record_request_fingerprint(plan_id, record_data):
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="幂等键已用于其他回款登记请求，请勿复用",
                 )
-            return _payment_record_response(existing)
+            # 兼容在统一命令记录上线前已经落库的回款记录：补写一条
+            # 已完成的 command execution，后续统一通过 operation_id 查询。
+            fingerprint = request_fingerprint({
+                "plan_id": plan_id,
+                "record": _payment_record_request_data(record_data),
+            })
+            try:
+                execution, replay = command_execution_service.begin(
+                    db,
+                    team_id=team_id,
+                    actor_id=str(current_user.id),
+                    command_type="PAYMENT_RECORD_CREATE",
+                    resource_type="PAYMENT_RECORD",
+                    resource_public_id=str(existing_record.id),
+                    operation_id=operation_id,
+                    idempotency_key=idempotency_key,
+                    fingerprint=fingerprint,
+                    correlation_id=correlation_id,
+                )
+                if replay:
+                    return _payment_record_from_command_replay(execution)
+                response = _payment_record_response(
+                    existing_record,
+                    operation_id=execution.operation_id,
+                    status=CommandExecutionStatus.SUCCEEDED,
+                )
+                command_execution_service.succeed(
+                    db,
+                    execution,
+                    data=response.model_dump(mode="json"),
+                    resource=CommandResource(type="PAYMENT_RECORD", public_id=str(existing_record.id)),
+                    correlation_id=correlation_id,
+                )
+                db.commit()
+                return response
+            except (CommandIdempotencyConflict, CommandAlreadyInProgress, CommandOperationConflict) as exc:
+                db.rollback()
+                if isinstance(exc, CommandAlreadyInProgress):
+                    raise HTTPException(
+                        status_code=status.HTTP_202_ACCEPTED,
+                        detail={"operation_id": str(exc), "message": "回款登记正在处理中，请稍候查询结果"},
+                    ) from exc
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
     _validate_payment_commission_member(
         db,
@@ -980,11 +1133,44 @@ async def create_payment_record(
     if plan.status == PaymentPlanStatus.COMPLETED:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="该回款计划已登记，无法继续登记回款"
+            detail="该回款计划已登记，无法继续登记回款",
         )
 
+    fingerprint = request_fingerprint({
+        "plan_id": plan_id,
+        "record": _payment_record_request_data(record_data),
+    })
     try:
-        # 创建回款记录（CRUD 层 - 同步，不包含通知逻辑）
+        execution, replay = command_execution_service.begin(
+            db,
+            team_id=team_id,
+            actor_id=str(current_user.id),
+            command_type="PAYMENT_RECORD_CREATE",
+            resource_type="PAYMENT_PLAN",
+            resource_public_id=str(plan_id),
+            operation_id=operation_id,
+            idempotency_key=idempotency_key,
+            fingerprint=fingerprint,
+            correlation_id=correlation_id,
+        )
+        if replay:
+            return _payment_record_from_command_replay(execution)
+    except CommandIdempotencyConflict as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except CommandAlreadyInProgress as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_202_ACCEPTED,
+            detail={"operation_id": str(exc), "message": "回款登记正在处理中，请稍候查询结果"},
+        ) from exc
+    except CommandOperationConflict as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    try:
+        # ``commit=False`` keeps the financial fact, approval, status rollups,
+        # and command result inside one transaction.
         record = payment_record_crud.create(
             db,
             plan_id,
@@ -993,6 +1179,7 @@ async def create_payment_record(
             current_user.name,
             team_id,
             idempotency_key=idempotency_key,
+            commit=False,
         )
         await _trigger_payment_record_intelligence_refresh(
             db,
@@ -1004,21 +1191,16 @@ async def create_payment_record(
             ),
         )
 
-        # 发送审批通知（API 层 - 异步）
-        # 注意：通知失败不阻断业务流程，只记录日志
+        # 发送审批通知（API 层 - 异步）。通知失败不阻断主事务。
         if record.approval_id:
             from app.api.approvals import get_notification_users_for_node
             from app.constants.business_types import BusinessType
-
-            # 获取审批实例
             from app.crud.approval import approval_crud
-            approval = approval_crud.get_by_id(db, record.approval_id, team_id)
 
+            approval = approval_crud.get_by_id(db, record.approval_id, team_id)
             if approval and approval.current_node:
                 notify_users = get_notification_users_for_node(db, approval.current_node, team_id)
-
                 entity_name = get_adapter(BusinessType.PAYMENT).get_name(record)
-
                 try:
                     await feishu_notification_service.notify_approval_pending(
                         db=db,
@@ -1035,44 +1217,142 @@ async def create_payment_record(
                         detail_fields=get_approval_card_fields(db, BusinessType.PAYMENT, record),
                     )
                 except Exception as notify_error:
-                    # 通知失败不阻断业务，记录日志
                     logger.error(
-                        f"[Payment] 通知发送失败: record_id={record.id}, "
-                        f"approval_id={record.approval_id}, error={str(notify_error)}"
+                        "[Payment] 通知发送失败: record_id=%s, approval_id=%s, error=%s",
+                        record.id,
+                        record.approval_id,
+                        notify_error,
                     )
 
-        return _payment_record_response(record)
-
-    except PaymentRecordIdempotentReplay as e:
-        # 并发请求在计划锁后发现首个请求已提交，直接复用结果，
-        # 不重新触发智能刷新或审批通知。
-        db.rollback()
-        return _payment_record_response(e.record)
-    except PaymentRecordIdempotencyConflict as e:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
-    except IntegrityError:
-        db.rollback()
-        # 并发重试可能由唯一索引拦截；若已有同一请求结果，直接返回它。
-        if idempotency_key:
-            existing = payment_record_crud.get_by_idempotency_key(db, team_id, idempotency_key)
-            if existing and existing.idempotency_fingerprint == payment_record_request_fingerprint(plan_id, record_data):
-                return _payment_record_response(existing)
-        logger.error("[Payment] 回款登记唯一性冲突", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="回款登记发生并发冲突，请刷新后确认结果")
-    except ValueError as e:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
+        response = _payment_record_response(
+            record,
+            operation_id=execution.operation_id,
+            status=CommandExecutionStatus.SUCCEEDED,
         )
-    except Exception as e:
+        command_execution_service.succeed(
+            db,
+            execution,
+            data=response.model_dump(mode="json"),
+            resource=CommandResource(type="PAYMENT_RECORD", public_id=str(record.id)),
+            effects=[CommandEffect(type="PAYMENT_PLAN", public_id=str(plan_id), status="SYNCED")],
+            correlation_id=correlation_id,
+        )
+        db.commit()
+        return response
+    except PaymentRecordIdempotentReplay as exc:
+        # A concurrent legacy request can win between the initial idempotency
+        # read and the plan lock. Reconcile the command after rollback instead
+        # of reporting a false amount-conflict to the user.
         db.rollback()
-        logger.error(f"[Payment] 登记回款失败: {str(e)}", exc_info=True)
+        try:
+            execution, replay = command_execution_service.begin(
+                db,
+                team_id=team_id,
+                actor_id=str(current_user.id),
+                command_type="PAYMENT_RECORD_CREATE",
+                resource_type="PAYMENT_RECORD",
+                resource_public_id=str(exc.record.id),
+                operation_id=execution.operation_id,
+                idempotency_key=idempotency_key,
+                fingerprint=fingerprint,
+                correlation_id=correlation_id,
+            )
+            if replay:
+                return _payment_record_from_command_replay(execution)
+            response = _payment_record_response(
+                exc.record,
+                operation_id=execution.operation_id,
+                status=CommandExecutionStatus.SUCCEEDED,
+            )
+            command_execution_service.succeed(
+                db,
+                execution,
+                data=response.model_dump(mode="json"),
+                resource=CommandResource(type="PAYMENT_RECORD", public_id=str(exc.record.id)),
+                correlation_id=correlation_id,
+            )
+            db.commit()
+            return response
+        except Exception:
+            db.rollback()
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="回款登记发生并发冲突，请刷新后确认结果") from exc
+    except PaymentRecordIdempotencyConflict as exc:
+        db.rollback()
+        _persist_payment_command_failure(
+            db,
+            team_id=team_id,
+            actor_id=str(current_user.id),
+            command_type="PAYMENT_RECORD_CREATE",
+            resource_type="PAYMENT_PLAN",
+            resource_public_id=str(plan_id),
+            operation_id=execution.operation_id,
+            idempotency_key=idempotency_key,
+            fingerprint=fingerprint,
+            correlation_id=correlation_id,
+            error_code="PAYMENT_IDEMPOTENCY_CONFLICT",
+            error_message=str(exc),
+        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except IntegrityError as exc:
+        db.rollback()
+        _persist_payment_command_failure(
+            db,
+            team_id=team_id,
+            actor_id=str(current_user.id),
+            command_type="PAYMENT_RECORD_CREATE",
+            resource_type="PAYMENT_PLAN",
+            resource_public_id=str(plan_id),
+            operation_id=execution.operation_id,
+            idempotency_key=idempotency_key,
+            fingerprint=fingerprint,
+            correlation_id=correlation_id,
+            error_code="PAYMENT_RECORD_CONFLICT",
+            error_message="回款登记发生并发冲突，请刷新后确认结果",
+        )
+        logger.error("[Payment] 回款登记唯一性冲突", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="回款登记发生并发冲突，请刷新后确认结果") from exc
+    except ValueError as exc:
+        db.rollback()
+        _persist_payment_command_failure(
+            db,
+            team_id=team_id,
+            actor_id=str(current_user.id),
+            command_type="PAYMENT_RECORD_CREATE",
+            resource_type="PAYMENT_PLAN",
+            resource_public_id=str(plan_id),
+            operation_id=execution.operation_id,
+            idempotency_key=idempotency_key,
+            fingerprint=fingerprint,
+            correlation_id=correlation_id,
+            error_code="PAYMENT_RECORD_VALIDATION",
+            error_message=str(exc),
+        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        db.rollback()
+        _persist_payment_command_failure(
+            db,
+            team_id=team_id,
+            actor_id=str(current_user.id),
+            command_type="PAYMENT_RECORD_CREATE",
+            resource_type="PAYMENT_PLAN",
+            resource_public_id=str(plan_id),
+            operation_id=execution.operation_id,
+            idempotency_key=idempotency_key,
+            fingerprint=fingerprint,
+            correlation_id=correlation_id,
+            error_code="PAYMENT_RECORD_UNKNOWN",
+            error_message="回款登记结果暂未确认，请通过操作编号查询最终状态",
+            command_status=CommandExecutionStatus.UNKNOWN,
+        )
+        logger.error("[Payment] 登记回款失败", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"登记回款失败: {str(e)}"
-        )
+            detail={
+                "operation_id": execution.operation_id,
+                "message": "回款登记结果暂未确认，请稍后查询操作结果",
+            },
+        ) from exc
 
 
 @router.get("/payment-plans/{plan_id}/records", response_model=List[PaymentRecordResponse], summary="查询回款记录", description="获取指定回款计划下的所有回款记录，按回款日期倒序排列。包含每笔回款的详细信息，如回款金额、回款日期、登记人等。")

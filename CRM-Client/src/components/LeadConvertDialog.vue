@@ -29,7 +29,15 @@ import { leadApi, type LeadDetail } from '@/api/lead'
 import customerApi from '@/api/customer'
 import procurementApi from '@/api/procurement'
 import { confirmDialog } from '@/utils/confirmDialog'
-import { handleApiError } from '@/utils/errorHandler'
+import { handleApiError, handleOutcomeUnknown, isOutcomeUnknown } from '@/utils/errorHandler'
+import {
+  createCommandRequestOptions,
+  isNetworkOrTimeoutError,
+  operationIdFromError,
+  pollCommandStatus,
+  type CommandExecutionResponse,
+  type CommandRequestOptions,
+} from '@/api/command'
 
 interface Props {
   open: boolean
@@ -48,6 +56,7 @@ const emit = defineEmits<Emits>()
 const loading = ref(false)
 const submitting = ref(false)
 const closeGuardPending = ref(false)
+const convertCommandOptions = ref<CommandRequestOptions | null>(null)
 const leadData = ref<LeadDetail | null>(null)
 const procurementMethodOptions = ref<{ id: number; name: string }[]>([])
 const loadRequestId = ref(0)
@@ -119,6 +128,40 @@ const fetchProcurementMethodOptions = async (): Promise<void> => {
   }
 }
 
+function commandErrorMessage(error: Record<string, unknown> | null | undefined): string {
+  const message = error?.['message']
+  return typeof message === 'string' && message.length > 0 ? message : '请稍后重试'
+}
+
+function isConversionSucceeded(result: { status?: string; customer_id?: string }): boolean {
+  if (result.status === undefined) return typeof result.customer_id === 'string' && result.customer_id.length > 0
+  return result.status === 'SUCCEEDED'
+}
+
+interface ConversionRecovery {
+  succeeded: boolean
+  keepCommand: boolean
+}
+
+async function recoverConversion(options: CommandRequestOptions): Promise<ConversionRecovery> {
+  try {
+    const result: CommandExecutionResponse = await pollCommandStatus(options.operationId ?? '', {
+      attempts: 8,
+      intervalMs: 500,
+    })
+    if (result.status === 'SUCCEEDED') return { succeeded: true, keepCommand: false }
+    if (result.status === 'PENDING' || result.status === 'UNKNOWN') {
+      handleOutcomeUnknown('线索转化')
+      return { succeeded: false, keepCommand: true }
+    }
+    toast.error('线索转化失败', { description: commandErrorMessage(result.error) })
+    return { succeeded: false, keepCommand: false }
+  } catch {
+    handleOutcomeUnknown('线索转化')
+    return { succeeded: false, keepCommand: true }
+  }
+}
+
 // 提交转化
 const handleSubmit = async (): Promise<void> => {
   if (props.leadId === undefined || props.leadId === null || submitting.value) return
@@ -140,19 +183,49 @@ const handleSubmit = async (): Promise<void> => {
   }
 
   submitting.value = true
+  const commandOptions = convertCommandOptions.value ?? createCommandRequestOptions()
+  convertCommandOptions.value = commandOptions
   try {
     const data = {
       lead_id: props.leadId,
       account_name: formValues.account_name.trim().length > 0 ? formValues.account_name.trim() : null,
       address: formValues.address.trim().length > 0 ? formValues.address.trim() : null,
-      default_procurement_method_id: Number(formValues.default_procurement_method_id)
+      default_procurement_method_id: Number(formValues.default_procurement_method_id),
     }
-    await customerApi.convertLeadToCustomer(data)
+    let succeeded = false
+    let keepCommand = true
+    try {
+      const result = await customerApi.convertLeadToCustomer(data, commandOptions)
+      succeeded = isConversionSucceeded(result)
+      if (result.status === 'PENDING' || result.status === 'UNKNOWN') {
+        const recovery = await recoverConversion(commandOptions)
+        succeeded = recovery.succeeded
+        keepCommand = recovery.keepCommand
+      } else if (result.status === 'FAILED' || result.status === 'CONFLICT' || result.status === 'PARTIAL') {
+        toast.error('线索转化失败', { description: commandErrorMessage(result.error) })
+        keepCommand = false
+      }
+    } catch (error: unknown) {
+      const operationId = operationIdFromError(error)
+      if (isNetworkOrTimeoutError(error) || operationId !== null || isOutcomeUnknown(error)) {
+        const recovery = await recoverConversion(operationId === null ? commandOptions : { ...commandOptions, operationId })
+        succeeded = recovery.succeeded
+        keepCommand = recovery.keepCommand
+      } else {
+        keepCommand = false
+        throw error
+      }
+    }
+    if (!succeeded) {
+      if (!keepCommand) convertCommandOptions.value = null
+      return
+    }
     toast.success('线索转化成功')
     visible.value = false
+    convertCommandOptions.value = null
     emit('success')
     // 不跳转，留在线索管理页面，通过 emit('success') 触发列表刷新
-  } catch (error) {
+  } catch (error: unknown) {
     handleApiError(error, '转化线索')
   } finally {
     submitting.value = false
@@ -216,6 +289,7 @@ watch(
       formValues.default_procurement_method_id = ''
       initialForm.value = { ...formValues }
       leadData.value = null
+      convertCommandOptions.value = null
     }
   },
 )

@@ -140,13 +140,72 @@ export const CustomerUpdateSchema = CustomerCreateSchema.partial()
 export type CustomerUpdate = z.infer<typeof CustomerUpdateSchema>
 
 // ===== 线索转换响应 =====
-export const ConvertResponseSchema = z.object({
+const ConvertResultDataSchema = z.object({
+  lead_id: z.string().min(1),
+  converted_lead_id: z.string().min(1),
   customer_id: z.string().min(1),
+  customer_public_id: z.string().min(1),
   contact_id: z.number().int().positive(),
-  message: z.string()
+  contact_public_id: z.string().nullable().optional(),
+  message: z.string(),
+  created_customer: z.boolean(),
+  created_contact: z.boolean(),
+  inherited_fields: z.array(z.string()).default([]),
+  source_relation: z.record(z.unknown()).default({}),
+  warnings: z.array(z.string()).default([])
+})
+
+export const ConvertResponseSchema = z.object({
+  operation_id: z.string().min(1).optional(),
+  status: z.enum(['PENDING', 'SUCCEEDED', 'FAILED', 'UNKNOWN', 'CONFLICT', 'PARTIAL']).optional(),
+  // Legacy top-level fields remain available during the API migration.
+  customer_id: z.string().min(1).optional(),
+  contact_id: z.number().int().positive().optional(),
+  message: z.string().optional(),
+  data: ConvertResultDataSchema.nullable().optional(),
+  resource: z.record(z.unknown()).nullable().optional(),
+  effects: z.array(z.record(z.unknown())).default([]),
+  next_actions: z.array(z.record(z.unknown())).default([]),
+  retryable: z.boolean().default(false),
+  queryable: z.boolean().default(true),
+  error: z.record(z.unknown()).nullable().optional(),
+  correlation_id: z.string().nullable().optional()
 })
 
 export type ConvertResponse = z.infer<typeof ConvertResponseSchema>
+
+// ===== 客户移交结果 =====
+export const CustomerAssignmentObjectSchema = z.object({
+  public_id: z.string().min(1),
+  object_type: z.enum(['opportunity', 'contract']),
+  status: z.string(),
+  detail: z.string().nullable().optional()
+})
+
+export const CustomerAssignmentResultSchema = z.object({
+  customer: CustomerResponseSchema,
+  previous_owner_id: z.string().nullable().optional(),
+  new_owner_id: z.string().nullable().optional(),
+  transfer_scope: z.enum(['customer_only', 'customer_and_opportunities', 'customer_opportunities_and_contracts']),
+  transferred_opportunities: z.number().int().nonnegative(),
+  transferred_contracts: z.number().int().nonnegative(),
+  updated_objects: z.array(CustomerAssignmentObjectSchema).default([]),
+  skipped_objects: z.array(CustomerAssignmentObjectSchema).default([]),
+  message: z.string()
+})
+
+export const CustomerAssignmentPreviewResponseSchema = z.object({
+  customer_id: z.string().min(1),
+  customer_version: z.number().int().nonnegative(),
+  transfer_scope: z.enum(['customer_only', 'customer_and_opportunities', 'customer_opportunities_and_contracts']),
+  opportunity_count: z.number().int().nonnegative(),
+  contract_count: z.number().int().nonnegative(),
+  locked_contract_count: z.number().int().nonnegative(),
+  locked_contracts: z.array(CustomerAssignmentObjectSchema).default([])
+})
+
+export type CustomerAssignmentResult = z.infer<typeof CustomerAssignmentResultSchema>
+export type CustomerAssignmentPreviewResponse = z.infer<typeof CustomerAssignmentPreviewResponseSchema>
 
 // ===== 客户退回响应 =====
 export const CustomerReturnResponseSchema = z.object({

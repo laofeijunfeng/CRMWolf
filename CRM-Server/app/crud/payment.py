@@ -748,6 +748,7 @@ class PaymentRecordCRUD:
         creator_name: str,
         team_id: int,
         idempotency_key: Optional[str] = None,
+        commit: bool = True,
     ) -> PaymentRecord:
         from app.crud.user import user_crud
         from app.crud.customer import customer_crud
@@ -888,7 +889,8 @@ class PaymentRecordCRUD:
 
         # 回款记录、审批实例、计划/合同状态、旅程事件和操作日志在同一
         # 业务事务中提交；任一主流程失败都由调用方 rollback。
-        db.commit()
+        if commit:
+            db.commit()
         db.refresh(db_record)
         return db_record
     

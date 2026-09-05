@@ -1,11 +1,26 @@
 import axios, { AxiosError, type AxiosRequestConfig } from 'axios'
 import { useUserStore } from '@/stores/user'
+import { rememberAuthReturnPath } from '@/utils/authRecovery'
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL
+let authRedirectInFlight = false
 
 export interface RequestConfig extends AxiosRequestConfig {
   skipErrorNotification?: boolean
+  /** Stable identifier for a user initiated write command. */
+  operationId?: string
+  /** Client generated key used to make a write safe to retry. */
+  idempotencyKey?: string
+  /** Optimistic concurrency fence understood by command endpoints. */
+  expectedVersion?: string | number
+  /** Shared trace identifier for the request and its recovery query. */
+  correlationId?: string
 }
+
+type CommandRequestConfig = Pick<
+  RequestConfig,
+  'operationId' | 'idempotencyKey' | 'expectedVersion' | 'correlationId'
+>
 
 const axiosInstance = axios.create({
   baseURL: apiBaseUrl === undefined || apiBaseUrl === null || apiBaseUrl.trim() === '' ? '/api' : apiBaseUrl,
@@ -14,10 +29,23 @@ const axiosInstance = axios.create({
 
 axiosInstance.interceptors.request.use(
   (config) => {
+    const commandConfig = config as typeof config & CommandRequestConfig
     const userStore = useUserStore()
     const token = userStore.token
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
+    }
+    if (commandConfig.operationId !== undefined && commandConfig.operationId !== '') {
+      config.headers['X-Operation-Id'] = commandConfig.operationId
+    }
+    if (commandConfig.idempotencyKey !== undefined && commandConfig.idempotencyKey !== '') {
+      config.headers['Idempotency-Key'] = commandConfig.idempotencyKey
+    }
+    if (commandConfig.expectedVersion !== undefined) {
+      config.headers['X-Expected-Version'] = String(commandConfig.expectedVersion)
+    }
+    if (commandConfig.correlationId !== undefined && commandConfig.correlationId !== '') {
+      config.headers['X-Correlation-Id'] = commandConfig.correlationId
     }
     return config
   },
@@ -43,10 +71,13 @@ axiosInstance.interceptors.response.use(
   },
   (error: AxiosError) => {
     // 只处理 401（跳转登录）
-    if (error.response?.status === 401) {
+    if (error.response?.status === 401 && !authRedirectInFlight) {
+      authRedirectInFlight = true
+      const returnPath = rememberAuthReturnPath()
       const userStore = useUserStore()
       userStore.logout()
-      window.location.href = '/login'
+      const query = returnPath === null ? '' : `?redirect=${encodeURIComponent(returnPath)}`
+      window.location.href = `/login${query}`
     }
 
     // 所有其他错误由页面级处理（使用 handleApiError）

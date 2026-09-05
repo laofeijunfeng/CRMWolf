@@ -60,7 +60,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Plus, Link, LogOut } from 'lucide-vue-next'
 import { Button, Card, CardContent } from '@/components/crmwolf'
 import {
@@ -74,18 +74,20 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { useUserStore } from '@/stores/user'
+import { createAuthReturnQuery, getSafeAuthReturnPath } from '@/utils/authRecovery'
 
+const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 
 const showLogoutDialog = ref(false)
 
 const goToCreateTeam = (): void => {
-  router.push('/onboarding/create-team')
+  router.push({ name: 'TeamCreate', query: createAuthReturnQuery(getSafeAuthReturnPath(route.query['redirect'])) })
 }
 
 const goToJoinTeam = (): void => {
-  router.push('/onboarding/join-team')
+  router.push({ name: 'TeamJoin', query: createAuthReturnQuery(getSafeAuthReturnPath(route.query['redirect'])) })
 }
 
 const handleLogout = (): void => {

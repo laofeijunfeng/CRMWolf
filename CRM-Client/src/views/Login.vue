@@ -67,7 +67,7 @@
 
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { Loader2 } from 'lucide-vue-next'
 import { authApi } from '@/api/auth'
@@ -80,7 +80,9 @@ import { useTeamStore } from '@/stores/team'
 import { useUserStore } from '@/stores/user'
 import { handleApiError } from '@/utils/errorHandler'
 import { logger } from '@/utils/logger'
+import { consumeAuthReturnPath, createAuthReturnQuery } from '@/utils/authRecovery'
 
+const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const teamStore = useTeamStore()
@@ -133,15 +135,17 @@ async function handleLogin(): Promise<void> {
 
     toast.success('登录成功', { description: '欢迎使用 CRM 系统' })
 
+    const returnPath = consumeAuthReturnPath(route.query['redirect'])
     try {
       await teamStore.fetchUserTeams()
       if (teamStore.hasTeam()) {
-        void router.push('/leads')
+        void router.replace(returnPath ?? '/leads')
       } else {
-        void router.push('/onboarding')
+        void router.replace({ name: 'Onboarding', query: createAuthReturnQuery(returnPath) })
       }
     } catch {
-      void router.push('/onboarding')
+      // A failed team request is not equivalent to an empty team list.
+      void router.replace({ name: 'TeamUnavailable', query: createAuthReturnQuery(returnPath) })
     }
   } catch (error: unknown) {
     handleApiError(error, '登录', {

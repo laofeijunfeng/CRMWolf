@@ -1,4 +1,6 @@
 import request from '@/utils/request'
+import type { CommandRequestOptions } from '@/api/command'
+import type { RequestConfig } from '@/utils/request'
 
 export interface PaymentPlanCreate {
   stage_name: string
@@ -150,6 +152,8 @@ export interface PaymentRecordResponse {
   created_time: string
   updated_time?: string | null
   last_modified_time: string
+  operation_id?: string
+  status?: string
 }
 
 export interface PaymentPlanStatusSummary {
@@ -357,13 +361,26 @@ const paymentApi = {
     throw lastError ?? new Error('回款登记结果尚未确认')
   },
 
-  createPaymentRecord: (planId: number, data: PaymentRecordCreate, idempotencyKey?: string) => {
+  createPaymentRecord: (
+    planId: number,
+    data: PaymentRecordCreate,
+    commandOptions?: CommandRequestOptions | string,
+  ): Promise<PaymentRecordResponse> => {
+    const config: RequestConfig = {}
+    if (typeof commandOptions === 'string') {
+      if (commandOptions.length > 0) {
+        config.headers = { 'Idempotency-Key': commandOptions }
+      }
+    } else if (commandOptions !== undefined) {
+      if (commandOptions.operationId !== undefined) config.operationId = commandOptions.operationId
+      if (commandOptions.idempotencyKey !== undefined) config.idempotencyKey = commandOptions.idempotencyKey
+      if (commandOptions.expectedVersion !== undefined) config.expectedVersion = commandOptions.expectedVersion
+      if (commandOptions.correlationId !== undefined) config.correlationId = commandOptions.correlationId
+    }
     return request.post<PaymentRecordResponse>(
       `/v1/payments/payment-plans/${planId}/records`,
       data,
-      idempotencyKey !== undefined && idempotencyKey.length > 0
-        ? { headers: { 'Idempotency-Key': idempotencyKey } }
-        : undefined,
+      Object.keys(config).length > 0 ? config : undefined,
     )
   },
 

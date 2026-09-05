@@ -1,3 +1,4 @@
+<!-- eslint-disable vue/multi-word-component-names -->
 <template>
   <slot v-if="hasPermission"></slot>
 </template>
@@ -7,7 +8,10 @@ import { computed } from 'vue'
 import { usePermissionStore } from '@/stores/permissions'
 
 interface Props {
+  // These props are intentionally optional because the component supports either code or codes.
+  // eslint-disable-next-line vue/require-default-prop
   code?: string
+  // eslint-disable-next-line vue/require-default-prop
   codes?: string[]
   mode?: 'any' | 'all'
 }
@@ -19,11 +23,13 @@ const props = withDefaults(defineProps<Props>(), {
 const permissionStore = usePermissionStore()
 
 const hasPermission = computed(() => {
-  if (props.code) {
+  if (permissionStore.loadState !== 'ready') return false
+
+  if (typeof props.code === 'string' && props.code.length > 0) {
     return permissionStore.hasPermission(props.code)
   }
   
-  if (props.codes && props.codes.length > 0) {
+  if (Array.isArray(props.codes) && props.codes.length > 0) {
     if (props.mode === 'any') {
       return permissionStore.hasAnyPermission(props.codes)
     } else {

@@ -18,7 +18,7 @@
  * - ✅ 保留业务逻辑（退回公海、输单、赢单等）
  */
 import { ref, reactive, computed, onMounted, watchEffect, type Component } from 'vue'
-import { handleApiError } from '@/utils/errorHandler'
+import { handleApiError, handleOutcomeUnknown, isOutcomeUnknown } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Sparkles, ArrowRightLeft, TrendingUp, TrendingDown, XCircle, Trash2, Pencil, UserRoundCheck } from 'lucide-vue-next'
 import { DataTable, TableRowActions, type ActionConfig, type TableRowActionSet } from '@/components/crmwolf'
@@ -65,6 +65,14 @@ import { serializeListQuery } from '@/utils/listQuery'
 import { LICENSE_STATUS_LABELS, licenseStatusClass, licenseStatusLabel } from '@/utils/licenseStatus'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 import type { FormSuccessPayload } from '@/types/actionOutcome'
+import {
+  createCommandRequestOptions,
+  isNetworkOrTimeoutError,
+  operationIdFromError,
+  pollCommandStatus,
+  type CommandExecutionResponse,
+  type CommandRequestOptions,
+} from '@/api/command'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -548,6 +556,14 @@ const fetchCustomerList = async (): Promise<boolean> => {
     }
   }
 }
+const refreshCustomerListAfterMutation = async (operationLabel: string): Promise<boolean> => {
+  const refreshed = await fetchCustomerList()
+  if (!refreshed) {
+    toast.warning(`${operationLabel}已成功，但客户列表刷新失败，请稍后重试。`)
+  }
+  return refreshed
+}
+
 const customFilterViews = useCustomFilterViews({
   viewKey: 'customers.list',
   activeTab,
@@ -719,9 +735,50 @@ const handleOpportunityDialogOpenChange = (open: boolean): void => {
   }
 }
 
-const handleOpportunitySuccess = (): void => {
+const handleOpportunitySuccess = async (): Promise<void> => {
   handleOpportunityDialogOpenChange(false)
-  fetchCustomerList()
+  await refreshCustomerListAfterMutation('商机创建')
+}
+
+async function recoverCustomerCommand(
+  options: CommandRequestOptions,
+  actionLabel: string,
+): Promise<CommandExecutionResponse | null> {
+  try {
+    const result = await pollCommandStatus(options.operationId ?? '', { attempts: 8, intervalMs: 500 })
+    if (result.status === 'SUCCEEDED') return result
+    if (result.status === 'PENDING' || result.status === 'UNKNOWN') {
+      handleOutcomeUnknown(actionLabel)
+      return null
+    }
+    toast.error(`${actionLabel}未完成`, { description: result.error?.message ?? '客户状态已变化，请刷新后重试' })
+    return null
+  } catch {
+    handleOutcomeUnknown(actionLabel)
+    return null
+  }
+}
+
+async function runCustomerCommand(
+  actionLabel: string,
+  options: CommandRequestOptions,
+  request: () => Promise<CommandExecutionResponse>,
+): Promise<CommandExecutionResponse | null> {
+  try {
+    const result = await request()
+    if (result.status === 'SUCCEEDED') return result
+    if (result.status === 'PENDING' || result.status === 'UNKNOWN') {
+      return recoverCustomerCommand(options, actionLabel)
+    }
+    toast.error(`${actionLabel}未完成`, { description: result.error?.message ?? '请刷新后重试' })
+    return null
+  } catch (error: unknown) {
+    const operationId = operationIdFromError(error)
+    if (isNetworkOrTimeoutError(error) || operationId !== null || isOutcomeUnknown(error)) {
+      return recoverCustomerCommand(operationId === null ? options : { ...options, operationId }, actionLabel)
+    }
+    throw error
+  }
 }
 
 const handleClaim = async (record: CustomerResponse): Promise<void> => {
@@ -729,9 +786,18 @@ const handleClaim = async (record: CustomerResponse): Promise<void> => {
   if (!confirmed) return
 
   try {
-    await customerApi.claimCustomer(record.id, { owner_id: String(userStore.userInfo?.id ?? '') })
+    const options = createCommandRequestOptions({ expectedVersion: record.version })
+    const result = await runCustomerCommand(
+      '领取客户',
+      options,
+      () => customerApi.claimCustomer(record.id, {
+        owner_id: String(userStore.userInfo?.id ?? ''),
+        expected_version: record.version,
+      }, options),
+    )
+    if (result === null) return
     toast.success('客户领取成功')
-    fetchCustomerList()
+    await refreshCustomerListAfterMutation('客户领取')
   } catch (error) {
     handleApiError(error, '领取客户')
   }
@@ -808,9 +874,9 @@ const handleTransferDialogOpenChange = (open: boolean): void => {
   }
 }
 
-const handleTransferSuccess = (): void => {
+const handleTransferSuccess = async (): Promise<void> => {
   handleTransferDialogOpenChange(false)
-  fetchCustomerList()
+  await refreshCustomerListAfterMutation('客户移交')
 }
 
 const handleReturnModalOk = async (): Promise<void> => {
@@ -821,13 +887,21 @@ const handleReturnModalOk = async (): Promise<void> => {
 
   returnSubmitting.value = true
   try {
-    await customerApi.returnToPool(selectedCustomer.value.id, {
-      ...returnForm,
-      detailed_reason: returnForm.detailed_reason.trim(),
-    })
+    const record = selectedCustomer.value
+    const options = createCommandRequestOptions({ expectedVersion: record.version })
+    const result = await runCustomerCommand(
+      '退回公海',
+      options,
+      () => customerApi.returnToPool(record.id, {
+        ...returnForm,
+        detailed_reason: returnForm.detailed_reason.trim(),
+        expected_version: record.version,
+      }, options),
+    )
+    if (result === null) return
     toast.success('客户已退回公海')
     closeReturnDialog()
-    void fetchCustomerList()
+    await refreshCustomerListAfterMutation('客户退回公海')
   } catch (error) {
     handleApiError(error, '退回公海')
   } finally {
@@ -842,7 +916,7 @@ const handleWin = async (record: CustomerResponse): Promise<void> => {
   try {
     await customerApi.updateCustomerStatus(record.id, { status: 1 as CustomerStatus })
     toast.success('客户已标记为赢单')
-    fetchCustomerList()
+    await refreshCustomerListAfterMutation('客户赢单标记')
   } catch (error) {
     handleApiError(error, '标记赢单')
   }
@@ -867,7 +941,7 @@ const handleLoseModalOk = async (): Promise<void> => {
     })
     toast.success('客户已标记为输单')
     closeLoseDialog()
-    void fetchCustomerList()
+    await refreshCustomerListAfterMutation('客户输单标记')
   } catch (error) {
     handleApiError(error, '标记输单')
   } finally {
@@ -882,7 +956,7 @@ const handleInvalid = async (record: CustomerResponse): Promise<void> => {
   try {
     await customerApi.updateCustomerStatus(record.id, { status: 3 as CustomerStatus })
     toast.success('客户已标记为失效')
-    fetchCustomerList()
+    await refreshCustomerListAfterMutation('客户失效标记')
   } catch (error) {
     handleApiError(error, '标记失效')
   }
@@ -904,7 +978,7 @@ const handleDelete = async (record: CustomerResponse): Promise<void> => {
   try {
     await customerApi.deleteCustomer(record.id)
     toast.success(`客户“${record.account_name}”已删除`)
-    void fetchCustomerList()
+    await refreshCustomerListAfterMutation('客户删除')
   } catch (error) {
     handleApiError(error, '删除客户')
   } finally {

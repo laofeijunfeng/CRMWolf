@@ -134,6 +134,15 @@ const handleSettings = (): void => {
   void router.push('/settings/account')
 }
 
+const retryTeamPermissions = async (): Promise<void> => {
+  const synced = await teamStore.retryPermissionSync()
+  if (synced) {
+    toast.success('权限已刷新')
+  } else {
+    toast.error('权限刷新失败', { description: '请检查网络后再次重试。' })
+  }
+}
+
 const handleSwitchTeam = async (teamId: number): Promise<void> => {
   if (teamId === teamStore.currentTeam?.id) {
     open.value = false
@@ -142,8 +151,19 @@ const handleSwitchTeam = async (teamId: number): Promise<void> => {
   try {
     await teamStore.switchTeam(teamId)
     open.value = false
-    toast.success('已切换团队')
-    router.go(0)
+    if (teamStore.permissionSyncState === 'error') {
+      toast.warning('团队已切换，但权限尚未刷新', {
+        description: '当前页面已切换到新团队，建议立即重试权限同步。',
+        action: {
+          label: '重试',
+          onClick: () => {
+            void retryTeamPermissions()
+          },
+        },
+      })
+    } else {
+      toast.success('已切换团队')
+    }
   } catch {
     toast.error('切换团队失败')
   }

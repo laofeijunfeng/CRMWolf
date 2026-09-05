@@ -14,6 +14,7 @@ setup_logging(debug=debug_mode)
 logger = get_logger(__name__)
 
 from app.api import (
+    operations,
     acquisition_sources,
     approval_ai,
     approvals,
@@ -135,6 +136,7 @@ api_router.include_router(invoices.router, prefix="/v1")
 api_router.include_router(invoices.invoice_router, prefix="/v1")
 api_router.include_router(finance.router, prefix="/v1")
 api_router.include_router(operation_logs.router, prefix="/v1")
+api_router.include_router(operations.router)
 api_router.include_router(acquisition_sources.router)
 api_router.include_router(procurement_methods.router)
 api_router.include_router(procurement_stage_templates.router)

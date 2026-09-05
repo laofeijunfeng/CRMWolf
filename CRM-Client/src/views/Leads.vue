@@ -258,6 +258,18 @@ const fetchLeadList = async (): Promise<boolean> => {
     }
   }
 }
+const refreshLeadListAfterMutation = async (operationLabel: string): Promise<boolean> => {
+  const refreshed = await fetchLeadList()
+  if (!refreshed) {
+    toast.warning(`${operationLabel}已成功，但线索列表刷新失败，请稍后重试。`)
+  }
+  return refreshed
+}
+
+const handleLeadMutationSuccess = async (operationLabel = '线索保存'): Promise<void> => {
+  await refreshLeadListAfterMutation(operationLabel)
+}
+
 const customFilterViews = useCustomFilterViews({
   viewKey: 'leads.list',
   activeTab,
@@ -337,6 +349,10 @@ const handlePageSizeChange = (pageSize: number): void => {
   fetchLeadList()
 }
 
+const handleLeadDetailRefresh = async (): Promise<void> => {
+  await handleLeadMutationSuccess('线索更新')
+}
+
 const handleViewDetail = (record: Lead): void => {
   selectedLeadId.value = record.id
   sheetVisible.value = true
@@ -366,7 +382,7 @@ const handleClaim = async (record: Lead): Promise<void> => {
   try {
     await leadApi.claimLead(record.id)
     toast.success('线索领取成功')
-    fetchLeadList()
+    await refreshLeadListAfterMutation('线索领取')
   } catch (error) {
     handleApiError(error, '领取线索')
   }
@@ -392,7 +408,7 @@ const handleAssignModalOk = async (): Promise<void> => {
     await leadApi.assignLead(selectedLead.value.id, { owner_id: String(assignForm.owner_id) })
     toast.success('线索分配成功')
     assignModalVisible.value = false
-    fetchLeadList()
+    await refreshLeadListAfterMutation('线索分配')
   } catch (error) {
     handleApiError(error, '分配线索')
   }
@@ -405,7 +421,7 @@ const handleReturn = async (record: Lead): Promise<void> => {
   try {
     await leadApi.returnLead(record.id)
     toast.success('线索已退回公海')
-    fetchLeadList()
+    await refreshLeadListAfterMutation('线索退回公海')
   } catch (error) {
     handleApiError(error, '退回线索到公海')
   }
@@ -428,7 +444,7 @@ const handleInvalidModalOk = async (): Promise<void> => {
     await leadApi.markInvalid(selectedLeadForInvalid.value.id, { reason: invalidForm.reason })
     toast.success('线索已标记为无效')
     invalidModalVisible.value = false
-    fetchLeadList()
+    await refreshLeadListAfterMutation('线索无效标记')
   } catch (error) {
     handleApiError(error, '标记线索为无效')
   }
@@ -446,7 +462,7 @@ const handleDelete = async (record: Lead): Promise<void> => {
   try {
     await leadApi.deleteLead(record.id)
     toast.success('线索删除成功')
-    fetchLeadList()
+    await refreshLeadListAfterMutation('线索删除')
   } catch (error) {
     handleApiError(error, '删除线索')
   }
@@ -820,7 +836,7 @@ watchEffect(() => {
     <LeadFormDialog
       v-model:open="showLeadCreateDialog"
       mode="create"
-      @success="fetchLeadList"
+      @success="handleLeadMutationSuccess('线索创建')"
     />
 
     <!-- 编辑线索弹窗 -->
@@ -832,21 +848,21 @@ watchEffect(() => {
       :lead-id="selectedLeadId ?? undefined"
       :lead="editingLead"
       @update:open="handleLeadEditDialogOpenChange"
-      @success="fetchLeadList"
+      @success="handleLeadMutationSuccess('线索编辑')"
     />
 
     <!-- 线索详情抽屉 -->
     <LeadDetailSheet
       v-model:visible="sheetVisible"
       :lead-id="selectedLeadId ?? null"
-      @refresh="fetchLeadList"
+      @refresh="handleLeadDetailRefresh"
     />
 
     <!-- 转化为客户弹窗 -->
     <LeadConvertDialog
       v-model:open="showConvertDialog"
       :lead-id="convertLeadId"
-      @success="fetchLeadList"
+      @success="handleLeadMutationSuccess('线索转化')"
     />
   </div>
 </template>

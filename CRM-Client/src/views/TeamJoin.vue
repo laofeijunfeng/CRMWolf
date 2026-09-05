@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { toTypedSchema } from '@vee-validate/zod'
 import { useForm } from 'vee-validate'
@@ -26,10 +26,12 @@ import {
 } from '@/components/ui/alert-dialog'
 import { useTeamStore } from '@/stores/team'
 import { useUserStore } from '@/stores/user'
+import { getSafeAuthReturnPath } from '@/utils/authRecovery'
 import { teamJoinSchema, type TeamJoinFormValues } from '@/schemas/team-join.schema'
 import { handleApiError } from '@/utils/errorHandler'
 import { omitUndefined } from '@/lib/utils'
 
+const route = useRoute()
 const router = useRouter()
 const teamStore = useTeamStore()
 const userStore = useUserStore()
@@ -56,7 +58,7 @@ const onSubmit = handleSubmit(async (values): Promise<void> => {
   try {
     await teamStore.joinTeam(values.code)
     toast.success('加入团队成功')
-    router.push('/leads')
+    router.replace(getSafeAuthReturnPath(route.query['redirect']) ?? '/leads')
   } catch (error: unknown) {
     handleApiError(error, '加入团队')
   } finally {

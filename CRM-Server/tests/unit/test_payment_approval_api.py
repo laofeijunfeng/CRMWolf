@@ -37,6 +37,8 @@ from app.models.approval import (
     Approval, ApprovalRecord, ApprovalFlow, ApprovalNode, ApprovalStatus,
 )
 from app.models.contract import Contract, ContractStatus
+from app.models.customer import Customer
+from app.models.opportunity import Opportunity
 from app.models.payment import (
     PaymentPlan, PaymentRecord, PaymentPlanStatus, PaymentConfirmationStatus,
 )
@@ -58,6 +60,8 @@ def db_session():
     )
     tables = [
         User.__table__,
+        Customer.__table__,
+        Opportunity.__table__,
         Contract.__table__,
         PaymentPlan.__table__,
         PaymentRecord.__table__,
@@ -66,7 +70,23 @@ def db_session():
         Approval.__table__,
         ApprovalRecord.__table__,
     ]
-    Base.metadata.create_all(engine, tables=tables)
+    # Customer and Contract historically share a legacy ``idx_team_id`` name.
+    # This focused fixture only needs Customer for the update response lookup;
+    # omit its non-essential indexes so SQLite can create both tables without
+    # changing production metadata or the migration contract.
+    omitted_indexes = {
+        table: list(table.indexes)
+        for table in (Customer.__table__, Opportunity.__table__)
+    }
+    for indexes in omitted_indexes.values():
+        for index in indexes:
+            index.table.indexes.discard(index)
+    try:
+        Base.metadata.create_all(engine, tables=tables)
+    finally:
+        for table, indexes in omitted_indexes.items():
+            for index in indexes:
+                table.indexes.add(index)
     Session = sessionmaker(bind=engine)
     session = Session()
     yield session
@@ -94,7 +114,14 @@ def patched_perms(monkeypatch):
 
 
 @pytest.fixture
-def app(db_session):
+def app(db_session, monkeypatch):
+    # This suite verifies payment approval semantics. Customer intelligence
+    # refresh has its own integration tests and would otherwise require the
+    # full opportunity schema/background database in this focused SQLite app.
+    monkeypatch.setattr(
+        "app.api.payments._build_payment_record_intelligence_change",
+        lambda *args, **kwargs: None,
+    )
     app_ = FastAPI()
     app_.include_router(payments_router)
     app_.dependency_overrides[deps.get_db] = lambda: db_session
@@ -137,7 +164,7 @@ def seed_contract_plan(db_session):
         contract_name="测试合同",
         customer_id=1,
         opportunity_id=1,
-        signing_contact_id=1,
+        signing_contact_id=None,
         user_count=10,
         total_amount=100000,
         license_type="SUBSCRIPTION",

@@ -152,8 +152,8 @@ const filteredRoles = computed(() => {
 })
 
 const listTitle = computed(() => `角色列表（${filteredRoles.value.length}）`)
-const canManageRoles = computed(() => isOwner.value || !permissionStore.initialized || permissionStore.hasPermission('role:manage'))
-const canManageRolePermissions = computed(() => isOwner.value || !permissionStore.initialized || permissionStore.hasAnyPermission(['permission:manage', 'role:manage']))
+const canManageRoles = computed(() => isOwner.value || permissionStore.hasPermission('role:manage'))
+const canManageRolePermissions = computed(() => isOwner.value || permissionStore.hasAnyPermission(['permission:manage', 'role:manage']))
 
 // 权限分组（按资源分组）
 const permissionGroups = computed(() => {

@@ -32,13 +32,26 @@ import {
 } from '@/components/crmwolf'
 import customerApi, {
   type CustomerAssignRequest,
-  type CustomerOpportunityTransferScope,
   type CustomerResponse,
+  type CustomerTransferScope,
 } from '@/api/customer'
 import { teamApi, type TeamMemberResponse } from '@/api/team'
 import { useTeamStore } from '@/stores/team'
 import { useDialogCloseGuard } from '@/composables/useDialogCloseGuard'
-import { handleApiError } from '@/utils/errorHandler'
+import { handleApiError, handleOutcomeUnknown, isOutcomeUnknown } from '@/utils/errorHandler'
+import {
+  createCommandRequestOptions,
+  isNetworkOrTimeoutError,
+  operationIdFromError,
+  pollCommandStatus,
+  type CommandExecutionResponse,
+  type CommandRequestOptions,
+} from '@/api/command'
+import {
+  CustomerAssignmentResultSchema,
+  type CustomerAssignmentPreviewResponse,
+  type CustomerAssignmentResult,
+} from '@/schemas/customer'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 
 interface Props {
@@ -58,10 +71,13 @@ const submitting = ref(false)
 const members = ref<TeamMemberResponse[]>([])
 const membersError = ref<FeedbackError | null>(null)
 const submitError = ref<FeedbackError | null>(null)
+const loadingPreview = ref(false)
+const assignmentPreview = ref<CustomerAssignmentPreviewResponse | null>(null)
+const assignmentCommandOptions = ref<CommandRequestOptions | null>(null)
 
 const form = reactive({
   ownerId: '',
-  scope: 'none' as CustomerOpportunityTransferScope,
+  scope: 'customer_only' as CustomerTransferScope,
   remark: ''
 })
 
@@ -97,7 +113,7 @@ const selectedOwnerName = computed(() => {
     : '尚未选择'
 })
 const hasFormChanges = computed(() =>
-  form.ownerId.trim() !== '' || form.scope !== 'none' || form.remark.trim() !== ''
+  form.ownerId.trim() !== '' || form.scope !== 'customer_only' || form.remark.trim() !== ''
 )
 const closeGuard = useDialogCloseGuard({
   isDirty: hasFormChanges,
@@ -107,22 +123,22 @@ const closeGuard = useDialogCloseGuard({
 const showConfirmDialog = closeGuard.showConfirmDialog
 
 const scopeOptions: {
-  value: CustomerOpportunityTransferScope
+  value: CustomerTransferScope
   label: string
   description: string
 }[] = [
   {
-    value: 'none',
+    value: 'customer_only',
     label: '仅客户',
     description: '只变更客户负责人，商机和合同负责人保持不变。'
   },
   {
-    value: 'following',
+    value: 'customer_and_opportunities',
     label: '客户 + 跟进中商机',
     description: '同步移交该客户下仍在推进的商机及其关联合同。'
   },
   {
-    value: 'all',
+    value: 'customer_opportunities_and_contracts',
     label: '客户 + 全部商机',
     description: '同步移交该客户下全部商机及其关联合同。'
   }
@@ -156,12 +172,53 @@ async function ensureTeamMembers(): Promise<void> {
   }
 }
 
+async function ensureAssignmentPreview(): Promise<void> {
+  if (props.customer === null) return
+  loadingPreview.value = true
+  try {
+    assignmentPreview.value = await customerApi.getAssignmentPreview(props.customer.id, form.scope)
+  } catch (error) {
+    assignmentPreview.value = null
+    // Preview is advisory; the server recalculates the impact atomically.
+    submitError.value = toFeedbackError(error, '加载移交影响范围')
+  } finally {
+    loadingPreview.value = false
+  }
+}
+
+function assignmentResult(response: CommandExecutionResponse): CustomerAssignmentResult | null {
+  if (response.data === null || response.data === undefined) return null
+  return CustomerAssignmentResultSchema.parse(response.data)
+}
+
+async function recoverAssignment(options: CommandRequestOptions): Promise<CommandExecutionResponse | null> {
+  try {
+    const result = await pollCommandStatus(options.operationId ?? '', { attempts: 8, intervalMs: 500 })
+    if (result.status === 'SUCCEEDED') return result
+    if (result.status === 'PENDING' || result.status === 'UNKNOWN') {
+      handleOutcomeUnknown('客户移交')
+      return null
+    }
+    submitError.value = {
+      kind: 'conflict',
+      title: '客户移交未完成',
+      description: result.error?.message ?? '客户状态已变化，请刷新后重试',
+    }
+    return null
+  } catch {
+    handleOutcomeUnknown('客户移交')
+    return null
+  }
+}
+
 function resetForm(): void {
   form.ownerId = ''
-  form.scope = 'none'
+  form.scope = 'customer_only'
   form.remark = ''
   membersError.value = null
   submitError.value = null
+  assignmentPreview.value = null
+  assignmentCommandOptions.value = null
 }
 
 function handleOpenChange(open: boolean): void {
@@ -181,7 +238,7 @@ function continueEditing(): void {
 }
 
 async function handleSubmit(): Promise<void> {
-  if (props.customer === null) return
+  if (props.customer === null || submitting.value) return
   submitError.value = null
   if (form.ownerId.trim() === '') {
     submitError.value = {
@@ -193,24 +250,44 @@ async function handleSubmit(): Promise<void> {
   }
 
   submitting.value = true
+  const commandOptions = assignmentCommandOptions.value ?? createCommandRequestOptions({
+    expectedVersion: assignmentPreview.value?.customer_version ?? props.customer.version,
+  })
+  assignmentCommandOptions.value = commandOptions
   try {
     const payload: CustomerAssignRequest = {
       owner_id: form.ownerId,
-      opportunity_transfer_scope: form.scope,
+      transfer_scope: form.scope,
+      expected_version: assignmentPreview.value?.customer_version ?? props.customer.version,
     }
     const trimmedRemark = form.remark.trim()
-    if (trimmedRemark !== '') {
-      payload.remark = trimmedRemark
+    if (trimmedRemark !== '') payload.reason = trimmedRemark
+
+    let response: CommandExecutionResponse | null = null
+    try {
+      const result = await customerApi.assignCustomer(props.customer.id, payload, commandOptions)
+      response = result.status === 'PENDING' || result.status === 'UNKNOWN'
+        ? await recoverAssignment(commandOptions)
+        : result
+    } catch (error: unknown) {
+      const operationId = operationIdFromError(error)
+      if (isNetworkOrTimeoutError(error) || operationId !== null || isOutcomeUnknown(error)) {
+        response = await recoverAssignment(operationId === null ? commandOptions : { ...commandOptions, operationId })
+      } else {
+        throw error
+      }
     }
 
-    const response = await customerApi.assignCustomer(props.customer.id, payload)
-
-    const details = response.transferred_opportunities > 0
-      ? `，同步移交 ${response.transferred_opportunities} 个商机、${response.transferred_contracts} 个合同`
+    if (response === null || response.status !== 'SUCCEEDED') return
+    const result = assignmentResult(response)
+    if (result === null) throw new Error('移交结果缺少业务摘要')
+    const skipped = result.skipped_objects.length > 0
+      ? `，${result.skipped_objects.length} 个锁定合同未同步`
       : ''
-    toast.success(`客户已移交${details}`)
+    toast.success(`客户已移交${result.transferred_opportunities > 0 ? `，同步 ${result.transferred_opportunities} 个商机、${result.transferred_contracts} 个合同` : ''}${skipped}`)
     closeGuard.approveClose()
     visible.value = false
+    assignmentCommandOptions.value = null
     emit('success')
   } catch (error) {
     submitError.value = toFeedbackError(error, '移交客户', { operation: 'write' })
@@ -220,6 +297,14 @@ async function handleSubmit(): Promise<void> {
   }
 }
 
+
+watch(
+  () => form.scope,
+  (scope, previousScope) => {
+    if (props.open && scope !== previousScope) void ensureAssignmentPreview()
+  },
+)
+
 watch(
   () => props.open,
   (open) => {
@@ -227,6 +312,7 @@ watch(
       resetForm()
       closeGuard.reset()
       void ensureTeamMembers()
+      void ensureAssignmentPreview()
       return
     }
 
@@ -304,7 +390,7 @@ watch(
           </RadioGroup>
         </div>
 
-        <div v-if="form.scope !== 'none'" class="customer-transfer-dialog__notice">
+        <div v-if="form.scope !== 'customer_only'" class="customer-transfer-dialog__notice">
           <Info class="size-4" />
           <span>移交商机时，系统会同步移交这些商机关联的合同，确保业务归属一致。</span>
         </div>
@@ -317,7 +403,14 @@ watch(
           <p>
             同步范围：{{ selectedScope?.label }}。{{ selectedScope?.description }}
           </p>
-          <p v-if="form.scope !== 'none'">实际移交数量将在提交成功后反馈。</p>
+          <p v-if="loadingPreview">正在计算影响范围...</p>
+          <template v-else-if="assignmentPreview">
+            <p>预计同步 {{ assignmentPreview.opportunity_count }} 个商机、{{ assignmentPreview.contract_count }} 个合同。</p>
+            <p v-if="assignmentPreview.locked_contract_count > 0" class="customer-transfer-dialog__impact-warning">
+              {{ assignmentPreview.locked_contract_count }} 个合同处于审批中或已签署状态，提交后将保留原负责人并明确记录为未同步。
+            </p>
+          </template>
+          <p v-else>影响范围暂时无法加载，提交时系统会再次校验并给出明细。</p>
         </div>
 
         <div v-if="submitError" class="customer-transfer-dialog__error customer-transfer-dialog__error--submit" role="alert">
@@ -527,6 +620,10 @@ watch(
   color: $wolf-text-secondary-v2;
   font-size: $wolf-font-size-caption-v2;
   line-height: $wolf-line-height-body-v2;
+}
+
+.customer-transfer-dialog__impact-warning {
+  color: $wolf-warning-v2;
 }
 
 .customer-transfer-dialog__impact p {

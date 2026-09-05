@@ -681,6 +681,18 @@ async def test_create_payment_record_triggers_business_object_intelligence(monke
     record = _payment_record()
     scheduled = []
 
+    execution = SimpleNamespace(operation_id="op_test_payment", status="PENDING")
+    monkeypatch.setattr(
+        payments_api.command_execution_service,
+        "begin",
+        lambda *args, **kwargs: (execution, False),
+    )
+    monkeypatch.setattr(
+        payments_api.command_execution_service,
+        "succeed",
+        lambda *args, **kwargs: execution,
+    )
+
     monkeypatch.setattr(
         payments_api, "check_payment_view_permission", lambda plan_id, team_id, current_user, db: record.payment_plan
     )

@@ -116,6 +116,7 @@ class OperationLogService:
         operator_id: str,
         operator_name: Optional[str] = None,
         team_id: Optional[int] = None,
+        commit: bool = True,
     ):
         """记录线索转化"""
         return self.log(
@@ -129,6 +130,7 @@ class OperationLogService:
             operator_id=operator_id,
             operator_name=operator_name,
             team_id=team_id,
+            commit=commit,
             content={"originalLeadName": lead_name, "newCustomerName": customer_name, "newCustomerId": customer_id},
         )
 

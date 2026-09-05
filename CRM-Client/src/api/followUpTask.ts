@@ -1,6 +1,7 @@
 /* eslint-disable crmwolf/require-zod-schema */
 import { z } from 'zod'
-import request from '@/utils/request'
+import request, { type RequestConfig } from '@/utils/request'
+import type { CommandRequestOptions, CommandStatus } from '@/api/command'
 
 export type FollowUpTaskStatus = 'OPEN' | 'COMPLETED' | 'CANCELLED' | string
 export type FollowUpTaskStatusFilter = 'all' | 'open' | 'completed' | 'cancelled'
@@ -78,6 +79,8 @@ export interface FollowUpTaskTransitionResponse {
   executed: boolean
   result: Record<string, unknown>
   task: FollowUpTaskItem
+  operation_id?: string
+  status?: CommandStatus
 }
 
 export interface FollowUpTaskListParams {
@@ -106,8 +109,13 @@ export const followUpTaskApi = {
     return request.get<FollowUpTaskItem>(`/v1/follow-up-tasks/${taskId}`)
   },
 
-  transition(taskId: string, payload: FollowUpTaskTransitionPayload): Promise<FollowUpTaskTransitionResponse> {
-    return request.post<FollowUpTaskTransitionResponse>(`/v1/follow-up-tasks/${taskId}/transition`, payload)
+  transition(
+    taskId: string,
+    payload: FollowUpTaskTransitionPayload,
+    commandOptions?: CommandRequestOptions,
+  ): Promise<FollowUpTaskTransitionResponse> {
+    const config: RequestConfig | undefined = commandOptions
+    return request.post<FollowUpTaskTransitionResponse>(`/v1/follow-up-tasks/${taskId}/transition`, payload, config)
   },
 }
 

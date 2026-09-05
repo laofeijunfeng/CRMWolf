@@ -17,7 +17,7 @@
 <template>
   <!-- 响应式权限检查 -->
   <Button
-    v-if="permissionStore.hasAnyPermission(APPROVAL_ENTRY_PERMISSIONS)"
+    v-if="canAccessApprovalCenter"
     variant="ghost"
     size="icon-sm"
     class="approval-icon"
@@ -97,6 +97,14 @@ const router = useRouter()
 const store = useApprovalStore()
 const permissionStore = usePermissionStore()
 const { pendingCount } = storeToRefs(store)
+
+// Do not expose the entry while the current team's permissions are still
+// loading or unavailable. The explicit state check documents the fail-closed
+// contract for this high-sensitivity navigation entry.
+const canAccessApprovalCenter = computed(() =>
+  permissionStore.loadState === 'ready' &&
+  permissionStore.hasAnyPermission(APPROVAL_ENTRY_PERMISSIONS),
+)
 
 /**
  * aria-label（UI/UX Pro Max §1 Accessibility）

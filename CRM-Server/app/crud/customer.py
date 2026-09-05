@@ -385,6 +385,11 @@ class CustomerCRUD:
         team_id: int,
         default_procurement_method_id: Optional[int] = None,
         operator_name: Optional[str] = None,
+        contact_name: Optional[str] = None,
+        contact_phone: Optional[str] = None,
+        industry: Optional[str] = None,
+        *,
+        commit: bool = True,
     ) -> Tuple[Customer, Contact]:
         from app.crud.customer_activity import customer_activity_crud
         from app.services.operation_log_service import operation_log_service
@@ -415,6 +420,7 @@ class CustomerCRUD:
             city=lead.city,
             address=address or None,
             company_scale=lead.company_scale.value if lead.company_scale else None,
+            industry=industry,
             source=source_row.name,
             source_id=lead.source_id,
             status=0,
@@ -431,8 +437,8 @@ class CustomerCRUD:
         contact = Contact(
             customer_id=customer.id,
             team_id=team_id,
-            name=lead.contact_name,
-            mobile=lead.contact_phone or "",
+            name=contact_name or lead.contact_name,
+            mobile=contact_phone or lead.contact_phone or "",
             is_primary=True,
             is_decision_maker=True,
         )
@@ -440,14 +446,12 @@ class CustomerCRUD:
         db.add(contact)
         db.flush()
 
-        customer_activity_crud.migrate_from_lead(db, lead_id, customer.id, team_id)
+        customer_activity_crud.migrate_from_lead(db, lead_id, customer.id, team_id, commit=False)
 
         lead.status = LeadStatus.CONVERTED
         lead.version += 1
 
-        db.commit()
-        db.refresh(customer)
-        db.refresh(contact)
+        db.flush()
 
         operation_log_service.log_lead_converted(
             db=db,
@@ -458,9 +462,20 @@ class CustomerCRUD:
             operator_id=creator_id,
             operator_name=operator_name,
             team_id=team_id,
+            commit=False,
         )
 
-        operation_log_crud.migrate_lead_logs_to_customer(db=db, lead_id=lead_id, customer_id=customer.id)
+        operation_log_crud.migrate_lead_logs_to_customer(
+            db=db,
+            lead_id=lead_id,
+            customer_id=customer.id,
+            commit=False,
+        )
+
+        if commit:
+            db.commit()
+            db.refresh(customer)
+            db.refresh(contact)
 
         return customer, contact
 
@@ -504,19 +519,39 @@ class CustomerCRUD:
         return result
 
     def return_to_pool(
-        self, db: Session, customer: Customer, return_reason: str, team_id: int, detailed_reason: Optional[str] = None
+        self,
+        db: Session,
+        customer: Customer,
+        return_reason: str,
+        team_id: int,
+        detailed_reason: Optional[str] = None,
+        *,
+        expected_version: Optional[int] = None,
+        commit: bool = True,
     ) -> Customer:
-        customer.owner_id = None
-        customer.return_reason = return_reason
+        locked_customer = (
+            db.query(Customer)
+            .filter(Customer.id == customer.id, Customer.team_id == team_id)
+            .with_for_update()
+            .first()
+        ) or customer
+        if locked_customer.owner_id is None:
+            raise ValueError("该客户已在公海池中")
+        if expected_version is not None and locked_customer.version != expected_version:
+            raise ValueError("RESOURCE_VERSION_CONFLICT")
+
+        locked_customer.owner_id = None
+        locked_customer.return_reason = return_reason
         if detailed_reason:
-            customer.return_reason = f"{return_reason}: {detailed_reason}"
-        customer.returned_time = business_now()
-        customer.version += 1
+            locked_customer.return_reason = f"{return_reason}: {detailed_reason}"
+        locked_customer.returned_time = business_now()
+        locked_customer.version += 1
 
-        db.commit()
-        db.refresh(customer)
+        if commit:
+            db.commit()
+            db.refresh(locked_customer)
 
-        return customer
+        return locked_customer
 
     def get_public_customers(
         self,
@@ -571,58 +606,186 @@ class CustomerCRUD:
 
         return customers, total
 
-    def claim_customer(self, db: Session, customer: Customer, owner_id: str, team_id: int) -> Customer:
-        if customer.owner_id is not None:
+    def claim_customer(
+        self,
+        db: Session,
+        customer: Customer,
+        owner_id: str,
+        team_id: int,
+        *,
+        expected_version: Optional[int] = None,
+        commit: bool = True,
+    ) -> Customer:
+        locked_customer = (
+            db.query(Customer)
+            .filter(Customer.id == customer.id, Customer.team_id == team_id)
+            .with_for_update()
+            .first()
+        ) or customer
+        if locked_customer.owner_id is not None:
             raise ValueError("该客户已有负责人，无法领取")
+        if expected_version is not None and locked_customer.version != expected_version:
+            raise ValueError("RESOURCE_VERSION_CONFLICT")
 
-        customer.owner_id = owner_id
-        customer.return_reason = None
-        customer.returned_time = None
-        customer.version += 1
+        locked_customer.owner_id = owner_id
+        locked_customer.return_reason = None
+        locked_customer.returned_time = None
+        locked_customer.version += 1
 
-        db.commit()
-        db.refresh(customer)
+        if commit:
+            db.commit()
+            db.refresh(locked_customer)
 
-        return customer
+        return locked_customer
 
-    def assign_customer(
-        self, db: Session, customer: Customer, new_owner_id: str, team_id: int, opportunity_transfer_scope: str = "none"
-    ) -> Tuple[Customer, int, int]:
-        customer.owner_id = new_owner_id
-
-        if customer.status == 3:
-            customer.status = 0
-            customer.return_reason = None
-            customer.returned_time = None
-
-        customer.version += 1
-        transferred_opportunities = 0
-        transferred_contracts = 0
-
+    def get_assignment_preview(
+        self,
+        db: Session,
+        customer: Customer,
+        team_id: int,
+        opportunity_transfer_scope: str = "none",
+    ) -> dict[str, object]:
+        """Return a read-only impact estimate using the same selection rules as transfer."""
+        opportunity_count = 0
+        contract_count = 0
+        locked_contracts: list[dict[str, str]] = []
         if opportunity_transfer_scope in {"following", "all"}:
             opportunity_query = db.query(Opportunity).filter(
                 Opportunity.team_id == team_id, Opportunity.customer_id == customer.id
             )
             if opportunity_transfer_scope == "following":
                 opportunity_query = opportunity_query.filter(Opportunity.status == 0)
+            opportunities = opportunity_query.all()
+            opportunity_count = len(opportunities)
+            for opportunity in opportunities:
+                contracts = db.query(Contract).filter(
+                    Contract.team_id == team_id, Contract.opportunity_id == opportunity.id
+                ).all()
+                for contract in contracts:
+                    approval_phase = str(contract.approval_phase or "").lower()
+                    contract_status = str(contract.status or "").upper()
+                    if approval_phase == "pending_review" or contract_status in {"PENDING_REVIEW", "SIGNED"}:
+                        locked_contracts.append({
+                            "public_id": str(contract.contract_number),
+                            "object_type": "contract",
+                            "status": "SKIPPED_LOCKED",
+                            "detail": "合同处于审批中或已签署状态，提交后不会同步负责人",
+                        })
+                    else:
+                        contract_count += 1
+        return {
+            "customer_id": customer.public_id,
+            "customer_version": customer.version,
+            "opportunity_count": opportunity_count,
+            "contract_count": contract_count,
+            "locked_contract_count": len(locked_contracts),
+            "locked_contracts": locked_contracts,
+        }
 
-            opportunity_ids = [opportunity.id for opportunity in opportunity_query.all()]
-            transferred_opportunities = len(opportunity_ids)
+    def assign_customer(
+        self,
+        db: Session,
+        customer: Customer,
+        new_owner_id: str,
+        team_id: int,
+        opportunity_transfer_scope: str = "none",
+        *,
+        expected_version: Optional[int] = None,
+        reason: Optional[str] = None,
+        commit: bool = True,
+        return_details: bool = False,
+    ) -> tuple[Customer, int, int] | dict[str, object]:
+        """Transfer ownership atomically and report every affected object.
 
-            if opportunity_ids:
-                db.query(Opportunity).filter(
-                    Opportunity.id.in_(opportunity_ids), Opportunity.team_id == team_id
-                ).update({Opportunity.owner_id: new_owner_id}, synchronize_session=False)
+        ``return_details=False`` preserves the historical three-value return
+        used by old callers. New command callers opt into the explicit result
+        summary and keep the transaction under API control.
+        """
+        locked_customer = (
+            db.query(Customer)
+            .filter(Customer.id == customer.id, Customer.team_id == team_id)
+            .with_for_update()
+            .first()
+        ) or customer
+        if expected_version is not None and locked_customer.version != expected_version:
+            raise ValueError("RESOURCE_VERSION_CONFLICT")
 
-                contract_query = db.query(Contract).filter(
-                    Contract.team_id == team_id, Contract.opportunity_id.in_(opportunity_ids)
+        previous_owner_id = locked_customer.owner_id
+        if previous_owner_id == new_owner_id:
+            raise ValueError("目标负责人已是当前负责人，无需重复移交")
+
+        locked_customer.owner_id = new_owner_id
+        if locked_customer.status == 3:
+            locked_customer.status = 0
+            locked_customer.return_reason = None
+            locked_customer.returned_time = None
+        locked_customer.version += 1
+
+        transferred_opportunities = 0
+        transferred_contracts = 0
+        updated_objects: list[dict[str, str]] = []
+        skipped_objects: list[dict[str, str]] = []
+
+        if opportunity_transfer_scope in {"following", "all"}:
+            opportunity_query = db.query(Opportunity).filter(
+                Opportunity.team_id == team_id, Opportunity.customer_id == locked_customer.id
+            )
+            if opportunity_transfer_scope == "following":
+                opportunity_query = opportunity_query.filter(Opportunity.status == 0)
+            opportunities = opportunity_query.with_for_update().all()
+            transferred_opportunities = len(opportunities)
+
+            for opportunity in opportunities:
+                opportunity.owner_id = new_owner_id
+                updated_objects.append({
+                    "public_id": opportunity.public_id,
+                    "object_type": "opportunity",
+                    "status": "SYNCED",
+                })
+
+                contracts = (
+                    db.query(Contract)
+                    .filter(
+                        Contract.team_id == team_id,
+                        Contract.opportunity_id == opportunity.id,
+                    )
+                    .with_for_update()
+                    .all()
                 )
-                transferred_contracts = contract_query.count()
-                contract_query.update({Contract.owner_id: new_owner_id}, synchronize_session=False)
+                for contract in contracts:
+                    approval_phase = str(contract.approval_phase or "").lower()
+                    contract_status = str(contract.status or "").upper()
+                    if approval_phase == "pending_review" or contract_status in {"PENDING_REVIEW", "SIGNED"}:
+                        skipped_objects.append({
+                            "public_id": str(contract.contract_number),
+                            "object_type": "contract",
+                            "status": "SKIPPED_LOCKED",
+                            "detail": "合同处于审批中或已签署状态，未同步负责人",
+                        })
+                        continue
+                    contract.owner_id = new_owner_id
+                    transferred_contracts += 1
+                    updated_objects.append({
+                        "public_id": str(contract.contract_number),
+                        "object_type": "contract",
+                        "status": "SYNCED",
+                    })
 
-        db.commit()
-        db.refresh(customer)
-        return customer, transferred_opportunities, transferred_contracts
+        if commit:
+            db.commit()
+            db.refresh(locked_customer)
+
+        if not return_details:
+            return locked_customer, transferred_opportunities, transferred_contracts
+        return {
+            "customer": locked_customer,
+            "previous_owner_id": previous_owner_id,
+            "new_owner_id": new_owner_id,
+            "transferred_opportunities": transferred_opportunities,
+            "transferred_contracts": transferred_contracts,
+            "updated_objects": updated_objects,
+            "skipped_objects": skipped_objects,
+        }
 
     def mark_as_lost(
         self,

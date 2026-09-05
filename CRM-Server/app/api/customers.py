@@ -2,8 +2,9 @@ import logging
 from datetime import date
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.invoices import _invoice_title_response, _populate_application_info
@@ -30,8 +31,10 @@ from app.crud.invoice import invoice_application_crud, invoice_title_crud
 from app.crud.lead import lead_crud
 from app.crud.team import team_crud
 from app.crud.user import user_crud
+from app.models.command_execution import CommandExecutionStatus
 from app.models.customer import Contact
 from app.schemas.common import PaginatedResponse
+from app.schemas.command import CommandEffect, CommandNextAction, CommandResource
 from app.schemas.contract import ContractListResponse, ContractStatusEnum
 from app.schemas.customer import (
     ContactCreate,
@@ -41,6 +44,9 @@ from app.schemas.customer import (
     ConvertResponse,
     CustomerAssignRequest,
     CustomerAssignResponse,
+    CustomerAssignmentResult,
+    CustomerAssignmentPreviewResponse,
+    CustomerTransferScope,
     CustomerClaimRequest,
     CustomerCreate,
     CustomerDetailResponse,
@@ -70,6 +76,14 @@ from app.schemas.customer import (
 )
 from app.schemas.invoice import InvoiceApplicationResponse, InvoiceTitleResponse
 from app.schemas.payment import PaymentPlanResponse
+from app.services.operation_log_service import operation_log_service
+from app.services.command_execution_service import (
+    CommandAlreadyInProgress,
+    CommandIdempotencyConflict,
+    CommandOperationConflict,
+    command_execution_service,
+    request_fingerprint,
+)
 from app.services.acquisition_source_service import (
     AcquisitionSourceError,
     build_source_info,
@@ -149,6 +163,19 @@ def _split_csv(value: Optional[str]) -> List[str]:
     if not value:
         return []
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _normalize_optional_header_text(value: object) -> Optional[str]:
+    """Normalize FastAPI Header defaults for both HTTP and direct function calls."""
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _normalize_optional_header_int(value: object) -> Optional[int]:
+    """Normalize an optional integer header without leaking FastAPI markers."""
+    return value if isinstance(value, int) else None
 
 
 def _customer_source_fields(db: Session, customer, source_map: Optional[dict] = None) -> dict:
@@ -398,42 +425,329 @@ def get_customer_industries(
     return industries
 
 
-@router.post("/convert-from-lead", response_model=ConvertResponse, status_code=status.HTTP_201_CREATED, summary="线索转化", description="根据线索ID创建客户和主联系人，AI自动生成档案")
+@router.post(
+    "/convert-from-lead",
+    response_model=ConvertResponse,
+    response_model_exclude_none=True,
+    status_code=status.HTTP_201_CREATED,
+    summary="线索转化",
+    description="根据线索ID原子转化客户和主联系人；AI/Agent 不属于本命令边界。",
+)
 async def convert_from_lead(
     data: ConvertLeadToCustomer,
     team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+    operation_id: Optional[str] = Header(None, alias="X-Operation-Id"),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+    correlation_id: Optional[str] = Header(None, alias="X-Correlation-Id"),
+) -> ConvertResponse:
+    """Atomically convert a lead into a customer and expose a durable outcome.
+
+    The legacy response shape is retained when callers do not send command
+    headers. New clients should always send both operation and idempotency
+    identifiers so a timeout can be resolved without replaying the conversion.
+    """
     from app.services.feishu import feishu_service
 
+    if operation_id is not None:
+        operation_id = operation_id.strip()
+        if not operation_id or len(operation_id) > 64:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="X-Operation-Id 必须为 1-64 个字符")
+    if idempotency_key is not None:
+        idempotency_key = idempotency_key.strip()
+        if not idempotency_key or len(idempotency_key) > 128:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Idempotency-Key 必须为 1-128 个字符")
+    if correlation_id is not None:
+        correlation_id = correlation_id.strip() or None
+
+    modern_command = operation_id is not None or idempotency_key is not None
+    if not modern_command:
+        source_lead = lead_crud.get_by_public_id(db, data.lead_id, team_id)
+        if not source_lead:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="线索不存在")
+
+        # Migration compatibility for old clients and scripts: retain the
+        # historical payload while using the same atomic domain conversion.
+        try:
+            _ensure_customer_name_available(
+                db,
+                data.account_name or source_lead.lead_name,
+                team_id,
+                allowed_source_lead_id=source_lead.id,
+            )
+            customer, contact = customer_crud.convert_from_lead(
+                db=db,
+                lead_id=source_lead.id,
+                account_name=data.account_name,
+                address=data.address,
+                default_procurement_method_id=data.default_procurement_method_id,
+                contact_name=data.contact_name,
+                contact_phone=data.contact_phone,
+                industry=data.industry,
+                creator_id=str(current_user.id),
+                operator_name=current_user.name,
+                team_id=team_id,
+                commit=True,
+            )
+        except ValueError as exc:
+            db.rollback()
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        except IntegrityError as exc:
+            db.rollback()
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="客户或联系人数据已被其他操作占用") from exc
+        try:
+            customer_business_object_intelligence_service.enqueue_customer_lifecycle_refresh_after_commit(
+                customer=customer,
+                actor_id=str(current_user.id),
+                trigger_type="customer_converted_from_lead",
+                source_lead_id=source_lead.id,
+            )
+        except Exception:
+            logger.exception("线索转客户后的客户智能刷新调度失败")
+        try:
+            await feishu_service.notify_account_created(customer.owner_id, customer.account_name, contact.name)
+        except Exception:
+            logger.exception("线索转客户后的飞书通知失败")
+        return ConvertResponse(
+            customer_id=customer.public_id,
+            contact_id=contact.id,
+            message="转化成功，客户智能档案正在整理",
+        )
+
+    fingerprint = request_fingerprint({
+        "lead_id": data.lead_id,
+        "account_name": data.account_name,
+        "address": data.address,
+        "default_procurement_method_id": data.default_procurement_method_id,
+        "contact_name": data.contact_name,
+        "contact_phone": data.contact_phone,
+        "industry": data.industry,
+    })
+    try:
+        execution, replay = command_execution_service.begin(
+            db,
+            team_id=team_id,
+            actor_id=str(current_user.id),
+            command_type="LEAD_CONVERT_TO_CUSTOMER",
+            resource_type="LEAD",
+            resource_public_id=data.lead_id,
+            operation_id=operation_id,
+            idempotency_key=idempotency_key,
+            fingerprint=fingerprint,
+            correlation_id=correlation_id,
+        )
+    except CommandIdempotencyConflict as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except CommandAlreadyInProgress as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_202_ACCEPTED,
+            detail={"operation_id": str(exc), "message": "转化正在处理中，请查询操作结果"},
+        ) from exc
+    except CommandOperationConflict as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    if replay:
+        db.rollback()
+        payload = command_execution_service.to_response_payload(execution)
+        stored_data = payload.get("data")
+        if isinstance(stored_data, dict):
+            return ConvertResponse(
+                **payload,
+                customer_id=stored_data.get("customer_id"),
+                contact_id=stored_data.get("contact_id"),
+                message=stored_data.get("message"),
+            )
+        return ConvertResponse(**payload)
+
+    # Resolve the source only after the durable command record exists. This
+    # makes a terminal idempotent replay independent of the current lead row
+    # and gives a failed first attempt an operation id that can be audited.
     source_lead = lead_crud.get_by_public_id(db, data.lead_id, team_id)
     if not source_lead:
+        try:
+            command_execution_service.fail(
+                db,
+                execution,
+                error_code="LEAD_NOT_FOUND",
+                error_message="线索不存在",
+                retryable=False,
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="线索不存在",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "LEAD_NOT_FOUND",
+                "message": "线索不存在",
+                "operation_id": execution.operation_id,
+            },
         )
-    _ensure_customer_name_available(
-        db,
-        data.account_name or source_lead.lead_name,
-        team_id,
-        allowed_source_lead_id=source_lead.id,
-    )
 
     try:
+        _ensure_customer_name_available(
+            db,
+            data.account_name or source_lead.lead_name,
+            team_id,
+            allowed_source_lead_id=source_lead.id,
+        )
         customer, contact = customer_crud.convert_from_lead(
             db=db,
             lead_id=source_lead.id,
             account_name=data.account_name,
             address=data.address,
             default_procurement_method_id=data.default_procurement_method_id,
+            contact_name=data.contact_name,
+            contact_phone=data.contact_phone,
+            industry=data.industry,
             creator_id=str(current_user.id),
             operator_name=current_user.name,
-            team_id=team_id
+            team_id=team_id,
+            commit=False,
         )
+        db.flush()
 
-        # 线索转化属于客户生命周期事件，但仍通过统一的提交后持久化
-        # seam 进入 Customer Intelligence，不让 API 直接编排刷新任务。
+        result_data = {
+            "lead_id": source_lead.public_id,
+            "converted_lead_id": source_lead.public_id,
+            "customer_id": customer.public_id,
+            "customer_public_id": customer.public_id,
+            "contact_id": contact.id,
+            "contact_public_id": None,
+            "message": "转化成功，客户智能档案正在整理",
+            "created_customer": True,
+            "created_contact": True,
+            "inherited_fields": ["lead_name", "city", "company_scale", "source", "owner_id", "contact_name", "contact_phone", "follow_ups", "operation_logs"],
+            "source_relation": {
+                "lead_public_id": source_lead.public_id,
+                "customer_public_id": customer.public_id,
+                "relation": "CONVERTED_FROM_LEAD",
+            },
+            "warnings": [],
+        }
+        command_execution_service.succeed(
+            db,
+            execution,
+            data=result_data,
+            resource=CommandResource(type="CUSTOMER", public_id=customer.public_id, version=customer.version),
+            effects=[
+                CommandEffect(type="LEAD", public_id=source_lead.public_id, status="SYNCED"),
+                CommandEffect(type="CUSTOMER", public_id=customer.public_id, status="SYNCED"),
+                CommandEffect(type="CONTACT", public_id=None, status="SYNCED", detail="主联系人使用兼容内部ID"),
+            ],
+            next_actions=[
+                CommandNextAction(id="view-customer", label="查看客户", kind="view-detail"),
+            ],
+            correlation_id=correlation_id,
+        )
+        db.commit()
+        db.refresh(customer)
+        db.refresh(contact)
+    except ValueError as exc:
+        db.rollback()
+        try:
+            failed_execution, failed_replay = command_execution_service.begin(
+                db,
+                team_id=team_id,
+                actor_id=str(current_user.id),
+                command_type="LEAD_CONVERT_TO_CUSTOMER",
+                resource_type="LEAD",
+                resource_public_id=data.lead_id,
+                operation_id=execution.operation_id,
+                idempotency_key=idempotency_key,
+                fingerprint=fingerprint,
+                correlation_id=correlation_id,
+            )
+            if not failed_replay:
+                command_execution_service.fail(
+                    db,
+                    failed_execution,
+                    error_code="LEAD_CONVERSION_REJECTED",
+                    error_message=str(exc),
+                    retryable=False,
+                )
+                db.commit()
+        except Exception:
+            db.rollback()
+        if modern_command:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "LEAD_CONVERSION_REJECTED", "message": str(exc), "operation_id": execution.operation_id}) from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except IntegrityError as exc:
+        db.rollback()
+        try:
+            failed_execution, failed_replay = command_execution_service.begin(
+                db,
+                team_id=team_id,
+                actor_id=str(current_user.id),
+                command_type="LEAD_CONVERT_TO_CUSTOMER",
+                resource_type="LEAD",
+                resource_public_id=data.lead_id,
+                operation_id=execution.operation_id,
+                idempotency_key=idempotency_key,
+                fingerprint=fingerprint,
+                correlation_id=correlation_id,
+            )
+            if not failed_replay:
+                command_execution_service.fail(db, failed_execution, error_code="LEAD_CONVERSION_CONFLICT", error_message="客户或联系人数据已被其他操作占用", retryable=True)
+                db.commit()
+        except Exception:
+            db.rollback()
+        if modern_command:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "LEAD_CONVERSION_CONFLICT", "message": "客户或联系人数据已被其他操作占用", "operation_id": execution.operation_id}) from exc
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="客户或联系人数据已被其他操作占用") from exc
+    except Exception as exc:
+        db.rollback()
+        logger.exception("线索转客户提交失败", extra={"operation_id": execution.operation_id})
+        if modern_command:
+            # The transaction may have failed before commit, but a commit
+            # failure can also leave the client unable to know whether the
+            # business fact was persisted. Keep a durable UNKNOWN outcome when
+            # the database is available so the client can query instead of
+            # replaying the conversion.
+            try:
+                unknown_execution, unknown_replay = command_execution_service.begin(
+                    db,
+                    team_id=team_id,
+                    actor_id=str(current_user.id),
+                    command_type="LEAD_CONVERT_TO_CUSTOMER",
+                    resource_type="LEAD",
+                    resource_public_id=data.lead_id,
+                    operation_id=execution.operation_id,
+                    idempotency_key=idempotency_key,
+                    fingerprint=fingerprint,
+                    correlation_id=correlation_id,
+                )
+                if not unknown_replay:
+                    command_execution_service.fail(
+                        db,
+                        unknown_execution,
+                        status=CommandExecutionStatus.UNKNOWN,
+                        error_code="LEAD_CONVERSION_UNKNOWN",
+                        error_message="转化结果暂未确认，请查询操作结果",
+                        retryable=False,
+                    )
+                    db.commit()
+            except Exception:
+                db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_202_ACCEPTED,
+                detail={
+                    "code": "LEAD_CONVERSION_UNKNOWN",
+                    "message": "转化结果暂未确认，请查询操作结果",
+                    "operation_id": execution.operation_id,
+                },
+            ) from exc
+        raise
+
+    # Notifications and intelligence refresh are post-commit side effects. A
+    # failure here must not turn a committed customer conversion into a false
+    # failure response.
+    warnings: list[str] = []
+    try:
         db.refresh(customer)
         customer_business_object_intelligence_service.enqueue_customer_lifecycle_refresh_after_commit(
             customer=customer,
@@ -441,23 +755,72 @@ async def convert_from_lead(
             trigger_type="customer_converted_from_lead",
             source_lead_id=source_lead.id,
         )
+    except Exception:
+        logger.exception("线索转客户后的客户智能刷新调度失败", extra={"operation_id": execution.operation_id})
+        warnings.append("客户智能档案将在后台补偿整理")
+    try:
+        await feishu_service.notify_account_created(customer.owner_id, customer.account_name, contact.name)
+    except Exception:
+        logger.exception("线索转客户后的飞书通知失败", extra={"operation_id": execution.operation_id})
+        warnings.append("飞书通知发送失败，可在操作记录中查看转化结果")
 
-        await feishu_service.notify_account_created(
-            customer.owner_id,
-            customer.account_name,
-            contact.name
-        )
+    warning_data: Optional[dict] = None
+    if warnings:
+        # Keep the business fact successful; only enrich the stored display data.
+        # A failure while persisting this optional metadata must not turn an
+        # already committed conversion into a false 5xx result.
+        stored_result = execution.result_json.get("data") if isinstance(execution.result_json, dict) else None
+        if isinstance(stored_result, dict):
+            warning_data = {**stored_result, "warnings": warnings}
+            execution.result_json["data"] = warning_data
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
+                logger.exception("线索转客户结果提示保存失败", extra={"operation_id": execution.operation_id})
 
-        return ConvertResponse(
-            customer_id=customer.public_id,
-            contact_id=contact.id,
-            message="转化成功，客户智能档案正在整理"
+    payload = command_execution_service.to_response_payload(execution)
+    if warning_data is not None:
+        payload["data"] = warning_data
+    stored_data = payload.get("data")
+    if isinstance(stored_data, dict):
+        payload.update(
+            customer_id=stored_data.get("customer_id"),
+            contact_id=stored_data.get("contact_id"),
+            message=stored_data.get("message"),
         )
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+    return ConvertResponse(**payload)
+
+
+@router.get(
+    "/{customer_id}/assignment-preview",
+    response_model=CustomerAssignmentPreviewResponse,
+    summary="预览客户移交影响范围",
+    description="只读计算客户移交将影响的商机、合同及不可同步的锁定合同，不修改任何业务事实。",
+)
+def preview_customer_assignment(
+    customer_id: str,
+    transfer_scope: CustomerTransferScope = Query(CustomerTransferScope.CUSTOMER_ONLY),
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> CustomerAssignmentPreviewResponse:
+    customer = _get_viewable_customer(db, customer_id, team_id, current_user)
+    legacy_scope, _ = CustomerAssignRequest(
+        owner_id="preview", transfer_scope=transfer_scope
+    ).normalized_transfer_scope()
+    preview = customer_crud.get_assignment_preview(
+        db, customer, team_id, legacy_scope
+    )
+    return CustomerAssignmentPreviewResponse(
+        customer_id=customer.public_id,
+        customer_version=customer.version,
+        transfer_scope=transfer_scope,
+        opportunity_count=int(preview["opportunity_count"]),
+        contract_count=int(preview["contract_count"]),
+        locked_contract_count=int(preview["locked_contract_count"]),
+        locked_contracts=preview["locked_contracts"],
+    )
 
 
 @router.get("/{customer_id}/contracts", response_model=List[ContractListResponse], summary="获取客户合同列表", description="""
@@ -1677,70 +2040,289 @@ def get_trend(
     return [TrendResponse(**item) for item in trend_data]
 
 
-@router.post("/{customer_id}/return-to-pool", response_model=CustomerReturnResponse, summary="客户退回公海", description="将客户退回到公海池，解除与负责人的绑定")
+@router.post(
+    "/{customer_id}/return-to-pool",
+    response_model=None,
+    summary="客户退回公海",
+    description="将客户退回到公海池，解除与负责人的绑定。新客户端使用命令结果查询保证幂等和并发安全。",
+)
 async def return_customer_to_pool(
     customer_id: str,
     return_data: CustomerReturnRequest,
     team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+    operation_id: Optional[str] = Header(None, alias="X-Operation-Id"),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+    correlation_id: Optional[str] = Header(None, alias="X-Correlation-Id"),
+    expected_version_header: Optional[int] = Header(None, alias="X-Expected-Version"),
+) -> object:
     from app.crud.role import role_crud
+    from app.services.feishu import feishu_service
 
+    operation_id = _normalize_optional_header_text(operation_id)
+    idempotency_key = _normalize_optional_header_text(idempotency_key)
+    correlation_id = _normalize_optional_header_text(correlation_id)
+    expected_version_header = _normalize_optional_header_int(expected_version_header)
+    if operation_id is not None and len(operation_id) > 64:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="X-Operation-Id 必须为 1-64 个字符")
+    if idempotency_key is not None and len(idempotency_key) > 128:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Idempotency-Key 必须为 1-128 个字符")
+
+    if (
+        expected_version_header is not None
+        and return_data.expected_version is not None
+        and expected_version_header != return_data.expected_version
+    ):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="客户版本号不一致，请刷新后重试")
+    expected_version = return_data.expected_version if return_data.expected_version is not None else expected_version_header
     customer = _get_customer_or_404(db, customer_id, team_id)
-
-    if customer.owner_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="该客户已在公海池中"
-        )
-
     user_roles = role_crud.get_user_roles(db, current_user.id, team_id)
     role_codes = {r.code for r in user_roles}
     is_admin = "TEAM_ADMIN" in role_codes
     is_director = "SALES_DIRECTOR" in role_codes
-
     if not (is_admin or is_director or customer.owner_id == str(current_user.id)):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="无权限操作此客户"
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权限操作此客户")
+
+    modern_command = operation_id is not None or idempotency_key is not None
+    if not modern_command:
+        try:
+            previous_owner = customer.owner_id
+            updated_customer = customer_crud.return_to_pool(
+                db,
+                customer,
+                return_data.return_reason,
+                team_id,
+                return_data.detailed_reason,
+                expected_version=expected_version,
+                commit=False,
+            )
+            operation_log_service.log(
+                db=db,
+                event_type="CUSTOMER_RETURNED_TO_POOL",
+                event_action="UPDATE",
+                resource_type="CUSTOMER",
+                resource_id=updated_customer.id,
+                operator_id=str(current_user.id),
+                operator_name=getattr(current_user, "name", None),
+                team_id=team_id,
+                commit=False,
+                remark=return_data.detailed_reason,
+                content={
+                    "previous_owner_id": previous_owner,
+                    "new_owner_id": None,
+                    "return_reason": return_data.return_reason,
+                    "detailed_reason": return_data.detailed_reason,
+                },
+            )
+            db.commit()
+            db.refresh(updated_customer)
+        except ValueError as exc:
+            db.rollback()
+            code = "RESOURCE_VERSION_CONFLICT" if str(exc) == "RESOURCE_VERSION_CONFLICT" else "CUSTOMER_RETURN_REJECTED"
+            message = "客户已被其他操作更新，请刷新后重试" if code == "RESOURCE_VERSION_CONFLICT" else str(exc)
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT if code == "RESOURCE_VERSION_CONFLICT" else status.HTTP_400_BAD_REQUEST, detail={"code": code, "message": message}) from exc
+
+        _persist_customer_business_object_refresh_after_commit(
+            business_object=updated_customer,
+            source_type="customer",
+            summary="客户已退回公海，刷新客户智能档案",
+            actor_id=str(current_user.id),
+            payload={
+                "change_type": "returned_to_pool",
+                "previous_owner_id": previous_owner,
+                "new_owner_id": None,
+                "return_reason": updated_customer.return_reason,
+            },
+        )
+        try:
+            await feishu_service.send_customer_returned_notification(
+                updated_customer.account_name,
+                return_data.return_reason,
+                previous_owner,
+            )
+        except Exception:
+            logger.exception("客户退回公海后的飞书通知失败")
+        return CustomerReturnResponse(
+            customer_id=updated_customer.public_id,
+            previous_owner=previous_owner,
+            returned_time=updated_customer.returned_time,
+            return_reason=updated_customer.return_reason,
+            message="客户已成功退回公海",
         )
 
-    previous_owner = customer.owner_id
+    fingerprint = request_fingerprint({
+        "customer_id": customer_id,
+        "return_reason": return_data.return_reason,
+        "detailed_reason": return_data.detailed_reason,
+        "expected_version": expected_version,
+    })
+    try:
+        execution, replay = command_execution_service.begin(
+            db,
+            team_id=team_id,
+            actor_id=str(current_user.id),
+            command_type="CUSTOMER_RETURN_TO_POOL",
+            resource_type="CUSTOMER",
+            resource_public_id=customer_id,
+            operation_id=operation_id,
+            idempotency_key=idempotency_key,
+            fingerprint=fingerprint,
+            correlation_id=correlation_id,
+        )
+    except CommandIdempotencyConflict as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "IDEMPOTENCY_CONFLICT", "message": str(exc)}) from exc
+    except CommandAlreadyInProgress as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_202_ACCEPTED, detail={"operation_id": str(exc), "message": "退回公海正在处理中，请查询操作结果"}) from exc
+    except CommandOperationConflict as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "OPERATION_CONFLICT", "message": str(exc)}) from exc
 
-    updated_customer = customer_crud.return_to_pool(
-        db, customer, return_data.return_reason, team_id, return_data.detailed_reason
-    )
-    _persist_customer_business_object_refresh_after_commit(
-        business_object=updated_customer,
-        source_type="customer",
-        summary="客户已退回公海，刷新客户智能档案",
-        actor_id=str(current_user.id),
-        payload={
-            "change_type": "returned_to_pool",
-            "previous_owner_id": previous_owner,
-            "new_owner_id": None,
-            "return_reason": updated_customer.return_reason,
-        },
-    )
+    if replay:
+        db.rollback()
+        return command_execution_service.to_response_payload(execution)
 
-    from app.services.feishu import feishu_service
+    command_operation_id = execution.operation_id
+    try:
+        previous_owner = customer.owner_id
+        updated_customer = customer_crud.return_to_pool(
+            db,
+            customer,
+            return_data.return_reason,
+            team_id,
+            return_data.detailed_reason,
+            expected_version=expected_version,
+            commit=False,
+        )
+        operation_log_service.log(
+            db=db,
+            event_type="CUSTOMER_RETURNED_TO_POOL",
+            event_action="UPDATE",
+            resource_type="CUSTOMER",
+            resource_id=updated_customer.id,
+            operator_id=str(current_user.id),
+            operator_name=getattr(current_user, "name", None),
+            team_id=team_id,
+            commit=False,
+            remark=return_data.detailed_reason,
+            content={
+                "previous_owner_id": previous_owner,
+                "new_owner_id": None,
+                "return_reason": return_data.return_reason,
+                "detailed_reason": return_data.detailed_reason,
+            },
+        )
+        command_execution_service.succeed(
+            db,
+            execution,
+            data={
+                "customer": _customer_response(db, updated_customer).model_dump(mode="json"),
+                "previous_owner_id": previous_owner,
+                "return_reason": updated_customer.return_reason,
+                "message": "客户已成功退回公海",
+            },
+            resource=CommandResource(
+                type="CUSTOMER",
+                public_id=str(updated_customer.public_id),
+                version=int(updated_customer.version),
+            ),
+            next_actions=[CommandNextAction(id="refresh-list", label="刷新客户列表", kind="continue")],
+            correlation_id=correlation_id,
+        )
+        db.commit()
+        db.refresh(updated_customer)
+    except ValueError as exc:
+        db.rollback()
+        error_code = "RESOURCE_VERSION_CONFLICT" if str(exc) == "RESOURCE_VERSION_CONFLICT" else "CUSTOMER_RETURN_REJECTED"
+        error_message = "客户已被其他操作更新，请刷新后重试" if error_code == "RESOURCE_VERSION_CONFLICT" else str(exc)
+        try:
+            execution, _ = command_execution_service.begin(
+                db,
+                team_id=team_id,
+                actor_id=str(current_user.id),
+                command_type="CUSTOMER_RETURN_TO_POOL",
+                resource_type="CUSTOMER",
+                resource_public_id=customer_id,
+                operation_id=command_operation_id,
+                idempotency_key=idempotency_key,
+                fingerprint=fingerprint,
+                correlation_id=correlation_id,
+            )
+            command_execution_service.fail(
+                db,
+                execution,
+                status=CommandExecutionStatus.CONFLICT,
+                error_code=error_code,
+                error_message=error_message,
+                retryable=True,
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT if error_code == "RESOURCE_VERSION_CONFLICT" else status.HTTP_400_BAD_REQUEST,
+            detail={"code": error_code, "message": error_message, "operation_id": command_operation_id},
+        ) from exc
+    except Exception as exc:
+        logger.exception("客户退回公海提交失败", extra={"operation_id": command_operation_id})
+        db.rollback()
+        try:
+            execution, _ = command_execution_service.begin(
+                db,
+                team_id=team_id,
+                actor_id=str(current_user.id),
+                command_type="CUSTOMER_RETURN_TO_POOL",
+                resource_type="CUSTOMER",
+                resource_public_id=customer_id,
+                operation_id=command_operation_id,
+                idempotency_key=idempotency_key,
+                fingerprint=fingerprint,
+                correlation_id=correlation_id,
+            )
+            command_execution_service.fail(
+                db,
+                execution,
+                status=CommandExecutionStatus.UNKNOWN,
+                error_code="CUSTOMER_RETURN_UNKNOWN",
+                error_message="退回公海结果暂未确认，请查询操作结果",
+                retryable=True,
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": "CUSTOMER_RETURN_UNKNOWN", "message": "退回公海结果暂未确认，请查询操作结果", "operation_id": command_operation_id},
+        ) from exc
+
+    try:
+        _persist_customer_business_object_refresh_after_commit(
+            business_object=updated_customer,
+            source_type="customer",
+            summary="客户已退回公海，刷新客户智能档案",
+            actor_id=str(current_user.id),
+            payload={
+                "change_type": "returned_to_pool",
+                "previous_owner_id": previous_owner,
+                "new_owner_id": None,
+                "return_reason": updated_customer.return_reason,
+            },
+        )
+    except Exception:
+        # The customer ownership fact is already committed. A projection
+        # enqueue failure must not turn a successful command into a 500.
+        logger.exception("客户退回公海后的智能档案刷新入队失败", extra={"operation_id": command_operation_id})
     try:
         await feishu_service.send_customer_returned_notification(
-            customer.account_name,
+            updated_customer.account_name,
             return_data.return_reason,
-            previous_owner
+            previous_owner,
         )
-    except Exception as e:
-        print(f"飞书通知发送失败: {e}")
-
-    return CustomerReturnResponse(
-        customer_id=updated_customer.public_id,
-        previous_owner=previous_owner,
-        returned_time=updated_customer.returned_time,
-        return_reason=updated_customer.return_reason,
-        message="客户已成功退回公海"
-    )
+    except Exception:
+        logger.exception("客户退回公海后的飞书通知失败", extra={"operation_id": command_operation_id})
+    return command_execution_service.to_response_payload(execution)
 
 
 @router.get("/public/list", response_model=PaginatedResponse[CustomerResponse], summary="查询公海客户", description="获取公海池中的客户列表，支持动态排序")
@@ -1779,20 +2361,222 @@ def get_public_customers(
     )
 
 
-@router.post("/{customer_id}/claim", response_model=CustomerResponse, summary="领取客户", description="从公海池中领取客户")
+@router.post(
+    "/{customer_id}/claim",
+    response_model=None,
+    summary="领取客户",
+    description="从公海池中领取客户。新客户端使用命令结果查询保证幂等和并发安全。",
+)
 def claim_customer(
     customer_id: str,
     claim_data: CustomerClaimRequest,
     team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    customer = _get_customer_or_404(db, customer_id, team_id)
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+    operation_id: Optional[str] = Header(None, alias="X-Operation-Id"),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+    correlation_id: Optional[str] = Header(None, alias="X-Correlation-Id"),
+    expected_version_header: Optional[int] = Header(None, alias="X-Expected-Version"),
+) -> object:
+    operation_id = _normalize_optional_header_text(operation_id)
+    idempotency_key = _normalize_optional_header_text(idempotency_key)
+    correlation_id = _normalize_optional_header_text(correlation_id)
+    expected_version_header = _normalize_optional_header_int(expected_version_header)
+    if operation_id is not None and len(operation_id) > 64:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="X-Operation-Id 必须为 1-64 个字符")
+    if idempotency_key is not None and len(idempotency_key) > 128:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Idempotency-Key 必须为 1-128 个字符")
 
     try:
-        updated_customer = customer_crud.claim_customer(
-            db, customer, claim_data.owner_id, team_id
+        target_owner_id = int(claim_data.owner_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="负责人ID无效") from exc
+    target_user = user_crud.get_by_id(db, target_owner_id)
+    if not target_user or not team_crud.is_member(db, team_id, target_owner_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="目标负责人不存在或不属于当前团队")
+
+    if (
+        expected_version_header is not None
+        and claim_data.expected_version is not None
+        and expected_version_header != claim_data.expected_version
+    ):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="客户版本号不一致，请刷新后重试")
+    expected_version = claim_data.expected_version if claim_data.expected_version is not None else expected_version_header
+    customer = _get_customer_or_404(db, customer_id, team_id)
+    modern_command = operation_id is not None or idempotency_key is not None
+    if not modern_command:
+        try:
+            updated_customer = customer_crud.claim_customer(
+                db,
+                customer,
+                claim_data.owner_id,
+                team_id,
+                expected_version=expected_version,
+                commit=False,
+            )
+            operation_log_service.log(
+                db=db,
+                event_type="CUSTOMER_CLAIMED",
+                event_action="UPDATE",
+                resource_type="CUSTOMER",
+                resource_id=updated_customer.id,
+                operator_id=str(current_user.id),
+                operator_name=getattr(current_user, "name", None),
+                team_id=team_id,
+                commit=False,
+                content={
+                    "previous_owner_id": None,
+                    "new_owner_id": updated_customer.owner_id,
+                },
+            )
+            db.commit()
+            db.refresh(updated_customer)
+            return _customer_response(db, updated_customer)
+        except ValueError as exc:
+            db.rollback()
+            code = "RESOURCE_VERSION_CONFLICT" if str(exc) == "RESOURCE_VERSION_CONFLICT" else "CUSTOMER_CLAIM_REJECTED"
+            message = "客户已被其他操作更新，请刷新后重试" if code == "RESOURCE_VERSION_CONFLICT" else str(exc)
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT if code == "RESOURCE_VERSION_CONFLICT" else status.HTTP_400_BAD_REQUEST, detail={"code": code, "message": message}) from exc
+
+    fingerprint = request_fingerprint({
+        "customer_id": customer_id,
+        "owner_id": claim_data.owner_id,
+        "expected_version": expected_version,
+    })
+    try:
+        execution, replay = command_execution_service.begin(
+            db,
+            team_id=team_id,
+            actor_id=str(current_user.id),
+            command_type="CUSTOMER_CLAIM",
+            resource_type="CUSTOMER",
+            resource_public_id=customer_id,
+            operation_id=operation_id,
+            idempotency_key=idempotency_key,
+            fingerprint=fingerprint,
+            correlation_id=correlation_id,
         )
+    except CommandIdempotencyConflict as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "IDEMPOTENCY_CONFLICT", "message": str(exc)}) from exc
+    except CommandAlreadyInProgress as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_202_ACCEPTED, detail={"operation_id": str(exc), "message": "客户领取正在处理中，请查询操作结果"}) from exc
+    except CommandOperationConflict as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "OPERATION_CONFLICT", "message": str(exc)}) from exc
+
+    if replay:
+        db.rollback()
+        return command_execution_service.to_response_payload(execution)
+
+    command_operation_id = execution.operation_id
+    try:
+        updated_customer = customer_crud.claim_customer(
+            db,
+            customer,
+            claim_data.owner_id,
+            team_id,
+            expected_version=expected_version,
+            commit=False,
+        )
+        operation_log_service.log(
+            db=db,
+            event_type="CUSTOMER_CLAIMED",
+            event_action="UPDATE",
+            resource_type="CUSTOMER",
+            resource_id=updated_customer.id,
+            operator_id=str(current_user.id),
+            operator_name=getattr(current_user, "name", None),
+            team_id=team_id,
+            commit=False,
+            content={
+                "previous_owner_id": None,
+                "new_owner_id": updated_customer.owner_id,
+            },
+        )
+        command_execution_service.succeed(
+            db,
+            execution,
+            data={
+                "customer": _customer_response(db, updated_customer).model_dump(mode="json"),
+                "message": "客户领取成功",
+            },
+            resource=CommandResource(
+                type="CUSTOMER",
+                public_id=str(updated_customer.public_id),
+                version=int(updated_customer.version),
+            ),
+            next_actions=[CommandNextAction(id="refresh-list", label="刷新客户列表", kind="continue")],
+            correlation_id=correlation_id,
+        )
+        db.commit()
+        db.refresh(updated_customer)
+    except ValueError as exc:
+        db.rollback()
+        error_code = "RESOURCE_VERSION_CONFLICT" if str(exc) == "RESOURCE_VERSION_CONFLICT" else "CUSTOMER_CLAIM_REJECTED"
+        error_message = "客户已被其他操作更新，请刷新后重试" if error_code == "RESOURCE_VERSION_CONFLICT" else str(exc)
+        try:
+            execution, _ = command_execution_service.begin(
+                db,
+                team_id=team_id,
+                actor_id=str(current_user.id),
+                command_type="CUSTOMER_CLAIM",
+                resource_type="CUSTOMER",
+                resource_public_id=customer_id,
+                operation_id=command_operation_id,
+                idempotency_key=idempotency_key,
+                fingerprint=fingerprint,
+                correlation_id=correlation_id,
+            )
+            command_execution_service.fail(
+                db,
+                execution,
+                status=CommandExecutionStatus.CONFLICT,
+                error_code=error_code,
+                error_message=error_message,
+                retryable=True,
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT if error_code == "RESOURCE_VERSION_CONFLICT" else status.HTTP_400_BAD_REQUEST,
+            detail={"code": error_code, "message": error_message, "operation_id": command_operation_id},
+        ) from exc
+    except Exception as exc:
+        logger.exception("客户领取提交失败", extra={"operation_id": command_operation_id})
+        db.rollback()
+        try:
+            execution, _ = command_execution_service.begin(
+                db,
+                team_id=team_id,
+                actor_id=str(current_user.id),
+                command_type="CUSTOMER_CLAIM",
+                resource_type="CUSTOMER",
+                resource_public_id=customer_id,
+                operation_id=command_operation_id,
+                idempotency_key=idempotency_key,
+                fingerprint=fingerprint,
+                correlation_id=correlation_id,
+            )
+            command_execution_service.fail(
+                db,
+                execution,
+                status=CommandExecutionStatus.UNKNOWN,
+                error_code="CUSTOMER_CLAIM_UNKNOWN",
+                error_message="领取结果暂未确认，请查询操作结果",
+                retryable=True,
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": "CUSTOMER_CLAIM_UNKNOWN", "message": "领取结果暂未确认，请查询操作结果", "operation_id": command_operation_id},
+        ) from exc
+
+    try:
         _persist_customer_business_object_refresh_after_commit(
             business_object=updated_customer,
             source_type="customer",
@@ -1804,48 +2588,308 @@ def claim_customer(
                 "new_owner_id": updated_customer.owner_id,
             },
         )
-        return _customer_response(db, updated_customer)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+    except Exception:
+        # Projection refresh is an after-commit side effect and must not
+        # invalidate the committed customer claim.
+        logger.exception("客户领取后的智能档案刷新入队失败", extra={"operation_id": command_operation_id})
+    return command_execution_service.to_response_payload(execution)
 
 
-@router.post("/{customer_id}/assign", response_model=CustomerAssignResponse, summary="移交客户", description="有 customer:assign 权限的用户可移交客户，并可选择同步移交关联商机及其合同")
+@router.post(
+    "/{customer_id}/assign",
+    response_model=None,
+    summary="移交客户",
+    description="有 customer:assign 权限的用户可移交客户，并可选择同步移交关联商机及其合同。新客户端使用命令结果查询保证幂等和并发安全。",
+)
 def assign_customer(
     customer_id: str,
     assign_data: CustomerAssignRequest,
     team_id: int = Depends(get_current_user_team),
-    _current_user = Depends(require_permission("customer:assign")),
-    db: Session = Depends(get_db)
-):
+    _current_user=Depends(require_permission("customer:assign")),
+    db: Session = Depends(get_db),
+    operation_id: Optional[str] = Header(None, alias="X-Operation-Id"),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+    correlation_id: Optional[str] = Header(None, alias="X-Correlation-Id"),
+    expected_version_header: Optional[int] = Header(None, alias="X-Expected-Version"),
+) -> object:
+    """Transfer a customer as one durable, auditable command.
+
+    Requests without command headers retain the historical response shape for
+    existing scripts. The migrated UI sends command headers and receives a
+    durable outcome whose ``data`` contains the explicit transfer summary.
+    """
+    # FastAPI injects concrete header values at runtime, while direct unit
+    # calls receive the ``Header(...)`` marker as the default. Normalize the
+    # latter to ``None`` so the legacy function contract remains testable.
+    operation_id = _normalize_optional_header_text(operation_id)
+    idempotency_key = _normalize_optional_header_text(idempotency_key)
+    correlation_id = _normalize_optional_header_text(correlation_id)
+    expected_version_header = _normalize_optional_header_int(expected_version_header)
+    if operation_id is not None and len(operation_id) > 64:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="X-Operation-Id 必须为 1-64 个字符")
+    if idempotency_key is not None and len(idempotency_key) > 128:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Idempotency-Key 必须为 1-128 个字符")
+    if (
+        expected_version_header is not None
+        and assign_data.expected_version is not None
+        and expected_version_header != assign_data.expected_version
+    ):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="客户版本号不一致，请刷新后重试")
+    expected_version = assign_data.expected_version if assign_data.expected_version is not None else expected_version_header
+    legacy_scope, normalized_scope = assign_data.normalized_transfer_scope()
+    modern_command = operation_id is not None or idempotency_key is not None
+
     try:
         target_user_id = int(assign_data.owner_id)
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="目标负责人ID无效"
-        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="目标负责人ID无效") from exc
 
     target_user = user_crud.get_by_id(db, target_user_id)
     if not target_user or not team_crud.is_member(db, team_id, target_user_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="目标负责人不存在或不属于当前团队"
+            detail="目标负责人不存在或不属于当前团队",
         )
 
     customer = _get_customer_or_404(db, customer_id, team_id)
+    if not modern_command:
+        try:
+            previous_owner = customer.owner_id
+            updated_customer, transferred_opportunities, transferred_contracts = customer_crud.assign_customer(
+                db,
+                customer,
+                assign_data.owner_id,
+                team_id,
+                legacy_scope,
+            )
+            operation_log_service.log(
+                db=db,
+                event_type="CUSTOMER_ASSIGNED",
+                event_action="UPDATE",
+                resource_type="CUSTOMER",
+                resource_id=updated_customer.id,
+                operator_id=str(_current_user.id),
+                operator_name=getattr(_current_user, "name", None),
+                team_id=team_id,
+                remark=assign_data.normalized_reason(),
+                content={
+                    "previous_owner_id": previous_owner,
+                    "new_owner_id": updated_customer.owner_id,
+                    "opportunity_transfer_scope": legacy_scope,
+                    "transferred_opportunities": transferred_opportunities,
+                    "transferred_contracts": transferred_contracts,
+                },
+            )
+            _persist_customer_business_object_refresh_after_commit(
+                business_object=updated_customer,
+                source_type="customer",
+                summary="客户负责人已变更，刷新客户智能档案",
+                actor_id=str(_current_user.id),
+                payload={
+                    "change_type": "assigned",
+                    "previous_owner_id": previous_owner,
+                    "new_owner_id": updated_customer.owner_id,
+                    "opportunity_transfer_scope": legacy_scope,
+                    "transferred_opportunities": transferred_opportunities,
+                    "transferred_contracts": transferred_contracts,
+                },
+            )
+            return CustomerAssignResponse(
+                customer=_customer_response(db, updated_customer),
+                transferred_opportunities=transferred_opportunities,
+                transferred_contracts=transferred_contracts,
+                message="客户已移交",
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
+    fingerprint = request_fingerprint({
+        "customer_id": customer_id,
+        "owner_id": assign_data.owner_id,
+        "transfer_scope": normalized_scope.value,
+        "expected_version": expected_version,
+        "reason": assign_data.normalized_reason(),
+    })
     try:
-        previous_owner = customer.owner_id
-        updated_customer, transferred_opportunities, transferred_contracts = customer_crud.assign_customer(
+        execution, replay = command_execution_service.begin(
+            db,
+            team_id=team_id,
+            actor_id=str(_current_user.id),
+            command_type="CUSTOMER_ASSIGN",
+            resource_type="CUSTOMER",
+            resource_public_id=customer_id,
+            operation_id=operation_id,
+            idempotency_key=idempotency_key,
+            fingerprint=fingerprint,
+            correlation_id=correlation_id,
+        )
+    except CommandIdempotencyConflict as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "IDEMPOTENCY_CONFLICT", "message": str(exc)}) from exc
+    except CommandAlreadyInProgress as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_202_ACCEPTED,
+            detail={"operation_id": str(exc), "message": "移交正在处理中，请查询操作结果"},
+        ) from exc
+    except CommandOperationConflict as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "OPERATION_CONFLICT", "message": str(exc)}) from exc
+
+    if replay:
+        db.rollback()
+        return command_execution_service.to_response_payload(execution)
+
+    command_operation_id = execution.operation_id
+    try:
+        details = customer_crud.assign_customer(
             db,
             customer,
             assign_data.owner_id,
             team_id,
-            assign_data.opportunity_transfer_scope
+            legacy_scope,
+            expected_version=expected_version,
+            reason=assign_data.normalized_reason(),
+            commit=False,
+            return_details=True,
         )
+        if not isinstance(details, dict):
+            raise RuntimeError("客户移交结果格式异常")
+        updated_customer = details["customer"]
+        if not hasattr(updated_customer, "public_id"):
+            raise RuntimeError("客户移交结果缺少客户")
+        assignment_result = CustomerAssignmentResult(
+            customer=_customer_response(db, updated_customer),
+            previous_owner_id=details["previous_owner_id"],
+            new_owner_id=details["new_owner_id"],
+            transfer_scope=normalized_scope,
+            transferred_opportunities=details["transferred_opportunities"],
+            transferred_contracts=details["transferred_contracts"],
+            updated_objects=details["updated_objects"],
+            skipped_objects=details["skipped_objects"],
+            message="客户已移交，部分锁定合同未同步" if details["skipped_objects"] else "客户已移交",
+        )
+        effects = [
+            CommandEffect(
+                type=str(item["object_type"]),
+                public_id=str(item["public_id"]),
+                status=str(item["status"]),
+                detail=item.get("detail"),
+            )
+            for item in [*details["updated_objects"], *details["skipped_objects"]]
+        ]
+        operation_log_service.log(
+            db=db,
+            event_type="CUSTOMER_ASSIGNED",
+            event_action="UPDATE",
+            resource_type="CUSTOMER",
+            resource_id=updated_customer.id,
+            operator_id=str(_current_user.id),
+            operator_name=getattr(_current_user, "name", None),
+            team_id=team_id,
+            commit=False,
+            remark=assign_data.normalized_reason(),
+            content={
+                "previous_owner_id": details["previous_owner_id"],
+                "new_owner_id": details["new_owner_id"],
+                "transfer_scope": normalized_scope.value,
+                "transferred_opportunities": details["transferred_opportunities"],
+                "transferred_contracts": details["transferred_contracts"],
+                "updated_objects": details["updated_objects"],
+                "skipped_objects": details["skipped_objects"],
+            },
+        )
+        command_execution_service.succeed(
+            db,
+            execution,
+            data=assignment_result.model_dump(mode="json"),
+            resource=CommandResource(
+                type="CUSTOMER",
+                public_id=str(updated_customer.public_id),
+                version=int(updated_customer.version),
+            ),
+            effects=effects,
+            next_actions=[
+                CommandNextAction(id="view-customer", label="查看客户详情", kind="view-detail"),
+                CommandNextAction(id="refresh-list", label="刷新客户列表", kind="continue"),
+            ],
+            correlation_id=correlation_id,
+        )
+        db.commit()
+        db.refresh(updated_customer)
+    except ValueError as exc:
+        db.rollback()
+        # The command record is itself the durable conflict result.
+        try:
+            execution, _ = command_execution_service.begin(
+                db,
+                team_id=team_id,
+                actor_id=str(_current_user.id),
+                command_type="CUSTOMER_ASSIGN",
+                resource_type="CUSTOMER",
+                resource_public_id=customer_id,
+                operation_id=command_operation_id,
+                idempotency_key=idempotency_key,
+                fingerprint=fingerprint,
+                correlation_id=correlation_id,
+            )
+            error_code = "RESOURCE_VERSION_CONFLICT" if str(exc) == "RESOURCE_VERSION_CONFLICT" else "OWNER_CHANGED"
+            command_execution_service.fail(
+                db,
+                execution,
+                status=CommandExecutionStatus.CONFLICT,
+                error_code=error_code,
+                error_message="客户已被其他操作更新，请刷新后重试" if error_code == "RESOURCE_VERSION_CONFLICT" else str(exc),
+                retryable=True,
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "RESOURCE_VERSION_CONFLICT" if str(exc) == "RESOURCE_VERSION_CONFLICT" else "OWNER_CHANGED",
+                "message": "客户已被其他操作更新，请刷新后重试" if str(exc) == "RESOURCE_VERSION_CONFLICT" else str(exc),
+                "operation_id": command_operation_id,
+            },
+        ) from exc
+    except Exception as exc:
+        logger.exception("客户移交提交失败", extra={"operation_id": command_operation_id})
+        db.rollback()
+        try:
+            execution, _ = command_execution_service.begin(
+                db,
+                team_id=team_id,
+                actor_id=str(_current_user.id),
+                command_type="CUSTOMER_ASSIGN",
+                resource_type="CUSTOMER",
+                resource_public_id=customer_id,
+                operation_id=command_operation_id,
+                idempotency_key=idempotency_key,
+                fingerprint=fingerprint,
+                correlation_id=correlation_id,
+            )
+            command_execution_service.fail(
+                db,
+                execution,
+                status=CommandExecutionStatus.UNKNOWN,
+                error_code="CUSTOMER_ASSIGN_UNKNOWN",
+                error_message="移交结果暂未确认，请查询操作结果",
+                retryable=True,
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "code": "CUSTOMER_ASSIGN_UNKNOWN",
+                "message": "移交结果暂未确认，请查询操作结果",
+                "operation_id": command_operation_id,
+            },
+        ) from exc
+
+    try:
         _persist_customer_business_object_refresh_after_commit(
             business_object=updated_customer,
             source_type="customer",
@@ -1853,24 +2897,20 @@ def assign_customer(
             actor_id=str(_current_user.id),
             payload={
                 "change_type": "assigned",
-                "previous_owner_id": previous_owner,
-                "new_owner_id": updated_customer.owner_id,
-                "opportunity_transfer_scope": assign_data.opportunity_transfer_scope,
-                "transferred_opportunities": transferred_opportunities,
-                "transferred_contracts": transferred_contracts,
+                "previous_owner_id": details["previous_owner_id"],
+                "new_owner_id": details["new_owner_id"],
+                "transfer_scope": normalized_scope.value,
+                "transferred_opportunities": details["transferred_opportunities"],
+                "transferred_contracts": details["transferred_contracts"],
+                "skipped_objects": details["skipped_objects"],
             },
         )
-        return CustomerAssignResponse(
-            customer=_customer_response(db, updated_customer),
-            transferred_opportunities=transferred_opportunities,
-            transferred_contracts=transferred_contracts,
-            message="客户已移交"
-        )
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+    except Exception:
+        # Ownership and related-object updates are already committed; keep the
+        # command result successful and let observability/retry handle the
+        # non-critical projection side effect.
+        logger.exception("客户移交后的智能档案刷新入队失败", extra={"operation_id": command_operation_id})
+    return command_execution_service.to_response_payload(execution)
 
 
 @router.post(

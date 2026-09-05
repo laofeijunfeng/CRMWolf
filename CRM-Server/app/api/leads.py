@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timedelta
 import json
 from app.core.database import get_db
+from app.api.customers import convert_from_lead as customers_convert_from_lead
 from app.core.deps import get_current_active_user, check_lead_access, check_lead_owner, require_permission, get_current_user_team, check_lead_delete_permission
 from app.crud.customer import customer_crud
 from app.crud.lead import lead_crud, lead_follow_up_crud
@@ -16,6 +17,7 @@ from app.schemas.lead import (
     LeadTrendResponse, LeadConversionResponse, LeadMarkInvalidRequest
 )
 from app.schemas.common import PaginatedResponse
+from app.schemas.customer import ConvertLeadToCustomer, ConvertResponse
 from app.models.lead import LeadStatus
 from app.models.user import User
 from app.services.acquisition_source_service import (
@@ -599,23 +601,47 @@ def delete_follow_up(
     return {"message": "删除成功"}
 
 
-@router.post("/{lead_id}/convert", response_model=LeadResponse, summary="线索转化", description="将线索转化为客户")
-def convert_lead(
+@router.post(
+    "/{lead_id}/convert",
+    response_model=ConvertResponse,
+    response_model_exclude_none=True,
+    # Preserve the legacy endpoint's 200 response semantics while routing
+    # the write through the canonical 201 command implementation.
+    summary="线索转化（兼容入口）",
+    description="兼容旧客户端的线索转化入口；实际执行统一转发至客户转化事务。",
+    deprecated=True,
+)
+async def convert_lead(
     lead_id: str,
     request: LeadConvertRequest,
-    lead = Depends(check_lead_owner),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    if lead.status == LeadStatus.CONVERTED:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="该线索已转化"
-        )
-
-    converted_lead = lead_crud.convert(db, lead.id)
-
-    return converted_lead
+    team_id: int = Depends(get_current_user_team),
+    lead=Depends(check_lead_owner),
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+    operation_id: Optional[str] = Header(None, alias="X-Operation-Id"),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+    correlation_id: Optional[str] = Header(None, alias="X-Correlation-Id"),
+) -> ConvertResponse:
+    # Keep one canonical conversion implementation. This prevents the old
+    # endpoint from changing only the lead status without creating the customer.
+    # The canonical handler owns the converted/idempotency checks so retries of
+    # an already committed command can resolve to the original outcome.
+    return await customers_convert_from_lead(
+        ConvertLeadToCustomer(
+            lead_id=lead.public_id,
+            account_name=request.customer_name,
+            address=request.customer_address,
+            contact_name=request.customer_contact_name,
+            contact_phone=request.customer_contact_phone,
+            industry=request.customer_industry,
+        ),
+        team_id=team_id,
+        current_user=current_user,
+        db=db,
+        operation_id=operation_id,
+        idempotency_key=idempotency_key,
+        correlation_id=correlation_id,
+    )
 
 
 @router.post("/{lead_id}/mark-invalid", response_model=LeadResponse, summary="标记无效", description="将线索标记为无效，必须记录无效原因")

@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useTeamStore } from '@/stores/team'
+import { createAuthReturnQuery, getSafeAuthReturnPath } from '@/utils/authRecovery'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -48,6 +49,12 @@ const routes: RouteRecordRaw[] = [
     path: '/onboarding/join-team',
     name: 'TeamJoin',
     component: () => import('@/views/TeamJoin.vue'),
+    meta: { requiresAuth: true, requiresTeam: false }
+  },
+  {
+    path: '/team-unavailable',
+    name: 'TeamUnavailable',
+    component: () => import('@/views/TeamUnavailable.vue'),
     meta: { requiresAuth: true, requiresTeam: false }
   },
   {
@@ -327,26 +334,31 @@ router.beforeEach(async (to, _from, next) => {
   const requiresTeam = to.meta['requiresTeam'] !== false
 
   if (requiresAuth && !userStore.isLoggedIn()) {
-    next('/login')
-  } else if (to.path === '/login' && userStore.isLoggedIn()) {
-    next('/leads')
-  } else if (requiresAuth && requiresTeam && userStore.isLoggedIn()) {
-    if (!teamStore.hasTeam()) {
-      try {
-        await teamStore.fetchUserTeams()
-        if (!teamStore.hasTeam()) {
-          next('/onboarding')
-          return
-        }
-      } catch {
-        next('/onboarding')
-        return
-      }
-    }
-    next()
-  } else {
-    next()
+    next({ name: 'Login', query: createAuthReturnQuery(to.fullPath) })
+    return
   }
+
+  if (to.path === '/login' && userStore.isLoggedIn()) {
+    const returnPath = getSafeAuthReturnPath(to.query['redirect']) ?? '/leads'
+    next(returnPath)
+    return
+  }
+
+  if (requiresAuth && requiresTeam && userStore.isLoggedIn() && !teamStore.hasTeam()) {
+    try {
+      await teamStore.fetchUserTeams()
+    } catch {
+      next({ name: 'TeamUnavailable', query: createAuthReturnQuery(to.fullPath) })
+      return
+    }
+
+    if (!teamStore.hasTeam()) {
+      next({ name: 'Onboarding', query: createAuthReturnQuery(to.fullPath) })
+      return
+    }
+  }
+
+  next()
 })
 
 export default router

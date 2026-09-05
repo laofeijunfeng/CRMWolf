@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from app.core.database import get_db
@@ -16,6 +16,7 @@ from app.crud.sales_commitment import (
     follow_up_task_projection_run_crud,
     sales_commitment_crud,
 )
+from app.models.command_execution import CommandExecutionStatus
 from app.models.sales_commitment import (
     FollowUpTaskConfirmationStatus,
     FollowUpTaskProjectionStatus,
@@ -32,6 +33,14 @@ from app.schemas.sales_commitment import (
     FollowUpTaskListResponse,
     FollowUpTaskProjectionRunResponse,
 )
+from app.services.command_execution_service import (
+    CommandAlreadyInProgress,
+    CommandIdempotencyConflict,
+    CommandOperationConflict,
+    command_execution_service,
+    request_fingerprint,
+)
+from app.schemas.command import CommandEffect, CommandNextAction, CommandResource
 from app.services.follow_up_task_confirmation_channel_service import (
     follow_up_task_confirmation_channel_service,
 )
@@ -267,6 +276,9 @@ def transition_follow_up_task(
     team_id: int = Depends(get_current_user_team),
     current_user=Depends(get_current_active_user),
     db: Session = Depends(get_db),
+    operation_id: str | None = Header(None, alias="X-Operation-Id"),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    correlation_id: str | None = Header(None, alias="X-Correlation-Id"),
 ) -> dict[str, Any]:
     action_map = {
         "complete": FollowUpTaskTransitionActionType.COMPLETE,
@@ -278,6 +290,65 @@ def transition_follow_up_task(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="action 只支持 complete/cancel/postpone")
     if normalized_action == FollowUpTaskTransitionActionType.POSTPONE and not payload.proposed_due_at:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="延期操作必须提供 proposed_due_at")
+
+    if not isinstance(operation_id, str):
+        operation_id = None
+    elif not operation_id.strip() or len(operation_id.strip()) > 64:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="X-Operation-Id 必须为 1-64 个字符")
+    else:
+        operation_id = operation_id.strip()
+    if not isinstance(idempotency_key, str):
+        idempotency_key = None
+    elif not idempotency_key.strip() or len(idempotency_key.strip()) > 128:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Idempotency-Key 必须为 1-128 个字符")
+    else:
+        idempotency_key = idempotency_key.strip()
+    if not isinstance(correlation_id, str):
+        correlation_id = None
+
+    task = follow_up_task_crud.get_by_public_id(db, task_id, team_id=team_id)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在")
+
+    fingerprint = request_fingerprint({
+        "task_public_id": task_id,
+        "action": normalized_action,
+        "proposed_due_at": payload.proposed_due_at,
+        "reason": payload.reason or "manual_ui_transition",
+    })
+    try:
+        execution, replay = command_execution_service.begin(
+            db,
+            team_id=team_id,
+            actor_id=str(current_user.id),
+            command_type="FOLLOW_UP_TASK_TRANSITION",
+            resource_type="FOLLOW_UP_TASK",
+            resource_public_id=task_id,
+            operation_id=operation_id,
+            idempotency_key=idempotency_key,
+            fingerprint=fingerprint,
+            correlation_id=correlation_id,
+        )
+    except CommandIdempotencyConflict as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except CommandAlreadyInProgress as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_202_ACCEPTED,
+            detail={"operation_id": str(exc), "message": "操作正在处理中，请查询操作结果"},
+        ) from exc
+    except CommandOperationConflict as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    if replay:
+        db.rollback()
+        replay_payload = command_execution_service.to_response_payload(execution)
+        stored_data = replay_payload.get("data")
+        if isinstance(stored_data, dict):
+            return {**stored_data, "operation_id": execution.operation_id, "status": execution.status}
+        return replay_payload
 
     plan = FollowUpTaskTransitionPlan(
         decision=FollowUpTaskReconciliationDecision(
@@ -304,26 +375,88 @@ def transition_follow_up_task(
         ),
         plan_source="manual_ui",
     )
-    result = follow_up_task_transition_execution_service.execute_action(
-        db,
-        team_id=team_id,
-        action=plan.actions[0],
-        plan=plan,
-        actor_id=str(current_user.id),
-        expected_owner_id=str(current_user.id),
-    )
-    if result.status != FollowUpTaskTransitionExecutionStatus.EXECUTED:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result.skip_reason or "任务状态更新失败")
-    return {
-        "executed": True,
-        "result": result.to_dict(),
-        "task": follow_up_task_query_service.get_task_detail(
+    try:
+        result = follow_up_task_transition_execution_service.execute_action(
+            db,
+            team_id=team_id,
+            action=plan.actions[0],
+            plan=plan,
+            actor_id=str(current_user.id),
+            expected_owner_id=str(current_user.id),
+            commit=False,
+        )
+        if result.status != FollowUpTaskTransitionExecutionStatus.EXECUTED:
+            command_execution_service.fail(
+                db,
+                execution,
+                error_code=result.skip_reason or "TASK_TRANSITION_FAILED",
+                error_message="任务状态未发生变化，请刷新后确认当前状态",
+                retryable=False,
+            )
+            db.commit()
+            response_status = (
+                status.HTTP_400_BAD_REQUEST
+                if result.skip_reason == "TASK_OWNER_MISMATCH"
+                else status.HTTP_409_CONFLICT
+            )
+            raise HTTPException(status_code=response_status, detail=result.skip_reason or "任务状态更新失败")
+
+        task_payload = follow_up_task_query_service.get_task_detail(
             db,
             team_id=team_id,
             user_id=current_user.id,
             task_public_id=task_id,
-        ),
-    }
+        )
+        data = {"executed": True, "result": result.to_dict(), "task": task_payload}
+        command_execution_service.succeed(
+            db,
+            execution,
+            data=data,
+            resource=CommandResource(type="FOLLOW_UP_TASK", public_id=task_id),
+            effects=[CommandEffect(type="FOLLOW_UP_TASK", public_id=task_id, status="SYNCED")],
+            next_actions=[CommandNextAction(id="view-task", label="查看追踪详情", kind="view-detail")],
+            correlation_id=correlation_id,
+        )
+        db.commit()
+        return {
+            **data,
+            "operation_id": execution.operation_id,
+            "status": CommandExecutionStatus.SUCCEEDED,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # The domain executor may have committed before an outer failure.  Do
+        # not tell the user it is safe to repeat the write; persist UNKNOWN so
+        # the client can query the original operation id instead.
+        db.rollback()
+        try:
+            from app.models.command_execution import CommandExecution
+
+            unknown = CommandExecution(
+                operation_id=execution.operation_id,
+                team_id=team_id,
+                actor_id=str(current_user.id),
+                command_type="FOLLOW_UP_TASK_TRANSITION",
+                resource_type="FOLLOW_UP_TASK",
+                resource_public_id=task_id,
+                idempotency_key=idempotency_key.strip() if idempotency_key else None,
+                request_fingerprint=fingerprint,
+                status=CommandExecutionStatus.UNKNOWN,
+                error_code="OUTCOME_UNKNOWN",
+                error_message="请求结果暂时无法确认，请查询操作结果",
+                retryable=False,
+                correlation_id=correlation_id,
+                completed_time=business_now(),
+            )
+            db.add(unknown)
+            db.commit()
+        except Exception:
+            db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_202_ACCEPTED,
+            detail={"operation_id": execution.operation_id, "message": "请求结果暂时无法确认，请查询操作结果"},
+        ) from exc
 
 
 @projection_router.get("/by-activity/{activity_id}", response_model=list[FollowUpTaskProjectionRunResponse], summary="按客户活动查询任务投影运行")

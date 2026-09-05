@@ -31,6 +31,9 @@ usePageTitle()
 const headerStore = useHeaderStore()
 const loading = ref(false)
 const errorMessage = ref('')
+const funnelError = ref('')
+const trendError = ref('')
+const ownerFilterError = ref('')
 const dashboard = ref<SalesDashboardFunnelResponse | null>(null)
 const followUpTrend = ref<SalesDashboardFollowUpTrendResponse | null>(null)
 const activeFilters = ref<ListFilterCondition[]>([])
@@ -197,37 +200,63 @@ const getMetricExtraFooter = (metric: SalesDashboardMetric): string => {
   return `${metric.extra_secondary_label}：${value}`
 }
 
-const loadDashboard = async (): Promise<void> => {
-  loading.value = true
-  errorMessage.value = ''
-  try {
-    const createdTimeBounds = getDateBounds(activeFilters.value, 'created_time')
-    const ownerId = getDelimitedFilterValues(activeFilters.value, 'owner_id')
-    const funnelParams = {
+const getDashboardParams = (): {
+  funnel: { start_date: string | null; end_date: string | null; owner_id: string | null }
+  trend: { start_date: string; end_date: string; owner_id: string | null }
+} => {
+  const createdTimeBounds = getDateBounds(activeFilters.value, 'created_time')
+  const ownerId = getDelimitedFilterValues(activeFilters.value, 'owner_id')
+  return {
+    funnel: {
       start_date: createdTimeBounds.start ?? null,
       end_date: createdTimeBounds.end ?? null,
       owner_id: ownerId
-    }
-    const trendParams = {
+    },
+    trend: {
       ...getTrendDateBounds(),
       owner_id: ownerId
     }
-    const [funnelResponse, followUpTrendResponse] = await Promise.all([
-      salesDashboardApi.getFunnel(funnelParams),
-      salesDashboardApi.getFollowUpTrend(trendParams)
-    ])
-    dashboard.value = funnelResponse
-    followUpTrend.value = followUpTrendResponse
-  } catch (error) {
-    logger.error('[SalesDashboard]', '加载销售看板失败', { error })
-    errorMessage.value = '销售看板加载失败'
-    toast.error('销售看板加载失败')
-  } finally {
-    loading.value = false
   }
 }
 
+const loadDashboard = async (): Promise<void> => {
+  loading.value = true
+  errorMessage.value = ''
+  funnelError.value = ''
+  trendError.value = ''
+  const params = getDashboardParams()
+  const [funnelResult, trendResult] = await Promise.allSettled([
+    salesDashboardApi.getFunnel(params.funnel),
+    salesDashboardApi.getFollowUpTrend(params.trend)
+  ])
+
+  if (funnelResult.status === 'fulfilled') {
+    dashboard.value = funnelResult.value
+  } else {
+    logger.error('[SalesDashboard]', '加载销售漏斗失败', { error: String(funnelResult.reason) })
+    funnelError.value = '销售漏斗暂时无法加载'
+  }
+
+  if (trendResult.status === 'fulfilled') {
+    followUpTrend.value = trendResult.value
+  } else {
+    logger.error('[SalesDashboard]', '加载跟进趋势失败', { error: String(trendResult.reason) })
+    trendError.value = '跟进趋势暂时无法加载'
+  }
+
+  if (funnelResult.status === 'rejected' && trendResult.status === 'rejected') {
+    errorMessage.value = '销售看板暂时无法加载，请重试'
+  }
+  if (funnelResult.status === 'rejected' || trendResult.status === 'rejected') {
+    toast.warning('销售看板部分数据加载失败', {
+      description: '已保留可用数据，你可以针对失败区域重试。'
+    })
+  }
+  loading.value = false
+}
+
 const fetchOwnerFilterOptions = async (): Promise<void> => {
+  ownerFilterError.value = ''
   try {
     const response = await salesDashboardApi.getOwnerFilterOptions()
     ownerFilterOptions.value = response.data.map((owner) => ({
@@ -236,7 +265,7 @@ const fetchOwnerFilterOptions = async (): Promise<void> => {
     }))
   } catch (error) {
     logger.error('[SalesDashboard]', '获取销售成员筛选项失败', { error })
-    ownerFilterOptions.value = []
+    ownerFilterError.value = '销售成员筛选项加载失败'
   }
 }
 
@@ -281,6 +310,14 @@ onMounted(() => {
       </TableToolbarButton>
     </div>
 
+    <div v-if="ownerFilterError" class="dashboard-inline-error dashboard-inline-error--toolbar" role="status">
+      <AlertCircle class="error-icon" aria-hidden="true" />
+      <span>{{ ownerFilterError }}</span>
+      <TableToolbarButton class="dashboard-inline-retry" @click="fetchOwnerFilterOptions">
+        重试
+      </TableToolbarButton>
+    </div>
+
     <div class="dashboard-scroll">
       <section class="dashboard-summary" aria-label="销售漏斗概览">
         <div v-if="errorMessage" class="dashboard-error" role="alert">
@@ -288,6 +325,13 @@ onMounted(() => {
           <span>{{ errorMessage }}</span>
         </div>
 
+        <div v-if="funnelError" class="dashboard-inline-error" role="status">
+          <AlertCircle class="error-icon" aria-hidden="true" />
+          <span>{{ funnelError }}</span>
+          <TableToolbarButton class="dashboard-inline-retry" @click="loadDashboard">
+            重试
+          </TableToolbarButton>
+        </div>
         <div class="metric-grid" :class="{ loading }">
           <template v-if="metrics.length > 0">
             <MetricCard
@@ -329,7 +373,7 @@ onMounted(() => {
             </MetricCard>
           </template>
 
-          <template v-else>
+          <template v-else-if="loading">
             <MetricCard
               v-for="item in 6"
               :key="item"
@@ -337,10 +381,18 @@ onMounted(() => {
               loading
             />
           </template>
+          <div v-else class="dashboard-empty">暂无销售漏斗数据</div>
         </div>
       </section>
 
       <section class="dashboard-trend" aria-label="客户活动趋势">
+        <div v-if="trendError" class="dashboard-inline-error" role="status">
+          <AlertCircle class="error-icon" aria-hidden="true" />
+          <span>{{ trendError }}</span>
+          <TableToolbarButton class="dashboard-inline-retry" @click="loadDashboard">
+            重试
+          </TableToolbarButton>
+        </div>
         <AreaTrendChart
           title="跟进趋势"
           description="每日客户活动与有效跟进"
@@ -453,6 +505,38 @@ onMounted(() => {
 .error-icon {
   width: 16px;
   height: 16px;
+}
+
+.dashboard-inline-error {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-sm-v2;
+  min-height: 40px;
+  margin-bottom: $wolf-space-sm-v2;
+  padding: 0 $wolf-space-md-v2;
+  color: hsl(var(--destructive));
+  background: hsl(var(--destructive) / 0.06);
+  border: 1px solid hsl(var(--destructive) / 0.16);
+  border-radius: $wolf-radius-v2;
+  font-size: $wolf-font-size-caption-v2;
+}
+
+.dashboard-inline-error--toolbar {
+  flex: 0 0 auto;
+  margin: -$wolf-space-sm-v2 0 $wolf-space-md-v2;
+}
+
+.dashboard-inline-retry {
+  margin-left: auto;
+}
+
+.dashboard-empty {
+  grid-column: 1 / -1;
+  min-height: 120px;
+  display: grid;
+  place-items: center;
+  color: hsl(var(--muted-foreground));
+  font-size: $wolf-font-size-caption-v2;
 }
 
 .metric-grid {

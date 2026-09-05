@@ -181,6 +181,10 @@ class PaymentRecordResponse(PaymentRecordBase):
     updated_time: Optional[datetime] = Field(None, description="最后更新时间")
     # Backward-compatible public timestamp used by existing list/detail clients.
     last_modified_time: datetime = Field(..., description="最后更新时间（兼容字段）")
+    # Durable command metadata is optional so list/detail responses remain
+    # backward-compatible while write responses can expose a queryable result.
+    operation_id: Optional[str] = Field(None, description="本次写操作ID")
+    status: Optional[str] = Field(None, description="本次写操作结果状态")
 
     class Config:
         from_attributes = True

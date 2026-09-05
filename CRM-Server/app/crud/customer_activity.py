@@ -286,6 +286,8 @@ class CustomerActivityCRUD:
         lead_id: int,
         new_customer_id: int,
         team_id: int,
+        *,
+        commit: bool = True,
     ) -> list[CustomerActivity]:
         lead_follow_ups = db.query(LeadFollowUp).filter(LeadFollowUp.lead_id == lead_id).all()
         migrated = []
@@ -315,10 +317,15 @@ class CustomerActivityCRUD:
             )
             db.add(activity)
             migrated.append(activity)
-        db.commit()
-        for activity in migrated:
-            db.refresh(activity)
-            _upsert_customer_activity_evidence(db, activity)
+        if commit:
+            db.commit()
+            for activity in migrated:
+                db.refresh(activity)
+                _upsert_customer_activity_evidence(db, activity)
+        else:
+            db.flush()
+            for activity in migrated:
+                _upsert_customer_activity_evidence(db, activity, commit=False)
         return migrated
 
 

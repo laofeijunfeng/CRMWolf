@@ -3,7 +3,7 @@ from __future__ import annotations
 import enum
 from datetime import date, datetime
 from enum import Enum
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -261,6 +261,9 @@ class ConvertLeadToCustomer(BaseModel):
     account_name: Optional[str] = Field(None, min_length=1, max_length=255, description="客户公司名称（可覆盖）")
     address: Optional[str] = Field(None, max_length=500, description="公司地址")
     default_procurement_method_id: Optional[int] = Field(None, description="默认采购方式ID")
+    contact_name: Optional[str] = Field(None, min_length=1, max_length=100, description="主联系人姓名（兼容旧转化入口）")
+    contact_phone: Optional[str] = Field(None, min_length=1, max_length=20, description="主联系人手机（兼容旧转化入口）")
+    industry: Optional[str] = Field(None, max_length=100, description="客户行业（兼容旧转化入口）")
 
 
 class CustomerResponse(BaseModel):
@@ -429,10 +432,40 @@ class CustomerDetailResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class ConvertResponse(BaseModel):
-    customer_id: str = Field(..., description="创建的客户对外ID")
-    contact_id: int = Field(..., description="创建的联系人ID")
+class ConvertResultData(BaseModel):
+    """线索转客户成功后的业务事实摘要。"""
+
+    lead_id: str = Field(..., description="已转化线索对外ID")
+    converted_lead_id: str = Field(..., description="已转化线索对外ID（兼容字段）")
+    customer_id: str = Field(..., description="创建或复用客户的对外ID")
+    customer_public_id: str = Field(..., description="客户对外ID")
+    contact_id: int = Field(..., description="创建或复用主联系人的内部ID（兼容字段）")
+    contact_public_id: Optional[str] = Field(None, description="主联系人对外ID；旧数据暂无时为空")
     message: str = Field(..., description="响应消息")
+    created_customer: bool = Field(..., description="是否新建客户")
+    created_contact: bool = Field(..., description="是否新建主联系人")
+    inherited_fields: List[str] = Field(default_factory=list, description="从线索继承的字段")
+    source_relation: Dict[str, Any] = Field(default_factory=dict, description="线索与客户的来源关系")
+    warnings: List[str] = Field(default_factory=list, description="不阻断主事实的提示")
+
+
+class ConvertResponse(BaseModel):
+    """线索转客户的统一命令结果，兼容旧客户端的顶层字段。"""
+
+    operation_id: Optional[str] = Field(None, description="操作对外ID")
+    status: Optional[str] = Field(None, description="命令状态")
+    # Migration compatibility: old clients read these fields directly.
+    customer_id: Optional[str] = Field(None, description="创建或复用客户的对外ID")
+    contact_id: Optional[int] = Field(None, description="创建或复用主联系人的内部ID")
+    message: Optional[str] = Field(None, description="响应消息")
+    data: Optional[ConvertResultData] = None
+    resource: Optional[Dict[str, Any]] = None
+    effects: Optional[List[Dict[str, Any]]] = None
+    next_actions: Optional[List[Dict[str, Any]]] = None
+    retryable: Optional[bool] = None
+    queryable: Optional[bool] = None
+    error: Optional[Dict[str, Any]] = None
+    correlation_id: Optional[str] = None
 
 
 class MessageResponse(BaseModel):
@@ -510,6 +543,7 @@ class TrendResponse(BaseModel):
 class CustomerReturnRequest(BaseModel):
     return_reason: ReturnReasonEnum = Field(..., description="退回公海原因")
     detailed_reason: Optional[str] = Field(None, max_length=500, description="详细原因说明")
+    expected_version: Optional[int] = Field(None, ge=0, description="退回时客户版本号，用于并发保护")
     
     @field_validator('detailed_reason')
     @classmethod
@@ -529,6 +563,7 @@ class CustomerReturnResponse(BaseModel):
 
 class CustomerClaimRequest(BaseModel):
     owner_id: str = Field(..., min_length=1, description="新负责人系统用户ID")
+    expected_version: Optional[int] = Field(None, ge=0, description="领取时客户版本号，用于并发保护")
     
     @field_validator('owner_id')
     @classmethod
@@ -536,22 +571,81 @@ class CustomerClaimRequest(BaseModel):
         if not v or not v.strip():
             raise ValueError('负责人ID不能为空')
         return v
+
+
+class CustomerTransferScope(str, Enum):
+    CUSTOMER_ONLY = "customer_only"
+    CUSTOMER_AND_OPPORTUNITIES = "customer_and_opportunities"
+    CUSTOMER_OPPORTUNITIES_AND_CONTRACTS = "customer_opportunities_and_contracts"
 
 
 class CustomerAssignRequest(BaseModel):
     owner_id: str = Field(..., min_length=1, description="被分配人（负责人）系统用户ID")
-    opportunity_transfer_scope: Literal["none", "following", "all"] = Field(
-        "none",
-        description="关联商机移交范围：none=仅客户，following=跟进中商机，all=全部商机；移交商机会同步移交关联合同"
+    # Keep the historical field during the migration. New clients should use
+    # transfer_scope so the contract explicitly states the affected objects.
+    opportunity_transfer_scope: Literal["none", "following", "all"] | None = Field(
+        None,
+        description="兼容字段：none=仅客户，following=跟进中商机，all=全部商机；移交商机会同步移交关联合同"
     )
-    remark: Optional[str] = Field(None, max_length=500, description="分配备注（说明分配原因等）")
+    transfer_scope: CustomerTransferScope | None = Field(
+        None,
+        description="移交范围：仅客户、客户及商机、客户/商机及合同"
+    )
+    expected_version: Optional[int] = Field(None, ge=0, description="提交时客户版本号，用于并发保护")
+    reason: Optional[str] = Field(None, max_length=500, description="移交原因")
+    remark: Optional[str] = Field(None, max_length=500, description="兼容字段：分配备注（说明分配原因等）")
     
     @field_validator('owner_id')
     @classmethod
     def owner_id_must_not_be_empty(cls, v):
         if not v or not v.strip():
             raise ValueError('负责人ID不能为空')
-        return v
+        return v.strip()
+
+    @field_validator('reason', 'remark')
+    @classmethod
+    def optional_text_must_not_be_empty(cls, v):
+        if v is not None and not v.strip():
+            return None
+        return v.strip() if v else v
+
+    def normalized_transfer_scope(self) -> tuple[str, CustomerTransferScope]:
+        if self.transfer_scope is not None:
+            mapping = {
+                CustomerTransferScope.CUSTOMER_ONLY: "none",
+                CustomerTransferScope.CUSTOMER_AND_OPPORTUNITIES: "following",
+                CustomerTransferScope.CUSTOMER_OPPORTUNITIES_AND_CONTRACTS: "all",
+            }
+            return mapping[self.transfer_scope], self.transfer_scope
+        legacy_scope = self.opportunity_transfer_scope or "none"
+        scope = {
+            "none": CustomerTransferScope.CUSTOMER_ONLY,
+            "following": CustomerTransferScope.CUSTOMER_AND_OPPORTUNITIES,
+            "all": CustomerTransferScope.CUSTOMER_OPPORTUNITIES_AND_CONTRACTS,
+        }[legacy_scope]
+        return legacy_scope, scope
+
+    def normalized_reason(self) -> Optional[str]:
+        return self.reason or self.remark
+
+
+class CustomerAssignmentObject(BaseModel):
+    public_id: str = Field(..., description="关联对象对外ID")
+    object_type: Literal["opportunity", "contract"]
+    status: str = Field(..., description="同步结果")
+    detail: Optional[str] = None
+
+
+class CustomerAssignmentResult(BaseModel):
+    customer: CustomerResponse = Field(..., description="移交后的客户信息")
+    previous_owner_id: Optional[str] = Field(None, description="原负责人ID")
+    new_owner_id: Optional[str] = Field(None, description="新负责人ID")
+    transfer_scope: CustomerTransferScope = Field(..., description="实际移交范围")
+    transferred_opportunities: int = Field(..., description="已同步移交的商机数量")
+    transferred_contracts: int = Field(..., description="已同步移交的合同数量")
+    updated_objects: List[CustomerAssignmentObject] = Field(default_factory=list, description="已同步对象")
+    skipped_objects: List[CustomerAssignmentObject] = Field(default_factory=list, description="未同步对象及原因")
+    message: str = Field(..., description="响应消息")
 
 
 class CustomerAssignResponse(BaseModel):
@@ -559,6 +653,16 @@ class CustomerAssignResponse(BaseModel):
     transferred_opportunities: int = Field(..., description="已同步移交的商机数量")
     transferred_contracts: int = Field(..., description="已同步移交的合同数量")
     message: str = Field(..., description="响应消息")
+
+
+class CustomerAssignmentPreviewResponse(BaseModel):
+    customer_id: str = Field(..., description="客户对外ID")
+    customer_version: int = Field(..., description="预览时客户版本号")
+    transfer_scope: CustomerTransferScope = Field(..., description="预览移交范围")
+    opportunity_count: int = Field(..., description="将同步移交的商机数量")
+    contract_count: int = Field(..., description="可同步移交的合同数量")
+    locked_contract_count: int = Field(..., description="因审批或签署状态不可同步的合同数量")
+    locked_contracts: List[CustomerAssignmentObject] = Field(default_factory=list, description="不可同步合同明细")
 
 
 class OwnerOption(BaseModel):
