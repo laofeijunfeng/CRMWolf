@@ -1,11 +1,16 @@
 <script setup lang="ts">
 import { AlertCircle, CheckCircle2, CircleSlash2 } from 'lucide-vue-next'
 
-import type { AgentUIBlock } from '@/schemas/agent-contracts'
+import type { AgentUIBlock, EntityRef } from '@/schemas/agent-contracts'
+import { isAgentEntityOpenable } from '@/components/agent/agentEntityNavigation'
 
 type ActionResultBlock = Extract<AgentUIBlock, { type: 'action_result' }>
 
 defineProps<{ block: ActionResultBlock }>()
+
+const emit = defineEmits<{
+  'open-entity': [entityRef: EntityRef]
+}>()
 
 const iconByStatus = {
   SUCCESS: CheckCircle2,
@@ -26,7 +31,21 @@ const classesByStatus = {
     <div>
       <strong class="text-foreground">{{ block.title }}</strong>
       <p class="mb-0 mt-1 text-muted-foreground">{{ block.message }}</p>
-      <span v-if="block.entity_ref" class="text-xs text-primary">{{ block.entity_ref.display_name }}</span>
+      <button
+        v-if="block.entity_ref && isAgentEntityOpenable(block.entity_ref)"
+        type="button"
+        class="mt-1 block max-w-full truncate text-left text-xs text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        :aria-label="`打开${block.entity_ref.display_name}详情`"
+        @click="emit('open-entity', block.entity_ref)"
+      >
+        {{ block.entity_ref.display_name }}
+      </button>
+      <span
+        v-else-if="block.entity_ref"
+        class="mt-1 block max-w-full truncate text-xs text-muted-foreground"
+      >
+        {{ block.entity_ref.display_name }}
+      </span>
     </div>
   </section>
 </template>

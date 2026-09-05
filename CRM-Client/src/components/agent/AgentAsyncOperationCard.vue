@@ -19,6 +19,7 @@
         aria-hidden="true"
       />
       <span class="agent-async-operation__title">{{ title }}</span>
+      <span class="agent-async-operation__status">{{ statusLabel }}</span>
       <component
         :is="expanded ? ChevronDown : ChevronRight"
         class="agent-async-operation__chevron"
@@ -31,6 +32,11 @@
       :id="detailsId"
       class="agent-async-operation__details"
     >
+      <p v-if="currentStep" class="agent-async-operation__step">
+        <span class="agent-async-operation__step-label">当前阶段</span>
+        <span>{{ currentStep }}</span>
+      </p>
+      <p class="agent-async-operation__outcome" :class="outcomeClass">{{ outcomeLabel }}</p>
       <ol v-if="visibleEvents.length > 0" class="agent-async-operation__events">
         <li v-for="event in visibleEvents" :key="event.event_key" class="agent-async-operation__event">
           <Circle class="agent-async-operation__event-icon" aria-hidden="true" />
@@ -43,6 +49,12 @@
       </p>
       <p v-if="operation.status === 'FAILED' && operation.error_message" class="agent-async-operation__notice">
         {{ operation.error_message }}
+      </p>
+      <p v-if="operation.status === 'RETRY_SCHEDULED' && operation.attempt_count > 0" class="agent-async-operation__notice">
+        已尝试 {{ operation.attempt_count }} 次
+      </p>
+      <p v-if="finishedTime !== null" class="agent-async-operation__meta">
+        完成时间：{{ finishedTime }}
       </p>
     </div>
   </article>
@@ -106,6 +118,9 @@ const visibleEvents = computed(() => props.operation.events
 
 const fallbackDetail = computed(() => {
   const summary = props.operation.summary?.trim() ?? ""
+  if (props.operation.status === "DEGRADED") {
+    return summary.length > 0 ? `${summary}，部分结果待核查。` : "任务已完成，但部分结果待核查。"
+  }
   if (summary.length > 0) return summary
   if (props.operation.status === "QUEUED") return "后台任务即将开始。"
   if (props.operation.status === "RUNNING") return "后台任务正在执行。"
@@ -116,10 +131,39 @@ const fallbackDetail = computed(() => {
   return "后台任务已完成。"
 })
 
+const currentStep = computed(() => {
+  const value = props.operation.current_step?.trim()
+  return value !== undefined && value.length > 0 ? value : null
+})
+
+const outcomeLabel = computed(() => {
+  if (props.operation.status === "QUEUED") return "任务已排队，等待开始"
+  if (props.operation.status === "RUNNING") {
+    return currentStep.value !== null ? `正在${currentStep.value}` : "任务正在执行"
+  }
+  if (props.operation.status === "WAITING_USER") return "等待你的确认后继续"
+  if (props.operation.status === "DEGRADED") return "已完成，但部分结果待核查"
+  if (props.operation.status === "FAILED") return "未完成，请根据原因处理"
+  if (props.operation.status === "CANCELLED") return "未执行，任务已取消"
+  if (props.operation.status === "RETRY_SCHEDULED") return "暂未完成，系统将自动重试"
+  const summary = props.operation.summary?.trim()
+  return summary !== undefined && summary.length > 0 ? summary : "任务已完成"
+})
+
+const outcomeClass = computed(() => ({
+  "agent-async-operation__outcome--warning": props.operation.status === "DEGRADED" || props.operation.status === "RETRY_SCHEDULED",
+  "agent-async-operation__outcome--danger": props.operation.status === "FAILED" || props.operation.status === "CANCELLED",
+}))
+
 const formatTime = (value: string): string => {
   const parsed = new Date(value)
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString("zh-CN", { hour12: false })
 }
+
+const finishedTime = computed(() => {
+  const value = props.operation.finished_time
+  return typeof value === "string" && value.length > 0 ? formatTime(value) : null
+})
 
 const retryNotice = computed(() => {
   const details = [props.operation.error_message?.trim()]
@@ -143,7 +187,7 @@ const retryNotice = computed(() => {
 
 .agent-async-operation__trigger {
   display: inline-grid;
-  grid-template-columns: 16px minmax(0, auto) 14px;
+  grid-template-columns: 16px minmax(0, 1fr) auto 14px;
   align-items: center;
   gap: $wolf-space-sm-v2;
   max-width: 100%;
@@ -202,6 +246,44 @@ const retryNotice = computed(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   transition: color 120ms ease;
+}
+
+.agent-async-operation__status {
+  color: $wolf-text-tertiary-v2;
+  white-space: nowrap;
+}
+
+.agent-async-operation__step,
+.agent-async-operation__outcome,
+.agent-async-operation__meta {
+  margin: 0;
+}
+
+.agent-async-operation__step {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $wolf-space-xs-v2;
+  color: $wolf-text-secondary-v2;
+}
+
+.agent-async-operation__step-label {
+  color: $wolf-text-tertiary-v2;
+}
+
+.agent-async-operation__outcome {
+  color: $wolf-text-secondary-v2;
+}
+
+.agent-async-operation__outcome--warning {
+  color: $wolf-warning-v2;
+}
+
+.agent-async-operation__outcome--danger {
+  color: $wolf-danger-v2;
+}
+
+.agent-async-operation__meta {
+  color: $wolf-text-tertiary-v2;
 }
 
 .agent-async-operation__chevron {

@@ -174,6 +174,16 @@
     v-model:visible="customerSheetVisible"
     :customer-id="selectedCustomerId"
   />
+
+  <OpportunityDetailSheet
+    v-model:visible="opportunitySheetVisible"
+    :opportunity-id="selectedOpportunityId"
+  />
+
+  <ContractDetailSheet
+    v-model:visible="contractSheetVisible"
+    :contract-id="selectedContractId"
+  />
 </template>
 
 <script setup lang="ts">
@@ -189,6 +199,7 @@ import {
   type AgentUIEnvelope,
 } from '@/api/agent'
 import AgentAsyncOperationList from '@/components/agent/AgentAsyncOperationList.vue'
+import { isAgentEntityOpenable, parseAgentContractId } from '@/components/agent/agentEntityNavigation'
 import { groupAgentAsyncOperationsByMessage } from '@/components/agent/agentAsyncOperations'
 import {
   compactTaskActionState,
@@ -210,6 +221,8 @@ import { useAgentAsyncOperations } from '@/composables/useAgentAsyncOperations'
 import type { AgentChatInput, AgentUIBlock, EntityRef, JsonObject } from '@/schemas/agent-contracts'
 import { useUserStore } from '@/stores/user'
 import CustomerDetailSheet from '@/views/CustomerDetailSheet.vue'
+import OpportunityDetailSheet from '@/views/OpportunityDetailSheet.vue'
+import ContractDetailSheet from '@/views/ContractDetailSheet.vue'
 
 const LAST_SESSION_STORAGE_KEY = 'crm_agent_last_session_id'
 
@@ -230,6 +243,8 @@ const activeStreamFinalized = ref(false)
 const transportError = ref<string | null>(null)
 const messageScrollKey = ref(0)
 const selectedCustomerId = ref<string | null>(null)
+const selectedOpportunityId = ref<string | null>(null)
+const selectedContractId = ref<number | null>(null)
 const lockedInteractionActionIds = ref<ReadonlySet<string>>(new Set())
 let messageLoadGeneration = 0
 
@@ -238,10 +253,30 @@ interface AgentMessageLoadResult {
   messages: AgentUIEnvelope[]
 }
 
+const closeSelectedEntity = (): void => {
+  selectedCustomerId.value = null
+  selectedOpportunityId.value = null
+  selectedContractId.value = null
+}
+
 const customerSheetVisible = computed({
   get: () => selectedCustomerId.value !== null,
   set: (visible: boolean) => {
     if (!visible) selectedCustomerId.value = null
+  },
+})
+
+const opportunitySheetVisible = computed({
+  get: () => selectedOpportunityId.value !== null,
+  set: (visible: boolean) => {
+    if (!visible) selectedOpportunityId.value = null
+  },
+})
+
+const contractSheetVisible = computed({
+  get: () => selectedContractId.value !== null,
+  set: (visible: boolean) => {
+    if (!visible) selectedContractId.value = null
   },
 })
 
@@ -655,9 +690,29 @@ const submitEntityAction = async (actionId: string): Promise<void> => {
 }
 
 const openEntity = (entityRef: EntityRef): void => {
+  if (!isAgentEntityOpenable(entityRef)) {
+    toast.info('该类型记录暂不支持在 Agent 中打开，请到对应业务页面查看')
+    return
+  }
+
+  if (entityRef.resource === 'contract') {
+    const contractId = parseAgentContractId(entityRef.public_id)
+    if (contractId === null) {
+      toast.error('无法打开合同详情：合同编号无效')
+      return
+    }
+    closeSelectedEntity()
+    selectedContractId.value = contractId
+    return
+  }
+
+  closeSelectedEntity()
   if (entityRef.resource === 'customer') {
     selectedCustomerId.value = entityRef.public_id
+    return
   }
+
+  selectedOpportunityId.value = entityRef.public_id
 }
 
 const useExample = (example: string): void => {

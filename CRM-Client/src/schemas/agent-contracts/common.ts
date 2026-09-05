@@ -20,6 +20,7 @@ export const CRMResourceSchema = z.enum([
   'customer',
   'contact',
   'customer_activity',
+  'deployment_info',
   'follow_up_task',
   'completed_work',
   'opportunity',

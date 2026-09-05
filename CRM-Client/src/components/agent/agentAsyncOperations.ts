@@ -107,7 +107,7 @@ export const AGENT_ASYNC_OPERATION_STATUS_META: Readonly<Record<AgentAsyncOperat
     toneClasses: "border-wolf-success-border bg-wolf-success-bg text-wolf-success-text",
   },
   DEGRADED: {
-    label: "已降级完成",
+    label: "已完成，待核查",
     tone: "warning",
     active: false,
     terminal: true,
