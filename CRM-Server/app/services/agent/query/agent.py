@@ -32,6 +32,7 @@ from app.services.agent.query.schemas import (
     QueryContractModel,
     QueryError,
 )
+from app.services.ai_http_client import managed_ai_http_clients
 
 if TYPE_CHECKING:
     from app.services.agent.query.registry import (
@@ -563,32 +564,34 @@ class CRMQueryAgent:
             }
             if model_config.enable_thinking is not None:
                 model_kwargs["extra_body"] = {"enable_thinking": model_config.enable_thinking}
-            model = self._chat_model_factory(**model_kwargs)
-            agent = self._agent_factory(
-                model=model,
-                tools=tools,
-                system_prompt=QUERY_AGENT_SYSTEM_PROMPT,
-                response_format=ToolStrategy(
-                    CRMQueryAgentResponse,
-                    handle_errors=handle_structured_output_error,
-                ),
-                middleware=[terminate_on_authoritative_empty],
-                checkpointer=None,
-                store=None,
-                name="crm_query_agent",
-            )
             async with asyncio.timeout(turn.remaining_timeout(self._limits.turn_timeout_seconds)):
-                state = await agent.ainvoke(
-                    {
-                        "messages": [
-                            {
-                                "role": "user",
-                                "content": _query_agent_user_content(request),
-                            }
-                        ]
-                    },
-                    config={"recursion_limit": self._limits.max_tool_calls * 2 + 4},
-                )
+                use_managed_transport = self._chat_model_factory is ChatOpenAI
+                async with managed_ai_http_clients(enabled=use_managed_transport) as transport_kwargs:
+                    model = self._chat_model_factory(**model_kwargs, **transport_kwargs)
+                    agent = self._agent_factory(
+                        model=model,
+                        tools=tools,
+                        system_prompt=QUERY_AGENT_SYSTEM_PROMPT,
+                        response_format=ToolStrategy(
+                            CRMQueryAgentResponse,
+                            handle_errors=handle_structured_output_error,
+                        ),
+                        middleware=[terminate_on_authoritative_empty],
+                        checkpointer=None,
+                        store=None,
+                        name="crm_query_agent",
+                    )
+                    state = await agent.ainvoke(
+                        {
+                            "messages": [
+                                {
+                                    "role": "user",
+                                    "content": _query_agent_user_content(request),
+                                }
+                            ]
+                        },
+                        config={"recursion_limit": self._limits.max_tool_calls * 2 + 4},
+                    )
         except TimeoutError as exc:
             # A CRM tool result is not a complete Query response.  The turn
             # remains failed when the model cannot produce the typed answer,

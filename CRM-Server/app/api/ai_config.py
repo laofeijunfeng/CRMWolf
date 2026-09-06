@@ -14,6 +14,7 @@ from app.models.user import User
 from app.crud.ai_config import ai_config_crud
 from app.schemas.ai_config import AIConfigCreate, AIConfigResponse, AITestRequest, AITestResponse
 from app.services.ai_service import ai_service
+from app.services.ai_http_client import ai_httpx_client_kwargs, ai_httpx_timeout
 
 T = TypeVar("T")
 
@@ -143,7 +144,10 @@ async def test_ai_connection(
         }
 
         try:
-            async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
+            async with httpx.AsyncClient(
+                timeout=ai_httpx_timeout(),
+                **ai_httpx_client_kwargs(),
+            ) as client:
                 async with client.stream(
                     "POST",
                     f"{config.api_host}/chat/completions",

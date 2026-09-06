@@ -19,6 +19,7 @@ from langchain_openai import ChatOpenAI
 from pydantic import ConfigDict, Field, model_validator
 
 from app.services.agent.query.schemas import QueryContractModel
+from app.services.ai_http_client import managed_ai_http_clients
 from app.utils.time import BUSINESS_TIMEZONE, business_now
 
 if TYPE_CHECKING:
@@ -232,31 +233,33 @@ class LLMQuerySemanticIntentResolver:
         if model_config.enable_thinking is not None:
             model_kwargs["extra_body"] = {"enable_thinking": model_config.enable_thinking}
         try:
-            model = self._chat_model_factory(**model_kwargs)
-            structured_model = model.with_structured_output(
-                CRMQuerySemanticIntent,
-                method="function_calling",
-            )
             timeout_seconds = self._timeout_seconds
             if runtime.deadline_at is not None:
                 timeout_seconds = max(0.001, min(timeout_seconds, runtime.deadline_at - monotonic()))
             async with asyncio.timeout(timeout_seconds):
-                result = await structured_model.ainvoke(
-                    [
-                        {"role": "system", "content": QUERY_SEMANTIC_INTENT_SYSTEM_PROMPT},
-                        {
-                            "role": "user",
-                            "content": json.dumps(
-                                {
-                                    "user_message": text,
-                                    "reference_now": self._now_factory().isoformat(),
-                                    "reference_timezone": BUSINESS_TIMEZONE,
-                                },
-                                ensure_ascii=False,
-                            ),
-                        },
-                    ]
-                )
+                use_managed_transport = self._chat_model_factory is ChatOpenAI
+                async with managed_ai_http_clients(enabled=use_managed_transport) as transport_kwargs:
+                    model = self._chat_model_factory(**model_kwargs, **transport_kwargs)
+                    structured_model = model.with_structured_output(
+                        CRMQuerySemanticIntent,
+                        method="function_calling",
+                    )
+                    result = await structured_model.ainvoke(
+                        [
+                            {"role": "system", "content": QUERY_SEMANTIC_INTENT_SYSTEM_PROMPT},
+                            {
+                                "role": "user",
+                                "content": json.dumps(
+                                    {
+                                        "user_message": text,
+                                        "reference_now": self._now_factory().isoformat(),
+                                        "reference_timezone": BUSINESS_TIMEZONE,
+                                    },
+                                    ensure_ascii=False,
+                                ),
+                            },
+                        ]
+                    )
         except Exception as exc:
             # Provider SDKs and LangChain wrappers expose several different
             # exception classes across versions.  Normalize all ordinary

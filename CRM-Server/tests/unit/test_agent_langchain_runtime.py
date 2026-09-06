@@ -123,6 +123,51 @@ async def test_langchain_runtime_passes_explicit_model_transport_options():
 
 
 @pytest.mark.asyncio
+async def test_langchain_runtime_uses_managed_transport_for_default_chat_model(monkeypatch):
+    class FakeAgent:
+        async def ainvoke(self, payload):
+            return {"structured_response": {"value": "ok", "score": 90}}
+
+    transport = {
+        "http_client": object(),
+        "http_async_client": object(),
+    }
+    entered = []
+
+    class DefaultChatModel:
+        def __init__(self, **kwargs):
+            entered.append(kwargs)
+
+    class ManagedTransport:
+        async def __aenter__(self):
+            return transport
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(langchain_runtime, "ChatOpenAI", DefaultChatModel)
+    monkeypatch.setattr(langchain_runtime, "managed_ai_http_clients", lambda **kwargs: ManagedTransport())
+
+    runtime = AgentLangChainRuntime(
+        agent_factory=lambda **kwargs: FakeAgent(),
+    )
+
+    await runtime.ainvoke_structured(
+        api_host="https://ai.example.com/v1",
+        api_key="test-key",
+        model="test-model",
+        temperature=0.1,
+        system_prompt="system",
+        user_prompt="user",
+        response_model=SampleStructuredResult,
+        error_prefix="测试",
+    )
+
+    assert entered[0]["http_client"] is transport["http_client"]
+    assert entered[0]["http_async_client"] is transport["http_async_client"]
+
+
+@pytest.mark.asyncio
 async def test_langchain_runtime_supports_explicit_tool_structured_output_strategy():
     class FakeAgent:
         async def ainvoke(self, payload):

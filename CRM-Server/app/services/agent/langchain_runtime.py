@@ -5,6 +5,8 @@ from typing import Literal, Optional, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
+from app.services.ai_http_client import managed_ai_http_clients
+
 try:
     from langchain.agents import create_agent
 except Exception:  # pragma: no cover - optional production dependency
@@ -66,17 +68,20 @@ class AgentLangChainRuntime:
             }
             if enable_thinking is not None:
                 model_kwargs["extra_body"] = {"enable_thinking": enable_thinking}
-            chat_model = self.chat_model_factory(
-                **model_kwargs,
-            )
-            agent = self.agent_factory(
-                model=chat_model,
-                tools=tools or [],
-                system_prompt=system_prompt,
-                response_format=self._response_format(response_model, structured_output_strategy),
-                middleware=middleware or [],
-            )
-            response = await agent.ainvoke({"messages": [{"role": "user", "content": user_prompt}]})
+            use_managed_transport = self.chat_model_factory is ChatOpenAI
+            async with managed_ai_http_clients(enabled=use_managed_transport) as transport_kwargs:
+                chat_model = self.chat_model_factory(
+                    **model_kwargs,
+                    **transport_kwargs,
+                )
+                agent = self.agent_factory(
+                    model=chat_model,
+                    tools=tools or [],
+                    system_prompt=system_prompt,
+                    response_format=self._response_format(response_model, structured_output_strategy),
+                    middleware=middleware or [],
+                )
+                response = await agent.ainvoke({"messages": [{"role": "user", "content": user_prompt}]})
         except Exception as exc:
             raise RuntimeError(
                 f"{error_prefix} 调用失败：{exc.__class__.__name__}: {_safe_error_message(exc)}"

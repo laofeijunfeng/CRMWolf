@@ -13,12 +13,15 @@ from langchain_openai import ChatOpenAI
 from openai import APIError, APITimeoutError
 from pydantic import ValidationError
 
+from app.core.config import get_settings
+
 from app.services.agent.orchestrator.contracts import (
     RootContextSnapshot,
     RootDecision,
     RootRuntimeContext,
     RootTurnInput,
 )
+from app.services.ai_http_client import managed_ai_http_clients
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -101,8 +104,13 @@ class LangChainRootDecisionClassifier:
         self,
         *,
         chat_model_factory: Callable[..., Any] = ChatOpenAI,
-        timeout_seconds: float = 20.0,
+        timeout_seconds: float | None = None,
     ) -> None:
+        timeout_seconds = (
+            get_settings().AGENT_ROOT_DECISION_TIMEOUT
+            if timeout_seconds is None
+            else timeout_seconds
+        )
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
         self._chat_model_factory = chat_model_factory
@@ -133,11 +141,6 @@ class LangChainRootDecisionClassifier:
         }
         if model_config.enable_thinking is not None:
             model_kwargs["extra_body"] = {"enable_thinking": model_config.enable_thinking}
-        model = self._chat_model_factory(**model_kwargs)
-        structured_model = model.with_structured_output(
-            RootDecision,
-            method="function_calling",
-        )
         context_payload = context.model_dump(
             mode="json",
             exclude_none=True,
@@ -181,12 +184,19 @@ class LangChainRootDecisionClassifier:
         try:
             timeout_seconds = self._remaining_timeout(runtime)
             async with asyncio.timeout(timeout_seconds):
-                result = await structured_model.ainvoke(
-                    [
-                        {"role": "system", "content": ROOT_DECISION_SYSTEM_PROMPT},
-                        {"role": "user", "content": payload},
-                    ]
-                )
+                use_managed_transport = self._chat_model_factory is ChatOpenAI
+                async with managed_ai_http_clients(enabled=use_managed_transport) as transport_kwargs:
+                    model = self._chat_model_factory(**model_kwargs, **transport_kwargs)
+                    structured_model = model.with_structured_output(
+                        RootDecision,
+                        method="function_calling",
+                    )
+                    result = await structured_model.ainvoke(
+                        [
+                            {"role": "system", "content": ROOT_DECISION_SYSTEM_PROMPT},
+                            {"role": "user", "content": payload},
+                        ]
+                    )
         except (APITimeoutError, TimeoutError) as exc:
             raise RootDecisionModelUnavailableError(
                 "Root decision model request timed out",
