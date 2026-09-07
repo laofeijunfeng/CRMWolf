@@ -701,6 +701,7 @@ watchEffect(() => {
       height-strategy="fill"
       scroll-mode="contained"
       empty-title="暂无发票申请"
+      :empty-reason="effectiveFilters.length > 0 ? 'filtered' : activeTab === 'all' ? 'not-created' : 'no-data'"
       row-interactive
       detail-column-key="application_number"
       :get-row-label="(row) => `发票申请 ${row.application_number || row.id}`"

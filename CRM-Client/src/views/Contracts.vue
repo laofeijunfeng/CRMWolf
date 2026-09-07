@@ -625,6 +625,7 @@ watchEffect(() => {
       scroll-mode="contained"
       compact-pagination
       empty-title="暂无合同"
+      :empty-reason="effectiveFilters.length > 0 ? 'filtered' : activeTab === 'all' ? 'not-created' : 'no-data'"
       row-interactive
       detail-column-key="contract_name"
       :get-row-label="(row) => `合同 ${row.contract_name || row.id}`"

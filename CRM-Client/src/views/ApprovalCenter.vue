@@ -41,6 +41,7 @@
         height-strategy="fill"
         scroll-mode="contained"
         empty-title="暂无待审批事项"
+        :empty-reason="effectiveFilters.length > 0 ? 'filtered' : 'no-data'"
         empty-description="所有回款与发票申请都已处理完毕"
         mobile-mode="card"
         row-interactive

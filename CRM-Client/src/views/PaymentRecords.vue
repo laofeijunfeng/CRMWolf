@@ -547,6 +547,7 @@ watchEffect(() => {
       scroll-mode="contained"
       compact-pagination
       empty-title="暂无回款记录"
+      :empty-reason="effectiveFilters.length > 0 ? 'filtered' : activeTab === 'all' ? 'not-created' : 'no-data'"
       row-interactive
       detail-column-key="record_number"
       :get-row-label="(row) => `回款记录 ${row.record_number || row.id}`"

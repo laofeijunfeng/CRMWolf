@@ -620,6 +620,7 @@ watch(
       scroll-mode="contained"
       compact-pagination
       empty-title="暂无回款计划"
+      :empty-reason="effectiveFilters.length > 0 ? 'filtered' : activeTab === 'all' ? 'not-created' : 'no-data'"
       row-interactive
       detail-column-key="plan_number"
       :get-row-label="(row) => `回款计划 ${row.plan_number || row.id}`"

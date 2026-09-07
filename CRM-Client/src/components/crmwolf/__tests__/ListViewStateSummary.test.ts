@@ -33,6 +33,8 @@ describe('ListViewStateSummary', () => {
     expect(wrapper.text()).toContain('“Acme”')
     expect(wrapper.text()).toContain('排序：更新时间 ↓')
     expect(wrapper.text()).toContain('已隐藏 2 列')
+    expect(wrapper.get('.list-view-state-summary-filter').attributes('aria-label')).toBe('客户名称 包含 “Acme”')
+    expect(wrapper.get('.list-view-state-summary-filter').attributes('tabindex')).toBe('0')
   })
 
   it('emits a single-filter removal and clear-filters actions', async () => {

@@ -14,6 +14,7 @@
  * - 参考 shadcn-vue 官网顶部导航样式
  */
 import { computed } from 'vue'
+import type { TabItem } from '@/stores/header'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -27,27 +28,6 @@ import { cn } from '@/lib/utils'
 import { ArrowLeftToLine, MoreVertical, Pencil, Trash2 } from 'lucide-vue-next'
 
 // ==================== Types ====================
-interface TabItem {
-  /** Tab 唯一标识 */
-  key: string
-  /** Tab 显示文字 */
-  label: string
-  /** 是否禁用 */
-  disabled?: boolean
-  /** 徽标内容（如待办数量） */
-  badge?: number | string
-  /** 是否为用户自定义视图 */
-  isCustomView?: boolean
-  /** 自定义视图 ID */
-  customViewId?: number
-  /** 重命名处理 */
-  onRename?: () => void
-  /** 移到最前处理 */
-  onMoveToFirst?: () => void
-  /** 删除处理 */
-  onDelete?: () => void
-}
-
 interface Props {
   /** Tab 列表 */
   tabs: TabItem[]
@@ -68,6 +48,25 @@ const emit = defineEmits<{
 const activeTabKey = computed(() => props.activeTab)
 
 // ==================== Methods ====================
+function isCustomView(tab: TabItem): boolean {
+  return tab.viewKind === 'custom' || tab.isCustomView === true
+}
+
+function getViewKind(tab: TabItem): 'built-in' | 'custom' {
+  return isCustomView(tab) ? 'custom' : 'built-in'
+}
+
+function isGroupStart(tab: TabItem, index: number): boolean {
+  if (index === 0) return false
+  const previous = props.tabs[index - 1]
+  return previous !== undefined && getViewKind(previous) !== getViewKind(tab)
+}
+
+function getTabAriaLabel(tab: TabItem): string {
+  const kindLabel = isCustomView(tab) ? '我的视图' : '系统视图'
+  return `${kindLabel}：${tab.label}`
+}
+
 function handleTabChange(key: string): void {
   if (key === activeTabKey.value) return
   emit('update:activeTab', key)
@@ -79,7 +78,7 @@ function hasBadge(badge: number | string | undefined): boolean {
 }
 
 function hasCustomMenu(tab: TabItem): boolean {
-  return tab.isCustomView === true
+  return isCustomView(tab)
 }
 
 function handleRename(tab: TabItem): void {
@@ -103,15 +102,19 @@ function handleDelete(tab: TabItem): void {
   >
     <TabsList class="tabs-list-underline">
       <div
-        v-for="tab in tabs"
+        v-for="(tab, index) in tabs"
         :key="tab.key"
         class="tabs-item"
-        :class="{ 'tabs-item--custom': hasCustomMenu(tab) }"
+        :class="{
+          'tabs-item--custom': hasCustomMenu(tab),
+          'tabs-item--group-start': isGroupStart(tab, index),
+        }"
       >
         <TabsTrigger
           :value="tab.key"
           :disabled="tab.disabled ?? false"
           class="tabs-trigger-underline"
+          :aria-label="getTabAriaLabel(tab)"
         >
           <span class="tab-trigger-content">
             {{ tab.label }}
@@ -201,6 +204,14 @@ function handleDelete(tab: TabItem): void {
   align-items: center;
   min-width: 0;
   border-radius: $wolf-radius-v2;
+}
+
+// Keep the visual grouping cue outside the tab trigger's focus/selection surface.
+// A pseudo-element avoids adding a non-tab node to Radix's tab list children.
+.tabs-item--group-start {
+  margin-left: $wolf-space-sm-v2;
+  padding-left: $wolf-space-sm-v2;
+  border-left: 1px solid $wolf-border-light-v2;
 }
 
 .tabs-item--custom {

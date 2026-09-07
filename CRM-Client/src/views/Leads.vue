@@ -661,6 +661,7 @@ watchEffect(() => {
       height-strategy="fill"
       scroll-mode="contained"
       empty-title="暂无线索"
+      :empty-reason="activeFilters.length > 0 ? 'filtered' : activeTab === 'all' ? 'not-created' : 'no-data'"
       row-interactive
       detail-column-key="lead_name"
       :get-row-label="(row) => `线索 ${row.lead_name || row.id}`"

@@ -70,6 +70,7 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
   const committedViewSnapshot = ref<ViewApplySnapshot | null>(null)
   const pendingViewApply = ref<PendingViewApply | null>(null)
   let viewApplySequence = 0
+  let ignoreNextStateChange = false
 
   interface ViewApplySnapshot {
     activeTab: string
@@ -115,17 +116,39 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
     return cloneSnapshot(committedViewSnapshot.value)
   }
 
-  function restoreSnapshot(snapshot: ViewApplySnapshot): void {
+  function restoreSnapshot(snapshot: ViewApplySnapshot, suppressStateWatch = false): void {
+    if (suppressStateWatch) ignoreNextStateChange = true
     options.activeTab.value = snapshot.activeTab
     options.activeFilters.value = cloneFilters(snapshot.filters)
     options.activeSorts.value = snapshot.sorts.map((sort) => ({ ...sort }))
     options.activeColumns.value = snapshot.columns.map((column) => ({ ...column }))
   }
 
+  function snapshotsEqual(left: ViewApplySnapshot, right: ViewApplySnapshot): boolean {
+    return JSON.stringify(left) === JSON.stringify(right)
+  }
+
   watch(
     [options.activeTab, options.activeFilters, options.activeSorts, options.activeColumns],
     () => {
-      if (applying.value) return
+      if (ignoreNextStateChange) {
+        ignoreNextStateChange = false
+        return
+      }
+      if (applying.value) {
+        const pending = pendingViewApply.value
+        if (pending !== null && !snapshotsEqual(captureCurrentSnapshot(), pending.target)) {
+          // 用户在视图应用期间手动修改了筛选/排序/字段配置。
+          // 这次修改优先于过期请求，避免 refresh() 将“请求过期”误判为应用失败并回滚用户输入。
+          viewApplySequence += 1
+          applying.value = false
+          pendingViewApply.value = null
+          applyError.value = null
+          failedViewTab.value = null
+          committedViewSnapshot.value = captureCurrentSnapshot()
+        }
+        return
+      }
       committedViewSnapshot.value = captureCurrentSnapshot()
     },
     { deep: true },
@@ -146,6 +169,7 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
       key: buildTabKey(view.id),
       label: view.name ?? '未命名视图',
       isCustomView: true,
+      viewKind: 'custom',
       customViewId: view.id,
       onMoveToFirst: (): void => {
         void moveCustomViewToFirst(view)
@@ -216,7 +240,13 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
       .filter((view) => view.sort_order === null)
       .map((view) => buildCustomViewTab(view))
 
-    return [...pinnedTabs, ...builtInTabs, ...normalTabs]
+    const normalizedBuiltInTabs: TabItem[] = builtInTabs.map((tab) => ({
+      ...tab,
+      viewKind: 'built-in' as const,
+      isCustomView: false,
+    }))
+
+    return [...pinnedTabs, ...normalizedBuiltInTabs, ...normalTabs]
   }
 
   async function updateActiveCustomViewConfig(): Promise<void> {
@@ -245,7 +275,7 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
       const result = await options.refresh()
       if (sequence !== viewApplySequence) return
       if (result === false) {
-        restoreSnapshot(previous)
+        restoreSnapshot(previous, true)
         applyError.value = viewApplyFailure()
         failedViewTab.value = target.activeTab
         pendingViewApply.value = { target: cloneSnapshot(target), previous: cloneSnapshot(previous) }
@@ -256,7 +286,7 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
       }
     } catch {
       if (sequence !== viewApplySequence) return
-      restoreSnapshot(previous)
+      restoreSnapshot(previous, true)
       applyError.value = viewApplyFailure()
       failedViewTab.value = target.activeTab
       pendingViewApply.value = { target: cloneSnapshot(target), previous: cloneSnapshot(previous) }

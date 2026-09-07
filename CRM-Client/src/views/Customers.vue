@@ -1097,6 +1097,7 @@ watchEffect(() => {
       scroll-mode="contained"
       compact-pagination
       empty-title="暂无客户"
+      :empty-reason="activeFilters.length > 0 ? 'filtered' : activeTab === 'all' ? 'not-created' : 'no-data'"
       row-interactive
       detail-column-key="account_name"
       :get-row-label="(row) => `客户 ${row.account_name || row.id}`"

@@ -69,6 +69,20 @@ describe('DataTable feedback states', () => {
     expect(wrapper.emitted('retry')).toHaveLength(1)
   })
 
+  it('uses the not-created copy when an unfiltered business list is empty', () => {
+    const wrapper = mount(DataTable, {
+      props: {
+        ...baseProps,
+        data: [],
+        emptyTitle: '暂无客户',
+        emptyReason: 'not-created',
+      },
+    })
+
+    expect(wrapper.text()).toContain('暂无客户')
+    expect(wrapper.text()).toContain('创建第一条记录后，它会显示在这里')
+  })
+
   it('uses the filtered empty-state copy when filters are active', async () => {
     const wrapper = mount(DataTable, {
       props: {

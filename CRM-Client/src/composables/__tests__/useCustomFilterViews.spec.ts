@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import { useCustomFilterViews } from '../useCustomFilterViews'
 import { viewPreferenceApi } from '@/api/viewPreference'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
@@ -141,10 +141,14 @@ describe('useCustomFilterViews', () => {
     await Promise.resolve()
 
     expect(viewPreferenceApi.updateCustomView).toHaveBeenCalledWith('customers.list', 2, { sort_order: -1 })
-    expect(customFilterViews.mergeTabs([
-      { key: 'all', label: '所有客户' },
+    const mergedTabs = customFilterViews.mergeTabs([
+      { key: 'all', label: '所有客户', isCustomView: true, viewKind: 'custom' },
       { key: 'public', label: '公海客户' },
-    ]).map((tab) => tab.label)).toEqual(['视图 2', '所有客户', '公海客户', '视图 1'])
+    ])
+
+    expect(mergedTabs.map((tab) => tab.label)).toEqual(['视图 2', '所有客户', '公海客户', '视图 1'])
+    expect(mergedTabs.map((tab) => tab.viewKind)).toEqual(['custom', 'built-in', 'built-in', 'custom'])
+    expect(mergedTabs.slice(1, 3).every((tab) => tab.isCustomView === false)).toBe(true)
   })
 
   it('saves column config into the active custom view', async () => {
@@ -258,6 +262,40 @@ describe('useCustomFilterViews', () => {
     expect(customFilterViews.applyError.value).toBeNull()
     expect(customFilterViews.applying.value).toBe(false)
     expect(refresh).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps manual state when a custom-view request becomes stale after user edits', async () => {
+    const activeTab = ref('all')
+    const activeFilters = ref<ListFilterCondition[]>([])
+    const activeSorts = ref<ListSortCondition[]>([])
+    const activeColumns = ref<ViewPreferenceItem['config']['columns']>([])
+    let resolveRequest: (value: boolean) => void = () => undefined
+    const request = new Promise<boolean>((resolve) => {
+      resolveRequest = resolve
+    })
+    const refresh = vi.fn().mockReturnValue(request)
+    const customFilterViews = useCustomFilterViews({
+      viewKey: 'customers.list',
+      activeTab,
+      activeFilters,
+      activeSorts,
+      activeColumns,
+      refresh,
+    })
+    customFilterViews.customViews.value = [customView]
+
+    customFilterViews.applyCustomViewTab('custom-view:1')
+    const manualFilter = { field: 'owner_id', op: 'eq', value: 7 } as ListFilterCondition
+    activeFilters.value = [manualFilter]
+    await nextTick()
+    resolveRequest(false)
+    await nextTick()
+    await nextTick()
+
+    expect(activeTab.value).toBe('custom-view:1')
+    expect(activeFilters.value).toEqual([manualFilter])
+    expect(customFilterViews.applyError.value).toBeNull()
+    expect(customFilterViews.applying.value).toBe(false)
   })
 
   it('cancels an in-flight custom-view apply when switching to a built-in tab', async () => {

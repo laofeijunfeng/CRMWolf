@@ -830,6 +830,7 @@ watchEffect(() => {
       :get-row-label="(row) => `客户跟进 ${row.customer_name || row.public_id}`"
       :get-row-actions="getRowActions"
       empty-title="暂无客户追踪"
+      :empty-reason="effectiveFilters.length > 0 ? 'filtered' : 'no-data'"
       mobile-title-key="customer_name"
       mobile-subtitle-key="tracking_content"
       mobile-status-key="status_label"
@@ -865,12 +866,14 @@ watchEffect(() => {
 
       <template #cell-tracking_content="{ row }">
         <div class="tracking-content-cell">
-          <HoverInfo side="top" align="start" content-class="tracking-content-hover-card">
-            <template #trigger>
-              <span class="tracking-content">{{ row.tracking_content }}</span>
-            </template>
-            <div class="tracking-content-hover-text">{{ row.tracking_content }}</div>
-          </HoverInfo>
+          <button
+            type="button"
+            class="tracking-content-trigger"
+            :aria-label="`查看客户追踪详情，追踪内容：${row.tracking_content}`"
+            @click.stop="openDetail(row)"
+          >
+            <span class="tracking-content">{{ row.tracking_content }}</span>
+          </button>
           <div
             v-if="firstPendingConfirmation(row)"
             class="tracking-confirmation-inline"
@@ -971,6 +974,20 @@ watchEffect(() => {
                 <span class="tracking-confirmation-label">需确认</span>
                 <p class="tracking-confirmation-detail-question">{{ selectedPendingConfirmation.question_text }}</p>
               </div>
+
+              <Card class="tracking-info-card">
+                <CardContent class="p-0">
+                  <div class="tracking-card-header">
+                    <h3 class="tracking-card-title">追踪内容</h3>
+                  </div>
+                  <div class="tracking-card-body">
+                    <p class="tracking-description">{{ selectedTask.title || '-' }}</p>
+                    <p v-if="selectedTask.description" class="tracking-description tracking-description--secondary">
+                      {{ selectedTask.description }}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
 
               <Card class="tracking-info-card">
                 <CardContent class="p-0">
@@ -1139,6 +1156,32 @@ watchEffect(() => {
 
   &:hover {
     color: $wolf-text-link-hover-v2;
+  }
+}
+
+.tracking-content-trigger {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover .tracking-content,
+  &:focus-visible .tracking-content {
+    color: $wolf-text-link-hover-v2;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  &:focus-visible {
+    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
+    outline-offset: $wolf-focus-ring-offset-v2;
+    border-radius: $wolf-radius-v2;
   }
 }
 
@@ -1391,6 +1434,13 @@ watchEffect(() => {
   line-height: $wolf-line-height-body-v2;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+.tracking-description--secondary {
+  margin-top: $wolf-space-sm-v2;
+  color: $wolf-text-tertiary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  font-weight: 400;
 }
 
 .tracking-attributes-grid {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { Settings2 } from 'lucide-vue-next'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import TableToolbarButton from './TableToolbarButton.vue'
@@ -8,7 +9,7 @@ import type { ViewPreferenceScope } from '@/api/viewPreference'
 import type { ColumnConfigOption } from './columnConfigTypes'
 import type { ListSortCondition, ListSortField } from './listSortTypes'
 
-defineProps<{
+const props = defineProps<{
   sorts: ListSortCondition[]
   sortFields: ListSortField[]
   columns: ColumnConfigOption[]
@@ -29,6 +30,13 @@ const emit = defineEmits<{
   'column-config-save': [value: ViewPreferenceScope]
   'column-config-reset': []
 }>()
+
+const advancedToolsAriaLabel = computed(() => {
+  const parts: string[] = ['更多列表设置']
+  if (props.sorts.length > 0) parts.push(`排序 ${props.sorts.length} 项`)
+  if (props.columnConfigActiveCount > 0) parts.push(`已隐藏 ${props.columnConfigActiveCount} 列`)
+  return parts.join('，')
+})
 </script>
 
 <template>
@@ -37,7 +45,7 @@ const emit = defineEmits<{
       <TableToolbarButton
         :active="sorts.length > 0 || columnConfigActive || columnConfigActiveCount > 0"
         :count="sorts.length + columnConfigActiveCount"
-        aria-label="更多列表设置"
+        :aria-label="advancedToolsAriaLabel"
       >
         <Settings2 class="h-4 w-4" aria-hidden="true" />
         <span>更多设置</span>

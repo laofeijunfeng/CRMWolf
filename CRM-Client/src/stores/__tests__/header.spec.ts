@@ -231,11 +231,11 @@ describe('header store', () => {
       const secondRename = vi.fn()
 
       store.setTabs([
-        { key: 'custom-view:1', label: '视图 1', isCustomView: true, customViewId: 1, onRename: firstRename }
+        { key: 'custom-view:1', label: '视图 1', isCustomView: true, viewKind: 'custom', customViewId: 1, onRename: firstRename }
       ], 'custom-view:1')
       const previousTabs = store.tabs
       store.setTabs([
-        { key: 'custom-view:1', label: '视图 1', isCustomView: true, customViewId: 1, onRename: secondRename }
+        { key: 'custom-view:1', label: '视图 1', isCustomView: true, viewKind: 'custom', customViewId: 1, onRename: secondRename }
       ], 'custom-view:1')
 
       expect(store.tabs).toBe(previousTabs)

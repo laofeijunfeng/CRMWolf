@@ -36,6 +36,8 @@ export interface TabItem {
   badge?: number | string
   /** 是否为用户自定义视图 */
   isCustomView?: boolean
+  /** 视图来源，用于区分系统预设与用户保存的视图 */
+  viewKind?: 'built-in' | 'custom'
   /** 自定义视图 ID */
   customViewId?: number
   /** 重命名处理 */
@@ -71,6 +73,7 @@ const areTabsEqual = (left: TabItem[] | null, right: TabItem[] | null): boolean 
       tab.disabled === nextTab.disabled &&
       tab.badge === nextTab.badge &&
       tab.isCustomView === nextTab.isCustomView &&
+      tab.viewKind === nextTab.viewKind &&
       tab.customViewId === nextTab.customViewId
   })
 }

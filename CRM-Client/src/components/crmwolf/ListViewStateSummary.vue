@@ -20,6 +20,12 @@ const emit = defineEmits<{
   'clear-filters': []
   'retry-view-apply': []
 }>()
+
+function getFilterSummaryTitle(filter: FilterSummaryItem): string {
+  return filter.valueLabel !== null && filter.valueLabel !== ''
+    ? `${filter.fieldLabel} ${filter.operatorLabel} “${filter.valueLabel}”`
+    : `${filter.fieldLabel} ${filter.operatorLabel}`
+}
 </script>
 
 <template>
@@ -33,6 +39,10 @@ const emit = defineEmits<{
           v-for="filter in filters"
           :key="filter.id"
           class="list-view-state-summary-filter"
+          :title="getFilterSummaryTitle(filter)"
+          :aria-label="getFilterSummaryTitle(filter)"
+          role="group"
+          tabindex="0"
         >
           <span>{{ filter.fieldLabel }} {{ filter.operatorLabel }}</span>
           <span v-if="filter.valueLabel" class="list-view-state-summary-value">“{{ filter.valueLabel }}”</span>
@@ -148,6 +158,11 @@ const emit = defineEmits<{
 .list-view-state-summary-filter > span {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.list-view-state-summary-filter:focus-visible {
+  outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
+  outline-offset: $wolf-focus-ring-offset-v2;
 }
 
 .list-view-state-summary-value {
