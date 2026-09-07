@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.core.list_query.catalog import ListQueryCatalog, ListQueryField
-from app.core.list_query.catalogs.common import person_field, source_field
+from app.core.list_query.catalogs.common import person_field, source_field, text_search_predicate
 from app.core.list_query.types import SortCondition
 from app.models.lead import CompanyScale, Lead, LeadStatus
 
@@ -42,4 +42,9 @@ LEADS_LIST_QUERY_CATALOG = ListQueryCatalog(
         ),
     ],
     default_sorts=[SortCondition(field="created_time", direction="desc")],
+    search_predicate=text_search_predicate(
+        Lead.lead_name,
+        Lead.contact_name,
+        Lead.contact_phone,
+    ),
 )

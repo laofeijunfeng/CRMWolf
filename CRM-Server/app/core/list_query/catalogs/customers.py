@@ -7,6 +7,7 @@ from app.core.list_query.catalogs.common import (
     customer_license_status_expression,
     person_field,
     source_field,
+    text_search_predicate,
     user_name_expression,
 )
 from app.core.list_query.types import JoinSpec, SortCondition
@@ -78,4 +79,5 @@ CUSTOMERS_LIST_QUERY_CATALOG = ListQueryCatalog(
         ListQueryField(key="returned_time", type="date", expression=Customer.returned_time),
     ],
     default_sorts=[SortCondition(field="created_time", direction="desc")],
+    search_predicate=text_search_predicate(include_customer_identity_terms=True),
 )

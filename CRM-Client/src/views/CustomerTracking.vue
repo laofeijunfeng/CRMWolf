@@ -93,6 +93,12 @@ const detailTriggerIndex = ref(-1)
 const focusedDetailTrigger = ref<HTMLElement | null>(null)
 
 const activeTab = ref<string>('open')
+
+const search = ref('')
+
+watch(activeTab, () => {
+  search.value = ''
+}, { flush: 'sync' })
 const activeFilters = ref<ListFilterCondition[]>([])
 const activeSorts = ref<ListSortCondition[]>([])
 const activeColumns = ref<ViewPreferenceConfig['columns']>([])
@@ -205,6 +211,7 @@ async function fetchTasks(): Promise<boolean> {
       owner_scope: 'mine',
       skip: (page.value - 1) * pageSize.value,
       limit: pageSize.value,
+      ...(search.value.trim() !== '' ? { search: search.value.trim() } : {}),
       ...serializeListQuery({ filters: effectiveFilters, sorts: activeSorts.value })
     })
     // A list request started before a transition may finish after the
@@ -741,6 +748,18 @@ function handleFilterReset(): void {
   void fetchTasks()
 }
 
+const handleSearchApply = (value: string): void => {
+  search.value = value.trim()
+  page.value = 1
+  void fetchTasks()
+}
+
+const handleSearchClear = (): void => {
+  search.value = ''
+  page.value = 1
+  void fetchTasks()
+}
+
 function handleSortReset(): void {
   activeSorts.value = []
   page.value = 1
@@ -830,7 +849,7 @@ watchEffect(() => {
       :get-row-label="(row) => `客户跟进 ${row.customer_name || row.public_id}`"
       :get-row-actions="getRowActions"
       empty-title="暂无客户追踪"
-      :empty-reason="effectiveFilters.length > 0 ? 'filtered' : 'no-data'"
+      :empty-reason="search.trim() !== '' || effectiveFilters.length > 0 ? 'filtered' : 'no-data'"
       mobile-title-key="customer_name"
       mobile-subtitle-key="tracking_content"
       mobile-status-key="status_label"
@@ -849,6 +868,12 @@ watchEffect(() => {
       :filter-view-save-loading="customFilterViews.saving.value"
       @update:page="page = $event; fetchTasks()"
       @update:page-size="pageSize = $event; page = 1; fetchTasks()"
+      v-model:search="search"
+      search-enabled
+      search-placeholder="搜索客户或跟进内容"
+      :search-loading="loading"
+      @search-apply="handleSearchApply"
+      @search-clear="handleSearchClear"
       @filter-apply="handleFilterApply"
       @filter-reset="handleFilterReset"
       @filter-save-view="customFilterViews.saveAsCustomView"

@@ -199,6 +199,7 @@ export interface PaymentPlanListParams {
   status_exclude?: string
   owner_id?: string
   keyword?: string
+  search?: string
   me?: boolean
   due_date_start?: string
   due_date_end?: string
@@ -235,6 +236,7 @@ export interface PaymentRecordListParams {
   actual_amount?: number
   creator_id?: string
   keyword?: string
+  search?: string
   record_number?: string
   record_number_exclude?: string
   customer_name?: string

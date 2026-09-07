@@ -6,6 +6,7 @@ from app.core.list_query.catalogs.common import (
     approval_entity_amount_expression,
     approval_entity_name_expression,
     approval_overdue_hours_expression,
+    text_search_predicate,
 )
 from app.core.list_query.types import SortCondition
 from app.models.approval import Approval
@@ -39,4 +40,9 @@ APPROVALS_LIST_QUERY_CATALOG = ListQueryCatalog(
         ),
     ],
     default_sorts=[SortCondition(field="created_time", direction="desc")],
+    search_predicate=text_search_predicate(
+        approval_application_number_expression(),
+        approval_entity_name_expression(),
+        Approval.submitter_name,
+    ),
 )

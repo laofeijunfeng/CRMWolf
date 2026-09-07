@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.core.list_query.catalog import ListQueryCatalog, ListQueryField
-from app.core.list_query.catalogs.common import case_order, keyword_predicate
+from app.core.list_query.catalogs.common import case_order, keyword_predicate, text_search_predicate
 from app.core.list_query.types import SortCondition
 from app.models.contract import Contract
 from app.models.customer import Customer
@@ -43,4 +43,11 @@ PAYMENT_PLANS_LIST_QUERY_CATALOG = ListQueryCatalog(
         ),
     ],
     default_sorts=[SortCondition(field="due_date", direction="asc")],
+    search_predicate=text_search_predicate(
+        PaymentPlan.plan_number,
+        PaymentPlan.stage_name,
+        Contract.contract_name,
+        Opportunity.opportunity_name,
+        include_customer_identity_terms=True,
+    ),
 )

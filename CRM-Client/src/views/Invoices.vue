@@ -15,7 +15,7 @@
  * - ✅ V2 Design Tokens
  * - ✅ Flexbox 高度管理
  */
-import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
+import { ref, reactive, computed, onMounted, watch, watchEffect } from 'vue'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Eye, Pencil, Trash2, Send, RotateCcw, Stamp, Download } from 'lucide-vue-next'
@@ -88,6 +88,12 @@ const tabs = [
 ]
 
 const activeTab = ref('all')
+
+const search = ref('')
+
+watch(activeTab, () => {
+  search.value = ''
+}, { flush: 'sync' })
 
 // ==================== 列表字段注册表 ====================
 const invoiceTypeOptions = [
@@ -199,6 +205,7 @@ const fetchInvoiceApplications = async (): Promise<boolean> => {
       page: pagination.current,
       page_size: pagination.pageSize,
       ...(tabStatus !== null ? { status: tabStatus } : {}),
+      ...(search.value.trim() !== '' ? { search: search.value.trim() } : {}),
       ...serializeListQuery({ filters: effectiveFilters, sorts: activeSorts.value })
     }
 
@@ -274,6 +281,18 @@ const handleReset = (): void => {
   activeFilters.value = []
   pagination.current = 1
   fetchInvoiceApplications()
+}
+
+const handleSearchApply = (value: string): void => {
+  search.value = value.trim()
+  pagination.current = 1
+  void fetchInvoiceApplications()
+}
+
+const handleSearchClear = (): void => {
+  search.value = ''
+  pagination.current = 1
+  void fetchInvoiceApplications()
 }
 
 const handleSortApply = (sorts: ListSortCondition[]): void => {
@@ -701,7 +720,7 @@ watchEffect(() => {
       height-strategy="fill"
       scroll-mode="contained"
       empty-title="暂无发票申请"
-      :empty-reason="effectiveFilters.length > 0 ? 'filtered' : activeTab === 'all' ? 'not-created' : 'no-data'"
+      :empty-reason="search.trim() !== '' || effectiveFilters.length > 0 ? 'filtered' : activeTab === 'all' ? 'not-created' : 'no-data'"
       row-interactive
       detail-column-key="application_number"
       :get-row-label="(row) => `发票申请 ${row.application_number || row.id}`"
@@ -724,6 +743,12 @@ watchEffect(() => {
       :filter-view-save-loading="customFilterViewSaving"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
+      v-model:search="search"
+      search-enabled
+      search-placeholder="搜索申请编号、客户、合同、抬头、税号或发票号码"
+      :search-loading="loading"
+      @search-apply="handleSearchApply"
+      @search-clear="handleSearchClear"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
       @filter-save-view="handleSaveFilterView"

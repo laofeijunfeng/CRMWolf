@@ -166,6 +166,7 @@ export interface ContractQueryParams {
   standard_unit_price_exclude?: number | null
   contract_number?: string | null
   keyword?: string | null
+  search?: string | null
   customer_keyword?: string | null
   opportunity_keyword?: string | null
   owner_id?: string | null  // 新增：负责人ID筛选（用于「我的合同」）

@@ -75,6 +75,7 @@ export interface LeadListParams {
   skip?: number
   limit?: number
   keyword?: string
+  search?: string
   filters?: string | null
   sorts?: string
   status?: number

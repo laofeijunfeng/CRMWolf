@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol
 
-from app.core.list_query import FilterCondition, SortCondition
+from app.core.list_query import FilterCondition, ListQueryContext, SortCondition, apply_search
+from app.core.list_query.catalogs import FOLLOW_UP_TASKS_LIST_QUERY_CATALOG
 from app.crud.permission import permission_crud
 from app.crud.sales_commitment import follow_up_task_confirmation_case_crud, follow_up_task_crud
 from app.models.customer import Customer, CustomerMember
@@ -75,6 +76,7 @@ class FollowUpTaskQueryService:
         owner_scope: str = "mine",
         query_text: str | None = None,
         retrieval_mode: str | None = None,
+        search: str | None = None,
         skip: int = 0,
         limit: int = 50,
         filters: list[FilterCondition] | None = None,
@@ -119,6 +121,7 @@ class FollowUpTaskQueryService:
             limit=limit,
             filters=filters,
             sorts=sorts,
+            search=search,
             semantic_task_public_ids=semantic_task_public_ids,
         )
 
@@ -255,6 +258,7 @@ class FollowUpTaskQueryService:
         limit: int,
         filters: list[FilterCondition] | None,
         sorts: list[SortCondition] | None,
+        search: str | None,
         semantic_task_public_ids: list[str] | None,
     ) -> tuple[list[FollowUpTask], int]:
         if semantic_task_public_ids == []:
@@ -272,6 +276,7 @@ class FollowUpTaskQueryService:
                     limit=limit,
                     filters=filters,
                     sorts=sorts,
+                    search=search,
                 )
             return follow_up_task_crud.list_for_owner(
                 db,
@@ -284,6 +289,7 @@ class FollowUpTaskQueryService:
                 limit=limit,
                 filters=filters,
                 sorts=sorts,
+                search=search,
             )
 
         query = db.query(FollowUpTask).filter(
@@ -298,6 +304,12 @@ class FollowUpTaskQueryService:
             query = query.filter(FollowUpTask.owner_id == str(user_id))
             if customer_id is not None:
                 query = query.filter(FollowUpTask.customer_id == customer_id)
+        query = apply_search(
+            query,
+            FOLLOW_UP_TASKS_LIST_QUERY_CATALOG,
+            search,
+            context=ListQueryContext(db=db, team_id=team_id, current_user_id=str(user_id)),
+        )
         query = follow_up_task_crud._apply_task_filters(
             query,
             statuses=None,

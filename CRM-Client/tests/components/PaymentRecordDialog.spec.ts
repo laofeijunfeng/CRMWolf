@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
 import PaymentRecordDialog from '@/components/dialogs/PaymentRecordDialog.vue'
+import { handleApiError } from '@/utils/errorHandler'
 
 const mocks = vi.hoisted(() => ({
   confirmDialog: vi.fn(),
@@ -196,6 +197,19 @@ function findButton(wrapper: ReturnType<typeof mount>, label: string) {
   return button
 }
 
+async function openSupplementArea(wrapper: ReturnType<typeof mount>) {
+  await wrapper.get('button.payment-record-dialog__supplement-trigger').trigger('click')
+}
+
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve
+  })
+  return { promise, resolve }
+}
+
 describe('PaymentRecordDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -215,6 +229,7 @@ describe('PaymentRecordDialog', () => {
     expect((wrapper.get('input[name="actual_amount"]').element as HTMLInputElement).value).toBe('1234.56')
 
     await wrapper.get('input[name="payment_date"]').setValue('2026-07-16')
+    await openSupplementArea(wrapper)
     await wrapper.get('input[name="proof_attachment"]').setValue('https://example.com/proof.pdf')
     await wrapper.get('textarea[name="notes"]').setValue('首笔回款')
     await wrapper.get('form').trigger('submit')
@@ -253,7 +268,7 @@ describe('PaymentRecordDialog', () => {
     expect(wrapper.findAll('[role="alert"]')).toHaveLength(3)
   })
 
-  it('加载并展示回款计划上下文', async () => {
+  it('用紧凑摘要展示回款计划上下文并折叠低频信息', async () => {
     mocks.getPaymentPlanDetail.mockResolvedValue({
       id: 18,
       customer_id: 'customer-1',
@@ -277,11 +292,116 @@ describe('PaymentRecordDialog', () => {
     })
     await flushPromises()
 
+    expect(wrapper.text()).toContain('客户')
     expect(wrapper.text()).toContain('飞驰科技')
     expect(wrapper.text()).toContain('年度服务合同')
+    expect(wrapper.text()).toContain('首付款')
+    expect(wrapper.text()).toContain('部分回款')
+    expect(wrapper.text()).toContain('待回款')
+    expect(wrapper.text()).toContain('¥70,000.00')
+
+    const detailsTrigger = wrapper.get('button.selection-summary__details-trigger')
+    expect(detailsTrigger.attributes('aria-expanded')).toBe('false')
+    await detailsTrigger.trigger('click')
+
+    expect(detailsTrigger.attributes('aria-expanded')).toBe('true')
+    expect(wrapper.text()).toContain('计划编号')
     expect(wrapper.text()).toContain('PP-2026-0018')
-    expect(wrapper.text()).toContain('当前状态：部分回款')
+    expect(wrapper.text()).toContain('计划金额')
+    expect(wrapper.text()).toContain('¥100,000.00')
     expect(mocks.getCustomerMemberCandidates).toHaveBeenCalledWith('customer-1')
+  })
+
+  it('上下文加载时保持弹窗结构稳定并允许表单先呈现', async () => {
+    const plan = {
+      id: 18,
+      customer_id: 'customer-1',
+      customer_name: '飞驰科技',
+      contract_name: '年度服务合同',
+      stage_name: '首付款',
+      plan_number: 'PP-2026-0018',
+      planned_amount: 100000,
+      paid_amount: 30000,
+      remaining_amount: 70000,
+      status: 'PARTIAL',
+    }
+    const planDeferred = createDeferred<typeof plan>()
+    const membersDeferred = createDeferred<[]>()
+    mocks.getPaymentPlanDetail.mockReturnValue(planDeferred.promise)
+    mocks.getCustomerMemberCandidates.mockReturnValue(membersDeferred.promise)
+
+    const wrapper = mount(PaymentRecordDialog, {
+      props: {
+        open: true,
+        paymentPlanId: 18,
+        defaultAmount: 70000,
+        defaultPayerName: '飞驰科技',
+      },
+    })
+    await nextTick()
+
+    const loadingSummary = wrapper.get('.selection-summary[role="status"]')
+    expect(loadingSummary.attributes('aria-busy')).toBe('true')
+    expect(loadingSummary.attributes('aria-label')).toBe('正在加载回款计划上下文')
+    expect(wrapper.findAll('.selection-summary__skeleton-value')).toHaveLength(5)
+    expect(wrapper.get('input[name="actual_amount"]').exists()).toBe(true)
+    expect(wrapper.find('.selection-summary__details-trigger').exists()).toBe(false)
+
+    planDeferred.resolve(plan)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('飞驰科技')
+    expect(wrapper.text()).toContain('¥70,000.00')
+    expect(wrapper.find('.selection-summary__skeleton-value').exists()).toBe(false)
+    expect(wrapper.get('button.selection-summary__details-trigger').exists()).toBe(true)
+
+    membersDeferred.resolve([])
+    await flushPromises()
+  })
+
+  it('上下文加载失败时使用统一反馈且不重复 toast', async () => {
+    mocks.getPaymentPlanDetail.mockRejectedValue(Object.assign(new Error('server error'), {
+      response: { status: 500 },
+    }))
+
+    const wrapper = mount(PaymentRecordDialog, {
+      props: {
+        open: true,
+        paymentPlanId: 18,
+        defaultAmount: 70000,
+        defaultPayerName: '飞驰科技',
+      },
+    })
+    await flushPromises()
+
+    const alert = wrapper.get('[role="alert"].feedback-alert')
+    expect(alert.text()).toContain('回款计划和团队成员加载失败')
+    expect(alert.text()).toContain('服务器暂时无法处理请求')
+    expect(handleApiError).not.toHaveBeenCalled()
+
+    await wrapper.get('.feedback-alert button').trigger('click')
+    await flushPromises()
+
+    expect(mocks.getPaymentPlanDetail).toHaveBeenCalledTimes(2)
+  })
+
+  it('将可选回款信息放入补充信息折叠区', async () => {
+    const wrapper = mount(PaymentRecordDialog, {
+      props: {
+        open: true,
+        defaultAmount: 5000,
+        defaultPayerName: '测试客户',
+      },
+    })
+
+    const supplementTrigger = wrapper.get('button.payment-record-dialog__supplement-trigger')
+    expect(supplementTrigger.attributes('aria-expanded')).toBe('false')
+
+    await supplementTrigger.trigger('click')
+
+    expect(supplementTrigger.attributes('aria-expanded')).toBe('true')
+    expect(wrapper.find('input[name="proof_attachment"]').exists()).toBe(true)
+    expect(wrapper.find('textarea[name="notes"]').exists()).toBe(true)
   })
 
   it('默认值未修改时直接关闭，不弹放弃确认', async () => {
@@ -310,6 +430,7 @@ describe('PaymentRecordDialog', () => {
       },
     })
 
+    await openSupplementArea(wrapper)
     await wrapper.get('textarea[name="notes"]').setValue('需要核对银行流水')
     await findButton(wrapper, '取消').trigger('click')
     await flushPromises()

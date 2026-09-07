@@ -21,6 +21,7 @@ from app.core.list_query import (
     FilterCondition,
     ListQueryContext,
     SortCondition,
+    apply_search,
     paginate_optional_list_query,
     uses_unified_list_query,
     without_filter_field,
@@ -98,6 +99,7 @@ class PaymentPlanCRUD:
         status_exclude: Optional[str] = None,
         owner_id: Optional[str] = None,
         keyword: Optional[str] = None,
+        search: Optional[str] = None,
         due_date_start: Optional[date] = None,
         due_date_end: Optional[date] = None,
         sort: Optional[str] = None,
@@ -138,6 +140,18 @@ class PaymentPlanCRUD:
         if current_user_id:
             plans_query = plans_query.filter(Contract.owner_id == current_user_id)
 
+        list_context = ListQueryContext(
+            db=db,
+            team_id=team_id,
+            current_user_id=current_user_id,
+        )
+        plans_query = apply_search(
+            plans_query,
+            PAYMENT_PLANS_LIST_QUERY_CATALOG,
+            search,
+            context=list_context,
+        )
+
         if uses_unified_list_query(filters=filters, sorts=sorts):
             effective_filters = without_filter_field(filters, "status") if status else filters
             plans, total = paginate_optional_list_query(
@@ -147,11 +161,7 @@ class PaymentPlanCRUD:
                 limit=limit,
                 filters=effective_filters,
                 sorts=sorts,
-                context=ListQueryContext(
-                    db=db,
-                    team_id=team_id,
-                    current_user_id=current_user_id,
-                ),
+                context=list_context,
             )
             return plans, total
 
@@ -494,6 +504,7 @@ class PaymentRecordCRUD:
         actual_amount: Optional[float] = None,
         creator_id: Optional[str] = None,
         keyword: Optional[str] = None,
+        search: Optional[str] = None,
         record_number: Optional[str] = None,
         record_number_exclude: Optional[str] = None,
         customer_name: Optional[str] = None,
@@ -607,6 +618,18 @@ class PaymentRecordCRUD:
         if current_user_id:
             records_query = records_query.filter(Contract.creator_id == current_user_id)
 
+        list_context = ListQueryContext(
+            db=db,
+            team_id=team_id,
+            current_user_id=current_user_id,
+        )
+        records_query = apply_search(
+            records_query,
+            PAYMENT_RECORDS_LIST_QUERY_CATALOG,
+            search,
+            context=list_context,
+        )
+
         if uses_unified_list_query(filters=filters, sorts=sorts):
             effective_filters = without_filter_field(filters, "approval_status") if approval_status else filters
             return paginate_optional_list_query(
@@ -616,11 +639,7 @@ class PaymentRecordCRUD:
                 limit=limit,
                 filters=effective_filters,
                 sorts=sorts,
-                context=ListQueryContext(
-                    db=db,
-                    team_id=team_id,
-                    current_user_id=current_user_id,
-                ),
+                context=list_context,
             )
 
         approval_status_exclude_values = _split_csv(approval_status_exclude)

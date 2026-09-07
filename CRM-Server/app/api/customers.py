@@ -1214,6 +1214,7 @@ def get_customers(
     owner_id: str = Query(None, description="负责人ID（支持 'me' 表示当前用户）"),
     owner_id_exclude: Optional[str] = Query(None, description="排除的负责人ID，多个值用逗号分隔"),
     keyword: str = Query(None, description="关键词搜索"),
+    search: Optional[str] = Query(None, description="统一搜索，可搜索客户名称、简称或别名"),
     created_time_start: Optional[date] = Query(None, description="创建时间起始"),
     created_time_end: Optional[date] = Query(None, description="创建时间结束"),
     order_by: str = Query(None, description="排序字段（created_time/last_modified_time/account_name/city/status/industry）"),
@@ -1294,6 +1295,7 @@ def get_customers(
         owner_id=actual_owner_id,
         owner_id_exclude=owner_id_exclude,
         keyword=keyword,
+        search=search,
         created_time_start=created_time_start,
         created_time_end=created_time_end,
         order_by=order_by,
@@ -2332,6 +2334,7 @@ def get_public_customers(
     status: Optional[int] = Query(None, description="客户状态"),
     city: Optional[str] = Query(None, description="所在城市"),
     keyword: Optional[str] = Query(None, description="关键词搜索"),
+    search: Optional[str] = Query(None, description="统一搜索，可搜索客户名称、简称或别名"),
     order_by: Optional[str] = Query(None, description="排序字段"),
     order_dir: Optional[str] = Query(None, description="排序方向（asc/desc）"),
     filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
@@ -2346,7 +2349,7 @@ def get_public_customers(
     )
     customers, total = run_or_400(lambda: customer_crud.get_public_customers(
         db, team_id=team_id, skip=skip, limit=limit,
-        status=status, city=city, keyword=keyword,
+        status=status, city=city, keyword=keyword, search=search,
         order_by=order_by, order_dir=order_dir,
         filters=parsed_filters, sorts=parsed_sorts,
     ))

@@ -17,7 +17,7 @@
  * - ✅ 使用 shadcn-vue 基础组件
  * - ✅ 保留业务逻辑（领取、分配、退回公海、标记无效、转化客户等）
  */
-import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
+import { ref, reactive, computed, onMounted, watch, watchEffect } from 'vue'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, ArrowRightLeft, CircleCheck, XCircle, Trash2, Pencil, UserPlus } from 'lucide-vue-next'
@@ -116,6 +116,12 @@ const tabs = [
 ]
 
 const activeTab = ref('all')
+
+const search = ref('')
+
+watch(activeTab, () => {
+  search.value = ''
+}, { flush: 'sync' })
 
 // ==================== 列表字段注册表 ====================
 const leadStatusOptions = [
@@ -237,6 +243,7 @@ const fetchLeadList = async (): Promise<boolean> => {
     const params: LeadListParams = {
       skip: (pagination.current - 1) * pagination.pageSize,
       limit: pagination.pageSize,
+      ...(search.value.trim() !== '' ? { search: search.value.trim() } : {}),
       ...serializeListQuery({ filters: activeFilters.value, sorts: activeSorts.value })
     }
 
@@ -300,6 +307,18 @@ const handleReset = (): void => {
   activeFilters.value = []
   pagination.current = 1
   fetchLeadList()
+}
+
+const handleSearchApply = (value: string): void => {
+  search.value = value.trim()
+  pagination.current = 1
+  void fetchLeadList()
+}
+
+const handleSearchClear = (): void => {
+  search.value = ''
+  pagination.current = 1
+  void fetchLeadList()
 }
 
 const handleSortApply = (sorts: ListSortCondition[]): void => {
@@ -661,7 +680,7 @@ watchEffect(() => {
       height-strategy="fill"
       scroll-mode="contained"
       empty-title="暂无线索"
-      :empty-reason="activeFilters.length > 0 ? 'filtered' : activeTab === 'all' ? 'not-created' : 'no-data'"
+      :empty-reason="search.trim() !== '' || activeFilters.length > 0 ? 'filtered' : activeTab === 'all' ? 'not-created' : 'no-data'"
       row-interactive
       detail-column-key="lead_name"
       :get-row-label="(row) => `线索 ${row.lead_name || row.id}`"
@@ -683,6 +702,12 @@ watchEffect(() => {
       :filter-view-save-loading="customFilterViewSaving"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
+      v-model:search="search"
+      search-enabled
+      search-placeholder="搜索线索名称、联系人或手机号"
+      :search-loading="loading"
+      @search-apply="handleSearchApply"
+      @search-clear="handleSearchClear"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
       @filter-save-view="handleSaveFilterView"

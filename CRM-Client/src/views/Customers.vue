@@ -17,7 +17,7 @@
  * - ✅ 移除活跃筛选汇总区
  * - ✅ 保留业务逻辑（退回公海、输单、赢单等）
  */
-import { ref, reactive, computed, onMounted, watchEffect, type Component } from 'vue'
+import { ref, reactive, computed, onMounted, watch, watchEffect, type Component } from 'vue'
 import { handleApiError, handleOutcomeUnknown, isOutcomeUnknown } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Sparkles, ArrowRightLeft, TrendingUp, TrendingDown, XCircle, Trash2, Pencil, UserRoundCheck } from 'lucide-vue-next'
@@ -177,6 +177,12 @@ const tabs = [
 ]
 
 const activeTab = ref('all')
+
+const search = ref('')
+
+watch(activeTab, () => {
+  search.value = ''
+}, { flush: 'sync' })
 
 const activeFilters = ref<ListFilterCondition[]>([])
 const activeSorts = ref<ListSortCondition[]>([])
@@ -525,6 +531,7 @@ const fetchCustomerList = async (): Promise<boolean> => {
     const params = {
       skip: (pagination.current - 1) * pagination.pageSize,
       limit: pagination.pageSize,
+      ...(search.value.trim() !== '' ? { search: search.value.trim() } : {}),
       ...serializeListQuery({ filters: activeFilters.value, sorts: activeSorts.value })
     }
 
@@ -594,6 +601,18 @@ const handleReset = (): void => {
   activeFilters.value = []
   pagination.current = 1
   fetchCustomerList()
+}
+
+const handleSearchApply = (value: string): void => {
+  search.value = value.trim()
+  pagination.current = 1
+  void fetchCustomerList()
+}
+
+const handleSearchClear = (): void => {
+  search.value = ''
+  pagination.current = 1
+  void fetchCustomerList()
 }
 
 const handleSortApply = (sorts: ListSortCondition[]): void => {
@@ -1097,7 +1116,7 @@ watchEffect(() => {
       scroll-mode="contained"
       compact-pagination
       empty-title="暂无客户"
-      :empty-reason="activeFilters.length > 0 ? 'filtered' : activeTab === 'all' ? 'not-created' : 'no-data'"
+      :empty-reason="search.trim() !== '' || activeFilters.length > 0 ? 'filtered' : activeTab === 'all' ? 'not-created' : 'no-data'"
       row-interactive
       detail-column-key="account_name"
       :get-row-label="(row) => `客户 ${row.account_name || row.id}`"
@@ -1118,6 +1137,12 @@ watchEffect(() => {
       :filter-view-save-loading="customFilterViewSaving"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
+      v-model:search="search"
+      search-enabled
+      search-placeholder="搜索客户名称、简称或别名"
+      :search-loading="loading"
+      @search-apply="handleSearchApply"
+      @search-clear="handleSearchClear"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
       @filter-save-view="handleSaveFilterView"

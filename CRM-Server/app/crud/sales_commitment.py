@@ -10,6 +10,7 @@ from app.core.list_query import (
     FilterCondition,
     ListQueryContext,
     SortCondition,
+    apply_search,
     paginate_optional_list_query,
     uses_unified_list_query,
     without_filter_field,
@@ -411,6 +412,7 @@ class FollowUpTaskCRUD:
         limit: int = 100,
         filters: list[FilterCondition] | None = None,
         sorts: list[SortCondition] | None = None,
+        search: str | None = None,
     ) -> tuple[list[FollowUpTask], int]:
         query = db.query(FollowUpTask).filter(
             FollowUpTask.team_id == team_id,
@@ -436,7 +438,14 @@ class FollowUpTaskCRUD:
                 filters=effective_filters,
                 sorts=sorts,
                 context=ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id),
+                search=search,
             )
+        query = apply_search(
+            query,
+            FOLLOW_UP_TASKS_LIST_QUERY_CATALOG,
+            search,
+            context=ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id),
+        )
         total = query.count()
         rows = query.order_by(FollowUpTask.due_at.asc(), FollowUpTask.id.asc()).offset(skip).limit(limit).all()
         return rows, total
@@ -458,6 +467,7 @@ class FollowUpTaskCRUD:
         limit: int = 100,
         filters: list[FilterCondition] | None = None,
         sorts: list[SortCondition] | None = None,
+        search: str | None = None,
     ) -> tuple[list[FollowUpTask], int]:
         query = db.query(FollowUpTask).filter(
             FollowUpTask.team_id == team_id,
@@ -484,7 +494,14 @@ class FollowUpTaskCRUD:
                 filters=effective_filters,
                 sorts=sorts,
                 context=ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id),
+                search=search,
             )
+        query = apply_search(
+            query,
+            FOLLOW_UP_TASKS_LIST_QUERY_CATALOG,
+            search,
+            context=ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id),
+        )
         total = query.count()
         rows = query.order_by(FollowUpTask.due_at.asc(), FollowUpTask.id.asc()).offset(skip).limit(limit).all()
         return rows, total

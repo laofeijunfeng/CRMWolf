@@ -104,6 +104,12 @@ const tabs = [
 
 const activeTab = ref('all')
 
+const search = ref('')
+
+watch(activeTab, () => {
+  search.value = ''
+}, { flush: 'sync' })
+
 // ==================== 列表字段注册表 ====================
 const opportunityStatusOptions = [
   { value: '0', label: '跟进中' },
@@ -299,6 +305,7 @@ const fetchOpportunities = async (): Promise<boolean> => {
       skip: (pagination.current - 1) * pagination.pageSize,
       limit: pagination.pageSize,
       status: tabStatus,
+      ...(search.value.trim() !== '' ? { search: search.value.trim() } : {}),
       ...serializeListQuery({ filters: effectiveFilters, sorts: activeSorts.value })
     }
 
@@ -360,6 +367,18 @@ const handleReset = (): void => {
   activeFilters.value = []
   pagination.current = 1
   fetchOpportunities()
+}
+
+const handleSearchApply = (value: string): void => {
+  search.value = value.trim()
+  pagination.current = 1
+  void fetchOpportunities()
+}
+
+const handleSearchClear = (): void => {
+  search.value = ''
+  pagination.current = 1
+  void fetchOpportunities()
 }
 
 const handleSortApply = (sorts: ListSortCondition[]): void => {
@@ -822,7 +841,7 @@ watchEffect(() => {
       height-strategy="fill"
       scroll-mode="contained"
       empty-title="暂无商机"
-      :empty-reason="effectiveFilters.length > 0 ? 'filtered' : activeTab === 'all' ? 'not-created' : 'no-data'"
+      :empty-reason="search.trim() !== '' || effectiveFilters.length > 0 ? 'filtered' : activeTab === 'all' ? 'not-created' : 'no-data'"
       row-interactive
       detail-column-key="opportunity_name"
       :get-row-label="(row) => `商机 ${row.opportunity_name || row.id}`"
@@ -845,6 +864,12 @@ watchEffect(() => {
       :filter-view-save-loading="customFilterViewSaving"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
+      v-model:search="search"
+      search-enabled
+      search-placeholder="搜索商机名称、客户或阶段"
+      :search-loading="loading"
+      @search-apply="handleSearchApply"
+      @search-clear="handleSearchClear"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
       @filter-save-view="handleSaveFilterView"

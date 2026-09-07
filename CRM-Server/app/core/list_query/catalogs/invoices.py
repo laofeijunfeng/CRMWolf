@@ -5,6 +5,7 @@ from app.core.list_query.catalogs.common import (
     invoice_effective_status_expression,
     invoice_keyword_predicate,
     related_name_expression,
+    text_search_predicate,
     user_name_expression,
 )
 from app.core.list_query.types import SortCondition
@@ -59,4 +60,22 @@ INVOICES_LIST_QUERY_CATALOG = ListQueryCatalog(
         ListQueryField(key="issued_time", type="date", expression=InvoiceApplication.issued_time),
     ],
     default_sorts=[SortCondition(field="created_time", direction="desc")],
+    search_predicate=text_search_predicate(
+        InvoiceApplication.application_number,
+        InvoiceApplication.invoice_title_text,
+        InvoiceApplication.invoice_taxpayer_id,
+        InvoiceApplication.invoice_number,
+        related_name_expression(
+            Customer,
+            InvoiceApplication.customer_id,
+            Customer.account_name,
+            team_id_expression=InvoiceApplication.team_id,
+        ),
+        related_name_expression(
+            Contract,
+            InvoiceApplication.contract_id,
+            Contract.contract_name,
+            team_id_expression=InvoiceApplication.team_id,
+        ),
+    ),
 )

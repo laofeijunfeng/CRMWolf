@@ -16,6 +16,7 @@ from app.core.list_query import (
     FilterCondition,
     ListQueryContext,
     SortCondition,
+    apply_search,
     paginate_optional_list_query,
     uses_unified_list_query,
 )
@@ -81,6 +82,7 @@ class CustomerCRUD:
         owner_id: Optional[str] = None,
         owner_id_exclude: Optional[str] = None,
         keyword: Optional[str] = None,
+        search: Optional[str] = None,
         created_time_start: Optional[date] = None,
         created_time_end: Optional[date] = None,
         order_by: Optional[str] = None,
@@ -131,6 +133,7 @@ class CustomerCRUD:
                 filters=filters,
                 sorts=sorts,
                 context=ListQueryContext(db=db, team_id=team_id, current_user_id=current_user_id),
+                search=search,
             )
 
         status_values = _split_int_csv(status)
@@ -167,6 +170,12 @@ class CustomerCRUD:
                     Customer.city.like(f"%{keyword}%"),
                 )
             )
+        query = apply_search(
+            query,
+            CUSTOMERS_LIST_QUERY_CATALOG,
+            search,
+            context=ListQueryContext(db=db, team_id=team_id, current_user_id=current_user_id),
+        )
         if created_time_start:
             query = query.filter(Customer.created_time >= datetime.combine(created_time_start, time.min))
         if created_time_end:
@@ -562,6 +571,7 @@ class CustomerCRUD:
         status: Optional[int] = None,
         city: Optional[str] = None,
         keyword: Optional[str] = None,
+        search: Optional[str] = None,
         order_by: Optional[str] = None,
         order_dir: Optional[str] = None,
         filters: list[FilterCondition] | None = None,
@@ -579,6 +589,7 @@ class CustomerCRUD:
                 filters=filters,
                 sorts=effective_sorts,
                 context=ListQueryContext(db=db, team_id=team_id),
+                search=search,
             )
 
         if status is not None:
@@ -589,6 +600,12 @@ class CustomerCRUD:
             query = query.filter(
                 or_(Customer.account_name.like(f"%{keyword}%"), Customer.industry.like(f"%{keyword}%"))
             )
+        query = apply_search(
+            query,
+            CUSTOMERS_LIST_QUERY_CATALOG,
+            search,
+            context=ListQueryContext(db=db, team_id=team_id),
+        )
 
         total = query.count()
 

@@ -98,6 +98,7 @@ def _catalog() -> ListQueryCatalog:
             ),
         ],
         default_sorts=[SortCondition(field="name", direction="asc")],
+        search_predicate=lambda value, _context: Item.name.ilike(f"%{value}%"),
     )
 
 
@@ -369,6 +370,19 @@ def test_optional_request_list_query_preserves_explicit_protocol_presence():
     assert optional_request_list_query() == (None, None)
     assert optional_request_list_query(filters_raw="[]") == ([], None)
     assert optional_request_list_query(sorts_raw="[]") == (None, [])
+
+
+def test_optional_list_query_search_is_normalized_and_combined_with_filters(db_session):
+    query, total = apply_optional_list_query(
+        db_session.query(Item),
+        _catalog(),
+        filters=[{"field": "status", "op": "eq", "value": "open"}],
+        sorts=[],
+        search="  acme  ",
+    )
+
+    assert total == 1
+    assert [row.name for row in query.all()] == ["Acme"]
 
 
 def test_sorts_only_unified_query_does_not_mix_in_legacy_filters(db_session):

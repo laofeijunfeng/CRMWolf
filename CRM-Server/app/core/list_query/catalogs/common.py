@@ -6,13 +6,14 @@ from typing import Any
 from sqlalchemy import Integer, String, and_, case, cast, exists, func, literal, or_, select
 
 from app.constants.business_types import BusinessType
-from app.core.list_query.catalog import ListQueryField
+from app.core.list_query.catalog import ListQueryField, SearchPredicate
 from app.core.list_query.hours import hours_between
 from app.core.list_query.license_status import license_status_expression
 from app.core.list_query.types import FilterCondition, ListQueryContext
 from app.models.approval import Approval, ApprovalStatus
 from app.models.contract import Contract
 from app.models.customer import Customer, CustomerMember
+from app.models.customer_identity_term import CustomerIdentityTerm, CustomerIdentityTermStatus
 from app.models.invoice import (
     InvoiceApplication,
     InvoiceRedOffset,
@@ -58,6 +59,42 @@ def user_name_expression(user_id_expression):
         .correlate_except(User)
         .scalar_subquery()
     )
+
+
+def _escape_like_wildcards(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def text_search_predicate(
+    *expressions,
+    include_customer_identity_terms: bool = False,
+) -> SearchPredicate:
+    """Build a module-scoped search predicate; search is deliberately separate from filters."""
+
+    def builder(value: str, context: ListQueryContext):  # noqa: ARG001
+        like = f"%{_escape_like_wildcards(value)}%"
+        clauses = [expression.ilike(like, escape="\\") for expression in expressions]
+        if include_customer_identity_terms:
+            identity_terms = exists().where(
+                CustomerIdentityTerm.customer_id == Customer.id,
+                CustomerIdentityTerm.team_id == Customer.team_id,
+                CustomerIdentityTerm.tenant_id == Customer.team_id,
+                CustomerIdentityTerm.status == CustomerIdentityTermStatus.ACTIVE,
+                or_(
+                    CustomerIdentityTerm.term.ilike(like, escape="\\"),
+                    CustomerIdentityTerm.normalized_term.ilike(like, escape="\\"),
+                ),
+            )
+            clauses.extend([
+                Customer.account_name.ilike(like, escape="\\"),
+                Customer.account_name_norm.ilike(like, escape="\\"),
+                identity_terms,
+            ])
+        if not clauses:
+            return None
+        return or_(*clauses)
+
+    return builder
 
 
 def related_name_expression(model, fk_expression, column, *, team_id_expression=None):
@@ -301,7 +338,7 @@ def payment_invoice_title_expression():
             ),
         )
         .order_by(
-            case((is_explicit_record_link, 0), else_=1),
+            InvoiceApplication.payment_record_id.isnot(None).desc(),
             InvoiceApplication.created_time.desc(),
             InvoiceApplication.id.desc(),
         )

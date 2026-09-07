@@ -15,7 +15,7 @@
  * - ✅ V2 Design Tokens
  * - ✅ Flexbox 高度管理
  */
-import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
+import { ref, reactive, computed, onMounted, watch, watchEffect } from 'vue'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Eye, Pencil, Send, Trash2 } from 'lucide-vue-next'
@@ -63,6 +63,12 @@ const listRequestId = ref<number>(0)
 const tableData = ref<ContractListResponse[]>([])
 const ownerFilterOptions = ref<OwnerFilterOption[]>([])
 const activeTab = ref('all')
+
+const search = ref('')
+
+watch(activeTab, () => {
+  search.value = ''
+}, { flush: 'sync' })
 const showCreateDialog = ref(false)
 const showEditDialog = ref(false)
 const editingContract = ref<ContractListResponse | null>(null)
@@ -251,6 +257,7 @@ const fetchContractList = async (): Promise<boolean> => {
       skip: (pagination.current - 1) * pagination.pageSize,
       limit: pagination.pageSize,
       status: tabStatus,
+      ...(search.value.trim() !== '' ? { search: search.value.trim() } : {}),
       ...serializeListQuery({ filters: effectiveFilters, sorts: activeSorts.value })
     }
 
@@ -313,6 +320,18 @@ const handleReset = (): void => {
   activeTab.value = 'all'
   pagination.current = 1
   fetchContractList()
+}
+
+const handleSearchApply = (value: string): void => {
+  search.value = value.trim()
+  pagination.current = 1
+  void fetchContractList()
+}
+
+const handleSearchClear = (): void => {
+  search.value = ''
+  pagination.current = 1
+  void fetchContractList()
 }
 
 const handleSortApply = (sorts: ListSortCondition[]): void => {
@@ -625,7 +644,7 @@ watchEffect(() => {
       scroll-mode="contained"
       compact-pagination
       empty-title="暂无合同"
-      :empty-reason="effectiveFilters.length > 0 ? 'filtered' : activeTab === 'all' ? 'not-created' : 'no-data'"
+      :empty-reason="search.trim() !== '' || effectiveFilters.length > 0 ? 'filtered' : activeTab === 'all' ? 'not-created' : 'no-data'"
       row-interactive
       detail-column-key="contract_name"
       :get-row-label="(row) => `合同 ${row.contract_name || row.id}`"
@@ -648,6 +667,12 @@ watchEffect(() => {
       :filter-view-save-loading="customFilterViewSaving"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
+      v-model:search="search"
+      search-enabled
+      search-placeholder="搜索合同编号、合同名称、客户或商机"
+      :search-loading="loading"
+      @search-apply="handleSearchApply"
+      @search-clear="handleSearchClear"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
       @filter-save-view="handleSaveFilterView"

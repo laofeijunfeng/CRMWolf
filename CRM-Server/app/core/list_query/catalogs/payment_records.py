@@ -7,6 +7,7 @@ from app.core.list_query.catalogs.common import (
     payment_approval_status_expression,
     payment_invoice_title_expression,
     payment_owner_name_expression,
+    text_search_predicate,
 )
 from app.core.list_query.types import SortCondition
 from app.models.contract import Contract
@@ -68,4 +69,14 @@ PAYMENT_RECORDS_LIST_QUERY_CATALOG = ListQueryCatalog(
         ),
     ],
     default_sorts=[SortCondition(field="payment_date", direction="desc")],
+    search_predicate=text_search_predicate(
+        PaymentRecord.record_number,
+        PaymentRecord.actual_payer_name,
+        PaymentRecord.commission_member_name,
+        PaymentPlan.stage_name,
+        Contract.contract_name,
+        payment_owner_name_expression(),
+        payment_invoice_title_expression(),
+        include_customer_identity_terms=True,
+    ),
 )

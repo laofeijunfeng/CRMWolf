@@ -87,6 +87,7 @@ export interface FollowUpTaskListParams {
   skip?: number
   filters?: string
   sorts?: string
+  search?: string
   status?: FollowUpTaskStatusFilter
   due_window?: string
   customer_id?: string

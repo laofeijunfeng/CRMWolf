@@ -88,6 +88,7 @@ def list_follow_up_tasks(
     limit: int = Query(50, ge=1, le=100),
     filters: str | None = Query(None, description="通用筛选条件 JSON"),
     sorts: str | None = Query(None, description="通用排序条件 JSON"),
+    search: str | None = Query(None, description="统一搜索，可搜索客户或跟进内容"),
     query_text: str | None = Query(None, description="按待办语义检索的自然语言描述"),
     retrieval_mode: str | None = Query(None, description="structured 或 semantic_filter"),
     team_id: int = Depends(get_current_user_team),
@@ -111,6 +112,7 @@ def list_follow_up_tasks(
             limit=limit,
             filters=parsed_filters,
             sorts=parsed_sorts,
+            search=search,
             query_text=query_text,
             retrieval_mode=retrieval_mode,
         ))

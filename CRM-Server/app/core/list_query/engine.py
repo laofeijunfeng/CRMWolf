@@ -18,6 +18,23 @@ from app.core.list_query.types import (
 )
 
 
+def apply_search(
+    query,
+    catalog: ListQueryCatalog,
+    search: str | None,
+    *,
+    context: ListQueryContext | None = None,
+):
+    """Apply an explicitly submitted, module-scoped search before filters and count."""
+    normalized = (search or "").strip()
+    if catalog.search_predicate is None or normalized == "":
+        return query
+    clause = catalog.search_predicate(normalized, context or ListQueryContext())
+    if clause is None:
+        return query
+    return query.filter(clause)
+
+
 def apply_filters(
     query,
     catalog: ListQueryCatalog,
@@ -117,10 +134,12 @@ def apply_optional_list_query(
     joined: set[str] | None = None,
     legacy_filters=None,
     legacy_sorts=None,
+    search: str | None = None,
 ):
     ctx = context or ListQueryContext()
     joined_keys = joined if joined is not None else set()
     unified_protocol = uses_unified_list_query(filters=filters, sorts=sorts)
+    query = apply_search(query, catalog, search, context=ctx)
     if unified_protocol:
         query = apply_filters(query, catalog, filters or [], context=ctx, joined=joined_keys)
     elif legacy_filters is not None:
@@ -145,6 +164,7 @@ def paginate_optional_list_query(
     joined: set[str] | None = None,
     legacy_filters=None,
     legacy_sorts=None,
+    search: str | None = None,
 ):
     query, total = apply_optional_list_query(
         query,
@@ -155,6 +175,7 @@ def paginate_optional_list_query(
         joined=joined,
         legacy_filters=legacy_filters,
         legacy_sorts=legacy_sorts,
+        search=search,
     )
     return query.offset(skip).limit(limit).all(), total
 

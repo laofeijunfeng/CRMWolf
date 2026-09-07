@@ -249,6 +249,7 @@ def get_leads(
     source_public_id: Optional[str] = Query(None, description="获客来源对外ID，多个值用逗号分隔"),
     city: Optional[str] = Query(None, description="所在城市"),
     keyword: Optional[str] = Query(None, description="关键词搜索"),
+    search: Optional[str] = Query(None, description="统一搜索，可搜索线索名称、联系人或手机号"),
     filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
     sorts: Optional[str] = Query(None, description="通用排序条件 JSON"),
     owner_id: Optional[str] = Query(None, description="按负责人ID筛选（支持 me/my 表示当前用户）"),
@@ -297,7 +298,7 @@ def get_leads(
     leads, total = run_or_400(lambda: lead_crud.get_multi(
         db, team_id=team_id, skip=skip, limit=limit,
         status=status, source_ids=source_ids, city=city,
-        owner_id=owner_id, keyword=keyword,
+        owner_id=owner_id, keyword=keyword, search=search,
         filters=parsed_filters, sorts=parsed_sorts,
         order_by=order_by, order_dir=order_dir
     ))
@@ -668,6 +669,7 @@ def get_public_leads(
     limit: int = Query(100, ge=1, le=100, description="返回记录数"),
     filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
     sorts: Optional[str] = Query(None, description="通用排序条件 JSON"),
+    search: Optional[str] = Query(None, description="统一搜索，可搜索线索名称、联系人或手机号"),
     order_by: Optional[str] = Query(None, description="排序字段"),
     order_dir: Optional[str] = Query(None, description="排序方向（asc/desc）"),
     team_id: int = Depends(get_current_user_team),
@@ -685,6 +687,7 @@ def get_public_leads(
         limit,
         filters=parsed_filters,
         sorts=parsed_sorts,
+        search=search,
         order_by=order_by,
         order_dir=order_dir
     ))

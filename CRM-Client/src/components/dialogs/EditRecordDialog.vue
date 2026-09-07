@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { ChevronDown } from 'lucide-vue-next'
 import type { PaymentRecordInfo, PaymentRecordResponse, PaymentRecordUpdate } from '@/api/payment'
 import {
   Dialog,
@@ -10,7 +11,13 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
 import { confirmDialog } from '@/utils/confirmDialog'
+import FormErrorSummary, { type FormErrorSummaryItem } from '@/components/crmwolf/FormErrorSummary.vue'
 import {
   DateField,
   InputField,
@@ -61,6 +68,7 @@ const form = reactive<EditRecordForm>({
 
 const initialForm = ref<EditRecordForm | null>(null)
 const closeGuardPending = ref(false)
+const supplementOpen = ref(false)
 
 const errors = reactive<EditRecordErrors>({
   actualAmount: '',
@@ -79,12 +87,24 @@ const hasAmountError = computed((): boolean => errors.actualAmount.length > 0)
 const hasActualPayerNameError = computed((): boolean => errors.actualPayerName.length > 0)
 const hasPaymentDateError = computed((): boolean => errors.paymentDate.length > 0)
 const hasNotesError = computed((): boolean => errors.notes.length > 0)
-const validationErrorMessages = computed((): string[] => [
-  errors.actualAmount,
-  errors.actualPayerName,
-  errors.paymentDate,
-  errors.notes,
-].filter((message): message is string => message.length > 0))
+const validationErrorItems = computed((): FormErrorSummaryItem[] => {
+  const items: FormErrorSummaryItem[] = []
+
+  if (errors.actualAmount.length > 0) {
+    items.push({ field: 'actualAmount', label: '回款金额', message: errors.actualAmount, targetId: 'edit-record-amount' })
+  }
+  if (errors.actualPayerName.length > 0) {
+    items.push({ field: 'actualPayerName', label: '实际付款方', message: errors.actualPayerName, targetId: 'edit-record-payer-name' })
+  }
+  if (errors.paymentDate.length > 0) {
+    items.push({ field: 'paymentDate', label: '回款日期', message: errors.paymentDate, targetId: 'edit-record-date' })
+  }
+  if (errors.notes.length > 0) {
+    items.push({ field: 'notes', label: '备注', message: errors.notes, targetId: 'edit-record-notes' })
+  }
+
+  return items
+})
 
 function clearErrors(): void {
   errors.actualAmount = ''
@@ -105,6 +125,7 @@ function resetForm(): void {
   form.paymentDate = ''
   form.proofAttachment = ''
   form.notes = ''
+  supplementOpen.value = false
   clearErrors()
 }
 
@@ -115,6 +136,7 @@ function populateForm(record: EditablePaymentRecord): void {
   form.proofAttachment = record.proof_attachment ?? ''
   form.notes = record.notes ?? ''
   initialForm.value = { ...form }
+  supplementOpen.value = false
   clearErrors()
 }
 
@@ -164,6 +186,7 @@ function validateForm(): boolean {
 
   if (form.notes.length > 200) {
     errors.notes = '备注不能超过 200 字'
+    supplementOpen.value = true
   }
 
   return !hasAmountError.value && !hasActualPayerNameError.value && !hasPaymentDateError.value && !hasNotesError.value
@@ -266,7 +289,7 @@ watch(
 
 <template>
   <Dialog :open="props.open" @update:open="handleOpenChange">
-    <DialogContent class="edit-record-dialog">
+    <DialogContent class="edit-record-dialog w-[calc(100vw-2rem)] max-w-[640px]">
       <DialogHeader>
         <DialogTitle>修改回款记录</DialogTitle>
         <DialogDescription>
@@ -274,108 +297,120 @@ watch(
         </DialogDescription>
       </DialogHeader>
 
-      <div
-        v-if="validationErrorMessages.length > 0"
-        class="edit-record-dialog__error-summary"
-        role="alert"
-        aria-live="assertive"
-      >
-        <strong>请先修正以下字段：</strong>
-        <ul>
-          <li v-for="message in validationErrorMessages" :key="message">{{ message }}</li>
-        </ul>
+      <div class="edit-record-dialog__body">
+        <FormErrorSummary :items="validationErrorItems" />
+
+        <form id="edit-record-form" class="edit-record-dialog__form" novalidate @submit.prevent="handleSubmit">
+          <div class="edit-record-dialog__required-grid">
+            <InputField
+              id="edit-record-amount"
+              v-model="form.actualAmount"
+              class="edit-record-dialog__field"
+              label="回款金额"
+              required
+              name="actual_amount"
+              type="number"
+              inputmode="decimal"
+              min="0"
+              step="0.01"
+              placeholder="请输入回款金额"
+              :disabled="isSubmitting || record === null"
+              helper-text="金额需大于 0，可精确到分。"
+              :error="errors.actualAmount"
+            />
+
+            <InputField
+              id="edit-record-payer-name"
+              v-model="form.actualPayerName"
+              class="edit-record-dialog__field"
+              label="实际付款方"
+              required
+              name="actual_payer_name"
+              type="text"
+              maxlength="200"
+              placeholder="请输入实际付款方"
+              :disabled="isSubmitting || record === null"
+              helper-text="可按实际付款公司抬头修改。"
+              :error="errors.actualPayerName"
+            />
+
+            <DateField
+              id="edit-record-date"
+              :model-value="parseLocalDate(form.paymentDate)"
+              class="edit-record-dialog__field"
+              label="回款日期"
+              required
+              placeholder="请选择回款日期"
+              :disabled="isSubmitting || record === null"
+              helper-text="使用本地日期，格式为 YYYY-MM-DD。"
+              :error="errors.paymentDate"
+              @update:model-value="handlePaymentDateChange"
+            />
+          </div>
+
+          <Collapsible v-model:open="supplementOpen" class="edit-record-dialog__supplement">
+            <CollapsibleTrigger as-child>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                class="edit-record-dialog__supplement-trigger"
+              >
+                补充信息
+                <ChevronDown class="edit-record-dialog__supplement-icon" aria-hidden="true" />
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <div class="edit-record-dialog__optional-grid">
+                <InputField
+                  id="edit-record-proof"
+                  v-model="form.proofAttachment"
+                  class="edit-record-dialog__field"
+                  label="凭证附件 URL"
+                  name="proof_attachment"
+                  type="url"
+                  placeholder="请输入附件 URL（可选）"
+                  :disabled="isSubmitting || record === null"
+                />
+
+                <TextareaField
+                  id="edit-record-notes"
+                  v-model="form.notes"
+                  class="edit-record-dialog__field"
+                  label="备注"
+                  name="notes"
+                  maxlength="200"
+                  placeholder="请输入备注信息（可选，最多 200 字）"
+                  control-class="min-h-20"
+                  :disabled="isSubmitting || record === null"
+                  :helper-text="`${form.notes.length}/200`"
+                  :error="errors.notes"
+                />
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+        </form>
       </div>
 
-      <form class="edit-record-dialog__form" novalidate @submit.prevent="handleSubmit">
-        <InputField
-          id="edit-record-amount"
-          v-model="form.actualAmount"
-          class="edit-record-dialog__field"
-          label="回款金额"
-          required
-          name="actual_amount"
-          type="number"
-          inputmode="decimal"
-          min="0"
-          step="0.01"
-          placeholder="请输入回款金额"
+      <DialogFooter class="edit-record-dialog__footer">
+        <Button
+          type="button"
+          variant="outline"
+          class="edit-record-dialog__button"
+          :disabled="isSubmitting || closeGuardPending"
+          @click="closeDialog"
+        >
+          取消
+        </Button>
+        <Button
+          type="submit"
+          form="edit-record-form"
+          class="edit-record-dialog__button"
           :disabled="isSubmitting || record === null"
-          helper-text="金额需大于 0，可精确到分。"
-          :error="errors.actualAmount"
-        />
-
-        <InputField
-          id="edit-record-payer-name"
-          v-model="form.actualPayerName"
-          class="edit-record-dialog__field"
-          label="实际付款方"
-          required
-          name="actual_payer_name"
-          type="text"
-          maxlength="200"
-          placeholder="请输入实际付款方"
-          :disabled="isSubmitting || record === null"
-          helper-text="可按实际付款公司抬头修改。"
-          :error="errors.actualPayerName"
-        />
-
-        <DateField
-          id="edit-record-date"
-          :model-value="parseLocalDate(form.paymentDate)"
-          class="edit-record-dialog__field"
-          label="回款日期"
-          required
-          placeholder="请选择回款日期"
-          :disabled="isSubmitting || record === null"
-          helper-text="使用本地日期，格式为 YYYY-MM-DD。"
-          :error="errors.paymentDate"
-          @update:model-value="handlePaymentDateChange"
-        />
-
-        <InputField
-          id="edit-record-proof"
-          v-model="form.proofAttachment"
-          class="edit-record-dialog__field"
-          label="凭证附件 URL"
-          name="proof_attachment"
-          type="url"
-          placeholder="请输入附件 URL（可选）"
-          :disabled="isSubmitting || record === null"
-        />
-
-        <TextareaField
-          id="edit-record-notes"
-          v-model="form.notes"
-          class="edit-record-dialog__field"
-          label="备注"
-          name="notes"
-          maxlength="200"
-          placeholder="请输入备注信息（可选，最多 200 字）"
-          control-class="min-h-20"
-          :disabled="isSubmitting || record === null"
-          :helper-text="`${form.notes.length}/200`"
-          :error="errors.notes"
-        />
-
-        <DialogFooter class="edit-record-dialog__footer">
-          <Button
-            type="button"
-            variant="outline"
-            class="edit-record-dialog__button min-h-11"
-            :disabled="isSubmitting || closeGuardPending"
-            @click="closeDialog"
-          >
-            取消
-          </Button>
-          <Button
-            type="submit"
-            class="edit-record-dialog__button min-h-11"
-            :disabled="isSubmitting || record === null"
-          >
-            {{ isSubmitting ? '提交中...' : '保存修改' }}
-          </Button>
-        </DialogFooter>
-      </form>
+        >
+          {{ isSubmitting ? '提交中...' : '保存修改' }}
+        </Button>
+      </DialogFooter>
     </DialogContent>
   </Dialog>
 </template>
@@ -384,49 +419,70 @@ watch(
 @use '@/styles/variables-v2.scss' as *;
 
 .edit-record-dialog {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   max-height: $wolf-modal-height-mobile-v2;
+  overflow: hidden;
+}
+
+.edit-record-dialog__body {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: $wolf-space-lg-v2;
   overflow-y: auto;
   overscroll-behavior: contain;
+  padding-inline: calc($wolf-focus-ring-width-v2 + $wolf-focus-ring-offset-v2);
   scroll-padding-bottom: calc($wolf-space-xl-v2 + $wolf-safe-area-bottom-v2);
 }
 
 .edit-record-dialog__form {
   display: flex;
   flex-direction: column;
-  gap: $wolf-form-item-gap-v2;
+  gap: $wolf-space-lg-v2;
 }
 
-.edit-record-dialog__error-summary {
-  display: flex;
-  flex-direction: column;
-  gap: $wolf-space-xs-v2;
-  padding: $wolf-space-md-v2;
-  border: 1px solid $wolf-danger-v2;
-  border-radius: $wolf-radius-v2;
-  background: $wolf-danger-bg-v2;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  line-height: $wolf-line-height-body-v2;
-}
-
-.edit-record-dialog__error-summary strong {
-  color: $wolf-text-primary-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-}
-
-.edit-record-dialog__error-summary ul {
-  margin: 0;
-  padding-left: $wolf-space-lg-v2;
+.edit-record-dialog__required-grid,
+.edit-record-dialog__optional-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: $wolf-space-xl-v2 $wolf-form-item-gap-v2;
 }
 
 .edit-record-dialog__field {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   gap: $wolf-space-sm-v2;
 }
 
+.edit-record-dialog__supplement {
+  display: flex;
+  flex-direction: column;
+  gap: $wolf-space-xs-v2;
+}
+
+.edit-record-dialog__supplement-trigger {
+  align-self: flex-start;
+  min-height: 36px;
+  padding: 0 $wolf-space-xs-v2;
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-caption-v2;
+}
+
+.edit-record-dialog__supplement-icon {
+  width: 14px;
+  height: 14px;
+  transition: transform 150ms ease;
+}
+
+.edit-record-dialog__supplement-trigger[aria-expanded='true'] .edit-record-dialog__supplement-icon {
+  transform: rotate(180deg);
+}
+
 .edit-record-dialog__button {
-  min-height: $wolf-touch-target-min-v2;
+  height: $wolf-button-height-md-v2;
+  min-height: $wolf-button-height-md-v2;
 }
 
 .edit-record-dialog__footer {
@@ -436,8 +492,15 @@ watch(
 }
 
 @media (max-width: $wolf-breakpoint-sm-v2) {
+  .edit-record-dialog__required-grid,
+  .edit-record-dialog__optional-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .edit-record-dialog__button {
     width: 100%;
+    height: $wolf-button-height-mobile-v2;
+    min-height: $wolf-button-height-mobile-v2;
   }
 }
 </style>

@@ -16,6 +16,7 @@ from app.core.list_query.types import (
 )
 
 PredicateBuilder = Callable[[FilterCondition, "ListQueryField", ListQueryContext, Any], Any]
+SearchPredicate = Callable[[str, ListQueryContext], Any]
 ValueResolver = Callable[[list[Any], ListQueryContext], list[Any]]
 ExpressionBuilder = Callable[[ListQueryContext], Any]
 
@@ -80,6 +81,7 @@ class ListQueryCatalog:
     name: str
     fields: Sequence[ListQueryField]
     default_sorts: Sequence[SortCondition] = ()
+    search_predicate: SearchPredicate | None = None
     _index: dict[str, ListQueryField] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:

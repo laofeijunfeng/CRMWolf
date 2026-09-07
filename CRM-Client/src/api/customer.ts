@@ -322,6 +322,7 @@ export interface CustomerQueryParams {
   owner_id?: string
   owner_id_exclude?: string
   keyword?: string
+  search?: string
   created_time_start?: string
   created_time_end?: string
   order_by?: string
@@ -433,6 +434,7 @@ export interface PublicCustomerQueryParams {
   status?: CustomerStatus
   city?: string
   keyword?: string
+  search?: string
   order_by?: string
   order_dir?: 'asc' | 'desc'
 }

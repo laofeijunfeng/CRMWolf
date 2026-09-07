@@ -30,6 +30,7 @@ from app.utils.approval_delete_guard import assert_deletable_approval_resource
 from app.utils.time import business_now
 from app.core.list_query import (
     FilterCondition,
+    apply_search,
     ListQueryContext,
     SortCondition,
     paginate_optional_list_query,
@@ -185,6 +186,7 @@ class InvoiceApplicationCRUD:
         applicant_id: Optional[str] = None,
         current_user_id: Optional[str] = None,
         keyword: Optional[str] = None,
+        search: Optional[str] = None,
         created_time_start: Optional[date] = None,
         created_time_end: Optional[date] = None,
         order_by: Optional[str] = None,
@@ -281,6 +283,17 @@ class InvoiceApplicationCRUD:
 
         if created_time_end:
             query = query.filter(InvoiceApplication.created_time <= datetime.combine(created_time_end, time.max))
+
+        query = apply_search(
+            query,
+            INVOICES_LIST_QUERY_CATALOG,
+            search,
+            context=ListQueryContext(
+                db=db,
+                team_id=team_id,
+                current_user_id=current_user_id,
+            ),
+        )
 
         if keyword and keyword.strip():
             like_keyword = f"%{keyword.strip()}%"

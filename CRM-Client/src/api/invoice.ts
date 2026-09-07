@@ -203,6 +203,7 @@ export interface InvoiceApplicationQueryParams {
   invoice_type_exclude?: string
   invoice_effective_status?: string
   keyword?: string
+  search?: string
   created_time_start?: string
   created_time_end?: string
   order_by?: string

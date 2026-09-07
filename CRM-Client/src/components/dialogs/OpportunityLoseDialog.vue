@@ -25,8 +25,9 @@ import {
 } from '@/components/ui/form'
 import { Button } from '@/components/ui/button'
 import { TextareaField } from '@/components/crmwolf'
+import FeedbackAlert from '@/components/crmwolf/FeedbackAlert.vue'
+import SelectionSummary, { type SummaryItem } from '@/components/crmwolf/SelectionSummary.vue'
 import { confirmDialog } from '@/utils/confirmDialog'
-import { handleApiError } from '@/utils/errorHandler'
 import { opportunityApi, type Opportunity } from '@/api/opportunity'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 
@@ -77,6 +78,17 @@ const customerName = computed(() =>
   opportunity.value?.customer_name ?? opportunity.value?.customer_info?.account_name ?? '未关联客户',
 )
 
+const contextItems = computed<SummaryItem[]>(() => {
+  if (opportunity.value === null) return []
+
+  return [
+    { key: 'opportunity', label: '商机', value: opportunity.value.opportunity_name },
+    { key: 'customer', label: '客户', value: customerName.value },
+    { key: 'status', label: '当前状态', value: currentStatusLabel.value },
+    { key: 'resultStatus', label: '提交后状态', value: '已输单' },
+  ]
+})
+
 const hasFormChanges = computed(() => String(values.loss_reason ?? '').trim().length > 0)
 
 const handleDialogOpenChange = async (open: boolean): Promise<void> => {
@@ -118,7 +130,6 @@ const loadOpportunity = async (opportunityId: string): Promise<void> => {
   } catch (error) {
     if (requestId !== loadRequestId.value || !props.open || props.opportunityId !== opportunityId) return
     loadError.value = toFeedbackError(error, '商机详情')
-    handleApiError(error, '加载商机详情')
   } finally {
     if (requestId === loadRequestId.value) loading.value = false
   }
@@ -161,7 +172,6 @@ const onSubmit = handleSubmit(async (formValues) => {
     emit('update:open', false)
   } catch (error) {
     submitError.value = toFeedbackError(error, '标记输单', { operation: 'write' })
-    handleApiError(error, '标记输单')
   } finally {
     submitting.value = false
   }
@@ -170,106 +180,88 @@ const onSubmit = handleSubmit(async (formValues) => {
 
 <template>
   <Dialog :open="props.open" @update:open="handleDialogOpenChange">
-    <DialogContent class="sm:max-w-[425px] max-w-full">
+    <DialogContent class="opportunity-lose-dialog w-[calc(100vw-2rem)] max-w-[425px]">
       <DialogHeader>
         <DialogTitle>标记输单</DialogTitle>
         <DialogDescription>确认输单原因后，商机状态将变更为“已输单”。</DialogDescription>
       </DialogHeader>
 
-      <div
-        v-if="loadError"
-        class="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm"
-        role="alert"
-        aria-live="assertive"
-      >
-        <strong class="block">{{ loadError.title }}</strong>
-        <span class="text-muted-foreground">{{ loadError.description }}</span>
-        <Button
-          v-if="loadError.retryable !== false"
-          type="button"
-          variant="outline"
-          size="sm"
-          class="mt-3"
-          :disabled="loading"
-          @click="retryLoad"
+      <div class="opportunity-lose-dialog__body">
+        <SelectionSummary
+          v-if="loading"
+          variant="compact"
+          aria-label="正在加载商机上下文"
+          loading
+          :loading-count="4"
+          :items="[]"
+          :details="[]"
+        />
+
+        <SelectionSummary
+          v-else-if="opportunity !== null"
+          variant="compact"
+          aria-label="输单操作上下文"
+          :items="contextItems"
         >
-          {{ loading ? '加载中...' : '重新加载商机信息' }}
-        </Button>
+          <template #value-resultStatus>
+            <span class="font-medium text-destructive">已输单</span>
+          </template>
+        </SelectionSummary>
+
+        <FeedbackAlert
+          v-if="loadError !== null"
+          class="opportunity-lose-dialog__feedback"
+          :error="loadError"
+          density="compact"
+          retry-label="重新加载商机信息"
+          @retry="retryLoad"
+        />
+
+        <FeedbackAlert
+          v-if="submitError !== null"
+          class="opportunity-lose-dialog__feedback"
+          :error="submitError"
+          density="compact"
+          retry-label="重新提交"
+          @retry="onSubmit"
+        />
+
+        <form id="opportunity-lose-form" class="opportunity-lose-dialog__form" @submit="onSubmit">
+          <FormField v-slot="{ value, handleChange }" name="loss_reason">
+            <FormItem>
+              <TextareaField
+                id="opportunity-lose-reason"
+                :model-value="String(value ?? '')"
+                label="输单原因"
+                required
+                :rows="4"
+                :maxlength="500"
+                placeholder="请输入输单原因"
+                :disabled="loading || submitting || loadError !== null"
+                control-class="resize-none"
+                @update:model-value="handleChange"
+              />
+              <FormMessage />
+            </FormItem>
+          </FormField>
+        </form>
       </div>
 
-      <div
-        v-if="submitError"
-        class="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm"
-        role="alert"
-        aria-live="assertive"
-      >
-        <strong class="block">{{ submitError.title }}</strong>
-        <span class="text-muted-foreground">{{ submitError.description }}</span>
-        <span v-if="submitError.outcomeUnknown" class="mt-1 block text-muted-foreground">
-          请先刷新商机状态，确认尚未标记为输单后再重试，避免重复操作。
-        </span>
-      </div>
-
-      <div v-if="opportunity" class="rounded-md border bg-muted/30 p-3 text-sm" aria-label="输单操作上下文">
-        <div class="grid gap-2 sm:grid-cols-2">
-          <div>
-            <div class="text-muted-foreground">商机</div>
-            <div class="font-medium break-words">{{ opportunity.opportunity_name }}</div>
-          </div>
-          <div>
-            <div class="text-muted-foreground">客户</div>
-            <div class="font-medium break-words">{{ customerName }}</div>
-          </div>
-          <div>
-            <div class="text-muted-foreground">当前状态</div>
-            <div class="font-medium">{{ currentStatusLabel }}</div>
-          </div>
-          <div>
-            <div class="text-muted-foreground">提交后状态</div>
-            <div class="font-medium text-destructive">已输单</div>
-          </div>
-        </div>
-      </div>
-
-      <div v-if="loading" class="py-8 text-center text-muted-foreground" role="status">
-        加载商机信息中...
-      </div>
-
-      <form v-else-if="!loadError" class="grid gap-4 py-4" @submit="onSubmit">
-        <FormField v-slot="{ value, handleChange }" name="loss_reason">
-          <FormItem>
-            <TextareaField
-              id="opportunity-lose-reason"
-              :model-value="String(value ?? '')"
-              label="输单原因"
-              required
-              :rows="4"
-              :maxlength="500"
-              placeholder="请输入输单原因"
-              :disabled="submitting"
-              control-class="resize-none"
-              @update:model-value="handleChange"
-            />
-            <FormMessage />
-          </FormItem>
-        </FormField>
-      </form>
-
-      <DialogFooter class="flex-col gap-2 sm:flex-row">
+      <DialogFooter class="opportunity-lose-dialog__footer">
         <Button
           variant="outline"
+          class="opportunity-lose-dialog__button"
           :disabled="submitting || closeGuardPending"
-          class="w-full sm:w-auto"
           @click="handleDialogOpenChange(false)"
         >
           取消
         </Button>
         <Button
           type="submit"
+          form="opportunity-lose-form"
+          class="opportunity-lose-dialog__button"
           :disabled="submitting || loading || loadError !== null || closeGuardPending"
           :loading="submitting"
-          class="w-full sm:w-auto"
-          @click="onSubmit"
         >
           {{ submitting ? '提交中...' : '确认标记输单' }}
         </Button>
@@ -277,3 +269,54 @@ const onSubmit = handleSubmit(async (formValues) => {
     </DialogContent>
   </Dialog>
 </template>
+
+<style scoped lang="scss">
+@use '@/styles/variables-v2.scss' as *;
+
+.opportunity-lose-dialog {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  max-height: $wolf-modal-height-mobile-v2;
+  overflow: hidden;
+}
+
+.opportunity-lose-dialog__body {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: $wolf-space-lg-v2;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-inline: calc($wolf-focus-ring-width-v2 + $wolf-focus-ring-offset-v2);
+  scroll-padding-bottom: calc($wolf-space-xl-v2 + $wolf-safe-area-bottom-v2);
+}
+
+.opportunity-lose-dialog__form {
+  display: flex;
+  flex-direction: column;
+  gap: $wolf-form-item-gap-v2;
+}
+
+.opportunity-lose-dialog__feedback {
+  min-width: 0;
+}
+
+.opportunity-lose-dialog__footer {
+  gap: $wolf-space-sm-v2;
+  padding-top: $wolf-space-lg-v2;
+  border-top: 1px solid $wolf-border-divider-v2;
+}
+
+.opportunity-lose-dialog__button {
+  height: $wolf-button-height-md-v2;
+  min-height: $wolf-button-height-md-v2;
+}
+
+@media (max-width: $wolf-breakpoint-sm-v2) {
+  .opportunity-lose-dialog__button {
+    width: 100%;
+    height: $wolf-button-height-mobile-v2;
+    min-height: $wolf-button-height-mobile-v2;
+  }
+}
+</style>

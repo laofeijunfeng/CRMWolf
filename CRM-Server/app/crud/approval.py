@@ -19,6 +19,7 @@ from app.core.list_query import (
     ListQueryContext,
     SortCondition,
     apply_filters,
+    apply_search,
     apply_sorts,
     uses_unified_list_query,
     without_filter_field,
@@ -1027,6 +1028,7 @@ class ApprovalCRUD:
         created_time_end: Optional[date] = None,
         page: int = 1,
         page_size: int = 20,
+        search: Optional[str] = None,
         filters: list[FilterCondition] | None = None,
         sorts: list[SortCondition] | None = None,
     ) -> Tuple[List[Dict[str, Any]], int, int]:
@@ -1115,6 +1117,18 @@ class ApprovalCRUD:
             query = query.filter(Approval.id.in_(processed_sub))
         else:
             raise ValueError(f"非法 tab: {tab}，仅支持 pending / processed / submitted")
+
+        query = apply_search(
+            query,
+            APPROVALS_LIST_QUERY_CATALOG,
+            search,
+            context=ListQueryContext(
+                db=db,
+                team_id=team_id,
+                current_user_id=user_id_str,
+                now=business_now(),
+            ),
+        )
 
         if unified_protocol:
             effective_filters = without_filter_field(filters, "status") if tab == "pending" else filters

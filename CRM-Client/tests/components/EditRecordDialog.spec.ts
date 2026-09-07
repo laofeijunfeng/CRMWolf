@@ -177,6 +177,7 @@ describe('EditRecordDialog', () => {
 
     const amountInput = wrapper.get('input[name="actual_amount"]').element as HTMLInputElement
     const dateInput = wrapper.get('#edit-record-date input').element as HTMLInputElement
+    await wrapper.get('button.edit-record-dialog__supplement-trigger').trigger('click')
     const proofInput = wrapper.get('input[name="proof_attachment"]').element as HTMLInputElement
     const notesInput = wrapper.get('textarea[name="notes"]').element as HTMLTextAreaElement
 
@@ -221,7 +222,38 @@ describe('EditRecordDialog', () => {
     expect(wrapper.get('input[name="actual_amount"]').attributes('aria-invalid')).toBe('true')
     expect(wrapper.get('#edit-record-date input').attributes('aria-invalid')).toBe('true')
     expect(wrapper.findAll('[role="alert"]')).toHaveLength(3)
-    expect(wrapper.get('.edit-record-dialog__error-summary').text()).toContain('请先修正以下字段：')
+    expect(wrapper.get('.form-error-summary').text()).toContain('请先修正以下字段：')
+  })
+
+  it('keeps optional record details collapsed and expands them for note validation', async () => {
+    const wrapper = mount(EditRecordDialog, {
+      props: {
+        open: true,
+        record: {
+          ...recordFixture(),
+          actual_amount: 8800.5,
+          proof_attachment: '',
+          notes: '',
+        },
+      },
+    })
+
+    const trigger = wrapper.get('button.edit-record-dialog__supplement-trigger')
+    expect(trigger.attributes('aria-expanded')).toBe('false')
+    expect(wrapper.find('input[name="proof_attachment"]').exists()).toBe(false)
+    expect(wrapper.find('textarea[name="notes"]').exists()).toBe(false)
+
+    await trigger.trigger('click')
+    expect(trigger.attributes('aria-expanded')).toBe('true')
+    expect(wrapper.get('input[name="proof_attachment"]').element).toBeTruthy()
+    expect(wrapper.get('textarea[name="notes"]').element).toBeTruthy()
+
+    await wrapper.get('textarea[name="notes"]').setValue(`${'长'.repeat(201)}`)
+    await wrapper.get('form').trigger('submit')
+    await nextTick()
+
+    expect(wrapper.text()).toContain('备注不能超过 200 字')
+    expect(trigger.attributes('aria-expanded')).toBe('true')
   })
 
   it('protects modified content before closing and does not add a guard for untouched content', async () => {
@@ -233,8 +265,9 @@ describe('EditRecordDialog', () => {
       },
     })
 
+    await wrapper.get('button.edit-record-dialog__supplement-trigger').trigger('click')
     await wrapper.get('textarea[name="notes"]').setValue('新的备注')
-    await wrapper.get('button[type="button"]').trigger('click')
+    await wrapper.get('.edit-record-dialog__footer button[type="button"]').trigger('click')
     expect(confirmDialogMock).toHaveBeenCalledWith(
       '已修改回款记录，关闭后这些修改不会保存。确定关闭吗？',
       '放弃本次修改？',
@@ -243,7 +276,7 @@ describe('EditRecordDialog', () => {
     expect(wrapper.emitted('update:open')).toBeUndefined()
 
     confirmDialogMock.mockResolvedValue(true)
-    await wrapper.get('button[type="button"]').trigger('click')
+    await wrapper.get('.edit-record-dialog__footer button[type="button"]').trigger('click')
     expect(wrapper.emitted('update:open')).toEqual([[false]])
   })
 

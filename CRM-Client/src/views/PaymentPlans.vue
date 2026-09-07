@@ -79,6 +79,7 @@ const editingPlan = ref<PaymentPlanWithDetails | null>(null)
 const activeFilters = ref<ListFilterCondition[]>([])
 const activeSorts = ref<ListSortCondition[]>([])
 const activeColumns = ref<ViewPreferenceConfig['columns']>([])
+const search = ref('')
 
 const pagination = reactive({
   current: 1,
@@ -95,6 +96,10 @@ const tabs = [
 ]
 
 const activeTab = ref('all')
+
+watch(activeTab, () => {
+  search.value = ''
+}, { flush: 'sync' })
 
 // Badge counts from store（暂不使用，保留供未来扩展）
 // const tabBadgeCounts = computed(() => ({
@@ -113,7 +118,6 @@ const paymentPlanStatusOptions = [
 ]
 
 const fields: ListFieldDefinition[] = [
-  { key: 'keyword', label: '客户/合同/商机/阶段', type: 'text', role: 'keyword', filter: true },
   { key: 'plan_number', label: '计划编号', type: 'text', column: { width: '150px' } },
   { key: 'stage_name', label: '阶段名称', type: 'text', column: { width: '120px' } },
   { key: 'customer_name', label: '客户名称', type: 'text', column: true },
@@ -170,6 +174,7 @@ const fetchPaymentPlans = async (): Promise<boolean> => {
       page: pagination.current,
       page_size: pagination.pageSize,
       ...(tabStatus !== null ? { status: tabStatus } : {}),
+      ...(search.value.trim() !== '' ? { search: search.value.trim() } : {}),
       ...serializeListQuery({ filters: effectiveFilters, sorts: activeSorts.value })
     }
 
@@ -234,6 +239,18 @@ const handleReset = (): void => {
   activeFilters.value = []
   pagination.current = 1
   fetchPaymentPlans()
+}
+
+const handleSearchApply = (value: string): void => {
+  search.value = value.trim()
+  pagination.current = 1
+  void fetchPaymentPlans()
+}
+
+const handleSearchClear = (): void => {
+  search.value = ''
+  pagination.current = 1
+  void fetchPaymentPlans()
 }
 
 const handleSortApply = (sorts: ListSortCondition[]): void => {
@@ -597,6 +614,7 @@ watch(
     <!-- DataTable -->
     <DataTable
       v-model:filters="activeFilters"
+      v-model:search="search"
       :fields="fields"
       :data="tableData"
       :loading="loading"
@@ -615,12 +633,15 @@ watch(
       :column-preference-mode="columnPreferenceMode"
       filter-view-save-enabled
       :filter-view-save-loading="customFilterViewSaving"
+      search-enabled
+      search-placeholder="搜索计划编号、客户、合同、商机或阶段"
+      :search-loading="loading"
       height="calc(100vh - 121px)"
       height-strategy="fill"
       scroll-mode="contained"
       compact-pagination
       empty-title="暂无回款计划"
-      :empty-reason="effectiveFilters.length > 0 ? 'filtered' : activeTab === 'all' ? 'not-created' : 'no-data'"
+      :empty-reason="search.trim() !== '' || effectiveFilters.length > 0 ? 'filtered' : activeTab === 'all' ? 'not-created' : 'no-data'"
       row-interactive
       detail-column-key="plan_number"
       :get-row-label="(row) => `回款计划 ${row.plan_number || row.id}`"
@@ -632,6 +653,8 @@ watch(
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
       @filter-apply="handleFilterApply"
+      @search-apply="handleSearchApply"
+      @search-clear="handleSearchClear"
       @filter-reset="handleReset"
       @filter-save-view="handleSaveFilterView"
       @update:sorts="activeSorts = $event"

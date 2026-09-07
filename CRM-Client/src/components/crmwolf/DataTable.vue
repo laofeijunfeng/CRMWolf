@@ -34,6 +34,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import ListFilterPopover from './ListFilterPopover.vue'
 import ListAdvancedTools from './ListAdvancedTools.vue'
 import ListViewStateSummary from './ListViewStateSummary.vue'
+import DataTableSearch from './DataTableSearch.vue'
 import SelectField from './SelectField.vue'
 import { viewPreferenceApi, type ViewPreferenceConfig, type ViewPreferenceScope } from '@/api/viewPreference'
 import type { ColumnConfigOption } from './columnConfigTypes'
@@ -146,6 +147,14 @@ interface Props {
   columnPreferenceMode?: 'default' | 'custom'
   /** 是否允许把当前筛选另存为视图 */
   filterViewSaveEnabled?: boolean
+  /** 是否启用统一搜索；搜索与筛选、视图状态分离 */
+  searchEnabled?: boolean
+  /** 已提交的统一搜索词 */
+  search?: string
+  /** 统一搜索占位文案，由页面声明可搜索字段范围 */
+  searchPlaceholder?: string
+  /** 搜索按钮加载状态 */
+  searchLoading?: boolean
   /** 筛选视图保存中 */
   filterViewSaveLoading?: boolean
 }
@@ -185,6 +194,10 @@ const props = withDefaults(defineProps<Props>(), {
   columnPreferenceMode: 'default',
   filterViewSaveEnabled: false,
   filterViewSaveLoading: false,
+  searchEnabled: false,
+  search: '',
+  searchPlaceholder: '',
+  searchLoading: false,
   viewApplying: false,
   viewApplyError: null,
   effectiveFilters: undefined,
@@ -210,6 +223,9 @@ const emit = defineEmits<{
   'remove-filter': [id: string]
   'clear-filters': []
   'retry-view-apply': []
+  'update:search': [value: string]
+  'search-apply': [value: string]
+  'search-clear': []
 }>()
 
 // ==================== Computed ====================
@@ -306,7 +322,7 @@ const hasAdvancedTools = computed(() =>
   normalizedSortFields.value.length > 0 || isColumnConfigAvailable.value
 )
 const hasTableTools = computed(() =>
-  normalizedFilterFields.value.length > 0 || hasAdvancedTools.value
+  props.searchEnabled || normalizedFilterFields.value.length > 0 || hasAdvancedTools.value
 )
 const pageSizeOptions = computed(() =>
   props.pageSizes.map((size) => ({
@@ -725,6 +741,18 @@ function handleClearFilters(): void {
   emit('clear-filters')
 }
 
+function handleSearchUpdate(value: string): void {
+  emit('update:search', value)
+}
+
+function handleSearchApply(value: string): void {
+  emit('search-apply', value)
+}
+
+function handleSearchClear(): void {
+  emit('search-clear')
+}
+
 function handleSortUpdate(sorts: ListSortCondition[]): void {
   emit('update:sorts', sorts)
 }
@@ -954,6 +982,16 @@ onBeforeUnmount(() => {
         </ContextMenuContent>
       </ContextMenu>
       <div v-if="hasTableTools || $slots['tableTools']" class="data-table-tools">
+        <DataTableSearch
+          v-if="props.searchEnabled"
+          :model-value="props.search"
+          :placeholder="props.searchPlaceholder || '搜索'"
+          :disabled="viewApplying ?? false"
+          :loading="props.searchLoading"
+          @update:model-value="handleSearchUpdate"
+          @search="handleSearchApply"
+          @clear="handleSearchClear"
+        />
         <ListFilterPopover
           v-if="normalizedFilterFields.length > 0"
           :model-value="normalizedFilters"

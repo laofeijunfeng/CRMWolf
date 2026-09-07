@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.core.list_query.catalog import ListQueryCatalog, ListQueryField
-from app.core.list_query.catalogs.common import person_field, related_name_expression
+from app.core.list_query.catalogs.common import person_field, related_name_expression, text_search_predicate
 from app.core.list_query.types import SortCondition
 from app.models.customer import Customer
 from app.models.opportunity import Opportunity
@@ -38,4 +38,14 @@ OPPORTUNITIES_LIST_QUERY_CATALOG = ListQueryCatalog(
         ListQueryField(key="created_time", type="date", expression=Opportunity.created_time),
     ],
     default_sorts=[SortCondition(field="created_time", direction="desc")],
+    search_predicate=text_search_predicate(
+        Opportunity.opportunity_name,
+        Opportunity.current_stage_name,
+        related_name_expression(
+            Customer,
+            Opportunity.customer_id,
+            Customer.account_name,
+            team_id_expression=Opportunity.team_id,
+        ),
+    ),
 )

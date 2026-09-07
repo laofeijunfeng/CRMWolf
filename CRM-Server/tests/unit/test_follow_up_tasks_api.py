@@ -48,6 +48,7 @@ from app.schemas.sales_commitment import (
     SalesCommitmentInternalCreate,
 )
 from app.services import follow_up_task_query_service
+from app.services.follow_up_task_query_service import follow_up_task_query_service as query_service
 
 
 @compiles(BigInteger, "sqlite")
@@ -386,6 +387,42 @@ def test_list_follow_up_tasks_returns_public_ids_and_customer_summary(client, db
     assert len(payload["customer_summary"]) == 1
     assert payload["customer_summary"][0]["customer"]["id"] == "cus_11111111111111111111111111111111"
     assert payload["usage_policy"]["task_state_source"] == "mysql"
+
+
+def test_list_follow_up_tasks_combines_semantic_candidates_with_module_search(client, db_session, monkeypatch):
+    task = _create_task(db_session, task_id=201)
+    other_task = _create_task(
+        db_session,
+        task_id=202,
+        customer_id=2,
+        source_activity_id=102,
+    )
+    task.title = "结构化搜索词"
+    other_task.title = "语义候选"
+    db_session.commit()
+
+    def _recall(db, *, team_id, query_text, limit=50):  # noqa: ARG001
+        return SimpleNamespace(
+            task_public_ids=[task.public_id, other_task.public_id],
+            evidence_by_task_public_id={task.public_id: []},
+            retrieval_event={"event": "test"},
+        )
+
+    monkeypatch.setattr(query_service.semantic_evidence_service, "recall", _recall)
+
+    response = client.get(
+        "/v1/follow-up-tasks",
+        params={
+            "retrieval_mode": "semantic_filter",
+            "query_text": "预算进展",
+            "search": "结构化搜索词",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 1
+    assert [item["title"] for item in payload["items"]] == ["结构化搜索词"]
 
 
 def test_list_follow_up_tasks_projects_pending_confirmations_onto_the_matching_task(client, db_session):

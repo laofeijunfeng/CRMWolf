@@ -14,7 +14,7 @@
  * - 页面 padding: 24px
  * - gap: 24px（组件间距）
  */
-import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
+import { ref, reactive, computed, onMounted, watch, watchEffect } from 'vue'
 import { useRouter } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
@@ -66,6 +66,7 @@ const isResubmitMode = ref(false)
 const activeFilters = ref<ListFilterCondition[]>([])
 const activeSorts = ref<ListSortCondition[]>([])
 const activeColumns = ref<ViewPreferenceConfig['columns']>([])
+const search = ref('')
 
 const pagination = reactive({
   current: 1,
@@ -84,6 +85,10 @@ const tabs = [
 
 const activeTab = ref('all')
 
+watch(activeTab, () => {
+  search.value = ''
+}, { flush: 'sync' })
+
 // ==================== 列表字段注册表 ====================
 const confirmationStatusOptions = [
   { value: 'PENDING', label: '待确认' },
@@ -98,7 +103,6 @@ const approvalStatusOptions = [
 ]
 
 const fields: ListFieldDefinition[] = [
-  { key: 'keyword', label: '全局关键词', type: 'text', role: 'keyword', filter: true },
   { key: 'record_number', label: '回款编号', type: 'text', column: { width: '180px' }, filter: true, sort: true },
   { key: 'customer_name', label: '客户名称', type: 'text', column: { width: '180px' }, filter: true, sort: true },
   { key: 'actual_payer_name', label: '实际付款方', type: 'text', column: { width: '180px' }, filter: true, sort: true },
@@ -177,6 +181,7 @@ const fetchPaymentRecords = async (): Promise<boolean> => {
       page: pagination.current,
       page_size: pagination.pageSize,
       ...(tabApprovalStatus !== null ? { approval_status: tabApprovalStatus } : {}),
+      ...(search.value.trim() !== '' ? { search: search.value.trim() } : {}),
       ...serializeListQuery({ filters: effectiveFilters, sorts: activeSorts.value })
     }
 
@@ -241,6 +246,18 @@ const handleReset = (): void => {
   activeFilters.value = []
   pagination.current = 1
   fetchPaymentRecords()
+}
+
+const handleSearchApply = (value: string): void => {
+  search.value = value.trim()
+  pagination.current = 1
+  void fetchPaymentRecords()
+}
+
+const handleSearchClear = (): void => {
+  search.value = ''
+  pagination.current = 1
+  void fetchPaymentRecords()
 }
 
 const handleSortApply = (sorts: ListSortCondition[]): void => {
@@ -525,6 +542,7 @@ watchEffect(() => {
     <DataTable
       v-model:filters="activeFilters"
       v-model:sorts="activeSorts"
+      v-model:search="search"
       :fields="fields"
       :data="tableData"
       :loading="loading"
@@ -542,12 +560,15 @@ watchEffect(() => {
       :column-preference-mode="columnPreferenceMode"
       filter-view-save-enabled
       :filter-view-save-loading="customFilterViewSaving"
+      search-enabled
+      search-placeholder="搜索回款编号、客户、合同、阶段、付款方或发票抬头"
+      :search-loading="loading"
       height="calc(100vh - 121px)"
       height-strategy="fill"
       scroll-mode="contained"
       compact-pagination
       empty-title="暂无回款记录"
-      :empty-reason="effectiveFilters.length > 0 ? 'filtered' : activeTab === 'all' ? 'not-created' : 'no-data'"
+      :empty-reason="search.trim() !== '' || effectiveFilters.length > 0 ? 'filtered' : activeTab === 'all' ? 'not-created' : 'no-data'"
       row-interactive
       detail-column-key="record_number"
       :get-row-label="(row) => `回款记录 ${row.record_number || row.id}`"
@@ -559,6 +580,8 @@ watchEffect(() => {
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
       @filter-apply="handleFilterApply"
+      @search-apply="handleSearchApply"
+      @search-clear="handleSearchClear"
       @filter-reset="handleReset"
       @filter-save-view="handleSaveFilterView"
       @sort-apply="handleSortApply"

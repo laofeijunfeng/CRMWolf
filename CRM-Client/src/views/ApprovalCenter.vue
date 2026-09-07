@@ -41,7 +41,7 @@
         height-strategy="fill"
         scroll-mode="contained"
         empty-title="暂无待审批事项"
-        :empty-reason="effectiveFilters.length > 0 ? 'filtered' : 'no-data'"
+        :empty-reason="search.trim() !== '' || effectiveFilters.length > 0 ? 'filtered' : 'no-data'"
         empty-description="所有回款与发票申请都已处理完毕"
         mobile-mode="card"
         row-interactive
@@ -50,6 +50,12 @@
         :get-row-actions="getRowActions"
         @update:page="page = $event; fetchList()"
         @update:page-size="pageSize = $event; page = 1; fetchList()"
+        v-model:search="search"
+        search-enabled
+        search-placeholder="搜索单号、实体或提交人"
+        :search-loading="listLoading"
+        @search-apply="handleSearchApply"
+        @search-clear="handleSearchClear"
         @filter-apply="handleFilterApply"
         @filter-reset="handleFilterReset"
         @sort-apply="handleSortApply"
@@ -598,6 +604,12 @@ const router = useRouter()
 
 // ==================== State ====================
 const activeTab = ref<Tab>('pending')
+
+const search = ref('')
+
+watch(activeTab, () => {
+  search.value = ''
+}, { flush: 'sync' })
 const activeFilters = ref<ListFilterCondition[]>([])
 const activeSorts = ref<ListSortCondition[]>([])
 
@@ -1248,6 +1260,7 @@ const fetchList = async (): Promise<boolean> => {
       tab: activeTab.value,
       page: page.value,
       page_size: pageSize.value,
+      ...(search.value.trim() !== '' ? { search: search.value.trim() } : {}),
       ...serializeListQuery({ filters: effectiveFilters, sorts: activeSorts.value })
     }
     const res = await store.fetchList(query)
@@ -1279,6 +1292,18 @@ const handleFilterReset = (): void => {
   activeFilters.value = []
   page.value = 1
   fetchList()
+}
+
+const handleSearchApply = (value: string): void => {
+  search.value = value.trim()
+  page.value = 1
+  void fetchList()
+}
+
+const handleSearchClear = (): void => {
+  search.value = ''
+  page.value = 1
+  void fetchList()
 }
 
 const handleSortApply = (sorts: ListSortCondition[]): void => {

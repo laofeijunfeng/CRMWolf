@@ -52,4 +52,8 @@ export interface InputGroupButtonProps {
   variant?: ButtonVariants["variant"]
   size?: InputGroupButtonVariants["size"]
   class?: HTMLAttributes["class"]
+  /** 防止重复提交，并向辅助技术暴露忙碌状态 */
+  loading?: boolean
+  /** 显式禁用按钮；loading 时始终视为禁用 */
+  disabled?: boolean | undefined
 }

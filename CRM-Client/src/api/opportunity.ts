@@ -202,6 +202,7 @@ export interface OpportunityListParams {
   owner_id_exclude?: string | null
   customer_id?: string | null
   keyword?: string | null
+  search?: string | null
   customer_keyword?: string | null
   license_type?: string | null
   license_type_exclude?: string | null

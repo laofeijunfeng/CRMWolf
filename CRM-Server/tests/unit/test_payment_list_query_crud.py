@@ -18,6 +18,7 @@ from app.crud.payment import payment_plan_crud, payment_record_crud
 from app.models.approval import Approval
 from app.models.contract import Contract
 from app.models.customer import Customer
+from app.models.customer_identity_term import CustomerIdentityTerm, CustomerIdentityTermStatus, CustomerIdentityTermType
 from app.models.invoice import (
     InvoiceApplication,
     InvoiceApplicationStatus,
@@ -52,6 +53,7 @@ def db_session():
     tables = [
         User.__table__,
         Customer.__table__,
+        CustomerIdentityTerm.__table__,
         Opportunity.__table__,
         Contract.__table__,
         PaymentPlan.__table__,
@@ -258,6 +260,114 @@ def _seed_payment_graph(db_session):
         ]
     )
     db_session.commit()
+
+
+def test_payment_unified_search_matches_identifiers_and_customer_aliases(db_session):
+    _seed_payment_graph(db_session)
+    db_session.add(
+        CustomerIdentityTerm(
+            tenant_id=1,
+            team_id=1,
+            customer_id=1,
+            term="Alpha 简称",
+            normalized_term="alpha简称",
+            term_type=CustomerIdentityTermType.ALIAS,
+            source="human",
+            confidence=1.0,
+            status=CustomerIdentityTermStatus.ACTIVE,
+        )
+    )
+    db_session.commit()
+
+    plans, plan_total = payment_plan_crud.list_plans(
+        db_session,
+        team_id=1,
+        search="Alpha 简称",
+        filters=[],
+        sorts=[],
+    )
+    records, record_total = payment_record_crud.list_records(
+        db_session,
+        team_id=1,
+        search="Alpha 简称",
+        filters=[],
+        sorts=[],
+    )
+
+    assert plan_total == 1
+    assert [plan.plan_number for plan in plans] == ["PP-001"]
+    assert record_total == 1
+    assert [record.record_number for record in records] == ["PR-001"]
+
+    plans_by_number, total_by_number = payment_plan_crud.list_plans(
+        db_session,
+        team_id=1,
+        search="PP-002",
+        filters=[],
+        sorts=[],
+    )
+
+    assert total_by_number == 1
+    assert [plan.plan_number for plan in plans_by_number] == ["PP-002"]
+
+    records_by_invoice_title, invoice_title_total = payment_record_crud.list_records(
+        db_session,
+        team_id=1,
+        search="Beta 发票抬头",
+        filters=[],
+        sorts=[],
+    )
+
+    assert invoice_title_total == 1
+    assert [record.record_number for record in records_by_invoice_title] == ["PR-002"]
+
+
+def test_payment_unified_search_combines_with_filters(db_session):
+    _seed_payment_graph(db_session)
+
+    plans, total = payment_plan_crud.list_plans(
+        db_session,
+        team_id=1,
+        search="Alpha",
+        filters=[{"field": "planned_amount", "op": "eq", "value": 3000}],
+        sorts=[],
+    )
+    records, record_total = payment_record_crud.list_records(
+        db_session,
+        team_id=1,
+        search="Alpha",
+        filters=[{"field": "actual_amount", "op": "eq", "value": 2800}],
+        sorts=[],
+    )
+
+    assert total == 0
+    assert plans == []
+    assert record_total == 0
+    assert records == []
+
+def test_payment_unified_search_escapes_like_wildcards(db_session):
+    _seed_payment_graph(db_session)
+
+    for wildcard in ("%", "_"):
+        plans, plan_total = payment_plan_crud.list_plans(
+            db_session,
+            team_id=1,
+            search=wildcard,
+            filters=[],
+            sorts=[],
+        )
+        records, record_total = payment_record_crud.list_records(
+            db_session,
+            team_id=1,
+            search=wildcard,
+            filters=[],
+            sorts=[],
+        )
+
+        assert plan_total == 0
+        assert plans == []
+        assert record_total == 0
+        assert records == []
 
 
 def test_payment_plan_planned_amount_filters_sorts_and_paginates(db_session):

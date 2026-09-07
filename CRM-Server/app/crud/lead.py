@@ -16,6 +16,7 @@ from app.core.list_query import (
     ListQueryContext,
     SortCondition,
     has_filter_field,
+    apply_search,
     paginate_optional_list_query,
     uses_unified_list_query,
 )
@@ -59,6 +60,7 @@ class LeadCRUD:
         owner_id: Optional[str] = None,
         creator_id: Optional[str] = None,
         keyword: Optional[str] = None,
+        search: Optional[str] = None,
         filters: list[FilterCondition] | None = None,
         sorts: list[SortCondition] | None = None,
         order_by: Optional[str] = None,
@@ -79,6 +81,7 @@ class LeadCRUD:
                 filters=filters,
                 sorts=sorts,
                 context=ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id),
+                search=search,
             )
 
         if status is not None:
@@ -104,6 +107,12 @@ class LeadCRUD:
             )
         if filters:
             query = self._apply_filters(query, filters, db=db, team_id=team_id)
+        query = apply_search(
+            query,
+            LEADS_LIST_QUERY_CATALOG,
+            search,
+            context=ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id),
+        )
 
         total = query.count()
 
@@ -418,6 +427,7 @@ class LeadCRUD:
         limit: int = 100,
         filters: list[FilterCondition] | None = None,
         sorts: list[SortCondition] | None = None,
+        search: Optional[str] = None,
         order_by: Optional[str] = None,
         order_dir: Optional[str] = None
     ) -> Tuple[List[Lead], int]:
@@ -436,6 +446,7 @@ class LeadCRUD:
             filters=filters,
             sorts=sorts,
             context=ListQueryContext(db=db, team_id=team_id),
+            search=search,
             legacy_filters=(
                 (lambda legacy_query: self._apply_filters(legacy_query, filters, db=db, team_id=team_id))
                 if filters

@@ -3,7 +3,12 @@ from __future__ import annotations
 from sqlalchemy import func
 
 from app.core.list_query.catalog import ListQueryCatalog, ListQueryField
-from app.core.list_query.catalogs.common import latest_official_issued_license, person_field, related_name_expression
+from app.core.list_query.catalogs.common import (
+    latest_official_issued_license,
+    person_field,
+    related_name_expression,
+    text_search_predicate,
+)
 from app.core.list_query.types import SortCondition
 from app.models.contract import Contract
 from app.models.customer import Customer
@@ -71,4 +76,20 @@ CONTRACTS_LIST_QUERY_CATALOG = ListQueryCatalog(
         person_field("owner_id", Contract.owner_id),
     ],
     default_sorts=[SortCondition(field="created_time", direction="desc")],
+    search_predicate=text_search_predicate(
+        Contract.contract_number,
+        Contract.contract_name,
+        related_name_expression(
+            Customer,
+            Contract.customer_id,
+            Customer.account_name,
+            team_id_expression=Contract.team_id,
+        ),
+        related_name_expression(
+            Opportunity,
+            Contract.opportunity_id,
+            Opportunity.opportunity_name,
+            team_id_expression=Contract.team_id,
+        ),
+    ),
 )

@@ -37,3 +37,23 @@ def test_committed_client_manifest_matches_backend_catalogs(tmp_path):
     assert json.loads(CLIENT_MANIFEST.read_text(encoding="utf-8")) == json.loads(
         generated_path.read_text(encoding="utf-8")
     )
+
+
+def test_every_datatable_catalog_defines_a_module_scoped_search_predicate():
+    datatable_catalogs = {
+        "approvals",
+        "contracts",
+        "customer_tracking" if "customer_tracking" in LIST_QUERY_CATALOGS else "follow_up_tasks",
+        "customers",
+        "invoices",
+        "leads",
+        "opportunities",
+        "payment_plans",
+        "payment_records",
+    }
+
+    missing = sorted(
+        name for name in datatable_catalogs
+        if LIST_QUERY_CATALOGS[name].search_predicate is None
+    )
+    assert missing == []

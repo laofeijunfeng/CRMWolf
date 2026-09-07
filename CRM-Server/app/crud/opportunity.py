@@ -13,6 +13,7 @@ from app.core.list_query import (
     FilterCondition,
     ListQueryContext,
     SortCondition,
+    apply_search,
     paginate_optional_list_query,
     uses_unified_list_query,
     without_filter_field,
@@ -195,6 +196,7 @@ class OpportunityCRUD:
         customer_id: Optional[int] = None,
         keyword: Optional[str] = None,
         customer_keyword: Optional[str] = None,
+        search: Optional[str] = None,
         license_type: Optional[str] = None,
         license_type_exclude: Optional[str] = None,
         purchase_type: Optional[str] = None,
@@ -228,6 +230,7 @@ class OpportunityCRUD:
                 filters=effective_filters,
                 sorts=sorts,
                 context=ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id),
+                search=search,
             )
 
         status_values = _split_int_csv(status)
@@ -248,6 +251,12 @@ class OpportunityCRUD:
             query = query.filter(Opportunity.opportunity_name.like(f"%{keyword}%"))
         if customer_keyword:
             query = query.filter(Opportunity.customer.has(Customer.account_name.like(f"%{customer_keyword}%")))
+        query = apply_search(
+            query,
+            OPPORTUNITIES_LIST_QUERY_CATALOG,
+            search,
+            context=ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id),
+        )
         if license_type:
             query = query.filter(Opportunity.license_type.in_(_split_csv(license_type)))
         if license_type_exclude:

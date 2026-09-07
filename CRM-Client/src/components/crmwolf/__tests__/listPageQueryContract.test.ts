@@ -200,6 +200,33 @@ describe('DataTable frontend/backend list-query contract', () => {
     }
   })
 
+  it('enables module-scoped DataTable search with page-specific copy on every paginated list', () => {
+    const expectedPlaceholders = {
+      'ApprovalCenter.vue': '搜索单号、实体或提交人',
+      'Contracts.vue': '搜索合同编号、合同名称、客户或商机',
+      'CustomerTracking.vue': '搜索客户或跟进内容',
+      'Customers.vue': '搜索客户名称、简称或别名',
+      'Invoices.vue': '搜索申请编号、客户、合同、抬头、税号或发票号码',
+      'Leads.vue': '搜索线索名称、联系人或手机号',
+      'Opportunities.vue': '搜索商机名称、客户或阶段',
+      'PaymentPlans.vue': '搜索计划编号、客户、合同、商机或阶段',
+      'PaymentRecords.vue': '搜索回款编号、客户、合同、阶段、付款方或发票抬头'
+    }
+
+    for (const [viewName, placeholder] of Object.entries(expectedPlaceholders)) {
+      const source = readFileSync(resolve(viewsDir, viewName), 'utf8')
+      expect(source, `${viewName} search switch`).toContain('search-enabled')
+      expect(source, `${viewName} search binding`).toContain('v-model:search="search"')
+      expect(source, `${viewName} search copy`).toContain(`search-placeholder="${placeholder}"`)
+      expect(source, `${viewName} search request`).toContain("...(search.value.trim() !== '' ? { search: search.value.trim() } : {})")
+      expect(source, `${viewName} search apply`).toContain('@search-apply="handleSearchApply"')
+      expect(source, `${viewName} search clear`).toContain('@search-clear="handleSearchClear"')
+      expect(source, `${viewName} filtered empty state`).toMatch(/empty-reason[^\n]*search\.trim\(\)/)
+    }
+
+    expect(new Set(Object.values(expectedPlaceholders)).size).toBe(Object.keys(expectedPlaceholders).length)
+  })
+
   it('does not reintroduce client-side filtering, sorting, or slicing in CustomerTracking', () => {
     const source = readFileSync(resolve(viewsDir, 'CustomerTracking.vue'), 'utf8')
     expect(source).not.toContain('applyFilters')

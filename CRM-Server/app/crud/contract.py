@@ -19,6 +19,7 @@ from app.core.list_query import (
     FilterCondition,
     ListQueryContext,
     SortCondition,
+    apply_search,
     paginate_optional_list_query,
     uses_unified_list_query,
     without_filter_field,
@@ -188,6 +189,7 @@ class ContractCRUD:
         keyword: Optional[str] = None,
         customer_keyword: Optional[str] = None,
         opportunity_keyword: Optional[str] = None,
+        search: Optional[str] = None,
         owner_id: Optional[str] = None,
         owner_id_exclude: Optional[str] = None,
         signing_date_start: Optional[date] = None,
@@ -295,6 +297,7 @@ class ContractCRUD:
                 filters=effective_filters,
                 sorts=sorts,
                 context=ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id),
+                search=search,
             )
 
         if customer_id:
@@ -338,6 +341,12 @@ class ContractCRUD:
 
         if opportunity_keyword:
             query = query.filter(Contract.opportunity.has(Opportunity.opportunity_name.like(f"%{opportunity_keyword}%")))
+        query = apply_search(
+            query,
+            CONTRACTS_LIST_QUERY_CATALOG,
+            search,
+            context=ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id),
+        )
 
         if owner_id:
             query = query.filter(Contract.owner_id.in_(_split_csv(owner_id)))
