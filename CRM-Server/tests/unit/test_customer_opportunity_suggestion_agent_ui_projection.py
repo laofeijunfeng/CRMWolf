@@ -124,6 +124,11 @@ def test_create_suggestion_projects_one_agent_message_and_action_idempotently():
         assert action.target_json["workflow_trigger"]["action"] == "CREATE_OPPORTUNITY"
         assert action.target_json["interaction_type"] == "confirmation"
         assert action.target_json["submit_on_select"] is True
+        message = db.get(AgentMessage, message_id)
+        blocks = message.ui_json["blocks"]
+        assert [block["type"] for block in blocks] == ["interaction"]
+        assert blocks[0]["prompt"] == message.content
+        assert message.content
 
         replay_id = projector.project_operation(db, operation=operation)
         db.commit()
@@ -144,6 +149,8 @@ def test_move_suggestion_projects_separate_agent_choice():
         message = db.get(AgentMessage, message_id)
         action = db.query(AgentUIAction).one()
         assert "推进机会" in message.content
+        assert [block["type"] for block in message.ui_json["blocks"]] == ["interaction"]
+        assert message.ui_json["blocks"][0]["prompt"] == message.content
         assert action.target_json["interaction_type"] == "confirmation"
         assert action.target_json["workflow_trigger"]["action"] == "MOVE_OPPORTUNITY_STAGE"
     finally:

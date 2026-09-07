@@ -587,3 +587,31 @@ def test_customer_context_projects_the_authoritative_customer_as_clickable_entit
     assert [block.type for block in composition.body.blocks] == ["text", "entity_list"]
     entity_block = composition.body.blocks[1]
     assert entity_block.items[0].entity_ref.display_name == "河南双汇发展股份有限公司"
+
+
+def test_customer_opportunity_suggestion_uses_interaction_as_sole_visual_prompt() -> None:
+    composer = AgentUIComposer()
+
+    for decision, prompt in (
+        (
+            "CREATE_OPPORTUNITY",
+            "我看到有一个比较明确的商机，是否帮你直接创建？",  # noqa: RUF001
+        ),
+        (
+            "MOVE_OPPORTUNITY_STAGE",
+            "我看到这个商机有明确的推进机会，是否帮你推进？",  # noqa: RUF001
+        ),
+    ):
+        composition = composer.compose_customer_opportunity_suggestion(
+            decision=decision,
+            job_public_id="cosj_test",
+            action_public_id="act_test",
+        )
+
+        assert [block.type for block in composition.body.blocks] == ["interaction"]
+        interaction = composition.body.blocks[0]
+        assert interaction.type == "interaction"
+        assert interaction.prompt == prompt
+        assert composition.content == prompt
+        assert composition.body.metadata.accessibility_label == prompt
+        assert len(composition.action_drafts) == 1

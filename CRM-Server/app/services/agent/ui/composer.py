@@ -248,11 +248,16 @@ class AgentUIComposer:
             target=target,
             consumption_mode="ONE_SHOT",
         )
+        # The interaction block is the sole visual carrier for this actionable
+        # suggestion.  Keep ``text`` for persistence, search, accessibility,
+        # and non-UI channel fallbacks, but do not render a second TextBlock
+        # with the same prompt above the card.
         return self._composition(
             text=prompt,
             route="WORKFLOW",
             blocks=(block,),
             actions=(action,),
+            include_text_block=False,
         )
 
     def compose(self, dispatch: RootDispatchResult) -> AgentUIComposition:
