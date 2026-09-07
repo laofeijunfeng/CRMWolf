@@ -17,7 +17,7 @@ const tabs = [
 ]
 
 describe('TopBarTabs', () => {
-  it('labels system and personal views without adding a focusable group control', () => {
+  it('keeps the existing tab presentation and does not add view-group labels', () => {
     const wrapper = mount(TopBarTabs, {
       props: {
         tabs,
@@ -25,11 +25,11 @@ describe('TopBarTabs', () => {
       },
     })
 
-    expect(wrapper.find('[aria-label="系统视图：全部客户"]').exists()).toBe(true)
-    expect(wrapper.find('[aria-label="系统视图：公海客户"]').exists()).toBe(true)
-    expect(wrapper.find('[aria-label="我的视图：重点客户"]').exists()).toBe(true)
+    expect(wrapper.find('[aria-label="系统视图：全部客户"]').exists()).toBe(false)
+    expect(wrapper.find('[aria-label="系统视图：公海客户"]').exists()).toBe(false)
+    expect(wrapper.find('[aria-label="我的视图：重点客户"]').exists()).toBe(false)
     expect(wrapper.find('[role="separator"]').exists()).toBe(false)
-    expect(wrapper.find('.tabs-item--group-start').exists()).toBe(true)
+    expect(wrapper.find('.tabs-item--group-start').exists()).toBe(false)
   })
 
   it('keeps view actions only on personal views', () => {

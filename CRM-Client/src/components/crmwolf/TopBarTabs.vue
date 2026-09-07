@@ -52,21 +52,6 @@ function isCustomView(tab: TabItem): boolean {
   return tab.viewKind === 'custom' || tab.isCustomView === true
 }
 
-function getViewKind(tab: TabItem): 'built-in' | 'custom' {
-  return isCustomView(tab) ? 'custom' : 'built-in'
-}
-
-function isGroupStart(tab: TabItem, index: number): boolean {
-  if (index === 0) return false
-  const previous = props.tabs[index - 1]
-  return previous !== undefined && getViewKind(previous) !== getViewKind(tab)
-}
-
-function getTabAriaLabel(tab: TabItem): string {
-  const kindLabel = isCustomView(tab) ? '我的视图' : '系统视图'
-  return `${kindLabel}：${tab.label}`
-}
-
 function handleTabChange(key: string): void {
   if (key === activeTabKey.value) return
   emit('update:activeTab', key)
@@ -102,19 +87,17 @@ function handleDelete(tab: TabItem): void {
   >
     <TabsList class="tabs-list-underline">
       <div
-        v-for="(tab, index) in tabs"
+        v-for="tab in tabs"
         :key="tab.key"
         class="tabs-item"
         :class="{
           'tabs-item--custom': hasCustomMenu(tab),
-          'tabs-item--group-start': isGroupStart(tab, index),
         }"
       >
         <TabsTrigger
           :value="tab.key"
           :disabled="tab.disabled ?? false"
           class="tabs-trigger-underline"
-          :aria-label="getTabAriaLabel(tab)"
         >
           <span class="tab-trigger-content">
             {{ tab.label }}
@@ -204,14 +187,6 @@ function handleDelete(tab: TabItem): void {
   align-items: center;
   min-width: 0;
   border-radius: $wolf-radius-v2;
-}
-
-// Keep the visual grouping cue outside the tab trigger's focus/selection surface.
-// A pseudo-element avoids adding a non-tab node to Radix's tab list children.
-.tabs-item--group-start {
-  margin-left: $wolf-space-sm-v2;
-  padding-left: $wolf-space-sm-v2;
-  border-left: 1px solid $wolf-border-light-v2;
 }
 
 .tabs-item--custom {
