@@ -317,7 +317,6 @@ watch(
     }
 
     if (closeGuard.handleParentClose()) return
-    closeGuard.reset()
   }
 )
 </script>

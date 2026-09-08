@@ -161,7 +161,6 @@ watch(
       resetForm()
     } else {
       if (closeGuard.handleParentClose()) return
-      closeGuard.reset()
       clearErrors()
     }
   },

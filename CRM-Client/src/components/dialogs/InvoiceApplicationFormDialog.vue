@@ -543,7 +543,6 @@ watch(
   ([open], previousValues) => {
     if (!open) {
       if (closeGuard.handleParentClose()) return
-      closeGuard.reset()
       invoiceTitleDialogOpen.value = false
       clearErrors()
       customerSearchKeyword.value = ''

@@ -132,7 +132,6 @@ const methodOptions: { value: string; label: string }[] = [
 watch(() => props.open, (newOpen) => {
   if (!newOpen) {
     if (closeGuard.handleParentClose()) return
-    closeGuard.reset()
     return
   }
 

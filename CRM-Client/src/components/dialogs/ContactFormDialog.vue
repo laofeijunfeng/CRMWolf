@@ -157,7 +157,6 @@ watch(values, () => {
 watch(() => props.open, (newOpen) => {
   if (!newOpen) {
     if (closeGuard.handleParentClose()) return
-    closeGuard.reset()
     return
   }
 

@@ -30,6 +30,7 @@ export function useDialogCloseGuard({
 }: DialogCloseGuardOptions): DialogCloseGuard {
   const showConfirmDialog = ref(false)
   const closeApproved = ref(false)
+  const suppressStaleOpen = ref(false)
   const focusReturnTarget = ref<HTMLElement | null>(null)
 
   function captureFocus(): void {
@@ -55,6 +56,7 @@ export function useDialogCloseGuard({
 
   function approveClose(): void {
     closeApproved.value = true
+    suppressStaleOpen.value = true
   }
 
   function requestClose(): void {
@@ -71,10 +73,10 @@ export function useDialogCloseGuard({
 
   function handleOpenChange(open: boolean): void {
     if (open) {
-      // Radix can emit a stale `true` while a controlled close is still
-      // propagating to the parent. Once closing has been approved, do not
-      // turn that event into a second open request.
-      if (closeApproved.value) return
+      // Reka/Radix can emit a stale `true` both while a controlled close is
+      // propagating and after the parent has applied `false`. Ignore it until
+      // the parent explicitly opens this dialog again (which calls reset).
+      if (closeApproved.value || suppressStaleOpen.value) return
       emitOpen(true)
       return
     }
@@ -142,6 +144,7 @@ export function useDialogCloseGuard({
   function reset(): void {
     showConfirmDialog.value = false
     closeApproved.value = false
+    suppressStaleOpen.value = false
     focusReturnTarget.value = null
   }
 

@@ -390,7 +390,6 @@ watch(
       resetForm()
     } else {
       if (closeGuard.handleParentClose()) return
-      closeGuard.reset()
       deploymentDialogOpen.value = false
       locallyCreatedDeployments.value = []
       clearErrors()

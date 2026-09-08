@@ -378,7 +378,6 @@ const initializeForm = async (): Promise<void> => {
 watch(() => props.open, (newOpen) => {
   if (!newOpen) {
     if (closeGuard.handleParentClose()) return
-    closeGuard.reset()
     return
   }
 

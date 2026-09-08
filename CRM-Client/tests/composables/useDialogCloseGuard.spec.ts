@@ -69,4 +69,22 @@ describe('useDialogCloseGuard', () => {
     expect(emittedOpen).toEqual([])
     wrapper.unmount()
   })
+
+  it('ignores a stale open after an approved close until the parent opens again', async () => {
+    const { wrapper, guard, emittedOpen } = createHost(false)
+
+    guard.approveClose()
+    guard.handleParentClose()
+    guard.handleOpenChange(true)
+    await nextTick()
+
+    expect(emittedOpen).toEqual([])
+
+    guard.reset()
+    guard.handleOpenChange(true)
+    await nextTick()
+
+    expect(emittedOpen).toEqual([true])
+    wrapper.unmount()
+  })
 })

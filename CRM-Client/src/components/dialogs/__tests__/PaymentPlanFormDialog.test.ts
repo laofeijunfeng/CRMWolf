@@ -150,4 +150,33 @@ describe('PaymentPlanFormDialog', () => {
     expect(wrapper.emitted('update:open')).toEqual([[false]])
     wrapper.unmount()
   })
+
+  it('ignores a stale open event after the parent has applied the successful close', async () => {
+    vi.spyOn(paymentApi, 'createPaymentPlans').mockResolvedValue([{ id: 1 } as PaymentPlanResponse])
+
+    const open = ref(true)
+    const Parent = defineComponent({
+      components: { PaymentPlanFormDialog },
+      setup: (): { open: typeof open } => ({ open }),
+      template: '<PaymentPlanFormDialog v-model:open="open" mode="create" :fixed-contract="{ id: 1, contract_name: \'合同\', total_amount: 100 }" />',
+    })
+    const wrapper = mount(Parent, { global: { stubs: formStubs } })
+    const dialog = wrapper.findComponent(PaymentPlanFormDialog)
+
+    await fillAndSubmit(dialog)
+    await nextTick()
+    expect(open.value).toBe(false)
+
+    const vm = dialog.vm as unknown as { handleOpenChange: (open: boolean) => void }
+    vm.handleOpenChange(true)
+    await nextTick()
+
+    expect(open.value).toBe(false)
+    expect(dialog.props('open')).toBe(false)
+
+    open.value = true
+    await nextTick()
+    expect(dialog.props('open')).toBe(true)
+    wrapper.unmount()
+  })
 })

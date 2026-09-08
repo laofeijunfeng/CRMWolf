@@ -435,7 +435,6 @@ watch(
       }
     } else {
       if (closeGuard.handleParentClose()) return
-      closeGuard.reset()
       clearErrors()
       customerSearchKeyword.value = ''
     }

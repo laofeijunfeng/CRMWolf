@@ -311,7 +311,6 @@ watch([
 ], async ([open, customerId]): Promise<void> => {
   if (!open) {
     if (closeGuard.handleParentClose()) return
-    closeGuard.reset()
     return
   }
 

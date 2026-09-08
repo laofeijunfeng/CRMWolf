@@ -393,7 +393,6 @@ function handleOpportunityChange(value: unknown): void {
 watch(() => props.open, async (newOpen) => {
   if (!newOpen) {
     if (closeGuard.handleParentClose()) return
-    closeGuard.reset()
     return
   }
 

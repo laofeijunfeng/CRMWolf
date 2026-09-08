@@ -1,11 +1,12 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { defineComponent, nextTick } from 'vue'
+import { defineComponent, nextTick, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import InvoiceApplicationFormDialog from '@/components/dialogs/InvoiceApplicationFormDialog.vue'
 import contractApi from '@/api/contract'
 import customerApi from '@/api/customer'
 import invoiceApi from '@/api/invoice'
 import paymentApi from '@/api/payment'
+import approvalGenericApi from '@/api/approvalGeneric'
 
 vi.mock('@/api/contract', () => ({
   default: {
@@ -22,6 +23,7 @@ vi.mock('@/api/customer', () => ({
 vi.mock('@/api/invoice', () => ({
   default: {
     getInvoiceTitles: vi.fn(),
+    createInvoiceApplication: vi.fn(),
   },
 }))
 
@@ -253,4 +255,78 @@ describe('InvoiceApplicationFormDialog', () => {
     expect(findSelectField(wrapper, 'invoice-application-title').props('modelValue')).toBe('32')
   })
 
+  it('does not reopen after a successful create when the parent has applied the close', async () => {
+    vi.mocked(invoiceApi.createInvoiceApplication).mockResolvedValue({ id: 77 } as never)
+    vi.mocked(approvalGenericApi.submitApproval).mockResolvedValue({
+      approval_id: 78,
+      status: 'PENDING',
+    } as never)
+
+    const open = ref(true)
+    const Parent = defineComponent({
+      components: { InvoiceApplicationFormDialog },
+      setup: (): { open: typeof open } => ({ open }),
+      template: `
+        <InvoiceApplicationFormDialog
+          v-model:open="open"
+          mode="create"
+          :fixed-customer="{ id: 'customer-1', account_name: '测试客户' }"
+          :fixed-contract-id="11"
+          :fixed-invoice-title="{
+            id: 31,
+            customer_id: 'customer-1',
+            title_type: 'COMPANY',
+            title: '测试公司',
+            taxpayer_id: '913100000000000000',
+            bank_name: null,
+            bank_account: null,
+            address: null,
+            phone: null,
+            is_default: true,
+            created_time: '2026-01-01T00:00:00',
+            last_modified_time: '2026-01-01T00:00:00',
+          }"
+        />
+      `,
+    })
+    const wrapper = mount(Parent, {
+      global: {
+        stubs: {
+          Dialog: DialogStub,
+          DialogContent: PassthroughStub,
+          DialogDescription: PassthroughStub,
+          DialogFooter: PassthroughStub,
+          DialogHeader: PassthroughStub,
+          DialogTitle: PassthroughStub,
+          Button: PassthroughStub,
+          SearchableSelectField: PassthroughStub,
+          SelectField: SelectFieldStub,
+          InputField: InputFieldStub,
+          InvoiceTypeSegmentedControl: PassthroughStub,
+          SelectionSummary: PassthroughStub,
+          InvoiceTitleFormDialog: InvoiceTitleFormDialogStub,
+        },
+      },
+    })
+    const dialog = wrapper.findComponent(InvoiceApplicationFormDialog)
+
+    await flushPromises()
+    await findSelectField(dialog, 'invoice-application-plan').vm.$emit('update:modelValue', '101')
+    await dialog.find('form').trigger('submit')
+    await flushPromises()
+    await nextTick()
+    expect(open.value).toBe(false)
+
+    const vm = dialog.vm as unknown as { handleOpenChange: (open: boolean) => void }
+    vm.handleOpenChange(true)
+    await nextTick()
+
+    expect(open.value).toBe(false)
+    expect(dialog.props('open')).toBe(false)
+
+    open.value = true
+    await nextTick()
+    expect(dialog.props('open')).toBe(true)
+    wrapper.unmount()
+  })
 })
