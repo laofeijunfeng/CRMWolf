@@ -123,6 +123,7 @@ class CRMQueryAgentModelConfig(QueryContractModel):
     model: str = Field(min_length=1, max_length=200)
     temperature: float = Field(ge=0, le=2)
     enable_thinking: bool | None = None
+    max_tokens: int | None = Field(default=None, ge=1)
 
 
 class CRMQueryAgentRequest(QueryContractModel):

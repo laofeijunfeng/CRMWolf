@@ -8,7 +8,6 @@ identity and all dates are still validated by server-owned services.
 
 from __future__ import annotations
 
-import asyncio
 import json
 from datetime import datetime
 from time import monotonic
@@ -18,8 +17,12 @@ from zoneinfo import ZoneInfo
 from langchain_openai import ChatOpenAI
 from pydantic import ConfigDict, Field, model_validator
 
+from app.core.config import get_settings
 from app.services.agent.query.schemas import QueryContractModel
-from app.services.ai_http_client import managed_ai_http_clients
+from app.services.agent.structured_model_call import (
+    StructuredModelCallError,
+    ainvoke_structured_output,
+)
 from app.utils.time import BUSINESS_TIMEZONE, business_now
 
 if TYPE_CHECKING:
@@ -207,9 +210,14 @@ class LLMQuerySemanticIntentResolver:
         self,
         *,
         chat_model_factory: Callable[..., Any] = ChatOpenAI,
-        timeout_seconds: float = 30.0,
+        timeout_seconds: float | None = None,
         now_factory: Callable[[], datetime] = business_now,
     ) -> None:
+        timeout_seconds = (
+            get_settings().AGENT_QUERY_SEMANTIC_TIMEOUT
+            if timeout_seconds is None
+            else timeout_seconds
+        )
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
         self._chat_model_factory = chat_model_factory
@@ -223,50 +231,36 @@ class LLMQuerySemanticIntentResolver:
         model_config: CRMQueryAgentModelConfig,
         runtime: RootRuntimeContext,
     ) -> CRMQuerySemanticIntent:
-        model_kwargs: dict[str, object] = {
-            "model": model_config.model,
-            "api_key": model_config.api_key,
-            "base_url": model_config.api_host,
-            "temperature": 0,
-            "max_retries": 0,
-        }
-        if model_config.enable_thinking is not None:
-            model_kwargs["extra_body"] = {"enable_thinking": model_config.enable_thinking}
         try:
             timeout_seconds = self._timeout_seconds
             if runtime.deadline_at is not None:
                 timeout_seconds = max(0.001, min(timeout_seconds, runtime.deadline_at - monotonic()))
-            async with asyncio.timeout(timeout_seconds):
-                use_managed_transport = self._chat_model_factory is ChatOpenAI
-                async with managed_ai_http_clients(enabled=use_managed_transport) as transport_kwargs:
-                    model = self._chat_model_factory(**model_kwargs, **transport_kwargs)
-                    structured_model = model.with_structured_output(
-                        CRMQuerySemanticIntent,
-                        method="function_calling",
-                    )
-                    result = await structured_model.ainvoke(
-                        [
-                            {"role": "system", "content": QUERY_SEMANTIC_INTENT_SYSTEM_PROMPT},
+            result = await ainvoke_structured_output(
+                CRMQuerySemanticIntent,
+                [
+                    {"role": "system", "content": QUERY_SEMANTIC_INTENT_SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": json.dumps(
                             {
-                                "role": "user",
-                                "content": json.dumps(
-                                    {
-                                        "user_message": text,
-                                        "reference_now": self._now_factory().isoformat(),
-                                        "reference_timezone": BUSINESS_TIMEZONE,
-                                    },
-                                    ensure_ascii=False,
-                                ),
+                                "user_message": text,
+                                "reference_now": self._now_factory().isoformat(),
+                                "reference_timezone": BUSINESS_TIMEZONE,
                             },
-                        ]
-                    )
-        except Exception as exc:
-            # Provider SDKs and LangChain wrappers expose several different
-            # exception classes across versions.  Normalize all ordinary
-            # provider/configuration failures at this boundary, while keeping
-            # cancellation and process-level exceptions untouched.
-            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
-                raise
+                            ensure_ascii=False,
+                        ),
+                    },
+                ],
+                chat_model_factory=self._chat_model_factory,
+                model=model_config.model,
+                api_key=model_config.api_key,
+                base_url=model_config.api_host,
+                temperature=0,
+                enable_thinking=model_config.enable_thinking,
+                max_tokens=model_config.max_tokens,
+                timeout_seconds=timeout_seconds,
+            )
+        except StructuredModelCallError as exc:
             raise QuerySemanticIntentUnavailableError("query semantic intent model request failed") from exc
         try:
             return CRMQuerySemanticIntent.model_validate(result)

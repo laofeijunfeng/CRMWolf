@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING
 import pytest
 
 from app.services.agent.orchestrator.contracts import RootRuntimeContext
-from app.services.agent.query import semantic_intent as semantic_intent_module
 from app.services.agent.query.agent import CRMQueryAgentModelConfig
 from app.services.agent.query.semantic_intent import (
     CRMQuerySemanticIntent,
@@ -157,7 +156,9 @@ async def test_resolver_default_budget_matches_provider_latency_budget(monkeypat
         async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> bool:
             return False
 
-    monkeypatch.setattr(semantic_intent_module.asyncio, "timeout", RecordingTimeout)
+    from app.services.agent import structured_model_call as structured_model_call_module
+
+    monkeypatch.setattr(structured_model_call_module.asyncio, "timeout", RecordingTimeout)
     resolver = LLMQuerySemanticIntentResolver(chat_model_factory=FakeModelFactory({
         "scope": "global_work",
         "resource": "follow_up_tasks",
@@ -166,7 +167,7 @@ async def test_resolver_default_budget_matches_provider_latency_budget(monkeypat
 
     await resolver.resolve("查询我接下来要做什么", model_config=_config(), runtime=RootRuntimeContext())
 
-    assert budgets == [30.0]
+    assert budgets == [60.0]
 
 
 class RaisingModelFactory:

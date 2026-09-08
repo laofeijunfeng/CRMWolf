@@ -1096,6 +1096,9 @@ async def test_root_uses_structured_decision_model_with_authoritative_context() 
             "base_url": "https://ai.example.com/v1",
             "temperature": 0.0,
             "max_retries": 0,
+            "streaming": True,
+            "stream_chunk_timeout": 45.0,
+            "max_tokens": 1024,
         }
     ]
     assert len(structured_model.calls) == 1

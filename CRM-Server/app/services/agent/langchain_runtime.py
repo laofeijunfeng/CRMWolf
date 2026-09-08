@@ -117,7 +117,7 @@ def agent_model_enable_thinking(model_name: str) -> bool | None:
     """Return explicit transport options required by known model families."""
 
     normalized = model_name.strip().lower()
-    if normalized.startswith("qwen3"):
+    if normalized.startswith("qwen3") or normalized.startswith("grok"):
         return False
     return None
 

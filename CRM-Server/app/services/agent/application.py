@@ -1253,6 +1253,12 @@ def _load_agent_model_configs(
     if isinstance(temperature, bool) or not isinstance(temperature, (int, float)):
         raise HTTPException(status_code=503, detail="AI 模型温度配置无效。")
     enable_thinking = agent_model_enable_thinking(model_name)
+    raw_max_tokens = getattr(config, "max_tokens", None)
+    max_tokens = (
+        raw_max_tokens
+        if isinstance(raw_max_tokens, int) and not isinstance(raw_max_tokens, bool) and raw_max_tokens > 0
+        else None
+    )
     return (
         RootDecisionModelConfig(
             api_host=api_host,
@@ -1260,6 +1266,7 @@ def _load_agent_model_configs(
             model=model_name,
             temperature=0,
             enable_thinking=enable_thinking,
+            max_tokens=max_tokens,
         ),
         CRMQueryAgentModelConfig(
             api_host=api_host,
@@ -1267,5 +1274,6 @@ def _load_agent_model_configs(
             model=model_name,
             temperature=float(temperature),
             enable_thinking=enable_thinking,
+            max_tokens=max_tokens,
         ),
     )

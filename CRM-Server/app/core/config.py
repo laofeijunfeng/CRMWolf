@@ -160,8 +160,10 @@ class Settings(BaseSettings):
     AGENT_THREAD_POOL_SIZE: int = 4  # Agent 专用线程池大小
     AGENT_MAX_CONCURRENT: int = 10  # Agent 最大并发数
     AGENT_TIMEOUT: int = 120  # Agent 执行超时(秒)
-    AGENT_ROOT_DECISION_TIMEOUT: float = 30.0  # Root 路由结构化请求单次超时(秒)
-    AGENT_QUERY_SEMANTIC_TIMEOUT: float = 30.0  # Query 语义解析单次超时(秒)
+    AGENT_ROOT_DECISION_TIMEOUT: float = 60.0  # Root 路由结构化请求单次超时(秒)
+    AGENT_QUERY_SEMANTIC_TIMEOUT: float = 60.0  # Query 语义解析单次超时(秒)
+    AGENT_STRUCTURED_STREAM_CHUNK_TIMEOUT: float = 45.0  # 结构化流式调用的分块空闲超时(秒)；需覆盖 grok 等模型中段停顿
+    AGENT_STRUCTURED_MAX_TOKENS: int = 1024  # 结构化调用默认 max_tokens
     AGENT_USER_RATE_LIMIT: int = 10  # 每用户每分钟请求限制
     AGENT_GLOBAL_RATE_LIMIT: int = 100  # 全局每分钟请求限制
     AGENT_INTERNAL_API_BASE_URL: str = "http://127.0.0.1:8000/api"  # Agent Tool 调用现有后端 API 的基础地址
@@ -170,7 +172,11 @@ class Settings(BaseSettings):
     # 如果部署确实需要代理，使用 AI_HTTP_PROXY 显式配置，而不是依赖 HTTP_PROXY。
     AI_HTTP_TRUST_ENV: bool = False
     AI_HTTP_PROXY: str = ""
-    AI_HTTP_TIMEOUT_SECONDS: float = 60.0
+    AI_HTTP_TIMEOUT_SECONDS: float = 60.0  # 非流式 AI HTTP 全阶段超时(秒)
+    AI_HTTP_CONNECT_TIMEOUT_SECONDS: float = 10.0
+    AI_HTTP_WRITE_TIMEOUT_SECONDS: float = 10.0
+    AI_HTTP_READ_TIMEOUT_SECONDS: float = 45.0  # 流式读超时，需与 AGENT_STRUCTURED_STREAM_CHUNK_TIMEOUT 对齐
+    AI_HTTP_POOL_TIMEOUT_SECONDS: float = 5.0
 
     def get_database_url(self) -> str:
         """获取数据库连接 URL, 支持密码特殊字符和 Docker secrets"""

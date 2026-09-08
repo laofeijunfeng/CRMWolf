@@ -4,24 +4,24 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from time import monotonic
 from typing import TYPE_CHECKING
 
 from langchain_openai import ChatOpenAI
-from openai import APIError, APITimeoutError
 from pydantic import ValidationError
 
 from app.core.config import get_settings
-
 from app.services.agent.orchestrator.contracts import (
     RootContextSnapshot,
     RootDecision,
     RootRuntimeContext,
     RootTurnInput,
 )
-from app.services.ai_http_client import managed_ai_http_clients
+from app.services.agent.structured_model_call import (
+    StructuredModelCallError,
+    ainvoke_structured_output,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -132,15 +132,6 @@ class LangChainRootDecisionClassifier:
         if model_config is None:
             raise RootDecisionModelUnavailableError("Root decision model config is missing")
 
-        model_kwargs: dict[str, object] = {
-            "model": model_config.model,
-            "api_key": model_config.api_key,
-            "base_url": model_config.api_host,
-            "temperature": model_config.temperature,
-            "max_retries": 0,
-        }
-        if model_config.enable_thinking is not None:
-            model_kwargs["extra_body"] = {"enable_thinking": model_config.enable_thinking}
         context_payload = context.model_dump(
             mode="json",
             exclude_none=True,
@@ -182,30 +173,27 @@ class LangChainRootDecisionClassifier:
             separators=(",", ":"),
         )
         try:
-            timeout_seconds = self._remaining_timeout(runtime)
-            async with asyncio.timeout(timeout_seconds):
-                use_managed_transport = self._chat_model_factory is ChatOpenAI
-                async with managed_ai_http_clients(enabled=use_managed_transport) as transport_kwargs:
-                    model = self._chat_model_factory(**model_kwargs, **transport_kwargs)
-                    structured_model = model.with_structured_output(
-                        RootDecision,
-                        method="function_calling",
-                    )
-                    result = await structured_model.ainvoke(
-                        [
-                            {"role": "system", "content": ROOT_DECISION_SYSTEM_PROMPT},
-                            {"role": "user", "content": payload},
-                        ]
-                    )
-        except (APITimeoutError, TimeoutError) as exc:
+            result = await ainvoke_structured_output(
+                RootDecision,
+                [
+                    {"role": "system", "content": ROOT_DECISION_SYSTEM_PROMPT},
+                    {"role": "user", "content": payload},
+                ],
+                chat_model_factory=self._chat_model_factory,
+                model=model_config.model,
+                api_key=model_config.api_key,
+                base_url=model_config.api_host,
+                temperature=model_config.temperature,
+                enable_thinking=model_config.enable_thinking,
+                max_tokens=model_config.max_tokens,
+                timeout_seconds=self._remaining_timeout(runtime),
+            )
+        except StructuredModelCallError as exc:
             raise RootDecisionModelUnavailableError(
-                "Root decision model request timed out",
-                reason="TIMEOUT",
-            ) from exc
-        except APIError as exc:
-            raise RootDecisionModelUnavailableError(
-                "Root decision model request failed",
-                reason="UNAVAILABLE",
+                "Root decision model request timed out"
+                if exc.reason == "TIMEOUT"
+                else "Root decision model request failed",
+                reason="TIMEOUT" if exc.reason == "TIMEOUT" else "UNAVAILABLE",
             ) from exc
         try:
             return RootDecision.model_validate(result)

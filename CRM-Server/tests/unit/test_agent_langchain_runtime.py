@@ -8,6 +8,7 @@ from app.services.agent import langchain_runtime
 from app.services.agent.langchain_runtime import (
     AgentLangChainRuntime,
     AgentLangChainStructuredOutputError,
+    agent_model_enable_thinking,
 )
 
 
@@ -120,6 +121,50 @@ async def test_langchain_runtime_passes_explicit_model_transport_options():
             "extra_body": {"enable_thinking": False},
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_langchain_runtime_passes_explicit_thinking_off_for_grok_models():
+    class FakeAgent:
+        async def ainvoke(self, payload):
+            return {"structured_response": {"value": "ok", "score": 90}}
+
+    calls = []
+
+    class RecordingChatModel:
+        def __init__(self, **kwargs):
+            calls.append(kwargs)
+
+    runtime = AgentLangChainRuntime(
+        agent_factory=lambda **kwargs: FakeAgent(),
+        chat_model_factory=RecordingChatModel,
+    )
+
+    await runtime.ainvoke_structured(
+        api_host="https://ai.example.com/v1",
+        api_key="test-key",
+        model="grok-4.6",
+        temperature=0.1,
+        enable_thinking=False,
+        system_prompt="system",
+        user_prompt="user",
+        response_model=SampleStructuredResult,
+        error_prefix="测试",
+    )
+
+    assert calls == [
+        {
+            "model": "grok-4.6",
+            "api_key": "test-key",
+            "base_url": "https://ai.example.com/v1",
+            "temperature": 0.1,
+            "max_retries": 0,
+            "extra_body": {"enable_thinking": False},
+        }
+    ]
+    assert agent_model_enable_thinking("grok-4.6") is False
+    assert agent_model_enable_thinking("qwen3.5-plus") is False
+    assert agent_model_enable_thinking("gpt-4.1") is None
 
 
 @pytest.mark.asyncio

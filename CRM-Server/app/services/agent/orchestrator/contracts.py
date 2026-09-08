@@ -97,6 +97,7 @@ class RootDecisionModelConfig(OrchestratorContractModel):
     model: str = Field(min_length=1, max_length=256)
     temperature: float = Field(default=0.0, ge=0, le=2)
     enable_thinking: bool | None = None
+    max_tokens: int | None = Field(default=None, ge=1)
 
 
 class ResultSetContext(OrchestratorContractModel):
