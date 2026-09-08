@@ -12,7 +12,6 @@ from pydantic import ValidationError
 from app.services.agent.workflow.contracts import (
     WorkflowActionPlan,
     WorkflowCancelledResult,
-    WorkflowSkippedResult,
     WorkflowCompletedResult,
     WorkflowEffectResult,
     WorkflowFailedResult,
@@ -22,6 +21,7 @@ from app.services.agent.workflow.contracts import (
     WorkflowResolvedCustomer,
     WorkflowResumeInput,
     WorkflowRuntimeContext,
+    WorkflowSkippedResult,
     WorkflowSupplement,
     WorkflowTurnInput,
 )
@@ -376,13 +376,24 @@ class WorkflowSubgraph:
             if resume.kind != "text" or not resume.content.strip():
                 raise ValueError("text supplement is required")
             request = WorkflowTurnInput.model_validate(state["workflow_input"])
+            interaction = WorkflowInteraction.model_validate(
+                state["workflow_interaction"]
+            )
+            # The interaction stored in the checkpoint is the server-owned
+            # contract for this resume.  Bind its action and id to the
+            # supplement instead of trusting client metadata; the planner
+            # uses the action to apply a field-level patch to the canonical
+            # semantic snapshot.
+            metadata = dict(resume.metadata)
+            metadata["business_action"] = interaction.business_action
+            metadata["interaction_id"] = interaction.interaction_id
             supplements = list(request.supplements)
             supplements.append(
                 WorkflowSupplement(
                     content=resume.content.strip(),
                     source=resume.source,
                     provider=resume.provider,
-                    metadata=resume.metadata,
+                    metadata=metadata,
                 )
             )
             if len(supplements) > 20:

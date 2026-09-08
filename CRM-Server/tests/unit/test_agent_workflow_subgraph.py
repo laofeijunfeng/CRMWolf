@@ -27,7 +27,6 @@ from app.services.agent.checkpoint_serde_inspection import CheckpointSerdeInspec
 from app.services.agent.durable_work_contracts import CustomerActivityDurableWorkReceipt
 from app.services.agent.guardrails import AgentToolGuardrailError
 from app.services.agent.input import AgentTurnInput
-from app.services.agent.principal import AgentPrincipal
 from app.services.agent.orchestrator import (
     ContextPolicy,
     InteractionResolution,
@@ -49,6 +48,7 @@ from app.services.agent.orchestrator import (
     WorkflowWaitingResult,
 )
 from app.services.agent.orchestrator.errors import WorkflowExecutionFailedError
+from app.services.agent.principal import AgentPrincipal
 from app.services.agent.quality import AgentFollowUpQualityEnvelope
 from app.services.agent.query import (
     CRMQueryAgentResponse,
@@ -67,8 +67,8 @@ from app.services.agent.workflow.contracts import (
     WorkflowCommandBinding,
     WorkflowInteraction,
     WorkflowInteractionOption,
-    WorkflowRuntimeContext,
     WorkflowResolvedCustomer,
+    WorkflowRuntimeContext,
     WorkflowTextStart,
     WorkflowTurnInput,
 )
@@ -1333,7 +1333,7 @@ class MissingContentThenCompleteSemanticParser:
         current_date: object = None,
     ) -> AgentSemanticParseEnvelope:
         self.messages.append(user_message)
-        content = "确认技术评估结论" if "确认技术评估结论" in user_message else None
+        content = "确认技术评估结论" if "内容是确认技术评估结论" in user_message else None
         return AgentSemanticParseEnvelope(
             result=AgentSemanticParseResult.model_validate(
                 {
@@ -1347,7 +1347,9 @@ class MissingContentThenCompleteSemanticParser:
                     "follow_up": {
                         "content": content,
                         "method": "电话",
-                        "next_action": "确认技术评估结论" if content else None,
+                        # The user request already contains the next action; only
+                        # the activity content is missing and supplied through HITL.
+                        "next_action": "确认技术评估结论",
                         "next_follow_time_text": "下周三上午10点",
                         "next_follow_time": {
                             "raw_text": "下周三上午10点",
@@ -1432,7 +1434,7 @@ async def test_missing_follow_up_content_interrupts_then_executes_after_required
             client_request_id="req_missing_content",
             input=TextTurnInput(
                 type="text",
-                text="为上海星云科技创建跟进任务,下周三上午10点电话跟进",
+                text="为上海星云科技创建跟进任务,下周三上午10点电话跟进,下一步确认技术评估结论",
             ),
             selected_entity_ref=CUSTOMER_REF,
         ),
@@ -1464,7 +1466,7 @@ async def test_missing_follow_up_content_interrupts_then_executes_after_required
     assert isinstance(completed, WorkflowDispatchResult)
     assert isinstance(completed.workflow_result, WorkflowCompletedResult)
     assert completed.continuation is None
-    assert "补充信息: 确认技术评估结论" in semantic_parser.messages[-1]
+    assert len(semantic_parser.messages) == 1
     assert len(tool_registry.calls) == 1
 
 
@@ -6127,3 +6129,158 @@ async def test_cached_customer_identity_is_reused_without_name_string_matching()
     assert plan.commands[0].tool_name == "create_customer_activity"
     assert customer_resolver.validate_cached_calls == [CUSTOMER_REF.public_id]
     assert customer_resolver.resolve_calls == []
+
+
+async def test_customer_supplement_preserves_canonical_activity_content() -> None:
+    original_content = (
+        "今天微信找了东风研发总院的采购张老师了解合同用印的进度，"  # noqa: RUF001
+        "张老师反馈目前还是用印的流程中，不过可以先安排交付相关的流程；"  # noqa: RUF001
+        "今天先和研发总院的业务部门安排交付和验收相关流程；"  # noqa: RUF001
+        "等周四再找张老师确认用印进展，以及是否可以开发票。"  # noqa: RUF001
+    )
+    initial_result = AgentSemanticParseResult.model_validate(
+        {
+            "intent": "CUSTOMER_ACTIVITY",
+            "intent_confidence": 0.99,
+            "customer": {
+                "name_text": "东风研发总院",
+                "confidence": 0.99,
+                "resolution_source": "EXPLICIT",
+            },
+            "follow_up": {
+                "content": original_content,
+                "method": "微信",
+                "next_action": "周四再找张老师确认用印进展，以及是否可以开发票。",  # noqa: RUF001
+            },
+        }
+    )
+    # The second result models the production failure: re-parsing the original
+    # text plus a customer-name supplement classifies the activity body as
+    # background and leaves follow_up.content empty.
+    broken_resume_result = AgentSemanticParseResult.model_validate(
+        {
+            "intent": "CUSTOMER_ACTIVITY",
+            "intent_confidence": 0.99,
+            "customer": {"name_text": None, "resolution_source": "NONE"},
+            "follow_up": {
+                "content": None,
+                "method": "微信",
+                "next_action": "周四再找张老师确认用印进展，以及是否可以开发票。",  # noqa: RUF001
+            },
+        }
+    )
+    semantic_parser = SequencedSemanticParser(initial_result, broken_resume_result)
+
+    class ResolveAfterCustomerSupplement:
+        def __init__(self) -> None:
+            self.calls: list[str | None] = []
+
+        async def resolve(
+            self,
+            *,
+            customer_lookup_name: str | None,
+            trusted_context_customer: EntityRef | None,
+            selected_customer_id: str | None,
+            authorization: str,
+        ) -> object:
+            self.calls.append(customer_lookup_name)
+            if customer_lookup_name == "东风研发总院":
+                return SimpleNamespace(status="NOT_FOUND", customer=None, candidates=())
+            return SimpleNamespace(
+                status="RESOLVED",
+                customer=SimpleNamespace(
+                    customer_id="cus_dongfeng_001",
+                    customer_name="东风汽车集团股份有限公司",
+                ),
+                candidates=(),
+            )
+
+    class CustomerSupplementInteractionResolver:
+        def __init__(self) -> None:
+            self.continuation: WorkflowContinuation | None = None
+
+        async def resolve(
+            self,
+            *,
+            turn: RootTurnInput,
+            context: RootContextSnapshot,
+            runtime: RootRuntimeContext,
+        ) -> InteractionResolution:
+            assert self.continuation is not None
+            assert isinstance(turn.input, InteractionTurnInput)
+            return InteractionResolution(
+                status="RESOLVED",
+                reason_code="STRUCTURED_WORKFLOW_CONTINUATION",
+                resolved_action=ResolvedAgentAction(
+                    action_id=turn.input.action_id,
+                    action_type="submit_interaction",
+                    continuation=self.continuation,
+                    claim_outcome="ACQUIRED",
+                    resume_payload=AgentTurnInput.text(
+                        "东风汽车集团股份有限公司",
+                        source="web",
+                        metadata={"business_action": "provide_follow_up_content"},
+                    ).model_dump(mode="json"),
+                ),
+            )
+
+    customer_resolver = ResolveAfterCustomerSupplement()
+    interaction_resolver = CustomerSupplementInteractionResolver()
+    tool_registry = CapturingToolRegistry()
+    orchestrator = RootOrchestrator(
+        checkpointer=json_safe_checkpointer(),
+        context_resolver=EmptyContextResolver(),
+        decision_classifier=CreateStandaloneWriteDecisionClassifier(reason_code="CREATE_CUSTOMER_ACTIVITY"),
+        query_executor=FailingQueryExecutor(),
+        interaction_resolver=interaction_resolver,
+        workflow_subgraph=build_workflow_subgraph(
+            planner=CRMWorkflowPlanner(
+                semantic_parser=semantic_parser,
+                temporal_resolver=FixedTemporalResolver(),
+                customer_resolver=customer_resolver,
+            ),
+            effect_executor=CRMWorkflowEffectExecutor(tool_registry=tool_registry),
+        ),
+    )
+    runtime = RootRuntimeContext(
+        db=object(),
+        authorization="Bearer test-token",
+        metadata={"current_datetime": datetime(2026, 8, 23, 9, 0, 0)},
+    )
+
+    waiting = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=2,
+            session_id=8,
+            client_request_id="req_customer_supplement_preserves_content",
+            input=TextTurnInput(type="text", text=original_content),
+        ),
+        runtime=runtime,
+    )
+
+    assert isinstance(waiting, WorkflowDispatchResult)
+    assert isinstance(waiting.workflow_result, WorkflowWaitingResult)
+    assert waiting.workflow_result.interaction.business_action == "provide_workflow_customer"
+    assert waiting.continuation is not None
+    interaction_resolver.continuation = waiting.continuation
+
+    completed = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=2,
+            session_id=8,
+            client_request_id="req_customer_supplement_preserves_content_resume",
+            input=InteractionTurnInput(type="interaction", action_id="act_supply_customer_name"),
+        ),
+        runtime=runtime,
+    )
+
+    assert isinstance(completed, WorkflowDispatchResult)
+    assert isinstance(completed.workflow_result, WorkflowCompletedResult)
+    assert len(semantic_parser.messages) == 1
+    assert customer_resolver.calls == ["东风研发总院", "东风汽车集团股份有限公司"]
+    assert len(tool_registry.calls) == 1
+    payload = tool_registry.calls[0]["payload"]
+    assert payload["source_content"] == original_content
+    assert payload["next_action"] == "周四再找张老师确认用印进展，以及是否可以开发票。"  # noqa: RUF001

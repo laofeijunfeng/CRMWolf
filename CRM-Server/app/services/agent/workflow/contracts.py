@@ -213,6 +213,12 @@ class WorkflowTextStart(WorkflowContractModel):
     # hint for consistency, but still owns detailed field extraction and CRM
     # command validation.
     semantic_plan: AgentSemanticPlan | None = None
+    # The first Workflow parse is the canonical intake snapshot. It is kept
+    # JSON-safe so durable checkpoints do not depend on application-specific
+    # constructors; the planner validates it back into AgentSemanticParseResult
+    # before using it. Resume turns must patch this snapshot instead of
+    # re-interpreting the original text.
+    semantic_snapshot: dict[str, JsonValue] | None = None
 
     @model_serializer(mode="wrap")
     def serialize_without_empty_plan(
@@ -221,6 +227,8 @@ class WorkflowTextStart(WorkflowContractModel):
         payload = handler(self)
         if self.semantic_plan is None:
             payload.pop("semantic_plan", None)
+        if self.semantic_snapshot is None:
+            payload.pop("semantic_snapshot", None)
         return payload
 
 

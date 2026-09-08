@@ -6,6 +6,8 @@ import math
 from datetime import date, datetime
 from typing import Protocol
 
+from pydantic import ValidationError
+
 from app.models.customer import Customer
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_opportunity_suggestion_job import CustomerOpportunitySuggestionJob
@@ -16,6 +18,7 @@ from app.services.agent.quality import (
     AgentFollowUpQualityEvaluatorError,
     agent_follow_up_quality_evaluator,
 )
+from app.services.agent.schemas import AgentSemanticParseResult
 from app.services.agent.semantic import (
     AgentSemanticParserError,
     agent_semantic_parser,
@@ -275,6 +278,7 @@ class CRMWorkflowPlanner:
                 "WORKFLOW_START_INVALID",
                 "工作流启动参数无效。",
             )
+        semantic = self._semantic_for_request(request)
         text = self._planning_text(request.start.text, request.supplements)
         db = runtime.db
         if db is None:
@@ -285,22 +289,29 @@ class CRMWorkflowPlanner:
             )
         team_id = request.principal.team_id
         current_datetime = self._current_datetime(runtime)
-        try:
-            envelope = await self._semantic_parser.parse_with_metadata(
-                db,
-                team_id=team_id,
-                user_message=text,
-                memory=None,
-                current_date=current_datetime.date(),
-            )
-        except AgentSemanticParserError as exc:
+        if semantic is None:
+            try:
+                envelope = await self._semantic_parser.parse_with_metadata(
+                    db,
+                    team_id=team_id,
+                    user_message=text,
+                    memory=None,
+                    current_date=current_datetime.date(),
+                )
+            except AgentSemanticParserError as exc:
+                raise WorkflowPlanningError(
+                    "WORKFLOW_SEMANTIC_PARSE_FAILED",
+                    "暂时无法理解这个写入请求,请稍后重试。",
+                    retryable=True,
+                ) from exc
+            semantic = getattr(envelope, "result", None)
+
+        if semantic is None:
             raise WorkflowPlanningError(
                 "WORKFLOW_SEMANTIC_PARSE_FAILED",
                 "暂时无法理解这个写入请求,请稍后重试。",
                 retryable=True,
-            ) from exc
-
-        semantic = getattr(envelope, "result", None)
+            )
         root_semantic_plan = request.start.semantic_plan
         expected_intent = self._workflow_intent_from_root_plan(root_semantic_plan)
         # Root and Workflow share the same model-produced semantic plan. The
@@ -322,6 +333,9 @@ class CRMWorkflowPlanner:
                     ),
                 }
             )
+        # Persist the normalized semantic result, including the Root-authorized
+        # intent, as the canonical snapshot used by future resume turns.
+        request = self._cache_semantic_snapshot(request, semantic)
         intent = getattr(semantic, "intent", None)
         confidence = getattr(semantic, "intent_confidence", 0.0)
         if not isinstance(confidence, (int, float)) or confidence < 0.75:
@@ -2328,6 +2342,65 @@ class CRMWorkflowPlanner:
         )
 
     @staticmethod
+    def _cache_semantic_snapshot(
+        request: WorkflowTurnInput,
+        semantic: object,
+    ) -> WorkflowTurnInput:
+        if not isinstance(request.start, WorkflowTextStart):
+            return request
+        if not hasattr(semantic, "model_dump"):
+            return request
+        snapshot = semantic.model_dump(mode="json")
+        return request.model_copy(
+            update={
+                "start": request.start.model_copy(
+                    update={"semantic_snapshot": snapshot}
+                )
+            }
+        )
+
+    @classmethod
+    def _semantic_for_request(cls, request: WorkflowTurnInput) -> object | None:
+        if not isinstance(request.start, WorkflowTextStart):
+            return None
+        snapshot = request.start.semantic_snapshot
+        if snapshot is None:
+            return None
+        try:
+            semantic = AgentSemanticParseResult.model_validate(snapshot)
+        except ValidationError as exc:
+            raise WorkflowPlanningError(
+                "WORKFLOW_SEMANTIC_SNAPSHOT_INVALID",
+                "工作流语义快照无效，请重新发起本次操作。",  # noqa: RUF001
+            ) from exc
+
+        # Supplements are typed by the interaction that requested them. Only
+        # the addressed slot is patched; untouched facts from the original
+        # turn remain canonical. Quality supplementation intentionally keeps
+        # the legacy full-reparse behavior because it asks the user to revise
+        # the whole activity narrative.
+        for supplement in request.supplements:
+            business_action = supplement.metadata.get("business_action")
+            if business_action == "provide_workflow_customer":
+                semantic.customer = semantic.customer.model_copy(
+                    update={
+                        "name_text": supplement.content,
+                        "resolution_source": "EXPLICIT",
+                    }
+                )
+            elif business_action == "provide_follow_up_content":
+                semantic.follow_up = semantic.follow_up.model_copy(
+                    update={"content": supplement.content}
+                )
+            elif business_action == "supplement_follow_up_next_action":
+                semantic.follow_up = semantic.follow_up.model_copy(
+                    update={"next_action": supplement.content}
+                )
+            elif business_action == "supplement_follow_up_quality":
+                return None
+        return semantic
+
+    @staticmethod
     def _with_resolved_customer(
         request: WorkflowTurnInput,
         *,
@@ -2417,6 +2490,7 @@ class CRMWorkflowPlanner:
                     business_action="provide_workflow_customer",
                     title="重新确认客户",
                     prompt="没有匹配客户，请提供更完整的客户名称。",  # noqa: RUF001
+                    checkpoint_request=request,
                 )
 
         trusted_context_customer = (
@@ -2457,7 +2531,8 @@ class CRMWorkflowPlanner:
                     workflow_id=workflow_id,
                     candidates=resolution.candidates,
                     stale_selection=selected_customer_id is not None,
-                )
+                ),
+                checkpoint_request=request,
             )
         if resolution.status == "MISSING":
             raise self._needs_text(
@@ -2466,6 +2541,7 @@ class CRMWorkflowPlanner:
                 business_action="provide_workflow_customer",
                 title="补充客户",
                 prompt="请说明这项业务操作对应哪个客户。",
+                checkpoint_request=request,
             )
         if resolution.status == "NOT_FOUND" or resolution.customer is None:
             customer_label = f"“{customer_lookup_name}”" if customer_lookup_name else "该客户"
@@ -2475,6 +2551,7 @@ class CRMWorkflowPlanner:
                 business_action="provide_workflow_customer",
                 title="重新确认客户",
                 prompt=f"没有找到可访问的客户{customer_label}, 请提供更完整的客户名称。",
+                checkpoint_request=request,
             )
         return resolution.customer.customer_id, resolution.customer.customer_name
 
