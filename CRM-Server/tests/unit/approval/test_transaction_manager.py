@@ -108,53 +108,28 @@ class TestApprovalTransactionManager:
         pass
 
     @pytest.mark.asyncio
-    async def test_send_notification_awaits_pending_notification_service(self, transaction_manager, mock_db):
+    async def test_send_notification_enqueues_and_kicks(self, transaction_manager, mock_db):
         approval = Mock()
         approval.id = 86
         approval.business_type = BusinessType.OPPORTUNITY
         approval.business_id = 30
-        approval.submitter_name = "张三"
-        approval.flow = Mock(flow_name="商机审批")
-        approval.current_node = Mock(
-            approve_role="SALES_MANAGER",
-            node_name="销售经理审批",
-            notify_user_ids=["11"],
-        )
         entity = Mock()
+        request = Mock(job_public_id="onj_queued")
 
-        sent_payload = {}
-
-        class FakeAdapter:
-            def get_name(self, entity):
-                return "企业版采购"
-
-        async def fake_notify_approval_pending(**kwargs):
-            sent_payload.update(kwargs)
-            return {"success": 1, "failed": 0, "skipped": 0}
-
-        with patch.object(transaction_manager_module, "get_adapter", return_value=FakeAdapter()), \
-            patch.object(transaction_manager_module, "get_approval_type_name", return_value="商机"), \
-            patch.object(transaction_manager_module, "get_approval_customer_name", return_value="测试客户"), \
-            patch.object(transaction_manager_module, "get_approval_card_fields", return_value={"商机": "企业版采购"}), \
-            patch("app.crud.role.role_crud.get_by_code", return_value=Mock(id=7)), \
-            patch(
-                "app.crud.role.role_crud.get_role_users",
-                return_value=[Mock(id=11), Mock(id=12)],
-            ), \
-            patch(
-                "app.services.feishu_notification.feishu_notification_service.notify_approval_pending",
-                side_effect=fake_notify_approval_pending,
-            ):
+        with patch.object(
+            transaction_manager_module.outbound_notification_job_service,
+            "enqueue_pending_for_approval",
+            return_value=request,
+        ) as enqueue, patch.object(
+            transaction_manager_module.outbound_notification_job_service,
+            "kick",
+        ) as kick:
             result = await transaction_manager.send_notification(mock_db, approval, entity, team_id=2)
 
-        assert result == {"success": 1, "failed": 0, "skipped": 0}
-        assert sent_payload["db"] is mock_db
-        assert sent_payload["team_id"] == 2
-        assert sent_payload["user_ids"] == [11]
-        assert sent_payload["entity_type"] == BusinessType.OPPORTUNITY
-        assert sent_payload["entity_name"] == "企业版采购"
-        assert sent_payload["flow_name"] == "商机审批"
-        assert sent_payload["node_name"] == "销售经理审批"
+        enqueue.assert_called_once_with(mock_db, approval=approval, team_id=2)
+        mock_db.commit.assert_called_once()
+        kick.assert_called_once_with(request)
+        assert result == {"success": 0, "failed": 0, "skipped": 0, "queued": 1}
 
     # ========================================================================
     # submit_for_approval 测试用例

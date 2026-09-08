@@ -43,19 +43,13 @@ from app.schemas.approval_generic import (
 from app.schemas.approval_generic import (
     ApprovalSubmitRequest as GenericApprovalSubmitRequest,
 )
-from app.services.approval_adapter import (
-    get_adapter,
-    get_approval_action_path,
-    get_approval_card_fields,
-    get_approval_customer_name,
-    get_approval_type_name,
-)
+from app.services.approval_adapter import get_adapter
 from app.services.approval_transaction_manager import approval_transaction_manager
 from app.services.customer_approval_intelligence_service import (
     CustomerApprovalChangeRefreshInput,
     customer_approval_intelligence_service,
 )
-from app.services.feishu_notification import feishu_notification_service
+from app.services.outbound_notification_job_service import outbound_notification_job_service
 from app.services.file_storage import FileStorageError, file_storage_service
 from app.utils.public_id import is_opportunity_public_id
 
@@ -643,21 +637,13 @@ async def submit_contract_approval(
 
         if approval.current_node:
             try:
-                notify_users = get_notification_users_for_node(db, approval.current_node, team_id)
-                result = await feishu_notification_service.notify_approval_pending(
-                    db=db,
+                request = outbound_notification_job_service.enqueue_pending_for_approval(
+                    db,
+                    approval=approval,
                     team_id=team_id,
-                    user_ids=[user.id for user in notify_users],
-                    entity_type=BusinessType.CONTRACT,
-                    entity_name=contract.contract_name,
-                    flow_name=flow.flow_name,
-                    node_name=approval.current_node.node_name,
-                    business_id=contract_id,
-                    submitter_name=current_user.name,
-                    approval_type_name=get_approval_type_name(BusinessType.CONTRACT),
-                    customer_name=get_approval_customer_name(db, BusinessType.CONTRACT, contract),
-                    detail_fields=get_approval_card_fields(db, BusinessType.CONTRACT, contract),
+                    actor_id=str(current_user.id),
                 )
+                result = _queue_outbound_notification(db, request)
                 notification_status = _feishu_notification_status(result)
             except Exception as notify_error:
                 notification_status = "failed"
@@ -805,16 +791,13 @@ async def approve_contract(
                 flow_direction = "completed"
                 next_node = None
                 try:
-                    result = await feishu_notification_service.notify_approval_approved(
-                        db=db,
+                    request = outbound_notification_job_service.enqueue_approved(
+                        db,
+                        approval=approval,
                         team_id=team_id,
-                        user_id=int(approval.submitter_id),
-                        entity_type=BusinessType.CONTRACT,
-                        entity_name=contract.contract_name,
-                        business_id=contract_id,
-                        detail_fields=get_approval_card_fields(db, BusinessType.CONTRACT, contract),
-                        button_path=get_approval_action_path(BusinessType.CONTRACT),
+                        actor_id=str(current_user.id),
                     )
+                    result = _queue_outbound_notification(db, request)
                     notification_status = _feishu_notification_status(result)
                 except Exception as notify_error:
                     notification_status = "failed"
@@ -826,21 +809,13 @@ async def approve_contract(
                 flow_direction = "next_node"
                 next_node = approval.current_node.node_name
                 try:
-                    notify_users = get_notification_users_for_node(db, approval.current_node, team_id)
-                    result = await feishu_notification_service.notify_approval_pending(
-                        db=db,
+                    request = outbound_notification_job_service.enqueue_pending_for_approval(
+                        db,
+                        approval=approval,
                         team_id=team_id,
-                        user_ids=[user.id for user in notify_users],
-                        entity_type=BusinessType.CONTRACT,
-                        entity_name=contract.contract_name,
-                        flow_name=approval.flow.flow_name if approval.flow else "",
-                        node_name=approval.current_node.node_name,
-                        business_id=contract_id,
-                        submitter_name=approval.submitter_name,
-                        approval_type_name=get_approval_type_name(BusinessType.CONTRACT),
-                        customer_name=get_approval_customer_name(db, BusinessType.CONTRACT, contract),
-                        detail_fields=get_approval_card_fields(db, BusinessType.CONTRACT, contract),
+                        actor_id=str(current_user.id),
                     )
+                    result = _queue_outbound_notification(db, request)
                     notification_status = _feishu_notification_status(result)
                 except Exception as notify_error:
                     notification_status = "failed"
@@ -868,17 +843,14 @@ async def approve_contract(
             # 拒绝审批
             flow_direction = "terminated"
             try:
-                result = await feishu_notification_service.notify_approval_rejected(
-                    db=db,
+                request = outbound_notification_job_service.enqueue_rejected(
+                    db,
+                    approval=approval,
                     team_id=team_id,
-                    user_id=int(approval.submitter_id),
-                    entity_type=BusinessType.CONTRACT,
-                    entity_name=contract.contract_name,
                     reject_reason=action_request.comment or "无",
-                    business_id=contract_id,
-                    detail_fields=get_approval_card_fields(db, BusinessType.CONTRACT, contract),
-                    button_path=get_approval_action_path(BusinessType.CONTRACT),
+                    actor_id=str(current_user.id),
                 )
+                result = _queue_outbound_notification(db, request)
                 notification_status = _feishu_notification_status(result)
             except Exception as notify_error:
                 notification_status = "failed"
@@ -991,27 +963,28 @@ async def cancel_approval(
     if current_node:
         notify_user_ids = [user.id for user in get_notification_users_for_node(db, current_node, team_id)]
 
+    notify_request = None
+    notification_status = "skipped"
+    if notify_user_ids:
+        try:
+            notify_request = outbound_notification_job_service.enqueue_cancelled(
+                db,
+                approval=approval,
+                team_id=team_id,
+                actor_id=str(current_user.id),
+                actor_name=current_user.name,
+                recipient_user_ids=notify_user_ids,
+            )
+            notification_status = "queued" if notify_request is not None else "skipped"
+        except Exception as notify_error:
+            notification_status = "failed"
+            logger.error(
+                f"[Approval] Cancel notification failed: contract_id={contract_id}, error={str(notify_error)}"
+            )
+
     try:
         approval = approval_crud.cancel(db, approval, str(current_user.id))
-        notification_status = "skipped"
-        if notify_user_ids and contract:
-            try:
-                result = await feishu_notification_service.notify_approval_cancelled(
-                    db=db,
-                    team_id=team_id,
-                    user_ids=notify_user_ids,
-                    entity_type=BusinessType.CONTRACT,
-                    entity_name=contract.contract_name,
-                    submitter_name=current_user.name,
-                    approval_type_name=get_approval_type_name(BusinessType.CONTRACT),
-                    detail_fields=get_approval_card_fields(db, BusinessType.CONTRACT, contract),
-                )
-                notification_status = _feishu_notification_status(result)
-            except Exception as notify_error:
-                notification_status = "failed"
-                logger.error(
-                    f"[Approval] Cancel notification failed: contract_id={contract_id}, error={str(notify_error)}"
-                )
+        outbound_notification_job_service.kick(notify_request)
 
         # 记录撤回日志
         log_approval_operation(
@@ -1214,11 +1187,22 @@ def get_notification_users_for_node(db: Session, node, team_id: int):
 
 
 def _feishu_notification_status(result: dict) -> str:
+    if result.get("queued", 0) > 0:
+        return "queued"
     if result.get("success", 0) > 0:
         return "success"
     if result.get("failed", 0) > 0:
         return "failed"
     return "skipped"
+
+
+def _queue_outbound_notification(db: Session, request, *, commit: bool = True) -> dict:
+    if request is None:
+        return {"success": 0, "failed": 0, "skipped": 1, "queued": 0}
+    if commit:
+        db.commit()
+    outbound_notification_job_service.kick(request)
+    return {"success": 0, "failed": 0, "skipped": 0, "queued": 1}
 
 
 # 自审追加权限校验失败文案（按 entity_type 分发）。
@@ -1808,7 +1792,7 @@ async def bulk_approve(
 **功能说明：**
 - 按 entity_type 走对应适配器取实体；不存在 → 404
 - 统一通过 ApprovalTransactionManager 提交审批，覆盖驳回重提、状态流转、审批实例创建
-- 通知在提交事务 commit 后发送，失败不阻断业务流程
+- 通知意图写入提交事务，由出站通知 worker 发送，失败不阻断业务流程
 
 **路径参数：**
 - entity_type: CONTRACT / PAYMENT / INVOICE / LICENSE / OPPORTUNITY
@@ -1843,7 +1827,6 @@ async def submit_generic_approval(
         team_id=team_id,
         submitter_id=str(current_user.id),
         submitter_name=current_user.name,
-        send_notification=False,
     )
     if ap is None:
         raise HTTPException(
@@ -1863,13 +1846,6 @@ async def submit_generic_approval(
             business_type=entity_type,
             business_id=resolved_entity_id,
         )
-
-        notification_result = await approval_transaction_manager.send_notification(
-            db,
-            ap,
-            adapter.get_entity(db, resolved_entity_id, team_id) or entity,
-            team_id,
-        )
         if ap.current_node:
             log_approval_operation(
                 operation="Submit",
@@ -1878,7 +1854,7 @@ async def submit_generic_approval(
                 node_name=ap.current_node.node_name,
                 operator=current_user.name,
                 flow_direction="submitted",
-                notification_status=_feishu_notification_status(notification_result),
+                notification_status="queued",
                 business_type=entity_type,
                 business_id=resolved_entity_id,
             )
@@ -1997,11 +1973,10 @@ async def approve_generic_approval(
     flow_direction_str = ("completed" if approval.status == ApprovalStatus.APPROVED else
                      "next_node" if approval.current_node else "terminated")
 
-    # 通知泛化（A8）：按 entity_type 走适配器取展示名，分发 pending/approved/rejected
+    # 通知泛化：按审批结果入队 pending/approved/rejected
     notification_status = "skipped"
     adapter = get_adapter(entity_type)
     entity = adapter.get_entity(db, approval.business_id, approval.team_id)
-    entity_name = adapter.get_name(entity) if entity is not None else f"{entity_type}#{resolved_entity_id}"
     if entity is not None:
         _enqueue_customer_approval_intelligence(
             db,
@@ -2013,51 +1988,32 @@ async def approve_generic_approval(
         )
 
     try:
+        request = None
         if action_request.action.value == ApprovalAction.APPROVE:
             if approval.status == ApprovalStatus.APPROVED:
-                # 全部节点通过：通知提交人
-                result = await feishu_notification_service.notify_approval_approved(
-                    db=db,
+                request = outbound_notification_job_service.enqueue_approved(
+                    db,
+                    approval=approval,
                     team_id=team_id,
-                    user_id=int(approval.submitter_id),
-                    entity_type=entity_type,
-                    entity_name=entity_name,
-                    business_id=resolved_entity_id,
-                    detail_fields=get_approval_card_fields(db, entity_type, entity),
-                    button_path=get_approval_action_path(entity_type),
+                    actor_id=str(current_user.id),
                 )
-                notification_status = _feishu_notification_status(result)
             elif approval.current_node:
-                # 流转到下一节点：通知下一节点审批人
-                notify_users = get_notification_users_for_node(db, approval.current_node, team_id)
-                result = await feishu_notification_service.notify_approval_pending(
-                    db=db,
+                request = outbound_notification_job_service.enqueue_pending_for_approval(
+                    db,
+                    approval=approval,
                     team_id=team_id,
-                    user_ids=[user.id for user in notify_users],
-                    entity_type=entity_type,
-                    entity_name=entity_name,
-                    flow_name=approval.flow.flow_name if approval.flow else "",
-                    node_name=approval.current_node.node_name,
-                    business_id=resolved_entity_id,
-                    submitter_name=approval.submitter_name,
-                    approval_type_name=get_approval_type_name(entity_type),
-                    customer_name=get_approval_customer_name(db, entity_type, entity),
-                    detail_fields=get_approval_card_fields(db, entity_type, entity),
+                    actor_id=str(current_user.id),
                 )
-                notification_status = _feishu_notification_status(result)
         elif action_request.action.value == ApprovalAction.REJECT:
-            result = await feishu_notification_service.notify_approval_rejected(
-                db=db,
+            request = outbound_notification_job_service.enqueue_rejected(
+                db,
+                approval=approval,
                 team_id=team_id,
-                user_id=int(approval.submitter_id),
-                entity_type=entity_type,
-                entity_name=entity_name,
                 reject_reason=action_request.comment or "无",
-                business_id=resolved_entity_id,
-                detail_fields=get_approval_card_fields(db, entity_type, entity),
-                button_path=get_approval_action_path(entity_type),
+                actor_id=str(current_user.id),
             )
-            notification_status = _feishu_notification_status(result)
+        result = _queue_outbound_notification(db, request)
+        notification_status = _feishu_notification_status(result)
     except Exception as notify_error:
         notification_status = "failed"
         logger.error(
@@ -2113,11 +2069,29 @@ async def cancel_generic_approval(
     flow_name = approval.flow.flow_name if approval.flow else ""
     current_node = approval.current_node
     adapter = get_adapter(entity_type)
-    entity = adapter.get_entity(db, resolved_entity_id, team_id)
-    entity_name = adapter.get_name(entity) if entity is not None else f"{entity_type}#{resolved_entity_id}"
     notify_user_ids = []
     if current_node:
         notify_user_ids = [user.id for user in get_notification_users_for_node(db, current_node, team_id)]
+
+    notify_request = None
+    notification_status = "skipped"
+    if notify_user_ids:
+        try:
+            notify_request = outbound_notification_job_service.enqueue_cancelled(
+                db,
+                approval=approval,
+                team_id=team_id,
+                actor_id=str(current_user.id),
+                actor_name=current_user.name,
+                recipient_user_ids=notify_user_ids,
+            )
+            notification_status = "queued" if notify_request is not None else "skipped"
+        except Exception as notify_error:
+            notification_status = "failed"
+            logger.error(
+                f"[Approval] Generic cancel notification failed: entity_type={entity_type}, "
+                f"business_id={resolved_entity_id}, error={str(notify_error)}"
+            )
 
     try:
         approval = approval_crud.cancel(db, approval, str(current_user.id))
@@ -2135,6 +2109,7 @@ async def cancel_generic_approval(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
+    outbound_notification_job_service.kick(notify_request)
     entity = adapter.get_entity(db, resolved_entity_id, team_id)
     if entity is not None:
         _enqueue_customer_approval_intelligence(
@@ -2145,27 +2120,6 @@ async def cancel_generic_approval(
             actor_id=str(current_user.id),
             action="CANCEL",
         )
-
-    notification_status = "skipped"
-    if notify_user_ids:
-        try:
-            result = await feishu_notification_service.notify_approval_cancelled(
-                db=db,
-                team_id=team_id,
-                user_ids=notify_user_ids,
-                entity_type=entity_type,
-                entity_name=entity_name,
-                submitter_name=current_user.name,
-                approval_type_name=get_approval_type_name(entity_type),
-                detail_fields=get_approval_card_fields(db, entity_type, entity),
-            )
-            notification_status = _feishu_notification_status(result)
-        except Exception as notify_error:
-            notification_status = "failed"
-            logger.error(
-                f"[Approval] Generic cancel notification failed: entity_type={entity_type}, "
-                f"business_id={resolved_entity_id}, error={str(notify_error)}"
-            )
 
     log_approval_operation(
         operation="Cancel",
@@ -2236,21 +2190,16 @@ async def remind_generic_approval(
             detail="当前审批节点没有可通知的审批人",
         )
 
-    entity_name = adapter.get_name(entity)
     notification_status = "skipped"
     try:
-        result = await feishu_notification_service.notify_approval_reminder(
-            db=db,
+        request = outbound_notification_job_service.enqueue_reminder(
+            db,
+            approval=approval,
             team_id=team_id,
-            user_ids=[user.id for user in notify_users],
-            entity_type=entity_type,
-            entity_name=entity_name,
-            node_name=approval.current_node.node_name,
-            business_id=resolved_entity_id,
-            submitter_name=current_user.name,
-            approval_type_name=get_approval_type_name(entity_type),
-            detail_fields=get_approval_card_fields(db, entity_type, entity),
+            actor_id=str(current_user.id),
+            recipient_user_ids=[user.id for user in notify_users],
         )
+        result = _queue_outbound_notification(db, request)
         notification_status = _feishu_notification_status(result)
     except Exception as notify_error:
         notification_status = "failed"

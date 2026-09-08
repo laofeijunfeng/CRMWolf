@@ -47,7 +47,8 @@ from app.services.customer_business_object_intelligence_service import (
     CustomerBusinessObjectChangeRefreshInput,
     customer_business_object_intelligence_service,
 )
-from app.services.feishu import feishu_service
+from app.models.outbound_notification_job import OutboundNotificationEventType
+from app.services.outbound_notification_job_service import outbound_notification_job_service
 
 router = APIRouter(prefix="/v1/opportunities", tags=["商机管理"])
 
@@ -231,7 +232,6 @@ async def create_opportunity(
         submitter_name=submitter_name,
         team_id=team_id,
         rollback_on_no_flow=True,
-        send_notification=False
     )
 
     if entity is None:
@@ -241,8 +241,6 @@ async def create_opportunity(
         )
 
     opportunity_crud.log_created(db, entity, submitter_id, team_id)
-    if approval is not None:
-        await approval_transaction_manager.send_notification(db, approval, entity, team_id)
     await _trigger_opportunity_intelligence_refresh(
         db,
         _build_opportunity_intelligence_change(
@@ -935,14 +933,20 @@ async def mark_opportunity_as_won(
     )
 
     customer = customer_crud.get_by_id(db, db_opportunity.customer_id, team_id)
-    
-    await feishu_service.notify_opportunity_won(
-        db_opportunity.owner_id,
-        db_opportunity.opportunity_name,
-        win_data.actual_amount,
-        customer.account_name if customer else None
+    outbound_notification_job_service.queue_committed(
+        db,
+        team_id=team_id,
+        event_type=OutboundNotificationEventType.OPPORTUNITY_WON,
+        business_type="OPPORTUNITY",
+        business_id=int(updated_opportunity.id),
+        recipient_user_ids=[db_opportunity.owner_id],
+        actor_id=str(current_user.id),
+        payload_json={
+            "opportunity_name": db_opportunity.opportunity_name,
+            "customer_name": customer.account_name if customer else "",
+            "actual_amount": float(win_data.actual_amount),
+        },
     )
-    
     return OpportunityResponse(**_opportunity_response_dict(db, updated_opportunity, team_id))
 
 
@@ -968,14 +972,20 @@ async def mark_opportunity_as_lost(
     )
 
     customer = customer_crud.get_by_id(db, db_opportunity.customer_id, team_id)
-    
-    await feishu_service.notify_opportunity_lost(
-        db_opportunity.owner_id,
-        db_opportunity.opportunity_name,
-        lose_data.loss_reason,
-        customer.account_name if customer else None
+    outbound_notification_job_service.queue_committed(
+        db,
+        team_id=team_id,
+        event_type=OutboundNotificationEventType.OPPORTUNITY_LOST,
+        business_type="OPPORTUNITY",
+        business_id=int(updated_opportunity.id),
+        recipient_user_ids=[db_opportunity.owner_id],
+        actor_id=str(current_user.id),
+        payload_json={
+            "opportunity_name": db_opportunity.opportunity_name,
+            "customer_name": customer.account_name if customer else "",
+            "loss_reason": lose_data.loss_reason,
+        },
     )
-    
     return OpportunityResponse(**_opportunity_response_dict(db, updated_opportunity, team_id))
 
 

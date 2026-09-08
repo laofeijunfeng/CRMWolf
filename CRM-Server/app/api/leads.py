@@ -28,6 +28,8 @@ from app.services.acquisition_source_service import (
     resolve_public_ids_to_ids,
 )
 from app.utils.time import business_now
+from app.models.outbound_notification_job import OutboundNotificationEventType
+from app.services.outbound_notification_job_service import outbound_notification_job_service
 from app.core.list_query import (
     enforce_owner_view_scope,
     optional_request_list_query,
@@ -456,8 +458,6 @@ async def claim_lead(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    from app.services.feishu import feishu_service
-
     lead = lead_crud.get_by_public_id(db, lead_id, team_id)
     if not lead:
         raise HTTPException(
@@ -472,12 +472,16 @@ async def claim_lead(
         )
 
     claimed_lead = lead_crud.claim(db, lead.id, str(current_user.id), team_id)
-
-    await feishu_service.notify_lead_claimed(
-        str(current_user.id),
-        lead.lead_name
+    outbound_notification_job_service.queue_committed(
+        db,
+        team_id=team_id,
+        event_type=OutboundNotificationEventType.LEAD_CLAIMED,
+        business_type="LEAD",
+        business_id=int(claimed_lead.id),
+        recipient_user_ids=[current_user.id],
+        actor_id=str(current_user.id),
+        payload_json={"lead_name": lead.lead_name},
     )
-
     return claimed_lead
 
 
@@ -490,7 +494,6 @@ async def assign_lead(
     db: Session = Depends(get_db)
 ):
     from app.crud.role import role_crud
-    from app.services.feishu import feishu_service
 
     user_roles = role_crud.get_user_roles(db, current_user.id, team_id)
     role_codes = {r.code for r in user_roles}
@@ -519,14 +522,20 @@ async def assign_lead(
         )
 
     assigned_lead = lead_crud.assign(db, lead.id, request.owner_id)
-
-    await feishu_service.notify_lead_assigned(
-        request.owner_id,
-        lead.lead_name,
-        lead.contact_name,
-        lead.contact_phone
+    outbound_notification_job_service.queue_committed(
+        db,
+        team_id=team_id,
+        event_type=OutboundNotificationEventType.LEAD_ASSIGNED,
+        business_type="LEAD",
+        business_id=int(assigned_lead.id),
+        recipient_user_ids=[request.owner_id],
+        actor_id=str(current_user.id),
+        payload_json={
+            "lead_name": lead.lead_name,
+            "contact_name": lead.contact_name,
+            "contact_phone": lead.contact_phone,
+        },
     )
-
     return assigned_lead
 
 

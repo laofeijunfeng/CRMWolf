@@ -19,7 +19,6 @@ M-3：payment/invoice 的 :approve:own 自审校验真正生效。
 import pytest
 from datetime import datetime, timedelta, date
 from decimal import Decimal
-from unittest.mock import AsyncMock
 
 from sqlalchemy import create_engine
 from sqlalchemy.ext.compiler import compiles
@@ -59,6 +58,10 @@ from app.models.role import Role
 from app.models.user_role import UserRole
 from app.models.permission import Permission
 from app.models.role_permission import RolePermission
+from app.models.outbound_notification_job import (
+    OutboundNotificationEventType,
+    OutboundNotificationJob,
+)
 
 
 # ---------- DB fixtures ---------------------------------------------------
@@ -89,6 +92,7 @@ def db_session():
         ApprovalNode.__table__,
         Approval.__table__,
         ApprovalRecord.__table__,
+        OutboundNotificationJob.__table__,
     ]
     Base.metadata.create_all(engine, tables=tables)
     Session = sessionmaker(bind=engine)
@@ -96,6 +100,15 @@ def db_session():
     yield session
     session.close()
     engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def _noop_outbound_notification_kick(monkeypatch):
+    """TestClient 有事件循环，不能让 worker 真的去打飞书。"""
+    monkeypatch.setattr(
+        "app.services.outbound_notification_job_service.OutboundNotificationJobService.kick",
+        lambda self, request: None,
+    )
 
 
 @pytest.fixture(scope="function")
@@ -537,7 +550,7 @@ def test_detail_not_found(client):
 
 def test_remind_pending_approval_by_submitter_sends_notification(
     db_session, client, seed_invoice_draft, seed_invoice_flow_with_finance_node,
-    seed_finance_role_and_link, current_user_rec, monkeypatch,
+    seed_finance_role_and_link, current_user_rec,
 ):
     """提交人可对自己提交的待审批单据催办当前节点审批人。"""
     flow, node = seed_invoice_flow_with_finance_node
@@ -554,27 +567,14 @@ def test_remind_pending_approval_by_submitter_sends_notification(
     db_session.add(approval)
     db_session.commit()
 
-    send_mock = AsyncMock(return_value={"success": 1, "failed": 0, "skipped": 0})
-    monkeypatch.setattr(
-        "app.api.approvals.feishu_notification_service.notify_approval_reminder",
-        send_mock,
-    )
-    monkeypatch.setattr(
-        "app.api.approvals.get_approval_card_fields",
-        lambda db, entity_type, entity: {"申请单号": entity.application_number},
-    )
-
     r = client.post(f"/v1/approvals/INVOICE/{seed_invoice_draft.id}/remind")
 
     assert r.status_code == 200, r.text
     assert r.json()["message"] == "已发送催办通知"
-    send_mock.assert_awaited_once()
-    kwargs = send_mock.await_args.kwargs
-    assert kwargs["user_ids"] == [current_user_rec.id]
-    assert kwargs["entity_type"] == BusinessType.INVOICE
-    assert kwargs["entity_name"] == f"发票申请#{seed_invoice_draft.id}"
-    assert kwargs["node_name"] == "财务审批"
-    assert kwargs["business_id"] == seed_invoice_draft.id
+    jobs = db_session.query(OutboundNotificationJob).all()
+    assert len(jobs) == 1
+    assert jobs[0].event_type == OutboundNotificationEventType.APPROVAL_REMINDER
+    assert jobs[0].recipient_user_ids == [current_user_rec.id]
 
 
 # ---------- E6 bulk-approve: 逐条独立事务 + 部分成功汇总 -------------------

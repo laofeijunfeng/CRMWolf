@@ -198,6 +198,12 @@ async def startup_event():
     )
     start_customer_activity_post_commit_recovery_scheduler()
 
+    logger.info("启动出站通知持久任务恢复扫描...")
+    from app.tasks.outbound_notification_recovery import (
+        start_outbound_notification_recovery_scheduler,
+    )
+    start_outbound_notification_recovery_scheduler()
+
     logger.info("启动 Agent 商机建议持久任务恢复扫描...")
     from app.tasks.customer_opportunity_suggestion_recovery import (
         start_customer_opportunity_suggestion_recovery_scheduler,
@@ -216,6 +222,9 @@ async def shutdown_event():
     from app.tasks.customer_activity_post_commit_recovery import (
         stop_customer_activity_post_commit_recovery_scheduler,
     )
+    from app.tasks.outbound_notification_recovery import (
+        stop_outbound_notification_recovery_scheduler,
+    )
     from app.tasks.customer_opportunity_suggestion_recovery import (
         stop_customer_opportunity_suggestion_recovery_scheduler,
     )
@@ -228,6 +237,7 @@ async def shutdown_event():
 
     stop_customer_activity_ai_job_recovery_scheduler()
     stop_customer_activity_post_commit_recovery_scheduler()
+    stop_outbound_notification_recovery_scheduler()
     stop_customer_opportunity_suggestion_recovery_scheduler()
     stop_follow_up_confirmation_delivery_recovery_scheduler()
     stop_customer_intelligence_backfill_scheduler()

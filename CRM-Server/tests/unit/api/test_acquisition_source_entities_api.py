@@ -123,8 +123,12 @@ def api_env(monkeypatch):
         lambda *args, **kwargs: False,
     )
     monkeypatch.setattr(
-        "app.services.feishu.feishu_service.notify_account_created",
-        AsyncMock(return_value=None),
+        "app.services.outbound_notification_job_service.OutboundNotificationJobService.queue_committed",
+        lambda self, *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "app.services.outbound_notification_job_service.OutboundNotificationJobService.kick",
+        lambda self, request: None,
     )
 
     app = FastAPI()

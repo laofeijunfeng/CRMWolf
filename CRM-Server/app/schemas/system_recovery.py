@@ -32,6 +32,15 @@ class CustomerActivityPostCommitRecoveryCandidate(BaseModel):
     job_public_id: str
 
 
+class OutboundNotificationJobRecoveryCandidate(BaseModel):
+    """Minimal routing identity emitted by the outbound notification scan."""
+
+    model_config = ConfigDict(frozen=True)
+
+    team_id: int
+    job_public_id: str
+
+
 class FollowUpConfirmationDeliveryRecoveryCandidate(BaseModel):
     """Durable delivery contract emitted by the system confirmation scan."""
 

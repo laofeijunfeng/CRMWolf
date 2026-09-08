@@ -94,6 +94,11 @@ from app.models.lead import CompanyScale, FollowUpMethod, Lead, LeadFollowUp, Le
 from app.models.license_application import LicenseApplication, LicenseApplicationStatus, LicenseType
 from app.models.oauth import OAuthProviderConfig, UserOAuthAccount
 from app.models.operation_log import EventAction, OperationLog, PrimaryResourceType
+from app.models.outbound_notification_job import (
+    OutboundNotificationEventType,
+    OutboundNotificationJob,
+    OutboundNotificationJobStatus,
+)
 from app.models.opportunity import Opportunity, OpportunityStage, OpportunityStatus, PurchaseType
 from app.models.payment import PaymentPlan, PaymentPlanStatus, PaymentRecord
 from app.models.permission import Permission
@@ -252,6 +257,9 @@ __all__ = [
     "LicenseType",
     "OAuthProviderConfig",
     "OperationLog",
+    "OutboundNotificationEventType",
+    "OutboundNotificationJob",
+    "OutboundNotificationJobStatus",
     "Opportunity",
     "OpportunityStage",
     "OpportunityStageSnapshot",

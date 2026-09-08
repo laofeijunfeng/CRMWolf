@@ -44,13 +44,12 @@ from app.schemas.invoice import (
     MessageResponse,
     PaymentPlanInvoiceSummary,
 )
-from app.services.approval_adapter import get_adapter, get_approval_card_fields
 from app.services.customer_business_object_intelligence_service import (
     CustomerBusinessObjectChangeRefreshInput,
     CustomerBusinessObjectChangeType,
     customer_business_object_intelligence_service,
 )
-from app.services.feishu_notification import feishu_notification_service
+from app.services.outbound_notification_job_service import outbound_notification_job_service
 from app.services.file_storage import FileStorageError, file_storage_service
 
 logger = logging.getLogger(__name__)
@@ -692,18 +691,20 @@ async def mark_invoice_issued(
             ),
         )
         try:
-            await feishu_notification_service.notify_approval_issued(
-                db=db,
+            notify_request = outbound_notification_job_service.enqueue_issued(
+                db,
                 team_id=team_id,
-                user_id=int(approval.submitter_id),
-                entity_type=BusinessType.INVOICE,
-                entity_name=get_adapter(BusinessType.INVOICE).get_name(issued_application),
-                detail_fields=get_approval_card_fields(db, BusinessType.INVOICE, issued_application),
+                business_type=BusinessType.INVOICE,
+                business_id=int(issued_application.id),
+                recipient_user_id=int(approval.submitter_id),
+                actor_id=str(current_user.id),
+                approval_id=int(approval.id) if getattr(approval, "id", None) is not None else None,
                 button_path="/invoices",
             )
+            outbound_notification_job_service.commit_and_kick(db, notify_request)
         except Exception as notify_error:
             logger.error(
-                f"[Invoice] Issue notification failed: application_id={application_id}, error={str(notify_error)}"
+                f"[Invoice] Issue notification enqueue failed: application_id={application_id}, error={str(notify_error)}"
             )
         return _populate_application_info(db, issued_application, team_id)
     except ValueError as e:

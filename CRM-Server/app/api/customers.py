@@ -104,9 +104,36 @@ from app.services.customer_intelligence_refresh_service import (
     customer_intelligence_refresh_service,
 )
 from app.services.customer_intelligence_run_service import CustomerIntelligenceRunDiagnostic
+from app.models.outbound_notification_job import OutboundNotificationEventType
+from app.services.outbound_notification_job_service import outbound_notification_job_service
 
 router = APIRouter(prefix="/v1/customers", tags=["客户管理"])
 logger = logging.getLogger(__name__)
+
+
+def _queue_customer_returned_notification(
+    db: Session,
+    *,
+    team_id: int,
+    customer,
+    previous_owner,
+    return_reason: str,
+    actor_id: str,
+) -> None:
+    outbound_notification_job_service.queue_committed(
+        db,
+        team_id=team_id,
+        event_type=OutboundNotificationEventType.CUSTOMER_RETURNED,
+        business_type="CUSTOMER",
+        business_id=int(customer.id),
+        recipient_user_ids=[previous_owner],
+        actor_id=actor_id,
+        payload_json={
+            "account_name": customer.account_name,
+            "return_reason": return_reason,
+            "previous_owner": previous_owner,
+        },
+    )
 
 
 def _customer_name_conflict_error(
@@ -448,8 +475,6 @@ async def convert_from_lead(
     headers. New clients should always send both operation and idempotency
     identifiers so a timeout can be resolved without replaying the conversion.
     """
-    from app.services.feishu import feishu_service
-
     if operation_id is not None:
         operation_id = operation_id.strip()
         if not operation_id or len(operation_id) > 64:
@@ -505,10 +530,19 @@ async def convert_from_lead(
             )
         except Exception:
             logger.exception("线索转客户后的客户智能刷新调度失败")
-        try:
-            await feishu_service.notify_account_created(customer.owner_id, customer.account_name, contact.name)
-        except Exception:
-            logger.exception("线索转客户后的飞书通知失败")
+        outbound_notification_job_service.queue_committed(
+            db,
+            team_id=team_id,
+            event_type=OutboundNotificationEventType.ACCOUNT_CREATED,
+            business_type="CUSTOMER",
+            business_id=int(customer.id),
+            recipient_user_ids=[customer.owner_id],
+            actor_id=str(current_user.id),
+            payload_json={
+                "account_name": customer.account_name,
+                "contact_name": contact.name,
+            },
+        )
         return ConvertResponse(
             customer_id=customer.public_id,
             contact_id=contact.id,
@@ -758,11 +792,21 @@ async def convert_from_lead(
     except Exception:
         logger.exception("线索转客户后的客户智能刷新调度失败", extra={"operation_id": execution.operation_id})
         warnings.append("客户智能档案将在后台补偿整理")
-    try:
-        await feishu_service.notify_account_created(customer.owner_id, customer.account_name, contact.name)
-    except Exception:
-        logger.exception("线索转客户后的飞书通知失败", extra={"operation_id": execution.operation_id})
-        warnings.append("飞书通知发送失败，可在操作记录中查看转化结果")
+    queued = outbound_notification_job_service.queue_committed(
+        db,
+        team_id=team_id,
+        event_type=OutboundNotificationEventType.ACCOUNT_CREATED,
+        business_type="CUSTOMER",
+        business_id=int(customer.id),
+        recipient_user_ids=[customer.owner_id],
+        actor_id=str(current_user.id),
+        payload_json={
+            "account_name": customer.account_name,
+            "contact_name": contact.name,
+        },
+    )
+    if queued is None:
+        warnings.append("飞书通知排队失败，可在操作记录中查看转化结果")
 
     warning_data: Optional[dict] = None
     if warnings:
@@ -1815,8 +1859,6 @@ async def update_customer_status(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    from app.services.feishu import feishu_service
-
     customer = _get_editable_customer(db, customer_id, team_id, current_user)
 
     new_status = status_update.status
@@ -1831,14 +1873,21 @@ async def update_customer_status(
     )
 
     if new_status == 1:
-        await feishu_service.notify_account_status_won(
-            customer.owner_id,
-            customer.account_name
-        )
+        event_type = OutboundNotificationEventType.ACCOUNT_STATUS_WON
     elif new_status == 2:
-        await feishu_service.notify_account_status_lost(
-            customer.owner_id,
-            customer.account_name
+        event_type = OutboundNotificationEventType.ACCOUNT_STATUS_LOST
+    else:
+        event_type = None
+    if event_type is not None:
+        outbound_notification_job_service.queue_committed(
+            db,
+            team_id=team_id,
+            event_type=event_type,
+            business_type="CUSTOMER",
+            business_id=int(updated_customer.id),
+            recipient_user_ids=[updated_customer.owner_id],
+            actor_id=str(current_user.id),
+            payload_json={"account_name": updated_customer.account_name},
         )
 
     return _customer_response(db, updated_customer)
@@ -1852,8 +1901,6 @@ async def mark_customer_as_lost(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    from app.services.feishu import feishu_service
-
     customer = _get_editable_customer(db, customer_id, team_id, current_user)
 
     if customer.status == 2:
@@ -1879,9 +1926,15 @@ async def mark_customer_as_lost(
         },
     )
 
-    await feishu_service.notify_account_status_lost(
-        customer.owner_id,
-        customer.account_name
+    outbound_notification_job_service.queue_committed(
+        db,
+        team_id=team_id,
+        event_type=OutboundNotificationEventType.ACCOUNT_STATUS_LOST,
+        business_type="CUSTOMER",
+        business_id=int(updated_customer.id),
+        recipient_user_ids=[updated_customer.owner_id],
+        actor_id=str(current_user.id),
+        payload_json={"account_name": updated_customer.account_name},
     )
 
     return _customer_response(db, updated_customer)
@@ -2060,7 +2113,6 @@ async def return_customer_to_pool(
     expected_version_header: Optional[int] = Header(None, alias="X-Expected-Version"),
 ) -> object:
     from app.crud.role import role_crud
-    from app.services.feishu import feishu_service
 
     operation_id = _normalize_optional_header_text(operation_id)
     idempotency_key = _normalize_optional_header_text(idempotency_key)
@@ -2137,14 +2189,14 @@ async def return_customer_to_pool(
                 "return_reason": updated_customer.return_reason,
             },
         )
-        try:
-            await feishu_service.send_customer_returned_notification(
-                updated_customer.account_name,
-                return_data.return_reason,
-                previous_owner,
-            )
-        except Exception:
-            logger.exception("客户退回公海后的飞书通知失败")
+        _queue_customer_returned_notification(
+            db,
+            team_id=team_id,
+            customer=updated_customer,
+            previous_owner=previous_owner,
+            return_reason=return_data.return_reason,
+            actor_id=str(current_user.id),
+        )
         return CustomerReturnResponse(
             customer_id=updated_customer.public_id,
             previous_owner=previous_owner,
@@ -2316,14 +2368,14 @@ async def return_customer_to_pool(
         # The customer ownership fact is already committed. A projection
         # enqueue failure must not turn a successful command into a 500.
         logger.exception("客户退回公海后的智能档案刷新入队失败", extra={"operation_id": command_operation_id})
-    try:
-        await feishu_service.send_customer_returned_notification(
-            updated_customer.account_name,
-            return_data.return_reason,
-            previous_owner,
-        )
-    except Exception:
-        logger.exception("客户退回公海后的飞书通知失败", extra={"operation_id": command_operation_id})
+    _queue_customer_returned_notification(
+        db,
+        team_id=team_id,
+        customer=updated_customer,
+        previous_owner=previous_owner,
+        return_reason=return_data.return_reason,
+        actor_id=str(current_user.id),
+    )
     return command_execution_service.to_response_payload(execution)
 
 

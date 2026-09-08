@@ -19,14 +19,10 @@ from sqlalchemy.orm import Session
 import logging
 
 from app.constants.approval_phase import ApprovalPhase
-from app.services.approval_adapter import (
-    get_adapter,
-    get_approval_card_fields,
-    get_approval_customer_name,
-    get_approval_type_name,
-)
+from app.services.approval_adapter import get_adapter
 from app.crud.approval import approval_crud, approval_flow_crud
 from app.models.approval import Approval
+from app.services.outbound_notification_job_service import outbound_notification_job_service
 
 logger = logging.getLogger(__name__)
 
@@ -125,14 +121,30 @@ class ApprovalTransactionManager:
             adapter = get_adapter(business_type)
             adapter.on_submit(db, entity)
 
-            # 7. 统一 commit
+            # 7. 通知意图写入同一事务；失败不阻断财务/审批事实。
+            notify_request = None
+            if send_notification:
+                try:
+                    notify_request = outbound_notification_job_service.enqueue_pending_for_approval(
+                        db,
+                        approval=approval,
+                        team_id=team_id,
+                        actor_id=submitter_id,
+                    )
+                except Exception as notify_error:
+                    logger.error(
+                        "审批通知入队失败（approval_id=%s, entity_id=%s）: %s",
+                        approval.id,
+                        entity.id,
+                        notify_error,
+                        exc_info=True,
+                    )
+
+            # 8. 统一 commit，再 kick 出站通知 worker
             db.commit()
             db.refresh(entity)
             db.refresh(approval)
-
-            # 8. 发送通知（失败不阻断）
-            if send_notification:
-                self._send_notification_sync(db, approval, entity, team_id)
+            outbound_notification_job_service.kick(notify_request)
 
             logger.info(
                 f"create_with_approval 成功（business_type={business_type}, "
@@ -265,13 +277,29 @@ class ApprovalTransactionManager:
             # 7. adapter.on_submit() 触发原有 status 联动
             adapter.on_submit(db, entity)
 
-            # 8. 统一 commit
+            # 8. 通知意图写入同一事务；失败不阻断审批事实。
+            notify_request = None
+            if send_notification:
+                try:
+                    notify_request = outbound_notification_job_service.enqueue_pending_for_approval(
+                        db,
+                        approval=approval,
+                        team_id=team_id,
+                        actor_id=submitter_id,
+                    )
+                except Exception as notify_error:
+                    logger.error(
+                        "审批通知入队失败（approval_id=%s, entity_id=%s）: %s",
+                        approval.id,
+                        entity.id,
+                        notify_error,
+                        exc_info=True,
+                    )
+
+            # 9. 统一 commit，再 kick 出站通知 worker
             db.commit()
             db.refresh(approval)
-
-            # 9. 发送通知（失败不阻断）
-            if send_notification:
-                self._send_notification_sync(db, approval, entity, team_id)
+            outbound_notification_job_service.kick(notify_request)
 
             logger.info(
                 f"submit_for_approval 成功（business_type={business_type}, "
@@ -285,148 +313,36 @@ class ApprovalTransactionManager:
             db.rollback()
             return (None, f"系统异常：{str(e)}")
 
-    def _build_pending_notification_context(
-        self,
-        db: Session,
-        approval: Approval,
-        entity: Any,
-        team_id: int
-    ) -> Optional[Dict[str, Any]]:
-        from app.crud.role import role_crud
-
-        adapter = get_adapter(approval.business_type)
-        entity_name = adapter.get_name(entity)
-
-        current_node = approval.current_node
-        if not current_node or not current_node.approve_role:
-            logger.warning(
-                "审批通知跳过：当前节点未配置审批角色（approval_id=%s, business_type=%s, business_id=%s）",
-                approval.id,
-                approval.business_type,
-                approval.business_id,
-            )
-            return None
-
-        role = role_crud.get_by_code(db, current_node.approve_role)
-        if not role:
-            logger.warning(
-                "审批通知跳过：审批角色不存在（approval_id=%s, business_type=%s, business_id=%s, role=%s）",
-                approval.id,
-                approval.business_type,
-                approval.business_id,
-                current_node.approve_role,
-            )
-            return None
-
-        approvers = role_crud.get_role_users(db, role.id, team_id)
-        notify_user_ids = current_node.notify_user_ids or []
-        if notify_user_ids:
-            notify_id_set = {int(user_id) for user_id in notify_user_ids}
-            approvers = [user for user in approvers if int(user.id) in notify_id_set]
-        if not approvers:
-            logger.warning(
-                "审批通知跳过：审批角色无可通知成员（approval_id=%s, business_type=%s, business_id=%s, role=%s）",
-                approval.id,
-                approval.business_type,
-                approval.business_id,
-                current_node.approve_role,
-            )
-            return None
-
-        return {
-            "team_id": team_id,
-            "user_ids": [user.id for user in approvers],
-            "entity_type": approval.business_type,
-            "entity_name": entity_name,
-            "flow_name": approval.flow.flow_name if approval.flow else "",
-            "node_name": current_node.node_name,
-            "business_id": approval.business_id,
-            "submitter_name": approval.submitter_name,
-            "approval_type_name": get_approval_type_name(approval.business_type),
-            "customer_name": get_approval_customer_name(db, approval.business_type, entity),
-            "detail_fields": get_approval_card_fields(db, approval.business_type, entity),
-        }
-
     async def send_notification(self, db: Session, approval: Approval, entity: Any, team_id: int) -> Dict[str, int]:
-        """
-        发送审批通知（失败不阻断业务流程）
-
-        设计决策：
-        1. 通知失败不阻断审批流程（业务数据已 commit）
-        2. 失败记录日志（approval.id + entity.id）
-        3. 提供手动补发入口（ApprovalService.resend_notification）
-
-        Args:
-            db: 数据库会话
-            approval: 审批实例
-            entity: 业务单据实例
-            team_id: 团队ID
-        """
+        """Enqueue a pending approval notification after the source transaction already committed."""
         try:
-            from app.services.feishu_notification import feishu_notification_service
-
-            context = self._build_pending_notification_context(db, approval, entity, team_id)
-            if context is None:
-                return {"success": 0, "failed": 0, "skipped": 1}
-
-            result = await feishu_notification_service.notify_approval_pending(
-                db=db,
-                **context,
+            request = outbound_notification_job_service.enqueue_pending_for_approval(
+                db,
+                approval=approval,
+                team_id=team_id,
             )
-
+            if request is None:
+                return {"success": 0, "failed": 0, "skipped": 1, "queued": 0}
+            db.commit()
+            outbound_notification_job_service.kick(request)
             logger.info(
-                "审批通知发送完成（approval_id=%s, business_type=%s, business_id=%s, "
-                "approver_ids=%s, success=%s, failed=%s, skipped=%s）",
+                "审批通知已入队（approval_id=%s, business_type=%s, business_id=%s, job=%s）",
                 approval.id,
                 approval.business_type,
                 approval.business_id,
-                context["user_ids"],
-                result.get("success", 0),
-                result.get("failed", 0),
-                result.get("skipped", 0),
+                request.job_public_id,
             )
-            return result
-
+            return {"success": 0, "failed": 0, "skipped": 0, "queued": 1}
         except Exception as e:
-            # 记录日志，不阻断业务流程
             logger.error(
-                f"审批通知发送失败（approval_id={approval.id}, "
+                f"审批通知入队失败（approval_id={approval.id}, "
                 f"entity_id={approval.business_id}）: {e}",
                 exc_info=True
             )
-            return {"success": 0, "failed": 1, "skipped": 0}
-
-    def _send_notification_sync(self, db: Session, approval: Approval, entity: Any, team_id: int) -> Dict[str, int]:
-        import asyncio
-
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(self.send_notification(db, approval, entity, team_id))
-
-        logger.error(
-            "审批通知发送跳过：同步事务入口运行在异步事件循环中，请在提交后 await send_notification "
-            "（approval_id=%s, business_type=%s, business_id=%s）",
-            approval.id,
-            approval.business_type,
-            approval.business_id,
-        )
-        return {"success": 0, "failed": 0, "skipped": 1}
+            return {"success": 0, "failed": 1, "skipped": 0, "queued": 0}
 
     def resend_notification(self, db: Session, approval_id: int, team_id: int) -> Tuple[bool, Optional[str]]:
-        """
-        手动补发审批通知（失败通知的补救入口）
-
-        Args:
-            db: 数据库会话
-            approval_id: 审批实例ID
-            team_id: 团队ID
-
-        Returns:
-            (success, error_message)
-            - success: 是否成功
-            - error_message: 错误消息（如果失败）
-        """
+        """Requeue a pending approval notification. Delivery stays on the outbox worker."""
         try:
             approval = approval_crud.get_by_id(db, approval_id, team_id)
 
@@ -439,10 +355,16 @@ class ApprovalTransactionManager:
             if entity is None:
                 return (False, "业务单据不存在")
 
-            result = self._send_notification_sync(db, approval, entity, team_id)
-            if result.get("success", 0) > 0:
-                return (True, None)
-            return (False, "通知未发送成功，请检查审批人飞书绑定或通知配置")
+            request = outbound_notification_job_service.requeue_pending(
+                db,
+                approval=approval,
+                team_id=team_id,
+            )
+            if request is None:
+                return (False, "通知未发送成功，请检查审批人飞书绑定或通知配置")
+            db.commit()
+            outbound_notification_job_service.kick(request)
+            return (True, None)
 
         except Exception as e:
             logger.error(f"补发通知失败: {e}", exc_info=True)

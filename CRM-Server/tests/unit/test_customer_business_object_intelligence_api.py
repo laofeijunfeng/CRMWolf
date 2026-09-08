@@ -272,10 +272,16 @@ class _FakeResult:
 
 
 class _FakeDb:
+    def __init__(self) -> None:
+        self.events: list[str] = []
+        self.committed = False
+        self.rolled_back = False
+
     def delete(self, obj) -> None:
         self.deleted = obj
 
     def commit(self) -> None:
+        self.events.append("commit")
         self.committed = True
 
     def refresh(self, obj) -> None:
@@ -320,15 +326,6 @@ async def test_create_opportunity_triggers_business_object_intelligence(monkeypa
     )
     monkeypatch.setattr(
         opportunities_api.opportunity_crud, "log_created", lambda db, entity, submitter_id, team_id: None
-    )
-
-    async def fake_send_notification(*args, **kwargs):
-        return None
-
-    monkeypatch.setattr(
-        opportunities_api.approval_transaction_manager,
-        "send_notification",
-        fake_send_notification,
     )
 
     async def fake_trigger(db, change):
@@ -425,11 +422,12 @@ async def test_mark_opportunity_won_triggers_business_object_intelligence(monkey
     async def fake_trigger(db, change):
         scheduled.append(change)
 
-    async def fake_notify(*args, **kwargs):
-        return {"ok": True}
-
     monkeypatch.setattr(opportunities_api, "_trigger_opportunity_intelligence_refresh", fake_trigger)
-    monkeypatch.setattr(opportunities_api.feishu_service, "notify_opportunity_won", fake_notify)
+    monkeypatch.setattr(
+        opportunities_api.outbound_notification_job_service,
+        "queue_committed",
+        lambda *args, **kwargs: SimpleNamespace(job_public_id="onj_opportunity_won"),
+    )
 
     result = await opportunities_api.mark_opportunity_as_won(
         301,
@@ -463,11 +461,12 @@ async def test_mark_opportunity_lost_triggers_business_object_intelligence(monke
     async def fake_trigger(db, change):
         scheduled.append(change)
 
-    async def fake_notify(*args, **kwargs):
-        return {"ok": True}
-
     monkeypatch.setattr(opportunities_api, "_trigger_opportunity_intelligence_refresh", fake_trigger)
-    monkeypatch.setattr(opportunities_api.feishu_service, "notify_opportunity_lost", fake_notify)
+    monkeypatch.setattr(
+        opportunities_api.outbound_notification_job_service,
+        "queue_committed",
+        lambda *args, **kwargs: SimpleNamespace(job_public_id="onj_opportunity_lost"),
+    )
 
     result = await opportunities_api.mark_opportunity_as_lost(
         301,
@@ -703,23 +702,27 @@ async def test_create_payment_record_triggers_business_object_intelligence(monke
         lambda db, plan_id, record_data, creator_id, creator_name, team_id, **kwargs: record,
     )
 
-    async def fake_trigger(db, change):
+    db = _FakeDb()
+
+    async def fake_trigger_with_order(db, change):
+        db.events.append("intelligence")
         scheduled.append(change)
 
-    monkeypatch.setattr(payments_api, "_trigger_payment_record_intelligence_refresh", fake_trigger)
+    monkeypatch.setattr(payments_api, "_trigger_payment_record_intelligence_refresh", fake_trigger_with_order)
 
     result = await payments_api.create_payment_record(
         501,
         SimpleNamespace(commission_member_id="9"),
         team_id=2,
         current_user=SimpleNamespace(id=9, name="张三"),
-        db=_FakeDb(),
+        db=db,
     )
 
     assert result.id == 601
     assert scheduled[0].source_type == "payment_record"
     assert scheduled[0].source_id == 601
     assert scheduled[0].change_type == "created"
+    assert db.events == ["commit", "intelligence"]
 
 
 @pytest.mark.asyncio
@@ -892,11 +895,16 @@ async def test_mark_invoice_issued_enqueues_business_object_intelligence(monkeyp
         "_enqueue_invoice_application_intelligence_refresh",
         lambda db, change: scheduled.append(change),
     )
-
-    async def fake_notify(**kwargs):
-        return {"ok": True}
-
-    monkeypatch.setattr(invoices_api.feishu_notification_service, "notify_approval_issued", fake_notify)
+    monkeypatch.setattr(
+        invoices_api.outbound_notification_job_service,
+        "enqueue_issued",
+        lambda *args, **kwargs: SimpleNamespace(job_public_id="onj_issued"),
+    )
+    monkeypatch.setattr(
+        invoices_api.outbound_notification_job_service,
+        "commit_and_kick",
+        lambda db, request: None,
+    )
 
     result = await invoices_api.mark_invoice_issued(
         701,

@@ -35,12 +35,11 @@ from app.schemas.license_application import (
     LicenseApplicationResponse,
     LicenseApplicationUpdate,
 )
-from app.services.approval_adapter import get_adapter, get_approval_card_fields
 from app.services.customer_business_object_intelligence_service import (
     CustomerBusinessObjectChangeType,
     customer_business_object_intelligence_service,
 )
-from app.services.feishu_notification import feishu_notification_service
+from app.services.outbound_notification_job_service import outbound_notification_job_service
 from app.services.license_export_service import export_license_document
 
 router = APIRouter(prefix="/v1/license-applications", tags=["License申请管理"])
@@ -372,18 +371,20 @@ async def issue_application(
         )
         if approval and approval.submitter_id:
             try:
-                await feishu_notification_service.notify_approval_issued(
-                    db=db,
+                notify_request = outbound_notification_job_service.enqueue_issued(
+                    db,
                     team_id=team_id,
-                    user_id=int(approval.submitter_id),
-                    entity_type=BusinessType.LICENSE,
-                    entity_name=get_adapter(BusinessType.LICENSE).get_name(issued),
-                    detail_fields=get_approval_card_fields(db, BusinessType.LICENSE, issued),
+                    business_type=BusinessType.LICENSE,
+                    business_id=int(issued.id),
+                    recipient_user_id=int(approval.submitter_id),
+                    actor_id=str(current_user.id),
+                    approval_id=int(approval.id) if getattr(approval, "id", None) is not None else None,
                     button_path="/customers",
                 )
+                outbound_notification_job_service.commit_and_kick(db, notify_request)
             except Exception as notify_error:
                 logger.error(
-                    f"[License] Issue notification failed: application_id={application_id}, error={str(notify_error)}"
+                    f"[License] Issue notification enqueue failed: application_id={application_id}, error={str(notify_error)}"
                 )
         return _license_application_response(issued)
     except ValueError as e:

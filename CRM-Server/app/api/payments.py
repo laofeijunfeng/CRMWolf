@@ -52,18 +52,12 @@ from app.schemas.payment import (
     PaymentRecordUpdate,
     PaymentReminder,
 )
-from app.services.approval_adapter import (
-    get_adapter,
-    get_approval_card_fields,
-    get_approval_customer_name,
-    get_approval_type_name,
-)
 from app.services.customer_business_object_intelligence_service import (
     CustomerBusinessObjectChangeRefreshInput,
     customer_business_object_intelligence_service,
 )
-from app.services.feishu_notification import feishu_notification_service
 from app.services.approval_transaction_manager import approval_transaction_manager
+from app.services.outbound_notification_job_service import outbound_notification_job_service
 from app.services.command_execution_service import (
     CommandAlreadyInProgress,
     CommandIdempotencyConflict,
@@ -1183,44 +1177,29 @@ async def create_payment_record(
             idempotency_key=idempotency_key,
             commit=False,
         )
-        await _trigger_payment_record_intelligence_refresh(
+        # Build the intelligence change before commit: expire_on_commit would
+        # otherwise detach the live SQLAlchemy instance used by the builder.
+        intelligence_change = _build_payment_record_intelligence_change(
             db,
-            _build_payment_record_intelligence_change(
-                db,
-                record,
-                change_type="created",
-                actor_id=str(current_user.id),
-            ),
+            record,
+            change_type="created",
+            actor_id=str(current_user.id),
         )
 
-        # 发送审批通知（API 层 - 异步）。通知失败不阻断主事务。
+        notify_request = None
         if record.approval_id:
-            from app.api.approvals import get_notification_users_for_node
-            from app.constants.business_types import BusinessType
-            from app.crud.approval import approval_crud
-
             approval = approval_crud.get_by_id(db, record.approval_id, team_id)
-            if approval and approval.current_node:
-                notify_users = get_notification_users_for_node(db, approval.current_node, team_id)
-                entity_name = get_adapter(BusinessType.PAYMENT).get_name(record)
+            if approval is not None:
                 try:
-                    await feishu_notification_service.notify_approval_pending(
-                        db=db,
+                    notify_request = outbound_notification_job_service.enqueue_pending_for_approval(
+                        db,
+                        approval=approval,
                         team_id=team_id,
-                        user_ids=[user.id for user in notify_users],
-                        entity_type=BusinessType.PAYMENT,
-                        entity_name=entity_name,
-                        flow_name=approval.flow.flow_name if approval.flow else "",
-                        node_name=approval.current_node.node_name,
-                        business_id=record.id,
-                        submitter_name=current_user.name,
-                        approval_type_name=get_approval_type_name(BusinessType.PAYMENT),
-                        customer_name=get_approval_customer_name(db, BusinessType.PAYMENT, record),
-                        detail_fields=get_approval_card_fields(db, BusinessType.PAYMENT, record),
+                        actor_id=str(current_user.id),
                     )
                 except Exception as notify_error:
                     logger.error(
-                        "[Payment] 通知发送失败: record_id=%s, approval_id=%s, error=%s",
+                        "[Payment] 通知入队失败: record_id=%s, approval_id=%s, error=%s",
                         record.id,
                         record.approval_id,
                         notify_error,
@@ -1240,6 +1219,8 @@ async def create_payment_record(
             correlation_id=correlation_id,
         )
         db.commit()
+        await _trigger_payment_record_intelligence_refresh(db, intelligence_change)
+        outbound_notification_job_service.kick(notify_request)
         return response
     except PaymentRecordIdempotentReplay as exc:
         # A concurrent legacy request can win between the initial idempotency
@@ -2059,7 +2040,6 @@ def submit_payment_approval(
         team_id=team_id,
         submitter_id=str(current_user.id),
         submitter_name=current_user.name,
-        send_notification=False,
     )
     if approval is None:
         raise HTTPException(

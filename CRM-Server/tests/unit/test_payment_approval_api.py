@@ -39,6 +39,7 @@ from app.models.approval import (
 from app.models.contract import Contract, ContractStatus
 from app.models.customer import Customer
 from app.models.opportunity import Opportunity
+from app.models.outbound_notification_job import OutboundNotificationJob
 from app.models.payment import (
     PaymentPlan, PaymentRecord, PaymentPlanStatus, PaymentConfirmationStatus,
 )
@@ -69,6 +70,7 @@ def db_session():
         ApprovalNode.__table__,
         Approval.__table__,
         ApprovalRecord.__table__,
+        OutboundNotificationJob.__table__,
     ]
     # Customer and Contract historically share a legacy ``idx_team_id`` name.
     # This focused fixture only needs Customer for the update response lookup;
@@ -121,6 +123,10 @@ def app(db_session, monkeypatch):
     monkeypatch.setattr(
         "app.api.payments._build_payment_record_intelligence_change",
         lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "app.services.outbound_notification_job_service.OutboundNotificationJobService.kick",
+        lambda self, request: None,
     )
     app_ = FastAPI()
     app_.include_router(payments_router)

@@ -9,7 +9,6 @@ parameterized case represents one CRM workflow scenario.
 from datetime import date, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -53,6 +52,7 @@ from app.models.deployment import DeploymentInfo
 from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus, InvoiceTitle, InvoiceType
 from app.models.license_application import LicenseApplication, LicenseApplicationStatus
 from app.models.opportunity import Opportunity
+from app.models.outbound_notification_job import OutboundNotificationJob
 from app.models.payment import PaymentConfirmationStatus, PaymentPlan, PaymentPlanStatus, PaymentRecord
 from app.models.permission import Permission
 from app.models.role import Role
@@ -161,6 +161,7 @@ def scenario_env(monkeypatch):
         ApprovalNode.__table__,
         Approval.__table__,
         ApprovalRecord.__table__,
+        OutboundNotificationJob.__table__,
         AgentSession.__table__,
         AgentMessage.__table__,
         AgentToolCall.__table__,
@@ -226,10 +227,8 @@ def scenario_env(monkeypatch):
     monkeypatch.setattr("app.core.deps.permission_crud.get_user_permissions", _permission_stub)
     monkeypatch.setattr("app.api.payments.permission_crud.get_user_permissions", _permission_stub)
     monkeypatch.setattr(
-        "app.api.approvals.feishu_notification_service.notify_approval_pending", AsyncMock(return_value=None)
-    )
-    monkeypatch.setattr(
-        "app.api.payments.feishu_notification_service.notify_approval_pending", AsyncMock(return_value=None)
+        "app.services.outbound_notification_job_service.OutboundNotificationJobService.kick",
+        lambda self, request: None,
     )
 
     app = FastAPI()

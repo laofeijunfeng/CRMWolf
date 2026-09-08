@@ -28,8 +28,6 @@ from app.core.deps import (
 from app.crud.contract import ApprovalService, contract_crud
 from app.crud.customer import contact_crud
 from app.crud.opportunity import opportunity_crud
-from app.crud.role import role_crud
-from app.models.approval import BusinessType
 from app.schemas.common import PaginatedResponse
 from app.schemas.contract import (
     ContractCreate,
@@ -40,12 +38,11 @@ from app.schemas.contract import (
     ContractUpdate,
     MessageResponse,
 )
-from app.services.approval_adapter import get_approval_card_fields, get_approval_customer_name, get_approval_type_name
 from app.services.customer_business_object_intelligence_service import (
     CustomerBusinessObjectChangeRefreshInput,
     customer_business_object_intelligence_service,
 )
-from app.services.feishu_notification import feishu_notification_service
+from app.services.outbound_notification_job_service import outbound_notification_job_service
 from app.services.file_storage import FileStorageError, file_storage_service
 from app.utils.public_id import is_opportunity_public_id
 
@@ -55,28 +52,25 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/contracts", tags=["合同管理"])
 
 
-def _get_approvers_by_role(db: Session, role_code: Optional[str], team_id: int) -> list:
-    if not role_code:
-        return []
-
-    role = role_crud.get_by_code(db, role_code)
-    if not role:
-        return []
-
-    return role_crud.get_role_users(db, role.id, team_id)
-
-
-def _get_notification_users_for_node(db: Session, node, team_id: int) -> list:
-    if not node:
-        return []
-
-    approvers = _get_approvers_by_role(db, node.approve_role, team_id)
-    notify_user_ids = node.notify_user_ids or []
-    if not notify_user_ids:
-        return approvers
-
-    notify_id_set = {int(user_id) for user_id in notify_user_ids}
-    return [user for user in approvers if int(user.id) in notify_id_set]
+def _queue_pending_approval_notification(db: Session, approval, *, actor_id=None) -> None:
+    if approval is None or approval.current_node is None:
+        return
+    try:
+        request = outbound_notification_job_service.enqueue_pending_for_approval(
+            db,
+            approval=approval,
+            team_id=int(approval.team_id),
+            actor_id=actor_id,
+        )
+    except Exception as notify_error:
+        logger.error(
+            "合同审批通知入队失败（contract_id=%s）: %s",
+            getattr(approval, "business_id", None),
+            notify_error,
+            exc_info=True,
+        )
+        return
+    outbound_notification_job_service.commit_and_kick(db, request)
 
 
 def _get_user_basic_info(db: Session, user_id: Optional[str]) -> Optional[dict]:
@@ -388,29 +382,9 @@ async def create_contract(
             ),
         )
 
-        # 提交审批并发送通知
+        # 提交审批并入队通知
         approval = ApprovalService.submit_for_approval(db, db_contract.id)
-        if approval and approval.current_node:
-            try:
-                notify_users = _get_notification_users_for_node(db, approval.current_node, team_id)
-                result = await feishu_notification_service.notify_approval_pending(
-                    db=db,
-                    team_id=team_id,
-                    user_ids=[user.id for user in notify_users],
-                    entity_type=BusinessType.CONTRACT,
-                    entity_name=db_contract.contract_name,
-                    flow_name=approval.flow.flow_name if approval.flow else "",
-                    node_name=approval.current_node.node_name,
-                    business_id=db_contract.id,
-                    submitter_name=current_user.name,
-                    approval_type_name=get_approval_type_name(BusinessType.CONTRACT),
-                    customer_name=get_approval_customer_name(db, BusinessType.CONTRACT, db_contract),
-                    detail_fields=get_approval_card_fields(db, BusinessType.CONTRACT, db_contract),
-                )
-                logger.info(f"合同审批通知发送完成（contract_id={db_contract.id}, result={result}）")
-            except Exception as notify_error:
-                # 通知失败不阻断业务流程
-                logger.error(f"合同审批通知发送失败（contract_id={db_contract.id}）: {notify_error}", exc_info=True)
+        _queue_pending_approval_notification(db, approval, actor_id=str(current_user.id))
 
         return ContractResponse(**_contract_response_base(db, db_contract))
     except ValueError as e:
@@ -555,29 +529,9 @@ async def create_contract_from_opportunity(
             ),
         )
 
-        # 提交审批并发送通知
+        # 提交审批并入队通知
         approval = ApprovalService.submit_for_approval(db, db_contract.id)
-        if approval and approval.current_node:
-            try:
-                notify_users = _get_notification_users_for_node(db, approval.current_node, team_id)
-                result = await feishu_notification_service.notify_approval_pending(
-                    db=db,
-                    team_id=team_id,
-                    user_ids=[user.id for user in notify_users],
-                    entity_type=BusinessType.CONTRACT,
-                    entity_name=db_contract.contract_name,
-                    flow_name=approval.flow.flow_name if approval.flow else "",
-                    node_name=approval.current_node.node_name,
-                    business_id=db_contract.id,
-                    submitter_name=current_user.name,
-                    approval_type_name=get_approval_type_name(BusinessType.CONTRACT),
-                    customer_name=get_approval_customer_name(db, BusinessType.CONTRACT, db_contract),
-                    detail_fields=get_approval_card_fields(db, BusinessType.CONTRACT, db_contract),
-                )
-                logger.info(f"合同审批通知发送完成（contract_id={db_contract.id}, result={result}）")
-            except Exception as notify_error:
-                # 通知失败不阻断业务流程
-                logger.error(f"合同审批通知发送失败（contract_id={db_contract.id}）: {notify_error}", exc_info=True)
+        _queue_pending_approval_notification(db, approval, actor_id=str(current_user.id))
 
         return ContractResponse(**_contract_response_base(db, db_contract))
     except ValueError as e:

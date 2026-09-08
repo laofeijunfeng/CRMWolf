@@ -15,6 +15,13 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
+def _format_amount(value: object) -> str:
+    try:
+        return f"{float(value):,.2f}"
+    except (TypeError, ValueError):
+        return str(value or "0.00")
+
+
 class FeishuNotificationService:
     api_base_url = "https://open.feishu.cn/open-apis"
 
@@ -266,6 +273,191 @@ class FeishuNotificationService:
             button_url=self._absolute_frontend_url(db, team_id, "/approvals"),
         )
         return await self.send_to_users(db, team_id, user_ids, "interactive", content)
+
+    async def notify_markdown_card(
+        self,
+        db: Session,
+        team_id: int,
+        user_ids: Iterable[int],
+        *,
+        title: str,
+        markdown: str,
+        template: str = "blue",
+    ) -> Dict[str, int]:
+        content = {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "template": template,
+                "title": {"tag": "plain_text", "content": title},
+            },
+            "elements": [
+                {"tag": "div", "text": {"tag": "lark_md", "content": markdown}},
+            ],
+        }
+        return await self.send_to_users(db, team_id, user_ids, "interactive", content)
+
+    async def notify_account_created(
+        self,
+        db: Session,
+        team_id: int,
+        user_ids: Iterable[int],
+        *,
+        account_name: str,
+        contact_name: str,
+    ) -> Dict[str, int]:
+        return await self.notify_markdown_card(
+            db,
+            team_id,
+            user_ids,
+            title="🎉 新客户创建成功",
+            markdown=(
+                f"客户创建成功！\n\n**客户名称**: {account_name}\n"
+                f"**主联系人**: {contact_name}\n\n请及时跟进客户！"
+            ),
+        )
+
+    async def notify_account_status_won(
+        self,
+        db: Session,
+        team_id: int,
+        user_ids: Iterable[int],
+        *,
+        account_name: str,
+    ) -> Dict[str, int]:
+        return await self.notify_markdown_card(
+            db,
+            team_id,
+            user_ids,
+            title="🎊 恭喜赢单",
+            markdown=f"恭喜您成功赢单！\n\n**客户名称**: {account_name}\n\n太棒了，继续保持！",
+            template="green",
+        )
+
+    async def notify_account_status_lost(
+        self,
+        db: Session,
+        team_id: int,
+        user_ids: Iterable[int],
+        *,
+        account_name: str,
+    ) -> Dict[str, int]:
+        return await self.notify_markdown_card(
+            db,
+            team_id,
+            user_ids,
+            title="😔 客户已输单",
+            markdown=f"客户已输单\n\n**客户名称**: {account_name}\n\n请总结经验，继续加油！",
+            template="red",
+        )
+
+    async def notify_customer_returned(
+        self,
+        db: Session,
+        team_id: int,
+        user_ids: Iterable[int],
+        *,
+        account_name: str,
+        return_reason: str,
+        previous_owner: str | None = None,
+    ) -> Dict[str, int]:
+        previous = previous_owner or "-"
+        return await self.notify_markdown_card(
+            db,
+            team_id,
+            user_ids,
+            title="🔄 客户已退回公海",
+            markdown=(
+                f"客户已退回公海\n\n**客户名称**: {account_name}\n"
+                f"**退回原因**: {return_reason}\n**原负责人**: {previous}\n\n"
+                "其他销售人员可以领取该客户。"
+            ),
+            template="yellow",
+        )
+
+    async def notify_lead_claimed(
+        self,
+        db: Session,
+        team_id: int,
+        user_ids: Iterable[int],
+        *,
+        lead_name: str,
+    ) -> Dict[str, int]:
+        return await self.notify_markdown_card(
+            db,
+            team_id,
+            user_ids,
+            title="✅ 线索领取成功",
+            markdown=f"您已成功领取线索：**{lead_name}**\n\n请尽快跟进，祝您成交！",
+            template="green",
+        )
+
+    async def notify_lead_assigned(
+        self,
+        db: Session,
+        team_id: int,
+        user_ids: Iterable[int],
+        *,
+        lead_name: str,
+        contact_name: str,
+        contact_phone: str,
+    ) -> Dict[str, int]:
+        return await self.notify_markdown_card(
+            db,
+            team_id,
+            user_ids,
+            title="🎯 新线索分配通知",
+            markdown=(
+                f"**线索信息**\n\n**线索名称**: {lead_name}\n"
+                f"**联系人**: {contact_name}\n**联系电话**: {contact_phone}\n\n"
+                "请及时跟进该线索！"
+            ),
+        )
+
+    async def notify_opportunity_won(
+        self,
+        db: Session,
+        team_id: int,
+        user_ids: Iterable[int],
+        *,
+        opportunity_name: str,
+        customer_name: str,
+        actual_amount: object = 0,
+    ) -> Dict[str, int]:
+        return await self.notify_markdown_card(
+            db,
+            team_id,
+            user_ids,
+            title="🎊 恭喜赢单",
+            markdown=(
+                f"恭喜您成功赢单！\n\n**商机名称**: {opportunity_name}\n"
+                f"**客户名称**: {customer_name}\n**实际金额**: ¥{_format_amount(actual_amount)}\n\n"
+                "太棒了，继续保持！"
+            ),
+            template="green",
+        )
+
+    async def notify_opportunity_lost(
+        self,
+        db: Session,
+        team_id: int,
+        user_ids: Iterable[int],
+        *,
+        opportunity_name: str,
+        customer_name: str,
+        loss_reason: str,
+    ) -> Dict[str, int]:
+        return await self.notify_markdown_card(
+            db,
+            team_id,
+            user_ids,
+            title="😔 商机已输单",
+            markdown=(
+                f"商机已输单\n\n**商机名称**: {opportunity_name}\n"
+                f"**客户名称**: {customer_name}\n**输单原因**: {loss_reason}\n\n"
+                "请总结经验，继续加油！"
+            ),
+            template="red",
+        )
 
     def _approval_card(
         self,
