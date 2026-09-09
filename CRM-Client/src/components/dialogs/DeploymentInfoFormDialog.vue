@@ -203,9 +203,8 @@ watch(
         <div class="deployment-dialog__switch-row">
           <Switch
             id="deployment-default"
-            :checked="form.isDefault"
+            v-model="form.isDefault"
             :disabled="submitting"
-            @update:checked="form.isDefault = $event"
           />
           <Label for="deployment-default" class="deployment-dialog__switch-label">设为默认部署</Label>
         </div>

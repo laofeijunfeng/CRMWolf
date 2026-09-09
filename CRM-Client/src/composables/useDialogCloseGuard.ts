@@ -93,7 +93,10 @@ export function useDialogCloseGuard({
    */
   function handleParentClose(): boolean {
     if (closeApproved.value) {
-      closeApproved.value = false
+      // Keep the approval token until the parent explicitly re-opens the
+      // dialog. A successful close can be followed by unrelated prop updates
+      // while `open` is still false; those updates must not be mistaken for a
+      // new parent-driven close of dirty form state.
       showConfirmDialog.value = false
       focusReturnTarget.value = null
       return false

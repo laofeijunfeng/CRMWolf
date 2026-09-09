@@ -1,5 +1,5 @@
-import { defineComponent, nextTick } from 'vue'
-import { mount } from '@vue/test-utils'
+import { defineComponent, nextTick, ref } from 'vue'
+import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import LicenseApplicationFormDialog from '@/components/dialogs/LicenseApplicationFormDialog.vue'
 import type { DeploymentInfoResponse } from '@/api/deployment'
@@ -138,6 +138,58 @@ describe('LicenseApplicationFormDialog', () => {
 
     expect(findSelectField(wrapper).props('modelValue')).toBe('42')
     expect(wrapper.emitted('deployment-created')?.[0]).toEqual([deployment])
+  })
+
+  it('stays closed when the parent refresh updates deployments after a successful submission', async () => {
+    licenseApplicationApi.create.mockResolvedValue({ id: 77 })
+    licenseApplicationApi.submitApplication.mockResolvedValue(undefined)
+
+    const open = ref(true)
+    const deployments = ref<DeploymentInfoResponse[]>([productionDeployment])
+    let completeRefresh: (() => void) | undefined
+    const Parent = defineComponent({
+      components: { LicenseApplicationFormDialog },
+      setup: () => ({
+        open,
+        deployments,
+        handleSuccess: () => new Promise<void>((resolve) => {
+          completeRefresh = () => {
+            deployments.value = []
+            resolve()
+          }
+        }),
+      }),
+      template: `
+        <LicenseApplicationFormDialog
+          v-model:open="open"
+          customer-id="customer-1"
+          :deployments="deployments"
+          :contracts="[]"
+          @success="handleSuccess"
+        />
+      `,
+    })
+    const wrapper = mount(Parent, {
+      global: { stubs: formStubs },
+    })
+    const dialog = wrapper.findComponent(LicenseApplicationFormDialog)
+    const tomorrow = new Date()
+    tomorrow.setDate(tomorrow.getDate() + 1)
+
+    await dialog.getComponent(DateFieldStub).vm.$emit('update:modelValue', tomorrow)
+    await dialog.find('form').trigger('submit')
+    await flushPromises()
+    await nextTick()
+    expect(open.value).toBe(false)
+
+    if (completeRefresh === undefined) throw new Error('success refresh was not started')
+    completeRefresh()
+    await flushPromises()
+    await nextTick()
+
+    expect(open.value).toBe(false)
+    expect(dialog.props('open')).toBe(false)
+    wrapper.unmount()
   })
 
   it('rejects expiry dates on local today or earlier without creating an application', async () => {

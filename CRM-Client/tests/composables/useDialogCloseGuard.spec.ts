@@ -75,6 +75,7 @@ describe('useDialogCloseGuard', () => {
 
     guard.approveClose()
     guard.handleParentClose()
+    guard.handleParentClose()
     guard.handleOpenChange(true)
     await nextTick()
 
