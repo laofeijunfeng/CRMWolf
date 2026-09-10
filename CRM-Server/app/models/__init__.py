@@ -141,6 +141,7 @@ from app.models.system_config import ConfigType, SystemConfig
 from app.models.team import Team, UserTeam
 from app.models.user import User, UserStatus
 from app.models.user_role import UserRole
+from app.models.workflow import VALID_TRANSITIONS, Workflow, WorkflowStatus
 from app.models.view_preference import ViewPreference, ViewPreferenceScope
 
 __all__ = [
@@ -289,4 +290,7 @@ __all__ = [
     "VerificationPurpose",
     "ViewPreference",
     "ViewPreferenceScope",
+    "VALID_TRANSITIONS",
+    "Workflow",
+    "WorkflowStatus",
 ]
