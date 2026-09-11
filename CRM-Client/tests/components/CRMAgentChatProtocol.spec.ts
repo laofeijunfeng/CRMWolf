@@ -22,7 +22,8 @@ const toast = vi.hoisted(() => ({
 const api = vi.hoisted(() => ({
   listSessions: vi.fn<() => Promise<PaginatedResponse<AgentSessionResponse>>>(),
   listMessages: vi.fn<(sessionId: number, params?: { page?: number, page_size?: number }) => Promise<PaginatedResponse<AgentUIEnvelope>>>(),
-  listSessionOperations: vi.fn<(sessionId: number, params?: { limit?: number }) => Promise<AgentAsyncOperation[]>>(),
+  listSessionOperationHistory: vi.fn<(sessionId: number, params?: { page?: number, page_size?: number }) => Promise<PaginatedResponse<AgentAsyncOperation>>>(),
+  listMessageAnchors: vi.fn<(sessionId: number, messageIds: number[]) => Promise<AgentUIEnvelope[]>>(),
   getOperation: vi.fn<(operationPublicId: string) => Promise<AgentAsyncOperation>>(),
   chatStream: vi.fn<(
     data: AgentChatRequest,
@@ -39,6 +40,14 @@ vi.mock('@/api/agent', async importOriginal => ({
 vi.mock('vue-sonner', () => ({ toast }))
 
 const emptyPage = (): PaginatedResponse<AgentUIEnvelope> => ({
+  items: [],
+  total: 0,
+  page: 1,
+  page_size: 100,
+  total_pages: 0,
+})
+
+const emptyOperationPage = (): PaginatedResponse<AgentAsyncOperation> => ({
   items: [],
   total: 0,
   page: 1,
@@ -211,7 +220,8 @@ describe('CRMAgentChat Agent UI protocol', () => {
       total_pages: 1,
     })
     api.listMessages.mockReset().mockResolvedValue(emptyPage())
-    api.listSessionOperations.mockReset().mockResolvedValue([])
+    api.listSessionOperationHistory.mockReset().mockResolvedValue(emptyOperationPage())
+    api.listMessageAnchors.mockReset().mockResolvedValue([])
     api.getOperation.mockReset()
     api.chatStream.mockReset().mockResolvedValue()
     toast.error.mockReset()

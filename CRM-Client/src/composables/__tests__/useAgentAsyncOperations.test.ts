@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { AgentAsyncOperation, AgentAsyncOperationStatus } from "@/api/agent"
+import type { PaginatedResponse } from "@/types/pagination"
 import { useAgentAsyncOperations } from "../useAgentAsyncOperations"
 
 const makeOperation = (
@@ -33,6 +34,14 @@ const makeOperation = (
   events: [],
 })
 
+const paginatedOperations = (items: AgentAsyncOperation[]): PaginatedResponse<AgentAsyncOperation> => ({
+  items,
+  total: items.length,
+  page: 1,
+  page_size: 100,
+  total_pages: items.length === 0 ? 0 : 1,
+})
+
 afterEach(() => {
   vi.useRealTimers()
 })
@@ -44,7 +53,7 @@ describe("useAgentAsyncOperations", () => {
     const onWaitingUser = vi.fn()
     const api = {
       getOperation: vi.fn().mockResolvedValue(waitingOperation),
-      listSessionOperations: vi.fn().mockResolvedValue([makeOperation("QUEUED")]),
+      listSessionOperationHistory: vi.fn().mockResolvedValue(paginatedOperations([makeOperation("QUEUED")])),
     }
     const controller = useAgentAsyncOperations({
       api,
@@ -69,7 +78,7 @@ describe("useAgentAsyncOperations", () => {
     const onWaitingUser = vi.fn()
     const api = {
       getOperation: vi.fn().mockResolvedValue(waitingOperation),
-      listSessionOperations: vi.fn().mockResolvedValue([waitingOperation]),
+      listSessionOperationHistory: vi.fn().mockResolvedValue(paginatedOperations([waitingOperation])),
     }
     const controller = useAgentAsyncOperations({ api, onWaitingUser })
 
@@ -85,7 +94,7 @@ describe("useAgentAsyncOperations", () => {
     const onWaitingUser = vi.fn()
     const api = {
       getOperation: vi.fn().mockResolvedValue(waitingOperation),
-      listSessionOperations: vi.fn().mockResolvedValue([waitingOperation]),
+      listSessionOperationHistory: vi.fn().mockResolvedValue(paginatedOperations([waitingOperation])),
     }
     const controller = useAgentAsyncOperations({ api, onWaitingUser })
 
