@@ -61,6 +61,7 @@ from app.schemas.customer import (
     CustomerIntelligenceRunDiagnosticResponse,
     CustomerListResponse,
     CustomerLoseRequest,
+    CustomerLifecycleStatusUpdate,
     CustomerMemberCandidate,
     CustomerMemberCreate,
     CustomerMemberResponse,
@@ -107,6 +108,11 @@ from app.services.customer_intelligence_refresh_service import (
 from app.services.customer_intelligence_run_service import CustomerIntelligenceRunDiagnostic
 from app.models.outbound_notification_job import OutboundNotificationEventType
 from app.services.outbound_notification_job_service import outbound_notification_job_service
+from app.core.exceptions import ConflictException
+from app.services.customer_status_transition_service import (
+    CustomerStatusTransitionError,
+    customer_status_transition_service,
+)
 
 router = APIRouter(prefix="/v1/customers", tags=["客户管理"])
 logger = logging.getLogger(__name__)
@@ -1730,6 +1736,76 @@ def remove_customer_member(
         },
     )
     return MessageResponse(message="移除成功")
+
+
+@router.patch("/{customer_id}/lifecycle-status", response_model=CustomerResponse, summary="更新客户快捷状态")
+async def update_customer_lifecycle_status(
+    customer_id: str,
+    status_update: CustomerLifecycleStatusUpdate,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    customer = _get_editable_customer(db, customer_id, team_id, current_user)
+    try:
+        decision = customer_status_transition_service.plan(
+            current_status=customer.status,
+            target_status=status_update.status,
+        )
+    except CustomerStatusTransitionError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    previous_version = customer.version
+    try:
+        updated_customer = customer_crud.update_status_with_version(
+            db,
+            customer,
+            status=decision.new_status,
+            expected_version=status_update.expected_version,
+        )
+    except ConflictException as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    operation_log_service.log(
+        db=db,
+        event_type=EventTypes.CUSTOMER_STATUS_CHANGED,
+        event_action="UPDATE",
+        resource_type="CUSTOMER",
+        resource_id=updated_customer.id,
+        operator_id=str(current_user.id),
+        operator_name=getattr(current_user, "name", None),
+        team_id=team_id,
+        content={
+            "previous_status": decision.previous_status,
+            "new_status": decision.new_status,
+            "previous_version": previous_version,
+            "new_version": updated_customer.version,
+        },
+    )
+    _persist_customer_business_object_refresh_after_commit(
+        business_object=updated_customer,
+        source_type="customer",
+        summary="客户状态已更新，刷新客户智能档案",
+        actor_id=str(current_user.id),
+        payload={
+            "change_type": "status_updated",
+            "previous_status": decision.previous_status,
+            "new_status": decision.new_status,
+        },
+    )
+    if decision.notification_event is not None:
+        outbound_notification_job_service.queue_committed(
+            db,
+            team_id=team_id,
+            event_type=decision.notification_event,
+            business_type="CUSTOMER",
+            business_id=int(updated_customer.id),
+            recipient_user_ids=[updated_customer.owner_id],
+            actor_id=str(current_user.id),
+            payload_json={"account_name": updated_customer.account_name},
+        )
+
+    return _customer_response(db, updated_customer)
 
 
 @router.get("/{customer_id}", response_model=CustomerDetailResponse, summary="获取客户详情", description="返回客户信息及其所有联系人列表")

@@ -341,6 +341,30 @@ class CustomerCRUD:
         db.commit()
         db.refresh(db_obj)
         return db_obj
+    def update_status_with_version(
+        self,
+        db: Session,
+        db_obj: Customer,
+        *,
+        status: int,
+        expected_version: int,
+    ) -> Customer:
+        locked_customer = (
+            db.query(Customer)
+            .filter(Customer.id == db_obj.id, Customer.team_id == db_obj.team_id)
+            .with_for_update()
+            .first()
+        )
+        if locked_customer is None:
+            raise ConflictException("客户已不存在，请刷新后确认最新状态")
+        if locked_customer.version != expected_version:
+            raise ConflictException("客户已发生变化，请刷新后确认最新状态")
+
+        locked_customer.status = status
+        locked_customer.version += 1
+        db.commit()
+        db.refresh(locked_customer)
+        return locked_customer
 
     def update_industry(self, db: Session, customer_id: int, industry: str) -> Customer:
         """更新客户行业字段"""
