@@ -126,9 +126,11 @@ describe('CustomerFormDialog progressive edit sections', () => {
       stubs: {
         Dialog: DialogSlotStub,
         DialogContent: DialogSlotStub,
+        DialogFooter: DialogSlotStub,
         Collapsible: defineComponent({ props: { open: Boolean }, emits: ['update:open'], template: '<div><slot /></div>' }),
         CollapsibleTrigger: defineComponent({ template: '<slot />' }),
         CollapsibleContent: defineComponent({ template: '<div><slot /></div>' }),
+        Button: defineComponent({ inheritAttrs: false, template: '<button v-bind="$attrs"><slot /></button>' }),
       },
     },
     props: {
@@ -210,6 +212,103 @@ describe('CustomerFormDialog progressive edit sections', () => {
     expect(wrapper.emitted('refresh')).toHaveLength(1)
     expect(wrapper.emitted('success')).toBeUndefined()
     expect(wrapper.props('open')).toBe(true)
+    wrapper.unmount()
+  })
+  it.each([2, 3])('does not treat read-only lifecycle status %s as dirty', async (status) => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const wrapper = mountEdit({ ...customerDetail, status: status as 2 | 3 })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { handleCancel: () => void; showConfirmDialog: boolean; lifecycleStatusValue: unknown }
+    expect(vm.lifecycleStatusValue).toBeNull()
+    vm.handleCancel()
+    expect(vm.showConfirmDialog).toBe(false)
+    expect(wrapper.emitted('update:open')).toContainEqual([false])
+    wrapper.unmount()
+  })
+
+  it('treats null industry and empty industry baseline as unchanged', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const wrapper = mountEdit({ ...customerDetail, industry: null })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { industryValue: string; industryBaseline: string | null; handleCancel: () => void; showConfirmDialog: boolean }
+    expect(vm.industryValue).toBe('')
+    expect(vm.industryBaseline).toBe('')
+    vm.handleCancel()
+    expect(vm.showConfirmDialog).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('closes and emits success for a clean ordinary save', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const updateCustomer = vi.spyOn(customerApi, 'updateCustomer')
+    const wrapper = mountEdit()
+    await flushPromises()
+    await (wrapper.vm as unknown as { onSubmit: (event: Event) => Promise<void> }).onSubmit(new Event('submit'))
+    await flushPromises()
+    expect(updateCustomer).not.toHaveBeenCalled()
+    expect(wrapper.emitted('update:open')).toContainEqual([false])
+    expect(wrapper.emitted('success')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('preserves dirty license values and keeps open after profile save', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    vi.spyOn(customerApi, 'updateCustomer').mockResolvedValue({ ...customerDetail, account_name: '更新客户', version: 4 })
+    const wrapper = mountEdit()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      licenseTypeValue: 'TRIAL' | 'OFFICIAL' | null
+      licenseExpiryDateValue: string | null
+      setValues: (values: Record<string, unknown>) => void
+      onSubmit: (event: Event) => Promise<void>
+    }
+    vm.licenseTypeValue = 'TRIAL'
+    vm.licenseExpiryDateValue = '2026-12-31'
+    vm.setValues({ account_name: '更新客户' })
+    await vm.onSubmit(new Event('submit'))
+    await flushPromises()
+    expect(vm.licenseTypeValue).toBe('TRIAL')
+    expect(vm.licenseExpiryDateValue).toBe('2026-12-31')
+    expect(wrapper.emitted('refresh')).toHaveLength(1)
+    expect(wrapper.emitted('success')).toBeUndefined()
+    expect(wrapper.emitted('update:open')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('expands more information before focusing an industry error', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const wrapper = mountEdit()
+    await flushPromises()
+    const field = document.createElement('input')
+    field.scrollIntoView = vi.fn()
+    field.focus = vi.fn()
+    vi.spyOn(document, 'querySelector').mockReturnValue(field)
+    const vm = wrapper.vm as unknown as { setErrors: (errors: Record<string, string>) => void; focusFirstError: () => Promise<void>; moreInfoOpen: boolean }
+    vm.setErrors({ industry: '请选择行业' })
+    await vm.focusFirstError()
+    expect(vm.moreInfoOpen).toBe(true)
+    expect(field.focus).toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('disables footer save and cancel while an inline write is submitting', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const wrapper = mountEdit()
+    const vm = wrapper.vm as unknown as { lifecycleSubmitting: boolean; licenseSubmitting: boolean; writeSubmitting: boolean }
+    await flushPromises()
+    vm.lifecycleSubmitting = true
+    await nextTick()
+    expect(vm.writeSubmitting).toBe(true)
+    vm.lifecycleSubmitting = false
+    vm.licenseSubmitting = true
+    await nextTick()
+    expect(vm.writeSubmitting).toBe(true)
     wrapper.unmount()
   })
 })
