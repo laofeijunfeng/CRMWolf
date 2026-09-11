@@ -26,6 +26,7 @@ from app.core.list_query import (
 )
 from app.crud.contract import contract_crud
 from app.crud.customer import contact_crud, customer_crud
+from app.constants.operation_log_events import EventTypes
 from app.crud.customer_member import customer_member_crud
 from app.crud.invoice import invoice_application_crud, invoice_title_crud
 from app.crud.lead import lead_crud
@@ -1835,18 +1836,40 @@ def update_customer(
     if customer_update.account_name:
         _ensure_customer_name_available(db, customer_update.account_name, team_id, exclude_customer_id=customer.id)
 
+    audit_fields = sorted(customer_update.model_fields_set - {"expected_version", "source_public_id", "source"})
+    audit_before = {field: getattr(customer, field, None) for field in audit_fields}
     try:
         updated = customer_crud.update(db, customer, customer_update)
     except AcquisitionSourceError as exc:
         _raise_source_error(exc)
-    changed_fields = customer_update.model_fields_set - {"expected_version"}
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    audit_after = {field: getattr(updated, field, None) for field in audit_fields}
+    changed_fields = [field for field in audit_fields if audit_before[field] != audit_after[field]]
+    if changed_fields:
+        operation_log_service.log(
+            db=db,
+            event_type=EventTypes.CUSTOMER_UPDATED,
+            event_action="UPDATE",
+            resource_type="CUSTOMER",
+            resource_id=updated.id,
+            operator_id=str(current_user.id),
+            operator_name=getattr(current_user, "name", None),
+            team_id=team_id,
+            content={
+                "changed_fields": changed_fields,
+                "before": {field: audit_before[field] for field in changed_fields},
+                "after": {field: audit_after[field] for field in changed_fields},
+            },
+        )
     if changed_fields:
         _persist_customer_business_object_refresh_after_commit(
             business_object=updated,
             source_type="customer",
             summary="客户主数据已更新，刷新客户智能档案",
             actor_id=str(current_user.id),
-            payload={"change_type": "updated", "changed_fields": sorted(changed_fields)},
+            payload={"change_type": "updated", "changed_fields": changed_fields},
         )
     return _customer_response(db, updated)
 

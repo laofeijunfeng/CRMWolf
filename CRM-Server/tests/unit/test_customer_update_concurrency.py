@@ -46,3 +46,44 @@ def test_customer_update_locks_and_updates_when_version_matches() -> None:
     assert current.city == "上海"
     assert current.version == 5
     db.commit.assert_called_once()
+
+def test_update_customer_logs_only_changed_fields(monkeypatch) -> None:
+    from app.api import customers as customers_api
+
+    customer = SimpleNamespace(
+        id=1,
+        public_id="cus_1",
+        team_id=9,
+        account_name="旧客户",
+        city="北京",
+        industry="old",
+        version=4,
+    )
+    user = SimpleNamespace(id=7, name="操作人")
+    logged = []
+    monkeypatch.setattr(customers_api, "_get_editable_customer", lambda *args: customer)
+    monkeypatch.setattr(customers_api, "_ensure_customer_name_available", lambda *args, **kwargs: None)
+    monkeypatch.setattr(customers_api.customer_crud, "update", lambda db, current, payload: setattr(current, "city", payload.city) or current)
+    monkeypatch.setattr(customers_api, "_persist_customer_business_object_refresh_after_commit", lambda **kwargs: None)
+    monkeypatch.setattr(customers_api, "_customer_response", lambda db, updated: updated)
+    monkeypatch.setattr(customers_api.operation_log_service, "log", lambda **kwargs: logged.append(kwargs))
+
+    result = customers_api.update_customer(
+        "cus_1",
+        CustomerUpdate(city="上海", expected_version=4),
+        team_id=9,
+        current_user=user,
+        db=MagicMock(),
+    )
+
+    assert result is customer
+    assert logged[0]["event_type"] == "CUSTOMER_UPDATED"
+    assert logged[0]["event_action"] == "UPDATE"
+    assert logged[0]["resource_type"] == "CUSTOMER"
+    assert logged[0]["team_id"] == 9
+    assert logged[0]["operator_id"] == "7"
+    assert logged[0]["content"] == {
+        "changed_fields": ["city"],
+        "before": {"city": "北京"},
+        "after": {"city": "上海"},
+    }

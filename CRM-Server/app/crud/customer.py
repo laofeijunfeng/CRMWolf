@@ -1,13 +1,14 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
-from typing import Optional, List, Tuple
+from typing import Any, Optional, List, Tuple
 from datetime import date, datetime, time, timedelta
 
 from app.models.customer import Customer, Contact, CustomerMember
 from app.models.lead import Lead, LeadStatus
 from app.models.contract import Contract
 from app.models.opportunity import Opportunity
-from app.schemas.customer import CustomerCreate, CustomerUpdate, CustomerStatusEnum, ContactCreate, ContactUpdate
+from app.schemas.customer import CustomerCreate, CustomerUpdate, CustomerStatusEnum, ContactCreate, ContactUpdate, CustomerLicenseSnapshotUpdate
+from app.crud.industry import industry_crud
 from app.crud.operation_log import operation_log_crud
 from app.services.acquisition_source_service import get_by_id, resolve_source_for_entity_write
 from app.utils.time import business_now
@@ -275,6 +276,10 @@ class CustomerCRUD:
             exclude_unset=True,
             exclude={"expected_version", "source_public_id", "source"},
         )
+        if "industry" in obj_in.model_fields_set and obj_in.industry is not None:
+            industry = industry_crud.get_by_code_with_parent(db, obj_in.industry)
+            if industry is None or (industry.is_active != 1 and industry.code != db_obj.industry):
+                raise ValueError("行业代码不存在或已停用")
         fields_set = obj_in.model_fields_set
         if "source_public_id" in fields_set or "source" in fields_set:
             source_row = resolve_source_for_entity_write(
@@ -297,6 +302,38 @@ class CustomerCRUD:
             db.refresh(db_obj)
 
         return db_obj
+
+    def update_license_snapshot(
+        self,
+        db: Session,
+        db_obj: Customer,
+        obj_in: CustomerLicenseSnapshotUpdate,
+    ) -> Tuple[Customer, dict[str, Any], dict[str, Any]]:
+        locked_customer = (
+            db.query(Customer)
+            .filter(Customer.id == db_obj.id, Customer.team_id == db_obj.team_id)
+            .with_for_update()
+            .first()
+        )
+        if locked_customer is None:
+            raise ConflictException("客户已不存在，请刷新后确认最新状态")
+        if locked_customer.version != obj_in.expected_version:
+            raise ConflictException("客户已发生变化，请刷新后确认最新状态")
+
+        before = {
+            "license_type": locked_customer.license_type,
+            "license_expiry_date": locked_customer.license_expiry_date,
+        }
+        locked_customer.license_type = obj_in.license_type
+        locked_customer.license_expiry_date = obj_in.license_expiry_date
+        locked_customer.version += 1
+        after = {
+            "license_type": locked_customer.license_type,
+            "license_expiry_date": locked_customer.license_expiry_date,
+        }
+        db.commit()
+        db.refresh(locked_customer)
+        return locked_customer, before, after
 
     def update_status(self, db: Session, db_obj: Customer, status: int) -> Customer:
         db_obj.status = status
