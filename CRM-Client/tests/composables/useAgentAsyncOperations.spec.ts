@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { AgentAsyncOperation } from "@/api/agent"
+import type { PaginatedResponse } from "@/types/pagination"
 import { useAgentAsyncOperations } from "@/composables/useAgentAsyncOperations"
 
 const operation = (
@@ -38,6 +39,19 @@ const flushPromises = async (): Promise<void> => {
   await Promise.resolve()
 }
 
+const operationPage = (
+  items: AgentAsyncOperation[],
+  page: number,
+  total: number,
+  totalPages: number,
+): PaginatedResponse<AgentAsyncOperation> => ({
+  items,
+  page,
+  page_size: 100,
+  total,
+  total_pages: totalPages,
+})
+
 describe("useAgentAsyncOperations", () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -53,7 +67,7 @@ describe("useAgentAsyncOperations", () => {
       .mockRejectedValueOnce(new Error("projection not committed yet"))
       .mockResolvedValueOnce(operation("RUNNING"))
     const tracker = useAgentAsyncOperations({
-      api: { getOperation, listSessionOperations: vi.fn() },
+      api: { getOperation, listSessionOperationHistory: vi.fn() },
       pollIntervalMs: 2_000,
     })
 
@@ -86,7 +100,7 @@ describe("useAgentAsyncOperations", () => {
         updated_time: "2026-08-12T12:00:05",
       }))
     const tracker = useAgentAsyncOperations({
-      api: { getOperation, listSessionOperations: vi.fn() },
+      api: { getOperation, listSessionOperationHistory: vi.fn() },
       pollIntervalMs: 2_000,
     })
 
@@ -111,7 +125,7 @@ describe("useAgentAsyncOperations", () => {
         updated_time: "2026-08-12T12:00:05",
       }))
     const tracker = useAgentAsyncOperations({
-      api: { getOperation, listSessionOperations: vi.fn() },
+      api: { getOperation, listSessionOperationHistory: vi.fn() },
       pollIntervalMs: 2_000,
       onTerminal,
     })
@@ -132,10 +146,10 @@ describe("useAgentAsyncOperations", () => {
   })
 
   it("restores nonterminal operations from session history and resumes polling", async () => {
-    const listSessionOperations = vi.fn().mockResolvedValue([operation("RUNNING")])
+    const listSessionOperationHistory = vi.fn().mockResolvedValue(operationPage([operation("RUNNING")], 1, 1, 1))
     const getOperation = vi.fn().mockResolvedValue(operation("SUCCEEDED"))
     const tracker = useAgentAsyncOperations({
-      api: { getOperation, listSessionOperations },
+      api: { getOperation, listSessionOperationHistory },
       pollIntervalMs: 2_000,
     })
 
@@ -149,16 +163,16 @@ describe("useAgentAsyncOperations", () => {
   })
 
   it("invalidates old polling and projections when the active session changes", async () => {
-    const listSessionOperations = vi.fn()
-      .mockResolvedValueOnce([operation("RUNNING", { session_id: 3 })])
-      .mockResolvedValueOnce([operation("QUEUED", {
+    const listSessionOperationHistory = vi.fn()
+      .mockResolvedValueOnce(operationPage([operation("RUNNING", { session_id: 3 })], 1, 1, 1))
+      .mockResolvedValueOnce(operationPage([operation("QUEUED", {
         public_id: "aop_2",
         request_id: "request-2",
         session_id: 9,
-      })])
+      })], 1, 1, 1))
     const getOperation = vi.fn()
     const tracker = useAgentAsyncOperations({
-      api: { getOperation, listSessionOperations },
+      api: { getOperation, listSessionOperationHistory },
       pollIntervalMs: 2_000,
     })
 
@@ -173,23 +187,75 @@ describe("useAgentAsyncOperations", () => {
   })
 
   it("does not erase an SSE acknowledgement that arrives while session projections are loading", async () => {
-    let resolveList: ((operations: AgentAsyncOperation[]) => void) | undefined
-    const listSessionOperations = vi.fn().mockReturnValue(new Promise<AgentAsyncOperation[]>(resolve => {
+    let resolveList: ((page: PaginatedResponse<AgentAsyncOperation>) => void) | undefined
+    const listSessionOperationHistory = vi.fn().mockReturnValue(new Promise<PaginatedResponse<AgentAsyncOperation>>(resolve => {
       resolveList = resolve
     }))
     const tracker = useAgentAsyncOperations({
-      api: { getOperation: vi.fn().mockRejectedValue(new Error("not ready")), listSessionOperations },
+      api: { getOperation: vi.fn().mockRejectedValue(new Error("not ready")), listSessionOperationHistory },
       pollIntervalMs: 2_000,
     })
 
     const loading = tracker.loadSession(3)
     tracker.acknowledgeScheduled({ operationPublicId: "aop_1", sessionId: 3 })
     await flushPromises()
-    resolveList?.([])
+    resolveList?.(operationPage([], 1, 0, 0))
     await loading
 
     expect(tracker.operations.value.map(item => item.public_id)).toEqual(["aop_1"])
     expect(tracker.operations.value[0]?.status).toBe("QUEUED")
+    tracker.dispose()
+  })
+
+  it("loads every operation-history page and polls only nonterminal rows", async () => {
+    const listSessionOperationHistory = vi.fn()
+      .mockResolvedValueOnce(operationPage([operation("RUNNING", { public_id: "aop_1" })], 1, 250, 1))
+      .mockResolvedValueOnce(operationPage([operation("SUCCEEDED", { public_id: "aop_2" })], 2, 250, 1))
+      .mockResolvedValueOnce(operationPage([operation("QUEUED", { public_id: "aop_3" })], 3, 250, 1))
+    const getOperation = vi.fn().mockResolvedValue(operation("SUCCEEDED"))
+    const tracker = useAgentAsyncOperations({
+      api: { getOperation, listSessionOperationHistory },
+      pollIntervalMs: 2_000,
+    })
+
+    await tracker.loadSession(3)
+
+    expect(listSessionOperationHistory).toHaveBeenNthCalledWith(1, 3, { page: 1, page_size: 100 })
+    expect(listSessionOperationHistory).toHaveBeenNthCalledWith(2, 3, { page: 2, page_size: 100 })
+    expect(listSessionOperationHistory).toHaveBeenNthCalledWith(3, 3, { page: 3, page_size: 100 })
+    expect(tracker.operations.value.map(item => item.public_id)).toEqual(["aop_1", "aop_2", "aop_3"])
+
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(getOperation).toHaveBeenCalledWith("aop_1")
+    expect(getOperation).toHaveBeenCalledWith("aop_3")
+    expect(getOperation).not.toHaveBeenCalledWith("aop_2")
+    tracker.dispose()
+  })
+
+  it("discards operation-history pages that finish after a session switch", async () => {
+    let resolveOldPage: ((page: PaginatedResponse<AgentAsyncOperation>) => void) | undefined
+    const listSessionOperationHistory = vi.fn()
+      .mockReturnValueOnce(new Promise<PaginatedResponse<AgentAsyncOperation>>(resolve => {
+        resolveOldPage = resolve
+      }))
+      .mockResolvedValueOnce(operationPage([operation("SUCCEEDED", {
+        public_id: "aop_new",
+        session_id: 9,
+      })], 1, 1, 1))
+    const tracker = useAgentAsyncOperations({
+      api: { getOperation: vi.fn(), listSessionOperationHistory },
+    })
+
+    const oldLoad = tracker.loadSession(3)
+    const newLoad = tracker.loadSession(9)
+    await newLoad
+    resolveOldPage?.(operationPage([operation("RUNNING", {
+      public_id: "aop_old",
+      session_id: 3,
+    })], 1, 1, 1))
+    await oldLoad
+
+    expect(tracker.operations.value.map(item => item.public_id)).toEqual(["aop_new"])
     tracker.dispose()
   })
 })

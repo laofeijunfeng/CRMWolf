@@ -108,6 +108,9 @@ describe('agentApi', () => {
     requestGet.mockResolvedValueOnce([anchor])
 
     await expect(agentApi.listMessageAnchors(7, [12, 13])).resolves.toMatchObject([anchor])
-    expect(requestGet).toHaveBeenCalledWith('/v1/agent/sessions/7/messages/anchors', { params: { message_id: [12, 13] } })
+    expect(requestGet).toHaveBeenCalledWith('/v1/agent/sessions/7/messages/anchors', {
+      params: { message_id: [12, 13] },
+      paramsSerializer: { indexes: null },
+    })
   })
 })

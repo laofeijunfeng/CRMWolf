@@ -208,7 +208,7 @@ import {
   optimisticallyCompleteCompactTask,
   restoreCompactTaskAction,
 } from '@/components/agent/agentInteractionState'
-import { isVisibleAgentMessage, loadLatestAgentMessages, resolveInitialAgentSession } from '@/components/agent/agentHistory'
+import { isVisibleAgentMessage, loadLatestAgentMessages, mergeAgentHistoryAnchors, resolveInitialAgentSession } from '@/components/agent/agentHistory'
 import AgentMessageBody from '@/components/agent/AgentMessageBody.vue'
 import AgentUIMessage from '@/components/agent-ui/AgentUIMessage.vue'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -292,6 +292,37 @@ const loadSessionMessages = async (targetSessionId: number): Promise<AgentMessag
   return { applied, messages: loadedMessages }
 }
 
+const loadSessionAnchors = async (
+  targetSessionId: number,
+  loadedMessages: AgentUIEnvelope[],
+): Promise<void> => {
+  const targetGeneration = messageLoadGeneration
+  const loadedMessageIds = new Set(loadedMessages.map(message => message.message_id))
+  const missingMessageIds = [...new Set(asyncOperations.value.flatMap(operation => (
+    [operation.source_user_message_id, operation.source_assistant_message_id]
+      .filter((messageId): messageId is number => (
+        messageId !== null
+        && messageId !== undefined
+        && messageId > 0
+        && !loadedMessageIds.has(messageId)
+      ))
+  )))].sort((left, right) => left - right)
+  if (missingMessageIds.length === 0) return
+
+  const anchors = await agentApi.listMessageAnchors(targetSessionId, missingMessageIds)
+  if (targetGeneration !== messageLoadGeneration || sessionId.value !== targetSessionId) return
+  messages.value = mergeAgentHistoryAnchors(messages.value, anchors)
+}
+
+const refreshSessionAnchors = (
+  targetSessionId: number,
+  loadedMessages: AgentUIEnvelope[],
+): void => {
+  void loadSessionAnchors(targetSessionId, loadedMessages).catch(() => {
+    // Anchor reads are best-effort; operation ownership remains unresolved when unavailable.
+  })
+}
+
 const {
   operations: asyncOperations,
   loadSession: loadSessionOperations,
@@ -304,14 +335,18 @@ const {
   onWaitingUser: operation => {
     const targetSessionId = operation.session_id
     if (targetSessionId === null || targetSessionId === undefined || targetSessionId !== sessionId.value) return
-    void loadSessionMessages(targetSessionId).catch(() => {
+    void loadSessionMessages(targetSessionId).then(result => {
+      if (result.applied) refreshSessionAnchors(targetSessionId, result.messages)
+    }).catch(() => {
       // A later session refresh restores messages if the projection is not visible yet.
     })
   },
   onTerminal: operation => {
     const targetSessionId = operation.session_id
     if (targetSessionId === null || targetSessionId === undefined || targetSessionId !== sessionId.value) return
-    void loadSessionMessages(targetSessionId).catch(() => {
+    void loadSessionMessages(targetSessionId).then(result => {
+      if (result.applied) refreshSessionAnchors(targetSessionId, result.messages)
+    }).catch(() => {
       // A later session refresh restores messages if the projection is not visible yet.
     })
   },
@@ -387,10 +422,11 @@ const loadInitialSession = async (): Promise<void> => {
     const session = resolveInitialAgentSession(response.items, storedSessionId())
     if (session === undefined) return
     rememberSession(session.id, session.session_key)
-    await Promise.all([
+    const [messageResult] = await Promise.all([
       loadSessionMessages(session.id),
       loadSessionOperations(session.id),
     ])
+    if (messageResult.applied) refreshSessionAnchors(session.id, messageResult.messages)
   } catch (error) {
     toast.error(error instanceof Error ? error.message : 'Agent 会话加载失败')
   } finally {
@@ -514,6 +550,7 @@ const reloadAuthoritativeSessionState = async (): Promise<AgentMessageLoadResult
     loadSessionMessages(targetSessionId),
     loadSessionOperations(targetSessionId).catch(() => undefined),
   ])
+  if (messageResult.applied) refreshSessionAnchors(targetSessionId, messageResult.messages)
   return messageResult
 }
 

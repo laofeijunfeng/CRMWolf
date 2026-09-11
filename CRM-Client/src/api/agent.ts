@@ -198,7 +198,8 @@ export const agentApi = {
   ): Promise<AgentUIEnvelope[]> => {
     return AgentMessageAnchorListSchema.parse(
       await request.get<unknown>(`/v1/agent/sessions/${sessionId}/messages/anchors`, {
-        params: { message_id: messageIds }
+        params: { message_id: messageIds },
+        paramsSerializer: { indexes: null },
       })
     )
   },

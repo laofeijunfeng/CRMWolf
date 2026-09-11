@@ -66,3 +66,38 @@ Duration  585ms (transform 75ms, setup 0ms, collect 91ms, tests 26ms, environmen
 ## Concern
 
 The schema normalizes omitted/default envelope metadata during parsing; the anchor API test therefore asserts the returned envelope with `toMatchObject` while still verifying request parameters and strict parsing behavior.
+
+## Review fix evidence
+
+The focused client test was updated first to require Axios's repeated-key serializer configuration. RED was observed before the production edit:
+
+```text
+cd /private/tmp/crmwolf-agent-history-anchors/CRM-Client
+npx vitest run src/api/__tests__/agent.spec.ts -t "loads exact message anchors"
+
+FAIL src/api/__tests__/agent.spec.ts > agentApi > loads exact message anchors with repeated message_id query parameters and strict envelopes
+AssertionError: expected "spy" to be called with arguments: [ …(2) ]
+Received request config contained params.message_id but no paramsSerializer; expected paramsSerializer: { indexes: null }.
+```
+
+The minimal fix adds `paramsSerializer: { indexes: null }` only to `agentApi.listMessageAnchors`, retaining the existing Axios request abstraction and strict `AgentMessageAnchorListSchema` parsing.
+
+GREEN command and output:
+
+```text
+cd /private/tmp/crmwolf-agent-history-anchors/CRM-Client
+npx vitest run src/api/__tests__/agent.spec.ts tests/components/agentHistory.spec.ts
+
+RUN  v2.1.9 /private/tmp/crmwolf-agent-history-anchors/CRM-Client
+✓ tests/components/agentHistory.spec.ts (10 tests) 21ms
+✓ src/api/__tests__/agent.spec.ts (7 tests) 6ms
+Test Files  2 passed (2)
+Tests 17 passed (17)
+```
+
+Changed files for this review fix:
+
+- `CRM-Client/src/api/__tests__/agent.spec.ts`
+- `CRM-Client/src/api/agent.ts`
+
+No backend files, unrelated source, formatter, linter, or project-wide suite was touched or run for this fix.

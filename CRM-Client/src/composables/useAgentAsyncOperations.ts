@@ -8,7 +8,16 @@ import {
 
 interface AgentAsyncOperationsApi {
   getOperation: (operationPublicId: string) => Promise<AgentAsyncOperation>
-  listSessionOperations: (sessionId: number, params?: { limit?: number }) => Promise<AgentAsyncOperation[]>
+  listSessionOperationHistory: (
+    sessionId: number,
+    params?: { page?: number, page_size?: number }
+  ) => Promise<{
+    items: AgentAsyncOperation[]
+    total: number
+    page: number
+    page_size: number
+    total_pages: number
+  }>
 }
 
 interface ScheduledOperationAcknowledgement {
@@ -171,8 +180,20 @@ export const useAgentAsyncOperations = (
       notifyChanged()
     }
     const targetGeneration = generation
-    const sessionOperations = await api.listSessionOperations(sessionId)
+    const pageSize = 100
+    const firstPage = await api.listSessionOperationHistory(sessionId, { page: 1, page_size: pageSize })
     if (targetGeneration !== generation || activeSessionId !== sessionId) return
+    const totalPages = Math.max(
+      firstPage.total_pages,
+      Math.ceil(firstPage.total / firstPage.page_size),
+      1,
+    )
+    const sessionOperations = [...firstPage.items]
+    for (let page = 2; page <= totalPages; page += 1) {
+      const currentPage = await api.listSessionOperationHistory(sessionId, { page, page_size: pageSize })
+      if (targetGeneration !== generation || activeSessionId !== sessionId) return
+      sessionOperations.push(...currentPage.items)
+    }
     const previousOperations = new Map(operations.value.map(operation => [operation.public_id, operation]))
     const mergedOperations = mergeOperationLists(operations.value, sessionOperations)
     operations.value = mergedOperations
