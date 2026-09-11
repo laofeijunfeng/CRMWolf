@@ -642,6 +642,32 @@ class AgentAsyncOperationService:
         )
         operations.reverse()
         return [self._projection(operation) for operation in operations]
+    def list_session_history_page(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_id: int,
+        session_id: int,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[AgentAsyncOperationProjection], int]:
+        """Return one owner-scoped operation-history page in display order."""
+        query = db.query(AgentAsyncOperation).filter(
+            AgentAsyncOperation.team_id == team_id,
+            AgentAsyncOperation.user_id == user_id,
+            AgentAsyncOperation.session_id == session_id,
+        )
+        total = int(query.count())
+        operations = (
+            query.order_by(AgentAsyncOperation.created_time.desc(), AgentAsyncOperation.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        operations.reverse()
+        return [self._projection(operation) for operation in operations], total
+
 
     def _ensure_scheduled_mysql(
         self,

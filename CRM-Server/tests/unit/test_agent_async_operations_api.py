@@ -89,6 +89,62 @@ def test_agent_session_operations_are_visible_after_original_stream_has_closed()
     finally:
         db.close()
         engine.dispose()
+def test_operation_history_is_paginated_and_stably_ordered() -> None:
+    engine = create_engine(
+        "sqlite:///:memory:",
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(
+        engine,
+        tables=[AgentSession.__table__, AgentAsyncOperation.__table__, AgentAsyncOperationEvent.__table__],
+    )
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    service = AgentAsyncOperationService()
+    try:
+        session = AgentSession(session_key="history-page", team_id=1, user_id=2, title="历史")
+        db.add(session)
+        db.commit()
+        operations = []
+        for index in range(3):
+            operations.append(
+                service.ensure_scheduled(
+                    db,
+                    operation_key=f"history-page:{index}",
+                    request_id=f"history-{index}",
+                    team_id=1,
+                    user_id=2,
+                    session_id=session.id,
+                    source_user_message_id=21 + index,
+                    operation_type="customer_intelligence_refresh",
+                    resource_type="customer",
+                    resource_id=18 + index,
+                    summary=f"操作 {index}",
+                )
+            )
+        db.commit()
+
+        app = FastAPI()
+        app.include_router(agent_api.router)
+        app.dependency_overrides[agent_api.get_db] = lambda: Session()
+        app.dependency_overrides[agent_api.get_current_user_team] = lambda: 1
+        app.dependency_overrides[agent_api.get_current_active_user] = lambda: SimpleNamespace(id=2)
+
+        with TestClient(app) as client:
+            response = client.get(f"/v1/agent/sessions/{session.id}/operations/history?page=2&page_size=2")
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["total"] == 3
+        assert body["page"] == 2
+        assert body["page_size"] == 2
+        assert body["total_pages"] == 2
+        assert [item["public_id"] for item in body["items"]] == [operations[0].public_id]
+    finally:
+        db.close()
+        engine.dispose()
+
 
 
 

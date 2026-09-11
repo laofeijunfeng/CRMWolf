@@ -319,6 +319,47 @@ def test_message_history_returns_only_canonical_agent_ui(api_harness) -> None:
     assert payload["total"] == 1
     assert payload["items"] == [message.ui_json]
     assert payload["items"][0]["schema_version"] == "crm.agent.ui.v1"
+def test_message_anchor_endpoint_returns_only_owned_canonical_messages(api_harness) -> None:
+    client, session_factory = api_harness
+    created = _create_session(client)
+    owned = _persist_message(session_factory, session_id=int(created["id"]), content="owned anchor")
+    with session_factory() as db:
+        other_session = AgentSession(session_key="anchor_other", team_id=1, user_id=99, title="其他用户")
+        db.add(other_session)
+        db.flush()
+        other = AgentMessage(
+            team_id=1,
+            user_id=99,
+            session_id=int(other_session.id),
+            role=AgentMessageRole.ASSISTANT,
+            content="not owned",
+            turn_id="turn_anchor_other",
+            ui_json={
+                "schema_version": "crm.agent.ui.v1",
+                "message_id": 0,
+                "turn_id": "turn_anchor_other",
+                "role": "assistant",
+                "state": "final",
+                "blocks": [],
+                "suggested_actions": [],
+                "metadata": {"display": "MESSAGE", "route": "QUERY", "result_set_id": None},
+            },
+        )
+        db.add(other)
+        db.flush()
+        other.ui_json["message_id"] = int(other.id)
+        db.commit()
+        other_id = int(other.id)
+
+    response = client.get(
+        f"/v1/agent/sessions/{created['id']}/messages/anchors",
+        params=[("message_id", owned.id), ("message_id", owned.id), ("message_id", other_id), ("message_id", 999999)],
+    )
+
+    assert response.status_code == 200
+    assert response.json() == [owned.ui_json]
+    assert response.json()[0]["schema_version"] == "crm.agent.ui.v1"
+
 
 
 
