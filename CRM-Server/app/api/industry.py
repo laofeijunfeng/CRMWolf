@@ -8,6 +8,9 @@ from sqlalchemy.orm import Session
 from typing import List, Dict, Any
 
 from app.schemas.industry import IndustryHierarchyResponse
+from app.core.database import get_db
+from app.core.deps import get_current_active_user
+from app.crud.industry import industry_crud
 
 router = APIRouter(prefix="/v1/industries", tags=["行业管理"])
 
