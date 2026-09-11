@@ -1,7 +1,7 @@
 # 客户编辑弹窗渐进披露与低频字段编辑设计
 
 - 日期：2026-09-11
-- 状态：待用户审阅
+- 状态：已确认（用户批准范围、交互和字段边界）
 - 范围：客户管理中的编辑客户 Dialog、客户主数据更新、客户状态快捷变更、客户授权汇总补录
 - 上游：用户确认采用“渐进披露”方案；行业使用数据库中的一级/二级目录；授权补录不增加修改原因字段，仅展示风险提醒
 - 相关规范：`CRM-Docs/design-system/patterns/form-page.md`、`CRM-Docs/design-system/patterns/detail-page.md`、`CRM-Docs/design-system/components/modal-sheet.md`、`CRM-Docs/design-system/components/input.md`
