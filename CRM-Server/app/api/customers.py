@@ -61,6 +61,7 @@ from app.schemas.customer import (
     CustomerIntelligenceRunDiagnosticResponse,
     CustomerListResponse,
     CustomerLoseRequest,
+    CustomerLicenseSnapshotUpdate,
     CustomerLifecycleStatusUpdate,
     CustomerMemberCandidate,
     CustomerMemberCreate,
@@ -1805,6 +1806,64 @@ async def update_customer_lifecycle_status(
             payload_json={"account_name": updated_customer.account_name},
         )
 
+    return _customer_response(db, updated_customer)
+
+
+@router.patch("/{customer_id}/license-snapshot", response_model=CustomerResponse, summary="更新客户授权快照")
+async def update_customer_license_snapshot(
+    customer_id: str,
+    snapshot_update: CustomerLicenseSnapshotUpdate,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    customer = _get_editable_customer(db, customer_id, team_id, current_user)
+    try:
+        updated_customer, before, after = customer_crud.update_license_snapshot(
+            db,
+            customer,
+            snapshot_update,
+        )
+    except ConflictException as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    changed_fields = [
+        field for field in ("license_type", "license_expiry_date")
+        if before.get(field) != after.get(field)
+    ]
+
+    def _audit_value(value):
+        return value.isoformat() if hasattr(value, "isoformat") else value
+
+    operation_log_service.log(
+        db=db,
+        event_type=EventTypes.CUSTOMER_LICENSE_SNAPSHOT_UPDATED,
+        event_action="UPDATE",
+        resource_type="CUSTOMER",
+        resource_id=updated_customer.id,
+        operator_id=str(current_user.id),
+        operator_name=getattr(current_user, "name", None),
+        team_id=team_id,
+        content={
+            "before": {field: _audit_value(before.get(field)) for field in ("license_type", "license_expiry_date")},
+            "after": {field: _audit_value(after.get(field)) for field in ("license_type", "license_expiry_date")},
+            "changed_fields": changed_fields,
+            "actor_id": str(current_user.id),
+            "team_id": team_id,
+        },
+    )
+    _persist_customer_business_object_refresh_after_commit(
+        business_object=updated_customer,
+        source_type="customer",
+        summary="客户授权汇总已更新，刷新客户智能档案",
+        actor_id=str(current_user.id),
+        payload={
+            "change_type": "license_snapshot_updated",
+            "changed_fields": ["license_type", "license_expiry_date"],
+        },
+    )
     return _customer_response(db, updated_customer)
 
 
