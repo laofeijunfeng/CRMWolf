@@ -87,3 +87,41 @@ def test_update_customer_logs_only_changed_fields(monkeypatch) -> None:
         "before": {"city": "北京"},
         "after": {"city": "上海"},
     }
+def test_update_customer_logs_source_public_id_changes(monkeypatch) -> None:
+    from app.api import customers as customers_api
+
+    previous_source = SimpleNamespace(id=11, public_id="src_old", name="旧来源")
+    next_source = SimpleNamespace(id=22, public_id="src_new", name="新来源")
+    customer = SimpleNamespace(
+        id=1,
+        public_id="cus_1",
+        team_id=9,
+        source_id=11,
+        source="旧来源",
+        version=4,
+    )
+    user = SimpleNamespace(id=7, name="操作人")
+    logged = []
+    monkeypatch.setattr(customers_api, "_get_editable_customer", lambda *args: customer)
+    monkeypatch.setattr(customers_api.customer_crud, "update", lambda db, current, payload: setattr(current, "source_id", 22) or setattr(current, "source", "新来源") or current)
+    monkeypatch.setattr(customers_api, "_persist_customer_business_object_refresh_after_commit", lambda **kwargs: None)
+    monkeypatch.setattr(customers_api, "_customer_response", lambda db, updated: updated)
+    monkeypatch.setattr(customers_api, "get_by_id", lambda db, source_id, team_id: {11: previous_source, 22: next_source}.get(source_id))
+    monkeypatch.setattr(customers_api.operation_log_service, "log", lambda **kwargs: logged.append(kwargs))
+
+    result = customers_api.update_customer(
+        "cus_1",
+        CustomerUpdate(source_public_id="src_new", expected_version=4),
+        team_id=9,
+        current_user=user,
+        db=MagicMock(),
+    )
+
+    assert result is customer
+    assert logged[0]["content"] == {
+        "changed_fields": ["source_public_id"],
+        "before": {"source_public_id": "src_old"},
+        "after": {"source_public_id": "src_new"},
+    }
+    assert "source_id" not in logged[0]["content"]["before"]
+    assert "source_id" not in logged[0]["content"]["after"]

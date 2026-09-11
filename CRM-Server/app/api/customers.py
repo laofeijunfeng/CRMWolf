@@ -1836,8 +1836,22 @@ def update_customer(
     if customer_update.account_name:
         _ensure_customer_name_available(db, customer_update.account_name, team_id, exclude_customer_id=customer.id)
 
-    audit_fields = sorted(customer_update.model_fields_set - {"expected_version", "source_public_id", "source"})
+    fields_set = customer_update.model_fields_set
+    audit_fields = sorted(fields_set - {"expected_version", "source_public_id", "source"})
+    source_audit_field = None
+    if "source_public_id" in fields_set:
+        source_audit_field = "source_public_id"
+    elif "source" in fields_set:
+        source_audit_field = "source"
+    if source_audit_field:
+        audit_fields.append(source_audit_field)
+
     audit_before = {field: getattr(customer, field, None) for field in audit_fields}
+    if source_audit_field == "source_public_id":
+        source_row = get_by_id(db, getattr(customer, "source_id", None), team_id)
+        audit_before[source_audit_field] = getattr(source_row, "public_id", None)
+    elif source_audit_field == "source":
+        audit_before[source_audit_field] = getattr(customer, "source", None)
     try:
         updated = customer_crud.update(db, customer, customer_update)
     except AcquisitionSourceError as exc:
@@ -1846,6 +1860,11 @@ def update_customer(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     audit_after = {field: getattr(updated, field, None) for field in audit_fields}
+    if source_audit_field == "source_public_id":
+        source_row = get_by_id(db, getattr(updated, "source_id", None), team_id)
+        audit_after[source_audit_field] = getattr(source_row, "public_id", None)
+    elif source_audit_field == "source":
+        audit_after[source_audit_field] = getattr(updated, "source", None)
     changed_fields = [field for field in audit_fields if audit_before[field] != audit_after[field]]
     if changed_fields:
         operation_log_service.log(
