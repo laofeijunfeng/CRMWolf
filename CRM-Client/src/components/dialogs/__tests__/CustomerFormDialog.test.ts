@@ -173,7 +173,9 @@ describe('CustomerFormDialog progressive edit sections', () => {
       industry: 'finance.securities',
     }))
     expect(updateCustomer.mock.calls[0]?.[1]).not.toHaveProperty('license_type')
-    wrapper.unmount()
+    expect(wrapper.emitted('update:open')).toContainEqual([false])
+    expect(wrapper.emitted('success')).toHaveLength(1)
+    expect(wrapper.emitted('refresh')).toBeUndefined()
   })
 
   it('keeps the dialog and entered license values when snapshot save fails', async () => {
