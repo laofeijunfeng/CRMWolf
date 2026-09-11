@@ -207,11 +207,14 @@ describe("useAgentAsyncOperations", () => {
     tracker.dispose()
   })
 
-  it("loads every operation-history page and polls only nonterminal rows", async () => {
+  it("loads every operation-history page in chronological order and polls only nonterminal rows", async () => {
+    const newestPageOperation = operation("RUNNING", { public_id: "aop_page_newest" })
+    const middlePageOperation = operation("SUCCEEDED", { public_id: "aop_page_middle" })
+    const oldestPageOperation = operation("QUEUED", { public_id: "aop_page_oldest" })
     const listSessionOperationHistory = vi.fn()
-      .mockResolvedValueOnce(operationPage([operation("RUNNING", { public_id: "aop_1" })], 1, 250, 1))
-      .mockResolvedValueOnce(operationPage([operation("SUCCEEDED", { public_id: "aop_2" })], 2, 250, 1))
-      .mockResolvedValueOnce(operationPage([operation("QUEUED", { public_id: "aop_3" })], 3, 250, 1))
+      .mockResolvedValueOnce(operationPage([newestPageOperation], 1, 250, 3))
+      .mockResolvedValueOnce(operationPage([middlePageOperation], 2, 250, 3))
+      .mockResolvedValueOnce(operationPage([oldestPageOperation], 3, 250, 3))
     const getOperation = vi.fn().mockResolvedValue(operation("SUCCEEDED"))
     const tracker = useAgentAsyncOperations({
       api: { getOperation, listSessionOperationHistory },
@@ -223,12 +226,16 @@ describe("useAgentAsyncOperations", () => {
     expect(listSessionOperationHistory).toHaveBeenNthCalledWith(1, 3, { page: 1, page_size: 100 })
     expect(listSessionOperationHistory).toHaveBeenNthCalledWith(2, 3, { page: 2, page_size: 100 })
     expect(listSessionOperationHistory).toHaveBeenNthCalledWith(3, 3, { page: 3, page_size: 100 })
-    expect(tracker.operations.value.map(item => item.public_id)).toEqual(["aop_1", "aop_2", "aop_3"])
+    expect(tracker.operations.value.map(item => item.public_id)).toEqual([
+      "aop_page_oldest",
+      "aop_page_middle",
+      "aop_page_newest",
+    ])
 
     await vi.advanceTimersByTimeAsync(2_000)
-    expect(getOperation).toHaveBeenCalledWith("aop_1")
-    expect(getOperation).toHaveBeenCalledWith("aop_3")
-    expect(getOperation).not.toHaveBeenCalledWith("aop_2")
+    expect(getOperation).toHaveBeenCalledWith("aop_page_oldest")
+    expect(getOperation).toHaveBeenCalledWith("aop_page_newest")
+    expect(getOperation).not.toHaveBeenCalledWith("aop_page_middle")
     tracker.dispose()
   })
 

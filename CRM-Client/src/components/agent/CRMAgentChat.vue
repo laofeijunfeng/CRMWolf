@@ -233,6 +233,7 @@ const isLoadingHistory = ref(false)
 const sessionId = ref<number | undefined>()
 const sessionKey = ref<string | undefined>()
 const messages = ref<AgentUIEnvelope[]>([])
+const insertedHistoryAnchorIds = ref<ReadonlySet<number>>(new Set())
 const pendingUserText = ref<string | null>(null)
 const pendingRequestLabel = ref('正在处理...')
 const streamingBlocks = ref<AgentUIBlock[]>([])
@@ -279,13 +280,13 @@ const contractSheetVisible = computed({
     if (!visible) selectedContractId.value = null
   },
 })
-
 const loadSessionMessages = async (targetSessionId: number): Promise<AgentMessageLoadResult> => {
   const generation = ++messageLoadGeneration
   const loadedMessages = await loadLatestAgentMessages(agentApi.listMessages, targetSessionId)
   const applied = generation === messageLoadGeneration && sessionId.value === targetSessionId
   if (applied) {
     messages.value = loadedMessages
+    insertedHistoryAnchorIds.value = new Set()
     pendingUserText.value = null
     messageScrollKey.value += 1
   }
@@ -311,6 +312,8 @@ const loadSessionAnchors = async (
 
   const anchors = await agentApi.listMessageAnchors(targetSessionId, missingMessageIds)
   if (targetGeneration !== messageLoadGeneration || sessionId.value !== targetSessionId) return
+  const visibleAnchorIds = new Set(anchors.filter(isVisibleAgentMessage).map(anchor => anchor.message_id))
+  insertedHistoryAnchorIds.value = new Set([...insertedHistoryAnchorIds.value, ...visibleAnchorIds])
   messages.value = mergeAgentHistoryAnchors(messages.value, anchors)
 }
 
@@ -388,6 +391,7 @@ const showEmptyState = computed(() => (
 ))
 const messageScrollCount = computed(() => (
   messages.value.length
+  - [...insertedHistoryAnchorIds.value].filter(messageId => messages.value.some(message => message.message_id === messageId)).length
   + (pendingUserText.value === null ? 0 : 1)
   + (isStreaming.value ? 1 : 0)
   + asyncOperations.value.length
@@ -408,6 +412,7 @@ const storedSessionId = (): number | undefined => {
 const rememberSession = (id: number, key: string): void => {
   if (sessionId.value !== undefined && sessionId.value !== id) {
     lockedInteractionActionIds.value = new Set()
+    insertedHistoryAnchorIds.value = new Set()
     messageLoadGeneration += 1
   }
   sessionId.value = id

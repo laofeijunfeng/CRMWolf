@@ -98,10 +98,17 @@ const operation: AgentAsyncOperation = {
 const mountChat = () => mount(CRMAgentChat, {
   global: {
     stubs: {
-      MessageScroller: { template: '<div><slot /></div>' },
+      MessageScroller: {
+        props: { itemsCount: { type: Number, required: true } },
+        template: '<div data-testid="message-scroller" :data-items-count="itemsCount"><slot /></div>',
+      },
     },
   },
 })
+
+const scrollerItemsCount = (wrapper: ReturnType<typeof mount>): number => Number(
+  wrapper.get('[data-testid="message-scroller"]').attributes('data-items-count'),
+)
 
 describe('CRMAgentChat background operation placement', () => {
   beforeEach(() => {
@@ -158,7 +165,34 @@ describe('CRMAgentChat background operation placement', () => {
     const text = wrapper.text()
     expect(text.indexOf('很早以前已记录')).toBeGreaterThanOrEqual(0)
     expect(text.indexOf('后台任务')).toBeGreaterThan(text.indexOf('很早以前已记录'))
+    expect(text.indexOf('后台任务')).toBeLessThan(text.indexOf('第一条跟进'))
+    expect(wrapper.findAll('.agent-chat__operations')).toHaveLength(1)
     expect(text).toContain('第一条跟进')
+    wrapper.unmount()
+  })
+
+  it('does not change the MessageScroller item count when merging historical anchors', async () => {
+    const sourceUser = envelope(8, 'user', '很早以前的跟进')
+    const sourceAssistant = envelope(9, 'assistant', '很早以前已记录')
+    let resolveAnchors: ((anchors: AgentUIEnvelope[]) => void) | undefined
+    const anchorPromise = new Promise<AgentUIEnvelope[]>(resolve => {
+      resolveAnchors = resolve
+    })
+    
+    api.listSessionOperationHistory.mockResolvedValue(paginatedOperations([{
+      ...operation,
+      source_user_message_id: 8,
+      source_assistant_message_id: 9,
+    }]))
+    api.listMessageAnchors.mockReturnValue(anchorPromise)
+
+    const wrapper = mountChat()
+    await flushPromises()
+    const beforeAnchorMerge = scrollerItemsCount(wrapper)
+    resolveAnchors?.([sourceUser, sourceAssistant])
+    await flushPromises()
+
+    expect(scrollerItemsCount(wrapper)).toBe(beforeAnchorMerge)
     wrapper.unmount()
   })
 

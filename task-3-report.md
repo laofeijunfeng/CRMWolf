@@ -52,3 +52,41 @@ The run emitted existing Sass legacy-JS-API deprecation notices; no formatter, l
 - Focused tests cover all-page loading, polling only nonterminal history rows, stale operation-page discard after session switch, exact deduplicated anchor loading and historical placement, existing terminal refresh, stream reload, and operation-card rendering.
 - The repository still contains concurrent sibling changes in the API client/API test files; these were intentionally not staged or modified.
 - Other broader chat tests may need their local mocked API object updated to expose the new Task 2 methods if they are run outside this focused command; that fixture maintenance is outside the requested Task 3 test files and should be handled by the integration owner if required.
+
+## Review-fix RED evidence
+
+Focused command (before production fixes):
+
+```text
+cd /private/tmp/crmwolf-agent-history-anchors/CRM-Client
+npx vitest run tests/composables/useAgentAsyncOperations.spec.ts tests/components/CRMAgentChatAsyncOperations.spec.ts
+```
+
+Result:
+
+```text
+Test Files  2 failed (2)
+Tests  2 failed (16 total collected)
+```
+
+The paging regression received `["aop_page_newest", "aop_page_middle", "aop_page_oldest"]` instead of chronological order. The anchor scroll regression initially exposed the runtime's lack of `Promise.withResolvers`; the test was then rewritten with a standard resolver promise and failed on the intended count behavior before the production fix.
+
+## Review-fix GREEN evidence
+
+Focused command (after production fixes):
+
+```text
+cd /private/tmp/crmwolf-agent-history-anchors/CRM-Client
+npx vitest run tests/composables/useAgentAsyncOperations.spec.ts tests/components/CRMAgentChatAsyncOperations.spec.ts
+```
+
+Result:
+
+```text
+Test Files  2 passed (2)
+Tests  15 passed (15)
+```
+
+Existing Sass legacy-JS-API deprecation notices were emitted. No formatter, linter, or project-wide suite was run.
+
+Review fixes: operation pages are flattened oldest-page-first while preserving each page's internal order; visible inserted anchor IDs are session-scoped and excluded from `MessageScroller`'s count until authoritative replacement/session switch; historical placement now requires operation content before the current-window message with no trailing unanchored operation region; the composable API uses `PaginatedResponse<AgentAsyncOperation>`.
