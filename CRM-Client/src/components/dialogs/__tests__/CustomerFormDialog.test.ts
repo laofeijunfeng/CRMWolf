@@ -1,5 +1,5 @@
 import { defineComponent, h, nextTick, type VNode } from 'vue'
-import { shallowMount, flushPromises } from '@vue/test-utils'
+import { shallowMount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import CustomerFormDialog from '../CustomerFormDialog.vue'
 import FormErrorSummary from '@/components/crmwolf/FormErrorSummary.vue'
@@ -112,6 +112,104 @@ describe('CustomerFormDialog mode transitions', () => {
       expect.objectContaining({ field: 'contact_gender', label: '性别' }),
     ]))
 
+    wrapper.unmount()
+  })
+})
+ 
+describe('CustomerFormDialog progressive edit sections', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  const mountEdit = (customer: CustomerDetailResponse = { ...customerDetail, company_scale: '1-50人', source_info: { public_id: 'source-1', name: '来源', is_active: 1 } }): VueWrapper => shallowMount(CustomerFormDialog, {
+    global: {
+      stubs: {
+        Dialog: DialogSlotStub,
+        DialogContent: DialogSlotStub,
+        Collapsible: defineComponent({ props: { open: Boolean }, emits: ['update:open'], template: '<div><slot /></div>' }),
+        CollapsibleTrigger: defineComponent({ template: '<slot />' }),
+        CollapsibleContent: defineComponent({ template: '<div><slot /></div>' }),
+      },
+    },
+    props: {
+      open: true,
+      mode: 'edit',
+      customerId: customer.id,
+      customer,
+    },
+  })
+
+  it('starts with the more customer information section collapsed', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const wrapper = mountEdit()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as { moreInfoOpen: boolean }
+    expect(vm.moreInfoOpen).toBe(false)
+    expect(wrapper.text()).toContain('更多客户信息')
+    wrapper.unmount()
+  })
+  it('saves an industry-only edit through the ordinary dirty-diff update', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    vi.spyOn(customerApi, 'getIndustryHierarchy').mockResolvedValue({})
+    const updateCustomer = vi.spyOn(customerApi, 'updateCustomer').mockResolvedValue({ ...customerDetail, industry: 'finance.securities', version: 4 })
+    const wrapper = mountEdit()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      industryValue: string
+      onSubmit: (event: Event) => Promise<void>
+    }
+    vm.industryValue = 'finance.securities'
+    await vm.onSubmit(new Event('submit'))
+    await flushPromises()
+
+    expect(updateCustomer).toHaveBeenCalledWith('customer-1', expect.objectContaining({
+      expected_version: 3,
+      industry: 'finance.securities',
+    }))
+    expect(updateCustomer.mock.calls[0]?.[1]).not.toHaveProperty('license_type')
+    wrapper.unmount()
+  })
+
+  it('keeps the dialog and entered license values when snapshot save fails', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    vi.spyOn(customerApi, 'updateCustomerLicenseSnapshot').mockRejectedValue(new Error('snapshot failed'))
+    const wrapper = mountEdit()
+    const vm = wrapper.vm as unknown as {
+      licenseTypeValue: 'TRIAL' | 'OFFICIAL' | null
+      licenseExpiryDateValue: string | null
+      saveLicenseSnapshot: () => Promise<void>
+    }
+    vm.licenseTypeValue = 'TRIAL'
+    vm.licenseExpiryDateValue = '2026-12-31'
+    await vm.saveLicenseSnapshot()
+
+    expect(wrapper.props('open')).toBe(true)
+    expect(vm.licenseTypeValue).toBe('TRIAL')
+    expect(vm.licenseExpiryDateValue).toBe('2026-12-31')
+    wrapper.unmount()
+  })
+
+  it('uses the current version for a lifecycle 0 to 1 save and emits only refresh', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const customer = { ...customerDetail, status: 0 as const, version: 8 }
+    const updateLifecycle = vi.spyOn(customerApi, 'updateCustomerLifecycleStatus').mockResolvedValue({ ...customer, status: 1, version: 9 })
+    const wrapper = mountEdit(customer)
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as { lifecycleStatusValue: 0 | 1; saveLifecycleStatus: () => Promise<void> }
+    vm.lifecycleStatusValue = 1
+    await vm.saveLifecycleStatus()
+
+    expect(updateLifecycle).toHaveBeenCalledWith('customer-1', { status: 1, expected_version: 8 })
+    expect(wrapper.emitted('refresh')).toHaveLength(1)
+    expect(wrapper.emitted('success')).toBeUndefined()
+    expect(wrapper.props('open')).toBe(true)
     wrapper.unmount()
   })
 })
