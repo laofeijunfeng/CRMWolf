@@ -53,6 +53,7 @@ import { handleApiError } from '@/utils/errorHandler'
 import { confirmDialog } from '@/utils/confirmDialog'
 import approvalFlowApi, {
   type ApprovalFlowDetail,
+  type ApprovalFlowListItem,
   type ApprovalNode
 } from '@/api/approvalFlow'
 import ApprovalFlowFormDialog from './ApprovalFlowFormDialog.vue'
@@ -82,7 +83,7 @@ const emit = defineEmits<Emits>()
 
 // ==================== State ====================
 const loading = ref(false)
-const approvalFlows = ref<ApprovalFlowDetail[]>([])
+const approvalFlows = ref<ApprovalFlowListItem[]>([])
 const searchText = ref('')
 const filterStatus = ref('')
 const filterLicenseType = ref('')
@@ -92,8 +93,6 @@ const pagination = ref({
   pageSize: 20,
   total: 0
 })
-
-type ApprovalFlowListItem = ApprovalFlowDetail & { id: number }
 
 // 详情 Dialog
 const detailDialogOpen = ref(false)
@@ -170,7 +169,7 @@ const fetchApprovalFlows = async (): Promise<void> => {
 }
 
 // ==================== Actions ====================
-const handleView = async (record: ApprovalFlowDetail): Promise<void> => {
+const handleView = async (record: ApprovalFlowListItem): Promise<void> => {
   if (typeof record.id !== 'number') return
   try {
     const data = await approvalFlowApi.getApprovalFlowDetail(record.id)
@@ -181,14 +180,14 @@ const handleView = async (record: ApprovalFlowDetail): Promise<void> => {
   }
 }
 
-const handleEdit = (record: ApprovalFlowDetail): void => {
+const handleEdit = (record: ApprovalFlowListItem): void => {
   if (typeof record.id !== 'number') return
   formDialogMode.value = 'edit'
   editingFlowId.value = record.id
   formDialogOpen.value = true
 }
 
-const handleToggleStatus = async (record: ApprovalFlowDetail): Promise<void> => {
+const handleToggleStatus = async (record: ApprovalFlowListItem): Promise<void> => {
   if (typeof record.id !== 'number') return
   const isActive = record.is_active === 1
   const action = isActive ? '禁用' : '启用'

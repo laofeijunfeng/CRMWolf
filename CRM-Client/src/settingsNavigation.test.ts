@@ -13,4 +13,14 @@ describe('settings navigation registry', () => {
     expect(account?.scope).toBe('personal')
     expect(account?.requiredAnyPermissions).toEqual([])
   })
+
+  it('allows automation permissions to enter the new approval workflow page', () => {
+    const item = getSettingsNavigationItem('approval-flows-new')
+
+    expect(item?.requiredAnyPermissions).toEqual(expect.arrayContaining([
+      'automation:read',
+      'automation:create',
+      'automation:edit',
+    ]))
+  })
 })

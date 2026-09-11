@@ -97,6 +97,18 @@ export const SETTINGS_NAVIGATION: readonly SettingsNavigationItem[] = [
     requiresTeam: true,
   },
   {
+    id: 'approval-flows-new',
+    label: '审批流程管理（新）',
+    description: '管理 CRM 审批流程与自动化工作流。',
+    path: '/settings/approval-flows-new',
+    icon: Workflow,
+    group: 'business',
+    scope: 'team',
+    requiredAnyPermissions: ['automation:read', 'automation:create', 'automation:edit', 'approval:flow:view', 'approval:flow:create', 'approval:flow:edit'],
+    legacyComponentKey: 'approval-flows-new',
+    requiresTeam: true,
+  },
+  {
     id: 'acquisition-sources',
     label: '获客来源',
     description: '维护线索与客户共用的获客来源。',

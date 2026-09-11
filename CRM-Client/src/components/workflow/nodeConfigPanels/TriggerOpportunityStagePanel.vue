@@ -25,7 +25,7 @@ onMounted(() => { void loadStages() })
 <template>
   <div data-testid="config-panel-trigger.opportunity_stage_changed" class="grid gap-4">
     <SelectField id="config-select-from-stage" data-testid="config-select-from-stage" label="原阶段" :model-value="String(props.config['from_stage'] ?? '__any__')" :options="[{ value: '__any__', label: '任意阶段' }, ...stages.map(stage => ({ value: stage.stage_code, label: stage.stage_name }))]" :disabled="loading" @update:model-value="value => update('from_stage', value)" />
-    <SelectField id="config-select-to-stage" data-testid="config-select-to-stage" label="目标阶段" :model-value="String(props.config['to_stage'] ?? '')" :options="stages.length > 0 ? stages.map(stage => ({ value: stage.stage_code, label: stage.stage_name })) : [{ value: 'QUOTE', label: 'QUOTE' }]" :disabled="loading" required placeholder="请选择目标阶段" @update:model-value="value => update('to_stage', value)" />
+    <SelectField id="config-select-to-stage" data-testid="config-select-to-stage" label="目标阶段" :model-value="String(props.config['to_stage'] ?? '')" :options="stages.map(stage => ({ value: stage.stage_code, label: stage.stage_name }))" :disabled="loading" required placeholder="请选择目标阶段" @update:model-value="value => update('to_stage', value)" />
     <p v-if="error" class="text-sm text-wolf-danger" role="alert">{{ error }}</p>
   </div>
 </template>

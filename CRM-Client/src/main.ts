@@ -4,6 +4,7 @@ import { createPinia } from 'pinia'
 // UI/UX Pro Max §8: Toast notification styles (vue-sonner)
 import 'vue-sonner/style.css'
 import '@vue-flow/core/dist/style.css'
+import '@vue-flow/core/dist/theme-default.css'
 
 import './styles/base.css'
 import './styles/global.scss'

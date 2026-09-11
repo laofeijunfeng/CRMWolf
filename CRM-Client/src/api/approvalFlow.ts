@@ -26,14 +26,22 @@ export interface ApprovalFlow {
   nodes?: ApprovalNode[]
 }
 
-export interface ApprovalFlowDetail extends ApprovalFlow {
+export interface ApprovalFlowListItem extends ApprovalFlow {
+  id: number
+  is_active: number
+  created_time: string
+  last_modified_time: string
+}
+
+export interface ApprovalFlowDetail extends ApprovalFlowListItem {
   nodes: ApprovalNode[]
 }
 
+
 const approvalFlowApi = {
-  getApprovalFlows: (params?: { skip?: number; limit?: number; is_active?: boolean | null }): Promise<ApprovalFlowDetail[]> => {
+  getApprovalFlows: (params?: { skip?: number; limit?: number; is_active?: boolean | null }): Promise<ApprovalFlowListItem[]> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
-    return request.get<ApprovalFlowDetail[]>('/v1/approvals/flows', { params })
+    return request.get<ApprovalFlowListItem[]>('/v1/approvals/flows', { params })
   },
 
   getApprovalFlowDetail: (flowId: number): Promise<ApprovalFlowDetail> => {
@@ -41,14 +49,14 @@ const approvalFlowApi = {
     return request.get<ApprovalFlowDetail>(`/v1/approvals/flows/${flowId}`)
   },
 
-  createApprovalFlow: (data: ApprovalFlow): Promise<ApprovalFlowDetail> => {
+  createApprovalFlow: (data: ApprovalFlow): Promise<ApprovalFlowListItem> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
-    return request.post<ApprovalFlowDetail>('/v1/approvals/flows', data)
+    return request.post<ApprovalFlowListItem>('/v1/approvals/flows', data)
   },
 
-  updateApprovalFlow: (flowId: number, data: Partial<ApprovalFlow>): Promise<ApprovalFlowDetail> => {
+  updateApprovalFlow: (flowId: number, data: Partial<ApprovalFlow>): Promise<ApprovalFlowListItem> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
-    return request.put<ApprovalFlowDetail>(`/v1/approvals/flows/${flowId}`, data)
+    return request.put<ApprovalFlowListItem>(`/v1/approvals/flows/${flowId}`, data)
   },
 
   deleteApprovalFlow: (flowId: number): Promise<{ success: boolean }> => {

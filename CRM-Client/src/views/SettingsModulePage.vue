@@ -86,6 +86,7 @@ const legacyComponents: Record<string, Component> = {
   members: defineAsyncComponent(() => import('@/components/system-config/TeamMemberSheet.vue')),
   roles: defineAsyncComponent(() => import('@/components/system-config/RoleSheet.vue')),
   'approval-flows': defineAsyncComponent(() => import('@/components/system-config/ApprovalFlowSheet.vue')),
+  'approval-flows-new': defineAsyncComponent(() => import('@/views/ApprovalFlowsNew.vue')),
   'acquisition-sources': defineAsyncComponent(() => import('@/components/system-config/AcquisitionSourcePanel.vue')),
   procurement: defineAsyncComponent(() => import('@/components/system-config/ProcurementMethodsPanel.vue')),
   ai: defineAsyncComponent(() => import('@/components/system-config/AIConfigSheet.vue')),
@@ -98,6 +99,7 @@ const migrationDescriptions: Record<string, string> = {
   members: '成员列表、邀请和角色分配等短任务暂时复用现有配置能力。',
   roles: '角色列表、权限配置和成员查看暂时复用现有配置能力。',
   'approval-flows': '审批流程列表和节点编辑暂时复用现有配置能力，审批实例仍由审批中心负责。',
+  'approval-flows-new': '独立审批与工作流页面；传统审批继续复用现有 API，自动化工作流使用 CRM 内 Vue Flow 画布保存 DSL。',
   'acquisition-sources': '获客来源搜索、状态筛选、启停和引用统计保持现有行为。',
   procurement: '采购方式及阶段模板继续保留现有版本锁定、引用检查和冲突反馈。',
   ai: '敏感密钥保持脱敏，连接测试和保存反馈继续复用现有能力。',
@@ -136,7 +138,7 @@ const legacyProps = computed<Record<string, unknown>>(() => {
     ? { active: true, embedded: true }
     : { open: legacyOpen.value }
 
-  if (moduleId.value === 'approval-flows' || moduleId.value === 'acquisition-sources' || moduleId.value === 'procurement') {
+  if (moduleId.value === 'approval-flows' || moduleId.value === 'approval-flows-new' || moduleId.value === 'acquisition-sources' || moduleId.value === 'procurement') {
     if (queryAction.value !== null) props['action'] = queryAction.value
     if (queryRecordId.value !== null) props['recordId'] = queryRecordId.value
   }
