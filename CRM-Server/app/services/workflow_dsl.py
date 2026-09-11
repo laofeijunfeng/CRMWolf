@@ -13,7 +13,7 @@ VALID_OPERATORS = frozenset({"eq", "neq", "gt", "lt", "in"})
 VALID_NOTIFY_TARGETS = frozenset({"owner", "role", "users"})
 
 
-def validate_workflow_dsl(dsl: dict) -> list[str]:
+def validate_workflow_dsl(dsl: object) -> list[str]:
     errors: list[str] = []
     if not isinstance(dsl, dict):
         return ["DSL 必须是对象"]
@@ -39,9 +39,10 @@ def validate_workflow_dsl(dsl: dict) -> list[str]:
             seen_ids.add(nid)
 
         ntype = node.get("type")
-        if ntype not in KNOWN_NODE_TYPES:
+        is_known_type = isinstance(ntype, str) and ntype in KNOWN_NODE_TYPES
+        if not is_known_type:
             errors.append(f"节点 {nid} 类型未知: {ntype}")
-        if ntype in TRIGGER_TYPES:
+        if isinstance(ntype, str) and ntype in TRIGGER_TYPES:
             trigger_count += 1
 
         pos = node.get("position")
@@ -53,14 +54,19 @@ def validate_workflow_dsl(dsl: dict) -> list[str]:
         if not isinstance(config, dict):
             config = {}
             errors.append(f"节点 {nid} config 必须是对象")
-        for field in NODE_CONFIG_REQUIREMENTS.get(ntype, []):
+        for field in NODE_CONFIG_REQUIREMENTS.get(ntype, []) if is_known_type else []:
             v = config.get(field)
             if v is None or (isinstance(v, str) and not v.strip()):
                 errors.append(f"节点 {nid} 缺少必填配置: {field}")
-        if ntype == "control.condition" and config.get("operator") not in VALID_OPERATORS:
-            errors.append(f"节点 {nid} operator 非法，允许: eq/neq/gt/lt/in")
-        if ntype == "action.notify" and config.get("notify_target") not in VALID_NOTIFY_TARGETS:
-            errors.append(f"节点 {nid} notify_target 非法，允许: owner/role/users")
+        if ntype == "control.condition" and (
+            not isinstance(config.get("operator"), str) or config.get("operator") not in VALID_OPERATORS
+        ):
+            errors.append("节点 {0} operator 非法，允许: eq/neq/gt/lt/in".format(nid))
+        if ntype == "action.notify" and (
+            not isinstance(config.get("notify_target"), str)
+            or config.get("notify_target") not in VALID_NOTIFY_TARGETS
+        ):
+            errors.append("节点 {0} notify_target 非法，允许: owner/role/users".format(nid))
 
     if trigger_count > 1:
         errors.append("trigger 类型节点全图至多 1 个")
@@ -74,14 +80,14 @@ def validate_workflow_dsl(dsl: dict) -> list[str]:
             errors.append(f"edges[{i}] 必须是对象")
             continue
         src, tgt = edge.get("source"), edge.get("target")
-        src_type = next((n.get("type") for n in nodes if isinstance(n, dict) and n.get("id") == src), None)
         tgt_type = next((n.get("type") for n in nodes if isinstance(n, dict) and n.get("id") == tgt), None)
-        if src not in seen_ids or tgt not in seen_ids:
+        valid_endpoints = isinstance(src, str) and isinstance(tgt, str)
+        if not valid_endpoints or src not in seen_ids or tgt not in seen_ids:
             errors.append(f"edges[{i}] 引用了不存在的节点: {src} -> {tgt}")
             continue
         if src == tgt:
             errors.append(f"edges[{i}] 不允许自环")
-        if tgt_type in TRIGGER_TYPES:
+        if isinstance(tgt_type, str) and tgt_type in TRIGGER_TYPES:
             errors.append(f"edges[{i}] 目标不能是 trigger 节点: {tgt}")
 
     return errors

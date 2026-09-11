@@ -58,6 +58,7 @@ from app.api.deployment import router as deployment_router  # 新增
 from app.api.frontend_logs import router as frontend_logs_router
 from app.api.im_bots import router as im_bots_router
 from app.api.license_application import router as license_application_router  # 新增
+from app.api.workflows import router as workflows_router
 from app.core.database import SessionLocal
 from app.core.exceptions import (
     AppException,
@@ -120,6 +121,7 @@ api_router.include_router(industry.router)
 api_router.include_router(customer_procurement.router)
 api_router.include_router(customer_activities.router)
 api_router.include_router(opportunities.router)
+api_router.include_router(workflows_router)
 api_router.include_router(opportunities.analytics_router)
 api_router.include_router(filter_options.router)
 api_router.include_router(contracts.router)

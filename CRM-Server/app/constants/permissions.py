@@ -108,6 +108,11 @@ ALL_PERMISSIONS = [
     # 审批流程权限
     {"name": "创建审批流程", "code": "approval:flow:create", "resource": "approval_flow", "action": "create"},
     {"name": "编辑审批流程", "code": "approval:flow:edit", "resource": "approval_flow", "action": "edit"},
+    # 自动化工作流权限
+    {"name": "查看自动化", "code": "automation:read", "resource": "automation", "action": "view"},
+    {"name": "创建自动化", "code": "automation:create", "resource": "automation", "action": "create"},
+    {"name": "编辑自动化", "code": "automation:edit", "resource": "automation", "action": "edit"},
+    {"name": "发布自动化", "code": "automation:publish", "resource": "automation", "action": "publish"},
 
     # 采购配置权限
     {"name": "查看采购方式", "code": "procurement_method:view", "resource": "procurement_method", "action": "view"},
