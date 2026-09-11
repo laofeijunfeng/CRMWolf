@@ -16,7 +16,9 @@ import {
   ContactResponseSchema,
   CustomerStatisticsSchema,
   CustomerAssignmentPreviewResponseSchema,
+  CustomerIndustryHierarchySchema,
 } from '@/schemas/customer'
+import type { CustomerIndustryHierarchy } from '@/schemas/customer'
 
 /**
  * 验证 API 响应数据
@@ -146,6 +148,18 @@ export interface CustomerUpdate {
   company_scale?: string | null
   source_public_id?: string | null
   default_procurement_method_id?: number | null
+  industry?: string | null
+}
+
+export interface CustomerLifecycleStatusUpdate {
+  status: 0 | 1
+  expected_version: number
+}
+
+export interface CustomerLicenseSnapshotUpdate {
+  expected_version: number
+  license_type: 'TRIAL' | 'OFFICIAL' | null
+  license_expiry_date: string | null
 }
 
 export type CustomerStatus = 0 | 1 | 2 | 3
@@ -533,6 +547,11 @@ const customerApi = {
 
   updateCustomerStatus: (customerId: string, data: CustomerStatusUpdate): Promise<CustomerResponse> =>
     api.patch('/v1/customers/' + customerId + '/status', data, undefined, CustomerResponseSchema),
+  updateCustomerLifecycleStatus: (customerId: string, data: CustomerLifecycleStatusUpdate): Promise<CustomerResponse> =>
+    api.patch('/v1/customers/' + customerId + '/lifecycle-status', data, undefined, CustomerResponseSchema),
+
+  updateCustomerLicenseSnapshot: (customerId: string, data: CustomerLicenseSnapshotUpdate): Promise<CustomerResponse> =>
+    api.patch('/v1/customers/' + customerId + '/license-snapshot', data, undefined, CustomerResponseSchema),
 
   markAsLost: (customerId: string, data: CustomerLoseRequest): Promise<CustomerResponse> =>
     api.patch('/v1/customers/' + customerId + '/lose', data, undefined, CustomerResponseSchema),
@@ -598,6 +617,8 @@ const customerApi = {
 
   getIndustryOptions: (): Promise<CustomerIndustryOption[]> =>
     api.get<CustomerIndustryOption[]>('/v1/customers/industries'),
+  getIndustryHierarchy: (): Promise<CustomerIndustryHierarchy> =>
+    api.get('/v1/industries/hierarchy', undefined, CustomerIndustryHierarchySchema),
 
   createContact: (customerId: string, data: ContactCreate): Promise<ContactResponse> =>
     api.post('/v1/customers/' + customerId + '/contacts', data, undefined, ContactResponseSchema),

@@ -135,7 +135,9 @@ export const CustomerCreateSchema = z.object({
 export type CustomerCreate = z.infer<typeof CustomerCreateSchema>
 
 // ===== 客户更新请求 =====
-export const CustomerUpdateSchema = CustomerCreateSchema.partial()
+export const CustomerUpdateSchema = CustomerCreateSchema.partial().extend({
+  industry: z.string().max(100).nullable().optional()
+})
 
 export type CustomerUpdate = z.infer<typeof CustomerUpdateSchema>
 
@@ -285,6 +287,20 @@ export const CustomerIndustryOptionSchema = z.object({
 })
 
 export type CustomerIndustryOption = z.infer<typeof CustomerIndustryOptionSchema>
+
+export const CustomerIndustryHierarchyChildSchema = z.object({
+  code: z.string().min(1),
+  name: z.string().min(1)
+})
+
+export const CustomerIndustryHierarchyGroupSchema = z.object({
+  name: z.string().min(1),
+  children: z.array(CustomerIndustryHierarchyChildSchema)
+})
+
+export const CustomerIndustryHierarchySchema = z.record(CustomerIndustryHierarchyGroupSchema)
+
+export type CustomerIndustryHierarchy = z.infer<typeof CustomerIndustryHierarchySchema>
 
 // ===== 合同列表响应 =====
 export const ContractListResponseSchema = z.object({

@@ -7,15 +7,12 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any
 
-from app.core.database import get_db
-from app.core.deps import get_current_active_user
-from app.crud.industry import industry_crud
-
+from app.schemas.industry import IndustryHierarchyResponse
 
 router = APIRouter(prefix="/v1/industries", tags=["行业管理"])
 
 
-@router.get("/hierarchy", response_model=Dict[str, Any], summary="获取行业层级结构", description="""
+@router.get("/hierarchy", response_model=IndustryHierarchyResponse, summary="获取行业层级结构", description="""
 获取完整的行业层级结构（一级 + 二级行业）。
 
 **返回格式：**

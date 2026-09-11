@@ -40,6 +40,7 @@ export const customerFormSchema = z.object({
     required_error: '请选择采购方式',
     invalid_type_error: '请选择采购方式'
   }).int().positive('请选择采购方式'),
+  industry: z.string().max(100).optional().or(z.literal('')),
 })
 
 export type CustomerForm = z.infer<typeof customerFormSchema>

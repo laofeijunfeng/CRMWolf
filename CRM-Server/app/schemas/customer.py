@@ -5,7 +5,7 @@ from datetime import date, datetime
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.acquisition_source import AcquisitionSourceInfo
 
@@ -254,6 +254,25 @@ class CustomerUpdate(BaseModel):
 
 class CustomerStatusUpdate(BaseModel):
     status: int = Field(..., ge=0, le=3, description="客户状态：0跟进中, 1已成交, 2已输单, 3已沉寂")
+
+
+class CustomerLifecycleStatusUpdate(BaseModel):
+    status: Literal[0, 1] = Field(..., description="客户快捷状态：0跟进中，1已成交")
+    expected_version: int = Field(..., ge=1, description="客户端读取到的客户版本号")
+
+
+class CustomerLicenseSnapshotUpdate(BaseModel):
+    expected_version: int = Field(..., ge=1)
+    license_type: Optional[Literal["TRIAL", "OFFICIAL"]] = None
+    license_expiry_date: Optional[date] = None
+
+    @model_validator(mode="after")
+    def normalize_license_pair(self):
+        if self.license_expiry_date is None:
+            self.license_type = None
+        elif self.license_type is None:
+            raise ValueError("授权到期日期不为空时必须选择授权类型")
+        return self
 
 
 class ConvertLeadToCustomer(BaseModel):
