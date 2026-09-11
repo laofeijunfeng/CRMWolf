@@ -13,6 +13,7 @@ export { default as DateField } from './DateField.vue'
 export { default as SegmentedChoiceControl } from './SegmentedChoiceControl.vue'
 export { default as SelectionSummary } from './SelectionSummary.vue'
 export { default as SearchableSelectField } from './SearchableSelectField.vue'
+export { default as IndustryHierarchySelectField } from './IndustryHierarchySelectField.vue'
 
 // Navigation components (§9 HIGH Priority)
 export { default as BottomNav } from './BottomNav.vue'
