@@ -121,9 +121,6 @@ function handleOpenChange(value: boolean): void {
   if (!value) searchTerm.value = ''
 }
 
-function getSearchDisplayValue(): string {
-  return searchTerm.value
-}
 </script>
 
 <template>
@@ -157,7 +154,7 @@ function getSearchDisplayValue(): string {
             :aria-describedby="describedBy"
             :disabled="selectDisabled"
             :class="cn(
-              'h-input-desktop min-h-input-desktop w-full justify-between rounded-wolf-sm border-wolf-border-default bg-wolf-bg-card px-3 text-left text-wolf-body font-wolf-regular text-wolf-text-primary shadow-none hover:bg-wolf-bg-card max-[767px]:h-input-mobile max-[767px]:min-h-input-mobile',
+              'h-input-mobile min-h-input-mobile w-full justify-between rounded-wolf-sm border-wolf-border-default bg-wolf-bg-card px-3 text-left text-wolf-body font-wolf-regular text-wolf-text-primary shadow-none hover:bg-wolf-bg-card',
               selectedLabel === '' && 'text-wolf-text-placeholder',
               error.trim() !== '' && 'border-wolf-danger focus-visible:ring-wolf-danger/15',
               triggerClass,
@@ -176,8 +173,7 @@ function getSearchDisplayValue(): string {
             :model-value="searchTerm"
             placeholder="搜索行业"
             :disabled="selectDisabled"
-            :display-value="getSearchDisplayValue"
-            class="h-input-desktop min-h-input-desktop border-0 bg-transparent shadow-none focus-visible:ring-0 max-[767px]:h-input-mobile max-[767px]:min-h-input-mobile"
+            class="h-input-mobile min-h-input-mobile border-0 bg-transparent shadow-none focus-visible:ring-0"
             @update:model-value="searchTerm = String($event ?? '')"
           />
         </div>
@@ -187,10 +183,7 @@ function getSearchDisplayValue(): string {
         <div v-else-if="error.trim() !== ''" class="px-2 py-2 text-sm text-wolf-danger" role="alert">
           {{ error }}
         </div>
-        <div v-else-if="options.length === 0" class="px-2 py-2 text-sm text-muted-foreground">
-          暂无行业
-        </div>
-        <template v-else>
+        <template v-if="!loading && error.trim() === ''">
           <ComboboxGroup
             v-for="primaryCode in Object.keys(hierarchy)"
             :key="primaryCode"
@@ -209,18 +202,6 @@ function getSearchDisplayValue(): string {
               </ComboboxItemIndicator>
             </ComboboxItem>
           </ComboboxGroup>
-          <ComboboxGroup
-            v-if="filteredRetainedCurrentOption"
-            heading="当前行业"
-          >
-            <ComboboxItem
-              :value="filteredRetainedCurrentOption.code"
-              :text-value="filteredRetainedCurrentOption.name"
-              disabled
-            >
-              <span class="min-w-0 flex-1 truncate">{{ filteredRetainedCurrentOption.name }}</span>
-            </ComboboxItem>
-          </ComboboxGroup>
           <div
             v-if="filteredOptions.length === 0 && filteredRetainedCurrentOption === undefined"
             class="px-2 py-2 text-sm text-muted-foreground"
@@ -228,6 +209,18 @@ function getSearchDisplayValue(): string {
             暂无行业
           </div>
         </template>
+        <ComboboxGroup
+          v-if="filteredRetainedCurrentOption"
+          heading="当前行业"
+        >
+          <ComboboxItem
+            :value="filteredRetainedCurrentOption.code"
+            :text-value="filteredRetainedCurrentOption.name"
+            disabled
+          >
+            <span class="min-w-0 flex-1 truncate">{{ filteredRetainedCurrentOption.name }}</span>
+          </ComboboxItem>
+        </ComboboxGroup>
       </ComboboxList>
     </Combobox>
     <p v-if="error" :id="errorId" class="m-0 text-wolf-caption font-wolf-medium text-wolf-danger" role="alert">

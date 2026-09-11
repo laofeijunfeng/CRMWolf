@@ -21,8 +21,15 @@ describe('IndustryHierarchySelectField', () => {
     const wrapper = mount(IndustryHierarchySelectField, {
       props: { modelValue: 'internet.enterprise', hierarchy },
     })
-    expect(wrapper.text()).toContain('互联网 / 企业服务')
-    await wrapper.get('button[role="combobox"]').trigger('click')
+    const trigger = wrapper.get('button[role="combobox"]')
+    expect(trigger.classes()).toContain('h-input-mobile')
+    expect(trigger.classes()).toContain('min-h-input-mobile')
+    await trigger.trigger('click')
+    const searchInput = document.body.querySelector('input[placeholder="搜索行业"]')
+    expect(searchInput).toBeInstanceOf(HTMLInputElement)
+    if (!(searchInput instanceof HTMLInputElement)) throw new Error('search input was not rendered')
+    expect(searchInput.classList).toContain('h-input-mobile')
+    expect(searchInput.classList).toContain('min-h-input-mobile')
     expect(document.body.textContent).toContain('互联网')
     expect(document.body.textContent).toContain('企业服务')
     wrapper.unmount()
@@ -41,6 +48,34 @@ describe('IndustryHierarchySelectField', () => {
     option.click()
     const emittedEvents = wrapper.emitted('update:modelValue') as unknown[][] | undefined
     expect(emittedEvents?.[emittedEvents.length - 1]).toEqual(['internet.software'])
+    wrapper.unmount()
+  })
+  it('retains an inactive current code when the hierarchy is empty', async () => {
+    const wrapper = mount(IndustryHierarchySelectField, {
+      props: { modelValue: 'legacy.industry', hierarchy: {} },
+      attachTo: document.body,
+    })
+    expect(wrapper.get('button[role="combobox"]').text()).toContain('legacy.industry')
+    await wrapper.get('button[role="combobox"]').trigger('click')
+    const option = Array.from(document.body.querySelectorAll('[role="option"]'))
+      .find((element) => element.textContent?.includes('legacy.industry') === true)
+    expect(option).toBeInstanceOf(HTMLElement)
+    if (!(option instanceof HTMLElement)) throw new Error('legacy.industry option was not rendered')
+    expect(option.hasAttribute('data-disabled')).toBe(true)
+    wrapper.unmount()
+  })
+  it('retains an inactive current code while hierarchy loading fails', async () => {
+    const wrapper = mount(IndustryHierarchySelectField, {
+      props: { modelValue: 'legacy.industry', hierarchy: {}, error: '行业加载失败' },
+      attachTo: document.body,
+    })
+    await wrapper.get('button[role="combobox"]').trigger('click')
+    const option = Array.from(document.body.querySelectorAll('[role="option"]'))
+      .find((element) => element.textContent?.includes('legacy.industry') === true)
+    expect(option).toBeInstanceOf(HTMLElement)
+    if (!(option instanceof HTMLElement)) throw new Error('legacy.industry option was not rendered during error state')
+    expect(option.hasAttribute('data-disabled')).toBe(true)
+    expect(document.body.textContent).toContain('行业加载失败')
     wrapper.unmount()
   })
 })
