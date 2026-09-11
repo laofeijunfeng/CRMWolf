@@ -178,7 +178,6 @@ describe('CRMAgentChat background operation placement', () => {
     const anchorPromise = new Promise<AgentUIEnvelope[]>(resolve => {
       resolveAnchors = resolve
     })
-    
     api.listSessionOperationHistory.mockResolvedValue(paginatedOperations([{
       ...operation,
       source_user_message_id: 8,
@@ -193,6 +192,50 @@ describe('CRMAgentChat background operation placement', () => {
     await flushPromises()
 
     expect(scrollerItemsCount(wrapper)).toBe(beforeAnchorMerge)
+    wrapper.unmount()
+  })
+
+  it('does not count an anchor already added by a stream as inserted history', async () => {
+    const sourceUser = envelope(8, 'user', '很早以前的跟进')
+    const sourceAssistant = envelope(9, 'assistant', '很早以前已记录')
+    let resolveAnchors: ((anchors: AgentUIEnvelope[]) => void) | undefined
+    const anchorPromise = new Promise<AgentUIEnvelope[]>(resolve => {
+      resolveAnchors = resolve
+    })
+    let resolveStream: (() => void) | undefined
+    const streamPromise = new Promise<void>(resolve => {
+      resolveStream = resolve
+    })
+    api.listSessionOperationHistory.mockResolvedValue(paginatedOperations([{
+      ...operation,
+      source_user_message_id: 8,
+      source_assistant_message_id: 9,
+    }]))
+    api.listMessageAnchors.mockReturnValue(anchorPromise)
+    api.chatStream.mockImplementation(async (_request, onEvent) => {
+      onEvent({
+        event: 'agent_ui',
+        phase: 'final',
+        message_id: 9,
+        turn_id: sourceAssistant.turn_id,
+        sequence: 1,
+        message: sourceAssistant,
+      })
+      await streamPromise
+    })
+
+    const wrapper = mountChat()
+    await flushPromises()
+    await wrapper.get('textarea').setValue('本轮跟进')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    const beforeAnchorResponse = scrollerItemsCount(wrapper)
+
+    resolveAnchors?.([sourceUser, sourceAssistant])
+    await flushPromises()
+
+    expect(scrollerItemsCount(wrapper)).toBe(beforeAnchorResponse)
+    resolveStream?.()
     wrapper.unmount()
   })
 

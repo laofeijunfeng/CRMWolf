@@ -208,7 +208,13 @@ import {
   optimisticallyCompleteCompactTask,
   restoreCompactTaskAction,
 } from '@/components/agent/agentInteractionState'
-import { isVisibleAgentMessage, loadLatestAgentMessages, mergeAgentHistoryAnchors, resolveInitialAgentSession } from '@/components/agent/agentHistory'
+import {
+  getMissingAgentHistoryAnchors,
+  isVisibleAgentMessage,
+  loadLatestAgentMessages,
+  mergeAgentHistoryAnchors,
+  resolveInitialAgentSession,
+} from '@/components/agent/agentHistory'
 import AgentMessageBody from '@/components/agent/AgentMessageBody.vue'
 import AgentUIMessage from '@/components/agent-ui/AgentUIMessage.vue'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -312,9 +318,13 @@ const loadSessionAnchors = async (
 
   const anchors = await agentApi.listMessageAnchors(targetSessionId, missingMessageIds)
   if (targetGeneration !== messageLoadGeneration || sessionId.value !== targetSessionId) return
-  const visibleAnchorIds = new Set(anchors.filter(isVisibleAgentMessage).map(anchor => anchor.message_id))
-  insertedHistoryAnchorIds.value = new Set([...insertedHistoryAnchorIds.value, ...visibleAnchorIds])
-  messages.value = mergeAgentHistoryAnchors(messages.value, anchors)
+  const insertedAnchors = getMissingAgentHistoryAnchors(messages.value, anchors)
+  if (insertedAnchors.length === 0) return
+  insertedHistoryAnchorIds.value = new Set([
+    ...insertedHistoryAnchorIds.value,
+    ...insertedAnchors.map(anchor => anchor.message_id),
+  ])
+  messages.value = mergeAgentHistoryAnchors(messages.value, insertedAnchors)
 }
 
 const refreshSessionAnchors = (

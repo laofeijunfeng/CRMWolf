@@ -90,3 +90,24 @@ Tests  15 passed (15)
 Existing Sass legacy-JS-API deprecation notices were emitted. No formatter, linter, or project-wide suite was run.
 
 Review fixes: operation pages are flattened oldest-page-first while preserving each page's internal order; visible inserted anchor IDs are session-scoped and excluded from `MessageScroller`'s count until authoritative replacement/session switch; historical placement now requires operation content before the current-window message with no trailing unanchored operation region; the composable API uses `PaginatedResponse<AgentAsyncOperation>`.
+
+## Anchor bookkeeping hardening
+
+The concurrent-response edge case was reproduced with a failing helper test before the helper existed:
+
+```text
+cd /private/tmp/crmwolf-agent-history-anchors/CRM-Client
+npx vitest run tests/components/agentHistory.spec.ts -t "returns only anchors absent"
+FAIL: getMissingAgentHistoryAnchors is not defined
+```
+
+The fix extracts `getMissingAgentHistoryAnchors`, computes missing visible IDs against the current message array at response time, and records only anchors actually inserted before merging. This prevents duplicate/replayed anchor responses from reducing `MessageScroller`'s item count.
+
+Focused GREEN command:
+
+```text
+cd /private/tmp/crmwolf-agent-history-anchors/CRM-Client
+npx vitest run tests/components/agentHistory.spec.ts tests/components/CRMAgentChatAsyncOperations.spec.ts tests/composables/useAgentAsyncOperations.spec.ts
+```
+
+Result: 3 test files passed, 27 tests passed. Existing Dart Sass legacy JS API deprecation notices only.

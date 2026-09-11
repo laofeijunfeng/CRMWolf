@@ -50,7 +50,7 @@ export const loadLatestAgentMessages = async (
   return visiblePages.reverse().flat().slice(-pageSize)
 }
 
-export const mergeAgentHistoryAnchors = (
+export const getMissingAgentHistoryAnchors = (
   messages: AgentUIEnvelope[],
   anchors: AgentUIEnvelope[],
 ): AgentUIEnvelope[] => {
@@ -58,9 +58,15 @@ export const mergeAgentHistoryAnchors = (
   const missingAnchors = anchors
     .filter(anchor => isVisibleAgentMessage(anchor) && !messageIds.has(anchor.message_id))
     .sort((left, right) => left.message_id - right.message_id)
-  const uniqueAnchors = missingAnchors.filter((anchor, index) => (
+  return missingAnchors.filter((anchor, index) => (
     index === 0 || anchor.message_id !== missingAnchors[index - 1]?.message_id
   ))
-
-  return [...uniqueAnchors, ...messages]
 }
+
+export const mergeAgentHistoryAnchors = (
+  messages: AgentUIEnvelope[],
+  anchors: AgentUIEnvelope[],
+): AgentUIEnvelope[] => [
+  ...getMissingAgentHistoryAnchors(messages, anchors),
+  ...messages,
+]

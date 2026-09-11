@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import type { AgentSessionResponse, AgentUIEnvelope } from '@/api/agent'
-import { isVisibleAgentMessage, loadLatestAgentMessages, mergeAgentHistoryAnchors, resolveInitialAgentSession } from '@/components/agent/agentHistory'
+import {
+  getMissingAgentHistoryAnchors,
+  isVisibleAgentMessage,
+  loadLatestAgentMessages,
+  mergeAgentHistoryAnchors,
+  resolveInitialAgentSession,
+} from '@/components/agent/agentHistory'
 import { AgentUIEnvelopeSchema } from '@/schemas/agent-contracts'
 import type { PaginatedResponse } from '@/types/pagination'
 
@@ -146,5 +152,14 @@ describe('mergeAgentHistoryAnchors', () => {
     expect(mergeAgentHistoryAnchors(current, anchors).map(item => item.message_id)).toEqual([5, 10, 20, 30])
     expect(current.map(item => item.message_id)).toEqual([20, 30])
     expect(anchors.map(item => item.message_id)).toEqual([30, 10, 5, 10])
+  })
+  it('returns only anchors absent from the current message window', () => {
+    const current = [message(8), message(20)]
+    const duplicate = message(8)
+    const missing = message(9)
+    const duplicateMissing = message(9)
+
+    expect(getMissingAgentHistoryAnchors(current, [duplicate, missing, duplicateMissing]).map(item => item.message_id))
+      .toEqual([9])
   })
 })
