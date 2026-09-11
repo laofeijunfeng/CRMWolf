@@ -51,7 +51,7 @@ export function validateWorkflow(graph: WorkflowGraph, name: string): WorkflowVa
     issues.push({ message: '工作流名称不能超过 100 个字符' })
   }
 
-  if (graph.schema_version !== undefined && graph.schema_version !== 1) {
+  if (graph.schema_version !== 1) {
     issues.push({ message: 'schema_version 必须为 1' })
   }
   if (!Array.isArray(graph.nodes) || graph.nodes.length === 0) {
@@ -77,6 +77,16 @@ export function validateWorkflow(graph: WorkflowGraph, name: string): WorkflowVa
       continue
     }
     nodesById.set(node.id, node)
+
+    if (
+      node.position === undefined
+      || typeof node.position !== 'object'
+      || node.position === null
+      || !Number.isFinite(node.position.x)
+      || !Number.isFinite(node.position.y)
+    ) {
+      issues.push({ nodeId: node.id, message: '节点缺少有效 position 坐标' })
+    }
 
     if (!isWorkflowNodeType(node.type)) {
       issues.push({ nodeId: node.id, message: `节点类型未知：${node.type}` })

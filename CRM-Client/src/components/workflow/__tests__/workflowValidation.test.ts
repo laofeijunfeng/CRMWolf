@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { validateWorkflow, type WorkflowGraph } from '../workflowValidation'
+import { validateWorkflow, type WorkflowGraph, type WorkflowGraphNode } from '../workflowValidation'
 
 const validGraph: WorkflowGraph = {
   schema_version: 1,
@@ -47,6 +47,24 @@ describe('validateWorkflow', () => {
 
   it('rejects a workflow name longer than 100 characters', () => {
     expect(issuesFor(validGraph, 'a'.repeat(101)).some(issue => issue.message.includes('100'))).toBe(true)
+  })
+  it('rejects a missing schema_version', () => {
+    const { schema_version: _schemaVersion, ...graphWithoutSchemaVersion } = validGraph
+    const issues = issuesFor(graphWithoutSchemaVersion as WorkflowGraph)
+
+    expect(issues.some(issue => issue.message === 'schema_version 必须为 1')).toBe(true)
+  })
+
+  it('rejects missing or non-numeric node positions with the node id', () => {
+    const missingPositionIssues = issuesFor(withGraph({
+      nodes: validGraph.nodes.map(node => node.id === 'condition' ? { ...node, position: undefined } : node) as unknown as WorkflowGraphNode[],
+    }))
+    expect(missingPositionIssues.some(issue => issue.nodeId === 'condition' && issue.message.includes('坐标'))).toBe(true)
+
+    const nonNumericPositionIssues = issuesFor(withGraph({
+      nodes: validGraph.nodes.map(node => node.id === 'action' ? { ...node, position: { x: Number.NaN, y: 'invalid' } } : node) as unknown as WorkflowGraphNode[],
+    }))
+    expect(nonNumericPositionIssues.some(issue => issue.nodeId === 'action' && issue.message.includes('坐标'))).toBe(true)
   })
 
   it('requires exactly one trigger', () => {
