@@ -11,6 +11,7 @@ const summary = computed(() => definition.value?.summary(props.data.config ?? {}
 <template>
   <button
     type="button"
+    :data-node-id="props.id"
     :data-testid="`workflow-node-${props.type}`"
     class="workflow-node min-w-48 rounded-lg border bg-background p-3 text-left shadow-sm"
     :class="props.data.hasError ? 'border-wolf-danger ring-2 ring-wolf-danger/30' : 'border-border'"

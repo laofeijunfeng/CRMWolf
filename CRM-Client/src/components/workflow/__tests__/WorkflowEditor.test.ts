@@ -46,6 +46,7 @@ const detail = {
 function mountEditor(workflowId: number | null = null) {
   return mount(WorkflowEditor, {
     props: { workflowId },
+    attachTo: document.body,
     global: {
       stubs: {
         VueFlow: { props: { id: String }, template: '<div data-testid="vue-flow" :id="id"><slot /></div>' },
@@ -115,6 +116,29 @@ describe('WorkflowEditor', () => {
 
     expect(wrapper.vm.nodes.some(node => node.type === 'action.notify')).toBe(true)
     expect(wrapper.vm.edges).toHaveLength(0)
+  })
+  it('focuses the inserted node after terminal selection removes its opener', async () => {
+    const wrapper = mountEditor()
+    wrapper.vm.addNode('trigger.opportunity_stage_changed', { x: 0, y: 0 }, { kind: 'root' })
+    const trigger = wrapper.vm.nodes[0]
+    if (trigger === undefined) throw new Error('trigger node missing')
+    wrapper.vm.addNode('action.notify', { x: 100, y: 0 }, { kind: 'after-node', sourceNodeId: trigger.id })
+    await nextTick()
+    const terminalButton = wrapper.find(`[data-testid="workflow-insert-terminal-${wrapper.vm.nodes[1]?.id}"]`)
+    await terminalButton.trigger('click')
+    const pickerItem = document.body.querySelector('[data-testid="workflow-picker-item-action.create_follow_up_task"]')
+    if (!(pickerItem instanceof HTMLElement)) throw new Error('picker item missing')
+    pickerItem.click()
+    await nextTick()
+    await nextTick()
+
+    const insertedNode = wrapper.vm.nodes[2]
+    if (insertedNode === undefined) throw new Error('inserted node missing')
+    const focusTarget = document.querySelector<HTMLElement>(`[data-node-id="${insertedNode.id}"]`)
+    expect(focusTarget?.isConnected).toBe(true)
+    expect(document.activeElement).toBe(focusTarget)
+    expect(document.activeElement).not.toBe(terminalButton.element)
+    expect(document.activeElement).not.toBe(document.body)
   })
 
   it('renders one terminal insertion button for each concrete branch tail', async () => {

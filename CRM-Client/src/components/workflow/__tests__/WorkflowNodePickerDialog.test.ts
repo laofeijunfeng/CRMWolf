@@ -78,7 +78,7 @@ describe('WorkflowNodePickerDialog', () => {
     expect(wrapper.emitted('update:open')).toContainEqual([false])
     wrapper.unmount()
   })
-  it('returns focus to the opener after Escape and selection', async () => {
+  it('restores a connected opener after Escape but skips selection focus when detached', async () => {
     const opener = document.createElement('button')
     document.body.append(opener)
     const wrapper = await mountedPicker(false, opener)
@@ -89,10 +89,11 @@ describe('WorkflowNodePickerDialog', () => {
     await wrapper.setProps({ open: true })
     await nextTick()
     bodyGet('[data-testid="workflow-picker-item-action.notify"]').click()
-    await nextTick()
+    opener.remove()
     await wrapper.setProps({ open: false })
     await nextTick()
-    expect(document.activeElement).toBe(opener)
+    expect(document.activeElement).not.toBe(opener)
+    expect(opener.isConnected).toBe(false)
     wrapper.unmount()
   })
 })
