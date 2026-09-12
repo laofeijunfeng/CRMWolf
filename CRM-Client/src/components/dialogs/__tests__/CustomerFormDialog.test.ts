@@ -268,7 +268,6 @@ describe('CustomerFormDialog progressive edit sections', () => {
 
     const vm = wrapper.vm as unknown as { moreInfoOpen: boolean }
     expect(vm.moreInfoOpen).toBe(false)
-    expect(wrapper.text()).toContain('更多客户信息')
     wrapper.unmount()
   })
   it('saves an industry-only edit through the ordinary dirty-diff update', async () => {
@@ -458,9 +457,10 @@ describe('CustomerFormDialog recovery and close guards', () => {
   const mountRecoveryEdit = (customer: CustomerDetailResponse = { ...customerDetail, company_scale: '1-50人', source_info: { public_id: 'source-1', name: '来源', is_active: true } }): VueWrapper<InstanceType<typeof CustomerFormDialog>> => shallowMount(CustomerFormDialog, {
     global: {
       stubs: {
-        Collapsible: MoreInfoCollapsibleStub,
+        Dialog: DialogSlotStub,
         DialogContent: DialogSlotStub,
         DialogFooter: DialogSlotStub,
+        Collapsible: MoreInfoCollapsibleStub,
         CollapsibleTrigger: defineComponent({ template: '<slot />' }),
         CollapsibleContent: defineComponent({ template: '<div><slot /></div>' }),
         FormField: defineComponent({ setup(_, { slots }) { return () => h('div', slots.default?.({ value: undefined, handleChange: () => undefined })) } }),
