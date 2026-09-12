@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { validateWorkflow, type WorkflowGraph, type WorkflowGraphNode } from '../workflowValidation'
+import { validateWorkflow, type WorkflowGraph, type WorkflowGraphNode, type WorkflowValidationIssue } from '../workflowValidation'
 
 const validGraph: WorkflowGraph = {
   schema_version: 1,
@@ -29,7 +29,7 @@ const validGraph: WorkflowGraph = {
   ],
 }
 
-const issuesFor = (graph: WorkflowGraph, name = '商机工作流') => validateWorkflow(graph, name)
+const issuesFor = (graph: WorkflowGraph, name = '商机工作流'): WorkflowValidationIssue[] => validateWorkflow(graph, name)
 
 const withGraph = (overrides: Partial<WorkflowGraph>): WorkflowGraph => ({
   ...validGraph,
@@ -49,8 +49,9 @@ describe('validateWorkflow', () => {
     expect(issuesFor(validGraph, 'a'.repeat(101)).some(issue => issue.message.includes('100'))).toBe(true)
   })
   it('rejects a missing schema_version', () => {
-    const { schema_version: _schemaVersion, ...graphWithoutSchemaVersion } = validGraph
-    const issues = issuesFor(graphWithoutSchemaVersion as WorkflowGraph)
+    const graphWithoutSchemaVersion = { ...validGraph }
+    delete graphWithoutSchemaVersion.schema_version
+    const issues = issuesFor(graphWithoutSchemaVersion)
 
     expect(issues.some(issue => issue.message === 'schema_version 必须为 1')).toBe(true)
   })
@@ -128,5 +129,30 @@ describe('validateWorkflow', () => {
     })
     const issue = issuesFor(graph).find(item => item.nodeId === 'action')
     expect(issue?.message).toContain('title')
+  })
+
+  it('accepts valid minimal configs for each CRM resource node', () => {
+    const crmNodes: WorkflowGraphNode[] = [
+      { id: 'customer', type: 'crm.create_customer', position: { x: 600, y: 0 }, config: { account_name: 'Acme', city: '上海' } },
+      { id: 'contact', type: 'crm.create_contact', position: { x: 800, y: 0 }, config: { customer_ref: 'customer', name: '王总', gender: '1', position: '采购', mobile: '13800138000' } },
+      { id: 'opportunity', type: 'crm.create_opportunity', position: { x: 1000, y: 0 }, config: { customer_ref: 'customer', total_amount: 100, user_count: 1, license_type: 'SUBSCRIPTION', purchase_type: 'NEW', expected_closing_date: '2026-12-31' } },
+    ]
+    const graph = withGraph({
+      nodes: [...validGraph.nodes, ...crmNodes],
+      edges: [...validGraph.edges, { id: 'edge-3', source: 'action', target: 'customer' }, { id: 'edge-4', source: 'customer', target: 'contact' }, { id: 'edge-5', source: 'contact', target: 'opportunity' }],
+    })
+    expect(issuesFor(graph)).toEqual([])
+  })
+
+  it('rejects missing required values for each CRM resource node', () => {
+    const cases: WorkflowGraphNode[] = [
+      { id: 'customer', type: 'crm.create_customer', position: { x: 600, y: 0 }, config: {} },
+      { id: 'contact', type: 'crm.create_contact', position: { x: 600, y: 0 }, config: {} },
+      { id: 'opportunity', type: 'crm.create_opportunity', position: { x: 600, y: 0 }, config: {} },
+    ]
+    for (const node of cases) {
+      const issue = issuesFor(withGraph({ nodes: [...validGraph.nodes, node], edges: [...validGraph.edges, { id: `edge-${node.id}`, source: 'action', target: node.id }] })).find(item => item.nodeId === node.id)
+      expect(issue?.message).toContain('缺少必填配置')
+    }
   })
 })
