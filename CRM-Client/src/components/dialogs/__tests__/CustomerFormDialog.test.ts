@@ -4,9 +4,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import CustomerFormDialog from '../CustomerFormDialog.vue'
 import FormErrorSummary from '@/components/crmwolf/FormErrorSummary.vue'
 import customerApi, { type CustomerDetailResponse } from '@/api/customer'
-import IndustryHierarchySelectField from '@/components/crmwolf/IndustryHierarchySelectField.vue'
 import procurementApi from '@/api/procurement'
 import { acquisitionSourceApi } from '@/api/acquisition-source'
+Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+  configurable: true,
+  value: vi.fn(),
+})
 
 const DialogSlotStub = defineComponent({
   inheritAttrs: false,
@@ -14,7 +17,84 @@ const DialogSlotStub = defineComponent({
     return () => h('div', slots['default']?.())
   },
 })
+const IndustryHierarchySelectFieldStub = defineComponent({
+  name: 'IndustryHierarchySelectField',
+  inheritAttrs: false,
+  props: {
+    id: { type: String, required: true },
+    modelValue: { type: String, default: '' },
+    error: { type: String, default: '' },
+    disabled: { type: Boolean, default: false },
+  },
+  emits: ['update:modelValue'],
+  setup(props): () => VNode {
+    return () => h('button', {
+      id: props.id,
+      type: 'button',
+      role: 'combobox',
+      disabled: props.disabled,
+      'aria-invalid': props.error !== '' ? 'true' : 'false',
+      'aria-describedby': props.error !== '' ? `${props.id}-error` : undefined,
+    }, props.modelValue)
+  },
+})
 
+const SelectFieldStub = defineComponent({
+  name: 'SelectField',
+  inheritAttrs: false,
+  props: {
+    id: { type: String, required: true },
+    modelValue: { type: [String, Number], default: '' },
+    options: { type: Array, default: () => [] },
+    disabled: { type: Boolean, default: false },
+  },
+  emits: ['update:modelValue'],
+  setup(props, { emit }): () => VNode {
+    return () => h('button', {
+      id: props.id,
+      type: 'button',
+      disabled: props.disabled,
+      onClick: () => {
+        const options = props.options as { value?: string | number }[]
+        emit('update:modelValue', options[1]?.value ?? options[0]?.value ?? '')
+      },
+    }, String(props.modelValue ?? ''))
+  },
+})
+
+const DateFieldStub = defineComponent({
+  name: 'DateField',
+  inheritAttrs: false,
+  props: {
+    id: { type: String, required: true },
+    modelValue: { type: Date, default: null },
+    disabled: { type: Boolean, default: false },
+  },
+  emits: ['update:modelValue'],
+  setup(props, { emit }): () => VNode {
+    return () => h('button', {
+      id: props.id,
+      type: 'button',
+      disabled: props.disabled,
+      onClick: () => emit('update:modelValue', new Date('2026-12-31T00:00:00')),
+    }, props.modelValue === null ? '' : props.modelValue.toISOString())
+  },
+})
+
+const MoreInfoCollapsibleStub = defineComponent({
+  name: 'MoreInfoCollapsible',
+  inheritAttrs: false,
+  props: { open: { type: Boolean, default: false } },
+  emits: ['update:open'],
+  setup(props, { emit, slots }): () => VNode {
+    return () => h('div', {
+      onClick: (event: MouseEvent) => {
+        const target = event.target instanceof HTMLElement ? event.target : null
+        if (target?.closest('#customer-more-info-trigger') !== null) emit('update:open', !props.open)
+      },
+    }, slots.default?.())
+  },
+})
 const customerDetail: CustomerDetailResponse = {
   id: 'customer-1',
   public_id: 'CUS-001',
@@ -161,10 +241,15 @@ describe('CustomerFormDialog progressive edit sections', () => {
         Dialog: DialogSlotStub,
         DialogContent: DialogSlotStub,
         DialogFooter: DialogSlotStub,
-        Collapsible: defineComponent({ props: { open: Boolean }, emits: ['update:open'], template: '<div><slot /></div>' }),
-        CollapsibleTrigger: defineComponent({ template: '<slot />' }),
+        Collapsible: MoreInfoCollapsibleStub,
         CollapsibleContent: defineComponent({ template: '<div><slot /></div>' }),
+        IndustryHierarchySelectField: IndustryHierarchySelectFieldStub,
+        SelectField: SelectFieldStub,
+        DateField: DateFieldStub,
         Button: defineComponent({ inheritAttrs: false, template: '<button v-bind="$attrs"><slot /></button>' }),
+        FormField: defineComponent({ setup(_, { slots }) { return () => h('div', slots.default?.({ value: undefined, handleChange: () => undefined })) } }),
+        FormItem: defineComponent({ template: '<div><slot /></div>' }),
+        FormMessage: defineComponent({ template: '<div><slot /></div>' }),
       },
     },
     props: {
@@ -173,8 +258,8 @@ describe('CustomerFormDialog progressive edit sections', () => {
       customerId: customer.id,
       customer,
     },
+    attachTo: document.body,
   })
-
   it('starts with the more customer information section collapsed', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
@@ -315,20 +400,22 @@ describe('CustomerFormDialog progressive edit sections', () => {
     wrapper.unmount()
   })
 
-  it('expands more information before focusing an industry error', async () => {
+  it('expands more information before focusing the rendered industry control on error', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
     const wrapper = mountEdit()
     await flushPromises()
-    const field = document.createElement('input')
-    field.scrollIntoView = vi.fn()
-    field.focus = vi.fn()
-    vi.spyOn(document, 'querySelector').mockReturnValue(field)
     const vm = wrapper.vm as unknown as { setErrors: (errors: Record<string, string>) => void; focusFirstError: () => Promise<void>; moreInfoOpen: boolean }
     vm.setErrors({ industry: '请选择行业' })
+    await nextTick()
+    const industryControl = document.querySelector('#customer-industry')
+    expect(industryControl).toBeInstanceOf(HTMLElement)
+    if (!(industryControl instanceof HTMLElement)) throw new Error('industry control was not rendered')
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus')
     await vm.focusFirstError()
     expect(vm.moreInfoOpen).toBe(true)
-    expect(field.focus).toHaveBeenCalled()
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true })
+    expect(focus.mock.instances).toContain(industryControl)
     wrapper.unmount()
   })
 
@@ -371,19 +458,23 @@ describe('CustomerFormDialog recovery and close guards', () => {
   const mountRecoveryEdit = (customer: CustomerDetailResponse = { ...customerDetail, company_scale: '1-50人', source_info: { public_id: 'source-1', name: '来源', is_active: true } }): VueWrapper<InstanceType<typeof CustomerFormDialog>> => shallowMount(CustomerFormDialog, {
     global: {
       stubs: {
-        Dialog: DialogSlotStub,
+        Collapsible: MoreInfoCollapsibleStub,
         DialogContent: DialogSlotStub,
         DialogFooter: DialogSlotStub,
-        Collapsible: defineComponent({ props: { open: Boolean }, emits: ['update:open'], template: '<div><slot /></div>' }),
         CollapsibleTrigger: defineComponent({ template: '<slot />' }),
         CollapsibleContent: defineComponent({ template: '<div><slot /></div>' }),
+        FormField: defineComponent({ setup(_, { slots }) { return () => h('div', slots.default?.({ value: undefined, handleChange: () => undefined })) } }),
+        FormItem: defineComponent({ template: '<div><slot /></div>' }),
+        FormMessage: defineComponent({ template: '<div><slot /></div>' }),
+        IndustryHierarchySelectField: IndustryHierarchySelectFieldStub,
+        SelectField: SelectFieldStub,
+        DateField: DateFieldStub,
         Button: defineComponent({ inheritAttrs: false, template: '<button v-bind="$attrs"><slot /></button>' }),
       },
     },
     props: { open: true, mode: 'edit', customerId: customer.id, customer },
   })
-
-  it('disables only industry on hierarchy load failure and restores it after retry', async () => {
+  it('disables only industry on hierarchy load failure and restores it after rendered retry', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
     const hierarchy = { internet: { name: '互联网', children: [{ code: 'internet.software', name: '软件服务' }] } }
@@ -391,56 +482,78 @@ describe('CustomerFormDialog recovery and close guards', () => {
       .mockRejectedValueOnce(new Error('hierarchy failed'))
       .mockResolvedValueOnce(hierarchy)
     const wrapper = mountRecoveryEdit()
+    await wrapper.get('#customer-more-info-trigger').trigger('click')
     await flushPromises()
-    const vm = wrapper.vm as unknown as { handleMoreInfoChange: (open: boolean) => void; fetchIndustryHierarchy: () => Promise<void> }
-    vm.handleMoreInfoChange(true)
-    await flushPromises()
-
-    const industry = wrapper.findComponent(IndustryHierarchySelectField)
+    const industry = wrapper.get('#customer-industry')
     expect(getIndustryHierarchy).toHaveBeenCalledTimes(1)
-    expect(industry.props('disabled')).toBe(true)
-    expect(industry.props('error')).not.toBe('')
-    expect(wrapper.findComponent({ name: 'SelectField' }).props('disabled')).not.toBe(true)
-
-    await vm.fetchIndustryHierarchy()
+    expect(industry.attributes('disabled')).toBeDefined()
+    expect(industry.attributes('aria-invalid')).toBe('true')
+    const sourceField = wrapper.findAllComponents({ name: 'SelectField' }).find((field) => field.props('id') === 'customer-source')
+    const procurementField = wrapper.findAllComponents({ name: 'SelectField' }).find((field) => field.props('id') === 'customer-procurement-method')
+    const lifecycleField = wrapper.findAllComponents({ name: 'SelectField' }).find((field) => field.props('id') === 'customer-lifecycle-status')
+    const licenseField = wrapper.findAllComponents({ name: 'SelectField' }).find((field) => field.props('id') === 'customer-license-type')
+    expect(sourceField?.props('disabled')).not.toBe(true)
+    expect(procurementField?.props('disabled')).not.toBe(true)
+    expect(lifecycleField?.props('disabled')).not.toBe(true)
+    expect(licenseField?.props('disabled')).not.toBe(true)
+    expect(wrapper.get('#customer-license-expiry-date').attributes('disabled')).toBeUndefined()
+    const retryButton = wrapper.findAll('button').find((button) => button.text() === '重试')
+    expect(retryButton).toBeDefined()
+    await retryButton?.trigger('click')
     await flushPromises()
     expect(getIndustryHierarchy).toHaveBeenCalledTimes(2)
-    expect(industry.props('disabled')).toBe(false)
-    expect(industry.props('error')).toBe('')
+    expect(wrapper.get('#customer-industry').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('#customer-industry').attributes('aria-invalid')).toBe('false')
     wrapper.unmount()
   })
 
-  it('keeps entered license values, dialog open, and error after snapshot failure', async () => {
+  it('keeps entered license values, dialog open, and error after rendered snapshot save failure', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
-    vi.spyOn(customerApi, 'updateCustomerLicenseSnapshot').mockRejectedValue(new Error('snapshot failed'))
+    const updateLicense = vi.spyOn(customerApi, 'updateCustomerLicenseSnapshot').mockRejectedValue(new Error('snapshot failed'))
     const wrapper = mountRecoveryEdit()
     await flushPromises()
-    const vm = wrapper.vm as unknown as { licenseTypeValue: 'TRIAL' | 'OFFICIAL' | null; licenseExpiryDateValue: string | null; saveLicenseSnapshot: () => Promise<void>; licenseError: { description: string } | null }
-    vm.licenseTypeValue = 'TRIAL'
-    vm.licenseExpiryDateValue = '2026-12-31'
-    await vm.saveLicenseSnapshot()
+    await wrapper.get('#customer-more-info-trigger').trigger('click')
+    await flushPromises()
+    await wrapper.get('#customer-license-type').trigger('click')
+    await wrapper.get('#customer-license-expiry-date').trigger('click')
+    const saveButton = wrapper.findAll('button').find((button) => button.text() === '保存授权信息')
+    expect(saveButton).toBeDefined()
+    await saveButton?.trigger('click')
+    await flushPromises()
 
+    expect(updateLicense).toHaveBeenCalledWith('customer-1', {
+      expected_version: 3,
+      license_type: 'OFFICIAL',
+      license_expiry_date: '2026-12-31',
+    })
+    expect(wrapper.props('open')).toBe(true)
+    expect(wrapper.get('#customer-license-type').text()).toBe('OFFICIAL')
+    expect(wrapper.get('#customer-license-expiry-date').text()).toContain('2026-12-30')
+    expect(wrapper.find('[role="alert"]').text()).toContain('请重试')
     expect(wrapper.emitted('update:open')).toBeUndefined()
-    expect(vm.licenseTypeValue).toBe('TRIAL')
-    expect(vm.licenseExpiryDateValue).toBe('2026-12-31')
-    expect(vm.licenseError?.description).not.toBe('')
     wrapper.unmount()
   })
 
-  it('keeps lifecycle target, dialog open, and error after lifecycle failure', async () => {
+  it('keeps lifecycle target, dialog open, and error after rendered lifecycle failure', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
-    vi.spyOn(customerApi, 'updateCustomerLifecycleStatus').mockRejectedValue(new Error('lifecycle failed'))
+    const updateLifecycle = vi.spyOn(customerApi, 'updateCustomerLifecycleStatus').mockRejectedValue(new Error('lifecycle failed'))
     const wrapper = mountRecoveryEdit({ ...customerDetail, status: 0 })
     await flushPromises()
-    const vm = wrapper.vm as unknown as { lifecycleStatusValue: 0 | 1; saveLifecycleStatus: () => Promise<void>; lifecycleError: { description: string } | null }
-    vm.lifecycleStatusValue = 1
-    await vm.saveLifecycleStatus()
+    await wrapper.get('#customer-more-info-trigger').trigger('click')
+    await flushPromises()
+    await wrapper.get('#customer-lifecycle-status').trigger('click')
+    const saveButton = wrapper.findAll('button').find((button) => button.text() === '保存生命周期状态')
+    expect(saveButton).toBeDefined()
+    await saveButton?.trigger('click')
+    await flushPromises()
 
+    expect(updateLifecycle).toHaveBeenCalledWith('customer-1', { status: 1, expected_version: 3 })
+    expect(wrapper.props('open')).toBe(true)
+    expect(wrapper.get('#customer-lifecycle-status').text()).toBe('1')
+    expect(wrapper.find('[role="alert"]').text()).toContain('请重试')
     expect(wrapper.emitted('update:open')).toBeUndefined()
-    expect(vm.lifecycleStatusValue).toBe(1)
-    expect(vm.lifecycleError?.description).not.toBe('')
     wrapper.unmount()
   })
 
