@@ -111,7 +111,7 @@ const MoreInfoCollapsibleStub = defineComponent({
         const target = event.target instanceof HTMLElement ? event.target : null
         if (target?.closest('#customer-more-info-trigger') !== null) emit('update:open', !props.open)
       },
-    }, slots.default?.())
+    }, slots['default']?.())
   },
 })
 const customerDetail: CustomerDetailResponse = {
@@ -266,7 +266,7 @@ describe('CustomerFormDialog progressive edit sections', () => {
         SelectField: SelectFieldStub,
         DateField: DateFieldStub,
         Button: defineComponent({ inheritAttrs: false, template: '<button v-bind="$attrs"><slot /></button>' }),
-        FormField: defineComponent({ setup(_, { slots }) { return () => h('div', slots.default?.({ value: undefined, handleChange: () => undefined })) } }),
+        FormField: defineComponent({ setup(_, { slots }) { return () => h('div', slots['default']?.({ value: undefined, handleChange: () => undefined })) } }),
         FormItem: defineComponent({ template: '<div><slot /></div>' }),
         FormMessage: defineComponent({ template: '<div><slot /></div>' }),
       },
@@ -482,8 +482,8 @@ describe('CustomerFormDialog recovery and close guards', () => {
         Collapsible: MoreInfoCollapsibleStub,
         CollapsibleTrigger: defineComponent({ template: '<slot />' }),
         CollapsibleContent: defineComponent({ template: '<div><slot /></div>' }),
-        FormField: defineComponent({ setup(_, { slots }) { return () => h('div', slots.default?.({ value: undefined, handleChange: () => undefined })) } }),
-        Field: defineComponent({ setup(_, { slots }) { return () => h('div', slots.default?.({ value: undefined, handleChange: () => undefined })) } }),
+        FormField: defineComponent({ setup(_, { slots }) { return () => h('div', slots['default']?.({ value: undefined, handleChange: () => undefined })) } }),
+        Field: defineComponent({ setup(_, { slots }) { return () => h('div', slots['default']?.({ value: undefined, handleChange: () => undefined })) } }),
         FormItem: defineComponent({ template: '<div><slot /></div>' }),
         FormMessage: defineComponent({ template: '<div><slot /></div>' }),
         IndustryHierarchySelectField: IndustryHierarchySelectFieldStub,
