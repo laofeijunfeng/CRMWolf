@@ -58,9 +58,16 @@ describe('WorkflowNode', () => {
       props: { ...nodeProps, data: { ...nodeProps.data, hasError: true, errorMessage: '缺少审批角色' } },
     })
 
-    expect(wrapper.get('[data-testid="workflow-node-category"]').text()).toBe('动作')
+    expect(wrapper.get('[data-testid="workflow-node-category"]').text()).toBe('审批')
     expect(wrapper.get('[data-testid="workflow-node-status"]').text()).toContain('需配置')
     expect(wrapper.get('button').attributes('aria-label')).toContain('审批节点')
     expect(wrapper.get('[role="alert"]').text()).toContain('缺少审批角色')
+  })
+  it('labels approval and CRM nodes with their specific categories', () => {
+    const approval = mount(WorkflowNode, { props: nodeProps })
+    expect(approval.get('[data-testid="workflow-node-category"]').text()).toBe('审批')
+
+    const crm = mount(WorkflowNode, { props: { ...nodeProps, type: 'crm.create_customer', data: { config: {} } } })
+    expect(crm.get('[data-testid="workflow-node-category"]').text()).toBe('CRM 业务')
   })
 })

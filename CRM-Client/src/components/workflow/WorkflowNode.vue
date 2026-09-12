@@ -7,7 +7,7 @@ interface NodeData { config?: Record<string, unknown>; hasError?: boolean; error
 const props = defineProps<NodeProps<NodeData>>()
 const definition = computed(() => WORKFLOW_NODE_REGISTRY[props.type as WorkflowNodeType])
 const summary = computed(() => definition.value?.summary(props.data.config ?? {}))
-const categoryLabel = computed(() => ({ trigger: '触发器', control: '控制', action: '动作' })[definition.value?.category ?? 'action'])
+const categoryLabel = computed(() => props.type.startsWith('approval.') ? '审批' : props.type.startsWith('crm.') ? 'CRM 业务' : ({ trigger: '触发器', control: '控制', action: '动作' })[definition.value?.category ?? 'action'])
 const statusLabel = computed(() => props.data.hasError ? '需配置' : '已配置')
 </script>
 <template>

@@ -11,7 +11,6 @@ import { getEdgeInsertContext, getTerminalInsertContexts, insertNodeIntoGraph, t
 import { WORKFLOW_NODE_REGISTRY, WORKFLOW_NODE_TYPES, type WorkflowNodeType } from './workflowNodeRegistry'
 import WorkflowInsertEdge, { type WorkflowInsertEdgeData } from './WorkflowInsertEdge.vue'
 import WorkflowNode from './WorkflowNode.vue'
-import WorkflowNodePalette from './WorkflowNodePalette.vue'
 import WorkflowNodePickerDialog, { type WorkflowNodePickerItem } from './WorkflowNodePickerDialog.vue'
 
 const WORKFLOW_FLOW_ID = 'workflow-editor-flow'
@@ -34,6 +33,7 @@ const pickerOpen = ref(false)
 const pickerOpener = ref<HTMLElement | null>(null)
 const insertContext = ref<WorkflowInsertContext>({ kind: 'root' })
 const isDirty = ref(props.workflowId === null)
+const suppressDirtyWatch = ref(false)
 const nodeTypes = Object.fromEntries(WORKFLOW_NODE_TYPES.map(type => [type, WorkflowNode]))
 const edgeTypes = { 'workflow-insert': WorkflowInsertEdge }
 const triggerUsed = computed(() => nodes.value.some(node => WORKFLOW_NODE_REGISTRY[node.type as WorkflowNodeType]?.isTrigger === true))
@@ -63,7 +63,6 @@ function edgeWithInsertContext(edge: WorkflowEditorEdge): WorkflowFlowEdge { ret
 function addNode(type: WorkflowNodeType, position = { x: 120, y: 120 }, context: WorkflowInsertContext = { kind: 'root' }): string | null { const definition = WORKFLOW_NODE_REGISTRY[type]; if (definition.isTrigger && triggerUsed.value) return null; const nextNode: WorkflowEditorNode = { id: freshId('node'), type, position, data: nodeData(definition.defaults()) }; const result = insertNodeIntoGraph(nodes.value, edges.value, nextNode, context); if (result.nodes === nodes.value) return null; nodes.value = result.nodes; edges.value = result.edges.map(edgeWithInsertContext); selectedNodeId.value = nextNode.id; isDirty.value = true; applyIssues([]); return nextNode.id }
 function focusNode(nodeId: string): void { void nextTick(() => { const target = document.querySelector<HTMLElement>(`[data-node-id="${nodeId}"]`); if (target?.isConnected) target.focus() }) }
 function addNodeWithAutomaticContext(type: WorkflowNodeType, position: { x: number; y: number }): void { const terminalNodes = nodes.value.filter(node => !edges.value.some(edge => edge.source === node.id)); const soleTerminal = terminalNodes.length === 1 ? terminalNodes[0] : undefined; const context: WorkflowInsertContext = soleTerminal !== undefined && !WORKFLOW_NODE_REGISTRY[type].isTrigger ? { kind: 'after-node', sourceNodeId: soleTerminal.id } : { kind: 'root' }; addNode(type, position, context) }
-function addNodeFromPalette(type: WorkflowNodeType): void { addNodeWithAutomaticContext(type, { x: 120, y: 120 }) }
 function selectNodeById(nodeId: string): void { selectedNodeId.value = nodeId }
 function selectNode(event: NodeMouseEvent): void { selectNodeById(event.node.id) }
 function updateSelectedConfig(patch: Record<string, unknown>): void { if (selectedNodeId.value === null) return; nodes.value = nodes.value.map(node => node.id === selectedNodeId.value ? { ...node, data: nodeData({ ...node.data.config, ...patch }, node.data.hasError, node.data.errorMessage) } : node); isDirty.value = true; applyIssues(validateWorkflow(graph(), workflowName.value)) }
@@ -75,7 +74,7 @@ function onDragOver(event: DragEvent): void { event.preventDefault() }
 function openPicker(context: WorkflowInsertContext = { kind: 'root' }, opener: HTMLElement | null = null): void { insertContext.value = context; pickerOpener.value = opener; pickerOpen.value = true }
 function openPickerForEdge(edgeId: string): void { const edge = edges.value.find(candidate => candidate.id === edgeId); const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null; if (edge !== undefined) openPicker(edge.data.insertionContext, opener) }
 function selectPickerType(type: WorkflowNodeType): void { const position = insertContext.value.kind === 'after-node' ? (nodes.value.find(node => node.id === insertContext.value.sourceNodeId)?.position ?? { x: 120, y: 120 }) : { x: 120, y: 120 }; const insertedNodeId = addNode(type, { x: position.x + 180, y: position.y }, insertContext.value); if (insertedNodeId !== null) focusNode(insertedNodeId) }
-function hydrate(detail: WorkflowDetail): void { workflowName.value = detail.name; description.value = detail.description ?? ''; loadedLastModified.value = detail.last_modified_time; nodes.value = detail.dsl.nodes.map(node => ({ id: node.id, type: node.type, position: { ...node.position }, data: nodeData({ ...node.config }) })); edges.value = detail.dsl.edges.map(edgeWithInsertContext); isDirty.value = false; applyIssues([]) }
+function hydrate(detail: WorkflowDetail): void { suppressDirtyWatch.value = true; workflowName.value = detail.name; description.value = detail.description ?? ''; loadedLastModified.value = detail.last_modified_time; nodes.value = detail.dsl.nodes.map(node => ({ id: node.id, type: node.type, position: { ...node.position }, data: nodeData({ ...node.config }) })); edges.value = detail.dsl.edges.map(edgeWithInsertContext); isDirty.value = false; applyIssues([]); void nextTick(() => { suppressDirtyWatch.value = false; isDirty.value = false }) }
 async function load(): Promise<void> { if (props.workflowId === null) return; loading.value = true; try { hydrate(await workflowApi.get(props.workflowId)) } catch { errorMessage.value = '无法加载工作流，请稍后重试。' } finally { loading.value = false } }
 async function reload(): Promise<void> { errorMessage.value = ''; await load() }
 function responseOf(error: unknown): unknown { return typeof error === 'object' && error !== null ? Reflect.get(error, 'response') : undefined }
@@ -83,10 +82,11 @@ function statusOf(error: unknown): number | undefined { const response = respons
 function validationIssuesOf(error: unknown): WorkflowValidationIssue[] { const response = responseOf(error); const data = typeof response === 'object' && response !== null ? Reflect.get(response, 'data') : undefined; const detail = typeof data === 'object' && data !== null ? Reflect.get(data, 'detail') : undefined; const errors = typeof detail === 'object' && detail !== null ? Reflect.get(detail, 'errors') : undefined; if (!Array.isArray(errors)) return []; return errors.filter((message): message is string => typeof message === 'string').map(message => { const nodeId = /^节点\s+(\S+)\s+/.exec(message)?.[1]; return nodeId === undefined ? { message } : { nodeId, message } }) }
 async function save(): Promise<void> { if (saving.value) return; const nextIssues = validateWorkflow(graph(), workflowName.value); applyIssues(nextIssues); errorMessage.value = ''; if (nextIssues.length > 0) return; saving.value = true; const dsl = graph() as WorkflowDsl; try { const result = props.workflowId === null ? await workflowApi.create({ name: workflowName.value.trim(), description: description.value.trim() || null, dsl }) : await workflowApi.update(props.workflowId, { name: workflowName.value.trim(), description: description.value.trim() || null, dsl, expected_last_modified_time: loadedLastModified.value ?? '' }); isDirty.value = false; emit('saved', result) } catch (error: unknown) { const status = statusOf(error); if (status === 422) { const backendIssues = validationIssuesOf(error); applyIssues(backendIssues); errorMessage.value = backendIssues.length > 0 ? `工作流校验失败：${backendIssues.length} 个问题，请检查配置。` : '工作流校验失败，请检查配置。' } else errorMessage.value = status === 409 ? '工作流已被修改，请刷新后重试' : '保存工作流失败，请稍后重试。' } finally { saving.value = false } }
 function cancel(): void { emit('cancelled') }
-watch([workflowName, description], () => { if (loadedLastModified.value !== null) isDirty.value = true })
+function onNodeDragStop(): void { isDirty.value = true }
+watch([workflowName, description], () => { if (!suppressDirtyWatch.value && loadedLastModified.value !== null) isDirty.value = true })
 watch(() => props.workflowId, () => { void load() })
 onMounted(() => { void load() })
-defineExpose({ addNode, save, onConnect, onDrop, removeNode, updateSelectedConfig, openPicker, closeConfigPanel, nodes, edges, reload })
+defineExpose({ addNode, save, onConnect, onDrop, onNodeDragStop, removeNode, updateSelectedConfig, openPicker, closeConfigPanel, nodes, edges, reload })
 </script>
 <template>
   <div class="workflow-editor flex h-full min-h-[560px] min-w-0 flex-col overflow-hidden bg-muted/20" data-testid="workflow-editor">
@@ -96,7 +96,7 @@ defineExpose({ addNode, save, onConnect, onDrop, removeNode, updateSelectedConfi
       </div>
       <div class="flex items-center gap-2 text-xs" aria-label="工作流状态">
         <span class="rounded-full bg-muted px-2 py-1 font-medium text-muted-foreground">草稿</span>
-        <span data-testid="workflow-save-status" class="text-muted-foreground">{{ isDirty ? '未保存' : '已保存' }}</span>
+        <span data-testid="workflow-save-status" class="text-muted-foreground">{{ isDirty ? '有未保存的更改' : '已保存' }}</span>
         <span data-testid="validation-summary" class="text-muted-foreground">{{ validationSummary }}</span>
       </div>
       <span v-if="errorMessage" class="text-sm text-wolf-danger" role="alert">{{ errorMessage }}</span>
@@ -106,13 +106,12 @@ defineExpose({ addNode, save, onConnect, onDrop, removeNode, updateSelectedConfi
         </div>
         <Button v-if="errorMessage.includes('已被修改')" type="button" data-testid="reload-workflow" variant="outline" :disabled="loading" @click="reload">重新加载</Button>
         <Button type="button" variant="outline" @click="cancel">取消</Button>
-        <Button type="button" data-testid="save-workflow" :disabled="saving" @click="save">保存</Button>
+        <Button type="button" data-testid="save-workflow" :disabled="saving" @click="save">保存草稿</Button>
       </div>
     </header>
-    <div class="grid min-h-0 min-w-0 flex-1 grid-cols-[220px_minmax(0,1fr)_320px] max-[1023px]:grid-cols-[180px_minmax(0,1fr)_280px] max-[767px]:flex max-[767px]:flex-col">
-      <WorkflowNodePalette class="min-h-0 overflow-y-auto border-r" :trigger-used="triggerUsed" @add="addNodeFromPalette" />
+    <div class="flex min-h-0 min-w-0 flex-1 max-[767px]:flex-col">
       <main class="relative min-h-0 min-w-0 flex-1" @drop="onDrop" @dragover="onDragOver">
-        <VueFlow :id="WORKFLOW_FLOW_ID" v-model:nodes="nodes" v-model:edges="edges" :node-types="nodeTypes" :edge-types="edgeTypes" @connect="onConnect" @node-click="selectNode">
+        <VueFlow :id="WORKFLOW_FLOW_ID" v-model:nodes="nodes" v-model:edges="edges" :node-types="nodeTypes" :edge-types="edgeTypes" @connect="onConnect" @node-click="selectNode" @node-drag-stop="onNodeDragStop">
           <Background />
           <Controls position="bottom-left" />
           <template #edge-workflow-insert="edgeProps"><WorkflowInsertEdge v-bind="edgeProps" @insert="openPickerForEdge" /></template>
@@ -124,8 +123,8 @@ defineExpose({ addNode, save, onConnect, onDrop, removeNode, updateSelectedConfi
       </main>
       <aside class="min-h-0 overflow-y-auto border-l bg-background p-4 max-[767px]:max-h-[45vh] max-[767px]:w-full max-[767px]:border-l-0 max-[767px]:border-t" data-testid="workflow-config-panel">
         <template v-if="selectedNode && selectedDefinition">
-          <div class="mb-4 flex items-center justify-between gap-2">
-            <h2 class="text-sm font-semibold">配置节点</h2>
+          <div class="mb-4 flex items-center justify-between gap-2" data-testid="workflow-config-header">
+            <h2 class="flex items-center gap-2 text-sm font-semibold"><component :is="selectedDefinition.icon" class="size-4" aria-hidden="true" /><span>{{ selectedDefinition.label }}</span><span class="text-muted-foreground">（{{ selectedDefinition.category === 'trigger' ? '触发器' : selectedDefinition.category === 'control' ? '控制' : selectedNode.type.startsWith('approval.') ? '审批' : selectedNode.type.startsWith('crm.') ? 'CRM 业务' : '动作' }}）</span></h2>
             <Button type="button" variant="ghost" size="sm" data-testid="workflow-config-close" aria-label="关闭节点配置" @click="closeConfigPanel">关闭</Button>
           </div>
           <component :is="selectedDefinition.component" :config="selectedNode.data.config" @update:config="updateSelectedConfig" />
