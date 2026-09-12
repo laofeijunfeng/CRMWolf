@@ -52,4 +52,16 @@ describe('WorkflowInsertEdge', () => {
     await button.trigger('keydown', { key: 'Enter', preventDefault })
     expect(wrapper.emitted('insert')).toEqual([['edge-main']])
   })
+  it('updates path and midpoint when edge coordinates change', async () => {
+    const wrapper = mount(WorkflowInsertEdge, { props: props as never })
+    const initialPath = wrapper.find('path').attributes('d')
+    const initialStyle = wrapper.find('[data-testid="workflow-insert-edge-edge-main"]').element.parentElement?.getAttribute('style')
+
+    await wrapper.setProps({ sourceX: 100, sourceY: 80, targetX: 400, targetY: 80 })
+
+    const updatedPath = wrapper.find('path').attributes('d')
+    const updatedStyle = wrapper.find('[data-testid="workflow-insert-edge-edge-main"]').element.parentElement?.getAttribute('style')
+    expect(updatedPath).not.toBe(initialPath)
+    expect(updatedStyle).not.toBe(initialStyle)
+  })
 })
