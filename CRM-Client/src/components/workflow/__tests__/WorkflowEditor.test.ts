@@ -1,11 +1,12 @@
 import { nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import WorkflowEditor from '../WorkflowEditor.vue'
 import * as workflowValidation from '../workflowValidation'
 import workflowApi from '@/api/workflow'
 import procurementApi from '@/api/procurement'
 import roleApi from '@/api/role'
+beforeAll(() => { HTMLElement.prototype.scrollIntoView = () => undefined })
 
 vi.mock('@/api/workflow', () => ({
   default: {
@@ -102,6 +103,35 @@ describe('WorkflowEditor', () => {
     await nextTick()
 
     expect(wrapper.get('[data-testid="palette-node-trigger.opportunity_stage_changed"]').attributes('aria-disabled')).toBe('true')
+  })
+  it('opens the shared picker from the toolbar and inserts the selected node at root', async () => {
+    const wrapper = mountEditor()
+    await wrapper.get('[data-testid="workflow-add-node"]').trigger('click')
+    await nextTick()
+    const pickerItem = document.body.querySelector('[data-testid="workflow-picker-item-action.notify"]')
+    if (!(pickerItem instanceof HTMLElement)) throw new Error('picker item missing')
+    pickerItem.click()
+    await nextTick()
+
+    expect(wrapper.vm.nodes.some(node => node.type === 'action.notify')).toBe(true)
+    expect(wrapper.vm.edges).toHaveLength(0)
+  })
+
+  it('renders one terminal insertion button for each concrete branch tail', async () => {
+    const wrapper = mountEditor()
+    wrapper.vm.addNode('trigger.opportunity_stage_changed', { x: 0, y: 0 }, { kind: 'root' })
+    const trigger = wrapper.vm.nodes[0]
+    if (trigger === undefined) throw new Error('trigger node missing')
+    wrapper.vm.addNode('action.notify', { x: 100, y: -40 }, { kind: 'after-node', sourceNodeId: trigger.id })
+    wrapper.vm.addNode('action.create_follow_up_task', { x: 100, y: 40 }, { kind: 'root' })
+    await nextTick()
+
+    const buttons = wrapper.findAll('[data-testid^="workflow-insert-terminal-"]')
+    expect(buttons).toHaveLength(2)
+    expect(buttons.map(button => button.attributes('data-testid'))).toEqual(expect.arrayContaining([
+      `workflow-insert-terminal-${wrapper.vm.nodes[2]?.id}`,
+      `workflow-insert-terminal-${wrapper.vm.nodes[1]?.id}`,
+    ]))
   })
   it('connects a newly added node to an explicit chain tail context', async () => {
     const wrapper = mountEditor()
