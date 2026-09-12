@@ -95,13 +95,17 @@ function addNode(
   applyIssues([])
 }
 
-function addNodeFromPalette(type: WorkflowNodeType): void {
+function addNodeWithAutomaticContext(type: WorkflowNodeType, position: { x: number; y: number }): void {
   const terminalNodes = nodes.value.filter(node => !edges.value.some(edge => edge.source === node.id))
   const soleTerminal = terminalNodes.length === 1 ? terminalNodes[0] : undefined
   const context: WorkflowInsertContext = soleTerminal !== undefined && !WORKFLOW_NODE_REGISTRY[type].isTrigger
     ? { kind: 'after-node', sourceNodeId: soleTerminal.id }
     : { kind: 'root' }
-  addNode(type, undefined, context)
+  addNode(type, position, context)
+}
+
+function addNodeFromPalette(type: WorkflowNodeType): void {
+  addNodeWithAutomaticContext(type, { x: 120, y: 120 })
 }
 function selectNodeById(nodeId: string): void {
   selectedNodeId.value = nodeId
@@ -137,7 +141,7 @@ function onDrop(event: DragEvent): void {
   event.preventDefault()
   const type = event.dataTransfer?.getData('application/workflow-node') ?? ''
   if (isKnownType(type)) {
-    addNode(type, screenToFlowCoordinate({ x: event.clientX, y: event.clientY }))
+    addNodeWithAutomaticContext(type, screenToFlowCoordinate({ x: event.clientX, y: event.clientY }))
   }
 }
 

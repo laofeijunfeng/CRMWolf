@@ -133,6 +133,32 @@ describe('WorkflowEditor', () => {
     expect(wrapper.vm.edges).toEqual([expect.objectContaining({ source: source.id, target: target.id })])
   })
 
+  it('connects a dropped node to the sole terminal node', async () => {
+    const wrapper = mountEditor()
+    wrapper.vm.addNode('trigger.opportunity_stage_changed', { x: 0, y: 0 }, { kind: 'root' })
+    const triggerNode = wrapper.vm.nodes[0]
+    if (triggerNode === undefined) throw new Error('trigger node missing')
+    wrapper.vm.addNode('action.create_follow_up_task', { x: 120, y: 0 }, {
+      kind: 'after-node',
+      sourceNodeId: triggerNode.id,
+    })
+    const tailNode = wrapper.vm.nodes[1]
+    if (tailNode === undefined) throw new Error('tail node missing')
+
+    wrapper.vm.onDrop({
+      preventDefault: () => undefined,
+      clientX: 240,
+      clientY: 0,
+      dataTransfer: { getData: () => 'action.notify' },
+    })
+    await nextTick()
+
+    const droppedNode = wrapper.vm.nodes[2]
+    expect(droppedNode).toBeDefined()
+    expect(wrapper.vm.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: tailNode.id, target: droppedNode?.id }),
+    ]))
+  })
   it('does not guess a source when the graph has multiple chain tails', async () => {
     const wrapper = mountEditor()
     await wrapper.get('[data-testid="palette-node-trigger.opportunity_stage_changed"]').trigger('click')
