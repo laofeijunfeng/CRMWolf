@@ -10,11 +10,11 @@ const items: WorkflowNodePickerItem[] = [
   { type: 'action.notify', label: '发送通知', description: '向负责人发送通知', category: 'action', icon: 'span', isTrigger: false },
 ]
 
-function mountPicker(triggerUsed = false) {
-  return mount(WorkflowNodePickerDialog, { props: { open: true, nodeTypes: items, triggerUsed }, attachTo: document.body })
+function mountPicker(triggerUsed = false, opener: HTMLElement | null = null) {
+  return mount(WorkflowNodePickerDialog, { props: { open: true, nodeTypes: items, triggerUsed, opener }, attachTo: document.body })
 }
-async function mountedPicker(triggerUsed = false) {
-  const wrapper = mountPicker(triggerUsed)
+async function mountedPicker(triggerUsed = false, opener: HTMLElement | null = null) {
+  const wrapper = mountPicker(triggerUsed, opener)
   await nextTick()
   await nextTick()
   return wrapper
@@ -76,6 +76,23 @@ describe('WorkflowNodePickerDialog', () => {
     bodyGet('[aria-label="关闭"]').click()
     await nextTick()
     expect(wrapper.emitted('update:open')).toContainEqual([false])
+    wrapper.unmount()
+  })
+  it('returns focus to the opener after Escape and selection', async () => {
+    const opener = document.createElement('button')
+    document.body.append(opener)
+    const wrapper = await mountedPicker(false, opener)
+    bodyGet('[role="dialog"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await wrapper.setProps({ open: false })
+    await nextTick()
+    expect(document.activeElement).toBe(opener)
+    await wrapper.setProps({ open: true })
+    await nextTick()
+    bodyGet('[data-testid="workflow-picker-item-action.notify"]').click()
+    await nextTick()
+    await wrapper.setProps({ open: false })
+    await nextTick()
+    expect(document.activeElement).toBe(opener)
     wrapper.unmount()
   })
 })

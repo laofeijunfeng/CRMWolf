@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import type { WorkflowNodeCategory, WorkflowNodeType } from './workflowNodeRegistry'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -14,7 +14,12 @@ export interface WorkflowNodePickerItem {
   disabledReason?: string
 }
 
-const props = defineProps<{ open: boolean; nodeTypes: readonly WorkflowNodePickerItem[]; triggerUsed: boolean }>()
+const props = defineProps<{
+  open: boolean
+  nodeTypes: readonly WorkflowNodePickerItem[]
+  triggerUsed: boolean
+  opener?: HTMLElement | null
+}>()
 const emit = defineEmits<{ 'update:open': [open: boolean]; select: [type: WorkflowNodeType] }>()
 const search = ref('')
 const categoryLabels: Record<WorkflowNodeCategory, string> = { trigger: '触发器', control: '控制', action: '动作' }
@@ -44,14 +49,20 @@ function handleOpenChange(open: boolean): void {
   emit('update:open', open)
   if (!open) search.value = ''
 }
-function handleKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Escape') close()
+function restoreFocus(event: Event): void {
+  event.preventDefault()
+  if (props.opener?.isConnected) props.opener.focus()
 }
+watch(() => props.open, open => {
+  if (!open) void nextTick(() => {
+    if (props.opener?.isConnected) props.opener.focus()
+  })
+})
 </script>
 
 <template>
   <Dialog :open="props.open" @update:open="handleOpenChange">
-    <DialogContent class="w-[calc(100vw-2rem)] max-w-2xl overflow-hidden p-0">
+    <DialogContent class="w-[calc(100vw-2rem)] max-w-2xl overflow-hidden p-0" @close-auto-focus="restoreFocus">
       <div @keydown="handleKeydown">
         <DialogHeader class="border-b px-6 py-4">
           <DialogTitle>添加节点</DialogTitle>
