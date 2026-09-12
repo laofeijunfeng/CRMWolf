@@ -575,6 +575,62 @@ describe('CustomerFormDialog recovery and close guards', () => {
     expect(wrapper.emitted('update:open')).toBeUndefined()
     wrapper.unmount()
   })
+  it('offers license recovery, applies latest values, and retries with refreshed version while preserving input', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const latest = { ...customerDetail, license_type: 'TRIAL' as const, license_expiry_date: '2027-01-01', version: 11 }
+    const updateLicense = vi.spyOn(customerApi, 'updateCustomerLicenseSnapshot')
+      .mockRejectedValueOnce({ response: { status: 409 } })
+      .mockRejectedValueOnce({ response: { status: 409 } })
+      .mockResolvedValueOnce({ ...latest, license_type: 'OFFICIAL' as const, license_expiry_date: '2026-12-31', version: 12 })
+    const getDetail = vi.spyOn(customerApi, 'getCustomerDetail').mockResolvedValue(latest)
+    const wrapper = mountRecoveryEdit({ ...customerDetail, version: 10 })
+    await flushPromises()
+    await wrapper.get('#customer-more-info-trigger').trigger('click')
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { licenseTypeValue: 'TRIAL' | 'OFFICIAL' | null; licenseExpiryDateValue: string | null; saveLicenseSnapshot: () => Promise<void>; loadedVersion: number | null; industryValue: string }
+    vm.licenseTypeValue = 'OFFICIAL'
+    vm.licenseExpiryDateValue = '2026-12-31'
+    await vm.saveLicenseSnapshot()
+    await flushPromises()
+    expect(wrapper.text()).toContain('其他人可能已经修改了该对象')
+    expect(wrapper.findAll('button').find((button) => button.text() === '使用最新数据')).toBeDefined()
+
+    await wrapper.findAll('button').find((button) => button.text() === '使用最新数据')?.trigger('click')
+    await flushPromises()
+    expect(getDetail).toHaveBeenCalled()
+    expect(vm.licenseTypeValue).toBe('TRIAL')
+    expect(vm.licenseExpiryDateValue).toBe('2027-01-01')
+    expect(vm.loadedVersion).toBe(11)
+
+    vm.licenseTypeValue = 'OFFICIAL'
+    vm.licenseExpiryDateValue = '2026-12-31'
+    await vm.saveLicenseSnapshot()
+    await flushPromises()
+    await wrapper.findAll('button').find((button) => button.text() === '保留当前输入并继续编辑')?.trigger('click')
+    await flushPromises()
+    expect(vm.licenseTypeValue).toBe('OFFICIAL')
+    expect(vm.licenseExpiryDateValue).toBe('2026-12-31')
+    expect(vm.loadedVersion).toBe(11)
+    await wrapper.findAll('button').find((button) => button.text() === '保存授权信息')?.trigger('click')
+    await flushPromises()
+    expect(updateLicense).toHaveBeenLastCalledWith('customer-1', {
+      expected_version: 11,
+      license_type: 'OFFICIAL',
+      license_expiry_date: '2026-12-31',
+    })
+    wrapper.unmount()
+  })
+
+  it('gives the more-information trigger the mobile minimum touch height', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const wrapper = mountRecoveryEdit()
+    await flushPromises()
+    expect(wrapper.get('#customer-more-info-trigger').classes()).toContain('h-input-mobile')
+    expect(wrapper.get('#customer-more-info-trigger').classes()).toContain('min-h-input-mobile')
+    wrapper.unmount()
+  })
 
   it('keeps lifecycle target, dialog open, and error after rendered lifecycle failure', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
