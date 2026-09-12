@@ -313,4 +313,19 @@ describe('CustomerFormDialog progressive edit sections', () => {
     expect(vm.writeSubmitting).toBe(true)
     wrapper.unmount()
   })
+  it('syncs normalized license snapshot values returned by the API', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const updateLicense = vi.spyOn(customerApi, 'updateCustomerLicenseSnapshot').mockResolvedValue({ ...customerDetail, license_type: null, license_expiry_date: null, version: 4 })
+    const wrapper = mountEdit()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { licenseTypeValue: 'TRIAL' | 'OFFICIAL' | null; licenseExpiryDateValue: string | null; saveLicenseSnapshot: () => Promise<void> }
+    vm.licenseTypeValue = 'OFFICIAL'
+    vm.licenseExpiryDateValue = '2026-12-31'
+    await vm.saveLicenseSnapshot()
+    expect(updateLicense).toHaveBeenCalled()
+    expect(vm.licenseTypeValue).toBeNull()
+    expect(vm.licenseExpiryDateValue).toBeNull()
+    wrapper.unmount()
+  })
 })
