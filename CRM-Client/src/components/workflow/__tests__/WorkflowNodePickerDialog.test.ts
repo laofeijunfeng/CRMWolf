@@ -8,6 +8,8 @@ const items: WorkflowNodePickerItem[] = [
   { type: 'trigger.opportunity_stage_changed', label: '商机阶段变化', description: '当商机阶段发生变化时触发', category: 'trigger', icon: 'span', isTrigger: true },
   { type: 'control.condition', label: '条件分支', description: '按字段条件选择分支', category: 'control', icon: 'span', isTrigger: false },
   { type: 'action.notify', label: '发送通知', description: '向负责人发送通知', category: 'action', icon: 'span', isTrigger: false },
+  { type: 'crm.create_customer', label: '创建客户', description: '创建客户并设置客户基础信息', category: 'crm', icon: 'span', isTrigger: false },
+  { type: 'approval.step', label: '审批节点', description: '发起审批并等待审批结果', category: 'approval', icon: 'span', isTrigger: false },
 ]
 
 function mountPicker(triggerUsed = false, opener: HTMLElement | null = null) {
@@ -28,14 +30,31 @@ function bodyGet(selector: string): HTMLElement {
 afterEach(() => { document.body.innerHTML = '' })
 
 describe('WorkflowNodePickerDialog', () => {
-  it('renders categorized node groups', async () => {
+  it('renders categorized node groups including CRM and approval', async () => {
     const wrapper = await mountedPicker()
     expect(bodyText()).toContain('触发器')
     expect(bodyText()).toContain('控制')
     expect(bodyText()).toContain('动作')
+    expect(bodyText()).toContain('CRM 业务')
+    expect(bodyText()).toContain('审批')
     expect(bodyText()).toContain('商机阶段变化')
     expect(bodyText()).toContain('条件分支')
     expect(bodyText()).toContain('发送通知')
+    expect(bodyText()).toContain('创建客户')
+    expect(bodyText()).toContain('审批节点')
+    const findHeading = (label: string): Element | undefined => [...document.body.querySelectorAll('*')].find(element => element.textContent?.trim() === label)
+    const crmHeading = findHeading('CRM 业务')
+    const approvalHeading = findHeading('审批')
+    expect(crmHeading).toBeDefined()
+    expect(approvalHeading).toBeDefined()
+    expect(crmHeading).not.toBe(approvalHeading)
+    expect(crmHeading?.parentElement?.textContent).toContain('创建客户')
+    expect(approvalHeading?.parentElement?.textContent).toContain('审批节点')
+    const renderedText = bodyText()
+    expect(renderedText.indexOf('触发器')).toBeLessThan(renderedText.indexOf('CRM 业务'))
+    expect(renderedText.indexOf('CRM 业务')).toBeLessThan(renderedText.indexOf('动作'))
+    expect(renderedText.indexOf('动作')).toBeLessThan(renderedText.indexOf('控制'))
+    expect(renderedText.indexOf('控制')).toBeLessThan(renderedText.indexOf('审批'))
     wrapper.unmount()
   })
   it('searches by label, description, and type', async () => {

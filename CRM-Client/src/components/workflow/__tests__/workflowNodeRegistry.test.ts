@@ -25,7 +25,7 @@ describe('WORKFLOW_NODE_REGISTRY', () => {
       isTrigger: true,
     })
     expect(WORKFLOW_NODE_REGISTRY['approval.step']).toMatchObject({
-      category: 'action',
+      category: 'approval',
       label: '审批节点',
       requiredFields: ['node_name', 'approve_role'],
       isTrigger: false,
@@ -49,7 +49,7 @@ describe('WORKFLOW_NODE_REGISTRY', () => {
       isTrigger: false,
     })
     expect(WORKFLOW_NODE_REGISTRY['crm.create_customer']).toMatchObject({
-      category: 'action',
+      category: 'crm',
       label: '创建客户',
       requiredFields: ['account_name', 'city'],
       isTrigger: false,
@@ -58,7 +58,7 @@ describe('WORKFLOW_NODE_REGISTRY', () => {
       account_name: '', city: '', industry: '', address: '', company_scale: '', owner_strategy: 'creator', default_procurement_method_id: null,
     })
     expect(WORKFLOW_NODE_REGISTRY['crm.create_contact']).toMatchObject({
-      category: 'action',
+      category: 'crm',
       label: '创建联系人',
       requiredFields: ['customer_ref', 'name', 'gender', 'position', 'mobile'],
       isTrigger: false,
@@ -67,7 +67,7 @@ describe('WORKFLOW_NODE_REGISTRY', () => {
       customer_ref: '', name: '', gender: '1', position: '', mobile: '', is_decision_maker: false, email: '', wechat_id: '', remark: '',
     })
     expect(WORKFLOW_NODE_REGISTRY['crm.create_opportunity']).toMatchObject({
-      category: 'action',
+      category: 'crm',
       label: '创建商机',
       requiredFields: ['customer_ref', 'total_amount', 'user_count', 'license_type', 'purchase_type', 'expected_closing_date'],
       isTrigger: false,

@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { Handle, Position, type NodeProps } from '@vue-flow/core'
-import { WORKFLOW_NODE_REGISTRY, type WorkflowNodeType } from './workflowNodeRegistry'
+import { WORKFLOW_NODE_REGISTRY, type WorkflowNodeCategory, type WorkflowNodeType } from './workflowNodeRegistry'
 
 interface NodeData { config?: Record<string, unknown>; hasError?: boolean; errorMessage?: string }
 const props = defineProps<NodeProps<NodeData>>()
 const definition = computed(() => WORKFLOW_NODE_REGISTRY[props.type as WorkflowNodeType])
 const summary = computed(() => definition.value?.summary(props.data.config ?? {}))
-const categoryLabel = computed(() => props.type.startsWith('approval.') ? '审批' : props.type.startsWith('crm.') ? 'CRM 业务' : ({ trigger: '触发器', control: '控制', action: '动作' })[definition.value?.category ?? 'action'])
+const categoryLabels: Record<WorkflowNodeCategory, string> = { trigger: '触发器', crm: 'CRM 业务', action: '动作', control: '控制', approval: '审批' }
+const categoryLabel = computed(() => categoryLabels[definition.value?.category ?? 'action'])
 const statusLabel = computed(() => props.data.hasError ? '需配置' : '已配置')
 </script>
 <template>

@@ -9,8 +9,8 @@ const props = defineProps<{ open: boolean; nodeTypes: readonly WorkflowNodePicke
 const emit = defineEmits<{ 'update:open': [open: boolean]; select: [type: WorkflowNodeType] }>()
 const search = ref('')
 const selectionInProgress = ref(false)
-const categoryLabels: Record<WorkflowNodeCategory, string> = { trigger: '触发器', control: '控制', action: '动作' }
-const categoryOrder: WorkflowNodeCategory[] = ['trigger', 'control', 'action']
+const categoryLabels: Record<WorkflowNodeCategory, string> = { trigger: '触发器', crm: 'CRM 业务', action: '动作', control: '控制', approval: '审批' }
+const categoryOrder: WorkflowNodeCategory[] = ['trigger', 'crm', 'action', 'control', 'approval']
 const normalizedItems = computed<NormalizedWorkflowNodePickerItem[]>(() => props.nodeTypes.map(item => ({ ...item, disabledReason: item.disabledReason ?? (item.isTrigger && props.triggerUsed ? '工作流只能有一个触发器' : undefined) })))
 const filteredItems = computed(() => { const query = search.value.trim().toLocaleLowerCase(); if (query === '') return normalizedItems.value; return normalizedItems.value.filter(item => [item.label, item.description, item.type].some(value => value.toLocaleLowerCase().includes(query))) })
 const groups = computed(() => categoryOrder.map(category => ({ category, label: categoryLabels[category], items: filteredItems.value.filter(item => item.category === category) })).filter(group => group.items.length > 0))

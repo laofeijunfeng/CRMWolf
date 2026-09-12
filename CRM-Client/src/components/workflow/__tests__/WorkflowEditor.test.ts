@@ -261,6 +261,14 @@ describe('WorkflowEditor', () => {
     await nextTick()
     expect(wrapper.get('[data-testid="workflow-node-action.create_follow_up_task"]').text()).toContain('跟进客户')
   })
+  it('shows semantic category labels in node configuration headers', async () => {
+    const wrapper = mountEditor()
+    await selectRootNode(wrapper, 'approval.step')
+    expect(wrapper.get('[data-testid="workflow-config-header"]').text()).toContain('审批')
+    wrapper.vm.closeConfigPanel()
+    await selectRootNode(wrapper, 'crm.create_customer')
+    expect(wrapper.get('[data-testid="workflow-config-header"]').text()).toContain('CRM 业务')
+  })
 
   it('saves the automatically created edge in the workflow DSL', async () => {
     const wrapper = mountEditor()

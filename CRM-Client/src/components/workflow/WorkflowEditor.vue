@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import workflowApi, { type WorkflowDetail, type WorkflowDsl } from '@/api/workflow'
 import { validateWorkflow, type WorkflowGraph, type WorkflowValidationIssue } from './workflowValidation'
 import { getEdgeInsertContext, getTerminalInsertContexts, insertNodeIntoGraph, type WorkflowEditorEdge, type WorkflowEditorNode, type WorkflowInsertContext } from './workflowGraphEditing'
-import { WORKFLOW_NODE_REGISTRY, WORKFLOW_NODE_TYPES, type WorkflowNodeType } from './workflowNodeRegistry'
+import { WORKFLOW_NODE_REGISTRY, WORKFLOW_NODE_TYPES, type WorkflowNodeCategory, type WorkflowNodeType } from './workflowNodeRegistry'
 import WorkflowInsertEdge, { type WorkflowInsertEdgeData } from './WorkflowInsertEdge.vue'
 import WorkflowNode from './WorkflowNode.vue'
 import WorkflowNodePickerDialog, { type WorkflowNodePickerItem } from './WorkflowNodePickerDialog.vue'
@@ -40,6 +40,7 @@ const triggerUsed = computed(() => nodes.value.some(node => WORKFLOW_NODE_REGIST
 const selectedNode = computed(() => nodes.value.find(node => node.id === selectedNodeId.value) ?? null)
 const selectedDefinition = computed(() => selectedNode.value === null ? undefined : WORKFLOW_NODE_REGISTRY[selectedNode.value.type as WorkflowNodeType])
 const validationSummary = computed(() => issues.value.length === 0 ? '校验通过' : `有 ${issues.value.length} 个问题`)
+const categoryLabels: Record<WorkflowNodeCategory, string> = { trigger: '触发器', crm: 'CRM 业务', action: '动作', control: '控制', approval: '审批' }
 const terminalContexts = computed(() => getTerminalInsertContexts(nodes.value, edges.value))
 const pickerItems = computed<WorkflowNodePickerItem[]>(() => {
   const descriptions: Record<WorkflowNodeType, string> = {
@@ -124,7 +125,7 @@ defineExpose({ addNode, save, onConnect, onDrop, onNodeDragStop, removeNode, upd
       <aside class="min-h-0 overflow-y-auto border-l bg-background p-4 max-[767px]:max-h-[45vh] max-[767px]:w-full max-[767px]:border-l-0 max-[767px]:border-t" data-testid="workflow-config-panel">
         <template v-if="selectedNode && selectedDefinition">
           <div class="mb-4 flex items-center justify-between gap-2" data-testid="workflow-config-header">
-            <h2 class="flex items-center gap-2 text-sm font-semibold"><component :is="selectedDefinition.icon" class="size-4" aria-hidden="true" /><span>{{ selectedDefinition.label }}</span><span class="text-muted-foreground">（{{ selectedDefinition.category === 'trigger' ? '触发器' : selectedDefinition.category === 'control' ? '控制' : selectedNode.type.startsWith('approval.') ? '审批' : selectedNode.type.startsWith('crm.') ? 'CRM 业务' : '动作' }}）</span></h2>
+            <h2 class="flex items-center gap-2 text-sm font-semibold"><component :is="selectedDefinition.icon" class="size-4" aria-hidden="true" /><span>{{ selectedDefinition.label }}</span><span class="text-muted-foreground">（{{ categoryLabels[selectedDefinition.category] }}）</span></h2>
             <Button type="button" variant="ghost" size="sm" data-testid="workflow-config-close" aria-label="关闭节点配置" @click="closeConfigPanel">关闭</Button>
           </div>
           <component :is="selectedDefinition.component" :config="selectedNode.data.config" @update:config="updateSelectedConfig" />
