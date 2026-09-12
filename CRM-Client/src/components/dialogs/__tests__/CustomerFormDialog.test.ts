@@ -442,8 +442,8 @@ describe('CustomerFormDialog progressive edit sections', () => {
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
     const wrapper = mountEdit()
     await flushPromises()
-    const vm = wrapper.vm as unknown as { setErrors: (errors: Record<string, string>) => void; focusFirstError: () => Promise<void>; moreInfoOpen: boolean }
-    vm.setErrors({ industry: '请选择行业' })
+    const vm = wrapper.vm as unknown as { setFieldError: (field: string, message: string) => void; focusFirstError: () => Promise<void>; moreInfoOpen: boolean }
+    vm.setFieldError('industry', '请选择行业')
     await nextTick()
     const industryControl = document.querySelector('#customer-industry')
     expect(industryControl).toBeInstanceOf(HTMLElement)
