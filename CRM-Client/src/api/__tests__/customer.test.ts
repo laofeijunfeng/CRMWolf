@@ -74,6 +74,17 @@ describe('customerApi lifecycle, license snapshot, and industry hierarchy', () =
     expect(result).toEqual(customerResponse)
   })
 
+  it('rejects malformed license snapshot responses through the customer response schema', async () => {
+    patch.mockResolvedValue({ ...customerResponse, version: '3' })
+    const { default: customerApi } = await import('../customer')
+
+    await expect(customerApi.updateCustomerLicenseSnapshot('customer-1', {
+      expected_version: 3,
+      license_type: 'OFFICIAL',
+      license_expiry_date: '2027-01-01',
+    })).rejects.toThrow()
+  })
+
   it('parses industry hierarchy responses with empty child arrays', async () => {
     const hierarchy = {
       technology: {
@@ -88,6 +99,18 @@ describe('customerApi lifecycle, license snapshot, and industry hierarchy', () =
 
     expect(get).toHaveBeenCalledWith('/v1/industries/hierarchy', undefined)
     expect(result).toEqual(hierarchy)
+  })
+
+  it('rejects malformed industry hierarchy responses through the hierarchy schema', async () => {
+    get.mockResolvedValue({
+      technology: {
+        name: 'Technology',
+        children: [{ name: 'Missing code' }],
+      },
+    })
+    const { default: customerApi } = await import('../customer')
+
+    await expect(customerApi.getIndustryHierarchy()).rejects.toThrow()
   })
 
   it('rejects customer responses that do not satisfy the response schema', async () => {
