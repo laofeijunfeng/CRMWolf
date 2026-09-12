@@ -46,6 +46,54 @@ VALID_DSL = {
     "edges": [{"id": "e1", "source": "n1", "target": "n2"}],
 }
 
+CRM_VALID_DSL = {
+    "schema_version": 1,
+    "nodes": [
+        {
+            "id": "trigger",
+            "type": "trigger.opportunity_stage_changed",
+            "position": {"x": 0, "y": 0},
+            "config": {"to_stage": "QUOTE"},
+        },
+        {
+            "id": "customer",
+            "type": "crm.create_customer",
+            "position": {"x": 200, "y": 0},
+            "config": {"account_name": "Acme", "city": "上海"},
+        },
+        {
+            "id": "contact",
+            "type": "crm.create_contact",
+            "position": {"x": 400, "y": 0},
+            "config": {
+                "customer_ref": "cust_1",
+                "name": "张三",
+                "gender": "男",
+                "position": "采购负责人",
+                "mobile": "13800000000",
+            },
+        },
+        {
+            "id": "opportunity",
+            "type": "crm.create_opportunity",
+            "position": {"x": 600, "y": 0},
+            "config": {
+                "customer_ref": "cust_1",
+                "total_amount": 100000,
+                "user_count": 20,
+                "license_type": "annual",
+                "purchase_type": "new",
+                "expected_closing_date": "2026-12-31",
+            },
+        },
+    ],
+    "edges": [
+        {"id": "e1", "source": "trigger", "target": "customer"},
+        {"id": "e2", "source": "customer", "target": "contact"},
+        {"id": "e3", "source": "contact", "target": "opportunity"},
+    ],
+}
+
 
 def _payload(name: str = "商机阶段工作流", dsl: dict | None = None) -> dict:
     return {"name": name, "description": "测试工作流", "dsl": dsl if dsl is not None else VALID_DSL}
@@ -157,6 +205,17 @@ def test_create_workflow_returns_201_with_dsl(api_env):
     assert body["node_count"] == 2
     assert body["dsl"] == VALID_DSL
     assert body["created_by"] == 1
+
+
+def test_create_workflow_with_crm_nodes_round_trips_dsl(api_env):
+    _use_team(api_env, 101)
+
+    response = api_env.client.post("/v1/workflows", json=_payload(dsl=CRM_VALID_DSL))
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["node_count"] == 4
+    assert body["dsl"] == CRM_VALID_DSL
 
 
 def test_create_workflow_with_invalid_dsl_returns_422(api_env):

@@ -12,6 +12,74 @@ VALID = {
     "edges": [{"id": "e1", "source": "n1", "target": "n2"}],
 }
 
+CRM_CONFIGS = {
+    "crm.create_customer": {"account_name": "Acme", "city": "上海"},
+    "crm.create_contact": {
+        "customer_ref": "cust_1",
+        "name": "张三",
+        "gender": "男",
+        "position": "采购负责人",
+        "mobile": "13800000000",
+    },
+    "crm.create_opportunity": {
+        "customer_ref": "cust_1",
+        "total_amount": 100000,
+        "user_count": 20,
+        "license_type": "annual",
+        "purchase_type": "new",
+        "expected_closing_date": "2026-12-31",
+    },
+}
+
+
+def _crm_dsl(nodes: list[dict]) -> dict:
+    return {
+        "schema_version": 1,
+        "nodes": [
+            {"id": "trigger", "type": "trigger.opportunity_stage_changed",
+             "position": {"x": 0, "y": 0}, "config": {"to_stage": "QUOTE"}},
+            *nodes,
+        ],
+        "edges": [
+            {"id": f"edge-{node['id']}", "source": "trigger", "target": node["id"]}
+            for node in nodes
+        ],
+    }
+
+
+def test_valid_dsl_with_each_crm_node_passes():
+    nodes = [
+        {"id": node_type, "type": node_type, "position": {"x": 100, "y": 100}, "config": config}
+        for node_type, config in CRM_CONFIGS.items()
+    ]
+
+    assert validate_workflow_dsl(_crm_dsl(nodes)) == []
+
+
+@pytest.mark.parametrize("node_type, missing_field", [
+    ("crm.create_customer", "account_name"),
+    ("crm.create_customer", "city"),
+    ("crm.create_contact", "customer_ref"),
+    ("crm.create_contact", "name"),
+    ("crm.create_contact", "gender"),
+    ("crm.create_contact", "position"),
+    ("crm.create_contact", "mobile"),
+    ("crm.create_opportunity", "customer_ref"),
+    ("crm.create_opportunity", "total_amount"),
+    ("crm.create_opportunity", "user_count"),
+    ("crm.create_opportunity", "license_type"),
+    ("crm.create_opportunity", "purchase_type"),
+    ("crm.create_opportunity", "expected_closing_date"),
+])
+def test_crm_node_missing_required_field_is_rejected(node_type, missing_field):
+    config = {key: value for key, value in CRM_CONFIGS[node_type].items() if key != missing_field}
+    node = {"id": "crm-node", "type": node_type, "position": {"x": 100, "y": 100}, "config": config}
+
+    errors = validate_workflow_dsl(_crm_dsl([node]))
+
+    assert any(missing_field in error for error in errors)
+
+
 def test_valid_dsl_passes():
     assert validate_workflow_dsl(VALID) == []
 

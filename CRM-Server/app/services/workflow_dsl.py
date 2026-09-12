@@ -6,6 +6,12 @@ NODE_CONFIG_REQUIREMENTS: dict[str, list[str]] = {
     "control.condition": ["field", "operator", "value"],
     "action.create_follow_up_task": ["title"],
     "action.notify": ["notify_target"],
+    "crm.create_customer": ["account_name", "city"],
+    "crm.create_contact": ["customer_ref", "name", "gender", "position", "mobile"],
+    "crm.create_opportunity": [
+        "customer_ref", "total_amount", "user_count", "license_type",
+        "purchase_type", "expected_closing_date",
+    ],
 }
 KNOWN_NODE_TYPES = frozenset(NODE_CONFIG_REQUIREMENTS)
 TRIGGER_TYPES = frozenset(t for t in KNOWN_NODE_TYPES if t.startswith("trigger."))
