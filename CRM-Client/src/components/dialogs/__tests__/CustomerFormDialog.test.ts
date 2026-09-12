@@ -39,6 +39,25 @@ const IndustryHierarchySelectFieldStub = defineComponent({
   },
 })
 
+const InputFieldStub = defineComponent({
+  name: 'InputField',
+  inheritAttrs: false,
+  props: {
+    id: { type: String, required: true },
+    modelValue: { type: String, default: '' },
+    disabled: { type: Boolean, default: false },
+  },
+  emits: ['update:modelValue'],
+  setup(props, { emit }): () => VNode {
+    return () => h('input', {
+      id: props.id,
+      value: props.modelValue,
+      disabled: props.disabled,
+      onInput: (event: Event) => emit('update:modelValue', (event.target as HTMLInputElement).value),
+    })
+  },
+})
+
 const SelectFieldStub = defineComponent({
   name: 'SelectField',
   inheritAttrs: false,
@@ -464,11 +483,13 @@ describe('CustomerFormDialog recovery and close guards', () => {
         CollapsibleTrigger: defineComponent({ template: '<slot />' }),
         CollapsibleContent: defineComponent({ template: '<div><slot /></div>' }),
         FormField: defineComponent({ setup(_, { slots }) { return () => h('div', slots.default?.({ value: undefined, handleChange: () => undefined })) } }),
+        Field: defineComponent({ setup(_, { slots }) { return () => h('div', slots.default?.({ value: undefined, handleChange: () => undefined })) } }),
         FormItem: defineComponent({ template: '<div><slot /></div>' }),
         FormMessage: defineComponent({ template: '<div><slot /></div>' }),
         IndustryHierarchySelectField: IndustryHierarchySelectFieldStub,
         SelectField: SelectFieldStub,
         DateField: DateFieldStub,
+        InputField: InputFieldStub,
         Button: defineComponent({ inheritAttrs: false, template: '<button v-bind="$attrs"><slot /></button>' }),
       },
     },
@@ -488,14 +509,15 @@ describe('CustomerFormDialog recovery and close guards', () => {
     expect(getIndustryHierarchy).toHaveBeenCalledTimes(1)
     expect(industry.attributes('disabled')).toBeDefined()
     expect(industry.attributes('aria-invalid')).toBe('true')
-    const sourceField = wrapper.findAllComponents({ name: 'SelectField' }).find((field) => field.props('id') === 'customer-source')
-    const procurementField = wrapper.findAllComponents({ name: 'SelectField' }).find((field) => field.props('id') === 'customer-procurement-method')
-    const lifecycleField = wrapper.findAllComponents({ name: 'SelectField' }).find((field) => field.props('id') === 'customer-lifecycle-status')
-    const licenseField = wrapper.findAllComponents({ name: 'SelectField' }).find((field) => field.props('id') === 'customer-license-type')
-    expect(sourceField?.props('disabled')).not.toBe(true)
-    expect(procurementField?.props('disabled')).not.toBe(true)
-    expect(lifecycleField?.props('disabled')).not.toBe(true)
-    expect(licenseField?.props('disabled')).not.toBe(true)
+    expect(wrapper.get('#customer-account-name').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('#customer-city').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('#customer-company-scale').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('#customer-source').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('#customer-procurement-method').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('#customer-address').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('#customer-more-info-trigger').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('#customer-lifecycle-status').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('#customer-license-type').attributes('disabled')).toBeUndefined()
     expect(wrapper.get('#customer-license-expiry-date').attributes('disabled')).toBeUndefined()
     const retryButton = wrapper.findAll('button').find((button) => button.text() === '重试')
     expect(retryButton).toBeDefined()
