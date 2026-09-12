@@ -25,17 +25,22 @@ const IndustryHierarchySelectFieldStub = defineComponent({
     modelValue: { type: String, default: '' },
     error: { type: String, default: '' },
     disabled: { type: Boolean, default: false },
+    retainedIndustryInfo: { type: Object, default: null },
   },
   emits: ['update:modelValue'],
   setup(props): () => VNode {
-    return () => h('button', {
-      id: props.id,
-      type: 'button',
-      role: 'combobox',
-      disabled: props.disabled,
-      'aria-invalid': props.error !== '' ? 'true' : 'false',
-      'aria-describedby': props.error !== '' ? `${props.id}-error` : undefined,
-    }, props.modelValue)
+    return () => {
+      const retained = props.retainedIndustryInfo
+      const retainedName = retained !== null && typeof retained === 'object' && 'name' in retained && typeof retained.name === 'string' ? retained.name : ''
+      return h('button', {
+        id: props.id,
+        type: 'button',
+        role: 'combobox',
+        disabled: props.disabled,
+        'aria-invalid': props.error !== '' ? 'true' : 'false',
+        'aria-describedby': props.error !== '' ? `${props.id}-error` : undefined,
+      }, `${props.modelValue}${retainedName === '' ? '' : ` ${retainedName}`}`)
+    }
   },
 })
 
@@ -200,6 +205,20 @@ describe('CustomerFormDialog edit initialization', () => {
     wrapper.unmount()
   })
 })
+  it('forwards detail industry_info to the retained industry selector', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const customer = { ...customerDetail, industry: 'legacy.industry', industry_info: { code: 'legacy.industry', name: '传统 / 已停用' } }
+    const wrapper = shallowMount(CustomerFormDialog, {
+      global: { stubs: { Dialog: DialogSlotStub, DialogContent: DialogSlotStub, Collapsible: MoreInfoCollapsibleStub, CollapsibleTrigger: defineComponent({ template: '<slot />' }), CollapsibleContent: defineComponent({ template: '<div><slot /></div>' }), IndustryHierarchySelectField: IndustryHierarchySelectFieldStub } },
+      props: { open: true, mode: 'edit', customerId: customer.id, customer },
+    })
+    await flushPromises()
+    await wrapper.get('#customer-more-info-trigger').trigger('click')
+    await nextTick()
+    expect(wrapper.get('#customer-industry').text()).toContain('传统 / 已停用')
+    wrapper.unmount()
+  })
 
 
 describe('CustomerFormDialog mode transitions', () => {
@@ -576,6 +595,43 @@ describe('CustomerFormDialog recovery and close guards', () => {
     expect(wrapper.get('#customer-lifecycle-status').text()).toBe('1')
     expect(wrapper.find('[role="alert"]').text()).toContain('请重试')
     expect(wrapper.emitted('update:open')).toBeUndefined()
+    wrapper.unmount()
+  })
+  it('offers lifecycle recovery after a conflict and retries with refreshed version and preserved target', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const latest = { ...customerDetail, status: 0 as const, version: 11 }
+    const updateLifecycle = vi.spyOn(customerApi, 'updateCustomerLifecycleStatus')
+      .mockRejectedValueOnce({ response: { status: 409 } })
+      .mockResolvedValueOnce({ ...latest, status: 1, version: 12 })
+    const getDetail = vi.spyOn(customerApi, 'getCustomerDetail').mockResolvedValue(latest)
+    const wrapper = mountRecoveryEdit({ ...customerDetail, status: 0, version: 10 })
+    await flushPromises()
+    await wrapper.get('#customer-more-info-trigger').trigger('click')
+    await flushPromises()
+    await wrapper.get('#customer-lifecycle-status').trigger('click')
+    await wrapper.findAll('button').find((button) => button.text() === '保存生命周期状态')?.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[role="alert"]').text()).toContain('客户生命周期已发生变化')
+    const preserve = wrapper.findAll('button').find((button) => button.text() === '保留当前输入并继续编辑')
+    expect(preserve).toBeDefined()
+    await preserve?.trigger('click')
+    await flushPromises()
+    expect(getDetail).toHaveBeenCalled()
+    expect((wrapper.vm as unknown as { lifecycleStatusValue: number }).lifecycleStatusValue).toBe(1)
+    await wrapper.findAll('button').find((button) => button.text() === '保存生命周期状态')?.trigger('click')
+    await flushPromises()
+    expect(updateLifecycle).toHaveBeenLastCalledWith('customer-1', { status: 1, expected_version: 11 })
+    wrapper.unmount()
+  })
+  it('shows the explicit authorization side-effect warning', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const wrapper = mountRecoveryEdit()
+    await flushPromises()
+    await wrapper.get('#customer-more-info-trigger').trigger('click')
+    await nextTick()
+    expect(wrapper.text()).toContain('此处只更新客户授权汇总信息，不创建 License 申请、不发起审批，也不修改正式 License 记录。')
     wrapper.unmount()
   })
 

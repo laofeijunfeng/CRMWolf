@@ -49,6 +49,39 @@ describe('IndustryHierarchySelectField', () => {
     expect(emittedEvents?.[emittedEvents.length - 1]).toEqual(['internet.software'])
     wrapper.unmount()
   })
+  it('emits the primary code for an active group without children', async () => {
+    const wrapper = mount(IndustryHierarchySelectField, {
+      props: { modelValue: '', hierarchy: { manufacturing: { name: '制造业', children: [] } } },
+      attachTo: document.body,
+    })
+    await wrapper.get('button[role="combobox"]').trigger('click')
+    const option = Array.from(document.body.querySelectorAll('[role="option"]'))
+      .find((element) => element.textContent?.includes('制造业') === true)
+    expect(option).toBeInstanceOf(HTMLElement)
+    if (!(option instanceof HTMLElement)) throw new Error('primary-only option was not rendered')
+    option.click()
+    const emittedEvents = wrapper.emitted('update:modelValue') as unknown[][] | undefined
+    expect(emittedEvents?.[emittedEvents.length - 1]).toEqual(['manufacturing'])
+    wrapper.unmount()
+  })
+
+  it('renders retained industry info as the disabled full path', async () => {
+    const wrapper = mount(IndustryHierarchySelectField, {
+      props: {
+        modelValue: 'legacy.industry',
+        retainedIndustryInfo: { code: 'legacy.industry', name: '传统 / 已停用' },
+        hierarchy: {},
+      },
+      attachTo: document.body,
+    })
+    expect(wrapper.get('button[role="combobox"]').text()).toContain('传统 / 已停用')
+    await wrapper.get('button[role="combobox"]').trigger('click')
+    const option = Array.from(document.body.querySelectorAll('[role="option"]'))
+      .find((element) => element.textContent?.includes('传统 / 已停用') === true)
+    expect(option).toBeInstanceOf(HTMLElement)
+    expect(option?.hasAttribute('data-disabled')).toBe(true)
+    wrapper.unmount()
+  })
   it('retains an inactive current code when the hierarchy is empty', async () => {
     const wrapper = mount(IndustryHierarchySelectField, {
       props: { modelValue: 'legacy.industry', hierarchy: {} },
