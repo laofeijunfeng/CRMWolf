@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import CustomerFormDialog from '../CustomerFormDialog.vue'
 import FormErrorSummary from '@/components/crmwolf/FormErrorSummary.vue'
 import customerApi, { type CustomerDetailResponse } from '@/api/customer'
+import IndustryHierarchySelectField from '@/components/crmwolf/IndustryHierarchySelectField.vue'
 import procurementApi from '@/api/procurement'
 import { acquisitionSourceApi } from '@/api/acquisition-source'
 
@@ -27,6 +28,9 @@ const customerDetail: CustomerDetailResponse = {
   owner_id: '1',
   source_lead_id: null,
   default_procurement_method_id: 1,
+  loss_reason: null,
+  return_reason: null,
+  returned_time: null,
   creator_id: '1',
   created_time: '2026-09-04T00:00:00Z',
   last_modified_time: '2026-09-04T00:00:00Z',
@@ -64,6 +68,36 @@ describe('CustomerFormDialog edit initialization', () => {
     await nextTick()
 
     expect(getCustomerDetail).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('retries loading customer details after the initial request fails', async () => {
+    const getCustomerDetail = vi.spyOn(customerApi, 'getCustomerDetail')
+      .mockRejectedValueOnce(new Error('initial load failed'))
+      .mockResolvedValueOnce(customerDetail)
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+
+    const wrapper = shallowMount(CustomerFormDialog, {
+      global: {
+        stubs: {
+          Dialog: DialogSlotStub,
+          DialogContent: DialogSlotStub,
+        },
+      },
+      props: {
+        open: true,
+        mode: 'edit',
+        customerId: customerDetail.id,
+      },
+    })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as { retryCustomerDetail: () => void }
+    vm.retryCustomerDetail()
+    await flushPromises()
+
+    expect(getCustomerDetail).toHaveBeenCalledTimes(2)
     wrapper.unmount()
   })
 })
@@ -121,7 +155,7 @@ describe('CustomerFormDialog progressive edit sections', () => {
     vi.restoreAllMocks()
   })
 
-  const mountEdit = (customer: CustomerDetailResponse = { ...customerDetail, company_scale: '1-50人', source_info: { public_id: 'source-1', name: '来源', is_active: 1 } }): VueWrapper => shallowMount(CustomerFormDialog, {
+  const mountEdit = (customer: CustomerDetailResponse = { ...customerDetail, company_scale: '1-50人', source_info: { public_id: 'source-1', name: '来源', is_active: true } }): VueWrapper<InstanceType<typeof CustomerFormDialog>> => shallowMount(CustomerFormDialog, {
     global: {
       stubs: {
         Dialog: DialogSlotStub,
@@ -326,6 +360,105 @@ describe('CustomerFormDialog progressive edit sections', () => {
     expect(updateLicense).toHaveBeenCalled()
     expect(vm.licenseTypeValue).toBeNull()
     expect(vm.licenseExpiryDateValue).toBeNull()
+    wrapper.unmount()
+  })
+})
+describe('CustomerFormDialog recovery and close guards', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  const mountRecoveryEdit = (customer: CustomerDetailResponse = { ...customerDetail, company_scale: '1-50人', source_info: { public_id: 'source-1', name: '来源', is_active: true } }): VueWrapper<InstanceType<typeof CustomerFormDialog>> => shallowMount(CustomerFormDialog, {
+    global: {
+      stubs: {
+        Dialog: DialogSlotStub,
+        DialogContent: DialogSlotStub,
+        DialogFooter: DialogSlotStub,
+        Collapsible: defineComponent({ props: { open: Boolean }, emits: ['update:open'], template: '<div><slot /></div>' }),
+        CollapsibleTrigger: defineComponent({ template: '<slot />' }),
+        CollapsibleContent: defineComponent({ template: '<div><slot /></div>' }),
+        Button: defineComponent({ inheritAttrs: false, template: '<button v-bind="$attrs"><slot /></button>' }),
+      },
+    },
+    props: { open: true, mode: 'edit', customerId: customer.id, customer },
+  })
+
+  it('disables only industry on hierarchy load failure and restores it after retry', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const hierarchy = { internet: { name: '互联网', children: [{ code: 'internet.software', name: '软件服务' }] } }
+    const getIndustryHierarchy = vi.spyOn(customerApi, 'getIndustryHierarchy')
+      .mockRejectedValueOnce(new Error('hierarchy failed'))
+      .mockResolvedValueOnce(hierarchy)
+    const wrapper = mountRecoveryEdit()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { handleMoreInfoChange: (open: boolean) => void; fetchIndustryHierarchy: () => Promise<void> }
+    vm.handleMoreInfoChange(true)
+    await flushPromises()
+
+    const industry = wrapper.findComponent(IndustryHierarchySelectField)
+    expect(getIndustryHierarchy).toHaveBeenCalledTimes(1)
+    expect(industry.props('disabled')).toBe(true)
+    expect(industry.props('error')).not.toBe('')
+    expect(wrapper.findComponent({ name: 'SelectField' }).props('disabled')).not.toBe(true)
+
+    await vm.fetchIndustryHierarchy()
+    await flushPromises()
+    expect(getIndustryHierarchy).toHaveBeenCalledTimes(2)
+    expect(industry.props('disabled')).toBe(false)
+    expect(industry.props('error')).toBe('')
+    wrapper.unmount()
+  })
+
+  it('keeps entered license values, dialog open, and error after snapshot failure', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    vi.spyOn(customerApi, 'updateCustomerLicenseSnapshot').mockRejectedValue(new Error('snapshot failed'))
+    const wrapper = mountRecoveryEdit()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { licenseTypeValue: 'TRIAL' | 'OFFICIAL' | null; licenseExpiryDateValue: string | null; saveLicenseSnapshot: () => Promise<void>; licenseError: { description: string } | null }
+    vm.licenseTypeValue = 'TRIAL'
+    vm.licenseExpiryDateValue = '2026-12-31'
+    await vm.saveLicenseSnapshot()
+
+    expect(wrapper.emitted('update:open')).toBeUndefined()
+    expect(vm.licenseTypeValue).toBe('TRIAL')
+    expect(vm.licenseExpiryDateValue).toBe('2026-12-31')
+    expect(vm.licenseError?.description).not.toBe('')
+    wrapper.unmount()
+  })
+
+  it('keeps lifecycle target, dialog open, and error after lifecycle failure', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    vi.spyOn(customerApi, 'updateCustomerLifecycleStatus').mockRejectedValue(new Error('lifecycle failed'))
+    const wrapper = mountRecoveryEdit({ ...customerDetail, status: 0 })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { lifecycleStatusValue: 0 | 1; saveLifecycleStatus: () => Promise<void>; lifecycleError: { description: string } | null }
+    vm.lifecycleStatusValue = 1
+    await vm.saveLifecycleStatus()
+
+    expect(wrapper.emitted('update:open')).toBeUndefined()
+    expect(vm.lifecycleStatusValue).toBe(1)
+    expect(vm.lifecycleError?.description).not.toBe('')
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['ordinary profile', (vm: { setValues: (values: Record<string, unknown>) => void; licenseTypeValue: string | null }): void => { vm.setValues({ account_name: '已修改' }) }],
+    ['inline license', (vm: { setValues: (values: Record<string, unknown>) => void; licenseTypeValue: string | null }): void => { vm.licenseTypeValue = 'TRIAL' }],
+  ])('invokes discard guard for %s dirty close attempts', async (_label, dirty) => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const wrapper = mountRecoveryEdit()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { setValues: (values: Record<string, unknown>) => void; licenseTypeValue: string | null; handleCancel: () => void; showConfirmDialog: boolean; confirmCancel: () => void }
+    dirty(vm)
+    vm.handleCancel()
+    expect(vm.showConfirmDialog).toBe(true)
+    expect(wrapper.emitted('update:open')).toBeUndefined()
+    vm.confirmCancel()
+    expect(wrapper.emitted('update:open')).toContainEqual([false])
     wrapper.unmount()
   })
 })

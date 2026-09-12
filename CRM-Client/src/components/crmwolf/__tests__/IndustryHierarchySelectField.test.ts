@@ -77,4 +77,15 @@ describe('IndustryHierarchySelectField', () => {
     expect(document.body.textContent).toContain('行业加载失败')
     wrapper.unmount()
   })
+  it('exposes disabled and error state through the combobox trigger', () => {
+    const wrapper = mount(IndustryHierarchySelectField, {
+      props: { modelValue: 'legacy.industry', hierarchy: {}, disabled: true, error: '行业加载失败', id: 'customer-industry' },
+    })
+    const trigger = wrapper.get('button[role="combobox"]')
+    expect(trigger.attributes('disabled')).toBeDefined()
+    expect(trigger.attributes('aria-invalid')).toBe('true')
+    expect(trigger.attributes('aria-describedby')).toBe('customer-industry-error')
+    expect(wrapper.get('#customer-industry-error').text()).toContain('行业加载失败')
+    wrapper.unmount()
+  })
 })
