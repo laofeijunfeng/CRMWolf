@@ -381,7 +381,7 @@ describe('WorkflowEditor', () => {
     await nextTick()
     expect(wrapper.get('[data-testid="workflow-save-status"]').text()).toBe('已保存')
 
-    await wrapper.vm.onNodeDragStop()
+    await wrapper.get('[data-testid="stop-node-drag"]').trigger('click')
     await nextTick()
 
     expect(wrapper.get('[data-testid="workflow-save-status"]').text()).toBe('有未保存的更改')
