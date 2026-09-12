@@ -48,4 +48,16 @@ describe('CRM workflow configuration panels', () => {
       [{ customer_ref: 'customer-1' }], [{ total_amount: 12000 }], [{ user_count: 5 }], [{ expected_closing_date: '2026-12-31' }],
     ])
   })
+  it('emits null when optional opportunity numeric fields are cleared', async () => {
+    const wrapper = mount(ActionCreateOpportunityPanel, { props: { config: { decision_maker_count: 3, procurement_method_id: 4, procurement_stage_id: 5 } }, global })
+    await wrapper.get('[data-testid="config-decision-maker-count"]').setValue('')
+    await wrapper.get('[data-testid="config-procurement-method-id"]').setValue('')
+    await wrapper.get('[data-testid="config-procurement-stage-id"]').setValue('')
+
+    expect(wrapper.emitted('update:config')).toEqual([
+      [{ decision_maker_count: null }],
+      [{ procurement_method_id: null }],
+      [{ procurement_stage_id: null }],
+    ])
+  })
 })

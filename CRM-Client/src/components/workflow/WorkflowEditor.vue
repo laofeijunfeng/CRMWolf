@@ -47,6 +47,9 @@ const pickerItems = computed<WorkflowNodePickerItem[]>(() => {
     'control.condition': '根据条件将流程分到不同分支',
     'action.create_follow_up_task': '为负责人创建一条跟进任务',
     'action.notify': '向负责人或指定对象发送通知',
+    'crm.create_customer': '创建客户并设置客户基础信息',
+    'crm.create_contact': '创建联系人并关联客户',
+    'crm.create_opportunity': '创建商机并配置采购信息',
   }
   return WORKFLOW_NODE_TYPES.map(type => { const definition = WORKFLOW_NODE_REGISTRY[type]; return { type, label: definition.label, description: descriptions[type], category: definition.category, icon: definition.icon, isTrigger: definition.isTrigger } })
 })

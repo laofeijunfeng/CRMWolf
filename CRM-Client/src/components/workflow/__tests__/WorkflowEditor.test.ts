@@ -2,6 +2,7 @@ import { nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import WorkflowEditor from '../WorkflowEditor.vue'
+import WorkflowNodePickerDialog from '../WorkflowNodePickerDialog.vue'
 import * as workflowValidation from '../workflowValidation'
 import workflowApi from '@/api/workflow'
 import procurementApi from '@/api/procurement'
@@ -90,12 +91,21 @@ describe('WorkflowEditor', () => {
     expect(workflowApi.get).toHaveBeenCalledTimes(2)
   })
 
-  it('shows all five palette nodes on an empty canvas', async () => {
+  it('shows all workflow palette nodes on an empty canvas', async () => {
     const wrapper = mountEditor()
     await nextTick()
 
     expect(wrapper.find('[data-testid="workflow-palette"]').text()).toContain('商机阶段变化')
-    expect(wrapper.findAll('[data-testid^="palette-node-"]')).toHaveLength(5)
+    expect(wrapper.findAll('[data-testid^="palette-node-"]')).toHaveLength(8)
+  })
+
+  it('provides a non-empty description for every picker item', async () => {
+    const wrapper = mountEditor()
+    await nextTick()
+
+    const picker = wrapper.findComponent(WorkflowNodePickerDialog)
+    const items = picker.props('nodeTypes') as ReadonlyArray<{ description: unknown }>
+    expect(items.every(item => typeof item.description === 'string' && item.description.trim() !== '')).toBe(true)
   })
 
   it('disables the trigger palette item after adding a trigger', async () => {
