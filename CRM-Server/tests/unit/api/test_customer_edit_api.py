@@ -6,7 +6,7 @@ import pytest
 from app.api import customers as customers_api
 from app.core.exceptions import ConflictException
 from app.models.outbound_notification_job import OutboundNotificationEventType
-from app.schemas.customer import CustomerLicenseSnapshotUpdate, CustomerLifecycleStatusUpdate
+from app.schemas.customer import CustomerLicenseSnapshotUpdate, CustomerLifecycleStatusUpdate, CustomerUpdate
 
 
 def _customer(*, status: int, version: int = 4):
@@ -68,8 +68,9 @@ async def test_lifecycle_status_following_to_won_updates_audits_refreshes_and_no
 
     assert response.status == 1
     assert response.version == 5
-    assert calls.updates == [{"customer": customer, "status": 1, "expected_version": 4}]
-    assert calls.logs[0]["event_type"] == customers_api.EventTypes.CUSTOMER_STATUS_CHANGED
+    assert calls.logs[0]["operator_id"] == "9"
+    assert calls.logs[0]["operator_name"] == "操作人"
+    assert calls.logs[0]["team_id"] == customer.team_id
     assert calls.logs[0]["content"] == {
         "previous_status": 0,
         "new_status": 1,
@@ -323,3 +324,184 @@ async def test_license_snapshot_permission_failure_has_no_mutation_or_side_effec
     assert calls.updates == []
     assert calls.logs == []
     assert calls.refreshes == []
+@pytest.mark.asyncio
+async def test_lifecycle_status_permission_denial_has_no_mutation_or_side_effects(monkeypatch):
+    customer = _customer(status=0)
+    calls = SimpleNamespace(updates=[], logs=[], refreshes=[])
+    monkeypatch.setattr(
+        customers_api,
+        "_get_editable_customer",
+        lambda *args, **kwargs: (_ for _ in ()).throw(customers_api.HTTPException(status_code=403, detail="无权编辑客户")),
+    )
+    monkeypatch.setattr(customers_api.customer_crud, "update_status_with_version", lambda *args, **kwargs: calls.updates.append(True))
+    monkeypatch.setattr(customers_api.operation_log_service, "log", lambda **kwargs: calls.logs.append(kwargs))
+    monkeypatch.setattr(customers_api, "_persist_customer_business_object_refresh_after_commit", lambda **kwargs: calls.refreshes.append(kwargs))
+
+    with pytest.raises(customers_api.HTTPException) as exc_info:
+        await customers_api.update_customer_lifecycle_status(
+            customer_id=customer.public_id,
+            status_update=CustomerLifecycleStatusUpdate(status=1, expected_version=4),
+            team_id=customer.team_id,
+            current_user=SimpleNamespace(id=9, name="操作人"),
+            db=SimpleNamespace(),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert customer.status == 0
+    assert customer.version == 4
+    assert calls.updates == []
+    assert calls.logs == []
+    assert calls.refreshes == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route_name", ["lifecycle", "snapshot"])
+async def test_edit_routes_reject_customer_from_another_team(monkeypatch, route_name):
+    customer = _license_customer()
+    calls = SimpleNamespace(updates=[])
+
+    def scoped_edit(db, customer_id, team_id, current_user):
+        assert team_id == 7
+        assert customer.team_id == 8
+        raise customers_api.HTTPException(status_code=404, detail="客户不存在")
+
+    monkeypatch.setattr(customers_api, "_get_editable_customer", scoped_edit)
+    monkeypatch.setattr(customers_api.customer_crud, "update_status_with_version", lambda *args, **kwargs: calls.updates.append(True))
+    monkeypatch.setattr(customers_api.customer_crud, "update_license_snapshot", lambda *args, **kwargs: calls.updates.append(True))
+
+    with pytest.raises(customers_api.HTTPException) as exc_info:
+        if route_name == "lifecycle":
+            await customers_api.update_customer_lifecycle_status(
+                customer_id=customer.public_id,
+                status_update=CustomerLifecycleStatusUpdate(status=1, expected_version=4),
+                team_id=7,
+                current_user=SimpleNamespace(id=9, name="操作人"),
+                db=SimpleNamespace(),
+            )
+        else:
+            await customers_api.update_customer_license_snapshot(
+                customer_id=customer.public_id,
+                snapshot_update=CustomerLicenseSnapshotUpdate(expected_version=4, license_type="OFFICIAL"),
+                team_id=7,
+                current_user=SimpleNamespace(id=9, name="操作人"),
+                db=SimpleNamespace(),
+            )
+
+    assert exc_info.value.status_code == 404
+    assert calls.updates == []
+
+
+@pytest.mark.asyncio
+async def test_customer_put_emits_changed_values_and_partial_intelligence_refresh(monkeypatch):
+    customer = _customer(status=0, version=4)
+    customer.city = "北京"
+    calls = SimpleNamespace(updates=[], logs=[], refreshes=[])
+    monkeypatch.setattr(customers_api, "_get_editable_customer", lambda db, customer_id, team_id, user: customer)
+
+    def update(db, db_customer, payload):
+        calls.updates.append(payload)
+        db_customer.city = payload.city
+        db_customer.version += 1
+        return db_customer
+
+    monkeypatch.setattr(customers_api.customer_crud, "update", update)
+    monkeypatch.setattr(customers_api.operation_log_service, "log", lambda **kwargs: calls.logs.append(kwargs))
+    monkeypatch.setattr(
+        customers_api.customer_business_object_intelligence_service,
+        "enqueue_object_change_refresh_after_commit",
+        lambda **kwargs: calls.refreshes.append(kwargs),
+    )
+    monkeypatch.setattr(customers_api, "_customer_response", lambda db, updated: updated)
+
+    response = customers_api.update_customer(
+        customer_id=customer.public_id,
+        customer_update=CustomerUpdate(city="上海", expected_version=4),
+        team_id=customer.team_id,
+        current_user=SimpleNamespace(id=9, name="操作人"),
+        db=SimpleNamespace(),
+    )
+
+    assert response.city == "上海"
+    assert response.version == 5
+    assert calls.logs[0]["event_type"] == customers_api.EventTypes.CUSTOMER_UPDATED
+    assert calls.logs[0]["operator_id"] == "9"
+    assert calls.logs[0]["content"] == {
+        "changed_fields": ["city"],
+        "before": {"city": "北京"},
+        "after": {"city": "上海"},
+    }
+    assert calls.refreshes[0]["change_type"] == "updated"
+    assert calls.refreshes[0]["scope"] == "partial"
+    assert calls.refreshes[0]["actor_id"] == "9"
+    assert calls.refreshes[0]["payload"] == {"change_type": "updated", "changed_fields": ["city"]}
+    assert len(calls.updates) == 1
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_status_sends_canonical_intelligence_event_payload(monkeypatch):
+    customer = _customer(status=0)
+    calls = _patch_route_dependencies(monkeypatch, customer)
+    calls.refreshes.clear()
+    monkeypatch.setattr(
+        customers_api,
+        "_persist_customer_business_object_refresh_after_commit",
+        lambda **kwargs: customers_api.customer_business_object_intelligence_service.enqueue_object_change_refresh_after_commit(**kwargs),
+    )
+    monkeypatch.setattr(
+        customers_api.customer_business_object_intelligence_service,
+        "enqueue_object_change_refresh_after_commit",
+        lambda **kwargs: calls.refreshes.append(kwargs),
+    )
+
+    await customers_api.update_customer_lifecycle_status(
+        customer_id=customer.public_id,
+        status_update=CustomerLifecycleStatusUpdate(status=1, expected_version=4),
+        team_id=customer.team_id,
+        current_user=SimpleNamespace(id=9, name="操作人"),
+        db=SimpleNamespace(),
+    )
+
+    assert calls.refreshes == [{
+        "business_object": customer,
+        "source_type": "customer",
+        "summary": "客户状态已更新，刷新客户智能档案",
+        "actor_id": "9",
+        "payload": {"change_type": "status_updated", "previous_status": 0, "new_status": 1},
+    }]
+
+
+@pytest.mark.asyncio
+async def test_license_snapshot_sends_canonical_intelligence_event_payload(monkeypatch):
+    customer = _license_customer()
+    calls = _patch_snapshot_route_dependencies(monkeypatch, customer)
+    calls.refreshes.clear()
+    monkeypatch.setattr(
+        customers_api,
+        "_persist_customer_business_object_refresh_after_commit",
+        lambda **kwargs: customers_api.customer_business_object_intelligence_service.enqueue_object_change_refresh_after_commit(**kwargs),
+    )
+    monkeypatch.setattr(
+        customers_api.customer_business_object_intelligence_service,
+        "enqueue_object_change_refresh_after_commit",
+        lambda **kwargs: calls.refreshes.append(kwargs),
+    )
+
+    await customers_api.update_customer_license_snapshot(
+        customer_id=customer.public_id,
+        snapshot_update=CustomerLicenseSnapshotUpdate(
+            expected_version=4,
+            license_type="OFFICIAL",
+            license_expiry_date=date(2027, 1, 1),
+        ),
+        team_id=customer.team_id,
+        current_user=SimpleNamespace(id=9, name="操作人"),
+        db=SimpleNamespace(),
+    )
+
+    assert calls.refreshes == [{
+        "business_object": customer,
+        "source_type": "customer",
+        "summary": "客户授权汇总已更新，刷新客户智能档案",
+        "actor_id": "9",
+        "payload": {"change_type": "license_snapshot_updated", "changed_fields": ["license_type", "license_expiry_date"]},
+    }]

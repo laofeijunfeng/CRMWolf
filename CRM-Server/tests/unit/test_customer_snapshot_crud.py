@@ -125,3 +125,39 @@ def test_customer_update_retains_current_inactive_industry_code(monkeypatch):
     assert current.industry == "legacy"
     assert current.version == 5
     db.commit.assert_called_once()
+
+
+def test_customer_update_accepts_active_industry_code(monkeypatch):
+    db = MagicMock()
+    current = SimpleNamespace(id=1, version=4, team_id=9, industry="old", city="北京")
+    locked_query = db.query.return_value.filter.return_value.with_for_update.return_value
+    locked_query.first.return_value = current
+    monkeypatch.setattr(
+        "app.crud.industry.industry_crud.get_by_code_with_parent",
+        lambda db, code: SimpleNamespace(code=code, is_active=1),
+    )
+
+    updated = customer_crud.update(db, current, CustomerUpdate(industry="current", expected_version=4))
+
+    assert updated is current
+    assert current.industry == "current"
+    assert current.version == 5
+    db.commit.assert_called_once()
+
+
+def test_customer_update_rejects_new_inactive_industry_code_before_mutation(monkeypatch):
+    db = MagicMock()
+    current = SimpleNamespace(id=1, version=4, team_id=9, industry="old", city="北京")
+    locked_query = db.query.return_value.filter.return_value.with_for_update.return_value
+    locked_query.first.return_value = current
+    monkeypatch.setattr(
+        "app.crud.industry.industry_crud.get_by_code_with_parent",
+        lambda db, code: SimpleNamespace(code=code, is_active=0),
+    )
+
+    with pytest.raises(ValueError, match="行业"):
+        customer_crud.update(db, current, CustomerUpdate(industry="inactive-new", expected_version=4))
+
+    assert current.industry == "old"
+    assert current.version == 4
+    db.commit.assert_not_called()
