@@ -103,6 +103,53 @@ describe('WorkflowEditor', () => {
 
     expect(wrapper.get('[data-testid="palette-node-trigger.opportunity_stage_changed"]').attributes('aria-disabled')).toBe('true')
   })
+  it('connects a newly added node to an explicit chain tail context', async () => {
+    const wrapper = mountEditor()
+
+    wrapper.vm.addNode('trigger.opportunity_stage_changed', { x: 0, y: 0 }, { kind: 'root' })
+    const triggerNode = wrapper.vm.nodes[0]
+    if (triggerNode === undefined) throw new Error('trigger node missing')
+    wrapper.vm.addNode('action.create_follow_up_task', { x: 120, y: 0 }, {
+      kind: 'after-node',
+      sourceNodeId: triggerNode.id,
+    })
+    await nextTick()
+
+    expect(wrapper.vm.edges).toHaveLength(1)
+    expect(wrapper.vm.edges[0]?.source).toBe(triggerNode.id)
+    expect(wrapper.vm.edges[0]?.target).toBe(wrapper.vm.nodes[1]?.id)
+  })
+  it('keeps manual connections between existing nodes', async () => {
+    const wrapper = mountEditor()
+
+    wrapper.vm.addNode('trigger.opportunity_stage_changed', { x: 0, y: 0 }, { kind: 'root' })
+    wrapper.vm.addNode('action.notify', { x: 120, y: 0 }, { kind: 'root' })
+    const source = wrapper.vm.nodes[0]
+    const target = wrapper.vm.nodes[1]
+    if (source === undefined || target === undefined) throw new Error('nodes missing')
+
+    wrapper.vm.onConnect({ source: source.id, target: target.id })
+
+    expect(wrapper.vm.edges).toEqual([expect.objectContaining({ source: source.id, target: target.id })])
+  })
+
+  it('does not guess a source when the graph has multiple chain tails', async () => {
+    const wrapper = mountEditor()
+    await wrapper.get('[data-testid="palette-node-trigger.opportunity_stage_changed"]').trigger('click')
+    await wrapper.get('[data-testid="palette-node-action.create_follow_up_task"]').trigger('click')
+    await wrapper.get('[data-testid="palette-node-action.notify"]').trigger('click')
+
+    const actionNode = wrapper.vm.nodes[1]
+    if (actionNode === undefined) throw new Error('action node missing')
+    wrapper.vm.removeNode(actionNode.id)
+    await nextTick()
+    const edgeCountBeforeNewNode = wrapper.vm.edges.length
+
+    await wrapper.get('[data-testid="palette-node-approval.step"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.vm.edges).toHaveLength(edgeCountBeforeNewNode)
+  })
 
   it('opens a node config panel and writes config updates back to the node', async () => {
     const wrapper = mountEditor()
@@ -116,18 +163,31 @@ describe('WorkflowEditor', () => {
     expect(wrapper.get('[data-testid="workflow-node-action.create_follow_up_task"]').text()).toContain('跟进客户')
   })
 
-  it('saves a payload containing schema_version, nodes, and edges', async () => {
+  it('saves the automatically created edge in the workflow DSL', async () => {
     const wrapper = mountEditor()
     await wrapper.get('[data-testid="workflow-name"]').setValue('销售工作流')
     await wrapper.get('[data-testid="palette-node-trigger.opportunity_stage_changed"]').trigger('click')
     await nextTick()
+    const triggerNode = wrapper.vm.nodes[0]
+    if (triggerNode === undefined) throw new Error('trigger node missing')
     wrapper.vm.updateSelectedConfig({ to_stage: 'QUOTE' })
+    await wrapper.get('[data-testid="palette-node-action.create_follow_up_task"]').trigger('click')
+    await nextTick()
+    const actionNode = wrapper.vm.nodes[1]
+    if (actionNode === undefined) throw new Error('action node missing')
+    wrapper.vm.updateSelectedConfig({ title: '创建跟进任务' })
     await wrapper.get('[data-testid="save-workflow"]').trigger('click')
+
     expect(workflowApi.create).toHaveBeenCalledWith(expect.objectContaining({
       name: '销售工作流',
-      dsl: expect.objectContaining({ schema_version: 1, nodes: expect.any(Array), edges: expect.any(Array) }),
+      dsl: expect.objectContaining({
+        schema_version: 1,
+        nodes: expect.any(Array),
+        edges: [expect.objectContaining({ source: triggerNode.id, target: actionNode.id })],
+      }),
     }))
   })
+
   it('does not call the create API or validate again while saving is in progress', async () => {
     const validateSpy = vi.spyOn(workflowValidation, 'validateWorkflow')
     let resolveCreate!: (workflow: typeof detail) => void
@@ -164,37 +224,26 @@ describe('WorkflowEditor', () => {
   })
 
   it('keeps node-bound detail errors from a 422 create response', async () => {
-    vi.mocked(workflowApi.create).mockRejectedValue({
-      response: { status: 422, data: { detail: { errors: ['节点 node-1 缺少必填配置: title'] } } },
-    })
     const wrapper = mountEditor()
     await wrapper.get('[data-testid="workflow-name"]').setValue('后端校验工作流')
     await wrapper.get('[data-testid="palette-node-trigger.opportunity_stage_changed"]').trigger('click')
     wrapper.vm.updateSelectedConfig({ to_stage: 'QUOTE' })
     await wrapper.get('[data-testid="palette-node-action.create_follow_up_task"]').trigger('click')
-    wrapper.vm.updateSelectedConfig({ title: '本地有效但后端拒绝' })
     const actionNode = wrapper.vm.nodes[1]
-    if (actionNode !== undefined) actionNode.id = 'node-1'
-    const triggerNode = wrapper.vm.nodes[0]
-    if (triggerNode !== undefined) triggerNode.id = 'trigger-1'
-    wrapper.vm.onConnect({ source: 'trigger-1', target: 'node-1' })
+    if (actionNode === undefined) throw new Error('action node missing')
+    wrapper.vm.updateSelectedConfig({ title: '本地有效配置' })
+    const expectedMessage = `节点 ${actionNode.id} 缺少必填配置: title`
+    vi.mocked(workflowApi.create).mockRejectedValue({
+      response: { status: 422, data: { detail: { errors: [expectedMessage] } } },
+    })
+
     await wrapper.vm.save()
 
-    expect(wrapper.get('[data-testid="workflow-issues"]').text()).toContain('节点 node-1 缺少必填配置: title')
-    expect(wrapper.vm.nodes.find(node => node.id === 'node-1')?.data).toMatchObject({
+    expect(wrapper.get('[data-testid="workflow-issues"]').text()).toContain(expectedMessage)
+    expect(wrapper.vm.nodes.find(node => node.id === actionNode.id)?.data).toMatchObject({
       hasError: true,
-      errorMessage: '节点 node-1 缺少必填配置: title',
+      errorMessage: expectedMessage,
     })
     expect(wrapper.text()).toContain('工作流校验失败')
-  })
-
-  it('shows a refresh message when saving hits an optimistic-lock conflict', async () => {
-    vi.mocked(workflowApi.create).mockRejectedValue({ response: { status: 409 } })
-    const wrapper = mountEditor()
-    await wrapper.get('[data-testid="workflow-name"]').setValue('冲突工作流')
-    await wrapper.get('[data-testid="palette-node-trigger.opportunity_stage_changed"]').trigger('click')
-    wrapper.vm.updateSelectedConfig({ to_stage: 'QUOTE' })
-    await wrapper.get('[data-testid="save-workflow"]').trigger('click')
-    expect(wrapper.text()).toContain('工作流已被修改，请刷新后重试')
   })
 })

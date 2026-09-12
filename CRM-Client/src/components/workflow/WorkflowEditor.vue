@@ -7,28 +7,19 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import workflowApi, { type WorkflowDetail, type WorkflowDsl } from '@/api/workflow'
 import { validateWorkflow, type WorkflowGraph, type WorkflowValidationIssue } from './workflowValidation'
+import {
+  insertNodeIntoGraph,
+  type WorkflowEditorEdge,
+  type WorkflowEditorNode,
+  type WorkflowInsertContext,
+} from './workflowGraphEditing'
 import { WORKFLOW_NODE_REGISTRY, WORKFLOW_NODE_TYPES, type WorkflowNodeType } from './workflowNodeRegistry'
 import WorkflowNode from './WorkflowNode.vue'
 import WorkflowNodePalette from './WorkflowNodePalette.vue'
 
 const WORKFLOW_FLOW_ID = 'workflow-editor-flow'
 
-interface WorkflowNodeData {
-  config: Record<string, unknown>
-  hasError: boolean
-  errorMessage: string
-}
-interface EditorNode {
-  id: string
-  type: string
-  position: { x: number; y: number }
-  data: WorkflowNodeData
-}
-interface EditorEdge {
-  id: string
-  source: string
-  target: string
-}
+type WorkflowNodeData = WorkflowEditorNode['data']
 
 function nodeData(config: Record<string, unknown>, hasError = false, errorMessage = ''): WorkflowNodeData {
   return { config, hasError, errorMessage }
@@ -36,8 +27,8 @@ function nodeData(config: Record<string, unknown>, hasError = false, errorMessag
 
 const props = defineProps<{ workflowId: number | null }>()
 const emit = defineEmits<{ saved: [workflow: WorkflowDetail]; cancelled: [] }>()
-const nodes = ref<EditorNode[]>([])
-const edges = ref<EditorEdge[]>([])
+const nodes = ref<WorkflowEditorNode[]>([])
+const edges = ref<WorkflowEditorEdge[]>([])
 const workflowName = ref('')
 const description = ref('')
 const loadedLastModified = ref<string | null>(null)
@@ -88,15 +79,30 @@ function applyIssues(nextIssues: WorkflowValidationIssue[]): void {
   }))
 }
 
-function addNode(type: WorkflowNodeType, position = { x: 120, y: 120 }): void {
+function addNode(
+  type: WorkflowNodeType,
+  position = { x: 120, y: 120 },
+  context: WorkflowInsertContext = { kind: 'root' },
+): void {
   const definition = WORKFLOW_NODE_REGISTRY[type]
   if (definition.isTrigger && triggerUsed.value) return
-  const id = freshId('node')
-  nodes.value = [...nodes.value, { id, type, position, data: nodeData(definition.defaults()) }]
-  selectedNodeId.value = id
+  const nextNode: WorkflowEditorNode = { id: freshId('node'), type, position, data: nodeData(definition.defaults()) }
+  const result = insertNodeIntoGraph(nodes.value, edges.value, nextNode, context)
+  if (result.nodes === nodes.value) return
+  nodes.value = result.nodes
+  edges.value = result.edges
+  selectedNodeId.value = nextNode.id
   applyIssues([])
 }
 
+function addNodeFromPalette(type: WorkflowNodeType): void {
+  const terminalNodes = nodes.value.filter(node => !edges.value.some(edge => edge.source === node.id))
+  const soleTerminal = terminalNodes.length === 1 ? terminalNodes[0] : undefined
+  const context: WorkflowInsertContext = soleTerminal !== undefined && !WORKFLOW_NODE_REGISTRY[type].isTrigger
+    ? { kind: 'after-node', sourceNodeId: soleTerminal.id }
+    : { kind: 'root' }
+  addNode(type, undefined, context)
+}
 function selectNodeById(nodeId: string): void {
   selectedNodeId.value = nodeId
 }
@@ -236,7 +242,7 @@ function cancel(): void {
 watch(() => props.workflowId, () => { void load() })
 onMounted(() => { void load() })
 
-defineExpose({ addNode, save, onConnect, removeNode, updateSelectedConfig, nodes, reload })
+defineExpose({ addNode, save, onConnect, removeNode, updateSelectedConfig, nodes, edges, reload })
 </script>
 
 <template>
@@ -261,7 +267,7 @@ defineExpose({ addNode, save, onConnect, removeNode, updateSelectedConfig, nodes
       </div>
     </header>
     <div class="grid min-h-0 flex-1 grid-cols-[220px_1fr_320px]">
-      <WorkflowNodePalette :trigger-used="triggerUsed" @add="addNode" />
+      <WorkflowNodePalette :trigger-used="triggerUsed" @add="addNodeFromPalette" />
       <div class="min-h-0" @drop="onDrop" @dragover="onDragOver">
         <VueFlow
           :id="WORKFLOW_FLOW_ID"
