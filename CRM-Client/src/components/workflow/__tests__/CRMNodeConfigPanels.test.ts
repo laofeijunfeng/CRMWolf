@@ -37,6 +37,13 @@ describe('CRM workflow configuration panels', () => {
       [{ customer_ref: 'customer-1' }], [{ name: '王总' }], [{ position: '采购负责人' }], [{ mobile: '13800138000' }], [{ is_decision_maker: true }],
     ])
   })
+  it('preserves numeric select values in contact patches', async () => {
+    const wrapper = mount(ActionCreateContactPanel, { props: { config: {} }, global })
+    const selectField = wrapper.findComponent(SelectFieldStub) as unknown as { vm: { $emit: (event: string, value: number) => void } }
+    selectField.vm.$emit('update:modelValue', 2)
+    await nextTick()
+    expect(wrapper.emitted('update:config')).toContainEqual([{ gender: 2 }])
+  })
 
   it('updates opportunity numeric fields through patches only', async () => {
     const wrapper = mount(ActionCreateOpportunityPanel, { props: { config: {} }, global })

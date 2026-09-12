@@ -9,7 +9,18 @@ export interface WorkflowInsertEdgeData {
 
 const props = defineProps<EdgeProps<WorkflowInsertEdgeData>>()
 const emit = defineEmits<{ insert: [edgeId: string] }>()
-const edgeGeometry = computed(() => getBezierPath(props))
+const edgeGeometry = computed(() => {
+  const params = {
+    sourceX: props.sourceX,
+    sourceY: props.sourceY,
+    sourcePosition: props.sourcePosition,
+    targetX: props.targetX,
+    targetY: props.targetY,
+    targetPosition: props.targetPosition,
+    ...(props.curvature !== undefined ? { curvature: props.curvature } : {}),
+  } satisfies Parameters<typeof getBezierPath>[0]
+  return getBezierPath(params)
+})
 const edgePath = computed(() => edgeGeometry.value[0])
 const midpointStyle = computed(() => ({ transform: `translate(-50%, -50%) translate(${edgeGeometry.value[1]}px,${edgeGeometry.value[2]}px)` }))
 

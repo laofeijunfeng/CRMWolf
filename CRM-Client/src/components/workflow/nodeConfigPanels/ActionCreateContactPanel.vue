@@ -7,7 +7,7 @@ import { SelectField } from '@/components/crmwolf'
 const props = defineProps<{ config: Record<string, unknown> }>()
 const emit = defineEmits<{ 'update:config': [patch: Record<string, unknown>] }>()
 
-function update(field: string, value: string | boolean): void {
+function update(field: string, value: string | number | boolean): void {
   emit('update:config', { [field]: value })
 }
 

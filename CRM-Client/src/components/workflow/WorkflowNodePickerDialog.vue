@@ -4,20 +4,27 @@ import type { WorkflowNodeCategory, WorkflowNodeType } from './workflowNodeRegis
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 export interface WorkflowNodePickerItem { type: WorkflowNodeType; label: string; description: string; category: WorkflowNodeCategory; icon: unknown; isTrigger: boolean; disabledReason?: string }
+type NormalizedWorkflowNodePickerItem = Omit<WorkflowNodePickerItem, 'disabledReason'> & { disabledReason: string | undefined }
 const props = defineProps<{ open: boolean; nodeTypes: readonly WorkflowNodePickerItem[]; triggerUsed: boolean; opener?: HTMLElement | null }>()
 const emit = defineEmits<{ 'update:open': [open: boolean]; select: [type: WorkflowNodeType] }>()
 const search = ref('')
 const selectionInProgress = ref(false)
 const categoryLabels: Record<WorkflowNodeCategory, string> = { trigger: '触发器', control: '控制', action: '动作' }
 const categoryOrder: WorkflowNodeCategory[] = ['trigger', 'control', 'action']
-const normalizedItems = computed(() => props.nodeTypes.map(item => ({ ...item, disabledReason: item.disabledReason ?? (item.isTrigger && props.triggerUsed ? '工作流只能有一个触发器' : undefined) })))
+const normalizedItems = computed<NormalizedWorkflowNodePickerItem[]>(() => props.nodeTypes.map(item => ({ ...item, disabledReason: item.disabledReason ?? (item.isTrigger && props.triggerUsed ? '工作流只能有一个触发器' : undefined) })))
 const filteredItems = computed(() => { const query = search.value.trim().toLocaleLowerCase(); if (query === '') return normalizedItems.value; return normalizedItems.value.filter(item => [item.label, item.description, item.type].some(value => value.toLocaleLowerCase().includes(query))) })
 const groups = computed(() => categoryOrder.map(category => ({ category, label: categoryLabels[category], items: filteredItems.value.filter(item => item.category === category) })).filter(group => group.items.length > 0))
 function close(): void { emit('update:open', false) }
-function select(item: WorkflowNodePickerItem): void { if (item.disabledReason !== undefined) return; selectionInProgress.value = true; emit('select', item.type); close() }
+function select(item: NormalizedWorkflowNodePickerItem): void { if (item.disabledReason !== undefined) return; selectionInProgress.value = true; emit('select', item.type); close() }
 function handleOpenChange(open: boolean): void { emit('update:open', open); if (!open) search.value = '' }
-function restoreFocus(event: Event): void { event.preventDefault(); if (!selectionInProgress.value && props.opener?.isConnected) props.opener.focus() }
-watch(() => props.open, open => { if (open) selectionInProgress.value = false; else void nextTick(() => { if (!selectionInProgress.value && props.opener?.isConnected) props.opener.focus() }) })
+function handleKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    close()
+  }
+}
+function restoreFocus(event: Event): void { event.preventDefault(); if (!selectionInProgress.value && props.opener?.isConnected === true) props.opener.focus() }
+watch(() => props.open, open => { if (open) selectionInProgress.value = false; else void nextTick(() => { if (!selectionInProgress.value && props.opener?.isConnected === true) props.opener.focus() }) })
 </script>
 <template>
   <Dialog :open="props.open" @update:open="handleOpenChange">
