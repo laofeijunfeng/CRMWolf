@@ -213,8 +213,8 @@ describe('WorkflowEditor', () => {
       preventDefault: () => undefined,
       clientX: 240,
       clientY: 0,
-      dataTransfer: { getData: () => 'action.notify' },
-    })
+      dataTransfer: { getData: () => 'action.notify' } as unknown as DataTransfer,
+    } as unknown as DragEvent)
     await nextTick()
 
     const droppedNode = wrapper.vm.nodes[2]
@@ -335,5 +335,35 @@ describe('WorkflowEditor', () => {
       errorMessage: expectedMessage,
     })
     expect(wrapper.text()).toContain('工作流校验失败')
+  })
+  it('shows draft, unsaved, and validation status in the top toolbar', async () => {
+    const wrapper = mountEditor()
+    await nextTick()
+
+    expect(wrapper.get('[data-testid="workflow-status-toolbar"]').text()).toContain('草稿')
+    expect(wrapper.get('[data-testid="workflow-status-toolbar"]').text()).toContain('未保存')
+    expect(wrapper.get('[data-testid="workflow-status-toolbar"]').text()).toContain('校验通过')
+  })
+
+  it('provides an accessible root add-node control', async () => {
+    const wrapper = mountEditor()
+    await nextTick()
+
+    const rootAdd = wrapper.get('[data-testid="workflow-root-add-node"]')
+    expect(rootAdd.text()).toContain('添加节点')
+    expect(rootAdd.attributes('aria-label')).toBe('添加根节点')
+  })
+
+  it('closes the selected node configuration panel without changing the graph', async () => {
+    const wrapper = mountEditor()
+    await wrapper.get('[data-testid="palette-node-action.notify"]').trigger('click')
+    await nextTick()
+    const nodeCount = wrapper.vm.nodes.length
+
+    await wrapper.get('[data-testid="workflow-config-close"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.vm.nodes).toHaveLength(nodeCount)
+    expect(wrapper.get('[data-testid="workflow-config-panel"]').text()).toContain('选择节点以配置')
   })
 })

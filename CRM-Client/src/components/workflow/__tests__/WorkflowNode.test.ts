@@ -53,4 +53,14 @@ describe('WorkflowNode', () => {
       { type: 'source', position: 'right' },
     ])
   })
+  it('renders category and status badges with stable accessible labels', () => {
+    const wrapper = mount(WorkflowNode, {
+      props: { ...nodeProps, data: { ...nodeProps.data, hasError: true, errorMessage: '缺少审批角色' } },
+    })
+
+    expect(wrapper.get('[data-testid="workflow-node-category"]').text()).toBe('动作')
+    expect(wrapper.get('[data-testid="workflow-node-status"]').text()).toContain('需配置')
+    expect(wrapper.get('button').attributes('aria-label')).toContain('审批节点')
+    expect(wrapper.get('[role="alert"]').text()).toContain('缺少审批角色')
+  })
 })
