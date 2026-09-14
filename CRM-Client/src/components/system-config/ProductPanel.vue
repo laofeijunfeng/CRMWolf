@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ListCard } from '@/components/crmwolf'
+import ErrorState from '@/components/ErrorState.vue'
 import {
   Dialog,
   DialogContent,
@@ -82,6 +83,7 @@ const permissionStore = usePermissionStore()
 
 const products = ref<ProductResponse[]>([])
 const loading = ref(false)
+const loadError = ref<unknown | null>(null)
 const searchText = ref('')
 const filterStatus = ref('all')
 const dialogOpen = ref(false)
@@ -127,9 +129,11 @@ const {
 
 const fetchProducts = async (): Promise<void> => {
   loading.value = true
+  loadError.value = null
   try {
     products.value = await productApi.list()
   } catch (error) {
+    loadError.value = error
     handleApiError(error, '获取产品')
   } finally {
     loading.value = false
@@ -137,6 +141,7 @@ const fetchProducts = async (): Promise<void> => {
 }
 
 const showCreateDialog = (): void => {
+  if (!canCreate.value) return
   isEditMode.value = false
   selectedProduct.value = null
   resetForm({ values: { code: '', name: '', description: '' } })
@@ -144,6 +149,7 @@ const showCreateDialog = (): void => {
 }
 
 const showEditDialog = (product: ProductResponse): void => {
+  if (!canEdit.value) return
   isEditMode.value = true
   selectedProduct.value = product
   resetForm({
@@ -314,31 +320,46 @@ const deleteModule = async (
   } catch (error) {
     handleApiError(error, '删除模块')
   }
-
 }
 
+const lastDeepLinkKey = ref<string | null>(null)
+
 watch(() => props.active, (active) => {
-  if (active) {
-    void fetchProducts()
-    if (props.action === 'create' && canCreate.value) showCreateDialog()
-  }
+  if (active) void fetchProducts()
 })
 
 onMounted(() => {
-  if (props.active) {
-    void fetchProducts()
-    if (props.action === 'create' && canCreate.value) showCreateDialog()
-  }
+  if (props.active) void fetchProducts()
 })
 
 watch(
-  () => [props.action, props.recordId, products.value.length] as const,
-  ([action, recordId]) => {
-    if (action === 'edit' && recordId !== undefined) {
+  () => [props.active, props.action, props.recordId, products.value.length] as const,
+  ([active, action, recordId]) => {
+    if (!active) return
+
+    if (action === undefined) {
+      lastDeepLinkKey.value = null
+      return
+    }
+
+    const key = `${action}:${recordId ?? ''}`
+    if (lastDeepLinkKey.value === key) return
+
+    if (action === 'create' && canCreate.value) {
+      lastDeepLinkKey.value = key
+      showCreateDialog()
+      return
+    }
+
+    if (action === 'edit' && recordId !== undefined && canEdit.value) {
       const found = products.value.find(item => item.public_id === recordId)
-      if (found) showEditDialog(found)
+      if (found) {
+        lastDeepLinkKey.value = key
+        showEditDialog(found)
+      }
     }
   },
+  { immediate: true },
 )
 </script>
 
@@ -353,6 +374,7 @@ watch(
               v-model="searchText"
               class="pl-8"
               placeholder="搜索产品名称或编码"
+              aria-label="搜索产品名称或编码"
             />
           </div>
           <Button v-if="canCreate" type="button" @click="showCreateDialog">
@@ -363,7 +385,7 @@ watch(
 
         <div class="flex items-center gap-3">
           <Select v-model="filterStatus">
-            <SelectTrigger class="w-32">
+            <SelectTrigger class="w-32" aria-label="产品状态">
               <SelectValue placeholder="状态" />
             </SelectTrigger>
             <SelectContent>
@@ -373,8 +395,24 @@ watch(
             </SelectContent>
           </Select>
         </div>
-
+        <ErrorState
+          v-if="loadError !== null"
+          title="产品加载失败"
+          description="请检查网络连接后重试。"
+        >
+          <template #action>
+            <Button
+              type="button"
+              data-testid="product-list-retry"
+              :disabled="loading"
+              @click="void fetchProducts()"
+            >
+              {{ loading ? '加载中...' : '重新加载' }}
+            </Button>
+          </template>
+        </ErrorState>
         <ListCard
+          v-if="loadError === null || products.length > 0"
           :title="`产品列表（${filteredProducts.length}）`"
           :items="filteredProducts"
           :loading="loading"

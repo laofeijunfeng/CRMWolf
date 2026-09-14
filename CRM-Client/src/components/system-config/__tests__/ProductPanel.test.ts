@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import ProductPanel from '@/components/system-config/ProductPanel.vue'
 import { flushPromises } from '@vue/test-utils'
@@ -25,7 +25,8 @@ vi.mock('@/utils/confirmDialog', () => ({ confirmDialog: vi.fn().mockResolvedVal
 
 const stubs = {
   Dialog: { props: ['open'], template: '<div v-if="open"><slot /></div>' },
-  ListCard: { props: ['title', 'items', 'loading', 'emptyText'], template: '<div><h3>{{ title }}</h3><div v-for="item in items" :key="item.id"><slot name="itemMain" :item="item" /><slot name="itemMeta" :item="item" /><slot name="itemBadges" :item="item" /><slot name="itemActions" :item="item" /></div></div>' },
+  ListCard: { props: ['title', 'items', 'loading', 'emptyText'], template: '<div><h3>{{ title }}</h3><div v-for="item in items" :key="item.id"><slot name="itemMain" :item="item" /><slot name="itemMeta" :item="item" /><slot name="itemBadges" :item="item" /><slot name="itemActions" :item="item" /></div><p v-if="items.length === 0">{{ emptyText }}</p></div>' },
+  ErrorState: { props: ['title', 'description'], template: '<div role="alert"><strong>{{ title }}</strong><span>{{ description }}</span><slot name="action" /></div>' },
   Button: { props: ['disabled'], template: '<button :disabled="disabled"><slot /></button>' },
   Input: { props: ['modelValue'], emits: ['update:modelValue'], template: '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />' },
   Badge: { template: '<span><slot /></span>' },
@@ -33,6 +34,8 @@ const stubs = {
   DialogContent: { template: '<div><slot /></div>' }, DialogHeader: { template: '<div><slot /></div>' }, DialogTitle: { template: '<h2><slot /></h2>' }, DialogDescription: { template: '<div><slot /></div>' }, DialogFooter: { template: '<div><slot /></div>' },
   FormField: { template: '<div><slot :componentField="{}" /></div>' }, FormControl: { template: '<div><slot /></div>' }, FormItem: { template: '<div><slot /></div>' }, FormLabel: { template: '<label><slot /></label>' }, FormMessage: { template: '<span><slot /></span>' }, Textarea: { template: '<textarea />' },
 }
+
+const mountPanel = (props: Record<string, unknown> = {}): VueWrapper => mount(ProductPanel, { props, global: { stubs } })
 
 const setPermissions = (codes: string[]): void => {
   const store = usePermissionStore()
@@ -53,6 +56,8 @@ describe('ProductPanel', () => {
     expect(wrapper.findAll('button').some(button => button.text().includes('新建产品'))).toBe(false)
     expect(wrapper.findAll('button').some(button => button.text().includes('编辑'))).toBe(false)
     expect(wrapper.findAll('button').some(button => button.text().includes('删除'))).toBe(false)
+    expect(wrapper.find('input[aria-label="搜索产品名称或编码"]').exists()).toBe(true)
+    expect(wrapper.find('button[aria-label="产品状态"]').exists()).toBe(true)
   })
 
   it('shows add-on module deletion for editors without product deletion permission', async () => {
@@ -73,5 +78,41 @@ describe('ProductPanel', () => {
     expect(wrapper.text()).toContain('新建产品')
     expect(wrapper.text()).toContain('新增模块')
     expect(wrapper.findAll('button').filter(button => button.text() === '删除模块')).toHaveLength(1)
+  })
+  it('does not open an edit dialog for a read-only edit deep link', async () => {
+    setActivePinia(createPinia()); setPermissions(['product:view'])
+    const wrapper = mountPanel({ action: 'edit', recordId: 'prd_1' })
+    await vi.waitFor(() => expect(productApi.list).toHaveBeenCalled())
+    await flushPromises()
+    expect(wrapper.find('h2').exists()).toBe(false)
+    expect(wrapper.findAll('button').some(button => button.text() === '保存')).toBe(false)
+    expect(wrapper.findAll('button').some(button => button.text() === '编辑')).toBe(false)
+  })
+
+  it('opens a create dialog when the action prop transitions on an active panel', async () => {
+    setActivePinia(createPinia()); setPermissions(['product:view', 'product:create'])
+    const wrapper = mountPanel()
+    await vi.waitFor(() => expect(productApi.list).toHaveBeenCalled())
+    await flushPromises()
+    expect(wrapper.find('h2').exists()).toBe(false)
+    await wrapper.setProps({ action: 'create' })
+    await flushPromises()
+    expect(wrapper.find('h2').text()).toBe('新建产品')
+    expect(wrapper.findAll('button').some(button => button.text() === '保存')).toBe(true)
+  })
+
+  it('renders a retryable error instead of an empty state and recovers after retry', async () => {
+    setActivePinia(createPinia()); setPermissions(['product:view'])
+    vi.mocked(productApi.list).mockRejectedValueOnce(new Error('network')).mockResolvedValueOnce([mocks.product])
+    const wrapper = mountPanel()
+    await vi.waitFor(() => expect(productApi.list).toHaveBeenCalled())
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('产品加载失败')
+    expect(wrapper.find('button[data-testid="product-list-retry"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('暂无产品')
+    await wrapper.get('button[data-testid="product-list-retry"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('CRM 产品')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
   })
 })
