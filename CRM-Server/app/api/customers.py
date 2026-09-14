@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.invoices import _invoice_title_response, _populate_application_info
+from app.constants.operation_log_events import EventTypes
 from app.core.database import get_db
 from app.core.deps import (
     check_customer_delete_permission,
@@ -18,6 +19,7 @@ from app.core.deps import (
     get_current_user_team,
     require_permission,
 )
+from app.core.exceptions import ConflictException
 from app.core.list_query import (
     enforce_owner_view_scope,
     optional_request_list_query,
@@ -26,7 +28,6 @@ from app.core.list_query import (
 )
 from app.crud.contract import contract_crud
 from app.crud.customer import contact_crud, customer_crud
-from app.constants.operation_log_events import EventTypes
 from app.crud.customer_member import customer_member_crud
 from app.crud.invoice import invoice_application_crud, invoice_title_crud
 from app.crud.lead import lead_crud
@@ -34,8 +35,10 @@ from app.crud.team import team_crud
 from app.crud.user import user_crud
 from app.models.command_execution import CommandExecutionStatus
 from app.models.customer import Contact
-from app.schemas.common import PaginatedResponse
+from app.models.outbound_notification_job import OutboundNotificationEventType
+
 from app.schemas.command import CommandEffect, CommandNextAction, CommandResource
+from app.schemas.common import PaginatedResponse
 from app.schemas.contract import ContractListResponse, ContractStatusEnum
 from app.schemas.customer import (
     ContactCreate,
@@ -43,11 +46,10 @@ from app.schemas.customer import (
     ContactUpdate,
     ConvertLeadToCustomer,
     ConvertResponse,
+    CustomerAssignmentPreviewResponse,
+    CustomerAssignmentResult,
     CustomerAssignRequest,
     CustomerAssignResponse,
-    CustomerAssignmentResult,
-    CustomerAssignmentPreviewResponse,
-    CustomerTransferScope,
     CustomerClaimRequest,
     CustomerCreate,
     CustomerDetailResponse,
@@ -59,10 +61,10 @@ from app.schemas.customer import (
     CustomerIntelligenceRetryDueResponse,
     CustomerIntelligenceRunDiagnosticListResponse,
     CustomerIntelligenceRunDiagnosticResponse,
-    CustomerListResponse,
-    CustomerLoseRequest,
     CustomerLicenseSnapshotUpdate,
     CustomerLifecycleStatusUpdate,
+    CustomerListResponse,
+    CustomerLoseRequest,
     CustomerMemberCandidate,
     CustomerMemberCreate,
     CustomerMemberResponse,
@@ -72,6 +74,7 @@ from app.schemas.customer import (
     CustomerReturnRequest,
     CustomerReturnResponse,
     CustomerStatusUpdate,
+    CustomerTransferScope,
     CustomerUpdate,
     MessageResponse,
     StatisticsResponse,
@@ -79,14 +82,6 @@ from app.schemas.customer import (
 )
 from app.schemas.invoice import InvoiceApplicationResponse, InvoiceTitleResponse
 from app.schemas.payment import PaymentPlanResponse
-from app.services.operation_log_service import operation_log_service
-from app.services.command_execution_service import (
-    CommandAlreadyInProgress,
-    CommandIdempotencyConflict,
-    CommandOperationConflict,
-    command_execution_service,
-    request_fingerprint,
-)
 from app.services.acquisition_source_service import (
     AcquisitionSourceError,
     build_source_info,
@@ -94,26 +89,32 @@ from app.services.acquisition_source_service import (
     map_sources_by_ids,
     resolve_public_ids_to_ids,
 )
-from app.services.customer_identity_resolution_application_service import (
-    customer_identity_resolution_application_service,
+from app.services.command_execution_service import (
+    CommandAlreadyInProgress,
+    CommandIdempotencyConflict,
+    CommandOperationConflict,
+    command_execution_service,
+    request_fingerprint,
 )
 from app.services.customer_business_object_intelligence_service import (
     CustomerBusinessObjectChangeType,
     CustomerBusinessObjectSourceType,
     customer_business_object_intelligence_service,
 )
+from app.services.customer_identity_resolution_application_service import (
+    customer_identity_resolution_application_service,
+)
 from app.services.customer_intelligence_refresh_service import (
     CustomerIntelligenceCommittedEventRequest,
     customer_intelligence_refresh_service,
 )
 from app.services.customer_intelligence_run_service import CustomerIntelligenceRunDiagnostic
-from app.models.outbound_notification_job import OutboundNotificationEventType
-from app.services.outbound_notification_job_service import outbound_notification_job_service
-from app.core.exceptions import ConflictException
 from app.services.customer_status_transition_service import (
     CustomerStatusTransitionError,
     customer_status_transition_service,
 )
+from app.services.operation_log_service import operation_log_service
+from app.services.outbound_notification_job_service import outbound_notification_job_service
 
 router = APIRouter(prefix="/v1/customers", tags=["客户管理"])
 logger = logging.getLogger(__name__)
@@ -1759,21 +1760,15 @@ async def update_customer_lifecycle_status(
 ):
     customer = _get_editable_customer(db, customer_id, team_id, current_user)
     try:
-        decision = customer_status_transition_service.plan(
-            current_status=customer.status,
+        updated_customer, decision, previous_version = customer_crud.plan_and_update_status_with_version(
+            db,
+            customer,
             target_status=status_update.status,
+            expected_version=status_update.expected_version,
+            planner=customer_status_transition_service.plan,
         )
     except CustomerStatusTransitionError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-    previous_version = customer.version
-    try:
-        updated_customer = customer_crud.update_status_with_version(
-            db,
-            customer,
-            status=decision.new_status,
-            expected_version=status_update.expected_version,
-        )
     except ConflictException as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
@@ -1860,6 +1855,8 @@ async def update_customer_license_snapshot(
             "before": {field: _audit_value(before.get(field)) for field in ("license_type", "license_expiry_date")},
             "after": {field: _audit_value(after.get(field)) for field in ("license_type", "license_expiry_date")},
             "changed_fields": changed_fields,
+            "previous_version": updated_customer.version - 1,
+            "new_version": updated_customer.version,
             "actor_id": str(current_user.id),
             "team_id": team_id,
         },
@@ -1871,7 +1868,7 @@ async def update_customer_license_snapshot(
         actor_id=str(current_user.id),
         payload={
             "change_type": "license_snapshot_updated",
-            "changed_fields": ["license_type", "license_expiry_date"],
+            "changed_fields": changed_fields,
         },
     )
     return _customer_response(db, updated_customer)
@@ -1981,31 +1978,19 @@ def update_customer(
     if customer_update.account_name:
         _ensure_customer_name_available(db, customer_update.account_name, team_id, exclude_customer_id=customer.id)
 
-    fields_set = customer_update.model_fields_set
-    audit_fields: list[str] = sorted(fields_set - {"expected_version"})
-
-    def _audit_snapshot(entity) -> dict[str, object]:
-        snapshot: dict[str, object] = {}
-        for field in audit_fields:
-            if field == "source_public_id":
-                source_row = get_by_id(db, getattr(entity, "source_id", None), team_id)
-                snapshot[field] = getattr(source_row, "public_id", None)
-            elif field == "source":
-                snapshot[field] = getattr(entity, "source", None)
-            else:
-                snapshot[field] = getattr(entity, field, None)
-        return snapshot
-
-    audit_before = _audit_snapshot(customer)
     try:
-        updated = customer_crud.update(db, customer, customer_update)
+        updated, before, after = customer_crud.update_with_audit(db, customer, customer_update)
+    except ConflictException as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except AcquisitionSourceError as exc:
         _raise_source_error(exc)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    audit_after = _audit_snapshot(updated)
-    changed_fields = [field for field in audit_fields if audit_before[field] != audit_after[field]]
+    def _audit_value(value):
+        return value.isoformat() if hasattr(value, "isoformat") else value
+
+    changed_fields = list(before.keys())
     if changed_fields:
         operation_log_service.log(
             db=db,
@@ -2018,19 +2003,21 @@ def update_customer(
             team_id=team_id,
             content={
                 "changed_fields": changed_fields,
-                "before": {field: audit_before[field] for field in changed_fields},
-                "after": {field: audit_after[field] for field in changed_fields},
+                "before": {field: _audit_value(before[field]) for field in changed_fields},
+                "after": {field: _audit_value(after[field]) for field in changed_fields},
             },
         )
-    if changed_fields:
         _persist_customer_business_object_refresh_after_commit(
             business_object=updated,
             source_type="customer",
             summary="客户主数据已更新，刷新客户智能档案",
             actor_id=str(current_user.id),
             payload={"change_type": "updated", "changed_fields": changed_fields},
+            scope="partial",
         )
+
     return _customer_response(db, updated)
+
 
 
 @router.patch("/{customer_id}/status", response_model=CustomerResponse, summary="更新客户状态", description="用于标记赢单、输单等关键状态变更")

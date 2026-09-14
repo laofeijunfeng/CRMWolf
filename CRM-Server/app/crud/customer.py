@@ -1,17 +1,9 @@
-from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_
-from typing import Any, Optional, List, Tuple
 from datetime import date, datetime, time, timedelta
+from typing import Any, List, Optional, Tuple
 
-from app.models.customer import Customer, Contact, CustomerMember
-from app.models.lead import Lead, LeadStatus
-from app.models.contract import Contract
-from app.models.opportunity import Opportunity
-from app.schemas.customer import CustomerCreate, CustomerUpdate, CustomerStatusEnum, ContactCreate, ContactUpdate, CustomerLicenseSnapshotUpdate
-from app.crud.industry import industry_crud
-from app.crud.operation_log import operation_log_crud
-from app.services.acquisition_source_service import get_by_id, resolve_source_for_entity_write
-from app.utils.time import business_now
+from sqlalchemy import and_, or_
+from sqlalchemy.orm import Session
+
 from app.core.exceptions import ConflictException
 from app.core.list_query import (
     FilterCondition,
@@ -22,6 +14,22 @@ from app.core.list_query import (
     uses_unified_list_query,
 )
 from app.core.list_query.catalogs import CUSTOMERS_LIST_QUERY_CATALOG
+from app.crud.industry import industry_crud
+from app.crud.operation_log import operation_log_crud
+from app.models.contract import Contract
+from app.models.customer import Contact, Customer, CustomerMember
+from app.models.lead import Lead, LeadStatus
+from app.models.opportunity import Opportunity
+from app.schemas.customer import (
+    ContactCreate,
+    ContactUpdate,
+    CustomerCreate,
+    CustomerLicenseSnapshotUpdate,
+    CustomerStatusEnum,
+    CustomerUpdate,
+)
+from app.services.acquisition_source_service import get_by_id, resolve_source_for_entity_write
+from app.utils.time import business_now
 
 
 def _split_csv(value: Optional[str]) -> List[str]:
@@ -288,53 +296,136 @@ class CustomerCRUD:
 
         return db_obj
 
-    def update(self, db: Session, db_obj: Customer, obj_in: CustomerUpdate) -> Customer:
-        if obj_in.expected_version is not None:
-            locked_customer = (
-                db.query(Customer)
-                .filter(
-                    Customer.id == db_obj.id,
-                    Customer.team_id == db_obj.team_id,
-                )
-                .with_for_update()
-                .first()
+    def update_with_audit(
+        self,
+        db: Session,
+        db_obj: Customer,
+        obj_in: CustomerUpdate,
+    ) -> Tuple[Customer, dict[str, Any], dict[str, Any]]:
+        locked_customer = (
+            db.query(Customer)
+            .filter(
+                Customer.id == db_obj.id,
+                Customer.team_id == db_obj.team_id,
             )
-            if locked_customer is None:
-                raise ConflictException("客户已不存在，请刷新后确认最新状态")
-            if locked_customer.version != obj_in.expected_version:
-                raise ConflictException("客户已发生变化，请刷新后确认最新状态")
-            db_obj = locked_customer
-
-        update_data = obj_in.model_dump(
-            exclude_unset=True,
-            exclude={"expected_version", "source_public_id", "source"},
+            .populate_existing()
+            .with_for_update()
+            .first()
         )
-        if "industry" in obj_in.model_fields_set and obj_in.industry is not None:
-            industry = industry_crud.get_by_code_with_parent(db, obj_in.industry)
-            if industry is None or (industry.is_active != 1 and industry.code != db_obj.industry):
-                raise ValueError("行业代码不存在或已停用")
+        if locked_customer is None:
+            raise ConflictException("客户已不存在，请刷新后确认最新状态")
+        if obj_in.expected_version is not None and locked_customer.version != obj_in.expected_version:
+            raise ConflictException("客户已发生变化，请刷新后确认最新状态")
+
         fields_set = obj_in.model_fields_set
+        proposed: dict[str, Any] = {}
+
+        if "industry" in fields_set:
+            if obj_in.industry is None:
+                proposed["industry"] = None
+            else:
+                industry = industry_crud.get_by_code_with_parent(db, obj_in.industry)
+                if industry is None:
+                    raise ValueError("行业代码不存在或已停用")
+                if industry.is_active == 1:
+                    proposed["industry"] = industry.code
+                elif industry.code == locked_customer.industry:
+                    proposed["industry"] = locked_customer.industry
+                else:
+                    raise ValueError("行业代码不存在或已停用")
+
+        if "status" in fields_set:
+            if locked_customer.status not in (0, 1):
+                raise ValueError("仅允许更新跟进中或已成交客户的状态")
+            proposed["status"] = obj_in.status
+
+        if "license_type" in fields_set or "license_expiry_date" in fields_set:
+            license_type = obj_in.license_type if "license_type" in fields_set else locked_customer.license_type
+            license_expiry_date = (
+                obj_in.license_expiry_date if "license_expiry_date" in fields_set else locked_customer.license_expiry_date
+            )
+            if license_expiry_date is None:
+                license_type = None
+            elif license_type is None:
+                raise ValueError("授权到期日期不为空时必须选择授权类型")
+            proposed["license_type"] = license_type
+            proposed["license_expiry_date"] = license_expiry_date
+
+        current_source_row = None
+        next_source_row = None
         if "source_public_id" in fields_set or "source" in fields_set:
-            source_row = resolve_source_for_entity_write(
+            current_source_row = get_by_id(db, locked_customer.source_id, locked_customer.team_id)
+            next_source_row = resolve_source_for_entity_write(
                 db,
-                db_obj.team_id,
+                locked_customer.team_id,
                 source_public_id=obj_in.source_public_id if "source_public_id" in fields_set else None,
                 legacy_source=obj_in.source if "source" in fields_set else None,
-                current_source_id=db_obj.source_id,
+                current_source_id=locked_customer.source_id,
                 required=False,
             )
-            update_data["source_id"] = source_row.id if source_row else None
-            update_data["source"] = source_row.name if source_row else None
+            proposed["source_id"] = next_source_row.id if next_source_row else None
+            proposed["source"] = next_source_row.name if next_source_row else None
 
-        if update_data:
-            for field, value in update_data.items():
-                setattr(db_obj, field, value)
+        for field in ("account_name", "city", "address", "company_scale", "default_procurement_method_id"):
+            if field in fields_set:
+                proposed[field] = getattr(obj_in, field)
 
-            db_obj.version += 1
+        audit_fields = (
+            "account_name",
+            "city",
+            "address",
+            "company_scale",
+            "source_public_id",
+            "default_procurement_method_id",
+            "industry",
+            "status",
+            "license_type",
+            "license_expiry_date",
+        )
+
+        def _current_audit_value(field: str) -> Any:
+            if field == "source_public_id":
+                return getattr(current_source_row, "public_id", None)
+            return getattr(locked_customer, field)
+
+        def _next_audit_value(field: str) -> Any:
+            if field == "source_public_id":
+                return getattr(next_source_row, "public_id", None)
+            if field in proposed:
+                return proposed[field]
+            return getattr(locked_customer, field)
+
+        def _field_was_requested(field: str) -> bool:
+            if field == "source_public_id":
+                return "source_public_id" in fields_set or "source" in fields_set
+            if field in ("license_type", "license_expiry_date"):
+                return "license_type" in fields_set or "license_expiry_date" in fields_set
+            return field in fields_set
+
+        before: dict[str, Any] = {}
+        after: dict[str, Any] = {}
+        for field in audit_fields:
+            if not _field_was_requested(field):
+                continue
+            old_value = _current_audit_value(field)
+            new_value = _next_audit_value(field)
+            if old_value != new_value:
+                before[field] = old_value
+                after[field] = new_value
+
+        if before:
+            for field, value in proposed.items():
+                setattr(locked_customer, field, value)
+            locked_customer.version += 1
             db.commit()
-            db.refresh(db_obj)
+            db.refresh(locked_customer)
 
-        return db_obj
+        return locked_customer, before, after
+
+    def update(self, db: Session, db_obj: Customer, obj_in: CustomerUpdate) -> Customer:
+        customer, _before, _after = self.update_with_audit(db, db_obj, obj_in)
+        return customer
+
 
     def update_license_snapshot(
         self,
@@ -345,6 +436,7 @@ class CustomerCRUD:
         locked_customer = (
             db.query(Customer)
             .filter(Customer.id == db_obj.id, Customer.team_id == db_obj.team_id)
+            .populate_existing()
             .with_for_update()
             .first()
         )
@@ -385,6 +477,7 @@ class CustomerCRUD:
         locked_customer = (
             db.query(Customer)
             .filter(Customer.id == db_obj.id, Customer.team_id == db_obj.team_id)
+            .populate_existing()
             .with_for_update()
             .first()
         )
@@ -398,6 +491,38 @@ class CustomerCRUD:
         db.commit()
         db.refresh(locked_customer)
         return locked_customer
+
+    def plan_and_update_status_with_version(
+        self,
+        db: Session,
+        db_obj: Customer,
+        *,
+        target_status: int,
+        expected_version: int,
+        planner,
+    ):
+        locked_customer = (
+            db.query(Customer)
+            .filter(Customer.id == db_obj.id, Customer.team_id == db_obj.team_id)
+            .populate_existing()
+            .with_for_update()
+            .first()
+        )
+        if locked_customer is None:
+            raise ConflictException("客户已不存在，请刷新后确认最新状态")
+        if locked_customer.version != expected_version:
+            raise ConflictException("客户已发生变化，请刷新后确认最新状态")
+
+        decision = planner(
+            current_status=locked_customer.status,
+            target_status=target_status,
+        )
+        previous_version = locked_customer.version
+        locked_customer.status = decision.new_status
+        locked_customer.version += 1
+        db.commit()
+        db.refresh(locked_customer)
+        return locked_customer, decision, previous_version
 
     def update_industry(self, db: Session, customer_id: int, industry: str) -> Customer:
         """更新客户行业字段"""
@@ -417,8 +542,8 @@ class CustomerCRUD:
 
         注意：删除前会检查是否存在关联合同，如有则抛出异常
         """
-        from app.services.operation_log_service import operation_log_service
         from app.crud.contract import contract_crud
+        from app.services.operation_log_service import operation_log_service
 
         # Use customer's team_id if not provided
         if team_id is None:
@@ -635,6 +760,7 @@ class CustomerCRUD:
         locked_customer = (
             db.query(Customer)
             .filter(Customer.id == customer.id, Customer.team_id == team_id)
+            .populate_existing()
             .with_for_update()
             .first()
         ) or customer
@@ -730,6 +856,7 @@ class CustomerCRUD:
         locked_customer = (
             db.query(Customer)
             .filter(Customer.id == customer.id, Customer.team_id == team_id)
+            .populate_existing()
             .with_for_update()
             .first()
         ) or customer
@@ -815,6 +942,7 @@ class CustomerCRUD:
         locked_customer = (
             db.query(Customer)
             .filter(Customer.id == customer.id, Customer.team_id == team_id)
+            .populate_existing()
             .with_for_update()
             .first()
         ) or customer

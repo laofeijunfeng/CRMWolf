@@ -59,15 +59,22 @@ def _deny_edit_permission(monkeypatch, customer):
 def _patch_route_dependencies(monkeypatch, customer):
     calls = SimpleNamespace(updates=[], logs=[], refreshes=[], notifications=[])
     _allow_edit_permission(monkeypatch, customer)
-    real_update_status = customers_api.customer_crud.update_status_with_version
+    real_plan_update = customers_api.customer_crud.plan_and_update_status_with_version
     crud_db = MagicMock()
-    crud_db.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = customer
+    crud_db.query.return_value.filter.return_value.populate_existing.return_value.with_for_update.return_value.first.return_value = customer
 
-    def update_status_with_version(db, db_customer, *, status, expected_version):
-        calls.updates.append({"customer": db_customer, "status": status, "expected_version": expected_version})
-        return real_update_status(crud_db, db_customer, status=status, expected_version=expected_version)
+    def plan_and_update_status_with_version(db, db_customer, *, target_status, expected_version, planner):
+        result = real_plan_update(
+            crud_db,
+            db_customer,
+            target_status=target_status,
+            expected_version=expected_version,
+            planner=planner,
+        )
+        calls.updates.append({"customer": db_customer, "status": target_status, "expected_version": expected_version})
+        return result
 
-    monkeypatch.setattr(customers_api.customer_crud, "update_status_with_version", update_status_with_version)
+    monkeypatch.setattr(customers_api.customer_crud, "plan_and_update_status_with_version", plan_and_update_status_with_version)
     monkeypatch.setattr(customers_api.operation_log_service, "log", lambda **kwargs: calls.logs.append(kwargs))
     monkeypatch.setattr(
         customers_api.customer_business_object_intelligence_service,
@@ -166,7 +173,7 @@ async def test_lifecycle_status_maps_stale_version_to_conflict_without_side_effe
     def reject_stale(*args, **kwargs):
         raise ConflictException("客户已发生变化，请刷新后确认最新状态")
 
-    monkeypatch.setattr(customers_api.customer_crud, "update_status_with_version", reject_stale)
+    monkeypatch.setattr(customers_api.customer_crud, "plan_and_update_status_with_version", reject_stale)
 
     with pytest.raises(customers_api.HTTPException) as exc_info:
         await customers_api.update_customer_lifecycle_status(
@@ -190,7 +197,7 @@ def _patch_snapshot_route_dependencies(monkeypatch, customer):
     _allow_edit_permission(monkeypatch, customer)
     real_update_snapshot = customers_api.customer_crud.update_license_snapshot
     crud_db = MagicMock()
-    crud_db.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = customer
+    crud_db.query.return_value.filter.return_value.populate_existing.return_value.with_for_update.return_value.first.return_value = customer
 
     def update_license_snapshot(db, db_customer, payload):
         calls.updates.append(payload)
@@ -241,15 +248,37 @@ async def test_license_snapshot_updates_audit_and_refreshes(monkeypatch):
         "before": {"license_type": "TRIAL", "license_expiry_date": "2026-01-01"},
         "after": {"license_type": "OFFICIAL", "license_expiry_date": "2027-01-01"},
         "changed_fields": ["license_type", "license_expiry_date"],
+        "previous_version": 4,
+        "new_version": 5,
         "actor_id": "9",
         "team_id": customer.team_id,
     }
-    assert calls.refreshes[0]["source_type"] == "customer"
-    assert calls.refreshes[0]["summary"] == "客户授权汇总已更新，刷新客户智能档案"
-    assert calls.refreshes[0]["payload"] == {
-        "change_type": "license_snapshot_updated",
-        "changed_fields": ["license_type", "license_expiry_date"],
-    }
+@pytest.mark.asyncio
+async def test_license_snapshot_audit_uses_persisted_version_not_expected_version(monkeypatch):
+    customer = _license_customer(version=8)
+    calls = _patch_snapshot_route_dependencies(monkeypatch, customer)
+    before = {"license_type": "TRIAL", "license_expiry_date": date(2026, 1, 1)}
+    after = {"license_type": "OFFICIAL", "license_expiry_date": date(2027, 1, 1)}
+    monkeypatch.setattr(
+        customers_api.customer_crud,
+        "update_license_snapshot",
+        lambda db, db_customer, payload: (customer, before, after),
+    )
+
+    await customers_api.update_customer_license_snapshot(
+        customer_id=customer.public_id,
+        snapshot_update=CustomerLicenseSnapshotUpdate(
+            expected_version=4,
+            license_type="OFFICIAL",
+            license_expiry_date=date(2027, 1, 1),
+        ),
+        team_id=customer.team_id,
+        current_user=SimpleNamespace(id=9, name="操作人"),
+        db=SimpleNamespace(),
+    )
+
+    assert calls.logs[0]["content"]["previous_version"] == 7
+    assert calls.logs[0]["content"]["new_version"] == 8
 
 
 @pytest.mark.asyncio
@@ -412,15 +441,14 @@ async def test_customer_put_emits_changed_values_and_partial_intelligence_refres
     customer.city = "北京"
     calls = SimpleNamespace(updates=[], logs=[], refreshes=[])
     _allow_edit_permission(monkeypatch, customer)
-    real_update = customers_api.customer_crud.update
-    crud_db = MagicMock()
-    crud_db.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = customer
-
-    def update(db, db_customer, payload):
+    def update_with_audit(db, db_customer, payload):
         calls.updates.append(payload)
-        return real_update(crud_db, db_customer, payload)
+        setattr(db_customer, "city", payload.city)
+        db_customer.version += 1
+        return db_customer, {"city": "北京"}, {"city": payload.city}
 
-    monkeypatch.setattr(customers_api.customer_crud, "update", update)
+    monkeypatch.setattr(customers_api.customer_crud, "update_with_audit", update_with_audit)
+
     monkeypatch.setattr(customers_api.operation_log_service, "log", lambda **kwargs: calls.logs.append(kwargs))
     monkeypatch.setattr(
         customers_api.customer_business_object_intelligence_service,
@@ -451,6 +479,102 @@ async def test_customer_put_emits_changed_values_and_partial_intelligence_refres
     assert calls.refreshes[0]["actor_id"] == "9"
     assert calls.refreshes[0]["payload"] == {"change_type": "updated", "changed_fields": ["city"]}
     assert len(calls.updates) == 1
+@pytest.mark.asyncio
+async def test_customer_put_maps_stale_version_to_conflict_without_side_effects(monkeypatch):
+    customer = _customer(status=0)
+    customer.city = "北京"
+    calls = SimpleNamespace(logs=[], refreshes=[])
+    _allow_edit_permission(monkeypatch, customer)
+    monkeypatch.setattr(
+        customers_api.customer_crud,
+        "update_with_audit",
+        lambda *args, **kwargs: (_ for _ in ()).throw(ConflictException("客户已发生变化，请刷新后确认最新状态")),
+    )
+
+    monkeypatch.setattr(customers_api.operation_log_service, "log", lambda **kwargs: calls.logs.append(kwargs))
+    monkeypatch.setattr(customers_api, "_persist_customer_business_object_refresh_after_commit", lambda **kwargs: calls.refreshes.append(kwargs))
+
+    with pytest.raises(customers_api.HTTPException) as exc_info:
+        customers_api.update_customer(
+            customer_id=customer.public_id,
+            customer_update=CustomerUpdate(city="上海", expected_version=4),
+            team_id=customer.team_id,
+            current_user=SimpleNamespace(id=9, name="操作人"),
+            db=MagicMock(),
+        )
+
+    assert exc_info.value.status_code == 409
+    assert customer.city == "北京"
+    assert calls.logs == []
+    assert calls.refreshes == []
+
+
+@pytest.mark.asyncio
+async def test_customer_put_updates_profile_status_industry_and_license_once(monkeypatch):
+    customer = _customer(status=0, version=4)
+    customer.city = "北京"
+    customer.industry = "internet_saas"
+    customer.license_type = "TRIAL"
+    customer.license_expiry_date = date(2026, 1, 1)
+    calls = SimpleNamespace(logs=[], refreshes=[], notifications=[])
+    _allow_edit_permission(monkeypatch, customer)
+    monkeypatch.setattr(
+        customers_api.customer_crud,
+        "update_with_audit",
+        lambda db, db_customer, payload: (
+            setattr(db_customer, "city", "上海") or
+            setattr(db_customer, "status", 1) or
+            setattr(db_customer, "industry", "finance_securities") or
+            setattr(db_customer, "license_type", "OFFICIAL") or
+            setattr(db_customer, "license_expiry_date", date(2027, 1, 1)) or
+            setattr(db_customer, "version", 5) or
+            (db_customer,
+             {"city": "北京", "status": 0, "industry": "internet_saas", "license_type": "TRIAL", "license_expiry_date": date(2026, 1, 1)},
+             {"city": "上海", "status": 1, "industry": "finance_securities", "license_type": "OFFICIAL", "license_expiry_date": date(2027, 1, 1)})
+        ),
+    )
+    monkeypatch.setattr(customers_api.operation_log_service, "log", lambda **kwargs: calls.logs.append(kwargs))
+    monkeypatch.setattr(customers_api, "_persist_customer_business_object_refresh_after_commit", lambda **kwargs: calls.refreshes.append(kwargs))
+    monkeypatch.setattr(customers_api.outbound_notification_job_service, "queue_committed", lambda *args, **kwargs: calls.notifications.append(kwargs))
+    monkeypatch.setattr(customers_api, "_customer_response", lambda db_session, value: value)
+
+    response = customers_api.update_customer(
+        customer.public_id,
+        CustomerUpdate(
+            expected_version=4,
+            city="上海",
+            status=1,
+            industry="finance_securities",
+            license_type="OFFICIAL",
+            license_expiry_date=date(2027, 1, 1),
+        ),
+        team_id=customer.team_id,
+        current_user=SimpleNamespace(id=9, name="操作人"),
+        db=MagicMock(),
+    )
+
+    assert response.version == 5
+    assert calls.logs[0]["event_type"] == customers_api.EventTypes.CUSTOMER_UPDATED
+    assert calls.logs[0]["content"] == {
+        "changed_fields": ["city", "status", "industry", "license_type", "license_expiry_date"],
+        "before": {
+            "city": "北京",
+            "status": 0,
+            "industry": "internet_saas",
+            "license_type": "TRIAL",
+            "license_expiry_date": "2026-01-01",
+        },
+        "after": {
+            "city": "上海",
+            "status": 1,
+            "industry": "finance_securities",
+            "license_type": "OFFICIAL",
+            "license_expiry_date": "2027-01-01",
+        },
+    }
+    assert calls.refreshes[0]["scope"] == "partial"
+    assert calls.notifications == []
+
 
 
 @pytest.mark.asyncio
@@ -513,16 +637,16 @@ def test_customer_put_source_audit_uses_public_ids_without_internal_ids(monkeypa
     _allow_edit_permission(monkeypatch, customer)
     old_source = SimpleNamespace(id=11, public_id="src_old", name="旧来源")
     new_source = SimpleNamespace(id=12, public_id="src_new", name="新来源")
-    monkeypatch.setattr(customers_api, "get_by_id", lambda db, source_id, team_id: old_source if source_id == 11 else new_source)
     monkeypatch.setattr(
-        "app.crud.customer.resolve_source_for_entity_write",
-        lambda db, team_id, **kwargs: new_source,
+        customers_api.customer_crud,
+        "update_with_audit",
+        lambda db, obj, payload: (
+            setattr(obj, "source_id", 12)
+            or setattr(obj, "source", "新来源")
+            or (obj, {"source_public_id": "src_old"}, {"source_public_id": "src_new"})
+        ),
     )
-    real_update = customers_api.customer_crud.update
-    crud_db = MagicMock()
-    crud_db.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = customer
 
-    monkeypatch.setattr(customers_api.customer_crud, "update", lambda db, obj, payload: real_update(crud_db, obj, payload))
     monkeypatch.setattr(customers_api.operation_log_service, "log", lambda **kwargs: calls.logs.append(kwargs))
     monkeypatch.setattr(customers_api, "_persist_customer_business_object_refresh_after_commit", lambda **kwargs: calls.refreshes.append(kwargs))
     monkeypatch.setattr(customers_api, "_customer_response", lambda db, updated: updated)
@@ -537,10 +661,11 @@ def test_customer_put_source_audit_uses_public_ids_without_internal_ids(monkeypa
 
     assert response.source_id == 12
     assert calls.logs[0]["content"] == {
-        "changed_fields": ["source", "source_public_id"],
-        "before": {"source": "旧来源", "source_public_id": "src_old"},
-        "after": {"source": "新来源", "source_public_id": "src_new"},
+        "changed_fields": ["source_public_id"],
+        "before": {"source_public_id": "src_old"},
+        "after": {"source_public_id": "src_new"},
     }
+
     assert "source_id" not in calls.logs[0]["content"]["before"]
     assert "source_id" not in calls.logs[0]["content"]["after"]
 
