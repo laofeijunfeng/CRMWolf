@@ -10,7 +10,10 @@ const mocks = vi.hoisted(() => ({
   product: {
     public_id: 'prd_1', team_id: 1, code: 'CRM', name: 'CRM 产品', description: '基础 CRM', is_active: true,
     created_by: 'u', updated_by: null, created_time: '2026-01-01T00:00:00', updated_time: '2026-01-01T00:00:00',
-    modules: [{ public_id: 'prm_1', team_id: 1, product_id: 1, code: 'BASE', name: '基础模块', description: null, module_role: 'BASE' as const, is_active: true, sort_order: 0, created_by: 'u', updated_by: null, created_time: '2026-01-01T00:00:00', updated_time: '2026-01-01T00:00:00' }],
+    modules: [
+      { public_id: 'prm_1', team_id: 1, product_id: 1, code: 'BASE', name: '基础模块', description: null, module_role: 'BASE' as const, is_active: true, sort_order: 0, created_by: 'u', updated_by: null, created_time: '2026-01-01T00:00:00', updated_time: '2026-01-01T00:00:00' },
+      { public_id: 'prm_2', team_id: 1, product_id: 1, code: 'ADD_ON', name: '增强模块', description: null, module_role: 'ADD_ON' as const, is_active: true, sort_order: 1, created_by: 'u', updated_by: null, created_time: '2026-01-01T00:00:00', updated_time: '2026-01-01T00:00:00' },
+    ],
   },
 }))
 
@@ -52,6 +55,15 @@ describe('ProductPanel', () => {
     expect(wrapper.findAll('button').some(button => button.text().includes('删除'))).toBe(false)
   })
 
+  it('shows add-on module deletion for editors without product deletion permission', async () => {
+    setActivePinia(createPinia()); setPermissions(['product:view', 'product:edit'])
+    const wrapper = mount(ProductPanel, { global: { stubs } })
+    await vi.waitFor(() => expect(productApi.list).toHaveBeenCalled())
+    await flushPromises()
+    expect(wrapper.findAll('button').some(button => button.text() === '删除模块')).toBe(true)
+    expect(wrapper.findAll('button').some(button => button.text() === '删除')).toBe(false)
+  })
+
   it('shows editor controls while keeping base module protected', async () => {
     setActivePinia(createPinia()); setPermissions(['product:view', 'product:create', 'product:edit', 'product:delete'])
     const wrapper = mount(ProductPanel, { global: { stubs } })
@@ -60,6 +72,6 @@ describe('ProductPanel', () => {
     expect(wrapper.text()).toContain('CRM 产品')
     expect(wrapper.text()).toContain('新建产品')
     expect(wrapper.text()).toContain('新增模块')
-    expect(wrapper.findAll('button').some(button => button.text().includes('删除模块'))).toBe(false)
+    expect(wrapper.findAll('button').filter(button => button.text() === '删除模块')).toHaveLength(1)
   })
 })

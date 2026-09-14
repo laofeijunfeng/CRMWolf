@@ -302,7 +302,7 @@ const deleteModule = async (
   module: ProductModuleResponse,
 ): Promise<void> => {
   if (
-    !canDelete.value
+    !canEdit.value
     || module.module_role === 'BASE'
     || !(await confirmDelete(`模块「${module.name}」`))
   ) return
@@ -314,6 +314,7 @@ const deleteModule = async (
   } catch (error) {
     handleApiError(error, '删除模块')
   }
+
 }
 
 watch(() => props.active, (active) => {
@@ -473,7 +474,7 @@ watch(
                     {{ module.is_active ? '停用' : '启用' }}
                   </Button>
                   <Button
-                    v-if="canDelete"
+                    v-if="canEdit"
                     type="button"
                     size="sm"
                     variant="ghost"
