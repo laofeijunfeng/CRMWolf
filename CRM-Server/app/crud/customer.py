@@ -40,6 +40,27 @@ def _split_int_csv(value: Optional[str]) -> List[int]:
     return values
 
 
+def _resolve_create_industry_code(db: Session, industry: Optional[str]) -> Optional[str]:
+    if industry is None:
+        return None
+    industry_value = industry.strip()
+    if not industry_value:
+        return None
+
+    by_code = industry_crud.get_by_code(db, industry_value)
+    if by_code is not None and by_code.is_active == 1:
+        return by_code.code
+
+    name_matches = [
+        row for row in industry_crud.get_all_active(db) if row.name == industry_value
+    ]
+    if len(name_matches) == 1:
+        return name_matches[0].code
+
+    raise ValueError("行业代码不存在或已停用")
+
+
+
 class CustomerCRUD:
     def get_by_id(self, db: Session, customer_id: int, team_id: Optional[int] = None) -> Optional[Customer]:
         query = db.query(Customer).filter(Customer.id == customer_id)
@@ -208,7 +229,14 @@ class CustomerCRUD:
         return customers, total
 
     def create(
-        self, db: Session, obj_in: CustomerCreate, creator_id: str, team_id: int, operator_name: Optional[str] = None
+        self,
+        db: Session,
+        obj_in: CustomerCreate,
+        creator_id: str,
+        team_id: int,
+        operator_name: Optional[str] = None,
+        *,
+        commit: bool = True,
     ) -> Customer:
         from app.services.operation_log_service import operation_log_service
 
@@ -224,16 +252,20 @@ class CustomerCRUD:
             customer_data["source_id"] = source_row.id
             customer_data["source"] = source_row.name
         customer_data["creator_id"] = creator_id
-        customer_data["status"] = 0
+        customer_data["status"] = obj_in.status
         customer_data["team_id"] = team_id
+        customer_data["industry"] = _resolve_create_industry_code(db, obj_in.industry)
 
         if not customer_data.get("owner_id"):
             customer_data["owner_id"] = creator_id
 
         db_obj = Customer(**customer_data)
         db.add(db_obj)
-        db.commit()
-        db.refresh(db_obj)
+        if commit:
+            db.commit()
+            db.refresh(db_obj)
+        else:
+            db.flush()
 
         operation_log_service.log(
             db=db,
@@ -251,6 +283,7 @@ class CustomerCRUD:
                 "fromLead": False,
             },
             team_id=team_id,  # ✅ 必须传递 team_id（团队隔离）
+            commit=commit,
         )
 
         return db_obj
@@ -966,7 +999,14 @@ class ContactCRUD:
         return query.first()
 
     def create(
-        self, db: Session, obj_in: ContactCreate, customer_id: int, team_id: int, is_primary: bool = False
+        self,
+        db: Session,
+        obj_in: ContactCreate,
+        customer_id: int,
+        team_id: int,
+        is_primary: bool = False,
+        *,
+        commit: bool = True,
     ) -> Contact:
         """创建联系人
 
@@ -992,8 +1032,11 @@ class ContactCRUD:
 
         db_obj = Contact(**contact_data)
         db.add(db_obj)
-        db.commit()
-        db.refresh(db_obj)
+        if commit:
+            db.commit()
+            db.refresh(db_obj)
+        else:
+            db.flush()
         return db_obj
 
     def update(self, db: Session, db_obj: Contact, obj_in: ContactUpdate) -> Contact:

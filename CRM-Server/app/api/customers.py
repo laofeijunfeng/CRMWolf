@@ -1222,22 +1222,32 @@ async def create_customer(
             obj_in=customer,
             creator_id=str(current_user.id),
             team_id=team_id,
-            operator_name=current_user.name
+            operator_name=current_user.name,
+            commit=False,
         )
+        if customer.primary_contact is not None:
+            contact_crud.create(
+                db=db,
+                obj_in=customer.primary_contact,
+                customer_id=new_customer.id,
+                team_id=team_id,
+                is_primary=True,
+                commit=False,
+            )
+        db.commit()
+        db.refresh(new_customer)
     except AcquisitionSourceError as exc:
+        db.rollback()
         _raise_source_error(exc)
-    if customer.primary_contact:
-        contact_crud.create(
-            db=db,
-            obj_in=customer.primary_contact,
-            customer_id=new_customer.id,
-            team_id=team_id,
-            is_primary=True
-        )
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="客户或联系人数据已被其他操作占用") from exc
 
     # 客户创建完成后，通过统一业务对象事件边界进入档案投影流水线。
     # 这里使用 full scope，确保企业基础信息、旅程和历史上下文一次性建立。
-    db.refresh(new_customer)
     customer_business_object_intelligence_service.enqueue_object_change_refresh_after_commit(
         source_type="customer",
         business_object=new_customer,

@@ -8,7 +8,14 @@ from app.api import customers as customers_api
 from app.core import deps
 from app.core.exceptions import ConflictException
 from app.models.outbound_notification_job import OutboundNotificationEventType
-from app.schemas.customer import CustomerLicenseSnapshotUpdate, CustomerLifecycleStatusUpdate, CustomerUpdate
+from app.crud.customer import contact_crud, customer_crud
+from app.schemas.customer import (
+    ContactCreate,
+    CustomerCreate,
+    CustomerLicenseSnapshotUpdate,
+    CustomerLifecycleStatusUpdate,
+    CustomerUpdate,
+)
 
 
 def _customer(*, status: int, version: int = 4):
@@ -536,3 +543,282 @@ def test_customer_put_source_audit_uses_public_ids_without_internal_ids(monkeypa
     }
     assert "source_id" not in calls.logs[0]["content"]["before"]
     assert "source_id" not in calls.logs[0]["content"]["after"]
+
+
+def _created_customer() -> SimpleNamespace:
+    return SimpleNamespace(
+        id=31,
+        public_id="cus_created",
+        team_id=8,
+        account_name="新客户",
+        city="上海",
+        industry="internet_saas",
+        status=1,
+        license_type="TRIAL",
+        license_expiry_date=date(2026, 12, 31),
+        owner_id="9",
+        version=1,
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_customer_commits_customer_and_contact_as_one_transaction(monkeypatch):
+    customer = _created_customer()
+    calls = SimpleNamespace(customer=[], contact=[], refreshes=[], notifications=[])
+    db = MagicMock()
+
+    def create_customer(**kwargs):
+        calls.customer.append(kwargs)
+        return customer
+
+    def create_contact(**kwargs):
+        calls.contact.append(kwargs)
+        return SimpleNamespace(id=41, name="李华")
+
+    _allow_edit_permission(monkeypatch, customer)
+    monkeypatch.setattr(customers_api.customer_crud, "get_by_name", lambda *args, **kwargs: None)
+    monkeypatch.setattr(customers_api.lead_crud, "get_by_name", lambda *args, **kwargs: None)
+    monkeypatch.setattr(customers_api.customer_crud, "create", create_customer)
+    monkeypatch.setattr(customers_api.contact_crud, "create", create_contact)
+    monkeypatch.setattr(
+        customers_api.customer_business_object_intelligence_service,
+        "enqueue_object_change_refresh_after_commit",
+        lambda **kwargs: calls.refreshes.append(kwargs),
+    )
+    monkeypatch.setattr(
+        customers_api.outbound_notification_job_service,
+        "queue_committed",
+        lambda *args, **kwargs: calls.notifications.append(kwargs),
+    )
+    monkeypatch.setattr(customers_api, "_customer_response", lambda db_session, value: value)
+
+    response = await customers_api.create_customer(
+        CustomerCreate(
+            account_name="新客户",
+            city="上海",
+            industry="internet_saas",
+            status=1,
+            license_type="TRIAL",
+            license_expiry_date=date(2026, 12, 31),
+            primary_contact={
+                "name": "李华",
+                "mobile": "13800138000",
+                "position": "CTO",
+                "gender": "1",
+                "is_decision_maker": False,
+            },
+        ),
+        team_id=8,
+        current_user=SimpleNamespace(id=9, name="操作人"),
+        db=db,
+    )
+
+    assert response is customer
+    assert calls.customer[0]["commit"] is False
+    assert calls.contact[0]["commit"] is False
+    assert calls.customer[0]["obj_in"].status == 1
+    assert calls.customer[0]["obj_in"].license_type == "TRIAL"
+    db.commit.assert_called_once()
+    assert calls.notifications == []
+    assert calls.refreshes[0]["scope"] == "full"
+
+
+@pytest.mark.asyncio
+async def test_create_customer_rolls_back_when_contact_write_fails(monkeypatch):
+    customer = _created_customer()
+    db = MagicMock()
+    monkeypatch.setattr(customers_api.customer_crud, "get_by_name", lambda *args, **kwargs: None)
+    monkeypatch.setattr(customers_api.lead_crud, "get_by_name", lambda *args, **kwargs: None)
+    monkeypatch.setattr(customers_api.customer_crud, "create", lambda **kwargs: customer)
+    monkeypatch.setattr(
+        customers_api.contact_crud,
+        "create",
+        lambda **kwargs: (_ for _ in ()).throw(ValueError("联系人写入失败")),
+    )
+    monkeypatch.setattr(
+        customers_api.customer_business_object_intelligence_service,
+        "enqueue_object_change_refresh_after_commit",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("失败事务不能刷新客户档案")),
+    )
+
+    with pytest.raises(customers_api.HTTPException) as exc_info:
+        await customers_api.create_customer(
+            CustomerCreate(
+                account_name="不会留下半成品",
+                city="上海",
+                primary_contact={
+                    "name": "李华",
+                    "mobile": "13800138000",
+                    "position": "CTO",
+                    "gender": "1",
+                    "is_decision_maker": False,
+                },
+            ),
+            team_id=8,
+            current_user=SimpleNamespace(id=9, name="操作人"),
+            db=db,
+        )
+
+    assert exc_info.value.status_code == 400
+    db.rollback.assert_called_once()
+    db.commit.assert_not_called()
+
+
+def _patch_create_dependencies(monkeypatch, *, industry=None, industries=None, logs=None):
+    monkeypatch.setattr(
+        "app.crud.customer.resolve_source_for_entity_write",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "app.crud.customer.industry_crud.get_by_code",
+        lambda db, code: industry if industry is not None and getattr(industry, "code", None) == code else None,
+    )
+    monkeypatch.setattr(
+        "app.crud.customer.industry_crud.get_all_active",
+        lambda db: industries or [],
+    )
+    monkeypatch.setattr(
+        "app.services.operation_log_service.operation_log_service.log",
+        lambda **kwargs: (logs.append(kwargs) if logs is not None else None),
+    )
+
+
+def test_create_persists_status_license_and_industry_code(monkeypatch):
+    db = MagicMock()
+    added = []
+    db.add.side_effect = lambda obj: added.append(obj)
+    _patch_create_dependencies(
+        monkeypatch,
+        industry=SimpleNamespace(code="internet_saas", name="互联网SaaS", is_active=1),
+    )
+
+    customer_crud.create(
+        db,
+        CustomerCreate(
+            account_name="新客户",
+            city="上海",
+            industry="internet_saas",
+            status=1,
+            license_type="TRIAL",
+            license_expiry_date=date(2026, 12, 31),
+        ),
+        creator_id="9",
+        team_id=8,
+        operator_name="操作人",
+    )
+
+    created = added[0]
+    assert created.status == 1
+    assert created.license_type == "TRIAL"
+    assert created.license_expiry_date == date(2026, 12, 31)
+    assert created.industry == "internet_saas"
+    db.commit.assert_called_once()
+    db.refresh.assert_called_once_with(created)
+    db.flush.assert_not_called()
+
+
+def test_create_stores_code_for_exact_active_industry_name(monkeypatch):
+    db = MagicMock()
+    added = []
+    db.add.side_effect = lambda obj: added.append(obj)
+    _patch_create_dependencies(
+        monkeypatch,
+        industries=[SimpleNamespace(code="internet_saas", name="互联网", is_active=1)],
+    )
+
+    customer_crud.create(
+        db,
+        CustomerCreate(account_name="新客户", city="上海", industry="互联网"),
+        creator_id="9",
+        team_id=8,
+    )
+
+    assert added[0].industry == "internet_saas"
+
+
+@pytest.mark.parametrize(
+    "industry,lookup",
+    [
+        ("missing", {"industry": None, "industries": []}),
+        (
+            "互联网",
+            {
+                "industry": None,
+                "industries": [
+                    SimpleNamespace(code="internet_saas", name="互联网", is_active=1),
+                    SimpleNamespace(code="internet_media", name="互联网", is_active=1),
+                ],
+            },
+        ),
+        (
+            "legacy",
+            {"industry": SimpleNamespace(code="legacy", name="旧行业", is_active=0), "industries": []},
+        ),
+    ],
+)
+def test_create_rejects_missing_ambiguous_and_inactive_industry(monkeypatch, industry, lookup):
+    db = MagicMock()
+    _patch_create_dependencies(
+        monkeypatch,
+        industry=lookup["industry"],
+        industries=lookup["industries"],
+    )
+
+    with pytest.raises(ValueError, match="行业代码不存在或已停用"):
+        customer_crud.create(
+            db,
+            CustomerCreate(account_name="新客户", city="上海", industry=industry),
+            creator_id="9",
+            team_id=8,
+        )
+
+    db.commit.assert_not_called()
+
+
+def test_create_flushes_without_commit_or_refresh_when_commit_false(monkeypatch):
+    db = MagicMock()
+    added = []
+    logs = []
+    db.add.side_effect = lambda obj: added.append(obj)
+    _patch_create_dependencies(monkeypatch, logs=logs)
+
+    created = customer_crud.create(
+        db,
+        CustomerCreate(account_name="新客户", city="上海"),
+        creator_id="9",
+        team_id=8,
+        commit=False,
+    )
+
+    assert created is added[0]
+    db.flush.assert_called_once()
+    db.commit.assert_not_called()
+    db.refresh.assert_not_called()
+    assert logs[0]["commit"] is False
+
+
+def test_contact_create_flushes_without_commit_or_refresh_when_commit_false(monkeypatch):
+    db = MagicMock()
+    added = []
+    db.add.side_effect = lambda obj: added.append(obj)
+    monkeypatch.setattr(contact_crud, "get_primary_by_customer_id", lambda *args, **kwargs: None)
+
+    created = contact_crud.create(
+        db,
+        ContactCreate(
+            name="李华",
+            mobile="13800138000",
+            position="CTO",
+            gender="1",
+            is_decision_maker=False,
+        ),
+        customer_id=31,
+        team_id=8,
+        is_primary=True,
+        commit=False,
+    )
+
+    assert created is added[0]
+    db.flush.assert_called_once()
+    db.commit.assert_not_called()
+    db.refresh.assert_not_called()
