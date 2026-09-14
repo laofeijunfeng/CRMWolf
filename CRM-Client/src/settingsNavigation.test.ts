@@ -1,5 +1,12 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { getSettingsNavigationItem, SETTINGS_NAVIGATION } from './settingsNavigation'
+
+const readSettingsModulePageSource = (): string => readFileSync(
+  resolve(process.cwd(), 'src/views/SettingsModulePage.vue'),
+  'utf8',
+)
 
 describe('settings navigation registry', () => {
   it('keeps one canonical route per settings module', () => {
@@ -32,5 +39,12 @@ describe('settings navigation registry', () => {
       requiresTeam: true,
       allowOwnerBypass: false,
     })
+  })
+
+  it('keeps separate AI and products legacy component mappings', () => {
+    const source = readSettingsModulePageSource()
+
+    expect(source).toContain("ai: defineAsyncComponent(() => import('@/components/system-config/AIConfigSheet.vue'))")
+    expect(source).toContain("products: defineAsyncComponent(() => import('@/components/system-config/ProductPanel.vue'))")
   })
 })

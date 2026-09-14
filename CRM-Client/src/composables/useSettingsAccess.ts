@@ -2,7 +2,7 @@ import { computed, type ComputedRef } from 'vue'
 import { usePermissionStore } from '@/stores/permissions'
 import { useTeamStore } from '@/stores/team'
 import { useUserStore } from '@/stores/user'
-import type { SettingsNavigationItem } from '@/settingsNavigation'
+import { SETTINGS_NAVIGATION, type SettingsNavigationItem } from '@/settingsNavigation'
 
 export const isTeamOwner = (userId: number | string | null | undefined, ownerId: number | string | null | undefined): boolean => {
   if (userId === null || userId === undefined || ownerId === null || ownerId === undefined) return false
@@ -25,9 +25,12 @@ export const useSettingsAccess = (): {
   ))
 
   const permissionsUnavailable = computed(() => permissionStore.loadState === 'error')
-  const permissionsPending = computed(() => !isOwner.value
-    && permissionStore.loadState !== 'ready'
-    && permissionStore.loadState !== 'error')
+  const hasExplicitPermissionTeamSetting = computed(() => SETTINGS_NAVIGATION.some(item => (
+    item.scope === 'team' && item.allowOwnerBypass === false
+  )))
+  const permissionsPending = computed(() => permissionStore.loadState !== 'ready'
+    && permissionStore.loadState !== 'error'
+    && (!isOwner.value || hasExplicitPermissionTeamSetting.value))
 
   const canAccess = (item: SettingsNavigationItem): boolean => {
     if (item.scope === 'personal') return true

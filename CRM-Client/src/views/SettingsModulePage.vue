@@ -79,7 +79,7 @@ interface Props {
 
 const props = defineProps<Props>()
 const route = useRoute()
-const { canAccess, permissionsUnavailable, permissionsPending } = useSettingsAccess()
+const { canAccess, isOwner, permissionsUnavailable, permissionsPending } = useSettingsAccess()
 const legacyOpen = ref(false)
 
 const legacyComponents: Record<string, Component> = {
@@ -89,6 +89,7 @@ const legacyComponents: Record<string, Component> = {
   'approval-flows-new': defineAsyncComponent(() => import('@/views/ApprovalFlowsNew.vue')),
   'acquisition-sources': defineAsyncComponent(() => import('@/components/system-config/AcquisitionSourcePanel.vue')),
   procurement: defineAsyncComponent(() => import('@/components/system-config/ProcurementMethodsPanel.vue')),
+  ai: defineAsyncComponent(() => import('@/components/system-config/AIConfigSheet.vue')),
   products: defineAsyncComponent(() => import('@/components/system-config/ProductPanel.vue')),
   notifications: defineAsyncComponent(() => import('@/components/system-config/NotificationSheet.vue')),
   integrations: defineAsyncComponent(() => import('@/components/system-config/LoginIntegrationSheet.vue')),
@@ -146,7 +147,11 @@ const legacyProps = computed<Record<string, unknown>>(() => {
   return props
 })
 const hasAccess = computed(() => moduleItem.value !== undefined && canAccess(moduleItem.value))
-const accessLoading = computed(() => moduleItem.value?.scope === 'team' && permissionsPending.value)
+const accessLoading = computed(() => {
+  const item = moduleItem.value
+  if (item?.scope !== 'team' || !permissionsPending.value) return false
+  return !isOwner.value || item.allowOwnerBypass === false
+})
 const accessUnavailable = computed(() => moduleItem.value?.scope === 'team' && permissionsUnavailable.value && !hasAccess.value)
 
 const queryAction = computed<'create' | 'edit' | null>(() => {
