@@ -18,6 +18,7 @@ PRODUCT_PERMISSION_CODES = (
     "product:edit",
     "product:delete",
 )
+_SQLITE_BIGINT = sa.BigInteger().with_variant(sa.Integer(), "sqlite")
 
 
 def _table_exists(table_name: str) -> bool:
@@ -67,7 +68,7 @@ def _seed_permissions() -> None:
 def upgrade() -> None:
     op.create_table(
         PRODUCT_TABLE,
-        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False, comment="主键"),
+        sa.Column("id", _SQLITE_BIGINT, autoincrement=True, nullable=False, comment="主键"),
         sa.Column("public_id", sa.String(64), nullable=False, comment="产品对外ID"),
         sa.Column("team_id", sa.BigInteger(), nullable=False, comment="团队ID"),
         sa.Column("code", sa.String(50), nullable=False, comment="团队内产品编码"),
@@ -89,7 +90,7 @@ def upgrade() -> None:
 
     op.create_table(
         MODULE_TABLE,
-        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False, comment="主键"),
+        sa.Column("id", _SQLITE_BIGINT, autoincrement=True, nullable=False, comment="主键"),
         sa.Column("public_id", sa.String(64), nullable=False, comment="模块对外ID"),
         sa.Column("team_id", sa.BigInteger(), nullable=False, comment="团队ID"),
         sa.Column("product_id", sa.BigInteger(), nullable=False, comment="所属产品ID"),
