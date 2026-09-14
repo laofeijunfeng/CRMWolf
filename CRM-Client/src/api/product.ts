@@ -18,6 +18,7 @@ const productApi = {
     return ProductResponseSchema.parse(await request.put<ProductResponse>(`/v1/products/${publicId}`, ProductUpdateSchema.parse(data)))
   },
   async delete(publicId: string): Promise<void> {
+    // DELETE endpoints return 204 with no response body to parse.
     await request.delete(`/v1/products/${publicId}`)
   },
   async createModule(productId: string, data: ProductModuleCreate): Promise<ProductModuleResponse> {
@@ -27,6 +28,7 @@ const productApi = {
     return ProductModuleResponseSchema.parse(await request.put<ProductModuleResponse>(`/v1/products/${productId}/modules/${moduleId}`, ProductModuleUpdateSchema.parse(data)))
   },
   async deleteModule(productId: string, moduleId: string): Promise<void> {
+    // DELETE endpoints return 204 with no response body to parse.
     await request.delete(`/v1/products/${productId}/modules/${moduleId}`)
   },
 }
