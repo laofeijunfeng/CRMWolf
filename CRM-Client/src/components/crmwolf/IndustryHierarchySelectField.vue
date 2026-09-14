@@ -116,6 +116,7 @@ const filteredRetainedCurrentOption = computed(() => {
 const selectedLabel = computed(() => selectedOption.value?.label ?? retainedCurrentOption.value?.label ?? '')
 const normalizedModelValue = computed(() => props.modelValue ?? '')
 const selectDisabled = computed(() => props.disabled === true)
+const hasBlockingError = computed(() => selectDisabled.value && props.error.trim() !== '')
 
 function handleUpdate(value: unknown): void {
   if (typeof value !== 'string') return
@@ -149,7 +150,7 @@ function handleOpenChange(value: boolean): void {
       @update:open="handleOpenChange"
     >
       <ComboboxAnchor class="w-full" as-child>
-        <ComboboxTrigger as-child>
+        <ComboboxTrigger as-child :aria-label="props.label">
           <Button
             :id="selectId"
             v-bind="$attrs"
@@ -161,7 +162,7 @@ function handleOpenChange(value: boolean): void {
             :aria-describedby="describedBy"
             :disabled="selectDisabled"
             :class="cn(
-              'h-input-mobile min-h-input-mobile w-full justify-between rounded-wolf-sm border-wolf-border-default bg-wolf-bg-card px-3 text-left text-wolf-body font-wolf-regular text-wolf-text-primary shadow-none hover:bg-wolf-bg-card',
+              'h-input-desktop min-h-input-desktop w-full justify-between rounded-wolf-sm border-wolf-border-default bg-wolf-bg-card px-3 text-left text-wolf-body font-wolf-regular text-wolf-text-primary shadow-none hover:bg-wolf-bg-card max-[767px]:h-input-mobile max-[767px]:min-h-input-mobile',
               selectedLabel === '' && 'text-wolf-text-placeholder',
               props.error.trim() !== '' && 'border-wolf-danger focus-visible:ring-wolf-danger/15',
               props.triggerClass,
@@ -180,17 +181,17 @@ function handleOpenChange(value: boolean): void {
             :model-value="searchTerm"
             placeholder="搜索行业"
             :disabled="selectDisabled"
-            class="h-input-mobile min-h-input-mobile border-0 bg-transparent shadow-none focus-visible:ring-0"
+            class="h-input-desktop min-h-input-desktop border-0 bg-transparent shadow-none focus-visible:ring-0 max-[767px]:h-input-mobile max-[767px]:min-h-input-mobile"
             @update:model-value="searchTerm = String($event ?? '')"
           />
         </div>
         <div v-if="props.loading" class="px-2 py-2 text-sm text-muted-foreground">
           加载中...
         </div>
-        <div v-else-if="props.error.trim() !== ''" class="px-2 py-2 text-sm text-wolf-danger" role="alert">
+        <div v-else-if="hasBlockingError" class="px-2 py-2 text-sm text-wolf-danger" role="alert">
           {{ props.error }}
         </div>
-        <template v-if="!props.loading && props.error.trim() === ''">
+        <template v-if="!props.loading && !hasBlockingError">
           <ComboboxGroup
             v-for="primaryCode in Object.keys(props.hierarchy)"
             :key="primaryCode"
