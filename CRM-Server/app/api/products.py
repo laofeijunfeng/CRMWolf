@@ -1,15 +1,15 @@
+# ruff: noqa: B008
+
 from __future__ import annotations
 
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import get_current_active_user, get_current_user_team, require_permission
+from app.core.deps import get_current_user_team, require_permission
 from app.crud.product import product_crud
-from app.models.product import Product, ProductModule
-from app.models.user import User
 from app.schemas.product import (
     ProductCreate,
     ProductModuleCreate,
@@ -18,6 +18,10 @@ from app.schemas.product import (
     ProductResponse,
     ProductUpdate,
 )
+
+if TYPE_CHECKING:
+    from app.models.product import Product, ProductModule
+    from app.models.user import User
 
 router = APIRouter(prefix="/v1/products", tags=["产品管理"])
 

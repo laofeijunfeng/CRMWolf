@@ -69,7 +69,6 @@ def api_env(monkeypatch):
     app.dependency_overrides[deps.get_current_user_team] = _current_team
     app.dependency_overrides[products_api.get_current_user_team] = _current_team
     app.dependency_overrides[deps.get_current_active_user] = lambda: current_user
-    app.dependency_overrides[products_api.get_current_active_user] = lambda: current_user
 
     with TestClient(app) as client:
         yield SimpleNamespace(
@@ -198,7 +197,6 @@ def test_mounted_app_registers_products_route_and_serves_list(api_env):
         deps.get_current_user_team: overrides.get(deps.get_current_user_team),
         products_api.get_current_user_team: overrides.get(products_api.get_current_user_team),
         deps.get_current_active_user: overrides.get(deps.get_current_active_user),
-        products_api.get_current_active_user: overrides.get(products_api.get_current_active_user),
     }
     overrides.update({
         database.get_db: api_env.get_db,
@@ -207,7 +205,6 @@ def test_mounted_app_registers_products_route_and_serves_list(api_env):
         deps.get_current_user_team: api_env.current_team,
         products_api.get_current_user_team: api_env.current_team,
         deps.get_current_active_user: lambda: api_env.current_user,
-        products_api.get_current_active_user: lambda: api_env.current_user,
     })
     try:
         with TestClient(mounted_app) as client:
