@@ -25,6 +25,9 @@ class CustomerIndustryInfo(BaseModel):
     """客户所属行业信息"""
     code: str = Field(..., description="行业代码")
     name: str = Field(..., description="行业名称")
+    primary_code: Optional[str] = None
+    primary_name: Optional[str] = None
+    secondary_name: Optional[str] = None
 
 
 class ProcurementMethodInfo(BaseModel):
@@ -216,10 +219,24 @@ class CustomerBase(BaseModel):
         return v.strip() if v else v
 
 
+CustomerLifecycleStatus = Literal[0, 1]
+CustomerLicenseType = Literal["TRIAL", "OFFICIAL"]
+
 class CustomerCreate(CustomerBase):
+    status: CustomerLifecycleStatus = Field(0, description="客户快捷状态：0跟进中，1已成交")
+    license_type: Optional[CustomerLicenseType] = Field(None, description="客户 License 类型：TRIAL/OFFICIAL")
+    license_expiry_date: Optional[date] = Field(None, description="客户 License 最晚到期时间")
     owner_id: Optional[str] = Field(None, description="负责人系统用户ID，不传则默认为创建人")
     default_procurement_method_id: Optional[int] = Field(None, description="默认采购方式ID")
     primary_contact: Optional[ContactCreate] = Field(None, description="创建客户时同步创建的主联系人")
+
+    @model_validator(mode="after")
+    def normalize_license_pair(self) -> "CustomerCreate":
+        if self.license_expiry_date is None:
+            self.license_type = None
+        elif self.license_type is None:
+            raise ValueError("授权到期日期不为空时必须选择授权类型")
+        return self
 
 
 class CustomerUpdate(BaseModel):
@@ -236,6 +253,9 @@ class CustomerUpdate(BaseModel):
     source: Optional[str] = Field(None, max_length=50, description="获客来源名称（兼容）")
     source_public_id: Optional[str] = Field(None, description="获客来源对外ID")
     default_procurement_method_id: Optional[int] = Field(None, description="默认采购方式ID")
+    status: Optional[CustomerLifecycleStatus] = Field(None, description="客户快捷状态：0跟进中，1已成交")
+    license_type: Optional[CustomerLicenseType] = Field(None, description="客户 License 类型：TRIAL/OFFICIAL")
+    license_expiry_date: Optional[date] = Field(None, description="客户 License 最晚到期时间")
 
     @field_validator('account_name')
     @classmethod

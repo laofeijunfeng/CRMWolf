@@ -119,7 +119,13 @@ export const CustomerDetailResponseSchema = CustomerResponseSchema.extend({
 
 export type CustomerDetailResponse = z.infer<typeof CustomerDetailResponseSchema>
 
-// ===== 客户创建请求 =====
+// ===== 客户创建/更新请求 =====
+export const CustomerLicenseTypeSchema = z.enum(['TRIAL', 'OFFICIAL'])
+export type CustomerLicenseType = z.infer<typeof CustomerLicenseTypeSchema>
+
+export const CustomerLifecycleStatusSchema = z.union([z.literal(0), z.literal(1)])
+export type CustomerLifecycleStatus = z.infer<typeof CustomerLifecycleStatusSchema>
+
 export const CustomerCreateSchema = z.object({
   account_name: z.string().min(1).max(255),
   industry: z.string().max(100).optional(),
@@ -129,12 +135,14 @@ export const CustomerCreateSchema = z.object({
   source: z.string().max(100).optional(),
   source_public_id: z.string().min(1).optional(),
   owner_id: z.string().optional(),
-  default_procurement_method_id: z.number().int().optional()
+  default_procurement_method_id: z.number().int().optional(),
+  status: CustomerLifecycleStatusSchema.optional(),
+  license_type: CustomerLicenseTypeSchema.nullable().optional(),
+  license_expiry_date: z.string().nullable().optional()
 })
 
 export type CustomerCreate = z.infer<typeof CustomerCreateSchema>
 
-// ===== 客户更新请求 =====
 export const CustomerUpdateSchema = CustomerCreateSchema.partial().extend({
   industry: z.string().max(100).nullable().optional()
 })

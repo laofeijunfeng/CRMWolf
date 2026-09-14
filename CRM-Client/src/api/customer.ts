@@ -130,13 +130,20 @@ export interface ConvertResponse {
 
 export type { AcquisitionSourceInfo }
 
+export type CustomerLifecycleStatus = 0 | 1
+export type CustomerLicenseType = 'TRIAL' | 'OFFICIAL'
+
 export interface CustomerCreate {
   account_name: string
   city: string
   address?: string | null
+  industry?: string | null
   company_scale?: string | null
   source_public_id?: string | null
   default_procurement_method_id?: number | null
+  status?: CustomerLifecycleStatus
+  license_type?: CustomerLicenseType | null
+  license_expiry_date?: string | null
   primary_contact?: ContactCreate | null
 }
 
@@ -145,10 +152,13 @@ export interface CustomerUpdate {
   account_name?: string | null
   city?: string | null
   address?: string | null
+  industry?: string | null
   company_scale?: string | null
   source_public_id?: string | null
   default_procurement_method_id?: number | null
-  industry?: string | null
+  status?: CustomerLifecycleStatus
+  license_type?: CustomerLicenseType | null
+  license_expiry_date?: string | null
 }
 
 export interface CustomerLifecycleStatusUpdate {

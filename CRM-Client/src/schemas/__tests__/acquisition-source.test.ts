@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { customerCreateSchema, customerFormSchema } from '../customer-form'
+import { customerCreateSchema, customerEditSchema, customerFormSchema } from '../customer-form'
 import { leadSchema } from '../lead-form'
 import { getAcquisitionSourceDisplayName } from '../acquisition-source'
 
@@ -54,6 +54,65 @@ describe('acquisition source form schemas', () => {
 
     expect(customerResult.success).toBe(true)
     expect(leadResult.success).toBe(true)
+  })
+
+  it('keeps standard scale validation strict while accepting legacy values only for edit', () => {
+    const legacyValues = {
+      account_name: '示例客户',
+      city: '北京',
+      company_scale: 'small',
+    }
+    const profileValues = {
+      ...legacyValues,
+      source_public_id: 'acq_referral',
+      default_procurement_method_id: 1,
+    }
+    const createValues = {
+      ...profileValues,
+      contact_name: '张三',
+      contact_mobile: '13800138000',
+      contact_position: '经理',
+      contact_gender: '男',
+    }
+
+    expect(customerFormSchema.safeParse(profileValues).success).toBe(false)
+    expect(customerCreateSchema.safeParse(createValues).success).toBe(false)
+    expect(customerEditSchema.safeParse(legacyValues).success).toBe(true)
+  })
+
+  it('accepts optional more-information values on create', () => {
+    const result = customerCreateSchema.safeParse({
+      account_name: '示例客户',
+      city: '上海',
+      company_scale: '1-50人',
+      source_public_id: 'acq_referral',
+      default_procurement_method_id: 1,
+      industry: 'internet_saas',
+      status: 1,
+      license_type: 'TRIAL',
+      license_expiry_date: '2026-12-31',
+      contact_name: '张三',
+      contact_mobile: '13800138000',
+      contact_position: '经理',
+      contact_gender: '男',
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects a non-empty expiry date without a license type', () => {
+    const result = customerCreateSchema.safeParse({
+      account_name: '示例客户',
+      city: '上海',
+      company_scale: '1-50人',
+      source_public_id: 'acq_referral',
+      default_procurement_method_id: 1,
+      license_expiry_date: '2026-12-31',
+      contact_name: '张三',
+      contact_mobile: '13800139000',
+      contact_position: '经理',
+      contact_gender: '男',
+    })
+    expect(result.success).toBe(false)
   })
 
   it('follows the current configured name and falls back to 未设置', () => {
