@@ -21,6 +21,10 @@ export type {
 export interface BusinessJourneyBoardParams {
   start_date?: string | null
   end_date?: string | null
+  created_time_start?: string | null
+  created_time_end?: string | null
+  expected_closing_date_start?: string | null
+  expected_closing_date_end?: string | null
   owner_id?: string | null
   limit?: number
 }
