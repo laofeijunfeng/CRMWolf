@@ -17,6 +17,7 @@ from app.api import (
     operations,
     acquisition_sources,
     approval_ai,
+    products,
     approvals,
     auth,
     business_journey_board,
@@ -147,6 +148,7 @@ api_router.include_router(procurement_admin.router)
 api_router.include_router(teams.router)
 api_router.include_router(oauth.router)
 api_router.include_router(deployment_router)  # 新增：部署信息管理
+api_router.include_router(products.router)
 api_router.include_router(license_application_router)  # 新增：License申请管理
 
 # === AI 相关路由 ===

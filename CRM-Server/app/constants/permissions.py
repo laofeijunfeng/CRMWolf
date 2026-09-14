@@ -123,6 +123,12 @@ ALL_PERMISSIONS = [
     {"name": "创建获客来源", "code": "acquisition_source:create", "resource": "acquisition_source", "action": "create"},
     {"name": "更新获客来源", "code": "acquisition_source:update", "resource": "acquisition_source", "action": "update"},
 
+    # 产品目录权限
+    {"name": "查看产品", "code": "product:view", "resource": "product", "action": "view", "scope": None},
+    {"name": "创建产品", "code": "product:create", "resource": "product", "action": "create", "scope": None},
+    {"name": "编辑产品", "code": "product:edit", "resource": "product", "action": "edit", "scope": None},
+    {"name": "删除产品", "code": "product:delete", "resource": "product", "action": "delete", "scope": None},
+
     # 系统管理权限
     {"name": "管理用户", "code": "user:manage", "resource": "user", "action": "manage"},
     {"name": "管理角色", "code": "role:manage", "resource": "role", "action": "manage"},
@@ -218,6 +224,7 @@ ROLES_DATA = [
 ROLE_PERMISSIONS_MAPPING = {
     "TEAM_ADMIN": "all",  # 所有权限
     "SALES_DIRECTOR": [
+        "product:view",
         "customer:view:all", "customer:view:own", "customer:create",
         "customer:edit:own", "customer:edit:all", "customer:delete:own", "customer:delete:all",
         "customer:return", "customer:claim", "customer:assign",
@@ -238,30 +245,31 @@ ROLE_PERMISSIONS_MAPPING = {
         "contract:edit:own", "contract:edit:all", "contract:delete:own", "contract:delete:all",
         "contract:submit", "contract:cancel", "contract:approve:own",
         "invoice:view:all", "invoice:view:own", "invoice:create",
-        "invoice:approve:own",  # ← 审自己提交的发票
+        "invoice:approve:own",
         "invoice_reissue:view:all", "invoice_reissue:view:own", "invoice_reissue:create",
         "invoice_reissue:submit", "invoice_reissue:withdraw", "invoice_reissue:approve:own",
         "payment:view:all", "payment:view:own", "payment:register",
-        "payment:approve:own",  # ← 审自己提交的回款
+        "payment:approve:own",
         "payment:plan:create", "payment:plan:edit", "payment:plan:delete", "payment:plan:view:all",
         "statistics:view", "report:view:own", "report:view:team", "sales_dashboard:view:team",
     ],
     "SALES_MEMBER": [
+        "product:view",
         "customer:view:own", "customer:create", "customer:edit:own",
-        "customer:delete:own",  # ← 补充删除权限
+        "customer:delete:own",
         "customer:return", "customer:claim",
         "customer:contact:create", "customer:contact:edit", "customer:contact:delete",
         "customer:activity:create", "customer:activity:edit", "customer:activity:delete",
         "customer_profile:view", "customer_profile:refresh", "customer_profile:history",
         "opportunity:view:own", "opportunity:create", "opportunity:edit:own",
-        "opportunity:delete:own",  # ← 补充删除权限
+        "opportunity:delete:own",
         "opportunity:stage", "opportunity:win", "opportunity:lose",
         "lead:view:own", "lead:create", "lead:edit:own",
-        "lead:delete:own",  # ← 补充删除权限
+        "lead:delete:own",
         "lead:claim", "lead:return", "lead:convert",
-        "lead:follow_up:create", "lead:import",  # ← 补充导入权限
+        "lead:follow_up:create", "lead:import",
         "contract:view:own", "contract:create", "contract:edit:own",
-        "contract:delete:own",  # ← 补充删除权限
+        "contract:delete:own",
         "contract:submit",
         "invoice:view:own", "invoice:create", "invoice:edit:own", "invoice:delete:own",
         "invoice:submit", "invoice:withdraw",
@@ -274,18 +282,18 @@ ROLE_PERMISSIONS_MAPPING = {
     ],
     "FINANCE": [
         "invoice:view:all", "invoice:view:own", "invoice:create",
-        "invoice:approve", "invoice:mark_issued",  # ← 补充核心财务权限
-        "invoice:submit", "invoice:withdraw",  # ← 补充发票提交/撤回
+        "invoice:approve", "invoice:mark_issued",
+        "invoice:submit", "invoice:withdraw",
         "invoice:title:create", "invoice:title:edit", "invoice:title:delete", "invoice:title:set_default",
         "invoice_reissue:view:all", "invoice_reissue:view:own", "invoice_reissue:create",
         "invoice_reissue:submit", "invoice_reissue:withdraw", "invoice_reissue:approve",
         "payment:view:all", "payment:view:own", "payment:register",
-        "payment:confirm",  # ← 补充回款确认权限
-        "payment:submit", "payment:approve",  # ← 补充回款提交/审批
+        "payment:confirm",
+        "payment:submit", "payment:approve",
         "payment:plan:view:all", "payment:plan:create", "payment:plan:edit", "payment:plan:delete",
         "contract:view:all", "contract:view:own",
         "license:issue",
-        "finance:audit:view", "finance:receivables:view", "finance:reports:view",  # ← 补充财务报表权限
+        "finance:audit:view", "finance:receivables:view", "finance:reports:view",
         "statistics:view", "report:view:own", "sales_dashboard:view:team",
     ],
 }
