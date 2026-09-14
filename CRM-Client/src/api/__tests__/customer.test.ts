@@ -1,10 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+const post = vi.fn()
+const put = vi.fn()
 const patch = vi.fn()
 const get = vi.fn()
 
 vi.mock('@/utils/request', () => ({
   default: {
+    post,
+    put,
     patch,
     get,
   },
@@ -36,8 +40,38 @@ const customerResponse = {
 
 describe('customerApi lifecycle, license snapshot, and industry hierarchy', () => {
   beforeEach(() => {
+    post.mockReset()
+    put.mockReset()
     patch.mockReset()
     get.mockReset()
+  })
+
+  it('updates ordinary customer fields with PUT and parses the customer response', async () => {
+    put.mockResolvedValue(customerResponse)
+    const { default: customerApi } = await import('../customer')
+
+    const payload = {
+      expected_version: 3,
+      city: '深圳',
+      status: 1 as const,
+      license_type: 'OFFICIAL' as const,
+      license_expiry_date: '2027-01-01',
+    }
+
+    const result = await customerApi.updateCustomer('customer-1', payload)
+
+    expect(put).toHaveBeenCalledWith('/v1/customers/customer-1', payload, undefined)
+    expect(result).toEqual(customerResponse)
+  })
+
+  it('rejects malformed ordinary PUT responses through the customer response schema', async () => {
+    put.mockResolvedValue({ ...customerResponse, version: '3' })
+    const { default: customerApi } = await import('../customer')
+
+    await expect(customerApi.updateCustomer('customer-1', {
+      expected_version: 3,
+      city: '深圳',
+    })).rejects.toThrow()
   })
 
   it('updates lifecycle status with the expected version and parses the customer response', async () => {
