@@ -41,10 +41,14 @@ def api_env(monkeypatch):
     Base.metadata.create_all(engine, tables=[Product.__table__, ProductModule.__table__])
     session_factory = sessionmaker(bind=engine)
     db = session_factory()
-    current_user = SimpleNamespace(id=7, status="active", name="销售成员")
+    current_user = SimpleNamespace(
+        id=7,
+        status="active",
+        name="销售成员",
+        roles=[SimpleNamespace(code="TEAM_ADMIN")],
+    )
     team_state = {"id": 1}
     permissions = {"product:view", "product:create", "product:edit", "product:delete"}
-
     def _permission_stub(_db, _user_id, team_id=None):
         assert team_id == team_state["id"]
         return [SimpleNamespace(code=code) for code in permissions]
@@ -74,6 +78,9 @@ def api_env(monkeypatch):
             permissions=permissions,
             team_state=team_state,
             current_user=current_user,
+            app=app,
+            get_db=_get_db,
+            current_team=_current_team,
         )
 
     db.close()
@@ -82,6 +89,138 @@ def api_env(monkeypatch):
 
 def _create_product(api_env, *, team_id: int = 1, code: str = "CRM", name: str = "CRM"):
     return product_crud.create(api_env.db, team_id, ProductCreate(code=code, name=name), "7")
+
+
+def _grant_only(api_env, required_permission: str):
+    """Grant one product permission while retaining unrelated access and TEAM_ADMIN role."""
+    api_env.permissions.clear()
+    api_env.permissions.update({"unrelated:permission", required_permission})
+    assert api_env.current_user.roles[0].code == "TEAM_ADMIN"
+
+
+def test_detail_requires_view_permission(api_env):
+    product = _create_product(api_env)
+    _grant_only(api_env, "product:create")
+
+    response = api_env.client.get(f"/v1/products/{product.public_id}")
+
+    assert response.status_code == 403
+
+
+def test_product_update_requires_edit_permission(api_env):
+    product = _create_product(api_env)
+    _grant_only(api_env, "product:view")
+
+    response = api_env.client.put(f"/v1/products/{product.public_id}", json={"name": "拒绝更新"})
+
+    assert response.status_code == 403
+
+
+def test_product_delete_requires_delete_permission(api_env):
+    product = _create_product(api_env)
+    _grant_only(api_env, "product:edit")
+
+    response = api_env.client.delete(f"/v1/products/{product.public_id}")
+
+    assert response.status_code == 403
+
+
+def test_module_create_requires_edit_permission(api_env):
+    product = _create_product(api_env)
+    _grant_only(api_env, "product:view")
+
+    response = api_env.client.post(
+        f"/v1/products/{product.public_id}/modules",
+        json={"code": "PRO", "name": "专业版"},
+    )
+
+    assert response.status_code == 403
+
+
+def test_module_update_requires_edit_permission(api_env):
+    product = _create_product(api_env)
+    module = product_crud.create_module(api_env.db, product, {"code": "PRO", "name": "专业版"}, "7")
+    _grant_only(api_env, "product:view")
+
+    response = api_env.client.put(
+        f"/v1/products/{product.public_id}/modules/{module.public_id}",
+        json={"name": "拒绝更新"},
+    )
+
+    assert response.status_code == 403
+
+
+def test_module_delete_requires_edit_permission_with_unrelated_access(api_env):
+    product = _create_product(api_env)
+    module = product_crud.create_module(api_env.db, product, {"code": "PRO", "name": "专业版"}, "7")
+    _grant_only(api_env, "product:view")
+
+    response = api_env.client.delete(f"/v1/products/{product.public_id}/modules/{module.public_id}")
+
+    assert response.status_code == 403
+
+
+def test_duplicate_product_code_returns_conflict_without_extra_product(api_env):
+    first = api_env.client.post("/v1/products/", json={"code": "DUP", "name": "第一个"})
+    duplicate = api_env.client.post("/v1/products/", json={"code": "DUP", "name": "重复"})
+
+    assert first.status_code == 201
+    assert duplicate.status_code == 409
+    assert [row.code for row in api_env.db.query(Product).filter(Product.team_id == 1).all()] == ["DUP"]
+
+
+def test_duplicate_module_code_returns_conflict_without_extra_module(api_env):
+    product = _create_product(api_env)
+    first = api_env.client.post(
+        f"/v1/products/{product.public_id}/modules",
+        json={"code": "DUP", "name": "第一个模块"},
+    )
+    duplicate = api_env.client.post(
+        f"/v1/products/{product.public_id}/modules",
+        json={"code": "DUP", "name": "重复模块"},
+    )
+
+    assert first.status_code == 201
+    assert duplicate.status_code == 409
+    modules = api_env.db.query(ProductModule).filter(ProductModule.product_id == product.id).all()
+    assert sorted(module.code for module in modules) == ["BASE", "DUP"]
+
+
+def test_mounted_app_registers_products_route_and_serves_list(api_env):
+    from app.main import app as mounted_app
+
+    assert any(route.path == "/api/v1/products/" for route in mounted_app.routes)
+    overrides = mounted_app.dependency_overrides
+    previous = {
+        database.get_db: overrides.get(database.get_db),
+        deps.get_db: overrides.get(deps.get_db),
+        products_api.get_db: overrides.get(products_api.get_db),
+        deps.get_current_user_team: overrides.get(deps.get_current_user_team),
+        products_api.get_current_user_team: overrides.get(products_api.get_current_user_team),
+        deps.get_current_active_user: overrides.get(deps.get_current_active_user),
+        products_api.get_current_active_user: overrides.get(products_api.get_current_active_user),
+    }
+    overrides.update({
+        database.get_db: api_env.get_db,
+        deps.get_db: api_env.get_db,
+        products_api.get_db: api_env.get_db,
+        deps.get_current_user_team: api_env.current_team,
+        products_api.get_current_user_team: api_env.current_team,
+        deps.get_current_active_user: lambda: api_env.current_user,
+        products_api.get_current_active_user: lambda: api_env.current_user,
+    })
+    try:
+        with TestClient(mounted_app) as client:
+            response = client.get("/api/v1/products/")
+    finally:
+        for dependency, value in previous.items():
+            if value is None:
+                overrides.pop(dependency, None)
+            else:
+                overrides[dependency] = value
+
+    assert response.status_code == 200
+    assert response.json() == []
 
 
 def test_view_permission_lists_and_gets_product_detail(api_env):
