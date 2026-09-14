@@ -129,4 +129,3 @@ def test_product_delete_rejects_add_on_modules(db):
 
     with pytest.raises(ValueError, match="包含增强模块"):
         product_crud.delete(db, product)
-
