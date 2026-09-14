@@ -82,6 +82,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("public_id", name="uq_crm_products_public_id"),
         sa.UniqueConstraint("team_id", "code", name="uq_crm_products_team_code"),
+        sa.UniqueConstraint("id", "team_id", name="uq_crm_products_id_team"),
         comment="团队级产品目录",
     )
     op.create_index("idx_crm_products_team_active", PRODUCT_TABLE, ["team_id", "is_active"])
@@ -97,6 +98,7 @@ def upgrade() -> None:
         sa.Column("code", sa.String(50), nullable=False, comment="产品内模块编码"),
         sa.Column("name", sa.String(100), nullable=False, comment="模块名称"),
         sa.Column("description", sa.Text(), nullable=True, comment="模块描述"),
+        sa.Column("base_key", sa.String(10), nullable=True, comment="基础模块唯一键；增强模块为空"),
         sa.Column("module_role", sa.String(20), nullable=False, server_default="ADD_ON", comment="模块角色"),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true(), comment="是否启用"),
         sa.Column("sort_order", sa.Integer(), nullable=False, server_default="0", comment="展示顺序"),
@@ -104,11 +106,21 @@ def upgrade() -> None:
         sa.Column("updated_by", sa.String(100), nullable=True, comment="最后更新人"),
         sa.Column("created_time", sa.DateTime(), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP"), comment="创建时间"),
         sa.Column("updated_time", sa.DateTime(), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP"), comment="更新时间"),
-        sa.ForeignKeyConstraint(["product_id"], [f"{PRODUCT_TABLE}.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["product_id", "team_id"],
+            [f"{PRODUCT_TABLE}.id", f"{PRODUCT_TABLE}.team_id"],
+            ondelete="CASCADE",
+            name="fk_crm_product_modules_product_team",
+        ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("public_id", name="uq_crm_product_modules_public_id"),
         sa.UniqueConstraint("product_id", "code", name="uq_crm_product_modules_product_code"),
+        sa.UniqueConstraint("product_id", "base_key", name="uq_crm_product_modules_product_base_key"),
         sa.CheckConstraint("module_role IN ('BASE', 'ADD_ON')", name="ck_crm_product_modules_role"),
+        sa.CheckConstraint(
+            "(module_role = 'BASE' AND base_key = 'BASE') OR (module_role = 'ADD_ON' AND base_key IS NULL)",
+            name="ck_crm_product_modules_base_key",
+        ),
         comment="产品模块目录",
     )
     op.create_index("idx_crm_product_modules_team_product", MODULE_TABLE, ["team_id", "product_id"])
@@ -118,25 +130,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    if _table_exists("role_permissions") and _table_exists("permissions"):
-        conn = op.get_bind()
-        conn.execute(
-            sa.text(
-                """
-                DELETE FROM role_permissions
-                WHERE permission_id IN (
-                    SELECT id FROM permissions WHERE code IN (:view, :create, :edit, :delete)
-                )
-                """
-            ),
-            {"view": "product:view", "create": "product:create", "edit": "product:edit", "delete": "product:delete"},
-        )
-        conn.execute(
-            sa.text(
-                "DELETE FROM permissions WHERE code IN (:view, :create, :edit, :delete)"
-            ),
-            {"view": "product:view", "create": "product:create", "edit": "product:edit", "delete": "product:delete"},
-        )
+    # Permission rows and grants may predate this migration. They are
+    # intentionally preserved because no portable provenance marker exists.
     if _table_exists(MODULE_TABLE):
         op.drop_index("idx_crm_product_modules_product_role", table_name=MODULE_TABLE)
         op.drop_index("idx_crm_product_modules_team_active", table_name=MODULE_TABLE)

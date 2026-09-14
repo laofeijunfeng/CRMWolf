@@ -52,9 +52,9 @@ def test_product_catalog_migration_generates_ids_on_sqlite() -> None:
             sa.text(
                 """
                 INSERT INTO crm_product_modules
-                    (public_id, team_id, product_id, code, name, created_by, created_time, updated_time)
+                    (public_id, team_id, product_id, code, name, module_role, base_key, created_by, created_time, updated_time)
                 VALUES
-                    (:public_id, :team_id, :product_id, :code, :name, :created_by, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    (:public_id, :team_id, :product_id, :code, :name, :module_role, :base_key, :created_by, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 RETURNING id
                 """
             ),
@@ -63,6 +63,8 @@ def test_product_catalog_migration_generates_ids_on_sqlite() -> None:
                 "team_id": 1,
                 "product_id": product_id,
                 "code": "BASE",
+                "module_role": "BASE",
+                "base_key": "BASE",
                 "name": "基础版",
                 "created_by": "migration-test",
             },
@@ -72,3 +74,44 @@ def test_product_catalog_migration_generates_ids_on_sqlite() -> None:
     assert product_id > 0
     assert isinstance(module_id, int)
     assert module_id > 0
+
+
+def test_product_catalog_downgrade_preserves_preexisting_product_permissions() -> None:
+    engine = sa.create_engine("sqlite:///:memory:")
+    migration = _load_migration()
+
+    with engine.connect() as connection:
+        connection.execute(sa.text("CREATE TABLE roles (id INTEGER PRIMARY KEY, code VARCHAR(50) NOT NULL)"))
+        connection.execute(
+            sa.text(
+                "CREATE TABLE permissions (id INTEGER PRIMARY KEY, name VARCHAR(100) NOT NULL, "
+                "code VARCHAR(100) NOT NULL, resource VARCHAR(100) NOT NULL, action VARCHAR(50) NOT NULL, scope VARCHAR(50))"
+            )
+        )
+        connection.execute(
+            sa.text(
+                "CREATE TABLE role_permissions (role_id INTEGER NOT NULL, permission_id INTEGER NOT NULL)"
+            )
+        )
+        connection.execute(sa.text("INSERT INTO roles (id, code) VALUES (1, 'SALES_MEMBER')"))
+        connection.execute(
+            sa.text(
+                "INSERT INTO permissions (id, name, code, resource, action) "
+                "VALUES (1, 'Existing product view', 'product:view', 'product', 'view')"
+            )
+        )
+        connection.execute(sa.text("INSERT INTO role_permissions (role_id, permission_id) VALUES (1, 1)"))
+        context = MigrationContext.configure(connection)
+        migration.op = Operations(context)
+        migration.upgrade()
+        migration.downgrade()
+
+        permission = connection.execute(
+            sa.text("SELECT name, code FROM permissions WHERE id = 1")
+        ).one()
+        grant = connection.execute(
+            sa.text("SELECT role_id, permission_id FROM role_permissions WHERE role_id = 1 AND permission_id = 1")
+        ).one()
+
+    assert permission == ("Existing product view", "product:view")
+    assert grant == (1, 1)

@@ -1,7 +1,8 @@
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
@@ -13,6 +14,11 @@ from app.schemas.product import ProductCreate, ProductModuleCreate, ProductModul
 @pytest.fixture
 def db(tmp_path: Path):
     engine = create_engine(f"sqlite:///{tmp_path / 'products.db'}")
+
+    @event.listens_for(engine, "connect")
+    def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
+        dbapi_connection.execute("PRAGMA foreign_keys=ON")
+
     Base.metadata.create_all(engine, tables=[Product.__table__, ProductModule.__table__])
     session = sessionmaker(bind=engine, expire_on_commit=False)()
     try:
@@ -28,6 +34,40 @@ def product_payload(code: str = "CRM", name: str = "CRM") -> ProductCreate:
 def module_payload(code: str = "ADDON", name: str = "增强模块") -> ProductModuleCreate:
     return ProductModuleCreate(code=code, name=name, description="module")
 
+
+def test_product_rejects_second_base_module_at_database_boundary(db):
+    product = product_crud.create(db, 1, product_payload(), "u1")
+
+    db.add(
+        ProductModule(
+            team_id=product.team_id,
+            product_id=product.id,
+            code="SECOND_BASE",
+            name="重复基础版",
+            module_role=ProductModuleRole.BASE.value,
+            base_key="BASE",
+            created_by="u2",
+        )
+    )
+    with pytest.raises(IntegrityError):
+        db.commit()
+
+
+def test_product_module_cannot_cross_team_product_boundary(db):
+    product = product_crud.create(db, 1, product_payload(), "u1")
+
+    db.add(
+        ProductModule(
+            team_id=2,
+            product_id=product.id,
+            code="CROSS_TEAM",
+            name="越权模块",
+            module_role=ProductModuleRole.ADD_ON.value,
+            created_by="u2",
+        )
+    )
+    with pytest.raises(IntegrityError):
+        db.commit()
 
 def test_create_product_creates_exactly_one_base_module(db):
     product = product_crud.create(db, team_id=1, obj_in=product_payload(), creator_id="u1")

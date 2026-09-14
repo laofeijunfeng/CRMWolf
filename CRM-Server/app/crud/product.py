@@ -61,6 +61,7 @@ class ProductCRUD:
                 code="BASE",
                 name="基础版",
                 module_role=ProductModuleRole.BASE.value,
+                base_key="BASE",
                 is_active=True,
                 sort_order=0,
                 created_by=creator_id,
@@ -110,7 +111,7 @@ class ProductCRUD:
         if db.query(ProductModule.id).filter(ProductModule.product_id == product.id, ProductModule.code == data["code"]).first():
             raise ValueError("模块编码已存在")
         data.pop("module_role", None)
-        module = ProductModule(team_id=product.team_id, product=product, created_by=creator_id, **data)
+        module = ProductModule(team_id=product.team_id, product=product, created_by=creator_id, base_key=None, **data)
         db.add(module)
         try:
             db.commit()
