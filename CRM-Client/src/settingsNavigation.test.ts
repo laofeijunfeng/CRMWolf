@@ -23,4 +23,14 @@ describe('settings navigation registry', () => {
       'automation:edit',
     ]))
   })
+  it('registers canonical products entry with explicit permission and no owner bypass', () => {
+    const item = getSettingsNavigationItem('products')
+    expect(item).toMatchObject({
+      path: '/settings/products',
+      requiredAnyPermissions: ['product:view'],
+      scope: 'team',
+      requiresTeam: true,
+      allowOwnerBypass: false,
+    })
+  })
 })

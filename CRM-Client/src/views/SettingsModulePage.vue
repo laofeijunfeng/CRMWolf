@@ -89,7 +89,7 @@ const legacyComponents: Record<string, Component> = {
   'approval-flows-new': defineAsyncComponent(() => import('@/views/ApprovalFlowsNew.vue')),
   'acquisition-sources': defineAsyncComponent(() => import('@/components/system-config/AcquisitionSourcePanel.vue')),
   procurement: defineAsyncComponent(() => import('@/components/system-config/ProcurementMethodsPanel.vue')),
-  ai: defineAsyncComponent(() => import('@/components/system-config/AIConfigSheet.vue')),
+  products: defineAsyncComponent(() => import('@/components/system-config/ProductPanel.vue')),
   notifications: defineAsyncComponent(() => import('@/components/system-config/NotificationSheet.vue')),
   integrations: defineAsyncComponent(() => import('@/components/system-config/LoginIntegrationSheet.vue')),
 }
@@ -138,7 +138,7 @@ const legacyProps = computed<Record<string, unknown>>(() => {
     ? { active: true, embedded: true }
     : { open: legacyOpen.value }
 
-  if (moduleId.value === 'approval-flows' || moduleId.value === 'approval-flows-new' || moduleId.value === 'acquisition-sources' || moduleId.value === 'procurement') {
+  if (moduleId.value === 'approval-flows' || moduleId.value === 'approval-flows-new' || moduleId.value === 'acquisition-sources' || moduleId.value === 'procurement' || moduleId.value === 'products') {
     if (queryAction.value !== null) props['action'] = queryAction.value
     if (queryRecordId.value !== null) props['recordId'] = queryRecordId.value
   }

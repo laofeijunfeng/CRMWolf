@@ -26,6 +26,7 @@ export interface SettingsNavigationItem {
   requiredAnyPermissions: readonly string[]
   legacyComponentKey?: string
   requiresTeam?: boolean
+  allowOwnerBypass?: boolean
 }
 
 export const SETTINGS_GROUP_LABELS: Record<SettingsGroup, string> = {
@@ -131,6 +132,19 @@ export const SETTINGS_NAVIGATION: readonly SettingsNavigationItem[] = [
     requiredAnyPermissions: ['procurement_method:view'],
     legacyComponentKey: 'procurement',
     requiresTeam: true,
+  },
+  {
+    id: 'products',
+    label: '产品管理',
+    description: '维护产品及其基础模块、增强模块和启用状态。',
+    path: '/settings/products',
+    icon: ShoppingCart,
+    group: 'business',
+    scope: 'team',
+    requiredAnyPermissions: ['product:view'],
+    legacyComponentKey: 'products',
+    requiresTeam: true,
+    allowOwnerBypass: false,
   },
   {
     id: 'ai',

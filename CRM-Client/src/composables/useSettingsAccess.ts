@@ -32,7 +32,7 @@ export const useSettingsAccess = (): {
   const canAccess = (item: SettingsNavigationItem): boolean => {
     if (item.scope === 'personal') return true
     if (item.requiresTeam === true && teamStore.currentTeam === null) return false
-    if (isOwner.value) return true
+    if (isOwner.value && item.allowOwnerBypass !== false) return true
     if (permissionStore.loadState !== 'ready') return false
     return permissionStore.hasAnyPermission([...item.requiredAnyPermissions])
   }
