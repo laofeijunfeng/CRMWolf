@@ -19,6 +19,7 @@ const productApi = {
   },
   async delete(publicId: string): Promise<void> {
     // DELETE endpoints return 204 with no response body to parse.
+    // eslint-disable-next-line crmwolf/require-zod-schema
     await request.delete(`/v1/products/${publicId}`)
   },
   async createModule(productId: string, data: ProductModuleCreate): Promise<ProductModuleResponse> {
@@ -29,6 +30,7 @@ const productApi = {
   },
   async deleteModule(productId: string, moduleId: string): Promise<void> {
     // DELETE endpoints return 204 with no response body to parse.
+    // eslint-disable-next-line crmwolf/require-zod-schema
     await request.delete(`/v1/products/${productId}/modules/${moduleId}`)
   },
 }
