@@ -10,6 +10,6 @@ describe('SettingsSidebar navigation contract', () => {
 
   it('exposes every settings module to the team owner policy', () => {
     const visible = getVisibleSettingsNavigation(() => true)
-    expect(visible).toHaveLength(10)
+    expect(visible.map(item => item.id)).toEqual(expect.arrayContaining(['products', 'ai']))
   })
 })

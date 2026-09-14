@@ -333,7 +333,7 @@ onMounted(() => {
 })
 
 watch(
-  () => [props.active, props.action, props.recordId, products.value.length] as const,
+  () => [props.active, props.action, props.recordId, products.value.length, canCreate.value, canEdit.value] as const,
   ([active, action, recordId]) => {
     if (!active) return
 

@@ -100,6 +100,21 @@ describe('ProductPanel', () => {
     expect(wrapper.find('h2').text()).toBe('新建产品')
     expect(wrapper.findAll('button').some(button => button.text() === '保存')).toBe(true)
   })
+  it('opens a pending create deep link when permissions become ready', async () => {
+    setActivePinia(createPinia())
+    const store = usePermissionStore()
+    store.loadState = 'loading'
+    store.permissions = []
+    const wrapper = mountPanel({ action: 'create' })
+    await vi.waitFor(() => expect(productApi.list).toHaveBeenCalled())
+    await flushPromises()
+    expect(wrapper.find('h2').exists()).toBe(false)
+
+    setPermissions(['product:view', 'product:create'])
+    await flushPromises()
+    expect(wrapper.find('h2').text()).toBe('新建产品')
+  })
+
 
   it('renders a retryable error instead of an empty state and recovers after retry', async () => {
     setActivePinia(createPinia()); setPermissions(['product:view'])

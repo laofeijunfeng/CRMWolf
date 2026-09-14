@@ -23,3 +23,18 @@ Focused command passed: 2 test files, 6 tests.
 
 ## Concerns
 No known concerns. No formatter or project-wide validation was run.
+
+## Settings regression evidence (2026-09-14)
+1. RED: `npm run test:unit -- src/settingsNavigation.test.ts src/composables/__tests__/useSettingsAccess.test.ts` failed 3 assertions: missing AI mapping and owner products access was not pending in `idle`/`loading` states.
+2. GREEN: the same focused command passed, 2 files / 12 tests, after restoring the AI mapping and making owner access loading explicit for `allowOwnerBypass:false` items.
+3. ESLint: `npx eslint src/settingsNavigation.ts src/settingsNavigation.test.ts src/composables/useSettingsAccess.ts src/composables/__tests__/useSettingsAccess.test.ts src/views/SettingsModulePage.vue --max-warnings=0` passed.
+4. Type-check: `npm run type-check` passed with no diagnostics.
+
+## Final review fixes (2026-09-14)
+1. Updated the sidebar owner-policy contract to assert required `products` and `ai` navigation IDs while preserving the account/roles filtering and personal-scope checks.
+2. Added a ProductPanel regression test for a create deep link received while permissions are loading; it opens after `product:create` becomes available.
+3. Included `canCreate.value` and `canEdit.value` in the deep-link watcher dependencies; the existing `lastDeepLinkKey` prevents duplicate opens.
+4. RED: the new ProductPanel regression test failed before the watcher dependency fix because the dialog remained closed after permissions became ready.
+5. GREEN: `npm run test:unit -- src/components/app-sidebar/__tests__/SettingsSidebar.test.ts src/settingsNavigation.test.ts src/composables/__tests__/useSettingsAccess.test.ts src/components/system-config/__tests__/ProductPanel.test.ts` — passed, 4 files / 21 tests.
+6. ESLint: `npx eslint src/components/app-sidebar/__tests__/SettingsSidebar.test.ts src/components/system-config/ProductPanel.vue src/components/system-config/__tests__/ProductPanel.test.ts --max-warnings=0` — passed with no output.
+7. Type-check: `npm run type-check` — passed with no diagnostics.
