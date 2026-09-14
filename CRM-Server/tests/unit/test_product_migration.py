@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
-from types import ModuleType
+from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+
+if TYPE_CHECKING:
+    from types import ModuleType
+
 
 MIGRATION_PATH = Path(__file__).resolve().parents[2] / "migrations" / "versions" / "132_product_module_catalog.py"
 
@@ -52,9 +56,15 @@ def test_product_catalog_migration_generates_ids_on_sqlite() -> None:
             sa.text(
                 """
                 INSERT INTO crm_product_modules
-                    (public_id, team_id, product_id, code, name, module_role, base_key, created_by, created_time, updated_time)
+                    (
+                        public_id, team_id, product_id, code, name,
+                        module_role, base_key, created_by, created_time, updated_time
+                    )
                 VALUES
-                    (:public_id, :team_id, :product_id, :code, :name, :module_role, :base_key, :created_by, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    (
+                        :public_id, :team_id, :product_id, :code, :name,
+                        :module_role, :base_key, :created_by, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                    )
                 RETURNING id
                 """
             ),
@@ -85,7 +95,8 @@ def test_product_catalog_downgrade_preserves_preexisting_product_permissions() -
         connection.execute(
             sa.text(
                 "CREATE TABLE permissions (id INTEGER PRIMARY KEY, name VARCHAR(100) NOT NULL, "
-                "code VARCHAR(100) NOT NULL, resource VARCHAR(100) NOT NULL, action VARCHAR(50) NOT NULL, scope VARCHAR(50))"
+                "code VARCHAR(100) NOT NULL, resource VARCHAR(100) NOT NULL, "
+                "action VARCHAR(50) NOT NULL, scope VARCHAR(50))"
             )
         )
         connection.execute(

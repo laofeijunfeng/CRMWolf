@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import BigInteger, create_engine, event
 from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.api import products as products_api
@@ -20,7 +20,7 @@ from app.schemas.product import ProductCreate
 
 
 @compiles(BigInteger, "sqlite")
-def _bigint_to_sqlite_int(element, compiler, **kw):  # noqa: ARG001
+def _bigint_to_sqlite_int(element, compiler, **kw):
     return "INTEGER"
 
 

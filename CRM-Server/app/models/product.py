@@ -2,7 +2,19 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, DateTime, ForeignKeyConstraint, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -62,7 +74,7 @@ class ProductModule(Base):
     name = Column(String(100), nullable=False, comment="模块名称")
     description = Column(Text, nullable=True, comment="模块描述")
     module_role = Column(String(20), nullable=False, default=ProductModuleRole.ADD_ON.value, comment="模块角色")
-    base_key = Column(String(10), nullable=True, comment="基础模块唯一键；增强模块为空")
+    base_key = Column(String(10), nullable=True, comment="基础模块唯一键；增强模块为空")  # noqa: RUF001
     is_active = Column(Boolean, nullable=False, default=True, comment="是否启用")
     sort_order = Column(Integer, nullable=False, default=0, comment="展示顺序")
     created_by = Column(String(100), nullable=False, comment="创建人")

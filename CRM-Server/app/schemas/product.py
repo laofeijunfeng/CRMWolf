@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime  # noqa: TC003  # Pydantic resolves this annotation at runtime.
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-
 
 ModuleRole = Literal["BASE", "ADD_ON"]
 
