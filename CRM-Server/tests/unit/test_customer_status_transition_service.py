@@ -28,13 +28,13 @@ def test_plans_won_to_following_without_notification():
 
 
 @pytest.mark.parametrize("current_status", [2, 3])
-def test_rejects_non_lifecycle_current_status(current_status):
+def test_rejects_non_lifecycle_current_status(current_status: int):
     with pytest.raises(CustomerStatusTransitionError):
         customer_status_transition_service.plan(current_status=current_status, target_status=0)
 
 
 @pytest.mark.parametrize("target_status", [2, 3])
-def test_rejects_non_lifecycle_target_status(target_status):
+def test_rejects_non_lifecycle_target_status(target_status: int):
     with pytest.raises(CustomerStatusTransitionError):
         customer_status_transition_service.plan(current_status=0, target_status=target_status)
 

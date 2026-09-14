@@ -237,6 +237,8 @@ async def test_license_snapshot_updates_audit_and_refreshes(monkeypatch):
     assert calls.logs[0]["event_type"] == customers_api.EventTypes.CUSTOMER_LICENSE_SNAPSHOT_UPDATED
     assert calls.logs[0]["operator_id"] == "9"
     assert calls.logs[0]["team_id"] == customer.team_id
+    assert "previous_version" not in calls.logs[0]["content"]
+    assert "new_version" not in calls.logs[0]["content"]
     assert calls.logs[0]["content"] == {
         "before": {"license_type": "TRIAL", "license_expiry_date": "2026-01-01"},
         "after": {"license_type": "OFFICIAL", "license_expiry_date": "2027-01-01"},
@@ -246,6 +248,44 @@ async def test_license_snapshot_updates_audit_and_refreshes(monkeypatch):
     }
     assert calls.refreshes[0]["source_type"] == "customer"
     assert calls.refreshes[0]["summary"] == "客户授权汇总已更新，刷新客户智能档案"
+    assert calls.refreshes[0]["payload"] == {
+        "change_type": "license_snapshot_updated",
+        "changed_fields": ["license_type", "license_expiry_date"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_license_snapshot_accepts_valid_trial_pair(monkeypatch):
+    customer = _license_customer()
+    customer.license_type = "OFFICIAL"
+    customer.license_expiry_date = date(2027, 1, 1)
+    calls = _patch_snapshot_route_dependencies(monkeypatch, customer)
+
+    response = await customers_api.update_customer_license_snapshot(
+        customer_id=customer.public_id,
+        snapshot_update=CustomerLicenseSnapshotUpdate(
+            expected_version=4,
+            license_type="TRIAL",
+            license_expiry_date=date(2026, 6, 1),
+        ),
+        team_id=customer.team_id,
+        current_user=SimpleNamespace(id=9, name="操作人"),
+        db=SimpleNamespace(),
+    )
+
+    assert response.license_type == "TRIAL"
+    assert response.license_expiry_date == date(2026, 6, 1)
+    assert response.version == 5
+    assert calls.logs[0]["event_type"] == customers_api.EventTypes.CUSTOMER_LICENSE_SNAPSHOT_UPDATED
+    assert "previous_version" not in calls.logs[0]["content"]
+    assert "new_version" not in calls.logs[0]["content"]
+    assert calls.logs[0]["content"] == {
+        "before": {"license_type": "OFFICIAL", "license_expiry_date": "2027-01-01"},
+        "after": {"license_type": "TRIAL", "license_expiry_date": "2026-06-01"},
+        "changed_fields": ["license_type", "license_expiry_date"],
+        "actor_id": "9",
+        "team_id": customer.team_id,
+    }
     assert calls.refreshes[0]["payload"] == {
         "change_type": "license_snapshot_updated",
         "changed_fields": ["license_type", "license_expiry_date"],
@@ -546,6 +586,7 @@ async def test_customer_put_updates_profile_status_industry_and_license_once(mon
     }
     assert calls.refreshes[0]["scope"] == "partial"
     assert calls.notifications == []
+    assert customers_api.EventTypes.CUSTOMER_STATUS_CHANGED not in [entry["event_type"] for entry in calls.logs]
 
 
 
