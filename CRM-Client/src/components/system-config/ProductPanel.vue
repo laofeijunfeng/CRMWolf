@@ -501,7 +501,7 @@ watch(
           <FormItem>
             <FormLabel>编码</FormLabel>
             <FormControl>
-              <Input v-bind="componentField" :disabled="isEditMode" />
+              <Input v-bind="componentField as unknown as Record<string, unknown>" :disabled="isEditMode" />
             </FormControl>
             <FormMessage />
           </FormItem>
@@ -510,7 +510,7 @@ watch(
           <FormItem>
             <FormLabel>名称</FormLabel>
             <FormControl>
-              <Input v-bind="componentField" />
+              <Input v-bind="componentField as unknown as Record<string, unknown>" />
             </FormControl>
             <FormMessage />
           </FormItem>
@@ -519,7 +519,7 @@ watch(
           <FormItem>
             <FormLabel>描述</FormLabel>
             <FormControl>
-              <Textarea v-bind="componentField" />
+              <Textarea v-bind="componentField as unknown as Record<string, unknown>" />
             </FormControl>
             <FormMessage />
           </FormItem>
@@ -544,7 +544,7 @@ watch(
           <FormItem>
             <FormLabel>编码</FormLabel>
             <FormControl>
-              <Input v-bind="componentField" :disabled="isModuleEditMode" />
+              <Input v-bind="componentField as unknown as Record<string, unknown>" :disabled="isModuleEditMode" />
             </FormControl>
             <FormMessage />
           </FormItem>
@@ -553,7 +553,7 @@ watch(
           <FormItem>
             <FormLabel>名称</FormLabel>
             <FormControl>
-              <Input v-bind="componentField" />
+              <Input v-bind="componentField as unknown as Record<string, unknown>" />
             </FormControl>
             <FormMessage />
           </FormItem>
@@ -562,7 +562,7 @@ watch(
           <FormItem>
             <FormLabel>描述</FormLabel>
             <FormControl>
-              <Textarea v-bind="componentField" />
+              <Textarea v-bind="componentField as unknown as Record<string, unknown>" />
             </FormControl>
             <FormMessage />
           </FormItem>
