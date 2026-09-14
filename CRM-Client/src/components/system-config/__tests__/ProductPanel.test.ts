@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import ProductPanel from '@/components/system-config/ProductPanel.vue'
+import { flushPromises } from '@vue/test-utils'
 import productApi from '@/api/product'
 import { usePermissionStore } from '@/stores/permissions'
 
@@ -42,7 +43,9 @@ describe('ProductPanel', () => {
   it('shows product data to a read-only user without maintenance buttons', async () => {
     setActivePinia(createPinia()); setPermissions(['product:view'])
     const wrapper = mount(ProductPanel, { global: { stubs } })
-    await vi.waitFor(() => expect(wrapper.text()).toContain('CRM 产品'))
+    await vi.waitFor(() => expect(productApi.list).toHaveBeenCalled())
+    await flushPromises()
+    expect(wrapper.text()).toContain('CRM 产品')
     expect(wrapper.text()).toContain('基础模块')
     expect(wrapper.findAll('button').some(button => button.text().includes('新建产品'))).toBe(false)
     expect(wrapper.findAll('button').some(button => button.text().includes('编辑'))).toBe(false)
@@ -53,6 +56,8 @@ describe('ProductPanel', () => {
     setActivePinia(createPinia()); setPermissions(['product:view', 'product:create', 'product:edit', 'product:delete'])
     const wrapper = mount(ProductPanel, { global: { stubs } })
     await vi.waitFor(() => expect(productApi.list).toHaveBeenCalled())
+    await flushPromises()
+    expect(wrapper.text()).toContain('CRM 产品')
     expect(wrapper.text()).toContain('新建产品')
     expect(wrapper.text()).toContain('新增模块')
     expect(wrapper.findAll('button').some(button => button.text().includes('删除模块'))).toBe(false)
