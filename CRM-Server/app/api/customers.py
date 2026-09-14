@@ -1760,15 +1760,21 @@ async def update_customer_lifecycle_status(
 ):
     customer = _get_editable_customer(db, customer_id, team_id, current_user)
     try:
-        updated_customer, decision, previous_version = customer_crud.plan_and_update_status_with_version(
-            db,
-            customer,
+        decision = customer_status_transition_service.plan(
+            current_status=customer.status,
             target_status=status_update.status,
-            expected_version=status_update.expected_version,
-            planner=customer_status_transition_service.plan,
         )
     except CustomerStatusTransitionError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    previous_version = customer.version
+    try:
+        updated_customer = customer_crud.update_status_with_version(
+            db,
+            customer,
+            status=decision.new_status,
+            expected_version=status_update.expected_version,
+        )
     except ConflictException as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
@@ -1855,8 +1861,6 @@ async def update_customer_license_snapshot(
             "before": {field: _audit_value(before.get(field)) for field in ("license_type", "license_expiry_date")},
             "after": {field: _audit_value(after.get(field)) for field in ("license_type", "license_expiry_date")},
             "changed_fields": changed_fields,
-            "previous_version": updated_customer.version - 1,
-            "new_version": updated_customer.version,
             "actor_id": str(current_user.id),
             "team_id": team_id,
         },

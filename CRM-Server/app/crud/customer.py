@@ -477,7 +477,6 @@ class CustomerCRUD:
         locked_customer = (
             db.query(Customer)
             .filter(Customer.id == db_obj.id, Customer.team_id == db_obj.team_id)
-            .populate_existing()
             .with_for_update()
             .first()
         )
@@ -491,38 +490,6 @@ class CustomerCRUD:
         db.commit()
         db.refresh(locked_customer)
         return locked_customer
-
-    def plan_and_update_status_with_version(
-        self,
-        db: Session,
-        db_obj: Customer,
-        *,
-        target_status: int,
-        expected_version: int,
-        planner,
-    ):
-        locked_customer = (
-            db.query(Customer)
-            .filter(Customer.id == db_obj.id, Customer.team_id == db_obj.team_id)
-            .populate_existing()
-            .with_for_update()
-            .first()
-        )
-        if locked_customer is None:
-            raise ConflictException("客户已不存在，请刷新后确认最新状态")
-        if locked_customer.version != expected_version:
-            raise ConflictException("客户已发生变化，请刷新后确认最新状态")
-
-        decision = planner(
-            current_status=locked_customer.status,
-            target_status=target_status,
-        )
-        previous_version = locked_customer.version
-        locked_customer.status = decision.new_status
-        locked_customer.version += 1
-        db.commit()
-        db.refresh(locked_customer)
-        return locked_customer, decision, previous_version
 
     def update_industry(self, db: Session, customer_id: int, industry: str) -> Customer:
         """更新客户行业字段"""
@@ -760,7 +727,6 @@ class CustomerCRUD:
         locked_customer = (
             db.query(Customer)
             .filter(Customer.id == customer.id, Customer.team_id == team_id)
-            .populate_existing()
             .with_for_update()
             .first()
         ) or customer
@@ -856,7 +822,6 @@ class CustomerCRUD:
         locked_customer = (
             db.query(Customer)
             .filter(Customer.id == customer.id, Customer.team_id == team_id)
-            .populate_existing()
             .with_for_update()
             .first()
         ) or customer
@@ -942,7 +907,6 @@ class CustomerCRUD:
         locked_customer = (
             db.query(Customer)
             .filter(Customer.id == customer.id, Customer.team_id == team_id)
-            .populate_existing()
             .with_for_update()
             .first()
         ) or customer

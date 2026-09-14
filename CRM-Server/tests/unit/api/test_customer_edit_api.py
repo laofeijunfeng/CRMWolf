@@ -59,22 +59,15 @@ def _deny_edit_permission(monkeypatch, customer):
 def _patch_route_dependencies(monkeypatch, customer):
     calls = SimpleNamespace(updates=[], logs=[], refreshes=[], notifications=[])
     _allow_edit_permission(monkeypatch, customer)
-    real_plan_update = customers_api.customer_crud.plan_and_update_status_with_version
+    real_update_status = customers_api.customer_crud.update_status_with_version
     crud_db = MagicMock()
-    crud_db.query.return_value.filter.return_value.populate_existing.return_value.with_for_update.return_value.first.return_value = customer
+    crud_db.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = customer
 
-    def plan_and_update_status_with_version(db, db_customer, *, target_status, expected_version, planner):
-        result = real_plan_update(
-            crud_db,
-            db_customer,
-            target_status=target_status,
-            expected_version=expected_version,
-            planner=planner,
-        )
-        calls.updates.append({"customer": db_customer, "status": target_status, "expected_version": expected_version})
-        return result
+    def update_status_with_version(db, db_customer, *, status, expected_version):
+        calls.updates.append({"customer": db_customer, "status": status, "expected_version": expected_version})
+        return real_update_status(crud_db, db_customer, status=status, expected_version=expected_version)
 
-    monkeypatch.setattr(customers_api.customer_crud, "plan_and_update_status_with_version", plan_and_update_status_with_version)
+    monkeypatch.setattr(customers_api.customer_crud, "update_status_with_version", update_status_with_version)
     monkeypatch.setattr(customers_api.operation_log_service, "log", lambda **kwargs: calls.logs.append(kwargs))
     monkeypatch.setattr(
         customers_api.customer_business_object_intelligence_service,
@@ -173,7 +166,7 @@ async def test_lifecycle_status_maps_stale_version_to_conflict_without_side_effe
     def reject_stale(*args, **kwargs):
         raise ConflictException("客户已发生变化，请刷新后确认最新状态")
 
-    monkeypatch.setattr(customers_api.customer_crud, "plan_and_update_status_with_version", reject_stale)
+    monkeypatch.setattr(customers_api.customer_crud, "update_status_with_version", reject_stale)
 
     with pytest.raises(customers_api.HTTPException) as exc_info:
         await customers_api.update_customer_lifecycle_status(
@@ -248,37 +241,16 @@ async def test_license_snapshot_updates_audit_and_refreshes(monkeypatch):
         "before": {"license_type": "TRIAL", "license_expiry_date": "2026-01-01"},
         "after": {"license_type": "OFFICIAL", "license_expiry_date": "2027-01-01"},
         "changed_fields": ["license_type", "license_expiry_date"],
-        "previous_version": 4,
-        "new_version": 5,
         "actor_id": "9",
         "team_id": customer.team_id,
     }
-@pytest.mark.asyncio
-async def test_license_snapshot_audit_uses_persisted_version_not_expected_version(monkeypatch):
-    customer = _license_customer(version=8)
-    calls = _patch_snapshot_route_dependencies(monkeypatch, customer)
-    before = {"license_type": "TRIAL", "license_expiry_date": date(2026, 1, 1)}
-    after = {"license_type": "OFFICIAL", "license_expiry_date": date(2027, 1, 1)}
-    monkeypatch.setattr(
-        customers_api.customer_crud,
-        "update_license_snapshot",
-        lambda db, db_customer, payload: (customer, before, after),
-    )
+    assert calls.refreshes[0]["source_type"] == "customer"
+    assert calls.refreshes[0]["summary"] == "客户授权汇总已更新，刷新客户智能档案"
+    assert calls.refreshes[0]["payload"] == {
+        "change_type": "license_snapshot_updated",
+        "changed_fields": ["license_type", "license_expiry_date"],
+    }
 
-    await customers_api.update_customer_license_snapshot(
-        customer_id=customer.public_id,
-        snapshot_update=CustomerLicenseSnapshotUpdate(
-            expected_version=4,
-            license_type="OFFICIAL",
-            license_expiry_date=date(2027, 1, 1),
-        ),
-        team_id=customer.team_id,
-        current_user=SimpleNamespace(id=9, name="操作人"),
-        db=SimpleNamespace(),
-    )
-
-    assert calls.logs[0]["content"]["previous_version"] == 7
-    assert calls.logs[0]["content"]["new_version"] == 8
 
 
 @pytest.mark.asyncio
