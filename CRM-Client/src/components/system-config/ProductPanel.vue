@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
+import type { GenericObject } from 'vee-validate'
 import { z } from 'zod'
 import { toast } from 'vue-sonner'
 import { Pencil, Plus, Power, Search, Trash2 } from 'lucide-vue-next'
@@ -21,6 +21,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import {
+  Form,
   FormControl,
   FormField,
   FormItem,
@@ -115,17 +116,9 @@ const filteredProducts = computed<ProductListItem[]>(() => {
 
 const productFormSchema = toTypedSchema(productFormZodSchema)
 const moduleFormSchema = toTypedSchema(moduleFormZodSchema)
-const { handleSubmit, resetForm } = useForm({
-  validationSchema: productFormSchema,
-  initialValues: { code: '', name: '', description: '' },
-})
-const {
-  handleSubmit: handleModuleSubmit,
-  resetForm: resetModuleForm,
-} = useForm({
-  validationSchema: moduleFormSchema,
-  initialValues: { code: '', name: '', description: '' },
-})
+const productFormValues = ref<ProductFormValues>({ code: '', name: '', description: '' })
+const moduleFormValues = ref<ModuleFormValues>({ code: '', name: '', description: '' })
+
 
 const fetchProducts = async (): Promise<void> => {
   loading.value = true
@@ -144,7 +137,7 @@ const showCreateDialog = (): void => {
   if (!canCreate.value) return
   isEditMode.value = false
   selectedProduct.value = null
-  resetForm({ values: { code: '', name: '', description: '' } })
+  productFormValues.value = { code: '', name: '', description: '' }
   dialogOpen.value = true
 }
 
@@ -152,33 +145,32 @@ const showEditDialog = (product: ProductResponse): void => {
   if (!canEdit.value) return
   isEditMode.value = true
   selectedProduct.value = product
-  resetForm({
-    values: {
-      code: product.code,
-      name: product.name,
-      description: product.description ?? '',
-    },
-  })
+  productFormValues.value = {
+    code: product.code,
+    name: product.name,
+    description: product.description ?? '',
+  }
   dialogOpen.value = true
 }
 
-const onSubmit = handleSubmit(async (values: ProductFormValues) => {
+const onSubmit = async (values: GenericObject): Promise<void> => {
   if (isEditMode.value ? !canEdit.value : !canCreate.value) return
 
+  const parsed = productFormZodSchema.parse(values)
   dialogSubmitting.value = true
   try {
     if (isEditMode.value && selectedProduct.value) {
       const data: ProductUpdate = {
-        name: values.name,
-        description: values.description ?? null,
+        name: parsed.name,
+        description: parsed.description ?? null,
       }
       await productApi.update(selectedProduct.value.public_id, data)
       toast.success('产品更新成功')
     } else {
       const data: ProductCreate = {
-        code: values.code,
-        name: values.name,
-        description: values.description ?? null,
+        code: parsed.code,
+        name: parsed.name,
+        description: parsed.description ?? null,
       }
       await productApi.create(data)
       toast.success('产品创建成功')
@@ -191,7 +183,7 @@ const onSubmit = handleSubmit(async (values: ProductFormValues) => {
   } finally {
     dialogSubmitting.value = false
   }
-})
+}
 
 const toggleProduct = async (product: ProductResponse): Promise<void> => {
   if (!canEdit.value) return
@@ -230,7 +222,7 @@ const showCreateModuleDialog = (product: ProductResponse): void => {
   selectedProduct.value = product
   isModuleEditMode.value = false
   selectedModule.value = null
-  resetModuleForm({ values: { code: '', name: '', description: '' } })
+  moduleFormValues.value = { code: '', name: '', description: '' }
   moduleDialogOpen.value = true
 }
 
@@ -243,32 +235,31 @@ const showEditModuleDialog = (
   selectedProduct.value = product
   selectedModule.value = module
   isModuleEditMode.value = true
-  resetModuleForm({
-    values: {
-      code: module.code,
-      name: module.name,
-      description: module.description ?? '',
-    },
-  })
+  moduleFormValues.value = {
+    code: module.code,
+    name: module.name,
+    description: module.description ?? '',
+  }
   moduleDialogOpen.value = true
 }
-const onModuleSubmit = handleModuleSubmit(async (values: ModuleFormValues) => {
+const onModuleSubmit = async (values: GenericObject): Promise<void> => {
   if (!canEdit.value || !selectedProduct.value) return
 
+  const parsed = moduleFormZodSchema.parse(values)
   moduleDialogSubmitting.value = true
   try {
     if (isModuleEditMode.value && selectedModule.value) {
       await productApi.updateModule(
         selectedProduct.value.public_id,
         selectedModule.value.public_id,
-        { name: values.name, description: values.description ?? null },
+        { name: parsed.name, description: parsed.description ?? null },
       )
       toast.success('模块更新成功')
     } else {
       const data: ProductModuleCreate = {
-        code: values.code,
-        name: values.name,
-        description: values.description ?? null,
+        code: parsed.code,
+        name: parsed.name,
+        description: parsed.description ?? null,
         module_role: 'ADD_ON',
         is_active: true,
         sort_order: 0,
@@ -284,7 +275,7 @@ const onModuleSubmit = handleModuleSubmit(async (values: ModuleFormValues) => {
   } finally {
     moduleDialogSubmitting.value = false
   }
-})
+}
 
 const toggleModule = async (
   product: ProductResponse,
@@ -535,7 +526,13 @@ watch(
         <DialogTitle>{{ isEditMode ? '编辑产品' : '新建产品' }}</DialogTitle>
         <DialogDescription>维护产品编码、名称和描述。</DialogDescription>
       </DialogHeader>
-      <form class="space-y-4" @submit="onSubmit">
+      <Form
+        v-if="dialogOpen"
+        :validation-schema="productFormSchema"
+        :initial-values="productFormValues"
+        class="space-y-4"
+        @submit="onSubmit"
+      >
         <FormField v-slot="{ componentField }" name="code">
           <FormItem>
             <FormLabel>编码</FormLabel>
@@ -566,7 +563,7 @@ watch(
         <DialogFooter>
           <Button type="submit" :disabled="dialogSubmitting">保存</Button>
         </DialogFooter>
-      </form>
+      </Form>
     </DialogContent>
   </Dialog>
 
@@ -578,7 +575,13 @@ watch(
           增强模块用于扩展产品能力；基础模块不可修改状态或删除。
         </DialogDescription>
       </DialogHeader>
-      <form class="space-y-4" @submit="onModuleSubmit">
+      <Form
+        v-if="moduleDialogOpen"
+        :validation-schema="moduleFormSchema"
+        :initial-values="moduleFormValues"
+        class="space-y-4"
+        @submit="onModuleSubmit"
+      >
         <FormField v-slot="{ componentField }" name="code">
           <FormItem>
             <FormLabel>编码</FormLabel>
@@ -609,7 +612,7 @@ watch(
         <DialogFooter>
           <Button type="submit" :disabled="moduleDialogSubmitting">保存</Button>
         </DialogFooter>
-      </form>
+      </Form>
     </DialogContent>
   </Dialog>
 </template>

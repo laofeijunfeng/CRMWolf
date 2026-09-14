@@ -29,11 +29,25 @@ const stubs = {
   ErrorState: { props: ['title', 'description'], template: '<div role="alert"><strong>{{ title }}</strong><span>{{ description }}</span><slot name="action" /></div>' },
   Button: { props: ['disabled'], template: '<button :disabled="disabled"><slot /></button>' },
   Input: { props: ['modelValue'], emits: ['update:modelValue'], template: '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />' },
+  Textarea: { props: ['modelValue'], emits: ['update:modelValue'], template: '<textarea :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />' },
   Badge: { template: '<span><slot /></span>' },
   Select: { template: '<div><slot /></div>' }, SelectContent: { template: '<div><slot /></div>' }, SelectItem: { template: '<div><slot /></div>' }, SelectTrigger: { template: '<button><slot /></button>' }, SelectValue: { template: '<span><slot /></span>' },
   DialogContent: { template: '<div><slot /></div>' }, DialogHeader: { template: '<div><slot /></div>' }, DialogTitle: { template: '<h2><slot /></h2>' }, DialogDescription: { template: '<div><slot /></div>' }, DialogFooter: { template: '<div><slot /></div>' },
-  FormField: { template: '<div><slot :componentField="{}" /></div>' }, FormControl: { template: '<div><slot /></div>' }, FormItem: { template: '<div><slot /></div>' }, FormLabel: { template: '<label><slot /></label>' }, FormMessage: { template: '<span><slot /></span>' }, Textarea: { template: '<textarea />' },
+  FormField: { template: '<div><slot :componentField="{}" /></div>' }, FormControl: { template: '<div><slot /></div>' }, FormItem: { template: '<div><slot /></div>' }, FormLabel: { template: '<label><slot /></label>' }, FormMessage: { template: '<span><slot /></span>' },
 }
+
+const formSubmitStubs = Object.fromEntries(
+  Object.entries(stubs).filter(([key]) => ![
+    'FormField',
+    'FormControl',
+    'FormItem',
+    'FormLabel',
+    'FormMessage',
+    'Input',
+    'Textarea',
+  ].includes(key)),
+)
+
 
 const mountPanel = (props: Record<string, unknown> = {}): VueWrapper => mount(ProductPanel, { props, global: { stubs } })
 
@@ -129,5 +143,32 @@ describe('ProductPanel', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('CRM 产品')
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+  })
+
+  it('creates a product from the product form instead of the module form', async () => {
+    setActivePinia(createPinia()); setPermissions(['product:view', 'product:create'])
+    vi.mocked(productApi.create).mockResolvedValueOnce(mocks.product)
+    const wrapper = mount(ProductPanel, {
+      props: { action: 'create' },
+      global: { stubs: formSubmitStubs },
+      attachTo: document.body,
+    })
+    await vi.waitFor(() => expect(productApi.list).toHaveBeenCalled())
+    await flushPromises()
+
+    const form = wrapper.get('form')
+    await form.get('input[name="code"]').setValue('CRM_WOLF')
+    await form.get('input[name="name"]').setValue('CRMWolf')
+    await form.get('textarea[name="description"]').setValue('客户关系管理平台')
+    await form.get('button[type="submit"]').trigger('click')
+    await vi.waitFor(() => {
+      expect(productApi.create).toHaveBeenCalledWith({
+        code: 'CRM_WOLF',
+        name: 'CRMWolf',
+        description: '客户关系管理平台',
+      })
+    })
+    expect(productApi.createModule).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 })
