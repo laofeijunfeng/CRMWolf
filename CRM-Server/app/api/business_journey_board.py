@@ -216,14 +216,23 @@ def _infer_active_opportunity_stage(opportunity: Opportunity | None) -> BoardSta
 def get_business_journey_board(
     start_date: date | None = Query(None, description="最近业务动态开始日期"),
     end_date: date | None = Query(None, description="最近业务动态结束日期"),
+    created_time_start: date | None = Query(None, description="主商机创建开始日期"),
+    created_time_end: date | None = Query(None, description="主商机创建结束日期"),
+    expected_closing_date_start: date | None = Query(None, description="主商机预计成交开始日期"),
+    expected_closing_date_end: date | None = Query(None, description="主商机预计成交结束日期"),
     owner_id: str | None = Query(None, description="负责人ID，多个用英文逗号分隔"),
     limit: int = Query(500, ge=1, le=1000, description="最多加载的旅程卡片数"),
     team_id: int = Depends(get_current_user_team),
     current_user=Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
-    if start_date and end_date and start_date > end_date:
-        raise HTTPException(status_code=400, detail="开始日期不能晚于结束日期")
+    for range_start, range_end in (
+        (start_date, end_date),
+        (created_time_start, created_time_end),
+        (expected_closing_date_start, expected_closing_date_end),
+    ):
+        if range_start and range_end and range_start > range_end:
+            raise HTTPException(status_code=400, detail="开始日期不能晚于结束日期")
 
     scope = _resolve_scope(db, current_user.id, team_id)
     user_id = str(current_user.id)
@@ -254,6 +263,17 @@ def get_business_journey_board(
         query = query.filter(CustomerDealJourney.last_event_at >= filter_start)
     if filter_end is not None:
         query = query.filter(CustomerDealJourney.last_event_at < filter_end)
+
+    created_start, created_end = _date_range(created_time_start, created_time_end)
+    if created_start is not None:
+        query = query.filter(Opportunity.created_time >= created_start)
+    if created_end is not None:
+        query = query.filter(Opportunity.created_time < created_end)
+
+    if expected_closing_date_start is not None:
+        query = query.filter(Opportunity.expected_closing_date >= expected_closing_date_start)
+    if expected_closing_date_end is not None:
+        query = query.filter(Opportunity.expected_closing_date <= expected_closing_date_end)
 
     owner_expr = func.coalesce(Opportunity.owner_id, Customer.owner_id)
     if scope == "own":
