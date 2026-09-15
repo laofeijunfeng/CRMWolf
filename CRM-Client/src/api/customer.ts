@@ -271,6 +271,9 @@ export interface CustomerDetailResponse {
   source_lead_id: string | null
   default_procurement_method_id: number | null
   default_procurement_method_info?: ProcurementMethodInfo | null
+  loss_reason: string | null
+  return_reason: string | null
+  returned_time: string | null
   default_opportunity?: CustomerDefaultOpportunity | null
   creator_id: string
   created_time: string

@@ -12,6 +12,7 @@ const routerPush = vi.hoisted(() => vi.fn(() => Promise.resolve()))
 const customerApi = vi.hoisted(() => ({
   getCustomers: vi.fn(),
   getPublicCustomers: vi.fn(),
+  getCustomerDetail: vi.fn(),
   claimCustomer: vi.fn(),
   updateCustomerStatus: vi.fn(),
   markAsLost: vi.fn(),
@@ -29,7 +30,8 @@ const headerStore = vi.hoisted(() => ({
   setActions: vi.fn(),
 }))
 const handleApiError = vi.hoisted(() => vi.fn())
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
+const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }))
+const sheetRefresh = vi.hoisted(() => vi.fn(() => Promise.resolve(true)))
 const confirmDelete = vi.hoisted(() => vi.fn())
 const confirmDialog = vi.hoisted(() => vi.fn())
 
@@ -62,9 +64,18 @@ vi.mock('@/components/crmwolf', () => ({
       pageSize: Number,
       total: Number,
       emptyTitle: String,
+      getRowActions: { type: Function as PropType<(row: CustomerResponse) => { primaryActions?: Array<{ id: string; handler?: (row: Record<string, unknown>) => void }> }>, required: true },
     },
     emits: ['update:page', 'update:page-size'],
-    setup: (props, { slots }) => () => h('div', { 'data-testid': 'data-table' }, props.data.map(row => h('div', { key: row.id }, slots['cell-account_name']?.({ row })))),
+    setup: (props, { slots }) => () => h('div', { 'data-testid': 'data-table' }, props.data.map(row => {
+      const editAction = props.getRowActions(row).primaryActions?.find(action => action.id === 'edit')
+      return h('div', { key: row.id }, [
+        slots['cell-account_name']?.({ row }),
+        editAction?.handler
+          ? h('button', { type: 'button', 'data-testid': `edit-customer-${row.id}`, onClick: () => editAction.handler?.(row as unknown as Record<string, unknown>) }, 'edit')
+          : null,
+      ])
+    })),
   }),
   TableRowActions: defineComponent({
     name: 'TableRowActions',
@@ -81,7 +92,26 @@ vi.mock('@/components/ui/button', () => ({
   }),
 }))
 vi.mock('@/components/AICustomerCreateDialog.vue', () => ({ default: defineComponent({ name: 'AICustomerCreateDialog', setup: () => () => null }) }))
-vi.mock('@/components/dialogs/CustomerFormDialog.vue', () => ({ default: defineComponent({ name: 'CustomerFormDialog', setup: () => () => null }) }))
+vi.mock('@/components/dialogs/CustomerFormDialog.vue', () => ({
+  default: defineComponent({
+    name: 'CustomerFormDialog',
+    props: { open: Boolean, customerId: String },
+    emits: ['update:open', 'success'],
+    setup: (props, { emit }) => () => props.open
+      ? h('button', {
+          type: 'button',
+          'data-testid': 'customer-form-success',
+          onClick: () => emit('success', {
+            entityType: 'customer',
+            entityId: 'cus_test_19',
+            operation: 'update',
+            outcome: 'success',
+            stateSyncRequested: true,
+          }),
+        }, 'save')
+      : null,
+  }),
+}))
 vi.mock('@/components/dialogs/CustomerTransferDialog.vue', () => ({ default: defineComponent({ name: 'CustomerTransferDialog', setup: () => () => null }) }))
 vi.mock('@/components/dialogs/OpportunityFormDialog.vue', () => ({ default: defineComponent({ name: 'OpportunityFormDialog', setup: () => () => null }) }))
 vi.mock('@/components/StatusBadge.vue', () => ({ default: defineComponent({ name: 'StatusBadge', setup: () => () => h('span') }) }))
@@ -96,13 +126,16 @@ vi.mock('@/views/CustomerDetailSheet.vue', () => ({
     name: 'CustomerDetailSheet',
     props: { visible: Boolean, customerId: String },
     emits: ['update:visible', 'refresh'],
-    setup: (props, { emit }) => () => h('div', {
-      'data-testid': 'customer-detail-sheet',
-      'data-visible': String(props.visible),
-      'data-customer-id': props.customerId === undefined ? '' : String(props.customerId),
-    }, [
-      h('button', { type: 'button', 'data-testid': 'close-customer-detail', onClick: () => emit('update:visible', false) }, 'close'),
-    ]),
+    setup: (props, { emit, expose }) => {
+      expose({ refresh: sheetRefresh })
+      return () => h('div', {
+        'data-testid': 'customer-detail-sheet',
+        'data-visible': String(props.visible),
+        'data-customer-id': props.customerId === undefined ? '' : String(props.customerId),
+      }, [
+        h('button', { type: 'button', 'data-testid': 'close-customer-detail', onClick: () => emit('update:visible', false) }, 'close'),
+      ])
+    },
   }),
 }))
 
@@ -136,6 +169,9 @@ describe('Customers local detail sheet state', () => {
     headerStore.activeTab = ''
     customerApi.getCustomers.mockResolvedValue([customerFixture()])
     customerApi.getPublicCustomers.mockResolvedValue([])
+    customerApi.getCustomerDetail.mockResolvedValue(customerFixture())
+    sheetRefresh.mockClear()
+
   })
 
   it('opens a customer detail sheet from the list without changing the route query', async () => {
@@ -186,5 +222,45 @@ describe('Customers local detail sheet state', () => {
 
     expect(wrapper.get('[data-testid="customer-detail-sheet"]').attributes('data-visible')).toBe('false')
     expect(routerPush).not.toHaveBeenCalled()
+  })
+
+  it('refreshes the list and matching open detail sheet after inline form success', async () => {
+    const wrapper = mount(Customers)
+    await flushPromises()
+
+    await wrapper.get('.link-text').trigger('click')
+    await wrapper.get('[data-testid="edit-customer-cus_test_19"]').trigger('click')
+    await flushPromises()
+
+    customerApi.getCustomers.mockClear()
+    sheetRefresh.mockClear()
+    await wrapper.get('[data-testid="customer-form-success"]').trigger('click')
+    await flushPromises()
+
+    expect(customerApi.getCustomers).toHaveBeenCalledTimes(1)
+    expect(sheetRefresh).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not refresh an open detail sheet for a different customer', async () => {
+    const wrapper = mount(Customers)
+    await flushPromises()
+
+    await wrapper.get('.link-text').trigger('click')
+    await wrapper.get('[data-testid="edit-customer-cus_test_19"]').trigger('click')
+    await flushPromises()
+
+    customerApi.getCustomers.mockClear()
+    sheetRefresh.mockClear()
+    wrapper.findComponent({ name: 'CustomerFormDialog' }).vm.$emit('success', {
+      entityType: 'customer',
+      entityId: 'cus_other',
+      operation: 'update',
+      outcome: 'success',
+      stateSyncRequested: true,
+    })
+    await flushPromises()
+
+    expect(customerApi.getCustomers).toHaveBeenCalledTimes(1)
+    expect(sheetRefresh).not.toHaveBeenCalled()
   })
 })
