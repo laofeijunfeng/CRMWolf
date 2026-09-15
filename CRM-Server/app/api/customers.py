@@ -31,7 +31,13 @@ from app.crud.customer import contact_crud, customer_crud
 from app.crud.customer_member import customer_member_crud
 from app.crud.invoice import invoice_application_crud, invoice_title_crud
 from app.crud.lead import lead_crud
-from app.crud.product_intent import ProductNotFoundError, product_intent_payload
+from app.crud.product_intent import (
+    EMPTY_CATALOG_MESSAGE,
+    INACTIVE_PRODUCT_MESSAGE,
+    MISSING_PRODUCT_MESSAGE,
+    ProductNotFoundError,
+    product_intent_payload,
+)
 from app.crud.team import team_crud
 from app.crud.user import user_crud
 from app.models.command_execution import CommandExecutionStatus
@@ -194,6 +200,61 @@ def _ensure_customer_name_available(
 
 def _raise_source_error(exc: AcquisitionSourceError) -> None:
     raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+_PRODUCT_INTENT_CLIENT_ERROR_MARKERS = (
+    EMPTY_CATALOG_MESSAGE,
+    INACTIVE_PRODUCT_MESSAGE,
+    MISSING_PRODUCT_MESSAGE,
+    "请选择产品",
+    "还没有可用产品",
+    "请选择启用中的产品",
+    "缺少产品",
+)
+
+
+def _is_product_intent_client_error(message: str) -> bool:
+    return any(marker in message for marker in _PRODUCT_INTENT_CLIENT_ERROR_MARKERS)
+
+
+def _record_failed_convert_command(
+    db: Session,
+    *,
+    team_id: int,
+    actor_id: str,
+    lead_id: str,
+    operation_id: str,
+    idempotency_key: Optional[str],
+    fingerprint: str,
+    correlation_id: Optional[str],
+    error_code: str,
+    error_message: str,
+    retryable: bool = False,
+) -> None:
+    try:
+        failed_execution, failed_replay = command_execution_service.begin(
+            db,
+            team_id=team_id,
+            actor_id=actor_id,
+            command_type="LEAD_CONVERT_TO_CUSTOMER",
+            resource_type="LEAD",
+            resource_public_id=lead_id,
+            operation_id=operation_id,
+            idempotency_key=idempotency_key,
+            fingerprint=fingerprint,
+            correlation_id=correlation_id,
+        )
+        if not failed_replay:
+            command_execution_service.fail(
+                db,
+                failed_execution,
+                error_code=error_code,
+                error_message=error_message,
+                retryable=retryable,
+            )
+            db.commit()
+    except Exception:
+        db.rollback()
 
 
 def _split_csv(value: Optional[str]) -> List[str]:
@@ -698,35 +759,56 @@ async def convert_from_lead(
         db.commit()
         db.refresh(customer)
         db.refresh(contact)
+    except ProductNotFoundError as exc:
+        db.rollback()
+        _record_failed_convert_command(
+            db,
+            team_id=team_id,
+            actor_id=str(current_user.id),
+            lead_id=data.lead_id,
+            operation_id=execution.operation_id,
+            idempotency_key=idempotency_key,
+            fingerprint=fingerprint,
+            correlation_id=correlation_id,
+            error_code="PRODUCT_NOT_FOUND",
+            error_message=str(exc),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "PRODUCT_NOT_FOUND",
+                "message": str(exc),
+                "operation_id": execution.operation_id,
+            },
+        ) from exc
     except ValueError as exc:
         db.rollback()
-        try:
-            failed_execution, failed_replay = command_execution_service.begin(
-                db,
-                team_id=team_id,
-                actor_id=str(current_user.id),
-                command_type="LEAD_CONVERT_TO_CUSTOMER",
-                resource_type="LEAD",
-                resource_public_id=data.lead_id,
-                operation_id=execution.operation_id,
-                idempotency_key=idempotency_key,
-                fingerprint=fingerprint,
-                correlation_id=correlation_id,
-            )
-            if not failed_replay:
-                command_execution_service.fail(
-                    db,
-                    failed_execution,
-                    error_code="LEAD_CONVERSION_REJECTED",
-                    error_message=str(exc),
-                    retryable=False,
-                )
-                db.commit()
-        except Exception:
-            db.rollback()
+        message = str(exc)
+        intent_client_error = _is_product_intent_client_error(message)
+        error_code = "PRODUCT_INTENT_REJECTED" if intent_client_error else "LEAD_CONVERSION_REJECTED"
+        http_status = status.HTTP_400_BAD_REQUEST if intent_client_error else status.HTTP_409_CONFLICT
+        _record_failed_convert_command(
+            db,
+            team_id=team_id,
+            actor_id=str(current_user.id),
+            lead_id=data.lead_id,
+            operation_id=execution.operation_id,
+            idempotency_key=idempotency_key,
+            fingerprint=fingerprint,
+            correlation_id=correlation_id,
+            error_code=error_code,
+            error_message=message,
+        )
         if modern_command:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "LEAD_CONVERSION_REJECTED", "message": str(exc), "operation_id": execution.operation_id}) from exc
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=http_status,
+                detail={
+                    "code": error_code,
+                    "message": message,
+                    "operation_id": execution.operation_id,
+                },
+            ) from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message) from exc
     except IntegrityError as exc:
         db.rollback()
         try:
