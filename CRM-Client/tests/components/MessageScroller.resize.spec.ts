@@ -81,4 +81,83 @@ describe("MessageScroller resize behavior", () => {
     expect(viewport.scrollTop).toBe(40)
     wrapper.unmount()
   })
+
+  it("does not pull the user to the bottom when scrollKey changes after they scroll up", async () => {
+    const { viewport, wrapper } = await mountScroller()
+    let scrollHeight = 300
+    const clientHeight = 200
+    Object.defineProperties(viewport, {
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      clientHeight: { configurable: true, get: () => clientHeight },
+    })
+
+    viewport.scrollTop = 40
+    viewport.dispatchEvent(new Event("scroll"))
+    scrollHeight = 400
+    await wrapper.setProps({ scrollKey: 1 })
+    await nextTick()
+
+    expect(viewport.scrollTop).toBe(40)
+    wrapper.unmount()
+  })
+
+  it("does not pull the user to the bottom when itemsCount changes after they scroll up", async () => {
+    const { viewport, wrapper } = await mountScroller()
+    let scrollHeight = 300
+    const clientHeight = 200
+    Object.defineProperties(viewport, {
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      clientHeight: { configurable: true, get: () => clientHeight },
+    })
+
+    viewport.scrollTop = 40
+    viewport.dispatchEvent(new Event("scroll"))
+    scrollHeight = 400
+    await wrapper.setProps({ itemsCount: 4 })
+    await nextTick()
+
+    expect(viewport.scrollTop).toBe(40)
+    wrapper.unmount()
+  })
+
+  it("keeps the viewport at the bottom when scrollKey changes while the user is near the bottom", async () => {
+    const { viewport, wrapper } = await mountScroller()
+    let scrollHeight = 300
+    let clientHeight = 200
+    Object.defineProperties(viewport, {
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      clientHeight: { configurable: true, get: () => clientHeight },
+    })
+
+    viewport.scrollTop = 100
+    viewport.dispatchEvent(new Event("scroll"))
+    scrollHeight = 400
+    clientHeight = 150
+    await wrapper.setProps({ scrollKey: 1 })
+    await nextTick()
+
+    expect(viewport.scrollTop).toBe(400)
+    wrapper.unmount()
+  })
+
+  it("does not restore stick-to-bottom after a content update while scrolled up", async () => {
+    const { viewport, wrapper } = await mountScroller()
+    let scrollHeight = 300
+    const clientHeight = 200
+    Object.defineProperties(viewport, {
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      clientHeight: { configurable: true, get: () => clientHeight },
+    })
+
+    viewport.scrollTop = 40
+    viewport.dispatchEvent(new Event("scroll"))
+    scrollHeight = 400
+    await wrapper.setProps({ scrollKey: 1 })
+    await nextTick()
+    ResizeObserverStub.current?.trigger()
+    await nextTick()
+
+    expect(viewport.scrollTop).toBe(40)
+    wrapper.unmount()
+  })
 })

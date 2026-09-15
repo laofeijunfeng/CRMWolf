@@ -34,12 +34,13 @@ const handleViewportScroll = (): void => {
 }
 
 const scrollToBottom = async (): Promise<void> => {
+  if (!keepAtBottom.value) return
   await nextTick()
+  if (!keepAtBottom.value) return
   const viewport = getViewport()
-  if (viewport) {
-    viewport.scrollTop = viewport.scrollHeight
-    keepAtBottom.value = true
-  }
+  if (viewport === null) return
+  viewport.scrollTop = viewport.scrollHeight
+  keepAtBottom.value = isNearBottom(viewport)
 }
 
 const observeSizeChanges = (): void => {
