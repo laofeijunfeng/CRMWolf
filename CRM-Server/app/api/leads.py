@@ -8,6 +8,7 @@ from app.api.customers import convert_from_lead as customers_convert_from_lead
 from app.core.deps import get_current_active_user, check_lead_access, check_lead_owner, require_permission, get_current_user_team, check_lead_delete_permission
 from app.crud.customer import customer_crud
 from app.crud.lead import lead_crud, lead_follow_up_crud
+from app.crud.product_intent import ProductNotFoundError, product_intent_payload
 from app.crud.user import user_crud
 from app.schemas.lead import (
     LeadCreate, LeadUpdate, LeadResponse, LeadListResponse, LeadDetailResponse,
@@ -131,6 +132,7 @@ def _build_lead_response(db: Session, lead) -> LeadResponse:
         "last_modified_time": lead.last_modified_time,
         "version": lead.version,
         **_lead_source_fields(db, lead),
+        **product_intent_payload(lead.product_links),
     }
     return LeadResponse(**payload)
 
@@ -180,6 +182,7 @@ def _build_lead_list_responses(db: Session, leads: List) -> List[LeadListRespons
             "last_modified_time": lead.last_modified_time,
             "version": lead.version,
             "owner_info": users_info.get(lead.owner_id) if lead.owner_id else None,
+            **product_intent_payload(lead.product_links),
         }
         result.append(LeadListResponse(**lead_dict))
 
@@ -199,6 +202,10 @@ def create_lead(
         created = lead_crud.create(db, lead, str(current_user.id), team_id)
     except AcquisitionSourceError as exc:
         _raise_source_error(exc)
+    except ProductNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return _build_lead_response(db, created)
 
 
@@ -413,6 +420,7 @@ def get_lead(
         "id": lead.public_id,
         "public_id": lead.public_id,
         **_lead_source_fields(db, lead),
+        **product_intent_payload(lead.product_links),
     }
     return LeadDetailResponse(
         **lead_payload,
@@ -433,6 +441,10 @@ def update_lead(
         updated = lead_crud.update(db, lead, lead_update)
     except AcquisitionSourceError as exc:
         _raise_source_error(exc)
+    except ProductNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return _build_lead_response(db, updated)
 
 

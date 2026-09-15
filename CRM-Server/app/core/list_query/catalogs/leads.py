@@ -1,9 +1,21 @@
 from __future__ import annotations
 
+from sqlalchemy import select
+
 from app.core.list_query.catalog import ListQueryCatalog, ListQueryField
 from app.core.list_query.catalogs.common import person_field, source_field, text_search_predicate
 from app.core.list_query.types import SortCondition
-from app.models.lead import CompanyScale, Lead, LeadStatus
+from app.models.lead import CompanyScale, Lead, LeadProduct, LeadStatus
+from app.models.product import Product
+
+_LEAD_PRODUCT_NAME = (
+    select(Product.name)
+    .join(LeadProduct, LeadProduct.product_id == Product.id)
+    .where(LeadProduct.lead_id == Lead.id, LeadProduct.team_id == Lead.team_id)
+    .order_by(LeadProduct.product_id)
+    .limit(1)
+    .scalar_subquery()
+)
 
 LEADS_LIST_QUERY_CATALOG = ListQueryCatalog(
     name="leads",
@@ -28,6 +40,7 @@ LEADS_LIST_QUERY_CATALOG = ListQueryCatalog(
             enum_type=LeadStatus,
             enum_persist="name",
         ),
+        ListQueryField(key="product_name", type="text", expression=_LEAD_PRODUCT_NAME),
         ListQueryField(
             key="created_time",
             type="date",
@@ -46,5 +59,6 @@ LEADS_LIST_QUERY_CATALOG = ListQueryCatalog(
         Lead.lead_name,
         Lead.contact_name,
         Lead.contact_phone,
+        _LEAD_PRODUCT_NAME,
     ),
 )

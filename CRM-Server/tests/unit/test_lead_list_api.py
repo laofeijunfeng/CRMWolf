@@ -12,7 +12,8 @@ from sqlalchemy.types import BigInteger
 from app.api.leads import router as leads_router
 from app.core import deps
 from app.core.database import Base
-from app.models.lead import Lead, LeadSource, LeadStatus
+from app.models.lead import Lead, LeadProduct, LeadSource, LeadStatus
+from app.models.product import Product
 from app.models.user import User, UserStatus
 
 
@@ -28,7 +29,18 @@ def db_session():
         poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
-    Base.metadata.create_all(engine, tables=[User.__table__, Lead.__table__])
+    tables = [User.__table__, Product.__table__, Lead.__table__, LeadProduct.__table__]
+    renamed_indexes = []
+    for table in tables:
+        for index in table.indexes:
+            if index.name:
+                renamed_indexes.append((index, index.name))
+                index.name = f"{table.name}_{index.name}"
+    try:
+        Base.metadata.create_all(engine, tables=tables)
+    finally:
+        for index, original_name in renamed_indexes:
+            index.name = original_name
     Session = sessionmaker(bind=engine)
     session = Session()
     yield session

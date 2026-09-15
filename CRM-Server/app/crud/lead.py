@@ -1,10 +1,12 @@
-from sqlalchemy.orm import Session
-from sqlalchemy import and_, case, or_, func
+from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import and_, case, exists, or_, func
 from typing import Any, Dict, Optional, List, Tuple
 from datetime import datetime, timedelta, time
 from enum import Enum
-from app.models.lead import Lead, LeadFollowUp, LeadStatus, CompanyScale
+from app.models.lead import Lead, LeadFollowUp, LeadProduct, LeadStatus, CompanyScale
+from app.models.product import Product
 from app.schemas.lead import LeadCreate, LeadUpdate, LeadFollowUpCreate
+from app.crud.product_intent import replace_product_links, resolve_writable_product
 from app.services.acquisition_source_service import (
     resolve_for_import,
     resolve_public_ids_to_ids,
@@ -25,13 +27,17 @@ from app.core.list_query.catalogs import LEADS_LIST_QUERY_CATALOG
 
 class LeadCRUD:
     def get_by_id(self, db: Session, lead_id: int, team_id: Optional[int] = None) -> Optional[Lead]:
-        query = db.query(Lead).filter(Lead.id == lead_id)
+        query = db.query(Lead).options(
+            selectinload(Lead.product_links).selectinload(LeadProduct.product)
+        ).filter(Lead.id == lead_id)
         if team_id is not None:
             query = query.filter(Lead.team_id == team_id)
         return query.first()
 
     def get_by_public_id(self, db: Session, public_id: str, team_id: Optional[int] = None) -> Optional[Lead]:
-        query = db.query(Lead).filter(Lead.public_id == public_id)
+        query = db.query(Lead).options(
+            selectinload(Lead.product_links).selectinload(LeadProduct.product)
+        ).filter(Lead.public_id == public_id)
         if team_id is not None:
             query = query.filter(Lead.team_id == team_id)
         return query.first()
@@ -66,7 +72,9 @@ class LeadCRUD:
         order_by: Optional[str] = None,
         order_dir: Optional[str] = None
     ) -> Tuple[List[Lead], int]:
-        query = db.query(Lead).filter(Lead.team_id == team_id)
+        query = db.query(Lead).options(
+            selectinload(Lead.product_links).selectinload(LeadProduct.product)
+        ).filter(Lead.team_id == team_id)
 
         if uses_unified_list_query(filters=filters, sorts=sorts):
             if not has_filter_field(filters, "status"):
@@ -102,7 +110,13 @@ class LeadCRUD:
                 or_(
                     Lead.lead_name.like(f"%{keyword}%"),
                     Lead.contact_name.like(f"%{keyword}%"),
-                    Lead.contact_phone.like(f"%{keyword}%")
+                    Lead.contact_phone.like(f"%{keyword}%"),
+                    exists().where(
+                        LeadProduct.lead_id == Lead.id,
+                        LeadProduct.team_id == Lead.team_id,
+                        Product.id == LeadProduct.product_id,
+                        Product.name.like(f"%{keyword}%"),
+                    ),
                 )
             )
         if filters:
@@ -262,7 +276,8 @@ class LeadCRUD:
         *,
         import_by_name: bool = False,
     ) -> Lead:
-        lead_data = obj_in.model_dump(exclude={"source_public_id", "source"})
+        product = resolve_writable_product(db, team_id, obj_in.product_public_id)
+        lead_data = obj_in.model_dump(exclude={"source_public_id", "source", "product_public_id"})
         if import_by_name:
             source_row = resolve_for_import(db, team_id, obj_in.source or "")
         else:
@@ -282,13 +297,22 @@ class LeadCRUD:
 
         db_obj = Lead(**lead_data)
         db.add(db_obj)
+        db.flush()
+        replace_product_links(
+            db,
+            team_id=team_id,
+            link_cls=LeadProduct,
+            owner_id=db_obj.id,
+            owner_fk="lead_id",
+            product=product,
+        )
         db.commit()
         db.refresh(db_obj)
 
         return db_obj
 
     def update(self, db: Session, db_obj: Lead, obj_in: LeadUpdate) -> Lead:
-        update_data = obj_in.model_dump(exclude_unset=True, exclude={"source_public_id", "source"})
+        update_data = obj_in.model_dump(exclude_unset=True, exclude={"source_public_id", "source", "product_public_id"})
         fields_set = obj_in.model_fields_set
         if "source_public_id" in fields_set or "source" in fields_set:
             source_row = resolve_source_for_entity_write(
@@ -304,6 +328,17 @@ class LeadCRUD:
         
         for field, value in update_data.items():
             setattr(db_obj, field, value)
+
+        if "product_public_id" in fields_set:
+            product = resolve_writable_product(db, db_obj.team_id, obj_in.product_public_id)
+            replace_product_links(
+                db,
+                team_id=db_obj.team_id,
+                link_cls=LeadProduct,
+                owner_id=db_obj.id,
+                owner_fk="lead_id",
+                product=product,
+            )
         
         db_obj.version += 1
         db.commit()
@@ -431,7 +466,9 @@ class LeadCRUD:
         order_by: Optional[str] = None,
         order_dir: Optional[str] = None
     ) -> Tuple[List[Lead], int]:
-        query = db.query(Lead).filter(
+        query = db.query(Lead).options(
+            selectinload(Lead.product_links).selectinload(LeadProduct.product)
+        ).filter(
             and_(
                 Lead.team_id == team_id,
                 Lead.owner_id.is_(None),

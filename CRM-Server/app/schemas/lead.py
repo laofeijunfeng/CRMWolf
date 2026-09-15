@@ -3,6 +3,7 @@ from typing import Optional, List
 from datetime import date, datetime, time
 from app.models.lead import LeadStatus, CompanyScale, FollowUpMethod
 from app.schemas.acquisition_source import AcquisitionSourceInfo
+from app.schemas.product import ProductIntentRef
 
 
 class OwnerInfo(BaseModel):
@@ -53,6 +54,25 @@ class LeadBase(BaseModel):
 class LeadCreate(LeadBase):
     source: Optional[str] = Field(None, max_length=50, description="获客来源名称（导入/兼容）")
     source_public_id: Optional[str] = Field(None, description="获客来源对外ID")
+    product_public_id: str = Field(..., min_length=1, description="意向产品对外ID")
+
+    @model_validator(mode="before")
+    @classmethod
+    def product_public_id_must_be_present_before(cls, data):
+        if not isinstance(data, dict):
+            return data
+        value = data.get("product_public_id")
+        if value is None or not str(value).strip():
+            raise ValueError("缺少产品")
+        data["product_public_id"] = str(value).strip()
+        return data
+
+    @field_validator("product_public_id")
+    @classmethod
+    def product_public_id_must_be_present(cls, v):
+        if not v or not str(v).strip():
+            raise ValueError("缺少产品")
+        return v.strip()
 
     @model_validator(mode="after")
     def source_must_be_present(self):
@@ -71,6 +91,7 @@ class LeadUpdate(BaseModel):
     contact_name: Optional[str] = Field(None, min_length=1, max_length=100, description="联系人姓名")
     contact_phone: Optional[str] = Field(None, min_length=1, max_length=20, description="联系人手机")
     company_scale: Optional[CompanyScale] = Field(None, description="团队规模")
+    product_public_id: Optional[str] = Field(None, description="意向产品对外ID")
     status: Optional[LeadStatus] = Field(None, description="线索状态")
     
     @field_validator('lead_name')
@@ -114,6 +135,9 @@ class LeadResponse(LeadBase):
     creator_id: str = Field(..., description="创建人系统用户ID")
     created_time: datetime = Field(..., description="创建时间")
     last_modified_time: datetime = Field(..., description="最后修改时间")
+    product_public_id: Optional[str] = Field(None, description="意向产品对外ID")
+    product_name: Optional[str] = Field(None, description="意向产品名称")
+    products: List[ProductIntentRef] = Field(default_factory=list, description="意向产品列表")
     version: int = Field(..., description="版本号（乐观锁，防止并发修改冲突）")
     class Config:
         from_attributes = True
