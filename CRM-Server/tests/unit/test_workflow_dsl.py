@@ -13,7 +13,7 @@ VALID = {
 }
 
 CRM_CONFIGS = {
-    "crm.create_customer": {"account_name": "Acme", "city": "上海"},
+    "crm.create_customer": {"account_name": "Acme", "city": "上海", "product_public_id": "prd_crm"},
     "crm.create_contact": {
         "customer_ref": "cust_1",
         "name": "张三",
@@ -61,6 +61,7 @@ def test_valid_dsl_with_each_crm_node_passes():
 @pytest.mark.parametrize("node_type, missing_field", [
     ("crm.create_customer", "account_name"),
     ("crm.create_customer", "city"),
+    ("crm.create_customer", "product_public_id"),
     ("crm.create_contact", "customer_ref"),
     ("crm.create_contact", "name"),
     ("crm.create_contact", "gender"),

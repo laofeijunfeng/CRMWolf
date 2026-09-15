@@ -59,7 +59,7 @@ CRM_VALID_DSL = {
             "id": "customer",
             "type": "crm.create_customer",
             "position": {"x": 200, "y": 0},
-            "config": {"account_name": "Acme", "city": "上海"},
+            "config": {"account_name": "Acme", "city": "上海", "product_public_id": "prd_crm"},
         },
         {
             "id": "contact",
