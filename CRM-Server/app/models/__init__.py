@@ -26,7 +26,7 @@ from app.models.approval import Approval, ApprovalFlow, ApprovalNode, ApprovalRe
 from app.models.command_execution import CommandExecution, CommandExecutionStatus
 from app.models.contract import Contract, ContractStatus, PaymentStatus
 from app.models.conversation_log import ConversationLog
-from app.models.customer import Contact, Customer, CustomerMember
+from app.models.customer import Contact, Customer, CustomerMember, CustomerProduct
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_activity_agent_origin import CustomerActivityAgentOrigin
 from app.models.customer_activity_ai_job import CustomerActivityAIJob
@@ -90,7 +90,7 @@ from app.models.invoice import (
     InvoiceType,
     TitleTypeEnum,
 )
-from app.models.lead import CompanyScale, FollowUpMethod, Lead, LeadFollowUp, LeadSource, LeadStatus
+from app.models.lead import CompanyScale, FollowUpMethod, Lead, LeadFollowUp, LeadProduct, LeadSource, LeadStatus
 from app.models.license_application import LicenseApplication, LicenseApplicationStatus, LicenseType
 from app.models.oauth import OAuthProviderConfig, UserOAuthAccount
 from app.models.operation_log import EventAction, OperationLog, PrimaryResourceType
@@ -178,6 +178,7 @@ __all__ = [
     "ContractStatus",
     "ConversationLog",
     "Customer",
+    "CustomerProduct",
     "CustomerActivity",
     "CustomerActivityAIJob",
     "CustomerActivityAgentOrigin",
@@ -251,6 +252,7 @@ __all__ = [
     "InvoiceTitle",
     "InvoiceType",
     "Lead",
+    "LeadProduct",
     "LeadFollowUp",
     "LeadSource",
     "LeadStatus",

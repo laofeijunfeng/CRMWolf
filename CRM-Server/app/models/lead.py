@@ -1,4 +1,4 @@
-from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Text, Enum, Index
+from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Text, Enum, Index, ForeignKey
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 from app.utils.time import business_now
@@ -68,7 +68,11 @@ class Lead(Base):
         primaryjoin="foreign(Lead.source_id)==AcquisitionSource.id",
         viewonly=True,
     )
-
+    product_links = relationship(
+        "LeadProduct",
+        back_populates="lead",
+        cascade="all, delete-orphan",
+    )
     __table_args__ = (
         Index('uq_lead_team_lead_name', 'team_id', 'lead_name', unique=True),
         Index('idx_owner_id', 'owner_id'),
@@ -80,6 +84,23 @@ class Lead(Base):
         Index('idx_team_id', 'team_id'),
         Index('idx_lead_public_id', 'public_id'),
         {'comment': '线索表'}
+    )
+
+
+class LeadProduct(Base):
+    __tablename__ = "crm_lead_products"
+
+    lead_id = Column(BigInteger, ForeignKey("crm_leads.id", ondelete="CASCADE"), primary_key=True, comment="线索ID")
+    product_id = Column(BigInteger, ForeignKey("crm_products.id", ondelete="RESTRICT"), primary_key=True, comment="产品ID")
+    team_id = Column(BigInteger, nullable=False, comment="团队ID")
+
+    lead = relationship("Lead", back_populates="product_links")
+    product = relationship("Product")
+
+    __table_args__ = (
+        Index("idx_lead_products_team", "team_id"),
+        Index("idx_lead_products_product", "product_id"),
+        {"comment": "线索意向产品"},
     )
 
 

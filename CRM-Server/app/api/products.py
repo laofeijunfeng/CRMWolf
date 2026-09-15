@@ -34,9 +34,10 @@ def _not_found(detail: str = "产品不存在") -> HTTPException:
 
 
 def _domain_error(exc: ValueError) -> HTTPException:
-    if "编码已存在" in str(exc):
-        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
-    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    message = str(exc)
+    if "编码已存在" in message or "引用" in message:
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=message)
+    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
 
 
 def _module_response(module: ProductModule) -> ProductModuleResponse:

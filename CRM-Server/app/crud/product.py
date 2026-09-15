@@ -99,8 +99,15 @@ class ProductCRUD:
             raise ValueError("产品包含增强模块，无法删除")  # noqa: RUF001
         if len(modules) != 1 or modules[0].module_role != ProductModuleRole.BASE.value:
             raise ValueError("产品基础模块状态不安全，无法删除")  # noqa: RUF001
-        db.delete(product)
-        db.commit()
+        from app.crud.product_intent import PRODUCT_IN_USE_MESSAGE, assert_product_deletable
+
+        assert_product_deletable(db, product)
+        try:
+            db.delete(product)
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            raise ValueError(PRODUCT_IN_USE_MESSAGE) from exc
 
     def create_module(
         self,

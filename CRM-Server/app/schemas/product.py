@@ -7,6 +7,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 ModuleRole = Literal["BASE", "ADD_ON"]
 
+class ProductIntentRef(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    public_id: str
+    name: str
+
 
 class ProductModuleCreate(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)

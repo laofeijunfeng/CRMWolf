@@ -104,7 +104,11 @@ class Customer(Base):
         primaryjoin="foreign(Customer.source_id)==AcquisitionSource.id",
         viewonly=True,
     )
-
+    product_links = relationship(
+        "CustomerProduct",
+        back_populates="customer",
+        cascade="all, delete-orphan",
+    )
     __table_args__ = (
         Index('idx_account_name', 'account_name'),
         Index('uq_customer_team_account_name', 'team_id', 'account_name', unique=True),
@@ -119,6 +123,23 @@ class Customer(Base):
         Index('idx_team_id', 'team_id'),
         Index('idx_customer_public_id', 'public_id'),
         {'comment': '客户/公司表'}
+    )
+
+
+class CustomerProduct(Base):
+    __tablename__ = "crm_customer_products"
+
+    customer_id = Column(BigInteger, ForeignKey("crm_customers.id", ondelete="CASCADE"), primary_key=True, comment="客户ID")
+    product_id = Column(BigInteger, ForeignKey("crm_products.id", ondelete="RESTRICT"), primary_key=True, comment="产品ID")
+    team_id = Column(BigInteger, nullable=False, comment="团队ID")
+
+    customer = relationship("Customer", back_populates="product_links")
+    product = relationship("Product")
+
+    __table_args__ = (
+        Index("idx_customer_products_team", "team_id"),
+        Index("idx_customer_products_product", "product_id"),
+        {"comment": "客户意向产品"},
     )
 
 
