@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import type { AgentSessionResponse, AgentUIEnvelope } from '@/api/agent'
-import { isVisibleAgentMessage, loadLatestAgentMessages, resolveInitialAgentSession } from '@/components/agent/agentHistory'
+import {
+  getMissingAgentHistoryAnchors,
+  isVisibleAgentMessage,
+  loadLatestAgentMessages,
+  mergeAgentHistoryAnchors,
+  resolveInitialAgentSession,
+} from '@/components/agent/agentHistory'
 import { AgentUIEnvelopeSchema } from '@/schemas/agent-contracts'
 import type { PaginatedResponse } from '@/types/pagination'
 
@@ -134,5 +140,26 @@ describe('loadLatestAgentMessages', () => {
     )
     expect(listMessages).toHaveBeenCalledTimes(3)
     expect(listMessages).toHaveBeenLastCalledWith(42, { page: 2, page_size: 100 })
+  })
+})
+
+describe('mergeAgentHistoryAnchors', () => {
+  it('prepends unique visible missing anchors in ascending message order without mutating inputs', () => {
+    const current = [message(20), message(30)]
+    const stateUpdate = AgentUIEnvelopeSchema.parse({ ...message(10), metadata: { display: 'STATE_UPDATE' } })
+    const anchors = [message(30), stateUpdate, message(5), message(10)]
+
+    expect(mergeAgentHistoryAnchors(current, anchors).map(item => item.message_id)).toEqual([5, 10, 20, 30])
+    expect(current.map(item => item.message_id)).toEqual([20, 30])
+    expect(anchors.map(item => item.message_id)).toEqual([30, 10, 5, 10])
+  })
+  it('returns only anchors absent from the current message window', () => {
+    const current = [message(8), message(20)]
+    const duplicate = message(8)
+    const missing = message(9)
+    const duplicateMissing = message(9)
+
+    expect(getMissingAgentHistoryAnchors(current, [duplicate, missing, duplicateMissing]).map(item => item.message_id))
+      .toEqual([9])
   })
 })

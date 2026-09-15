@@ -185,6 +185,78 @@ def _encode_sse(event: AgentSSEEventEnvelope) -> str:
 
 def _authorization_header(credentials: HTTPAuthorizationCredentials) -> str:
     return f"{credentials.scheme} {credentials.credentials}"
+def _project_agent_message_actions(
+    db: Session,
+    items: list[AgentUIEnvelope],
+    *,
+    team_id: int,
+    user_id: int,
+    session_id: int,
+) -> list[AgentUIEnvelope]:
+    action_ids = {
+        block.submit_action_id
+        for item in items
+        for block in item.blocks
+        if getattr(block, "type", None) == "interaction"
+        and getattr(block, "submit_action_id", None) is not None
+    }
+    if not action_ids:
+        return items
+    actions = agent_ui_action_repository.list_owned_for_messages(
+        db,
+        team_id=team_id,
+        user_id=user_id,
+        session_id=session_id,
+        message_ids=[item.message_id for item in items],
+    )
+    follow_up_actions = [
+        action
+        for action in actions
+        if action.target.get("business_action") == "resolve_follow_up_task_confirmation_case"
+        or isinstance(action.target.get("follow_up_confirmation_case_public_id"), str)
+    ]
+    explicit_case_actions = [
+        action
+        for action in follow_up_actions
+        if isinstance(action.target.get("follow_up_confirmation_case_public_id"), str)
+        and action.target.get("follow_up_confirmation_case_public_id")
+    ]
+    unbound_follow_up_actions = [action for action in follow_up_actions if action not in explicit_case_actions]
+    follow_up_case_statuses_by_action: dict[str, str] = {
+        action.public_id: "READ_ONLY" for action in unbound_follow_up_actions
+    }
+    if explicit_case_actions:
+        explicit_case_ids = [
+            action.target["follow_up_confirmation_case_public_id"] for action in explicit_case_actions
+        ]
+        try:
+            follow_up_case_statuses = follow_up_task_confirmation_case_crud.list_statuses_by_public_ids(
+                db,
+                team_id=team_id,
+                public_ids=explicit_case_ids,
+            )
+        except Exception:
+            db.rollback()
+            logger.exception(
+                "读取 Agent 跟进确认 Case 状态失败，显式绑定卡片降级为只读: session_id=%s",
+                session_id,
+            )
+            follow_up_case_statuses_by_action.update(
+                {action.public_id: "LOOKUP_FAILED" for action in explicit_case_actions}
+            )
+        else:
+            for action in explicit_case_actions:
+                case_public_id = action.target["follow_up_confirmation_case_public_id"]
+                follow_up_case_statuses_by_action[action.public_id] = follow_up_case_statuses.get(
+                    case_public_id,
+                    "MISSING",
+                )
+    return project_interaction_action_states(
+        items,
+        actions,
+        follow_up_confirmation_case_statuses_by_action=follow_up_case_statuses_by_action,
+    )
+
 
 
 
@@ -298,6 +370,35 @@ async def get_agent_workflow_detail(
     return _workflow_detail_response(workflow_id, actions)
 
 
+@router.get(
+    "/sessions/{session_id}/messages/anchors",
+    response_model=list[AgentUIEnvelope],
+)
+async def list_agent_message_anchors(
+    session_id: int,
+    message_id: list[int] = Query(default=[]),
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    require_owned_session(db, team_id=team_id, user_id=current_user.id, session_id=session_id)
+    ids = {value for value in message_id if value > 0}
+    records = agent_turn_repository.list_owned_by_ids(
+        db,
+        team_id=team_id,
+        user_id=current_user.id,
+        session_id=session_id,
+        message_ids=ids,
+    )
+    return _project_agent_message_actions(
+        db,
+        [record.ui for record in records],
+        team_id=team_id,
+        user_id=current_user.id,
+        session_id=session_id,
+    )
+
+
 @router.get("/sessions/{session_id}/operations", response_model=list[AgentAsyncOperationResponse])
 async def list_agent_async_operations(
     session_id: int,
@@ -344,6 +445,59 @@ async def list_agent_async_operations(
             limit=limit,
         )
     return operations
+
+
+@router.get(
+    "/sessions/{session_id}/operations/history",
+    response_model=PaginatedResponse[AgentAsyncOperationResponse],
+)
+async def list_agent_operation_history(
+    session_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=1, le=100),
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    require_owned_session(db, team_id=team_id, user_id=current_user.id, session_id=session_id)
+    try:
+        recovered = agent_durable_work_recovery_service.recover_session(
+            db, team_id=team_id, user_id=current_user.id, session_id=session_id
+        )
+        if recovered:
+            db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("读取 Agent 异步操作历史时恢复持久任务失败: session_id=%s", session_id)
+    operations, total = agent_async_operation_service.list_session_history_page(
+        db,
+        team_id=team_id,
+        user_id=current_user.id,
+        session_id=session_id,
+        page=page,
+        page_size=page_size,
+    )
+    repaired = _read_repair_customer_intelligence_operations(db, operations)
+    if _read_repair_customer_activity_post_commit_operations(db, operations):
+        repaired = True
+    if _read_repair_customer_opportunity_suggestion_operations(db, operations):
+        repaired = True
+    if repaired:
+        operations, total = agent_async_operation_service.list_session_history_page(
+            db,
+            team_id=team_id,
+            user_id=current_user.id,
+            session_id=session_id,
+            page=page,
+            page_size=page_size,
+        )
+    return PaginatedResponse[AgentAsyncOperationResponse](
+        items=operations,
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=(total + page_size - 1) // page_size,
+    )
 
 
 @router.get("/operations/{operation_public_id}", response_model=AgentAsyncOperationResponse)
@@ -460,17 +614,11 @@ async def list_agent_messages(
         if history_case_ids:
             try:
                 duplicate_case_ids = follow_up_task_confirmation_case_crud.list_duplicate_active_case_public_ids(
-                    db,
-                    team_id=team_id,
-                    public_ids=history_case_ids,
+                    db, team_id=team_id, public_ids=history_case_ids
                 )
             except Exception:
                 db.rollback()
-                logger.warning(
-                    "读取重复跟进确认 Case 失败，跳过重复消息隐藏: session_id=%s",
-                    session_id,
-                    exc_info=True,
-                )
+                logger.warning("读取重复跟进确认 Case 失败，跳过重复消息隐藏: session_id=%s", session_id, exc_info=True)
         hidden_case_ids = superseded_case_ids | duplicate_case_ids
         hidden_message_ids = {
             action.message_id
@@ -479,10 +627,7 @@ async def list_agent_messages(
         }
     except Exception:
         db.rollback()
-        logger.exception(
-            "读取 Agent 历史时识别已被新修订替代的跟进确认消息失败，保留原消息: session_id=%s",
-            session_id,
-        )
+        logger.exception("读取 Agent 历史时识别已被新修订替代的跟进确认消息失败，保留原消息: session_id=%s", session_id)
 
     skip = (page - 1) * page_size
     records, total = agent_turn_repository.list_visible_by_session(
@@ -494,74 +639,13 @@ async def list_agent_messages(
         limit=page_size,
         exclude_message_ids=list(hidden_message_ids),
     )
-    items = [record.ui for record in records]
-    action_ids = {
-        block.submit_action_id
-        for item in items
-        for block in item.blocks
-        if getattr(block, "type", None) == "interaction"
-        and getattr(block, "submit_action_id", None) is not None
-    }
-    if action_ids:
-        actions = agent_ui_action_repository.list_owned_for_messages(
-            db,
-            team_id=team_id,
-            user_id=current_user.id,
-            session_id=session_id,
-            message_ids=[item.message_id for item in items],
-        )
-        follow_up_actions = [
-            action
-            for action in actions
-            if action.target.get("business_action") == "resolve_follow_up_task_confirmation_case"
-            or isinstance(action.target.get("follow_up_confirmation_case_public_id"), str)
-        ]
-        explicit_case_actions = [
-            action
-            for action in follow_up_actions
-            if isinstance(action.target.get("follow_up_confirmation_case_public_id"), str)
-            and action.target.get("follow_up_confirmation_case_public_id")
-        ]
-        unbound_follow_up_actions = [
-            action for action in follow_up_actions if action not in explicit_case_actions
-        ]
-        follow_up_case_statuses_by_action: dict[str, str] = {
-            action.public_id: "READ_ONLY" for action in unbound_follow_up_actions
-        }
-
-        if explicit_case_actions:
-            explicit_case_ids = [
-                action.target["follow_up_confirmation_case_public_id"]
-                for action in explicit_case_actions
-            ]
-            try:
-                follow_up_case_statuses = follow_up_task_confirmation_case_crud.list_statuses_by_public_ids(
-                    db,
-                    team_id=team_id,
-                    public_ids=explicit_case_ids,
-                )
-            except Exception:
-                db.rollback()
-                logger.exception(
-                    "读取 Agent 跟进确认 Case 状态失败，显式绑定卡片降级为只读: session_id=%s",
-                    session_id,
-                )
-                follow_up_case_statuses_by_action.update(
-                    {action.public_id: "LOOKUP_FAILED" for action in explicit_case_actions}
-                )
-            else:
-                for action in explicit_case_actions:
-                    case_public_id = action.target["follow_up_confirmation_case_public_id"]
-                    follow_up_case_statuses_by_action[action.public_id] = follow_up_case_statuses.get(
-                        case_public_id,
-                        "MISSING",
-                    )
-
-        items = project_interaction_action_states(
-            items,
-            actions,
-            follow_up_confirmation_case_statuses_by_action=follow_up_case_statuses_by_action,
-        )
+    items = _project_agent_message_actions(
+        db,
+        [record.ui for record in records],
+        team_id=team_id,
+        user_id=current_user.id,
+        session_id=session_id,
+    )
     return PaginatedResponse[AgentUIEnvelope](
         items=items,
         total=total,

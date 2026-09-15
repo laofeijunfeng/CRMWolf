@@ -49,3 +49,24 @@ export const loadLatestAgentMessages = async (
 
   return visiblePages.reverse().flat().slice(-pageSize)
 }
+
+export const getMissingAgentHistoryAnchors = (
+  messages: AgentUIEnvelope[],
+  anchors: AgentUIEnvelope[],
+): AgentUIEnvelope[] => {
+  const messageIds = new Set(messages.map(message => message.message_id))
+  const missingAnchors = anchors
+    .filter(anchor => isVisibleAgentMessage(anchor) && !messageIds.has(anchor.message_id))
+    .sort((left, right) => left.message_id - right.message_id)
+  return missingAnchors.filter((anchor, index) => (
+    index === 0 || anchor.message_id !== missingAnchors[index - 1]?.message_id
+  ))
+}
+
+export const mergeAgentHistoryAnchors = (
+  messages: AgentUIEnvelope[],
+  anchors: AgentUIEnvelope[],
+): AgentUIEnvelope[] => [
+  ...getMissingAgentHistoryAnchors(messages, anchors),
+  ...messages,
+]

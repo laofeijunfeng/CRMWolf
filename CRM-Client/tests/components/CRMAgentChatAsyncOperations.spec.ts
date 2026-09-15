@@ -17,7 +17,8 @@ import type { PaginatedResponse } from '@/types/pagination'
 const api = vi.hoisted(() => ({
   listSessions: vi.fn<() => Promise<PaginatedResponse<AgentSessionResponse>>>(),
   listMessages: vi.fn<(sessionId: number, params?: { page?: number, page_size?: number }) => Promise<PaginatedResponse<AgentUIEnvelope>>>(),
-  listSessionOperations: vi.fn<(sessionId: number, params?: { limit?: number }) => Promise<AgentAsyncOperation[]>>(),
+  listSessionOperationHistory: vi.fn<(sessionId: number, params?: { page?: number, page_size?: number }) => Promise<PaginatedResponse<AgentAsyncOperation>>>(),
+  listMessageAnchors: vi.fn<(sessionId: number, messageIds: number[]) => Promise<AgentUIEnvelope[]>>(),
   getOperation: vi.fn<(operationPublicId: string) => Promise<AgentAsyncOperation>>(),
   chatStream: vi.fn<(
     data: AgentChatRequest,
@@ -59,6 +60,14 @@ const paginatedMessages = (items: AgentUIEnvelope[]): PaginatedResponse<AgentUIE
   total_pages: items.length === 0 ? 0 : 1,
 })
 
+const paginatedOperations = (items: AgentAsyncOperation[]): PaginatedResponse<AgentAsyncOperation> => ({
+  items,
+  total: items.length,
+  page: 1,
+  page_size: 100,
+  total_pages: items.length === 0 ? 0 : 1,
+})
+
 const operation: AgentAsyncOperation = {
   public_id: 'aop_first_turn',
   request_id: 'request-first-turn',
@@ -89,10 +98,17 @@ const operation: AgentAsyncOperation = {
 const mountChat = () => mount(CRMAgentChat, {
   global: {
     stubs: {
-      MessageScroller: { template: '<div><slot /></div>' },
+      MessageScroller: {
+        props: { itemsCount: { type: Number, required: true } },
+        template: '<div data-testid="message-scroller" :data-items-count="itemsCount"><slot /></div>',
+      },
     },
   },
 })
+
+const scrollerItemsCount = (wrapper: ReturnType<typeof mount>): number => Number(
+  wrapper.get('[data-testid="message-scroller"]').attributes('data-items-count'),
+)
 
 describe('CRMAgentChat background operation placement', () => {
   beforeEach(() => {
@@ -119,7 +135,8 @@ describe('CRMAgentChat background operation placement', () => {
       total_pages: 1,
     })
     api.listMessages.mockReset().mockResolvedValue(paginatedMessages(messages))
-    api.listSessionOperations.mockReset().mockResolvedValue([operation])
+    api.listSessionOperationHistory.mockReset().mockResolvedValue(paginatedOperations([operation]))
+    api.listMessageAnchors.mockReset().mockResolvedValue([])
     api.getOperation.mockReset()
     api.chatStream.mockReset().mockResolvedValue()
   })
@@ -127,6 +144,99 @@ describe('CRMAgentChat background operation placement', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it('loads missing source anchors once and places historical operations under their assistant turn', async () => {
+    const sourceUser = envelope(8, 'user', '很早以前的跟进')
+    const sourceAssistant = envelope(9, 'assistant', '很早以前已记录')
+    api.listMessages.mockResolvedValue(paginatedMessages(messages))
+    api.listSessionOperationHistory.mockResolvedValue(paginatedOperations([{
+      ...operation,
+      source_user_message_id: 8,
+      source_assistant_message_id: 9,
+    }]))
+    api.listMessageAnchors.mockResolvedValue([sourceUser, sourceAssistant])
+
+    const wrapper = mountChat()
+    await flushPromises()
+
+    expect(api.listMessageAnchors).toHaveBeenCalledTimes(1)
+    expect(api.listMessageAnchors).toHaveBeenCalledWith(3, [8, 9])
+    const text = wrapper.text()
+    expect(text.indexOf('很早以前已记录')).toBeGreaterThanOrEqual(0)
+    expect(text.indexOf('后台任务')).toBeGreaterThan(text.indexOf('很早以前已记录'))
+    expect(text.indexOf('后台任务')).toBeLessThan(text.indexOf('第一条跟进'))
+    expect(wrapper.findAll('.agent-chat__operations')).toHaveLength(1)
+    expect(text).toContain('第一条跟进')
+    wrapper.unmount()
+  })
+
+  it('does not change the MessageScroller item count when merging historical anchors', async () => {
+    const sourceUser = envelope(8, 'user', '很早以前的跟进')
+    const sourceAssistant = envelope(9, 'assistant', '很早以前已记录')
+    let resolveAnchors: ((anchors: AgentUIEnvelope[]) => void) | undefined
+    const anchorPromise = new Promise<AgentUIEnvelope[]>(resolve => {
+      resolveAnchors = resolve
+    })
+    api.listSessionOperationHistory.mockResolvedValue(paginatedOperations([{
+      ...operation,
+      source_user_message_id: 8,
+      source_assistant_message_id: 9,
+    }]))
+    api.listMessageAnchors.mockReturnValue(anchorPromise)
+
+    const wrapper = mountChat()
+    await flushPromises()
+    const beforeAnchorMerge = scrollerItemsCount(wrapper)
+    resolveAnchors?.([sourceUser, sourceAssistant])
+    await flushPromises()
+
+    expect(scrollerItemsCount(wrapper)).toBe(beforeAnchorMerge)
+    wrapper.unmount()
+  })
+
+  it('does not count an anchor already added by a stream as inserted history', async () => {
+    const sourceUser = envelope(8, 'user', '很早以前的跟进')
+    const sourceAssistant = envelope(9, 'assistant', '很早以前已记录')
+    let resolveAnchors: ((anchors: AgentUIEnvelope[]) => void) | undefined
+    const anchorPromise = new Promise<AgentUIEnvelope[]>(resolve => {
+      resolveAnchors = resolve
+    })
+    let resolveStream: (() => void) | undefined
+    const streamPromise = new Promise<void>(resolve => {
+      resolveStream = resolve
+    })
+    api.listSessionOperationHistory.mockResolvedValue(paginatedOperations([{
+      ...operation,
+      source_user_message_id: 8,
+      source_assistant_message_id: 9,
+    }]))
+    api.listMessageAnchors.mockReturnValue(anchorPromise)
+    api.chatStream.mockImplementation(async (_request, onEvent) => {
+      onEvent({
+        event: 'agent_ui',
+        phase: 'final',
+        message_id: 9,
+        turn_id: sourceAssistant.turn_id,
+        sequence: 1,
+        message: sourceAssistant,
+      })
+      await streamPromise
+    })
+
+    const wrapper = mountChat()
+    await flushPromises()
+    await wrapper.get('textarea').setValue('本轮跟进')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    const beforeAnchorResponse = scrollerItemsCount(wrapper)
+
+    resolveAnchors?.([sourceUser, sourceAssistant])
+    await flushPromises()
+
+    expect(scrollerItemsCount(wrapper)).toBe(beforeAnchorResponse)
+    resolveStream?.()
+    wrapper.unmount()
   })
 
   it('renders a completed background operation after the assistant response from its source turn', async () => {
@@ -144,7 +254,7 @@ describe('CRMAgentChat background operation placement', () => {
   })
 
   it('shows every automatically transitioned historical task as a visible result card', async () => {
-    api.listSessionOperations.mockResolvedValue([{
+    api.listSessionOperationHistory.mockResolvedValue(paginatedOperations([{
       ...operation,
       operation_type: 'customer_activity_post_commit',
       result: {
@@ -160,7 +270,7 @@ describe('CRMAgentChat background operation placement', () => {
           ],
         },
       },
-    }])
+    }]))
 
     const wrapper = mountChat()
     await flushPromises()
@@ -176,9 +286,9 @@ describe('CRMAgentChat background operation placement', () => {
     api.listMessages
       .mockResolvedValueOnce(paginatedMessages([]))
       .mockResolvedValueOnce(paginatedMessages(completedHistory))
-    api.listSessionOperations
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ ...operation, source_user_message_id: 20, source_assistant_message_id: 21 }])
+    api.listSessionOperationHistory
+      .mockResolvedValueOnce(paginatedOperations([]))
+      .mockResolvedValueOnce(paginatedOperations([{ ...operation, source_user_message_id: 20, source_assistant_message_id: 21 }]))
     api.chatStream.mockImplementation(async (_request, onEvent) => {
       onEvent({ event: 'session', session_id: 3, session_key: 'session-3' })
       onEvent({
@@ -225,7 +335,7 @@ describe('CRMAgentChat background operation placement', () => {
       finished_time: '2026-08-12T12:00:05',
       updated_time: '2026-08-12T12:00:05',
     }
-    api.listSessionOperations.mockResolvedValueOnce([runningOperation])
+    api.listSessionOperationHistory.mockResolvedValueOnce(paginatedOperations([runningOperation]))
     api.getOperation.mockResolvedValueOnce(completedOperation)
 
     const wrapper = mountChat()
@@ -238,7 +348,7 @@ describe('CRMAgentChat background operation placement', () => {
   })
 
   it('collapses multiple operations into one list until the user expands it', async () => {
-    api.listSessionOperations.mockResolvedValue([
+    api.listSessionOperationHistory.mockResolvedValue(paginatedOperations([
       operation,
       {
         ...operation,
@@ -248,7 +358,7 @@ describe('CRMAgentChat background operation placement', () => {
         resource_type: 'customer_activity',
         summary: '跟进任务已完成对账',
       },
-    ])
+    ]))
 
     const wrapper = mountChat()
     await flushPromises()

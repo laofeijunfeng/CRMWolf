@@ -78,7 +78,9 @@ const AgentAsyncOperationSchema = z.object({
 
 const AgentSessionPageSchema = paginatedSchema(AgentSessionResponseSchema)
 const AgentMessagePageSchema = paginatedSchema(AgentUIEnvelopeSchema)
+const AgentAsyncOperationPageSchema = paginatedSchema(AgentAsyncOperationSchema)
 const AgentAsyncOperationListSchema = z.array(AgentAsyncOperationSchema)
+const AgentMessageAnchorListSchema = z.array(AgentUIEnvelopeSchema)
 
 const AgentSessionStreamEventSchema = z.object({
   event: z.literal('session'),
@@ -178,6 +180,27 @@ export const agentApi = {
   ): Promise<AgentAsyncOperation[]> => {
     return AgentAsyncOperationListSchema.parse(
       await request.get<unknown>(`/v1/agent/sessions/${sessionId}/operations`, { params })
+    )
+  },
+
+  listSessionOperationHistory: async (
+    sessionId: number,
+    params?: { page?: number, page_size?: number }
+  ): Promise<PaginatedResponse<AgentAsyncOperation>> => {
+    return AgentAsyncOperationPageSchema.parse(
+      await request.get<unknown>(`/v1/agent/sessions/${sessionId}/operations/history`, { params })
+    )
+  },
+
+  listMessageAnchors: async (
+    sessionId: number,
+    messageIds: number[]
+  ): Promise<AgentUIEnvelope[]> => {
+    return AgentMessageAnchorListSchema.parse(
+      await request.get<unknown>(`/v1/agent/sessions/${sessionId}/messages/anchors`, {
+        params: { message_id: messageIds },
+        paramsSerializer: { indexes: null },
+      })
     )
   },
 

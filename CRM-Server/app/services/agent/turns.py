@@ -381,6 +381,37 @@ class AgentTurnRepository:
         if row is None:
             raise AgentTurnOwnershipError("owned message not found")
         return self._to_record(row)
+    def list_owned_by_ids(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_id: int,
+        session_id: int,
+        message_ids: set[int],
+    ) -> list[AgentPersistedMessageRecord]:
+        """Return canonical messages for the supplied owned exact IDs."""
+        self._require_owned_session(
+            db,
+            team_id=team_id,
+            user_id=user_id,
+            session_id=session_id,
+        )
+        if not message_ids:
+            return []
+        rows = (
+            db.query(AgentMessage)
+            .filter(
+                AgentMessage.id.in_(message_ids),
+                AgentMessage.team_id == team_id,
+                AgentMessage.user_id == user_id,
+                AgentMessage.session_id == session_id,
+            )
+            .order_by(AgentMessage.created_time.asc(), AgentMessage.id.asc())
+            .all()
+        )
+        return [self._to_record(row) for row in rows]
+
 
     def list_visible_by_session(
         self,
