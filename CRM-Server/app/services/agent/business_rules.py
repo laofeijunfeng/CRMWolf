@@ -575,12 +575,12 @@ def missing_contact_fields(contact: Dict[str, object]) -> List[str]:
 
 
 def missing_lead_fields(lead: Dict[str, object]) -> List[str]:
-    required_fields = ["lead_name", "city", "contact_name", "contact_phone"]
+    required_fields = ["lead_name", "city", "contact_name", "contact_phone", "product_public_id"]
     return [field for field in required_fields if not lead.get(field)]
 
 
 def missing_customer_fields(customer: Dict[str, object]) -> List[str]:
-    missing = [field for field in ["account_name", "city"] if not customer.get(field)]
+    missing = [field for field in ["account_name", "city", "product_public_id"] if not customer.get(field)]
     has_contact = any(customer.get(field) for field in ["contact_name", "contact_phone", "contact_position", "contact_gender"])
     if has_contact:
         missing.extend(field for field in ["contact_name", "contact_phone", "contact_position", "contact_gender"] if not customer.get(field))
@@ -595,6 +595,7 @@ def format_customer_missing_fields(fields: List[str]) -> str:
         "contact_phone": "主联系人手机号",
         "contact_position": "主联系人职务",
         "contact_gender": "主联系人性别（男/女/未知）",
+        "product_public_id": "产品",
     }
     return "、".join(labels.get(field, field) for field in fields)
 
@@ -607,6 +608,7 @@ def format_lead_missing_fields(fields: List[str]) -> str:
         "contact_phone": "联系人手机号",
         "source": "线索来源",
         "company_scale": "公司规模",
+        "product_public_id": "产品",
     }
     return "、".join(labels.get(field, field) for field in fields)
 

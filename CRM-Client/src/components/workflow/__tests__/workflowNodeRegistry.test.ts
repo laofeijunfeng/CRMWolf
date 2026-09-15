@@ -51,11 +51,11 @@ describe('WORKFLOW_NODE_REGISTRY', () => {
     expect(WORKFLOW_NODE_REGISTRY['crm.create_customer']).toMatchObject({
       category: 'crm',
       label: '创建客户',
-      requiredFields: ['account_name', 'city'],
+      requiredFields: ['account_name', 'city', 'product_public_id'],
       isTrigger: false,
     })
     expect(WORKFLOW_NODE_REGISTRY['crm.create_customer'].defaults()).toEqual({
-      account_name: '', city: '', industry: '', address: '', company_scale: '', owner_strategy: 'creator', default_procurement_method_id: null,
+      account_name: '', city: '', industry: '', address: '', company_scale: '', owner_strategy: 'creator', default_procurement_method_id: null, product_public_id: '',
     })
     expect(WORKFLOW_NODE_REGISTRY['crm.create_contact']).toMatchObject({
       category: 'crm',

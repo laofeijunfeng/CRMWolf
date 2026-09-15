@@ -133,9 +133,9 @@ describe('validateWorkflow', () => {
 
   it('accepts valid minimal configs for each CRM resource node', () => {
     const crmNodes: WorkflowGraphNode[] = [
-      { id: 'customer', type: 'crm.create_customer', position: { x: 600, y: 0 }, config: { account_name: 'Acme', city: '上海' } },
+      { id: 'customer', type: 'crm.create_customer', position: { x: 600, y: 0 }, config: { account_name: 'Acme', city: '上海', product_public_id: 'prd_1' } },
       { id: 'contact', type: 'crm.create_contact', position: { x: 800, y: 0 }, config: { customer_ref: 'customer', name: '王总', gender: '1', position: '采购', mobile: '13800138000' } },
-      { id: 'opportunity', type: 'crm.create_opportunity', position: { x: 1000, y: 0 }, config: { customer_ref: 'customer', total_amount: 100, user_count: 1, license_type: 'SUBSCRIPTION', purchase_type: 'NEW', expected_closing_date: '2026-12-31' } },
+      { id: 'opportunity', type: 'crm.create_opportunity', position: { x: 1000, y: 0 }, config: { customer_ref: 'customer', total_amount: 100, user_count: 1, license_type: 'SUBSCRIPTION', purchase_type: 'NEW', expected_closing_date: '2026-12-31', product_public_id: 'prd_1', product_module_public_ids: 'prm_base' } },
     ]
     const graph = withGraph({
       nodes: [...validGraph.nodes, ...crmNodes],

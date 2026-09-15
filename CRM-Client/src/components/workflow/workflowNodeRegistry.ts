@@ -73,8 +73,8 @@ export const WORKFLOW_NODE_REGISTRY: Record<WorkflowNodeType, WorkflowNodeTypeDe
   'crm.create_customer': {
     type: 'crm.create_customer', label: '创建客户', category: 'crm', icon: Building2,
     component: ActionCreateCustomerPanel,
-    defaults: () => ({ account_name: '', city: '', industry: '', address: '', company_scale: '', owner_strategy: 'creator', default_procurement_method_id: null }),
-    requiredFields: ['account_name', 'city'], isTrigger: false,
+    defaults: () => ({ account_name: '', city: '', industry: '', address: '', company_scale: '', owner_strategy: 'creator', default_procurement_method_id: null, product_public_id: '' }),
+    requiredFields: ['account_name', 'city', 'product_public_id'], isTrigger: false,
     summary: config => typeof config['account_name'] === 'string' && config['account_name'].trim() !== '' ? config['account_name'] : '未命名客户',
   },
   'crm.create_contact': {

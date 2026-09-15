@@ -589,6 +589,7 @@ class CRMWorkflowPlanner:
                 "contact_name": getattr(lead_model, "contact_name", None),
                 "contact_phone": getattr(lead_model, "contact_phone", None),
                 "company_scale": getattr(lead_model, "company_scale", None),
+                "product_public_id": getattr(lead_model, "product_public_id", None),
             }.items()
             if value is not None and value != ""
         }
@@ -600,7 +601,12 @@ class CRMWorkflowPlanner:
                 field="lead_fields",
                 business_action="provide_lead_fields",
                 title="补充线索信息",
-                prompt=f"还需要补充:{business_rules.format_lead_missing_fields(missing_fields)}。",
+                prompt=self._product_missing_prompt(
+                    missing_fields,
+                    formatter=business_rules.format_lead_missing_fields,
+                    db=db,
+                    team_id=team_id,
+                ),
             )
         lead_name = str(lead["lead_name"])
         follow_up_content = getattr(lead_model, "follow_up_content", None)
@@ -684,6 +690,7 @@ class CRMWorkflowPlanner:
                 "contact_position": getattr(customer_model, "contact_position", None),
                 "contact_gender": getattr(customer_model, "contact_gender", None),
                 "contact_email": getattr(customer_model, "contact_email", None),
+                "product_public_id": getattr(customer_model, "product_public_id", None),
             }.items()
             if value is not None and value != ""
         }
@@ -695,7 +702,12 @@ class CRMWorkflowPlanner:
                 field="customer_fields",
                 business_action="provide_customer_fields",
                 title="补充客户信息",
-                prompt=f"还需要补充:{business_rules.format_customer_missing_fields(missing_fields)}。",
+                prompt=self._product_missing_prompt(
+                    missing_fields,
+                    formatter=business_rules.format_customer_missing_fields,
+                    db=db,
+                    team_id=team_id,
+                ),
             )
         customer = self._customer_create_payload(flat_customer)
         account_name = str(customer["account_name"])
@@ -2406,6 +2418,23 @@ class CRMWorkflowPlanner:
             completed_text=completed_text,
             cancelled_text=cancelled_text,
         )
+
+    @staticmethod
+    def _product_missing_prompt(
+        missing_fields: list[str],
+        *,
+        formatter,
+        db: object,
+        team_id: int,
+    ) -> str:
+        prompt = f"还需要补充:{formatter(missing_fields)}。"
+        if "product_public_id" not in missing_fields:
+            return prompt
+        from app.crud.product_intent import EMPTY_CATALOG_MESSAGE, first_active_product
+
+        if hasattr(db, "query") and first_active_product(db, team_id) is None:
+            return f"{prompt}{EMPTY_CATALOG_MESSAGE}"
+        return prompt
 
     @staticmethod
     def _needs_text(

@@ -72,6 +72,7 @@ class AgentLeadCreatePayload(AgentStrictPayload):
     contact_name: str = Field(..., min_length=1, max_length=100)
     contact_phone: str = Field(..., min_length=1, max_length=20)
     company_scale: Optional[str] = Field(None, max_length=50)
+    product_public_id: str = Field(..., min_length=1, description="意向产品对外ID")
 
 
 class AgentContactPayload(AgentStrictPayload):
@@ -96,6 +97,7 @@ class AgentCustomerCreatePayload(AgentStrictPayload):
     source_public_id: Optional[str] = Field(None, max_length=64)
     default_procurement_method_id: Optional[int] = Field(None, ge=1)
     primary_contact: Optional[AgentContactPayload] = None
+    product_public_id: str = Field(..., min_length=1, description="意向产品对外ID")
 
 
 class AgentInvoiceTitlePayload(AgentStrictPayload):

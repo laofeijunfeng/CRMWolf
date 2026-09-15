@@ -1783,6 +1783,7 @@ async def test_create_lead_workflow_confirms_and_executes_through_root_dispatch(
                     "city": "上海",
                     "contact_name": "王敏",
                     "contact_phone": "13800138000",
+                    "product_public_id": "prd_1",
                 },
             }
         )
@@ -1852,6 +1853,7 @@ async def test_create_lead_workflow_confirms_and_executes_through_root_dispatch(
             "city": "上海",
             "contact_name": "王敏",
             "contact_phone": "13800138000",
+            "product_public_id": "prd_1",
         },
         "idempotency_suffix": f"{waiting.workflow_result.workflow_ref.workflow_id}:create_lead",
     }
@@ -1872,6 +1874,7 @@ async def test_create_customer_workflow_normalizes_primary_contact_before_execut
                     "contact_position": "CTO",
                     "contact_gender": "1",
                     "contact_email": "lihua@example.com",
+                    "product_public_id": "prd_1",
                 },
             }
         )
@@ -1947,6 +1950,7 @@ async def test_create_customer_workflow_normalizes_primary_contact_before_execut
                 "gender": "1",
                 "email": "lihua@example.com",
             },
+            "product_public_id": "prd_1",
         },
         "idempotency_suffix": f"{waiting.workflow_result.workflow_ref.workflow_id}:create_customer",
     }
@@ -1963,6 +1967,7 @@ async def test_create_lead_with_follow_up_confirms_once_and_binds_created_lead_i
                     "city": "上海",
                     "contact_name": "王敏",
                     "contact_phone": "13800138000",
+                    "product_public_id": "prd_1",
                     "follow_up_content": "已确认需要安排产品演示",
                     "follow_up_method": "电话",
                     "next_action": "安排产品演示",
@@ -2053,6 +2058,7 @@ async def test_create_lead_with_follow_up_confirms_once_and_binds_created_lead_i
             "city": "上海",
             "contact_name": "王敏",
             "contact_phone": "13800138000",
+            "product_public_id": "prd_1",
         },
         "idempotency_suffix": f"{workflow_id}:create_lead",
     }
@@ -2080,6 +2086,7 @@ async def test_create_customer_with_activity_confirms_once_and_binds_created_cus
                     "contact_phone": "13900139000",
                     "contact_position": "CTO",
                     "contact_gender": "1",
+                    "product_public_id": "prd_1",
                     "follow_up_content": "已确认进入技术评估阶段",
                     "follow_up_method": "微信",
                     "next_action": "发送技术评估材料",
@@ -2175,6 +2182,7 @@ async def test_create_customer_with_activity_confirms_once_and_binds_created_cus
                 "position": "CTO",
                 "gender": "1",
             },
+            "product_public_id": "prd_1",
         },
         "idempotency_suffix": f"{workflow_id}:create_customer",
     }

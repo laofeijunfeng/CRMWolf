@@ -2814,6 +2814,7 @@ async def test_agent_tool_create_lead_calls_existing_lead_api():
                     "contact_name": "王总",
                     "contact_phone": "13800138000",
                     "company_scale": "51-200人",
+                    "product_public_id": "prd_1",
                 },
                 "idempotency_suffix": "task-lead-001",
             },
@@ -2833,6 +2834,7 @@ async def test_agent_tool_create_lead_calls_existing_lead_api():
                     "contact_name": "王总",
                     "contact_phone": "13800138000",
                     "company_scale": "51-200人",
+                    "product_public_id": "prd_1",
                 },
             }
         ]
@@ -2859,6 +2861,7 @@ async def test_agent_tool_create_lead_resolves_unspecified_source_to_team_other(
                     "city": "广州",
                     "contact_name": "王总",
                     "contact_phone": "13800138000",
+                    "product_public_id": "prd_1",
                 },
                 "idempotency_suffix": "task-lead-unspecified-source",
             },
@@ -2889,6 +2892,7 @@ async def test_agent_tool_create_lead_omits_chinese_source_when_table_missing():
                     "city": "广州",
                     "contact_name": "王总",
                     "contact_phone": "13800138000",
+                    "product_public_id": "prd_1",
                 },
                 "idempotency_suffix": "task-lead-no-source-table",
             },
@@ -2918,6 +2922,7 @@ async def test_agent_tool_create_customer_calls_existing_customer_api():
                     "account_name": "广州睿狐科技",
                     "source": "其他",
                     "city": "广州",
+                    "product_public_id": "prd_1",
                     "primary_contact": {
                         "name": "王总",
                         "mobile": "13800138000",
@@ -2946,6 +2951,7 @@ async def test_agent_tool_create_customer_calls_existing_customer_api():
                     "gender": "1",
                     "is_decision_maker": False,
                 },
+                "product_public_id": "prd_1",
             },
         }
         assert db.query(AgentToolCall).one().tool_name == "create_customer"
@@ -3148,6 +3154,7 @@ async def test_agent_tool_registry_rejects_unknown_lead_payload_fields():
                         "city": "广州",
                         "contact_name": "王总",
                         "contact_phone": "13800138000",
+                        "product_public_id": "prd_1",
                         "owner_id": "9",
                     },
                 },

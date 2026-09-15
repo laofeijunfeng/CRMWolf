@@ -145,6 +145,7 @@ class AgentLeadEntity(BaseModel):
     next_follow_time_text: Optional[str] = Field(None, description="用户表达中的线索下次跟进时间")
     next_follow_time: Optional["AgentTemporalExpression"] = Field(None, description="用户表达的结构化线索下次跟进时间")
     next_follow_time_iso: Optional[str] = Field(None, description="系统计算字段，AI 必须返回 null")
+    product_public_id: Optional[str] = Field(None, min_length=1, description="意向产品对外ID")
 
 
 class AgentCustomerCreateEntity(BaseModel):
@@ -164,6 +165,7 @@ class AgentCustomerCreateEntity(BaseModel):
     next_follow_time_text: Optional[str] = Field(None, description="用户表达中的客户下次跟进时间")
     next_follow_time: Optional["AgentTemporalExpression"] = Field(None, description="用户表达的结构化客户下次跟进时间")
     next_follow_time_iso: Optional[str] = Field(None, description="系统计算字段，AI 必须返回 null")
+    product_public_id: Optional[str] = Field(None, min_length=1, description="意向产品对外ID")
 
 
 class AgentTemporalExpression(BaseModel):
