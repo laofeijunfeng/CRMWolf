@@ -17,12 +17,19 @@ const DialogSlotStub = defineComponent({
     return () => h('div', slots['default']?.())
   },
 })
+const DialogPartStub = defineComponent({
+  inheritAttrs: false,
+  setup(_, { attrs, slots }): () => VNode {
+    return () => h('div', attrs, slots['default']?.())
+  },
+})
 const IndustryHierarchySelectFieldStub = defineComponent({
   name: 'IndustryHierarchySelectField',
   inheritAttrs: false,
   props: {
     id: { type: String, required: true },
     modelValue: { type: String, default: '' },
+    label: { type: String, default: '' },
     error: { type: String, default: '' },
     disabled: { type: Boolean, default: false },
     retainedIndustryInfo: { type: Object, default: null },
@@ -31,15 +38,18 @@ const IndustryHierarchySelectFieldStub = defineComponent({
   setup(props): () => VNode {
     return () => {
       const retained = props.retainedIndustryInfo
-      const retainedName = retained !== null && typeof retained === 'object' && 'name' in retained && typeof retained.name === 'string' ? retained.name : ''
-      return h('button', {
-        id: props.id,
-        type: 'button',
-        role: 'combobox',
-        disabled: props.disabled,
-        'aria-invalid': props.error !== '' ? 'true' : 'false',
-        'aria-describedby': props.error !== '' ? `${props.id}-error` : undefined,
-      }, `${props.modelValue}${retainedName === '' ? '' : ` ${retainedName}`}`)
+      const retainedName = retained !== null && typeof retained === 'object' && 'name' in retained && typeof retained['name'] === 'string' ? retained['name'] : ''
+      return h('div', [
+        props.label === '' ? null : h('span', props.label),
+        h('button', {
+          id: props.id,
+          type: 'button',
+          role: 'combobox',
+          disabled: props.disabled,
+          'aria-invalid': props.error !== '' ? 'true' : 'false',
+          'aria-describedby': props.error !== '' ? `${props.id}-error` : undefined,
+        }, `${props.modelValue}${retainedName === '' ? '' : ` ${retainedName}`}`),
+      ])
     }
   },
 })
@@ -69,20 +79,26 @@ const SelectFieldStub = defineComponent({
   props: {
     id: { type: String, required: true },
     modelValue: { type: [String, Number], default: '' },
+    label: { type: String, default: '' },
     options: { type: Array, default: () => [] },
     disabled: { type: Boolean, default: false },
+    ariaLabel: { type: String, default: '' },
   },
   emits: ['update:modelValue'],
   setup(props, { emit }): () => VNode {
-    return () => h('button', {
-      id: props.id,
-      type: 'button',
-      disabled: props.disabled,
-      onClick: () => {
-        const options = props.options as { value?: string | number }[]
-        emit('update:modelValue', options[1]?.value ?? options[0]?.value ?? '')
-      },
-    }, String(props.modelValue ?? ''))
+    return () => h('div', [
+      props.label === '' ? null : h('span', props.label),
+      h('button', {
+        id: props.id,
+        type: 'button',
+        disabled: props.disabled,
+        'aria-label': props.ariaLabel || undefined,
+        onClick: () => {
+          const options = props.options as { value?: string | number }[]
+          emit('update:modelValue', options[1]?.value ?? options[0]?.value ?? '')
+        },
+      }, String(props.modelValue ?? '')),
+    ])
   },
 })
 
@@ -91,17 +107,21 @@ const DateFieldStub = defineComponent({
   inheritAttrs: false,
   props: {
     id: { type: String, required: true },
+    label: { type: String, default: '' },
     modelValue: { type: Date, default: null },
     disabled: { type: Boolean, default: false },
   },
   emits: ['update:modelValue'],
   setup(props, { emit }): () => VNode {
-    return () => h('button', {
-      id: props.id,
-      type: 'button',
-      disabled: props.disabled,
-      onClick: () => emit('update:modelValue', new Date('2026-12-31T00:00:00')),
-    }, props.modelValue === null ? '' : props.modelValue.toISOString())
+    return () => h('div', [
+      props.label === '' ? null : h('span', props.label),
+      h('button', {
+        id: props.id,
+        type: 'button',
+        disabled: props.disabled,
+        onClick: () => emit('update:modelValue', new Date('2026-12-31T00:00:00')),
+      }, props.modelValue === null ? '' : props.modelValue.toISOString()),
+    ])
   },
 })
 
@@ -266,6 +286,132 @@ describe('CustomerFormDialog mode transitions', () => {
 
     wrapper.unmount()
   })
+  it('clears ordinary field errors when switching customers', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+
+    const customerA = { ...customerDetail, id: 'customer-a' }
+    const customerB = { ...customerDetail, id: 'customer-b', city: '北京' }
+    const wrapper = shallowMount(CustomerFormDialog, {
+      global: {
+        stubs: {
+          Dialog: DialogSlotStub,
+          DialogContent: DialogSlotStub,
+        },
+      },
+      props: { open: true, mode: 'edit', customerId: customerA.id, customer: customerA },
+    })
+    await flushPromises()
+
+    interface FormState {
+      setFieldError: (field: string, message: string) => void
+      errors: Record<string, string | undefined>
+      submitError: unknown
+    }
+    const formState = wrapper.vm as unknown as FormState
+    formState.setFieldError('city', '请输入所在城市')
+    formState.setFieldError('industry', '行业代码无效')
+    formState.submitError = { kind: 'conflict', description: '旧客户冲突' }
+    await nextTick()
+    expect(formState.errors['city']).toBe('请输入所在城市')
+    expect(formState.errors['industry']).toBe('行业代码无效')
+
+    await wrapper.setProps({ customerId: customerB.id, customer: customerB })
+    await flushPromises()
+
+    expect(formState.errors['city']).toBeUndefined()
+    expect(formState.errors['industry']).toBeUndefined()
+    expect(formState.submitError).toBeNull()
+    wrapper.unmount()
+  })
+  it('clears optional profile fields when switching to a customer without them', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+
+    const customerA = {
+      ...customerDetail,
+      id: 'customer-a',
+      company_scale: '1-50人',
+      source_info: { public_id: 'source-a', name: '来源 A', is_active: true },
+      default_procurement_method_id: 8,
+    }
+    const customerB = {
+      ...customerDetail,
+      id: 'customer-b',
+      company_scale: null,
+      source_info: null,
+      default_procurement_method_id: null,
+    }
+    const wrapper = shallowMount(CustomerFormDialog, {
+      global: { stubs: { Dialog: DialogSlotStub, DialogContent: DialogSlotStub } },
+      props: { open: true, mode: 'edit', customerId: customerA.id, customer: customerA },
+    })
+    await flushPromises()
+    const initialValues = (wrapper.vm as unknown as { values: Record<string, unknown> }).values
+    expect(initialValues['company_scale']).toBe('1-50人')
+    expect(initialValues['source_public_id']).toBe('source-a')
+    expect(initialValues['default_procurement_method_id']).toBe(8)
+    await wrapper.setProps({ customerId: customerB.id, customer: customerB })
+    await flushPromises()
+    const switchedValues = (wrapper.vm as unknown as { values: Record<string, unknown> }).values
+    expect(switchedValues['company_scale']).toBeUndefined()
+    expect(switchedValues['source_public_id']).toBeUndefined()
+    expect(switchedValues['default_procurement_method_id']).toBeUndefined()
+    wrapper.unmount()
+  })
+  it('allows editing another field when legacy profile fields are unset', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const updateCustomer = vi.spyOn(customerApi, 'updateCustomer').mockResolvedValue({ ...customerDetail, city: '北京', version: 4 })
+    const legacyCustomer = { ...customerDetail, company_scale: null, source_info: null, default_procurement_method_id: null }
+    const wrapper = shallowMount(CustomerFormDialog, {
+      global: { stubs: { Dialog: DialogSlotStub, DialogContent: DialogSlotStub } },
+      props: { open: true, mode: 'edit', customerId: legacyCustomer.id, customer: legacyCustomer },
+    })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      setValues: (values: Record<string, unknown>) => void
+      onSubmit: (event: Event) => Promise<void>
+    }
+    vm.setValues({ city: '北京' })
+    await vm.onSubmit(new Event('submit'))
+    await flushPromises()
+
+    expect(updateCustomer).toHaveBeenCalledWith('customer-1', {
+      expected_version: 3,
+      city: '北京',
+    })
+    expect(wrapper.emitted('update:open')).toContainEqual([false])
+    wrapper.unmount()
+  })
+  it('preserves an unknown legacy company scale while saving another field', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const updateCustomer = vi.spyOn(customerApi, 'updateCustomer').mockResolvedValue({ ...customerDetail, city: '北京', version: 4 })
+    const legacyCustomer = { ...customerDetail, company_scale: 'small' }
+    const wrapper = shallowMount(CustomerFormDialog, {
+      global: { stubs: { Dialog: DialogSlotStub, DialogContent: DialogSlotStub } },
+      props: { open: true, mode: 'edit', customerId: legacyCustomer.id, customer: legacyCustomer },
+    })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      values: Record<string, unknown>
+      setValues: (values: Record<string, unknown>) => void
+      onSubmit: (event: Event) => Promise<void>
+    }
+    expect(vm.values['company_scale']).toBe('small')
+    vm.setValues({ city: '北京' })
+    await vm.onSubmit(new Event('submit'))
+    await flushPromises()
+
+    expect(updateCustomer).toHaveBeenCalledWith('customer-1', {
+      expected_version: 3,
+      city: '北京',
+    })
+    wrapper.unmount()
+  })
 })
  
 describe('CustomerFormDialog progressive edit sections', () => {
@@ -273,23 +419,27 @@ describe('CustomerFormDialog progressive edit sections', () => {
     vi.restoreAllMocks()
   })
 
+  const dialogStubs = {
+    Dialog: DialogSlotStub,
+    DialogContent: DialogSlotStub,
+    DialogFooter: DialogSlotStub,
+    DialogHeader: DialogPartStub,
+    DialogTitle: DialogPartStub,
+    DialogDescription: DialogPartStub,
+    Collapsible: MoreInfoCollapsibleStub,
+    CollapsibleTrigger: defineComponent({ template: '<slot />' }),
+    CollapsibleContent: defineComponent({ template: '<div><slot /></div>' }),
+    IndustryHierarchySelectField: IndustryHierarchySelectFieldStub,
+    SelectField: SelectFieldStub,
+    DateField: DateFieldStub,
+    InputField: InputFieldStub,
+    Button: defineComponent({ inheritAttrs: false, template: '<button v-bind="$attrs"><slot /></button>' }),
+    FormField: defineComponent({ setup(_, { slots }) { return () => h('div', slots['default']?.({ value: undefined, handleChange: () => undefined })) } }),
+    FormItem: defineComponent({ template: '<div><slot /></div>' }),
+    FormMessage: defineComponent({ template: '<div><slot /></div>' }),
+  }
   const mountEdit = (customer: CustomerDetailResponse = { ...customerDetail, company_scale: '1-50人', source_info: { public_id: 'source-1', name: '来源', is_active: true } }): VueWrapper<InstanceType<typeof CustomerFormDialog>> => shallowMount(CustomerFormDialog, {
-    global: {
-      stubs: {
-        Dialog: DialogSlotStub,
-        DialogContent: DialogSlotStub,
-        DialogFooter: DialogSlotStub,
-        Collapsible: MoreInfoCollapsibleStub,
-        CollapsibleContent: defineComponent({ template: '<div><slot /></div>' }),
-        IndustryHierarchySelectField: IndustryHierarchySelectFieldStub,
-        SelectField: SelectFieldStub,
-        DateField: DateFieldStub,
-        Button: defineComponent({ inheritAttrs: false, template: '<button v-bind="$attrs"><slot /></button>' }),
-        FormField: defineComponent({ setup(_, { slots }) { return () => h('div', slots['default']?.({ value: undefined, handleChange: () => undefined })) } }),
-        FormItem: defineComponent({ template: '<div><slot /></div>' }),
-        FormMessage: defineComponent({ template: '<div><slot /></div>' }),
-      },
-    },
+    global: { stubs: dialogStubs },
     props: {
       open: true,
       mode: 'edit',
@@ -298,16 +448,79 @@ describe('CustomerFormDialog progressive edit sections', () => {
     },
     attachTo: document.body,
   })
-  it('starts with the more customer information section collapsed', async () => {
+  const mountCreate = (): VueWrapper<InstanceType<typeof CustomerFormDialog>> => shallowMount(CustomerFormDialog, {
+    global: { stubs: dialogStubs },
+    props: { open: true, mode: 'create' },
+    attachTo: document.body,
+  })
+  const mountCreateAndFillRequiredFields = (): VueWrapper<InstanceType<typeof CustomerFormDialog>> => {
+    const wrapper = mountCreate()
+    const vm = wrapper.vm as unknown as { setValues: (values: Record<string, unknown>) => void }
+    vm.setValues({
+      account_name: '新客户',
+      city: '上海',
+      company_scale: '1-50人',
+      source_public_id: 'source-1',
+      default_procurement_method_id: 1,
+      contact_name: '张三',
+      contact_mobile: '13800138000',
+      contact_position: '经理',
+      contact_gender: '男',
+    })
+    return wrapper
+  }
+  it('renders the more-information trigger collapsed in create and edit modes', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
-    const wrapper = mountEdit()
+    const createWrapper = mountCreate()
+    const editWrapper = mountEdit()
     await flushPromises()
-
-    const vm = wrapper.vm as unknown as { moreInfoOpen: boolean }
-    expect(vm.moreInfoOpen).toBe(false)
+    expect(createWrapper.get('#customer-more-info-trigger').attributes('aria-expanded')).toBe('false')
+    expect(editWrapper.get('#customer-more-info-trigger').attributes('aria-expanded')).toBe('false')
+    createWrapper.unmount()
+    editWrapper.unmount()
+  })
+  it('renders one flat more-information group without independent save actions', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const wrapper = mountEdit({ ...customerDetail, status: 0 })
+    await flushPromises()
+    await wrapper.get('#customer-more-info-trigger').trigger('click')
+    expect(wrapper.text()).toContain('行业')
+    expect(wrapper.text()).toContain('客户状态')
+    expect(wrapper.text()).toContain('授权类型')
+    expect(wrapper.text()).toContain('授权到期日')
+    expect(wrapper.findAll('button').some((button) => button.text() === '应用状态变更')).toBe(false)
+    expect(wrapper.findAll('button').some((button) => button.text() === '保存授权信息')).toBe(false)
+    expect(wrapper.findAll('button').some((button) => button.text() === '清除日期')).toBe(false)
+    expect(wrapper.findAll('button').filter((button) => button.text() === '保存客户资料')).toHaveLength(1)
     wrapper.unmount()
   })
+  it('counts an existing status 0 in the collapsed more-information summary', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const wrapper = mountEdit({ ...customerDetail, status: 0, industry: null, license_type: null, license_expiry_date: null })
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.get('#customer-more-info-trigger').text()).toContain('1 项')
+    wrapper.unmount()
+  })
+
+  it.each([2, 3])('counts read-only existing status %s in the collapsed summary and preserves the read-only message', async (status) => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const wrapper = mountEdit({ ...customerDetail, status: status as 2 | 3, industry: null, license_type: null, license_expiry_date: null })
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.get('#customer-more-info-trigger').text()).toContain('1 项')
+    await wrapper.get('#customer-more-info-trigger').trigger('click')
+    await nextTick()
+    expect(wrapper.text()).toContain('该客户状态由其他流程管理，暂不支持在此修改。')
+    wrapper.unmount()
+  })
+
   it('saves an industry-only edit through the ordinary dirty-diff update', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
@@ -334,42 +547,132 @@ describe('CustomerFormDialog progressive edit sections', () => {
     expect(wrapper.emitted('refresh')).toBeUndefined()
   })
 
-  it('keeps the dialog and entered license values when snapshot save fails', async () => {
+  it('saves profile, industry, status, and license in one ordinary PUT', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
-    vi.spyOn(customerApi, 'updateCustomerLicenseSnapshot').mockRejectedValue(new Error('snapshot failed'))
-    const wrapper = mountEdit()
+    const updateCustomer = vi.spyOn(customerApi, 'updateCustomer').mockResolvedValue({
+      id: 'customer-1',
+      public_id: 'CUS-001',
+      account_name: '测试客户',
+      industry: 'finance_securities',
+      city: '上海',
+      address: '测试地址',
+      company_scale: 'small',
+      source: null,
+      status: 1,
+      owner_id: '1',
+      source_lead_id: null,
+      default_procurement_method_id: 1,
+      return_reason: null,
+      returned_time: null,
+      creator_id: '1',
+      created_time: '2026-09-04T00:00:00Z',
+      last_modified_time: '2026-09-14T00:00:00Z',
+      version: 4,
+      license_expiry_date: '2027-01-01',
+      license_type: 'OFFICIAL',
+    })
+    const wrapper = mountEdit({ ...customerDetail, status: 0, version: 3, city: '北京' })
+    await flushPromises()
     const vm = wrapper.vm as unknown as {
+      setValues: (values: Record<string, unknown>) => void
+      industryValue: string
+      lifecycleStatusValue: 0 | 1 | null
       licenseTypeValue: 'TRIAL' | 'OFFICIAL' | null
       licenseExpiryDateValue: string | null
-      saveLicenseSnapshot: () => Promise<void>
+      onSubmit: (event: Event) => Promise<void>
     }
-    vm.licenseTypeValue = 'TRIAL'
-    vm.licenseExpiryDateValue = '2026-12-31'
-    await vm.saveLicenseSnapshot()
+    vm.setValues({ city: '上海' })
+    vm.industryValue = 'finance_securities'
+    vm.lifecycleStatusValue = 1
+    vm.licenseTypeValue = 'OFFICIAL'
+    vm.licenseExpiryDateValue = '2027-01-01'
+    await vm.onSubmit(new Event('submit'))
+    await flushPromises()
 
-    expect(wrapper.props('open')).toBe(true)
-    expect(vm.licenseTypeValue).toBe('TRIAL')
-    expect(vm.licenseExpiryDateValue).toBe('2026-12-31')
+    expect(updateCustomer).toHaveBeenCalledTimes(1)
+    expect(updateCustomer).toHaveBeenCalledWith('customer-1', {
+      expected_version: 3,
+      city: '上海',
+      industry: 'finance_securities',
+      status: 1,
+      license_type: 'OFFICIAL',
+      license_expiry_date: '2027-01-01',
+    })
+    expect(wrapper.emitted('update:open')).toContainEqual([false])
+    expect(wrapper.emitted('success')).toHaveLength(1)
     wrapper.unmount()
   })
 
-  it('uses the current version for a lifecycle 0 to 1 save and emits only refresh', async () => {
+  it('sends optional more-information values through the create POST', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const createCustomer = vi.spyOn(customerApi, 'createCustomer').mockResolvedValue({
+      id: 'customer-created',
+      public_id: 'CUS-CREATED',
+      account_name: '新客户',
+      industry: 'internet_saas',
+      city: '上海',
+      address: null,
+      company_scale: '1-50人',
+      source: null,
+      status: 1,
+      owner_id: '1',
+      source_lead_id: null,
+      default_procurement_method_id: 1,
+      return_reason: null,
+      returned_time: null,
+      creator_id: '1',
+      created_time: '2026-09-14T00:00:00Z',
+      last_modified_time: '2026-09-14T00:00:00Z',
+      version: 1,
+      license_expiry_date: '2026-12-31',
+      license_type: 'TRIAL',
+    })
+    const wrapper = mountCreateAndFillRequiredFields()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      industryValue: string
+      lifecycleStatusValue: 0 | 1 | null
+      licenseTypeValue: 'TRIAL' | 'OFFICIAL' | null
+      licenseExpiryDateValue: string | null
+      onSubmit: (event: Event) => Promise<void>
+    }
+    vm.industryValue = 'internet_saas'
+    vm.lifecycleStatusValue = 1
+    vm.licenseTypeValue = 'TRIAL'
+    vm.licenseExpiryDateValue = '2026-12-31'
+    await vm.onSubmit(new Event('submit'))
+    await flushPromises()
+
+    expect(createCustomer).toHaveBeenCalledWith(expect.objectContaining({
+      industry: 'internet_saas',
+      status: 1,
+      license_type: 'TRIAL',
+      license_expiry_date: '2026-12-31',
+    }))
+    wrapper.unmount()
+  })
+
+  it('saves a status change through the ordinary PUT and closes', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
     const customer = { ...customerDetail, status: 0 as const, version: 8 }
-    const updateLifecycle = vi.spyOn(customerApi, 'updateCustomerLifecycleStatus').mockResolvedValue({ ...customer, status: 1, version: 9 })
+    const updateCustomer = vi.spyOn(customerApi, 'updateCustomer').mockResolvedValue({ ...customer, status: 1, version: 9 })
+    const updateLifecycle = vi.spyOn(customerApi, 'updateCustomerLifecycleStatus')
     const wrapper = mountEdit(customer)
     await flushPromises()
 
-    const vm = wrapper.vm as unknown as { lifecycleStatusValue: 0 | 1; saveLifecycleStatus: () => Promise<void> }
+    const vm = wrapper.vm as unknown as { lifecycleStatusValue: 0 | 1 | null; onSubmit: (event: Event) => Promise<void> }
     vm.lifecycleStatusValue = 1
-    await vm.saveLifecycleStatus()
+    await vm.onSubmit(new Event('submit'))
+    await flushPromises()
 
-    expect(updateLifecycle).toHaveBeenCalledWith('customer-1', { status: 1, expected_version: 8 })
-    expect(wrapper.emitted('refresh')).toHaveLength(1)
-    expect(wrapper.emitted('success')).toBeUndefined()
-    expect(wrapper.props('open')).toBe(true)
+    expect(updateLifecycle).not.toHaveBeenCalled()
+    expect(updateCustomer).toHaveBeenCalledWith('customer-1', { expected_version: 8, status: 1 })
+    expect(wrapper.emitted('refresh')).toBeUndefined()
+    expect(wrapper.emitted('success')).toHaveLength(1)
+    expect(wrapper.emitted('update:open')).toContainEqual([false])
     wrapper.unmount()
   })
   it.each([2, 3])('does not treat read-only lifecycle status %s as dirty', async (status) => {
@@ -412,10 +715,11 @@ describe('CustomerFormDialog progressive edit sections', () => {
     wrapper.unmount()
   })
 
-  it('preserves dirty license values and keeps open after profile save', async () => {
+  it('saves dirty license values through the ordinary PUT and closes', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
-    vi.spyOn(customerApi, 'updateCustomer').mockResolvedValue({ ...customerDetail, account_name: '更新客户', version: 4 })
+    const updateCustomer = vi.spyOn(customerApi, 'updateCustomer').mockResolvedValue({ ...customerDetail, account_name: '更新客户', license_type: 'TRIAL', license_expiry_date: '2026-12-31', version: 4 })
+    const updateLicense = vi.spyOn(customerApi, 'updateCustomerLicenseSnapshot')
     const wrapper = mountEdit()
     await flushPromises()
     const vm = wrapper.vm as unknown as {
@@ -429,11 +733,16 @@ describe('CustomerFormDialog progressive edit sections', () => {
     vm.setValues({ account_name: '更新客户' })
     await vm.onSubmit(new Event('submit'))
     await flushPromises()
-    expect(vm.licenseTypeValue).toBe('TRIAL')
-    expect(vm.licenseExpiryDateValue).toBe('2026-12-31')
-    expect(wrapper.emitted('refresh')).toHaveLength(1)
-    expect(wrapper.emitted('success')).toBeUndefined()
-    expect(wrapper.emitted('update:open')).toBeUndefined()
+    expect(updateLicense).not.toHaveBeenCalled()
+    expect(updateCustomer).toHaveBeenCalledWith('customer-1', {
+      expected_version: 3,
+      account_name: '更新客户',
+      license_type: 'TRIAL',
+      license_expiry_date: '2026-12-31',
+    })
+    expect(wrapper.emitted('refresh')).toBeUndefined()
+    expect(wrapper.emitted('success')).toHaveLength(1)
+    expect(wrapper.emitted('update:open')).toContainEqual([false])
     wrapper.unmount()
   })
 
@@ -456,36 +765,39 @@ describe('CustomerFormDialog progressive edit sections', () => {
     wrapper.unmount()
   })
 
-  it('disables footer save and cancel while an inline write is submitting', async () => {
+  it('tracks ordinary submit as the only writeSubmitting state', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
     const wrapper = mountEdit()
-    const vm = wrapper.vm as unknown as { lifecycleSubmitting: boolean; licenseSubmitting: boolean; writeSubmitting: boolean }
+    const vm = wrapper.vm as unknown as { writeSubmitting: boolean; submitting: boolean }
     await flushPromises()
-    vm.lifecycleSubmitting = true
-    await nextTick()
-    expect(vm.writeSubmitting).toBe(true)
-    vm.lifecycleSubmitting = false
-    vm.licenseSubmitting = true
+    expect(vm.writeSubmitting).toBe(false)
+    vm.submitting = true
     await nextTick()
     expect(vm.writeSubmitting).toBe(true)
     wrapper.unmount()
   })
-  it('syncs normalized license snapshot values returned by the API', async () => {
+
+  it('blocks save when license expiry is set without a type', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
-    const updateLicense = vi.spyOn(customerApi, 'updateCustomerLicenseSnapshot').mockResolvedValue({ ...customerDetail, license_type: null, license_expiry_date: null, version: 4 })
+    const updateCustomer = vi.spyOn(customerApi, 'updateCustomer')
     const wrapper = mountEdit()
     await flushPromises()
-    const vm = wrapper.vm as unknown as { licenseTypeValue: 'TRIAL' | 'OFFICIAL' | null; licenseExpiryDateValue: string | null; saveLicenseSnapshot: () => Promise<void> }
-    vm.licenseTypeValue = 'OFFICIAL'
+    const vm = wrapper.vm as unknown as {
+      licenseExpiryDateValue: string | null
+      onSubmit: (event: Event) => Promise<void>
+      errors: Record<string, string | undefined>
+    }
     vm.licenseExpiryDateValue = '2026-12-31'
-    await vm.saveLicenseSnapshot()
-    expect(updateLicense).toHaveBeenCalled()
-    expect(vm.licenseTypeValue).toBeNull()
-    expect(vm.licenseExpiryDateValue).toBeNull()
+    await vm.onSubmit(new Event('submit'))
+    await flushPromises()
+    expect(updateCustomer).not.toHaveBeenCalled()
+    expect(vm.errors['license_expiry_date']).toBe('授权到期日期不为空时必须选择授权类型')
+    expect(wrapper.emitted('update:open')).toBeUndefined()
     wrapper.unmount()
   })
+
 })
 describe('CustomerFormDialog recovery and close guards', () => {
   afterEach(() => {
@@ -513,6 +825,16 @@ describe('CustomerFormDialog recovery and close guards', () => {
       },
     },
     props: { open: true, mode: 'edit', customerId: customer.id, customer },
+  })
+  it('labels the status control as 客户状态', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const wrapper = mountRecoveryEdit({ ...customerDetail, status: 0 })
+    await flushPromises()
+    await wrapper.get('#customer-more-info-trigger').trigger('click')
+    await nextTick()
+    expect(wrapper.text()).toContain('客户状态')
+    wrapper.unmount()
   })
   it('disables only industry on hierarchy load failure and restores it after rendered retry', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
@@ -548,50 +870,61 @@ describe('CustomerFormDialog recovery and close guards', () => {
     wrapper.unmount()
   })
 
-  it('keeps entered license values, dialog open, and error after rendered snapshot save failure', async () => {
+  it('keeps entered license values, dialog open, and error after ordinary PUT failure', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
-    const updateLicense = vi.spyOn(customerApi, 'updateCustomerLicenseSnapshot').mockRejectedValue(new Error('snapshot failed'))
+    const updateCustomer = vi.spyOn(customerApi, 'updateCustomer').mockRejectedValue(new Error('update failed'))
+    const updateLicense = vi.spyOn(customerApi, 'updateCustomerLicenseSnapshot')
     const wrapper = mountRecoveryEdit()
     await flushPromises()
     await wrapper.get('#customer-more-info-trigger').trigger('click')
     await flushPromises()
-    await wrapper.get('#customer-license-type').trigger('click')
-    await wrapper.get('#customer-license-expiry-date').trigger('click')
-    const saveButton = wrapper.findAll('button').find((button) => button.text() === '保存授权信息')
-    expect(saveButton).toBeDefined()
-    await saveButton?.trigger('click')
+    const vm = wrapper.vm as unknown as {
+      licenseTypeValue: 'TRIAL' | 'OFFICIAL' | null
+      licenseExpiryDateValue: string | null
+      onSubmit: (event: Event) => Promise<void>
+    }
+    vm.licenseTypeValue = 'OFFICIAL'
+    vm.licenseExpiryDateValue = '2026-12-31'
+    await vm.onSubmit(new Event('submit'))
     await flushPromises()
 
-    expect(updateLicense).toHaveBeenCalledWith('customer-1', {
+    expect(updateLicense).not.toHaveBeenCalled()
+    expect(updateCustomer).toHaveBeenCalledWith('customer-1', {
       expected_version: 3,
       license_type: 'OFFICIAL',
       license_expiry_date: '2026-12-31',
     })
     expect(wrapper.props('open')).toBe(true)
     expect(wrapper.get('#customer-license-type').text()).toBe('OFFICIAL')
-    expect(wrapper.get('#customer-license-expiry-date').text()).toContain('2026-12-30')
+    expect(vm.licenseExpiryDateValue).toBe('2026-12-31')
     expect(wrapper.find('[role="alert"]').text()).toContain('请重试')
     expect(wrapper.emitted('update:open')).toBeUndefined()
     wrapper.unmount()
   })
-  it('offers license recovery, applies latest values, and retries with refreshed version while preserving input', async () => {
+  it('offers recovery, applies latest values, and retries with refreshed version while preserving input', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
     const latest = { ...customerDetail, license_type: 'TRIAL' as const, license_expiry_date: '2027-01-01', version: 11 }
-    const updateLicense = vi.spyOn(customerApi, 'updateCustomerLicenseSnapshot')
+    const updateCustomer = vi.spyOn(customerApi, 'updateCustomer')
       .mockRejectedValueOnce({ response: { status: 409 } })
       .mockRejectedValueOnce({ response: { status: 409 } })
       .mockResolvedValueOnce({ ...latest, license_type: 'OFFICIAL' as const, license_expiry_date: '2026-12-31', version: 12 })
+    const updateLicense = vi.spyOn(customerApi, 'updateCustomerLicenseSnapshot')
     const getDetail = vi.spyOn(customerApi, 'getCustomerDetail').mockResolvedValue(latest)
     const wrapper = mountRecoveryEdit({ ...customerDetail, version: 10 })
     await flushPromises()
     await wrapper.get('#customer-more-info-trigger').trigger('click')
     await flushPromises()
-    const vm = wrapper.vm as unknown as { licenseTypeValue: 'TRIAL' | 'OFFICIAL' | null; licenseExpiryDateValue: string | null; saveLicenseSnapshot: () => Promise<void>; loadedVersion: number | null; industryValue: string }
+    const vm = wrapper.vm as unknown as {
+      licenseTypeValue: 'TRIAL' | 'OFFICIAL' | null
+      licenseExpiryDateValue: string | null
+      onSubmit: (event: Event) => Promise<void>
+      loadedVersion: number | null
+    }
     vm.licenseTypeValue = 'OFFICIAL'
     vm.licenseExpiryDateValue = '2026-12-31'
-    await vm.saveLicenseSnapshot()
+    await vm.onSubmit(new Event('submit'))
     await flushPromises()
     expect(wrapper.text()).toContain('其他人可能已经修改了该对象')
     expect(wrapper.findAll('button').find((button) => button.text() === '使用最新数据')).toBeDefined()
@@ -605,20 +938,62 @@ describe('CustomerFormDialog recovery and close guards', () => {
 
     vm.licenseTypeValue = 'OFFICIAL'
     vm.licenseExpiryDateValue = '2026-12-31'
-    await vm.saveLicenseSnapshot()
+    await vm.onSubmit(new Event('submit'))
     await flushPromises()
     await wrapper.findAll('button').find((button) => button.text() === '保留当前输入并继续编辑')?.trigger('click')
     await flushPromises()
     expect(vm.licenseTypeValue).toBe('OFFICIAL')
     expect(vm.licenseExpiryDateValue).toBe('2026-12-31')
     expect(vm.loadedVersion).toBe(11)
-    await wrapper.findAll('button').find((button) => button.text() === '保存授权信息')?.trigger('click')
+    await vm.onSubmit(new Event('submit'))
     await flushPromises()
-    expect(updateLicense).toHaveBeenLastCalledWith('customer-1', {
+    expect(updateLicense).not.toHaveBeenCalled()
+    expect(updateCustomer).toHaveBeenLastCalledWith('customer-1', {
       expected_version: 11,
       license_type: 'OFFICIAL',
       license_expiry_date: '2026-12-31',
     })
+    wrapper.unmount()
+  })
+  it('refreshes retained industry details when preserving input after a conflict', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const initial = {
+      ...customerDetail,
+      industry: 'legacy.industry',
+      industry_info: { code: 'legacy.industry', name: '旧行业 / 已停用' },
+      version: 10,
+    }
+    const latest = {
+      ...initial,
+      industry_info: { code: 'legacy.industry', name: '新行业 / 已停用' },
+      version: 11,
+    }
+    const updateCustomer = vi.spyOn(customerApi, 'updateCustomer')
+      .mockRejectedValueOnce({ response: { status: 409 } })
+    const updateLicense = vi.spyOn(customerApi, 'updateCustomerLicenseSnapshot')
+    const getDetail = vi.spyOn(customerApi, 'getCustomerDetail').mockResolvedValue(latest)
+    const wrapper = mountRecoveryEdit(initial)
+    await flushPromises()
+    await wrapper.get('#customer-more-info-trigger').trigger('click')
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      licenseTypeValue: 'TRIAL' | 'OFFICIAL' | null
+      licenseExpiryDateValue: string | null
+      onSubmit: (event: Event) => Promise<void>
+    }
+    vm.licenseTypeValue = 'OFFICIAL'
+    vm.licenseExpiryDateValue = '2026-12-31'
+    await vm.onSubmit(new Event('submit'))
+    await flushPromises()
+    await wrapper.findAll('button').find((button) => button.text() === '保留当前输入并继续编辑')?.trigger('click')
+    await flushPromises()
+
+    expect(updateLicense).not.toHaveBeenCalled()
+    expect(updateCustomer).toHaveBeenCalledTimes(1)
+    expect(getDetail).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('#customer-industry').text()).toContain('新行业 / 已停用')
     wrapper.unmount()
   })
 
@@ -632,52 +1007,130 @@ describe('CustomerFormDialog recovery and close guards', () => {
     wrapper.unmount()
   })
 
-  it('keeps lifecycle target, dialog open, and error after rendered lifecycle failure', async () => {
+  it('keeps ordinary profile dirty state after preserving input through a conflict', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
-    const updateLifecycle = vi.spyOn(customerApi, 'updateCustomerLifecycleStatus').mockRejectedValue(new Error('lifecycle failed'))
+    const updateCustomer = vi.spyOn(customerApi, 'updateCustomer').mockRejectedValueOnce({ response: { status: 409 } })
+    const latest = { ...customerDetail, account_name: '其他人修改', version: 11 }
+    const getDetail = vi.spyOn(customerApi, 'getCustomerDetail').mockResolvedValue(latest)
+    const wrapper = mountRecoveryEdit({ ...customerDetail, company_scale: '1-50人', source_info: { public_id: 'source-1', name: '来源', is_active: true }, version: 10 })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      setValues: (values: Record<string, unknown>) => void
+      onSubmit: (event: Event) => Promise<void>
+      handleCancel: () => void
+      showConfirmDialog: boolean
+    }
+    vm.setValues({ account_name: '当前输入' })
+    await vm.onSubmit(new Event('submit'))
+    await flushPromises()
+    expect(updateCustomer).toHaveBeenCalled()
+    await wrapper.findAll('button').find((button) => button.text() === '保留当前输入并继续编辑')?.trigger('click')
+    await flushPromises()
+    expect(getDetail).toHaveBeenCalledTimes(1)
+
+    vm.handleCancel()
+    expect(vm.showConfirmDialog).toBe(true)
+    expect(wrapper.emitted('update:open')).toBeUndefined()
+    wrapper.unmount()
+  })
+  it('merges an untouched industry from latest data when preserving ordinary input', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const updateCustomer = vi.spyOn(customerApi, 'updateCustomer')
+      .mockRejectedValueOnce({ response: { status: 409 } })
+      .mockResolvedValueOnce({ ...customerDetail, account_name: '当前输入', industry: 'finance.securities', version: 12 })
+    const latest = { ...customerDetail, account_name: '其他人修改', city: '深圳', industry: 'finance.securities', version: 11 }
+    const getDetail = vi.spyOn(customerApi, 'getCustomerDetail').mockResolvedValue(latest)
+    const wrapper = mountRecoveryEdit({ ...customerDetail, industry: 'internet.enterprise', version: 10 })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      values: Record<string, unknown>
+      industryValue: string
+      setValues: (values: Record<string, unknown>) => void
+      onSubmit: (event: Event) => Promise<void>
+      refreshConflict: (preserveInput: boolean) => Promise<void>
+    }
+    vm.setValues({ account_name: '当前输入' })
+    await vm.onSubmit(new Event('submit'))
+    await flushPromises()
+    expect(updateCustomer).toHaveBeenCalledTimes(1)
+    expect(updateCustomer).toHaveBeenLastCalledWith('customer-1', {
+      expected_version: 10,
+      account_name: '当前输入',
+    })
+    await vm.refreshConflict(true)
+    await flushPromises()
+    expect(vm.values['city']).toBe('深圳')
+    expect(vm.industryValue).toBe('finance.securities')
+    expect(vm.values['account_name']).toBe('当前输入')
+    await vm.onSubmit(new Event('submit'))
+    await flushPromises()
+    expect(updateCustomer).toHaveBeenCalledTimes(2)
+    expect(updateCustomer.mock.calls[1]?.[1]).toEqual({
+      expected_version: 11,
+      account_name: '当前输入',
+    })
+
+    expect(getDetail).toHaveBeenCalledTimes(1)
+    expect(updateCustomer).toHaveBeenLastCalledWith('customer-1', {
+      expected_version: 11,
+      account_name: '当前输入',
+    })
+    wrapper.unmount()
+  })
+  it('keeps status target, dialog open, and error after ordinary PUT failure', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const updateCustomer = vi.spyOn(customerApi, 'updateCustomer').mockRejectedValue(new Error('update failed'))
+    const updateLifecycle = vi.spyOn(customerApi, 'updateCustomerLifecycleStatus')
     const wrapper = mountRecoveryEdit({ ...customerDetail, status: 0 })
     await flushPromises()
     await wrapper.get('#customer-more-info-trigger').trigger('click')
     await flushPromises()
-    await wrapper.get('#customer-lifecycle-status').trigger('click')
-    const saveButton = wrapper.findAll('button').find((button) => button.text() === '保存生命周期状态')
-    expect(saveButton).toBeDefined()
-    await saveButton?.trigger('click')
+    const vm = wrapper.vm as unknown as { lifecycleStatusValue: 0 | 1 | null; onSubmit: (event: Event) => Promise<void> }
+    vm.lifecycleStatusValue = 1
+    await vm.onSubmit(new Event('submit'))
     await flushPromises()
 
-    expect(updateLifecycle).toHaveBeenCalledWith('customer-1', { status: 1, expected_version: 3 })
+    expect(updateLifecycle).not.toHaveBeenCalled()
+    expect(updateCustomer).toHaveBeenCalledWith('customer-1', { expected_version: 3, status: 1 })
     expect(wrapper.props('open')).toBe(true)
     expect(wrapper.get('#customer-lifecycle-status').text()).toBe('1')
     expect(wrapper.find('[role="alert"]').text()).toContain('请重试')
     expect(wrapper.emitted('update:open')).toBeUndefined()
     wrapper.unmount()
   })
-  it('offers lifecycle recovery after a conflict and retries with refreshed version and preserved target', async () => {
+  it('offers status recovery after a conflict and retries with refreshed version and preserved target', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
     const latest = { ...customerDetail, status: 0 as const, version: 11 }
-    const updateLifecycle = vi.spyOn(customerApi, 'updateCustomerLifecycleStatus')
+    const updateCustomer = vi.spyOn(customerApi, 'updateCustomer')
       .mockRejectedValueOnce({ response: { status: 409 } })
       .mockResolvedValueOnce({ ...latest, status: 1, version: 12 })
+    const updateLifecycle = vi.spyOn(customerApi, 'updateCustomerLifecycleStatus')
     const getDetail = vi.spyOn(customerApi, 'getCustomerDetail').mockResolvedValue(latest)
     const wrapper = mountRecoveryEdit({ ...customerDetail, status: 0, version: 10 })
     await flushPromises()
     await wrapper.get('#customer-more-info-trigger').trigger('click')
     await flushPromises()
-    await wrapper.get('#customer-lifecycle-status').trigger('click')
-    await wrapper.findAll('button').find((button) => button.text() === '保存生命周期状态')?.trigger('click')
+    const vm = wrapper.vm as unknown as { lifecycleStatusValue: 0 | 1 | null; onSubmit: (event: Event) => Promise<void> }
+    vm.lifecycleStatusValue = 1
+    await vm.onSubmit(new Event('submit'))
     await flushPromises()
-    expect(wrapper.find('[role="alert"]').text()).toContain('客户生命周期已发生变化')
+    expect(wrapper.find('[role="alert"]').text()).toContain('其他人可能已经修改了该对象')
     const preserve = wrapper.findAll('button').find((button) => button.text() === '保留当前输入并继续编辑')
     expect(preserve).toBeDefined()
     await preserve?.trigger('click')
     await flushPromises()
     expect(getDetail).toHaveBeenCalled()
-    expect((wrapper.vm as unknown as { lifecycleStatusValue: number }).lifecycleStatusValue).toBe(1)
-    await wrapper.findAll('button').find((button) => button.text() === '保存生命周期状态')?.trigger('click')
+    expect(vm.lifecycleStatusValue).toBe(1)
+    await vm.onSubmit(new Event('submit'))
     await flushPromises()
-    expect(updateLifecycle).toHaveBeenLastCalledWith('customer-1', { status: 1, expected_version: 11 })
+    expect(updateLifecycle).not.toHaveBeenCalled()
+    expect(updateCustomer).toHaveBeenLastCalledWith('customer-1', { status: 1, expected_version: 11 })
     wrapper.unmount()
   })
   it('shows the explicit authorization side-effect warning', async () => {
@@ -688,6 +1141,44 @@ describe('CustomerFormDialog recovery and close guards', () => {
     await wrapper.get('#customer-more-info-trigger').trigger('click')
     await nextTick()
     expect(wrapper.text()).toContain('此处只更新客户授权汇总信息，不创建 License 申请、不发起审批，也不修改正式 License 记录。')
+    wrapper.unmount()
+  })
+
+  it('drops a stale lifecycle target when the latest server state is read-only', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const latest = { ...customerDetail, status: 2 as const, version: 11 }
+    const updateCustomer = vi.spyOn(customerApi, 'updateCustomer')
+      .mockRejectedValueOnce({ response: { status: 409 } })
+    const updateLifecycle = vi.spyOn(customerApi, 'updateCustomerLifecycleStatus')
+    const getDetail = vi.spyOn(customerApi, 'getCustomerDetail').mockResolvedValue(latest)
+    const wrapper = mountRecoveryEdit({ ...customerDetail, status: 0, version: 10 })
+    await flushPromises()
+    await wrapper.get('#customer-more-info-trigger').trigger('click')
+    await flushPromises()
+    const submitVm = wrapper.vm as unknown as { lifecycleStatusValue: 0 | 1 | null; onSubmit: (event: Event) => Promise<void> }
+    submitVm.lifecycleStatusValue = 1
+    await submitVm.onSubmit(new Event('submit'))
+
+    await wrapper.findAll('button').find((button) => button.text() === '保留当前输入并继续编辑')?.trigger('click')
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      lifecycleStatusValue: 0 | 1 | null
+      lifecycleStatusBaseline: 0 | 1 | null
+      showConfirmDialog: boolean
+      handleCancel: () => void
+    }
+    expect(getDetail).toHaveBeenCalledTimes(1)
+    expect(updateLifecycle).not.toHaveBeenCalled()
+    expect(updateCustomer).toHaveBeenCalledTimes(1)
+    expect(vm.lifecycleStatusValue).toBeNull()
+    expect(vm.lifecycleStatusBaseline).toBeNull()
+    expect(wrapper.text()).toContain('该客户状态由其他流程管理，暂不支持在此修改。')
+
+    vm.handleCancel()
+    expect(vm.showConfirmDialog).toBe(false)
+    expect(wrapper.emitted('update:open')).toContainEqual([false])
     wrapper.unmount()
   })
 
