@@ -509,6 +509,19 @@
         "not_in"
       ]
     },
+    "product_name": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
     "returned_time": {
       "type": "date",
       "filterable": true,
@@ -876,6 +889,19 @@
         "neq",
         "not_contains",
         "not_in"
+      ]
+    },
+    "product_name": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
       ]
     },
     "source": {

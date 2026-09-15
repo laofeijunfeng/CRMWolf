@@ -275,6 +275,7 @@ const fields = computed<ListFieldDefinition[]>(() => [
     filter: true,
     sort: true
   },
+  { key: 'product_name', label: '产品', type: 'text', column: { width: '120px' }, filter: true, sort: true },
   { key: 'creator', label: '创建人', type: 'text', column: { width: '100px' } },
   {
     key: 'created_time',
@@ -1139,7 +1140,7 @@ watchEffect(() => {
       @update:page-size="handlePageSizeChange"
       v-model:search="search"
       search-enabled
-      search-placeholder="搜索客户名称、简称或别名"
+      search-placeholder="搜索客户名称、简称、别名或产品"
       :search-loading="loading"
       @search-apply="handleSearchApply"
       @search-clear="handleSearchClear"
@@ -1222,6 +1223,11 @@ watchEffect(() => {
           type="source"
         />
         <span v-else class="text-muted-foreground">-</span>
+      </template>
+
+      <!-- 产品 -->
+      <template #cell-product_name="{ row }">
+        {{ row.product_name || '-' }}
       </template>
 
       <!-- 城市 -->

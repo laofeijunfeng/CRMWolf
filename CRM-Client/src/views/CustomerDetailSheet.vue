@@ -1656,6 +1656,10 @@ onBeforeUnmount(() => {
                         <div class="attribute-value">{{ getAcquisitionSourceDisplayName(customer) }}</div>
                       </div>
                       <div class="attribute-item">
+                        <div class="attribute-label">产品</div>
+                        <div class="attribute-value">{{ customer?.product_name || '-' }}</div>
+                      </div>
+                      <div class="attribute-item">
                         <div class="attribute-label">所在城市</div>
                         <div class="attribute-value">{{ customer?.city || '-' }}</div>
                       </div>

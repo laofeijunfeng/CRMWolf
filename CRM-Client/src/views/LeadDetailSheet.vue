@@ -296,6 +296,10 @@ watch(() => props.visible, (visible): void => {
                       <div class="attribute-value">{{ getAcquisitionSourceDisplayName(leadData) }}</div>
                     </div>
                     <div class="attribute-item">
+                      <div class="attribute-label">产品</div>
+                      <div class="attribute-value">{{ leadData.product_name || '-' }}</div>
+                    </div>
+                    <div class="attribute-item">
                       <div class="attribute-label">所在城市</div>
                       <div class="attribute-value">{{ leadData.city || '-' }}</div>
                     </div>

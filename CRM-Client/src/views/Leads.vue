@@ -163,6 +163,7 @@ const fields = computed<ListFieldDefinition[]>(() => {
       filter: true,
       sort: true
     },
+    { key: 'product_name', label: '产品', type: 'text', column: { width: '120px' }, filter: true, sort: true },
     { key: 'city', label: '城市', type: 'text', column: { width: '100px' }, filter: true, sort: true },
     {
       key: 'company_scale',
@@ -688,7 +689,7 @@ watchEffect(() => {
       mobile-title-key="lead_name"
       mobile-subtitle-key="contact_name"
       mobile-status-key="status"
-      :mobile-meta-keys="['contact_phone', 'source', 'owner']"
+      :mobile-meta-keys="['contact_phone', 'source', 'product_name', 'owner']"
       v-model:filters="activeFilters"
       :sorts="activeSorts"
       view-key="leads.list"
@@ -704,7 +705,7 @@ watchEffect(() => {
       @update:page-size="handlePageSizeChange"
       v-model:search="search"
       search-enabled
-      search-placeholder="搜索线索名称、联系人或手机号"
+      search-placeholder="搜索线索名称、联系人、手机号或产品"
       :search-loading="loading"
       @search-apply="handleSearchApply"
       @search-clear="handleSearchClear"
@@ -733,6 +734,7 @@ watchEffect(() => {
         </div>
         <div class="lead-mobile-card-meta">
           <span>{{ getAcquisitionSourceDisplayName(row, '-') }}</span>
+          <span>{{ row.product_name || '-' }}</span>
           <span>{{ row.city || '-' }}</span>
           <span>负责人：{{ row.owner_info?.name || '未分配' }}</span>
         </div>
@@ -767,6 +769,11 @@ watchEffect(() => {
           type="source"
         />
         <span v-else class="text-muted-foreground">-</span>
+      </template>
+
+      <!-- 产品 -->
+      <template #cell-product_name="{ row }">
+        {{ row.product_name || '-' }}
       </template>
 
       <!-- 城市 -->
