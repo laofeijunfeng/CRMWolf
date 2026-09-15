@@ -1,7 +1,7 @@
 # 客户创建弹窗联系人顺序与更多信息展开过渡
 
 - 日期：2026-09-15
-- 状态：草案，待用户书面审阅
+- 状态：已确认
 - 范围：`CustomerFormDialog` 创建模式区块顺序；仓库 `Collapsible` 的高度过渡
 - 上游：`docs/superpowers/specs/2026-09-11-customer-edit-progressive-disclosure-design.md`
 - 相关组件：shadcn-vue / Reka UI `Collapsible`（[文档](https://www.shadcn-vue.com/docs/components/collapsible)、[Reka 高度动画](https://reka-ui.com/docs/components/collapsible#animating-content-size)）

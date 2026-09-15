@@ -777,70 +777,6 @@ function continueEditing(): void { closeGuard.continueEditing() }
             </FormItem>
           </FormField>
         </div>
-
-        <Collapsible
-          :open="moreInfoOpen"
-          class="space-y-3 border-t border-slate-200 pt-4"
-          @update:open="handleMoreInfoChange"
-        >
-          <CollapsibleTrigger as-child>
-            <button
-              id="customer-more-info-trigger"
-              type="button"
-              class="flex h-input-mobile min-h-input-mobile w-full items-center justify-between rounded-wolf-lg border border-blue-200 bg-blue-50/60 px-3 text-left text-sm font-semibold text-blue-900"
-              :aria-expanded="moreInfoOpen"
-              aria-controls="customer-more-info-content"
-            >
-              <span>{{ moreInfoOpen ? '收起更多客户信息' : '更多客户信息' }}</span>
-              <span class="text-xs font-semibold text-blue-700">已填写 {{ moreInfoCount }} 项</span>
-            </button>
-          </CollapsibleTrigger>
-          <CollapsibleContent id="customer-more-info-content" class="grid gap-4 px-1 pt-1">
-            <div v-if="industryHierarchyError" class="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-sm" role="alert">
-              <span>{{ industryHierarchyError.description }}</span>
-              <Button type="button" variant="outline" size="sm" class="ml-2" @click="fetchIndustryHierarchy">重试</Button>
-            </div>
-            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <IndustryHierarchySelectField
-                id="customer-industry"
-                v-model="industryValue"
-                :hierarchy="industryHierarchy"
-                :loading="industryHierarchyLoading"
-                :error="industryHierarchyError?.description ?? industryErrorMessage"
-                :disabled="industryHierarchyError !== null"
-                :retained-industry-info="retainedIndustryInfo"
-                label="行业"
-              />
-              <SelectField
-                id="customer-lifecycle-status"
-                :model-value="lifecycleStatusValue ?? ''"
-                label="客户状态"
-                :options="[{ value: 0, label: '跟进中' }, { value: 1, label: '已成交' }]"
-                :disabled="statusIsReadOnly || writeSubmitting"
-                @update:model-value="handleLifecycleStatusChange"
-              />
-              <SelectField
-                id="customer-license-type"
-                :model-value="licenseTypeValue ?? ''"
-                label="授权类型"
-                :options="[{ value: 'TRIAL', label: '试用' }, { value: 'OFFICIAL', label: '正式' }]"
-                :disabled="writeSubmitting"
-                @update:model-value="handleLicenseTypeChange"
-              />
-              <DateField
-                id="customer-license-expiry-date"
-                label="授权到期日"
-                :model-value="licenseExpiryDateValue === null ? null : new Date(`${licenseExpiryDateValue}T00:00:00`)"
-                :disabled="writeSubmitting"
-                @update:model-value="licenseExpiryDateValue = $event === null ? null : formatLocalDate($event)"
-              />
-            </div>
-            <p v-if="statusIsReadOnly" class="text-xs leading-relaxed text-slate-500">该客户状态由其他流程管理，暂不支持在此修改。</p>
-            <p class="text-xs leading-relaxed text-slate-500">此处只更新客户授权汇总信息，不创建 License 申请、不发起审批，也不修改正式 License 记录。</p>
-            <p class="text-sm text-slate-700"><span class="font-medium">授权状态：</span>{{ licenseStatusLabel(licenseExpiryDateValue, licenseTypeValue) }}</p>
-          </CollapsibleContent>
-        </Collapsible>
-
         <div v-if="mode === 'create'" class="space-y-4 pt-4 border-t">
           <h3 class="text-sm font-medium text-muted-foreground">联系人信息</h3>
 
@@ -906,6 +842,69 @@ function continueEditing(): void { closeGuard.continueEditing() }
             </div>
           </div>
         </div>
+
+        <Collapsible
+          :open="moreInfoOpen"
+          class="space-y-3 border-t border-slate-200 pt-4"
+          @update:open="handleMoreInfoChange"
+        >
+          <CollapsibleTrigger as-child>
+            <button
+              id="customer-more-info-trigger"
+              type="button"
+              class="flex h-input-mobile min-h-input-mobile w-full items-center justify-between rounded-wolf-lg border border-blue-200 bg-blue-50/60 px-3 text-left text-sm font-semibold text-blue-900"
+              :aria-expanded="moreInfoOpen"
+              aria-controls="customer-more-info-content"
+            >
+              <span>{{ moreInfoOpen ? '收起更多客户信息' : '更多客户信息' }}</span>
+              <span class="text-xs font-semibold text-blue-700">已填写 {{ moreInfoCount }} 项</span>
+            </button>
+          </CollapsibleTrigger>
+          <CollapsibleContent id="customer-more-info-content" class="grid gap-4 px-1 pt-1">
+            <div v-if="industryHierarchyError" class="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-sm" role="alert">
+              <span>{{ industryHierarchyError.description }}</span>
+              <Button type="button" variant="outline" size="sm" class="ml-2" @click="fetchIndustryHierarchy">重试</Button>
+            </div>
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <IndustryHierarchySelectField
+                id="customer-industry"
+                v-model="industryValue"
+                :hierarchy="industryHierarchy"
+                :loading="industryHierarchyLoading"
+                :error="industryHierarchyError?.description ?? industryErrorMessage"
+                :disabled="industryHierarchyError !== null"
+                :retained-industry-info="retainedIndustryInfo"
+                label="行业"
+              />
+              <SelectField
+                id="customer-lifecycle-status"
+                :model-value="lifecycleStatusValue ?? ''"
+                label="客户状态"
+                :options="[{ value: 0, label: '跟进中' }, { value: 1, label: '已成交' }]"
+                :disabled="statusIsReadOnly || writeSubmitting"
+                @update:model-value="handleLifecycleStatusChange"
+              />
+              <SelectField
+                id="customer-license-type"
+                :model-value="licenseTypeValue ?? ''"
+                label="授权类型"
+                :options="[{ value: 'TRIAL', label: '试用' }, { value: 'OFFICIAL', label: '正式' }]"
+                :disabled="writeSubmitting"
+                @update:model-value="handleLicenseTypeChange"
+              />
+              <DateField
+                id="customer-license-expiry-date"
+                label="授权到期日"
+                :model-value="licenseExpiryDateValue === null ? null : new Date(`${licenseExpiryDateValue}T00:00:00`)"
+                :disabled="writeSubmitting"
+                @update:model-value="licenseExpiryDateValue = $event === null ? null : formatLocalDate($event)"
+              />
+            </div>
+            <p v-if="statusIsReadOnly" class="text-xs leading-relaxed text-slate-500">该客户状态由其他流程管理，暂不支持在此修改。</p>
+            <p class="text-xs leading-relaxed text-slate-500">此处只更新客户授权汇总信息，不创建 License 申请、不发起审批，也不修改正式 License 记录。</p>
+            <p class="text-sm text-slate-700"><span class="font-medium">授权状态：</span>{{ licenseStatusLabel(licenseExpiryDateValue, licenseTypeValue) }}</p>
+          </CollapsibleContent>
+        </Collapsible>
 
         <!-- DialogFooter -->
         <DialogFooter class="mt-6 pt-4 border-t">

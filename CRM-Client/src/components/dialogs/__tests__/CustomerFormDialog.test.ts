@@ -435,6 +435,7 @@ describe('CustomerFormDialog progressive edit sections', () => {
     InputField: InputFieldStub,
     Button: defineComponent({ inheritAttrs: false, template: '<button v-bind="$attrs"><slot /></button>' }),
     FormField: defineComponent({ setup(_, { slots }): () => VNode { return () => h('div', slots['default']?.({ value: undefined, handleChange: () => undefined })) } }),
+    Field: defineComponent({ setup(_, { slots }): () => VNode { return () => h('div', slots['default']?.({ value: undefined, handleChange: () => undefined })) } }),
     FormItem: defineComponent({ template: '<div><slot /></div>' }),
     FormMessage: defineComponent({ template: '<div><slot /></div>' }),
   }
@@ -482,6 +483,28 @@ describe('CustomerFormDialog progressive edit sections', () => {
     createWrapper.unmount()
     editWrapper.unmount()
   })
+  it('places create contact fields above the more-information trigger', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const wrapper = mountCreate()
+    await flushPromises()
+    const contact = wrapper.get('#customer-contact-name').element
+    const trigger = wrapper.get('#customer-more-info-trigger').element
+    expect(contact.compareDocumentPosition(trigger) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(wrapper.get('#customer-contact-name').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('does not render contact fields in edit mode', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const wrapper = mountEdit()
+    await flushPromises()
+    expect(wrapper.find('#customer-contact-name').exists()).toBe(false)
+    expect(wrapper.find('#customer-more-info-trigger').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
   it('renders one flat more-information group without independent save actions', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
