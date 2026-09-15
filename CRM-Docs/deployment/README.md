@@ -130,3 +130,7 @@ Root Orchestrator / Workflow Agent / Query Agent 单版本切换必须先执行 
 - `secrets/`：本地部署密钥目录，只用于部署上传，不能提交到 git。
 
 已废弃的完整生产 compose 和手工打包脚本不再保留。
+
+## Activepieces 自动化 MVP
+
+Activepieces 不属于 CRM 前后端本地开发 Compose，也不由 CRM 主部署脚本隐式创建。其独立部署单元位于 `CRM-Docs/deployment/activepieces/`：使用独立 PostgreSQL，复用服务器已有 `redis6` 的 Redis DB 6，并通过 `crmwolf-network` 调用 CRM 受控 HTTP API。详见该目录的 README；启动前必须确认服务器已有 `redis6` 和 external network，禁止为了绕过前置条件再启动第二个 Redis。

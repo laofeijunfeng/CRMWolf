@@ -1,9 +1,9 @@
 # CRMWolf 自动化与审批编排平台 PRD
 
 - **文档状态：**Draft
-- **版本：**v0.1
-- **日期：**2026-09-04
-- **产品方向：**以 Activepieces 为自动化运行时，构建面向 CRM 业务对象的轻量、可配置、可审计自动化能力
+- **版本：**v0.3
+- **日期：**2026-09-09
+- **产品方向：**以 Activepieces 为自动化执行底座，由 CRMWolf 提供 Vue Flow 画布与节点配置体验，构建面向 CRM 业务对象的轻量、可配置、可审计自动化能力
 - **相关调研：**
   - `CRM-Docs/research/2026-08-crm-workflow-automation-market.md`
   - `CRM-Docs/research/2026-08-crm-workflow-automation-strategy.md`
@@ -25,13 +25,13 @@ CRMWolf 当前已经具备客户、商机、合同、回款、发票、License�
 - 将 CRMWolf 与飞书、ERP、财务、项目管理、邮件等系统打通；
 - 在自动化流程中调用 Agent，生成摘要、建议或草稿。
 
-如果每个需求都由 CRMWolf 自己开发页面、定时器、流程引擎、重试机制和连接器，会持续重复建设基础设施，也会使系统越来越难以扩展。因此，本项目引入 Activepieces 作为独立的自动化编排运行时，CRMWolf 提供 CRM 领域 API、事件、权限、审批、业务状态和审计能力。
+如果每个需求都由 CRMWolf 自己开发页面、定时器、流程引擎、重试机制和连接器，会持续重复建设基础设施，也会使系统越来越难以扩展。因此，本项目引入 Activepieces 作为独立的自动化编排执行底座，CRMWolf 自己提供留在 CRM 内的表单式配置体验，并提供 CRM 领域 API、事件、权限、审批、业务状态和审计能力。
 
 本项目不是把 CRMWolf 做成另一个通用 Zapier，也不是把 CRM 的业务规则外包给第三方工作流平台，而是形成清晰的职责分工：
 
 > **Activepieces 决定“什么时候做、按什么顺序做、条件是什么、失败如何重试”；CRMWolf 决定“业务是否允许做、谁可以做、最终业务状态是什么”。**
 
-第一阶段优先采用飞书式的轻量产品体验：
+第一阶段采用 CRMWolf 内置的 Vue Flow 画布与飞书式业务配置体验：
 
 ```text
 当……
@@ -39,7 +39,7 @@ CRMWolf 当前已经具备客户、商机、合同、回款、发票、License�
 那么……
 ```
 
-底层不自研工作流画布、Scheduler、Worker、Retry Engine 或执行引擎，而是直接使用 Activepieces；CRMWolf 只建设必要的控制面和集成边界，保证租户、权限、幂等、审计与业务一致性。
+第一阶段直接采用 Vue Flow，不嵌入或复制 Activepieces 的通用流程画布。Vue Flow 负责 CRMWolf 内的工作流编辑、节点连线和流程展示；节点配置面板、表单、弹窗和选择器使用 shadcn-vue。底层的 Scheduler、Worker、Retry Engine 和执行引擎直接使用 Activepieces。CRMWolf 只建设业务化配置、工作流定义、必要的控制面和集成边界，保证租户、权限、幂等、审计与业务一致性。
 
 ---
 
@@ -63,7 +63,7 @@ CRMWolf 缺少一个面向业务管理员的、低门槛的自动化配置能力
 本项目不追求：
 
 - 自研一个通用工作流平台；
-- 复制 Activepieces 的画布、连接器市场和执行引擎；
+- 复制 Activepieces 的通用画布、连接器市场和执行引擎；
 - 让 Activepieces 成为 CRM 核心业务状态的最终事实来源；
 - 用自动化替代 Agent 对话、确认和高风险写入门禁；
 - 一次性迁移所有历史审批实例和所有固定业务流程。
@@ -80,7 +80,7 @@ CRMWolf 缺少一个面向业务管理员的、低门槛的自动化配置能力
 
 #### 目标 G2：以 Activepieces 为运行时，避免重复造轮子
 
-CRMWolf 不自研通用流程执行层，优先复用 Activepieces 已有的 Flow Builder、Trigger、Condition、Schedule、Delay、Retry、Run History 和连接器能力。
+CRMWolf 不自研通用流程执行层，直接复用 Activepieces 的 Trigger、Condition、Schedule、Delay、Retry、Run History 和连接器能力；流程配置体验由 CRMWolf 自己以表单方式提供。
 
 #### 目标 G3：保证 CRM 业务安全边界
 
@@ -88,11 +88,11 @@ CRMWolf 不自研通用流程执行层，优先复用 Activepieces 已有的 Flo
 
 #### 目标 G4：先解决审批，再扩展提醒和跨系统自动化
 
-第一批验证以新合同审批为主，同时验证一个主动提醒和一个外部 Webhook 场景，建立从事件触发到结果回写的完整闭环。
+第一批验证以“商机阶段变化后创建跟进任务”为主，同时验证一个定时提醒和一个外部 Webhook 场景，建立从事件触发到结果回写的完整闭环；合同审批属于后续迁移范围。
 
-#### 目标 G5：为未来嵌入式体验和多连接器生态保留架构空间
+#### 目标 G5：让自动化成为 CRMWolf 内的自然能力
 
-先支持独立 Activepieces 服务与 CRMWolf 关联；在权限、租户、凭据和运行历史边界稳定后，再评估 Embed Builder、单点登录和更深度的白标体验。
+用户始终在 CRMWolf 内完成自动化配置、启停和业务结果查看。Activepieces 作为独立后端服务运行，通过 API、Webhook 和受控 Piece 与 CRMWolf 连接；是否使用 Activepieces 原生 Builder 不属于当前产品路线。
 
 ### 3.2 成功标准
 
@@ -128,12 +128,12 @@ CRMWolf 不自研通用流程执行层，优先复用 Activepieces 已有的 Flo
 2. **CRM 是业务事实来源**：客户、商机、合同、回款、发票、License 和审批决定最终以 CRMWolf 为准。
 3. **Flow 通过 API/Piece 访问 CRM**：禁止直连 CRM 数据库和自由 SQL。
 4. **业务动作要深，不要暴露内部表结构**：提供“创建跟进任务”“发起合同审批”等业务动作，而不是暴露通用 CRUD。
-5. **轻量优先**：产品体验优先围绕“当—如果—那么”，不一开始把用户暴露给复杂画布。
+5. **CRM 内配置**：产品体验围绕“当—如果—那么”，第一阶段由 CRMWolf 内置 Vue Flow 画布承载流程结构，由 shadcn-vue 表单配置节点；不让用户离开 CRM，也不把用户导向 Activepieces Builder。
 6. **高风险动作必须受控**：核心状态变更、对外发送和批量写入需要权限、幂等，必要时需要审批或人工确认。
 7. **单一状态机原则**：Activepieces 负责自动化 Flow 状态；CRMWolf 负责审批决定和业务状态，不维护两套相互竞争的审批状态机。
 8. **可观测、可重试、可审计**：自动化不是黑盒后台任务。
 9. **按阶段开放能力**：先管理员和销售运营，后续再扩大普通用户和外部租户范围。
-10. **底层可替换，产品契约稳定**：CRMWolf 的事件、动作、身份和审计契约不能绑定到 Activepieces 的内部数据库模型。
+10. **底层可替换，产品契约稳定**：CRMWolf 的 Vue Flow 编辑状态、节点配置和业务规则使用自己的 Automation DSL，不能把 Activepieces 的内部 Flow JSON 直接当作 CRM 的公共领域模型。
 
 ---
 
@@ -194,7 +194,7 @@ CRMWolf 不自研通用流程执行层，优先复用 Activepieces 已有的 Flo
 18. 作为业务管理员，我希望自动化只读取和修改我有权限访问的 CRM 数据，以便满足团队隔离和权限要求。
 19. 作为业务负责人，我希望调用 Agent 生成跟进摘要或沟通草稿，以便提升销售效率而不直接放开高风险自动发送。
 20. 作为业务负责人，我希望自动化的每次发布、停用、运行和业务写入都有审计记录，以便满足追责和复盘要求。
-21. 作为产品管理员，我希望未来可以在 CRMWolf 内嵌或统一跳转到 Flow Builder，以便用户不必理解多个系统的关系。
+21. 作为业务管理员，我希望始终在 CRMWolf 内通过 Vue Flow 画布配置、启停和查看自动化，以便不需要理解或进入另一个工作流平台。
 22. 作为平台开发者，我希望新增 CRM 动作时只需增加稳定的 API/Piece 契约，而不需要修改自动化执行引擎。
 23. 作为平台开发者，我希望未来可以替换底层自动化引擎而不改变 CRM 业务模型，以便降低长期技术锁定风险。
 
@@ -255,7 +255,7 @@ CRMWolf 不自研通用流程执行层，优先复用 Activepieces 已有的 Flo
 
 ### 6.2 后续范围
 
-- CRMWolf 内嵌 Activepieces Builder；
+- CRMWolf 内的表单式自动化配置；
 - 模板中心和行业模板；
 - 更多中国区 SaaS 连接器；
 - OAuth 连接和连接健康检查；
@@ -330,11 +330,11 @@ Agent 只生成建议或草稿，不直接拥有任意外部发送权限；对�
 
 ### 8.1 配置入口
 
-第一阶段不在 CRMWolf 自己实现通用画布。提供以下入口：
+第一阶段在 CRMWolf 内置 Vue Flow 画布，但不自研通用执行引擎，也不依赖 Activepieces Builder 作为终端用户入口。提供以下入口：
 
 1. **自动化列表**：查看当前团队的 Flow、状态、负责人、最近运行结果；
-2. **从模板创建**：直接进入 Activepieces Flow 配置；
-3. **编辑自动化**：跳转或嵌入 Activepieces Builder；
+2. **从模板创建**：进入 CRMWolf Vue Flow 编辑器，预填触发器、条件和动作；
+3. **编辑自动化**：在 CRMWolf Vue Flow 编辑器内编辑，不跳转到 Activepieces；
 4. **业务对象详情页**：查看该客户、商机、合同关联的自动化和最近运行；
 5. **审批中心**：查看审批对应的 Flow、版本和运行状态。
 
@@ -349,7 +349,7 @@ Agent 只生成建议或草稿，不直接拥有任意外部发送权限；对�
 那么 [选择动作]
 ```
 
-技术上可由 Activepieces 画布承载，但 CRMWolf 应通过模板、命名、说明和动作目录隐藏不必要的技术复杂度。
+CRMWolf 通过 Vue Flow、模板、业务术语、说明和动作目录隐藏不必要的技术复杂度。Vue Flow 编辑状态保存为 CRMWolf 自己的 Automation DSL，再由后端适配器生成或更新 Activepieces Flow；不得让前端直接依赖 Activepieces 内部 Flow JSON。
 
 ### 8.3 模板
 
@@ -445,10 +445,10 @@ CRMWolf 不复制 Activepieces 的全部节点详情，但应展示对业务有�
 ### 9.4 迁移策略
 
 1. 旧审批流程和存量审批实例继续按现有逻辑运行；
-2. 第一阶段只让“新合同审批”走 Activepieces；
-3. 保留现有审批中心作为审批人的统一入口；
-4. 先实现线性两级审批，再加入条件分支、超时提醒、驳回重提和撤回；
-5. 验证稳定后，再迁移回款、发票、License、商机等业务类型；
+2. 第一阶段只让“商机阶段变化 → 创建跟进任务”走 Activepieces；合同审批仍按现有逻辑运行，迁移放到后续阶段；
+3. 保留现有审批中心作为审批人的统一入口，并不因自动化 MVP 改变审批事实模型；
+4. 首个闭环先实现事件触发、受控动作、幂等、失败重试和运行追踪，再加入审批等待、条件分支和定时提醒；
+5. 验证稳定后，再迁移合同、回款、发票、License 等业务流程；
 6. 最后再决定是否废弃旧的 `ApprovalFlow` 配置页和旧流程写入接口。
 
 ### 9.5 事务一致性
@@ -479,8 +479,8 @@ Activepieces 不参与 CRMWolf 数据库事务。业务提交与 Flow 启动必�
                ▼
 ┌──────────────────────────────────────────┐
 │ Activepieces                             │
-│ Builder / Trigger / Condition / Delay    │
-│ Schedule / Retry / Run History / Connect │
+│ Trigger / Condition / Delay / Schedule  │
+│ Retry / Run History / Worker / Connect   │
 └───────┬───────────────┬──────────────────┘
         │               │
         ▼               ▼
@@ -509,16 +509,17 @@ CRMWolf 不建设执行引擎，但需要建设薄的 Automation Control Plane�
 - Activepieces 作为独立服务部署；
 - CRMWolf 通过 Webhook 和 REST API 接入；
 - 使用私有/自维护 `CRMWolf Piece` 或 HTTP 动作；
-- 先通过外部入口打开 Activepieces Builder；
+- CRMWolf 前端通过表单完成自动化配置，用户不离开 CRM；
+- 后端通过 Activepieces API、Webhook 和受控 Piece 创建、更新和触发 Flow；
 - 不依赖深度修改 Activepieces 内部源码。
 
 #### 产品化阶段
 
-- 评估 Activepieces Embed Builder/Embed SDK；
-- 增加 CRMWolf 内部单点登录或短期授权跳转；
-- 将模板、CRM 业务动作和运行投影集成到 CRMWolf；
-- 明确 Community Edition、Enterprise 和 Embed 能力的许可边界；
-- 保持 CRMWolf 与 Activepieces 数据模型解耦，避免未来替换引擎时重写 CRM 业务层。
+- 完善 CRMWolf 内的 Vue Flow 画布、节点配置面板、模板中心和业务对象关联；
+- 增加 Automation DSL 校验、版本、发布、回滚和变更 diff；
+- 建立 Activepieces Adapter 版本管理，隔离 Activepieces Flow 模型变化；
+- 完善连接管理、OAuth、租户隔离、配额和数据保留策略；
+- 仅在确有复杂编排需求时，另行评估是否开放 Activepieces 原生 Builder；该事项不作为当前路线依赖。
 
 ---
 
@@ -799,28 +800,29 @@ CRMWolf 侧至少可查询：
 
 ### Phase 1：轻量自动化 MVP
 
-目标：面向管理员/销售运营提供可实际使用的自动化能力。
+目标：面向管理员/销售运营提供可实际使用的自动化能力，用户在 CRMWolf 内通过 Vue Flow 画布和 shadcn-vue 表单完成配置。
 
 交付：
 
-- 自动化列表和模板入口；
+- Vue Flow 工作流画布和 shadcn-vue 节点配置面板；
+- 自动化列表、模板入口、草稿、版本和发布；
 - CRM 事件目录；
 - 受控 CRM 动作目录；
-- 商机阶段提醒；
+- 商机阶段变化 → 创建跟进任务；
+- 基础条件、延迟、定时提醒和通知动作；
 - 回款提醒；
 - 合同审批模板；
 - Webhook/HTTP 集成；
 - Flow 状态和运行投影；
 - 权限、审计、幂等和失败处理。
 
-### Phase 2：产品化与嵌入体验
+### Phase 2：产品化与 CRM 原生体验
 
-目标：降低用户进入 Activepieces 的门槛，让自动化成为 CRMWolf 的自然能力。
+目标：让用户始终在 CRMWolf 内通过 Vue Flow 完成自动化配置、发布、运行查看和业务结果追踪。
 
 交付：
 
-- Embed Builder 或统一单点登录；
-- CRMWolf 内的模板中心；
+- 完善 CRMWolf Vue Flow 画布、节点配置面板和模板中心；
 - 自动化与业务对象详情页关联；
 - 连接管理和 OAuth；
 - 运行历史、重放和死信处理；
@@ -836,6 +838,35 @@ CRMWolf 侧至少可查询：
 - 多租户集成市场；
 - 长周期、多信号、补偿型业务流程；
 - Activepieces 与其他 durable execution 方案的边界评估。
+
+---
+
+## 十六点一、首个 MVP 实施拆分
+
+本节作为本 MVP 的实施入口。后续开发必须遵循“先更新并确认 PRD，再实现代码”的顺序。Vue Flow 从首个前端切片开始就是 CRMWolf 的正式工作流编辑器，不先做一套表单编辑器再迁移。
+
+首个垂直切片只验证一个低风险、可回滚的业务闭环：
+
+```text
+商机阶段变化 → opportunity.stage_changed → Activepieces Webhook
+→ HTTP Request → CRMWolf 受控 API → 创建跟进任务
+```
+
+开发任务拆分：
+
+| 编号 | 任务 | 主要产出 | 依赖 |
+|-|-|-|-|
+| AP-01 | Activepieces 部署基线 | 独立 Compose、App/Worker、独立 PostgreSQL、共用 Redis 的独立逻辑 DB、健康检查和配置说明 | 无 |
+| AP-02 | 手工执行 Flow | 研发在 Activepieces Builder 中建立 Webhook → HTTP Request 测试 Flow，仅用于底层联调 | AP-01 |
+| CRM-01 | 自动化动作 API | `create_follow_up_task` 的 Pydantic schema、租户/权限校验、幂等、审计和统一错误码 | 无 |
+| CRM-02 | 事件契约与投递 | `opportunity.stage_changed`、`event_id`、`trace_id`、签名认证、可重试投递 | CRM-01 |
+| AP-03 | Activepieces Adapter | 将 CRMWolf Automation DSL 转换为 Activepieces Flow，保存 Flow ID、版本和绑定关系 | AP-02、CRM-02 |
+| UI-01 | Vue Flow 编辑器底座 | 画布、节点注册、拖拽、连线、缩放、保存和加载 CRMWolf 工作流定义 | 无 |
+| UI-02 | 首批节点配置 | 商机阶段变化 Trigger 和创建跟进任务 Action 的展示、配置面板与基础校验 | UI-01、CRM-01 |
+| CRM-03 | 真实事件接入 | 商机阶段变更成功提交后发布事件，避免事务未提交就触发自动化 | CRM-02 |
+| QA-01 | 端到端验收 | 成功、重复事件、无权限、超时、5xx、重试、重启恢复和链路追踪测试 | AP-03、UI-02、CRM-03 |
+
+完成定义：可以启动 Activepieces；从 CRMWolf 保存包含两个节点的 Vue Flow 工作流定义；发布后生成/更新对应 Flow；模拟商机阶段变化创建一条跟进任务；重复 `event_id` 不产生第二条任务；失败可通过 `event_id`、`trace_id`、`run_id` 定位；不同团队无法读写彼此业务对象；不影响现有审批中心。
 
 ---
 
@@ -930,7 +961,7 @@ CRMWolf 侧至少可查询：
 
 | 风险 | 影响 | 应对 |
 |---|---|---|
-| Activepieces 嵌入或白标许可不满足预期 | 产品化受阻 | 先采用独立服务；尽早核实 Community/Enterprise/Embed 授权 |
+| Activepieces 的 API/Flow 模型变化 | 配置转换或发布失败 | 建立 CRMWolf Automation DSL 和 Adapter 版本；禁止前端直接依赖内部 Flow JSON |
 | Activepieces 与 CRM 同时维护审批状态 | 重复审批、状态不一致 | 明确状态归属，CRM 掌握审批决定，单向回调 |
 | Flow 绕过 CRM 权限 | 数据泄露或错误写入 | 禁止直连 DB，所有动作走受控 API/Piece |
 | 业务事务成功但 Flow 未启动 | 用户误以为审批已开始 | 建立启动记录、可靠投递、可见状态和重试 |
@@ -947,16 +978,16 @@ CRMWolf 侧至少可查询：
 
 以下事项不阻塞技术 POC，但必须在产品化前确认：
 
-1. Activepieces 采用独立服务、嵌入 Builder，还是两者并存；
+1. Activepieces 后端服务的部署方式、API 版本和升级策略；
 2. Activepieces 的租户隔离采用 project、workspace 还是独立实例；
-3. 第一阶段是否直接支持用户自定义 Flow，还是仅允许模板复制和有限修改；
+3. 第一阶段 Vue Flow 用户自定义范围：触发器、条件、动作、延迟和模板参数的边界；
 4. 飞书通知是复用 CRMWolf 当前团队配置，还是允许每个 Flow 使用独立连接；
 5. 审批人是否始终在 CRMWolf 审批中心操作，还是后续支持 Activepieces Human Input；
 6. Agent 动作第一阶段是只生成摘要/草稿，还是允许低风险字段自动回写；
 7. 外部系统同步采用单向推送还是支持双向同步；
 8. 是否需要把 Flow Run 全量同步到 CRMWolf，还是只投影与 CRM 业务对象相关的运行；
-9. Community Edition 与 Enterprise/Embed 能力的商业许可边界；
-10. 未来是否需要支持 n8n、Make、Zapier 等其他自动化引擎的互操作。
+9. Community Edition 与 Enterprise 能力的商业许可边界，尤其是私有 Piece、团队治理和多租户能力；
+10. 是否需要把 Automation DSL 设计成未来可适配其他自动化引擎的稳定边界。
 
 ---
 
@@ -968,9 +999,10 @@ CRMWolf 侧至少可查询：
 4. **Activepieces 负责编排，CRMWolf 负责业务事实、权限、审批决定、审计和最终写入。**
 5. **现有审批中心保留为审批人的统一入口，先不把审批人迁移到 Activepieces UI。**
 6. **不允许 Activepieces 直连数据库或绕过 CRM API。**
-7. **先独立接入，后评估 Embed；不要因为技术上可嵌入就一开始绑定企业授权能力。**
-8. **先建设稳定的事件、动作、身份、幂等和回调契约，再扩展连接器和 UI。**
-9. **MCP 不属于本 PRD 范围。Agent 如需接入，先通过受控 Agent API/Piece 作为一个动作节点。**
+7. **用户始终留在 CRMWolf 内，通过 Vue Flow 画布和 shadcn-vue 节点配置面板配置自动化；Activepieces 只作为后端执行底座。**
+8. **建设 CRMWolf Automation DSL 和 Activepieces Adapter，隔离产品配置与执行引擎模型。**
+9. **先建设稳定的事件、动作、身份、幂等和回调契约，再扩展连接器和 UI。**
+10. **MCP 不属于本 PRD 范围。Agent 如需接入，先通过受控 Agent API/Piece 作为一个动作节点。**
 
 最终产品路径为：
 
