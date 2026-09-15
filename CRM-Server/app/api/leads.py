@@ -656,6 +656,7 @@ async def convert_lead(
             contact_name=request.customer_contact_name,
             contact_phone=request.customer_contact_phone,
             industry=request.customer_industry,
+            product_public_id=request.product_public_id,
         ),
         team_id=team_id,
         current_user=current_user,

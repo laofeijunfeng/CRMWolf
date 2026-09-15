@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from sqlalchemy import select
+
 from app.core.list_query.catalog import ListQueryCatalog, ListQueryField
 from app.core.list_query.catalogs.common import (
     collaborators_name_expression,
@@ -11,8 +13,20 @@ from app.core.list_query.catalogs.common import (
     user_name_expression,
 )
 from app.core.list_query.types import JoinSpec, SortCondition
-from app.models.customer import Customer, CustomerStatus
+from app.models.customer import Customer, CustomerProduct, CustomerStatus
 from app.models.procurement import ProcurementMethod
+from app.models.product import Product
+
+
+def _customer_product_name_expression():
+    return (
+        select(Product.name)
+        .join(CustomerProduct, CustomerProduct.product_id == Product.id)
+        .where(CustomerProduct.customer_id == Customer.id, CustomerProduct.team_id == Customer.team_id)
+        .order_by(CustomerProduct.product_id)
+        .limit(1)
+        .scalar_subquery()
+    )
 
 CUSTOMERS_LIST_QUERY_CATALOG = ListQueryCatalog(
     name="customers",
@@ -64,6 +78,7 @@ CUSTOMERS_LIST_QUERY_CATALOG = ListQueryCatalog(
             ],
         ),
         ListQueryField(key="industry", type="enum", expression=Customer.industry),
+        ListQueryField(key="product_name", type="text", expression=_customer_product_name_expression()),
         source_field(filter_column=Customer.source_id, sort_column=Customer.source),
         ListQueryField(
             key="creator",
@@ -79,5 +94,8 @@ CUSTOMERS_LIST_QUERY_CATALOG = ListQueryCatalog(
         ListQueryField(key="returned_time", type="date", expression=Customer.returned_time),
     ],
     default_sorts=[SortCondition(field="created_time", direction="desc")],
-    search_predicate=text_search_predicate(include_customer_identity_terms=True),
+    search_predicate=text_search_predicate(
+        _customer_product_name_expression(),
+        include_customer_identity_terms=True,
+    ),
 )

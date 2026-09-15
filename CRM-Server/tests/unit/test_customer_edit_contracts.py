@@ -39,7 +39,7 @@ def test_license_snapshot_clears_type_when_expiry_is_empty() -> None:
 
 
 def test_customer_create_defaults_to_following_and_empty_license_snapshot() -> None:
-    payload = CustomerCreate(account_name="客户 A", city="上海")
+    payload = CustomerCreate(account_name="客户 A", city="上海", product_public_id="prd_test")
     assert payload.status == 0
     assert payload.license_type is None
     assert payload.license_expiry_date is None
@@ -52,6 +52,7 @@ def test_customer_create_accepts_initial_won_and_complete_license_snapshot() -> 
         status=1,
         license_type="TRIAL",
         license_expiry_date=date(2026, 12, 31),
+        product_public_id="prd_test",
     )
     assert payload.status == 1
     assert payload.license_type == "TRIAL"
@@ -64,11 +65,12 @@ def test_customer_create_rejects_expiry_without_license_type() -> None:
             account_name="客户 A",
             city="上海",
             license_expiry_date=date(2026, 12, 31),
+            product_public_id="prd_test",
         )
 
 
 def test_customer_create_normalizes_type_without_expiry_to_empty_snapshot() -> None:
-    payload = CustomerCreate(account_name="客户 A", city="上海", license_type="TRIAL")
+    payload = CustomerCreate(account_name="客户 A", city="上海", license_type="TRIAL", product_public_id="prd_test")
     assert payload.license_type is None
     assert payload.license_expiry_date is None
 

@@ -934,6 +934,7 @@ async def test_create_customer_commits_customer_and_contact_as_one_transaction(m
             status=1,
             license_type="TRIAL",
             license_expiry_date=date(2026, 12, 31),
+            product_public_id="prd_test",
             primary_contact={
                 "name": "李华",
                 "mobile": "13800138000",
@@ -980,6 +981,7 @@ async def test_create_customer_rolls_back_when_contact_write_fails(monkeypatch):
             CustomerCreate(
                 account_name="不会留下半成品",
                 city="上海",
+                product_public_id="prd_test",
                 primary_contact={
                     "name": "李华",
                     "mobile": "13800138000",
@@ -1015,6 +1017,12 @@ def _patch_create_dependencies(monkeypatch, *, industry=None, industries=None, l
         "app.services.operation_log_service.operation_log_service.log",
         lambda **kwargs: (logs.append(kwargs) if logs is not None else None),
     )
+    monkeypatch.setattr(
+        customer_crud,
+        "_resolve_product_for_write",
+        lambda db, team_id, product_public_id: SimpleNamespace(id=1, team_id=team_id, public_id=product_public_id),
+    )
+    monkeypatch.setattr("app.crud.customer.replace_product_links", lambda *args, **kwargs: None)
 
 
 def test_create_persists_status_license_and_industry_code(monkeypatch):
@@ -1035,6 +1043,7 @@ def test_create_persists_status_license_and_industry_code(monkeypatch):
             status=1,
             license_type="TRIAL",
             license_expiry_date=date(2026, 12, 31),
+            product_public_id="prd_test",
         ),
         creator_id="9",
         team_id=8,
@@ -1048,7 +1057,7 @@ def test_create_persists_status_license_and_industry_code(monkeypatch):
     assert created.industry == "internet_saas"
     db.commit.assert_called_once()
     db.refresh.assert_called_once_with(created)
-    db.flush.assert_not_called()
+    db.flush.assert_called_once()
 
 
 def test_create_stores_code_for_exact_active_industry_name(monkeypatch):
@@ -1062,7 +1071,7 @@ def test_create_stores_code_for_exact_active_industry_name(monkeypatch):
 
     customer_crud.create(
         db,
-        CustomerCreate(account_name="新客户", city="上海", industry="互联网"),
+        CustomerCreate(account_name="新客户", city="上海", industry="互联网", product_public_id="prd_test"),
         creator_id="9",
         team_id=8,
     )
@@ -1101,7 +1110,7 @@ def test_create_rejects_missing_ambiguous_and_inactive_industry(monkeypatch, ind
     with pytest.raises(ValueError, match="行业代码不存在或已停用"):
         customer_crud.create(
             db,
-            CustomerCreate(account_name="新客户", city="上海", industry=industry),
+            CustomerCreate(account_name="新客户", city="上海", industry=industry, product_public_id="prd_test"),
             creator_id="9",
             team_id=8,
         )
@@ -1118,7 +1127,7 @@ def test_create_flushes_without_commit_or_refresh_when_commit_false(monkeypatch)
 
     created = customer_crud.create(
         db,
-        CustomerCreate(account_name="新客户", city="上海"),
+        CustomerCreate(account_name="新客户", city="上海", product_public_id="prd_test"),
         creator_id="9",
         team_id=8,
         commit=False,

@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.acquisition_source import AcquisitionSourceInfo
+from app.schemas.product import ProductIntentRef
 
 JsonObject = Dict[str, object]
 
@@ -229,6 +230,25 @@ class CustomerCreate(CustomerBase):
     owner_id: Optional[str] = Field(None, description="负责人系统用户ID，不传则默认为创建人")
     default_procurement_method_id: Optional[int] = Field(None, description="默认采购方式ID")
     primary_contact: Optional[ContactCreate] = Field(None, description="创建客户时同步创建的主联系人")
+    product_public_id: str = Field(..., min_length=1, description="意向产品对外ID")
+
+    @model_validator(mode="before")
+    @classmethod
+    def product_public_id_must_be_present_before(cls, data):
+        if not isinstance(data, dict):
+            return data
+        value = data.get("product_public_id")
+        if value is None or not str(value).strip():
+            raise ValueError("缺少产品")
+        data["product_public_id"] = str(value).strip()
+        return data
+
+    @field_validator("product_public_id")
+    @classmethod
+    def product_public_id_must_be_present(cls, v):
+        if not v or not str(v).strip():
+            raise ValueError("缺少产品")
+        return v.strip()
 
     @model_validator(mode="after")
     def normalize_license_pair(self) -> "CustomerCreate":
@@ -256,6 +276,7 @@ class CustomerUpdate(BaseModel):
     status: Optional[CustomerLifecycleStatus] = Field(None, description="客户快捷状态：0跟进中，1已成交")
     license_type: Optional[CustomerLicenseType] = Field(None, description="客户 License 类型：TRIAL/OFFICIAL")
     license_expiry_date: Optional[date] = Field(None, description="客户 License 最晚到期时间")
+    product_public_id: Optional[str] = Field(None, description="意向产品对外ID")
 
     @field_validator('account_name')
     @classmethod
@@ -303,6 +324,7 @@ class ConvertLeadToCustomer(BaseModel):
     contact_name: Optional[str] = Field(None, min_length=1, max_length=100, description="主联系人姓名（兼容旧转化入口）")
     contact_phone: Optional[str] = Field(None, min_length=1, max_length=20, description="主联系人手机（兼容旧转化入口）")
     industry: Optional[str] = Field(None, max_length=100, description="客户行业（兼容旧转化入口）")
+    product_public_id: Optional[str] = Field(None, description="意向产品对外ID")
 
 
 class CustomerResponse(BaseModel):
@@ -329,6 +351,9 @@ class CustomerResponse(BaseModel):
     # License 授权字段
     license_expiry_date: Optional[date] = Field(None, description="客户 License 最晚到期时间")
     license_type: Optional[str] = Field(None, description="客户 License 类型：TRIAL/OFFICIAL")
+    product_public_id: Optional[str] = Field(None, description="意向产品对外ID")
+    product_name: Optional[str] = Field(None, description="意向产品名称")
+    products: List[ProductIntentRef] = Field(default_factory=list, description="意向产品列表")
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -467,6 +492,9 @@ class CustomerDetailResponse(BaseModel):
     # License 授权字段
     license_expiry_date: Optional[date] = Field(None, description="客户 License 最晚到期时间")
     license_type: Optional[str] = Field(None, description="客户 License 类型：TRIAL/OFFICIAL")
+    product_public_id: Optional[str] = Field(None, description="意向产品对外ID")
+    product_name: Optional[str] = Field(None, description="意向产品名称")
+    products: List[ProductIntentRef] = Field(default_factory=list, description="意向产品列表")
 
     model_config = ConfigDict(from_attributes=True)
 

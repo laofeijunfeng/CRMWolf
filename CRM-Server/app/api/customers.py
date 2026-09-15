@@ -31,6 +31,7 @@ from app.crud.customer import contact_crud, customer_crud
 from app.crud.customer_member import customer_member_crud
 from app.crud.invoice import invoice_application_crud, invoice_title_crud
 from app.crud.lead import lead_crud
+from app.crud.product_intent import ProductNotFoundError, product_intent_payload
 from app.crud.team import team_crud
 from app.crud.user import user_crud
 from app.models.command_execution import CommandExecutionStatus
@@ -392,6 +393,7 @@ def _customer_response(db: Session, customer) -> CustomerResponse:
         "version": customer.version,
         "license_expiry_date": customer.license_expiry_date,
         "license_type": customer.license_type,
+        **product_intent_payload(customer.product_links),
     })
 
 
@@ -519,11 +521,15 @@ async def convert_from_lead(
                 contact_name=data.contact_name,
                 contact_phone=data.contact_phone,
                 industry=data.industry,
+                product_public_id=data.product_public_id,
                 creator_id=str(current_user.id),
                 operator_name=current_user.name,
                 team_id=team_id,
                 commit=True,
             )
+        except ProductNotFoundError as exc:
+            db.rollback()
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
         except ValueError as exc:
             db.rollback()
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -566,6 +572,7 @@ async def convert_from_lead(
         "contact_name": data.contact_name,
         "contact_phone": data.contact_phone,
         "industry": data.industry,
+        "product_public_id": data.product_public_id,
     })
     try:
         execution, replay = command_execution_service.begin(
@@ -647,6 +654,7 @@ async def convert_from_lead(
             contact_name=data.contact_name,
             contact_phone=data.contact_phone,
             industry=data.industry,
+            product_public_id=data.product_public_id,
             creator_id=str(current_user.id),
             operator_name=current_user.name,
             team_id=team_id,
@@ -1240,6 +1248,9 @@ async def create_customer(
     except AcquisitionSourceError as exc:
         db.rollback()
         _raise_source_error(exc)
+    except ProductNotFoundError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -1521,7 +1532,8 @@ def get_customers(
             'owner_info': users_info.get(customer.owner_id) if customer.owner_id else None,
             'collaborator_infos': collaborators_by_customer.get(customer.id, []),
             'creator_info': users_info.get(customer.creator_id) if customer.creator_id else None,
-            'default_procurement_method_info': procurement_methods_info.get(customer.default_procurement_method_id) if customer.default_procurement_method_id else None
+            'default_procurement_method_info': procurement_methods_info.get(customer.default_procurement_method_id) if customer.default_procurement_method_id else None,
+            **product_intent_payload(customer.product_links),
         }
         result.append(CustomerListResponse(**customer_dict))
     
@@ -1952,6 +1964,7 @@ def get_customer(
         "public_id": customer.public_id,
         **_customer_source_fields(db, customer),
         "source_lead_id": source_lead.public_id if (source_lead := lead_crud.get_by_id(db, customer.source_lead_id, team_id)) else None,
+        **product_intent_payload(customer.product_links),
     }
 
     return CustomerDetailResponse(
@@ -1988,6 +2001,8 @@ def update_customer(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except AcquisitionSourceError as exc:
         _raise_source_error(exc)
+    except ProductNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 

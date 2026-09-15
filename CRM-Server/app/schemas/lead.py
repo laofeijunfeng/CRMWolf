@@ -212,6 +212,7 @@ class LeadConvertRequest(BaseModel):
     customer_contact_phone: str = Field(..., min_length=1, max_length=20, description="客户联系人手机")
     customer_address: Optional[str] = Field(None, max_length=500, description="客户地址")
     customer_industry: Optional[str] = Field(None, max_length=100, description="客户行业")
+    product_public_id: Optional[str] = Field(None, description="意向产品对外ID")
     
     @field_validator('customer_name')
     @classmethod

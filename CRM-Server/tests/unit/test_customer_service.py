@@ -22,7 +22,8 @@ def customer_create_data() -> CustomerCreate:
         city="北京",
         industry="互联网",
         address="北京市朝阳区",
-        company_scale="51-200"
+        company_scale="51-200",
+        product_public_id="prd_test",
     )
 
 

@@ -1,9 +1,8 @@
 from datetime import date, datetime, time, timedelta
 from typing import Any, List, Optional, Tuple
 
-from sqlalchemy import and_, or_
-from sqlalchemy.orm import Session
-
+from sqlalchemy import and_, exists, or_
+from sqlalchemy.orm import Session, selectinload
 from app.core.exceptions import ConflictException
 from app.core.list_query import (
     FilterCondition,
@@ -16,10 +15,18 @@ from app.core.list_query import (
 from app.core.list_query.catalogs import CUSTOMERS_LIST_QUERY_CATALOG
 from app.crud.industry import industry_crud
 from app.crud.operation_log import operation_log_crud
+from app.crud.product_intent import (
+    EMPTY_CATALOG_MESSAGE,
+    MISSING_PRODUCT_MESSAGE,
+    first_active_product,
+    replace_product_links,
+    resolve_writable_product,
+)
 from app.models.contract import Contract
-from app.models.customer import Contact, Customer, CustomerMember
-from app.models.lead import Lead, LeadStatus
+from app.models.customer import Contact, Customer, CustomerMember, CustomerProduct
+from app.models.lead import Lead, LeadProduct, LeadStatus
 from app.models.opportunity import Opportunity
+from app.models.product import Product
 from app.schemas.customer import (
     ContactCreate,
     ContactUpdate,
@@ -71,13 +78,17 @@ def _resolve_create_industry_code(db: Session, industry: Optional[str]) -> Optio
 
 class CustomerCRUD:
     def get_by_id(self, db: Session, customer_id: int, team_id: Optional[int] = None) -> Optional[Customer]:
-        query = db.query(Customer).filter(Customer.id == customer_id)
+        query = db.query(Customer).options(
+            selectinload(Customer.product_links).selectinload(CustomerProduct.product)
+        ).filter(Customer.id == customer_id)
         if team_id is not None:
             query = query.filter(Customer.team_id == team_id)
         return query.first()
 
     def get_by_public_id(self, db: Session, public_id: str, team_id: Optional[int] = None) -> Optional[Customer]:
-        query = db.query(Customer).filter(Customer.public_id == public_id)
+        query = db.query(Customer).options(
+            selectinload(Customer.product_links).selectinload(CustomerProduct.product)
+        ).filter(Customer.public_id == public_id)
         if team_id is not None:
             query = query.filter(Customer.team_id == team_id)
         return query.first()
@@ -123,7 +134,9 @@ class CustomerCRUD:
         filters: list[FilterCondition] | None = None,
         sorts: list[SortCondition] | None = None,
     ) -> Tuple[List[Customer], int]:
-        query = db.query(Customer).filter(Customer.team_id == team_id)
+        query = db.query(Customer).options(
+            selectinload(Customer.product_links).selectinload(CustomerProduct.product)
+        ).filter(Customer.team_id == team_id)
 
         current_user_id = str(current_user_id) if current_user_id is not None else None
         if scope == "collaborated" and current_user_id:
@@ -198,6 +211,12 @@ class CustomerCRUD:
                     Customer.account_name.like(f"%{keyword}%"),
                     Customer.industry.like(f"%{keyword}%"),
                     Customer.city.like(f"%{keyword}%"),
+                    exists().where(
+                        CustomerProduct.customer_id == Customer.id,
+                        CustomerProduct.team_id == Customer.team_id,
+                        Product.id == CustomerProduct.product_id,
+                        Product.name.like(f"%{keyword}%"),
+                    ),
                 )
             )
         query = apply_search(
@@ -248,7 +267,8 @@ class CustomerCRUD:
     ) -> Customer:
         from app.services.operation_log_service import operation_log_service
 
-        customer_data = obj_in.model_dump(exclude={"primary_contact", "source_public_id", "source"})
+        product = self._resolve_product_for_write(db, team_id, obj_in.product_public_id)
+        customer_data = obj_in.model_dump(exclude={"primary_contact", "source_public_id", "source", "product_public_id"})
         source_row = resolve_source_for_entity_write(
             db,
             team_id,
@@ -269,11 +289,18 @@ class CustomerCRUD:
 
         db_obj = Customer(**customer_data)
         db.add(db_obj)
+        db.flush()
+        replace_product_links(
+            db,
+            team_id=team_id,
+            link_cls=CustomerProduct,
+            owner_id=db_obj.id,
+            owner_fk="customer_id",
+            product=product,
+        )
         if commit:
             db.commit()
             db.refresh(db_obj)
-        else:
-            db.flush()
 
         operation_log_service.log(
             db=db,
@@ -304,6 +331,7 @@ class CustomerCRUD:
     ) -> Tuple[Customer, dict[str, Any], dict[str, Any]]:
         locked_customer = (
             db.query(Customer)
+            .options(selectinload(Customer.product_links).selectinload(CustomerProduct.product))
             .filter(
                 Customer.id == db_obj.id,
                 Customer.team_id == db_obj.team_id,
@@ -370,6 +398,25 @@ class CustomerCRUD:
             if field in fields_set:
                 proposed[field] = getattr(obj_in, field)
 
+        current_product_public_id = None
+        next_product_public_id = None
+        if "product_public_id" in fields_set:
+            current_links = sorted(locked_customer.product_links or [], key=lambda link: link.product_id)
+            current_product = current_links[0].product if current_links else None
+            current_product_public_id = current_product.public_id if current_product is not None else None
+            product = self._resolve_product_for_write(
+                db, locked_customer.team_id, obj_in.product_public_id
+            )
+            next_product_public_id = product.public_id
+            replace_product_links(
+                db,
+                team_id=locked_customer.team_id,
+                link_cls=CustomerProduct,
+                owner_id=locked_customer.id,
+                owner_fk="customer_id",
+                product=product,
+            )
+
         audit_fields = (
             "account_name",
             "city",
@@ -381,16 +428,21 @@ class CustomerCRUD:
             "status",
             "license_type",
             "license_expiry_date",
+            "product_public_id",
         )
 
         def _current_audit_value(field: str) -> Any:
             if field == "source_public_id":
                 return getattr(current_source_row, "public_id", None)
+            if field == "product_public_id":
+                return current_product_public_id
             return getattr(locked_customer, field)
 
         def _next_audit_value(field: str) -> Any:
             if field == "source_public_id":
                 return getattr(next_source_row, "public_id", None)
+            if field == "product_public_id":
+                return next_product_public_id
             if field in proposed:
                 return proposed[field]
             return getattr(locked_customer, field)
@@ -416,6 +468,10 @@ class CustomerCRUD:
         if before:
             for field, value in proposed.items():
                 setattr(locked_customer, field, value)
+            locked_customer.version += 1
+            db.commit()
+            db.refresh(locked_customer)
+        elif "product_public_id" in fields_set:
             locked_customer.version += 1
             db.commit()
             db.refresh(locked_customer)
@@ -583,6 +639,7 @@ class CustomerCRUD:
         contact_name: Optional[str] = None,
         contact_phone: Optional[str] = None,
         industry: Optional[str] = None,
+        product_public_id: Optional[str] = None,
         *,
         commit: bool = True,
     ) -> Tuple[Customer, Contact]:
@@ -591,6 +648,7 @@ class CustomerCRUD:
 
         lead = (
             db.query(Lead)
+            .options(selectinload(Lead.product_links).selectinload(LeadProduct.product))
             .filter(
                 Lead.id == lead_id,
                 Lead.team_id == team_id,
@@ -628,6 +686,16 @@ class CustomerCRUD:
 
         db.add(customer)
         db.flush()
+        product = self._resolve_convert_product(db, team_id, lead, product_public_id)
+        replace_product_links(
+            db,
+            team_id=team_id,
+            link_cls=CustomerProduct,
+            owner_id=customer.id,
+            owner_fk="customer_id",
+            product=product,
+        )
+
 
         contact = Contact(
             customer_id=customer.id,
@@ -763,7 +831,9 @@ class CustomerCRUD:
         filters: list[FilterCondition] | None = None,
         sorts: list[SortCondition] | None = None,
     ) -> Tuple[List[Customer], int]:
-        query = db.query(Customer).filter(Customer.team_id == team_id, Customer.owner_id.is_(None))
+        query = db.query(Customer).options(
+            selectinload(Customer.product_links).selectinload(CustomerProduct.product)
+        ).filter(Customer.team_id == team_id, Customer.owner_id.is_(None))
 
         if uses_unified_list_query(filters=filters, sorts=sorts):
             effective_sorts = sorts if sorts else [SortCondition(field="returned_time", direction="desc")]
@@ -784,7 +854,16 @@ class CustomerCRUD:
             query = query.filter(Customer.city == city)
         if keyword:
             query = query.filter(
-                or_(Customer.account_name.like(f"%{keyword}%"), Customer.industry.like(f"%{keyword}%"))
+                or_(
+                    Customer.account_name.like(f"%{keyword}%"),
+                    Customer.industry.like(f"%{keyword}%"),
+                    exists().where(
+                        CustomerProduct.customer_id == Customer.id,
+                        CustomerProduct.team_id == Customer.team_id,
+                        Product.id == CustomerProduct.product_id,
+                        Product.name.like(f"%{keyword}%"),
+                    ),
+                )
             )
         query = apply_search(
             query,
@@ -1021,6 +1100,29 @@ class CustomerCRUD:
         )
 
         return customer
+
+    def _resolve_product_for_write(
+        self, db: Session, team_id: int, product_public_id: str | None
+    ):
+        if first_active_product(db, team_id) is None:
+            raise ValueError(EMPTY_CATALOG_MESSAGE)
+        return resolve_writable_product(db, team_id, product_public_id)
+
+    def _resolve_convert_product(
+        self,
+        db: Session,
+        team_id: int,
+        lead: Lead,
+        product_public_id: Optional[str],
+    ):
+        requested = str(product_public_id).strip() if product_public_id is not None else ""
+        if requested:
+            return self._resolve_product_for_write(db, team_id, requested)
+        links = sorted(lead.product_links or [], key=lambda link: link.product_id)
+        if links:
+            return links[0].product
+        raise ValueError(MISSING_PRODUCT_MESSAGE)
+
 
 
 class ContactCRUD:

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.crud.customer import contact_crud, customer_crud
 from app.crud.industry import industry_crud
+from app.crud.product_intent import EMPTY_CATALOG_MESSAGE, first_active_product
 from app.schemas.customer import ContactCreate, CustomerCreate
 from app.services.acquisition_source_service import (
     default_source_name,
@@ -241,12 +242,16 @@ class CustomerAIParser(EntityAIParserBase):
             industry_code = self._match_industry(db, industry_hint)
 
         source_row = resolve_source_for_ai(db, team_id, customer_info.get("source"))
+        product = first_active_product(db, team_id)
+        if product is None:
+            raise ValueError(EMPTY_CATALOG_MESSAGE)
         customer_create = CustomerCreate(
             account_name=customer_info["account_name"],
             city=customer_info["city"],
             company_scale=company_scale_value,
             source_public_id=source_row.public_id,
-            industry=industry_code  # AI 识别的行业编码
+            industry=industry_code,  # AI 识别的行业编码
+            product_public_id=product.public_id,
         )
 
         customer = customer_crud.create(
