@@ -27,7 +27,7 @@ const RouterLinkStub = defineComponent({
     to: { type: [String, Object], required: true },
   },
   setup(props, { slots }): () => VNode {
-    return () => h('a', { href: typeof props.to === 'string' ? props.to : '' }, slots.default?.())
+    return () => h('a', { href: typeof props.to === 'string' ? props.to : '' }, slots['default']?.())
   },
 })
 

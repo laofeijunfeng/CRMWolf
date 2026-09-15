@@ -41,7 +41,7 @@ function passthrough(name: string): Component {
   return defineComponent({
     name,
     setup(_, { slots }): () => VNode {
-      return () => h('div', slots.default?.())
+      return () => h('div', slots['default']?.())
     },
   })
 }
@@ -52,7 +52,7 @@ vi.mock('@/components/ui/dialog', () => ({
     props: { open: Boolean },
     emits: ['update:open'],
     setup(props, { slots }): () => VNode | null {
-      return () => props.open ? h('section', { role: 'dialog' }, slots.default?.()) : null
+      return () => props.open ? h('section', { role: 'dialog' }, slots['default']?.()) : null
     },
   }),
   DialogContent: passthrough('UiDialogContent'),
@@ -70,7 +70,7 @@ vi.mock('@/components/ui/button', () => ({
       disabled: { type: Boolean, default: false },
     },
     setup(props, { slots }): () => VNode {
-      return () => h('button', { type: props.type ?? 'button', disabled: props.disabled }, slots.default?.())
+      return () => h('button', { type: props.type ?? 'button', disabled: props.disabled }, slots['default']?.())
     },
   }),
 }))
