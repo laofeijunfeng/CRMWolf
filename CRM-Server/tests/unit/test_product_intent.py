@@ -128,6 +128,20 @@ def test_replace_product_links_replaces_instead_of_appending(db):
     assert [link.product_id for link in links] == [oa.id]
 
 
+def test_replace_product_links_is_session_safe_when_owner_links_are_loaded(db):
+    crm = product_crud.create(db, 1, ProductCreate(name="CRM"), "u1")
+    oa = product_crud.create(db, 1, ProductCreate(name="OA"), "u1")
+    lead = _lead(db, team_id=1)
+    replace_product_links(db, team_id=1, link_cls=LeadProduct, owner_id=lead.id, owner_fk="lead_id", product=crm)
+
+    loaded = db.query(Lead).filter(Lead.id == lead.id).one()
+    assert [link.product_id for link in loaded.product_links] == [crm.id]
+
+    replace_product_links(db, team_id=1, link_cls=LeadProduct, owner_id=lead.id, owner_fk="lead_id", product=crm)
+    replace_product_links(db, team_id=1, link_cls=LeadProduct, owner_id=lead.id, owner_fk="lead_id", product=oa)
+    assert [link.product_id for link in loaded.product_links] == [oa.id]
+
+
 def test_replace_product_links_uses_product_team_not_caller_guess(db):
     product = product_crud.create(db, 2, ProductCreate(name="CRM"), "u1")
     lead = _lead(db, team_id=2)

@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session
 
 from app.crud.product import product_crud
-from app.models.customer import CustomerProduct
-from app.models.lead import LeadProduct
+from app.models.customer import Customer, CustomerProduct
+from app.models.lead import Lead, LeadProduct
 from app.models.opportunity import Opportunity
 from app.models.product import Product, ProductModuleRole
 
@@ -55,7 +56,8 @@ def replace_product_links(
 ) -> None:
     del team_id
     owner_column = getattr(link_cls, owner_fk)
-    db.query(link_cls).filter(owner_column == owner_id).delete(synchronize_session=False)
+    db.query(link_cls).filter(owner_column == owner_id).delete(synchronize_session="fetch")
+    _expire_loaded_product_links(db, owner_fk, owner_id)
     db.add(
         link_cls(
             **{
@@ -66,6 +68,15 @@ def replace_product_links(
         )
     )
     db.flush()
+
+
+def _expire_loaded_product_links(db: Session, owner_fk: str, owner_id: int) -> None:
+    owner_cls = {"lead_id": Lead, "customer_id": Customer}.get(owner_fk)
+    if owner_cls is None:
+        return
+    owner = db.identity_map.get(sa_inspect(owner_cls).identity_key_from_primary_key((owner_id,)))
+    if owner is not None:
+        db.expire(owner, ["product_links"])
 
 
 def product_intent_payload(links: list[Any] | tuple[Any, ...] | None) -> dict[str, Any]:
