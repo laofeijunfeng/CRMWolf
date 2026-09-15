@@ -13,22 +13,20 @@ const customerLicenseTypeSchema = z.enum(['TRIAL', 'OFFICIAL']).optional().or(z.
 const customerLifecycleStatusSchema = z.union([z.literal(0), z.literal(1)]).optional()
 const customerLicenseExpirySchema = z.string().optional().or(z.literal(''))
 
-const rejectExpiryWithoutLicenseType = (
-  values: { license_type?: string | null | undefined; license_expiry_date?: string | null | undefined },
-): boolean => {
-  const expiry = values.license_expiry_date
+const rejectExpiryWithoutLicenseType = (values: Record<string, unknown>): boolean => {
+  const expiry = values['license_expiry_date']
   const hasExpiry = typeof expiry === 'string' && expiry.trim() !== ''
   if (!hasExpiry) {
     return true
   }
-  const licenseType = values.license_type
+  const licenseType = values['license_type']
   return typeof licenseType === 'string' && licenseType.trim() !== ''
 }
 
 const licensePairIssue = {
   message: '授权到期日期不为空时必须选择授权类型',
-  path: ['license_expiry_date'],
-} as const
+  path: ['license_expiry_date'] as (string | number)[],
+}
 
 // Customer form schema for create/edit. Existing callers retain strict profile validation.
 const customerFormObjectSchema = z.object({

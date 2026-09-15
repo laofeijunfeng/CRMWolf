@@ -556,23 +556,10 @@ describe('CustomerFormDialog progressive edit sections', () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
     const updateCustomer = vi.spyOn(customerApi, 'updateCustomer').mockResolvedValue({
-      id: 'customer-1',
-      public_id: 'CUS-001',
-      account_name: '测试客户',
+      ...customerDetail,
       industry: 'finance_securities',
       city: '上海',
-      address: '测试地址',
-      company_scale: 'small',
-      source: null,
       status: 1,
-      owner_id: '1',
-      source_lead_id: null,
-      default_procurement_method_id: 1,
-      return_reason: null,
-      returned_time: null,
-      creator_id: '1',
-      created_time: '2026-09-04T00:00:00Z',
-      last_modified_time: '2026-09-14T00:00:00Z',
       version: 4,
       license_expiry_date: '2027-01-01',
       license_type: 'OFFICIAL',
@@ -613,6 +600,7 @@ describe('CustomerFormDialog progressive edit sections', () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
     const createCustomer = vi.spyOn(customerApi, 'createCustomer').mockResolvedValue({
+      ...customerDetail,
       id: 'customer-created',
       public_id: 'CUS-CREATED',
       account_name: '新客户',
@@ -620,16 +608,7 @@ describe('CustomerFormDialog progressive edit sections', () => {
       city: '上海',
       address: null,
       company_scale: '1-50人',
-      source: null,
       status: 1,
-      owner_id: '1',
-      source_lead_id: null,
-      default_procurement_method_id: 1,
-      return_reason: null,
-      returned_time: null,
-      creator_id: '1',
-      created_time: '2026-09-14T00:00:00Z',
-      last_modified_time: '2026-09-14T00:00:00Z',
       version: 1,
       license_expiry_date: '2026-12-31',
       license_type: 'TRIAL',
@@ -886,7 +865,7 @@ describe('CustomerFormDialog recovery and close guards', () => {
     vm.setValues({ account_name: '当前输入' })
     await vm.onSubmit(new Event('submit'))
     await flushPromises()
-    expect(vm.values.account_name).toBe('当前输入')
+    expect(vm.values['account_name']).toBe('当前输入')
     expect(wrapper.props('open')).toBe(true)
     wrapper.unmount()
   })
