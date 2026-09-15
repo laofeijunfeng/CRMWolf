@@ -71,5 +71,8 @@ uploads/*
 .superpowers/
 .gstack/
 
+# ===== Git worktrees =====
+.worktrees/
+
 # Docker images
 *.tar
