@@ -518,6 +518,10 @@ class OpportunityCRUD:
             seen.add(public_id)
             unique_module_ids.append(public_id)
         if not product_public_id:
+            from app.crud.product_intent import EMPTY_CATALOG_MESSAGE
+
+            if not product_crud.list(db, team_id, is_active=True):
+                raise ValueError(EMPTY_CATALOG_MESSAGE)
             raise ValueError("请选择产品")
         if not unique_module_ids:
             raise ValueError("请至少选择一个产品模块")

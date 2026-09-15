@@ -3,7 +3,8 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, event
+from sqlalchemy import BigInteger, create_engine, event
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
@@ -12,6 +13,11 @@ from app.crud.product import product_crud
 from app.models.opportunity import Opportunity, OpportunityProductModule
 from app.models.product import Product, ProductModule
 from app.schemas.product import ProductCreate, ProductModuleCreate
+
+
+@compiles(BigInteger, "sqlite")
+def _bigint_to_sqlite_int(element, compiler, **kw):  # noqa: ARG001
+    return "INTEGER"
 
 
 @pytest.fixture
@@ -110,3 +116,44 @@ def test_assign_product_replaces_previous_modules_when_product_changes(db):
 
     assert opportunity.product_id == oa.id
     assert [module.public_id for module in opportunity.selected_modules] == [oa.modules[0].public_id]
+
+
+def test_assign_product_blank_id_with_empty_catalog_uses_admin_copy(db):
+    opportunity = _opportunity(db)
+    with pytest.raises(ValueError, match="还没有可用产品"):
+        opportunity_crud.assign_product(db, opportunity, team_id=1, product_public_id="", module_public_ids=[])
+
+
+def test_assign_product_blank_id_with_catalog_still_requires_product(db):
+    product_crud.create(db, 1, ProductCreate(name="CRM"), "u1")
+    opportunity = _opportunity(db)
+    with pytest.raises(ValueError, match="请选择产品"):
+        opportunity_crud.assign_product(db, opportunity, team_id=1, product_public_id="", module_public_ids=[])
+
+
+def test_assign_product_missing_product_with_catalog_is_not_found(db):
+    product_crud.create(db, 1, ProductCreate(name="CRM"), "u1")
+    opportunity = _opportunity(db)
+    with pytest.raises(ValueError, match="产品不存在"):
+        opportunity_crud.assign_product(
+            db,
+            opportunity,
+            team_id=1,
+            product_public_id="prd_missing",
+            module_public_ids=["prm_x"],
+        )
+
+
+def test_assign_product_inactive_product_with_catalog_is_not_found(db):
+    crm = product_crud.create(db, 1, ProductCreate(name="CRM"), "u1")
+    crm.is_active = False
+    db.commit()
+    opportunity = _opportunity(db)
+    with pytest.raises(ValueError, match="产品不存在"):
+        opportunity_crud.assign_product(
+            db,
+            opportunity,
+            team_id=1,
+            product_public_id=crm.public_id,
+            module_public_ids=[crm.modules[0].public_id],
+        )

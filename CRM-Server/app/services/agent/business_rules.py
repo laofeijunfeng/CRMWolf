@@ -113,11 +113,53 @@ def opportunity_missing_display_fields(missing_fields: List[str]) -> List[str]:
     return opportunity_interaction_fields(missing_fields)
 
 
-def opportunity_field_defaults(customer: Dict[str, object]) -> Dict[str, object]:
-    default_procurement_method_id = customer_default_procurement_method_id(customer)
-    if default_procurement_method_id is None:
+def customer_opportunity_product_defaults(db, team_id: int, customer: dict) -> dict:
+    from app.crud.product import product_crud
+    from app.crud.product_intent import base_module_public_id, first_active_product
+
+    public_id = customer.get("product_public_id")
+    product = None
+    if public_id:
+        product = product_crud.get_by_public_id(db, str(public_id), team_id)
+        if product is not None and not bool(product.is_active):
+            product = None
+    if product is None:
+        product = first_active_product(db, team_id)
+    if product is None:
         return {}
-    return {"procurement_method_id": default_procurement_method_id}
+    module_id = base_module_public_id(product)
+    defaults = {"product_public_id": product.public_id}
+    if module_id:
+        defaults["product_module_public_ids"] = [module_id]
+    return defaults
+
+
+def opportunity_field_defaults(
+    customer: Dict[str, object],
+    db: object | None = None,
+    team_id: Optional[int] = None,
+) -> Dict[str, object]:
+    defaults: Dict[str, object] = {}
+    default_procurement_method_id = customer_default_procurement_method_id(customer)
+    if default_procurement_method_id is not None:
+        defaults["procurement_method_id"] = default_procurement_method_id
+
+    public_id = customer.get("product_public_id")
+    if public_id:
+        defaults["product_public_id"] = public_id
+
+    module_ids = customer.get("product_module_public_ids")
+    keep_customer_modules = isinstance(module_ids, list) and len(module_ids) > 0
+    if keep_customer_modules:
+        defaults["product_module_public_ids"] = list(module_ids)
+
+    if db is not None and team_id is not None:
+        product_defaults = customer_opportunity_product_defaults(db, int(team_id), customer)
+        if keep_customer_modules:
+            product_defaults.pop("product_module_public_ids", None)
+        defaults.update(product_defaults)
+
+    return defaults
 
 
 def append_suggestions_to_response(response: str, suggestions: List[object]) -> str:
@@ -157,6 +199,10 @@ def opportunity_next_task_from_suggestions(
     opportunity = dict(parsed.get("opportunity") or {})
     opportunity.pop("opportunity_name", None)
     opportunity["customer_id"] = customer.get("id")
+    field_defaults = opportunity_field_defaults(customer)
+    for key in ("product_public_id", "product_module_public_ids"):
+        if not opportunity.get(key) and key in field_defaults:
+            opportunity[key] = field_defaults[key]
     missing_fields = missing_opportunity_fields(
         opportunity,
         require_procurement_method=customer_requires_procurement_method(customer),
@@ -178,7 +224,7 @@ def opportunity_next_task_from_suggestions(
                 "opportunity": opportunity,
                 "missing_fields": missing_fields,
                 "interaction_fields": opportunity_interaction_fields(missing_fields),
-                "field_defaults": opportunity_field_defaults(customer),
+                "field_defaults": field_defaults,
             },
             "content": content,
         }
