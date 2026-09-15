@@ -805,13 +805,6 @@ const handleCustomerEditSuccess = async (): Promise<void> => {
   emit('refresh')
 }
 
-const handleCustomerEditRefresh = async (): Promise<void> => {
-  if (props.customerId === null) return
-  const refreshed = await loadAllData(props.customerId)
-  warnIfCustomerDetailRefreshFailed(refreshed, '客户信息更新')
-  emit('refresh')
-}
-
 // FollowUp handlers
 const handleFollowUpSuccess = async (): Promise<void> => {
   followUpDialogOpen.value = false
@@ -1958,7 +1951,6 @@ onBeforeUnmount(() => {
     :open="customerEditDialogOpen"
     @update:open="customerEditDialogOpen = $event"
     @success="handleCustomerEditSuccess"
-    @refresh="handleCustomerEditRefresh"
   />
 
   <ContactFormDialog

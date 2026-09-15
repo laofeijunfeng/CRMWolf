@@ -731,11 +731,6 @@ const handleCustomerFormSuccess = async (payload?: FormSuccessPayload): Promise<
     toast.warning(`客户已保存，但${failedScopes.join('和')}刷新失败，请稍后重试。`)
   }
 }
- 
-const handleCustomerFormRefresh = async (): Promise<void> => {
-  const refreshed = await fetchCustomerList()
-  if (!refreshed) toast.warning('客户已更新，但客户列表刷新失败，请稍后重试。')
-}
 
 const clearOpportunityCustomer = (): void => {
   opportunityCustomerId.value = null
@@ -1366,7 +1361,6 @@ watchEffect(() => {
       v-bind="customerFormDialogProps"
       @update:open="handleCustomerFormOpenChange"
       @success="handleCustomerFormSuccess"
-      @refresh="handleCustomerFormRefresh"
     />
 
     <!-- 客户详情抽屉 -->
