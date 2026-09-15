@@ -29,6 +29,7 @@ def _locked_customer_for_update(db: MagicMock, **overrides: object) -> SimpleNam
         "city": "北京",
         "address": None,
         "company_scale": "1-50人",
+        "default_procurement_method_id": None,
         "source_id": None,
         "source": None,
         "industry": "internet_saas",
@@ -346,4 +347,162 @@ def test_update_with_audit_does_not_increment_version_for_no_actual_change() -> 
     assert after == {}
     assert customer.version == 4
     db.commit.assert_not_called()
+
+
+def test_update_with_audit_keeps_current_inactive_industry_when_editing_other_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    db = MagicMock()
+    customer = _locked_customer_for_update(db, industry="legacy")
+    monkeypatch.setattr(
+        "app.crud.customer.industry_crud.get_by_code_with_parent",
+        lambda db_session, code: SimpleNamespace(code=code, is_active=0),
+    )
+
+    updated, before, after = customer_crud.update_with_audit(
+        db,
+        customer,
+        CustomerUpdate(expected_version=4, industry="legacy", city="上海"),
+    )
+
+    assert updated is customer
+    assert customer.industry == "legacy"
+    assert customer.city == "上海"
+    assert customer.version == 5
+    assert before == {"city": "北京"}
+    assert after == {"city": "上海"}
+    db.commit.assert_called_once()
+
+
+def test_update_with_audit_retains_current_inactive_industry_without_mutation(monkeypatch: pytest.MonkeyPatch) -> None:
+    db = MagicMock()
+    customer = _locked_customer_for_update(db, industry="legacy")
+    monkeypatch.setattr(
+        "app.crud.customer.industry_crud.get_by_code_with_parent",
+        lambda db_session, code: SimpleNamespace(code=code, is_active=0),
+    )
+
+    updated, before, after = customer_crud.update_with_audit(
+        db,
+        customer,
+        CustomerUpdate(expected_version=4, industry="legacy"),
+    )
+
+    assert updated is customer
+    assert customer.industry == "legacy"
+    assert before == {}
+    assert after == {}
+    assert customer.version == 4
+    db.commit.assert_not_called()
+    db.refresh.assert_not_called()
+
+
+def test_update_with_audit_increments_version_once_for_industry_change(monkeypatch: pytest.MonkeyPatch) -> None:
+    db = MagicMock()
+    customer = _locked_customer_for_update(db)
+    monkeypatch.setattr(
+        "app.crud.customer.industry_crud.get_by_code_with_parent",
+        lambda db_session, code: SimpleNamespace(code=code, is_active=1),
+    )
+
+    updated, before, after = customer_crud.update_with_audit(
+        db,
+        customer,
+        CustomerUpdate(expected_version=4, industry="finance_securities"),
+    )
+
+    assert updated is customer
+    assert customer.industry == "finance_securities"
+    assert before == {"industry": "internet_saas"}
+    assert after == {"industry": "finance_securities"}
+    assert customer.version == 5
+    db.commit.assert_called_once()
+
+
+def test_update_with_audit_increments_version_once_for_status_change() -> None:
+    db = MagicMock()
+    customer = _locked_customer_for_update(db)
+
+    updated, before, after = customer_crud.update_with_audit(
+        db,
+        customer,
+        CustomerUpdate(expected_version=4, status=1),
+    )
+
+    assert updated is customer
+    assert customer.status == 1
+    assert before == {"status": 0}
+    assert after == {"status": 1}
+    assert customer.version == 5
+    db.commit.assert_called_once()
+
+
+def test_update_with_audit_increments_version_once_for_license_pair() -> None:
+    db = MagicMock()
+    customer = _locked_customer_for_update(db)
+
+    updated, before, after = customer_crud.update_with_audit(
+        db,
+        customer,
+        CustomerUpdate(expected_version=4, license_type="OFFICIAL", license_expiry_date=date(2027, 1, 1)),
+    )
+
+    assert updated is customer
+    assert customer.license_type == "OFFICIAL"
+    assert customer.license_expiry_date == date(2027, 1, 1)
+    assert before == {"license_type": "TRIAL", "license_expiry_date": date(2026, 1, 1)}
+    assert after == {"license_type": "OFFICIAL", "license_expiry_date": date(2027, 1, 1)}
+    assert customer.version == 5
+    db.commit.assert_called_once()
+
+
+def test_update_with_audit_increments_version_once_for_ordinary_and_more_information_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    db = MagicMock()
+    customer = _locked_customer_for_update(db)
+    monkeypatch.setattr(
+        "app.crud.customer.industry_crud.get_by_code_with_parent",
+        lambda db_session, code: SimpleNamespace(code=code, is_active=1),
+    )
+
+    updated, before, after = customer_crud.update_with_audit(
+        db,
+        customer,
+        CustomerUpdate(
+            expected_version=4,
+            account_name="更新客户",
+            city="上海",
+            address="新地址",
+            company_scale="51-200人",
+            default_procurement_method_id=8,
+            industry="finance_securities",
+            status=1,
+            license_type="OFFICIAL",
+            license_expiry_date=date(2027, 1, 1),
+        ),
+    )
+
+    assert updated is customer
+    assert customer.version == 5
+    assert before == {
+        "account_name": "测试客户",
+        "city": "北京",
+        "address": None,
+        "company_scale": "1-50人",
+        "default_procurement_method_id": None,
+        "industry": "internet_saas",
+        "status": 0,
+        "license_type": "TRIAL",
+        "license_expiry_date": date(2026, 1, 1),
+    }
+    assert after == {
+        "account_name": "更新客户",
+        "city": "上海",
+        "address": "新地址",
+        "company_scale": "51-200人",
+        "default_procurement_method_id": 8,
+        "industry": "finance_securities",
+        "status": 1,
+        "license_type": "OFFICIAL",
+        "license_expiry_date": date(2027, 1, 1),
+    }
+    db.commit.assert_called_once()
+    db.refresh.assert_called_once_with(customer)
 

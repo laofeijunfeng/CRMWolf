@@ -1,3 +1,4 @@
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -261,3 +262,79 @@ def test_customer_update_rejects_stale_version_after_concurrent_commit(tmp_path:
         session_b.close()
         session_c.close()
         engine.dispose()
+
+
+def test_customer_update_increments_version_once_for_combined_more_information_fields(monkeypatch) -> None:
+    db = MagicMock()
+    current = SimpleNamespace(
+        id=1,
+        version=4,
+        team_id=9,
+        city="北京",
+        industry="internet_saas",
+        status=0,
+        license_type="TRIAL",
+        license_expiry_date=None,
+    )
+    locked_query = db.query.return_value.filter.return_value.populate_existing.return_value.with_for_update.return_value
+    locked_query.first.return_value = current
+    monkeypatch.setattr(
+        "app.crud.customer.industry_crud.get_by_code_with_parent",
+        lambda db_session, code: SimpleNamespace(code=code, is_active=1),
+    )
+
+    updated = customer_crud.update(
+        db,
+        current,
+        CustomerUpdate(
+            expected_version=4,
+            industry="finance_securities",
+            status=1,
+            license_type="OFFICIAL",
+            license_expiry_date=date(2027, 1, 1),
+        ),
+    )
+
+    assert updated is current
+    assert current.industry == "finance_securities"
+    assert current.status == 1
+    assert current.license_type == "OFFICIAL"
+    assert current.version == 5
+    db.commit.assert_called_once()
+
+
+def test_update_customer_skips_audit_and_refresh_for_noop(monkeypatch) -> None:
+    from app.api import customers as customers_api
+
+    customer = SimpleNamespace(
+        id=1,
+        public_id="cus_1",
+        team_id=9,
+        city="北京",
+        version=4,
+    )
+    user = SimpleNamespace(id=7, name="操作人")
+    logged = []
+    refreshes = []
+    monkeypatch.setattr(customers_api, "_get_editable_customer", lambda *args: customer)
+    monkeypatch.setattr(
+        customers_api.customer_crud,
+        "update_with_audit",
+        lambda db, current, payload: (current, {}, {}),
+    )
+    monkeypatch.setattr(customers_api, "_persist_customer_business_object_refresh_after_commit", lambda **kwargs: refreshes.append(kwargs))
+    monkeypatch.setattr(customers_api, "_customer_response", lambda db, updated: updated)
+    monkeypatch.setattr(customers_api.operation_log_service, "log", lambda **kwargs: logged.append(kwargs))
+
+    result = customers_api.update_customer(
+        "cus_1",
+        CustomerUpdate(city="北京", expected_version=4),
+        team_id=9,
+        current_user=user,
+        db=MagicMock(),
+    )
+
+    assert result is customer
+    assert customer.version == 4
+    assert logged == []
+    assert refreshes == []

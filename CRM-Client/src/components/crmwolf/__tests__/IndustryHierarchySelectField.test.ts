@@ -124,6 +124,8 @@ describe('IndustryHierarchySelectField', () => {
     expect(trigger.attributes('aria-invalid')).toBe('true')
     expect(trigger.attributes('aria-describedby')).toBe('customer-industry-error')
     expect(wrapper.get('#customer-industry-error').text()).toContain('行业代码无效')
+    expect(trigger.classes()).toContain('max-[767px]:h-input-mobile')
+    expect(trigger.classes()).toContain('max-[767px]:min-h-input-mobile')
     wrapper.unmount()
   })
 

@@ -448,6 +448,202 @@ async def test_edit_routes_reject_customer_from_another_team(monkeypatch, route_
 
 
 @pytest.mark.asyncio
+async def test_customer_put_denies_user_without_edit_permission(monkeypatch):
+    customer = _customer(status=0)
+    _deny_edit_permission(monkeypatch, customer)
+    with pytest.raises(customers_api.HTTPException) as exc_info:
+        customers_api.update_customer(
+            customer.public_id,
+            CustomerUpdate(expected_version=4, city="上海"),
+            team_id=customer.team_id,
+            current_user=SimpleNamespace(id=9, name="操作人"),
+            db=MagicMock(),
+        )
+    assert exc_info.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_customer_put_does_not_cross_team_boundary(monkeypatch):
+    customer = _customer(status=0)
+    _allow_edit_permission(monkeypatch, customer)
+    monkeypatch.setattr(customers_api.customer_crud, "get_by_public_id", lambda db, public_id, team_id: None)
+    with pytest.raises(customers_api.HTTPException) as exc_info:
+        customers_api.update_customer(
+            customer.public_id,
+            CustomerUpdate(expected_version=4, city="上海"),
+            team_id=customer.team_id + 1,
+            current_user=SimpleNamespace(id=9, name="操作人"),
+            db=MagicMock(),
+        )
+    assert exc_info.value.status_code == 404
+
+
+def _patch_put_side_effects(monkeypatch, customer, *, before, after, mutate):
+    calls = SimpleNamespace(logs=[], refreshes=[], notifications=[])
+    _allow_edit_permission(monkeypatch, customer)
+
+    def update_with_audit(db, db_customer, payload):
+        mutate(db_customer, payload)
+        db_customer.version += 1
+        return db_customer, before, after
+
+    monkeypatch.setattr(customers_api.customer_crud, "update_with_audit", update_with_audit)
+    monkeypatch.setattr(customers_api.operation_log_service, "log", lambda **kwargs: calls.logs.append(kwargs))
+    monkeypatch.setattr(customers_api, "_persist_customer_business_object_refresh_after_commit", lambda **kwargs: calls.refreshes.append(kwargs))
+    monkeypatch.setattr(customers_api.outbound_notification_job_service, "queue_committed", lambda *args, **kwargs: calls.notifications.append(kwargs))
+    monkeypatch.setattr(customers_api, "_customer_response", lambda db_session, value: value)
+    return calls
+
+
+def _assert_ordinary_put_side_effects(calls, *, version):
+    assert version == 5
+    assert len(calls.logs) == 1
+    assert calls.logs[0]["event_type"] == customers_api.EventTypes.CUSTOMER_UPDATED
+    assert len(calls.refreshes) == 1
+    assert calls.refreshes[0]["scope"] == "partial"
+    assert customers_api.EventTypes.CUSTOMER_STATUS_CHANGED not in [entry["event_type"] for entry in calls.logs]
+    assert calls.notifications == []
+
+
+@pytest.mark.asyncio
+async def test_customer_put_industry_only_audits_once_without_status_or_notification(monkeypatch):
+    customer = _customer(status=0, version=4)
+    customer.industry = "internet_saas"
+    calls = _patch_put_side_effects(
+        monkeypatch,
+        customer,
+        before={"industry": "internet_saas"},
+        after={"industry": "finance_securities"},
+        mutate=lambda db_customer, payload: setattr(db_customer, "industry", payload.industry),
+    )
+
+    response = customers_api.update_customer(
+        customer.public_id,
+        CustomerUpdate(expected_version=4, industry="finance_securities"),
+        team_id=customer.team_id,
+        current_user=SimpleNamespace(id=9, name="操作人"),
+        db=MagicMock(),
+    )
+
+    _assert_ordinary_put_side_effects(calls, version=response.version)
+    assert response.industry == "finance_securities"
+
+
+@pytest.mark.asyncio
+async def test_customer_put_status_only_audits_once_without_status_event_or_notification(monkeypatch):
+    customer = _customer(status=0, version=4)
+    calls = _patch_put_side_effects(
+        monkeypatch,
+        customer,
+        before={"status": 0},
+        after={"status": 1},
+        mutate=lambda db_customer, payload: setattr(db_customer, "status", payload.status),
+    )
+
+    response = customers_api.update_customer(
+        customer.public_id,
+        CustomerUpdate(expected_version=4, status=1),
+        team_id=customer.team_id,
+        current_user=SimpleNamespace(id=9, name="操作人"),
+        db=MagicMock(),
+    )
+
+    _assert_ordinary_put_side_effects(calls, version=response.version)
+    assert response.status == 1
+
+
+@pytest.mark.asyncio
+async def test_customer_put_license_pair_audits_once_without_status_or_notification(monkeypatch):
+    customer = _customer(status=0, version=4)
+    customer.license_type = "TRIAL"
+    customer.license_expiry_date = date(2026, 1, 1)
+    calls = _patch_put_side_effects(
+        monkeypatch,
+        customer,
+        before={"license_type": "TRIAL", "license_expiry_date": date(2026, 1, 1)},
+        after={"license_type": "OFFICIAL", "license_expiry_date": date(2027, 1, 1)},
+        mutate=lambda db_customer, payload: (
+            setattr(db_customer, "license_type", payload.license_type)
+            or setattr(db_customer, "license_expiry_date", payload.license_expiry_date)
+        ),
+    )
+
+    response = customers_api.update_customer(
+        customer.public_id,
+        CustomerUpdate(expected_version=4, license_type="OFFICIAL", license_expiry_date=date(2027, 1, 1)),
+        team_id=customer.team_id,
+        current_user=SimpleNamespace(id=9, name="操作人"),
+        db=MagicMock(),
+    )
+
+    _assert_ordinary_put_side_effects(calls, version=response.version)
+    assert response.license_type == "OFFICIAL"
+    assert response.license_expiry_date == date(2027, 1, 1)
+
+
+@pytest.mark.asyncio
+async def test_customer_put_noop_skips_version_audit_and_refresh(monkeypatch):
+    customer = _customer(status=0, version=4)
+    customer.city = "北京"
+    calls = SimpleNamespace(logs=[], refreshes=[], notifications=[])
+    _allow_edit_permission(monkeypatch, customer)
+    monkeypatch.setattr(
+        customers_api.customer_crud,
+        "update_with_audit",
+        lambda db, db_customer, payload: (db_customer, {}, {}),
+    )
+    monkeypatch.setattr(customers_api.operation_log_service, "log", lambda **kwargs: calls.logs.append(kwargs))
+    monkeypatch.setattr(customers_api, "_persist_customer_business_object_refresh_after_commit", lambda **kwargs: calls.refreshes.append(kwargs))
+    monkeypatch.setattr(customers_api.outbound_notification_job_service, "queue_committed", lambda *args, **kwargs: calls.notifications.append(kwargs))
+    monkeypatch.setattr(customers_api, "_customer_response", lambda db_session, value: value)
+
+    response = customers_api.update_customer(
+        customer.public_id,
+        CustomerUpdate(expected_version=4, city="北京"),
+        team_id=customer.team_id,
+        current_user=SimpleNamespace(id=9, name="操作人"),
+        db=MagicMock(),
+    )
+
+    assert response.version == 4
+    assert calls.logs == []
+    assert calls.refreshes == []
+    assert calls.notifications == []
+
+
+@pytest.mark.asyncio
+async def test_customer_put_rejects_inactive_industry_without_audit_or_refresh(monkeypatch):
+    customer = _customer(status=0, version=4)
+    customer.industry = "internet_saas"
+    calls = SimpleNamespace(logs=[], refreshes=[], notifications=[])
+    _allow_edit_permission(monkeypatch, customer)
+    monkeypatch.setattr(
+        customers_api.customer_crud,
+        "update_with_audit",
+        lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("行业代码不存在或已停用")),
+    )
+    monkeypatch.setattr(customers_api.operation_log_service, "log", lambda **kwargs: calls.logs.append(kwargs))
+    monkeypatch.setattr(customers_api, "_persist_customer_business_object_refresh_after_commit", lambda **kwargs: calls.refreshes.append(kwargs))
+    monkeypatch.setattr(customers_api.outbound_notification_job_service, "queue_committed", lambda *args, **kwargs: calls.notifications.append(kwargs))
+
+    with pytest.raises(customers_api.HTTPException) as exc_info:
+        customers_api.update_customer(
+            customer.public_id,
+            CustomerUpdate(expected_version=4, industry="inactive_new"),
+            team_id=customer.team_id,
+            current_user=SimpleNamespace(id=9, name="操作人"),
+            db=MagicMock(),
+        )
+
+    assert exc_info.value.status_code == 400
+    assert customer.industry == "internet_saas"
+    assert customer.version == 4
+    assert calls.logs == []
+    assert calls.refreshes == []
+    assert calls.notifications == []
+
+
+@pytest.mark.asyncio
 async def test_customer_put_emits_changed_values_and_partial_intelligence_refresh(monkeypatch):
     customer = _customer(status=0, version=4)
     customer.city = "北京"

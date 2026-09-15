@@ -99,6 +99,33 @@ describe('acquisition source form schemas', () => {
     expect(result.success).toBe(true)
   })
 
+  it('accepts optional more-information values on edit', () => {
+    const result = customerEditSchema.safeParse({
+      account_name: '示例客户',
+      city: '上海',
+      company_scale: '1-50人',
+      source_public_id: 'acq_referral',
+      default_procurement_method_id: 1,
+      industry: 'internet_saas',
+      status: 1,
+      license_type: 'TRIAL',
+      license_expiry_date: '2026-12-31',
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects a non-empty expiry date without a license type on edit', () => {
+    const result = customerEditSchema.safeParse({
+      account_name: '示例客户',
+      city: '上海',
+      company_scale: '1-50人',
+      source_public_id: 'acq_referral',
+      default_procurement_method_id: 1,
+      license_expiry_date: '2026-12-31',
+    })
+    expect(result.success).toBe(false)
+  })
+
   it('rejects a non-empty expiry date without a license type', () => {
     const result = customerCreateSchema.safeParse({
       account_name: '示例客户',

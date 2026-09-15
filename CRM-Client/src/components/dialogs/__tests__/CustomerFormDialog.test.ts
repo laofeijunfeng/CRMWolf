@@ -434,7 +434,7 @@ describe('CustomerFormDialog progressive edit sections', () => {
     DateField: DateFieldStub,
     InputField: InputFieldStub,
     Button: defineComponent({ inheritAttrs: false, template: '<button v-bind="$attrs"><slot /></button>' }),
-    FormField: defineComponent({ setup(_, { slots }) { return () => h('div', slots['default']?.({ value: undefined, handleChange: () => undefined })) } }),
+    FormField: defineComponent({ setup(_, { slots }): () => VNode { return () => h('div', slots['default']?.({ value: undefined, handleChange: () => undefined })) } }),
     FormItem: defineComponent({ template: '<div><slot /></div>' }),
     FormMessage: defineComponent({ template: '<div><slot /></div>' }),
   }
@@ -476,7 +476,9 @@ describe('CustomerFormDialog progressive edit sections', () => {
     const editWrapper = mountEdit()
     await flushPromises()
     expect(createWrapper.get('#customer-more-info-trigger').attributes('aria-expanded')).toBe('false')
+    expect(createWrapper.get('#customer-more-info-trigger').attributes('aria-controls')).toBe('customer-more-info-content')
     expect(editWrapper.get('#customer-more-info-trigger').attributes('aria-expanded')).toBe('false')
+    expect(editWrapper.get('#customer-more-info-trigger').attributes('aria-controls')).toBe('customer-more-info-content')
     createWrapper.unmount()
     editWrapper.unmount()
   })
@@ -486,10 +488,13 @@ describe('CustomerFormDialog progressive edit sections', () => {
     const wrapper = mountEdit({ ...customerDetail, status: 0 })
     await flushPromises()
     await wrapper.get('#customer-more-info-trigger').trigger('click')
+    expect(wrapper.get('#customer-more-info-trigger').attributes('aria-expanded')).toBe('true')
+    expect(wrapper.get('#customer-more-info-trigger').attributes('aria-controls')).toBe('customer-more-info-content')
     expect(wrapper.text()).toContain('行业')
     expect(wrapper.text()).toContain('客户状态')
     expect(wrapper.text()).toContain('授权类型')
     expect(wrapper.text()).toContain('授权到期日')
+    expect(wrapper.text()).toContain('此处只更新客户授权汇总信息，不创建 License 申请、不发起审批，也不修改正式 License 记录。')
     expect(wrapper.findAll('button').some((button) => button.text() === '应用状态变更')).toBe(false)
     expect(wrapper.findAll('button').some((button) => button.text() === '保存授权信息')).toBe(false)
     expect(wrapper.findAll('button').some((button) => button.text() === '清除日期')).toBe(false)
@@ -762,6 +767,8 @@ describe('CustomerFormDialog progressive edit sections', () => {
     expect(vm.moreInfoOpen).toBe(true)
     expect(focus).toHaveBeenCalledWith({ preventScroll: true })
     expect(focus.mock.instances).toContain(industryControl)
+    expect(wrapper.get('#customer-industry').attributes('aria-invalid')).toBe('true')
+    expect(wrapper.get('#customer-industry').attributes('aria-describedby')).toBe('customer-industry-error')
     wrapper.unmount()
   })
 
@@ -813,8 +820,8 @@ describe('CustomerFormDialog recovery and close guards', () => {
         Collapsible: MoreInfoCollapsibleStub,
         CollapsibleTrigger: defineComponent({ template: '<slot />' }),
         CollapsibleContent: defineComponent({ template: '<div><slot /></div>' }),
-        FormField: defineComponent({ setup(_, { slots }) { return () => h('div', slots['default']?.({ value: undefined, handleChange: () => undefined })) } }),
-        Field: defineComponent({ setup(_, { slots }) { return () => h('div', slots['default']?.({ value: undefined, handleChange: () => undefined })) } }),
+        FormField: defineComponent({ setup(_, { slots }): () => VNode { return () => h('div', slots['default']?.({ value: undefined, handleChange: () => undefined })) } }),
+        Field: defineComponent({ setup(_, { slots }): () => VNode { return () => h('div', slots['default']?.({ value: undefined, handleChange: () => undefined })) } }),
         FormItem: defineComponent({ template: '<div><slot /></div>' }),
         FormMessage: defineComponent({ template: '<div><slot /></div>' }),
         IndustryHierarchySelectField: IndustryHierarchySelectFieldStub,
@@ -836,20 +843,17 @@ describe('CustomerFormDialog recovery and close guards', () => {
     expect(wrapper.text()).toContain('客户状态')
     wrapper.unmount()
   })
-  it('disables only industry on hierarchy load failure and restores it after rendered retry', async () => {
+  it('disables only industry after hierarchy loading failure and retries successfully', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
-    const hierarchy = { internet: { name: '互联网', children: [{ code: 'internet.software', name: '软件服务' }] } }
-    const getIndustryHierarchy = vi.spyOn(customerApi, 'getIndustryHierarchy')
+    const getHierarchy = vi.spyOn(customerApi, 'getIndustryHierarchy')
       .mockRejectedValueOnce(new Error('hierarchy failed'))
-      .mockResolvedValueOnce(hierarchy)
+      .mockResolvedValueOnce({ manufacturing: { name: '制造业', children: [] } })
     const wrapper = mountRecoveryEdit()
     await wrapper.get('#customer-more-info-trigger').trigger('click')
     await flushPromises()
-    const industry = wrapper.get('#customer-industry')
-    expect(getIndustryHierarchy).toHaveBeenCalledTimes(1)
-    expect(industry.attributes('disabled')).toBeDefined()
-    expect(industry.attributes('aria-invalid')).toBe('true')
+    expect(wrapper.get('#customer-industry').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('#customer-industry').attributes('aria-invalid')).toBe('true')
     expect(wrapper.get('#customer-account-name').attributes('disabled')).toBeUndefined()
     expect(wrapper.get('#customer-city').attributes('disabled')).toBeUndefined()
     expect(wrapper.get('#customer-company-scale').attributes('disabled')).toBeUndefined()
@@ -860,16 +864,32 @@ describe('CustomerFormDialog recovery and close guards', () => {
     expect(wrapper.get('#customer-lifecycle-status').attributes('disabled')).toBeUndefined()
     expect(wrapper.get('#customer-license-type').attributes('disabled')).toBeUndefined()
     expect(wrapper.get('#customer-license-expiry-date').attributes('disabled')).toBeUndefined()
-    const retryButton = wrapper.findAll('button').find((button) => button.text() === '重试')
-    expect(retryButton).toBeDefined()
-    await retryButton?.trigger('click')
+    await wrapper.findAll('button').find((button) => button.text() === '重试')?.trigger('click')
     await flushPromises()
-    expect(getIndustryHierarchy).toHaveBeenCalledTimes(2)
+    expect(getHierarchy).toHaveBeenCalledTimes(2)
     expect(wrapper.get('#customer-industry').attributes('disabled')).toBeUndefined()
     expect(wrapper.get('#customer-industry').attributes('aria-invalid')).toBe('false')
     wrapper.unmount()
   })
 
+  it('keeps entered values and the dialog open after ordinary PUT failure', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    vi.spyOn(customerApi, 'updateCustomer').mockRejectedValue(new Error('update failed'))
+    const wrapper = mountRecoveryEdit()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      setValues: (values: Record<string, unknown>) => void
+      values: Record<string, unknown>
+      onSubmit: (event: Event) => Promise<void>
+    }
+    vm.setValues({ account_name: '当前输入' })
+    await vm.onSubmit(new Event('submit'))
+    await flushPromises()
+    expect(vm.values.account_name).toBe('当前输入')
+    expect(wrapper.props('open')).toBe(true)
+    wrapper.unmount()
+  })
   it('keeps entered license values, dialog open, and error after ordinary PUT failure', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
@@ -1004,6 +1024,55 @@ describe('CustomerFormDialog recovery and close guards', () => {
     await flushPromises()
     expect(wrapper.get('#customer-more-info-trigger').classes()).toContain('h-input-mobile')
     expect(wrapper.get('#customer-more-info-trigger').classes()).toContain('min-h-input-mobile')
+    wrapper.unmount()
+  })
+  it('preserves dirty more-information values across a 409 recovery', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    vi.spyOn(customerApi, 'updateCustomer').mockRejectedValue({ response: { status: 409 } })
+    vi.spyOn(customerApi, 'getCustomerDetail').mockResolvedValue({
+      ...customerDetail,
+      version: 11,
+      city: '深圳',
+      status: 0,
+      industry: 'finance_securities',
+      license_type: 'TRIAL',
+      license_expiry_date: '2027-01-01',
+    })
+    const wrapper = mountRecoveryEdit({ ...customerDetail, version: 10, status: 0 })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      setValues: (values: Record<string, unknown>) => void
+      industryValue: string
+      lifecycleStatusValue: 0 | 1 | null
+      licenseTypeValue: 'TRIAL' | 'OFFICIAL' | null
+      licenseExpiryDateValue: string | null
+      onSubmit: (event: Event) => Promise<void>
+    }
+    vm.setValues({ account_name: '当前输入' })
+    vm.industryValue = 'internet_saas'
+    vm.lifecycleStatusValue = 1
+    vm.licenseTypeValue = 'OFFICIAL'
+    vm.licenseExpiryDateValue = '2026-12-31'
+    await vm.onSubmit(new Event('submit'))
+    await flushPromises()
+    await wrapper.findAll('button').find((button) => button.text() === '保留当前输入并继续编辑')?.trigger('click')
+    await flushPromises()
+    expect(vm.industryValue).toBe('internet_saas')
+    expect(vm.lifecycleStatusValue).toBe(1)
+    expect(vm.licenseTypeValue).toBe('OFFICIAL')
+    expect(vm.licenseExpiryDateValue).toBe('2026-12-31')
+    wrapper.unmount()
+  })
+
+  it.each([2, 3])('renders status %s as read-only and clean', async (status) => {
+    const wrapper = mountRecoveryEdit({ ...customerDetail, status: status as 2 | 3 })
+    await flushPromises()
+    await wrapper.get('#customer-more-info-trigger').trigger('click')
+    expect(wrapper.text()).toContain('该客户状态由其他流程管理，暂不支持在此修改。')
+    const vm = wrapper.vm as unknown as { handleCancel: () => void; showConfirmDialog: boolean }
+    vm.handleCancel()
+    expect(vm.showConfirmDialog).toBe(false)
     wrapper.unmount()
   })
 
