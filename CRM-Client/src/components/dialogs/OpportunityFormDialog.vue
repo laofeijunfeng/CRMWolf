@@ -45,6 +45,7 @@ import customerApi, { type CustomerResponse, type CustomerDetailResponse } from 
 import productApi from '@/api/product'
 import type { ProductResponse } from '@/schemas/product'
 import { formatLocalDate } from '@/utils/format'
+import { EMPTY_CATALOG_MESSAGE } from '@/composables/useProductCatalog'
 
 // Zod schema for form validation
 const schema = toTypedSchema(
@@ -357,8 +358,8 @@ watch(values, () => {
 const initializeForm = async (): Promise<void> => {
   customerSearchKeyword.value = ''
   const productsPromise = fetchProducts()
+  let loadedCustomerDetail: CustomerDetailResponse | null = null
 
-  // Edit mode: populate form with opportunity data
   if (isEdit.value && props.opportunity) {
     const opp = props.opportunity
     resetForm({
@@ -391,12 +392,11 @@ const initializeForm = async (): Promise<void> => {
     }
   } else {
     const initialCustomerId = props.customerId === undefined ? '' : String(props.customerId)
-    const defaultProduct = firstActiveProduct()
     resetForm({
       values: {
         customer_id: initialCustomerId,
-        product_public_id: defaultProduct?.public_id ?? '',
-        product_module_public_ids: defaultProduct === undefined ? [] : defaultModulePublicIds(defaultProduct),
+        product_public_id: '',
+        product_module_public_ids: [],
         total_amount: 0,
         user_count: 1,
         license_type: LicenseType.SUBSCRIPTION,
@@ -415,35 +415,35 @@ const initializeForm = async (): Promise<void> => {
         setFieldValue('customer_id', String(props.customerId))
       }
       try {
-        const customerDetail: CustomerDetailResponse = await customerApi.getCustomerDetail(props.customerId)
-        customers.value = [toCustomerOption(customerDetail)]
-        setFieldValue('customer_id', String(customerDetail.id))
+        loadedCustomerDetail = await customerApi.getCustomerDetail(props.customerId)
+        customers.value = [toCustomerOption(loadedCustomerDetail)]
+        setFieldValue('customer_id', String(loadedCustomerDetail.id))
 
-        if (customerDetail.default_opportunity) {
-          setFieldValue('total_amount', customerDetail.default_opportunity.total_amount ?? 0)
-          setFieldValue('user_count', customerDetail.default_opportunity.user_count ?? 1)
+        if (loadedCustomerDetail.default_opportunity) {
+          setFieldValue('total_amount', loadedCustomerDetail.default_opportunity.total_amount ?? 0)
+          setFieldValue('user_count', loadedCustomerDetail.default_opportunity.user_count ?? 1)
           setFieldValue(
             'license_type',
-            isLicenseType(customerDetail.default_opportunity.license_type)
-              ? customerDetail.default_opportunity.license_type
+            isLicenseType(loadedCustomerDetail.default_opportunity.license_type)
+              ? loadedCustomerDetail.default_opportunity.license_type
               : LicenseType.SUBSCRIPTION
           )
-          setFieldValue('subscription_years', customerDetail.default_opportunity.subscription_years ?? 1)
+          setFieldValue('subscription_years', loadedCustomerDetail.default_opportunity.subscription_years ?? 1)
           setFieldValue(
             'purchase_type',
-            isPurchaseType(customerDetail.default_opportunity.purchase_type)
-              ? customerDetail.default_opportunity.purchase_type
+            isPurchaseType(loadedCustomerDetail.default_opportunity.purchase_type)
+              ? loadedCustomerDetail.default_opportunity.purchase_type
               : PurchaseType.NEW
           )
-          if (customerDetail.default_opportunity.expected_closing_date !== null) {
-            setFieldValue('expected_closing_date', customerDetail.default_opportunity.expected_closing_date)
+          if (loadedCustomerDetail.default_opportunity.expected_closing_date !== null) {
+            setFieldValue('expected_closing_date', loadedCustomerDetail.default_opportunity.expected_closing_date)
           }
-          if (customerDetail.default_opportunity.procurement_method_id !== null) {
-            setFieldValue('procurement_method_id', customerDetail.default_opportunity.procurement_method_id)
+          if (loadedCustomerDetail.default_opportunity.procurement_method_id !== null) {
+            setFieldValue('procurement_method_id', loadedCustomerDetail.default_opportunity.procurement_method_id)
           }
         }
-        if (customerDetail.default_procurement_method_id !== null) {
-          setFieldValue('procurement_method_id', customerDetail.default_procurement_method_id)
+        if (loadedCustomerDetail.default_procurement_method_id !== null) {
+          setFieldValue('procurement_method_id', loadedCustomerDetail.default_procurement_method_id)
         }
       } catch (error) {
         if (props.customerLocked) {
@@ -456,7 +456,22 @@ const initializeForm = async (): Promise<void> => {
   }
 
   await productsPromise
-  applyDefaultProductSelection()
+  if (isEdit.value) {
+    applyDefaultProductSelection()
+  } else {
+    const customerDetail = loadedCustomerDetail
+    const customerProduct = customerDetail === null
+      ? undefined
+      : products.value.find(product =>
+        product.public_id === customerDetail.product_public_id && product.is_active
+      )
+    const defaultProduct = customerProduct ?? firstActiveProduct()
+    setFieldValue('product_public_id', defaultProduct?.public_id ?? '')
+    setFieldValue(
+      'product_module_public_ids',
+      defaultProduct === undefined ? [] : defaultModulePublicIds(defaultProduct),
+    )
+  }
   isDirty.value = false
 }
 
@@ -594,7 +609,7 @@ function continueEditing(): void {
             产品 <span class="text-wolf-danger" aria-hidden="true">*</span>
           </p>
           <p v-if="loadingProducts" class="text-sm text-wolf-text-secondary">加载产品中...</p>
-          <p v-else-if="productOptions.length === 0" class="text-sm text-wolf-text-secondary">暂无可用产品</p>
+          <p v-else-if="productOptions.length === 0" class="text-sm text-wolf-text-secondary">{{ EMPTY_CATALOG_MESSAGE }}</p>
           <SegmentedChoiceControl
             v-else
             :model-value="String(values.product_public_id ?? '')"

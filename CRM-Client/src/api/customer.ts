@@ -111,6 +111,7 @@ export interface ConvertLeadToCustomer {
   contact_name?: string | null
   contact_phone?: string | null
   industry?: string | null
+  product_public_id?: string | null
 }
 
 export interface ConvertResponse {
@@ -132,7 +133,6 @@ export type { AcquisitionSourceInfo }
 
 export type CustomerLifecycleStatus = 0 | 1
 export type CustomerLicenseType = 'TRIAL' | 'OFFICIAL'
-
 export interface CustomerCreate {
   account_name: string
   city: string
@@ -140,6 +140,7 @@ export interface CustomerCreate {
   industry?: string | null
   company_scale?: string | null
   source_public_id?: string | null
+  product_public_id: string
   default_procurement_method_id?: number | null
   status?: CustomerLifecycleStatus
   license_type?: CustomerLicenseType | null
@@ -159,6 +160,7 @@ export interface CustomerUpdate {
   status?: CustomerLifecycleStatus
   license_type?: CustomerLicenseType | null
   license_expiry_date?: string | null
+  product_public_id?: string | null
 }
 
 export interface CustomerLifecycleStatusUpdate {
@@ -227,6 +229,9 @@ export interface CustomerResponse {
   owner_info?: UserBasicInfo
   collaborator_infos?: UserBasicInfo[]
   creator_info?: UserBasicInfo
+  product_public_id?: string | null
+  product_name?: string | null
+  products?: { public_id: string; name: string }[]
 }
 
 export interface ContactResponse {
@@ -285,6 +290,9 @@ export interface CustomerDetailResponse {
   owner_info?: UserBasicInfo
   creator_info?: UserBasicInfo
   customer_intelligence_has_inputs?: boolean
+  product_public_id?: string | null
+  product_name?: string | null
+  products?: { public_id: string; name: string }[]
 }
 
 export interface ContactCreate {

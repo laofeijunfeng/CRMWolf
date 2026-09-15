@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   InputField,
+  ProductIntentPicker,
   SelectField,
 } from '@/components/crmwolf'
 import FeedbackAlert from '@/components/crmwolf/FeedbackAlert.vue'
@@ -70,14 +71,15 @@ const initialForm = ref({
   city: '',
   address: '',
   default_procurement_method_id: '' as string | number,
+  product_public_id: '',
 })
 
-// 表单数据
 const formValues = reactive({
   account_name: '',
   city: '',
   address: '',
-  default_procurement_method_id: '' as string | number
+  default_procurement_method_id: '' as string | number,
+  product_public_id: '',
 })
 
 // 计算属性
@@ -97,6 +99,7 @@ const hasFormChanges = computed(() =>
   || formValues.city.trim() !== String(initialForm.value.city).trim()
   || formValues.address.trim() !== String(initialForm.value.address).trim()
   || String(formValues.default_procurement_method_id) !== String(initialForm.value.default_procurement_method_id)
+  || formValues.product_public_id !== initialForm.value.product_public_id
 )
 
 // ==================== Methods ====================
@@ -113,6 +116,7 @@ const fetchLeadDetail = async (leadId: string, requestId: number): Promise<void>
     formValues.city = res.city ?? ''
     formValues.address = ''
     formValues.default_procurement_method_id = ''
+    formValues.product_public_id = res.product_public_id ?? ''
     initialForm.value = { ...formValues }
   } catch (error: unknown) {
     if (requestId !== loadRequestId.value || !props.open || props.leadId !== leadId) return
@@ -191,6 +195,10 @@ const handleSubmit = async (): Promise<void> => {
     toast.error('请选择默认采购方式')
     return
   }
+  if (formValues.product_public_id.trim() === '') {
+    toast.error('请选择产品')
+    return
+  }
 
   submitting.value = true
   const commandOptions = convertCommandOptions.value ?? createCommandRequestOptions()
@@ -201,6 +209,7 @@ const handleSubmit = async (): Promise<void> => {
       account_name: formValues.account_name.trim().length > 0 ? formValues.account_name.trim() : null,
       address: formValues.address.trim().length > 0 ? formValues.address.trim() : null,
       default_procurement_method_id: Number(formValues.default_procurement_method_id),
+      product_public_id: formValues.product_public_id,
     }
     let succeeded = false
     let keepCommand = true
@@ -281,6 +290,7 @@ const startLoad = (leadId: string): void => {
   formValues.city = ''
   formValues.address = ''
   formValues.default_procurement_method_id = ''
+  formValues.product_public_id = ''
   initialForm.value = { ...formValues }
   leadLoading.value = true
   procurementLoading.value = true
@@ -320,6 +330,7 @@ watch(
       formValues.city = ''
       formValues.address = ''
       formValues.default_procurement_method_id = ''
+      formValues.product_public_id = ''
       initialForm.value = { ...formValues }
       leadData.value = null
       procurementMethodOptions.value = []
@@ -462,6 +473,13 @@ watch(
               label="公司地址"
               :disabled="submitting || loading || loadError !== null || closeGuardPending"
               placeholder="请输入公司地址（可选）"
+            />
+
+            <ProductIntentPicker
+              :model-value="formValues.product_public_id"
+              :disabled="submitting || loading || loadError !== null || closeGuardPending"
+              id-prefix="lead-convert-product"
+              @update:model-value="(value) => { formValues.product_public_id = value }"
             />
           </div>
         </form>

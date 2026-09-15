@@ -28,6 +28,7 @@ import {
 import { Button } from '@/components/ui/button'
 import {
   InputField,
+  ProductIntentPicker,
   SelectField,
   TextareaField,
 } from '@/components/crmwolf'
@@ -89,6 +90,7 @@ function applyLeadDetail(lead: LeadDetail): void {
   initialValues.value = {
     lead_name: lead.lead_name,
     source_public_id: lead.source_info?.public_id ?? '',
+    product_public_id: lead.product_public_id ?? '',
     city: lead.city,
     company_scale: lead.company_scale as LeadForm['company_scale'] | undefined,
     contact_name: lead.contact_name,
@@ -158,6 +160,7 @@ const handleSubmit = async (values: GenericObject): Promise<void> => {
     const payload: LeadCreate = {
       lead_name: formData.lead_name,
       source_public_id: formData.source_public_id,
+      product_public_id: formData.product_public_id,
       city: formData.city,
       contact_name: formData.contact_name,
       contact_phone: formData.contact_phone,
@@ -257,6 +260,18 @@ const continueEditing = (): void => {
                   required
                   :options="sourceOptions"
                   placeholder="请选择来源"
+                  @update:model-value="handleChange"
+                />
+                <FormMessage />
+              </FormItem>
+            </FormField>
+
+            <!-- 意向产品 -->
+            <FormField v-slot="{ value, handleChange }" name="product_public_id">
+              <FormItem>
+                <ProductIntentPicker
+                  :model-value="String(value ?? '')"
+                  id-prefix="lead-product"
                   @update:model-value="handleChange"
                 />
                 <FormMessage />

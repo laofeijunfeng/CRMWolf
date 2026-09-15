@@ -400,7 +400,7 @@ watch(
           :title="`产品列表（${filteredProducts.length}）`"
           :items="filteredProducts"
           :loading="loading"
-          empty-text="暂无产品"
+          :empty-text="filteredProducts.length === 0 && !canCreate ? '暂无产品。你没有创建产品的权限，请联系团队管理员' : '暂无产品'"
         >
           <template #itemMain="{ item }">
             <div>

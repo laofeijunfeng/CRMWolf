@@ -6,6 +6,7 @@ export interface CustomerEditableSnapshot {
   address: string | null
   company_scale: string | null
   source_public_id: string | null
+  product_public_id: string | null
   default_procurement_method_id: number | null
   industry: string | null
   status: 0 | 1 | null
@@ -19,6 +20,7 @@ type CustomerDiffField =
   | 'address'
   | 'company_scale'
   | 'source_public_id'
+  | 'product_public_id'
   | 'default_procurement_method_id'
   | 'industry'
   | 'status'
@@ -30,6 +32,7 @@ const customerDiffFields: readonly CustomerDiffField[] = [
   'address',
   'company_scale',
   'source_public_id',
+  'product_public_id',
   'default_procurement_method_id',
   'industry',
   'status',
@@ -114,6 +117,15 @@ export function buildCustomerUpdatePayload(
         const baselineValue = normalizeText(baseline.source_public_id)
         if (currentValue !== baselineValue) {
           payload.source_public_id = currentValue
+          hasChanges = true
+        }
+        break
+      }
+      case 'product_public_id': {
+        const currentValue = normalizeText(current.product_public_id)
+        const baselineValue = normalizeText(baseline.product_public_id)
+        if (currentValue !== baselineValue) {
+          payload.product_public_id = currentValue
           hasChanges = true
         }
         break

@@ -20,6 +20,9 @@ export interface Lead {
   contact_name: string
   contact_phone: string
   company_scale?: string
+  product_public_id?: string | null
+  product_name?: string | null
+  products?: { public_id: string; name: string }[]
   owner_id?: string
   owner_info?: OwnerInfo
   status: number
@@ -40,6 +43,9 @@ export interface LeadDetail {
   contact_name: string
   contact_phone: string
   company_scale?: string
+  product_public_id?: string | null
+  product_name?: string | null
+  products?: { public_id: string; name: string }[]
   owner_id?: string
   owner_info?: OwnerInfo
   status: number
@@ -59,6 +65,7 @@ export interface LeadCreate {
   contact_name: string
   contact_phone: string
   company_scale?: string
+  product_public_id: string
 }
 
 export interface LeadUpdate {
@@ -68,6 +75,7 @@ export interface LeadUpdate {
   contact_name?: string
   contact_phone?: string
   company_scale?: string
+  product_public_id?: string
   status?: number
 }
 

@@ -27,6 +27,9 @@ export const LeadResponseSchema = z.object({
   contact_phone: z.string().min(1).max(20),
   company_scale: CompanyScaleSchema.nullable(),
   owner_id: z.string().nullable(),
+  product_public_id: z.string().nullable(),
+  product_name: z.string().nullable(),
+  products: z.array(z.object({ public_id: z.string(), name: z.string() })).default([]),
   status: LeadStatusSchema,
   pool_id: z.number().int().nullable(),
   creator_id: z.string(),
@@ -73,6 +76,7 @@ export type LeadDetailResponse = z.infer<typeof LeadDetailResponseSchema>
 export const LeadCreateSchema = z.object({
   lead_name: z.string().min(1).max(255),
   source_public_id: z.string().min(1),
+  product_public_id: z.string().min(1),
   city: z.string().min(1).max(100),
   contact_name: z.string().min(1).max(100),
   contact_phone: z.string().min(1).max(20),

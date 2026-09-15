@@ -129,6 +129,16 @@ describe('ProductPanel', () => {
     expect(wrapper.find('h2').text()).toBe('新建产品')
   })
 
+  it('tells a viewer without create permission to contact the team admin when the list is empty', async () => {
+    setActivePinia(createPinia()); setPermissions(['product:view'])
+    vi.mocked(productApi.list).mockResolvedValueOnce([])
+    const wrapper = mountPanel()
+    await vi.waitFor(() => expect(productApi.list).toHaveBeenCalled())
+    await flushPromises()
+    expect(wrapper.text()).toContain('你没有创建产品的权限')
+    wrapper.unmount()
+  })
+
 
   it('renders a retryable error instead of an empty state and recovers after retry', async () => {
     setActivePinia(createPinia()); setPermissions(['product:view'])

@@ -6,6 +6,26 @@ import FormErrorSummary from '@/components/crmwolf/FormErrorSummary.vue'
 import customerApi, { type CustomerDetailResponse } from '@/api/customer'
 import procurementApi from '@/api/procurement'
 import { acquisitionSourceApi } from '@/api/acquisition-source'
+import { customerCreateSchema, customerEditSchema, customerFormSchema } from '@/schemas/customer-form'
+
+vi.mock('@/api/product', () => ({
+  default: {
+    list: vi.fn().mockResolvedValue([
+      {
+        id: 'prd_crm',
+        public_id: 'prd_crm',
+        name: 'CRM',
+        description: null,
+        is_active: true,
+        created_by: 'u',
+        updated_by: null,
+        created_time: '2026-01-01T00:00:00',
+        updated_time: '2026-01-01T00:00:00',
+        modules: [],
+      },
+    ]),
+  },
+}))
 Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
   configurable: true,
   value: vi.fn(),
@@ -162,6 +182,9 @@ const customerDetail: CustomerDetailResponse = {
   license_expiry_date: null,
   license_type: null,
   contacts: [],
+  product_public_id: 'prd_crm',
+  product_name: 'CRM',
+  products: [{ public_id: 'prd_crm', name: 'CRM' }],
 }
 
 describe('CustomerFormDialog edit initialization', () => {
@@ -241,6 +264,35 @@ describe('CustomerFormDialog edit initialization', () => {
   })
 
 
+
+describe('CustomerFormDialog product schema', () => {
+  it('requires product_public_id on create, form, and edit schemas', () => {
+    const missing = {
+      account_name: '新客户',
+      city: '上海',
+      company_scale: '1-50人' as const,
+      source_public_id: 'source-1',
+      default_procurement_method_id: 1,
+      contact_name: '张三',
+      contact_mobile: '13800138000',
+      contact_position: '经理',
+      contact_gender: '男' as const,
+    }
+    expect(customerCreateSchema.safeParse(missing).success).toBe(false)
+    expect(customerFormSchema.safeParse({
+      account_name: '新客户',
+      city: '上海',
+      company_scale: '1-50人',
+      source_public_id: 'source-1',
+      default_procurement_method_id: 1,
+    }).success).toBe(false)
+    expect(customerEditSchema.safeParse({
+      account_name: '新客户',
+      city: '上海',
+    }).success).toBe(false)
+    expect(customerCreateSchema.safeParse({ ...missing, product_public_id: 'prd_crm' }).success).toBe(true)
+  })
+})
 describe('CustomerFormDialog mode transitions', () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -341,6 +393,9 @@ describe('CustomerFormDialog mode transitions', () => {
       company_scale: null,
       source_info: null,
       default_procurement_method_id: null,
+      product_public_id: null,
+      product_name: null,
+      products: [],
     }
     const wrapper = shallowMount(CustomerFormDialog, {
       global: { stubs: { Dialog: DialogSlotStub, DialogContent: DialogSlotStub } },
@@ -348,6 +403,7 @@ describe('CustomerFormDialog mode transitions', () => {
     })
     await flushPromises()
     const initialValues = (wrapper.vm as unknown as { values: Record<string, unknown> }).values
+    expect(initialValues['product_public_id']).toBe('prd_crm')
     expect(initialValues['company_scale']).toBe('1-50人')
     expect(initialValues['source_public_id']).toBe('source-a')
     expect(initialValues['default_procurement_method_id']).toBe(8)
@@ -356,6 +412,7 @@ describe('CustomerFormDialog mode transitions', () => {
     const switchedValues = (wrapper.vm as unknown as { values: Record<string, unknown> }).values
     expect(switchedValues['company_scale']).toBeUndefined()
     expect(switchedValues['source_public_id']).toBeUndefined()
+    expect(switchedValues['product_public_id']).toBe('')
     expect(switchedValues['default_procurement_method_id']).toBeUndefined()
     wrapper.unmount()
   })
@@ -467,6 +524,7 @@ describe('CustomerFormDialog progressive edit sections', () => {
       contact_mobile: '13800138000',
       contact_position: '经理',
       contact_gender: '男',
+      product_public_id: 'prd_crm',
     })
     return wrapper
   }
@@ -490,8 +548,7 @@ describe('CustomerFormDialog progressive edit sections', () => {
     await flushPromises()
     const contact = wrapper.get('#customer-contact-name').element
     const trigger = wrapper.get('#customer-more-info-trigger').element
-    expect(contact.compareDocumentPosition(trigger) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(wrapper.get('#customer-contact-name').exists()).toBe(true)
+    expect(Boolean(contact.compareDocumentPosition(trigger) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
     wrapper.unmount()
   })
 
@@ -512,7 +569,7 @@ describe('CustomerFormDialog progressive edit sections', () => {
     await flushPromises()
     const content = wrapper.get('#customer-more-info-content')
     expect(content.classes()).not.toContain('grid')
-    expect(content.get('.grid').exists()).toBe(true)
+    expect(content.find('.grid').exists()).toBe(true)
     wrapper.unmount()
   })
 
@@ -664,6 +721,7 @@ describe('CustomerFormDialog progressive edit sections', () => {
     await flushPromises()
 
     expect(createCustomer).toHaveBeenCalledWith(expect.objectContaining({
+      product_public_id: 'prd_crm',
       industry: 'internet_saas',
       status: 1,
       license_type: 'TRIAL',

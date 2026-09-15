@@ -28,6 +28,7 @@ import {
   DateField,
   IndustryHierarchySelectField,
   InputField,
+  ProductIntentPicker,
   SegmentedChoiceControl,
   SelectField,
 } from '@/components/crmwolf'
@@ -70,12 +71,13 @@ interface CustomerEditFormValues {
   address: string
   company_scale?: string
   source_public_id?: string
+  product_public_id: string
   default_procurement_method_id?: number
 }
 
 const { handleSubmit, resetForm, setValues, setFieldValue, setFieldError, setErrors, errors, values } = useForm<CustomerEditForm | CustomerCreateForm>({
   validationSchema: schema,
-  initialValues: { account_name: '', city: '', address: '', company_scale: undefined, source_public_id: undefined, default_procurement_method_id: undefined, contact_name: '', contact_mobile: '', contact_position: '', contact_gender: undefined } as unknown as CustomerCreateForm,
+  initialValues: { account_name: '', city: '', address: '', company_scale: undefined, source_public_id: undefined, product_public_id: '', default_procurement_method_id: undefined, contact_name: '', contact_mobile: '', contact_position: '', contact_gender: undefined } as unknown as CustomerCreateForm,
 })
 const { value: contactGenderValue, errorMessage: contactGenderError } = useField<string>('contact_gender')
 const genderOptions = [{ value: '男', label: '男', tone: 'primary' as const }, { value: '女', label: '女', tone: 'success' as const }]
@@ -139,6 +141,7 @@ const fieldLabels: Record<string, string> = {
   address: '详细地址',
   company_scale: '公司规模',
   source_public_id: '获客来源',
+  product_public_id: '产品',
   default_procurement_method_id: '采购方式',
   contact_name: '联系人姓名',
   contact_mobile: '联系电话',
@@ -238,6 +241,7 @@ function emptyEditableSnapshot(): CustomerEditableSnapshot {
     address: null,
     company_scale: null,
     source_public_id: null,
+    product_public_id: null,
     default_procurement_method_id: null,
     industry: null,
     status: null,
@@ -256,6 +260,7 @@ function buildCustomerEditFormValues(customer: CustomerDetailResponse): Customer
     account_name: customer.account_name,
     city: customer.city,
     address: customer.address ?? '',
+    product_public_id: customer.product_public_id ?? '',
   }
   const companyScale = normalizeCompanyScale(customer.company_scale)
   if (companyScale !== undefined) formValues.company_scale = companyScale
@@ -266,7 +271,7 @@ function buildCustomerEditFormValues(customer: CustomerDetailResponse): Customer
   return formValues
 }
 type CustomerProfileField = keyof CustomerEditFormValues
-const customerProfileFields: readonly CustomerProfileField[] = ['account_name', 'city', 'address', 'company_scale', 'source_public_id', 'default_procurement_method_id']
+const customerProfileFields: readonly CustomerProfileField[] = ['account_name', 'city', 'address', 'company_scale', 'source_public_id', 'product_public_id', 'default_procurement_method_id']
 function normalizeProfileValue(field: CustomerProfileField, value: unknown): string | number | null {
   if (field === 'default_procurement_method_id') {
     if (typeof value === 'number' && Number.isFinite(value)) return value
@@ -292,6 +297,7 @@ function buildEditableSnapshot(customer: {
   address: string | null
   company_scale: string | null
   source_info?: { public_id?: string | null } | null
+  product_public_id?: string | null
   default_procurement_method_id: number | null
   industry: string | null
   status: CustomerDetailResponse['status']
@@ -304,6 +310,7 @@ function buildEditableSnapshot(customer: {
     address: customer.address,
     company_scale: customer.company_scale,
     source_public_id: customer.source_info?.public_id ?? null,
+    product_public_id: customer.product_public_id ?? null,
     default_procurement_method_id: customer.default_procurement_method_id,
     industry: customer.industry,
     status: editableStatus(customer.status),
@@ -318,6 +325,7 @@ function buildCurrentSnapshot(editData: CustomerEditForm): CustomerEditableSnaps
     address: editData.address ?? null,
     company_scale: editData.company_scale ?? null,
     source_public_id: editData.source_public_id ?? null,
+    product_public_id: editData.product_public_id ?? null,
     default_procurement_method_id: editData.default_procurement_method_id ?? null,
     industry: normalizeIndustryValue(industryValue.value),
     status: lifecycleStatusValue.value,
@@ -333,6 +341,7 @@ function mergeCustomerProfileValues(latest: CustomerDetailResponse): CustomerEdi
     account_name: preservedFields.has('account_name') ? currentValues.account_name ?? '' : latestValues.account_name,
     city: preservedFields.has('city') ? currentValues.city ?? '' : latestValues.city,
     address: preservedFields.has('address') ? currentValues.address ?? '' : latestValues.address,
+    product_public_id: preservedFields.has('product_public_id') ? currentValues.product_public_id ?? '' : latestValues.product_public_id,
   }
   const companyScale = preservedFields.has('company_scale') ? currentValues.company_scale : latestValues.company_scale
   if (companyScale !== undefined) formValues.company_scale = companyScale
@@ -398,7 +407,7 @@ async function applyCustomerDetail(customer: CustomerDetailResponse): Promise<vo
   setValues(formValues as unknown as CustomerForm | CustomerCreateForm, false)
   resetForm({ values: formValues as unknown as CustomerForm | CustomerCreateForm, errors: {} }, { force: true })
   await nextTick()
-  for (const field of ['account_name', 'city', 'address', 'company_scale', 'source_public_id', 'default_procurement_method_id', 'industry', 'status', 'license_type', 'license_expiry_date', 'contact_name', 'contact_mobile', 'contact_position', 'contact_gender'] as const) {
+  for (const field of ['account_name', 'city', 'address', 'company_scale', 'source_public_id', 'product_public_id', 'default_procurement_method_id', 'industry', 'status', 'license_type', 'license_expiry_date', 'contact_name', 'contact_mobile', 'contact_position', 'contact_gender'] as const) {
     setFieldError(field, undefined)
   }
   applyingFormValues.value = false
@@ -447,6 +456,7 @@ watch(
           address: '',
           company_scale: undefined,
           source_public_id: undefined,
+          product_public_id: '',
           default_procurement_method_id: undefined,
           contact_name: '',
           contact_mobile: '',
@@ -464,7 +474,7 @@ watch(
 )
 function clearFieldErrors(): void {
   setErrors({})
-  for (const field of ['account_name', 'city', 'address', 'company_scale', 'source_public_id', 'default_procurement_method_id', 'industry', 'status', 'license_type', 'license_expiry_date', 'contact_name', 'contact_mobile', 'contact_position', 'contact_gender'] as const) {
+  for (const field of ['account_name', 'city', 'address', 'company_scale', 'source_public_id', 'product_public_id', 'default_procurement_method_id', 'industry', 'status', 'license_type', 'license_expiry_date', 'contact_name', 'contact_mobile', 'contact_position', 'contact_gender'] as const) {
     setFieldError(field, undefined)
   }
 }
@@ -559,6 +569,7 @@ const submitForm = handleSubmit(async (formValues): Promise<void> => {
         address: normalizeOptionalText(createData.address),
         company_scale: createData.company_scale ?? null,
         source_public_id: createData.source_public_id,
+        product_public_id: createData.product_public_id,
         default_procurement_method_id: createData.default_procurement_method_id ?? null,
         primary_contact: {
           name: createData.contact_name,
@@ -711,7 +722,6 @@ function continueEditing(): void { closeGuard.continueEditing() }
               </FormItem>
             </FormField>
 
-            <!-- Customer Source -->
             <FormField v-slot="{ value, handleChange }" name="source_public_id">
               <FormItem>
                 <SelectField
@@ -722,6 +732,17 @@ function continueEditing(): void { closeGuard.continueEditing() }
                   :options="sourceSelectOptions"
                   placeholder="请选择来源"
                   :disabled="sourceOptionsLoading || sourceOptionsError !== null"
+                  @update:model-value="handleChange"
+                />
+                <FormMessage />
+              </FormItem>
+            </FormField>
+
+            <FormField v-slot="{ value, handleChange }" name="product_public_id">
+              <FormItem>
+                <ProductIntentPicker
+                  :model-value="String(value ?? '')"
+                  id-prefix="customer-product"
                   @update:model-value="handleChange"
                 />
                 <FormMessage />

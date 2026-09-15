@@ -48,6 +48,7 @@ const customerFormObjectSchema = z.object({
     invalid_type_error: '请选择公司规模'
   }),
   source_public_id: z.string().min(1, '请选择获客来源'),
+  product_public_id: z.string({ required_error: '请选择产品' }).min(1, '请选择产品'),
   default_procurement_method_id: z.number({
     required_error: '请选择采购方式',
     invalid_type_error: '请选择采购方式'
@@ -80,6 +81,7 @@ export const customerCreateSchema = customerFormObjectSchema.pick({
   address: true,
   company_scale: true,
   source_public_id: true,
+  product_public_id: true,
   default_procurement_method_id: true,
   industry: true,
   status: true,

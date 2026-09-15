@@ -7,6 +7,8 @@ export const leadSchema = z.object({
 
   source_public_id: z.string().min(1, '请选择获客来源'),
 
+  product_public_id: z.string({ required_error: '请选择产品' }).min(1, '请选择产品'),
+
   city: z.string()
     .min(2, '城市名称至少 2 个字符')
     .max(50, '城市名称最多 50 个字符'),
