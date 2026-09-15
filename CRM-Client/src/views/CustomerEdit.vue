@@ -36,6 +36,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Input } from '@/components/ui/input'
+import { ProductIntentPicker } from '@/components/crmwolf'
 import ErrorState from '@/components/ErrorState.vue'
 import { customerFormSchema, companyScaleOptions, type CustomerForm } from '@/schemas/customer-form'
 import { useAcquisitionSourceOptions } from '@/composables/useAcquisitionSourceOptions'
@@ -78,6 +79,7 @@ const { handleSubmit, setFieldError, errors, meta, resetForm, validate } = useFo
     address: '',
     company_scale: undefined,
     source_public_id: undefined,
+    product_public_id: '',
     default_procurement_method_id: undefined
   } as unknown as CustomerForm
 })
@@ -100,10 +102,12 @@ function isCompleteCustomerForm(value: Partial<CustomerForm> | undefined): value
     && typeof value.city === 'string'
     && typeof value.company_scale === 'string'
     && typeof value.source_public_id === 'string'
+    && typeof value.product_public_id === 'string'
+    && value.product_public_id !== ''
     && typeof value.default_procurement_method_id === 'number'
 }
 
-function toFormValues(res: { account_name: string; city: string; address: string | null; company_scale: string | null; source_info?: { public_id: string } | null; default_procurement_method_id: number | null }): Partial<CustomerForm> {
+function toFormValues(res: { account_name: string; city: string; address: string | null; company_scale: string | null; source_info?: { public_id: string } | null; product_public_id?: string | null; default_procurement_method_id: number | null }): Partial<CustomerForm> {
   const companyScale = normalizeCompanyScale(res.company_scale)
   const sourcePublicId = res.source_info?.public_id
   const procurementMethodId = res.default_procurement_method_id ?? undefined
@@ -112,6 +116,7 @@ function toFormValues(res: { account_name: string; city: string; address: string
     account_name: res.account_name ?? '',
     city: res.city ?? '',
     address: res.address ?? '',
+    product_public_id: res.product_public_id ?? '',
     ...(companyScale === undefined ? {} : { company_scale: companyScale }),
     ...(sourcePublicId === undefined ? {} : { source_public_id: sourcePublicId }),
     ...(procurementMethodId === undefined ? {} : { default_procurement_method_id: procurementMethodId }),
@@ -198,6 +203,7 @@ const fieldLabels: Record<string, string> = {
   address: '公司地址',
   company_scale: '公司规模',
   source_public_id: '获客来源',
+  product_public_id: '产品',
   default_procurement_method_id: '采购方式',
 }
 
@@ -256,6 +262,7 @@ const submitCustomer = async (formValues: CustomerForm, navigateAfterSuccess: bo
         address: emptyToNull(formValues.address),
         company_scale: formValues.company_scale ?? null,
         source_public_id: formValues.source_public_id,
+        product_public_id: formValues.product_public_id,
         default_procurement_method_id: formValues.default_procurement_method_id ?? null,
       } satisfies CustomerUpdate
       const updatedCustomer = await customerApi.updateCustomer(customerId.value, updateData)
@@ -269,6 +276,7 @@ const submitCustomer = async (formValues: CustomerForm, navigateAfterSuccess: bo
         address: emptyToNull(formValues.address),
         company_scale: formValues.company_scale ?? null,
         source_public_id: formValues.source_public_id,
+        product_public_id: formValues.product_public_id,
         default_procurement_method_id: formValues.default_procurement_method_id ?? null,
       } satisfies CustomerCreate
       const createdCustomer = await customerApi.createCustomer(createData)
@@ -512,6 +520,17 @@ onUnmounted(() => {
                 <p v-if="optionsErrorFields.includes('source_public_id')" class="form-option-error">
                   获客来源加载失败，请点击上方“重试加载选项”。
                 </p>
+              </FormItem>
+            </FormField>
+
+            <FormField v-slot="{ value, handleChange }" name="product_public_id">
+              <FormItem>
+                <ProductIntentPicker
+                  :model-value="String(value ?? '')"
+                  id-prefix="customer-edit-product"
+                  @update:model-value="handleChange"
+                />
+                <FormMessage />
               </FormItem>
             </FormField>
 

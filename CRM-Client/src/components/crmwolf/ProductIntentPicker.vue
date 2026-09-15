@@ -10,9 +10,9 @@ import {
 
 interface Props {
   modelValue: string
-  disabled?: boolean
-  invalid?: boolean
-  idPrefix?: string
+  disabled?: boolean | undefined
+  invalid?: boolean | undefined
+  idPrefix?: string | undefined
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -68,10 +68,10 @@ function handleChange(value: string): void {
       v-else
       :model-value="modelValue"
       :options="options"
-      :disabled="disabled"
+      :disabled="props.disabled"
       :labelled-by="labelId"
-      :id-prefix="idPrefix"
-      :invalid="invalid"
+      :id-prefix="props.idPrefix"
+      :invalid="props.invalid"
       :described-by="errorId"
       :style="{ '--segmented-choice-columns': String(Math.min(Math.max(options.length, 1), 4)) }"
       @update:model-value="handleChange"
