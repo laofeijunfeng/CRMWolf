@@ -162,6 +162,21 @@ def opportunity_field_defaults(
     return defaults
 
 
+def apply_customer_opportunity_product_defaults(
+    opportunity: Dict[str, object],
+    customer: Dict[str, object],
+    db: object | None,
+    team_id: Optional[int],
+) -> Dict[str, object]:
+    if db is None or team_id is None:
+        return opportunity
+    defaults = customer_opportunity_product_defaults(db, int(team_id), customer)
+    for key, value in defaults.items():
+        if not opportunity.get(key):
+            opportunity[key] = value
+    return opportunity
+
+
 def append_suggestions_to_response(response: str, suggestions: List[object]) -> str:
     actionable = [
         suggestion
@@ -181,6 +196,8 @@ def opportunity_next_task_from_suggestions(
     suggestions: List[object],
     parsed: Dict[str, object],
     customer: Dict[str, object],
+    db: object | None = None,
+    team_id: Optional[int] = None,
 ) -> Optional[Dict[str, object]]:
     if not customer.get("id"):
         return None
@@ -199,7 +216,7 @@ def opportunity_next_task_from_suggestions(
     opportunity = dict(parsed.get("opportunity") or {})
     opportunity.pop("opportunity_name", None)
     opportunity["customer_id"] = customer.get("id")
-    field_defaults = opportunity_field_defaults(customer)
+    field_defaults = opportunity_field_defaults(customer, db=db, team_id=team_id)
     for key in ("product_public_id", "product_module_public_ids"):
         if not opportunity.get(key) and key in field_defaults:
             opportunity[key] = field_defaults[key]

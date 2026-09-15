@@ -1165,6 +1165,25 @@ class CRMWorkflowPlanner:
         if opportunity.get("license_type") == "PERPETUAL":
             opportunity.pop("subscription_years", None)
 
+        db = runtime.db
+        team_id = request.principal.team_id
+        if hasattr(db, "query"):
+            from app.crud.customer import customer_crud
+            from app.crud.product_intent import product_intent_payload
+
+            customer_dict: dict[str, object] = {}
+            customer = customer_crud.get_by_public_id(db, customer_id, team_id)
+            if customer is not None:
+                customer_dict["product_public_id"] = product_intent_payload(
+                    customer.product_links
+                ).get("product_public_id")
+            business_rules.apply_customer_opportunity_product_defaults(
+                opportunity,
+                customer_dict,
+                db,
+                team_id,
+            )
+
         missing_fields = business_rules.missing_opportunity_fields(opportunity)
         if missing_fields:
             interaction_fields = [
@@ -1178,9 +1197,11 @@ class CRMWorkflowPlanner:
                     interaction_type="form",
                     business_action="collect_opportunity_fields",
                     title="补充商机信息",
-                    prompt=(
-                        f"请补充为「{customer_name}」创建商机所需的信息:"
-                        f"{business_rules.format_opportunity_missing_fields(missing_fields)}。"
+                    prompt=self._opportunity_missing_fields_prompt(
+                        customer_name,
+                        missing_fields,
+                        db=db,
+                        team_id=team_id,
                     ),
                     fields=self._opportunity_interaction_fields(
                         interaction_fields,
@@ -2418,6 +2439,26 @@ class CRMWorkflowPlanner:
             completed_text=completed_text,
             cancelled_text=cancelled_text,
         )
+
+    @staticmethod
+    def _opportunity_missing_fields_prompt(
+        customer_name: str,
+        missing_fields: list[str],
+        *,
+        db: object,
+        team_id: int,
+    ) -> str:
+        prompt = (
+            f"请补充为「{customer_name}」创建商机所需的信息:"
+            f"{business_rules.format_opportunity_missing_fields(missing_fields)}。"
+        )
+        if "product_public_id" not in missing_fields:
+            return prompt
+        from app.crud.product_intent import EMPTY_CATALOG_MESSAGE, first_active_product
+
+        if hasattr(db, "query") and first_active_product(db, team_id) is None:
+            return f"{prompt}{EMPTY_CATALOG_MESSAGE}"
+        return prompt
 
     @staticmethod
     def _product_missing_prompt(
