@@ -1099,6 +1099,7 @@ const approvalSubjectFields = computed<ApprovalSubjectField[]>(() => {
         { key: 'number', label: '商机编号', value: subjectNumber.value, type: 'copy' },
         { key: 'name', label: '商机名称', value: entityDetailValue('opportunity_name') ?? subjectName.value, wide: true },
         commonCustomerField,
+        { key: 'product', label: '产品', value: entityDetailValue('product_name') },
         { key: 'amount', label: '预计金额', value: entityDetailValue('total_amount') ?? subjectAmount.value, type: 'amount' },
         { key: 'user_count', label: '用户数', value: entityDetailValue('user_count') },
         { key: 'unit_price', label: '标准单价', value: entityDetailValue('unit_price'), type: 'amount' },

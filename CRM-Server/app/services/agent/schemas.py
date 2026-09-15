@@ -123,7 +123,8 @@ class AgentOpportunityEntity(BaseModel):
     expected_closing_date_text: Optional[str] = Field(None, description="用户原文中的预计成交日期表达")
     expected_closing_date: Optional["AgentTemporalExpression"] = Field(None, description="预计成交日期结构化时间")
     expected_closing_date_iso: Optional[str] = Field(None, description="系统计算字段，AI 必须返回 null")
-
+    product_public_id: Optional[str] = Field(None, min_length=1, description="关联产品对外ID")
+    product_module_public_ids: Optional[list[str]] = Field(None, min_length=1, description="关联产品模块对外ID列表")
 
 class AgentOpportunityStageTransitionEntity(BaseModel):
     opportunity_id: Optional[str] = Field(None, description="用户明确提到的商机对外 ID；没有则为 null")

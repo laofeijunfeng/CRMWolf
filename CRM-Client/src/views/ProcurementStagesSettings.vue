@@ -41,17 +41,17 @@ const submitting = ref(false)
 const editingStage = ref<ProcurementStageTemplate | null>(null)
 
 const stageSchema = toTypedSchema(z.object({
-  stage_code: z.string().trim().min(1, '请输入阶段编码').max(50, '编码不能超过50字符').regex(/^[A-Z0-9_]+$/, '编码只能包含大写字母、数字和下划线'),
+  template_code: z.string().trim().min(1, '请输入阶段编码').max(50, '编码不能超过50字符').regex(/^[A-Z0-9_]+$/, '编码只能包含大写字母、数字和下划线'),
   stage_name: z.string().trim().min(1, '请输入阶段名称').max(50, '阶段名称不能超过50字符'),
   win_probability: z.number().min(0, '赢率不能小于0').max(100, '赢率不能超过100'),
   sort_order: z.number().int('排序必须是整数').min(0, '排序不能小于0'),
-  is_default: z.boolean(),
+  is_default_start: z.boolean(),
   can_skip: z.boolean(),
   description: z.string().max(200, '描述不能超过200字符').optional(),
 }))
 const { handleSubmit, resetForm } = useForm({
   validationSchema: stageSchema,
-  initialValues: { stage_code: '', stage_name: '', win_probability: 0, sort_order: 0, is_default: false, can_skip: false, description: '' },
+  initialValues: { template_code: '', stage_name: '', win_probability: 0, sort_order: 0, is_default_start: false, can_skip: false, description: '' },
 })
 
 const loadMethod = async (): Promise<void> => {
@@ -67,26 +67,29 @@ const loadMethod = async (): Promise<void> => {
     loading.value = false
   }
 }
+
 const showCreate = (): void => {
   editingStage.value = null
-  resetForm({ values: { stage_code: '', stage_name: '', win_probability: 0, sort_order: method.value?.stage_templates.length ?? 0, is_default: false, can_skip: false, description: '' } })
+  resetForm({ values: { template_code: '', stage_name: '', win_probability: 0, sort_order: method.value?.stage_templates.length ?? 0, is_default_start: false, can_skip: false, description: '' } })
   dialogOpen.value = true
 }
+
 const showEdit = (stage: ProcurementStageTemplate): void => {
   editingStage.value = stage
-  resetForm({ values: { stage_code: stage.stage_code, stage_name: stage.stage_name, win_probability: stage.win_probability, sort_order: stage.sort_order, is_default: stage.is_default === 1, can_skip: stage.can_skip === 1, description: stage.description ?? '' } })
+  resetForm({ values: { template_code: stage.template_code, stage_name: stage.stage_name, win_probability: stage.win_probability, sort_order: stage.sort_order, is_default_start: stage.is_default_start === 1, can_skip: stage.can_skip === 1, description: stage.description ?? '' } })
   dialogOpen.value = true
 }
+
 const submit = handleSubmit(async (values) => {
   if (methodId.value === null) return
   submitting.value = true
   try {
     if (editingStage.value !== null) {
-      const data: ProcurementStageTemplateUpdate = { stage_name: values.stage_name, win_probability: values.win_probability, sort_order: values.sort_order, is_default: values.is_default ? 1 : 0, can_skip: values.can_skip ? 1 : 0, description: values.description ?? '' }
+      const data: ProcurementStageTemplateUpdate = { template_code: values.template_code, stage_name: values.stage_name, win_probability: values.win_probability, sort_order: values.sort_order, is_default_start: values.is_default_start ? 1 : 0, can_skip: values.can_skip ? 1 : 0, description: values.description ?? '' }
       await procurementApi.updateStageTemplate(editingStage.value.id, data)
       toast.success('阶段模板已更新')
     } else {
-      const data: ProcurementStageTemplateCreate = { procurement_method_id: methodId.value, stage_code: values.stage_code, stage_name: values.stage_name, win_probability: values.win_probability, sort_order: values.sort_order, is_default: values.is_default ? 1 : 0, can_skip: values.can_skip ? 1 : 0, description: values.description ?? '' }
+      const data: ProcurementStageTemplateCreate = { procurement_method_id: methodId.value, template_code: values.template_code, stage_name: values.stage_name, win_probability: values.win_probability, sort_order: values.sort_order, is_default_start: values.is_default_start ? 1 : 0, can_skip: values.can_skip ? 1 : 0, description: values.description ?? '' }
       await procurementApi.createStageTemplate(data)
       toast.success('阶段模板已创建')
     }
@@ -98,6 +101,7 @@ const submit = handleSubmit(async (values) => {
     submitting.value = false
   }
 })
+
 const removeStage = async (stage: ProcurementStageTemplate): Promise<void> => {
   if (!(await confirmDelete(`阶段模板“${stage.stage_name}”`))) return
   try {
@@ -133,12 +137,25 @@ onMounted(() => { void loadMethod() })
       <CardHeader><CardTitle>{{ method.name }} · 阶段模板</CardTitle><CardDescription>调整模板会影响后续新建或推进的商机，历史商机数据保持不变。</CardDescription></CardHeader>
       <CardContent>
         <ListCard :title="`阶段列表（${method.stage_templates.length}）`" :items="method.stage_templates.slice().sort((a, b) => a.sort_order - b.sort_order)" empty-text="暂无阶段模板">
-          <template #itemMain="{ item }"><div class="font-medium text-wolf-text-primary">{{ item.stage_name }}</div><div class="mt-1 text-xs text-muted-foreground">{{ item.stage_code }} · 赢率 {{ item.win_probability }}% · 排序 {{ item.sort_order }}</div><div v-if="item.description" class="mt-1 text-sm text-muted-foreground">{{ item.description }}</div></template>
-          <template #itemBadges="{ item }"><Badge v-if="item.is_default === 1" variant="outline">默认起点</Badge><Badge v-if="item.can_skip === 1" variant="secondary">可跳过</Badge><Badge :variant="item.is_active === 1 ? 'default' : 'secondary'">{{ item.is_active === 1 ? '启用' : '停用' }}</Badge></template>
+          <template #itemMain="{ item }"><div class="font-medium text-wolf-text-primary">{{ item.stage_name }}</div><div class="mt-1 text-xs text-muted-foreground">{{ item.template_code }} · 赢率 {{ item.win_probability }}% · 排序 {{ item.sort_order }}</div><div v-if="item.description" class="mt-1 text-sm text-muted-foreground">{{ item.description }}</div></template>
+          <template #itemBadges="{ item }"><Badge v-if="item.is_default_start === 1" variant="outline">默认起点</Badge><Badge v-if="item.can_skip === 1" variant="secondary">可跳过</Badge></template>
           <template #itemActions="{ item }"><Button v-if="canUpdate" variant="ghost" size="icon" title="编辑" @click="showEdit(item)"><Pencil class="size-4" /></Button><Button v-if="canDelete" variant="ghost" size="icon" title="删除" class="text-destructive hover:text-destructive" @click="removeStage(item)"><Trash2 class="size-4" /></Button></template>
         </ListCard>
       </CardContent>
     </Card>
   </main>
-  <Dialog v-model:open="dialogOpen"><DialogContent class="max-w-lg"><DialogHeader><DialogTitle>{{ editingStage === null ? '新增阶段模板' : '编辑阶段模板' }}</DialogTitle><DialogDescription>阶段编码创建后不可修改，避免影响已有商机引用。</DialogDescription></DialogHeader><form class="space-y-4" @submit="submit"><FormField v-slot="{ componentField }" name="stage_code"><FormItem><FormLabel>阶段编码</FormLabel><FormControl><Input v-bind="componentField as unknown as Record<string, unknown>" :disabled="editingStage !== null" placeholder="如：QUALIFICATION" /></FormControl><FormMessage /></FormItem></FormField><FormField v-slot="{ componentField }" name="stage_name"><FormItem><FormLabel>阶段名称</FormLabel><FormControl><Input v-bind="componentField as unknown as Record<string, unknown>" placeholder="请输入阶段名称" /></FormControl><FormMessage /></FormItem></FormField><div class="grid grid-cols-2 gap-4"><FormField v-slot="{ componentField }" name="win_probability"><FormItem><FormLabel>赢率（%）</FormLabel><FormControl><Input v-bind="componentField as unknown as Record<string, unknown>" type="number" /></FormControl><FormMessage /></FormItem></FormField><FormField v-slot="{ componentField }" name="sort_order"><FormItem><FormLabel>排序</FormLabel><FormControl><Input v-bind="componentField as unknown as Record<string, unknown>" type="number" /></FormControl><FormMessage /></FormItem></FormField></div><FormField v-slot="{ value, handleChange }" name="is_default"><FormItem class="flex items-center justify-between rounded-lg border p-3"><FormLabel>默认起点</FormLabel><FormControl><Switch :model-value="value" @update:model-value="handleChange" /></FormControl></FormItem></FormField><FormField v-slot="{ value, handleChange }" name="can_skip"><FormItem class="flex items-center justify-between rounded-lg border p-3"><FormLabel>允许跳过</FormLabel><FormControl><Switch :model-value="value" @update:model-value="handleChange" /></FormControl></FormItem></FormField><FormField v-slot="{ componentField }" name="description"><FormItem><FormLabel>描述</FormLabel><FormControl><Textarea v-bind="componentField as unknown as Record<string, unknown>" :rows="3" placeholder="可选" /></FormControl><FormMessage /></FormItem></FormField><DialogFooter><Button type="button" variant="outline" @click="dialogOpen = false">取消</Button><Button type="submit" :disabled="submitting">{{ submitting ? '提交中…' : '保存' }}</Button></DialogFooter></form></DialogContent></Dialog>
+  <Dialog v-model:open="dialogOpen">
+    <DialogContent class="max-w-lg">
+      <DialogHeader><DialogTitle>{{ editingStage === null ? '新增阶段模板' : '编辑阶段模板' }}</DialogTitle><DialogDescription>阶段编码创建后不可修改，避免影响已有商机引用。</DialogDescription></DialogHeader>
+      <form class="space-y-4" @submit="submit">
+        <FormField v-slot="{ componentField }" name="template_code"><FormItem><FormLabel>阶段编码</FormLabel><FormControl><Input v-bind="componentField as unknown as Record<string, unknown>" :disabled="editingStage !== null" placeholder="如：QUALIFICATION" /></FormControl><FormMessage /></FormItem></FormField>
+        <FormField v-slot="{ componentField }" name="stage_name"><FormItem><FormLabel>阶段名称</FormLabel><FormControl><Input v-bind="componentField as unknown as Record<string, unknown>" placeholder="请输入阶段名称" /></FormControl><FormMessage /></FormItem></FormField>
+        <div class="grid grid-cols-2 gap-4"><FormField v-slot="{ componentField }" name="win_probability"><FormItem><FormLabel>赢率（%）</FormLabel><FormControl><Input v-bind="componentField as unknown as Record<string, unknown>" type="number" /></FormControl><FormMessage /></FormItem></FormField><FormField v-slot="{ componentField }" name="sort_order"><FormItem><FormLabel>排序</FormLabel><FormControl><Input v-bind="componentField as unknown as Record<string, unknown>" type="number" /></FormControl><FormMessage /></FormItem></FormField></div>
+        <FormField v-slot="{ value, handleChange }" name="is_default_start"><FormItem class="flex items-center justify-between rounded-lg border p-3"><FormLabel>默认起点</FormLabel><FormControl><Switch :model-value="value" @update:model-value="handleChange" /></FormControl></FormItem></FormField>
+        <FormField v-slot="{ value, handleChange }" name="can_skip"><FormItem class="flex items-center justify-between rounded-lg border p-3"><FormLabel>允许跳过</FormLabel><FormControl><Switch :model-value="value" @update:model-value="handleChange" /></FormControl></FormItem></FormField>
+        <FormField v-slot="{ componentField }" name="description"><FormItem><FormLabel>描述</FormLabel><FormControl><Textarea v-bind="componentField as unknown as Record<string, unknown>" :rows="3" placeholder="可选" /></FormControl><FormMessage /></FormItem></FormField>
+        <DialogFooter><Button type="button" variant="outline" @click="dialogOpen = false">取消</Button><Button type="submit" :disabled="submitting">{{ submitting ? '提交中…' : '保存' }}</Button></DialogFooter>
+      </form>
+    </DialogContent>
+  </Dialog>
 </template>

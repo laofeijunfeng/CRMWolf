@@ -5,8 +5,9 @@ import {
 } from '@/schemas/product'
 
 const productApi = {
-  async list(): Promise<ProductResponse[]> {
-    return ProductListResponseSchema.parse(await request.get<ProductResponse[]>('/v1/products/'))
+  async list(isActive?: boolean): Promise<ProductResponse[]> {
+    const params = isActive === undefined ? undefined : { is_active: isActive }
+    return ProductListResponseSchema.parse(await request.get<ProductResponse[]>('/v1/products/', { params }))
   },
   async get(publicId: string): Promise<ProductResponse> {
     return ProductResponseSchema.parse(await request.get<ProductResponse>(`/v1/products/${publicId}`))

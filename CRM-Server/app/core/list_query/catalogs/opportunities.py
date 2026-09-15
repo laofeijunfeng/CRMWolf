@@ -5,6 +5,7 @@ from app.core.list_query.catalogs.common import person_field, related_name_expre
 from app.core.list_query.types import SortCondition
 from app.models.customer import Customer
 from app.models.opportunity import Opportunity
+from app.models.product import Product
 
 OPPORTUNITIES_LIST_QUERY_CATALOG = ListQueryCatalog(
     name="opportunities",
@@ -18,6 +19,16 @@ OPPORTUNITIES_LIST_QUERY_CATALOG = ListQueryCatalog(
                 Customer,
                 Opportunity.customer_id,
                 Customer.account_name,
+                team_id_expression=Opportunity.team_id,
+            ),
+        ),
+        ListQueryField(
+            key="product_name",
+            type="text",
+            expression=related_name_expression(
+                Product,
+                Opportunity.product_id,
+                Product.name,
                 team_id_expression=Opportunity.team_id,
             ),
         ),
@@ -45,6 +56,12 @@ OPPORTUNITIES_LIST_QUERY_CATALOG = ListQueryCatalog(
             Customer,
             Opportunity.customer_id,
             Customer.account_name,
+            team_id_expression=Opportunity.team_id,
+        ),
+        related_name_expression(
+            Product,
+            Opportunity.product_id,
+            Product.name,
             team_id_expression=Opportunity.team_id,
         ),
     ),

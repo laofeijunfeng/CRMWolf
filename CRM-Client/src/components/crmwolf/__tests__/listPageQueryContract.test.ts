@@ -208,7 +208,7 @@ describe('DataTable frontend/backend list-query contract', () => {
       'Customers.vue': '搜索客户名称、简称或别名',
       'Invoices.vue': '搜索申请编号、客户、合同、抬头、税号或发票号码',
       'Leads.vue': '搜索线索名称、联系人或手机号',
-      'Opportunities.vue': '搜索商机名称、客户或阶段',
+      'Opportunities.vue': '搜索商机名称、客户、产品或阶段',
       'PaymentPlans.vue': '搜索计划编号、客户、合同、商机或阶段',
       'PaymentRecords.vue': '搜索回款编号、客户、合同、阶段、付款方或发票抬头'
     }

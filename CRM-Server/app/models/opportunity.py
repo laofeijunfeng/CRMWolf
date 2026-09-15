@@ -1,4 +1,4 @@
-from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Date, Index, ForeignKey, Numeric
+from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Date, Index, ForeignKey, Numeric, UniqueConstraint
 from sqlalchemy.orm import relationship
 from enum import Enum as PyEnum
 from app.core.database import Base
@@ -66,6 +66,7 @@ class Opportunity(Base):
     opportunity_number = Column(String(50), unique=True, nullable=False, comment="商机编号（系统自动生成）")
     opportunity_name = Column(String(255), nullable=False, comment="商机名称")
     customer_id = Column(BigInteger, ForeignKey('crm_customers.id', ondelete='CASCADE'), nullable=False, comment="关联客户ID")
+    product_id = Column(BigInteger, ForeignKey('crm_products.id', ondelete='RESTRICT'), nullable=True, comment="关联产品ID")
     procurement_method_id = Column(BigInteger, nullable=True, comment="采购方式ID")
     current_stage_snapshot_id = Column(BigInteger, nullable=True, comment="当前阶段快照ID")
     current_stage_name = Column(String(100), nullable=True, comment="当前阶段名称")
@@ -96,13 +97,25 @@ class Opportunity(Base):
 
     contracts = relationship("Contract", back_populates="opportunity", cascade="all, delete-orphan")
     invoice_applications = relationship("InvoiceApplication", back_populates="opportunity", cascade="all, delete-orphan")
+    product = relationship("Product")
+    module_links = relationship(
+        "OpportunityProductModule",
+        back_populates="opportunity",
+        cascade="all, delete-orphan",
+    )
 
     @property
     def updated_time(self):
         return self.last_modified_time
 
+    @property
+    def selected_modules(self):
+        links = list(self.module_links or [])
+        return [link.module for link in links if link.module is not None]
+
     __table_args__ = (
         Index('idx_customer_id', 'customer_id'),
+        Index('idx_opportunity_product_id', 'product_id'),
         Index('idx_procurement_stage_id', 'procurement_stage_id'),
         Index('idx_owner_id', 'owner_id'),
         Index('idx_status', 'status'),
@@ -114,4 +127,21 @@ class Opportunity(Base):
         Index('idx_opportunity_public_id', 'public_id'),
         Index('idx_opportunity_deal_journey_id', 'deal_journey_id'),
         {'comment': '商机表'}
+    )
+
+
+class OpportunityProductModule(Base):
+    __tablename__ = "crm_opportunity_product_modules"
+
+    opportunity_id = Column(BigInteger, ForeignKey("crm_opportunities.id", ondelete="CASCADE"), primary_key=True, comment="商机ID")
+    product_module_id = Column(BigInteger, ForeignKey("crm_product_modules.id", ondelete="RESTRICT"), primary_key=True, comment="产品模块ID")
+    team_id = Column(BigInteger, nullable=False, comment="团队ID")
+
+    opportunity = relationship("Opportunity", back_populates="module_links")
+    module = relationship("ProductModule")
+
+    __table_args__ = (
+        UniqueConstraint("opportunity_id", "product_module_id", name="uq_opportunity_product_module"),
+        Index("idx_opportunity_product_modules_team", "team_id"),
+        {"comment": "商机所选产品模块"},
     )

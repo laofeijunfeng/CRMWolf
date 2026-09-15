@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Dict, List, Literal, Optional, Union
+from datetime import datetime
+from typing import Annotated, Awaitable, Callable, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator, model_validator
 
 try:
     from langchain_core.tools import StructuredTool
@@ -25,6 +26,42 @@ class AgentStrictPayload(BaseModel):
 
 CustomerIdentifier = Union[str, int]
 LeadIdentifier = Union[str, int]
+
+
+def _truncate_title(value: str | None) -> str | None:
+    """Clamp titles to the CRM API's String(255) column before transport."""
+
+    if value is None:
+        return None
+    return value[:255] if len(value) > 255 else value
+
+
+def _normalize_datetime_text(value: str | None) -> str | None:
+    """Normalize model-authored datetime text to ISO-8601 before transport.
+
+    LLM tool calls occasionally emit ``2026/09/17`` or ``2026/09/17 10:00``
+    (slash dates). The CRM API parses ``Optional[datetime]`` via
+    ``datetime.fromisoformat`` and rejects slashes with a 422, so normalize
+    here at the tool boundary instead.
+    """
+
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    normalized = text.replace("/", "-")
+    if normalized == text:
+        return text
+    try:
+        datetime.fromisoformat(normalized)
+    except ValueError:
+        return text
+    return normalized
+
+
+AgentTitleText = Annotated[Optional[str], BeforeValidator(_truncate_title)]
+AgentDatetimeText = Annotated[Optional[str], BeforeValidator(_normalize_datetime_text)]
 
 
 class AgentLeadCreatePayload(AgentStrictPayload):
@@ -96,6 +133,15 @@ class AgentOpportunityPayload(AgentStrictPayload):
     decision_maker_count: Optional[int] = Field(None, ge=1)
     expected_closing_date: str = Field(..., min_length=10, max_length=10)
     procurement_method_id: Optional[int] = Field(None, ge=1)
+    product_public_id: str = Field(..., min_length=1, description="关联产品对外ID")
+    product_module_public_ids: list[str] = Field(..., min_length=1, description="关联产品模块对外ID列表")
+
+    @field_validator("product_module_public_ids", mode="before")
+    def split_module_public_ids(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
 
     @model_validator(mode="after")
     def validate_subscription_years(self) -> "AgentOpportunityPayload":
@@ -205,12 +251,12 @@ class CreateCustomerActivityInput(BaseModel):
     customer_name: Optional[str] = None
     activity_kind: str = "OTHER_FOLLOW_UP"
     source_content: str = Field(..., min_length=1)
-    title: Optional[str] = None
+    title: AgentTitleText = None
     content_json: Optional[dict[str, object]] = None
     summary: Optional[str] = None
     next_action: Optional[str] = None
     next_action_source: Optional[str] = None
-    next_follow_time: Optional[str] = None
+    next_follow_time: AgentDatetimeText = None
     next_follow_time_source: Optional[str] = None
     # Agent 工具只接受 Planner 已完成的最终评估，不提供历史默认值。
     effectiveness_score: int = Field(..., ge=0, le=100)
@@ -235,7 +281,7 @@ class CreateLeadFollowUpInput(BaseModel):
     content: str = Field(..., min_length=1)
     method: str = "其他"
     next_action: Optional[str] = None
-    next_follow_time: Optional[str] = None
+    next_follow_time: AgentDatetimeText = None
     idempotency_suffix: Optional[str] = None
 
 

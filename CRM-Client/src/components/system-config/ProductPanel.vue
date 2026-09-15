@@ -59,7 +59,6 @@ interface ProductListItem extends ProductResponse {
 }
 
 const productFormZodSchema = z.object({
-  code: z.string().trim().min(1, '请输入产品编码').max(50),
   name: z.string().trim().min(1, '请输入产品名称').max(100),
   description: z.string().max(2000).optional(),
 })
@@ -67,7 +66,6 @@ const productFormZodSchema = z.object({
 type ProductFormValues = z.infer<typeof productFormZodSchema>
 
 const moduleFormZodSchema = z.object({
-  code: z.string().trim().min(1, '请输入模块编码').max(50),
   name: z.string().trim().min(1, '请输入模块名称').max(100),
   description: z.string().max(2000).optional(),
 })
@@ -106,7 +104,6 @@ const filteredProducts = computed<ProductListItem[]>(() => {
     .filter((item) => {
       const matchesQuery = query.length === 0
         || item.name.toLowerCase().includes(query)
-        || item.code.toLowerCase().includes(query)
       const matchesStatus = filterStatus.value === 'all'
         || (filterStatus.value === 'true' ? item.is_active : !item.is_active)
       return matchesQuery && matchesStatus
@@ -116,8 +113,8 @@ const filteredProducts = computed<ProductListItem[]>(() => {
 
 const productFormSchema = toTypedSchema(productFormZodSchema)
 const moduleFormSchema = toTypedSchema(moduleFormZodSchema)
-const productFormValues = ref<ProductFormValues>({ code: '', name: '', description: '' })
-const moduleFormValues = ref<ModuleFormValues>({ code: '', name: '', description: '' })
+const productFormValues = ref<ProductFormValues>({ name: '', description: '' })
+const moduleFormValues = ref<ModuleFormValues>({ name: '', description: '' })
 
 
 const fetchProducts = async (): Promise<void> => {
@@ -137,7 +134,7 @@ const showCreateDialog = (): void => {
   if (!canCreate.value) return
   isEditMode.value = false
   selectedProduct.value = null
-  productFormValues.value = { code: '', name: '', description: '' }
+  productFormValues.value = { name: '', description: '' }
   dialogOpen.value = true
 }
 
@@ -146,7 +143,6 @@ const showEditDialog = (product: ProductResponse): void => {
   isEditMode.value = true
   selectedProduct.value = product
   productFormValues.value = {
-    code: product.code,
     name: product.name,
     description: product.description ?? '',
   }
@@ -168,7 +164,6 @@ const onSubmit = async (values: GenericObject): Promise<void> => {
       toast.success('产品更新成功')
     } else {
       const data: ProductCreate = {
-        code: parsed.code,
         name: parsed.name,
         description: parsed.description ?? null,
       }
@@ -222,7 +217,7 @@ const showCreateModuleDialog = (product: ProductResponse): void => {
   selectedProduct.value = product
   isModuleEditMode.value = false
   selectedModule.value = null
-  moduleFormValues.value = { code: '', name: '', description: '' }
+  moduleFormValues.value = { name: '', description: '' }
   moduleDialogOpen.value = true
 }
 
@@ -236,7 +231,6 @@ const showEditModuleDialog = (
   selectedModule.value = module
   isModuleEditMode.value = true
   moduleFormValues.value = {
-    code: module.code,
     name: module.name,
     description: module.description ?? '',
   }
@@ -257,7 +251,6 @@ const onModuleSubmit = async (values: GenericObject): Promise<void> => {
       toast.success('模块更新成功')
     } else {
       const data: ProductModuleCreate = {
-        code: parsed.code,
         name: parsed.name,
         description: parsed.description ?? null,
         module_role: 'ADD_ON',
@@ -364,8 +357,8 @@ watch(
             <Input
               v-model="searchText"
               class="pl-8"
-              placeholder="搜索产品名称或编码"
-              aria-label="搜索产品名称或编码"
+              placeholder="搜索产品名称"
+              aria-label="搜索产品名称"
             />
           </div>
           <Button v-if="canCreate" type="button" @click="showCreateDialog">
@@ -413,7 +406,6 @@ watch(
             <div>
               <div class="font-medium">
                 {{ item.name }}
-                <span class="text-muted-foreground">({{ item.code }})</span>
               </div>
               <div class="text-sm text-muted-foreground">
                 {{ item.description || '暂无描述' }}
@@ -477,7 +469,7 @@ watch(
                 :key="module.public_id"
                 class="flex flex-wrap items-center gap-2 text-sm"
               >
-                <span>{{ module.name }} ({{ module.code }})</span>
+                <span>{{ module.name }}</span>
                 <Badge>
                   {{ module.module_role === 'BASE'
                     ? '基础模块（受保护）'
@@ -524,7 +516,7 @@ watch(
     <DialogContent>
       <DialogHeader>
         <DialogTitle>{{ isEditMode ? '编辑产品' : '新建产品' }}</DialogTitle>
-        <DialogDescription>维护产品编码、名称和描述。</DialogDescription>
+        <DialogDescription>维护产品名称和描述。</DialogDescription>
       </DialogHeader>
       <Form
         v-if="dialogOpen"
@@ -533,15 +525,6 @@ watch(
         class="space-y-4"
         @submit="onSubmit"
       >
-        <FormField v-slot="{ componentField }" name="code">
-          <FormItem>
-            <FormLabel>编码</FormLabel>
-            <FormControl>
-              <Input v-bind="componentField as unknown as Record<string, unknown>" :disabled="isEditMode" />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        </FormField>
         <FormField v-slot="{ componentField }" name="name">
           <FormItem>
             <FormLabel>名称</FormLabel>
@@ -582,15 +565,6 @@ watch(
         class="space-y-4"
         @submit="onModuleSubmit"
       >
-        <FormField v-slot="{ componentField }" name="code">
-          <FormItem>
-            <FormLabel>编码</FormLabel>
-            <FormControl>
-              <Input v-bind="componentField as unknown as Record<string, unknown>" :disabled="isModuleEditMode" />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        </FormField>
         <FormField v-slot="{ componentField }" name="name">
           <FormItem>
             <FormLabel>名称</FormLabel>

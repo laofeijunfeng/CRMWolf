@@ -11,7 +11,6 @@ ModuleRole = Literal["BASE", "ADD_ON"]
 class ProductModuleCreate(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    code: str = Field(..., min_length=1, max_length=50)
     name: str = Field(..., min_length=1, max_length=100)
     description: str | None = Field(None, max_length=2000)
     module_role: Literal["ADD_ON"] = "ADD_ON"
@@ -31,10 +30,8 @@ class ProductModuleUpdate(BaseModel):
 class ProductModuleResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    id: str = Field(..., validation_alias="public_id")
     public_id: str
-    team_id: int
-    product_id: int
-    code: str
     name: str
     description: str | None
     module_role: ModuleRole
@@ -54,7 +51,6 @@ class ProductModuleResponse(BaseModel):
 class ProductCreate(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    code: str = Field(..., min_length=1, max_length=50)
     name: str = Field(..., min_length=1, max_length=100)
     description: str | None = Field(None, max_length=2000)
 
@@ -70,9 +66,8 @@ class ProductUpdate(BaseModel):
 class ProductResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    id: str = Field(..., validation_alias="public_id")
     public_id: str
-    team_id: int
-    code: str
     name: str
     description: str | None
     is_active: bool

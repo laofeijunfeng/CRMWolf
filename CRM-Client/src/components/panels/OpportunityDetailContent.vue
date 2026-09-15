@@ -1125,6 +1125,20 @@ watch(approvalPhase, phase => {
                   </div>
 
                   <div class="attribute-item">
+                    <div class="attribute-label">产品</div>
+                    <span class="attribute-value" :class="{ 'not-filled': !opportunity.product_name }">
+                      {{ opportunity.product_name || '-' }}
+                    </span>
+                  </div>
+
+                  <div class="attribute-item">
+                    <div class="attribute-label">产品模块</div>
+                    <span class="attribute-value" :class="{ 'not-filled': !opportunity.product_modules?.length }">
+                      {{ opportunity.product_modules?.length ? opportunity.product_modules.map(module => module.name).join('、') : '-' }}
+                    </span>
+                  </div>
+
+                  <div class="attribute-item">
                     <div class="attribute-label">审批状态</div>
                     <span class="attribute-value">
                       <Badge :class="['status-badge', getApprovalPhaseClass(opportunity.approval_phase)]">

@@ -1,4 +1,4 @@
-/* eslint-disable crmwolf/require-zod-schema */
+
 import request from '@/utils/request'
 import { ApiResponseSchema } from '@/schemas/common'
 
@@ -42,38 +42,43 @@ export interface ProcurementMethodWithStages extends ProcurementMethod {
 export interface ProcurementStageTemplate {
   id: number
   procurement_method_id: number
-  stage_code: string
+  template_code: string
   stage_name: string
   win_probability: number
   sort_order: number
-  is_default: number
+  is_default_start: number
   can_skip: number
-  is_active: number
-  description?: string
+  description?: string | null
+  version: number
+  version_lock: number
+  created_by?: string | null
+  updated_by?: string | null
   created_time: string
   updated_time: string
 }
 
 export interface ProcurementStageTemplateCreate {
   procurement_method_id: number
-  stage_code: string
+  template_code: string
   stage_name: string
   win_probability: number
   sort_order: number
-  is_default: number
+  is_default_start: number
   can_skip: number
-  description?: string
+  description?: string | null
 }
 
 export interface ProcurementStageTemplateUpdate {
+  template_code?: string
   stage_name?: string
   win_probability?: number
   sort_order?: number
-  is_default?: number
+  is_default_start?: number
   can_skip?: number
-  is_active?: number
-  description?: string
+  description?: string | null
+  version_lock?: number
 }
+
 
 export type ProcurementStageTemplateResponse = ProcurementStageTemplate
 

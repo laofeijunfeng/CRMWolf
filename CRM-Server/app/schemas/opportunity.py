@@ -1,8 +1,16 @@
 from pydantic import BaseModel, Field, field_validator, ConfigDict, model_validator
-from typing import Optional, List
+from typing import Any, Optional, List
 from datetime import date, datetime
 from enum import Enum
 from app.schemas.customer import ProcurementMethodInfo
+
+
+def _split_public_ids(value: Any) -> Any:
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    return value
+
+
 
 
 class CurrentStageSnapshotInfo(BaseModel):
@@ -129,6 +137,14 @@ class OpportunityCreate(OpportunityBase):
     procurement_method_id: Optional[int] = Field(None, description="采购方式ID（关联到 crm_procurement_methods 表），如果不指定则使用客户的默认采购方式")
     stage_id: Optional[int] = Field(None, description="初始销售阶段ID（关联到 crm_procurement_stage_templates 表），如果不指定则使用采购方式的默认起始阶段")
     owner_id: Optional[str] = Field(None, description="负责人系统用户ID，如果不指定则默认为创建人")
+    product_public_id: str = Field(..., min_length=1, description="关联产品对外ID")
+    product_module_public_ids: List[str] = Field(..., min_length=1, description="关联产品模块对外ID列表")
+
+    @field_validator("product_module_public_ids", mode="before")
+    @classmethod
+    def split_create_module_public_ids(cls, value: Any) -> Any:
+        return _split_public_ids(value)
+
 
 
 class OpportunityUpdate(BaseModel):
@@ -142,16 +158,32 @@ class OpportunityUpdate(BaseModel):
     expected_closing_date: Optional[date] = Field(None, description="预计成交日期")
     procurement_method_id: Optional[int] = Field(None, description="采购方式ID（关联到 crm_procurement_methods 表）")
     owner_id: Optional[str] = Field(None, description="负责人系统用户ID")
-    
-    @model_validator(mode='after')
+    product_public_id: Optional[str] = Field(None, min_length=1, description="关联产品对外ID")
+    product_module_public_ids: Optional[List[str]] = Field(None, description="关联产品模块对外ID列表")
+
+    @field_validator("product_module_public_ids", mode="before")
+    @classmethod
+    def split_update_module_public_ids(cls, value: Any) -> Any:
+        return _split_public_ids(value)
+
+
+    @model_validator(mode="after")
     def validate_license_fields(cls, values):
         license_type = values.license_type
         subscription_years = values.subscription_years
-        
+
         if license_type == LicenseTypeEnum.SUBSCRIPTION:
             if subscription_years is None or subscription_years <= 0:
-                raise ValueError('订阅制下订阅年限必须大于0')
-        
+                raise ValueError("订阅制下订阅年限必须大于0")
+
+        product_public_id = values.product_public_id
+        module_public_ids = values.product_module_public_ids
+        if product_public_id is not None or module_public_ids is not None:
+            if not product_public_id:
+                raise ValueError("请选择产品")
+            if not module_public_ids:
+                raise ValueError("请至少选择一个产品模块")
+
         return values
 
 
@@ -194,6 +226,12 @@ class OpportunityLose(BaseModel):
         return v.strip() if v else v
 
 
+class OpportunityProductModuleInfo(BaseModel):
+    public_id: str = Field(..., description="产品模块对外ID")
+    name: str = Field(..., description="产品模块名称")
+    module_role: str = Field(..., description="模块角色：BASE/ADD_ON")
+
+
 class OpportunityResponse(BaseModel):
     id: str = Field(..., description="商机对外ID")
     deal_journey_id: int | None = Field(None, description="当前业务旅程ID")
@@ -203,6 +241,10 @@ class OpportunityResponse(BaseModel):
     customer_id: str = Field(..., description="关联客户对外ID")
     procurement_method_id: Optional[int] = Field(None, description="采购方式ID")
     procurement_method_info: Optional[ProcurementMethodInfo] = Field(None, description="采购方式详细信息")
+    product_public_id: Optional[str] = Field(None, description="关联产品对外ID")
+    product_name: Optional[str] = Field(None, description="关联产品名称")
+    product_module_public_ids: List[str] = Field(default_factory=list, description="关联产品模块对外ID列表")
+    product_modules: List[OpportunityProductModuleInfo] = Field(default_factory=list, description="关联产品模块摘要")
     total_amount: float = Field(..., description="预计总金额（元）")
     user_count: int = Field(..., description="采购用户数（ licenses 数量）")
     unit_price: float = Field(..., description="标准单价（系统自动计算：订阅制=总金额/用户数/年数，买断制=总金额/用户数/5）")
@@ -226,7 +268,7 @@ class OpportunityResponse(BaseModel):
     updated_time: Optional[datetime] = Field(None, description="最后修改时间，兼容前端字段")
     version: int = Field(..., description="版本号（乐观锁，防止并发修改冲突）")
     current_stage_snapshot: Optional[CurrentStageSnapshotInfo] = Field(None, description="当前阶段快照信息")
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 

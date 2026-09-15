@@ -153,6 +153,10 @@ class ApprovalTransactionManager:
 
             return (entity, approval, None)
 
+        except ValueError as e:
+            logger.info("create_with_approval 业务校验失败: %s", e)
+            db.rollback()
+            return (None, None, str(e))
         except Exception as e:
             logger.error(f"create_with_approval 异常: {e}", exc_info=True)
             db.rollback()

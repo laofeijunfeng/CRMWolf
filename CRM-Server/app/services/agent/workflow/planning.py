@@ -361,7 +361,7 @@ class CRMWorkflowPlanner:
                 current_datetime=current_datetime,
             )
         if intent == "CREATE_CUSTOMER":
-            return self._plan_customer(
+            return await self._plan_customer(
                 semantic,
                 db=db,
                 team_id=team_id,
@@ -532,7 +532,7 @@ class CRMWorkflowPlanner:
             "customer_name": customer_name,
             "activity_kind": infer_activity_kind(method, final_content),
             "source_content": content,
-            "title": final_content,
+            "title": final_content[:255],
             "content_json": {"content": final_content},
             "summary": final_content[:200],
             "next_action": persisted_next_action,
@@ -661,7 +661,7 @@ class CRMWorkflowPlanner:
             cancelled_text=f"已取消创建线索“{lead_name}”及首次跟进。",
         )
 
-    def _plan_customer(
+    async def _plan_customer(
         self,
         semantic: object,
         *,
@@ -715,11 +715,47 @@ class CRMWorkflowPlanner:
 
         content = follow_up_content.strip()
         method = getattr(customer_model, "follow_up_method", None)
+        try:
+            quality_envelope = await self._follow_up_quality_evaluator.evaluate_with_metadata(
+                db,
+                team_id=team_id,
+                user_message=content,
+                semantic_result=semantic,
+                current_date=current_datetime.date(),
+            )
+        except AgentFollowUpQualityEvaluatorError as exc:
+            raise WorkflowPlanningError(
+                "WORKFLOW_FOLLOW_UP_QUALITY_EVALUATION_FAILED",
+                "暂时无法完成跟进质量评估，请稍后重试。",  # noqa: RUF001
+                retryable=True,
+            ) from exc
+        quality = quality_envelope.result
+        if not quality.passed:
+            raise self._needs_text(
+                workflow_id=workflow_id,
+                field="follow_up_quality",
+                business_action="supplement_follow_up_quality",
+                title="补充跟进信息",
+                prompt=(
+                    quality.supplement_question
+                    or "这条跟进还差一点关键信息，请补充下一步由谁在什么时间做什么。"  # noqa: RUF001
+                ),
+            )
         activity_payload: dict[str, object] = {
             "customer_name": account_name,
             "activity_kind": infer_activity_kind(method, content),
             "source_content": content,
-            "title": content,
+            "title": content[:255],
+            "content_json": {"content": content},
+            "summary": content[:200],
+            "next_action_source": "AGENT",
+            "effectiveness_score": quality.score,
+            "effectiveness_is_valid": quality.passed,
+            "effectiveness_reason": quality.reason,
+            "effectiveness_detail_json": {
+                key: value.model_dump(mode="json")
+                for key, value in quality.principle_scores.items()
+            },
         }
         next_action = getattr(customer_model, "next_action", None)
         if isinstance(next_action, str) and next_action.strip():
@@ -1190,10 +1226,13 @@ class CRMWorkflowPlanner:
             "expected_closing_date": opportunity["expected_closing_date"],
             "procurement_method_id": resolution.method_id,
         }
-        for optional_field in ("subscription_years", "decision_maker_count"):
+        for optional_field in ("subscription_years", "decision_maker_count", "product_public_id"):
             value = opportunity.get(optional_field)
             if value is not None:
                 payload[optional_field] = value
+        module_ids = opportunity.get("product_module_public_ids")
+        if isinstance(module_ids, list) and module_ids:
+            payload["product_module_public_ids"] = module_ids
         summary = business_rules.format_opportunity_summary(payload)
         if not require_confirmation:
             return self._resume_commands_plan(
@@ -1341,6 +1380,8 @@ class CRMWorkflowPlanner:
                 "purchase_type",
                 "decision_maker_count",
                 "expected_closing_date",
+                "product_public_id",
+                "product_module_public_ids",
             }
             try:
                 opportunity = self._validated_opportunity_form_values(
@@ -1813,6 +1854,12 @@ class CRMWorkflowPlanner:
         )
         if expected_closing_date is not None:
             values["expected_closing_date"] = expected_closing_date
+        product_public_id = getattr(opportunity, "product_public_id", None)
+        if isinstance(product_public_id, str) and product_public_id.strip():
+            values["product_public_id"] = product_public_id
+        module_ids = getattr(opportunity, "product_module_public_ids", None)
+        if isinstance(module_ids, list) and all(isinstance(item, str) and item.strip() for item in module_ids):
+            values["product_module_public_ids"] = module_ids
         return values
 
     @staticmethod
@@ -1843,6 +1890,8 @@ class CRMWorkflowPlanner:
             "purchase_type",
             "decision_maker_count",
             "expected_closing_date",
+            "product_public_id",
+            "product_module_public_ids",
         }
         if set(raw_values) - allowed_fields:
             raise WorkflowPlanningError(
@@ -1899,6 +1948,24 @@ class CRMWorkflowPlanner:
                     "预计成交日期无效。",
                 ) from exc
             values["expected_closing_date"] = expected_closing_date
+        product_public_id = raw_values.get("product_public_id")
+        if product_public_id is not None:
+            if not isinstance(product_public_id, str) or not product_public_id.strip():
+                raise WorkflowPlanningError(
+                    "WORKFLOW_OPPORTUNITY_FIELDS_INVALID",
+                    "产品无效。",
+                )
+            values["product_public_id"] = product_public_id
+        module_ids = raw_values.get("product_module_public_ids")
+        if isinstance(module_ids, str):
+            module_ids = [item.strip() for item in module_ids.split(",") if item.strip()]
+        if module_ids is not None:
+            if not isinstance(module_ids, list) or any(not isinstance(item, str) or not item.strip() for item in module_ids):
+                raise WorkflowPlanningError(
+                    "WORKFLOW_OPPORTUNITY_FIELDS_INVALID",
+                    "产品模块无效。",
+                )
+            values["product_module_public_ids"] = module_ids
         return values
 
     @staticmethod
@@ -1953,6 +2020,28 @@ class CRMWorkflowPlanner:
                         key=field_name,
                         label="预计成交日期",
                         field_type="date",
+                        required=required,
+                        default_value=defaults.get(field_name),
+                    )
+                )
+                continue
+            if field_name == "product_public_id":
+                fields.append(
+                    WorkflowInteractionField(
+                        key=field_name,
+                        label="产品",
+                        field_type="text",
+                        required=required,
+                        default_value=defaults.get(field_name),
+                    )
+                )
+                continue
+            if field_name == "product_module_public_ids":
+                fields.append(
+                    WorkflowInteractionField(
+                        key=field_name,
+                        label="产品模块",
+                        field_type="text",
                         required=required,
                         default_value=defaults.get(field_name),
                     )

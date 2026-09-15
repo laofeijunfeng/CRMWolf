@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.product import Product, ProductModule, ProductModuleRole
+from app.utils.public_id import generate_public_id
 from app.utils.time import business_now
 
 if TYPE_CHECKING:
@@ -51,9 +52,12 @@ class ProductCRUD:
 
     def create(self, db: Session, team_id: int, obj_in: ProductCreate, creator_id: str) -> Product:
         data = self._dump(obj_in)
-        if db.query(Product.id).filter(Product.team_id == team_id, Product.code == data["code"]).first() is not None:
-            raise ValueError("产品编码已存在")
-        product = Product(team_id=team_id, created_by=creator_id, **data)
+        product = Product(
+            team_id=team_id,
+            created_by=creator_id,
+            code=generate_public_id("PRD"),
+            **data,
+        )
         db.add(product)
         try:
             db.flush()
@@ -110,14 +114,15 @@ class ProductCRUD:
         data = self._dump(obj_in)
         if data.get("module_role", ProductModuleRole.ADD_ON.value) != ProductModuleRole.ADD_ON.value:
             raise ValueError("新增模块只能是增强模块")
-        if (
-            db.query(ProductModule.id)
-            .filter(ProductModule.product_id == product.id, ProductModule.code == data["code"])
-            .first()
-        ):
-            raise ValueError("模块编码已存在")
         data.pop("module_role", None)
-        module = ProductModule(team_id=product.team_id, product=product, created_by=creator_id, base_key=None, **data)
+        module = ProductModule(
+            team_id=product.team_id,
+            product=product,
+            created_by=creator_id,
+            base_key=None,
+            code=generate_public_id("PRM"),
+            **data,
+        )
         db.add(module)
         try:
             db.commit()

@@ -69,11 +69,11 @@ describe('WORKFLOW_NODE_REGISTRY', () => {
     expect(WORKFLOW_NODE_REGISTRY['crm.create_opportunity']).toMatchObject({
       category: 'crm',
       label: '创建商机',
-      requiredFields: ['customer_ref', 'total_amount', 'user_count', 'license_type', 'purchase_type', 'expected_closing_date'],
+      requiredFields: ['customer_ref', 'total_amount', 'user_count', 'license_type', 'purchase_type', 'expected_closing_date', 'product_public_id', 'product_module_public_ids'],
       isTrigger: false,
     })
     expect(WORKFLOW_NODE_REGISTRY['crm.create_opportunity'].defaults()).toEqual({
-      customer_ref: '', opportunity_name: '', total_amount: 0, user_count: 1, license_type: 'SUBSCRIPTION', subscription_years: 1, purchase_type: 'NEW', expected_closing_date: '', decision_maker_count: null, procurement_method_id: null, procurement_stage_id: null, owner_strategy: 'creator',
+      customer_ref: '', opportunity_name: '', total_amount: 0, user_count: 1, license_type: 'SUBSCRIPTION', subscription_years: 1, purchase_type: 'NEW', expected_closing_date: '', decision_maker_count: null, procurement_method_id: null, procurement_stage_id: null, owner_strategy: 'creator', product_public_id: '', product_module_public_ids: '',
     })
 
     for (const definition of Object.values(WORKFLOW_NODE_REGISTRY)) {

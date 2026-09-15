@@ -81,6 +81,8 @@ def test_missing_opportunity_fields_respects_subscription_and_procurement_requir
             "license_type": "SUBSCRIPTION",
             "purchase_type": "NEW",
             "expected_closing_date": "2026-08-01",
+            "product_public_id": "prd_crm",
+            "product_module_public_ids": ["prm_base"],
         },
         require_procurement_method=True,
     )

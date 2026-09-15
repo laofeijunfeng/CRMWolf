@@ -136,8 +136,26 @@ def _customer_info_dict(customer) -> Optional[dict]:
     }
 
 
-def _opportunity_response_dict(db: Session, opportunity, team_id: Optional[int]) -> dict:
+def _opportunity_product_payload(opportunity) -> dict:
+    product = getattr(opportunity, "product", None)
+    modules = list(getattr(opportunity, "selected_modules", []) or [])
     return {
+        "product_public_id": getattr(product, "public_id", None),
+        "product_name": getattr(product, "name", None),
+        "product_module_public_ids": [module.public_id for module in modules],
+        "product_modules": [
+            {
+                "public_id": module.public_id,
+                "name": module.name,
+                "module_role": module.module_role,
+            }
+            for module in modules
+        ],
+    }
+
+
+def _opportunity_response_dict(db: Session, opportunity, team_id: Optional[int]) -> dict:
+    payload = {
         "id": opportunity.public_id,
         "public_id": opportunity.public_id,
         "deal_journey_id": opportunity.deal_journey_id,
@@ -170,6 +188,8 @@ def _opportunity_response_dict(db: Session, opportunity, team_id: Optional[int])
         "version": opportunity.version,
         "current_stage_snapshot": None,
     }
+    payload.update(_opportunity_product_payload(opportunity))
+    return payload
 
 
 def _build_opportunity_intelligence_change(
@@ -422,6 +442,7 @@ def get_opportunities(
                 "avatar_url": owner_info[2]
             } if owner_info else None
         }
+        opp_dict.update(_opportunity_product_payload(opp))
         
         result.append(OpportunityListResponse(**opp_dict))
     
@@ -663,6 +684,7 @@ def get_opportunity(
             "avatar_url": creator_info[2]
         } if creator_info else None
     }
+    result.update(_opportunity_product_payload(opportunity))
     
     return result
 
@@ -722,7 +744,10 @@ async def update_opportunity(
     db: Session = Depends(get_db)
 ):
     _ensure_opportunity_not_pending(db, db_opportunity, db_opportunity.team_id)
-    updated_opportunity = opportunity_crud.update(db, db_opportunity, opportunity)
+    try:
+        updated_opportunity = opportunity_crud.update(db, db_opportunity, opportunity)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     await _trigger_opportunity_intelligence_refresh(
         db,
         _build_opportunity_intelligence_change(
@@ -907,6 +932,7 @@ async def move_opportunity_stage(
         "owner_info": None,
         "creator_info": None
     }
+    result.update(_opportunity_product_payload(updated_opportunity))
     
     return result
 

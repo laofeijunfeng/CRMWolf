@@ -99,7 +99,7 @@ from app.models.outbound_notification_job import (
     OutboundNotificationJob,
     OutboundNotificationJobStatus,
 )
-from app.models.opportunity import Opportunity, OpportunityStage, OpportunityStatus, PurchaseType
+from app.models.opportunity import Opportunity, OpportunityProductModule, OpportunityStage, OpportunityStatus, PurchaseType
 from app.models.payment import PaymentPlan, PaymentPlanStatus, PaymentRecord
 from app.models.permission import Permission
 from app.models.procurement import (
@@ -263,9 +263,9 @@ __all__ = [
     "OutboundNotificationJob",
     "OutboundNotificationJobStatus",
     "Opportunity",
+    "OpportunityProductModule",
     "OpportunityStage",
     "OpportunityStageSnapshot",
-    "OpportunityStatus",
     "PaymentPlan",
     "PaymentPlanStatus",
     "PaymentRecord",

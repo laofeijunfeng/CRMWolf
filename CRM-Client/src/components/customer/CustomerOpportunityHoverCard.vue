@@ -6,6 +6,7 @@ import { Separator } from '@/components/ui/separator'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { OpportunityStatus, opportunityApi, type OpportunityListResponse } from '@/api/opportunity'
 import { normalizePaginatedResponse } from '@/types/pagination'
+import { formatOpportunityProductSummary } from '@/utils/opportunityProduct'
 
 const PREVIEW_LIMIT = 3
 
@@ -46,6 +47,9 @@ const getWinProbability = (opportunity: OpportunityListResponse): number => {
 
   return Math.min(100, Math.max(0, probability))
 }
+
+const getProductSummary = (opportunity: OpportunityListResponse): string =>
+  formatOpportunityProductSummary(opportunity, '')
 
 const loadOpportunities = async (): Promise<void> => {
   if (loading.value || loaded.value) return
@@ -182,6 +186,13 @@ const handleViewAll = (): void => {
                     tone="primary"
                     class="mt-wolf-md self-start text-wolf-text-primary-v2"
                   />
+                  <span
+                    v-if="getProductSummary(opportunity)"
+                    class="mt-wolf-sm truncate text-wolf-caption text-wolf-text-tertiary-v2"
+                    :title="getProductSummary(opportunity)"
+                  >
+                    {{ getProductSummary(opportunity) }}
+                  </span>
                   <Progress
                     :model-value="getWinProbability(opportunity)"
                     class="mt-wolf-md h-1.5 bg-wolf-bg-card"

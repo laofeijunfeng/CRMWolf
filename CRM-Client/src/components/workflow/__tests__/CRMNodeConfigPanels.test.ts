@@ -1,9 +1,18 @@
 import { nextTick } from 'vue'
-import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+import { describe, expect, it, vi } from 'vitest'
 import ActionCreateCustomerPanel from '../nodeConfigPanels/ActionCreateCustomerPanel.vue'
 import ActionCreateContactPanel from '../nodeConfigPanels/ActionCreateContactPanel.vue'
 import ActionCreateOpportunityPanel from '../nodeConfigPanels/ActionCreateOpportunityPanel.vue'
+import TriggerOpportunityStagePanel from '../nodeConfigPanels/TriggerOpportunityStagePanel.vue'
+import procurementApi, { type ProcurementMethodWithStages } from '@/api/procurement'
+
+vi.mock('@/api/procurement', () => ({
+  default: {
+    getProcurementMethods: vi.fn(),
+    getProcurementMethod: vi.fn(),
+  },
+}))
 
 const SelectFieldStub = {
   props: ['id', 'modelValue', 'label', 'options'],
@@ -66,5 +75,50 @@ describe('CRM workflow configuration panels', () => {
       [{ procurement_method_id: null }],
       [{ procurement_stage_id: null }],
     ])
+  })
+  it('maps backend template_code values into trigger stage options', async () => {
+    vi.mocked(procurementApi.getProcurementMethods).mockResolvedValue([{
+      id: 1,
+      code: 'SALES',
+      name: '销售流程',
+      is_active: 1,
+      sort_order: 1,
+      created_time: '2026-09-13T00:00:00',
+      updated_time: '2026-09-13T00:00:00',
+    }])
+    const backendMethod = {
+      id: 1,
+      code: 'SALES',
+      name: '销售流程',
+      is_active: 1,
+      sort_order: 1,
+      created_time: '2026-09-13T00:00:00',
+      updated_time: '2026-09-13T00:00:00',
+      stage_templates: [{
+        id: 11,
+        procurement_method_id: 1,
+        template_code: 'QUOTE',
+        stage_name: '报价确认',
+        win_probability: 50,
+        sort_order: 1,
+        is_default_start: 0,
+        can_skip: 0,
+        description: null,
+        version: 1,
+        version_lock: 0,
+        created_by: '1',
+        updated_by: null,
+        created_time: '2026-09-13T00:00:00',
+        updated_time: '2026-09-13T00:00:00',
+      }],
+    } as unknown as ProcurementMethodWithStages
+    vi.mocked(procurementApi.getProcurementMethod).mockResolvedValue(backendMethod)
+
+    const wrapper = mount(TriggerOpportunityStagePanel, { props: { config: {} }, global })
+    await flushPromises()
+
+    const toStage = wrapper.findAllComponents(SelectFieldStub).find(select => select.props('id') === 'config-select-to-stage')
+    if (toStage === undefined) throw new Error('目标阶段选择器缺失')
+    expect(toStage.props('options')).toEqual([{ value: 'QUOTE', label: '报价确认' }])
   })
 })

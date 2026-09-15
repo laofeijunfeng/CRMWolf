@@ -1,10 +1,11 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import and_, func, cast, Integer
 from typing import Optional, List, Tuple
 from datetime import date, datetime
 
-from app.models.opportunity import Opportunity, OpportunityStage, OpportunityStatus
+from app.models.opportunity import Opportunity, OpportunityProductModule, OpportunityStage, OpportunityStatus
 from app.models.customer import Customer
+from app.models.product import ProductModule
 from app.constants.business_types import BusinessType
 from app.services.business_number_generator import BusinessNumberGenerator
 from app.utils.approval_delete_guard import assert_deletable_approval_resource
@@ -114,15 +115,22 @@ class OpportunityStageCRUD:
         return False
 
 
+
 class OpportunityCRUD:
+    def _query(self, db: Session):
+        return db.query(Opportunity).options(
+            selectinload(Opportunity.product),
+            selectinload(Opportunity.module_links).selectinload(OpportunityProductModule.module),
+        )
+
     def get_by_id(self, db: Session, opportunity_id: int, team_id: Optional[int] = None) -> Optional[Opportunity]:
-        query = db.query(Opportunity).filter(Opportunity.id == opportunity_id)
+        query = self._query(db).filter(Opportunity.id == opportunity_id)
         if team_id is not None:
             query = query.filter(Opportunity.team_id == team_id)
         return query.first()
 
     def get_by_public_id(self, db: Session, public_id: str, team_id: Optional[int] = None) -> Optional[Opportunity]:
-        query = db.query(Opportunity).filter(Opportunity.public_id == public_id)
+        query = self._query(db).filter(Opportunity.public_id == public_id)
         if team_id is not None:
             query = query.filter(Opportunity.team_id == team_id)
         return query.first()
@@ -135,7 +143,7 @@ class OpportunityCRUD:
         skip: int = 0,
         limit: int = 100
     ) -> Tuple[List[Opportunity], int]:
-        query = db.query(Opportunity).filter(Opportunity.customer_id == customer_id)
+        query = self._query(db).filter(Opportunity.customer_id == customer_id)
         if team_id is not None:
             query = query.filter(Opportunity.team_id == team_id)
         total = query.count()
@@ -168,7 +176,7 @@ class OpportunityCRUD:
         """
         from sqlalchemy import or_
 
-        query = db.query(Opportunity).filter(
+        query = self._query(db).filter(
             and_(
                 Opportunity.team_id == team_id,
                 or_(
@@ -209,7 +217,7 @@ class OpportunityCRUD:
         filters: list[FilterCondition] | None = None,
         sorts: list[SortCondition] | None = None,
     ) -> Tuple[List[Opportunity], int]:
-        query = db.query(Opportunity).filter(Opportunity.team_id == team_id)
+        query = self._query(db).filter(Opportunity.team_id == team_id)
 
         if uses_unified_list_query(filters=filters, sorts=sorts):
             effective_filters = filters
@@ -401,7 +409,14 @@ class OpportunityCRUD:
 
         deal_journey_service.record_opportunity_created(db, db_obj, creator_id)
         deal_journey_service.record_opportunity_stage_changed(db, db_obj, snapshot, creator_id)
-        
+        self.assign_product(
+            db,
+            db_obj,
+            team_id=team_id,
+            product_public_id=obj_in.product_public_id,
+            module_public_ids=obj_in.product_module_public_ids,
+        )
+
         return db_obj
 
     @staticmethod
@@ -446,19 +461,21 @@ class OpportunityCRUD:
 
     def update(self, db: Session, db_obj: Opportunity, obj_in: OpportunityUpdate) -> Opportunity:
         from app.services.pricing import pricing_service
-        from decimal import Decimal
-        
+
         update_data = obj_in.model_dump(exclude_unset=True)
-        
+        product_fields_set = "product_public_id" in update_data or "product_module_public_ids" in update_data
+        product_public_id = update_data.pop("product_public_id", None)
+        module_public_ids = update_data.pop("product_module_public_ids", None)
+
         pricing_fields = ['total_amount', 'user_count', 'license_type', 'subscription_years']
         should_recalculate = any(field in update_data for field in pricing_fields)
-        
+
         if should_recalculate:
             total_amount = update_data.get('total_amount', db_obj.total_amount)
             user_count = update_data.get('user_count', db_obj.user_count)
             license_type = update_data.get('license_type', db_obj.license_type)
             subscription_years = update_data.get('subscription_years', db_obj.subscription_years)
-            
+
             unit_price = pricing_service.calculate_unit_price(
                 total_amount=float(total_amount),
                 user_count=int(user_count),
@@ -466,13 +483,73 @@ class OpportunityCRUD:
                 subscription_years=int(subscription_years) if subscription_years else 1
             )
             update_data['unit_price'] = float(unit_price)
-        
+
         for field, value in update_data.items():
             setattr(db_obj, field, value)
+        if product_fields_set:
+            self.assign_product(
+                db,
+                db_obj,
+                team_id=int(db_obj.team_id),
+                product_public_id=str(product_public_id or ""),
+                module_public_ids=list(module_public_ids or []),
+            )
         _bump_opportunity_version(db_obj)
         db.commit()
         db.refresh(db_obj)
         return db_obj
+
+    def assign_product(
+        self,
+        db: Session,
+        opportunity: Opportunity,
+        *,
+        team_id: int,
+        product_public_id: str,
+        module_public_ids: List[str],
+    ) -> Opportunity:
+        from app.crud.product import product_crud
+
+        unique_module_ids: List[str] = []
+        seen: set[str] = set()
+        for public_id in module_public_ids:
+            if not public_id or public_id in seen:
+                continue
+            seen.add(public_id)
+            unique_module_ids.append(public_id)
+        if not product_public_id:
+            raise ValueError("请选择产品")
+        if not unique_module_ids:
+            raise ValueError("请至少选择一个产品模块")
+
+        product = product_crud.get_by_public_id(db, product_public_id, team_id)
+        if product is None or not bool(product.is_active):
+            raise ValueError("产品不存在")
+
+        modules: List[ProductModule] = []
+        for public_id in unique_module_ids:
+            module = product_crud.get_module_by_public_id(db, public_id, team_id, product_id=int(product.id))
+            if module is None or int(module.product_id) != int(product.id):
+                raise ValueError("产品模块不属于所选产品")
+            if not bool(module.is_active):
+                raise ValueError("产品模块已停用")
+            modules.append(module)
+
+        opportunity.product_id = product.id
+        opportunity.product = product
+        opportunity.module_links.clear()
+        db.flush()
+        for module in modules:
+            opportunity.module_links.append(
+                OpportunityProductModule(
+                    opportunity_id=opportunity.id,
+                    product_module_id=module.id,
+                    team_id=team_id,
+                    module=module,
+                )
+            )
+        db.flush()
+        return opportunity
 
     def move_to_stage(
         self,

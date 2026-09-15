@@ -86,8 +86,8 @@ def api_env(monkeypatch):
     engine.dispose()
 
 
-def _create_product(api_env, *, team_id: int = 1, code: str = "CRM", name: str = "CRM"):
-    return product_crud.create(api_env.db, team_id, ProductCreate(code=code, name=name), "7")
+def _create_product(api_env, *, team_id: int = 1, name: str = "CRM"):
+    return product_crud.create(api_env.db, team_id, ProductCreate(name=name), "7")
 
 
 def _grant_only(api_env, required_permission: str):
@@ -130,7 +130,7 @@ def test_module_create_requires_edit_permission(api_env):
 
     response = api_env.client.post(
         f"/v1/products/{product.public_id}/modules",
-        json={"code": "PRO", "name": "专业版"},
+        json={"name": "专业版"},
     )
 
     assert response.status_code == 403
@@ -138,7 +138,7 @@ def test_module_create_requires_edit_permission(api_env):
 
 def test_module_update_requires_edit_permission(api_env):
     product = _create_product(api_env)
-    module = product_crud.create_module(api_env.db, product, {"code": "PRO", "name": "专业版"}, "7")
+    module = product_crud.create_module(api_env.db, product, {"name": "专业版"}, "7")
     _grant_only(api_env, "product:view")
 
     response = api_env.client.put(
@@ -151,7 +151,7 @@ def test_module_update_requires_edit_permission(api_env):
 
 def test_module_delete_requires_edit_permission_with_unrelated_access(api_env):
     product = _create_product(api_env)
-    module = product_crud.create_module(api_env.db, product, {"code": "PRO", "name": "专业版"}, "7")
+    module = product_crud.create_module(api_env.db, product, {"name": "专业版"}, "7")
     _grant_only(api_env, "product:view")
 
     response = api_env.client.delete(f"/v1/products/{product.public_id}/modules/{module.public_id}")
@@ -159,30 +159,56 @@ def test_module_delete_requires_edit_permission_with_unrelated_access(api_env):
     assert response.status_code == 403
 
 
-def test_duplicate_product_code_returns_conflict_without_extra_product(api_env):
-    first = api_env.client.post("/v1/products/", json={"code": "DUP", "name": "第一个"})
-    duplicate = api_env.client.post("/v1/products/", json={"code": "DUP", "name": "重复"})
+def test_create_product_rejects_client_supplied_code(api_env):
+    response = api_env.client.post("/v1/products/", json={"code": "DUP", "name": "第一个"})
+
+    assert response.status_code == 422
+    assert api_env.db.query(Product).count() == 0
+
+
+def test_create_product_assigns_public_id_without_leaking_internal_ids(api_env):
+    first = api_env.client.post("/v1/products/", json={"name": "第一个"})
+    second = api_env.client.post("/v1/products/", json={"name": "第二个"})
 
     assert first.status_code == 201
-    assert duplicate.status_code == 409
-    assert [row.code for row in api_env.db.query(Product).filter(Product.team_id == 1).all()] == ["DUP"]
+    assert second.status_code == 201
+    payload = first.json()
+    assert payload["id"] == payload["public_id"]
+    assert payload["public_id"].startswith("prd_")
+    assert "code" not in payload
+    assert "team_id" not in payload
+    assert "product_id" not in payload
+    module = payload["modules"][0]
+    assert module["id"] == module["public_id"]
+    assert module["public_id"].startswith("prm_")
+    assert "code" not in module
+    assert "team_id" not in module
+    assert "product_id" not in module
+    assert second.json()["public_id"] != payload["public_id"]
+    assert [row.name for row in api_env.db.query(Product).filter(Product.team_id == 1).order_by(Product.id).all()] == [
+        "第一个",
+        "第二个",
+    ]
 
 
-def test_duplicate_module_code_returns_conflict_without_extra_module(api_env):
+def test_create_add_on_module_assigns_public_id_without_client_code(api_env):
     product = _create_product(api_env)
     first = api_env.client.post(
         f"/v1/products/{product.public_id}/modules",
-        json={"code": "DUP", "name": "第一个模块"},
+        json={"name": "第一个模块"},
     )
-    duplicate = api_env.client.post(
+    second = api_env.client.post(
         f"/v1/products/{product.public_id}/modules",
-        json={"code": "DUP", "name": "重复模块"},
+        json={"name": "第二个模块"},
     )
 
     assert first.status_code == 201
-    assert duplicate.status_code == 409
-    modules = api_env.db.query(ProductModule).filter(ProductModule.product_id == product.id).all()
-    assert sorted(module.code for module in modules) == ["BASE", "DUP"]
+    assert second.status_code == 201
+    assert first.json()["public_id"].startswith("prm_")
+    assert first.json()["id"] == first.json()["public_id"]
+    assert "code" not in first.json()
+    assert "product_id" not in first.json()
+    assert first.json()["public_id"] != second.json()["public_id"]
 
 
 def test_mounted_app_registers_products_route_and_serves_list(api_env):
@@ -244,18 +270,18 @@ def test_missing_view_permission_returns_forbidden(api_env):
 def test_create_requires_explicit_permission_even_for_team_admin_role(api_env):
     api_env.permissions.difference_update({"product:create"})
 
-    response = api_env.client.post("/v1/products/", json={"code": "CRM", "name": "CRM"})
+    response = api_env.client.post("/v1/products/", json={"name": "CRM"})
 
     assert response.status_code == 403
 
 
 def test_create_returns_mandatory_base_module(api_env):
-    response = api_env.client.post("/v1/products/", json={"code": "CRM", "name": "CRM"})
+    response = api_env.client.post("/v1/products/", json={"name": "CRM"})
 
     assert response.status_code == 201
     assert len(response.json()["modules"]) == 1
     assert response.json()["modules"][0]["module_role"] == "BASE"
-    assert response.json()["modules"][0]["code"] == "BASE"
+    assert response.json()["public_id"].startswith("prd_")
 
 
 def test_edit_updates_product_and_add_on_module(api_env):
@@ -263,7 +289,7 @@ def test_edit_updates_product_and_add_on_module(api_env):
     module = product_crud.create_module(
         api_env.db,
         product,
-        {"code": "PRO", "name": "专业版"},
+        {"name": "专业版"},
         "7",
     )
 
@@ -294,7 +320,7 @@ def test_delete_safe_product(api_env):
 
 def test_module_delete_requires_product_edit_permission(api_env):
     product = _create_product(api_env)
-    module = product_crud.create_module(api_env.db, product, {"code": "PRO", "name": "专业版"}, "7")
+    module = product_crud.create_module(api_env.db, product, {"name": "专业版"}, "7")
     api_env.permissions.discard("product:edit")
 
     response = api_env.client.delete(f"/v1/products/{product.public_id}/modules/{module.public_id}")
@@ -317,7 +343,7 @@ def test_base_module_delete_and_deactivation_return_bad_request(api_env):
 
 
 def test_foreign_product_public_id_is_not_found_and_cannot_be_mutated(api_env):
-    foreign = _create_product(api_env, team_id=2, code="FOREIGN", name="Foreign")
+    foreign = _create_product(api_env, team_id=2, name="Foreign")
 
     detail = api_env.client.get(f"/v1/products/{foreign.public_id}")
     update = api_env.client.put(f"/v1/products/{foreign.public_id}", json={"name": "侵入"})
@@ -329,12 +355,12 @@ def test_foreign_product_public_id_is_not_found_and_cannot_be_mutated(api_env):
 
 
 def test_foreign_module_public_id_is_not_found_under_local_product(api_env):
-    local = _create_product(api_env, team_id=1, code="LOCAL", name="Local")
-    foreign = _create_product(api_env, team_id=2, code="FOREIGN", name="Foreign")
+    local = _create_product(api_env, team_id=1, name="Local")
+    foreign = _create_product(api_env, team_id=2, name="Foreign")
     foreign_module = product_crud.create_module(
         api_env.db,
         foreign,
-        {"code": "PRO", "name": "专业版"},
+        {"name": "专业版"},
         "7",
     )
 

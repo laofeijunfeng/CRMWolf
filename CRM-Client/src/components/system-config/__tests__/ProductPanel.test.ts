@@ -8,11 +8,11 @@ import { usePermissionStore } from '@/stores/permissions'
 
 const mocks = vi.hoisted(() => ({
   product: {
-    public_id: 'prd_1', team_id: 1, code: 'CRM', name: 'CRM 产品', description: '基础 CRM', is_active: true,
+    public_id: 'prd_1', id: 'prd_1', name: 'CRM 产品', description: '基础 CRM', is_active: true,
     created_by: 'u', updated_by: null, created_time: '2026-01-01T00:00:00', updated_time: '2026-01-01T00:00:00',
     modules: [
-      { public_id: 'prm_1', team_id: 1, product_id: 1, code: 'BASE', name: '基础模块', description: null, module_role: 'BASE' as const, is_active: true, sort_order: 0, created_by: 'u', updated_by: null, created_time: '2026-01-01T00:00:00', updated_time: '2026-01-01T00:00:00' },
-      { public_id: 'prm_2', team_id: 1, product_id: 1, code: 'ADD_ON', name: '增强模块', description: null, module_role: 'ADD_ON' as const, is_active: true, sort_order: 1, created_by: 'u', updated_by: null, created_time: '2026-01-01T00:00:00', updated_time: '2026-01-01T00:00:00' },
+      { public_id: 'prm_1', id: 'prm_1', name: '基础模块', description: null, module_role: 'BASE' as const, is_active: true, sort_order: 0, created_by: 'u', updated_by: null, created_time: '2026-01-01T00:00:00', updated_time: '2026-01-01T00:00:00' },
+      { public_id: 'prm_2', id: 'prm_2', name: '增强模块', description: null, module_role: 'ADD_ON' as const, is_active: true, sort_order: 1, created_by: 'u', updated_by: null, created_time: '2026-01-01T00:00:00', updated_time: '2026-01-01T00:00:00' },
     ],
   },
 }))
@@ -70,7 +70,7 @@ describe('ProductPanel', () => {
     expect(wrapper.findAll('button').some(button => button.text().includes('新建产品'))).toBe(false)
     expect(wrapper.findAll('button').some(button => button.text().includes('编辑'))).toBe(false)
     expect(wrapper.findAll('button').some(button => button.text().includes('删除'))).toBe(false)
-    expect(wrapper.find('input[aria-label="搜索产品名称或编码"]').exists()).toBe(true)
+    expect(wrapper.find('input[aria-label="搜索产品名称"]').exists()).toBe(true)
     expect(wrapper.find('button[aria-label="产品状态"]').exists()).toBe(true)
   })
 
@@ -157,13 +157,12 @@ describe('ProductPanel', () => {
     await flushPromises()
 
     const form = wrapper.get('form')
-    await form.get('input[name="code"]').setValue('CRM_WOLF')
+    expect(form.find('input[name="code"]').exists()).toBe(false)
     await form.get('input[name="name"]').setValue('CRMWolf')
     await form.get('textarea[name="description"]').setValue('客户关系管理平台')
     await form.get('button[type="submit"]').trigger('click')
     await vi.waitFor(() => {
       expect(productApi.create).toHaveBeenCalledWith({
-        code: 'CRM_WOLF',
         name: 'CRMWolf',
         description: '客户关系管理平台',
       })

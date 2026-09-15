@@ -44,13 +44,31 @@ class InternalCRMAPIClient:
 
         if response.status_code >= 400:
             response_json = self._safe_json(response)
-            detail = response_json.get("detail") if isinstance(response_json, dict) else None
             raise CRMAPIClientError(
-                detail or f"CRM API调用失败：{response.status_code}",
+                self._error_message(response.status_code, response_json),
                 status_code=response.status_code,
                 response_json=response_json,
             )
         return self._safe_json(response)
+
+    @staticmethod
+    def _error_message(status_code: int, response_json: object) -> str:
+        """Surface FastAPI 422 field errors so callers can self-correct."""
+
+        if isinstance(response_json, dict):
+            detail = response_json.get("detail")
+            if isinstance(detail, str) and detail.strip():
+                fields = response_json.get("errors")
+                if status_code == 422 and isinstance(fields, list):
+                    parts = [
+                        f"{item.get('field')}: {item.get('message')}"
+                        for item in fields
+                        if isinstance(item, dict) and item.get("field")
+                    ]
+                    if parts:
+                        return f"{detail} ({'; '.join(parts[:5])})"
+                return detail
+        return f"CRM API调用失败：{status_code}"
 
     @staticmethod
     def _safe_json(response: httpx.Response) -> object:

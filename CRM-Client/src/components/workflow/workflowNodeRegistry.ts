@@ -87,8 +87,8 @@ export const WORKFLOW_NODE_REGISTRY: Record<WorkflowNodeType, WorkflowNodeTypeDe
   'crm.create_opportunity': {
     type: 'crm.create_opportunity', label: '创建商机', category: 'crm', icon: BriefcaseBusiness,
     component: ActionCreateOpportunityPanel,
-    defaults: () => ({ customer_ref: '', opportunity_name: '', total_amount: 0, user_count: 1, license_type: 'SUBSCRIPTION', subscription_years: 1, purchase_type: 'NEW', expected_closing_date: '', decision_maker_count: null, procurement_method_id: null, procurement_stage_id: null, owner_strategy: 'creator' }),
-    requiredFields: ['customer_ref', 'total_amount', 'user_count', 'license_type', 'purchase_type', 'expected_closing_date'], isTrigger: false,
+    defaults: () => ({ customer_ref: '', opportunity_name: '', total_amount: 0, user_count: 1, license_type: 'SUBSCRIPTION', subscription_years: 1, purchase_type: 'NEW', expected_closing_date: '', decision_maker_count: null, procurement_method_id: null, procurement_stage_id: null, owner_strategy: 'creator', product_public_id: '', product_module_public_ids: '' }),
+    requiredFields: ['customer_ref', 'total_amount', 'user_count', 'license_type', 'purchase_type', 'expected_closing_date', 'product_public_id', 'product_module_public_ids'], isTrigger: false,
     summary: config => typeof config['opportunity_name'] === 'string' && config['opportunity_name'].trim() !== '' ? config['opportunity_name'] : '未命名商机',
   },
 }

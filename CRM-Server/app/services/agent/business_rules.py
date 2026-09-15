@@ -681,10 +681,14 @@ def missing_opportunity_fields(
         "license_type",
         "purchase_type",
         "expected_closing_date",
+        "product_public_id",
     ]
     for field in required_fields:
         if not opportunity.get(field):
             fields.append(field)
+    module_ids = opportunity.get("product_module_public_ids")
+    if not isinstance(module_ids, list) or len(module_ids) == 0:
+        fields.append("product_module_public_ids")
     if require_procurement_method and not opportunity.get("procurement_method_id"):
         fields.append("procurement_method_id")
     if opportunity.get("license_type") == "SUBSCRIPTION" and not opportunity.get("subscription_years"):
@@ -709,6 +713,8 @@ def format_opportunity_missing_fields(fields: List[str]) -> str:
         "purchase_type": "采购类型（新购/续购/增购）",
         "procurement_method_id": "采购方式",
         "expected_closing_date": "预计成交日期",
+        "product_public_id": "产品",
+        "product_module_public_ids": "产品模块",
     }
     return "、".join(labels.get(field, field) for field in fields)
 

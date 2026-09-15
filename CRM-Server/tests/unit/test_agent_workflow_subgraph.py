@@ -363,7 +363,7 @@ class RootPlanProjectionProbePlanner(CRMWorkflowPlanner):
     async def _plan_customer_activity(self, *args: object, **kwargs: object) -> WorkflowActionPlan:
         return self._probe("CUSTOMER_ACTIVITY")
 
-    def _plan_customer(self, *args: object, **kwargs: object) -> WorkflowActionPlan:
+    async def _plan_customer(self, *args: object, **kwargs: object) -> WorkflowActionPlan:
         return self._probe("CREATE_CUSTOMER")
 
     async def _plan_opportunity(self, *args: object, **kwargs: object) -> WorkflowActionPlan:
@@ -2184,8 +2184,15 @@ async def test_create_customer_with_activity_confirms_once_and_binds_created_cus
         "activity_kind": "WECHAT_FOLLOW_UP",
         "source_content": "已确认进入技术评估阶段",
         "title": "已确认进入技术评估阶段",
+        "content_json": {"content": "已确认进入技术评估阶段"},
+        "summary": "已确认进入技术评估阶段",
         "next_action": "发送技术评估材料",
+        "next_action_source": "AGENT",
         "next_follow_time": "2026-08-26T10:00:00",
+        "effectiveness_score": 80,
+        "effectiveness_is_valid": True,
+        "effectiveness_reason": "测试质量评估结果。",
+        "effectiveness_detail_json": {},
         "idempotency_suffix": f"{workflow_id}:create_customer_activity",
     }
 
@@ -3122,6 +3129,8 @@ class OpportunityFormThenConfirmationResolver:
             "subscription_years": 2,
             "purchase_type": "NEW",
             "expected_closing_date": "2026-09-30",
+            "product_public_id": "prd_crm",
+            "product_module_public_ids": ["prm_base"],
         }
 
     async def resolve(
@@ -3218,6 +3227,8 @@ async def test_create_opportunity_collects_signed_fields_and_uses_authoritative_
         "subscription_years",
         "purchase_type",
         "expected_closing_date",
+        "product_public_id",
+        "product_module_public_ids",
     ]
     assert form.continuation is not None
     interaction_resolver.continuations["act_submit_opportunity_fields"] = form.continuation
@@ -3277,6 +3288,8 @@ async def test_create_opportunity_collects_signed_fields_and_uses_authoritative_
             "purchase_type": "NEW",
             "expected_closing_date": "2026-09-30",
             "procurement_method_id": 8,
+            "product_public_id": "prd_crm",
+            "product_module_public_ids": ["prm_base"],
         },
         "idempotency_suffix": f"{workflow_id}:create_opportunity",
     }
@@ -3497,6 +3510,8 @@ async def test_create_opportunity_revalidates_server_signed_procurement_choice()
                         "day": 30,
                         "confidence": 0.99,
                     },
+                    "product_public_id": "prd_crm",
+                    "product_module_public_ids": ["prm_base"],
                 },
             }
         )
@@ -3610,6 +3625,8 @@ async def test_create_opportunity_reprompts_when_signed_procurement_choice_expir
                         "day": 30,
                         "confidence": 0.99,
                     },
+                    "product_public_id": "prd_crm",
+                    "product_module_public_ids": ["prm_base"],
                 },
             }
         )

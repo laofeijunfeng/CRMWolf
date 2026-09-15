@@ -52,6 +52,12 @@ export interface SalesStageUpdate {
   is_active?: number
 }
 
+export interface OpportunityProductModule {
+  public_id: string
+  name: string
+  module_role: string
+}
+
 export interface Opportunity {
   id: string
   public_id: string
@@ -74,6 +80,10 @@ export interface Opportunity {
       can_skip: boolean
     }[]
   } | null
+  product_public_id?: string | null
+  product_name?: string | null
+  product_module_public_ids?: string[]
+  product_modules?: OpportunityProductModule[]
   total_amount: number
   user_count: number
   unit_price: number
@@ -158,6 +168,8 @@ export interface OpportunityCreate {
   procurement_stage_id?: number | null
   owner_id?: string
   decision_maker_count?: number | null
+  product_public_id: string
+  product_module_public_ids: string[]
 }
 
 export interface OpportunityUpdate {
@@ -171,6 +183,8 @@ export interface OpportunityUpdate {
   expected_closing_date?: string
   procurement_method_id?: number | null
   procurement_stage_id?: number | null
+  product_public_id?: string
+  product_module_public_ids?: string[]
 }
 
 export interface OpportunityMoveStageRequest {
@@ -248,6 +262,10 @@ export interface OpportunityListResponse {
   opportunity_name: string
   customer_id: string
   procurement_method_id: number | null
+  product_public_id?: string | null
+  product_name?: string | null
+  product_module_public_ids?: string[]
+  product_modules?: OpportunityProductModule[]
   procurement_method_info: {
     id: number
     name: string

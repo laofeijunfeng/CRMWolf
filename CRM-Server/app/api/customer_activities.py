@@ -228,7 +228,7 @@ def create_agent_finalized_activity(
 ):
     customer = check_customer_activity_permission(customer_id, team_id, current_user, db)
     finalization = CustomerActivityFinalization(
-        title=activity.title or activity.source_content,
+        title=(activity.title or activity.source_content)[:255],
         content_json=activity.content_json or {"content": activity.title or activity.source_content},
         summary=activity.summary or activity.source_content[:200],
         next_action=activity.next_action,

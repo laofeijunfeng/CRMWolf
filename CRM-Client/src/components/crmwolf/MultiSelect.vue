@@ -16,10 +16,12 @@ const props = withDefaults(defineProps<{
   modelValue?: string[]
   options?: MultiSelectOption[]
   placeholder?: string
+  disabled?: boolean
 }>(), {
   modelValue: () => [],
   options: () => [],
-  placeholder: '请选择'
+  placeholder: '请选择',
+  disabled: false,
 })
 
 const emit = defineEmits<{
@@ -58,6 +60,7 @@ function handleValueChange(value: unknown): void {
   <Select
     :model-value="selectedValues"
     multiple
+    :disabled="props.disabled"
     @update:model-value="handleValueChange"
   >
     <SelectTrigger class="wolf-multi-select-trigger">

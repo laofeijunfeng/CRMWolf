@@ -84,6 +84,8 @@ CRM_VALID_DSL = {
                 "license_type": "annual",
                 "purchase_type": "new",
                 "expected_closing_date": "2026-12-31",
+                "product_public_id": "prd_crm",
+                "product_module_public_ids": "prm_base",
             },
         },
     ],

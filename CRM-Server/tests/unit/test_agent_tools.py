@@ -3113,6 +3113,8 @@ async def test_agent_tool_create_opportunity_calls_existing_api():
                     "subscription_years": 1,
                     "purchase_type": "NEW",
                     "expected_closing_date": "2026-08-31",
+                    "product_public_id": "prd_crm",
+                    "product_module_public_ids": ["prm_base"],
                 },
             },
         )
@@ -3178,6 +3180,8 @@ async def test_agent_tool_registry_rejects_model_authored_opportunity_name():
                         "subscription_years": 1,
                         "purchase_type": "NEW",
                         "expected_closing_date": "2026-08-31",
+                        "product_public_id": "prd_crm",
+                        "product_module_public_ids": ["prm_base"],
                     },
                 },
             )

@@ -11,6 +11,7 @@ NODE_CONFIG_REQUIREMENTS: dict[str, list[str]] = {
     "crm.create_opportunity": [
         "customer_ref", "total_amount", "user_count", "license_type",
         "purchase_type", "expected_closing_date",
+        "product_public_id", "product_module_public_ids",
     ],
 }
 KNOWN_NODE_TYPES = frozenset(NODE_CONFIG_REQUIREMENTS)

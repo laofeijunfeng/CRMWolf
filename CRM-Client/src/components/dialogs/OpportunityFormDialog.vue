@@ -32,7 +32,9 @@ import { Button } from '@/components/ui/button'
 import {
   DateField,
   InputField,
+  MultiSelect,
   SearchableSelectField,
+  SegmentedChoiceControl,
   SelectField,
 } from '@/components/crmwolf'
 import { handleApiError } from '@/utils/errorHandler'
@@ -40,12 +42,16 @@ import { useDialogCloseGuard } from '@/composables/useDialogCloseGuard'
 import { opportunityApi, type Opportunity, type OpportunityCreate, type OpportunityUpdate, LicenseType, PurchaseType } from '@/api/opportunity'
 import procurementApi, { type ProcurementMethodOption } from '@/api/procurement'
 import customerApi, { type CustomerResponse, type CustomerDetailResponse } from '@/api/customer'
+import productApi from '@/api/product'
+import type { ProductResponse } from '@/schemas/product'
 import { formatLocalDate } from '@/utils/format'
 
 // Zod schema for form validation
 const schema = toTypedSchema(
   z.object({
     customer_id: z.string().min(1, '请选择客户'),
+    product_public_id: z.string().min(1, '请选择产品'),
+    product_module_public_ids: z.array(z.string().min(1)).min(1, '请至少选择一个产品模块'),
     total_amount: z.coerce.number().gt(0, '商机金额必须大于0'),
     user_count: z.coerce.number().int('用户数必须为整数').min(1, '用户数至少为1'),
     license_type: z.nativeEnum(LicenseType, { errorMap: () => ({ message: '请选择授权类型' }) }),
@@ -102,10 +108,12 @@ function getDefaultDate(): string {
 }
 
 // VeeValidate form setup
-const { handleSubmit, resetForm, values, setFieldValue } = useForm({
+const { handleSubmit, resetForm, values, setFieldValue, errors, submitCount } = useForm({
   validationSchema: schema,
   initialValues: {
     customer_id: '',
+    product_public_id: '',
+    product_module_public_ids: [],
     total_amount: 0,
     user_count: 1,
     license_type: LicenseType.SUBSCRIPTION,
@@ -124,6 +132,8 @@ const loadingMethods = ref(false)
 const customers = ref<CustomerOption[]>([])
 const loadingCustomers = ref(false)
 const customerSearchKeyword = ref('')
+const products = ref<ProductResponse[]>([])
+const loadingProducts = ref(false)
 
 // Computed property for dialog visibility
 const visible = computed({
@@ -172,6 +182,56 @@ const procurementMethodOptions = computed(() =>
     label: method.name,
   }))
 )
+const productOptions = computed(() =>
+  products.value
+    .filter(product => product.is_active || product.public_id === String(values.product_public_id ?? ''))
+    .map(product => ({
+      value: product.public_id,
+      label: product.name,
+    }))
+)
+const selectedProduct = computed(() =>
+  products.value.find(product => product.public_id === String(values.product_public_id ?? '')) ?? null
+)
+const moduleOptions = computed(() =>
+  (selectedProduct.value?.modules ?? [])
+    .filter(module => module.is_active)
+    .map(module => ({
+      value: module.public_id,
+      label: module.name,
+    }))
+)
+const productError = computed(() => submitCount.value > 0 ? (errors.value.product_public_id ?? '') : '')
+
+function defaultModulePublicIds(product: ProductResponse): string[] {
+  const activeModules = (product.modules ?? []).filter(module => module.is_active)
+  const baseModule = activeModules.find(module => module.module_role === 'BASE')
+  if (baseModule !== undefined) return [baseModule.public_id]
+  const firstModule = activeModules[0]
+  return firstModule === undefined ? [] : [firstModule.public_id]
+}
+
+function firstActiveProduct(): ProductResponse | undefined {
+  return products.value.find(product => product.is_active)
+}
+
+function applyDefaultProductSelection(): void {
+  const selectedProductId = String(values.product_public_id ?? '')
+  if (selectedProductId === '') {
+    const firstProduct = firstActiveProduct()
+    if (firstProduct === undefined) return
+    setFieldValue('product_public_id', firstProduct.public_id)
+    setFieldValue('product_module_public_ids', defaultModulePublicIds(firstProduct))
+    return
+  }
+
+  const selected = products.value.find(product => product.public_id === selectedProductId)
+  if (selected === undefined) return
+  const selectedModuleIds = Array.isArray(values.product_module_public_ids) ? values.product_module_public_ids : []
+  if (selectedModuleIds.length === 0) {
+    setFieldValue('product_module_public_ids', defaultModulePublicIds(selected))
+  }
+}
 
 interface CustomerOption {
   id: string
@@ -246,6 +306,24 @@ async function fetchProcurementMethods(): Promise<void> {
   }
 }
 
+async function fetchProducts(): Promise<void> {
+  loadingProducts.value = true
+  try {
+    products.value = await productApi.list()
+  } catch (error) {
+    handleApiError(error, '获取产品')
+  } finally {
+    loadingProducts.value = false
+  }
+}
+
+function handleProductChange(productId: string): void {
+  if (productId === String(values.product_public_id ?? '')) return
+  const nextProduct = products.value.find(product => product.public_id === productId)
+  setFieldValue('product_public_id', productId)
+  setFieldValue('product_module_public_ids', nextProduct === undefined ? [] : defaultModulePublicIds(nextProduct))
+}
+
 // Fetch customers for dropdown
 async function fetchCustomers(keyword?: string): Promise<void> {
   loadingCustomers.value = true
@@ -278,6 +356,7 @@ watch(values, () => {
 
 const initializeForm = async (): Promise<void> => {
   customerSearchKeyword.value = ''
+  const productsPromise = fetchProducts()
 
   // Edit mode: populate form with opportunity data
   if (isEdit.value && props.opportunity) {
@@ -285,6 +364,8 @@ const initializeForm = async (): Promise<void> => {
     resetForm({
       values: {
         customer_id: String(opp.customer_id),
+        product_public_id: opp.product_public_id ?? '',
+        product_module_public_ids: [...(opp.product_module_public_ids ?? [])],
         total_amount: opp.total_amount,
         user_count: opp.user_count,
         license_type: opp.license_type,
@@ -310,9 +391,12 @@ const initializeForm = async (): Promise<void> => {
     }
   } else {
     const initialCustomerId = props.customerId === undefined ? '' : String(props.customerId)
+    const defaultProduct = firstActiveProduct()
     resetForm({
       values: {
         customer_id: initialCustomerId,
+        product_public_id: defaultProduct?.public_id ?? '',
+        product_module_public_ids: defaultProduct === undefined ? [] : defaultModulePublicIds(defaultProduct),
         total_amount: 0,
         user_count: 1,
         license_type: LicenseType.SUBSCRIPTION,
@@ -371,6 +455,8 @@ const initializeForm = async (): Promise<void> => {
     }
   }
 
+  await productsPromise
+  applyDefaultProductSelection()
   isDirty.value = false
 }
 
@@ -387,17 +473,17 @@ watch(() => props.open, (newOpen) => {
   }
 }, { immediate: true })
 
-// Fetch data on mount
 onMounted(() => {
   fetchProcurementMethods()
 })
 
-// Form submission
 const onSubmit = handleSubmit(async (formValues) => {
   submitting.value = true
   try {
     const data: OpportunityCreate | OpportunityUpdate = {
       customer_id: formValues['customer_id'],
+      product_public_id: formValues['product_public_id'],
+      product_module_public_ids: [...formValues['product_module_public_ids']],
       total_amount: formValues['total_amount'],
       user_count: formValues['user_count'],
       license_type: formValues['license_type'],
@@ -499,6 +585,44 @@ function continueEditing(): void {
               @update:open="(open: boolean) => { if (open) fetchCustomers(customerSearchKeyword) }"
               @update:search-value="handleCustomerSearch"
             />
+            <FormMessage />
+          </FormItem>
+        </FormField>
+
+        <div class="space-y-2">
+          <p id="opportunity-product-label" class="text-wolf-caption font-wolf-medium text-wolf-text-primary">
+            产品 <span class="text-wolf-danger" aria-hidden="true">*</span>
+          </p>
+          <p v-if="loadingProducts" class="text-sm text-wolf-text-secondary">加载产品中...</p>
+          <p v-else-if="productOptions.length === 0" class="text-sm text-wolf-text-secondary">暂无可用产品</p>
+          <SegmentedChoiceControl
+            v-else
+            :model-value="String(values.product_public_id ?? '')"
+            :options="productOptions"
+            labelled-by="opportunity-product-label"
+            id-prefix="opportunity-product"
+            :invalid="Boolean(productError)"
+            described-by="opportunity-product-error"
+            :style="{ '--segmented-choice-columns': String(Math.min(Math.max(productOptions.length, 1), 4)) }"
+            @update:model-value="handleProductChange"
+          />
+          <p v-if="productError" id="opportunity-product-error" class="text-sm text-destructive" role="alert">{{ productError }}</p>
+        </div>
+
+        <FormField v-slot="{ value, handleChange }" name="product_module_public_ids">
+          <FormItem>
+            <div class="grid gap-wolf-xs">
+              <p id="opportunity-modules-label" class="text-wolf-caption font-wolf-medium text-wolf-text-primary">
+                产品模块 <span class="text-wolf-danger" aria-hidden="true">*</span>
+              </p>
+              <MultiSelect
+                :model-value="Array.isArray(value) ? value : []"
+                :options="moduleOptions"
+                placeholder="请选择产品模块"
+                :disabled="!values.product_public_id || moduleOptions.length === 0"
+                @update:model-value="handleChange"
+              />
+            </div>
             <FormMessage />
           </FormItem>
         </FormField>

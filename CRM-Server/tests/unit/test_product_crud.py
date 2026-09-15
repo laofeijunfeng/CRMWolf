@@ -27,12 +27,12 @@ def db(tmp_path: Path):
         session.close()
 
 
-def product_payload(code: str = "CRM", name: str = "CRM") -> ProductCreate:
-    return ProductCreate(code=code, name=name, description="desc")
+def product_payload(name: str = "CRM") -> ProductCreate:
+    return ProductCreate(name=name, description="desc")
 
 
-def module_payload(code: str = "ADDON", name: str = "增强模块") -> ProductModuleCreate:
-    return ProductModuleCreate(code=code, name=name, description="module")
+def module_payload(name: str = "增强模块") -> ProductModuleCreate:
+    return ProductModuleCreate(name=name, description="module")
 
 
 def test_product_rejects_second_base_module_at_database_boundary(db):
@@ -73,35 +73,40 @@ def test_create_product_creates_exactly_one_base_module(db):
     product = product_crud.create(db, team_id=1, obj_in=product_payload(), creator_id="u1")
 
     assert product.team_id == 1
+    assert product.public_id.startswith("prd_")
+    assert len(product.public_id) == 36
+    assert product.code.startswith("PRD_")
+    assert product.code != product.public_id
     assert len(product.modules) == 1
     base = product.modules[0]
+    assert base.public_id.startswith("prm_")
     assert base.code == "BASE"
     assert base.name == "基础版"
     assert base.module_role == ProductModuleRole.BASE.value
     assert base.is_active is True
 
 
-def test_duplicate_product_code_in_same_team_is_rejected(db):
-    product_crud.create(db, 1, product_payload(), "u1")
-
-    with pytest.raises(ValueError, match="产品编码已存在"):
-        product_crud.create(db, 1, product_payload(name="另一个"), "u2")
-
-
-def test_same_product_code_in_another_team_is_allowed(db):
+def test_create_product_generates_unique_internal_codes_per_team(db):
     first = product_crud.create(db, 1, product_payload(), "u1")
-    second = product_crud.create(db, 2, product_payload(), "u2")
+    second = product_crud.create(db, 1, product_payload(name="另一个"), "u2")
+    other_team = product_crud.create(db, 2, product_payload(), "u3")
 
     assert first.public_id != second.public_id
-    assert second.team_id == 2
+    assert first.code != second.code
+    assert other_team.team_id == 2
+    assert other_team.public_id != first.public_id
 
 
-def test_duplicate_module_code_in_one_product_is_rejected(db):
+def test_create_add_on_module_generates_internal_code(db):
     product = product_crud.create(db, 1, product_payload(), "u1")
-    product_crud.create_module(db, product, module_payload(), "u1")
+    first = product_crud.create_module(db, product, module_payload(), "u1")
+    second = product_crud.create_module(db, product, module_payload(name="重复名称"), "u2")
 
-    with pytest.raises(ValueError, match="模块编码已存在"):
-        product_crud.create_module(db, product, module_payload(name="重复"), "u2")
+    assert first.public_id.startswith("prm_")
+    assert first.code.startswith("PRM_")
+    assert first.code != "BASE"
+    assert second.code != first.code
+    assert second.name == "重复名称"
 
 
 def test_base_module_cannot_be_deleted_or_deactivated(db):

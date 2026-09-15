@@ -38,6 +38,7 @@ import { isOpportunityPublicId } from '@/utils/opportunityRoutes'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
 import { customerDetailRoute } from '@/utils/customerRoutes'
+import { formatOpportunityModuleNames, formatOpportunityProductSummary } from '@/utils/opportunityProduct'
 import { normalizePaginatedResponse } from '@/types/pagination'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 import type { FormSuccessPayload } from '@/types/actionOutcome'
@@ -142,6 +143,7 @@ const fields = computed<ListFieldDefinition[]>(() => {
       sort: { apiKey: 'owner_id' }
     },
     { key: 'customer_name', label: '客户名称', type: 'text', column: { width: '150px' }, filter: true, sort: true },
+    { key: 'product_name', label: '产品', type: 'text', column: { width: '180px' }, filter: true, sort: true },
     {
       key: 'total_amount',
       label: '预计金额',
@@ -275,6 +277,12 @@ const getOpportunityStageName = (row: OpportunityListResponse): string => {
     ?? row.stage_name
     ?? '-'
 }
+
+const getOpportunityModuleNames = (row: OpportunityListResponse): string =>
+  formatOpportunityModuleNames(row)
+
+const getOpportunityProductSummary = (row: OpportunityListResponse): string =>
+  formatOpportunityProductSummary(row)
 
 // ==================== Methods ====================
 const fetchOwnerFilterOptions = async (): Promise<void> => {
@@ -866,7 +874,7 @@ watchEffect(() => {
       @update:page-size="handlePageSizeChange"
       v-model:search="search"
       search-enabled
-      search-placeholder="搜索商机名称、客户或阶段"
+      search-placeholder="搜索商机名称、客户、产品或阶段"
       :search-loading="loading"
       @search-apply="handleSearchApply"
       @search-clear="handleSearchClear"
@@ -912,6 +920,7 @@ watchEffect(() => {
           <span>赢率：{{ row.win_probability !== undefined ? row.win_probability + '%' : '-' }}</span>
           <span>预计：{{ formatDate(row.expected_closing_date) }}</span>
           <span>负责人：{{ row.owner_info?.name || '-' }}</span>
+          <span>产品：{{ getOpportunityProductSummary(row) }}</span>
         </div>
       </template>
 
@@ -931,6 +940,15 @@ watchEffect(() => {
         <span class="link-text" @click.stop="handleViewCustomer(row.customer_id)">
           {{ row.customer_name || '-' }}
         </span>
+      </template>
+
+      <template #cell-product_name="{ row }">
+        <div class="opportunity-product-cell">
+          <span class="opportunity-product-name">{{ row.product_name || '-' }}</span>
+          <span v-if="getOpportunityModuleNames(row)" class="opportunity-product-modules">
+            {{ getOpportunityModuleNames(row) }}
+          </span>
+        </div>
       </template>
 
       <!-- 预计金额 -->
@@ -1106,6 +1124,26 @@ watchEffect(() => {
   flex-wrap: wrap;
   gap: $wolf-space-xs-v2;
   margin-top: $wolf-space-sm-v2;
+}
+
+.opportunity-product-cell {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.opportunity-product-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.opportunity-product-modules {
+  min-width: 0;
+  font-size: $wolf-font-size-caption-v2;
+  line-height: 1.4;
+  color: $wolf-text-tertiary-v2;
+  overflow-wrap: anywhere;
 }
 
 .opportunity-mobile-card-meta {

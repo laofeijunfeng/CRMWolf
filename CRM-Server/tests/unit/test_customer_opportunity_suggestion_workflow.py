@@ -143,6 +143,8 @@ async def test_create_suggestion_uses_signed_payload_without_semantic_parser() -
                     "subscription_years": 2,
                     "purchase_type": "NEW",
                     "expected_closing_date": "2026-09-30",
+                    "product_public_id": "prd_crm",
+                    "product_module_public_ids": ["prm_base"],
                 }
             )
         ),
@@ -159,6 +161,8 @@ async def test_create_suggestion_uses_signed_payload_without_semantic_parser() -
         "expected_closing_date": "2026-09-30",
         "procurement_method_id": 7,
         "subscription_years": 2,
+        "product_public_id": "prd_crm",
+        "product_module_public_ids": ["prm_base"],
     }
 
 
@@ -190,6 +194,8 @@ async def test_create_suggestion_returns_embedded_form_then_executes_after_suppl
                             "license_type": "PERPETUAL",
                             "purchase_type": "NEW",
                             "expected_closing_date": "2026-09-30",
+                            "product_public_id": "prd_crm",
+                            "product_module_public_ids": ["prm_base"],
                         },
                     },
                 )
@@ -288,6 +294,8 @@ async def test_suggestion_resume_plan_carries_user_confirmation_to_write_guardra
                     "license_type": "PERPETUAL",
                     "purchase_type": "NEW",
                     "expected_closing_date": "2026-09-30",
+                    "product_public_id": "prd_crm",
+                    "product_module_public_ids": ["prm_base"],
                 }
             )
         ),

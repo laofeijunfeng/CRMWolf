@@ -1005,6 +1005,19 @@
         "not_in"
       ]
     },
+    "product_name": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
     "purchase_type": {
       "type": "enum",
       "filterable": true,

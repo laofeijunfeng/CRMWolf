@@ -19,6 +19,7 @@ import StatusBadge from '@/components/StatusBadge.vue'
 import AmountText from '@/components/crmwolf/AmountText.vue'
 import ListCard from '@/components/crmwolf/ListCard.vue'
 import type { OpportunityListResponse, OpportunityStatus } from '@/api/opportunity'
+import { formatOpportunityProductSummary } from '@/utils/opportunityProduct'
 
 interface Props {
   customerId: string
@@ -57,6 +58,9 @@ const formatDate = (dateStr: string): string => {
   const date = new Date(dateStr)
   return date.toLocaleDateString('zh-CN')
 }
+
+const formatProductSummary = (item: OpportunityListResponse): string =>
+  formatOpportunityProductSummary(item, '未关联产品')
 </script>
 
 <template>
@@ -107,6 +111,7 @@ const formatDate = (dateStr: string): string => {
       <template #itemMeta="{ item }">
         <AmountText :value="item.total_amount" size="sm" tone="primary" />
         <span> · {{ item.stage_info?.stage_name ?? '-' }}</span>
+        <span> · {{ formatProductSummary(item) }}</span>
         <span> · 预计成交: {{ formatDate(item.expected_closing_date) }}</span>
       </template>
 
