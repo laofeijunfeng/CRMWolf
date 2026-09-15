@@ -237,3 +237,39 @@ def test_public_leads_rejects_unknown_unified_query_field(client):
 
     assert response.status_code == 400
     assert "missing_field" in response.json()["detail"]
+
+
+def test_public_leads_include_product_intent_payload(client, db_session):
+    product = Product(
+        team_id=1,
+        code="CRM",
+        name="CRM",
+        created_by="1",
+        public_id="prd_public_list",
+    )
+    db_session.add(product)
+    db_session.flush()
+    lead = Lead(
+        team_id=1,
+        lead_name="公海产品线索",
+        source=LeadSource.WEBSITE_INQUIRY,
+        city="上海",
+        contact_name="甲",
+        contact_phone="13800138005",
+        owner_id=None,
+        creator_id="1",
+        status=LeadStatus.NEW,
+    )
+    db_session.add(lead)
+    db_session.flush()
+    db_session.add(LeadProduct(lead_id=lead.id, product_id=product.id, team_id=1))
+    db_session.commit()
+
+    response = client.get("/v1/leads/public/list")
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["product_public_id"] == "prd_public_list"
+    assert item["product_name"] == "CRM"
+    assert item["products"] == [{"public_id": "prd_public_list", "name": "CRM"}]
+

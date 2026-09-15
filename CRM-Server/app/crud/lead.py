@@ -6,7 +6,12 @@ from enum import Enum
 from app.models.lead import Lead, LeadFollowUp, LeadProduct, LeadStatus, CompanyScale
 from app.models.product import Product
 from app.schemas.lead import LeadCreate, LeadUpdate, LeadFollowUpCreate
-from app.crud.product_intent import replace_product_links, resolve_writable_product
+from app.crud.product_intent import (
+    EMPTY_CATALOG_MESSAGE,
+    first_active_product,
+    replace_product_links,
+    resolve_writable_product,
+)
 from app.services.acquisition_source_service import (
     resolve_for_import,
     resolve_public_ids_to_ids,
@@ -276,7 +281,7 @@ class LeadCRUD:
         *,
         import_by_name: bool = False,
     ) -> Lead:
-        product = resolve_writable_product(db, team_id, obj_in.product_public_id)
+        product = self._resolve_product_for_write(db, team_id, obj_in.product_public_id)
         lead_data = obj_in.model_dump(exclude={"source_public_id", "source", "product_public_id"})
         if import_by_name:
             source_row = resolve_for_import(db, team_id, obj_in.source or "")
@@ -330,7 +335,7 @@ class LeadCRUD:
             setattr(db_obj, field, value)
 
         if "product_public_id" in fields_set:
-            product = resolve_writable_product(db, db_obj.team_id, obj_in.product_public_id)
+            product = self._resolve_product_for_write(db, db_obj.team_id, obj_in.product_public_id)
             replace_product_links(
                 db,
                 team_id=db_obj.team_id,
@@ -344,6 +349,14 @@ class LeadCRUD:
         db.commit()
         db.refresh(db_obj)
         return db_obj
+
+    def _resolve_product_for_write(
+        self, db: Session, team_id: int, product_public_id: str | None
+    ):
+        if first_active_product(db, team_id) is None:
+            raise ValueError(EMPTY_CATALOG_MESSAGE)
+        return resolve_writable_product(db, team_id, product_public_id)
+
 
     def delete(self, db: Session, lead_id: int) -> Optional[Lead]:
         """删除线索，同时删除关联的跟进记录

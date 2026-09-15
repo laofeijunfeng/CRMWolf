@@ -16,6 +16,7 @@ from app.services.acquisition_source_service import (
 from app.services.lead_ai_confirmed_write_service import lead_ai_confirmed_write_service
 from app.utils.time import business_now
 from app.crud.lead import lead_crud
+from app.crud.product_intent import EMPTY_CATALOG_MESSAGE, first_active_product
 from app.schemas.lead import LeadCreate
 from app.models.lead import CompanyScale, FollowUpMethod
 
@@ -239,13 +240,18 @@ class LeadAIParser(EntityAIParserBase):
         if company_scale_str:
             company_scale_enum = COMPANY_SCALE_ENUM_MAP.get(company_scale_str)
 
+        product = first_active_product(db, team_id)
+        if product is None:
+            raise ValueError(EMPTY_CATALOG_MESSAGE)
+
         lead_create = LeadCreate(
             lead_name=parsed_data["lead_name"],
             source_public_id=source_row.public_id,
             city=parsed_data["city"],
             contact_name=parsed_data["contact_name"],
             contact_phone=parsed_data["contact_phone"],
-            company_scale=CompanyScale(company_scale_enum) if company_scale_enum else None
+            company_scale=CompanyScale(company_scale_enum) if company_scale_enum else None,
+            product_public_id=product.public_id,
         )
 
         lead = lead_crud.create(db, lead_create, user_id, team_id)

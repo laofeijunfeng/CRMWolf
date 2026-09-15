@@ -8,14 +8,16 @@ from app.core.list_query.types import SortCondition
 from app.models.lead import CompanyScale, Lead, LeadProduct, LeadStatus
 from app.models.product import Product
 
-_LEAD_PRODUCT_NAME = (
-    select(Product.name)
-    .join(LeadProduct, LeadProduct.product_id == Product.id)
-    .where(LeadProduct.lead_id == Lead.id, LeadProduct.team_id == Lead.team_id)
-    .order_by(LeadProduct.product_id)
-    .limit(1)
-    .scalar_subquery()
-)
+def _lead_product_name_expression():
+    return (
+        select(Product.name)
+        .join(LeadProduct, LeadProduct.product_id == Product.id)
+        .where(LeadProduct.lead_id == Lead.id, LeadProduct.team_id == Lead.team_id)
+        .order_by(LeadProduct.product_id)
+        .limit(1)
+        .scalar_subquery()
+    )
+
 
 LEADS_LIST_QUERY_CATALOG = ListQueryCatalog(
     name="leads",
@@ -40,7 +42,7 @@ LEADS_LIST_QUERY_CATALOG = ListQueryCatalog(
             enum_type=LeadStatus,
             enum_persist="name",
         ),
-        ListQueryField(key="product_name", type="text", expression=_LEAD_PRODUCT_NAME),
+        ListQueryField(key="product_name", type="text", expression=_lead_product_name_expression()),
         ListQueryField(
             key="created_time",
             type="date",
@@ -59,6 +61,6 @@ LEADS_LIST_QUERY_CATALOG = ListQueryCatalog(
         Lead.lead_name,
         Lead.contact_name,
         Lead.contact_phone,
-        _LEAD_PRODUCT_NAME,
+        _lead_product_name_expression(),
     ),
 )

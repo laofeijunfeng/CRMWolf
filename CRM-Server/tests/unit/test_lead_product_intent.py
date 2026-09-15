@@ -9,7 +9,11 @@ from sqlalchemy.orm import sessionmaker
 from app.core.database import Base
 from app.crud.lead import lead_crud
 from app.crud.product import product_crud
-from app.crud.product_intent import ProductNotFoundError, product_intent_payload
+from app.crud.product_intent import (
+    EMPTY_CATALOG_MESSAGE,
+    ProductNotFoundError,
+    product_intent_payload,
+)
 from app.models.acquisition_source import AcquisitionSource
 from app.models.lead import Lead, LeadProduct
 from app.models.product import Product, ProductModule
@@ -104,7 +108,8 @@ def test_create_lead_requires_active_product(db):
             contact_phone="13800138000",
             source="线上注册",
         )
-    other = product_crud.create(db, 2, ProductCreate(name="CRM"), "u1")
+    crm = product_crud.create(db, 1, ProductCreate(name="CRM"), "u1")
+    other = product_crud.create(db, 2, ProductCreate(name="OA"), "u1")
     with pytest.raises(ProductNotFoundError, match="产品不存在"):
         lead_crud.create(db, _lead_in(product_public_id=other.public_id), "u1", 1)
     inactive = product_crud.create(db, 1, ProductCreate(name="停用"), "u1")
@@ -112,7 +117,6 @@ def test_create_lead_requires_active_product(db):
     db.commit()
     with pytest.raises(ValueError, match="请选择启用中的产品"):
         lead_crud.create(db, _lead_in(product_public_id=inactive.public_id), "u1", 1)
-    crm = product_crud.create(db, 1, ProductCreate(name="CRM"), "u1")
     lead = lead_crud.create(db, _lead_in(product_public_id=crm.public_id), "u1", 1)
     payload = product_intent_payload(lead.product_links)
     assert payload["product_public_id"] == crm.public_id
@@ -163,3 +167,116 @@ def test_leads_catalog_exposes_product_name():
     field = LEADS_LIST_QUERY_CATALOG.require("product_name")
     assert field.type == "text"
     assert field.supports_sorting()
+
+
+def test_create_lead_empty_catalog_uses_admin_copy(db):
+    with pytest.raises(ValueError, match="还没有可用产品"):
+        lead_crud.create(db, _lead_in(product_public_id="prd_junk"), "u1", 1)
+
+
+def test_create_lead_only_inactive_products_uses_admin_copy(db):
+    inactive = product_crud.create(db, 1, ProductCreate(name="停用"), "u1")
+    inactive.is_active = False
+    db.commit()
+    with pytest.raises(ValueError, match=EMPTY_CATALOG_MESSAGE):
+        lead_crud.create(db, _lead_in(product_public_id=inactive.public_id), "u1", 1)
+
+
+def test_update_lead_empty_catalog_uses_admin_copy(db):
+    lead = _lead_row(db, team_id=1)
+    with pytest.raises(ValueError, match=EMPTY_CATALOG_MESSAGE):
+        lead_crud.update(db, lead, LeadUpdate(product_public_id="prd_junk"))
+
+
+def test_build_lead_response_includes_product_public_id(db):
+    from app.api.leads import _build_lead_list_responses, _build_lead_response
+
+    crm = product_crud.create(db, 1, ProductCreate(name="CRM"), "u1")
+    lead = lead_crud.create(db, _lead_in(product_public_id=crm.public_id), "u1", 1)
+    response = _build_lead_response(db, lead)
+    assert response.product_public_id == crm.public_id
+    assert response.product_name == "CRM"
+    assert [(item.public_id, item.name) for item in response.products] == [(crm.public_id, "CRM")]
+
+    listed = _build_lead_list_responses(db, [lead])
+    assert listed[0].product_public_id == crm.public_id
+    assert listed[0].product_name == "CRM"
+
+
+def test_lead_parser_create_entity_defaults_first_active_product(db):
+    import asyncio
+
+    from app.services.ai_parser.lead_parser import LeadAIParser
+
+    db.add(
+        AcquisitionSource(
+            team_id=1,
+            code="OTHER",
+            name="其他",
+            is_system=1,
+            is_active=1,
+            sort_order=99,
+            created_by="u1",
+        )
+    )
+    db.commit()
+    crm = product_crud.create(db, 1, ProductCreate(name="CRM"), "u1")
+    lead = asyncio.run(
+        LeadAIParser().create_entity(
+            db,
+            {
+                "lead_name": "解析线索",
+                "source": "线上注册",
+                "city": "上海",
+                "contact_name": "王",
+                "contact_phone": "13800138000",
+            },
+            "u1",
+            1,
+        )
+    )
+    assert product_intent_payload(lead.product_links)["product_public_id"] == crm.public_id
+
+
+def test_lead_parser_create_entity_empty_catalog(db):
+    import asyncio
+
+    from app.services.ai_parser.lead_parser import LeadAIParser
+
+    db.add(
+        AcquisitionSource(
+            team_id=1,
+            code="OTHER",
+            name="其他",
+            is_system=1,
+            is_active=1,
+            sort_order=99,
+            created_by="u1",
+        )
+    )
+    db.commit()
+    with pytest.raises(ValueError, match=EMPTY_CATALOG_MESSAGE):
+        asyncio.run(
+            LeadAIParser().create_entity(
+                db,
+                {
+                    "lead_name": "解析线索",
+                    "source": "线上注册",
+                    "city": "上海",
+                    "contact_name": "王",
+                    "contact_phone": "13800138000",
+                },
+                "u1",
+                1,
+            )
+        )
+
+
+def test_leads_catalog_product_name_uses_fresh_subquery():
+    from app.core.list_query.catalogs.leads import (
+        LEADS_LIST_QUERY_CATALOG,
+        _lead_product_name_expression,
+    )
+
+    field = LEADS_LIST_QUERY_CATALOG.require("product_name")
+    assert field.expression is not _lead_product_name_expression()

@@ -494,7 +494,7 @@ async def claim_lead(
         actor_id=str(current_user.id),
         payload_json={"lead_name": lead.lead_name},
     )
-    return claimed_lead
+    return _build_lead_response(db, claimed_lead)
 
 
 @router.post("/{lead_id}/assign", response_model=LeadResponse, summary="分配线索", description="将线索分配给指定负责人")
@@ -548,7 +548,7 @@ async def assign_lead(
             "contact_phone": lead.contact_phone,
         },
     )
-    return assigned_lead
+    return _build_lead_response(db, assigned_lead)
 
 
 @router.post("/{lead_id}/return", response_model=LeadResponse, summary="退回线索", description="将线索退回公海")
@@ -564,7 +564,7 @@ def return_lead(
             detail="该线索已在公海中"
         )
 
-    return lead_crud.return_to_pool(db, lead.id, team_id)
+    return _build_lead_response(db, lead_crud.return_to_pool(db, lead.id, team_id))
 
 
 @router.post("/{lead_id}/follow-ups", response_model=LeadFollowUpResponse, status_code=status.HTTP_201_CREATED, summary="添加跟进记录", description="为线索添加跟进记录")
@@ -681,7 +681,10 @@ def mark_lead_invalid(
             detail="该线索已标记为无效"
         )
 
-    return lead_crud.mark_invalid(db, lead.id, request_data.reason, str(current_user.id), current_user.name, team_id)
+    return _build_lead_response(
+        db,
+        lead_crud.mark_invalid(db, lead.id, request_data.reason, str(current_user.id), current_user.name, team_id),
+    )
 
 
 @router.get("/public/list", response_model=PaginatedResponse[LeadResponse], summary="公海线索", description="获取公海中的线索列表（团队公海池）")
@@ -715,7 +718,7 @@ def get_public_leads(
     page = skip // limit + 1
     total_pages = (total + limit - 1) // limit if total > 0 else 0
     return PaginatedResponse[LeadResponse](
-        items=leads,
+        items=_build_lead_list_responses(db, leads),
         total=total,
         page=page,
         page_size=limit,
