@@ -126,3 +126,66 @@ def test_product_catalog_downgrade_preserves_preexisting_product_permissions() -
 
     assert permission == ("Existing product view", "product:view")
     assert grant == (1, 1)
+
+
+def test_product_catalog_permission_seed_sets_is_active_when_column_has_no_default() -> None:
+    engine = sa.create_engine("sqlite:///:memory:")
+    migration = _load_migration()
+
+    with engine.connect() as connection:
+        connection.execute(sa.text("CREATE TABLE roles (id INTEGER PRIMARY KEY, code VARCHAR(50) NOT NULL)"))
+        connection.execute(
+            sa.text(
+                "CREATE TABLE permissions (id INTEGER PRIMARY KEY, name VARCHAR(100) NOT NULL, "
+                "code VARCHAR(100) NOT NULL, resource VARCHAR(100) NOT NULL, "
+                "action VARCHAR(50) NOT NULL, scope VARCHAR(50), is_active INTEGER NOT NULL)"
+            )
+        )
+        connection.execute(
+            sa.text(
+                "CREATE TABLE role_permissions (role_id INTEGER NOT NULL, permission_id INTEGER NOT NULL)"
+            )
+        )
+        connection.execute(sa.text("INSERT INTO roles (id, code) VALUES (1, 'SALES_MEMBER')"))
+        context = MigrationContext.configure(connection)
+        migration.op = Operations(context)
+        migration.upgrade()
+
+        seeded = connection.execute(
+            sa.text(
+                "SELECT code, is_active FROM permissions WHERE code LIKE 'product:%' ORDER BY code"
+            )
+        ).all()
+        grant = connection.execute(
+            sa.text(
+                "SELECT COUNT(*) FROM role_permissions rp "
+                "JOIN permissions p ON p.id = rp.permission_id "
+                "WHERE p.code = 'product:view'"
+            )
+        ).scalar_one()
+
+    assert seeded == [
+        ("product:create", 1),
+        ("product:delete", 1),
+        ("product:edit", 1),
+        ("product:view", 1),
+    ]
+    assert grant == 1
+
+
+def test_product_catalog_upgrade_is_idempotent_after_partial_table_create() -> None:
+    engine = sa.create_engine("sqlite:///:memory:")
+    migration = _load_migration()
+
+    with engine.connect() as connection:
+        context = MigrationContext.configure(connection)
+        migration.op = Operations(context)
+        migration.upgrade()
+        migration.upgrade()
+
+        tables = connection.execute(
+            sa.text("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+        ).scalars().all()
+
+    assert "crm_products" in tables
+    assert "crm_product_modules" in tables
