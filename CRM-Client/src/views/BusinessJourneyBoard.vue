@@ -30,7 +30,10 @@ import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { useCustomFilterViews } from '@/composables/useCustomFilterViews'
-import { getDateBounds, getDelimitedFilterValues } from '@/utils/listFilters'
+import {
+  BUSINESS_JOURNEY_BOARD_OPPORTUNITY_DATE_FILTER_FIELDS,
+  buildBusinessJourneyBoardParams
+} from '@/utils/businessJourneyBoardFilters'
 import { logger } from '@/utils/logger'
 
 usePageTitle()
@@ -73,7 +76,8 @@ const filterFields = computed<ListFilterField[]>(() => [
     label: '负责人',
     type: 'enum',
     options: ownerFilterOptions.value
-  }
+  },
+  ...BUSINESS_JOURNEY_BOARD_OPPORTUNITY_DATE_FILTER_FIELDS
 ])
 
 const columns = computed<BusinessJourneyBoardColumn[]>(() => board.value?.columns ?? [])
@@ -173,14 +177,9 @@ const loadBoard = async (): Promise<void> => {
   loading.value = true
   errorMessage.value = ''
   try {
-    const lastEventBounds = getDateBounds(activeFilters.value, 'last_event_at')
-    const ownerId = getDelimitedFilterValues(activeFilters.value, 'owner_id')
-    const nextBoard = await businessJourneyBoardApi.getBoard({
-      start_date: lastEventBounds.start ?? null,
-      end_date: lastEventBounds.end ?? null,
-      owner_id: ownerId,
-      limit: 500
-    })
+    const nextBoard = await businessJourneyBoardApi.getBoard(
+      buildBusinessJourneyBoardParams(activeFilters.value)
+    )
     if (requestId !== boardRequestSequence.value) return
     board.value = nextBoard
   } catch (error) {
