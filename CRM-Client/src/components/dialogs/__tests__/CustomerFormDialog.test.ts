@@ -505,6 +505,17 @@ describe('CustomerFormDialog progressive edit sections', () => {
     wrapper.unmount()
   })
 
+  it('keeps more-information layout classes on an inner wrapper', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const wrapper = mountCreate()
+    await flushPromises()
+    const content = wrapper.get('#customer-more-info-content')
+    expect(content.classes()).not.toContain('grid')
+    expect(content.get('.grid').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
   it('renders one flat more-information group without independent save actions', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])

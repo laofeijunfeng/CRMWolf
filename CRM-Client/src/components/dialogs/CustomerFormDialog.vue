@@ -845,6 +845,7 @@ function continueEditing(): void { closeGuard.continueEditing() }
 
         <Collapsible
           :open="moreInfoOpen"
+          :unmount-on-hide="false"
           class="space-y-3 border-t border-slate-200 pt-4"
           @update:open="handleMoreInfoChange"
         >
@@ -860,7 +861,8 @@ function continueEditing(): void { closeGuard.continueEditing() }
               <span class="text-xs font-semibold text-blue-700">已填写 {{ moreInfoCount }} 项</span>
             </button>
           </CollapsibleTrigger>
-          <CollapsibleContent id="customer-more-info-content" class="grid gap-4 px-1 pt-1">
+          <CollapsibleContent id="customer-more-info-content">
+            <div class="grid gap-4 px-1 pt-1">
             <div v-if="industryHierarchyError" class="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-sm" role="alert">
               <span>{{ industryHierarchyError.description }}</span>
               <Button type="button" variant="outline" size="sm" class="ml-2" @click="fetchIndustryHierarchy">重试</Button>
@@ -903,6 +905,7 @@ function continueEditing(): void { closeGuard.continueEditing() }
             <p v-if="statusIsReadOnly" class="text-xs leading-relaxed text-slate-500">该客户状态由其他流程管理，暂不支持在此修改。</p>
             <p class="text-xs leading-relaxed text-slate-500">此处只更新客户授权汇总信息，不创建 License 申请、不发起审批，也不修改正式 License 记录。</p>
             <p class="text-sm text-slate-700"><span class="font-medium">授权状态：</span>{{ licenseStatusLabel(licenseExpiryDateValue, licenseTypeValue) }}</p>
+            </div>
           </CollapsibleContent>
         </Collapsible>
 
