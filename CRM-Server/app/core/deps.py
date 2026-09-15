@@ -25,6 +25,56 @@ def _customer_member_has_access(db: Session, team_id: int, customer_id: int, use
     )
 
 
+def user_can_view_customer(db: Session, team_id: int, customer_id: int, user_id: int) -> bool:
+    """客户是协作和可见性边界：全部可见、客户成员 VIEW+、或自己负责的客户。"""
+    from app.crud.customer import customer_crud
+
+    customer = customer_crud.get_by_id(db, customer_id, team_id)
+    if not customer:
+        return False
+
+    user_permissions = permission_crud.get_user_permissions(db, user_id, team_id)
+    permission_codes = {p.code for p in user_permissions}
+
+    if "customer:view:all" in permission_codes:
+        return True
+    if _customer_member_has_access(db, team_id, customer.id, user_id, "VIEW"):
+        return True
+    if "customer:view:own" in permission_codes and customer.owner_id == str(user_id):
+        return True
+    return False
+
+
+def get_viewable_customer_ids(db: Session, team_id: int, user_id: int) -> set[int] | None:
+    """返回当前用户可见客户 ID；None 表示可查看全部客户。"""
+    from app.crud.customer_member import ACCESS_LEVEL_RANK
+    from app.models.customer import Customer, CustomerMember
+
+    user_permissions = permission_crud.get_user_permissions(db, user_id, team_id)
+    permission_codes = {p.code for p in user_permissions}
+    if "customer:view:all" in permission_codes:
+        return None
+
+    customer_ids: set[int] = set()
+    if "customer:view:own" in permission_codes:
+        owned_ids = db.query(Customer.id).filter(
+            Customer.team_id == team_id,
+            Customer.owner_id == str(user_id),
+        ).all()
+        customer_ids.update(row[0] for row in owned_ids)
+
+    member_rows = db.query(CustomerMember.customer_id, CustomerMember.access_level).filter(
+        CustomerMember.team_id == team_id,
+        CustomerMember.user_id == str(user_id),
+        CustomerMember.is_active == True,
+    ).all()
+    view_rank = ACCESS_LEVEL_RANK.get("VIEW", 1)
+    for customer_id, access_level in member_rows:
+        if ACCESS_LEVEL_RANK.get(access_level, 0) >= view_rank:
+            customer_ids.add(customer_id)
+    return customer_ids
+
+
 def _user_has_team_role(db: Session, team_id: int, user_id: int, role_code: str) -> bool:
     from app.crud.role import role_crud
 
@@ -1052,7 +1102,8 @@ def check_invoice_view_permission(
 
     权限规则：
     - invoice:view:all → 可查看任何发票申请
-    - invoice:view:own → 只能查看自己申请的发票申请
+    - 可查看发票所属客户 → 可查看该客户树上的发票
+    - invoice:view:own → 可查看自己申请的发票申请
     """
     from app.crud.invoice import invoice_application_crud
 
@@ -1070,6 +1121,11 @@ def check_invoice_view_permission(
     if "invoice:view:all" in permission_codes:
         return application
 
+    if application.customer_id and user_can_view_customer(
+        db, team_id, application.customer_id, current_user.id
+    ):
+        return application
+
     # 检查是否有查看自己发票申请的权限
     if "invoice:view:own" in permission_codes:
         if application.applicant_id == str(current_user.id):
@@ -1083,6 +1139,43 @@ def check_invoice_view_permission(
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="缺少权限: invoice:view:own 或 invoice:view:all"
+    )
+
+
+def check_invoice_write_scope(
+    invoice_application_id: int,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    单据负责人是写入责任边界。
+
+    客户可见只够只读。对指定发票发起重开等写入操作需要：
+    - invoice:view:all / invoice:edit:all
+    - 或当前用户是该发票申请人
+    """
+    from app.crud.invoice import invoice_application_crud
+
+    application = invoice_application_crud.get_by_id(db, invoice_application_id, team_id)
+    if not application:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="发票申请不存在"
+        )
+
+    user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+    permission_codes = {p.code for p in user_permissions}
+
+    if "invoice:view:all" in permission_codes or "invoice:edit:all" in permission_codes:
+        return application
+
+    if application.applicant_id == str(current_user.id):
+        return application
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="只能操作自己申请的发票申请"
     )
 
 

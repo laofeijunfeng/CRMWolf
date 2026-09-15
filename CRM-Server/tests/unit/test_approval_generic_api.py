@@ -53,6 +53,7 @@ from app.models.invoice import (
     InvoiceApplication, InvoiceApplicationStatus, InvoiceType,
 )
 from app.models.payment import PaymentRecord, PaymentConfirmationStatus
+from app.models.customer import Customer, CustomerMember
 from app.models.user import User, UserStatus
 from app.models.role import Role
 from app.models.user_role import UserRole
@@ -85,6 +86,8 @@ def db_session():
         UserRole.__table__,
         Permission.__table__,
         RolePermission.__table__,
+        Customer.__table__,
+        CustomerMember.__table__,
         Contract.__table__,
         InvoiceApplication.__table__,
         PaymentRecord.__table__,
@@ -94,7 +97,17 @@ def db_session():
         ApprovalRecord.__table__,
         OutboundNotificationJob.__table__,
     ]
-    Base.metadata.create_all(engine, tables=tables)
+    renamed_indexes = []
+    for table in tables:
+        for index in table.indexes:
+            if index.name:
+                renamed_indexes.append((index, index.name))
+                index.name = f"{table.name}_{index.name}"
+    try:
+        Base.metadata.create_all(engine, tables=tables)
+    finally:
+        for index, original_name in renamed_indexes:
+            index.name = original_name
     Session = sessionmaker(bind=engine)
     session = Session()
     yield session
@@ -219,12 +232,27 @@ def grant_invoice_approve_own(seed_finance_role_and_link, db_session):
 
 
 @pytest.fixture
-def seed_invoice_draft(db_session, current_user_rec):
+def seed_customer(db_session):
+    """发票所属客户：负责人是提交人，无关用户默认不可见。"""
+    customer = Customer(
+        team_id=1,
+        account_name="测试公司",
+        city="北京",
+        creator_id="1",
+        owner_id="1",
+    )
+    db_session.add(customer)
+    db_session.commit()
+    return customer
+
+
+@pytest.fixture
+def seed_invoice_draft(db_session, current_user_rec, seed_customer):
     """一条 DRAFT 发票申请，applicant=当前用户。"""
     inv = InvoiceApplication(
         team_id=1,
         application_number="INV-2026-001",
-        customer_id=1,
+        customer_id=seed_customer.id,
         contract_id=1,
         opportunity_id=1,
         payment_plan_id=1,
@@ -242,7 +270,7 @@ def seed_invoice_draft(db_session, current_user_rec):
 
 
 @pytest.fixture
-def seed_invoice_draft_other_submitter(db_session):
+def seed_invoice_draft_other_submitter(db_session, seed_customer):
     """一条 DRAFT 发票申请，applicant=他人（非 current_user）—— 用于非自审用例。
 
     applicant_id 用数字字符串（"9999"）以兼容通知层 int(submitter_id) 转换；
@@ -251,7 +279,7 @@ def seed_invoice_draft_other_submitter(db_session):
     inv = InvoiceApplication(
         team_id=1,
         application_number="INV-2026-OTHER",
-        customer_id=1,
+        customer_id=seed_customer.id,
         contract_id=1,
         opportunity_id=1,
         payment_plan_id=1,
@@ -474,6 +502,7 @@ def test_detail_forbidden_for_unrelated_user(
         name = "无关用户"
         status = "active"
 
+    # 无关用户没有 customer:view:all / 客户成员身份 / 客户负责人身份
     app.dependency_overrides[deps.get_current_active_user] = lambda: OtherUser()
 
     r = client.get(f"/v1/approvals/INVOICE/{seed_invoice_draft.id}/detail")
@@ -533,6 +562,7 @@ def test_file_forbidden_for_unrelated_user(
         name = "无关用户"
         status = "active"
 
+    # 无关用户没有 customer:view:all / 客户成员身份 / 客户负责人身份
     app.dependency_overrides[deps.get_current_active_user] = lambda: OtherUser()
 
     r = client.get(f"/v1/approvals/INVOICE/{seed_invoice_draft.id}/file")

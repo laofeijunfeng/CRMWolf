@@ -490,6 +490,58 @@ def get_approval_card_fields(db: Session, business_type: str, entity: Any) -> di
     }
 
 
+def get_approval_customer_id(db: Session, business_type: str, entity: Any) -> Optional[int]:
+    """从审批单据解析所属客户 ID，供客户树只读权限复用。"""
+    if entity is None:
+        return None
+
+    customer = getattr(entity, "customer", None)
+    customer_id = getattr(customer, "id", None) if customer is not None else None
+    if customer_id:
+        return int(customer_id)
+
+    customer_id = getattr(entity, "customer_id", None)
+    if customer_id:
+        return int(customer_id)
+
+    if business_type == BusinessType.PAYMENT:
+        payment_plan = getattr(entity, "payment_plan", None)
+        if payment_plan is None:
+            payment_plan_id = getattr(entity, "payment_plan_id", None)
+            if payment_plan_id:
+                payment_plan = db.query(PaymentPlan).filter(
+                    PaymentPlan.id == payment_plan_id,
+                    PaymentPlan.team_id == getattr(entity, "team_id", None),
+                ).first()
+        if payment_plan is None:
+            return None
+        contract = getattr(payment_plan, "contract", None)
+        if contract is None:
+            from app.models.contract import Contract
+            contract = db.query(Contract).filter(
+                Contract.id == payment_plan.contract_id,
+                Contract.team_id == getattr(entity, "team_id", None),
+            ).first()
+        if contract is None:
+            return None
+        return int(contract.customer_id) if contract.customer_id else None
+
+    if business_type == BusinessType.INVOICE_REISSUE:
+        original = getattr(entity, "original_invoice_application", None)
+        if original is None:
+            original_id = getattr(entity, "original_invoice_application_id", None)
+            if original_id:
+                original = db.query(InvoiceApplication).filter(
+                    InvoiceApplication.id == original_id,
+                    InvoiceApplication.team_id == getattr(entity, "team_id", None),
+                ).first()
+        if original is None:
+            return None
+        return int(original.customer_id) if original.customer_id else None
+
+    return None
+
+
 def get_approval_customer_name(db: Session, business_type: str, entity: Any) -> Optional[str]:
     if entity is None:
         return None
