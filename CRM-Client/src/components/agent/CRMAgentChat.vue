@@ -207,6 +207,7 @@ import {
   isCompactTaskCompletionAction,
   optimisticallyCompleteCompactTask,
   restoreCompactTaskAction,
+  unlockInteractionActionId,
 } from '@/components/agent/agentInteractionState'
 import {
   getMissingAgentHistoryAnchors,
@@ -624,8 +625,9 @@ const sendMessage = async (): Promise<void> => {
 }
 
 const unlockInteraction = (actionId: string): void => {
-  lockedInteractionActionIds.value = new Set(
-    [...lockedInteractionActionIds.value].filter(item => item !== actionId)
+  lockedInteractionActionIds.value = unlockInteractionActionId(
+    lockedInteractionActionIds.value,
+    actionId,
   )
 }
 
@@ -727,11 +729,16 @@ const submitInteraction = async (actionId: string, values: JsonObject): Promise<
     await submitCompactTaskInteraction(actionId, values)
     return
   }
+  if (isStreaming.value || lockedInteractionActionIds.value.has(actionId)) return
   lockedInteractionActionIds.value = new Set([...lockedInteractionActionIds.value, actionId])
-  await submitInput(
-    { type: 'interaction_submission', action_id: actionId, values },
-    { label: '正在提交...' },
-  )
+  try {
+    await submitInput(
+      { type: 'interaction_submission', action_id: actionId, values },
+      { label: '正在提交...' },
+    )
+  } finally {
+    unlockInteraction(actionId)
+  }
 }
 
 const submitEntityAction = async (actionId: string): Promise<void> => {
