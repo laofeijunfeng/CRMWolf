@@ -366,6 +366,17 @@ const submit = async (): Promise<void> => {
       <span class="shrink-0 text-xs text-muted-foreground">{{ stateLabel }}</span>
     </header>
 
+    <dl
+      v-if="block.facts.length > 0"
+      class="grid gap-2 rounded-lg border border-border/70 bg-background/70 px-3 py-2 text-sm"
+      data-agent-ui-confirmation-facts
+    >
+      <div v-for="fact in block.facts" :key="fact.key" class="grid gap-0.5">
+        <dt class="text-xs text-muted-foreground">{{ fact.label }}</dt>
+        <dd class="m-0 whitespace-pre-wrap text-foreground">{{ fact.value }}</dd>
+      </div>
+    </dl>
+
     <div
       v-if="submittedChoiceValue !== null"
       class="rounded-lg border border-border/70 bg-background/70 px-3 py-2 text-sm text-foreground"

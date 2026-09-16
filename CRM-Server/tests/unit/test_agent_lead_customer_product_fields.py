@@ -271,6 +271,25 @@ def test_plan_lead_maps_tilde_scale_to_one_to_fifty():
     assert plan.commands[0].payload["lead"]["company_scale"] == "1-50人"
 
 
+def test_plan_lead_with_follow_up_projects_confirmation_facts():
+    plan = _plan_lead(
+        SimpleNamespace(
+            **_lead_kwargs(product_public_id="prd_1", company_scale="10~29"),
+            follow_up_content="已确认需要安排产品演示",
+            follow_up_method="电话",
+            next_action="安排产品演示",
+        ),
+        db=object(),
+    )
+    assert plan.interaction is not None
+    facts = {fact.key: fact.value for fact in plan.interaction.facts}
+    assert facts["lead_name"] == "A"
+    assert facts["follow_up_method"] == "电话"
+    assert facts["follow_up_content"] == "已确认需要安排产品演示"
+    assert facts["company_scale"] == "1-50人"
+    assert facts["next_action"] == "安排产品演示"
+
+
 def test_create_lead_follow_up_input_rejects_unmapped_method():
     from app.services.agent.tool_registry import CreateLeadFollowUpInput
 

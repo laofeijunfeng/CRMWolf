@@ -2026,6 +2026,9 @@ async def test_create_lead_with_follow_up_confirms_once_and_binds_created_lead_i
     assert isinstance(waiting, WorkflowDispatchResult)
     assert isinstance(waiting.workflow_result, WorkflowWaitingResult)
     assert waiting.workflow_result.interaction.business_action == "create_lead_with_follow_up"
+    fact_map = {fact.key: fact.value for fact in waiting.workflow_result.interaction.facts}
+    assert fact_map["follow_up_method"] == "电话"
+    assert fact_map["lead_name"] == "上海云图科技"
     assert waiting.continuation is not None
     interaction_resolver.continuation = waiting.continuation
     assert tool_registry.calls == []

@@ -82,6 +82,12 @@ class WorkflowInteractionField(WorkflowContractModel):
         return self
 
 
+class WorkflowConfirmationFact(WorkflowContractModel):
+    key: str = Field(min_length=1, max_length=128, pattern=r"^[a-z][a-z0-9_]*$")
+    label: str = Field(min_length=1, max_length=200)
+    value: str = Field(min_length=1, max_length=10_000)
+
+
 class WorkflowInteraction(WorkflowContractModel):
     """Channel-neutral request for the next user interaction."""
 
@@ -92,6 +98,7 @@ class WorkflowInteraction(WorkflowContractModel):
     prompt: str = Field(min_length=1, max_length=10_000)
     options: list[WorkflowInteractionOption] = Field(default_factory=list, max_length=50)
     fields: list[WorkflowInteractionField] = Field(default_factory=list, max_length=20)
+    facts: list[WorkflowConfirmationFact] = Field(default_factory=list, max_length=20)
     selection_mode: Literal["single", "multiple"] | None = None
     min_selections: int | None = Field(default=None, ge=0, le=50)
     max_selections: int | None = Field(default=None, ge=1, le=50)
@@ -121,6 +128,8 @@ class WorkflowInteraction(WorkflowContractModel):
             raise ValueError("form interactions require fields")
         if self.interaction_type != "form" and self.fields:
             raise ValueError("fields are only valid for form interactions")
+        if self.facts and self.interaction_type != "confirmation":
+            raise ValueError("facts are only valid for confirmation interactions")
         if self.interaction_type == "text_input" and self.allow_blank is None:
             raise ValueError("text input interactions require allow_blank")
         if self.interaction_type != "text_input" and self.allow_blank is not None:

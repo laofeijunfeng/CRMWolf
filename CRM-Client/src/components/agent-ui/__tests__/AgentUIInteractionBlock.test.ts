@@ -188,3 +188,35 @@ it('renders a submitted choice as immutable text and keeps the final choice visi
   expect(wrapper.text()).toContain('已提交')
   expect(wrapper.findAll('button')).toHaveLength(0)
 })
+
+it('renders confirmation facts above confirm and cancel', () => {
+  const block = InteractionBlockSchema.parse({
+    id: 'b_lead_confirmation_facts',
+    type: 'interaction',
+    interaction_id: 'int_lead_confirmation_facts',
+    interaction_type: 'confirmation',
+    selection_mode: 'single',
+    submit_on_select: true,
+    state: 'ACTIVE',
+    prompt: '确认要创建线索“协鑫数智科技”并记录首次跟进吗?',
+    fields: [],
+    facts: [
+      { key: 'lead_name', label: '线索名称', value: '协鑫数智科技' },
+      { key: 'follow_up_method', label: '跟进方式', value: '其他' },
+    ],
+    options: [
+      { value: 'confirm', label: '确认创建', description: null, disabled: false },
+      { value: 'cancel', label: '取消', description: null, disabled: false },
+    ],
+    submit_label: '确认',
+    submit_action_id: 'act_lead_confirmation_facts',
+  })
+
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+  const facts = wrapper.get('[data-agent-ui-confirmation-facts]')
+  expect(facts.text()).toContain('线索名称')
+  expect(facts.text()).toContain('协鑫数智科技')
+  expect(facts.text()).toContain('跟进方式')
+  expect(facts.text()).toContain('其他')
+  expect(wrapper.findAll('button')).toHaveLength(2)
+})

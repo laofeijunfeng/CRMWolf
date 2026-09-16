@@ -32,6 +32,7 @@ from app.services.agent.workflow.contracts import (
     WorkflowAuthorizationScope,
     WorkflowCommand,
     WorkflowCommandBinding,
+    WorkflowConfirmationFact,
     WorkflowInteraction,
     WorkflowInteractionField,
     WorkflowInteractionOption,
@@ -630,6 +631,14 @@ class CRMWorkflowPlanner:
                 ),
             )
         lead_name = str(lead["lead_name"])
+        lead_facts = [
+            ("lead_name", "线索名称", lead_name),
+            ("contact_name", "联系人", lead.get("contact_name")),
+            ("contact_phone", "联系电话", lead.get("contact_phone")),
+            ("city", "城市", lead.get("city")),
+            ("company_scale", "团队规模", lead.get("company_scale")),
+            ("product", "产品", lead.get("product_public_id")),
+        ]
         follow_up_content = getattr(lead_model, "follow_up_content", None)
         if not isinstance(follow_up_content, str) or not follow_up_content.strip():
             return self._confirmation_plan(
@@ -642,6 +651,7 @@ class CRMWorkflowPlanner:
                 confirm_label="确认创建",
                 completed_text=f"已创建线索“{lead_name}”。",
                 cancelled_text=f"已取消创建线索“{lead_name}”。",
+                facts=self._confirmation_facts(lead_facts),
             )
 
         try:
@@ -713,6 +723,14 @@ class CRMWorkflowPlanner:
             confirm_label="确认创建",
             completed_text=f"已创建线索“{lead_name}”并记录首次跟进。",
             cancelled_text=f"已取消创建线索“{lead_name}”及首次跟进。",
+            facts=self._confirmation_facts(
+                [
+                    *lead_facts,
+                    ("follow_up_method", "跟进方式", method.value),
+                    ("follow_up_content", "跟进内容", follow_up_content.strip()),
+                    ("next_action", "下一步", follow_up_payload.get("next_action")),
+                ]
+            ),
         )
 
     async def _plan_customer(
@@ -869,6 +887,14 @@ class CRMWorkflowPlanner:
             confirm_label="确认创建",
             completed_text=f"已创建客户“{account_name}”并记录首次跟进。",
             cancelled_text=f"已取消创建客户“{account_name}”及首次跟进。",
+            facts=self._confirmation_facts(
+                [
+                    ("customer_name", "客户名称", account_name),
+                    ("activity_content", "跟进内容", content),
+                    ("activity_kind", "跟进类型", activity_payload.get("activity_kind")),
+                    ("next_action", "下一步", activity_payload.get("next_action")),
+                ]
+            ),
         )
 
     async def _plan_contact(
@@ -2425,6 +2451,18 @@ class CRMWorkflowPlanner:
             terminal_reason=reason,
         )
 
+    @staticmethod
+    def _confirmation_facts(items: list[tuple[str, str, object]]) -> list[WorkflowConfirmationFact]:
+        facts: list[WorkflowConfirmationFact] = []
+        for key, label, raw in items:
+            if raw is None:
+                continue
+            value = raw if isinstance(raw, str) else str(raw)
+            stripped = value.strip()
+            if stripped:
+                facts.append(WorkflowConfirmationFact(key=key, label=label, value=stripped))
+        return facts
+
     @classmethod
     def _confirmation_plan(
         cls,
@@ -2438,6 +2476,7 @@ class CRMWorkflowPlanner:
         confirm_label: str,
         completed_text: str,
         cancelled_text: str,
+        facts: list[WorkflowConfirmationFact] | None = None,
     ) -> WorkflowActionPlan:
         return cls._confirmation_commands_plan(
             workflow_id=workflow_id,
@@ -2457,6 +2496,7 @@ class CRMWorkflowPlanner:
             confirm_label=confirm_label,
             completed_text=completed_text,
             cancelled_text=cancelled_text,
+            facts=facts,
         )
 
     @staticmethod
@@ -2470,6 +2510,7 @@ class CRMWorkflowPlanner:
         confirm_label: str,
         completed_text: str,
         cancelled_text: str,
+        facts: list[WorkflowConfirmationFact] | None = None,
     ) -> WorkflowActionPlan:
         suffix = workflow_id.removeprefix("wf_")
         return WorkflowActionPlan(
@@ -2489,6 +2530,7 @@ class CRMWorkflowPlanner:
                 selection_mode="single",
                 submit_on_select=True,
                 submit_label="确认",
+                facts=facts or [],
             ),
             completed_text=completed_text,
             cancelled_text=cancelled_text,
