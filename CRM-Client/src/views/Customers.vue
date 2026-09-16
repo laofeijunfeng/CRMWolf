@@ -18,6 +18,7 @@
  * - ✅ 保留业务逻辑（退回公海、输单、赢单等）
  */
 import { ref, reactive, computed, onMounted, watch, watchEffect, type Component } from 'vue'
+import { useRoute } from 'vue-router'
 import { handleApiError, handleOutcomeUnknown, isOutcomeUnknown } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Sparkles, ArrowRightLeft, TrendingUp, TrendingDown, XCircle, Trash2, Pencil, UserRoundCheck } from 'lucide-vue-next'
@@ -63,6 +64,8 @@ import { companyScaleOptions } from '@/schemas/customer-form'
 import { useAcquisitionSourceOptions } from '@/composables/useAcquisitionSourceOptions'
 import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
 import { serializeListQuery } from '@/utils/listQuery'
+import { isCustomerPublicId } from '@/utils/customerRoutes'
+import { isDealJourneyPublicId } from '@/utils/dealJourney'
 import { LICENSE_STATUS_LABELS, licenseStatusClass, licenseStatusLabel } from '@/utils/licenseStatus'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 import type { FormSuccessPayload } from '@/types/actionOutcome'
@@ -81,6 +84,7 @@ usePageTitle()
 const userStore = useUserStore()
 const permissionStore = usePermissionStore()
 const headerStore = useHeaderStore()
+const route = useRoute()
 
 type CustomerTableRow = CustomerResponse
 
@@ -111,33 +115,80 @@ const deletingCustomerIds = ref<Set<string>>(new Set())
 
 const selectedCustomerId = ref<string | null>(null)
 const targetOpportunityId = ref<string | null>(null)
-const targetCustomerDetailPanel = ref<'opportunities' | null>(null)
+const targetJourneyId = ref<string | null>(null)
+const targetCustomerDetailPanel = ref<'journeys' | 'opportunities' | null>(null)
+
+const firstQueryValue = (value: unknown): string => {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value) && typeof value[0] === 'string') return value[0]
+  return ''
+}
+
+const clearCustomerDetailTargets = (): void => {
+  targetOpportunityId.value = null
+  targetJourneyId.value = null
+  targetCustomerDetailPanel.value = null
+}
 
 const openCustomerDetail = (customerId: string): void => {
-  targetOpportunityId.value = null
-  targetCustomerDetailPanel.value = null
+  clearCustomerDetailTargets()
   selectedCustomerId.value = customerId
 }
 
 const openCustomerOpportunity = (customerId: string, opportunityId: string): void => {
   targetOpportunityId.value = opportunityId
-  targetCustomerDetailPanel.value = 'opportunities'
+  targetJourneyId.value = null
+  targetCustomerDetailPanel.value = 'journeys'
   selectedCustomerId.value = customerId
 }
 
 const openCustomerOpportunities = (customerId: string): void => {
   targetOpportunityId.value = null
-  targetCustomerDetailPanel.value = 'opportunities'
+  targetJourneyId.value = null
+  targetCustomerDetailPanel.value = 'journeys'
   selectedCustomerId.value = customerId
 }
+
+const applyCustomerDetailFromRoute = (): void => {
+  const customerId = firstQueryValue(route.query['customerId'])
+  if (!isCustomerPublicId(customerId)) return
+
+  const tab = firstQueryValue(route.query['tab'])
+  const journeyId = firstQueryValue(route.query['journeyId'])
+  const opportunityId = firstQueryValue(route.query['opportunityId'])
+
+  selectedCustomerId.value = customerId
+  targetCustomerDetailPanel.value = tab === 'journeys' || tab === 'opportunities' ? 'journeys' : null
+
+  if (isDealJourneyPublicId(journeyId)) {
+    targetJourneyId.value = journeyId
+    targetOpportunityId.value = null
+    return
+  }
+
+  targetJourneyId.value = null
+  targetOpportunityId.value = opportunityId.length > 0 ? opportunityId : null
+}
+
+watch(
+  () => [
+    route.query['customerId'],
+    route.query['tab'],
+    route.query['journeyId'],
+    route.query['opportunityId'],
+  ],
+  () => {
+    applyCustomerDetailFromRoute()
+  },
+  { immediate: true }
+)
 
 const sheetVisible = computed({
   get: () => selectedCustomerId.value !== null,
   set: (visible: boolean) => {
     if (!visible) {
       selectedCustomerId.value = null
-      targetOpportunityId.value = null
-      targetCustomerDetailPanel.value = null
+      clearCustomerDetailTargets()
     }
   }
 })
@@ -1376,6 +1427,7 @@ watchEffect(() => {
       v-model:visible="sheetVisible"
       :customer-id="selectedCustomerId ?? null"
       :target-opportunity-id="targetOpportunityId"
+      :target-journey-id="targetJourneyId"
       :target-panel="targetCustomerDetailPanel"
       @refresh="handleSheetRefresh"
       @view-customer="openCustomerDetail"

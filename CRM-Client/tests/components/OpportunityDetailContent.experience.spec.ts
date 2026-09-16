@@ -3,8 +3,6 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
 import OpportunityDetailContent from '@/components/panels/OpportunityDetailContent.vue'
 import { LicenseType, OpportunityStatus, PurchaseType, type Opportunity } from '@/api/opportunity'
-import type { LicenseApplicationResponse } from '@/api/licenseApplication'
-import { getDateAfterDays } from '@/utils/format'
 
 const opportunityApi = vi.hoisted(() => ({
   getOpportunity: vi.fn(),
@@ -131,10 +129,16 @@ vi.mock('@/components/dialogs/OpportunityFormDialog.vue', () => ({
   }),
 }))
 
-const opportunityFixture = (): Opportunity => ({
-  id: 88,
+const OPPORTUNITY_PUBLIC_ID = 'opp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+const CUSTOMER_PUBLIC_ID = 'cus_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+const JOURNEY_PUBLIC_ID = 'djy_cccccccccccccccccccccccccccccccc'
+
+const opportunityFixture = (overrides: Partial<Opportunity> = {}): Opportunity => ({
+  id: OPPORTUNITY_PUBLIC_ID,
+  public_id: OPPORTUNITY_PUBLIC_ID,
+  opportunity_number: 'OPP-88',
   opportunity_name: 'CRM 升级项目',
-  customer_id: 'cus_19',
+  customer_id: CUSTOMER_PUBLIC_ID,
   customer_name: '上海测试客户',
   procurement_method_id: null,
   total_amount: 320000,
@@ -150,48 +154,17 @@ const opportunityFixture = (): Opportunity => ({
   win_probability: 50,
   owner_id: '9',
   status: OpportunityStatus.FOLLOW_UP,
+  approval_phase: 'draft',
   creator_id: '9',
   created_time: '2026-07-15T00:00:00.000Z',
   updated_time: '2026-07-15T00:00:00.000Z',
   version: 1,
   customer_info: {
-    id: 'cus_19',
+    id: CUSTOMER_PUBLIC_ID,
     account_name: '上海测试客户',
   },
+  ...overrides,
 })
-
-
-function buildLicenseApplication(
-  overrides: Partial<LicenseApplicationResponse> = {}
-): LicenseApplicationResponse {
-  return {
-    id: 1,
-    team_id: 1,
-    application_number: 'LIC202608200001',
-    customer_id: 'cus_19',
-    deployment_info_id: null,
-    contract_id: null,
-    authorized_users: 10,
-    expiry_date: getDateAfterDays(14),
-    license_type: 'TRIAL',
-    enterprise_id: null,
-    supported_modules: null,
-    server_license_code: null,
-    client_license_code: null,
-    remark: null,
-    license_code: null,
-    status: 'ISSUED',
-    applicant_id: '9',
-    approver_id: null,
-    approved_time: null,
-    created_time: '2026-08-20T09:46:47',
-    last_modified_time: '2026-08-20T09:46:47',
-    customer_name: '上海测试客户',
-    deployment_name: null,
-    contract_name: null,
-    ...overrides,
-  }
-}
 
 describe('OpportunityDetailContent experience states', () => {
   beforeEach(() => {
@@ -200,7 +173,7 @@ describe('OpportunityDetailContent experience states', () => {
     contractApi.getContractByOpportunity.mockRejectedValue({ response: { status: 404 } })
     approvalGenericApi.submitApproval.mockResolvedValue({ approval_id: 99 })
     customerApi.getCustomerDetail.mockResolvedValue({
-      id: 'cus_19',
+      id: CUSTOMER_PUBLIC_ID,
       account_name: '上海测试客户',
       owner_id: '9',
     })
@@ -219,9 +192,9 @@ describe('OpportunityDetailContent experience states', () => {
     const wrapper = mount(OpportunityDetailContent, {
       attachTo: document.body,
       props: {
-        opportunityId: 88,
+        opportunityId: OPPORTUNITY_PUBLIC_ID,
         embedded: true,
-        customerContext: { customerId: 'cus_19', customerName: '上海测试客户' },
+        customerContext: { customerId: CUSTOMER_PUBLIC_ID, customerName: '上海测试客户' },
       },
     })
 
@@ -237,7 +210,7 @@ describe('OpportunityDetailContent experience states', () => {
 
     const wrapper = mount(OpportunityDetailContent, {
       props: {
-        opportunityId: 88,
+        opportunityId: OPPORTUNITY_PUBLIC_ID,
       },
     })
 
@@ -255,7 +228,7 @@ describe('OpportunityDetailContent experience states', () => {
 
     const wrapper = mount(OpportunityDetailContent, {
       props: {
-        opportunityId: 88,
+        opportunityId: OPPORTUNITY_PUBLIC_ID,
       },
     })
 
@@ -272,14 +245,13 @@ describe('OpportunityDetailContent experience states', () => {
   })
 
   it('keeps resubmit intent when the form closes before emitting success', async () => {
-    opportunityApi.getOpportunity.mockResolvedValue({
-      ...opportunityFixture(),
+    opportunityApi.getOpportunity.mockResolvedValue(opportunityFixture({
       approval_phase: 'rejected',
-    })
+    }))
 
     const wrapper = mount(OpportunityDetailContent, {
       props: {
-        opportunityId: 88,
+        opportunityId: OPPORTUNITY_PUBLIC_ID,
       },
     })
 
@@ -291,65 +263,69 @@ describe('OpportunityDetailContent experience states', () => {
     await wrapper.get('[data-testid="opportunity-form-submit"]').trigger('click')
     await flushPromises()
 
-    expect(approvalGenericApi.submitApproval).toHaveBeenCalledWith('OPPORTUNITY', 88)
+    expect(approvalGenericApi.submitApproval).toHaveBeenCalledWith('OPPORTUNITY', OPPORTUNITY_PUBLIC_ID)
     expect(toast.success).toHaveBeenCalledWith('商机已重新提交审批')
   })
 
-  it('shows expired and valid customer licenses together on opportunity detail', async () => {
-    opportunityApi.getOpportunity.mockResolvedValue({
-      ...opportunityFixture(),
-      approval_phase: 'approved',
-    })
-    licenseApplicationApi.list.mockResolvedValue([
-      buildLicenseApplication({
-        id: 11,
-        application_number: 'LIC202607210001',
-        expiry_date: getDateAfterDays(-16),
-      }),
-      buildLicenseApplication({
-        id: 12,
-        application_number: 'LIC202608200001',
-        expiry_date: getDateAfterDays(14),
-      }),
-    ])
-
+  it('does not load contracts, payments, invoices, or licenses', async () => {
     const wrapper = mount(OpportunityDetailContent, {
       props: {
-        opportunityId: 88,
-        embedded: true,
-        customerContext: { customerId: 'cus_19', customerName: '上海测试客户' },
+        opportunityId: OPPORTUNITY_PUBLIC_ID,
       },
     })
 
     await flushPromises()
     await nextTick()
 
-    expect(wrapper.text()).toContain('LIC202607210001')
-    expect(wrapper.text()).toContain('LIC202608200001')
-    expect(wrapper.text()).toContain('已过期')
-    expect(wrapper.text()).not.toContain('暂无许可证申请')
+    expect(opportunityApi.getOpportunity).toHaveBeenCalledWith(OPPORTUNITY_PUBLIC_ID)
+    expect(contractApi.getContractByOpportunity).not.toHaveBeenCalled()
+    expect(paymentApi.getPaymentPlans).not.toHaveBeenCalled()
+    expect(invoiceApi.getInvoiceApplications).not.toHaveBeenCalled()
+    expect(licenseApplicationApi.list).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('基本信息')
+    expect(wrapper.text()).toContain('编辑')
+    expect(wrapper.text()).not.toContain('合同')
+    expect(wrapper.text()).not.toContain('回款')
+    expect(wrapper.text()).not.toContain('发票')
+    expect(wrapper.text()).not.toContain('许可')
   })
 
-  it('does not pretend license applications are empty when the list request fails', async () => {
-    opportunityApi.getOpportunity.mockResolvedValue({
-      ...opportunityFixture(),
-      approval_phase: 'approved',
-    })
-    licenseApplicationApi.list.mockRejectedValue(new Error('network error'))
+  it('emits view-journey when deal_journey_id is present', async () => {
+    opportunityApi.getOpportunity.mockResolvedValue(opportunityFixture({
+      deal_journey_id: JOURNEY_PUBLIC_ID,
+    }))
 
     const wrapper = mount(OpportunityDetailContent, {
       props: {
-        opportunityId: 88,
-        embedded: true,
-        customerContext: { customerId: 'cus_19', customerName: '上海测试客户' },
+        opportunityId: OPPORTUNITY_PUBLIC_ID,
       },
     })
 
     await flushPromises()
     await nextTick()
 
-    expect(handleApiError).toHaveBeenCalled()
-    expect(wrapper.text()).not.toContain('暂无许可证申请')
-    expect(wrapper.text()).toContain('许可证申请加载失败')
+    await wrapper.get('[data-testid="view-deal-journey"]').trigger('click')
+
+    expect(wrapper.emitted('view-journey')).toEqual([[{
+      customerId: CUSTOMER_PUBLIC_ID,
+      journeyPublicId: JOURNEY_PUBLIC_ID,
+    }]])
+  })
+
+  it('hides view-journey when deal_journey_id is null', async () => {
+    opportunityApi.getOpportunity.mockResolvedValue(opportunityFixture({
+      deal_journey_id: null,
+    }))
+
+    const wrapper = mount(OpportunityDetailContent, {
+      props: {
+        opportunityId: OPPORTUNITY_PUBLIC_ID,
+      },
+    })
+
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.find('[data-testid="view-deal-journey"]').exists()).toBe(false)
   })
 })

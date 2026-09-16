@@ -38,9 +38,9 @@ describe('ContractPaymentPlans V2 migration contract', () => {
   })
 })
 
-describe('OpportunityDetailContent payment-plan fixed contract', () => {
+describe('DealJourneyDetailContent payment-plan fixed contract', () => {
   it('passes contract total_amount instead of remaining allocatable amount', () => {
-    const source = readSource('src/components/panels/OpportunityDetailContent.vue')
+    const source = readSource('src/components/panels/DealJourneyDetailContent.vue')
     const blockStart = source.indexOf('const fixedContractForPaymentPlan')
     const blockEnd = source.indexOf('const paymentRecordDefaultAmount')
     const block = source.slice(blockStart, blockEnd)
