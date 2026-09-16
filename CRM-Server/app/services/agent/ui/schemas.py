@@ -312,6 +312,12 @@ class InteractionField(AgentUIContractModel):
         return self
 
 
+class InteractionConfirmationFact(AgentUIContractModel):
+    key: str = Field(min_length=1, max_length=128, pattern=r"^[a-z][a-z0-9_]*$")
+    label: str = Field(min_length=1, max_length=200)
+    value: str = Field(min_length=1, max_length=10_000)
+
+
 class InteractionBlock(AgentUIBlockBase):
     type: Literal["interaction"]
     interaction_id: str = Field(min_length=1, max_length=128)
@@ -320,6 +326,7 @@ class InteractionBlock(AgentUIBlockBase):
     state: Literal["ACTIVE", "SUBMITTED", "EXPIRED", "CANCELLED", "READ_ONLY"]
     prompt: str = Field(min_length=1, max_length=10000)
     fields: list[InteractionField] = Field(default_factory=list, max_length=20)
+    facts: list[InteractionConfirmationFact] = Field(default_factory=list, max_length=20)
     options: list[InteractionOption] = Field(default_factory=list, max_length=50)
     selection_mode: Literal["single", "multiple"] | None = None
     min_selections: int | None = Field(default=None, ge=0, le=50)
@@ -422,6 +429,8 @@ class InteractionBlock(AgentUIBlockBase):
                 valid_submit_shape = False
             if not valid_submit_shape:
                 raise ValueError("submit_on_select requires an exact single-choice interaction")
+        if self.facts and self.interaction_type != "confirmation":
+            raise ValueError("facts are only valid for confirmation interactions")
         return self
 
 

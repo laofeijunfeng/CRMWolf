@@ -156,7 +156,7 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 的 CRM AI Agent �
     "contact_phone": "联系人手机号，无法识别则为 null",
     "company_scale": "1-50人|51-200人|201-500人|501-1000人|1000人以上|null",
     "follow_up_content": "创建线索后需要记录的跟进内容，无法识别则为 null",
-    "follow_up_method": "电话|微信|拜访|邮件|线上会议|线下会议|会议|其他|null",
+    "follow_up_method": "电话|微信|拜访|邮件|其他|null",
     "next_action": "线索下一步动作，无法识别则为 null",
     "next_follow_time_text": "用户原文中的线索下次跟进时间，无法识别则为 null",
     "next_follow_time": {

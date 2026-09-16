@@ -46,6 +46,12 @@ export const InteractionFieldSchema = z.object({
   }
 })
 
+export const InteractionConfirmationFactSchema = z.object({
+  key: z.string().min(1).max(128).regex(/^[a-z][a-z0-9_]*$/),
+  label: z.string().min(1).max(200),
+  value: z.string().min(1).max(10000)
+}).strict()
+
 export const InteractionBlockObjectSchema = z.object({
   id: z.string().min(1).max(128),
   type: z.literal('interaction'),
@@ -55,6 +61,7 @@ export const InteractionBlockObjectSchema = z.object({
   state: z.enum(['ACTIVE', 'SUBMITTED', 'EXPIRED', 'CANCELLED', 'READ_ONLY']),
   prompt: z.string().min(1).max(10000),
   fields: z.array(InteractionFieldSchema).max(20).default([]),
+  facts: z.array(InteractionConfirmationFactSchema).max(20).default([]),
   options: z.array(InteractionOptionSchema).max(50).default([]),
   selection_mode: z.enum(['single', 'multiple']).nullable().optional(),
   min_selections: z.number().int().min(0).max(50).nullable().optional(),
@@ -135,6 +142,14 @@ export function validateInteractionBlock(
     } else if (!block.allow_blank && field.min_length === 0) {
       context.addIssue({ code: z.ZodIssueCode.custom, message: 'non-blank text_input requires min_length greater than zero' })
     }
+  }
+
+  if (block.facts.length > 0 && block.interaction_type !== 'confirmation') {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'facts are only valid for confirmation interactions',
+      path: ['facts']
+    })
   }
 
   if (block.submit_on_select === true) {

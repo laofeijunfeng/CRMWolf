@@ -82,6 +82,12 @@ class WorkflowInteractionField(WorkflowContractModel):
         return self
 
 
+class WorkflowConfirmationFact(WorkflowContractModel):
+    key: str = Field(min_length=1, max_length=128, pattern=r"^[a-z][a-z0-9_]*$")
+    label: str = Field(min_length=1, max_length=200)
+    value: str = Field(min_length=1, max_length=10_000)
+
+
 class WorkflowInteraction(WorkflowContractModel):
     """Channel-neutral request for the next user interaction."""
 
@@ -92,6 +98,7 @@ class WorkflowInteraction(WorkflowContractModel):
     prompt: str = Field(min_length=1, max_length=10_000)
     options: list[WorkflowInteractionOption] = Field(default_factory=list, max_length=50)
     fields: list[WorkflowInteractionField] = Field(default_factory=list, max_length=20)
+    facts: list[WorkflowConfirmationFact] = Field(default_factory=list, max_length=20)
     selection_mode: Literal["single", "multiple"] | None = None
     min_selections: int | None = Field(default=None, ge=0, le=50)
     max_selections: int | None = Field(default=None, ge=1, le=50)
@@ -121,6 +128,8 @@ class WorkflowInteraction(WorkflowContractModel):
             raise ValueError("form interactions require fields")
         if self.interaction_type != "form" and self.fields:
             raise ValueError("fields are only valid for form interactions")
+        if self.facts and self.interaction_type != "confirmation":
+            raise ValueError("facts are only valid for confirmation interactions")
         if self.interaction_type == "text_input" and self.allow_blank is None:
             raise ValueError("text input interactions require allow_blank")
         if self.interaction_type != "text_input" and self.allow_blank is not None:
@@ -279,6 +288,14 @@ class WorkflowCompletedResult(WorkflowContractModel):
     durable_work: list[AgentDurableWorkReceipt] = Field(default_factory=list, max_length=20)
 
 
+class WorkflowCommittedResource(WorkflowContractModel):
+    command_id: str = Field(min_length=1, max_length=128, pattern=r"^[a-z][a-z0-9_]*$")
+    tool_name: str = Field(min_length=1, max_length=128, pattern=r"^[a-z][a-z0-9_]*$")
+    resource: Literal["lead", "customer", "customer_activity", "contact", "opportunity"]
+    public_id: str = Field(min_length=1, max_length=128)
+    display_name: str = Field(min_length=1, max_length=200)
+
+
 class WorkflowFailedResult(WorkflowContractModel):
     status: Literal["FAILED"] = "FAILED"
     workflow_ref: WorkflowRef | None = None
@@ -286,6 +303,8 @@ class WorkflowFailedResult(WorkflowContractModel):
     message: str = Field(min_length=1, max_length=2_000)
     retryable: bool = False
     progress: WorkflowProgress
+    committed_resources: list[WorkflowCommittedResource] = Field(default_factory=list, max_length=20)
+    failed_command_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class WorkflowReplayResult(WorkflowContractModel):
@@ -452,15 +471,21 @@ class WorkflowEffectResult(WorkflowContractModel):
     message: str = Field(min_length=1, max_length=2_000)
     retryable: bool = False
     durable_work: list[AgentDurableWorkReceipt] = Field(default_factory=list, max_length=20)
+    committed_resources: list[WorkflowCommittedResource] = Field(default_factory=list, max_length=20)
+    failed_command_id: str | None = Field(default=None, min_length=1, max_length=128)
 
     @model_validator(mode="after")
     def validate_outcome(self) -> Self:
-        if self.success and self.code is not None:
-            raise ValueError("successful Workflow effects cannot include an error code")
-        if not self.success and self.code is None:
-            raise ValueError("failed Workflow effects require an error code")
-        if not self.success and self.durable_work:
-            raise ValueError("failed Workflow effects cannot publish durable-work receipts")
+        if self.success:
+            if self.code is not None:
+                raise ValueError("successful Workflow effects cannot include an error code")
+            if self.failed_command_id is not None:
+                raise ValueError("successful Workflow effects cannot include a failed command")
+        else:
+            if self.code is None:
+                raise ValueError("failed Workflow effects require an error code")
+            if self.durable_work:
+                raise ValueError("failed Workflow effects cannot publish durable-work receipts")
         return self
 
 

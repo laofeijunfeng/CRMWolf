@@ -37,6 +37,7 @@ from app.services.agent.ui.schemas import (
     EntityListItem,
     ErrorBlock,
     InteractionBlock,
+    InteractionConfirmationFact,
     InteractionField,
     InteractionOption,
     ProcessBlock,
@@ -589,6 +590,10 @@ class AgentUIComposer:
             )
             for field in interaction.fields
         ]
+        facts = [
+            InteractionConfirmationFact(key=fact.key, label=fact.label, value=fact.value)
+            for fact in interaction.facts
+        ]
         if interaction.interaction_type == "text_input":
             allow_blank = interaction.allow_blank is True
             fields = [
@@ -644,6 +649,7 @@ class AgentUIComposer:
                 state="ACTIVE",
                 prompt=interaction.prompt,
                 fields=fields,
+                facts=facts,
                 options=options,
                 selection_mode=interaction.selection_mode,
                 min_selections=ui_min_selections,

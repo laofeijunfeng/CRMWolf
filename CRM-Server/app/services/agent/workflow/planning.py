@@ -6,11 +6,16 @@ import math
 from datetime import date, datetime
 from typing import Protocol
 
+from sqlalchemy.exc import OperationalError
 from pydantic import ValidationError
+
+from app.crud.customer import customer_crud
+from app.crud.lead import lead_crud
 
 from app.models.customer import Customer
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_opportunity_suggestion_job import CustomerOpportunitySuggestionJob
+from app.models.lead import FollowUpMethod
 from app.services.acquisition_source_service import resolve_write_fields_for_ai
 from app.services.agent import business_rules
 from app.services.agent.quality import (
@@ -31,6 +36,7 @@ from app.services.agent.workflow.contracts import (
     WorkflowAuthorizationScope,
     WorkflowCommand,
     WorkflowCommandBinding,
+    WorkflowConfirmationFact,
     WorkflowInteraction,
     WorkflowInteractionField,
     WorkflowInteractionOption,
@@ -61,6 +67,11 @@ from app.services.agent.workflow.resources import (
     WorkflowCustomerCandidate,
     WorkflowCustomerResolver,
     WorkflowResourceResolutionError,
+)
+from app.services.agent.workflow.write_enums import (
+    UnmappedLeadFollowUpMethod,
+    canonicalize_company_scale,
+    canonicalize_lead_follow_up_method,
 )
 from app.services.customer_activity_contracts import (
     CustomerActivitySubmissionSource,
@@ -360,6 +371,7 @@ class CRMWorkflowPlanner:
                 workflow_id=workflow_id,
                 current_datetime=current_datetime,
                 user_message=text,
+                request=request,
             )
         if intent == "CREATE_CUSTOMER":
             return await self._plan_customer(
@@ -571,6 +583,17 @@ class CRMWorkflowPlanner:
             cancelled_text=f"已取消记录{customer_name}的本次跟进。",
         )
 
+    @staticmethod
+    def _unique_named_record(getter, db: object, name: str, team_id: int):
+        if not hasattr(db, "query"):
+            return None
+        try:
+            return getter(db, name, team_id)
+        except OperationalError as exc:
+            if "no such table" not in str(exc):
+                raise
+            return None
+
     def _plan_lead(
         self,
         semantic: object,
@@ -580,6 +603,7 @@ class CRMWorkflowPlanner:
         workflow_id: str,
         current_datetime: datetime,
         user_message: str | None = None,
+        request: WorkflowTurnInput | None = None,
     ) -> WorkflowActionPlan:
         lead_model = getattr(semantic, "lead", None)
         lead = {
@@ -602,6 +626,11 @@ class CRMWorkflowPlanner:
             team_id=team_id,
             fallback_text=user_message,
         )
+        scale = canonicalize_company_scale(lead.get("company_scale"))
+        if scale is None:
+            lead.pop("company_scale", None)
+        else:
+            lead["company_scale"] = scale
         missing_fields = business_rules.missing_lead_fields(lead)
         if missing_fields:
             raise self._needs_text(
@@ -617,7 +646,23 @@ class CRMWorkflowPlanner:
                 ),
             )
         lead_name = str(lead["lead_name"])
+        existing_lead = self._unique_named_record(lead_crud.get_by_name, db, lead_name, team_id)
         follow_up_content = getattr(lead_model, "follow_up_content", None)
+        if existing_lead is not None and (
+            not isinstance(follow_up_content, str) or not follow_up_content.strip()
+        ):
+            raise WorkflowPlanningError(
+                "WORKFLOW_LEAD_ALREADY_EXISTS",
+                f"线索「{lead_name}」已存在，请直接补充跟进，不要重复创建。",
+            )
+        lead_facts = [
+            ("lead_name", "线索名称", lead_name),
+            ("contact_name", "联系人", lead.get("contact_name")),
+            ("contact_phone", "联系电话", lead.get("contact_phone")),
+            ("city", "城市", lead.get("city")),
+            ("company_scale", "团队规模", lead.get("company_scale")),
+            ("product", "产品", lead.get("product_public_id")),
+        ]
         if not isinstance(follow_up_content, str) or not follow_up_content.strip():
             return self._confirmation_plan(
                 workflow_id=workflow_id,
@@ -629,11 +674,39 @@ class CRMWorkflowPlanner:
                 confirm_label="确认创建",
                 completed_text=f"已创建线索“{lead_name}”。",
                 cancelled_text=f"已取消创建线索“{lead_name}”。",
+                facts=self._confirmation_facts(lead_facts),
             )
 
+        try:
+            method = canonicalize_lead_follow_up_method(
+                getattr(lead_model, "follow_up_method", None)
+            )
+        except UnmappedLeadFollowUpMethod:
+            raise WorkflowPlanningNeedsInput(
+                WorkflowInteraction(
+                    interaction_id=f"int_{workflow_id.removeprefix('wf_')}_lead_follow_up_method",
+                    interaction_type="choice",
+                    business_action="select_lead_follow_up_method",
+                    title="选择跟进方式",
+                    prompt="请选择线索跟进方式。",
+                    options=[
+                        WorkflowInteractionOption(
+                            value=item.value,
+                            label=item.value,
+                            metadata={"follow_up_method": item.value},
+                        )
+                        for item in FollowUpMethod
+                    ],
+                    selection_mode="single",
+                    min_selections=1,
+                    max_selections=1,
+                    submit_label="继续",
+                ),
+                checkpoint_request=request,
+            )
         follow_up_payload: dict[str, object] = {
             "content": follow_up_content.strip(),
-            "method": getattr(lead_model, "follow_up_method", None) or "其他",
+            "method": method.value,
         }
         next_action = getattr(lead_model, "next_action", None)
         if isinstance(next_action, str) and next_action.strip():
@@ -644,6 +717,34 @@ class CRMWorkflowPlanner:
         )
         if next_follow_time:
             follow_up_payload["next_follow_time"] = next_follow_time
+        follow_up_facts = self._confirmation_facts(
+            [
+                *lead_facts,
+                ("follow_up_method", "跟进方式", method.value),
+                ("follow_up_content", "跟进内容", follow_up_content.strip()),
+                ("next_action", "下一步", follow_up_payload.get("next_action")),
+            ]
+        )
+        if existing_lead is not None:
+            follow_up_payload["lead_id"] = existing_lead.public_id
+            return self._confirmation_commands_plan(
+                workflow_id=workflow_id,
+                business_action="create_lead_follow_up",
+                commands=[
+                    WorkflowCommand(
+                        command_id="create_lead_follow_up",
+                        tool_name="create_lead_follow_up",
+                        payload=follow_up_payload,
+                        authorization_scope=WorkflowAuthorizationScope(customer_ids=[]),
+                    )
+                ],
+                title="确认记录线索跟进",
+                prompt=f"确认为已有线索“{lead_name}”记录跟进吗?",
+                confirm_label="确认记录",
+                completed_text=f"已为线索“{lead_name}”记录跟进。",
+                cancelled_text=f"已取消为线索“{lead_name}”记录跟进。",
+                facts=follow_up_facts,
+            )
         return self._confirmation_commands_plan(
             workflow_id=workflow_id,
             business_action="create_lead_with_follow_up",
@@ -673,6 +774,7 @@ class CRMWorkflowPlanner:
             confirm_label="确认创建",
             completed_text=f"已创建线索“{lead_name}”并记录首次跟进。",
             cancelled_text=f"已取消创建线索“{lead_name}”及首次跟进。",
+            facts=follow_up_facts,
         )
 
     async def _plan_customer(
@@ -704,6 +806,11 @@ class CRMWorkflowPlanner:
         }
         flat_customer = resolve_write_fields_for_ai(flat_customer, db, team_id)
         flat_customer = self._resolve_product_public_id(flat_customer, db=db, team_id=team_id)
+        scale = canonicalize_company_scale(flat_customer.get("company_scale"))
+        if scale is None:
+            flat_customer.pop("company_scale", None)
+        else:
+            flat_customer["company_scale"] = scale
         missing_fields = business_rules.missing_customer_fields(flat_customer)
         if missing_fields:
             raise self._needs_text(
@@ -720,7 +827,17 @@ class CRMWorkflowPlanner:
             )
         customer = self._customer_create_payload(flat_customer)
         account_name = str(customer["account_name"])
+        existing_customer = self._unique_named_record(
+            customer_crud.get_by_name, db, account_name, team_id
+        )
         follow_up_content = getattr(customer_model, "follow_up_content", None)
+        if existing_customer is not None and (
+            not isinstance(follow_up_content, str) or not follow_up_content.strip()
+        ):
+            raise WorkflowPlanningError(
+                "WORKFLOW_CUSTOMER_ALREADY_EXISTS",
+                f"客户「{account_name}」已存在，请直接记录跟进，不要重复创建。",
+            )
         if not isinstance(follow_up_content, str) or not follow_up_content.strip():
             return self._confirmation_plan(
                 workflow_id=workflow_id,
@@ -787,6 +904,36 @@ class CRMWorkflowPlanner:
         )
         if next_follow_time:
             activity_payload["next_follow_time"] = next_follow_time
+        activity_facts = self._confirmation_facts(
+            [
+                ("customer_name", "客户名称", account_name),
+                ("activity_content", "跟进内容", content),
+                ("activity_kind", "跟进类型", activity_payload.get("activity_kind")),
+                ("next_action", "下一步", activity_payload.get("next_action")),
+            ]
+        )
+        if existing_customer is not None:
+            activity_payload["customer_id"] = existing_customer.public_id
+            return self._confirmation_commands_plan(
+                workflow_id=workflow_id,
+                business_action="create_customer_activity",
+                commands=[
+                    WorkflowCommand(
+                        command_id="create_customer_activity",
+                        tool_name="create_customer_activity",
+                        payload=activity_payload,
+                        authorization_scope=WorkflowAuthorizationScope(
+                            customer_ids=[existing_customer.public_id],
+                        ),
+                    )
+                ],
+                title="确认记录客户跟进",
+                prompt=f"确认为已有客户“{account_name}”记录跟进吗?",
+                confirm_label="确认记录",
+                completed_text=f"已为客户“{account_name}”记录跟进。",
+                cancelled_text=f"已取消为客户“{account_name}”记录跟进。",
+                facts=activity_facts,
+            )
         return self._confirmation_commands_plan(
             workflow_id=workflow_id,
             business_action="create_customer_with_activity",
@@ -824,6 +971,7 @@ class CRMWorkflowPlanner:
             confirm_label="确认创建",
             completed_text=f"已创建客户“{account_name}”并记录首次跟进。",
             cancelled_text=f"已取消创建客户“{account_name}”及首次跟进。",
+            facts=activity_facts,
         )
 
     async def _plan_contact(
@@ -2380,6 +2528,18 @@ class CRMWorkflowPlanner:
             terminal_reason=reason,
         )
 
+    @staticmethod
+    def _confirmation_facts(items: list[tuple[str, str, object]]) -> list[WorkflowConfirmationFact]:
+        facts: list[WorkflowConfirmationFact] = []
+        for key, label, raw in items:
+            if raw is None:
+                continue
+            value = raw if isinstance(raw, str) else str(raw)
+            stripped = value.strip()
+            if stripped:
+                facts.append(WorkflowConfirmationFact(key=key, label=label, value=stripped))
+        return facts
+
     @classmethod
     def _confirmation_plan(
         cls,
@@ -2393,6 +2553,7 @@ class CRMWorkflowPlanner:
         confirm_label: str,
         completed_text: str,
         cancelled_text: str,
+        facts: list[WorkflowConfirmationFact] | None = None,
     ) -> WorkflowActionPlan:
         return cls._confirmation_commands_plan(
             workflow_id=workflow_id,
@@ -2412,6 +2573,7 @@ class CRMWorkflowPlanner:
             confirm_label=confirm_label,
             completed_text=completed_text,
             cancelled_text=cancelled_text,
+            facts=facts,
         )
 
     @staticmethod
@@ -2425,6 +2587,7 @@ class CRMWorkflowPlanner:
         confirm_label: str,
         completed_text: str,
         cancelled_text: str,
+        facts: list[WorkflowConfirmationFact] | None = None,
     ) -> WorkflowActionPlan:
         suffix = workflow_id.removeprefix("wf_")
         return WorkflowActionPlan(
@@ -2444,6 +2607,7 @@ class CRMWorkflowPlanner:
                 selection_mode="single",
                 submit_on_select=True,
                 submit_label="确认",
+                facts=facts or [],
             ),
             completed_text=completed_text,
             cancelled_text=cancelled_text,
@@ -2584,6 +2748,11 @@ class CRMWorkflowPlanner:
                 semantic.follow_up = semantic.follow_up.model_copy(
                     update={"next_action": supplement.content}
                 )
+            elif business_action == "select_lead_follow_up_method":
+                if semantic.lead is not None:
+                    semantic.lead = semantic.lead.model_copy(
+                        update={"follow_up_method": supplement.content}
+                    )
             elif business_action == "supplement_follow_up_quality":
                 return None
         return semantic

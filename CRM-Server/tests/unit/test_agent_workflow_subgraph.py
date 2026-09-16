@@ -60,6 +60,7 @@ from app.services.agent.schemas import AgentFollowUpQualityResult, AgentSemantic
 from app.services.agent.semantic import AgentSemanticParseEnvelope
 from app.services.agent.semantic_plan import AgentSemanticPlan
 from app.services.agent.tools.base import AgentToolContext, AgentToolResult
+from app.services.agent.tools.api_client import CRMAPIClientError
 from app.services.agent.workflow.contracts import (
     WorkflowActionPlan,
     WorkflowAuthorizationScope,
@@ -525,10 +526,17 @@ class CapturingToolRegistry:
             "create_lead_follow_up": "lfu_001",
             "create_customer_activity": "actv_001",
         }
+        result_data: dict[str, object] = {"id": result_ids.get(name, "resource_001")}
+        if name == "create_lead":
+            result_data["public_id"] = "lead_001"
+            result_data["lead_name"] = "上海云图科技"
+        elif name == "create_customer":
+            result_data["public_id"] = "cust_001"
+            result_data["account_name"] = "上海星图信息技术有限公司"
         return AgentToolResult(
             tool_name=name,
             success=True,
-            data={"id": result_ids.get(name, "resource_001")},
+            data=result_data,
             durable_work=(
                 CustomerActivityDurableWorkReceipt(
                     activity_id=241,
@@ -539,6 +547,39 @@ class CapturingToolRegistry:
             if name == "create_customer_activity"
             else (),
         )
+
+
+class PartialLeadFollowUpToolRegistry(CapturingToolRegistry):
+    async def execute(self, name, context, payload, *, policy):
+        if name == "create_lead_follow_up":
+            self.calls.append({"name": name, "context": context, "payload": payload, "policy": policy})
+            raise CRMAPIClientError(
+                "请求参数验证失败 (body -> method: Input should be '电话', '微信', '拜访', '邮件' or '其他')",
+                status_code=422,
+            )
+        result = await super().execute(name, context, payload, policy=policy)
+        if name == "create_lead":
+            result.data = {
+                "id": "lead_001",
+                "public_id": "lead_001",
+                "lead_name": "上海云图科技",
+            }
+        return result
+
+
+class UnavailableLeadFollowUpToolRegistry(CapturingToolRegistry):
+    async def execute(self, name, context, payload, *, policy):
+        if name == "create_lead_follow_up":
+            self.calls.append({"name": name, "context": context, "payload": payload, "policy": policy})
+            raise CRMAPIClientError("upstream", status_code=503)
+        result = await super().execute(name, context, payload, policy=policy)
+        if name == "create_lead":
+            result.data = {
+                "id": "lead_001",
+                "public_id": "lead_001",
+                "lead_name": "上海云图科技",
+            }
+        return result
 
 
 class RaisingToolRegistry:
@@ -2026,6 +2067,9 @@ async def test_create_lead_with_follow_up_confirms_once_and_binds_created_lead_i
     assert isinstance(waiting, WorkflowDispatchResult)
     assert isinstance(waiting.workflow_result, WorkflowWaitingResult)
     assert waiting.workflow_result.interaction.business_action == "create_lead_with_follow_up"
+    fact_map = {fact.key: fact.value for fact in waiting.workflow_result.interaction.facts}
+    assert fact_map["follow_up_method"] == "电话"
+    assert fact_map["lead_name"] == "上海云图科技"
     assert waiting.continuation is not None
     interaction_resolver.continuation = waiting.continuation
     assert tool_registry.calls == []
@@ -2070,6 +2114,162 @@ async def test_create_lead_with_follow_up_confirms_once_and_binds_created_lead_i
         "next_follow_time": "2026-08-26T10:00:00",
         "idempotency_suffix": f"{workflow_id}:create_lead_follow_up",
     }
+
+
+async def test_create_lead_follow_up_validation_failure_keeps_created_lead() -> None:
+    parser = StaticSemanticParser(
+        AgentSemanticParseResult.model_validate(
+            {
+                "intent": "CREATE_LEAD",
+                "intent_confidence": 0.99,
+                "lead": {
+                    "lead_name": "上海云图科技",
+                    "city": "上海",
+                    "contact_name": "王敏",
+                    "contact_phone": "13800138000",
+                    "product_public_id": "prd_1",
+                    "follow_up_content": "已确认需要安排产品演示",
+                    "follow_up_method": "电话",
+                },
+            }
+        )
+    )
+    tool_registry = PartialLeadFollowUpToolRegistry()
+    interaction_resolver = CanonicalConfirmationResolver()
+    orchestrator = RootOrchestrator(
+        checkpointer=json_safe_checkpointer(),
+        context_resolver=EmptyContextResolver(),
+        decision_classifier=CreateStandaloneWriteDecisionClassifier(reason_code="CREATE_LEAD"),
+        query_executor=FailingQueryExecutor(),
+        interaction_resolver=interaction_resolver,
+        workflow_subgraph=build_workflow_subgraph(
+            planner=CRMWorkflowPlanner(
+                semantic_parser=parser,
+                temporal_resolver=FixedTemporalResolver(),
+            ),
+            effect_executor=CRMWorkflowEffectExecutor(tool_registry=tool_registry),
+        ),
+    )
+    runtime = RootRuntimeContext(
+        db=object(),
+        authorization="Bearer test-token",
+        metadata={"current_datetime": datetime(2026, 8, 23, 9, 0, 0)},
+    )
+    waiting = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=2,
+            session_id=562,
+            client_request_id="req_partial_lead_waiting",
+            input=TextTurnInput(
+                type="text",
+                text="创建上海云图科技线索,联系人王敏,电话13800138000,已电话确认需要安排产品演示",
+            ),
+        ),
+        runtime=runtime,
+    )
+    assert isinstance(waiting, WorkflowDispatchResult)
+    interaction_resolver.continuation = waiting.continuation
+    failed = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=2,
+            session_id=562,
+            client_request_id="req_partial_lead_confirmed",
+            input=InteractionTurnInput(
+                type="interaction",
+                action_id="act_confirm_create_lead_with_follow_up",
+            ),
+        ),
+        runtime=runtime,
+    )
+    assert isinstance(failed, WorkflowDispatchResult)
+    assert isinstance(failed.workflow_result, WorkflowFailedResult)
+    assert failed.workflow_result.retryable is False
+    assert failed.workflow_result.failed_command_id == "create_lead_follow_up"
+    assert [item.public_id for item in failed.workflow_result.committed_resources] == ["lead_001"]
+    assert "Input should be" not in failed.workflow_result.message
+    assert failed.workflow_result.message == (
+        "已创建线索「上海云图科技」，但首次跟进没写上：跟进方式无效。\n"
+        "请直接为这条线索补充跟进（电话 / 微信 / 拜访 / 邮件 / 其他），不要再创建同一条线索。"
+    )
+    assert [call["name"] for call in tool_registry.calls] == ["create_lead", "create_lead_follow_up"]
+
+
+async def test_create_lead_follow_up_unavailable_failure_keeps_created_lead() -> None:
+    parser = StaticSemanticParser(
+        AgentSemanticParseResult.model_validate(
+            {
+                "intent": "CREATE_LEAD",
+                "intent_confidence": 0.99,
+                "lead": {
+                    "lead_name": "上海云图科技",
+                    "city": "上海",
+                    "contact_name": "王敏",
+                    "contact_phone": "13800138000",
+                    "product_public_id": "prd_1",
+                    "follow_up_content": "已确认需要安排产品演示",
+                    "follow_up_method": "电话",
+                },
+            }
+        )
+    )
+    tool_registry = UnavailableLeadFollowUpToolRegistry()
+    interaction_resolver = CanonicalConfirmationResolver()
+    orchestrator = RootOrchestrator(
+        checkpointer=json_safe_checkpointer(),
+        context_resolver=EmptyContextResolver(),
+        decision_classifier=CreateStandaloneWriteDecisionClassifier(reason_code="CREATE_LEAD"),
+        query_executor=FailingQueryExecutor(),
+        interaction_resolver=interaction_resolver,
+        workflow_subgraph=build_workflow_subgraph(
+            planner=CRMWorkflowPlanner(
+                semantic_parser=parser,
+                temporal_resolver=FixedTemporalResolver(),
+            ),
+            effect_executor=CRMWorkflowEffectExecutor(tool_registry=tool_registry),
+        ),
+    )
+    runtime = RootRuntimeContext(
+        db=object(),
+        authorization="Bearer test-token",
+        metadata={"current_datetime": datetime(2026, 8, 23, 9, 0, 0)},
+    )
+    waiting = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=2,
+            session_id=564,
+            client_request_id="req_partial_lead_unavailable_waiting",
+            input=TextTurnInput(
+                type="text",
+                text="创建上海云图科技线索,联系人王敏,电话13800138000,已电话确认需要安排产品演示",
+            ),
+        ),
+        runtime=runtime,
+    )
+    assert isinstance(waiting, WorkflowDispatchResult)
+    interaction_resolver.continuation = waiting.continuation
+    failed = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=2,
+            session_id=564,
+            client_request_id="req_partial_lead_unavailable_confirmed",
+            input=InteractionTurnInput(
+                type="interaction",
+                action_id="act_confirm_create_lead_with_follow_up",
+            ),
+        ),
+        runtime=runtime,
+    )
+    assert isinstance(failed, WorkflowDispatchResult)
+    assert isinstance(failed.workflow_result, WorkflowFailedResult)
+    assert failed.workflow_result.retryable is True
+    assert failed.workflow_result.failed_command_id == "create_lead_follow_up"
+    assert [item.public_id for item in failed.workflow_result.committed_resources] == ["lead_001"]
+    assert failed.workflow_result.message == "CRM 服务暂时不可用, 请稍后重试。"
+    assert [call["name"] for call in tool_registry.calls] == ["create_lead", "create_lead_follow_up"]
 
 
 async def test_create_customer_with_activity_confirms_once_and_binds_created_customer_id() -> None:

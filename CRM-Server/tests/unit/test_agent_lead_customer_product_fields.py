@@ -3,6 +3,8 @@ from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+from contextlib import nullcontext
+
 import pytest
 from pydantic import ValidationError
 from sqlalchemy import create_engine, event
@@ -10,6 +12,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
 from app.crud.product_intent import EMPTY_CATALOG_MESSAGE
+from app.models.lead import FollowUpMethod
 from app.models.product import Product, ProductModule
 from app.services.agent.business_rules import (
     format_customer_missing_fields,
@@ -17,7 +20,9 @@ from app.services.agent.business_rules import (
     missing_customer_fields,
     missing_lead_fields,
 )
+from app.services.agent.principal import AgentPrincipal
 from app.services.agent.tool_registry import AgentCustomerCreatePayload, AgentLeadCreatePayload
+from app.services.agent.workflow.contracts import WorkflowTextStart, WorkflowTurnInput
 from app.services.agent.workflow.planning import CRMWorkflowPlanner, WorkflowPlanningNeedsInput
 
 
@@ -103,7 +108,34 @@ def test_format_customer_missing_fields_labels_product_not_module():
     assert "模块" not in format_customer_missing_fields(["product_public_id"])
 
 
-def _plan_lead(semantic_lead: SimpleNamespace, *, db: object, user_message: str | None = None):
+class _EmptyQuery:
+    def filter(self, *_args, **_kwargs):
+        return self
+
+    def options(self, *_args, **_kwargs):
+        return self
+
+    def order_by(self, *_args, **_kwargs):
+        return self
+
+    def first(self):
+        return None
+
+    def all(self):
+        return []
+
+
+def _queryable_db() -> SimpleNamespace:
+    return SimpleNamespace(query=lambda *_args, **_kwargs: _EmptyQuery(), begin_nested=nullcontext)
+
+
+def _plan_lead(
+    semantic_lead: SimpleNamespace,
+    *,
+    db: object,
+    user_message: str | None = None,
+    request: WorkflowTurnInput | None = None,
+):
     planner = CRMWorkflowPlanner()
     return planner._plan_lead(
         SimpleNamespace(lead=semantic_lead),
@@ -112,6 +144,7 @@ def _plan_lead(semantic_lead: SimpleNamespace, *, db: object, user_message: str 
         workflow_id="wf_lead_product",
         current_datetime=datetime(2026, 8, 23, 9, 0, 0),
         user_message=user_message,
+        request=request,
     )
 
 
@@ -208,3 +241,191 @@ async def test_plan_customer_empty_catalog_appends_admin_copy(db):
     assert EMPTY_CATALOG_MESSAGE in prompt
     assert "product_public_id" not in prompt
     assert "模块" not in prompt
+
+
+def test_plan_lead_defaults_blank_follow_up_method_to_other():
+    plan = _plan_lead(
+        SimpleNamespace(**_lead_kwargs(product_public_id="prd_1"), follow_up_content="已电话沟通"),
+        db=object(),
+    )
+    assert plan.commands[1].payload["method"] == FollowUpMethod.OTHER.value
+
+
+def test_plan_lead_maps_online_meeting_method_to_other():
+    plan = _plan_lead(
+        SimpleNamespace(
+            **_lead_kwargs(product_public_id="prd_1"),
+            follow_up_content="开了线上会议",
+            follow_up_method="线上会议",
+        ),
+        db=object(),
+    )
+    assert plan.commands[1].payload["method"] == FollowUpMethod.OTHER.value
+
+
+def test_plan_lead_unmapped_method_asks_for_closed_choice():
+    request = WorkflowTurnInput(
+        workflow_id="wf_" + "a" * 32,
+        start=WorkflowTextStart(kind="text", text="录入线索"),
+        principal=AgentPrincipal(team_id=1, user_id=2, session_id=3),
+    )
+    with pytest.raises(WorkflowPlanningNeedsInput) as exc:
+        _plan_lead(
+            SimpleNamespace(
+                **_lead_kwargs(product_public_id="prd_1"),
+                follow_up_content="发了传真",
+                follow_up_method="传真",
+            ),
+            db=object(),
+            request=request,
+        )
+    interaction = exc.value.interaction
+    assert interaction.interaction_type == "choice"
+    assert interaction.business_action == "select_lead_follow_up_method"
+    assert [option.value for option in interaction.options] == ["电话", "微信", "拜访", "邮件", "其他"]
+    assert exc.value.checkpoint_request is request
+
+
+def test_plan_lead_maps_tilde_scale_to_one_to_fifty():
+    plan = _plan_lead(
+        SimpleNamespace(**_lead_kwargs(product_public_id="prd_1", company_scale="10~29")),
+        db=object(),
+    )
+    assert plan.commands[0].payload["lead"]["company_scale"] == "1-50人"
+
+
+def test_plan_lead_with_follow_up_projects_confirmation_facts():
+    plan = _plan_lead(
+        SimpleNamespace(
+            **_lead_kwargs(product_public_id="prd_1", company_scale="10~29"),
+            follow_up_content="已确认需要安排产品演示",
+            follow_up_method="电话",
+            next_action="安排产品演示",
+        ),
+        db=object(),
+    )
+    assert plan.interaction is not None
+    facts = {fact.key: fact.value for fact in plan.interaction.facts}
+    assert facts["lead_name"] == "A"
+    assert facts["follow_up_method"] == "电话"
+    assert facts["follow_up_content"] == "已确认需要安排产品演示"
+    assert facts["company_scale"] == "1-50人"
+    assert facts["next_action"] == "安排产品演示"
+
+
+def test_create_lead_follow_up_input_rejects_unmapped_method():
+    from app.services.agent.tool_registry import CreateLeadFollowUpInput
+
+    with pytest.raises(ValidationError):
+        CreateLeadFollowUpInput(lead_id="lead_001", content="跟进", method="线上会议")
+
+
+def test_plan_lead_follow_up_on_unique_existing_lead_does_not_recreate(monkeypatch):
+    existing = SimpleNamespace(public_id="lead_existing", lead_name="A")
+    monkeypatch.setattr(
+        "app.services.agent.workflow.planning.lead_crud.get_by_name",
+        lambda db, lead_name, team_id: existing,
+    )
+    db = _queryable_db()
+    plan = _plan_lead(
+        SimpleNamespace(
+            **_lead_kwargs(product_public_id="prd_1"),
+            follow_up_content="电话补充跟进",
+            follow_up_method="电话",
+        ),
+        db=db,
+    )
+    assert [command.tool_name for command in plan.commands] == ["create_lead_follow_up"]
+    assert plan.commands[0].payload["lead_id"] == "lead_existing"
+    assert plan.interaction is not None
+    assert plan.interaction.prompt == "确认为已有线索“A”记录跟进吗?"
+
+
+def test_plan_lead_existing_without_follow_up_does_not_recreate(monkeypatch):
+    existing = SimpleNamespace(public_id="lead_existing", lead_name="A")
+    monkeypatch.setattr(
+        "app.services.agent.workflow.planning.lead_crud.get_by_name",
+        lambda db, lead_name, team_id: existing,
+    )
+    db = _queryable_db()
+    from app.services.agent.workflow.planning import WorkflowPlanningError
+
+    with pytest.raises(WorkflowPlanningError, match="已存在"):
+        _plan_lead(SimpleNamespace(**_lead_kwargs(product_public_id="prd_1")), db=db)
+
+
+def test_plan_lead_lookup_failure_does_not_create_new_lead(monkeypatch):
+    from sqlalchemy.exc import SQLAlchemyError
+
+    def _raise_lookup_failure(_db, _lead_name, _team_id):
+        raise SQLAlchemyError("connection failed")
+
+    monkeypatch.setattr(
+        "app.services.agent.workflow.planning.lead_crud.get_by_name",
+        _raise_lookup_failure,
+    )
+    db = _queryable_db()
+    with pytest.raises(SQLAlchemyError, match="connection failed"):
+        _plan_lead(
+            SimpleNamespace(
+                **_lead_kwargs(product_public_id="prd_1"),
+                follow_up_content="电话补充跟进",
+                follow_up_method="电话",
+            ),
+            db=db,
+        )
+
+
+@pytest.mark.asyncio
+async def test_plan_customer_activity_on_unique_existing_customer_does_not_recreate(monkeypatch):
+    existing = SimpleNamespace(public_id="cust_existing", account_name="A")
+    monkeypatch.setattr(
+        "app.services.agent.workflow.planning.customer_crud.get_by_name",
+        lambda db, account_name, team_id: existing,
+    )
+    db = _queryable_db()
+
+    async def _evaluate_with_metadata(*_args, **_kwargs):
+        from app.services.agent.quality import AgentFollowUpQualityEnvelope
+        from app.services.agent.schemas import AgentFollowUpQualityResult
+
+        return AgentFollowUpQualityEnvelope(
+            result=AgentFollowUpQualityResult(
+                score=80,
+                passed=True,
+                reason="测试质量评估结果。",
+                next_action_status="CLEAR",
+            ),
+            quality_source="test",
+            model="test-model",
+        )
+
+    monkeypatch.setattr(
+        "app.services.agent.workflow.planning.agent_follow_up_quality_evaluator.evaluate_with_metadata",
+        _evaluate_with_metadata,
+    )
+    plan = await _plan_customer(
+        SimpleNamespace(
+            **_customer_kwargs(product_public_id="prd_1"),
+            follow_up_content="电话补充跟进",
+            follow_up_method="微信",
+        ),
+        db=db,
+    )
+    assert [command.tool_name for command in plan.commands] == ["create_customer_activity"]
+    assert plan.commands[0].payload["customer_id"] == "cust_existing"
+    assert plan.interaction is not None
+
+
+@pytest.mark.asyncio
+async def test_plan_customer_existing_without_activity_does_not_recreate(monkeypatch):
+    existing = SimpleNamespace(public_id="cust_existing", account_name="A")
+    monkeypatch.setattr(
+        "app.services.agent.workflow.planning.customer_crud.get_by_name",
+        lambda db, account_name, team_id: existing,
+    )
+    db = _queryable_db()
+    from app.services.agent.workflow.planning import WorkflowPlanningError
+
+    with pytest.raises(WorkflowPlanningError, match="已存在"):
+        await _plan_customer(SimpleNamespace(**_customer_kwargs(product_public_id="prd_1")), db=db)

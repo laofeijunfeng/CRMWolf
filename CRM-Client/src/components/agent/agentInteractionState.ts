@@ -101,3 +101,10 @@ export const restoreCompactTaskAction = (
         }
   ))
 }
+
+export function unlockInteractionActionId(
+  locked: ReadonlySet<string>,
+  actionId: string,
+): Set<string> {
+  return new Set([...locked].filter(item => item !== actionId))
+}
