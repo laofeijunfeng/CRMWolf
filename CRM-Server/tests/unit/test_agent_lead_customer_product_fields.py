@@ -354,6 +354,28 @@ def test_plan_lead_existing_without_follow_up_does_not_recreate(monkeypatch):
         _plan_lead(SimpleNamespace(**_lead_kwargs(product_public_id="prd_1")), db=db)
 
 
+def test_plan_lead_lookup_failure_does_not_create_new_lead(monkeypatch):
+    from sqlalchemy.exc import SQLAlchemyError
+
+    def _raise_lookup_failure(_db, _lead_name, _team_id):
+        raise SQLAlchemyError("connection failed")
+
+    monkeypatch.setattr(
+        "app.services.agent.workflow.planning.lead_crud.get_by_name",
+        _raise_lookup_failure,
+    )
+    db = _queryable_db()
+    with pytest.raises(SQLAlchemyError, match="connection failed"):
+        _plan_lead(
+            SimpleNamespace(
+                **_lead_kwargs(product_public_id="prd_1"),
+                follow_up_content="电话补充跟进",
+                follow_up_method="电话",
+            ),
+            db=db,
+        )
+
+
 @pytest.mark.asyncio
 async def test_plan_customer_activity_on_unique_existing_customer_does_not_recreate(monkeypatch):
     existing = SimpleNamespace(public_id="cust_existing", account_name="A")

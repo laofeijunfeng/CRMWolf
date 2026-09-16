@@ -6,7 +6,7 @@ import math
 from datetime import date, datetime
 from typing import Protocol
 
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import OperationalError
 from pydantic import ValidationError
 
 from app.crud.customer import customer_crud
@@ -589,7 +589,9 @@ class CRMWorkflowPlanner:
             return None
         try:
             return getter(db, name, team_id)
-        except SQLAlchemyError:
+        except OperationalError as exc:
+            if "no such table" not in str(exc):
+                raise
             return None
 
     def _plan_lead(
