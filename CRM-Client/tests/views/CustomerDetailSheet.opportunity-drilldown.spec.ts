@@ -296,6 +296,8 @@ vi.mock('@/components/dialogs/DeploymentInfoFormDialog.vue', () => ({
 }))
 
 const JOURNEY_PUBLIC_ID = 'djy_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+const SECOND_JOURNEY_PUBLIC_ID = 'djy_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+
 const OPPORTUNITY_PUBLIC_ID = 'opp_test_88'
 
 const customerFixture = (overrides: Partial<CustomerDetailResponse> = {}): CustomerDetailResponse => ({
@@ -930,5 +932,82 @@ describe('CustomerDetailSheet journey drilldown', () => {
     expect(journeyDetailRefresh).toHaveBeenCalled()
     expect(wrapper.get('[data-testid="deal-journey-detail"]').attributes('data-journey-id')).toBe(JOURNEY_PUBLIC_ID)
     expect(wrapper.find('[data-testid="deal-journeys-panel"]').exists()).toBe(false)
+  })
+
+  it('keeps the journeys tab after creating a contract from nested journey detail', async () => {
+    const wrapper = mount(CustomerDetailSheet, {
+      props: {
+        customerId: 'cus_test_19',
+        visible: true,
+      },
+    })
+
+    await flushPromises()
+    await wrapper.get('[data-testid="tab-journeys"]').trigger('click')
+    await nextTick()
+    await wrapper.get('[data-testid="view-journey"]').trigger('click')
+    await nextTick()
+    await wrapper.get('[data-testid="create-journey-contract"]').trigger('click')
+    await nextTick()
+    await wrapper.get('[data-testid="contract-dialog-success"]').trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.get('[data-testid="deal-journey-detail"]').attributes('data-journey-id')).toBe(JOURNEY_PUBLIC_ID)
+
+    await wrapper.get('[data-testid="back-to-journeys"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.get('[data-testid="tab-journeys"]').attributes('data-active')).toBe('true')
+    expect(wrapper.get('[data-testid="tab-customer-info"]').attributes('data-active')).toBe('false')
+    expect(wrapper.find('[data-testid="deal-journeys-panel"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="deal-journey-detail"]').exists()).toBe(false)
+  })
+
+  it('replaces nested journey instead of appending when targetJourneyId changes', async () => {
+    dealJourneyApi.listByCustomer.mockResolvedValue([
+      journeyFixture(),
+      journeyFixture({
+        id: SECOND_JOURNEY_PUBLIC_ID,
+        public_id: SECOND_JOURNEY_PUBLIC_ID,
+        name: '续费项目',
+        primary_opportunity: {
+          public_id: 'opp_test_99',
+          opportunity_name: '续费项目',
+          status: 0,
+          approval_phase: 'approved',
+          win_probability: 40,
+          expected_closing_date: '2026-09-30',
+          product_name: 'CRM',
+        },
+      }),
+    ])
+
+    const wrapper = mount(CustomerDetailSheet, {
+      props: {
+        customerId: 'cus_test_19',
+        visible: true,
+      },
+    })
+
+    await flushPromises()
+    await wrapper.get('[data-testid="tab-journeys"]').trigger('click')
+    await nextTick()
+    await wrapper.get('[data-testid="view-journey"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.get('[data-testid="deal-journey-detail"]').attributes('data-journey-id')).toBe(JOURNEY_PUBLIC_ID)
+
+    await wrapper.setProps({ targetJourneyId: SECOND_JOURNEY_PUBLIC_ID })
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.get('[data-testid="deal-journey-detail"]').attributes('data-journey-id')).toBe(SECOND_JOURNEY_PUBLIC_ID)
+
+    await wrapper.get('[data-testid="back-to-journeys"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.find('[data-testid="deal-journey-detail"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="deal-journeys-panel"]').exists()).toBe(true)
   })
 })

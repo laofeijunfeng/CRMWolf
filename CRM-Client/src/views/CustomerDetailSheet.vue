@@ -697,11 +697,12 @@ defineExpose({
 
 const retryPanel = async (panel: CustomerDetailPanelKey): Promise<boolean> => {
   if (props.customerId === null) return false
-  activePanel.value = panel === 'followUps' ? 'followup'
-    : panel === 'journeys' ? 'journeys'
-      : panel === 'customerProfile' || panel === 'customerProfileEvidence' ? 'customer-profile'
-        : 'customer-info'
-
+  if (!hasNestedDetail.value) {
+    activePanel.value = panel === 'followUps' ? 'followup'
+      : panel === 'journeys' ? 'journeys'
+        : panel === 'customerProfile' || panel === 'customerProfileEvidence' ? 'customer-profile'
+          : 'customer-info'
+  }
   const customerId = props.customerId
   switch (panel) {
     case 'followUps':
@@ -922,10 +923,7 @@ const handleOpportunitySuccess = async (): Promise<void> => {
 const handleViewJourney = (journeyId: string): void => {
   activePanel.value = 'journeys'
   if (props.customerId !== null) {
-    const currentRoot = detailContextStack.nodes.value[0]
-    if (currentRoot?.type !== 'customer' || currentRoot.id !== props.customerId) {
-      detailContextStack.reset([createCustomerContextNode(props.customerId)])
-    }
+    detailContextStack.reset([createCustomerContextNode(props.customerId)])
     detailContextStack.push(createJourneyContextNode(journeyId))
   }
   selectedContractId.value = null
