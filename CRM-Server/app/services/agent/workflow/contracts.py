@@ -288,6 +288,14 @@ class WorkflowCompletedResult(WorkflowContractModel):
     durable_work: list[AgentDurableWorkReceipt] = Field(default_factory=list, max_length=20)
 
 
+class WorkflowCommittedResource(WorkflowContractModel):
+    command_id: str = Field(min_length=1, max_length=128, pattern=r"^[a-z][a-z0-9_]*$")
+    tool_name: str = Field(min_length=1, max_length=128, pattern=r"^[a-z][a-z0-9_]*$")
+    resource: Literal["lead", "customer", "customer_activity", "contact", "opportunity"]
+    public_id: str = Field(min_length=1, max_length=128)
+    display_name: str = Field(min_length=1, max_length=200)
+
+
 class WorkflowFailedResult(WorkflowContractModel):
     status: Literal["FAILED"] = "FAILED"
     workflow_ref: WorkflowRef | None = None
@@ -295,6 +303,8 @@ class WorkflowFailedResult(WorkflowContractModel):
     message: str = Field(min_length=1, max_length=2_000)
     retryable: bool = False
     progress: WorkflowProgress
+    committed_resources: list[WorkflowCommittedResource] = Field(default_factory=list, max_length=20)
+    failed_command_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class WorkflowReplayResult(WorkflowContractModel):
@@ -461,15 +471,21 @@ class WorkflowEffectResult(WorkflowContractModel):
     message: str = Field(min_length=1, max_length=2_000)
     retryable: bool = False
     durable_work: list[AgentDurableWorkReceipt] = Field(default_factory=list, max_length=20)
+    committed_resources: list[WorkflowCommittedResource] = Field(default_factory=list, max_length=20)
+    failed_command_id: str | None = Field(default=None, min_length=1, max_length=128)
 
     @model_validator(mode="after")
     def validate_outcome(self) -> Self:
-        if self.success and self.code is not None:
-            raise ValueError("successful Workflow effects cannot include an error code")
-        if not self.success and self.code is None:
-            raise ValueError("failed Workflow effects require an error code")
-        if not self.success and self.durable_work:
-            raise ValueError("failed Workflow effects cannot publish durable-work receipts")
+        if self.success:
+            if self.code is not None:
+                raise ValueError("successful Workflow effects cannot include an error code")
+            if self.failed_command_id is not None:
+                raise ValueError("successful Workflow effects cannot include a failed command")
+        else:
+            if self.code is None:
+                raise ValueError("failed Workflow effects require an error code")
+            if self.durable_work:
+                raise ValueError("failed Workflow effects cannot publish durable-work receipts")
         return self
 
 

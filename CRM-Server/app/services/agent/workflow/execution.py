@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 import httpx
 from pydantic import ValidationError
@@ -17,6 +17,7 @@ from app.services.agent.tools.base import AgentToolContext, AgentToolResult
 from app.services.agent.workflow.contracts import (
     WorkflowActionPlan,
     WorkflowCommand,
+    WorkflowCommittedResource,
     WorkflowEffectResult,
     WorkflowOpportunitySuggestionStart,
     WorkflowRuntimeContext,
@@ -99,6 +100,7 @@ class CRMWorkflowEffectExecutor:
         db, authorization, team_id, user_id, session_id = execution_context
         command_results: dict[str, object] = {}
         durable_work = []
+        committed: list[WorkflowCommittedResource] = []
 
         for command in plan.commands:
             try:
@@ -185,14 +187,29 @@ class CRMWorkflowEffectExecutor:
             )
             result = await self._execute_command(command, context=context, payload=payload, policy=policy)
             if isinstance(result, WorkflowEffectResult):
-                return result
+                return result.model_copy(
+                    update={
+                        "committed_resources": list(committed),
+                        "failed_command_id": command.command_id,
+                        "message": _user_facing_effect_failure(
+                            command=command,
+                            committed=committed,
+                            retryable=result.retryable,
+                            original=result.message,
+                        ),
+                    }
+                )
             command_results[command.command_id] = result.data
             durable_work.extend(result.durable_work)
+            committed_resource = _committed_resource(command, result.data)
+            if committed_resource is not None:
+                committed.append(committed_resource)
 
         return WorkflowEffectResult(
             success=True,
             message=plan.completed_text,
             durable_work=durable_work,
+            committed_resources=committed,
         )
 
     async def _validate_command_resources(
@@ -553,3 +570,70 @@ def _resolve_authorized_customer_ids(
 
 def _is_retryable_status(status_code: int | None) -> bool:
     return status_code is None or status_code in {408, 429} or status_code >= 500
+
+
+WorkflowCommittedKind = Literal["lead", "customer", "customer_activity", "contact", "opportunity"]
+_TOOL_RESOURCE: dict[str, WorkflowCommittedKind] = {
+    "create_lead": "lead",
+    "create_customer": "customer",
+    "create_customer_activity": "customer_activity",
+    "create_contact": "contact",
+    "create_opportunity": "opportunity",
+}
+_DISPLAY_KEYS = ("lead_name", "account_name", "title", "name", "display_name")
+
+
+def _committed_resource(command: WorkflowCommand, data: object) -> WorkflowCommittedResource | None:
+    resource = _TOOL_RESOURCE.get(command.tool_name)
+    if resource is None or not isinstance(data, dict):
+        return None
+    public_id = data.get("public_id") or data.get("id")
+    if not isinstance(public_id, (str, int)) or isinstance(public_id, bool):
+        return None
+    display_name = next(
+        (
+            str(data[key]).strip()
+            for key in _DISPLAY_KEYS
+            if isinstance(data.get(key), str) and str(data[key]).strip()
+        ),
+        str(public_id),
+    )
+    return WorkflowCommittedResource(
+        command_id=command.command_id,
+        tool_name=command.tool_name,
+        resource=resource,
+        public_id=str(public_id),
+        display_name=display_name,
+    )
+
+
+def _user_facing_effect_failure(
+    *,
+    command: WorkflowCommand,
+    committed: list[WorkflowCommittedResource],
+    retryable: bool,
+    original: str,
+) -> str:
+    if retryable:
+        return original
+    if command.tool_name == "create_lead_follow_up" and committed:
+        lead = committed[0]
+        if "method" in original or "跟进方式" in original or original.startswith("请求参数验证失败"):
+            return (
+                f"已创建线索「{lead.display_name}」，但首次跟进没写上：跟进方式无效。\n"
+                "请直接为这条线索补充跟进（电话 / 微信 / 拜访 / 邮件 / 其他），不要再创建同一条线索。"
+            )
+        return (
+            f"已创建线索「{lead.display_name}」，但首次跟进没写上。\n"
+            "请直接为这条线索补充跟进（电话 / 微信 / 拜访 / 邮件 / 其他），不要再创建同一条线索。"
+        )
+    if command.tool_name == "create_customer_activity" and committed:
+        customer = committed[0]
+        return (
+            f"已创建客户「{customer.display_name}」，但首次跟进没写上。\n"
+            "请直接为这个客户记录跟进，不要再创建同一客户。"
+        )
+    if committed:
+        names = "、".join(f"「{item.display_name}」" for item in committed)
+        return f"已完成{names}，但后续写入没完成。请针对已有对象继续操作，不要重复创建。"
+    return "操作没完成，确认已失效，请改数据后重新描述。"
