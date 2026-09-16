@@ -31,6 +31,7 @@ from app.services.customer_profile_projection_service import (
     _important_change_items,
     _recorded_follow_ups,
 )
+from app.services.customer_profile_demand_claims import CatalogProductRef
 
 
 @compiles(BigInteger, "sqlite")
@@ -561,12 +562,12 @@ def test_profile_demand_items_merge_near_duplicates_and_keep_all_evidence():
     activities = [
         _activity(
             1,
-            "客户重新评估 Apifox 私有化部署方案，需要私有环境安装包和试用方案开展 POC 部署试用。",
+            "客户对 Hifox 感兴趣，公司层面需要私有化部署。",
             occurred_at="2026-08-25T10:00:00",
         ),
         _activity(
             2,
-            "客户重新评估私有化部署 Apifox 方案，需提供私有环境安装包和试用方案开展 POC 部署试用。",
+            "客户对 Hifox 比较感兴趣，公司层面使用需要私有化部署。",
             occurred_at="2026-08-25T11:00:00",
         ),
         _activity(
@@ -581,12 +582,20 @@ def test_profile_demand_items_merge_near_duplicates_and_keep_all_evidence():
         ),
     ]
 
-    items = _demand_items(activities)
+    items = _demand_items(
+        activities,
+        catalog=(
+            CatalogProductRef(public_id="prd_hifox", name="Hifox"),
+            CatalogProductRef(public_id="prd_apifox", name="Apifox"),
+        ),
+    )
 
     assert [item["topic"] for item in items] == ["private_solution", "poc"]
+    assert items[0]["topic"] == "private_solution"
     assert items[0]["activity_count"] == 2
     assert items[0]["evidence_refs"] == ["activity:1", "activity:2"]
-    assert "私有化部署" in items[0]["statement"]
+    assert "Hifox" in items[0]["statement"]
+    assert "Apifox" not in items[0]["statement"]
     assert "正式试用" in items[1]["statement"]
     assert items[1]["evidence_refs"] == ["activity:3", "activity:4"]
 
@@ -607,7 +616,7 @@ def test_profile_follow_up_process_is_phase_summary_not_one_row_per_activity():
         ),
         _activity(
             3,
-            "已提交立项材料，正在内部审批。",
+            "立项材料已提交，正在内部审批。",
             occurred_at="2026-08-25T11:00:00",
             next_action="确认审批结果",
         ),

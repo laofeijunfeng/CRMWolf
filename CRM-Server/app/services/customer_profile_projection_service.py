@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from datetime import datetime
 from hashlib import sha256
 from typing import TYPE_CHECKING
 
@@ -26,6 +26,13 @@ from app.models.customer_profile_projection import (
 )
 from app.schemas.customer_profile import CustomerProfileSections
 from app.services.agent.types import JSONDict, coerce_json_dict
+from app.services.customer_profile_demand_claims import (
+    CatalogProductRef,
+    _TOPIC_TITLES,
+    _group_activities,
+    _unique_activity_texts,
+    compose_demand_claims,
+)
 from app.services.customer_profile_projection_policy import (
     CustomerProfileProjectionAssessment,
     CustomerProfileProjectionPolicy,
@@ -668,7 +675,23 @@ class CustomerProfileProjectionService:
         active_journeys = [item for item in journey_sections if item.get("status") == "ACTIVE"]
         journey_history = [item for item in journey_sections if item.get("status") != "ACTIVE"]
         latest_activity = activities[0] if activities else {}
-        demand_items = _demand_items(activities, facts=facts)
+        catalog_rows = [
+            CatalogProductRef(str(item["public_id"]), str(item["name"]), bool(item.get("is_active", True)))
+            for item in _json_dict_list(context.get("product_catalog"))
+            if item.get("public_id") and item.get("name")
+        ]
+        customer_products = [
+            CatalogProductRef(str(item["public_id"]), str(item["name"]))
+            for item in _json_dict_list(customer.get("products"))
+            if item.get("public_id") and item.get("name")
+        ]
+        demand_items = _demand_items(
+            activities,
+            facts=facts,
+            catalog=catalog_rows,
+            customer_products=customer_products,
+            opportunities=opportunities,
+        )
         process = _follow_up_process(activities)
         recorded_follow_ups = _recorded_follow_ups(tasks, commitments, task_events)
         important_changes = _important_change_items(
@@ -714,6 +737,7 @@ class CustomerProfileProjectionService:
                 "latest_event_key": source_event_key,
             }
         )
+        watermark["product_catalog_names"] = [item.name for item in catalog_rows if item.is_active]
         sections = CustomerProfileSections(
             current_situation={
                 "headline": str(customer.get("account_name") or "该客户"),
@@ -964,85 +988,6 @@ def _build_evidence_registry(
     return result
 
 
-_DEMAND_KEYWORDS = (
-    "需求",
-    "使用",
-    "服务器",
-    "部署",
-    "采购",
-    "功能",
-    "预算",
-    "系统",
-    "平台",
-    "接口",
-    "场景",
-    "私有化",
-    "试用",
-    "POC",
-    "验收",
-)
-_TOPIC_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("project_blocked", ("没进展", "暂无进展", "出差", "等领导", "等待领导")),
-    ("approval", ("立项", "审批", "采购流程", "报价确认")),
-    ("private_solution", ("私有化", "私有环境", "安装包", "部署方案", "本地部署")),
-    ("usage_expansion", ("账号已用满", "增购", "授权", "续费", "扩大使用", "全公司")),
-    ("reporting", ("报表", "导出", "按部门")),
-    ("internal_validation", ("1-2个项目", "1—2个项目", "内部试用", "cto", "上级汇报")),
-    ("procurement", ("预算", "采购", "招标", "放款", "财务审批", "付款", "内部过", "再给答复", "对一下时间")),
-    ("acceptance", ("验收", "轻量交互页面")),
-    ("poc", ("poc", "试用", "测试环境", "暂无问题", "正常进行")),
-    ("generic_demand", _DEMAND_KEYWORDS),
-)
-_TOPIC_TITLES = {
-    "project_blocked": "项目推进受阻",
-    "approval": "立项与审批推进",
-    "private_solution": "私有化方案评估",
-    "acceptance": "产品事项验收",
-    "poc": "POC 试用验证",
-    "generic_demand": "客户沟通",
-    "usage_expansion": "使用与授权范围",
-    "reporting": "报表使用需求",
-    "procurement": "采购与预算推进",
-    "internal_validation": "内部试用与汇报",
-}
-
-_FACT_DEMAND_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("private_solution", ("私有化", "私有环境", "安装包", "本地部署", "部署方案")),
-    ("reporting", ("报表", "导出", "按部门")),
-    ("internal_validation", ("1-2个项目", "1—2个项目", "内部试用", "cto", "上级汇报")),
-    ("usage_expansion", ("账号已用满", "增购", "授权", "续费", "扩大使用", "全公司")),
-    ("procurement", ("预算", "采购", "招标", "放款", "财务审批", "付款")),
-)
-
-
-def _activity_text(activity: dict[str, object], *, limit: int = 800) -> str:
-    """Prefer the concise recorded summary, falling back to the source wording."""
-
-    return _text(activity.get("content") or activity.get("summary") or activity.get("source_content"), limit=limit)
-
-
-def _activity_topic(activity: dict[str, object]) -> str | None:
-    text = _activity_text(activity, limit=1200).lower()
-    if not text:
-        return None
-    for topic, keywords in _TOPIC_RULES:
-        if any(keyword.lower() in text for keyword in keywords):
-            return topic
-    return None
-
-
-def _activity_datetime(activity: dict[str, object]) -> datetime | None:
-    value = activity.get("occurred_at") or activity.get("event_time") or activity.get("created_time")
-    if isinstance(value, datetime):
-        return value
-    if not isinstance(value, str) or not value.strip():
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-
-
 _TEXT_NORMALIZATION_PATTERN = r"[\s\uFF0C\u3002\uFF1B\uFF1A\u3001,.!?\uFF01\uFF1F\uFF08\uFF09()\-—_]+"
 
 
@@ -1060,101 +1005,19 @@ def _similar_text(left: str, right: str) -> bool:
     return overlap >= 0.86
 
 
-def _unique_activity_texts(activities: list[dict[str, object]], *, limit: int = 3) -> list[str]:
-    texts: list[str] = []
-    for activity in sorted(activities, key=_timeline_sort_key):
-        text = _activity_text(activity, limit=800)
-        if text and not any(_similar_text(text, existing) for existing in texts):
-            texts.append(text)
-    return texts[-limit:]
+def _activity_text(activity: dict[str, object], *, limit: int = 800) -> str:
+    """Prefer the concise recorded summary, falling back to the source wording."""
 
-
-def _group_activities(activities: list[dict[str, object]]) -> list[tuple[str, list[dict[str, object]]]]:
-    """Group notes by recorded topic while keeping long-running phases readable.
-
-    A topic starts a new node after a long gap, so an old need does not silently
-    become the current phase. Within a phase, repeated notes are represented by
-    one node with all evidence refs and a small set of distinct recorded facts.
-    """
-
-    groups: list[tuple[str, list[dict[str, object]]]] = []
-    group_indexes: dict[str, int] = {}
-    last_by_topic: dict[str, datetime] = {}
-    for activity in sorted(activities, key=_timeline_sort_key):
-        topic = _activity_topic(activity) or "other"
-        occurred_at = _activity_datetime(activity)
-        group_index = group_indexes.get(topic)
-        previous_at = last_by_topic.get(topic)
-        gap_days = 0.0
-        if previous_at is not None and occurred_at is not None:
-            try:
-                gap_days = (occurred_at - previous_at).total_seconds() / 86400
-            except TypeError:
-                gap_days = 0.0
-        if group_index is None or gap_days > 45:
-            group_indexes[topic] = len(groups)
-            groups.append((topic, [activity]))
-        else:
-            groups[group_index][1].append(activity)
-        if occurred_at is not None:
-            last_by_topic[topic] = occurred_at
-    return groups
-
-
-def _demand_statement(topic: str, activities: list[dict[str, object]]) -> tuple[str, str]:
-    latest_text = _unique_activity_texts(activities, limit=2)
-    combined = "；".join(latest_text)  # noqa: RUF001
-    if topic == "usage_expansion":
-        return (
-            "客户团队已在使用产品且账号已用满，正在推进授权增购，并评估从部门使用扩大到更大范围。",  # noqa: RUF001
-            "增购与使用范围评估中",
-        )
-    if topic == "reporting":
-        return "客户要求数据报表支持按部门导出。", "需求已提出"
-    if topic == "internal_validation":
-        return "客户计划内部选择1—2个项目试用，并向上级CTO汇报项目情况。", "内部验证推进中"  # noqa: RUF001
-    if topic == "procurement":
-        return "客户正在推进采购预算、内部审批和付款安排。", "采购与付款推进中"
-    if topic == "private_solution":
-        return (
-            "客户正在重新评估 Apifox 私有化部署方案，需要私有环境安装包和试用方案。",  # noqa: RUF001
-            "方案仍在评估，相关部署支持需求已被记录。",  # noqa: RUF001
-        )
-    if topic == "poc":
-        if any(marker in combined for marker in ("已部署", "已安装", "正式试用", "暂无问题", "正常")):
-            return (
-                "POC 环境已部署完成并进入正式试用，最近记录反馈正常、暂无问题。",  # noqa: RUF001
-                "已进入试用验证阶段，最近一次客户反馈暂无问题。",  # noqa: RUF001
-            )
-        return (
-            "客户提出 POC 试用验证需求。",
-            "已提出",
-        )
-    if topic == "acceptance":
-        return (
-            "测试侧提出轻量交互页面验收需求。",
-            "已提出",
-        )
-    if topic == "approval":
-        return (
-            "项目正在走立项及内部审批流程，立项材料已提交的记录已形成。",  # noqa: RUF001
-            "项目推进依赖客户内部立项与审批节奏。",
-        )
-    if topic == "project_blocked":
-        return (
-            "项目曾因客户内部人员出差暂缓推进，后续记录显示项目已恢复跟进。",  # noqa: RUF001
-            "早期推进曾暂缓，后续已重新进入项目推进过程。",  # noqa: RUF001
-        )
-    return (
-        latest_text[-1] if latest_text else "",
-        "已记录",
-    )
+    return _text(activity.get("content") or activity.get("summary") or activity.get("source_content"), limit=limit)
 
 
 def _demand_items(
     activities: list[dict[str, object]],
     *,
     facts: list[dict[str, object]] | None = None,
+    catalog: Sequence[CatalogProductRef] = (),
+    customer_products: Sequence[CatalogProductRef] = (),
+    opportunities: list[dict[str, object]] | None = None,
 ) -> list[dict[str, object]]:
     """Project needs from notes and structured facts into a few readable themes.
 
@@ -1163,73 +1026,14 @@ def _demand_items(
     customer with many extracted next steps still reads like a profile.
     """
 
-    items_by_topic: dict[str, dict[str, object]] = {}
-    topic_order: list[str] = []
-    for topic, grouped in _group_activities(activities):
-        if topic not in {
-            "private_solution",
-            "poc",
-            "acceptance",
-            "generic_demand",
-            "usage_expansion",
-            "reporting",
-            "internal_validation",
-            "procurement",
-        }:
-            continue
-        if topic == "generic_demand" and not any(_is_meaningful_activity(item) for item in grouped):
-            continue
-        statement, status = _demand_statement(topic, grouped)
-        refs = _refs(*(_evidence_key("activity", item.get("id")) for item in grouped))
-        journey_ids = list(
-            dict.fromkeys(
-                item.get("deal_journey_id") for item in grouped if item.get("deal_journey_id") is not None
-            )
-        )
-        latest = grouped[-1]
-        item = {
-                "topic": topic,
-                "statement": statement,
-                "occurred_at": grouped[0].get("occurred_at"),
-                "latest_at": latest.get("occurred_at"),
-                "journey_id": latest.get("deal_journey_id"),
-                "journey_ids": journey_ids,
-                "activity_count": len(grouped),
-                "evidence_refs": refs,
-                "status": status,
-            }
-        items_by_topic[topic] = item
-        if topic not in topic_order:
-            topic_order.append(topic)
-
-    for topic, grouped_facts in _group_demand_facts(facts or []):
-        activity_item = items_by_topic.get(topic)
-        fact_refs = _refs(*(_evidence_key("fact", fact.get("id")) for fact in grouped_facts))
-        if activity_item is not None:
-            activity_item["evidence_refs"] = _refs(*(activity_item.get("evidence_refs") or []), *fact_refs)
-            continue
-        statement, status = _fact_demand_statement(topic, grouped_facts)
-        if not statement:
-            continue
-        latest = max(grouped_facts, key=_timeline_sort_key)
-        items_by_topic[topic] = {
-            "topic": topic,
-            "statement": statement,
-            "occurred_at": min(
-                (item.get("occurred_at") or item.get("extracted_at") or "" for item in grouped_facts),
-                default=latest.get("occurred_at") or latest.get("extracted_at"),
-            ),
-            "latest_at": latest.get("occurred_at") or latest.get("extracted_at"),
-            "journey_id": None,
-            "journey_ids": [],
-            "activity_count": 0,
-            "evidence_refs": fact_refs,
-            "status": status,
-        }
-        if topic not in topic_order:
-            topic_order.append(topic)
-
-    return [items_by_topic[topic] for topic in topic_order if topic in items_by_topic][:8]
+    claims = compose_demand_claims(
+        activities,
+        facts=facts,
+        catalog=catalog,
+        customer_products=customer_products,
+        opportunities=opportunities,
+    )
+    return [claim.as_item() for claim in claims]
 
 
 def _is_meaningful_activity(activity: dict[str, object]) -> bool:
@@ -1240,65 +1044,6 @@ def _is_meaningful_activity(activity: dict[str, object]) -> bool:
         and normalized not in {"测试", "测试测试", "test", "testtest"}
         and not (normalized.startswith(("neg", "def")) and len(normalized) < 40)
     )
-
-
-def _fact_topic(fact: dict[str, object]) -> str | None:
-    text = " ".join(
-        value
-        for value in (
-            _text(fact.get("subject"), limit=255),
-            _text(fact.get("content"), limit=800),
-        )
-        if value
-    ).lower()
-    fact_type = str(fact.get("fact_type") or "")
-    for topic, keywords in _FACT_DEMAND_RULES:
-        if any(keyword.lower() in text for keyword in keywords):
-            return topic
-    if fact_type == "need":
-        return "generic_demand"
-    return None
-
-
-def _group_demand_facts(facts: list[dict[str, object]]) -> list[tuple[str, list[dict[str, object]]]]:
-    grouped: dict[str, list[dict[str, object]]] = {}
-    for fact in sorted(facts, key=_timeline_sort_key, reverse=True):
-        topic = _fact_topic(fact)
-        if topic is None:
-            continue
-        content = _text(fact.get("content"), limit=800)
-        if not content or any(
-            _similar_text(content, _text(item.get("content"), limit=800))
-            for item in grouped.get(topic, [])
-        ):
-            continue
-        grouped.setdefault(topic, []).append(fact)
-    return list(grouped.items())
-
-
-def _fact_demand_statement(topic: str, facts: list[dict[str, object]]) -> tuple[str, str]:
-    text = "；".join(  # noqa: RUF001
-        _text(item.get("content"), limit=500)
-        for item in facts
-        if _text(item.get("content"), limit=500)
-    )
-    if topic == "usage_expansion":
-        return (
-            "客户团队已在使用产品且账号已用满，正在推进授权增购，并评估从部门使用扩大到更大范围。",  # noqa: RUF001
-            "增购与使用范围评估中",
-        )
-    if topic == "reporting":
-        return "客户认可权限角色配置，但要求数据报表支持按部门导出。", "需求已提出"  # noqa: RUF001
-    if topic == "internal_validation":
-        return "客户计划内部选择1—2个项目试用，并向上级CTO汇报项目情况。", "内部验证推进中"  # noqa: RUF001
-    if topic == "procurement":
-        return (
-            "客户同时推进授权增购、续费及更大范围采购评估；采购预算、内部审批和实际放款节奏仍在确认中。",  # noqa: RUF001
-            "采购与付款推进中",
-        )
-    if topic == "private_solution":
-        return "客户正在评估私有化部署方案及配套试用支持。", "方案评估中"
-    return (_sentence_body(text), "需求已记录") if text else ("", "")
 
 
 def _important_change_items(
@@ -1452,24 +1197,10 @@ def _change_item(activity: dict[str, object]) -> dict[str, object]:
     }
 
 
-def _process_change(topic: str, _activities: list[dict[str, object]]) -> str:
-    if topic == "approval":
-        return "立项材料已提交，当前记录仍显示项目处于立项/内部审批流程。"  # noqa: RUF001
-    if topic == "private_solution":
-        return "客户重新评估私有化部署方案，安装包和试用支持需求已被记录。"  # noqa: RUF001
-    if topic == "poc":
-        return "POC 试用验证需求已提出。"
-    if topic == "acceptance":
-        return "测试侧提出页面验收事项。"
-    if topic == "usage_expansion":
-        return "客户团队已在使用产品且账号已用满，近期申请增购授权，并评估扩大使用范围。"  # noqa: RUF001
-    if topic == "reporting":
-        return "客户提出数据报表按部门导出的使用需求。"
-    if topic == "internal_validation":
-        return "客户计划内部选择1—2个项目试用，并向上级CTO汇报项目情况。"  # noqa: RUF001
-    if topic == "procurement":
-        return "客户近期持续确认采购预算、财务审批和放款安排，采购节奏仍在推进中。"  # noqa: RUF001
-    return ""
+def _process_change(topic: str, activities: list[dict[str, object]]) -> str:
+    del topic
+    texts = _unique_activity_texts(activities, limit=1)
+    return texts[-1] if texts else ""
 
 
 def _follow_up_process(activities: list[dict[str, object]]) -> list[dict[str, object]]:
