@@ -920,7 +920,14 @@ def _build_evidence_registry(
     result: list[dict[str, object]] = []
     seen: set[str] = set()
 
-    def add(key: str, source_type: str, source_id: object, occurred_at: object = None, title: object = None) -> None:
+    def add(
+        key: str,
+        source_type: str,
+        source_id: object,
+        occurred_at: object = None,
+        title: object = None,
+        snippet: object = None,
+    ) -> None:
         if key in seen:
             return
         seen.add(key)
@@ -931,6 +938,7 @@ def _build_evidence_registry(
                 "source_id": source_id,
                 "occurred_at": occurred_at,
                 "title": _text(title, limit=255) or None,
+                "snippet": snippet if isinstance(snippet, str) else "",
             }
         )
 
@@ -951,6 +959,7 @@ def _build_evidence_registry(
             item.get("id"),
             item.get("occurred_at"),
             item.get("title"),
+            _activity_text(item),
         )
     for item in journey_events:
         add(
@@ -984,6 +993,7 @@ def _build_evidence_registry(
             item.get("id"),
             item.get("created_time"),
             item.get("fact_type"),
+            _text(item.get("content")),
         )
     return result
 
