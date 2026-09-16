@@ -35,6 +35,7 @@ import paymentApi, {
   type PaymentPlanUpdate,
 } from '@/api/payment'
 import { handleApiError } from '@/utils/errorHandler'
+import { formatCurrency } from '@/utils/format'
 import { useDialogCloseGuard } from '@/composables/useDialogCloseGuard'
 import { normalizePaginatedResponse } from '@/types/pagination'
 import type { FormSuccessPayload } from '@/types/actionOutcome'
@@ -85,6 +86,12 @@ const customers = ref<CustomerResponse[]>([])
 const contracts = ref<ContractListResponse[]>([])
 const customersLoading = ref(false)
 const contractsLoading = ref(false)
+const existingPlans = ref<PaymentPlanResponse[]>([])
+const existingPlansLoading = ref(false)
+const existingPlansFailed = ref(false)
+const contractTotalOverride = ref<string | null>(null)
+const contractTotalLoading = ref(false)
+const contractTotalFailed = ref(false)
 const submitting = ref(false)
 const customerSearchKeyword = ref('')
 
@@ -176,9 +183,7 @@ function resetForm(): void {
     ? String(props.fixedContract.id)
     : plan?.contract_id !== undefined ? String(plan.contract_id) : ''
   form.stageName = plan?.stage_name ?? ''
-  form.plannedAmount = plan?.planned_amount !== undefined
-    ? String(plan.planned_amount)
-    : getSelectedContractAmount()
+  form.plannedAmount = plan?.planned_amount !== undefined ? String(plan.planned_amount) : ''
   form.dueDate = plan?.due_date ?? ''
   form.notes = plan?.notes ?? ''
   clearErrors()
@@ -223,10 +228,7 @@ function validateForm(): boolean {
     errors.stageName = '请输入阶段名称'
   }
 
-  const amount = Number(form.plannedAmount)
-  if (form.plannedAmount.trim() === '' || !Number.isFinite(amount) || amount <= 0) {
-    errors.plannedAmount = '请输入大于 0 的计划金额'
-  }
+  validatePlannedAmount('submit')
 
   if (form.dueDate.trim() === '' || !isValidLocalDate(form.dueDate.trim())) {
     errors.dueDate = '请选择计划日期'
@@ -340,7 +342,6 @@ function handleContractChange(value: unknown): void {
   if (nextContractId === null || nextContractId === '') return
 
   form.contractId = nextContractId
-  form.plannedAmount = getSelectedContractAmount()
 }
 
 async function handleSubmit(): Promise<void> {
@@ -410,15 +411,130 @@ function customerOptionLabel(customer: CustomerResponse): string {
   return customer.account_name
 }
 
-function getSelectedContractAmount(): string {
-  if (!isCreateMode.value) return ''
+function toCents(value: string | number): number | null {
+  const amount = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(amount)) return null
+  return Math.round(amount * 100)
+}
 
+function centsToAmountString(cents: number): string {
+  return (cents / 100).toString()
+}
+
+const resolvedContractId = computed<number | null>(() => {
+  const raw = form.contractId.trim()
+  if (raw === '') return null
+  const id = Number(raw)
+  return Number.isInteger(id) && id > 0 ? id : null
+})
+
+const contractTotalCents = computed<number | null>(() => {
+  if (contractTotalFailed.value) return null
   if (props.fixedContract !== null) {
-    return String(props.fixedContract.total_amount)
+    return toCents(props.fixedContract.total_amount)
   }
+  if (contractTotalOverride.value !== null) {
+    return toCents(contractTotalOverride.value)
+  }
+  const selected = contracts.value.find((contract) => String(contract.id) === form.contractId)
+  return selected === undefined ? null : toCents(selected.total_amount)
+})
 
-  const selectedContract = contracts.value.find((contract) => String(contract.id) === form.contractId)
-  return selectedContract !== undefined ? String(selectedContract.total_amount) : ''
+const allocatedCents = computed<number>(() => {
+  const currentId = props.plan?.id
+  return existingPlans.value.reduce((total, plan) => {
+    if (currentId !== undefined && plan.id === currentId) return total
+    const cents = toCents(plan.planned_amount)
+    return cents === null ? total : total + cents
+  }, 0)
+})
+
+const remainingCents = computed<number | null>(() => {
+  if (existingPlansFailed.value || contractTotalCents.value === null) return null
+  if (existingPlansLoading.value || contractTotalLoading.value) return null
+  return Math.max(0, contractTotalCents.value - allocatedCents.value)
+})
+
+const amountHelperText = computed<string>(() => {
+  if (errors.plannedAmount !== '') return ''
+  if (remainingCents.value === null) return ''
+  return `还可分配 ${formatCurrency(remainingCents.value / 100)}`
+})
+
+function plannedAmountOverCapMessage(amountCents: number): string {
+  if (remainingCents.value === null || contractTotalCents.value === null) return ''
+  if (isCreateMode.value) {
+    if (amountCents > remainingCents.value) {
+      return `回款计划合计不能超过合同金额 ${formatCurrency(contractTotalCents.value / 100)}，当前还可分配 ${formatCurrency(remainingCents.value / 100)}`
+    }
+    return ''
+  }
+  const originalCents = toCents(props.plan?.planned_amount ?? 0) ?? 0
+  const oldTotal = allocatedCents.value + originalCents
+  const newTotal = allocatedCents.value + amountCents
+  if (newTotal > oldTotal && newTotal > contractTotalCents.value) {
+    return `回款计划合计不能超过合同金额 ${formatCurrency(contractTotalCents.value / 100)}，当前还可分配 ${formatCurrency(remainingCents.value / 100)}`
+  }
+  return ''
+}
+
+function validatePlannedAmount(trigger: 'input' | 'submit'): void {
+  const raw = form.plannedAmount.trim()
+  if (raw === '') {
+    errors.plannedAmount = trigger === 'submit' ? '请输入大于 0 的计划金额' : ''
+    return
+  }
+  const amount = Number(raw)
+  if (!Number.isFinite(amount) || amount <= 0) {
+    errors.plannedAmount = '请输入大于 0 的计划金额'
+    return
+  }
+  const amountCents = toCents(raw)
+  if (amountCents === null) {
+    errors.plannedAmount = '请输入大于 0 的计划金额'
+    return
+  }
+  errors.plannedAmount = plannedAmountOverCapMessage(amountCents)
+}
+
+async function loadExistingPlans(contractId: number): Promise<void> {
+  existingPlansLoading.value = true
+  existingPlansFailed.value = false
+  try {
+    existingPlans.value = await paymentApi.getPaymentPlans(contractId)
+  } catch (error: unknown) {
+    existingPlans.value = []
+    existingPlansFailed.value = true
+    handleApiError(error, '获取回款计划')
+  } finally {
+    existingPlansLoading.value = false
+  }
+}
+
+async function loadContractTotalForEdit(contractId: number): Promise<void> {
+  if (props.fixedContract !== null || isCreateMode.value) return
+  contractTotalLoading.value = true
+  contractTotalFailed.value = false
+  try {
+    const contract = await contractApi.getContract(contractId)
+    contractTotalOverride.value = String(contract.total_amount)
+  } catch (error: unknown) {
+    contractTotalOverride.value = null
+    contractTotalFailed.value = true
+    handleApiError(error, '获取合同金额')
+  } finally {
+    contractTotalLoading.value = false
+  }
+}
+
+function applyCreatePrefill(): void {
+  if (!isCreateMode.value) return
+  if (remainingCents.value === null) {
+    form.plannedAmount = ''
+    return
+  }
+  form.plannedAmount = remainingCents.value > 0 ? centsToAmountString(remainingCents.value) : ''
+  initialForm.value = { ...form }
 }
 
 watch(
@@ -443,11 +559,30 @@ watch(
 )
 
 watch(
-  () => form.contractId,
+  () => form.plannedAmount,
   () => {
-    if (!visible.value || !isCreateMode.value || hasFixedContract.value) return
-    form.plannedAmount = getSelectedContractAmount()
-  }
+    if (!visible.value) return
+    validatePlannedAmount('input')
+  },
+)
+
+watch(
+  () => resolvedContractId.value,
+  (contractId) => {
+    if (!visible.value || contractId === null) {
+      existingPlans.value = []
+      return
+    }
+    void (async (): Promise<void> => {
+      await Promise.all([
+        loadExistingPlans(contractId),
+        loadContractTotalForEdit(contractId),
+      ])
+      applyCreatePrefill()
+      validatePlannedAmount('input')
+    })()
+  },
+  { immediate: true },
 )
 </script>
 
@@ -529,6 +664,7 @@ watch(
             placeholder="请输入计划金额"
             :disabled="submitting"
             :error="errors.plannedAmount"
+            :helper-text="amountHelperText"
           />
         </div>
 
