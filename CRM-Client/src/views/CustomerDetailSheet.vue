@@ -971,7 +971,7 @@ const applyNavigationTarget = (fromJourneysLoad = false): void => {
   }
 
   if (props.targetPanel !== undefined && props.targetPanel !== null) {
-    activePanel.value = resolveTargetPanel(props.targetPanel)
+    setActivePanel(resolveTargetPanel(props.targetPanel))
   }
   navigationTargetPending = false
 }

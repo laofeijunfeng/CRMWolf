@@ -427,6 +427,34 @@ describe('CustomerDetailSheet journey drilldown', () => {
     expect(wrapper.find('[data-testid="deal-journeys-panel"]').exists()).toBe(false)
   })
 
+  it('leaves nested journey detail when a panel-only journeys target is applied', async () => {
+    const wrapper = mount(CustomerDetailSheet, {
+      props: {
+        customerId: 'cus_test_19',
+        targetOpportunityId: OPPORTUNITY_PUBLIC_ID,
+        visible: true,
+      },
+    })
+
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.get('[data-testid="deal-journey-detail"]').attributes('data-journey-id')).toBe(JOURNEY_PUBLIC_ID)
+    expect(wrapper.find('[data-testid="deal-journeys-panel"]').exists()).toBe(false)
+
+    await wrapper.setProps({
+      targetOpportunityId: null,
+      targetJourneyId: null,
+      targetPanel: 'journeys',
+    })
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.find('[data-testid="deal-journey-detail"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="deal-journeys-panel"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="tab-journeys"]').attributes('data-active')).toBe('true')
+  })
+
   it('stays on the journeys list when the target opportunity has no matching journey', async () => {
     const wrapper = mount(CustomerDetailSheet, {
       props: {
