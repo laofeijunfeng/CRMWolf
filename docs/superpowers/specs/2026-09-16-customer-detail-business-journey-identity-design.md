@@ -1,11 +1,11 @@
 # 客户详情业务旅程身份设计
 
 - 日期：2026-09-16
-- 状态：已确认方向，待书面审阅
-- 范围：客户详情「项目旅程」改挂业务旅程；商机详情瘦身为商机对象页；`CustomerDealJourney.public_id` 与客户下旅程薄读接口
-- 上游决定：客户详情列表一行 = 一条业务旅程；独立商机详情只做商机自己的活；合同 / 回款 / 发票 / License 只在客户 → 业务旅程里操作；赢单 / 输单 / 编辑只留独立商机详情；旅程页仍可推进采购阶段；创建入口仍是「新建商机」；独立旅程管理页不做；产品面默认 1:1，不做共享 / 解绑 UI；对外一律 `public_id`
+- 状态：已确认
+- 范围：客户详情「项目旅程」改挂业务旅程；商机详情瘦身为商机对象页；客户列表名称 hover 改成旅程预览；`CustomerDealJourney.public_id` 与客户下旅程薄读接口
+- 上游决定：客户详情列表一行 = 一条业务旅程；独立商机详情只做商机自己的活；合同 / 回款 / 发票 / License 只在客户 → 业务旅程里操作；旅程页商机行提供编辑 / 赢单 / 输单 icon，独立商机页脚仍保留这三项；旅程页仍可推进采购阶段；创建入口仍是「新建商机」；独立旅程管理页不做；产品面默认 1:1，不做共享 / 解绑 UI；对外一律 `public_id`；客户列表 hover 预览业务旅程，进度条按看板阶段，不显示赢率
 - 相关规范：`CRM-Docs/design-agent/runtime/customer-intelligence-profile.md` §8、`CRM-Docs/design-system/patterns/kanban-page.md`、`docs/ux/p1-packages/04-object-context-hierarchy.md`、`docs/superpowers/specs/2026-09-14-business-journey-board-opportunity-date-filters-design.md`
-- 相关实现：`CRM-Client/src/views/CustomerDetailSheet.vue`、`CRM-Client/src/components/panels/OpportunityDetailContent.vue`、`CRM-Client/src/components/panels/OpportunitiesPanel.vue`、`CRM-Server/app/models/deal_journey.py`、`CRM-Server/app/services/deal_journey_service.py`、`CRM-Server/app/api/business_journey_board.py`
+- 相关实现：`CRM-Client/src/views/CustomerDetailSheet.vue`、`CRM-Client/src/components/panels/OpportunityDetailContent.vue`、`CRM-Client/src/components/panels/OpportunitiesPanel.vue`、`CRM-Client/src/components/customer/CustomerOpportunityHoverCard.vue`、`CRM-Client/src/views/Customers.vue`、`CRM-Server/app/models/deal_journey.py`、`CRM-Server/app/services/deal_journey_service.py`、`CRM-Server/app/api/business_journey_board.py`
 
 ## 1. 背景与目标
 
@@ -132,7 +132,7 @@ GET /v1/customers/{customer_public_id}/deal-journeys/{journey_public_id}
 | `amount` | 主商机 `total_amount`，无主商机为 `0` |
 | `purchase_type` | 主商机；无主商机为 `null` |
 | `started_at` / `closed_at` / `last_event_at` | 旅程 |
-| `primary_opportunity` | `public_id`、名称、商机状态、审批阶段、赢率、预计成交日期；无主商机为 `null` |
+| `primary_opportunity` | `public_id`、名称、商机状态、审批阶段、赢率、预计成交日期、`product_name`；无主商机为 `null` |
 
 详情不聚合合同 / 回款 / 发票 / License。正文里的审批、阶段步进、合同、回款、发票、License 仍打现有对象接口，用 `primary_opportunity.public_id` 和现有 `getContractByOpportunity` 等。
 
@@ -171,6 +171,7 @@ Footer / 空态按钮仍是「新建商机」，成功后刷新旅程列表。
 基本信息          ← 主商机字段，只读展示
 审批进度          ← ApprovalProcessGeneric，对象仍是 OPPORTUNITY
 商机进度          ← OpportunityStageStepper，可点击推进
+商机              ← ListCard，行内 icon：编辑 / 赢单 / 输单
 合同 / 回款 / 发票 / 许可申请
 ```
 
@@ -178,9 +179,11 @@ Footer / 空态按钮仍是「新建商机」，成功后刷新旅程列表。
 
 页脚没有编辑 / 赢单 / 输单。新建合同、申请发票 / License 仍在各自面板上。
 
-审批提交 / 通过 / 驳回 / 撤回留在旅程页（推进门禁）。驳回后「改完再提交」不再内嵌 `OpportunityFormDialog`；提示去独立商机详情编辑后再回来提交。
+**商机行快捷动作**与合同 / 回款行同一套：`ListCard` `#itemActions`、ghost `size="icon"`、`HoverInfo` 文案。icon 顺序：编辑、赢单、输单。点击打开现有 `OpportunityFormDialog` / `OpportunityWinDialog` / `OpportunityLoseDialog`，不新做表单。显隐沿用 `canEditOpportunity` / `canWin` / `canLose` 以及现有审批门禁（审批中不能编辑，未通过不能赢单）。无主商机时不渲染该行。
 
-无主商机：基本信息 / 审批进度 / 商机进度显示空态「该旅程暂无主商机」。本期合同仍走 `getContractByOpportunity(primary_opportunity.public_id)`，无主商机则不请求合同，合同 / 回款 / 发票面板为空。不新增按旅程拉合同的接口。
+审批提交 / 通过 / 驳回 / 撤回留在旅程页。驳回后「改完再提交」走商机行的编辑 icon，不再把用户撵到独立商机页。
+
+无主商机：基本信息 / 审批进度 / 商机进度 / 商机行显示空态「该旅程暂无主商机」。本期合同仍走 `getContractByOpportunity(primary_opportunity.public_id)`，无主商机则不请求合同，合同 / 回款 / 发票面板为空。不新增按旅程拉合同的接口。
 
 ### 7.3 瘦身后的商机详情
 
@@ -203,6 +206,39 @@ Footer / 空态按钮仍是「新建商机」，成功后刷新旅程列表。
 ### 7.4 文案
 
 审批区标题统一「审批进度」。阶段区统一「商机进度」。步进器和审批组件不新写。不抽第三层履约面板容器，除非拆完出现大段复制。
+
+### 7.5 客户列表名称 hover
+
+`CustomerOpportunityHoverCard` 改为旅程预览（组件可改名 `CustomerDealJourneyHoverCard`，调用方一次迁完）。
+
+数据：`GET /v1/customers/{id}/deal-journeys`，前端排除 `LOST` / `ARCHIVED`，预览最多 3 条，与现在排除输单商机、limit 3 对齐。点行打开对应旅程详情；「查看全部」打开客户详情业务旅程页签。
+
+行布局：
+
+```text
+旅程名称                          金额
+进度条
+看板阶段徽章                      >
+```
+
+不再显示赢率数字，进度条也不再绑定 `win_probability`。赢率只覆盖销售推进，签完合同后的签约中 / 回款中 / 开票中会被卡在 100% 或回退，不能代表旅程。
+
+进度条取值由 `current_board_stage` 映射（前端纯函数，API 不另加 percent 字段）：
+
+| 阶段 | 进度 |
+|---|---|
+| `early_communication` 初期交流 | 14% |
+| `active_progress` 持续推进 | 29% |
+| `closing_soon` 即将签约 | 43% |
+| `contract_processing` 签约中 | 57% |
+| `payment_processing` 回款中 | 71% |
+| `invoice_processing` 开票中 | 86% |
+| `completed` 已完成 | 100% |
+| `lost` 已输单 | 不进预览 |
+
+标题「共 N 个」按旅程计数。空态「暂无业务旅程」。产品摘要可保留为名称下的 caption，不进金额右侧。
+
+`Customers.vue` 的 `openCustomerOpportunity` 改为 `openCustomerJourney(customerId, journeyPublicId)`。
 
 ## 8. 数据流
 
@@ -245,31 +281,36 @@ DealJourneyDetailContent
 - 客户第四页签文案「业务旅程」；列表渲染阶段 label，不渲染「商机」标题
 - 栈类型为 `journey`，从旅程打开合同后返回旅程而不是商机
 - `targetOpportunityId` 落到对应旅程；`targetJourneyId` 直接打开该旅程
-- 瘦身后的商机详情没有合同 / 回款 / 发票 / License；有旅程时有「查看业务旅程」
-- 旅程详情没有编辑 / 赢单 / 输单；有主商机时可推进阶段
+- 瘦身后的商机详情没有合同 / 回款 / 发票 / License；有旅程时有「查看业务旅程」；页脚仍有编辑 / 赢单 / 输单
+- 旅程详情页脚没有这三项；商机行有对应 icon，门禁与独立商机页相同
+- 客户列表 hover 展示旅程名称 + 金额 + 阶段进度条，不出现「赢率」；点击落到旅程详情
 
 手工：
 
 - 客户 → 业务旅程 → 合同 → 返回旅程
+- 旅程页商机行编辑 / 赢单 / 输单打开现有弹窗
 - 商机列表 → 瘦详情 → 查看业务旅程 → 落在同一客户的对应旅程
-- 未审批商机创建后出现在客户业务旅程列表
+- 客户列表 hover 名称 → 点旅程 → 打开客户详情对应旅程
+- 未审批商机创建后出现在客户业务旅程列表和 hover（未输单）
 
-不新挂 Vue 大页测试。用现有 `CustomerDetailSheet.opportunity-drilldown.spec.ts` 改成旅程下钻；商机详情组件测瘦身。
+不新挂 Vue 大页测试。用现有 `CustomerDetailSheet.opportunity-drilldown.spec.ts` 改成旅程下钻；商机详情组件测瘦身；hover 卡测数据源和进度映射。
 
 ## 10. 风险
 
 1. 独立商机页不再直达履约对象。「查看业务旅程」是唯一回收路径，深链必须可用。
-2. `targetOpportunityId`、客户 hover 打开商机、`Customers.vue` 的 `openCustomerOpportunity` 必须改成打开旅程。漏改会停在列表或开错对象。
-3. 驳回后再提交：旅程页不再内嵌商机编辑。
-4. 无 `deal_journey_id` 的孤儿商机不会出现在客户业务旅程页签。本期不补数据。
+2. `targetOpportunityId`、客户 hover、`Customers.vue` 必须改成打开旅程。漏改会停在列表或开错对象。
+3. 旅程页重新内嵌商机编辑 / 赢 / 输弹窗。两处入口共用对话框，注意打开态不要串。
+4. 无 `deal_journey_id` 的孤儿商机不会出现在客户业务旅程页签和 hover。本期不补数据。
 5. 看板、档案、活动响应仍可能带内部旅程 int。客户详情导航禁止使用那些字段。
 6. 商机 `deal_journey_id` 从 int 改成 string 是破坏性 API 变更。前端 schema 必须同步；没有外部 SDK 依赖时不做兼容层。
 7. 合同加载仍按主商机。默认 1:1 成立；共享旅程（仅 API）下旅程详情只能看到主商机那份合同。
+8. hover 进度是阶段阶梯，不是赢率。销售推进阶段里「赢率 80%、阶段即将签约」的条会比现在短（43% 对 80%）。这是有意的：条表示整条旅程走到哪，不是成交把握。
 
 ## 11. 实现顺序
 
 1. `public_id` 列、生成器、迁移、模型 default
 2. 抽出 `_infer_stage`；客户下旅程列表 / 详情读接口；商机响应字段改为 `public_id`
-3. `DealJourneysPanel` + `DealJourneyDetailContent`；客户详情页签 / 栈 / 深链
+3. `DealJourneysPanel` + `DealJourneyDetailContent`（含商机行 icon）；客户详情页签 / 栈 / 深链
 4. 瘦身 `OpportunityDetailContent`；加「查看业务旅程」
-5. 改现有下钻测试；定向跑后端迁移 / 读接口测试和前端详情测试
+5. 客户列表 hover 改旅程预览与进度映射
+6. 改现有下钻 / hover 测试；定向跑后端迁移 / 读接口测试和前端详情测试
