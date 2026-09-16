@@ -72,12 +72,13 @@ import { useDetailContextStack } from '@/composables/useDetailContextStack'
 
 // ==================== Props & Emits ====================
 type CustomerDetailPanel = 'customer-profile' | 'customer-info' | 'followup' | 'journeys'
+type CustomerDetailPanelTarget = CustomerDetailPanel | 'opportunities'
 
 interface Props {
   customerId: string | null
   targetOpportunityId?: string | null
   targetJourneyId?: string | null
-  targetPanel?: CustomerDetailPanel | null
+  targetPanel?: CustomerDetailPanelTarget | null
   visible: boolean
 }
 
@@ -629,7 +630,7 @@ const loadAllData = async (customerId: string): Promise<boolean> => {
     if (isCurrentPanelLoad('followUps')) followUps.value = followUpsData
     if (isCurrentPanelLoad('journeys')) {
       journeys.value = journeysData
-      applyNavigationTarget()
+      if (navigationTargetPending && journeysResult.status === 'fulfilled') applyNavigationTarget(true)
     }
     if (isCurrentPanelLoad('contracts')) contracts.value = contractsData
     if (isCurrentPanelLoad('invoiceTitles')) invoiceTitles.value = invoiceTitlesData.invoice_titles ?? []
@@ -929,21 +930,33 @@ const resolveTargetJourneyId = (): string | null => {
   return matched?.public_id ?? null
 }
 
-const applyNavigationTarget = (): void => {
+const resolveTargetPanel = (panel: CustomerDetailPanelTarget): CustomerDetailPanel =>
+  panel === 'opportunities' ? 'journeys' : panel
+
+let navigationTargetPending = false
+
+const markNavigationTargetPending = (): void => {
+  navigationTargetPending = true
+}
+
+const applyNavigationTarget = (fromJourneysLoad = false): void => {
   const journeyId = resolveTargetJourneyId()
   if (journeyId !== null) {
     handleViewJourney(journeyId)
+    navigationTargetPending = false
     return
   }
 
   if (props.targetOpportunityId !== undefined && props.targetOpportunityId !== null) {
     activePanel.value = 'journeys'
+    if (fromJourneysLoad) navigationTargetPending = false
     return
   }
 
   if (props.targetPanel !== undefined && props.targetPanel !== null) {
-    activePanel.value = props.targetPanel
+    activePanel.value = resolveTargetPanel(props.targetPanel)
   }
+  navigationTargetPending = false
 }
 
 const syncNavigationFromContext = (): void => {
@@ -1430,6 +1443,7 @@ watch(() => props.visible, (visible): void => {
 
   if (visible && props.customerId !== null) {
     resetLocalNavigation()
+    markNavigationTargetPending()
     applyNavigationTarget()
     loadAllData(props.customerId)
   } else if (!visible) {
@@ -1462,6 +1476,7 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
   }
   if (!props.visible || customerId === null || customerId === previousCustomerId) return
   resetLocalNavigation()
+  markNavigationTargetPending()
   applyNavigationTarget()
   selectedContractId.value = null
   loadAllData(customerId)
@@ -1469,6 +1484,7 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
 
 watch(() => [props.targetJourneyId, props.targetOpportunityId], (): void => {
   if (!props.visible) return
+  markNavigationTargetPending()
   applyNavigationTarget()
 })
 
@@ -1476,7 +1492,7 @@ watch(() => props.targetPanel, (panel): void => {
   const hasTargetJourney = resolveTargetJourneyId() !== null
   const hasTargetOpportunity = props.targetOpportunityId !== undefined && props.targetOpportunityId !== null
   if (!props.visible || panel === undefined || panel === null || hasTargetJourney || hasTargetOpportunity) return
-  activePanel.value = panel
+  activePanel.value = resolveTargetPanel(panel)
 })
 onBeforeUnmount(() => {
   profileRefreshPollGeneration += 1

@@ -228,7 +228,22 @@ vi.mock('@/components/panels/DealJourneyDetailContent.vue', () => ({
 
 vi.mock('@/components/dialogs/FollowUpFormDialog.vue', () => ({ default: defineComponent({ name: 'FollowUpFormDialog', setup: () => () => null }) }))
 vi.mock('@/components/dialogs/ContactFormDialog.vue', () => ({ default: defineComponent({ name: 'ContactFormDialog', setup: () => () => null }) }))
-vi.mock('@/components/dialogs/OpportunityFormDialog.vue', () => ({ default: defineComponent({ name: 'OpportunityFormDialog', setup: () => () => null }) }))
+vi.mock('@/components/dialogs/OpportunityFormDialog.vue', () => ({
+  default: defineComponent({
+    name: 'OpportunityFormDialog',
+    props: {
+      open: Boolean,
+      customerId: String,
+    },
+    emits: ['success'],
+    setup: (props, { emit }) => () => h('div', {
+      'data-testid': 'opportunity-dialog',
+      'data-open': String(props.open),
+    }, [
+      h('button', { type: 'button', 'data-testid': 'opportunity-success', onClick: () => emit('success') }, 'success'),
+    ]),
+  }),
+}))
 vi.mock('@/components/dialogs/ContractFormDialog.vue', () => ({ default: defineComponent({ name: 'ContractFormDialog', setup: () => () => null }) }))
 vi.mock('@/components/dialogs/InvoiceTitleFormDialog.vue', () => ({ default: defineComponent({ name: 'InvoiceTitleFormDialog', setup: () => () => null }) }))
 vi.mock('@/components/dialogs/DeploymentInfoFormDialog.vue', () => ({
@@ -717,5 +732,88 @@ describe('CustomerDetailSheet journey drilldown', () => {
     expect(wrapper.get('[data-testid="deal-journeys-panel"]').exists()).toBe(true)
     expect(routerReplace).not.toHaveBeenCalled()
     expect(routerPush).not.toHaveBeenCalled()
+  })
+
+  it('aliases leftover opportunities targetPanel to the journeys list', async () => {
+    const wrapper = mount(CustomerDetailSheet, {
+      props: {
+        customerId: 'cus_test_19',
+        targetPanel: 'opportunities',
+        visible: true,
+      },
+    })
+
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.get('[data-testid="tab-journeys"]').attributes('data-active')).toBe('true')
+    expect(wrapper.find('[data-testid="deal-journeys-panel"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="deal-journey-detail"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('新建商机')
+  })
+
+  it('keeps the targeted journey after a sticky-target detail refresh', async () => {
+    const wrapper = mount(CustomerDetailSheet, {
+      props: {
+        customerId: 'cus_test_19',
+        targetOpportunityId: OPPORTUNITY_PUBLIC_ID,
+        visible: true,
+      },
+    })
+
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.get('[data-testid="deal-journey-detail"]').attributes('data-journey-id')).toBe(JOURNEY_PUBLIC_ID)
+
+    dealJourneyApi.listByCustomer.mockClear()
+    await wrapper.get('[data-testid="detail-refresh"]').trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    expect(dealJourneyApi.listByCustomer).toHaveBeenCalledWith('cus_test_19')
+    const detail = wrapper.get('[data-testid="deal-journey-detail"]')
+    expect(detail.attributes('data-journey-id')).toBe(JOURNEY_PUBLIC_ID)
+    expect(wrapper.find('[data-testid="deal-journeys-panel"]').exists()).toBe(false)
+
+    await wrapper.get('[data-testid="back-to-journeys"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.find('[data-testid="deal-journey-detail"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="deal-journeys-panel"]').exists()).toBe(true)
+  })
+
+  it('stays on the journeys list after back when a sticky-target loadAllData runs', async () => {
+    const wrapper = mount(CustomerDetailSheet, {
+      props: {
+        customerId: 'cus_test_19',
+        targetOpportunityId: OPPORTUNITY_PUBLIC_ID,
+        visible: true,
+      },
+    })
+
+    await flushPromises()
+    await nextTick()
+    await wrapper.get('[data-testid="back-to-journeys"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.find('[data-testid="deal-journeys-panel"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="deal-journeys-panel"]').attributes('data-highlighted-journey-id')).toBe(JOURNEY_PUBLIC_ID)
+
+    const createOpportunityButton = wrapper.findAll('button').find(button => button.text() === '新建商机')
+    expect(createOpportunityButton).toBeDefined()
+    await createOpportunityButton!.trigger('click')
+    await nextTick()
+
+    dealJourneyApi.listByCustomer.mockClear()
+    await wrapper.get('[data-testid="opportunity-success"]').trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    expect(dealJourneyApi.listByCustomer).toHaveBeenCalledWith('cus_test_19')
+    expect(wrapper.find('[data-testid="deal-journey-detail"]').exists()).toBe(false)
+    const panel = wrapper.get('[data-testid="deal-journeys-panel"]')
+    expect(panel.attributes('data-highlighted-journey-id')).toBe(JOURNEY_PUBLIC_ID)
+    expect(wrapper.get('[data-testid="tab-journeys"]').attributes('data-active')).toBe('true')
   })
 })
