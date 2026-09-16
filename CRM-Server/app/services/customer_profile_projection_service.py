@@ -918,7 +918,7 @@ def _build_evidence_registry(
     facts: list[dict[str, object]],
 ) -> list[dict[str, object]]:
     result: list[dict[str, object]] = []
-    seen: set[str] = set()
+    by_key: dict[str, dict[str, object]] = {}
 
     def add(
         key: str,
@@ -928,19 +928,30 @@ def _build_evidence_registry(
         title: object = None,
         snippet: object = None,
     ) -> None:
-        if key in seen:
+        incoming_snippet = snippet if isinstance(snippet, str) else ""
+        incoming_title = _text(title, limit=255) or None
+        existing = by_key.get(key)
+        if existing is not None:
+            existing_snippet = existing.get("snippet") if isinstance(existing.get("snippet"), str) else ""
+            if existing_snippet or not incoming_snippet:
+                return
+            existing["snippet"] = incoming_snippet
+            if existing.get("source_type") == "semantic_evidence":
+                existing["source_type"] = source_type
+                existing["source_id"] = source_id
+                existing["occurred_at"] = occurred_at
+                existing["title"] = incoming_title
             return
-        seen.add(key)
-        result.append(
-            {
-                "evidence_key": key,
-                "source_type": source_type,
-                "source_id": source_id,
-                "occurred_at": occurred_at,
-                "title": _text(title, limit=255) or None,
-                "snippet": snippet if isinstance(snippet, str) else "",
-            }
-        )
+        row = {
+            "evidence_key": key,
+            "source_type": source_type,
+            "source_id": source_id,
+            "occurred_at": occurred_at,
+            "title": incoming_title,
+            "snippet": incoming_snippet,
+        }
+        result.append(row)
+        by_key[key] = row
 
     for item in _json_dict_list(context.get("semantic_evidence"))[:20]:
         key = _text(item.get("evidence_key") or item.get("id") or item.get("source_key"), limit=128)
