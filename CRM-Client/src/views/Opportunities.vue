@@ -38,7 +38,7 @@ import { isOpportunityPublicId } from '@/utils/opportunityRoutes'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
 import { customerDetailRoute } from '@/utils/customerRoutes'
-import { formatOpportunityModuleNames, formatOpportunityProductSummary } from '@/utils/opportunityProduct'
+import { formatOpportunityModuleNames, formatOpportunityProductName, formatOpportunityProductSummary } from '@/utils/opportunityProduct'
 import { normalizePaginatedResponse } from '@/types/pagination'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 import type { FormSuccessPayload } from '@/types/actionOutcome'
@@ -280,6 +280,9 @@ const getOpportunityStageName = (row: OpportunityListResponse): string => {
 
 const getOpportunityModuleNames = (row: OpportunityListResponse): string =>
   formatOpportunityModuleNames(row)
+
+const getOpportunityProductName = (row: OpportunityListResponse): string =>
+  formatOpportunityProductName(row)
 
 const getOpportunityProductSummary = (row: OpportunityListResponse): string =>
   formatOpportunityProductSummary(row)
@@ -944,7 +947,7 @@ watchEffect(() => {
 
       <template #cell-product_name="{ row }">
         <div class="opportunity-product-cell">
-          <span class="opportunity-product-name">{{ getOpportunityProductSummary(row) }}</span>
+          <span class="opportunity-product-name">{{ getOpportunityProductName(row) }}</span>
           <span v-if="getOpportunityModuleNames(row)" class="opportunity-product-modules">
             {{ getOpportunityModuleNames(row) }}
           </span>

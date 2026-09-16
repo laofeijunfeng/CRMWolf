@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatOpportunityModuleNames, formatOpportunityProductSummary } from '../opportunityProduct'
+import { formatOpportunityModuleNames, formatOpportunityProductName, formatOpportunityProductSummary } from '../opportunityProduct'
 
 describe('formatOpportunityProductSummary', () => {
   it('stacks product and module names for list scanning', () => {
@@ -21,5 +21,20 @@ describe('formatOpportunityProductSummary', () => {
       product_modules: [{ name: '基础版' }],
     })).toBe('基础版')
     expect(formatOpportunityProductSummary({}, '未关联产品')).toBe('未关联产品')
+  })
+})
+
+describe('formatOpportunityProductName', () => {
+  it('keeps the product line free of module names', () => {
+    expect(formatOpportunityProductName({
+      product_name: 'Apifox',
+      product_modules: [{ name: '基础版' }],
+    })).toBe('Apifox')
+  })
+
+  it('falls back to the empty label when the product is missing', () => {
+    expect(formatOpportunityProductName({
+      product_modules: [{ name: '基础版' }],
+    })).toBe('-')
   })
 })

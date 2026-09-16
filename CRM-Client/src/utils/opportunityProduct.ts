@@ -11,6 +11,15 @@ export const formatOpportunityModuleNames = (
     .filter(name => name.trim() !== '')
     .join('、')
 
+export const formatOpportunityProductName = (
+  source: OpportunityProductSummarySource,
+  emptyLabel = '-',
+): string => {
+  const productName = source.product_name?.trim() ?? ''
+  if (productName !== '') return productName
+  return emptyLabel
+}
+
 export const formatOpportunityProductSummary = (
   source: OpportunityProductSummarySource,
   emptyLabel = '-',
