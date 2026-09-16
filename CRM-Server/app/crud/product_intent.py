@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Sequence
 
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session
@@ -42,6 +42,29 @@ def format_active_product_catalog(db: Session | None, team_id: int | None) -> tu
     return catalog_text, names_enum
 
 
+def match_catalog_product(products: Sequence[Any], raw: object) -> Any | None:
+    text = str(raw).strip() if raw is not None else ""
+    if not text:
+        return None
+    folded = text.casefold()
+    active = [item for item in products if bool(getattr(item, "is_active", True))]
+    by_id = [item for item in active if str(getattr(item, "public_id", "")) == text]
+    if len(by_id) == 1:
+        return by_id[0]
+    exact = [item for item in active if str(getattr(item, "name", "")).casefold() == folded]
+    if len(exact) == 1:
+        return exact[0]
+    contained = [
+        item
+        for item in active
+        if (name := str(getattr(item, "name", "")).casefold())
+        and (name in folded or folded in name)
+    ]
+    if len(contained) == 1:
+        return contained[0]
+    return None
+
+
 def match_active_product(db: Session, team_id: int, raw: object) -> Product | None:
     text = str(raw).strip() if raw is not None else ""
     if not text:
@@ -49,19 +72,7 @@ def match_active_product(db: Session, team_id: int, raw: object) -> Product | No
     by_id = product_crud.get_by_public_id(db, text, team_id)
     if by_id is not None and bool(by_id.is_active):
         return by_id
-    products = product_crud.list(db, team_id, is_active=True)
-    folded = text.casefold()
-    exact = [product for product in products if product.name.casefold() == folded]
-    if len(exact) == 1:
-        return exact[0]
-    contained = [
-        product
-        for product in products
-        if product.name.casefold() in folded or folded in product.name.casefold()
-    ]
-    if len(contained) == 1:
-        return contained[0]
-    return None
+    return match_catalog_product(product_crud.list(db, team_id, is_active=True), raw)
 
 
 def resolve_writable_product(db: Session, team_id: int, product_public_id: str | None) -> Product:

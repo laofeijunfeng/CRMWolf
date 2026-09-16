@@ -16,8 +16,10 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import Session, joinedload
 
+from app.crud.product import product_crud
+from app.crud.product_intent import product_intent_payload
 from app.models.contract import Contract
-from app.models.customer import Contact, Customer
+from app.models.customer import Contact, Customer, CustomerProduct
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
 from app.models.deal_journey import CustomerDealJourney, CustomerDealJourneyEvent
@@ -61,6 +63,9 @@ class CustomerFact:
     returned_time: str | None
     return_reason: str | None
     loss_reason: str | None
+    product_public_id: str | None = None
+    product_name: str | None = None
+    products: list[JsonObject] = field(default_factory=list)
 
     def to_dict(self) -> JsonObject:
         return {
@@ -78,6 +83,9 @@ class CustomerFact:
             "returned_time": self.returned_time,
             "return_reason": self.return_reason,
             "loss_reason": self.loss_reason,
+            "product_public_id": self.product_public_id,
+            "product_name": self.product_name,
+            "products": self.products,
         }
 
 
@@ -123,6 +131,8 @@ class OpportunityFact:
     created_time: str | None
     actual_closing_date: str | None
     deal_journey_id: int | None = None
+    product_public_id: str | None = None
+    product_name: str | None = None
 
     def to_dict(self) -> JsonObject:
         return {
@@ -144,6 +154,8 @@ class OpportunityFact:
             "created_time": self.created_time,
             "actual_closing_date": self.actual_closing_date,
             "deal_journey_id": self.deal_journey_id,
+            "product_public_id": self.product_public_id,
+            "product_name": self.product_name,
         }
 
 
@@ -278,6 +290,7 @@ class CustomerStrongContext:
     sales_commitments: list[JsonObject] = field(default_factory=list)
     follow_up_task_events: list[JsonObject] = field(default_factory=list)
     source_watermarks: JsonObject = field(default_factory=dict)
+    product_catalog: list[JsonObject] = field(default_factory=list)
 
     def to_dict(self) -> JsonObject:
         return {
@@ -312,6 +325,7 @@ class CustomerIntelligenceContext:
             "semantic_evidence": [item.to_dict() for item in self.evidence_hits],
             "retrieval": self.retrieval_state.to_dict(),
             "source_watermark": self.source_watermark or self.strong_context.source_watermarks,
+            "product_catalog": self.strong_context.product_catalog,
         }
 
     def to_agent_payload(self) -> JsonObject:
@@ -363,6 +377,7 @@ class CustomerIntelligenceContextService:
     ) -> CustomerIntelligenceContext:
         customer = (
             db.query(Customer)
+            .options(joinedload(Customer.product_links).joinedload(CustomerProduct.product))
             .filter(Customer.id == customer_id, Customer.team_id == team_id)
             .first()
         )
@@ -389,6 +404,7 @@ class CustomerIntelligenceContextService:
     ) -> CustomerIntelligenceContext:
         customer = (
             db.query(Customer)
+            .options(joinedload(Customer.product_links).joinedload(CustomerProduct.product))
             .filter(Customer.public_id == customer_public_id, Customer.team_id == team_id)
             .first()
         )
@@ -439,6 +455,7 @@ class CustomerIntelligenceContextService:
         )
         opportunities = (
             db.query(Opportunity)
+            .options(joinedload(Opportunity.product))
             .filter(Opportunity.customer_id == customer.id, Opportunity.team_id == team_id)
             .order_by(Opportunity.status.asc(), Opportunity.last_modified_time.desc())
             .limit(50)
@@ -583,9 +600,14 @@ class CustomerIntelligenceContextService:
             sales_commitments=commitment_payload,
             follow_up_task_events=task_event_payload,
             source_watermarks=watermarks,
+            product_catalog=[
+                {"public_id": item.public_id, "name": item.name, "is_active": True}
+                for item in product_crud.list(db, team_id, is_active=True)
+            ],
         )
 
     def _customer_fact(self, db: Session, customer: Customer) -> CustomerFact:
+        intent = product_intent_payload(customer.product_links)
         return CustomerFact(
             id=int(customer.id),
             public_id=customer.public_id,
@@ -601,6 +623,9 @@ class CustomerIntelligenceContextService:
             returned_time=self._datetime(customer.returned_time),
             return_reason=customer.return_reason,
             loss_reason=customer.loss_reason,
+            product_public_id=intent["product_public_id"],
+            product_name=intent["product_name"],
+            products=list(intent["products"]),
         )
 
     def _contact_fact(self, contact: Contact) -> ContactFact:
@@ -615,6 +640,7 @@ class CustomerIntelligenceContextService:
         )
 
     def _opportunity_fact(self, opportunity: Opportunity) -> OpportunityFact:
+        product = opportunity.product
         return OpportunityFact(
             id=int(opportunity.id),
             name=opportunity.opportunity_name,
@@ -634,6 +660,8 @@ class CustomerIntelligenceContextService:
             created_time=self._datetime(opportunity.created_time),
             actual_closing_date=self._date(opportunity.actual_closing_date),
             deal_journey_id=self._optional_int(opportunity.deal_journey_id),
+            product_public_id=product.public_id if product is not None else None,
+            product_name=product.name if product is not None else None,
         )
 
     def _contract_fact(self, contract: Contract) -> ContractFact:
