@@ -1528,31 +1528,16 @@ watch(approvalPhase, phase => {
                 />
               </template>
             </template>
-
-            <LicensePanel
-              :customer-id="opportunity.customer_id"
-              :customer-name="displayCustomerName"
-              :license-applications="licenseApplications"
-              :deployments="deployments"
-              :load-error="licenseApplicationsLoadError"
-              :show-deployments="false"
-              :show-apply="canCreateLicenseApplication"
-              :can-delete-application="canDeleteLicenseApplication"
-              @add-deployment="handleAddDeployment"
-              @delete-application="handleDeleteLicenseApplication"
-              @apply="handleApplyLicense"
-            />
           </template>
 
           <LicensePanel
-            v-else
             :customer-id="customerId"
             :customer-name="displayCustomerName"
             :license-applications="licenseApplications"
             :deployments="deployments"
             :load-error="licenseApplicationsLoadError"
             :show-deployments="false"
-            :show-apply="canCreateLicenseApplication"
+            :show-apply="canCreateLicenseApplication && hasPrimaryOpportunity"
             :can-delete-application="canDeleteLicenseApplication"
             @add-deployment="handleAddDeployment"
             @delete-application="handleDeleteLicenseApplication"

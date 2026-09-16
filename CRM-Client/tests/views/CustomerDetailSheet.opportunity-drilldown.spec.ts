@@ -30,6 +30,7 @@ const invoiceApi = vi.hoisted(() => ({ getInvoiceTitles: vi.fn() }))
 const deploymentApi = vi.hoisted(() => ({ list: vi.fn() }))
 const handleApiError = vi.hoisted(() => vi.fn())
 const toast = vi.hoisted(() => ({ success: vi.fn(), info: vi.fn() }))
+const journeyDetailRefresh = vi.hoisted(() => vi.fn())
 
 interface Deferred<T> {
   promise: Promise<T>
@@ -212,17 +213,34 @@ vi.mock('@/components/panels/DealJourneyDetailContent.vue', () => ({
       journey: Object as PropType<DealJourney | null>,
       embedded: Boolean,
     },
-    emits: ['back', 'refresh', 'view-contract'],
-    setup: (props, { emit }) => () => h('div', {
-      'data-testid': 'deal-journey-detail',
-      'data-journey-id': String(props.journeyId),
-      'data-embedded': String(props.embedded),
-    }, [
-      props.journey?.name ?? '',
-      h('button', { type: 'button', 'data-testid': 'back-to-journeys', onClick: () => emit('back') }, 'back'),
-      h('button', { type: 'button', 'data-testid': 'detail-refresh', onClick: () => emit('refresh') }, 'refresh'),
-      h('button', { type: 'button', 'data-testid': 'view-journey-contract', onClick: () => emit('view-contract', 701) }, 'view contract'),
-    ]),
+    emits: ['back', 'refresh', 'view-contract', 'create-contract'],
+    setup: (props, { emit, expose }) => {
+      expose({ refresh: journeyDetailRefresh })
+      return () => h('div', {
+        'data-testid': 'deal-journey-detail',
+        'data-journey-id': String(props.journeyId),
+        'data-embedded': String(props.embedded),
+      }, [
+        props.journey?.name ?? '',
+        h('button', { type: 'button', 'data-testid': 'back-to-journeys', onClick: () => emit('back') }, 'back'),
+        h('button', { type: 'button', 'data-testid': 'detail-refresh', onClick: () => emit('refresh') }, 'refresh'),
+        h('button', { type: 'button', 'data-testid': 'view-journey-contract', onClick: () => emit('view-contract', 701) }, 'view contract'),
+        h('button', {
+          type: 'button',
+          'data-testid': 'create-journey-contract',
+          onClick: () => emit('create-contract', {
+            opportunityId: 'opp_test_88',
+            customerId: 'cus_test_19',
+            customerName: '上海测试客户',
+            opportunityName: 'CRM 升级项目',
+            totalAmount: 320000,
+            userCount: 20,
+            licenseType: 'SUBSCRIPTION',
+            subscriptionYears: 1,
+          }),
+        }, 'create contract'),
+      ])
+    },
   }),
 }))
 
@@ -244,7 +262,23 @@ vi.mock('@/components/dialogs/OpportunityFormDialog.vue', () => ({
     ]),
   }),
 }))
-vi.mock('@/components/dialogs/ContractFormDialog.vue', () => ({ default: defineComponent({ name: 'ContractFormDialog', setup: () => () => null }) }))
+vi.mock('@/components/dialogs/ContractFormDialog.vue', () => ({
+  default: defineComponent({
+    name: 'ContractFormDialog',
+    props: {
+      open: Boolean,
+      customerId: String,
+    },
+    emits: ['success', 'update:open'],
+    setup: (props, { emit }) => () => props.open
+      ? h('button', {
+        type: 'button',
+        'data-testid': 'contract-dialog-success',
+        onClick: () => emit('success'),
+      }, 'success')
+      : null,
+  }),
+}))
 vi.mock('@/components/dialogs/InvoiceTitleFormDialog.vue', () => ({ default: defineComponent({ name: 'InvoiceTitleFormDialog', setup: () => () => null }) }))
 vi.mock('@/components/dialogs/DeploymentInfoFormDialog.vue', () => ({
   default: defineComponent({
@@ -815,5 +849,31 @@ describe('CustomerDetailSheet journey drilldown', () => {
     const panel = wrapper.get('[data-testid="deal-journeys-panel"]')
     expect(panel.attributes('data-highlighted-journey-id')).toBe(JOURNEY_PUBLIC_ID)
     expect(wrapper.get('[data-testid="tab-journeys"]').attributes('data-active')).toBe('true')
+  })
+
+  it('refreshes the mounted journey workbench after creating a contract without leaving detail', async () => {
+    const wrapper = mount(CustomerDetailSheet, {
+      props: {
+        customerId: 'cus_test_19',
+        visible: true,
+      },
+    })
+
+    await flushPromises()
+    await wrapper.get('[data-testid="tab-journeys"]').trigger('click')
+    await nextTick()
+    await wrapper.get('[data-testid="view-journey"]').trigger('click')
+    await nextTick()
+
+    journeyDetailRefresh.mockClear()
+    await wrapper.get('[data-testid="create-journey-contract"]').trigger('click')
+    await nextTick()
+    await wrapper.get('[data-testid="contract-dialog-success"]').trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    expect(journeyDetailRefresh).toHaveBeenCalled()
+    expect(wrapper.get('[data-testid="deal-journey-detail"]').attributes('data-journey-id')).toBe(JOURNEY_PUBLIC_ID)
+    expect(wrapper.find('[data-testid="deal-journeys-panel"]').exists()).toBe(false)
   })
 })

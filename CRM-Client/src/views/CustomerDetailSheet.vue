@@ -131,6 +131,12 @@ const selectedJourneyId = ref<string | null>(null)
 const highlightedJourneyId = ref<string | null>(null)
 const restoreFocusJourneyId = ref<string | null>(null)
 
+interface DealJourneyDetailContentExpose {
+  refresh: () => Promise<void> | void
+}
+
+const dealJourneyDetailContentRef = ref<DealJourneyDetailContentExpose | null>(null)
+
 interface ContractOpportunityContext {
   id: string
   opportunity_name: string
@@ -1078,6 +1084,9 @@ const handleContractSuccess = async (): Promise<void> => {
 
   const refreshed = await retryPanel('contracts')
   warnIfCustomerDetailRefreshFailed(refreshed, '合同更新')
+  if (selectedJourneyId.value !== null) {
+    await dealJourneyDetailContentRef.value?.refresh()
+  }
   emit('refresh')
 }
 
@@ -1085,6 +1094,9 @@ const refreshContractRelations = async (): Promise<void> => {
 
   const refreshed = await retryPanel('contracts')
   warnIfCustomerDetailRefreshFailed(refreshed, '合同操作')
+  if (selectedJourneyId.value !== null) {
+    await dealJourneyDetailContentRef.value?.refresh()
+  }
   emit('refresh')
 }
 
@@ -1540,6 +1552,7 @@ onBeforeUnmount(() => {
         >
           <DealJourneyDetailContent
             v-if="selectedJourneyId !== null"
+            ref="dealJourneyDetailContentRef"
             :journey-id="selectedJourneyId"
             :customer-id="customerId ?? ''"
             :journey="selectedJourney"

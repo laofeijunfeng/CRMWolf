@@ -203,7 +203,14 @@ vi.mock('@/components/panels/InvoicesPanel.vue', () => ({
   default: defineComponent({ name: 'InvoicesPanel', setup: () => () => h('div', 'invoices') }),
 }))
 vi.mock('@/components/panels/LicensePanel.vue', () => ({
-  default: defineComponent({ name: 'LicensePanel', setup: () => () => h('div', 'license') }),
+  default: defineComponent({
+    name: 'LicensePanel',
+    props: { customerId: String },
+    setup: (props) => () => h('div', {
+      'data-testid': 'journey-license-panel',
+      'data-customer-id': props.customerId ?? '',
+    }, 'license'),
+  }),
 }))
 
 const JOURNEY_PUBLIC_ID = 'djy_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
@@ -357,5 +364,7 @@ describe('DealJourneyDetailContent fulfillment workbench', () => {
     expect(licenseApplicationApi.list).toHaveBeenCalledWith(CUSTOMER_PUBLIC_ID)
     expect(wrapper.text()).toContain('该旅程暂无主商机')
     expect(wrapper.find('[data-testid="journey-opportunity-actions"]').exists()).toBe(false)
+    const licensePanel = wrapper.get('[data-testid="journey-license-panel"]')
+    expect(licensePanel.attributes('data-customer-id')).toBe(CUSTOMER_PUBLIC_ID)
   })
 })
