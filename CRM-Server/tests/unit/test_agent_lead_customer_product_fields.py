@@ -3,6 +3,8 @@ from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+from contextlib import nullcontext
+
 import pytest
 from pydantic import ValidationError
 from sqlalchemy import create_engine, event
@@ -104,6 +106,27 @@ def test_format_lead_missing_fields_labels_product_not_module():
 def test_format_customer_missing_fields_labels_product_not_module():
     assert format_customer_missing_fields(["product_public_id"]) == "产品"
     assert "模块" not in format_customer_missing_fields(["product_public_id"])
+
+
+class _EmptyQuery:
+    def filter(self, *_args, **_kwargs):
+        return self
+
+    def options(self, *_args, **_kwargs):
+        return self
+
+    def order_by(self, *_args, **_kwargs):
+        return self
+
+    def first(self):
+        return None
+
+    def all(self):
+        return []
+
+
+def _queryable_db() -> SimpleNamespace:
+    return SimpleNamespace(query=lambda *_args, **_kwargs: _EmptyQuery(), begin_nested=nullcontext)
 
 
 def _plan_lead(
@@ -295,3 +318,92 @@ def test_create_lead_follow_up_input_rejects_unmapped_method():
 
     with pytest.raises(ValidationError):
         CreateLeadFollowUpInput(lead_id="lead_001", content="跟进", method="线上会议")
+
+
+def test_plan_lead_follow_up_on_unique_existing_lead_does_not_recreate(monkeypatch):
+    existing = SimpleNamespace(public_id="lead_existing", lead_name="A")
+    monkeypatch.setattr(
+        "app.services.agent.workflow.planning.lead_crud.get_by_name",
+        lambda db, lead_name, team_id: existing,
+    )
+    db = _queryable_db()
+    plan = _plan_lead(
+        SimpleNamespace(
+            **_lead_kwargs(product_public_id="prd_1"),
+            follow_up_content="电话补充跟进",
+            follow_up_method="电话",
+        ),
+        db=db,
+    )
+    assert [command.tool_name for command in plan.commands] == ["create_lead_follow_up"]
+    assert plan.commands[0].payload["lead_id"] == "lead_existing"
+    assert plan.interaction is not None
+    assert plan.interaction.prompt == "确认为已有线索“A”记录跟进吗?"
+
+
+def test_plan_lead_existing_without_follow_up_does_not_recreate(monkeypatch):
+    existing = SimpleNamespace(public_id="lead_existing", lead_name="A")
+    monkeypatch.setattr(
+        "app.services.agent.workflow.planning.lead_crud.get_by_name",
+        lambda db, lead_name, team_id: existing,
+    )
+    db = _queryable_db()
+    from app.services.agent.workflow.planning import WorkflowPlanningError
+
+    with pytest.raises(WorkflowPlanningError, match="已存在"):
+        _plan_lead(SimpleNamespace(**_lead_kwargs(product_public_id="prd_1")), db=db)
+
+
+@pytest.mark.asyncio
+async def test_plan_customer_activity_on_unique_existing_customer_does_not_recreate(monkeypatch):
+    existing = SimpleNamespace(public_id="cust_existing", account_name="A")
+    monkeypatch.setattr(
+        "app.services.agent.workflow.planning.customer_crud.get_by_name",
+        lambda db, account_name, team_id: existing,
+    )
+    db = _queryable_db()
+
+    async def _evaluate_with_metadata(*_args, **_kwargs):
+        from app.services.agent.quality import AgentFollowUpQualityEnvelope
+        from app.services.agent.schemas import AgentFollowUpQualityResult
+
+        return AgentFollowUpQualityEnvelope(
+            result=AgentFollowUpQualityResult(
+                score=80,
+                passed=True,
+                reason="测试质量评估结果。",
+                next_action_status="CLEAR",
+            ),
+            quality_source="test",
+            model="test-model",
+        )
+
+    monkeypatch.setattr(
+        "app.services.agent.workflow.planning.agent_follow_up_quality_evaluator.evaluate_with_metadata",
+        _evaluate_with_metadata,
+    )
+    plan = await _plan_customer(
+        SimpleNamespace(
+            **_customer_kwargs(product_public_id="prd_1"),
+            follow_up_content="电话补充跟进",
+            follow_up_method="微信",
+        ),
+        db=db,
+    )
+    assert [command.tool_name for command in plan.commands] == ["create_customer_activity"]
+    assert plan.commands[0].payload["customer_id"] == "cust_existing"
+    assert plan.interaction is not None
+
+
+@pytest.mark.asyncio
+async def test_plan_customer_existing_without_activity_does_not_recreate(monkeypatch):
+    existing = SimpleNamespace(public_id="cust_existing", account_name="A")
+    monkeypatch.setattr(
+        "app.services.agent.workflow.planning.customer_crud.get_by_name",
+        lambda db, account_name, team_id: existing,
+    )
+    db = _queryable_db()
+    from app.services.agent.workflow.planning import WorkflowPlanningError
+
+    with pytest.raises(WorkflowPlanningError, match="已存在"):
+        await _plan_customer(SimpleNamespace(**_customer_kwargs(product_public_id="prd_1")), db=db)
