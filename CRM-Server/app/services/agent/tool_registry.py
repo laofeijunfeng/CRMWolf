@@ -12,6 +12,7 @@ try:
 except Exception:  # pragma: no cover - keeps imports resilient in stripped test envs
     StructuredTool = None  # type: ignore[assignment]
 
+from app.models.lead import FollowUpMethod
 from app.services.agent.guardrails import AgentToolExecutionPolicy, AgentToolGuardrails, agent_tool_guardrails
 from app.services.agent.tools import CRMAgentToolService
 from app.services.agent.tools.base import AgentToolContext, AgentToolResult
@@ -281,7 +282,7 @@ class CreateCustomerInput(BaseModel):
 class CreateLeadFollowUpInput(BaseModel):
     lead_id: LeadIdentifier = Field(..., description="线索对外ID；兼容历史任务中的数据库ID")
     content: str = Field(..., min_length=1)
-    method: str = "其他"
+    method: FollowUpMethod = FollowUpMethod.OTHER
     next_action: Optional[str] = None
     next_follow_time: AgentDatetimeText = None
     idempotency_suffix: Optional[str] = None

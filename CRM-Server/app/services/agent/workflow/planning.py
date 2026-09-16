@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from app.models.customer import Customer
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_opportunity_suggestion_job import CustomerOpportunitySuggestionJob
+from app.models.lead import FollowUpMethod
 from app.services.acquisition_source_service import resolve_write_fields_for_ai
 from app.services.agent import business_rules
 from app.services.agent.quality import (
@@ -61,6 +62,11 @@ from app.services.agent.workflow.resources import (
     WorkflowCustomerCandidate,
     WorkflowCustomerResolver,
     WorkflowResourceResolutionError,
+)
+from app.services.agent.workflow.write_enums import (
+    UnmappedLeadFollowUpMethod,
+    canonicalize_company_scale,
+    canonicalize_lead_follow_up_method,
 )
 from app.services.customer_activity_contracts import (
     CustomerActivitySubmissionSource,
@@ -602,6 +608,11 @@ class CRMWorkflowPlanner:
             team_id=team_id,
             fallback_text=user_message,
         )
+        scale = canonicalize_company_scale(lead.get("company_scale"))
+        if scale is None:
+            lead.pop("company_scale", None)
+        else:
+            lead["company_scale"] = scale
         missing_fields = business_rules.missing_lead_fields(lead)
         if missing_fields:
             raise self._needs_text(
@@ -631,9 +642,35 @@ class CRMWorkflowPlanner:
                 cancelled_text=f"已取消创建线索“{lead_name}”。",
             )
 
+        try:
+            method = canonicalize_lead_follow_up_method(
+                getattr(lead_model, "follow_up_method", None)
+            )
+        except UnmappedLeadFollowUpMethod:
+            raise WorkflowPlanningNeedsInput(
+                WorkflowInteraction(
+                    interaction_id=f"int_{workflow_id.removeprefix('wf_')}_lead_follow_up_method",
+                    interaction_type="choice",
+                    business_action="select_lead_follow_up_method",
+                    title="选择跟进方式",
+                    prompt="请选择线索跟进方式。",
+                    options=[
+                        WorkflowInteractionOption(
+                            value=item.value,
+                            label=item.value,
+                            metadata={"follow_up_method": item.value},
+                        )
+                        for item in FollowUpMethod
+                    ],
+                    selection_mode="single",
+                    min_selections=1,
+                    max_selections=1,
+                    submit_label="继续",
+                )
+            )
         follow_up_payload: dict[str, object] = {
             "content": follow_up_content.strip(),
-            "method": getattr(lead_model, "follow_up_method", None) or "其他",
+            "method": method.value,
         }
         next_action = getattr(lead_model, "next_action", None)
         if isinstance(next_action, str) and next_action.strip():
@@ -704,6 +741,11 @@ class CRMWorkflowPlanner:
         }
         flat_customer = resolve_write_fields_for_ai(flat_customer, db, team_id)
         flat_customer = self._resolve_product_public_id(flat_customer, db=db, team_id=team_id)
+        scale = canonicalize_company_scale(flat_customer.get("company_scale"))
+        if scale is None:
+            flat_customer.pop("company_scale", None)
+        else:
+            flat_customer["company_scale"] = scale
         missing_fields = business_rules.missing_customer_fields(flat_customer)
         if missing_fields:
             raise self._needs_text(
@@ -2584,6 +2626,11 @@ class CRMWorkflowPlanner:
                 semantic.follow_up = semantic.follow_up.model_copy(
                     update={"next_action": supplement.content}
                 )
+            elif business_action == "select_lead_follow_up_method":
+                if semantic.lead is not None:
+                    semantic.lead = semantic.lead.model_copy(
+                        update={"follow_up_method": supplement.content}
+                    )
             elif business_action == "supplement_follow_up_quality":
                 return None
         return semantic

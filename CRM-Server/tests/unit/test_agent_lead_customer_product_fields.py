@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
 from app.crud.product_intent import EMPTY_CATALOG_MESSAGE
+from app.models.lead import FollowUpMethod
 from app.models.product import Product, ProductModule
 from app.services.agent.business_rules import (
     format_customer_missing_fields,
@@ -208,3 +209,54 @@ async def test_plan_customer_empty_catalog_appends_admin_copy(db):
     assert EMPTY_CATALOG_MESSAGE in prompt
     assert "product_public_id" not in prompt
     assert "模块" not in prompt
+
+
+def test_plan_lead_defaults_blank_follow_up_method_to_other():
+    plan = _plan_lead(
+        SimpleNamespace(**_lead_kwargs(product_public_id="prd_1"), follow_up_content="已电话沟通"),
+        db=object(),
+    )
+    assert plan.commands[1].payload["method"] == FollowUpMethod.OTHER.value
+
+
+def test_plan_lead_maps_online_meeting_method_to_other():
+    plan = _plan_lead(
+        SimpleNamespace(
+            **_lead_kwargs(product_public_id="prd_1"),
+            follow_up_content="开了线上会议",
+            follow_up_method="线上会议",
+        ),
+        db=object(),
+    )
+    assert plan.commands[1].payload["method"] == FollowUpMethod.OTHER.value
+
+
+def test_plan_lead_unmapped_method_asks_for_closed_choice():
+    with pytest.raises(WorkflowPlanningNeedsInput) as exc:
+        _plan_lead(
+            SimpleNamespace(
+                **_lead_kwargs(product_public_id="prd_1"),
+                follow_up_content="发了传真",
+                follow_up_method="传真",
+            ),
+            db=object(),
+        )
+    interaction = exc.value.interaction
+    assert interaction.interaction_type == "choice"
+    assert interaction.business_action == "select_lead_follow_up_method"
+    assert [option.value for option in interaction.options] == ["电话", "微信", "拜访", "邮件", "其他"]
+
+
+def test_plan_lead_maps_tilde_scale_to_one_to_fifty():
+    plan = _plan_lead(
+        SimpleNamespace(**_lead_kwargs(product_public_id="prd_1", company_scale="10~29")),
+        db=object(),
+    )
+    assert plan.commands[0].payload["lead"]["company_scale"] == "1-50人"
+
+
+def test_create_lead_follow_up_input_rejects_unmapped_method():
+    from app.services.agent.tool_registry import CreateLeadFollowUpInput
+
+    with pytest.raises(ValidationError):
+        CreateLeadFollowUpInput(lead_id="lead_001", content="跟进", method="线上会议")
