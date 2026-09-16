@@ -167,7 +167,7 @@ async def test_resolver_default_budget_matches_provider_latency_budget(monkeypat
 
     await resolver.resolve("查询我接下来要做什么", model_config=_config(), runtime=RootRuntimeContext())
 
-    assert budgets == [60.0]
+    assert budgets == [90.0]
 
 
 class RaisingModelFactory:

@@ -1097,7 +1097,7 @@ async def test_root_uses_structured_decision_model_with_authoritative_context() 
             "temperature": 0.0,
             "max_retries": 0,
             "streaming": True,
-            "stream_chunk_timeout": 45.0,
+            "stream_chunk_timeout": 75.0,
             "max_tokens": 1024,
         }
     ]
@@ -1107,6 +1107,47 @@ async def test_root_uses_structured_decision_model_with_authoritative_context() 
     assert payload["input"] == {"type": "text", "text": "帮我看看这个客户"}
     assert payload["selected_entity_ref"]["display_name"] == "广州睿狐科技有限公司"
     assert payload["context_snapshot"] == {}
+
+
+async def test_root_decision_default_budget_covers_grok_structured_latency(monkeypatch) -> None:
+    budgets: list[float] = []
+
+    class RecordingTimeout:
+        def __init__(self, timeout: float) -> None:
+            budgets.append(timeout)
+
+        async def __aenter__(self) -> RecordingTimeout:
+            return self
+
+        async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> bool:
+            return False
+
+    from app.services.agent import structured_model_call as structured_model_call_module
+
+    monkeypatch.setattr(structured_model_call_module.asyncio, "timeout", RecordingTimeout)
+    structured_model = RecordingStructuredDecisionModel(query_decision())
+    chat_model = RecordingDecisionChatModel(structured_model)
+    classifier = LangChainRootDecisionClassifier(chat_model_factory=lambda **kwargs: chat_model)
+
+    await classifier.classify(
+        turn=RootTurnInput(
+            team_id=1,
+            user_id=1,
+            session_id=556,
+            client_request_id="req_root_budget",
+            input=TextTurnInput(type="text", text="录入 Hifox 线索"),
+        ),
+        context=RootContextSnapshot(),
+        runtime=RootRuntimeContext(
+            root_model_config=RootDecisionModelConfig(
+                api_host="https://ai.example.com/v1",
+                api_key="test-key",
+                model="grok-4.6",
+            )
+        ),
+    )
+
+    assert budgets == [90.0]
 
 
 async def test_rejected_structured_interaction_returns_typed_failure_without_model_or_workflow() -> None:
