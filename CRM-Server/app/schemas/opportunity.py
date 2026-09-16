@@ -190,10 +190,9 @@ class OpportunityUpdate(BaseModel):
 class OpportunityDealJourneyUpdate(BaseModel):
     """显式调整商机当前业务旅程；传 null 表示解除关联。"""
 
-    deal_journey_id: int | None = Field(
+    deal_journey_id: str | None = Field(
         ...,
-        ge=1,
-        description="目标业务旅程内部ID；传 null 表示解除当前关联",
+        description="目标业务旅程对外ID；传 null 表示解除当前关联",
     )
     expected_version: int | None = Field(
         None,
@@ -234,7 +233,7 @@ class OpportunityProductModuleInfo(BaseModel):
 
 class OpportunityResponse(BaseModel):
     id: str = Field(..., description="商机对外ID")
-    deal_journey_id: int | None = Field(None, description="当前业务旅程ID")
+    deal_journey_id: Optional[str] = Field(None, description="当前业务旅程对外ID")
     public_id: str = Field(..., description="商机对外ID")
     opportunity_number: str = Field(..., description="商机编号")
     opportunity_name: str = Field(..., description="商机名称（项目名称）")

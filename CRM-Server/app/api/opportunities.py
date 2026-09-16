@@ -24,6 +24,7 @@ from app.core.deps import (
     require_permission,
 )
 from app.crud.customer import customer_crud
+from app.crud.deal_journey import deal_journey_crud
 from app.crud.opportunity import opportunity_crud
 from app.models.approval import ApprovalStatus
 from app.schemas.common import PaginatedResponse
@@ -49,6 +50,7 @@ from app.services.customer_business_object_intelligence_service import (
 )
 from app.models.outbound_notification_job import OutboundNotificationEventType
 from app.services.outbound_notification_job_service import outbound_notification_job_service
+from app.utils.public_id import is_deal_journey_public_id
 
 router = APIRouter(prefix="/v1/opportunities", tags=["商机管理"])
 
@@ -120,6 +122,34 @@ def _customer_public_id(db: Session, customer_id: Optional[int], team_id: Option
     return customer.public_id if customer else None
 
 
+def _deal_journey_public_id(
+    db: Session,
+    journey_id: Optional[int],
+    team_id: Optional[int],
+    *,
+    journey_public_id: Optional[str] = None,
+) -> Optional[str]:
+    if journey_public_id is not None:
+        return journey_public_id
+    if journey_id is None or team_id is None:
+        return None
+    journey = deal_journey_crud.get_by_id(db, int(journey_id), int(team_id))
+    return journey.public_id if journey else None
+
+
+def _deal_journey_public_id_map(
+    db: Session,
+    *,
+    team_id: int,
+    journey_ids: list[int],
+) -> dict[int, str]:
+    unique_ids = list(dict.fromkeys(journey_id for journey_id in journey_ids if journey_id is not None))
+    if not unique_ids:
+        return {}
+    journeys = deal_journey_crud.list_by_ids(db, team_id=team_id, journey_ids=unique_ids)
+    return {int(journey.id): journey.public_id for journey in journeys}
+
+
 def _customer_info_dict(customer) -> Optional[dict]:
     if not customer:
         return None
@@ -154,11 +184,22 @@ def _opportunity_product_payload(opportunity) -> dict:
     }
 
 
-def _opportunity_response_dict(db: Session, opportunity, team_id: Optional[int]) -> dict:
+def _opportunity_response_dict(
+    db: Session,
+    opportunity,
+    team_id: Optional[int],
+    *,
+    journey_public_id: Optional[str] = None,
+) -> dict:
     payload = {
         "id": opportunity.public_id,
         "public_id": opportunity.public_id,
-        "deal_journey_id": opportunity.deal_journey_id,
+        "deal_journey_id": _deal_journey_public_id(
+            db,
+            opportunity.deal_journey_id,
+            team_id,
+            journey_public_id=journey_public_id,
+        ),
         "opportunity_number": opportunity.opportunity_number,
         "opportunity_name": opportunity.opportunity_name,
         "customer_id": _customer_public_id(db, opportunity.customer_id, team_id),
@@ -369,6 +410,11 @@ def get_opportunities(
     ))
     
     result = []
+    journey_public_ids = _deal_journey_public_id_map(
+        db,
+        team_id=team_id,
+        journey_ids=[opp.deal_journey_id for opp in opportunities],
+    )
     for opp in opportunities:
         customer = customer_crud.get_by_id(db, opp.customer_id, team_id)
         
@@ -409,7 +455,7 @@ def get_opportunities(
         opp_dict = {
             "id": opp.public_id,
             "public_id": opp.public_id,
-            "deal_journey_id": opp.deal_journey_id,
+            "deal_journey_id": journey_public_ids.get(opp.deal_journey_id) if opp.deal_journey_id else None,
             "opportunity_number": opp.opportunity_number,
             "opportunity_name": opp.opportunity_name,
             "customer_id": customer.public_id if customer else None,
@@ -494,8 +540,12 @@ def get_available_opportunities_for_contract(
     customer = check_customer_view_permission(customer_id, team_id, current_user, db)
 
     opportunities = opportunity_crud.get_available_for_contract(db, customer.id, team_id)
-    
     result = []
+    journey_public_ids = _deal_journey_public_id_map(
+        db,
+        team_id=team_id,
+        journey_ids=[opp.deal_journey_id for opp in opportunities],
+    )
     for opp in opportunities:
         customer_info = None
         if opp.customer_id:
@@ -532,7 +582,7 @@ def get_available_opportunities_for_contract(
         result.append(OpportunityListResponse(**{
             "id": opp.public_id,
             "public_id": opp.public_id,
-            "deal_journey_id": opp.deal_journey_id,
+            "deal_journey_id": journey_public_ids.get(opp.deal_journey_id) if opp.deal_journey_id else None,
             "opportunity_number": opp.opportunity_number,
             "opportunity_name": opp.opportunity_name,
             "customer_id": customer_info["id"] if customer_info else None,
@@ -641,7 +691,7 @@ def get_opportunity(
     result = {
         "id": opportunity.public_id,
         "public_id": opportunity.public_id,
-        "deal_journey_id": opportunity.deal_journey_id,
+        "deal_journey_id": _deal_journey_public_id(db, opportunity.deal_journey_id, team_id),
         "opportunity_number": opportunity.opportunity_number,
         "opportunity_name": opportunity.opportunity_name,
         "customer_id": customer.public_id if customer else None,
@@ -779,8 +829,22 @@ async def update_opportunity_deal_journey(
         deal_journey_service,
     )
 
+    resolved_deal_journey_id: int | None = None
+    if journey_update.deal_journey_id is not None:
+        if not is_deal_journey_public_id(journey_update.deal_journey_id):
+            raise HTTPException(status_code=404, detail="业务旅程不存在")
+        target = deal_journey_crud.get_by_public_id(
+            db,
+            journey_update.deal_journey_id,
+            db_opportunity.team_id,
+            customer_id=db_opportunity.customer_id,
+        )
+        if target is None:
+            raise HTTPException(status_code=404, detail="业务旅程不存在")
+        resolved_deal_journey_id = int(target.id)
+
     try:
-        if journey_update.deal_journey_id is None:
+        if resolved_deal_journey_id is None:
             deal_journey_service.detach_opportunity(
                 db,
                 db_opportunity,
@@ -791,7 +855,7 @@ async def update_opportunity_deal_journey(
             deal_journey_service.associate_opportunity(
                 db,
                 db_opportunity,
-                deal_journey_id=journey_update.deal_journey_id,
+                deal_journey_id=resolved_deal_journey_id,
                 actor_id=str(current_user.id),
                 expected_version=journey_update.expected_version,
             )
@@ -897,7 +961,9 @@ async def move_opportunity_stage(
     result = {
         "id": updated_opportunity.public_id,
         "public_id": updated_opportunity.public_id,
-        "deal_journey_id": updated_opportunity.deal_journey_id,
+        "deal_journey_id": _deal_journey_public_id(
+            db, updated_opportunity.deal_journey_id, updated_opportunity.team_id
+        ),
         "opportunity_number": updated_opportunity.opportunity_number,
         "opportunity_name": updated_opportunity.opportunity_name,
         "customer_id": _customer_public_id(db, updated_opportunity.customer_id, updated_opportunity.team_id),
