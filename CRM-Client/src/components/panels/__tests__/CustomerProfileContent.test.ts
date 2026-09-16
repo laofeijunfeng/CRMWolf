@@ -91,7 +91,8 @@ describe('CustomerProfileContent', () => {
             status: '已提出',
             evidence_refs: ['activity:10']
           }]
-        }
+        },
+        business_status_rows: [{ dimension: '商业推进', current: '1 条跟进中的商机' }]
       },
       current_journeys: [{
         id: 'journey-1',
@@ -246,7 +247,8 @@ describe('CustomerProfileContent', () => {
         demand_background: {
           summary: '希望先完成验证，再评估采购。',
           items: [{ statement: '需要支持多站点部署。' }]
-        }
+        },
+        business_status_rows: [{ dimension: '商业推进', current: '1 条跟进中的商机' }]
       },
       current_journeys: [{
         id: 'journey-1',
@@ -303,5 +305,28 @@ describe('CustomerProfileContent', () => {
 
     expect(wrapper.find('.evidence-stub').text()).toBe('[1]')
     expect(wrapper.text()).not.toContain('依据：')
+  })
+
+  it('does not reuse demand statements as current business status', () => {
+    const wrapper = mountProfile(baseProfile({
+      current_situation: {
+        demand_background: {
+          summary: '跟进记录显示客户对 Hifox 感兴趣，公司层面使用需要私有化部署。',
+          items: [{
+            topic: 'private_solution',
+            statement: '跟进记录显示客户对 Hifox 感兴趣，公司层面使用需要私有化部署。',
+          }]
+        }
+      },
+      current_journeys: [],
+      important_changes: [],
+      long_term_context: {},
+      follow_up_process: [],
+      recorded_follow_ups: []
+    }))
+    const text = wrapper.text()
+    expect(text).toContain('项目需求背景')
+    expect(text).toContain('Hifox')
+    expect(text).not.toContain('当前业务状态')
   })
 })

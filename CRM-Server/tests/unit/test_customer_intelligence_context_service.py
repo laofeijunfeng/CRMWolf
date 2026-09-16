@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.database import Base
 from app.models.contract import Contract
-from app.models.customer import Contact, Customer
+from app.models.customer import Contact, Customer, CustomerProduct
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
 from app.models.customer_fact import CustomerFact, CustomerFactRevision, CustomerFactSource
@@ -17,6 +17,7 @@ from app.models.deal_journey import CustomerDealJourney, CustomerDealJourneyEven
 from app.models.opportunity import Opportunity
 from app.models.payment import PaymentPlan, PaymentRecord
 from app.models.sales_commitment import FollowUpTask, FollowUpTaskEvent, SalesCommitment
+from app.models.product import Product, ProductModule
 from app.services.customer_fact_service import CustomerFactInput, CustomerFactSourceInput, customer_fact_service
 from app.services.customer_intelligence_context_service import (
     CustomerIntelligenceContextNotFound,
@@ -138,6 +139,9 @@ def _session():
             CustomerFactSource.__table__,
             CustomerFactRevision.__table__,
             Industry.__table__,
+            Product.__table__,
+            ProductModule.__table__,
+            CustomerProduct.__table__,
         ],
     )
     session_factory = sessionmaker(bind=engine)
@@ -171,6 +175,18 @@ def _seed_customer_context(db: Session) -> Customer:
         creator_id="9",
     )
     db.add(customer)
+    db.add(
+        Product(
+            id=801,
+            public_id="prd_hifox",
+            team_id=2,
+            code="HIFOX",
+            name="Hifox",
+            is_active=True,
+            created_by="9",
+        )
+    )
+    db.add(CustomerProduct(customer_id=101, product_id=801, team_id=2))
     db.flush()
     db.add(
         Contact(
@@ -204,6 +220,7 @@ def _seed_customer_context(db: Session) -> Customer:
             creator_id="9",
             status=0,
             approval_phase="approved",
+            product_id=801,
         )
     )
     db.add(
@@ -311,6 +328,13 @@ def test_customer_intelligence_context_combines_strong_facts_and_semantic_eviden
         assert payload["strong_context"]["customer"]["account_name"] == "越秀金融"
         assert payload["strong_context"]["customer_facts"][0]["content"] == "客户已经进入 POC，需要准备试用环境。"
         assert payload["strong_context"]["opportunities"][0]["stage"] == "POC"
+        customer = payload["strong_context"]["customer"]
+        assert customer["product_public_id"] == "prd_hifox"
+        assert customer["product_name"] == "Hifox"
+        assert customer["products"] == [{"public_id": "prd_hifox", "name": "Hifox"}]
+        assert payload["strong_context"]["opportunities"][0]["product_public_id"] == "prd_hifox"
+        assert payload["strong_context"]["opportunities"][0]["product_name"] == "Hifox"
+        assert payload["product_catalog"] == [{"public_id": "prd_hifox", "name": "Hifox", "is_active": True}]
         assert payload["strong_context"]["payment_records"][0]["actual_amount"] == "30000.00"
         assert payload["semantic_evidence"][0]["text"] == "张总确认本周开始 POC。"
         assert payload["retrieval"]["status"] == "ok"
@@ -428,6 +452,29 @@ def test_customer_intelligence_context_marks_low_confidence_evidence() -> None:
         assert payload["retrieval"]["returned_count"] == 0
         assert payload["retrieval"]["dropped_count"] == 1
         assert payload["retrieval"]["top_score"] == 0.21
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_customer_intelligence_context_empty_product_is_null_list() -> None:
+    engine, db = _session()
+    service = CustomerIntelligenceContextService(
+        embedding_service=FakeEmbeddingService(),
+        qdrant_index_service=FakeQdrantIndexService(),
+    )
+    try:
+        _seed_industries(db)
+        customer = Customer(
+            id=101, team_id=2, account_name="无产品客户", city="未知", creator_id="9",
+        )
+        db.add(customer)
+        db.commit()
+        payload = service.build_context(db, team_id=2, customer_id=101).to_dict()
+        assert payload["strong_context"]["customer"]["product_public_id"] is None
+        assert payload["strong_context"]["customer"]["product_name"] is None
+        assert payload["strong_context"]["customer"]["products"] == []
+        assert payload["product_catalog"] == []
     finally:
         db.close()
         engine.dispose()

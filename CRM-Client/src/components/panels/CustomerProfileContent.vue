@@ -273,43 +273,16 @@ const journeyTimeline = computed<JourneyTimelineRow[]>(() => {
     .slice(-20)
 })
 
-const currentAssessmentRows = computed(() => {
-  const configured = arrayValue(currentSituation.value['business_status_rows'])
+const currentAssessmentRows = computed(() =>
+  arrayValue(currentSituation.value['business_status_rows'])
     .map((item) => ({
       dimension: stringValue(item['dimension']) || stringValue(item['label']),
       current: stringValue(item['current']) || stringValue(item['status']),
       judgement: stringValue(item['judgement']) || stringValue(item['assessment'])
     }))
     .filter((row) => row.dimension && (row.current || row.judgement))
-  if (configured.length > 0) return configured
+)
 
-  const topicLabels: Record<string, string> = {
-    usage_expansion: '技术采用',
-    internal_validation: '决策关系',
-    reporting: '需求匹配',
-    procurement: '商业推进'
-  }
-  const rows = demandItems.value.map((item) => {
-    const topic = stringValue(item['topic'])
-    return {
-      dimension: topicLabels[topic] ?? '需求匹配',
-      current: stringValue(item['statement']),
-      judgement: stringValue(item['status'])
-    }
-  })
-  const dimensions = new Set(rows.map((row) => row.dimension))
-  if (!dimensions.has('商业推进') && opportunities.value.length > 0) {
-    rows.push({
-      dimension: '商业推进',
-      current: `${opportunities.value.length} 条商机记录${currentStage.value ? `，当前主要处于“${currentStage.value}”阶段` : ''}`,
-      judgement: ''
-    })
-  }
-  if (!dimensions.has('授权连续性') && licenseLabel.value) {
-    rows.push({ dimension: '授权连续性', current: licenseLabel.value, judgement: '' })
-  }
-  return rows.filter((row) => row.current || row.judgement)
-})
 
 const dateSortValue = (value: unknown): number => {
   const timestamp = new Date(stringValue(value)).getTime()

@@ -48,7 +48,11 @@ _FORBIDDEN_STATEMENT_ROLES = frozenset({"sales_guidance", "sales_advice", "recom
 class CustomerProfileProjectionValidator:
     """Validate a draft without changing or enriching its content."""
 
-    def validate_draft(self, draft: CustomerProfileProjectionDraft) -> CustomerProfileSections:
+    def validate_draft(
+        self,
+        draft: CustomerProfileProjectionDraft,
+        inherited_sections: object = None,
+    ) -> CustomerProfileSections:
         try:
             sections = CustomerProfileSections.model_validate(draft.sections)
         except Exception as exc:  # Pydantic's detailed error must not cross the API boundary.
@@ -64,6 +68,16 @@ class CustomerProfileProjectionValidator:
         for name in ("fact_watermark", "journey_watermark", "task_watermark", "commitment_watermark"):
             if int(getattr(draft, name, 0)) < 0:
                 raise CustomerProfileProjectionValidationError(f"{name} 不能为负数")
+        from app.services.customer_profile_claim_grounding import assert_claims_grounded
+
+        names = draft.source_watermark.get("product_catalog_names") if isinstance(draft.source_watermark, dict) else []
+        inherited_payload = inherited_sections if isinstance(inherited_sections, dict) else None
+        assert_claims_grounded(
+            sections,
+            evidence_refs=draft.evidence_refs,
+            product_catalog_names=[str(name) for name in names or [] if str(name).strip()],
+            inherited_payload=inherited_payload,
+        )
         return sections
 
     def _evidence_registry(self, evidence_refs: object) -> set[str]:
