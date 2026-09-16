@@ -769,10 +769,12 @@ class AgentApplicationService:
 
     @staticmethod
     def _action_claim_succeeded(dispatch: RootDispatchResult) -> bool:
-        return (
-            isinstance(dispatch, WorkflowDispatchResult)
-            and dispatch.workflow_result.status in {"WAITING", "COMPLETED", "CANCELLED", "SKIPPED"}
-        )
+        if not isinstance(dispatch, WorkflowDispatchResult):
+            return False
+        status = dispatch.workflow_result.status
+        if status in {"WAITING", "COMPLETED", "CANCELLED", "SKIPPED"}:
+            return True
+        return status == "FAILED" and dispatch.workflow_result.retryable is False
 
     def _settle_action_claim(
         self,

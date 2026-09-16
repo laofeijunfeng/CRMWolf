@@ -1153,6 +1153,69 @@ async def test_failed_workflow_releases_root_action_claim(
 
 
 @pytest.mark.asyncio
+async def test_non_retryable_failed_workflow_completes_root_action_claim(
+    application_harness,
+) -> None:
+    service, session_factory = application_harness
+    session_id, action_id = await _start_interaction(service)
+    action_repository = AgentUIActionRepository()
+
+    def claim_action(turn: RootTurnInput, runtime: RootRuntimeContext) -> None:
+        action_repository.begin_consumption(
+            runtime.db,
+            public_id=action_id,
+            team_id=turn.team_id,
+            user_id=turn.user_id,
+            session_id=turn.session_id,
+            client_request_id=turn.client_request_id,
+        )
+
+    service.root_orchestrator = _FakeRootOrchestrator(
+        WorkflowDispatchResult(
+            decision=_decision("WORKFLOW", relation="CONTINUE_TASK"),
+            workflow_result=WorkflowFailedResult(
+                workflow_ref=WorkflowRef(workflow_id="wf_create_lead"),
+                code="WORKFLOW_CRM_API_REJECTED",
+                message=(
+                    "已创建线索「上海云图科技」，但首次跟进没写上：跟进方式无效。\n"
+                    "请直接为这条线索补充跟进（电话 / 微信 / 拜访 / 邮件 / 其他），不要再创建同一条线索。"
+                ),
+                retryable=False,
+                progress=execution_progress(
+                    confirmation_required=True,
+                    has_supplements=False,
+                    outcome="FAILED",
+                ),
+            ),
+            action_claim_id=action_id,
+        ),
+        on_dispatch=claim_action,
+    )
+
+    await _collect(
+        service,
+        request_input=InteractionSubmissionInput(
+            type="interaction_submission",
+            action_id=action_id,
+            values={"choice": "confirm"},
+        ),
+        client_request_id=UUID("aaa2e0e8-86d4-4d6c-a1b0-6490b2bf12be"),
+        session_id=session_id,
+    )
+
+    with session_factory() as db:
+        action = db.query(AgentUIAction).filter_by(public_id=action_id).one()
+        assert action.status == AgentUIActionStatus.CONSUMED
+        assert action.submitted_values == {"choice": "confirm"}
+        assert action.result_message_id is not None
+        assert action_repository.list_active_workflow_continuations(
+            db,
+            team_id=1,
+            user_id=2,
+            session_id=session_id,
+        ) == []
+
+@pytest.mark.asyncio
 async def test_entity_action_dispatch_exception_releases_prepared_claim(
     application_harness,
     monkeypatch,
