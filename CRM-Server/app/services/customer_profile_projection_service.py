@@ -748,6 +748,11 @@ class CustomerProfileProjectionService:
                     "items": demand_items,
                 },
                 "business_status": _business_status(active_journeys, opportunities, contracts, payment_records),
+                "business_status_rows": _business_status_rows(
+                    active_journeys=active_journeys,
+                    opportunities=opportunities,
+                    contracts=contracts,
+                ),
                 "latest_change": important_changes[0] if important_changes else None,
             },
             current_journeys=active_journeys,
@@ -1665,6 +1670,30 @@ def _current_situation_from_business_state(
     name = _text(customer.get("account_name"), limit=255)
     prefix = f"{name}：" if name else ""  # noqa: RUF001
     return prefix + "；".join(fragments[:4]) + "。"  # noqa: RUF001
+
+
+def _business_status_rows(*, active_journeys, opportunities, contracts) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    stages = list(dict.fromkeys(
+        _text(item.get("current_stage"), limit=40)
+        for item in active_journeys
+        if _text(item.get("current_stage"), limit=40)
+    ))
+    if active_journeys:
+        current = f"{len(active_journeys)} 条进行中的业务旅程"
+        if stages:
+            current += f"，当前阶段主要为{'、'.join(stages)}"
+        rows.append({"dimension": "业务旅程", "current": current, "judgement": ""})
+    open_opportunities = [item for item in opportunities if str(item.get("status")) in {"0", "FOLLOWING", "None"}]
+    if open_opportunities:
+        rows.append({
+            "dimension": "商业推进",
+            "current": f"{len(open_opportunities)} 条跟进中的商机",
+            "judgement": "",
+        })
+    if contracts:
+        rows.append({"dimension": "合同", "current": f"{len(contracts)} 份合同记录", "judgement": ""})
+    return rows
 
 
 def _business_status(

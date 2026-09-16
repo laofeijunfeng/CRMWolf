@@ -402,6 +402,38 @@ def test_projection_omits_system_boundary_disclaimer_from_customer_profile():
     assert "note" not in draft.sections.current_situation["business_status"]
 
 
+def test_draft_without_business_objects_has_empty_status_rows():
+    service = CustomerProfileProjectionService()
+    draft = service.draft_from_context(
+        context={
+            "product_catalog": [{"public_id": "prd_hifox", "name": "Hifox", "is_active": True}],
+            "strong_context": {
+                "customer": {"account_name": "成都协鑫数智科技有限责任公司", "products": []},
+                "customer_facts": [],
+                "contacts": [],
+                "opportunities": [],
+                "contracts": [],
+                "payment_plans": [],
+                "payment_records": [],
+                "recent_activities": [{
+                    "id": 1,
+                    "content": "今天看到了 Hifox，需要私有化部署。",
+                    "source_content": "今天看到了 Hifox，需要私有化部署。",
+                    "occurred_at": "2026-09-16T10:00:00",
+                }],
+                "deal_journeys": [],
+                "deal_journey_events": [],
+                "recorded_follow_ups": [],
+                "sales_commitments": [],
+                "follow_up_task_events": [],
+            },
+        },
+        source_event_key="rows",
+    )
+    assert draft.sections.current_situation["business_status_rows"] == []
+    assert draft.sections.current_situation["demand_background"]["items"]
+
+
 
 def _activity(activity_id: int, content: str, *, occurred_at: str, next_action: str | None = None):
     return {
