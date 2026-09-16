@@ -37,3 +37,15 @@ describe('ContractPaymentPlans V2 migration contract', () => {
     expect(source).not.toContain('text-wolf-danger-text-v2')
   })
 })
+
+describe('OpportunityDetailContent payment-plan fixed contract', () => {
+  it('passes contract total_amount instead of remaining allocatable amount', () => {
+    const source = readSource('src/components/panels/OpportunityDetailContent.vue')
+    const blockStart = source.indexOf('const fixedContractForPaymentPlan')
+    const blockEnd = source.indexOf('const paymentRecordDefaultAmount')
+    const block = source.slice(blockStart, blockEnd)
+
+    expect(block).toContain('total_amount: contract.total_amount')
+    expect(block).not.toContain('remainingPaymentPlanAmount')
+  })
+})

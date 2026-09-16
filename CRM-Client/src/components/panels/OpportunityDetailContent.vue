@@ -287,9 +287,7 @@ const fixedContractForPaymentPlan = computed(() => {
   return {
     id: contract.id,
     contract_name: contract.contract_name,
-    total_amount: remainingPaymentPlanAmount.value > 0
-      ? remainingPaymentPlanAmount.value
-      : contract.total_amount,
+    total_amount: contract.total_amount,
     customer_name: displayCustomerName.value
   }
 })
