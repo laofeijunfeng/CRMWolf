@@ -11,6 +11,13 @@
 
 确认前 Agent 只能说明将要执行什么，不得声称已完成。
 
+确认前 payload 必须通过对应 CRM 写入 schema 的闭世界校验。确认卡可以投影只读 facts，但不能用 facts 收集新字段。
+
+确认执行失败分叉：
+
+- 可重试依赖失败（5xx / 超时）：确认 action 放回 ACTIVE，只允许再点同一按钮重试同一 payload。
+- 不可重试业务拒绝（4xx 校验等）：确认 action 标记 CONSUMED，不再占 active workflow；已成功 command 不回滚；用户必须开新任务补剩余原子。
+
 写入确认必须以 LangGraph interrupt 表达。用户通过按钮、表单、IM reaction 或文本确认后，必须转换成 resume payload，并通过 `Command(resume=...)` 回到原图节点继续执行。不得在图外重新解析原始自然语言后直接执行写入。
 
 一轮回复只能有一个主确认目标。跟进记录需要确认时，不得在同一条最终回复里同时展示下一步建议。
