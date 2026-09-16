@@ -5,10 +5,9 @@ from app.api.business_journey_board import (
     BusinessJourneyContractSummary,
     BusinessJourneyInvoiceSummary,
     BusinessJourneyPaymentSummary,
-    _infer_active_opportunity_stage,
-    _infer_stage,
 )
 from app.models.deal_journey import DealJourneyStatus
+from app.services.deal_journey_stage import infer_active_opportunity_stage, infer_board_stage
 
 
 def test_closing_soon_column_is_titled_upcoming_contract():
@@ -19,7 +18,7 @@ def test_closing_soon_column_is_titled_upcoming_contract():
 
 
 def test_won_pending_contract_merges_into_closing_soon_stage():
-    stage = _infer_stage(
+    stage = infer_board_stage(
         SimpleNamespace(status=DealJourneyStatus.WON),
         SimpleNamespace(current_win_probability=100, win_probability=100),
         BusinessJourneyContractSummary(count=0, signed_count=0, amount=0),
@@ -31,7 +30,7 @@ def test_won_pending_contract_merges_into_closing_soon_stage():
 
 
 def test_100_percent_opportunity_merges_into_closing_soon_stage():
-    stage = _infer_active_opportunity_stage(
+    stage = infer_active_opportunity_stage(
         SimpleNamespace(current_win_probability=100, win_probability=100)
     )
 
