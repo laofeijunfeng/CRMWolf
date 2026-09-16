@@ -1530,7 +1530,7 @@ watch(() => props.targetPanel, (panel): void => {
   const hasTargetJourney = resolveTargetJourneyId() !== null
   const hasTargetOpportunity = props.targetOpportunityId !== undefined && props.targetOpportunityId !== null
   if (!props.visible || panel === undefined || panel === null || hasTargetJourney || hasTargetOpportunity) return
-  activePanel.value = resolveTargetPanel(panel)
+  setActivePanel(resolveTargetPanel(panel))
 })
 onBeforeUnmount(() => {
   profileRefreshPollGeneration += 1

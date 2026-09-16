@@ -455,6 +455,33 @@ describe('CustomerDetailSheet journey drilldown', () => {
     expect(wrapper.get('[data-testid="tab-journeys"]').attributes('data-active')).toBe('true')
   })
 
+  it('pops in-sheet journey detail when hover view-all sets a panel-only target', async () => {
+    const wrapper = mount(CustomerDetailSheet, {
+      props: {
+        customerId: 'cus_test_19',
+        visible: true,
+      },
+    })
+
+    await flushPromises()
+    await nextTick()
+    await wrapper.get('[data-testid="tab-journeys"]').trigger('click')
+    await nextTick()
+    await wrapper.get('[data-testid="view-journey"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.find('[data-testid="deal-journey-detail"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="deal-journeys-panel"]').exists()).toBe(false)
+
+    await wrapper.setProps({ targetPanel: 'journeys' })
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.find('[data-testid="deal-journey-detail"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="deal-journeys-panel"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="tab-journeys"]').attributes('data-active')).toBe('true')
+  })
+
   it('stays on the journeys list when the target opportunity has no matching journey', async () => {
     const wrapper = mount(CustomerDetailSheet, {
       props: {
