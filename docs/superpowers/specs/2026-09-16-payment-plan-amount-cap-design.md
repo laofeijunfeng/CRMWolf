@@ -1,7 +1,7 @@
 # 回款计划合计不超过合同金额
 
 - 日期：2026-09-16
-- 状态：已确认方向，待书面审阅
+- 状态：已确认
 - 范围：回款计划创建/编辑弹窗；`PaymentPlanCRUD.batch_create` / `create` / `update`；商机详情传入的 `fixedContract.total_amount`
 - 上游决定：所有创建和编辑入口；填写时前端即时红字，不边填边请求；本地超限拦住提交；后端按合同下全部计划重算兜底；统一预填剩余可分配金额；编辑只拦「会让合计更高」的改动；弹窗自己按合同拉计划合计（方案 A）
 - 相关规范：`CRM-Docs/design-system/patterns/form-page.md`、`CRM-Docs/design-system/components/input.md`

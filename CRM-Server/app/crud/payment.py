@@ -60,6 +60,13 @@ def _parse_sort(value: Optional[str], order_by: Optional[str] = None, order_dir:
     return sort_specs
 
 
+TWOPLACES = Decimal("0.01")
+
+
+def as_money(value: Any) -> Decimal:
+    return Decimal(str(value)).quantize(TWOPLACES)
+
+
 class PaymentPlanCRUD:
     def get_by_id(self, db: Session, plan_id: int, team_id: Optional[int] = None) -> Optional[PaymentPlan]:
         query = db.query(PaymentPlan).filter(PaymentPlan.id == plan_id)
@@ -238,7 +245,43 @@ class PaymentPlanCRUD:
         
         return plans, total
     
+    def _lock_contract(self, db: Session, contract_id: int) -> Contract:
+        contract = (
+            db.query(Contract)
+            .filter(Contract.id == contract_id)
+            .with_for_update()
+            .first()
+        )
+        if contract is None:
+            raise ValueError("合同不存在")
+        return contract
+
+    def _existing_planned_total(
+        self,
+        db: Session,
+        contract_id: int,
+        exclude_plan_id: Optional[int] = None,
+    ) -> Decimal:
+        plans = db.query(PaymentPlan).filter(PaymentPlan.contract_id == contract_id).all()
+        total = Decimal("0.00")
+        for plan in plans:
+            if exclude_plan_id is not None and getattr(plan, "id", None) == exclude_plan_id:
+                continue
+            total += as_money(plan.planned_amount)
+        return total
+
+    def _assert_planned_total_within_contract(self, contract: Contract, new_total: Decimal) -> None:
+        contract_total = as_money(contract.total_amount)
+        if new_total > contract_total:
+            raise ValueError(
+                f"回款计划总额({new_total})不能超过合同总额({contract_total})"
+            )
+
     def create(self, db: Session, contract_id: int, obj_in: PaymentPlanCreate, team_id: int) -> PaymentPlan:
+        contract = self._lock_contract(db, contract_id)
+        new_total = self._existing_planned_total(db, contract_id) + as_money(obj_in.planned_amount)
+        self._assert_planned_total_within_contract(contract, new_total)
+
         # 生成计划编号
         plan_number = BusinessNumberGenerator.generate('PP', db)
 
@@ -246,7 +289,7 @@ class PaymentPlanCRUD:
             contract_id=contract_id,
             team_id=team_id,
             plan_number=plan_number,
-            deal_journey_id=getattr(db.query(Contract).filter(Contract.id == contract_id).first(), "deal_journey_id", None),
+            deal_journey_id=contract.deal_journey_id,
             **obj_in.model_dump()
         )
         db.add(db_plan)
@@ -254,22 +297,20 @@ class PaymentPlanCRUD:
         db.refresh(db_plan)
         from app.models.deal_journey import DealJourneyEventType, DealJourneySourceType
         from app.services.deal_journey_service import deal_journey_service
-        contract = db.query(Contract).filter(Contract.id == contract_id).first()
-        if contract:
-            deal_journey_service.record_event(
-                db,
-                deal_journey_id=db_plan.deal_journey_id,
-                team_id=team_id,
-                customer_id=contract.customer_id,
-                event_type=DealJourneyEventType.PAYMENT_PLAN_CREATED,
-                source_type=DealJourneySourceType.PAYMENT_PLAN,
-                source_id=db_plan.id,
-                event_time=db_plan.created_time,
-                summary=f"创建回款计划：{db_plan.stage_name}",
-            )
-            deal_journey_service.refresh_closure_status(db, db_plan.deal_journey_id)
-            db.commit()
-            db.refresh(db_plan)
+        deal_journey_service.record_event(
+            db,
+            deal_journey_id=db_plan.deal_journey_id,
+            team_id=team_id,
+            customer_id=contract.customer_id,
+            event_type=DealJourneyEventType.PAYMENT_PLAN_CREATED,
+            source_type=DealJourneySourceType.PAYMENT_PLAN,
+            source_id=db_plan.id,
+            event_time=db_plan.created_time,
+            summary=f"创建回款计划：{db_plan.stage_name}",
+        )
+        deal_journey_service.refresh_closure_status(db, db_plan.deal_journey_id)
+        db.commit()
+        db.refresh(db_plan)
         return db_plan
 
     def batch_create(self, db: Session, contract_id: int, plans_data: List[PaymentPlanCreate], creator_id: str, team_id: int) -> List[PaymentPlan]:
@@ -278,14 +319,10 @@ class PaymentPlanCRUD:
         from app.models.payment import PaymentPlan
         from app.services.operation_log_service import operation_log_service
 
-        total_planned = sum(p.planned_amount for p in plans_data)
-
-        contract = db.query(Contract).filter(Contract.id == contract_id).first()
-        if not contract:
-            raise ValueError("合同不存在")
-
-        if total_planned > float(contract.total_amount):
-            raise ValueError(f"回款计划总额({total_planned})不能超过合同总额({contract.total_amount})")
+        contract = self._lock_contract(db, contract_id)
+        requested_total = sum((as_money(plan.planned_amount) for plan in plans_data), Decimal("0.00"))
+        new_total = self._existing_planned_total(db, contract_id) + requested_total
+        self._assert_planned_total_within_contract(contract, new_total)
 
         plans = []
         for plan_data in plans_data:
@@ -347,7 +384,7 @@ class PaymentPlanCRUD:
                 "contractNumber": contract.contract_number,
                 "contractName": contract.contract_name,
                 "planCount": len(plans),
-                "totalPlannedAmount": float(total_planned),
+                "totalPlannedAmount": float(requested_total),
                 "customerId": contract.customer_id,
                 "customerName": customer.account_name if customer else None
             }
@@ -357,7 +394,16 @@ class PaymentPlanCRUD:
 
     def update(self, db: Session, db_obj: PaymentPlan, obj_in: PaymentPlanUpdate) -> PaymentPlan:
         update_data = obj_in.model_dump(exclude_unset=True)
-        
+        contract = self._lock_contract(db, db_obj.contract_id)
+        old_total = self._existing_planned_total(db, db_obj.contract_id)
+        if "planned_amount" in update_data:
+            new_total = (
+                self._existing_planned_total(db, db_obj.contract_id, exclude_plan_id=db_obj.id)
+                + as_money(update_data["planned_amount"])
+            )
+            if new_total > old_total:
+                self._assert_planned_total_within_contract(contract, new_total)
+
         for field, value in update_data.items():
             setattr(db_obj, field, value)
 
@@ -370,7 +416,7 @@ class PaymentPlanCRUD:
         db.commit()
         db.refresh(db_obj)
         return db_obj
-    
+
     def delete(self, db: Session, plan_id: int, team_id: int) -> bool:
         plan = self.get_by_id(db, plan_id, team_id)  # 使用 team_id 进行团队隔离验证
         if not plan:
