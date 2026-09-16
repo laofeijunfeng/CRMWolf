@@ -1,7 +1,7 @@
 # 系统设置工作区视觉与操作统一
 
 - 日期：2026-09-17
-- 状态：用户已确认方向，待书面审阅
+- 状态：已确认
 - 范围：`/settings/**` 全部子页面的外壳、列表、分组表单、行操作和主操作放置
 - 上游决定：对齐业务页，不换皮；列表走 DataTable；表单卡片左右撑满并复用客户编辑两列网格；已有组件直接复用，不为设置另做一套视觉
 - 相关规范：`CRM-Docs/design-system/patterns/list-page.md`、`CRM-Docs/design-system/patterns/form-page.md`、`CRM-Docs/design-system/components/table.md`、`CRM-Docs/design-system/components/list-card.md`、`CRM-Docs/design-system/components/card.md`、`CRM-Docs/requirements/2026-08-31-system-settings-page-optimization.md`
