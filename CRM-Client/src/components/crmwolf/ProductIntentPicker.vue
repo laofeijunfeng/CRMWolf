@@ -2,6 +2,7 @@
 import { computed, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
 import SegmentedChoiceControl from '@/components/crmwolf/SegmentedChoiceControl.vue'
+import { Label } from '@/components/ui/label'
 import { usePermissionStore } from '@/stores/permissions'
 import {
   EMPTY_CATALOG_MESSAGE,
@@ -48,10 +49,10 @@ function handleChange(value: string): void {
 </script>
 
 <template>
-  <div class="space-y-2">
-    <p :id="labelId" class="text-wolf-caption font-wolf-medium text-wolf-text-primary">
+  <div class="grid gap-wolf-xs">
+    <Label :id="labelId" class="text-wolf-caption font-wolf-medium text-wolf-text-primary">
       产品 <span class="text-wolf-danger" aria-hidden="true">*</span>
-    </p>
+    </Label>
     <p v-if="loading" class="text-sm text-wolf-text-secondary">加载产品中...</p>
     <template v-else-if="forbidden" />
     <template v-else-if="empty">
@@ -73,7 +74,7 @@ function handleChange(value: string): void {
       :id-prefix="props.idPrefix"
       :invalid="props.invalid"
       :described-by="errorId"
-      :style="{ '--segmented-choice-columns': String(Math.min(Math.max(options.length, 1), 4)) }"
+      :style="{ '--segmented-choice-columns': String(Math.min(Math.max(options.length, 1), 3)) }"
       @update:model-value="handleChange"
     />
   </div>

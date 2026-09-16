@@ -230,4 +230,22 @@ describe('LeadConvertDialog product field', () => {
     expect(customerApi.convertLeadToCustomer).not.toHaveBeenCalled()
     wrapper.unmount()
   })
+
+  it('places the required product field before optional address', async () => {
+    mocks.getLeadDetail.mockResolvedValue(leadFixture)
+
+    const wrapper = mount(LeadConvertDialog, {
+      props: { open: true, leadId: 'lead-1' },
+    })
+    await flushPromises()
+    await nextTick()
+
+    const formHtml = wrapper.get('form#lead-convert-form').html()
+    expect(formHtml.indexOf('product-intent-picker')).toBeGreaterThan(-1)
+    expect(formHtml.indexOf('lead-convert-address')).toBeGreaterThan(-1)
+    expect(formHtml.indexOf('product-intent-picker')).toBeLessThan(
+      formHtml.indexOf('lead-convert-address'),
+    )
+    wrapper.unmount()
+  })
 })

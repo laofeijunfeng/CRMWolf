@@ -37,6 +37,7 @@ import {
 } from '@/components/ui/dialog'
 import { SelectField, TextareaField } from '@/components/crmwolf'
 import { confirmDialog } from '@/utils/confirmDialog'
+import { formatProductIntentName } from '@/utils/productIntent'
 import CustomerFormDialog from '@/components/dialogs/CustomerFormDialog.vue'
 import CustomerTransferDialog from '@/components/dialogs/CustomerTransferDialog.vue'
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
@@ -1227,7 +1228,7 @@ watchEffect(() => {
 
       <!-- 产品 -->
       <template #cell-product_name="{ row }">
-        {{ row.product_name || '-' }}
+        {{ formatProductIntentName(row) }}
       </template>
 
       <!-- 城市 -->

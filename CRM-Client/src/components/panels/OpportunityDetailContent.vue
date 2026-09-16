@@ -12,6 +12,7 @@ import { toast } from 'vue-sonner'
 import { handleApiError, handleOutcomeUnknown, isOutcomeUnknown } from '@/utils/errorHandler'
 import { formatLocalDate } from '@/utils/format'
 import { confirmDelete } from '@/utils/confirmDialog'
+import { formatOpportunityProductSummary } from '@/utils/opportunityProduct'
 import { AmountText } from '@/components/crmwolf'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -1126,8 +1127,8 @@ watch(approvalPhase, phase => {
 
                   <div class="attribute-item">
                     <div class="attribute-label">产品</div>
-                    <span class="attribute-value" :class="{ 'not-filled': !opportunity.product_name }">
-                      {{ opportunity.product_name || '-' }}
+                    <span class="attribute-value" :class="{ 'not-filled': formatOpportunityProductSummary(opportunity) === '-' }">
+                      {{ formatOpportunityProductSummary(opportunity) }}
                     </span>
                   </div>
 

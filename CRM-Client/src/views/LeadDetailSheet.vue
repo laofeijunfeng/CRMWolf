@@ -15,6 +15,7 @@
  */
 import { ref, reactive, watch } from 'vue'
 import { handleApiError } from '@/utils/errorHandler'
+import { formatProductIntentName } from '@/utils/productIntent'
 import { toast } from 'vue-sonner'
 import { CheckCircle, Pencil, Plus, TrendingUp } from 'lucide-vue-next'
 import LeadFormDialog from '@/components/LeadFormDialog.vue'
@@ -297,7 +298,7 @@ watch(() => props.visible, (visible): void => {
                     </div>
                     <div class="attribute-item">
                       <div class="attribute-label">产品</div>
-                      <div class="attribute-value">{{ leadData.product_name || '-' }}</div>
+                      <div class="attribute-value">{{ formatProductIntentName(leadData) }}</div>
                     </div>
                     <div class="attribute-item">
                       <div class="attribute-label">所在城市</div>

@@ -122,8 +122,10 @@ describe('LeadFormDialog product field', () => {
       props: { open: true, mode: 'create' },
       global: {
         stubs: {
-          Dialog: { template: '<div><slot /></div>' },
-          DialogContent: { template: '<div><slot /></div>' },
+          DialogContent: {
+            inheritAttrs: false,
+            template: '<div v-bind="$attrs"><slot /></div>',
+          },
           DialogHeader: { template: '<div><slot /></div>' },
           DialogTitle: { template: '<h2><slot /></h2>' },
           DialogFooter: { template: '<div><slot /></div>' },
@@ -139,6 +141,8 @@ describe('LeadFormDialog product field', () => {
     expect(wrapper.findComponent({ name: 'ProductIntentPicker' }).exists()).toBe(true)
     expect(wrapper.text()).not.toContain('基础模块')
     expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false)
+    expect(wrapper.find('.sm\\:max-w-2xl').exists()).toBe(true)
+    expect(wrapper.find('.sm\\:col-span-2').exists()).toBe(true)
 
     await wrapper.get('#lead-name').setValue('飞驰科技')
     await wrapper.get('#lead-city').setValue('上海')
@@ -161,6 +165,81 @@ describe('LeadFormDialog product field', () => {
       source_public_id: 'source-1',
       product_public_id: 'prd_crm',
     }))
+    wrapper.unmount()
+  })
+
+  it('includes product_public_id when updating an existing lead', async () => {
+    setActivePinia(createPinia())
+    setPermissions(['product:view'])
+    vi.mocked(acquisitionSourceApi.listOptions).mockResolvedValue([
+      { public_id: 'source-1', name: '官网', code: 'WEB', is_system: true, is_active: true, sort_order: 1 },
+    ])
+    vi.mocked(productApi.list).mockResolvedValue([product('prd_crm', 'CRM'), product('prd_oa', 'OA')])
+    vi.mocked(leadApi.getLeadDetail).mockResolvedValue({
+      id: 'lead-1',
+      public_id: 'LEAD-001',
+      lead_name: '飞驰科技',
+      source: '官网',
+      source_info: { public_id: 'source-1', name: '官网', is_active: true },
+      city: '上海',
+      contact_name: '张三',
+      contact_phone: '13800138000',
+      status: 0,
+      creator_id: 'u',
+      created_time: '2026-01-01T00:00:00Z',
+      last_modified_time: '2026-01-01T00:00:00Z',
+      version: 1,
+      follow_ups: [],
+    })
+    vi.mocked(leadApi.updateLead).mockResolvedValue({
+      id: 'lead-1',
+      public_id: 'LEAD-001',
+      lead_name: '飞驰科技',
+      source: '官网',
+      city: '上海',
+      contact_name: '张三',
+      contact_phone: '13800138000',
+      status: 0,
+      creator_id: 'u',
+      created_time: '2026-01-01T00:00:00Z',
+      last_modified_time: '2026-01-01T00:00:00Z',
+      version: 2,
+    })
+
+    const wrapper = mount(LeadFormDialog, {
+      props: { open: true, mode: 'edit', leadId: 'lead-1' },
+      global: {
+        stubs: {
+          DialogContent: {
+            inheritAttrs: false,
+            template: '<div v-bind="$attrs"><slot /></div>',
+          },
+          DialogHeader: { template: '<div><slot /></div>' },
+          DialogTitle: { template: '<h2><slot /></h2>' },
+          DialogFooter: { template: '<div><slot /></div>' },
+          AlertDialog: { template: '<div></div>' },
+          RouterLink: true,
+        },
+      },
+    })
+    await flushPromises()
+    await nextTick()
+
+    const picker = wrapper.findComponent({ name: 'ProductIntentPicker' })
+    ;(picker.vm as unknown as { $emit: (event: 'update:modelValue', value: string) => void }).$emit(
+      'update:modelValue',
+      'prd_oa',
+    )
+    await nextTick()
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(leadApi.updateLead).toHaveBeenCalledWith(
+      'lead-1',
+      expect.objectContaining({
+        product_public_id: 'prd_oa',
+      }),
+    )
     wrapper.unmount()
   })
 })

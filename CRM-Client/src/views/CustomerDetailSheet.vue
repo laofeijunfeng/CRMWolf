@@ -48,6 +48,7 @@ import EditRecordDialog from '@/components/dialogs/EditRecordDialog.vue'
 import { Plus, Pencil } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { handleApiError } from '@/utils/errorHandler'
+import { formatProductIntentName } from '@/utils/productIntent'
 import customerApi, { type CustomerDetailResponse, type ContactResponse, type CustomerMemberResponse } from '@/api/customer'
 import customerProfileApi from '@/api/customerProfile'
 import type { CustomerProfileEvidence, CustomerProfileResponse } from '@/schemas/customerProfile'
@@ -1657,7 +1658,7 @@ onBeforeUnmount(() => {
                       </div>
                       <div class="attribute-item">
                         <div class="attribute-label">产品</div>
-                        <div class="attribute-value">{{ customer?.product_name || '-' }}</div>
+                        <div class="attribute-value">{{ formatProductIntentName(customer ?? {}) }}</div>
                       </div>
                       <div class="attribute-item">
                         <div class="attribute-label">所在城市</div>

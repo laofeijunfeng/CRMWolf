@@ -32,6 +32,7 @@ import customerApi from '@/api/customer'
 import procurementApi from '@/api/procurement'
 import { confirmDialog } from '@/utils/confirmDialog'
 import { handleApiError, handleOutcomeUnknown, isOutcomeUnknown } from '@/utils/errorHandler'
+import { formatProductIntentName, productPublicIdFromIntent } from '@/utils/productIntent'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 import {
   createCommandRequestOptions,
@@ -116,7 +117,7 @@ const fetchLeadDetail = async (leadId: string, requestId: number): Promise<void>
     formValues.city = res.city ?? ''
     formValues.address = ''
     formValues.default_procurement_method_id = ''
-    formValues.product_public_id = res.product_public_id ?? ''
+    formValues.product_public_id = productPublicIdFromIntent(res)
     initialForm.value = { ...formValues }
   } catch (error: unknown) {
     if (requestId !== loadRequestId.value || !props.open || props.leadId !== leadId) return
@@ -397,6 +398,10 @@ watch(
               <span class="attribute-value">{{ getAcquisitionSourceDisplayName(leadData) }}</span>
             </div>
             <div class="attribute-item">
+              <span class="attribute-label">产品</span>
+              <span class="attribute-value">{{ formatProductIntentName(leadData) }}</span>
+            </div>
+            <div class="attribute-item">
               <span class="attribute-label">所在城市</span>
               <span class="attribute-value">{{ leadData.city || '-' }}</span>
             </div>
@@ -465,6 +470,12 @@ watch(
                 placeholder="请选择默认采购方式"
               />
             </div>
+            <ProductIntentPicker
+              :model-value="formValues.product_public_id"
+              :disabled="submitting || loading || loadError !== null || closeGuardPending"
+              id-prefix="lead-convert-product"
+              @update:model-value="(value) => { formValues.product_public_id = value }"
+            />
 
             <InputField
               id="lead-convert-address"
@@ -473,13 +484,6 @@ watch(
               label="公司地址"
               :disabled="submitting || loading || loadError !== null || closeGuardPending"
               placeholder="请输入公司地址（可选）"
-            />
-
-            <ProductIntentPicker
-              :model-value="formValues.product_public_id"
-              :disabled="submitting || loading || loadError !== null || closeGuardPending"
-              id-prefix="lead-convert-product"
-              @update:model-value="(value) => { formValues.product_public_id = value }"
             />
           </div>
         </form>

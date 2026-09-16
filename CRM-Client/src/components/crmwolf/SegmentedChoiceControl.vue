@@ -86,8 +86,9 @@ function optionId(value: string): string {
           `segmented-choice__option--${option.tone ?? 'muted'}`,
           { 'segmented-choice__option--active': modelValue === option.value },
         ]"
+        :title="option.label"
       >
-      {{ option.label }}
+        <span class="segmented-choice__label">{{ option.label }}</span>
       </Label>
     </div>
   </RadioGroup>
@@ -124,7 +125,7 @@ function optionId(value: string): string {
   justify-content: center;
   min-width: 0;
   width: 100%;
-  height: $wolf-input-height-v2;
+  height: auto;
   min-height: $wolf-input-height-v2;
   padding: 0 $wolf-space-md-v2;
   border: 1px solid $wolf-border-default-v2;
@@ -135,6 +136,7 @@ function optionId(value: string): string {
   font-weight: $wolf-font-weight-medium-v2;
   line-height: $wolf-line-height-body-v2;
   white-space: nowrap;
+  overflow: hidden;
   transition:
     border-color 0.16s ease,
     background-color 0.16s ease,
@@ -142,7 +144,15 @@ function optionId(value: string): string {
     color 0.16s ease;
   cursor: pointer;
   pointer-events: none;
+}
 
+.segmented-choice__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
 }
 
 .segmented-choice__item:hover .segmented-choice__option {

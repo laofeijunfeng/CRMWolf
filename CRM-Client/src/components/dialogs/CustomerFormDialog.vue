@@ -36,6 +36,7 @@ import FormErrorSummary from '@/components/crmwolf/FormErrorSummary.vue'
 import { handleApiError } from '@/utils/errorHandler'
 import { formatLocalDate } from '@/utils/format'
 import { licenseStatusLabel } from '@/utils/licenseStatus'
+import { productPublicIdFromIntent } from '@/utils/productIntent'
 import { useDialogCloseGuard } from '@/composables/useDialogCloseGuard'
 import customerApi, {
   type CustomerCreate,
@@ -260,7 +261,7 @@ function buildCustomerEditFormValues(customer: CustomerDetailResponse): Customer
     account_name: customer.account_name,
     city: customer.city,
     address: customer.address ?? '',
-    product_public_id: customer.product_public_id ?? '',
+    product_public_id: productPublicIdFromIntent(customer),
   }
   const companyScale = normalizeCompanyScale(customer.company_scale)
   if (companyScale !== undefined) formValues.company_scale = companyScale
@@ -310,7 +311,7 @@ function buildEditableSnapshot(customer: {
     address: customer.address,
     company_scale: customer.company_scale,
     source_public_id: customer.source_info?.public_id ?? null,
-    product_public_id: customer.product_public_id ?? null,
+    product_public_id: productPublicIdFromIntent(customer) || null,
     default_procurement_method_id: customer.default_procurement_method_id,
     industry: customer.industry,
     status: editableStatus(customer.status),
@@ -739,7 +740,7 @@ function continueEditing(): void { closeGuard.continueEditing() }
             </FormField>
 
             <FormField v-slot="{ value, handleChange }" name="product_public_id">
-              <FormItem>
+              <FormItem class="sm:col-span-2">
                 <ProductIntentPicker
                   :model-value="String(value ?? '')"
                   id-prefix="customer-product"

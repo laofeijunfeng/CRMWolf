@@ -61,7 +61,7 @@ describe('customerApi lifecycle, license snapshot, and industry hierarchy', () =
     const result = await customerApi.updateCustomer('customer-1', payload)
 
     expect(put).toHaveBeenCalledWith('/v1/customers/customer-1', payload, undefined)
-    expect(result).toEqual(customerResponse)
+    expect(result).toEqual({ ...customerResponse, products: [] })
   })
 
   it('rejects malformed ordinary PUT responses through the customer response schema', async () => {
@@ -87,7 +87,7 @@ describe('customerApi lifecycle, license snapshot, and industry hierarchy', () =
       status: 1,
       expected_version: 3,
     }, undefined)
-    expect(result).toEqual(customerResponse)
+    expect(result).toEqual({ ...customerResponse, products: [] })
   })
 
   it('updates only the defined license snapshot fields and parses the customer response', async () => {
@@ -105,7 +105,7 @@ describe('customerApi lifecycle, license snapshot, and industry hierarchy', () =
       license_type: 'OFFICIAL',
       license_expiry_date: '2027-01-01',
     }, undefined)
-    expect(result).toEqual(customerResponse)
+    expect(result).toEqual({ ...customerResponse, products: [] })
   })
 
   it('rejects malformed license snapshot responses through the customer response schema', async () => {
@@ -155,5 +155,42 @@ describe('customerApi lifecycle, license snapshot, and industry hierarchy', () =
       status: 1,
       expected_version: 3,
     })).rejects.toThrow()
+  })
+
+  it('parses customer detail without product fields as null intent', async () => {
+    get.mockResolvedValue({
+      ...customerResponse,
+      owner_info: null,
+      creator_info: null,
+      contacts: [],
+      loss_reason: null,
+    })
+    const { default: customerApi } = await import('../customer')
+
+    const result = await customerApi.getCustomerDetail('customer-1')
+
+    expect(result.product_public_id ?? null).toBeNull()
+    expect(result.product_name ?? null).toBeNull()
+    expect(result.products).toEqual([])
+  })
+
+  it('parses customer detail with an associated product', async () => {
+    get.mockResolvedValue({
+      ...customerResponse,
+      owner_info: null,
+      creator_info: null,
+      contacts: [],
+      loss_reason: null,
+      product_public_id: 'prd_crm',
+      product_name: 'CRM',
+      products: [{ public_id: 'prd_crm', name: 'CRM' }],
+    })
+    const { default: customerApi } = await import('../customer')
+
+    const result = await customerApi.getCustomerDetail('customer-1')
+
+    expect(result.product_public_id).toBe('prd_crm')
+    expect(result.product_name).toBe('CRM')
+    expect(result.products).toEqual([{ public_id: 'prd_crm', name: 'CRM' }])
   })
 })

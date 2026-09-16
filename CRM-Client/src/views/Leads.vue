@@ -45,6 +45,7 @@ import {
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
+import { formatProductIntentName } from '@/utils/productIntent'
 import LeadFormDialog from '@/components/LeadFormDialog.vue'
 import LeadConvertDialog from '@/components/LeadConvertDialog.vue'
 import LeadDetailSheet from './LeadDetailSheet.vue'
@@ -734,7 +735,7 @@ watchEffect(() => {
         </div>
         <div class="lead-mobile-card-meta">
           <span>{{ getAcquisitionSourceDisplayName(row, '-') }}</span>
-          <span>{{ row.product_name || '-' }}</span>
+          <span>{{ formatProductIntentName(row) }}</span>
           <span>{{ row.city || '-' }}</span>
           <span>负责人：{{ row.owner_info?.name || '未分配' }}</span>
         </div>
@@ -773,7 +774,7 @@ watchEffect(() => {
 
       <!-- 产品 -->
       <template #cell-product_name="{ row }">
-        {{ row.product_name || '-' }}
+        {{ formatProductIntentName(row) }}
       </template>
 
       <!-- 城市 -->

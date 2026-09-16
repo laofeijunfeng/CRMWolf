@@ -6,6 +6,7 @@ import { toTypedSchema } from '@vee-validate/zod'
 import { toast } from 'vue-sonner'
 import { handleApiError } from '@/utils/errorHandler'
 import { logger } from '@/utils/logger'
+import { productPublicIdFromIntent } from '@/utils/productIntent'
 import customerApi, { type CustomerCreate, type CustomerUpdate } from '@/api/customer'
 import procurementApi, { type ProcurementMethodOption } from '@/api/procurement'
 import { usePageTitle } from '@/composables/usePageTitle'
@@ -107,7 +108,7 @@ function isCompleteCustomerForm(value: Partial<CustomerForm> | undefined): value
     && typeof value.default_procurement_method_id === 'number'
 }
 
-function toFormValues(res: { account_name: string; city: string; address: string | null; company_scale: string | null; source_info?: { public_id: string } | null; product_public_id?: string | null; default_procurement_method_id: number | null }): Partial<CustomerForm> {
+function toFormValues(res: { account_name: string; city: string; address: string | null; company_scale: string | null; source_info?: { public_id: string } | null; product_public_id?: string | null; products?: { public_id: string; name: string }[]; default_procurement_method_id: number | null }): Partial<CustomerForm> {
   const companyScale = normalizeCompanyScale(res.company_scale)
   const sourcePublicId = res.source_info?.public_id
   const procurementMethodId = res.default_procurement_method_id ?? undefined
@@ -116,7 +117,7 @@ function toFormValues(res: { account_name: string; city: string; address: string
     account_name: res.account_name ?? '',
     city: res.city ?? '',
     address: res.address ?? '',
-    product_public_id: res.product_public_id ?? '',
+    product_public_id: productPublicIdFromIntent(res),
     ...(companyScale === undefined ? {} : { company_scale: companyScale }),
     ...(sourcePublicId === undefined ? {} : { source_public_id: sourcePublicId }),
     ...(procurementMethodId === undefined ? {} : { default_procurement_method_id: procurementMethodId }),
@@ -523,16 +524,18 @@ onUnmounted(() => {
               </FormItem>
             </FormField>
 
-            <FormField v-slot="{ value, handleChange }" name="product_public_id">
-              <FormItem>
-                <ProductIntentPicker
-                  :model-value="String(value ?? '')"
-                  id-prefix="customer-edit-product"
-                  @update:model-value="handleChange"
-                />
-                <FormMessage />
-              </FormItem>
-            </FormField>
+            <div class="form-grid-full">
+              <FormField v-slot="{ value, handleChange }" name="product_public_id">
+                <FormItem>
+                  <ProductIntentPicker
+                    :model-value="String(value ?? '')"
+                    id-prefix="customer-edit-product"
+                    @update:model-value="handleChange"
+                  />
+                  <FormMessage />
+                </FormItem>
+              </FormField>
+            </div>
 
             <!-- Company Scale -->
             <FormField v-slot="{ componentField }" name="company_scale">
@@ -774,6 +777,10 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: $wolf-form-item-gap-v2;
+}
+
+.form-grid-full {
+  grid-column: 1 / -1;
 }
 
 // Form actions card

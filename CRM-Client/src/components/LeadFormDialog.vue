@@ -35,6 +35,7 @@ import {
 import { leadApi, type LeadCreate, type LeadDetail, type LeadUpdate } from '@/api/lead'
 import { leadSchema, type LeadForm } from '@/schemas/lead-form'
 import { useAcquisitionSourceOptions } from '@/composables/useAcquisitionSourceOptions'
+import { productPublicIdFromIntent } from '@/utils/productIntent'
 
 interface Props {
   open: boolean
@@ -90,7 +91,7 @@ function applyLeadDetail(lead: LeadDetail): void {
   initialValues.value = {
     lead_name: lead.lead_name,
     source_public_id: lead.source_info?.public_id ?? '',
-    product_public_id: lead.product_public_id ?? '',
+    product_public_id: productPublicIdFromIntent(lead),
     city: lead.city,
     company_scale: lead.company_scale as LeadForm['company_scale'] | undefined,
     contact_name: lead.contact_name,
@@ -216,7 +217,7 @@ const continueEditing = (): void => {
 
 <template>
   <Dialog v-model:open="visible">
-    <DialogContent>
+    <DialogContent class="w-[calc(100vw-2rem)] sm:max-w-2xl max-h-[min(90vh,90dvh)] overflow-y-auto overscroll-contain [scroll-padding-bottom:calc(5rem+env(safe-area-inset-bottom,0px))]">
       <DialogHeader>
         <DialogTitle>{{ mode === 'create' ? '新建线索' : '编辑线索' }}</DialogTitle>
       </DialogHeader>
@@ -266,9 +267,9 @@ const continueEditing = (): void => {
               </FormItem>
             </FormField>
 
-            <!-- 意向产品 -->
+            <!-- 意向产品：分段选择需要整行宽度，避免挤在半列里溢出 -->
             <FormField v-slot="{ value, handleChange }" name="product_public_id">
-              <FormItem>
+              <FormItem class="sm:col-span-2">
                 <ProductIntentPicker
                   :model-value="String(value ?? '')"
                   id-prefix="lead-product"

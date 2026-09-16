@@ -944,7 +944,7 @@ watchEffect(() => {
 
       <template #cell-product_name="{ row }">
         <div class="opportunity-product-cell">
-          <span class="opportunity-product-name">{{ row.product_name || '-' }}</span>
+          <span class="opportunity-product-name">{{ getOpportunityProductSummary(row) }}</span>
           <span v-if="getOpportunityModuleNames(row)" class="opportunity-product-modules">
             {{ getOpportunityModuleNames(row) }}
           </span>
