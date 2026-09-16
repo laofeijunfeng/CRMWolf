@@ -4,8 +4,8 @@ import { defineComponent, h, nextTick, type PropType } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import CustomerDetailSheet from '@/views/CustomerDetailSheet.vue'
 import type { CustomerDetailResponse } from '@/api/customer'
-import type { OpportunityListResponse } from '@/api/opportunity'
 import type { ContractListResponse } from '@/api/contract'
+import type { DealJourney } from '@/schemas/dealJourney'
 import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
 
@@ -20,18 +20,16 @@ const customerApi = vi.hoisted(() => ({
   getCustomerMembers: vi.fn(),
 }))
 const customerActivityApi = vi.hoisted(() => ({ getActivities: vi.fn() }))
-const opportunityApi = vi.hoisted(() => ({ getOpportunities: vi.fn() }))
+const dealJourneyApi = vi.hoisted(() => ({
+  listByCustomer: vi.fn(),
+  getByCustomer: vi.fn(),
+}))
 const contractApi = vi.hoisted(() => ({ getCustomerContracts: vi.fn() }))
 const paymentApi = vi.hoisted(() => ({ getPaymentPlans: vi.fn() }))
 const invoiceApi = vi.hoisted(() => ({ getInvoiceTitles: vi.fn() }))
 const deploymentApi = vi.hoisted(() => ({ list: vi.fn() }))
 const handleApiError = vi.hoisted(() => vi.fn())
 const toast = vi.hoisted(() => ({ success: vi.fn(), info: vi.fn() }))
-
-interface OpportunityCustomerContext {
-  customerId: string
-  customerName?: string
-}
 
 interface Deferred<T> {
   promise: Promise<T>
@@ -55,7 +53,7 @@ vi.mock('vue-router', () => ({
 }))
 vi.mock('@/api/customer', () => ({ default: customerApi }))
 vi.mock('@/api/customerActivity', () => ({ default: customerActivityApi }))
-vi.mock('@/api/opportunity', () => ({ opportunityApi }))
+vi.mock('@/api/dealJourney', () => ({ dealJourneyApi, default: dealJourneyApi }))
 vi.mock('@/api/contract', () => ({ default: contractApi }))
 vi.mock('@/api/payment', () => ({ default: paymentApi }))
 vi.mock('@/api/invoice', () => ({ default: invoiceApi }))
@@ -161,21 +159,20 @@ vi.mock('@/components/ui/accordion', () => ({
 
 vi.mock('@/components/panels/FollowUpPanel.vue', () => ({ default: defineComponent({ name: 'FollowUpPanel', setup: () => () => h('div', 'followup') }) }))
 vi.mock('@/components/panels/ContactsPanel.vue', () => ({ default: defineComponent({ name: 'ContactsPanel', setup: () => () => h('div', 'contacts') }) }))
-vi.mock('@/components/panels/OpportunitiesPanel.vue', () => ({
+vi.mock('@/components/panels/DealJourneysPanel.vue', () => ({
   default: defineComponent({
-    name: 'OpportunitiesPanel',
+    name: 'DealJourneysPanel',
     props: {
-      highlightedOpportunityId: String,
-      restoreFocusOpportunityId: String,
+      highlightedJourneyId: String,
+      restoreFocusJourneyId: String,
     },
-    emits: ['view', 'open-full-page', 'add'],
+    emits: ['view', 'add'],
     setup: (props, { emit }) => () => h('div', {
-      'data-testid': 'opportunities-panel',
-      'data-highlighted-opportunity-id': props.highlightedOpportunityId === undefined ? '' : String(props.highlightedOpportunityId),
-      'data-restore-focus-opportunity-id': props.restoreFocusOpportunityId === undefined ? '' : String(props.restoreFocusOpportunityId),
+      'data-testid': 'deal-journeys-panel',
+      'data-highlighted-journey-id': props.highlightedJourneyId === undefined ? '' : String(props.highlightedJourneyId),
+      'data-restore-focus-journey-id': props.restoreFocusJourneyId === undefined ? '' : String(props.restoreFocusJourneyId),
     }, [
-      h('button', { type: 'button', 'data-testid': 'view-opportunity', onClick: () => emit('view', 'opp_test_88') }, 'view opportunity'),
-      h('button', { type: 'button', 'data-testid': 'open-full-page', onClick: () => emit('open-full-page', 'opp_test_88') }, 'open full page'),
+      h('button', { type: 'button', 'data-testid': 'view-journey', onClick: () => emit('view', 'djy_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa') }, 'view journey'),
     ]),
   }),
 }))
@@ -207,24 +204,24 @@ vi.mock('@/components/panels/ContractDetailContent.vue', () => ({
   }),
 }))
 
-vi.mock('@/components/panels/OpportunityDetailContent.vue', () => ({
+vi.mock('@/components/panels/DealJourneyDetailContent.vue', () => ({
   default: defineComponent({
-    name: 'OpportunityDetailContent',
+    name: 'DealJourneyDetailContent',
     props: {
-      opportunityId: String,
+      journeyId: String,
+      journey: Object as PropType<DealJourney | null>,
       embedded: Boolean,
-      customerContext: Object as PropType<OpportunityCustomerContext>,
     },
-    emits: ['back', 'refresh', 'open-full-page'],
+    emits: ['back', 'refresh', 'view-contract'],
     setup: (props, { emit }) => () => h('div', {
-      'data-testid': 'opportunity-detail-content',
-      'data-opportunity-id': String(props.opportunityId),
+      'data-testid': 'deal-journey-detail',
+      'data-journey-id': String(props.journeyId),
       'data-embedded': String(props.embedded),
-      'data-context-customer-id': props.customerContext === undefined ? '' : String(props.customerContext.customerId),
-      'data-context-customer-name': props.customerContext?.customerName ?? '',
     }, [
-      h('button', { type: 'button', 'data-testid': 'back-to-opportunities', onClick: () => emit('back') }, 'back'),
+      props.journey?.name ?? '',
+      h('button', { type: 'button', 'data-testid': 'back-to-journeys', onClick: () => emit('back') }, 'back'),
       h('button', { type: 'button', 'data-testid': 'detail-refresh', onClick: () => emit('refresh') }, 'refresh'),
+      h('button', { type: 'button', 'data-testid': 'view-journey-contract', onClick: () => emit('view-contract', 701) }, 'view contract'),
     ]),
   }),
 }))
@@ -249,6 +246,9 @@ vi.mock('@/components/dialogs/DeploymentInfoFormDialog.vue', () => ({
   }),
 }))
 
+const JOURNEY_PUBLIC_ID = 'djy_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+const OPPORTUNITY_PUBLIC_ID = 'opp_test_88'
+
 const customerFixture = (overrides: Partial<CustomerDetailResponse> = {}): CustomerDetailResponse => ({
   id: 'cus_test_19',
   public_id: 'cus_test_19',
@@ -270,25 +270,28 @@ const customerFixture = (overrides: Partial<CustomerDetailResponse> = {}): Custo
   ...overrides,
 })
 
-const opportunityFixture = (): OpportunityListResponse => ({
-  id: 'opp_test_88',
-  opportunity_name: 'CRM 升级项目',
-  customer_id: 'cus_test_19',
-  procurement_method_id: null,
-  procurement_method_info: null,
-  total_amount: 320000,
-  user_count: 20,
-  unit_price: 16000,
-  license_type: 'SUBSCRIPTION',
-  subscription_years: 1,
+const journeyFixture = (overrides: Partial<DealJourney> = {}): DealJourney => ({
+  id: JOURNEY_PUBLIC_ID,
+  public_id: JOURNEY_PUBLIC_ID,
+  name: 'CRM 升级项目',
+  status: 'OPEN',
+  current_board_stage: 'closing_soon',
+  current_board_stage_label: '即将签约',
+  amount: 320000,
   purchase_type: 'NEW',
-  decision_maker_count: 1,
-  expected_closing_date: '2026-08-30',
-  stage_id: 1,
-  stage_info: { id: 1, stage_name: '方案沟通', win_probability: 50, is_default: 0 },
-  status: 0,
-  created_time: '2026-07-15T00:00:00.000Z',
-  last_modified_time: '2026-07-15T00:00:00.000Z',
+  started_at: '2026-07-15T00:00:00',
+  closed_at: null,
+  last_event_at: '2026-07-15T00:00:00',
+  primary_opportunity: {
+    public_id: OPPORTUNITY_PUBLIC_ID,
+    opportunity_name: 'CRM 升级项目',
+    status: 0,
+    approval_phase: 'approved',
+    win_probability: 50,
+    expected_closing_date: '2026-08-30',
+    product_name: 'CRM',
+  },
+  ...overrides,
 })
 
 const contractFixture = (): ContractListResponse => ({
@@ -297,7 +300,7 @@ const contractFixture = (): ContractListResponse => ({
   contract_name: 'CRM 升级合同',
   customer_id: 'cus_test_19',
   customer_name: '上海测试客户',
-  opportunity_id: 'opp_test_88',
+  opportunity_id: OPPORTUNITY_PUBLIC_ID,
   opportunity_name: 'CRM 升级项目',
   signing_contact_id: 1,
   user_count: 20,
@@ -316,12 +319,13 @@ const contractFixture = (): ContractListResponse => ({
   last_modified_time: '2026-07-15T00:00:00.000Z',
 })
 
-describe('CustomerDetailSheet opportunity drilldown', () => {
+describe('CustomerDetailSheet journey drilldown', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     const userStore = useUserStore()
     const permissionStore = usePermissionStore()
     userStore.userInfo = { id: 9, name: '测试用户', email: 'test@example.com' } as typeof userStore.userInfo
+    permissionStore.loadState = 'ready'
     permissionStore.permissions = [
       { code: 'customer:edit:own' },
       { code: 'customer:activity:create' },
@@ -332,7 +336,8 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
     routeState.query = {}
     customerApi.getCustomerDetail.mockResolvedValue(customerFixture())
     customerActivityApi.getActivities.mockResolvedValue([])
-    opportunityApi.getOpportunities.mockResolvedValue([opportunityFixture()])
+    dealJourneyApi.listByCustomer.mockResolvedValue([journeyFixture()])
+    dealJourneyApi.getByCustomer.mockResolvedValue(journeyFixture())
     contractApi.getCustomerContracts.mockResolvedValue([])
     paymentApi.getPaymentPlans.mockResolvedValue([])
     invoiceApi.getInvoiceTitles.mockResolvedValue({ invoice_titles: [] })
@@ -340,11 +345,10 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
     customerApi.getCustomerMembers.mockResolvedValue([])
   })
 
-  it('opens the requested opportunity directly when a target opportunity is provided', async () => {
+  it('labels the fourth tab as 业务旅程', async () => {
     const wrapper = mount(CustomerDetailSheet, {
       props: {
         customerId: 'cus_test_19',
-        targetOpportunityId: 'opp_test_88',
         visible: true,
       },
     })
@@ -352,16 +356,16 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
     await flushPromises()
     await nextTick()
 
-    const detail = wrapper.get('[data-testid="opportunity-detail-content"]')
-    expect(detail.attributes('data-opportunity-id')).toBe('opp_test_88')
-    expect(detail.attributes('data-embedded')).toBe('true')
+    const journeysTab = wrapper.get('[data-testid="tab-journeys"]')
+    expect(journeysTab.text()).toBe('业务旅程')
+    expect(wrapper.find('[data-testid="tab-opportunities"]').exists()).toBe(false)
   })
 
-  it('opens the project journey when the opportunities panel is requested', async () => {
+  it('opens the matching journey when a target opportunity id is provided', async () => {
     const wrapper = mount(CustomerDetailSheet, {
       props: {
         customerId: 'cus_test_19',
-        targetPanel: 'opportunities',
+        targetOpportunityId: OPPORTUNITY_PUBLIC_ID,
         visible: true,
       },
     })
@@ -369,8 +373,44 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
     await flushPromises()
     await nextTick()
 
-    expect(wrapper.get('[data-testid="tab-opportunities"]').attributes('data-active')).toBe('true')
-    expect(wrapper.find('[data-testid="opportunities-panel"]').exists()).toBe(true)
+    const detail = wrapper.get('[data-testid="deal-journey-detail"]')
+    expect(detail.attributes('data-journey-id')).toBe(JOURNEY_PUBLIC_ID)
+    expect(wrapper.find('[data-testid="deal-journeys-panel"]').exists()).toBe(false)
+  })
+
+  it('stays on the journeys list when the target opportunity has no matching journey', async () => {
+    const wrapper = mount(CustomerDetailSheet, {
+      props: {
+        customerId: 'cus_test_19',
+        targetOpportunityId: 'opp_missing',
+        targetPanel: 'journeys',
+        visible: true,
+      },
+    })
+
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.get('[data-testid="tab-journeys"]').attributes('data-active')).toBe('true')
+    expect(wrapper.find('[data-testid="deal-journeys-panel"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="deal-journey-detail"]').exists()).toBe(false)
+  })
+
+  it('opens the journeys panel when the journeys panel is requested', async () => {
+    const wrapper = mount(CustomerDetailSheet, {
+      props: {
+        customerId: 'cus_test_19',
+        targetPanel: 'journeys',
+        visible: true,
+      },
+    })
+
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.get('[data-testid="tab-journeys"]').attributes('data-active')).toBe('true')
+    expect(wrapper.find('[data-testid="deal-journeys-panel"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('新建商机')
   })
 
   it('opens a contract from the customer info panel inside the same detail sheet', async () => {
@@ -396,7 +436,7 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
     expect(wrapper.get('[data-testid="contract-detail-content"]').attributes('data-embedded')).toBe('true')
   })
 
-  it('renders opportunity detail content inside the current customer sheet when an opportunity is selected', async () => {
+  it('renders journey detail content inside the current customer sheet when a journey is selected', async () => {
     const wrapper = mount(CustomerDetailSheet, {
       props: {
         customerId: 'cus_test_19',
@@ -406,20 +446,43 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
 
     await wrapper.setProps({ visible: true })
     await flushPromises()
-    await wrapper.get('[data-testid="tab-opportunities"]').trigger('click')
+    await wrapper.get('[data-testid="tab-journeys"]').trigger('click')
     await nextTick()
 
-    await wrapper.get('[data-testid="view-opportunity"]').trigger('click')
+    await wrapper.get('[data-testid="view-journey"]').trigger('click')
     await nextTick()
 
     expect(wrapper.findAll('[data-testid="sheet-root"]')).toHaveLength(1)
-    expect(wrapper.find('[data-testid="opportunities-panel"]').exists()).toBe(false)
-    const detail = wrapper.get('[data-testid="opportunity-detail-content"]')
-    expect(detail.attributes('data-opportunity-id')).toBe('opp_test_88')
-    expect(detail.attributes('data-embedded')).toBe('true')
+    expect(wrapper.find('[data-testid="deal-journeys-panel"]').exists()).toBe(false)
+    const detail = wrapper.get('[data-testid="deal-journey-detail"]')
+    expect(detail.attributes('data-journey-id')).toBe(JOURNEY_PUBLIC_ID)
+    expect(detail.text()).toContain('CRM 升级项目')
   })
 
-  it('returns from opportunity detail to the opportunities list with highlighted row focus metadata', async () => {
+  it('opens a contract from a journey with journey parent context in the header', async () => {
+    contractApi.getCustomerContracts.mockResolvedValue([contractFixture()])
+
+    const wrapper = mount(CustomerDetailSheet, {
+      props: {
+        customerId: 'cus_test_19',
+        visible: true,
+      },
+    })
+
+    await flushPromises()
+    await wrapper.get('[data-testid="tab-journeys"]').trigger('click')
+    await nextTick()
+    await wrapper.get('[data-testid="view-journey"]').trigger('click')
+    await nextTick()
+    await wrapper.get('[data-testid="view-journey-contract"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.get('[data-testid="contract-detail-content"]').attributes('data-contract-id')).toBe('701')
+    expect(wrapper.get('[data-testid="detail-context-header"]').text()).toContain('CRM 升级项目')
+    expect(wrapper.get('[data-testid="detail-context-header"]').text()).not.toContain('商机')
+  })
+
+  it('returns from journey detail to the journeys list with highlighted row focus metadata', async () => {
     const wrapper = mount(CustomerDetailSheet, {
       props: {
         customerId: 'cus_test_19',
@@ -429,22 +492,22 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
 
     await wrapper.setProps({ visible: true })
     await flushPromises()
-    await wrapper.get('[data-testid="tab-opportunities"]').trigger('click')
+    await wrapper.get('[data-testid="tab-journeys"]').trigger('click')
     await nextTick()
-    await wrapper.get('[data-testid="view-opportunity"]').trigger('click')
-    await nextTick()
-
-    await wrapper.get('[data-testid="back-to-opportunities"]').trigger('click')
+    await wrapper.get('[data-testid="view-journey"]').trigger('click')
     await nextTick()
 
-    expect(wrapper.find('[data-testid="opportunity-detail-content"]').exists()).toBe(false)
-    const panel = wrapper.get('[data-testid="opportunities-panel"]')
-    expect(panel.attributes('data-highlighted-opportunity-id')).toBe('opp_test_88')
-    expect(panel.attributes('data-restore-focus-opportunity-id')).toBe('opp_test_88')
-    expect(wrapper.get('[data-testid="tab-opportunities"]').attributes('data-active')).toBe('true')
+    await wrapper.get('[data-testid="back-to-journeys"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.find('[data-testid="deal-journey-detail"]').exists()).toBe(false)
+    const panel = wrapper.get('[data-testid="deal-journeys-panel"]')
+    expect(panel.attributes('data-highlighted-journey-id')).toBe(JOURNEY_PUBLIC_ID)
+    expect(panel.attributes('data-restore-focus-journey-id')).toBe(JOURNEY_PUBLIC_ID)
+    expect(wrapper.get('[data-testid="tab-journeys"]').attributes('data-active')).toBe('true')
   })
 
-  it('refreshes customer data when embedded opportunity detail emits refresh', async () => {
+  it('refreshes customer data when embedded journey detail emits refresh', async () => {
     const wrapper = mount(CustomerDetailSheet, {
       props: {
         customerId: 'cus_test_19',
@@ -454,9 +517,9 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
 
     await wrapper.setProps({ visible: true })
     await flushPromises()
-    await wrapper.get('[data-testid="tab-opportunities"]').trigger('click')
+    await wrapper.get('[data-testid="tab-journeys"]').trigger('click')
     await nextTick()
-    await wrapper.get('[data-testid="view-opportunity"]').trigger('click')
+    await wrapper.get('[data-testid="view-journey"]').trigger('click')
     await nextTick()
 
     customerApi.getCustomerDetail.mockClear()
@@ -478,7 +541,7 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
 
     customerApi.getCustomerDetail.mockClear()
     customerActivityApi.getActivities.mockClear()
-    opportunityApi.getOpportunities.mockClear()
+    dealJourneyApi.listByCustomer.mockClear()
     contractApi.getCustomerContracts.mockClear()
     invoiceApi.getInvoiceTitles.mockClear()
     deploymentApi.list.mockClear()
@@ -489,7 +552,7 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
 
     expect(customerApi.getCustomerDetail).toHaveBeenCalledWith('cus_test_42')
     expect(customerActivityApi.getActivities).toHaveBeenCalledWith('cus_test_42')
-    expect(opportunityApi.getOpportunities).toHaveBeenCalledWith({ customer_id: 'cus_test_42' })
+    expect(dealJourneyApi.listByCustomer).toHaveBeenCalledWith('cus_test_42')
     expect(contractApi.getCustomerContracts).toHaveBeenCalledWith('cus_test_42')
     expect(invoiceApi.getInvoiceTitles).toHaveBeenCalledWith('cus_test_42')
     expect(deploymentApi.list).toHaveBeenCalledWith('cus_test_42')
@@ -550,7 +613,7 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
     await nextTick()
 
     expect(wrapper.text()).toContain('客户 42')
-    expect(wrapper.find('[data-testid="opportunity-detail-content"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="deal-journey-detail"]').exists()).toBe(false)
 
     customer19Load.resolve(customerFixture({ id: 'cus_test_19', public_id: 'cus_test_19', account_name: '客户 19' }))
     await flushPromises()
@@ -560,8 +623,8 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
     expect(wrapper.text()).not.toContain('客户 19')
   })
 
-  it('does not restore the opportunities tab from the route query on mount', async () => {
-    routeState.query = { customerId: 'cus_test_19', tab: 'opportunities' }
+  it('does not restore the journeys tab from the route query on mount', async () => {
+    routeState.query = { customerId: 'cus_test_19', tab: 'journeys' }
 
     const wrapper = mount(CustomerDetailSheet, {
       props: {
@@ -573,7 +636,7 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-testid="tab-customer-profile"]').attributes('data-active')).toBe('true')
-    expect(wrapper.find('[data-testid="opportunities-panel"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="deal-journeys-panel"]').exists()).toBe(false)
   })
 
   it('switches tabs locally without changing the route query', async () => {
@@ -587,16 +650,16 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
     })
 
     await flushPromises()
-    await wrapper.get('[data-testid="tab-opportunities"]').trigger('click')
+    await wrapper.get('[data-testid="tab-journeys"]').trigger('click')
     await nextTick()
 
-    expect(wrapper.get('[data-testid="tab-opportunities"]').attributes('data-active')).toBe('true')
+    expect(wrapper.get('[data-testid="tab-journeys"]').attributes('data-active')).toBe('true')
     expect(routerPush).not.toHaveBeenCalled()
     expect(routerReplace).not.toHaveBeenCalled()
   })
 
-  it('opens embedded opportunity detail locally without changing the route query', async () => {
-    routeState.query = { customerId: 'cus_test_19', tab: 'opportunities' }
+  it('opens embedded journey detail locally without changing the route query', async () => {
+    routeState.query = { customerId: 'cus_test_19', tab: 'journeys' }
 
     const wrapper = mount(CustomerDetailSheet, {
       props: {
@@ -606,18 +669,18 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
     })
 
     await flushPromises()
-    await wrapper.get('[data-testid="tab-opportunities"]').trigger('click')
+    await wrapper.get('[data-testid="tab-journeys"]').trigger('click')
     await nextTick()
-    await wrapper.get('[data-testid="view-opportunity"]').trigger('click')
+    await wrapper.get('[data-testid="view-journey"]').trigger('click')
     await nextTick()
 
-    expect(wrapper.get('[data-testid="opportunity-detail-content"]').attributes('data-opportunity-id')).toBe('opp_test_88')
+    expect(wrapper.get('[data-testid="deal-journey-detail"]').attributes('data-journey-id')).toBe(JOURNEY_PUBLIC_ID)
     expect(routerPush).not.toHaveBeenCalled()
     expect(routerReplace).not.toHaveBeenCalled()
   })
 
-  it('does not restore embedded opportunity detail from the route query on mount', async () => {
-    routeState.query = { customerId: 'cus_test_19', tab: 'opportunities', opportunityId: 'opp_test_88' }
+  it('does not restore embedded journey detail from the route query on mount', async () => {
+    routeState.query = { customerId: 'cus_test_19', tab: 'journeys', journeyId: JOURNEY_PUBLIC_ID }
 
     const wrapper = mount(CustomerDetailSheet, {
       props: {
@@ -628,12 +691,12 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
 
     await flushPromises()
 
-    expect(wrapper.find('[data-testid="opportunity-detail-content"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="deal-journey-detail"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="tab-customer-profile"]').attributes('data-active')).toBe('true')
   })
 
-  it('returns to the opportunities list locally without changing the route query', async () => {
-    routeState.query = { customerId: 'cus_test_19', tab: 'opportunities', opportunityId: 'opp_test_88' }
+  it('returns to the journeys list locally without changing the route query', async () => {
+    routeState.query = { customerId: 'cus_test_19', tab: 'journeys', journeyId: JOURNEY_PUBLIC_ID }
 
     const wrapper = mount(CustomerDetailSheet, {
       props: {
@@ -643,15 +706,15 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
     })
 
     await flushPromises()
-    await wrapper.get('[data-testid="tab-opportunities"]').trigger('click')
+    await wrapper.get('[data-testid="tab-journeys"]').trigger('click')
     await nextTick()
-    await wrapper.get('[data-testid="view-opportunity"]').trigger('click')
+    await wrapper.get('[data-testid="view-journey"]').trigger('click')
     await nextTick()
-    await wrapper.get('[data-testid="back-to-opportunities"]').trigger('click')
+    await wrapper.get('[data-testid="back-to-journeys"]').trigger('click')
     await nextTick()
 
-    expect(wrapper.find('[data-testid="opportunity-detail-content"]').exists()).toBe(false)
-    expect(wrapper.get('[data-testid="opportunities-panel"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="deal-journey-detail"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="deal-journeys-panel"]').exists()).toBe(true)
     expect(routerReplace).not.toHaveBeenCalled()
     expect(routerPush).not.toHaveBeenCalled()
   })

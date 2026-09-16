@@ -26,6 +26,7 @@ const emit = defineEmits<{
 
 const objectTypeLabels: Record<DetailContextNode['type'], string> = {
   customer: '客户',
+  journey: '业务旅程',
   opportunity: '商机',
   contract: '合同',
   'payment-plan': '回款计划',
