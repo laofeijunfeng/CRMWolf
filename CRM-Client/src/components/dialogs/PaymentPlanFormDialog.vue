@@ -94,6 +94,7 @@ const contractTotalLoading = ref(false)
 const contractTotalFailed = ref(false)
 const submitting = ref(false)
 const customerSearchKeyword = ref('')
+let allocationLoadGeneration = 0
 
 const initialForm = ref<PaymentPlanForm>({
   customerId: '',
@@ -429,12 +430,14 @@ const resolvedContractId = computed<number | null>(() => {
 })
 
 const contractTotalCents = computed<number | null>(() => {
-  if (contractTotalFailed.value) return null
   if (props.fixedContract !== null) {
     return toCents(props.fixedContract.total_amount)
   }
-  if (contractTotalOverride.value !== null) {
-    return toCents(contractTotalOverride.value)
+  if (!isCreateMode.value) {
+    if (contractTotalFailed.value) return null
+    if (contractTotalOverride.value !== null) {
+      return toCents(contractTotalOverride.value)
+    }
   }
   const selected = contracts.value.find((contract) => String(contract.id) === form.contractId)
   return selected === undefined ? null : toCents(selected.total_amount)
@@ -497,34 +500,65 @@ function validatePlannedAmount(trigger: 'input' | 'submit'): void {
   errors.plannedAmount = plannedAmountOverCapMessage(amountCents)
 }
 
-async function loadExistingPlans(contractId: number): Promise<void> {
+function resetAllocationState(): void {
+  allocationLoadGeneration += 1
+  existingPlans.value = []
+  existingPlansLoading.value = false
+  existingPlansFailed.value = false
+  contractTotalOverride.value = null
+  contractTotalLoading.value = false
+  contractTotalFailed.value = false
+}
+
+async function loadExistingPlans(contractId: number, generation: number): Promise<void> {
   existingPlansLoading.value = true
   existingPlansFailed.value = false
   try {
-    existingPlans.value = await paymentApi.getPaymentPlans(contractId)
+    const plans = await paymentApi.getPaymentPlans(contractId)
+    if (generation !== allocationLoadGeneration) return
+    existingPlans.value = plans
   } catch (error: unknown) {
+    if (generation !== allocationLoadGeneration) return
     existingPlans.value = []
     existingPlansFailed.value = true
     handleApiError(error, '获取回款计划')
   } finally {
-    existingPlansLoading.value = false
+    if (generation === allocationLoadGeneration) {
+      existingPlansLoading.value = false
+    }
   }
 }
 
-async function loadContractTotalForEdit(contractId: number): Promise<void> {
+async function loadContractTotalForEdit(contractId: number, generation: number): Promise<void> {
   if (props.fixedContract !== null || isCreateMode.value) return
   contractTotalLoading.value = true
   contractTotalFailed.value = false
   try {
     const contract = await contractApi.getContract(contractId)
+    if (generation !== allocationLoadGeneration) return
     contractTotalOverride.value = String(contract.total_amount)
   } catch (error: unknown) {
+    if (generation !== allocationLoadGeneration) return
     contractTotalOverride.value = null
     contractTotalFailed.value = true
     handleApiError(error, '获取合同金额')
   } finally {
-    contractTotalLoading.value = false
+    if (generation === allocationLoadGeneration) {
+      contractTotalLoading.value = false
+    }
   }
+}
+
+async function refreshAllocation(contractId: number): Promise<void> {
+  const generation = allocationLoadGeneration + 1
+  allocationLoadGeneration = generation
+  await Promise.all([
+    loadExistingPlans(contractId, generation),
+    loadContractTotalForEdit(contractId, generation),
+  ])
+  if (generation !== allocationLoadGeneration) return
+  applyCreatePrefill()
+  validatePlannedAmount('input')
 }
 
 function applyCreatePrefill(): void {
@@ -544,12 +578,18 @@ watch(
       closeGuard.reset()
       customerSearchKeyword.value = ''
       resetForm()
+      resetAllocationState()
       void fetchCustomers(customerSearchKeyword.value)
       const customerId = form.customerId.trim()
       if (customerId !== '') {
         void fetchContracts(customerId)
       }
+      const contractId = resolvedContractId.value
+      if (contractId !== null) {
+        void refreshAllocation(contractId)
+      }
     } else {
+      resetAllocationState()
       if (closeGuard.handleParentClose()) return
       clearErrors()
       customerSearchKeyword.value = ''
@@ -569,20 +609,13 @@ watch(
 watch(
   () => resolvedContractId.value,
   (contractId) => {
-    if (!visible.value || contractId === null) {
-      existingPlans.value = []
+    if (!visible.value) return
+    if (contractId === null) {
+      resetAllocationState()
       return
     }
-    void (async (): Promise<void> => {
-      await Promise.all([
-        loadExistingPlans(contractId),
-        loadContractTotalForEdit(contractId),
-      ])
-      applyCreatePrefill()
-      validatePlannedAmount('input')
-    })()
+    void refreshAllocation(contractId)
   },
-  { immediate: true },
 )
 </script>
 

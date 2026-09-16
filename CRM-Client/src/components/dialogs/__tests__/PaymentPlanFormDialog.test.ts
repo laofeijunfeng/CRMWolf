@@ -377,4 +377,86 @@ describe('PaymentPlanFormDialog', () => {
     )
     wrapper.unmount()
   })
+
+  it('reloads plans and re-prefills remaining when reopening create on the same contract', async () => {
+    const getPlans = vi.spyOn(paymentApi, 'getPaymentPlans').mockResolvedValue([existingPlan(12000)])
+
+    const wrapper = mount(PaymentPlanFormDialog, {
+      props: {
+        open: true,
+        mode: 'create',
+        fixedContract: { id: 1, contract_name: '合同', total_amount: 40000 },
+      },
+      global: { stubs: formStubs },
+    })
+    await flushPromises()
+
+    expect((wrapper.get('#payment-plan-amount').element as HTMLInputElement).value).toBe('28000')
+    expect(getPlans).toHaveBeenCalledTimes(1)
+
+    await wrapper.setProps({ open: false })
+    await flushPromises()
+
+    getPlans.mockResolvedValue([existingPlan(12000), existingPlan(28000, 10)])
+    await wrapper.setProps({ open: true })
+    await flushPromises()
+
+    expect(getPlans).toHaveBeenCalledTimes(2)
+    expect((wrapper.get('#payment-plan-amount').element as HTMLInputElement).value).toBe('')
+    expect(wrapper.get('[data-testid="payment-plan-amount-helper"]').text()).toBe(
+      `还可分配 ${formatCurrency(0)}`,
+    )
+    wrapper.unmount()
+  })
+
+  it('does not leak list-page edit contract total into a later create', async () => {
+    const current = existingPlan(12000, 1)
+    vi.spyOn(paymentApi, 'getPaymentPlans')
+      .mockResolvedValueOnce([current])
+      .mockResolvedValue([])
+    vi.spyOn(contractApi, 'getContract').mockResolvedValue({
+      id: 1,
+      total_amount: '40000',
+    } as Awaited<ReturnType<typeof contractApi.getContract>>)
+
+    const wrapper = mount(PaymentPlanFormDialog, {
+      props: {
+        open: true,
+        mode: 'edit',
+        plan: current,
+      },
+      global: { stubs: formStubs },
+    })
+    await flushPromises()
+
+    expect(contractApi.getContract).toHaveBeenCalledWith(1)
+    expect(wrapper.get('[data-testid="payment-plan-amount-helper"]').text()).toContain(
+      formatCurrency(40000),
+    )
+
+    await wrapper.setProps({ open: false })
+    await flushPromises()
+
+    await wrapper.setProps({
+      open: true,
+      mode: 'create',
+      plan: null,
+      fixedContract: null,
+    })
+    await flushPromises()
+
+    expect((wrapper.get('#payment-plan-amount').element as HTMLInputElement).value).toBe('')
+    expect(wrapper.find('[data-testid="payment-plan-amount-helper"]').exists()).toBe(false)
+
+    await wrapper.setProps({
+      fixedContract: { id: 2, contract_name: '另一合同', total_amount: 100 },
+    })
+    await flushPromises()
+
+    expect((wrapper.get('#payment-plan-amount').element as HTMLInputElement).value).toBe('100')
+    expect(wrapper.get('[data-testid="payment-plan-amount-helper"]').text()).toBe(
+      `还可分配 ${formatCurrency(100)}`,
+    )
+    wrapper.unmount()
+  })
 })
