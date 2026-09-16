@@ -269,9 +269,6 @@ const relatedContractTotalAmount = computed(() => Number(relatedContract.value?.
 const plannedPaymentAmount = computed(() =>
   paymentPlans.value.reduce((total, plan) => total + Number(plan.planned_amount ?? 0), 0)
 )
-const remainingPaymentPlanAmount = computed(() =>
-  Math.max(0, relatedContractTotalAmount.value - plannedPaymentAmount.value)
-)
 const isPaymentPlanAmountComplete = computed(() =>
   relatedContractTotalAmount.value > 0
     && plannedPaymentAmount.value >= relatedContractTotalAmount.value - 0.01
