@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from hashlib import sha256
 from typing import TYPE_CHECKING
@@ -45,8 +45,6 @@ from app.services.customer_profile_watermark_service import (
 from app.utils.time import business_now
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from sqlalchemy.orm import Session
 
     from app.services.customer_profile_projection_quality import CustomerProfileQualityReport
@@ -161,18 +159,26 @@ class CustomerProfileProjectionService:
     def __init__(self, *, policy: CustomerProfileProjectionPolicy | None = None) -> None:
         self.policy = policy or customer_profile_projection_policy
 
-    def assess_draft(self, draft: CustomerProfileProjectionDraft) -> CustomerProfileProjectionAssessment:
+    def assess_draft(
+        self,
+        draft: CustomerProfileProjectionDraft,
+        inherited_sections: Mapping[str, object] | None = None,
+    ) -> CustomerProfileProjectionAssessment:
         """Evaluate hard invariants and soft quality diagnostics in one pass."""
 
         try:
-            return self.policy.assess(draft)
+            return self.policy.assess(draft, inherited_sections=inherited_sections)
         except CustomerProfileProjectionValidationError as exc:
             raise CustomerProfileProjectionError(str(exc), code=exc.code) from exc
 
-    def validate_draft(self, draft: CustomerProfileProjectionDraft) -> CustomerProfileSections:
+    def validate_draft(
+        self,
+        draft: CustomerProfileProjectionDraft,
+        inherited_sections: Mapping[str, object] | None = None,
+    ) -> CustomerProfileSections:
         """Validate hard publication invariants."""
 
-        return self.assess_draft(draft).sections
+        return self.assess_draft(draft, inherited_sections=inherited_sections).sections
 
     def lint_draft(self, draft: CustomerProfileProjectionDraft) -> CustomerProfileQualityReport:
         """Return non-blocking narrative diagnostics for a validated draft."""
@@ -241,6 +247,35 @@ class CustomerProfileProjectionService:
         # than being mistaken for fresh evidence.
         evidence_refs = _merge_evidence_refs(previous.evidence_refs_json, draft.evidence_refs)
         return replace(draft, sections=merged_sections, evidence_refs=evidence_refs)
+
+    def _inherited_sections_for_draft(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        customer_id: int,
+        draft: CustomerProfileProjectionDraft,
+    ) -> dict[str, object] | None:
+        target_sections = tuple(dict.fromkeys(draft.target_sections))
+        if not target_sections or set(target_sections) == set(PROFILE_SECTION_NAMES):
+            return None
+        current = customer_profile_projection_crud.get_current(
+            db,
+            team_id=team_id,
+            customer_id=customer_id,
+            for_update=False,
+        )
+        if current is None:
+            return None
+        previous = customer_profile_projection_crud.get_current_version(
+            db,
+            team_id=team_id,
+            customer_id=customer_id,
+            current=current,
+        )
+        if previous is None:
+            return None
+        return _version_sections(previous)
 
     def ensure_current(
         self,
@@ -388,11 +423,14 @@ class CustomerProfileProjectionService:
             customer_id=customer_id,
             draft=draft,
         )
+        inherited_sections = self._inherited_sections_for_draft(
+            db, team_id=team_id, customer_id=customer_id, draft=draft
+        )
 
         # Re-evaluate after partial merging so preserved sections are checked
         # too. The Agent may carry diagnostics through its checkpoint, but this
         # policy assessment is authoritative at the publication seam.
-        assessment = self.assess_draft(draft)
+        assessment = self.assess_draft(draft, inherited_sections=inherited_sections)
         sections = assessment.sections
         quality_report = assessment.quality_report
         source_watermark = _json_object(draft.source_watermark)
@@ -738,23 +776,27 @@ class CustomerProfileProjectionService:
             }
         )
         watermark["product_catalog_names"] = [item.name for item in catalog_rows if item.is_active]
-        sections = CustomerProfileSections(
-            current_situation={
-                "headline": str(customer.get("account_name") or "该客户"),
-                "summary": current_summary,
-                "customer_basics": _customer_basics(customer),
-                "demand_background": {
-                    "summary": _demand_background_summary(demand_items),
-                    "items": demand_items,
-                },
-                "business_status": _business_status(active_journeys, opportunities, contracts, payment_records),
-                "business_status_rows": _business_status_rows(
-                    active_journeys=active_journeys,
-                    opportunities=opportunities,
-                    contracts=contracts,
-                ),
-                "latest_change": important_changes[0] if important_changes else None,
+        current_situation = {
+            "headline": str(customer.get("account_name") or "该客户"),
+            "summary": current_summary,
+            "customer_basics": _customer_basics(customer),
+            "demand_background": {
+                "summary": _demand_background_summary(demand_items),
+                "items": demand_items,
             },
+            "business_status": _business_status(active_journeys, opportunities, contracts, payment_records),
+            "business_status_rows": _business_status_rows(
+                active_journeys=active_journeys,
+                opportunities=opportunities,
+                contracts=contracts,
+            ),
+            "latest_change": important_changes[0] if important_changes else None,
+        }
+        latest_activity_id = latest_activity.get("id") if latest_activity else None
+        if latest_activity_id is not None:
+            current_situation["evidence_refs"] = _refs(_evidence_key("activity", latest_activity_id))
+        sections = CustomerProfileSections(
+            current_situation=current_situation,
             current_journeys=active_journeys,
             important_changes=important_changes,
             long_term_context=long_term_context,

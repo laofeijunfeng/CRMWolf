@@ -38,9 +38,16 @@ class CustomerProfileProjectionAssessment:
 class CustomerProfileProjectionPolicy:
     """Evaluate profile content without performing database or Agent side effects."""
 
-    def assess(self, draft: CustomerProfileProjectionDraft) -> CustomerProfileProjectionAssessment:
+    def assess(
+        self,
+        draft: CustomerProfileProjectionDraft,
+        inherited_sections: object = None,
+    ) -> CustomerProfileProjectionAssessment:
         try:
-            sections = customer_profile_projection_validator.validate_draft(draft)
+            sections = customer_profile_projection_validator.validate_draft(
+                draft,
+                inherited_sections=inherited_sections,
+            )
         except CustomerProfileProjectionValidationError:
             raise
         quality_report = customer_profile_projection_quality_linter.lint(

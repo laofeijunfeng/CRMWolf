@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -27,6 +28,7 @@ def assert_claims_grounded(
     *,
     evidence_refs: object,
     product_catalog_names: object,
+    inherited_payload: Mapping[str, Any] | None = None,
 ) -> None:
     """Reject demand prose that invents catalog products or template plot."""
 
@@ -35,21 +37,29 @@ def assert_claims_grounded(
         return
     registry = _snippet_registry(evidence_refs)
     catalog = [str(name) for name in (product_catalog_names or []) if str(name).strip()]
+    inherited = inherited_payload if isinstance(inherited_payload, Mapping) else {}
+    inherit_enabled = inherited_payload is not None
     current = payload.get("current_situation")
     demand_items: list[Mapping[str, Any]] = []
     demand: object = None
+    inherited_current = inherited.get("current_situation") if inherit_enabled else None
     if isinstance(current, Mapping):
         demand = current.get("demand_background")
         if isinstance(demand, Mapping) and isinstance(demand.get("items"), list):
             demand_items = [item for item in demand["items"] if isinstance(item, Mapping)]
-        _assert_text_grounded(
-            current.get("summary"),
-            evidence_refs=_collect_refs(demand_items),
-            product_names=_collect_bound_names(demand_items),
-            registry=registry,
-            catalog=catalog,
-        )
-    if isinstance(demand, Mapping):
+        summary_refs = [*_direct_refs(current.get("evidence_refs")), *_collect_refs(demand_items)]
+        if not _unchanged(current, inherited_current, enabled=inherit_enabled):
+            _assert_text_grounded(
+                current.get("summary"),
+                evidence_refs=summary_refs,
+                product_names=_collect_bound_names(demand_items),
+                registry=registry,
+                catalog=catalog,
+            )
+    inherited_demand = (
+        inherited_current.get("demand_background") if isinstance(inherited_current, Mapping) else None
+    )
+    if isinstance(demand, Mapping) and not _unchanged(demand, inherited_demand, enabled=inherit_enabled):
         _assert_text_grounded(
             demand.get("summary"),
             evidence_refs=_collect_refs(demand_items),
@@ -66,7 +76,8 @@ def assert_claims_grounded(
                 catalog=catalog,
             )
     process = payload.get("follow_up_process")
-    if isinstance(process, list):
+    inherited_process = inherited.get("follow_up_process") if inherit_enabled else None
+    if isinstance(process, list) and not _unchanged(process, inherited_process, enabled=inherit_enabled):
         for item in process:
             if not isinstance(item, Mapping):
                 continue
@@ -77,6 +88,20 @@ def assert_claims_grounded(
                 registry=registry,
                 catalog=catalog,
             )
+
+
+def _canonical(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def _unchanged(value: object, inherited_value: object, *, enabled: bool) -> bool:
+    return enabled and _canonical(value) == _canonical(inherited_value)
+
+
+def _direct_refs(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return list(dict.fromkeys(ref.strip() for ref in value if isinstance(ref, str) and ref.strip()))
 
 
 def _fold(value: str) -> str:
