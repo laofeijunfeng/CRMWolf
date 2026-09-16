@@ -142,6 +142,17 @@ interface ContractOpportunityContext {
   subscription_years: number | null
 }
 
+interface CreateContractPayload {
+  opportunityId: string
+  customerId: string
+  customerName: string
+  opportunityName: string
+  totalAmount: number
+  userCount: number
+  licenseType: string
+  subscriptionYears: number | null
+}
+
 const fixedContractOpportunity = ref<ContractOpportunityContext | null>(null)
 
 // ==================== Data Loading State ====================
@@ -1035,6 +1046,21 @@ const handleJourneyDetailRefresh = async (): Promise<void> => {
   }
   emit('refresh')
 }
+const handleCreateContractFromJourney = (payload: CreateContractPayload): void => {
+  editingContract.value = null
+  fixedContractOpportunity.value = {
+    id: payload.opportunityId,
+    opportunity_name: payload.opportunityName,
+    customer_id: payload.customerId,
+    customer_name: payload.customerName,
+    total_amount: payload.totalAmount,
+    user_count: payload.userCount,
+    license_type: payload.licenseType,
+    subscription_years: payload.subscriptionYears
+  }
+  contractDialogOpen.value = true
+}
+
 
 
 const handleContractDialogClose = (open: boolean): void => {
@@ -1515,12 +1541,22 @@ onBeforeUnmount(() => {
           <DealJourneyDetailContent
             v-if="selectedJourneyId !== null"
             :journey-id="selectedJourneyId"
+            :customer-id="customerId ?? ''"
             :journey="selectedJourney"
             embedded
+            :show-breadcrumb="false"
+            :customer-context="customerId === null ? null : { customerId, customerName: customer?.account_name }"
+            :can-edit-customer-context="canEditCurrentCustomer"
             @back="handleBackFromJourney"
             @close="handleContextClose"
             @refresh="handleJourneyDetailRefresh"
             @view-contract="handleViewContractFromJourney"
+            @view-payment-plan="handleViewPaymentPlan"
+            @create-contract="handleCreateContractFromJourney"
+            @edit-contract="handleEditContract"
+            @submit-contract-approval="handleSubmitContractApproval"
+            @withdraw-contract-approval="handleWithdrawContractApproval"
+            @delete-contract="handleDeleteContract"
           />
 
           <ContractDetailContent
