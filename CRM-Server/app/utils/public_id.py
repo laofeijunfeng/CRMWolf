@@ -5,6 +5,8 @@ from uuid import uuid4
 
 ACQUISITION_SOURCE_PUBLIC_ID_PATTERN = re.compile(r"^acq_[0-9a-f]{32}$")
 OPPORTUNITY_PUBLIC_ID_PATTERN = re.compile(r"^opp_[0-9a-f]{32}$")
+DEAL_JOURNEY_PUBLIC_ID_PATTERN = re.compile(r"^djy_[0-9a-f]{32}$")
+
 SALES_COMMITMENT_PUBLIC_ID_PATTERN = re.compile(r"^scm_[0-9a-f]{32}$")
 FOLLOW_UP_TASK_PUBLIC_ID_PATTERN = re.compile(r"^fut_[0-9a-f]{32}$")
 FOLLOW_UP_TASK_EVENT_PUBLIC_ID_PATTERN = re.compile(r"^fte_[0-9a-f]{32}$")
@@ -30,6 +32,12 @@ def is_opportunity_public_id(value: object) -> bool:
     if not isinstance(value, str):
         return False
     return bool(OPPORTUNITY_PUBLIC_ID_PATTERN.fullmatch(value))
+
+
+def is_deal_journey_public_id(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    return bool(DEAL_JOURNEY_PUBLIC_ID_PATTERN.fullmatch(value))
 
 
 def is_sales_commitment_public_id(value: object) -> bool:
