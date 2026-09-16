@@ -43,7 +43,7 @@ import CustomerFormDialog from '@/components/dialogs/CustomerFormDialog.vue'
 import CustomerTransferDialog from '@/components/dialogs/CustomerTransferDialog.vue'
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
 import CustomerDetailSheet from './CustomerDetailSheet.vue'
-import CustomerOpportunityHoverCard from '@/components/customer/CustomerOpportunityHoverCard.vue'
+import CustomerDealJourneyHoverCard from '@/components/customer/CustomerDealJourneyHoverCard.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import customerApi, {
   type CustomerResponse,
@@ -135,14 +135,14 @@ const openCustomerDetail = (customerId: string): void => {
   selectedCustomerId.value = customerId
 }
 
-const openCustomerOpportunity = (customerId: string, opportunityId: string): void => {
-  targetOpportunityId.value = opportunityId
-  targetJourneyId.value = null
+const openCustomerJourney = (customerId: string, journeyPublicId: string): void => {
+  targetOpportunityId.value = null
+  targetJourneyId.value = journeyPublicId
   targetCustomerDetailPanel.value = 'journeys'
   selectedCustomerId.value = customerId
 }
 
-const openCustomerOpportunities = (customerId: string): void => {
+const openCustomerJourneys = (customerId: string): void => {
   targetOpportunityId.value = null
   targetJourneyId.value = null
   targetCustomerDetailPanel.value = 'journeys'
@@ -1243,18 +1243,18 @@ watchEffect(() => {
 
       <!-- 客户名称 -->
       <template #cell-account_name="{ row }">
-        <CustomerOpportunityHoverCard
+        <CustomerDealJourneyHoverCard
           :customer-id="row.id"
           :customer-name="row.account_name"
-          @select-opportunity="openCustomerOpportunity(row.id, $event)"
-          @view-all="openCustomerOpportunities(row.id)"
+          @select-journey="openCustomerJourney(row.id, $event)"
+          @view-all="openCustomerJourneys(row.id)"
         >
           <template #trigger>
-            <span class="link-text" data-testid="customer-opportunity-trigger" @click.stop="openCustomerDetail(row.id)">
+            <span class="link-text" data-testid="customer-deal-journey-trigger" @click.stop="openCustomerDetail(row.id)">
               {{ row.account_name }}
             </span>
           </template>
-        </CustomerOpportunityHoverCard>
+        </CustomerDealJourneyHoverCard>
       </template>
 
       <!-- 行业：有二级行业时只显示二级（解析 name 中的 "/"），否则显示完整路径 -->

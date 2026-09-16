@@ -115,10 +115,23 @@ vi.mock('@/components/dialogs/CustomerFormDialog.vue', () => ({
 vi.mock('@/components/dialogs/CustomerTransferDialog.vue', () => ({ default: defineComponent({ name: 'CustomerTransferDialog', setup: () => () => null }) }))
 vi.mock('@/components/dialogs/OpportunityFormDialog.vue', () => ({ default: defineComponent({ name: 'OpportunityFormDialog', setup: () => () => null }) }))
 vi.mock('@/components/StatusBadge.vue', () => ({ default: defineComponent({ name: 'StatusBadge', setup: () => () => h('span') }) }))
-vi.mock('@/components/customer/CustomerOpportunityHoverCard.vue', () => ({
+vi.mock('@/components/customer/CustomerDealJourneyHoverCard.vue', () => ({
   default: defineComponent({
-    name: 'CustomerOpportunityHoverCard',
-    setup: (_, { slots }) => () => h('div', slots.trigger?.()),
+    name: 'CustomerDealJourneyHoverCard',
+    emits: ['select-journey', 'view-all'],
+    setup: (_, { emit, slots }) => () => h('div', [
+      slots.trigger?.(),
+      h('button', {
+        type: 'button',
+        'data-testid': 'select-hover-journey',
+        onClick: () => emit('select-journey', 'djy_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+      }, 'select-journey'),
+      h('button', {
+        type: 'button',
+        'data-testid': 'view-all-hover-journeys',
+        onClick: () => emit('view-all'),
+      }, 'view-all'),
+    ]),
   }),
 }))
 vi.mock('@/views/CustomerDetailSheet.vue', () => ({
@@ -268,6 +281,34 @@ describe('Customers local detail sheet state', () => {
     expect(sheet.attributes('data-visible')).toBe('true')
     expect(sheet.attributes('data-customer-id')).toBe('cus_test_19')
     expect(sheet.attributes('data-target-panel')).toBe('')
+    expect(sheet.attributes('data-target-journey-id')).toBe('')
+    expect(sheet.attributes('data-target-opportunity-id')).toBe('')
+  })
+
+  it('opens a selected deal journey from the name hover card', async () => {
+    const wrapper = mount(Customers)
+    await flushPromises()
+
+    await wrapper.get('[data-testid="select-hover-journey"]').trigger('click')
+
+    const sheet = wrapper.get('[data-testid="customer-detail-sheet"]')
+    expect(sheet.attributes('data-visible')).toBe('true')
+    expect(sheet.attributes('data-customer-id')).toBe('cus_test_19')
+    expect(sheet.attributes('data-target-panel')).toBe('journeys')
+    expect(sheet.attributes('data-target-journey-id')).toBe('djy_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+    expect(sheet.attributes('data-target-opportunity-id')).toBe('')
+  })
+
+  it('opens the journeys tab from hover view-all without a journey id', async () => {
+    const wrapper = mount(Customers)
+    await flushPromises()
+
+    await wrapper.get('[data-testid="view-all-hover-journeys"]').trigger('click')
+
+    const sheet = wrapper.get('[data-testid="customer-detail-sheet"]')
+    expect(sheet.attributes('data-visible')).toBe('true')
+    expect(sheet.attributes('data-customer-id')).toBe('cus_test_19')
+    expect(sheet.attributes('data-target-panel')).toBe('journeys')
     expect(sheet.attributes('data-target-journey-id')).toBe('')
     expect(sheet.attributes('data-target-opportunity-id')).toBe('')
   })
