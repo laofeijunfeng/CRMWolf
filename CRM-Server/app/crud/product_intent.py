@@ -31,12 +31,48 @@ def first_active_product(db: Session, team_id: int) -> Product | None:
     return products[0] if products else None
 
 
+def format_active_product_catalog(db: Session | None, team_id: int | None) -> tuple[str, str]:
+    if db is None or team_id is None or not hasattr(db, "query"):
+        return "无", ""
+    products = product_crud.list(db, int(team_id), is_active=True)
+    if not products:
+        return "无", ""
+    catalog_text = "、".join(f"{product.name}({product.public_id})" for product in products)
+    names_enum = "|".join(product.name for product in products)
+    return catalog_text, names_enum
+
+
+def match_active_product(db: Session, team_id: int, raw: object) -> Product | None:
+    text = str(raw).strip() if raw is not None else ""
+    if not text:
+        return None
+    by_id = product_crud.get_by_public_id(db, text, team_id)
+    if by_id is not None and bool(by_id.is_active):
+        return by_id
+    products = product_crud.list(db, team_id, is_active=True)
+    folded = text.casefold()
+    exact = [product for product in products if product.name.casefold() == folded]
+    if len(exact) == 1:
+        return exact[0]
+    contained = [
+        product
+        for product in products
+        if product.name.casefold() in folded or folded in product.name.casefold()
+    ]
+    if len(contained) == 1:
+        return contained[0]
+    return None
+
+
 def resolve_writable_product(db: Session, team_id: int, product_public_id: str | None) -> Product:
     if _is_blank(product_public_id):
         if first_active_product(db, team_id) is None:
             raise ValueError(EMPTY_CATALOG_MESSAGE)
         raise ValueError(MISSING_PRODUCT_MESSAGE)
 
+    matched = match_active_product(db, team_id, product_public_id)
+    if matched is not None:
+        return matched
     product = product_crud.get_by_public_id(db, str(product_public_id).strip(), team_id)
     if product is None:
         raise ProductNotFoundError(PRODUCT_NOT_FOUND_MESSAGE)

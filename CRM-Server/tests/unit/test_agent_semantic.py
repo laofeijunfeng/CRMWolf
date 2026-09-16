@@ -22,7 +22,7 @@ from app.services.agent.semantic import (
     AgentSemanticParser,
     AgentSemanticParserError,
 )
-from app.services.agent.semantic_plan import semantic_plan_from_result
+from app.services.agent.semantic_plan import semantic_plan_from_result, workflow_intent_from_semantic_plan
 
 
 def test_semantic_prompt_declares_stage_transition_as_semantic_only():
@@ -225,12 +225,16 @@ def test_semantic_prompt_injects_team_source_names_instead_of_hardcoded_enum():
     prompt = render_semantic_system_prompt(
         source_names=["线上注册", "未分类"],
         default_source_name="未分类",
+        product_catalog_text="Hifox(prd_hifox)、CRMWolf(prd_crm)",
+        product_names_enum="Hifox|CRMWolf",
     )
     messages = build_semantic_messages(
         "帮我建一条线索",
         '{"recent_messages":[]}',
         source_names=["线上注册", "未分类"],
         default_source_name="未分类",
+        product_catalog_text="Hifox(prd_hifox)、CRMWolf(prd_crm)",
+        product_names_enum="Hifox|CRMWolf",
     )
 
     assert "获客来源只能输出当前团队启用项：线上注册、未分类" in prompt  # noqa: RUF001
@@ -239,6 +243,11 @@ def test_semantic_prompt_injects_team_source_names_instead_of_hardcoded_enum():
     assert "用户未明确来源时默认可输出“未分类”" in prompt
     assert "线上注册|市场活动|客户推荐|电话营销|网站咨询|展会|其他" not in prompt
     assert "获客来源只能输出当前团队启用项：线上注册、未分类" in messages[0]["content"]  # noqa: RUF001
+    assert "当前团队启用产品：Hifox(prd_hifox)、CRMWolf(prd_crm)" in prompt
+    assert "lead.product_public_id" in prompt
+    assert "CREATE_LEAD：创建销售线索、新增线索、录入潜在线索" in prompt
+    assert "线索、回款、合同、License、发票申请等不在本期执行" not in prompt
+    assert "当前 Agent Workflow 支持客户活动、客户、客户资料维护（联系人、发票抬头、部署信息、客户成员）、线索、商机及商机阶段推进" in prompt  # noqa: RUF001
 
 
 @pytest.mark.asyncio
@@ -290,6 +299,7 @@ async def test_semantic_parser_uses_single_structured_path_and_disables_qwen_thi
     )
     monkeypatch.setattr(semantic, "format_active_source_names", lambda db, team_id: [])
     monkeypatch.setattr(semantic, "default_source_name", lambda db, team_id: None)
+    monkeypatch.setattr(semantic, "format_active_product_catalog", lambda db, team_id: ("无", ""))
 
     envelope = await AgentSemanticParser(
         agent_factory=lambda **kwargs: FakeAgent(),
@@ -336,6 +346,7 @@ async def test_semantic_parser_does_not_fallback_to_legacy_stream_after_structur
     )
     monkeypatch.setattr(semantic, "format_active_source_names", lambda db, team_id: [])
     monkeypatch.setattr(semantic, "default_source_name", lambda db, team_id: None)
+    monkeypatch.setattr(semantic, "format_active_product_catalog", lambda db, team_id: ("无", ""))
 
     parser = AgentSemanticParser(
         agent_factory=lambda **kwargs: FailingAgent(),
@@ -445,3 +456,5 @@ def test_semantic_result_keeps_unsupported_capability_identity_for_root_boundary
     assert lead_plan.business_object == "LEAD"
     assert payment_plan.operation == "CREATE"
     assert lead_plan.operation == "CREATE"
+    assert workflow_intent_from_semantic_plan(payment_plan) is None
+    assert workflow_intent_from_semantic_plan(lead_plan) == "CREATE_LEAD"

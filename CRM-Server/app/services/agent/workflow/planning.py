@@ -359,6 +359,7 @@ class CRMWorkflowPlanner:
                 team_id=team_id,
                 workflow_id=workflow_id,
                 current_datetime=current_datetime,
+                user_message=text,
             )
         if intent == "CREATE_CUSTOMER":
             return await self._plan_customer(
@@ -578,6 +579,7 @@ class CRMWorkflowPlanner:
         team_id: int,
         workflow_id: str,
         current_datetime: datetime,
+        user_message: str | None = None,
     ) -> WorkflowActionPlan:
         lead_model = getattr(semantic, "lead", None)
         lead = {
@@ -594,6 +596,12 @@ class CRMWorkflowPlanner:
             if value is not None and value != ""
         }
         lead = resolve_write_fields_for_ai(lead, db, team_id)
+        lead = self._resolve_product_public_id(
+            lead,
+            db=db,
+            team_id=team_id,
+            fallback_text=user_message,
+        )
         missing_fields = business_rules.missing_lead_fields(lead)
         if missing_fields:
             raise self._needs_text(
@@ -695,6 +703,7 @@ class CRMWorkflowPlanner:
             if value is not None and value != ""
         }
         flat_customer = resolve_write_fields_for_ai(flat_customer, db, team_id)
+        flat_customer = self._resolve_product_public_id(flat_customer, db=db, team_id=team_id)
         missing_fields = business_rules.missing_customer_fields(flat_customer)
         if missing_fields:
             raise self._needs_text(
@@ -2476,6 +2485,26 @@ class CRMWorkflowPlanner:
         if hasattr(db, "query") and first_active_product(db, team_id) is None:
             return f"{prompt}{EMPTY_CATALOG_MESSAGE}"
         return prompt
+
+    @staticmethod
+    def _resolve_product_public_id(
+        payload: dict[str, object],
+        *,
+        db: object,
+        team_id: int,
+        fallback_text: str | None = None,
+    ) -> dict[str, object]:
+        raw = payload.get("product_public_id") or fallback_text
+        if raw is None or not hasattr(db, "query"):
+            return payload
+        from app.crud.product_intent import match_active_product
+
+        matched = match_active_product(db, team_id, raw)
+        if matched is None:
+            return payload
+        resolved = dict(payload)
+        resolved["product_public_id"] = matched.public_id
+        return resolved
 
     @staticmethod
     def _needs_text(

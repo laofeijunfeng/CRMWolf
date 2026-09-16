@@ -15,6 +15,8 @@ from app.crud.product_intent import (
     PRODUCT_IN_USE_MESSAGE,
     base_module_public_id,
     first_active_product,
+    format_active_product_catalog,
+    match_active_product,
     product_intent_payload,
     replace_product_links,
     resolve_writable_product,
@@ -251,6 +253,22 @@ def test_first_active_product_returns_lowest_id(db):
     remaining = first_active_product(db, 1)
     assert remaining is not None
     assert remaining.id != first.id
+
+
+def test_format_active_product_catalog_and_name_match(db):
+    assert format_active_product_catalog(None, 1) == ("无", "")
+    assert format_active_product_catalog(db, 1) == ("无", "")
+    hifox = product_crud.create(db, 1, ProductCreate(name="Hifox"), "u1")
+    crm = product_crud.create(db, 1, ProductCreate(name="CRMWolf"), "u1")
+    catalog_text, names_enum = format_active_product_catalog(db, 1)
+    assert f"Hifox({hifox.public_id})" in catalog_text
+    assert f"CRMWolf({crm.public_id})" in catalog_text
+    assert names_enum == "Hifox|CRMWolf"
+    assert match_active_product(db, 1, "Hifox").public_id == hifox.public_id
+    assert match_active_product(db, 1, "录入 Hifox 线索").public_id == hifox.public_id
+    assert match_active_product(db, 1, hifox.public_id).public_id == hifox.public_id
+    assert match_active_product(db, 1, "未知产品") is None
+    assert resolve_writable_product(db, 1, "Hifox").public_id == hifox.public_id
 
 
 def test_base_module_public_id_prefers_active_base(db):

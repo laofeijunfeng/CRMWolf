@@ -3220,6 +3220,7 @@ async def test_customer_profile_writes_enter_workflow_instead_of_being_rejected(
         ("INVOICE_TITLE", "CREATE_INVOICE_TITLE", "给客户创建发票抬头"),
         ("DEPLOYMENT_INFO", "CREATE_DEPLOYMENT_INFO", "给客户创建部署信息"),
         ("CUSTOMER_MEMBER", "CREATE_CUSTOMER_MEMBER", "给客户添加团队成员"),
+        ("LEAD", "CREATE_LEAD", "录入一条销售线索"),
     )
 
     for business_object, expected_intent, text in cases:
@@ -3301,7 +3302,7 @@ async def test_unsupported_structured_write_is_clarified_instead_of_entering_wor
     assert result.decision.reason_code == "SEMANTIC_WRITE_UNSUPPORTED"
     assert result.clarification.question == (
         "当前 Agent 可以处理客户、客户资料\uff08联系人、发票抬头、部署信息、客户成员\uff09、"
-        "客户活动、商机及商机阶段推进\uff1b线索、回款、合同、License、发票申请等操作暂不支持。"
+        "客户活动、线索、商机及商机阶段推进\uff1b回款、合同、License、发票申请等操作暂不支持。"
     )
     assert query_executor.calls == []
     assert workflow_calls == []

@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.crud.ai_config import ai_config_crud
+from app.crud.product_intent import format_active_product_catalog
 from app.services.acquisition_source_service import default_source_name, format_active_source_names
 from app.services.agent.langchain_runtime import (
     AgentLangChainRuntime,
@@ -214,6 +215,7 @@ class AgentSemanticParser:
             missing_config_message="AI 配置未设置，无法进行 Agent 语义理解。",
             missing_key_message="AI API Key 未设置，无法进行 Agent 语义理解。",
         )
+        catalog_text, names_enum = format_active_product_catalog(db, team_id)
         result = await self._parse_with_langchain(
             api_host=config.api_host,
             api_key=api_key,
@@ -224,6 +226,8 @@ class AgentSemanticParser:
             current_date=current_date,
             source_names=format_active_source_names(db, team_id),
             default_source_name=default_source_name(db, team_id),
+            product_catalog_text=catalog_text,
+            product_names_enum=names_enum,
         )
         return AgentSemanticParseEnvelope(
             result=self._require_structured_result(result, "LangChain structured output 运行时不可用。"),
@@ -243,10 +247,12 @@ class AgentSemanticParser:
         current_date: Optional[date] = None,
         source_names: Optional[list[str]] = None,
         default_source_name: Optional[str] = None,
+        product_catalog_text: Optional[str] = None,
+        product_names_enum: Optional[str] = None,
     ) -> Optional[AgentSemanticParseResult]:
         prompt_date = current_date or date.today()
         system_prompt = (
-            f"{render_semantic_system_prompt(source_names, default_source_name)}"
+            f"{render_semantic_system_prompt(source_names, default_source_name, product_catalog_text, product_names_enum)}"
             f"\n\n【当前日期】\n{prompt_date.isoformat()}"
         )
         user_prompt = "【会话记忆】\n" f"{memory_json}\n\n" "【用户输入】\n" f"{user_message}"

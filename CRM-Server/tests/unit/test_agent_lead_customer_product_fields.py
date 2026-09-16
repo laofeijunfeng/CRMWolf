@@ -103,7 +103,7 @@ def test_format_customer_missing_fields_labels_product_not_module():
     assert "模块" not in format_customer_missing_fields(["product_public_id"])
 
 
-def _plan_lead(semantic_lead: SimpleNamespace, *, db: object):
+def _plan_lead(semantic_lead: SimpleNamespace, *, db: object, user_message: str | None = None):
     planner = CRMWorkflowPlanner()
     return planner._plan_lead(
         SimpleNamespace(lead=semantic_lead),
@@ -111,6 +111,7 @@ def _plan_lead(semantic_lead: SimpleNamespace, *, db: object):
         team_id=1,
         workflow_id="wf_lead_product",
         current_datetime=datetime(2026, 8, 23, 9, 0, 0),
+        user_message=user_message,
     )
 
 
@@ -151,6 +152,28 @@ def test_plan_lead_empty_catalog_appends_admin_copy(db):
     assert EMPTY_CATALOG_MESSAGE in prompt
     assert "product_public_id" not in prompt
     assert "模块" not in prompt
+
+def test_plan_lead_resolves_product_name_to_public_id(db):
+    from app.crud.product import product_crud
+    from app.schemas.product import ProductCreate
+
+    product = product_crud.create(db, 1, ProductCreate(name="Hifox"), "u1")
+    plan = _plan_lead(SimpleNamespace(**_lead_kwargs(product_public_id="Hifox")), db=db)
+    assert plan.commands[0].payload["lead"]["product_public_id"] == product.public_id
+
+def test_plan_lead_matches_product_name_from_user_message(db):
+    from app.crud.product import product_crud
+    from app.schemas.product import ProductCreate
+
+    product = product_crud.create(db, 1, ProductCreate(name="Hifox"), "u1")
+    plan = _plan_lead(
+        SimpleNamespace(**_lead_kwargs()),
+        db=db,
+        user_message="录入 Hifox 线索\n企业名称：协鑫数智科技\n联系人：黄思盛",
+    )
+    assert plan.commands[0].payload["lead"]["product_public_id"] == product.public_id
+
+
 
 
 @pytest.mark.asyncio

@@ -2019,7 +2019,7 @@ class RootOrchestrator:
                 "SEMANTIC_WRITE_UNSUPPORTED",
                 clarification_question=(
                     "当前 Agent 可以处理客户、客户资料（联系人、发票抬头、部署信息、客户成员）、"
-                    "客户活动、商机及商机阶段推进；线索、回款、合同、License、发票申请等操作暂不支持。"
+                    "客户活动、线索、商机及商机阶段推进；回款、合同、License、发票申请等操作暂不支持。"
                 ),
             )
 

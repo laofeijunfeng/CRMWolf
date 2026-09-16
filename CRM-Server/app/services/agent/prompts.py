@@ -50,12 +50,12 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 的 CRM AI Agent �
   - 事件陈述中出现“沟通、跟进记录、客户活动、POC”等业务词，不代表用户在查询；不要因为会话里刚刚查过该客户或活动，就把本轮事实陈述改成查询。
 - 回款场景需要识别回款事实，但合同、回款计划、佣金归属人由后续 API 上下文判断。
 - License 申请前需要确认部署信息。
-- 当前 Agent Workflow 支持客户活动、客户、客户资料维护（联系人、发票抬头、部署信息、客户成员）、商机及商机阶段推进；线索、回款、合同、License、发票申请等不在本期执行。
+- 当前 Agent Workflow 支持客户活动、客户、客户资料维护（联系人、发票抬头、部署信息、客户成员）、线索、商机及商机阶段推进；回款、合同、License、发票申请等不在本期执行。
 
 【可选意图】
 - CUSTOMER_ACTIVITY：客户跟进、会议、沟通记录、项目进展记录。
 - PAYMENT_RECORD：客户已回款、到账、打款等回款事实。
-- CREATE_LEAD：创建销售线索、新增线索、录入潜在线索；仅用于语义识别，不代表当前统一 Workflow 可执行。
+- CREATE_LEAD：创建销售线索、新增线索、录入潜在线索。
 - CREATE_CUSTOMER：创建正式客户、新增客户、录入客户档案；不是潜在线索。
 - CREATE_OPPORTUNITY：创建商机、补商机、立项后新增机会或用户明确要求建商机。
 - CREATE_CONTACT：创建客户联系人。
@@ -174,7 +174,8 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 的 CRM AI Agent �
       "minute": "0-59；用户未指定具体分钟则为 null",
       "confidence": 0.0
     },
-    "next_follow_time_iso": null
+    "next_follow_time_iso": null,
+    "product_public_id": "意向产品对外ID，格式 prd_...；能匹配当前团队产品名称时输出对应 public_id，无法识别则为 null"
   },
   "customer_create": {
     "account_name": "客户公司名称，无法识别则为 null",
@@ -192,7 +193,8 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 的 CRM AI Agent �
     "next_action": "客户下一步动作，无法识别则为 null",
     "next_follow_time_text": "用户原文中的客户下次跟进时间，无法识别则为 null",
     "next_follow_time": null,
-    "next_follow_time_iso": null
+    "next_follow_time_iso": null,
+    "product_public_id": "意向产品对外ID，格式 prd_...；能匹配当前团队产品名称时输出对应 public_id，无法识别则为 null"
   },
   "opportunity": {
     "opportunity_name": null,
@@ -218,7 +220,8 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 的 CRM AI Agent �
       "minute": null,
       "confidence": 0.0
     },
-    "expected_closing_date_iso": null
+    "expected_closing_date_iso": null,
+    "product_public_id": "关联产品对外ID，格式 prd_...；能匹配当前团队产品名称时输出对应 public_id，无法识别则为 null"
   },
   "contact": {
     "name": "联系人姓名或称呼",
@@ -281,8 +284,10 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 的 CRM AI Agent �
 - 例如“今天回款了”：payment.payment_date_text 为“今天”，payment.payment_date.kind 为 RELATIVE_DAY，direction 为 current。
 - 回款金额只提取用户明确表达的金额；“回款了”“到账了”但没有金额时 actual_amount 必须为 null，缺失字段由后续确定性规划器判断。
 - “5 万”这类金额必须归一化为 50000，“30 万”必须归一化为 300000。
-- 创建线索必须尽量提取 lead.lead_name、lead.source、lead.city、lead.contact_name、lead.contact_phone、lead.company_scale。
+- 创建线索必须尽量提取 lead.lead_name、lead.source、lead.city、lead.contact_name、lead.contact_phone、lead.company_scale、lead.product_public_id。
 - 获客来源只能输出当前团队启用项：{source_names_text}。禁止发明新来源，禁止输出“{forbidden_source_name}”。如果系统表单值给出了 source=acq_...，可原样输出该 public_id。用户未明确来源时默认可输出“{default_source_name}”，不要追问来源。
+- 当前团队启用产品：{product_catalog_text}。创建线索、客户或商机时，产品只能从该目录选择；用户提到产品名称（如 Hifox）时，lead.product_public_id / customer_create.product_public_id / opportunity.product_public_id 必须输出对应 public_id。禁止发明新产品。未表达产品时保持为 null，由后续确定性规划器判断。
+- 用户说“录入 X 线索”且 X 能匹配当前团队产品名称时，X 是产品不是线索企业名称；线索名称优先取企业名称/项目名称。
 - 创建线索时，未表达的 lead_name、city、contact_name、contact_phone 保持为 null，缺失字段由后续确定性规划器判断。
 - 如果线索创建请求中还包含拜访、电话、微信沟通内容或下一步计划，应放入 lead.follow_up_content、lead.follow_up_method、lead.next_action 和 lead.next_follow_time；不要把跟进信息混入线索基础字段。
 - 用户表达线索下次跟进时间时，只输出结构化时间要素 lead.next_follow_time，不要自己换算最终日期；lead.next_follow_time_iso 必须输出 null。
@@ -310,6 +315,8 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 的 CRM AI Agent �
 def render_semantic_system_prompt(
     source_names: Optional[list[str]] = None,
     default_source_name: Optional[str] = None,
+    product_catalog_text: Optional[str] = None,
+    product_names_enum: Optional[str] = None,
 ) -> str:
     names = [str(name).strip() for name in (source_names or _DEFAULT_ACQUISITION_SOURCE_NAMES) if str(name).strip()]
     if not names:
@@ -317,11 +324,14 @@ def render_semantic_system_prompt(
     fallback_name = (
         default_source_name or _DEFAULT_ACQUISITION_SOURCE_FALLBACK
     ).strip() or _DEFAULT_ACQUISITION_SOURCE_FALLBACK
+    catalog_text = (product_catalog_text or "无").strip() or "无"
     return (
         CRM_AGENT_SEMANTIC_SYSTEM_PROMPT_TEMPLATE.replace("{source_enum}", "|".join(names))
         .replace("{source_names_text}", "、".join(names))
         .replace("{default_source_name}", fallback_name)
         .replace("{forbidden_source_name}", FORBIDDEN_SOURCE_NAME)
+        .replace("{product_catalog_text}", catalog_text)
+        .replace("{product_names_enum}", (product_names_enum or "").strip())
     )
 
 
@@ -559,10 +569,12 @@ def build_semantic_messages(
     current_date: Optional[date] = None,
     source_names: Optional[list[str]] = None,
     default_source_name: Optional[str] = None,
+    product_catalog_text: Optional[str] = None,
+    product_names_enum: Optional[str] = None,
 ) -> list[dict]:
     prompt_date = current_date or date.today()
     system = (
-        f"{render_semantic_system_prompt(source_names, default_source_name)}\n\n【当前日期】\n{prompt_date.isoformat()}"
+        f"{render_semantic_system_prompt(source_names, default_source_name, product_catalog_text, product_names_enum)}\n\n【当前日期】\n{prompt_date.isoformat()}"
     )
     user = f"【会话记忆】\n{memory_json}\n\n【用户输入】\n{user_message}"
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
