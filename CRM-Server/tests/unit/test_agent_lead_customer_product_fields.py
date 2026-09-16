@@ -18,7 +18,9 @@ from app.services.agent.business_rules import (
     missing_customer_fields,
     missing_lead_fields,
 )
+from app.services.agent.principal import AgentPrincipal
 from app.services.agent.tool_registry import AgentCustomerCreatePayload, AgentLeadCreatePayload
+from app.services.agent.workflow.contracts import WorkflowTextStart, WorkflowTurnInput
 from app.services.agent.workflow.planning import CRMWorkflowPlanner, WorkflowPlanningNeedsInput
 
 
@@ -104,7 +106,13 @@ def test_format_customer_missing_fields_labels_product_not_module():
     assert "模块" not in format_customer_missing_fields(["product_public_id"])
 
 
-def _plan_lead(semantic_lead: SimpleNamespace, *, db: object, user_message: str | None = None):
+def _plan_lead(
+    semantic_lead: SimpleNamespace,
+    *,
+    db: object,
+    user_message: str | None = None,
+    request: WorkflowTurnInput | None = None,
+):
     planner = CRMWorkflowPlanner()
     return planner._plan_lead(
         SimpleNamespace(lead=semantic_lead),
@@ -113,6 +121,7 @@ def _plan_lead(semantic_lead: SimpleNamespace, *, db: object, user_message: str 
         workflow_id="wf_lead_product",
         current_datetime=datetime(2026, 8, 23, 9, 0, 0),
         user_message=user_message,
+        request=request,
     )
 
 
@@ -232,6 +241,11 @@ def test_plan_lead_maps_online_meeting_method_to_other():
 
 
 def test_plan_lead_unmapped_method_asks_for_closed_choice():
+    request = WorkflowTurnInput(
+        workflow_id="wf_" + "a" * 32,
+        start=WorkflowTextStart(kind="text", text="录入线索"),
+        principal=AgentPrincipal(team_id=1, user_id=2, session_id=3),
+    )
     with pytest.raises(WorkflowPlanningNeedsInput) as exc:
         _plan_lead(
             SimpleNamespace(
@@ -240,11 +254,13 @@ def test_plan_lead_unmapped_method_asks_for_closed_choice():
                 follow_up_method="传真",
             ),
             db=object(),
+            request=request,
         )
     interaction = exc.value.interaction
     assert interaction.interaction_type == "choice"
     assert interaction.business_action == "select_lead_follow_up_method"
     assert [option.value for option in interaction.options] == ["电话", "微信", "拜访", "邮件", "其他"]
+    assert exc.value.checkpoint_request is request
 
 
 def test_plan_lead_maps_tilde_scale_to_one_to_fifty():

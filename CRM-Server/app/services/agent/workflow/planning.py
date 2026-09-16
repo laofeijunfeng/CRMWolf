@@ -366,6 +366,7 @@ class CRMWorkflowPlanner:
                 workflow_id=workflow_id,
                 current_datetime=current_datetime,
                 user_message=text,
+                request=request,
             )
         if intent == "CREATE_CUSTOMER":
             return await self._plan_customer(
@@ -586,6 +587,7 @@ class CRMWorkflowPlanner:
         workflow_id: str,
         current_datetime: datetime,
         user_message: str | None = None,
+        request: WorkflowTurnInput | None = None,
     ) -> WorkflowActionPlan:
         lead_model = getattr(semantic, "lead", None)
         lead = {
@@ -666,7 +668,8 @@ class CRMWorkflowPlanner:
                     min_selections=1,
                     max_selections=1,
                     submit_label="继续",
-                )
+                ),
+                checkpoint_request=request,
             )
         follow_up_payload: dict[str, object] = {
             "content": follow_up_content.strip(),
