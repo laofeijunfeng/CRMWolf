@@ -15,6 +15,7 @@ from app.services.customer_profile_projection_validator import (
 
 OLD = "客户正在重新评估 Apifox 私有化部署方案，需要私有环境安装包和试用方案。"
 QUOTE = "今天看到了 Hifox，需要私有化部署。"
+BOUND_STATEMENT = "客户正在评估 Apifox 私有化部署。"
 
 
 def test_assert_claims_grounded_rejects_apifox_template():
@@ -112,3 +113,50 @@ def test_xiexin_draft_passes_grounding():
     assert "Hifox" in item["statement"]
     assert "Apifox" not in item["statement"]
     assert draft.evidence_refs[0]["snippet"]
+
+
+def _apifox_claim_sections(*, product_names, product_public_ids=None):
+    item = {
+        "statement": BOUND_STATEMENT,
+        "evidence_refs": ["activity:1"],
+        "product_names": product_names,
+    }
+    if product_public_ids is not None:
+        item["product_public_ids"] = product_public_ids
+    return CustomerProfileSections(
+        current_situation={
+            "summary": BOUND_STATEMENT,
+            "demand_background": {
+                "summary": BOUND_STATEMENT,
+                "items": [item],
+            },
+        },
+        current_journeys=[],
+        important_changes=[],
+        long_term_context={},
+        follow_up_process=[],
+        recorded_follow_ups=[],
+    )
+
+
+def test_assert_claims_grounded_rejects_unbound_product_names():
+    sections = _apifox_claim_sections(product_names=["Apifox"])
+    with pytest.raises(CustomerProfileProjectionValidationError) as exc:
+        assert_claims_grounded(
+            sections,
+            evidence_refs=[{"evidence_key": "activity:1", "snippet": QUOTE}],
+            product_catalog_names=["Hifox", "Apifox"],
+        )
+    assert exc.value.code == PROFILE_CLAIM_UNGROUNDED
+
+
+def test_assert_claims_grounded_allows_bound_product_names():
+    sections = _apifox_claim_sections(
+        product_names=["Apifox"],
+        product_public_ids=["prd_apifox"],
+    )
+    assert_claims_grounded(
+        sections,
+        evidence_refs=[{"evidence_key": "activity:1", "snippet": QUOTE}],
+        product_catalog_names=["Hifox", "Apifox"],
+    )

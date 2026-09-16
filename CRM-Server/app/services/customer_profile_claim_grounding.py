@@ -45,7 +45,7 @@ def assert_claims_grounded(
         _assert_text_grounded(
             current.get("summary"),
             evidence_refs=_collect_refs(demand_items),
-            product_names=_collect_names(demand_items),
+            product_names=_collect_bound_names(demand_items),
             registry=registry,
             catalog=catalog,
         )
@@ -53,7 +53,7 @@ def assert_claims_grounded(
         _assert_text_grounded(
             demand.get("summary"),
             evidence_refs=_collect_refs(demand_items),
-            product_names=_collect_names(demand_items),
+            product_names=_collect_bound_names(demand_items),
             registry=registry,
             catalog=catalog,
         )
@@ -61,7 +61,7 @@ def assert_claims_grounded(
             _assert_text_grounded(
                 item.get("statement"),
                 evidence_refs=item.get("evidence_refs"),
-                product_names=item.get("product_names"),
+                product_names=_bound_product_names(item),
                 registry=registry,
                 catalog=catalog,
             )
@@ -73,7 +73,7 @@ def assert_claims_grounded(
             _assert_text_grounded(
                 item.get("business_change"),
                 evidence_refs=item.get("evidence_refs"),
-                product_names=item.get("product_names"),
+                product_names=_bound_product_names(item),
                 registry=registry,
                 catalog=catalog,
             )
@@ -110,15 +110,27 @@ def _collect_refs(items: Sequence[Mapping[str, Any]]) -> list[str]:
     return list(dict.fromkeys(refs))
 
 
-def _collect_names(items: Sequence[Mapping[str, Any]]) -> list[str]:
+def _bound_product_names(item: Mapping[str, Any]) -> list[str]:
+    names = item.get("product_names")
+    public_ids = item.get("product_public_ids")
+    if not isinstance(names, list) or not isinstance(public_ids, list):
+        return []
+    if len(names) != len(public_ids):
+        return []
+    bound: list[str] = []
+    for name, public_id in zip(names, public_ids, strict=True):
+        if not isinstance(name, str) or not name.strip():
+            continue
+        if not isinstance(public_id, str) or not public_id.strip():
+            continue
+        bound.append(name)
+    return bound
+
+
+def _collect_bound_names(items: Sequence[Mapping[str, Any]]) -> list[str]:
     names: list[str] = []
     for item in items:
-        value = item.get("product_names")
-        if not isinstance(value, list):
-            continue
-        for name in value:
-            if isinstance(name, str) and name.strip():
-                names.append(name)
+        names.extend(_bound_product_names(item))
     return names
 
 
