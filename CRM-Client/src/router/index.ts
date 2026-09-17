@@ -238,6 +238,12 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true, title: '团队信息与安全', settingsKey: 'team' }
       },
       {
+        path: 'settings/members',
+        name: 'SettingsMembers',
+        component: () => import('@/views/settings/SettingsMembersPage.vue'),
+        meta: { requiresAuth: true, title: '团队成员', settingsKey: 'members' },
+      },
+      {
         path: 'settings/procurement-methods',
         name: 'SettingsProcurementMethods',
         component: () => import('@/views/SettingsModulePage.vue'),

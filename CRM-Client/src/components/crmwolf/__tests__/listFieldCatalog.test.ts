@@ -186,7 +186,8 @@ describe('DataTable list field catalog contract', () => {
       'views/Leads.vue',
       'views/Opportunities.vue',
       'views/PaymentPlans.vue',
-      'views/PaymentRecords.vue'
+      'views/PaymentRecords.vue',
+      'views/settings/SettingsMembersPage.vue'
     ])
 
     for (const filePath of consumers) {
