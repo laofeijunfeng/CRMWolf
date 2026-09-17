@@ -29,14 +29,14 @@ interface Props {
   customerId: string
   journeys: DealJourney[]
   showAdd?: boolean
-  highlightedJourneyId?: string
-  restoreFocusJourneyId?: string
+  highlightedJourneyId?: string | null
+  restoreFocusJourneyId?: string | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
   showAdd: false,
-  highlightedJourneyId: undefined,
-  restoreFocusJourneyId: undefined
+  highlightedJourneyId: null,
+  restoreFocusJourneyId: null
 })
 
 const emit = defineEmits<{
@@ -60,7 +60,7 @@ const purchaseTypeLabel = (purchaseType: string | null): string | null => {
 watch(
   () => props.restoreFocusJourneyId,
   async (journeyId): Promise<void> => {
-    if (journeyId === undefined || journeyId === '') return
+    if (journeyId === undefined || journeyId === null || journeyId === '') return
     await nextTick()
     const row = document.querySelector(`[data-list-card-row-id="${journeyId}"]`)
     if (row instanceof HTMLElement) row.focus()
