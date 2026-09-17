@@ -292,6 +292,25 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true, title: '产品管理', settingsKey: 'products' },
       },
       {
+        path: 'settings/ai',
+        name: 'SettingsAI',
+        component: () => import('@/views/settings/SettingsAIPage.vue'),
+        meta: { requiresAuth: true, title: 'AI 配置', settingsKey: 'ai' }
+      },
+      {
+        path: 'settings/notifications',
+        name: 'SettingsNotifications',
+        component: () => import('@/views/settings/SettingsNotificationsPage.vue'),
+        meta: { requiresAuth: true, title: '通知配置', settingsKey: 'notifications' }
+      },
+      {
+        path: 'settings/integrations',
+        name: 'SettingsIntegrations',
+        component: () => import('@/views/settings/SettingsIntegrationsPage.vue'),
+        meta: { requiresAuth: true, title: '第三方集成', settingsKey: 'integrations' }
+      },
+
+      {
         path: 'settings/:module',
         name: 'SettingsModule',
         component: () => import('@/views/SettingsModulePage.vue'),
