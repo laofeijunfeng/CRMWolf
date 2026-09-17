@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, type Mock } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia, type Pinia } from 'pinia'
 import TeamSettings from '@/views/TeamSettings.vue'
@@ -36,6 +36,8 @@ vi.mock('@/api/team', () => ({
 
 vi.mock('vue-router', () => ({
   useRoute: (): { meta: { title: string } } => ({ meta: { title: '团队信息与安全' } }),
+  useRouter: (): { push: Mock } => ({ push: vi.fn() }),
+  onBeforeRouteLeave: (): void => undefined,
 }))
 
 const passthrough = { template: '<div><slot /></div>' }

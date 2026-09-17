@@ -19,9 +19,20 @@ import { handleApiError } from '@/utils/errorHandler'
 import { useTeamStore } from '@/stores/team'
 import { usePermissionStore } from '@/stores/permissions'
 import { useSettingsAccess } from '@/composables/useSettingsAccess'
+import { useSettingsUnsavedLeave } from '@/composables/useSettingsUnsavedLeave'
 import { getSettingsNavigationItem } from '@/settingsNavigation'
 import { usePageTitle } from '@/composables/usePageTitle'
 import SettingsContent from '@/views/settings/SettingsContent.vue'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
 usePageTitle()
 
@@ -52,7 +63,7 @@ const schema = toTypedSchema(z.object({
   bot_open_id: z.string().trim().max(128, 'Bot Open ID 不能超过128个字符').optional(),
 }))
 
-const { handleSubmit, resetForm, setFieldValue, values } = useForm({
+const { handleSubmit, resetForm, setFieldValue, values, meta } = useForm({
   validationSchema: schema,
   initialValues: {
     enabled: false,
@@ -65,6 +76,18 @@ const { handleSubmit, resetForm, setFieldValue, values } = useForm({
     bot_open_id: '',
   },
 })
+
+const { showLeaveConfirm, confirmLeave, cancelLeave } = useSettingsUnsavedLeave({
+  isDirty: (): boolean => meta.value.dirty,
+  isSubmitting: (): boolean => saving.value,
+})
+
+const handleLeaveDialogOpenChange = (open: boolean): void => {
+  if (open) return
+  Promise.resolve().then((): void => {
+    if (showLeaveConfirm.value) cancelLeave()
+  })
+}
 
 const retryPermissions = async (): Promise<void> => {
   await teamStore.retryPermissionSync()
@@ -403,5 +426,19 @@ onMounted(() => {
         </div>
       </form>
     </template>
+    <AlertDialog :open="showLeaveConfirm" @update:open="handleLeaveDialogOpenChange">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>放弃未保存的更改？</AlertDialogTitle>
+          <AlertDialogDescription>
+            当前页面有尚未保存的更改。离开后这些内容会丢失。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel @click="cancelLeave">继续编辑</AlertDialogCancel>
+          <AlertDialogAction @click="confirmLeave">放弃更改</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </SettingsContent>
 </template>

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia, type Pinia } from 'pinia'
 import SettingsIntegrationsPage from '@/views/settings/SettingsIntegrationsPage.vue'
@@ -18,6 +18,8 @@ vi.mock('@/api/oauth', () => ({
 
 vi.mock('vue-router', () => ({
   useRoute: (): { meta: { title: string } } => ({ meta: { title: '第三方集成' } }),
+  useRouter: (): { push: Mock } => ({ push: vi.fn() }),
+  onBeforeRouteLeave: (): void => undefined,
 }))
 
 const teamFixture: TeamResponse = {

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia, type Pinia } from 'pinia'
 import SettingsAIPage from '@/views/settings/SettingsAIPage.vue'
@@ -19,6 +19,8 @@ vi.mock('@/api/aiConfig', () => ({
 
 vi.mock('vue-router', () => ({
   useRoute: (): { meta: { title: string } } => ({ meta: { title: 'AI 配置' } }),
+  useRouter: (): { push: Mock } => ({ push: vi.fn() }),
+  onBeforeRouteLeave: (): void => undefined,
 }))
 
 const teamFixture: TeamResponse = {
