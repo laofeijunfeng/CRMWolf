@@ -1,10 +1,11 @@
 import { createPinia, setActivePinia } from 'pinia'
-import { defineComponent, h } from 'vue'
+import { defineComponent, h, type VNode } from 'vue'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ApprovalFlowListItem } from '@/api/approvalFlow'
 import type { WorkflowSummary } from '@/api/workflow'
 import { usePermissionStore } from '@/stores/permissions'
+import { useHeaderStore } from '@/stores/header'
 
 const mocks = vi.hoisted(() => ({
   getApprovalFlows: vi.fn(),
@@ -45,7 +46,7 @@ vi.mock('@/components/system-config/ApprovalFlowFormDialog.vue', () => ({
       flowId: { type: Number, default: null },
     },
     emits: ['update:open', 'success'],
-    setup(props, { emit }) {
+    setup(props, { emit }): () => VNode | null {
       return () => props.open
         ? h('div', { 'data-testid': 'approval-flow-form-dialog' }, [
             h('span', { 'data-testid': 'approval-flow-form-mode' }, props.mode),
@@ -61,7 +62,7 @@ vi.mock('@/components/workflow/WorkflowEditor.vue', () => ({
     name: 'WorkflowEditor',
     props: { workflowId: { type: Number, default: null } },
     emits: ['saved', 'cancelled'],
-    setup(props, { emit }) {
+    setup(props, { emit }): () => VNode {
       return () => h('div', { 'data-testid': 'workflow-editor' }, [
         h('span', { 'data-testid': 'workflow-editor-id' }, String(props.workflowId ?? '')),
         h('button', { 'data-testid': 'workflow-editor-save', onClick: () => emit('saved', {}) }, '保存工作流'),
@@ -132,15 +133,26 @@ function mountPage(permissionCodes: string[] = [
   return mount(ApprovalFlowsNew, { props, global: { plugins: [pinia] } })
 }
 
-function mountPageBeforePermissionsReady() {
+function mountPageBeforePermissionsReady(): VueWrapper {
   const pinia = createPinia()
   setActivePinia(pinia)
   const permissionStore = usePermissionStore()
   permissionStore.permissions = []
   permissionStore.loadState = 'idle'
   permissionStore.initialized = false
-  const wrapper = mount(ApprovalFlowsNew, { global: { plugins: [pinia] } })
-  return { wrapper, permissionStore }
+  return mount(ApprovalFlowsNew, { global: { plugins: [pinia] } })
+}
+
+function headerActionVisible(id: string): boolean {
+  const action = useHeaderStore().actions.find((headerAction) => headerAction.id === id)
+  return action !== undefined && action.visible !== false
+}
+
+async function triggerHeaderAction(id: string): Promise<void> {
+  const action = useHeaderStore().actions.find((headerAction) => headerAction.id === id)
+  expect(action).toBeDefined()
+  action?.handler()
+  await flushPromises()
 }
 
 async function waitForLoaded(wrapper: VueWrapper): Promise<void> {
@@ -155,7 +167,8 @@ describe('ApprovalFlowsNew', () => {
     mocks.confirmDialog.mockResolvedValue(true)
   })
   it('loads both lists when permissions become ready after mount', async () => {
-    const { wrapper, permissionStore } = mountPageBeforePermissionsReady()
+    const wrapper = mountPageBeforePermissionsReady()
+    const permissionStore = usePermissionStore()
 
     expect(mocks.getApprovalFlows).not.toHaveBeenCalled()
     expect(mocks.listWorkflows).not.toHaveBeenCalled()
@@ -215,7 +228,7 @@ describe('ApprovalFlowsNew', () => {
     const wrapper = mountPage()
 
     await vi.waitFor(() => expect(wrapper.text()).toContain('暂无审批流程'))
-    expect(wrapper.get('[data-testid="approval-flows-create"]')).toBeTruthy()
+    expect(headerActionVisible('create-approval-flow')).toBe(true)
   })
 
   it('shows retry action after load failure and retries the request', async () => {
@@ -233,7 +246,7 @@ describe('ApprovalFlowsNew', () => {
     const wrapper = mountPage()
     await waitForLoaded(wrapper)
 
-    await wrapper.get('[data-testid="approval-flows-create"]').trigger('click')
+    await triggerHeaderAction('create-approval-flow')
     expect(wrapper.getComponent({ name: 'ApprovalFlowFormDialog' }).props('mode')).toBe('create')
 
     await wrapper.get('[data-testid="approval-flow-edit-11"]').trigger('click')
@@ -268,7 +281,7 @@ describe('ApprovalFlowsNew', () => {
     await waitForLoaded(wrapper)
     const initialCalls = mocks.getApprovalFlows.mock.calls.length
 
-    await wrapper.get('[data-testid="approval-flows-create"]').trigger('click')
+    await triggerHeaderAction('create-approval-flow')
     await wrapper.get('[data-testid="approval-flow-form-success"]').trigger('click')
     await flushPromises()
 
@@ -298,12 +311,12 @@ describe('ApprovalFlowsNew', () => {
   it('shows workflow creation only with automation:create permission', async () => {
     const wrapper = mountPage()
     await vi.waitFor(() => expect(wrapper.text()).toContain('商机跟进自动化'))
-    expect(wrapper.get('[data-testid="workflow-create"]')).toBeTruthy()
+    expect(headerActionVisible('create-workflow')).toBe(true)
 
     const permissionStore = usePermissionStore()
     permissionStore.permissions = permissionStore.permissions.filter(permission => permission.code !== 'automation:create')
     await flushPromises()
-    expect(wrapper.find('[data-testid="workflow-create"]').exists()).toBe(false)
+    expect(headerActionVisible('create-workflow')).toBe(false)
   })
 
   it('publishes a workflow through updateStatus', async () => {

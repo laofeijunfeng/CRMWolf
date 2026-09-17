@@ -10,6 +10,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { confirmDialog } from '@/utils/confirmDialog'
 import { handleApiError } from '@/utils/errorHandler'
 import { usePermissionStore } from '@/stores/permissions'
+import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
+import SettingsContent from '@/views/settings/SettingsContent.vue'
 
 const permissionStore = usePermissionStore()
 
@@ -160,21 +162,18 @@ watch(
 )
 watch(() => [props.action, props.recordId, canCreate.value, canEdit.value] as const, consumeAction, { immediate: true })
 
+useTopBarRegistration({
+  actionDeps: [canCreateWorkflow, canCreate, workflowEditorOpen],
+  actions: () => workflowEditorOpen.value ? [] : [
+    { id: 'create-workflow', label: '新建工作流', type: 'primary', visible: canCreateWorkflow.value, handler: (): void => { openWorkflowEditor(null) } },
+    { id: 'create-approval-flow', label: '手动创建', type: 'default', visible: canCreate.value, handler: openCreate },
+  ],
+})
+
 </script>
 
 <template>
-  <section class="space-y-6" aria-label="审批流程管理">
-    <template v-if="!workflowEditorOpen">
-      <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
-        <div>
-          <h1 class="text-2xl font-semibold tracking-tight">审批流程管理</h1>
-          <p class="mt-1 text-sm text-muted-foreground">CRM 侧审批流程配置预览，创建与编辑继续使用现有审批 API。</p>
-        </div>
-        <div class="flex gap-2">
-          <Button v-if="canCreateWorkflow" data-testid="workflow-create" type="button" @click="openWorkflowEditor(null)">新建工作流</Button>
-          <Button v-if="canCreate" data-testid="approval-flows-create" type="button" @click="openCreate">手动创建</Button>
-        </div>
-      </div>
+  <SettingsContent v-if="!workflowEditorOpen" ariaLabel="审批流程管理" description="CRM 侧审批流程配置预览，创建与编辑继续使用现有审批 API。">
 
       <Card v-if="canReadWorkflow" aria-label="工作流列表">
         <CardHeader>
@@ -270,11 +269,10 @@ watch(() => [props.action, props.recordId, canCreate.value, canEdit.value] as co
         </div>
       </template>
       </template>
-    </template>
+  </SettingsContent>
 
-    <div v-else class="min-h-[calc(100vh-8rem)]">
-      <WorkflowEditor :workflow-id="editingWorkflowId" @saved="handleWorkflowSaved" @cancelled="closeWorkflowEditor" />
-    </div>
-    <ApprovalFlowFormDialog v-model:open="formOpen" :mode="formMode" :flow-id="editingFlowId" @success="handleFormSuccess" />
-  </section>
+  <div v-else class="min-h-[calc(100vh-8rem)]">
+    <WorkflowEditor :workflow-id="editingWorkflowId" @saved="handleWorkflowSaved" @cancelled="closeWorkflowEditor" />
+  </div>
+  <ApprovalFlowFormDialog v-model:open="formOpen" :mode="formMode" :flow-id="editingFlowId" @success="handleFormSuccess" />
 </template>
