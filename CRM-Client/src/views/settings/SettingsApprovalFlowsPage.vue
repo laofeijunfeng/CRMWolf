@@ -225,13 +225,15 @@ function hasAmountRange(minAmount: number | null | undefined, maxAmount: number 
   return (minAmount !== null && minAmount !== undefined) || (maxAmount !== null && maxAmount !== undefined)
 }
 
-watch(() => [route.query['action'], route.query['id'], approvalFlows.value.length, canCreate.value, canEdit.value] as const, ([action, id]) => {
+watch(() => [route.query['action'], canCreate.value] as const, ([action]) => {
+  if (queryParam(action) === 'create' && canCreate.value) {
+    handleManualCreate()
+  }
+}, { immediate: true })
+
+watch(() => [route.query['action'], route.query['id'], approvalFlows.value.length, canEdit.value] as const, ([action, id]) => {
   const actionValue = queryParam(action)
   const idValue = queryParam(id)
-  if (actionValue === 'create' && canCreate.value) {
-    handleManualCreate()
-    return
-  }
   if (actionValue === 'edit' && idValue !== '' && canEdit.value) {
     const flow = approvalFlows.value.find(item => String(item.id) === idValue)
     if (flow !== undefined) handleEdit(flow)
