@@ -250,6 +250,12 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true, title: '审批流程管理', settingsKey: 'approval-flows' },
       },
       {
+        path: 'settings/approval-flows-new',
+        name: 'SettingsApprovalFlowsNew',
+        component: () => import('@/views/ApprovalFlowsNew.vue'),
+        meta: { requiresAuth: true, title: '审批流程管理（新）', settingsKey: 'approval-flows-new' },
+      },
+      {
         path: 'settings/members',
         name: 'SettingsMembers',
         component: () => import('@/views/settings/SettingsMembersPage.vue'),
@@ -308,13 +314,6 @@ const routes: RouteRecordRaw[] = [
         name: 'SettingsIntegrations',
         component: () => import('@/views/settings/SettingsIntegrationsPage.vue'),
         meta: { requiresAuth: true, title: '第三方集成', settingsKey: 'integrations' }
-      },
-
-      {
-        path: 'settings/:module',
-        name: 'SettingsModule',
-        component: () => import('@/views/SettingsModulePage.vue'),
-        meta: { requiresAuth: true, title: '系统设置' }
       },
       {
         path: 'system-config',
