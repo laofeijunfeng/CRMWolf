@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
-import { ArrowLeft, Plus, Pencil, Trash2 } from 'lucide-vue-next'
+import { Plus, Pencil, Trash2 } from 'lucide-vue-next'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
@@ -18,9 +18,13 @@ import { getSettingsNavigationItem } from '@/settingsNavigation'
 import { handleApiError } from '@/utils/errorHandler'
 import { confirmDelete } from '@/utils/confirmDialog'
 import { usePermissionStore } from '@/stores/permissions'
+import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
+import { useHeaderStore } from '@/stores/header'
+import SettingsContent from '@/views/settings/SettingsContent.vue'
 
 const route = useRoute()
-const router = useRouter()
+const headerStore = useHeaderStore()
+headerStore.setBack(true, '/settings/procurement-methods')
 const permissionStore = usePermissionStore()
 const { canAccess } = useSettingsAccess()
 const procurementSettings = getSettingsNavigationItem('procurement')
@@ -114,21 +118,22 @@ const removeStage = async (stage: ProcurementStageTemplate): Promise<void> => {
 }
 
 onMounted(() => { void loadMethod() })
+
+useTopBarRegistration({
+  actionDeps: [hasAccess, canCreate, method],
+  actions: () => [{
+    id: 'create-stage',
+    label: '新增阶段',
+    type: 'primary',
+    icon: Plus,
+    visible: hasAccess.value && canCreate.value && method.value !== null,
+    handler: showCreate,
+  }],
+})
 </script>
 
 <template>
-  <main class="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6" aria-label="采购阶段模板">
-    <div class="flex flex-wrap items-start justify-between gap-4">
-      <div class="space-y-1">
-        <p class="text-sm font-medium text-primary">系统设置 / 采购方式管理</p>
-        <h1 class="text-2xl font-semibold tracking-tight">采购阶段模板</h1>
-        <p class="text-sm text-muted-foreground">配置采购方式“{{ method?.name ?? '未找到' }}”的阶段顺序、赢率和跳过规则。</p>
-      </div>
-      <div class="flex gap-2">
-        <Button variant="outline" @click="router.push('/settings/procurement-methods')"><ArrowLeft class="mr-2 size-4" />返回采购方式</Button>
-        <Button v-if="hasAccess && canCreate && method !== null" @click="showCreate"><Plus class="mr-2 size-4" />新增阶段</Button>
-      </div>
-    </div>
+  <SettingsContent ariaLabel="采购阶段模板" :description="`配置采购方式“${method?.name ?? '未找到'}”的阶段顺序、赢率和跳过规则。`">
     <ErrorState v-if="!hasAccess" variant="forbidden" title="暂无访问权限" description="你没有访问采购阶段模板的权限。" />
     <ErrorState v-else-if="methodId === null" variant="error" title="采购方式不存在" description="请从采购方式管理页面选择有效的采购方式。" />
     <div v-else-if="loading" class="space-y-3" aria-label="正在加载采购阶段模板"><Skeleton v-for="index in 3" :key="index" class="h-20 w-full" /></div>
@@ -143,7 +148,7 @@ onMounted(() => { void loadMethod() })
         </ListCard>
       </CardContent>
     </Card>
-  </main>
+  </SettingsContent>
   <Dialog v-model:open="dialogOpen">
     <DialogContent class="max-w-lg">
       <DialogHeader><DialogTitle>{{ editingStage === null ? '新增阶段模板' : '编辑阶段模板' }}</DialogTitle><DialogDescription>阶段编码创建后不可修改，避免影响已有商机引用。</DialogDescription></DialogHeader>

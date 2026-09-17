@@ -117,6 +117,13 @@ describe('AccountSettings', () => {
     expect(wrapper.text()).not.toContain('created_time')
   })
 
+  it('wraps account content in the settings shell instead of a max-width page', () => {
+    const { wrapper } = mountAccountPage({ userInfo: userFixture })
+    expect(wrapper.findComponent({ name: 'SettingsContent' }).exists()).toBe(true)
+    expect(wrapper.classes().join(' ')).not.toContain('max-w-6xl')
+    expect(wrapper.text()).not.toContain('系统设置')
+  })
+
   it('marks account content to inherit the application typography system', () => {
     const { wrapper } = mountAccountPage({ userInfo: userFixture })
     expect(wrapper.classes()).toContain('account-settings--system')

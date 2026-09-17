@@ -36,6 +36,7 @@ import { useHeaderStore } from '@/stores/header'
 import { handleApiError } from '@/utils/errorHandler'
 import { rememberOAuthReturnPath } from '@/utils/authRecovery'
 import { Link2, Loader2, Unlink } from 'lucide-vue-next'
+import SettingsContent from '@/views/settings/SettingsContent.vue'
 
 const userStore = useUserStore()
 const route = useRoute()
@@ -192,7 +193,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <main class="account-settings account-settings--system" aria-label="账户设置">
+  <SettingsContent ariaLabel="账户设置" class="account-settings account-settings--system">
     <DataViewStatePanel
       :state="isInitialLoad ? 'loading' : loadError ? 'error' : userInfo === null ? 'empty' : 'ready'"
       error-title="账户信息加载失败"
@@ -342,16 +343,13 @@ onMounted(() => {
         </form>
       </DialogContent>
     </Dialog>
-  </main>
+  </SettingsContent>
 </template>
 
 <style scoped lang="scss">
 @use '@/styles/variables-v2.scss' as *;
 
 .account-settings {
-  min-height: 100%;
-  padding: $wolf-page-padding-v2;
-  background: $wolf-bg-page-v2;
   color: $wolf-text-primary-v2;
   font-family: $wolf-font-family-v2;
   font-size: $wolf-font-size-body-v2;
@@ -369,7 +367,6 @@ onMounted(() => {
   &__password-input > :first-child { flex: 1; }
 
   @media (max-width: $wolf-breakpoint-sm-v2) {
-    padding: $wolf-page-padding-mobile-v2;
     &__profile { gap: $wolf-card-padding-mobile-v2; }
     &__details { grid-template-columns: 1fr; gap: $wolf-form-item-gap-mobile-v2; }
     &__oauth { align-items: stretch; flex-direction: column; }

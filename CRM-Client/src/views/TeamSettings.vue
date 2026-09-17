@@ -15,6 +15,7 @@ import { usePermissionStore } from '@/stores/permissions'
 import { useSettingsAccess } from '@/composables/useSettingsAccess'
 import { getSettingsNavigationItem } from '@/settingsNavigation'
 import { usePageTitle } from '@/composables/usePageTitle'
+import SettingsContent from '@/views/settings/SettingsContent.vue'
 
 usePageTitle()
 
@@ -116,13 +117,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <main class="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6" aria-label="团队信息与安全">
-    <div class="space-y-1">
-      <p class="text-sm font-medium text-primary">系统设置</p>
-      <h1 class="text-2xl font-semibold tracking-tight">团队信息与安全</h1>
-      <p class="text-sm text-muted-foreground">维护当前团队资料、邀请入口和团队安全边界。</p>
-    </div>
-
+  <SettingsContent ariaLabel="团队信息与安全" description="维护当前团队资料、邀请入口和团队安全边界。">
     <ErrorState
       v-if="permissionsUnavailable"
       variant="error"
@@ -197,5 +192,5 @@ onMounted(() => {
         </Card>
       </div>
     </template>
-  </main>
+  </SettingsContent>
 </template>
