@@ -227,6 +227,37 @@ describe('SettingsProductsPage', () => {
     vi.clearAllMocks()
   })
 
+  it('does not list products when the owner lacks product:view', async () => {
+    seedPinia([])
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(productApi.list).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('暂无访问权限')
+    wrapper.unmount()
+  })
+
+  it('lists products after permissions become ready with product:view', async () => {
+    seedPinia([])
+    const permissionStore = usePermissionStore()
+    permissionStore.loadState = 'loading'
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(productApi.list).not.toHaveBeenCalled()
+
+    permissionStore.permissions = [{
+      id: 1,
+      code: 'product:view',
+      name: 'product:view',
+      resource: 'product',
+      action: 'view',
+    }]
+    permissionStore.loadState = 'ready'
+    await vi.waitFor(() => expect(productApi.list).toHaveBeenCalledTimes(1))
+    expect(wrapper.text()).toContain('CRM 产品')
+    wrapper.unmount()
+  })
+
+
   it('shows product data to a read-only user without maintenance buttons', async () => {
     seedPinia(['product:view'])
     const wrapper = mountPage()
@@ -304,11 +335,12 @@ describe('SettingsProductsPage', () => {
     store.permissions = []
     mocks.routeQuery.action = 'create'
     const wrapper = mountPage()
-    await vi.waitFor(() => expect(productApi.list).toHaveBeenCalled())
     await flushPromises()
+    expect(productApi.list).not.toHaveBeenCalled()
     expect(wrapper.find('h2').exists()).toBe(false)
 
     setPermissions(['product:view', 'product:create'])
+    await vi.waitFor(() => expect(productApi.list).toHaveBeenCalled())
     await flushPromises()
     expect(wrapper.find('h2').text()).toBe('新建产品')
     wrapper.unmount()

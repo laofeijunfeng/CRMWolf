@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
+
 import approvalFlowApi, { type ApprovalFlowListItem } from '@/api/approvalFlow'
 import workflowApi, { type WorkflowDetail, type WorkflowSummary } from '@/api/workflow'
 import ApprovalFlowFormDialog from '@/components/system-config/ApprovalFlowFormDialog.vue'
@@ -12,6 +14,8 @@ import { handleApiError } from '@/utils/errorHandler'
 import { usePermissionStore } from '@/stores/permissions'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import SettingsContent from '@/views/settings/SettingsContent.vue'
+
+const route = useRoute()
 
 const permissionStore = usePermissionStore()
 
@@ -51,6 +55,12 @@ const workflowActionId = ref<number | null>(null)
 const approvalLoaded = ref(false)
 const workflowLoaded = ref(false)
 const consumedAction = ref<string | null>(null)
+const queryParam = (value: unknown): string => {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value) && typeof value[0] === 'string') return value[0]
+  return ''
+}
+
 
 const businessTypeLabels: Record<ApprovalFlowListItem['business_type'], string> = {
   CONTRACT: '合同', PAYMENT: '回款登记', INVOICE: '发票申请', INVOICE_REISSUE: '发票重开申请',
@@ -97,13 +107,17 @@ function openWorkflowEditor(workflowId: number | null): void { editingWorkflowId
 function closeWorkflowEditor(): void { workflowEditorOpen.value = false; editingWorkflowId.value = null }
 
 function consumeAction(): void {
-  const action = props.action
+  const queryAction = queryParam(route.query['action'])
+  const action = queryAction !== '' ? queryAction : (props.action ?? '')
   if (action !== 'create' && action !== 'edit') {
     consumedAction.value = null
     return
   }
-  const recordId = props.recordId ?? ''
+  const queryId = queryParam(route.query['id'])
+  const queryRecordId = queryParam(route.query['recordId'])
+  const recordId = queryId !== '' ? queryId : (queryRecordId !== '' ? queryRecordId : (props.recordId ?? ''))
   const signature = `${action}:${recordId}`
+
   if (consumedAction.value === signature || formOpen.value) return
   if (action === 'create') {
     if (!canCreate.value) return
@@ -116,6 +130,7 @@ function consumeAction(): void {
   }
   consumedAction.value = signature
 }
+
 
 async function toggleFlow(flow: ApprovalFlowListItem): Promise<void> {
   if (togglingFlowId.value !== null) return
@@ -160,7 +175,8 @@ watch(
     if (workflowReadable && (!workflowLoaded.value || previous?.[2] !== true)) void loadWorkflows()
   },
 )
-watch(() => [props.action, props.recordId, canCreate.value, canEdit.value] as const, consumeAction, { immediate: true })
+watch(() => [route.query['action'], route.query['id'], route.query['recordId'], props.action, props.recordId, canCreate.value, canEdit.value] as const, consumeAction, { immediate: true })
+
 
 useTopBarRegistration({
   actionDeps: [canCreateWorkflow, canCreate, workflowEditorOpen],

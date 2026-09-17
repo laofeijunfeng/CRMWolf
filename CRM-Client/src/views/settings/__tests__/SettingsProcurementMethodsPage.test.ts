@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { nextTick } from 'vue'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
+
 import { createPinia, setActivePinia } from 'pinia'
 import SettingsProcurementMethodsPage from '@/views/settings/SettingsProcurementMethodsPage.vue'
 import { useTeamStore } from '@/stores/team'
@@ -9,16 +10,20 @@ import { usePermissionStore } from '@/stores/permissions'
 
 const mocks = vi.hoisted(() => ({
   listMethods: vi.fn(),
+  getProcurementMethod: vi.fn(),
   routeQuery: {} as Record<string, string | undefined>,
 }))
+
 
 const { listMethods } = mocks
 
 vi.mock('@/api/procurement', () => ({
   default: {
     getProcurementMethods: mocks.listMethods,
+    getProcurementMethod: mocks.getProcurementMethod,
   },
 }))
+
 
 vi.mock('vue-router', () => ({
   useRoute: (): { meta: { title: string }; query: Record<string, string | undefined> } => ({
@@ -33,7 +38,8 @@ vi.mock('vue-router', () => ({
 }))
 
 const pageStubs = {
-  DataTable: { props: ['data'], template: '<div data-testid="methods-table">{{ data[0]?.name }}</div>' },
+  DataTable: { props: ['data'], template: '<div data-testid="methods-table">{{ data[0]?.name }} {{ data[0]?.stage_templates?.length ?? 0 }}</div>' },
+
   TableRowActions: true,
   SettingsContent: { template: '<main><slot /></main>' },
   Dialog: {
@@ -82,14 +88,58 @@ describe('SettingsProcurementMethodsPage', () => {
 
   it('loads procurement methods into a DataTable', async () => {
     seedOwnerPinia()
-    listMethods.mockResolvedValue([{ id: 'pm_1', name: '公开招标', code: 'OPEN_TENDER', is_active: true, stage_templates: [{}, {}] }])
+    listMethods.mockResolvedValue([{ id: 1, name: '公开招标', code: 'OPEN_TENDER', is_active: true, sort_order: 0 }])
+    mocks.getProcurementMethod.mockResolvedValue({
+      id: 1,
+      name: '公开招标',
+      code: 'OPEN_TENDER',
+      is_active: true,
+      sort_order: 0,
+      stage_templates: [{}, {}],
+    })
     const wrapper = mount(SettingsProcurementMethodsPage, {
       global: { stubs: { DataTable: { props: ['data'], template: '<div>{{ data[0]?.name }}</div>' }, TableRowActions: true, SettingsContent: { template: '<main><slot /></main>' }, Dialog: true } },
     })
     await vi.waitFor(() => expect(listMethods).toHaveBeenCalled())
+    await vi.waitFor(() => expect(mocks.getProcurementMethod).toHaveBeenCalledWith(1))
+    await flushPromises()
     expect(wrapper.text()).toContain('公开招标')
     wrapper.unmount()
   })
+
+  it('loads real stage counts from each method detail', async () => {
+    seedOwnerPinia()
+    listMethods.mockResolvedValue([{
+      id: 1,
+      name: '公开招标',
+      code: 'OPEN_TENDER',
+      is_active: 1,
+      sort_order: 0,
+      created_time: '2026-01-01T00:00:00Z',
+      updated_time: '2026-01-01T00:00:00Z',
+    }])
+    mocks.getProcurementMethod.mockResolvedValue({
+      id: 1,
+      name: '公开招标',
+      code: 'OPEN_TENDER',
+      is_active: 1,
+      sort_order: 0,
+      created_time: '2026-01-01T00:00:00Z',
+      updated_time: '2026-01-01T00:00:00Z',
+      stage_templates: [{ id: 11 }, { id: 12 }],
+    })
+    const wrapper = mount(SettingsProcurementMethodsPage, {
+      global: { stubs: pageStubs },
+    })
+    await vi.waitFor(() => expect(listMethods).toHaveBeenCalled())
+    await vi.waitFor(() => expect(mocks.getProcurementMethod).toHaveBeenCalledWith(1))
+    await flushPromises()
+    expect(wrapper.text()).toContain('公开招标')
+    expect(wrapper.text()).toContain('2')
+    wrapper.unmount()
+  })
+
+
 
   it('does not reopen create Dialog when the list length changes', async () => {
     seedOwnerPinia()
@@ -114,6 +164,8 @@ describe('SettingsProcurementMethodsPage', () => {
     expect(wrapper.find('[data-testid="method-dialog"]').exists()).toBe(false)
 
     resolveMethods?.([{ id: 'pm_1', name: '公开招标', code: 'OPEN_TENDER', is_active: true, stage_templates: [{}, {}] }])
+    mocks.getProcurementMethod.mockResolvedValue({ id: 'pm_1', name: '公开招标', code: 'OPEN_TENDER', is_active: true, stage_templates: [{}, {}] })
+
     await vi.waitFor(() => expect(listMethods).toHaveBeenCalled())
     await nextTick()
     expect(wrapper.find('[data-testid="method-dialog"]').exists()).toBe(false)

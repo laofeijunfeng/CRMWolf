@@ -14,7 +14,10 @@ const mocks = vi.hoisted(() => ({
   updateWorkflowStatus: vi.fn(),
   confirmDialog: vi.fn(),
   handleApiError: vi.fn(),
+  routeQuery: {} as Record<string, string | undefined>,
 }))
+
+
 
 vi.mock('@/api/approvalFlow', () => ({
   default: {
@@ -71,6 +74,15 @@ vi.mock('@/components/workflow/WorkflowEditor.vue', () => ({
     },
   }),
 }))
+
+vi.mock('vue-router', () => ({
+  useRoute: (): { query: Record<string, string | undefined> } => ({
+    get query(): Record<string, string | undefined> {
+      return mocks.routeQuery
+    },
+  }),
+}))
+
 
 import ApprovalFlowsNew from '../ApprovalFlowsNew.vue'
 
@@ -162,10 +174,12 @@ async function waitForLoaded(wrapper: VueWrapper): Promise<void> {
 describe('ApprovalFlowsNew', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.routeQuery = {}
     mocks.getApprovalFlows.mockResolvedValue([activeFlow])
     mocks.listWorkflows.mockResolvedValue([draftWorkflow])
     mocks.confirmDialog.mockResolvedValue(true)
   })
+
   it('loads both lists when permissions become ready after mount', async () => {
     const wrapper = mountPageBeforePermissionsReady()
     const permissionStore = usePermissionStore()
@@ -205,6 +219,29 @@ describe('ApprovalFlowsNew', () => {
     expect(form.props('mode')).toBe('edit')
     expect(form.props('flowId')).toBe(11)
   })
+  it('opens the create form from ?action=create', () => {
+    mocks.routeQuery = { action: 'create' }
+    const wrapper = mountPage()
+
+    const form = wrapper.getComponent({ name: 'ApprovalFlowFormDialog' })
+    expect(form.props('open')).toBe(true)
+    expect(form.props('mode')).toBe('create')
+    expect(form.props('flowId')).toBe(null)
+    wrapper.unmount()
+  })
+
+  it('opens the edit form from ?action=edit&id=', () => {
+    mocks.routeQuery = { action: 'edit', id: '11' }
+    const wrapper = mountPage()
+
+    const form = wrapper.getComponent({ name: 'ApprovalFlowFormDialog' })
+    expect(form.props('open')).toBe(true)
+    expect(form.props('mode')).toBe('edit')
+    expect(form.props('flowId')).toBe(11)
+    wrapper.unmount()
+  })
+
+
 
   it('renders loaded flow identity, business type, and status', async () => {
     const wrapper = mountPage()

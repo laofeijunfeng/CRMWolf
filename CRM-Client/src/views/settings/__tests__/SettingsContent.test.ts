@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import SettingsContent from '../SettingsContent.vue'
@@ -23,4 +25,15 @@ describe('SettingsContent', () => {
     expect(wrapper.find('p.settings-content__description').exists()).toBe(false)
     wrapper.unmount()
   })
+
+  it('styles nested form grids with :deep so Card content receives the layout', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/views/settings/SettingsContent.vue'), 'utf8')
+    expect(source).toContain(':deep(.settings-form-grid)')
+    expect(source).toContain(':deep(.settings-form-grid-full)')
+    expect(source).toContain(':deep(.settings-form-actions)')
+    expect(source).toContain(':deep(.settings-dl)')
+    expect(source).toContain(':deep(.settings-setting-row)')
+    expect(source).not.toContain(':slotted(.settings-form-grid)')
+  })
+
 })

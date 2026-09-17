@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+
+
 import { useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { Plus } from 'lucide-vue-next'
@@ -78,7 +80,8 @@ const fields: ListFieldDefinition[] = defineListFields([
 ])
 
 const loadMethod = async (): Promise<void> => {
-  if (methodId.value === null) return
+  if (methodId.value === null || !hasAccess.value) return
+
   loading.value = true
   loadError.value = null
   try {
@@ -156,6 +159,14 @@ const getRowActions = (_row: ProcurementStageTemplate): TableRowActionSet => {
 }
 
 onMounted(() => { void loadMethod() })
+onUnmounted(() => {
+  headerStore.setBack(false)
+})
+watch(hasAccess, (ok) => {
+  if (ok) void loadMethod()
+})
+
+
 
 useTopBarRegistration({
   actionDeps: [hasAccess, canCreate, method],

@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
+
 import { z } from 'zod'
 import { toast } from 'vue-sonner'
 import { Search, Loader2, Plus } from 'lucide-vue-next'
@@ -26,6 +27,8 @@ import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { handleApiError } from '@/utils/errorHandler'
+import ErrorState from '@/components/ErrorState.vue'
+
 import { confirmDelete } from '@/utils/confirmDialog'
 import { teamApi } from '@/api/team'
 import type { TeamMemberResponse } from '@/api/team'
@@ -37,6 +40,8 @@ import { useUserStore } from '@/stores/user'
 import { useTeamStore } from '@/stores/team'
 import { usePermissionStore } from '@/stores/permissions'
 import { useSettingsAccess } from '@/composables/useSettingsAccess'
+import { getSettingsNavigationItem } from '@/settingsNavigation'
+
 import { usePageTitle } from '@/composables/usePageTitle'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { DataTable, TableRowActions } from '@/components/crmwolf'
@@ -53,7 +58,9 @@ usePageTitle()
 const userStore = useUserStore()
 const teamStore = useTeamStore()
 const permissionStore = usePermissionStore()
-const { isOwner } = useSettingsAccess()
+const { isOwner, canAccess, permissionsUnavailable, permissionsPending } = useSettingsAccess()
+const membersSettings = getSettingsNavigationItem('members')
+
 
 const submittedSearch = ref('')
 const members = ref<TeamMemberResponse[]>([])
@@ -111,6 +118,13 @@ const { handleSubmit: handleResetPasswordSubmit, resetForm: resetPasswordResetFo
 const currentUserId = computed(() => String(userStore.userInfo?.id ?? ''))
 const teamId = computed(() => teamStore.currentTeam?.id)
 
+const hasAccess = computed(() => membersSettings !== undefined && canAccess(membersSettings))
+const retryingPermissions = computed(() => permissionStore.loadState === 'loading')
+
+const retryPermissions = async (): Promise<void> => {
+  await teamStore.retryPermissionSync()
+}
+
 const canManageMembers = computed(() => {
   if (isOwner.value) return true
   return permissionStore.hasAnyPermission([
@@ -146,7 +160,8 @@ const currentTeamId = (): number | null => teamId.value ?? null
 
 const loadMembers = async (): Promise<void> => {
   const id = currentTeamId()
-  if (id === null) return
+  if (id === null || !hasAccess.value) return
+
   const requestId = ++listRequestId.value
   loading.value = true
   loadError.value = null
@@ -165,6 +180,8 @@ const loadMembers = async (): Promise<void> => {
 }
 
 const fetchAvailableRoles = async (): Promise<void> => {
+  if (!hasAccess.value) return
+
   try {
     const response = await roleApi.getRoles()
     availableRoles.value = response
@@ -386,15 +403,44 @@ function handleRoleChange(roleId: number, checked: boolean): void {
   }
 }
 
-watch(() => teamStore.currentTeam?.id, () => {
+watch([hasAccess, teamId], (): void => {
+  if (!hasAccess.value) return
   void loadMembers()
   void fetchAvailableRoles()
 }, { immediate: true })
+
+
 </script>
 
 <template>
   <SettingsContent ariaLabel="团队成员" description="管理当前团队成员、邀请和角色。邀请、改名、重置密码等短任务继续用对话框。">
+    <ErrorState
+      v-if="permissionsUnavailable"
+      variant="error"
+      title="权限信息暂不可用"
+      description="暂时无法确认你的团队设置权限。请重试权限同步，避免在权限不明确时继续操作。"
+    >
+      <template #action>
+        <Button :loading="retryingPermissions" @click="retryPermissions">
+          {{ retryingPermissions ? '同步中…' : '重试权限同步' }}
+        </Button>
+      </template>
+    </ErrorState>
+    <ErrorState
+      v-else-if="permissionsPending"
+      variant="error"
+      title="正在同步权限"
+      description="正在确认你的访问权限，请稍候。"
+    />
+    <ErrorState
+      v-else-if="!hasAccess"
+      variant="forbidden"
+      title="暂无访问权限"
+      description="你没有访问团队成员的权限，请联系团队所有者或管理员。"
+    />
     <DataTable
+      v-else
+
       :fields="fields"
       :data="displayedMembers"
       :loading="loading"

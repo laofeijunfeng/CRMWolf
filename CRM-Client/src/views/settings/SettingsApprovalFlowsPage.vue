@@ -3,6 +3,8 @@ import { ref, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { Plus } from 'lucide-vue-next'
+import { Button } from '@/components/ui/button'
+
 import {
   Dialog,
   DialogContent,
@@ -17,7 +19,9 @@ import {
   EmptyMedia,
   EmptyTitle
 } from '@/components/ui/empty'
+import ErrorState from '@/components/ErrorState.vue'
 import { handleApiError } from '@/utils/errorHandler'
+
 import { confirmDialog } from '@/utils/confirmDialog'
 import approvalFlowApi, {
   type ApprovalFlowDetail,
@@ -29,6 +33,8 @@ import ApprovalFlowAIDialog from '@/components/ApprovalFlowAIDialog.vue'
 import { usePermissionStore } from '@/stores/permissions'
 import { useTeamStore } from '@/stores/team'
 import { useSettingsAccess } from '@/composables/useSettingsAccess'
+import { getSettingsNavigationItem } from '@/settingsNavigation'
+
 import { usePageTitle } from '@/composables/usePageTitle'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { AmountText, DataTable, TableRowActions } from '@/components/crmwolf'
@@ -45,7 +51,17 @@ usePageTitle()
 const route = useRoute()
 const teamStore = useTeamStore()
 const permissionStore = usePermissionStore()
-const { isOwner } = useSettingsAccess()
+const { isOwner, canAccess, permissionsUnavailable, permissionsPending } = useSettingsAccess()
+const approvalFlowsSettings = getSettingsNavigationItem('approval-flows')
+const hasAccess = computed(() => approvalFlowsSettings !== undefined && canAccess(approvalFlowsSettings))
+const retryingPermissions = computed(() => permissionStore.loadState === 'loading')
+const teamId = computed(() => teamStore.currentTeam?.id)
+
+
+const retryPermissions = async (): Promise<void> => {
+  await teamStore.retryPermissionSync()
+}
+
 
 const submittedSearch = ref('')
 const approvalFlows = ref<ApprovalFlowListItem[]>([])
@@ -104,6 +120,8 @@ const queryParam = (value: unknown): string => {
 }
 
 const loadApprovalFlows = async (): Promise<void> => {
+  if (!hasAccess.value) return
+
   const requestId = ++listRequestId.value
   loading.value = true
   loadError.value = null
@@ -240,14 +258,44 @@ watch(() => [route.query['action'], route.query['id'], approvalFlows.value.lengt
   }
 }, { immediate: true })
 
-watch(() => teamStore.currentTeam?.id, () => {
+watch([hasAccess, teamId], (): void => {
+  if (!hasAccess.value) return
   void loadApprovalFlows()
 }, { immediate: true })
+
+
+
 </script>
 
 <template>
   <SettingsContent ariaLabel="审批流程管理" description="配置审批流程、节点和启停状态。短任务继续用对话框。">
+    <ErrorState
+      v-if="permissionsUnavailable"
+      variant="error"
+      title="权限信息暂不可用"
+      description="暂时无法确认你的团队设置权限。请重试权限同步，避免在权限不明确时继续操作。"
+    >
+      <template #action>
+        <Button :loading="retryingPermissions" @click="retryPermissions">
+          {{ retryingPermissions ? '同步中…' : '重试权限同步' }}
+        </Button>
+      </template>
+    </ErrorState>
+    <ErrorState
+      v-else-if="permissionsPending"
+      variant="error"
+      title="正在同步权限"
+      description="正在确认你的访问权限，请稍候。"
+    />
+    <ErrorState
+      v-else-if="!hasAccess"
+      variant="forbidden"
+      title="暂无访问权限"
+      description="你没有访问审批流程的权限，请联系团队所有者或管理员。"
+    />
     <DataTable
+      v-else
+
       :fields="fields"
       :data="displayedFlows"
       :loading="loading"

@@ -4,6 +4,8 @@ import { createPinia, setActivePinia } from 'pinia'
 import SettingsRolesPage from '@/views/settings/SettingsRolesPage.vue'
 import { useTeamStore } from '@/stores/team'
 import { useUserStore } from '@/stores/user'
+import { usePermissionStore } from '@/stores/permissions'
+
 
 const mocks = vi.hoisted(() => ({
   getRoles: vi.fn(),
@@ -39,6 +41,7 @@ describe('SettingsRolesPage', () => {
     setActivePinia(createPinia())
     const teamStore = useTeamStore()
     const userStore = useUserStore()
+    const permissionStore = usePermissionStore()
     teamStore.currentTeam = {
       id: 7,
       name: '演示团队',
@@ -54,6 +57,8 @@ describe('SettingsRolesPage', () => {
       created_at: null,
       updated_at: null,
     }
+    permissionStore.loadState = 'ready'
+
     getRoles.mockResolvedValue([{
       id: 1,
       code: 'ADMIN',

@@ -8,6 +8,8 @@ import { toast } from 'vue-sonner'
 import { Plus } from 'lucide-vue-next'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import ErrorState from '@/components/ErrorState.vue'
+
 import {
   Dialog,
   DialogContent,
@@ -35,6 +37,8 @@ import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
 import { usePermissionStore } from '@/stores/permissions'
 import { useTeamStore } from '@/stores/team'
 import { useSettingsAccess } from '@/composables/useSettingsAccess'
+import { getSettingsNavigationItem } from '@/settingsNavigation'
+
 import { usePageTitle } from '@/composables/usePageTitle'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { DataTable, TableRowActions } from '@/components/crmwolf'
@@ -56,7 +60,17 @@ const route = useRoute()
 const router = useRouter()
 const teamStore = useTeamStore()
 const permissionStore = usePermissionStore()
-const { isOwner } = useSettingsAccess()
+const { isOwner, canAccess, permissionsUnavailable, permissionsPending } = useSettingsAccess()
+const procurementSettings = getSettingsNavigationItem('procurement')
+const hasAccess = computed(() => procurementSettings !== undefined && canAccess(procurementSettings))
+const retryingPermissions = computed(() => permissionStore.loadState === 'loading')
+const teamId = computed(() => teamStore.currentTeam?.id)
+
+
+const retryPermissions = async (): Promise<void> => {
+  await teamStore.retryPermissionSync()
+}
+
 
 const submittedSearch = ref('')
 const methods = ref<ProcurementMethodRow[]>([])
@@ -124,13 +138,31 @@ const queryParam = (value: unknown): string => {
 }
 
 const loadMethods = async (): Promise<void> => {
+  if (!hasAccess.value) return
   const requestId = ++listRequestId.value
   loading.value = true
   loadError.value = null
   try {
     const data = await procurementApi.getProcurementMethods()
     if (requestId !== listRequestId.value) return
-    methods.value = Array.isArray(data) ? data : []
+    const listed = Array.isArray(data) ? data : []
+    const details = await Promise.all(listed.map(async (method) => {
+      try {
+        const detail = await procurementApi.getProcurementMethod(method.id)
+        if (detail === undefined || detail === null) {
+          return { ...method, stage_templates: [] }
+        }
+        return {
+          ...detail,
+          stage_templates: Array.isArray(detail.stage_templates) ? detail.stage_templates : [],
+        }
+      } catch {
+        return { ...method, stage_templates: [] }
+      }
+    }))
+
+    if (requestId !== listRequestId.value) return
+    methods.value = details
   } catch (error) {
     if (requestId !== listRequestId.value) return
     loadError.value = toFeedbackError(error, '采购方式')
@@ -305,14 +337,44 @@ watch(() => [route.query['action'], route.query['id'], methods.value.length, can
   }
 }, { immediate: true })
 
-watch(() => teamStore.currentTeam?.id, () => {
+watch([hasAccess, teamId], (): void => {
+  if (!hasAccess.value) return
   void loadMethods()
 }, { immediate: true })
+
+
+
 </script>
 
 <template>
   <SettingsContent ariaLabel="采购方式管理" description="维护采购方式和阶段模板。短任务继续用对话框。">
+    <ErrorState
+      v-if="permissionsUnavailable"
+      variant="error"
+      title="权限信息暂不可用"
+      description="暂时无法确认你的团队设置权限。请重试权限同步，避免在权限不明确时继续操作。"
+    >
+      <template #action>
+        <Button :loading="retryingPermissions" @click="retryPermissions">
+          {{ retryingPermissions ? '同步中…' : '重试权限同步' }}
+        </Button>
+      </template>
+    </ErrorState>
+    <ErrorState
+      v-else-if="permissionsPending"
+      variant="error"
+      title="正在同步权限"
+      description="正在确认你的访问权限，请稍候。"
+    />
+    <ErrorState
+      v-else-if="!hasAccess"
+      variant="forbidden"
+      title="暂无访问权限"
+      description="你没有访问采购方式的权限，请联系团队所有者或管理员。"
+    />
     <DataTable
+      v-else
+
       :fields="fields"
       :data="displayedMethods"
       :loading="loading"

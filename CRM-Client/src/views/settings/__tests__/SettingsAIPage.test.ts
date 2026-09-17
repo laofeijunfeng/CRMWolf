@@ -69,6 +69,25 @@ const setupOwner = (): Pinia => {
   return pinia
 }
 
+const setupPendingNonOwner = (): Pinia => {
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const teamStore = useTeamStore()
+  const permissionStore = usePermissionStore()
+  const userStore = useUserStore()
+  permissionStore.loadState = 'loading'
+  permissionStore.permissions = []
+  teamStore.currentTeam = teamFixture
+  userStore.userInfo = {
+    ...ownerFixture,
+    id: 99,
+    name: '成员',
+    email: 'member@example.com',
+  }
+  return pinia
+}
+
+
 const mountPage = (): VueWrapper => {
   return mount(SettingsAIPage, {
     global: {
@@ -185,4 +204,56 @@ describe('SettingsAIPage', () => {
 
     wrapper.unmount()
   })
+
+  it('fetches AI config after hasAccess becomes true', async () => {
+    vi.mocked(aiConfigApi.getConfig).mockResolvedValue({
+      code: 0,
+      message: 'ok',
+      data: existingConfig,
+    })
+
+    const pinia = setupPendingNonOwner()
+    const wrapper = mount(SettingsAIPage, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          Card: passthrough,
+          CardHeader: passthrough,
+          CardTitle: passthrough,
+          CardDescription: passthrough,
+          CardContent: passthrough,
+          FormItem: passthrough,
+          FormControl: passthrough,
+          FormLabel: passthrough,
+          FormDescription: passthrough,
+          FormMessage: true,
+          Select: passthrough,
+          SelectTrigger: true,
+          SelectValue: true,
+          SelectContent: true,
+          SelectItem: true,
+          Alert: passthrough,
+          AlertDescription: passthrough,
+          Skeleton: true,
+        },
+      },
+    })
+    await flushPromises()
+    expect(aiConfigApi.getConfig).not.toHaveBeenCalled()
+
+    const permissionStore = usePermissionStore()
+    permissionStore.permissions = [{
+      id: 1,
+      code: 'ai:read',
+      name: 'ai:read',
+      resource: 'ai',
+      action: 'read',
+      scope: null,
+      description: null,
+    }]
+    permissionStore.loadState = 'ready'
+    await vi.waitFor(() => expect(aiConfigApi.getConfig).toHaveBeenCalledTimes(1))
+    wrapper.unmount()
+  })
+
 })

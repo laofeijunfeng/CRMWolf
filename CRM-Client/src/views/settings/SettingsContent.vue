@@ -34,17 +34,17 @@ withDefaults(defineProps<Props>(), {
   color: $wolf-text-secondary-v2;
 }
 
-:slotted(.settings-form-grid) {
+:deep(.settings-form-grid) {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: $wolf-form-item-gap-v2;
 }
 
-:slotted(.settings-form-grid-full) {
+:deep(.settings-form-grid-full) {
   grid-column: 1 / -1;
 }
 
-:slotted(.settings-form-actions) {
+:deep(.settings-form-actions) {
   display: flex;
   justify-content: flex-end;
   gap: $wolf-space-sm-v2;
@@ -54,7 +54,7 @@ withDefaults(defineProps<Props>(), {
   box-shadow: $wolf-shadow-card-v2;
 }
 
-:slotted(.settings-dl) {
+:deep(.settings-dl) {
   display: grid;
   grid-template-columns: 120px minmax(0, 1fr) 120px minmax(0, 1fr);
   gap: $wolf-space-md-v2 $wolf-space-xl-v2;
@@ -62,18 +62,18 @@ withDefaults(defineProps<Props>(), {
   font-size: $wolf-font-size-body-v2;
 }
 
-:slotted(.settings-dl dt) {
+:deep(.settings-dl dt) {
   color: $wolf-text-secondary-v2;
   font-size: $wolf-font-size-auxiliary-v2;
 }
 
-:slotted(.settings-dl dd) {
+:deep(.settings-dl dd) {
   margin: 0;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
 
-:slotted(.settings-setting-row) {
+:deep(.settings-setting-row) {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -82,7 +82,7 @@ withDefaults(defineProps<Props>(), {
   border-top: 1px solid $wolf-border-light-v2;
 }
 
-:slotted(.settings-setting-row:first-child) {
+:deep(.settings-setting-row:first-child) {
   border-top: 0;
   padding-top: 0;
 }
@@ -92,14 +92,15 @@ withDefaults(defineProps<Props>(), {
     padding: $wolf-page-padding-mobile-v2;
   }
 
-  :slotted(.settings-form-grid),
-  :slotted(.settings-dl) {
+  :deep(.settings-form-grid),
+  :deep(.settings-dl) {
     grid-template-columns: 1fr;
   }
 
-  :slotted(.settings-setting-row) {
+  :deep(.settings-setting-row) {
     flex-direction: column;
     align-items: stretch;
   }
 }
+
 </style>

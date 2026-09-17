@@ -1,4 +1,4 @@
-import { onActivated, onMounted, toValue, watch, type MaybeRefOrGetter, type WatchSource } from 'vue'
+import { onActivated, onDeactivated, onMounted, onUnmounted, toValue, watch, type MaybeRefOrGetter, type WatchSource } from 'vue'
 import { useHeaderStore, type HeaderAction, type TabItem } from '@/stores/header'
 
 interface UseTopBarRegistrationOptions {
@@ -10,6 +10,8 @@ interface UseTopBarRegistrationOptions {
 
 export function useTopBarRegistration(options: UseTopBarRegistrationOptions): void {
   const headerStore = useHeaderStore()
+  const registeredActions = options.actions !== undefined
+  const registeredTabs = options.tabs !== undefined
 
   const register = (): void => {
     const tabs = options.tabs === undefined ? undefined : toValue(options.tabs)
@@ -23,8 +25,19 @@ export function useTopBarRegistration(options: UseTopBarRegistrationOptions): vo
     }
   }
 
+  const unregister = (): void => {
+    if (registeredActions) {
+      headerStore.setActions([])
+    }
+    if (registeredTabs) {
+      headerStore.setTabs(null)
+    }
+  }
+
   onMounted(register)
   onActivated(register)
+  onUnmounted(unregister)
+  onDeactivated(unregister)
   watch(
     [
       (): TabItem[] | null | undefined => options.tabs === undefined ? undefined : toValue(options.tabs),
@@ -35,3 +48,4 @@ export function useTopBarRegistration(options: UseTopBarRegistrationOptions): vo
     { immediate: true }
   )
 }
+

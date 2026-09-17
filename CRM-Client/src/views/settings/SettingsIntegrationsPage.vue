@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
@@ -21,6 +22,8 @@ import { usePermissionStore } from '@/stores/permissions'
 import { useSettingsAccess } from '@/composables/useSettingsAccess'
 import { useSettingsUnsavedLeave } from '@/composables/useSettingsUnsavedLeave'
 import { getSettingsNavigationItem } from '@/settingsNavigation'
+import { useHeaderStore } from '@/stores/header'
+
 import { usePageTitle } from '@/composables/usePageTitle'
 import SettingsContent from '@/views/settings/SettingsContent.vue'
 import {
@@ -35,6 +38,8 @@ import {
 } from '@/components/ui/alert-dialog'
 
 usePageTitle()
+const headerStore = useHeaderStore()
+
 
 const teamStore = useTeamStore()
 const permissionStore = usePermissionStore()
@@ -198,8 +203,13 @@ const copyBotEncryptKey = async (): Promise<void> => {
 }
 
 onMounted(() => {
-  void fetchConfig()
+  headerStore.clear()
 })
+
+watch(hasAccess, (ok) => {
+  if (ok) void fetchConfig()
+}, { immediate: true })
+
 </script>
 
 <template>

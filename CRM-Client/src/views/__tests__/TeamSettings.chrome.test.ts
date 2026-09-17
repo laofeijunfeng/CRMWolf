@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, type Mock } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia, type Pinia } from 'pinia'
+
 import TeamSettings from '@/views/TeamSettings.vue'
 import { teamApi, type TeamResponse } from '@/api/team'
 import type { UserResponse } from '@/schemas/auth'
@@ -106,4 +107,57 @@ describe('TeamSettings chrome', () => {
     expect(wrapper.find('.lg\\:grid-cols-2').exists()).toBe(false)
     wrapper.unmount()
   })
+
+  it('fetches team detail after hasAccess becomes true', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const teamStore = useTeamStore()
+    const permissionStore = usePermissionStore()
+    const userStore = useUserStore()
+    permissionStore.loadState = 'loading'
+    permissionStore.permissions = []
+    teamStore.currentTeam = teamFixture
+    userStore.userInfo = {
+      ...ownerFixture,
+      id: 99,
+      name: '成员',
+      email: 'member@example.com',
+    }
+    vi.mocked(teamApi.getTeamDetail).mockReset()
+    vi.mocked(teamApi.getTeamDetail).mockResolvedValue(teamFixture)
+
+    const wrapper = mount(TeamSettings, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          ErrorState: true,
+          Card: passthrough,
+          CardHeader: true,
+          CardTitle: true,
+          CardDescription: true,
+          CardContent: true,
+          Button: true,
+          Input: true,
+          Label: true,
+          Skeleton: true,
+        },
+      },
+    })
+    await flushPromises()
+    expect(teamApi.getTeamDetail).not.toHaveBeenCalled()
+
+    permissionStore.permissions = [{
+      id: 1,
+      code: 'team:settings:view',
+      name: 'team:settings:view',
+      resource: 'team',
+      action: 'view',
+      scope: null,
+      description: null,
+    }]
+    permissionStore.loadState = 'ready'
+    await vi.waitFor(() => expect(teamApi.getTeamDetail).toHaveBeenCalledTimes(1))
+    wrapper.unmount()
+  })
+
 })

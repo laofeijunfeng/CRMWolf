@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -16,6 +17,8 @@ import { useSettingsAccess } from '@/composables/useSettingsAccess'
 import { useSettingsUnsavedLeave } from '@/composables/useSettingsUnsavedLeave'
 import { getSettingsNavigationItem } from '@/settingsNavigation'
 import { usePageTitle } from '@/composables/usePageTitle'
+import { useHeaderStore } from '@/stores/header'
+
 import SettingsContent from '@/views/settings/SettingsContent.vue'
 import {
   AlertDialog,
@@ -31,6 +34,8 @@ import {
 usePageTitle()
 
 const teamStore = useTeamStore()
+const headerStore = useHeaderStore()
+
 const permissionStore = usePermissionStore()
 const { isOwner, permissionsUnavailable, canAccess } = useSettingsAccess()
 const teamSettings = getSettingsNavigationItem('team')
@@ -138,8 +143,13 @@ const copyInviteLink = async (): Promise<void> => {
 }
 
 onMounted(() => {
-  void loadTeam()
+  headerStore.clear()
 })
+
+watch(hasAccess, (ok) => {
+  if (ok) void loadTeam()
+}, { immediate: true })
+
 </script>
 
 <template>

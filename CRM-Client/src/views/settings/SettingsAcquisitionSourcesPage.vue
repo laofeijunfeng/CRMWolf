@@ -8,6 +8,8 @@ import { toast } from 'vue-sonner'
 import { Plus } from 'lucide-vue-next'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import ErrorState from '@/components/ErrorState.vue'
+
 import {
   Dialog,
   DialogContent,
@@ -34,6 +36,8 @@ import { confirmDialog } from '@/utils/confirmDialog'
 import { usePermissionStore } from '@/stores/permissions'
 import { useTeamStore } from '@/stores/team'
 import { useSettingsAccess } from '@/composables/useSettingsAccess'
+import { getSettingsNavigationItem } from '@/settingsNavigation'
+
 import { usePageTitle } from '@/composables/usePageTitle'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { DataTable, TableRowActions } from '@/components/crmwolf'
@@ -50,7 +54,17 @@ usePageTitle()
 const route = useRoute()
 const teamStore = useTeamStore()
 const permissionStore = usePermissionStore()
-const { isOwner } = useSettingsAccess()
+const { isOwner, canAccess, permissionsUnavailable, permissionsPending } = useSettingsAccess()
+const acquisitionSourcesSettings = getSettingsNavigationItem('acquisition-sources')
+const hasAccess = computed(() => acquisitionSourcesSettings !== undefined && canAccess(acquisitionSourcesSettings))
+const retryingPermissions = computed(() => permissionStore.loadState === 'loading')
+const teamId = computed(() => teamStore.currentTeam?.id)
+
+
+const retryPermissions = async (): Promise<void> => {
+  await teamStore.retryPermissionSync()
+}
+
 
 const submittedSearch = ref('')
 const sources = ref<AcquisitionSource[]>([])
@@ -108,6 +122,8 @@ const queryParam = (value: unknown): string => {
 }
 
 const loadSources = async (): Promise<void> => {
+  if (!hasAccess.value) return
+
   const requestId = ++listRequestId.value
   loading.value = true
   loadError.value = null
@@ -253,14 +269,44 @@ watch(() => [route.query['action'], route.query['id'], sources.value.length, can
   }
 }, { immediate: true })
 
-watch(() => teamStore.currentTeam?.id, () => {
+watch([hasAccess, teamId], (): void => {
+  if (!hasAccess.value) return
   void loadSources()
 }, { immediate: true })
+
+
+
 </script>
 
 <template>
   <SettingsContent ariaLabel="获客来源" description="维护线索与客户共用的获客来源。短任务继续用对话框。">
+    <ErrorState
+      v-if="permissionsUnavailable"
+      variant="error"
+      title="权限信息暂不可用"
+      description="暂时无法确认你的团队设置权限。请重试权限同步，避免在权限不明确时继续操作。"
+    >
+      <template #action>
+        <Button :loading="retryingPermissions" @click="retryPermissions">
+          {{ retryingPermissions ? '同步中…' : '重试权限同步' }}
+        </Button>
+      </template>
+    </ErrorState>
+    <ErrorState
+      v-else-if="permissionsPending"
+      variant="error"
+      title="正在同步权限"
+      description="正在确认你的访问权限，请稍候。"
+    />
+    <ErrorState
+      v-else-if="!hasAccess"
+      variant="forbidden"
+      title="暂无访问权限"
+      description="你没有访问获客来源的权限，请联系团队所有者或管理员。"
+    />
     <DataTable
+      v-else
+
       :fields="fields"
       :data="displayedSources"
       :loading="loading"
