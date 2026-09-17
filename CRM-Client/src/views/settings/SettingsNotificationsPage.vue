@@ -184,7 +184,14 @@ const onSubmit = handleSubmit(async (formValues) => {
     const response = await notificationConfigApi.updateConfig(updateData)
 
     configInfo.value = response
-    savedUrl.value = formValues.feishu_webhook_url ?? ''
+    resetForm({
+      values: {
+        feishu_webhook_enabled: response.feishu_webhook_enabled ?? false,
+        feishu_webhook_url: response.feishu_webhook_url ?? '',
+        notification_group_name: response.notification_group_name ?? '',
+      },
+    })
+    savedUrl.value = response.feishu_webhook_url ?? ''
     toast.success('通知配置保存成功')
     saving.value = false
 
