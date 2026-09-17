@@ -264,9 +264,8 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'settings/procurement-methods',
         name: 'SettingsProcurementMethods',
-        component: () => import('@/views/SettingsModulePage.vue'),
+        component: () => import('@/views/settings/SettingsProcurementMethodsPage.vue'),
         meta: { requiresAuth: true, title: '采购方式管理', settingsKey: 'procurement' },
-        props: { module: 'procurement' }
       },
       {
         path: 'settings/procurement-methods/:methodId/stages',
