@@ -63,8 +63,10 @@ const aiConfigSchema = toTypedSchema(
     api_host: z.string()
       .min(1, '请输入接口地址')
       .url('请输入有效的 URL 地址'),
-    api_key: z.string()
-      .min(8, 'API Key 长度至少 8 位'),
+    api_key: z.union([
+      z.literal(''),
+      z.string().min(8, 'API Key 长度至少 8 位'),
+    ]),
     model_name: z.string()
       .min(1, '请输入模型名称'),
   }),
