@@ -61,6 +61,7 @@ export interface OpportunityProductModule {
 export interface Opportunity {
   id: string
   public_id: string
+  deal_journey_id?: string | null
   opportunity_number: string
   opportunity_name: string
   customer_id: string
@@ -258,6 +259,7 @@ export interface StageDurationData {
 export interface OpportunityListResponse {
   id: string
   public_id: string
+  deal_journey_id?: string | null
   opportunity_number: string
   opportunity_name: string
   customer_id: string

@@ -36,7 +36,10 @@ vi.mock('@/api/contract', () => ({ default: contractApi }))
 vi.mock('@/utils/errorHandler', () => ({ handleApiError }))
 vi.mock('vue-sonner', () => ({ toast }))
 vi.mock('@/stores/permissions', () => ({
-  usePermissionStore: () => ({ hasAnyPermission: () => true }),
+  usePermissionStore: () => ({ hasAnyPermission: () => true, hasPermission: () => true }),
+}))
+vi.mock('@/stores/user', () => ({
+  useUserStore: () => ({ userInfo: { id: '9' } }),
 }))
 
 vi.mock('@/components/ui/sheet', () => {
@@ -120,10 +123,16 @@ vi.mock('@/components/OpportunityStageStepper.vue', () => ({
   default: defineComponent({ name: 'OpportunityStageStepper', setup: () => () => h('div', 'stage stepper') }),
 }))
 
+const OPPORTUNITY_PUBLIC_ID = 'opp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+const CUSTOMER_PUBLIC_ID = 'cus_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+const JOURNEY_PUBLIC_ID = 'djy_cccccccccccccccccccccccccccccccc'
+
 const opportunityFixture = (): Opportunity => ({
-  id: 88,
+  id: OPPORTUNITY_PUBLIC_ID,
+  public_id: OPPORTUNITY_PUBLIC_ID,
+  opportunity_number: 'OPP-88',
   opportunity_name: 'CRM 升级项目',
-  customer_id: 19,
+  customer_id: CUSTOMER_PUBLIC_ID,
   customer_name: '上海测试客户',
   procurement_method_id: null,
   total_amount: 320000,
@@ -139,14 +148,16 @@ const opportunityFixture = (): Opportunity => ({
   win_probability: 50,
   owner_id: '9',
   status: OpportunityStatus.FOLLOW_UP,
+  approval_phase: 'draft',
   creator_id: '9',
   created_time: '2026-07-15T00:00:00.000Z',
   updated_time: '2026-07-15T00:00:00.000Z',
   version: 1,
   customer_info: {
-    id: 19,
+    id: CUSTOMER_PUBLIC_ID,
     account_name: '上海测试客户',
   },
+  deal_journey_id: JOURNEY_PUBLIC_ID,
 })
 
 describe('OpportunityDetailSheet content reuse', () => {
@@ -160,7 +171,7 @@ describe('OpportunityDetailSheet content reuse', () => {
     const wrapper = mount(OpportunityDetailSheet, {
       props: {
         visible: true,
-        opportunityId: 88,
+        opportunityId: OPPORTUNITY_PUBLIC_ID,
       },
     })
 
@@ -168,6 +179,29 @@ describe('OpportunityDetailSheet content reuse', () => {
 
     expect(wrapper.findAll('[data-testid="sheet-root"]')).toHaveLength(1)
     const content = wrapper.get('[data-testid="opportunity-detail-content"]')
-    expect(content.attributes('data-opportunity-id')).toBe('88')
+    expect(content.attributes('data-opportunity-id')).toBe(OPPORTUNITY_PUBLIC_ID)
+  })
+
+  it('opens the customer journeys tab for the deal journey then closes the sheet', async () => {
+    const wrapper = mount(OpportunityDetailSheet, {
+      props: {
+        visible: true,
+        opportunityId: OPPORTUNITY_PUBLIC_ID,
+      },
+    })
+
+    await flushPromises()
+
+    await wrapper.get('[data-testid="view-deal-journey"]').trigger('click')
+
+    expect(routerPush).toHaveBeenCalledWith({
+      path: '/customers',
+      query: {
+        customerId: CUSTOMER_PUBLIC_ID,
+        tab: 'journeys',
+        journeyId: JOURNEY_PUBLIC_ID,
+      },
+    })
+    expect(wrapper.emitted('update:visible')).toEqual([[false]])
   })
 })

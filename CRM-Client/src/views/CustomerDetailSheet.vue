@@ -25,11 +25,11 @@ import DetailContextHost from '@/components/crmwolf/DetailContextHost.vue'
 import FollowUpPanel from '@/components/panels/FollowUpPanel.vue'
 import ContactsPanel from '@/components/panels/ContactsPanel.vue'
 import ContractsPanel from '@/components/panels/ContractsPanel.vue'
-import OpportunitiesPanel from '@/components/panels/OpportunitiesPanel.vue'
+import DealJourneysPanel from '@/components/panels/DealJourneysPanel.vue'
 import InvoicesPanel from '@/components/panels/InvoicesPanel.vue'
 import LicensePanel from '@/components/panels/LicensePanel.vue'
 import CustomerMembersPanel from '@/components/panels/CustomerMembersPanel.vue'
-import OpportunityDetailContent from '@/components/panels/OpportunityDetailContent.vue'
+import DealJourneyDetailContent from '@/components/panels/DealJourneyDetailContent.vue'
 import ContractDetailContent from '@/components/panels/ContractDetailContent.vue'
 import PaymentPlanDetailContent from '@/components/panels/PaymentPlanDetailContent.vue'
 import PaymentRecordDetailContent from '@/components/panels/PaymentRecordDetailContent.vue'
@@ -54,13 +54,13 @@ import customerProfileApi from '@/api/customerProfile'
 import type { CustomerProfileEvidence, CustomerProfileResponse } from '@/schemas/customerProfile'
 import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
 import customerActivityApi, { type CustomerActivityResponse } from '@/api/customerActivity'
-import { opportunityApi, type OpportunityListResponse } from '@/api/opportunity'
+import { dealJourneyApi, type DealJourney } from '@/api/dealJourney'
 import contractApi, { type ContractListResponse, type ContractResponse } from '@/api/contract'
 import type { PaymentPlanResponse, PaymentRecordInfo, ApprovalInfo, ApprovalInfoLite, PaymentRecordUpdate } from '@/api/payment'
 import paymentApi from '@/api/payment'
 import invoiceApi, { type InvoiceTitleResponse } from '@/api/invoice'
 import deploymentApi, { type DeploymentInfoResponse } from '@/api/deployment'
-import { normalizePaginatedResponse } from '@/types/pagination'
+
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
 import { useApprovalStore } from '@/stores/approval'
@@ -71,12 +71,14 @@ import type { DetailContextNode, DetailObjectType } from '@/types/detailContext'
 import { useDetailContextStack } from '@/composables/useDetailContextStack'
 
 // ==================== Props & Emits ====================
-type CustomerDetailPanel = 'customer-profile' | 'customer-info' | 'followup' | 'opportunities'
+type CustomerDetailPanel = 'customer-profile' | 'customer-info' | 'followup' | 'journeys'
+type CustomerDetailPanelTarget = CustomerDetailPanel | 'opportunities'
 
 interface Props {
   customerId: string | null
   targetOpportunityId?: string | null
-  targetPanel?: CustomerDetailPanel | null
+  targetJourneyId?: string | null
+  targetPanel?: CustomerDetailPanelTarget | null
   visible: boolean
 }
 
@@ -125,9 +127,15 @@ const selectedRecord = ref<{ record: PaymentRecordInfo; stageName: string; appro
 const recordEditDialogOpen = ref(false)
 const recordEditSubmitting = ref(false)
 const isRecordResubmitMode = ref(false)
-const selectedOpportunityId = ref<string | null>(null)
-const highlightedOpportunityId = ref<string | null>(null)
-const restoreFocusOpportunityId = ref<string | null>(null)
+const selectedJourneyId = ref<string | null>(null)
+const highlightedJourneyId = ref<string | null>(null)
+const restoreFocusJourneyId = ref<string | null>(null)
+
+interface DealJourneyDetailContentExpose {
+  refresh: () => Promise<void> | void
+}
+
+const dealJourneyDetailContentRef = ref<DealJourneyDetailContentExpose | null>(null)
 
 interface ContractOpportunityContext {
   id: string
@@ -151,19 +159,19 @@ interface CreateContractPayload {
   subscriptionYears: number | null
 }
 
-interface OpportunityDetailContentExpose {
-  refresh: () => Promise<void>
-}
-
 const fixedContractOpportunity = ref<ContractOpportunityContext | null>(null)
-const opportunityDetailContentRef = ref<OpportunityDetailContentExpose | null>(null)
 
 // ==================== Data Loading State ====================
 const customer = ref<CustomerDetailResponse | null>(null)
 const customerProfile = ref<CustomerProfileResponse | null>(null)
 const customerProfileEvidence = ref<CustomerProfileEvidence[]>([])
 const followUps = ref<CustomerActivityResponse[]>([])
-const opportunities = ref<OpportunityListResponse[]>([])
+const journeys = ref<DealJourney[]>([])
+const selectedJourney = computed(() => (
+  selectedJourneyId.value === null
+    ? null
+    : journeys.value.find(item => item.public_id === selectedJourneyId.value) ?? null
+))
 const contracts = ref<ContractListResponse[]>([])
 const paymentPlans = ref<PaymentPlanResponse[]>([])
 const invoiceTitles = ref<InvoiceTitleResponse[]>([])
@@ -171,7 +179,7 @@ const deployments = ref<DeploymentInfoResponse[]>([])
 const customerMembers = ref<CustomerMemberResponse[]>([])
 type CustomerDetailPanelKey =
   | 'followUps'
-  | 'opportunities'
+  | 'journeys'
   | 'contracts'
   | 'invoiceTitles'
   | 'deployments'
@@ -182,7 +190,7 @@ type CustomerDetailPanelKey =
 const panelErrors = ref<Partial<Record<CustomerDetailPanelKey, FeedbackError | undefined>>>({})
 const panelLoading = ref<Record<CustomerDetailPanelKey, boolean>>({
   followUps: false,
-  opportunities: false,
+  journeys: false,
   contracts: false,
   invoiceTitles: false,
   deployments: false,
@@ -193,7 +201,7 @@ const panelLoading = ref<Record<CustomerDetailPanelKey, boolean>>({
 })
 const CUSTOMER_DETAIL_PANELS: CustomerDetailPanelKey[] = [
   'followUps',
-  'opportunities',
+  'journeys',
   'contracts',
   'invoiceTitles',
   'deployments',
@@ -204,7 +212,7 @@ const CUSTOMER_DETAIL_PANELS: CustomerDetailPanelKey[] = [
 ]
 const panelRequestIds: Record<CustomerDetailPanelKey, number> = {
   followUps: 0,
-  opportunities: 0,
+  journeys: 0,
   contracts: 0,
   invoiceTitles: 0,
   deployments: 0,
@@ -229,7 +237,7 @@ const navTabs: NavTabItem[] = [
   { key: 'customer-profile', label: '客户档案' },
   { key: 'customer-info', label: '客户信息' },
   { key: 'followup', label: '客户活动' },
-  { key: 'opportunities', label: '项目旅程' }
+  { key: 'journeys', label: '业务旅程' }
 ]
 
 // ==================== Methods ====================
@@ -293,13 +301,13 @@ const createCustomerContextNode = (customerId: string): DetailContextNode => {
   }
 }
 
-const createOpportunityContextNode = (opportunityId: string): DetailContextNode => {
-  const opportunity = opportunities.value.find(item => item.id === opportunityId)
-  const opportunityName = opportunity?.opportunity_name?.trim()
+const createJourneyContextNode = (journeyId: string): DetailContextNode => {
+  const journey = journeys.value.find(item => item.public_id === journeyId)
+  const journeyName = journey?.name?.trim()
   const node: DetailContextNode = {
-    type: 'opportunity',
-    id: opportunityId,
-    label: opportunityName !== undefined && opportunityName.length > 0 ? opportunityName : '商机详情',
+    type: 'journey',
+    id: journeyId,
+    label: journeyName !== undefined && journeyName.length > 0 ? journeyName : '业务旅程',
     parentType: 'customer',
     source: 'related-object'
   }
@@ -358,23 +366,23 @@ const resetDetailContext = (): void => {
 
 const resetLocalNavigation = (): void => {
   activePanel.value = 'customer-profile'
-  selectedOpportunityId.value = null
+  selectedJourneyId.value = null
   selectedContractId.value = null
   selectedPlanId.value = null
   selectedRecord.value = null
-  highlightedOpportunityId.value = null
-  restoreFocusOpportunityId.value = null
+  highlightedJourneyId.value = null
+  restoreFocusJourneyId.value = null
   resetDetailContext()
 }
 
 const setActivePanel = (panel: string): void => {
   activePanel.value = panel
-  selectedOpportunityId.value = null
+  selectedJourneyId.value = null
   selectedContractId.value = null
   selectedPlanId.value = null
   selectedRecord.value = null
-  highlightedOpportunityId.value = null
-  restoreFocusOpportunityId.value = null
+  highlightedJourneyId.value = null
+  restoreFocusJourneyId.value = null
   resetDetailContext()
 }
 
@@ -590,7 +598,7 @@ const loadAllData = async (customerId: string): Promise<boolean> => {
     const [
       customerDetailResult,
       followUpsResult,
-      opportunitiesResult,
+      journeysResult,
       contractsResult,
       invoiceTitlesResult,
       deploymentsResult,
@@ -600,7 +608,7 @@ const loadAllData = async (customerId: string): Promise<boolean> => {
     ] = await Promise.allSettled([
       customerApi.getCustomerDetail(customerId),
       customerActivityApi.getActivities(customerId),
-      opportunityApi.getOpportunities({ customer_id: customerId }),
+      dealJourneyApi.listByCustomer(customerId),
       contractApi.getCustomerContracts(customerId),
       invoiceApi.getInvoiceTitles(customerId),
       deploymentApi.list(customerId),
@@ -619,7 +627,7 @@ const loadAllData = async (customerId: string): Promise<boolean> => {
     customer.value = customerDetailResult.value
     const panelLoadSucceeded: Record<CustomerDetailPanelKey, boolean> = {
       followUps: followUpsResult.status === 'fulfilled' && isCurrentPanelLoad('followUps'),
-      opportunities: opportunitiesResult.status === 'fulfilled' && isCurrentPanelLoad('opportunities'),
+      journeys: journeysResult.status === 'fulfilled' && isCurrentPanelLoad('journeys'),
       contracts: contractsResult.status === 'fulfilled' && isCurrentPanelLoad('contracts'),
       invoiceTitles: invoiceTitlesResult.status === 'fulfilled' && isCurrentPanelLoad('invoiceTitles'),
       deployments: deploymentsResult.status === 'fulfilled' && isCurrentPanelLoad('deployments'),
@@ -629,7 +637,7 @@ const loadAllData = async (customerId: string): Promise<boolean> => {
       paymentPlans: false,
     }
     const followUpsData = readPanel(followUpsResult, 'followUps', '客户活动', followUps.value)
-    const opportunitiesData = readPanel(opportunitiesResult, 'opportunities', '商机', opportunities.value)
+    const journeysData = readPanel(journeysResult, 'journeys', '业务旅程', journeys.value)
     const contractsData = readPanel(contractsResult, 'contracts', '合同', contracts.value)
     const invoiceTitlesData = readPanel(invoiceTitlesResult, 'invoiceTitles', '发票抬头', { invoice_titles: invoiceTitles.value })
     const deploymentsData = readPanel(deploymentsResult, 'deployments', '部署信息', deployments.value)
@@ -637,7 +645,10 @@ const loadAllData = async (customerId: string): Promise<boolean> => {
     const profileData = readPanel(customerProfileResult, 'customerProfile', '客户档案', customerProfile.value)
     const profileEvidenceData = readPanel(customerProfileEvidenceResult, 'customerProfileEvidence', '客户档案证据', customerProfileEvidence.value)
     if (isCurrentPanelLoad('followUps')) followUps.value = followUpsData
-    if (isCurrentPanelLoad('opportunities')) opportunities.value = normalizePaginatedResponse(opportunitiesData).items
+    if (isCurrentPanelLoad('journeys')) {
+      journeys.value = journeysData
+      if (navigationTargetPending && journeysResult.status === 'fulfilled') applyNavigationTarget(true)
+    }
     if (isCurrentPanelLoad('contracts')) contracts.value = contractsData
     if (isCurrentPanelLoad('invoiceTitles')) invoiceTitles.value = invoiceTitlesData.invoice_titles ?? []
     if (isCurrentPanelLoad('deployments')) deployments.value = deploymentsData
@@ -686,18 +697,19 @@ defineExpose({
 
 const retryPanel = async (panel: CustomerDetailPanelKey): Promise<boolean> => {
   if (props.customerId === null) return false
-  activePanel.value = panel === 'followUps' ? 'followup'
-    : panel === 'opportunities' ? 'opportunities'
-      : panel === 'customerProfile' || panel === 'customerProfileEvidence' ? 'customer-profile'
-        : 'customer-info'
-
+  if (!hasNestedDetail.value) {
+    activePanel.value = panel === 'followUps' ? 'followup'
+      : panel === 'journeys' ? 'journeys'
+        : panel === 'customerProfile' || panel === 'customerProfileEvidence' ? 'customer-profile'
+          : 'customer-info'
+  }
   const customerId = props.customerId
   switch (panel) {
     case 'followUps':
       return runPanelRequest(panel, '客户活动', () => customerActivityApi.getActivities(customerId), (data) => { followUps.value = data })
-    case 'opportunities':
-      return runPanelRequest(panel, '商机', () => opportunityApi.getOpportunities({ customer_id: customerId }), (data) => {
-        opportunities.value = normalizePaginatedResponse(data).items
+    case 'journeys':
+      return runPanelRequest(panel, '业务旅程', () => dealJourneyApi.listByCustomer(customerId), (data) => {
+        journeys.value = data
       })
     case 'contracts': {
       const contractsLoaded = await runPanelRequest(panel, '合同', () => contractApi.getCustomerContracts(customerId), (data) => { contracts.value = data })
@@ -908,37 +920,63 @@ const handleOpportunitySuccess = async (): Promise<void> => {
   emit('refresh')
 }
 
-const handleViewOpportunity = (opportunityId: string): void => {
-  activePanel.value = 'opportunities'
+const handleViewJourney = (journeyId: string): void => {
+  activePanel.value = 'journeys'
   if (props.customerId !== null) {
-    const currentRoot = detailContextStack.nodes.value[0]
-    if (currentRoot?.type !== 'customer' || currentRoot.id !== props.customerId) {
-      detailContextStack.reset([createCustomerContextNode(props.customerId)])
-    }
-    detailContextStack.push(createOpportunityContextNode(opportunityId))
+    detailContextStack.reset([createCustomerContextNode(props.customerId)])
+    detailContextStack.push(createJourneyContextNode(journeyId))
   }
   selectedContractId.value = null
   selectedPlanId.value = null
   selectedRecord.value = null
-  selectedOpportunityId.value = opportunityId
-  highlightedOpportunityId.value = null
-  restoreFocusOpportunityId.value = null
+  selectedJourneyId.value = journeyId
+  highlightedJourneyId.value = null
+  restoreFocusJourneyId.value = null
 }
 
-const applyNavigationTarget = (): void => {
+const resolveTargetJourneyId = (): string | null => {
+  if (props.targetJourneyId !== undefined && props.targetJourneyId !== null) {
+    return props.targetJourneyId
+  }
+  if (props.targetOpportunityId === undefined || props.targetOpportunityId === null) {
+    return null
+  }
+  const matched = journeys.value.find(item => item.primary_opportunity?.public_id === props.targetOpportunityId)
+  return matched?.public_id ?? null
+}
+
+const resolveTargetPanel = (panel: CustomerDetailPanelTarget): CustomerDetailPanel =>
+  panel === 'opportunities' ? 'journeys' : panel
+
+let navigationTargetPending = false
+
+const markNavigationTargetPending = (): void => {
+  navigationTargetPending = true
+}
+
+const applyNavigationTarget = (fromJourneysLoad = false): void => {
+  const journeyId = resolveTargetJourneyId()
+  if (journeyId !== null) {
+    handleViewJourney(journeyId)
+    navigationTargetPending = false
+    return
+  }
+
   if (props.targetOpportunityId !== undefined && props.targetOpportunityId !== null) {
-    handleViewOpportunity(props.targetOpportunityId)
+    activePanel.value = 'journeys'
+    if (fromJourneysLoad) navigationTargetPending = false
     return
   }
 
   if (props.targetPanel !== undefined && props.targetPanel !== null) {
-    activePanel.value = props.targetPanel
+    setActivePanel(resolveTargetPanel(props.targetPanel))
   }
+  navigationTargetPending = false
 }
 
 const syncNavigationFromContext = (): void => {
   const current = detailContextStack.current.value
-  selectedOpportunityId.value = current?.type === 'opportunity' ? current.id : null
+  selectedJourneyId.value = current?.type === 'journey' ? current.id : null
   selectedContractId.value = current?.type === 'contract' ? Number(current.id) : null
   selectedPlanId.value = current?.type === 'payment-plan'
     ? Number(current.id)
@@ -964,13 +1002,13 @@ const syncNavigationFromContext = (): void => {
   }
 }
 
-const handleBackFromOpportunity = (): void => {
-  const previousOpportunityId = selectedOpportunityId.value
+const handleBackFromJourney = (): void => {
+  const previousJourneyId = selectedJourneyId.value
   detailContextStack.pop()
   syncNavigationFromContext()
-  if (previousOpportunityId !== null && detailContextStack.current.value?.type === 'customer') {
-    highlightedOpportunityId.value = previousOpportunityId
-    restoreFocusOpportunityId.value = previousOpportunityId
+  if (previousJourneyId !== null && detailContextStack.current.value?.type === 'customer') {
+    highlightedJourneyId.value = previousJourneyId
+    restoreFocusJourneyId.value = previousJourneyId
   }
 }
 
@@ -981,8 +1019,8 @@ const handleBackFromContract = (): void => {
 
 const handleContextBack = (): void => {
   const currentType = detailContextStack.current.value?.type
-  if (currentType === 'opportunity') {
-    handleBackFromOpportunity()
+  if (currentType === 'journey') {
+    handleBackFromJourney()
     return
   }
   detailContextStack.pop()
@@ -998,22 +1036,22 @@ const handleContextNavigate = (index: number): void => {
 
 const handleContextClose = (): void => {
   detailContextStack.closeRoot()
-  selectedOpportunityId.value = null
+  selectedJourneyId.value = null
   selectedContractId.value = null
   selectedPlanId.value = null
   selectedRecord.value = null
   emit('update:visible', false)
 }
 
-const handleOpportunityDetailRefresh = async (): Promise<void> => {
+const handleJourneyDetailRefresh = async (): Promise<void> => {
   if (props.customerId !== null) {
     const refreshed = await loadAllData(props.customerId)
-    warnIfCustomerDetailRefreshFailed(refreshed, '商机操作')
+    warnIfCustomerDetailRefreshFailed(refreshed, '业务旅程操作')
   }
   emit('refresh')
 }
-
-const handleOpportunityDetailCreateContract = (payload: CreateContractPayload): void => {
+const handleCreateContractFromJourney = (payload: CreateContractPayload): void => {
+  editingContract.value = null
   fixedContractOpportunity.value = {
     id: payload.opportunityId,
     opportunity_name: payload.opportunityName,
@@ -1027,6 +1065,8 @@ const handleOpportunityDetailCreateContract = (payload: CreateContractPayload): 
   contractDialogOpen.value = true
 }
 
+
+
 const handleContractDialogClose = (open: boolean): void => {
   contractDialogOpen.value = open
   if (!open) {
@@ -1039,16 +1079,22 @@ const handleContractSuccess = async (): Promise<void> => {
   contractDialogOpen.value = false
   editingContract.value = null
   fixedContractOpportunity.value = null
-  void opportunityDetailContentRef.value?.refresh()
+
   const refreshed = await retryPanel('contracts')
   warnIfCustomerDetailRefreshFailed(refreshed, '合同更新')
+  if (selectedJourneyId.value !== null) {
+    await dealJourneyDetailContentRef.value?.refresh()
+  }
   emit('refresh')
 }
 
 const refreshContractRelations = async (): Promise<void> => {
-  void opportunityDetailContentRef.value?.refresh()
+
   const refreshed = await retryPanel('contracts')
   warnIfCustomerDetailRefreshFailed(refreshed, '合同操作')
+  if (selectedJourneyId.value !== null) {
+    await dealJourneyDetailContentRef.value?.refresh()
+  }
   emit('refresh')
 }
 
@@ -1196,27 +1242,27 @@ const handleViewContract = (contractId: number): void => {
     }
     detailContextStack.push(createContractContextNode(contractId))
   }
-  selectedOpportunityId.value = null
+  selectedJourneyId.value = null
   selectedContractId.value = contractId
   selectedPlanId.value = null
   selectedRecord.value = null
 }
 
-const handleViewContractFromOpportunity = (contractId: number): void => {
-  const opportunityId = selectedOpportunityId.value
-  if (opportunityId !== null && props.customerId !== null) {
+const handleViewContractFromJourney = (contractId: number): void => {
+  const journeyId = selectedJourneyId.value
+  if (journeyId !== null && props.customerId !== null) {
     const currentRoot = detailContextStack.nodes.value[0]
     if (currentRoot?.type !== 'customer' || currentRoot.id !== props.customerId) {
       detailContextStack.reset([createCustomerContextNode(props.customerId)])
     }
-    detailContextStack.push(createOpportunityContextNode(opportunityId))
+    detailContextStack.push(createJourneyContextNode(journeyId))
     detailContextStack.push({
       ...createContractContextNode(contractId),
-      parentType: 'opportunity',
-      parentId: opportunityId
+      parentType: 'journey',
+      parentId: journeyId
     })
   }
-  selectedOpportunityId.value = null
+  selectedJourneyId.value = null
   selectedContractId.value = contractId
   selectedPlanId.value = null
   selectedRecord.value = null
@@ -1229,12 +1275,12 @@ const handleViewPaymentPlan = (planId: number, plan?: PaymentPlanResponse): void
     detailContextStack.reset([createCustomerContextNode(props.customerId)])
   }
   const parent = detailContextStack.current.value
-  const parentType = parent?.type === 'opportunity' || parent?.type === 'contract'
+  const parentType = parent?.type === 'journey' || parent?.type === 'opportunity' || parent?.type === 'contract'
     ? parent.type
     : 'customer'
   const parentId = parentType === 'customer' ? props.customerId : parent?.id
   detailContextStack.push(createPaymentPlanContextNode(planId, parentType, parentId))
-  selectedOpportunityId.value = null
+  selectedJourneyId.value = null
   selectedContractId.value = null
   selectedPlanId.value = planId
   selectedRecord.value = null
@@ -1247,9 +1293,6 @@ const handleViewPaymentPlan = (planId: number, plan?: PaymentPlanResponse): void
   }
 }
 
-const handleViewPaymentPlanFromOpportunity = (planId: number, plan: PaymentPlanResponse): void => {
-  handleViewPaymentPlan(planId, plan)
-}
 
 const handleViewPaymentPlanFromContract = (plan: PaymentPlanResponse): void => {
   handleViewPaymentPlan(plan.id, plan)
@@ -1389,7 +1432,7 @@ const handlePaymentPlanDetailViewContract = (contractId: number): void => {
   if (current?.type === 'payment-plan') {
     const parent = detailContextStack.nodes.value[detailContextStack.nodes.value.length - 2]
     const parentType: DetailObjectType =
-      parent?.type === 'opportunity' || parent?.type === 'contract'
+      parent?.type === 'journey' || parent?.type === 'opportunity' || parent?.type === 'contract'
         ? parent.type
         : 'customer'
     const contractNode: DetailContextNode = {
@@ -1407,14 +1450,14 @@ const handlePaymentPlanDetailViewContract = (contractId: number): void => {
   }
   selectedPlanId.value = null
   selectedRecord.value = null
-  selectedOpportunityId.value = null
+  selectedJourneyId.value = null
   selectedContractId.value = contractId
 }
 
 const handlePaymentPlanDetailViewCustomer = (customerId: string, _plan: PaymentPlanResponse): void => {
   if (customerId === props.customerId) {
     detailContextStack.reset(props.customerId === null ? [] : [createCustomerContextNode(props.customerId)])
-    selectedOpportunityId.value = null
+    selectedJourneyId.value = null
     selectedContractId.value = null
     selectedPlanId.value = null
     selectedRecord.value = null
@@ -1436,6 +1479,7 @@ watch(() => props.visible, (visible): void => {
 
   if (visible && props.customerId !== null) {
     resetLocalNavigation()
+    markNavigationTargetPending()
     applyNavigationTarget()
     loadAllData(props.customerId)
   } else if (!visible) {
@@ -1445,7 +1489,7 @@ watch(() => props.visible, (visible): void => {
     customerProfile.value = null
     customerProfileEvidence.value = []
     followUps.value = []
-    opportunities.value = []
+    journeys.value = []
     contracts.value = []
     paymentPlans.value = []
     invoiceTitles.value = []
@@ -1454,7 +1498,7 @@ watch(() => props.visible, (visible): void => {
     selectedContractId.value = null
     selectedPlanId.value = null
     selectedRecord.value = null
-      fixedContractOpportunity.value = null
+    fixedContractOpportunity.value = null
     customerEditDialogOpen.value = false
     deploymentDialogOpen.value = false
   }
@@ -1468,20 +1512,23 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
   }
   if (!props.visible || customerId === null || customerId === previousCustomerId) return
   resetLocalNavigation()
+  markNavigationTargetPending()
   applyNavigationTarget()
   selectedContractId.value = null
   loadAllData(customerId)
 })
 
-watch(() => props.targetOpportunityId, (opportunityId): void => {
-  if (!props.visible || opportunityId === undefined || opportunityId === null) return
-  handleViewOpportunity(opportunityId)
+watch(() => [props.targetJourneyId, props.targetOpportunityId], (): void => {
+  if (!props.visible) return
+  markNavigationTargetPending()
+  applyNavigationTarget()
 })
 
 watch(() => props.targetPanel, (panel): void => {
+  const hasTargetJourney = resolveTargetJourneyId() !== null
   const hasTargetOpportunity = props.targetOpportunityId !== undefined && props.targetOpportunityId !== null
-  if (!props.visible || panel === undefined || panel === null || hasTargetOpportunity) return
-  activePanel.value = panel
+  if (!props.visible || panel === undefined || panel === null || hasTargetJourney || hasTargetOpportunity) return
+  setActivePanel(resolveTargetPanel(panel))
 })
 onBeforeUnmount(() => {
   profileRefreshPollGeneration += 1
@@ -1501,27 +1548,26 @@ onBeforeUnmount(() => {
           @close="handleContextClose"
           @navigate="handleContextNavigate"
         >
-          <OpportunityDetailContent
-            v-if="selectedOpportunityId !== null"
-            ref="opportunityDetailContentRef"
-            :opportunity-id="selectedOpportunityId"
+          <DealJourneyDetailContent
+            v-if="selectedJourneyId !== null"
+            ref="dealJourneyDetailContentRef"
+            :journey-id="selectedJourneyId"
+            :customer-id="customerId ?? ''"
+            :journey="selectedJourney"
             embedded
-            :customer-context="{
-              customerId: customerId ?? '',
-              customerName: customer?.account_name
-            }"
+            :show-breadcrumb="false"
+            :customer-context="customerId === null ? null : { customerId, customerName: customer?.account_name }"
             :can-edit-customer-context="canEditCurrentCustomer"
-            @back="handleBackFromOpportunity"
+            @back="handleBackFromJourney"
             @close="handleContextClose"
-            @refresh="handleOpportunityDetailRefresh"
-            @create-contract="handleOpportunityDetailCreateContract"
+            @refresh="handleJourneyDetailRefresh"
+            @view-contract="handleViewContractFromJourney"
+            @view-payment-plan="handleViewPaymentPlan"
+            @create-contract="handleCreateContractFromJourney"
             @edit-contract="handleEditContract"
             @submit-contract-approval="handleSubmitContractApproval"
             @withdraw-contract-approval="handleWithdrawContractApproval"
             @delete-contract="handleDeleteContract"
-            @view-contract="handleViewContractFromOpportunity"
-            @view-payment-plan="handleViewPaymentPlanFromOpportunity"
-            :show-breadcrumb="false"
           />
 
           <ContractDetailContent
@@ -1868,31 +1914,31 @@ onBeforeUnmount(() => {
               @delete="handleFollowUpDelete"
             />
 
-            <div v-if="activePanel === 'opportunities' && panelLoading.opportunities" class="customer-detail-panel-loading" aria-busy="true" aria-live="polite">
+            <div v-if="activePanel === 'journeys' && panelLoading.journeys" class="customer-detail-panel-loading" aria-busy="true" aria-live="polite">
               <div class="loading-spinner loading-spinner--small" />
-              <span>正在加载商机…</span>
+              <span>正在加载业务旅程…</span>
             </div>
             <ErrorState
-              v-else-if="activePanel === 'opportunities' && panelErrors.opportunities"
-              :variant="panelErrors.opportunities.variant ?? 'error'"
-              :title="panelErrors.opportunities.title"
-              :description="panelErrors.opportunities.description"
+              v-else-if="activePanel === 'journeys' && panelErrors.journeys"
+              :variant="panelErrors.journeys.variant ?? 'error'"
+              :title="panelErrors.journeys.title"
+              :description="panelErrors.journeys.description"
             >
               <template #action>
-                <Button v-if="panelErrors.opportunities.retryable !== false" type="button" :loading="panelLoading.opportunities" @click="retryPanel('opportunities')">
-                  重试加载商机
+                <Button v-if="panelErrors.journeys.retryable !== false" type="button" :loading="panelLoading.journeys" @click="retryPanel('journeys')">
+                  重试加载业务旅程
                 </Button>
               </template>
             </ErrorState>
-            <OpportunitiesPanel
-              v-if="activePanel === 'opportunities' && !panelErrors.opportunities"
+            <DealJourneysPanel
+              v-if="activePanel === 'journeys' && !panelErrors.journeys"
               :customer-id="customerId ?? ''"
-              :opportunities="opportunities"
-              :highlighted-opportunity-id="highlightedOpportunityId ?? undefined"
-              :restore-focus-opportunity-id="restoreFocusOpportunityId ?? undefined"
+              :journeys="journeys"
+              :highlighted-journey-id="highlightedJourneyId ?? undefined"
+              :restore-focus-journey-id="restoreFocusJourneyId ?? undefined"
               :show-add="canCreateOpportunityForCustomer"
               @add="handleCreateOpportunity"
-              @view="handleViewOpportunity"
+              @view="handleViewJourney"
             />
           </div>
         </ScrollArea>
@@ -1928,7 +1974,7 @@ onBeforeUnmount(() => {
             </Button>
           </template>
 
-          <template v-else-if="activePanel === 'opportunities' && canCreateOpportunityForCustomer">
+          <template v-else-if="activePanel === 'journeys' && canCreateOpportunityForCustomer">
             <Button variant="default" @click="handleCreateOpportunity">
               <Plus class="w-4 h-4 mr-2" />
               新建商机

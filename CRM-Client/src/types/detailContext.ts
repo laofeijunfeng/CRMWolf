@@ -6,6 +6,7 @@
  */
 export type DetailObjectType =
   | 'customer'
+  | 'journey'
   | 'opportunity'
   | 'contract'
   | 'payment-plan'

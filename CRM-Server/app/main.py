@@ -23,6 +23,7 @@ from app.api import (
     business_journey_board,
     contracts,
     customer_activities,
+    customer_deal_journeys,
     customer_procurement,
     customers,
     filter_options,
@@ -116,6 +117,7 @@ api_router.include_router(leads.analytics_router)
 api_router.include_router(procurement_ai.router)
 api_router.include_router(approval_ai.router)
 api_router.include_router(customers.router)
+api_router.include_router(customer_deal_journeys.router)
 api_router.include_router(customer_ai_router)
 api_router.include_router(customer_profiles_router)
 api_router.include_router(industry.router)

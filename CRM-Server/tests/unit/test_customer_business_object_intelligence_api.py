@@ -256,6 +256,9 @@ class _FakeQuery:
     def __init__(self, value=None):
         self.value = value
 
+    def options(self, *args, **kwargs):
+        return self
+
     def filter(self, *criteria):
         return self
 
@@ -1269,6 +1272,7 @@ async def test_issue_license_application_enqueues_business_object_intelligence(m
 
 @pytest.mark.asyncio
 async def test_update_opportunity_deal_journey_passes_expected_version_and_returns_new_version(monkeypatch) -> None:
+    journey_public_id = "djy_" + "b" * 32
     opportunity = _opportunity()
     opportunity.public_id = "opp_301"
     opportunity.opportunity_number = "OPP-301"
@@ -1286,25 +1290,47 @@ async def test_update_opportunity_deal_journey_passes_expected_version_and_retur
         status=1,
         owner_id="9",
     )
+    journey = SimpleNamespace(
+        id=22,
+        public_id=journey_public_id,
+        team_id=2,
+        customer_id=101,
+    )
     db = _FakeDb()
     received = {}
 
     monkeypatch.setattr(opportunities_api, "_ensure_opportunity_not_pending", lambda db, opportunity, team_id: None)
     monkeypatch.setattr(opportunities_api.customer_crud, "get_by_id", lambda db, customer_id, team_id: customer)
 
+    from app.crud.deal_journey import deal_journey_crud
     from app.services import deal_journey_service as deal_journey_module
+
+    monkeypatch.setattr(
+        deal_journey_crud,
+        "get_by_public_id",
+        lambda db, public_id, team_id, customer_id=None: journey if public_id == journey_public_id else None,
+    )
+    monkeypatch.setattr(
+        deal_journey_crud,
+        "get_by_id",
+        lambda db, journey_id, team_id: journey if journey_id == 22 else None,
+        raising=False,
+    )
 
     def fake_associate(db, db_opportunity, **kwargs):
         received.update(kwargs)
         db_opportunity.deal_journey_id = kwargs["deal_journey_id"]
         db_opportunity.version += 1
-        return SimpleNamespace(id=kwargs["deal_journey_id"])
+        return SimpleNamespace(id=kwargs["deal_journey_id"], public_id=journey_public_id)
 
     monkeypatch.setattr(deal_journey_module.deal_journey_service, "associate_opportunity", fake_associate)
 
     result = await opportunities_api.update_opportunity_deal_journey(
         "opp_301",
-        opportunities_api.OpportunityDealJourneyUpdate(deal_journey_id=22, expected_version=7),
+        opportunities_api.OpportunityDealJourneyUpdate(
+            deal_journey_id=journey_public_id,
+            expected_version=7,
+        ),
         db_opportunity=opportunity,
         current_user=SimpleNamespace(id=9),
         db=db,
@@ -1312,18 +1338,31 @@ async def test_update_opportunity_deal_journey_passes_expected_version_and_retur
 
     assert received == {"deal_journey_id": 22, "actor_id": "9", "expected_version": 7}
     assert opportunity.deal_journey_id == 22
-    assert result.deal_journey_id == 22
+    assert result.deal_journey_id == journey_public_id
     assert result.version == 8
     assert db.committed is True
 
 
 @pytest.mark.asyncio
 async def test_update_opportunity_deal_journey_maps_stale_version_to_conflict(monkeypatch) -> None:
+    journey_public_id = "djy_" + "b" * 32
     opportunity = _opportunity()
     db = _FakeDb()
     monkeypatch.setattr(opportunities_api, "_ensure_opportunity_not_pending", lambda db, opportunity, team_id: None)
 
+    from app.crud.deal_journey import deal_journey_crud
     from app.services import deal_journey_service as deal_journey_module
+
+    monkeypatch.setattr(
+        deal_journey_crud,
+        "get_by_public_id",
+        lambda db, public_id, team_id, customer_id=None: SimpleNamespace(
+            id=22,
+            public_id=journey_public_id,
+            team_id=2,
+            customer_id=101,
+        ),
+    )
 
     def fake_associate(db, db_opportunity, **kwargs):
         raise deal_journey_module.OpportunityDealJourneyConflictError(
@@ -1335,7 +1374,10 @@ async def test_update_opportunity_deal_journey_maps_stale_version_to_conflict(mo
     with pytest.raises(opportunities_api.HTTPException) as exc_info:
         await opportunities_api.update_opportunity_deal_journey(
             "opp_301",
-            opportunities_api.OpportunityDealJourneyUpdate(deal_journey_id=22, expected_version=7),
+            opportunities_api.OpportunityDealJourneyUpdate(
+                deal_journey_id=journey_public_id,
+                expected_version=7,
+            ),
             db_opportunity=opportunity,
             current_user=SimpleNamespace(id=9),
             db=db,
@@ -1345,3 +1387,32 @@ async def test_update_opportunity_deal_journey_maps_stale_version_to_conflict(mo
     assert exc_info.value.detail["code"] == "OPPORTUNITY_VERSION_CONFLICT"
     assert exc_info.value.detail["details"]["current_version"] == 8
     assert db.rolled_back is True
+
+
+@pytest.mark.asyncio
+async def test_update_opportunity_deal_journey_rejects_internal_id(monkeypatch) -> None:
+    opportunity = _opportunity()
+    db = _FakeDb()
+    monkeypatch.setattr(opportunities_api, "_ensure_opportunity_not_pending", lambda db, opportunity, team_id: None)
+
+    from app.services import deal_journey_service as deal_journey_module
+
+    called: list[tuple] = []
+
+    def fake_associate(*args, **kwargs):
+        called.append((args, kwargs))
+
+    monkeypatch.setattr(deal_journey_module.deal_journey_service, "associate_opportunity", fake_associate)
+
+    with pytest.raises(opportunities_api.HTTPException) as exc_info:
+        await opportunities_api.update_opportunity_deal_journey(
+            "opp_301",
+            opportunities_api.OpportunityDealJourneyUpdate(deal_journey_id="22", expected_version=7),
+            db_opportunity=opportunity,
+            current_user=SimpleNamespace(id=9),
+            db=db,
+        )
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "业务旅程不存在"
+    assert called == []

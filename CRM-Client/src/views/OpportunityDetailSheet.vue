@@ -5,43 +5,22 @@
  * 仅负责 Sheet 容器与外层导航动作，详情内容由
  * OpportunityDetailContent.vue 复用组件承载。
  */
-import { ref, computed } from 'vue'
+import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   Sheet
 } from '@/components/ui/sheet'
 import { DetailSheetContent } from '@/components/ui/detail-sheet'
 import OpportunityDetailContent from '@/components/panels/OpportunityDetailContent.vue'
-import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
-import { toast } from 'vue-sonner'
-import { handleApiError } from '@/utils/errorHandler'
-import contractApi, { type ContractListResponse, type ContractResponse } from '@/api/contract'
-import approvalGenericApi from '@/api/approvalGeneric'
-import { confirmDelete } from '@/utils/confirmDialog'
-
-interface CreateContractPayload {
-  opportunityId: string
-  customerId: string
-  customerName: string
-  opportunityName: string
-  totalAmount: number
-  userCount: number
-  licenseType: string
-  subscriptionYears: number | null
-}
-
-interface ContractOpportunityContext {
-  id: string
-  opportunity_name: string
-  customer_id: string
-  customer_name?: string
-  total_amount: number
-  user_count: number
-  license_type: string
-  subscription_years: number | null
-}
+import { customerDetailRoute } from '@/utils/customerRoutes'
 
 interface OpportunityDetailContentExpose {
   refresh: () => Promise<boolean>
+}
+
+interface ViewJourneyPayload {
+  customerId: string
+  journeyPublicId: string
 }
 
 interface Props {
@@ -55,13 +34,8 @@ const emit = defineEmits<{
   'refresh': []
 }>()
 
-// Contract dialog state
-const showContractDialog = ref(false)
+const router = useRouter()
 const opportunityDetailContentRef = ref<OpportunityDetailContentExpose | null>(null)
-const contractDialogCustomerId = ref<string | undefined>(undefined)
-const contractDialogCustomerName = ref<string | undefined>(undefined)
-const contractDialogOpportunity = ref<ContractOpportunityContext | null>(null)
-const editingContract = ref<ContractResponse | null>(null)
 
 const visibleModel = computed({
   get: () => props.visible,
@@ -80,93 +54,15 @@ async function refresh(): Promise<boolean> {
   return opportunityDetailContentRef.value?.refresh() ?? false
 }
 
+function handleViewJourney(payload: ViewJourneyPayload): void {
+  void router.push(customerDetailRoute(payload.customerId, {
+    tab: 'journeys',
+    journeyId: payload.journeyPublicId,
+  }))
+  closeSheet()
+}
+
 defineExpose({ refresh })
-
-function handleCreateContract(payload: CreateContractPayload): void {
-  // Open contract dialog with locked customer
-  editingContract.value = null
-  contractDialogCustomerId.value = payload.customerId
-  contractDialogCustomerName.value = payload.customerName
-  contractDialogOpportunity.value = {
-    id: payload.opportunityId,
-    opportunity_name: payload.opportunityName,
-    customer_id: payload.customerId,
-    customer_name: payload.customerName,
-    total_amount: payload.totalAmount,
-    user_count: payload.userCount,
-    license_type: payload.licenseType,
-    subscription_years: payload.subscriptionYears
-  }
-  showContractDialog.value = true
-}
-
-async function handleEditContract(contract: ContractListResponse): Promise<void> {
-  try {
-    editingContract.value = await contractApi.getContract(contract.id)
-    contractDialogCustomerId.value = contract.customer_id
-    contractDialogCustomerName.value = contract.customer_name
-      ?? contract.customer_info?.account_name
-      ?? undefined
-    contractDialogOpportunity.value = null
-    showContractDialog.value = true
-  } catch (error) {
-    handleApiError(error, '获取合同详情')
-  }
-}
-
-async function handleSubmitContractApproval(contract: ContractListResponse): Promise<void> {
-  try {
-    await approvalGenericApi.submitApproval('CONTRACT', contract.id)
-    const refreshed = await opportunityDetailContentRef.value?.refresh() ?? false
-    toast.success('合同已提交审批', refreshed ? undefined : {
-      description: '合同审批已提交，但商机详情刷新失败，请稍后重试。',
-    })
-    handleRefresh()
-  } catch (error) {
-    handleApiError(error, '提交审批')
-  }
-}
-
-async function handleWithdrawContractApproval(contract: ContractListResponse): Promise<void> {
-  try {
-    await approvalGenericApi.cancelApproval('CONTRACT', contract.id)
-    const refreshed = await opportunityDetailContentRef.value?.refresh() ?? false
-    toast.success('合同审批已撤回', refreshed ? undefined : {
-      description: '合同审批已撤回，但商机详情刷新失败，请稍后重试。',
-    })
-    handleRefresh()
-  } catch (error) {
-    handleApiError(error, '撤回审批')
-  }
-}
-
-async function handleDeleteContract(contract: ContractListResponse): Promise<void> {
-  const confirmed = await confirmDelete(`合同 "${contract.contract_name}"`)
-  if (!confirmed) return
-
-  try {
-    await contractApi.deleteContract(contract.id)
-    const refreshed = await opportunityDetailContentRef.value?.refresh() ?? false
-    toast.success('合同删除成功', refreshed ? undefined : {
-      description: '合同已删除，但商机详情刷新失败，请稍后重试。',
-    })
-    handleRefresh()
-  } catch (error) {
-    handleApiError(error, '删除合同')
-  }
-}
-
-async function handleContractSuccess(): Promise<void> {
-  showContractDialog.value = false
-  editingContract.value = null
-  contractDialogOpportunity.value = null
-  const refreshed = await opportunityDetailContentRef.value?.refresh() ?? false
-  if (!refreshed) {
-    toast.warning('合同已保存，但商机详情刷新失败，请稍后重试。')
-  }
-  // Refresh opportunity data if needed
-  handleRefresh()
-}
 </script>
 
 <template>
@@ -178,23 +74,8 @@ async function handleContractSuccess(): Promise<void> {
         :opportunity-id="opportunityId"
         @close="closeSheet"
         @refresh="handleRefresh"
-        @create-contract="handleCreateContract"
-        @edit-contract="handleEditContract"
-        @submit-contract-approval="handleSubmitContractApproval"
-        @withdraw-contract-approval="handleWithdrawContractApproval"
-        @delete-contract="handleDeleteContract"
+        @view-journey="handleViewJourney"
       />
     </DetailSheetContent>
   </Sheet>
-
-  <!-- Contract Create Dialog -->
-  <ContractFormDialog
-    v-model:open="showContractDialog"
-    :customer-id="contractDialogCustomerId"
-    :customer-name="contractDialogCustomerName"
-    :customer-locked="true"
-    :fixed-opportunity="contractDialogOpportunity"
-    :contract="editingContract"
-    @success="handleContractSuccess"
-  />
 </template>

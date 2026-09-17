@@ -63,6 +63,7 @@ export const OpportunityCurrentStageSnapshotSchema = z.object({
 export const OpportunityApiResponseSchema = z.object({
   id: z.string().min(1),
   public_id: z.string().min(1),
+  deal_journey_id: z.string().nullable().optional(),
   opportunity_number: z.string(),
   opportunity_name: z.string(),
   customer_id: z.string(),
@@ -110,6 +111,7 @@ export const OpportunityApiResponseSchema = z.object({
 export const OpportunityListItemApiSchema = z.object({
   id: z.string().min(1),
   public_id: z.string().min(1),
+  deal_journey_id: z.string().nullable().optional(),
   opportunity_number: z.string(),
   opportunity_name: z.string(),
   customer_id: z.string(),
@@ -226,6 +228,7 @@ export const OpportunityStageMap: Record<string, string> = {
 export const OpportunityResponseSchema = z.object({
   id: z.string().min(1),
   public_id: z.string().min(1),
+  deal_journey_id: z.string().nullable().optional(),
   opportunity_name: z.string().min(1).max(255),
   customer_id: z.string().min(1),
   expected_amount: z.number().positive().nullable(),

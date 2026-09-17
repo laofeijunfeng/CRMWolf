@@ -51,7 +51,7 @@ describe('HoverInfo overlay surface', () => {
   })
 
   it('promotes is-panel hover content to the overlay surface', async () => {
-    mountHoverInfo('商机面板', 'customer-opportunity-hover-card is-panel w-[460px] p-0')
+    mountHoverInfo('商机面板', 'customer-deal-journey-hover-card is-panel w-[460px] p-0')
     await nextTick()
     const content = findHoverContent('商机面板')
     expect(content.classList.contains('is-panel')).toBe(true)

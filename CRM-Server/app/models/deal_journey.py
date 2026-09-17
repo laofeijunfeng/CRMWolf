@@ -1,6 +1,8 @@
 from sqlalchemy import Column, BigInteger, String, Text, DateTime, Index, ForeignKey
 
 from app.core.database import Base
+from app.utils.public_id import generate_public_id
+
 from app.utils.time import business_now
 
 
@@ -45,6 +47,15 @@ class CustomerDealJourney(Base):
     __tablename__ = "crm_customer_deal_journeys"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
+    public_id = Column(
+        String(64),
+        nullable=False,
+        unique=True,
+        index=True,
+        default=lambda: generate_public_id("djy"),
+        comment="对外业务旅程ID",
+    )
+
     team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
     customer_id = Column(BigInteger, ForeignKey("crm_customers.id", ondelete="CASCADE"), nullable=False, comment="客户ID")
     primary_opportunity_id = Column(BigInteger, ForeignKey("crm_opportunities.id", ondelete="SET NULL"), nullable=True, comment="主商机ID")
