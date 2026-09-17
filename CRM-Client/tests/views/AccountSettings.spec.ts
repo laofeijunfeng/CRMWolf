@@ -22,6 +22,11 @@ interface UserStoreMock {
 }
 
 const authApi = vi.hoisted(() => ({ getUserInfo: vi.fn(), changePassword: vi.fn() }))
+const oauthApi = vi.hoisted(() => ({
+  getFeishuBindingStatus: vi.fn(),
+  getFeishuBindUrl: vi.fn(),
+  unbindFeishu: vi.fn(),
+}))
 // vi.hoisted runs before static imports, so it must not call ref(). The reactive ref
 // is assigned after imports and before every component mount; storeToRefs then receives
 // a real Vue ref and preserves reactivity.
@@ -32,6 +37,7 @@ const confirmDialog = vi.hoisted(() => vi.fn())
 const headerStore = vi.hoisted(() => ({ clear: vi.fn() }))
 
 vi.mock('@/api/auth', () => ({ authApi }))
+vi.mock('@/api/oauth', () => ({ oauthApi }))
 vi.mock('@/stores/user', () => ({ useUserStore: () => userStore }))
 vi.mock('@/stores/header', () => ({ useHeaderStore: () => headerStore }))
 vi.mock('@/utils/errorHandler', () => ({ handleApiError }))
@@ -102,6 +108,15 @@ describe('AccountSettings', () => {
     userStore.userInfo = ref(null)
     userStore.fetchUserInfo.mockResolvedValue(userFixture)
     authApi.changePassword.mockResolvedValue({ message: 'ok' })
+    oauthApi.getFeishuBindingStatus.mockResolvedValue({
+      provider: 'feishu',
+      enabled: true,
+      bound: false,
+      name: null,
+      email: null,
+      avatar_url: null,
+      updated_at: null,
+    })
     confirmDialog.mockResolvedValue(true)
   })
 
@@ -126,7 +141,16 @@ describe('AccountSettings', () => {
 
   it('marks account content to inherit the application typography system', () => {
     const { wrapper } = mountAccountPage({ userInfo: userFixture })
-    expect(wrapper.classes()).toContain('account-settings--system')
+    expect(wrapper.find('.settings-content').exists()).toBe(true)
+  })
+
+  it('renders personal data in one full-width definition list and keeps security actions in a second card', () => {
+    const { wrapper } = mountAccountPage({ userInfo: userFixture })
+    expect(wrapper.findAll('.settings-dl').length).toBe(1)
+    expect(wrapper.text()).toContain('安全与授权')
+    expect(wrapper.text()).toContain('这是个人绑定，不是团队应用配置')
+    expect(wrapper.find('[data-testid="change-password-trigger"]').exists()).toBe(true)
+    expect(wrapper.findAll('h2').length).toBe(0)
   })
 
   it('loads profile data when the store is empty, and retries from an actionable error state', async () => {

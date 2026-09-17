@@ -20,12 +20,12 @@ import {
   DialogHeader,
   DialogTitle,
   Input,
-  Label,
   Skeleton,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@/components/crmwolf'
+import { CardTitle } from '@/components/ui/card'
 import { FormControl, FormDescription, FormField, FormItem, FormLabel } from '@/components/ui/form'
 import { authApi } from '@/api/auth'
 import { oauthApi, type OAuthBindingStatusResponse } from '@/api/oauth'
@@ -48,7 +48,7 @@ const loadError = ref<boolean>(false)
 const avatarFailed = ref<boolean>(false)
 const passwordDialogOpen = ref<boolean>(false)
 const passwordSubmitting = ref<boolean>(false)
-const oauthLoading = ref<boolean>(false)
+const oauthLoading = ref<boolean>(true)
 const oauthSubmitting = ref<boolean>(false)
 const feishuBinding = ref<OAuthBindingStatusResponse | null>(null)
 const passwordVisible = reactive<Record<'oldPassword' | 'newPassword' | 'confirmPassword', boolean>>({
@@ -193,7 +193,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <SettingsContent ariaLabel="账户设置" class="account-settings account-settings--system">
+  <SettingsContent ariaLabel="账户设置" description="个人资料和登录安全。飞书个人绑定与团队级飞书应用配置不是同一件事。" class="account-settings">
     <DataViewStatePanel
       :state="isInitialLoad ? 'loading' : loadError ? 'error' : userInfo === null ? 'empty' : 'ready'"
       error-title="账户信息加载失败"
@@ -205,7 +205,7 @@ onMounted(() => {
     >
       <template #loading>
         <div class="account-settings__cards" aria-label="正在加载账户信息">
-          <Card v-for="index in 3" :key="index">
+          <Card v-for="index in 2" :key="index">
             <CardHeader><Skeleton class="h-6 w-32" /></CardHeader>
             <CardContent class="space-y-3"><Skeleton class="h-10 w-full" /><Skeleton class="h-10 w-full" /></CardContent>
           </Card>
@@ -219,73 +219,90 @@ onMounted(() => {
       <template #default>
         <div v-if="userInfo" class="account-settings__cards">
       <Card>
-        <CardHeader><h2>个人信息</h2></CardHeader>
-        <CardContent class="account-settings__profile">
-          <Avatar class="h-16 w-16">
-            <AvatarImage v-if="avatarUrl.length > 0 && !avatarFailed" :src="avatarUrl" :alt="`${displayValue(userInfo.name)}的头像`" @error="avatarFailed = true" />
-            <AvatarFallback>{{ initials() }}</AvatarFallback>
-          </Avatar>
-          <dl class="account-settings__details">
-            <div><dt>姓名</dt><dd>{{ displayValue(userInfo.name) }}</dd></div>
-            <div><dt>邮箱</dt><dd>{{ displayValue(userInfo.email) }}</dd></div>
-            <div><dt>手机号</dt><dd>{{ displayValue(userInfo.mobile) }}</dd></div>
-            <div><dt>所属区域</dt><dd>{{ displayValue(userInfo.region) }}</dd></div>
-          </dl>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader><h2>账户详情</h2></CardHeader>
+        <CardHeader>
+          <CardTitle>个人信息</CardTitle>
+        </CardHeader>
         <CardContent>
-          <dl class="account-settings__details">
-            <div><dt>用户 ID</dt><dd class="flex items-center gap-2 tabular-nums"><span>{{ userInfo.id }}</span><Tooltip><TooltipTrigger as-child><Button type="button" variant="ghost" size="sm" aria-label="复制用户 ID" @click="copyUserId">复制</Button></TooltipTrigger><TooltipContent>复制用户 ID</TooltipContent></Tooltip></dd></div>
-            <div><dt>工号</dt><dd>{{ displayValue(userInfo.employee_no) }}</dd></div>
-            <div><dt>账户状态</dt><dd><Badge>{{ displayValue(userInfo.status) }}</Badge></dd></div>
-            <div><dt>创建时间</dt><dd>{{ formatDateTime(userInfo.created_at) }}</dd></div>
-            <div><dt>更新时间</dt><dd>{{ formatDateTime(userInfo.updated_at) }}</dd></div>
-            <div><dt>角色</dt><dd class="flex flex-wrap gap-2"><Badge v-for="role in userRoles" :key="role.id" variant="secondary">{{ role.name }}</Badge><span v-if="userRoles.length === 0">未设置</span></dd></div>
+          <div class="account-settings__profile">
+            <Avatar class="h-16 w-16">
+              <AvatarImage v-if="avatarUrl.length > 0 && !avatarFailed" :src="avatarUrl" :alt="`${displayValue(userInfo.name)}的头像`" @error="avatarFailed = true" />
+              <AvatarFallback>{{ initials() }}</AvatarFallback>
+            </Avatar>
+            <div>
+              <div class="font-medium">{{ displayValue(userInfo.name) }}</div>
+              <p class="text-sm text-muted-foreground">{{ displayValue(userInfo.email) }}</p>
+            </div>
+          </div>
+          <dl class="settings-dl">
+            <dt>姓名</dt><dd>{{ displayValue(userInfo.name) }}</dd>
+            <dt>邮箱</dt><dd>{{ displayValue(userInfo.email) }}</dd>
+            <dt>手机号</dt><dd>{{ displayValue(userInfo.mobile) }}</dd>
+            <dt>所属区域</dt><dd>{{ displayValue(userInfo.region) }}</dd>
+            <dt>工号</dt><dd>{{ displayValue(userInfo.employee_no) }}</dd>
+            <dt>账户状态</dt><dd><Badge>{{ displayValue(userInfo.status) }}</Badge></dd>
+            <dt>用户 ID</dt>
+            <dd class="flex items-center gap-2 tabular-nums">
+              <span>{{ userInfo.id }}</span>
+              <Tooltip>
+                <TooltipTrigger as-child>
+                  <Button type="button" variant="ghost" size="sm" aria-label="复制用户 ID" @click="copyUserId">复制</Button>
+                </TooltipTrigger>
+                <TooltipContent>复制用户 ID</TooltipContent>
+              </Tooltip>
+            </dd>
+            <dt>角色</dt>
+            <dd class="flex flex-wrap gap-2">
+              <Badge v-for="role in userRoles" :key="role.id" variant="secondary">{{ role.name }}</Badge>
+              <span v-if="userRoles.length === 0">未设置</span>
+            </dd>
+            <dt>创建时间</dt><dd>{{ formatDateTime(userInfo.created_at) }}</dd>
+            <dt>更新时间</dt><dd>{{ formatDateTime(userInfo.updated_at) }}</dd>
           </dl>
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader><h2>安全设置</h2></CardHeader>
-        <CardContent class="flex items-center justify-between gap-4">
-          <div><Label class="font-medium">登录密码</Label><p class="text-sm text-muted-foreground">定期更新密码有助于保护账户安全。</p></div>
-          <Button data-testid="change-password-trigger" @click="passwordDialogOpen = true">修改密码</Button>
-        </CardContent>
-      </Card>
-
-      <Card v-if="oauthLoading || feishuBinding?.enabled">
-        <CardHeader><h2>登录授权</h2></CardHeader>
-        <CardContent class="account-settings__oauth">
-          <div>
-            <Label class="font-medium">飞书账号</Label>
-            <p class="text-sm text-muted-foreground">
-              <span v-if="oauthLoading">正在加载授权状态</span>
-              <span v-else-if="feishuBinding?.bound === true">已绑定 {{ displayValue(feishuBinding.name ?? feishuBinding.email) }}</span>
-              <span v-else>当前未绑定飞书账号</span>
-            </p>
+        <CardHeader>
+          <CardTitle>安全与授权</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div class="settings-setting-row">
+            <div>
+              <div class="font-medium">登录密码</div>
+              <p class="text-sm text-muted-foreground">定期更新密码有助于保护账户安全。</p>
+            </div>
+            <Button data-testid="change-password-trigger" variant="outline" @click="passwordDialogOpen = true">修改密码</Button>
           </div>
-          <Button
-            v-if="!oauthLoading && feishuBinding?.bound === true"
-            variant="outline"
-            :disabled="oauthSubmitting"
-            @click="unbindFeishu"
-          >
-            <Loader2 v-if="oauthSubmitting" class="mr-2 h-4 w-4 animate-spin" />
-            <Unlink v-else class="mr-2 h-4 w-4" />
-            解绑
-          </Button>
-          <Button
-            v-else-if="!oauthLoading"
-            :disabled="oauthSubmitting"
-            @click="bindFeishu"
-          >
-            <Loader2 v-if="oauthSubmitting" class="mr-2 h-4 w-4 animate-spin" />
-            <Link2 v-else class="mr-2 h-4 w-4" />
-            绑定飞书
-          </Button>
+          <div v-if="oauthLoading || feishuBinding?.enabled" class="settings-setting-row">
+            <div>
+              <div class="font-medium">飞书账号</div>
+              <p class="text-sm text-muted-foreground">
+                <span v-if="oauthLoading">正在加载授权状态</span>
+                <span v-else-if="feishuBinding?.bound === true">已绑定 {{ displayValue(feishuBinding.name ?? feishuBinding.email) }}</span>
+                <span v-else>当前未绑定飞书账号</span>
+                。这是个人绑定，不是团队应用配置
+              </p>
+            </div>
+            <Button
+              v-if="!oauthLoading && feishuBinding?.bound === true"
+              variant="outline"
+              :disabled="oauthSubmitting"
+              @click="unbindFeishu"
+            >
+              <Loader2 v-if="oauthSubmitting" class="mr-2 h-4 w-4 animate-spin" />
+              <Unlink v-else class="mr-2 h-4 w-4" />
+              解绑
+            </Button>
+            <Button
+              v-else-if="!oauthLoading"
+              :disabled="oauthSubmitting"
+              @click="bindFeishu"
+            >
+              <Loader2 v-if="oauthSubmitting" class="mr-2 h-4 w-4 animate-spin" />
+              <Link2 v-else class="mr-2 h-4 w-4" />
+              绑定飞书
+            </Button>
+          </div>
         </CardContent>
       </Card>
         </div>
@@ -350,26 +367,13 @@ onMounted(() => {
 @use '@/styles/variables-v2.scss' as *;
 
 .account-settings {
-  color: $wolf-text-primary-v2;
-  font-family: $wolf-font-family-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-normal-v2;
-  line-height: $wolf-line-height-body-v2;
-
   &__cards { display: grid; gap: $wolf-card-gap-v2; }
   &__profile { display: flex; gap: $wolf-space-lg-v2; align-items: flex-start; }
-  &__details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: $wolf-space-lg-v2; width: 100%; }
-  &__details div { min-width: 0; }
-  &__details dt { color: $wolf-text-secondary-v2; font-size: 0.875rem; }
-  &__details dd { margin: $wolf-space-xs-v2 0 0; overflow-wrap: anywhere; word-break: break-word; }
-  &__oauth { display: flex; align-items: center; justify-content: space-between; gap: $wolf-space-lg-v2; }
   &__password-input { display: flex; align-items: center; gap: $wolf-space-sm-v2; }
   &__password-input > :first-child { flex: 1; }
 
   @media (max-width: $wolf-breakpoint-sm-v2) {
     &__profile { gap: $wolf-card-padding-mobile-v2; }
-    &__details { grid-template-columns: 1fr; gap: $wolf-form-item-gap-mobile-v2; }
-    &__oauth { align-items: stretch; flex-direction: column; }
     &__password-input :deep(input) { min-height: $wolf-input-height-mobile-v2; padding-inline: $wolf-input-padding-mobile-v2; font-size: $wolf-font-size-body-mobile-v2; }
     &__password-input :deep(button) { min-height: $wolf-button-height-mobile-v2; }
   }
