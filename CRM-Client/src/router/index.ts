@@ -286,6 +286,12 @@ const routes: RouteRecordRaw[] = [
         })
       },
       {
+        path: 'settings/products',
+        name: 'SettingsProducts',
+        component: () => import('@/views/settings/SettingsProductsPage.vue'),
+        meta: { requiresAuth: true, title: '产品管理', settingsKey: 'products' },
+      },
+      {
         path: 'settings/:module',
         name: 'SettingsModule',
         component: () => import('@/views/SettingsModulePage.vue'),
