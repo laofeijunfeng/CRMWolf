@@ -57,6 +57,7 @@ from app.services.agent.orchestrator import (
 from app.services.agent.orchestrator.runtime import get_root_orchestrator
 from app.services.agent.query import CRMQueryAgentModelConfig, CRMQueryAgentResult, EntityRef
 from app.services.agent.query.result_sets import AgentQueryResultSetRepository
+from app.services.agent.run_log import build_turn_timeline
 from app.services.agent.sessions import new_session_key, require_owned_session
 from app.services.agent.turns import AgentTurnIdempotencyConflictError, AgentTurnRepository
 from app.services.agent.ui.actions import (
@@ -335,7 +336,7 @@ class AgentApplicationService:
                     composition,
                     display="STATE_UPDATE",
                 )
-            diagnostics = self._dispatch_diagnostics(dispatch)
+            diagnostics = self._dispatch_diagnostics(dispatch, user_text=prepared.content)
             with db.begin_nested():
                 completed = self.turn_repository.complete(
                     db,
@@ -991,7 +992,7 @@ class AgentApplicationService:
         )
 
     @staticmethod
-    def _dispatch_diagnostics(dispatch: RootDispatchResult) -> dict[str, object]:
+    def _dispatch_diagnostics(dispatch: RootDispatchResult, *, user_text: str) -> dict[str, object]:
         diagnostics: dict[str, object] = {"dispatch_type": dispatch.type}
         decision = getattr(dispatch, "decision", None)
         if decision is not None:
@@ -1001,6 +1002,10 @@ class AgentApplicationService:
                 receipt.model_dump(mode="json")
                 for receipt in dispatch.workflow_result.durable_work
             ]
+        diagnostics["turn_observability"] = build_turn_timeline(
+            dispatch,
+            user_text=user_text,
+        ).model_dump(mode="json")
         return diagnostics
 
     @staticmethod

@@ -6130,6 +6130,9 @@ async def test_quality_supplement_reparses_full_semantics_and_reuses_checkpoint_
     assert isinstance(waiting, WorkflowDispatchResult)
     assert isinstance(waiting.workflow_result, WorkflowWaitingResult)
     assert waiting.workflow_result.interaction.business_action == "supplement_follow_up_quality"
+    assert waiting.workflow_result.quality_gate is not None
+    assert waiting.workflow_result.quality_gate.score == 45
+    assert waiting.workflow_result.quality_gate.passed is False
     assert waiting.continuation is not None
     interaction_resolver.continuation = waiting.continuation
     assert tool_registry.calls == []

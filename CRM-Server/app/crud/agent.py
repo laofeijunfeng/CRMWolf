@@ -6,13 +6,14 @@ through existing API endpoints in the tool layer.
 
 from typing import List, Optional, Tuple
 
-from sqlalchemy import or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Query, Session, aliased
 
 from app.models.agent import (
     AgentIdempotencyKey,
     AgentMessage,
+    AgentMessageRole,
     AgentSession,
     AgentToolCall,
     AgentWorkflowAction,
@@ -161,6 +162,119 @@ class AgentMessageCRUD:
             )
         items = query.order_by(AgentMessage.created_time.asc(), AgentMessage.id.asc()).offset(skip).limit(limit).all()
         return items, total
+
+    def list_run_log_turns(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_id: Optional[int] = None,
+        outcome: Optional[str] = None,
+        q: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 20,
+    ) -> Tuple[List[Tuple[AgentMessage, AgentMessage]], int]:
+        query = self._run_log_turn_query(
+            db,
+            team_id=team_id,
+            user_id=user_id,
+            outcome=outcome,
+            q=q,
+        )
+        total = query.count()
+        rows = (
+            query.order_by(self._assistant_alias.created_time.desc(), self._assistant_alias.id.desc())
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+        return rows, total
+
+    def get_run_log_turn(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        turn_id: str,
+    ) -> Optional[Tuple[AgentMessage, AgentMessage]]:
+        return (
+            self._run_log_turn_query(db, team_id=team_id)
+            .filter(self._user_alias.turn_id == turn_id)
+            .order_by(self._assistant_alias.created_time.desc(), self._assistant_alias.id.desc())
+            .first()
+        )
+
+    _user_alias = aliased(AgentMessage, name="run_log_user")
+    _assistant_alias = aliased(AgentMessage, name="run_log_assistant")
+
+    def _run_log_turn_query(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_id: Optional[int] = None,
+        outcome: Optional[str] = None,
+        q: Optional[str] = None,
+    ) -> Query:
+        user_message = self._user_alias
+        assistant_message = self._assistant_alias
+        query = (
+            db.query(user_message, assistant_message)
+            .join(
+                assistant_message,
+                and_(
+                    assistant_message.team_id == user_message.team_id,
+                    assistant_message.session_id == user_message.session_id,
+                    assistant_message.turn_id == user_message.turn_id,
+                    assistant_message.role == AgentMessageRole.ASSISTANT,
+                ),
+            )
+            .filter(
+                user_message.team_id == team_id,
+                user_message.role == AgentMessageRole.USER,
+                user_message.turn_id.is_not(None),
+                assistant_message.diagnostics_json.is_not(None),
+            )
+        )
+        if user_id is not None:
+            query = query.filter(user_message.user_id == user_id)
+        outcome_value = self._json_text(
+            db,
+            assistant_message.diagnostics_json,
+            "$.turn_observability.outcome",
+        )
+        query = query.filter(outcome_value.is_not(None))
+        if outcome:
+            query = query.filter(outcome_value == outcome)
+        if q and q.strip():
+            pattern = f"%{q.strip()}%"
+            customer_name = self._json_text(
+                db,
+                assistant_message.diagnostics_json,
+                "$.turn_observability.customer_name",
+            )
+            summary = self._json_text(
+                db,
+                assistant_message.diagnostics_json,
+                "$.turn_observability.summary",
+            )
+            query = query.filter(
+                or_(
+                    user_message.content.like(pattern),
+                    assistant_message.content.like(pattern),
+                    customer_name.like(pattern),
+                    summary.like(pattern),
+                )
+            )
+        return query
+
+    @staticmethod
+    def _json_text(db: Session, column: object, path: str) -> object:
+        extracted = func.json_extract(column, path)
+        dialect = db.get_bind().dialect.name
+        if dialect == "sqlite":
+            return extracted
+        return func.json_unquote(extracted)
 
 
 class AgentToolCallCRUD:

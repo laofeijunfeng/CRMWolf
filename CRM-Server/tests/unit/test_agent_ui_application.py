@@ -479,8 +479,16 @@ async def test_text_turn_dispatches_once_and_persists_one_authoritative_agent_ui
     assert runtime.authorization == "Bearer test-token"
     assert runtime.metadata == {"source": "web"}
     with session_factory() as db:
-        assert db.query(AgentMessage).filter_by(role=AgentMessageRole.ASSISTANT).count() == 1
-
+        assistant = db.query(AgentMessage).filter_by(role=AgentMessageRole.ASSISTANT).one()
+        diagnostics = assistant.diagnostics_json
+        assert diagnostics is not None
+        assert diagnostics["dispatch_type"] == "query"
+        observability = diagnostics["turn_observability"]
+        assert observability["outcome"] == "answered"
+        assert len(observability["steps"]) == 6
+        assert observability["steps"][0]["kind"] == "model"
+        assert observability["steps"][4]["kind"] == "api"
+        assert observability["steps"][4]["tone"] == "done"
 
 @pytest.mark.asyncio
 async def test_query_turn_persists_clickable_result_set_without_workflow_actions(
@@ -1002,7 +1010,7 @@ async def test_consumed_interaction_closes_the_already_persisted_turn_with_one_f
 async def test_completed_workflow_late_binds_durable_work_after_turn_commit(
     application_harness,
 ) -> None:
-    service, _ = application_harness
+    service, session_factory = application_harness
     binder = _CapturingDurableWorkBinder()
     service.durable_work_binder = binder
     service.root_orchestrator = _FakeRootOrchestrator(
@@ -1038,6 +1046,16 @@ async def test_completed_workflow_late_binds_durable_work_after_turn_commit(
     call = binder.calls[0]
     assert call["receipts"][0].activity_id == 241
     assert call["binding"].source_assistant_message_id == events[1]["message_id"]
+    with session_factory() as db:
+        assistant = db.query(AgentMessage).filter_by(role=AgentMessageRole.ASSISTANT).one()
+        diagnostics = assistant.diagnostics_json
+        assert diagnostics is not None
+        assert diagnostics["dispatch_type"] == "workflow"
+        assert diagnostics["durable_work"][0]["activity_id"] == 241
+        observability = diagnostics["turn_observability"]
+        assert observability["outcome"] == "written"
+        assert observability["steps"][-1]["kind"] == "background"
+        assert observability["steps"][-1]["tone"] == "done"
 
 
 @pytest.mark.asyncio

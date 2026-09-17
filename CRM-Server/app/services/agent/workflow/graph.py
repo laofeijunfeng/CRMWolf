@@ -17,6 +17,7 @@ from app.services.agent.workflow.contracts import (
     WorkflowFailedResult,
     WorkflowInteraction,
     WorkflowInterruptPayload,
+    WorkflowQualityGate,
     WorkflowRef,
     WorkflowResolvedCustomer,
     WorkflowResumeInput,
@@ -75,6 +76,7 @@ class WorkflowSubgraphState(TypedDict, total=False):
     workflow_id: str
     workflow_plan: dict[str, object] | None
     workflow_interaction: dict[str, object] | None
+    workflow_quality_gate: dict[str, object] | None
     workflow_resume: dict[str, object] | None
     workflow_result: dict[str, object] | None
 
@@ -174,6 +176,7 @@ class WorkflowSubgraph:
             "workflow_id": request.workflow_id,
             "workflow_plan": None,
             "workflow_interaction": None,
+            "workflow_quality_gate": None,
             "workflow_resume": None,
             "workflow_result": None,
         }
@@ -229,6 +232,9 @@ class WorkflowSubgraph:
                 ),
                 "workflow_plan": None,
                 "workflow_interaction": exc.interaction.model_dump(mode="json"),
+                "workflow_quality_gate": (
+                    exc.quality_gate.model_dump(mode="json") if exc.quality_gate is not None else None
+                ),
                 "workflow_resume": None,
                 "workflow_result": None,
             }
@@ -260,6 +266,7 @@ class WorkflowSubgraph:
             "workflow_input": request.model_dump(mode="json"),
             "workflow_plan": plan.model_dump(mode="json"),
             "workflow_interaction": None,
+            "workflow_quality_gate": None,
             "workflow_resume": None,
             "workflow_result": None,
         }
@@ -327,6 +334,13 @@ class WorkflowSubgraph:
                     progress=required_input_failed_progress(),
                 ).model_dump(mode="json")
             }
+        quality_gate = None
+        raw_quality_gate = state.get("workflow_quality_gate")
+        if raw_quality_gate is not None:
+            try:
+                quality_gate = WorkflowQualityGate.model_validate(raw_quality_gate)
+            except ValidationError:
+                quality_gate = None
         progress = awaiting_required_input_progress()
         writer(progress.model_dump(mode="json"))
         raw_resume = interrupt(
@@ -334,6 +348,7 @@ class WorkflowSubgraph:
                 workflow_id=workflow_id,
                 interaction=interaction,
                 progress=progress,
+                quality_gate=quality_gate,
             ).model_dump(mode="json")
         )
         try:
@@ -411,6 +426,7 @@ class WorkflowSubgraph:
         return {
             "workflow_input": request.model_dump(mode="json"),
             "workflow_interaction": None,
+            "workflow_quality_gate": None,
             "workflow_resume": None,
             "workflow_result": None,
         }

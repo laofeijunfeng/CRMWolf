@@ -40,6 +40,19 @@ describe('settings navigation registry', () => {
       allowOwnerBypass: false,
     })
   })
+  it('registers Agent run log after AI config in the integration group', () => {
+    const item = getSettingsNavigationItem('agent-run-log')
+    const ids = SETTINGS_NAVIGATION.map(entry => entry.id)
+    expect(item).toMatchObject({
+      path: '/settings/agent-run-log',
+      group: 'integration',
+      scope: 'team',
+      requiresTeam: true,
+      requiredAnyPermissions: ['ai:read', 'ai:manage', 'system:config'],
+    })
+    expect(item?.legacyComponentKey).toBeUndefined()
+    expect(ids.indexOf('agent-run-log')).toBe(ids.indexOf('ai') + 1)
+  })
 
   it('keeps separate AI and products legacy component mappings', () => {
     const source = readSettingsModulePageSource()

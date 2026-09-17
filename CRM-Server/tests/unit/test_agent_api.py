@@ -742,3 +742,159 @@ def test_removed_runtime_management_endpoints_are_not_registered(api_harness) ->
         "GET",
         "/v1/agent/sessions/{session_id}/runtime/checkpoints/{checkpoint_id}",
     ) not in registered
+
+
+def _grant_ai_read(monkeypatch) -> None:
+    monkeypatch.setattr(
+        agent_api.permission_crud,
+        "get_user_permissions",
+        lambda *args, **kwargs: [SimpleNamespace(code="ai:read")],
+    )
+    monkeypatch.setattr(agent_api.team_crud, "is_owner", lambda *args, **kwargs: False)
+
+
+def _deny_ai_access(monkeypatch) -> None:
+    monkeypatch.setattr(
+        agent_api.permission_crud,
+        "get_user_permissions",
+        lambda *args, **kwargs: [],
+    )
+    monkeypatch.setattr(agent_api.team_crud, "is_owner", lambda *args, **kwargs: False)
+
+
+def _persist_run_log_turn(
+    session_factory: sessionmaker[Session],
+    *,
+    session_id: int,
+    turn_id: str,
+    user_id: int = 2,
+    user_text: str = "记一条跟进",
+    assistant_text: str = "质量 52 分，拦住写入。",
+    outcome: str = "blocked_unwritten",
+    quality_score: int | None = 52,
+    customer_name: str | None = "双汇",
+    team_id: int = 1,
+) -> None:
+    with session_factory() as db:
+        user_row = AgentMessage(
+            team_id=team_id,
+            user_id=user_id,
+            session_id=session_id,
+            role=AgentMessageRole.USER,
+            content=user_text,
+            turn_id=turn_id,
+        )
+        assistant_row = AgentMessage(
+            team_id=team_id,
+            user_id=user_id,
+            session_id=session_id,
+            role=AgentMessageRole.ASSISTANT,
+            content=assistant_text,
+            turn_id=turn_id,
+            diagnostics_json={
+                "dispatch_type": "workflow",
+                "turn_observability": {
+                    "outcome": outcome,
+                    "summary": assistant_text,
+                    "quality_score": quality_score,
+                    "customer_name": customer_name,
+                    "model": "test-model",
+                    "steps": [
+                        {"kind": "model", "title": "判成「记跟进」", "detail": "route = WORKFLOW", "tone": "done"},
+                        {"kind": "code", "title": "匹配到客户「双汇」", "detail": "checkpoint 已有客户绑定", "tone": "done"},
+                        {"kind": "code", "title": "质量 52 分，拦住", "detail": "阈值 60。", "tone": "blocked"},
+                        {"kind": "interaction", "title": "只问了一个补充问题", "detail": assistant_text, "tone": "blocked"},
+                        {"kind": "api", "title": "没有调创建", "detail": "create_customer_activity 未调用", "tone": "skipped"},
+                        {"kind": "background", "title": "没有整理 / 评分任务", "detail": "Agent 路径不创建 AIJob", "tone": "skipped"},
+                    ],
+                },
+            },
+        )
+        db.add_all([user_row, assistant_row])
+        db.commit()
+
+
+def test_run_log_turns_require_ai_permissions(api_harness, monkeypatch) -> None:
+    client, _ = api_harness
+    _deny_ai_access(monkeypatch)
+
+    response = client.get("/v1/agent/run-log/turns")
+
+    assert response.status_code == 403
+
+
+def test_run_log_turns_list_and_filter_with_ai_read(api_harness, monkeypatch) -> None:
+    client, session_factory = api_harness
+    _grant_ai_read(monkeypatch)
+    session = _create_session(client)
+    _persist_run_log_turn(
+        session_factory,
+        session_id=int(session["id"]),
+        turn_id="turn_blocked",
+        user_text="记双汇跟进",
+        outcome="blocked_unwritten",
+        quality_score=52,
+    )
+    _persist_run_log_turn(
+        session_factory,
+        session_id=int(session["id"]),
+        turn_id="turn_answered",
+        user_id=3,
+        user_text="上海还有哪些客户?",
+        assistant_text="已回答查询，没有写入。",
+        outcome="answered",
+        quality_score=None,
+        customer_name=None,
+    )
+
+    listed = client.get("/v1/agent/run-log/turns")
+    assert listed.status_code == 200
+    body = listed.json()
+    assert body["total"] == 2
+    assert {item["outcome"] for item in body["items"]} == {"blocked_unwritten", "answered"}
+
+    blocked = client.get("/v1/agent/run-log/turns", params={"outcome": "blocked_unwritten"})
+    assert blocked.status_code == 200
+    assert blocked.json()["total"] == 1
+    assert blocked.json()["items"][0]["quality_score"] == 52
+    assert blocked.json()["items"][0]["user_text"] == "记双汇跟进"
+
+    by_user = client.get("/v1/agent/run-log/turns", params={"user_id": 3})
+    assert by_user.status_code == 200
+    assert by_user.json()["total"] == 1
+    assert by_user.json()["items"][0]["user_id"] == 3
+
+    searched = client.get("/v1/agent/run-log/turns", params={"q": "双汇"})
+    assert searched.status_code == 200
+    assert searched.json()["total"] == 1
+    assert searched.json()["items"][0]["turn_id"] == "turn_blocked"
+
+    paged = client.get("/v1/agent/run-log/turns", params={"page": 1, "page_size": 1})
+    assert paged.status_code == 200
+    assert paged.json()["page_size"] == 1
+    assert len(paged.json()["items"]) == 1
+    assert paged.json()["total_pages"] == 2
+
+
+def test_run_log_turn_detail_returns_six_steps(api_harness, monkeypatch) -> None:
+    client, session_factory = api_harness
+    _grant_ai_read(monkeypatch)
+    session = _create_session(client)
+    _persist_run_log_turn(
+        session_factory,
+        session_id=int(session["id"]),
+        turn_id="turn_detail",
+        user_text="记一条跟进",
+    )
+
+    missing = client.get("/v1/agent/run-log/turns/missing")
+    assert missing.status_code == 404
+
+    detail = client.get("/v1/agent/run-log/turns/turn_detail")
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body["turn_id"] == "turn_detail"
+    assert body["outcome"] == "blocked_unwritten"
+    assert len(body["steps"]) == 6
+    assert body["steps"][2]["tone"] == "blocked"
+    assert body["steps"][4]["kind"] == "api"

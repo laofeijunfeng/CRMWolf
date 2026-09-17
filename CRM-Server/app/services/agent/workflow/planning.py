@@ -6,12 +6,11 @@ import math
 from datetime import date, datetime
 from typing import Protocol
 
-from sqlalchemy.exc import OperationalError
 from pydantic import ValidationError
+from sqlalchemy.exc import OperationalError
 
 from app.crud.customer import customer_crud
 from app.crud.lead import lead_crud
-
 from app.models.customer import Customer
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_opportunity_suggestion_job import CustomerOpportunitySuggestionJob
@@ -39,8 +38,8 @@ from app.services.agent.workflow.contracts import (
     WorkflowConfirmationFact,
     WorkflowInteraction,
     WorkflowInteractionField,
-    WorkflowInteractionOption,
     WorkflowOpportunitySuggestionStart,
+    WorkflowQualityGate,
     WorkflowResolvedCustomer,
     WorkflowResourceStart,
     WorkflowRuntimeContext,
@@ -98,11 +97,12 @@ class WorkflowPlanningNeedsInput(Exception):
         interaction: WorkflowInteraction,
         *,
         checkpoint_request: WorkflowTurnInput | None = None,
+        quality_gate: WorkflowQualityGate | None = None,
     ) -> None:
         super().__init__(interaction.prompt)
         self.interaction = interaction
         self.checkpoint_request = checkpoint_request
-
+        self.quality_gate = quality_gate
 
 class WorkflowSemanticParser(Protocol):
     async def parse_with_metadata(
@@ -517,6 +517,7 @@ class CRMWorkflowPlanner:
                     submit_label="继续评估",
                 ),
                 checkpoint_request=checkpoint_request,
+                quality_gate=self._quality_gate_from_envelope(quality_envelope),
             )
         next_action_status = getattr(quality, "next_action_status", "MISSING")
         # The evaluator is the semantic authority for this gate.  The only
@@ -536,6 +537,7 @@ class CRMWorkflowPlanner:
                     submit_label="继续评估",
                 ),
                 checkpoint_request=checkpoint_request,
+                quality_gate=self._quality_gate_from_envelope(quality_envelope),
             )
 
         final_content = (quality.suggested_revision or content).strip()
@@ -878,6 +880,7 @@ class CRMWorkflowPlanner:
                     quality.supplement_question
                     or "这条跟进还差一点关键信息，请补充下一步由谁在什么时间做什么。"  # noqa: RUF001
                 ),
+                quality_gate=self._quality_gate_from_envelope(quality_envelope),
             )
         activity_payload: dict[str, object] = {
             "customer_name": account_name,
@@ -2679,6 +2682,7 @@ class CRMWorkflowPlanner:
         title: str,
         prompt: str,
         checkpoint_request: WorkflowTurnInput | None = None,
+        quality_gate: WorkflowQualityGate | None = None,
     ) -> WorkflowPlanningNeedsInput:
         return WorkflowPlanningNeedsInput(
             WorkflowInteraction(
@@ -2691,6 +2695,18 @@ class CRMWorkflowPlanner:
                 submit_label="继续",
             ),
             checkpoint_request=checkpoint_request,
+            quality_gate=quality_gate,
+        )
+
+    @staticmethod
+    def _quality_gate_from_envelope(envelope: AgentFollowUpQualityEnvelope) -> WorkflowQualityGate:
+        reason = (envelope.result.reason or "").strip() or "跟进质量评估未通过。"
+        return WorkflowQualityGate(
+            score=envelope.result.score,
+            passed=envelope.result.passed,
+            reason=reason[:200],
+            quality_source=envelope.quality_source,
+            model=envelope.model or None,
         )
 
     @staticmethod

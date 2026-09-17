@@ -11,9 +11,11 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import get_current_active_user, get_current_user_team, security
-from app.crud.agent import agent_session_crud, agent_workflow_action_crud
+from app.crud.agent import agent_message_crud, agent_session_crud, agent_workflow_action_crud
 from app.crud.permission import permission_crud
 from app.crud.sales_commitment import follow_up_task_confirmation_case_crud
+from app.crud.team import team_crud
+from app.crud.user import user_crud
 from app.models.user import User
 from app.schemas.agent import (
     AgentAsyncOperationResponse,
@@ -26,6 +28,7 @@ from app.schemas.agent import (
     AgentWorkflowGraphEdgeResponse,
     AgentWorkflowGraphNodeResponse,
 )
+from app.schemas.agent_run_log import AgentRunLogTurnDetail, AgentRunLogTurnListItem
 from app.schemas.common import PaginatedResponse
 from app.services.agent import action_workflow
 from app.services.agent.application import agent_application_service
@@ -49,11 +52,11 @@ from app.services.customer_activity_post_commit_operation_projector import (
 from app.services.customer_intelligence_operation_projector import (
     customer_intelligence_operation_projector,
 )
-from app.services.customer_opportunity_suggestion_operation_projector import (
-    customer_opportunity_suggestion_operation_projector,
-)
 from app.services.customer_opportunity_suggestion_agent_ui_projection import (
     customer_opportunity_suggestion_agent_ui_projection,
+)
+from app.services.customer_opportunity_suggestion_operation_projector import (
+    customer_opportunity_suggestion_operation_projector,
 )
 from app.utils.sse_encoder import SSEJsonEncoder
 
@@ -298,6 +301,109 @@ async def list_agent_sessions(
         page=page,
         page_size=page_size,
         total_pages=(total + page_size - 1) // page_size,
+    )
+
+
+_RUN_LOG_PERMISSIONS = frozenset({"ai:read", "ai:manage", "system:config"})
+
+
+def _require_run_log_access(db: Session, *, team_id: int, user_id: int) -> None:
+    if team_crud.is_owner(db, team_id, user_id):
+        return
+    permission_codes = {
+        permission.code
+        for permission in permission_crud.get_user_permissions(db, user_id=user_id, team_id=team_id)
+        if isinstance(getattr(permission, "code", None), str) and permission.code
+    }
+    if permission_codes & _RUN_LOG_PERMISSIONS:
+        return
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权限访问 Agent 运行日志")
+
+
+def _observability(diagnostics: object) -> dict[str, object] | None:
+    if not isinstance(diagnostics, dict):
+        return None
+    payload = diagnostics.get("turn_observability")
+    return payload if isinstance(payload, dict) else None
+
+
+def _run_log_user_name(db: Session, user_id: int) -> str | None:
+    try:
+        user = user_crud.get_by_id(db, user_id)
+    except Exception:
+        return None
+    name = getattr(user, "name", None)
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    return None
+
+
+def _run_log_list_item(db: Session, user_message: object, assistant_message: object) -> AgentRunLogTurnListItem:
+    observability = _observability(getattr(assistant_message, "diagnostics_json", None)) or {}
+    raw_text = getattr(user_message, "content", None)
+    user_text = raw_text.strip() if isinstance(raw_text, str) and raw_text.strip() else "（无文本）"
+    return AgentRunLogTurnListItem(
+        turn_id=str(user_message.turn_id),
+        user_id=int(user_message.user_id),
+        user_name=_run_log_user_name(db, int(user_message.user_id)),
+        user_text=user_text,
+        outcome=str(observability.get("outcome")),
+        summary=str(observability.get("summary") or assistant_message.content or "（无摘要）"),
+        quality_score=observability.get("quality_score"),
+        customer_name=observability.get("customer_name"),
+        model=observability.get("model"),
+        created_time=assistant_message.created_time,
+    )
+
+
+@router.get("/run-log/turns", response_model=PaginatedResponse[AgentRunLogTurnListItem])
+async def list_agent_run_log_turns(
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(20, ge=1, le=100, description="每页数量"),
+    user_id: Optional[int] = Query(None, gt=0, description="按销售筛选"),
+    outcome: Optional[str] = Query(None, description="按回合结论筛选"),
+    q: Optional[str] = Query(None, description="搜索用户原文、客户或摘要"),
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> PaginatedResponse[AgentRunLogTurnListItem]:
+    _require_run_log_access(db, team_id=team_id, user_id=current_user.id)
+    skip = (page - 1) * page_size
+    rows, total = agent_message_crud.list_run_log_turns(
+        db,
+        team_id=team_id,
+        user_id=user_id,
+        outcome=outcome,
+        q=q,
+        skip=skip,
+        limit=page_size,
+    )
+    return PaginatedResponse[AgentRunLogTurnListItem](
+        items=[_run_log_list_item(db, user_message, assistant_message) for user_message, assistant_message in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=(total + page_size - 1) // page_size if page_size else 0,
+    )
+
+
+@router.get("/run-log/turns/{turn_id}", response_model=AgentRunLogTurnDetail)
+async def get_agent_run_log_turn(
+    turn_id: str,
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> AgentRunLogTurnDetail:
+    _require_run_log_access(db, team_id=team_id, user_id=current_user.id)
+    pair = agent_message_crud.get_run_log_turn(db, team_id=team_id, turn_id=turn_id)
+    if pair is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="运行日志不存在")
+    user_message, assistant_message = pair
+    item = _run_log_list_item(db, user_message, assistant_message)
+    observability = _observability(assistant_message.diagnostics_json) or {}
+    return AgentRunLogTurnDetail(
+        **item.model_dump(),
+        steps=observability.get("steps") or [],
     )
 
 

@@ -238,6 +238,12 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true, title: '团队信息与安全', settingsKey: 'team' }
       },
       {
+        path: 'settings/agent-run-log',
+        name: 'SettingsAgentRunLog',
+        component: () => import('@/views/AgentRunLogSettings.vue'),
+        meta: { requiresAuth: true, title: 'Agent 运行日志', settingsKey: 'agent-run-log' }
+      },
+      {
         path: 'settings/procurement-methods',
         name: 'SettingsProcurementMethods',
         component: () => import('@/views/SettingsModulePage.vue'),

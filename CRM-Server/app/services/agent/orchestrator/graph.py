@@ -782,6 +782,7 @@ class RootOrchestrator:
             assistant_text=payload.interaction.prompt,
             interaction=payload.interaction,
             progress=payload.progress,
+            quality_gate=payload.quality_gate,
         )
 
     def _build_graph(self) -> CompiledStateGraph:

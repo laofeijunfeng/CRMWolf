@@ -191,7 +191,7 @@ class WorkflowInterruptPayload(WorkflowContractModel):
     workflow_id: str = Field(min_length=1, max_length=128)
     interaction: WorkflowInteraction
     progress: WorkflowProgress
-
+    quality_gate: WorkflowQualityGate | None = None
 
 class WorkflowSupplement(WorkflowContractModel):
     """One canonical text or form response supplied while a Workflow is suspended."""
@@ -213,6 +213,16 @@ class WorkflowResolvedCustomer(WorkflowContractModel):
     customer_id: str = Field(pattern=r"^cus_[A-Za-z0-9_-]+$", min_length=5, max_length=128)
     customer_name: str = Field(min_length=1, max_length=255)
     lookup_name: str | None = Field(default=None, min_length=1, max_length=255)
+
+
+class WorkflowQualityGate(WorkflowContractModel):
+    """Follow-up quality evaluation that blocked or authorized a write."""
+
+    score: int = Field(ge=0, le=100)
+    passed: bool
+    reason: str = Field(min_length=1, max_length=200)
+    quality_source: str = Field(min_length=1, max_length=128)
+    model: str | None = Field(default=None, min_length=1, max_length=256)
 
 
 class WorkflowTextStart(WorkflowContractModel):
@@ -278,6 +288,8 @@ class WorkflowWaitingResult(WorkflowContractModel):
     assistant_text: str = Field(min_length=1, max_length=10_000)
     interaction: WorkflowInteraction
     progress: WorkflowProgress
+    quality_gate: WorkflowQualityGate | None = None
+    resolved_customer: WorkflowResolvedCustomer | None = None
 
 
 class WorkflowCompletedResult(WorkflowContractModel):
