@@ -6133,6 +6133,8 @@ async def test_quality_supplement_reparses_full_semantics_and_reuses_checkpoint_
     assert waiting.workflow_result.quality_gate is not None
     assert waiting.workflow_result.quality_gate.score == 45
     assert waiting.workflow_result.quality_gate.passed is False
+    assert waiting.workflow_result.resolved_customer is not None
+    assert waiting.workflow_result.resolved_customer.customer_name == CUSTOMER_REF.display_name
     assert waiting.continuation is not None
     interaction_resolver.continuation = waiting.continuation
     assert tool_registry.calls == []
@@ -6162,6 +6164,10 @@ async def test_quality_supplement_reparses_full_semantics_and_reuses_checkpoint_
     assert len(tool_registry.calls) == 1
     assert tool_registry.calls[0]["payload"]["source_content"] == supplemented_content
     assert tool_registry.calls[0]["payload"]["effectiveness_score"] == 82
+    assert completed.workflow_result.resolved_customer is not None
+    assert completed.workflow_result.resolved_customer.customer_name == CUSTOMER_REF.display_name
+    assert completed.workflow_result.quality_gate is not None
+    assert completed.workflow_result.quality_gate.score == 82
 
 
 async def test_vague_next_action_is_a_gate_and_does_not_write_activity() -> None:

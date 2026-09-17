@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from app.services.agent.orchestrator.contracts import (
     ClarificationDispatchResult,
@@ -41,6 +41,12 @@ class TurnTimelineStep(BaseModel):
     detail: str = Field(min_length=1, max_length=2_000)
     tone: StepTone
 
+    @field_validator("title", "detail", mode="before")
+    @classmethod
+    def clip_step_text(cls, value: object, info: ValidationInfo) -> object:
+        limit = 200 if info.field_name == "title" else 2_000
+        return _clip_required(value, limit)
+
 
 class TurnTimeline(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -51,6 +57,37 @@ class TurnTimeline(BaseModel):
     customer_name: str | None = Field(default=None, min_length=1, max_length=255)
     model: str | None = Field(default=None, min_length=1, max_length=256)
     steps: list[TurnTimelineStep] = Field(min_length=6, max_length=6)
+
+    @field_validator("summary", mode="before")
+    @classmethod
+    def clip_summary(cls, value: object) -> object:
+        return _clip_required(value, 500)
+
+    @field_validator("customer_name", "model", mode="before")
+    @classmethod
+    def clip_optional_text(cls, value: object, info: ValidationInfo) -> object:
+        limit = 255 if info.field_name == "customer_name" else 256
+        return _clip_optional(value, limit)
+
+
+def _clip_required(value: object, limit: int) -> object:
+    if not isinstance(value, str):
+        return value
+    text = value.strip() or "（无内容）"
+    if len(text) <= limit:
+        return text
+    return f"{text[: max(limit - 1, 0)]}…"[:limit]
+
+
+def _clip_optional(value: object, limit: int) -> object:
+    if value is None or not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text:
+        return None
+    if len(text) <= limit:
+        return text
+    return f"{text[: max(limit - 1, 0)]}…"[:limit]
 
 
 _OBJECT_LABELS = {

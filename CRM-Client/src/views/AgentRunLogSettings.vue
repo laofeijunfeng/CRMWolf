@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
@@ -92,7 +92,8 @@ const stepToneVariant = (tone: 'done' | 'blocked' | 'skipped'): 'default' | 'sec
 }
 
 const loadTurns = async (): Promise<void> => {
-  if (!hasAccess.value) {
+  const allowed = pageItem !== undefined && canAccess(pageItem)
+  if (!allowed || permissionsPending.value === true || permissionsUnavailable.value === true) {
     loading.value = false
     return
   }
@@ -146,9 +147,13 @@ watch(outcome, () => {
   void loadTurns()
 })
 
-onMounted(() => {
-  void loadTurns()
-})
+watch(
+  [permissionsPending, permissionsUnavailable],
+  () => {
+    void loadTurns()
+  },
+  { immediate: true },
+)
 </script>
 
 <template>

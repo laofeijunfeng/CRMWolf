@@ -563,6 +563,7 @@ class CRMWorkflowPlanner:
             },
         }
         intent_confidence = float(getattr(semantic, "intent_confidence", 0.0) or 0.0)
+        quality_gate = self._quality_gate_from_envelope(quality_envelope)
         if intent_confidence >= 0.85:
             return self._auto_execute_plan(
                 workflow_id=workflow_id,
@@ -572,6 +573,7 @@ class CRMWorkflowPlanner:
                 confidence=intent_confidence,
                 completed_text=f"已记录{customer_name}的本次跟进。",
                 cancelled_text=f"已取消记录{customer_name}的本次跟进。",
+                quality_gate=quality_gate,
             )
         return self._confirmation_plan(
             workflow_id=workflow_id,
@@ -583,6 +585,7 @@ class CRMWorkflowPlanner:
             confirm_label="确认创建",
             completed_text=f"已记录{customer_name}的本次跟进。",
             cancelled_text=f"已取消记录{customer_name}的本次跟进。",
+            quality_gate=quality_gate,
         )
 
     @staticmethod
@@ -2465,6 +2468,7 @@ class CRMWorkflowPlanner:
         confidence: float,
         completed_text: str,
         cancelled_text: str,
+        quality_gate: WorkflowQualityGate | None = None,
     ) -> WorkflowActionPlan:
         suffix = workflow_id.removeprefix("wf_")
         return WorkflowActionPlan(
@@ -2484,6 +2488,7 @@ class CRMWorkflowPlanner:
             ],
             completed_text=completed_text,
             cancelled_text=cancelled_text,
+            quality_gate=quality_gate,
         )
 
     @staticmethod
@@ -2557,6 +2562,7 @@ class CRMWorkflowPlanner:
         completed_text: str,
         cancelled_text: str,
         facts: list[WorkflowConfirmationFact] | None = None,
+        quality_gate: WorkflowQualityGate | None = None,
     ) -> WorkflowActionPlan:
         return cls._confirmation_commands_plan(
             workflow_id=workflow_id,
@@ -2577,6 +2583,7 @@ class CRMWorkflowPlanner:
             completed_text=completed_text,
             cancelled_text=cancelled_text,
             facts=facts,
+            quality_gate=quality_gate,
         )
 
     @staticmethod
@@ -2591,6 +2598,7 @@ class CRMWorkflowPlanner:
         completed_text: str,
         cancelled_text: str,
         facts: list[WorkflowConfirmationFact] | None = None,
+        quality_gate: WorkflowQualityGate | None = None,
     ) -> WorkflowActionPlan:
         suffix = workflow_id.removeprefix("wf_")
         return WorkflowActionPlan(
@@ -2614,6 +2622,7 @@ class CRMWorkflowPlanner:
             ),
             completed_text=completed_text,
             cancelled_text=cancelled_text,
+            quality_gate=quality_gate,
         )
 
     @staticmethod

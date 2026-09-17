@@ -341,6 +341,7 @@ class WorkflowSubgraph:
                 quality_gate = WorkflowQualityGate.model_validate(raw_quality_gate)
             except ValidationError:
                 quality_gate = None
+        resolved_customer = _resolved_customer_from_state(state)
         progress = awaiting_required_input_progress()
         writer(progress.model_dump(mode="json"))
         raw_resume = interrupt(
@@ -349,6 +350,7 @@ class WorkflowSubgraph:
                 interaction=interaction,
                 progress=progress,
                 quality_gate=quality_gate,
+                resolved_customer=resolved_customer,
             ).model_dump(mode="json")
         )
         try:
@@ -473,6 +475,8 @@ class WorkflowSubgraph:
                 workflow_id=workflow_id,
                 interaction=plan.interaction,
                 progress=progress,
+                quality_gate=plan.quality_gate,
+                resolved_customer=_resolved_customer_from_state(state),
             ).model_dump(mode="json")
         )
         try:
@@ -552,6 +556,8 @@ class WorkflowSubgraph:
                     assistant_text=effect_result.message,
                     progress=completed_progress,
                     durable_work=effect_result.durable_work,
+                    quality_gate=plan.quality_gate,
+                    resolved_customer=request.resolved_customer,
                 ).model_dump(mode="json")
             }
         failed_progress = execution_progress(
@@ -637,6 +643,16 @@ class WorkflowSubgraph:
                 progress=confirmation_cancelled_progress(),
             ).model_dump(mode="json")
         }
+
+
+def _resolved_customer_from_state(state: WorkflowSubgraphState) -> WorkflowResolvedCustomer | None:
+    raw_request = state.get("workflow_input")
+    if raw_request is None:
+        return None
+    try:
+        return WorkflowTurnInput.model_validate(raw_request).resolved_customer
+    except ValidationError:
+        return None
 
 
 def build_workflow_subgraph(

@@ -235,3 +235,50 @@ def test_failure_turn_is_failed() -> None:
 
     assert timeline.outcome == "failed"
     assert "失败" in timeline.summary
+
+
+def test_oversize_confirmation_prompt_is_clipped_not_raised() -> None:
+    workflow_ref = WorkflowRef(workflow_id="wf_customer_follow_up", interrupt_id="intr_long")
+    prompt = "确认创建：" + ("跟进内容" * 600)
+    dispatch = WorkflowDispatchResult(
+        decision=_decision("WORKFLOW"),
+        workflow_result=WorkflowWaitingResult(
+            workflow_ref=workflow_ref,
+            assistant_text=prompt,
+            interaction=WorkflowInteraction(
+                interaction_id="int_confirm_long",
+                interaction_type="confirmation",
+                business_action="create_customer_activity",
+                title="确认创建",
+                prompt=prompt,
+                options=[
+                    WorkflowInteractionOption(value="confirm", label="确认创建"),
+                    WorkflowInteractionOption(value="cancel", label="取消"),
+                ],
+                selection_mode="single",
+                min_selections=1,
+                max_selections=1,
+            ),
+            progress=awaiting_required_input_progress(),
+        ),
+        continuation=_continuation(workflow_ref),
+    )
+
+    timeline = build_turn_timeline(dispatch, user_text="记一条跟进")
+
+    interaction = next(step for step in timeline.steps if step.kind == "interaction")
+    assert len(interaction.detail) <= 2000
+    assert timeline.outcome == "waiting_confirmation"
+
+
+def test_oversize_failure_message_is_clipped_not_raised() -> None:
+    dispatch = FailureDispatchResult(
+        decision=_decision("WORKFLOW"),
+        error=AgentExecutionError(code="WORKFLOW_FAILED", message="失败：" + ("详情" * 400), retryable=False),
+    )
+
+    timeline = build_turn_timeline(dispatch, user_text="记一条跟进")
+
+    assert timeline.outcome == "failed"
+    assert len(timeline.summary) <= 500
+    assert all(len(step.detail) <= 2000 for step in timeline.steps)

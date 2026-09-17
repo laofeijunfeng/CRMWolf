@@ -192,6 +192,7 @@ class WorkflowInterruptPayload(WorkflowContractModel):
     interaction: WorkflowInteraction
     progress: WorkflowProgress
     quality_gate: WorkflowQualityGate | None = None
+    resolved_customer: WorkflowResolvedCustomer | None = None
 
 class WorkflowSupplement(WorkflowContractModel):
     """One canonical text or form response supplied while a Workflow is suspended."""
@@ -298,6 +299,8 @@ class WorkflowCompletedResult(WorkflowContractModel):
     assistant_text: str = Field(min_length=1, max_length=10_000)
     progress: WorkflowProgress
     durable_work: list[AgentDurableWorkReceipt] = Field(default_factory=list, max_length=20)
+    quality_gate: WorkflowQualityGate | None = None
+    resolved_customer: WorkflowResolvedCustomer | None = None
 
 
 class WorkflowCommittedResource(WorkflowContractModel):
@@ -422,6 +425,7 @@ class WorkflowActionPlan(WorkflowContractModel):
     completed_text: str = Field(default="", max_length=10_000)
     cancelled_text: str = Field(default="", max_length=10_000)
     terminal_reason: str | None = Field(default=None, max_length=2_000)
+    quality_gate: WorkflowQualityGate | None = None
 
     @model_validator(mode="after")
     def validate_command_order(self) -> Self:

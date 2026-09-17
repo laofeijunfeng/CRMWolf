@@ -6,7 +6,7 @@ const listTurns = vi.hoisted(() => vi.fn())
 const getTurn = vi.hoisted(() => vi.fn())
 const handleApiError = vi.hoisted(() => vi.fn())
 const accessState = vi.hoisted(() => ({
-  allowed: true,
+  allowed: { value: true },
   unavailable: { value: false },
   pending: { value: false },
 }))
@@ -18,13 +18,15 @@ vi.mock('@/utils/errorHandler', () => ({ handleApiError }))
 vi.mock('@/composables/usePageTitle', () => ({ usePageTitle: () => undefined }))
 vi.mock('@/composables/useSettingsAccess', async () => {
   const { ref } = await import('vue')
+  const allowed = ref(true)
   const unavailable = ref(false)
   const pending = ref(false)
+  accessState.allowed = allowed
   accessState.unavailable = unavailable
   accessState.pending = pending
   return {
     useSettingsAccess: () => ({
-      canAccess: () => accessState.allowed,
+      canAccess: () => allowed.value,
       permissionsUnavailable: unavailable,
       permissionsPending: pending,
     }),
@@ -89,7 +91,7 @@ describe('AgentRunLogSettings', () => {
     listTurns.mockReset()
     getTurn.mockReset()
     handleApiError.mockReset()
-    accessState.allowed = true
+    accessState.allowed.value = true
     accessState.unavailable.value = false
     accessState.pending.value = false
     listTurns.mockResolvedValue({
@@ -121,11 +123,28 @@ describe('AgentRunLogSettings', () => {
   })
 
   it('hides the log when the viewer lacks AI settings access', async () => {
-    accessState.allowed = false
+    accessState.allowed.value = false
     const wrapper = mount(AgentRunLogSettings)
     await flushPromises()
 
     expect(wrapper.text()).toContain('暂无访问权限')
     expect(listTurns).not.toHaveBeenCalled()
+  })
+
+  it('loads turns after settings access becomes available', async () => {
+    accessState.allowed.value = false
+    accessState.pending.value = true
+    const wrapper = mount(AgentRunLogSettings)
+    await flushPromises()
+
+    expect(listTurns).not.toHaveBeenCalled()
+
+    accessState.allowed.value = true
+    accessState.pending.value = false
+    await wrapper.vm.$nextTick()
+    await flushPromises()
+
+    expect(listTurns).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('记双汇跟进')
   })
 })

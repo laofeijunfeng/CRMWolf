@@ -783,6 +783,7 @@ class RootOrchestrator:
             interaction=payload.interaction,
             progress=payload.progress,
             quality_gate=payload.quality_gate,
+            resolved_customer=payload.resolved_customer,
         )
 
     def _build_graph(self) -> CompiledStateGraph:
