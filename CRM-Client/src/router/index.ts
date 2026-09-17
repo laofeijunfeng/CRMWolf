@@ -238,6 +238,12 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true, title: '团队信息与安全', settingsKey: 'team' }
       },
       {
+        path: 'settings/approval-flows',
+        name: 'SettingsApprovalFlows',
+        component: () => import('@/views/settings/SettingsApprovalFlowsPage.vue'),
+        meta: { requiresAuth: true, title: '审批流程管理', settingsKey: 'approval-flows' },
+      },
+      {
         path: 'settings/members',
         name: 'SettingsMembers',
         component: () => import('@/views/settings/SettingsMembersPage.vue'),

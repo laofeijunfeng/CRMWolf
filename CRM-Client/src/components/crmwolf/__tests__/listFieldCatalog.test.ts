@@ -187,6 +187,7 @@ describe('DataTable list field catalog contract', () => {
       'views/Opportunities.vue',
       'views/PaymentPlans.vue',
       'views/PaymentRecords.vue',
+      'views/settings/SettingsApprovalFlowsPage.vue',
       'views/settings/SettingsMembersPage.vue',
       'views/settings/SettingsRolesPage.vue'
     ])
