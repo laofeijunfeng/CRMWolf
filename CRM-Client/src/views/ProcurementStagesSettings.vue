@@ -1,26 +1,37 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+
+
+import { useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
-import { ArrowLeft, Plus, Pencil, Trash2 } from 'lucide-vue-next'
+import { Plus } from 'lucide-vue-next'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
-import { Badge, Button, Card, CardContent, CardHeader, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input, ListCard, Textarea } from '@/components/crmwolf'
-import { CardDescription, CardTitle } from '@/components/ui/card'
+import { Button, DataTable, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input, TableRowActions, Textarea } from '@/components/crmwolf'
+import { Badge } from '@/components/ui/badge'
 import { FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Switch } from '@/components/ui/switch'
 import ErrorState from '@/components/ErrorState.vue'
-import { Skeleton } from '@/components/ui/skeleton'
 import procurementApi, { type ProcurementMethodWithStages, type ProcurementStageTemplate, type ProcurementStageTemplateCreate, type ProcurementStageTemplateUpdate } from '@/api/procurement'
 import { useSettingsAccess } from '@/composables/useSettingsAccess'
 import { getSettingsNavigationItem } from '@/settingsNavigation'
 import { handleApiError } from '@/utils/errorHandler'
 import { confirmDelete } from '@/utils/confirmDialog'
 import { usePermissionStore } from '@/stores/permissions'
+import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
+import { useHeaderStore } from '@/stores/header'
+import type { ActionConfig, TableRowActionSet } from '@/components/crmwolf'
+import { defineListFields } from '@/components/crmwolf/listFieldCatalog'
+import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
+import { settingsListColumn } from '@/views/settings/settingsListCatalog'
+import { toFeedbackError } from '@/types/feedback'
+import type { FeedbackError } from '@/types/feedback'
+import SettingsContent from '@/views/settings/SettingsContent.vue'
 
 const route = useRoute()
-const router = useRouter()
+const headerStore = useHeaderStore()
+headerStore.setBack(true, '/settings/procurement-methods')
 const permissionStore = usePermissionStore()
 const { canAccess } = useSettingsAccess()
 const procurementSettings = getSettingsNavigationItem('procurement')
@@ -35,7 +46,7 @@ const canUpdate = computed(() => permissionStore.hasPermission('procurement_stag
 const canDelete = computed(() => permissionStore.hasPermission('procurement_stage:delete'))
 const method = ref<ProcurementMethodWithStages | null>(null)
 const loading = ref(false)
-const loadError = ref(false)
+const loadError = ref<FeedbackError | null>(null)
 const dialogOpen = ref(false)
 const submitting = ref(false)
 const editingStage = ref<ProcurementStageTemplate | null>(null)
@@ -54,14 +65,29 @@ const { handleSubmit, resetForm } = useForm({
   initialValues: { template_code: '', stage_name: '', win_probability: 0, sort_order: 0, is_default_start: false, can_skip: false, description: '' },
 })
 
+const displayedStages = computed(() => {
+  if (method.value === null) return []
+  return method.value.stage_templates.slice().sort((left, right) => left.sort_order - right.sort_order)
+})
+
+const fields: ListFieldDefinition[] = defineListFields([
+  settingsListColumn({ key: 'stage_name', label: '阶段', column: { fixed: 'left' } }),
+  settingsListColumn({ key: 'template_code', label: '编码', column: true }),
+  settingsListColumn({ key: 'win_probability', label: '赢率', column: true }),
+  settingsListColumn({ key: 'sort_order', label: '排序', column: true }),
+  settingsListColumn({ key: 'is_default_start', label: '默认起点', column: true }),
+  settingsListColumn({ key: 'can_skip', label: '可跳过', column: true }),
+])
+
 const loadMethod = async (): Promise<void> => {
-  if (methodId.value === null) return
+  if (methodId.value === null || !hasAccess.value) return
+
   loading.value = true
-  loadError.value = false
+  loadError.value = null
   try {
     method.value = await procurementApi.getProcurementMethod(methodId.value)
   } catch (error: unknown) {
-    loadError.value = true
+    loadError.value = toFeedbackError(error, '采购阶段模板')
     handleApiError(error, '获取采购阶段模板')
   } finally {
     loading.value = false
@@ -113,37 +139,97 @@ const removeStage = async (stage: ProcurementStageTemplate): Promise<void> => {
   }
 }
 
+const asStageHandler = (handler: (row: ProcurementStageTemplate) => void): ActionConfig['handler'] => {
+  return (row) => { handler(row as ProcurementStageTemplate) }
+}
+
+const getRowActions = (_row: ProcurementStageTemplate): TableRowActionSet => {
+  return {
+    primaryActions: [{
+      id: 'edit',
+      label: '编辑',
+      desktopPrimary: true,
+      visible: canUpdate.value,
+      handler: asStageHandler(showEdit),
+    }],
+    secondaryActions: [
+      { id: 'delete', label: '删除', destructive: true, risk: 'destructive', visible: canDelete.value, handler: asStageHandler((stage) => { void removeStage(stage) }) },
+    ],
+  }
+}
+
 onMounted(() => { void loadMethod() })
+onUnmounted(() => {
+  headerStore.setBack(false)
+})
+watch(hasAccess, (ok) => {
+  if (ok) void loadMethod()
+})
+
+
+
+useTopBarRegistration({
+  actionDeps: [hasAccess, canCreate, method],
+  actions: () => [{
+    id: 'create-stage',
+    label: '新增阶段',
+    type: 'primary',
+    icon: Plus,
+    visible: hasAccess.value && canCreate.value && method.value !== null,
+    handler: showCreate,
+  }],
+})
 </script>
 
 <template>
-  <main class="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6" aria-label="采购阶段模板">
-    <div class="flex flex-wrap items-start justify-between gap-4">
-      <div class="space-y-1">
-        <p class="text-sm font-medium text-primary">系统设置 / 采购方式管理</p>
-        <h1 class="text-2xl font-semibold tracking-tight">采购阶段模板</h1>
-        <p class="text-sm text-muted-foreground">配置采购方式“{{ method?.name ?? '未找到' }}”的阶段顺序、赢率和跳过规则。</p>
-      </div>
-      <div class="flex gap-2">
-        <Button variant="outline" @click="router.push('/settings/procurement-methods')"><ArrowLeft class="mr-2 size-4" />返回采购方式</Button>
-        <Button v-if="hasAccess && canCreate && method !== null" @click="showCreate"><Plus class="mr-2 size-4" />新增阶段</Button>
-      </div>
-    </div>
+  <SettingsContent ariaLabel="采购阶段模板" :description="`配置采购方式“${method?.name ?? '未找到'}”的阶段顺序、赢率和跳过规则。`">
     <ErrorState v-if="!hasAccess" variant="forbidden" title="暂无访问权限" description="你没有访问采购阶段模板的权限。" />
     <ErrorState v-else-if="methodId === null" variant="error" title="采购方式不存在" description="请从采购方式管理页面选择有效的采购方式。" />
-    <div v-else-if="loading" class="space-y-3" aria-label="正在加载采购阶段模板"><Skeleton v-for="index in 3" :key="index" class="h-20 w-full" /></div>
-    <ErrorState v-else-if="loadError" variant="error" title="采购阶段模板加载失败" description="请检查网络后重试。"><template #action><Button variant="outline" @click="loadMethod">重试</Button></template></ErrorState>
-    <Card v-else-if="method !== null">
-      <CardHeader><CardTitle>{{ method.name }} · 阶段模板</CardTitle><CardDescription>调整模板会影响后续新建或推进的商机，历史商机数据保持不变。</CardDescription></CardHeader>
-      <CardContent>
-        <ListCard :title="`阶段列表（${method.stage_templates.length}）`" :items="method.stage_templates.slice().sort((a, b) => a.sort_order - b.sort_order)" empty-text="暂无阶段模板">
-          <template #itemMain="{ item }"><div class="font-medium text-wolf-text-primary">{{ item.stage_name }}</div><div class="mt-1 text-xs text-muted-foreground">{{ item.template_code }} · 赢率 {{ item.win_probability }}% · 排序 {{ item.sort_order }}</div><div v-if="item.description" class="mt-1 text-sm text-muted-foreground">{{ item.description }}</div></template>
-          <template #itemBadges="{ item }"><Badge v-if="item.is_default_start === 1" variant="outline">默认起点</Badge><Badge v-if="item.can_skip === 1" variant="secondary">可跳过</Badge></template>
-          <template #itemActions="{ item }"><Button v-if="canUpdate" variant="ghost" size="icon" title="编辑" @click="showEdit(item)"><Pencil class="size-4" /></Button><Button v-if="canDelete" variant="ghost" size="icon" title="删除" class="text-destructive hover:text-destructive" @click="removeStage(item)"><Trash2 class="size-4" /></Button></template>
-        </ListCard>
-      </CardContent>
-    </Card>
-  </main>
+    <DataTable
+      v-else
+      :fields="fields"
+      :data="displayedStages"
+      :loading="loading"
+      :load-error="loadError"
+      :page="1"
+      :page-size="Math.max(displayedStages.length, 1)"
+      :total="displayedStages.length"
+      height-strategy="page"
+      scroll-mode="page"
+      compact-pagination
+      empty-title="暂无阶段模板"
+      empty-reason="not-created"
+      :get-row-actions="getRowActions"
+      mobile-title-key="stage_name"
+      :mobile-meta-keys="['template_code']"
+      @retry="loadMethod"
+    >
+      <template #cell-stage_name="{ row }">
+        <div class="font-medium text-wolf-text-primary">{{ row.stage_name }}</div>
+        <div v-if="row.description" class="mt-1 text-sm text-muted-foreground">{{ row.description }}</div>
+      </template>
+      <template #cell-template_code="{ row }">
+        <Badge variant="outline">{{ row.template_code }}</Badge>
+      </template>
+      <template #cell-win_probability="{ row }">
+        {{ row.win_probability }}%
+      </template>
+      <template #cell-sort_order="{ row }">
+        {{ row.sort_order }}
+      </template>
+      <template #cell-is_default_start="{ row }">
+        <Badge v-if="row.is_default_start === 1" variant="outline">默认起点</Badge>
+        <span v-else class="text-muted-foreground">否</span>
+      </template>
+      <template #cell-can_skip="{ row }">
+        <Badge v-if="row.can_skip === 1" variant="secondary">可跳过</Badge>
+        <span v-else class="text-muted-foreground">否</span>
+      </template>
+      <template #mobile-actions="{ row }">
+        <TableRowActions :row="row" v-bind="getRowActions(row)" size="lg" />
+      </template>
+    </DataTable>
+  </SettingsContent>
   <Dialog v-model:open="dialogOpen">
     <DialogContent class="max-w-lg">
       <DialogHeader><DialogTitle>{{ editingStage === null ? '新增阶段模板' : '编辑阶段模板' }}</DialogTitle><DialogDescription>阶段编码创建后不可修改，避免影响已有商机引用。</DialogDescription></DialogHeader>

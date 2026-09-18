@@ -3,11 +3,6 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { getSettingsNavigationItem, SETTINGS_NAVIGATION } from './settingsNavigation'
 
-const readSettingsModulePageSource = (): string => readFileSync(
-  resolve(process.cwd(), 'src/views/SettingsModulePage.vue'),
-  'utf8',
-)
-
 describe('settings navigation registry', () => {
   it('keeps one canonical route per settings module', () => {
     const paths = SETTINGS_NAVIGATION.map(item => item.path)
@@ -54,10 +49,20 @@ describe('settings navigation registry', () => {
     expect(ids.indexOf('agent-run-log')).toBe(ids.indexOf('ai') + 1)
   })
 
-  it('keeps separate AI and products legacy component mappings', () => {
-    const source = readSettingsModulePageSource()
+  it('does not host settings modules through SettingsModulePage', () => {
+    const routerSource = readFileSync(resolve(process.cwd(), 'src/router/index.ts'), 'utf8')
+    expect(routerSource).not.toContain('SettingsModulePage')
+    expect(routerSource).toContain('SettingsMembersPage')
+    expect(routerSource).toContain('SettingsProductsPage')
+    expect(routerSource).toContain('SettingsAIPage')
+  })
 
-    expect(source).toContain("ai: defineAsyncComponent(() => import('@/components/system-config/AIConfigSheet.vue'))")
-    expect(source).toContain("products: defineAsyncComponent(() => import('@/components/system-config/ProductPanel.vue'))")
+  it('keeps separate AI and products settings routes', () => {
+    const routerSource = readFileSync(resolve(process.cwd(), 'src/router/index.ts'), 'utf8')
+    expect(routerSource).toContain('SettingsAIPage')
+    expect(routerSource).toContain('SettingsProductsPage')
+    expect(getSettingsNavigationItem('ai')?.id).toBe('ai')
+    expect(getSettingsNavigationItem('products')?.id).toBe('products')
+    expect(getSettingsNavigationItem('ai')?.path).not.toBe(getSettingsNavigationItem('products')?.path)
   })
 })

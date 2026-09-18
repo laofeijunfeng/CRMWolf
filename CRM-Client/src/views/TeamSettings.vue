@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+
 import { toast } from 'vue-sonner'
-import { Building2, Copy, KeyRound, Loader2, RefreshCw } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -10,15 +10,32 @@ import { Skeleton } from '@/components/ui/skeleton'
 import ErrorState from '@/components/ErrorState.vue'
 import { teamApi, type TeamResponse } from '@/api/team'
 import { handleApiError } from '@/utils/errorHandler'
+import { confirmDialog } from '@/utils/confirmDialog'
 import { useTeamStore } from '@/stores/team'
 import { usePermissionStore } from '@/stores/permissions'
 import { useSettingsAccess } from '@/composables/useSettingsAccess'
+import { useSettingsUnsavedLeave } from '@/composables/useSettingsUnsavedLeave'
 import { getSettingsNavigationItem } from '@/settingsNavigation'
 import { usePageTitle } from '@/composables/usePageTitle'
+import { useHeaderStore } from '@/stores/header'
+
+import SettingsContent from '@/views/settings/SettingsContent.vue'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
 usePageTitle()
 
 const teamStore = useTeamStore()
+const headerStore = useHeaderStore()
+
 const permissionStore = usePermissionStore()
 const { isOwner, permissionsUnavailable, canAccess } = useSettingsAccess()
 const teamSettings = getSettingsNavigationItem('team')
@@ -34,6 +51,18 @@ const hasAccess = computed(() => teamSettings !== undefined && canAccess(teamSet
 const canUpdateTeam = computed(() => isOwner.value || permissionStore.hasAnyPermission(['team:settings:update', 'team:manage']))
 const canManageInvite = computed(() => isOwner.value || permissionStore.hasAnyPermission(['team:invite:manage', 'team:manage']))
 const retryingPermissions = computed(() => permissionStore.loadState === 'loading')
+
+const { showLeaveConfirm, confirmLeave, cancelLeave } = useSettingsUnsavedLeave({
+  isDirty: (): boolean => teamName.value.trim() !== (team.value?.name ?? ''),
+  isSubmitting: (): boolean => saving.value,
+})
+
+const handleLeaveDialogOpenChange = (open: boolean): void => {
+  if (open) return
+  Promise.resolve().then((): void => {
+    if (showLeaveConfirm.value) cancelLeave()
+  })
+}
 
 const retryPermissions = async (): Promise<void> => {
   await teamStore.retryPermissionSync()
@@ -87,6 +116,9 @@ const regenerateInviteCode = async (): Promise<void> => {
   const currentTeamId = team.value?.id
   if (currentTeamId === undefined || !canManageInvite.value) return
 
+  const confirmed = await confirmDialog('确定要重置邀请码吗？重置后旧邀请码将失效。', '重置邀请码')
+  if (!confirmed) return
+
   regenerating.value = true
   try {
     const response = await teamApi.regenerateInviteCode(currentTeamId)
@@ -111,18 +143,17 @@ const copyInviteLink = async (): Promise<void> => {
 }
 
 onMounted(() => {
-  void loadTeam()
+  headerStore.clear()
 })
+
+watch(hasAccess, (ok) => {
+  if (ok) void loadTeam()
+}, { immediate: true })
+
 </script>
 
 <template>
-  <main class="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6" aria-label="团队信息与安全">
-    <div class="space-y-1">
-      <p class="text-sm font-medium text-primary">系统设置</p>
-      <h1 class="text-2xl font-semibold tracking-tight">团队信息与安全</h1>
-      <p class="text-sm text-muted-foreground">维护当前团队资料、邀请入口和团队安全边界。</p>
-    </div>
-
+  <SettingsContent ariaLabel="团队信息与安全" description="维护当前团队资料和邀请入口。重置邀请码后，旧链接立即失效。">
     <ErrorState
       v-if="permissionsUnavailable"
       variant="error"
@@ -142,10 +173,10 @@ onMounted(() => {
       description="你没有访问团队设置的权限，请联系团队所有者或管理员。"
     />
     <template v-else>
-      <div v-if="loading" class="grid gap-6 lg:grid-cols-2" aria-label="正在加载团队信息">
-        <Card v-for="index in 2" :key="index">
+      <div v-if="loading" class="flex flex-col gap-4" aria-label="正在加载团队信息">
+        <Card v-for="index in 3" :key="index">
           <CardHeader><Skeleton class="h-6 w-36" /></CardHeader>
-          <CardContent class="space-y-3"><Skeleton class="h-10 w-full" /><Skeleton class="h-10 w-2/3" /></CardContent>
+          <CardContent class="space-y-3"><Skeleton class="h-10 w-full" /></CardContent>
         </Card>
       </div>
       <ErrorState
@@ -156,46 +187,76 @@ onMounted(() => {
       >
         <template #action><Button variant="outline" @click="loadTeam">重试</Button></template>
       </ErrorState>
-      <div v-else-if="team !== null" class="grid gap-6 lg:grid-cols-2">
+      <template v-else-if="team !== null">
         <Card>
           <CardHeader>
-            <CardTitle class="flex items-center gap-2"><Building2 class="size-5" />团队信息</CardTitle>
-            <CardDescription>团队名称会展示在工作区和成员入口中。</CardDescription>
+            <CardTitle>团队信息</CardTitle>
+            <CardDescription>名称会显示在工作区和成员入口中。</CardDescription>
           </CardHeader>
-          <CardContent class="space-y-4">
-            <div class="space-y-2">
-              <Label for="team-name">团队名称</Label>
-              <Input id="team-name" v-model="teamName" :disabled="!canUpdateTeam || saving" maxlength="100" />
+          <CardContent>
+            <div class="settings-form-grid">
+              <div class="space-y-2">
+                <Label for="team-name">团队名称</Label>
+                <Input id="team-name" v-model="teamName" :disabled="!canUpdateTeam || saving" maxlength="100" />
+              </div>
+              <div class="space-y-2">
+                <Label for="team-created">创建时间</Label>
+                <Input id="team-created" :model-value="team.created_at" disabled />
+              </div>
             </div>
-            <Button :disabled="!canUpdateTeam || saving || teamName.trim().length === 0" @click="saveTeamName">
-              <Loader2 v-if="saving" class="mr-2 size-4 animate-spin" />
-              保存团队信息
-            </Button>
           </CardContent>
         </Card>
-
         <Card>
           <CardHeader>
-            <CardTitle class="flex items-center gap-2"><KeyRound class="size-5" />邀请与安全</CardTitle>
-            <CardDescription>邀请码变更后，历史邀请链接立即失效。</CardDescription>
+            <CardTitle>邀请</CardTitle>
+            <CardDescription>把链接发给同事即可加入当前团队。成员页不再重复放邀请码。</CardDescription>
           </CardHeader>
           <CardContent class="space-y-4">
-            <div class="space-y-2">
-              <Label for="team-code">当前邀请码</Label>
-              <Input id="team-code" :model-value="team.code" readonly />
+            <div class="settings-form-grid">
+              <div class="space-y-2">
+                <Label for="team-code">当前邀请码</Label>
+                <Input id="team-code" :model-value="team.code" readonly />
+              </div>
+              <div class="space-y-2">
+                <Label for="team-invite-link">邀请链接</Label>
+                <Input id="team-invite-link" :model-value="inviteLink" readonly />
+              </div>
             </div>
             <div class="flex flex-wrap gap-2">
-              <Button variant="outline" :disabled="inviteLink.length === 0" @click="copyInviteLink">
-                <Copy class="mr-2 size-4" />复制邀请链接
-              </Button>
-              <Button variant="outline" :disabled="!canManageInvite || regenerating" @click="regenerateInviteCode">
-                <RefreshCw :class="['mr-2 size-4', regenerating ? 'animate-spin' : '']" />重置邀请码
-              </Button>
+              <Button variant="outline" :disabled="inviteLink.length === 0" @click="copyInviteLink">复制邀请链接</Button>
+              <Button variant="outline" :disabled="!canManageInvite || regenerating" @click="regenerateInviteCode">重置邀请码</Button>
             </div>
-            <p class="text-sm text-muted-foreground">团队所有者：{{ isOwner ? '当前用户（团队所有者）' : team.owner_id }}</p>
           </CardContent>
         </Card>
-      </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>所有者</CardTitle>
+            <CardDescription>所有权转移需要二次确认，本期只读展示。</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <p class="text-sm">{{ isOwner ? '当前用户（团队所有者）' : team.owner_id }}</p>
+          </CardContent>
+        </Card>
+        <div class="settings-form-actions">
+          <Button :disabled="!canUpdateTeam || saving || teamName.trim().length === 0" @click="saveTeamName">
+            保存团队信息
+          </Button>
+        </div>
+      </template>
     </template>
-  </main>
+    <AlertDialog :open="showLeaveConfirm" @update:open="handleLeaveDialogOpenChange">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>放弃未保存的更改？</AlertDialogTitle>
+          <AlertDialogDescription>
+            当前页面有尚未保存的更改。离开后这些内容会丢失。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel @click="cancelLeave">继续编辑</AlertDialogCancel>
+          <AlertDialogAction @click="confirmLeave">放弃更改</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  </SettingsContent>
 </template>

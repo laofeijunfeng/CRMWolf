@@ -244,11 +244,40 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true, title: 'Agent 运行日志', settingsKey: 'agent-run-log' }
       },
       {
+        path: 'settings/acquisition-sources',
+        name: 'SettingsAcquisitionSources',
+        component: () => import('@/views/settings/SettingsAcquisitionSourcesPage.vue'),
+        meta: { requiresAuth: true, title: '获客来源', settingsKey: 'acquisition-sources' },
+      },
+      {
+        path: 'settings/approval-flows',
+        name: 'SettingsApprovalFlows',
+        component: () => import('@/views/settings/SettingsApprovalFlowsPage.vue'),
+        meta: { requiresAuth: true, title: '审批流程管理', settingsKey: 'approval-flows' },
+      },
+      {
+        path: 'settings/approval-flows-new',
+        name: 'SettingsApprovalFlowsNew',
+        component: () => import('@/views/ApprovalFlowsNew.vue'),
+        meta: { requiresAuth: true, title: '审批流程管理（新）', settingsKey: 'approval-flows-new' },
+      },
+      {
+        path: 'settings/members',
+        name: 'SettingsMembers',
+        component: () => import('@/views/settings/SettingsMembersPage.vue'),
+        meta: { requiresAuth: true, title: '团队成员', settingsKey: 'members' },
+      },
+      {
+        path: 'settings/roles',
+        name: 'SettingsRoles',
+        component: () => import('@/views/settings/SettingsRolesPage.vue'),
+        meta: { requiresAuth: true, title: '角色管理', settingsKey: 'roles' },
+      },
+      {
         path: 'settings/procurement-methods',
         name: 'SettingsProcurementMethods',
-        component: () => import('@/views/SettingsModulePage.vue'),
+        component: () => import('@/views/settings/SettingsProcurementMethodsPage.vue'),
         meta: { requiresAuth: true, title: '采购方式管理', settingsKey: 'procurement' },
-        props: { module: 'procurement' }
       },
       {
         path: 'settings/procurement-methods/:methodId/stages',
@@ -269,10 +298,28 @@ const routes: RouteRecordRaw[] = [
         })
       },
       {
-        path: 'settings/:module',
-        name: 'SettingsModule',
-        component: () => import('@/views/SettingsModulePage.vue'),
-        meta: { requiresAuth: true, title: '系统设置' }
+        path: 'settings/products',
+        name: 'SettingsProducts',
+        component: () => import('@/views/settings/SettingsProductsPage.vue'),
+        meta: { requiresAuth: true, title: '产品管理', settingsKey: 'products' },
+      },
+      {
+        path: 'settings/ai',
+        name: 'SettingsAI',
+        component: () => import('@/views/settings/SettingsAIPage.vue'),
+        meta: { requiresAuth: true, title: 'AI 配置', settingsKey: 'ai' }
+      },
+      {
+        path: 'settings/notifications',
+        name: 'SettingsNotifications',
+        component: () => import('@/views/settings/SettingsNotificationsPage.vue'),
+        meta: { requiresAuth: true, title: '通知配置', settingsKey: 'notifications' }
+      },
+      {
+        path: 'settings/integrations',
+        name: 'SettingsIntegrations',
+        component: () => import('@/views/settings/SettingsIntegrationsPage.vue'),
+        meta: { requiresAuth: true, title: '第三方集成', settingsKey: 'integrations' }
       },
       {
         path: 'system-config',
