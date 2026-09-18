@@ -468,15 +468,14 @@ class AgentApplicationService:
                 try:
                     begin_result = self.turn_repository.begin(db, turn_start)
                     if begin_result.outcome in {"CREATED", "IN_PROGRESS"}:
-                        composition = self.ui_composer.compose(
-                            FailureDispatchResult(
-                                error=AgentExecutionError(
-                                    code="INTERNAL_ERROR",
-                                    message=agent_copy.service_error(str(exc)),
-                                    retryable=True,
-                                )
+                        failure = FailureDispatchResult(
+                            error=AgentExecutionError(
+                                code="INTERNAL_ERROR",
+                                message=agent_copy.service_error(str(exc)),
+                                retryable=True,
                             )
                         )
+                        composition = self.ui_composer.compose(failure)
                         if prepared is not None and prepared.message_display == "STATE_UPDATE":
                             composition = self._with_message_display(
                                 composition,
@@ -491,7 +490,10 @@ class AgentApplicationService:
                                 turn_id=begin_result.user_message.turn_id,
                                 content=composition.content,
                                 ui=composition.body,
-                                diagnostics={"dispatch_type": "failure"},
+                                diagnostics=self._dispatch_diagnostics(
+                                    failure,
+                                    user_text=prepared.content if prepared is not None else composition.content,
+                                ),
                             ),
                         )
                         self._release_prepared_action_claim(
@@ -907,15 +909,14 @@ class AgentApplicationService:
             if begin_result.outcome == "COMPLETED":
                 db.rollback()
                 return
-            composition = self.ui_composer.compose(
-                FailureDispatchResult(
-                    error=AgentExecutionError(
-                        code="TURN_INTERRUPTED",
-                        message="本次操作已结束,请查看会话记录和后台任务状态。",
-                        retryable=False,
-                    )
+            failure = FailureDispatchResult(
+                error=AgentExecutionError(
+                    code="TURN_INTERRUPTED",
+                    message="本次操作已结束,请查看会话记录和后台任务状态。",
+                    retryable=False,
                 )
             )
+            composition = self.ui_composer.compose(failure)
             if prepared is not None and prepared.message_display == "STATE_UPDATE":
                 composition = self._with_message_display(
                     composition,
@@ -930,7 +931,10 @@ class AgentApplicationService:
                     turn_id=begin_result.user_message.turn_id,
                     content=composition.content,
                     ui=composition.body,
-                    diagnostics={"dispatch_type": "failure", "error_code": "TURN_INTERRUPTED"},
+                    diagnostics=self._dispatch_diagnostics(
+                        failure,
+                        user_text=prepared.content if prepared is not None else composition.content,
+                    ),
                 ),
             )
             self._release_prepared_action_claim(
@@ -1204,11 +1208,10 @@ class AgentApplicationService:
         # dispatch, not a reason to abandon the turn. Close it with one durable
         # error response so retries replay a final result instead of poisoning
         # the session with a permanent TURN_IN_PROGRESS state.
-        composition = self.ui_composer.compose(
-            FailureDispatchResult(
-                error=AgentExecutionError(code=code, message=message, retryable=False)
-            )
+        failure = FailureDispatchResult(
+            error=AgentExecutionError(code=code, message=message, retryable=False)
         )
+        composition = self.ui_composer.compose(failure)
         completed = self.turn_repository.complete(
             db,
             AgentAssistantMessageCreate(
@@ -1218,7 +1221,7 @@ class AgentApplicationService:
                 turn_id=begin_result.user_message.turn_id,
                 content=composition.content,
                 ui=composition.body,
-                diagnostics={"dispatch_type": "failure", "error_code": code},
+                diagnostics=self._dispatch_diagnostics(failure, user_text=user_content),
             ),
         )
         db.commit()

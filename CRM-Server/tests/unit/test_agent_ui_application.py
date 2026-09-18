@@ -595,7 +595,13 @@ async def test_query_result_set_failure_rolls_back_assistant_result_set_and_acti
         assert db.query(AgentUIAction).count() == 0
         assistants = db.query(AgentMessage).filter_by(role=AgentMessageRole.ASSISTANT).all()
         assert len(assistants) == 1
-        assert assistants[0].diagnostics_json == {"dispatch_type": "failure"}
+        diagnostics = assistants[0].diagnostics_json
+        assert diagnostics is not None
+        assert diagnostics["dispatch_type"] == "failure"
+        observability = diagnostics["turn_observability"]
+        assert observability["outcome"] == "failed"
+        assert len(observability["steps"]) == 6
+
 
 
 @pytest.mark.asyncio

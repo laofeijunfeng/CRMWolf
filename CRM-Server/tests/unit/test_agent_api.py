@@ -898,3 +898,45 @@ def test_run_log_turn_detail_returns_six_steps(api_harness, monkeypatch) -> None
     assert len(body["steps"]) == 6
     assert body["steps"][2]["tone"] == "blocked"
     assert body["steps"][4]["kind"] == "api"
+
+
+def test_run_log_lists_catch_all_failure_without_observability(api_harness, monkeypatch) -> None:
+    client, session_factory = api_harness
+    _grant_ai_read(monkeypatch)
+    session = _create_session(client)
+    with session_factory() as db:
+        db.add_all(
+            [
+                AgentMessage(
+                    team_id=1,
+                    user_id=2,
+                    session_id=int(session["id"]),
+                    role=AgentMessageRole.USER,
+                    content="创建 Hifox 线索",
+                    turn_id="turn_internal_error",
+                ),
+                AgentMessage(
+                    team_id=1,
+                    user_id=2,
+                    session_id=int(session["id"]),
+                    role=AgentMessageRole.ASSISTANT,
+                    content="这次没处理成，请稍后再试。",
+                    turn_id="turn_internal_error",
+                    diagnostics_json={"dispatch_type": "failure"},
+                ),
+            ]
+        )
+        db.commit()
+
+    listed = client.get("/v1/agent/run-log/turns")
+    assert listed.status_code == 200
+    body = listed.json()
+    assert body["total"] == 1
+    assert body["items"][0]["turn_id"] == "turn_internal_error"
+    assert body["items"][0]["outcome"] == "failed"
+    assert "没处理成" in body["items"][0]["summary"]
+
+    detail = client.get("/v1/agent/run-log/turns/turn_internal_error")
+    assert detail.status_code == 200
+    assert detail.json()["outcome"] == "failed"
+    assert len(detail.json()["steps"]) == 6

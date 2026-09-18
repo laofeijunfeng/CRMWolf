@@ -243,9 +243,28 @@ class AgentMessageCRUD:
             assistant_message.diagnostics_json,
             "$.turn_observability.outcome",
         )
-        query = query.filter(outcome_value.is_not(None))
+        dispatch_type = self._json_text(
+            db,
+            assistant_message.diagnostics_json,
+            "$.dispatch_type",
+        )
         if outcome:
-            query = query.filter(outcome_value == outcome)
+            if outcome == "failed":
+                query = query.filter(
+                    or_(
+                        outcome_value == "failed",
+                        and_(outcome_value.is_(None), dispatch_type == "failure"),
+                    )
+                )
+            else:
+                query = query.filter(outcome_value == outcome)
+        else:
+            query = query.filter(
+                or_(
+                    outcome_value.is_not(None),
+                    dispatch_type == "failure",
+                )
+            )
         if q and q.strip():
             pattern = f"%{q.strip()}%"
             customer_name = self._json_text(

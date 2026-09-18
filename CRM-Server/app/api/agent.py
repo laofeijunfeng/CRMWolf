@@ -28,7 +28,7 @@ from app.schemas.agent import (
     AgentWorkflowGraphEdgeResponse,
     AgentWorkflowGraphNodeResponse,
 )
-from app.schemas.agent_run_log import AgentRunLogTurnDetail, AgentRunLogTurnListItem
+from app.schemas.agent_run_log import AgentRunLogStep, AgentRunLogTurnDetail, AgentRunLogTurnListItem
 from app.schemas.common import PaginatedResponse
 from app.services.agent import action_workflow
 from app.services.agent.application import agent_application_service
@@ -41,6 +41,8 @@ from app.services.agent.durable_work import agent_durable_work_recovery_service
 from app.services.agent.follow_up_confirmation_projection import (
     follow_up_confirmation_agent_ui_projection,
 )
+from app.services.agent.orchestrator import AgentExecutionError, FailureDispatchResult
+from app.services.agent.run_log import build_turn_timeline
 from app.services.agent.sessions import build_session_create, require_owned_session
 from app.services.agent.turns import AgentTurnRepository
 from app.services.agent.ui.actions import AgentUIActionRepository
@@ -338,10 +340,37 @@ def _run_log_user_name(db: Session, user_id: int) -> str | None:
     return None
 
 
+def _reconstruct_failure_observability(user_text: str, assistant_message: object) -> dict[str, object]:
+    diagnostics = getattr(assistant_message, "diagnostics_json", None)
+    error_code = "INTERNAL_ERROR"
+    if isinstance(diagnostics, dict):
+        raw_code = diagnostics.get("error_code")
+        if isinstance(raw_code, str) and raw_code.strip():
+            error_code = raw_code.strip()
+    message = getattr(assistant_message, "content", None)
+    timeline = build_turn_timeline(
+        FailureDispatchResult(
+            error=AgentExecutionError(
+                code=error_code,
+                message=message if isinstance(message, str) and message.strip() else "这次没处理成，请稍后再试。",
+            )
+        ),
+        user_text=user_text,
+    )
+    return timeline.model_dump(mode="json")
+
+
+def _run_log_observability(user_text: str, assistant_message: object) -> dict[str, object]:
+    observability = _observability(getattr(assistant_message, "diagnostics_json", None))
+    if isinstance(observability, dict) and observability.get("outcome"):
+        return observability
+    return _reconstruct_failure_observability(user_text, assistant_message)
+
+
 def _run_log_list_item(db: Session, user_message: object, assistant_message: object) -> AgentRunLogTurnListItem:
-    observability = _observability(getattr(assistant_message, "diagnostics_json", None)) or {}
     raw_text = getattr(user_message, "content", None)
     user_text = raw_text.strip() if isinstance(raw_text, str) and raw_text.strip() else "（无文本）"
+    observability = _run_log_observability(user_text, assistant_message)
     return AgentRunLogTurnListItem(
         turn_id=str(user_message.turn_id),
         user_id=int(user_message.user_id),
@@ -400,10 +429,11 @@ async def get_agent_run_log_turn(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="运行日志不存在")
     user_message, assistant_message = pair
     item = _run_log_list_item(db, user_message, assistant_message)
-    observability = _observability(assistant_message.diagnostics_json) or {}
+    observability = _run_log_observability(item.user_text, assistant_message)
+    steps = observability.get("steps") or []
     return AgentRunLogTurnDetail(
         **item.model_dump(),
-        steps=observability.get("steps") or [],
+        steps=[AgentRunLogStep.model_validate(step) for step in steps],
     )
 
 
