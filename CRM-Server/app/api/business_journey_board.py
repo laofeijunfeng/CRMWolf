@@ -1,5 +1,4 @@
 from datetime import date, datetime, time, timedelta
-from decimal import Decimal
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -7,20 +6,19 @@ from pydantic import BaseModel
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
-from app.constants.approval_phase import ApprovalPhase
 from app.core.database import get_db
 from app.core.deps import get_current_active_user, get_current_user_team
 from app.crud.permission import permission_crud
 from app.models.customer import Customer
-from app.models.deal_journey import (
-    CustomerDealJourney,
-    CustomerDealJourneyEvent,
-    DealJourneyEventType,
-    DealJourneyStatus,
-)
+from app.models.deal_journey import CustomerDealJourney, CustomerDealJourneyEvent, DealJourneyStatus
 from app.models.opportunity import Opportunity
-from app.models.user import User
+from app.services.business_journey_presenter import (
+    legacy_board_opportunity_summary,
+    legacy_board_owner_map,
+    opportunity_amount,
+)
 from app.services.deal_journey_stage import (
+    BOARD_COLUMNS,
     BoardStageKey,
     BusinessJourneyContractSummary,
     BusinessJourneyInvoiceSummary,
@@ -99,24 +97,6 @@ class BusinessJourneyBoardResponse(BaseModel):
     summary: BusinessJourneyBoardSummary
 
 
-BOARD_COLUMNS: list[tuple[BoardStageKey, str, str]] = [
-    ("early_communication", "初期交流", "赢率 0%-49% 或尚未评估的成交旅程"),
-    ("active_progress", "持续推进", "赢率 50%-79% 的成交旅程"),
-    ("closing_soon", "即将签约", "赢率 80%-99% 或商机已赢单但尚未进入合同处理的成交旅程"),
-    ("contract_processing", "签约中", "已创建合同，正在签约或合同履约前置处理"),
-    ("payment_processing", "回款中", "已有回款计划或回款记录，合同尚未完成回款"),
-    ("invoice_processing", "开票中", "已有发票申请，仍有发票未完成开具"),
-    ("completed", "已完成", "旅程已完成闭环"),
-    ("lost", "已输单", "商机或旅程已输单"),
-]
-
-
-def _scalar_number(value) -> float:
-    if value is None:
-        return 0
-    if isinstance(value, Decimal):
-        return float(value)
-    return float(value)
 
 
 def _date_range(start_date: date | None, end_date: date | None) -> tuple[datetime | None, datetime | None]:
@@ -187,19 +167,6 @@ def get_business_journey_board(
         .outerjoin(Opportunity, Opportunity.id == CustomerDealJourney.primary_opportunity_id)
         .filter(CustomerDealJourney.team_id == team_id)
     )
-    approved_event_exists = (
-        db.query(CustomerDealJourneyEvent.id)
-        .filter(
-            CustomerDealJourneyEvent.team_id == team_id,
-            CustomerDealJourneyEvent.deal_journey_id == CustomerDealJourney.id,
-            CustomerDealJourneyEvent.event_type == DealJourneyEventType.OPPORTUNITY_APPROVED,
-        )
-        .exists()
-    )
-    query = query.filter(
-        Opportunity.approval_phase == ApprovalPhase.APPROVED.value,
-        approved_event_exists,
-    )
 
     if filter_start is not None:
         query = query.filter(CustomerDealJourney.last_event_at >= filter_start)
@@ -238,7 +205,7 @@ def get_business_journey_board(
     payment_map = _load_payment_summaries(db, team_id, journey_ids)
     invoice_map = _load_invoice_summaries(db, team_id, journey_ids)
     latest_event_map = _load_latest_event_summaries(db, team_id, journey_ids)
-    owner_map = _load_owner_map(db, rows)
+    owner_map = legacy_board_owner_map(db, rows)
 
     columns_by_key = {
         key: BusinessJourneyBoardColumn(key=key, title=title, description=description, count=0, amount=0, cards=[])
@@ -266,7 +233,7 @@ def get_business_journey_board(
             issued_amount=0,
         ))
         stage_key = _infer_stage(journey, opportunity, contract_summary, payment_summary, invoice_summary)
-        amount = _journey_amount(opportunity, contract_summary)
+        amount = opportunity_amount(opportunity)
         total_amount += amount
         if journey.status == DealJourneyStatus.COMPLETED:
             completed_count += 1
@@ -295,7 +262,7 @@ def get_business_journey_board(
             last_event_at=journey.last_event_at,
             last_event_summary=latest_event_map.get(journey.id),
             amount=amount,
-            primary_opportunity=_opportunity_summary(opportunity),
+            primary_opportunity=legacy_board_opportunity_summary(opportunity),
             contract_summary=contract_summary,
             payment_summary=payment_summary,
             invoice_summary=invoice_summary,
@@ -340,42 +307,3 @@ def _load_latest_event_summaries(db: Session, team_id: int, journey_ids: list[in
         if event.deal_journey_id not in result and event.summary:
             result[event.deal_journey_id] = event.summary
     return result
-
-
-def _load_owner_map(db: Session, rows) -> dict[str, BusinessJourneyBoardOwner]:
-    owner_ids = {
-        owner_id
-        for journey, customer, opportunity in rows
-        for owner_id in [_owner_id_for(journey, customer, opportunity)]
-        if owner_id
-    }
-    if not owner_ids:
-        return {}
-    users = db.query(User).filter(User.id.in_([int(owner_id) for owner_id in owner_ids if str(owner_id).isdigit()])).all()
-    return {
-        str(user.id): BusinessJourneyBoardOwner(id=str(user.id), name=user.name, avatar_url=user.avatar_url)
-        for user in users
-    }
-
-
-def _journey_amount(opportunity: Opportunity | None, contract_summary: BusinessJourneyContractSummary) -> float:
-    if contract_summary.amount > 0:
-        return contract_summary.amount
-    if opportunity is None:
-        return 0
-    return _scalar_number(opportunity.actual_amount or opportunity.total_amount)
-
-
-def _opportunity_summary(opportunity: Opportunity | None) -> BusinessJourneyOpportunitySummary | None:
-    if opportunity is None:
-        return None
-    return BusinessJourneyOpportunitySummary(
-        id=opportunity.id,
-        name=opportunity.opportunity_name,
-        amount=_scalar_number(opportunity.total_amount),
-        actual_amount=_scalar_number(opportunity.actual_amount) if opportunity.actual_amount is not None else None,
-        status=opportunity.status,
-        current_stage_name=opportunity.current_stage_name,
-        win_probability=opportunity.current_win_probability or opportunity.win_probability,
-        expected_closing_date=opportunity.expected_closing_date.isoformat() if opportunity.expected_closing_date else None,
-    )

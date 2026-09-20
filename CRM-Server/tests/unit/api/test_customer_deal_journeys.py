@@ -128,6 +128,7 @@ def seed_journey(
     approval_phase: str = ApprovalPhase.DRAFT.value,
     win_probability: int = 20,
     last_event_at: datetime | None = None,
+    actual_amount: Decimal | None = None,
 ) -> CustomerDealJourney:
     created_time = datetime(2026, 3, 1, 10, 0, 0)
     opportunity = Opportunity(
@@ -136,6 +137,7 @@ def seed_journey(
         opportunity_name=f"商机{suffix}",
         customer_id=customer.id,
         total_amount=Decimal("10000"),
+        actual_amount=actual_amount,
         user_count=10,
         unit_price=Decimal("1000"),
         license_type="SUBSCRIPTION",
@@ -187,6 +189,20 @@ def test_list_includes_unapproved_opportunity_journey(api_env):
     assert body[0]["public_id"] == journey.public_id
     assert body[0]["current_board_stage"] == "early_communication"
     assert body[0]["amount"] == 10000.0
+
+
+def test_customer_journey_amount_preserves_total_amount_contract(api_env):
+    seed_journey(
+        api_env,
+        api_env.customer,
+        suffix="actual",
+        actual_amount=Decimal("7500"),
+    )
+
+    response = api_env.client.get(f"/v1/customers/{api_env.customer.public_id}/deal-journeys")
+
+    assert response.status_code == 200
+    assert response.json()[0]["amount"] == 10000.0
 
 
 def test_list_excludes_archived(api_env):
