@@ -10,10 +10,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 import hashlib
 import json
-from typing import Any
+from typing import Any, Literal
 
 import sqlalchemy as sa
 from alembic import op
+from pydantic import BaseModel, Field, ValidationError
 
 
 revision: str = "136_business_journey_saved_views"
@@ -48,34 +49,45 @@ def _serialize_config(config: dict[str, Any]) -> str:
     return json.dumps(config, ensure_ascii=False, separators=(",", ":"))
 
 
-def _canonical_config(config: dict[str, Any]) -> dict[str, Any]:
-    canonical = dict(config)
-    canonical.setdefault("version", 1)
-    canonical.setdefault("columns", [])
-    canonical.setdefault("sorts", [])
-    canonical.setdefault("filters", [])
-    canonical.setdefault("density", None)
+class _MigrationViewPreferenceColumn(BaseModel):
+    key: str = Field(..., min_length=1, max_length=100)
+    order: int | None = None
+    visible: bool | None = None
+    width: int | None = Field(None, ge=40, le=1000)
+    fixed: Literal["left", "right"] | None = None
 
-    columns = canonical["columns"]
-    if isinstance(columns, list):
-        normalized_columns: list[Any] = []
-        for column in columns:
-            if not isinstance(column, dict):
-                normalized_columns.append(column)
-                continue
-            normalized_column = dict(column)
-            normalized_column.setdefault("order", None)
-            normalized_column.setdefault("visible", None)
-            normalized_column.setdefault("width", None)
-            normalized_column.setdefault("fixed", None)
-            normalized_columns.append(normalized_column)
-        canonical["columns"] = normalized_columns
-    return canonical
+
+class _MigrationViewPreferenceConfig(BaseModel):
+    version: int = Field(1, ge=1)
+    columns: list[_MigrationViewPreferenceColumn] = Field(
+        default_factory=list, max_length=100
+    )
+    sorts: list[dict[str, Any]] = Field(default_factory=list, max_length=10)
+    filters: list[dict[str, Any]] = Field(default_factory=list, max_length=50)
+    density: str | None = Field(None, max_length=20)
+    display_mode: Literal["table", "board"] | None = None
+
+_MigrationViewPreferenceConfig.model_rebuild(
+    _types_namespace={
+        "Any": Any,
+        "Literal": Literal,
+        "_MigrationViewPreferenceColumn": _MigrationViewPreferenceColumn,
+    }
+)
+
+
+def _normalized_config(config: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return _MigrationViewPreferenceConfig.model_validate(config).model_dump(
+            mode="json"
+        )
+    except ValidationError:
+        return config
 
 
 def _config_hash(config: dict[str, Any]) -> str:
     canonical_json = json.dumps(
-        _canonical_config(config),
+        _normalized_config(config),
         ensure_ascii=False,
         separators=(",", ":"),
         sort_keys=True,

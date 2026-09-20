@@ -342,6 +342,115 @@ def test_downgrade_survives_normal_config_schema_round_trip() -> None:
     assert downgraded["config_json"] == original_config_json
 
 
+def test_downgrade_restores_coercible_legacy_config_after_schema_round_trip() -> None:
+    migration = _load_migration()
+    connection, table = _connection_with_table()
+    original_config_json = (
+        '{"version":"1","columns":[{"key":"customer","order":"2",'
+        '"visible":"false","width":"120","fixed":null,'
+        '"unknown_column":"drop-me"}],"sorts":[],"filters":[],'
+        '"unknown_top":"drop-me"}'
+    )
+    try:
+        _insert_view(table, connection, config_json=original_config_json)
+        _run(connection, migration, "upgrade")
+
+        row = _rows(table, connection)[0]
+        round_tripped_config_json = ViewPreferenceConfig(
+            **json.loads(row["config_json"])
+        ).model_dump_json()
+        connection.execute(
+            table.update()
+            .where(table.c.id == row["id"])
+            .values(config_json=round_tripped_config_json)
+        )
+
+        _run(connection, migration, "downgrade")
+
+        downgraded = _rows(table, connection)[0]
+    finally:
+        connection.close()
+
+    assert downgraded["view_key"] == LEGACY_VIEW_KEY
+    assert downgraded["config_json"] == original_config_json
+
+
+def test_downgrade_restores_coercible_collision_config_after_schema_round_trip() -> None:
+    migration = _load_migration()
+    connection, table = _connection_with_table()
+    original_target_config_json = (
+        '{"version":"1","columns":[{"key":"customer","order":"2",'
+        '"visible":"false","width":"120","fixed":null,'
+        '"unknown_column":"drop-me"}],"sorts":[],"filters":[],'
+        '"unknown_top":"drop-me"}'
+    )
+    try:
+        _insert_view(table, connection, id=10)
+        _insert_view(
+            table,
+            connection,
+            id=20,
+            view_key=TARGET_VIEW_KEY,
+            config_json=original_target_config_json,
+        )
+        _run(connection, migration, "upgrade")
+
+        row = _rows(table, connection)[0]
+        round_tripped_config_json = ViewPreferenceConfig(
+            **json.loads(row["config_json"])
+        ).model_dump_json()
+        connection.execute(
+            table.update()
+            .where(table.c.id == row["id"])
+            .values(config_json=round_tripped_config_json)
+        )
+
+        _run(connection, migration, "downgrade")
+
+        downgraded = _rows(table, connection)[0]
+    finally:
+        connection.close()
+
+    assert downgraded["view_key"] == TARGET_VIEW_KEY
+    assert downgraded["config_json"] == original_target_config_json
+
+
+def test_downgrade_preserves_known_field_change_after_schema_round_trip() -> None:
+    migration = _load_migration()
+    connection, table = _connection_with_table()
+    original_config_json = (
+        '{"version":"1","columns":[{"key":"customer","order":"2",'
+        '"visible":"false","width":"120","unknown_column":"drop-me"}],'
+        '"sorts":[],"filters":[],"unknown_top":"drop-me"}'
+    )
+    try:
+        _insert_view(table, connection, config_json=original_config_json)
+        _run(connection, migration, "upgrade")
+
+        row = _rows(table, connection)[0]
+        round_tripped_config = json.loads(
+            ViewPreferenceConfig(
+                **json.loads(row["config_json"])
+            ).model_dump_json()
+        )
+        round_tripped_config["columns"][0]["width"] = 121
+        changed_config_json = json.dumps(round_tripped_config, separators=(",", ":"))
+        connection.execute(
+            table.update()
+            .where(table.c.id == row["id"])
+            .values(config_json=changed_config_json)
+        )
+
+        _run(connection, migration, "downgrade")
+
+        downgraded = _rows(table, connection)[0]
+    finally:
+        connection.close()
+
+    assert downgraded["view_key"] == TARGET_VIEW_KEY
+    assert downgraded["config_json"] == changed_config_json
+
+
 def test_downgrade_preserves_migrated_row_changed_to_table_mode() -> None:
     migration = _load_migration()
     connection, table = _connection_with_table()
