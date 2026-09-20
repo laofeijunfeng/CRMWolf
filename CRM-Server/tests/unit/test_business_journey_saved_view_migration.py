@@ -8,6 +8,9 @@ from pathlib import Path
 from types import ModuleType
 
 import sqlalchemy as sa
+from sqlalchemy.dialects import mysql
+from sqlalchemy.schema import CreateTable
+
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 
@@ -118,6 +121,44 @@ def test_migration_revision_follows_deal_journey_public_ids() -> None:
 
     assert migration.revision == "136_business_journey_saved_views"
     assert migration.down_revision == "135_deal_journey_public_ids"
+
+
+def test_provenance_table_uses_utf8mb4_for_mysql() -> None:
+    migration = _load_migration()
+    connection, _ = _connection_with_table()
+    try:
+        origin_table = migration._origin_table(connection, create=True)
+        assert origin_table is not None
+        ddl = str(CreateTable(origin_table).compile(dialect=mysql.dialect()))
+        mysql_options = origin_table.dialect_options["mysql"]
+    finally:
+        connection.close()
+
+    assert mysql_options["charset"] == "utf8mb4"
+    assert mysql_options["collate"] == "utf8mb4_unicode_ci"
+    assert "CHARSET=utf8mb4" in ddl
+    assert "COLLATE utf8mb4_unicode_ci" in ddl
+
+
+def test_downgrade_restores_utf8_config_exactly() -> None:
+    migration = _load_migration()
+    connection, table = _connection_with_table()
+    original_config_json = (
+        '{ "version": 1, "columns": [], "filters": '
+        '[{"field":"客户名称","op":"eq","value":"重点客户🚀"}], "sorts": [] }'
+    )
+    original_config_bytes = original_config_json.encode("utf-8")
+    try:
+        _insert_view(table, connection, config_json=original_config_json)
+        _run(connection, migration, "upgrade")
+        _run(connection, migration, "downgrade")
+
+        downgraded = _rows(table, connection)[0]
+    finally:
+        connection.close()
+
+    assert downgraded["view_key"] == LEGACY_VIEW_KEY
+    assert downgraded["config_json"].encode("utf-8") == original_config_bytes
 
 
 def test_upgrade_migrates_legacy_board_view_and_is_idempotent() -> None:

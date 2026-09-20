@@ -104,6 +104,8 @@ def _origin_table(connection: sa.Connection, *, create: bool) -> sa.Table | None
         sa.Column("origin", sa.String(20), nullable=False),
         sa.Column("original_config_json", sa.Text, nullable=False),
         sa.Column("migrated_config_hash", sa.String(64), nullable=False),
+        mysql_charset="utf8mb4",
+        mysql_collate="utf8mb4_unicode_ci",
     )
     if create:
         table.create(connection, checkfirst=True)
