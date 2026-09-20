@@ -3,9 +3,25 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import BigInteger, create_engine
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.api import customers as customers_api
 from app.api import customer_ai as customer_ai_api
+from app.api import customer_enrichment as customer_enrichment_api
+from app.services.customer_enrichment_contracts import CustomerEnrichmentJobStatus
+from fastapi import HTTPException
+from fastapi.routing import APIRoute
+from app.core.database import Base
+from app.models.customer import Customer
+from app.models.customer_enrichment_job import CustomerEnrichmentJob
+from app.models.industry import Industry
+from app.services.customer_enrichment_plan import ACTIVE_CUSTOMER_ENRICHMENT_PLAN
+from app.services.customer_enrichment_reconciliation_service import (
+    CustomerEnrichmentReconciliationResult,
+)
 from app.services.ai_parser import customer_parser as customer_parser_module
 from app.services.ai_parser.customer_parser import CustomerAIParser
 from app.services.customer_intelligence_refresh_service import CustomerIntelligenceCommittedEventRequest
@@ -14,6 +30,11 @@ from app.services.customer_lifecycle_post_commit_coordinator import CustomerLife
 from app.schemas.customer import ConvertLeadToCustomer
 
 from unittest.mock import MagicMock
+
+
+@compiles(BigInteger, "sqlite")
+def _bigint_to_sqlite_int(element, compiler, **kw):
+    return "INTEGER"
 
 
 class _RequestData(SimpleNamespace):
@@ -514,3 +535,385 @@ async def test_customer_parser_post_create_actions_does_not_trigger_profile_refr
     )
 
     assert refresh_calls == []
+
+
+class _QueryRows:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def filter(self, *args):
+        del args
+        return self
+
+    def order_by(self, *args):
+        del args
+        return self
+
+    def offset(self, value):
+        self.rows = self.rows[value:]
+        return self
+
+    def limit(self, value):
+        self.rows = self.rows[:value]
+        return self
+
+    def all(self):
+        return self.rows
+
+    def count(self):
+        return len(self.rows)
+
+
+class _ListJobsDB:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def query(self, *entities):
+        del entities
+        return _QueryRows(self.rows)
+
+
+def test_enrichment_job_list_passes_team_scope_and_omits_sensitive_payloads(monkeypatch):
+    job = SimpleNamespace(
+        public_id="cej_safe",
+        team_id=2,
+        customer_id=8,
+        purpose="HISTORICAL_BACKFILL",
+        plan_version="customer-initial-v1",
+        requested_fields_json=["industry"],
+        status="EXHAUSTED",
+        attempt_count=3,
+        max_attempts=3,
+        requeue_count=0,
+        profile_refresh_request_id=None,
+        available_at=None,
+        next_attempt_at=None,
+        first_attempt_finished_at=None,
+        created_time=None,
+        updated_time=None,
+        result_json={"prompt": "secret", "customer_mobile": "13800000000"},
+        error_message="prompt included customer mobile",
+    )
+    customer = SimpleNamespace(id=8, public_id="cus_8", team_id=2, account_name="PII name")
+    captured = {}
+
+    def fake_list(db, **kwargs):
+        del db
+        captured.update(kwargs)
+        return [(job, customer)], 1
+
+    monkeypatch.setattr(customer_enrichment_api, "list_enrichment_jobs_for_team", fake_list)
+
+    response = customer_enrichment_api.list_enrichment_jobs(
+        status_filter="EXHAUSTED",
+        purpose="HISTORICAL_BACKFILL",
+        skip=0,
+        limit=20,
+        team_id=2,
+        current_user=SimpleNamespace(id=9),
+        db=object(),
+    )
+
+    assert captured == {
+        "team_id": 2,
+        "status_filter": "EXHAUSTED",
+        "purpose": "HISTORICAL_BACKFILL",
+        "skip": 0,
+        "limit": 20,
+    }
+    dumped = response.model_dump()
+    assert dumped["items"][0]["customer_id"] == "cus_8"
+    assert "result_json" not in dumped["items"][0]
+    assert "error_message" not in dumped["items"][0]
+    assert "account_name" not in dumped["items"][0]
+
+
+def test_enrichment_backfill_preview_returns_exact_partition_counts(monkeypatch):
+    expected = {
+        "industry_null": 5,
+        "existing_jobs": 2,
+        "would_schedule": 3,
+        "filled_skip": 4,
+        "invalid_non_null": 1,
+        "other_available": True,
+    }
+    calls = []
+    monkeypatch.setattr(
+        customer_enrichment_api,
+        "build_backfill_preview",
+        lambda db, *, team_id: calls.append((db, team_id)) or expected,
+    )
+
+    response = customer_enrichment_api.get_enrichment_backfill_preview(
+        team_id=2,
+        current_user=SimpleNamespace(id=9),
+        db=object(),
+    )
+
+    assert response.model_dump() == expected
+    assert calls[0][1] == 2
+
+
+
+def test_enrichment_backfill_preview_counts_invalid_non_null_as_filled_skip():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(
+        engine,
+        tables=[Industry.__table__, Customer.__table__, CustomerEnrichmentJob.__table__],
+    )
+    db = sessionmaker(bind=engine, expire_on_commit=False)()
+    try:
+        db.add_all(
+            [
+                Industry(level=1, code="software", name="Software", is_active=1),
+                Industry(level=1, code="other", name="Other", is_active=1),
+            ]
+        )
+        customers = [
+            Customer(team_id=2, account_name="null-existing", city="X", creator_id="9"),
+            Customer(team_id=2, account_name="null-new", city="X", creator_id="9"),
+            Customer(
+                team_id=2,
+                account_name="valid-filled",
+                city="X",
+                creator_id="9",
+                industry="software",
+            ),
+            Customer(
+                team_id=2,
+                account_name="invalid-filled",
+                city="X",
+                creator_id="9",
+                industry="legacy",
+            ),
+        ]
+        db.add_all(customers)
+        db.flush()
+        db.add(
+            CustomerEnrichmentJob(
+                team_id=2,
+                customer_id=customers[0].id,
+                purpose="HISTORICAL_BACKFILL",
+                plan_version=ACTIVE_CUSTOMER_ENRICHMENT_PLAN.version,
+                requested_fields_json=["industry"],
+                status="QUEUED",
+                available_at=customer_enrichment_api.business_now(),
+                attempt_count=0,
+                max_attempts=3,
+                run_id="run-preview",
+                graph_thread_id="thread-preview",
+                requeue_count=0,
+            )
+        )
+        db.flush()
+
+        preview = customer_enrichment_api.build_backfill_preview(db, team_id=2)
+
+        assert preview == {
+            "industry_null": 2,
+            "existing_jobs": 1,
+            "would_schedule": 1,
+            "filled_skip": 2,
+            "invalid_non_null": 1,
+            "other_available": True,
+        }
+    finally:
+        db.close()
+        engine.dispose()
+
+def test_requeue_rejects_non_exhausted_and_filled_customer(monkeypatch):
+    non_exhausted = SimpleNamespace(
+        status=CustomerEnrichmentJobStatus.QUEUED.value,
+        customer_id=8,
+        public_id="cej_8",
+        plan_version=ACTIVE_CUSTOMER_ENRICHMENT_PLAN.version,
+        requested_fields_json=["industry"],
+    )
+    customer = SimpleNamespace(id=8, team_id=2, industry=None)
+    monkeypatch.setattr(
+        customer_enrichment_api,
+        "lock_enrichment_job_and_customer",
+        lambda db, *, team_id, job_public_id: (non_exhausted, customer),
+    )
+    with pytest.raises(HTTPException) as conflict:
+        customer_enrichment_api.requeue_enrichment_job(
+            "cej_8", team_id=2, current_user=SimpleNamespace(id=9), db=MagicMock()
+        )
+    assert conflict.value.status_code == 409
+
+    exhausted = SimpleNamespace(
+        status=CustomerEnrichmentJobStatus.EXHAUSTED.value,
+        customer_id=8,
+        public_id="cej_8",
+        plan_version=ACTIVE_CUSTOMER_ENRICHMENT_PLAN.version,
+        requested_fields_json=["industry"],
+    )
+    filled = SimpleNamespace(id=8, team_id=2, industry="software")
+    monkeypatch.setattr(
+        customer_enrichment_api,
+        "lock_enrichment_job_and_customer",
+        lambda db, *, team_id, job_public_id: (exhausted, filled),
+    )
+    with pytest.raises(HTTPException) as filled_conflict:
+        customer_enrichment_api.requeue_enrichment_job(
+            "cej_8", team_id=2, current_user=SimpleNamespace(id=9), db=MagicMock()
+        )
+    assert filled_conflict.value.status_code == 409
+
+
+def test_requeue_rejects_exhausted_job_from_inactive_plan(monkeypatch):
+    job = SimpleNamespace(
+        status=CustomerEnrichmentJobStatus.EXHAUSTED.value,
+        customer_id=8,
+        public_id="cej_old",
+        plan_version="customer-initial-old",
+        requested_fields_json=["industry"],
+    )
+    customer = SimpleNamespace(id=8, team_id=2, industry=None)
+    monkeypatch.setattr(
+        customer_enrichment_api,
+        "lock_enrichment_job_and_customer",
+        lambda db, *, team_id, job_public_id: (job, customer),
+    )
+    class CRUD:
+        def requeue_exhausted(self, db, **kwargs):
+            del db, kwargs
+            raise AssertionError("inactive plan must be rejected before requeue")
+
+    monkeypatch.setattr(customer_enrichment_api, "customer_enrichment_job_crud", CRUD())
+
+    with pytest.raises(HTTPException) as conflict:
+        customer_enrichment_api.requeue_enrichment_job(
+            "cej_old", team_id=2, current_user=SimpleNamespace(id=9), db=MagicMock()
+        )
+
+    assert conflict.value.status_code == 409
+
+
+def test_requeue_resets_same_job_commits_then_kicks(monkeypatch):
+    order = []
+    job = SimpleNamespace(
+        id=7,
+        public_id="cej_7",
+        team_id=2,
+        customer_id=8,
+        purpose="HISTORICAL_BACKFILL",
+        plan_version="customer-initial-v1",
+        requested_fields_json=["industry"],
+        status=CustomerEnrichmentJobStatus.EXHAUSTED.value,
+        attempt_count=3,
+        max_attempts=3,
+        requeue_count=4,
+        profile_refresh_request_id=None,
+        available_at=None,
+        next_attempt_at=None,
+        first_attempt_finished_at=None,
+        created_time=None,
+        updated_time=None,
+    )
+    customer = SimpleNamespace(id=8, public_id="cus_8", team_id=2, industry=None)
+
+    class DB:
+        def commit(self):
+            order.append("commit")
+
+        def rollback(self):
+            order.append("rollback")
+
+    class CRUD:
+        def requeue_exhausted(self, db, **kwargs):
+            del db, kwargs
+            job.status = CustomerEnrichmentJobStatus.QUEUED.value
+            job.requeue_count += 1
+            return job
+
+    monkeypatch.setattr(
+        customer_enrichment_api,
+        "lock_enrichment_job_and_customer",
+        lambda db, *, team_id, job_public_id: (job, customer),
+    )
+    monkeypatch.setattr(customer_enrichment_api, "customer_enrichment_job_crud", CRUD())
+    monkeypatch.setattr(
+        customer_enrichment_api.customer_enrichment_job_service,
+        "kick",
+        lambda request: order.append(("kick", request.job_public_id)),
+    )
+
+    response = customer_enrichment_api.requeue_enrichment_job(
+        "cej_7", team_id=2, current_user=SimpleNamespace(id=9), db=DB()
+    )
+
+    assert response.job_public_id == "cej_7"
+    assert response.requeue_count == 5
+    assert order == ["commit", ("kick", "cej_7")]
+
+
+def test_reconciliation_endpoint_returns_counts_and_routes_require_edit_all(monkeypatch):
+    monkeypatch.setattr(
+        customer_enrichment_api.customer_enrichment_reconciliation_service,
+        "reconcile_once",
+        lambda db, **kwargs: CustomerEnrichmentReconciliationResult(
+            scanned=4,
+            jobs_created=1,
+            gates_released=1,
+            refreshes_repaired=1,
+            errors=1,
+            next_customer_id=22,
+            dry_run=kwargs["dry_run"],
+        ),
+    )
+    db = MagicMock()
+    response = customer_enrichment_api.run_enrichment_reconciliation(
+        customer_enrichment_api.CustomerEnrichmentReconciliationRequest(
+            limit=10, after_customer_id=3, dry_run=True
+        ),
+        team_id=2,
+        current_user=SimpleNamespace(id=9),
+        db=db,
+    )
+    assert response.model_dump() == {
+        "scanned": 4,
+        "jobs_created": 1,
+        "gates_released": 1,
+        "refreshes_repaired": 1,
+        "errors": 1,
+        "next_customer_id": 22,
+        "dry_run": True,
+    }
+    assert db.commit.called is False
+
+    permission_dependencies = [
+        dependency.call
+        for route in customer_enrichment_api.router.routes
+        if isinstance(route, APIRoute)
+        for dependency in route.dependant.dependencies
+        if getattr(dependency.call, "__name__", "") == "permission_checker"
+    ]
+    assert len(permission_dependencies) == 4
+    assert all(
+        "customer:edit:all" in (dependency.__closure__[0].cell_contents,)
+        for dependency in permission_dependencies
+    )
+
+
+def test_enrichment_router_is_registered_before_dynamic_customer_route():
+    from app.main import app
+
+    matches = [
+        route
+        for route in app.routes
+        if isinstance(route, APIRoute)
+        and route.path in {"/api/v1/customers/enrichment/jobs", "/api/v1/customers/{customer_id}"}
+    ]
+    paths = [route.path for route in matches]
+    assert paths.index("/api/v1/customers/enrichment/jobs") < paths.index(
+        "/api/v1/customers/{customer_id}"
+    )
+    enrichment_route = next(
+        route for route in matches if route.path == "/api/v1/customers/enrichment/jobs"
+    )
+    assert enrichment_route.endpoint is customer_enrichment_api.list_enrichment_jobs

@@ -594,6 +594,74 @@ class CustomerIntelligenceRetryDueResponse(BaseModel):
     results: List[JsonObject] = Field(default_factory=list, description="重试结果")
 
 
+
+class CustomerEnrichmentJobDiagnosticResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    job_public_id: str
+    customer_id: str
+    purpose: Literal["INITIAL_CREATION", "HISTORICAL_BACKFILL"]
+    plan_version: str
+    requested_fields: List[str] = Field(default_factory=list)
+    status: Literal["QUEUED", "RUNNING", "RETRY_PENDING", "COMPLETED", "SKIPPED", "EXHAUSTED"]
+    attempt_count: int
+    max_attempts: int
+    requeue_count: int
+    has_profile_refresh_receipt: bool
+    available_at: Optional[datetime] = None
+    next_attempt_at: Optional[datetime] = None
+    first_attempt_finished_at: Optional[datetime] = None
+    created_time: Optional[datetime] = None
+    updated_time: Optional[datetime] = None
+
+
+class CustomerEnrichmentJobListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: List[CustomerEnrichmentJobDiagnosticResponse] = Field(default_factory=list)
+    total: int
+    skip: int
+    limit: int
+
+
+class CustomerEnrichmentBackfillPreviewResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    industry_null: int
+    existing_jobs: int
+    would_schedule: int
+    filled_skip: int
+    invalid_non_null: int
+    other_available: bool
+
+
+class CustomerEnrichmentRequeueResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    job_public_id: str
+    status: Literal["QUEUED"]
+    requeue_count: int
+
+
+class CustomerEnrichmentReconciliationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    limit: int = Field(50, ge=1, le=500)
+    after_customer_id: Optional[int] = Field(None, gt=0)
+    dry_run: bool = False
+
+
+class CustomerEnrichmentReconciliationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scanned: int
+    jobs_created: int
+    gates_released: int
+    refreshes_repaired: int
+    errors: int
+    next_customer_id: Optional[int] = None
+    dry_run: bool
+
 class StatisticsResponse(BaseModel):
     total: int = Field(..., description="总客户数")
     following: int = Field(..., description="跟进中客户数")

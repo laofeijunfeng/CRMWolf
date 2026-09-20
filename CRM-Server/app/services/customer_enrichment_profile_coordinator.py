@@ -174,6 +174,38 @@ class CustomerEnrichmentProfileCoordinator:
                 replace(request, kick_required=True)
             )
 
+    def repair_missing_profile_receipt(
+        self,
+        db: Session,
+        *,
+        job: CustomerEnrichmentJob,
+        now: datetime | None = None,
+    ) -> bool:
+        """Repair one terminal receipt without committing the caller's transaction."""
+        if str(job.status) not in _TERMINAL_SUCCESS or job.profile_refresh_request_id is not None:
+            return False
+        occurred_at = now or business_now()
+        released = self.run_service.release_deferred_for_customer(
+            db,
+            team_id=int(job.team_id),
+            customer_id=int(job.customer_id),
+        )
+        if released:
+            job.profile_refresh_request_id = f"released:{released[0]}"
+        else:
+            request = self.publication_service.persist_in_transaction_request(
+                db,
+                event=self._terminal_refresh_event(job, occurred_at=occurred_at),
+                scope="full",
+            )
+            if request is None or not request.scheduled:
+                return False
+            job.profile_refresh_request_id = request.request_id
+        job.profile_refresh_enqueued_at = occurred_at
+        db.add(job)
+        db.flush()
+        return True
+
     def _terminal_refresh_event(
         self,
         job: CustomerEnrichmentJob,
