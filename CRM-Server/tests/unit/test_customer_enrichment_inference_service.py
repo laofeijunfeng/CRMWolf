@@ -52,6 +52,7 @@ class _ContextDb:
             city="上海",
             company_scale="51-200人",
             source="线上注册",
+            industry="finance",
             version=4,
             source_lead_id=None,
             product_links=[SimpleNamespace(product=SimpleNamespace(public_id="prd_hifox", name="Hifox"))],
@@ -141,6 +142,7 @@ def test_context_is_bounded_and_does_not_include_contact_pii(monkeypatch):
         "city": "上海",
         "company_scale": "51-200人",
         "source": "线上注册",
+        "industry": "finance",
         "version": 4,
     }
     assert payload["products"] == [{"public_id": "prd_hifox", "name": "Hifox"}]

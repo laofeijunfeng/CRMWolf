@@ -75,6 +75,7 @@ class CustomerEnrichmentContextService:
                 "city": customer.city,
                 "company_scale": customer.company_scale,
                 "source": customer.source,
+                "industry": customer.industry,
                 "version": customer.version,
             },
             "products": products,
