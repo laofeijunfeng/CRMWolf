@@ -1,12 +1,12 @@
 # 业务旅程独立页面、导航分组与视图配置设计
 
 - 日期：2026-09-20
-- 状态：已确认，待实施
+- 状态：已实施（2026-09-21）
 - 范围：左侧导航信息架构；独立业务旅程页面；表格 / 看板显示模式；自定义视图保存；业务旅程 Sheet；现有业务看板迁移
 - 上游决定：销售日常入口增加「业务旅程」；页面默认表格，现有看板迁入同页；「视图配置」提供「看板视图」开关；系统 Tab 不持久化，用户自定义视图保存筛选、排序、字段和显示模式；表格行与看板卡片直接打开业务旅程 Sheet；页面与浮层只组合现有设计系统和既有业务组件，不私自开发重复组件
 - 覆盖决定：覆盖 `docs/superpowers/specs/2026-09-16-customer-detail-business-journey-identity-design.md` 中「独立业务旅程管理页不做」「看板卡片不跳转」「DealJourneyDetailContent 只挂在 CustomerDetailSheet」三项旧决定；其余对象身份、商机详情瘦身、履约对象归属和 `public_id` 契约继续有效
 - 相关规范：`CRM-Docs/design-system/README.md`、`CRM-Docs/design-system/patterns/list-page.md`、`CRM-Docs/design-system/patterns/kanban-page.md`、`CRM-Docs/design-system/components/table.md`、`docs/superpowers/specs/2026-09-16-customer-detail-business-journey-identity-design.md`
-- 相关实现：`CRM-Client/src/components/app-sidebar/AppSidebar.vue`、`CRM-Client/src/views/BusinessJourneyBoard.vue`、`CRM-Client/src/components/panels/DealJourneyDetailContent.vue`、`CRM-Client/src/components/crmwolf/DataTable.vue`、`CRM-Client/src/components/crmwolf/ListAdvancedTools.vue`、`CRM-Client/src/composables/useCustomFilterViews.ts`、`CRM-Server/app/api/business_journey_board.py`、`CRM-Server/app/schemas/view_preference.py`
+- 相关实现：`CRM-Client/src/components/app-sidebar/AppSidebar.vue`、`CRM-Client/src/views/BusinessJourneys.vue`、`CRM-Client/src/components/business-journey/BusinessJourneyBoardView.vue`、`CRM-Client/src/components/business-journey/DealJourneyDetailHost.vue`、`CRM-Client/src/views/DealJourneyDetailSheet.vue`、`CRM-Client/src/components/panels/DealJourneyDetailContent.vue`、`CRM-Client/src/components/crmwolf/DataTable.vue`、`CRM-Client/src/components/crmwolf/ListAdvancedTools.vue`、`CRM-Client/src/composables/useCustomFilterViews.ts`、`CRM-Server/app/api/business_journeys.py`、`CRM-Server/app/services/business_journey_query_service.py`、`CRM-Server/app/schemas/view_preference.py`
 
 ## 1. 背景与目标
 
