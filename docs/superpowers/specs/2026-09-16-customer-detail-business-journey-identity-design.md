@@ -1,11 +1,11 @@
 # 客户详情业务旅程身份设计
 
 - 日期：2026-09-16
-- 状态：已确认
+- 状态：已确认；独立业务旅程页面范围由 `2026-09-20-business-journey-page-navigation-view-config-design.md` 扩展
 - 范围：客户详情「项目旅程」改挂业务旅程；商机详情瘦身为商机对象页；客户列表名称 hover 改成旅程预览；`CustomerDealJourney.public_id` 与客户下旅程薄读接口
-- 上游决定：客户详情列表一行 = 一条业务旅程；独立商机详情只做商机自己的活；合同 / 回款 / 发票 / License 只在客户 → 业务旅程里操作；旅程页商机行提供编辑 / 赢单 / 输单 icon，独立商机页脚仍保留这三项；旅程页仍可推进采购阶段；创建入口仍是「新建商机」；独立旅程管理页不做；产品面默认 1:1，不做共享 / 解绑 UI；对外一律 `public_id`；客户列表 hover 预览业务旅程，进度条按看板阶段，不显示赢率
-- 相关规范：`CRM-Docs/design-agent/runtime/customer-intelligence-profile.md` §8、`CRM-Docs/design-system/patterns/kanban-page.md`、`docs/ux/p1-packages/04-object-context-hierarchy.md`、`docs/superpowers/specs/2026-09-14-business-journey-board-opportunity-date-filters-design.md`
-- 相关实现：`CRM-Client/src/views/CustomerDetailSheet.vue`、`CRM-Client/src/components/panels/OpportunityDetailContent.vue`、`CRM-Client/src/components/panels/OpportunitiesPanel.vue`、`CRM-Client/src/components/customer/CustomerOpportunityHoverCard.vue`、`CRM-Client/src/views/Customers.vue`、`CRM-Server/app/models/deal_journey.py`、`CRM-Server/app/services/deal_journey_service.py`、`CRM-Server/app/api/business_journey_board.py`
+- 上游决定：客户详情列表一行 = 一条业务旅程；独立商机详情只做商机自己的活；合同 / 回款 / 发票 / License 只在业务旅程详情里操作；旅程页商机行提供编辑 / 赢单 / 输单 icon，独立商机页脚仍保留这三项；旅程页仍可推进采购阶段；创建入口仍是「新建商机」；产品面默认 1:1，不做共享 / 解绑 UI；对外一律 `public_id`；客户列表 hover 预览业务旅程，进度条按看板阶段，不显示赢率。后续已确认新增独立业务旅程页面和 Sheet，复用本设计的旅程身份与详情内容契约
+- 相关规范：`CRM-Docs/design-agent/runtime/customer-intelligence-profile.md` §8、`CRM-Docs/design-system/patterns/kanban-page.md`、`docs/ux/p1-packages/04-object-context-hierarchy.md`、`docs/superpowers/specs/2026-09-14-business-journey-board-opportunity-date-filters-design.md`、`docs/superpowers/specs/2026-09-20-business-journey-page-navigation-view-config-design.md`
+- 相关实现：`CRM-Client/src/views/CustomerDetailSheet.vue`、`CRM-Client/src/components/panels/OpportunityDetailContent.vue`、`CRM-Client/src/components/panels/DealJourneyDetailContent.vue`、`CRM-Client/src/components/customer/CustomerDealJourneyHoverCard.vue`、`CRM-Client/src/views/Customers.vue`、`CRM-Server/app/models/deal_journey.py`、`CRM-Server/app/services/deal_journey_service.py`、`CRM-Server/app/api/business_journey_board.py`
 
 ## 1. 背景与目标
 
@@ -30,7 +30,6 @@
 
 ## 2. 非目标
 
-- 独立业务旅程管理页、看板卡片点进旅程详情
 - 任何写接口语义、权限码、旅程事件模型
 - 共享 / 解绑旅程的产品 UI
 - 用档案 `GET /customers/{id}/profile/journeys` 当交易详情
@@ -39,6 +38,8 @@
 - 给无旅程的孤儿商机补数据或并进旅程列表
 - 把客户详情 footer / 空态「新建商机」改成「新建业务旅程」
 
+独立业务旅程页面、看板卡片点击和独立 Sheet 已由后续设计纳入范围，不再属于本设计的非目标。
+
 ## 3. 方案选择
 
 采用「拆壳，不拆写路径」。
@@ -46,8 +47,9 @@
 放弃：
 
 - 只换页签文案、详情仍是商机：和「一行 = 旅程」、商机详情只做商机都对不上
-- 做成完整旅程模块（管理页 + 看板跳转 + 商机工作台换身份）：超出本期
 - 零后端、用商机列表按 `deal_journey_id` 去重：无主商机的旅程进不来，且继续把内部 int 当身份
+
+独立业务旅程页面由后续设计扩展；本设计的「拆壳，不拆写路径」继续作为其对象身份基础。
 
 ## 4. 对象身份
 
@@ -103,9 +105,9 @@ Alembic，模式对齐 `066_opportunity_public_ids.py`：
 - `OpportunityDealJourneyUpdate.deal_journey_id` 同步改为 `public_id` 字符串或 `null`；非法格式 404，与商机路径校验一致
 - 前端 Zod / 类型跟这次改；`passthrough()` 不能再把内部 int 当身份用
 
-看板 `journey_id` 本期仍为内部 int。看板首版明确不做点击跳转；改看板身份不在本期。若后续看板要点进客户详情旅程，再把卡片 `id` 换成 `public_id`。
+现有看板响应原本返回内部 `journey_id: int`。后续独立业务旅程页面要求看板卡片可直接打开旅程 Sheet，因此看板对外身份必须迁到旅程 `public_id`；具体列表 / 看板响应与 clean cutover 见后续设计。
 
-客户活动响应里的 `deal_journey_id: int` 本期不动。档案投影 JSON 里的旅程 `id` 仍是内部 int，档案前端只做摘要，不作为客户详情导航键。
+客户活动响应里的 `deal_journey_id: int` 本期不动。档案投影 JSON 里的旅程 `id` 仍是内部 int，档案前端只做摘要，不作为客户详情或独立旅程页面的导航键。
 
 ## 6. 读接口
 
@@ -161,8 +163,7 @@ Footer / 空态按钮仍是「新建商机」，成功后刷新旅程列表。
 
 ### 7.2 业务旅程详情 `DealJourneyDetailContent`
 
-只挂在 `CustomerDetailSheet`。
-
+该组件是唯一旅程详情内容：既挂在 `CustomerDetailSheet` 的对象栈，也挂在后续独立 `DealJourneyDetailSheet`。两个入口不得复制详情实现。
 ```text
 顶栏：旅程名称 · 看板阶段 · 采购类型
 金额在右侧
