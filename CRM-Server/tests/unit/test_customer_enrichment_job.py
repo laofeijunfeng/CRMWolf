@@ -49,6 +49,54 @@ def _ensure(
         max_attempts=3,
     )
 
+def test_profile_gate_timeout_preserves_first_timestamp_across_stale_sessions(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'gate-timeout.sqlite'}")
+    Base.metadata.create_all(engine, tables=[CustomerEnrichmentJob.__table__])
+    Session = sessionmaker(bind=engine, expire_on_commit=False)
+    crud = CustomerEnrichmentJobCRUD()
+    deadline = datetime(2026, 9, 20, 10, 0, 30)
+
+    seed = Session()
+    job = _ensure(crud, seed, available_at=deadline - timedelta(seconds=30))
+    public_id = str(job.public_id)
+    seed.close()
+
+    writer_a = Session()
+    writer_b = Session()
+    stale_a = crud.get_by_public_id(writer_a, team_id=2, public_id=public_id)
+    stale_b = crud.get_by_public_id(writer_b, team_id=2, public_id=public_id)
+    assert stale_a is not None and stale_a.profile_gate_timed_out_at is None
+    assert stale_b is not None and stale_b.profile_gate_timed_out_at is None
+
+    first = deadline + timedelta(seconds=1)
+    second = deadline + timedelta(seconds=2)
+    assert crud.record_profile_gate_timeout_if_unset(
+        writer_a,
+        team_id=2,
+        customer_id=101,
+        plan_version="customer-initial-v1",
+        timed_out_at=first,
+    ) is True
+    writer_a.commit()
+
+    assert crud.record_profile_gate_timeout_if_unset(
+        writer_b,
+        team_id=2,
+        customer_id=101,
+        plan_version="customer-initial-v1",
+        timed_out_at=second,
+    ) is False
+    writer_b.commit()
+
+    verify = Session()
+    persisted = crud.get_by_public_id(verify, team_id=2, public_id=public_id)
+    assert persisted is not None
+    assert persisted.profile_gate_timed_out_at == first
+    verify.close()
+    writer_a.close()
+    writer_b.close()
+    engine.dispose()
+
 
 def test_ensure_is_idempotent_for_customer_and_plan():
     db = _session()

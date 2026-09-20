@@ -37,21 +37,18 @@ class FakeJobCrud:
     def __init__(self, job) -> None:
         self.job = job
         self.identity_calls = []
+        self.timeout_calls = []
 
     def get_by_identity(self, db, **kwargs):
         self.identity_calls.append({"db": db, **kwargs})
         return self.job
 
+    def record_profile_gate_timeout_if_unset(self, db, **kwargs):
+        self.timeout_calls.append({"db": db, **kwargs})
+        return len(self.timeout_calls) == 1
+
 class FakeDB:
-    def __init__(self) -> None:
-        self.added = []
-        self.flush_count = 0
-
-    def add(self, value) -> None:
-        self.added.append(value)
-
-    def flush(self) -> None:
-        self.flush_count += 1
+    pass
 
 
 class FakeRunService:
@@ -137,18 +134,29 @@ def test_gate_deadline_passed_records_timeout_once_before_allowing_profile():
     assert gate.defer_if_needed(
         db, event=_event("customer_created"), run=SimpleNamespace(id=7), now=_now()
     ) is None
-    assert job.profile_gate_timed_out_at == _now()
-
     gate.defer_if_needed(
         db,
         event=_event("customer_created"),
         run=SimpleNamespace(id=7),
         now=_now() + timedelta(minutes=1),
     )
-    assert job.profile_gate_timed_out_at == _now()
+    assert gate.job_crud.timeout_calls == [
+        {
+            "db": db,
+            "team_id": 2,
+            "customer_id": 101,
+            "plan_version": "customer-initial-v1",
+            "timed_out_at": _now(),
+        },
+        {
+            "db": db,
+            "team_id": 2,
+            "customer_id": 101,
+            "plan_version": "customer-initial-v1",
+            "timed_out_at": _now() + timedelta(minutes=1),
+        },
+    ]
     assert gate.run_service.defer_calls == [(2, 7, before_deadline + timedelta(seconds=5))]
-    assert db.added == [job]
-    assert db.flush_count == 1
 
 
 def test_first_attempt_finished_does_not_gate_or_record_timeout():

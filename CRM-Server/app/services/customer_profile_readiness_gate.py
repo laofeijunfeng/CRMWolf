@@ -59,10 +59,13 @@ class CustomerProfileReadinessGate:
         if deadline is None:
             return None
         if deadline <= now:
-            if job.profile_gate_timed_out_at is None:
-                job.profile_gate_timed_out_at = now
-                db.add(job)
-                db.flush()
+            self.job_crud.record_profile_gate_timeout_if_unset(
+                db,
+                team_id=event.team_id,
+                customer_id=event.customer_id,
+                plan_version=ACTIVE_CUSTOMER_ENRICHMENT_PLAN.version,
+                timed_out_at=now,
+            )
             return None
 
         not_before_at = min(deadline, now + timedelta(seconds=5))

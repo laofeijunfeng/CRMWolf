@@ -139,10 +139,14 @@ class CustomerEnrichmentReconciliationService:
                             )
                             if released:
                                 customer_gates_released = len(released)
-                                if deadline_timed_out and job.profile_gate_timed_out_at is None:
-                                    job.profile_gate_timed_out_at = now
-                                    db.add(job)
-                                    db.flush()
+                                if deadline_timed_out:
+                                    self.job_crud.record_profile_gate_timeout_if_unset(
+                                        db,
+                                        team_id=int(job.team_id),
+                                        customer_id=int(job.customer_id),
+                                        plan_version=str(job.plan_version),
+                                        timed_out_at=now,
+                                    )
                                 if self._receipt_should_repair(job):
                                     job.profile_refresh_request_id = f"released:{released[0]}"
                                     job.profile_refresh_enqueued_at = now

@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
+from app.crud.customer_enrichment_job import CustomerEnrichmentJobCRUD
 from app.models.customer import Customer
 from app.models.customer_enrichment_job import CustomerEnrichmentJob
 from app.models.customer_intelligence_run import (
@@ -154,13 +155,21 @@ class FakeProfileCoordinator:
         db.flush()
         return True
 
-
-def _service(*, run_service=None, coordinator=None):
+def _service(*, job_crud=None, run_service=None, coordinator=None):
     return CustomerEnrichmentReconciliationService(
+        job_crud=job_crud,
         run_service=run_service or FakeRunService(),
         profile_coordinator=coordinator or FakeProfileCoordinator(),
         max_attempts=3,
     )
+
+class RecordingJobCRUD(CustomerEnrichmentJobCRUD):
+    def __init__(self) -> None:
+        self.timeout_calls = []
+
+    def record_profile_gate_timeout_if_unset(self, db, **kwargs):
+        self.timeout_calls.append(kwargs)
+        return super().record_profile_gate_timeout_if_unset(db, **kwargs)
 
 
 def test_reconciliation_creates_missing_job_as_historical_and_is_idempotent(db_session):
@@ -189,8 +198,9 @@ def test_reconciliation_releases_expired_gate_and_repairs_missing_refresh_receip
         first_attempt_finished=True,
     )
     run_service = FakeRunService(releases={int(gated_customer.id): [91]})
+    job_crud = RecordingJobCRUD()
     coordinator = FakeProfileCoordinator()
-    service = _service(run_service=run_service, coordinator=coordinator)
+    service = _service(job_crud=job_crud, run_service=run_service, coordinator=coordinator)
 
     result = service.reconcile_once(db_session, team_id=2, limit=50, dry_run=False)
 
@@ -198,6 +208,14 @@ def test_reconciliation_releases_expired_gate_and_repairs_missing_refresh_receip
     assert result.refreshes_repaired == 1
     assert coordinator.calls == [terminal_customer.id]
     assert terminal.profile_refresh_request_id == f"refresh-{terminal.public_id}"
+    assert job_crud.timeout_calls == [
+        {
+            "team_id": int(gated_customer.team_id),
+            "customer_id": int(gated_customer.id),
+            "plan_version": ACTIVE_CUSTOMER_ENRICHMENT_PLAN.version,
+            "timed_out_at": db_session.get(CustomerEnrichmentJob, 1).profile_gate_timed_out_at,
+        }
+    ]
     assert db_session.get(CustomerEnrichmentJob, 1).profile_gate_timed_out_at is not None
 
 

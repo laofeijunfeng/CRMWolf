@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from sqlalchemy.orm import Session
+    from sqlalchemy.sql.elements import ColumnElement
 
 
 _TERMINAL = {
@@ -110,6 +111,34 @@ class CustomerEnrichmentJobCRUD:
             )
             .one_or_none()
         )
+
+    def record_profile_gate_timeout_if_unset(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        customer_id: int,
+        plan_version: str,
+        timed_out_at: datetime,
+    ) -> bool:
+        updated = (
+            db.query(CustomerEnrichmentJob)
+            .filter(
+                CustomerEnrichmentJob.team_id == team_id,
+                CustomerEnrichmentJob.customer_id == customer_id,
+                CustomerEnrichmentJob.plan_version == plan_version,
+                CustomerEnrichmentJob.purpose == CustomerEnrichmentPurpose.INITIAL_CREATION.value,
+                CustomerEnrichmentJob.first_attempt_finished_at.is_(None),
+                CustomerEnrichmentJob.profile_gate_deadline_at <= timed_out_at,
+                CustomerEnrichmentJob.profile_gate_timed_out_at.is_(None),
+            )
+            .update(
+                {CustomerEnrichmentJob.profile_gate_timed_out_at: timed_out_at},
+                synchronize_session=False,
+            )
+        )
+        db.flush()
+        return updated == 1
 
     def get_by_public_id(
         self,
@@ -340,7 +369,7 @@ class CustomerEnrichmentJobCRUD:
         return candidates
 
     @staticmethod
-    def _recoverable_predicate(now: datetime):
+    def _recoverable_predicate(now: datetime) -> ColumnElement[bool]:
         due_queued = and_(
             CustomerEnrichmentJob.status == CustomerEnrichmentJobStatus.QUEUED.value,
             CustomerEnrichmentJob.available_at <= now,
