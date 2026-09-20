@@ -5,7 +5,13 @@ import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent, h, nextTick, type PropType } from 'vue'
 import type { ContractListResponse, ContractResponse } from '@/api/contract'
 import type { DealJourney } from '@/api/dealJourney'
-import type { ApprovalInfoLite, PaymentPlanResponse, PaymentRecordInfo, PaymentRecordUpdate } from '@/api/payment'
+import type {
+  ApprovalInfoLite,
+  PaymentPlanResponse,
+  PaymentRecordDetailResponse,
+  PaymentRecordInfo,
+  PaymentRecordUpdate,
+} from '@/api/payment'
 
 const contractApi = vi.hoisted(() => ({
   getContract: vi.fn(),
@@ -15,7 +21,10 @@ const approvalGenericApi = vi.hoisted(() => ({
   submitApproval: vi.fn(),
   cancelApproval: vi.fn(),
 }))
-const paymentApi = vi.hoisted(() => ({ updatePaymentRecord: vi.fn() }))
+const paymentApi = vi.hoisted(() => ({
+  getPaymentRecordDetail: vi.fn(),
+  updatePaymentRecord: vi.fn(),
+}))
 const confirmDelete = vi.hoisted(() => vi.fn())
 const handleApiError = vi.hoisted(() => vi.fn())
 const toast = vi.hoisted(() => ({ success: vi.fn() }))
@@ -72,7 +81,7 @@ vi.mock('@/views/ContractDetailSheet.vue', () => ({
   default: defineComponent({
     name: 'ContractDetailSheet',
     props: { visible: Boolean, contractId: Number },
-    emits: ['update:visible', 'refresh', 'approve', 'reject'],
+    emits: ['update:visible', 'refresh', 'approve', 'reject', 'view-payment-plan'],
     setup: props => () => h('div', { 'data-visible': String(props.visible) }),
   }),
 }))
@@ -144,6 +153,54 @@ const paymentRecordFixture = (overrides: Partial<PaymentRecordInfo> = {}): Payme
   ...overrides,
 })
 
+const approvalFixture = (overrides: Partial<ApprovalInfoLite> = {}): ApprovalInfoLite => ({
+  id: 901,
+  status: 'PENDING',
+  current_approver_name: '财务经理',
+  nodes: [],
+  ...overrides,
+})
+
+const paymentRecordDetailFixture = (
+  overrides: Partial<PaymentRecordDetailResponse> = {},
+): PaymentRecordDetailResponse => ({
+  id: 51,
+  payment_plan_id: 41,
+  actual_amount: 50000,
+  payment_date: '2026-09-15',
+  created_time: '2026-09-15T00:00:00',
+  last_modified_time: '2026-09-21T00:00:00',
+  approval_phase: 'approved',
+  confirmation_status: 'CONFIRMED',
+  status: 'APPROVED',
+  approval: approvalFixture({ status: 'APPROVED' }),
+  payment_plan: {
+    id: 41,
+    stage_name: '验收款',
+    planned_amount: 50000,
+    paid_amount: 50000,
+    remaining_amount: 0,
+    due_date: '2026-09-15',
+    status: 'COMPLETED',
+    last_modified_time: '2026-09-21T00:00:00',
+  },
+  ...overrides,
+})
+
+interface Deferred<T> {
+  promise: Promise<T>
+  resolve: (value: T | PromiseLike<T>) => void
+}
+
+function createDeferred<T>(): Deferred<T> {
+  let resolvePromise: ((value: T | PromiseLike<T>) => void) | undefined
+  const promise = new Promise<T>((resolve) => {
+    resolvePromise = resolve
+  })
+  if (resolvePromise === undefined) throw new Error('Deferred resolver was not initialized')
+  return { promise, resolve: resolvePromise }
+}
+
 const paymentPlanFixture = (overrides: Partial<PaymentPlanResponse> = {}): PaymentPlanResponse => ({
   id: 41,
   contract_id: 31,
@@ -197,6 +254,7 @@ describe('DealJourneyDetailHost', () => {
     approvalGenericApi.submitApproval.mockResolvedValue(undefined)
     approvalGenericApi.cancelApproval.mockResolvedValue(undefined)
     paymentApi.updatePaymentRecord.mockResolvedValue(undefined)
+    paymentApi.getPaymentRecordDetail.mockResolvedValue(paymentRecordDetailFixture())
     submitEntity.mockResolvedValue({ approval_id: 77 })
     confirmDelete.mockResolvedValue(true)
   })
@@ -223,6 +281,22 @@ describe('DealJourneyDetailHost', () => {
     await nextTick()
     expect(wrapper.getComponent(PaymentPlanDetailSheet).props()).toMatchObject({ planId: 41, visible: true })
     expect(wrapper.getComponent(DealJourneyDetailContent).exists()).toBe(true)
+  })
+
+  it('opens a payment plan emitted by the contract sheet and closes the contract', async () => {
+    const wrapper = mountHost()
+    const plan = paymentPlanFixture()
+    wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-contract', plan.contract_id)
+    await nextTick()
+
+    wrapper.getComponent(ContractDetailSheet).vm.$emit('view-payment-plan', plan)
+    await nextTick()
+
+    expect(wrapper.getComponent(ContractDetailSheet).props('visible')).toBe(false)
+    expect(wrapper.getComponent(PaymentPlanDetailSheet).props()).toMatchObject({
+      planId: plan.id,
+      visible: true,
+    })
   })
 
   it('opens the existing contract form and refreshes journey after create success', async () => {
@@ -300,6 +374,130 @@ describe('DealJourneyDetailHost', () => {
     planSheet.vm.$emit('view-approval', record)
     await nextTick()
     expect(wrapper.getComponent(PaymentRecordDetailSheet).props('visible')).toBe(true)
+  })
+
+  it('reloads authoritative payment record state before refreshing journey and parent', async () => {
+    const wrapper = mountHost()
+    const plan = paymentPlanFixture()
+    const record = plan.payment_records[0]
+    const updatedApproval = approvalFixture({ id: 902, status: 'APPROVED' })
+    const updatedRecord = paymentRecordDetailFixture({
+      id: record.id,
+      actual_amount: 52000,
+      approval_phase: 'approved',
+      confirmation_status: 'CONFIRMED',
+      approval: updatedApproval,
+      payment_plan: {
+        ...paymentRecordDetailFixture().payment_plan,
+        stage_name: '终验款',
+      },
+    })
+    paymentApi.getPaymentRecordDetail.mockResolvedValueOnce(updatedRecord)
+
+    wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-payment-plan', plan.id, plan)
+    await nextTick()
+    wrapper.getComponent(PaymentPlanDetailSheet).vm.$emit('record-click', record)
+    await nextTick()
+    wrapper.getComponent(PaymentRecordDetailSheet).vm.$emit('refresh')
+    await flushPromises()
+
+    expect(paymentApi.getPaymentRecordDetail).toHaveBeenCalledWith(record.id)
+    expect(wrapper.getComponent(PaymentRecordDetailSheet).props()).toMatchObject({
+      visible: true,
+      record: updatedRecord,
+      approval: updatedApproval,
+      stageName: '终验款',
+    })
+    expect(journeyRefresh).toHaveBeenCalledOnce()
+    expect(wrapper.emitted('refresh')).toHaveLength(1)
+  })
+
+  it('keeps the current payment record when detail reload fails and still refreshes journey', async () => {
+    const error = new Error('detail refresh failed')
+    paymentApi.getPaymentRecordDetail.mockRejectedValueOnce(error)
+    const wrapper = mountHost()
+    const plan = paymentPlanFixture()
+    const record = plan.payment_records[0]
+
+    wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-payment-plan', plan.id, plan)
+    await nextTick()
+    wrapper.getComponent(PaymentPlanDetailSheet).vm.$emit('record-click', record)
+    await nextTick()
+    wrapper.getComponent(PaymentRecordDetailSheet).vm.$emit('refresh')
+    await flushPromises()
+
+    expect(handleApiError).toHaveBeenCalledWith(error, '刷新回款记录详情')
+    expect(wrapper.getComponent(PaymentRecordDetailSheet).props()).toMatchObject({
+      visible: true,
+      record,
+      stageName: plan.stage_name,
+    })
+    expect(wrapper.getComponent(DealJourneyDetailContent).exists()).toBe(true)
+    expect(journeyRefresh).toHaveBeenCalledOnce()
+    expect(wrapper.emitted('refresh')).toHaveLength(1)
+  })
+
+  it('does not restore a payment record closed while its detail refresh is pending', async () => {
+    const detailRequest = createDeferred<PaymentRecordDetailResponse>()
+    paymentApi.getPaymentRecordDetail.mockReturnValueOnce(detailRequest.promise)
+    const wrapper = mountHost()
+    const plan = paymentPlanFixture()
+    const record = plan.payment_records[0]
+
+    wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-payment-plan', plan.id, plan)
+    await nextTick()
+    wrapper.getComponent(PaymentPlanDetailSheet).vm.$emit('record-click', record)
+    await nextTick()
+    wrapper.getComponent(PaymentRecordDetailSheet).vm.$emit('refresh')
+    await nextTick()
+    wrapper.getComponent(PaymentRecordDetailSheet).vm.$emit('update:visible', false)
+    await nextTick()
+
+    detailRequest.resolve(paymentRecordDetailFixture({ id: record.id, actual_amount: 99000 }))
+    await flushPromises()
+
+    expect(wrapper.getComponent(PaymentRecordDetailSheet).props()).toMatchObject({
+      visible: false,
+      record: null,
+    })
+    expect(journeyRefresh).toHaveBeenCalledOnce()
+    expect(wrapper.emitted('refresh')).toHaveLength(1)
+  })
+
+  it('does not overwrite a newly selected payment record with a stale detail response', async () => {
+    const detailRequest = createDeferred<PaymentRecordDetailResponse>()
+    paymentApi.getPaymentRecordDetail.mockReturnValueOnce(detailRequest.promise)
+    const wrapper = mountHost()
+    const firstPlan = paymentPlanFixture()
+    const firstRecord = firstPlan.payment_records[0]
+    const secondRecord = paymentRecordFixture({ id: 52, actual_amount: 25000 })
+    const secondPlan = paymentPlanFixture({
+      id: 42,
+      stage_name: '尾款',
+      payment_records: [secondRecord],
+    })
+
+    wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-payment-plan', firstPlan.id, firstPlan)
+    await nextTick()
+    wrapper.getComponent(PaymentPlanDetailSheet).vm.$emit('record-click', firstRecord)
+    await nextTick()
+    wrapper.getComponent(PaymentRecordDetailSheet).vm.$emit('refresh')
+    await nextTick()
+
+    wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-payment-plan', secondPlan.id, secondPlan)
+    await nextTick()
+    wrapper.getComponent(PaymentPlanDetailSheet).vm.$emit('record-click', secondRecord)
+    await nextTick()
+    detailRequest.resolve(paymentRecordDetailFixture({ id: firstRecord.id, actual_amount: 99000 }))
+    await flushPromises()
+
+    expect(wrapper.getComponent(PaymentRecordDetailSheet).props()).toMatchObject({
+      visible: true,
+      record: secondRecord,
+      stageName: secondPlan.stage_name,
+    })
+    expect(journeyRefresh).toHaveBeenCalledOnce()
+    expect(wrapper.emitted('refresh')).toHaveLength(1)
   })
 
   it('edits and resubmits a payment record through EditRecordDialog', async () => {

@@ -198,6 +198,10 @@ function handleViewPaymentPlan(planId: number, plan: PaymentPlanResponse): void 
   paymentPlanSheetOpen.value = true
 }
 
+function handleContractPaymentPlan(plan: PaymentPlanResponse): void {
+  handleViewPaymentPlan(plan.id, plan)
+}
+
 function handlePaymentPlanSheetOpenChange(open: boolean): void {
   paymentPlanSheetOpen.value = open
   if (!open) selectedPaymentPlan.value = null
@@ -220,6 +224,27 @@ function handlePaymentRecord(record: PaymentRecordInfo): void {
 function handlePaymentRecordSheetOpenChange(open: boolean): void {
   paymentRecordSheetOpen.value = open
   if (!open) selectedPaymentRecord.value = null
+}
+
+async function handlePaymentRecordRefresh(): Promise<void> {
+  const selected = selectedPaymentRecord.value
+  if (selected !== null) {
+    const recordId = selected.record.id
+    try {
+      const detail = await paymentApi.getPaymentRecordDetail(recordId)
+      if (selectedPaymentRecord.value === selected) {
+        selectedPaymentRecord.value = {
+          record: detail,
+          stageName: detail.payment_plan.stage_name,
+          approval: detail.approval ?? null,
+        }
+      }
+    } catch (error) {
+      handleApiError(error, '刷新回款记录详情')
+    }
+  }
+
+  await refreshJourneyAfterChildAction()
 }
 
 function handleRecordEdit(): void {
@@ -300,6 +325,7 @@ async function handleRecordEditSubmit(recordId: number, payload: PaymentRecordUp
     @refresh="refreshJourneyAfterChildAction"
     @approve="refreshJourneyAfterChildAction"
     @reject="refreshJourneyAfterChildAction"
+    @view-payment-plan="handleContractPaymentPlan"
   />
 
   <PaymentPlanDetailSheet
@@ -320,7 +346,7 @@ async function handleRecordEditSubmit(recordId: number, payload: PaymentRecordUp
     :stage-name="selectedPaymentRecord?.stageName ?? ''"
     :approval="selectedPaymentRecord?.approval ?? null"
     @update:visible="handlePaymentRecordSheetOpenChange"
-    @refresh="refreshJourneyAfterChildAction"
+    @refresh="handlePaymentRecordRefresh"
     @edit="handleRecordEdit"
     @resubmit="handleRecordResubmit"
   />
