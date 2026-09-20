@@ -6,9 +6,13 @@ import logging
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
+from sqlalchemy import exists
+
 from app.core.config import get_settings
 from app.crud.customer_enrichment_job import CustomerEnrichmentJobCRUD, customer_enrichment_job_crud
 from app.models.customer import Customer
+from app.models.customer_enrichment_job import CustomerEnrichmentJob
+from app.models.customer_intelligence_run import CustomerIntelligenceRun
 from app.services.customer_enrichment_contracts import (
     CustomerEnrichmentJobStatus,
     CustomerEnrichmentPurpose,
@@ -23,6 +27,7 @@ from app.services.customer_enrichment_profile_coordinator import (
     customer_enrichment_profile_coordinator,
 )
 from app.services.customer_intelligence_run_service import (
+    TERMINAL_RUN_STATUSES,
     CustomerIntelligenceRunService,
     customer_intelligence_run_service,
 )
@@ -33,7 +38,6 @@ if TYPE_CHECKING:
 
     from sqlalchemy.orm import Session
 
-    from app.models.customer_enrichment_job import CustomerEnrichmentJob
 
 logger = logging.getLogger(__name__)
 _TERMINAL_SUCCESS = {
@@ -47,6 +51,7 @@ class CustomerEnrichmentReconciliationResult:
     scanned: int
     jobs_created: int
     gates_released: int
+    gates_cancelled: int
     refreshes_repaired: int
     errors: int
     next_customer_id: int | None
@@ -95,6 +100,7 @@ class CustomerEnrichmentReconciliationService:
         gates_released = 0
         refreshes_repaired = 0
         errors = 0
+        gates_cancelled = 0
         now = business_now()
         max_attempts = self._resolved_max_attempts()
 
@@ -190,11 +196,64 @@ class CustomerEnrichmentReconciliationService:
                     getattr(customer, "id", None),
                 )
 
+
+        orphan_query = (
+            db.query(CustomerEnrichmentJob.team_id, CustomerEnrichmentJob.customer_id)
+            .filter(
+                ~exists().where(
+                    Customer.id == CustomerEnrichmentJob.customer_id,
+                    Customer.team_id == CustomerEnrichmentJob.team_id,
+                ),
+                exists().where(
+                    CustomerIntelligenceRun.team_id == CustomerEnrichmentJob.team_id,
+                    CustomerIntelligenceRun.customer_id == CustomerEnrichmentJob.customer_id,
+                    CustomerIntelligenceRun.status.not_in(tuple(TERMINAL_RUN_STATUSES)),
+                    CustomerIntelligenceRun.not_before_at.is_not(None),
+                ),
+            )
+            .distinct()
+        )
+        if team_id is not None:
+            orphan_query = orphan_query.filter(CustomerEnrichmentJob.team_id == team_id)
+        orphan_rows = (
+            orphan_query.order_by(
+                CustomerEnrichmentJob.team_id.asc(),
+                CustomerEnrichmentJob.customer_id.asc(),
+            )
+            .limit(page_size)
+            .all()
+        )
+        for orphan in orphan_rows:
+            try:
+                with db.begin_nested():
+                    if dry_run:
+                        gates_cancelled += self.run_service.count_deferred_for_customer(
+                            db,
+                            team_id=int(orphan.team_id),
+                            customer_id=int(orphan.customer_id),
+                        )
+                    else:
+                        cancelled = self.run_service.cancel_deferred_for_customer(
+                            db,
+                            team_id=int(orphan.team_id),
+                            customer_id=int(orphan.customer_id),
+                            reason="CUSTOMER_NOT_FOUND",
+                            now=now,
+                        )
+                        gates_cancelled += len(cancelled)
+            except Exception:
+                errors += 1
+                logger.exception(
+                    "客户初始补全孤儿档案 gate 取消失败: team_id=%s customer_id=%s",
+                    getattr(orphan, "team_id", None),
+                    getattr(orphan, "customer_id", None),
+                )
         return CustomerEnrichmentReconciliationResult(
             scanned=len(customers),
             jobs_created=jobs_created,
             gates_released=gates_released,
             refreshes_repaired=refreshes_repaired,
+            gates_cancelled=gates_cancelled,
             errors=errors,
             next_customer_id=int(customers[-1].id) if customers else None,
             dry_run=dry_run,

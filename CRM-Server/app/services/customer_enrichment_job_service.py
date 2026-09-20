@@ -343,7 +343,7 @@ class CustomerEnrichmentJobService:
                 updated=updated,
                 result=result,
                 first_attempt_finished=first_attempt_finished,
-                terminal_success=True,
+                terminal_success=write_result.reason != "CUSTOMER_NOT_FOUND",
             )
         if write_result.outcome == RETRY:
             return self._record_retry_in_session(

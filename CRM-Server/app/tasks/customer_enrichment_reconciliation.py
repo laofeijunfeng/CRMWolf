@@ -94,6 +94,7 @@ class CustomerEnrichmentReconciliationScheduler:
                     for key in (
                         "jobs_created",
                         "gates_released",
+                        "gates_cancelled",
                         "refreshes_repaired",
                         "errors",
                     )

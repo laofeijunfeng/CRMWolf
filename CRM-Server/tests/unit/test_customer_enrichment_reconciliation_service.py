@@ -129,6 +129,59 @@ def _profile_run(
     return run
 
 
+def _orphan_job(db, *, team_id: int, customer_id: int) -> CustomerEnrichmentJob:
+    now = business_now()
+    job = CustomerEnrichmentJob(
+        team_id=team_id,
+        customer_id=customer_id,
+        purpose=CustomerEnrichmentPurpose.INITIAL_CREATION.value,
+        plan_version=ACTIVE_CUSTOMER_ENRICHMENT_PLAN.version,
+        requested_fields_json=list(ACTIVE_CUSTOMER_ENRICHMENT_PLAN.fields),
+        status=CustomerEnrichmentJobStatus.SKIPPED.value,
+        available_at=now,
+        profile_gate_deadline_at=now,
+        attempt_count=1,
+        max_attempts=3,
+        run_id=f"orphan-run-{team_id}-{customer_id}",
+        graph_thread_id=f"orphan-thread-{team_id}-{customer_id}",
+        first_attempt_finished_at=now,
+        result_json={"skip_reason": "CUSTOMER_NOT_FOUND"},
+    )
+    db.add(job)
+    db.flush()
+    return job
+
+
+def _orphan_profile_run(
+    db,
+    *,
+    team_id: int,
+    customer_id: int,
+    sequence: int,
+    deferred: bool = True,
+) -> CustomerIntelligenceRun:
+    run = CustomerIntelligenceRun(
+        run_key=f"orphan-run-key-{team_id}-{customer_id}-{sequence}",
+        request_id=f"orphan-request-{team_id}-{customer_id}-{sequence}",
+        event_key=f"orphan-event-{team_id}-{customer_id}-{sequence}",
+        tenant_id=team_id,
+        team_id=team_id,
+        customer_id=customer_id,
+        trigger_type="customer_created",
+        scope="full",
+        status=CustomerIntelligenceRunStatus.PENDING,
+        attempt_count=0,
+        max_attempts=3,
+        not_before_at=business_now() if deferred else None,
+        next_retry_at=business_now(),
+        lease_token="stale-lease",
+        lease_expires_at=business_now() + timedelta(minutes=5),
+    )
+    db.add(run)
+    db.flush()
+    return run
+
+
 class FakeRunService:
     def __init__(self, *, releases: dict[int, list[int]] | None = None) -> None:
         self.releases = releases or {}
@@ -566,3 +619,78 @@ def test_profile_coordinator_repairs_receipt_in_caller_transaction(db_session):
         .profile_refresh_request_id
         is None
     )
+
+
+def test_reconciliation_cancels_deferred_profile_runs_for_orphan_customer(db_session):
+    _orphan_job(db_session, team_id=2, customer_id=901)
+    run = _orphan_profile_run(db_session, team_id=2, customer_id=901, sequence=1)
+    service = CustomerEnrichmentReconciliationService(
+        run_service=CustomerIntelligenceRunService(),
+        profile_coordinator=FakeProfileCoordinator(),
+        max_attempts=3,
+    )
+
+    result = service.reconcile_once(db_session, team_id=2, limit=10, dry_run=False)
+
+    assert result.gates_cancelled == 1
+    db_session.refresh(run)
+    assert run.status == CustomerIntelligenceRunStatus.CANCELLED
+    assert run.error_message == "CUSTOMER_NOT_FOUND"
+    assert run.not_before_at is None
+    assert run.next_retry_at is None
+    assert run.lease_token is None
+    assert run.lease_expires_at is None
+
+
+def test_reconciliation_dry_run_counts_orphan_cancellations_without_mutation(db_session):
+    _orphan_job(db_session, team_id=2, customer_id=902)
+    first = _orphan_profile_run(db_session, team_id=2, customer_id=902, sequence=1)
+    second = _orphan_profile_run(db_session, team_id=2, customer_id=902, sequence=2)
+    service = CustomerEnrichmentReconciliationService(
+        run_service=CustomerIntelligenceRunService(),
+        profile_coordinator=FakeProfileCoordinator(),
+        max_attempts=3,
+    )
+
+    result = service.reconcile_once(db_session, team_id=2, limit=10, dry_run=True)
+
+    assert result.gates_cancelled == 2
+    assert first.status == CustomerIntelligenceRunStatus.PENDING
+    assert second.status == CustomerIntelligenceRunStatus.PENDING
+    assert first.not_before_at is not None
+    assert second.not_before_at is not None
+
+
+def test_reconciliation_orphan_cancellation_is_tenant_scoped(db_session):
+    _orphan_job(db_session, team_id=2, customer_id=903)
+    own = _orphan_profile_run(db_session, team_id=2, customer_id=903, sequence=1)
+    _orphan_job(db_session, team_id=3, customer_id=903)
+    other = _orphan_profile_run(db_session, team_id=3, customer_id=903, sequence=2)
+    service = CustomerEnrichmentReconciliationService(
+        run_service=CustomerIntelligenceRunService(),
+        profile_coordinator=FakeProfileCoordinator(),
+        max_attempts=3,
+    )
+
+    result = service.reconcile_once(db_session, team_id=2, limit=10, dry_run=False)
+
+    assert result.gates_cancelled == 1
+    assert own.status == CustomerIntelligenceRunStatus.CANCELLED
+    assert other.status == CustomerIntelligenceRunStatus.PENDING
+
+
+def test_clean_orphan_does_not_block_later_dirty_orphan_under_limit(db_session):
+    _orphan_job(db_session, team_id=2, customer_id=904)
+    _orphan_profile_run(db_session, team_id=2, customer_id=904, sequence=1, deferred=False)
+    _orphan_job(db_session, team_id=2, customer_id=905)
+    dirty = _orphan_profile_run(db_session, team_id=2, customer_id=905, sequence=2)
+    service = CustomerEnrichmentReconciliationService(
+        run_service=CustomerIntelligenceRunService(),
+        profile_coordinator=FakeProfileCoordinator(),
+        max_attempts=3,
+    )
+
+    result = service.reconcile_once(db_session, team_id=2, limit=1, dry_run=False)
+
+    assert result.gates_cancelled == 1
+    assert dirty.status == CustomerIntelligenceRunStatus.CANCELLED

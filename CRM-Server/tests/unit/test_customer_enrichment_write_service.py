@@ -237,6 +237,27 @@ def test_apply_retries_when_customer_version_changed_but_field_still_null():
     assert db.query(OperationLog).count() == 0
 
 
+def test_apply_skips_when_customer_deleted_after_computation():
+    db, customer = _seed_customer(industry=None, version=4)
+    customer_id = customer.id
+    db.execute(Customer.__table__.delete().where(Customer.id == customer_id))
+    db.commit()
+
+    result = _service().apply(
+        db,
+        team_id=2,
+        customer_id=customer_id,
+        expected_version=4,
+        decisions=(_industry_decision(),),
+        plan_version="customer-initial-v1",
+        job_public_id="cej_deleted",
+    )
+
+    assert result.outcome == "SKIPPED"
+    assert result.reason == "CUSTOMER_NOT_FOUND"
+    assert db.query(OperationLog).count() == 0
+
+
 def test_apply_is_tenant_scoped():
     db, customer = _seed_customer(industry=None, version=4)
 
@@ -250,9 +271,8 @@ def test_apply_is_tenant_scoped():
         job_public_id="cej_1",
     )
 
-    db.refresh(customer)
-    assert result.outcome == "RETRY"
-    assert result.reason == "CUSTOMER_CHANGED_DURING_ENRICHMENT"
+    assert result.outcome == "SKIPPED"
+    assert result.reason == "CUSTOMER_NOT_FOUND"
     assert customer.industry is None
     assert customer.version == 4
     assert db.query(OperationLog).count() == 0

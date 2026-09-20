@@ -131,7 +131,7 @@ CUSTOMER_INITIAL_ENRICHMENT_RECONCILIATION_BATCH_SIZE=50
 
 1. 执行 migration，并以生产 Compose 默认值启动后端：`CUSTOMER_INITIAL_ENRICHMENT_BACKFILL_ENABLED=false`、`CUSTOMER_INITIAL_ENRICHMENT_RECONCILIATION_ENABLED=false`、recovery 保持启用。此时不会在 preview 前扫描历史客户或创建 reconciliation 补偿任务。
 2. 先确认 recovery 日志：`docker logs crm-backend --since 10m | grep '客户初始补全任务恢复调度已启动'`。不要把 backfill/reconciliation 未出现“已启动”视为故障；它们此阶段按设计关闭。
-3. 使用下方管理员 API 执行 backfill preview 和 reconciliation `dry_run=true`，重点审查 `other_available=true`、`invalid_non_null`、`would_schedule`，并确认 dry-run 的 `errors=0` 及预期 `jobs_created / gates_released / refreshes_repaired`。
+3. 使用下方管理员 API 执行 backfill preview 和 reconciliation `dry_run=true`，重点审查 `other_available=true`、`invalid_non_null`、`would_schedule`，并确认 dry-run 的 `errors=0` 及预期 `jobs_created / gates_released / gates_cancelled / refreshes_repaired`。
 4. 审查通过后，在服务器部署环境的 `.env` 中各定义一次且只定义一次：
 
    ```bash
@@ -169,7 +169,7 @@ curl -sS -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application
   -d '{"limit":500,"dry_run":true}'
 ```
 
-任务诊断返回 purpose、plan、requested fields、attempt/max attempts、`requeue_count`、下一次尝试时间、首次尝试完成时间、`profile_gate_timed_out_at` 和档案刷新 receipt。reconciliation dry-run 返回 `scanned / jobs_created / gates_released / refreshes_repaired / errors`，用于发布前评估而不写入；`refreshes_repaired` 同时覆盖空 receipt 和无法在同一 team/customer 下解析的 `released:<run_id>` / request ID。`profile_gate_timeout` 的 durable 证据是诊断中非空的 `profile_gate_timed_out_at`：它只在创建期任务尚未完成首次尝试、deadline 已过且档案实际解除 gate 时首次写入；不能从聚合 `gates_released` 推断。运行期间应持续观察 `COMPLETED / SKIPPED / RETRY_PENDING / EXHAUSTED`，并结合写入操作日志的 per-field `reasons`、job result、`requeue_count`、档案 refresh receipt 和该时间戳形成 scheduled、applied、other、skipped、retry_pending、exhausted、requeued、profile_gate_timeout 证据；`SKIPPED/CUSTOMER_NOT_FOUND` 不登记终态档案刷新，技术失败不得伪装为行业 `other`。
+任务诊断返回 purpose、plan、requested fields、attempt/max attempts、`requeue_count`、下一次尝试时间、首次尝试完成时间、`profile_gate_timed_out_at` 和档案刷新 receipt。reconciliation dry-run 返回 `scanned / jobs_created / gates_released / gates_cancelled / refreshes_repaired / errors`，用于发布前评估而不写入；`gates_released` 只统计仍存在客户的正常释放，`gates_cancelled` 按 run 数统计已删除客户的 deferred Profile run（正式运行会 tenant-scoped 标记为 `CANCELLED/CUSTOMER_NOT_FOUND` 并清空 defer/retry/lease，永不 kick），`refreshes_repaired` 同时覆盖空 receipt 和无法在同一 team/customer 下解析的 `released:<run_id>` / request ID。`profile_gate_timeout` 的 durable 证据是诊断中非空的 `profile_gate_timed_out_at`：它只在创建期任务尚未完成首次尝试、deadline 已过且档案实际解除 gate 时首次写入；不能从聚合 `gates_released` 推断。运行期间应持续观察 `COMPLETED / SKIPPED / RETRY_PENDING / EXHAUSTED`，并结合写入操作日志的 per-field `reasons`、job result、`requeue_count`、档案 refresh receipt 和该时间戳形成 scheduled、applied、other、skipped、retry_pending、exhausted、requeued、profile_gate_timeout 证据；`SKIPPED/CUSTOMER_NOT_FOUND` 不登记终态档案刷新，技术失败不得伪装为行业 `other`。
 
 `EXHAUSTED` 不会无限自动重试。确认 AI 配置、行业目录和下游故障已修复后，管理员只能对当前 active plan、目标字段仍为空的耗尽任务重新入队：
 

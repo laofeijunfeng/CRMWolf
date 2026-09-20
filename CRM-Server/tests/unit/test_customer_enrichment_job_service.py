@@ -458,6 +458,25 @@ async def test_write_outcome_controls_terminal_state(write_result, expected_stat
     result = await service.run(_job_request())
 
     assert result.execution_status == expected_status
+@pytest.mark.asyncio
+async def test_delete_after_model_skip_does_not_retry_or_request_terminal_refresh():
+    service = _service(
+        workflow_result=_decision_result(),
+        write_result=CustomerEnrichmentWriteResult(
+            outcome="SKIPPED",
+            reason="CUSTOMER_NOT_FOUND",
+        ),
+    )
+
+    result = await service.run(_job_request())
+
+    assert result.execution_status == "SKIPPED"
+    assert result.skip_reason == "CUSTOMER_NOT_FOUND"
+    assert service.job_crud.calls.count("mark_skipped") == 1
+    assert "mark_retry" not in service.job_crud.calls
+    assert "mark_exhausted" not in service.job_crud.calls
+    assert service.completion_port.calls == ["first_attempt"]
+
 
 
 @pytest.mark.asyncio

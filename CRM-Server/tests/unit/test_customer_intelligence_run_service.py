@@ -21,7 +21,7 @@ from app.services.customer_intelligence_run_service import (
 
 
 @compiles(BigInteger, "sqlite")
-def _bigint_to_sqlite_int(element, compiler, **kw):  # noqa: ANN001, ANN003
+def _bigint_to_sqlite_int(element, compiler, **kw):
     return "INTEGER"
 
 
@@ -51,7 +51,7 @@ def _event(
     )
 
 
-def _input(**kwargs) -> CustomerIntelligenceRunInput:  # noqa: ANN003
+def _input(**kwargs) -> CustomerIntelligenceRunInput:
     request_id = str(kwargs.pop("request_id", "request-1"))
     max_attempts = int(kwargs.pop("max_attempts", 3))
     return CustomerIntelligenceRunInput(

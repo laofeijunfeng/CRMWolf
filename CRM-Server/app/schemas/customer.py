@@ -658,6 +658,7 @@ class CustomerEnrichmentReconciliationResponse(BaseModel):
     scanned: int
     jobs_created: int
     gates_released: int
+    gates_cancelled: int
     refreshes_repaired: int
     errors: int
     next_customer_id: Optional[int] = None

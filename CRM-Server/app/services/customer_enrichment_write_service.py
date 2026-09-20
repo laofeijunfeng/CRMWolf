@@ -168,6 +168,11 @@ class CustomerEnrichmentWriteService:
             .populate_existing()
             .first()
         )
+        if customer is None:
+            return CustomerEnrichmentWriteResult(
+                outcome=SKIPPED,
+                reason="CUSTOMER_NOT_FOUND",
+            )
         if customer is not None and any(
             not self._field_registry.is_missing(field, getattr(customer, field, None))
             for field in field_keys

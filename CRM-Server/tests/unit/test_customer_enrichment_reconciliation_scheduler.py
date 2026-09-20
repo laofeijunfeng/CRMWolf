@@ -40,6 +40,7 @@ class FakeService:
             scanned=2,
             jobs_created=1,
             gates_released=1,
+            gates_cancelled=2,
             refreshes_repaired=0,
             errors=0,
             next_customer_id=11,
@@ -64,6 +65,7 @@ async def test_scheduler_reconcile_once_commits_and_returns_cursor(monkeypatch):
     result = await scheduler.reconcile_once(limit=7, after_customer_id=3)
 
     assert result["jobs_created"] == 1
+    assert result["gates_cancelled"] == 2
     assert result["next_customer_id"] == 11
     assert service.calls == [
         {"team_id": None, "limit": 7, "after_customer_id": 3, "dry_run": False}

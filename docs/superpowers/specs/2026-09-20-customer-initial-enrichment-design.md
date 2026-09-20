@@ -510,9 +510,12 @@ AND 不存在 (team_id, customer_id, plan_version) job
 - 新客户有创建事实但没有 active plan job；
 - job RUNNING lease 过期；
 - RETRY_PENDING 已到期；
+- 客户已删除但 enrichment job 和 deferred Profile run 仍存在：reconciliation 额外扫描没有 Customer row、却存在 nonterminal `not_before_at` run 的 distinct tenant/customer orphan；正式运行 tenant-scoped 取消这些 run，dry-run 精确计数 `gates_cancelled`，不受普通 customer cursor 限制；
 - enrichment 成功但 `profile_refresh_request_id` 为空，或 receipt 在同一 team/customer 下无法解析到 `released:<numeric_run_id>` / request ID 对应 run；过期 receipt 在同一 savepoint 内替换为实际释放的 run，或清空后登记新的 durable refresh；`CUSTOMER_NOT_FOUND` skip 不登记刷新；
 - profile run 被 gate 延后但 first attempt 已结束或 gate deadline 已到；
 - `not_before_at` 已到期但 run 未被 worker 领取。
+
+对账结果把正常 gate 释放与删除客户取消分开：`gates_released` 只统计 release，`gates_cancelled` 按被取消 run 数统计。孤儿扫描只选择仍有 deferred nonterminal run 的 identity，避免干净孤儿占用 limit，并在每个 orphan savepoint 中隔离错误。
 
 重复 ensure 必须由唯一键变成 no-op。提供 diagnostics 与 EXHAUSTED requeue 服务 / 管理端 API，但不需要业务用户确认 UI。
 
