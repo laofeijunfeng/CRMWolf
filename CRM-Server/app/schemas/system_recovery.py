@@ -23,6 +23,14 @@ class CustomerOpportunitySuggestionJobRecoveryCandidate(BaseModel):
     job_public_id: str
 
 
+class CustomerEnrichmentJobRecoveryCandidate(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    team_id: int
+    job_public_id: str
+    purpose: str
+
+
 class CustomerActivityPostCommitRecoveryCandidate(BaseModel):
     """Minimal routing identity emitted by the system post-commit scan."""
 
