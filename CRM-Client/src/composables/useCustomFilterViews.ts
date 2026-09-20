@@ -240,6 +240,7 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
   }
 
   async function createCustomView(filters: ListFilterCondition[]): Promise<void> {
+    const source = captureCurrentSnapshot()
     saving.value = true
     try {
       const view = await viewPreferenceApi.createCustomView(options.viewKey, {
@@ -250,6 +251,9 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
           options.activeDisplayMode?.value,
         )
       })
+      if (!isCustomFilterViewTab(source.activeTab)) {
+        builtInViewSnapshot.value = cloneSnapshot(source)
+      }
       customViews.value = [...customViews.value, view]
       options.activeFilters.value = (view.config.filters ?? []) as unknown as ListFilterCondition[]
       options.activeSorts.value = (view.config.sorts ?? []) as unknown as ListSortCondition[]
@@ -359,7 +363,7 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
       columns: view.config.columns ?? [],
       ...(options.activeDisplayMode === undefined
         ? {}
-        : { displayMode: view.config.display_mode ?? options.builtInDisplayMode ?? options.activeDisplayMode.value }),
+        : { displayMode: view.config.display_mode ?? 'table' }),
     }
     void performViewApply(target, previous)
     return true

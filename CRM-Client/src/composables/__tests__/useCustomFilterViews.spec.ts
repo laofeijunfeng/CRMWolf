@@ -411,6 +411,73 @@ describe('useCustomFilterViews', () => {
     expect(displayMode.value).toBe('board')
   })
 
+  it('restores the exact built-in snapshot after saving it as a custom view', async () => {
+    const activeTab = ref('active')
+    const builtInFilters: ListFilterCondition[] = [
+      { field: 'status', op: 'eq', value: 'ACTIVE' },
+      { field: 'owner_id', op: 'eq', value: 'me' },
+    ]
+    const builtInSorts: ListSortCondition[] = [
+      { field: 'updated_time', direction: 'desc' },
+    ]
+    const builtInColumns: ViewPreferenceItem['config']['columns'] = [
+      { key: 'customer_name', order: 0, visible: true },
+      { key: 'owner_name', order: 1, visible: false },
+    ]
+    const activeFilters = ref<ListFilterCondition[]>(builtInFilters)
+    const activeSorts = ref<ListSortCondition[]>(builtInSorts)
+    const activeColumns = ref<ViewPreferenceItem['config']['columns']>(builtInColumns)
+    const displayMode = ref<ViewDisplayMode>('board')
+    vi.mocked(viewPreferenceApi.createCustomView).mockResolvedValue({
+      ...customView,
+      config: {
+        version: 1,
+        filters: builtInFilters as unknown as Record<string, unknown>[],
+        sorts: builtInSorts as unknown as Record<string, unknown>[],
+        columns: builtInColumns,
+        display_mode: 'board',
+      },
+    })
+    const views = useCustomFilterViews({
+      viewKey: 'business-journeys.list',
+      activeTab,
+      activeFilters,
+      activeSorts,
+      activeColumns,
+      activeDisplayMode: displayMode,
+      refresh: vi.fn().mockResolvedValue(true),
+    })
+
+    await views.saveCurrentAsCustomView()
+    expect(activeTab.value).toBe('custom-view:1')
+
+    expect(views.applyBuiltInTab('active')).toBe(true)
+    expect(activeFilters.value).toEqual(builtInFilters)
+    expect(activeSorts.value).toEqual(builtInSorts)
+    expect(activeColumns.value).toEqual(builtInColumns)
+    expect(displayMode.value).toBe('board')
+  })
+
+  it('defaults legacy custom views without display mode to table', async () => {
+    const activeTab = ref('all')
+    const displayMode = ref<ViewDisplayMode>('board')
+    const views = useCustomFilterViews({
+      viewKey: 'business-journeys.list',
+      activeTab,
+      activeFilters: ref<ListFilterCondition[]>([]),
+      activeSorts: ref<ListSortCondition[]>([]),
+      activeColumns: ref<ViewPreferenceItem['config']['columns']>([]),
+      activeDisplayMode: displayMode,
+      refresh: vi.fn().mockResolvedValue(true),
+    })
+    views.customViews.value = [customView]
+
+    expect(views.applyCustomViewTab('custom-view:1')).toBe(true)
+    await flushPromises()
+
+    expect(displayMode.value).toBe('table')
+  })
+
   it('saves a board-only current snapshot without filters', async () => {
     const activeTab = ref('all')
     const activeFilters = ref<ListFilterCondition[]>([])
