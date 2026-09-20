@@ -14,6 +14,9 @@ const viewPreferenceMocks = vi.hoisted(() => ({
   updateCustomView: vi.fn(),
   deleteCustomView: vi.fn(),
 }))
+const routerMocks = vi.hoisted(() => ({
+  push: vi.fn(),
+}))
 
 vi.mock('@/api/dealJourney', () => ({
   dealJourneyApi: journeyApiMocks,
@@ -26,6 +29,9 @@ vi.mock('@/api/viewPreference', async (importOriginal) => {
     viewPreferenceApi: viewPreferenceMocks,
   }
 })
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: routerMocks.push }),
+}))
 vi.mock('@/composables/usePageTitle', () => ({ usePageTitle: vi.fn() }))
 vi.mock('@/utils/logger', () => ({ logger: { error: vi.fn() } }))
 vi.mock('vue-sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() } }))
@@ -45,12 +51,28 @@ vi.mock('@/views/DealJourneyDetailSheet.vue', () => ({
     }),
   }),
 }))
+vi.mock('@/views/CustomerDetailSheet.vue', () => ({
+  default: defineComponent({
+    name: 'CustomerDetailSheet',
+    props: {
+      customerId: String,
+      visible: Boolean,
+    },
+    emits: ['update:visible', 'refresh', 'view-customer'],
+    setup: props => () => h('div', {
+      'data-testid': 'customer-detail-sheet',
+      'data-visible': String(props.visible),
+      'data-customer-id': props.customerId ?? '',
+    }),
+  }),
+}))
 
 import BusinessJourneys from '@/views/BusinessJourneys.vue'
 import BusinessJourneyTableView from '@/components/business-journey/BusinessJourneyTableView.vue'
 import BusinessJourneyBoardView from '@/components/business-journey/BusinessJourneyBoardView.vue'
 import { useHeaderStore } from '@/stores/header'
 import DealJourneyDetailSheet from '@/views/DealJourneyDetailSheet.vue'
+import CustomerDetailSheet from '@/views/CustomerDetailSheet.vue'
 
 const emptyList = {
   items: [],
@@ -120,7 +142,10 @@ const boardItemFixture = {
 
 const TableStub = defineComponent({
   name: 'BusinessJourneyTableView',
-  emits: ['update:view-display-mode', 'row-click'],
+  props: {
+    viewApplyError: { type: Object, default: null },
+  },
+  emits: ['update:view-display-mode', 'row-click', 'retry-view-apply'],
   setup(_, { emit }) {
     return () => h('button', {
       'data-testid': 'table-projection',
@@ -150,6 +175,7 @@ function mountPage() {
         BusinessJourneyBoardView: BoardStub,
         BusinessJourneyListTools: true,
         DealJourneyDetailSheet: false,
+        CustomerDetailSheet: false,
       },
     },
   })
@@ -247,6 +273,36 @@ describe('BusinessJourneys', () => {
     expect(wrapper.findComponent(BusinessJourneyBoardView).exists()).toBe(true)
   })
 
+  it('keeps a failed custom view apply stable until explicit retry', async () => {
+    viewPreferenceMocks.listCustomViews.mockResolvedValue(customLostTableViewResponse)
+    const wrapper = mountPage()
+    await flushPromises()
+    journeyApiMocks.list.mockClear()
+    const headerStore = useHeaderStore()
+    journeyApiMocks.list.mockRejectedValueOnce(new Error('offline'))
+
+    // Simulate the stale header value being replayed after the composable rolls
+    // the page state back. The watcher must consume it instead of applying again.
+    headerStore.setActiveTab('custom-view:7')
+    await flushPromises()
+    headerStore.setActiveTab('custom-view:7')
+    await flushPromises()
+
+    expect(journeyApiMocks.list).toHaveBeenCalledOnce()
+    expect(wrapper.findComponent(BusinessJourneyTableView).exists()).toBe(true)
+    expect(wrapper.getComponent(BusinessJourneyTableView).props('viewApplyError')).toMatchObject({
+      title: '视图应用失败',
+      retryable: true,
+    })
+    expect(headerStore.activeTab).toBe('all')
+
+    wrapper.getComponent(BusinessJourneyTableView).vm.$emit('retry-view-apply')
+    await flushPromises()
+
+    expect(journeyApiMocks.list).toHaveBeenCalledTimes(2)
+    expect(headerStore.activeTab).toBe('custom-view:7')
+  })
+
   it('keeps table and board last-success state independent across stale failures', async () => {
     const firstList = { ...emptyList, items: [{ public_id: 'djy_table' }], total: 1, total_pages: 1 }
     journeyApiMocks.list.mockResolvedValueOnce(firstList)
@@ -293,6 +349,44 @@ describe('BusinessJourneys', () => {
     expect(wrapper.getComponent(DealJourneyDetailSheet).props()).toMatchObject({
       customerId: null,
       journeyId: null,
+      visible: false,
+    })
+    expect(document.activeElement).toBe(trigger)
+    trigger.remove()
+  })
+
+  it('drills from journey detail into the customer sheet and restores the originating focus', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    const trigger = document.createElement('button')
+    document.body.appendChild(trigger)
+    trigger.focus()
+
+    wrapper.getComponent(BusinessJourneyTableView).vm.$emit('row-click', {
+      customerId: listItemFixture.customer_id,
+      journeyPublicId: listItemFixture.public_id,
+    })
+    await nextTick()
+    wrapper.getComponent(DealJourneyDetailSheet).vm.$emit('view-customer', listItemFixture.customer_id)
+    await nextTick()
+
+    expect(wrapper.getComponent(DealJourneyDetailSheet).props()).toMatchObject({
+      customerId: null,
+      journeyId: null,
+      visible: false,
+    })
+    expect(wrapper.getComponent(CustomerDetailSheet).props()).toMatchObject({
+      customerId: listItemFixture.customer_id,
+      visible: true,
+    })
+    expect(routerMocks.push).not.toHaveBeenCalled()
+
+    wrapper.getComponent(CustomerDetailSheet).vm.$emit('update:visible', false)
+    await nextTick()
+    await nextTick()
+
+    expect(wrapper.getComponent(CustomerDetailSheet).props()).toMatchObject({
+      customerId: null,
       visible: false,
     })
     expect(document.activeElement).toBe(trigger)

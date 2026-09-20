@@ -6,6 +6,7 @@ import BusinessJourneyBoardView from '@/components/business-journey/BusinessJour
 import BusinessJourneyListTools from '@/components/business-journey/BusinessJourneyListTools.vue'
 import BusinessJourneyTableView from '@/components/business-journey/BusinessJourneyTableView.vue'
 import DealJourneyDetailSheet from '@/views/DealJourneyDetailSheet.vue'
+import CustomerDetailSheet from '@/views/CustomerDetailSheet.vue'
 import { createBusinessJourneyListFields } from '@/components/business-journey/businessJourneyListFields'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
@@ -49,6 +50,8 @@ const selectedJourneyCustomerName = ref<string | undefined>(undefined)
 const selectedJourneyId = ref<string | null>(null)
 const journeyDetailVisible = ref(false)
 let journeyDetailTrigger: HTMLElement | null = null
+const selectedCustomerId = ref<string | null>(null)
+const customerDetailVisible = ref(false)
 
 const builtInFilters: Record<string, ListFilterCondition[]> = {
   all: [],
@@ -285,17 +288,41 @@ function handleRowClick(payload: { customerId: string; journeyPublicId: string }
   journeyDetailVisible.value = true
 }
 
+function clearJourneyDetailSelection(): void {
+  journeyDetailVisible.value = false
+  selectedJourneyCustomerId.value = null
+  selectedJourneyCustomerName.value = undefined
+  selectedJourneyId.value = null
+}
+
+async function restoreJourneyTriggerFocus(): Promise<void> {
+  const trigger = journeyDetailTrigger
+  journeyDetailTrigger = null
+  await nextTick()
+  if (trigger?.isConnected === true) trigger.focus()
+}
+
 async function handleJourneyDetailVisibleChange(visible: boolean): Promise<void> {
   journeyDetailVisible.value = visible
   if (visible) return
 
-  const trigger = journeyDetailTrigger
-  selectedJourneyCustomerId.value = null
-  selectedJourneyCustomerName.value = undefined
-  selectedJourneyId.value = null
-  journeyDetailTrigger = null
-  await nextTick()
-  if (trigger?.isConnected === true) trigger.focus()
+  clearJourneyDetailSelection()
+  if (customerDetailVisible.value) return
+  await restoreJourneyTriggerFocus()
+}
+
+function handleViewCustomer(customerId: string): void {
+  clearJourneyDetailSelection()
+  selectedCustomerId.value = customerId
+  customerDetailVisible.value = true
+}
+
+async function handleCustomerDetailVisibleChange(visible: boolean): Promise<void> {
+  customerDetailVisible.value = visible
+  if (visible) return
+
+  selectedCustomerId.value = null
+  await restoreJourneyTriggerFocus()
 }
 
 function refreshJourneyProjection(): void {
@@ -306,6 +333,10 @@ watchEffect(() => {
   const nextTab = headerStore.activeTab
   if (nextTab === '' || nextTab === activeTab.value) return
   pagination.current = 1
+  if (customFilterViews.consumeFailedViewApply(nextTab)) {
+    headerStore.activeTab = activeTab.value
+    return
+  }
   if (customFilterViews.applyCustomViewTab(nextTab)) return
   customFilterViews.applyBuiltInTab(nextTab)
   void refreshActiveProjection()
@@ -404,6 +435,14 @@ onMounted(() => {
     :journey-id="selectedJourneyId"
     :visible="journeyDetailVisible"
     @update:visible="handleJourneyDetailVisibleChange"
+    @refresh="refreshJourneyProjection"
+    @view-customer="handleViewCustomer"
+  />
+
+  <CustomerDetailSheet
+    :customer-id="selectedCustomerId"
+    :visible="customerDetailVisible"
+    @update:visible="handleCustomerDetailVisibleChange"
     @refresh="refreshJourneyProjection"
   />
 </template>
