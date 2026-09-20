@@ -2,11 +2,11 @@
 import { computed, ref, watch } from 'vue'
 import { RefreshCw } from 'lucide-vue-next'
 import {
-  ListAdvancedTools,
   ListFilterPopover,
   TableToolbarButton
 } from '@/components/crmwolf'
 import JourneySearch from '@/components/crmwolf/DataTableSearch.vue'
+import ListAdvancedTools from '@/components/crmwolf/ListAdvancedTools.vue'
 import { projectListFieldCatalog } from '@/components/crmwolf/listFieldCatalog'
 import type { ViewDisplayMode, ViewPreferenceConfig } from '@/api/viewPreference'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
@@ -86,7 +86,7 @@ function handleColumnConfigSave(): void {
     <JourneySearch
       :model-value="search"
       placeholder="搜索旅程、客户或商机"
-      :loading="loading"
+      :loading="loading ?? false"
       @update:model-value="emit('update:search', $event)"
       @search="emit('search-apply', $event)"
       @clear="emit('search-clear')"
@@ -95,7 +95,7 @@ function handleColumnConfigSave(): void {
       :model-value="filters"
       :fields="projected.filterFields"
       save-view-enabled
-      :save-view-loading="saving"
+      :save-view-loading="saving ?? false"
       @update:model-value="emit('update:filters', $event)"
       @apply="emit('filter-apply', $event)"
       @reset="emit('filter-reset')"
@@ -117,7 +117,7 @@ function handleColumnConfigSave(): void {
       view-config-trigger-label="视图配置"
       view-config-panel-title="视图配置"
       can-save-current-view
-      :view-save-loading="saving"
+      :view-save-loading="saving ?? false"
       @update:sorts="emit('update:sorts', $event)"
       @sort-apply="emit('sort-apply', $event)"
       @sort-reset="emit('sort-reset')"
