@@ -6,15 +6,14 @@ import DealJourneyDetailHost from '@/components/business-journey/DealJourneyDeta
 
 interface Props {
   customerId: string | null
-  customerName?: string
+  customerName?: string | undefined
   journeyId: string | null
   visible: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  customerName: undefined,
+  customerName: '',
 })
-
 const emit = defineEmits<{
   'update:visible': [value: boolean]
   refresh: []

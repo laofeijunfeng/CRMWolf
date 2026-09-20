@@ -23,7 +23,7 @@ import { handleApiError } from '@/utils/errorHandler'
 
 interface Props {
   customerId: string
-  customerName?: string
+  customerName?: string | undefined
   journeyId: string
   journey?: DealJourney | null
   embedded?: boolean
@@ -63,7 +63,7 @@ interface SelectedPaymentRecord {
 }
 
 withDefaults(defineProps<Props>(), {
-  customerName: undefined,
+  customerName: '',
   journey: null,
   embedded: false,
   canEditCustomerContext: null,
@@ -290,11 +290,11 @@ async function handleRecordEditSubmit(recordId: number, payload: PaymentRecordUp
     ref="journeyContentRef"
     :customer-id="customerId"
     :journey-id="journeyId"
-    :journey="journey"
-    :embedded="embedded"
+    :journey="journey ?? null"
+    :embedded="embedded ?? false"
     :show-breadcrumb="false"
     :customer-context="{ customerId, customerName }"
-    :can-edit-customer-context="canEditCustomerContext"
+    :can-edit-customer-context="canEditCustomerContext ?? null"
     @back="emit('close')"
     @close="emit('close')"
     @refresh="emit('refresh')"
