@@ -22,7 +22,7 @@ from app.services.customer_intelligence_trace_service import visible_trace_event
 from app.utils.time import business_now
 
 if TYPE_CHECKING:
-    from sqlalchemy.orm import Session
+    from sqlalchemy.orm import Query, Session
 
     from app.services.customer_intelligence_event_service import CustomerIntelligenceEvent
 
@@ -196,6 +196,19 @@ class CustomerIntelligenceRunService:
             db.flush()
         return run
 
+    def count_deferred_for_customer(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        customer_id: int,
+    ) -> int:
+        return self._deferred_for_customer_query(
+            db,
+            team_id=team_id,
+            customer_id=customer_id,
+        ).count()
+
     def release_deferred_for_customer(
         self,
         db: Session,
@@ -204,12 +217,10 @@ class CustomerIntelligenceRunService:
         customer_id: int,
     ) -> list[int]:
         runs = (
-            db.query(CustomerIntelligenceRun)
-            .filter(
-                CustomerIntelligenceRun.team_id == team_id,
-                CustomerIntelligenceRun.customer_id == customer_id,
-                CustomerIntelligenceRun.status.not_in(tuple(TERMINAL_RUN_STATUSES)),
-                CustomerIntelligenceRun.not_before_at.is_not(None),
+            self._deferred_for_customer_query(
+                db,
+                team_id=team_id,
+                customer_id=customer_id,
             )
             .order_by(CustomerIntelligenceRun.id.asc())
             .populate_existing()
@@ -222,6 +233,20 @@ class CustomerIntelligenceRunService:
         if released:
             db.flush()
         return released
+
+    @staticmethod
+    def _deferred_for_customer_query(
+        db: Session,
+        *,
+        team_id: int,
+        customer_id: int,
+    ) -> Query[CustomerIntelligenceRun]:
+        return db.query(CustomerIntelligenceRun).filter(
+            CustomerIntelligenceRun.team_id == team_id,
+            CustomerIntelligenceRun.customer_id == customer_id,
+            CustomerIntelligenceRun.status.not_in(tuple(TERMINAL_RUN_STATUSES)),
+            CustomerIntelligenceRun.not_before_at.is_not(None),
+        )
 
     def claim_for_execution(
         self,

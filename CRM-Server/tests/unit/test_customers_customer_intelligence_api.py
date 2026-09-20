@@ -1,35 +1,33 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
+from fastapi import HTTPException
+from fastapi.routing import APIRoute
 from sqlalchemy import BigInteger, create_engine
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.api import customers as customers_api
 from app.api import customer_ai as customer_ai_api
 from app.api import customer_enrichment as customer_enrichment_api
-from app.services.customer_enrichment_contracts import CustomerEnrichmentJobStatus
-from fastapi import HTTPException
-from fastapi.routing import APIRoute
+from app.api import customers as customers_api
 from app.core.database import Base
 from app.models.customer import Customer
 from app.models.customer_enrichment_job import CustomerEnrichmentJob
 from app.models.industry import Industry
+from app.schemas.customer import ConvertLeadToCustomer
+from app.services.ai_parser import customer_parser as customer_parser_module
+from app.services.ai_parser.customer_parser import CustomerAIParser
+from app.services.customer_enrichment_contracts import CustomerEnrichmentJobStatus
 from app.services.customer_enrichment_plan import ACTIVE_CUSTOMER_ENRICHMENT_PLAN
 from app.services.customer_enrichment_reconciliation_service import (
     CustomerEnrichmentReconciliationResult,
 )
-from app.services.ai_parser import customer_parser as customer_parser_module
-from app.services.ai_parser.customer_parser import CustomerAIParser
 from app.services.customer_intelligence_refresh_service import CustomerIntelligenceCommittedEventRequest
 from app.services.customer_lifecycle_post_commit_coordinator import CustomerLifecyclePostCommitCoordinator
-
-from app.schemas.customer import ConvertLeadToCustomer
-
-from unittest.mock import MagicMock
 
 
 @compiles(BigInteger, "sqlite")
@@ -626,6 +624,77 @@ def test_enrichment_job_list_passes_team_scope_and_omits_sensitive_payloads(monk
     assert "result_json" not in dumped["items"][0]
     assert "error_message" not in dumped["items"][0]
     assert "account_name" not in dumped["items"][0]
+
+
+def test_enrichment_job_list_total_matches_joined_rows_when_orphan_exists():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(
+        engine,
+        tables=[Customer.__table__, CustomerEnrichmentJob.__table__],
+    )
+    db = sessionmaker(bind=engine, expire_on_commit=False)()
+    try:
+        customer = Customer(
+            team_id=2,
+            account_name="visible-customer",
+            city="X",
+            creator_id="9",
+        )
+        db.add(customer)
+        db.flush()
+        now = customer_enrichment_api.business_now()
+        db.add_all(
+            [
+                CustomerEnrichmentJob(
+                    team_id=2,
+                    customer_id=customer.id,
+                    purpose="HISTORICAL_BACKFILL",
+                    plan_version=ACTIVE_CUSTOMER_ENRICHMENT_PLAN.version,
+                    requested_fields_json=["industry"],
+                    status="QUEUED",
+                    available_at=now,
+                    attempt_count=0,
+                    max_attempts=3,
+                    run_id="visible-run",
+                    graph_thread_id="visible-thread",
+                    requeue_count=0,
+                ),
+                CustomerEnrichmentJob(
+                    team_id=2,
+                    customer_id=999,
+                    purpose="HISTORICAL_BACKFILL",
+                    plan_version=ACTIVE_CUSTOMER_ENRICHMENT_PLAN.version,
+                    requested_fields_json=["industry"],
+                    status="QUEUED",
+                    available_at=now,
+                    attempt_count=0,
+                    max_attempts=3,
+                    run_id="orphan-run",
+                    graph_thread_id="orphan-thread",
+                    requeue_count=0,
+                ),
+            ]
+        )
+        db.flush()
+
+        rows, total = customer_enrichment_api.list_enrichment_jobs_for_team(
+            db,
+            team_id=2,
+            status_filter=None,
+            purpose=None,
+            skip=0,
+            limit=20,
+        )
+
+        assert len(rows) == 1
+        assert total == 1
+    finally:
+        db.close()
+        engine.dispose()
 
 
 def test_enrichment_backfill_preview_returns_exact_partition_counts(monkeypatch):

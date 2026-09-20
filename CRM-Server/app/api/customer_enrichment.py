@@ -46,12 +46,6 @@ def list_enrichment_jobs_for_team(
     skip: int,
     limit: int,
 ) -> tuple[list[tuple[CustomerEnrichmentJob, Customer]], int]:
-    base = db.query(CustomerEnrichmentJob).filter(CustomerEnrichmentJob.team_id == team_id)
-    if status_filter:
-        base = base.filter(CustomerEnrichmentJob.status == status_filter)
-    if purpose:
-        base = base.filter(CustomerEnrichmentJob.purpose == purpose)
-    total = base.count()
     rows = (
         db.query(CustomerEnrichmentJob, Customer)
         .join(
@@ -67,11 +61,11 @@ def list_enrichment_jobs_for_team(
         rows = rows.filter(CustomerEnrichmentJob.status == status_filter)
     if purpose:
         rows = rows.filter(CustomerEnrichmentJob.purpose == purpose)
+    total = rows.count()
     return (
         rows.order_by(CustomerEnrichmentJob.id.desc()).offset(skip).limit(limit).all(),
         total,
     )
-
 
 def build_backfill_preview(db: Session, *, team_id: int) -> dict[str, int | bool]:
     active_plan_jobs = db.query(CustomerEnrichmentJob.customer_id).filter(

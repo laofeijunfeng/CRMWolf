@@ -120,7 +120,11 @@ class CustomerEnrichmentReconciliationService:
 
                     if job is not None and self._gate_should_release(job, now=now):
                         if dry_run:
-                            customer_gates_released = 1
+                            customer_gates_released = self.run_service.count_deferred_for_customer(
+                                db,
+                                team_id=int(job.team_id),
+                                customer_id=int(job.customer_id),
+                            )
                         else:
                             released = self.run_service.release_deferred_for_customer(
                                 db,

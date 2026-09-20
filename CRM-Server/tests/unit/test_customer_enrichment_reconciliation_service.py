@@ -12,6 +12,10 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base
 from app.models.customer import Customer
 from app.models.customer_enrichment_job import CustomerEnrichmentJob
+from app.models.customer_intelligence_run import (
+    CustomerIntelligenceRun,
+    CustomerIntelligenceRunStatus,
+)
 from app.services.customer_enrichment_contracts import (
     CustomerEnrichmentJobStatus,
     CustomerEnrichmentPurpose,
@@ -21,6 +25,7 @@ from app.services.customer_enrichment_profile_coordinator import CustomerEnrichm
 from app.services.customer_enrichment_reconciliation_service import (
     CustomerEnrichmentReconciliationService,
 )
+from app.services.customer_intelligence_run_service import CustomerIntelligenceRunService
 from app.utils.time import business_now
 
 
@@ -38,7 +43,11 @@ def db_session():
     )
     Base.metadata.create_all(
         engine,
-        tables=[Customer.__table__, CustomerEnrichmentJob.__table__],
+        tables=[
+            Customer.__table__,
+            CustomerEnrichmentJob.__table__,
+            CustomerIntelligenceRun.__table__,
+        ],
     )
     session = sessionmaker(bind=engine, expire_on_commit=False)()
     yield session
@@ -88,6 +97,34 @@ def _job(
     db.add(job)
     db.flush()
     return job
+
+
+def _profile_run(
+    db,
+    customer: Customer,
+    *,
+    sequence: int,
+    status: str = CustomerIntelligenceRunStatus.PENDING,
+    deferred: bool = True,
+) -> CustomerIntelligenceRun:
+    now = business_now()
+    run = CustomerIntelligenceRun(
+        run_key=f"run-key-{customer.id}-{sequence}",
+        request_id=f"request-{customer.id}-{sequence}",
+        event_key=f"event-{customer.id}-{sequence}",
+        tenant_id=customer.team_id,
+        team_id=customer.team_id,
+        customer_id=customer.id,
+        trigger_type="customer_created",
+        scope="full",
+        status=status,
+        attempt_count=0,
+        max_attempts=3,
+        not_before_at=now if deferred else None,
+    )
+    db.add(run)
+    db.flush()
+    return run
 
 
 class FakeRunService:
@@ -185,6 +222,36 @@ def test_reconciliation_dry_run_does_not_mutate_and_returns_stable_cursor(db_ses
     assert next_page.next_customer_id == second.id
 
 
+
+
+@pytest.mark.parametrize("deferred_count", [0, 2])
+def test_reconciliation_dry_run_counts_exact_releasable_runs_without_updates(
+    db_session,
+    deferred_count,
+):
+    customer = _customer(db_session, industry="software")
+    _job(db_session, customer, gate_expired=True)
+    deferred_runs = [
+        _profile_run(db_session, customer, sequence=index)
+        for index in range(deferred_count)
+    ]
+    terminal = _profile_run(
+        db_session,
+        customer,
+        sequence=99,
+        status=CustomerIntelligenceRunStatus.SUCCESS,
+    )
+    service = CustomerEnrichmentReconciliationService(
+        run_service=CustomerIntelligenceRunService(),
+        profile_coordinator=FakeProfileCoordinator(),
+        max_attempts=3,
+    )
+
+    result = service.reconcile_once(db_session, team_id=2, limit=50, dry_run=True)
+
+    assert result.gates_released == deferred_count
+    assert all(run.not_before_at is not None for run in deferred_runs)
+    assert terminal.not_before_at is not None
 
 def test_reconciliation_records_released_run_as_terminal_profile_receipt(db_session):
     customer = _customer(db_session, industry="software")
