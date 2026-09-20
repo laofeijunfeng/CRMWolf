@@ -29,7 +29,7 @@ import DealJourneysPanel from '@/components/panels/DealJourneysPanel.vue'
 import InvoicesPanel from '@/components/panels/InvoicesPanel.vue'
 import LicensePanel from '@/components/panels/LicensePanel.vue'
 import CustomerMembersPanel from '@/components/panels/CustomerMembersPanel.vue'
-import DealJourneyDetailContent from '@/components/panels/DealJourneyDetailContent.vue'
+import DealJourneyDetailHost from '@/components/business-journey/DealJourneyDetailHost.vue'
 import ContractDetailContent from '@/components/panels/ContractDetailContent.vue'
 import PaymentPlanDetailContent from '@/components/panels/PaymentPlanDetailContent.vue'
 import PaymentRecordDetailContent from '@/components/panels/PaymentRecordDetailContent.vue'
@@ -131,35 +131,6 @@ const selectedJourneyId = ref<string | null>(null)
 const highlightedJourneyId = ref<string | null>(null)
 const restoreFocusJourneyId = ref<string | null>(null)
 
-interface DealJourneyDetailContentExpose {
-  refresh: () => Promise<void> | void
-}
-
-const dealJourneyDetailContentRef = ref<DealJourneyDetailContentExpose | null>(null)
-
-interface ContractOpportunityContext {
-  id: string
-  opportunity_name: string
-  customer_id: string
-  customer_name?: string
-  total_amount: number
-  user_count: number
-  license_type: string
-  subscription_years: number | null
-}
-
-interface CreateContractPayload {
-  opportunityId: string
-  customerId: string
-  customerName: string
-  opportunityName: string
-  totalAmount: number
-  userCount: number
-  licenseType: string
-  subscriptionYears: number | null
-}
-
-const fixedContractOpportunity = ref<ContractOpportunityContext | null>(null)
 
 // ==================== Data Loading State ====================
 const customer = ref<CustomerDetailResponse | null>(null)
@@ -247,7 +218,6 @@ const handleCreateContractForCustomer = (): void => {
     return
   }
   editingContract.value = null
-  fixedContractOpportunity.value = null
   contractDialogOpen.value = true
 }
 
@@ -475,22 +445,22 @@ const canCreateContractForCustomer = computed(() => (
   permissionStore.hasPermission('contract:create') && canEditCurrentCustomer.value
 ))
 
-const canEditContractRow = (contract: ContractListResponse): boolean => {
+const canEditCustomerContractRow = (contract: ContractListResponse): boolean => {
   if (contract.status !== 'DRAFT') return false
   if (permissionStore.hasPermission('contract:edit:all')) return true
   return permissionStore.hasPermission('contract:edit:own')
     && contract.owner_id === String(userStore.userInfo?.id ?? '')
 }
 
-const canSubmitContractApprovalRow = (contract: ContractListResponse): boolean => (
+const canSubmitCustomerContractApprovalRow = (contract: ContractListResponse): boolean => (
   contract.status === 'DRAFT'
 )
 
-const canWithdrawContractApprovalRow = (contract: ContractListResponse): boolean => (
+const canWithdrawCustomerContractApprovalRow = (contract: ContractListResponse): boolean => (
   contract.approval_phase === 'pending_review'
 )
 
-const canDeleteContractRow = (contract: ContractListResponse): boolean => {
+const canDeleteCustomerContractRow = (contract: ContractListResponse): boolean => {
   if (contract.approval_phase === 'pending_review' || contract.approval_phase === 'approved') return false
   if (contract.status !== 'DRAFT') return false
   if (permissionStore.hasPermission('contract:delete:all')) return true
@@ -1050,55 +1020,29 @@ const handleJourneyDetailRefresh = async (): Promise<void> => {
   }
   emit('refresh')
 }
-const handleCreateContractFromJourney = (payload: CreateContractPayload): void => {
-  editingContract.value = null
-  fixedContractOpportunity.value = {
-    id: payload.opportunityId,
-    opportunity_name: payload.opportunityName,
-    customer_id: payload.customerId,
-    customer_name: payload.customerName,
-    total_amount: payload.totalAmount,
-    user_count: payload.userCount,
-    license_type: payload.licenseType,
-    subscription_years: payload.subscriptionYears
-  }
-  contractDialogOpen.value = true
-}
 
 
 
-const handleContractDialogClose = (open: boolean): void => {
+const handleCustomerContractDialogClose = (open: boolean): void => {
   contractDialogOpen.value = open
-  if (!open) {
-    editingContract.value = null
-    fixedContractOpportunity.value = null
-  }
+  if (!open) editingContract.value = null
 }
 
-const handleContractSuccess = async (): Promise<void> => {
+const handleCustomerContractSuccess = async (): Promise<void> => {
   contractDialogOpen.value = false
   editingContract.value = null
-  fixedContractOpportunity.value = null
-
   const refreshed = await retryPanel('contracts')
   warnIfCustomerDetailRefreshFailed(refreshed, '合同更新')
-  if (selectedJourneyId.value !== null) {
-    await dealJourneyDetailContentRef.value?.refresh()
-  }
   emit('refresh')
 }
 
-const refreshContractRelations = async (): Promise<void> => {
-
+const refreshCustomerContractRelations = async (): Promise<void> => {
   const refreshed = await retryPanel('contracts')
   warnIfCustomerDetailRefreshFailed(refreshed, '合同操作')
-  if (selectedJourneyId.value !== null) {
-    await dealJourneyDetailContentRef.value?.refresh()
-  }
   emit('refresh')
 }
 
-const handleEditContract = async (contract: ContractListResponse): Promise<void> => {
+const handleEditCustomerContract = async (contract: ContractListResponse): Promise<void> => {
   try {
     editingContract.value = await contractApi.getContract(contract.id)
     contractDialogOpen.value = true
@@ -1107,7 +1051,7 @@ const handleEditContract = async (contract: ContractListResponse): Promise<void>
   }
 }
 
-const handleDeleteContract = async (contract: ContractListResponse): Promise<void> => {
+const handleDeleteCustomerContract = async (contract: ContractListResponse): Promise<void> => {
   const confirmed = await confirmDelete(`合同 "${contract.contract_name}"`)
   if (!confirmed) return
 
@@ -1118,27 +1062,27 @@ const handleDeleteContract = async (contract: ContractListResponse): Promise<voi
       syncNavigationFromContext()
     }
     toast.success('合同删除成功')
-    await refreshContractRelations()
+    await refreshCustomerContractRelations()
   } catch (error) {
     handleApiError(error, '删除合同')
   }
 }
 
-const handleSubmitContractApproval = async (contract: ContractListResponse): Promise<void> => {
+const handleSubmitCustomerContractApproval = async (contract: ContractListResponse): Promise<void> => {
   try {
     await approvalGenericApi.submitApproval('CONTRACT', contract.id)
     toast.success('合同已提交审批')
-    await refreshContractRelations()
+    await refreshCustomerContractRelations()
   } catch (error) {
     handleApiError(error, '提交审批')
   }
 }
 
-const handleWithdrawContractApproval = async (contract: ContractListResponse): Promise<void> => {
+const handleWithdrawCustomerContractApproval = async (contract: ContractListResponse): Promise<void> => {
   try {
     await approvalGenericApi.cancelApproval('CONTRACT', contract.id)
     toast.success('合同审批已撤回')
-    await refreshContractRelations()
+    await refreshCustomerContractRelations()
   } catch (error) {
     handleApiError(error, '撤回审批')
   }
@@ -1248,25 +1192,6 @@ const handleViewContract = (contractId: number): void => {
   selectedRecord.value = null
 }
 
-const handleViewContractFromJourney = (contractId: number): void => {
-  const journeyId = selectedJourneyId.value
-  if (journeyId !== null && props.customerId !== null) {
-    const currentRoot = detailContextStack.nodes.value[0]
-    if (currentRoot?.type !== 'customer' || currentRoot.id !== props.customerId) {
-      detailContextStack.reset([createCustomerContextNode(props.customerId)])
-    }
-    detailContextStack.push(createJourneyContextNode(journeyId))
-    detailContextStack.push({
-      ...createContractContextNode(contractId),
-      parentType: 'journey',
-      parentId: journeyId
-    })
-  }
-  selectedJourneyId.value = null
-  selectedContractId.value = contractId
-  selectedPlanId.value = null
-  selectedRecord.value = null
-}
 
 const handleViewPaymentPlan = (planId: number, plan?: PaymentPlanResponse): void => {
   if (props.customerId === null) return
@@ -1390,9 +1315,7 @@ const handleRecordEdit = (): void => {
 
 const handleRecordEditDialogOpenChange = (open: boolean): void => {
   recordEditDialogOpen.value = open
-  if (!open) {
-    isRecordResubmitMode.value = false
-  }
+  if (!open) isRecordResubmitMode.value = false
 }
 
 const handleRecordEditSubmit = async (recordId: number, payload: PaymentRecordUpdate): Promise<void> => {
@@ -1400,20 +1323,21 @@ const handleRecordEditSubmit = async (recordId: number, payload: PaymentRecordUp
   try {
     await paymentApi.updatePaymentRecord(recordId, payload)
     if (isRecordResubmitMode.value) {
-      const res = await approvalStore.submitEntity('PAYMENT', recordId)
-      toast.success(res.approval_id === 0 ? '未配置审批流，已转为财务确认' : '已重新提交审批')
+      const response = await approvalStore.submitEntity('PAYMENT', recordId)
+      toast.success(response.approval_id === 0 ? '未配置审批流，已转为财务确认' : '已重新提交审批')
     } else {
       toast.success('回款记录更新成功')
     }
     recordEditDialogOpen.value = false
     isRecordResubmitMode.value = false
     await handlePlanDetailRefresh()
-  } catch (error: unknown) {
+  } catch (error) {
     handleApiError(error, isRecordResubmitMode.value ? '重新提交审批' : '更新回款记录')
   } finally {
     recordEditSubmitting.value = false
   }
 }
+
 
 // Contract detail approval handlers (Task 6 fix)
 const handleContractApprove = async (): Promise<void> => {
@@ -1496,9 +1420,6 @@ watch(() => props.visible, (visible): void => {
     deployments.value = []
     // Clear nested sheet states
     selectedContractId.value = null
-    selectedPlanId.value = null
-    selectedRecord.value = null
-    fixedContractOpportunity.value = null
     customerEditDialogOpen.value = false
     deploymentDialogOpen.value = false
   }
@@ -1548,26 +1469,17 @@ onBeforeUnmount(() => {
           @close="handleContextClose"
           @navigate="handleContextNavigate"
         >
-          <DealJourneyDetailContent
+          <DealJourneyDetailHost
             v-if="selectedJourneyId !== null"
-            ref="dealJourneyDetailContentRef"
             :journey-id="selectedJourneyId"
             :customer-id="customerId ?? ''"
+            :customer-name="customer?.account_name"
             :journey="selectedJourney"
             embedded
-            :show-breadcrumb="false"
-            :customer-context="customerId === null ? null : { customerId, customerName: customer?.account_name }"
             :can-edit-customer-context="canEditCurrentCustomer"
-            @back="handleBackFromJourney"
-            @close="handleContextClose"
+            @close="handleBackFromJourney"
             @refresh="handleJourneyDetailRefresh"
-            @view-contract="handleViewContractFromJourney"
-            @view-payment-plan="handleViewPaymentPlan"
-            @create-contract="handleCreateContractFromJourney"
-            @edit-contract="handleEditContract"
-            @submit-contract-approval="handleSubmitContractApproval"
-            @withdraw-contract-approval="handleWithdrawContractApproval"
-            @delete-contract="handleDeleteContract"
+            @view-customer="emit('view-customer', $event)"
           />
 
           <ContractDetailContent
@@ -1775,16 +1687,16 @@ onBeforeUnmount(() => {
                 :customer-id="customerId ?? ''"
                 :contracts="contracts"
                 :show-add="canCreateContractForCustomer"
-                :can-edit="canEditContractRow"
-                :can-submit-approval="canSubmitContractApprovalRow"
-                :can-withdraw-approval="canWithdrawContractApprovalRow"
-                :can-delete="canDeleteContractRow"
+                :can-edit="canEditCustomerContractRow"
+                :can-submit-approval="canSubmitCustomerContractApprovalRow"
+                :can-withdraw-approval="canWithdrawCustomerContractApprovalRow"
+                :can-delete="canDeleteCustomerContractRow"
                 @add="handleCreateContractForCustomer"
                 @view="handleViewContract"
-                @edit="handleEditContract"
-                @submit-approval="handleSubmitContractApproval"
-                @withdraw-approval="handleWithdrawContractApproval"
-                @delete="handleDeleteContract"
+                @edit="handleEditCustomerContract"
+                @submit-approval="handleSubmitCustomerContractApproval"
+                @withdraw-approval="handleWithdrawCustomerContractApproval"
+                @delete="handleDeleteCustomerContract"
               />
 
               <ContactsPanel
@@ -2031,9 +1943,8 @@ onBeforeUnmount(() => {
     :customer-locked="true"
     :open="contractDialogOpen"
     :contract="editingContract"
-    :fixed-opportunity="fixedContractOpportunity"
-    @update:open="handleContractDialogClose"
-    @success="handleContractSuccess"
+    @update:open="handleCustomerContractDialogClose"
+    @success="handleCustomerContractSuccess"
   />
 
   <InvoiceTitleFormDialog

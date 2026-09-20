@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { defineComponent, h } from 'vue'
+import { defineComponent, h, nextTick } from 'vue'
 
 const journeyApiMocks = vi.hoisted(() => ({
   list: vi.fn(),
@@ -29,11 +29,28 @@ vi.mock('@/api/viewPreference', async (importOriginal) => {
 vi.mock('@/composables/usePageTitle', () => ({ usePageTitle: vi.fn() }))
 vi.mock('@/utils/logger', () => ({ logger: { error: vi.fn() } }))
 vi.mock('vue-sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() } }))
+vi.mock('@/views/DealJourneyDetailSheet.vue', () => ({
+  default: defineComponent({
+    name: 'DealJourneyDetailSheet',
+    props: {
+      customerId: String,
+      customerName: String,
+      journeyId: String,
+      visible: Boolean,
+    },
+    emits: ['update:visible', 'refresh', 'view-customer'],
+    setup: props => () => h('div', {
+      'data-testid': 'journey-detail-sheet',
+      'data-visible': String(props.visible),
+    }),
+  }),
+}))
 
 import BusinessJourneys from '@/views/BusinessJourneys.vue'
 import BusinessJourneyTableView from '@/components/business-journey/BusinessJourneyTableView.vue'
 import BusinessJourneyBoardView from '@/components/business-journey/BusinessJourneyBoardView.vue'
 import { useHeaderStore } from '@/stores/header'
+import DealJourneyDetailSheet from '@/views/DealJourneyDetailSheet.vue'
 
 const emptyList = {
   items: [],
@@ -90,6 +107,17 @@ const customLostTableViewResponse = {
 }
 
 
+const listItemFixture = {
+  customer_id: 'cus_table',
+  customer_name: '表格客户',
+  public_id: 'djy_table',
+}
+
+const boardItemFixture = {
+  customerId: 'cus_board',
+  journeyPublicId: 'djy_board',
+}
+
 const TableStub = defineComponent({
   name: 'BusinessJourneyTableView',
   emits: ['update:view-display-mode', 'row-click'],
@@ -121,6 +149,7 @@ function mountPage() {
         BusinessJourneyTableView: TableStub,
         BusinessJourneyBoardView: BoardStub,
         BusinessJourneyListTools: true,
+        DealJourneyDetailSheet: false,
       },
     },
   })
@@ -238,5 +267,51 @@ describe('BusinessJourneys', () => {
 
     expect(wrapper.getComponent(BusinessJourneyBoardView).props('board')).not.toBeNull()
     expect(wrapper.getComponent(BusinessJourneyBoardView).props('errorMessage')).toContain('上次成功加载的数据')
+  })
+
+  it('opens from table and restores the originating focus after close', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    const trigger = document.createElement('button')
+    document.body.appendChild(trigger)
+    trigger.focus()
+
+    wrapper.getComponent(BusinessJourneyTableView).vm.$emit('row-click', {
+      customerId: listItemFixture.customer_id,
+      journeyPublicId: listItemFixture.public_id,
+    })
+    await nextTick()
+
+    expect(wrapper.getComponent(DealJourneyDetailSheet).props()).toMatchObject({
+      customerId: listItemFixture.customer_id,
+      journeyId: listItemFixture.public_id,
+      visible: true,
+    })
+
+    wrapper.getComponent(DealJourneyDetailSheet).vm.$emit('update:visible', false)
+    await nextTick()
+    expect(wrapper.getComponent(DealJourneyDetailSheet).props()).toMatchObject({
+      customerId: null,
+      journeyId: null,
+      visible: false,
+    })
+    expect(document.activeElement).toBe(trigger)
+    trigger.remove()
+  })
+
+  it('opens the same independent sheet from the board public-id payload', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    wrapper.getComponent(BusinessJourneyTableView).vm.$emit('update:view-display-mode', 'board')
+    await flushPromises()
+
+    wrapper.getComponent(BusinessJourneyBoardView).vm.$emit('row-click', boardItemFixture)
+    await nextTick()
+
+    expect(wrapper.getComponent(DealJourneyDetailSheet).props()).toMatchObject({
+      customerId: boardItemFixture.customerId,
+      journeyId: boardItemFixture.journeyPublicId,
+      visible: true,
+    })
   })
 })

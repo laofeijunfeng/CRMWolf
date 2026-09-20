@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch, watchEffect } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch, watchEffect } from 'vue'
 import type { ViewDisplayMode, ViewPreferenceConfig } from '@/api/viewPreference'
 import { dealJourneyApi, type BusinessJourneyTab } from '@/api/dealJourney'
 import BusinessJourneyBoardView from '@/components/business-journey/BusinessJourneyBoardView.vue'
 import BusinessJourneyListTools from '@/components/business-journey/BusinessJourneyListTools.vue'
 import BusinessJourneyTableView from '@/components/business-journey/BusinessJourneyTableView.vue'
+import DealJourneyDetailSheet from '@/views/DealJourneyDetailSheet.vue'
 import { createBusinessJourneyListFields } from '@/components/business-journey/businessJourneyListFields'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
@@ -43,6 +44,11 @@ const boardErrorMessage = ref('')
 const board = ref<BusinessJourneyBoardResponse | null>(null)
 const boardRequestSequence = ref(0)
 const boardHasSuccess = ref(false)
+const selectedJourneyCustomerId = ref<string | null>(null)
+const selectedJourneyCustomerName = ref<string | undefined>(undefined)
+const selectedJourneyId = ref<string | null>(null)
+const journeyDetailVisible = ref(false)
+let journeyDetailTrigger: HTMLElement | null = null
 
 const builtInFilters: Record<string, ListFilterCondition[]> = {
   all: [],
@@ -261,9 +267,39 @@ function handlePageSizeChange(pageSize: number): void {
   void loadTable()
 }
 
+function findCustomerName(customerId: string, journeyPublicId: string): string | undefined {
+  const tableMatch = tableItems.value.find(item => item.customer_id === customerId && item.public_id === journeyPublicId)
+  if (tableMatch !== undefined) return tableMatch.customer_name
+
+  const boardMatch = board.value?.columns
+    .flatMap(column => column.cards)
+    .find(card => 'public_id' in card && card.customer_id === customerId && card.public_id === journeyPublicId)
+  return boardMatch?.customer_name
+}
+
 function handleRowClick(payload: { customerId: string; journeyPublicId: string }): void {
-  // Task 6 mounts the independent journey detail sheet on this public-ID seam.
-  void payload
+  journeyDetailTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  selectedJourneyCustomerId.value = payload.customerId
+  selectedJourneyCustomerName.value = findCustomerName(payload.customerId, payload.journeyPublicId)
+  selectedJourneyId.value = payload.journeyPublicId
+  journeyDetailVisible.value = true
+}
+
+async function handleJourneyDetailVisibleChange(visible: boolean): Promise<void> {
+  journeyDetailVisible.value = visible
+  if (visible) return
+
+  const trigger = journeyDetailTrigger
+  selectedJourneyCustomerId.value = null
+  selectedJourneyCustomerName.value = undefined
+  selectedJourneyId.value = null
+  journeyDetailTrigger = null
+  await nextTick()
+  if (trigger?.isConnected === true) trigger.focus()
+}
+
+function refreshJourneyProjection(): void {
+  void refreshActiveProjection()
 }
 
 watchEffect(() => {
@@ -361,6 +397,15 @@ onMounted(() => {
       @row-click="handleRowClick"
     />
   </div>
+
+  <DealJourneyDetailSheet
+    :customer-id="selectedJourneyCustomerId"
+    :customer-name="selectedJourneyCustomerName"
+    :journey-id="selectedJourneyId"
+    :visible="journeyDetailVisible"
+    @update:visible="handleJourneyDetailVisibleChange"
+    @refresh="refreshJourneyProjection"
+  />
 </template>
 
 <style scoped lang="scss">

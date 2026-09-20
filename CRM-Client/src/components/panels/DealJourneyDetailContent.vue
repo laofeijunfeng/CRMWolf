@@ -2,8 +2,8 @@
 /**
  * DealJourneyDetailContent.vue - 业务旅程履约工作台
  *
- * 挂在 CustomerDetailSheet。顶栏展示旅程阶段与采购类型；正文复用商机履约面板。
- * 页脚无编辑 / 赢单 / 输单；这些动作在商机 ListCard 行内 icon 上。
+ * 唯一内容契约：仅 DealJourneyDetailHost 可渲染并编排本组件；Sheet 与客户详情都复用该 Host。
+ * 顶栏展示旅程阶段与采购类型；正文复用商机履约面板。页脚无编辑 / 赢单 / 输单；这些动作在商机 ListCard 行内 icon 上。
  */
 import { computed, nextTick, ref, watch } from 'vue'
 import { Pencil, Trophy, XCircle } from 'lucide-vue-next'
