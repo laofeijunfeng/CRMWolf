@@ -6,6 +6,7 @@ if TYPE_CHECKING:
     from app.core.list_query.catalog import ListQueryCatalog
 
 from app.core.list_query.catalogs.approvals import APPROVALS_LIST_QUERY_CATALOG
+from app.core.list_query.catalogs.business_journeys import BUSINESS_JOURNEYS_LIST_QUERY_CATALOG
 from app.core.list_query.catalogs.contracts import CONTRACTS_LIST_QUERY_CATALOG
 from app.core.list_query.catalogs.customers import CUSTOMERS_LIST_QUERY_CATALOG
 from app.core.list_query.catalogs.follow_up_tasks import FOLLOW_UP_TASKS_LIST_QUERY_CATALOG
@@ -17,6 +18,7 @@ from app.core.list_query.catalogs.payment_records import PAYMENT_RECORDS_LIST_QU
 
 LIST_QUERY_CATALOGS: dict[str, ListQueryCatalog] = {
     "approvals": APPROVALS_LIST_QUERY_CATALOG,
+    "business_journeys": BUSINESS_JOURNEYS_LIST_QUERY_CATALOG,
     "contracts": CONTRACTS_LIST_QUERY_CATALOG,
     "customers": CUSTOMERS_LIST_QUERY_CATALOG,
     "follow_up_tasks": FOLLOW_UP_TASKS_LIST_QUERY_CATALOG,
@@ -29,6 +31,7 @@ LIST_QUERY_CATALOGS: dict[str, ListQueryCatalog] = {
 
 __all__ = [
     "APPROVALS_LIST_QUERY_CATALOG",
+    "BUSINESS_JOURNEYS_LIST_QUERY_CATALOG",
     "CONTRACTS_LIST_QUERY_CATALOG",
     "CUSTOMERS_LIST_QUERY_CATALOG",
     "FOLLOW_UP_TASKS_LIST_QUERY_CATALOG",
