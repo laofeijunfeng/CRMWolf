@@ -186,6 +186,8 @@ def test_exhausted_job_can_be_requeued_in_place():
     crud = CustomerEnrichmentJobCRUD()
     now = datetime(2026, 9, 20, 10, 0, 0)
     job = _ensure(crud, db, available_at=now)
+    job.profile_gate_timed_out_at = now - timedelta(seconds=5)
+    db.flush()
     crud.claim_for_execution(
         db,
         team_id=2,
@@ -216,6 +218,7 @@ def test_exhausted_job_can_be_requeued_in_place():
     assert requeued.attempt_count == 0
     assert requeued.requeue_count == 1
     assert requeued.result_json["previous_terminal"]["terminal"] == "EXHAUSTED"
+    assert requeued.profile_gate_timed_out_at == now - timedelta(seconds=5)
 
 
 def test_recovery_candidates_take_initial_and_backfill_quotas():

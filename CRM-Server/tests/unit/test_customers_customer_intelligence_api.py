@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -587,6 +588,7 @@ def test_enrichment_job_list_passes_team_scope_and_omits_sensitive_payloads(monk
         available_at=None,
         next_attempt_at=None,
         first_attempt_finished_at=None,
+        profile_gate_timed_out_at=datetime(2026, 9, 20, 10, 0, 30),
         created_time=None,
         updated_time=None,
         result_json={"prompt": "secret", "customer_mobile": "13800000000"},
@@ -621,6 +623,7 @@ def test_enrichment_job_list_passes_team_scope_and_omits_sensitive_payloads(monk
     }
     dumped = response.model_dump()
     assert dumped["items"][0]["customer_id"] == "cus_8"
+    assert dumped["items"][0]["profile_gate_timed_out_at"] == datetime(2026, 9, 20, 10, 0, 30)
     assert "result_json" not in dumped["items"][0]
     assert "error_message" not in dumped["items"][0]
     assert "account_name" not in dumped["items"][0]

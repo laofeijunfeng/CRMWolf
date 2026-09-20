@@ -32,6 +32,7 @@ def upgrade() -> None:
         sa.Column("status", sa.String(length=20), nullable=False, server_default="QUEUED", comment="任务状态"),
         sa.Column("available_at", sa.DateTime(), nullable=False, comment="最早可执行时间"),
         sa.Column("profile_gate_deadline_at", sa.DateTime(), nullable=True, comment="档案等待截止时间"),
+        sa.Column("profile_gate_timed_out_at", sa.DateTime(), nullable=True, comment="档案等待超时实际发生时间"),
         sa.Column("attempt_count", sa.Integer(), nullable=False, server_default="0", comment="执行次数"),
         sa.Column("max_attempts", sa.Integer(), nullable=False, server_default="3", comment="最大执行次数"),
         sa.Column("next_attempt_at", sa.DateTime(), nullable=True, comment="下次恢复时间"),

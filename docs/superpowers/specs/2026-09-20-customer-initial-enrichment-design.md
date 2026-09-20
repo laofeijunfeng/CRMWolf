@@ -246,6 +246,7 @@ lease_expires_at
 run_id
 graph_thread_id
 first_attempt_finished_at
+profile_gate_timed_out_at       # nullable；deadline 实际放行首次档案时首次写入，requeue 保留
 profile_refresh_request_id
 profile_refresh_enqueued_at
 requeue_count
@@ -447,6 +448,8 @@ Agent “创建客户 + 首次跟进”是两个顺序 command。客户创建事
 写入后释放 `CustomerProfileReadinessGate`，唤醒该客户被延后的 profile runs。
 
 如果 worker 没有完成第一次执行，`profile_gate_deadline_at` 到期时 profile run 自行解除 gate并生成无行业档案；enrichment job 保持原状态，之后仍可执行。
+
+实际 deadline 放行时，在同一事务中幂等写入 job 的 `profile_gate_timed_out_at`；只有 `INITIAL_CREATION` 且 `first_attempt_finished_at IS NULL` 的真实超时路径可写。reconciliation dry-run、历史任务、首次尝试已经结束的释放不写，后续 requeue 保留该时间戳作为 durable `profile_gate_timeout` 证据。
 
 ### 11.2 后续重试成功
 

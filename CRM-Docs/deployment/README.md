@@ -107,7 +107,7 @@ docker logs crm-backend --since 10m | grep -E '客户智能历史补档|客户�
 
 客户初始补全是客户主数据 mutation，不是客户智能档案生成的一部分。客户创建事务先成功；后台 durable job 只补 active plan 允许且仍为空的字段（当前 `customer-initial-v1` 仅补 `Customer.industry`），不覆盖人工或既有值。客户档案仍是只读 Projection：首次生成会在有限时间内等待补全第一次真实尝试，超时或第一次技术失败时降级生成无行业档案，后续补全成功再触发档案刷新。补全失败不得回滚客户，档案失败也不得回滚已经补全的主数据。
 
-部署环境必须显式核对以下配置；括号内是当前默认值：
+应用代码默认启用 recovery、backfill 和 reconciliation，适合本地开发及已完成上线门禁的环境；服务器 `docker-compose.yml` 为首次生产发布提供更保守的 rollout 默认值：recovery 仍为 `true`，但 backfill 和 reconciliation 默认为 `false`。以下列表先给出应用默认值，带“生产 Compose 首发默认”的两项以服务器 Compose 为准：
 
 ```bash
 CUSTOMER_INITIAL_ENRICHMENT_SETTLE_SECONDS=5
@@ -117,23 +117,36 @@ CUSTOMER_INITIAL_ENRICHMENT_LEASE_SECONDS=120
 CUSTOMER_INITIAL_ENRICHMENT_RECOVERY_ENABLED=true
 CUSTOMER_INITIAL_ENRICHMENT_RECOVERY_INTERVAL_SECONDS=60
 CUSTOMER_INITIAL_ENRICHMENT_BATCH_SIZE=20
-CUSTOMER_INITIAL_ENRICHMENT_BACKFILL_ENABLED=true
+CUSTOMER_INITIAL_ENRICHMENT_BACKFILL_ENABLED=true       # 生产 Compose 首发默认 false
 CUSTOMER_INITIAL_ENRICHMENT_BACKFILL_BATCH_SIZE=5
 CUSTOMER_INITIAL_ENRICHMENT_BACKFILL_INTERVAL_SECONDS=300
-CUSTOMER_INITIAL_ENRICHMENT_RECONCILIATION_ENABLED=true
+CUSTOMER_INITIAL_ENRICHMENT_RECONCILIATION_ENABLED=true # 生产 Compose 首发默认 false
 CUSTOMER_INITIAL_ENRICHMENT_RECONCILIATION_INTERVAL_SECONDS=300
 CUSTOMER_INITIAL_ENRICHMENT_RECONCILIATION_BATCH_SIZE=50
 ```
 
-`PROFILE_GATE_MAX_SECONDS` 只限制首次档案等待时间，不是 enrichment job 超时；`RECOVERY_ENABLED` 负责领取新客户与历史回填任务及恢复到期重试，`BACKFILL_ENABLED` 负责为历史缺失字段登记任务，`RECONCILIATION_ENABLED` 负责补登记遗漏任务、释放到期 gate 和修复缺失的档案刷新 receipt。首次客户每轮默认领取 20 条，历史回填仍保留 5 条配额，不能让历史任务长期饥饿。
+`PROFILE_GATE_MAX_SECONDS` 只限制首次档案等待时间，不是 enrichment job 超时；`RECOVERY_ENABLED` 负责领取新客户与已登记历史任务并恢复到期重试，`BACKFILL_ENABLED` 负责为历史缺失字段登记任务，`RECONCILIATION_ENABLED` 负责补登记遗漏任务、释放到期 gate 和修复缺失的档案刷新 receipt。首次客户每轮默认领取 20 条，历史回填仍保留 5 条配额，不能让历史任务长期饥饿。
 
-迁移必须先到 `136_customer_initial_enrichment (head)` 再启动服务。启动后检查三个独立 scheduler 的证据：
+首次生产发布必须分阶段执行：
 
-```bash
-docker logs crm-backend --since 10m | grep -E '客户初始补全任务恢复调度已启动|客户初始补全历史回填调度已启动|客户初始补全对账调度已启动'
-```
+1. 执行 migration，并以生产 Compose 默认值启动后端：`CUSTOMER_INITIAL_ENRICHMENT_BACKFILL_ENABLED=false`、`CUSTOMER_INITIAL_ENRICHMENT_RECONCILIATION_ENABLED=false`、recovery 保持启用。此时不会在 preview 前扫描历史客户或创建 reconciliation 补偿任务。
+2. 先确认 recovery 日志：`docker logs crm-backend --since 10m | grep '客户初始补全任务恢复调度已启动'`。不要把 backfill/reconciliation 未出现“已启动”视为故障；它们此阶段按设计关闭。
+3. 使用下方管理员 API 执行 backfill preview 和 reconciliation `dry_run=true`，重点审查 `other_available=true`、`invalid_non_null`、`would_schedule`，并确认 dry-run 的 `errors=0` 及预期 `jobs_created / gates_released / refreshes_repaired`。
+4. 审查通过后，在服务器部署环境的 `.env` 中各定义一次且只定义一次：
 
-正常启动应同时出现三条“已启动”日志；后续有历史任务登记时还会出现“客户初始补全历史回填已调度”。只看到档案 backfill 或证据向量同步日志，不能证明主数据补全 worker 已启动。
+   ```bash
+   CUSTOMER_INITIAL_ENRICHMENT_BACKFILL_ENABLED=true
+   CUSTOMER_INITIAL_ENRICHMENT_RECONCILIATION_ENABLED=true
+   ```
+
+5. 使用相同 Compose 文件 recreate 后端：`docker compose -f docker-compose.yml -f docker-compose.server.yml up -d --force-recreate backend`。
+6. 再检查三个独立 scheduler 的证据：
+
+   ```bash
+   docker logs crm-backend --since 10m | grep -E '客户初始补全任务恢复调度已启动|客户初始补全历史回填调度已启动|客户初始补全对账调度已启动'
+   ```
+
+三条“已启动”日志必须同时出现；后续有历史任务登记时还会出现“客户初始补全历史回填已调度”。只看到档案 backfill 或证据向量同步日志，不能证明主数据补全 worker 已启动。
 
 历史回填前先使用具备 `customer:edit:all` 权限的管理员凭证查看团队级 preview；接口均位于统一 `/api` 前缀下：
 
@@ -156,7 +169,7 @@ curl -sS -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application
   -d '{"limit":500,"dry_run":true}'
 ```
 
-任务诊断返回 purpose、plan、requested fields、attempt/max attempts、`requeue_count`、下一次尝试时间、首次尝试完成时间和档案刷新 receipt。reconciliation dry-run 返回 `scanned / jobs_created / gates_released / refreshes_repaired / errors`，用于发布前评估而不写入。运行期间应持续观察 `COMPLETED / SKIPPED / RETRY_PENDING / EXHAUSTED`，并结合写入操作日志、`requeue_count`、档案 refresh receipt 和 gate timeout 形成 scheduled、applied、other、skipped、retry_pending、exhausted、requeued、profile_gate_timeout 证据；技术失败不得伪装为行业 `other`。
+任务诊断返回 purpose、plan、requested fields、attempt/max attempts、`requeue_count`、下一次尝试时间、首次尝试完成时间、`profile_gate_timed_out_at` 和档案刷新 receipt。reconciliation dry-run 返回 `scanned / jobs_created / gates_released / refreshes_repaired / errors`，用于发布前评估而不写入。`profile_gate_timeout` 的 durable 证据是诊断中非空的 `profile_gate_timed_out_at`：它只在创建期任务尚未完成首次尝试、deadline 已过且档案实际解除 gate 时首次写入；不能从聚合 `gates_released` 推断。运行期间应持续观察 `COMPLETED / SKIPPED / RETRY_PENDING / EXHAUSTED`，并结合写入操作日志、`requeue_count`、档案 refresh receipt 和该时间戳形成 scheduled、applied、other、skipped、retry_pending、exhausted、requeued、profile_gate_timeout 证据；技术失败不得伪装为行业 `other`。
 
 `EXHAUSTED` 不会无限自动重试。确认 AI 配置、行业目录和下游故障已修复后，管理员只能对当前 active plan、目标字段仍为空的耗尽任务重新入队：
 

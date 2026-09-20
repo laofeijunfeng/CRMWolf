@@ -241,6 +241,8 @@ Agent 只负责在事实和证据之上完成归纳，不拥有“把什么写�
 
 该 gate 是有期限的偏好，不是客户档案可用性的硬依赖。worker 停摆或首次尝试未在 deadline 前完成时，档案必须解除 gate、降级生成不含缺失字段的版本；enrichment job 保持原状态并继续恢复/重试。后续补全成功再登记客户主数据变化刷新，使档案读取新值。若创建期 job 因登记故障不存在，档案也不阻塞，由 reconciliation 补登记任务并在成功后刷新。
 
+超时证据保存在 enrichment job 的 nullable `profile_gate_timed_out_at`。只有 `INITIAL_CREATION` 任务仍未结束首次尝试、deadline 已过，并且 Profile run 因该 deadline 实际放行时，才在调用方事务中写入首次时间；重复放行保留原值。历史回填、首次尝试已经结束的释放和 dry-run 不写该字段，运维 requeue 也保留既有超时历史。
+
 ### 3.3 客户级事实与旅程级事实
 
 所有可演化事实都必须明确作用范围：

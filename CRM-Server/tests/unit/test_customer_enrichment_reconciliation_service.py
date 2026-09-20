@@ -76,12 +76,13 @@ def _job(
     first_attempt_finished: bool = False,
     gate_expired: bool = False,
     receipt: str | None = None,
+    purpose: str = CustomerEnrichmentPurpose.INITIAL_CREATION.value,
 ) -> CustomerEnrichmentJob:
     now = business_now()
     job = CustomerEnrichmentJob(
         team_id=customer.team_id,
         customer_id=customer.id,
-        purpose=CustomerEnrichmentPurpose.INITIAL_CREATION.value,
+        purpose=purpose,
         plan_version=ACTIVE_CUSTOMER_ENRICHMENT_PLAN.version,
         requested_fields_json=list(ACTIVE_CUSTOMER_ENRICHMENT_PLAN.fields),
         status=status,
@@ -197,6 +198,7 @@ def test_reconciliation_releases_expired_gate_and_repairs_missing_refresh_receip
     assert result.refreshes_repaired == 1
     assert coordinator.calls == [terminal_customer.id]
     assert terminal.profile_refresh_request_id == f"refresh-{terminal.public_id}"
+    assert db_session.get(CustomerEnrichmentJob, 1).profile_gate_timed_out_at is not None
 
 
 def test_reconciliation_dry_run_does_not_mutate_and_returns_stable_cursor(db_session):
@@ -252,6 +254,7 @@ def test_reconciliation_dry_run_counts_exact_releasable_runs_without_updates(
     assert result.gates_released == deferred_count
     assert all(run.not_before_at is not None for run in deferred_runs)
     assert terminal.not_before_at is not None
+    assert db_session.query(CustomerEnrichmentJob).one().profile_gate_timed_out_at is None
 
 def test_reconciliation_records_released_run_as_terminal_profile_receipt(db_session):
     customer = _customer(db_session, industry="software")
@@ -272,6 +275,26 @@ def test_reconciliation_records_released_run_as_terminal_profile_receipt(db_sess
     assert result.refreshes_repaired == 1
     assert job.profile_refresh_request_id == "released:71"
     assert coordinator.calls == []
+    assert job.profile_gate_timed_out_at is None
+    assert job.first_attempt_finished_at is not None
+
+def test_reconciliation_does_not_record_timeout_for_historical_job(db_session):
+    customer = _customer(db_session, industry="software")
+    job = _job(
+        db_session,
+        customer,
+        purpose=CustomerEnrichmentPurpose.HISTORICAL_BACKFILL.value,
+        gate_expired=True,
+    )
+    service = _service(
+        run_service=FakeRunService(releases={int(customer.id): [72]}),
+        coordinator=FakeProfileCoordinator(),
+    )
+
+    result = service.reconcile_once(db_session, team_id=2, limit=50, dry_run=False)
+
+    assert result.gates_released == 1
+    assert job.profile_gate_timed_out_at is None
 
 
 def test_reconciliation_does_not_count_rolled_back_customer_work(db_session):

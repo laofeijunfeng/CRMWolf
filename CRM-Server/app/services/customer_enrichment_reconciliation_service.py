@@ -131,8 +131,18 @@ class CustomerEnrichmentReconciliationService:
                                 team_id=int(job.team_id),
                                 customer_id=int(job.customer_id),
                             )
+                            deadline_timed_out = (
+                                str(job.purpose) == CustomerEnrichmentPurpose.INITIAL_CREATION.value
+                                and job.first_attempt_finished_at is None
+                                and job.profile_gate_deadline_at is not None
+                                and job.profile_gate_deadline_at <= now
+                            )
                             if released:
                                 customer_gates_released = len(released)
+                                if deadline_timed_out and job.profile_gate_timed_out_at is None:
+                                    job.profile_gate_timed_out_at = now
+                                    db.add(job)
+                                    db.flush()
                                 if self._receipt_should_repair(job):
                                     job.profile_refresh_request_id = f"released:{released[0]}"
                                     job.profile_refresh_enqueued_at = now

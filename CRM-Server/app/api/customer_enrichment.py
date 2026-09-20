@@ -289,6 +289,7 @@ def _job_diagnostic(
         available_at=job.available_at,
         next_attempt_at=job.next_attempt_at,
         first_attempt_finished_at=job.first_attempt_finished_at,
+        profile_gate_timed_out_at=job.profile_gate_timed_out_at,
         created_time=job.created_time,
         updated_time=job.updated_time,
     )

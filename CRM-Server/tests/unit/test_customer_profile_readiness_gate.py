@@ -42,6 +42,17 @@ class FakeJobCrud:
         self.identity_calls.append({"db": db, **kwargs})
         return self.job
 
+class FakeDB:
+    def __init__(self) -> None:
+        self.added = []
+        self.flush_count = 0
+
+    def add(self, value) -> None:
+        self.added.append(value)
+
+    def flush(self) -> None:
+        self.flush_count += 1
+
 
 class FakeRunService:
     def __init__(self) -> None:
@@ -107,33 +118,52 @@ def test_historical_job_does_not_gate():
     assert gate.run_service.defer_calls == []
 
 
-def test_gate_deadline_passed_does_not_gate():
-    gate = _gate(
-        _job(
-            purpose="INITIAL_CREATION",
-            first_attempt_finished_at=None,
-            profile_gate_deadline_at=_now() - timedelta(seconds=1),
-        )
+def test_gate_deadline_passed_records_timeout_once_before_allowing_profile():
+    before_deadline = _now() - timedelta(seconds=10)
+    job = _job(
+        purpose="INITIAL_CREATION",
+        first_attempt_finished_at=None,
+        profile_gate_deadline_at=_now() - timedelta(seconds=1),
+        profile_gate_timed_out_at=None,
     )
+    gate = _gate(job)
+    db = FakeDB()
+
+    assert gate.defer_if_needed(
+        db, event=_event("customer_created"), run=SimpleNamespace(id=7), now=before_deadline
+    ) == before_deadline + timedelta(seconds=5)
+    assert job.profile_gate_timed_out_at is None
+
+    assert gate.defer_if_needed(
+        db, event=_event("customer_created"), run=SimpleNamespace(id=7), now=_now()
+    ) is None
+    assert job.profile_gate_timed_out_at == _now()
+
+    gate.defer_if_needed(
+        db,
+        event=_event("customer_created"),
+        run=SimpleNamespace(id=7),
+        now=_now() + timedelta(minutes=1),
+    )
+    assert job.profile_gate_timed_out_at == _now()
+    assert gate.run_service.defer_calls == [(2, 7, before_deadline + timedelta(seconds=5))]
+    assert db.added == [job]
+    assert db.flush_count == 1
+
+
+def test_first_attempt_finished_does_not_gate_or_record_timeout():
+    job = _job(
+        purpose="INITIAL_CREATION",
+        first_attempt_finished_at=_now(),
+        profile_gate_deadline_at=_now() - timedelta(seconds=30),
+        profile_gate_timed_out_at=None,
+    )
+    gate = _gate(job)
 
     assert gate.defer_if_needed(
         object(), event=_event("customer_created"), run=SimpleNamespace(id=7), now=_now()
     ) is None
-    assert gate.run_service.defer_calls == []
-
-
-def test_first_attempt_finished_does_not_gate():
-    gate = _gate(
-        _job(
-            purpose="INITIAL_CREATION",
-            first_attempt_finished_at=_now(),
-            profile_gate_deadline_at=_now() + timedelta(seconds=30),
-        )
-    )
-
-    assert gate.defer_if_needed(
-        object(), event=_event("customer_created"), run=SimpleNamespace(id=7), now=_now()
-    ) is None
+    assert job.profile_gate_timed_out_at is None
     assert gate.run_service.defer_calls == []
 
 

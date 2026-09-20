@@ -56,7 +56,13 @@ class CustomerProfileReadinessGate:
         if job.first_attempt_finished_at is not None:
             return None
         deadline = job.profile_gate_deadline_at
-        if deadline is None or deadline <= now:
+        if deadline is None:
+            return None
+        if deadline <= now:
+            if job.profile_gate_timed_out_at is None:
+                job.profile_gate_timed_out_at = now
+                db.add(job)
+                db.flush()
             return None
 
         not_before_at = min(deadline, now + timedelta(seconds=5))

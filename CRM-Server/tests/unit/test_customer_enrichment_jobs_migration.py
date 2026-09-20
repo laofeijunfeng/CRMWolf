@@ -42,8 +42,9 @@ def test_migration_136_creates_enrichment_jobs_and_profile_gate_column():
         "requested_fields_json", "status", "available_at", "profile_gate_deadline_at",
         "attempt_count", "max_attempts", "next_attempt_at", "lease_token",
         "lease_expires_at", "run_id", "graph_thread_id", "first_attempt_finished_at",
-        "profile_refresh_request_id", "profile_refresh_enqueued_at", "requeue_count",
-        "result_json", "error_message", "started_at", "finished_at", "created_time", "updated_time",
+        "profile_gate_timed_out_at", "profile_refresh_request_id", "profile_refresh_enqueued_at",
+        "requeue_count", "result_json", "error_message", "started_at", "finished_at",
+        "created_time", "updated_time",
     } <= columns
     constraints = {item.name for item in items if getattr(item, "name", None)}
     assert "uq_customer_enrichment_job_plan" in constraints

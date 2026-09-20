@@ -47,6 +47,7 @@ class CustomerEnrichmentJob(Base):
     )
     available_at = Column(DateTime, nullable=False, index=True, comment="最早可执行时间")
     profile_gate_deadline_at = Column(DateTime, nullable=True, index=True, comment="档案等待截止时间")
+    profile_gate_timed_out_at = Column(DateTime, nullable=True, comment="档案等待超时实际发生时间")
     attempt_count = Column(Integer, nullable=False, default=0, comment="执行次数")
     max_attempts = Column(Integer, nullable=False, default=3, comment="最大执行次数")
     next_attempt_at = Column(DateTime, nullable=True, index=True, comment="下次恢复时间")

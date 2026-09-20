@@ -611,6 +611,7 @@ class CustomerEnrichmentJobDiagnosticResponse(BaseModel):
     available_at: Optional[datetime] = None
     next_attempt_at: Optional[datetime] = None
     first_attempt_finished_at: Optional[datetime] = None
+    profile_gate_timed_out_at: Optional[datetime] = None
     created_time: Optional[datetime] = None
     updated_time: Optional[datetime] = None
 
