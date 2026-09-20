@@ -242,6 +242,35 @@ def test_creates_personal_custom_filter_view_with_generated_name(client):
     assert body["config"]["filters"][0]["field"] == "status"
 
 
+def test_custom_view_round_trips_business_journey_display_mode(client):
+    response = client.post(
+        "/api/v1/view-preferences/business-journeys.list/custom-views",
+        json={"config": {"version": 1, "columns": [], "filters": [], "sorts": [], "display_mode": "board"}},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["config"]["display_mode"] == "board"
+
+
+def test_view_preference_rejects_unknown_display_mode(client):
+    response = client.post(
+        "/api/v1/view-preferences/business-journeys.list/custom-views",
+        json={"config": {"version": 1, "columns": [], "display_mode": "cards"}},
+    )
+
+    assert response.status_code == 422
+
+
+def test_old_view_config_without_display_mode_still_parses(client):
+    response = client.post(
+        "/api/v1/view-preferences/customers.list/custom-views",
+        json={"config": {"version": 1, "columns": []}},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["config"]["display_mode"] is None
+
+
 def test_custom_filter_view_name_uses_current_effective_count_plus_one(client):
     for _ in range(2):
         response = client.post(
