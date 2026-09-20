@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from app.core.database import SessionLocal
@@ -110,43 +111,68 @@ class CustomerEnrichmentProfileCoordinator:
         del result
         released: list[int] = []
         event = None
+        request = None
         db = self._session_factory()
         try:
-            locked = self.job_crud.get_by_public_id(
-                db,
-                team_id=int(job.team_id),
-                public_id=str(job.public_id),
-                for_update=True,
-            )
-            if locked is None or locked.profile_refresh_request_id is not None:
+            try:
+                locked = self.job_crud.get_by_public_id(
+                    db,
+                    team_id=int(job.team_id),
+                    public_id=str(job.public_id),
+                    for_update=True,
+                )
+                if locked is None or locked.profile_refresh_request_id is not None:
+                    return
+
+                released = self.run_service.release_deferred_for_customer(
+                    db,
+                    team_id=int(locked.team_id),
+                    customer_id=int(locked.customer_id),
+                )
+                if released:
+                    locked.profile_refresh_request_id = f"released:{released[0]}"
+                    locked.profile_refresh_enqueued_at = business_now()
+                    db.add(locked)
+                    db.commit()
+                else:
+                    event = self._terminal_refresh_event(locked, occurred_at=business_now())
+            except Exception:
+                db.rollback()
+                logger.exception("登记客户补全档案刷新凭据失败: job=%s", job.public_id)
                 return
 
-            released = self.run_service.release_deferred_for_customer(
-                db,
-                team_id=int(locked.team_id),
-                customer_id=int(locked.customer_id),
-            )
-            receipt_time = business_now()
-            if released:
-                locked.profile_refresh_request_id = f"released:{released[0]}"
-            else:
-                event = self._terminal_refresh_event(locked, occurred_at=receipt_time)
-                locked.profile_refresh_request_id = self._request_id(event)
-            locked.profile_refresh_enqueued_at = receipt_time
-            db.add(locked)
-            db.commit()
-        except Exception:
-            db.rollback()
-            logger.exception("登记客户补全档案刷新凭据失败: job=%s", job.public_id)
-            return
+            if event is not None:
+                try:
+                    request = self.publication_service.persist_in_transaction_request(
+                        db,
+                        event=event,
+                        scope="full",
+                    )
+                except Exception:
+                    db.rollback()
+                    raise
+                if request is None or not request.scheduled:
+                    db.rollback()
+                    return
+                try:
+                    locked.profile_refresh_request_id = request.request_id
+                    locked.profile_refresh_enqueued_at = business_now()
+                    db.add(locked)
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                    logger.exception("登记客户补全档案刷新凭据失败: job=%s", job.public_id)
+                    return
         finally:
             db.close()
 
         if released:
             self._kick_released_runs(team_id=int(job.team_id), released=released)
             return
-        if event is not None:
-            self.publication_service.enqueue_after_commit(event=event, scope="full")
+        if request is not None:
+            self.refresh_service.kick_committed_event_refresh(
+                replace(request, kick_required=True)
+            )
 
     def _terminal_refresh_event(
         self,
@@ -184,18 +210,21 @@ class CustomerEnrichmentProfileCoordinator:
         )
         task.add_done_callback(self._consume_task_exception)
 
-    @staticmethod
-    def _request_id(event: CustomerIntelligenceEvent) -> str:
-        return f"business-event-{event.trigger_type}-{event.event_key[:16]}"
 
     @staticmethod
     def _consume_task_exception(task: asyncio.Task[object]) -> None:
         if task.cancelled():
             return
         try:
-            task.exception()
+            error = task.exception()
         except Exception:
             logger.exception("唤醒已释放客户档案任务失败")
+            return
+        if error is not None:
+            logger.error(
+                "唤醒已释放客户档案任务失败",
+                exc_info=(type(error), error, error.__traceback__),
+            )
 
 
 customer_enrichment_profile_coordinator = CustomerEnrichmentProfileCoordinator()

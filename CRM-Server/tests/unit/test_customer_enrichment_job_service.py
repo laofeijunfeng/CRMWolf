@@ -15,6 +15,9 @@ from app.services.customer_enrichment_inference_service import CustomerEnrichmen
 from app.services.customer_enrichment_job_service import CustomerEnrichmentJobService
 from app.services.customer_enrichment_profile_coordinator import CustomerEnrichmentProfileCoordinator
 from app.services.customer_enrichment_write_service import CustomerEnrichmentWriteResult
+from app.services.customer_intelligence_refresh_service import (
+    CustomerIntelligenceCommittedEventRequest,
+)
 from app.utils.time import business_now
 
 
@@ -494,22 +497,43 @@ class CoordinatorRunService:
 class CoordinatorRefreshService:
     def __init__(self) -> None:
         self.calls = []
+        self.kick_requests = []
 
     async def run_due_retries(self, *, team_id, limit):
         self.calls.append((team_id, limit))
         return {"success": True}
 
+    def kick_committed_event_refresh(self, request):
+        self.kick_requests.append(request)
+
 
 class CoordinatorPublicationService:
-    def __init__(self) -> None:
+    def __init__(self, results=None) -> None:
         self.events = []
+        self.results = list(results or [])
+        self.after_commit_calls = []
 
-    def enqueue_after_commit(self, *, event, scope):
-        self.events.append((event, scope))
-        return SimpleNamespace(
+    def persist_in_transaction_request(self, db, *, event, scope):
+        self.events.append((db, event, scope))
+        result = self.results.pop(0) if self.results else SimpleNamespace(
             request_id=f"business-event-{event.trigger_type}-{event.event_key[:16]}",
             scheduled=True,
+            schedule_error=None,
         )
+        if isinstance(result, Exception):
+            raise result
+        return CustomerIntelligenceCommittedEventRequest(
+            request_id=result.request_id,
+            event=event,
+            scope=scope,
+            scheduled=result.scheduled,
+            kick_required=False,
+            schedule_error=result.schedule_error,
+        )
+
+    def enqueue_after_commit(self, *, event, scope):
+        self.after_commit_calls.append((event, scope))
+        raise AssertionError("coordinator must not open a second-session enqueue")
 
 
 class CoordinatorEventService:
@@ -526,14 +550,14 @@ class CoordinatorEventService:
         )
 
 
-def _coordinator(*, job, released_sequences):
+def _coordinator(*, job, released_sequences, publication_results=None):
     session_factory = CoordinatorSessionFactory(job)
     coordinator = CustomerEnrichmentProfileCoordinator(
         job_crud=CoordinatorJobCrud(job),
         run_service=CoordinatorRunService(released_sequences),
         refresh_service=CoordinatorRefreshService(),
         event_service=CoordinatorEventService(),
-        publication_service=CoordinatorPublicationService(),
+        publication_service=CoordinatorPublicationService(publication_results),
         session_factory=session_factory,
     )
     coordinator.session_factory_fake = session_factory
@@ -568,6 +592,121 @@ async def test_terminal_success_records_released_run_without_enqueuing_duplicate
     assert job.profile_refresh_request_id == "released:41"
     assert job.profile_refresh_enqueued_at is not None
     assert coordinator.publication_service.events == []
+    assert coordinator.publication_service.after_commit_calls == []
+
+
+def test_terminal_success_retries_after_durable_publication_failure():
+    job = _job(status="COMPLETED")
+    job.profile_refresh_request_id = None
+    job.profile_refresh_enqueued_at = None
+    coordinator = _coordinator(
+        job=job,
+        released_sequences=[[], []],
+        publication_results=[
+            SimpleNamespace(
+                request_id="durable-request-1",
+                scheduled=False,
+                schedule_error="store down",
+            ),
+            SimpleNamespace(
+                request_id="durable-request-2",
+                scheduled=True,
+                schedule_error=None,
+            ),
+        ],
+    )
+
+    coordinator.on_terminal_success(job, SimpleNamespace())
+
+    assert job.profile_refresh_request_id is None
+    assert job.profile_refresh_enqueued_at is None
+
+    coordinator.on_terminal_success(job, SimpleNamespace())
+
+    assert job.profile_refresh_request_id == "durable-request-2"
+    assert job.profile_refresh_enqueued_at is not None
+    assert len(coordinator.publication_service.events) == 2
+    assert coordinator.publication_service.after_commit_calls == []
+
+
+def test_terminal_success_persists_durable_request_receipt_after_enqueue(monkeypatch):
+    job = _job(status="COMPLETED")
+    job.profile_refresh_request_id = None
+    job.profile_refresh_enqueued_at = None
+    occurred_at = business_now()
+    enqueued_at = occurred_at + timedelta(seconds=1)
+    times = iter((occurred_at, enqueued_at))
+    monkeypatch.setattr(
+        "app.services.customer_enrichment_profile_coordinator.business_now",
+        lambda: next(times),
+    )
+    coordinator = _coordinator(
+        job=job,
+        released_sequences=[[]],
+        publication_results=[
+            SimpleNamespace(
+                request_id="durable-request-exact",
+                scheduled=True,
+                schedule_error=None,
+            )
+        ],
+    )
+    original_persist = coordinator.publication_service.persist_in_transaction_request
+
+    def assert_receipt_is_empty_during_persist(db, *, event, scope):
+        assert db is coordinator.session_factory_fake.sessions[0]
+        assert db.commits == 0
+        assert job.profile_refresh_request_id is None
+        assert job.profile_refresh_enqueued_at is None
+        return original_persist(db, event=event, scope=scope)
+
+    coordinator.publication_service.persist_in_transaction_request = (
+        assert_receipt_is_empty_during_persist
+    )
+
+    coordinator.on_terminal_success(job, SimpleNamespace())
+
+    assert job.profile_refresh_request_id == "durable-request-exact"
+    assert job.profile_refresh_enqueued_at == enqueued_at
+    assert coordinator.session_factory_fake.sessions[0].commits == 1
+    assert coordinator.publication_service.after_commit_calls == []
+    assert [request.request_id for request in coordinator.refresh_service.kick_requests] == [
+        "durable-request-exact"
+    ]
+    assert coordinator.refresh_service.kick_requests[0].kick_required is True
+    assert coordinator.event_service.calls[0]["occurred_at"] == occurred_at
+
+
+def test_terminal_success_enqueue_exception_is_caught_by_callback_boundary(caplog):
+    job = _job(status="COMPLETED")
+    job.profile_refresh_request_id = None
+    job.profile_refresh_enqueued_at = None
+    coordinator = _coordinator(
+        job=job,
+        released_sequences=[[]],
+        publication_results=[RuntimeError("store exploded")],
+    )
+    service = _service()
+    service.completion_port = coordinator
+
+    with caplog.at_level("ERROR"):
+        service._call_terminal_success(job, SimpleNamespace())
+
+    assert job.profile_refresh_request_id is None
+    assert job.profile_refresh_enqueued_at is None
+    assert "客户补全终态成功回调失败" in caplog.text
+    assert "store exploded" in caplog.text
+
+
+def test_retry_kick_done_callback_logs_returned_exception(caplog):
+    error = RuntimeError("retry kick exploded")
+    task = SimpleNamespace(cancelled=lambda: False, exception=lambda: error)
+
+    with caplog.at_level("ERROR"):
+        CustomerEnrichmentProfileCoordinator._consume_task_exception(task)
+
+    assert "唤醒已释放客户档案任务失败" in caplog.text
+    assert caplog.records[-1].exc_info[1] is error
 
 
 def test_terminal_success_enqueues_once_and_persists_receipt_when_nothing_is_deferred():
@@ -584,7 +723,7 @@ def test_terminal_success_enqueues_once_and_persists_receipt_when_nothing_is_def
     )
     assert job.profile_refresh_enqueued_at is not None
     assert len(coordinator.publication_service.events) == 1
-    event, scope = coordinator.publication_service.events[0]
+    _db, event, scope = coordinator.publication_service.events[0]
     assert scope == "full"
     assert event.trigger_type == "customer_business_object_updated"
     assert coordinator.event_service.calls[0]["payload"] == {
