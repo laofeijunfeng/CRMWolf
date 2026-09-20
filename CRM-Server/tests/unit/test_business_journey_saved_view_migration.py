@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.util
-import hashlib
 import json
 from pathlib import Path
 from types import ModuleType
@@ -11,6 +10,8 @@ from types import ModuleType
 import sqlalchemy as sa
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+
+from app.schemas.view_preference import ViewPreferenceConfig
 
 
 MIGRATION_PATH = (
@@ -21,8 +22,7 @@ MIGRATION_PATH = (
 )
 LEGACY_VIEW_KEY = "business-journey-board.board"
 TARGET_VIEW_KEY = "business-journeys.list"
-MIGRATION_ORIGIN_KEY = "_migration_136_origin"
-MIGRATION_ORIGIN_FALLBACK_KEY = "_migration_136_origin_1"
+ORIGIN_TABLE_NAME = "_migration_136_saved_view_origins"
 
 
 def _load_migration() -> ModuleType:
@@ -104,15 +104,13 @@ def _rows(table: sa.Table, connection: sa.Connection) -> list[sa.RowMapping]:
     return list(connection.execute(sa.select(table).order_by(table.c.id)).mappings())
 
 
-def _migration_marker(
-    origin: str, row_id: int, original_config: dict[str, object]
-) -> dict[str, object]:
-    canonical = json.dumps(original_config, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
-    return {
-        "origin": origin,
-        "row_id": row_id,
-        "config_digest": hashlib.sha256(canonical.encode()).hexdigest(),
-    }
+def _origin_rows(connection: sa.Connection) -> list[sa.RowMapping]:
+    table = sa.Table(ORIGIN_TABLE_NAME, sa.MetaData(), autoload_with=connection)
+    return list(connection.execute(sa.select(table).order_by(table.c.preference_id)).mappings())
+
+
+def _origin_table_exists(connection: sa.Connection) -> bool:
+    return sa.inspect(connection).has_table(ORIGIN_TABLE_NAME)
 
 
 def test_migration_revision_follows_deal_journey_public_ids() -> None:
@@ -125,40 +123,44 @@ def test_migration_revision_follows_deal_journey_public_ids() -> None:
 def test_upgrade_migrates_legacy_board_view_and_is_idempotent() -> None:
     migration = _load_migration()
     connection, table = _connection_with_table()
+    original_config_json = '{ "version": 1, "columns": [], "filters": [], "sorts": [] }'
     try:
-        _insert_view(table, connection)
+        _insert_view(table, connection, config_json=original_config_json)
 
         _run(connection, migration, "upgrade")
         _run(connection, migration, "upgrade")
 
         rows = _rows(table, connection)
+        origins = _origin_rows(connection)
     finally:
         connection.close()
 
     assert len(rows) == 1
     row = rows[0]
-    config = json.loads(row["config_json"])
     assert row["view_key"] == TARGET_VIEW_KEY
     assert row["name"] == "我的看板"
     assert row["sort_order"] == 9
-    assert config["display_mode"] == "board"
-    assert config[MIGRATION_ORIGIN_KEY] == _migration_marker(
-        "renamed",
-        1,
-        {
-            "version": 1,
-            "columns": [],
-            "filters": [{"field": "owner_id", "op": "eq", "value": "me"}],
-            "sorts": [{"field": "updated_time", "order": "desc"}],
-        },
-    )
-    assert config["filters"] == [{"field": "owner_id", "op": "eq", "value": "me"}]
-    assert config["sorts"] == [{"field": "updated_time", "order": "desc"}]
+    assert json.loads(row["config_json"]) == {
+        "version": 1,
+        "columns": [],
+        "filters": [],
+        "sorts": [],
+        "display_mode": "board",
+    }
+    assert len(origins) == 1
+    assert origins[0]["preference_id"] == row["id"]
+    assert origins[0]["origin"] == "renamed"
+    assert origins[0]["original_config_json"] == original_config_json
+    assert len(origins[0]["migrated_config_hash"]) == 64
 
 
 def test_upgrade_merges_collision_into_target_without_replacing_target_identity() -> None:
     migration = _load_migration()
     connection, table = _connection_with_table()
+    target_config_json = (
+        '{"version":1,"columns":[{"key":"customer"}],'
+        '"filters":[],"sorts":[],"_migration_136_forged":"user-value"}'
+    )
     try:
         _insert_view(table, connection, id=10, name="旧看板", sort_order=99)
         _insert_view(
@@ -168,58 +170,40 @@ def test_upgrade_merges_collision_into_target_without_replacing_target_identity(
             view_key=TARGET_VIEW_KEY,
             name="旅程视图",
             sort_order=2,
-            config_json=json.dumps(
-                {
-                    "version": 1,
-                    "columns": [{"key": "customer"}],
-                    "filters": [{"field": "stage", "op": "eq", "value": "active"}],
-                    "sorts": [{"field": "name", "order": "asc"}],
-                }
-            ),
+            config_json=target_config_json,
         )
 
         _run(connection, migration, "upgrade")
 
         rows = _rows(table, connection)
+        origins = _origin_rows(connection)
     finally:
         connection.close()
 
     assert len(rows) == 1
     row = rows[0]
-    config = json.loads(row["config_json"])
     assert row["id"] == 20
     assert row["view_key"] == TARGET_VIEW_KEY
     assert row["name"] == "旅程视图"
     assert row["sort_order"] == 2
-    assert config == {
+    assert json.loads(row["config_json"]) == {
         "version": 1,
         "columns": [{"key": "customer"}],
-        "filters": [{"field": "stage", "op": "eq", "value": "active"}],
-        "sorts": [{"field": "name", "order": "asc"}],
+        "filters": [],
+        "sorts": [],
+        "_migration_136_forged": "user-value",
         "display_mode": "board",
-        MIGRATION_ORIGIN_KEY: _migration_marker(
-            "collision",
-            20,
-            {
-                "version": 1,
-                "columns": [{"key": "customer"}],
-                "filters": [{"field": "stage", "op": "eq", "value": "active"}],
-                "sorts": [{"field": "name", "order": "asc"}],
-            },
-        ),
     }
+    assert len(origins) == 1
+    assert origins[0]["preference_id"] == 20
+    assert origins[0]["origin"] == "collision"
+    assert origins[0]["original_config_json"] == target_config_json
 
 
-def test_downgrade_restores_collision_target_config_without_rekeying() -> None:
+def test_downgrade_restores_collision_target_exactly_without_rekeying() -> None:
     migration = _load_migration()
     connection, table = _connection_with_table()
-    original_config = {
-        "version": 1,
-        "columns": [{"key": "customer"}],
-        "filters": [{"field": "stage", "op": "eq", "value": "active"}],
-        MIGRATION_ORIGIN_KEY: {"origin": "renamed", "row_id": 20},
-        "_migration_136_origin_9": {"origin": "collision", "row_id": 20},
-    }
+    target_config_json = '{ "version": 1, "columns": [], "filters": [], "sorts": [] }'
     try:
         _insert_view(table, connection, id=10)
         _insert_view(
@@ -227,59 +211,25 @@ def test_downgrade_restores_collision_target_config_without_rekeying() -> None:
             connection,
             id=20,
             view_key=TARGET_VIEW_KEY,
-            config_json=json.dumps(original_config),
+            config_json=target_config_json,
         )
         _run(connection, migration, "upgrade")
-
-        upgraded = _rows(table, connection)
-        upgraded_config = json.loads(upgraded[0]["config_json"])
-        assert upgraded_config[MIGRATION_ORIGIN_KEY] == {"origin": "renamed", "row_id": 20}
-        assert upgraded_config["_migration_136_origin_9"] == {
-            "origin": "collision",
-            "row_id": 20,
-        }
-        assert upgraded_config[MIGRATION_ORIGIN_FALLBACK_KEY] == _migration_marker(
-            "collision", 20, original_config
-        )
 
         _run(connection, migration, "downgrade")
 
         rows = _rows(table, connection)
+        origin_table_exists = _origin_table_exists(connection)
     finally:
         connection.close()
 
     assert len(rows) == 1
     assert rows[0]["id"] == 20
     assert rows[0]["view_key"] == TARGET_VIEW_KEY
-    assert json.loads(rows[0]["config_json"]) == original_config
+    assert rows[0]["config_json"] == target_config_json
+    assert origin_table_exists is False
 
 
-def test_upgrade_does_not_override_existing_target_display_mode() -> None:
-    migration = _load_migration()
-    connection, table = _connection_with_table()
-    original_config_json = '{"version": 1, "columns": [], "display_mode": "table"}'
-    try:
-        _insert_view(table, connection, id=10)
-        _insert_view(
-            table,
-            connection,
-            id=20,
-            view_key=TARGET_VIEW_KEY,
-            config_json=original_config_json,
-        )
-
-        _run(connection, migration, "upgrade")
-        _run(connection, migration, "downgrade")
-
-        rows = _rows(table, connection)
-    finally:
-        connection.close()
-
-    assert len(rows) == 1
-    assert rows[0]["config_json"] == original_config_json
-
-
-def test_upgrade_preserves_malformed_collision_target_config_bytes() -> None:
+def test_upgrade_does_not_touch_malformed_collision_target_or_record_provenance() -> None:
     migration = _load_migration()
     connection, table = _connection_with_table()
     malformed_config = '{"version": 1, "columns": ['
@@ -296,116 +246,23 @@ def test_upgrade_preserves_malformed_collision_target_config_bytes() -> None:
         _run(connection, migration, "upgrade")
 
         rows = _rows(table, connection)
+        origins = _origin_rows(connection)
     finally:
         connection.close()
 
     assert len(rows) == 1
     assert rows[0]["id"] == 20
-    assert rows[0]["view_key"] == TARGET_VIEW_KEY
     assert rows[0]["config_json"] == malformed_config
+    assert origins == []
 
 
-def test_upgrade_marker_does_not_duplicate_large_legacy_config() -> None:
+def test_upgrade_does_not_touch_existing_target_display_mode_or_record_provenance() -> None:
     migration = _load_migration()
     connection, table = _connection_with_table()
-    original_config = {
-        "version": 1,
-        "columns": [],
-        "filters": [{"field": "notes", "op": "eq", "value": "x" * 40_000}],
-    }
-    original_config_json = json.dumps(original_config)
-    try:
-        _insert_view(table, connection, config_json=original_config_json)
-
-        _run(connection, migration, "upgrade")
-
-        upgraded_config_json = _rows(table, connection)[0]["config_json"]
-    finally:
-        connection.close()
-
-    assert len(upgraded_config_json) < len(original_config_json) + 500
-
-
-def test_upgrade_recovers_invalid_legacy_config() -> None:
-    migration = _load_migration()
-    connection, table = _connection_with_table()
-    try:
-        _insert_view(table, connection, config_json="not-json")
-
-        _run(connection, migration, "upgrade")
-
-        row = _rows(table, connection)[0]
-    finally:
-        connection.close()
-
-    assert row["view_key"] == TARGET_VIEW_KEY
-    assert json.loads(row["config_json"]) == {
-        "version": 1,
-        "columns": [],
-        "display_mode": "board",
-        MIGRATION_ORIGIN_KEY: _migration_marker(
-            "renamed", 1, {"version": 1, "columns": []}
-        ),
-    }
-
-
-def test_downgrade_restores_legacy_key_and_removes_display_mode() -> None:
-    migration = _load_migration()
-    connection, table = _connection_with_table()
-    try:
-        _insert_view(table, connection)
-        _run(connection, migration, "upgrade")
-
-        _run(connection, migration, "downgrade")
-
-        row = _rows(table, connection)[0]
-    finally:
-        connection.close()
-
-    config = json.loads(row["config_json"])
-    assert row["view_key"] == LEGACY_VIEW_KEY
-    assert "display_mode" not in config
-    assert MIGRATION_ORIGIN_KEY not in config
-    assert config["filters"] == [{"field": "owner_id", "op": "eq", "value": "me"}]
-
-
-
-def test_renamed_source_preserves_existing_migration_marker_keys() -> None:
-    migration = _load_migration()
-    connection, table = _connection_with_table()
-    original_config = {
-        "version": 1,
-        "columns": [],
-        MIGRATION_ORIGIN_KEY: {"origin": "collision", "row_id": 1},
-        "_migration_136_origin_4": {"origin": "renamed", "row_id": 1},
-    }
-    try:
-        _insert_view(table, connection, config_json=json.dumps(original_config))
-
-        _run(connection, migration, "upgrade")
-
-        upgraded = _rows(table, connection)[0]
-        upgraded_config = json.loads(upgraded["config_json"])
-        assert upgraded_config[MIGRATION_ORIGIN_KEY] == {"origin": "collision", "row_id": 1}
-        assert upgraded_config["_migration_136_origin_4"] == {
-            "origin": "renamed",
-            "row_id": 1,
-        }
-        assert upgraded_config[MIGRATION_ORIGIN_FALLBACK_KEY] == _migration_marker(
-            "renamed", 1, original_config
-        )
-        _run(connection, migration, "downgrade")
-
-        row = _rows(table, connection)[0]
-    finally:
-        connection.close()
-
-    assert row["view_key"] == LEGACY_VIEW_KEY
-    assert json.loads(row["config_json"]) == original_config
-
-def test_downgrade_keeps_renamed_target_key_when_legacy_collision_exists() -> None:
-    migration = _load_migration()
-    connection, table = _connection_with_table()
+    original_config_json = (
+        '{"version":1,"columns":[],"display_mode":"table",'
+        '"_migration_136_origin":{"origin":"renamed"}}'
+    )
     try:
         _insert_view(table, connection, id=10)
         _insert_view(
@@ -413,17 +270,184 @@ def test_downgrade_keeps_renamed_target_key_when_legacy_collision_exists() -> No
             connection,
             id=20,
             view_key=TARGET_VIEW_KEY,
-            config_json=json.dumps(
-                {
-                    "version": 1,
-                    "columns": [],
-                    "display_mode": "board",
-                    MIGRATION_ORIGIN_KEY: _migration_marker(
-                        "renamed", 20, {"version": 1, "columns": []}
-                    ),
-                }
-            ),
+            config_json=original_config_json,
         )
+
+        _run(connection, migration, "upgrade")
+        origins = _origin_rows(connection)
+        _run(connection, migration, "downgrade")
+
+        rows = _rows(table, connection)
+    finally:
+        connection.close()
+
+    assert len(rows) == 1
+    assert rows[0]["view_key"] == TARGET_VIEW_KEY
+    assert rows[0]["config_json"] == original_config_json
+    assert origins == []
+
+
+def test_downgrade_restores_renamed_source_exact_bytes_and_user_migration_keys() -> None:
+    migration = _load_migration()
+    connection, table = _connection_with_table()
+    original_config_json = (
+        '{ "version": 1, "columns": [], "filters": [], "sorts": [], '
+        '"_migration_136_origin": {"origin": "collision", "row_id": 1} }'
+    )
+    try:
+        _insert_view(table, connection, config_json=original_config_json)
+        _run(connection, migration, "upgrade")
+
+        upgraded = _rows(table, connection)[0]
+        assert json.loads(upgraded["config_json"])["_migration_136_origin"] == {
+            "origin": "collision",
+            "row_id": 1,
+        }
+
+        _run(connection, migration, "downgrade")
+
+        row = _rows(table, connection)[0]
+    finally:
+        connection.close()
+
+    assert row["view_key"] == LEGACY_VIEW_KEY
+    assert row["config_json"] == original_config_json
+
+
+def test_downgrade_survives_normal_config_schema_round_trip() -> None:
+    migration = _load_migration()
+    connection, table = _connection_with_table()
+    original_config_json = '{"version":1,"columns":[],"filters":[],"sorts":[]}'
+    try:
+        _insert_view(table, connection, config_json=original_config_json)
+        _run(connection, migration, "upgrade")
+
+        row = _rows(table, connection)[0]
+        round_tripped_config_json = ViewPreferenceConfig(
+            **json.loads(row["config_json"])
+        ).model_dump_json()
+        connection.execute(
+            table.update()
+            .where(table.c.id == row["id"])
+            .values(config_json=round_tripped_config_json)
+        )
+
+        _run(connection, migration, "downgrade")
+
+        downgraded = _rows(table, connection)[0]
+    finally:
+        connection.close()
+
+    assert downgraded["view_key"] == LEGACY_VIEW_KEY
+    assert downgraded["config_json"] == original_config_json
+
+
+def test_downgrade_preserves_migrated_row_changed_to_table_mode() -> None:
+    migration = _load_migration()
+    connection, table = _connection_with_table()
+    try:
+        _insert_view(table, connection)
+        _run(connection, migration, "upgrade")
+
+        row = _rows(table, connection)[0]
+        table_config = json.loads(row["config_json"])
+        table_config["display_mode"] = "table"
+        table_config_json = json.dumps(table_config)
+        connection.execute(
+            table.update().where(table.c.id == row["id"]).values(config_json=table_config_json)
+        )
+
+        _run(connection, migration, "downgrade")
+
+        downgraded = _rows(table, connection)[0]
+    finally:
+        connection.close()
+
+    assert downgraded["view_key"] == TARGET_VIEW_KEY
+    assert downgraded["config_json"] == table_config_json
+
+
+def test_downgrade_preserves_semantically_changed_board_config() -> None:
+    migration = _load_migration()
+    connection, table = _connection_with_table()
+    try:
+        _insert_view(table, connection)
+        _run(connection, migration, "upgrade")
+
+        row = _rows(table, connection)[0]
+        changed_config = json.loads(row["config_json"])
+        changed_config["filters"].append({"field": "stage", "op": "eq", "value": "won"})
+        changed_config_json = json.dumps(changed_config)
+        connection.execute(
+            table.update().where(table.c.id == row["id"]).values(config_json=changed_config_json)
+        )
+
+        _run(connection, migration, "downgrade")
+
+        downgraded = _rows(table, connection)[0]
+    finally:
+        connection.close()
+
+    assert downgraded["view_key"] == TARGET_VIEW_KEY
+    assert downgraded["config_json"] == changed_config_json
+
+
+def test_upgrade_recovers_invalid_legacy_config_and_downgrade_restores_exact_bytes() -> None:
+    migration = _load_migration()
+    connection, table = _connection_with_table()
+    original_config_json = "not-json"
+    try:
+        _insert_view(table, connection, config_json=original_config_json)
+
+        _run(connection, migration, "upgrade")
+
+        upgraded = _rows(table, connection)[0]
+        origins = _origin_rows(connection)
+        assert json.loads(upgraded["config_json"]) == {
+            "version": 1,
+            "columns": [],
+            "display_mode": "board",
+        }
+        assert origins[0]["original_config_json"] == original_config_json
+
+        _run(connection, migration, "downgrade")
+
+        downgraded = _rows(table, connection)[0]
+    finally:
+        connection.close()
+
+    assert downgraded["view_key"] == LEGACY_VIEW_KEY
+    assert downgraded["config_json"] == original_config_json
+
+
+def test_downgrade_skips_missing_migrated_target_and_drops_provenance_table() -> None:
+    migration = _load_migration()
+    connection, table = _connection_with_table()
+    try:
+        _insert_view(table, connection)
+        _run(connection, migration, "upgrade")
+        migrated_id = _rows(table, connection)[0]["id"]
+        connection.execute(table.delete().where(table.c.id == migrated_id))
+
+        _run(connection, migration, "downgrade")
+
+        rows = _rows(table, connection)
+        origin_table_exists = _origin_table_exists(connection)
+    finally:
+        connection.close()
+
+    assert rows == []
+    assert origin_table_exists is False
+
+
+def test_downgrade_keeps_renamed_target_key_when_legacy_unique_key_is_occupied() -> None:
+    migration = _load_migration()
+    connection, table = _connection_with_table()
+    original_config_json = '{"version":1,"columns":[],"filters":[],"sorts":[]}'
+    try:
+        _insert_view(table, connection, id=20, config_json=original_config_json)
+        _run(connection, migration, "upgrade")
+        _insert_view(table, connection, id=30, name="new legacy view")
 
         _run(connection, migration, "downgrade")
 
@@ -431,5 +455,5 @@ def test_downgrade_keeps_renamed_target_key_when_legacy_collision_exists() -> No
     finally:
         connection.close()
 
-    assert [row["view_key"] for row in rows] == [LEGACY_VIEW_KEY, TARGET_VIEW_KEY]
-    assert json.loads(rows[1]["config_json"]) == {"version": 1, "columns": []}
+    assert [row["view_key"] for row in rows] == [TARGET_VIEW_KEY, LEGACY_VIEW_KEY]
+    assert rows[0]["config_json"] == original_config_json
