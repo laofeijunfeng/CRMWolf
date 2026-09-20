@@ -201,4 +201,100 @@ describe('ListAdvancedTools', () => {
 
     expect(wrapper.emitted('column-config-save')).toEqual([['team']])
   })
+
+  it('shows the optional journey view config and emits board mode', async () => {
+    const wrapper = mount(ListAdvancedTools, {
+      props: {
+        ...props,
+        viewDisplayModeEnabled: true,
+        viewDisplayMode: 'table',
+        viewConfigTriggerLabel: '视图配置',
+        viewConfigPanelTitle: '视图配置',
+        canSaveCurrentView: true,
+        viewSaveLoading: false,
+      },
+      attachTo: document.body,
+    })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    const trigger = Array.from(document.body.querySelectorAll('button')).find(button => (
+      button.textContent?.includes('视图配置') === true
+    ))
+    expect(trigger).toBeDefined()
+    trigger?.click()
+    await flushPromises()
+    const boardSwitch = document.body.querySelector('[role="switch"]')
+    expect(boardSwitch).not.toBeNull()
+    ;(boardSwitch as HTMLElement).click()
+    await flushPromises()
+    expect(wrapper.emitted('update:view-display-mode')).toEqual([['board']])
+  })
+
+  it('emits save-current-view from the same config surface', async () => {
+    const wrapper = mount(ListAdvancedTools, {
+      props: {
+        ...props,
+        viewDisplayModeEnabled: true,
+        viewDisplayMode: 'board',
+        viewConfigTriggerLabel: '视图配置',
+        viewConfigPanelTitle: '视图配置',
+        canSaveCurrentView: true,
+        viewSaveLoading: false,
+      },
+      attachTo: document.body,
+    })
+    wrappers.push(wrapper)
+    await flushPromises()
+    const trigger = Array.from(document.body.querySelectorAll('button')).find(button => (
+      button.textContent?.includes('视图配置') === true
+    ))
+    trigger?.click()
+    await flushPromises()
+    const save = Array.from(document.body.querySelectorAll('button')).find(button => button.textContent?.replace(/\s+/g, '') === '另存为视图')
+    expect(save).toBeDefined()
+    save?.click()
+    await flushPromises()
+    expect(wrapper.emitted('save-current-view')).toHaveLength(1)
+  })
+
+  it('keeps existing pages free of the board switch and view label', async () => {
+    const wrapper = mount(ListAdvancedTools, { props, attachTo: document.body })
+    wrappers.push(wrapper)
+    await flushPromises()
+    expect(document.body.textContent).not.toContain('看板视图')
+    expect(document.body.textContent).not.toContain('视图配置')
+    expect(document.body.textContent).toContain('字段配置')
+  })
+
+  it('preserves controlled board mode across the compact breakpoint', async () => {
+    const viewport = mockViewportWidth(767.5)
+    const wrapper = mount(ListAdvancedTools, {
+      props: {
+        ...props,
+        viewDisplayModeEnabled: true,
+        viewDisplayMode: 'table',
+        viewConfigTriggerLabel: '视图配置',
+        viewConfigPanelTitle: '视图配置',
+        canSaveCurrentView: true,
+        viewSaveLoading: false,
+      },
+      attachTo: document.body,
+    })
+    wrappers.push(wrapper)
+    await flushPromises()
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+    const trigger = Array.from(document.body.querySelectorAll('button')).find(button => (
+      button.textContent?.includes('视图配置') === true
+    ))
+    trigger?.click()
+    await flushPromises()
+    const boardSwitch = document.body.querySelector('[role="switch"]') as HTMLElement | null
+    boardSwitch?.click()
+    await wrapper.setProps({ viewDisplayMode: 'board' })
+    viewport.setWidth(768)
+    await flushPromises()
+    expect(document.body.querySelector('[role="switch"]')?.getAttribute('data-state')).toBe('checked')
+  })
 })

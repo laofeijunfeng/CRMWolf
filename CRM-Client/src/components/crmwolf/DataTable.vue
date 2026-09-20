@@ -36,7 +36,7 @@ import ListAdvancedTools from './ListAdvancedTools.vue'
 import ListViewStateSummary from './ListViewStateSummary.vue'
 import DataTableSearch from './DataTableSearch.vue'
 import SelectField from './SelectField.vue'
-import { viewPreferenceApi, type ViewPreferenceConfig, type ViewPreferenceScope } from '@/api/viewPreference'
+import { viewPreferenceApi, type ViewDisplayMode, type ViewPreferenceConfig, type ViewPreferenceScope } from '@/api/viewPreference'
 import type { ColumnConfigOption } from './columnConfigTypes'
 import type { ListFilterCondition } from './listFilterTypes'
 import { buildFilterSummaryItems, buildSortSummaryItems, countHiddenColumns } from './listViewState'
@@ -157,6 +157,18 @@ interface Props {
   searchLoading?: boolean
   /** 筛选视图保存中 */
   filterViewSaveLoading?: boolean
+  /** 可选的列表展示模式控制 */
+  viewDisplayMode?: ViewDisplayMode | null
+  /** 是否在字段配置浮层显示展示模式 */
+  viewDisplayModeEnabled?: boolean
+  /** 配置入口标签 */
+  viewConfigTriggerLabel?: string
+  /** 配置面板标题 */
+  viewConfigPanelTitle?: string
+  /** 是否允许从配置浮层另存当前视图 */
+  canSaveCurrentView?: boolean
+  /** 当前视图另存中 */
+  viewSaveLoading?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -194,6 +206,12 @@ const props = withDefaults(defineProps<Props>(), {
   columnPreferenceMode: 'default',
   filterViewSaveEnabled: false,
   filterViewSaveLoading: false,
+  viewDisplayMode: null,
+  viewDisplayModeEnabled: false,
+  viewConfigTriggerLabel: '字段配置',
+  viewConfigPanelTitle: '字段配置',
+  canSaveCurrentView: false,
+  viewSaveLoading: false,
   searchEnabled: false,
   search: '',
   searchPlaceholder: '',
@@ -220,6 +238,8 @@ const emit = defineEmits<{
   'column-config-current-change': [value: ViewPreferenceConfig]
   'column-config-save': [value: ViewPreferenceConfig]
   'column-config-reset': []
+  'update:view-display-mode': [value: ViewDisplayMode]
+  'save-current-view': []
   'remove-filter': [id: string]
   'clear-filters': []
   'retry-view-apply': []
@@ -319,7 +339,10 @@ const sortSummaryItems = computed(() =>
 )
 const hiddenColumnCount = computed(() => countHiddenColumns(columnConfigOptions.value))
 const hasAdvancedTools = computed(() =>
-  normalizedSortFields.value.length > 0 || isColumnConfigAvailable.value
+  normalizedSortFields.value.length > 0
+  || isColumnConfigAvailable.value
+  || props.viewDisplayModeEnabled
+  || props.canSaveCurrentView
 )
 const hasTableTools = computed(() =>
   props.searchEnabled || normalizedFilterFields.value.length > 0 || hasAdvancedTools.value
@@ -1015,12 +1038,20 @@ onBeforeUnmount(() => {
           :column-preference-mode="columnPreferenceMode ?? 'default'"
           :column-config-loading="columnConfigLoading"
           :column-config-saving="columnConfigSaving"
+          :view-display-mode="props.viewDisplayMode"
+          :view-display-mode-enabled="props.viewDisplayModeEnabled"
+          :view-config-trigger-label="props.viewConfigTriggerLabel"
+          :view-config-panel-title="props.viewConfigPanelTitle"
+          :can-save-current-view="props.canSaveCurrentView"
+          :view-save-loading="props.viewSaveLoading"
           @update:sorts="handleSortUpdate"
           @sort-apply="handleSortApply"
           @sort-reset="handleSortReset"
           @column-config-change="handleColumnConfigChange"
           @column-config-save="handleColumnConfigSave"
           @column-config-reset="handleColumnConfigReset(activeColumnConfigScope)"
+          @update:view-display-mode="emit('update:view-display-mode', $event)"
+          @save-current-view="emit('save-current-view')"
         />
         <slot name="tableTools" />
       </div>

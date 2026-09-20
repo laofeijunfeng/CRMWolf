@@ -4,9 +4,10 @@ import { Eye, EyeOff, GripVertical, Lock, Settings2, User, Users } from 'lucide-
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Switch } from '@/components/ui/switch'
 import TableToolbarButton from './TableToolbarButton.vue'
 import TableToolbarBuilderPanel from './TableToolbarBuilderPanel.vue'
-import type { ViewPreferenceScope } from '@/api/viewPreference'
+import type { ViewDisplayMode, ViewPreferenceScope } from '@/api/viewPreference'
 import type { ColumnConfigOption } from './columnConfigTypes'
 
 const props = withDefaults(defineProps<{
@@ -18,6 +19,12 @@ const props = withDefaults(defineProps<{
   scope?: ViewPreferenceScope
   scopeEditable?: boolean
   open?: boolean | null
+  viewDisplayMode?: ViewDisplayMode | null
+  viewDisplayModeEnabled?: boolean
+  viewConfigTriggerLabel?: string
+  viewConfigPanelTitle?: string
+  canSaveCurrentView?: boolean
+  viewSaveLoading?: boolean
 }>(), {
   active: false,
   activeCount: 0,
@@ -25,11 +32,19 @@ const props = withDefaults(defineProps<{
   loading: false,
   scope: 'personal',
   scopeEditable: true,
-  open: null
+  open: null,
+  viewDisplayMode: null,
+  viewDisplayModeEnabled: false,
+  viewConfigTriggerLabel: '字段配置',
+  viewConfigPanelTitle: '字段配置',
+  canSaveCurrentView: false,
+  viewSaveLoading: false,
 })
 
 const emit = defineEmits<{
   'update:open': [value: boolean]
+  'update:view-display-mode': [value: ViewDisplayMode]
+  'save-current-view': []
   change: [value: ColumnConfigOption[]]
   save: [scope: ViewPreferenceScope]
   reset: [scope: ViewPreferenceScope]
@@ -48,6 +63,11 @@ const dragKey = ref<string | null>(null)
 const selectedScope = ref<ViewPreferenceScope>(props.scope)
 const normalizedActiveCount = computed(() => props.activeCount ?? 0)
 const isActive = computed(() => props.active || normalizedActiveCount.value > 0)
+const boardViewEnabled = computed(() => props.viewDisplayMode === 'board')
+
+function handleDisplayModeChange(checked: boolean): void {
+  emit('update:view-display-mode', checked ? 'board' : 'table')
+}
 
 function cloneColumns(columns: ColumnConfigOption[]): ColumnConfigOption[] {
   return columns.map((column) => ({ ...column }))
@@ -111,13 +131,13 @@ watch(() => props.scope, (scope) => {
     <PopoverTrigger as-child>
       <TableToolbarButton :active="isActive" :count="normalizedActiveCount">
         <Settings2 class="w-4 h-4" aria-hidden="true" />
-        <span>字段配置</span>
+        <span>{{ viewConfigTriggerLabel }}</span>
       </TableToolbarButton>
     </PopoverTrigger>
 
     <PopoverContent align="start" class="column-config-popover">
       <TableToolbarBuilderPanel
-        title="字段配置"
+        :title="viewConfigPanelTitle"
         @close="open = false"
       >
         <div v-if="scopeEditable" class="column-config-scope" role="radiogroup" aria-label="保存范围">
@@ -140,6 +160,19 @@ watch(() => props.scope, (scope) => {
             <span>同步团队</span>
           </Button>
         </div>
+
+        <div v-if="viewDisplayModeEnabled" class="column-config-view-section">
+          <div class="column-config-view-row">
+            <span>看板视图</span>
+            <Switch
+              :model-value="boardViewEnabled"
+              aria-label="看板视图"
+              @update:model-value="handleDisplayModeChange"
+            />
+          </div>
+        </div>
+
+        <div v-if="viewDisplayModeEnabled" class="column-config-section-title column-config-section-title--columns">字段</div>
 
         <ScrollArea class="column-config-list-scroll">
           <div v-if="loading" class="column-config-state">正在读取配置</div>
@@ -179,6 +212,16 @@ watch(() => props.scope, (scope) => {
         </ScrollArea>
 
         <template #footer>
+          <Button
+            v-if="canSaveCurrentView"
+            type="button"
+            variant="ghost"
+            size="sm"
+            :disabled="viewSaveLoading"
+            @click="emit('save-current-view')"
+          >
+            另存为视图
+          </Button>
           <Button type="button" variant="ghost" size="sm" @click="emit('reset', selectedScope)">
             恢复默认
           </Button>
@@ -202,6 +245,30 @@ watch(() => props.scope, (scope) => {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: $wolf-space-sm-v2;
+}
+
+.column-config-view-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.column-config-section-title {
+  color: $wolf-text-tertiary-v2;
+  font-size: $wolf-font-size-caption-v2;
+}
+
+.column-config-section-title--columns {
+  margin-top: $wolf-space-sm-v2;
+}
+
+.column-config-view-row {
+  display: flex;
+  min-height: $wolf-touch-target-min-v2;
+  align-items: center;
+  justify-content: space-between;
+  gap: $wolf-space-md-v2;
+  color: $wolf-text-primary-v2;
+  font-size: $wolf-font-size-body-v2;
 }
 
 .column-config-list-scroll {

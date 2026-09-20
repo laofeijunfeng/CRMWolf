@@ -1,10 +1,11 @@
-import { describe, expect, it, vi } from 'vitest'
+import { flushPromises } from '@vue/test-utils'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick, ref } from 'vue'
 import { useCustomFilterViews } from '../useCustomFilterViews'
 import { viewPreferenceApi } from '@/api/viewPreference'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
-import type { ViewPreferenceItem } from '@/api/viewPreference'
+import type { ViewDisplayMode, ViewPreferenceItem } from '@/api/viewPreference'
 
 vi.mock('vue-sonner', () => ({
   toast: {
@@ -53,6 +54,10 @@ const customView = {
 } satisfies ViewPreferenceItem
 
 describe('useCustomFilterViews', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
   it('applies the first moved custom view after loading custom views', async () => {
     const activeTab = ref('all')
     const activeFilters = ref<ListFilterCondition[]>([])
@@ -374,5 +379,130 @@ describe('useCustomFilterViews', () => {
         sorts: activeSorts.value,
       },
     })
+  })
+
+  it('applies custom display mode and restores the built-in mode', async () => {
+    const activeTab = ref('all')
+    const activeFilters = ref<ListFilterCondition[]>([])
+    const activeSorts = ref<ListSortCondition[]>([])
+    const activeColumns = ref<ViewPreferenceItem['config']['columns']>([])
+    const displayMode = ref<ViewDisplayMode>('board')
+    const refresh = vi.fn().mockResolvedValue(true)
+    const views = useCustomFilterViews({
+      viewKey: 'business-journeys.list',
+      activeTab,
+      activeFilters,
+      activeSorts,
+      activeColumns,
+      activeDisplayMode: displayMode,
+      builtInDisplayMode: 'table',
+      refresh,
+    })
+    views.customViews.value = [{
+      ...customView,
+      config: { ...customView.config, display_mode: 'table' },
+    }]
+
+    expect(views.applyCustomViewTab('custom-view:1')).toBe(true)
+    await flushPromises()
+    expect(displayMode.value).toBe('table')
+
+    expect(views.applyBuiltInTab('all')).toBe(true)
+    expect(displayMode.value).toBe('board')
+  })
+
+  it('saves a board-only current snapshot without filters', async () => {
+    const activeTab = ref('all')
+    const activeFilters = ref<ListFilterCondition[]>([])
+    const activeSorts = ref<ListSortCondition[]>([])
+    const activeColumns = ref<ViewPreferenceItem['config']['columns']>([])
+    const displayMode = ref<ViewDisplayMode>('board')
+    vi.mocked(viewPreferenceApi.createCustomView).mockResolvedValue({
+      ...customView,
+      config: { ...customView.config, filters: [], sorts: [], columns: [], display_mode: 'board' },
+    })
+    const views = useCustomFilterViews({
+      viewKey: 'business-journeys.list',
+      activeTab,
+      activeFilters,
+      activeSorts,
+      activeColumns,
+      activeDisplayMode: displayMode,
+      getBuiltInFilters: () => [],
+      refresh: vi.fn().mockResolvedValue(true),
+    })
+
+    await views.saveCurrentAsCustomView()
+
+    expect(viewPreferenceApi.createCustomView).toHaveBeenCalledWith('business-journeys.list', {
+      config: { version: 1, columns: [], filters: [], sorts: [], display_mode: 'board' },
+    })
+  })
+
+  it('materializes built-in tab scope and lets explicit filters win by field', async () => {
+    const activeTab = ref('active')
+    const activeFilters = ref<ListFilterCondition[]>([
+      { field: 'status', op: 'eq', value: 'WON' },
+      { field: 'owner_id', op: 'eq', value: 'me' },
+    ])
+    vi.mocked(viewPreferenceApi.createCustomView).mockResolvedValue(customView)
+    const views = useCustomFilterViews({
+      viewKey: 'business-journeys.list',
+      activeTab,
+      activeFilters,
+      activeSorts: ref<ListSortCondition[]>([]),
+      activeColumns: ref([]),
+      activeDisplayMode: ref<ViewDisplayMode>('table'),
+      getBuiltInFilters: tab => tab === 'active'
+        ? [{ field: 'status', op: 'in', value: ['ACTIVE', 'WON'] }]
+        : [],
+      refresh: vi.fn().mockResolvedValue(true),
+    })
+
+    await views.saveCurrentAsCustomView()
+
+    const call = vi.mocked(viewPreferenceApi.createCustomView).mock.calls[0]
+    expect(call?.[1].config.filters).toEqual([
+      { field: 'status', op: 'eq', value: 'WON' },
+      { field: 'owner_id', op: 'eq', value: 'me' },
+    ])
+  })
+
+  it('keeps existing callers free of display_mode', async () => {
+    const activeTab = ref('all')
+    const activeFilters = ref<ListFilterCondition[]>([])
+    const activeSorts = ref<ListSortCondition[]>([])
+    const activeColumns = ref<ViewPreferenceItem['config']['columns']>([])
+    const views = useCustomFilterViews({
+      viewKey: 'customers.list',
+      activeTab,
+      activeFilters,
+      activeSorts,
+      activeColumns,
+      refresh: vi.fn().mockResolvedValue(true),
+    })
+    views.customViews.value = [customView]
+    activeTab.value = 'custom-view:1'
+    vi.mocked(viewPreferenceApi.updateCustomView).mockResolvedValue(customView)
+
+    await views.updateActiveCustomViewConfig()
+
+    const config = vi.mocked(viewPreferenceApi.updateCustomView).mock.calls[0]?.[2].config
+    expect(config).not.toHaveProperty('display_mode')
+  })
+
+  it('keeps the existing empty-filter save guard', async () => {
+    const views = useCustomFilterViews({
+      viewKey: 'customers.list',
+      activeTab: ref('all'),
+      activeFilters: ref<ListFilterCondition[]>([]),
+      activeSorts: ref<ListSortCondition[]>([]),
+      activeColumns: ref([]),
+      refresh: vi.fn().mockResolvedValue(true),
+    })
+
+    await views.saveAsCustomView([])
+
+    expect(viewPreferenceApi.createCustomView).not.toHaveBeenCalled()
   })
 })
