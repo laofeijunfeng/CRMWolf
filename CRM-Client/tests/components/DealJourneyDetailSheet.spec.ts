@@ -7,7 +7,7 @@ vi.mock('@/components/ui/sheet', () => ({
     name: 'Sheet',
     props: { open: Boolean },
     emits: ['update:open'],
-    setup: (props, { slots }) => () => props.open ? h('section', slots.default?.()) : null,
+    setup: (_, { slots }) => () => h('section', slots.default?.()),
   }),
 }))
 vi.mock('@/components/ui/detail-sheet', () => ({
@@ -49,6 +49,15 @@ describe('DealJourneyDetailSheet', () => {
       journeyId: 'djy_test',
     })
     expect(wrapper.findComponent(CustomerDetailSheet).exists()).toBe(false)
+  })
+
+  it('unmounts the Sheet boundary and Host when hidden', async () => {
+    const wrapper = mountSheet()
+
+    await wrapper.setProps({ visible: false })
+
+    expect(wrapper.findComponent({ name: 'Sheet' }).exists()).toBe(false)
+    expect(wrapper.findComponent(DealJourneyDetailHost).exists()).toBe(false)
   })
 
   it('closes the sheet from the Host and forwards refresh and customer events', async () => {

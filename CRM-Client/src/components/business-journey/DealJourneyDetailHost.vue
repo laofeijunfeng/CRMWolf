@@ -319,6 +319,7 @@ async function handleRecordEditSubmit(recordId: number, payload: PaymentRecordUp
   />
 
   <ContractDetailSheet
+    v-if="contractSheetOpen"
     :contract-id="selectedContractId"
     :visible="contractSheetOpen"
     @update:visible="handleContractSheetOpenChange"
@@ -329,6 +330,7 @@ async function handleRecordEditSubmit(recordId: number, payload: PaymentRecordUp
   />
 
   <PaymentPlanDetailSheet
+    v-if="paymentPlanSheetOpen"
     :plan-id="selectedPaymentPlan?.id ?? null"
     :visible="paymentPlanSheetOpen"
     @update:visible="handlePaymentPlanSheetOpenChange"
@@ -340,6 +342,7 @@ async function handleRecordEditSubmit(recordId: number, payload: PaymentRecordUp
   />
 
   <PaymentRecordDetailSheet
+    v-if="paymentRecordSheetOpen"
     :record-id="selectedPaymentRecord?.record.id ?? null"
     :visible="paymentRecordSheetOpen"
     :record="selectedPaymentRecord?.record ?? null"

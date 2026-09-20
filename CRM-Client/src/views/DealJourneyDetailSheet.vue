@@ -31,7 +31,7 @@ function closeSheet(): void {
 </script>
 
 <template>
-  <Sheet v-model:open="visibleModel">
+  <Sheet v-if="visible" v-model:open="visibleModel">
     <DetailSheetContent>
       <DealJourneyDetailHost
         v-if="customerId !== null && journeyId !== null"
