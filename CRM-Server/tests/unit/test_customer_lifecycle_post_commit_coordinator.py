@@ -56,9 +56,16 @@ class FakeJobService:
 
 
 class FakeIntelligenceService:
-    def __init__(self, *, prepare_error=None, after_commit_error=None) -> None:
+    def __init__(
+        self,
+        *,
+        prepare_error=None,
+        after_commit_error=None,
+        after_commit_profile_service=None,
+    ) -> None:
         self.prepare_error = prepare_error
         self.after_commit_error = after_commit_error
+        self.after_commit_profile_service = after_commit_profile_service
         self.calls: list[dict[str, object]] = []
         self.after_commit_calls: list[dict[str, object]] = []
         self.request = SimpleNamespace(request_id="profile-1", scheduled=True, kick_required=True)
@@ -73,6 +80,8 @@ class FakeIntelligenceService:
         self.after_commit_calls.append(kwargs)
         if self.after_commit_error is not None:
             raise self.after_commit_error
+        if self.after_commit_profile_service is not None:
+            self.after_commit_profile_service.kick_committed_event_refresh(self.request)
         return self.request
 
 
@@ -102,8 +111,11 @@ def _coordinator(
     session_factory=None,
 ):
     job_service = FakeJobService(ensure_error=job_error, kick_error=enrichment_kick_error)
-    intelligence = FakeIntelligenceService(prepare_error=profile_error)
     profile_service = FakeProfileService(kick_error=profile_kick_error)
+    intelligence = FakeIntelligenceService(
+        prepare_error=profile_error,
+        after_commit_profile_service=profile_service,
+    )
     coordinator = CustomerLifecyclePostCommitCoordinator(
         job_service=job_service,
         intelligence_service=intelligence,
@@ -132,6 +144,15 @@ def _work_with_both_requests() -> CustomerLifecyclePostCommitWork:
         warnings=(),
     )
 
+
+
+def test_work_keeps_warnings_as_third_positional_field():
+    warnings = ("existing warning",)
+
+    work = CustomerLifecyclePostCommitWork(None, None, warnings)
+
+    assert work.warnings == warnings
+    assert work.profile_kick_pending is True
 
 def test_work_is_frozen():
     work = _work_with_both_requests()
@@ -226,6 +247,39 @@ def test_enqueue_after_commit_uses_short_session_for_enrichment_receipt():
     assert sessions[0].commits == 1
     assert sessions[0].closed is True
     assert fakes.intelligence.after_commit_calls[0]["source_lead_id"] == 44
+
+
+def test_enqueue_after_commit_profile_publication_is_the_single_kick_owner():
+    coordinator, fakes = _coordinator()
+    work = coordinator.enqueue_after_commit(
+        customer=_customer(industry=None),
+        actor_id="9",
+        trigger_type="customer_converted_from_lead",
+        source_lead_id=44,
+    )
+
+    warnings = coordinator.kick(work)
+
+    assert warnings == ()
+    assert fakes.job_service.kick_calls == ["cej_1"]
+    assert fakes.profile_service.kick_calls == ["profile-1"]
+
+
+def test_prepare_profile_request_is_kicked_once_after_commit():
+    coordinator, fakes = _coordinator()
+    work = coordinator.prepare_in_transaction(
+        FakeDb(),
+        customer=_customer(industry=None),
+        actor_id="9",
+        trigger_type="customer_created",
+    )
+
+    warnings = coordinator.kick(work)
+
+    assert warnings == ()
+    assert fakes.job_service.kick_calls == ["cej_1"]
+    assert fakes.profile_service.kick_calls == ["profile-1"]
+    assert fakes.profile_service.kick_required_calls == [True]
 
 
 def test_prepare_surfaces_unscheduled_profile_receipt_as_warning():

@@ -8,6 +8,8 @@ from app.api import customers as customers_api
 from app.api import customer_ai as customer_ai_api
 from app.services.ai_parser import customer_parser as customer_parser_module
 from app.services.ai_parser.customer_parser import CustomerAIParser
+from app.services.customer_intelligence_refresh_service import CustomerIntelligenceCommittedEventRequest
+from app.services.customer_lifecycle_post_commit_coordinator import CustomerLifecyclePostCommitCoordinator
 
 from app.schemas.customer import ConvertLeadToCustomer
 
@@ -164,6 +166,53 @@ def _conversion_rows():
     return lead, customer, contact
 
 
+class _LifecycleSession:
+    def commit(self):
+        return None
+
+    def rollback(self):
+        return None
+
+    def close(self):
+        return None
+
+
+def _after_commit_coordinator_calls():
+    calls = SimpleNamespace(enrichment_kicks=[], publication_profile_kicks=[], coordinator_profile_kicks=[])
+
+    class JobService:
+        def ensure(self, db, **kwargs):
+            return SimpleNamespace(public_id="cej_1")
+
+        def kick(self, request):
+            calls.enrichment_kicks.append(request.job_public_id)
+
+    class IntelligenceService:
+        def enqueue_customer_lifecycle_refresh_after_commit(self, **kwargs):
+            request = CustomerIntelligenceCommittedEventRequest(
+                request_id="profile-1",
+                event=SimpleNamespace(),
+                scope="full",
+            )
+            calls.publication_profile_kicks.append(request.request_id)
+            return request
+
+    class ProfileService:
+        def kick_committed_event_refresh(self, request):
+            calls.coordinator_profile_kicks.append(request.request_id)
+
+    coordinator = CustomerLifecyclePostCommitCoordinator(
+        job_service=JobService(),
+        intelligence_service=IntelligenceService(),
+        profile_refresh_service=ProfileService(),
+        session_factory=_LifecycleSession,
+        settle_seconds=0,
+        profile_gate_max_seconds=0,
+        max_attempts=1,
+    )
+    return coordinator, calls
+
+
 @pytest.mark.asyncio
 async def test_legacy_conversion_uses_lifecycle_coordinator_after_commit(monkeypatch):
     lead, customer, contact = _conversion_rows()
@@ -221,6 +270,41 @@ async def test_legacy_conversion_uses_lifecycle_coordinator_after_commit(monkeyp
     ]
     assert kick_calls == [work]
 
+
+
+@pytest.mark.asyncio
+async def test_legacy_conversion_after_commit_profile_is_kicked_exactly_once(monkeypatch):
+    lead, customer, contact = _conversion_rows()
+    coordinator, calls = _after_commit_coordinator_calls()
+
+    monkeypatch.setattr(customers_api.lead_crud, "get_by_public_id", lambda *args: lead)
+    monkeypatch.setattr(customers_api, "_ensure_customer_name_available", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        customers_api.customer_crud,
+        "convert_from_lead",
+        lambda **kwargs: (customer, contact),
+    )
+    monkeypatch.setattr(customers_api, "customer_lifecycle_post_commit_coordinator", coordinator)
+    monkeypatch.setattr(
+        customers_api.outbound_notification_job_service,
+        "queue_committed",
+        lambda *args, **kwargs: SimpleNamespace(id=1),
+    )
+
+    response = await customers_api.convert_from_lead(
+        ConvertLeadToCustomer(lead_id="lead_44", product_public_id="prd_1"),
+        team_id=2,
+        current_user=SimpleNamespace(id=9, name="管理员"),
+        db=MagicMock(),
+        operation_id=None,
+        idempotency_key=None,
+        correlation_id=None,
+    )
+
+    assert response.customer_id == "cus_101"
+    assert calls.publication_profile_kicks == ["profile-1"]
+    assert calls.coordinator_profile_kicks == []
+    assert calls.enrichment_kicks == ["cej_1"]
 
 @pytest.mark.asyncio
 async def test_modern_conversion_prepares_before_commit_and_kicks_after(monkeypatch):
@@ -363,6 +447,51 @@ async def test_customer_ai_submit_uses_lifecycle_coordinator(monkeypatch):
         }
     ]
     assert kick_calls == [work]
+
+
+@pytest.mark.asyncio
+async def test_customer_ai_after_commit_profile_is_kicked_exactly_once(monkeypatch):
+    customer = SimpleNamespace(
+        id=101,
+        public_id="cus_101",
+        account_name="AI客户",
+        city="上海",
+        status=1,
+        team_id=2,
+        industry=None,
+    )
+    coordinator, calls = _after_commit_coordinator_calls()
+
+    async def create_entity(**kwargs):
+        return customer
+
+    async def post_create_actions(**kwargs):
+        return None
+
+    parser = SimpleNamespace(
+        create_entity=create_entity,
+        post_create_actions=post_create_actions,
+    )
+    monkeypatch.setattr(customer_ai_api.EntityAIParserFactory, "get_parser", lambda kind: parser)
+    monkeypatch.setattr(customer_ai_api, "_ensure_customer_name_available", lambda *args: None)
+    monkeypatch.setattr(customer_ai_api, "customer_lifecycle_post_commit_coordinator", coordinator)
+    payload = SimpleNamespace(
+        customer_info=SimpleNamespace(account_name="AI客户", model_dump=lambda: {"account_name": "AI客户"}),
+        contact_info=SimpleNamespace(model_dump=lambda: {"contact_name": "李华"}),
+        follow_up_info=None,
+    )
+
+    result = await customer_ai_api.create_customer_from_ai(
+        payload,
+        current_user=SimpleNamespace(id=9),
+        team_id=2,
+        db=object(),
+    )
+
+    assert result["public_id"] == "cus_101"
+    assert calls.publication_profile_kicks == ["profile-1"]
+    assert calls.coordinator_profile_kicks == []
+    assert calls.enrichment_kicks == ["cej_1"]
 
 
 @pytest.mark.asyncio

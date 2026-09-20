@@ -44,6 +44,7 @@ class CustomerLifecyclePostCommitWork:
     enrichment_request: CustomerEnrichmentJobRequest | None
     profile_request: CustomerIntelligenceCommittedEventRequest | None
     warnings: tuple[str, ...] = ()
+    profile_kick_pending: bool = True
 
 
 class CustomerLifecyclePostCommitCoordinator:
@@ -183,6 +184,7 @@ class CustomerLifecyclePostCommitCoordinator:
         return CustomerLifecyclePostCommitWork(
             enrichment_request=enrichment_request,
             profile_request=profile_request,
+            profile_kick_pending=False,
             warnings=tuple(warnings),
         )
 
@@ -197,7 +199,7 @@ class CustomerLifecyclePostCommitCoordinator:
                     "客户初始补全唤醒失败，将由恢复任务执行: job=%s",
                     work.enrichment_request.job_public_id,
                 )
-        if work.profile_request is not None:
+        if work.profile_kick_pending and work.profile_request is not None:
             try:
                 profile_request = work.profile_request
                 if not profile_request.kick_required and profile_request.scheduled:
