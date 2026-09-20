@@ -171,6 +171,32 @@ class CustomerIntelligenceRunService:
             .first()
         )
 
+    def resolve_profile_receipt(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        customer_id: int,
+        receipt: str,
+    ) -> CustomerIntelligenceRun | None:
+        value = str(receipt or "").strip()
+        if not value:
+            return None
+        query = db.query(CustomerIntelligenceRun).filter(
+            CustomerIntelligenceRun.team_id == team_id,
+            CustomerIntelligenceRun.customer_id == customer_id,
+        )
+        if value.startswith("released:"):
+            raw_run_id = value.removeprefix("released:")
+            if not raw_run_id.isdigit():
+                return None
+            return query.filter(CustomerIntelligenceRun.id == int(raw_run_id)).one_or_none()
+        return (
+            query.filter(CustomerIntelligenceRun.request_id == value)
+            .order_by(CustomerIntelligenceRun.id.desc())
+            .first()
+        )
+
     def defer_until(
         self,
         db: Session,
@@ -208,6 +234,40 @@ class CustomerIntelligenceRunService:
             team_id=team_id,
             customer_id=customer_id,
         ).count()
+
+    def cancel_deferred_for_customer(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        customer_id: int,
+        reason: str,
+        now: datetime | None = None,
+    ) -> list[int]:
+        cancelled_at = now or business_now()
+        runs = (
+            self._deferred_for_customer_query(
+                db,
+                team_id=team_id,
+                customer_id=customer_id,
+            )
+            .order_by(CustomerIntelligenceRun.id.asc())
+            .populate_existing()
+            .with_for_update()
+            .all()
+        )
+        cancelled = [int(run.id) for run in runs]
+        for run in runs:
+            run.status = CustomerIntelligenceRunStatus.CANCELLED
+            run.error_message = reason
+            run.not_before_at = None
+            run.next_retry_at = None
+            run.lease_token = None
+            run.lease_expires_at = None
+            run.finished_time = cancelled_at
+        if cancelled:
+            db.flush()
+        return cancelled
 
     def release_deferred_for_customer(
         self,

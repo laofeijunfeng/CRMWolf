@@ -20,7 +20,7 @@ from app.services.customer_enrichment_backfill_service import (
     CustomerEnrichmentBackfillService,
 )
 from app.services.customer_enrichment_contracts import CustomerEnrichmentPurpose
-from app.services.customer_enrichment_plan import ACTIVE_CUSTOMER_ENRICHMENT_PLAN
+from app.services.customer_enrichment_plan import ACTIVE_CUSTOMER_ENRICHMENT_PLAN, CustomerEnrichmentPlan
 from app.tasks.customer_enrichment_backfill import CustomerEnrichmentBackfillScheduler
 from app.utils.time import business_now
 
@@ -118,6 +118,39 @@ def test_backfill_scans_null_industry_even_when_profile_exists(db_session) -> No
     assert job.purpose == CustomerEnrichmentPurpose.HISTORICAL_BACKFILL.value
     assert job.profile_gate_deadline_at is None
 
+
+
+def test_backfill_schedules_blank_industry_once_and_skips_filled(db_session) -> None:
+    blank = _customer(db_session, industry="\u3000")
+    _customer(db_session, industry="software")
+    service = CustomerEnrichmentBackfillService()
+
+    first = service.scan_and_ensure(db_session, limit=20, dry_run=False)
+    second = service.scan_and_ensure(db_session, limit=20, dry_run=False)
+
+    assert first.customer_ids == [blank.id]
+    assert first.scheduled == 1
+    assert second.scheduled == 0
+    assert db_session.query(CustomerEnrichmentJob).count() == 1
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_backfill_disabled_plan_scans_and_schedules_nothing(db_session, dry_run) -> None:
+    _customer(db_session)
+    plan = CustomerEnrichmentPlan(
+        version="customer-initial-disabled",
+        fields=("industry",),
+        backfill_enabled=False,
+    )
+    service = CustomerEnrichmentBackfillService(plan=plan)
+
+    result = service.scan_and_ensure(db_session, limit=20, dry_run=dry_run)
+
+    assert result.scanned == 0
+    assert result.eligible == 0
+    assert result.scheduled == 0
+    assert result.customer_ids == []
+    assert db_session.query(CustomerEnrichmentJob).count() == 0
 
 def test_backfill_skips_existing_industry_and_existing_plan_job(db_session) -> None:
     _customer(db_session, industry="software")

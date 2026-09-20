@@ -345,7 +345,10 @@ async def test_success_completes_job_and_calls_completion_port_in_order():
     service = _service(
         workflow_result=_decision_result(),
         write_result=CustomerEnrichmentWriteResult(
-            outcome="APPLIED", applied_fields=("industry",), customer_version=5
+            outcome="APPLIED",
+            applied_fields=("industry",),
+            decision_reasons={"industry": "软件研发"},
+            customer_version=5,
         ),
     )
 
@@ -353,6 +356,10 @@ async def test_success_completes_job_and_calls_completion_port_in_order():
 
     assert result.execution_status == "COMPLETED"
     assert result.applied_fields == ["industry"]
+    assert result.decision_reasons == {"industry": "软件研发"}
+    assert service.job_crud.existing.result_json["decision_reasons"] == {
+        "industry": "软件研发"
+    }
     assert service.completion_port.calls == ["first_attempt", "terminal_success"]
     assert len(service.session_factory_fake.sessions) == 2
     assert all(session.closed for session in service.session_factory_fake.sessions)
@@ -362,6 +369,22 @@ async def test_success_completes_job_and_calls_completion_port_in_order():
     assert mutation_session.persisted_customer_write is True
     assert mutation_session.pending_customer_write is False
 
+
+def test_persisted_legacy_result_defaults_decision_reasons():
+    job = _job(
+        status="COMPLETED",
+        result_json={
+            "job_public_id": "cej_job-1",
+            "customer_id": 101,
+            "execution_status": "COMPLETED",
+            "success": True,
+            "applied_fields": ["industry"],
+        },
+    )
+
+    result = CustomerEnrichmentJobService._persisted_result(job)
+
+    assert result.decision_reasons == {}
 
 @pytest.mark.asyncio
 async def test_first_failure_retries_and_releases_profile_gate():
@@ -394,6 +417,27 @@ async def test_third_failure_exhausts():
     assert result.execution_status == "EXHAUSTED"
     assert result.retryable is False
 
+
+
+@pytest.mark.asyncio
+async def test_deleted_customer_is_skipped_once_without_retry_or_terminal_refresh():
+    from app.services.customer_enrichment_context_service import CustomerEnrichmentSkip
+
+    service = _service(
+        workflow_error=CustomerEnrichmentSkip("CUSTOMER_NOT_FOUND"),
+        attempt_count=1,
+    )
+
+    result = await service.run(_job_request())
+
+    assert result.execution_status == "SKIPPED"
+    assert result.skip_reason == "CUSTOMER_NOT_FOUND"
+    assert result.retryable is False
+    assert service.job_crud.calls.count("mark_skipped") == 1
+    assert "mark_retry" not in service.job_crud.calls
+    assert "mark_exhausted" not in service.job_crud.calls
+    assert service.write_service.calls == []
+    assert service.completion_port.calls == ["first_attempt"]
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
@@ -448,6 +492,7 @@ async def test_stale_finalization_rolls_back_pending_customer_write():
     mutation_session = service.session_factory_fake.sessions[1]
     assert result.execution_status == "BUSY"
     assert service.write_service.calls[0]["commit"] is False
+
     assert mutation_session.rollbacks == 1
     assert mutation_session.pending_customer_write is False
     assert mutation_session.persisted_customer_write is False
@@ -491,6 +536,11 @@ class CoordinatorRunService:
 
     def release_deferred_for_customer(self, db, *, team_id, customer_id):
         self.calls.append((team_id, customer_id))
+        return self.released_sequences.pop(0) if self.released_sequences else []
+
+    def cancel_deferred_for_customer(self, db, *, team_id, customer_id, reason, now=None):
+        del db, reason, now
+        self.calls.append(("cancel", team_id, customer_id))
         return self.released_sequences.pop(0) if self.released_sequences else []
 
 
@@ -562,6 +612,29 @@ def _coordinator(*, job, released_sequences, publication_results=None):
     )
     coordinator.session_factory_fake = session_factory
     return coordinator
+
+
+@pytest.mark.asyncio
+async def test_deleted_customer_first_attempt_cancels_deferred_profile_without_kick_or_receipt():
+    job = _job(
+        status="SKIPPED",
+        result_json={
+            "execution_status": "SKIPPED",
+            "success": True,
+            "skip_reason": "CUSTOMER_NOT_FOUND",
+        },
+    )
+    job.profile_refresh_request_id = None
+    job.profile_refresh_enqueued_at = None
+    coordinator = _coordinator(job=job, released_sequences=[[41]])
+
+    coordinator.on_first_attempt_finished(job)
+    await asyncio.sleep(0)
+
+    assert coordinator.run_service.calls == [("cancel", 2, 101)]
+    assert coordinator.refresh_service.calls == []
+    assert job.profile_refresh_request_id is None
+    assert job.profile_refresh_enqueued_at is None
 
 
 @pytest.mark.asyncio

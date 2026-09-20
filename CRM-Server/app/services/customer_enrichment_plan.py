@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Protocol, Sequence
+from typing import TYPE_CHECKING, Protocol
+
+from sqlalchemy import or_
 
 from app.crud.industry import industry_crud
 from app.models.customer import Customer
-from app.services.customer_enrichment_contracts import CustomerEnrichmentDecision
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
+
+    from sqlalchemy.orm import Session
+
+    from app.services.customer_enrichment_contracts import CustomerEnrichmentDecision
 
 
 @dataclass(frozen=True)
@@ -27,7 +35,14 @@ class CustomerEnrichmentFieldHandler(Protocol):
     @property
     def customer_column(self) -> object: ...
 
-    def catalog(self, db) -> list[dict[str, object]]: ...
+    def is_missing(self, value: object) -> bool: ...
+
+    @property
+    def missing_condition(self) -> object: ...
+
+    def catalog(self, db: Session) -> list[dict[str, object]]: ...
+
+    def validate_catalog(self, catalog: Sequence[dict[str, object]]) -> None: ...
 
     def validate(self, value: str, catalog: Sequence[dict[str, object]]) -> None: ...
 
@@ -38,7 +53,15 @@ class IndustryEnrichmentField:
     def customer_column(self) -> object:
         return Customer.industry
 
-    def catalog(self, db) -> list[dict[str, object]]:
+    @staticmethod
+    def is_missing(value: object) -> bool:
+        return value is None or (isinstance(value, str) and not value.strip())
+
+    @property
+    def missing_condition(self) -> object:
+        return or_(Customer.industry.is_(None), Customer.industry.regexp_match(r"^\s*$"))
+
+    def catalog(self, db: Session) -> list[dict[str, object]]:
         catalog: list[dict[str, object]] = []
         for industry in industry_crud.get_all_active(db):
             if getattr(industry, "is_active", 0) != 1:
@@ -55,12 +78,16 @@ class IndustryEnrichmentField:
             )
         return catalog
 
+    def validate_catalog(self, catalog: Sequence[dict[str, object]]) -> None:
+        other = next((entry for entry in catalog if entry.get("code") == "other"), None)
+        if other is None or other.get("level") != 1:
+            raise _inference_error("客户补全行业目录缺少启用的一级 other")
+
     def validate(self, value: str, catalog: Sequence[dict[str, object]]) -> None:
+        self.validate_catalog(catalog)
         item = next((entry for entry in catalog if entry.get("code") == value), None)
         if item is None:
             raise _inference_error(f"客户补全行业代码不在启用目录中: {value}")
-        if value == "other" and item.get("level") != 1:
-            raise _inference_error("客户补全行业目录缺少启用的一级 other")
 
 
 class CustomerEnrichmentFieldRegistry:
@@ -74,14 +101,32 @@ class CustomerEnrichmentFieldRegistry:
         except KeyError as exc:
             raise _inference_error(f"未注册的客户补全字段: {field_key}") from exc
 
+    def is_missing(self, field_key: str, value: object) -> bool:
+        return self.get(field_key).is_missing(value)
+
+    def missing_condition(self, field_key: str) -> object:
+        return self.get(field_key).missing_condition
+
     def catalogs(
         self,
-        db,
+        db: Session,
         team_id: int,
         fields: tuple[str, ...],
     ) -> dict[str, list[dict[str, object]]]:
         del team_id
         return {field: self.get(field).catalog(db) for field in fields}
+
+    def validate_catalogs(
+        self,
+        requested_fields: Sequence[str],
+        catalogs: dict[str, list[dict[str, object]]],
+    ) -> None:
+        for field in requested_fields:
+            try:
+                catalog = catalogs[field]
+            except KeyError as exc:
+                raise _inference_error(f"客户补全字段目录缺失: {field}") from exc
+            self.get(field).validate_catalog(catalog)
 
     def validate(
         self,
@@ -95,6 +140,7 @@ class CustomerEnrichmentFieldRegistry:
             raise _inference_error("客户补全结果字段重复")
         if len(decisions) != len(requested) or set(decision_fields) != set(requested):
             raise _inference_error("客户补全结果必须逐字段完整返回")
+        self.validate_catalogs(requested, catalogs)
         for decision in decisions:
             try:
                 catalog = catalogs[decision.field]

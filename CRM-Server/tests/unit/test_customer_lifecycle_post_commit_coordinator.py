@@ -176,6 +176,41 @@ def test_prepare_registers_enrichment_and_profile_for_null_industry():
     assert fakes.intelligence.calls[0]["trigger_type"] == "customer_created"
 
 
+@pytest.mark.parametrize("industry", ["", "   \t"])
+def test_prepare_registers_enrichment_for_blank_industry(industry):
+    coordinator, fakes = _coordinator()
+
+    work = coordinator.prepare_in_transaction(
+        FakeDb(),
+        customer=_customer(industry=industry),
+        actor_id="9",
+        trigger_type="customer_created",
+    )
+
+    assert work.enrichment_request.job_public_id == "cej_1"
+    assert len(fakes.job_service.ensure_calls) == 1
+
+@pytest.mark.parametrize("industry", ["", "   \t"])
+def test_enqueue_after_commit_registers_enrichment_for_blank_industry(industry):
+    sessions: list[FakeDb] = []
+
+    def session_factory():
+        session = FakeDb()
+        sessions.append(session)
+        return session
+
+    coordinator, fakes = _coordinator(session_factory=session_factory)
+
+    work = coordinator.enqueue_after_commit(
+        customer=_customer(industry=industry),
+        actor_id="9",
+        trigger_type="customer_created",
+    )
+
+    assert work.enrichment_request.job_public_id == "cej_1"
+    assert len(fakes.job_service.ensure_calls) == 1
+    assert sessions[0].commits == 1
+
 def test_prepare_skips_enrichment_when_industry_already_filled():
     coordinator, fakes = _coordinator()
     work = coordinator.prepare_in_transaction(

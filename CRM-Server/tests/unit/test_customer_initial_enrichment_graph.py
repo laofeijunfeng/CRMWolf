@@ -7,6 +7,7 @@ from app.services.agent.customer_initial_enrichment_graph import (
     CustomerInitialEnrichmentGraphService,
     CustomerInitialEnrichmentRequest,
 )
+from app.services.customer_enrichment_context_service import CustomerEnrichmentSkip
 from app.services.customer_enrichment_contracts import (
     CustomerEnrichmentDecision,
     CustomerEnrichmentInferenceResult,
@@ -33,6 +34,12 @@ class FakeContextService:
             }
         )
         return self.payload
+
+
+class MissingCustomerContextService:
+    def build(self, db, team_id: int, customer_id: int, fields: tuple[str, ...]):
+        del db, team_id, customer_id, fields
+        raise CustomerEnrichmentSkip("CUSTOMER_NOT_FOUND")
 
 
 class FakeInferenceService:
@@ -105,3 +112,38 @@ async def test_graph_returns_validated_decisions_for_missing_industry():
     assert result.expected_version == 4
     assert result.decisions == (decision,)
     assert inference.calls[0]["requested_fields"] == ("industry",)
+
+
+@pytest.mark.asyncio
+async def test_graph_treats_blank_industry_as_missing():
+    decision = CustomerEnrichmentDecision(field="industry", value="internet_saas", reason="软件研发")
+    context = FakeContextService(payload={"customer": {"version": 4, "industry": "  \t"}})
+    inference = FakeInferenceService(result=CustomerEnrichmentInferenceResult(decisions=[decision]))
+    graph = CustomerInitialEnrichmentGraphService(
+        context_service=context,
+        inference_service=inference,
+        checkpointer=InMemorySaver(),
+        session_factory=FakeSession,
+    )
+
+    result = await graph.run(_request())
+
+    assert result.decisions == (decision,)
+    assert inference.calls[0]["requested_fields"] == ("industry",)
+
+
+@pytest.mark.asyncio
+async def test_graph_propagates_deleted_customer_skip_without_inference():
+    inference = FakeInferenceService()
+    graph = CustomerInitialEnrichmentGraphService(
+        context_service=MissingCustomerContextService(),
+        inference_service=inference,
+        checkpointer=InMemorySaver(),
+        session_factory=FakeSession,
+    )
+
+    with pytest.raises(CustomerEnrichmentSkip) as exc:
+        await graph.run(_request())
+
+    assert exc.value.reason == "CUSTOMER_NOT_FOUND"
+    assert inference.calls == []

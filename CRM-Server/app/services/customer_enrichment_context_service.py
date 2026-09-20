@@ -1,16 +1,24 @@
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
 
-from app.crud.industry import industry_crud
+from sqlalchemy.orm import joinedload
+
 from app.crud.product_intent import product_intent_payload
 from app.models.customer import Contact, Customer, CustomerProduct
 from app.models.customer_activity import CustomerActivity
 from app.models.lead import Lead, LeadFollowUp
-from app.services.customer_enrichment_inference_service import CustomerEnrichmentInferenceError
 from app.services.customer_enrichment_plan import CustomerEnrichmentFieldRegistry
-from sqlalchemy.orm import joinedload
 
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
+
+class CustomerEnrichmentSkip(Exception):
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
 
 class CustomerEnrichmentContextService:
     def __init__(self, *, registry: CustomerEnrichmentFieldRegistry | None = None) -> None:
@@ -18,7 +26,7 @@ class CustomerEnrichmentContextService:
 
     def build(
         self,
-        db,
+        db: Session,
         team_id: int,
         customer_id: int,
         fields: tuple[str, ...],
@@ -30,7 +38,7 @@ class CustomerEnrichmentContextService:
             .first()
         )
         if customer is None:
-            raise CustomerEnrichmentInferenceError("客户不存在")
+            raise CustomerEnrichmentSkip("CUSTOMER_NOT_FOUND")
 
         primary_contact = (
             db.query(Contact)
@@ -105,7 +113,7 @@ class CustomerEnrichmentContextService:
 
     @staticmethod
     def _source_lead_context(
-        db,
+        db: Session,
         *,
         team_id: int,
         source_lead_id: int | None,

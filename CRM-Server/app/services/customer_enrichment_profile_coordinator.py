@@ -71,6 +71,7 @@ class CustomerEnrichmentProfileCoordinator:
     def on_first_attempt_finished(self, job: CustomerEnrichmentJob) -> None:
         released: list[int] = []
         db = self._session_factory()
+        should_kick = True
         try:
             locked = self.job_crud.get_by_public_id(
                 db,
@@ -80,19 +81,29 @@ class CustomerEnrichmentProfileCoordinator:
             )
             if locked is None:
                 return
-            released = self.run_service.release_deferred_for_customer(
-                db,
-                team_id=int(locked.team_id),
-                customer_id=int(locked.customer_id),
-            )
-            if (
-                released
-                and str(locked.status) in _TERMINAL_SUCCESS
-                and locked.profile_refresh_request_id is None
-            ):
-                locked.profile_refresh_request_id = f"released:{released[0]}"
-                locked.profile_refresh_enqueued_at = business_now()
-                db.add(locked)
+            payload = locked.result_json if isinstance(locked.result_json, dict) else {}
+            if payload.get("skip_reason") == "CUSTOMER_NOT_FOUND":
+                should_kick = False
+                self.run_service.cancel_deferred_for_customer(
+                    db,
+                    team_id=int(locked.team_id),
+                    customer_id=int(locked.customer_id),
+                    reason="CUSTOMER_NOT_FOUND",
+                )
+            else:
+                released = self.run_service.release_deferred_for_customer(
+                    db,
+                    team_id=int(locked.team_id),
+                    customer_id=int(locked.customer_id),
+                )
+                if (
+                    released
+                    and str(locked.status) in _TERMINAL_SUCCESS
+                    and locked.profile_refresh_request_id is None
+                ):
+                    locked.profile_refresh_request_id = f"released:{released[0]}"
+                    locked.profile_refresh_enqueued_at = business_now()
+                    db.add(locked)
             db.commit()
         except Exception:
             db.rollback()
@@ -101,7 +112,8 @@ class CustomerEnrichmentProfileCoordinator:
         finally:
             db.close()
 
-        self._kick_released_runs(team_id=int(job.team_id), released=released)
+        if should_kick:
+            self._kick_released_runs(team_id=int(job.team_id), released=released)
 
     def on_terminal_success(
         self,

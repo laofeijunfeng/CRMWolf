@@ -233,13 +233,13 @@ Agent 只负责在事实和证据之上完成归纳，不拥有“把什么写�
 
 ### 3.2.1 客户初始补全与档案投影边界
 
-客户初始补全是独立的客户主数据 mutation：客户首次成为正式客户后，durable job 只对 active plan 明确许可且仍为空的字段执行条件写入；第一期仅处理 `Customer.industry`。它不属于档案 Projection Graph，也不能由档案读取或手动刷新隐式触发。人工值、线索转化继承值、导入值和其它既有非空值永不覆盖；补全失败只进入自身的重试/耗尽生命周期，不能回滚已创建客户。
+客户初始补全是独立的客户主数据 mutation：客户首次成为正式客户后，durable job 只对 active plan 明确许可且仍缺失的字段执行条件写入；第一期仅处理 `Customer.industry`，其缺失语义是 `NULL` 或仅空白字符。字段 handler 统一提供该谓词，创建、线索转化、Graph、原子写入、历史回填、preview 和 reconciliation 必须一致使用。人工值、线索转化解析出的有效 code/name、导入值和其它既有非缺失值永不覆盖；旧 AI 入口的 `industry_hint` 仅为兼容 parse/wire 字段，不同步写入。补全失败只进入自身的重试/耗尽生命周期，不能回滚已创建客户。
 
-客户档案继续保持只读投影。Profile Workflow 只能读取补全提交后的客户主数据并发布阅读版本，不能反向修改 `Customer`。补全成功后的主数据更新可登记一次档案刷新；档案发布失败沿用档案自身的重试和上一成功版本，不改变 enrichment job 的终态，也不能回滚已经写入的主数据。
+客户档案继续保持只读投影。Profile Workflow 只能读取补全提交后的客户主数据并发布阅读版本，不能反向修改 `Customer`。补全成功后的主数据更新可登记一次档案刷新；档案发布失败沿用档案自身的重试和上一成功版本，不改变 enrichment job 的终态，也不能回滚已经写入的主数据。行业目录在模型调用前和原子写入前都必须存在启用的一级 `other`；任何技术或目录失败都不得写成 `other`。每个 applied field 的 bounded `reason` 同时写入操作日志和 enrichment job result。
 
-首次档案生成前使用持久 readiness gate 协调时序：如果当前 active plan 存在 `purpose=INITIAL_CREATION`、`first_attempt_finished_at IS NULL` 且尚未到 `profile_gate_deadline_at` 的任务，Profile run 在 claim、递增 attempt 或标记 `UPDATING` 之前写入未来的 `not_before_at` 并延后。首次真实尝试以 `COMPLETED`、`SKIPPED`、第一次技术失败进入 `RETRY_PENDING`，或直接 `EXHAUSTED` 结束后，释放被延后的 run。
+首次档案生成前使用持久 readiness gate 协调时序：如果当前 active plan 存在 `purpose=INITIAL_CREATION`、`first_attempt_finished_at IS NULL` 且尚未到 `profile_gate_deadline_at` 的任务，Profile run 在 claim、递增 attempt 或标记 `UPDATING` 之前写入未来的 `not_before_at` 并延后。首次真实尝试以 `COMPLETED`、普通 `SKIPPED`、第一次技术失败进入 `RETRY_PENDING`，或直接 `EXHAUSTED` 结束后，释放被延后的 run。客户已删除时使用 typed domain skip 直接持久化 `SKIPPED/CUSTOMER_NOT_FOUND`，不调用模型、不进入重试、不登记终态档案刷新，并把已 deferred 的首次档案 run tenant-scoped 地取消而不是释放/kick。
 
-该 gate 是有期限的偏好，不是客户档案可用性的硬依赖。worker 停摆或首次尝试未在 deadline 前完成时，档案必须解除 gate、降级生成不含缺失字段的版本；enrichment job 保持原状态并继续恢复/重试。后续补全成功再登记客户主数据变化刷新，使档案读取新值。若创建期 job 因登记故障不存在，档案也不阻塞，由 reconciliation 补登记任务并在成功后刷新。
+该 gate 是有期限的偏好，不是客户档案可用性的硬依赖。worker 停摆或首次尝试未在 deadline 前完成时，档案必须解除 gate、降级生成不含缺失字段的版本；enrichment job 保持原状态并继续恢复/重试。后续补全成功再登记客户主数据变化刷新，使档案读取新值。若创建期 job 因登记故障不存在，档案也不阻塞，由 reconciliation 补登记任务并在成功后刷新。终态 receipt 必须在同一 team/customer 下解析到 `released:<numeric_run_id>` 或普通 request ID 对应 run；空白或失效 receipt 由 reconciliation 在 customer savepoint 内替换或重新登记，dry-run 只报告。
 
 超时证据保存在 enrichment job 的 nullable `profile_gate_timed_out_at`。只有 `INITIAL_CREATION` 任务仍未结束首次尝试、deadline 已过，并且 Profile run 因该 deadline 实际放行时，才在调用方事务中写入首次时间；重复放行保留原值。历史回填、首次尝试已经结束的释放和 dry-run 不写该字段，运维 requeue 也保留既有超时历史。
 

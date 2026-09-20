@@ -673,7 +673,7 @@ class CustomerCRUD:
             city=lead.city,
             address=address or None,
             company_scale=lead.company_scale.value if lead.company_scale else None,
-            industry=industry,
+            industry=_resolve_create_industry_code(db, industry),
             source=source_row.name,
             source_id=lead.source_id,
             status=0,

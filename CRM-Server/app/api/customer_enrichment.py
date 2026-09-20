@@ -27,7 +27,10 @@ from app.services.customer_enrichment_contracts import (
     CustomerEnrichmentJobStatus,
 )
 from app.services.customer_enrichment_job_service import customer_enrichment_job_service
-from app.services.customer_enrichment_plan import ACTIVE_CUSTOMER_ENRICHMENT_PLAN
+from app.services.customer_enrichment_plan import (
+    ACTIVE_CUSTOMER_ENRICHMENT_PLAN,
+    CustomerEnrichmentFieldRegistry,
+)
 from app.services.customer_enrichment_reconciliation_service import (
     customer_enrichment_reconciliation_service,
 )
@@ -68,13 +71,15 @@ def list_enrichment_jobs_for_team(
     )
 
 def build_backfill_preview(db: Session, *, team_id: int) -> dict[str, int | bool]:
+    registry = CustomerEnrichmentFieldRegistry()
+    industry_missing = registry.missing_condition("industry")
     active_plan_jobs = db.query(CustomerEnrichmentJob.customer_id).filter(
         CustomerEnrichmentJob.team_id == team_id,
         CustomerEnrichmentJob.plan_version == ACTIVE_CUSTOMER_ENRICHMENT_PLAN.version,
     )
     industry_null = (
         db.query(func.count(Customer.id))
-        .filter(Customer.team_id == team_id, Customer.industry.is_(None))
+        .filter(Customer.team_id == team_id, industry_missing)
         .scalar()
         or 0
     )
@@ -82,7 +87,7 @@ def build_backfill_preview(db: Session, *, team_id: int) -> dict[str, int | bool
         db.query(func.count(Customer.id))
         .filter(
             Customer.team_id == team_id,
-            Customer.industry.is_(None),
+            industry_missing,
             Customer.id.in_(active_plan_jobs),
         )
         .scalar()
@@ -92,18 +97,22 @@ def build_backfill_preview(db: Session, *, team_id: int) -> dict[str, int | bool
         str(code)
         for (code,) in db.query(Industry.code).filter(Industry.is_active == 1).all()
     }
-    non_null_values = [
+    non_missing_values = [
         str(value)
         for (value,) in db.query(Customer.industry)
-        .filter(Customer.team_id == team_id, Customer.industry.is_not(None))
+        .filter(Customer.team_id == team_id, ~industry_missing)
         .all()
     ]
-    invalid_non_null = sum(value not in active_industries for value in non_null_values)
+    invalid_non_null = sum(value not in active_industries for value in non_missing_values)
     return {
         "industry_null": int(industry_null),
         "existing_jobs": int(existing_jobs),
-        "would_schedule": max(0, int(industry_null) - int(existing_jobs)),
-        "filled_skip": len(non_null_values),
+        "would_schedule": (
+            max(0, int(industry_null) - int(existing_jobs))
+            if ACTIVE_CUSTOMER_ENRICHMENT_PLAN.backfill_enabled
+            else 0
+        ),
+        "filled_skip": len(non_missing_values),
         "invalid_non_null": invalid_non_null,
         "other_available": (
             db.query(Industry.id)
@@ -264,9 +273,9 @@ def _requested_fields_missing(customer: Customer, fields: list[object]) -> bool:
     active = set(ACTIVE_CUSTOMER_ENRICHMENT_PLAN.fields)
     if not requested or not requested.issubset(active):
         return False
+    registry = CustomerEnrichmentFieldRegistry()
     return any(
-        (value := getattr(customer, field, None)) is None
-        or (isinstance(value, str) and not value.strip())
+        registry.is_missing(field, getattr(customer, field, None))
         for field in requested
     )
 

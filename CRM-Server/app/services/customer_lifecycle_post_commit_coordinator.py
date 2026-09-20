@@ -22,7 +22,10 @@ from app.services.customer_enrichment_job_service import (
     CustomerEnrichmentJobService,
     customer_enrichment_job_service,
 )
-from app.services.customer_enrichment_plan import ACTIVE_CUSTOMER_ENRICHMENT_PLAN
+from app.services.customer_enrichment_plan import (
+    ACTIVE_CUSTOMER_ENRICHMENT_PLAN,
+    CustomerEnrichmentFieldRegistry,
+)
 from app.services.customer_intelligence_refresh_service import (
     CustomerIntelligenceCommittedEventRequest,
     CustomerIntelligenceRefreshService,
@@ -32,6 +35,7 @@ from app.utils.time import business_now
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from contextlib import AbstractContextManager
 
     from sqlalchemy.orm import Session
 
@@ -60,11 +64,13 @@ class CustomerLifecyclePostCommitCoordinator:
         settle_seconds: int | None = None,
         profile_gate_max_seconds: int | None = None,
         max_attempts: int | None = None,
+        field_registry: CustomerEnrichmentFieldRegistry | None = None,
     ) -> None:
         settings = get_settings()
         self.job_service = job_service or customer_enrichment_job_service
         self.intelligence_service = intelligence_service or customer_business_object_intelligence_service
         self.profile_refresh_service = profile_refresh_service or customer_intelligence_refresh_service
+        self.field_registry = field_registry or CustomerEnrichmentFieldRegistry()
         self._session_factory = session_factory
         self.settle_seconds = max(
             0,
@@ -104,7 +110,7 @@ class CustomerLifecyclePostCommitCoordinator:
         enrichment_request = None
         profile_request = None
 
-        if getattr(customer, "industry", None) is None:
+        if self._fields_missing(customer):
             try:
                 with self._savepoint(db):
                     enrichment_request = self._ensure_enrichment(db, customer=customer)
@@ -149,7 +155,7 @@ class CustomerLifecyclePostCommitCoordinator:
         enrichment_request = None
         profile_request = None
 
-        if getattr(customer, "industry", None) is None:
+        if self._fields_missing(customer):
             db = None
             try:
                 db = self._session_factory()
@@ -241,8 +247,14 @@ class CustomerLifecyclePostCommitCoordinator:
         )
         return CustomerEnrichmentJobRequest(team_id=team_id, job_public_id=str(job.public_id))
 
+    def _fields_missing(self, customer: object) -> bool:
+        return any(
+            self.field_registry.is_missing(field, getattr(customer, field, None))
+            for field in ACTIVE_CUSTOMER_ENRICHMENT_PLAN.fields
+        )
+
     @staticmethod
-    def _savepoint(db: Session):
+    def _savepoint(db: Session) -> AbstractContextManager[object]:
         begin_nested = getattr(db, "begin_nested", None)
         return begin_nested() if callable(begin_nested) else nullcontext()
 

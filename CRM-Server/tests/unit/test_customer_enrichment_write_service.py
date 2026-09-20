@@ -141,10 +141,30 @@ def test_apply_sets_null_industry_and_logs_once():
         "changed_fields": ["industry"],
         "before": {"industry": None},
         "after": {"industry": "internet_saas"},
+        "reasons": {"industry": "软件研发"},
         "source": "CUSTOMER_INITIAL_ENRICHMENT",
         "plan_version": "customer-initial-v1",
         "job_public_id": "cej_1",
     }
+
+
+def test_apply_replaces_blank_industry_as_missing():
+    db, customer = _seed_customer(industry="  \t", version=4)
+
+    result = _service().apply(
+        db,
+        team_id=2,
+        customer_id=customer.id,
+        expected_version=4,
+        decisions=(_industry_decision(),),
+        plan_version="customer-initial-v1",
+        job_public_id="cej_blank",
+    )
+
+    db.refresh(customer)
+    assert result.outcome == "APPLIED"
+    assert customer.industry == "internet_saas"
+    assert customer.version == 5
 
 
 def test_apply_without_commit_flushes_then_rollback_undoes_customer_and_audit():
@@ -260,6 +280,31 @@ def test_apply_revalidates_active_industry_before_write():
     assert db.query(OperationLog).count() == 0
 
 
+def test_apply_rejects_write_when_primary_other_disappears_before_commit():
+    db, customer = _seed_customer(industry=None, version=4)
+    other = db.query(Industry).filter(Industry.code == "other").one()
+    other.is_active = 0
+    db.flush()
+
+    with pytest.raises(CustomerEnrichmentWriteError):
+        _service().apply(
+            db,
+            team_id=2,
+            customer_id=customer.id,
+            expected_version=4,
+            decisions=(_industry_decision(),),
+            plan_version="customer-initial-v1",
+            job_public_id="cej_1",
+        )
+
+    db.expire_all()
+    stored = db.get(Customer, customer.id)
+    assert stored is not None
+    assert stored.industry is None
+    assert stored.version == 4
+    assert db.query(OperationLog).count() == 0
+
+
 def test_apply_rolls_back_when_operation_log_fails(monkeypatch):
     db, customer = _seed_customer(industry=None, version=4)
     monkeypatch.setattr(
@@ -294,9 +339,20 @@ class _AddressEnrichmentField:
     def customer_column(self):
         return Customer.address
 
+    @staticmethod
+    def is_missing(value):
+        return value is None or (isinstance(value, str) and not value.strip())
+
+    @property
+    def missing_condition(self):
+        return Customer.address.is_(None)
+
     def catalog(self, db):
         del db
         return []
+
+    def validate_catalog(self, catalog):
+        del catalog
 
     def validate(self, value, catalog):
         del catalog

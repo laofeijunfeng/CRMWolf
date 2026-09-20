@@ -26,6 +26,7 @@ RETRY = "RETRY"
 class CustomerEnrichmentWriteResult:
     outcome: Literal["APPLIED", "SKIPPED", "RETRY"]
     applied_fields: tuple[str, ...] = ()
+    decision_reasons: dict[str, str] | None = None
     customer_version: int | None = None
     reason: str | None = None
 
@@ -57,12 +58,17 @@ class CustomerEnrichmentWriteService:
         commit: bool = True,
     ) -> CustomerEnrichmentWriteResult:
         try:
-            applied_fields, applied_values, column_values = self._validated_values(db, decisions)
+            applied_fields, applied_values, decision_reasons, column_values = self._validated_values(
+                db, decisions
+            )
             conditions = [
                 Customer.id == customer_id,
                 Customer.team_id == team_id,
                 Customer.version == expected_version,
-                *(column.is_(None) for column in column_values),
+                *(
+                    self._field_registry.missing_condition(field)
+                    for field in applied_fields
+                ),
             ]
             result = db.execute(
                 update(Customer)
@@ -82,7 +88,7 @@ class CustomerEnrichmentWriteService:
                     db,
                     team_id=team_id,
                     customer_id=customer_id,
-                    columns=tuple(column_values),
+                    field_keys=applied_fields,
                 )
 
             log = self._log_service.log(
@@ -99,6 +105,7 @@ class CustomerEnrichmentWriteService:
                     "changed_fields": applied_fields,
                     "before": dict.fromkeys(applied_fields),
                     "after": applied_values,
+                    "reasons": decision_reasons,
                     "source": "CUSTOMER_INITIAL_ENRICHMENT",
                     "plan_version": plan_version,
                     "job_public_id": job_public_id,
@@ -113,6 +120,7 @@ class CustomerEnrichmentWriteService:
             return CustomerEnrichmentWriteResult(
                 outcome=APPLIED,
                 applied_fields=applied_fields,
+                decision_reasons=decision_reasons,
                 customer_version=expected_version + 1,
             )
         except CustomerEnrichmentWriteError:
@@ -126,13 +134,14 @@ class CustomerEnrichmentWriteService:
         self,
         db: Session,
         decisions: tuple[CustomerEnrichmentDecision, ...],
-    ) -> tuple[tuple[str, ...], dict[str, str], dict[object, str]]:
+    ) -> tuple[tuple[str, ...], dict[str, str], dict[str, str], dict[object, str]]:
         if not decisions:
             raise CustomerEnrichmentWriteError("客户补全决策不能为空")
 
         applied_fields: list[str] = []
         applied_values: dict[str, str] = {}
         column_values: dict[object, str] = {}
+        decision_reasons: dict[str, str] = {}
         for decision in decisions:
             if decision.field in applied_values:
                 raise CustomerEnrichmentWriteError("客户补全决策字段重复")
@@ -141,16 +150,17 @@ class CustomerEnrichmentWriteService:
             handler.validate(decision.value, catalog)
             applied_fields.append(decision.field)
             applied_values[decision.field] = decision.value
+            decision_reasons[decision.field] = decision.reason
             column_values[handler.customer_column] = decision.value
-        return tuple(applied_fields), applied_values, column_values
+        return tuple(applied_fields), applied_values, decision_reasons, column_values
 
-    @staticmethod
     def _conflict_result(
+        self,
         db: Session,
         *,
         team_id: int,
         customer_id: int,
-        columns: tuple[object, ...],
+        field_keys: tuple[str, ...],
     ) -> CustomerEnrichmentWriteResult:
         customer = (
             db.query(Customer)
@@ -158,7 +168,10 @@ class CustomerEnrichmentWriteService:
             .populate_existing()
             .first()
         )
-        if customer is not None and any(getattr(customer, column.key) is not None for column in columns):
+        if customer is not None and any(
+            not self._field_registry.is_missing(field, getattr(customer, field, None))
+            for field in field_keys
+        ):
             return CustomerEnrichmentWriteResult(
                 outcome=SKIPPED,
                 reason="FIELD_ALREADY_FILLED",

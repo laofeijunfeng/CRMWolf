@@ -23,7 +23,7 @@ from app.schemas.customer import ConvertLeadToCustomer
 from app.services.ai_parser import customer_parser as customer_parser_module
 from app.services.ai_parser.customer_parser import CustomerAIParser
 from app.services.customer_enrichment_contracts import CustomerEnrichmentJobStatus
-from app.services.customer_enrichment_plan import ACTIVE_CUSTOMER_ENRICHMENT_PLAN
+from app.services.customer_enrichment_plan import ACTIVE_CUSTOMER_ENRICHMENT_PLAN, CustomerEnrichmentPlan
 from app.services.customer_enrichment_reconciliation_service import (
     CustomerEnrichmentReconciliationResult,
 )
@@ -513,6 +513,68 @@ async def test_customer_ai_after_commit_profile_is_kicked_exactly_once(monkeypat
     assert calls.coordinator_profile_kicks == []
     assert calls.enrichment_kicks == ["cej_1"]
 
+@pytest.mark.asyncio
+async def test_customer_parser_keeps_industry_hint_non_authoritative(monkeypatch):
+    captured = {}
+    customer = SimpleNamespace(id=101, public_id="cus_101", industry=None)
+
+    monkeypatch.setattr(
+        customer_parser_module,
+        "industry_crud",
+        SimpleNamespace(
+            get_industry_hierarchy=lambda db: (_ for _ in ()).throw(
+                AssertionError("legacy industry matcher must not run")
+            )
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        customer_parser_module,
+        "resolve_source_for_ai",
+        lambda db, team_id, source: SimpleNamespace(public_id="src_online"),
+    )
+    monkeypatch.setattr(
+        customer_parser_module,
+        "first_active_product",
+        lambda db, team_id: SimpleNamespace(public_id="prd_crm"),
+    )
+
+    def create_customer(**kwargs):
+        captured["customer_create"] = kwargs["obj_in"]
+        return customer
+
+    monkeypatch.setattr(customer_parser_module.customer_crud, "create", create_customer)
+    monkeypatch.setattr(
+        customer_parser_module.contact_crud,
+        "create",
+        lambda **kwargs: SimpleNamespace(id=301),
+    )
+
+    created = await CustomerAIParser().create_entity(
+        db=object(),
+        parsed_data={
+            "customer_info": {
+                "account_name": "AI客户",
+                "city": "上海",
+                "company_scale": None,
+                "source": "线上注册",
+                "industry_hint": "SaaS公司",
+            },
+            "contact_info": {
+                "contact_name": "李华",
+                "contact_phone": "13800138000",
+                "contact_position": "负责人",
+                "contact_gender": "0",
+            },
+        },
+        user_id="9",
+        team_id=2,
+    )
+
+    assert created is customer
+    assert captured["customer_create"].industry is None
+
+
 
 @pytest.mark.asyncio
 async def test_customer_parser_post_create_actions_does_not_trigger_profile_refresh(monkeypatch):
@@ -793,6 +855,73 @@ def test_enrichment_backfill_preview_counts_invalid_non_null_as_filled_skip():
             "invalid_non_null": 1,
             "other_available": True,
         }
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_enrichment_backfill_preview_treats_blank_as_missing_once():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(
+        engine,
+        tables=[Industry.__table__, Customer.__table__, CustomerEnrichmentJob.__table__],
+    )
+    db = sessionmaker(bind=engine, expire_on_commit=False)()
+    try:
+        db.add_all(
+            [
+                Industry(level=1, code="software", name="Software", is_active=1),
+                Industry(level=1, code="other", name="Other", is_active=1),
+            ]
+        )
+        customers = [
+            Customer(team_id=2, account_name="blank", city="X", creator_id="9", industry="  "),
+            Customer(team_id=2, account_name="filled", city="X", creator_id="9", industry="software"),
+        ]
+        db.add_all(customers)
+        db.flush()
+
+        preview = customer_enrichment_api.build_backfill_preview(db, team_id=2)
+
+        assert preview["industry_null"] == 1
+        assert preview["would_schedule"] == 1
+        assert preview["filled_skip"] == 1
+        assert preview["invalid_non_null"] == 0
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_enrichment_backfill_preview_reports_zero_when_plan_disables_backfill(monkeypatch):
+    disabled = CustomerEnrichmentPlan(
+        version="customer-initial-disabled",
+        fields=("industry",),
+        backfill_enabled=False,
+    )
+    monkeypatch.setattr(customer_enrichment_api, "ACTIVE_CUSTOMER_ENRICHMENT_PLAN", disabled)
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(
+        engine,
+        tables=[Industry.__table__, Customer.__table__, CustomerEnrichmentJob.__table__],
+    )
+    db = sessionmaker(bind=engine, expire_on_commit=False)()
+    try:
+        db.add(Industry(level=1, code="other", name="Other", is_active=1))
+        db.add(Customer(team_id=2, account_name="missing", city="X", creator_id="9"))
+        db.flush()
+
+        preview = customer_enrichment_api.build_backfill_preview(db, team_id=2)
+
+        assert preview["industry_null"] == 1
+        assert preview["would_schedule"] == 0
     finally:
         db.close()
         engine.dispose()

@@ -4,11 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.services.customer_enrichment_context_service import CustomerEnrichmentContextService
 from app.services.customer_enrichment_contracts import (
     CustomerEnrichmentDecision,
     CustomerEnrichmentInferenceResult,
 )
-from app.services.customer_enrichment_context_service import CustomerEnrichmentContextService
 from app.services.customer_enrichment_inference_service import (
     CustomerEnrichmentInferenceError,
     CustomerEnrichmentInferenceService,
@@ -129,7 +129,7 @@ def test_industry_handler_exposes_customer_column_for_atomic_write():
 
 def test_context_is_bounded_and_does_not_include_contact_pii(monkeypatch):
     monkeypatch.setattr(
-        "app.services.customer_enrichment_context_service.industry_crud.get_all_active",
+        "app.services.customer_enrichment_plan.industry_crud.get_all_active",
         lambda db: _industries(),
     )
     db = _ContextDb()
@@ -192,6 +192,48 @@ async def test_inference_calls_structured_runtime_once_and_validates_code(monkey
     assert runtime.calls[0]["structured_output_strategy"] == "tool"
     assert runtime.calls[0]["temperature"] == 0.1
 
+
+
+@pytest.mark.asyncio
+async def test_inference_requires_active_primary_other_before_runtime(monkeypatch):
+    runtime = _Runtime(
+        CustomerEnrichmentInferenceResult(
+            decisions=[
+                CustomerEnrichmentDecision(
+                    field="industry",
+                    value="internet_saas",
+                    reason="客户主营软件研发",
+                )
+            ]
+        )
+    )
+    monkeypatch.setattr(
+        "app.services.customer_enrichment_inference_service.ai_config_crud.get_config",
+        lambda db, team_id: SimpleNamespace(api_host="https://ai", model_name="model"),
+    )
+    monkeypatch.setattr(
+        "app.services.customer_enrichment_inference_service.ai_config_crud.get_decrypted_api_key",
+        lambda db, team_id: "key",
+    )
+    service = CustomerEnrichmentInferenceService(runtime=runtime)
+    context = {
+        "catalogs": {
+            "industry": [
+                {
+                    "code": "internet_saas",
+                    "name": "SaaS公司",
+                    "level": 2,
+                    "parent_code": "internet",
+                    "parent_name": "互联网",
+                }
+            ]
+        }
+    }
+
+    with pytest.raises(CustomerEnrichmentInferenceError, match="一级 other"):
+        await service.infer(object(), team_id=2, context=context, requested_fields=("industry",))
+
+    assert runtime.calls == []
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(

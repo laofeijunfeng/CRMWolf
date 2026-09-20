@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from app.crud.ai_config import ai_config_crud
 from app.services.agent.langchain_runtime import AgentLangChainRuntime, agent_model_enable_thinking
 from app.services.customer_enrichment_contracts import CustomerEnrichmentInferenceResult
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from sqlalchemy.orm import Session
+
+    from app.services.customer_enrichment_plan import CustomerEnrichmentFieldRegistry
 
 
 class CustomerEnrichmentInferenceError(Exception):
@@ -15,7 +22,12 @@ class CustomerEnrichmentInferenceError(Exception):
 
 
 class CustomerEnrichmentInferenceService:
-    def __init__(self, *, runtime: AgentLangChainRuntime | None = None, registry=None) -> None:
+    def __init__(
+        self,
+        *,
+        runtime: AgentLangChainRuntime | None = None,
+        registry: CustomerEnrichmentFieldRegistry | None = None,
+    ) -> None:
         if registry is None:
             from app.services.customer_enrichment_plan import CustomerEnrichmentFieldRegistry
 
@@ -25,7 +37,7 @@ class CustomerEnrichmentInferenceService:
 
     async def infer(
         self,
-        db,
+        db: Session,
         team_id: int,
         context: dict[str, object],
         requested_fields: tuple[str, ...],
@@ -39,6 +51,7 @@ class CustomerEnrichmentInferenceService:
                 raise CustomerEnrichmentInferenceError("AI API Key 未设置")
 
             catalogs = _requested_catalogs(context, requested_fields)
+            self.registry.validate_catalogs(requested_fields, catalogs)
             result = await self.runtime.ainvoke_structured(
                 api_host=config.api_host,
                 api_key=api_key,

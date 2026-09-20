@@ -13,7 +13,11 @@ from app.services.customer_enrichment_contracts import (
     CustomerEnrichmentJobStatus,
     CustomerEnrichmentPurpose,
 )
-from app.services.customer_enrichment_plan import ACTIVE_CUSTOMER_ENRICHMENT_PLAN
+from app.services.customer_enrichment_plan import (
+    ACTIVE_CUSTOMER_ENRICHMENT_PLAN,
+    CustomerEnrichmentFieldRegistry,
+    CustomerEnrichmentPlan,
+)
 from app.services.customer_enrichment_profile_coordinator import (
     CustomerEnrichmentProfileCoordinator,
     customer_enrichment_profile_coordinator,
@@ -60,11 +64,15 @@ class CustomerEnrichmentReconciliationService:
         run_service: CustomerIntelligenceRunService | None = None,
         profile_coordinator: CustomerEnrichmentProfileCoordinator | None = None,
         max_attempts: int | None = None,
+        plan: CustomerEnrichmentPlan | None = None,
+        field_registry: CustomerEnrichmentFieldRegistry | None = None,
     ) -> None:
         self.job_crud = job_crud or customer_enrichment_job_crud
         self.run_service = run_service or customer_intelligence_run_service
         self.profile_coordinator = profile_coordinator or customer_enrichment_profile_coordinator
         self.max_attempts = max_attempts
+        self.plan = plan or ACTIVE_CUSTOMER_ENRICHMENT_PLAN
+        self.field_registry = field_registry or CustomerEnrichmentFieldRegistry()
 
     def reconcile_once(
         self,
@@ -100,9 +108,9 @@ class CustomerEnrichmentReconciliationService:
                         db,
                         team_id=int(customer.team_id),
                         customer_id=int(customer.id),
-                        plan_version=ACTIVE_CUSTOMER_ENRICHMENT_PLAN.version,
+                        plan_version=self.plan.version,
                     )
-                    if job is None and self._fields_missing(customer):
+                    if job is None and self.plan.backfill_enabled and self._fields_missing(customer):
                         customer_jobs_created = 1
                         if not dry_run:
                             job = self.job_crud.ensure(
@@ -110,8 +118,8 @@ class CustomerEnrichmentReconciliationService:
                                 team_id=int(customer.team_id),
                                 customer_id=int(customer.id),
                                 purpose=CustomerEnrichmentPurpose.HISTORICAL_BACKFILL.value,
-                                plan_version=ACTIVE_CUSTOMER_ENRICHMENT_PLAN.version,
-                                requested_fields=list(ACTIVE_CUSTOMER_ENRICHMENT_PLAN.fields),
+                                plan_version=self.plan.version,
+                                requested_fields=list(self.plan.fields),
                                 available_at=now,
                                 profile_gate_deadline_at=None,
                                 max_attempts=max_attempts,
@@ -147,22 +155,30 @@ class CustomerEnrichmentReconciliationService:
                                         plan_version=str(job.plan_version),
                                         timed_out_at=now,
                                     )
-                                if self._receipt_should_repair(job):
+                                if self._receipt_should_repair(db, job):
                                     job.profile_refresh_request_id = f"released:{released[0]}"
                                     job.profile_refresh_enqueued_at = now
                                     db.add(job)
                                     db.flush()
                                     customer_refreshes_repaired = 1
-                    receipt_missing = job is not None and self._receipt_should_repair(job)
-                    if receipt_missing and (
-                        dry_run
-                        or self.profile_coordinator.repair_missing_profile_receipt(
+                    receipt_missing = (
+                        job is not None
+                        and customer_refreshes_repaired == 0
+                        and self._receipt_should_repair(db, job)
+                    )
+                    if receipt_missing and dry_run:
+                        customer_refreshes_repaired = 1
+                    elif receipt_missing:
+                        job.profile_refresh_request_id = None
+                        job.profile_refresh_enqueued_at = None
+                        db.add(job)
+                        db.flush()
+                        if self.profile_coordinator.repair_missing_profile_receipt(
                             db,
                             job=job,
                             now=now,
-                        )
-                    ):
-                        customer_refreshes_repaired = 1
+                        ):
+                            customer_refreshes_repaired = 1
                 jobs_created += customer_jobs_created
                 gates_released += customer_gates_released
                 refreshes_repaired += customer_refreshes_repaired
@@ -189,13 +205,11 @@ class CustomerEnrichmentReconciliationService:
             return max(1, int(self.max_attempts))
         return max(1, int(get_settings().CUSTOMER_INITIAL_ENRICHMENT_MAX_ATTEMPTS))
 
-    @staticmethod
-    def _fields_missing(customer: Customer) -> bool:
-        for field in ACTIVE_CUSTOMER_ENRICHMENT_PLAN.fields:
-            value = getattr(customer, field, None)
-            if value is None or (isinstance(value, str) and not value.strip()):
-                return True
-        return False
+    def _fields_missing(self, customer: Customer) -> bool:
+        return any(
+            self.field_registry.is_missing(field, getattr(customer, field, None))
+            for field in self.plan.fields
+        )
 
     @staticmethod
     def _gate_should_release(job: CustomerEnrichmentJob, *, now: datetime) -> bool:
@@ -204,11 +218,23 @@ class CustomerEnrichmentReconciliationService:
         deadline = job.profile_gate_deadline_at
         return deadline is not None and deadline <= now
 
-    @staticmethod
-    def _receipt_should_repair(job: CustomerEnrichmentJob) -> bool:
+    def _receipt_should_repair(self, db: Session, job: CustomerEnrichmentJob) -> bool:
+        if str(job.status) not in _TERMINAL_SUCCESS:
+            return False
+        payload = job.result_json if isinstance(job.result_json, dict) else {}
+        if payload.get("skip_reason") == "CUSTOMER_NOT_FOUND":
+            return False
+        receipt = str(job.profile_refresh_request_id or "").strip()
+        if not receipt:
+            return True
         return (
-            str(job.status) in _TERMINAL_SUCCESS
-            and not str(job.profile_refresh_request_id or "").strip()
+            self.run_service.resolve_profile_receipt(
+                db,
+                team_id=int(job.team_id),
+                customer_id=int(job.customer_id),
+                receipt=receipt,
+            )
+            is None
         )
 
 

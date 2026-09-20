@@ -125,7 +125,7 @@ CUSTOMER_INITIAL_ENRICHMENT_RECONCILIATION_INTERVAL_SECONDS=300
 CUSTOMER_INITIAL_ENRICHMENT_RECONCILIATION_BATCH_SIZE=50
 ```
 
-`PROFILE_GATE_MAX_SECONDS` 只限制首次档案等待时间，不是 enrichment job 超时；`RECOVERY_ENABLED` 负责领取新客户与已登记历史任务并恢复到期重试，`BACKFILL_ENABLED` 负责为历史缺失字段登记任务，`RECONCILIATION_ENABLED` 负责补登记遗漏任务、释放到期 gate 和修复缺失的档案刷新 receipt。首次客户每轮默认领取 20 条，历史回填仍保留 5 条配额，不能让历史任务长期饥饿。
+`PROFILE_GATE_MAX_SECONDS` 只限制首次档案等待时间，不是 enrichment job 超时；`RECOVERY_ENABLED` 负责领取新客户与已登记历史任务并恢复到期重试，`BACKFILL_ENABLED` 负责为历史缺失字段登记任务，`RECONCILIATION_ENABLED` 负责补登记遗漏任务、释放到期 gate，并验证/修复 tenant+customer scoped 的档案刷新 receipt。active plan 的 `backfill_enabled=false` 时，即使 scheduler 或 reconciliation 被调用，也不得创建历史 job；preview 的 `would_schedule` 必须为 0。首次客户每轮默认领取 20 条，历史回填仍保留 5 条配额，不能让历史任务长期饥饿。
 
 首次生产发布必须分阶段执行：
 
@@ -155,7 +155,7 @@ curl -sS -H "Authorization: Bearer $TOKEN" \
   "$CRM_BASE_URL/api/v1/customers/enrichment/backfill-preview"
 ```
 
-重点核对 `industry_null`、`existing_jobs`、`would_schedule`、`filled_skip`、`invalid_non_null` 和 `other_available`。`other_available` 必须为 `true`；`invalid_non_null` 只报告，不自动覆盖历史非空值。preview 不登记 job，也不调用模型。
+重点核对 `industry_null`、`existing_jobs`、`would_schedule`、`filled_skip`、`invalid_non_null` 和 `other_available`。`industry_null` 包括 SQL NULL 与 trim 后空白；`other_available` 必须为 `true`；`invalid_non_null` 只报告，不自动覆盖历史非缺失值。active plan 禁止历史回填时 `would_schedule=0`。preview 不登记 job，也不调用模型。
 
 诊断任务状态与运行证据：
 
@@ -169,7 +169,7 @@ curl -sS -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application
   -d '{"limit":500,"dry_run":true}'
 ```
 
-任务诊断返回 purpose、plan、requested fields、attempt/max attempts、`requeue_count`、下一次尝试时间、首次尝试完成时间、`profile_gate_timed_out_at` 和档案刷新 receipt。reconciliation dry-run 返回 `scanned / jobs_created / gates_released / refreshes_repaired / errors`，用于发布前评估而不写入。`profile_gate_timeout` 的 durable 证据是诊断中非空的 `profile_gate_timed_out_at`：它只在创建期任务尚未完成首次尝试、deadline 已过且档案实际解除 gate 时首次写入；不能从聚合 `gates_released` 推断。运行期间应持续观察 `COMPLETED / SKIPPED / RETRY_PENDING / EXHAUSTED`，并结合写入操作日志、`requeue_count`、档案 refresh receipt 和该时间戳形成 scheduled、applied、other、skipped、retry_pending、exhausted、requeued、profile_gate_timeout 证据；技术失败不得伪装为行业 `other`。
+任务诊断返回 purpose、plan、requested fields、attempt/max attempts、`requeue_count`、下一次尝试时间、首次尝试完成时间、`profile_gate_timed_out_at` 和档案刷新 receipt。reconciliation dry-run 返回 `scanned / jobs_created / gates_released / refreshes_repaired / errors`，用于发布前评估而不写入；`refreshes_repaired` 同时覆盖空 receipt 和无法在同一 team/customer 下解析的 `released:<run_id>` / request ID。`profile_gate_timeout` 的 durable 证据是诊断中非空的 `profile_gate_timed_out_at`：它只在创建期任务尚未完成首次尝试、deadline 已过且档案实际解除 gate 时首次写入；不能从聚合 `gates_released` 推断。运行期间应持续观察 `COMPLETED / SKIPPED / RETRY_PENDING / EXHAUSTED`，并结合写入操作日志的 per-field `reasons`、job result、`requeue_count`、档案 refresh receipt 和该时间戳形成 scheduled、applied、other、skipped、retry_pending、exhausted、requeued、profile_gate_timeout 证据；`SKIPPED/CUSTOMER_NOT_FOUND` 不登记终态档案刷新，技术失败不得伪装为行业 `other`。
 
 `EXHAUSTED` 不会无限自动重试。确认 AI 配置、行业目录和下游故障已修复后，管理员只能对当前 active plan、目标字段仍为空的耗尽任务重新入队：
 

@@ -46,6 +46,7 @@ class CustomerEnrichmentRunResult(BaseModel):
     success: bool
     retryable: bool = False
     applied_fields: list[str] = Field(default_factory=list)
+    decision_reasons: dict[str, str] = Field(default_factory=dict)
     skip_reason: str | None = None
     error: str | None = None
     profile_refresh_action: Literal["RELEASED", "ENQUEUED", "NONE"] = "NONE"

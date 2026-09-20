@@ -21,7 +21,7 @@ from app.services.customer_enrichment_contracts import (
     CustomerEnrichmentJobStatus,
     CustomerEnrichmentPurpose,
 )
-from app.services.customer_enrichment_plan import ACTIVE_CUSTOMER_ENRICHMENT_PLAN
+from app.services.customer_enrichment_plan import ACTIVE_CUSTOMER_ENRICHMENT_PLAN, CustomerEnrichmentPlan
 from app.services.customer_enrichment_profile_coordinator import CustomerEnrichmentProfileCoordinator
 from app.services.customer_enrichment_reconciliation_service import (
     CustomerEnrichmentReconciliationService,
@@ -155,11 +155,12 @@ class FakeProfileCoordinator:
         db.flush()
         return True
 
-def _service(*, job_crud=None, run_service=None, coordinator=None):
+def _service(*, job_crud=None, run_service=None, coordinator=None, plan=None):
     return CustomerEnrichmentReconciliationService(
         job_crud=job_crud,
         run_service=run_service or FakeRunService(),
         profile_coordinator=coordinator or FakeProfileCoordinator(),
+        plan=plan,
         max_attempts=3,
     )
 
@@ -186,6 +187,38 @@ def test_reconciliation_creates_missing_job_as_historical_and_is_idempotent(db_s
     assert job.purpose == CustomerEnrichmentPurpose.HISTORICAL_BACKFILL.value
     assert job.plan_version == ACTIVE_CUSTOMER_ENRICHMENT_PLAN.version
 
+
+
+def test_reconciliation_creates_one_job_for_blank_industry_and_skips_filled(db_session):
+    blank = _customer(db_session, industry="  \t")
+    _customer(db_session, industry="software")
+    service = _service()
+
+    first = service.reconcile_once(db_session, team_id=2, limit=50, dry_run=False)
+    second = service.reconcile_once(db_session, team_id=2, limit=50, dry_run=False)
+
+    assert first.jobs_created == 1
+    assert second.jobs_created == 0
+    assert db_session.query(CustomerEnrichmentJob).one().customer_id == blank.id
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_reconciliation_disabled_backfill_plan_does_not_create_historical_jobs(
+    db_session,
+    dry_run,
+):
+    _customer(db_session)
+    plan = CustomerEnrichmentPlan(
+        version="customer-initial-disabled",
+        fields=("industry",),
+        backfill_enabled=False,
+    )
+    service = _service(plan=plan)
+
+    result = service.reconcile_once(db_session, team_id=2, limit=50, dry_run=dry_run)
+
+    assert result.jobs_created == 0
+    assert db_session.query(CustomerEnrichmentJob).count() == 0
 
 def test_reconciliation_releases_expired_gate_and_repairs_missing_refresh_receipt(db_session):
     gated_customer = _customer(db_session)
@@ -295,6 +328,132 @@ def test_reconciliation_records_released_run_as_terminal_profile_receipt(db_sess
     assert coordinator.calls == []
     assert job.profile_gate_timed_out_at is None
     assert job.first_attempt_finished_at is not None
+
+
+@pytest.mark.parametrize("receipt_kind", ["released", "request"])
+def test_reconciliation_repairs_receipt_when_target_run_is_absent(db_session, receipt_kind):
+    customer = _customer(db_session, industry="software")
+    receipt = "released:9999" if receipt_kind == "released" else "missing-request"
+    job = _job(
+        db_session,
+        customer,
+        status=CustomerEnrichmentJobStatus.COMPLETED.value,
+        first_attempt_finished=True,
+        receipt=receipt,
+    )
+    coordinator = FakeProfileCoordinator()
+    service = CustomerEnrichmentReconciliationService(
+        run_service=CustomerIntelligenceRunService(),
+        profile_coordinator=coordinator,
+        max_attempts=3,
+    )
+
+    result = service.reconcile_once(db_session, team_id=2, limit=50, dry_run=False)
+
+    assert result.refreshes_repaired == 1
+    assert coordinator.calls == [customer.id]
+    assert job.profile_refresh_request_id == f"refresh-{job.public_id}"
+
+
+@pytest.mark.parametrize("receipt_kind", ["released", "request"])
+def test_reconciliation_keeps_valid_receipt_target(db_session, receipt_kind):
+    customer = _customer(db_session, industry="software")
+    run = _profile_run(db_session, customer, sequence=21, deferred=False)
+    receipt = f"released:{run.id}" if receipt_kind == "released" else run.request_id
+    job = _job(
+        db_session,
+        customer,
+        status=CustomerEnrichmentJobStatus.COMPLETED.value,
+        first_attempt_finished=True,
+        receipt=receipt,
+    )
+    coordinator = FakeProfileCoordinator()
+    service = CustomerEnrichmentReconciliationService(
+        run_service=CustomerIntelligenceRunService(),
+        profile_coordinator=coordinator,
+        max_attempts=3,
+    )
+
+    result = service.reconcile_once(db_session, team_id=2, limit=50, dry_run=False)
+
+    assert result.refreshes_repaired == 0
+    assert coordinator.calls == []
+    assert job.profile_refresh_request_id == receipt
+
+
+@pytest.mark.parametrize("mismatch", ["team", "customer"])
+def test_reconciliation_rejects_receipt_target_outside_job_scope(db_session, mismatch):
+    customer = _customer(db_session, team_id=2, industry="software")
+    target_customer = (
+        _customer(db_session, team_id=3, industry="software")
+        if mismatch == "team"
+        else _customer(db_session, team_id=2, industry="software")
+    )
+    run = _profile_run(db_session, target_customer, sequence=31, deferred=False)
+    job = _job(
+        db_session,
+        customer,
+        status=CustomerEnrichmentJobStatus.COMPLETED.value,
+        first_attempt_finished=True,
+        receipt=f"released:{run.id}",
+    )
+    coordinator = FakeProfileCoordinator()
+    service = CustomerEnrichmentReconciliationService(
+        run_service=CustomerIntelligenceRunService(),
+        profile_coordinator=coordinator,
+        max_attempts=3,
+    )
+
+    result = service.reconcile_once(db_session, team_id=2, limit=50, dry_run=False)
+
+    assert result.refreshes_repaired == 1
+    assert coordinator.calls == [customer.id]
+    assert job.profile_refresh_request_id == f"refresh-{job.public_id}"
+
+
+def test_reconciliation_dry_run_reports_stale_receipt_without_mutation(db_session):
+    customer = _customer(db_session, industry="software")
+    job = _job(
+        db_session,
+        customer,
+        status=CustomerEnrichmentJobStatus.COMPLETED.value,
+        first_attempt_finished=True,
+        receipt="released:9999",
+    )
+    coordinator = FakeProfileCoordinator()
+    service = CustomerEnrichmentReconciliationService(
+        run_service=CustomerIntelligenceRunService(),
+        profile_coordinator=coordinator,
+        max_attempts=3,
+    )
+
+    result = service.reconcile_once(db_session, team_id=2, limit=50, dry_run=True)
+
+    assert result.refreshes_repaired == 1
+    assert coordinator.calls == []
+    assert job.profile_refresh_request_id == "released:9999"
+
+
+def test_reconciliation_does_not_repair_customer_not_found_skip_receipt(db_session):
+    customer = _customer(db_session, industry="software")
+    job = _job(
+        db_session,
+        customer,
+        status=CustomerEnrichmentJobStatus.SKIPPED.value,
+        first_attempt_finished=True,
+    )
+    job.result_json = {"skip_reason": "CUSTOMER_NOT_FOUND"}
+    coordinator = FakeProfileCoordinator()
+    service = CustomerEnrichmentReconciliationService(
+        run_service=CustomerIntelligenceRunService(),
+        profile_coordinator=coordinator,
+        max_attempts=3,
+    )
+
+    result = service.reconcile_once(db_session, team_id=2, limit=50, dry_run=False)
+
+    assert result.refreshes_repaired == 0
+    assert coordinator.calls == []
 
 def test_reconciliation_does_not_record_timeout_for_historical_job(db_session):
     customer = _customer(db_session, industry="software")

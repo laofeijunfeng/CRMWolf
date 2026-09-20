@@ -12,7 +12,11 @@ from app.crud.customer_enrichment_job import CustomerEnrichmentJobCRUD, customer
 from app.models.customer import Customer
 from app.models.customer_enrichment_job import CustomerEnrichmentJob
 from app.services.customer_enrichment_contracts import CustomerEnrichmentPurpose
-from app.services.customer_enrichment_plan import ACTIVE_CUSTOMER_ENRICHMENT_PLAN
+from app.services.customer_enrichment_plan import (
+    ACTIVE_CUSTOMER_ENRICHMENT_PLAN,
+    CustomerEnrichmentFieldRegistry,
+    CustomerEnrichmentPlan,
+)
 from app.utils.time import business_now
 
 if TYPE_CHECKING:
@@ -35,8 +39,16 @@ class CustomerEnrichmentBackfillResult:
 
 
 class CustomerEnrichmentBackfillService:
-    def __init__(self, *, job_crud: CustomerEnrichmentJobCRUD | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        job_crud: CustomerEnrichmentJobCRUD | None = None,
+        plan: CustomerEnrichmentPlan | None = None,
+        field_registry: CustomerEnrichmentFieldRegistry | None = None,
+    ) -> None:
         self.job_crud = job_crud or customer_enrichment_job_crud
+        self.plan = plan or ACTIVE_CUSTOMER_ENRICHMENT_PLAN
+        self.field_registry = field_registry or CustomerEnrichmentFieldRegistry()
 
     def scan_and_ensure(
         self,
@@ -47,14 +59,23 @@ class CustomerEnrichmentBackfillService:
         after_customer_id: int | None = None,
         dry_run: bool = False,
     ) -> CustomerEnrichmentBackfillResult:
+        if not self.plan.backfill_enabled:
+            return CustomerEnrichmentBackfillResult(
+                success=True,
+                scanned=0,
+                eligible=0,
+                scheduled=0,
+                skipped=0,
+                dry_run=dry_run,
+            )
         page_size = max(1, int(limit))
         current_plan_job = exists().where(
             CustomerEnrichmentJob.team_id == Customer.team_id,
             CustomerEnrichmentJob.customer_id == Customer.id,
-            CustomerEnrichmentJob.plan_version == ACTIVE_CUSTOMER_ENRICHMENT_PLAN.version,
+            CustomerEnrichmentJob.plan_version == self.plan.version,
         )
         query = db.query(Customer.id, Customer.team_id).filter(
-            Customer.industry.is_(None),
+            self.field_registry.missing_condition("industry"),
             ~current_plan_job,
         )
         if team_id is not None:
@@ -85,8 +106,8 @@ class CustomerEnrichmentBackfillService:
                 team_id=int(row.team_id),
                 customer_id=int(row.id),
                 purpose=CustomerEnrichmentPurpose.HISTORICAL_BACKFILL.value,
-                plan_version=ACTIVE_CUSTOMER_ENRICHMENT_PLAN.version,
-                requested_fields=list(ACTIVE_CUSTOMER_ENRICHMENT_PLAN.fields),
+                plan_version=self.plan.version,
+                requested_fields=list(self.plan.fields),
                 available_at=now,
                 profile_gate_deadline_at=None,
                 max_attempts=max(1, int(settings.CUSTOMER_INITIAL_ENRICHMENT_MAX_ATTEMPTS)),

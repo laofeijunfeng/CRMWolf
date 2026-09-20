@@ -140,7 +140,7 @@ class CustomerInitialEnrichmentGraphService:
         for field in request.requested_fields:
             handler = self.field_registry.get(field)
             value = customer.get(handler.field_key)
-            if value is None or (isinstance(value, str) and not value.strip()):
+            if self.field_registry.is_missing(field, value):
                 missing.append(field)
         if missing:
             return {"missing_fields": missing}

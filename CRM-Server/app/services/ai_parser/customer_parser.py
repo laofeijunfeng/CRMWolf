@@ -1,14 +1,9 @@
-"""
-客户 AI 解析器
-
-实现客户创建的 AI 解析功能，含行业识别和档案生成
-"""
+"""客户 AI 解析器。"""
 from typing import Any, Dict
 
 from sqlalchemy.orm import Session
 
 from app.crud.customer import contact_crud, customer_crud
-from app.crud.industry import industry_crud
 from app.crud.product_intent import EMPTY_CATALOG_MESSAGE, first_active_product
 from app.schemas.customer import ContactCreate, CustomerCreate
 from app.services.acquisition_source_service import (
@@ -234,11 +229,6 @@ class CustomerAIParser(EntityAIParserBase):
             # Customer 使用字符串存储，直接使用显示值
             company_scale_value = company_scale_str
 
-        # 行业识别（如果 AI 提供了 industry_hint，则匹配数据库行业）
-        industry_code = None
-        industry_hint = customer_info.get("industry_hint")
-        if industry_hint:
-            industry_code = self._match_industry(db, industry_hint)
 
         source_row = resolve_source_for_ai(db, team_id, customer_info.get("source"))
         product = first_active_product(db, team_id)
@@ -249,7 +239,7 @@ class CustomerAIParser(EntityAIParserBase):
             city=customer_info["city"],
             company_scale=company_scale_value,
             source_public_id=source_row.public_id,
-            industry=industry_code,  # AI 识别的行业编码
+            industry=None,
             product_public_id=product.public_id,
         )
 
@@ -280,32 +270,6 @@ class CustomerAIParser(EntityAIParserBase):
 
         return customer
 
-    def _match_industry(self, db: Session, industry_hint: str) -> str:
-        """
-        匹配行业编码（从数据库一二级行业中选择）
-
-        Args:
-            industry_hint: AI 提取的行业关键词
-
-        Returns:
-            行业编码（如 "internet", "finance"）或 None
-        """
-        # 获取行业层级结构
-        hierarchy = industry_crud.get_industry_hierarchy(db)
-
-        # 从二级行业开始匹配
-        for primary_code, primary_info in hierarchy.items():
-            for child in primary_info['children']:
-                # 检查行业名称是否包含关键词
-                if industry_hint.lower() in child['name'].lower():
-                    return child['code']
-
-        # 如果二级行业未匹配，尝试一级行业
-        for primary_code, primary_info in hierarchy.items():
-            if industry_hint.lower() in primary_info['name'].lower():
-                return primary_code
-
-        return None
 
     async def post_create_actions(
         self,

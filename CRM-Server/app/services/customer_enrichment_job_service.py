@@ -16,6 +16,7 @@ from app.services.agent.customer_initial_enrichment_graph import (
     CustomerInitialEnrichmentResult,
 )
 from app.services.ai_task_limiter import ai_generation_semaphore
+from app.services.customer_enrichment_context_service import CustomerEnrichmentSkip
 from app.services.customer_enrichment_contracts import (
     CustomerEnrichmentJobRequest,
     CustomerEnrichmentJobStatus,
@@ -160,6 +161,22 @@ class CustomerEnrichmentJobService:
         try:
             async with ai_generation_semaphore:
                 computed = await self.workflow.run(graph_request)
+        except CustomerEnrichmentSkip as exc:
+            result = self._result(
+                request,
+                customer_id=snapshot["customer_id"],
+                execution_status=CustomerEnrichmentJobStatus.SKIPPED.value,
+                success=True,
+                skip_reason=exc.reason,
+            )
+            return self._complete(
+                request,
+                lease_token=lease_token,
+                result=result,
+                skipped=True,
+                first_attempt_finished=snapshot["first_attempt_finished"],
+                terminal_success=False,
+            )
         except Exception as exc:
             logger.exception("客户补全任务计算失败: job=%s", request.job_public_id)
             return self._record_failure(
@@ -281,6 +298,7 @@ class CustomerEnrichmentJobService:
                 execution_status=CustomerEnrichmentJobStatus.COMPLETED.value,
                 success=True,
                 applied_fields=list(write_result.applied_fields),
+                decision_reasons=write_result.decision_reasons or {},
             )
             updated = self.job_crud.mark_completed_if_lease_owner(
                 db,
@@ -348,6 +366,7 @@ class CustomerEnrichmentJobService:
         result: CustomerEnrichmentRunResult,
         skipped: bool,
         first_attempt_finished: bool,
+        terminal_success: bool = True,
     ) -> CustomerEnrichmentRunResult:
         db = self._session_factory()
         try:
@@ -368,7 +387,7 @@ class CustomerEnrichmentJobService:
                 updated=updated,
                 result=result,
                 first_attempt_finished=first_attempt_finished,
-                terminal_success=True,
+                terminal_success=terminal_success,
             )
         finally:
             db.close()
@@ -623,6 +642,7 @@ class CustomerEnrichmentJobService:
         success: bool,
         retryable: bool = False,
         applied_fields: list[str] | None = None,
+        decision_reasons: dict[str, str] | None = None,
         skip_reason: str | None = None,
         error: str | None = None,
     ) -> CustomerEnrichmentRunResult:
@@ -633,6 +653,7 @@ class CustomerEnrichmentJobService:
             success=success,
             retryable=retryable,
             applied_fields=applied_fields or [],
+            decision_reasons=decision_reasons or {},
             skip_reason=skip_reason,
             error=error,
         )
