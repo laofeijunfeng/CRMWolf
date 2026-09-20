@@ -73,6 +73,30 @@ test('rejects direct utility status colors', () => {
   ])
 })
 
+test('DS-EX-004 allows only extracted legacy board status-color tokens', () => {
+  const boardPath = 'CRM-Client/src/components/business-journey/BusinessJourneyBoardView.vue'
+
+  assert.equal(inspectContent(boardPath, [
+    "countBadge: 'bg-blue-50 text-blue-700 border-blue-100'",
+  ]).length, 0)
+
+  assert.deepEqual(inspectContent(boardPath, [
+    "countBadge: 'bg-blue-50 text-blue-700 border-blue-100 bg-blue-950'",
+  ]).map((violation) => violation.category), [
+    'status-color',
+  ])
+
+  assert.deepEqual(inspectContent(boardPath, [
+    "class: 'foo-bg-blue-50'",
+  ]).map((violation) => violation.category), [
+    'status-color',
+  ])
+
+  assert.equal(inspectContent(boardPath, [
+    "countBadge: 'bg-blue-50 text-blue-700 border-blue-100' // bg-blue-950",
+  ]).length, 0)
+})
+
 test('rejects new legacy and Element Plus entries', () => {
   const violations = inspectContent('CRM-Client/src/views/Example.vue', [
     "@use '@/styles/variables.scss';",

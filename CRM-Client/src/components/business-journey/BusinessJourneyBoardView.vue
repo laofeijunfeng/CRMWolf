@@ -102,6 +102,9 @@ const getStageAgeTone = (value: string | null | undefined): string => {
 }
 
 type BoardCard = BusinessJourneyBoardCard | LegacyBusinessJourneyBoardResponse['columns'][number]['cards'][number]
+const hasPublicJourneyIdentity = (card: BoardCard): card is BusinessJourneyBoardCard =>
+  'public_id' in card && typeof card.public_id === 'string'
+
 
 const shouldShowOpportunityStage = (card: BoardCard): boolean =>
   ['early_communication', 'active_progress', 'closing_soon'].includes(card.current_board_stage)
@@ -115,7 +118,7 @@ const getWinProbability = (card: BoardCard): string => {
 }
 
 const emitRowClick = (card: BoardCard): void => {
-  if ('public_id' in card && typeof card.public_id === 'string') {
+  if (hasPublicJourneyIdentity(card)) {
     emit('row-click', {
       customerId: card.customer_id,
       journeyPublicId: card.public_id
@@ -125,10 +128,13 @@ const emitRowClick = (card: BoardCard): void => {
   emit('legacy-customer-click', card.customer_id)
 }
 
-const cardKey = (card: BoardCard): string | number => {
-  if ('public_id' in card && typeof card.public_id === 'string') return card.public_id
-  return Number(card.journey_id)
-}
+const cardKey = (card: BoardCard): string | number =>
+  hasPublicJourneyIdentity(card) ? card.public_id : Number(card.journey_id)
+
+const cardAriaLabel = (card: BoardCard): string =>
+  hasPublicJourneyIdentity(card)
+    ? `查看业务旅程：${card.journey_name}`
+    : `查看客户详情：${card.customer_name ?? card.customer_id}`
 </script>
 
 <template>
@@ -202,7 +208,7 @@ const cardKey = (card: BoardCard): string | number => {
                   class="journey-card"
                   role="button"
                   tabindex="0"
-                  :aria-label="`查看业务旅程：${card.journey_name}`"
+                  :aria-label="cardAriaLabel(card)"
                   @click="emitRowClick(card)"
                   @keydown.enter.prevent="emitRowClick(card)"
                   @keydown.space.prevent="emitRowClick(card)"

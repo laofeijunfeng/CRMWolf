@@ -59,6 +59,44 @@ const board = {
   },
   truncated: false,
 }
+const legacyCustomerId = '42'
+const legacyBoard = {
+  scope: 'all',
+  period_start: null,
+  period_end: null,
+  columns: [{
+    ...board.columns[0],
+    cards: [{
+      journey_id: 91,
+      journey_name: board.columns[0].cards[0].journey_name,
+      customer_id: legacyCustomerId,
+      customer_name: board.columns[0].cards[0].customer_name,
+      owner: board.columns[0].cards[0].owner,
+      status: board.columns[0].cards[0].status,
+      current_board_stage: board.columns[0].cards[0].current_board_stage,
+      started_at: board.columns[0].cards[0].started_at,
+      closed_at: board.columns[0].cards[0].closed_at,
+      last_event_at: board.columns[0].cards[0].last_event_at,
+      last_event_summary: board.columns[0].cards[0].last_event_summary,
+      amount: board.columns[0].cards[0].amount,
+      primary_opportunity: {
+        id: 17,
+        name: '华东续约商机',
+        amount: 168000,
+        actual_amount: null,
+        status: 1,
+        current_stage_name: '方案确认',
+        win_probability: 70,
+        expected_closing_date: '2026-10-31',
+      },
+      contract_summary: board.columns[0].cards[0].contract_summary,
+      payment_summary: board.columns[0].cards[0].payment_summary,
+      invoice_summary: board.columns[0].cards[0].invoice_summary,
+    }],
+  }],
+  summary: board.summary,
+}
+
 
 function mountBoard(props: Record<string, unknown> = {}) {
   return mount(BusinessJourneyBoardView, {
@@ -121,11 +159,25 @@ describe('BusinessJourneyBoardView', () => {
       customerId: board.columns[0].cards[0].customer_id,
       journeyPublicId,
     }
+    expect(card.attributes('aria-label')).toBe('查看业务旅程：华东续约旅程')
+
 
     await card.trigger('click')
     await card.trigger('keydown', { key: 'Enter' })
     await card.trigger('keydown', { key: ' ' })
 
     expect(wrapper.emitted('row-click')).toEqual([[payload], [payload], [payload]])
+  })
+
+  it('preserves customer-detail semantics for legacy cards', async () => {
+    const wrapper = mountBoard({ board: legacyBoard })
+    const card = wrapper.get('.journey-card')
+
+    expect(card.attributes('aria-label')).toBe('查看客户详情：示例科技')
+
+    await card.trigger('click')
+
+    expect(wrapper.emitted('legacy-customer-click')).toEqual([[legacyCustomerId]])
+    expect(wrapper.emitted('row-click')).toBeUndefined()
   })
 })

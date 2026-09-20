@@ -78,6 +78,17 @@ const customLostBoardViewResponse = {
     updated_time: '2026-09-20T10:00:00',
   }],
 }
+const customLostTableViewResponse = {
+  ...customLostBoardViewResponse,
+  items: [{
+    ...customLostBoardViewResponse.items[0],
+    config: {
+      ...customLostBoardViewResponse.items[0].config,
+      display_mode: 'table' as const,
+    },
+  }],
+}
+
 
 const TableStub = defineComponent({
   name: 'BusinessJourneyTableView',
@@ -147,6 +158,45 @@ describe('BusinessJourneys', () => {
     expect(journeyApiMocks.getBoard).toHaveBeenCalledOnce()
     expect(wrapper.findComponent(BusinessJourneyBoardView).exists()).toBe(true)
   })
+  it('starts the board projection while custom-view persistence is pending', async () => {
+    viewPreferenceMocks.listCustomViews.mockResolvedValue(customLostTableViewResponse)
+    const wrapper = mountPage()
+    await flushPromises()
+    const headerStore = useHeaderStore()
+    headerStore.setActiveTab('custom-view:7')
+    await flushPromises()
+
+    let resolvePersistence: (value: typeof customLostBoardViewResponse.items[0]) => void = () => undefined
+    const persistence = new Promise<typeof customLostBoardViewResponse.items[0]>((resolve) => {
+      resolvePersistence = resolve
+    })
+    let resolveBoard: (value: typeof emptyBoard) => void = () => undefined
+    const boardResponse = new Promise<typeof emptyBoard>((resolve) => {
+      resolveBoard = resolve
+    })
+    viewPreferenceMocks.updateCustomView.mockReturnValueOnce(persistence)
+    journeyApiMocks.getBoard.mockReturnValueOnce(boardResponse)
+
+    wrapper.getComponent(BusinessJourneyTableView).vm.$emit('update:view-display-mode', 'board')
+    await wrapper.vm.$nextTick()
+
+    expect(viewPreferenceMocks.updateCustomView).toHaveBeenCalledOnce()
+    expect(journeyApiMocks.getBoard).toHaveBeenCalledOnce()
+    expect(wrapper.getComponent(BusinessJourneyBoardView).props('loading')).toBe(true)
+
+    resolvePersistence({
+      ...customLostBoardViewResponse.items[0],
+      config: {
+        ...customLostBoardViewResponse.items[0].config,
+        display_mode: 'board',
+      },
+    })
+    resolveBoard(emptyBoard)
+    await flushPromises()
+
+    expect(journeyApiMocks.getBoard).toHaveBeenCalledOnce()
+  })
+
 
   it('uses built-in tab at runtime and explicit filters for a saved board view', async () => {
     viewPreferenceMocks.listCustomViews.mockResolvedValue(customLostBoardViewResponse)

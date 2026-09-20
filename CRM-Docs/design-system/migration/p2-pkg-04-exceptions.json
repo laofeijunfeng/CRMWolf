@@ -46,7 +46,7 @@
         "CRM-Client/src/components/business-journey/BusinessJourneyBoardView.vue",
         "CRM-Client/tests/components/BusinessJourneyBoardView.spec.ts"
       ],
-      "match": "(?:bg|text|border)-(?:sky|blue|emerald|violet|amber|cyan|slate|rose|yellow)-",
+      "match": "^(?:(?:/\\*.*?\\*/|//.*$)|(?<![A-Za-z0-9_/-])(?:bg-sky-50|text-sky-700|border-sky-100|bg-sky-600|bg-blue-50|text-blue-700|border-blue-100|bg-blue-600|bg-emerald-50|text-emerald-700|border-emerald-100|bg-emerald-600|bg-violet-50|text-violet-700|border-violet-100|bg-violet-600|bg-amber-50|text-amber-700|border-amber-100|bg-amber-600|bg-cyan-50|text-cyan-700|border-cyan-100|bg-cyan-600|bg-slate-50|text-slate-700|border-slate-100|bg-slate-600|text-slate-600|bg-rose-50|text-rose-700|border-rose-100|bg-rose-600|bg-yellow-50|text-yellow-700|border-yellow-100)(?=$|[^A-Za-z0-9_/-])|(?!(?:(?:text|bg|border)-(?:red|orange|amber|yellow|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|pink|rose|slate|gray)-(?:[1-9]\\d?\\d?)(?:/[0-9]+)?)\\b).)*$",
       "reason": "Task 5 extracts the shipped business-journey board unchanged; its stage palette and age tones are established visual encodings that must remain identical through the route cutover.",
       "owner": "frontend",
       "reviewDate": "2026-12-21",

@@ -194,8 +194,11 @@ async function fetchOwnerOptions(): Promise<void> {
 async function handleDisplayModeChange(mode: ViewDisplayMode): Promise<void> {
   if (mode === displayMode.value) return
   displayMode.value = mode
-  await customFilterViews.updateActiveCustomViewConfig()
-  await refreshActiveProjection()
+  const projectionRefresh = refreshActiveProjection()
+  await Promise.all([
+    customFilterViews.updateActiveCustomViewConfig(),
+    projectionRefresh,
+  ])
 }
 
 async function handleFilterApply(filters: ListFilterCondition[]): Promise<void> {
