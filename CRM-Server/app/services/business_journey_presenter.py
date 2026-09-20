@@ -63,6 +63,17 @@ def opportunity_amount(opportunity: Opportunity | None) -> float:
     return scalar_number(opportunity.total_amount)
 
 
+def legacy_board_amount(
+    opportunity: Opportunity | None,
+    contract_summary: BusinessJourneyContractSummary,
+) -> float:
+    if contract_summary.amount > 0:
+        return contract_summary.amount
+    if opportunity is None:
+        return 0.0
+    return scalar_number(opportunity.actual_amount or opportunity.total_amount)
+
+
 def customer_opportunity_amount(opportunity: Opportunity | None) -> float:
     if opportunity is None:
         return 0.0
@@ -375,6 +386,7 @@ __all__ = [
     "customer_journey_responses",
     "customer_opportunity_amount",
     "customer_opportunity_summary",
+    "legacy_board_amount",
     "legacy_board_opportunity_summary",
     "legacy_board_owner_map",
     "list_items",

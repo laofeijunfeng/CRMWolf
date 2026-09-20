@@ -13,9 +13,9 @@ from app.models.customer import Customer
 from app.models.deal_journey import CustomerDealJourney, CustomerDealJourneyEvent, DealJourneyStatus
 from app.models.opportunity import Opportunity
 from app.services.business_journey_presenter import (
+    legacy_board_amount,
     legacy_board_opportunity_summary,
     legacy_board_owner_map,
-    opportunity_amount,
 )
 from app.services.deal_journey_stage import (
     BOARD_COLUMNS,
@@ -233,7 +233,7 @@ def get_business_journey_board(
             issued_amount=0,
         ))
         stage_key = _infer_stage(journey, opportunity, contract_summary, payment_summary, invoice_summary)
-        amount = opportunity_amount(opportunity)
+        amount = legacy_board_amount(opportunity, contract_summary)
         total_amount += amount
         if journey.status == DealJourneyStatus.COMPLETED:
             completed_count += 1

@@ -111,6 +111,8 @@ def seed_board_card(
     created_time: datetime,
     expected_closing_date: date,
     last_event_at: datetime,
+    total_amount: str = "10000",
+    actual_amount: str | None = None,
 ) -> CustomerDealJourney:
     customer = Customer(
         team_id=1,
@@ -127,7 +129,8 @@ def seed_board_card(
         opportunity_number=f"OPP-{suffix}",
         opportunity_name=f"商机{suffix}",
         customer_id=customer.id,
-        total_amount=Decimal("10000"),
+        total_amount=Decimal(total_amount),
+        actual_amount=Decimal(actual_amount) if actual_amount is not None else None,
         user_count=10,
         unit_price=Decimal("1000"),
         license_type="SUBSCRIPTION",
@@ -171,6 +174,84 @@ def seed_board_card(
     )
     env.db.commit()
     return journey
+
+
+def seed_contract(env, journey: CustomerDealJourney, *, total_amount: str) -> Contract:
+    contract = Contract(
+        team_id=1,
+        contract_number=f"CTR-{journey.id}",
+        contract_name=f"合同{journey.id}",
+        customer_id=journey.customer_id,
+        opportunity_id=journey.primary_opportunity_id,
+        deal_journey_id=journey.id,
+        user_count=10,
+        total_amount=Decimal(total_amount),
+        license_type="SUBSCRIPTION",
+        subscription_years=1,
+        standard_unit_price=Decimal("1000"),
+        status="DRAFT",
+        owner_id="1",
+        creator_id="1",
+    )
+    env.db.add(contract)
+    env.db.commit()
+    return contract
+
+
+def _single_card_and_column(body: dict) -> tuple[dict, dict]:
+    column = next(column for column in body["columns"] if column["cards"])
+    return column["cards"][0], column
+
+
+def test_legacy_board_amount_prefers_positive_contract_summary(api_env):
+    journey = seed_board_card(
+        api_env,
+        suffix="CONTRACT-AMOUNT",
+        created_time=datetime(2026, 3, 15, 10, 0, 0),
+        expected_closing_date=date(2026, 9, 30),
+        last_event_at=datetime(2026, 8, 1, 9, 0, 0),
+        total_amount="10000",
+        actual_amount="7500",
+    )
+    seed_contract(api_env, journey, total_amount="12345")
+
+    response = api_env.client.get("/v1/business-journey-board/")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    card, column = _single_card_and_column(body)
+    assert card["amount"] == 12345.0
+    assert column["amount"] == 12345.0
+    assert body["summary"]["total_amount"] == 12345.0
+
+
+@pytest.mark.parametrize(
+    ("actual_amount", "expected_amount"),
+    [("7500", 7500.0), (None, 10000.0), ("0", 10000.0)],
+)
+def test_legacy_board_amount_falls_back_to_opportunity_actual_then_total(
+    api_env,
+    actual_amount,
+    expected_amount,
+):
+    seed_board_card(
+        api_env,
+        suffix=f"OPPORTUNITY-AMOUNT-{actual_amount}",
+        created_time=datetime(2026, 3, 15, 10, 0, 0),
+        expected_closing_date=date(2026, 9, 30),
+        last_event_at=datetime(2026, 8, 1, 9, 0, 0),
+        total_amount="10000",
+        actual_amount=actual_amount,
+    )
+
+    response = api_env.client.get("/v1/business-journey-board/")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    card, column = _single_card_and_column(body)
+    assert card["amount"] == expected_amount
+    assert column["amount"] == expected_amount
+    assert body["summary"]["total_amount"] == expected_amount
 
 
 def seed_three_cards(env):
