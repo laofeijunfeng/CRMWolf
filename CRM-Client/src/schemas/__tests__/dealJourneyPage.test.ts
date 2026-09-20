@@ -11,6 +11,7 @@ vi.mock('@/utils/request', () => ({
 import { dealJourneyApi } from '@/api/dealJourney'
 import {
   BusinessJourneyBoardResponseSchema,
+  BusinessJourneyDetailResponseSchema,
   BusinessJourneyListResponseSchema,
 } from '@/schemas/dealJourney'
 
@@ -98,6 +99,47 @@ const boardCard = {
   },
 }
 
+const detailOpportunity = {
+  id: opportunityPublicId,
+  public_id: opportunityPublicId,
+  deal_journey_id: journeyPublicId,
+  opportunity_number: 'OPP-2026-001',
+  opportunity_name: '华东续约商机',
+  customer_id: `cus_${'c'.repeat(32)}`,
+  customer_name: '示例科技',
+  procurement_method_id: null,
+  procurement_method_info: null,
+  product_public_id: null,
+  product_name: 'Hifox CRM',
+  product_module_public_ids: [],
+  product_modules: [],
+  total_amount: 168000,
+  user_count: 20,
+  unit_price: 8400,
+  license_type: 'SUBSCRIPTION',
+  subscription_years: 1,
+  purchase_type: 'RENEWAL',
+  decision_maker_count: 3,
+  expected_closing_date: '2026-10-31',
+  procurement_stage_id: null,
+  win_probability: 70,
+  current_stage_snapshot: null,
+  owner_id: '7',
+  creator_id: '7',
+  status: 0,
+  approval_phase: 'approved',
+  actual_amount: null,
+  actual_closing_date: null,
+  loss_reason: null,
+  created_time: '2026-08-15T10:00:00',
+  updated_time: '2026-09-20T12:00:00',
+  version: 1,
+  customer_info: {
+    id: `cus_${'c'.repeat(32)}`,
+    account_name: '示例科技',
+  },
+}
+
 describe('business journey page schemas', () => {
   it('parses the backend pagination envelope and complete list item', () => {
     const parsed = BusinessJourneyListResponseSchema.parse({
@@ -157,6 +199,27 @@ describe('business journey page schemas', () => {
   })
 })
 
+describe('business journey detail schema', () => {
+  it('parses the unified journey and full primary opportunity envelope', () => {
+    const parsed = BusinessJourneyDetailResponseSchema.parse({
+      journey: listItem,
+      primary_opportunity: detailOpportunity,
+    })
+
+    expect(parsed.journey.public_id).toBe(journeyPublicId)
+    expect(parsed.primary_opportunity?.customer_name).toBe('示例科技')
+  })
+
+  it('accepts a null full primary opportunity', () => {
+    const parsed = BusinessJourneyDetailResponseSchema.parse({
+      journey: { ...listItem, primary_opportunity: null },
+      primary_opportunity: null,
+    })
+
+    expect(parsed.primary_opportunity).toBeNull()
+  })
+})
+
 describe('dealJourneyApi page projections', () => {
   beforeEach(() => {
     requestGet.mockReset()
@@ -184,5 +247,17 @@ describe('dealJourneyApi page projections', () => {
 
     await dealJourneyApi.getOwnerFilterOptions()
     expect(requestGet).toHaveBeenCalledWith('/v1/business-journeys/owner-options')
+  })
+
+  it('calls the unified detail endpoint and parses its envelope', async () => {
+    requestGet.mockResolvedValue({
+      journey: listItem,
+      primary_opportunity: detailOpportunity,
+    })
+
+    const detail = await dealJourneyApi.getDetail(journeyPublicId)
+
+    expect(requestGet).toHaveBeenCalledWith(`/v1/business-journeys/${journeyPublicId}`)
+    expect(detail.primary_opportunity?.public_id).toBe(opportunityPublicId)
   })
 })

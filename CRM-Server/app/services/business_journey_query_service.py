@@ -154,6 +154,22 @@ class BusinessJourneyQueryService:
         )
         return rows, total, total > len(rows)
 
+    def get_by_public_id(
+        self,
+        db: Session,
+        *,
+        request: BusinessJourneyQueryRequest,
+        journey_public_id: str,
+    ) -> BusinessJourneyQueryRow | None:
+        raw_row = (
+            self.query_base(db, request=request)
+            .filter(CustomerDealJourney.public_id == journey_public_id)
+            .one_or_none()
+        )
+        if raw_row is None:
+            return None
+        return self._hydrate_rows(db, request.team_id, [raw_row])[0]
+
     def owner_options(
         self,
         db: Session,

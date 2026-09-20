@@ -55,7 +55,7 @@ import InvoicesPanel from '@/components/panels/InvoicesPanel.vue'
 import LicensePanel from '@/components/panels/LicensePanel.vue'
 import ListCard from '@/components/crmwolf/ListCard.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
-import { opportunityApi, type Opportunity } from '@/api/opportunity'
+import type { Opportunity } from '@/api/opportunity'
 import { dealJourneyApi, type DealJourney } from '@/api/dealJourney'
 import approvalGenericApi from '@/api/approvalGeneric'
 import customerApi, { type CustomerDetailResponse, type CustomerMemberResponse } from '@/api/customer'
@@ -364,10 +364,10 @@ async function fetchJourneyDetail(): Promise<boolean> {
   loading.value = true
   loadError.value = false
   try {
-    const journeyData = await dealJourneyApi.getByCustomer(props.customerId, props.journeyId)
-    journeyDetail.value = journeyData
-    const primary = journeyData.primary_opportunity
-    if (primary === null) {
+    const detail = await dealJourneyApi.getDetail(props.journeyId)
+    journeyDetail.value = detail.journey
+    const data = detail.primary_opportunity
+    if (data === null) {
       opportunity.value = null
       relatedContract.value = null
       paymentPlans.value = []
@@ -376,7 +376,6 @@ async function fetchJourneyDetail(): Promise<boolean> {
       await fetchCustomerLicenseApplications()
       return true
     }
-    const data = await opportunityApi.getOpportunity(primary.public_id)
     opportunity.value = data
     syncStageStateFromOpportunity(data)
     await fetchRelatedContract(data.id)

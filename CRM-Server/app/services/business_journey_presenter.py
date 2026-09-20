@@ -14,10 +14,12 @@ from app.schemas.deal_journey import (
     BusinessJourneyBoardResponse,
     BusinessJourneyBoardSummary,
     BusinessJourneyListItem,
+    BusinessJourneyDetailResponse,
     BusinessJourneyOwner,
     CustomerDealJourneyOpportunitySummary,
     CustomerDealJourneyResponse,
 )
+from app.services.opportunity_presenter import opportunity_detail_response
 from app.services.business_journey_query_service import BusinessJourneyQueryRow
 from app.services.deal_journey_stage import (
     BOARD_COLUMNS,
@@ -237,6 +239,36 @@ def list_items(
             )
         )
     return items
+
+
+def detail_response(
+    db: Session,
+    *,
+    team_id: int,
+    row: BusinessJourneyQueryRow,
+) -> BusinessJourneyDetailResponse:
+    journey = customer_journey_response(
+        row.journey,
+        opportunity=row.opportunity,
+        contract_summary=row.contract_summary,
+        payment_summary=row.payment_summary,
+        invoice_summary=row.invoice_summary,
+    )
+    primary_opportunity = (
+        opportunity_detail_response(
+            db,
+            row.opportunity,
+            team_id,
+            journey_public_id=row.journey.public_id,
+            customer=row.customer,
+        )
+        if row.opportunity is not None
+        else None
+    )
+    return BusinessJourneyDetailResponse(
+        journey=journey,
+        primary_opportunity=primary_opportunity,
+    )
 
 
 def _board_opportunity_summary(

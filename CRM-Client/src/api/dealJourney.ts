@@ -1,11 +1,13 @@
 import request from '@/utils/request'
 import {
   BusinessJourneyBoardResponseSchema,
+  BusinessJourneyDetailResponseSchema,
   BusinessJourneyListResponseSchema,
   BusinessJourneyOwnerFilterOptionsResponseSchema,
   DealJourneyListSchema,
   DealJourneySchema,
   type BusinessJourneyBoardResponse,
+  type BusinessJourneyDetailResponse,
   type BusinessJourneyListResponse,
   type BusinessJourneyOwnerFilterOptionsResponse,
   type DealJourney
@@ -15,6 +17,7 @@ export type {
   BusinessJourneyBoardCard,
   BusinessJourneyBoardColumn,
   BusinessJourneyBoardResponse,
+  BusinessJourneyDetailResponse,
   BusinessJourneyListItem,
   BusinessJourneyListResponse,
   BusinessJourneyOwner,
@@ -60,6 +63,12 @@ export const dealJourneyApi = {
     // eslint-disable-next-line crmwolf/require-zod-schema
     const raw: unknown = await request.get('/v1/business-journeys/owner-options')
     return BusinessJourneyOwnerFilterOptionsResponseSchema.parse(raw)
+  },
+
+  async getDetail(journeyPublicId: string): Promise<BusinessJourneyDetailResponse> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const raw: unknown = await request.get(`/v1/business-journeys/${journeyPublicId}`)
+    return BusinessJourneyDetailResponseSchema.parse(raw)
   },
 
   async listByCustomer(customerId: string): Promise<DealJourney[]> {

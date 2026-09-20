@@ -6,6 +6,7 @@ import { LicenseType, OpportunityStatus, PurchaseType, type Opportunity } from '
 import type { DealJourney } from '@/api/dealJourney'
 
 const dealJourneyApi = vi.hoisted(() => ({
+  getDetail: vi.fn(),
   getByCustomer: vi.fn(),
   listByCustomer: vi.fn(),
 }))
@@ -274,6 +275,11 @@ const opportunityFixture = (overrides: Partial<Opportunity> = {}): Opportunity =
   ...overrides,
 })
 
+const detailFixture = (journey: DealJourney = journeyFixture(), primaryOpportunity: Opportunity | null = opportunityFixture()) => ({
+  journey,
+  primary_opportunity: primaryOpportunity,
+})
+
 async function mountDetail(props: Record<string, unknown> = {}) {
   const wrapper = mount(DealJourneyDetailContent, {
     props: {
@@ -300,8 +306,7 @@ function namedFooterButtons(wrapper: { findAll: (selector: string) => Array<{ te
 describe('DealJourneyDetailContent fulfillment workbench', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    dealJourneyApi.getByCustomer.mockResolvedValue(journeyFixture())
-    opportunityApi.getOpportunity.mockResolvedValue(opportunityFixture())
+    dealJourneyApi.getDetail.mockResolvedValue(detailFixture())
     contractApi.getContractByOpportunity.mockRejectedValue({ response: { status: 404 } })
     customerApi.getCustomerDetail.mockResolvedValue({
       id: CUSTOMER_PUBLIC_ID,
@@ -317,6 +322,16 @@ describe('DealJourneyDetailContent fulfillment workbench', () => {
 
   afterEach(() => {
     document.body.innerHTML = ''
+  })
+
+  it('loads the unified detail envelope without customer-scoped or opportunity detail reads', async () => {
+    const wrapper = await mountDetail()
+
+    expect(dealJourneyApi.getDetail).toHaveBeenCalledWith(JOURNEY_PUBLIC_ID)
+    expect(dealJourneyApi.getByCustomer).not.toHaveBeenCalled()
+    expect(opportunityApi.getOpportunity).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('CRM 升级项目')
+    expect(wrapper.text()).toContain('上海测试客户')
   })
 
   it('shows board stage and purchase type in the header, not win/lose footer', async () => {
@@ -351,11 +366,14 @@ describe('DealJourneyDetailContent fulfillment workbench', () => {
   })
 
   it('does not fetch contracts when primary_opportunity is null', async () => {
-    dealJourneyApi.getByCustomer.mockResolvedValue(journeyFixture({
-      primary_opportunity: null,
-      purchase_type: null,
-      amount: 0,
-    }))
+    dealJourneyApi.getDetail.mockResolvedValue(detailFixture(
+      journeyFixture({
+        primary_opportunity: null,
+        purchase_type: null,
+        amount: 0,
+      }),
+      null
+    ))
 
     const wrapper = await mountDetail()
 

@@ -15,14 +15,16 @@ from app.schemas.common import PaginatedResponse
 from app.schemas.customer import OwnerListResponse
 from app.schemas.deal_journey import (
     BusinessJourneyBoardResponse,
+    BusinessJourneyDetailResponse,
     BusinessJourneyListItem,
 )
-from app.services.business_journey_presenter import board_response, list_items
+from app.services.business_journey_presenter import board_response, detail_response, list_items
 from app.services.business_journey_query_service import (
     BusinessJourneyQueryRequest,
     JourneyScopeTab,
     business_journey_query_service,
 )
+from app.utils.public_id import is_deal_journey_public_id
 
 router = APIRouter(prefix="/v1/business-journeys", tags=["业务旅程"])
 _RELEVANT_PERMISSIONS = frozenset(
@@ -222,3 +224,31 @@ def get_business_journey_owner_options(
         lambda: business_journey_query_service.owner_options(db, request=request)
     )
     return OwnerListResponse(data=options)
+
+
+@router.get("/{journey_public_id}", response_model=BusinessJourneyDetailResponse)
+def get_business_journey_detail(
+    journey_public_id: str,
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> BusinessJourneyDetailResponse:
+    request = _authorized_request(
+        db,
+        team_id=team_id,
+        user_id=current_user.id,
+        tab="all",
+        search=None,
+        filters=None,
+        sorts=None,
+    )
+    if not is_deal_journey_public_id(journey_public_id):
+        raise HTTPException(status_code=404, detail="业务旅程不存在")
+    row = business_journey_query_service.get_by_public_id(
+        db,
+        request=request,
+        journey_public_id=journey_public_id,
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="业务旅程不存在")
+    return detail_response(db, team_id=team_id, row=row)

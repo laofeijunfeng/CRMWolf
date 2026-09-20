@@ -5,6 +5,7 @@ from datetime import date, datetime
 from pydantic import BaseModel
 
 from app.schemas.common import PaginatedResponse
+from app.schemas.opportunity import OpportunityDetailResponse
 from app.services.deal_journey_stage import (
     BoardStageKey,
     BusinessJourneyContractSummary,
@@ -56,6 +57,11 @@ class BusinessJourneyListItem(CustomerDealJourneyResponse):
 
 class BusinessJourneyListResponse(PaginatedResponse[BusinessJourneyListItem]):
     pass
+
+
+class BusinessJourneyDetailResponse(BaseModel):
+    journey: CustomerDealJourneyResponse
+    primary_opportunity: OpportunityDetailResponse | None
 
 
 class BusinessJourneyBoardOpportunitySummary(BaseModel):

@@ -23,9 +23,9 @@ from app.models.contract import Contract
 from app.models.customer import Contact, Customer, CustomerMember
 from app.models.deal_journey import CustomerDealJourney, CustomerDealJourneyEvent, DealJourneyStatus
 from app.models.invoice import InvoiceApplication, InvoiceTitle
-from app.models.opportunity import Opportunity
+from app.models.opportunity import Opportunity, OpportunityProductModule
 from app.models.payment import PaymentPlan, PaymentRecord
-from app.models.product import Product
+from app.models.product import Product, ProductModule
 from app.models.user import User, UserStatus
 
 
@@ -48,6 +48,8 @@ def api_env(monkeypatch):
         CustomerMember.__table__,
         Product.__table__,
         Opportunity.__table__,
+        ProductModule.__table__,
+        OpportunityProductModule.__table__,
         CustomerDealJourney.__table__,
         CustomerDealJourneyEvent.__table__,
         Contract.__table__,
@@ -205,6 +207,45 @@ def seed_customer_member(
     env.db.add(member)
     env.db.commit()
     return member
+
+
+def test_detail_returns_journey_and_full_primary_opportunity(api_env):
+    journey = seed_journey(api_env, product_name="Hifox CRM")
+
+    response = api_env.client.get(f"/v1/business-journeys/{journey.public_id}")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["journey"]["public_id"] == journey.public_id
+    assert body["primary_opportunity"]["public_id"].startswith("opp_")
+    assert body["primary_opportunity"]["deal_journey_id"] == journey.public_id
+    assert body["primary_opportunity"]["customer_id"].startswith("cus_")
+    assert body["primary_opportunity"]["customer_name"].startswith("客户")
+    assert body["primary_opportunity"]["product_name"] == "Hifox CRM"
+
+
+def test_detail_returns_null_primary_opportunity(api_env):
+    journey = seed_journey(api_env)
+    opportunity = api_env.db.query(Opportunity).filter(Opportunity.id == journey.primary_opportunity_id).one()
+    opportunity.deal_journey_id = None
+    journey.primary_opportunity_id = None
+    api_env.db.commit()
+
+    response = api_env.client.get(f"/v1/business-journeys/{journey.public_id}")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["journey"]["public_id"] == journey.public_id
+    assert response.json()["journey"]["primary_opportunity"] is None
+    assert response.json()["primary_opportunity"] is None
+
+
+def test_detail_requires_public_journey_id(api_env):
+    journey = seed_journey(api_env)
+
+    response = api_env.client.get(f"/v1/business-journeys/{journey.id}")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "业务旅程不存在"
 
 
 def _journey_public_ids(body: dict) -> set[str]:

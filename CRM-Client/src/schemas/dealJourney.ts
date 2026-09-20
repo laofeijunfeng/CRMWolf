@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { BusinessDateStringSchema, BusinessDateTimeStringSchema } from './common'
+import { OpportunityApiResponseSchema } from './opportunity'
 
 export const DealJourneyBoardStageSchema = z.enum([
   'early_communication',
@@ -38,6 +39,11 @@ export const DealJourneySchema = z.object({
 })
 
 export const DealJourneyListSchema = z.array(DealJourneySchema)
+
+export const BusinessJourneyDetailResponseSchema = z.object({
+  journey: DealJourneySchema,
+  primary_opportunity: OpportunityApiResponseSchema.nullable()
+})
 
 export const BusinessJourneyOwnerSchema = z.object({
   id: z.string().min(1),
@@ -150,6 +156,7 @@ export const BusinessJourneyOwnerFilterOptionsResponseSchema = z.object({
 export type DealJourneyBoardStage = z.infer<typeof DealJourneyBoardStageSchema>
 export type DealJourneyOpportunitySummary = z.infer<typeof DealJourneyOpportunitySummarySchema>
 export type DealJourney = z.infer<typeof DealJourneySchema>
+export type BusinessJourneyDetailResponse = z.infer<typeof BusinessJourneyDetailResponseSchema>
 export type BusinessJourneyOwner = z.infer<typeof BusinessJourneyOwnerSchema>
 export type BusinessJourneyListItem = z.infer<typeof BusinessJourneyListItemSchema>
 export type BusinessJourneyListResponse = z.infer<typeof BusinessJourneyListResponseSchema>
