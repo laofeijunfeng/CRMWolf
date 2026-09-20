@@ -64,6 +64,7 @@ const selectedScope = ref<ViewPreferenceScope>(props.scope)
 const normalizedActiveCount = computed(() => props.activeCount ?? 0)
 const isActive = computed(() => props.active || normalizedActiveCount.value > 0)
 const boardViewEnabled = computed(() => props.viewDisplayMode === 'board')
+const normalizedViewConfigPanelTitle = computed(() => props.viewConfigPanelTitle ?? '字段配置')
 
 function handleDisplayModeChange(checked: boolean): void {
   emit('update:view-display-mode', checked ? 'board' : 'table')
@@ -137,7 +138,7 @@ watch(() => props.scope, (scope) => {
 
     <PopoverContent align="start" class="column-config-popover">
       <TableToolbarBuilderPanel
-        :title="viewConfigPanelTitle"
+        :title="normalizedViewConfigPanelTitle"
         @close="open = false"
       >
         <div v-if="scopeEditable" class="column-config-scope" role="radiogroup" aria-label="保存范围">

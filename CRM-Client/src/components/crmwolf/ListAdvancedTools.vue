@@ -57,6 +57,12 @@ const parkedToolsTarget = ref<HTMLElement | null>(null)
 const preserveChildOpenDuringMove = ref(false)
 let toolMoveSequence = 0
 const childToolOpen = computed(() => sortOpen.value || columnConfigOpen.value)
+const normalizedViewDisplayMode = computed<ViewDisplayMode | null>(() => props.viewDisplayMode ?? null)
+const normalizedViewDisplayModeEnabled = computed(() => props.viewDisplayModeEnabled ?? false)
+const normalizedViewConfigTriggerLabel = computed(() => props.viewConfigTriggerLabel ?? '字段配置')
+const normalizedViewConfigPanelTitle = computed(() => props.viewConfigPanelTitle ?? '字段配置')
+const normalizedCanSaveCurrentView = computed(() => props.canSaveCurrentView ?? false)
+const normalizedViewSaveLoading = computed(() => props.viewSaveLoading ?? false)
 const toolsTarget = computed(() => {
   if (!isCompactToolbar.value) return desktopToolsTarget.value
   if (moreSettingsOpen.value && compactToolsTarget.value !== null) return compactToolsTarget.value
@@ -155,12 +161,12 @@ watch(isCompactToolbar, async (compact) => {
       :scope-editable="columnPreferenceMode === 'default'"
       :loading="columnConfigLoading"
       :saving="columnConfigSaving"
-      :view-display-mode="viewDisplayMode"
-      :view-display-mode-enabled="viewDisplayModeEnabled"
-      :view-config-trigger-label="viewConfigTriggerLabel"
-      :view-config-panel-title="viewConfigPanelTitle"
-      :can-save-current-view="canSaveCurrentView"
-      :view-save-loading="viewSaveLoading"
+      :view-display-mode="normalizedViewDisplayMode"
+      :view-display-mode-enabled="normalizedViewDisplayModeEnabled"
+      :view-config-trigger-label="normalizedViewConfigTriggerLabel"
+      :view-config-panel-title="normalizedViewConfigPanelTitle"
+      :can-save-current-view="normalizedCanSaveCurrentView"
+      :view-save-loading="normalizedViewSaveLoading"
       @update:open="handleColumnConfigOpenChange"
       @change="emit('column-config-change', $event)"
       @save="emit('column-config-save', $event)"
