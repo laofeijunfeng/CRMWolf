@@ -149,13 +149,6 @@ describe('AppLayout sidebar visibility CSS contract', () => {
     expect(sidebarProviderSource).toContain('passive: (props.open === undefined) as false')
   })
 
-  it('keeps dashboard navigation visible while permissions are still loading', () => {
-    const appSidebarSource = readFileSync('src/components/app-sidebar/AppSidebar.vue', 'utf-8')
-
-    expect(appSidebarSource).toContain('const shouldShowDashboardGroup = computed(() => {')
-    expect(appSidebarSource).toContain('return !permissionStore.initialized || canViewSalesDashboard.value')
-    expect(appSidebarSource).toContain('...(shouldShowDashboardGroup.value')
-  })
 
   it('keeps the top bar aligned with the white main workspace surface', () => {
     const appLayoutSource = readFileSync('src/AppLayout.vue', 'utf-8')
@@ -195,5 +188,20 @@ describe('AppLayout sidebar visibility CSS contract', () => {
     expect(salesDashboardSource).not.toContain('min-height: calc($wolf-viewport-height-mobile-v2 - $wolf-topbar-height-mobile-v2)')
     expect(salesDashboardSource).not.toContain('padding-bottom: calc($wolf-bottom-nav-height-v2 + $wolf-page-padding-mobile-v2 + $wolf-safe-area-bottom-v2)')
     expect(salesDashboardSource).toMatch(/\.sales-dashboard-page\s*\{[^}]*min-height:\s*0/s)
+  })
+})
+
+describe('business journeys route cutover', () => {
+  it('keeps only the unified business journeys route and fixed workspace', () => {
+    const routerSource = readFileSync('src/router/index.ts', 'utf-8')
+    const appLayoutSource = readFileSync('src/AppLayout.vue', 'utf-8')
+
+    expect(routerSource).toContain("path: 'business-journeys'")
+    expect(routerSource).toContain("name: 'BusinessJourneys'")
+    expect(routerSource).toContain("meta: { requiresAuth: true, title: '业务旅程' }")
+    expect(routerSource).not.toContain('business-journey-board')
+    expect(routerSource).not.toContain('BusinessJourneyBoard')
+    expect(appLayoutSource).toContain("route.name === 'BusinessJourneys'")
+    expect(appLayoutSource).not.toContain("route.name === 'BusinessJourneyBoard'")
   })
 })

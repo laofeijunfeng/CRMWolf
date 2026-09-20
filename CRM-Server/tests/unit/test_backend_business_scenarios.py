@@ -22,7 +22,6 @@ from sqlalchemy.types import BigInteger
 
 from app.api import agent as agent_api
 from app.api import approvals as approvals_api
-from app.api import business_journey_board as business_journey_board_api
 from app.api import business_journeys as business_journeys_api
 from app.api import invoices as invoices_api
 from app.api import license_application as license_api
@@ -251,7 +250,6 @@ def scenario_env(monkeypatch):
     app = FastAPI()
     app.include_router(agent_api.router)
     app.include_router(approvals_api.router)
-    app.include_router(business_journey_board_api.router)
     app.include_router(business_journeys_api.router)
     app.include_router(invoices_api.invoice_router, prefix="/v1")
     app.include_router(payments_api.router)
@@ -262,7 +260,6 @@ def scenario_env(monkeypatch):
         deps,
         agent_api,
         approvals_api,
-        business_journey_board_api,
         business_journeys_api,
         invoices_api,
         payments_api,

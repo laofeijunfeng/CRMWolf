@@ -59,43 +59,6 @@ const board = {
   },
   truncated: false,
 }
-const legacyCustomerId = '42'
-const legacyBoard = {
-  scope: 'all',
-  period_start: null,
-  period_end: null,
-  columns: [{
-    ...board.columns[0],
-    cards: [{
-      journey_id: 91,
-      journey_name: board.columns[0].cards[0].journey_name,
-      customer_id: legacyCustomerId,
-      customer_name: board.columns[0].cards[0].customer_name,
-      owner: board.columns[0].cards[0].owner,
-      status: board.columns[0].cards[0].status,
-      current_board_stage: board.columns[0].cards[0].current_board_stage,
-      started_at: board.columns[0].cards[0].started_at,
-      closed_at: board.columns[0].cards[0].closed_at,
-      last_event_at: board.columns[0].cards[0].last_event_at,
-      last_event_summary: board.columns[0].cards[0].last_event_summary,
-      amount: board.columns[0].cards[0].amount,
-      primary_opportunity: {
-        id: 17,
-        name: '华东续约商机',
-        amount: 168000,
-        actual_amount: null,
-        status: 1,
-        current_stage_name: '方案确认',
-        win_probability: 70,
-        expected_closing_date: '2026-10-31',
-      },
-      contract_summary: board.columns[0].cards[0].contract_summary,
-      payment_summary: board.columns[0].cards[0].payment_summary,
-      invoice_summary: board.columns[0].cards[0].invoice_summary,
-    }],
-  }],
-  summary: board.summary,
-}
 
 
 function mountBoard(props: Record<string, unknown> = {}) {
@@ -127,16 +90,16 @@ describe('BusinessJourneyBoardView', () => {
   it('renders the unchanged initial skeleton', () => {
     const wrapper = mountBoard({ board: null, loading: true })
 
-    expect(wrapper.get('[aria-label="业务看板加载中"]').findAll('.business-board-column')).toHaveLength(5)
+    expect(wrapper.get('[aria-label="旅程看板加载中"]').findAll('.business-board-column')).toHaveLength(5)
   })
 
   it('shows stale refresh state without replacing the successful board', () => {
     const wrapper = mountBoard({
       loading: true,
-      errorMessage: '业务看板刷新失败，当前显示上次成功加载的数据',
+      errorMessage: '旅程看板刷新失败，当前显示上次成功加载的数据',
     })
 
-    expect(wrapper.text()).toContain('业务看板刷新失败，当前显示上次成功加载的数据')
+    expect(wrapper.text()).toContain('旅程看板刷新失败，当前显示上次成功加载的数据')
     expect(wrapper.text()).toContain('正在刷新，当前显示上次成功加载的数据')
     expect(wrapper.find('.journey-card').exists()).toBe(true)
   })
@@ -144,10 +107,10 @@ describe('BusinessJourneyBoardView', () => {
   it('shows a blocking error only when no board data exists', async () => {
     const wrapper = mountBoard({
       board: null,
-      errorMessage: '业务看板加载失败，请重试',
+      errorMessage: '旅程看板加载失败，请重试',
     })
 
-    expect(wrapper.get('.business-board-blocking-error').text()).toContain('业务看板加载失败，请重试')
+    expect(wrapper.get('.business-board-blocking-error').text()).toContain('旅程看板加载失败，请重试')
     await wrapper.get('.business-board-blocking-error button').trigger('click')
     expect(wrapper.emitted('retry')).toHaveLength(1)
   })
@@ -167,17 +130,5 @@ describe('BusinessJourneyBoardView', () => {
     await card.trigger('keydown', { key: ' ' })
 
     expect(wrapper.emitted('row-click')).toEqual([[payload], [payload], [payload]])
-  })
-
-  it('preserves customer-detail semantics for legacy cards', async () => {
-    const wrapper = mountBoard({ board: legacyBoard })
-    const card = wrapper.get('.journey-card')
-
-    expect(card.attributes('aria-label')).toBe('查看客户详情：示例科技')
-
-    await card.trigger('click')
-
-    expect(wrapper.emitted('legacy-customer-click')).toEqual([[legacyCustomerId]])
-    expect(wrapper.emitted('row-click')).toBeUndefined()
   })
 })

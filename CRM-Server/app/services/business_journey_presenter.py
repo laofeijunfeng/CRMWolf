@@ -63,16 +63,6 @@ def opportunity_amount(opportunity: Opportunity | None) -> float:
     return scalar_number(opportunity.total_amount)
 
 
-def legacy_board_amount(
-    opportunity: Opportunity | None,
-    contract_summary: BusinessJourneyContractSummary,
-) -> float:
-    if contract_summary.amount > 0:
-        return contract_summary.amount
-    if opportunity is None:
-        return 0.0
-    return scalar_number(opportunity.actual_amount or opportunity.total_amount)
-
 
 def customer_opportunity_amount(opportunity: Opportunity | None) -> float:
     if opportunity is None:
@@ -97,44 +87,6 @@ def customer_opportunity_summary(
     )
 
 
-def legacy_board_opportunity_summary(opportunity: Opportunity | None) -> dict | None:
-    if opportunity is None:
-        return None
-    return {
-        "id": opportunity.id,
-        "name": opportunity.opportunity_name,
-        "amount": scalar_number(opportunity.total_amount),
-        "actual_amount": (
-            scalar_number(opportunity.actual_amount)
-            if opportunity.actual_amount is not None
-            else None
-        ),
-        "status": opportunity.status,
-        "current_stage_name": opportunity.current_stage_name,
-        "win_probability": opportunity.current_win_probability or opportunity.win_probability,
-        "expected_closing_date": (
-            opportunity.expected_closing_date.isoformat()
-            if opportunity.expected_closing_date
-            else None
-        ),
-    }
-
-
-def legacy_board_owner_map(db: Session, rows) -> dict[str, dict]:
-    owner_ids = {
-        getattr(opportunity, "owner_id", None) or getattr(customer, "owner_id", None)
-        for _journey, customer, opportunity in rows
-    }
-    numeric_ids = [int(owner_id) for owner_id in owner_ids if owner_id and str(owner_id).isdigit()]
-    users = db.query(User).filter(User.id.in_(numeric_ids)).all() if numeric_ids else []
-    return {
-        str(user.id): {
-            "id": str(user.id),
-            "name": user.name,
-            "avatar_url": user.avatar_url,
-        }
-        for user in users
-    }
 
 
 def customer_journey_response(
@@ -386,9 +338,6 @@ __all__ = [
     "customer_journey_responses",
     "customer_opportunity_amount",
     "customer_opportunity_summary",
-    "legacy_board_amount",
-    "legacy_board_opportunity_summary",
-    "legacy_board_owner_map",
     "list_items",
     "opportunity_amount",
     "scalar_number",

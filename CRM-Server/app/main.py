@@ -20,7 +20,6 @@ from app.api import (
     products,
     approvals,
     auth,
-    business_journey_board,
     business_journeys,
     contracts,
     customer_activities,
@@ -134,7 +133,6 @@ api_router.include_router(sales_dashboard.router)
 api_router.include_router(follow_up_tasks.router)
 api_router.include_router(follow_up_tasks.projection_router)
 api_router.include_router(follow_up_tasks.observability_router)
-api_router.include_router(business_journey_board.router)
 api_router.include_router(business_journeys.router)
 api_router.include_router(system_configs.router)
 api_router.include_router(view_preferences.router)

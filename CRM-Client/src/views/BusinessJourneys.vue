@@ -142,8 +142,8 @@ async function loadBoard(): Promise<boolean> {
     if (requestId !== boardRequestSequence.value || displayMode.value !== 'board') return false
     logger.error('[BusinessJourneys]', '加载业务旅程看板失败', { error })
     boardErrorMessage.value = boardHasSuccess.value
-      ? '业务看板刷新失败，当前显示上次成功加载的数据'
-      : '业务看板加载失败，请重试'
+      ? '旅程看板刷新失败，当前显示上次成功加载的数据'
+      : '旅程看板加载失败，请重试'
     return false
   } finally {
     if (requestId === boardRequestSequence.value) boardLoading.value = false

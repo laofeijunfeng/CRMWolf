@@ -228,7 +228,6 @@ const mobileOverflowHeaderActions = computed<HeaderAction[]>(() => {
 })
 const isFixedWorkspaceRoute = computed(() => (
   route.name === 'SalesDashboard' ||
-  route.name === 'BusinessJourneyBoard' ||
   route.name === 'BusinessJourneys'
 ))
 const appLayoutClass = computed(() => ({

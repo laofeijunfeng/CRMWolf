@@ -14,10 +14,9 @@ import type {
   BusinessJourneyBoardResponse,
   DealJourneyBoardStage
 } from '@/schemas/dealJourney'
-import type { BusinessJourneyBoardResponse as LegacyBusinessJourneyBoardResponse } from '@/schemas/businessJourneyBoard'
 
 interface Props {
-  board: BusinessJourneyBoardResponse | LegacyBusinessJourneyBoardResponse | null
+  board: BusinessJourneyBoardResponse | null
   loading?: boolean
   errorMessage?: string
 }
@@ -30,7 +29,6 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   retry: []
   'row-click': [payload: { customerId: string; journeyPublicId: string }]
-  'legacy-customer-click': [customerId: string]
 }>()
 const columns = computed(() => props.board?.columns ?? [])
 const hasBoardData = computed(() => props.board !== null)
@@ -101,10 +99,7 @@ const getStageAgeTone = (value: string | null | undefined): string => {
   return 'bg-rose-50 text-rose-700 border-rose-100'
 }
 
-type BoardCard = BusinessJourneyBoardCard | LegacyBusinessJourneyBoardResponse['columns'][number]['cards'][number]
-const hasPublicJourneyIdentity = (card: BoardCard): card is BusinessJourneyBoardCard =>
-  'public_id' in card && typeof card.public_id === 'string'
-
+type BoardCard = BusinessJourneyBoardCard
 
 const shouldShowOpportunityStage = (card: BoardCard): boolean =>
   ['early_communication', 'active_progress', 'closing_soon'].includes(card.current_board_stage)
@@ -118,23 +113,15 @@ const getWinProbability = (card: BoardCard): string => {
 }
 
 const emitRowClick = (card: BoardCard): void => {
-  if (hasPublicJourneyIdentity(card)) {
-    emit('row-click', {
-      customerId: card.customer_id,
-      journeyPublicId: card.public_id
-    })
-    return
-  }
-  emit('legacy-customer-click', card.customer_id)
+  emit('row-click', {
+    customerId: card.customer_id,
+    journeyPublicId: card.public_id
+  })
 }
 
-const cardKey = (card: BoardCard): string | number =>
-  hasPublicJourneyIdentity(card) ? card.public_id : Number(card.journey_id)
+const cardKey = (card: BoardCard): string => card.public_id
 
-const cardAriaLabel = (card: BoardCard): string =>
-  hasPublicJourneyIdentity(card)
-    ? `查看业务旅程：${card.journey_name}`
-    : `查看客户详情：${card.customer_name ?? card.customer_id}`
+const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.journey_name}`
 </script>
 
 <template>
@@ -169,7 +156,7 @@ const cardAriaLabel = (card: BoardCard): string =>
     <Card class="business-board-surface">
       <CardContent class="business-board-surface-content">
         <div class="business-board-scroll">
-          <div v-if="loading && !hasBoardData" class="business-board-skeleton" aria-label="业务看板加载中">
+          <div v-if="loading && !hasBoardData" class="business-board-skeleton" aria-label="旅程看板加载中">
             <section v-for="index in 5" :key="index" class="business-board-column">
               <Skeleton class="h-8 w-24" />
               <Skeleton class="h-28 w-full" />
@@ -180,7 +167,7 @@ const cardAriaLabel = (card: BoardCard): string =>
 
           <div v-else-if="!hasBoardData" class="business-board-blocking-error" role="alert">
             <AlertCircle class="blocking-error-icon" aria-hidden="true" />
-            <strong>{{ errorMessage || '业务看板暂时无法加载' }}</strong>
+            <strong>{{ errorMessage || '旅程看板暂时无法加载' }}</strong>
             <span>请检查网络连接后重试。</span>
             <TableToolbarButton :disabled="loading" @click="emit('retry')">
               {{ loading ? '加载中…' : '重新加载' }}
