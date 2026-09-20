@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 from types import SimpleNamespace
 
@@ -12,6 +13,7 @@ from app.services.customer_enrichment_contracts import (
 )
 from app.services.customer_enrichment_inference_service import CustomerEnrichmentInferenceError
 from app.services.customer_enrichment_job_service import CustomerEnrichmentJobService
+from app.services.customer_enrichment_profile_coordinator import CustomerEnrichmentProfileCoordinator
 from app.services.customer_enrichment_write_service import CustomerEnrichmentWriteResult
 from app.utils.time import business_now
 
@@ -446,3 +448,145 @@ async def test_stale_finalization_rolls_back_pending_customer_write():
     assert mutation_session.rollbacks == 1
     assert mutation_session.pending_customer_write is False
     assert mutation_session.persisted_customer_write is False
+
+
+class CoordinatorSession(FakeSession):
+    def __init__(self, locked_job) -> None:
+        super().__init__()
+        self.locked_job = locked_job
+        self.flushed = 0
+
+    def flush(self) -> None:
+        self.flushed += 1
+
+
+class CoordinatorSessionFactory:
+    def __init__(self, locked_job) -> None:
+        self.locked_job = locked_job
+        self.sessions = []
+
+    def __call__(self):
+        session = CoordinatorSession(self.locked_job)
+        self.sessions.append(session)
+        return session
+
+
+class CoordinatorJobCrud:
+    def __init__(self, locked_job) -> None:
+        self.locked_job = locked_job
+        self.calls = []
+
+    def get_by_public_id(self, db, *, team_id, public_id, for_update=False):
+        self.calls.append((team_id, public_id, for_update))
+        return self.locked_job
+
+
+class CoordinatorRunService:
+    def __init__(self, released_sequences) -> None:
+        self.released_sequences = list(released_sequences)
+        self.calls = []
+
+    def release_deferred_for_customer(self, db, *, team_id, customer_id):
+        self.calls.append((team_id, customer_id))
+        return self.released_sequences.pop(0) if self.released_sequences else []
+
+
+class CoordinatorRefreshService:
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def run_due_retries(self, *, team_id, limit):
+        self.calls.append((team_id, limit))
+        return {"success": True}
+
+
+class CoordinatorPublicationService:
+    def __init__(self) -> None:
+        self.events = []
+
+    def enqueue_after_commit(self, *, event, scope):
+        self.events.append((event, scope))
+        return SimpleNamespace(
+            request_id=f"business-event-{event.trigger_type}-{event.event_key[:16]}",
+            scheduled=True,
+        )
+
+
+class CoordinatorEventService:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def business_object_changed(self, **kwargs):
+        self.calls.append(kwargs)
+        return SimpleNamespace(
+            event_key=f"enrichment-{kwargs['change_id']}",
+            trigger_type=kwargs["trigger_type"],
+            team_id=kwargs["team_id"],
+            customer_id=kwargs["customer_id"],
+        )
+
+
+def _coordinator(*, job, released_sequences):
+    session_factory = CoordinatorSessionFactory(job)
+    coordinator = CustomerEnrichmentProfileCoordinator(
+        job_crud=CoordinatorJobCrud(job),
+        run_service=CoordinatorRunService(released_sequences),
+        refresh_service=CoordinatorRefreshService(),
+        event_service=CoordinatorEventService(),
+        publication_service=CoordinatorPublicationService(),
+        session_factory=session_factory,
+    )
+    coordinator.session_factory_fake = session_factory
+    return coordinator
+
+
+@pytest.mark.asyncio
+async def test_first_attempt_callback_releases_deferred_profile_runs_and_kicks_due_worker():
+    job = _job(status="RETRY_PENDING")
+    coordinator = _coordinator(job=job, released_sequences=[[31, 32]])
+
+    coordinator.on_first_attempt_finished(job)
+    await asyncio.sleep(0)
+
+    assert coordinator.run_service.calls == [(2, 101)]
+    assert coordinator.refresh_service.calls == [(2, 2)]
+    assert coordinator.session_factory_fake.sessions[0].commits == 1
+    assert coordinator.session_factory_fake.sessions[0].closed is True
+
+
+@pytest.mark.asyncio
+async def test_terminal_success_records_released_run_without_enqueuing_duplicate_refresh():
+    job = _job(status="COMPLETED")
+    job.profile_refresh_request_id = None
+    job.profile_refresh_enqueued_at = None
+    coordinator = _coordinator(job=job, released_sequences=[[41]])
+
+    coordinator.on_first_attempt_finished(job)
+    coordinator.on_terminal_success(job, SimpleNamespace())
+    await asyncio.sleep(0)
+
+    assert job.profile_refresh_request_id == "released:41"
+    assert job.profile_refresh_enqueued_at is not None
+    assert coordinator.publication_service.events == []
+
+
+def test_terminal_success_enqueues_once_and_persists_receipt_when_nothing_is_deferred():
+    job = _job(status="COMPLETED")
+    job.profile_refresh_request_id = None
+    job.profile_refresh_enqueued_at = None
+    coordinator = _coordinator(job=job, released_sequences=[[], []])
+
+    coordinator.on_terminal_success(job, SimpleNamespace())
+    coordinator.on_terminal_success(job, SimpleNamespace())
+
+    assert job.profile_refresh_request_id == (
+        "business-event-customer_business_object_updated-enrichment-initi"
+    )
+    assert job.profile_refresh_enqueued_at is not None
+    assert len(coordinator.publication_service.events) == 1
+    event, scope = coordinator.publication_service.events[0]
+    assert scope == "full"
+    assert event.trigger_type == "customer_business_object_updated"
+    assert coordinator.event_service.calls[0]["payload"] == {
+        "change_origin": "CUSTOMER_INITIAL_ENRICHMENT"
+    }

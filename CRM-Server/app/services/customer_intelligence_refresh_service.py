@@ -73,6 +73,10 @@ from app.services.customer_profile_projection_service import (
     CustomerProfileProjectionService,
     customer_profile_projection_service,
 )
+from app.services.customer_profile_readiness_gate import (
+    CustomerProfileReadinessGate,
+    customer_profile_readiness_gate,
+)
 from app.utils.time import business_now
 
 if TYPE_CHECKING:
@@ -167,6 +171,7 @@ class CustomerIntelligenceRefreshService:
         operation_projector: CustomerIntelligenceOperationProjector | None = None,
         profile_projection_service: CustomerProfileProjectionService | None = None,
         profile_workflow: CustomerProfileProjectionWorkflowRunner | None = None,
+        readiness_gate: CustomerProfileReadinessGate | None = None,
     ) -> None:
         self.profile_workflow = profile_workflow or CustomerProfileProjectionWorkflow()
         self.event_service = event_service or customer_intelligence_event_service
@@ -174,6 +179,7 @@ class CustomerIntelligenceRefreshService:
         self.identity_resolution_service = identity_resolution_service or customer_identity_resolution_service
         self.async_operation_service = async_operation_service or agent_async_operation_service
         self.profile_projection_service = profile_projection_service or customer_profile_projection_service
+        self.readiness_gate = readiness_gate or customer_profile_readiness_gate
         self.operation_projector = operation_projector or CustomerIntelligenceOperationProjector(
             run_service=self.run_service,
             operation_service=self.async_operation_service,
@@ -629,6 +635,16 @@ class CustomerIntelligenceRefreshService:
             max_attempts=settings.CUSTOMER_INTELLIGENCE_MAX_ATTEMPTS,
         )
         try:
+            deferred = self._defer_profile_run_if_needed(run_input, now=business_now())
+            if deferred is not None:
+                return {
+                    "success": True,
+                    "scheduled": True,
+                    "deferred": True,
+                    "request_id": request_id,
+                    "event_key": event.event_key,
+                    "not_before_at": deferred.isoformat(),
+                }
             claim = self._claim_run(
                 run_input,
                 lease_seconds=settings.CUSTOMER_INTELLIGENCE_LEASE_SECONDS,
@@ -820,6 +836,29 @@ class CustomerIntelligenceRefreshService:
             "busy": True,
             "run_status": run_status,
         }
+
+    def _defer_profile_run_if_needed(
+        self,
+        run_input: CustomerIntelligenceRunInput,
+        *,
+        now: datetime,
+    ) -> datetime | None:
+        db = SessionLocal()
+        try:
+            run = self.run_service.ensure_pending(db, run_input)
+            deferred = self.readiness_gate.defer_if_needed(
+                db,
+                event=run_input.event,
+                run=run,
+                now=now,
+            )
+            db.commit()
+            return deferred
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
 
     def _claim_run(
         self,

@@ -171,6 +171,58 @@ class CustomerIntelligenceRunService:
             .first()
         )
 
+    def defer_until(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        run_id: int,
+        not_before_at: datetime,
+    ) -> CustomerIntelligenceRun:
+        run = (
+            db.query(CustomerIntelligenceRun)
+            .filter(
+                CustomerIntelligenceRun.team_id == team_id,
+                CustomerIntelligenceRun.id == run_id,
+            )
+            .populate_existing()
+            .with_for_update()
+            .one()
+        )
+        if str(run.status) in TERMINAL_RUN_STATUSES:
+            return run
+        if run.not_before_at is None or run.not_before_at < not_before_at:
+            run.not_before_at = not_before_at
+            db.flush()
+        return run
+
+    def release_deferred_for_customer(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        customer_id: int,
+    ) -> list[int]:
+        runs = (
+            db.query(CustomerIntelligenceRun)
+            .filter(
+                CustomerIntelligenceRun.team_id == team_id,
+                CustomerIntelligenceRun.customer_id == customer_id,
+                CustomerIntelligenceRun.status.not_in(tuple(TERMINAL_RUN_STATUSES)),
+                CustomerIntelligenceRun.not_before_at.is_not(None),
+            )
+            .order_by(CustomerIntelligenceRun.id.asc())
+            .populate_existing()
+            .with_for_update()
+            .all()
+        )
+        released = [int(run.id) for run in runs]
+        for run in runs:
+            run.not_before_at = None
+        if released:
+            db.flush()
+        return released
+
     def claim_for_execution(
         self,
         db: Session,
@@ -195,6 +247,8 @@ class CustomerIntelligenceRunService:
         status = str(run.status)
         if status in TERMINAL_RUN_STATUSES:
             return CustomerIntelligenceRunClaim(CustomerIntelligenceRunClaimStatus.TERMINAL, run)
+        if run.not_before_at is not None and run.not_before_at > current_time:
+            return CustomerIntelligenceRunClaim(CustomerIntelligenceRunClaimStatus.BUSY, run)
         if status == CustomerIntelligenceRunStatus.RUNNING:
             lease_expires_at = run.lease_expires_at
             if lease_expires_at is not None and lease_expires_at > current_time:
@@ -387,6 +441,10 @@ class CustomerIntelligenceRunService:
     ) -> list[CustomerIntelligenceRun]:
         current_time = now or business_now()
         query = db.query(CustomerIntelligenceRun).filter(
+            or_(
+                CustomerIntelligenceRun.not_before_at.is_(None),
+                CustomerIntelligenceRun.not_before_at <= current_time,
+            ),
             (CustomerIntelligenceRun.status == CustomerIntelligenceRunStatus.PENDING)
             | (
                 (CustomerIntelligenceRun.status == CustomerIntelligenceRunStatus.RETRY_PENDING)

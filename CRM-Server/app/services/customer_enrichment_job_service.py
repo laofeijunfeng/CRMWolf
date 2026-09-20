@@ -642,3 +642,12 @@ def build_customer_enrichment_job_service(
     completion_port: CustomerEnrichmentCompletionPort,
 ) -> CustomerEnrichmentJobService:
     return CustomerEnrichmentJobService(completion_port=completion_port)
+
+
+from app.services.customer_enrichment_profile_coordinator import (  # noqa: E402
+    customer_enrichment_profile_coordinator,
+)
+
+customer_enrichment_job_service = build_customer_enrichment_job_service(
+    customer_enrichment_profile_coordinator
+)
