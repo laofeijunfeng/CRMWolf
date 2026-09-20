@@ -517,32 +517,147 @@ describe('DealJourneyDetailHost', () => {
     expect(wrapper.emitted('refresh')).toHaveLength(1)
   })
 
-  it('edits and resubmits a payment record through EditRecordDialog', async () => {
+  it('reloads authoritative payment record state after a normal edit before refreshing journey and parent', async () => {
+    const journeyRequest = createDeferred<boolean>()
+    journeyRefresh.mockReturnValueOnce(journeyRequest.promise)
     const wrapper = mountHost()
     const plan = paymentPlanFixture()
     const record = plan.payment_records[0]
+    const updatedApproval = approvalFixture({ id: 902, status: 'APPROVED' })
+    const updatedRecord = paymentRecordDetailFixture({
+      id: record.id,
+      actual_amount: 62000,
+      approval_phase: 'approved',
+      confirmation_status: 'CONFIRMED',
+      status: 'APPROVED',
+      approval: updatedApproval,
+      payment_plan: {
+        ...paymentRecordDetailFixture().payment_plan,
+        stage_name: '终验款',
+        status: 'COMPLETED',
+      },
+    })
+    paymentApi.getPaymentRecordDetail.mockResolvedValueOnce(updatedRecord)
+
     wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-payment-plan', plan.id, plan)
     await nextTick()
     wrapper.getComponent(PaymentPlanDetailSheet).vm.$emit('record-click', record)
     await nextTick()
-
     wrapper.getComponent(PaymentRecordDetailSheet).vm.$emit('edit')
     await nextTick()
-    expect(wrapper.getComponent(EditRecordDialog).props()).toMatchObject({ open: true, record })
-    const update: PaymentRecordUpdate = { notes: 'updated' }
+
+    const update: PaymentRecordUpdate = { actual_amount: 62000, notes: 'updated' }
     wrapper.getComponent(EditRecordDialog).vm.$emit('submit', record.id, update)
     await flushPromises()
-    expect(paymentApi.updatePaymentRecord).toHaveBeenCalledWith(record.id, update)
-    expect(submitEntity).not.toHaveBeenCalled()
-    expect(journeyRefresh).toHaveBeenCalledTimes(1)
 
+    expect(paymentApi.updatePaymentRecord).toHaveBeenCalledWith(record.id, update)
+    expect(paymentApi.getPaymentRecordDetail).toHaveBeenCalledWith(record.id)
+    expect(wrapper.getComponent(PaymentRecordDetailSheet).props()).toMatchObject({
+      visible: true,
+      record: updatedRecord,
+      approval: updatedApproval,
+      stageName: '终验款',
+    })
+    expect(wrapper.getComponent(EditRecordDialog).props('open')).toBe(false)
+    expect(toast.success).toHaveBeenCalledWith('回款记录更新成功')
+    expect(journeyRefresh).toHaveBeenCalledOnce()
+    expect(paymentApi.getPaymentRecordDetail.mock.invocationCallOrder[0])
+      .toBeLessThan(journeyRefresh.mock.invocationCallOrder[0])
+    expect(wrapper.emitted('refresh')).toBeUndefined()
+
+    journeyRequest.resolve(true)
+    await flushPromises()
+    expect(wrapper.emitted('refresh')).toHaveLength(1)
+  })
+
+  it('reloads changed approval state after resubmission before refreshing journey and parent', async () => {
+    const journeyRequest = createDeferred<boolean>()
+    journeyRefresh.mockReturnValueOnce(journeyRequest.promise)
+    const wrapper = mountHost()
+    const plan = paymentPlanFixture()
+    const record = plan.payment_records[0]
+    const resubmittedApproval = approvalFixture({ id: 903, status: 'PENDING', current_approver_name: '总经理' })
+    const resubmittedRecord = paymentRecordDetailFixture({
+      id: record.id,
+      actual_amount: 58000,
+      approval_phase: 'pending_review',
+      confirmation_status: 'PENDING',
+      status: 'PENDING',
+      approval: resubmittedApproval,
+      payment_plan: {
+        ...paymentRecordDetailFixture().payment_plan,
+        stage_name: '尾款',
+        status: 'PARTIAL',
+      },
+    })
+    paymentApi.getPaymentRecordDetail.mockResolvedValueOnce(resubmittedRecord)
+
+    wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-payment-plan', plan.id, plan)
+    await nextTick()
+    wrapper.getComponent(PaymentPlanDetailSheet).vm.$emit('record-click', record)
+    await nextTick()
     wrapper.getComponent(PaymentRecordDetailSheet).vm.$emit('resubmit')
     await nextTick()
+
+    const update: PaymentRecordUpdate = { actual_amount: 58000 }
     wrapper.getComponent(EditRecordDialog).vm.$emit('submit', record.id, update)
     await flushPromises()
-    expect(paymentApi.updatePaymentRecord).toHaveBeenCalledTimes(2)
+
+    expect(paymentApi.updatePaymentRecord).toHaveBeenCalledWith(record.id, update)
     expect(submitEntity).toHaveBeenCalledWith('PAYMENT', record.id)
-    expect(journeyRefresh).toHaveBeenCalledTimes(2)
+    expect(paymentApi.getPaymentRecordDetail).toHaveBeenCalledWith(record.id)
+    expect(wrapper.getComponent(PaymentRecordDetailSheet).props()).toMatchObject({
+      visible: true,
+      record: resubmittedRecord,
+      approval: resubmittedApproval,
+      stageName: '尾款',
+    })
+    expect(wrapper.getComponent(EditRecordDialog).props('open')).toBe(false)
+    expect(toast.success).toHaveBeenCalledWith('已重新提交审批')
+    expect(journeyRefresh).toHaveBeenCalledOnce()
+    expect(submitEntity.mock.invocationCallOrder[0])
+      .toBeLessThan(paymentApi.getPaymentRecordDetail.mock.invocationCallOrder[0])
+    expect(paymentApi.getPaymentRecordDetail.mock.invocationCallOrder[0])
+      .toBeLessThan(journeyRefresh.mock.invocationCallOrder[0])
+    expect(wrapper.emitted('refresh')).toBeUndefined()
+
+    journeyRequest.resolve(true)
+    await flushPromises()
+    expect(wrapper.emitted('refresh')).toHaveLength(1)
+  })
+
+  it('keeps the open payment record when post-edit detail reload fails and still refreshes journey and parent', async () => {
+    const error = new Error('detail refresh failed after edit')
+    paymentApi.getPaymentRecordDetail.mockRejectedValueOnce(error)
+    const journeyRequest = createDeferred<boolean>()
+    journeyRefresh.mockReturnValueOnce(journeyRequest.promise)
+    const wrapper = mountHost()
+    const plan = paymentPlanFixture()
+    const record = plan.payment_records[0]
+
+    wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-payment-plan', plan.id, plan)
+    await nextTick()
+    wrapper.getComponent(PaymentPlanDetailSheet).vm.$emit('record-click', record)
+    await nextTick()
+    wrapper.getComponent(PaymentRecordDetailSheet).vm.$emit('edit')
+    await nextTick()
+    wrapper.getComponent(EditRecordDialog).vm.$emit('submit', record.id, { notes: 'updated' })
+    await flushPromises()
+
+    expect(handleApiError).toHaveBeenCalledWith(error, '刷新回款记录详情')
+    expect(wrapper.getComponent(PaymentRecordDetailSheet).props()).toMatchObject({
+      visible: true,
+      record,
+      stageName: plan.stage_name,
+    })
+    expect(wrapper.getComponent(DealJourneyDetailContent).exists()).toBe(true)
+    expect(wrapper.getComponent(EditRecordDialog).props('open')).toBe(false)
+    expect(journeyRefresh).toHaveBeenCalledOnce()
+    expect(wrapper.emitted('refresh')).toBeUndefined()
+
+    journeyRequest.resolve(true)
+    await flushPromises()
+    expect(wrapper.emitted('refresh')).toHaveLength(1)
   })
 
   it('preserves the host and does not emit refresh when content refresh rejects', async () => {

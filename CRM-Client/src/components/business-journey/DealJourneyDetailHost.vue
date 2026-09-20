@@ -276,7 +276,7 @@ async function handleRecordEditSubmit(recordId: number, payload: PaymentRecordUp
     }
     recordEditDialogOpen.value = false
     isRecordResubmitMode.value = false
-    await refreshJourneyAfterChildAction()
+    await handlePaymentRecordRefresh()
   } catch (error) {
     handleApiError(error, isRecordResubmitMode.value ? '重新提交审批' : '更新回款记录')
   } finally {
