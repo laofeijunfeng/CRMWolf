@@ -27,17 +27,27 @@ interface EditableSort {
 const props = withDefaults(defineProps<{
   fields: ListSortField[]
   modelValue?: ListSortCondition[]
+  open?: boolean | null
 }>(), {
-  modelValue: () => []
+  modelValue: () => [],
+  open: null
 })
 
 const emit = defineEmits<{
   'update:modelValue': [value: ListSortCondition[]]
+  'update:open': [value: boolean]
   apply: [value: ListSortCondition[]]
   reset: []
 }>()
 
-const open = ref(false)
+const internalOpen = ref(false)
+const open = computed({
+  get: () => props.open ?? internalOpen.value,
+  set: (value: boolean) => {
+    internalOpen.value = value
+    emit('update:open', value)
+  }
+})
 const localSorts = ref<EditableSort[]>([])
 
 const firstField = computed(() => props.fields[0])

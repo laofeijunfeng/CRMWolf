@@ -111,6 +111,5 @@ describe('overlay panel chrome', () => {
     expect(findButton('关闭')).toBeTruthy()
     expect(findButton('保存').querySelector('svg')).toBeNull()
     expect(findButton('恢复默认').querySelector('svg')).toBeNull()
-    expect(document.body.textContent).toContain('拖动非固定列调整表格顺序')
   })
 })

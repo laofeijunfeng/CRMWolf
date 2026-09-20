@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useMediaQuery } from '@vueuse/core'
 import { Settings2 } from 'lucide-vue-next'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import TableToolbarButton from './TableToolbarButton.vue'
@@ -31,16 +32,54 @@ const emit = defineEmits<{
   'column-config-reset': []
 }>()
 
+const isCompactToolbar = useMediaQuery('(width < 768px)')
+const moreSettingsOpen = ref(false)
+const sortOpen = ref(false)
+const columnConfigOpen = ref(false)
+const desktopToolsTarget = ref<HTMLElement | null>(null)
+const compactToolsTarget = ref<HTMLElement | null>(null)
+const parkedToolsTarget = ref<HTMLElement | null>(null)
+
+const childToolOpen = computed(() => sortOpen.value || columnConfigOpen.value)
+const toolsTarget = computed(() => {
+  if (!isCompactToolbar.value) return desktopToolsTarget.value
+  if (moreSettingsOpen.value && compactToolsTarget.value !== null) return compactToolsTarget.value
+  return parkedToolsTarget.value
+})
+
+function handleMoreSettingsOpenChange(open: boolean): void {
+  moreSettingsOpen.value = open
+  if (!open && isCompactToolbar.value) {
+    sortOpen.value = false
+    columnConfigOpen.value = false
+  }
+}
+
 const advancedToolsAriaLabel = computed(() => {
   const parts: string[] = ['更多列表设置']
   if (props.sorts.length > 0) parts.push(`排序 ${props.sorts.length} 项`)
   if (props.columnConfigActiveCount > 0) parts.push(`已隐藏 ${props.columnConfigActiveCount} 列`)
   return parts.join('，')
 })
+
+watch(isCompactToolbar, (compact) => {
+  moreSettingsOpen.value = compact && childToolOpen.value
+})
 </script>
 
 <template>
-  <Popover>
+  <div
+    ref="desktopToolsTarget"
+    class="list-advanced-tools-desktop"
+    :class="{ 'is-hidden': isCompactToolbar }"
+  />
+  <div ref="parkedToolsTarget" class="list-advanced-tools-parking" aria-hidden="true" />
+
+  <Popover
+    v-if="isCompactToolbar"
+    :open="moreSettingsOpen"
+    @update:open="handleMoreSettingsOpenChange"
+  >
     <PopoverTrigger as-child>
       <TableToolbarButton
         :active="sorts.length > 0 || columnConfigActive || columnConfigActiveCount > 0"
@@ -54,36 +93,49 @@ const advancedToolsAriaLabel = computed(() => {
     <PopoverContent align="start" class="list-advanced-tools-popover">
       <div class="list-advanced-tools-panel">
         <div class="list-advanced-tools-heading">列表设置</div>
-        <div class="list-advanced-tools-items">
-          <ListSortPopover
-            v-if="sortFields.length > 0"
-            :model-value="sorts"
-            :fields="sortFields"
-            @update:model-value="emit('update:sorts', $event)"
-            @apply="emit('sort-apply', $event)"
-            @reset="emit('sort-reset')"
-          />
-          <ColumnConfigPopover
-            v-if="columnConfigEnabled"
-            :columns="columns"
-            :active="columnConfigActive"
-            :active-count="columnConfigActiveCount"
-            :scope="columnConfigScope"
-            :scope-editable="columnPreferenceMode === 'default'"
-            :loading="columnConfigLoading"
-            :saving="columnConfigSaving"
-            @change="emit('column-config-change', $event)"
-            @save="emit('column-config-save', $event)"
-            @reset="emit('column-config-reset')"
-          />
-        </div>
+        <div ref="compactToolsTarget" class="list-advanced-tools-items" />
       </div>
     </PopoverContent>
   </Popover>
+
+  <Teleport v-if="toolsTarget !== null" :to="toolsTarget">
+    <ListSortPopover
+      v-if="sortFields.length > 0"
+      v-model:open="sortOpen"
+      :model-value="sorts"
+      :fields="sortFields"
+      @update:model-value="emit('update:sorts', $event)"
+      @apply="emit('sort-apply', $event)"
+      @reset="emit('sort-reset')"
+    />
+    <ColumnConfigPopover
+      v-if="columnConfigEnabled"
+      v-model:open="columnConfigOpen"
+      :columns="columns"
+      :active="columnConfigActive"
+      :active-count="columnConfigActiveCount"
+      :scope="columnConfigScope"
+      :scope-editable="columnPreferenceMode === 'default'"
+      :loading="columnConfigLoading"
+      :saving="columnConfigSaving"
+      @change="emit('column-config-change', $event)"
+      @save="emit('column-config-save', $event)"
+      @reset="emit('column-config-reset')"
+    />
+  </Teleport>
 </template>
 
 <style scoped lang="scss">
 @use '@/styles/variables-v2.scss' as *;
+
+.list-advanced-tools-desktop {
+  display: contents;
+}
+
+.list-advanced-tools-desktop.is-hidden,
+.list-advanced-tools-parking {
+  display: none;
+}
 
 .list-advanced-tools-popover {
   width: auto;

@@ -17,22 +17,32 @@ const props = withDefaults(defineProps<{
   loading?: boolean
   scope?: ViewPreferenceScope
   scopeEditable?: boolean
+  open?: boolean | null
 }>(), {
   active: false,
   activeCount: 0,
   saving: false,
   loading: false,
   scope: 'personal',
-  scopeEditable: true
+  scopeEditable: true,
+  open: null
 })
 
 const emit = defineEmits<{
+  'update:open': [value: boolean]
   change: [value: ColumnConfigOption[]]
   save: [scope: ViewPreferenceScope]
   reset: [scope: ViewPreferenceScope]
 }>()
 
-const open = ref(false)
+const internalOpen = ref(false)
+const open = computed({
+  get: () => props.open ?? internalOpen.value,
+  set: (value: boolean) => {
+    internalOpen.value = value
+    emit('update:open', value)
+  }
+})
 const localColumns = ref<ColumnConfigOption[]>([])
 const dragKey = ref<string | null>(null)
 const selectedScope = ref<ViewPreferenceScope>(props.scope)
