@@ -29,6 +29,9 @@ from app.services.customer_ai_confirmed_write_service import customer_ai_confirm
 # 新增功能（AI 创建客户）
 from app.schemas.customer_ai_create import CustomerAICreateParseRequest, CustomerAICreateRequest as CustomerCreateAIRequest
 from app.services.ai_parser.factory import EntityAIParserFactory
+from app.services.customer_lifecycle_post_commit_coordinator import (
+    customer_lifecycle_post_commit_coordinator,
+)
 
 
 router = APIRouter(prefix="/v1/customers/ai", tags=["AI 客户活动"])
@@ -192,8 +195,19 @@ async def create_customer_from_ai(
             user_id=str(current_user.id),
             team_id=team_id
         )
+        try:
+            lifecycle_work = customer_lifecycle_post_commit_coordinator.enqueue_after_commit(
+                customer=customer,
+                actor_id=str(current_user.id),
+                trigger_type="customer_created",
+            )
+            lifecycle_warnings = customer_lifecycle_post_commit_coordinator.kick(lifecycle_work)
+            if lifecycle_warnings:
+                logger.warning("AI 创建客户后台任务已有恢复凭据: %s", "; ".join(lifecycle_warnings))
+        except Exception:
+            logger.exception("AI 创建客户后的后台任务唤醒失败")
         
-        # 执行创建后的额外操作（触发档案生成 + 创建客户活动）
+        # 执行创建后的额外操作（仅创建客户活动）
         await parser.post_create_actions(
             db=db,
             entity=customer,

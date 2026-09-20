@@ -896,10 +896,12 @@ def _created_customer() -> SimpleNamespace:
 
 
 @pytest.mark.asyncio
-async def test_create_customer_commits_customer_and_contact_as_one_transaction(monkeypatch):
+async def test_create_customer_prepares_before_commit_and_ignores_kick_failure(monkeypatch):
     customer = _created_customer()
-    calls = SimpleNamespace(customer=[], contact=[], refreshes=[], notifications=[])
+    calls = SimpleNamespace(customer=[], contact=[], lifecycle=[], notifications=[])
+    order: list[str] = []
     db = MagicMock()
+    db.commit.side_effect = lambda: order.append("commit")
 
     def create_customer(**kwargs):
         calls.customer.append(kwargs)
@@ -909,15 +911,26 @@ async def test_create_customer_commits_customer_and_contact_as_one_transaction(m
         calls.contact.append(kwargs)
         return SimpleNamespace(id=41, name="李华")
 
+    def prepare(db_session, **kwargs):
+        assert db_session is db
+        order.append("prepare")
+        calls.lifecycle.append(kwargs)
+        return SimpleNamespace(enrichment_request=None, profile_request=None, warnings=())
+
     _allow_edit_permission(monkeypatch, customer)
     monkeypatch.setattr(customers_api.customer_crud, "get_by_name", lambda *args, **kwargs: None)
     monkeypatch.setattr(customers_api.lead_crud, "get_by_name", lambda *args, **kwargs: None)
     monkeypatch.setattr(customers_api.customer_crud, "create", create_customer)
     monkeypatch.setattr(customers_api.contact_crud, "create", create_contact)
     monkeypatch.setattr(
-        customers_api.customer_business_object_intelligence_service,
-        "enqueue_object_change_refresh_after_commit",
-        lambda **kwargs: calls.refreshes.append(kwargs),
+        customers_api.customer_lifecycle_post_commit_coordinator,
+        "prepare_in_transaction",
+        prepare,
+    )
+    monkeypatch.setattr(
+        customers_api.customer_lifecycle_post_commit_coordinator,
+        "kick",
+        lambda work: (_ for _ in ()).throw(RuntimeError("kick down")),
     )
     monkeypatch.setattr(
         customers_api.outbound_notification_job_service,
@@ -953,10 +966,15 @@ async def test_create_customer_commits_customer_and_contact_as_one_transaction(m
     assert calls.contact[0]["commit"] is False
     assert calls.customer[0]["obj_in"].status == 1
     assert calls.customer[0]["obj_in"].license_type == "TRIAL"
-    db.commit.assert_called_once()
+    assert order == ["prepare", "commit"]
+    assert calls.lifecycle == [
+        {
+            "customer": customer,
+            "actor_id": "9",
+            "trigger_type": "customer_created",
+        }
+    ]
     assert calls.notifications == []
-    assert calls.refreshes[0]["scope"] == "full"
-
 
 @pytest.mark.asyncio
 async def test_create_customer_rolls_back_when_contact_write_fails(monkeypatch):

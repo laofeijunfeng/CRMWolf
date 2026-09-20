@@ -108,6 +108,9 @@ from app.services.customer_business_object_intelligence_service import (
     CustomerBusinessObjectSourceType,
     customer_business_object_intelligence_service,
 )
+from app.services.customer_lifecycle_post_commit_coordinator import (
+    customer_lifecycle_post_commit_coordinator,
+)
 from app.services.customer_identity_resolution_application_service import (
     customer_identity_resolution_application_service,
 )
@@ -598,14 +601,17 @@ async def convert_from_lead(
             db.rollback()
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="客户或联系人数据已被其他操作占用") from exc
         try:
-            customer_business_object_intelligence_service.enqueue_customer_lifecycle_refresh_after_commit(
+            lifecycle_work = customer_lifecycle_post_commit_coordinator.enqueue_after_commit(
                 customer=customer,
                 actor_id=str(current_user.id),
                 trigger_type="customer_converted_from_lead",
                 source_lead_id=source_lead.id,
             )
+            lifecycle_warnings = customer_lifecycle_post_commit_coordinator.kick(lifecycle_work)
+            if lifecycle_warnings:
+                logger.warning("线索转客户后台任务已有恢复凭据: %s", "; ".join(lifecycle_warnings))
         except Exception:
-            logger.exception("线索转客户后的客户智能刷新调度失败")
+            logger.exception("线索转客户后的后台任务唤醒失败")
         outbound_notification_job_service.queue_committed(
             db,
             team_id=team_id,
@@ -722,6 +728,13 @@ async def convert_from_lead(
             commit=False,
         )
         db.flush()
+        lifecycle_work = customer_lifecycle_post_commit_coordinator.prepare_in_transaction(
+            db,
+            customer=customer,
+            actor_id=str(current_user.id),
+            trigger_type="customer_converted_from_lead",
+            source_lead_id=source_lead.id,
+        )
 
         result_data = {
             "lead_id": source_lead.public_id,
@@ -876,20 +889,20 @@ async def convert_from_lead(
             ) from exc
         raise
 
-    # Notifications and intelligence refresh are post-commit side effects. A
-    # failure here must not turn a committed customer conversion into a false
-    # failure response.
+    # Notifications and worker kicks are post-commit side effects. A failure
+    # here must not turn a committed customer conversion into a false failure.
     warnings: list[str] = []
     try:
-        db.refresh(customer)
-        customer_business_object_intelligence_service.enqueue_customer_lifecycle_refresh_after_commit(
-            customer=customer,
-            actor_id=str(current_user.id),
-            trigger_type="customer_converted_from_lead",
-            source_lead_id=source_lead.id,
-        )
+        lifecycle_warnings = customer_lifecycle_post_commit_coordinator.kick(lifecycle_work)
+        if lifecycle_warnings:
+            logger.warning(
+                "线索转客户后台任务已有恢复凭据: operation_id=%s warnings=%s",
+                execution.operation_id,
+                "; ".join(lifecycle_warnings),
+            )
+            warnings.append("客户智能档案将在后台补偿整理")
     except Exception:
-        logger.exception("线索转客户后的客户智能刷新调度失败", extra={"operation_id": execution.operation_id})
+        logger.exception("线索转客户后的后台任务唤醒失败", extra={"operation_id": execution.operation_id})
         warnings.append("客户智能档案将在后台补偿整理")
     queued = outbound_notification_job_service.queue_committed(
         db,
@@ -1325,6 +1338,12 @@ async def create_customer(
                 is_primary=True,
                 commit=False,
             )
+        lifecycle_work = customer_lifecycle_post_commit_coordinator.prepare_in_transaction(
+            db,
+            customer=new_customer,
+            actor_id=str(current_user.id),
+            trigger_type="customer_created",
+        )
         db.commit()
         db.refresh(new_customer)
     except AcquisitionSourceError as exc:
@@ -1340,16 +1359,12 @@ async def create_customer(
         db.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="客户或联系人数据已被其他操作占用") from exc
 
-    # 客户创建完成后，通过统一业务对象事件边界进入档案投影流水线。
-    # 这里使用 full scope，确保企业基础信息、旅程和历史上下文一次性建立。
-    customer_business_object_intelligence_service.enqueue_object_change_refresh_after_commit(
-        source_type="customer",
-        business_object=new_customer,
-        change_type="created",
-        actor_id=str(current_user.id),
-        summary="客户已创建，生成客户档案",
-        scope="full",
-    )
+    try:
+        lifecycle_warnings = customer_lifecycle_post_commit_coordinator.kick(lifecycle_work)
+        if lifecycle_warnings:
+            logger.warning("客户创建后台任务已有恢复凭据: %s", "; ".join(lifecycle_warnings))
+    except Exception:
+        logger.exception("客户创建后的后台任务唤醒失败")
 
     return _customer_response(db, new_customer)
 

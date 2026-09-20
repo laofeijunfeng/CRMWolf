@@ -19,7 +19,6 @@ from app.services.acquisition_source_service import (
 from app.services.ai_parser.base_parser import EntityAIParserBase
 from app.services.ai_parser.constants import COMPANY_SCALE_ENUM_MAP
 from app.services.customer_ai_confirmed_write_service import customer_ai_confirmed_write_service
-from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
 from app.utils.time import business_now
 
 
@@ -316,22 +315,10 @@ class CustomerAIParser(EntityAIParserBase):
         user_id: str,
         team_id: int
     ) -> None:
-        """
-        创建客户后的额外操作：
-        1. 触发档案生成（异步）
-        2. 创建客户活动（如果有）
-        """
+        """创建客户后的额外操作：创建客户活动（如果有）。"""
         customer = entity
 
-        # 1. 触发客户智能档案生成（异步，进入 LangGraph 统一编排）
-        await customer_intelligence_refresh_service.trigger_customer_created_refresh(
-            db,
-            team_id=team_id,
-            customer_id=customer.id,
-            actor_id=user_id,
-        )
-
-        # 2. 创建客户活动（如果有）
+        # 创建客户活动（如果有）
         follow_up_info = parsed_data.get("follow_up_info")
         if follow_up_info and (follow_up_info.get("content") or follow_up_info.get("next_action")):
             from app.services.customer_activity_kinds import CustomerActivityKind
