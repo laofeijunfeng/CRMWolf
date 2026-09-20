@@ -104,7 +104,8 @@ const journeyPermissionCodes = [
   'customer:view:own',
   'opportunity:view:all',
   'opportunity:view:own',
-]
+] as const
+const firstJourneyPermissionCode = journeyPermissionCodes[0]
 
 const dashboardPermissionCode = 'sales_dashboard:view:own'
 
@@ -122,7 +123,7 @@ describe('AppSidebar business navigation', () => {
   })
 
   it('groups sales work, transactions, finance, and dashboards in the required order', () => {
-    const wrapper = mountSidebar('ready', [journeyPermissionCodes[0], dashboardPermissionCode])
+    const wrapper = mountSidebar('ready', [firstJourneyPermissionCode, dashboardPermissionCode])
     wrappers.push(wrapper)
 
     expect(groupLabels(wrapper)).toEqual(['销售工作', '交易管理', '财务管理', '数据看板'])
@@ -157,7 +158,7 @@ describe('AppSidebar business navigation', () => {
     expect(items(wrapper, '销售工作')).toContain('业务旅程')
   })
   it('hides business journeys when permission loading fails', () => {
-    const wrapper = mountSidebar('error', [journeyPermissionCodes[0]])
+    const wrapper = mountSidebar('error', [firstJourneyPermissionCode])
     wrappers.push(wrapper)
 
     expect(items(wrapper, '销售工作')).not.toContain('业务旅程')
