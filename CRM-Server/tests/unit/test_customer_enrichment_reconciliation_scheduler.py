@@ -44,6 +44,7 @@ class FakeService:
             refreshes_repaired=0,
             errors=0,
             next_customer_id=11,
+            next_orphan_job_id=17,
             dry_run=bool(kwargs.get("dry_run")),
         )
 
@@ -62,13 +63,24 @@ async def test_scheduler_reconcile_once_commits_and_returns_cursor(monkeypatch):
         session_factory=lambda: db,
     )
 
-    result = await scheduler.reconcile_once(limit=7, after_customer_id=3)
+    result = await scheduler.reconcile_once(
+        limit=7,
+        after_customer_id=3,
+        after_orphan_job_id=5,
+    )
 
     assert result["jobs_created"] == 1
     assert result["gates_cancelled"] == 2
     assert result["next_customer_id"] == 11
+    assert result["next_orphan_job_id"] == 17
     assert service.calls == [
-        {"team_id": None, "limit": 7, "after_customer_id": 3, "dry_run": False}
+        {
+            "team_id": None,
+            "limit": 7,
+            "after_customer_id": 3,
+            "after_orphan_job_id": 5,
+            "dry_run": False,
+        }
     ]
     assert db.committed is True
     assert db.rolled_back is False
@@ -93,7 +105,13 @@ async def test_scheduler_dry_run_does_not_commit(monkeypatch):
 
     assert result["dry_run"] is True
     assert service.calls == [
-        {"team_id": 2, "limit": 50, "after_customer_id": None, "dry_run": True}
+        {
+            "team_id": 2,
+            "limit": 50,
+            "after_customer_id": None,
+            "after_orphan_job_id": None,
+            "dry_run": True,
+        }
     ]
     assert db.committed is False
     assert db.rolled_back is False
@@ -121,6 +139,71 @@ async def test_scheduler_rolls_back_and_closes_on_failure(monkeypatch):
     assert db.rolled_back is True
     assert db.closed is True
 
+
+
+@pytest.mark.asyncio
+async def test_scheduler_advances_and_resets_customer_and_orphan_cursors_independently(monkeypatch):
+    scheduler = module.CustomerEnrichmentReconciliationScheduler(
+        reconciliation_service=FakeService(),
+        session_factory=FakeDB,
+    )
+    scheduler._running = True
+    scheduler._after_customer_id = 3
+    scheduler._after_orphan_job_id = 5
+    results = iter(
+        [
+            {
+                "jobs_created": 0,
+                "gates_released": 0,
+                "gates_cancelled": 0,
+                "refreshes_repaired": 0,
+                "errors": 0,
+                "next_customer_id": 11,
+                "next_orphan_job_id": None,
+            },
+            {
+                "jobs_created": 0,
+                "gates_released": 0,
+                "gates_cancelled": 0,
+                "refreshes_repaired": 0,
+                "errors": 0,
+                "next_customer_id": None,
+                "next_orphan_job_id": 17,
+            },
+        ]
+    )
+    calls = []
+
+    async def reconcile_once(**kwargs):
+        calls.append(kwargs)
+        result = next(results)
+        if len(calls) == 2:
+            scheduler._running = False
+        return result
+
+    monkeypatch.setattr(scheduler, "reconcile_once", reconcile_once)
+    monkeypatch.setattr(
+        module,
+        "get_settings",
+        lambda: SimpleNamespace(
+            CUSTOMER_INITIAL_ENRICHMENT_RECONCILIATION_INTERVAL_SECONDS=60,
+            CUSTOMER_INITIAL_ENRICHMENT_RECONCILIATION_BATCH_SIZE=50,
+        ),
+    )
+    monkeypatch.setattr(module.asyncio, "sleep", lambda seconds: _noop())
+
+    await scheduler._run_scheduler()
+
+    assert calls == [
+        {"limit": 50, "after_customer_id": 3, "after_orphan_job_id": 5},
+        {"limit": 50, "after_customer_id": 11, "after_orphan_job_id": None},
+    ]
+    assert scheduler._after_customer_id is None
+    assert scheduler._after_orphan_job_id == 17
+
+
+async def _noop():
+    return None
 
 def test_scheduler_start_and_stop_respect_configuration(monkeypatch):
     created = []

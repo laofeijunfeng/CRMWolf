@@ -1054,10 +1054,12 @@ def test_requeue_resets_same_job_commits_then_kicks(monkeypatch):
 
 
 def test_reconciliation_endpoint_returns_counts_and_routes_require_edit_all(monkeypatch):
-    monkeypatch.setattr(
-        customer_enrichment_api.customer_enrichment_reconciliation_service,
-        "reconcile_once",
-        lambda db, **kwargs: CustomerEnrichmentReconciliationResult(
+    captured = {}
+
+    def reconcile_once(db, **kwargs):
+        del db
+        captured.update(kwargs)
+        return CustomerEnrichmentReconciliationResult(
             scanned=4,
             jobs_created=1,
             gates_released=1,
@@ -1065,13 +1067,22 @@ def test_reconciliation_endpoint_returns_counts_and_routes_require_edit_all(monk
             refreshes_repaired=1,
             errors=1,
             next_customer_id=22,
+            next_orphan_job_id=44,
             dry_run=kwargs["dry_run"],
-        ),
+        )
+
+    monkeypatch.setattr(
+        customer_enrichment_api.customer_enrichment_reconciliation_service,
+        "reconcile_once",
+        reconcile_once,
     )
     db = MagicMock()
     response = customer_enrichment_api.run_enrichment_reconciliation(
         customer_enrichment_api.CustomerEnrichmentReconciliationRequest(
-            limit=10, after_customer_id=3, dry_run=True
+            limit=10,
+            after_customer_id=3,
+            after_orphan_job_id=4,
+            dry_run=True,
         ),
         team_id=2,
         current_user=SimpleNamespace(id=9),
@@ -1086,8 +1097,16 @@ def test_reconciliation_endpoint_returns_counts_and_routes_require_edit_all(monk
         "errors": 1,
         "next_customer_id": 22,
         "dry_run": True,
+        "next_orphan_job_id": 44,
     }
     assert db.commit.called is False
+    assert captured == {
+        "team_id": 2,
+        "limit": 10,
+        "after_customer_id": 3,
+        "after_orphan_job_id": 4,
+        "dry_run": True,
+    }
 
     permission_dependencies = [
         dependency.call

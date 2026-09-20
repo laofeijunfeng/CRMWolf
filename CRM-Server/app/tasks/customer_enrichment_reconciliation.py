@@ -36,6 +36,7 @@ class CustomerEnrichmentReconciliationScheduler:
         self._running = False
         self._task: asyncio.Task[None] | None = None
         self._after_customer_id: int | None = None
+        self._after_orphan_job_id: int | None = None
 
     async def reconcile_once(
         self,
@@ -43,6 +44,7 @@ class CustomerEnrichmentReconciliationScheduler:
         team_id: int | None = None,
         limit: int | None = None,
         after_customer_id: int | None = None,
+        after_orphan_job_id: int | None = None,
         dry_run: bool = False,
     ) -> dict[str, object]:
         settings = get_settings()
@@ -58,6 +60,7 @@ class CustomerEnrichmentReconciliationScheduler:
                 team_id=team_id,
                 limit=max(1, batch_size),
                 after_customer_id=after_customer_id,
+                after_orphan_job_id=after_orphan_job_id,
                 dry_run=dry_run,
             )
             if not dry_run:
@@ -84,10 +87,15 @@ class CustomerEnrichmentReconciliationScheduler:
                 result = await self.reconcile_once(
                     limit=batch_size,
                     after_customer_id=self._after_customer_id,
+                    after_orphan_job_id=self._after_orphan_job_id,
                 )
                 next_customer_id = result.get("next_customer_id")
                 self._after_customer_id = (
                     int(next_customer_id) if next_customer_id is not None else None
+                )
+                next_orphan_job_id = result.get("next_orphan_job_id")
+                self._after_orphan_job_id = (
+                    int(next_orphan_job_id) if next_orphan_job_id is not None else None
                 )
                 if any(
                     int(result[key])

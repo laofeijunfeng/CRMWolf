@@ -6,7 +6,7 @@ import logging
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import exists
+from sqlalchemy import exists, func
 
 from app.core.config import get_settings
 from app.crud.customer_enrichment_job import CustomerEnrichmentJobCRUD, customer_enrichment_job_crud
@@ -55,6 +55,7 @@ class CustomerEnrichmentReconciliationResult:
     refreshes_repaired: int
     errors: int
     next_customer_id: int | None
+    next_orphan_job_id: int | None
     dry_run: bool
 
     def to_dict(self) -> dict[str, Any]:
@@ -86,6 +87,7 @@ class CustomerEnrichmentReconciliationService:
         team_id: int | None = None,
         limit: int,
         after_customer_id: int | None = None,
+        after_orphan_job_id: int | None = None,
         dry_run: bool = False,
     ) -> CustomerEnrichmentReconciliationResult:
         page_size = max(1, int(limit))
@@ -197,8 +199,12 @@ class CustomerEnrichmentReconciliationService:
                 )
 
 
-        orphan_query = (
-            db.query(CustomerEnrichmentJob.team_id, CustomerEnrichmentJob.customer_id)
+        orphan_identities = (
+            db.query(
+                CustomerEnrichmentJob.team_id.label("team_id"),
+                CustomerEnrichmentJob.customer_id.label("customer_id"),
+                func.min(CustomerEnrichmentJob.id).label("min_job_id"),
+            )
             .filter(
                 ~exists().where(
                     Customer.id == CustomerEnrichmentJob.customer_id,
@@ -211,18 +217,26 @@ class CustomerEnrichmentReconciliationService:
                     CustomerIntelligenceRun.not_before_at.is_not(None),
                 ),
             )
-            .distinct()
         )
         if team_id is not None:
-            orphan_query = orphan_query.filter(CustomerEnrichmentJob.team_id == team_id)
+            orphan_identities = orphan_identities.filter(CustomerEnrichmentJob.team_id == team_id)
+        orphan_page = orphan_identities.group_by(
+            CustomerEnrichmentJob.team_id,
+            CustomerEnrichmentJob.customer_id,
+        ).subquery()
+        orphan_query = db.query(orphan_page)
+        if after_orphan_job_id is not None:
+            orphan_query = orphan_query.filter(orphan_page.c.min_job_id > after_orphan_job_id)
         orphan_rows = (
             orphan_query.order_by(
-                CustomerEnrichmentJob.team_id.asc(),
-                CustomerEnrichmentJob.customer_id.asc(),
+                orphan_page.c.min_job_id.asc(),
+                orphan_page.c.team_id.asc(),
+                orphan_page.c.customer_id.asc(),
             )
             .limit(page_size)
             .all()
         )
+        next_orphan_job_id = int(orphan_rows[-1].min_job_id) if orphan_rows else None
         for orphan in orphan_rows:
             try:
                 with db.begin_nested():
@@ -256,6 +270,7 @@ class CustomerEnrichmentReconciliationService:
             gates_cancelled=gates_cancelled,
             errors=errors,
             next_customer_id=int(customers[-1].id) if customers else None,
+            next_orphan_job_id=next_orphan_job_id,
             dry_run=dry_run,
         )
 

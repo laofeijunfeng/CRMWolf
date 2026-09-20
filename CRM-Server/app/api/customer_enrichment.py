@@ -256,6 +256,7 @@ def run_enrichment_reconciliation(
         result = customer_enrichment_reconciliation_service.reconcile_once(
             db,
             team_id=team_id,
+            after_orphan_job_id=request.after_orphan_job_id,
             limit=request.limit,
             after_customer_id=request.after_customer_id,
             dry_run=request.dry_run,

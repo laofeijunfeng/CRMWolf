@@ -515,7 +515,7 @@ AND 不存在 (team_id, customer_id, plan_version) job
 - profile run 被 gate 延后但 first attempt 已结束或 gate deadline 已到；
 - `not_before_at` 已到期但 run 未被 worker 领取。
 
-对账结果把正常 gate 释放与删除客户取消分开：`gates_released` 只统计 release，`gates_cancelled` 按被取消 run 数统计。孤儿扫描只选择仍有 deferred nonterminal run 的 identity，避免干净孤儿占用 limit，并在每个 orphan savepoint 中隔离错误。
+对账结果把正常 gate 释放与删除客户取消分开：`gates_released` 只统计 release，`gates_cancelled` 按被取消 run 数统计。孤儿扫描只选择仍有 deferred nonterminal run 的 identity，避免干净孤儿占用 limit，并在每个 orphan savepoint 中隔离错误。普通客户和 orphan 使用独立 cursor：orphan identity 以该 `(team_id, customer_id)` 的最小 enrichment job id 为稳定 anchor，按 `min_job_id` 分页并返回 `next_orphan_job_id`；失败 identity 也推进 cursor。调用方分别携带 `after_customer_id` / `after_orphan_job_id`，独立迭代，直到两个 next cursor 都为 null。
 
 重复 ensure 必须由唯一键变成 no-op。提供 diagnostics 与 EXHAUSTED requeue 服务 / 管理端 API，但不需要业务用户确认 UI。
 

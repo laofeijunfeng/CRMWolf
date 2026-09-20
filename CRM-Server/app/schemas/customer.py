@@ -649,6 +649,7 @@ class CustomerEnrichmentReconciliationRequest(BaseModel):
 
     limit: int = Field(50, ge=1, le=500)
     after_customer_id: Optional[int] = Field(None, gt=0)
+    after_orphan_job_id: Optional[int] = Field(None, gt=0)
     dry_run: bool = False
 
 
@@ -662,6 +663,7 @@ class CustomerEnrichmentReconciliationResponse(BaseModel):
     refreshes_repaired: int
     errors: int
     next_customer_id: Optional[int] = None
+    next_orphan_job_id: Optional[int] = None
     dry_run: bool
 
 class StatisticsResponse(BaseModel):

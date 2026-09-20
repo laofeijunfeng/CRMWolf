@@ -694,3 +694,78 @@ def test_clean_orphan_does_not_block_later_dirty_orphan_under_limit(db_session):
 
     assert result.gates_cancelled == 1
     assert dirty.status == CustomerIntelligenceRunStatus.CANCELLED
+
+
+def test_orphan_dry_run_pages_without_repeats(db_session):
+    jobs = []
+    for customer_id in (910, 911, 912):
+        jobs.append(_orphan_job(db_session, team_id=2, customer_id=customer_id))
+        _orphan_profile_run(db_session, team_id=2, customer_id=customer_id, sequence=customer_id)
+    service = CustomerEnrichmentReconciliationService(
+        run_service=CustomerIntelligenceRunService(),
+        profile_coordinator=FakeProfileCoordinator(),
+        max_attempts=3,
+    )
+
+    first = service.reconcile_once(db_session, team_id=2, limit=2, dry_run=True)
+    second = service.reconcile_once(
+        db_session,
+        team_id=2,
+        limit=2,
+        after_orphan_job_id=first.next_orphan_job_id,
+        dry_run=True,
+    )
+    third = service.reconcile_once(
+        db_session,
+        team_id=2,
+        limit=2,
+        after_orphan_job_id=second.next_orphan_job_id,
+        dry_run=True,
+    )
+
+    assert first.gates_cancelled == 2
+    assert first.next_orphan_job_id == jobs[1].id
+    assert second.gates_cancelled == 1
+    assert second.next_orphan_job_id == jobs[2].id
+    assert third.gates_cancelled == 0
+    assert third.next_orphan_job_id is None
+
+
+def test_erroring_orphan_advances_cursor_to_later_page(db_session):
+    first_job = _orphan_job(db_session, team_id=2, customer_id=920)
+    _orphan_profile_run(db_session, team_id=2, customer_id=920, sequence=1)
+    second_job = _orphan_job(db_session, team_id=2, customer_id=921)
+    second_run = _orphan_profile_run(db_session, team_id=2, customer_id=921, sequence=2)
+
+    class FailingFirstRunService(CustomerIntelligenceRunService):
+        def cancel_deferred_for_customer(self, db, *, team_id, customer_id, reason, now=None):
+            if customer_id == 920:
+                raise RuntimeError("cancel failed")
+            return super().cancel_deferred_for_customer(
+                db,
+                team_id=team_id,
+                customer_id=customer_id,
+                reason=reason,
+                now=now,
+            )
+
+    service = CustomerEnrichmentReconciliationService(
+        run_service=FailingFirstRunService(),
+        profile_coordinator=FakeProfileCoordinator(),
+        max_attempts=3,
+    )
+
+    first = service.reconcile_once(db_session, team_id=2, limit=1, dry_run=False)
+    second = service.reconcile_once(
+        db_session,
+        team_id=2,
+        limit=1,
+        after_orphan_job_id=first.next_orphan_job_id,
+        dry_run=False,
+    )
+
+    assert first.errors == 1
+    assert first.next_orphan_job_id == first_job.id
+    assert second.next_orphan_job_id == second_job.id
+    assert second.gates_cancelled == 1
+    assert second_run.status == CustomerIntelligenceRunStatus.CANCELLED
