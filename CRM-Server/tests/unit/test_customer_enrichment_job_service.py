@@ -13,22 +13,32 @@ from app.services.customer_enrichment_contracts import (
 from app.services.customer_enrichment_inference_service import CustomerEnrichmentInferenceError
 from app.services.customer_enrichment_job_service import CustomerEnrichmentJobService
 from app.services.customer_enrichment_write_service import CustomerEnrichmentWriteResult
+from app.utils.time import business_now
 
 
 class FakeSession:
     def __init__(self) -> None:
         self.commits = 0
         self.rollbacks = 0
+        self.pending_customer_write = False
+        self.persisted_customer_write = False
         self.closed = False
 
     def commit(self) -> None:
         self.commits += 1
+        if self.pending_customer_write:
+            self.persisted_customer_write = True
+            self.pending_customer_write = False
 
     def rollback(self) -> None:
         self.rollbacks += 1
+        self.pending_customer_write = False
 
     def close(self) -> None:
         self.closed = True
+
+    def add(self, _value) -> None:
+        return None
 
 
 class FakeSessionFactory:
@@ -173,6 +183,11 @@ class FakeWriteService:
 
     def apply(self, db, **kwargs):
         self.calls.append({"db": db, **kwargs})
+        if self.result.outcome == "APPLIED":
+            if kwargs.get("commit", True):
+                db.persisted_customer_write = True
+            else:
+                db.pending_customer_write = True
         return self.result
 
 
@@ -187,7 +202,14 @@ class FakeCompletionPort:
         self.calls.append("terminal_success")
 
 
-def _job(*, status: str = "QUEUED", result_json=None, attempt_count: int = 1):
+def _job(
+    *,
+    status: str = "QUEUED",
+    result_json=None,
+    attempt_count: int = 1,
+    lease_token: str | None = None,
+    lease_expires_at=None,
+):
     return SimpleNamespace(
         public_id="cej_job-1",
         team_id=2,
@@ -198,7 +220,8 @@ def _job(*, status: str = "QUEUED", result_json=None, attempt_count: int = 1):
         result_json=result_json,
         attempt_count=attempt_count,
         max_attempts=3,
-        lease_expires_at=None,
+        lease_token=lease_token,
+        lease_expires_at=lease_expires_at,
         run_id="run-1",
         graph_thread_id="customer-enrichment:2:101:customer-initial-v1",
         first_attempt_finished_at=None,
@@ -269,6 +292,48 @@ async def test_busy_job_does_not_compute():
     assert result.execution_status == "BUSY"
     assert service.workflow.calls == []
 
+@pytest.mark.asyncio
+async def test_live_final_attempt_returns_busy_without_clearing_lease():
+    live_until = business_now() + timedelta(minutes=5)
+    job = _job(
+        status="RUNNING",
+        attempt_count=3,
+        lease_token="current-owner",
+        lease_expires_at=live_until,
+    )
+    crud = FakeJobCrud(existing=job)
+    service = _service(crud=crud)
+
+    result = await service.run(_job_request())
+
+    assert result.execution_status == "BUSY"
+    assert job.status == "RUNNING"
+    assert job.lease_token == "current-owner"
+    assert job.lease_expires_at == live_until
+    assert service.workflow.calls == []
+    assert crud.calls == ["get"]
+    assert service.session_factory_fake.sessions[0].rollbacks == 1
+
+
+@pytest.mark.asyncio
+async def test_expired_final_attempt_becomes_exhausted():
+    job = _job(
+        status="RUNNING",
+        attempt_count=3,
+        lease_token="expired-owner",
+        lease_expires_at=business_now() - timedelta(seconds=1),
+    )
+    crud = FakeJobCrud(existing=job)
+    service = _service(crud=crud)
+
+    result = await service.run(_job_request())
+
+    assert result.execution_status == "EXHAUSTED"
+    assert job.status == "EXHAUSTED"
+    assert job.lease_token is None
+    assert job.lease_expires_at is None
+    assert service.workflow.calls == []
+
 
 @pytest.mark.asyncio
 async def test_success_completes_job_and_calls_completion_port_in_order():
@@ -286,6 +351,11 @@ async def test_success_completes_job_and_calls_completion_port_in_order():
     assert service.completion_port.calls == ["first_attempt", "terminal_success"]
     assert len(service.session_factory_fake.sessions) == 2
     assert all(session.closed for session in service.session_factory_fake.sessions)
+    mutation_session = service.session_factory_fake.sessions[1]
+    assert service.write_service.calls[0]["commit"] is False
+    assert mutation_session.commits == 1
+    assert mutation_session.persisted_customer_write is True
+    assert mutation_session.pending_customer_write is False
 
 
 @pytest.mark.asyncio
@@ -362,3 +432,17 @@ async def test_stale_lease_cannot_finalize():
     assert result.execution_status == "BUSY"
     assert result.success is False
     assert service.completion_port.calls == []
+
+
+@pytest.mark.asyncio
+async def test_stale_finalization_rolls_back_pending_customer_write():
+    service = _service(workflow_result=_decision_result(), mark_completed_result=None)
+
+    result = await service.run(_job_request())
+
+    mutation_session = service.session_factory_fake.sessions[1]
+    assert result.execution_status == "BUSY"
+    assert service.write_service.calls[0]["commit"] is False
+    assert mutation_session.rollbacks == 1
+    assert mutation_session.pending_customer_write is False
+    assert mutation_session.persisted_customer_write is False

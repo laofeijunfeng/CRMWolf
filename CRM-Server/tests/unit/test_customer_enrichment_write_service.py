@@ -17,15 +17,15 @@ from app.services.customer_enrichment_plan import (
     CustomerEnrichmentFieldRegistry,
     IndustryEnrichmentField,
 )
-from app.services.operation_log_service import OperationLogService
 from app.services.customer_enrichment_write_service import (
     CustomerEnrichmentWriteError,
     CustomerEnrichmentWriteService,
 )
+from app.services.operation_log_service import OperationLogService
 
 
 @compiles(BigInteger, "sqlite")
-def _bigint_to_sqlite_int(element, compiler, **kw):  # noqa: ARG001
+def _bigint_to_sqlite_int(element, compiler, **kw):
     return "INTEGER"
 
 
@@ -146,6 +146,34 @@ def test_apply_sets_null_industry_and_logs_once():
         "job_public_id": "cej_1",
     }
 
+
+def test_apply_without_commit_flushes_then_rollback_undoes_customer_and_audit():
+    db, customer = _seed_customer(industry=None, version=4)
+
+    result = _service().apply(
+        db,
+        team_id=2,
+        customer_id=customer.id,
+        expected_version=4,
+        decisions=(_industry_decision(),),
+        plan_version="customer-initial-v1",
+        job_public_id="cej_atomic",
+        commit=False,
+    )
+
+    db.refresh(customer)
+    assert result.outcome == "APPLIED"
+    assert customer.industry == "internet_saas"
+    assert customer.version == 5
+    assert db.query(OperationLog).count() == 1
+
+    db.rollback()
+    db.expire_all()
+    stored = db.get(Customer, customer.id)
+    assert stored is not None
+    assert stored.industry is None
+    assert stored.version == 4
+    assert db.query(OperationLog).count() == 0
 
 def test_apply_does_not_overwrite_existing_industry():
     db, customer = _seed_customer(industry="finance", version=4)

@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from sqlalchemy import update
-from sqlalchemy.orm import Session
 
 from app.constants.operation_log_events import EventActions, EventTypes, ResourceTypes
 from app.models.customer import Customer
-from app.services.customer_enrichment_contracts import CustomerEnrichmentDecision
 from app.services.customer_enrichment_plan import CustomerEnrichmentFieldRegistry
-from app.services.operation_log_service import OperationLogService, operation_log_service
+from app.services.operation_log_service import operation_log_service
 from app.utils.time import business_now
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
+    from app.services.customer_enrichment_contracts import CustomerEnrichmentDecision
+    from app.services.operation_log_service import OperationLogService
 
 APPLIED = "APPLIED"
 SKIPPED = "SKIPPED"
@@ -50,6 +54,7 @@ class CustomerEnrichmentWriteService:
         decisions: tuple[CustomerEnrichmentDecision, ...],
         plan_version: str,
         job_public_id: str,
+        commit: bool = True,
     ) -> CustomerEnrichmentWriteResult:
         try:
             applied_fields, applied_values, column_values = self._validated_values(db, decisions)
@@ -92,7 +97,7 @@ class CustomerEnrichmentWriteService:
                 commit=False,
                 content={
                     "changed_fields": applied_fields,
-                    "before": {field: None for field in applied_fields},
+                    "before": dict.fromkeys(applied_fields),
                     "after": applied_values,
                     "source": "CUSTOMER_INITIAL_ENRICHMENT",
                     "plan_version": plan_version,
@@ -102,7 +107,9 @@ class CustomerEnrichmentWriteService:
             if log is None:
                 raise CustomerEnrichmentWriteError("客户补全操作日志写入失败")
 
-            db.commit()
+            db.flush()
+            if commit:
+                db.commit()
             return CustomerEnrichmentWriteResult(
                 outcome=APPLIED,
                 applied_fields=applied_fields,

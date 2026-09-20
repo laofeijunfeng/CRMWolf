@@ -115,6 +115,9 @@ class CustomerEnrichmentJobService:
             if str(existing.status) in _TERMINAL:
                 return self._persisted_result(existing)
             if int(existing.attempt_count or 0) >= max(1, int(existing.max_attempts or 1)):
+                if self._has_live_lease(existing, now=claimed_at):
+                    db.rollback()
+                    return self._busy_result(request, customer_id=int(existing.customer_id))
                 return self._finalize_already_exhausted(db, existing, now=claimed_at)
 
             claimed = self.job_crud.claim_for_execution(
@@ -205,6 +208,7 @@ class CustomerEnrichmentJobService:
                     decisions=computed.decisions,
                     plan_version=snapshot["plan_version"],
                     job_public_id=request.job_public_id,
+                    commit=False,
                 )
             except Exception as exc:
                 logger.exception("客户补全任务写入失败: job=%s", request.job_public_id)
@@ -556,6 +560,16 @@ class CustomerEnrichmentJobService:
     @staticmethod
     def _retry_delay(attempt_count: int) -> timedelta:
         return timedelta(seconds=60 if attempt_count <= 1 else 300)
+
+    @staticmethod
+    def _has_live_lease(job: CustomerEnrichmentJob | None, *, now: datetime) -> bool:
+        return bool(
+            job is not None
+            and str(job.status) == CustomerEnrichmentJobStatus.RUNNING.value
+            and job.lease_token
+            and job.lease_expires_at is not None
+            and job.lease_expires_at > now
+        )
 
     @staticmethod
     def _owns_live_lease(job: CustomerEnrichmentJob | None, lease_token: str, *, now: datetime) -> bool:
