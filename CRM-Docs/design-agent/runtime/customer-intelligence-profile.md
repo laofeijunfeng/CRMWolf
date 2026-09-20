@@ -231,6 +231,16 @@ Agent 只负责在事实和证据之上完成归纳，不拥有“把什么写�
 - Qdrant：保存可语义召回的证据文本；不作为商机阶段、合同状态或回款金额的真相；
 - MySQL 业务表：保存正式业务对象、客户事实、任务、承诺、旅程和档案投影。
 
+### 3.2.1 客户初始补全与档案投影边界
+
+客户初始补全是独立的客户主数据 mutation：客户首次成为正式客户后，durable job 只对 active plan 明确许可且仍为空的字段执行条件写入；第一期仅处理 `Customer.industry`。它不属于档案 Projection Graph，也不能由档案读取或手动刷新隐式触发。人工值、线索转化继承值、导入值和其它既有非空值永不覆盖；补全失败只进入自身的重试/耗尽生命周期，不能回滚已创建客户。
+
+客户档案继续保持只读投影。Profile Workflow 只能读取补全提交后的客户主数据并发布阅读版本，不能反向修改 `Customer`。补全成功后的主数据更新可登记一次档案刷新；档案发布失败沿用档案自身的重试和上一成功版本，不改变 enrichment job 的终态，也不能回滚已经写入的主数据。
+
+首次档案生成前使用持久 readiness gate 协调时序：如果当前 active plan 存在 `purpose=INITIAL_CREATION`、`first_attempt_finished_at IS NULL` 且尚未到 `profile_gate_deadline_at` 的任务，Profile run 在 claim、递增 attempt 或标记 `UPDATING` 之前写入未来的 `not_before_at` 并延后。首次真实尝试以 `COMPLETED`、`SKIPPED`、第一次技术失败进入 `RETRY_PENDING`，或直接 `EXHAUSTED` 结束后，释放被延后的 run。
+
+该 gate 是有期限的偏好，不是客户档案可用性的硬依赖。worker 停摆或首次尝试未在 deadline 前完成时，档案必须解除 gate、降级生成不含缺失字段的版本；enrichment job 保持原状态并继续恢复/重试。后续补全成功再登记客户主数据变化刷新，使档案读取新值。若创建期 job 因登记故障不存在，档案也不阻塞，由 reconciliation 补登记任务并在成功后刷新。
+
 ### 3.3 客户级事实与旅程级事实
 
 所有可演化事实都必须明确作用范围：

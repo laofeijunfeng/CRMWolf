@@ -1,7 +1,7 @@
 # 客户初始智能补全与行业历史回填
 
 - 日期：2026-09-20
-- 状态：已确认，待实施
+- 状态：已实施
 - 范围：客户首次成为正式客户后的异步主数据补全；第一期只补 `Customer.industry`；完成后驱动客户档案投影。覆盖页面创建、Agent 创建、线索转客户、旧 AI 创建兼容入口和历史空行业客户。
 - 上游决定：客户保存接口不等待 LLM；无人工确认、无置信度门槛；模型只能从启用行业目录选一个 code，业务上无法判断时选 `other`；技术失败不得伪装成 `other`；只补空值，人工值永不覆盖；首次补全优先，第一次技术失败后允许先生成无行业档案，后续补全成功再刷新档案。
 - 相关规范：`CONTEXT.md`、`CRM-Docs/design-agent/foundations/architecture-boundary.md`、`CRM-Docs/design-agent/runtime/customer-intelligence-profile.md`
