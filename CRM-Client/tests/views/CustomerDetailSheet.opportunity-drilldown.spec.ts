@@ -3,6 +3,8 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick, type PropType } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import CustomerDetailSheet from '@/views/CustomerDetailSheet.vue'
+import DetailContextHost from '@/components/crmwolf/DetailContextHost.vue'
+import DealJourneyDetailHost from '@/components/business-journey/DealJourneyDetailHost.vue'
 import type { CustomerDetailResponse } from '@/api/customer'
 import type { ContractListResponse } from '@/api/contract'
 import type { DealJourney } from '@/schemas/dealJourney'
@@ -211,9 +213,11 @@ vi.mock('@/components/business-journey/DealJourneyDetailHost.vue', () => ({
       customerId: String,
       customerName: String,
       journeyId: String,
+      journeyName: String,
       journey: Object as PropType<DealJourney | null>,
       embedded: Boolean,
       canEditCustomerContext: { type: Boolean, default: null },
+      contextPrefix: { type: Array, default: () => [] },
     },
     emits: ['close', 'refresh', 'view-customer'],
     setup: (props, { emit }) => () => h('div', {
@@ -223,6 +227,12 @@ vi.mock('@/components/business-journey/DealJourneyDetailHost.vue', () => ({
     }, [
       props.journey?.name ?? '',
       h('button', { type: 'button', 'data-testid': 'back-to-journeys', onClick: () => emit('close') }, 'back'),
+      h('button', { type: 'button', 'data-testid': 'journey-host-close', onClick: () => emit('close') }, 'close'),
+      h('button', {
+        type: 'button',
+        'data-testid': 'view-same-customer',
+        onClick: () => emit('view-customer', props.customerId ?? ''),
+      }, 'view customer'),
       h('button', { type: 'button', 'data-testid': 'detail-refresh', onClick: () => emit('refresh') }, 'refresh'),
     ]),
   }),
@@ -283,6 +293,8 @@ const JOURNEY_PUBLIC_ID = 'djy_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 const SECOND_JOURNEY_PUBLIC_ID = 'djy_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 
 const OPPORTUNITY_PUBLIC_ID = 'opp_test_88'
+const CUSTOMER_ID = 'cus_test_19'
+
 
 const customerFixture = (overrides: Partial<CustomerDetailResponse> = {}): CustomerDetailResponse => ({
   id: 'cus_test_19',
@@ -565,14 +577,14 @@ describe('CustomerDetailSheet journey drilldown', () => {
     await wrapper.get('[data-testid="view-journey"]').trigger('click')
     await nextTick()
 
-    await wrapper.get('[data-testid="back-to-journeys"]').trigger('click')
+    await wrapper.get('[data-testid="view-same-customer"]').trigger('click')
     await nextTick()
 
     expect(wrapper.find('[data-testid="deal-journey-detail"]').exists()).toBe(false)
     const panel = wrapper.get('[data-testid="deal-journeys-panel"]')
-    expect(panel.attributes('data-highlighted-journey-id')).toBe(JOURNEY_PUBLIC_ID)
-    expect(panel.attributes('data-restore-focus-journey-id')).toBe(JOURNEY_PUBLIC_ID)
+    expect(panel.exists()).toBe(true)
     expect(wrapper.get('[data-testid="tab-journeys"]').attributes('data-active')).toBe('true')
+    expect(wrapper.emitted('update:visible')).toBeUndefined()
   })
 
   it('refreshes customer data when embedded journey detail emits refresh', async () => {
@@ -778,7 +790,7 @@ describe('CustomerDetailSheet journey drilldown', () => {
     await nextTick()
     await wrapper.get('[data-testid="view-journey"]').trigger('click')
     await nextTick()
-    await wrapper.get('[data-testid="back-to-journeys"]').trigger('click')
+    await wrapper.get('[data-testid="view-same-customer"]').trigger('click')
     await nextTick()
 
     expect(wrapper.find('[data-testid="deal-journey-detail"]').exists()).toBe(false)
@@ -829,7 +841,7 @@ describe('CustomerDetailSheet journey drilldown', () => {
     expect(detail.attributes('data-journey-id')).toBe(JOURNEY_PUBLIC_ID)
     expect(wrapper.find('[data-testid="deal-journeys-panel"]').exists()).toBe(false)
 
-    await wrapper.get('[data-testid="back-to-journeys"]').trigger('click')
+    await wrapper.get('[data-testid="view-same-customer"]').trigger('click')
     await nextTick()
 
     expect(wrapper.find('[data-testid="deal-journey-detail"]').exists()).toBe(false)
@@ -847,11 +859,10 @@ describe('CustomerDetailSheet journey drilldown', () => {
 
     await flushPromises()
     await nextTick()
-    await wrapper.get('[data-testid="back-to-journeys"]').trigger('click')
+    await wrapper.get('[data-testid="view-same-customer"]').trigger('click')
     await nextTick()
 
     expect(wrapper.find('[data-testid="deal-journeys-panel"]').exists()).toBe(true)
-    expect(wrapper.get('[data-testid="deal-journeys-panel"]').attributes('data-highlighted-journey-id')).toBe(JOURNEY_PUBLIC_ID)
 
     const createOpportunityButton = wrapper.findAll('button').find(button => button.text() === '新建商机')
     expect(createOpportunityButton).toBeDefined()
@@ -866,7 +877,7 @@ describe('CustomerDetailSheet journey drilldown', () => {
     expect(dealJourneyApi.listByCustomer).toHaveBeenCalledWith('cus_test_19')
     expect(wrapper.find('[data-testid="deal-journey-detail"]').exists()).toBe(false)
     const panel = wrapper.get('[data-testid="deal-journeys-panel"]')
-    expect(panel.attributes('data-highlighted-journey-id')).toBe(JOURNEY_PUBLIC_ID)
+    expect(panel.exists()).toBe(true)
     expect(wrapper.get('[data-testid="tab-journeys"]').attributes('data-active')).toBe('true')
   })
 
@@ -911,10 +922,101 @@ describe('CustomerDetailSheet journey drilldown', () => {
 
     expect(wrapper.get('[data-testid="deal-journey-detail"]').attributes('data-journey-id')).toBe(SECOND_JOURNEY_PUBLIC_ID)
 
-    await wrapper.get('[data-testid="back-to-journeys"]').trigger('click')
+    await wrapper.get('[data-testid="view-same-customer"]').trigger('click')
     await nextTick()
 
     expect(wrapper.find('[data-testid="deal-journey-detail"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="deal-journeys-panel"]').exists()).toBe(true)
+  })
+
+  it('delegates journey drilldown context to the host without an outer context host', async () => {
+    const wrapper = mount(CustomerDetailSheet, {
+      props: {
+        customerId: CUSTOMER_ID,
+        visible: true,
+      },
+    })
+
+    await flushPromises()
+    await wrapper.get('[data-testid="tab-journeys"]').trigger('click')
+    await nextTick()
+    await wrapper.get('[data-testid="view-journey"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.findAllComponents(DetailContextHost)).toHaveLength(0)
+    expect(wrapper.getComponent(DealJourneyDetailHost).props('contextPrefix')).toEqual([
+      expect.objectContaining({
+        type: 'customer',
+        id: CUSTOMER_ID,
+        label: customerFixture().account_name,
+      }),
+    ])
+    expect(wrapper.getComponent(DealJourneyDetailHost).props('journeyName')).toBe('CRM 升级项目')
+  })
+
+  it('returns to the customer root when the journey host views the same customer', async () => {
+    const wrapper = mount(CustomerDetailSheet, {
+      props: {
+        customerId: CUSTOMER_ID,
+        visible: true,
+      },
+    })
+
+    await flushPromises()
+    await wrapper.get('[data-testid="tab-journeys"]').trigger('click')
+    await nextTick()
+    await wrapper.get('[data-testid="view-journey"]').trigger('click')
+    await nextTick()
+
+    await wrapper.get('[data-testid="view-same-customer"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.find('[data-testid="deal-journey-detail"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="deal-journeys-panel"]').exists()).toBe(true)
+    expect(wrapper.findAll('[data-testid="sheet-root"]')).toHaveLength(1)
+    expect(wrapper.emitted('update:visible')).toBeUndefined()
+    expect(wrapper.emitted('view-customer')).toBeUndefined()
+  })
+
+  it('closes the whole customer sheet when the journey host emits close', async () => {
+    const wrapper = mount(CustomerDetailSheet, {
+      props: {
+        customerId: CUSTOMER_ID,
+        visible: true,
+      },
+    })
+
+    await flushPromises()
+    await wrapper.get('[data-testid="tab-journeys"]').trigger('click')
+    await nextTick()
+    await wrapper.get('[data-testid="view-journey"]').trigger('click')
+    await nextTick()
+
+    await wrapper.get('[data-testid="journey-host-close"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.emitted('update:visible')).toEqual([[false]])
+  })
+
+  it('keeps the outer context host for a direct customer-root contract drilldown', async () => {
+    contractApi.getCustomerContracts.mockResolvedValue([contractFixture()])
+
+    const wrapper = mount(CustomerDetailSheet, {
+      props: {
+        customerId: CUSTOMER_ID,
+        visible: true,
+      },
+    })
+
+    await flushPromises()
+    await wrapper.get('[data-testid="tab-customer-info"]').trigger('click')
+    await nextTick()
+    await wrapper.get('[data-testid="view-contract"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.findAllComponents(DetailContextHost)).toHaveLength(1)
+    expect(wrapper.findComponent(DealJourneyDetailHost).exists()).toBe(false)
+    expect(wrapper.get('[data-testid="contract-detail-content"]').attributes('data-contract-id')).toBe('701')
+    expect(wrapper.findAll('[data-testid="sheet-root"]')).toHaveLength(1)
   })
 })

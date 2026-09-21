@@ -1013,6 +1013,15 @@ const handleContextClose = (): void => {
   emit('update:visible', false)
 }
 
+function handleJourneyHostViewCustomer(customerId: string): void {
+  if (customerId === props.customerId) {
+    selectedJourneyId.value = null
+    resetDetailContext()
+    return
+  }
+  emit('view-customer', customerId)
+}
+
 const handleJourneyDetailRefresh = async (): Promise<void> => {
   if (props.customerId !== null) {
     const refreshed = await loadAllData(props.customerId)
@@ -1461,29 +1470,31 @@ onBeforeUnmount(() => {
   <Sheet :open="visible" @update:open="emit('update:visible', $event)">
     <DetailSheetContent>
       <Transition name="drilldown-fade" mode="out-in">
+        <DealJourneyDetailHost
+          v-if="selectedJourneyId !== null"
+          :journey-id="selectedJourneyId"
+          :journey-name="selectedJourney?.name"
+          :customer-id="customerId ?? ''"
+          :customer-name="customer?.account_name"
+          :journey="selectedJourney"
+          :context-prefix="customerId === null ? [] : [createCustomerContextNode(customerId)]"
+          embedded
+          :can-edit-customer-context="canEditCurrentCustomer"
+          @close="handleContextClose"
+          @refresh="handleJourneyDetailRefresh"
+          @view-customer="handleJourneyHostViewCustomer"
+        />
+
         <DetailContextHost
-          v-if="hasNestedDetail"
+          v-else-if="hasNestedDetail"
           :nodes="detailContextNodes"
           :can-go-back="detailContextCanGoBack"
           @back="handleContextBack"
           @close="handleContextClose"
           @navigate="handleContextNavigate"
         >
-          <DealJourneyDetailHost
-            v-if="selectedJourneyId !== null"
-            :journey-id="selectedJourneyId"
-            :customer-id="customerId ?? ''"
-            :customer-name="customer?.account_name"
-            :journey="selectedJourney"
-            embedded
-            :can-edit-customer-context="canEditCurrentCustomer"
-            @close="handleBackFromJourney"
-            @refresh="handleJourneyDetailRefresh"
-            @view-customer="emit('view-customer', $event)"
-          />
-
           <ContractDetailContent
-            v-else-if="selectedContractId !== null"
+            v-if="selectedContractId !== null"
             :contract-id="selectedContractId"
             embedded
             @back="handleBackFromContract"
