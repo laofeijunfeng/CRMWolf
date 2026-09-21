@@ -141,7 +141,7 @@ export interface ListFieldDefinition {
 
 ### 5.2 DataTable Props 与事件
 
-新增建议合同：
+新增合同：
 
 ```ts
 interface Props {
@@ -285,7 +285,7 @@ Content-Disposition: attachment; filename*=UTF-8''...
 - 未传显式排序时使用现有列表默认排序；
 - 在业务排序之后追加稳定业务标识或内部主键排序，仅用于确定顺序，不导出该内部主键。
 
-现有列表端点普遍限制每页最多 100 条。导出不得调用列表 HTTP API 循环翻页，也不得对全部结果调用 `.all()` 一次性装入内存；应抽取并复用底层查询构造函数，以 `yield_per` / `stream_results` 或等价的资源级批量迭代器读取并逐行写入 workbook。关联名称和枚举值的补全必须按批预取，禁止形成逐行 N+1 查询。
+现有列表端点普遍限制每页最多 100 条。导出不得调用列表 HTTP API 循环翻页，也不得对全部结果调用 `.all()` 一次性装入内存；应抽取并复用底层查询构造函数，使用 SQLAlchemy `yield_per` 配合 `stream_results` 批量读取并逐行写入 workbook。关联名称和枚举值的补全必须按批预取，禁止形成逐行 N+1 查询。
 
 ## 9. 服务端导出字段目录
 
