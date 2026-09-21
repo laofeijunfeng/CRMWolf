@@ -1473,7 +1473,7 @@ onBeforeUnmount(() => {
         <DealJourneyDetailHost
           v-if="selectedJourneyId !== null"
           :journey-id="selectedJourneyId"
-          :journey-name="selectedJourney?.name"
+          :journey-name="selectedJourney?.name ?? ''"
           :customer-id="customerId ?? ''"
           :customer-name="customer?.account_name"
           :journey="selectedJourney"
