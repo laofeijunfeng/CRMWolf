@@ -93,6 +93,7 @@ const handleRowClick = (row: BusinessJourneyListItem): void => {
     :page-size="pageSize"
     :loading="loading ?? false"
     :load-error="loadError ?? null"
+    height="calc(100vh - 121px)"
     height-strategy="fill"
     scroll-mode="contained"
     row-interactive
