@@ -21,7 +21,9 @@ const props = defineProps<Props>()
 const navigationRef = ref<HTMLElement | null>(null)
 
 function focusBackButton(): void {
-  navigationRef.value?.querySelector<HTMLButtonElement>('button')?.focus()
+  navigationRef.value
+    ?.querySelector<HTMLButtonElement>('[data-testid="detail-context-back"]')
+    ?.focus()
 }
 
 defineExpose({ focusBackButton })

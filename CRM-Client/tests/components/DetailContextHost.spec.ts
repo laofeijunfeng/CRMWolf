@@ -109,4 +109,23 @@ describe('DetailContextHost', () => {
 
     expect(document.activeElement).toBe(wrapper.get('[data-testid="detail-context-back"]').element)
   })
+
+  it('does not focus a breadcrumb crumb when the back button is absent', async () => {
+    const wrapper = mount(DetailContextHost, {
+      attachTo: document.body,
+      props: {
+        nodes: [journeyNode, contractNode],
+        canGoBack: false,
+      },
+    })
+    onTestFinished(() => wrapper.unmount())
+
+    const crumb = wrapper.get('[aria-label="返回续费旅程"]')
+    crumb.element.focus()
+    const activeBefore = document.activeElement
+    ;(wrapper.vm as unknown as DetailContextHostExpose).focusBackButton()
+    await nextTick()
+
+    expect(document.activeElement).toBe(activeBefore)
+  })
 })
