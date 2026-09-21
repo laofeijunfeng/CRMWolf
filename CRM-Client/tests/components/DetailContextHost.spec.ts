@@ -120,12 +120,14 @@ describe('DetailContextHost', () => {
     })
     onTestFinished(() => wrapper.unmount())
 
-    const crumb = wrapper.get('[aria-label="返回续费旅程"]')
-    crumb.element.focus()
-    const activeBefore = document.activeElement
+    const outsideTrigger = document.createElement('button')
+    document.body.appendChild(outsideTrigger)
+    onTestFinished(() => outsideTrigger.remove())
+    outsideTrigger.focus()
     ;(wrapper.vm as unknown as DetailContextHostExpose).focusBackButton()
     await nextTick()
 
-    expect(document.activeElement).toBe(activeBefore)
+    expect(document.activeElement).toBe(outsideTrigger)
+    expect(document.activeElement).not.toBe(wrapper.get('[aria-label="返回续费旅程"]').element)
   })
 })
