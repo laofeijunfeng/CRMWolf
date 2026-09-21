@@ -1,13 +1,22 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import DetailContextHeader from '@/components/crmwolf/DetailContextHeader.vue'
 import type { DetailContextNode } from '@/types/detailContext'
 
 interface Props {
   nodes: readonly DetailContextNode[]
   canGoBack: boolean
+  showHeader?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), { showHeader: true })
+const headerRef = ref<{ focusBackButton: () => void } | null>(null)
+
+function focusBackButton(): void {
+  headerRef.value?.focusBackButton()
+}
+
+defineExpose({ focusBackButton })
 
 const emit = defineEmits<{
   back: []
@@ -19,6 +28,8 @@ const emit = defineEmits<{
 <template>
   <div class="detail-context-host" data-testid="detail-context-host">
     <DetailContextHeader
+      v-if="props.showHeader"
+      ref="headerRef"
       :nodes="props.nodes"
       :can-go-back="props.canGoBack"
       @back="emit('back')"

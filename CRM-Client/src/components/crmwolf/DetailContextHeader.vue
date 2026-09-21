@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { ArrowLeft, X } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import {
@@ -17,6 +18,15 @@ interface Props {
 }
 
 const props = defineProps<Props>()
+const navigationRef = ref<HTMLElement | null>(null)
+
+function focusBackButton(): void {
+  navigationRef.value
+    ?.querySelector<HTMLButtonElement>('[data-testid="detail-context-back"]')
+    ?.focus()
+}
+
+defineExpose({ focusBackButton })
 
 const emit = defineEmits<{
   back: []
@@ -41,7 +51,7 @@ const getNodeLabel = (node: DetailContextNode): string => {
 
 <template>
   <header class="detail-context-header" data-testid="detail-context-header">
-    <div class="detail-context-header__navigation">
+    <div ref="navigationRef" class="detail-context-header__navigation">
       <Button
         v-if="props.canGoBack"
         type="button"

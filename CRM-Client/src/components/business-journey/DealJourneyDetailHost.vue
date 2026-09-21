@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import DealJourneyDetailContent from '@/components/panels/DealJourneyDetailContent.vue'
+import DetailContextHost from '@/components/crmwolf/DetailContextHost.vue'
+import ContractDetailContent from '@/components/panels/ContractDetailContent.vue'
+import PaymentPlanDetailContent from '@/components/panels/PaymentPlanDetailContent.vue'
+import PaymentRecordDetailContent from '@/components/panels/PaymentRecordDetailContent.vue'
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
 import EditRecordDialog from '@/components/dialogs/EditRecordDialog.vue'
-import ContractDetailSheet from '@/views/ContractDetailSheet.vue'
-import PaymentPlanDetailSheet from '@/views/PaymentPlanDetailSheet.vue'
-import PaymentRecordDetailSheet from '@/views/PaymentRecordDetailSheet.vue'
 import contractApi, { type ContractListResponse, type ContractResponse } from '@/api/contract'
 import approvalGenericApi from '@/api/approvalGeneric'
 import paymentApi, {
@@ -17,6 +18,8 @@ import paymentApi, {
   type PaymentRecordUpdate,
 } from '@/api/payment'
 import type { DealJourney } from '@/api/dealJourney'
+import { useDetailContextStack } from '@/composables/useDetailContextStack'
+import type { DetailContextNode } from '@/types/detailContext'
 import { useApprovalStore } from '@/stores/approval'
 import { confirmDelete } from '@/utils/confirmDialog'
 import { handleApiError } from '@/utils/errorHandler'
@@ -25,9 +28,11 @@ interface Props {
   customerId: string
   customerName?: string | undefined
   journeyId: string
+  journeyName?: string
   journey?: DealJourney | null
   embedded?: boolean
   canEditCustomerContext?: boolean | null
+  contextPrefix?: readonly DetailContextNode[]
 }
 
 interface ContractOpportunityContext {
@@ -62,11 +67,26 @@ interface SelectedPaymentRecord {
   approval: ApprovalInfo | ApprovalInfoLite | null
 }
 
-withDefaults(defineProps<Props>(), {
+interface DetailContextHostExpose {
+  focusBackButton: () => void
+}
+
+/**
+ * record_number exists on payment record rows but not on the shared
+ * PaymentRecordInfo type; keep the breadcrumb lookup local instead of
+ * widening the shared API type.
+ */
+type BreadcrumbPaymentRecord = PaymentRecordInfo & {
+  record_number?: string
+}
+
+const props = withDefaults(defineProps<Props>(), {
   customerName: '',
+  journeyName: '',
   journey: null,
   embedded: false,
   canEditCustomerContext: null,
+  contextPrefix: () => [],
 })
 
 const emit = defineEmits<{
@@ -77,18 +97,252 @@ const emit = defineEmits<{
 
 const approvalStore = useApprovalStore()
 const journeyContentRef = ref<JourneyContentExpose | null>(null)
+const journeyContentContainerRef = ref<HTMLElement | null>(null)
+const contextHostRef = ref<DetailContextHostExpose | null>(null)
 const contractDialogOpen = ref(false)
 const editingContract = ref<ContractResponse | null>(null)
 const fixedContractOpportunity = ref<ContractOpportunityContext | null>(null)
-const selectedContractId = ref<number | null>(null)
-const contractSheetOpen = ref(false)
-const selectedPaymentPlan = ref<PaymentPlanResponse | null>(null)
-const paymentPlanSheetOpen = ref(false)
 const selectedPaymentRecord = ref<SelectedPaymentRecord | null>(null)
-const paymentRecordSheetOpen = ref(false)
 const recordEditDialogOpen = ref(false)
 const recordEditSubmitting = ref(false)
 const isRecordResubmitMode = ref(false)
+
+const detailContextStack = useDetailContextStack()
+const contextTriggers = new Map<string, HTMLElement>()
+const planSnapshots = new Map<string, PaymentPlanResponse>()
+
+const journeyLabel = (): string => {
+  const fromProps = props.journeyName?.trim()
+  if (fromProps !== undefined && fromProps !== '') return fromProps
+  const fromJourney = props.journey?.name?.trim()
+  if (fromJourney !== undefined && fromJourney !== '') return fromJourney
+  return '业务旅程'
+}
+const contractLabel = (contract: Pick<ContractListResponse, 'contract_name'>): string =>
+  contract.contract_name.trim() || '合同详情'
+const planLabel = (plan: PaymentPlanResponse): string => {
+  const planNumber = plan.plan_number?.trim()
+  if (planNumber !== undefined && planNumber !== '') return planNumber
+  const stageName = plan.stage_name.trim()
+  if (stageName !== '') return stageName
+  return '回款计划详情'
+}
+const recordLabel = (record: PaymentRecordInfo): string => {
+  const recordNumber = (record as BreadcrumbPaymentRecord).record_number?.trim()
+  return recordNumber !== undefined && recordNumber !== ''
+    ? recordNumber
+    : `回款记录 #${record.id}`
+}
+
+const nodeKey = (node: DetailContextNode): string => `${node.type}:${node.id}`
+
+function createJourneyNode(): DetailContextNode {
+  return {
+    type: 'journey',
+    id: props.journeyId,
+    label: journeyLabel(),
+    source: 'list',
+  }
+}
+
+function createContractNode(
+  contractId: number,
+  contractName: string | undefined,
+  parentId: string,
+): DetailContextNode {
+  return {
+    type: 'contract',
+    id: String(contractId),
+    label: contractName === undefined ? '合同详情' : contractLabel({ contract_name: contractName }),
+    parentType: 'journey',
+    parentId,
+    source: 'related-object',
+  }
+}
+
+function createPlanNode(plan: PaymentPlanResponse, contractId: string): DetailContextNode {
+  return {
+    type: 'payment-plan',
+    id: String(plan.id),
+    label: planLabel(plan),
+    parentType: 'contract',
+    parentId: contractId,
+    source: 'related-object',
+  }
+}
+
+function createRecordNode(record: PaymentRecordInfo, planId: string): DetailContextNode {
+  return {
+    type: 'payment-record',
+    id: String(record.id),
+    label: recordLabel(record),
+    parentType: 'payment-plan',
+    parentId: planId,
+    source: 'related-object',
+  }
+}
+
+const displayNodes = computed<DetailContextNode[]>(() => [
+  ...props.contextPrefix,
+  ...detailContextStack.nodes.value,
+])
+const currentNode = computed<DetailContextNode | null>(() => detailContextStack.current.value)
+const currentContractId = computed<number | null>(() =>
+  currentNode.value?.type === 'contract' ? Number(currentNode.value.id) : null)
+const currentPlanId = computed<number | null>(() =>
+  currentNode.value?.type === 'payment-plan' ? Number(currentNode.value.id) : null)
+const currentRecordId = computed<number | null>(() =>
+  currentNode.value?.type === 'payment-record' ? Number(currentNode.value.id) : null)
+const showContextHeader = computed<boolean>(() =>
+  props.contextPrefix.length > 0 || detailContextStack.depth.value > 1)
+const canGoBack = computed<boolean>(() => showContextHeader.value)
+
+function resetContextState(): void {
+  detailContextStack.reset([createJourneyNode()])
+  contextTriggers.clear()
+  planSnapshots.clear()
+  selectedPaymentRecord.value = null
+  isRecordResubmitMode.value = false
+  recordEditDialogOpen.value = false
+}
+
+function prefixIdentity(nodes: readonly DetailContextNode[]): string {
+  return nodes.map(node => `${node.type}:${node.id}`).join('|')
+}
+
+watch(
+  [
+    (): string => props.journeyId,
+    (): string => journeyLabel(),
+    (): string => prefixIdentity(props.contextPrefix),
+  ] as const,
+  () => { resetContextState() },
+  { immediate: true },
+)
+
+function rememberTrigger(node: DetailContextNode): void {
+  const activeElement = document.activeElement
+  if (activeElement instanceof HTMLElement) {
+    contextTriggers.set(nodeKey(node), activeElement)
+  }
+}
+
+function forgetTriggers(nodes: readonly DetailContextNode[]): void {
+  for (const node of nodes) {
+    contextTriggers.delete(nodeKey(node))
+  }
+}
+
+function restoreFocus(removedNodes: readonly DetailContextNode[]): void {
+  for (const node of removedNodes) {
+    const trigger = contextTriggers.get(nodeKey(node))
+    if (trigger !== undefined && trigger.isConnected) {
+      trigger.focus()
+      return
+    }
+  }
+  if (showContextHeader.value) {
+    contextHostRef.value?.focusBackButton()
+    return
+  }
+  journeyContentContainerRef.value?.focus()
+}
+
+function handleViewContract(contract: ContractListResponse): void {
+  const internalNodes = detailContextStack.nodes.value
+  const journeyNode = internalNodes[0]
+  if (journeyNode === undefined || journeyNode.type !== 'journey') return
+  const contractNode = createContractNode(contract.id, contract.contract_name, journeyNode.id)
+  rememberTrigger(contractNode)
+  detailContextStack.reset([journeyNode])
+  detailContextStack.push(contractNode)
+}
+
+function handleViewPaymentPlan(planId: number, plan?: PaymentPlanResponse): void {
+  const paymentPlan = plan === undefined ? null : (plan.id === planId ? plan : { ...plan, id: planId })
+  if (paymentPlan === null) return
+  const internalNodes = detailContextStack.nodes.value
+  const journeyNode = internalNodes[0]
+  if (journeyNode === undefined || journeyNode.type !== 'journey') return
+  const contractNodeId = String(paymentPlan.contract_id)
+  const existingContract = internalNodes[1]
+  const contractNode = existingContract?.type === 'contract' && existingContract.id === contractNodeId
+    ? existingContract
+    : createContractNode(paymentPlan.contract_id, paymentPlan.contract_name, journeyNode.id)
+  const planNode = createPlanNode(paymentPlan, contractNode.id)
+  rememberTrigger(planNode)
+  planSnapshots.set(planNode.id, paymentPlan)
+  detailContextStack.reset([journeyNode, contractNode])
+  detailContextStack.push(planNode)
+}
+
+function handleContractPaymentPlan(plan: PaymentPlanResponse): void {
+  handleViewPaymentPlan(plan.id, plan)
+}
+
+function handlePaymentRecord(record: PaymentRecordInfo): void {
+  const planNode = detailContextStack.current.value
+  if (planNode?.type !== 'payment-plan') return
+  const plan = planSnapshots.get(planNode.id) ?? null
+  selectedPaymentRecord.value = {
+    record,
+    stageName: plan?.stage_name ?? planNode.label,
+    approval: record.approval
+      ?? (plan?.latest_record_id === record.id ? plan.latest_approval : null)
+      ?? null,
+  }
+  const recordNode = createRecordNode(record, planNode.id)
+  rememberTrigger(recordNode)
+  detailContextStack.push(recordNode)
+}
+
+function handlePlanViewContract(contractId: number, plan: PaymentPlanResponse): void {
+  const internalNodes = detailContextStack.nodes.value
+  const journeyNode = internalNodes[0]
+  if (journeyNode === undefined || journeyNode.type !== 'journey') return
+  const contractNodeId = String(contractId)
+  const existingContract = internalNodes[1]
+  const contractNode = existingContract?.type === 'contract' && existingContract.id === contractNodeId
+    ? existingContract
+    : createContractNode(contractId, plan.contract_name, journeyNode.id)
+  rememberTrigger(contractNode)
+  detailContextStack.reset([journeyNode, contractNode])
+}
+
+async function handleContextBack(): Promise<void> {
+  if (detailContextStack.depth.value > 1) {
+    const removedNodes = detailContextStack.nodes.value.slice(-1)
+    detailContextStack.pop()
+    await nextTick()
+    restoreFocus(removedNodes)
+    forgetTriggers(removedNodes)
+    return
+  }
+  const prefixLength = props.contextPrefix.length
+  if (prefixLength > 0) {
+    const lastPrefix = props.contextPrefix[prefixLength - 1]
+    emit('view-customer', lastPrefix?.id ?? props.customerId)
+  }
+}
+
+async function handleContextNavigate(displayIndex: number): Promise<void> {
+  if (displayIndex < props.contextPrefix.length) {
+    emit('view-customer', props.contextPrefix[displayIndex]?.id ?? props.customerId)
+    return
+  }
+  const internalIndex = displayIndex - props.contextPrefix.length
+  const internalNodes = detailContextStack.nodes.value
+  if (internalIndex < 0 || internalIndex >= internalNodes.length) return
+  const removedNodes = internalNodes.slice(internalIndex + 1)
+  detailContextStack.reset(internalNodes.slice(0, internalIndex + 1))
+  await nextTick()
+  restoreFocus(removedNodes)
+  forgetTriggers(removedNodes)
+}
+
+function handleContextClose(): void {
+  emit('close')
+}
 
 async function refreshJourneyAfterChildAction(): Promise<boolean> {
   try {
@@ -148,9 +402,10 @@ async function handleDeleteContract(contract: ContractListResponse): Promise<voi
 
   try {
     await contractApi.deleteContract(contract.id)
-    if (selectedContractId.value === contract.id) {
-      contractSheetOpen.value = false
-      selectedContractId.value = null
+    const viewingNode = detailContextStack.current.value
+    if (viewingNode?.type === 'contract' && viewingNode.id === String(contract.id)) {
+      const journeyNode = detailContextStack.nodes.value[0]
+      detailContextStack.reset(journeyNode === undefined ? [] : [journeyNode])
     }
     toast.success('合同删除成功')
     await refreshJourneyAfterChildAction()
@@ -179,51 +434,8 @@ async function handleWithdrawContractApproval(contract: ContractListResponse): P
   }
 }
 
-function handleViewContract(contractId: number): void {
-  paymentPlanSheetOpen.value = false
-  paymentRecordSheetOpen.value = false
-  selectedContractId.value = contractId
-  contractSheetOpen.value = true
-}
-
-function handleContractSheetOpenChange(open: boolean): void {
-  contractSheetOpen.value = open
-  if (!open) selectedContractId.value = null
-}
-
-function handleViewPaymentPlan(planId: number, plan: PaymentPlanResponse): void {
-  contractSheetOpen.value = false
-  paymentRecordSheetOpen.value = false
-  selectedPaymentPlan.value = plan.id === planId ? plan : { ...plan, id: planId }
-  paymentPlanSheetOpen.value = true
-}
-
-function handleContractPaymentPlan(plan: PaymentPlanResponse): void {
-  handleViewPaymentPlan(plan.id, plan)
-}
-
-function handlePaymentPlanSheetOpenChange(open: boolean): void {
-  paymentPlanSheetOpen.value = open
-  if (!open) selectedPaymentPlan.value = null
-}
-
-function handlePaymentRecord(record: PaymentRecordInfo): void {
-  const plan = selectedPaymentPlan.value
-  if (plan === null) return
-  selectedPaymentRecord.value = {
-    record,
-    stageName: plan.stage_name,
-    approval: record.approval
-      ?? (plan.latest_record_id === record.id ? plan.latest_approval : null)
-      ?? null,
-  }
-  paymentPlanSheetOpen.value = false
-  paymentRecordSheetOpen.value = true
-}
-
-function handlePaymentRecordSheetOpenChange(open: boolean): void {
-  paymentRecordSheetOpen.value = open
-  if (!open) selectedPaymentRecord.value = null
+function handlePaymentPlanViewCustomer(customerId: string): void {
+  emit('view-customer', customerId)
 }
 
 async function handlePaymentRecordRefresh(): Promise<void> {
@@ -286,26 +498,80 @@ async function handleRecordEditSubmit(recordId: number, payload: PaymentRecordUp
 </script>
 
 <template>
-  <DealJourneyDetailContent
-    ref="journeyContentRef"
-    :customer-id="customerId"
-    :journey-id="journeyId"
-    :journey="journey ?? null"
-    :embedded="embedded ?? false"
-    :show-breadcrumb="false"
-    :customer-context="{ customerId, customerName }"
-    :can-edit-customer-context="canEditCustomerContext ?? null"
-    @back="emit('close')"
-    @close="emit('close')"
-    @refresh="emit('refresh')"
-    @create-contract="handleCreateContract"
-    @edit-contract="handleEditContract"
-    @delete-contract="handleDeleteContract"
-    @submit-contract-approval="handleSubmitContractApproval"
-    @withdraw-contract-approval="handleWithdrawContractApproval"
-    @view-contract="handleViewContract"
-    @view-payment-plan="handleViewPaymentPlan"
-  />
+  <DetailContextHost
+    ref="contextHostRef"
+    :nodes="displayNodes"
+    :can-go-back="canGoBack"
+    :show-header="showContextHeader"
+    @back="handleContextBack"
+    @navigate="handleContextNavigate"
+    @close="handleContextClose"
+  >
+    <div v-show="currentNode?.type === 'journey'" ref="journeyContentContainerRef" class="contents">
+      <DealJourneyDetailContent
+        ref="journeyContentRef"
+        :customer-id="customerId"
+        :journey-id="journeyId"
+        :journey="journey ?? null"
+        :embedded="embedded ?? false"
+        :show-breadcrumb="false"
+        :customer-context="{ customerId, customerName }"
+        :can-edit-customer-context="canEditCustomerContext ?? null"
+        @back="emit('close')"
+        @close="emit('close')"
+        @refresh="emit('refresh')"
+        @create-contract="handleCreateContract"
+        @edit-contract="handleEditContract"
+        @delete-contract="handleDeleteContract"
+        @submit-contract-approval="handleSubmitContractApproval"
+        @withdraw-contract-approval="handleWithdrawContractApproval"
+        @view-contract="handleViewContract"
+        @view-payment-plan="handleViewPaymentPlan"
+      />
+    </div>
+
+    <ContractDetailContent
+      v-if="currentContractId !== null"
+      :key="`contract-${currentContractId}`"
+      :contract-id="currentContractId"
+      embedded
+      :show-breadcrumb="false"
+      @refresh="refreshJourneyAfterChildAction"
+      @approve="refreshJourneyAfterChildAction"
+      @reject="refreshJourneyAfterChildAction"
+      @view-payment-plan="handleContractPaymentPlan"
+      @close="handleContextClose"
+    />
+
+    <PaymentPlanDetailContent
+      v-if="currentNode?.type === 'payment-plan'"
+      :key="`plan-${currentPlanId}`"
+      :plan-id="currentPlanId"
+      :visible="true"
+      embedded
+      @refresh="refreshJourneyAfterChildAction"
+      @record-click="handlePaymentRecord"
+      @view-approval="handlePaymentRecord"
+      @view-contract="handlePlanViewContract"
+      @view-customer="handlePaymentPlanViewCustomer"
+      @close="handleContextClose"
+    />
+
+    <PaymentRecordDetailContent
+      v-if="currentNode?.type === 'payment-record'"
+      :key="`record-${currentRecordId}`"
+      :record-id="currentRecordId"
+      :visible="true"
+      embedded
+      :record="selectedPaymentRecord?.record ?? null"
+      :stage-name="selectedPaymentRecord?.stageName ?? ''"
+      :approval="selectedPaymentRecord?.approval ?? null"
+      @refresh="handlePaymentRecordRefresh"
+      @edit="handleRecordEdit"
+      @resubmit="handleRecordResubmit"
+      @close="handleContextClose"
+    />
+  </DetailContextHost>
 
   <ContractFormDialog
     :customer-id="customerId"
@@ -316,42 +582,6 @@ async function handleRecordEditSubmit(recordId: number, payload: PaymentRecordUp
     :fixed-opportunity="fixedContractOpportunity"
     @update:open="handleContractDialogOpenChange"
     @success="handleContractSuccess"
-  />
-
-  <ContractDetailSheet
-    v-if="contractSheetOpen"
-    :contract-id="selectedContractId"
-    :visible="contractSheetOpen"
-    @update:visible="handleContractSheetOpenChange"
-    @refresh="refreshJourneyAfterChildAction"
-    @approve="refreshJourneyAfterChildAction"
-    @reject="refreshJourneyAfterChildAction"
-    @view-payment-plan="handleContractPaymentPlan"
-  />
-
-  <PaymentPlanDetailSheet
-    v-if="paymentPlanSheetOpen"
-    :plan-id="selectedPaymentPlan?.id ?? null"
-    :visible="paymentPlanSheetOpen"
-    @update:visible="handlePaymentPlanSheetOpenChange"
-    @refresh="refreshJourneyAfterChildAction"
-    @record-click="handlePaymentRecord"
-    @view-approval="handlePaymentRecord"
-    @view-contract="handleViewContract"
-    @view-customer="emit('view-customer', $event)"
-  />
-
-  <PaymentRecordDetailSheet
-    v-if="paymentRecordSheetOpen"
-    :record-id="selectedPaymentRecord?.record.id ?? null"
-    :visible="paymentRecordSheetOpen"
-    :record="selectedPaymentRecord?.record ?? null"
-    :stage-name="selectedPaymentRecord?.stageName ?? ''"
-    :approval="selectedPaymentRecord?.approval ?? null"
-    @update:visible="handlePaymentRecordSheetOpenChange"
-    @refresh="handlePaymentRecordRefresh"
-    @edit="handleRecordEdit"
-    @resubmit="handleRecordResubmit"
   />
 
   <EditRecordDialog

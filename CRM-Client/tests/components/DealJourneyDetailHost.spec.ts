@@ -12,6 +12,9 @@ import type {
   PaymentRecordInfo,
   PaymentRecordUpdate,
 } from '@/api/payment'
+import type { DetailContextNode } from '@/types/detailContext'
+
+type BreadcrumbPaymentRecord = PaymentRecordInfo & { record_number?: string }
 
 const contractApi = vi.hoisted(() => ({
   getContract: vi.fn(),
@@ -69,36 +72,76 @@ vi.mock('@/components/panels/DealJourneyDetailContent.vue', () => ({
   }),
 }))
 
+vi.mock('@/components/crmwolf/DetailContextHost.vue', () => ({
+  default: defineComponent({
+    name: 'DetailContextHost',
+    props: {
+      nodes: { type: Array as PropType<readonly DetailContextNode[]>, default: () => [] },
+      canGoBack: { type: Boolean, default: false },
+      showHeader: { type: Boolean, default: true },
+    },
+    emits: ['back', 'close', 'navigate'],
+    setup: (_, { slots }) => () => h('div', { 'data-testid': 'detail-context-host' }, slots.default?.()),
+  }),
+}))
+
+vi.mock('@/components/panels/ContractDetailContent.vue', () => ({
+  default: defineComponent({
+    name: 'ContractDetailContent',
+    props: {
+      contractId: { type: Number, default: null },
+      embedded: { type: Boolean, default: false },
+      showBreadcrumb: { type: Boolean, default: true },
+    },
+    emits: ['back', 'close', 'approve', 'reject', 'view-payment-plan', 'refresh'],
+    setup: props => () => h('div', {
+      'data-testid': 'contract-detail-content',
+      'data-contract-id': String(props.contractId ?? ''),
+    }),
+  }),
+}))
+
+vi.mock('@/components/panels/PaymentPlanDetailContent.vue', () => ({
+  default: defineComponent({
+    name: 'PaymentPlanDetailContent',
+    props: {
+      planId: { type: Number, default: null },
+      visible: { type: Boolean, default: true },
+      embedded: { type: Boolean, default: false },
+    },
+    emits: ['update:visible', 'close', 'refresh', 'record-click', 'view-approval', 'view-customer', 'view-contract'],
+    setup: props => () => h('div', {
+      'data-testid': 'payment-plan-detail-content',
+      'data-plan-id': String(props.planId ?? ''),
+    }),
+  }),
+}))
+
+vi.mock('@/components/panels/PaymentRecordDetailContent.vue', () => ({
+  default: defineComponent({
+    name: 'PaymentRecordDetailContent',
+    props: {
+      recordId: { type: Number, default: null },
+      visible: { type: Boolean, default: true },
+      embedded: { type: Boolean, default: false },
+      record: { type: Object, default: null },
+      stageName: { type: String, default: '' },
+      approval: { type: Object, default: null },
+    },
+    emits: ['update:visible', 'close', 'refresh', 'edit', 'resubmit'],
+    setup: props => () => h('div', {
+      'data-testid': 'payment-record-detail-content',
+      'data-record-id': String(props.recordId ?? ''),
+    }),
+  }),
+}))
+
 vi.mock('@/components/dialogs/ContractFormDialog.vue', () => ({
   default: defineComponent({
     name: 'ContractFormDialog',
     props: { open: Boolean, customerId: String, customerName: String, customerLocked: Boolean, contract: Object, fixedOpportunity: Object },
     emits: ['update:open', 'success'],
     setup: props => () => h('div', { 'data-visible': String(props.open) }),
-  }),
-}))
-vi.mock('@/views/ContractDetailSheet.vue', () => ({
-  default: defineComponent({
-    name: 'ContractDetailSheet',
-    props: { visible: Boolean, contractId: Number },
-    emits: ['update:visible', 'refresh', 'approve', 'reject', 'view-payment-plan'],
-    setup: props => () => h('div', { 'data-visible': String(props.visible) }),
-  }),
-}))
-vi.mock('@/views/PaymentPlanDetailSheet.vue', () => ({
-  default: defineComponent({
-    name: 'PaymentPlanDetailSheet',
-    props: { visible: Boolean, planId: Number },
-    emits: ['update:visible', 'refresh', 'record-click', 'view-approval', 'view-customer', 'view-contract'],
-    setup: props => () => h('div', { 'data-visible': String(props.visible) }),
-  }),
-}))
-vi.mock('@/views/PaymentRecordDetailSheet.vue', () => ({
-  default: defineComponent({
-    name: 'PaymentRecordDetailSheet',
-    props: { visible: Boolean, recordId: Number, record: Object, stageName: String, approval: Object },
-    emits: ['update:visible', 'refresh', 'edit', 'resubmit'],
-    setup: props => () => h('div', { 'data-visible': String(props.visible) }),
   }),
 }))
 vi.mock('@/components/dialogs/EditRecordDialog.vue', () => ({
@@ -112,10 +155,11 @@ vi.mock('@/components/dialogs/EditRecordDialog.vue', () => ({
 
 import DealJourneyDetailHost from '@/components/business-journey/DealJourneyDetailHost.vue'
 import DealJourneyDetailContent from '@/components/panels/DealJourneyDetailContent.vue'
+import DetailContextHost from '@/components/crmwolf/DetailContextHost.vue'
+import ContractDetailContent from '@/components/panels/ContractDetailContent.vue'
+import PaymentPlanDetailContent from '@/components/panels/PaymentPlanDetailContent.vue'
+import PaymentRecordDetailContent from '@/components/panels/PaymentRecordDetailContent.vue'
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
-import ContractDetailSheet from '@/views/ContractDetailSheet.vue'
-import PaymentPlanDetailSheet from '@/views/PaymentPlanDetailSheet.vue'
-import PaymentRecordDetailSheet from '@/views/PaymentRecordDetailSheet.vue'
 import EditRecordDialog from '@/components/dialogs/EditRecordDialog.vue'
 
 const contractFixture = (overrides: Partial<ContractListResponse> = {}): ContractListResponse => ({
@@ -216,6 +260,13 @@ const paymentPlanFixture = (overrides: Partial<PaymentPlanResponse> = {}): Payme
   ...overrides,
 })
 
+const customerPrefixFixture = (): DetailContextNode => ({
+  type: 'customer',
+  id: 'cus_test',
+  label: '测试客户',
+  source: 'customer-detail',
+})
+
 const createContractPayload = {
   opportunityId: 'opp_test',
   customerId: 'cus_test',
@@ -227,13 +278,15 @@ const createContractPayload = {
   subscriptionYears: 1,
 }
 
-function mountHost() {
+function mountHost(props: Record<string, unknown> = {}) {
   return mount(DealJourneyDetailHost, {
     props: {
       customerId: 'cus_test',
       customerName: '测试客户',
       journeyId: 'djy_test',
+      journeyName: '华东续约旅程',
       embedded: true,
+      ...props,
     },
     global: { plugins: [createPinia()] },
   })
@@ -259,7 +312,7 @@ describe('DealJourneyDetailHost', () => {
     confirmDelete.mockResolvedValue(true)
   })
 
-  it('renders one DealJourneyDetailContent with journey identity and no nested sheets', () => {
+  it('renders one DealJourneyDetailContent inside a single context host without nested sheets', () => {
     const wrapper = mountHost()
 
     expect(wrapper.findAllComponents(DealJourneyDetailContent)).toHaveLength(1)
@@ -267,49 +320,219 @@ describe('DealJourneyDetailHost', () => {
       customerId: 'cus_test',
       journeyId: 'djy_test',
       embedded: true,
+      showBreadcrumb: false,
     })
-    expect(wrapper.findComponent(ContractDetailSheet).exists()).toBe(false)
-    expect(wrapper.findComponent(PaymentPlanDetailSheet).exists()).toBe(false)
-    expect(wrapper.findComponent(PaymentRecordDetailSheet).exists()).toBe(false)
+    expect(wrapper.getComponent(DetailContextHost).props()).toMatchObject({
+      nodes: [{ type: 'journey', id: 'djy_test', label: '华东续约旅程' }],
+      canGoBack: false,
+      showHeader: false,
+    })
+    expect(wrapper.findComponent({ name: 'ContractDetailSheet' }).exists()).toBe(false)
+    expect(wrapper.findComponent({ name: 'PaymentPlanDetailSheet' }).exists()).toBe(false)
+    expect(wrapper.findComponent({ name: 'PaymentRecordDetailSheet' }).exists()).toBe(false)
   })
 
-  it('mounts nested contract and payment plan sheets only while open', async () => {
+  it('shows journey and contract in one context path without another Sheet', async () => {
     const wrapper = mountHost()
-    const content = wrapper.getComponent(DealJourneyDetailContent)
-
-    content.vm.$emit('view-contract', 31)
+    wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-contract', contractFixture())
     await nextTick()
-    expect(wrapper.getComponent(ContractDetailSheet).props()).toMatchObject({ contractId: 31, visible: true })
 
-    wrapper.getComponent(ContractDetailSheet).vm.$emit('update:visible', false)
-    await nextTick()
-    expect(wrapper.findComponent(ContractDetailSheet).exists()).toBe(false)
-    expect(wrapper.findComponent(DealJourneyDetailContent).exists()).toBe(true)
-
-    content.vm.$emit('view-payment-plan', 41, paymentPlanFixture())
-    await nextTick()
-    expect(wrapper.getComponent(PaymentPlanDetailSheet).props()).toMatchObject({ planId: 41, visible: true })
-
-    wrapper.getComponent(PaymentPlanDetailSheet).vm.$emit('update:visible', false)
-    await nextTick()
-    expect(wrapper.findComponent(PaymentPlanDetailSheet).exists()).toBe(false)
-    expect(wrapper.findComponent(DealJourneyDetailContent).exists()).toBe(true)
+    expect(wrapper.getComponent(DetailContextHost).props('nodes')).toMatchObject([
+      { type: 'journey', id: 'djy_test', label: '华东续约旅程' },
+      { type: 'contract', id: '31', label: '旅程合同' },
+    ])
+    expect(wrapper.getComponent(ContractDetailContent).props()).toMatchObject({
+      contractId: 31,
+      embedded: true,
+      showBreadcrumb: false,
+    })
+    expect(wrapper.findComponent({ name: 'ContractDetailSheet' }).exists()).toBe(false)
   })
 
-  it('opens a payment plan emitted by the contract sheet and closes the contract', async () => {
+  it('builds journey contract plan record breadcrumbs and supports ancestor navigation', async () => {
     const wrapper = mountHost()
-    const plan = paymentPlanFixture()
-    wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-contract', plan.contract_id)
+    const contract = contractFixture()
+    const plan = paymentPlanFixture({ contract_name: contract.contract_name, plan_number: 'PAY-001' })
+    const record: BreadcrumbPaymentRecord = {
+      ...paymentRecordFixture({ id: 51 }),
+      record_number: 'REC-051',
+    }
+
+    wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-contract', contract)
+    await nextTick()
+    wrapper.getComponent(ContractDetailContent).vm.$emit('view-payment-plan', plan)
+    await nextTick()
+    wrapper.getComponent(PaymentPlanDetailContent).vm.$emit('record-click', record)
     await nextTick()
 
-    wrapper.getComponent(ContractDetailSheet).vm.$emit('view-payment-plan', plan)
+    expect(wrapper.getComponent(DetailContextHost).props('nodes').map(node => node.label)).toEqual([
+      '华东续约旅程',
+      '旅程合同',
+      'PAY-001',
+      'REC-051',
+    ])
+
+    wrapper.getComponent(DetailContextHost).vm.$emit('navigate', 1)
+    await nextTick()
+    expect(wrapper.findComponent(ContractDetailContent).exists()).toBe(true)
+    expect(wrapper.findComponent(PaymentRecordDetailContent).exists()).toBe(false)
+  })
+
+  it('auto-inserts the contract node when opening a payment plan directly from the journey', async () => {
+    const wrapper = mountHost()
+    const contract = contractFixture()
+    const plan = paymentPlanFixture({ contract_name: contract.contract_name, plan_number: 'PAY-001' })
+
+    wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-payment-plan', plan.id, plan)
     await nextTick()
 
-    expect(wrapper.findComponent(ContractDetailSheet).exists()).toBe(false)
-    expect(wrapper.getComponent(PaymentPlanDetailSheet).props()).toMatchObject({
+    expect(wrapper.getComponent(DetailContextHost).props('nodes').map(node => node.label)).toEqual([
+      '华东续约旅程',
+      '旅程合同',
+      'PAY-001',
+    ])
+    expect(wrapper.getComponent(PaymentPlanDetailContent).props()).toMatchObject({
       planId: plan.id,
       visible: true,
+      embedded: true,
     })
+    expect(wrapper.findComponent(ContractDetailContent).exists()).toBe(false)
+  })
+
+  it('returns to the same mounted journey content element after backing out of a contract', async () => {
+    const wrapper = mountHost()
+    const journeyElement = wrapper.get('[data-testid="journey-content"]').element
+
+    wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-contract', contractFixture())
+    await nextTick()
+    expect(wrapper.get('[data-testid="journey-content"]').element).toBe(journeyElement)
+
+    wrapper.getComponent(DetailContextHost).vm.$emit('back')
+    await nextTick()
+
+    expect(wrapper.get('[data-testid="journey-content"]').element).toBe(journeyElement)
+    expect(wrapper.findComponent(ContractDetailContent).exists()).toBe(false)
+    expect(wrapper.getComponent(DetailContextHost).props()).toMatchObject({
+      nodes: [{ type: 'journey', id: 'djy_test' }],
+      canGoBack: false,
+      showHeader: false,
+    })
+  })
+
+  it('delegates customer prefix navigation to view-customer without switching internal nodes', async () => {
+    const wrapper = mountHost({ contextPrefix: [customerPrefixFixture()] })
+
+    expect(wrapper.getComponent(DetailContextHost).props()).toMatchObject({
+      showHeader: true,
+      canGoBack: true,
+    })
+    expect(wrapper.getComponent(DetailContextHost).props('nodes').map(node => node.type)).toEqual(['customer', 'journey'])
+
+    wrapper.getComponent(DetailContextHost).vm.$emit('navigate', 0)
+    await nextTick()
+
+    expect(wrapper.emitted('view-customer')).toEqual([['cus_test']])
+    expect(wrapper.getComponent(DealJourneyDetailContent).exists()).toBe(true)
+    expect(wrapper.findComponent(ContractDetailContent).exists()).toBe(false)
+    expect(wrapper.getComponent(DetailContextHost).props('nodes').map(node => node.type)).toEqual(['customer', 'journey'])
+
+    wrapper.getComponent(DetailContextHost).vm.$emit('back')
+    await nextTick()
+
+    expect(wrapper.emitted('view-customer')).toEqual([['cus_test'], ['cus_test']])
+    expect(wrapper.getComponent(DetailContextHost).props('nodes').map(node => node.type)).toEqual(['customer', 'journey'])
+  })
+
+  it('keeps the open child stack when the customer prefix is a new array of the same node', async () => {
+    const wrapper = mountHost({ contextPrefix: [customerPrefixFixture()] })
+    const contract = contractFixture()
+    wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-contract', contract)
+    await nextTick()
+    expect(wrapper.findComponent(ContractDetailContent).exists()).toBe(true)
+
+    await wrapper.setProps({
+      contextPrefix: [{ ...customerPrefixFixture(), label: '测试客户（刷新）' }],
+    })
+    await nextTick()
+
+    expect(wrapper.findComponent(ContractDetailContent).exists()).toBe(true)
+    expect(wrapper.getComponent(DetailContextHost).props('nodes')).toMatchObject([
+      { type: 'customer', id: 'cus_test', label: '测试客户（刷新）' },
+      { type: 'journey', id: 'djy_test' },
+      { type: 'contract', id: '31' },
+    ])
+  })
+
+  it('resets the child stack when the customer prefix node identity changes', async () => {
+    const wrapper = mountHost({ contextPrefix: [customerPrefixFixture()] })
+    wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-contract', contractFixture())
+    await nextTick()
+    expect(wrapper.findComponent(ContractDetailContent).exists()).toBe(true)
+
+    await wrapper.setProps({
+      contextPrefix: [{ ...customerPrefixFixture(), id: 'cus_other' }],
+    })
+    await nextTick()
+
+    expect(wrapper.findComponent(ContractDetailContent).exists()).toBe(false)
+    expect(wrapper.getComponent(DetailContextHost).props('nodes')).toMatchObject([
+      { type: 'customer', id: 'cus_other' },
+      { type: 'journey', id: 'djy_test' },
+    ])
+  })
+
+  it('resets the context stack and child state when journeyId changes', async () => {
+    const wrapper = mountHost()
+    const contract = contractFixture()
+    wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-contract', contract)
+    await nextTick()
+    wrapper.getComponent(ContractDetailContent).vm.$emit('view-payment-plan', paymentPlanFixture({ contract_name: contract.contract_name }))
+    await nextTick()
+    expect(wrapper.findComponent(PaymentPlanDetailContent).exists()).toBe(true)
+
+    await wrapper.setProps({ journeyId: 'djy_next' })
+
+    expect(wrapper.getComponent(DetailContextHost).props('nodes')).toMatchObject([
+      { type: 'journey', id: 'djy_next', label: '华东续约旅程' },
+    ])
+    expect(wrapper.findComponent(ContractDetailContent).exists()).toBe(false)
+    expect(wrapper.findComponent(PaymentPlanDetailContent).exists()).toBe(false)
+    expect(wrapper.findComponent(PaymentRecordDetailContent).exists()).toBe(false)
+    expect(wrapper.getComponent(DealJourneyDetailContent).props('journeyId')).toBe('djy_next')
+  })
+
+  it('reuses the ancestor contract node when a payment plan navigates back to its contract', async () => {
+    const wrapper = mountHost()
+    const contract = contractFixture()
+    const plan = paymentPlanFixture({ contract_name: contract.contract_name, plan_number: 'PAY-001' })
+    wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-contract', contract)
+    await nextTick()
+    wrapper.getComponent(ContractDetailContent).vm.$emit('view-payment-plan', plan)
+    await nextTick()
+
+    wrapper.getComponent(PaymentPlanDetailContent).vm.$emit('view-contract', plan.contract_id, plan)
+    await nextTick()
+
+    expect(wrapper.getComponent(DetailContextHost).props('nodes').map(node => `${node.type}:${node.id}`)).toEqual([
+      'journey:djy_test',
+      'contract:31',
+    ])
+    expect(wrapper.getComponent(ContractDetailContent).props('contractId')).toBe(31)
+    expect(wrapper.findComponent(PaymentPlanDetailContent).exists()).toBe(false)
+  })
+
+  it('emits close from the context header without altering the context stack', async () => {
+    const wrapper = mountHost()
+    wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-contract', contractFixture())
+    await nextTick()
+
+    wrapper.getComponent(DetailContextHost).vm.$emit('close')
+
+    expect(wrapper.emitted('close')).toHaveLength(1)
+    expect(wrapper.getComponent(DetailContextHost).props('nodes')).toMatchObject([
+      { type: 'journey' },
+      { type: 'contract' },
+    ])
   })
 
   it('opens the existing contract form and refreshes journey after create success', async () => {
@@ -350,6 +573,22 @@ describe('DealJourneyDetailHost', () => {
     await expectRefresh(wrapper)
   })
 
+  it('returns to the journey root when the open contract is deleted', async () => {
+    const wrapper = mountHost()
+    wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-contract', contractFixture())
+    await nextTick()
+    expect(wrapper.findComponent(ContractDetailContent).exists()).toBe(true)
+
+    wrapper.getComponent(DealJourneyDetailContent).vm.$emit('delete-contract', contractFixture())
+    await flushPromises()
+
+    expect(wrapper.findComponent(ContractDetailContent).exists()).toBe(false)
+    expect(wrapper.getComponent(DetailContextHost).props('nodes')).toMatchObject([
+      { type: 'journey', id: 'djy_test' },
+    ])
+    await expectRefresh(wrapper)
+  })
+
   it('submits and withdraws contract approval through the existing APIs', async () => {
     const wrapper = mountHost()
     const content = wrapper.getComponent(DealJourneyDetailContent)
@@ -366,38 +605,38 @@ describe('DealJourneyDetailHost', () => {
     expect(wrapper.emitted('refresh')).toHaveLength(2)
   })
 
-  it('mounts payment record detail from plan events and unmounts it on close', async () => {
+  it('mounts payment record detail from plan events within the same host', async () => {
     const wrapper = mountHost()
-    const plan = paymentPlanFixture()
+    const contract = contractFixture()
+    const plan = paymentPlanFixture({ contract_name: contract.contract_name })
     const record = plan.payment_records[0]
-    const content = wrapper.getComponent(DealJourneyDetailContent)
-    content.vm.$emit('view-payment-plan', plan.id, plan)
+    wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-payment-plan', plan.id, plan)
     await nextTick()
 
-    wrapper.getComponent(PaymentPlanDetailSheet).vm.$emit('record-click', record)
+    wrapper.getComponent(PaymentPlanDetailContent).vm.$emit('record-click', record)
     await nextTick()
-    expect(wrapper.getComponent(PaymentRecordDetailSheet).props()).toMatchObject({
+    expect(wrapper.getComponent(PaymentRecordDetailContent).props()).toMatchObject({
       recordId: record.id,
       visible: true,
       stageName: '首款',
+      record: expect.objectContaining({ id: record.id }),
     })
-    expect(wrapper.findComponent(PaymentPlanDetailSheet).exists()).toBe(false)
+    expect(wrapper.findComponent(PaymentPlanDetailContent).exists()).toBe(false)
 
-    wrapper.getComponent(PaymentRecordDetailSheet).vm.$emit('update:visible', false)
+    wrapper.getComponent(DetailContextHost).vm.$emit('back')
     await nextTick()
-    expect(wrapper.findComponent(PaymentRecordDetailSheet).exists()).toBe(false)
-    expect(wrapper.findComponent(DealJourneyDetailContent).exists()).toBe(true)
+    expect(wrapper.getComponent(PaymentPlanDetailContent).props('planId')).toBe(plan.id)
+    expect(wrapper.findComponent(PaymentRecordDetailContent).exists()).toBe(false)
 
-    content.vm.$emit('view-payment-plan', plan.id, plan)
+    wrapper.getComponent(PaymentPlanDetailContent).vm.$emit('view-approval', record)
     await nextTick()
-    wrapper.getComponent(PaymentPlanDetailSheet).vm.$emit('view-approval', record)
-    await nextTick()
-    expect(wrapper.getComponent(PaymentRecordDetailSheet).props('visible')).toBe(true)
+    expect(wrapper.getComponent(PaymentRecordDetailContent).props('recordId')).toBe(record.id)
   })
 
   it('reloads authoritative payment record state before refreshing journey and parent', async () => {
     const wrapper = mountHost()
-    const plan = paymentPlanFixture()
+    const contract = contractFixture()
+    const plan = paymentPlanFixture({ contract_name: contract.contract_name })
     const record = plan.payment_records[0]
     const updatedApproval = approvalFixture({ id: 902, status: 'APPROVED' })
     const updatedRecord = paymentRecordDetailFixture({
@@ -415,13 +654,13 @@ describe('DealJourneyDetailHost', () => {
 
     wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-payment-plan', plan.id, plan)
     await nextTick()
-    wrapper.getComponent(PaymentPlanDetailSheet).vm.$emit('record-click', record)
+    wrapper.getComponent(PaymentPlanDetailContent).vm.$emit('record-click', record)
     await nextTick()
-    wrapper.getComponent(PaymentRecordDetailSheet).vm.$emit('refresh')
+    wrapper.getComponent(PaymentRecordDetailContent).vm.$emit('refresh')
     await flushPromises()
 
     expect(paymentApi.getPaymentRecordDetail).toHaveBeenCalledWith(record.id)
-    expect(wrapper.getComponent(PaymentRecordDetailSheet).props()).toMatchObject({
+    expect(wrapper.getComponent(PaymentRecordDetailContent).props()).toMatchObject({
       visible: true,
       record: updatedRecord,
       approval: updatedApproval,
@@ -435,18 +674,19 @@ describe('DealJourneyDetailHost', () => {
     const error = new Error('detail refresh failed')
     paymentApi.getPaymentRecordDetail.mockRejectedValueOnce(error)
     const wrapper = mountHost()
-    const plan = paymentPlanFixture()
+    const contract = contractFixture()
+    const plan = paymentPlanFixture({ contract_name: contract.contract_name })
     const record = plan.payment_records[0]
 
     wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-payment-plan', plan.id, plan)
     await nextTick()
-    wrapper.getComponent(PaymentPlanDetailSheet).vm.$emit('record-click', record)
+    wrapper.getComponent(PaymentPlanDetailContent).vm.$emit('record-click', record)
     await nextTick()
-    wrapper.getComponent(PaymentRecordDetailSheet).vm.$emit('refresh')
+    wrapper.getComponent(PaymentRecordDetailContent).vm.$emit('refresh')
     await flushPromises()
 
     expect(handleApiError).toHaveBeenCalledWith(error, '刷新回款记录详情')
-    expect(wrapper.getComponent(PaymentRecordDetailSheet).props()).toMatchObject({
+    expect(wrapper.getComponent(PaymentRecordDetailContent).props()).toMatchObject({
       visible: true,
       record,
       stageName: plan.stage_name,
@@ -456,27 +696,29 @@ describe('DealJourneyDetailHost', () => {
     expect(wrapper.emitted('refresh')).toHaveLength(1)
   })
 
-  it('does not restore a payment record closed while its detail refresh is pending', async () => {
+  it('does not restore a payment record left while its detail refresh is pending', async () => {
     const detailRequest = createDeferred<PaymentRecordDetailResponse>()
     paymentApi.getPaymentRecordDetail.mockReturnValueOnce(detailRequest.promise)
     const wrapper = mountHost()
-    const plan = paymentPlanFixture()
+    const contract = contractFixture()
+    const plan = paymentPlanFixture({ contract_name: contract.contract_name })
     const record = plan.payment_records[0]
 
     wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-payment-plan', plan.id, plan)
     await nextTick()
-    wrapper.getComponent(PaymentPlanDetailSheet).vm.$emit('record-click', record)
+    wrapper.getComponent(PaymentPlanDetailContent).vm.$emit('record-click', record)
     await nextTick()
-    wrapper.getComponent(PaymentRecordDetailSheet).vm.$emit('refresh')
+    wrapper.getComponent(PaymentRecordDetailContent).vm.$emit('refresh')
     await nextTick()
-    wrapper.getComponent(PaymentRecordDetailSheet).vm.$emit('update:visible', false)
+    wrapper.getComponent(DetailContextHost).vm.$emit('back')
     await nextTick()
 
     detailRequest.resolve(paymentRecordDetailFixture({ id: record.id, actual_amount: 99000 }))
     await flushPromises()
 
-    expect(wrapper.findComponent(PaymentRecordDetailSheet).exists()).toBe(false)
-    expect(wrapper.findComponent(DealJourneyDetailContent).exists()).toBe(true)
+    expect(wrapper.findComponent(PaymentRecordDetailContent).exists()).toBe(false)
+    expect(wrapper.getComponent(PaymentPlanDetailContent).props('planId')).toBe(plan.id)
+    expect(wrapper.getComponent(DealJourneyDetailContent).exists()).toBe(true)
     expect(journeyRefresh).toHaveBeenCalledOnce()
     expect(wrapper.emitted('refresh')).toHaveLength(1)
   })
@@ -485,7 +727,8 @@ describe('DealJourneyDetailHost', () => {
     const detailRequest = createDeferred<PaymentRecordDetailResponse>()
     paymentApi.getPaymentRecordDetail.mockReturnValueOnce(detailRequest.promise)
     const wrapper = mountHost()
-    const firstPlan = paymentPlanFixture()
+    const contract = contractFixture()
+    const firstPlan = paymentPlanFixture({ contract_name: contract.contract_name })
     const firstRecord = firstPlan.payment_records[0]
     const secondRecord = paymentRecordFixture({ id: 52, actual_amount: 25000 })
     const secondPlan = paymentPlanFixture({
@@ -496,20 +739,21 @@ describe('DealJourneyDetailHost', () => {
 
     wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-payment-plan', firstPlan.id, firstPlan)
     await nextTick()
-    wrapper.getComponent(PaymentPlanDetailSheet).vm.$emit('record-click', firstRecord)
+    wrapper.getComponent(PaymentPlanDetailContent).vm.$emit('record-click', firstRecord)
     await nextTick()
-    wrapper.getComponent(PaymentRecordDetailSheet).vm.$emit('refresh')
+    wrapper.getComponent(PaymentRecordDetailContent).vm.$emit('refresh')
     await nextTick()
 
     wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-payment-plan', secondPlan.id, secondPlan)
     await nextTick()
-    wrapper.getComponent(PaymentPlanDetailSheet).vm.$emit('record-click', secondRecord)
+    wrapper.getComponent(PaymentPlanDetailContent).vm.$emit('record-click', secondRecord)
     await nextTick()
     detailRequest.resolve(paymentRecordDetailFixture({ id: firstRecord.id, actual_amount: 99000 }))
     await flushPromises()
 
-    expect(wrapper.getComponent(PaymentRecordDetailSheet).props()).toMatchObject({
+    expect(wrapper.getComponent(PaymentRecordDetailContent).props()).toMatchObject({
       visible: true,
+      recordId: secondRecord.id,
       record: secondRecord,
       stageName: secondPlan.stage_name,
     })
@@ -521,7 +765,8 @@ describe('DealJourneyDetailHost', () => {
     const journeyRequest = createDeferred<boolean>()
     journeyRefresh.mockReturnValueOnce(journeyRequest.promise)
     const wrapper = mountHost()
-    const plan = paymentPlanFixture()
+    const contract = contractFixture()
+    const plan = paymentPlanFixture({ contract_name: contract.contract_name })
     const record = plan.payment_records[0]
     const updatedApproval = approvalFixture({ id: 902, status: 'APPROVED' })
     const updatedRecord = paymentRecordDetailFixture({
@@ -541,9 +786,9 @@ describe('DealJourneyDetailHost', () => {
 
     wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-payment-plan', plan.id, plan)
     await nextTick()
-    wrapper.getComponent(PaymentPlanDetailSheet).vm.$emit('record-click', record)
+    wrapper.getComponent(PaymentPlanDetailContent).vm.$emit('record-click', record)
     await nextTick()
-    wrapper.getComponent(PaymentRecordDetailSheet).vm.$emit('edit')
+    wrapper.getComponent(PaymentRecordDetailContent).vm.$emit('edit')
     await nextTick()
 
     const update: PaymentRecordUpdate = { actual_amount: 62000, notes: 'updated' }
@@ -552,7 +797,7 @@ describe('DealJourneyDetailHost', () => {
 
     expect(paymentApi.updatePaymentRecord).toHaveBeenCalledWith(record.id, update)
     expect(paymentApi.getPaymentRecordDetail).toHaveBeenCalledWith(record.id)
-    expect(wrapper.getComponent(PaymentRecordDetailSheet).props()).toMatchObject({
+    expect(wrapper.getComponent(PaymentRecordDetailContent).props()).toMatchObject({
       visible: true,
       record: updatedRecord,
       approval: updatedApproval,
@@ -574,7 +819,8 @@ describe('DealJourneyDetailHost', () => {
     const journeyRequest = createDeferred<boolean>()
     journeyRefresh.mockReturnValueOnce(journeyRequest.promise)
     const wrapper = mountHost()
-    const plan = paymentPlanFixture()
+    const contract = contractFixture()
+    const plan = paymentPlanFixture({ contract_name: contract.contract_name })
     const record = plan.payment_records[0]
     const resubmittedApproval = approvalFixture({ id: 903, status: 'PENDING', current_approver_name: '总经理' })
     const resubmittedRecord = paymentRecordDetailFixture({
@@ -594,9 +840,9 @@ describe('DealJourneyDetailHost', () => {
 
     wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-payment-plan', plan.id, plan)
     await nextTick()
-    wrapper.getComponent(PaymentPlanDetailSheet).vm.$emit('record-click', record)
+    wrapper.getComponent(PaymentPlanDetailContent).vm.$emit('record-click', record)
     await nextTick()
-    wrapper.getComponent(PaymentRecordDetailSheet).vm.$emit('resubmit')
+    wrapper.getComponent(PaymentRecordDetailContent).vm.$emit('resubmit')
     await nextTick()
 
     const update: PaymentRecordUpdate = { actual_amount: 58000 }
@@ -606,7 +852,7 @@ describe('DealJourneyDetailHost', () => {
     expect(paymentApi.updatePaymentRecord).toHaveBeenCalledWith(record.id, update)
     expect(submitEntity).toHaveBeenCalledWith('PAYMENT', record.id)
     expect(paymentApi.getPaymentRecordDetail).toHaveBeenCalledWith(record.id)
-    expect(wrapper.getComponent(PaymentRecordDetailSheet).props()).toMatchObject({
+    expect(wrapper.getComponent(PaymentRecordDetailContent).props()).toMatchObject({
       visible: true,
       record: resubmittedRecord,
       approval: resubmittedApproval,
@@ -632,20 +878,21 @@ describe('DealJourneyDetailHost', () => {
     const journeyRequest = createDeferred<boolean>()
     journeyRefresh.mockReturnValueOnce(journeyRequest.promise)
     const wrapper = mountHost()
-    const plan = paymentPlanFixture()
+    const contract = contractFixture()
+    const plan = paymentPlanFixture({ contract_name: contract.contract_name })
     const record = plan.payment_records[0]
 
     wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-payment-plan', plan.id, plan)
     await nextTick()
-    wrapper.getComponent(PaymentPlanDetailSheet).vm.$emit('record-click', record)
+    wrapper.getComponent(PaymentPlanDetailContent).vm.$emit('record-click', record)
     await nextTick()
-    wrapper.getComponent(PaymentRecordDetailSheet).vm.$emit('edit')
+    wrapper.getComponent(PaymentRecordDetailContent).vm.$emit('edit')
     await nextTick()
     wrapper.getComponent(EditRecordDialog).vm.$emit('submit', record.id, { notes: 'updated' })
     await flushPromises()
 
     expect(handleApiError).toHaveBeenCalledWith(error, '刷新回款记录详情')
-    expect(wrapper.getComponent(PaymentRecordDetailSheet).props()).toMatchObject({
+    expect(wrapper.getComponent(PaymentRecordDetailContent).props()).toMatchObject({
       visible: true,
       record,
       stageName: plan.stage_name,

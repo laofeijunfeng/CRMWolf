@@ -112,7 +112,7 @@ const emit = defineEmits<{
   'submit-contract-approval': [contract: ContractListResponse]
   'withdraw-contract-approval': [contract: ContractListResponse]
   'delete-contract': [contract: ContractListResponse]
-  'view-contract': [contractId: number]
+  'view-contract': [contract: ContractListResponse]
   'view-payment-plan': [planId: number, plan: PaymentPlanResponse]
   'create-contract': [{
     opportunityId: string
@@ -622,7 +622,9 @@ function handleCreateContract(): void {
 
 function handleViewContract(contractId?: number): void {
   if (contractId === undefined) return
-  emit('view-contract', contractId)
+  const contract = relatedContracts.value.find(item => item.id === contractId)
+  if (contract === undefined) return
+  emit('view-contract', contract)
 }
 
 function handleEditContract(contract: ContractListResponse): void {

@@ -47,6 +47,7 @@ const boardRequestSequence = ref(0)
 const boardHasSuccess = ref(false)
 const selectedJourneyCustomerId = ref<string | null>(null)
 const selectedJourneyCustomerName = ref<string | undefined>(undefined)
+const selectedJourneyName = ref<string | undefined>(undefined)
 const selectedJourneyId = ref<string | null>(null)
 const journeyDetailVisible = ref(false)
 let journeyDetailTrigger: HTMLElement | null = null
@@ -280,10 +281,21 @@ function findCustomerName(customerId: string, journeyPublicId: string): string |
   return boardMatch?.customer_name
 }
 
+function findJourneyName(customerId: string, journeyPublicId: string): string | undefined {
+  const tableMatch = tableItems.value.find(item => item.customer_id === customerId && item.public_id === journeyPublicId)
+  if (tableMatch !== undefined) return tableMatch.name
+
+  return board.value?.columns
+    .flatMap(column => column.cards)
+    .find(card => card.customer_id === customerId && card.public_id === journeyPublicId)
+    ?.journey_name
+}
+
 function handleRowClick(payload: { customerId: string; journeyPublicId: string }): void {
   journeyDetailTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null
   selectedJourneyCustomerId.value = payload.customerId
   selectedJourneyCustomerName.value = findCustomerName(payload.customerId, payload.journeyPublicId)
+  selectedJourneyName.value = findJourneyName(payload.customerId, payload.journeyPublicId)
   selectedJourneyId.value = payload.journeyPublicId
   journeyDetailVisible.value = true
 }
@@ -292,6 +304,7 @@ function clearJourneyDetailSelection(): void {
   journeyDetailVisible.value = false
   selectedJourneyCustomerId.value = null
   selectedJourneyCustomerName.value = undefined
+  selectedJourneyName.value = undefined
   selectedJourneyId.value = null
 }
 
@@ -433,6 +446,7 @@ onMounted(() => {
     :customer-id="selectedJourneyCustomerId"
     :customer-name="selectedJourneyCustomerName"
     :journey-id="selectedJourneyId"
+    :journey-name="selectedJourneyName"
     :visible="journeyDetailVisible"
     @update:visible="handleJourneyDetailVisibleChange"
     @refresh="refreshJourneyProjection"
