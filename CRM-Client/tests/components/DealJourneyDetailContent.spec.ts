@@ -194,8 +194,43 @@ vi.mock('@/components/dialogs/InvoiceApplicationFormDialog.vue', () => ({
 vi.mock('@/components/dialogs/LicenseApplicationFormDialog.vue', () => ({
   default: defineComponent({ name: 'LicenseApplicationFormDialog', setup: () => () => null }),
 }))
+const contractViewPayload = vi.hoisted(() => ({
+  id: 31,
+  contract_number: 'CON-31',
+  contract_name: '旅程合同',
+  customer_id: 'cus_test_19',
+  customer_name: '上海测试客户',
+  opportunity_id: 'opp_test_88',
+  opportunity_name: 'CRM 升级项目',
+  signing_contact_id: 1,
+  user_count: 20,
+  total_amount: '320000',
+  license_type: 'SUBSCRIPTION',
+  subscription_years: 1,
+  standard_unit_price: '16000',
+  status: 'SIGNED',
+  approval_phase: 'approved',
+  signing_date: '2026-09-01',
+  effective_date: null,
+  expiry_date: null,
+  owner_id: '9',
+  creator_id: '9',
+  created_time: '2026-09-01T00:00:00',
+  last_modified_time: '2026-09-01T00:00:00',
+}))
 vi.mock('@/components/panels/ContractsPanel.vue', () => ({
-  default: defineComponent({ name: 'ContractsPanel', setup: () => () => h('div', 'contracts') }),
+  default: defineComponent({
+    name: 'ContractsPanel',
+    props: { contracts: { type: Array, default: () => [] } },
+    emits: ['view'],
+    setup: (_, { emit }) => () => h('div', { 'data-testid': 'contracts-panel' }, [
+      h('button', {
+        type: 'button',
+        'data-testid': 'contracts-view',
+        onClick: () => emit('view', contractViewPayload.id),
+      }, 'view contract'),
+    ]),
+  }),
 }))
 vi.mock('@/components/panels/PaymentsPanel.vue', () => ({
   default: defineComponent({ name: 'PaymentsPanel', setup: () => () => h('div', 'payments') }),
@@ -384,5 +419,18 @@ describe('DealJourneyDetailContent fulfillment workbench', () => {
     expect(wrapper.find('[data-testid="journey-opportunity-actions"]').exists()).toBe(false)
     const licensePanel = wrapper.get('[data-testid="journey-license-panel"]')
     expect(licensePanel.attributes('data-customer-id')).toBe(CUSTOMER_PUBLIC_ID)
+  })
+
+  it('emits the full contract row on view-contract instead of only the numeric id', async () => {
+    dealJourneyApi.getDetail.mockResolvedValue(detailFixture(
+      journeyFixture(),
+      opportunityFixture({ win_probability: 100 })
+    ))
+    contractApi.getContractByOpportunity.mockResolvedValue(contractViewPayload)
+    const wrapper = await mountDetail()
+
+    await wrapper.get('[data-testid="contracts-view"]').trigger('click')
+
+    expect(wrapper.emitted('view-contract')).toEqual([[contractViewPayload]])
   })
 })
