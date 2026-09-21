@@ -2,9 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useDataTableExport } from '../useDataTableExport'
 import { downloadBlob } from '@/utils/downloadBlob'
 
-const handleApiError = vi.fn()
-const toastSuccess = vi.fn()
-
+const { handleApiError, toastSuccess } = vi.hoisted(() => ({
+  handleApiError: vi.fn(),
+  toastSuccess: vi.fn(),
+}))
 vi.mock('@/utils/errorHandler', () => ({
   handleApiError,
 }))
