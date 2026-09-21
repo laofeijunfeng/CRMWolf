@@ -26,11 +26,13 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import FollowUpFormDialog from '@/components/dialogs/FollowUpFormDialog.vue'
 import {
   followUpTaskApi,
+  type FollowUpTaskExportTab,
   type FollowUpTaskItem,
   type FollowUpTaskPendingConfirmation,
   type FollowUpTaskStatusFilter,
   type FollowUpTaskTransitionResponse,
 } from '@/api/followUpTask'
+import { type ListExportPayload } from '@/api/listExport'
 import {
   createCommandRequestOptions,
   isNetworkOrTimeoutError,
@@ -44,11 +46,14 @@ import { handleApiError } from '@/utils/errorHandler'
 import { confirmDialog } from '@/utils/confirmDialog'
 import { useHeaderStore, type TabItem } from '@/stores/header'
 import { useFollowUpConfirmationStore } from '@/stores/followUpConfirmation'
+import { usePermissionStore } from '@/stores/permissions'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
+import { useDataTableExport } from '@/composables/useDataTableExport'
 import { formatLocalDate } from '@/utils/format'
 import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
+import { buildDataTableExportFileName } from '@/utils/downloadBlob'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 
 usePageTitle()
@@ -71,6 +76,7 @@ type TrackingRow = FollowUpTaskItem & {
 }
 
 const headerStore = useHeaderStore()
+const permissionStore = usePermissionStore()
 const confirmationStore = useFollowUpConfirmationStore()
 const { resolvingCaseId, postResolveRefreshError } = storeToRefs(confirmationStore)
 const { resolveCase } = confirmationStore
@@ -116,6 +122,12 @@ const tabs = computed<TabItem[]>(() => [
 
 const fields: ListFieldDefinition[] = [
   {
+    key: 'public_id',
+    label: '业务 ID',
+    type: 'text',
+    export: true,
+  },
+  {
     key: 'customer_name',
     label: '客户',
     type: 'text',
@@ -151,6 +163,38 @@ const fields: ListFieldDefinition[] = [
     sort: true
   },
 ]
+
+const canExportFollowUpTasks = computed(() => permissionStore.hasPermission('follow_up_task:export'))
+
+interface FollowUpTaskListExportContext {
+  tab: FollowUpTaskExportTab
+  search: string | undefined
+  filters: ListFilterCondition[]
+  sorts: ListSortCondition[]
+}
+
+const currentFollowUpTaskListContext = (): FollowUpTaskListExportContext => ({
+  tab: taskStatusForTab(activeTab.value),
+  search: search.value.trim() || undefined,
+  filters: [...activeFilters.value],
+  sorts: [...activeSorts.value],
+})
+
+const { exportFields: exportFollowUpTaskFields } = useDataTableExport({
+  request: (fields) => {
+    const { tab, search, filters, sorts } = currentFollowUpTaskListContext()
+    const payload: ListExportPayload<FollowUpTaskExportTab> = { fields, tab, filters, sorts }
+    if (search !== undefined) {
+      payload.search = search
+    }
+    return followUpTaskApi.exportFollowUpTasks(payload)
+  },
+  fileName: () => buildDataTableExportFileName(
+    '客户追踪列表',
+    tabs.value.find((tab) => tab.key === activeTab.value)?.label ?? '待处理',
+    new Date(),
+  ),
+})
 
 const customFilterViews = useCustomFilterViews({
   viewKey: 'customer-tracking.list',
@@ -832,6 +876,9 @@ watchEffect(() => {
 <template>
   <div class="customer-tracking-page">
     <DataTable
+      :export-enabled="canExportFollowUpTasks"
+      export-title="客户追踪列表"
+      :export-handler="exportFollowUpTaskFields"
       :fields="fields"
       :data="rows"
       :loading="loading"
