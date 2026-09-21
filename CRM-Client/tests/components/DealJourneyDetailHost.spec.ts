@@ -443,6 +443,44 @@ describe('DealJourneyDetailHost', () => {
     expect(wrapper.getComponent(DetailContextHost).props('nodes').map(node => node.type)).toEqual(['customer', 'journey'])
   })
 
+  it('keeps the open child stack when the customer prefix is a new array of the same node', async () => {
+    const wrapper = mountHost({ contextPrefix: [customerPrefixFixture()] })
+    const contract = contractFixture()
+    wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-contract', contract)
+    await nextTick()
+    expect(wrapper.findComponent(ContractDetailContent).exists()).toBe(true)
+
+    await wrapper.setProps({
+      contextPrefix: [{ ...customerPrefixFixture(), label: '测试客户（刷新）' }],
+    })
+    await nextTick()
+
+    expect(wrapper.findComponent(ContractDetailContent).exists()).toBe(true)
+    expect(wrapper.getComponent(DetailContextHost).props('nodes')).toMatchObject([
+      { type: 'customer', id: 'cus_test', label: '测试客户（刷新）' },
+      { type: 'journey', id: 'djy_test' },
+      { type: 'contract', id: '31' },
+    ])
+  })
+
+  it('resets the child stack when the customer prefix node identity changes', async () => {
+    const wrapper = mountHost({ contextPrefix: [customerPrefixFixture()] })
+    wrapper.getComponent(DealJourneyDetailContent).vm.$emit('view-contract', contractFixture())
+    await nextTick()
+    expect(wrapper.findComponent(ContractDetailContent).exists()).toBe(true)
+
+    await wrapper.setProps({
+      contextPrefix: [{ ...customerPrefixFixture(), id: 'cus_other' }],
+    })
+    await nextTick()
+
+    expect(wrapper.findComponent(ContractDetailContent).exists()).toBe(false)
+    expect(wrapper.getComponent(DetailContextHost).props('nodes')).toMatchObject([
+      { type: 'customer', id: 'cus_other' },
+      { type: 'journey', id: 'djy_test' },
+    ])
+  })
+
   it('resets the context stack and child state when journeyId changes', async () => {
     const wrapper = mountHost()
     const contract = contractFixture()

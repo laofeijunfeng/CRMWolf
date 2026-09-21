@@ -206,11 +206,15 @@ function resetContextState(): void {
   recordEditDialogOpen.value = false
 }
 
+function prefixIdentity(nodes: readonly DetailContextNode[]): string {
+  return nodes.map(node => `${node.type}:${node.id}`).join('|')
+}
+
 watch(
   [
     (): string => props.journeyId,
     (): string => journeyLabel(),
-    (): readonly DetailContextNode[] => props.contextPrefix,
+    (): string => prefixIdentity(props.contextPrefix),
   ] as const,
   () => { resetContextState() },
   { immediate: true },
