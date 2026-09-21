@@ -68,6 +68,7 @@ from app.services.opportunity_presenter import (
     deal_journey_public_id_map as _deal_journey_public_id_map,
     opportunity_detail_response,
     opportunity_product_payload as _opportunity_product_payload,
+    opportunity_product_payloads as _opportunity_product_payloads,
     opportunity_response_dict as _opportunity_response_dict,
     resolve_opportunity_approval_phase as _resolve_opportunity_approval_phase,
 )
@@ -417,6 +418,9 @@ def _build_opportunity_list_responses(projection_db, opportunities, team_id: int
             .all()
         )
         customers = {c.id: c for c in customers_list}
+    product_payloads = _opportunity_product_payloads(projection_db, opportunities)
+    empty_product_payload = _opportunity_product_payload(None)
+
 
     for opp in opportunities:
         customer = customers.get(opp.customer_id)
@@ -474,7 +478,7 @@ def _build_opportunity_list_responses(projection_db, opportunities, team_id: int
             "stage_info": stage_info,
             "owner_info": users_info.get(str(opp.owner_id)),
         }
-        opp_dict.update(_opportunity_product_payload(opp))
+        opp_dict.update(product_payloads.get(opp.id, empty_product_payload))
         result.append(OpportunityListResponse(**opp_dict))
 
     return result
@@ -537,7 +541,7 @@ def export_opportunities(
     )
 
     status_value = {"active": "0", "won": "1", "lost": "2"}.get(request.tab)
-    query = opportunity_crud.build_list_query(
+    query = run_or_400(lambda: opportunity_crud.build_list_query(
         db,
         team_id=team_id,
         status=status_value,
@@ -545,7 +549,7 @@ def export_opportunities(
         search=request.search,
         filters=request.filters,
         sorts=request.sorts,
-    )
+    ))
     stream = query.enable_eagerloads(False).execution_options(stream_results=True).yield_per(500)
     rows = _iter_opportunity_export_rows(stream, team_id, projection_session_factory=SessionLocal)
     generated = run_list_export_or_400(lambda: create_list_export_file(

@@ -818,7 +818,7 @@ def export_invoice_applications(
     db: Session = Depends(get_db),
 ) -> FileResponse:
     current_user_id, visible_customer_ids = _invoice_view_scope(db, current_user, team_id)
-    query = invoice_application_crud.build_list_query(
+    query = run_or_400(lambda: invoice_application_crud.build_list_query(
         db,
         team_id=team_id,
         status=INVOICE_TAB_STATUS.get(request.tab),
@@ -827,7 +827,7 @@ def export_invoice_applications(
         search=request.search,
         filters=request.filters,
         sorts=request.sorts,
-    )
+    ))
     stream = query.enable_eagerloads(False).execution_options(stream_results=True).yield_per(500)
     rows = _iter_invoice_export_rows(stream, team_id, projection_session_factory=SessionLocal)
     generated = run_list_export_or_400(lambda: create_list_export_file(

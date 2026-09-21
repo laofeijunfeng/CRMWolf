@@ -571,3 +571,15 @@ def test_follow_up_export_batch_loads_customers_users_and_confirmations(client, 
     assert confirmation_calls == [[task.id]]
     assert user_calls and task.owner_id in user_calls[0]
     recall.assert_not_called()
+
+
+def test_follow_up_export_unknown_filter_returns_400(client, monkeypatch):
+    _grant(monkeypatch, "follow_up_task:export", "customer:view:own")
+
+    response = client.post("/v1/follow-up-tasks/export", json=_export_body(
+        fields=["public_id"],
+        filters=[{"field": "missing", "op": "eq", "value": "x"}],
+    ))
+
+    assert response.status_code == 400, response.text
+    assert "未知筛选字段" in response.text

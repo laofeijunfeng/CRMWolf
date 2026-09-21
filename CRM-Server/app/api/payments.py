@@ -1011,7 +1011,7 @@ def export_payment_plans(
     db: Session = Depends(get_db),
 ) -> FileResponse:
     current_user_id = _payment_view_own_user_id(db, current_user, team_id)
-    query = payment_plan_crud.build_list_query(
+    query = run_or_400(lambda: payment_plan_crud.build_list_query(
         db,
         team_id=team_id,
         status=PAYMENT_PLAN_TAB_STATUS.get(request.tab),
@@ -1019,7 +1019,7 @@ def export_payment_plans(
         search=request.search,
         filters=request.filters,
         sorts=request.sorts,
-    )
+    ))
     stream = query.enable_eagerloads(False).execution_options(stream_results=True).yield_per(500)
     rows = _iter_payment_plan_export_rows(stream, projection_session_factory=SessionLocal)
     generated = run_list_export_or_400(lambda: create_list_export_file(
@@ -2213,7 +2213,7 @@ def export_payment_records(
     db: Session = Depends(get_db),
 ) -> FileResponse:
     current_user_id = _payment_view_own_user_id(db, current_user, team_id)
-    query = payment_record_crud.build_list_query(
+    query = run_or_400(lambda: payment_record_crud.build_list_query(
         db,
         team_id=team_id,
         approval_status=PAYMENT_RECORD_TAB_APPROVAL_STATUS.get(request.tab),
@@ -2221,7 +2221,7 @@ def export_payment_records(
         search=request.search,
         filters=request.filters,
         sorts=request.sorts,
-    )
+    ))
     stream = query.enable_eagerloads(False).execution_options(stream_results=True).yield_per(500)
     rows = _iter_payment_record_export_rows(stream, team_id, projection_session_factory=SessionLocal)
     generated = run_list_export_or_400(lambda: create_list_export_file(

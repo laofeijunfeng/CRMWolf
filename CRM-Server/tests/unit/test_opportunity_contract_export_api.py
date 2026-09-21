@@ -24,7 +24,7 @@ from app.models.lead import Lead, LeadProduct
 from app.models.license_application import LicenseApplication
 from app.models.approval import Approval, ApprovalFlow, ApprovalNode, ApprovalRecord
 from app.models.opportunity import Opportunity, OpportunityProductModule
-from app.models.product import Product
+from app.models.product import Product, ProductModule
 from app.models.user import User, UserStatus
 
 
@@ -43,6 +43,7 @@ def db_session():
     tables = [
         User.__table__,
         Product.__table__,
+        ProductModule.__table__,
         Customer.__table__,
         CustomerProduct.__table__,
         Lead.__table__,
@@ -317,3 +318,115 @@ def test_contract_export_blank_contract_number_stays_blank(client, db_session, m
     assert rows[0] == ("合同编号", "负责人")
     assert rows[1][0] == "HT-2026-001"
     assert rows[1][1] == "销售张"
+
+
+def test_opportunity_export_loads_product_off_the_stream_session(client, db_session, monkeypatch):
+    from sqlalchemy import event
+
+    _grant(monkeypatch, "opportunity:export", "opportunity:view:all")
+    db_session.add(User(id=1, email="sales@example.com", name="销售张", status=UserStatus.ACTIVE))
+    db_session.add(Product(
+        id=1,
+        public_id="prd_crm",
+        team_id=1,
+        code="CRM",
+        name="CRM产品",
+        created_by="1",
+    ))
+    _seed_opportunity(
+        db_session,
+        opportunity_name="带产品商机",
+        owner_id="1",
+        product_id=1,
+    )
+    db_session.commit()
+
+    stream_product_sql: list[str] = []
+
+    @event.listens_for(db_session, "do_orm_execute")
+    def _capture_stream_product_sql(execute_state):
+        statement = str(execute_state.statement)
+        if "crm_products" in statement or "crm_opportunity_product_modules" in statement:
+            stream_product_sql.append(statement)
+
+    response = client.post("/v1/opportunities/export", json={
+        "fields": ["opportunity_name", "product_name"],
+        "tab": "all",
+        "filters": [],
+        "sorts": [],
+    })
+
+    assert response.status_code == 200, response.text
+    rows = _workbook_rows(response)
+    assert rows[0] == ("商机名称", "产品")
+    assert rows[1] == ("带产品商机", "CRM产品")
+    assert stream_product_sql == []
+
+
+def test_opportunity_and_contract_export_unknown_filter_returns_400(client, db_session, monkeypatch):
+    _grant(monkeypatch, "opportunity:export", "opportunity:view:all", "contract:export", "contract:view:all")
+    unknown_filter = [{"field": "missing", "op": "eq", "value": "x"}]
+
+    opportunity_response = client.post("/v1/opportunities/export", json={
+        "fields": ["opportunity_name"],
+        "tab": "all",
+        "filters": unknown_filter,
+        "sorts": [],
+    })
+    contract_response = client.post("/v1/contracts/export", json={
+        "fields": ["contract_name"],
+        "tab": "all",
+        "filters": unknown_filter,
+        "sorts": [],
+    })
+
+    assert opportunity_response.status_code == 400, opportunity_response.text
+    assert "未知筛选字段" in opportunity_response.text
+    assert contract_response.status_code == 400, contract_response.text
+    assert "未知筛选字段" in contract_response.text
+
+
+def test_contract_export_reuses_batch_loaded_customer_and_opportunity(client, db_session, monkeypatch):
+    import app.api.contracts as contracts_module
+
+    _grant(monkeypatch, "contract:export", "contract:view:all")
+    db_session.add(User(id=1, email="sales@example.com", name="销售张", status=UserStatus.ACTIVE))
+    _seed_customer(db_session)
+    _seed_opportunity(db_session, opportunity_name="合同商机", owner_id="1")
+    _seed_contract(db_session, contract_number="HT-2026-001", owner_id="1", opportunity_id=1)
+    _seed_contract(db_session, contract_number="HT-2026-002", owner_id="1", opportunity_id=1)
+    db_session.commit()
+
+    customer_lookups: list[int] = []
+    opportunity_lookups: list[int] = []
+    original_customer = contracts_module._get_customer_basic_info
+    original_opportunity = contracts_module._get_opportunity_list_info
+
+    def _spy_customer(db, customer_id):
+        if customer_id is not None:
+            customer_lookups.append(customer_id)
+        return original_customer(db, customer_id)
+
+    def _spy_opportunity(db, opportunity_id):
+        if opportunity_id is not None:
+            opportunity_lookups.append(opportunity_id)
+        return original_opportunity(db, opportunity_id)
+
+    monkeypatch.setattr(contracts_module, "_get_customer_basic_info", _spy_customer)
+    monkeypatch.setattr(contracts_module, "_get_opportunity_list_info", _spy_opportunity)
+
+    response = client.post("/v1/contracts/export", json={
+        "fields": ["contract_number", "customer_name", "opportunity_name"],
+        "tab": "all",
+        "filters": [],
+        "sorts": [],
+    })
+
+    assert response.status_code == 200, response.text
+    rows = _workbook_rows(response)
+    assert rows[0] == ("合同编号", "客户名称", "商机名称")
+    assert {row[0] for row in rows[1:]} == {"HT-2026-001", "HT-2026-002"}
+    assert {row[1] for row in rows[1:]} == {"客户A"}
+    assert {row[2] for row in rows[1:]} == {"合同商机"}
+    assert customer_lookups == []
+    assert opportunity_lookups == []

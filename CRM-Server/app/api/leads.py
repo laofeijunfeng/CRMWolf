@@ -265,16 +265,16 @@ def export_leads(
         permission_detail="只能查看自己负责的线索，或需要 lead:view:all 权限查看他人数据",
     )
 
-    if request.tab == "public":
-        query = lead_crud.build_public_list_query(
-            db,
-            team_id=team_id,
-            search=request.search,
-            filters=request.filters,
-            sorts=request.sorts,
-        )
-    else:
-        query = lead_crud.build_list_query(
+    def _resolve_lead_export_query():
+        if request.tab == "public":
+            return lead_crud.build_public_list_query(
+                db,
+                team_id=team_id,
+                search=request.search,
+                filters=request.filters,
+                sorts=request.sorts,
+            )
+        return lead_crud.build_list_query(
             db,
             team_id=team_id,
             owner_id=owner_id,
@@ -282,6 +282,8 @@ def export_leads(
             filters=request.filters,
             sorts=request.sorts,
         )
+
+    query = run_or_400(_resolve_lead_export_query)
 
     stream = query.enable_eagerloads(False).execution_options(stream_results=True).yield_per(500)
     rows = _iter_lead_export_rows(stream, projection_session_factory=SessionLocal)

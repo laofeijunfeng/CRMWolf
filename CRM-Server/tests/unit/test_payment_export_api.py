@@ -447,3 +447,26 @@ def test_payment_exports_leave_missing_business_numbers_blank(
     assert plan_rows[1][1] == "首付款"
     assert record_rows[1][0] is None
     assert record_rows[1][1] == "付款方A"
+
+
+def test_payment_export_unknown_filter_returns_400(client, monkeypatch):
+    _grant(monkeypatch, "payment:plan:export", "payment:record:export", "payment:view:all")
+    unknown_filter = [{"field": "missing", "op": "eq", "value": "x"}]
+
+    plan_response = client.post("/v1/payments/payment-plans/export", json={
+        "fields": ["plan_number"],
+        "tab": "all",
+        "filters": unknown_filter,
+        "sorts": [],
+    })
+    record_response = client.post("/v1/payments/payment-records/export", json={
+        "fields": ["record_number"],
+        "tab": "all",
+        "filters": unknown_filter,
+        "sorts": [],
+    })
+
+    assert plan_response.status_code == 400, plan_response.text
+    assert "未知筛选字段" in plan_response.text
+    assert record_response.status_code == 400, record_response.text
+    assert "未知筛选字段" in record_response.text

@@ -185,9 +185,17 @@ def _get_latest_official_license_info(db: Session, contract_id: Optional[int]) -
     }
 
 
-def _contract_response_base(db: Session, contract) -> dict:
-    customer_info = _get_customer_basic_info(db, contract.customer_id)
-    opportunity_info = _get_opportunity_list_info(db, contract.opportunity_id)
+def _contract_response_base(
+    db: Session,
+    contract,
+    *,
+    customer_info: Optional[dict] = None,
+    opportunity_info: Optional[dict] = None,
+) -> dict:
+    if customer_info is None:
+        customer_info = _get_customer_basic_info(db, contract.customer_id)
+    if opportunity_info is None:
+        opportunity_info = _get_opportunity_list_info(db, contract.opportunity_id)
     return {
         "id": contract.id,
         "contract_number": contract.contract_number,
@@ -755,7 +763,12 @@ def _build_contract_list_responses(projection_db, contracts, team_id: int) -> Li
             "opportunity_name": opportunity.opportunity_name,
             "purchase_type": opportunity.purchase_type,
         } if opportunity else None
-        contract_dict = _contract_response_base(projection_db, contract)
+        contract_dict = _contract_response_base(
+            projection_db,
+            contract,
+            customer_info=customer_info,
+            opportunity_info=opportunity_info,
+        )
         contract_dict.update({
             "customer_name": customer_info["account_name"] if customer_info else None,
             "opportunity_name": opportunity_info["opportunity_name"] if opportunity_info else None,
@@ -838,7 +851,7 @@ def export_contracts(
         permission_detail="只能查看自己负责的合同，或需要 contract:view:all 权限查看他人数据",
     )
 
-    query = contract_crud.build_list_query(
+    query = run_or_400(lambda: contract_crud.build_list_query(
         db,
         team_id=team_id,
         status=request.tab if request.tab != "all" else None,
@@ -846,7 +859,7 @@ def export_contracts(
         search=request.search,
         filters=request.filters,
         sorts=request.sorts,
-    )
+    ))
     stream = query.enable_eagerloads(False).execution_options(stream_results=True).yield_per(500)
     rows = _iter_contract_export_rows(stream, team_id, projection_session_factory=SessionLocal)
     generated = run_list_export_or_400(lambda: create_list_export_file(

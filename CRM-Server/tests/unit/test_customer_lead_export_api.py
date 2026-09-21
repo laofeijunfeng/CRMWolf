@@ -257,3 +257,26 @@ def test_customer_and_lead_export_reject_unsafe_fields(client, monkeypatch):
         "sorts": [],
     })
     assert response.status_code == 400
+
+
+def test_customer_and_lead_export_unknown_filter_returns_400(client, monkeypatch):
+    _grant(monkeypatch, "customer:export", "customer:view:all", "lead:export", "lead:view:all")
+    unknown_filter = [{"field": "missing", "op": "eq", "value": "x"}]
+
+    customer_response = client.post("/v1/customers/export", json={
+        "fields": ["account_name"],
+        "tab": "all",
+        "filters": unknown_filter,
+        "sorts": [],
+    })
+    lead_response = client.post("/v1/leads/export", json={
+        "fields": ["lead_name"],
+        "tab": "all",
+        "filters": unknown_filter,
+        "sorts": [],
+    })
+
+    assert customer_response.status_code == 400, customer_response.text
+    assert "未知筛选字段" in customer_response.text
+    assert lead_response.status_code == 400, lead_response.text
+    assert "未知筛选字段" in lead_response.text

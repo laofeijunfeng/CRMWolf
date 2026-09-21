@@ -152,7 +152,7 @@ def export_approvals(
     db: Session = Depends(get_db),
 ) -> FileResponse:
     user_roles = [role.code for role in role_crud.get_user_roles(db, current_user.id, team_id)]
-    query, _needs_summary_filter = approval_crud.build_list_query(
+    query, _needs_summary_filter = run_or_400(lambda: approval_crud.build_list_query(
         db,
         team_id=team_id,
         user_id=current_user.id,
@@ -161,7 +161,7 @@ def export_approvals(
         search=request.search,
         filters=request.filters,
         sorts=request.sorts,
-    )
+    ))
     stream = query.enable_eagerloads(False).execution_options(stream_results=True).yield_per(500)
     rows = _iter_approval_export_rows(stream, team_id, projection_session_factory=SessionLocal)
     generated = run_list_export_or_400(lambda: create_list_export_file(

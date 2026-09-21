@@ -1789,7 +1789,7 @@ def export_customers(
     current_user=Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> FileResponse:
-    query = _resolve_customer_export_query(request, team_id, current_user, db)
+    query = run_or_400(lambda: _resolve_customer_export_query(request, team_id, current_user, db))
     stream = query.enable_eagerloads(False).execution_options(stream_results=True).yield_per(500)
     rows = _iter_customer_export_rows(stream, team_id, projection_session_factory=SessionLocal)
     generated = run_list_export_or_400(lambda: create_list_export_file(

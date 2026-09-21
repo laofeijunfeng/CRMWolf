@@ -211,7 +211,7 @@ def export_follow_up_tasks(
         statuses = follow_up_task_query_service._normalize_status(request.tab)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    query = follow_up_task_crud.build_for_owner_query(
+    query = run_or_400(lambda: follow_up_task_crud.build_for_owner_query(
         db,
         team_id=team_id,
         owner_id=str(current_user.id),
@@ -219,7 +219,7 @@ def export_follow_up_tasks(
         filters=request.filters,
         sorts=request.sorts,
         search=request.search,
-    )
+    ))
     stream = query.enable_eagerloads(False).execution_options(stream_results=True).yield_per(500)
     rows = _iter_follow_up_export_rows(
         stream,

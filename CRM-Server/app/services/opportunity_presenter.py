@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Optional
+from collections.abc import Sequence
+from typing import Any, Optional
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -125,6 +126,68 @@ def opportunity_product_payload(opportunity) -> dict:
             for module in modules
         ],
     }
+
+
+def opportunity_product_payloads(db: Session, opportunities: Sequence[Any]) -> dict[int, dict]:
+    """Load product and module display fields on this session; never touch stream-session relationships."""
+    from types import SimpleNamespace
+
+    from app.models.opportunity import OpportunityProductModule
+    from app.models.product import Product, ProductModule
+
+    if not opportunities:
+        return {}
+
+    product_ids = {
+        int(opp.product_id)
+        for opp in opportunities
+        if getattr(opp, "product_id", None) is not None
+    }
+    products = {
+        product.id: product
+        for product in db.query(Product).filter(Product.id.in_(product_ids)).all()
+    } if product_ids else {}
+
+    opportunity_ids = [int(opp.id) for opp in opportunities if getattr(opp, "id", None) is not None]
+    links = (
+        db.query(OpportunityProductModule)
+        .filter(OpportunityProductModule.opportunity_id.in_(opportunity_ids))
+        .all()
+    ) if opportunity_ids else []
+    module_ids = {
+        int(link.product_module_id)
+        for link in links
+        if getattr(link, "product_module_id", None) is not None
+    }
+    modules = {
+        module.id: module
+        for module in db.query(ProductModule).filter(ProductModule.id.in_(module_ids)).all()
+    } if module_ids else {}
+
+    modules_by_opportunity: dict[int, list] = {}
+    for link in links:
+        module = (
+            modules.get(int(link.product_module_id))
+            if getattr(link, "product_module_id", None) is not None
+            else None
+        )
+        if module is not None:
+            modules_by_opportunity.setdefault(int(link.opportunity_id), []).append(module)
+
+    payloads: dict[int, dict] = {}
+    for opp in opportunities:
+        product = (
+            products.get(int(opp.product_id))
+            if getattr(opp, "product_id", None) is not None
+            else None
+        )
+        payloads[int(opp.id)] = opportunity_product_payload(
+            SimpleNamespace(
+                product=product,
+                selected_modules=modules_by_opportunity.get(int(opp.id), []),
+            )
+        )
+    return payloads
 
 
 def opportunity_response_dict(
@@ -292,6 +355,7 @@ __all__ = [
     "deal_journey_public_id_map",
     "opportunity_detail_response",
     "opportunity_product_payload",
+    "opportunity_product_payloads",
     "opportunity_response_dict",
     "resolve_opportunity_approval_phase",
 ]

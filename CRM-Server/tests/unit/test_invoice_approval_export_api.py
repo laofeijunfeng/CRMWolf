@@ -567,3 +567,26 @@ def test_approval_export_blanks_internal_id_application_number_fallback(client, 
     assert rows[1][0] in {None, ""}
     assert rows[1][0] not in {f"INV-{approval.business_id}", f"INVOICE-{approval.business_id}"}
     assert rows[1][1] == "审批中"
+
+
+def test_invoice_and_approval_export_unknown_filter_returns_400(client, monkeypatch):
+    _grant(monkeypatch, "invoice:export", "invoice:view:all", "approval:export")
+    unknown_filter = [{"field": "missing", "op": "eq", "value": "x"}]
+
+    invoice_response = client.post("/v1/invoice-applications/export", json={
+        "fields": ["application_number"],
+        "tab": "all",
+        "filters": unknown_filter,
+        "sorts": [],
+    })
+    approval_response = client.post("/v1/approvals/export", json={
+        "fields": ["application_number"],
+        "tab": "pending",
+        "filters": unknown_filter,
+        "sorts": [],
+    })
+
+    assert invoice_response.status_code == 400, invoice_response.text
+    assert "未知筛选字段" in invoice_response.text
+    assert approval_response.status_code == 400, approval_response.text
+    assert "未知筛选字段" in approval_response.text
