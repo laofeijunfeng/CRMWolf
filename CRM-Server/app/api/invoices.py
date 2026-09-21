@@ -1,13 +1,22 @@
 import logging
 import os
-from datetime import date
-from typing import Literal, Optional
+from datetime import date, datetime
+from typing import Iterator, Literal, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
+from fastapi.responses import FileResponse
+from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.constants.business_types import BusinessType
-from app.core.database import get_db
+from app.core.database import SessionLocal, get_db
+from app.core.list_export import (
+    INVOICES_LIST_EXPORT_CATALOG,
+    create_list_export_file,
+    iter_batches,
+    list_export_file_response,
+    run_list_export_or_400,
+)
 from app.core.list_query import optional_request_list_query, run_or_400
 from app.core.deps import (
     check_customer_edit_permission,
@@ -30,6 +39,7 @@ from app.models.invoice import InvoiceApplicationStatus
 from app.models.opportunity import Opportunity
 from app.models.payment import PaymentPlan
 from app.models.user import User
+from app.schemas.list_export import InvoiceListExportRequest
 from app.schemas.invoice import (
     InvoiceApplicationCreate,
     InvoiceApplicationListResponse,
@@ -282,6 +292,322 @@ def delete_invoice_title(
 
 invoice_router = APIRouter(prefix="/invoice-applications", tags=["发票申请管理"])
 
+INVOICE_STATUS_LABELS = {
+    "DRAFT": "草稿",
+    "PENDING_REVIEW": "待审批",
+    "APPROVED": "已批准",
+    "REJECTED": "已驳回",
+    "ISSUED": "已开票",
+    "CANCELLED": "已取消",
+}
+INVOICE_TYPE_LABELS = {
+    "VAT_SPECIAL": "增值税专用发票",
+    "VAT_NORMAL": "增值税普通发票",
+}
+INVOICE_EFFECTIVE_STATUS_LABELS = {
+    "ACTIVE": "有效",
+    "REISSUE_PENDING": "重开中",
+    "RED_OFFSET": "已冲红",
+    "REISSUED": "已重开",
+}
+INVOICE_TAB_STATUS = {
+    "pending": "PENDING_REVIEW",
+    "approved": "APPROVED",
+    "invoiced": "ISSUED",
+}
+INVOICE_TAB_STEMS = {
+    "all": "全部申请",
+    "pending": "待审批",
+    "approved": "已批准",
+    "invoiced": "已开票",
+}
+
+
+def _invoice_view_scope(db: Session, current_user, team_id: int, *, me: bool = False):
+    from app.crud.permission import permission_crud
+
+    permission_codes = {
+        permission.code
+        for permission in permission_crud.get_user_permissions(db, current_user.id, team_id)
+    }
+    has_view_all = "invoice:view:all" in permission_codes
+    has_view_own = "invoice:view:own" in permission_codes
+    viewable_customer_ids = get_viewable_customer_ids(db, team_id, current_user.id)
+    current_user_id = None
+    visible_customer_ids = None
+    if me:
+        current_user_id = str(current_user.id)
+    elif not has_view_all:
+        if not has_view_own and viewable_customer_ids is not None and not viewable_customer_ids:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="没有查看发票申请的权限",
+            )
+        if has_view_own:
+            current_user_id = str(current_user.id)
+        if viewable_customer_ids is not None:
+            visible_customer_ids = viewable_customer_ids
+    return current_user_id, visible_customer_ids
+
+
+def _invoice_effective_status_from_maps(
+    application,
+    reissues_by_original: dict[int, list],
+    red_offsets_by_invoice: dict[int, list],
+) -> tuple[str, str]:
+    reissues = reissues_by_original.get(application.id, [])
+    red_offsets = red_offsets_by_invoice.get(application.id, [])
+    reissue_status = "NONE"
+    completed_reissues = [
+        reissue
+        for reissue in reissues
+        if reissue.status == "COMPLETED" and reissue.new_invoice_file_path
+    ]
+    latest_completed_reissue = max(
+        completed_reissues,
+        key=lambda reissue: (reissue.completed_time or reissue.last_modified_time or reissue.created_time, reissue.id),
+        default=None,
+    )
+    if latest_completed_reissue is not None:
+        reissue_status = "REISSUED"
+    elif any(reissue.status in {"DRAFT", "PENDING_REVIEW", "APPROVED"} for reissue in reissues):
+        reissue_status = "REISSUE_PENDING"
+    latest_red_offset = max(
+        red_offsets,
+        key=lambda red_offset: (red_offset.red_offset_time or red_offset.last_modified_time or red_offset.created_time, red_offset.id),
+        default=None,
+    )
+    if latest_completed_reissue is not None:
+        return reissue_status, "REISSUED"
+    if latest_red_offset is not None:
+        return reissue_status, "RED_OFFSET"
+    return reissue_status, ("REISSUE_PENDING" if reissue_status == "REISSUE_PENDING" else "ACTIVE")
+
+
+def _populate_application_list_info(projection_db: Session, applications, team_id: int):
+    from app.models.invoice import InvoiceRedOffset, InvoiceReissueApplication
+
+    if not applications:
+        return []
+    application_ids = [application.id for application in applications]
+    customer_ids = {application.customer_id for application in applications if application.customer_id}
+    contract_ids = {application.contract_id for application in applications if application.contract_id}
+    opportunity_ids = {application.opportunity_id for application in applications if application.opportunity_id}
+    payment_plan_ids = {application.payment_plan_id for application in applications if application.payment_plan_id}
+    user_ids = {
+        int(user_id)
+        for application in applications
+        for user_id in (application.applicant_id, application.reviewer_id)
+        if user_id and str(user_id).isdigit()
+    }
+
+    customers = {
+        customer.id: customer
+        for customer in projection_db.query(Customer).filter(
+            Customer.id.in_(customer_ids),
+            *((Customer.team_id == team_id,) if team_id is not None else ()),
+        ).all()
+    } if customer_ids else {}
+    contracts = {
+        contract.id: contract
+        for contract in projection_db.query(Contract).filter(
+            Contract.id.in_(contract_ids),
+            *((Contract.team_id == team_id,) if team_id is not None else ()),
+        ).all()
+    } if contract_ids else {}
+    opportunities = {
+        opportunity.id: opportunity
+        for opportunity in projection_db.query(Opportunity).filter(
+            Opportunity.id.in_(opportunity_ids),
+            *((Opportunity.team_id == team_id,) if team_id is not None else ()),
+        ).all()
+    } if opportunity_ids else {}
+    payment_plans = {
+        plan.id: plan
+        for plan in projection_db.query(PaymentPlan).filter(
+            PaymentPlan.id.in_(payment_plan_ids),
+            *((PaymentPlan.team_id == team_id,) if team_id is not None else ()),
+        ).all()
+    } if payment_plan_ids else {}
+    users = {
+        str(user.id): user
+        for user in projection_db.query(User).filter(User.id.in_(user_ids)).all()
+    } if user_ids else {}
+
+    reissues_by_original: dict[int, list] = {}
+    red_offsets_by_invoice: dict[int, list] = {}
+    bind = projection_db.bind
+    has_reissue_table = bind is None or inspect(bind).has_table(InvoiceReissueApplication.__tablename__)
+    has_red_offset_table = bind is None or inspect(bind).has_table(InvoiceRedOffset.__tablename__)
+    if application_ids and has_reissue_table:
+        reissue_query = projection_db.query(InvoiceReissueApplication).filter(
+            InvoiceReissueApplication.original_invoice_application_id.in_(application_ids)
+        )
+        if team_id is not None:
+            reissue_query = reissue_query.filter(InvoiceReissueApplication.team_id == team_id)
+        for reissue in reissue_query.all():
+            reissues_by_original.setdefault(reissue.original_invoice_application_id, []).append(reissue)
+    if application_ids and has_red_offset_table:
+        red_offset_query = projection_db.query(InvoiceRedOffset).filter(
+            InvoiceRedOffset.invoice_application_id.in_(application_ids)
+        )
+        if team_id is not None:
+            red_offset_query = red_offset_query.filter(InvoiceRedOffset.team_id == team_id)
+        for red_offset in red_offset_query.all():
+            red_offsets_by_invoice.setdefault(red_offset.invoice_application_id, []).append(red_offset)
+
+    items = []
+    for application in applications:
+        customer = customers.get(application.customer_id)
+        contract = contracts.get(application.contract_id)
+        opportunity = opportunities.get(application.opportunity_id)
+        payment_plan = payment_plans.get(application.payment_plan_id)
+        applicant = users.get(str(application.applicant_id)) if application.applicant_id else None
+        reviewer = users.get(str(application.reviewer_id)) if application.reviewer_id else None
+        reissues = reissues_by_original.get(application.id, [])
+        red_offsets = red_offsets_by_invoice.get(application.id, [])
+        reissue_status, invoice_effective_status = _invoice_effective_status_from_maps(
+            application, reissues_by_original, red_offsets_by_invoice
+        )
+        items.append(InvoiceApplicationResponse(
+            id=application.id,
+            application_number=application.application_number,
+            customer_id=customer.public_id if customer else str(application.customer_id),
+            contract_id=application.contract_id,
+            opportunity_id=application.opportunity_id,
+            payment_plan_id=application.payment_plan_id,
+            invoice_title_id=application.invoice_title_id,
+            invoice_amount=float(application.invoice_amount),
+            invoice_type=application.invoice_type,
+            status=application.status,
+            applicant_id=application.applicant_id,
+            reviewer_id=application.reviewer_id,
+            review_comment=application.review_comment,
+            reviewed_time=application.reviewed_time,
+            payment_record_id=application.payment_record_id,
+            invoice_title_type=application.invoice_title_type,
+            invoice_title_text=application.invoice_title_text,
+            invoice_taxpayer_id=application.invoice_taxpayer_id,
+            invoice_bank_name=application.invoice_bank_name,
+            invoice_bank_account=application.invoice_bank_account,
+            invoice_address=application.invoice_address,
+            invoice_phone=application.invoice_phone,
+            created_time=application.created_time,
+            last_modified_time=application.last_modified_time,
+            invoice_file_path=application.invoice_file_path,
+            invoice_number=application.invoice_number,
+            issued_time=application.issued_time,
+            customer_name=customer.account_name if customer else None,
+            contract_name=contract.contract_name if contract else None,
+            opportunity_name=opportunity.opportunity_name if opportunity else None,
+            payment_plan_stage_name=payment_plan.stage_name if payment_plan else None,
+            invoice_title_title=application.invoice_title_text,
+            applicant_name=applicant.name if applicant else None,
+            reviewer_name=reviewer.name if reviewer else None,
+            reissue_status=reissue_status,
+            invoice_effective_status=invoice_effective_status,
+            red_offsets=[_populate_red_offset_info(projection_db, red_offset) for red_offset in red_offsets],
+            reissue_applications=[_populate_reissue_application_info(projection_db, reissue) for reissue in reissues],
+        ))
+    return items
+
+
+def _invoice_export_row(
+    application,
+    *,
+    customer,
+    contract,
+    applicant,
+    invoice_effective_status: str,
+) -> dict[str, object]:
+    status_value = getattr(application.status, "value", application.status)
+    invoice_type = getattr(application.invoice_type, "value", application.invoice_type)
+    return {
+        "application_number": application.application_number,
+        "customer_name": customer.account_name if customer else None,
+        "contract_name": contract.contract_name if contract else None,
+        "invoice_type": INVOICE_TYPE_LABELS.get(invoice_type, invoice_type),
+        "invoice_amount": float(application.invoice_amount),
+        "invoice_title_text": application.invoice_title_text,
+        "status": INVOICE_STATUS_LABELS.get(status_value, status_value),
+        "invoice_effective_status": INVOICE_EFFECTIVE_STATUS_LABELS.get(
+            invoice_effective_status, invoice_effective_status
+        ),
+        "applicant_name": applicant.name if applicant else None,
+        "created_time": application.created_time,
+    }
+
+
+def _iter_invoice_export_rows(stream, team_id: int, projection_session_factory=SessionLocal) -> Iterator[dict[str, object]]:
+    from app.models.invoice import InvoiceRedOffset, InvoiceReissueApplication
+
+    for batch in iter_batches(stream, 500):
+        projection_db = projection_session_factory()
+        try:
+            if not batch:
+                continue
+            application_ids = [application.id for application in batch]
+            customer_ids = {application.customer_id for application in batch if application.customer_id}
+            contract_ids = {application.contract_id for application in batch if application.contract_id}
+            user_ids = {
+                int(application.applicant_id)
+                for application in batch
+                if application.applicant_id and str(application.applicant_id).isdigit()
+            }
+            customers = {
+                customer.id: customer
+                for customer in projection_db.query(Customer).filter(
+                    Customer.id.in_(customer_ids),
+                    Customer.team_id == team_id,
+                ).all()
+            } if customer_ids else {}
+            contracts = {
+                contract.id: contract
+                for contract in projection_db.query(Contract).filter(
+                    Contract.id.in_(contract_ids),
+                    Contract.team_id == team_id,
+                ).all()
+            } if contract_ids else {}
+            users = {
+                str(user.id): user
+                for user in projection_db.query(User).filter(User.id.in_(user_ids)).all()
+            } if user_ids else {}
+            reissues_by_original: dict[int, list] = {}
+            red_offsets_by_invoice: dict[int, list] = {}
+            bind = projection_db.bind
+            has_reissue_table = bind is None or inspect(bind).has_table(InvoiceReissueApplication.__tablename__)
+            has_red_offset_table = bind is None or inspect(bind).has_table(InvoiceRedOffset.__tablename__)
+            if application_ids and has_reissue_table:
+                reissue_query = projection_db.query(InvoiceReissueApplication).filter(
+                    InvoiceReissueApplication.original_invoice_application_id.in_(application_ids),
+                    InvoiceReissueApplication.team_id == team_id,
+                )
+                for reissue in reissue_query.all():
+                    reissues_by_original.setdefault(reissue.original_invoice_application_id, []).append(reissue)
+            if application_ids and has_red_offset_table:
+                red_offset_query = projection_db.query(InvoiceRedOffset).filter(
+                    InvoiceRedOffset.invoice_application_id.in_(application_ids),
+                    InvoiceRedOffset.team_id == team_id,
+                )
+                for red_offset in red_offset_query.all():
+                    red_offsets_by_invoice.setdefault(red_offset.invoice_application_id, []).append(red_offset)
+            for application in batch:
+                _, invoice_effective_status = _invoice_effective_status_from_maps(
+                    application, reissues_by_original, red_offsets_by_invoice
+                )
+                yield _invoice_export_row(
+                    application,
+                    customer=customers.get(application.customer_id),
+                    contract=contracts.get(application.contract_id),
+                    applicant=users.get(str(application.applicant_id)) if application.applicant_id else None,
+                    invoice_effective_status=invoice_effective_status,
+                )
+        finally:
+            projection_db.close()
+
+
+
+
 
 @invoice_router.post("", response_model=InvoiceApplicationResponse, summary="创建发票申请", description="创建新的发票申请，自动关联业务上下文（客户、合同、商机、回款计划）")
 def create_invoice_application(
@@ -421,7 +747,7 @@ def list_invoice_applications(
         sorts=parsed_sorts,
     ))
 
-    populated_applications = [_populate_application_info(db, app, team_id) for app in applications]
+    populated_applications = _populate_application_list_info(db, applications, team_id)
 
     # 计算页码（skip/limit + 1）
     current_page = page if page is not None else (effective_skip // effective_limit + 1 if effective_limit > 0 else 1)
@@ -432,6 +758,41 @@ def list_invoice_applications(
         "page": current_page,
         "page_size": effective_limit
     }
+
+
+@invoice_router.post(
+    "/export",
+    dependencies=[Depends(require_permission("invoice:export"))],
+    summary="导出发票申请列表",
+    description="按当前筛选条件导出全部匹配发票申请为 Excel",
+)
+def export_invoice_applications(
+    request: InvoiceListExportRequest,
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    current_user_id, visible_customer_ids = _invoice_view_scope(db, current_user, team_id)
+    query = invoice_application_crud.build_list_query(
+        db,
+        team_id=team_id,
+        status=INVOICE_TAB_STATUS.get(request.tab),
+        current_user_id=current_user_id,
+        visible_customer_ids=visible_customer_ids,
+        search=request.search,
+        filters=request.filters,
+        sorts=request.sorts,
+    )
+    stream = query.enable_eagerloads(False).execution_options(stream_results=True).yield_per(500)
+    rows = _iter_invoice_export_rows(stream, team_id, projection_session_factory=SessionLocal)
+    generated = run_list_export_or_400(lambda: create_list_export_file(
+        catalog=INVOICES_LIST_EXPORT_CATALOG,
+        selected_keys=request.fields,
+        rows=rows,
+        file_stem=f"发票申请列表-{INVOICE_TAB_STEMS.get(request.tab, '全部申请')}",
+    ))
+    return list_export_file_response(generated)
+
 
 
 @invoice_router.post(

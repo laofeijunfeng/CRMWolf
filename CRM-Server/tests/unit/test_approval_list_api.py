@@ -81,6 +81,7 @@ def db_session():
                 opportunity_number VARCHAR(50) NOT NULL,
                 opportunity_name VARCHAR(255) NOT NULL,
                 customer_id INTEGER NOT NULL,
+                product_id INTEGER,
                 procurement_method_id INTEGER,
                 current_stage_snapshot_id INTEGER,
                 current_stage_name VARCHAR(100),

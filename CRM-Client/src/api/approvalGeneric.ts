@@ -26,6 +26,7 @@
 /* eslint-disable crmwolf/require-zod-schema */
 
 import request from '@/utils/request'
+import { postListExport, type ListExportPayload } from '@/api/listExport'
 import {
   type EntityType,
   type ApprovalAction,
@@ -34,7 +35,8 @@ import {
   type MessageResponse,
   type BulkApproveResponse,
   type ApprovalListResponse,
-  type ApprovalListQuery
+  type ApprovalListQuery,
+  type ApprovalTab,
 } from '@/schemas/approvalGeneric'
 
 // 乐观锁时间戳映射：{ str(business_id): iso8601 }，键为 id 字符串形式
@@ -159,6 +161,10 @@ function listApprovals(query: ApprovalListQuery): Promise<ApprovalListResponse> 
   return request.get<ApprovalListResponse>('/v1/approvals', { params: query })
 }
 
+function exportApprovals(payload: ListExportPayload<ApprovalTab>): Promise<Blob> {
+  return postListExport('/v1/approvals/export', payload)
+}
+
 const getApprovalAttachmentPath = (entityType: EntityType, entityId: ApprovalEntityId): string =>
   `/v1/approvals/${entityType}/${entityId}/file`
 
@@ -202,6 +208,7 @@ const approvalGenericApi = {
   getApprovalDetail,
   bulkApprove,
   listApprovals,
+  exportApprovals,
   createApprovalAttachmentObjectUrl,
   downloadApprovalAttachment
 }
@@ -215,6 +222,7 @@ export {
   getApprovalDetail,
   bulkApprove,
   listApprovals,
+  exportApprovals,
   createApprovalAttachmentObjectUrl,
   downloadApprovalAttachment
 }

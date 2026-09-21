@@ -2,8 +2,7 @@ from datetime import date, datetime, time
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import and_, exists, not_, or_
-from sqlalchemy.orm import Session
-
+from sqlalchemy.orm import Query, Session
 from app.constants.business_types import BusinessType
 from app.models.contract import Contract
 from app.models.customer import Customer
@@ -33,6 +32,7 @@ from app.core.list_query import (
     apply_search,
     ListQueryContext,
     SortCondition,
+    build_optional_list_query,
     paginate_optional_list_query,
     uses_unified_list_query,
     without_filter_field,
@@ -169,6 +169,66 @@ class InvoiceApplicationCRUD:
             query = query.filter(InvoiceApplication.team_id == team_id)
         return query.order_by(InvoiceApplication.created_time.desc()).all()
 
+    def _scoped_applications_query(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        status: str | None,
+        current_user_id: str | None,
+        visible_customer_ids: set[int] | None,
+    ):
+        query = db.query(InvoiceApplication).filter(InvoiceApplication.team_id == team_id)
+        if status:
+            query = query.filter(InvoiceApplication.status.in_(_split_csv(status)))
+        visibility_filters = []
+        if current_user_id:
+            visibility_filters.append(InvoiceApplication.applicant_id == current_user_id)
+        if visible_customer_ids is not None:
+            visibility_filters.append(
+                InvoiceApplication.customer_id.in_(list(visible_customer_ids) or [-1])
+            )
+        if len(visibility_filters) == 1:
+            query = query.filter(visibility_filters[0])
+        elif len(visibility_filters) > 1:
+            query = query.filter(or_(*visibility_filters))
+        return query
+
+    def build_list_query(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        status: str | None,
+        current_user_id: str | None,
+        visible_customer_ids: set[int] | None,
+        search: str | None,
+        filters: list[FilterCondition],
+        sorts: list[SortCondition],
+    ) -> Query:
+        """Return ordered invoice applications without pagination."""
+        query = self._scoped_applications_query(
+            db,
+            team_id=team_id,
+            status=status,
+            current_user_id=current_user_id,
+            visible_customer_ids=visible_customer_ids,
+        )
+        effective_filters = without_filter_field(filters, "status") if status else filters
+        _, ordered = build_optional_list_query(
+            query,
+            INVOICES_LIST_QUERY_CATALOG,
+            filters=effective_filters,
+            sorts=sorts,
+            context=ListQueryContext(
+                db=db,
+                team_id=team_id,
+                current_user_id=current_user_id,
+            ),
+            search=search,
+        )
+        return ordered.order_by(InvoiceApplication.id.asc())
+
     def list_applications(
         self,
         db: Session,
@@ -195,39 +255,28 @@ class InvoiceApplicationCRUD:
         filters: list[FilterCondition] | None = None,
         sorts: list[SortCondition] | None = None,
     ) -> Tuple[List[InvoiceApplication], int]:
-        query = db.query(InvoiceApplication).filter(InvoiceApplication.team_id == team_id)
-
-        # 页签状态与数据范围属于固定 scope；显式统一协议下其余旧参数不再混入。
-        if status:
-            query = query.filter(InvoiceApplication.status.in_(_split_csv(status)))
-
-        visibility_filters = []
-        if current_user_id:
-            visibility_filters.append(InvoiceApplication.applicant_id == current_user_id)
-        if visible_customer_ids is not None:
-            visibility_filters.append(
-                InvoiceApplication.customer_id.in_(list(visible_customer_ids) or [-1])
-            )
-        if len(visibility_filters) == 1:
-            query = query.filter(visibility_filters[0])
-        elif len(visibility_filters) > 1:
-            query = query.filter(or_(*visibility_filters))
-
         if uses_unified_list_query(filters=filters, sorts=sorts):
-            effective_filters = without_filter_field(filters, "status") if status else filters
-            return paginate_optional_list_query(
-                query,
-                INVOICES_LIST_QUERY_CATALOG,
-                skip=skip,
-                limit=limit,
-                filters=effective_filters,
-                sorts=sorts,
-                context=ListQueryContext(
-                    db=db,
-                    team_id=team_id,
-                    current_user_id=current_user_id,
-                ),
+            query = self.build_list_query(
+                db,
+                team_id=team_id,
+                status=status,
+                current_user_id=current_user_id,
+                visible_customer_ids=visible_customer_ids,
+                search=search,
+                filters=filters or [],
+                sorts=sorts or [],
             )
+            total = query.order_by(None).count()
+            return query.offset(skip).limit(limit).all(), total
+
+        query = self._scoped_applications_query(
+            db,
+            team_id=team_id,
+            status=status,
+            current_user_id=current_user_id,
+            visible_customer_ids=visible_customer_ids,
+        )
+
 
         if customer_id:
             query = query.filter(InvoiceApplication.customer_id == customer_id)

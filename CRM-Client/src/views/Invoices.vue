@@ -36,8 +36,10 @@ import {
 import invoiceApi, {
   type InvoiceApplicationResponse,
   type InvoiceApplicationQueryParams,
-  type InvoiceEffectiveStatus
+  type InvoiceEffectiveStatus,
+  type InvoiceExportTab,
 } from '@/api/invoice'
+import { type ListExportPayload } from '@/api/listExport'
 import customerApi from '@/api/customer'
 import type { CustomerResponse } from '@/api/customer'
 import { normalizePaginatedResponse } from '@/types/pagination'
@@ -46,9 +48,11 @@ import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
+import { useDataTableExport } from '@/composables/useDataTableExport'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { buildInvoiceDownloadFileName } from '@/utils/invoiceFileName'
 import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
+import { buildDataTableExportFileName } from '@/utils/downloadBlob'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 
 // 自动从 route.meta.title 设置页面标题
@@ -169,6 +173,40 @@ const activeColumns = ref<ViewPreferenceConfig['columns']>([])
 const canCreateInvoice = computed(() => permissionStore.hasPermission('invoice:create'))
 const canCreateInvoiceTitle = computed(() => permissionStore.hasPermission('invoice:title:create'))
 const canMarkInvoiced = computed(() => permissionStore.hasPermission('invoice:mark_issued'))
+const canExportInvoices = computed(() => permissionStore.hasPermission('invoice:export'))
+
+interface InvoiceListExportContext {
+  tab: InvoiceExportTab
+  search: string | undefined
+  filters: ListFilterCondition[]
+  sorts: ListSortCondition[]
+}
+
+const currentInvoiceListContext = (): InvoiceListExportContext => ({
+  tab: activeTab.value === 'pending' || activeTab.value === 'approved' || activeTab.value === 'invoiced'
+    ? activeTab.value
+    : 'all',
+  search: search.value.trim() || undefined,
+  filters: [...activeFilters.value],
+  sorts: [...activeSorts.value],
+})
+
+const { exportFields: exportInvoiceFields } = useDataTableExport({
+  request: (fields) => {
+    const { tab, search, filters, sorts } = currentInvoiceListContext()
+    const payload: ListExportPayload<InvoiceExportTab> = { fields, tab, filters, sorts }
+    if (search !== undefined) {
+      payload.search = search
+    }
+    return invoiceApi.exportInvoiceApplications(payload)
+  },
+  fileName: () => buildDataTableExportFileName(
+    '发票申请列表',
+    tabs.find((tab) => tab.key === activeTab.value)?.label ?? '全部申请',
+    new Date(),
+  ),
+})
+
 
 const canDeleteInvoiceApplicationRow = (row: InvoiceApplicationResponse): boolean => {
   if (!canCreateInvoice.value) return false
@@ -709,6 +747,9 @@ watchEffect(() => {
   <div class="invoices-page">
     <!-- DataTable -->
     <DataTable
+      :export-enabled="canExportInvoices"
+      export-title="发票申请列表"
+      :export-handler="exportInvoiceFields"
       :fields="fields"
       :data="tableData"
       :loading="loading"

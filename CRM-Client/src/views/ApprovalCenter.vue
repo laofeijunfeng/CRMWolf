@@ -27,6 +27,9 @@
       <DataTable
         v-model:filters="activeFilters"
         v-model:sorts="activeSorts"
+        :export-enabled="canExportApprovals"
+        export-title="审批列表"
+        :export-handler="exportApprovalFields"
         :fields="fields"
         :data="rows"
         :total="total"
@@ -572,16 +575,19 @@ import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
+import { useDataTableExport } from '@/composables/useDataTableExport'
 import { formatDateRelative } from '@/utils/format'
 import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
+import { buildDataTableExportFileName } from '@/utils/downloadBlob'
 import { createConfirmDialog } from '@/utils/confirmDialogImpl'
 import { handleApiError } from '@/utils/errorHandler'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 import { customerDetailRoute } from '@/utils/customerRoutes'
 import approvalGenericApi from '@/api/approvalGeneric'
+import { type ListExportPayload } from '@/api/listExport'
 import contractApi from '@/api/contract'
 import invoiceApi, { type InvoiceApplicationResponse } from '@/api/invoice'
-import type { EntityType, ApprovalCustomerInfo, ApprovalDetail, ApprovalListItem, ApprovalListQuery } from '@/schemas/approvalGeneric'
+import type { EntityType, ApprovalCustomerInfo, ApprovalDetail, ApprovalListItem, ApprovalListQuery, ApprovalTab } from '@/schemas/approvalGeneric'
 import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
 import type { ContractResponse } from '@/api/contract'
 
@@ -601,9 +607,39 @@ const permissionStore = usePermissionStore()
 const headerStore = useHeaderStore()
 const { pendingCount, currentApprovalDetail } = storeToRefs(store)
 const router = useRouter()
-
-// ==================== State ====================
+const canExportApprovals = computed(() => permissionStore.hasPermission('approval:export'))
 const activeTab = ref<Tab>('pending')
+
+interface ApprovalListExportContext {
+  tab: ApprovalTab
+  search: string | undefined
+  filters: ListFilterCondition[]
+  sorts: ListSortCondition[]
+}
+
+const currentApprovalListContext = (): ApprovalListExportContext => ({
+  tab: activeTab.value,
+  search: search.value.trim() || undefined,
+  filters: [...activeFilters.value],
+  sorts: [...activeSorts.value],
+})
+
+const { exportFields: exportApprovalFields } = useDataTableExport({
+  request: (fields) => {
+    const { tab, search, filters, sorts } = currentApprovalListContext()
+    const payload: ListExportPayload<ApprovalTab> = { fields, tab, filters, sorts }
+    if (search !== undefined) {
+      payload.search = search
+    }
+    return approvalGenericApi.exportApprovals(payload)
+  },
+  fileName: () => buildDataTableExportFileName(
+    '审批列表',
+    tabs.value.find((tab) => tab.key === activeTab.value)?.label ?? '待我审批',
+    new Date(),
+  ),
+})
+
 
 const search = ref('')
 

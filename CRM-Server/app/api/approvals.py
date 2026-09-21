@@ -1,16 +1,24 @@
 import os
-from datetime import date
+from datetime import date, datetime
 from datetime import datetime as _datetime
-from typing import Dict, List, Optional
+from typing import Dict, Iterator, List, Optional
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.constants.business_types import BusinessType, is_valid_business_type
-from app.core.database import get_db
+from app.core.database import SessionLocal, get_db
+from app.core.list_export import (
+    APPROVALS_LIST_EXPORT_CATALOG,
+    create_list_export_file,
+    iter_batches,
+    list_export_file_response,
+    run_list_export_or_400,
+)
 from app.core.list_query import optional_request_list_query, run_or_400
 from app.core.deps import (
     get_current_active_user,
@@ -20,6 +28,7 @@ from app.core.deps import (
 )
 from app.core.logging import get_logger, log_with_fields
 from app.crud.approval import approval_crud, approval_flow_crud
+from app.schemas.list_export import ApprovalListExportRequest
 from app.crud.contract import contract_crud
 from app.crud.opportunity import opportunity_crud
 from app.crud.role import role_crud
@@ -62,6 +71,93 @@ router = APIRouter(prefix="/v1/approvals", tags=["审批管理"])
 
 # 审批操作日志记录器
 logger = get_logger(__name__)
+
+APPROVAL_STATUS_LABELS = {
+    "PENDING": "审批中",
+    "APPROVED": "已通过",
+    "REJECTED": "已驳回",
+    "CANCELLED": "已撤回",
+}
+APPROVAL_TYPE_LABELS = {
+    "PAYMENT": "回款",
+    "INVOICE": "发票",
+    "INVOICE_REISSUE": "发票重开",
+    "CONTRACT": "合同",
+    "LICENSE": "License",
+    "OPPORTUNITY": "商机",
+}
+APPROVAL_TAB_STEMS = {
+    "pending": "待我审批",
+    "processed": "我已处理",
+    "submitted": "我提交的",
+}
+
+
+def _approval_export_row(item: dict) -> dict[str, object]:
+    created_time = item.get("created_time")
+    if isinstance(created_time, str) and created_time:
+        created_time = datetime.fromisoformat(created_time)
+    elif not created_time:
+        created_time = None
+    status_value = item.get("status")
+    if hasattr(status_value, "value"):
+        status_value = status_value.value
+    business_type = item.get("business_type")
+    return {
+        "application_number": item.get("application_number"),
+        "business_type": APPROVAL_TYPE_LABELS.get(business_type, business_type),
+        "entity_name": item.get("entity_name"),
+        "entity_amount": item.get("entity_amount"),
+        "submitter_name": item.get("submitter_name"),
+        "created_time": created_time,
+        "status": APPROVAL_STATUS_LABELS.get(status_value, status_value),
+        "overdue_hours": item.get("overdue_hours"),
+    }
+
+
+def _iter_approval_export_rows(stream, team_id: int, projection_session_factory=SessionLocal) -> Iterator[dict[str, object]]:
+    for batch in iter_batches(stream, 500):
+        projection_db = projection_session_factory()
+        try:
+            for item in approval_crud.build_list_items(projection_db, batch, team_id):
+                yield _approval_export_row(item)
+        finally:
+            projection_db.close()
+
+
+@router.post(
+    "/export",
+    dependencies=[Depends(require_permission("approval:export"))],
+    summary="导出审批列表",
+    description="按当前筛选条件导出全部匹配审批为 Excel",
+)
+def export_approvals(
+    request: ApprovalListExportRequest,
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    user_roles = [role.code for role in role_crud.get_user_roles(db, current_user.id, team_id)]
+    query, _needs_summary_filter = approval_crud.build_list_query(
+        db,
+        team_id=team_id,
+        user_id=current_user.id,
+        user_roles=user_roles,
+        tab=request.tab,
+        search=request.search,
+        filters=request.filters,
+        sorts=request.sorts,
+    )
+    stream = query.enable_eagerloads(False).execution_options(stream_results=True).yield_per(500)
+    rows = _iter_approval_export_rows(stream, team_id, projection_session_factory=SessionLocal)
+    generated = run_list_export_or_400(lambda: create_list_export_file(
+        catalog=APPROVALS_LIST_EXPORT_CATALOG,
+        selected_keys=request.fields,
+        rows=rows,
+        file_stem=f"审批列表-{APPROVAL_TAB_STEMS.get(request.tab, '待我审批')}",
+    ))
+    return list_export_file_response(generated)
+
 
 
 class BulkApproveRequest(BaseModel):
