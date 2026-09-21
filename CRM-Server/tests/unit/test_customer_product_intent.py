@@ -19,6 +19,7 @@ from app.crud.product_intent import (
 )
 from app.models.acquisition_source import AcquisitionSource
 from app.models.customer import Contact, Customer, CustomerProduct
+from app.models.industry import Industry
 from app.models.lead import Lead, LeadFollowUp, LeadProduct
 from app.models.operation_log import OperationLog
 from app.models.opportunity import Opportunity, OpportunityProductModule
@@ -46,6 +47,7 @@ def db(tmp_path: Path):
 
     tables = [
         AcquisitionSource.__table__,
+        Industry.__table__,
         Product.__table__,
         ProductModule.__table__,
         Lead.__table__,
@@ -240,6 +242,40 @@ def test_convert_request_product_overrides_lead_product(db):
     )
     assert [link.product_id for link in customer.product_links] == [oa.id]
     assert [link.product_id for link in lead.product_links] == [crm.id]
+
+
+@pytest.mark.parametrize(
+    ("industry", "expected"),
+    [("   ", None), ("internet_saas", "internet_saas"), ("SaaS公司", "internet_saas")],
+)
+def test_convert_normalizes_industry_with_create_resolver(db, industry, expected):
+    crm = product_crud.create(db, 1, ProductCreate(name="CRM"), "u1")
+    primary = Industry(level=1, code="internet", name="互联网", is_active=1, sort_order=10)
+    db.add(primary)
+    db.flush()
+    db.add(
+        Industry(
+            level=2,
+            parent_id=primary.id,
+            code="internet_saas",
+            name="SaaS公司",
+            is_active=1,
+            sort_order=20,
+        )
+    )
+    lead = lead_crud.create(db, _lead_in(product_public_id=crm.public_id), "u1", 1)
+
+    customer, _contact = customer_crud.convert_from_lead(
+        db,
+        lead_id=lead.id,
+        account_name=lead.lead_name,
+        address=None,
+        creator_id="u1",
+        team_id=1,
+        industry=industry,
+    )
+
+    assert customer.industry == expected
 
 
 def test_convert_historical_lead_without_product_requires_request_id(db):

@@ -21,7 +21,7 @@ from app.services.customer_intelligence_run_service import (
 
 
 @compiles(BigInteger, "sqlite")
-def _bigint_to_sqlite_int(element, compiler, **kw):  # noqa: ANN001, ANN003
+def _bigint_to_sqlite_int(element, compiler, **kw):
     return "INTEGER"
 
 
@@ -51,7 +51,7 @@ def _event(
     )
 
 
-def _input(**kwargs) -> CustomerIntelligenceRunInput:  # noqa: ANN003
+def _input(**kwargs) -> CustomerIntelligenceRunInput:
     request_id = str(kwargs.pop("request_id", "request-1"))
     max_attempts = int(kwargs.pop("max_attempts", 3))
     return CustomerIntelligenceRunInput(
@@ -252,6 +252,92 @@ def test_list_due_excludes_live_leases_and_other_teams():
     assert [run.request_id for run in due] == ["pending", "expired"]
 
 
+def test_future_not_before_is_not_due_or_claimable():
+    db = _session()
+    now = datetime(2026, 9, 20, 10, 0, 0)
+    run_input = _input()
+    run = customer_intelligence_run_service.ensure_pending(db, run_input)
+    customer_intelligence_run_service.defer_until(
+        db, team_id=2, run_id=run.id, not_before_at=now + timedelta(seconds=20)
+    )
+
+    assert customer_intelligence_run_service.list_due(db, now=now, team_id=2) == []
+    claim = customer_intelligence_run_service.claim_for_execution(db, run_input, now=now)
+
+    assert claim.status == CustomerIntelligenceRunClaimStatus.BUSY
+    assert claim.run.attempt_count == 0
+
+
+def test_not_before_past_is_claimable():
+    db = _session()
+    now = datetime(2026, 9, 20, 10, 0, 0)
+    run_input = _input()
+    run = customer_intelligence_run_service.ensure_pending(db, run_input)
+    customer_intelligence_run_service.defer_until(
+        db, team_id=2, run_id=run.id, not_before_at=now - timedelta(seconds=1)
+    )
+
+    claim = customer_intelligence_run_service.claim_for_execution(db, run_input, now=now)
+
+    assert claim.status == CustomerIntelligenceRunClaimStatus.CLAIMED
+
+
+def test_release_deferred_for_customer_is_tenant_scoped():
+    db = _session()
+    now = datetime(2026, 9, 20, 10, 0, 0)
+    own = customer_intelligence_run_service.ensure_pending(
+        db, _input(event_key="own", team_id=2, customer_id=101)
+    )
+    other = customer_intelligence_run_service.ensure_pending(
+        db, _input(event_key="other", team_id=3, customer_id=101)
+    )
+    customer_intelligence_run_service.defer_until(
+        db, team_id=2, run_id=own.id, not_before_at=now
+    )
+    customer_intelligence_run_service.defer_until(
+        db, team_id=3, run_id=other.id, not_before_at=now
+    )
+
+    released = customer_intelligence_run_service.release_deferred_for_customer(
+        db, team_id=2, customer_id=101
+    )
+
+    assert released == [own.id]
+    assert db.get(CustomerIntelligenceRun, own.id).not_before_at is None
+    assert db.get(CustomerIntelligenceRun, other.id).not_before_at == now
+
+
+def test_cancel_deferred_for_deleted_customer_is_tenant_scoped():
+    db = _session()
+    now = datetime(2026, 9, 20, 10, 0, 0)
+    own = customer_intelligence_run_service.ensure_pending(
+        db, _input(event_key="own-cancel", team_id=2, customer_id=101)
+    )
+    other = customer_intelligence_run_service.ensure_pending(
+        db, _input(event_key="other-cancel", team_id=3, customer_id=101)
+    )
+    customer_intelligence_run_service.defer_until(
+        db, team_id=2, run_id=own.id, not_before_at=now
+    )
+    customer_intelligence_run_service.defer_until(
+        db, team_id=3, run_id=other.id, not_before_at=now
+    )
+
+    cancelled = customer_intelligence_run_service.cancel_deferred_for_customer(
+        db,
+        team_id=2,
+        customer_id=101,
+        reason="CUSTOMER_NOT_FOUND",
+        now=now,
+    )
+
+    assert cancelled == [own.id]
+    assert db.get(CustomerIntelligenceRun, own.id).status == CustomerIntelligenceRunStatus.CANCELLED
+    assert db.get(CustomerIntelligenceRun, own.id).error_message == "CUSTOMER_NOT_FOUND"
+    assert db.get(CustomerIntelligenceRun, own.id).not_before_at is None
+    assert db.get(CustomerIntelligenceRun, other.id).status == CustomerIntelligenceRunStatus.PENDING
+
+
 def test_request_lookup_is_tenant_scoped():
     db = _session()
     customer_intelligence_run_service.ensure_pending(db, _input(request_id="shared", team_id=2, event_key="a"))
@@ -259,6 +345,43 @@ def test_request_lookup_is_tenant_scoped():
 
     assert customer_intelligence_run_service.get_by_request_id(db, team_id=2, request_id="shared").team_id == 2
     assert customer_intelligence_run_service.get_by_request_id(db, team_id=4, request_id="shared") is None
+
+
+@pytest.mark.parametrize("receipt_kind", ["released", "request"])
+def test_profile_receipt_lookup_requires_tenant_and_customer_scope(receipt_kind):
+    db = _session()
+    own = customer_intelligence_run_service.ensure_pending(
+        db,
+        _input(request_id="shared-request", team_id=2, customer_id=101, event_key="own-receipt"),
+    )
+    receipt = f"released:{own.id}" if receipt_kind == "released" else own.request_id
+
+    resolved = customer_intelligence_run_service.resolve_profile_receipt(
+        db,
+        team_id=2,
+        customer_id=101,
+        receipt=receipt,
+    )
+
+    assert resolved is own
+    assert (
+        customer_intelligence_run_service.resolve_profile_receipt(
+            db,
+            team_id=3,
+            customer_id=101,
+            receipt=receipt,
+        )
+        is None
+    )
+    assert (
+        customer_intelligence_run_service.resolve_profile_receipt(
+            db,
+            team_id=2,
+            customer_id=999,
+            receipt=receipt,
+        )
+        is None
+    )
 
 
 def test_lease_mutation_cannot_lock_cross_team_row_even_with_same_run_key():

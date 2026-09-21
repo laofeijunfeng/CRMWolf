@@ -34,6 +34,7 @@ class CustomerIntelligenceRun(Base):
     max_attempts = Column(Integer, nullable=False, default=3, comment="最大尝试次数")
     last_duration_ms = Column(Integer, nullable=True, comment="最近一次运行耗时毫秒")
     next_retry_at = Column(DateTime, nullable=True, index=True, comment="下次可重试时间")
+    not_before_at = Column(DateTime, nullable=True, index=True)
     lease_token = Column(String(64), nullable=True, index=True, comment="当前执行租约令牌")
     lease_expires_at = Column(DateTime, nullable=True, index=True, comment="当前执行租约过期时间")
     started_time = Column(DateTime, nullable=True, index=True, comment="开始时间")

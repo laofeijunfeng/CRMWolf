@@ -309,6 +309,32 @@ class CustomerBusinessObjectIntelligenceService:
             raise RuntimeError("客户智能事件未构造")
         return request
 
+    def enqueue_customer_lifecycle_refresh(
+        self,
+        db: Session,
+        *,
+        customer: object,
+        actor_id: str | None,
+        trigger_type: Literal["customer_created", "customer_converted_from_lead"],
+        source_lead_id: int | None = None,
+        scope: CustomerIntelligenceRefreshScope = "full",
+    ) -> CustomerIntelligenceCommittedEventRequest:
+        """Persist a lifecycle profile receipt without kicking before commit."""
+        event = self._customer_lifecycle_event(
+            customer=customer,
+            actor_id=actor_id,
+            trigger_type=trigger_type,
+            source_lead_id=source_lead_id,
+        )
+        request = self.publication_service.persist_in_transaction_request(
+            db,
+            event=event,
+            scope=scope,
+        )
+        if request is None:
+            raise RuntimeError("客户生命周期事件未构造")
+        return request
+
     def enqueue_customer_lifecycle_refresh_after_commit(
         self,
         *,
@@ -324,6 +350,22 @@ class CustomerBusinessObjectIntelligenceService:
         ordinary CRUD mutations, but they still use the same durable post-commit
         seam as every other customer intelligence refresh.
         """
+        event = self._customer_lifecycle_event(
+            customer=customer,
+            actor_id=actor_id,
+            trigger_type=trigger_type,
+            source_lead_id=source_lead_id,
+        )
+        return self._enqueue_event_after_commit(event, scope=scope)
+
+    @staticmethod
+    def _customer_lifecycle_event(
+        *,
+        customer: object,
+        actor_id: str | None,
+        trigger_type: Literal["customer_created", "customer_converted_from_lead"],
+        source_lead_id: int | None,
+    ) -> CustomerIntelligenceEvent:
         team_id = _int_attr(customer, "team_id")
         customer_id = _int_attr(customer, "id")
         if team_id is None or customer_id is None:
@@ -331,7 +373,7 @@ class CustomerBusinessObjectIntelligenceService:
         source_version = _source_version_for_object(customer, change_type="created")
         version_key = str(source_version or "initial")
         request_id = f"customer-lifecycle-{trigger_type}:{customer_id}:{source_lead_id or customer_id}:{version_key}"
-        event = customer_intelligence_event_service.customer_lifecycle_refresh_requested(
+        return customer_intelligence_event_service.customer_lifecycle_refresh_requested(
             team_id=team_id,
             customer_id=customer_id,
             actor_id=actor_id,
@@ -339,7 +381,6 @@ class CustomerBusinessObjectIntelligenceService:
             trigger_type=trigger_type,
             source_lead_id=source_lead_id,
         )
-        return self._enqueue_event_after_commit(event, scope=scope)
 
     def enqueue_change_refresh_after_commit(
         self,

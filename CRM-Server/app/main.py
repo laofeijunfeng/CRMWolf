@@ -24,6 +24,7 @@ from app.api import (
     contracts,
     customer_activities,
     customer_deal_journeys,
+    customer_enrichment,
     customer_procurement,
     customers,
     filter_options,
@@ -116,6 +117,7 @@ api_router.include_router(leads.router)
 api_router.include_router(leads.analytics_router)
 api_router.include_router(procurement_ai.router)
 api_router.include_router(approval_ai.router)
+api_router.include_router(customer_enrichment.router)
 api_router.include_router(customers.router)
 api_router.include_router(customer_deal_journeys.router)
 api_router.include_router(customer_ai_router)
@@ -176,6 +178,24 @@ async def startup_event():
     )
     start_customer_activity_ai_job_recovery_scheduler()
 
+    logger.info("启动客户初始补全持久任务恢复扫描...")
+    from app.tasks.customer_enrichment_recovery import (
+        start_customer_enrichment_recovery_scheduler,
+    )
+    start_customer_enrichment_recovery_scheduler()
+
+    logger.info("启动客户初始补全历史回填任务...")
+    from app.tasks.customer_enrichment_backfill import (
+        start_customer_enrichment_backfill_scheduler,
+    )
+    start_customer_enrichment_backfill_scheduler()
+
+    logger.info("启动客户初始补全对账任务...")
+    from app.tasks.customer_enrichment_reconciliation import (
+        start_customer_enrichment_reconciliation_scheduler,
+    )
+    start_customer_enrichment_reconciliation_scheduler()
+
     logger.info("启动客户证据向量同步任务...")
     from app.tasks.customer_evidence_sync import start_customer_evidence_sync_scheduler
     start_customer_evidence_sync_scheduler()
@@ -225,6 +245,15 @@ async def shutdown_event():
     from app.tasks.customer_activity_ai_job_recovery import (
         stop_customer_activity_ai_job_recovery_scheduler,
     )
+    from app.tasks.customer_enrichment_recovery import (
+        stop_customer_enrichment_recovery_scheduler,
+    )
+    from app.tasks.customer_enrichment_backfill import (
+        stop_customer_enrichment_backfill_scheduler,
+    )
+    from app.tasks.customer_enrichment_reconciliation import (
+        stop_customer_enrichment_reconciliation_scheduler,
+    )
     from app.tasks.customer_activity_post_commit_recovery import (
         stop_customer_activity_post_commit_recovery_scheduler,
     )
@@ -242,6 +271,9 @@ async def shutdown_event():
     )
 
     stop_customer_activity_ai_job_recovery_scheduler()
+    stop_customer_enrichment_recovery_scheduler()
+    stop_customer_enrichment_backfill_scheduler()
+    stop_customer_enrichment_reconciliation_scheduler()
     stop_customer_activity_post_commit_recovery_scheduler()
     stop_outbound_notification_recovery_scheduler()
     stop_customer_opportunity_suggestion_recovery_scheduler()

@@ -50,6 +50,7 @@ from app.models.customer_identity_term import (
     CustomerIdentityTermStatus,
     CustomerIdentityTermType,
 )
+from app.models.customer_enrichment_job import CustomerEnrichmentJob
 from app.models.customer_intelligence_run import CustomerIntelligenceRun, CustomerIntelligenceRunStatus
 from app.models.customer_opportunity_suggestion_job import CustomerOpportunitySuggestionJob
 from app.models.customer_profile_projection import (
@@ -198,6 +199,7 @@ __all__ = [
     "CustomerIdentityTermSource",
     "CustomerIdentityTermStatus",
     "CustomerIdentityTermType",
+    "CustomerEnrichmentJob",
     "CustomerIntelligenceRun",
     "CustomerIntelligenceRunStatus",
     "CustomerMember",

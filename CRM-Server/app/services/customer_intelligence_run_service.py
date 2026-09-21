@@ -22,7 +22,7 @@ from app.services.customer_intelligence_trace_service import visible_trace_event
 from app.utils.time import business_now
 
 if TYPE_CHECKING:
-    from sqlalchemy.orm import Session
+    from sqlalchemy.orm import Query, Session
 
     from app.services.customer_intelligence_event_service import CustomerIntelligenceEvent
 
@@ -171,6 +171,143 @@ class CustomerIntelligenceRunService:
             .first()
         )
 
+    def resolve_profile_receipt(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        customer_id: int,
+        receipt: str,
+    ) -> CustomerIntelligenceRun | None:
+        value = str(receipt or "").strip()
+        if not value:
+            return None
+        query = db.query(CustomerIntelligenceRun).filter(
+            CustomerIntelligenceRun.team_id == team_id,
+            CustomerIntelligenceRun.customer_id == customer_id,
+        )
+        if value.startswith("released:"):
+            raw_run_id = value.removeprefix("released:")
+            if not raw_run_id.isdigit():
+                return None
+            return query.filter(CustomerIntelligenceRun.id == int(raw_run_id)).one_or_none()
+        return (
+            query.filter(CustomerIntelligenceRun.request_id == value)
+            .order_by(CustomerIntelligenceRun.id.desc())
+            .first()
+        )
+
+    def defer_until(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        run_id: int,
+        not_before_at: datetime,
+    ) -> CustomerIntelligenceRun:
+        run = (
+            db.query(CustomerIntelligenceRun)
+            .filter(
+                CustomerIntelligenceRun.team_id == team_id,
+                CustomerIntelligenceRun.id == run_id,
+            )
+            .populate_existing()
+            .with_for_update()
+            .one()
+        )
+        if str(run.status) in TERMINAL_RUN_STATUSES:
+            return run
+        if run.not_before_at is None or run.not_before_at < not_before_at:
+            run.not_before_at = not_before_at
+            db.flush()
+        return run
+
+    def count_deferred_for_customer(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        customer_id: int,
+    ) -> int:
+        return self._deferred_for_customer_query(
+            db,
+            team_id=team_id,
+            customer_id=customer_id,
+        ).count()
+
+    def cancel_deferred_for_customer(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        customer_id: int,
+        reason: str,
+        now: datetime | None = None,
+    ) -> list[int]:
+        cancelled_at = now or business_now()
+        runs = (
+            self._deferred_for_customer_query(
+                db,
+                team_id=team_id,
+                customer_id=customer_id,
+            )
+            .order_by(CustomerIntelligenceRun.id.asc())
+            .populate_existing()
+            .with_for_update()
+            .all()
+        )
+        cancelled = [int(run.id) for run in runs]
+        for run in runs:
+            run.status = CustomerIntelligenceRunStatus.CANCELLED
+            run.error_message = reason
+            run.not_before_at = None
+            run.next_retry_at = None
+            run.lease_token = None
+            run.lease_expires_at = None
+            run.finished_time = cancelled_at
+        if cancelled:
+            db.flush()
+        return cancelled
+
+    def release_deferred_for_customer(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        customer_id: int,
+    ) -> list[int]:
+        runs = (
+            self._deferred_for_customer_query(
+                db,
+                team_id=team_id,
+                customer_id=customer_id,
+            )
+            .order_by(CustomerIntelligenceRun.id.asc())
+            .populate_existing()
+            .with_for_update()
+            .all()
+        )
+        released = [int(run.id) for run in runs]
+        for run in runs:
+            run.not_before_at = None
+        if released:
+            db.flush()
+        return released
+
+    @staticmethod
+    def _deferred_for_customer_query(
+        db: Session,
+        *,
+        team_id: int,
+        customer_id: int,
+    ) -> Query[CustomerIntelligenceRun]:
+        return db.query(CustomerIntelligenceRun).filter(
+            CustomerIntelligenceRun.team_id == team_id,
+            CustomerIntelligenceRun.customer_id == customer_id,
+            CustomerIntelligenceRun.status.not_in(tuple(TERMINAL_RUN_STATUSES)),
+            CustomerIntelligenceRun.not_before_at.is_not(None),
+        )
+
     def claim_for_execution(
         self,
         db: Session,
@@ -195,6 +332,8 @@ class CustomerIntelligenceRunService:
         status = str(run.status)
         if status in TERMINAL_RUN_STATUSES:
             return CustomerIntelligenceRunClaim(CustomerIntelligenceRunClaimStatus.TERMINAL, run)
+        if run.not_before_at is not None and run.not_before_at > current_time:
+            return CustomerIntelligenceRunClaim(CustomerIntelligenceRunClaimStatus.BUSY, run)
         if status == CustomerIntelligenceRunStatus.RUNNING:
             lease_expires_at = run.lease_expires_at
             if lease_expires_at is not None and lease_expires_at > current_time:
@@ -387,6 +526,10 @@ class CustomerIntelligenceRunService:
     ) -> list[CustomerIntelligenceRun]:
         current_time = now or business_now()
         query = db.query(CustomerIntelligenceRun).filter(
+            or_(
+                CustomerIntelligenceRun.not_before_at.is_(None),
+                CustomerIntelligenceRun.not_before_at <= current_time,
+            ),
             (CustomerIntelligenceRun.status == CustomerIntelligenceRunStatus.PENDING)
             | (
                 (CustomerIntelligenceRun.status == CustomerIntelligenceRunStatus.RETRY_PENDING)

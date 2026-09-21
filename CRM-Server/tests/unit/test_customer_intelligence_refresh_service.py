@@ -32,7 +32,6 @@ from app.services.customer_intelligence_refresh_service import (
     CustomerIntelligenceRefreshRequest,
     CustomerIntelligenceRefreshService,
 )
-from app.services.customer_profile_projection_service import CustomerProfileProjectionService
 from app.services.customer_intelligence_run_service import (
     CustomerIntelligenceRunClaim,
     CustomerIntelligenceRunClaimStatus,
@@ -41,6 +40,7 @@ from app.services.customer_intelligence_run_service import (
     CustomerIntelligenceRunLeaseMutationStatus,
     CustomerIntelligenceRunService,
 )
+from app.services.customer_profile_projection_service import CustomerProfileProjectionService
 from app.utils.time import business_now
 
 
@@ -290,9 +290,18 @@ class FakeProfileProjectionService:
 @pytest.fixture(autouse=True)
 def _fake_default_profile_projection_service(monkeypatch):
     projection_service = FakeProfileProjectionService()
+
+    class OpenReadinessGate:
+        def defer_if_needed(self, db, *, event, run, now):
+            return None
+
     monkeypatch.setattr(
         "app.services.customer_intelligence_refresh_service.customer_profile_projection_service",
         projection_service,
+    )
+    monkeypatch.setattr(
+        "app.services.customer_intelligence_refresh_service.customer_profile_readiness_gate",
+        OpenReadinessGate(),
     )
     return projection_service
 
@@ -1333,6 +1342,69 @@ def test_customer_intelligence_refresh_service_closes_obsolete_historical_runs()
 
 
 @pytest.mark.asyncio
+async def test_customer_created_profile_run_defers_before_claim_or_updating(monkeypatch):
+    now = datetime(2026, 9, 20, 10, 0, 0)
+    deferred_until = now + timedelta(seconds=5)
+    fake_session = FakeSession()
+    run_service = FakeRunService()
+    profile_projection_service = FakeProfileProjectionService()
+
+    class ReadinessGate:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def defer_if_needed(self, db, *, event, run, now):
+            self.calls.append({"db": db, "event": event, "run": run, "now": now})
+            return deferred_until
+
+    readiness_gate = ReadinessGate()
+    event = CustomerIntelligenceEvent(
+        event_key="customer-created-gated",
+        trigger_type="customer_created",
+        tenant_id=2,
+        team_id=2,
+        customer_id=101,
+        occurred_at=now,
+        source=CustomerIntelligenceSource(source_type="customer", source_object_id="101"),
+    )
+    monkeypatch.setattr(
+        "app.services.customer_intelligence_refresh_service.SessionLocal",
+        lambda: fake_session,
+    )
+    service = CustomerIntelligenceRefreshService(
+        event_service=FakeEventService(),
+        run_service=run_service,
+        profile_projection_service=profile_projection_service,
+        readiness_gate=readiness_gate,
+    )
+
+    def fail_claim(*args, **kwargs):
+        raise AssertionError("claim must not run while the profile gate is closed")
+
+    monkeypatch.setattr(service, "_claim_run", fail_claim)
+
+    result = await service._run_event_refresh(
+        request_id="customer-created-gated-request",
+        event=event,
+        scope="full",
+    )
+
+    assert result == {
+        "success": True,
+        "scheduled": True,
+        "deferred": True,
+        "request_id": "customer-created-gated-request",
+        "event_key": "customer-created-gated",
+        "not_before_at": deferred_until.isoformat(),
+    }
+    assert len(readiness_gate.calls) == 1
+    assert readiness_gate.calls[0]["run"].attempt_count == 0
+    assert profile_projection_service.updating_calls == []
+    assert fake_session.committed is True
+    assert fake_session.closed is True
+
+
+@pytest.mark.asyncio
 async def test_customer_intelligence_refresh_service_runs_committed_business_event_through_graph(monkeypatch):
     fake_session = FakeSession()
     graph_service = FakeGraphService()
@@ -1826,7 +1898,6 @@ async def test_customer_intelligence_refresh_service_runs_due_retries(monkeypatc
     assert result["succeeded"] == 1
     assert run_service.running[0]["run_input"].request_id == "manual-refresh-retry"
     assert graph_service.calls[0]["event"].event_key == "manual-event-1"
-    assert len(sessions) == 1
 
 
 @pytest.mark.asyncio

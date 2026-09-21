@@ -103,6 +103,83 @@ docker logs crm-backend --since 10m | grep -E '客户智能历史补档|客户�
 
 如果日志里能看到“客户智能历史补档调度已启动”和“客户证据向量同步调度已启动”，说明自动补件链路已经启动；后续看到“客户智能历史补档已调度”或“客户证据向量同步完成”，说明历史数据正在分批补齐。
 
+## 客户初始补全上线检查
+
+客户初始补全是客户主数据 mutation，不是客户智能档案生成的一部分。客户创建事务先成功；后台 durable job 只补 active plan 允许且仍为空的字段（当前 `customer-initial-v1` 仅补 `Customer.industry`），不覆盖人工或既有值。客户档案仍是只读 Projection：首次生成会在有限时间内等待补全第一次真实尝试，超时或第一次技术失败时降级生成无行业档案，后续补全成功再触发档案刷新。补全失败不得回滚客户，档案失败也不得回滚已经补全的主数据。
+
+应用代码默认启用 recovery、backfill 和 reconciliation，适合本地开发及已完成上线门禁的环境；服务器 `docker-compose.yml` 为首次生产发布提供更保守的 rollout 默认值：recovery 仍为 `true`，但 backfill 和 reconciliation 默认为 `false`。以下列表先给出应用默认值，带“生产 Compose 首发默认”的两项以服务器 Compose 为准：
+
+```bash
+CUSTOMER_INITIAL_ENRICHMENT_SETTLE_SECONDS=5
+CUSTOMER_INITIAL_ENRICHMENT_PROFILE_GATE_MAX_SECONDS=30
+CUSTOMER_INITIAL_ENRICHMENT_MAX_ATTEMPTS=3
+CUSTOMER_INITIAL_ENRICHMENT_LEASE_SECONDS=120
+CUSTOMER_INITIAL_ENRICHMENT_RECOVERY_ENABLED=true
+CUSTOMER_INITIAL_ENRICHMENT_RECOVERY_INTERVAL_SECONDS=60
+CUSTOMER_INITIAL_ENRICHMENT_BATCH_SIZE=20
+CUSTOMER_INITIAL_ENRICHMENT_BACKFILL_ENABLED=true       # 生产 Compose 首发默认 false
+CUSTOMER_INITIAL_ENRICHMENT_BACKFILL_BATCH_SIZE=5
+CUSTOMER_INITIAL_ENRICHMENT_BACKFILL_INTERVAL_SECONDS=300
+CUSTOMER_INITIAL_ENRICHMENT_RECONCILIATION_ENABLED=true # 生产 Compose 首发默认 false
+CUSTOMER_INITIAL_ENRICHMENT_RECONCILIATION_INTERVAL_SECONDS=300
+CUSTOMER_INITIAL_ENRICHMENT_RECONCILIATION_BATCH_SIZE=50
+```
+
+`PROFILE_GATE_MAX_SECONDS` 只限制首次档案等待时间，不是 enrichment job 超时；`RECOVERY_ENABLED` 负责领取新客户与已登记历史任务并恢复到期重试，`BACKFILL_ENABLED` 负责为历史缺失字段登记任务，`RECONCILIATION_ENABLED` 负责补登记遗漏任务、释放到期 gate，并验证/修复 tenant+customer scoped 的档案刷新 receipt。active plan 的 `backfill_enabled=false` 时，即使 scheduler 或 reconciliation 被调用，也不得创建历史 job；preview 的 `would_schedule` 必须为 0。首次客户每轮默认领取 20 条，历史回填仍保留 5 条配额，不能让历史任务长期饥饿。
+
+首次生产发布必须分阶段执行：
+
+1. 执行 migration，并以生产 Compose 默认值启动后端：`CUSTOMER_INITIAL_ENRICHMENT_BACKFILL_ENABLED=false`、`CUSTOMER_INITIAL_ENRICHMENT_RECONCILIATION_ENABLED=false`、recovery 保持启用。此时不会在 preview 前扫描历史客户或创建 reconciliation 补偿任务。
+2. 先确认 recovery 日志：`docker logs crm-backend --since 10m | grep '客户初始补全任务恢复调度已启动'`。不要把 backfill/reconciliation 未出现“已启动”视为故障；它们此阶段按设计关闭。
+3. 使用下方管理员 API 执行 backfill preview 和 reconciliation `dry_run=true`，重点审查 `other_available=true`、`invalid_non_null`、`would_schedule`，并确认 dry-run 的 `errors=0` 及预期 `jobs_created / gates_released / gates_cancelled / refreshes_repaired`。
+4. 审查通过后，在服务器部署环境的 `.env` 中各定义一次且只定义一次：
+
+   ```bash
+   CUSTOMER_INITIAL_ENRICHMENT_BACKFILL_ENABLED=true
+   CUSTOMER_INITIAL_ENRICHMENT_RECONCILIATION_ENABLED=true
+   ```
+
+5. 使用相同 Compose 文件 recreate 后端：`docker compose -f docker-compose.yml -f docker-compose.server.yml up -d --force-recreate backend`。
+6. 再检查三个独立 scheduler 的证据：
+
+   ```bash
+   docker logs crm-backend --since 10m | grep -E '客户初始补全任务恢复调度已启动|客户初始补全历史回填调度已启动|客户初始补全对账调度已启动'
+   ```
+
+三条“已启动”日志必须同时出现；后续有历史任务登记时还会出现“客户初始补全历史回填已调度”。只看到档案 backfill 或证据向量同步日志，不能证明主数据补全 worker 已启动。
+
+历史回填前先使用具备 `customer:edit:all` 权限的管理员凭证查看团队级 preview；接口均位于统一 `/api` 前缀下：
+
+```bash
+curl -sS -H "Authorization: Bearer $TOKEN" \
+  "$CRM_BASE_URL/api/v1/customers/enrichment/backfill-preview"
+```
+
+重点核对 `industry_null`、`existing_jobs`、`would_schedule`、`filled_skip`、`invalid_non_null` 和 `other_available`。`industry_null` 包括 SQL NULL 与 trim 后空白；`other_available` 必须为 `true`；`invalid_non_null` 只报告，不自动覆盖历史非缺失值。active plan 禁止历史回填时 `would_schedule=0`。preview 不登记 job，也不调用模型。
+
+诊断任务状态与运行证据：
+
+```bash
+curl -sS -H "Authorization: Bearer $TOKEN" \
+  "$CRM_BASE_URL/api/v1/customers/enrichment/jobs?limit=200"
+curl -sS -H "Authorization: Bearer $TOKEN" \
+  "$CRM_BASE_URL/api/v1/customers/enrichment/jobs?status=EXHAUSTED&limit=200"
+curl -sS -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  "$CRM_BASE_URL/api/v1/customers/enrichment/reconciliation/run" \
+  -d '{"limit":500,"dry_run":true}'
+```
+
+任务诊断返回 purpose、plan、requested fields、attempt/max attempts、`requeue_count`、下一次尝试时间、首次尝试完成时间、`profile_gate_timed_out_at` 和档案刷新 receipt。reconciliation dry-run 返回 `scanned / jobs_created / gates_released / gates_cancelled / refreshes_repaired / errors / next_customer_id / next_orphan_job_id`，用于发布前评估而不写入；客户页和 orphan 页使用两个独立 cursor：请求分别传 `after_customer_id` 与 `after_orphan_job_id`，每次把响应的 next 值带入下一页，某个 cursor 为 null 时只重置该 cursor，继续另一 cursor，直到两者都为 null。`gates_released` 只统计仍存在客户的正常释放，`gates_cancelled` 按 run 数统计已删除客户的 deferred Profile run（正式运行会 tenant-scoped 标记为 `CANCELLED/CUSTOMER_NOT_FOUND` 并清空 defer/retry/lease，永不 kick），`refreshes_repaired` 同时覆盖空 receipt 和无法在同一 team/customer 下解析的 `released:<run_id>` / request ID。`profile_gate_timeout` 的 durable 证据是诊断中非空的 `profile_gate_timed_out_at`：它只在创建期任务尚未完成首次尝试、deadline 已过且档案实际解除 gate 时首次写入；不能从聚合 `gates_released` 推断。运行期间应持续观察 `COMPLETED / SKIPPED / RETRY_PENDING / EXHAUSTED`，并结合写入操作日志的 per-field `reasons`、job result、`requeue_count`、档案 refresh receipt 和该时间戳形成 scheduled、applied、other、skipped、retry_pending、exhausted、requeued、profile_gate_timeout 证据；`SKIPPED/CUSTOMER_NOT_FOUND` 不登记终态档案刷新，技术失败不得伪装为行业 `other`。
+
+`EXHAUSTED` 不会无限自动重试。确认 AI 配置、行业目录和下游故障已修复后，管理员只能对当前 active plan、目标字段仍为空的耗尽任务重新入队：
+
+```bash
+curl -sS -X POST -H "Authorization: Bearer $TOKEN" \
+  "$CRM_BASE_URL/api/v1/customers/enrichment/jobs/$JOB_PUBLIC_ID/requeue"
+```
+
+成功响应为原 `job_public_id`、`status=QUEUED` 和递增后的 `requeue_count`；系统清除旧 lease/error、重置 attempt，并立即 kick 原任务，不创建第二条 job。非 `EXHAUSTED`、旧 plan 或字段已被人工填写时返回 `409`，不得绕过该保护直接改表。
+
 ## 销售承诺/跟进任务上线检查
 
 销售承诺/跟进任务包含两类迁移，不能只执行 Alembic：

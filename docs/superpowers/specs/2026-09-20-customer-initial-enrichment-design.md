@@ -1,7 +1,7 @@
 # 客户初始智能补全与行业历史回填
 
 - 日期：2026-09-20
-- 状态：已确认，待实施
+- 状态：已实施
 - 范围：客户首次成为正式客户后的异步主数据补全；第一期只补 `Customer.industry`；完成后驱动客户档案投影。覆盖页面创建、Agent 创建、线索转客户、旧 AI 创建兼容入口和历史空行业客户。
 - 上游决定：客户保存接口不等待 LLM；无人工确认、无置信度门槛；模型只能从启用行业目录选一个 code，业务上无法判断时选 `other`；技术失败不得伪装成 `other`；只补空值，人工值永不覆盖；首次补全优先，第一次技术失败后允许先生成无行业档案，后续补全成功再刷新档案。
 - 相关规范：`CONTEXT.md`、`CRM-Docs/design-agent/foundations/architecture-boundary.md`、`CRM-Docs/design-agent/runtime/customer-intelligence-profile.md`
@@ -9,17 +9,9 @@
 
 ## 1. 背景与目标
 
-旧 `CustomerAIParser` 在创建客户时具备完整行业链：
+旧 `CustomerAIParser` 曾在创建客户时把 `industry_hint` 通过 `_match_industry()` 同步写入 `Customer.industry`，形成绕过 durable job、重试和审计的第二条行业补全路径。兼容入口继续解析和传递 `industry_hint`，但该字段不具备事实权威性，创建时必须保持 `CustomerCreate.industry=None`，统一由初始补全生命周期处理。
 
-```text
-用户描述
-  → LLM 提取 industry_hint
-  → 读取 crm_industries 一、二级目录
-  → _match_industry()
-  → CustomerCreate.industry=行业 code
-```
-
-客户创建入口合并到 Agent 后，只迁入了 `customer_create.industry` 自由文本字段和普通客户创建 API，没有迁入“行业目录约束 + 自然语言匹配”节点。当前 Agent 若没有从原文明示行业，输出 `null`；即使输出行业，也只能依赖普通 Customer CRUD 对 code 或精确名称的校验。
+Agent 创建入口只迁入了普通客户创建 API；当原文没有明确行业时输出 `null`，即使输出行业也只能依赖普通 Customer CRUD 对 code 或精确名称的校验。统一异步补全因此承担目录闭世界和 durable lifecycle。
 
 客户档案生成不会补写行业。档案把 `Customer.industry` 当作强事实输入，并且其架构契约明确：档案是只读投影，不是客户主数据真相。
 
@@ -29,7 +21,7 @@
 2. 客户第一次成为正式客户时，异步补充缺失的主数据；第一期仅行业。
 3. 行业直接写入，无人工确认、无置信度门槛；用户可在客户编辑页修改。
 4. 补全逻辑可复用：未来增加公司规模、别名、组织简介等字段，不重建队列、租约、重试和审计。
-5. 历史 `industry IS NULL` 客户走同一 Workflow 批量补齐，而不是一次性 SQL。
+5. 历史行业缺失（`NULL` 或仅空白字符）客户走同一 Workflow 批量补齐，而不是一次性 SQL。
 6. 客户档案优先消费补全后的行业；补全技术失败时档案降级生成，后续成功再刷新。
 
 ## 2. 非目标
@@ -39,7 +31,7 @@
 - 不新增人工审核页、确认卡或候选行业 UI。
 - 不保存置信度，不以置信度决定是否写入。
 - 不新增 `primary_industry` / `secondary_industry` 两个客户字段。客户只保存一个行业 code；二级行业的一级父行业由 `Industry.parent` 得出。
-- 不覆盖任何已有行业，包括用户录入、线索转化继承、导入或旧 AI 流程已写入的行业。
+- 不覆盖任何已有有效行业，包括用户录入、线索转化继承和导入值；旧 AI 兼容入口的 `industry_hint` 不再同步写入。
 - 不因普通编辑、跟进、商机、合同、回款或手动刷新档案而再次运行“初始补全”。
 - 不为此引入 Celery、Redis 或新的消息中间件。
 - 不把任意模型输出通过通用 `setattr()` 写入客户。
@@ -59,7 +51,7 @@
 ## 4. 不变量
 
 1. **客户事实优先。** 客户创建成功不因补全或档案失败而回滚。
-2. **只填空值。** 自动补全只允许 `NULL → value`；已有值永不覆盖。
+2. **只填缺失值。** 字段 handler 统一定义 missing；v1 行业缺失是 `NULL` 或仅空白字符，自动补全只允许 missing → value，已有值永不覆盖。
 3. **目录闭世界。** 行业输出必须是执行时启用的 `crm_industries.code`；业务无法判断时使用启用的一级行业 `other`。
 4. **技术失败不是“其他”。** 模型不可用、超时、结构化输出错误、非法 code、目录缺失都进入重试；不得写 `other`。
 5. **只在首次阶段运行。** 同一客户、同一 `plan_version` 最多一个 durable job；普通业务事件不创建新 job。
@@ -246,6 +238,7 @@ lease_expires_at
 run_id
 graph_thread_id
 first_attempt_finished_at
+profile_gate_timed_out_at       # nullable；deadline 实际放行首次档案时首次写入，requeue 保留
 profile_refresh_request_id
 profile_refresh_enqueued_at
 requeue_count
@@ -354,7 +347,7 @@ Workflow 先计算当前仍缺失的 requested fields；若为空，不调用模
 - 输出一级 code：表示只能确定大类；
 - 无法判断：输出启用的一级 `other`。
 
-若 `other` 不存在或停用，视为 `ENRICHMENT_CATALOG_INVALID` 技术 / 配置失败，不写行业。
+若启用目录不存在一级 `other`，视为 `ENRICHMENT_CATALOG_INVALID` 技术 / 配置失败。该目录不变量必须在模型调用前验证，并在原子写入前再次验证；技术失败不写行业。
 
 ### 9.2 上下文
 
@@ -376,7 +369,7 @@ Workflow 先计算当前仍缺失的 requested fields；若为空，不调用模
 
 - `field == industry` 且属于 requested fields；
 - `value` 是当前启用行业 code；
-- `reason` 非空但只用于审计；
+- `reason` 非空、每字段最多 500 字符，只用于审计，并随操作日志和 job result 持久化；
 - 一个字段最多一条 decision；
 - 缺 decision、未知 field、非法 code、结构损坏均视为可重试执行失败。
 
@@ -386,36 +379,25 @@ Workflow 先计算当前仍缺失的 requested fields；若为空，不调用模
 
 未来一个 plan 可能补多个字段：所有 requested decision 必须先完成闭世界校验，再在**同一个客户条件更新和同一个事务**中写入，Customer.version 只递增一次；任何 decision 无效时整批不写，任务进入重试，不允许半成功。
 
-第一期等价 SQL：
-
-```sql
-UPDATE crm_customers
-SET industry = :industry_code,
-    version = version + 1,
-    last_modified_time = :now
-WHERE team_id = :team_id
-  AND id = :customer_id
-  AND industry IS NULL
-  AND version = :expected_version
-```
+第一期条件写入等价于：按 `team_id + customer_id + expected_version` 定位客户，并要求 industry 仍满足字段 handler 的 missing 谓词（`NULL` 或 trim 后为空），然后一次写入 code、递增 version 并更新时间。不能把空白历史值当作已填写。
 
 受影响行数：
 
 - `1`：APPLIED；
 - `0`：重新读取。行业已有值 → `SKIPPED/FIELD_ALREADY_FILLED`；客户仍存在、行业仍空但 version 已变化 → `RETRY_PENDING/CUSTOMER_CHANGED_DURING_ENRICHMENT`，用最新上下文重新执行，不使用旧判断，也不永久漏补。
 
-写入事务中再次确认行业 code 仍为启用状态，并记录一条操作日志：
+写入事务中再次确认行业 code 仍为启用状态且启用目录仍存在一级 `other`，并记录一条操作日志：
 
 ```text
-event_type = CUSTOMER_UPDATED
-action = UPDATE
-changed_fields = [industry]
 source = CUSTOMER_INITIAL_ENRICHMENT
 plan_version
 job_public_id
-before = null
-after = industry_code
+changed_fields
+before / after
+reasons = {field: bounded reason}
 ```
+
+同一 `reasons` mapping 必须出现在 completed job 的 `result_json`；旧 result JSON 通过默认空 mapping 保持可读。
 
 不需要在 Customer 表新增 `industry_source` 或置信度字段。
 
@@ -447,6 +429,8 @@ Agent “创建客户 + 首次跟进”是两个顺序 command。客户创建事
 写入后释放 `CustomerProfileReadinessGate`，唤醒该客户被延后的 profile runs。
 
 如果 worker 没有完成第一次执行，`profile_gate_deadline_at` 到期时 profile run 自行解除 gate并生成无行业档案；enrichment job 保持原状态，之后仍可执行。
+
+实际 deadline 放行时，在同一事务中幂等写入 job 的 `profile_gate_timed_out_at`；只有 `INITIAL_CREATION` 且 `first_attempt_finished_at IS NULL` 的真实超时路径可写。reconciliation dry-run、历史任务、首次尝试已经结束的释放不写，后续 requeue 保留该时间戳作为 durable `profile_gate_timeout` 证据。
 
 ### 11.2 后续重试成功
 
@@ -486,11 +470,14 @@ Agent “创建客户 + 首次跟进”是两个顺序 command。客户创建事
 | 重试耗尽 | EXHAUSTED；保留客户和已发布档案 |
 | 档案刷新失败 | 不修改 enrichment 终态；沿用档案自身重试 |
 
+客户删除由 context build 抛出 typed domain skip。job 直接进入 `SKIPPED/CUSTOMER_NOT_FOUND`，不进入模型、`RETRY_PENDING` 或 `EXHAUSTED`；首次尝试时间仍作为 lifecycle 证据写入，但已 deferred 的 Profile run 必须在同一 tenant/customer 范围内取消，不得释放/kick，也不得记录 profile refresh receipt。
+
 `EXHAUSTED` 不自动无限重试。提供受权限保护的运维 requeue 能力：仅当 active plan 的目标字段仍缺失时，清空 lease/error、attempt_count 归零、`requeue_count + 1`、重新设为 QUEUED，并记录操作审计；唯一 job 不新建第二条。
 
 ## 13. 历史回填与数据迁移
 
 ### 13.1 Alembic
+
 
 新增 migration 只负责：
 
@@ -506,9 +493,11 @@ Agent “创建客户 + 首次跟进”是两个顺序 command。客户创建事
 
 ```text
 active plan backfill_enabled
-AND plan 所需字段仍缺失（v1: Customer.industry IS NULL）
+AND plan 所需字段仍缺失（v1: Customer.industry 为 NULL 或仅空白字符）
 AND 不存在 (team_id, customer_id, plan_version) job
 ```
+
+`backfill_enabled=false` 时 backfill、preview 的 `would_schedule` 和 reconciliation 的历史 job 创建计数都必须为 0；reconciliation 仍可修复既有 job、gate 和 receipt。
 
 按 `team_id, customer_id` 稳定排序 ensure job。新客户与历史回填使用同一执行服务但分开领取配额：高频 worker 每轮先处理 `INITIAL_CREATION`（默认 20），再至少处理一批 `HISTORICAL_BACKFILL`（默认 5）；不能只按全局优先级排序导致历史任务长期饥饿。
 
@@ -521,20 +510,23 @@ AND 不存在 (team_id, customer_id, plan_version) job
 - 新客户有创建事实但没有 active plan job；
 - job RUNNING lease 过期；
 - RETRY_PENDING 已到期；
-- enrichment 成功但 `profile_refresh_request_id` 为空或对应 run 不存在；
+- 客户已删除但 enrichment job 和 deferred Profile run 仍存在：reconciliation 额外扫描没有 Customer row、却存在 nonterminal `not_before_at` run 的 distinct tenant/customer orphan；正式运行 tenant-scoped 取消这些 run，dry-run 精确计数 `gates_cancelled`，不受普通 customer cursor 限制；
+- enrichment 成功但 `profile_refresh_request_id` 为空，或 receipt 在同一 team/customer 下无法解析到 `released:<numeric_run_id>` / request ID 对应 run；过期 receipt 在同一 savepoint 内替换为实际释放的 run，或清空后登记新的 durable refresh；`CUSTOMER_NOT_FOUND` skip 不登记刷新；
 - profile run 被 gate 延后但 first attempt 已结束或 gate deadline 已到；
 - `not_before_at` 已到期但 run 未被 worker 领取。
+
+对账结果把正常 gate 释放与删除客户取消分开：`gates_released` 只统计 release，`gates_cancelled` 按被取消 run 数统计。孤儿扫描只选择仍有 deferred nonterminal run 的 identity，避免干净孤儿占用 limit，并在每个 orphan savepoint 中隔离错误。普通客户和 orphan 使用独立 cursor：orphan identity 以该 `(team_id, customer_id)` 的最小 enrichment job id 为稳定 anchor，按 `min_job_id` 分页并返回 `next_orphan_job_id`；失败 identity 也推进 cursor。调用方分别携带 `after_customer_id` / `after_orphan_job_id`，独立迭代，直到两个 next cursor 都为 null。
 
 重复 ensure 必须由唯一键变成 no-op。提供 diagnostics 与 EXHAUSTED requeue 服务 / 管理端 API，但不需要业务用户确认 UI。
 
 ### 13.4 Dry-run 与证据
 
 ```text
-按团队的 industry NULL 数量
+按团队的 industry missing（NULL 或仅空白）数量
 已存在 job 数量
-待创建 job 数量
-已有 industry、应跳过数量
-非空但不是有效启用 code 的历史值数量（仅报告，不自动覆盖）
+待创建 job 数量（active plan 禁止 backfill 时为 0）
+已有非缺失 industry、应跳过数量
+非缺失但不是有效启用 code 的历史值数量（仅报告，不自动覆盖）
 行业目录是否存在启用的 other
 ```
 
@@ -554,7 +546,7 @@ CustomerCreationApplicationService
 
 1. `POST /v1/customers/` 使用 Coordinator；Agent 自动覆盖。
 2. 线索转客户的新旧分支使用 Coordinator。
-3. 旧 AI submit 兼容入口改用 Coordinator，移除其独立 `trigger_customer_created_refresh()`。
+3. 旧 AI submit 兼容入口改用 Coordinator，保留非权威 `industry_hint` parse/wire 字段，移除 `_match_industry()` 和同步行业写入；
 4. 盘点 `CustomerService.create()`；无运行时 caller 则保留薄封装但标明调用者必须通过应用服务。
 5. reconciliation 为漏发入口兜底。
 
