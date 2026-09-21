@@ -1,3 +1,5 @@
+import type { Opportunity } from '@/api/opportunity'
+import { parseOpportunityApiResponse } from '@/api/opportunity'
 import request from '@/utils/request'
 import {
   BusinessJourneyBoardResponseSchema,
@@ -5,19 +7,17 @@ import {
   BusinessJourneyListResponseSchema,
   BusinessJourneyOwnerFilterOptionsResponseSchema,
   DealJourneyListSchema,
+  type DealJourney,
   DealJourneySchema,
   type BusinessJourneyBoardResponse,
-  type BusinessJourneyDetailResponse,
   type BusinessJourneyListResponse,
   type BusinessJourneyOwnerFilterOptionsResponse,
-  type DealJourney
 } from '@/schemas/dealJourney'
 
 export type {
   BusinessJourneyBoardCard,
   BusinessJourneyBoardColumn,
   BusinessJourneyBoardResponse,
-  BusinessJourneyDetailResponse,
   BusinessJourneyListItem,
   BusinessJourneyListResponse,
   BusinessJourneyOwner,
@@ -46,6 +46,11 @@ export interface BusinessJourneyBoardParams {
   limit?: number
 }
 
+export interface BusinessJourneyDetailResponse {
+  journey: DealJourney
+  primary_opportunity: Opportunity | null
+}
+
 export const dealJourneyApi = {
   async list(params: BusinessJourneyListParams): Promise<BusinessJourneyListResponse> {
     // eslint-disable-next-line crmwolf/require-zod-schema
@@ -68,7 +73,13 @@ export const dealJourneyApi = {
   async getDetail(journeyPublicId: string): Promise<BusinessJourneyDetailResponse> {
     // eslint-disable-next-line crmwolf/require-zod-schema
     const raw: unknown = await request.get(`/v1/business-journeys/${journeyPublicId}`)
-    return BusinessJourneyDetailResponseSchema.parse(raw)
+    const parsed = BusinessJourneyDetailResponseSchema.parse(raw)
+    return {
+      journey: parsed.journey,
+      primary_opportunity: parsed.primary_opportunity === null
+        ? null
+        : parseOpportunityApiResponse(parsed.primary_opportunity)
+    }
   },
 
   async listByCustomer(customerId: string): Promise<DealJourney[]> {

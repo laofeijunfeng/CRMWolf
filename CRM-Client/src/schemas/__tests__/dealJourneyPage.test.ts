@@ -9,6 +9,7 @@ vi.mock('@/utils/request', () => ({
 }))
 
 import { dealJourneyApi } from '@/api/dealJourney'
+import type { Opportunity } from '@/api/opportunity'
 import {
   BusinessJourneyBoardResponseSchema,
   BusinessJourneyDetailResponseSchema,
@@ -259,5 +260,7 @@ describe('dealJourneyApi page projections', () => {
 
     expect(requestGet).toHaveBeenCalledWith(`/v1/business-journeys/${journeyPublicId}`)
     expect(detail.primary_opportunity?.public_id).toBe(opportunityPublicId)
+    const normalizedOpportunity: Opportunity | null = detail.primary_opportunity
+    expect(normalizedOpportunity?.deal_journey_id).toBe(journeyPublicId)
   })
 })
