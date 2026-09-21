@@ -126,6 +126,7 @@ describe('DataTable frontend/backend list-export contract', () => {
     for (const [viewName, { resource }] of Object.entries(dataTableViews)) {
       const backendFields = manifest[resource]
       expect(backendFields, `${viewName} export catalog`).toBeDefined()
+      if (backendFields === undefined) continue
       const exportFields = extractExportFields(viewName)
       expect(exportFields.length, `${viewName} export fields`).toBeGreaterThan(0)
 
@@ -133,6 +134,7 @@ describe('DataTable frontend/backend list-export contract', () => {
         expect(isUnsafeExportKey(field.exportKey), `${viewName} unsafe ${field.exportKey}`).toBe(false)
         const backendField = backendFields[field.exportKey]
         expect(backendField, `${viewName} export ${field.exportKey}`).toBeDefined()
+        if (backendField === undefined) continue
         expect(backendField.label, `${viewName} export ${field.exportKey} label`).toBe(field.label)
       }
     }

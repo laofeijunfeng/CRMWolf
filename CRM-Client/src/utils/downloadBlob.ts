@@ -2,7 +2,7 @@ const INVALID_FILENAME_CHARS = /[\\/:*?"<>|\r\n]/g
 const FALLBACK_TITLE = '列表导出'
 
 function sanitizeSegment(value: string): string {
-  const cleaned = value.replace(INVALID_FILENAME_CHARS, '').trim(' .')
+  const cleaned = value.replace(INVALID_FILENAME_CHARS, '').replace(/^[. ]+|[. ]+$/g, '')
   return cleaned.length > 0 ? cleaned : ''
 }
 

@@ -484,15 +484,14 @@ const columnConfigActive = computed(() =>
 )
 
 const exportDialogFields = computed<DataTableExportDialogField[]>(() => {
-  const visibilityByFieldKey = new Map(
-    preferredColumns.value.map((column) => [column.key, column.visible !== false])
+  const exportByFieldKey = new Map(
+    projectedFields.value.exportFields.map((field) => [field.fieldKey, field]),
   )
-  const columnSourced = projectedFields.value.exportFields
-    .filter((field) => field.source === 'column')
-    .map((field) => ({
-      ...field,
-      visible: visibilityByFieldKey.get(field.fieldKey) ?? true,
-    }))
+  const columnSourced = preferredColumns.value.flatMap((column) => {
+    const field = exportByFieldKey.get(column.key)
+    if (field === undefined || field.source !== 'column') return []
+    return [{ ...field, visible: column.visible !== false }]
+  })
   const exportOnly = projectedFields.value.exportFields
     .filter((field) => field.source === 'export-only')
     .map((field) => ({ ...field, visible: false }))

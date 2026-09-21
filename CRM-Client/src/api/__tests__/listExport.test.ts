@@ -11,7 +11,7 @@ const payload = {
   tab: 'all',
   filters: [],
   sorts: [],
-} as const
+}
 
 describe('postListExport', () => {
   it('posts the typed payload as a blob with the export-only zero timeout', async () => {
