@@ -1,89 +1,39 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watchEffect } from 'vue'
-import {
-  AlertCircle,
-  CheckCircle2,
-  RefreshCw,
-  UserRound
-} from 'lucide-vue-next'
-import { toast } from 'vue-sonner'
+import { computed } from 'vue'
+import { AlertCircle, CheckCircle2, RefreshCw, UserRound } from 'lucide-vue-next'
 import {
   AmountText,
   Badge,
   Card,
   CardContent,
-  ListFilterPopover,
   Skeleton,
   TableToolbarButton
 } from '@/components/crmwolf'
-import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
-import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
-import type { ViewPreferenceConfig } from '@/api/viewPreference'
-import businessJourneyBoardApi, {
-  type BusinessJourneyBoardCard,
-  type BusinessJourneyBoardColumn,
-  type BusinessJourneyBoardResponse,
-  type BusinessJourneyBoardStageKey
-} from '@/api/businessJourneyBoard'
-import CustomerDetailSheet from './CustomerDetailSheet.vue'
-import { useHeaderStore } from '@/stores/header'
-import { usePageTitle } from '@/composables/usePageTitle'
-import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
-import { useCustomFilterViews } from '@/composables/useCustomFilterViews'
-import {
-  BUSINESS_JOURNEY_BOARD_OPPORTUNITY_DATE_FILTER_FIELDS,
-  buildBusinessJourneyBoardParams
-} from '@/utils/businessJourneyBoardFilters'
-import { logger } from '@/utils/logger'
+import type {
+  BusinessJourneyBoardCard,
+  BusinessJourneyBoardResponse,
+  DealJourneyBoardStage
+} from '@/schemas/dealJourney'
 
-usePageTitle()
+interface Props {
+  board: BusinessJourneyBoardResponse | null
+  loading?: boolean
+  errorMessage?: string
+}
 
-const headerStore = useHeaderStore()
-const loading = ref(false)
-const errorMessage = ref('')
-const board = ref<BusinessJourneyBoardResponse | null>(null)
-const boardRequestSequence = ref(0)
-const activeFilters = ref<ListFilterCondition[]>([])
-const activeSorts = ref<ListSortCondition[]>([])
-const activeColumns = ref<ViewPreferenceConfig['columns']>([])
-const activeTab = ref('all')
-const ownerFilterOptions = ref<{ value: string; label: string }[]>([])
-const ownerFilterLoading = ref(false)
-const ownerFilterError = ref('')
-const ownerFilterRequestSequence = ref(0)
-const selectedCustomerId = ref<string | null>(null)
-const sheetVisible = computed({
-  get: () => selectedCustomerId.value !== null,
-  set: (visible: boolean) => {
-    if (!visible) {
-      selectedCustomerId.value = null
-    }
-  }
+const props = withDefaults(defineProps<Props>(), {
+  loading: false,
+  errorMessage: ''
 })
 
-const tabs = [
-  { key: 'all', label: '所有业务' }
-]
+const emit = defineEmits<{
+  retry: []
+  'row-click': [payload: { customerId: string; journeyPublicId: string }]
+}>()
+const columns = computed(() => props.board?.columns ?? [])
+const hasBoardData = computed(() => props.board !== null)
 
-const filterFields = computed<ListFilterField[]>(() => [
-  {
-    key: 'last_event_at',
-    label: '最近动态时间',
-    type: 'date'
-  },
-  {
-    key: 'owner_id',
-    label: '负责人',
-    type: 'enum',
-    options: ownerFilterOptions.value
-  },
-  ...BUSINESS_JOURNEY_BOARD_OPPORTUNITY_DATE_FILTER_FIELDS
-])
-
-const columns = computed<BusinessJourneyBoardColumn[]>(() => board.value?.columns ?? [])
-const hasBoardData = computed(() => board.value !== null)
-
-const stagePalette: Record<BusinessJourneyBoardStageKey, { column: string; countBadge: string; emphasisBadge: string }> = {
+const stagePalette: Record<DealJourneyBoardStage, { column: string; countBadge: string; emphasisBadge: string }> = {
   early_communication: {
     column: 'business-board-stage--sky',
     countBadge: 'bg-sky-50 text-sky-700 border-sky-100',
@@ -130,8 +80,7 @@ const getStageAge = (value: string | null | undefined): string => {
   if (value === null || value === undefined || value === '') return '-'
   const start = new Date(value)
   if (Number.isNaN(start.getTime())) return '-'
-  const diff = Date.now() - start.getTime()
-  const days = Math.max(Math.floor(diff / 86400000), 0)
+  const days = Math.max(Math.floor((Date.now() - start.getTime()) / 86400000), 0)
   if (days === 0) return '今天'
   return `${days}天`
 }
@@ -150,172 +99,33 @@ const getStageAgeTone = (value: string | null | undefined): string => {
   return 'bg-rose-50 text-rose-700 border-rose-100'
 }
 
-const shouldShowOpportunityStage = (card: BusinessJourneyBoardCard): boolean => {
-  return ['early_communication', 'active_progress', 'closing_soon'].includes(card.current_board_stage)
-}
+type BoardCard = BusinessJourneyBoardCard
 
-const getCardStageName = (card: BusinessJourneyBoardCard): string => {
-  return card.primary_opportunity?.current_stage_name ?? '未记录阶段'
-}
+const shouldShowOpportunityStage = (card: BoardCard): boolean =>
+  ['early_communication', 'active_progress', 'closing_soon'].includes(card.current_board_stage)
 
-const getWinProbability = (card: BusinessJourneyBoardCard): string => {
+const getCardStageName = (card: BoardCard): string =>
+  card.primary_opportunity?.current_stage_name ?? '未记录阶段'
+
+const getWinProbability = (card: BoardCard): string => {
   const value = card.primary_opportunity?.win_probability
   return value === null || value === undefined ? '-' : `${value}%`
 }
 
-const openCustomerDetail = (customerId: string): void => {
-  selectedCustomerId.value = customerId
+const emitRowClick = (card: BoardCard): void => {
+  emit('row-click', {
+    customerId: card.customer_id,
+    journeyPublicId: card.public_id
+  })
 }
 
-const handleSheetRefresh = (): void => {
-  void loadBoard()
-}
+const cardKey = (card: BoardCard): string => card.public_id
 
-const loadBoard = async (): Promise<void> => {
-  const requestId = boardRequestSequence.value + 1
-  boardRequestSequence.value = requestId
-  loading.value = true
-  errorMessage.value = ''
-  try {
-    const nextBoard = await businessJourneyBoardApi.getBoard(
-      buildBusinessJourneyBoardParams(activeFilters.value)
-    )
-    if (requestId !== boardRequestSequence.value) return
-    board.value = nextBoard
-  } catch (error) {
-    if (requestId !== boardRequestSequence.value) return
-    logger.error('[BusinessJourneyBoard]', '加载业务看板失败', { error })
-    errorMessage.value = hasBoardData.value
-      ? '业务看板刷新失败，当前显示上次成功加载的数据'
-      : '业务看板加载失败，请重试'
-    toast.warning('业务看板加载失败', {
-      description: hasBoardData.value
-        ? '当前仍显示上次成功加载的数据，你可以重试。'
-        : '请检查网络连接后重试。'
-    })
-  } finally {
-    if (requestId === boardRequestSequence.value) {
-      loading.value = false
-    }
-  }
-}
-
-const fetchOwnerFilterOptions = async (): Promise<void> => {
-  const requestId = ownerFilterRequestSequence.value + 1
-  ownerFilterRequestSequence.value = requestId
-  ownerFilterLoading.value = true
-  ownerFilterError.value = ''
-  try {
-    const response = await businessJourneyBoardApi.getOwnerFilterOptions()
-    if (requestId !== ownerFilterRequestSequence.value) return
-    ownerFilterOptions.value = response.data.map((owner) => ({
-      value: owner.id,
-      label: owner.name
-    }))
-  } catch (error) {
-    if (requestId !== ownerFilterRequestSequence.value) return
-    logger.error('[BusinessJourneyBoard]', '获取负责人筛选项失败', { error })
-    ownerFilterError.value = ownerFilterOptions.value.length > 0
-      ? '负责人筛选项加载失败，当前仍保留已有选项'
-      : '负责人筛选项加载失败，请重试'
-  } finally {
-    if (requestId === ownerFilterRequestSequence.value) {
-      ownerFilterLoading.value = false
-    }
-  }
-}
-
-const customFilterViews = useCustomFilterViews({
-  viewKey: 'business-journey-board.board',
-  activeTab,
-  activeFilters,
-  activeSorts,
-  activeColumns,
-  refresh: loadBoard,
-})
-const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
-const customFilterViewSaving = computed(() => customFilterViews.saving.value)
-
-const handleFilterApply = async (filters: ListFilterCondition[]): Promise<void> => {
-  activeFilters.value = filters
-  await customFilterViews.updateActiveCustomViewConfig()
-  void loadBoard()
-}
-
-const handleFilterReset = (): void => {
-  activeFilters.value = []
-  void customFilterViews.updateActiveCustomViewConfig()
-  void loadBoard()
-}
-
-const handleSaveFilterView = async (filters: ListFilterCondition[]): Promise<void> => {
-  activeFilters.value = filters
-  await customFilterViews.saveAsCustomView(filters)
-}
-
-onMounted(() => {
-  void fetchOwnerFilterOptions()
-  void customFilterViews.loadCustomViews()
-  void loadBoard()
-})
-
-useTopBarRegistration({
-  tabs: allTabs,
-  activeTab,
-  actions: () => []
-})
-
-watchEffect(() => {
-  if (headerStore.activeTab && headerStore.activeTab !== activeTab.value) {
-    if (customFilterViews.applyCustomViewTab(headerStore.activeTab)) {
-      return
-    }
-    customFilterViews.applyBuiltInTab(headerStore.activeTab)
-    void loadBoard()
-  }
-})
+const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.journey_name}`
 </script>
 
 <template>
-  <div class="business-board-page">
-    <div class="business-board-toolbar" aria-label="业务看板工具栏">
-      <ListFilterPopover
-        v-model="activeFilters"
-        :fields="filterFields"
-        save-view-enabled
-        :save-view-loading="customFilterViewSaving"
-        @apply="handleFilterApply"
-        @reset="handleFilterReset"
-        @save-view="handleSaveFilterView"
-      />
-      <TableToolbarButton
-        class="refresh-button"
-        :disabled="loading"
-        aria-label="刷新业务看板"
-        @click="loadBoard"
-      >
-        <RefreshCw class="refresh-icon" :class="{ spinning: loading }" aria-hidden="true" />
-        刷新
-      </TableToolbarButton>
-    </div>
-
-    <div
-      v-if="ownerFilterError"
-      class="business-board-inline-error business-board-inline-error--toolbar"
-      role="alert"
-      aria-live="polite"
-    >
-      <AlertCircle class="error-icon" aria-hidden="true" />
-      <span>{{ ownerFilterError }}</span>
-      <TableToolbarButton
-        class="business-board-inline-retry"
-        :disabled="ownerFilterLoading"
-        @click="fetchOwnerFilterOptions"
-      >
-        {{ ownerFilterLoading ? '重试中…' : '重试' }}
-      </TableToolbarButton>
-    </div>
-
+  <div class="business-board-view">
     <div
       v-if="errorMessage && hasBoardData"
       class="business-board-error"
@@ -327,7 +137,7 @@ watchEffect(() => {
       <TableToolbarButton
         class="business-board-inline-retry"
         :disabled="loading"
-        @click="loadBoard"
+        @click="emit('retry')"
       >
         重试
       </TableToolbarButton>
@@ -346,7 +156,7 @@ watchEffect(() => {
     <Card class="business-board-surface">
       <CardContent class="business-board-surface-content">
         <div class="business-board-scroll">
-          <div v-if="loading && !hasBoardData" class="business-board-skeleton" aria-label="业务看板加载中">
+          <div v-if="loading && !hasBoardData" class="business-board-skeleton" aria-label="旅程看板加载中">
             <section v-for="index in 5" :key="index" class="business-board-column">
               <Skeleton class="h-8 w-24" />
               <Skeleton class="h-28 w-full" />
@@ -357,9 +167,9 @@ watchEffect(() => {
 
           <div v-else-if="!hasBoardData" class="business-board-blocking-error" role="alert">
             <AlertCircle class="blocking-error-icon" aria-hidden="true" />
-            <strong>{{ errorMessage || '业务看板暂时无法加载' }}</strong>
+            <strong>{{ errorMessage || '旅程看板暂时无法加载' }}</strong>
             <span>请检查网络连接后重试。</span>
-            <TableToolbarButton :disabled="loading" @click="loadBoard">
+            <TableToolbarButton :disabled="loading" @click="emit('retry')">
               {{ loading ? '加载中…' : '重新加载' }}
             </TableToolbarButton>
           </div>
@@ -381,14 +191,14 @@ watchEffect(() => {
               <div class="column-card-list">
                 <Card
                   v-for="card in column.cards"
-                  :key="card.journey_id"
+                  :key="cardKey(card)"
                   class="journey-card"
                   role="button"
                   tabindex="0"
-                  :aria-label="`查看客户详情：${card.customer_name ?? card.customer_id}`"
-                  @click="openCustomerDetail(card.customer_id)"
-                  @keydown.enter.prevent="openCustomerDetail(card.customer_id)"
-                  @keydown.space.prevent="openCustomerDetail(card.customer_id)"
+                  :aria-label="cardAriaLabel(card)"
+                  @click="emitRowClick(card)"
+                  @keydown.enter.prevent="emitRowClick(card)"
+                  @keydown.space.prevent="emitRowClick(card)"
                 >
                   <CardContent class="journey-card-content">
                     <div class="journey-card-topline">
@@ -402,9 +212,7 @@ watchEffect(() => {
                       </Badge>
                     </div>
 
-                    <div class="journey-title">
-                      {{ card.journey_name }}
-                    </div>
+                    <div class="journey-title">{{ card.journey_name }}</div>
 
                     <div class="journey-main-metric">
                       <AmountText :value="card.amount" size="lg" tone="default" />
@@ -447,51 +255,21 @@ watchEffect(() => {
         </div>
       </CardContent>
     </Card>
-
-    <CustomerDetailSheet
-      v-model:visible="sheetVisible"
-      :customer-id="selectedCustomerId"
-      @refresh="handleSheetRefresh"
-      @view-customer="openCustomerDetail"
-    />
   </div>
 </template>
 
 <style scoped lang="scss">
 @use '@/styles/variables-v2.scss' as *;
 
-.business-board-page {
-  box-sizing: border-box;
+.business-board-view {
   display: flex;
+  flex: 1;
   flex-direction: column;
-  height: 100%;
   min-height: 0;
-  overflow: hidden;
-  padding: $wolf-page-padding-v2;
   gap: 16px;
-  background: $wolf-bg-page-v2;
-}
-
-.business-board-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-  min-height: 32px;
-}
-
-.refresh-icon {
-  width: 14px;
-  height: 14px;
-}
-
-.refresh-icon.spinning {
-  animation: business-board-spin 0.8s linear infinite;
 }
 
 .business-board-error,
-.business-board-inline-error,
 .business-board-refreshing {
   display: flex;
   align-items: center;
@@ -502,15 +280,10 @@ watchEffect(() => {
   font-size: $wolf-font-size-caption-v2;
 }
 
-.business-board-error,
-.business-board-inline-error {
+.business-board-error {
   border: 1px solid rgba($wolf-danger-v2, 0.18);
   color: $wolf-danger-text-v2;
   background: $wolf-danger-bg-v2;
-}
-
-.business-board-inline-error--toolbar {
-  flex-shrink: 0;
 }
 
 .business-board-refreshing {
@@ -523,7 +296,8 @@ watchEffect(() => {
   margin-left: auto;
 }
 
-.refreshing-icon {
+.refreshing-icon,
+.error-icon {
   width: 16px;
   height: 16px;
   flex-shrink: 0;
@@ -552,12 +326,6 @@ watchEffect(() => {
   width: 24px;
   height: 24px;
   color: $wolf-danger-text-v2;
-}
-
-.error-icon {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
 }
 
 .business-board-surface {
@@ -645,9 +413,7 @@ watchEffect(() => {
   background: hsl(var(--card));
   box-shadow: none;
   cursor: pointer;
-  transition:
-    border-color 160ms ease,
-    box-shadow 160ms ease;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
 }
 
 .journey-card:hover,
@@ -720,15 +486,12 @@ watchEffect(() => {
   display: inline-flex;
   align-items: center;
   min-width: 0;
-  gap: 5px;
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-.journey-info-tag {
   max-width: 100%;
+  gap: 5px;
   border: 0;
+  font-size: 12px;
   font-weight: 500;
+  line-height: 1.35;
 }
 
 .tag-icon,
@@ -758,54 +521,25 @@ watchEffect(() => {
   font-size: 13px;
 }
 
-.business-board-stage--sky {
-  --column-bg: rgb(240 249 255);
-}
+.business-board-stage--sky { --column-bg: rgb(240 249 255); }
+.business-board-stage--blue { --column-bg: rgb(239 246 255); }
+.business-board-stage--violet { --column-bg: rgb(245 243 255); }
+.business-board-stage--amber { --column-bg: rgb(255 251 235); }
+.business-board-stage--cyan { --column-bg: rgb(236 254 255); }
+.business-board-stage--emerald { --column-bg: rgb(236 253 245); }
+.business-board-stage--slate { --column-bg: rgb(248 250 252); }
+.business-board-stage--rose { --column-bg: rgb(255 241 242); }
 
-.business-board-stage--blue {
-  --column-bg: rgb(239 246 255);
-}
-
-.business-board-stage--violet {
-  --column-bg: rgb(245 243 255);
-}
-
-.business-board-stage--amber {
-  --column-bg: rgb(255 251 235);
-}
-
-.business-board-stage--cyan {
-  --column-bg: rgb(236 254 255);
-}
-
-.business-board-stage--emerald {
-  --column-bg: rgb(236 253 245);
-}
-
-.business-board-stage--slate {
-  --column-bg: rgb(248 250 252);
-}
-
-.business-board-stage--rose {
-  --column-bg: rgb(255 241 242);
+.spinning {
+  animation: business-board-spin 0.8s linear infinite;
 }
 
 @keyframes business-board-spin {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 @media (max-width: 900px) {
-  .business-board-page {
-    padding: $wolf-page-padding-mobile-v2;
-    padding-bottom: calc($wolf-page-padding-mobile-v2 + $wolf-safe-area-bottom-v2);
-  }
-
   .business-board-columns,
   .business-board-skeleton {
     grid-auto-columns: minmax(272px, 88vw);

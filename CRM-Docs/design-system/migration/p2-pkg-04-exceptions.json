@@ -1,7 +1,7 @@
 {
   "$schema": "./p2-pkg-04-exceptions.schema.json",
   "version": "1.0",
-  "lastVerified": "2026-09-04",
+  "lastVerified": "2026-09-21",
   "exceptions": [
     {
       "id": "DS-EX-001",
@@ -37,6 +37,31 @@
       "reason": "商机阶段是浮层中的业务标签/阶段编码，不属于统一生命周期状态；当前蓝色标签用于与主体状态徽章区分。待建立阶段专用 Badge 契约后再单独评估迁移。",
       "owner": "frontend-platform",
       "reviewDate": "2026-12-04",
+      "status": "active"
+    },
+    {
+      "id": "DS-EX-004",
+      "category": "status-color",
+      "files": [
+        "CRM-Client/src/components/business-journey/BusinessJourneyBoardView.vue",
+        "CRM-Client/tests/components/BusinessJourneyBoardView.spec.ts"
+      ],
+      "match": "^(?:(?:/\\*.*?\\*/|//.*$)|(?<![A-Za-z0-9_/-])(?:bg-sky-50|text-sky-700|border-sky-100|bg-sky-600|bg-blue-50|text-blue-700|border-blue-100|bg-blue-600|bg-emerald-50|text-emerald-700|border-emerald-100|bg-emerald-600|bg-violet-50|text-violet-700|border-violet-100|bg-violet-600|bg-amber-50|text-amber-700|border-amber-100|bg-amber-600|bg-cyan-50|text-cyan-700|border-cyan-100|bg-cyan-600|bg-slate-50|text-slate-700|border-slate-100|bg-slate-600|text-slate-600|bg-rose-50|text-rose-700|border-rose-100|bg-rose-600|bg-yellow-50|text-yellow-700|border-yellow-100)(?=$|[^A-Za-z0-9_/-])|(?!(?:(?:text|bg|border)-(?:red|orange|amber|yellow|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|pink|rose|slate|gray)-(?:[1-9]\\d?\\d?)(?:/[0-9]+)?)\\b).)*$",
+      "reason": "Task 5 extracts the shipped business-journey board unchanged; its stage palette and age tones are established visual encodings that must remain identical through the route cutover.",
+      "owner": "frontend",
+      "reviewDate": "2026-12-21",
+      "status": "active"
+    },
+    {
+      "id": "DS-EX-005",
+      "category": "raw-color",
+      "files": [
+        "CRM-Client/src/components/business-journey/BusinessJourneyBoardView.vue"
+      ],
+      "match": "rgba\\(37, 99, 235|rgb\\((?:240 249 255|239 246 255|245 243 255|255 251 235|236 254 255|236 253 245|248 250 252|255 241 242)\\)",
+      "reason": "Task 5 extracts the shipped business-journey board unchanged; these exact column fills and focus ring preserve the legacy board visual until a separately approved palette migration.",
+      "owner": "frontend",
+      "reviewDate": "2026-12-21",
       "status": "active"
     }
   ]

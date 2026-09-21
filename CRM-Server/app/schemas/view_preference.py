@@ -21,6 +21,7 @@ class ViewPreferenceConfig(BaseModel):
     sorts: list[dict[str, Any]] = Field(default_factory=list, max_length=10)
     filters: list[dict[str, Any]] = Field(default_factory=list, max_length=50)
     density: str | None = Field(None, max_length=20)
+    display_mode: Literal["table", "board"] | None = None
 
 
 class ViewPreferenceSaveRequest(BaseModel):

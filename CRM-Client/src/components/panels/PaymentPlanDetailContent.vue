@@ -1008,11 +1008,17 @@ $payment-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
 }
 
 .attribute-link {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  height: auto;
   min-height: $wolf-touch-target-min-v2;
   justify-content: flex-start;
   padding: 0;
   color: $wolf-text-link-v2;
   text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
 
   &:focus-visible {
     outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;

@@ -9,6 +9,7 @@ import { computed, ref } from 'vue'
 import { Sheet } from '@/components/ui/sheet'
 import { DetailSheetContent } from '@/components/ui/detail-sheet'
 import ContractDetailContent from '@/components/panels/ContractDetailContent.vue'
+import type { PaymentPlanResponse } from '@/api/payment'
 
 interface Props {
   contractId: number | null
@@ -25,6 +26,7 @@ const emit = defineEmits<{
   'approve': [contractId: number]
   'reject': [contractId: number]
   'refresh': []
+  'view-payment-plan': [plan: PaymentPlanResponse]
 }>()
 
 const visibleModel = computed({
@@ -58,6 +60,7 @@ function closeSheet(): void {
         @approve="emit('approve', $event)"
         @reject="emit('reject', $event)"
         @refresh="emit('refresh')"
+        @view-payment-plan="emit('view-payment-plan', $event)"
       />
     </DetailSheetContent>
   </Sheet>

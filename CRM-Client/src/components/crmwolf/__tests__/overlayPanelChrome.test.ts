@@ -112,4 +112,26 @@ describe('overlay panel chrome', () => {
     expect(findButton('保存').querySelector('svg')).toBeNull()
     expect(findButton('恢复默认').querySelector('svg')).toBeNull()
   })
+
+  it('uses optional view config labels without changing the column chrome', async () => {
+    const wrapper = mountAttached(ColumnConfigPopover, {
+      columns: [{
+        key: 'name',
+        title: '名称',
+        visible: true,
+        configurable: true,
+        hideable: true,
+      }],
+      viewDisplayModeEnabled: true,
+      viewDisplayMode: 'table',
+      viewConfigTriggerLabel: '视图配置',
+      viewConfigPanelTitle: '视图配置',
+    })
+
+    await openToolbarPopover(wrapper, '视图配置')
+
+    expect(document.body.textContent).toContain('看板视图')
+    expect(document.body.textContent).toContain('字段')
+    expect(findButton('关闭')).toBeTruthy()
+  })
 })

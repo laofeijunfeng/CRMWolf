@@ -27,6 +27,12 @@ def test_build_list_query_manifest_exposes_each_catalog_field_type():
     assert manifest["payment_plans"]["planned_amount"]["type"] == "number"
     assert manifest["approvals"]["overdue_hours"]["sortable"] is True
     assert manifest["payment_records"]["approval_status"]["sortable"] is True
+    assert manifest["business_journeys"]["stage"] == {
+        "type": "enum",
+        "filterable": True,
+        "sortable": False,
+        "ops": ["eq", "in", "neq", "not_in"],
+    }
 
 
 def test_committed_client_manifest_matches_backend_catalogs(tmp_path):
@@ -42,6 +48,7 @@ def test_committed_client_manifest_matches_backend_catalogs(tmp_path):
 def test_every_datatable_catalog_defines_a_module_scoped_search_predicate():
     datatable_catalogs = {
         "approvals",
+        "business_journeys",
         "contracts",
         "customer_tracking" if "customer_tracking" in LIST_QUERY_CATALOGS else "follow_up_tasks",
         "customers",

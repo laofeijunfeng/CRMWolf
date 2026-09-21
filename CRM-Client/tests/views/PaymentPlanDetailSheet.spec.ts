@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs'
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { flushPromises, mount, type DOMWrapper, type VueWrapper } from '@vue/test-utils'
-import { defineComponent, h, type PropType } from 'vue'
+import { compileStyleAsync, parse } from '@vue/compiler-sfc'
+import { defineComponent, h, type Component, type PropType } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import type { PaymentPlanResponse, PaymentRecordInfo, PaymentRecordCreate, PaymentRecordUpdate } from '@/api/payment'
 
@@ -94,11 +95,28 @@ vi.mock('@/components/ui/button', () => ({
     },
     setup: (props, { slots, attrs }) => () => h(
       'button',
-      { ...attrs, type: props.type ?? 'button', disabled: props.disabled },
+      {
+        ...attrs,
+        class: ['inline-flex items-center justify-center whitespace-nowrap h-9', attrs.class],
+        type: props.type ?? 'button',
+        disabled: props.disabled,
+      },
       slots.default?.()
     ),
   }),
 }))
+
+const buttonBaseStyle = document.createElement('style')
+buttonBaseStyle.textContent = `
+  .inline-flex { display: inline-flex; }
+  .justify-center { justify-content: center; }
+  .whitespace-nowrap { white-space: nowrap; }
+  .h-9 { height: 2.25rem; }
+`
+document.head.append(buttonBaseStyle)
+afterAll(() => {
+  buttonBaseStyle.remove()
+})
 
 vi.mock('@/components/ui/badge', () => ({
   Badge: defineComponent({
@@ -248,6 +266,7 @@ vi.mock('@/components/dialogs/EditRecordDialog.vue', () => ({
 }))
 
 import PaymentPlanDetailSheet from '@/views/PaymentPlanDetailSheet.vue'
+import PaymentPlanDetailContent from '@/components/panels/PaymentPlanDetailContent.vue'
 
 const paymentRecordFixture = (): PaymentRecordInfo => ({
   id: 501,
@@ -293,6 +312,36 @@ const sourceText = (): string => [
   `${process.cwd()}/src/components/panels/PaymentPlanDetailContent.vue`,
 ].map((filePath) => readFileSync(filePath, 'utf8')).join('\n')
 
+
+const installPaymentPlanDetailStyles = async (): Promise<HTMLStyleElement> => {
+  const filePath = `${process.cwd()}/src/components/panels/PaymentPlanDetailContent.vue`
+  const { descriptor } = parse(readFileSync(filePath, 'utf8'), { filename: filePath })
+  const styleBlock = descriptor.styles[0]
+  const scopeId = (PaymentPlanDetailContent as Component & { __scopeId?: string }).__scopeId
+
+  if (styleBlock === undefined || scopeId === undefined) {
+    throw new Error('PaymentPlanDetailContent scoped styles are unavailable')
+  }
+
+  const variablesPath = `${process.cwd()}/src/styles/variables-v2.scss`
+  const result = await compileStyleAsync({
+    filename: filePath,
+    id: scopeId.replace('data-v-', ''),
+    source: styleBlock.content.replace('@/styles/variables-v2.scss', variablesPath),
+    scoped: styleBlock.scoped,
+    preprocessLang: styleBlock.lang,
+  })
+
+  if (result.errors.length > 0) {
+    throw result.errors[0]
+  }
+
+  const style = document.createElement('style')
+  style.textContent = result.code
+  document.head.append(style)
+  return style
+}
+
 describe('PaymentPlanDetailSheet', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -326,6 +375,52 @@ describe('PaymentPlanDetailSheet', () => {
     expect(wrapper.text()).toContain('¥50,000.00')
     expect(wrapper.text()).toContain('2 张')
     expect(wrapper.get('[data-testid="payment-record-list"]').attributes('data-record-count')).toBe('1')
+  })
+
+  it('keeps long customer and contract links wrapped inside their attribute cells', async () => {
+    const plan = paymentPlanFixture({
+      customer_name: '上海超长客户名称用于验证嵌套详情中的链接能够在网格单元格内安全换行',
+      contract_name: '年度企业数字化转型与长期运营支持服务超长合同名称用于验证网格内换行',
+    })
+    paymentApi.getPaymentPlanDetail.mockResolvedValue(plan)
+    const componentStyle = await installPaymentPlanDetailStyles()
+    const wrapper = mount(PaymentPlanDetailSheet, {
+      attachTo: document.body,
+      props: {
+        visible: true,
+        planId: 101,
+      },
+    })
+    onTestFinished(() => {
+      wrapper.unmount()
+      componentStyle.remove()
+    })
+    await flushPromises()
+
+    const customerLink = wrapper.get(`[aria-label="查看客户 ${plan.customer_name}"]`)
+    const contractLink = wrapper.get(`[aria-label="查看合同 ${plan.contract_name}"]`)
+
+    for (const link of [customerLink, contractLink]) {
+      const style = getComputedStyle(link.element)
+
+      expect(style.width).toBe('100%')
+      expect(['0', '0px']).toContain(style.minWidth)
+      expect(style.maxWidth).toBe('100%')
+      expect(style.height).toBe('auto')
+      expect(style.minHeight).toBe('44px')
+      expect(style.whiteSpace).toBe('normal')
+      expect(style.overflowWrap).toBe('anywhere')
+      expect(style.justifyContent).toBe('flex-start')
+      expect(style.textAlign).toBe('left')
+    }
+
+    await customerLink.trigger('click')
+    await contractLink.trigger('click')
+
+    expect(wrapper.emitted('view-customer')?.[0]).toEqual(['303', plan])
+
+    expect(wrapper.emitted('view-contract')?.[0]).toEqual([202, plan])
+
   })
 
   it('emits navigation seams (view-customer, view-contract, record-click) without routing', async () => {
@@ -376,10 +471,14 @@ describe('PaymentPlanDetailSheet', () => {
     expect(paymentApi.createPaymentRecord).toHaveBeenCalledWith(
       101,
       { actual_amount: 50000, payment_date: '2026-07-15' },
-      expect.any(String),
+      expect.objectContaining({
+        correlationId: expect.any(String),
+        idempotencyKey: expect.any(String),
+      }),
     )
     expect(toast.success).toHaveBeenCalledWith(
       '回款登记成功，本次登记 ¥50000.00，剩余 ¥60000.00，计划状态：部分回款',
+      { description: '回款计划详情已同步。' },
     )
 
     // Should reload and emit refresh
@@ -405,7 +504,10 @@ describe('PaymentPlanDetailSheet', () => {
 
     // Should call approval store
     expect(approvalStore.submitEntity).toHaveBeenCalledWith('PAYMENT', 501)
-    expect(toast.success).toHaveBeenCalledWith('已提交审批，等待审批人处理')
+    expect(toast.success).toHaveBeenCalledWith(
+      '已提交审批，等待审批人处理',
+      { description: '回款计划详情已同步。' },
+    )
 
     // Should reload and emit refresh
     expect(paymentApi.getPaymentPlanDetail).toHaveBeenCalledTimes(2)
@@ -429,7 +531,10 @@ describe('PaymentPlanDetailSheet', () => {
     await getButtonByText(wrapper, '提交审批').trigger('click')
     await flushPromises()
 
-    expect(toast.success).toHaveBeenCalledWith('未配置审批流，已转为财务确认')
+    expect(toast.success).toHaveBeenCalledWith(
+      '未配置审批流，已转为财务确认',
+      { description: '回款计划详情已同步。' },
+    )
   })
 
   it('opens edit dialog for resubmit and submits update + approval', async () => {
@@ -479,7 +584,10 @@ describe('PaymentPlanDetailSheet', () => {
     // Should call update then submit
     expect(paymentApi.updatePaymentRecord).toHaveBeenCalledWith(501, { actual_amount: 55000, payment_date: '2026-07-16' })
     expect(approvalStore.submitEntity).toHaveBeenCalledWith('PAYMENT', 501)
-    expect(toast.success).toHaveBeenCalledWith('已重新提交审批')
+    expect(toast.success).toHaveBeenCalledWith(
+      '已重新提交审批',
+      { description: '回款计划详情已同步。' },
+    )
 
     // Should reload and emit refresh
     expect(paymentApi.getPaymentPlanDetail).toHaveBeenCalledTimes(2)
@@ -512,7 +620,10 @@ describe('PaymentPlanDetailSheet', () => {
     // Should call update only, not approval
     expect(paymentApi.updatePaymentRecord).toHaveBeenCalledWith(501, { actual_amount: 55000, payment_date: '2026-07-16' })
     expect(approvalStore.submitEntity).not.toHaveBeenCalled()
-    expect(toast.success).toHaveBeenCalledWith('回款记录已更新')
+    expect(toast.success).toHaveBeenCalledWith(
+      '回款记录已更新',
+      { description: '回款计划详情已同步。' },
+    )
 
     // Should reload and emit refresh
     expect(paymentApi.getPaymentPlanDetail).toHaveBeenCalledTimes(2)

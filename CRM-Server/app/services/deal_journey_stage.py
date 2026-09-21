@@ -36,6 +36,18 @@ BOARD_STAGE_LABELS: dict[BoardStageKey, str] = {
 }
 
 
+BOARD_COLUMNS: list[tuple[BoardStageKey, str, str]] = [
+    ("early_communication", "初期交流", "赢率 0%-49% 或尚未评估的成交旅程"),
+    ("active_progress", "持续推进", "赢率 50%-79% 的成交旅程"),
+    ("closing_soon", "即将签约", "赢率 80%-99% 或商机已赢单但尚未进入合同处理的成交旅程"),
+    ("contract_processing", "签约中", "已创建合同，正在签约或合同履约前置处理"),
+    ("payment_processing", "回款中", "已有回款计划或回款记录，合同尚未完成回款"),
+    ("invoice_processing", "开票中", "已有发票申请，仍有发票未完成开具"),
+    ("completed", "已完成", "旅程已完成闭环"),
+    ("lost", "已输单", "商机或旅程已输单"),
+]
+
+
 class BusinessJourneyContractSummary(BaseModel):
     count: int
     signed_count: int

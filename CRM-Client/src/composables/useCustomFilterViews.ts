@@ -1,6 +1,6 @@
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { toast } from 'vue-sonner'
-import { viewPreferenceApi, type ViewPreferenceConfig, type ViewPreferenceItem } from '@/api/viewPreference'
+import { viewPreferenceApi, type ViewDisplayMode, type ViewPreferenceConfig, type ViewPreferenceItem } from '@/api/viewPreference'
 import type { TabItem } from '@/stores/header'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
@@ -16,6 +16,9 @@ interface UseCustomFilterViewsOptions {
   activeFilters: Ref<ListFilterCondition[]>
   activeSorts: Ref<ListSortCondition[]>
   activeColumns: Ref<ViewPreferenceConfig['columns']>
+  activeDisplayMode?: Ref<ViewDisplayMode>
+  builtInDisplayMode?: ViewDisplayMode
+  getBuiltInFilters?: (tabKey: string) => ListFilterCondition[]
   refresh: () => boolean | undefined | Promise<unknown>
   onViewApplySuccess?: (tabKey: string) => void
 }
@@ -27,6 +30,7 @@ interface UseCustomFilterViewsReturn {
   saving: Ref<boolean>
   loadCustomViews: () => Promise<void>
   saveAsCustomView: (filters: ListFilterCondition[]) => Promise<void>
+  saveCurrentAsCustomView: () => Promise<void>
   mergeTabs: (builtInTabs: TabItem[]) => TabItem[]
   applyCustomViewTab: (tabKey: string) => boolean
   applying: Ref<boolean>
@@ -45,13 +49,15 @@ function buildTabKey(viewId: number): string {
 function buildViewConfig(
   filters: ListFilterCondition[],
   sorts: ListSortCondition[],
-  columns: ViewPreferenceConfig['columns']
+  columns: ViewPreferenceConfig['columns'],
+  displayMode?: ViewDisplayMode
 ): ViewPreferenceConfig {
   return {
     version: 1,
     columns,
     filters: filters as unknown as Record<string, unknown>[],
-    sorts: sorts as unknown as Record<string, unknown>[]
+    sorts: sorts as unknown as Record<string, unknown>[],
+    ...(displayMode === undefined ? {} : { display_mode: displayMode }),
   }
 }
 
@@ -77,6 +83,7 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
     filters: ListFilterCondition[]
     sorts: ListSortCondition[]
     columns: ViewPreferenceConfig['columns']
+    displayMode?: ViewDisplayMode
   }
 
   interface PendingViewApply {
@@ -97,6 +104,7 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
       filters: cloneFilters(snapshot.filters),
       sorts: snapshot.sorts.map((sort) => ({ ...sort })),
       columns: snapshot.columns.map((column) => ({ ...column })),
+      ...(snapshot.displayMode === undefined ? {} : { displayMode: snapshot.displayMode }),
     }
   }
 
@@ -106,6 +114,7 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
       filters: cloneFilters(options.activeFilters.value),
       sorts: options.activeSorts.value.map((sort) => ({ ...sort })),
       columns: options.activeColumns.value.map((column) => ({ ...column })),
+      ...(options.activeDisplayMode === undefined ? {} : { displayMode: options.activeDisplayMode.value }),
     }
   }
 
@@ -122,6 +131,9 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
     options.activeFilters.value = cloneFilters(snapshot.filters)
     options.activeSorts.value = snapshot.sorts.map((sort) => ({ ...sort }))
     options.activeColumns.value = snapshot.columns.map((column) => ({ ...column }))
+    if (options.activeDisplayMode !== undefined && snapshot.displayMode !== undefined) {
+      options.activeDisplayMode.value = snapshot.displayMode
+    }
   }
 
   function snapshotsEqual(left: ViewApplySnapshot, right: ViewApplySnapshot): boolean {
@@ -129,7 +141,13 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
   }
 
   watch(
-    [options.activeTab, options.activeFilters, options.activeSorts, options.activeColumns],
+    [
+      options.activeTab,
+      options.activeFilters,
+      options.activeSorts,
+      options.activeColumns,
+      ...(options.activeDisplayMode === undefined ? [] : [options.activeDisplayMode]),
+    ],
     () => {
       if (ignoreNextStateChange) {
         ignoreNextStateChange = false
@@ -210,18 +228,39 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
     }
   }
 
-  async function saveAsCustomView(filters: ListFilterCondition[]): Promise<void> {
-    if (filters.length === 0) return
+  function materializeSnapshotFilters(filters: ListFilterCondition[]): ListFilterCondition[] {
+    const builtInFilters = isCustomFilterViewTab(options.activeTab.value)
+      ? []
+      : options.getBuiltInFilters?.(options.activeTab.value) ?? []
+    const explicitFields = new Set(filters.map((filter) => filter.field))
+    return cloneFilters([
+      ...builtInFilters.filter((filter) => !explicitFields.has(filter.field)),
+      ...filters,
+    ])
+  }
 
+  async function createCustomView(filters: ListFilterCondition[]): Promise<void> {
+    const source = captureCurrentSnapshot()
     saving.value = true
     try {
       const view = await viewPreferenceApi.createCustomView(options.viewKey, {
-        config: buildViewConfig(filters, options.activeSorts.value, options.activeColumns.value)
+        config: buildViewConfig(
+          materializeSnapshotFilters(filters),
+          options.activeSorts.value,
+          options.activeColumns.value,
+          options.activeDisplayMode?.value,
+        )
       })
+      if (!isCustomFilterViewTab(source.activeTab)) {
+        builtInViewSnapshot.value = cloneSnapshot(source)
+      }
       customViews.value = [...customViews.value, view]
       options.activeFilters.value = (view.config.filters ?? []) as unknown as ListFilterCondition[]
       options.activeSorts.value = (view.config.sorts ?? []) as unknown as ListSortCondition[]
       options.activeColumns.value = view.config.columns ?? []
+      if (options.activeDisplayMode !== undefined && view.config.display_mode != null) {
+        options.activeDisplayMode.value = view.config.display_mode
+      }
       options.activeTab.value = buildTabKey(view.id)
       await options.refresh()
       toast.success('已另存为视图')
@@ -230,6 +269,15 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
     } finally {
       saving.value = false
     }
+  }
+
+  async function saveAsCustomView(filters: ListFilterCondition[]): Promise<void> {
+    if (filters.length === 0) return
+    await createCustomView(filters)
+  }
+
+  async function saveCurrentAsCustomView(): Promise<void> {
+    await createCustomView(options.activeFilters.value)
   }
 
   function mergeTabs(builtInTabs: TabItem[]): TabItem[] {
@@ -255,7 +303,12 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
 
     try {
       const updated = await viewPreferenceApi.updateCustomView(options.viewKey, view.id, {
-        config: buildViewConfig(options.activeFilters.value, options.activeSorts.value, options.activeColumns.value)
+        config: buildViewConfig(
+          options.activeFilters.value,
+          options.activeSorts.value,
+          options.activeColumns.value,
+          options.activeDisplayMode?.value,
+        )
       })
       customViews.value = customViews.value.map((item) => item.id === updated.id ? updated : item)
     } catch {
@@ -308,6 +361,9 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
       filters: (view.config.filters ?? []) as unknown as ListFilterCondition[],
       sorts: (view.config.sorts ?? []) as unknown as ListSortCondition[],
       columns: view.config.columns ?? [],
+      ...(options.activeDisplayMode === undefined
+        ? {}
+        : { displayMode: view.config.display_mode ?? 'table' }),
     }
     void performViewApply(target, previous)
     return true
@@ -342,6 +398,11 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
       options.activeFilters.value = builtInViewSnapshot.value?.filters ?? []
       options.activeSorts.value = builtInViewSnapshot.value?.sorts ?? []
       options.activeColumns.value = builtInViewSnapshot.value?.columns ?? []
+      if (options.activeDisplayMode !== undefined) {
+        options.activeDisplayMode.value = builtInViewSnapshot.value?.displayMode
+          ?? options.builtInDisplayMode
+          ?? options.activeDisplayMode.value
+      }
       builtInViewSnapshot.value = null
     }
     committedViewSnapshot.value = captureCurrentSnapshot()
@@ -355,7 +416,12 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
     options.activeColumns.value = columns
     try {
       const updated = await viewPreferenceApi.updateCustomView(options.viewKey, view.id, {
-        config: buildViewConfig(options.activeFilters.value, options.activeSorts.value, columns)
+        config: buildViewConfig(
+          options.activeFilters.value,
+          options.activeSorts.value,
+          columns,
+          options.activeDisplayMode?.value,
+        )
       })
       customViews.value = customViews.value.map((item) => item.id === updated.id ? updated : item)
       toast.success('视图字段配置已保存')
@@ -436,6 +502,7 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
     saving,
     loadCustomViews,
     saveAsCustomView,
+    saveCurrentAsCustomView,
     mergeTabs,
     applyCustomViewTab,
     applying,

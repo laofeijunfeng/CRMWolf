@@ -30,7 +30,6 @@ const invoiceApi = vi.hoisted(() => ({ getInvoiceTitles: vi.fn() }))
 const deploymentApi = vi.hoisted(() => ({ list: vi.fn() }))
 const handleApiError = vi.hoisted(() => vi.fn())
 const toast = vi.hoisted(() => ({ success: vi.fn(), info: vi.fn() }))
-const journeyDetailRefresh = vi.hoisted(() => vi.fn())
 
 interface Deferred<T> {
   promise: Promise<T>
@@ -205,42 +204,27 @@ vi.mock('@/components/panels/ContractDetailContent.vue', () => ({
   }),
 }))
 
-vi.mock('@/components/panels/DealJourneyDetailContent.vue', () => ({
+vi.mock('@/components/business-journey/DealJourneyDetailHost.vue', () => ({
   default: defineComponent({
-    name: 'DealJourneyDetailContent',
+    name: 'DealJourneyDetailHost',
     props: {
+      customerId: String,
+      customerName: String,
       journeyId: String,
       journey: Object as PropType<DealJourney | null>,
       embedded: Boolean,
+      canEditCustomerContext: { type: Boolean, default: null },
     },
-    emits: ['back', 'refresh', 'view-contract', 'create-contract'],
-    setup: (props, { emit, expose }) => {
-      expose({ refresh: journeyDetailRefresh })
-      return () => h('div', {
-        'data-testid': 'deal-journey-detail',
-        'data-journey-id': String(props.journeyId),
-        'data-embedded': String(props.embedded),
-      }, [
-        props.journey?.name ?? '',
-        h('button', { type: 'button', 'data-testid': 'back-to-journeys', onClick: () => emit('back') }, 'back'),
-        h('button', { type: 'button', 'data-testid': 'detail-refresh', onClick: () => emit('refresh') }, 'refresh'),
-        h('button', { type: 'button', 'data-testid': 'view-journey-contract', onClick: () => emit('view-contract', 701) }, 'view contract'),
-        h('button', {
-          type: 'button',
-          'data-testid': 'create-journey-contract',
-          onClick: () => emit('create-contract', {
-            opportunityId: 'opp_test_88',
-            customerId: 'cus_test_19',
-            customerName: '上海测试客户',
-            opportunityName: 'CRM 升级项目',
-            totalAmount: 320000,
-            userCount: 20,
-            licenseType: 'SUBSCRIPTION',
-            subscriptionYears: 1,
-          }),
-        }, 'create contract'),
-      ])
-    },
+    emits: ['close', 'refresh', 'view-customer'],
+    setup: (props, { emit }) => () => h('div', {
+      'data-testid': 'deal-journey-detail',
+      'data-journey-id': String(props.journeyId),
+      'data-embedded': String(props.embedded),
+    }, [
+      props.journey?.name ?? '',
+      h('button', { type: 'button', 'data-testid': 'back-to-journeys', onClick: () => emit('close') }, 'back'),
+      h('button', { type: 'button', 'data-testid': 'detail-refresh', onClick: () => emit('refresh') }, 'refresh'),
+    ]),
   }),
 }))
 
@@ -565,28 +549,6 @@ describe('CustomerDetailSheet journey drilldown', () => {
     expect(detail.text()).toContain('CRM 升级项目')
   })
 
-  it('opens a contract from a journey with journey parent context in the header', async () => {
-    contractApi.getCustomerContracts.mockResolvedValue([contractFixture()])
-
-    const wrapper = mount(CustomerDetailSheet, {
-      props: {
-        customerId: 'cus_test_19',
-        visible: true,
-      },
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="tab-journeys"]').trigger('click')
-    await nextTick()
-    await wrapper.get('[data-testid="view-journey"]').trigger('click')
-    await nextTick()
-    await wrapper.get('[data-testid="view-journey-contract"]').trigger('click')
-    await nextTick()
-
-    expect(wrapper.get('[data-testid="contract-detail-content"]').attributes('data-contract-id')).toBe('701')
-    expect(wrapper.get('[data-testid="detail-context-header"]').text()).toContain('CRM 升级项目')
-    expect(wrapper.get('[data-testid="detail-context-header"]').text()).not.toContain('商机')
-  })
 
   it('returns from journey detail to the journeys list with highlighted row focus metadata', async () => {
     const wrapper = mount(CustomerDetailSheet, {
@@ -908,61 +870,6 @@ describe('CustomerDetailSheet journey drilldown', () => {
     expect(wrapper.get('[data-testid="tab-journeys"]').attributes('data-active')).toBe('true')
   })
 
-  it('refreshes the mounted journey workbench after creating a contract without leaving detail', async () => {
-    const wrapper = mount(CustomerDetailSheet, {
-      props: {
-        customerId: 'cus_test_19',
-        visible: true,
-      },
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="tab-journeys"]').trigger('click')
-    await nextTick()
-    await wrapper.get('[data-testid="view-journey"]').trigger('click')
-    await nextTick()
-
-    journeyDetailRefresh.mockClear()
-    await wrapper.get('[data-testid="create-journey-contract"]').trigger('click')
-    await nextTick()
-    await wrapper.get('[data-testid="contract-dialog-success"]').trigger('click')
-    await flushPromises()
-    await nextTick()
-
-    expect(journeyDetailRefresh).toHaveBeenCalled()
-    expect(wrapper.get('[data-testid="deal-journey-detail"]').attributes('data-journey-id')).toBe(JOURNEY_PUBLIC_ID)
-    expect(wrapper.find('[data-testid="deal-journeys-panel"]').exists()).toBe(false)
-  })
-
-  it('keeps the journeys tab after creating a contract from nested journey detail', async () => {
-    const wrapper = mount(CustomerDetailSheet, {
-      props: {
-        customerId: 'cus_test_19',
-        visible: true,
-      },
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="tab-journeys"]').trigger('click')
-    await nextTick()
-    await wrapper.get('[data-testid="view-journey"]').trigger('click')
-    await nextTick()
-    await wrapper.get('[data-testid="create-journey-contract"]').trigger('click')
-    await nextTick()
-    await wrapper.get('[data-testid="contract-dialog-success"]').trigger('click')
-    await flushPromises()
-    await nextTick()
-
-    expect(wrapper.get('[data-testid="deal-journey-detail"]').attributes('data-journey-id')).toBe(JOURNEY_PUBLIC_ID)
-
-    await wrapper.get('[data-testid="back-to-journeys"]').trigger('click')
-    await nextTick()
-
-    expect(wrapper.get('[data-testid="tab-journeys"]').attributes('data-active')).toBe('true')
-    expect(wrapper.get('[data-testid="tab-customer-info"]').attributes('data-active')).toBe('false')
-    expect(wrapper.find('[data-testid="deal-journeys-panel"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="deal-journey-detail"]').exists()).toBe(false)
-  })
 
   it('replaces nested journey instead of appending when targetJourneyId changes', async () => {
     dealJourneyApi.listByCustomer.mockResolvedValue([

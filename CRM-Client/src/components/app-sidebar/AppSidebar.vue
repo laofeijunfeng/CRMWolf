@@ -37,9 +37,9 @@ import {
   BarChart3,
   Bot,
   Building2,
-  Columns3,
   FileText,
   Flag,
+  GitBranch,
   ListChecks,
   Receipt,
   Stamp,
@@ -120,9 +120,18 @@ const shouldShowDashboardGroup = computed(() => {
   return permissionStore.loadState === 'ready' && canViewSalesDashboard.value
 })
 
+const canViewBusinessJourneys = computed(() => (
+  permissionStore.loadState === 'idle'
+  || permissionStore.loadState === 'loading'
+  || permissionStore.hasAnyPermission([
+    'customer:view:all', 'customer:view:own',
+    'opportunity:view:all', 'opportunity:view:own',
+  ])
+))
+
 const navGroups = computed<NavMainGroup[]>(() => [
   {
-    label: '销售流程',
+    label: '销售工作',
     items: [
       {
         label: 'AI Agent',
@@ -154,6 +163,19 @@ const navGroups = computed<NavMainGroup[]>(() => [
             }
           : {}),
       },
+      ...(canViewBusinessJourneys.value
+        ? [{
+            label: '业务旅程',
+            path: '/business-journeys',
+            icon: GitBranch,
+            active: currentPath.value.startsWith('/business-journeys'),
+          }]
+        : []),
+    ],
+  },
+  {
+    label: '交易管理',
+    items: [
       {
         label: '商机管理',
         path: '/opportunities',
@@ -175,7 +197,7 @@ const navGroups = computed<NavMainGroup[]>(() => [
     ],
   },
   {
-    label: '财务流程',
+    label: '财务管理',
     items: [
       {
         label: '回款管理',
@@ -200,12 +222,6 @@ const navGroups = computed<NavMainGroup[]>(() => [
             path: '/sales-dashboard',
             icon: BarChart3,
             active: currentPath.value.startsWith('/sales-dashboard'),
-          },
-          {
-            label: '业务看板',
-            path: '/business-journey-board',
-            icon: Columns3,
-            active: currentPath.value.startsWith('/business-journey-board'),
           },
         ],
       }]

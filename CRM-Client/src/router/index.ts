@@ -69,10 +69,10 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true, title: '销售看板' }
       },
       {
-        path: 'business-journey-board',
-        name: 'BusinessJourneyBoard',
-        component: () => import('@/views/BusinessJourneyBoard.vue'),
-        meta: { requiresAuth: true, title: '业务看板' }
+        path: 'business-journeys',
+        name: 'BusinessJourneys',
+        component: () => import('@/views/BusinessJourneys.vue'),
+        meta: { requiresAuth: true, title: '业务旅程' }
       },
       {
         path: 'agent',

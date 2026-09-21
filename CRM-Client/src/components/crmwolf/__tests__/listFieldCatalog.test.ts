@@ -178,6 +178,7 @@ describe('DataTable list field catalog contract', () => {
     }).sort()
 
     expect(consumers.map((filePath) => filePath.slice(srcDir.length + 1))).toEqual([
+      'components/business-journey/BusinessJourneyTableView.vue',
       'views/ApprovalCenter.vue',
       'views/Contracts.vue',
       'views/CustomerTracking.vue',
@@ -204,10 +205,12 @@ describe('DataTable list field catalog contract', () => {
       expect(source).not.toContain(':filter-fields')
       expect(source).not.toContain(':sort-fields')
       expect(source).not.toContain('buildSortFieldsFromFilterFields')
-      expect(source).toContain(':get-row-actions="getRowActions"')
-      expect(source).toContain('#mobile-actions')
       expect(source).not.toContain('#cell-actions')
       expect(source).not.toMatch(/key:\s*'actions'/)
+      if (!filePath.endsWith('/components/business-journey/BusinessJourneyTableView.vue')) {
+        expect(source).toContain(':get-row-actions="getRowActions"')
+        expect(source).toContain('#mobile-actions')
+      }
     }
   })
 
@@ -234,7 +237,7 @@ describe('DataTable list field catalog contract', () => {
       const actionStart = source.indexOf('const getRowActions')
       expect(actionStart, viewName).toBeGreaterThan(-1)
       const actionBlock = source.slice(actionStart, actionStart + 900)
-      const viewItem = actionBlock.match(/\{[^{}]*label: '查看'[^{}]*\}/)
+      const viewItem = actionBlock.match(/\{[^{}]*kind: 'detail'[^{}]*\}/)
       expect(viewItem?.[0], viewName).toBeDefined()
       expect(viewItem?.[0]).not.toContain('visible:')
     }

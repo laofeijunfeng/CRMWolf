@@ -226,19 +226,20 @@ const mobileOverflowHeaderActions = computed<HeaderAction[]>(() => {
   if (primaryAction === null) return visibleHeaderActions.value
   return visibleHeaderActions.value.filter(action => action.id !== primaryAction.id)
 })
-const isFixedDashboardRoute = computed(() => (
-  route.name === 'SalesDashboard' || route.name === 'BusinessJourneyBoard'
+const isFixedWorkspaceRoute = computed(() => (
+  route.name === 'SalesDashboard' ||
+  route.name === 'BusinessJourneys'
 ))
 const appLayoutClass = computed(() => ({
-  'app-layout--fixed': isFixedDashboardRoute.value,
+  'app-layout--fixed': isFixedWorkspaceRoute.value,
 }))
 const mainViewClass = computed(() => ({
   'main-view--contained': route.name === 'AgentChat' || route.path.startsWith('/agent'),
-  'main-view--fixed': isFixedDashboardRoute.value,
+  'main-view--fixed': isFixedWorkspaceRoute.value,
 }))
 const mainContentClass = computed(() => ({
   'main-content--contained': route.name === 'AgentChat' || route.path.startsWith('/agent'),
-  'main-content--fixed': isFixedDashboardRoute.value,
+  'main-content--fixed': isFixedWorkspaceRoute.value,
 }))
 
 const getRouteViewKey = (currentRoute: RouteLocationNormalizedLoaded): string => {

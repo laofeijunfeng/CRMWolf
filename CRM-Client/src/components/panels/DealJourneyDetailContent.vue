@@ -2,8 +2,8 @@
 /**
  * DealJourneyDetailContent.vue - 业务旅程履约工作台
  *
- * 挂在 CustomerDetailSheet。顶栏展示旅程阶段与采购类型；正文复用商机履约面板。
- * 页脚无编辑 / 赢单 / 输单；这些动作在商机 ListCard 行内 icon 上。
+ * 唯一内容契约：仅 DealJourneyDetailHost 可渲染并编排本组件；Sheet 与客户详情都复用该 Host。
+ * 顶栏展示旅程阶段与采购类型；正文复用商机履约面板。页脚无编辑 / 赢单 / 输单；这些动作在商机 ListCard 行内 icon 上。
  */
 import { computed, nextTick, ref, watch } from 'vue'
 import { Pencil, Trophy, XCircle } from 'lucide-vue-next'
@@ -55,7 +55,7 @@ import InvoicesPanel from '@/components/panels/InvoicesPanel.vue'
 import LicensePanel from '@/components/panels/LicensePanel.vue'
 import ListCard from '@/components/crmwolf/ListCard.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
-import { opportunityApi, type Opportunity } from '@/api/opportunity'
+import type { Opportunity } from '@/api/opportunity'
 import { dealJourneyApi, type DealJourney } from '@/api/dealJourney'
 import approvalGenericApi from '@/api/approvalGeneric'
 import customerApi, { type CustomerDetailResponse, type CustomerMemberResponse } from '@/api/customer'
@@ -364,10 +364,10 @@ async function fetchJourneyDetail(): Promise<boolean> {
   loading.value = true
   loadError.value = false
   try {
-    const journeyData = await dealJourneyApi.getByCustomer(props.customerId, props.journeyId)
-    journeyDetail.value = journeyData
-    const primary = journeyData.primary_opportunity
-    if (primary === null) {
+    const detail = await dealJourneyApi.getDetail(props.journeyId)
+    journeyDetail.value = detail.journey
+    const data = detail.primary_opportunity
+    if (data === null) {
       opportunity.value = null
       relatedContract.value = null
       paymentPlans.value = []
@@ -376,7 +376,6 @@ async function fetchJourneyDetail(): Promise<boolean> {
       await fetchCustomerLicenseApplications()
       return true
     }
-    const data = await opportunityApi.getOpportunity(primary.public_id)
     opportunity.value = data
     syncStageStateFromOpportunity(data)
     await fetchRelatedContract(data.id)

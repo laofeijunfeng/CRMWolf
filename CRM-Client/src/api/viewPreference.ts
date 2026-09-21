@@ -4,6 +4,8 @@ import request from '@/utils/request'
 
 export type ViewPreferenceScope = 'personal' | 'team'
 
+export type ViewDisplayMode = 'table' | 'board'
+
 export interface ViewPreferenceColumn {
   key: string
   order?: number | null | undefined
@@ -18,6 +20,7 @@ export interface ViewPreferenceConfig {
   sorts?: Record<string, unknown>[] | undefined
   filters?: Record<string, unknown>[] | undefined
   density?: string | null | undefined
+  display_mode?: ViewDisplayMode | null | undefined
 }
 
 export interface ViewPreferenceItem {
@@ -80,6 +83,7 @@ const ViewPreferenceConfigSchema: z.ZodType<ViewPreferenceConfig> = z.object({
   sorts: z.array(z.record(z.string(), z.unknown())).optional(),
   filters: z.array(z.record(z.string(), z.unknown())).optional(),
   density: z.string().nullable().optional(),
+  display_mode: z.enum(['table', 'board']).nullable().optional(),
 })
 const ViewPreferenceItemSchema: z.ZodType<ViewPreferenceItem> = z.object({
   id: z.number(),

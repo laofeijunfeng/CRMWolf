@@ -1,13 +1,14 @@
 from types import SimpleNamespace
 
-from app.api.business_journey_board import (
+from app.models.deal_journey import DealJourneyStatus
+from app.services.deal_journey_stage import (
     BOARD_COLUMNS,
     BusinessJourneyContractSummary,
     BusinessJourneyInvoiceSummary,
     BusinessJourneyPaymentSummary,
+    infer_active_opportunity_stage,
+    infer_board_stage,
 )
-from app.models.deal_journey import DealJourneyStatus
-from app.services.deal_journey_stage import infer_active_opportunity_stage, infer_board_stage
 
 
 def test_closing_soon_column_is_titled_upcoming_contract():

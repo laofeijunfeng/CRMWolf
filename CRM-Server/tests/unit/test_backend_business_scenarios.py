@@ -22,7 +22,7 @@ from sqlalchemy.types import BigInteger
 
 from app.api import agent as agent_api
 from app.api import approvals as approvals_api
-from app.api import business_journey_board as business_journey_board_api
+from app.api import business_journeys as business_journeys_api
 from app.api import invoices as invoices_api
 from app.api import license_application as license_api
 from app.api import payments as payments_api
@@ -42,7 +42,7 @@ from app.models.agent_persistence import AgentQueryResultSet, AgentUIAction
 from app.models.ai_config import AIConfig
 from app.models.approval import Approval, ApprovalAction, ApprovalFlow, ApprovalNode, ApprovalRecord, ApprovalStatus
 from app.models.contract import Contract, ContractStatus
-from app.models.customer import Contact, Customer, CustomerMember
+from app.models.customer import Contact, Customer, CustomerMember, CustomerProduct
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_activity_agent_origin import CustomerActivityAgentOrigin
 from app.models.customer_fact import CustomerFact, CustomerFactRevision, CustomerFactSource
@@ -59,7 +59,8 @@ from app.models.invoice import (
     InvoiceType,
 )
 from app.models.license_application import LicenseApplication, LicenseApplicationStatus
-from app.models.opportunity import Opportunity
+from app.models.opportunity import Opportunity, OpportunityProductModule
+from app.models.product import Product, ProductModule
 from app.models.outbound_notification_job import OutboundNotificationJob
 from app.models.payment import PaymentConfirmationStatus, PaymentPlan, PaymentPlanStatus, PaymentRecord
 from app.models.permission import Permission
@@ -79,6 +80,7 @@ from app.services.agent.orchestrator import (
 )
 from app.services.agent.semantic_plan import AgentSemanticPlan
 from app.services.agent.workflow.progress import execution_progress
+from app.services.deal_journey_service import deal_journey_service
 
 
 @compiles(BigInteger, "sqlite")
@@ -153,11 +155,15 @@ def scenario_env(monkeypatch):
         Customer.__table__,
         Contact.__table__,
         CustomerMember.__table__,
+        CustomerProduct.__table__,
         CustomerActivity.__table__,
         CustomerActivityAgentOrigin.__table__,
         CustomerDealJourney.__table__,
         CustomerDealJourneyEvent.__table__,
+        Product.__table__,
+        ProductModule.__table__,
         Opportunity.__table__,
+        OpportunityProductModule.__table__,
         Contract.__table__,
         PaymentPlan.__table__,
         PaymentRecord.__table__,
@@ -244,12 +250,21 @@ def scenario_env(monkeypatch):
     app = FastAPI()
     app.include_router(agent_api.router)
     app.include_router(approvals_api.router)
-    app.include_router(business_journey_board_api.router)
+    app.include_router(business_journeys_api.router)
     app.include_router(invoices_api.invoice_router, prefix="/v1")
     app.include_router(payments_api.router)
     app.include_router(license_api.router)
 
-    for module in (database, deps, agent_api, approvals_api, business_journey_board_api, invoices_api, payments_api, license_api):
+    for module in (
+        database,
+        deps,
+        agent_api,
+        approvals_api,
+        business_journeys_api,
+        invoices_api,
+        payments_api,
+        license_api,
+    ):
         if hasattr(module, "get_db"):
             app.dependency_overrides[module.get_db] = lambda: db
         if hasattr(module, "get_current_user_team"):
@@ -936,12 +951,17 @@ def run_opportunity_approval_starts_business_journey_board(env):
     seed_flow(env, BusinessType.OPPORTUNITY)
     customer = seed_customer(env)
     opportunity = seed_opportunity(env, customer)
+    deal_journey_service.record_opportunity_created(env.db, opportunity, actor_id="1")
+    env.db.commit()
 
-    submit_approval(env, "OPPORTUNITY", opportunity.id)
+    submit_approval(env, "OPPORTUNITY", opportunity.public_id)
 
-    before_approval = env.client.get("/v1/business-journey-board/")
+    before_approval = env.client.get("/v1/business-journeys/board")
     assert before_approval.status_code == 200, before_approval.text
-    assert before_approval.json()["summary"]["total_count"] == 0
+    before_body = before_approval.json()
+    assert before_body["summary"]["total_count"] == 1
+    before_card = next(card for column in before_body["columns"] for card in column["cards"])
+    assert before_card["current_board_stage"] == "early_communication"
 
     approval = current_approval(env, BusinessType.OPPORTUNITY, opportunity.id)
     approvals_api.approval_crud.approve(
@@ -963,11 +983,13 @@ def run_opportunity_approval_starts_business_journey_board(env):
     )
     assert event.deal_journey_id == opportunity.deal_journey_id
 
-    response = env.client.get("/v1/business-journey-board/")
+    response = env.client.get("/v1/business-journeys/board")
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["summary"]["total_count"] == 1
-    assert body["columns"][0]["cards"][0]["journey_id"] == opportunity.deal_journey_id
+    card = next(card for column in body["columns"] for card in column["cards"])
+    journey = env.db.query(CustomerDealJourney).filter(CustomerDealJourney.id == opportunity.deal_journey_id).one()
+    assert card["public_id"] == journey.public_id
 
 
 def run_payment_submit_approval_creates_instance(env):
@@ -1043,14 +1065,15 @@ def run_license_create_and_list(env):
     response = env.client.post(
         "/v1/license-applications/",
         json={
-            "customer_id": customer.id,
+            "customer_id": customer.public_id,
             "license_type": "TRIAL",
+            "authorized_users": 10,
             "expiry_date": "2027-12-31",
             "remark": "客户试用申请",
         },
     )
     assert response.status_code == 201, response.text
-    list_response = env.client.get(f"/v1/license-applications/?customer_id={customer.id}")
+    list_response = env.client.get(f"/v1/license-applications/?customer_id={customer.public_id}")
     assert list_response.status_code == 200, list_response.text
     assert len(list_response.json()) == 1
 

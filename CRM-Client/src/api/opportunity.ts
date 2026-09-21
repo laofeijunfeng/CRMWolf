@@ -330,6 +330,10 @@ export interface OpportunityListResponse {
   }
 }
 
+export function parseOpportunityApiResponse(raw: unknown): Opportunity {
+  return OpportunityApiResponseSchema.parse(raw) as Opportunity
+}
+
 export const opportunityApi = {
   getOpportunities: async (params?: OpportunityListParams): Promise<OpportunityListResponse[] | PaginatedResponse<OpportunityListResponse>> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
@@ -339,8 +343,8 @@ export const opportunityApi = {
 
   getOpportunity: async (opportunityId: string): Promise<Opportunity> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
-    const response = await request.get<Opportunity>(`/v1/opportunities/${opportunityId}`)
-    return OpportunityApiResponseSchema.parse(response) as Opportunity
+    const response: unknown = await request.get(`/v1/opportunities/${opportunityId}`)
+    return parseOpportunityApiResponse(response)
   },
 
   getOpportunityDetail: async (opportunityId: string): Promise<Opportunity> => {
