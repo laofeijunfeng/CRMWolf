@@ -46,6 +46,7 @@ import { isOpportunityPublicId } from '@/utils/opportunityRoutes'
 import type { FormSuccessPayload } from '@/types/actionOutcome'
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
 import OpportunityWinDialog from '@/components/dialogs/OpportunityWinDialog.vue'
+import OpportunityLoseDialog from '@/components/dialogs/OpportunityLoseDialog.vue'
 import OpportunityDetailSheet from './OpportunityDetailSheet.vue'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 
@@ -884,6 +885,7 @@ watchEffect(() => {
       export-title="商机列表"
       :export-handler="exportOpportunityFields"
       :fields="fields"
+      :data="tableData"
       :loading="loading"
       :load-error="loadError"
       :page="pagination.current"
