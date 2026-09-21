@@ -527,7 +527,7 @@ async function handleRecordEditSubmit(recordId: number, payload: PaymentRecordUp
     </div>
 
     <ContractDetailContent
-      v-if="currentNode?.type === 'contract'"
+      v-if="currentContractId !== null"
       :key="`contract-${currentContractId}`"
       :contract-id="currentContractId"
       embedded
