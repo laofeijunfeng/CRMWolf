@@ -19,7 +19,7 @@ vi.mock('@/components/ui/detail-sheet', () => ({
 vi.mock('@/components/business-journey/DealJourneyDetailHost.vue', () => ({
   default: defineComponent({
     name: 'DealJourneyDetailHost',
-    props: { customerId: String, customerName: String, journeyId: String },
+    props: { customerId: String, customerName: String, journeyId: String, journeyName: String },
     emits: ['close', 'refresh', 'view-customer'],
     setup: props => () => h('div', { 'data-customer-id': props.customerId, 'data-journey-id': props.journeyId }),
   }),
@@ -34,7 +34,13 @@ import CustomerDetailSheet from '@/views/CustomerDetailSheet.vue'
 
 function mountSheet() {
   return mount(DealJourneyDetailSheet, {
-    props: { customerId: 'cus_test', customerName: '测试客户', journeyId: 'djy_test', visible: true },
+    props: {
+      customerId: 'cus_test',
+      customerName: '测试客户',
+      journeyId: 'djy_test',
+      journeyName: '华东续约旅程',
+      visible: true,
+    },
   })
 }
 
@@ -47,6 +53,7 @@ describe('DealJourneyDetailSheet', () => {
       customerId: 'cus_test',
       customerName: '测试客户',
       journeyId: 'djy_test',
+      journeyName: '华东续约旅程',
     })
     expect(wrapper.findComponent(CustomerDetailSheet).exists()).toBe(false)
   })

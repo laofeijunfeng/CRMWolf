@@ -42,6 +42,7 @@ vi.mock('@/views/DealJourneyDetailSheet.vue', () => ({
       customerId: String,
       customerName: String,
       journeyId: String,
+      journeyName: String,
       visible: Boolean,
     },
     emits: ['update:visible', 'refresh', 'view-customer'],
@@ -133,11 +134,26 @@ const listItemFixture = {
   customer_id: 'cus_table',
   customer_name: '表格客户',
   public_id: 'djy_table',
+  name: '华东续约旅程',
 }
 
 const boardItemFixture = {
   customerId: 'cus_board',
   journeyPublicId: 'djy_board',
+}
+
+const boardCardFixture = {
+  public_id: 'djy_board',
+  journey_name: '华南新签旅程',
+  customer_id: 'cus_board',
+  customer_name: '看板客户',
+  owner: null,
+  status: 'ACTIVE',
+  current_board_stage: 'active_progress',
+  amount: 1000,
+  contract_summary: { count: 0, signed_count: 0, amount: 0 },
+  payment_summary: { plan_count: 0, record_count: 0, planned_amount: 0, paid_amount: 0, remaining_amount: 0 },
+  invoice_summary: { application_count: 0, issued_count: 0, applied_amount: 0, issued_amount: 0 },
 }
 
 const TableStub = defineComponent({
@@ -355,6 +371,43 @@ describe('BusinessJourneys', () => {
     trigger.remove()
   })
 
+  it('passes the journey name from the table row into the sheet and clears it on close', async () => {
+    journeyApiMocks.list.mockResolvedValueOnce({
+      ...emptyList,
+      items: [listItemFixture],
+      total: 1,
+      total_pages: 1,
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    wrapper.getComponent(BusinessJourneyTableView).vm.$emit('row-click', {
+      customerId: listItemFixture.customer_id,
+      journeyPublicId: listItemFixture.public_id,
+    })
+    await nextTick()
+
+    expect(wrapper.getComponent(DealJourneyDetailSheet).props()).toMatchObject({
+      customerId: listItemFixture.customer_id,
+      customerName: listItemFixture.customer_name,
+      journeyId: listItemFixture.public_id,
+      journeyName: listItemFixture.name,
+      visible: true,
+    })
+    expect(routerMocks.push).not.toHaveBeenCalled()
+
+    wrapper.getComponent(DealJourneyDetailSheet).vm.$emit('update:visible', false)
+    await nextTick()
+
+    expect(wrapper.getComponent(DealJourneyDetailSheet).props()).toMatchObject({
+      customerId: null,
+      customerName: undefined,
+      journeyId: null,
+      journeyName: undefined,
+      visible: false,
+    })
+  })
+
   it('drills from journey detail into the customer sheet and restores the originating focus', async () => {
     const wrapper = mountPage()
     await flushPromises()
@@ -407,5 +460,35 @@ describe('BusinessJourneys', () => {
       journeyId: boardItemFixture.journeyPublicId,
       visible: true,
     })
+  })
+
+  it('resolves the journey name from the board card public-id payload', async () => {
+    journeyApiMocks.getBoard.mockResolvedValueOnce({
+      ...emptyBoard,
+      columns: [{
+        key: 'active_progress',
+        title: '积极推进',
+        description: '',
+        count: 1,
+        amount: 1000,
+        cards: [boardCardFixture],
+      }],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    wrapper.getComponent(BusinessJourneyTableView).vm.$emit('update:view-display-mode', 'board')
+    await flushPromises()
+
+    wrapper.getComponent(BusinessJourneyBoardView).vm.$emit('row-click', boardItemFixture)
+    await nextTick()
+
+    expect(wrapper.getComponent(DealJourneyDetailSheet).props()).toMatchObject({
+      customerId: boardItemFixture.customerId,
+      customerName: boardCardFixture.customer_name,
+      journeyId: boardItemFixture.journeyPublicId,
+      journeyName: boardCardFixture.journey_name,
+      visible: true,
+    })
+    expect(routerMocks.push).not.toHaveBeenCalled()
   })
 })

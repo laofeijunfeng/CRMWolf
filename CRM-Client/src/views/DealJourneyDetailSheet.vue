@@ -8,11 +8,13 @@ interface Props {
   customerId: string | null
   customerName?: string | undefined
   journeyId: string | null
+  journeyName?: string | undefined
   visible: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   customerName: '',
+  journeyName: '',
 })
 const emit = defineEmits<{
   'update:visible': [value: boolean]
@@ -38,6 +40,7 @@ function closeSheet(): void {
         :customer-id="customerId"
         :customer-name="customerName"
         :journey-id="journeyId"
+        :journey-name="journeyName ?? ''"
         @close="closeSheet"
         @refresh="emit('refresh')"
         @view-customer="emit('view-customer', $event)"
