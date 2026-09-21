@@ -27,7 +27,7 @@ from app.models.user import User
 
 
 @compiles(BigInteger, "sqlite")
-def _bigint_to_sqlite_int(element, compiler, **kw):  # noqa: ARG001
+def _bigint_to_sqlite_int(element, compiler, **kw):
     return "INTEGER"
 
 
