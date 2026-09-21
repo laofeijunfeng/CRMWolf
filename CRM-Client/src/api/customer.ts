@@ -6,6 +6,7 @@ import {
   type CommandRequestOptions,
 } from '@/api/command'
 import { z } from 'zod'
+import { postListExport, type ListExportPayload } from '@/api/listExport'
 import type { PaginatedResponse } from '@/types/pagination'
 import { logger } from '@/utils/logger'
 import type { AcquisitionSourceInfo } from '@/schemas/acquisition-source'
@@ -461,6 +462,8 @@ export interface CustomerMemberPayload {
   remark?: string | null
 }
 
+export type CustomerExportTab = 'all' | 'collaborated' | 'public'
+
 export interface PublicCustomerQueryParams {
   skip?: number
   limit?: number
@@ -556,6 +559,9 @@ const customerApi = {
 
   getCustomers: (params?: CustomerQueryParams): Promise<CustomerResponse[] | PaginatedResponse<CustomerResponse>> =>
     api.get<CustomerResponse[] | PaginatedResponse<CustomerResponse>>('/v1/customers/', { params }),
+
+  exportCustomers: (payload: ListExportPayload<CustomerExportTab>): Promise<Blob> =>
+    postListExport('/v1/customers/export', payload),
 
   getCustomerDetail: (customerId: string): Promise<CustomerDetailResponse> =>
     api.get('/v1/customers/' + customerId, undefined, CustomerDetailResponseSchema),

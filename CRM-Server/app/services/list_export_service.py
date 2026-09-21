@@ -20,7 +20,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet._write_only import WriteOnlyWorksheet
 from starlette.background import BackgroundTask
 
-from app.core.list_export import ListExportCatalog, ListExportField
+from app.core.list_export.catalog import ListExportCatalog, ListExportField
 from app.utils.time import business_now
 
 XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

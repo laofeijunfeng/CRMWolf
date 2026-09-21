@@ -24,13 +24,15 @@ import { toast } from 'vue-sonner'
 import { Plus, Sparkles, ArrowRightLeft, TrendingUp, TrendingDown, XCircle, Trash2, Pencil, UserRoundCheck } from 'lucide-vue-next'
 import { DataTable, TableRowActions, type ActionConfig, type TableRowActionSet } from '@/components/crmwolf'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
+import { useDataTableExport } from '@/composables/useDataTableExport'
+import { buildDataTableExportFileName } from '@/utils/downloadBlob'
+import type { ListExportPayload } from '@/api/listExport'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { ViewPreferenceConfig } from '@/api/viewPreference'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
-  DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
@@ -52,7 +54,8 @@ import customerApi, {
   type CustomerReturnRequest,
   type ReturnReasonEnum,
   type CustomerLoseRequest,
-  type OwnerFilterOption
+  type OwnerFilterOption,
+  type CustomerExportTab,
 } from '@/api/customer'
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
@@ -257,6 +260,12 @@ const ownerFieldOptions = computed(() =>
 
 const fields = computed<ListFieldDefinition[]>(() => [
   {
+    key: 'public_id',
+    label: '业务 ID',
+    type: 'text',
+    export: true,
+  },
+  {
     key: 'account_name',
     label: '客户名称',
     type: 'text',
@@ -347,8 +356,39 @@ const formatCollaborators = (row: CustomerTableRow): string => {
   return names && names.length > 0 ? names.join('、') : '-'
 }
 
-// ==================== 权限 ====================
 const canCreateCustomer = computed(() => permissionStore.hasPermission('customer:create'))
+const canExportCustomers = computed(() => permissionStore.hasPermission('customer:export'))
+
+interface CustomerListExportContext {
+  tab: CustomerExportTab
+  search: string | undefined
+  filters: ListFilterCondition[]
+  sorts: ListSortCondition[]
+}
+
+const currentCustomerListContext = (): CustomerListExportContext => ({
+  tab: activeTab.value === 'public' || activeTab.value === 'collaborated' ? activeTab.value : 'all',
+  search: search.value.trim() || undefined,
+  filters: [...activeFilters.value],
+  sorts: [...activeSorts.value],
+})
+
+const { exportFields: exportCustomerFields } = useDataTableExport({
+  request: (fields) => {
+    const { tab, search, filters, sorts } = currentCustomerListContext()
+    const payload: ListExportPayload<CustomerExportTab> = { fields, tab, filters, sorts }
+    if (search !== undefined) {
+      payload.search = search
+    }
+    return customerApi.exportCustomers(payload)
+  },
+  fileName: () => buildDataTableExportFileName(
+    '客户列表',
+    activeTab.value === 'public' ? '公海客户' : activeTab.value === 'collaborated' ? '协作客户' : '全部客户',
+    new Date(),
+  ),
+})
+
 const canEditAllCustomer = computed(() => permissionStore.hasPermission('customer:edit:all'))
 const canEditOwnCustomer = computed(() => permissionStore.hasPermission('customer:edit:own'))
 const canDeleteAllCustomer = computed(() => permissionStore.hasPermission('customer:delete:all'))
@@ -1157,6 +1197,11 @@ watchEffect(() => {
   <div class="customers-page">
     <!-- DataTable -->
     <DataTable
+      column-config-enabled
+      :column-preference-mode="columnPreferenceMode"
+      :export-enabled="canExportCustomers"
+      export-title="客户列表"
+      :export-handler="exportCustomerFields"
       :fields="fields"
       :data="tableData"
       :loading="loading"
@@ -1183,9 +1228,7 @@ watchEffect(() => {
       :view-applying="customFilterViews.applying.value"
       :view-apply-error="customFilterViews.applyError.value"
       @retry-view-apply="customFilterViews.retryViewApply"
-      column-config-enabled
       :column-preference-config="activeColumnPreferenceConfig"
-      :column-preference-mode="columnPreferenceMode"
       filter-view-save-enabled
       :filter-view-save-loading="customFilterViewSaving"
       @update:page="handlePageChange"

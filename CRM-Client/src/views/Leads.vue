@@ -50,7 +50,10 @@ import LeadFormDialog from '@/components/LeadFormDialog.vue'
 import LeadConvertDialog from '@/components/LeadConvertDialog.vue'
 import LeadDetailSheet from './LeadDetailSheet.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
-import { leadApi, type Lead, type LeadDetail, type LeadListParams, type LeadOwnerFilterOption } from '@/api/lead'
+import { leadApi, type Lead, type LeadDetail, type LeadListParams, type LeadOwnerFilterOption, type LeadExportTab } from '@/api/lead'
+import { useDataTableExport } from '@/composables/useDataTableExport'
+import { buildDataTableExportFileName } from '@/utils/downloadBlob'
+import type { ListExportPayload } from '@/api/listExport'
 import userApi, { type UserResponse, UserStatus } from '@/api/user'
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
@@ -140,6 +143,7 @@ const companyScaleOptions = [
 
 const fields = computed<ListFieldDefinition[]>(() => {
   const catalog: ListFieldDefinition[] = [
+    { key: 'public_id', label: '业务 ID', type: 'text', export: true },
     { key: 'lead_name', label: '线索名称', type: 'text', column: { width: '220px' }, filter: true, sort: true },
     {
       key: 'owner',
@@ -196,6 +200,37 @@ const activeColumns = ref<ViewPreferenceConfig['columns']>([])
 
 // ==================== 权限 ====================
 const canCreateLead = computed(() => permissionStore.hasPermission('lead:create'))
+const canExportLeads = computed(() => permissionStore.hasPermission('lead:export'))
+
+interface LeadListExportContext {
+  tab: LeadExportTab
+  search: string | undefined
+  filters: ListFilterCondition[]
+  sorts: ListSortCondition[]
+}
+
+const currentLeadListContext = (): LeadListExportContext => ({
+  tab: activeTab.value === 'public' ? 'public' : 'all',
+  search: search.value.trim() || undefined,
+  filters: [...activeFilters.value],
+  sorts: [...activeSorts.value],
+})
+
+const { exportFields: exportLeadFields } = useDataTableExport({
+  request: (fields) => {
+    const { tab, search, filters, sorts } = currentLeadListContext()
+    const payload: ListExportPayload<LeadExportTab> = { fields, tab, filters, sorts }
+    if (search !== undefined) {
+      payload.search = search
+    }
+    return leadApi.exportLeads(payload)
+  },
+  fileName: () => buildDataTableExportFileName(
+    '线索列表',
+    activeTab.value === 'public' ? '公海线索' : '全部线索',
+    new Date(),
+  ),
+})
 const canEditAllLead = computed(() => permissionStore.hasPermission('lead:edit:all'))
 const canEditOwnLead = computed(() => permissionStore.hasPermission('lead:edit:own'))
 const canDeleteAllLead = computed(() => permissionStore.hasPermission('lead:delete:all'))
@@ -671,6 +706,9 @@ watchEffect(() => {
   <div class="leads-page">
     <!-- DataTable -->
     <DataTable
+      :export-enabled="canExportLeads"
+      export-title="线索列表"
+      :export-handler="exportLeadFields"
       :fields="fields"
       :data="tableData"
       :loading="loading"

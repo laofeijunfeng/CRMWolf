@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Header, HTTPException, status, Query
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import Iterator, List, Optional
 from datetime import datetime, timedelta
 import json
 from app.core.database import get_db
@@ -15,8 +16,9 @@ from app.schemas.lead import (
     LeadFollowUpCreate, LeadFollowUpResponse,
     LeadAssignRequest, LeadConvertRequest,
     LeadBatchImportRequest, LeadBatchImportResponse,
-    LeadTrendResponse, LeadConversionResponse, LeadMarkInvalidRequest
+    LeadTrendResponse, LeadConversionResponse, LeadMarkInvalidRequest,
 )
+from app.schemas.list_export import LeadListExportRequest
 from app.schemas.common import PaginatedResponse
 from app.schemas.customer import ConvertLeadToCustomer, ConvertResponse
 from app.models.lead import LeadStatus
@@ -37,8 +39,23 @@ from app.core.list_query import (
     run_or_400,
     uses_unified_list_query,
 )
+from app.core.list_export import (
+    LEADS_LIST_EXPORT_CATALOG,
+    create_list_export_file,
+    iter_batches,
+    list_export_file_response,
+    run_list_export_or_400,
+)
 
 router = APIRouter(prefix="/v1/leads", tags=["线索管理"])
+
+
+LEAD_STATUS_LABELS = {
+    LeadStatus.NEW: "新建",
+    LeadStatus.FOLLOWING: "跟进中",
+    LeadStatus.CONVERTED: "已转化",
+    LeadStatus.INVALID: "无效",
+}
 
 
 def _build_lead_follow_up_response(follow_up, lead_public_id: str, creator_info=None) -> LeadFollowUpResponse:
@@ -187,6 +204,83 @@ def _build_lead_list_responses(db: Session, leads: List) -> List[LeadListRespons
         result.append(LeadListResponse(**lead_dict))
 
     return result
+
+
+def _lead_export_row(item: LeadListResponse) -> dict[str, object]:
+    return {
+        "public_id": item.public_id,
+        "lead_name": item.lead_name,
+        "owner": item.owner_info.name if item.owner_info else None,
+        "contact_name": item.contact_name,
+        "contact_phone": item.contact_phone,
+        "source": item.source_info.name if item.source_info else item.source,
+        "product_name": item.product_name,
+        "city": item.city,
+        "company_scale": item.company_scale,
+        "status": LEAD_STATUS_LABELS[item.status],
+        "created_time": item.created_time,
+    }
+
+
+def _iter_lead_export_rows(stream, db: Session) -> Iterator[dict[str, object]]:
+    for batch in iter_batches(stream, 500):
+        for item in _build_lead_list_responses(db, batch):
+            yield _lead_export_row(item)
+
+
+@router.post(
+    "/export",
+    dependencies=[Depends(require_permission("lead:export"))],
+    summary="导出线索列表",
+    description="按当前筛选条件导出全部匹配线索为 Excel",
+)
+def export_leads(
+    request: LeadListExportRequest,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    from app.crud.permission import permission_crud
+
+    permission_codes = {
+        p.code
+        for p in permission_crud.get_user_permissions(db, current_user.id, team_id)
+    }
+    has_view_all = "lead:view:all" in permission_codes
+    owner_id = enforce_owner_view_scope(
+        request.filters,
+        current_user_id=str(current_user.id),
+        has_view_all=has_view_all,
+        permission_detail="只能查看自己负责的线索，或需要 lead:view:all 权限查看他人数据",
+    )
+
+    if request.tab == "public":
+        query = lead_crud.build_public_list_query(
+            db,
+            team_id=team_id,
+            search=request.search,
+            filters=request.filters,
+            sorts=request.sorts,
+        )
+    else:
+        query = lead_crud.build_list_query(
+            db,
+            team_id=team_id,
+            owner_id=owner_id,
+            search=request.search,
+            filters=request.filters,
+            sorts=request.sorts,
+        )
+
+    stream = query.enable_eagerloads(False).execution_options(stream_results=True).yield_per(500)
+    rows = _iter_lead_export_rows(stream, db)
+    generated = run_list_export_or_400(lambda: create_list_export_file(
+        catalog=LEADS_LIST_EXPORT_CATALOG,
+        selected_keys=request.fields,
+        rows=rows,
+        file_stem=f"线索列表-{'公海线索' if request.tab == 'public' else '全部线索'}",
+    ))
+    return list_export_file_response(generated)
 
 
 @router.post("/", response_model=LeadResponse, status_code=status.HTTP_201_CREATED, summary="创建线索", description="创建新的线索")

@@ -7,6 +7,7 @@ from app.core.list_query.engine import (
     apply_optional_list_query,
     apply_search,
     apply_sorts,
+    build_optional_list_query,
     execute_list_query,
     paginate_optional_list_query,
 )
@@ -36,8 +37,8 @@ __all__ = [
     "apply_filters",
     "apply_list_query",
     "apply_optional_list_query",
-    "apply_search",
     "apply_sorts",
+    "build_optional_list_query",
     "enforce_owner_view_scope",
     "execute_list_query",
     "has_filter_field",
