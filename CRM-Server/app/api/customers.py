@@ -51,11 +51,12 @@ from app.crud.product_intent import (
     MISSING_PRODUCT_MESSAGE,
     ProductNotFoundError,
     product_intent_payload,
+    product_intent_payloads_by_owner,
 )
 from app.crud.team import team_crud
 from app.crud.user import user_crud
 from app.models.command_execution import CommandExecutionStatus
-from app.models.customer import Contact, CustomerStatus
+from app.models.customer import Contact, CustomerProduct, CustomerStatus
 from app.models.outbound_notification_job import OutboundNotificationEventType
 
 from app.schemas.command import CommandEffect, CommandNextAction, CommandResource
@@ -1631,6 +1632,14 @@ def _build_customer_list_responses(db: Session, customers: List, team_id: int) -
                 'primary_name': industry.parent.name if industry.parent else None,
                 'secondary_name': industry.name if industry.level == 2 else None
             }
+    product_payloads = product_intent_payloads_by_owner(
+        db,
+        link_model=CustomerProduct,
+        owner_fk="customer_id",
+        owner_ids=customer_ids,
+    )
+    empty_product_payload = product_intent_payload([])
+
 
     for customer in customers:
         customer_dict = {
@@ -1659,7 +1668,7 @@ def _build_customer_list_responses(db: Session, customers: List, team_id: int) -
             'collaborator_infos': collaborators_by_customer.get(customer.id, []),
             'creator_info': users_info.get(customer.creator_id) if customer.creator_id else None,
             'default_procurement_method_info': procurement_methods_info.get(customer.default_procurement_method_id) if customer.default_procurement_method_id else None,
-            **product_intent_payload(customer.product_links),
+            **product_payloads.get(customer.id, empty_product_payload),
         }
         result.append(CustomerListResponse(**customer_dict))
 
@@ -1794,6 +1803,7 @@ def export_customers(
 
 @router.get(
     "/identity-resolution",
+    response_model=CustomerIdentityResolutionResponse,
     summary="解析客户身份",
 )
 def resolve_customer_identity(

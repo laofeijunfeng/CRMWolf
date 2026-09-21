@@ -154,6 +154,40 @@ def product_intent_payload(links: list[Any] | tuple[Any, ...] | None) -> dict[st
     }
 
 
+def product_intent_payloads_by_owner(
+    db: Session,
+    *,
+    link_model: type[CustomerProduct] | type[LeadProduct],
+    owner_fk: str,
+    owner_ids: Sequence[int],
+) -> dict[int, dict[str, Any]]:
+    """Load product links for owner ids on this session; never touch stream-session relationships."""
+    if not owner_ids:
+        return {}
+    links = (
+        db.query(link_model)
+        .filter(getattr(link_model, owner_fk).in_(list(owner_ids)))
+        .all()
+    )
+    product_ids = {int(link.product_id) for link in links if getattr(link, "product_id", None) is not None}
+    products = {
+        product.id: product
+        for product in db.query(Product).filter(Product.id.in_(product_ids)).all()
+    } if product_ids else {}
+    links_by_owner: dict[int, list] = {}
+    for link in links:
+        owner_id = int(getattr(link, owner_fk))
+        product = products.get(int(link.product_id)) if getattr(link, "product_id", None) is not None else None
+        if product is not None:
+            link.product = product
+        links_by_owner.setdefault(owner_id, []).append(link)
+    return {
+        owner_id: product_intent_payload(owner_links)
+        for owner_id, owner_links in links_by_owner.items()
+    }
+
+
+
 def base_module_public_id(product: Product) -> str | None:
     modules = list(product.modules or [])
     active_base = next(

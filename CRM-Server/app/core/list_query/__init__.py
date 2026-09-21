@@ -37,6 +37,7 @@ __all__ = [
     "apply_filters",
     "apply_list_query",
     "apply_optional_list_query",
+    "apply_search",
     "apply_sorts",
     "build_optional_list_query",
     "enforce_owner_view_scope",

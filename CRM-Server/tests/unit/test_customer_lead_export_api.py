@@ -17,7 +17,7 @@ from app.api.customers import router as customers_router
 from app.api.leads import router as leads_router
 from app.core import deps
 from app.core.database import Base
-from app.models.customer import Customer, CustomerProduct, CustomerStatus
+from app.models.customer import Customer, CustomerMember, CustomerProduct, CustomerStatus
 from app.models.lead import Lead, LeadProduct, LeadSource, LeadStatus
 from app.models.product import Product
 from app.models.user import User, UserStatus
@@ -39,6 +39,7 @@ def db_session():
         User.__table__,
         Product.__table__,
         Customer.__table__,
+        CustomerMember.__table__,
         CustomerProduct.__table__,
         Lead.__table__,
         LeadProduct.__table__,
@@ -62,7 +63,14 @@ def db_session():
 
 
 @pytest.fixture
-def client(db_session):
+def client(db_session, monkeypatch):
+    import app.api.customers as customers_module
+    import app.api.leads as leads_module
+
+    test_session_factory = sessionmaker(bind=db_session.get_bind())
+    monkeypatch.setattr(customers_module, "SessionLocal", test_session_factory)
+    monkeypatch.setattr(leads_module, "SessionLocal", test_session_factory, raising=False)
+
     app = FastAPI()
     app.include_router(customers_router)
     app.include_router(leads_router)
@@ -78,6 +86,7 @@ def client(db_session):
         yield test_client
 
     app.dependency_overrides.clear()
+
 
 
 def _grant(monkeypatch, *codes: str) -> None:

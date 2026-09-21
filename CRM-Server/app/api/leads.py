@@ -4,12 +4,12 @@ from sqlalchemy.orm import Session
 from typing import Iterator, List, Optional
 from datetime import datetime, timedelta
 import json
-from app.core.database import get_db
+from app.core.database import SessionLocal, get_db
 from app.api.customers import convert_from_lead as customers_convert_from_lead
 from app.core.deps import get_current_active_user, check_lead_access, check_lead_owner, require_permission, get_current_user_team, check_lead_delete_permission
 from app.crud.customer import customer_crud
 from app.crud.lead import lead_crud, lead_follow_up_crud
-from app.crud.product_intent import ProductNotFoundError, product_intent_payload
+from app.crud.product_intent import ProductNotFoundError, product_intent_payload, product_intent_payloads_by_owner
 from app.crud.user import user_crud
 from app.schemas.lead import (
     LeadCreate, LeadUpdate, LeadResponse, LeadListResponse, LeadDetailResponse,
@@ -21,7 +21,7 @@ from app.schemas.lead import (
 from app.schemas.list_export import LeadListExportRequest
 from app.schemas.common import PaginatedResponse
 from app.schemas.customer import ConvertLeadToCustomer, ConvertResponse
-from app.models.lead import LeadStatus
+from app.models.lead import LeadProduct, LeadStatus
 from app.models.user import User
 from app.services.acquisition_source_service import (
     AcquisitionSourceError,
@@ -178,6 +178,13 @@ def _build_lead_list_responses(db: Session, leads: List) -> List[LeadListRespons
         leads[0].team_id,
         [lead.source_id for lead in leads],
     ) if leads else {}
+    product_payloads = product_intent_payloads_by_owner(
+        db,
+        link_model=LeadProduct,
+        owner_fk="lead_id",
+        owner_ids=[lead.id for lead in leads],
+    )
+    empty_product_payload = product_intent_payload([])
 
     result = []
     for lead in leads:
@@ -199,7 +206,7 @@ def _build_lead_list_responses(db: Session, leads: List) -> List[LeadListRespons
             "last_modified_time": lead.last_modified_time,
             "version": lead.version,
             "owner_info": users_info.get(lead.owner_id) if lead.owner_id else None,
-            **product_intent_payload(lead.product_links),
+            **product_payloads.get(lead.id, empty_product_payload),
         }
         result.append(LeadListResponse(**lead_dict))
 
@@ -222,10 +229,14 @@ def _lead_export_row(item: LeadListResponse) -> dict[str, object]:
     }
 
 
-def _iter_lead_export_rows(stream, db: Session) -> Iterator[dict[str, object]]:
+def _iter_lead_export_rows(stream, projection_session_factory=SessionLocal) -> Iterator[dict[str, object]]:
     for batch in iter_batches(stream, 500):
-        for item in _build_lead_list_responses(db, batch):
-            yield _lead_export_row(item)
+        projection_db = projection_session_factory()
+        try:
+            for item in _build_lead_list_responses(projection_db, batch):
+                yield _lead_export_row(item)
+        finally:
+            projection_db.close()
 
 
 @router.post(
@@ -273,7 +284,7 @@ def export_leads(
         )
 
     stream = query.enable_eagerloads(False).execution_options(stream_results=True).yield_per(500)
-    rows = _iter_lead_export_rows(stream, db)
+    rows = _iter_lead_export_rows(stream, projection_session_factory=SessionLocal)
     generated = run_list_export_or_400(lambda: create_list_export_file(
         catalog=LEADS_LIST_EXPORT_CATALOG,
         selected_keys=request.fields,
