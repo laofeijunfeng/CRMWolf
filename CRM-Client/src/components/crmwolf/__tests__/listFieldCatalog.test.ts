@@ -56,6 +56,10 @@ describe('projectListFieldCatalog', () => {
         },
         { key: 'issued_time', label: '开票时间', type: 'date' },
         { key: 'collaborators', label: '协作者', type: 'text' }
+      ],
+      exportFields: [
+        { fieldKey: 'owner', key: 'owner', label: '负责人', source: 'column' },
+        { fieldKey: 'collaborators', key: 'collaborators', label: '协作者', source: 'column' }
       ]
     })
   })
@@ -129,7 +133,8 @@ describe('projectListFieldCatalog', () => {
     ])).toEqual({
       columns: [{ key: 'license_status', title: '授权状态', width: '100px' }],
       filterFields: [{ key: 'license_status', label: '授权状态', type: 'enum' }],
-      sortFields: [{ key: 'license_status', label: '授权状态', type: 'enum' }]
+      sortFields: [{ key: 'license_status', label: '授权状态', type: 'enum' }],
+      exportFields: [{ fieldKey: 'license_status', key: 'license_status', label: '授权状态', source: 'column' }]
     })
 
     expect(() => projectListFieldCatalog([
@@ -145,6 +150,35 @@ describe('projectListFieldCatalog', () => {
     expect(() => projectListFieldCatalog([
       { key: 'created_time', label: '创建时间', type: 'date', column: true, sort: false }
     ])).toThrow('List field "created_time" disables sort without sortDisabledReason')
+  })
+
+  it('projects export fields with safe aliases and rejects unsafe explicit keys', () => {
+    expect(projectListFieldCatalog([
+      { key: 'public_id', label: '业务 ID', export: true },
+      { key: 'name', label: '名称', type: 'text', column: true },
+      { key: 'owner_id', label: '负责人', type: 'enum', column: true, export: { key: 'owner' } },
+      { key: 'badge', label: '标记', role: 'decoration', column: true },
+    ])).toMatchObject({
+      exportFields: [
+        { fieldKey: 'public_id', key: 'public_id', label: '业务 ID', source: 'export-only' },
+        { fieldKey: 'name', key: 'name', label: '名称', source: 'column' },
+        { fieldKey: 'owner_id', key: 'owner', label: '负责人', source: 'column' },
+      ],
+    })
+
+    expect(projectListFieldCatalog([
+      { key: 'keyword', label: '关键字', type: 'text', role: 'keyword', filter: true },
+      { key: 'badge', label: '标记', role: 'decoration', column: true },
+    ]).exportFields).toEqual([])
+
+    expect(() => defineListFields([{ key: 'id', label: 'ID', export: true }]))
+      .toThrow('List field export key "id" is unsafe')
+    expect(() => defineListFields([{ key: 'owner_id', label: '负责人', type: 'enum', column: true, export: true }]))
+      .toThrow('List field export key "owner_id" is unsafe')
+    expect(() => defineListFields([
+      { key: 'name', label: '名称', type: 'text', column: true },
+      { key: 'alias', label: '别名', type: 'text', column: true, export: { key: 'name' } },
+    ])).toThrow('Duplicate list export field key: name')
   })
 
   it('keeps keyword and action fields from inheriting business-column defaults', () => {
@@ -174,6 +208,7 @@ describe('DataTable list field catalog contract', () => {
   it('requires every DataTable consumer to feed one catalog', () => {
     const consumers = listVueFiles(srcDir).filter((filePath) => {
       if (filePath.endsWith('/components/crmwolf/DataTable.vue')) return false
+      if (filePath.endsWith('/components/crmwolf/ListAdvancedTools.vue')) return false
       return readFileSync(filePath, 'utf8').includes('<DataTable')
     }).sort()
 
