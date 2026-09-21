@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 from app.core.list_export.catalogs import LIST_EXPORT_CATALOGS
@@ -39,6 +38,4 @@ def test_manifest_contains_user_facing_contract() -> None:
 def test_committed_export_manifest_matches_backend(tmp_path: Path) -> None:
     generated = tmp_path / "listExportCatalogManifest.json"
     write_list_export_manifest(generated, LIST_EXPORT_CATALOGS)
-    assert json.loads(CLIENT_MANIFEST.read_text(encoding="utf-8")) == json.loads(
-        generated.read_text(encoding="utf-8")
-    )
+    assert CLIENT_MANIFEST.read_text(encoding="utf-8") == generated.read_text(encoding="utf-8")
