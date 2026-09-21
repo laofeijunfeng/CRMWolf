@@ -33,7 +33,6 @@ from app.core.list_query import (
     ListQueryContext,
     SortCondition,
     build_optional_list_query,
-    paginate_optional_list_query,
     uses_unified_list_query,
     without_filter_field,
 )

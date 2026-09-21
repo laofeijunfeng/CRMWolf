@@ -22,7 +22,14 @@ from app.core import deps
 from app.models.approval import Approval, ApprovalAction, ApprovalFlow, ApprovalNode, ApprovalRecord, ApprovalStatus
 from app.models.contract import Contract
 from app.models.customer import Customer, CustomerMember
-from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus, InvoiceRedOffset, InvoiceReissueApplication, InvoiceType
+from app.models.invoice import (
+    InvoiceApplication,
+    InvoiceApplicationStatus,
+    InvoiceRedOffset,
+    InvoiceReissueApplication,
+    InvoiceReissueApplicationStatus,
+    InvoiceType,
+)
 from app.models.opportunity import Opportunity
 from app.models.payment import PaymentPlan, PaymentPlanStatus
 from app.models.role import Role
@@ -186,6 +193,7 @@ def _seed_invoice(db_session, **overrides) -> InvoiceApplication:
         "invoice_type": InvoiceType.VAT_NORMAL,
         "status": InvoiceApplicationStatus.ISSUED,
         "applicant_id": "1",
+        "invoice_title_id": 1,
         "invoice_title_type": "COMPANY",
         "invoice_title_text": "测试抬头",
         "invoice_taxpayer_id": "TAX-001",
@@ -253,6 +261,32 @@ def _seed_approval(db_session, node: ApprovalNode, **overrides) -> Approval:
         team_id=1,
     ))
     return approval
+
+def _seed_completed_reissue(db_session, original: InvoiceApplication, **overrides) -> InvoiceReissueApplication:
+    defaults = {
+        "team_id": 1,
+        "application_number": "INVR-001",
+        "original_invoice_application_id": original.id,
+        "applicant_id": "1",
+        "reason": "抬头错误",
+        "status": InvoiceReissueApplicationStatus.COMPLETED,
+        "approval_phase": "approved",
+        "invoice_title_type": "COMPANY",
+        "invoice_title_text": "新抬头",
+        "invoice_taxpayer_id": "TAX-NEW",
+        "invoice_amount": original.invoice_amount,
+        "invoice_type": InvoiceType.VAT_NORMAL,
+        "new_invoice_file_path": "invoices/reissue-new.pdf",
+        "new_invoice_number": "REISSUE-NO-1",
+        "completed_time": datetime(2026, 8, 20, 9, 0, 0),
+        "created_time": datetime(2026, 8, 19, 9, 0, 0),
+        "last_modified_time": datetime(2026, 8, 20, 9, 0, 0),
+    }
+    defaults.update(overrides)
+    reissue = InvoiceReissueApplication(**defaults)
+    db_session.add(reissue)
+    return reissue
+
 
 
 def test_invoice_export_requires_permission_and_keeps_view_own_customer_scope(
@@ -352,7 +386,10 @@ def test_approval_export_keeps_pending_role_scope(client, db_session, monkeypatc
     )
     db_session.add(sales_node)
     db_session.flush()
-    mine = _seed_approval(db_session, node, business_id=11)
+    _seed_graph(db_session, owner_id="1", graph_id=11)
+    mine_invoice = _seed_invoice(db_session, application_number="INV-MINE-11", customer_id=11, contract_id=11, opportunity_id=11, payment_plan_id=11)
+    db_session.flush()
+    mine = _seed_approval(db_session, node, business_id=mine_invoice.id)
     _seed_approval(db_session, sales_node, business_id=12)
     db_session.commit()
 
@@ -367,8 +404,9 @@ def test_approval_export_keeps_pending_role_scope(client, db_session, monkeypatc
     rows = _workbook_rows(response)
     assert rows[0] == ("单号", "状态")
     assert len(rows) == 2
-    assert rows[1][0] in {f"INV-{mine.business_id}", f"INVOICE-{mine.business_id}"}
+    assert rows[1][0] == "INV-MINE-11"
     assert rows[1][1] == "审批中"
+    assert mine.business_id == mine_invoice.id
 
 
 
@@ -376,17 +414,36 @@ def test_approval_export_keeps_processed_and_submitted_scope(client, db_session,
     _grant(monkeypatch, "approval:export")
     _seed_user(db_session)
     node = _seed_finance_role(db_session)
-    submitted = _seed_approval(
+    _seed_graph(db_session, owner_id="1", graph_id=21)
+    _seed_graph(db_session, owner_id="2", graph_id=22)
+    submitted_invoice = _seed_invoice(
+        db_session,
+        application_number="INV-SUB-21",
+        customer_id=21,
+        contract_id=21,
+        opportunity_id=21,
+        payment_plan_id=21,
+    )
+    processed_invoice = _seed_invoice(
+        db_session,
+        application_number="INV-PROC-22",
+        customer_id=22,
+        contract_id=22,
+        opportunity_id=22,
+        payment_plan_id=22,
+    )
+    db_session.flush()
+    _seed_approval(
         db_session,
         node,
-        business_id=21,
+        business_id=submitted_invoice.id,
         status=ApprovalStatus.APPROVED,
         submitter_id="1",
     )
     processed = _seed_approval(
         db_session,
         node,
-        business_id=22,
+        business_id=processed_invoice.id,
         status=ApprovalStatus.APPROVED,
         submitter_id="2",
         submitter_name="他人",
@@ -419,10 +476,9 @@ def test_approval_export_keeps_processed_and_submitted_scope(client, db_session,
     assert processed_response.status_code == 200
     submitted_rows = _workbook_rows(submitted_response)
     processed_rows = _workbook_rows(processed_response)
-    assert [row[0] for row in submitted_rows[1:]] == [f"INV-{submitted.business_id}"] or [
-        row[0] for row in submitted_rows[1:]
-    ] == [f"INVOICE-{submitted.business_id}"]
+    assert [row[0] for row in submitted_rows[1:]] == ["INV-SUB-21"]
     assert len(processed_rows) == 2
+    assert processed_rows[1][0] == "INV-PROC-22"
 
 
 def test_invoice_and_approval_exports_write_all_matching_rows(client, db_session, monkeypatch):
@@ -465,3 +521,49 @@ def test_invoice_and_approval_exports_write_all_matching_rows(client, db_session
     assert len(approval_rows) == 77
     assert invoice_rows[1][0] == "INV-75"
     assert invoice_rows[76][0] == "INV-00"
+
+
+def test_invoice_list_projects_current_reissue_file_for_download(client, db_session, monkeypatch):
+    _grant(monkeypatch, "invoice:view:all")
+    _seed_graph(db_session)
+    original = _seed_invoice(
+        db_session,
+        application_number="INV-REISSUE",
+        invoice_file_path="invoices/original.pdf",
+        invoice_number="OLD-NO-1",
+        status=InvoiceApplicationStatus.ISSUED,
+    )
+    db_session.flush()
+    reissue = _seed_completed_reissue(db_session, original)
+    db_session.commit()
+
+    response = client.get("/v1/invoice-applications")
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    assert item["application_number"] == "INV-REISSUE"
+    assert item["current_invoice_file_kind"] == "reissue_new"
+    assert item["current_invoice_file_path"] == "invoices/reissue-new.pdf"
+    assert item["current_invoice_number"] == "REISSUE-NO-1"
+    assert item["current_reissue_id"] == reissue.id
+    assert item["customer_id"] == "cus_00000000000000000000000000000001"
+
+
+def test_approval_export_blanks_internal_id_application_number_fallback(client, db_session, monkeypatch):
+    _grant(monkeypatch, "approval:export")
+    _seed_user(db_session)
+    node = _seed_finance_role(db_session)
+    approval = _seed_approval(db_session, node, business_id=99)
+    db_session.commit()
+
+    response = client.post("/v1/approvals/export", json={
+        "fields": ["application_number", "status"],
+        "tab": "pending",
+        "filters": [],
+        "sorts": [],
+    })
+    assert response.status_code == 200
+    rows = _workbook_rows(response)
+    assert len(rows) == 2
+    assert rows[1][0] in {None, ""}
+    assert rows[1][0] not in {f"INV-{approval.business_id}", f"INVOICE-{approval.business_id}"}
+    assert rows[1][1] == "审批中"

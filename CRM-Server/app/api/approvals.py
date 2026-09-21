@@ -103,8 +103,22 @@ def _approval_export_row(item: dict) -> dict[str, object]:
     if hasattr(status_value, "value"):
         status_value = status_value.value
     business_type = item.get("business_type")
+    application_number = item.get("application_number")
+    business_id = item.get("business_id")
+    if application_number and business_id is not None:
+        fallbacks = {
+            f"{business_type}-{business_id}",
+            f"INVOICE-{business_id}",
+            f"INVR-{business_id}",
+            f"PAY-{business_id}",
+            f"CONTRACT-{business_id}",
+            f"LICENSE-{business_id}",
+            f"OPP-{business_id}",
+        }
+        if application_number in fallbacks:
+            application_number = None
     return {
-        "application_number": item.get("application_number"),
+        "application_number": application_number,
         "business_type": APPROVAL_TYPE_LABELS.get(business_type, business_type),
         "entity_name": item.get("entity_name"),
         "entity_amount": item.get("entity_amount"),

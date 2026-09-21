@@ -1,6 +1,6 @@
 import logging
 import os
-from datetime import date, datetime
+from datetime import date
 from typing import Iterator, Literal, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
@@ -384,6 +384,44 @@ def _invoice_effective_status_from_maps(
     return reissue_status, ("REISSUE_PENDING" if reissue_status == "REISSUE_PENDING" else "ACTIVE")
 
 
+def _current_invoice_file_fields(application, reissues: list, red_offsets: list) -> tuple[str | None, str | None, str | None, int | None]:
+    latest_completed_reissue = max(
+        [
+            reissue
+            for reissue in reissues
+            if reissue.status == "COMPLETED" and reissue.new_invoice_file_path
+        ],
+        key=lambda reissue: (
+            reissue.completed_time or reissue.last_modified_time or reissue.created_time,
+            reissue.id,
+        ),
+        default=None,
+    )
+    latest_red_offset = max(
+        red_offsets,
+        key=lambda red_offset: (
+            red_offset.red_offset_time or red_offset.last_modified_time or red_offset.created_time,
+            red_offset.id,
+        ),
+        default=None,
+    )
+    if latest_completed_reissue is not None:
+        return (
+            "reissue_new",
+            latest_completed_reissue.new_invoice_file_path,
+            latest_completed_reissue.new_invoice_number,
+            latest_completed_reissue.id,
+        )
+    if latest_red_offset is not None:
+        return None, None, None, None
+    return (
+        "original" if application.invoice_file_path else None,
+        application.invoice_file_path,
+        application.invoice_number,
+        None,
+    )
+
+
 def _populate_application_list_info(projection_db: Session, applications, team_id: int):
     from app.models.invoice import InvoiceRedOffset, InvoiceReissueApplication
 
@@ -469,10 +507,13 @@ def _populate_application_list_info(projection_db: Session, applications, team_i
         reissue_status, invoice_effective_status = _invoice_effective_status_from_maps(
             application, reissues_by_original, red_offsets_by_invoice
         )
+        current_invoice_file_kind, current_invoice_file_path, current_invoice_number, current_reissue_id = (
+            _current_invoice_file_fields(application, reissues, red_offsets)
+        )
         items.append(InvoiceApplicationResponse(
             id=application.id,
             application_number=application.application_number,
-            customer_id=customer.public_id if customer else str(application.customer_id),
+            customer_id=customer.public_id if customer else None,
             contract_id=application.contract_id,
             opportunity_id=application.opportunity_id,
             payment_plan_id=application.payment_plan_id,
@@ -506,6 +547,10 @@ def _populate_application_list_info(projection_db: Session, applications, team_i
             reviewer_name=reviewer.name if reviewer else None,
             reissue_status=reissue_status,
             invoice_effective_status=invoice_effective_status,
+            current_invoice_file_kind=current_invoice_file_kind,
+            current_invoice_file_path=current_invoice_file_path,
+            current_invoice_number=current_invoice_number,
+            current_reissue_id=current_reissue_id,
             red_offsets=[_populate_red_offset_info(projection_db, red_offset) for red_offset in red_offsets],
             reissue_applications=[_populate_reissue_application_info(projection_db, reissue) for reissue in reissues],
         ))
