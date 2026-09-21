@@ -7,6 +7,7 @@ import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { BusinessJourneyListItem } from '@/schemas/dealJourney'
 import type { FeedbackError } from '@/types/feedback'
+import { businessJourneyStagePresentation } from './businessJourneyStagePresentation'
 
 interface Props {
   fields: ListFieldDefinition[]
@@ -140,8 +141,23 @@ const handleRowClick = (row: BusinessJourneyListItem): void => {
     @search-apply="emit('search-apply', $event)"
     @search-clear="emit('search-clear')"
   >
+    <template #cell-name="{ row }">
+      <span
+        class="business-journey-name-link"
+        data-testid="business-journey-name-link"
+        @click.stop="handleRowClick(row)"
+      >
+        {{ row.name }}
+      </span>
+    </template>
     <template #cell-current_board_stage="{ row }">
-      <Badge variant="outline">{{ row.current_board_stage_label || stageLabels.get(row.current_board_stage) || '-' }}</Badge>
+      <Badge
+        variant="outline"
+        data-testid="business-journey-stage-badge"
+        :class="businessJourneyStagePresentation[row.current_board_stage].badgeClass"
+      >
+        {{ row.current_board_stage_label || stageLabels.get(row.current_board_stage) || '-' }}
+      </Badge>
     </template>
     <template #cell-primary_opportunity_name="{ row }">
       {{ row.primary_opportunity_name || '-' }}
@@ -167,3 +183,17 @@ const handleRowClick = (row: BusinessJourneyListItem): void => {
     </template>
   </DataTable>
 </template>
+
+<style scoped lang="scss">
+@use '@/styles/variables-v2.scss' as *;
+
+.business-journey-name-link {
+  color: $wolf-text-link-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+  cursor: pointer;
+
+  &:hover {
+    color: $wolf-text-link-hover-v2;
+  }
+}
+</style>

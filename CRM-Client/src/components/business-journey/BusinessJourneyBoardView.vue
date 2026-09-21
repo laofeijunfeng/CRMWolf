@@ -11,9 +11,9 @@ import {
 } from '@/components/crmwolf'
 import type {
   BusinessJourneyBoardCard,
-  BusinessJourneyBoardResponse,
-  DealJourneyBoardStage
+  BusinessJourneyBoardResponse
 } from '@/schemas/dealJourney'
+import { businessJourneyStagePresentation } from './businessJourneyStagePresentation'
 
 interface Props {
   board: BusinessJourneyBoardResponse | null
@@ -32,49 +32,6 @@ const emit = defineEmits<{
 }>()
 const columns = computed(() => props.board?.columns ?? [])
 const hasBoardData = computed(() => props.board !== null)
-
-const stagePalette: Record<DealJourneyBoardStage, { column: string; countBadge: string; emphasisBadge: string }> = {
-  early_communication: {
-    column: 'business-board-stage--sky',
-    countBadge: 'bg-sky-50 text-sky-700 border-sky-100',
-    emphasisBadge: 'bg-sky-600 text-white border-transparent'
-  },
-  active_progress: {
-    column: 'business-board-stage--blue',
-    countBadge: 'bg-blue-50 text-blue-700 border-blue-100',
-    emphasisBadge: 'bg-blue-600 text-white border-transparent'
-  },
-  closing_soon: {
-    column: 'business-board-stage--emerald',
-    countBadge: 'bg-emerald-50 text-emerald-700 border-emerald-100',
-    emphasisBadge: 'bg-emerald-600 text-white border-transparent'
-  },
-  contract_processing: {
-    column: 'business-board-stage--violet',
-    countBadge: 'bg-violet-50 text-violet-700 border-violet-100',
-    emphasisBadge: 'bg-violet-600 text-white border-transparent'
-  },
-  payment_processing: {
-    column: 'business-board-stage--amber',
-    countBadge: 'bg-amber-50 text-amber-700 border-amber-100',
-    emphasisBadge: 'bg-amber-600 text-white border-transparent'
-  },
-  invoice_processing: {
-    column: 'business-board-stage--cyan',
-    countBadge: 'bg-cyan-50 text-cyan-700 border-cyan-100',
-    emphasisBadge: 'bg-cyan-600 text-white border-transparent'
-  },
-  completed: {
-    column: 'business-board-stage--slate',
-    countBadge: 'bg-slate-50 text-slate-700 border-slate-100',
-    emphasisBadge: 'bg-slate-600 text-white border-transparent'
-  },
-  lost: {
-    column: 'business-board-stage--rose',
-    countBadge: 'bg-rose-50 text-rose-700 border-rose-100',
-    emphasisBadge: 'bg-rose-600 text-white border-transparent'
-  }
-}
 
 const getStageAge = (value: string | null | undefined): string => {
   if (value === null || value === undefined || value === '') return '-'
@@ -179,11 +136,11 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
               v-for="column in columns"
               :key="column.key"
               class="business-board-column"
-              :class="stagePalette[column.key].column"
+              :class="businessJourneyStagePresentation[column.key].columnClass"
             >
               <header class="column-header">
                 <h2>{{ column.title }}</h2>
-                <Badge variant="outline" :class="stagePalette[column.key].countBadge">
+                <Badge variant="outline" :class="businessJourneyStagePresentation[column.key].badgeClass">
                   {{ column.count }}
                 </Badge>
               </header>
@@ -238,7 +195,7 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
                     <Badge
                       v-if="shouldShowOpportunityStage(card)"
                       class="journey-stage-tag"
-                      :class="stagePalette[column.key].emphasisBadge"
+                      :class="businessJourneyStagePresentation[column.key].emphasisBadgeClass"
                     >
                       {{ getCardStageName(card) }}
                     </Badge>
