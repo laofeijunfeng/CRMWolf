@@ -9,6 +9,9 @@ import {
   StageDurationDataSchema
 } from '@/schemas/opportunity'
 import { z } from 'zod'
+import { postListExport, type ListExportPayload } from '@/api/listExport'
+
+export type OpportunityExportTab = 'all' | 'active' | 'won' | 'lost'
 
 export enum OpportunityStatus {
   FOLLOW_UP = 0,
@@ -335,6 +338,9 @@ export function parseOpportunityApiResponse(raw: unknown): Opportunity {
 }
 
 export const opportunityApi = {
+  exportOpportunities: (payload: ListExportPayload<OpportunityExportTab>): Promise<Blob> =>
+    postListExport('/v1/opportunities/export', payload),
+
   getOpportunities: async (params?: OpportunityListParams): Promise<OpportunityListResponse[] | PaginatedResponse<OpportunityListResponse>> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
     const response = await request.get<OpportunityListResponse[] | PaginatedResponse<OpportunityListResponse>>(`/v1/opportunities/`, { params })

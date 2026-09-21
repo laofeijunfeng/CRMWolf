@@ -2,6 +2,9 @@ import request from '@/utils/request'
 import type { PaginatedResponse } from '@/types/pagination'
 import { OptionalNullableStringSchema, OptionalStringFromNullableSchema } from '@/schemas/common'
 import { z } from 'zod'
+import { postListExport, type ListExportPayload } from '@/api/listExport'
+
+export type ContractExportTab = 'all' | 'DRAFT' | 'PENDING_REVIEW' | 'SIGNED'
 
 export type LicenseType = 'SUBSCRIPTION' | 'PERPETUAL'
 export type PurchaseType = 'NEW' | 'RENEWAL' | 'EXPANSION'
@@ -286,6 +289,9 @@ const OwnerFilterOptionsResponseSchema = z.object({
 })
 
 const contractApi = {
+  exportContracts: (payload: ListExportPayload<ContractExportTab>): Promise<Blob> =>
+    postListExport('/v1/contracts/export', payload),
+
   createContract: async (payload: ContractCreateWithFile): Promise<ContractResponse> => {
     const formData = new FormData()
     formData.append('contract_payload', JSON.stringify(payload.data))

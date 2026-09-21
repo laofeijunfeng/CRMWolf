@@ -29,8 +29,12 @@ import StatusBadge from '@/components/StatusBadge.vue'
 import contractApi, {
   type ContractListResponse,
   type ContractQueryParams,
-  type OwnerFilterOption
+  type OwnerFilterOption,
+  type ContractExportTab,
 } from '@/api/contract'
+import { useDataTableExport } from '@/composables/useDataTableExport'
+import { buildDataTableExportFileName } from '@/utils/downloadBlob'
+import type { ListExportPayload } from '@/api/listExport'
 import approvalGenericApi from '@/api/approvalGeneric'
 import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
@@ -195,7 +199,8 @@ const fields = computed<ListFieldDefinition[]>(() => {
       })),
       column: { width: '100px' },
       filter: true,
-      sort: true
+      sort: true,
+      export: { key: 'owner', label: '负责人' },
     }
   ]
   return catalog
@@ -211,7 +216,37 @@ const canEditAllContract = computed(() => permissionStore.hasPermission('contrac
 const canEditOwnContract = computed(() => permissionStore.hasPermission('contract:edit:own'))
 const canDeleteAllContract = computed(() => permissionStore.hasPermission('contract:delete:all'))
 const canDeleteOwnContract = computed(() => permissionStore.hasPermission('contract:delete:own'))
+const canExportContracts = computed(() => permissionStore.hasPermission('contract:export'))
 
+interface ContractListExportContext {
+  tab: ContractExportTab
+  search: string | undefined
+  filters: ListFilterCondition[]
+  sorts: ListSortCondition[]
+}
+
+const currentContractListContext = (): ContractListExportContext => ({
+  tab: activeTab.value === 'DRAFT' || activeTab.value === 'PENDING_REVIEW' || activeTab.value === 'SIGNED' ? activeTab.value : 'all',
+  search: search.value.trim() || undefined,
+  filters: [...activeFilters.value],
+  sorts: [...activeSorts.value],
+})
+
+const { exportFields: exportContractFields } = useDataTableExport({
+  request: (fields) => {
+    const { tab, search, filters, sorts } = currentContractListContext()
+    const payload: ListExportPayload<ContractExportTab> = { fields, tab, filters, sorts }
+    if (search !== undefined) {
+      payload.search = search
+    }
+    return contractApi.exportContracts(payload)
+  },
+  fileName: () => buildDataTableExportFileName(
+    '合同列表',
+    tabs.find((tab) => tab.key === activeTab.value)?.label ?? '全部合同',
+    new Date(),
+  ),
+})
 // 行级权限检查函数
 const canEditRow = (row: ContractListResponse): boolean => {
   if (row['status'] !== 'DRAFT') return false
@@ -632,6 +667,9 @@ watchEffect(() => {
   <div class="contracts-page">
     <!-- DataTable -->
     <DataTable
+      :export-enabled="canExportContracts"
+      export-title="合同列表"
+      :export-handler="exportContractFields"
       :fields="fields"
       :data="tableData"
       :loading="loading"

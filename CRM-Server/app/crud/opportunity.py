@@ -1,8 +1,7 @@
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Query, Session, selectinload
 from sqlalchemy import and_, func, cast, Integer
 from typing import Optional, List, Tuple
 from datetime import date, datetime
-
 from app.models.opportunity import Opportunity, OpportunityProductModule, OpportunityStage, OpportunityStatus
 from app.models.customer import Customer
 from app.models.product import ProductModule
@@ -13,11 +12,12 @@ from app.utils.time import business_now
 from app.core.list_query import (
     FilterCondition,
     ListQueryContext,
-    SortCondition,
     apply_search,
+    build_optional_list_query,
+    SortCondition,
+    without_filter_field,
     paginate_optional_list_query,
     uses_unified_list_query,
-    without_filter_field,
 )
 from app.core.list_query.catalogs import OPPORTUNITIES_LIST_QUERY_CATALOG
 from app.schemas.opportunity import (
@@ -189,6 +189,43 @@ class OpportunityCRUD:
         opportunities = query.order_by(Opportunity.created_time.desc()).limit(limit).all()
 
         return opportunities
+
+
+    def build_list_query(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        status: Optional[str] = None,
+        owner_id: Optional[str] = None,
+        customer_id: Optional[int] = None,
+        search: Optional[str] = None,
+        filters: list[FilterCondition] | None = None,
+        sorts: list[SortCondition] | None = None,
+    ) -> "Query":
+        """Return the filtered, ordered opportunity query without count or pagination."""
+        query = self._query(db).filter(Opportunity.team_id == team_id)
+
+        effective_filters = filters
+        if status is not None:
+            status_values = _split_int_csv(status)
+            if status_values:
+                query = query.filter(Opportunity.status.in_(status_values))
+            effective_filters = without_filter_field(filters, "status")
+        if owner_id:
+            query = query.filter(Opportunity.owner_id.in_(_split_csv(owner_id)))
+        if customer_id is not None:
+            query = query.filter(Opportunity.customer_id == customer_id)
+
+        _, ordered = build_optional_list_query(
+            query,
+            OPPORTUNITIES_LIST_QUERY_CATALOG,
+            filters=effective_filters,
+            sorts=sorts,
+            context=ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id),
+            search=search,
+        )
+        return ordered.order_by(Opportunity.id.asc())
 
     def get_multi(
         self,
