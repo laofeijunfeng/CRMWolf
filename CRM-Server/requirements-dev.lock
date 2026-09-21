@@ -666,6 +666,10 @@ types-cffi==2.0.0.20260518 \
     --hash=sha256:5b68a215a95d0eac4203b58e766ff7fe40c2e091b1fa1a9e54111f04cc560084 \
     --hash=sha256:f9707e66c13454789a58f8843d1ded4a66f1e9c8b10bd24d5eb5e0f25c0c5472
     # via types-pyopenssl
+types-openpyxl==3.1.5.20260827 \
+    --hash=sha256:94e176d871d12e3cbc34f8fb03dc14db2a4245a6690791daf16fc7b08fd67869 \
+    --hash=sha256:be8b605fb99cfd7d5f5576d4a508e8ec44be2dd15b85157c559080de6384be34
+    # via -r requirements-dev.txt
 types-pyopenssl==24.1.0.20240722 \
     --hash=sha256:47913b4678a01d879f503a12044468221ed8576263c1540dcb0484ca21b08c39 \
     --hash=sha256:6a7a5d2ec042537934cfb4c9d4deb0e16c4c6250b09358df1f083682fe6fda54
