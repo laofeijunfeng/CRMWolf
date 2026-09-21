@@ -205,9 +205,9 @@ describe('DataTable frontend/backend list-query contract', () => {
       'ApprovalCenter.vue': '搜索单号、实体或提交人',
       'Contracts.vue': '搜索合同编号、合同名称、客户或商机',
       'CustomerTracking.vue': '搜索客户或跟进内容',
-      'Customers.vue': '搜索客户名称、简称或别名',
+      'Customers.vue': '搜索客户名称、简称、别名或产品',
       'Invoices.vue': '搜索申请编号、客户、合同、抬头、税号或发票号码',
-      'Leads.vue': '搜索线索名称、联系人或手机号',
+      'Leads.vue': '搜索线索名称、联系人、手机号或产品',
       'Opportunities.vue': '搜索商机名称、客户、产品或阶段',
       'PaymentPlans.vue': '搜索计划编号、客户、合同、商机或阶段',
       'PaymentRecords.vue': '搜索回款编号、客户、合同、阶段、付款方或发票抬头'
