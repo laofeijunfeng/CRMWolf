@@ -107,6 +107,7 @@
 
 ```ts
 export interface ListFieldExportConfig {
+  key?: string
   label?: string
 }
 
@@ -120,11 +121,12 @@ export interface ListFieldDefinition {
 
 投影规则：
 
-- 普通业务列默认可导出；
+- 普通业务列默认可导出，默认导出 key 与字段 key 相同；
 - `role: 'action'` 和 `role: 'decoration'` 默认不可导出；
 - 字段可通过 `export: false` 显式禁止导出；
+- `export: { key }` 可把表格字段映射到不暴露内部语义的服务端导出 key；
 - 无 `column` 但显式配置 `export: true` 或对象时，可作为导出专用字段；
-- `key === 'id'` 永远不可导出，字段注册表校验应直接拒绝；
+- 生效后的导出 key 为 `id`，或以 `_id` 结尾且不是 `public_id` / `*_public_id` 时，默认不可导出；显式启用则字段注册表校验直接拒绝；
 - 前端导出候选字段必须同时存在于对应服务端导出字段目录中。
 
 有 `public_id` 的资源增加导出专用字段：
@@ -139,36 +141,47 @@ export interface ListFieldDefinition {
 
 该字段没有 `column`，因此不会出现在 DataTable，也不会默认勾选。
 
-### 5.2 DataTable Props 与事件
+例如合同列表的表格字段继续使用 `owner_id` 对接现有筛选、排序和视图偏好，但导出字段必须使用安全别名：
+
+```ts
+{
+  key: 'owner_id',
+  label: '负责人',
+  column: true,
+  filter: true,
+  sort: true,
+  export: { key: 'owner', label: '负责人' }
+}
+```
+
+导出弹窗和服务端请求只看到 `owner`，不会暴露 `owner_id`。
+
+### 5.2 DataTable Props 与异步处理器
 
 新增合同：
 
 ```ts
 interface Props {
   exportEnabled?: boolean
-  exporting?: boolean
   exportTitle?: string
+  exportHandler?: (fieldKeys: string[]) => Promise<void>
 }
-
-const emit = defineEmits<{
-  export: [fieldKeys: string[]]
-}>()
 ```
 
 - `exportEnabled` 由页面结合独立权限决定；
-- `exporting` 由页面或共享导出 composable 管理；
 - `exportTitle` 用于弹窗说明和文件名，例如“客户列表”；
+- `exportHandler` 由页面的共享导出 composable 提供；组件等待 Promise，成功后关闭弹窗，失败时保持弹窗和字段选择；
 - 匹配条数直接使用 DataTable 已有 `total`；
-- DataTable 只负责字段选择和触发事件，不负责理解业务页签或拼装业务 API 参数。
+- DataTable 只负责字段选择和调用处理器，不负责理解业务页签或拼装业务 API 参数。
 
 ### 5.3 组件结构
 
 新增 `DataTableExportDialog.vue`：
 
 - 展示导出入口；
-- 管理弹窗开关和临时字段选择；
+- 管理弹窗开关、提交状态和临时字段选择；
 - 接收已投影的可见、隐藏和导出专用字段；
-- 发出选定字段 key；
+- 等待 `exportHandler(fieldKeys)`；成功后关闭，失败时保留当前弹窗状态；
 - 不读取 API、不生成 Excel、不保存偏好。
 
 `ListAdvancedTools.vue` 将它与排序、字段配置放在同一响应式工具目标中，使桌面直接展示、移动端自动进入“更多设置”。
@@ -285,23 +298,31 @@ Content-Disposition: attachment; filename*=UTF-8''...
 - 未传显式排序时使用现有列表默认排序；
 - 在业务排序之后追加稳定业务标识或内部主键排序，仅用于确定顺序，不导出该内部主键。
 
-现有列表端点普遍限制每页最多 100 条。导出不得调用列表 HTTP API 循环翻页，也不得对全部结果调用 `.all()` 一次性装入内存；应抽取并复用底层查询构造函数，使用 SQLAlchemy `yield_per` 配合 `stream_results` 批量读取并逐行写入 workbook。关联名称和枚举值的补全必须按批预取，禁止形成逐行 N+1 查询。
+现有列表端点普遍限制每页最多 100 条。导出不得调用列表 HTTP API 循环翻页，也不得对全部结果调用 `.all()` 一次性装入内存；应抽取并复用底层查询构造函数，使用 SQLAlchemy `yield_per` 配合 `stream_results` 批量读取并逐行写入 workbook。流式查询使用请求 Session，批量关联投影使用独立的短生命周期 Session，避免 MySQL/PyMySQL 在未消费完服务端游标时执行第二条语句；流式查询必须禁用 collection eager-load。关联名称和枚举值按 500 行批次预取，禁止逐行 N+1 查询。
 
 ## 9. 服务端导出字段目录
 
 新增受控的导出字段目录：
 
 ```py
+ExportRow = Mapping[str, object]
+
+
 @dataclass(frozen=True)
 class ListExportField:
     key: str
     label: str
     cell_type: Literal["text", "number", "date", "datetime", "currency"]
-    value_getter: Callable[[object], object]
+    value_getter: Callable[[ExportRow], object] | None = None
+
+    def value_from(self, row: ExportRow) -> object:
+        return self.value_getter(row) if self.value_getter is not None else row.get(self.key)
+
 
 @dataclass(frozen=True)
 class ListExportCatalog:
     resource: str
+    sheet_name: str
     fields: Sequence[ListExportField]
 ```
 
@@ -309,7 +330,7 @@ class ListExportCatalog:
 
 - 白名单校验请求字段；
 - 提供可信表头；
-- 从业务列表行读取用户可见值；
+- 从资源的批量投影行读取用户可见值，默认按 key 读取，特殊字段可提供 `value_getter`；
 - 定义 Excel 单元格类型和格式；
 - 明确禁止内部 ID。
 
@@ -403,9 +424,9 @@ approval:export
 | 场景 | 行为 |
 | --- | --- |
 | 无导出权限 | 服务端 `403`；前端正常情况下不显示入口 |
-| 未选择字段 | 前端阻止提交；服务端再次返回 `400` |
-| 请求未知或禁用字段 | 服务端 `400`，不忽略字段 |
-| 请求包含 `id` | 服务端 `400` |
+| 未选择字段 | 前端阻止提交；请求 schema 的 `min_length=1` 返回 `422` |
+| 请求包含重复、`id` 或其他不安全字段 | 请求 schema 返回 `422` |
+| 请求字段格式合法但不在资源导出目录 | 服务端目录校验返回 `400`，不忽略字段 |
 | 当前结果已变为空 | 返回包含表头、0 条数据的有效 Excel，与请求执行时的真实结果一致 |
 | Excel 生成失败 | 不返回部分文件；前端保留弹窗与选择并提示重试 |
 | 网络中断 | 取消下载，不生成损坏的本地文件 |
