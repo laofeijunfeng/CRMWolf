@@ -27,25 +27,28 @@ import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { ViewPreferenceConfig } from '@/api/viewPreference'
 import { confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
-import { opportunityApi, type Opportunity, type OpportunityListParams, type OpportunityListResponse, type OwnerFilterOption } from '@/api/opportunity'
+import { opportunityApi, type Opportunity, type OpportunityListParams, type OpportunityListResponse, type OwnerFilterOption, type OpportunityExportTab } from '@/api/opportunity'
+import { useDataTableExport } from '@/composables/useDataTableExport'
+import { buildDataTableExportFileName } from '@/utils/downloadBlob'
+import type { ListExportPayload } from '@/api/listExport'
 import procurementApi from '@/api/procurement'
 import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
-import { isOpportunityPublicId } from '@/utils/opportunityRoutes'
-import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
-import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
-import { customerDetailRoute } from '@/utils/customerRoutes'
 import { formatOpportunityModuleNames, formatOpportunityProductName, formatOpportunityProductSummary } from '@/utils/opportunityProduct'
+import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
 import { normalizePaginatedResponse } from '@/types/pagination'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
+import { customerDetailRoute } from '@/utils/customerRoutes'
+import { isOpportunityPublicId } from '@/utils/opportunityRoutes'
 import type { FormSuccessPayload } from '@/types/actionOutcome'
-import OpportunityDetailSheet from './OpportunityDetailSheet.vue'
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
 import OpportunityWinDialog from '@/components/dialogs/OpportunityWinDialog.vue'
 import OpportunityLoseDialog from '@/components/dialogs/OpportunityLoseDialog.vue'
+import OpportunityDetailSheet from './OpportunityDetailSheet.vue'
+import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 
 interface OpportunityDetailSheetExpose {
   refresh: () => Promise<boolean>
@@ -103,8 +106,9 @@ const tabs = [
   { key: 'lost', label: '已输单' }
 ]
 
-const activeTab = ref('all')
+const tabLabel = (key: string): string => tabs.find((tab) => tab.key === key)?.label ?? '全部商机'
 
+const activeTab = ref('all')
 const search = ref('')
 
 watch(activeTab, () => {
@@ -129,6 +133,7 @@ const purchaseTypeOptions = [
 
 const fields = computed<ListFieldDefinition[]>(() => {
   const catalog: ListFieldDefinition[] = [
+    { key: 'public_id', label: '业务 ID', type: 'text', export: true },
     { key: 'opportunity_name', label: '商机名称', type: 'text', column: { width: '220px' }, filter: true, sort: true },
     {
       key: 'owner',
@@ -235,6 +240,40 @@ const canDeleteOwnOpportunity = computed(() =>
   permissionStore.hasPermission('opportunity:delete:own')
 )
 
+const canExportOpportunities = computed(() =>
+  permissionStore.hasPermission('opportunity:export')
+)
+
+interface OpportunityListExportContext {
+  tab: OpportunityExportTab
+  search: string | undefined
+  filters: ListFilterCondition[]
+  sorts: ListSortCondition[]
+}
+
+const currentOpportunityListContext = (): OpportunityListExportContext => ({
+  tab: activeTab.value === 'active' || activeTab.value === 'won' || activeTab.value === 'lost' ? activeTab.value : 'all',
+  search: search.value.trim() || undefined,
+  filters: [...activeFilters.value],
+  sorts: [...activeSorts.value],
+})
+
+const { exportFields: exportOpportunityFields } = useDataTableExport({
+  request: (fields) => {
+    const { tab, search, filters, sorts } = currentOpportunityListContext()
+    const payload: ListExportPayload<OpportunityExportTab> = { fields, tab, filters, sorts }
+    if (search !== undefined) {
+      payload.search = search
+    }
+    return opportunityApi.exportOpportunities(payload)
+  },
+  fileName: () => buildDataTableExportFileName(
+    '商机列表',
+    activeTab.value === 'all' ? '全部商机' : tabLabel(activeTab.value),
+    new Date(),
+  ),
+})
+
 type ApprovalPhaseLike = OpportunityListResponse['approval_phase'] | string | null | undefined
 
 const normalizeApprovalPhase = (phase: ApprovalPhaseLike): string => {
@@ -264,11 +303,12 @@ const canDeleteRow = (row: OpportunityListResponse): boolean => {
   return false
 }
 
-const isApprovalApproved = (row: OpportunityListResponse): boolean => normalizeApprovalPhase(row.approval_phase) === 'approved'
 const isApprovalPending = (row: OpportunityListResponse): boolean => {
   const normalized = normalizeApprovalPhase(row.approval_phase)
   return normalized === 'pending_review' || normalized === 'pending'
 }
+
+const isApprovalApproved = (row: OpportunityListResponse): boolean => normalizeApprovalPhase(row.approval_phase) === 'approved'
 
 const getOpportunityStageName = (row: OpportunityListResponse): string => {
   return row.current_stage_snapshot?.stage_name
@@ -287,7 +327,6 @@ const getOpportunityProductName = (row: OpportunityListResponse): string =>
 const getOpportunityProductSummary = (row: OpportunityListResponse): string =>
   formatOpportunityProductSummary(row)
 
-// ==================== Methods ====================
 const fetchOwnerFilterOptions = async (): Promise<void> => {
   try {
     const response = await opportunityApi.getOwnerFilterOptions()
@@ -297,6 +336,7 @@ const fetchOwnerFilterOptions = async (): Promise<void> => {
   }
 }
 
+// ==================== Methods ====================
 const fetchOpportunities = async (): Promise<boolean> => {
   const requestId = ++listRequestId.value
   loadError.value = null
@@ -841,6 +881,9 @@ watchEffect(() => {
   <div class="opportunities-page">
     <!-- DataTable -->
     <DataTable
+      :export-enabled="canExportOpportunities"
+      export-title="商机列表"
+      :export-handler="exportOpportunityFields"
       :fields="fields"
       :data="tableData"
       :loading="loading"

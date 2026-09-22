@@ -1,4 +1,4 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Query, Session
 from sqlalchemy import and_, func
 from typing import Optional, List, Tuple
 from decimal import Decimal
@@ -20,6 +20,7 @@ from app.core.list_query import (
     ListQueryContext,
     SortCondition,
     apply_search,
+    build_optional_list_query,
     paginate_optional_list_query,
     uses_unified_list_query,
     without_filter_field,
@@ -165,6 +166,40 @@ class ContractCRUD:
             Contract.team_id == team_id,
             Contract.deleted_at.is_(None)
         ).first() is not None
+
+    def build_list_query(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        customer_id: Optional[int] = None,
+        status: Optional[str] = None,
+        owner_id: Optional[str] = None,
+        search: Optional[str] = None,
+        filters: list[FilterCondition] | None = None,
+        sorts: list[SortCondition] | None = None,
+    ) -> "Query":
+        """Return the filtered, ordered contract query without count or pagination."""
+        query = db.query(Contract).filter(Contract.team_id == team_id, Contract.deleted_at.is_(None))
+
+        effective_filters = filters
+        if customer_id:
+            query = query.filter(Contract.customer_id == customer_id)
+        if status:
+            query = query.filter(Contract.status.in_(_split_csv(status)))
+            effective_filters = without_filter_field(filters, "status")
+        if owner_id:
+            query = query.filter(Contract.owner_id.in_(_split_csv(owner_id)))
+
+        _, ordered = build_optional_list_query(
+            query,
+            CONTRACTS_LIST_QUERY_CATALOG,
+            filters=effective_filters,
+            sorts=sorts,
+            context=ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id),
+            search=search,
+        )
+        return ordered.order_by(Contract.id.asc())
 
     def get_multi(
         self,

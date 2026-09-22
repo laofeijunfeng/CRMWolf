@@ -1,7 +1,7 @@
 import request from '@/utils/request'
+import { postListExport, type ListExportPayload } from '@/api/listExport'
 import type { AcquisitionSourceInfo } from '@/schemas/acquisition-source'
 import type { PaginatedResponse } from '@/types/pagination'
-
 export type { AcquisitionSourceInfo }
 
 export interface OwnerInfo {
@@ -153,7 +153,11 @@ export interface LeadOwnerFilterOptionsResponse {
   data: LeadOwnerFilterOption[]
 }
 
+export type LeadExportTab = 'all' | 'public'
+
 export const leadApi = {
+  exportLeads: (payload: ListExportPayload<LeadExportTab>): Promise<Blob> =>
+    postListExport('/v1/leads/export', payload),
   createLead: (data: LeadCreate): Promise<Lead> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
     return request.post<Lead>('/v1/leads/', data)

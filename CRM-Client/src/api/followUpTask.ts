@@ -2,9 +2,11 @@
 import { z } from 'zod'
 import request, { type RequestConfig } from '@/utils/request'
 import type { CommandRequestOptions, CommandStatus } from '@/api/command'
+import { postListExport, type ListExportPayload } from '@/api/listExport'
 
 export type FollowUpTaskStatus = 'OPEN' | 'COMPLETED' | 'CANCELLED' | string
 export type FollowUpTaskStatusFilter = 'all' | 'open' | 'completed' | 'cancelled'
+export type FollowUpTaskExportTab = FollowUpTaskStatusFilter
 export type FollowUpTaskTransitionAction = 'complete' | 'cancel' | 'postpone'
 export type FollowUpTaskConfirmationAction = 'COMPLETE' | 'POSTPONE' | 'CANCEL' | 'KEEP_OPEN' | 'UNKNOWN'
 
@@ -104,6 +106,10 @@ export interface FollowUpTaskTransitionPayload {
 export const followUpTaskApi = {
   list(params: FollowUpTaskListParams = {}): Promise<FollowUpTaskListResponse> {
     return request.get<FollowUpTaskListResponse>('/v1/follow-up-tasks', { params })
+  },
+
+  exportFollowUpTasks(payload: ListExportPayload<FollowUpTaskExportTab>): Promise<Blob> {
+    return postListExport('/v1/follow-up-tasks/export', payload)
   },
 
   getDetail(taskId: string): Promise<FollowUpTaskItem> {

@@ -2,13 +2,14 @@ from datetime import date, datetime, time, timedelta
 from typing import Any, List, Optional, Tuple
 
 from sqlalchemy import and_, exists, or_
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Query, Session, selectinload
 from app.core.exceptions import ConflictException
 from app.core.list_query import (
     FilterCondition,
     ListQueryContext,
     SortCondition,
     apply_search,
+    build_optional_list_query,
     paginate_optional_list_query,
     uses_unified_list_query,
 )
@@ -104,6 +105,86 @@ class CustomerCRUD:
         if team_id is not None:
             query = query.filter(Customer.team_id == team_id)
         return query.first()
+
+    def build_list_query(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        owner_id: str | None,
+        scope: str | None,
+        current_user_id: str | None,
+        include_collaborated: bool,
+        search: str | None,
+        filters: list[FilterCondition] | None,
+        sorts: list[SortCondition] | None,
+    ) -> Query:
+        """Return the filtered, ordered customer query without count or pagination."""
+        query = db.query(Customer).options(
+            selectinload(Customer.product_links).selectinload(CustomerProduct.product)
+        ).filter(Customer.team_id == team_id)
+
+        current_user_id = str(current_user_id) if current_user_id is not None else None
+        if scope == "collaborated" and current_user_id:
+            query = query.filter(
+                db.query(CustomerMember.id)
+                .filter(
+                    CustomerMember.team_id == team_id,
+                    CustomerMember.customer_id == Customer.id,
+                    CustomerMember.user_id == current_user_id,
+                    CustomerMember.is_active == True,
+                )
+                .exists()
+            )
+        elif include_collaborated and current_user_id:
+            query = query.filter(
+                or_(
+                    Customer.owner_id == current_user_id,
+                    db.query(CustomerMember.id)
+                    .filter(
+                        CustomerMember.team_id == team_id,
+                        CustomerMember.customer_id == Customer.id,
+                        CustomerMember.user_id == current_user_id,
+                        CustomerMember.is_active == True,
+                    )
+                    .exists(),
+                )
+            )
+
+        if uses_unified_list_query(filters=filters, sorts=sorts):
+            if owner_id:
+                query = query.filter(Customer.owner_id.in_(_split_csv(owner_id)))
+            _, ordered = build_optional_list_query(
+                query,
+                CUSTOMERS_LIST_QUERY_CATALOG,
+                filters=filters,
+                sorts=sorts,
+                context=ListQueryContext(db=db, team_id=team_id, current_user_id=current_user_id),
+                search=search,
+            )
+            return ordered.order_by(Customer.id.asc())
+
+        return self._apply_legacy_filters_and_sort(query, owner_id=owner_id, search=search)
+
+    def _apply_legacy_filters_and_sort(
+        self,
+        query: Query,
+        *,
+        owner_id: str | None,
+        search: str | None,
+        created_time_start: Optional[date] = None,
+        created_time_end: Optional[date] = None,
+    ) -> Query:
+        """Legacy get_multi parameter branches; unified protocol bypasses this."""
+        query = apply_search(
+            query,
+            CUSTOMERS_LIST_QUERY_CATALOG,
+            search,
+            context=ListQueryContext(),
+        )
+        if owner_id:
+            query = query.filter(Customer.owner_id.in_(_split_csv(owner_id)))
+        return query
 
     def get_multi(
         self,
@@ -814,7 +895,28 @@ class CustomerCRUD:
             db.commit()
             db.refresh(locked_customer)
 
-        return locked_customer
+    def build_public_list_query(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        search: str | None,
+        filters: list[FilterCondition] | None,
+        sorts: list[SortCondition] | None,
+    ) -> Query:
+        """Return the filtered, ordered public-pool customer query without pagination."""
+        query = db.query(Customer).filter(Customer.team_id == team_id, Customer.owner_id.is_(None))
+
+        effective_sorts = sorts if sorts else [SortCondition(field="returned_time", direction="desc")]
+        _, ordered = build_optional_list_query(
+            query,
+            CUSTOMERS_LIST_QUERY_CATALOG,
+            filters=filters,
+            sorts=effective_sorts,
+            context=ListQueryContext(db=db, team_id=team_id),
+            search=search,
+        )
+        return ordered.order_by(Customer.id.asc())
 
     def get_public_customers(
         self,

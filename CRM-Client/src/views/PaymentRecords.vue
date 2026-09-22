@@ -31,16 +31,20 @@ import EditRecordDialog from '@/components/dialogs/EditRecordDialog.vue'
 import paymentApi, {
   type PaymentRecordWithDetails,
   type PaymentRecordListParams,
-  type PaymentRecordUpdate
+  type PaymentRecordUpdate,
+  type PaymentRecordExportTab,
 } from '@/api/payment'
+import { type ListExportPayload } from '@/api/listExport'
 import { usePermissionStore } from '@/stores/permissions'
 import { useApprovalStore } from '@/stores/approval'
 import { useHeaderStore } from '@/stores/header'
 import { useUserStore } from '@/stores/user'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
+import { useDataTableExport } from '@/composables/useDataTableExport'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
+import { buildDataTableExportFileName } from '@/utils/downloadBlob'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 
 // 自动从 route.meta.title 设置页面标题
@@ -144,6 +148,43 @@ const canEditAnyRecord = computed(() => permissionStore.hasAnyPermission(['payme
 const canDeleteRecord = computed(() =>
   permissionStore.hasAnyPermission(['payment:record:delete', 'payment:delete'])
 )
+const canExportRecords = computed(() => permissionStore.hasPermission('payment:record:export'))
+
+interface PaymentRecordListExportContext {
+  tab: PaymentRecordExportTab
+  search: string | undefined
+  filters: ListFilterCondition[]
+  sorts: ListSortCondition[]
+}
+
+const currentPaymentRecordListContext = (): PaymentRecordListExportContext => ({
+  tab: activeTab.value === 'pending_submit'
+    || activeTab.value === 'pending_approval'
+    || activeTab.value === 'rejected'
+    || activeTab.value === 'confirmed'
+    ? activeTab.value
+    : 'all',
+  search: search.value.trim() || undefined,
+  filters: [...activeFilters.value],
+  sorts: [...activeSorts.value],
+})
+
+const { exportFields: exportPaymentRecordFields } = useDataTableExport({
+  request: (fields) => {
+    const { tab, search, filters, sorts } = currentPaymentRecordListContext()
+    const payload: ListExportPayload<PaymentRecordExportTab> = { fields, tab, filters, sorts }
+    if (search !== undefined) {
+      payload.search = search
+    }
+    return paymentApi.exportPaymentRecords(payload)
+  },
+  fileName: () => buildDataTableExportFileName(
+    '回款记录列表',
+    tabs.find((tab) => tab.key === activeTab.value)?.label ?? '全部记录',
+    new Date(),
+  ),
+})
+
 
 const canEditRecordRow = (row: PaymentRecordWithDetails): boolean => {
   if (row.approval?.status === 'PENDING') return false
@@ -543,6 +584,9 @@ watchEffect(() => {
       v-model:filters="activeFilters"
       v-model:sorts="activeSorts"
       v-model:search="search"
+      :export-enabled="canExportRecords"
+      export-title="回款记录列表"
+      :export-handler="exportPaymentRecordFields"
       :fields="fields"
       :data="tableData"
       :loading="loading"

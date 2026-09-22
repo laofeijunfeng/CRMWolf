@@ -1,6 +1,10 @@
 /* eslint-disable crmwolf/require-zod-schema */
 import request from '@/utils/request'
 import { ApiResponseSchema } from '@/schemas/common'
+import { postListExport, type ListExportPayload } from '@/api/listExport'
+
+export type InvoiceExportTab = 'all' | 'pending' | 'approved' | 'invoiced'
+
 
 export type TitleType = 'COMPANY' | 'PERSONAL'
 
@@ -226,6 +230,9 @@ const DeleteResponseSchema = ApiResponseSchema<{ message: string }>()
 const InvoiceApplicationArraySchema = ApiResponseSchema<InvoiceApplicationResponse[]>()
 
 const invoiceApi = {
+  exportInvoiceApplications: (payload: ListExportPayload<InvoiceExportTab>): Promise<Blob> =>
+    postListExport('/v1/invoice-applications/export', payload),
+
   createInvoiceTitle: async (customerId: string, data: InvoiceTitleCreate): Promise<InvoiceTitleResponse> => {
     return InvoiceTitleResponseSchema.parse(await request.post<InvoiceTitleResponse>('/v1/invoice-titles', data, {
       params: { customer_id: customerId }

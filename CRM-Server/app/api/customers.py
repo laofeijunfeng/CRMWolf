@@ -1,11 +1,25 @@
 import logging
 from datetime import date
-from typing import List, Literal, Optional
+from typing import Iterator, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi.responses import FileResponse
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+
+from app.core.list_export import (
+    CUSTOMERS_LIST_EXPORT_CATALOG,
+    create_list_export_file,
+    iter_batches,
+    list_export_file_response,
+    run_list_export_or_400,
+)
+from app.core.list_query.license_status import classify_license_status
+from app.core.database import SessionLocal
+from app.schemas.list_export import CustomerListExportRequest
+from app.utils.time import business_now
+
 
 from app.api.invoices import _invoice_title_response, _populate_application_info
 from app.constants.operation_log_events import EventTypes
@@ -37,11 +51,12 @@ from app.crud.product_intent import (
     MISSING_PRODUCT_MESSAGE,
     ProductNotFoundError,
     product_intent_payload,
+    product_intent_payloads_by_owner,
 )
 from app.crud.team import team_crud
 from app.crud.user import user_crud
 from app.models.command_execution import CommandExecutionStatus
-from app.models.customer import Contact
+from app.models.customer import Contact, CustomerProduct, CustomerStatus
 from app.models.outbound_notification_job import OutboundNotificationEventType
 
 from app.schemas.command import CommandEffect, CommandNextAction, CommandResource
@@ -1477,7 +1492,22 @@ def get_customers(
         filters=parsed_filters,
         sorts=parsed_sorts,
     ))
-    
+
+    result = _build_customer_list_responses(db, customers, team_id)
+
+    page = skip // limit + 1
+    total_pages = (total + limit - 1) // limit if total > 0 else 0
+    return PaginatedResponse[CustomerListResponse](
+        items=result,
+        total=total,
+        page=page,
+        page_size=limit,
+        total_pages=total_pages
+    )
+
+
+def _build_customer_list_responses(db: Session, customers: List, team_id: int) -> List[CustomerListResponse]:
+    """Batch-project customer ORM rows into list responses with display info."""
     result = []
     owner_ids = set(c.owner_id for c in customers if c.owner_id)
     creator_ids = set(c.creator_id for c in customers if c.creator_id)
@@ -1485,7 +1515,7 @@ def get_customers(
     source_lead_ids = [c.source_lead_id for c in customers if c.source_lead_id]
     source_map = map_sources_by_ids(db, team_id, [c.source_id for c in customers])
     procurement_method_ids = set(c.default_procurement_method_id for c in customers if c.default_procurement_method_id)
-    
+
     users_info = {}
     if owner_ids or creator_ids:
         all_user_ids = owner_ids.union(creator_ids)
@@ -1560,7 +1590,7 @@ def get_customers(
         params = {f'lead_id_{i}': lead_id for i, lead_id in enumerate(source_lead_ids)}
         source_leads_result = db.execute(source_leads_query, params).fetchall()
         source_lead_public_ids = {row[0]: row[1] for row in source_leads_result}
-    
+
     procurement_methods_info = {}
     if procurement_method_ids:
         from app.models.procurement import ProcurementMethod
@@ -1574,7 +1604,7 @@ def get_customers(
                 'name': m.name,
                 'is_active': m.is_active
             }
-    
+
     industries_info = {}
     industry_values = set()
     for customer in customers:
@@ -1602,7 +1632,15 @@ def get_customers(
                 'primary_name': industry.parent.name if industry.parent else None,
                 'secondary_name': industry.name if industry.level == 2 else None
             }
-    
+    product_payloads = product_intent_payloads_by_owner(
+        db,
+        link_model=CustomerProduct,
+        owner_fk="customer_id",
+        owner_ids=customer_ids,
+    )
+    empty_product_payload = product_intent_payload([])
+
+
     for customer in customers:
         customer_dict = {
             'id': customer.public_id,
@@ -1630,19 +1668,137 @@ def get_customers(
             'collaborator_infos': collaborators_by_customer.get(customer.id, []),
             'creator_info': users_info.get(customer.creator_id) if customer.creator_id else None,
             'default_procurement_method_info': procurement_methods_info.get(customer.default_procurement_method_id) if customer.default_procurement_method_id else None,
-            **product_intent_payload(customer.product_links),
+            **product_payloads.get(customer.id, empty_product_payload),
         }
         result.append(CustomerListResponse(**customer_dict))
-    
-    page = skip // limit + 1
-    total_pages = (total + limit - 1) // limit if total > 0 else 0
-    return PaginatedResponse[CustomerListResponse](
-        items=result,
-        total=total,
-        page=page,
-        page_size=limit,
-        total_pages=total_pages
+
+    return result
+
+
+CUSTOMER_STATUS_LABELS = {
+    CustomerStatus.FOLLOWING: "跟进中",
+    CustomerStatus.WON: "已成交",
+    CustomerStatus.LOST: "已流失",
+    CustomerStatus.INACTIVE: "非激活",
+}
+
+LICENSE_STATUS_LABELS = {
+    "none": "未授权",
+    "expired": "已过期",
+    "trial": "试用",
+    "official": "正式",
+}
+
+
+def customer_license_status_label(item: CustomerListResponse) -> str:
+    status = classify_license_status(item.license_expiry_date, item.license_type, business_now().date())
+    return LICENSE_STATUS_LABELS[status]
+
+
+def _customer_export_row(item: CustomerListResponse) -> dict[str, object]:
+    return {
+        "public_id": item.public_id,
+        "account_name": item.account_name,
+        "owner": item.owner_info.name if item.owner_info else None,
+        "collaborators": "、".join(user.name for user in item.collaborator_infos or []),
+        "city": item.city,
+        "company_scale": item.company_scale,
+        "status": CUSTOMER_STATUS_LABELS[CustomerStatus(item.status)],
+        "license_status": customer_license_status_label(item),
+        "license_expiry_date": item.license_expiry_date,
+        "default_procurement_method": item.default_procurement_method_info.name if item.default_procurement_method_info else None,
+        "industry": item.industry_info.name if item.industry_info else None,
+        "source": item.source_info.name if item.source_info else item.source,
+        "product_name": item.product_name,
+        "creator": item.creator_info.name if item.creator_info else None,
+        "created_time": item.created_time,
+    }
+
+
+def _customer_export_file_stem(tab: str) -> str:
+    return "客户列表-公海客户" if tab == "public" else "客户列表-全部客户"
+
+
+def _resolve_customer_export_query(
+    request: CustomerListExportRequest,
+    team_id: int,
+    current_user,
+    db: Session,
+):
+    from app.crud.permission import permission_crud
+
+    permission_codes = {
+        p.code
+        for p in permission_crud.get_user_permissions(db, current_user.id, team_id)
+    }
+    has_view_all = "customer:view:all" in permission_codes
+
+    owner_id = enforce_owner_view_scope(
+        request.filters,
+        current_user_id=str(current_user.id),
+        has_view_all=has_view_all,
+        permission_detail="只能查看自己负责的客户，或需要 customer:view:all 权限查看他人数据",
+        default_to_self=request.tab not in {"collaborated"},
     )
+
+    if request.tab == "public":
+        return customer_crud.build_public_list_query(
+            db,
+            team_id=team_id,
+            search=request.search,
+            filters=request.filters,
+            sorts=request.sorts,
+        )
+
+    return customer_crud.build_list_query(
+        db,
+        team_id=team_id,
+        owner_id=owner_id,
+        scope=request.tab if request.tab in {"collaborated", "accessible"} else None,
+        current_user_id=str(current_user.id),
+        include_collaborated=request.tab == "accessible" and not has_view_all,
+        search=request.search,
+        filters=request.filters,
+        sorts=request.sorts,
+    )
+
+
+def _iter_customer_export_rows(
+    stream,
+    team_id: int,
+    projection_session_factory=SessionLocal,
+) -> Iterator[dict[str, object]]:
+    for batch in iter_batches(stream, 500):
+        projection_db = projection_session_factory()
+        try:
+            for item in _build_customer_list_responses(projection_db, batch, team_id):
+                yield _customer_export_row(item)
+        finally:
+            projection_db.close()
+
+
+@router.post(
+    "/export",
+    dependencies=[Depends(require_permission("customer:export"))],
+    summary="导出客户列表",
+    description="按当前筛选条件导出全部匹配客户为 Excel",
+)
+def export_customers(
+    request: CustomerListExportRequest,
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    query = run_or_400(lambda: _resolve_customer_export_query(request, team_id, current_user, db))
+    stream = query.enable_eagerloads(False).execution_options(stream_results=True).yield_per(500)
+    rows = _iter_customer_export_rows(stream, team_id, projection_session_factory=SessionLocal)
+    generated = run_list_export_or_400(lambda: create_list_export_file(
+        catalog=CUSTOMERS_LIST_EXPORT_CATALOG,
+        selected_keys=request.fields,
+        rows=rows,
+        file_stem=_customer_export_file_stem(request.tab),
+    ))
+    return list_export_file_response(generated)
 
 
 @router.get(

@@ -33,10 +33,11 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import ListFilterPopover from './ListFilterPopover.vue'
 import ListAdvancedTools from './ListAdvancedTools.vue'
+import type { DataTableExportDialogField } from './DataTableExportDialog.vue'
 import ListViewStateSummary from './ListViewStateSummary.vue'
+import { viewPreferenceApi, type ViewDisplayMode, type ViewPreferenceConfig, type ViewPreferenceScope } from '@/api/viewPreference'
 import DataTableSearch from './DataTableSearch.vue'
 import SelectField from './SelectField.vue'
-import { viewPreferenceApi, type ViewDisplayMode, type ViewPreferenceConfig, type ViewPreferenceScope } from '@/api/viewPreference'
 import type { ColumnConfigOption } from './columnConfigTypes'
 import type { ListFilterCondition } from './listFilterTypes'
 import { buildFilterSummaryItems, buildSortSummaryItems, countHiddenColumns } from './listViewState'
@@ -169,6 +170,12 @@ interface Props {
   canSaveCurrentView?: boolean
   /** 当前视图另存中 */
   viewSaveLoading?: boolean
+  /** 是否启用导出；由页面结合独立导出权限决定 */
+  exportEnabled?: boolean
+  /** 导出弹窗标题与文件名前缀 */
+  exportTitle?: string
+  /** 异步导出处理器；组件等待 Promise，成功后关闭弹窗，失败时保留弹窗与已选字段 */
+  exportHandler?: (fieldKeys: string[]) => Promise<void>
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -212,6 +219,9 @@ const props = withDefaults(defineProps<Props>(), {
   viewConfigPanelTitle: '字段配置',
   canSaveCurrentView: false,
   viewSaveLoading: false,
+  exportEnabled: false,
+  exportTitle: '列表',
+  exportHandler: undefined,
   searchEnabled: false,
   search: '',
   searchPlaceholder: '',
@@ -343,6 +353,7 @@ const hasAdvancedTools = computed(() =>
   || isColumnConfigAvailable.value
   || props.viewDisplayModeEnabled
   || props.canSaveCurrentView
+  || exportAvailable.value
 )
 const hasTableTools = computed(() =>
   props.searchEnabled || normalizedFilterFields.value.length > 0 || hasAdvancedTools.value
@@ -471,6 +482,22 @@ const columnConfigActiveCount = computed(() => {
 const columnConfigActive = computed(() =>
   isColumnConfigAvailable.value && (effectiveColumnPreferenceConfig.value?.columns.length ?? 0) > 0
 )
+
+const exportDialogFields = computed<DataTableExportDialogField[]>(() => {
+  const exportByFieldKey = new Map(
+    projectedFields.value.exportFields.map((field) => [field.fieldKey, field]),
+  )
+  const columnSourced = preferredColumns.value.flatMap((column) => {
+    const field = exportByFieldKey.get(column.key)
+    if (field === undefined || field.source !== 'column') return []
+    return [{ ...field, visible: column.visible !== false }]
+  })
+  const exportOnly = projectedFields.value.exportFields
+    .filter((field) => field.source === 'export-only')
+    .map((field) => ({ ...field, visible: false }))
+  return [...columnSourced, ...exportOnly]
+})
+const exportAvailable = computed(() => props.exportEnabled && props.exportHandler !== undefined)
 
 const dataColumns = computed(() => processedColumns.value.filter((col) => col.key !== 'actions'))
 const fallbackTitleColumn = computed(() =>
@@ -1044,6 +1071,11 @@ onBeforeUnmount(() => {
           :view-config-panel-title="props.viewConfigPanelTitle"
           :can-save-current-view="props.canSaveCurrentView"
           :view-save-loading="props.viewSaveLoading"
+          :export-fields="exportDialogFields"
+          :export-enabled="exportAvailable"
+          :export-title="props.exportTitle"
+          :export-total="total"
+          :export-handler="props.exportHandler"
           @update:sorts="handleSortUpdate"
           @sort-apply="handleSortApply"
           @sort-reset="handleSortReset"

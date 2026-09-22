@@ -6,6 +6,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import TableToolbarButton from './TableToolbarButton.vue'
 import ListSortPopover from './ListSortPopover.vue'
 import ColumnConfigPopover from './ColumnConfigPopover.vue'
+import DataTableExportDialog, { type DataTableExportDialogField } from './DataTableExportDialog.vue'
 import type { ViewDisplayMode, ViewPreferenceScope } from '@/api/viewPreference'
 import type { ColumnConfigOption } from './columnConfigTypes'
 import type { ListSortCondition, ListSortField } from './listSortTypes'
@@ -27,6 +28,11 @@ const props = withDefaults(defineProps<{
   viewConfigPanelTitle?: string
   canSaveCurrentView?: boolean
   viewSaveLoading?: boolean
+  exportFields?: DataTableExportDialogField[]
+  exportEnabled?: boolean
+  exportTitle?: string
+  exportTotal?: number
+  exportHandler?: (fieldKeys: string[]) => Promise<void>
 }>(), {
   viewDisplayMode: null,
   viewDisplayModeEnabled: false,
@@ -34,6 +40,11 @@ const props = withDefaults(defineProps<{
   viewConfigPanelTitle: '字段配置',
   canSaveCurrentView: false,
   viewSaveLoading: false,
+  exportFields: () => [],
+  exportEnabled: false,
+  exportTitle: '列表',
+  exportTotal: 0,
+  exportHandler: undefined,
 })
 
 const emit = defineEmits<{
@@ -81,7 +92,6 @@ function handleSortOpenChange(open: boolean): void {
   if (!open && preserveChildOpenDuringMove.value) return
   sortOpen.value = open
 }
-
 function handleColumnConfigOpenChange(open: boolean): void {
   if (!open && preserveChildOpenDuringMove.value) return
   columnConfigOpen.value = open
@@ -173,6 +183,14 @@ watch(isCompactToolbar, async (compact) => {
       @reset="emit('column-config-reset')"
       @update:view-display-mode="emit('update:view-display-mode', $event)"
       @save-current-view="emit('save-current-view')"
+    />
+
+    <DataTableExportDialog
+      v-if="exportEnabled && exportHandler !== undefined"
+      :fields="exportFields"
+      :total="exportTotal"
+      :title="exportTitle"
+      :export-handler="exportHandler"
     />
   </Teleport>
 </template>

@@ -210,6 +210,17 @@ ALL_PERMISSIONS = [
     {"name": "查看财务审计日志", "code": "finance:audit:view", "resource": "finance", "action": "audit", "scope": "view"},
     {"name": "查看应收账款", "code": "finance:receivables:view", "resource": "finance", "action": "receivables", "scope": "view"},
     {"name": "查看财务报表", "code": "finance:reports:view", "resource": "finance", "action": "reports", "scope": "view"},
+
+    # DataTable 导出权限（独立权限，默认仅 TEAM_ADMIN 拥有）
+    {"name": "导出客户", "code": "customer:export", "resource": "customer", "action": "export"},
+    {"name": "导出客户追踪", "code": "follow_up_task:export", "resource": "follow_up_task", "action": "export"},
+    {"name": "导出线索", "code": "lead:export", "resource": "lead", "action": "export"},
+    {"name": "导出商机", "code": "opportunity:export", "resource": "opportunity", "action": "export"},
+    {"name": "导出合同", "code": "contract:export", "resource": "contract", "action": "export"},
+    {"name": "导出回款计划", "code": "payment:plan:export", "resource": "payment_plan", "action": "export"},
+    {"name": "导出回款记录", "code": "payment:record:export", "resource": "payment_record", "action": "export"},
+    {"name": "导出发票", "code": "invoice:export", "resource": "invoice", "action": "export"},
+    {"name": "导出审批", "code": "approval:export", "resource": "approval", "action": "export"},
 ]
 
 # 角色定义

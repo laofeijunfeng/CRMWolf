@@ -26,6 +26,18 @@ from app.core.deps import (
 from app.crud.customer import customer_crud
 from app.crud.deal_journey import deal_journey_crud
 from app.crud.opportunity import opportunity_crud
+from app.models.approval import ApprovalStatus
+from app.core.list_export import (
+    OPPORTUNITIES_LIST_EXPORT_CATALOG,
+    create_list_export_file,
+    iter_batches,
+    list_export_file_response,
+    run_list_export_or_400,
+)
+from app.core.database import SessionLocal
+from app.schemas.list_export import OpportunityListExportRequest
+from fastapi.responses import FileResponse
+from typing import Iterator
 from app.schemas.common import PaginatedResponse
 from app.schemas.opportunity import (
     MessageResponse,
@@ -50,17 +62,32 @@ from app.services.customer_business_object_intelligence_service import (
 from app.models.outbound_notification_job import OutboundNotificationEventType
 from app.services.outbound_notification_job_service import outbound_notification_job_service
 from app.services.opportunity_presenter import (
+    customer_info_dict as _customer_info_dict,
     customer_public_id as _customer_public_id,
     deal_journey_public_id as _deal_journey_public_id,
     deal_journey_public_id_map as _deal_journey_public_id_map,
     opportunity_detail_response,
     opportunity_product_payload as _opportunity_product_payload,
+    opportunity_product_payloads as _opportunity_product_payloads,
     opportunity_response_dict as _opportunity_response_dict,
     resolve_opportunity_approval_phase as _resolve_opportunity_approval_phase,
 )
 from app.utils.public_id import is_deal_journey_public_id
 
 router = APIRouter(prefix="/v1/opportunities", tags=["商机管理"])
+
+
+OPPORTUNITY_STATUS_LABELS = {0: "跟进中", 1: "已赢单", 2: "已输单"}
+LICENSE_TYPE_LABELS = {"SUBSCRIPTION": "订阅", "PERPETUAL": "买断"}
+PURCHASE_TYPE_LABELS = {"NEW": "新购", "RENEWAL": "续购", "EXPANSION": "增购"}
+APPROVAL_PHASE_LABELS = {
+    "draft": "待提交",
+    "pending_review": "审批中",
+    "pending": "审批中",
+    "approved": "已通过",
+    "rejected": "已拒绝",
+}
+
 
 
 def _ensure_opportunity_not_pending(db: Session, opportunity, team_id: Optional[int]) -> None:
@@ -77,6 +104,8 @@ def _ensure_opportunity_approved(db: Session, opportunity, team_id: Optional[int
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="商机审批通过后才能进行该操作"
         )
+
+
 
 
 def _build_opportunity_intelligence_change(
@@ -102,6 +131,8 @@ async def _trigger_opportunity_intelligence_refresh(
     change: CustomerBusinessObjectChangeRefreshInput,
 ) -> None:
     customer_business_object_intelligence_service.enqueue_change_refresh_after_commit(change)
+
+
 
 
 @router.post("/", response_model=OpportunityResponse, status_code=status.HTTP_201_CREATED, summary="创建商机", description="为指定客户创建商机")
@@ -347,8 +378,190 @@ def get_opportunities(
     )
 
 
+def _build_opportunity_list_responses(projection_db, opportunities, team_id: int) -> List[OpportunityListResponse]:
+    """Batch-project opportunity ORM rows into list responses with display info."""
+    from sqlalchemy import text
+
+    result = []
+    journey_public_ids = _deal_journey_public_id_map(
+        projection_db,
+        team_id=team_id,
+        journey_ids=[opp.deal_journey_id for opp in opportunities],
+    )
+    owner_ids = {int(opp.owner_id) for opp in opportunities if opp.owner_id}
+    users_info = {}
+    if owner_ids:
+        placeholders = ','.join(f':owner_{i}' for i in range(len(owner_ids)))
+        rows = projection_db.execute(text(f"""
+            SELECT id, name, avatar_url FROM users WHERE id IN ({placeholders})
+        """), {f'owner_{i}': uid for i, uid in enumerate(owner_ids)}).fetchall()
+        users_info = {str(row[0]): {"id": str(row[0]), "name": row[1], "avatar_url": row[2]} for row in rows}
+
+    snapshot_ids = {opp.current_stage_snapshot_id for opp in opportunities if opp.current_stage_snapshot_id}
+    snapshots = {}
+    if snapshot_ids:
+        placeholders = ','.join(f':snap_{i}' for i in range(len(snapshot_ids)))
+        rows = projection_db.execute(text(f"""
+            SELECT id, stage_name, win_probability, template_sort_order
+            FROM crm_opportunity_stage_snapshots WHERE id IN ({placeholders})
+        """), {f'snap_{i}': sid for i, sid in enumerate(snapshot_ids)}).fetchall()
+        snapshots = {row[0]: row for row in rows}
+
+    customer_ids = {opp.customer_id for opp in opportunities if opp.customer_id}
+    customers = {}
+    if customer_ids:
+        from app.models.customer import Customer
+
+        customers_list = (
+            projection_db.query(Customer)
+            .filter(Customer.team_id == team_id, Customer.id.in_(customer_ids))
+            .all()
+        )
+        customers = {c.id: c for c in customers_list}
+    product_payloads = _opportunity_product_payloads(projection_db, opportunities)
+    empty_product_payload = _opportunity_product_payload(None)
+
+
+    for opp in opportunities:
+        customer = customers.get(opp.customer_id)
+        snapshot_data = snapshots.get(opp.current_stage_snapshot_id) if opp.current_stage_snapshot_id else None
+        stage = None
+        stage_info = None
+        if snapshot_data:
+            stage = {
+                "id": snapshot_data[0],
+                "stage_code": "",
+                "stage_name": snapshot_data[1],
+                "win_probability": snapshot_data[2],
+                "sort_order": snapshot_data[3],
+                "description": None,
+                "is_active": 1,
+                "created_time": opp.created_time,
+                "last_modified_time": opp.last_modified_time
+            }
+            stage_info = {
+                "id": snapshot_data[0],
+                "stage_name": snapshot_data[1],
+                "win_probability": snapshot_data[2],
+                "is_default": 0,
+            }
+
+        opp_dict = {
+            "id": opp.public_id,
+            "public_id": opp.public_id,
+            "deal_journey_id": journey_public_ids.get(opp.deal_journey_id) if opp.deal_journey_id else None,
+            "opportunity_number": opp.opportunity_number,
+            "opportunity_name": opp.opportunity_name,
+            "customer_id": customer.public_id if customer else None,
+            "total_amount": float(opp.total_amount),
+            "user_count": opp.user_count,
+            "unit_price": float(opp.unit_price),
+            "license_type": opp.license_type,
+            "subscription_years": opp.subscription_years,
+            "purchase_type": opp.purchase_type,
+            "decision_maker_count": opp.decision_maker_count,
+            "expected_closing_date": opp.expected_closing_date,
+            "stage_id": opp.procurement_stage_id,
+            "win_probability": opp.win_probability,
+            "owner_id": opp.owner_id,
+            "status": opp.status,
+            "approval_phase": _resolve_opportunity_approval_phase(projection_db, opp, team_id),
+            "loss_reason": opp.loss_reason,
+            "actual_amount": float(opp.actual_amount) if opp.actual_amount else None,
+            "actual_closing_date": opp.actual_closing_date,
+            "creator_id": opp.creator_id,
+            "created_time": opp.created_time,
+            "last_modified_time": opp.last_modified_time,
+            "version": opp.version,
+            "customer_name": customer.account_name if customer else None,
+            "stage": stage,
+            "stage_info": stage_info,
+            "owner_info": users_info.get(str(opp.owner_id)),
+        }
+        opp_dict.update(product_payloads.get(opp.id, empty_product_payload))
+        result.append(OpportunityListResponse(**opp_dict))
+
+    return result
+
+
+def _opportunity_export_row(item: OpportunityListResponse) -> dict[str, object]:
+    return {
+        "public_id": item.public_id,
+        "opportunity_name": item.opportunity_name,
+        "owner": item.owner_info.name if item.owner_info else None,
+        "customer_name": item.customer_name,
+        "product_name": item.product_name,
+        "total_amount": item.total_amount,
+        "user_count": item.user_count,
+        "license_type": LICENSE_TYPE_LABELS.get(item.license_type, item.license_type),
+        "purchase_type": PURCHASE_TYPE_LABELS.get(item.purchase_type, item.purchase_type),
+        "expected_closing_date": item.expected_closing_date,
+        "stage": item.stage.stage_name if item.stage else None,
+        "win_probability": item.win_probability,
+        "status": OPPORTUNITY_STATUS_LABELS.get(item.status, str(item.status)),
+        "approval_phase": APPROVAL_PHASE_LABELS.get(item.approval_phase, item.approval_phase) if item.approval_phase else None,
+        "created_time": item.created_time,
+    }
+
+
+def _iter_opportunity_export_rows(stream, team_id: int, projection_session_factory=SessionLocal) -> Iterator[dict[str, object]]:
+    for batch in iter_batches(stream, 500):
+        projection_db = projection_session_factory()
+        try:
+            for item in _build_opportunity_list_responses(projection_db, batch, team_id):
+                yield _opportunity_export_row(item)
+        finally:
+            projection_db.close()
+
+
+@router.post(
+    "/export",
+    dependencies=[Depends(require_permission("opportunity:export"))],
+    summary="导出商机列表",
+    description="按当前筛选条件导出全部匹配商机为 Excel",
+)
+def export_opportunities(
+    request: OpportunityListExportRequest,
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    from app.crud.permission import permission_crud
+
+    permission_codes = {
+        p.code
+        for p in permission_crud.get_user_permissions(db, current_user.id, team_id)
+    }
+    has_view_all = "opportunity:view:all" in permission_codes
+    owner_id = enforce_owner_view_scope(
+        request.filters,
+        current_user_id=str(current_user.id),
+        has_view_all=has_view_all,
+        permission_detail="只能查看自己负责的商机，或需要 opportunity:view:all 权限查看他人数据",
+    )
+
+    status_value = {"active": "0", "won": "1", "lost": "2"}.get(request.tab)
+    query = run_or_400(lambda: opportunity_crud.build_list_query(
+        db,
+        team_id=team_id,
+        status=status_value,
+        owner_id=owner_id,
+        search=request.search,
+        filters=request.filters,
+        sorts=request.sorts,
+    ))
+    stream = query.enable_eagerloads(False).execution_options(stream_results=True).yield_per(500)
+    rows = _iter_opportunity_export_rows(stream, team_id, projection_session_factory=SessionLocal)
+    generated = run_list_export_or_400(lambda: create_list_export_file(
+        catalog=OPPORTUNITIES_LIST_EXPORT_CATALOG,
+        selected_keys=request.fields,
+        rows=rows,
+        file_stem="商机列表-全部商机" if request.tab == "all" else f"商机列表-{OPPORTUNITY_STATUS_LABELS[int(status_value)]}",
+    ))
+    return list_export_file_response(generated)
+
+
 @router.get("/available-for-contract", response_model=List[OpportunityListResponse], summary="获取可创建合同的商机列表", description="""
-获取指定客户的可创建合同的商机列表，只返回"已赢单"且"未创建合同"的商机。
 
 **功能说明：**
 - 获取客户可创建合同的商机
@@ -471,6 +684,8 @@ def get_opportunity(
 ):
     opportunity = check_opportunity_view_permission(opportunity_id, team_id, current_user, db)
     return opportunity_detail_response(db, opportunity, team_id)
+
+
 
 
 @router.get("/{opportunity_id}/procurement-stages", response_model=List[OpportunityProcurementStageInfo], summary="获取商机采购阶段", description="获取商机对应的采购方式的所有阶段，标注当前商机的阶段")

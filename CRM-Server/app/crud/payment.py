@@ -1,4 +1,4 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Query, Session
 from sqlalchemy import and_, or_, func, text, case, cast, Integer, inspect
 from sqlalchemy.orm import contains_eager, joinedload
 from typing import Any, Dict, Optional, List, Tuple
@@ -22,7 +22,7 @@ from app.core.list_query import (
     ListQueryContext,
     SortCondition,
     apply_search,
-    paginate_optional_list_query,
+    build_optional_list_query,
     uses_unified_list_query,
     without_filter_field,
 )
@@ -96,6 +96,67 @@ class PaymentPlanCRUD:
 
         return plans, total
 
+    def _base_plans_query(self, db: Session, team_id: int):
+        from app.models.contract import Contract
+        from app.models.customer import Customer
+        from app.models.opportunity import Opportunity
+
+        return (
+            db.query(PaymentPlan)
+            .join(
+                Contract,
+                and_(PaymentPlan.contract_id == Contract.id, Contract.team_id == team_id),
+            )
+            .outerjoin(
+                Customer,
+                and_(Contract.customer_id == Customer.id, Customer.team_id == team_id),
+            )
+            .outerjoin(
+                Opportunity,
+                and_(Contract.opportunity_id == Opportunity.id, Opportunity.team_id == team_id),
+            )
+            .options(
+                contains_eager(PaymentPlan.contract).contains_eager(Contract.customer),
+                contains_eager(PaymentPlan.contract).contains_eager(Contract.opportunity),
+            )
+            .filter(PaymentPlan.team_id == team_id)
+        )
+
+    def build_list_query(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        status: str | None,
+        current_user_id: str | None,
+        search: str | None,
+        filters: list[FilterCondition],
+        sorts: list[SortCondition],
+    ) -> Query:
+        """Return ordered payment plans without pagination."""
+        from app.models.contract import Contract
+
+        plans_query = self._base_plans_query(db, team_id)
+        if status:
+            plans_query = plans_query.filter(PaymentPlan.status.in_(_split_csv(status)))
+        if current_user_id:
+            plans_query = plans_query.filter(Contract.owner_id == current_user_id)
+
+        effective_filters = without_filter_field(filters, "status") if status else filters
+        _, ordered = build_optional_list_query(
+            plans_query,
+            PAYMENT_PLANS_LIST_QUERY_CATALOG,
+            filters=effective_filters,
+            sorts=sorts,
+            context=ListQueryContext(
+                db=db,
+                team_id=team_id,
+                current_user_id=current_user_id,
+            ),
+            search=search,
+        )
+        return ordered.order_by(PaymentPlan.id.asc())
+
     def list_plans(
         self,
         db: Session,
@@ -120,28 +181,21 @@ class PaymentPlanCRUD:
         from app.models.customer import Customer
         from app.models.opportunity import Opportunity
 
-        plans_query = (
-            db.query(PaymentPlan)
-            .join(
-                Contract,
-                and_(PaymentPlan.contract_id == Contract.id, Contract.team_id == team_id),
+        if uses_unified_list_query(filters=filters, sorts=sorts):
+            query = self.build_list_query(
+                db,
+                team_id=team_id,
+                status=status,
+                current_user_id=current_user_id,
+                search=search,
+                filters=filters or [],
+                sorts=sorts or [],
             )
-            .outerjoin(
-                Customer,
-                and_(Contract.customer_id == Customer.id, Customer.team_id == team_id),
-            )
-            .outerjoin(
-                Opportunity,
-                and_(Contract.opportunity_id == Opportunity.id, Opportunity.team_id == team_id),
-            )
-            .options(
-                contains_eager(PaymentPlan.contract).contains_eager(Contract.customer),
-                contains_eager(PaymentPlan.contract).contains_eager(Contract.opportunity),
-            )
-            .filter(PaymentPlan.team_id == team_id)
-        )
+            total = query.order_by(None).count()
+            return query.offset(skip).limit(limit).all(), total
 
-        # 页签状态与数据范围属于固定 scope；显式统一协议下其余旧参数不再混入。
+        plans_query = self._base_plans_query(db, team_id)
+
         if status:
             plans_query = plans_query.filter(PaymentPlan.status.in_(_split_csv(status)))
         if current_user_id:
@@ -158,19 +212,6 @@ class PaymentPlanCRUD:
             search,
             context=list_context,
         )
-
-        if uses_unified_list_query(filters=filters, sorts=sorts):
-            effective_filters = without_filter_field(filters, "status") if status else filters
-            plans, total = paginate_optional_list_query(
-                plans_query,
-                PAYMENT_PLANS_LIST_QUERY_CATALOG,
-                skip=skip,
-                limit=limit,
-                filters=effective_filters,
-                sorts=sorts,
-                context=list_context,
-            )
-            return plans, total
 
         if status_exclude:
             plans_query = plans_query.filter(PaymentPlan.status.notin_(_split_csv(status_exclude)))
@@ -194,7 +235,7 @@ class PaymentPlanCRUD:
                     Opportunity.opportunity_name.ilike(like_keyword),
                 )
             )
-        
+
         total = plans_query.count()
 
         status_order = case(
@@ -228,22 +269,8 @@ class PaymentPlanCRUD:
         else:
             plans_query = plans_query.order_by(PaymentPlan.due_date.asc(), PaymentPlan.id.desc())
 
-        plans = plans_query.offset(skip).limit(limit).all()
-        
-        for plan in plans:
-            contract = db.query(Contract).filter(Contract.id == plan.contract_id).first()
-            if contract:
-                plan.contract = contract
-                if contract.customer_id:
-                    customer = db.query(Customer).filter(Customer.id == contract.customer_id).first()
-                    if customer:
-                        contract.customer = customer
-                if contract.opportunity_id:
-                    opportunity = db.query(Opportunity).filter(Opportunity.id == contract.opportunity_id).first()
-                    if opportunity:
-                        contract.opportunity = opportunity
-        
-        return plans, total
+        return plans_query.offset(skip).limit(limit).all(), total
+
     
     def _lock_contract(self, db: Session, contract_id: int) -> Contract:
         contract = (
@@ -536,6 +563,106 @@ class PaymentRecordCRUD:
             query = query.filter(PaymentRecord.team_id == team_id)
         return query.order_by(PaymentRecord.payment_date.desc()).all()
 
+    def _base_records_query(self, db: Session, team_id: int):
+        from app.models.contract import Contract
+        from app.models.customer import Customer
+        from app.models.opportunity import Opportunity
+
+        return (
+            db.query(PaymentRecord)
+            .join(PaymentPlan, PaymentRecord.payment_plan_id == PaymentPlan.id)
+            .join(Contract, PaymentPlan.contract_id == Contract.id)
+            .outerjoin(Customer, Contract.customer_id == Customer.id)
+            .outerjoin(Opportunity, Contract.opportunity_id == Opportunity.id)
+            .options(
+                contains_eager(PaymentRecord.payment_plan).contains_eager(
+                    PaymentPlan.contract
+                ).contains_eager(
+                    Contract.customer
+                ),
+                contains_eager(PaymentRecord.payment_plan).contains_eager(
+                    PaymentPlan.contract
+                ).contains_eager(
+                    Contract.opportunity
+                ),
+                joinedload(PaymentRecord.approval),
+            )
+            .filter(PaymentRecord.team_id == team_id)
+        )
+
+    def _apply_record_scope(self, query, *, approval_status: str | None, current_user_id: str | None):
+        from app.models.approval import Approval, ApprovalStatus
+        from app.models.contract import Contract
+
+        def approval_status_predicate(status_value: str):
+            if status_value == "pending_submit":
+                return and_(
+                    PaymentRecord.approval_id.is_(None),
+                    PaymentRecord.confirmation_status == PaymentConfirmationStatus.PENDING,
+                )
+            if status_value == "pending_approval":
+                return and_(
+                    PaymentRecord.approval_id.isnot(None),
+                    Approval.status == ApprovalStatus.PENDING,
+                )
+            if status_value == "approved":
+                return PaymentRecord.confirmation_status == PaymentConfirmationStatus.CONFIRMED
+            if status_value == "rejected":
+                return Approval.status == ApprovalStatus.REJECTED
+            return None
+
+        approval_status_values = _split_csv(approval_status)
+        if approval_status_values:
+            needs_approval_join = any(
+                value in {"pending_approval", "rejected"} for value in approval_status_values
+            )
+            if needs_approval_join:
+                query = query.outerjoin(Approval, PaymentRecord.approval_id == Approval.id)
+            include_predicates = [
+                predicate
+                for predicate in (approval_status_predicate(value) for value in approval_status_values)
+                if predicate is not None
+            ]
+            if include_predicates:
+                query = query.filter(or_(*include_predicates))
+        if current_user_id:
+            query = query.filter(Contract.creator_id == current_user_id)
+        return query
+
+    def build_list_query(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        approval_status: str | None,
+        current_user_id: str | None,
+        search: str | None,
+        filters: list[FilterCondition],
+        sorts: list[SortCondition],
+    ) -> Query:
+        """Return ordered payment records without pagination."""
+        records_query = self._apply_record_scope(
+            self._base_records_query(db, team_id),
+            approval_status=approval_status,
+            current_user_id=current_user_id,
+        )
+        effective_filters = (
+            without_filter_field(filters, "approval_status") if approval_status else filters
+        )
+        _, ordered = build_optional_list_query(
+            records_query,
+            PAYMENT_RECORDS_LIST_QUERY_CATALOG,
+            filters=effective_filters,
+            sorts=sorts,
+            context=ListQueryContext(
+                db=db,
+                team_id=team_id,
+                current_user_id=current_user_id,
+            ),
+            search=search,
+        )
+        return ordered.order_by(PaymentRecord.id.asc())
+
     def list_records(
         self,
         db: Session,
@@ -578,14 +705,27 @@ class PaymentRecordCRUD:
         filters: list[FilterCondition] | None = None,
         sorts: list[SortCondition] | None = None,
     ) -> Tuple[List[PaymentRecord], int]:
+        if uses_unified_list_query(filters=filters, sorts=sorts):
+            query = self.build_list_query(
+                db,
+                team_id=team_id,
+                approval_status=approval_status,
+                current_user_id=current_user_id,
+                search=search,
+                filters=filters or [],
+                sorts=sorts or [],
+            )
+            total = query.order_by(None).count()
+            return query.offset(skip).limit(limit).all(), total
+
         from app.models.contract import Contract
         from app.models.customer import Customer
         from app.models.opportunity import Opportunity
         from app.models.approval import Approval, ApprovalStatus
         from app.models.invoice import InvoiceApplication
         from app.models.user import User
-        from app.constants.business_types import BusinessType
         from sqlalchemy.orm import contains_eager, joinedload
+
 
         # Query with eager loading for customer_name, contract_name, stage_name, approval info
         owner_id_expr = func.coalesce(Opportunity.owner_id, Contract.owner_id)
@@ -675,18 +815,6 @@ class PaymentRecordCRUD:
             search,
             context=list_context,
         )
-
-        if uses_unified_list_query(filters=filters, sorts=sorts):
-            effective_filters = without_filter_field(filters, "approval_status") if approval_status else filters
-            return paginate_optional_list_query(
-                records_query,
-                PAYMENT_RECORDS_LIST_QUERY_CATALOG,
-                skip=skip,
-                limit=limit,
-                filters=effective_filters,
-                sorts=sorts,
-                context=list_context,
-            )
 
         approval_status_exclude_values = _split_csv(approval_status_exclude)
         if approval_status_exclude_values:

@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from app.core.database import get_db
-from app.core.deps import get_current_active_user, get_current_user_team
+from app.core.database import SessionLocal, get_db
+from app.core.deps import get_current_active_user, get_current_user_team, require_permission
+from app.core.list_export import (
+    FOLLOW_UP_TASKS_LIST_EXPORT_CATALOG,
+    create_list_export_file,
+    iter_batches,
+    list_export_file_response,
+    run_list_export_or_400,
+)
 from app.core.list_query import optional_request_list_query, run_or_400
 from app.crud.permission import permission_crud
 from app.crud.sales_commitment import (
@@ -22,6 +31,8 @@ from app.models.sales_commitment import (
     FollowUpTaskProjectionStatus,
     FollowUpTaskSourceType,
 )
+from app.schemas.command import CommandEffect, CommandNextAction, CommandResource
+from app.schemas.list_export import FollowUpTaskListExportRequest
 from app.schemas.sales_commitment import (
     FollowUpTaskConfirmationCaseItemResponse,
     FollowUpTaskConfirmationCaseListResponse,
@@ -40,7 +51,6 @@ from app.services.command_execution_service import (
     command_execution_service,
     request_fingerprint,
 )
-from app.schemas.command import CommandEffect, CommandNextAction, CommandResource
 from app.services.follow_up_task_confirmation_channel_service import (
     follow_up_task_confirmation_channel_service,
 )
@@ -70,6 +80,68 @@ if TYPE_CHECKING:
 router = APIRouter(prefix="/v1/follow-up-tasks", tags=["客户跟进任务"])
 projection_router = APIRouter(prefix="/v1/follow-up-task-projection-runs", tags=["客户跟进任务投影"])
 observability_router = APIRouter(prefix="/v1/follow-up-task-transition-observability", tags=["客户跟进任务观测"])
+
+FOLLOW_UP_TASK_EXPORT_TAB_STEMS = {
+    "all": "所有追踪",
+    "open": "待处理",
+    "completed": "已完成",
+    "cancelled": "已关闭",
+}
+
+
+def _follow_up_tracking_content(item: dict[str, Any]) -> str:
+    title = str(item.get("title") or "").strip()
+    if title:
+        return title
+    description = item.get("description")
+    if isinstance(description, str) and description.strip():
+        return description
+    return "-"
+
+
+def _follow_up_status_label(item: dict[str, Any]) -> str:
+    if item.get("pending_confirmations"):
+        return "需确认"
+    status_value = item.get("status")
+    if status_value == "COMPLETED":
+        return "已完成"
+    if status_value == "CANCELLED":
+        return "已关闭"
+    return "待处理"
+
+
+def _follow_up_export_row(item: dict[str, Any]) -> dict[str, object]:
+    customer = item.get("customer") if isinstance(item.get("customer"), dict) else None
+    due_at = item.get("due_at")
+    tracking_time = datetime.fromisoformat(due_at) if isinstance(due_at, str) and due_at else None
+    return {
+        "public_id": item.get("public_id"),
+        "customer_name": customer.get("name") if customer else None,
+        "tracking_content": _follow_up_tracking_content(item),
+        "status_label": _follow_up_status_label(item),
+        "tracking_time": tracking_time,
+    }
+
+
+def _iter_follow_up_export_rows(
+    stream,
+    team_id: int,
+    user_id: int,
+    projection_session_factory=SessionLocal,
+) -> Iterator[dict[str, object]]:
+    for batch in iter_batches(stream, 500):
+        projection_db = projection_session_factory()
+        try:
+            for item in follow_up_task_query_service.build_task_payloads(
+                projection_db,
+                batch,
+                team_id,
+                user_id,
+            ):
+                yield _follow_up_export_row(item)
+        finally:
+            projection_db.close()
+
 
 
 class FollowUpTaskTransitionRequest(BaseModel):
@@ -121,6 +193,47 @@ def list_follow_up_tasks(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post(
+    "/export",
+    dependencies=[Depends(require_permission("follow_up_task:export"))],
+    summary="导出客户追踪列表",
+    description="按当前筛选条件导出全部匹配客户跟进任务为 Excel，始终限定当前 owner",
+)
+def export_follow_up_tasks(
+    request: FollowUpTaskListExportRequest,
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    try:
+        statuses = follow_up_task_query_service._normalize_status(request.tab)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    query = run_or_400(lambda: follow_up_task_crud.build_for_owner_query(
+        db,
+        team_id=team_id,
+        owner_id=str(current_user.id),
+        statuses=statuses,
+        filters=request.filters,
+        sorts=request.sorts,
+        search=request.search,
+    ))
+    stream = query.enable_eagerloads(False).execution_options(stream_results=True).yield_per(500)
+    rows = _iter_follow_up_export_rows(
+        stream,
+        team_id,
+        current_user.id,
+        projection_session_factory=SessionLocal,
+    )
+    generated = run_list_export_or_400(lambda: create_list_export_file(
+        catalog=FOLLOW_UP_TASKS_LIST_EXPORT_CATALOG,
+        selected_keys=request.fields,
+        rows=rows,
+        file_stem=f"客户追踪列表-{FOLLOW_UP_TASK_EXPORT_TAB_STEMS.get(request.tab, '待处理')}",
+    ))
+    return list_export_file_response(generated)
 
 
 @router.get(

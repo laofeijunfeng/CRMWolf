@@ -42,14 +42,18 @@ import paymentApi, {
   type PaymentRecordCreate,
   type PaymentRecordResponse,
   type PaymentPlanWithDetails,
-  type PaymentPlanListParams
+  type PaymentPlanListParams,
+  type PaymentPlanExportTab,
 } from '@/api/payment'
+import { type ListExportPayload } from '@/api/listExport'
 import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
+import { useDataTableExport } from '@/composables/useDataTableExport'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
+import { buildDataTableExportFileName } from '@/utils/downloadBlob'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 import type { FormSuccessPayload } from '@/types/actionOutcome'
 
@@ -147,6 +151,40 @@ const canCreatePlan = computed(() => permissionStore.hasPermission('payment:plan
 const canEditPlan = computed(() => permissionStore.hasPermission('payment:plan:edit'))
 const canDeletePlan = computed(() => permissionStore.hasPermission('payment:plan:delete'))
 const canConfirmPayment = computed(() => permissionStore.hasPermission('payment:confirm'))
+const canExportPlans = computed(() => permissionStore.hasPermission('payment:plan:export'))
+
+interface PaymentPlanListExportContext {
+  tab: PaymentPlanExportTab
+  search: string | undefined
+  filters: ListFilterCondition[]
+  sorts: ListSortCondition[]
+}
+
+const currentPaymentPlanListContext = (): PaymentPlanListExportContext => ({
+  tab: activeTab.value === 'pending' || activeTab.value === 'partial' || activeTab.value === 'completed'
+    ? activeTab.value
+    : 'all',
+  search: search.value.trim() || undefined,
+  filters: [...activeFilters.value],
+  sorts: [...activeSorts.value],
+})
+
+const { exportFields: exportPaymentPlanFields } = useDataTableExport({
+  request: (fields) => {
+    const { tab, search, filters, sorts } = currentPaymentPlanListContext()
+    const payload: ListExportPayload<PaymentPlanExportTab> = { fields, tab, filters, sorts }
+    if (search !== undefined) {
+      payload.search = search
+    }
+    return paymentApi.exportPaymentPlans(payload)
+  },
+  fileName: () => buildDataTableExportFileName(
+    '回款计划列表',
+    tabs.find((tab) => tab.key === activeTab.value)?.label ?? '全部计划',
+    new Date(),
+  ),
+})
+
 const registerDefaultAmount = computed<number | null>(() => {
   const plan = selectedConfirmPlan.value
   if (plan === null) return null
@@ -615,6 +653,9 @@ watch(
     <DataTable
       v-model:filters="activeFilters"
       v-model:search="search"
+      :export-enabled="canExportPlans"
+      export-title="回款计划列表"
+      :export-handler="exportPaymentPlanFields"
       :fields="fields"
       :data="tableData"
       :loading="loading"

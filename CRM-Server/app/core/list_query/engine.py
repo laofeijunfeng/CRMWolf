@@ -124,6 +124,36 @@ def execute_list_query(
     return query.offset(skip).limit(limit).all(), total
 
 
+def build_optional_list_query(
+    query,
+    catalog: ListQueryCatalog,
+    *,
+    filters=None,
+    sorts=None,
+    context: ListQueryContext | None = None,
+    joined: set[str] | None = None,
+    legacy_filters=None,
+    legacy_sorts=None,
+    search: str | None = None,
+):
+    """Return (filtered_query, ordered_query) without count or pagination."""
+    ctx = context or ListQueryContext()
+    joined_keys = joined if joined is not None else set()
+    unified_protocol = uses_unified_list_query(filters=filters, sorts=sorts)
+    filtered = apply_search(query, catalog, search, context=ctx)
+    if unified_protocol:
+        filtered = apply_filters(filtered, catalog, filters or [], context=ctx, joined=joined_keys)
+    elif legacy_filters is not None:
+        filtered = legacy_filters(filtered)
+    if unified_protocol:
+        ordered = apply_sorts(filtered, catalog, sorts or [], context=ctx, joined=joined_keys)
+    elif legacy_sorts is not None:
+        ordered = legacy_sorts(filtered)
+    else:
+        ordered = filtered
+    return filtered, ordered
+
+
 def apply_optional_list_query(
     query,
     catalog: ListQueryCatalog,
@@ -136,21 +166,18 @@ def apply_optional_list_query(
     legacy_sorts=None,
     search: str | None = None,
 ):
-    ctx = context or ListQueryContext()
-    joined_keys = joined if joined is not None else set()
-    unified_protocol = uses_unified_list_query(filters=filters, sorts=sorts)
-    query = apply_search(query, catalog, search, context=ctx)
-    if unified_protocol:
-        query = apply_filters(query, catalog, filters or [], context=ctx, joined=joined_keys)
-    elif legacy_filters is not None:
-        query = legacy_filters(query)
-    total = query.count()
-    if unified_protocol:
-        query = apply_sorts(query, catalog, sorts or [], context=ctx, joined=joined_keys)
-    elif legacy_sorts is not None:
-        query = legacy_sorts(query)
-    return query, total
-
+    filtered, ordered = build_optional_list_query(
+        query,
+        catalog,
+        filters=filters,
+        sorts=sorts,
+        context=context,
+        joined=joined,
+        legacy_filters=legacy_filters,
+        legacy_sorts=legacy_sorts,
+        search=search,
+    )
+    return ordered, filtered.count()
 
 def paginate_optional_list_query(
     query,

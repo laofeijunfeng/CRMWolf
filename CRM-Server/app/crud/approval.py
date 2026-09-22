@@ -1,4 +1,4 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Query, Session
 from sqlalchemy import and_, or_
 from sqlalchemy.exc import OperationalError
 from typing import Optional, List, Tuple, Dict, Any
@@ -18,9 +18,8 @@ from app.core.list_query import (
     FilterCondition,
     ListQueryContext,
     SortCondition,
-    apply_filters,
     apply_search,
-    apply_sorts,
+    build_optional_list_query,
     uses_unified_list_query,
     without_filter_field,
 )
@@ -1008,6 +1007,108 @@ class ApprovalCRUD:
     # pending_count：当前用户「待我审批」总数，任意 tab 都附给前端徽章。
     # ========================================================================
 
+    def build_list_query(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_id: int,
+        user_roles: List[str],
+        tab: str,
+        search: str | None,
+        filters: list[FilterCondition],
+        sorts: list[SortCondition],
+    ) -> tuple[Query, bool]:
+        """Return ordered approvals and whether legacy summary filtering is required."""
+        from app.models.approval import ApprovalNode, ApprovalRecord, ApprovalAction
+
+        user_id_str = str(user_id)
+        query = db.query(Approval).filter(Approval.team_id == team_id)
+        if tab == "pending":
+            query = (
+                query.join(ApprovalNode, Approval.current_node_id == ApprovalNode.id)
+                .filter(Approval.status == ApprovalStatus.PENDING)
+            )
+            if user_roles:
+                query = query.filter(ApprovalNode.approve_role.in_(user_roles))
+            else:
+                query = query.filter(ApprovalNode.approve_role.is_(None))
+        elif tab == "submitted":
+            query = query.filter(Approval.submitter_id == user_id_str)
+        elif tab == "processed":
+            processed_sub = (
+                db.query(ApprovalRecord.approval_id)
+                .filter(
+                    ApprovalRecord.approver_id == user_id_str,
+                    ApprovalRecord.action != ApprovalAction.SUBMIT,
+                )
+                .distinct()
+            )
+            query = query.filter(Approval.id.in_(processed_sub))
+        else:
+            raise ValueError(f"非法 tab: {tab}，仅支持 pending / processed / submitted")
+
+        context = ListQueryContext(
+            db=db,
+            team_id=team_id,
+            current_user_id=user_id_str,
+            now=business_now(),
+        )
+        effective_filters = without_filter_field(filters, "status") if tab == "pending" else filters
+        effective_sorts = sorts
+        if tab == "pending" and not effective_sorts:
+            effective_sorts = [SortCondition(field="overdue_hours", direction="desc")]
+        _, ordered = build_optional_list_query(
+            query,
+            APPROVALS_LIST_QUERY_CATALOG,
+            filters=effective_filters,
+            sorts=effective_sorts,
+            context=context,
+            search=search,
+        )
+        return ordered.order_by(Approval.id.asc()), False
+
+    def build_list_items(self, projection_db: Session, rows: List[Approval], team_id: int) -> List[Dict[str, Any]]:
+        summaries = self._batch_entity_summaries(projection_db, rows, team_id)
+        now = business_now()
+        items: List[Dict[str, Any]] = []
+        for ap in rows:
+            sum_key = (ap.business_type, ap.business_id) if ap.business_id else None
+            summary = summaries.get(sum_key) if sum_key else None
+            overdue_hours: Optional[int] = None
+            if ap.status == ApprovalStatus.PENDING and ap.created_time is not None:
+                overdue_hours = int((now - ap.created_time).total_seconds() // 3600)
+            contract_file_path = summary.get("contract_file_path") if summary else None
+            invoice_file_path = summary.get("invoice_file_path") if summary else None
+            items.append({
+                "id": ap.id,
+                "business_type": ap.business_type,
+                "business_id": ap.business_id if ap.business_id is not None else 0,
+                "business_public_id": summary.get("business_public_id") if summary else None,
+                "original_invoice_application_id": summary.get("original_invoice_application_id") if summary else None,
+                "application_number": summary["application_number"] if summary else f"{ap.business_type}-{ap.business_id}",
+                "entity_name": summary["entity_name"] if summary else None,
+                "entity_amount": summary["entity_amount"] if summary else None,
+                "actual_payer_name": summary.get("actual_payer_name") if summary else None,
+                "license_status": summary.get("license_status") if summary else None,
+                "customer_info": summary["customer_info"] if summary else None,
+                "has_attachment": bool(contract_file_path or invoice_file_path),
+                "contract_file_path": contract_file_path,
+                "contract_file_name": summary.get("contract_file_name") if summary else None,
+                "contract_file_size": summary.get("contract_file_size") if summary else None,
+                "contract_file_mime_type": summary.get("contract_file_mime_type") if summary else None,
+                "invoice_file_path": invoice_file_path,
+                "invoice_number": summary.get("invoice_number") if summary else None,
+                "issued_time": _serialize_optional_datetime(summary.get("issued_time")) if summary else None,
+                "submitter_id": ap.submitter_id,
+                "submitter_name": ap.submitter_name,
+                "status": ap.status,
+                "created_time": ap.created_time.isoformat() if ap.created_time else "",
+                "updated_time": ap.updated_time.isoformat() if ap.updated_time else "",
+                "overdue_hours": overdue_hours,
+            })
+        return items
+
     def list_approvals(
         self,
         db: Session,
@@ -1131,46 +1232,35 @@ class ApprovalCRUD:
         )
 
         if unified_protocol:
-            effective_filters = without_filter_field(filters, "status") if tab == "pending" else filters
-            context = ListQueryContext(
-                db=db,
+            query, _needs_summary_filter = self.build_list_query(
+                db,
                 team_id=team_id,
-                current_user_id=user_id_str,
-                now=business_now(),
+                user_id=user_id,
+                user_roles=user_roles,
+                tab=tab,
+                search=search,
+                filters=filters or [],
+                sorts=sorts or [],
             )
-            query = apply_filters(
-                query,
-                APPROVALS_LIST_QUERY_CATALOG,
-                effective_filters or [],
-                context=context,
-            )
-            total = query.count()
-            effective_sorts = sorts
-            if tab == "pending" and not effective_sorts:
-                effective_sorts = [SortCondition(field="overdue_hours", direction="desc")]
-            ordered_query = apply_sorts(
-                query,
-                APPROVALS_LIST_QUERY_CATALOG,
-                effective_sorts or [],
-                context=context,
-            )
-            rows = ordered_query.offset(skip).limit(page_size).all()
-            needs_summary_filter = False
-        else:
-            needs_summary_filter = any([
-                application_number,
-                entity_name,
-                entity_amount is not None,
-            ])
-            ordered_query = query.order_by(Approval.created_time.desc())
-            if needs_summary_filter:
-                rows = ordered_query.all()
-            else:
-                total = query.count()
-                rows = ordered_query.offset(skip).limit(page_size).all()
+            total = query.order_by(None).count()
+            rows = query.offset(skip).limit(page_size).all()
+            items = self.build_list_items(db, rows, team_id)
+            pending_count = self._count_pending_for_user(db, team_id, user_roles)
+            return items, total, pending_count
 
-        # ---- E9：按 business_type 批量预取实体摘要，内存 join 避免 N+1 ----
-        summaries = self._batch_entity_summaries(db, rows, team_id)
+        needs_summary_filter = any([
+            application_number,
+            entity_name,
+            entity_amount is not None,
+        ])
+        ordered_query = query.order_by(Approval.created_time.desc())
+        if needs_summary_filter:
+            rows = ordered_query.all()
+        else:
+            total = query.count()
+            rows = ordered_query.offset(skip).limit(page_size).all()
+
+        items = self.build_list_items(db, rows, team_id)
 
         def matches_summary_filters(item: Dict[str, Any]) -> bool:
             if application_number:
@@ -1191,44 +1281,6 @@ class ApprovalCRUD:
                     return False
             return True
 
-        # ---- 组装列表项 + overdue_hours Python 计算 ----
-        now = business_now()
-        items: List[Dict[str, Any]] = []
-        for ap in rows:
-            sum_key = (ap.business_type, ap.business_id) if ap.business_id else None
-            summary = summaries.get(sum_key) if sum_key else None
-            overdue_hours: Optional[int] = None
-            if ap.status == ApprovalStatus.PENDING and ap.created_time is not None:
-                overdue_hours = int((now - ap.created_time).total_seconds() // 3600)
-            contract_file_path = summary.get("contract_file_path") if summary else None
-            invoice_file_path = summary.get("invoice_file_path") if summary else None
-            items.append({
-                "id": ap.id,
-                "business_type": ap.business_type,
-                "business_id": ap.business_id if ap.business_id is not None else 0,
-                "business_public_id": summary.get("business_public_id") if summary else None,
-                "original_invoice_application_id": summary.get("original_invoice_application_id") if summary else None,
-                "application_number": summary["application_number"] if summary else f"{ap.business_type}-{ap.business_id}",
-                "entity_name": summary["entity_name"] if summary else None,
-                "entity_amount": summary["entity_amount"] if summary else None,
-                "actual_payer_name": summary.get("actual_payer_name") if summary else None,
-                "license_status": summary.get("license_status") if summary else None,
-                "customer_info": summary["customer_info"] if summary else None,
-                "has_attachment": bool(contract_file_path or invoice_file_path),
-                "contract_file_path": contract_file_path,
-                "contract_file_name": summary.get("contract_file_name") if summary else None,
-                "contract_file_size": summary.get("contract_file_size") if summary else None,
-                "contract_file_mime_type": summary.get("contract_file_mime_type") if summary else None,
-                "invoice_file_path": invoice_file_path,
-                "invoice_number": summary.get("invoice_number") if summary else None,
-                "issued_time": _serialize_optional_datetime(summary.get("issued_time")) if summary else None,
-                "submitter_id": ap.submitter_id,
-                "submitter_name": ap.submitter_name,
-                "status": ap.status,
-                "created_time": ap.created_time.isoformat() if ap.created_time else "",
-                "updated_time": ap.updated_time.isoformat() if ap.updated_time else "",
-                "overdue_hours": overdue_hours,
-            })
 
         if needs_summary_filter:
             items = [item for item in items if matches_summary_filters(item)]

@@ -43,6 +43,8 @@ export { default as TableRowActions } from './TableRowActions.vue'
 export { default as DesktopTableRowActions } from './DesktopTableRowActions.vue'
 export { default as HoverInfo } from './HoverInfo.vue'
 export { default as StatusBadge } from '../StatusBadge.vue'
+export { default as DataTableExportDialog } from './DataTableExportDialog.vue'
+export type { DataTableExportDialogField } from './DataTableExportDialog.vue'
 
 // Export types
 export type { ActionConfig } from './tableRowActionTypes'
@@ -59,7 +61,8 @@ export {
   isDetailTableRowAction
 } from './tableRowActionGroups'
 export type { ColumnConfigOption } from './columnConfigTypes'
-export type { ListFieldDefinition, ListFieldColumnConfig, ListFieldQueryConfig } from './listFieldCatalog'
+export type { ListFieldExportConfig, DataTableExportField } from './listFieldCatalog'
+export { isUnsafeExportKey } from './listFieldCatalog'
 export { defineListFields, projectListFieldCatalog } from './listFieldCatalog'
 export type { ListFilterCondition, ListFilterField } from './listFilterTypes'
 export type { ListSortCondition, ListSortField } from './listSortTypes'

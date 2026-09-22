@@ -1,8 +1,11 @@
-from sqlalchemy.orm import Session, selectinload
-from sqlalchemy import and_, case, exists, or_, func
+from datetime import datetime, time, timedelta
 from typing import Any, Dict, Optional, List, Tuple
-from datetime import datetime, timedelta, time
 from enum import Enum
+
+from sqlalchemy import and_, case, exists, or_, func
+from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Query
+
 from app.models.lead import Lead, LeadFollowUp, LeadProduct, LeadStatus, CompanyScale
 from app.models.product import Product
 from app.schemas.lead import LeadCreate, LeadUpdate, LeadFollowUpCreate
@@ -17,17 +20,18 @@ from app.services.acquisition_source_service import (
     resolve_public_ids_to_ids,
     resolve_source_for_entity_write,
 )
-from app.utils.time import business_now
 from app.core.list_query import (
     FilterCondition,
     ListQueryContext,
     SortCondition,
-    has_filter_field,
     apply_search,
+    build_optional_list_query,
+    has_filter_field,
     paginate_optional_list_query,
     uses_unified_list_query,
 )
 from app.core.list_query.catalogs import LEADS_LIST_QUERY_CATALOG
+from app.utils.time import business_now
 
 
 class LeadCRUD:
@@ -58,6 +62,49 @@ class LeadCRUD:
         if team_id is not None:
             query = query.filter(Lead.team_id == team_id)
         return query.first()
+
+    def build_list_query(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        owner_id: str | None,
+        search: str | None,
+        filters: list[FilterCondition] | None,
+        sorts: list[SortCondition] | None,
+    ) -> Query:
+        """Return the filtered, ordered lead query without count or pagination."""
+        query = db.query(Lead).options(
+            selectinload(Lead.product_links).selectinload(LeadProduct.product)
+        ).filter(Lead.team_id == team_id)
+
+        if uses_unified_list_query(filters=filters, sorts=sorts):
+            if not has_filter_field(filters, "status"):
+                query = query.filter(Lead.status != LeadStatus.CONVERTED)
+            if owner_id:
+                query = query.filter(Lead.owner_id == owner_id)
+            _, ordered = build_optional_list_query(
+                query,
+                LEADS_LIST_QUERY_CATALOG,
+                filters=filters,
+                sorts=sorts,
+                context=ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id),
+                search=search,
+            )
+            return ordered.order_by(Lead.id.asc())
+
+        return self._apply_legacy_list_filters(query, owner_id=owner_id, search=search)
+
+    def _apply_legacy_list_filters(self, query: Query, *, owner_id: str | None, search: str | None) -> Query:
+        """Legacy get_multi branches; unified protocol bypasses this."""
+        if owner_id:
+            query = query.filter(Lead.owner_id == owner_id)
+        return apply_search(
+            query,
+            LEADS_LIST_QUERY_CATALOG,
+            search,
+            context=ListQueryContext(),
+        )
 
     def get_multi(
         self,
@@ -466,6 +513,32 @@ class LeadCRUD:
             .group_by(Lead.source_id)
             .all()
         )
+    def build_public_list_query(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        search: str | None,
+        filters: list[FilterCondition] | None,
+        sorts: list[SortCondition] | None,
+    ) -> Query:
+        """Return the filtered, ordered public-pool lead query without pagination."""
+        query = db.query(Lead).filter(
+            and_(
+                Lead.team_id == team_id,
+                Lead.owner_id.is_(None),
+                Lead.status != LeadStatus.CONVERTED
+            )
+        )
+        _, ordered = build_optional_list_query(
+            query,
+            LEADS_LIST_QUERY_CATALOG,
+            filters=filters,
+            sorts=sorts,
+            context=ListQueryContext(db=db, team_id=team_id),
+            search=search,
+        )
+        return ordered.order_by(Lead.id.asc())
 
     def get_public_leads(
         self,

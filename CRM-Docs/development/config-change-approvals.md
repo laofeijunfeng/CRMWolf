@@ -17,3 +17,11 @@
 - **原因**：CI 原先在安装生产锁后无约束安装 pytest、Ruff 和 MyPy，仍可能因工具或传递依赖漂移产生不可重复结果。
 - **验证**：CI 统一通过两个带 hash 的锁文件安装；依赖校验器同时核对 pyproject、锁文件输入和实际安装版本；全新 Python 3.11 临时环境完成安装、`pip check`、schema 校验和依赖测试。
 - **回退约束**：不得恢复 CI 中无版本或无 hash 的 `pip install pytest/ruff/mypy`；开发工具升级必须同步修改精确声明、重新生成锁文件并通过完整门禁。
+
+## 2026-09-21 — Excel 导出依赖（openpyxl）
+
+- **批准范围**：`CRM-Server/pyproject.toml` 生产依赖新增 `openpyxl==3.1.5`，dev 依赖新增 `types-openpyxl==3.1.5.20260827`；同步更新 `requirements.txt`、`requirements-dev.txt` 并重新生成两个带 hash 的锁文件。
+- **批准依据**：已批准的规格 `docs/superpowers/specs/2026-09-21-datatable-filtered-excel-export-design.md` §10 依赖交付，以及产品负责人 2026-09-21 对 DataTable 导出方案的批准。
+- **原因**：服务端需以 openpyxl write-only 模式生成受控 `.xlsx` 导出；本仓库此前无任何 Excel 生成依赖。
+- **验证**：`uv pip compile` 重新生成 `requirements.lock` / `requirements-dev.lock`；`uv pip install --require-hashes` 干净安装；`tests/unit/test_list_export_service.py` 通过；Ruff 与 MyPy 对新增文件零诊断。
+- **回退约束**：openpyxl 升级必须保持精确版本并重新生成双锁文件；不得引入运行时动态安装或无 hash 安装路径。

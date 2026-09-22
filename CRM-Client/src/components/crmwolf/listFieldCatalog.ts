@@ -45,8 +45,21 @@ export interface ListFieldDefinition {
   column?: true | false | ListFieldColumnConfig
   filter?: true | false | ListFieldQueryConfig
   sort?: true | false | ListFieldQueryConfig
+  export?: true | false | ListFieldExportConfig
   filterDisabledReason?: string
   sortDisabledReason?: string
+}
+
+export interface ListFieldExportConfig {
+  key?: string
+  label?: string
+}
+
+export interface DataTableExportField {
+  fieldKey: string
+  key: string
+  label: string
+  source: 'column' | 'export-only'
 }
 
 export interface DataTableColumn {
@@ -64,6 +77,7 @@ export interface ProjectedListFields {
   columns: DataTableColumn[]
   filterFields: ListFilterField[]
   sortFields: ListSortField[]
+  exportFields: DataTableExportField[]
 }
 
 function isEnabled(value: unknown): value is true | object {
@@ -72,6 +86,33 @@ function isEnabled(value: unknown): value is true | object {
 
 function isBusinessColumn(field: ListFieldDefinition): boolean {
   return isEnabled(field.column) && field.role === undefined
+}
+
+export function isUnsafeExportKey(key: string): boolean {
+  return key === 'id' || (
+    key.endsWith('_id')
+    && key !== 'public_id'
+    && !key.endsWith('_public_id')
+  )
+}
+
+function resolveListFieldExport(
+  field: ListFieldDefinition
+): { enabled: boolean; key: string; label: string } {
+  const explicit = field.export
+  const key = typeof explicit === 'object' && explicit !== null && explicit.key !== undefined && explicit.key !== ''
+    ? explicit.key
+    : field.key
+  const label = typeof explicit === 'object' && explicit !== null && explicit.label !== undefined && explicit.label !== ''
+    ? explicit.label
+    : field.label
+  const enabled = explicit !== undefined
+    ? isEnabled(explicit)
+    : isBusinessColumn(field) && !isUnsafeExportKey(key)
+  if (enabled && isUnsafeExportKey(key)) {
+    throw new Error(`List field export key "${key}" is unsafe`)
+  }
+  return { enabled, key, label }
 }
 
 export function resolveListFieldFilter(
@@ -107,7 +148,20 @@ export function listFieldQueryKey(
   return fallback ?? sortFallback ?? field.key
 }
 
+function assertExportFields(fields: ListFieldDefinition[]): void {
+  const seenExportKeys = new Set<string>()
+  for (const field of fields) {
+    const exportProjection = resolveListFieldExport(field)
+    if (!exportProjection.enabled) continue
+    if (seenExportKeys.has(exportProjection.key)) {
+      throw new Error(`Duplicate list export field key: ${exportProjection.key}`)
+    }
+    seenExportKeys.add(exportProjection.key)
+  }
+}
+
 function assertListFieldCatalog(fields: ListFieldDefinition[]): void {
+  assertExportFields(fields)
   const seenKeys = new Set<string>()
   for (const field of fields) {
     if (seenKeys.has(field.key)) {
@@ -164,7 +218,7 @@ export function projectListFieldCatalog(fields: ListFieldDefinition[]): Projecte
   const columns: DataTableColumn[] = []
   const filterFields: ListFilterField[] = []
   const sortFields: ListSortField[] = []
-
+  const exportFields: DataTableExportField[] = []
   for (const field of fields) {
     if (isEnabled(field.column)) {
       const column = field.column === true ? {} : field.column
@@ -190,7 +244,17 @@ export function projectListFieldCatalog(fields: ListFieldDefinition[]): Projecte
     if (isEnabled(sort)) {
       sortFields.push(projectQueryField(field, sort))
     }
+
+    const exportProjection = resolveListFieldExport(field)
+    if (exportProjection.enabled) {
+      exportFields.push({
+        fieldKey: field.key,
+        key: exportProjection.key,
+        label: exportProjection.label,
+        source: isEnabled(field.column) ? 'column' : 'export-only'
+      })
+    }
   }
 
-  return { columns, filterFields, sortFields }
+  return { columns, filterFields, sortFields, exportFields }
 }

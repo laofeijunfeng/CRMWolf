@@ -125,27 +125,13 @@ class FollowUpTaskQueryService:
             semantic_task_public_ids=semantic_task_public_ids,
         )
 
-        customers_by_id = self._customers_by_id(db, team_id=team_id, customer_ids=[task.customer_id for task in rows])
-        users_by_id = self._users_by_id(
+        items = self.build_task_payloads(
             db,
-            user_ids=[task.owner_id for task in rows] + [task.creator_id for task in rows],
+            rows,
+            team_id,
+            user_id,
+            semantic_evidence_by_task_id=semantic_evidence_by_task_id,
         )
-        pending_confirmations_by_task_id = self._pending_confirmations_by_task_id(
-            db,
-            team_id=team_id,
-            user_id=user_id,
-            tasks=rows,
-        )
-        items = [
-            self._task_payload(
-                task,
-                customers_by_id.get(task.customer_id),
-                users_by_id=users_by_id,
-                semantic_evidence=semantic_evidence_by_task_id.get(str(task.public_id)),
-                pending_confirmations=pending_confirmations_by_task_id.get(task.id, []),
-            )
-            for task in rows
-        ]
         return {
             "items": items,
             "total": total,
@@ -243,6 +229,42 @@ class FollowUpTaskQueryService:
         if status not in FOLLOW_UP_TASK_QUERY_STATUSES:
             raise ValueError("未知任务状态过滤")
         return FOLLOW_UP_TASK_QUERY_STATUSES[status]
+
+    def build_task_payloads(
+        self,
+        projection_db: Session,
+        tasks: list[FollowUpTask],
+        team_id: int,
+        user_id: int,
+        *,
+        semantic_evidence_by_task_id: dict[str, list[dict[str, Any]]] | None = None,
+    ) -> list[dict[str, Any]]:
+        evidence = semantic_evidence_by_task_id or {}
+        customers_by_id = self._customers_by_id(
+            projection_db,
+            team_id=team_id,
+            customer_ids=[task.customer_id for task in tasks],
+        )
+        users_by_id = self._users_by_id(
+            projection_db,
+            user_ids=[task.owner_id for task in tasks] + [task.creator_id for task in tasks],
+        )
+        pending_confirmations_by_task_id = self._pending_confirmations_by_task_id(
+            projection_db,
+            team_id=team_id,
+            user_id=user_id,
+            tasks=tasks,
+        )
+        return [
+            self._task_payload(
+                task,
+                customers_by_id.get(task.customer_id),
+                users_by_id=users_by_id,
+                semantic_evidence=evidence.get(str(task.public_id)),
+                pending_confirmations=pending_confirmations_by_task_id.get(task.id, []),
+            )
+            for task in tasks
+        ]
 
     def _list_filtered_tasks(
         self,

@@ -1,6 +1,11 @@
 import request from '@/utils/request'
 import type { CommandRequestOptions } from '@/api/command'
 import type { RequestConfig } from '@/utils/request'
+import { postListExport, type ListExportPayload } from '@/api/listExport'
+
+export type PaymentPlanExportTab = 'all' | 'pending' | 'partial' | 'completed'
+export type PaymentRecordExportTab = 'all' | 'pending_submit' | 'pending_approval' | 'rejected' | 'confirmed'
+
 
 export interface PaymentPlanCreate {
   stage_name: string
@@ -289,6 +294,12 @@ export interface BadgeCounts {
 // TODO: Add Zod schema validation for API responses in future iteration
 
 const paymentApi = {
+  exportPaymentPlans: (payload: ListExportPayload<PaymentPlanExportTab>): Promise<Blob> =>
+    postListExport('/v1/payments/payment-plans/export', payload),
+
+  exportPaymentRecords: (payload: ListExportPayload<PaymentRecordExportTab>): Promise<Blob> =>
+    postListExport('/v1/payments/payment-records/export', payload),
+
   getPaymentSummary: (contractId: number): Promise<ContractPaymentSummary> => {
     return request.get<ContractPaymentSummary>(`/v1/payments/contracts/${contractId}/payment-summary`)
   },

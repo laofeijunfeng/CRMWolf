@@ -1,16 +1,16 @@
 import logging
 from datetime import date, datetime
-from typing import List, Literal, Optional
+from typing import Iterator, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi.responses import FileResponse
 from sqlalchemy import and_, case, inspect, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.constants.approval_phase import ApprovalPhase
 from app.constants.business_types import BusinessType
-from app.core.database import get_db
-from app.core.list_query import optional_request_list_query, run_or_400
+from app.core.database import SessionLocal, get_db
 from app.core.deps import (
     check_contract_edit_permission,
     check_contract_view_permission,
@@ -19,6 +19,15 @@ from app.core.deps import (
     get_current_user_team,
     require_permission,
 )
+from app.core.list_export import (
+    PAYMENT_PLANS_LIST_EXPORT_CATALOG,
+    PAYMENT_RECORDS_LIST_EXPORT_CATALOG,
+    create_list_export_file,
+    iter_batches,
+    list_export_file_response,
+    run_list_export_or_400,
+)
+from app.core.list_query import optional_request_list_query, run_or_400
 from app.crud.approval import approval_crud, approval_flow_crud
 from app.crud.customer_member import customer_member_crud
 from app.crud.payment import (
@@ -36,28 +45,24 @@ from app.models.approval import Approval, ApprovalNode, ApprovalRecord, Approval
 from app.models.command_execution import CommandExecutionStatus
 from app.models.payment import PaymentConfirmationStatus, PaymentPlan, PaymentPlanStatus, PaymentRecord
 from app.schemas.command import CommandEffect, CommandResource
+from app.schemas.list_export import PaymentPlanListExportRequest, PaymentRecordListExportRequest
 from app.schemas.payment import (
     ContractPaymentSummary,
     PaginatedResponse,
     PaymentPlanBatchCreate,
     PaymentPlanResponse,
+    PaymentPlanStatusSummary,
     PaymentPlanUpdate,
     PaymentRecordCreate,
     PaymentRecordDetailResponse,
     PaymentRecordInfo,
     PaymentRecordListItem,
-    PaymentPlanStatusSummary,
     PaymentRecordListResponse,
     PaymentRecordResponse,
     PaymentRecordUpdate,
     PaymentReminder,
 )
-from app.services.customer_business_object_intelligence_service import (
-    CustomerBusinessObjectChangeRefreshInput,
-    customer_business_object_intelligence_service,
-)
 from app.services.approval_transaction_manager import approval_transaction_manager
-from app.services.outbound_notification_job_service import outbound_notification_job_service
 from app.services.command_execution_service import (
     CommandAlreadyInProgress,
     CommandIdempotencyConflict,
@@ -65,6 +70,11 @@ from app.services.command_execution_service import (
     command_execution_service,
     request_fingerprint,
 )
+from app.services.customer_business_object_intelligence_service import (
+    CustomerBusinessObjectChangeRefreshInput,
+    customer_business_object_intelligence_service,
+)
+from app.services.outbound_notification_job_service import outbound_notification_job_service
 
 router = APIRouter(prefix="/v1/payments", tags=["回款管理"])
 logger = logging.getLogger(__name__)
@@ -160,8 +170,8 @@ def _payment_plan_response(plan: PaymentPlan) -> PaymentPlanResponse:
         "status": plan.status.value if hasattr(plan.status, "value") else plan.status,
         "created_time": plan.created_time,
         "last_modified_time": plan.last_modified_time,
-        "paid_amount": float(plan.paid_amount),
-        "remaining_amount": float(plan.remaining_amount),
+        "paid_amount": float(getattr(plan, "paid_amount", 0) or 0),
+        "remaining_amount": float(getattr(plan, "remaining_amount", plan.planned_amount) or 0),
         "payment_records": [
             PaymentRecordInfo(**{
                 "id": record.id,
@@ -189,10 +199,403 @@ def _payment_plan_response(plan: PaymentPlan) -> PaymentPlanResponse:
         "opportunity_name": opportunity.opportunity_name if opportunity else None,
         "owner_id": opportunity.owner_id if opportunity else (contract.owner_id if contract else None),
         "owner_name": getattr(plan, "owner_name", None),
-        "is_invoiced": plan.invoice_count > 0,
-        "invoice_count": plan.invoice_count,
-        "invoiced_amount": float(plan.invoiced_amount),
+        "is_invoiced": bool(getattr(plan, "invoice_count", 0)),
+        "invoice_count": int(getattr(plan, "invoice_count", 0) or 0),
+        "invoiced_amount": float(getattr(plan, "invoiced_amount", 0) or 0),
     })
+
+PAYMENT_PLAN_STATUS_LABELS = {
+    "PENDING": "待登记",
+    "PARTIAL": "部分回款",
+    "COMPLETED": "已登记",
+    "OVERDUE": "已逾期",
+}
+PAYMENT_PLAN_TAB_STATUS = {
+    "pending": "PENDING",
+    "partial": "PARTIAL",
+    "completed": "COMPLETED",
+}
+PAYMENT_PLAN_TAB_STEMS = {
+    "all": "全部计划",
+    "pending": "待登记",
+    "partial": "部分回款",
+    "completed": "已登记",
+}
+PAYMENT_RECORD_STATUS_LABELS = {
+    "PENDING": "待确认",
+    "CONFIRMED": "已确认",
+    "DISPUTED": "有争议",
+}
+PAYMENT_RECORD_TAB_APPROVAL_STATUS = {
+    "pending_submit": "pending_submit",
+    "pending_approval": "pending_approval",
+    "rejected": "rejected",
+    "confirmed": "approved",
+}
+PAYMENT_RECORD_TAB_STEMS = {
+    "all": "全部记录",
+    "pending_submit": "待提交",
+    "pending_approval": "审批中",
+    "rejected": "已驳回",
+    "confirmed": "已确认",
+}
+
+
+def _blank_business_number(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _enum_value(value: object) -> str | None:
+    if value is None:
+        return None
+    return getattr(value, "value", value)
+
+
+def _payment_view_own_user_id(db: Session, current_user, team_id: int) -> str | None:
+    permission_codes = {
+        permission.code
+        for permission in permission_crud.get_user_permissions(db, current_user.id, team_id)
+    }
+    has_view_all = "payment:view:all" in permission_codes
+    has_view_own = "payment:view:own" in permission_codes
+    if not has_view_all and not has_view_own:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="没有查看回款数据的权限",
+        )
+    if has_view_own and not has_view_all:
+        return str(current_user.id)
+    return None
+
+
+def _attach_payment_plan_owner_names(projection_db: Session, plans: list[PaymentPlan]) -> None:
+    from app.models.user import User
+
+    owner_ids: set[int] = set()
+    owner_id_by_plan: dict[int, str] = {}
+    for plan in plans:
+        contract = getattr(plan, "contract", None)
+        opportunity = getattr(contract, "opportunity", None) if contract is not None else None
+        owner_id = None
+        if opportunity is not None and getattr(opportunity, "owner_id", None):
+            owner_id = str(opportunity.owner_id)
+        elif contract is not None and getattr(contract, "owner_id", None):
+            owner_id = str(contract.owner_id)
+        if owner_id is None:
+            continue
+        owner_id_by_plan[plan.id] = owner_id
+        if owner_id.isdigit():
+            owner_ids.add(int(owner_id))
+    owner_name_by_id = {
+        str(user.id): user.name
+        for user in projection_db.query(User).filter(User.id.in_(owner_ids)).all()
+    } if owner_ids else {}
+    for plan in plans:
+        owner_id = owner_id_by_plan.get(plan.id)
+        plan.owner_name = owner_name_by_id.get(owner_id) if owner_id else None
+
+
+def _payment_plan_export_row(plan: PaymentPlan) -> dict[str, object]:
+    contract = getattr(plan, "contract", None)
+    customer = getattr(contract, "customer", None) if contract is not None else None
+    status_value = _enum_value(plan.status)
+    return {
+        "plan_number": _blank_business_number(plan.plan_number),
+        "stage_name": plan.stage_name,
+        "customer_name": customer.account_name if customer is not None else None,
+        "contract_name": contract.contract_name if contract is not None else None,
+        "plan_amount": float(plan.planned_amount),
+        "due_date": plan.due_date,
+        "status": PAYMENT_PLAN_STATUS_LABELS.get(status_value, status_value),
+    }
+
+
+def _iter_payment_plan_export_rows(
+    stream,
+    projection_session_factory=SessionLocal,
+) -> Iterator[dict[str, object]]:
+    for batch in iter_batches(stream, 500):
+        projection_db = projection_session_factory()
+        try:
+            plans = payment_plan_crud._base_plans_query(projection_db, batch[0].team_id).filter(
+                PaymentPlan.id.in_([plan.id for plan in batch])
+            ).all()
+            plans_by_id = {plan.id: plan for plan in plans}
+            for streamed in batch:
+                plan = plans_by_id.get(streamed.id)
+                if plan is not None:
+                    yield _payment_plan_export_row(plan)
+        finally:
+            projection_db.close()
+
+
+
+def _build_payment_record_list_items(
+    projection_db: Session,
+    records: list[PaymentRecord],
+    team_id: int,
+    *,
+    include_approval: bool = True,
+) -> list[dict]:
+    from app.models.contract import Contract
+    from app.models.customer import Customer
+    from app.models.invoice import InvoiceApplication
+    from app.models.opportunity import Opportunity
+    from app.models.user import User
+
+    if not records:
+        return []
+
+    record_ids = [record.id for record in records]
+    plan_ids = list({record.payment_plan_id for record in records})
+    plans = {
+        plan.id: plan
+        for plan in projection_db.query(PaymentPlan).filter(PaymentPlan.id.in_(plan_ids)).all()
+    } if plan_ids else {}
+    contract_ids = {plan.contract_id for plan in plans.values() if plan.contract_id}
+    contracts = {
+        contract.id: contract
+        for contract in projection_db.query(Contract).filter(Contract.id.in_(contract_ids)).all()
+    } if contract_ids else {}
+    customer_ids = {contract.customer_id for contract in contracts.values() if contract.customer_id}
+    customers = {
+        customer.id: customer
+        for customer in projection_db.query(Customer).filter(
+            Customer.team_id == team_id,
+            Customer.id.in_(customer_ids),
+        ).all()
+    } if customer_ids else {}
+    opportunity_ids = {
+        contract.opportunity_id for contract in contracts.values() if contract.opportunity_id
+    }
+    opportunities = {
+        opportunity.id: opportunity
+        for opportunity in projection_db.query(Opportunity).filter(
+            Opportunity.id.in_(opportunity_ids)
+        ).all()
+    } if opportunity_ids else {}
+
+    record_ids_by_plan: dict[int, list[int]] = {}
+    for record in records:
+        record_ids_by_plan.setdefault(record.payment_plan_id, []).append(record.id)
+
+    latest_invoice_title_by_record: dict[int, str] = {}
+    has_invoice_application_table = (
+        inspect(projection_db.bind).has_table(InvoiceApplication.__tablename__)
+        if projection_db.bind
+        else True
+    )
+    if record_ids and has_invoice_application_table:
+        explicit_record_link = InvoiceApplication.payment_record_id.in_(record_ids)
+        plan_level_link = and_(
+            InvoiceApplication.payment_record_id.is_(None),
+            InvoiceApplication.payment_plan_id.in_(plan_ids),
+        )
+        invoice_rows = projection_db.query(
+            InvoiceApplication.payment_record_id,
+            InvoiceApplication.payment_plan_id,
+            InvoiceApplication.invoice_title_text,
+        ).filter(
+            InvoiceApplication.team_id == team_id,
+            or_(explicit_record_link, plan_level_link),
+        ).order_by(
+            case((explicit_record_link, 0), else_=1),
+            InvoiceApplication.created_time.desc(),
+            InvoiceApplication.id.desc(),
+        ).all()
+        for payment_record_id, payment_plan_id, invoice_title_text_value in invoice_rows:
+            target_record_ids = (
+                [payment_record_id]
+                if payment_record_id is not None
+                else record_ids_by_plan.get(payment_plan_id, [])
+            )
+            for target_record_id in target_record_ids:
+                if target_record_id not in latest_invoice_title_by_record:
+                    latest_invoice_title_by_record[target_record_id] = invoice_title_text_value
+
+    owner_id_by_record: dict[int, str] = {}
+    for record in records:
+        plan = plans.get(record.payment_plan_id)
+        contract = contracts.get(plan.contract_id) if plan is not None else None
+        opportunity = (
+            opportunities.get(contract.opportunity_id)
+            if contract is not None and contract.opportunity_id
+            else None
+        )
+        owner_id_value = (
+            opportunity.owner_id if opportunity is not None else (
+                contract.owner_id if contract is not None else None
+            )
+        )
+        if owner_id_value:
+            owner_id_by_record[record.id] = str(owner_id_value)
+
+    numeric_owner_ids = sorted({
+        int(owner_id_value)
+        for owner_id_value in owner_id_by_record.values()
+        if str(owner_id_value).isdigit()
+    })
+    owner_name_by_id = {
+        str(user.id): user.name
+        for user in projection_db.query(User).filter(User.id.in_(numeric_owner_ids)).all()
+    } if numeric_owner_ids else {}
+
+    approval_ids = [record.approval_id for record in records if record.approval_id]
+    approvals_by_id = {
+        approval.id: approval
+        for approval in projection_db.query(Approval).filter(Approval.id.in_(approval_ids)).all()
+    } if include_approval and approval_ids else {}
+    approval_records_by_approval: dict[int, list[ApprovalRecord]] = {}
+    flow_nodes_by_flow: dict[int, list[ApprovalNode]] = {}
+    if include_approval and approval_ids:
+        approval_records = projection_db.query(ApprovalRecord).filter(
+            ApprovalRecord.approval_id.in_(approval_ids)
+        ).order_by(ApprovalRecord.created_time).all()
+        for approval_record in approval_records:
+            approval_records_by_approval.setdefault(approval_record.approval_id, []).append(approval_record)
+        flow_ids = [approval.flow_id for approval in approvals_by_id.values() if approval.flow_id]
+        if flow_ids:
+            flow_nodes = projection_db.query(ApprovalNode).filter(
+                ApprovalNode.flow_id.in_(flow_ids)
+            ).order_by(ApprovalNode.node_order).all()
+            for node in flow_nodes:
+                flow_nodes_by_flow.setdefault(node.flow_id, []).append(node)
+
+    items = []
+    for record in records:
+        plan = plans.get(record.payment_plan_id)
+        contract = contracts.get(plan.contract_id) if plan is not None else None
+        customer = customers.get(contract.customer_id) if contract is not None else None
+        opportunity = (
+            opportunities.get(contract.opportunity_id)
+            if contract is not None and contract.opportunity_id
+            else None
+        )
+        owner_id = owner_id_by_record.get(record.id)
+        item_dict = {
+            "id": record.id,
+            "payment_plan_id": record.payment_plan_id,
+            "record_number": record.record_number,
+            "actual_amount": float(record.actual_amount),
+            "actual_payer_name": getattr(record, "actual_payer_name", None),
+            "payment_date": record.payment_date.isoformat() if record.payment_date else None,
+            "proof_attachment": getattr(record, "proof_attachment", None),
+            "commission_member_id": getattr(record, "commission_member_id", None),
+            "commission_member_name": getattr(record, "commission_member_name", None),
+            "notes": getattr(record, "notes", None),
+            "creator_id": getattr(record, "creator_id", None),
+            "creator_name": getattr(record, "creator_name", None),
+            "approval_phase": _enum_value(getattr(record, "approval_phase", None)),
+            "confirmation_status": _enum_value(record.confirmation_status),
+            "created_time": record.created_time.isoformat() if record.created_time else None,
+            "updated_time": getattr(record, "updated_time", None),
+            "last_modified_time": _payment_record_last_modified_time(record).isoformat(),
+            "contract_id": plan.contract_id if plan is not None else None,
+            "contract_name": contract.contract_name if contract is not None else None,
+            "stage_name": plan.stage_name if plan is not None else None,
+            "customer_id": customer.public_id if customer is not None else None,
+            "customer_name": customer.account_name if customer is not None else None,
+            "opportunity_id": opportunity.id if opportunity is not None else None,
+            "opportunity_name": opportunity.opportunity_name if opportunity is not None else None,
+            "invoice_title_text": latest_invoice_title_by_record.get(record.id),
+            "owner_id": owner_id,
+            "owner_name": owner_name_by_id.get(owner_id) if owner_id else None,
+            "approval_id": record.approval_id,
+        }
+
+        if include_approval and record.approval_id:
+            approval = approvals_by_id.get(record.approval_id)
+            if approval is not None:
+                approval_records = approval_records_by_approval.get(approval.id, [])
+                nodes_info = []
+                if approval.flow_id:
+                    for node in flow_nodes_by_flow.get(approval.flow_id, []):
+                        node_records = [row for row in approval_records if row.node_id == node.id]
+                        node_status = "PENDING"
+                        final_record = None
+                        if node_records:
+                            node_records_sorted = sorted(node_records, key=lambda row: row.created_time)
+                            final_record = node_records_sorted[-1]
+                            if final_record.action == "SUBMIT":
+                                node_status = "SUBMIT"
+                            elif final_record.action == "APPROVE":
+                                node_status = "APPROVE"
+                            elif final_record.action == "REJECT":
+                                node_status = "REJECT"
+                        approver_id = final_record.approver_id if final_record else None
+                        approver_name = final_record.approver_name if final_record else None
+                        if node_status == "APPROVE":
+                            approve_record = next(
+                                (row for row in node_records if row.action == "APPROVE"),
+                                None,
+                            )
+                            if approve_record:
+                                approver_id = approve_record.approver_id
+                                approver_name = approve_record.approver_name
+                        nodes_info.append({
+                            "id": node.id,
+                            "node_order": node.node_order,
+                            "node_name": node.node_name,
+                            "approve_role": node.approve_role,
+                            "status": node_status,
+                            "approver_id": approver_id,
+                            "approver_name": approver_name,
+                            "comment": final_record.comment if final_record else None,
+                        })
+                item_dict["approval"] = {
+                    "id": approval.id,
+                    "status": approval.status,
+                    "current_approver_name": _get_current_approver_names(projection_db, approval, team_id),
+                    "nodes": nodes_info,
+                }
+        items.append(item_dict)
+    return items
+
+
+def _payment_record_export_row(item: dict) -> dict[str, object]:
+    created_time = item.get("created_time")
+    if isinstance(created_time, str):
+        created_time = datetime.fromisoformat(created_time)
+    payment_date = item.get("payment_date")
+    if isinstance(payment_date, str):
+        payment_date = date.fromisoformat(payment_date)
+    confirmation_status = _enum_value(item.get("confirmation_status"))
+    return {
+        "record_number": _blank_business_number(item.get("record_number")),
+        "customer_name": item.get("customer_name"),
+        "actual_payer_name": item.get("actual_payer_name"),
+        "invoice_title_text": item.get("invoice_title_text"),
+        "contract_name": item.get("contract_name"),
+        "actual_amount": item.get("actual_amount"),
+        "owner_name": item.get("owner_name"),
+        "commission_member_name": item.get("commission_member_name"),
+        "payment_date": payment_date,
+        "confirmation_status": PAYMENT_RECORD_STATUS_LABELS.get(confirmation_status, confirmation_status),
+        "created_time": created_time,
+    }
+
+
+def _iter_payment_record_export_rows(
+    stream,
+    team_id: int,
+    projection_session_factory=SessionLocal,
+) -> Iterator[dict[str, object]]:
+    for batch in iter_batches(stream, 500):
+        projection_db = projection_session_factory()
+        try:
+            for item in _build_payment_record_list_items(
+                projection_db,
+                batch,
+                team_id,
+                include_approval=False,
+            ):
+                yield _payment_record_export_row(item)
+        finally:
+            projection_db.close()
+
 
 
 def _payment_record_response(
@@ -575,23 +978,8 @@ def list_payment_plans(
             sorts=parsed_sorts,
         ))
 
-        # Task 1.2: Computed fields are properties on the model, no need to set them
-        # Just enrich with contract/customer info
-        for plan in plans:
-            if hasattr(plan, 'contract') and plan.contract:
-                plan.contract_name = plan.contract.contract_name
-                plan.creator_id = plan.contract.creator_id
-                # 负责人：通过合同关联商机获取
-                if hasattr(plan.contract, 'opportunity') and plan.contract.opportunity:
-                    plan.owner_id = plan.contract.opportunity.owner_id
-                    # 查询负责人姓名
-                    from app.crud.user import user_crud
-                    owner = user_crud.get_by_id(db, int(plan.contract.opportunity.owner_id)) if plan.contract.opportunity.owner_id else None
-                    plan.owner_name = owner.name if owner else None
-                if hasattr(plan.contract, 'customer') and plan.contract.customer:
-                    plan.customer_id = plan.contract.customer.public_id
-                    plan.customer_name = plan.contract.customer.account_name
-        
+        _attach_payment_plan_owner_names(db, plans)
+
         total_pages = (total + page_size - 1) // page_size if total > 0 else 0
         
         return PaginatedResponse[PaymentPlanResponse](
@@ -608,6 +996,40 @@ def list_payment_plans(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"查询回款计划失败: {str(e)}"
         )
+
+
+@router.post(
+    "/payment-plans/export",
+    dependencies=[Depends(require_permission("payment:plan:export"))],
+    summary="导出回款计划列表",
+    description="按当前筛选条件导出全部匹配回款计划为 Excel",
+)
+def export_payment_plans(
+    request: PaymentPlanListExportRequest,
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    current_user_id = _payment_view_own_user_id(db, current_user, team_id)
+    query = run_or_400(lambda: payment_plan_crud.build_list_query(
+        db,
+        team_id=team_id,
+        status=PAYMENT_PLAN_TAB_STATUS.get(request.tab),
+        current_user_id=current_user_id,
+        search=request.search,
+        filters=request.filters,
+        sorts=request.sorts,
+    ))
+    stream = query.enable_eagerloads(False).execution_options(stream_results=True).yield_per(500)
+    rows = _iter_payment_plan_export_rows(stream, projection_session_factory=SessionLocal)
+    generated = run_list_export_or_400(lambda: create_list_export_file(
+        catalog=PAYMENT_PLANS_LIST_EXPORT_CATALOG,
+        selected_keys=request.fields,
+        rows=rows,
+        file_stem=f"回款计划列表-{PAYMENT_PLAN_TAB_STEMS.get(request.tab, '全部计划')}",
+    ))
+    return list_export_file_response(generated)
+
 
 
 @router.get("/payment-plans/badge-counts", summary="获取回款计划 Badge 数量", description="返回各类待处理数量：pending(未登记)、partial(部分回款)、overdue(逾期)、pending_submit(待提交)、pending_approval(审批中-团队)、pending_approval_me(审批中-待我审批)")
@@ -1756,200 +2178,11 @@ def list_payment_records(
             sorts=parsed_sorts,
         ))
 
-        # Task 1.4: Calculate pending_approval_me_count
         user_role_objs = role_crud.get_user_roles(db, current_user.id, team_id)
         user_roles = [r.code for r in user_role_objs]
         pending_approval_me_count = query_pending_approval_me(db, team_id, user_roles)
-
-        # Build response with approval info
-        from app.models.invoice import InvoiceApplication
-        from app.models.user import User
-
-        record_ids = [record.id for record in records]
-        record_ids_by_plan: dict[int, list[int]] = {}
-        for record in records:
-            record_ids_by_plan.setdefault(record.payment_plan_id, []).append(record.id)
-
-        latest_invoice_title_by_record: dict[int, str] = {}
-        has_invoice_application_table = inspect(db.bind).has_table(InvoiceApplication.__tablename__) if db.bind else True
-        if record_ids and has_invoice_application_table:
-            plan_ids = list(record_ids_by_plan)
-            explicit_record_link = InvoiceApplication.payment_record_id.in_(record_ids)
-            plan_level_link = and_(
-                InvoiceApplication.payment_record_id.is_(None),
-                InvoiceApplication.payment_plan_id.in_(plan_ids),
-            )
-            invoice_rows = db.query(
-                InvoiceApplication.payment_record_id,
-                InvoiceApplication.payment_plan_id,
-                InvoiceApplication.invoice_title_text,
-            ).filter(
-                InvoiceApplication.team_id == team_id,
-                or_(explicit_record_link, plan_level_link),
-            ).order_by(
-                case((explicit_record_link, 0), else_=1),
-                InvoiceApplication.created_time.desc(),
-                InvoiceApplication.id.desc(),
-            ).all()
-            for payment_record_id, payment_plan_id, invoice_title_text_value in invoice_rows:
-                target_record_ids = (
-                    [payment_record_id]
-                    if payment_record_id is not None
-                    else record_ids_by_plan.get(payment_plan_id, [])
-                )
-                for target_record_id in target_record_ids:
-                    if target_record_id not in latest_invoice_title_by_record:
-                        latest_invoice_title_by_record[target_record_id] = invoice_title_text_value
-
-        owner_id_by_record: dict[int, str] = {}
-        for record in records:
-            contract = record.payment_plan.contract if record.payment_plan and record.payment_plan.contract else None
-            opportunity = contract.opportunity if contract and getattr(contract, "opportunity", None) else None
-            owner_id_value = opportunity.owner_id if opportunity else (contract.owner_id if contract else None)
-            if owner_id_value:
-                owner_id_by_record[record.id] = str(owner_id_value)
-
-        numeric_owner_ids = sorted({
-            int(owner_id_value)
-            for owner_id_value in owner_id_by_record.values()
-            if str(owner_id_value).isdigit()
-        })
-        owner_name_by_id = {
-            str(user.id): user.name
-            for user in db.query(User).filter(User.id.in_(numeric_owner_ids)).all()
-        } if numeric_owner_ids else {}
-
-        items = []
-        for record in records:
-            # Enrich with contract/customer info
-            record.contract_id = None
-            record.contract_name = None
-            record.customer_id = None
-            record.customer_name = None
-            record.opportunity_id = None
-            record.opportunity_name = None
-            record.stage_name = None
-            record.invoice_title_text = latest_invoice_title_by_record.get(record.id)
-            record.owner_id = owner_id_by_record.get(record.id)
-            record.owner_name = owner_name_by_id.get(record.owner_id) if record.owner_id else None
-
-            if hasattr(record, 'payment_plan') and record.payment_plan:
-                record.contract_id = record.payment_plan.contract_id
-                if hasattr(record.payment_plan, 'contract') and record.payment_plan.contract:
-                    record.contract_name = record.payment_plan.contract.contract_name
-                    if hasattr(record.payment_plan.contract, 'customer') and record.payment_plan.contract.customer:
-                        record.customer_id = record.payment_plan.contract.customer.public_id
-                        record.customer_name = record.payment_plan.contract.customer.account_name
-                    if hasattr(record.payment_plan.contract, 'opportunity') and record.payment_plan.contract.opportunity:
-                        record.opportunity_id = record.payment_plan.contract.opportunity.id
-                        record.opportunity_name = record.payment_plan.contract.opportunity.opportunity_name
-                record.stage_name = record.payment_plan.stage_name
-
-            # Build item dict with approval info
-            item_dict = {
-                "id": record.id,
-                "payment_plan_id": record.payment_plan_id,
-                "record_number": record.record_number,
-                "actual_amount": float(record.actual_amount),
-                "actual_payer_name": getattr(record, "actual_payer_name", None),
-                "payment_date": record.payment_date.isoformat(),
-                "proof_attachment": getattr(record, "proof_attachment", None),
-                "commission_member_id": getattr(record, "commission_member_id", None),
-                "commission_member_name": getattr(record, "commission_member_name", None),
-                "notes": getattr(record, "notes", None),
-                "creator_id": getattr(record, "creator_id", None),
-                "creator_name": getattr(record, "creator_name", None),
-                "approval_phase": record.approval_phase.value if hasattr(getattr(record, "approval_phase", None), 'value') else getattr(record, "approval_phase", None),
-                "confirmation_status": record.confirmation_status,
-                "created_time": record.created_time.isoformat(),
-                "updated_time": getattr(record, "updated_time", None),
-                "last_modified_time": _payment_record_last_modified_time(record).isoformat(),
-                "contract_id": record.contract_id,
-                "contract_name": record.contract_name,
-                "stage_name": record.stage_name,
-                "customer_id": record.customer_id,
-                "customer_name": record.customer_name,
-                "opportunity_id": record.opportunity_id,
-                "opportunity_name": record.opportunity_name,
-                "invoice_title_text": record.invoice_title_text,
-                "owner_id": record.owner_id,
-                "owner_name": record.owner_name,
-                "approval_id": record.approval_id,
-            }
-
-            # Task 1.4: Add approval info if exists
-            if record.approval_id and record.approval:
-                approval_records = db.query(ApprovalRecord).filter(
-                    ApprovalRecord.approval_id == record.approval.id
-                ).order_by(ApprovalRecord.created_time).all()
-
-                # Get flow nodes
-                nodes_info = []
-                if record.approval.flow_id:
-                    flow_nodes = db.query(ApprovalNode).filter(
-                        ApprovalNode.flow_id == record.approval.flow_id
-                    ).order_by(ApprovalNode.node_order).all()
-
-                    for node in flow_nodes:
-                        # 查找该节点的所有审批记录（可能有 SUBMIT + APPROVE）
-                        node_records = [r for r in approval_records if r.node_id == node.id]
-
-                        # 节点状态逻辑：
-                        # - 如果有多条记录（SUBMIT + APPROVE/REJECT），取最后一条（审批结果）
-                        # - 如果只有一条 SUBMIT，显示 SUBMIT
-                        # - 如果没有记录，显示 PENDING
-                        node_status = "PENDING"
-                        final_record = None
-
-                        if node_records:
-                            # 按时间排序，取最后一条（审批结果）
-                            node_records_sorted = sorted(node_records, key=lambda r: r.created_time)
-                            final_record = node_records_sorted[-1]
-
-                            if final_record.action == "SUBMIT":
-                                node_status = "SUBMIT"
-                            elif final_record.action == "APPROVE":
-                                node_status = "APPROVE"
-                            elif final_record.action == "REJECT":
-                                node_status = "REJECT"
-
-                        # approver_id/approver_name：取最后一条记录
-                        approver_id = final_record.approver_id if final_record else None
-                        approver_name = final_record.approver_name if final_record else None
-
-                        # 对于审批通过，显示审批人（APPROVE 记录）
-                        if node_status == "APPROVE":
-                            approve_record = next(
-                                (r for r in node_records if r.action == "APPROVE"),
-                                None
-                            )
-                            if approve_record:
-                                approver_id = approve_record.approver_id
-                                approver_name = approve_record.approver_name
-
-                        nodes_info.append({
-                            "id": node.id,
-                            "node_order": node.node_order,
-                            "node_name": node.node_name,
-                            "approve_role": node.approve_role,
-                            "status": node_status,
-                            "approver_id": approver_id,
-                            "approver_name": approver_name,
-                            "comment": final_record.comment if final_record else None,
-                        })
-
-                item_dict["approval"] = {
-                    "id": record.approval.id,
-                    "status": record.approval.status,
-                    "current_approver_name": _get_current_approver_names(db, record.approval, team_id),
-                    "nodes": nodes_info,
-                }
-
-            items.append(item_dict)
-
+        items = _build_payment_record_list_items(db, records, team_id)
         total_pages = (total + page_size - 1) // page_size if total > 0 else 0
-
-        # Task 1.4: Return response with pending_approval_me_count
         return {
             "items": items,
             "total": total,
@@ -1965,6 +2198,40 @@ def list_payment_records(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"查询回款记录失败: {str(e)}"
         )
+
+
+@router.post(
+    "/payment-records/export",
+    dependencies=[Depends(require_permission("payment:record:export"))],
+    summary="导出回款记录列表",
+    description="按当前筛选条件导出全部匹配回款记录为 Excel",
+)
+def export_payment_records(
+    request: PaymentRecordListExportRequest,
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    current_user_id = _payment_view_own_user_id(db, current_user, team_id)
+    query = run_or_400(lambda: payment_record_crud.build_list_query(
+        db,
+        team_id=team_id,
+        approval_status=PAYMENT_RECORD_TAB_APPROVAL_STATUS.get(request.tab),
+        current_user_id=current_user_id,
+        search=request.search,
+        filters=request.filters,
+        sorts=request.sorts,
+    ))
+    stream = query.enable_eagerloads(False).execution_options(stream_results=True).yield_per(500)
+    rows = _iter_payment_record_export_rows(stream, team_id, projection_session_factory=SessionLocal)
+    generated = run_list_export_or_400(lambda: create_list_export_file(
+        catalog=PAYMENT_RECORDS_LIST_EXPORT_CATALOG,
+        selected_keys=request.fields,
+        rows=rows,
+        file_stem=f"回款记录列表-{PAYMENT_RECORD_TAB_STEMS.get(request.tab, '全部记录')}",
+    ))
+    return list_export_file_response(generated)
+
 
 
 @router.get("/reminders/overdue", response_model=List[PaymentReminder], summary="查询逾期回款", description="获取所有逾期的回款计划，用于催收提醒")

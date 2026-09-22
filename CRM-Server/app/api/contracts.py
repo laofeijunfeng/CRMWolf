@@ -24,11 +24,25 @@ from app.core.deps import (
     check_customer_view_permission,
     get_current_active_user,
     get_current_user_team,
+    require_permission,
 )
 from app.crud.contract import ApprovalService, contract_crud
 from app.crud.customer import contact_crud
 from app.crud.opportunity import opportunity_crud
+from app.core.list_export import (
+    CONTRACTS_LIST_EXPORT_CATALOG,
+    create_list_export_file,
+    iter_batches,
+    list_export_file_response,
+    run_list_export_or_400,
+)
+from app.core.database import SessionLocal
+from app.schemas.list_export import ContractListExportRequest
+from fastapi.responses import FileResponse
+from typing import Iterator
 from app.schemas.common import PaginatedResponse
+from app.models.opportunity import Opportunity
+from app.models.customer import Customer
 from app.schemas.contract import (
     ContractCreate,
     ContractDetailResponse,
@@ -171,9 +185,17 @@ def _get_latest_official_license_info(db: Session, contract_id: Optional[int]) -
     }
 
 
-def _contract_response_base(db: Session, contract) -> dict:
-    customer_info = _get_customer_basic_info(db, contract.customer_id)
-    opportunity_info = _get_opportunity_list_info(db, contract.opportunity_id)
+def _contract_response_base(
+    db: Session,
+    contract,
+    *,
+    customer_info: Optional[dict] = None,
+    opportunity_info: Optional[dict] = None,
+) -> dict:
+    if customer_info is None:
+        customer_info = _get_customer_basic_info(db, contract.customer_id)
+    if opportunity_info is None:
+        opportunity_info = _get_opportunity_list_info(db, contract.opportunity_id)
     return {
         "id": contract.id,
         "contract_number": contract.contract_number,
@@ -681,6 +703,172 @@ def get_contracts(
         page_size=limit,
         total_pages=total_pages
     )
+
+
+def _build_contract_list_responses(projection_db, contracts, team_id: int) -> List[ContractListResponse]:
+    """Batch-project contract ORM rows into list responses with display info."""
+    contract_ids = [c.id for c in contracts]
+    customer_ids = {c.customer_id for c in contracts if c.customer_id}
+    opportunity_ids = {c.opportunity_id for c in contracts if c.opportunity_id}
+    user_ids = {uid for c in contracts for uid in (c.owner_id, c.creator_id) if uid}
+
+    customers = {}
+    if customer_ids:
+        customer_rows = projection_db.query(Customer).filter(
+            Customer.team_id == team_id, Customer.id.in_(customer_ids)
+        ).all()
+        customers = {c.id: c for c in customer_rows}
+
+    opportunities = {}
+    if opportunity_ids:
+        opportunity_rows = projection_db.query(Opportunity).filter(
+            Opportunity.id.in_(opportunity_ids)
+        ).all()
+        opportunities = {o.id: o for o in opportunity_rows}
+
+    users_info = {}
+    if user_ids:
+        user_placeholders = ','.join(f':user_{i}' for i in range(len(user_ids)))
+        user_rows = projection_db.execute(text(f"""
+            SELECT id, name, avatar_url FROM users WHERE id IN ({user_placeholders})
+        """), {f'user_{i}': int(uid) for i, uid in enumerate(user_ids)}).fetchall()
+        users_info = {str(row[0]): {"id": str(row[0]), "name": row[1], "avatar_url": row[2]} for row in user_rows}
+
+    latest_licenses = {}
+    if contract_ids:
+        placeholders = ','.join(f':contract_{i}' for i in range(len(contract_ids)))
+        license_rows = projection_db.execute(text(f"""
+            SELECT contract_id, authorized_users, expiry_date
+            FROM crm_license_applications
+            WHERE contract_id IN ({placeholders})
+              AND license_type = 'OFFICIAL'
+              AND status = 'ISSUED'
+            ORDER BY last_modified_time DESC, id DESC
+        """), {f'contract_{i}': cid for i, cid in enumerate(contract_ids)}).fetchall()
+        for row in license_rows:
+            latest_licenses.setdefault(row[0], {"authorized_users": row[1], "expiry_date": row[2]})
+
+    result = []
+    for contract in contracts:
+        customer = customers.get(contract.customer_id)
+        opportunity = opportunities.get(contract.opportunity_id)
+        latest_license = latest_licenses.get(contract.id)
+        customer_info = {
+            "id": customer.public_id,
+            "public_id": customer.public_id,
+            "account_name": customer.account_name,
+        } if customer else None
+        opportunity_info = {
+            "id": opportunity.public_id,
+            "opportunity_name": opportunity.opportunity_name,
+            "purchase_type": opportunity.purchase_type,
+        } if opportunity else None
+        contract_dict = _contract_response_base(
+            projection_db,
+            contract,
+            customer_info=customer_info,
+            opportunity_info=opportunity_info,
+        )
+        contract_dict.update({
+            "customer_name": customer_info["account_name"] if customer_info else None,
+            "opportunity_name": opportunity_info["opportunity_name"] if opportunity_info else None,
+            "purchase_type": opportunity_info["purchase_type"] if opportunity_info else None,
+            "license_authorized_users": (
+                latest_license["authorized_users"] if latest_license else contract.user_count
+            ),
+            "license_expiry_date": latest_license["expiry_date"] if latest_license else None,
+            "customer_info": customer_info,
+            "opportunity_info": (
+                {"id": opportunity_info["id"], "opportunity_name": opportunity_info["opportunity_name"]}
+                if opportunity_info
+                else None
+            ),
+            "owner_info": users_info.get(str(contract.owner_id)),
+            "creator_info": users_info.get(str(contract.creator_id)),
+        })
+        result.append(ContractListResponse(**contract_dict))
+
+    return result
+
+
+CONTRACT_STATUS_LABELS = {"DRAFT": "草稿", "PENDING_REVIEW": "审批中", "SIGNED": "已签署", "EXPIRED": "已到期"}
+LICENSE_TYPE_LABELS = {"SUBSCRIPTION": "订阅", "PERPETUAL": "买断"}
+PURCHASE_TYPE_LABELS = {"NEW": "新购", "RENEWAL": "续购", "EXPANSION": "增购"}
+
+
+def _contract_export_row(item: ContractListResponse) -> dict[str, object]:
+    return {
+        "contract_number": item.contract_number,
+        "contract_name": item.contract_name,
+        "customer_name": item.customer_name,
+        "opportunity_name": item.opportunity_name,
+        "total_amount": item.total_amount,
+        "license_type": LICENSE_TYPE_LABELS.get(item.license_type, item.license_type),
+        "purchase_type": PURCHASE_TYPE_LABELS.get(item.purchase_type, item.purchase_type),
+        "subscription_years": item.subscription_years,
+        "license_authorized_users": item.license_authorized_users,
+        "standard_unit_price": item.standard_unit_price,
+        "license_expiry_date": item.license_expiry_date,
+        "signing_date": item.signing_date,
+        "created_time": item.created_time,
+        "owner": item.owner_info.name if item.owner_info else None,
+    }
+
+
+def _iter_contract_export_rows(stream, team_id: int, projection_session_factory=SessionLocal) -> Iterator[dict[str, object]]:
+    for batch in iter_batches(stream, 500):
+        projection_db = projection_session_factory()
+        try:
+            for item in _build_contract_list_responses(projection_db, batch, team_id):
+                yield _contract_export_row(item)
+        finally:
+            projection_db.close()
+
+
+@router.post(
+    "/export",
+    dependencies=[Depends(require_permission("contract:export"))],
+    summary="导出合同列表",
+    description="按当前筛选条件导出全部匹配合同为 Excel",
+)
+def export_contracts(
+    request: ContractListExportRequest,
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    from app.crud.permission import permission_crud
+
+    permission_codes = {
+        p.code
+        for p in permission_crud.get_user_permissions(db, current_user.id, team_id)
+    }
+    has_view_all = "contract:view:all" in permission_codes
+    owner_id = enforce_owner_view_scope(
+        request.filters,
+        current_user_id=str(current_user.id),
+        has_view_all=has_view_all,
+        permission_detail="只能查看自己负责的合同，或需要 contract:view:all 权限查看他人数据",
+    )
+
+    query = run_or_400(lambda: contract_crud.build_list_query(
+        db,
+        team_id=team_id,
+        status=request.tab if request.tab != "all" else None,
+        owner_id=owner_id,
+        search=request.search,
+        filters=request.filters,
+        sorts=request.sorts,
+    ))
+    stream = query.enable_eagerloads(False).execution_options(stream_results=True).yield_per(500)
+    rows = _iter_contract_export_rows(stream, team_id, projection_session_factory=SessionLocal)
+    generated = run_list_export_or_400(lambda: create_list_export_file(
+        catalog=CONTRACTS_LIST_EXPORT_CATALOG,
+        selected_keys=request.fields,
+        rows=rows,
+        file_stem=f"合同列表-{CONTRACT_STATUS_LABELS.get(request.tab, '全部合同') if request.tab != 'all' else '全部合同'}",
+    ))
+    return list_export_file_response(generated)
 
 
 @router.get("/opportunity/{opportunity_id}", response_model=Optional[ContractListResponse], summary="根据商机获取合同", description="""

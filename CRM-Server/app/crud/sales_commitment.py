@@ -11,7 +11,7 @@ from app.core.list_query import (
     ListQueryContext,
     SortCondition,
     apply_search,
-    paginate_optional_list_query,
+    build_optional_list_query,
     uses_unified_list_query,
     without_filter_field,
 )
@@ -395,6 +395,120 @@ class FollowUpTaskCRUD:
         )
         return query.order_by(FollowUpTask.due_at.asc(), FollowUpTask.id.asc()).all()
 
+    def build_for_owner_query(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        owner_id: str,
+        statuses: Iterable[str] | None = None,
+        due_at_start: datetime | None = None,
+        due_at_end: datetime | None = None,
+        due_window: str | None = None,
+        due_window_now: datetime | None = None,
+        due_window_timezone: str | None = None,
+        customer_id: int | None = None,
+        filters: list[FilterCondition] | None = None,
+        sorts: list[SortCondition] | None = None,
+        search: str | None = None,
+    ) -> Query[Any]:
+        query = db.query(FollowUpTask).filter(
+            FollowUpTask.team_id == team_id,
+            FollowUpTask.owner_id == owner_id,
+        )
+        query = self._apply_task_filters(
+            query,
+            statuses=statuses,
+            due_at_start=due_at_start,
+            due_at_end=due_at_end,
+            due_window=due_window,
+            due_window_now=due_window_now,
+            due_window_timezone=due_window_timezone,
+            customer_id=customer_id,
+        )
+        return self._order_task_query(
+            query,
+            team_id=team_id,
+            current_user_id=owner_id,
+            statuses=statuses,
+            filters=filters,
+            sorts=sorts,
+            search=search,
+        )
+
+    def build_for_customer_query(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        customer_id: int,
+        statuses: Iterable[str] | None = None,
+        owner_id: str | None = None,
+        due_at_start: datetime | None = None,
+        due_at_end: datetime | None = None,
+        due_window: str | None = None,
+        due_window_now: datetime | None = None,
+        due_window_timezone: str | None = None,
+        filters: list[FilterCondition] | None = None,
+        sorts: list[SortCondition] | None = None,
+        search: str | None = None,
+    ) -> Query[Any]:
+        query = db.query(FollowUpTask).filter(
+            FollowUpTask.team_id == team_id,
+            FollowUpTask.customer_id == customer_id,
+        )
+        if owner_id is not None:
+            query = query.filter(FollowUpTask.owner_id == owner_id)
+        query = self._apply_task_filters(
+            query,
+            statuses=statuses,
+            due_at_start=due_at_start,
+            due_at_end=due_at_end,
+            due_window=due_window,
+            due_window_now=due_window_now,
+            due_window_timezone=due_window_timezone,
+        )
+        return self._order_task_query(
+            query,
+            team_id=team_id,
+            current_user_id=owner_id,
+            statuses=statuses,
+            filters=filters,
+            sorts=sorts,
+            search=search,
+        )
+
+    def _order_task_query(
+        self,
+        query: Query[Any],
+        *,
+        team_id: int,
+        current_user_id: str | None,
+        statuses: Iterable[str] | None,
+        filters: list[FilterCondition] | None,
+        sorts: list[SortCondition] | None,
+        search: str | None,
+    ) -> Query[Any]:
+        context = ListQueryContext(db=query.session, team_id=team_id, current_user_id=current_user_id)
+        if uses_unified_list_query(filters=filters, sorts=sorts):
+            effective_filters = without_filter_field(filters, "status_label") if statuses is not None else filters
+            _, ordered = build_optional_list_query(
+                query,
+                FOLLOW_UP_TASKS_LIST_QUERY_CATALOG,
+                filters=effective_filters,
+                sorts=sorts,
+                context=context,
+                search=search,
+            )
+            return ordered.order_by(FollowUpTask.id.asc())
+        query = apply_search(
+            query,
+            FOLLOW_UP_TASKS_LIST_QUERY_CATALOG,
+            search,
+            context=context,
+        )
+        return query.order_by(FollowUpTask.due_at.asc(), FollowUpTask.id.asc())
+
     def list_for_owner(
         self,
         db: Session,
@@ -414,12 +528,10 @@ class FollowUpTaskCRUD:
         sorts: list[SortCondition] | None = None,
         search: str | None = None,
     ) -> tuple[list[FollowUpTask], int]:
-        query = db.query(FollowUpTask).filter(
-            FollowUpTask.team_id == team_id,
-            FollowUpTask.owner_id == owner_id,
-        )
-        query = self._apply_task_filters(
-            query,
+        query = self.build_for_owner_query(
+            db,
+            team_id=team_id,
+            owner_id=owner_id,
             statuses=statuses,
             due_at_start=due_at_start,
             due_at_end=due_at_end,
@@ -427,28 +539,12 @@ class FollowUpTaskCRUD:
             due_window_now=due_window_now,
             due_window_timezone=due_window_timezone,
             customer_id=customer_id,
+            filters=filters,
+            sorts=sorts,
+            search=search,
         )
-        if uses_unified_list_query(filters=filters, sorts=sorts):
-            effective_filters = without_filter_field(filters, "status_label") if statuses is not None else filters
-            return paginate_optional_list_query(
-                query,
-                FOLLOW_UP_TASKS_LIST_QUERY_CATALOG,
-                skip=skip,
-                limit=limit,
-                filters=effective_filters,
-                sorts=sorts,
-                context=ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id),
-                search=search,
-            )
-        query = apply_search(
-            query,
-            FOLLOW_UP_TASKS_LIST_QUERY_CATALOG,
-            search,
-            context=ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id),
-        )
-        total = query.count()
-        rows = query.order_by(FollowUpTask.due_at.asc(), FollowUpTask.id.asc()).offset(skip).limit(limit).all()
-        return rows, total
+        total = query.order_by(None).count()
+        return query.offset(skip).limit(limit).all(), total
 
     def list_for_customer(
         self,
@@ -469,42 +565,23 @@ class FollowUpTaskCRUD:
         sorts: list[SortCondition] | None = None,
         search: str | None = None,
     ) -> tuple[list[FollowUpTask], int]:
-        query = db.query(FollowUpTask).filter(
-            FollowUpTask.team_id == team_id,
-            FollowUpTask.customer_id == customer_id,
-        )
-        if owner_id is not None:
-            query = query.filter(FollowUpTask.owner_id == owner_id)
-        query = self._apply_task_filters(
-            query,
+        query = self.build_for_customer_query(
+            db,
+            team_id=team_id,
+            customer_id=customer_id,
             statuses=statuses,
+            owner_id=owner_id,
             due_at_start=due_at_start,
             due_at_end=due_at_end,
             due_window=due_window,
             due_window_now=due_window_now,
             due_window_timezone=due_window_timezone,
+            filters=filters,
+            sorts=sorts,
+            search=search,
         )
-        if uses_unified_list_query(filters=filters, sorts=sorts):
-            effective_filters = without_filter_field(filters, "status_label") if statuses is not None else filters
-            return paginate_optional_list_query(
-                query,
-                FOLLOW_UP_TASKS_LIST_QUERY_CATALOG,
-                skip=skip,
-                limit=limit,
-                filters=effective_filters,
-                sorts=sorts,
-                context=ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id),
-                search=search,
-            )
-        query = apply_search(
-            query,
-            FOLLOW_UP_TASKS_LIST_QUERY_CATALOG,
-            search,
-            context=ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id),
-        )
-        total = query.count()
-        rows = query.order_by(FollowUpTask.due_at.asc(), FollowUpTask.id.asc()).offset(skip).limit(limit).all()
-        return rows, total
+        total = query.order_by(None).count()
+        return query.offset(skip).limit(limit).all(), total
 
     def create(
         self,
