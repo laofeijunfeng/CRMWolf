@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from uuid import UUID
+import uuid
 
 import pytest
 from sqlalchemy import create_engine, event
@@ -21,7 +23,10 @@ from app.models.agent_persistence import (
     AgentUIAction,
     AgentUIActionStatus,
 )
-from app.models.customer import Customer, CustomerMember
+from app.models.agent_turn_execution import AgentTurnExecution
+from app.models.user import User
+from app.models.customer import Customer, CustomerMember, CustomerProduct
+from app.models.sales_commitment import FollowUpTask, FollowUpTaskConfirmationCase
 from app.schemas.agent_persistence import AgentUIActionRegistration
 from app.services.agent import application as application_module
 from app.services.agent.application import AgentApplicationService
@@ -35,10 +40,14 @@ from app.services.agent.orchestrator import (
     RootDecision,
     RootRuntimeContext,
     RootTurnInput,
+    TextTurnInput,
     WorkflowContinuation,
     WorkflowDispatchResult,
 )
+from app.services.agent.orchestrator.contracts import RootContextSnapshot, RootRoutingPlan
+from app.services.agent.orchestrator.graph import RootOrchestrator, build_root_graph_config
 from app.services.agent.orchestrator.context import DatabaseRootContextResolver
+from app.services.agent.orchestrator.errors import WorkflowCheckpointUnavailableError
 from app.services.agent.query import CRMQueryAgentResult
 from app.services.agent.semantic_plan import AgentSemanticPlan
 from app.services.agent.ui.actions import ActionAlreadyConsumedError, AgentUIActionRepository
@@ -48,6 +57,7 @@ from app.services.agent.ui.schemas import (
     TextAgentInput,
 )
 from app.services.agent.workflow import (
+    WorkflowCancelledResult,
     WorkflowCompletedResult,
     WorkflowFailedResult,
     WorkflowInteraction,
@@ -60,6 +70,7 @@ from app.services.agent.workflow import (
 from app.services.agent.workflow.progress import (
     awaiting_required_input_progress,
     execution_progress,
+    required_input_cancelled_progress,
 )
 from app.utils.time import business_now
 
@@ -144,9 +155,7 @@ def _query_dispatch() -> QueryDispatchResult:
                             }
                         ],
                         "total": 1,
-                        "applied_filters": [
-                            {"field": "city", "operator": "eq", "value": "上海"}
-                        ],
+                        "applied_filters": [{"field": "city", "operator": "eq", "value": "上海"}],
                         "applied_sorts": [],
                         "facts": [],
                         "warnings": [],
@@ -251,6 +260,39 @@ def _waiting_workflow_dispatch() -> WorkflowDispatchResult:
     )
 
 
+def _follow_up_content_workflow_dispatch() -> WorkflowDispatchResult:
+    return WorkflowDispatchResult(
+        decision=_decision("WORKFLOW"),
+        workflow_result=WorkflowWaitingResult(
+            workflow_ref=WorkflowRef(workflow_id="wf_follow_up", interrupt_id="intr_content"),
+            assistant_text="请补充本次客户跟进的具体内容。",
+            interaction=WorkflowInteraction(
+                interaction_id="int_follow_up_content",
+                interaction_type="text_input",
+                business_action="provide_follow_up_content",
+                title="补充跟进内容",
+                allow_cancel=True,
+                prompt="请补充本次客户跟进的具体内容。",
+                allow_blank=False,
+            ),
+            progress=awaiting_required_input_progress(),
+        ),
+        continuation=_waiting_workflow_dispatch().continuation.model_copy(
+            update={"workflow_ref": WorkflowRef(workflow_id="wf_follow_up", interrupt_id="intr_content")}
+        ),
+    )
+
+
+def _cancelled_workflow_dispatch(action_id: str) -> WorkflowDispatchResult:
+    return WorkflowDispatchResult(
+        decision=_decision("WORKFLOW", relation="CONTINUE_TASK"),
+        workflow_result=WorkflowCancelledResult(
+            workflow_ref=WorkflowRef(workflow_id="wf_follow_up"),
+            assistant_text="已取消当前工作流。",
+            progress=required_input_cancelled_progress(),
+        ),
+        action_claim_id=action_id,
+    )
 
 
 class _CapturingDurableWorkBinder:
@@ -263,6 +305,7 @@ class _CapturingDurableWorkBinder:
         assert db.query(AgentMessage).filter_by(id=binding.source_user_message_id).one()
         assert db.query(AgentMessage).filter_by(id=binding.source_assistant_message_id).one()
         self.calls.append({"receipts": receipts, "binding": binding})
+
 
 class _FakeRootOrchestrator:
     def __init__(
@@ -336,19 +379,9 @@ class _ProgressRootOrchestrator(_FakeRootOrchestrator):
 @pytest.fixture
 def application_harness(monkeypatch):
     engine = create_engine(
-        "sqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
+        f"sqlite:///file:agent-app-{uuid.uuid4().hex}?mode=memory&cache=shared&uri=true",
+        connect_args={"check_same_thread": False, "uri": True},
     )
-    @event.listens_for(engine, "connect")
-    def _disable_sqlite_driver_transactions(dbapi_connection, connection_record):
-        del connection_record
-        dbapi_connection.isolation_level = None
-
-    @event.listens_for(engine, "begin")
-    def _begin_sqlite_transaction(connection):
-        connection.exec_driver_sql("BEGIN")
-
     Base.metadata.create_all(
         engine,
         tables=[
@@ -356,8 +389,13 @@ def application_harness(monkeypatch):
             AgentMessage.__table__,
             AgentQueryResultSet.__table__,
             AgentUIAction.__table__,
+            AgentTurnExecution.__table__,
+            User.__table__,
             Customer.__table__,
             CustomerMember.__table__,
+            CustomerProduct.__table__,
+            FollowUpTask.__table__,
+            FollowUpTaskConfirmationCase.__table__,
         ],
     )
     session_factory = sessionmaker(bind=engine)
@@ -449,9 +487,7 @@ async def _start_interaction(service: AgentApplicationService) -> tuple[int, str
         request_input=TextAgentInput(type="text", text="创建跟进任务"),
         client_request_id=UUID("9fa2e0e8-86d4-4d6c-a1b0-6490b2bf12be"),
     )
-    interaction = next(
-        block for block in events[1]["message"]["blocks"] if block["type"] == "interaction"
-    )
+    interaction = next(block for block in events[1]["message"]["blocks"] if block["type"] == "interaction")
     action_id = interaction["submit_action_id"]
     return events[0]["session_id"], action_id
 
@@ -476,7 +512,12 @@ async def test_text_turn_dispatches_once_and_persists_one_authoritative_agent_ui
     assert turn.input.type == "text"
     assert turn.input.text == "我在上海有哪些客户"
     assert turn.selected_entity_ref is None
-    assert runtime.authorization == "Bearer test-token"
+    assert runtime.authorization.startswith("Bearer ")
+    from app.core.security import decode_access_token
+    payload = decode_access_token(runtime.authorization.split(" ", 1)[1])
+    assert payload is not None
+    assert payload["purpose"] == "agent_worker"
+    assert payload["sub"] == "2"
     assert runtime.metadata == {"source": "web"}
     with session_factory() as db:
         assistant = db.query(AgentMessage).filter_by(role=AgentMessageRole.ASSISTANT).one()
@@ -489,6 +530,7 @@ async def test_text_turn_dispatches_once_and_persists_one_authoritative_agent_ui
         assert observability["steps"][0]["kind"] == "model"
         assert observability["steps"][4]["kind"] == "api"
         assert observability["steps"][4]["tone"] == "done"
+
 
 @pytest.mark.asyncio
 async def test_query_turn_persists_clickable_result_set_without_workflow_actions(
@@ -531,21 +573,14 @@ async def test_query_turn_server_signs_result_set_before_ui_and_persistence(
         result.model_copy(
             update={
                 "result_set_id": None,
-                "entity_refs": [
-                    ref.model_copy(update={"result_set_id": None})
-                    for ref in result.entity_refs
-                ],
+                "entity_refs": [ref.model_copy(update={"result_set_id": None}) for ref in result.entity_refs],
             }
         )
         for result in dispatch.query_result.query_results
     ]
     service.root_orchestrator = _FakeRootOrchestrator(
         dispatch.model_copy(
-            update={
-                "query_result": dispatch.query_result.model_copy(
-                    update={"query_results": unsigned_results}
-                )
-            }
+            update={"query_result": dispatch.query_result.model_copy(update={"query_results": unsigned_results})}
         )
     )
 
@@ -565,7 +600,6 @@ async def test_query_turn_server_signs_result_set_before_ui_and_persistence(
         result_set = db.query(AgentQueryResultSet).one()
         assert result_set.public_id == entity_list["result_set_id"]
         assert result_set.ordered_entity_refs_json[0]["result_set_id"] == result_set.public_id
-
 
 
 class _FailingResultSetRepository:
@@ -603,7 +637,6 @@ async def test_query_result_set_failure_rolls_back_assistant_result_set_and_acti
         assert len(observability["steps"]) == 6
 
 
-
 @pytest.mark.asyncio
 async def test_workflow_progress_is_streamed_before_the_authoritative_final_message(
     application_harness,
@@ -623,6 +656,9 @@ async def test_workflow_progress_is_streamed_before_the_authoritative_final_mess
     agent_ui_events = [event for event in events if event["event"] == "agent_ui"]
     assert [event["phase"] for event in agent_ui_events] == ["delta", "delta", "final"]
     assert [event["sequence"] for event in agent_ui_events] == [1, 2, 3]
+    turn_ids = {event["turn_id"] for event in agent_ui_events}
+    assert len(turn_ids) == 1
+    assert all(turn_id.startswith("turn_") for turn_id in turn_ids)
     assert agent_ui_events[0]["operations"][0]["op"] == "upsert_block"
     assert agent_ui_events[0]["operations"][0]["block"]["type"] == "process"
     assert agent_ui_events[0]["operations"][0]["block"]["items"][0]["status"] == "RUNNING"
@@ -653,9 +689,7 @@ async def test_entity_action_passes_authoritative_selected_entity_and_consumes_o
         application_module,
         "permission_crud",
         SimpleNamespace(
-            get_user_permissions=lambda db, user_id, team_id: [
-                SimpleNamespace(code="customer:follow_up:create")
-            ]
+            get_user_permissions=lambda db, user_id, team_id: [SimpleNamespace(code="customer:follow_up:create")]
         ),
     )
     orchestrator = _FakeRootOrchestrator(_completed_workflow_dispatch())
@@ -744,18 +778,14 @@ async def test_entity_action_rejects_expired_result_set_before_dispatch(
                 creator_id="2",
             )
         )
-        result_set = db.query(AgentQueryResultSet).filter_by(
-            public_id="rs_query_application_test"
-        ).one()
+        result_set = db.query(AgentQueryResultSet).filter_by(public_id="rs_query_application_test").one()
         result_set.expires_at = business_now() - timedelta(seconds=1)
         db.commit()
     monkeypatch.setattr(
         application_module,
         "permission_crud",
         SimpleNamespace(
-            get_user_permissions=lambda db, user_id, team_id: [
-                SimpleNamespace(code="customer:follow_up:create")
-            ]
+            get_user_permissions=lambda db, user_id, team_id: [SimpleNamespace(code="customer:follow_up:create")]
         ),
     )
     orchestrator = _FakeRootOrchestrator(_completed_workflow_dispatch())
@@ -791,9 +821,7 @@ async def test_interaction_submission_persists_the_clicked_button_label(
         client_request_id=UUID("3fa2e0e8-86d4-4d6c-a1b0-6490b2bf12be"),
     )
     session_id = initial[0]["session_id"]
-    interaction = next(
-        block for block in initial[1]["message"]["blocks"] if block["type"] == "interaction"
-    )
+    interaction = next(block for block in initial[1]["message"]["blocks"] if block["type"] == "interaction")
     action_id = interaction["submit_action_id"]
     action_repository = AgentUIActionRepository()
 
@@ -812,9 +840,7 @@ async def test_interaction_submission_persists_the_clicked_button_label(
         on_dispatch=claim_action,
     )
     request_id = UUID(
-        "4fa2e0e8-86d4-4d6c-a1b0-6490b2bf12be"
-        if choice == "confirm"
-        else "5fa2e0e8-86d4-4d6c-a1b0-6490b2bf12be"
+        "4fa2e0e8-86d4-4d6c-a1b0-6490b2bf12be" if choice == "confirm" else "5fa2e0e8-86d4-4d6c-a1b0-6490b2bf12be"
     )
 
     await _collect(
@@ -896,6 +922,513 @@ async def test_interaction_input_is_claimed_by_root_and_completed_by_application
 
 
 @pytest.mark.asyncio
+async def test_signed_follow_up_text_resume_claims_before_checkpoint_and_settles_old_card(
+    application_harness, monkeypatch
+) -> None:
+    service, session_factory = application_harness
+    initial_dispatch = _follow_up_content_workflow_dispatch()
+    service.root_orchestrator = _FakeRootOrchestrator(initial_dispatch)
+    initial = await _collect(
+        service,
+        request_input=TextAgentInput(type="text", text="为客户创建跟进"),
+        client_request_id=UUID("21a2e0e8-86d4-4d6c-a1b0-6490b2bf12be"),
+    )
+    session_id = initial[0]["session_id"]
+    old_action_id = next(
+        block["submit_action_id"] for block in initial[1]["message"]["blocks"] if block["type"] == "interaction"
+    )
+    continuation = initial_dispatch.continuation
+    assert continuation is not None
+    plan = RootRoutingPlan(
+        kind="TEXT_WORKFLOW_RESUME",
+        context=RootContextSnapshot(active_workflow=continuation.workflow_ref),
+        decision=_decision("WORKFLOW", relation="CONTINUE_TASK"),
+        continuation=continuation,
+    )
+
+    # Exercise the real text-resume adapter while controlling only checkpoint IO.
+    orchestrator = object.__new__(RootOrchestrator)
+    async def checkpoint_present(config):
+        assert config["configurable"]["thread_id"] == continuation.root_thread_id
+
+    async def resume_graph(graph_input, config, *, runtime, on_progress):
+        del graph_input, config, on_progress
+        with session_factory() as db:
+            old_action = db.query(AgentUIAction).filter_by(public_id=old_action_id).one()
+            assert old_action.status == AgentUIActionStatus.CONSUMING
+            with pytest.raises(ActionAlreadyConsumedError):
+                service.action_repository.begin_consumption(
+                    db, public_id=old_action_id, team_id=1, user_id=2, session_id=session_id,
+                    client_request_id=UUID("30a2e0e8-86d4-4d6c-a1b0-6490b2bf12be"),
+                )
+        return {"dispatch_result": _completed_workflow_dispatch().model_dump(mode="json")}, None
+
+    monkeypatch.setattr(orchestrator, "_require_continuation_checkpoint", checkpoint_present)
+    monkeypatch.setattr(orchestrator, "_invoke_graph", resume_graph)
+
+    async def dispatch(turn, *, runtime, on_progress=None):
+        return await orchestrator._resume_text_plan(
+            turn=turn,
+            runtime=runtime,
+            config=build_root_graph_config(turn),
+            plan=plan,
+            on_progress=on_progress,
+        )
+
+    monkeypatch.setattr(orchestrator, "dispatch", dispatch)
+    service.root_orchestrator = orchestrator
+    request_id = UUID("22a2e0e8-86d4-4d6c-a1b0-6490b2bf12be")
+    resumed = await _collect(
+        service,
+        request_input=TextAgentInput(type="text", text="今天联系客户，下一步回访"),
+        client_request_id=request_id,
+        session_id=session_id,
+    )
+    assert [event["event"] for event in resumed] == ["session", "agent_ui", "done"]
+    with session_factory() as db:
+        old_action = db.query(AgentUIAction).filter_by(public_id=old_action_id).one()
+        assert old_action.status == AgentUIActionStatus.CONSUMED, resumed[1]
+        assert old_action.consumed_request_id == str(request_id)
+        assert old_action.result_message_id == resumed[1]["message_id"]
+        with pytest.raises(ActionAlreadyConsumedError):
+            service.action_repository.begin_consumption(
+                db, public_id=old_action_id, team_id=1, user_id=2, session_id=session_id,
+                client_request_id=UUID("23a2e0e8-86d4-4d6c-a1b0-6490b2bf12be"),
+            )
+
+
+@pytest.mark.asyncio
+async def test_signed_text_resume_waiting_next_card_settles_only_old_card(application_harness, monkeypatch) -> None:
+    service, session_factory = application_harness
+    waiting = _follow_up_content_workflow_dispatch()
+    service.root_orchestrator = _FakeRootOrchestrator(waiting)
+    initial = await _collect(
+        service, request_input=TextAgentInput(type="text", text="创建跟进"),
+        client_request_id=UUID("34a2e0e8-86d4-4d6c-a1b0-6490b2bf12be"),
+    )
+    session_id = initial[0]["session_id"]
+    old_action_id = next(
+        block["submit_action_id"] for block in initial[1]["message"]["blocks"] if block["type"] == "interaction"
+    )
+    continuation = waiting.continuation
+    assert continuation is not None
+    next_ref = WorkflowRef(workflow_id="wf_follow_up", interrupt_id="intr_next")
+    next_continuation = continuation.model_copy(
+        update={
+            "workflow_ref": next_ref,
+            "parent_checkpoint_id": "parent_cp_next",
+            "subgraph_checkpoint_id": "child_cp_next",
+        }
+    )
+    next_waiting = waiting.model_copy(
+        update={
+            "workflow_result": waiting.workflow_result.model_copy(update={"workflow_ref": next_ref}),
+            "continuation": next_continuation,
+        }
+    )
+    plan = RootRoutingPlan(
+        kind="TEXT_WORKFLOW_RESUME",
+        context=RootContextSnapshot(active_workflow=continuation.workflow_ref),
+        decision=_decision("WORKFLOW", relation="CONTINUE_TASK"), continuation=continuation,
+    )
+    orchestrator = object.__new__(RootOrchestrator)
+
+    async def checkpoint_present(config):
+        del config
+
+    async def resume_graph(graph_input, config, *, runtime, on_progress):
+        del graph_input, config, runtime, on_progress
+        return {"dispatch_result": None}, next_continuation
+    monkeypatch.setattr(orchestrator, "_require_continuation_checkpoint", checkpoint_present)
+    monkeypatch.setattr(orchestrator, "_invoke_graph", resume_graph)
+    monkeypatch.setattr(orchestrator, "_dispatch_result_from_state", lambda state, *, continuation: next_waiting)
+
+    async def dispatch(turn, *, runtime, on_progress=None):
+        return await orchestrator._resume_text_plan(
+            turn=turn, runtime=runtime, config=build_root_graph_config(turn),
+            plan=plan, on_progress=on_progress,
+        )
+
+    monkeypatch.setattr(orchestrator, "dispatch", dispatch)
+    service.root_orchestrator = orchestrator
+    request_id = UUID("35a2e0e8-86d4-4d6c-a1b0-6490b2bf12be")
+    result = await _collect(
+        service, request_input=TextAgentInput(type="text", text="客户想要回访"),
+        client_request_id=request_id, session_id=session_id,
+    )
+    next_action_id = next(
+        block["submit_action_id"] for block in result[1]["message"]["blocks"] if block["type"] == "interaction"
+    )
+    assert old_action_id != next_action_id
+    with session_factory() as db:
+        old = db.query(AgentUIAction).filter_by(public_id=old_action_id).one()
+        newer = db.query(AgentUIAction).filter_by(public_id=next_action_id).one()
+        assert old.status == AgentUIActionStatus.CONSUMED
+        assert old.result_message_id == result[1]["message_id"]
+        assert newer.status == AgentUIActionStatus.ACTIVE
+        assert newer.consumed_request_id is None
+        assert newer.target_json["workflow_continuation"]["parent_checkpoint_id"] == "parent_cp_next"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_follow_up_card_blocks_late_text_checkpoint(application_harness, monkeypatch) -> None:
+    service, session_factory = application_harness
+    waiting = _follow_up_content_workflow_dispatch()
+    service.root_orchestrator = _FakeRootOrchestrator(waiting)
+    initial = await _collect(
+        service, request_input=TextAgentInput(type="text", text="准备跟进"),
+        client_request_id=UUID("31a2e0e8-86d4-4d6c-a1b0-6490b2bf12be"),
+    )
+    session_id = initial[0]["session_id"]
+    action_id = next(
+        block["submit_action_id"] for block in initial[1]["message"]["blocks"] if block["type"] == "interaction"
+    )
+    continuation = waiting.continuation
+    assert continuation is not None
+    plan = RootRoutingPlan(
+        kind="TEXT_WORKFLOW_RESUME",
+        context=RootContextSnapshot(active_workflow=continuation.workflow_ref),
+        decision=_decision("WORKFLOW", relation="CONTINUE_TASK"), continuation=continuation,
+    )
+    orchestrator = object.__new__(RootOrchestrator)
+
+    async def forbidden_checkpoint(config):
+        del config
+        pytest.fail("text continuation ran after cancellation won the action")
+
+    monkeypatch.setattr(orchestrator, "_require_continuation_checkpoint", forbidden_checkpoint)
+
+    async def dispatch(turn, *, runtime, on_progress=None):
+        return await orchestrator._resume_text_plan(
+            turn=turn, runtime=runtime, config=build_root_graph_config(turn),
+            plan=plan, on_progress=on_progress,
+        )
+
+    with session_factory() as db:
+        service.action_repository.begin_consumption(
+            db, public_id=action_id, team_id=1, user_id=2, session_id=session_id,
+            client_request_id=UUID("32a2e0e8-86d4-4d6c-a1b0-6490b2bf12be"),
+        )
+        db.commit()
+    monkeypatch.setattr(orchestrator, "dispatch", dispatch)
+    service.root_orchestrator = orchestrator
+    events = await _collect(
+        service, request_input=TextAgentInput(type="text", text="迟到的补充"),
+        client_request_id=UUID("33a2e0e8-86d4-4d6c-a1b0-6490b2bf12be"), session_id=session_id,
+    )
+    assert events[1]["message"]["blocks"][0]["code"] == "ACTION_ALREADY_CONSUMED"
+    with session_factory() as db:
+        action = db.query(AgentUIAction).filter_by(public_id=action_id).one()
+        assert action.status == AgentUIActionStatus.CONSUMING
+        assert action.consumed_request_id == "32a2e0e8-86d4-4d6c-a1b0-6490b2bf12be"
+
+
+
+
+@pytest.mark.asyncio
+async def test_failed_signed_text_resume_releases_old_card_for_retry(application_harness, monkeypatch) -> None:
+    service, session_factory = application_harness
+    first = _follow_up_content_workflow_dispatch()
+    service.root_orchestrator = _FakeRootOrchestrator(first)
+    initial = await _collect(
+        service, request_input=TextAgentInput(type="text", text="记录客户跟进"),
+        client_request_id=UUID("24a2e0e8-86d4-4d6c-a1b0-6490b2bf12be"),
+    )
+    session_id = initial[0]["session_id"]
+    action_id = next(
+        block["submit_action_id"] for block in initial[1]["message"]["blocks"] if block["type"] == "interaction"
+    )
+    continuation = first.continuation
+    assert continuation is not None
+    plan = RootRoutingPlan(
+        kind="TEXT_WORKFLOW_RESUME",
+        context=RootContextSnapshot(active_workflow=continuation.workflow_ref),
+        decision=_decision("WORKFLOW", relation="CONTINUE_TASK"),
+        continuation=continuation,
+    )
+    orchestrator = object.__new__(RootOrchestrator)
+
+    async def missing_checkpoint(config):
+        del config
+        raise WorkflowCheckpointUnavailableError("missing checkpoint")
+
+    async def dispatch(turn, *, runtime, on_progress=None):
+        return await orchestrator._resume_text_plan(
+            turn=turn, runtime=runtime, config=build_root_graph_config(turn),
+            plan=plan, on_progress=on_progress,
+        )
+
+    monkeypatch.setattr(orchestrator, "dispatch", dispatch)
+    service.root_orchestrator = orchestrator
+    failure = await _collect(
+        service, request_input=TextAgentInput(type="text", text="今天回访客户"),
+        client_request_id=UUID("25a2e0e8-86d4-4d6c-a1b0-6490b2bf12be"), session_id=session_id,
+    )
+    assert failure[1]["message"]["blocks"][0]["retryable"] is True
+    with session_factory() as db:
+        action = db.query(AgentUIAction).filter_by(public_id=action_id).one()
+        assert action.status == AgentUIActionStatus.ACTIVE
+        assert action.consumed_request_id is None
+
+
+@pytest.mark.asyncio
+async def test_other_text_workflow_resume_keeps_existing_path(application_harness, monkeypatch) -> None:
+    service, session_factory = application_harness
+    waiting = _follow_up_content_workflow_dispatch()
+    waiting = waiting.model_copy(
+        update={
+            "workflow_result": waiting.workflow_result.model_copy(
+                update={
+                    "interaction": waiting.workflow_result.interaction.model_copy(
+                        update={"business_action": "supplement_follow_up_quality", "allow_cancel": False}
+                    )
+                }
+            )
+        }
+    )
+    service.root_orchestrator = _FakeRootOrchestrator(waiting)
+    initial = await _collect(
+        service, request_input=TextAgentInput(type="text", text="补充跟进信息"),
+        client_request_id=UUID("28a2e0e8-86d4-4d6c-a1b0-6490b2bf12be"),
+    )
+    action_id = next(
+        block["submit_action_id"] for block in initial[1]["message"]["blocks"] if block["type"] == "interaction"
+    )
+    continuation = waiting.continuation
+    assert continuation is not None
+    plan = RootRoutingPlan(
+        kind="TEXT_WORKFLOW_RESUME",
+        context=RootContextSnapshot(active_workflow=continuation.workflow_ref),
+        decision=_decision("WORKFLOW", relation="CONTINUE_TASK"), continuation=continuation,
+    )
+    orchestrator = object.__new__(RootOrchestrator)
+
+    async def checkpoint_present(config):
+        del config
+
+    async def resume_graph(graph_input, config, *, runtime, on_progress):
+        del graph_input, config, runtime, on_progress
+        return {"dispatch_result": _completed_workflow_dispatch().model_dump(mode="json")}, None
+
+    monkeypatch.setattr(orchestrator, "_require_continuation_checkpoint", checkpoint_present)
+    monkeypatch.setattr(orchestrator, "_invoke_graph", resume_graph)
+
+    async def dispatch(turn, *, runtime, on_progress=None):
+        return await orchestrator._resume_text_plan(
+            turn=turn, runtime=runtime, config=build_root_graph_config(turn),
+            plan=plan, on_progress=on_progress,
+        )
+
+    monkeypatch.setattr(orchestrator, "dispatch", dispatch)
+    service.root_orchestrator = orchestrator
+    result = await _collect(
+        service, request_input=TextAgentInput(type="text", text="客户希望下周回访"),
+        client_request_id=UUID("29a2e0e8-86d4-4d6c-a1b0-6490b2bf12be"),
+        session_id=initial[0]["session_id"],
+    )
+    assert result[1]["message"]["blocks"][0]["type"] != "error"
+    with session_factory() as db:
+        assert db.query(AgentUIAction).filter_by(public_id=action_id).one().status == AgentUIActionStatus.ACTIVE
+
+
+@pytest.mark.asyncio
+async def test_text_resume_exception_releases_committed_action_claim(application_harness, monkeypatch) -> None:
+    service, session_factory = application_harness
+    initial_dispatch = _follow_up_content_workflow_dispatch()
+    service.root_orchestrator = _FakeRootOrchestrator(initial_dispatch)
+    initial = await _collect(
+        service, request_input=TextAgentInput(type="text", text="跟进客户"),
+        client_request_id=UUID("26a2e0e8-86d4-4d6c-a1b0-6490b2bf12be"),
+    )
+    session_id = initial[0]["session_id"]
+    action_id = next(
+        block["submit_action_id"] for block in initial[1]["message"]["blocks"] if block["type"] == "interaction"
+    )
+    continuation = initial_dispatch.continuation
+    assert continuation is not None
+    plan = RootRoutingPlan(
+        kind="TEXT_WORKFLOW_RESUME",
+        context=RootContextSnapshot(active_workflow=continuation.workflow_ref),
+        decision=_decision("WORKFLOW", relation="CONTINUE_TASK"), continuation=continuation,
+    )
+    orchestrator = object.__new__(RootOrchestrator)
+
+    async def checkpoint_present(config):
+        del config
+
+    async def crashed_graph(graph_input, config, *, runtime, on_progress):
+        del graph_input, config, runtime, on_progress
+        raise RuntimeError("resume crashed after claim")
+
+    monkeypatch.setattr(orchestrator, "_require_continuation_checkpoint", checkpoint_present)
+    monkeypatch.setattr(orchestrator, "_invoke_graph", crashed_graph)
+
+    async def dispatch(turn, *, runtime, on_progress=None):
+        return await orchestrator._resume_text_plan(
+            turn=turn, runtime=runtime, config=build_root_graph_config(turn),
+            plan=plan, on_progress=on_progress,
+        )
+
+    monkeypatch.setattr(orchestrator, "dispatch", dispatch)
+    service.root_orchestrator = orchestrator
+    await _collect(
+        service, request_input=TextAgentInput(type="text", text="继续补充"),
+        client_request_id=UUID("27a2e0e8-86d4-4d6c-a1b0-6490b2bf12be"), session_id=session_id,
+    )
+    with session_factory() as db:
+        action = db.query(AgentUIAction).filter_by(public_id=action_id).one()
+        assert action.status == AgentUIActionStatus.ACTIVE
+        assert action.consumed_request_id is None
+
+
+@pytest.mark.asyncio
+async def test_follow_up_content_cancel_settles_action_and_erases_task_context_for_new_request(
+    application_harness,
+) -> None:
+    service, session_factory = application_harness
+    service.root_orchestrator = _FakeRootOrchestrator(_follow_up_content_workflow_dispatch())
+    initial = await _collect(
+        service,
+        request_input=TextAgentInput(type="text", text="为河南双汇创建跟进，下一步回访"),
+        client_request_id=UUID("00a2e0e8-86d4-4d6c-a1b0-6490b2bf12be"),
+    )
+    assert [event["event"] for event in initial] == ["session", "agent_ui", "done"], initial
+    session_id = initial[0]["session_id"]
+    action_id = next(
+        block["submit_action_id"] for block in initial[1]["message"]["blocks"] if block["type"] == "interaction"
+    )
+    with session_factory() as db:
+        session = db.query(AgentSession).filter_by(id=session_id).one()
+        session.context_json = {"client_context": {"view": "customers"}}
+        db.commit()
+
+    def claim_and_persist_old_draft(turn: RootTurnInput, runtime: RootRuntimeContext) -> None:
+        assert turn.input.type == "interaction"
+        assert turn.input.values == {"cancel": True}
+        service.action_repository.begin_consumption(
+            runtime.db,
+            public_id=action_id,
+            team_id=turn.team_id,
+            user_id=turn.user_id,
+            session_id=turn.session_id,
+            client_request_id=turn.client_request_id,
+        )
+        DatabaseRootContextResolver().persist_conversation_memory(
+            runtime.db,
+            turn=turn,
+            memory=RootConversationMemory(
+                resolved_customer={
+                    "customer_id": "cus_00000000000000000000000000000001",
+                    "customer_name": "河南双汇实业有限公司",
+                },
+                current_task="customer_activity",
+                known_activity_content="旧跟进正文",
+                known_next_action="回访",
+                pending_question="请补充跟进内容",
+                user_corrections=["旧任务补充"],
+            ),
+        )
+
+    orchestrator = _FakeRootOrchestrator(
+        _cancelled_workflow_dispatch(action_id), on_dispatch=claim_and_persist_old_draft
+    )
+    service.root_orchestrator = orchestrator
+    request = InteractionSubmissionInput(type="interaction_submission", action_id=action_id, values={"cancel": True})
+    request_id = UUID("01a2e0e8-86d4-4d6c-a1b0-6490b2bf12be")
+    events = await _collect(service, request_input=request, client_request_id=request_id, session_id=session_id)
+    result_message_id = events[1]["message_id"]
+    assert [event["event"] for event in events] == ["session", "agent_ui", "done"]
+    with session_factory() as db:
+        action = db.query(AgentUIAction).filter_by(public_id=action_id).one()
+        session = db.query(AgentSession).filter_by(id=session_id).one()
+        user_message = (
+            db.query(AgentMessage).filter_by(client_request_id=str(request_id), role=AgentMessageRole.USER).one()
+        )
+        assert user_message.content == "取消"
+        assert action.status == AgentUIActionStatus.CANCELLED
+        assert action.submitted_values == {"cancel": True}
+        assert action.result_message_id == result_message_id
+        assert session.context_json["client_context"] == {"view": "customers"}
+        assert DatabaseRootContextResolver._read_conversation_memory(session) == RootConversationMemory()
+        next_turn = RootTurnInput(
+            team_id=1,
+            user_id=2,
+            session_id=session_id,
+            client_request_id="new-complete-request",
+            input=TextTurnInput(type="text", text="为新客户创建完整跟进"),
+        )
+        snapshot = await DatabaseRootContextResolver().resolve(turn=next_turn, runtime=RootRuntimeContext(db=db))
+        assert snapshot.conversation_memory == RootConversationMemory()
+        assert snapshot.recent_messages == []
+        assert snapshot.active_workflow is None
+
+    replay = await _collect(service, request_input=request, client_request_id=request_id, session_id=session_id)
+    assert replay[1] == events[1]
+    assert len(orchestrator.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_follow_up_content_cancel_retains_task_memory_and_retryable_action(
+    application_harness,
+) -> None:
+    service, session_factory = application_harness
+    service.root_orchestrator = _FakeRootOrchestrator(_follow_up_content_workflow_dispatch())
+    initial = await _collect(
+        service,
+        request_input=TextAgentInput(type="text", text="为河南双汇创建跟进"),
+        client_request_id=UUID("02a2e0e8-86d4-4d6c-a1b0-6490b2bf12be"),
+    )
+    session_id = initial[0]["session_id"]
+    action_id = next(
+        block["submit_action_id"] for block in initial[1]["message"]["blocks"] if block["type"] == "interaction"
+    )
+    memory = RootConversationMemory(current_task="customer_activity", known_activity_content="旧草稿")
+    with session_factory() as db:
+        session = db.query(AgentSession).filter_by(id=session_id).one()
+        session.context_json = {"_root_conversation_memory": memory.model_dump(mode="json", exclude_none=True)}
+        db.commit()
+
+    def claim_action(turn: RootTurnInput, runtime: RootRuntimeContext) -> None:
+        service.action_repository.begin_consumption(
+            runtime.db,
+            public_id=action_id,
+            team_id=turn.team_id,
+            user_id=turn.user_id,
+            session_id=turn.session_id,
+            client_request_id=turn.client_request_id,
+        )
+
+    service.root_orchestrator = _FakeRootOrchestrator(
+        WorkflowDispatchResult(
+            decision=_decision("WORKFLOW", relation="CONTINUE_TASK"),
+            workflow_result=WorkflowFailedResult(
+                workflow_ref=WorkflowRef(workflow_id="wf_follow_up"),
+                code="CHECKPOINT_UNAVAILABLE",
+                message="会话状态服务暂时不可用。",
+                retryable=True,
+                progress=execution_progress(confirmation_required=False, has_supplements=False, outcome="FAILED"),
+            ),
+            action_claim_id=action_id,
+        ),
+        on_dispatch=claim_action,
+    )
+    await _collect(
+        service,
+        request_input=InteractionSubmissionInput(
+            type="interaction_submission", action_id=action_id, values={"cancel": True}
+        ),
+        client_request_id=UUID("03a2e0e8-86d4-4d6c-a1b0-6490b2bf12be"),
+        session_id=session_id,
+    )
+    with session_factory() as db:
+        action = db.query(AgentUIAction).filter_by(public_id=action_id).one()
+        session = db.query(AgentSession).filter_by(id=session_id).one()
+        assert action.status == AgentUIActionStatus.ACTIVE
+        assert action.result_message_id is None
+        assert DatabaseRootContextResolver._read_conversation_memory(session) == memory
+
+
+@pytest.mark.asyncio
 async def test_compact_task_completion_is_persisted_as_state_update_without_visible_turn_messages(
     application_harness,
 ) -> None:
@@ -937,11 +1470,7 @@ async def test_compact_task_completion_is_persisted_as_state_update_without_visi
 
     assert events[1]["message"]["metadata"]["display"] == "STATE_UPDATE"
     with session_factory() as db:
-        turn_messages = (
-            db.query(AgentMessage)
-            .filter(AgentMessage.client_request_id == str(request_id))
-            .all()
-        )
+        turn_messages = db.query(AgentMessage).filter(AgentMessage.client_request_id == str(request_id)).all()
         assert len(turn_messages) == 1
         assistant = (
             db.query(AgentMessage)
@@ -990,18 +1519,12 @@ async def test_consumed_interaction_closes_the_already_persisted_turn_with_one_f
 
     assert [event["event"] for event in first] == ["session", "agent_ui", "done"]
     assert first[1]["message"] == replay[1]["message"]
-    error_blocks = [
-        block for block in first[1]["message"]["blocks"] if block["type"] == "error"
-    ]
+    error_blocks = [block for block in first[1]["message"]["blocks"] if block["type"] == "error"]
     assert len(error_blocks) == 1
     assert error_blocks[0]["code"] == "ACTION_ALREADY_CONSUMED"
     assert not any(block["type"] == "text" for block in first[1]["message"]["blocks"])
     with session_factory() as db:
-        turn_messages = (
-            db.query(AgentMessage)
-            .filter(AgentMessage.client_request_id == str(request_id))
-            .all()
-        )
+        turn_messages = db.query(AgentMessage).filter(AgentMessage.client_request_id == str(request_id)).all()
         assert len(turn_messages) == 1
         assistant_messages = (
             db.query(AgentMessage)
@@ -1232,12 +1755,16 @@ async def test_non_retryable_failed_workflow_completes_root_action_claim(
         assert action.status == AgentUIActionStatus.CONSUMED
         assert action.submitted_values == {"choice": "confirm"}
         assert action.result_message_id is not None
-        assert action_repository.list_active_workflow_continuations(
-            db,
-            team_id=1,
-            user_id=2,
-            session_id=session_id,
-        ) == []
+        assert (
+            action_repository.list_active_workflow_continuations(
+                db,
+                team_id=1,
+                user_id=2,
+                session_id=session_id,
+            )
+            == []
+        )
+
 
 @pytest.mark.asyncio
 async def test_entity_action_dispatch_exception_releases_prepared_claim(
@@ -1262,9 +1789,7 @@ async def test_entity_action_dispatch_exception_releases_prepared_claim(
         application_module,
         "permission_crud",
         SimpleNamespace(
-            get_user_permissions=lambda db, user_id, team_id: [
-                SimpleNamespace(code="customer:follow_up:create")
-            ]
+            get_user_permissions=lambda db, user_id, team_id: [SimpleNamespace(code="customer:follow_up:create")]
         ),
     )
 
@@ -1374,9 +1899,7 @@ async def test_rejected_interaction_failure_does_not_consume_active_action(
     )
 
     assert [event["event"] for event in events] == ["session", "agent_ui", "done"]
-    error_blocks = [
-        block for block in events[1]["message"]["blocks"] if block["type"] == "error"
-    ]
+    error_blocks = [block for block in events[1]["message"]["blocks"] if block["type"] == "error"]
     assert len(error_blocks) == 1
     assert error_blocks[0]["code"] == "ACTION_INVALID"
     assert not any(block["type"] == "text" for block in events[1]["message"]["blocks"])
@@ -1510,3 +2033,77 @@ async def test_request_id_reuse_with_different_typed_input_is_transport_error(
     assert [event["event"] for event in second] == ["session", "transport_error", "done"]
     assert second[1]["code"] == "IDEMPOTENCY_KEY_REUSED"
     assert len(orchestrator.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_closed_stream_still_settles_the_accepted_execution(application_harness) -> None:
+    service, session_factory = application_harness
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def dispatch(turn, *, runtime, on_progress=None):
+        del turn, runtime, on_progress
+        started.set()
+        await release.wait()
+        return _query_dispatch()
+
+    service.root_orchestrator.dispatch = dispatch
+    request_id = UUID("41a2e0e8-86d4-4d6c-a1b0-6490b2bf12be")
+    stream = service.stream_chat_events(
+        request_input=TextAgentInput(type="text", text="我在上海有哪些客户"),
+        client_request_id=request_id, team_id=1, user_id=2, authorization="Bearer test-token",
+    )
+    assert (await anext(stream))["event"] == "session"
+    await started.wait()
+    await stream.aclose()
+    release.set()
+    await asyncio.wait_for(next(iter(service._workers.values())), timeout=2)
+    with session_factory() as db:
+        execution = db.query(AgentTurnExecution).filter_by(client_request_id=str(request_id)).one()
+        assert execution.status == "COMPLETED"
+        assert execution.result_message_id is not None
+
+
+@pytest.mark.asyncio
+async def test_stale_lease_cannot_overwrite_a_newer_execution(application_harness) -> None:
+    service, session_factory = application_harness
+    request_id = UUID("42a2e0e8-86d4-4d6c-a1b0-6490b2bf12be")
+    await _collect(service, request_input=TextAgentInput(type="text", text="我在上海有哪些客户"), client_request_id=request_id)
+    with session_factory() as db:
+        execution = db.query(AgentTurnExecution).one()
+        execution.status = "RUNNING"
+        execution.lease_version = 2
+        execution.lease_owner = "current-worker"
+        execution.lease_expires_at = business_now() - timedelta(seconds=1)
+        execution.result_message_id = None
+        db.commit()
+        execution_id = execution.id
+    await service._run_execution(execution_id, "Bearer test-token", "stale-worker")
+    with session_factory() as db:
+        execution = db.get(AgentTurnExecution, execution_id)
+        assert execution.lease_owner == "current-worker"
+        assert execution.result_message_id is None
+
+
+@pytest.mark.asyncio
+async def test_recovery_stops_when_original_permission_is_gone(application_harness, monkeypatch) -> None:
+    service, session_factory = application_harness
+    request_id = UUID("43a2e0e8-86d4-4d6c-a1b0-6490b2bf12be")
+    await _collect(service, request_input=TextAgentInput(type="text", text="我在上海有哪些客户"), client_request_id=request_id)
+    with session_factory() as db:
+        execution = db.query(AgentTurnExecution).one()
+        execution.status = "RUNNING"
+        execution.permission_codes_json = ["customer:create"]
+        execution.lease_expires_at = business_now() - timedelta(seconds=1)
+        db.commit()
+    with session_factory() as db:
+        db.add(User(id=2, email="agent@example.com", name="Agent", status="active"))
+        db.commit()
+    monkeypatch.setattr(application_module, "user_team_crud", SimpleNamespace(get_by_user_and_team=lambda db, user_id, team_id: object()))
+    monkeypatch.setattr(application_module, "permission_crud", SimpleNamespace(get_user_permissions=lambda db, user_id, team_id: []))
+    result = await service.recover_expired_executions()
+    with session_factory() as db:
+        execution = db.query(AgentTurnExecution).one()
+        assert result == {"recovered": 0}
+        assert execution.status == "FAILED"
+        assert execution.last_error_code == "REAUTHORIZATION_FAILED"

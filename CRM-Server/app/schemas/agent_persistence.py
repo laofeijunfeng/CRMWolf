@@ -89,7 +89,7 @@ AgentUIActionType = Literal[
     "retry",
 ]
 AgentUIActionConsumptionMode = Literal["REUSABLE", "ONE_SHOT"]
-AgentUIActionStatus = Literal["ACTIVE", "CONSUMING", "CONSUMED", "EXPIRED", "REVOKED"]
+AgentUIActionStatus = Literal["ACTIVE", "CONSUMING", "CONSUMED", "CANCELLED", "EXPIRED", "REVOKED"]
 AgentUIActionConsumptionOutcome = Literal["ACQUIRED", "REPLAY", "REUSABLE"]
 AgentUIActionRootContextRole = Literal["RESUMABLE_WORKFLOW", "PENDING_CASE", "PROJECTION_ONLY"]
 

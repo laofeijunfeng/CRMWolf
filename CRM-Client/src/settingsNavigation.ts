@@ -10,6 +10,7 @@ import {
   ShoppingCart,
   ShieldCheck,
   UsersRound,
+  BellRing,
   Workflow,
 } from 'lucide-vue-next'
 
@@ -96,6 +97,18 @@ export const SETTINGS_NAVIGATION: readonly SettingsNavigationItem[] = [
     scope: 'team',
     requiredAnyPermissions: ['approval:flow:view', 'approval:flow:create', 'approval:flow:edit'],
     legacyComponentKey: 'approval-flows',
+    requiresTeam: true,
+  },
+  {
+    id: 'reminder-rules',
+    label: '提醒规则',
+    description: '当业务对象满足条件时通知相关人。',
+    path: '/settings/reminder-rules',
+    icon: BellRing,
+    group: 'business',
+    scope: 'team',
+    requiredAnyPermissions: ['automation:read'],
+    allowOwnerBypass: false,
     requiresTeam: true,
   },
   {

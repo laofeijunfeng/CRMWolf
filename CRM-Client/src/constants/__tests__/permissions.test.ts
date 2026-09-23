@@ -25,6 +25,9 @@ describe('permission catalog', () => {
     expect(getPermissionResourceName('approval_flow')).toBe('审批流程')
     expect(getPermissionActionName('view')).toBe('查看')
     expect(getPermissionActionName('mark_issued')).toBe('标记已开票')
+    expect(getPermissionActionName('export')).toBe('导出')
+    expect(getPermissionResourceName('follow_up_task')).toBe('客户追踪')
+    expect(getPermissionResourceName('approval')).toBe('审批')
   })
   it('recognizes historical API permissions as deprecated', () => {
     expect(DEPRECATED_PERMISSION_CODES.has('customer:api:list')).toBe(true)

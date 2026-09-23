@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, cast
 
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 from sqlalchemy import and_, not_
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -69,26 +69,26 @@ class DatabaseRootContextResolver:
         db: Session,
         *,
         turn: RootTurnInput,
+        session: AgentSession,
     ) -> list[ConversationMessageContext]:
-        rows = (
-            db.query(AgentMessage)
-            .filter(
-                AgentMessage.team_id == turn.team_id,
-                AgentMessage.user_id == turn.user_id,
-                AgentMessage.session_id == turn.session_id,
-                AgentMessage.role.in_((AgentMessageRole.USER, AgentMessageRole.ASSISTANT)),
-                AgentMessage.content.is_not(None),
-                not_(
-                    and_(
-                        AgentMessage.role == AgentMessageRole.USER,
-                        AgentMessage.client_request_id == turn.client_request_id,
-                    )
-                ),
-            )
-            .order_by(AgentMessage.created_time.desc(), AgentMessage.id.desc())
-            .limit(12)
-            .all()
+        query = db.query(AgentMessage).filter(
+            AgentMessage.team_id == turn.team_id,
+            AgentMessage.user_id == turn.user_id,
+            AgentMessage.session_id == turn.session_id,
+            AgentMessage.role.in_((AgentMessageRole.USER, AgentMessageRole.ASSISTANT)),
+            AgentMessage.content.is_not(None),
+            not_(
+                and_(
+                    AgentMessage.role == AgentMessageRole.USER,
+                    AgentMessage.client_request_id == turn.client_request_id,
+                )
+            ),
         )
+        context = session.context_json
+        after_id = context.get("recent_messages_after_id") if isinstance(context, dict) else None
+        if isinstance(after_id, int) and not isinstance(after_id, bool) and after_id > 0:
+            query = query.filter(AgentMessage.id > after_id)
+        rows = query.order_by(AgentMessage.created_time.desc(), AgentMessage.id.desc()).limit(12).all()
         messages: list[ConversationMessageContext] = []
         for row in reversed(rows):
             content = str(row.content or "").strip()
@@ -109,22 +109,40 @@ class DatabaseRootContextResolver:
         turn: RootTurnInput,
         memory: RootConversationMemory,
     ) -> None:
-        """Merge Root memory without overwriting client-owned session context."""
+        """Merge Root memory only when this turn started after the latest cancellation."""
 
         session = (
             db.query(AgentSession)
+            .populate_existing()
             .filter(
                 AgentSession.id == turn.session_id,
                 AgentSession.team_id == turn.team_id,
                 AgentSession.user_id == turn.user_id,
             )
+            .with_for_update()
             .first()
         )
         if session is None:
             raise RootContextUnavailableError("Owned Agent session not found")
-        context = dict(session.context_json) if isinstance(session.context_json, dict) else {}
+        raw_context = session.context_json
+        context: dict[str, JsonValue] = dict(raw_context) if isinstance(raw_context, dict) else {}
+        after_id = context.get("recent_messages_after_id")
+        if isinstance(after_id, int) and not isinstance(after_id, bool) and after_id > 0:
+            user_message_id = (
+                db.query(AgentMessage.id)
+                .filter(
+                    AgentMessage.team_id == turn.team_id,
+                    AgentMessage.user_id == turn.user_id,
+                    AgentMessage.session_id == turn.session_id,
+                    AgentMessage.role == AgentMessageRole.USER,
+                    AgentMessage.client_request_id == turn.client_request_id,
+                )
+                .scalar()
+            )
+            if user_message_id is None or user_message_id <= after_id:
+                return
         context["_root_conversation_memory"] = memory.model_dump(mode="json", exclude_none=True)
-        session.context_json = context
+        session.context_json = cast("dict[str, object]", context)  # type: ignore[assignment]
         db.flush()
 
     async def resolve(
@@ -153,7 +171,7 @@ class DatabaseRootContextResolver:
             if session is None:
                 raise RootContextUnavailableError("Owned Agent session not found")
             conversation_memory = self._read_conversation_memory(session)
-            recent_messages = self._recent_messages(db, turn=turn)
+            recent_messages = self._recent_messages(db, turn=turn, session=session)
             result_set = self._result_set_repository.get_latest_active(
                 db,
                 team_id=turn.team_id,

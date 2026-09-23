@@ -36,6 +36,7 @@ const AgentRunLogTurnListItemSchema = z.object({
 }).strict()
 
 const AgentRunLogTurnDetailSchema = AgentRunLogTurnListItemSchema.extend({
+  log: z.string(),
   steps: z.array(AgentRunLogStepSchema).length(6),
 }).strict()
 

@@ -322,6 +322,8 @@ class InteractionBlock(AgentUIBlockBase):
     type: Literal["interaction"]
     interaction_id: str = Field(min_length=1, max_length=128)
     interaction_type: Literal["choice", "form", "confirmation", "text_input"]
+    business_action: str | None = Field(default=None, min_length=1, max_length=128)
+    allow_cancel: bool = False
     presentation: Literal["COMPACT_TASK_COMPLETION"] | None = None
     state: Literal["ACTIVE", "SUBMITTED", "EXPIRED", "CANCELLED", "READ_ONLY"]
     prompt: str = Field(min_length=1, max_length=10000)
@@ -343,6 +345,11 @@ class InteractionBlock(AgentUIBlockBase):
             raise ValueError("active interaction requires submit_action_id")
         if self.state != "ACTIVE" and self.submit_action_id is not None:
             raise ValueError("non-active interaction cannot expose submit_action_id")
+        if self.allow_cancel and (
+            self.business_action != "provide_follow_up_content"
+            or self.interaction_type not in {"text_input", "form"}
+        ):
+            raise ValueError("cancellation is only available for follow-up content input")
         if len({option.value for option in self.options}) != len(self.options):
             raise ValueError("interaction option values must be unique")
         if (

@@ -86,6 +86,27 @@ describe('BusinessJourneyTableView layout', () => {
     ]])
   })
 
+  it('shows the primary opportunity expected closing date instead of the journey start time', () => {
+    const wrapper = mountJourneyTable([{
+      ...journeyFixture,
+      started_at: '2026-09-01T00:00:00',
+      expected_closing_date: '2026-10-01',
+    }])
+    const dateField = createBusinessJourneyListFields([]).find(field => field.key === 'expected_closing_date')
+
+    expect(dateField).toMatchObject({
+      label: '预计成交日期',
+      type: 'date',
+      filter: true,
+      sort: true,
+    })
+    expect(createBusinessJourneyListFields([]).some(field => field.key === 'started_at')).toBe(false)
+    expect(wrapper.text()).toContain('预计成交日期')
+    expect(wrapper.text()).toContain('2026-10-01')
+    expect(wrapper.text()).not.toContain('开始时间')
+    expect(wrapper.text()).not.toContain('2026-09-01')
+  })
+
   it.each([
     ['early_communication', ['bg-sky-50', 'text-sky-700', 'border-sky-100']],
     ['active_progress', ['bg-blue-50', 'text-blue-700', 'border-blue-100']],

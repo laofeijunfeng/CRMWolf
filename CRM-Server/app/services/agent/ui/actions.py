@@ -20,6 +20,7 @@ from app.schemas.agent_persistence import (
     AgentUIActionConsumption,
     AgentUIActionRecord,
     AgentUIActionRegistration,
+    AgentUIActionRootContextRole,
     AgentUIActionType,
 )
 from app.schemas.agent_persistence import (
@@ -39,6 +40,7 @@ logger = logging.getLogger(__name__)
 _ACTION_TERMINAL_RETENTION = timedelta(days=30)
 _ACTION_TYPE_ADAPTER: TypeAdapter[AgentUIActionType] = TypeAdapter(AgentUIActionType)
 _CONSUMPTION_MODE_ADAPTER: TypeAdapter[UIActionConsumptionMode] = TypeAdapter(UIActionConsumptionMode)
+_ROOT_CONTEXT_ROLE_ADAPTER: TypeAdapter[AgentUIActionRootContextRole] = TypeAdapter(AgentUIActionRootContextRole)
 _ACTION_STATUS_ADAPTER: TypeAdapter[UIActionStatus] = TypeAdapter(UIActionStatus)
 
 
@@ -177,6 +179,60 @@ class AgentUIActionRepository:
             continuations.append(continuation)
         return continuations
 
+    def begin_text_continuation(
+        self,
+        db: Session,
+        *,
+        continuation: WorkflowContinuation,
+        team_id: int,
+        user_id: int,
+        session_id: int,
+        client_request_id: UUID | str,
+    ) -> AgentUIActionConsumption | None:
+        """Claim only the signed text-input card bound to this exact interrupt."""
+
+        rows = (
+            db.query(AgentUIAction)
+            .filter(
+                AgentUIAction.team_id == team_id,
+                AgentUIAction.user_id == user_id,
+                AgentUIAction.session_id == session_id,
+                AgentUIAction.action_type == "submit_interaction",
+                AgentUIAction.root_context_role == "RESUMABLE_WORKFLOW",
+                AgentUIAction.target_json["workflow_continuation"]["root_thread_id"].as_string()
+                == continuation.root_thread_id,
+                AgentUIAction.target_json["workflow_continuation"]["parent_checkpoint_id"].as_string()
+                == continuation.parent_checkpoint_id,
+            )
+            .order_by(AgentUIAction.id.desc())
+            .all()
+        )
+        for row in rows:
+            target = row.target_json if isinstance(row.target_json, dict) else {}
+            if (
+                target.get("business_action") != "provide_follow_up_content"
+                or target.get("interaction_type") != "text_input"
+                or target.get("allow_cancel") is not True
+                or row.consumption_mode != AgentUIActionConsumptionMode.ONE_SHOT
+            ):
+                continue
+            try:
+                signed = WorkflowContinuation.model_validate(target.get("workflow_continuation"))
+            except ValueError:
+                continue
+            if signed.model_dump(exclude={"waiting_interaction_type"}) == continuation.model_dump(
+                exclude={"waiting_interaction_type"}
+            ) and continuation.waiting_interaction_type in {None, "text_input"}:
+                return self.begin_consumption(
+                    db,
+                    public_id=str(row.public_id),
+                    team_id=team_id,
+                    user_id=user_id,
+                    session_id=session_id,
+                    client_request_id=client_request_id,
+                )
+        return None
+
     def revoke_for_follow_up_confirmation_case(
         self,
         db: Session,
@@ -294,6 +350,7 @@ class AgentUIActionRepository:
             raise ActionUnavailableError("action revoked")
         if row.expires_at <= requested_at and row.status not in {
             AgentUIActionStatus.CONSUMED,
+            AgentUIActionStatus.CANCELLED,
             AgentUIActionStatus.REVOKED,
         }:
             row.status = AgentUIActionStatus.EXPIRED
@@ -315,6 +372,7 @@ class AgentUIActionRepository:
         if row.consumed_request_id == request_id and row.status in {
             AgentUIActionStatus.CONSUMING,
             AgentUIActionStatus.CONSUMED,
+            AgentUIActionStatus.CANCELLED,
         }:
             return AgentUIActionConsumption(outcome="REPLAY", action=self._to_record(row))
         raise ActionAlreadyConsumedError("one-shot action already consumed by another request")
@@ -330,6 +388,7 @@ class AgentUIActionRepository:
         client_request_id: UUID | str,
         result_message_id: int,
         submitted_values: dict[str, JsonValue] | None = None,
+        cancelled: bool = False,
         now: datetime | None = None,
     ) -> AgentUIActionRecord:
         completed_at = now or business_now()
@@ -343,9 +402,14 @@ class AgentUIActionRepository:
         )
         if row.consumed_request_id != request_id:
             raise ActionAlreadyConsumedError("one-shot action belongs to another request")
-        if row.status == AgentUIActionStatus.CONSUMED:
-            if row.result_message_id != result_message_id:
-                raise ActionStateConflictError("completed action result message cannot change")
+        terminal_status = AgentUIActionStatus.CANCELLED if cancelled else AgentUIActionStatus.CONSUMED
+        if row.status in {AgentUIActionStatus.CONSUMED, AgentUIActionStatus.CANCELLED}:
+            if (
+                row.status != terminal_status
+                or row.result_message_id != result_message_id
+                or (submitted_values is not None and row.submitted_values != submitted_values)
+            ):
+                raise ActionStateConflictError("completed action settlement cannot change")
             return self._to_record(row)
         if row.status != AgentUIActionStatus.CONSUMING:
             raise ActionStateConflictError("action is not being consumed")
@@ -356,7 +420,7 @@ class AgentUIActionRepository:
             user_id=user_id,
             session_id=session_id,
         )
-        row.status = AgentUIActionStatus.CONSUMED
+        row.status = terminal_status
         row.submitted_values = submitted_values
         row.result_message_id = result_message_id
         row.consumed_at = completed_at
@@ -409,6 +473,7 @@ class AgentUIActionRepository:
                 AgentUIAction.status.in_(
                     [
                         AgentUIActionStatus.CONSUMED,
+                        AgentUIActionStatus.CANCELLED,
                         AgentUIActionStatus.EXPIRED,
                         AgentUIActionStatus.REVOKED,
                     ]
@@ -496,7 +561,7 @@ class AgentUIActionRepository:
             session_id=int(row.session_id),
             message_id=int(row.message_id),
             action_type=_ACTION_TYPE_ADAPTER.validate_python(row.action_type),
-            root_context_role=row.root_context_role,
+            root_context_role=_ROOT_CONTEXT_ROLE_ADAPTER.validate_python(row.root_context_role),
             target=row.target_json,
             consumption_mode=_CONSUMPTION_MODE_ADAPTER.validate_python(row.consumption_mode),
             status=_ACTION_STATUS_ADAPTER.validate_python(row.status),

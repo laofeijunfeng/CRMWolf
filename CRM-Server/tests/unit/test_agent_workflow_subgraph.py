@@ -49,6 +49,7 @@ from app.services.agent.orchestrator import (
 )
 from app.services.agent.orchestrator.errors import WorkflowExecutionFailedError
 from app.services.agent.principal import AgentPrincipal
+from app.services.agent.run_log import build_turn_timeline
 from app.services.agent.quality import AgentFollowUpQualityEnvelope
 from app.services.agent.query import (
     CRMQueryAgentResponse,
@@ -64,6 +65,7 @@ from app.services.agent.tools.api_client import CRMAPIClientError
 from app.services.agent.workflow.contracts import (
     WorkflowActionPlan,
     WorkflowAuthorizationScope,
+    WorkflowAuthorizationBinding,
     WorkflowCommand,
     WorkflowCommandBinding,
     WorkflowInteraction,
@@ -235,11 +237,7 @@ class SemanticCustomerFollowUpDecisionClassifier(CreateFollowUpDecisionClassifie
     ) -> RootDecision:
         decision = await super().classify(turn=turn, context=context, runtime=runtime)
         return decision.model_copy(
-            update={
-                "context_policy": decision.context_policy.model_copy(
-                    update={"selected_entity": "IGNORE"}
-                )
-            }
+            update={"context_policy": decision.context_policy.model_copy(update={"selected_entity": "IGNORE"})}
         )
 
 
@@ -370,14 +368,10 @@ class RootPlanProjectionProbePlanner(CRMWorkflowPlanner):
     async def _plan_opportunity(self, *args: object, **kwargs: object) -> WorkflowActionPlan:
         return self._probe("CREATE_OPPORTUNITY")
 
-    async def _plan_opportunity_stage_transition(
-        self, *args: object, **kwargs: object
-    ) -> WorkflowActionPlan:
+    async def _plan_opportunity_stage_transition(self, *args: object, **kwargs: object) -> WorkflowActionPlan:
         return self._probe("MOVE_OPPORTUNITY_STAGE")
 
-    async def _plan_follow_up_task_transition(
-        self, *args: object, **kwargs: object
-    ) -> WorkflowActionPlan:
+    async def _plan_follow_up_task_transition(self, *args: object, **kwargs: object) -> WorkflowActionPlan:
         return self._probe("FOLLOW_UP_TASK_TRANSITION")
 
 
@@ -733,9 +727,7 @@ async def test_customer_lookup_name_is_resolved_without_page_selected_entity() -
     orchestrator = RootOrchestrator(
         checkpointer=json_safe_checkpointer(),
         context_resolver=EmptyContextResolver(),
-        decision_classifier=CreateStandaloneWriteDecisionClassifier(
-            reason_code="CREATE_CUSTOMER_ACTIVITY"
-        ),
+        decision_classifier=CreateStandaloneWriteDecisionClassifier(reason_code="CREATE_CUSTOMER_ACTIVITY"),
         query_executor=FailingQueryExecutor(),
         interaction_resolver=CanonicalConfirmationResolver(),
         workflow_subgraph=build_workflow_subgraph(
@@ -757,10 +749,7 @@ async def test_customer_lookup_name_is_resolved_without_page_selected_entity() -
             client_request_id="req_explicit_customer_without_page_context",
             input=TextTurnInput(
                 type="text",
-                text=(
-                    "微信联系了凡亚信息，技术经理张总反馈项目正在走立项流程；"
-                    "下周三再继续跟进立项流程"
-                ),
+                text=("微信联系了凡亚信息，技术经理张总反馈项目正在走立项流程；下周三再继续跟进立项流程"),
             ),
         ),
         runtime=RootRuntimeContext(
@@ -774,10 +763,7 @@ async def test_customer_lookup_name_is_resolved_without_page_selected_entity() -
     assert isinstance(result, WorkflowDispatchResult)
     assert isinstance(result.workflow_result, WorkflowCompletedResult)
     assert result.workflow_result.assistant_text == "已记录广州凡亚信息科技有限公司的本次跟进。"
-    progress_snapshots = [
-        [(step.key, step.status) for step in progress.steps]
-        for progress in progress_events
-    ]
+    progress_snapshots = [[(step.key, step.status) for step in progress.steps] for progress in progress_events]
     assert [("understand_request", "RUNNING")] in progress_snapshots
     assert [
         ("understand_request", "COMPLETED"),
@@ -1509,6 +1495,84 @@ async def test_missing_follow_up_content_interrupts_then_executes_after_required
     assert completed.continuation is None
     assert len(semantic_parser.messages) == 1
     assert len(tool_registry.calls) == 1
+
+
+async def test_missing_follow_up_content_cancel_ends_checkpoint_without_creating_activity() -> None:
+    semantic_parser = MissingContentThenCompleteSemanticParser()
+    tool_registry = CapturingToolRegistry()
+
+    class CancelContentResolver(SupplementThenConfirmationResolver):
+        async def resolve(self, *, turn, context, runtime) -> InteractionResolution:
+            assert isinstance(turn.input, InteractionTurnInput)
+            continuation = self.continuations[turn.input.action_id]
+            return InteractionResolution(
+                status="RESOLVED",
+                reason_code="STRUCTURED_WORKFLOW_CONTINUATION",
+                resolved_action=ResolvedAgentAction(
+                    action_id=turn.input.action_id,
+                    action_type="submit_interaction",
+                    continuation=continuation,
+                    claim_outcome="ACQUIRED",
+                    resume_payload=AgentTurnInput.reject(source="web").model_dump(mode="json"),
+                ),
+            )
+
+    resolver = CancelContentResolver()
+    orchestrator = RootOrchestrator(
+        checkpointer=json_safe_checkpointer(),
+        context_resolver=EmptyContextResolver(),
+        decision_classifier=CreateFollowUpDecisionClassifier(),
+        query_executor=FailingQueryExecutor(),
+        interaction_resolver=resolver,
+        workflow_subgraph=build_workflow_subgraph(
+            planner=CRMWorkflowPlanner(
+                semantic_parser=semantic_parser,
+                temporal_resolver=FixedTemporalResolver(),
+                customer_resolver=ContextWorkflowCustomerResolver(),
+            ),
+            effect_executor=CRMWorkflowEffectExecutor(tool_registry=tool_registry),
+        ),
+    )
+    runtime = RootRuntimeContext(
+        db=object(),
+        authorization="Bearer test-token",
+        metadata={"current_datetime": datetime(2026, 8, 23, 9, 0, 0)},
+    )
+    waiting = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=2,
+            session_id=557,
+            client_request_id="req_missing_content_cancel_wait",
+            input=TextTurnInput(
+                type="text",
+                text="为上海星云科技创建跟进任务,下周三上午10点电话跟进,下一步确认技术评估结论",
+            ),
+            selected_entity_ref=CUSTOMER_REF,
+        ),
+        runtime=runtime,
+    )
+    assert isinstance(waiting, WorkflowDispatchResult)
+    assert isinstance(waiting.workflow_result, WorkflowWaitingResult)
+    assert waiting.continuation is not None
+    resolver.continuations["act_cancel_follow_up_content"] = waiting.continuation
+    cancelled = await orchestrator.dispatch(
+        RootTurnInput(
+            team_id=1,
+            user_id=2,
+            session_id=557,
+            client_request_id="req_missing_content_cancel_submit",
+            input=InteractionTurnInput(
+                type="interaction", action_id="act_cancel_follow_up_content", values={"cancel": True}
+            ),
+        ),
+        runtime=runtime,
+    )
+    assert isinstance(cancelled, WorkflowDispatchResult)
+    assert isinstance(cancelled.workflow_result, WorkflowCancelledResult)
+    assert cancelled.continuation is None
+    assert tool_registry.calls == []
+    assert semantic_parser.messages == ["为上海星云科技创建跟进任务,下周三上午10点电话跟进,下一步确认技术评估结论"]
 
 
 class TwoSupplementsThenCompleteSemanticParser:
@@ -2270,6 +2334,10 @@ async def test_create_lead_follow_up_unavailable_failure_keeps_created_lead() ->
     assert [item.public_id for item in failed.workflow_result.committed_resources] == ["lead_001"]
     assert failed.workflow_result.message == "CRM 服务暂时不可用, 请稍后重试。"
     assert [call["name"] for call in tool_registry.calls] == ["create_lead", "create_lead_follow_up"]
+    timeline = build_turn_timeline(failed, user_text="确认创建线索")
+    assert timeline.steps[-2].tone == "done"
+    assert "lead_001" in timeline.steps[-2].detail
+    assert "没有调创建" not in timeline.steps[-2].title
 
 
 async def test_create_customer_with_activity_confirms_once_and_binds_created_customer_id() -> None:
@@ -2852,7 +2920,7 @@ class MissingCreatedIdToolRegistry(CapturingToolRegistry):
         )
         if name != "create_lead":
             raise AssertionError("A command with an unresolved binding must not execute")
-        return AgentToolResult(tool_name=name, success=True, data={})
+        return AgentToolResult(tool_name=name, success=True, data={"public_id": "lead_001", "lead_name": "上海云图科技"})
 
 
 def confirmation_plan(commands: list[WorkflowCommand]) -> WorkflowActionPlan:
@@ -2932,6 +3000,159 @@ async def dispatch_confirmed_static_plan(
     return waiting_dispatch.workflow_result, completed_dispatch
 
 
+async def test_committed_activity_with_long_title_keeps_submission_receipt() -> None:
+    title = "跟" * 255
+
+    class CommittedActivityRegistry(CapturingToolRegistry):
+        async def execute(self, name, context, payload, *, policy):
+            result = await super().execute(name, context, payload, policy=policy)
+            result.data = {"id": 241, "title": title, "submission_id": "create_customer_activity:2:confirmed"}
+            return result
+
+    registry = CommittedActivityRegistry()
+    result = await CRMWorkflowEffectExecutor(tool_registry=registry).execute(
+        confirmation_plan(
+            [
+                WorkflowCommand(
+                    command_id="create_customer_activity",
+                    tool_name="create_customer_activity",
+                    payload={"customer_id": CUSTOMER_REF.public_id, "title": title},
+                    authorization_scope=WorkflowAuthorizationScope(customer_ids=[CUSTOMER_REF.public_id]),
+                )
+            ]
+        ),
+        workflow_id="wf_" + "e" * 32,
+        request=WorkflowTurnInput(
+            workflow_id="wf_" + "e" * 32,
+            start=WorkflowTextStart(kind="text", text="记录客户跟进"),
+            principal=AgentPrincipal(team_id=1, user_id=2, session_id=562),
+        ),
+        runtime=WorkflowRuntimeContext(db=object(), authorization="Bearer test-token"),
+    )
+
+    assert result.success is True
+    assert [resource.public_id for resource in result.committed_resources] == ["241"]
+    assert result.committed_resources[0].display_name == title[:200]
+    assert len(result.durable_work) == 1
+    assert [call["name"] for call in registry.calls] == ["create_customer_activity"]
+
+
+class ActivityThenRejectedContactRegistry(CapturingToolRegistry):
+    async def execute(self, name, context, payload, *, policy):
+        if name == "create_contact":
+            self.calls.append({"name": name, "context": context, "payload": payload, "policy": policy})
+            return AgentToolResult(tool_name=name, success=False, error_message="联系人无效", status_code=422)
+        return await super().execute(name, context, payload, policy=policy)
+
+
+async def test_confirmed_partial_commit_keeps_activity_receipt_and_does_not_repeat_first_command() -> None:
+    registry = ActivityThenRejectedContactRegistry()
+    _, dispatch = await dispatch_confirmed_static_plan(
+        plan=confirmation_plan(
+            [
+                WorkflowCommand(
+                    command_id="create_customer_activity",
+                    tool_name="create_customer_activity",
+                    payload={"customer_id": CUSTOMER_REF.public_id, "title": "初次跟进"},
+                    authorization_scope=WorkflowAuthorizationScope(customer_ids=[CUSTOMER_REF.public_id]),
+                ),
+                WorkflowCommand(
+                    command_id="create_contact",
+                    tool_name="create_contact",
+                    payload={"customer_id": CUSTOMER_REF.public_id, "name": "张老师"},
+                    authorization_scope=WorkflowAuthorizationScope(customer_ids=[CUSTOMER_REF.public_id]),
+                ),
+            ]
+        ),
+        tool_registry=registry,
+        session_id=569,
+    )
+
+    assert isinstance(dispatch.workflow_result, WorkflowFailedResult)
+    failure = dispatch.workflow_result
+    assert failure.code == "WORKFLOW_TOOL_REJECTED"
+    assert failure.retryable is False
+    assert failure.failed_command_id == "create_contact"
+    assert [(resource.command_id, resource.public_id) for resource in failure.committed_resources] == [
+        ("create_customer_activity", "actv_001")
+    ]
+    assert [receipt.activity_id for receipt in failure.durable_work] == [241]
+    assert [call["name"] for call in registry.calls] == ["create_customer_activity", "create_contact"]
+    timeline = build_turn_timeline(dispatch, user_text="确认执行")
+    assert timeline.outcome == "failed"
+    assert "部分" in timeline.summary or "已写入" in timeline.summary
+    assert timeline.steps[-2].tone == "done"
+    assert "初次跟进" in timeline.steps[-2].detail or "actv_001" in timeline.steps[-2].detail
+    assert timeline.steps[-1].tone == "done"
+
+
+async def test_scope_failure_after_activity_commit_keeps_receipt_without_executing_next_command() -> None:
+    registry = CapturingToolRegistry()
+    _, dispatch = await dispatch_confirmed_static_plan(
+        plan=confirmation_plan(
+            [
+                WorkflowCommand(
+                    command_id="create_customer_activity",
+                    tool_name="create_customer_activity",
+                    payload={"customer_id": CUSTOMER_REF.public_id, "title": "初次跟进"},
+                    authorization_scope=WorkflowAuthorizationScope(customer_ids=[CUSTOMER_REF.public_id]),
+                ),
+                WorkflowCommand(
+                    command_id="create_contact",
+                    tool_name="create_contact",
+                    payload={"name": "张老师"},
+                    authorization_scope=WorkflowAuthorizationScope(
+                        customer_ids=[],
+                        customer_bindings=[WorkflowAuthorizationBinding(
+                            source_command_id="create_customer_activity", source_path=["missing_customer_id"]
+                        )],
+                    ),
+                ),
+            ]
+        ),
+        tool_registry=registry,
+        session_id=570,
+    )
+
+    assert isinstance(dispatch.workflow_result, WorkflowFailedResult)
+    assert dispatch.workflow_result.code == "WORKFLOW_AUTHORIZATION_SCOPE_INVALID"
+    assert dispatch.workflow_result.failed_command_id == "create_contact"
+    assert [resource.public_id for resource in dispatch.workflow_result.committed_resources] == ["actv_001"]
+    assert [receipt.activity_id for receipt in dispatch.workflow_result.durable_work] == [241]
+    assert [call["name"] for call in registry.calls] == ["create_customer_activity"]
+
+
+async def test_resource_preflight_failure_after_activity_commit_keeps_receipt() -> None:
+    registry = CapturingToolRegistry()
+    _, dispatch = await dispatch_confirmed_static_plan(
+        plan=confirmation_plan(
+            [
+                WorkflowCommand(
+                    command_id="create_customer_activity",
+                    tool_name="create_customer_activity",
+                    payload={"customer_id": CUSTOMER_REF.public_id, "title": "初次跟进"},
+                    authorization_scope=WorkflowAuthorizationScope(customer_ids=[CUSTOMER_REF.public_id]),
+                ),
+                WorkflowCommand(
+                    command_id="transition_follow_up_task",
+                    tool_name="transition_follow_up_task",
+                    payload={"task_id": "", "action": "complete"},
+                    authorization_scope=WorkflowAuthorizationScope(customer_ids=[CUSTOMER_REF.public_id]),
+                ),
+            ]
+        ),
+        tool_registry=registry,
+        session_id=571,
+    )
+
+    assert isinstance(dispatch.workflow_result, WorkflowFailedResult)
+    assert dispatch.workflow_result.code == "WORKFLOW_AUTHORIZATION_SCOPE_INVALID"
+    assert dispatch.workflow_result.failed_command_id == "transition_follow_up_task"
+    assert [resource.public_id for resource in dispatch.workflow_result.committed_resources] == ["actv_001"]
+    assert [receipt.activity_id for receipt in dispatch.workflow_result.durable_work] == [241]
+    assert [call["name"] for call in registry.calls] == ["create_customer_activity"]
+
+
 async def test_workflow_fails_closed_when_prior_command_result_cannot_be_bound() -> None:
     tool_registry = MissingCreatedIdToolRegistry()
     _, completed = await dispatch_confirmed_static_plan(
@@ -2964,6 +3185,8 @@ async def test_workflow_fails_closed_when_prior_command_result_cannot_be_bound()
 
     assert isinstance(completed.workflow_result, WorkflowFailedResult)
     assert completed.workflow_result.code == "WORKFLOW_COMMAND_BINDING_FAILED"
+    assert [resource.public_id for resource in completed.workflow_result.committed_resources] == ["lead_001"]
+    assert completed.workflow_result.failed_command_id == "create_lead_follow_up"
     assert [call["name"] for call in tool_registry.calls] == ["create_lead"]
 
 
@@ -2993,6 +3216,11 @@ async def test_workflow_preflights_every_command_before_any_effect_executes() ->
     assert isinstance(completed.workflow_result, WorkflowFailedResult)
     assert completed.workflow_result.code == "WORKFLOW_ACTION_UNSUPPORTED"
     assert tool_registry.calls == []
+    assert completed.workflow_result.committed_resources == []
+    assert completed.workflow_result.durable_work == []
+    timeline = build_turn_timeline(completed, user_text="确认执行")
+    assert timeline.steps[-2].tone == "skipped"
+    assert "写入前" in timeline.steps[-2].detail
 
 
 class FakeCustomerMemberResolver:
@@ -4931,7 +5159,11 @@ async def test_move_opportunity_stage_stops_after_first_failed_intermediate_stag
     assert isinstance(failed, WorkflowDispatchResult)
     assert isinstance(failed.workflow_result, WorkflowFailedResult)
     assert failed.workflow_result.code == "WORKFLOW_TOOL_REJECTED"
-    assert failed.workflow_result.message == "采购阶段状态已变化。"
+    assert failed.workflow_result.completed_command_ids == ["move_opportunity_stage_1"]
+    assert failed.workflow_result.failed_command_id == "move_opportunity_stage_2"
+    timeline = build_turn_timeline(failed, user_text="确认推进阶段")
+    assert timeline.steps[-2].tone == "done"
+    assert "move_opportunity_stage_1" in timeline.steps[-2].detail
     assert [call["payload"]["stage_template_id"] for call in tool_registry.calls] == [
         23,
         24,
@@ -5177,9 +5409,7 @@ def build_follow_up_task_orchestrator(
     return RootOrchestrator(
         checkpointer=json_safe_checkpointer(),
         context_resolver=EmptyContextResolver(),
-        decision_classifier=CreateStandaloneWriteDecisionClassifier(
-            reason_code="FOLLOW_UP_TASK_TRANSITION"
-        ),
+        decision_classifier=CreateStandaloneWriteDecisionClassifier(reason_code="FOLLOW_UP_TASK_TRANSITION"),
         query_executor=FailingQueryExecutor(),
         interaction_resolver=interaction_resolver,
         workflow_subgraph=build_workflow_subgraph(
@@ -5442,10 +5672,7 @@ async def test_follow_up_task_postpone_collects_time_then_uses_system_resolved_i
     assert isinstance(missing_time, WorkflowDispatchResult)
     assert isinstance(missing_time.workflow_result, WorkflowWaitingResult)
     assert missing_time.workflow_result.interaction.interaction_type == "text_input"
-    assert (
-        missing_time.workflow_result.interaction.business_action
-        == "collect_follow_up_task_postpone_due_at"
-    )
+    assert missing_time.workflow_result.interaction.business_action == "collect_follow_up_task_postpone_due_at"
     assert missing_time.continuation is not None
     interaction_resolver.continuations["act_supply_follow_up_postpone"] = missing_time.continuation
 
@@ -5467,8 +5694,7 @@ async def test_follow_up_task_postpone_collects_time_then_uses_system_resolved_i
     assert isinstance(confirmation.workflow_result, WorkflowWaitingResult)
     assert confirmation.workflow_result.interaction.interaction_type == "confirmation"
     assert confirmation.workflow_result.interaction.prompt == (
-        "确认要将上海星云科技有限公司的跟进任务“确认预算审批”"
-        "延期到 2026-08-26T10:00:00吗?"
+        "确认要将上海星云科技有限公司的跟进任务“确认预算审批”延期到 2026-08-26T10:00:00吗?"
     )
     assert parser.messages == [
         f"把 {task_id} 延期",
@@ -5495,9 +5721,7 @@ async def test_follow_up_task_postpone_collects_time_then_uses_system_resolved_i
 
     assert isinstance(completed, WorkflowDispatchResult)
     assert isinstance(completed.workflow_result, WorkflowCompletedResult)
-    assert completed.workflow_result.assistant_text == (
-        "已将跟进任务“确认预算审批”延期到 2026-08-26T10:00:00。"
-    )
+    assert completed.workflow_result.assistant_text == ("已将跟进任务“确认预算审批”延期到 2026-08-26T10:00:00。")
     assert len(tool_registry.calls) == 1
     assert tool_registry.calls[0]["payload"]["proposed_due_at"] == "2026-08-26T10:00:00"
 
@@ -5629,10 +5853,7 @@ async def test_follow_up_confirmation_case_reply_resumes_native_workflow_without
         "先放着",
         "不管了",
     ]
-    assert (
-        waiting.workflow_result.interaction.business_action
-        == "resolve_follow_up_task_confirmation_case"
-    )
+    assert waiting.workflow_result.interaction.business_action == "resolve_follow_up_task_confirmation_case"
     assert waiting.continuation is not None
     interaction_resolver.continuation = waiting.continuation
     interaction_resolver.interaction_id = waiting.workflow_result.interaction.interaction_id
@@ -5663,8 +5884,7 @@ async def test_follow_up_confirmation_case_reply_resumes_native_workflow_without
         "case_id": "fuc_00000000000000000000000000000001",
         "reply_text": "已完成",
         "idempotency_suffix": (
-            f"{completed.workflow_result.workflow_ref.workflow_id}:"
-            "resolve_follow_up_task_confirmation_case"
+            f"{completed.workflow_result.workflow_ref.workflow_id}:resolve_follow_up_task_confirmation_case"
         ),
     }
     context = call["context"]
@@ -5836,9 +6056,7 @@ async def test_independent_workflow_triggers_in_one_session_use_distinct_executi
     continuations = [result.continuation for result in waiting_results]
     assert all(continuation is not None for continuation in continuations)
     checkpoint_namespaces = {
-        continuation.subgraph_checkpoint_ns
-        for continuation in continuations
-        if continuation is not None
+        continuation.subgraph_checkpoint_ns for continuation in continuations if continuation is not None
     }
     assert len(checkpoint_namespaces) == 3
 
@@ -5882,10 +6100,7 @@ async def test_independent_workflow_triggers_in_one_session_use_distinct_executi
         assert isinstance(completed.workflow_result, WorkflowCompletedResult)
         completed_results.append(completed)
 
-    workflow_ids = {
-        result.workflow_result.workflow_ref.workflow_id
-        for result in waiting_results
-    }
+    workflow_ids = {result.workflow_result.workflow_ref.workflow_id for result in waiting_results}
     assert len(workflow_ids) == 3
     assert len(tool_registry.requests) == 3
 
@@ -5946,6 +6161,7 @@ def test_root_rejects_terminal_workflow_result_from_another_execution() -> None:
                 "workflow_result": workflow_result.model_dump(mode="json"),
             }
         )
+
 
 class CacheAwareWorkflowCustomerResolver:
     def __init__(self) -> None:
@@ -6321,6 +6537,7 @@ async def test_next_action_gate_allows_clear_or_explicitly_none(
     assert isinstance(result, WorkflowDispatchResult)
     assert isinstance(result.workflow_result, WorkflowCompletedResult)
     assert len(tool_registry.calls) == 1
+
 
 async def test_cached_customer_identity_is_reused_without_name_string_matching() -> None:
     semantic = _activity_semantic(

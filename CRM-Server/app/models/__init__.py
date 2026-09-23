@@ -21,6 +21,7 @@ from app.models.agent_persistence import (
     AgentUIActionConsumptionMode,
     AgentUIActionStatus,
 )
+from app.models.agent_turn_execution import AgentTurnExecution, AgentTurnExecutionStatus
 from app.models.ai_config import AIConfig
 from app.models.approval import Approval, ApprovalFlow, ApprovalNode, ApprovalRecord
 from app.models.command_execution import CommandExecution, CommandExecutionStatus
@@ -142,6 +143,8 @@ from app.models.system_config import ConfigType, SystemConfig
 from app.models.team import Team, UserTeam
 from app.models.user import User, UserStatus
 from app.models.user_role import UserRole
+from app.models.reminder_rule import ReminderRule
+from app.models.reminder_rule_run import ReminderRuleRun
 from app.models.workflow import VALID_TRANSITIONS, Workflow, WorkflowStatus
 from app.models.view_preference import ViewPreference, ViewPreferenceScope
 from app.models.product import Product, ProductModule, ProductModuleRole

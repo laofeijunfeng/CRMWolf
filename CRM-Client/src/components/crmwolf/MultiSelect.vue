@@ -1,11 +1,17 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { ChevronsUpDown } from 'lucide-vue-next'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger
-} from '@/components/ui/select'
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 
 interface MultiSelectOption {
   value: string | number
@@ -14,13 +20,15 @@ interface MultiSelectOption {
 
 const props = withDefaults(defineProps<{
   modelValue?: string[]
-  options?: MultiSelectOption[]
+  options?: readonly MultiSelectOption[]
   placeholder?: string
+  searchPlaceholder?: string
   disabled?: boolean
 }>(), {
   modelValue: () => [],
   options: () => [],
   placeholder: '请选择',
+  searchPlaceholder: '搜索...',
   disabled: false,
 })
 
@@ -29,88 +37,60 @@ const emit = defineEmits<{
 }>()
 
 const selectedValues = computed<string[]>(() => props.modelValue ?? [])
-
 const selectedSummary = computed(() => {
   if (selectedValues.value.length === 0) return props.placeholder
-
   const labels = selectedValues.value.map((value) => {
-    const option = props.options.find((item) => String(item.value) === value)
+    const option = props.options.find(item => String(item.value) === value)
     return option?.label ?? value
   })
-
   return labels.length <= 2 ? labels.join('、') : `${labels.slice(0, 2).join('、')} 等 ${labels.length} 项`
 })
 
-function handleValueChange(value: unknown): void {
-  if (Array.isArray(value)) {
-    emit('update:modelValue', value.map((item) => String(item)))
-    return
-  }
-
-  if (value === null || value === undefined || value === '') {
-    emit('update:modelValue', [])
-    return
-  }
-
-  emit('update:modelValue', [String(value)])
+function toggleValue(value: string): void {
+  const next = new Set(selectedValues.value)
+  if (next.has(value)) next.delete(value)
+  else next.add(value)
+  emit('update:modelValue', [...next])
 }
 </script>
 
 <template>
-  <Select
-    :model-value="selectedValues"
-    multiple
-    :disabled="props.disabled"
-    @update:model-value="handleValueChange"
-  >
-    <SelectTrigger class="wolf-multi-select-trigger">
-      <span
-        class="wolf-multi-select-value"
-        :class="{ 'is-placeholder': selectedValues.length === 0 }"
+  <Popover>
+    <PopoverTrigger as-child>
+      <Button
+        type="button"
+        variant="outline"
+        role="combobox"
+        :disabled="props.disabled"
+        class="h-input-desktop min-h-input-desktop w-full justify-between rounded-wolf border-wolf-border-default bg-wolf-bg-card px-wolf-md py-0 !text-wolf-body font-wolf font-normal text-wolf-text-primary shadow-none hover:bg-wolf-bg-card max-[767px]:h-input-mobile max-[767px]:min-h-input-mobile max-[767px]:px-wolf-xl"
       >
-        {{ selectedSummary }}
-      </span>
-    </SelectTrigger>
-    <SelectContent class="wolf-multi-select-content">
-      <SelectItem
-        v-for="option in options"
-        :key="String(option.value)"
-        :value="String(option.value)"
-      >
-        {{ option.label }}
-      </SelectItem>
-    </SelectContent>
-  </Select>
+        <span class="min-w-0 truncate" :class="selectedValues.length === 0 ? 'text-muted-foreground' : ''">
+          {{ selectedSummary }}
+        </span>
+        <ChevronsUpDown class="ml-2 h-4 w-4 shrink-0 opacity-50" />
+      </Button>
+    </PopoverTrigger>
+    <PopoverContent align="start" class="w-[var(--reka-popover-trigger-width)] p-0">
+      <Command>
+        <CommandInput :placeholder="props.searchPlaceholder" />
+        <CommandList class="max-h-64">
+          <CommandEmpty>没有匹配成员</CommandEmpty>
+          <CommandGroup>
+            <CommandItem
+              v-for="option in props.options"
+              :key="String(option.value)"
+              :value="String(option.value)"
+              @select.prevent="toggleValue(String(option.value))"
+            >
+              <Checkbox
+                :checked="selectedValues.includes(String(option.value))"
+                class="pointer-events-none"
+              />
+              <span>{{ option.label }}</span>
+            </CommandItem>
+          </CommandGroup>
+        </CommandList>
+      </Command>
+    </PopoverContent>
+  </Popover>
 </template>
-
-<style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
-
-.wolf-multi-select-trigger {
-  height: $wolf-input-height-v2;
-  min-width: 0;
-}
-
-@media (max-width: 767px) {
-  .wolf-multi-select-trigger {
-    height: $wolf-input-height-mobile-v2;
-  }
-}
-
-.wolf-multi-select-value {
-  min-width: 0;
-  overflow: hidden;
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-auxiliary-v2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-
-  &.is-placeholder {
-    color: $wolf-text-tertiary-v2;
-  }
-}
-
-:global(.wolf-multi-select-content) {
-  z-index: 1100;
-}
-</style>

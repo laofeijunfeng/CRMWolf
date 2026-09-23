@@ -62,6 +62,7 @@ from app.api.frontend_logs import router as frontend_logs_router
 from app.api.im_bots import router as im_bots_router
 from app.api.license_application import router as license_application_router  # 新增
 from app.api.workflows import router as workflows_router
+from app.api.reminder_rules import router as reminder_rules_router
 from app.core.database import SessionLocal
 from app.core.exceptions import (
     AppException,
@@ -127,6 +128,7 @@ api_router.include_router(customer_procurement.router)
 api_router.include_router(customer_activities.router)
 api_router.include_router(opportunities.router)
 api_router.include_router(workflows_router)
+api_router.include_router(reminder_rules_router)
 api_router.include_router(opportunities.analytics_router)
 api_router.include_router(filter_options.router)
 api_router.include_router(contracts.router)
@@ -229,12 +231,19 @@ async def startup_event():
         start_outbound_notification_recovery_scheduler,
     )
     start_outbound_notification_recovery_scheduler()
+    logger.info("启动提醒规则扫描...")
+    from app.tasks.reminder_rule_scheduler import start_reminder_rule_scheduler
+    start_reminder_rule_scheduler()
 
     logger.info("启动 Agent 商机建议持久任务恢复扫描...")
     from app.tasks.customer_opportunity_suggestion_recovery import (
         start_customer_opportunity_suggestion_recovery_scheduler,
     )
     start_customer_opportunity_suggestion_recovery_scheduler()
+
+    logger.info("启动 Agent 持久执行恢复扫描...")
+    from app.tasks.agent_turn_execution_recovery import start_agent_turn_execution_recovery_scheduler
+    start_agent_turn_execution_recovery_scheduler()
 
     logger.info("审批超时自动催办任务已停用，催办改为审批中心手动触发")
 
@@ -260,6 +269,7 @@ async def shutdown_event():
     from app.tasks.outbound_notification_recovery import (
         stop_outbound_notification_recovery_scheduler,
     )
+    from app.tasks.reminder_rule_scheduler import stop_reminder_rule_scheduler
     from app.tasks.customer_opportunity_suggestion_recovery import (
         stop_customer_opportunity_suggestion_recovery_scheduler,
     )
@@ -271,6 +281,7 @@ async def shutdown_event():
     )
 
     stop_customer_activity_ai_job_recovery_scheduler()
+    stop_reminder_rule_scheduler()
     stop_customer_enrichment_recovery_scheduler()
     stop_customer_enrichment_backfill_scheduler()
     stop_customer_enrichment_reconciliation_scheduler()
@@ -282,6 +293,8 @@ async def shutdown_event():
     from app.tasks.customer_intelligence_reconciliation import stop_customer_intelligence_reconciliation_scheduler
     stop_customer_intelligence_reconciliation_scheduler()
     stop_customer_intelligence_refresh_retry_scheduler()
+    from app.tasks.agent_turn_execution_recovery import stop_agent_turn_execution_recovery_scheduler
+    stop_agent_turn_execution_recovery_scheduler()
     stop_customer_evidence_sync_scheduler()
 
 

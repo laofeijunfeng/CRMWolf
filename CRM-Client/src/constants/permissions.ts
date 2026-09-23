@@ -53,6 +53,7 @@ export const mergePermissionIdsPreservingDeprecated = (
 export const PERMISSION_RESOURCE_NAMES: Readonly<Record<string, string>> = {
   acquisition_source: '获客来源',
   ai: 'AI 配置',
+  approval: '审批',
   approval_flow: '审批流程',
   contract: '合同',
   customer: '客户',
@@ -61,6 +62,7 @@ export const PERMISSION_RESOURCE_NAMES: Readonly<Record<string, string>> = {
   customer_follow_up: '客户跟进',
   customer_profile: '客户档案',
   finance: '财务',
+  follow_up_task: '客户追踪',
   invoice: '发票',
   invoice_reissue: '发票重开',
   invoice_title: '发票抬头',
@@ -99,6 +101,7 @@ export const PERMISSION_ACTION_NAMES: Readonly<Record<string, string>> = {
   create: '创建',
   delete: '删除',
   edit: '编辑',
+  export: '导出',
   history: '历史',
   import: '导入',
   issue: '发放',

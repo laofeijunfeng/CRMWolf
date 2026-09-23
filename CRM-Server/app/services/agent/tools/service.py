@@ -900,24 +900,40 @@ class CRMAgentToolService:
                     "effectiveness_detail_json": effectiveness_detail_json or {},
                 },
             )
-            self._customer_activity_durable_work_receipt(response)
-            return response
+            if not validate_receipt(response):
+                raise ValueError("客户活动写入结果缺少可验证的原始回执")
+            try:
+                committed = await reconcile()
+            except Exception as exc:
+                raise RuntimeError("客户活动已提交但持久回执未确认") from exc
+            if not validate_receipt(committed) or committed["id"] != response["id"]:
+                raise ValueError("客户活动已提交但持久回执不完整")
+            return committed
 
         async def reconcile():
             customer_public_id = self._resolve_customer_public_id(context, customer_id)
-            response = await self.api_client.request(
+            return await self.api_client.request(
                 "GET",
-                f"/v1/customer-activities/{customer_public_id}",
+                f"/v1/customer-activities/{customer_public_id}/agent-submissions/{action_key}",
                 context.authorization,
-                params={"skip": 0, "limit": 100},
+                params={"agent_session_id": context.session_id, "request_hash": self._hash_json(payload)},
             )
-            items = response if isinstance(response, list) else (response.get("items", []) if isinstance(response, dict) else [])
-            if not isinstance(items, list):
-                return None
-            return next(
-                (item for item in items if isinstance(item, dict) and item.get("submission_id") == action_key),
-                None,
-            )
+
+        def validate_receipt(data: object) -> bool:
+            if not isinstance(data, dict):
+                return False
+            if data.get("customer_id") != self._resolve_customer_public_id(context, customer_id):
+                return False
+            if data.get("submission_id") != action_key:
+                return False
+            durable = data.get("durable_work")
+            if not isinstance(durable, dict) or durable.get("activity_revision") != 1:
+                return False
+            try:
+                self._customer_activity_durable_work_receipt(data)
+            except ValueError:
+                return False
+            return True
 
         result = await self._run_write_tool(
             context,
@@ -926,6 +942,7 @@ class CRMAgentToolService:
             action_key,
             call_api,
             reconcile=reconcile,
+            validate_result=validate_receipt,
         )
         if not result.success:
             return result
@@ -1440,6 +1457,7 @@ class CRMAgentToolService:
         action_key: str,
         call_api: Callable[[], Awaitable[object]],
         reconcile: Callable[[], Awaitable[object | None]] | None = None,
+        validate_result: Callable[[object], bool] | None = None,
     ) -> AgentToolResult:
         request_hash = self._hash_json(request_json)
         idempotency, created = agent_idempotency_key_crud.ensure(
@@ -1452,7 +1470,7 @@ class CRMAgentToolService:
                 request_hash=request_hash,
             ),
         )
-        if idempotency.request_hash != request_hash:
+        if idempotency.session_id != context.session_id or idempotency.request_hash != request_hash:
             return AgentToolResult(
                 tool_name=tool_name,
                 success=False,
@@ -1460,6 +1478,13 @@ class CRMAgentToolService:
                 status_code=409,
             )
         if idempotency.status == AgentIdempotencyStatus.SUCCESS:
+            if validate_result is not None and not validate_result(idempotency.result_json):
+                return AgentToolResult(
+                    tool_name=tool_name,
+                    success=False,
+                    error_message="idempotency_execution_ambiguous",
+                    status_code=409,
+                )
             return AgentToolResult(
                 tool_name=tool_name,
                 success=True,
@@ -1477,7 +1502,7 @@ class CRMAgentToolService:
                 except Exception:  # reconciliation is best-effort; never duplicate the write
                     logger.exception("Agent 写入结果对账失败: action_key=%s", action_key)
                     reconciled_data = None
-                if reconciled_data is not None:
+                if reconciled_data is not None and (validate_result is None or validate_result(reconciled_data)):
                     agent_idempotency_key_crud.update(
                         context.db,
                         idempotency,

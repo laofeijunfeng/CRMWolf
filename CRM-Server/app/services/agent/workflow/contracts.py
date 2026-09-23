@@ -318,6 +318,8 @@ class WorkflowFailedResult(WorkflowContractModel):
     message: str = Field(min_length=1, max_length=2_000)
     retryable: bool = False
     progress: WorkflowProgress
+    durable_work: list[AgentDurableWorkReceipt] = Field(default_factory=list, max_length=20)
+    completed_command_ids: list[str] = Field(default_factory=list, max_length=20)
     committed_resources: list[WorkflowCommittedResource] = Field(default_factory=list, max_length=20)
     failed_command_id: str | None = Field(default=None, min_length=1, max_length=128)
 
@@ -488,6 +490,7 @@ class WorkflowEffectResult(WorkflowContractModel):
     retryable: bool = False
     durable_work: list[AgentDurableWorkReceipt] = Field(default_factory=list, max_length=20)
     committed_resources: list[WorkflowCommittedResource] = Field(default_factory=list, max_length=20)
+    completed_command_ids: list[str] = Field(default_factory=list, max_length=20)
     failed_command_id: str | None = Field(default=None, min_length=1, max_length=128)
 
     @model_validator(mode="after")
@@ -500,8 +503,6 @@ class WorkflowEffectResult(WorkflowContractModel):
         else:
             if self.code is None:
                 raise ValueError("failed Workflow effects require an error code")
-            if self.durable_work:
-                raise ValueError("failed Workflow effects cannot publish durable-work receipts")
         return self
 
 

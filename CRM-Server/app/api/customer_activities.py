@@ -13,7 +13,11 @@ from app.core.deps import (
     get_current_active_user,
     get_current_user_team,
 )
+from app.crud.agent import agent_idempotency_key_crud, agent_session_crud
 from app.crud.customer_activity import customer_activity_crud
+from app.crud.customer_activity_post_commit_job import customer_activity_post_commit_job_crud
+from app.crud.customer_opportunity_suggestion_job import customer_opportunity_suggestion_job_crud
+from app.models.customer_intelligence_run import CustomerIntelligenceRun
 from app.crud.sales_commitment import follow_up_task_crud
 from app.models.sales_commitment import FollowUpTaskProjectionTrigger
 from app.schemas.customer_activity import (
@@ -32,6 +36,7 @@ from app.services.customer_activity_write_service import (
     CustomerActivityWriteResult,
     customer_activity_write_service,
 )
+from app.services.customer_intelligence_event_service import customer_intelligence_event_service
 from app.services.follow_up_task_reconciliation_evaluation_service import (
     FollowUpTaskReconciliationDecision,
     FollowUpTaskReconciliationTaskDecision,
@@ -340,6 +345,95 @@ async def create_activity_and_complete_tracking(
         activity=_build_activity_response(db, write_result.activity, write_result=write_result),
         completed_task_public_id=payload.task_public_id,
     )
+
+
+@router.get(
+    "/{customer_id}/agent-submissions/{submission_id}",
+    summary="查询 Agent 客户活动原始提交回执",
+)
+def get_agent_submission_receipt(
+    customer_id: str,
+    submission_id: str,
+    agent_session_id: int = Query(..., gt=0),
+    request_hash: str = Query(..., min_length=64, max_length=64),
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    customer = check_customer_activity_permission(customer_id, team_id, current_user, db)
+    session = agent_session_crud.get_by_id(db, agent_session_id, team_id=team_id, user_id=current_user.id)
+    idempotency = agent_idempotency_key_crud.get_by_action_key(
+        db, team_id, current_user.id, submission_id
+    )
+    if (
+        session is None
+        or idempotency is None
+        or idempotency.session_id != agent_session_id
+        or idempotency.request_hash != request_hash
+        or not submission_id.startswith(f"create_customer_activity:{agent_session_id}:")
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="原始提交不存在")
+
+    activity = customer_activity_crud.get_by_submission_id(db, team_id=team_id, submission_id=submission_id)
+    if activity is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="原始提交不存在")
+    if (
+        activity.customer_id != customer.id
+        or activity.creator_id != str(current_user.id)
+        or activity.submission_source != "AGENT"
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="原始提交不存在")
+
+    post_commit = customer_activity_post_commit_job_crud.get_by_identity(
+        db, team_id=team_id, activity_id=activity.id,
+        trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_CREATED_DETERMINISTIC,
+        activity_revision=1,
+    )
+    event_key = customer_intelligence_event_service._event_key(
+        team_id=team_id, trigger_type="customer_activity_created", source_type="customer_activity",
+        source_object_id=f"{activity.id}:revision:1",
+    )
+    run = (
+        db.query(CustomerIntelligenceRun)
+        .filter(CustomerIntelligenceRun.team_id == team_id, CustomerIntelligenceRun.event_key == event_key)
+        .one_or_none()
+    )
+    event = run.event_json if run is not None else None
+    source = event.get("source") if isinstance(event, dict) else None
+    if (
+        post_commit is None
+        or post_commit.actor_id != str(current_user.id)
+        or run is None
+        or not run.request_id
+        or run.customer_id != customer.id
+        or run.actor_id != str(current_user.id)
+        or run.trigger_type != "customer_activity_created"
+        or not isinstance(event, dict)
+        or event.get("event_key") != event_key
+        or event.get("customer_id") != customer.id
+        or event.get("team_id") != team_id
+        or event.get("actor_id") != str(current_user.id)
+        or not isinstance(source, dict)
+        or source.get("source_type") != "customer_activity"
+        or source.get("source_object_id") != str(activity.id)
+        or source.get("source_version") != 1
+    ):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="原始持久回执尚不完整")
+
+    suggestion = customer_opportunity_suggestion_job_crud.get_by_identity(
+        db, team_id=team_id, activity_id=activity.id, activity_revision=1
+    )
+    return {
+        "id": activity.id,
+        "customer_id": customer.public_id,
+        "submission_id": submission_id,
+        "durable_work": {
+            "activity_revision": 1,
+            "post_commit_job_public_id": post_commit.public_id,
+            "customer_intelligence_request_id": run.request_id,
+            "opportunity_suggestion_job_public_id": suggestion.public_id if suggestion is not None else None,
+        },
+    }
 
 
 @router.get("/{customer_id}", response_model=List[CustomerActivityResponse], summary="查询客户活动列表")

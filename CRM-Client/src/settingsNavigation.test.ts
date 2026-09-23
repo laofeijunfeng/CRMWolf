@@ -16,6 +16,20 @@ describe('settings navigation registry', () => {
     expect(account?.requiredAnyPermissions).toEqual([])
   })
 
+  it('places reminder rules after approval flows and keeps them out of the canvas page', () => {
+    const item = getSettingsNavigationItem('reminder-rules')
+    const ids = SETTINGS_NAVIGATION.map(entry => entry.id)
+    expect(item).toMatchObject({
+      label: '提醒规则',
+      path: '/settings/reminder-rules',
+      group: 'business',
+      requiredAnyPermissions: ['automation:read'],
+      allowOwnerBypass: false,
+    })
+    expect(ids.indexOf('reminder-rules')).toBe(ids.indexOf('approval-flows') + 1)
+    expect(item?.path).not.toBe(getSettingsNavigationItem('approval-flows-new')?.path)
+  })
+
   it('allows automation permissions to enter the new approval workflow page', () => {
     const item = getSettingsNavigationItem('approval-flows-new')
 

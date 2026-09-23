@@ -15,6 +15,7 @@ from app.services.agent.orchestrator.contracts import (
     WorkflowDispatchResult,
 )
 from app.services.agent.workflow.contracts import (
+    WorkflowFailedResult,
     WorkflowCompletedResult,
     WorkflowQualityGate,
     WorkflowWaitingResult,
@@ -213,6 +214,15 @@ def _workflow_timeline(dispatch: WorkflowDispatchResult, *, model: str | None) -
                 ),
             ],
         )
+    if isinstance(result, WorkflowFailedResult):
+        return _failed_workflow_timeline(
+            dispatch,
+            result=result,
+            quality=quality if isinstance(quality, WorkflowQualityGate) else None,
+            customer_name=customer_name,
+            quality_score=quality_score,
+            model=resolved_model,
+        )
     return TurnTimeline(
         outcome="failed",
         summary=getattr(result, "message", None) or "工作流执行失败。",
@@ -222,6 +232,68 @@ def _workflow_timeline(dispatch: WorkflowDispatchResult, *, model: str | None) -
         steps=_failed_steps(dispatch, detail=getattr(result, "message", None) or "工作流执行失败。"),
     )
 
+
+def _failed_workflow_timeline(
+    dispatch: WorkflowDispatchResult,
+    *,
+    result: WorkflowFailedResult,
+    quality: WorkflowQualityGate | None,
+    customer_name: str | None,
+    quality_score: int | None,
+    model: str | None,
+) -> TurnTimeline:
+    committed = result.committed_resources
+    completed_ids = result.completed_command_ids
+    receipts = result.durable_work
+    preflight = not completed_ids and (
+        result.failed_command_id is None or result.code in {
+            "WORKFLOW_COMMAND_BINDING_FAILED",
+            "WORKFLOW_AUTHORIZATION_SCOPE_INVALID",
+            "WORKFLOW_RESOURCE_REVALIDATION_FAILED",
+            "WORKFLOW_RESOURCE_STALE",
+        }
+    )
+    if committed or completed_ids:
+        names = "、".join(f"{item.display_name}（{item.public_id}）" for item in committed) or "、".join(completed_ids)
+        api_step = TurnTimelineStep(
+            kind="api", title="部分写入已完成", detail=f"已确认写入：{names}；后续命令未完成。", tone="done"
+        )
+        background_step = TurnTimelineStep(
+            kind="background",
+            title="已登记后台任务" if receipts else "未收到后台任务回执",
+            detail=f"已确认 {len(receipts)} 条持久任务回执。" if receipts else "已提交对象未附带后台任务回执。",
+            tone="done" if receipts else "skipped",
+        )
+        summary = f"部分写入已完成；后续操作失败。{result.message}"
+    elif preflight:
+        api_step = TurnTimelineStep(kind="api", title="写入前校验失败", detail="本轮在写入前校验失败，未执行写入命令。", tone="skipped")
+        background_step = TurnTimelineStep(
+            kind="background", title="未登记后台任务", detail="写入前校验失败，未登记后台任务。", tone="skipped"
+        )
+        summary = result.message
+    else:
+        api_step = TurnTimelineStep(
+            kind="api", title="写入结果待确认", detail="写入接口可能已提交，请先核对结果，不要重复提交。", tone="blocked"
+        )
+        background_step = TurnTimelineStep(
+            kind="background", title="后台任务状态待确认", detail="无法确认写入和后台任务状态。", tone="blocked"
+        )
+        summary = result.message
+    return TurnTimeline(
+        outcome="failed",
+        summary=summary,
+        quality_score=quality_score,
+        customer_name=customer_name,
+        model=model,
+        steps=[
+            _model_step(dispatch, fallback="处理请求"),
+            _customer_step(customer_name),
+            _quality_passed_step(quality),
+            TurnTimelineStep(kind="interaction", title="操作未全部完成", detail=result.message, tone="blocked"),
+            api_step,
+            background_step,
+        ],
+    )
 
 def _waiting_workflow_timeline(
     dispatch: WorkflowDispatchResult,

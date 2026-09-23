@@ -344,6 +344,81 @@ def test_ui_action_repository_atomically_claims_and_replays_one_shot_action(db_s
     assert db_session.query(AgentUIAction).count() == 1
 
 
+def test_cancelled_action_is_terminal_replayable_and_immutable(db_session) -> None:
+    from app.schemas.agent_persistence import AgentUIActionRegistration
+    from app.services.agent.ui.actions import (
+        ActionAlreadyConsumedError,
+        ActionStateConflictError,
+        AgentUIActionRepository,
+    )
+
+    message = _seed_message(db_session)
+    result = AgentMessage(
+        team_id=1, user_id=2, session_id=message.session_id,
+        role=AgentMessageRole.ASSISTANT, content="已取消",
+    )
+    db_session.add(result)
+    db_session.flush()
+    now = datetime(2026, 8, 21, 10, 0, 0)
+    repository = AgentUIActionRepository()
+    action = repository.register(
+        db_session,
+        AgentUIActionRegistration(
+            public_id="act_cancel_follow_up", team_id=1, user_id=2,
+            session_id=message.session_id, message_id=message.id,
+            action_type="submit_interaction", root_context_role="RESUMABLE_WORKFLOW",
+            target={"business_action": "provide_follow_up_content", "allow_cancel": True},
+            consumption_mode="ONE_SHOT",
+        ),
+        now=now,
+    )
+    owner = dict(
+        public_id=action.public_id, team_id=1, user_id=2, session_id=message.session_id,
+        client_request_id="6fa2e0e8-86d4-4d6c-a1b0-6490b2bf12be",
+    )
+    assert repository.begin_consumption(db_session, **owner, now=now).outcome == "ACQUIRED"
+    cancelled = repository.complete_consumption(
+        db_session, **owner, result_message_id=result.id,
+        submitted_values={"cancel": True}, cancelled=True, now=now + timedelta(seconds=1),
+    )
+    assert cancelled.status == "CANCELLED"
+    assert cancelled.result_message_id == result.id
+    assert cancelled.submitted_values == {"cancel": True}
+    assert repository.list_active_workflow_continuations(
+        db_session, team_id=1, user_id=2, session_id=message.session_id,
+        now=now + timedelta(seconds=2),
+    ) == []
+    replay = repository.begin_consumption(
+        db_session, **owner, now=now + timedelta(days=2),
+    )
+    assert replay.outcome == "REPLAY"
+    assert replay.action == cancelled
+
+    with pytest.raises(ActionAlreadyConsumedError):
+        repository.begin_consumption(
+            db_session, **{**owner, "client_request_id": "7fa2e0e8-86d4-4d6c-a1b0-6490b2bf12be"},
+            now=now + timedelta(days=2),
+        )
+    with pytest.raises(ActionAlreadyConsumedError):
+        repository.complete_consumption(
+            db_session, **{**owner, "client_request_id": "7fa2e0e8-86d4-4d6c-a1b0-6490b2bf12be"},
+            result_message_id=result.id, cancelled=True,
+        )
+    with pytest.raises(ActionStateConflictError):
+        repository.complete_consumption(db_session, **owner, result_message_id=result.id, cancelled=False)
+    with pytest.raises(ActionStateConflictError):
+        repository.complete_consumption(
+            db_session, **owner, result_message_id=result.id,
+            submitted_values={"text": "伪造内容"}, cancelled=True,
+        )
+    assert repository.complete_consumption(
+        db_session, **owner, result_message_id=result.id,
+        submitted_values={"cancel": True}, cancelled=True,
+    ) == cancelled
+    assert repository.purge_terminal(db_session, team_id=1, now=now + timedelta(days=29)) == 0
+    assert repository.purge_terminal(db_session, team_id=1, now=now + timedelta(days=31)) == 1
+
+
 def test_ui_action_repository_leaves_reusable_action_active_and_expires_stale_action(db_session) -> None:
     from app.schemas.agent_persistence import AgentUIActionRegistration
     from app.services.agent.ui.actions import ActionExpiredError, AgentUIActionRepository

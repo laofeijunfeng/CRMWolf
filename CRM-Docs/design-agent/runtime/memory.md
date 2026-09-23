@@ -58,6 +58,8 @@ Agent 只能从 LangGraph checkpoint、Agent 自有会话、消息、任务投�
 
 任务执行成功、被取消或被挂起后，必须通过 LangGraph resume 路由和 task 状态变更表达结果；不得依赖 session context 表达运行时暂停。
 
+对于 `provide_follow_up_content` 的签名取消操作，成功拒绝续接后须使原 Action 持久终结，在结果消息与 Action 结算的同一事务清空任务级会话工作记忆，并以会话持久记录的取消结果消息 ID 为界隔离之前的近期消息。刷新仍展示“已取消”；后续完整聊天请求走新的 Root 决策，不继承已取消任务的客户、正文或下一步行动。若取消失败，不清空任务记忆或遮蔽历史，保留有效续接以供重试。其他可恢复任务的取消与挂起规则不变。
+
 ## Pending 中断
 
 存在 LangGraph interrupt 时，下一轮用户输入不得无条件进入该任务。

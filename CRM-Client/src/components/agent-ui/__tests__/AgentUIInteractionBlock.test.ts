@@ -220,3 +220,139 @@ it('renders confirmation facts above confirm and cancel', () => {
   expect(facts.text()).toContain('其他')
   expect(wrapper.findAll('button')).toHaveLength(2)
 })
+
+const followUpContentBlock = {
+  id: 'b_follow_up_content',
+  type: 'interaction' as const,
+  interaction_id: 'int_follow_up_content',
+  interaction_type: 'text_input' as const,
+  business_action: 'provide_follow_up_content',
+  allow_cancel: true,
+  state: 'ACTIVE' as const,
+  prompt: '请补充本次客户跟进的具体内容。',
+  allow_blank: false,
+  fields: [{
+    key: 'text',
+    label: '补充跟进内容',
+    field_type: 'textarea' as const,
+    required: true,
+    default_value: '',
+    min_length: 1,
+    max_length: 10000,
+    options: [],
+  }],
+  options: [],
+  submit_label: '继续',
+  submit_action_id: 'act_follow_up_content',
+}
+
+it('cancels a signed follow-up prompt with required text empty and locks both actions', async () => {
+  const block = InteractionBlockSchema.parse(followUpContentBlock)
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+  const buttons = wrapper.findAll('button')
+
+  expect(buttons.map(button => button.text())).toEqual(['取消', '继续'])
+  await buttons[0]?.trigger('click')
+
+  expect(wrapper.emitted('submit')).toEqual([['act_follow_up_content', { cancel: true }]])
+  expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+  expect(wrapper.findAll('button').every(button => button.attributes('disabled') !== undefined)).toBe(true)
+  await wrapper.findAll('button')[0]?.trigger('click')
+  await wrapper.findAll('button')[1]?.trigger('click')
+  expect(wrapper.emitted('submit')).toEqual([['act_follow_up_content', { cancel: true }]])
+})
+
+it('does not offer follow-up cancellation without both the signed permission and matching action', () => {
+  for (const changes of [
+    { allow_cancel: undefined, business_action: 'provide_follow_up_content' },
+    { allow_cancel: false, business_action: 'provide_follow_up_content' },
+    { allow_cancel: true, business_action: undefined },
+    { allow_cancel: true, business_action: 'supplement_follow_up_quality' },
+    { allow_cancel: true, business_action: 'provide_lead_fields' },
+  ]) {
+    const block = InteractionBlockSchema.parse({ ...followUpContentBlock, ...changes })
+    const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+    expect(wrapper.findAll('button').map(button => button.text())).toEqual(['继续'])
+  }
+})
+
+it('permits cancellation of a signed follow-up form without validating required fields', async () => {
+  const block = InteractionBlockSchema.parse({
+    ...followUpContentBlock,
+    interaction_type: 'form',
+    allow_blank: undefined,
+  })
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+
+  expect(wrapper.findAll('button').map(button => button.text())).toEqual(['取消', '继续'])
+  await wrapper.findAll('button')[0]?.trigger('click')
+  expect(wrapper.emitted('submit')).toEqual([['act_follow_up_content', { cancel: true }]])
+  expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+})
+
+it('still validates required follow-up text for normal submission', async () => {
+  const block = InteractionBlockSchema.parse(followUpContentBlock)
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+
+  await wrapper.findAll('button')[1]?.trigger('click')
+  expect(wrapper.emitted('submit')).toBeUndefined()
+  expect(wrapper.get('[role="alert"]').text()).toContain('请填写补充跟进内容')
+  await wrapper.get('textarea').setValue('与客户确定下周会议时间')
+  await wrapper.findAll('button')[1]?.trigger('click')
+  expect(wrapper.emitted('submit')).toEqual([['act_follow_up_content', { text: '与客户确定下周会议时间' }]])
+})
+
+it('does not offer cancellation for another action form even when the block says it is allowed', () => {
+  const block = InteractionBlockSchema.parse({
+    ...followUpContentBlock,
+    interaction_type: 'form',
+    business_action: 'provide_lead_fields',
+    allow_blank: undefined,
+  })
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+  expect(wrapper.findAll('button').map(button => button.text())).toEqual(['继续'])
+})
+
+it('keeps the follow-up prompt retryable after a failed cancellation and consumes it after success', async () => {
+  const block = InteractionBlockSchema.parse(followUpContentBlock)
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+  await wrapper.get('textarea').setValue('尚待确认的跟进记录')
+
+  await wrapper.findAll('button')[0]?.trigger('click')
+  await wrapper.setProps({ locked: true })
+  await wrapper.setProps({ locked: false })
+  expect(wrapper.findAll('button').every(button => button.attributes('disabled') === undefined)).toBe(true)
+  expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('尚待确认的跟进记录')
+
+  await wrapper.findAll('button')[0]?.trigger('click')
+  expect(wrapper.emitted('submit')).toEqual([
+    ['act_follow_up_content', { cancel: true }],
+    ['act_follow_up_content', { cancel: true }],
+  ])
+
+  await wrapper.setProps({ block: InteractionBlockSchema.parse({
+    ...followUpContentBlock,
+    state: 'CANCELLED',
+    submit_action_id: null,
+  }) })
+  expect(wrapper.text()).toContain('已取消')
+  expect(wrapper.find('textarea').exists()).toBe(true)
+  expect(wrapper.findAll('button')).toHaveLength(0)
+})
+
+it('does not reopen a submitted confirmation when its parent releases a transient lock', async () => {
+  const block = InteractionBlockSchema.parse({
+    id: 'confirmation_retry', type: 'interaction', interaction_id: 'int_confirmation_retry',
+    interaction_type: 'confirmation', state: 'ACTIVE', prompt: '确认创建？', fields: [],
+    options: [{ value: 'confirm', label: '确认', disabled: false }, { value: 'cancel', label: '取消', disabled: false }],
+    selection_mode: 'single', submit_action_id: 'act_confirmation_retry',
+  })
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+
+  await wrapper.findAll('button')[0]?.trigger('click')
+  await wrapper.setProps({ locked: true })
+  await wrapper.setProps({ locked: false })
+  expect(wrapper.findAll('button').every(button => button.attributes('disabled') !== undefined)).toBe(true)
+  await wrapper.findAll('button')[1]?.trigger('click')
+  expect(wrapper.emitted('submit')).toEqual([['act_confirmation_retry', { choice: 'confirm' }]])
+})

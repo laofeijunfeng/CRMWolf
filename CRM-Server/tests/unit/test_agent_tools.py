@@ -93,15 +93,37 @@ class FakeCRMAPIClient:
         if method == "POST" and path == f"/v1/customer-activities/{CUSTOMER_PUBLIC_ID}/agent-finalized":
             return {
                 "id": 9001,
+                "submission_id": json["submission_id"],
                 "customer_id": CUSTOMER_PUBLIC_ID,
                 "source_content": json["source_content"],
                 "activity_kind": json["activity_kind"],
                 "next_follow_time": "2026-07-29T00:00:00",
                 "durable_work": {
+                    "activity_revision": 1,
                     "post_commit_job_public_id": "pcj_9001",
                     "customer_intelligence_request_id": "cir_9001",
                 },
             }
+        if method == "GET" and "/agent-submissions/" in path:
+            submission_id = path.rsplit("/", 1)[-1]
+            committed = next(
+                (call for call in self.calls if call["method"] == "POST"
+                 and call["path"] == f"/v1/customer-activities/{CUSTOMER_PUBLIC_ID}/agent-finalized"
+                 and call["json"]["submission_id"] == submission_id),
+                None,
+            )
+            if committed is not None:
+                return {
+                    "id": 9001,
+                    "customer_id": CUSTOMER_PUBLIC_ID,
+                    "submission_id": submission_id,
+                    "durable_work": {
+                        "activity_revision": 1,
+                        "post_commit_job_public_id": "pcj_9001",
+                        "customer_intelligence_request_id": "cir_9001",
+                    },
+                }
+            return None
         if method == "POST" and path == "/v1/leads/":
             return {"id": 8101, "status": 0, **json}
         if method == "POST" and path == "/v1/customers/":
@@ -2557,7 +2579,7 @@ async def test_agent_tool_create_customer_activity_is_idempotent():
         assert first.success is True
         assert second.success is True
         assert second.idempotent_replay is True
-        assert len(fake_client.calls) == 1
+        assert [call["method"] for call in fake_client.calls] == ["POST", "GET"]
         assert fake_client.calls[0]["path"] == f"/v1/customer-activities/{CUSTOMER_PUBLIC_ID}/agent-finalized"
         assert fake_client.calls[0]["params"] is None
         assert fake_client.calls[0]["json"]["next_follow_time"] == "2026-07-29T09:00:00"
@@ -2612,7 +2634,7 @@ async def test_agent_write_tool_propagates_stable_action_key_to_internal_api():
         )
 
         assert result.success is True
-        assert fake_client.idempotency_keys == ["create_customer_activity:3:act_123"]
+        assert fake_client.idempotency_keys == ["create_customer_activity:3:act_123", None]
     finally:
         db.close()
         engine.dispose()
@@ -2652,7 +2674,7 @@ async def test_agent_tool_rejects_same_idempotency_key_with_changed_payload():
         assert conflict.success is False
         assert conflict.status_code == 409
         assert conflict.error_message == "idempotency_request_mismatch"
-        assert len(fake_client.calls) == 1
+        assert [call["method"] for call in fake_client.calls] == ["POST", "GET"]
     finally:
         db.close()
         engine.dispose()
@@ -2662,21 +2684,17 @@ async def test_agent_tool_rejects_same_idempotency_key_with_changed_payload():
 async def test_agent_tool_reconciles_dispatched_write_from_existing_activity():
     class ReconcileCRMAPIClient(FakeCRMAPIClient):
         async def request(self, method, path, authorization, *, params=None, json=None, idempotency_key=None):
-            if method == "GET" and path == f"/v1/customer-activities/{CUSTOMER_PUBLIC_ID}":
+            if method == "GET" and path == f"/v1/customer-activities/{CUSTOMER_PUBLIC_ID}/agent-submissions/create_customer_activity:3:msg-reconcile":
                 self.calls.append({"method": method, "path": path, "params": params, "json": json})
                 return {
-                    "items": [{
-                        "id": 9010,
-                        "customer_id": CUSTOMER_PUBLIC_ID,
-                        "activity_kind": "PHONE_FOLLOW_UP",
-                        "source_content": "可能已写入的内容",
-                        "submission_id": "create_customer_activity:3:msg-reconcile",
-                        "durable_work": {
-                            "post_commit_job_public_id": "pcj_9010",
-                            "customer_intelligence_request_id": "cir_9010",
-                        },
-                    }],
-                    "total": 1,
+                    "id": 9010,
+                    "customer_id": CUSTOMER_PUBLIC_ID,
+                    "submission_id": "create_customer_activity:3:msg-reconcile",
+                    "durable_work": {
+                        "activity_revision": 1,
+                        "post_commit_job_public_id": "pcj_9010",
+                        "customer_intelligence_request_id": "cir_9010",
+                    },
                 }
             return await super().request(
                 method, path, authorization, params=params, json=json, idempotency_key=idempotency_key
@@ -2732,6 +2750,7 @@ async def test_agent_tool_reconciles_dispatched_write_from_existing_activity():
         assert result.idempotent_replay is True
         assert result.data["id"] == 9010
         assert len(fake_client.calls) == 1
+        assert fake_client.calls[0]["params"] == {"agent_session_id": 3, "request_hash": service._hash_json(payload)}
         assert db.query(AgentIdempotencyKey).one().status == AgentIdempotencyStatus.SUCCESS
     finally:
         db.close()
@@ -2789,7 +2808,99 @@ async def test_agent_tool_fails_closed_for_previously_dispatched_write():
         assert result.status_code == 409
         assert result.error_message == "idempotency_execution_ambiguous"
         assert [call["method"] for call in fake_client.calls] == ["GET"]
+        assert fake_client.calls[0]["path"] == f"/v1/customer-activities/{CUSTOMER_PUBLIC_ID}/agent-submissions/create_customer_activity:3:msg-dispatched"
         assert db.query(AgentToolCall).count() == 0
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.asyncio
+async def test_activity_post_response_cannot_claim_success_without_persisted_intelligence_run():
+    class UnscheduledClient(FakeCRMAPIClient):
+        async def request(self, method, path, authorization, *, params=None, json=None, idempotency_key=None):
+            if method == "GET" and "/agent-submissions/" in path:
+                self.calls.append({"method": method, "path": path})
+                raise CRMAPIClientError("原始持久回执尚不完整", status_code=409)
+            return await super().request(method, path, authorization, params=params, json=json, idempotency_key=idempotency_key)
+
+    engine, db = _db_session()
+    client = UnscheduledClient()
+    service = CRMAgentToolService(api_client=client)
+    kwargs = dict(customer_id=CUSTOMER_PUBLIC_ID, activity_kind="PHONE_FOLLOW_UP",
+                  source_content="scheduled ID is not durable", effectiveness_score=82,
+                  effectiveness_is_valid=True, effectiveness_reason="valid", idempotency_suffix="unscheduled")
+    try:
+        first = await service.create_customer_activity(_context(db), **kwargs)
+        second = await service.create_customer_activity(_context(db), **kwargs)
+        assert first.success is False and second.success is False
+        assert [call["method"] for call in client.calls] == ["POST", "GET", "GET"]
+        assert db.query(AgentIdempotencyKey).one().status == AgentIdempotencyStatus.AMBIGUOUS
+    finally:
+        db.close()
+        engine.dispose()
+
+
+async def test_activity_lost_post_response_never_dispatches_second_post():
+    class LostResponseClient(FakeCRMAPIClient):
+        async def request(self, method, path, authorization, *, params=None, json=None, idempotency_key=None):
+            if method == "POST" and "/customer-activities/" in path:
+                self.calls.append({"method": method, "path": path})
+                raise TimeoutError("response lost after commit")
+            return await super().request(method, path, authorization, params=params, json=json, idempotency_key=idempotency_key)
+
+    engine, db = _db_session()
+    client = LostResponseClient()
+    service = CRMAgentToolService(api_client=client)
+    kwargs = dict(customer_id=CUSTOMER_PUBLIC_ID, activity_kind="PHONE_FOLLOW_UP",
+                  source_content="one POST only", effectiveness_score=82, effectiveness_is_valid=True,
+                  effectiveness_reason="valid", idempotency_suffix="lost-response")
+    try:
+        first = await service.create_customer_activity(_context(db), **kwargs)
+        second = await service.create_customer_activity(_context(db), **kwargs)
+        assert first.success is False and second.success is False
+        assert [call["method"] for call in client.calls].count("POST") == 1
+        assert db.query(AgentIdempotencyKey).one().status == AgentIdempotencyStatus.AMBIGUOUS
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_activity_reconciliation_rejects_fabricated_receipt_and_changed_session():
+    class SpoofClient(FakeCRMAPIClient):
+        async def request(self, method, path, authorization, *, params=None, json=None, idempotency_key=None):
+            self.calls.append({"method": method, "path": path, "params": params})
+            return {"id": 9010, "durable_work": {"post_commit_job_public_id": "pcj_fake",
+                                               "customer_intelligence_request_id": "cir_fake"}}
+
+    engine, db = _db_session()
+    client = SpoofClient()
+    service = CRMAgentToolService(api_client=client)
+    kwargs = dict(customer_id=CUSTOMER_PUBLIC_ID, activity_kind="PHONE_FOLLOW_UP",
+                  source_content="original", effectiveness_score=82, effectiveness_is_valid=True,
+                  effectiveness_reason="valid", idempotency_suffix="spoof")
+    context = _context(db)
+    payload = dict(customer_id=CUSTOMER_PUBLIC_ID, customer_name=None, activity_kind="PHONE_FOLLOW_UP",
+                   source_content="original", title=None, content_json=None, summary=None,
+                   next_action=None, next_action_source=None, next_follow_time=None,
+                   next_follow_time_source=None, effectiveness_score=82, effectiveness_is_valid=True,
+                   effectiveness_reason="valid", effectiveness_detail_json={})
+    db.add(AgentIdempotencyKey(team_id=1, user_id=2, session_id=99,
+                               action_key="create_customer_activity:3:spoof", status=AgentIdempotencyStatus.DISPATCHED,
+                               request_hash=service._hash_json(payload)))
+    db.commit()
+    try:
+        rejected = await service.create_customer_activity(context, **kwargs)
+        assert rejected.success is False and rejected.status_code == 409
+        assert client.calls == []
+        db.query(AgentIdempotencyKey).one().session_id = 3
+        db.commit()
+        spoof = await service.create_customer_activity(context, **kwargs)
+        assert spoof.success is False and spoof.status_code == 409
+        assert db.query(AgentIdempotencyKey).one().status != AgentIdempotencyStatus.SUCCESS
+        assert all(call["method"] != "POST" for call in client.calls)
     finally:
         db.close()
         engine.dispose()

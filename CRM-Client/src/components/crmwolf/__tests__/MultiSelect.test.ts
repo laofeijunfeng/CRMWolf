@@ -12,13 +12,12 @@ const filterPopoverSource = readComponent('ListFilterPopover')
 
 describe('MultiSelect control sizing', () => {
   it('uses the shared input height tokens so filter value controls align with field and operator selects', () => {
-    expect(multiSelectSource).toMatch(
-      /\.wolf-multi-select-trigger\s*\{[^}]*height:\s*\$wolf-input-height-v2;/s
-    )
-    expect(multiSelectSource).toMatch(
-      /@media\s*\(max-width:\s*767px\)\s*\{[\s\S]*?\.wolf-multi-select-trigger\s*\{[^}]*height:\s*\$wolf-input-height-mobile-v2;/s
-    )
-    expect(multiSelectSource).not.toContain('height: 32px')
+    expect(multiSelectSource).toContain('h-input-desktop')
+    expect(multiSelectSource).toContain('min-h-input-desktop')
+    expect(multiSelectSource).toContain('max-[767px]:h-input-mobile')
+    expect(multiSelectSource).toContain('max-[767px]:min-h-input-mobile')
+    expect(multiSelectSource).toContain('py-0')
+    expect(multiSelectSource).toContain('!text-wolf-body')
     expect(filterPopoverSource).toMatch(
       /@media\s*\(max-width:\s*767px\)\s*\{[\s\S]*?\.filter-field-select,[\s\S]*?height:\s*\$wolf-input-height-mobile-v2;/s
     )

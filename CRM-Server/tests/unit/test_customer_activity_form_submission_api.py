@@ -15,7 +15,11 @@ from app.core import deps
 from app.core.database import Base
 from app.models.customer import Customer, CustomerMember
 from app.models.customer_activity import CustomerActivity
+from app.models.agent import AgentIdempotencyKey, AgentIdempotencyStatus, AgentSession
 from app.models.customer_activity_ai_job import CustomerActivityAIJob
+from app.models.customer_activity_post_commit_job import CustomerActivityPostCommitJob
+from app.models.customer_intelligence_run import CustomerIntelligenceRun
+from app.models.customer_opportunity_suggestion_job import CustomerOpportunitySuggestionJob
 from app.services.customer_activity_contracts import (
     CustomerActivityAIJobStatus,
     CustomerActivityEffectivenessStatus,
@@ -49,6 +53,11 @@ def form_submission_context(monkeypatch):
             Customer.__table__,
             CustomerMember.__table__,
             CustomerActivity.__table__,
+            AgentSession.__table__,
+            AgentIdempotencyKey.__table__,
+            CustomerActivityPostCommitJob.__table__,
+            CustomerIntelligenceRun.__table__,
+            CustomerOpportunitySuggestionJob.__table__,
             CustomerActivityAIJob.__table__,
         ],
     )
@@ -227,3 +236,58 @@ def test_legacy_activity_mutation_and_processing_routes_are_not_registered():
     assert ("/v1/customer-activities/{activity_id}/next-time", ("PATCH",)) not in routes
     assert ("/v1/customer-activities/{activity_id}/process", ("POST",)) not in routes
     assert ("/v1/customer-activities/{activity_id}/evaluate", ("POST",)) not in routes
+
+
+def test_exact_agent_submission_receipt_uses_original_revision_evidence(form_submission_context):
+    client, db = form_submission_context
+    from app.services.agent.tools.service import CRMAgentToolService
+
+    submission_id = "create_customer_activity:3:outside-first-page"
+    request_hash = CRMAgentToolService._hash_json({"customer_id": "cus_11111111111111111111111111111111"})
+    db.add(AgentSession(id=3, session_key="session-3", team_id=1, user_id=1))
+    db.add(AgentIdempotencyKey(team_id=1, user_id=1, session_id=3, action_key=submission_id,
+                               status=AgentIdempotencyStatus.DISPATCHED, request_hash=request_hash))
+    activity = CustomerActivity(team_id=1, customer_id=1, creator_id="1", owner_id="1",
+                                activity_kind="PHONE_FOLLOW_UP", source_content="original",
+                                submission_source="AGENT", submission_id=submission_id,
+                                activity_revision=2, title="edited later")
+    db.add(activity)
+    db.flush()
+    db.add(CustomerActivityPostCommitJob(team_id=1, activity_id=activity.id, activity_revision=1,
+                                         trigger_type="ACTIVITY_CREATED_DETERMINISTIC", actor_id="1",
+                                         public_id="pcj-original", run_id="post-run", graph_thread_id="thread"))
+    from app.services.customer_intelligence_event_service import customer_intelligence_event_service
+    event_key = customer_intelligence_event_service._event_key(
+        team_id=1, trigger_type="customer_activity_created", source_type="customer_activity",
+        source_object_id=f"{activity.id}:revision:1",
+    )
+    event = {"event_key": event_key, "trigger_type": "customer_activity_created",
+             "team_id": 1, "tenant_id": 1, "customer_id": 1, "actor_id": "1",
+             "source": {"source_type": "customer_activity", "source_object_id": str(activity.id),
+                        "source_version": 1}, "payload": {"activity_revision": 1}}
+    db.add(CustomerIntelligenceRun(team_id=1, tenant_id=1, customer_id=1, actor_id="1",
+                                   run_key="run-original", request_id="business-event-original",
+                                   event_key=event_key, event_json=event,
+                                   trigger_type="customer_activity_created", scope="partial"))
+    db.add(CustomerOpportunitySuggestionJob(team_id=1, activity_id=activity.id,
+                                             activity_revision=1, submission_source="AGENT",
+                                             public_id="cosj-original", run_id="suggestion-run", graph_thread_id="thread"))
+    db.commit()
+    endpoint = f"/api/v1/customer-activities/cus_11111111111111111111111111111111/agent-submissions/{submission_id}"
+    response = client.get(endpoint, params={"agent_session_id": 3, "request_hash": request_hash})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == activity.id
+    assert data["durable_work"]["activity_revision"] == 1
+    assert data["durable_work"]["post_commit_job_public_id"] == "pcj-original"
+    assert data["durable_work"]["customer_intelligence_request_id"] == "business-event-original"
+    assert data["durable_work"]["opportunity_suggestion_job_public_id"] == "cosj-original"
+    assert "title" not in data  # mutable revision-2 state cannot masquerade as the original snapshot
+    assert client.get(endpoint, params={"agent_session_id": 4, "request_hash": request_hash}).status_code == 404
+    assert client.get(endpoint, params={"agent_session_id": 3, "request_hash": "0" * 64}).status_code == 404
+
+    db.query(CustomerIntelligenceRun).delete()
+    db.commit()
+    missing = client.get(endpoint, params={"agent_session_id": 3, "request_hash": request_hash})
+    assert missing.status_code == 409
+    assert "durable_work" not in missing.json()

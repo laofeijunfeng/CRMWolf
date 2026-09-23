@@ -180,6 +180,12 @@ class Settings(BaseSettings):
     AGENT_USER_RATE_LIMIT: int = 10  # 每用户每分钟请求限制
     AGENT_GLOBAL_RATE_LIMIT: int = 100  # 全局每分钟请求限制
     AGENT_INTERNAL_API_BASE_URL: str = "http://127.0.0.1:8000/api"  # Agent Tool 调用现有后端 API 的基础地址
+    AGENT_TURN_EXECUTION_LEASE_SECONDS: int = 30
+    AGENT_TURN_EXECUTION_MAX_ATTEMPTS: int = 3
+    AGENT_TURN_RECOVERY_ENABLED: bool = True
+    AGENT_TURN_RECOVERY_INTERVAL_SECONDS: int = 10
+    AGENT_TURN_RECOVERY_BATCH_SIZE: int = 20
+    AGENT_WORKER_TOKEN_SECONDS: int = 120
 
     # 出站 AI HTTP 传输配置。默认不读取机器级代理，避免 dev 与线上行为不一致。
     # 如果部署确实需要代理，使用 AI_HTTP_PROXY 显式配置，而不是依赖 HTTP_PROXY。

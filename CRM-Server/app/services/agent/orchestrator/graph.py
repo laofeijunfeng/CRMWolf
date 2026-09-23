@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 import logging
 import math
-from typing import TYPE_CHECKING, Annotated, TypedDict, TypeVar
+from typing import TYPE_CHECKING, Annotated, TypedDict, TypeVar, cast
 from uuid import NAMESPACE_URL, uuid5
 
 from langgraph.graph import END, START, StateGraph
@@ -77,6 +77,12 @@ from app.services.agent.semantic_plan import (
     semantic_plan_is_write,
     semantic_plan_supports_workflow_write,
 )
+from app.services.agent.ui.actions import (
+    ActionAlreadyConsumedError,
+    ActionExpiredError,
+    ActionUnavailableError,
+    AgentUIActionRepository,
+)
 from app.services.agent.workflow import (
     WorkflowInterruptPayload,
     WorkflowOpportunitySuggestionStart,
@@ -98,7 +104,7 @@ if TYPE_CHECKING:
     from langgraph.checkpoint.base import BaseCheckpointSaver
     from langgraph.graph.state import CompiledStateGraph
     from langgraph.runtime import Runtime
-
+    from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 
@@ -496,8 +502,56 @@ class RootOrchestrator:
     ) -> RootDispatchResult:
         if not isinstance(turn.input, TextTurnInput) or plan.continuation is None:
             raise WorkflowExecutionFailedError("Text Workflow resume plan is invalid")
+        claim_id: str | None = None
+        db = cast("Session", runtime.db)
+        if db is None:
+            return self._workflow_failure("WORKFLOW_CHECKPOINT_UNAVAILABLE")
+        try:
+            claim = AgentUIActionRepository().begin_text_continuation(
+                db,
+                continuation=plan.continuation,
+                team_id=turn.team_id,
+                user_id=turn.user_id,
+                session_id=turn.session_id,
+                client_request_id=turn.client_request_id,
+            )
+            if claim is not None:
+                db.commit()
+        except (ActionAlreadyConsumedError, ActionExpiredError, ActionUnavailableError) as exc:
+            db.rollback()
+            code = "ACTION_ALREADY_CONSUMED" if isinstance(exc, ActionAlreadyConsumedError) else "ACTION_INVALID"
+            return FailureDispatchResult(
+                error=AgentExecutionError(
+                    code=code,
+                    message="该操作已被处理或不可用，请刷新会话后重试。",
+                    retryable=False,
+                )
+            )
+        except Exception:
+            db.rollback()
+        claim_id = None
+        if claim is not None:
+            if claim.outcome == "REPLAY":
+                if claim.action.result_message_id is not None:
+                    return WorkflowDispatchResult(
+                        decision=plan.decision,
+                        workflow_result=WorkflowReplayResult(
+                            workflow_ref=plan.continuation.workflow_ref,
+                            message_id=claim.action.result_message_id,
+                        ),
+                    )
+                return FailureDispatchResult(
+                    error=AgentExecutionError(
+                        code="TURN_IN_PROGRESS", message="该请求仍在处理中，请稍后重试。", retryable=True
+                    )
+                )
+            claim_id = claim.action.public_id
+            runtime.metadata["text_resume_action_claim_id"] = claim_id
         continuation_config = self._config_for_continuation(config, plan.continuation)
-        await self._require_continuation_checkpoint(continuation_config)
+        try:
+            await self._require_continuation_checkpoint(continuation_config)
+        except WorkflowCheckpointUnavailableError:
+            return self._workflow_failure("WORKFLOW_CHECKPOINT_UNAVAILABLE", action_claim_id=claim_id)
         resume = WorkflowResumeInput(
             kind="text",
             content=turn.input.text,
@@ -526,12 +580,12 @@ class RootOrchestrator:
                 raise WorkflowExecutionFailedError(
                     "Text Workflow continuation returned a non-Workflow result"
                 )
-            return result
+            return result.model_copy(update={"action_claim_id": claim_id})
         except WorkflowCheckpointUnavailableError:
-            return self._workflow_failure("WORKFLOW_CHECKPOINT_UNAVAILABLE")
+            return self._workflow_failure("WORKFLOW_CHECKPOINT_UNAVAILABLE", action_claim_id=claim_id)
         except WorkflowExecutionFailedError:
             logger.exception("Text Workflow continuation failed")
-            return self._workflow_failure("WORKFLOW_EXECUTION_FAILED")
+            return self._workflow_failure("WORKFLOW_EXECUTION_FAILED", action_claim_id=claim_id)
 
     async def _resume_interaction_plan(
         self,

@@ -3,6 +3,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from typing import List
 from app.core.database import get_db
+from app.core.request_scope import agent_worker_execution_id, agent_worker_permissions
 from app.core.security import decode_access_token
 from app.crud.user import user_crud
 from app.crud.permission import permission_crud
@@ -146,6 +147,21 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    purpose = payload.get("purpose")
+    if purpose == "agent_worker":
+        granted = payload.get("permissions")
+        execution_id = payload.get("execution_id")
+        if (
+            not isinstance(granted, list)
+            or any(not isinstance(item, str) for item in granted)
+            or not isinstance(execution_id, str)
+            or not execution_id
+        ):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的执行凭证")
+        agent_worker_permissions.set(frozenset(granted))
+        agent_worker_execution_id.set(execution_id)
+    elif purpose is not None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的认证凭证")
     setattr(user, "_token_payload", payload)
     return user
 

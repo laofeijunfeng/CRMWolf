@@ -256,6 +256,38 @@ def test_form_interaction_signs_the_same_constraints_rendered_to_the_user() -> N
     ]
 
 
+
+@pytest.mark.parametrize("interaction_type", ["text_input", "form"])
+def test_only_follow_up_content_interactions_sign_cancellation(interaction_type: str) -> None:
+    interaction = WorkflowInteraction(
+        interaction_id="int_follow_up_content",
+        interaction_type=interaction_type,
+        business_action="provide_follow_up_content",
+        title="补充跟进内容",
+        prompt="请填写跟进内容。",
+        allow_blank=False if interaction_type == "text_input" else None,
+        fields=(
+            [WorkflowInteractionField(
+                key="content", label="内容", field_type="textarea", required=True,
+                min_length=1, max_length=10_000,
+            )]
+            if interaction_type == "form" else []
+        ),
+    )
+    composition = AgentUIComposer().compose(_waiting_dispatch(interaction))
+    block = composition.body.blocks[1]
+    assert block.type == "interaction"
+    assert block.business_action == "provide_follow_up_content"
+    assert block.allow_cancel is True
+    assert composition.action_drafts[0].target["allow_cancel"] is True
+
+    other = interaction.model_copy(update={"business_action": "collect_supplement"})
+    other_composition = AgentUIComposer().compose(_waiting_dispatch(other))
+    other_block = other_composition.body.blocks[1]
+    assert other_block.type == "interaction"
+    assert other_block.allow_cancel is False
+    assert "allow_cancel" not in other_composition.action_drafts[0].target
+
 def test_confirmation_preserves_canonical_workflow_options() -> None:
     dispatch = _waiting_dispatch(
         WorkflowInteraction(

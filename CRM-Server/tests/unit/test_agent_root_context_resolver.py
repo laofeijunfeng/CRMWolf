@@ -389,3 +389,159 @@ async def test_database_context_resolver_persists_root_memory_without_overwritin
     finally:
         db.close()
         engine.dispose()
+
+
+async def test_cancelled_follow_up_cutoff_wins_over_stale_root_memory_writer(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'root-cancel-race.db'}")
+    Base.metadata.create_all(engine, tables=[AgentSession.__table__, AgentMessage.__table__])
+    sessions = sessionmaker(bind=engine)
+    setup = sessions()
+    stale = sessions()
+    cancelling = sessions()
+    check = sessions()
+    try:
+        session = AgentSession(
+            session_key="root-cancel-race",
+            team_id=1,
+            user_id=2,
+            context_json={
+                "client_context": {"view": "customers"},
+                "_root_conversation_memory": RootConversationMemory(
+                    current_task="customer_activity",
+                    known_activity_content="旧客户跟进",
+                ).model_dump(mode="json", exclude_none=True),
+            },
+        )
+        setup.add(session)
+        setup.flush()
+        setup.add(
+            AgentMessage(
+                team_id=1,
+                user_id=2,
+                session_id=session.id,
+                role=AgentMessageRole.USER,
+                content="旧客户跟进",
+                client_request_id="old-request",
+            )
+        )
+        setup.commit()
+        session_id = session.id
+
+        # The old turn has already loaded its Root snapshot before cancellation.
+        assert stale.get(AgentSession, session_id).context_json["_root_conversation_memory"][
+            "known_activity_content"
+        ] == "旧客户跟进"
+        cancelled_result = AgentMessage(
+            team_id=1,
+            user_id=2,
+            session_id=session_id,
+            role=AgentMessageRole.ASSISTANT,
+            content="已取消当前工作流。",
+        )
+        cancelling.add(cancelled_result)
+        cancelling.flush()
+        cancelling.get(AgentSession, session_id).context_json = {
+            "client_context": {"view": "customers"},
+            "_root_conversation_memory": RootConversationMemory().model_dump(mode="json", exclude_none=True),
+            "recent_messages_after_id": cancelled_result.id,
+        }
+        cancelling.commit()
+
+        DatabaseRootContextResolver().persist_conversation_memory(
+            stale,
+            turn=RootTurnInput(
+                team_id=1,
+                user_id=2,
+                session_id=session_id,
+                client_request_id="old-request",
+                input=TextTurnInput(type="text", text="旧客户跟进"),
+            ),
+            memory=RootConversationMemory(current_task="customer_activity", known_activity_content="旧客户跟进"),
+        )
+        stale.commit()
+        saved = check.get(AgentSession, session_id).context_json
+        assert saved["recent_messages_after_id"] == cancelled_result.id
+        assert RootConversationMemory.model_validate(saved["_root_conversation_memory"]).current_task is None
+        assert saved["client_context"] == {"view": "customers"}
+    finally:
+        check.close()
+        cancelling.close()
+        stale.close()
+        setup.close()
+        engine.dispose()
+
+
+async def test_cancelled_follow_up_cutoff_excludes_old_messages_but_keeps_new_request_context() -> None:
+    engine, db = _db_session()
+    try:
+        session = AgentSession(session_key="root-cancel-cutoff", team_id=1, user_id=2)
+        db.add(session)
+        db.flush()
+        old_user = AgentMessage(
+            team_id=1,
+            user_id=2,
+            session_id=session.id,
+            role=AgentMessageRole.USER,
+            content="河南双汇旧任务跟进",
+            client_request_id="old-task",
+        )
+        db.add(old_user)
+        db.flush()
+        cancelled_result = AgentMessage(
+            team_id=1,
+            user_id=2,
+            session_id=session.id,
+            role=AgentMessageRole.ASSISTANT,
+            content="已取消当前工作流。",
+        )
+        db.add(cancelled_result)
+        db.flush()
+        session.context_json = {"recent_messages_after_id": cancelled_result.id}
+        new_user = AgentMessage(
+            team_id=1,
+            user_id=2,
+            session_id=session.id,
+            role=AgentMessageRole.USER,
+            content="为新客户创建完整跟进",
+            client_request_id="new-task",
+        )
+        db.add(new_user)
+        db.flush()
+        first = await DatabaseRootContextResolver().resolve(
+            turn=RootTurnInput(
+                team_id=1,
+                user_id=2,
+                session_id=session.id,
+                client_request_id="new-task",
+                input=TextTurnInput(type="text", text="为新客户创建完整跟进"),
+            ),
+            runtime=RootRuntimeContext(db=db),
+        )
+        assert first.recent_messages == []
+        db.add(
+            AgentMessage(
+                team_id=1,
+                user_id=2,
+                session_id=session.id,
+                role=AgentMessageRole.ASSISTANT,
+                content="新任务需澄清客户",
+            )
+        )
+        db.flush()
+        second = await DatabaseRootContextResolver().resolve(
+            turn=RootTurnInput(
+                team_id=1,
+                user_id=2,
+                session_id=session.id,
+                client_request_id="another-task",
+                input=TextTurnInput(type="text", text="继续新任务"),
+            ),
+            runtime=RootRuntimeContext(db=db),
+        )
+        assert [message.content for message in second.recent_messages] == [
+            "为新客户创建完整跟进",
+            "新任务需澄清客户",
+        ]
+    finally:
+        db.close()
+        engine.dispose()

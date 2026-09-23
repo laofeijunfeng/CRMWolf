@@ -27,6 +27,20 @@ class InteractionInputResolver:
         values: Mapping[str, JsonValue],
     ) -> WorkflowResumeInput:
         metadata = self._interaction_context(target)
+        if "cancel" in values:
+            if (
+                len(values) != 1 or values["cancel"] is not True
+                or target.get("allow_cancel") is not True
+                or target.get("business_action") != "provide_follow_up_content"
+                or target.get("interaction_type") not in {"text_input", "form"}
+            ):
+                raise AgentUIInputResolutionError("cancellation is not authorized by this signed interaction")
+            return WorkflowResumeInput(
+                kind="reject",
+                content="取消",
+                source="web",
+                metadata=metadata,
+            )
         interaction_type = target.get("interaction_type")
         if interaction_type == "choice":
             content, choice_metadata = self._resolve_choice(target, values)

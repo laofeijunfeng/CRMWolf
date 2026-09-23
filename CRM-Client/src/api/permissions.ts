@@ -13,14 +13,6 @@ import { z } from 'zod'
 
 export type { PermissionResponse } from '@/schemas/role'
 
-export interface PermissionQueryParams {
-  skip?: number
-  limit?: number
-  resource?: string
-  action?: string
-  include_inactive?: boolean
-}
-
 export interface GetUserPermissionsParams {
   use_cache?: boolean
 }
@@ -34,10 +26,16 @@ const permissionApi = {
     return omitUndefined(UserPermissionsResponseSchema.parse(response))
   },
 
-  async getAllPermissions(params?: PermissionQueryParams): Promise<PermissionResponse[]> {
-    // eslint-disable-next-line crmwolf/require-zod-schema
-    const response: unknown = await request.get('/v1/permissions', { params })
-    return PermissionResponseSchema.array().parse(response)
+  async getAllPermissions(): Promise<PermissionResponse[]> {
+    const permissions: PermissionResponse[] = []
+    const pageSize = 100
+    for (let skip = 0; ; skip += pageSize) {
+      // eslint-disable-next-line crmwolf/require-zod-schema
+      const response: unknown = await request.get('/v1/permissions', { params: { skip, limit: pageSize } })
+      const page = PermissionResponseSchema.array().parse(response)
+      permissions.push(...page)
+      if (page.length < pageSize) return permissions
+    }
   },
 
   async assignPermissionToRole(permissionId: number, roleId: number): Promise<z.infer<typeof RoleMutationResponseSchema>> {

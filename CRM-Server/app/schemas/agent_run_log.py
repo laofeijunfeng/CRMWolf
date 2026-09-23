@@ -45,4 +45,5 @@ class AgentRunLogTurnListItem(BaseModel):
 
 
 class AgentRunLogTurnDetail(AgentRunLogTurnListItem):
+    log: str
     steps: list[AgentRunLogStep] = Field(min_length=6, max_length=6)

@@ -573,6 +573,8 @@ class WorkflowSubgraph:
                 message=effect_result.message,
                 retryable=effect_result.retryable,
                 progress=failed_progress,
+                durable_work=effect_result.durable_work,
+                completed_command_ids=effect_result.completed_command_ids,
                 committed_resources=effect_result.committed_resources,
                 failed_command_id=effect_result.failed_command_id,
             ).model_dump(mode="json")

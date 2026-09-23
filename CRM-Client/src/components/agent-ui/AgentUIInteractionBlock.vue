@@ -75,7 +75,23 @@ watch(
   { immediate: true }
 )
 
+watch(() => props.locked, (locked, previous) => {
+  if (
+    previous === true && locked !== true && props.block.state === 'ACTIVE'
+    && props.block.business_action === 'provide_follow_up_content'
+    && (props.block.interaction_type === 'text_input' || props.block.interaction_type === 'form')
+  ) {
+    submitting.value = false
+  }
+})
+
 const isActive = computed(() => props.block.state === 'ACTIVE' && props.block.submit_action_id !== null)
+const canCancel = computed(() => (
+  isActive.value
+  && props.block.allow_cancel === true
+  && props.block.business_action === 'provide_follow_up_content'
+  && (props.block.interaction_type === 'text_input' || props.block.interaction_type === 'form')
+))
 const isCompactTaskCompletion = computed(() => (
   props.block.presentation === 'COMPACT_TASK_COMPLETION'
 ))
@@ -266,6 +282,13 @@ const fieldErrorId = (field: InteractionField): string => `${props.block.id}-${f
 const focusFirstError = async (): Promise<void> => {
   await nextTick()
   interactionRef.value?.querySelector<HTMLElement>('[data-agent-ui-error-focus="true"]')?.focus()
+}
+
+const cancel = (): void => {
+  const actionId = props.block.submit_action_id
+  if (!canCancel.value || controlsDisabled.value || actionId === null) return
+  submitting.value = true
+  emit('submit', actionId, { cancel: true })
 }
 
 const submit = async (): Promise<void> => {
@@ -566,6 +589,18 @@ const submit = async (): Promise<void> => {
         </p>
       </div>
     </form>
+
+    <Button
+      v-if="canCancel"
+      type="button"
+      variant="outline"
+      size="sm"
+      class="min-h-11"
+      :disabled="controlsDisabled"
+      @click="cancel"
+    >
+      取消
+    </Button>
 
     <Button
       v-if="isActive && !submitsOnOptionClick"

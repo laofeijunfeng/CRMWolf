@@ -238,3 +238,36 @@ def test_consumed_text_input_projects_submitted_value_as_read_only_text() -> Non
     assert block.state == "SUBMITTED"
     assert block.submit_action_id is None
     assert block.submitted_values == {"text": "已完成 POC 部署沟通，等待排期确认。"}
+
+
+def test_cancelled_action_projects_historical_card_as_cancelled_without_submitted_text() -> None:
+    now = datetime(2026, 8, 24, 10, 0, 0)
+    block = InteractionBlock(
+        id="b_follow_up", type="interaction", interaction_id="int_follow_up",
+        interaction_type="text_input", business_action="provide_follow_up_content",
+        state="ACTIVE", prompt="请补充跟进信息", allow_blank=False, allow_cancel=True,
+        fields=[{"key": "text", "label": "补充跟进信息", "field_type": "textarea",
+                 "required": True, "min_length": 1, "max_length": 10000}],
+        submit_action_id="act_follow_up",
+    )
+    envelope = AgentUIEnvelope(
+        schema_version="crm.agent.ui.v1", message_id=10, turn_id="turn_10",
+        role="assistant", state="final", blocks=[block], suggested_actions=[],
+        metadata=AgentUIMetadata(route="WORKFLOW"),
+    )
+    action = AgentUIActionRecord(
+        public_id="act_follow_up", team_id=1, user_id=2, session_id=3, message_id=10,
+        action_type="submit_interaction", root_context_role="RESUMABLE_WORKFLOW",
+        target={"business_action": "provide_follow_up_content", "allow_cancel": True},
+        consumption_mode="ONE_SHOT", status="CANCELLED", expires_at=now,
+        consumed_at=now, submitted_values={"cancel": True},
+        consumed_request_id="6fa2e0e8-86d4-4d6c-a1b0-6490b2bf12be",
+        result_message_id=11, lock_version=2, created_time=now, last_modified_time=now,
+    )
+
+    projected = project_interaction_action_states([envelope], [action], now=now)[0].blocks[0]
+    assert projected.type == "interaction"
+    assert projected.state == "CANCELLED"
+    assert projected.submit_action_id is None
+    assert projected.submitted_values is None
+    assert block.state == "ACTIVE"

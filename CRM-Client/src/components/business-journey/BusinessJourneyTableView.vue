@@ -178,8 +178,8 @@ const handleRowClick = (row: BusinessJourneyListItem): void => {
     <template #cell-last_event_at="{ row }">
       {{ formatDate(row.last_event_at) }}
     </template>
-    <template #cell-started_at="{ row }">
-      {{ formatDate(row.started_at) }}
+    <template #cell-expected_closing_date="{ row }">
+      {{ formatDate(row.expected_closing_date) }}
     </template>
   </DataTable>
 </template>

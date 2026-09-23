@@ -101,24 +101,51 @@ class CRMWorkflowEffectExecutor:
         command_results: dict[str, object] = {}
         durable_work = []
         committed: list[WorkflowCommittedResource] = []
+        completed_command_ids: list[str] = []
+
+        def failed_effect(result: WorkflowEffectResult, command: WorkflowCommand) -> WorkflowEffectResult:
+            return result.model_copy(
+                update={
+                    "durable_work": list(durable_work),
+                    "completed_command_ids": list(completed_command_ids),
+                    "committed_resources": list(committed),
+                    "failed_command_id": command.command_id,
+                    "message": (
+                        _user_facing_effect_failure(
+                            command=command,
+                            committed=committed,
+                            retryable=result.retryable,
+                            original=result.message,
+                        )
+                        if committed
+                        else result.message
+                    ),
+                }
+            )
 
         for command in plan.commands:
             try:
                 payload = _resolve_command_payload(command, command_results)
             except ValueError:
-                return WorkflowEffectResult(
-                    success=False,
-                    code="WORKFLOW_COMMAND_BINDING_FAILED",
-                    message="工作流命令结果无法传递到后续操作。",
+                return failed_effect(
+                    WorkflowEffectResult(
+                        success=False,
+                        code="WORKFLOW_COMMAND_BINDING_FAILED",
+                        message="工作流命令结果无法传递到后续操作。",
+                    ),
+                    command,
                 )
             payload["idempotency_suffix"] = f"{workflow_id}:{command.command_id}"
             try:
                 allowed_customer_ids = _resolve_authorized_customer_ids(command, command_results)
             except ValueError:
-                return WorkflowEffectResult(
-                    success=False,
-                    code="WORKFLOW_AUTHORIZATION_SCOPE_INVALID",
-                    message="工作流授权范围无法验证。",
+                return failed_effect(
+                    WorkflowEffectResult(
+                        success=False,
+                        code="WORKFLOW_AUTHORIZATION_SCOPE_INVALID",
+                        message="工作流授权范围无法验证。",
+                    ),
+                    command,
                 )
             resource_validation = await self._validate_command_resources(
                 command,
@@ -129,7 +156,9 @@ class CRMWorkflowEffectExecutor:
                 suggestion_trigger=isinstance(request.start, WorkflowOpportunitySuggestionStart),
             )
             if resource_validation is not None:
-                return resource_validation
+                if resource_validation.success:
+                    return resource_validation
+                return failed_effect(resource_validation, command)
             command_action_id = f"{plan.action_id}:{command.command_id}"
             if plan.execution_authorization == "CONFIRMATION_REQUIRED":
                 execution_policy = action_workflow.EXECUTION_REQUIRES_CONFIRMATION
@@ -187,19 +216,9 @@ class CRMWorkflowEffectExecutor:
             )
             result = await self._execute_command(command, context=context, payload=payload, policy=policy)
             if isinstance(result, WorkflowEffectResult):
-                return result.model_copy(
-                    update={
-                        "committed_resources": list(committed),
-                        "failed_command_id": command.command_id,
-                        "message": _user_facing_effect_failure(
-                            command=command,
-                            committed=committed,
-                            retryable=result.retryable,
-                            original=result.message,
-                        ),
-                    }
-                )
+                return failed_effect(result, command)
             command_results[command.command_id] = result.data
+            completed_command_ids.append(command.command_id)
             durable_work.extend(result.durable_work)
             committed_resource = _committed_resource(command, result.data)
             if committed_resource is not None:
@@ -603,7 +622,7 @@ def _committed_resource(command: WorkflowCommand, data: object) -> WorkflowCommi
         tool_name=command.tool_name,
         resource=resource,
         public_id=str(public_id),
-        display_name=display_name,
+        display_name=display_name[:200],
     )
 
 

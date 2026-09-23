@@ -381,6 +381,60 @@ def test_text_input_rejects_values_outside_signed_bounds(text: str) -> None:
         InteractionInputResolver().resolve_interaction_values(_text_target(), {"text": text})
 
 
+def test_follow_up_content_cancellation_requires_exact_values_and_signed_permission() -> None:
+    target = _text_target()
+    target["business_action"] = "provide_follow_up_content"
+    resolver = InteractionInputResolver()
+
+    with pytest.raises(AgentUIInputResolutionError):
+        resolver.resolve_interaction_values(target, {"cancel": True})
+
+    target["allow_cancel"] = True
+    assert resolver.resolve_interaction_values(target, {"cancel": True}) == WorkflowResumeInput(
+        kind="reject",
+        content="取消",
+        source="web",
+        metadata={"business_action": "provide_follow_up_content"},
+    )
+    for values in ({"cancel": False}, {"cancel": True, "text": "旧内容"}, {"text": ""}):
+        with pytest.raises(AgentUIInputResolutionError):
+            resolver.resolve_interaction_values(target, values)
+
+    other = _text_target()
+    other["allow_cancel"] = True
+    with pytest.raises(AgentUIInputResolutionError):
+        resolver.resolve_interaction_values(other, {"cancel": True})
+
+
+@pytest.mark.parametrize("interaction_type", ["text_input", "form"])
+def test_only_signed_follow_up_content_can_cancel_required_input(interaction_type: str) -> None:
+    target = _text_target() if interaction_type == "text_input" else _form_target()
+    target.update(business_action="provide_follow_up_content", allow_cancel=True)
+    resume = InteractionInputResolver().resolve_interaction_values(target, {"cancel": True})
+    assert resume.kind == "reject"
+    assert resume.content == "取消"
+    assert resume.metadata == {"business_action": "provide_follow_up_content"}
+
+    for unsigned in ({"allow_cancel": False}, {"allow_cancel": "true"}, {"business_action": "collect_supplement"}):
+        restricted = {**target, **unsigned}
+        with pytest.raises(AgentUIInputResolutionError):
+            InteractionInputResolver().resolve_interaction_values(restricted, {"cancel": True})
+
+
+@pytest.mark.parametrize("values", [{"cancel": 1}, {"cancel": "true"}, {"cancel": None}, {"cancel": True, "summary": "old"}])
+def test_follow_up_form_rejects_non_exact_cancel_values(values: dict) -> None:
+    target = {**_form_target(), "business_action": "provide_follow_up_content", "allow_cancel": True}
+    with pytest.raises(AgentUIInputResolutionError):
+        InteractionInputResolver().resolve_interaction_values(target, values)
+
+
+def test_signed_cancellation_does_not_apply_to_choice_or_confirmation() -> None:
+    for target in (_choice_target(), _confirmation_target()):
+        target.update(business_action="provide_follow_up_content", allow_cancel=True)
+        with pytest.raises(AgentUIInputResolutionError):
+            InteractionInputResolver().resolve_interaction_values(target, {"cancel": True})
+
+
 def test_resolver_rejects_unsupported_or_legacy_interaction_type() -> None:
     resolver = InteractionInputResolver()
     legacy_target = deepcopy(_confirmation_target())

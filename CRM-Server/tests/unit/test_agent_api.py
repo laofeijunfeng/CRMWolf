@@ -876,28 +876,80 @@ def test_run_log_turns_list_and_filter_with_ai_read(api_harness, monkeypatch) ->
     assert paged.json()["total_pages"] == 2
 
 
-def test_run_log_turn_detail_returns_six_steps(api_harness, monkeypatch) -> None:
+def test_run_log_turn_detail_returns_persisted_messages_and_diagnostics(api_harness, monkeypatch) -> None:
     client, session_factory = api_harness
     _grant_ai_read(monkeypatch)
     session = _create_session(client)
+    user_text = "跟进内容: " + "细节" * 1200
+    assistant_text = "排查结果: " + "原因" * 1200
     _persist_run_log_turn(
         session_factory,
         session_id=int(session["id"]),
         turn_id="turn_detail",
-        user_text="记一条跟进",
+        user_text=user_text,
+        assistant_text=assistant_text,
     )
+    with session_factory() as db:
+        assistant = db.query(AgentMessage).filter(
+            AgentMessage.turn_id == "turn_detail", AgentMessage.role == AgentMessageRole.ASSISTANT
+        ).one()
+        assistant.diagnostics_json = {
+            **assistant.diagnostics_json,
+            "turn_observability": {
+                **assistant.diagnostics_json["turn_observability"],
+                "summary": "质量 52 分, 拦住写入。",
+                "steps": [
+                    {**step, "detail": "交互等待用户补充"} if step["kind"] == "interaction" else step
+                    for step in assistant.diagnostics_json["turn_observability"]["steps"]
+                ],
+            },
+            "decision": {
+                "route": "WORKFLOW",
+                "semantic_plan": {"note": "完整决策", "token": "nested-secret", "apiKey": "camel-secret"},
+                "api_key": "private-key",
+            },
+            "durable_work": [{"activity_id": 241, "metadata": {"authorization": "Bearer nested-secret"}}],
+            "runtime_events": [{"authorization": "Bearer private-token"}],
+            "unknown_payload": {"password": "private-password"},
+        }
+        db.commit()
 
     missing = client.get("/v1/agent/run-log/turns/missing")
     assert missing.status_code == 404
 
-    detail = client.get("/v1/agent/run-log/turns/turn_detail")
-    assert detail.status_code == 200
-    body = detail.json()
-    assert body["turn_id"] == "turn_detail"
-    assert body["outcome"] == "blocked_unwritten"
-    assert len(body["steps"]) == 6
-    assert body["steps"][2]["tone"] == "blocked"
-    assert body["steps"][4]["kind"] == "api"
+    response = client.get("/v1/agent/run-log/turns/turn_detail")
+    assert response.status_code == 200
+    body = response.json()
+    log = json.loads(body["log"])
+    assert log["turn_id"] == "turn_detail"
+    assert log["session_id"] == int(session["id"])
+    assert [message["role"] for message in log["messages"]] == ["user", "assistant"]
+    assert log["messages"][0]["content"] == user_text
+    assert log["messages"][1]["content"] == assistant_text
+    diagnostics = log["messages"][1]["diagnostics"]
+    assert diagnostics["decision"]["semantic_plan"]["note"] == "完整决策"
+    assert diagnostics["durable_work"] == [{"activity_id": 241, "metadata": {"authorization": "[REDACTED]"}}]
+    assert "runtime_events" not in diagnostics
+    assert diagnostics["decision"]["api_key"] == "[REDACTED]"
+    assert diagnostics["decision"]["semantic_plan"]["token"] == "[REDACTED]"
+    assert diagnostics["decision"]["semantic_plan"]["apiKey"] == "[REDACTED]"
+    assert "camel-secret" not in body["log"]
+    assert "nested-secret" not in body["log"]
+    assert "unknown_payload" not in diagnostics
+    assert "private-token" not in body["log"]
+    assert "private-password" not in body["log"]
+
+
+def test_run_log_detail_rejects_other_teams_and_users_without_access(api_harness, monkeypatch) -> None:
+    client, session_factory = api_harness
+    session = _create_session(client)
+    _persist_run_log_turn(session_factory, session_id=int(session["id"]), turn_id="turn_other_team", team_id=2)
+
+    _deny_ai_access(monkeypatch)
+    assert client.get("/v1/agent/run-log/turns/turn_other_team").status_code == 403
+
+    _grant_ai_read(monkeypatch)
+    assert client.get("/v1/agent/run-log/turns/turn_other_team").status_code == 404
 
 
 def test_run_log_lists_catch_all_failure_without_observability(api_harness, monkeypatch) -> None:

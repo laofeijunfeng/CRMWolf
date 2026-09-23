@@ -30,7 +30,7 @@ class PermissionCRUD:
         if not include_inactive:
             query = query.filter(Permission.is_active.is_(True))
         
-        return query.offset(skip).limit(limit).all()
+        return query.order_by(Permission.id).offset(skip).limit(limit).all()
 
     def create(self, db: Session, obj_in: PermissionCreate) -> Permission:
         db_obj = Permission(**obj_in.model_dump())
@@ -81,19 +81,21 @@ class PermissionCRUD:
         ).all()
 
     def get_user_permissions(self, db: Session, user_id: int, team_id: Optional[int] = None) -> List[Permission]:
-        """
-        获取用户的权限列表
+        """获取用户权限，并在 Agent worker 请求中限制为原授权范围。"""
 
-        Args:
-            user_id: 用户ID
-            team_id: 团队ID（可选，不传则返回用户在所有团队的权限）
-        """
+        from app.core.request_scope import agent_worker_permissions
         from app.models.user_role import UserRole
 
-        query = db.query(Permission).join(RolePermission, Permission.id == RolePermission.permission_id).join(UserRole, RolePermission.role_id == UserRole.role_id).filter(UserRole.user_id == user_id)
+        query = db.query(Permission).join(
+            RolePermission, Permission.id == RolePermission.permission_id
+        ).join(UserRole, RolePermission.role_id == UserRole.role_id).filter(UserRole.user_id == user_id)
         if team_id is not None:
             query = query.filter(UserRole.team_id == team_id)
-        return query.all()
+        permissions = query.all()
+        granted = agent_worker_permissions.get()
+        if granted is None:
+            return permissions
+        return [permission for permission in permissions if permission.code in granted]
 
 
 permission_crud = PermissionCRUD()

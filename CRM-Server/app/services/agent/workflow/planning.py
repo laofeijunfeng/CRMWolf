@@ -38,6 +38,7 @@ from app.services.agent.workflow.contracts import (
     WorkflowConfirmationFact,
     WorkflowInteraction,
     WorkflowInteractionField,
+    WorkflowInteractionOption,
     WorkflowOpportunitySuggestionStart,
     WorkflowQualityGate,
     WorkflowResolvedCustomer,

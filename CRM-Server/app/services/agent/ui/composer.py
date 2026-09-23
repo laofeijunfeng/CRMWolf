@@ -548,6 +548,11 @@ class AgentUIComposer:
         compact_task_completion = (
             interaction.business_action == "resolve_follow_up_task_confirmation_case"
         )
+        allow_cancel = (
+            interaction.business_action == "provide_follow_up_content"
+            and interaction.interaction_type in {"text_input", "form"}
+            and interaction.allow_cancel is True
+        )
         ui_source_options = interaction.options
         if compact_task_completion:
             completion_option = next(
@@ -615,6 +620,8 @@ class AgentUIComposer:
             "submit_label": interaction.submit_label,
             "submit_on_select": interaction.submit_on_select,
         }
+        if allow_cancel:
+            target["allow_cancel"] = True
         if follow_up_confirmation_case_public_id is not None:
             target["follow_up_confirmation_case_public_id"] = follow_up_confirmation_case_public_id
         if compact_task_completion:
@@ -645,6 +652,8 @@ class AgentUIComposer:
                 type="interaction",
                 interaction_id=interaction.interaction_id,
                 interaction_type=interaction.interaction_type,
+                business_action=interaction.business_action,
+                allow_cancel=allow_cancel,
                 presentation="COMPACT_TASK_COMPLETION" if compact_task_completion else None,
                 state="ACTIVE",
                 prompt=interaction.prompt,

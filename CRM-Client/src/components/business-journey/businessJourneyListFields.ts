@@ -29,6 +29,6 @@ export function createBusinessJourneyListFields(ownerOptions: ListFieldOption[])
     { key: 'purchase_type', label: '采购类型', type: 'enum', options: businessJourneyPurchaseTypeOptions, column: { width: '110px' }, filter: true, sort: true },
     { key: 'owner_id', label: '负责人', type: 'enum', options: ownerOptions, column: { width: '120px' }, filter: true, sort: true },
     { key: 'last_event_at', label: '最近动态', type: 'date', column: { width: '150px' }, filter: true, sort: true },
-    { key: 'started_at', label: '开始时间', type: 'date', column: { width: '140px' }, filter: true, sort: true }
+    { key: 'expected_closing_date', label: '预计成交日期', type: 'date', column: { width: '140px' }, filter: true, sort: true }
   ])
 }

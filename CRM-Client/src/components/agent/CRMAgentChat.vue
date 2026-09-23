@@ -120,6 +120,8 @@
           </div>
         </div>
       </Message>
+      <div v-for="(label, index) in requestStatusLabels" :key="index" role="status" class="agent-chat__request-status px-10 text-sm text-warning">{{ label }}</div>
+      <div v-if="pendingRequests.length > 0" role="status" class="agent-chat__pending-status px-10 text-sm text-muted-foreground">{{ pendingRequests.length }} 项操作状态确认中，请勿重复提交。</div>
 
       <section
         v-if="transportError !== null"
@@ -151,7 +153,7 @@
           v-model="input"
           class="min-h-[72px] overflow-y-hidden pb-3.5 pr-14"
           placeholder="输入客户跟进、查询或操作指令..."
-          :disabled="isStreaming"
+          :disabled="isStreaming || pendingRequests.some(request => request.kind !== 'compact')"
           :auto-resize="true"
           :min-rows="2"
           :max-rows="6"
@@ -187,7 +189,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onActivated, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, ref } from 'vue'
 import { AlertTriangle, ArrowUp, Loader2, Sparkles } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 
@@ -197,16 +199,15 @@ import {
   type AgentChatRequest,
   type AgentStreamEvent,
   type AgentUIEnvelope,
+  type AgentRequestStatus,
 } from '@/api/agent'
 import AgentAsyncOperationList from '@/components/agent/AgentAsyncOperationList.vue'
 import { isAgentEntityOpenable, parseAgentContractId } from '@/components/agent/agentEntityNavigation'
 import { groupAgentAsyncOperationsByMessage } from '@/components/agent/agentAsyncOperations'
 import {
-  compactTaskActionState,
   findCompactTaskAction,
   isCompactTaskCompletionAction,
   optimisticallyCompleteCompactTask,
-  restoreCompactTaskAction,
   unlockInteractionActionId,
 } from '@/components/agent/agentInteractionState'
 import {
@@ -230,10 +231,56 @@ import { useUserStore } from '@/stores/user'
 import CustomerDetailSheet from '@/views/CustomerDetailSheet.vue'
 import OpportunityDetailSheet from '@/views/OpportunityDetailSheet.vue'
 import ContractDetailSheet from '@/views/ContractDetailSheet.vue'
+import { useTeamStore } from '@/stores/team'
 
 const LAST_SESSION_STORAGE_KEY = 'crm_agent_last_session_id'
+const PENDING_REQUESTS_STORAGE_KEY = 'crm_agent_pending_requests'
+const REQUEST_POLL_INTERVAL_MS = 2000
+
+interface PendingAgentRequest {
+  userId: number
+  teamId: number
+  sessionId: number | null
+  requestId: string
+  actionId: string | null
+  kind: 'text' | 'interaction' | 'compact' | 'entity'
+  hold?: boolean
+}
+
+const isPendingAgentRequest = (value: unknown): value is PendingAgentRequest => {
+  if (typeof value !== 'object' || value === null) return false
+  const item = value as Record<string, unknown>
+  const userId = item.userId
+  const teamId = item.teamId
+  const sessionIdValue = item.sessionId
+  const requestId = item.requestId
+  const actionId = item.actionId
+  const kind = item.kind
+  const hold = item.hold
+  return typeof userId === 'number' && Number.isInteger(userId) && userId > 0
+    && typeof teamId === 'number' && Number.isInteger(teamId) && teamId > 0
+    && (sessionIdValue === null || typeof sessionIdValue === 'number' && Number.isInteger(sessionIdValue) && sessionIdValue > 0)
+    && typeof requestId === 'string' && /^[\da-f]{8}-[\da-f]{4}-[1-8][\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/i.test(requestId)
+    && (actionId === null || typeof actionId === 'string')
+    && (kind === 'text' || kind === 'interaction' || kind === 'compact' || kind === 'entity')
+    && (hold === undefined || typeof hold === 'boolean')
+}
+
+const readPendingRequests = (): PendingAgentRequest[] => {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(PENDING_REQUESTS_STORAGE_KEY) ?? '[]')
+    return Array.isArray(parsed) ? parsed.filter(isPendingAgentRequest) : []
+  } catch {
+    return []
+  }
+}
+
+const savePendingRequests = (requests: PendingAgentRequest[]): void => {
+  localStorage.setItem(PENDING_REQUESTS_STORAGE_KEY, JSON.stringify(requests))
+}
 
 const userStore = useUserStore()
+const teamStore = useTeamStore()
 const input = ref('')
 const isStreaming = ref(false)
 const isLoadingHistory = ref(false)
@@ -254,6 +301,12 @@ const selectedCustomerId = ref<string | null>(null)
 const selectedOpportunityId = ref<string | null>(null)
 const selectedContractId = ref<number | null>(null)
 const lockedInteractionActionIds = ref<ReadonlySet<string>>(new Set())
+const pendingRequests = ref<PendingAgentRequest[]>([])
+const requestStatusLabels = ref<string[]>([])
+let sessionOwner: { userId: number, teamId: number } | undefined
+let requestPollTimer: ReturnType<typeof setTimeout> | undefined
+let disposed = false
+const activeStatusPolls = new Set<string>()
 let messageLoadGeneration = 0
 
 interface AgentMessageLoadResult {
@@ -290,11 +343,12 @@ const contractSheetVisible = computed({
 const loadSessionMessages = async (targetSessionId: number): Promise<AgentMessageLoadResult> => {
   const generation = ++messageLoadGeneration
   const loadedMessages = await loadLatestAgentMessages(agentApi.listMessages, targetSessionId)
-  const applied = generation === messageLoadGeneration && sessionId.value === targetSessionId
+  const applied = generation >= messageLoadGeneration && sessionId.value === targetSessionId
   if (applied) {
+    messageLoadGeneration = generation
     messages.value = loadedMessages
     insertedHistoryAnchorIds.value = new Set()
-    pendingUserText.value = null
+    if (pendingRequests.value.length === 0) pendingUserText.value = null
     messageScrollKey.value += 1
   }
   return { applied, messages: loadedMessages }
@@ -375,7 +429,7 @@ const groupedAsyncOperations = computed(() => (
 ))
 const operationsByMessageId = computed(() => groupedAsyncOperations.value.byMessageId)
 const unanchoredAsyncOperations = computed(() => groupedAsyncOperations.value.unanchored)
-const canSend = computed(() => input.value.trim().length > 0 && !isStreaming.value)
+const canSend = computed(() => input.value.trim().length > 0 && !isStreaming.value && !pendingRequests.value.some(request => request.kind !== 'compact'))
 const streamingMessage = computed(() => {
   if (streamingBlocks.value.length === 0) return null
   return {
@@ -399,6 +453,7 @@ const showEmptyState = computed(() => (
   && messages.value.length === 0
   && pendingUserText.value === null
   && !isStreaming.value
+  && pendingRequests.value.length === 0
 ))
 const messageScrollCount = computed(() => (
   messages.value.length
@@ -407,6 +462,7 @@ const messageScrollCount = computed(() => (
   + (isStreaming.value ? 1 : 0)
   + asyncOperations.value.length
   + (transportError.value === null ? 0 : 1)
+  + requestStatusLabels.value.length
 ))
 const userInitial = computed(() => {
   const name = userStore.userInfo?.name
@@ -425,10 +481,149 @@ const rememberSession = (id: number, key: string): void => {
     lockedInteractionActionIds.value = new Set()
     insertedHistoryAnchorIds.value = new Set()
     messageLoadGeneration += 1
+    pendingRequests.value = []
   }
   sessionId.value = id
   sessionKey.value = key
   localStorage.setItem(LAST_SESSION_STORAGE_KEY, String(id))
+}
+
+const ownerForRequest = (): { userId: number, teamId: number } | undefined => {
+  const userId = userStore.userInfo?.id
+  const teamId = teamStore.currentTeam?.id
+  if (sessionOwner !== undefined && typeof userId === 'number' && userId > 0 && userId !== sessionOwner.userId) return undefined
+  if (sessionOwner !== undefined && typeof teamId === 'number' && teamId > 0 && teamId !== sessionOwner.teamId) return undefined
+  if (typeof userId === 'number' && userId > 0 && typeof teamId === 'number' && teamId > 0) {
+    return { userId, teamId }
+  }
+  return sessionOwner
+}
+
+const ownsRequest = (request: PendingAgentRequest): boolean => {
+  const owner = ownerForRequest()
+  return owner !== undefined && owner.userId === request.userId && owner.teamId === request.teamId
+}
+
+const scheduleRequestPoll = (): void => {
+  const active = pendingRequests.value.filter(request => request.hold !== true && request.sessionId !== null)
+  if (disposed || requestPollTimer !== undefined || active.length === 0) return
+  requestPollTimer = setTimeout(() => {
+    requestPollTimer = undefined
+    void Promise.all(active.map(pollRequestStatus)).finally(scheduleRequestPoll)
+  }, REQUEST_POLL_INTERVAL_MS)
+}
+
+const trackRequest = (request: PendingAgentRequest): void => {
+  const stored = readPendingRequests().filter(item => item.requestId !== request.requestId)
+  savePendingRequests([...stored, request])
+  pendingRequests.value = [...pendingRequests.value, request]
+  if (request.actionId !== null) {
+    lockedInteractionActionIds.value = new Set([...lockedInteractionActionIds.value, request.actionId])
+  }
+  scheduleRequestPoll()
+}
+
+const bindRequestSession = (requestId: string, id: number): void => {
+  const stored = readPendingRequests()
+  const request = stored.find(item => item.requestId === requestId)
+  if (request === undefined || !ownsRequest(request)) return
+  request.sessionId = id
+  savePendingRequests(stored)
+  const active = pendingRequests.value.find(item => item.requestId === requestId)
+  if (active !== undefined) active.sessionId = id
+  pendingRequests.value = [...pendingRequests.value]
+}
+
+const restorePendingRequests = (id: number): void => {
+  pendingRequests.value = readPendingRequests().filter(request => request.sessionId === id && ownsRequest(request))
+  lockedInteractionActionIds.value = new Set(pendingRequests.value.flatMap(request => request.actionId === null ? [] : [request.actionId]))
+  const active = pendingRequests.value.filter(request => request.hold !== true)
+  if (active.length > 0) void Promise.all(active.map(pollRequestStatus)).finally(scheduleRequestPoll)
+}
+
+const forgetRequest = (request: PendingAgentRequest, releaseAction: boolean): void => {
+  savePendingRequests(readPendingRequests().filter(item => item.requestId !== request.requestId))
+  pendingRequests.value = pendingRequests.value.filter(item => item.requestId !== request.requestId)
+  if (releaseAction && request.actionId !== null) unlockInteraction(request.actionId)
+  if (pendingRequests.value.length === 0) pendingUserText.value = null
+}
+
+const settleRequest = async (request: PendingAgentRequest, status: AgentRequestStatus): Promise<void> => {
+  if (status.status === 'IN_PROGRESS') return
+  const action = request.actionId === null ? undefined : messages.value.flatMap(message => (
+    message.blocks.filter(block => block.type === 'interaction' && block.submit_action_id === request.actionId)
+      .map(block => ({ messageId: message.message_id, block }))
+  ))[0]
+  const history = await reloadAuthoritativeSessionState().catch(() => undefined)
+  if (status.message !== null && request.kind !== 'compact') upsertFinalMessage(status.message)
+  if (status.status === 'COMPLETED' && request.kind === 'compact' && request.actionId !== null) {
+    messages.value = optimisticallyCompleteCompactTask(messages.value, request.actionId)
+  }
+  if (status.status === 'PARTIALLY_COMMITTED') {
+    requestStatusLabels.value = [...requestStatusLabels.value, '部分操作已提交，请核对后续步骤。']
+  } else if (status.status === 'NEEDS_RECONCILIATION') {
+    requestStatusLabels.value = [...requestStatusLabels.value, '操作需要核对，部分更改可能已提交，请勿重复提交。']
+  } else if (status.status === 'FAILED' && status.message === null) {
+    requestStatusLabels.value = [...requestStatusLabels.value, '请求未完成，请核对后再继续。']
+  }
+  const failedBlock = status.status === 'FAILED' ? status.message?.blocks.find(block => block.type === 'error') : undefined
+  if (failedBlock?.type === 'error' && request.kind === 'compact') toast.error(failedBlock.message)
+  const retryableAction = action?.block.type === 'interaction'
+    && action.block.business_action === 'provide_follow_up_content'
+    && (action.block.interaction_type === 'text_input' || action.block.interaction_type === 'form')
+  const sourceBlock = action?.block.type === 'interaction' ? action.block : undefined
+  const active = history?.applied === true && sourceBlock !== undefined
+    && history.messages.some(message => message.message_id === action?.messageId && message.blocks.some(block => (
+      block.type === 'interaction' && sourceBlock !== undefined
+      && block.id === sourceBlock.id && block.interaction_id === sourceBlock.interaction_id
+      && block.state === 'ACTIVE' && block.submit_action_id === request.actionId
+    )))
+  const compactActive = request.kind === 'compact' && history?.applied === true && request.actionId !== null
+    && history.messages.some(message => message.blocks.some(block => (
+      block.type === 'interaction' && block.presentation === 'COMPACT_TASK_COMPLETION'
+      && block.state === 'ACTIVE' && block.submit_action_id === request.actionId
+    )))
+  const releaseAction = status.status === 'FAILED' && failedBlock?.type === 'error' && failedBlock.retryable
+    && ((retryableAction && active) || compactActive)
+  if (releaseAction && request.actionId !== null) {
+    await nextTick()
+    unlockInteraction(request.actionId)
+  }
+  if (status.status === 'NEEDS_RECONCILIATION' || status.status === 'PARTIALLY_COMMITTED') {
+    request.hold = true
+    const stored = readPendingRequests().filter(item => item.requestId !== request.requestId)
+    savePendingRequests([...stored, request])
+  } else {
+    forgetRequest(request, releaseAction)
+  }
+  transportError.value = null
+  messageScrollKey.value += 1
+}
+const pollRequestStatus = async (request: PendingAgentRequest): Promise<void> => {
+  if (disposed || request.hold === true || request.sessionId === null || activeStatusPolls.has(request.requestId) || !ownsRequest(request)) return
+  activeStatusPolls.add(request.requestId)
+  try {
+    const status = await agentApi.getRequest(request.sessionId, request.requestId)
+    if (disposed || sessionId.value !== request.sessionId || !ownsRequest(request)) return
+    await settleRequest(request, status)
+  } catch {
+    // A failed status read cannot establish whether the write committed.
+  } finally {
+    activeStatusPolls.delete(request.requestId)
+    scheduleRequestPoll()
+  }
+}
+
+const createTrackedRequest = (agentInput: AgentChatInput, kind: PendingAgentRequest['kind']): { request: AgentChatRequest, pending?: PendingAgentRequest } => {
+  const request: AgentChatRequest = { ...requestContext(), client_request_id: crypto.randomUUID(), input: agentInput }
+  const owner = ownerForRequest()
+  if (owner === undefined) return { request }
+  const pending: PendingAgentRequest = {
+    ...owner, sessionId: sessionId.value ?? null, requestId: request.client_request_id,
+    actionId: agentInput.type === 'text' ? null : agentInput.action_id, kind,
+  }
+  trackRequest(pending)
+  return { request, pending }
 }
 
 const loadInitialSession = async (): Promise<void> => {
@@ -438,11 +633,13 @@ const loadInitialSession = async (): Promise<void> => {
     const session = resolveInitialAgentSession(response.items, storedSessionId())
     if (session === undefined) return
     rememberSession(session.id, session.session_key)
+    sessionOwner = { userId: session.user_id, teamId: session.team_id }
     const [messageResult] = await Promise.all([
       loadSessionMessages(session.id),
       loadSessionOperations(session.id),
     ])
     if (messageResult.applied) refreshSessionAnchors(session.id, messageResult.messages)
+    restorePendingRequests(session.id)
   } catch (error) {
     toast.error(error instanceof Error ? error.message : 'Agent 会话加载失败')
   } finally {
@@ -570,6 +767,7 @@ const reloadAuthoritativeSessionState = async (): Promise<AgentMessageLoadResult
   return messageResult
 }
 
+
 const submitInput = async (
   agentInput: AgentChatInput,
   options: { pendingText?: string, label: string },
@@ -580,36 +778,32 @@ const submitInput = async (
     toast.error('请先登录')
     return
   }
-
   transportError.value = null
   resetStreamProjection()
   pendingUserText.value = options.pendingText ?? null
   pendingRequestLabel.value = options.label
   isStreaming.value = true
 
-  const request: AgentChatRequest = {
-    ...requestContext(),
-    client_request_id: crypto.randomUUID(),
-    input: agentInput,
-  }
-
+  const { request, pending } = createTrackedRequest(agentInput, agentInput.type === 'text' ? 'text' : agentInput.type === 'entity_action' ? 'entity' : 'interaction')
   try {
-    await agentApi.chatStream(request, handleStreamEvent, token)
-    try {
-      await reloadAuthoritativeSessionState()
-    } catch {
-      // The final Agent UI message remains authoritative and visible until the next refresh.
+    await agentApi.chatStream(request, (event) => {
+      if (event.event === 'session' && pending !== undefined) bindRequestSession(pending.requestId, event.session_id)
+      handleStreamEvent(event)
+    }, token)
+    if (pending !== undefined) await pollRequestStatus(pending)
+    if (pending === undefined) {
+      try { await reloadAuthoritativeSessionState() } catch { /* Keep the streamed result. */ }
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Agent 请求失败'
-    if (transportError.value === null) transportError.value = message
-    toast.error(message)
-    resetStreamProjection()
-    try {
-      await reloadAuthoritativeSessionState()
-    } catch {
-      // Preserve the original transport/protocol error; a later refresh can recover history.
+    if (pending === undefined) {
+      if (transportError.value === null) transportError.value = message
+      toast.error(message)
+    } else {
+      transportError.value = null
+      await pollRequestStatus(pending)
     }
+    resetStreamProjection()
   } finally {
     isStreaming.value = false
     resetStreamProjection()
@@ -619,7 +813,7 @@ const submitInput = async (
 
 const sendMessage = async (): Promise<void> => {
   const text = input.value.trim()
-  if (text.length === 0 || isStreaming.value) return
+  if (text.length === 0 || !canSend.value) return
   input.value = ''
   await submitInput({ type: 'text', text }, { pendingText: text, label: '正在理解并处理...' })
 }
@@ -632,96 +826,29 @@ const unlockInteraction = (actionId: string): void => {
 }
 
 const submitCompactTaskInteraction = async (actionId: string, values: JsonObject): Promise<void> => {
-  if (isStreaming.value || lockedInteractionActionIds.value.has(actionId)) return
+  if (lockedInteractionActionIds.value.has(actionId)) return
   const token = userStore.token
   if (!token) {
     toast.error('请先登录')
     return
   }
-
-  const actionRef = findCompactTaskAction(messages.value, actionId)
-  if (actionRef === undefined) return
-  const previousMessages = messages.value
-  lockedInteractionActionIds.value = new Set([...lockedInteractionActionIds.value, actionId])
-  messages.value = optimisticallyCompleteCompactTask(messages.value, actionId)
-  messageScrollKey.value += 1
-
-  let finalError: string | null = null
-  let successfulFinalReceived = false
-  let streamFailure: string | null = null
-  const request: AgentChatRequest = {
-    ...requestContext(),
-    client_request_id: crypto.randomUUID(),
-    input: { type: 'interaction_submission', action_id: actionId, values },
-  }
-
+  if (findCompactTaskAction(messages.value, actionId) === undefined) return
+  const { request, pending } = createTrackedRequest(
+    { type: 'interaction_submission', action_id: actionId, values }, 'compact',
+  )
+  if (pending === undefined) lockedInteractionActionIds.value = new Set([...lockedInteractionActionIds.value, actionId])
   try {
-    await agentApi.chatStream(request, (event) => {
+    await agentApi.chatStream(request, event => {
       if (event.event === 'session') {
         rememberSession(event.session_id, event.session_key)
-        return
+        if (pending !== undefined) bindRequestSession(pending.requestId, event.session_id)
       }
-      if (event.event === 'transport_error') {
-        streamFailure = event.message
-        return
-      }
-      if (event.event !== 'agent_ui' || event.phase !== 'final') return
-
-      const errorBlock = event.message.blocks.find(block => block.type === 'error')
-      if (errorBlock?.type === 'error') {
-        finalError = errorBlock.message
-        return
-      }
-      if (event.message.metadata.display !== 'STATE_UPDATE') {
-        finalError = '待办状态响应无效'
-        return
-      }
-      successfulFinalReceived = true
     }, token)
-  } catch (error) {
-    streamFailure = error instanceof Error ? error.message : '待办完成失败'
-  }
-
-  let authoritative: AgentMessageLoadResult | undefined
-  try {
-    authoritative = await reloadAuthoritativeSessionState()
   } catch {
-    authoritative = undefined
+    // The request receipt, not stream liveness, determines whether the action committed.
   }
-  const authoritativeState = authoritative?.applied === true
-    ? compactTaskActionState(authoritative.messages, actionRef)
-    : 'UNKNOWN'
-
-  if (successfulFinalReceived || authoritativeState === 'SUBMITTED') {
-    messages.value = optimisticallyCompleteCompactTask(messages.value, actionId)
-    unlockInteraction(actionId)
-    messageScrollKey.value += 1
-    return
-  }
-
-  if (finalError !== null) {
-    messages.value = restoreCompactTaskAction(
-      messages.value,
-      authoritativeState === 'ACTIVE'
-        ? authoritative?.messages ?? previousMessages
-        : previousMessages,
-      actionId,
-    )
-    unlockInteraction(actionId)
-    messageScrollKey.value += 1
-    toast.error(finalError)
-    return
-  }
-
-  if (authoritativeState === 'ACTIVE') {
-    messages.value = restoreCompactTaskAction(messages.value, authoritative?.messages ?? previousMessages, actionId)
-    unlockInteraction(actionId)
-    messageScrollKey.value += 1
-    toast.error(streamFailure ?? '待办完成失败')
-    return
-  }
-
-  toast.error('完成状态确认中，请刷新会话查看')
+  if (pending !== undefined) await pollRequestStatus(pending)
+  else requestStatusLabels.value = [...requestStatusLabels.value, '完成状态确认中，请勿重复提交。']
 }
 
 const submitInteraction = async (actionId: string, values: JsonObject): Promise<void> => {
@@ -730,15 +857,25 @@ const submitInteraction = async (actionId: string, values: JsonObject): Promise<
     return
   }
   if (isStreaming.value || lockedInteractionActionIds.value.has(actionId)) return
-  lockedInteractionActionIds.value = new Set([...lockedInteractionActionIds.value, actionId])
-  try {
+  const actionMessage = messages.value.find(message => message.blocks.some(block => (
+    block.type === 'interaction' && block.submit_action_id === actionId
+  )))
+  const actionBlock = actionMessage?.blocks.find(block => (
+    block.type === 'interaction' && block.submit_action_id === actionId
+  ))
+  if (actionBlock?.type !== 'interaction' || actionMessage === undefined) {
     await submitInput(
       { type: 'interaction_submission', action_id: actionId, values },
       { label: '正在提交...' },
     )
-  } finally {
-    unlockInteraction(actionId)
+    return
   }
+
+  lockedInteractionActionIds.value = new Set([...lockedInteractionActionIds.value, actionId])
+  await submitInput(
+    { type: 'interaction_submission', action_id: actionId, values },
+    { label: '正在提交...' },
+  )
 }
 
 const submitEntityAction = async (actionId: string): Promise<void> => {
@@ -783,11 +920,14 @@ onMounted(() => {
 })
 
 onActivated(() => {
+  disposed = false
   messageScrollKey.value += 1
   resumeOperationPolling()
+  if (pendingRequests.value.length > 0) void Promise.all(pendingRequests.value.map(pollRequestStatus)).finally(scheduleRequestPoll)
 })
-
 onBeforeUnmount(() => {
+  disposed = true
+  if (requestPollTimer !== undefined) clearTimeout(requestPollTimer)
   disposeOperationPolling()
 })
 </script>

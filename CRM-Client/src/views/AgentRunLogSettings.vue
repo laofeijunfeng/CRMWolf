@@ -1,27 +1,22 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Sheet, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
-import { Table, TableCell, TableHeader, TableRow } from '@/components/ui/table'
 import { DetailSheetContent } from '@/components/ui/detail-sheet'
-import { DataViewStatePanel } from '@/components/crmwolf'
-import type { DataViewState } from '@/components/crmwolf'
+import { DataTable, DataTableSearch, SelectField } from '@/components/crmwolf'
+import { defineListFields } from '@/components/crmwolf/listFieldCatalog'
 import ErrorState from '@/components/ErrorState.vue'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { useSettingsAccess } from '@/composables/useSettingsAccess'
 import { getSettingsNavigationItem } from '@/settingsNavigation'
 import { handleApiError } from '@/utils/errorHandler'
 import { formatDateRelative } from '@/utils/format'
+import { toFeedbackError } from '@/types/feedback'
+import type { FeedbackError } from '@/types/feedback'
 import { agentRunLogApi } from '@/api/agentRunLog'
-import type {
-  AgentRunLogTurnDetail,
-  AgentRunLogTurnListItem,
-  TurnOutcome,
-} from '@/api/agentRunLog'
+import type { AgentRunLogTurnDetail, AgentRunLogTurnListItem, TurnOutcome } from '@/api/agentRunLog'
 
 usePageTitle()
 
@@ -38,122 +33,152 @@ const OUTCOME_LABELS: Record<TurnOutcome, string> = {
   failed: '失败',
   clarified: '需澄清',
 }
+const outcomeOptions = [
+  { value: 'all', label: '全部结论' },
+  ...Object.entries(OUTCOME_LABELS).map(([value, label]) => ({ value, label })),
+]
 
-const STEP_KIND_LABELS = {
-  model: '模型',
-  code: '代码',
-  interaction: '交互',
-  api: '接口',
-  background: '后台',
-} as const
+// Only the API's q/outcome parameters search the complete authorized result set.
+// No field-level filter/sort catalog exists for these columns.
+const fields = defineListFields([
+  { key: 'created_time', label: '时间', column: { width: '160px', fixed: 'left' }, filter: false, sort: false, filterDisabledReason: '日志不提供时间范围查询', sortDisabledReason: '日志按服务端时间顺序展示' },
+  { key: 'user_name', label: '销售', column: true, filter: false, sort: false, filterDisabledReason: '日志不提供销售字段级筛选', sortDisabledReason: '日志不提供销售跨页排序' },
+  { key: 'user_text', label: '用户说了什么', column: { width: '320px' }, filter: false, sort: false, filterDisabledReason: '请使用服务端关键字搜索', sortDisabledReason: '日志不提供原文跨页排序' },
+  { key: 'outcome', label: '结论', column: true, filter: false, sort: false, filterDisabledReason: '请使用工具栏结论条件', sortDisabledReason: '日志不提供结论跨页排序' },
+  { key: 'quality_score', label: '质量分', column: true, filter: false, sort: false, filterDisabledReason: '日志不提供质量分范围查询', sortDisabledReason: '日志不提供质量分跨页排序' },
+  { key: 'customer_name', label: '客户', column: true, filter: false, sort: false, filterDisabledReason: '请使用服务端关键字搜索', sortDisabledReason: '日志不提供客户跨页排序' },
+])
 
-const search = ref('')
+const committedSearch = ref('')
 const outcome = ref<TurnOutcome | 'all'>('all')
 const page = ref(1)
-const pageSize = 20
+const pageSize = ref(20)
 const total = ref(0)
 const rows = ref<AgentRunLogTurnListItem[]>([])
 const loading = ref(false)
-const loadError = ref(false)
+const loadError = ref<FeedbackError | null>(null)
+let listRequestId = 0
+
 const selectedTurnId = ref<string | null>(null)
 const detail = ref<AgentRunLogTurnDetail | null>(null)
 const detailLoading = ref(false)
 const detailError = ref(false)
+let detailRequestId = 0
 
-const listState = computed<DataViewState>(() => {
-  if (loading.value) return 'loading'
-  if (loadError.value) return 'error'
-  if (rows.value.length === 0) return 'empty'
-  return 'ready'
-})
-
-const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 const sheetOpen = computed({
   get: () => selectedTurnId.value !== null,
   set: (open: boolean) => {
     if (!open) {
+      detailRequestId += 1
       selectedTurnId.value = null
       detail.value = null
+      detailLoading.value = false
       detailError.value = false
     }
   },
 })
 
-const outcomeBadgeVariant = (value: TurnOutcome): 'default' | 'secondary' | 'destructive' | 'outline' => {
+const outcomeBadgeVariant = (value: TurnOutcome): 'default' | 'secondary' | 'destructive' => {
   if (value === 'failed' || value === 'blocked_unwritten') return 'destructive'
   if (value === 'written' || value === 'answered') return 'default'
   return 'secondary'
 }
 
-const stepToneVariant = (tone: 'done' | 'blocked' | 'skipped'): 'default' | 'secondary' | 'destructive' => {
-  if (tone === 'blocked') return 'destructive'
-  if (tone === 'skipped') return 'secondary'
-  return 'default'
-}
-
 const loadTurns = async (): Promise<void> => {
-  const allowed = pageItem !== undefined && canAccess(pageItem)
-  if (!allowed || permissionsPending.value === true || permissionsUnavailable.value === true) {
+  const requestId = ++listRequestId
+  if (!hasAccess.value || permissionsPending.value || permissionsUnavailable.value) {
+    rows.value = []
+    total.value = 0
+    sheetOpen.value = false
     loading.value = false
     return
   }
+  rows.value = []
+  total.value = 0
   loading.value = true
-  loadError.value = false
+  loadError.value = null
   try {
-    const params: {
-      page: number
-      page_size: number
-      outcome?: TurnOutcome
-      q?: string
-    } = {
+    const params: { page: number; page_size: number; outcome?: TurnOutcome; q?: string } = {
       page: page.value,
-      page_size: pageSize,
+      page_size: pageSize.value,
     }
-    if (outcome.value !== 'all') {
-      params.outcome = outcome.value
-    }
-    const query = search.value.trim()
-    if (query !== '') {
-      params.q = query
-    }
+    if (outcome.value !== 'all') params.outcome = outcome.value
+    if (committedSearch.value !== '') params.q = committedSearch.value
     const result = await agentRunLogApi.listTurns(params)
+    if (requestId !== listRequestId) return
     rows.value = result.items
     total.value = result.total
   } catch (error: unknown) {
-    loadError.value = true
+    if (requestId !== listRequestId) return
+    loadError.value = toFeedbackError(error, 'Agent 运行日志')
+    sheetOpen.value = false
     handleApiError(error, '加载 Agent 运行日志')
   } finally {
-    loading.value = false
+    if (requestId === listRequestId) loading.value = false
   }
 }
 
-const openTurn = async (turnId: string): Promise<void> => {
-  selectedTurnId.value = turnId
+const applySearch = (value: string): void => {
+  committedSearch.value = value.trim()
+  page.value = 1
+  void loadTurns()
+}
+const clearFilters = (): void => {
+  committedSearch.value = ''
+  outcome.value = 'all'
+  page.value = 1
+  void loadTurns()
+}
+const changePage = (value: number): void => {
+  if (page.value === value) return
+  page.value = value
+  void loadTurns()
+}
+const changePageSize = (value: number): void => {
+  pageSize.value = value
+  page.value = 1
+  void loadTurns()
+}
+const changeOutcome = (value: string | number): void => {
+  if (value !== 'all' && !(value in OUTCOME_LABELS)) return
+  outcome.value = value as TurnOutcome | 'all'
+  page.value = 1
+  void loadTurns()
+}
+
+const openTurn = async (row: AgentRunLogTurnListItem): Promise<void> => {
+  const requestId = ++detailRequestId
+  selectedTurnId.value = row.turn_id
   detail.value = null
   detailError.value = false
   detailLoading.value = true
   try {
-    detail.value = await agentRunLogApi.getTurn(turnId)
+    const response = await agentRunLogApi.getTurn(row.turn_id)
+    if (requestId !== detailRequestId) return
+    detail.value = response
   } catch (error: unknown) {
+    if (requestId !== detailRequestId) return
     detailError.value = true
     handleApiError(error, '加载回合过程')
   } finally {
-    detailLoading.value = false
+    if (requestId === detailRequestId) detailLoading.value = false
   }
 }
 
-watch(outcome, () => {
-  page.value = 1
-  void loadTurns()
-})
+const copyLog = async (): Promise<void> => {
+  const log = detail.value?.log
+  if (log === undefined) return
+  try {
+    await navigator.clipboard.writeText(log)
+    toast.success('完整日志已复制')
+  } catch {
+    toast.error('复制失败，请手动选择日志复制')
+  }
+}
 
-watch(
-  [permissionsPending, permissionsUnavailable],
-  () => {
-    void loadTurns()
-  },
-  { immediate: true },
-)
+watch([permissionsPending, permissionsUnavailable, hasAccess], () => {
+  void loadTurns()
+}, { immediate: true })
 </script>
 
 <template>
@@ -181,123 +206,84 @@ watch(
     />
 
     <template v-else>
-      <Card>
-        <CardContent class="flex flex-col gap-4 pt-6">
-          <div class="flex flex-col gap-4 sm:flex-row sm:items-end">
-            <div class="flex-1 space-y-2">
-              <Label for="run-log-search">搜索</Label>
-              <Input
-                id="run-log-search"
-                v-model="search"
-                placeholder="用户原文、客户或摘要"
-                @keydown.enter="page = 1; loadTurns()"
-              />
-            </div>
-            <div class="space-y-2">
-              <Label for="run-log-outcome">结论</Label>
-              <select
-                id="run-log-outcome"
-                v-model="outcome"
-                class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
-              >
-                <option value="all">全部结论</option>
-                <option v-for="(label, value) in OUTCOME_LABELS" :key="value" :value="value">
-                  {{ label }}
-                </option>
-              </select>
-            </div>
-            <Button type="button" @click="page = 1; loadTurns()">查询</Button>
+      <DataTable
+        :fields="fields"
+        :data="rows"
+        row-key="turn_id"
+        row-interactive
+        detail-column-key="user_text"
+        :get-row-label="(row: AgentRunLogTurnListItem) => row.user_text"
+        :loading="loading"
+        :load-error="loadError"
+        :page="page"
+        :page-size="pageSize"
+        :total="total"
+        height-strategy="page"
+        scroll-mode="page"
+        compact-pagination
+        empty-title="还没有可查看的 Agent 回合"
+        empty-description="销售完成查询或跟进后，这里会留下运行记录。"
+        :empty-reason="committedSearch || outcome !== 'all' ? 'filtered' : 'no-data'"
+        @update:page="changePage"
+        @update:page-size="changePageSize"
+        @row-click="openTurn"
+        @retry="loadTurns"
+        @filter-reset="clearFilters"
+      >
+        <template #tableTools>
+          <DataTableSearch
+            :model-value="committedSearch"
+            placeholder="搜索用户原文、客户或摘要"
+            @search="applySearch"
+            @clear="applySearch('')"
+          />
+          <SelectField
+            id="run-log-outcome"
+            :model-value="outcome"
+            label="结论"
+            :options="outcomeOptions"
+            @update:model-value="changeOutcome"
+          />
+        </template>
+        <template #mobile-card="{ row }">
+          <div class="flex min-w-0 items-start justify-between gap-3">
+            <p class="line-clamp-3 min-w-0 flex-1 break-words font-medium [overflow-wrap:anywhere]">{{ row.user_text }}</p>
+            <Badge :variant="outcomeBadgeVariant(row.outcome)">{{ OUTCOME_LABELS[row.outcome] }}</Badge>
           </div>
-
-          <DataViewStatePanel
-            :state="listState"
-            loading-type="table"
-            empty-title="还没有可查看的 Agent 回合"
-            empty-description="销售完成查询或跟进后，这里会留下六步过程。"
-            error-title="运行日志加载失败"
-            @retry="loadTurns"
-          >
-            <Table>
-              <thead>
-                <TableRow>
-                  <TableHeader>时间</TableHeader>
-                  <TableHeader>销售</TableHeader>
-                  <TableHeader>用户说了什么</TableHeader>
-                  <TableHeader>结论</TableHeader>
-                  <TableHeader>质量分</TableHeader>
-                  <TableHeader>客户</TableHeader>
-                </TableRow>
-              </thead>
-              <tbody>
-                <TableRow
-                  v-for="row in rows"
-                  :key="row.turn_id"
-                  class="cursor-pointer"
-                  @click="openTurn(row.turn_id)"
-                >
-                  <TableCell>{{ formatDateRelative(row.created_time) }}</TableCell>
-                  <TableCell>{{ row.user_name ?? row.user_id }}</TableCell>
-                  <TableCell class="max-w-md truncate">{{ row.user_text }}</TableCell>
-                  <TableCell>
-                    <Badge :variant="outcomeBadgeVariant(row.outcome)">
-                      {{ OUTCOME_LABELS[row.outcome] }}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>{{ row.quality_score ?? '—' }}</TableCell>
-                  <TableCell>{{ row.customer_name ?? '—' }}</TableCell>
-                </TableRow>
-              </tbody>
-            </Table>
-            <div class="flex items-center justify-between pt-4 text-sm text-muted-foreground">
-              <p>共 {{ total }} 条</p>
-              <div class="flex gap-2">
-                <Button type="button" variant="outline" :disabled="page <= 1" @click="page -= 1; loadTurns()">
-                  上一页
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  :disabled="page >= totalPages"
-                  @click="page += 1; loadTurns()"
-                >
-                  下一页
-                </Button>
-              </div>
-            </div>
-          </DataViewStatePanel>
-        </CardContent>
-      </Card>
+          <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+            <span>销售：{{ row.user_name ?? row.user_id }}</span>
+            <span>{{ formatDateRelative(row.created_time) }}</span>
+          </div>
+        </template>
+        <template #cell-created_time="{ row }">{{ formatDateRelative(row.created_time) }}</template>
+        <template #cell-user_name="{ row }">{{ row.user_name ?? row.user_id }}</template>
+        <template #cell-outcome="{ row }">
+          <Badge :variant="outcomeBadgeVariant(row.outcome)">{{ OUTCOME_LABELS[row.outcome] }}</Badge>
+        </template>
+        <template #cell-quality_score="{ row }">{{ row.quality_score ?? '—' }}</template>
+        <template #cell-customer_name="{ row }">{{ row.customer_name ?? '—' }}</template>
+      </DataTable>
 
       <Sheet v-model:open="sheetOpen">
         <DetailSheetContent>
           <SheetHeader class="border-b p-6">
-            <SheetTitle>回合过程</SheetTitle>
+            <SheetTitle>完整运行日志</SheetTitle>
             <SheetDescription v-if="detail !== null">
               {{ OUTCOME_LABELS[detail.outcome] }} · {{ detail.summary }}
             </SheetDescription>
           </SheetHeader>
-          <div class="flex-1 overflow-auto p-6">
-            <p v-if="detailLoading">正在加载过程…</p>
+          <div class="min-w-0 flex-1 overflow-auto p-6">
+            <p v-if="detailLoading">正在加载完整日志…</p>
             <ErrorState
               v-else-if="detailError"
               variant="error"
-              title="过程加载失败"
+              title="日志加载失败"
               description="请关闭后重试。"
             />
-            <ol v-else-if="detail !== null" class="space-y-4">
-              <li
-                v-for="(step, index) in detail.steps"
-                :key="`${step.kind}-${index}`"
-                class="rounded-lg border p-4"
-              >
-                <div class="mb-2 flex items-center gap-2">
-                  <span class="text-sm text-muted-foreground">{{ index + 1 }}.</span>
-                  <Badge variant="outline">{{ STEP_KIND_LABELS[step.kind] }}</Badge>
-                  <Badge :variant="stepToneVariant(step.tone)">{{ step.title }}</Badge>
-                </div>
-                <p class="text-sm text-muted-foreground">{{ step.detail }}</p>
-              </li>
-            </ol>
+            <template v-else-if="detail !== null">
+              <Button type="button" variant="outline" aria-label="复制完整日志" @click="copyLog">复制完整日志</Button>
+              <pre class="mt-4 max-w-full select-text whitespace-pre-wrap break-words rounded-md border bg-muted p-4 text-sm [overflow-wrap:anywhere]">{{ detail.log }}</pre>
+            </template>
           </div>
         </DetailSheetContent>
       </Sheet>

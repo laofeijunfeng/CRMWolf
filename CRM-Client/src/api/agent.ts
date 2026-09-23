@@ -81,6 +81,10 @@ const AgentMessagePageSchema = paginatedSchema(AgentUIEnvelopeSchema)
 const AgentAsyncOperationPageSchema = paginatedSchema(AgentAsyncOperationSchema)
 const AgentAsyncOperationListSchema = z.array(AgentAsyncOperationSchema)
 const AgentMessageAnchorListSchema = z.array(AgentUIEnvelopeSchema)
+const AgentRequestStatusSchema = z.object({
+  status: z.enum(['IN_PROGRESS', 'COMPLETED', 'PARTIALLY_COMMITTED', 'NEEDS_RECONCILIATION', 'FAILED']),
+  message: AgentUIEnvelopeSchema.nullable(),
+}).strict()
 
 const AgentSessionStreamEventSchema = z.object({
   event: z.literal('session'),
@@ -107,6 +111,7 @@ export type AgentAsyncOperation = z.infer<typeof AgentAsyncOperationSchema>
 export type AgentSessionStreamEvent = z.infer<typeof AgentSessionStreamEventSchema>
 export type AgentDoneStreamEvent = z.infer<typeof AgentDoneStreamEventSchema>
 export type AgentStreamEvent = z.infer<typeof AgentStreamEventSchema>
+export type AgentRequestStatus = z.infer<typeof AgentRequestStatusSchema>
 export type {
   AgentChatRequest,
   AgentTransportErrorEvent,
@@ -207,6 +212,12 @@ export const agentApi = {
   getOperation: async (operationPublicId: string): Promise<AgentAsyncOperation> => {
     return AgentAsyncOperationSchema.parse(
       await request.get<unknown>(`/v1/agent/operations/${operationPublicId}`)
+    )
+  },
+
+  getRequest: async (sessionId: number, clientRequestId: string): Promise<AgentRequestStatus> => {
+    return AgentRequestStatusSchema.parse(
+      await request.get<unknown>(`/v1/agent/sessions/${sessionId}/requests/${encodeURIComponent(clientRequestId)}`)
     )
   },
 

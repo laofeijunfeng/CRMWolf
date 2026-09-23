@@ -1,6 +1,7 @@
 """CRM AI Agent API."""
 import json
 import logging
+from uuid import UUID
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, status
@@ -329,6 +330,46 @@ def _observability(diagnostics: object) -> dict[str, object] | None:
     return payload if isinstance(payload, dict) else None
 
 
+# Only the dispatch summary and approved diagnostic projections may cross this API boundary.
+_RUN_LOG_DIAGNOSTIC_KEYS = ("dispatch_type", "decision", "durable_work", "turn_observability")
+_RUN_LOG_SENSITIVE_KEYS = (
+    "apikey", "authorization", "auth", "password", "passwd", "passphrase",
+    "secret", "token", "credential", "cookie", "privatekey", "accesskey",
+    "signature", "headers", "payload", "runtimeevents", "uijson",
+)
+
+
+def _is_sensitive_run_log_key(key: str) -> bool:
+    normalized = "".join(character for character in key.casefold() if character.isalnum())
+    return any(sensitive in normalized for sensitive in _RUN_LOG_SENSITIVE_KEYS)
+
+
+def _redact_run_log_diagnostic(value: object) -> object:
+    if isinstance(value, dict):
+        return {
+            key: (
+                "[REDACTED]"
+                if _is_sensitive_run_log_key(key)
+                else _redact_run_log_diagnostic(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_run_log_diagnostic(item) for item in value]
+    return value
+
+
+def _run_log_diagnostics(assistant_message: object) -> dict[str, object]:
+    diagnostics = getattr(assistant_message, "diagnostics_json", None)
+    if not isinstance(diagnostics, dict):
+        return {}
+    return {
+        key: _redact_run_log_diagnostic(diagnostics[key])
+        for key in _RUN_LOG_DIAGNOSTIC_KEYS
+        if key in diagnostics
+    }
+
+
 def _run_log_user_name(db: Session, user_id: int) -> str | None:
     try:
         user = user_crud.get_by_id(db, user_id)
@@ -431,8 +472,25 @@ async def get_agent_run_log_turn(
     item = _run_log_list_item(db, user_message, assistant_message)
     observability = _run_log_observability(item.user_text, assistant_message)
     steps = observability.get("steps") or []
+    log = json.dumps(
+        {
+            "turn_id": str(user_message.turn_id),
+            "session_id": int(user_message.session_id),
+            "messages": [
+                {"role": "user", "content": user_message.content},
+                {
+                    "role": "assistant",
+                    "content": assistant_message.content,
+                    "diagnostics": _run_log_diagnostics(assistant_message),
+                },
+            ],
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
     return AgentRunLogTurnDetail(
         **item.model_dump(),
+        log=log,
         steps=[AgentRunLogStep.model_validate(step) for step in steps],
     )
 
@@ -835,6 +893,9 @@ async def stream_agent_chat(
     current_user: User = Depends(get_current_active_user),
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ):
+    payload = getattr(current_user, "_token_payload", {}) or {}
+    if payload.get("purpose") == "agent_worker":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的执行凭证")
     user_id = current_user.id
     async def generate_sse():
         async for event in agent_application_service.stream_chat_events(
@@ -857,6 +918,25 @@ async def stream_agent_chat(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get("/sessions/{session_id}/requests/{client_request_id}")
+async def get_agent_request_status(
+    session_id: int,
+    client_request_id: UUID,
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(get_current_active_user),
+):
+    status_result = agent_application_service.request_status(
+        team_id=team_id,
+        user_id=current_user.id,
+        session_id=session_id,
+        client_request_id=client_request_id,
+    )
+    return {
+        "status": status_result.status,
+        "message": status_result.message.model_dump(mode="json") if status_result.message is not None else None,
+    }
 
 
 def _action_status_counts(actions: list[object]) -> dict[str, int]:
