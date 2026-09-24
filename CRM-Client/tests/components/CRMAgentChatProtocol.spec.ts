@@ -285,6 +285,38 @@ describe('CRMAgentChat Agent UI protocol', () => {
     expect(localStorage.getItem('crm_agent_pending_requests')).not.toContain('550e8400-e29b-41d4-a716-446655440000')
     second.unmount()
   })
+  it('keeps chat available after a text request ends and offers retry on that message', async () => {
+    api.chatStream.mockRejectedValueOnce(new Error('connection interrupted'))
+    api.getRequest.mockResolvedValueOnce({ status: 'FAILED', message: envelope(81, 'AI 暂时没有回应，请稍后再试。') })
+    const wrapper = mountChat()
+    await flushPromises()
+    await startRequest(wrapper, '记录今天的跟进')
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('请勿重复提交')
+    expect(wrapper.get('textarea').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('button[aria-label="重试这一条"]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+  it('rechecks the original text request without sending it again', async () => {
+    api.chatStream.mockRejectedValueOnce(new Error('connection interrupted'))
+    api.getRequest.mockResolvedValueOnce({ status: 'FAILED', message: envelope(82, 'AI 暂时没有回应，请稍后再试。') })
+      .mockResolvedValueOnce({ status: 'COMPLETED', message: envelope(83, '已重新确认结果') })
+    const wrapper = mountChat()
+    await flushPromises()
+    await startRequest(wrapper, '记录今天的跟进')
+    await flushPromises()
+    await wrapper.get('button[aria-label="重试这一条"]').trigger('click')
+    await flushPromises()
+    expect(api.getRequest).toHaveBeenLastCalledWith(3, '550e8400-e29b-41d4-a716-446655440000')
+    expect(api.chatStream).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('已重新确认结果')
+    expect(wrapper.find('button[aria-label="重试这一条"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+
+
+
 
   it('keeps ambiguous compact tasks separate and locks only each pending action', async () => {
     api.listMessages.mockResolvedValue({ ...emptyPage(), items: [compactTaskEnvelope()], total: 1, total_pages: 1 })

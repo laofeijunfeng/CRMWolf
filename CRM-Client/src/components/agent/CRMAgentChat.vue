@@ -67,6 +67,17 @@
               @interaction="submitInteraction"
               @open-entity="openEntity"
             />
+            <Button
+              v-if="retryRequestForMessage(message.message_id) !== undefined"
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label="重试这一条"
+              :disabled="isStreaming"
+              @click="retryRequest(message.message_id)"
+            >
+              <RotateCw aria-hidden="true" />
+            </Button>
           </div>
           <Avatar v-if="message.role === 'user'" class="h-8 w-8 shrink-0 bg-primary text-primary-foreground">
             <AvatarFallback class="flex h-full w-full items-center justify-center font-semibold text-current">
@@ -121,7 +132,8 @@
         </div>
       </Message>
       <div v-for="(label, index) in requestStatusLabels" :key="index" role="status" class="agent-chat__request-status px-10 text-sm text-warning">{{ label }}</div>
-      <div v-if="pendingRequests.length > 0" role="status" class="agent-chat__pending-status px-10 text-sm text-muted-foreground">{{ pendingRequests.length }} 项操作状态确认中，请勿重复提交。</div>
+      <div v-for="request in unresolvedTextRequests" :key="request.requestId" role="status" class="agent-chat__request-status px-10 text-sm text-muted-foreground">这一条结果确认中。</div>
+      <div v-if="confirmationPending" role="status" class="agent-chat__pending-status px-10 text-sm text-muted-foreground">{{ pendingRequests.filter(request => request.kind !== 'text').length }} 项操作状态确认中，请勿重复提交。</div>
 
       <section
         v-if="transportError !== null"
@@ -153,7 +165,7 @@
           v-model="input"
           class="min-h-[72px] overflow-y-hidden pb-3.5 pr-14"
           placeholder="输入客户跟进、查询或操作指令..."
-          :disabled="isStreaming || pendingRequests.some(request => request.kind !== 'compact')"
+          :disabled="isStreaming"
           :auto-resize="true"
           :min-rows="2"
           :max-rows="6"
@@ -190,7 +202,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, ref } from 'vue'
-import { AlertTriangle, ArrowUp, Loader2, Sparkles } from 'lucide-vue-next'
+import { AlertTriangle, ArrowUp, Loader2, RotateCw, Sparkles } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 
 import {
@@ -245,18 +257,20 @@ interface PendingAgentRequest {
   actionId: string | null
   kind: 'text' | 'interaction' | 'compact' | 'entity'
   hold?: boolean
+  messageId?: number | null
 }
 
 const isPendingAgentRequest = (value: unknown): value is PendingAgentRequest => {
   if (typeof value !== 'object' || value === null) return false
   const item = value as Record<string, unknown>
-  const userId = item.userId
-  const teamId = item.teamId
-  const sessionIdValue = item.sessionId
-  const requestId = item.requestId
-  const actionId = item.actionId
-  const kind = item.kind
-  const hold = item.hold
+  const userId = item['userId']
+  const teamId = item['teamId']
+  const sessionIdValue = item['sessionId']
+  const requestId = item['requestId']
+  const actionId = item['actionId']
+  const kind = item['kind']
+  const hold = item['hold']
+  const messageId = item['messageId']
   return typeof userId === 'number' && Number.isInteger(userId) && userId > 0
     && typeof teamId === 'number' && Number.isInteger(teamId) && teamId > 0
     && (sessionIdValue === null || typeof sessionIdValue === 'number' && Number.isInteger(sessionIdValue) && sessionIdValue > 0)
@@ -264,7 +278,9 @@ const isPendingAgentRequest = (value: unknown): value is PendingAgentRequest => 
     && (actionId === null || typeof actionId === 'string')
     && (kind === 'text' || kind === 'interaction' || kind === 'compact' || kind === 'entity')
     && (hold === undefined || typeof hold === 'boolean')
+    && (messageId === undefined || messageId === null || typeof messageId === 'number' && Number.isInteger(messageId) && messageId > 0)
 }
+
 
 const readPendingRequests = (): PendingAgentRequest[] => {
   try {
@@ -429,7 +445,12 @@ const groupedAsyncOperations = computed(() => (
 ))
 const operationsByMessageId = computed(() => groupedAsyncOperations.value.byMessageId)
 const unanchoredAsyncOperations = computed(() => groupedAsyncOperations.value.unanchored)
-const canSend = computed(() => input.value.trim().length > 0 && !isStreaming.value && !pendingRequests.value.some(request => request.kind !== 'compact'))
+const canSend = computed(() => input.value.trim().length > 0 && !isStreaming.value)
+const confirmationPending = computed(() => pendingRequests.value.some(request => request.kind !== 'text' && request.kind !== 'entity'))
+const retryRequestForMessage = (messageId: number): PendingAgentRequest | undefined => pendingRequests.value.find(request => (
+  request.kind === 'text' && request.hold === true && request.messageId === messageId
+))
+const unresolvedTextRequests = computed(() => pendingRequests.value.filter(request => request.kind === 'text' && request.messageId == null))
 const streamingMessage = computed(() => {
   if (streamingBlocks.value.length === 0) return null
   return {
@@ -556,6 +577,7 @@ const settleRequest = async (request: PendingAgentRequest, status: AgentRequestS
   ))[0]
   const history = await reloadAuthoritativeSessionState().catch(() => undefined)
   if (status.message !== null && request.kind !== 'compact') upsertFinalMessage(status.message)
+  if (request.kind === 'text' && status.message !== null) request.messageId = status.message.message_id
   if (status.status === 'COMPLETED' && request.kind === 'compact' && request.actionId !== null) {
     messages.value = optimisticallyCompleteCompactTask(messages.value, request.actionId)
   }
@@ -589,10 +611,12 @@ const settleRequest = async (request: PendingAgentRequest, status: AgentRequestS
     await nextTick()
     unlockInteraction(request.actionId)
   }
-  if (status.status === 'NEEDS_RECONCILIATION' || status.status === 'PARTIALLY_COMMITTED') {
+  const terminalTextFailure = request.kind === 'text' && status.status === 'FAILED' && status.message !== null
+  if (status.status === 'NEEDS_RECONCILIATION' || status.status === 'PARTIALLY_COMMITTED' || terminalTextFailure) {
     request.hold = true
     const stored = readPendingRequests().filter(item => item.requestId !== request.requestId)
     savePendingRequests([...stored, request])
+    pendingRequests.value = pendingRequests.value.map(item => item.requestId === request.requestId ? { ...request } : item)
   } else {
     forgetRequest(request, releaseAction)
   }
@@ -816,6 +840,18 @@ const sendMessage = async (): Promise<void> => {
   if (text.length === 0 || !canSend.value) return
   input.value = ''
   await submitInput({ type: 'text', text }, { pendingText: text, label: '正在理解并处理...' })
+}
+const retryRequest = async (messageId: number): Promise<void> => {
+  const pending = retryRequestForMessage(messageId)
+  if (pending === undefined || isStreaming.value) return
+  pending.hold = false
+  pendingRequests.value = pendingRequests.value.map(item => item.requestId === pending.requestId ? { ...pending } : item)
+  isStreaming.value = true
+  try {
+    await pollRequestStatus(pending)
+  } finally {
+    isStreaming.value = false
+  }
 }
 
 const unlockInteraction = (actionId: string): void => {

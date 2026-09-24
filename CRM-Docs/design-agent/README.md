@@ -1,6 +1,6 @@
 # CRMWolf Agent 设计规范
 
-> **当前实现基线（2026-08-28）：**本目录中的架构原则和领域规则继续有效，但涉及 Root 运行时、checkpoint 身份和 Workflow 组合的具体实现，以 `CRM-Docs/requirements/2026-08-21-crm-agent-query-architecture-trd.md` 与 `CRM-Docs/deployment/agent-architecture-migration.md` 为准。当前生产组装入口是 `app.services.agent.orchestrator.runtime.get_root_orchestrator()`；Root 使用 `orchestrator/graph.py`，Query 使用无状态 LangChain `create_agent`，Workflow 使用原生 LangGraph subgraph。旧文档中关于 `root_runtime.py` 作为应用唯一入口、旧五段 thread 或 fallback 执行路径的描述均为历史记录，不得作为新代码实现依据。
+> **当前实现基线（2026-09-24）：**架构现状见 [当前架构](foundations/current-architecture.md)。本目录的原则和领域规则继续有效；`root_runtime.py`、旧五段 thread、pending/confirmed 独立 runtime 和 application fallback 都是历史描述，不得作为新代码依据。生产入口是 `app.services.agent.orchestrator.runtime.get_root_orchestrator()`。
 
 这是 CRM AI Agent 的目标状态规范库根入口。Agent 面向“围绕客户跟进记录的智能客户关系管理系统”，当前重点是销售跟进记录、客户识别、商机创建/推进、客户资料补充、IM 协作入口，以及通过现有 CRM API 执行业务动作。
 
