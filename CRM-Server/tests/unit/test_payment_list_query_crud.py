@@ -13,6 +13,7 @@ from sqlalchemy.schema import CreateTable
 from sqlalchemy.types import BigInteger
 
 from app.core.list_query import run_or_400
+from app.core.list_query.errors import ListQueryError
 from app.crud.invoice import invoice_application_crud
 from app.crud.payment import payment_plan_crud, payment_record_crud
 from app.models.approval import Approval
@@ -130,7 +131,7 @@ def _seed_payment_graph(db_session):
                 unit_price=Decimal("100"),
                 license_type="SUBSCRIPTION",
                 subscription_years=1,
-                purchase_type="NEW",
+                purchase_type="RENEWAL",
                 expected_closing_date=date(2026, 9, 2),
                 owner_id="2",
                 creator_id="2",
@@ -163,7 +164,7 @@ def _seed_payment_graph(db_session):
                 opportunity_id=2,
                 user_count=30,
                 total_amount=Decimal("3000"),
-                license_type="SUBSCRIPTION",
+                license_type="PERPETUAL",
                 subscription_years=1,
                 standard_unit_price=Decimal("100"),
                 owner_id="2",
@@ -647,3 +648,57 @@ def test_unified_payment_record_query_does_not_mix_legacy_amount_filter(db_sessi
 
     assert total == 2
     assert {record.record_number for record in records} == {"PR-001", "PR-002"}
+
+
+def test_payment_record_contract_license_type_filters_and_sorts_before_pagination(db_session):
+    _seed_payment_graph(db_session)
+
+    try:
+        filtered, filtered_total = payment_record_crud.list_records(
+            db_session,
+            team_id=1,
+            filters=[{"field": "license_type", "op": "eq", "value": "PERPETUAL"}],
+            sorts=[],
+        )
+        first_page, sorted_total = payment_record_crud.list_records(
+            db_session,
+            team_id=1,
+            skip=0,
+            limit=1,
+            filters=[],
+            sorts=[{"field": "license_type", "direction": "asc"}],
+        )
+    except ListQueryError as error:
+        pytest.fail(str(error))
+
+    assert filtered_total == 1
+    assert [record.record_number for record in filtered] == ["PR-002"]
+    assert sorted_total == 2
+    assert [record.record_number for record in first_page] == ["PR-002"]
+
+
+def test_payment_record_purchase_type_filters_and_sorts_before_pagination(db_session):
+    _seed_payment_graph(db_session)
+
+    try:
+        filtered, filtered_total = payment_record_crud.list_records(
+            db_session,
+            team_id=1,
+            filters=[{"field": "purchase_type", "op": "eq", "value": "NEW"}],
+            sorts=[],
+        )
+        first_page, sorted_total = payment_record_crud.list_records(
+            db_session,
+            team_id=1,
+            skip=0,
+            limit=1,
+            filters=[],
+            sorts=[{"field": "purchase_type", "direction": "desc"}],
+        )
+    except ListQueryError as error:
+        pytest.fail(str(error))
+
+    assert filtered_total == 1
+    assert [record.record_number for record in filtered] == ["PR-001"]
+    assert sorted_total == 2
+    assert [record.record_number for record in first_page] == ["PR-002"]

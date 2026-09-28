@@ -12,6 +12,7 @@ from app.core.list_query.catalogs.common import (
 from app.core.list_query.types import SortCondition
 from app.models.contract import Contract
 from app.models.customer import Customer
+from app.models.opportunity import Opportunity
 from app.models.payment import PaymentConfirmationStatus, PaymentPlan, PaymentRecord
 
 PAYMENT_RECORDS_LIST_QUERY_CATALOG = ListQueryCatalog(
@@ -40,6 +41,8 @@ PAYMENT_RECORDS_LIST_QUERY_CATALOG = ListQueryCatalog(
             expression=payment_invoice_title_expression(),
         ),
         ListQueryField(key="contract_name", type="text", expression=Contract.contract_name),
+        ListQueryField(key="license_type", type="enum", expression=Contract.license_type),
+        ListQueryField(key="purchase_type", type="enum", expression=Opportunity.purchase_type),
         ListQueryField(key="actual_amount", type="number", expression=PaymentRecord.actual_amount),
         ListQueryField(
             key="owner_name",

@@ -27,6 +27,14 @@ def test_build_list_query_manifest_exposes_each_catalog_field_type():
     assert manifest["payment_plans"]["planned_amount"]["type"] == "number"
     assert manifest["approvals"]["overdue_hours"]["sortable"] is True
     assert manifest["payment_records"]["approval_status"]["sortable"] is True
+    expected_payment_enum = {
+        "type": "enum",
+        "filterable": True,
+        "sortable": True,
+        "ops": ["contains", "eq", "in", "is_empty", "is_not_empty", "neq", "not_contains", "not_in"],
+    }
+    assert manifest["payment_records"].get("license_type") == expected_payment_enum
+    assert manifest["payment_records"].get("purchase_type") == expected_payment_enum
     assert manifest["business_journeys"]["stage"] == {
         "type": "enum",
         "filterable": True,
