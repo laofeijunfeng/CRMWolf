@@ -164,6 +164,33 @@ def current_user_rec(db_session):
 @pytest.fixture
 def seed_contract_plan(db_session):
     """一条 Contract + PaymentPlan，team_id=1。"""
+    db_session.add(Customer(
+        id=1,
+        public_id="cus_00000000000000000000000000000001",
+        team_id=1,
+        account_name="测试客户",
+        city="上海",
+        owner_id="1",
+        creator_id="1",
+    ))
+    db_session.add(Opportunity(
+        id=1,
+        public_id="opp_00000000000000000000000000000001",
+        team_id=1,
+        opportunity_number="OPP-2026-001",
+        opportunity_name="测试商机",
+        customer_id=1,
+        total_amount=100000,
+        user_count=10,
+        unit_price=10000,
+        license_type="PERPETUAL",
+        purchase_type="EXPANSION",
+        expected_closing_date=__import__("datetime").date(2026, 8, 31),
+        owner_id="1",
+        creator_id="1",
+    ))
+    db_session.flush()
+
     contract = Contract(
         team_id=1,
         contract_number="C-2026-001",
@@ -173,7 +200,7 @@ def seed_contract_plan(db_session):
         signing_contact_id=None,
         user_count=10,
         total_amount=100000,
-        license_type="SUBSCRIPTION",
+        license_type="PERPETUAL",
         standard_unit_price=10000,
         status=ContractStatus.SIGNED,
         owner_id="1",
@@ -316,6 +343,8 @@ def test_update_payment_record_creator_can_edit_after_withdraw(
     body = r.json()
     assert body["actual_amount"] == 30000
     assert body["actual_payer_name"] == "北京智云悟飞科技有限公司"
+    assert body.get("license_type") == "PERPETUAL"
+    assert body.get("purchase_type") == "EXPANSION"
 
     db_session.expire_all()
     rec = db_session.query(PaymentRecord).filter(

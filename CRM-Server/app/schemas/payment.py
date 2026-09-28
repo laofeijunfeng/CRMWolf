@@ -170,6 +170,8 @@ class PaymentRecordResponse(PaymentRecordBase):
     customer_name: Optional[str] = Field(None, description="客户名称")
     opportunity_id: Optional[int] = Field(None, description="商机ID")
     opportunity_name: Optional[str] = Field(None, description="商机名称")
+    license_type: Optional[str] = Field(None, description="关联合同授权模式：SUBSCRIPTION/PERPETUAL")
+    purchase_type: Optional[str] = Field(None, description="关联合同商机采购类型：NEW/RENEWAL/EXPANSION")
     invoice_title_text: Optional[str] = Field(None, description="关联发票开票抬头")
     owner_id: Optional[str] = Field(None, description="负责人用户ID")
     owner_name: Optional[str] = Field(None, description="负责人姓名")

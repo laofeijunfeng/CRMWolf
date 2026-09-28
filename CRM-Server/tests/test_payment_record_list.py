@@ -182,17 +182,45 @@ def user_role_finance(db_session, current_user_rec, role_finance):
 
 @pytest.fixture
 def seed_contract_plan(db_session):
-    """Contract + PaymentPlan（不创建 Customer 表，仅使用 customer_id 字段）"""
+    """Contract + PaymentPlan with related customer and opportunity."""
+    customer = Customer(
+        id=1,
+        public_id="cus_00000000000000000000000000000001",
+        team_id=1,
+        account_name="测试客户",
+        city="上海",
+        owner_id="1",
+        creator_id="1",
+    )
+    opportunity = Opportunity(
+        id=1,
+        public_id="opp_00000000000000000000000000000001",
+        team_id=1,
+        opportunity_number="OPP-2026-001",
+        opportunity_name="测试商机",
+        customer_id=1,
+        total_amount=100000,
+        user_count=10,
+        unit_price=10000,
+        license_type="PERPETUAL",
+        purchase_type="RENEWAL",
+        expected_closing_date=date(2026, 8, 31),
+        owner_id="1",
+        creator_id="1",
+    )
+    db_session.add_all([customer, opportunity])
+    db_session.flush()
+
     contract = Contract(
         team_id=1,
         contract_number="C-2026-001",
         contract_name="测试合同",
-        customer_id=1,  # Dummy ID - Customer table not created
+        customer_id=1,
         opportunity_id=1,
         signing_contact_id=1,
         user_count=10,
         total_amount=100000,
-        license_type="SUBSCRIPTION",
+        license_type="PERPETUAL",
         standard_unit_price=10000,
         status=ContractStatus.SIGNED,
         owner_id="1",
@@ -360,6 +388,19 @@ def test_payment_record_list_all(client, patched_deps):
     assert "pending_approval_me_count" in data
 
 
+def test_payment_record_list_projects_contract_license_and_purchase_type(
+    client, seed_payment_records, patched_deps
+):
+    patched_deps(["payment:view:all"])
+
+    response = client.get("/v1/payments/payment-records")
+
+    assert response.status_code == 200, response.text
+    items = response.json()["items"]
+    assert items
+    assert {item.get("license_type") for item in items} == {"PERPETUAL"}
+    assert {item.get("purchase_type") for item in items} == {"RENEWAL"}
+
 def test_payment_record_list_includes_record_number(
     client, patched_deps, monkeypatch
 ):
@@ -398,6 +439,10 @@ def test_payment_record_list_includes_record_number(
     # The public list contract requires the compatibility timestamp even for
     # legacy ORM objects that only expose created_time.
     assert item["last_modified_time"] == record.created_time.isoformat()
+    assert "license_type" in item
+    assert item["license_type"] is None
+    assert "purchase_type" in item
+    assert item["purchase_type"] is None
 
 
 def test_payment_record_list_uses_updated_time_for_last_modified_time(
