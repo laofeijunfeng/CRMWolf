@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import type { VNode } from 'vue'
 import { projectListFieldCatalog, type ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 
 enableAutoUnmount(afterEach)
@@ -16,7 +17,7 @@ const headerStore = vi.hoisted(() => ({
   setActions: vi.fn(),
 }))
 
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
+vi.mock('vue-router', (): Record<string, unknown> => ({ useRouter: (): Record<string, unknown> => ({ push: vi.fn() }) }))
 vi.mock('@/api/payment', () => ({
   default: {
     listPaymentRecords: mocks.listPaymentRecords,
@@ -26,41 +27,41 @@ vi.mock('@/api/payment', () => ({
   },
 }))
 vi.mock('@/stores/permissions', () => ({
-  usePermissionStore: () => ({ hasPermission: () => true, hasAnyPermission: () => true }),
+  usePermissionStore: (): Record<string, unknown> => ({ hasPermission: (): boolean => true, hasAnyPermission: (): boolean => true }),
 }))
 vi.mock('@/stores/approval', () => ({
-  useApprovalStore: () => ({ submitEntity: vi.fn() }),
+  useApprovalStore: (): Record<string, unknown> => ({ submitEntity: vi.fn() }),
 }))
-vi.mock('@/stores/header', () => ({ useHeaderStore: () => headerStore }))
-vi.mock('@/stores/user', () => ({ useUserStore: () => ({ userInfo: { id: 1 } }) }))
-vi.mock('@/composables/usePageTitle', () => ({ usePageTitle: () => undefined }))
-vi.mock('@/composables/useTopBarRegistration', () => ({ useTopBarRegistration: () => undefined }))
+vi.mock('@/stores/header', () => ({ useHeaderStore: (): typeof headerStore => headerStore }))
+vi.mock('@/stores/user', () => ({ useUserStore: (): Record<string, unknown> => ({ userInfo: { id: 1 } }) }))
+vi.mock('@/composables/usePageTitle', () => ({ usePageTitle: (): void => undefined }))
+vi.mock('@/composables/useTopBarRegistration', () => ({ useTopBarRegistration: (): void => undefined }))
 vi.mock('@/composables/useDataTableExport', () => ({
-  useDataTableExport: () => ({ exportFields: vi.fn() }),
+  useDataTableExport: (): Record<string, unknown> => ({ exportFields: vi.fn() }),
 }))
-vi.mock('@/composables/useCustomFilterViews', async () => {
+vi.mock('@/composables/useCustomFilterViews', async (): Promise<Record<string, unknown>> => {
   const { ref } = await import('vue')
   return {
-    isCustomFilterViewTab: () => false,
-    useCustomFilterViews: () => ({
+    isCustomFilterViewTab: (): boolean => false,
+    useCustomFilterViews: (): Record<string, unknown> => ({
       saving: ref(false),
       applying: ref(false),
       applyError: ref(null),
-      mergeTabs: (tabs: unknown[]) => tabs,
+      mergeTabs: (tabs: unknown[]): unknown[] => tabs,
       loadCustomViews: mocks.loadCustomViews,
       updateActiveCustomViewConfig: vi.fn().mockResolvedValue(undefined),
       saveAsCustomView: vi.fn().mockResolvedValue(undefined),
       saveActiveCustomViewColumns: vi.fn().mockResolvedValue(undefined),
-      consumeFailedViewApply: () => false,
-      applyCustomViewTab: () => false,
-      applyBuiltInTab: () => false,
+      consumeFailedViewApply: (): boolean => false,
+      applyCustomViewTab: (): boolean => false,
+      applyBuiltInTab: (): boolean => false,
       retryViewApply: vi.fn().mockResolvedValue(undefined),
     }),
   }
 })
 
 // Render the real page slots against API rows without mounting the full DataTable controls.
-vi.mock('@/components/crmwolf', async () => {
+vi.mock('@/components/crmwolf', async (): Promise<Record<string, unknown>> => {
   const { defineComponent, h } = await import('vue')
   const DataTable = defineComponent({
     name: 'DataTable',
@@ -68,9 +69,9 @@ vi.mock('@/components/crmwolf', async () => {
       fields: { type: Array, default: () => [] },
       data: { type: Array, default: () => [] },
     },
-    setup(props, { slots }) {
+    setup(props, { slots }): () => VNode {
       return () => h('div', { 'data-testid': 'payment-records-table' },
-        (props.data as Array<Record<string, unknown>>).map((row) => h('section', { key: String(row['id']) }, [
+        (props.data as Record<string, unknown>[]).map((row) => h('section', { key: String(row['id']) }, [
           h('div', { 'data-testid': `desktop-license-${row['id']}` },
             slots['cell-license_type']?.({ row, value: row['license_type'] })),
           h('div', { 'data-testid': `desktop-purchase-${row['id']}` },
@@ -84,25 +85,25 @@ vi.mock('@/components/crmwolf', async () => {
   const AmountText = defineComponent({
     name: 'AmountText',
     props: { value: { type: [Number, String], default: null } },
-    setup: (props) => () => h('span', String(props.value ?? '')),
+    setup: (props): (() => VNode) => () => h('span', String(props.value ?? '')),
   })
-  const TableRowActions = defineComponent({ name: 'TableRowActions', setup: () => () => h('div') })
+  const TableRowActions = defineComponent({ name: 'TableRowActions', setup: (): (() => VNode) => () => h('div') })
   return { DataTable, AmountText, TableRowActions }
 })
-vi.mock('@/views/PaymentRecordDetailSheet.vue', async () => {
+vi.mock('@/views/PaymentRecordDetailSheet.vue', async (): Promise<Record<string, unknown>> => {
   const { defineComponent, h } = await import('vue')
-  return { default: defineComponent({ name: 'PaymentRecordDetailSheet', setup: () => () => h('div') }) }
+  return { default: defineComponent({ name: 'PaymentRecordDetailSheet', setup: (): (() => VNode) => () => h('div') }) }
 })
-vi.mock('@/components/dialogs/EditRecordDialog.vue', async () => {
+vi.mock('@/components/dialogs/EditRecordDialog.vue', async (): Promise<Record<string, unknown>> => {
   const { defineComponent, h } = await import('vue')
-  return { default: defineComponent({ name: 'EditRecordDialog', setup: () => () => h('div') }) }
+  return { default: defineComponent({ name: 'EditRecordDialog', setup: (): (() => VNode) => () => h('div') }) }
 })
 vi.mock('vue-sonner', () => ({ toast: { info: vi.fn(), success: vi.fn() } }))
 vi.mock('@/utils/errorHandler', () => ({ handleApiError: vi.fn() }))
 
 import PaymentRecords from '@/views/PaymentRecords.vue'
 
-const record = (overrides: Record<string, unknown>) => ({
+const record = (overrides: Record<string, unknown>): Record<string, unknown> => ({
   id: 1,
   payment_plan_id: 10,
   record_number: 'PAY-001',
