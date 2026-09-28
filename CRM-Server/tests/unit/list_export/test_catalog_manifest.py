@@ -33,6 +33,8 @@ def test_manifest_contains_user_facing_contract() -> None:
     manifest = build_list_export_manifest(LIST_EXPORT_CATALOGS)
     assert manifest["customers"]["public_id"] == {"label": "业务 ID", "type": "text"}
     assert manifest["payment_records"]["actual_amount"] == {"label": "回款金额", "type": "currency"}
+    assert manifest["payment_records"].get("license_type") == {"label": "授权模式", "type": "text"}
+    assert manifest["payment_records"].get("purchase_type") == {"label": "采购类型", "type": "text"}
 
 
 def test_committed_export_manifest_matches_backend(tmp_path: Path) -> None:

@@ -226,6 +226,15 @@ PAYMENT_RECORD_STATUS_LABELS = {
     "CONFIRMED": "已确认",
     "DISPUTED": "有争议",
 }
+LICENSE_TYPE_LABELS = {
+    "SUBSCRIPTION": "订阅",
+    "PERPETUAL": "买断",
+}
+PURCHASE_TYPE_LABELS = {
+    "NEW": "新购",
+    "RENEWAL": "续购",
+    "EXPANSION": "增购",
+}
 PAYMENT_RECORD_TAB_APPROVAL_STATUS = {
     "pending_submit": "pending_submit",
     "pending_approval": "pending_approval",
@@ -565,12 +574,16 @@ def _payment_record_export_row(item: dict) -> dict[str, object]:
     if isinstance(payment_date, str):
         payment_date = date.fromisoformat(payment_date)
     confirmation_status = _enum_value(item.get("confirmation_status"))
+    license_type = _enum_value(item.get("license_type"))
+    purchase_type = _enum_value(item.get("purchase_type"))
     return {
         "record_number": _blank_business_number(item.get("record_number")),
         "customer_name": item.get("customer_name"),
         "actual_payer_name": item.get("actual_payer_name"),
         "invoice_title_text": item.get("invoice_title_text"),
         "contract_name": item.get("contract_name"),
+        "license_type": LICENSE_TYPE_LABELS.get(license_type, license_type),
+        "purchase_type": PURCHASE_TYPE_LABELS.get(purchase_type, purchase_type),
         "actual_amount": item.get("actual_amount"),
         "owner_name": item.get("owner_name"),
         "commission_member_name": item.get("commission_member_name"),

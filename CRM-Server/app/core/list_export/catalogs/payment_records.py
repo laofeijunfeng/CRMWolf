@@ -9,6 +9,8 @@ PAYMENT_RECORDS_LIST_EXPORT_CATALOG = ListExportCatalog(
         ListExportField("actual_payer_name", "实际付款方", "text"),
         ListExportField("invoice_title_text", "发票抬头", "text"),
         ListExportField("contract_name", "合同名称", "text"),
+        ListExportField("license_type", "授权模式", "text"),
+        ListExportField("purchase_type", "采购类型", "text"),
         ListExportField("actual_amount", "回款金额", "currency"),
         ListExportField("owner_name", "负责人", "text"),
         ListExportField("commission_member_name", "团队成员", "text"),

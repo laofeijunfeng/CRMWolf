@@ -117,6 +117,7 @@ def _seed_opportunity(
     opportunity_id: int = 1,
     customer_id: int = 1,
     owner_id: str = "1",
+    purchase_type: str = "NEW",
 ) -> None:
     if db_session.query(Opportunity).filter_by(id=opportunity_id).first() is None:
         db_session.add(Opportunity(
@@ -130,7 +131,7 @@ def _seed_opportunity(
             user_count=10,
             unit_price=Decimal("100"),
             license_type="SUBSCRIPTION",
-            purchase_type="NEW",
+            purchase_type=purchase_type,
             expected_closing_date=date(2026, 12, 31),
             owner_id=owner_id,
             creator_id=owner_id,
@@ -146,6 +147,7 @@ def _seed_contract(
     owner_id: str = "1",
     creator_id: str = "1",
     contract_name: str = "合同A",
+    license_type: str = "SUBSCRIPTION",
 ) -> None:
     if db_session.query(Contract).filter_by(id=contract_id).first() is None:
         db_session.add(Contract(
@@ -157,7 +159,7 @@ def _seed_contract(
             opportunity_id=opportunity_id,
             user_count=10,
             total_amount=Decimal("1000"),
-            license_type="SUBSCRIPTION",
+            license_type=license_type,
             standard_unit_price=Decimal("100"),
             owner_id=owner_id,
             creator_id=creator_id,
@@ -470,3 +472,116 @@ def test_payment_export_unknown_filter_returns_400(client, monkeypatch):
     assert "未知筛选字段" in plan_response.text
     assert record_response.status_code == 400, record_response.text
     assert "未知筛选字段" in record_response.text
+
+
+def test_payment_record_export_maps_contract_fields_and_blanks_missing_opportunity(
+    client,
+    db_session,
+    monkeypatch,
+):
+    _grant(monkeypatch, "payment:record:export", "payment:view:all")
+    _seed_user(db_session, user_id=1, name="销售张")
+    _seed_customer(db_session, customer_id=1, account_name="客户A")
+    _seed_customer(db_session, customer_id=2, account_name="客户B")
+    _seed_opportunity(
+        db_session,
+        opportunity_id=1,
+        customer_id=1,
+        owner_id="1",
+        purchase_type="RENEWAL",
+    )
+    _seed_contract(
+        db_session,
+        contract_id=1,
+        customer_id=1,
+        opportunity_id=1,
+        license_type="PERPETUAL",
+    )
+    _seed_contract(
+        db_session,
+        contract_id=2,
+        customer_id=2,
+        opportunity_id=999,
+        contract_name="无商机合同",
+        license_type="SUBSCRIPTION",
+    )
+    _seed_plan(db_session, id=1, contract_id=1, plan_number="PP-LABELED")
+    _seed_plan(db_session, id=2, contract_id=2, plan_number="PP-MISSING")
+    _seed_record(
+        db_session,
+        id=1,
+        record_number="PR-LABELED",
+        payment_plan_id=1,
+        payment_date=date(2026, 8, 11),
+    )
+    _seed_record(
+        db_session,
+        id=2,
+        record_number="PR-MISSING",
+        payment_plan_id=2,
+        payment_date=date(2026, 8, 10),
+    )
+    db_session.commit()
+
+    response = client.post("/v1/payments/payment-records/export", json={
+        "fields": ["record_number", "license_type", "purchase_type"],
+        "tab": "all",
+        "filters": [],
+        "sorts": [],
+    })
+
+    assert response.status_code == 200, response.text
+    rows = _workbook_rows(response)
+    assert rows == [
+        ("回款编号", "授权模式", "采购类型"),
+        ("PR-LABELED", "买断", "续购"),
+        ("PR-MISSING", "订阅"),
+    ]
+    assert load_workbook(io.BytesIO(response.content)).active["C3"].value is None
+
+
+def test_payment_record_export_preserves_unknown_contract_values_and_maps_other_purchase_types(
+    client,
+    db_session,
+    monkeypatch,
+):
+    _grant(monkeypatch, "payment:record:export", "payment:view:all")
+    _seed_user(db_session)
+    for value_id, license_type, purchase_type in (
+        (1, "SUBSCRIPTION", "NEW"),
+        (2, "PERPETUAL", "EXPANSION"),
+        (3, "CUSTOM_LICENSE", "CUSTOM_PURCHASE"),
+    ):
+        _seed_customer(db_session, customer_id=value_id)
+        _seed_opportunity(
+            db_session,
+            opportunity_id=value_id,
+            customer_id=value_id,
+            purchase_type=purchase_type,
+        )
+        _seed_contract(
+            db_session,
+            contract_id=value_id,
+            customer_id=value_id,
+            opportunity_id=value_id,
+            license_type=license_type,
+        )
+        _seed_plan(db_session, id=value_id, contract_id=value_id, plan_number=f"PP-{value_id}")
+        _seed_record(db_session, id=value_id, record_number=f"PR-{value_id}", payment_plan_id=value_id)
+    db_session.commit()
+
+    response = client.post("/v1/payments/payment-records/export", json={
+        "fields": ["record_number", "license_type", "purchase_type"],
+        "tab": "all",
+        "filters": [],
+        "sorts": [],
+    })
+
+    assert response.status_code == 200, response.text
+    rows = _workbook_rows(response)
+    assert rows[0] == ("回款编号", "授权模式", "采购类型")
+    assert {row[0]: row[1:] for row in rows[1:]} == {
+        "PR-1": ("订阅", "新购"),
+        "PR-2": ("买断", "增购"),
+        "PR-3": ("CUSTOM_LICENSE", "CUSTOM_PURCHASE"),
+    }

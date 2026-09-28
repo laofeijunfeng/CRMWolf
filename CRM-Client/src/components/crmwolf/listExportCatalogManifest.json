@@ -376,6 +376,14 @@
       "label": "合同名称",
       "type": "text"
     },
+    "license_type": {
+      "label": "授权模式",
+      "type": "text"
+    },
+    "purchase_type": {
+      "label": "采购类型",
+      "type": "text"
+    },
     "actual_amount": {
       "label": "回款金额",
       "type": "currency"
