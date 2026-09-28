@@ -105,6 +105,15 @@ const approvalStatusOptions = [
   { value: 'rejected', label: '已驳回' },
   { value: 'approved', label: '已确认' }
 ]
+const licenseTypeOptions = [
+  { value: 'SUBSCRIPTION', label: '订阅' },
+  { value: 'PERPETUAL', label: '买断' },
+]
+const purchaseTypeOptions = [
+  { value: 'NEW', label: '新购' },
+  { value: 'RENEWAL', label: '续购' },
+  { value: 'EXPANSION', label: '增购' },
+]
 
 const fields: ListFieldDefinition[] = [
   { key: 'record_number', label: '回款编号', type: 'text', column: { width: '180px' }, filter: true, sort: true },
@@ -112,6 +121,24 @@ const fields: ListFieldDefinition[] = [
   { key: 'actual_payer_name', label: '实际付款方', type: 'text', column: { width: '180px' }, filter: true, sort: true },
   { key: 'invoice_title_text', label: '发票抬头', type: 'text', column: { width: '200px' }, filter: true, sort: true },
   { key: 'contract_name', label: '合同名称', type: 'text', column: { width: '220px' }, filter: true, sort: true },
+  {
+    key: 'license_type',
+    label: '授权模式',
+    type: 'enum',
+    options: licenseTypeOptions,
+    column: { align: 'center', width: '110px' },
+    filter: true,
+    sort: true,
+  },
+  {
+    key: 'purchase_type',
+    label: '采购类型',
+    type: 'enum',
+    options: purchaseTypeOptions,
+    column: { align: 'center', width: '110px' },
+    filter: true,
+    sort: true,
+  },
   {
     key: 'actual_amount',
     label: '回款金额',
@@ -649,6 +676,20 @@ watchEffect(() => {
         <div class="payment-record-mobile-card-contract">
           {{ row.contract_name || '-' }}
         </div>
+        <div v-if="row.license_type || row.purchase_type" class="payment-record-mobile-card-badges">
+          <StatusBadge
+            v-if="row.license_type"
+            :status="row.license_type"
+            type="authorizationMode"
+            size="small"
+          />
+          <StatusBadge
+            v-if="row.purchase_type"
+            :status="row.purchase_type"
+            type="procurementType"
+            size="small"
+          />
+        </div>
         <AmountText class="payment-record-mobile-card-amount" :value="row.actual_amount" size="lg" />
         <div class="payment-record-mobile-card-meta">
           <span>付款方：{{ row.actual_payer_name || '-' }}</span>
@@ -684,6 +725,24 @@ watchEffect(() => {
 
       <template #cell-invoice_title_text="{ row }">
         <span>{{ row.invoice_title_text || '-' }}</span>
+      </template>
+
+      <template #cell-license_type="{ row }">
+        <StatusBadge
+          v-if="row.license_type"
+          :status="row.license_type"
+          type="authorizationMode"
+        />
+        <span v-else class="text-muted-foreground">-</span>
+      </template>
+
+      <template #cell-purchase_type="{ row }">
+        <StatusBadge
+          v-if="row.purchase_type"
+          :status="row.purchase_type"
+          type="procurementType"
+        />
+        <span v-else class="text-muted-foreground">-</span>
       </template>
 
       <template #cell-owner_name="{ row }">
@@ -821,6 +880,13 @@ watchEffect(() => {
   font-size: $wolf-font-size-body-v2;
   color: $wolf-text-secondary-v2;
   overflow-wrap: anywhere;
+}
+
+.payment-record-mobile-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $wolf-space-xs-v2;
+  margin-top: $wolf-space-sm-v2;
 }
 
 .payment-record-mobile-card-amount {

@@ -1,4 +1,5 @@
 import request from '@/utils/request'
+import type { LicenseType, PurchaseType } from '@/api/contract'
 import type { CommandRequestOptions } from '@/api/command'
 import type { RequestConfig } from '@/utils/request'
 import { postListExport, type ListExportPayload } from '@/api/listExport'
@@ -151,6 +152,8 @@ export interface PaymentRecordResponse {
   creator_name?: string
   approval_phase?: 'draft' | 'pending_review' | 'approved' | 'rejected'
   confirmation_status?: PaymentConfirmationStatus | null
+  license_type?: LicenseType | null
+  purchase_type?: PurchaseType | null
   invoice_title_text?: string | null
   owner_id?: string | null
   owner_name?: string | null
