@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
+import type { PermissionResponse } from '@/schemas/role'
 import {
   DEPRECATED_PERMISSION_CODES,
   getPermissionActionName,
   getPermissionResourceName,
   isAssignablePermission,
   isDeprecatedPermission,
+  groupAssignablePermissions,
   mergePermissionIdsPreservingDeprecated,
 } from '@/constants/permissions'
 
@@ -18,6 +20,26 @@ const permission = (overrides: Partial<{
   is_active: true,
   ...overrides,
 })
+const permissionResponse = (
+  id: number,
+  code: string,
+  resource: string,
+  name: string,
+  action: string,
+  isActive = true,
+): PermissionResponse => ({
+  id,
+  code,
+  name,
+  resource,
+  action,
+  scope: null,
+  description: null,
+  is_active: isActive,
+  created_at: '2026-09-28T00:00:00Z',
+  updated_at: '2026-09-28T00:00:00Z',
+})
+
 
 describe('permission catalog', () => {
   it('localizes resource and action labels used by the role permission dialog', () => {
@@ -52,6 +74,25 @@ describe('permission catalog', () => {
     ].map((item, index) => ({ ...item, id: index + 10 }))
 
     expect(mergePermissionIdsPreservingDeprecated([11], currentPermissions)).toEqual([11, 10])
+  })
+
+  it('groups assignable payment permissions in API order without changing their resources', () => {
+    const entries = [
+      permissionResponse(1, 'payment:approve', 'payment', '审批回款', 'approve'),
+      permissionResponse(2, 'payment:plan:export', 'payment_plan', '导出回款计划', 'export'),
+      permissionResponse(3, 'payment:record:export', 'payment_record', '导出回款记录', 'export'),
+      permissionResponse(4, 'customer:view:all', 'customer', '查看所有客户', 'view'),
+      permissionResponse(5, 'payment:api:list', 'api', '旧回款 API', 'view'),
+      permissionResponse(6, 'payment:record:inactive', 'payment_record', '停用回款权限', 'view', false),
+    ]
+    const groups = groupAssignablePermissions(entries)
+
+    expect(groups.map(group => group.resource)).toEqual(['payment', 'customer'])
+    expect(groups[0]?.permissions).toEqual(entries.slice(0, 3))
+    expect(groups[0]?.permissions.map(item => item.resource)).toEqual([
+      'payment', 'payment_plan', 'payment_record',
+    ])
+    expect(groups[0]?.permissions[2]).toBe(entries[2])
   })
 
 })

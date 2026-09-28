@@ -51,7 +51,7 @@ import SettingsContent from '@/views/settings/SettingsContent.vue'
 import {
   getPermissionActionName,
   getPermissionResourceName,
-  isAssignablePermission,
+  groupAssignablePermissions,
   mergePermissionIdsPreservingDeprecated,
 } from '@/constants/permissions'
 
@@ -136,20 +136,7 @@ const fields: ListFieldDefinition[] = defineListFields([
   settingsListColumn({ key: 'updated_at', label: '更新时间', column: true }),
 ])
 
-const permissionGroups = computed(() => {
-  const groups: Record<string, PermissionResponse[]> = {}
-  allPermissions.value.filter(isAssignablePermission).forEach(permission => {
-    const resource = permission.resource
-    if (!groups[resource]) {
-      groups[resource] = []
-    }
-    groups[resource].push(permission)
-  })
-  return Object.entries(groups).map(([resource, permissions]) => ({
-    resource,
-    permissions
-  }))
-})
+const permissionGroups = computed(() => groupAssignablePermissions(allPermissions.value))
 
 const loadRoles = async (): Promise<void> => {
   if (!hasAccess.value) return

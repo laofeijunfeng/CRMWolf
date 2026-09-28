@@ -36,6 +36,40 @@ export const isDeprecatedPermission = (permission: Pick<PermissionResponse, 'cod
 export const isAssignablePermission = (permission: Pick<PermissionResponse, 'code' | 'resource' | 'is_active'>): boolean => (
   !isDeprecatedPermission(permission)
 )
+export interface PermissionGroup {
+  resource: string
+  permissions: PermissionResponse[]
+}
+
+const PERMISSION_GROUP_RESOURCE_ALIASES: Readonly<Record<string, string>> = {
+  payment_plan: 'payment',
+  payment_record: 'payment',
+}
+
+export const getPermissionGroupResource = (resource: string): string => (
+  PERMISSION_GROUP_RESOURCE_ALIASES[resource] ?? resource
+)
+
+export const groupAssignablePermissions = (
+  permissions: readonly PermissionResponse[],
+): PermissionGroup[] => {
+  const groups = new Map<string, PermissionResponse[]>()
+  for (const permission of permissions) {
+    if (!isAssignablePermission(permission)) continue
+    const resource = getPermissionGroupResource(permission.resource)
+    const group = groups.get(resource)
+    if (group === undefined) {
+      groups.set(resource, [permission])
+    } else {
+      group.push(permission)
+    }
+  }
+  return Array.from(groups, ([resource, groupedPermissions]) => ({
+    resource,
+    permissions: groupedPermissions,
+  }))
+}
+
 
 export const mergePermissionIdsPreservingDeprecated = (
   selectedPermissionIds: readonly number[],

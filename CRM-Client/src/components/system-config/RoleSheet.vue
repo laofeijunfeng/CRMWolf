@@ -62,7 +62,7 @@ import { useSettingsAccess } from '@/composables/useSettingsAccess'
 import {
   getPermissionActionName,
   getPermissionResourceName,
-  isAssignablePermission,
+  groupAssignablePermissions,
   mergePermissionIdsPreservingDeprecated,
 } from '@/constants/permissions'
 
@@ -156,20 +156,7 @@ const canManageRoles = computed(() => isOwner.value || permissionStore.hasPermis
 const canManageRolePermissions = computed(() => isOwner.value || permissionStore.hasAnyPermission(['permission:manage', 'role:manage']))
 
 // 权限分组（按资源分组）
-const permissionGroups = computed(() => {
-  const groups: Record<string, PermissionResponse[]> = {}
-  allPermissions.value.filter(isAssignablePermission).forEach(permission => {
-    const resource = permission.resource
-    if (!groups[resource]) {
-      groups[resource] = []
-    }
-    groups[resource].push(permission)
-  })
-  return Object.entries(groups).map(([resource, permissions]) => ({
-    resource,
-    permissions
-  }))
-})
+const permissionGroups = computed(() => groupAssignablePermissions(allPermissions.value))
 
 // ==================== API Methods ====================
 const fetchRoles = async (): Promise<void> => {
