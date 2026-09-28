@@ -1,10 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h } from 'vue'
 import type { Ref, VNode } from 'vue'
 import type { PermissionResponse } from '@/schemas/role'
-import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
-
-enableAutoUnmount(afterEach)
+import { flushPromises, mount } from '@vue/test-utils'
 
 const mocks = vi.hoisted(() => ({
   getRoles: vi.fn(),
@@ -84,12 +82,12 @@ const permissionResponse = (id: number, code: string, resource: string, name: st
 const DialogStub = defineComponent({
   props: { open: Boolean },
   setup(props, { slots }): () => VNode | null {
-    return () => props.open ? h('div', { role: 'dialog' }, slots.default?.()) : null
+    return () => props.open ? h('div', { role: 'dialog' }, slots['default']?.()) : null
   },
 })
 
 const SlotStub = defineComponent({
-  setup: (_, { slots }): (() => VNode) => () => h('div', slots.default?.()),
+  setup: (_, { slots }): (() => VNode) => () => h('div', slots['default']?.()),
 })
 
 describe('RoleSheet permission grouping', () => {
@@ -136,5 +134,6 @@ describe('RoleSheet permission grouping', () => {
     expect(groupHeadings).not.toContain('回款记录')
     expect(wrapper.text()).toContain('导出回款记录')
     expect(wrapper.text()).toContain('payment:record:export')
+    wrapper.unmount()
   })
 })

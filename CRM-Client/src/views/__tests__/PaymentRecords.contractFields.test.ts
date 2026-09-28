@@ -1,9 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
 import type { VNode } from 'vue'
 import { projectListFieldCatalog, type ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
-
-enableAutoUnmount(afterEach)
 
 const mocks = vi.hoisted(() => ({
   listPaymentRecords: vi.fn(),
@@ -161,6 +159,7 @@ describe('PaymentRecords contract fields', () => {
       expect(projected.sortFields.find(field => field.key === key)).toMatchObject({ type: 'enum' })
       expect(projected.exportFields.find(field => field.key === key)).toMatchObject({ source: 'column' })
     }
+    wrapper.unmount()
   })
 
   it('renders localized desktop and mobile badges while omitting null mobile values', async () => {
@@ -181,5 +180,6 @@ describe('PaymentRecords contract fields', () => {
     const emptyMobile = wrapper.get('[data-testid="mobile-2"]')
     expect(emptyMobile.findAll('[role="status"]')).toHaveLength(1)
     expect(emptyMobile.text()).not.toContain('未知')
+    wrapper.unmount()
   })
 })
