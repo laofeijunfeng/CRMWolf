@@ -49,6 +49,7 @@ def _opportunity_relation() -> SimpleNamespace:
         public_id="opp_301",
         opportunity_name="企业版采购",
         owner_id="9",
+        purchase_type="NEW",
     )
 
 

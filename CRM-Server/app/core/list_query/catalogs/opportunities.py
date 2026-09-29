@@ -47,6 +47,12 @@ OPPORTUNITIES_LIST_QUERY_CATALOG = ListQueryCatalog(
         ListQueryField(key="status", type="enum", expression=Opportunity.status),
         ListQueryField(key="approval_phase", type="enum", expression=Opportunity.approval_phase),
         ListQueryField(key="created_time", type="date", expression=Opportunity.created_time),
+        ListQueryField(
+            key="last_modified_time",
+            type="date",
+            expression=Opportunity.last_modified_time,
+            date_kind="datetime",
+        ),
     ],
     default_sorts=[SortCondition(field="created_time", direction="desc")],
     search_predicate=text_search_predicate(

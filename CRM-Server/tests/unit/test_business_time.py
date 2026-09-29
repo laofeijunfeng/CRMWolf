@@ -29,6 +29,9 @@ class FakeDB:
     def add(self, obj):
         self.added = obj
 
+    def flush(self):
+        return None
+
     def commit(self):
         self.commits += 1
 

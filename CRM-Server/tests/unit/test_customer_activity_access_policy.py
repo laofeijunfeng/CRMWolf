@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 from sqlalchemy.types import BigInteger
 
 from app.core.database import Base
-from app.models.customer import Customer, CustomerMember
+from app.models.customer import Customer, CustomerMember, CustomerProduct
 from app.services.customer_activity_access_policy import (
     CustomerActivityAccessDeniedError,
     CustomerActivityAccessPolicy,
@@ -31,7 +31,7 @@ def _db_session():
     )
     Base.metadata.create_all(
         engine,
-        tables=[Customer.__table__, CustomerMember.__table__],
+        tables=[Customer.__table__, CustomerMember.__table__, CustomerProduct.__table__],
     )
     return engine, sessionmaker(bind=engine)()
 

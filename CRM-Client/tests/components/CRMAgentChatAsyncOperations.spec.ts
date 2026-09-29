@@ -1,133 +1,91 @@
-import { flushPromises, mount } from '@vue/test-utils'
-import { createPinia, setActivePinia } from 'pinia'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-
+import { flushPromises, mount } from "@vue/test-utils"
+import { createPinia, setActivePinia } from "pinia"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import type {
   AgentAsyncOperation,
   AgentChatRequest,
+  AgentChatSSEEvent,
+  AgentMessageResponse,
   AgentSessionResponse,
-  AgentStreamEvent,
-  AgentUIEnvelope,
-} from '@/api/agent'
-import CRMAgentChat from '@/components/agent/CRMAgentChat.vue'
-import { AgentUIEnvelopeSchema } from '@/schemas/agent-contracts'
-import { useUserStore } from '@/stores/user'
-import type { PaginatedResponse } from '@/types/pagination'
+} from "@/api/agent"
+import type { PaginatedResponse } from "@/types/pagination"
 
 const api = vi.hoisted(() => ({
   listSessions: vi.fn<() => Promise<PaginatedResponse<AgentSessionResponse>>>(),
-  listMessages: vi.fn<(sessionId: number, params?: { page?: number, page_size?: number }) => Promise<PaginatedResponse<AgentUIEnvelope>>>(),
-  listSessionOperationHistory: vi.fn<(sessionId: number, params?: { page?: number, page_size?: number }) => Promise<PaginatedResponse<AgentAsyncOperation>>>(),
-  listMessageAnchors: vi.fn<(sessionId: number, messageIds: number[]) => Promise<AgentUIEnvelope[]>>(),
+  listMessages: vi.fn<(sessionId: number, params?: { page?: number, page_size?: number }) => Promise<PaginatedResponse<AgentMessageResponse>>>(),
+  listSessionOperations: vi.fn<(sessionId: number, params?: { limit?: number }) => Promise<AgentAsyncOperation[]>>(),
   getOperation: vi.fn<(operationPublicId: string) => Promise<AgentAsyncOperation>>(),
   chatStream: vi.fn<(
     data: AgentChatRequest,
-    onEvent: (event: AgentStreamEvent) => void,
+    onEvent: (event: AgentChatSSEEvent) => void,
     token: string
   ) => Promise<void>>(),
 }))
 
-vi.mock('@/api/agent', async importOriginal => ({
-  ...await importOriginal<typeof import('@/api/agent')>(),
+vi.mock("@/api/agent", async importOriginal => ({
+  ...await importOriginal<typeof import("@/api/agent")>(),
   agentApi: api,
 }))
 
-const envelope = (messageId: number, role: 'user' | 'assistant', text: string): AgentUIEnvelope => (
-  AgentUIEnvelopeSchema.parse({
-    schema_version: 'crm.agent.ui.v1',
-    message_id: messageId,
-    turn_id: `turn_${Math.ceil(messageId / 2)}`,
-    role,
-    state: 'final',
-    blocks: [{ id: `text_${messageId}`, type: 'text', format: 'plain', text }],
-    suggested_actions: [],
-    metadata: {},
-  })
-)
-
-const messages = [
-  envelope(10, 'user', '第一条跟进'),
-  envelope(11, 'assistant', '第一条已记录'),
-  envelope(12, 'user', '第二条消息'),
-  envelope(13, 'assistant', '第二条已处理'),
-]
-
-const paginatedMessages = (items: AgentUIEnvelope[]): PaginatedResponse<AgentUIEnvelope> => ({
-  items,
-  total: items.length,
-  page: 1,
-  page_size: 100,
-  total_pages: items.length === 0 ? 0 : 1,
-})
-
-const paginatedOperations = (items: AgentAsyncOperation[]): PaginatedResponse<AgentAsyncOperation> => ({
-  items,
-  total: items.length,
-  page: 1,
-  page_size: 100,
-  total_pages: items.length === 0 ? 0 : 1,
-})
+import CRMAgentChat from "@/components/agent/CRMAgentChat.vue"
+import { useUserStore } from "@/stores/user"
 
 const operation: AgentAsyncOperation = {
-  public_id: 'aop_first_turn',
-  request_id: 'request-first-turn',
+  public_id: "aop_first_turn",
+  request_id: "request-first-turn",
   team_id: 1,
   user_id: 2,
   session_id: 3,
   source_user_message_id: 10,
   source_assistant_message_id: null,
-  operation_type: 'customer_intelligence_refresh',
-  resource_type: 'customer',
+  operation_type: "customer_intelligence_refresh",
+  resource_type: "customer",
   resource_id: 18,
-  resource_public_id: 'cus_18',
-  status: 'SUCCEEDED',
-  summary: '客户档案已更新',
+  resource_public_id: "cus_18",
+  status: "SUCCEEDED",
+  summary: "客户档案已更新",
   current_step: null,
-  graph_thread_id: 'thread-1',
+  graph_thread_id: "thread-1",
   result: {},
   error_message: null,
-  started_time: '2026-08-12T12:00:00',
-  finished_time: '2026-08-12T12:00:05',
+  started_time: "2026-08-12T12:00:00",
+  finished_time: "2026-08-12T12:00:05",
   next_retry_at: null,
   attempt_count: 1,
-  created_time: '2026-08-12T12:00:00',
-  updated_time: '2026-08-12T12:00:05',
+  created_time: "2026-08-12T12:00:00",
+  updated_time: "2026-08-12T12:00:05",
   events: [],
 }
 
-const mountChat = () => mount(CRMAgentChat, {
-  global: {
-    stubs: {
-      MessageScroller: {
-        props: { itemsCount: { type: Number, required: true } },
-        template: '<div data-testid="message-scroller" :data-items-count="itemsCount"><slot /></div>',
-      },
-    },
-  },
+const messages: AgentMessageResponse[] = [
+  { id: 10, role: "user", content: "第一条跟进", created_time: "2026-08-12T12:00:00" },
+  { id: 11, role: "assistant", content: "第一条已记录", created_time: "2026-08-12T12:00:01" },
+  { id: 12, role: "user", content: "第二条消息", created_time: "2026-08-12T12:01:00" },
+  { id: 13, role: "assistant", content: "第二条已处理", created_time: "2026-08-12T12:01:01" },
+]
+
+const paginatedMessages = (items: AgentMessageResponse[]): PaginatedResponse<AgentMessageResponse> => ({
+  items,
+  total: items.length,
+  page: 1,
+  page_size: 100,
+  total_pages: 1,
 })
 
-const scrollerItemsCount = (wrapper: ReturnType<typeof mount>): number => Number(
-  wrapper.get('[data-testid="message-scroller"]').attributes('data-items-count'),
-)
-
-describe('CRMAgentChat background operation placement', () => {
+describe("CRMAgentChat background operation placement", () => {
   beforeEach(() => {
     localStorage.clear()
     setActivePinia(createPinia())
-    useUserStore().setToken('test-token')
-    vi.spyOn(crypto, 'randomUUID').mockReturnValue('550e8400-e29b-41d4-a716-446655440000')
+    useUserStore().setToken("test-token")
     api.listSessions.mockReset().mockResolvedValue({
       items: [{
         id: 3,
-        session_key: 'session-3',
-        team_id: 1,
-        user_id: 2,
-        title: '测试会话',
-        status: 'active',
+        session_key: "session-3",
+        title: "测试会话",
+        status: "active",
         summary: null,
-        context_json: null,
-        created_time: '2026-08-12T12:00:00',
-        last_modified_time: '2026-08-12T12:01:01',
+        created_time: "2026-08-12T12:00:00",
+        last_modified_time: "2026-08-12T12:01:01",
       }],
       total: 1,
       page: 1,
@@ -135,241 +93,83 @@ describe('CRMAgentChat background operation placement', () => {
       total_pages: 1,
     })
     api.listMessages.mockReset().mockResolvedValue(paginatedMessages(messages))
-    api.listSessionOperationHistory.mockReset().mockResolvedValue(paginatedOperations([operation]))
-    api.listMessageAnchors.mockReset().mockResolvedValue([])
+    api.listSessionOperations.mockReset().mockResolvedValue([operation])
     api.getOperation.mockReset()
-    api.chatStream.mockReset().mockResolvedValue()
+    api.chatStream.mockReset()
   })
 
-  afterEach(() => {
-    vi.useRealTimers()
-    vi.restoreAllMocks()
-  })
-
-  it('loads missing source anchors once and places historical operations under their assistant turn', async () => {
-    const sourceUser = envelope(8, 'user', '很早以前的跟进')
-    const sourceAssistant = envelope(9, 'assistant', '很早以前已记录')
-    api.listMessages.mockResolvedValue(paginatedMessages(messages))
-    api.listSessionOperationHistory.mockResolvedValue(paginatedOperations([{
-      ...operation,
-      source_user_message_id: 8,
-      source_assistant_message_id: 9,
-    }]))
-    api.listMessageAnchors.mockResolvedValue([sourceUser, sourceAssistant])
-
-    const wrapper = mountChat()
-    await flushPromises()
-
-    expect(api.listMessageAnchors).toHaveBeenCalledTimes(1)
-    expect(api.listMessageAnchors).toHaveBeenCalledWith(3, [8, 9])
-    const text = wrapper.text()
-    expect(text.indexOf('很早以前已记录')).toBeGreaterThanOrEqual(0)
-    expect(text.indexOf('后台任务')).toBeGreaterThan(text.indexOf('很早以前已记录'))
-    expect(text.indexOf('后台任务')).toBeLessThan(text.indexOf('第一条跟进'))
-    expect(wrapper.findAll('.agent-chat__operations')).toHaveLength(1)
-    expect(text).toContain('第一条跟进')
-    wrapper.unmount()
-  })
-
-  it('does not change the MessageScroller item count when merging historical anchors', async () => {
-    const sourceUser = envelope(8, 'user', '很早以前的跟进')
-    const sourceAssistant = envelope(9, 'assistant', '很早以前已记录')
-    let resolveAnchors: ((anchors: AgentUIEnvelope[]) => void) | undefined
-    const anchorPromise = new Promise<AgentUIEnvelope[]>(resolve => {
-      resolveAnchors = resolve
-    })
-    api.listSessionOperationHistory.mockResolvedValue(paginatedOperations([{
-      ...operation,
-      source_user_message_id: 8,
-      source_assistant_message_id: 9,
-    }]))
-    api.listMessageAnchors.mockReturnValue(anchorPromise)
-
-    const wrapper = mountChat()
-    await flushPromises()
-    const beforeAnchorMerge = scrollerItemsCount(wrapper)
-    resolveAnchors?.([sourceUser, sourceAssistant])
-    await flushPromises()
-
-    expect(scrollerItemsCount(wrapper)).toBe(beforeAnchorMerge)
-    wrapper.unmount()
-  })
-
-  it('does not count an anchor already added by a stream as inserted history', async () => {
-    const sourceUser = envelope(8, 'user', '很早以前的跟进')
-    const sourceAssistant = envelope(9, 'assistant', '很早以前已记录')
-    let resolveAnchors: ((anchors: AgentUIEnvelope[]) => void) | undefined
-    const anchorPromise = new Promise<AgentUIEnvelope[]>(resolve => {
-      resolveAnchors = resolve
-    })
-    let resolveStream: (() => void) | undefined
-    const streamPromise = new Promise<void>(resolve => {
-      resolveStream = resolve
-    })
-    api.listSessionOperationHistory.mockResolvedValue(paginatedOperations([{
-      ...operation,
-      source_user_message_id: 8,
-      source_assistant_message_id: 9,
-    }]))
-    api.listMessageAnchors.mockReturnValue(anchorPromise)
-    api.chatStream.mockImplementation(async (_request, onEvent) => {
-      onEvent({
-        event: 'agent_ui',
-        phase: 'final',
-        message_id: 9,
-        turn_id: sourceAssistant.turn_id,
-        sequence: 1,
-        message: sourceAssistant,
-      })
-      await streamPromise
-    })
-
-    const wrapper = mountChat()
-    await flushPromises()
-    await wrapper.get('textarea').setValue('本轮跟进')
-    await wrapper.get('form').trigger('submit')
-    await flushPromises()
-    const beforeAnchorResponse = scrollerItemsCount(wrapper)
-
-    resolveAnchors?.([sourceUser, sourceAssistant])
-    await flushPromises()
-
-    expect(scrollerItemsCount(wrapper)).toBe(beforeAnchorResponse)
-    resolveStream?.()
-    wrapper.unmount()
-  })
-
-  it('renders a completed background operation after the assistant response from its source turn', async () => {
-    const wrapper = mountChat()
-    await flushPromises()
-
-    const text = wrapper.text()
-    expect(text.indexOf('后台任务')).toBeGreaterThan(text.indexOf('第一条已记录'))
-    expect(text.indexOf('后台任务')).toBeLessThan(text.indexOf('第二条消息'))
-    const operationRegion = wrapper.get('.agent-chat__operations')
-    expect(operationRegion.classes()).toEqual(expect.arrayContaining(['max-w-[760px]', 'flex-1']))
-    expect(operationRegion.element.parentElement?.tagName).toBe('ARTICLE')
-    expect(operationRegion.element.previousElementSibling?.getAttribute('aria-hidden')).toBe('true')
-    wrapper.unmount()
-  })
-
-  it('shows every automatically transitioned historical task as a visible result card', async () => {
-    api.listSessionOperationHistory.mockResolvedValue(paginatedOperations([{
-      ...operation,
-      operation_type: 'customer_activity_post_commit',
-      result: {
-        post_commit: {
-          automatic_task_transitions: [
-            {
-              task_public_id: 'fut_private_package',
-              title: '提供私有环境安装包和试用方案',
-              action: 'COMPLETE',
-              previous_status: 'OPEN',
-              new_status: 'COMPLETED',
-            },
-          ],
+  it("renders a completed background operation after the assistant response from its source turn", async () => {
+    const wrapper = mount(CRMAgentChat, {
+      global: {
+        stubs: {
+          AgentInteractionDrawer: true,
+          MessageScroller: { template: "<div><slot /></div>" },
         },
       },
-    }]))
-
-    const wrapper = mountChat()
-    await flushPromises()
-
-    expect(wrapper.text()).toContain('提供私有环境安装包和试用方案')
-    expect(wrapper.text()).toContain('已自动完成')
-    wrapper.unmount()
-  })
-
-  it('loads the operation after a typed Agent UI stream is persisted', async () => {
-    const finalAssistant = envelope(21, 'assistant', '本轮已记录')
-    const completedHistory = [envelope(20, 'user', '本轮跟进'), finalAssistant]
-    api.listMessages
-      .mockResolvedValueOnce(paginatedMessages([]))
-      .mockResolvedValueOnce(paginatedMessages(completedHistory))
-    api.listSessionOperationHistory
-      .mockResolvedValueOnce(paginatedOperations([]))
-      .mockResolvedValueOnce(paginatedOperations([{ ...operation, source_user_message_id: 20, source_assistant_message_id: 21 }]))
-    api.chatStream.mockImplementation(async (_request, onEvent) => {
-      onEvent({ event: 'session', session_id: 3, session_key: 'session-3' })
-      onEvent({
-        event: 'agent_ui',
-        phase: 'final',
-        message_id: 21,
-        turn_id: finalAssistant.turn_id,
-        sequence: 1,
-        message: finalAssistant,
-      })
-      onEvent({ event: 'done', session_id: 3 })
     })
-
-    const wrapper = mountChat()
-    await flushPromises()
-    await wrapper.get('textarea').setValue('本轮跟进')
-    await wrapper.get('form').trigger('submit')
     await flushPromises()
 
-    expect(api.chatStream).toHaveBeenCalledWith(
-      {
-        session_id: 3,
-        client_request_id: '550e8400-e29b-41d4-a716-446655440000',
-        input: { type: 'text', text: '本轮跟进' },
-      },
-      expect.any(Function),
-      'test-token',
-    )
     const text = wrapper.text()
-    expect(text.indexOf('后台任务')).toBeGreaterThan(text.indexOf('本轮已记录'))
+    const firstAssistantIndex = text.indexOf("第一条已记录")
+    const operationIndex = text.indexOf("客户档案更新")
+    const secondUserIndex = text.indexOf("第二条消息")
+
+    expect(firstAssistantIndex).toBeGreaterThanOrEqual(0)
+    expect(operationIndex).toBeGreaterThan(firstAssistantIndex)
+    expect(operationIndex).toBeLessThan(secondUserIndex)
     wrapper.unmount()
   })
 
-  it('refreshes Agent UI history when a session operation becomes terminal', async () => {
-    vi.useFakeTimers()
-    const runningOperation: AgentAsyncOperation = {
+  it("keeps a newly scheduled operation with its original turn after the user sends another message", async () => {
+    api.listMessages.mockResolvedValue(paginatedMessages([]))
+    api.listSessionOperations.mockResolvedValue([])
+    api.getOperation.mockResolvedValue({
       ...operation,
-      status: 'RUNNING',
+      source_user_message_id: 20,
+      status: "RUNNING",
       finished_time: null,
-    }
-    const completedOperation: AgentAsyncOperation = {
-      ...runningOperation,
-      status: 'SUCCEEDED',
-      finished_time: '2026-08-12T12:00:05',
-      updated_time: '2026-08-12T12:00:05',
-    }
-    api.listSessionOperationHistory.mockResolvedValueOnce(paginatedOperations([runningOperation]))
-    api.getOperation.mockResolvedValueOnce(completedOperation)
+    })
+    api.chatStream
+      .mockImplementationOnce(async (_request, onEvent) => {
+        onEvent({ event: "session", session_id: 3, session_key: "session-3" })
+        onEvent({ event: "message", role: "user", message_id: 20, content: "本轮跟进" })
+        onEvent({
+          event: "agent_root_customer_intelligence_refresh_scheduled",
+          session_id: 3,
+          operation_public_id: "aop_first_turn",
+          request_id: "request-first-turn",
+          source_user_message_id: 20,
+        })
+        onEvent({ event: "message", role: "assistant", message_id: 21, content: "本轮已记录" })
+        onEvent({ event: "done" })
+      })
+      .mockImplementationOnce(async (_request, onEvent) => {
+        onEvent({ event: "session", session_id: 3, session_key: "session-3" })
+        onEvent({ event: "message", role: "user", message_id: 22, content: "下一轮问题" })
+        onEvent({ event: "message", role: "assistant", message_id: 23, content: "下一轮已处理" })
+        onEvent({ event: "done" })
+      })
 
-    const wrapper = mountChat()
-    await flushPromises()
-    await vi.advanceTimersByTimeAsync(2_000)
-    await flushPromises()
-
-    expect(api.listMessages).toHaveBeenCalledTimes(2)
-    wrapper.unmount()
-  })
-
-  it('collapses multiple operations into one list until the user expands it', async () => {
-    api.listSessionOperationHistory.mockResolvedValue(paginatedOperations([
-      operation,
-      {
-        ...operation,
-        public_id: 'aop_post_commit',
-        request_id: 'pcj_first_turn',
-        operation_type: 'customer_activity_post_commit',
-        resource_type: 'customer_activity',
-        summary: '跟进任务已完成对账',
+    const wrapper = mount(CRMAgentChat, {
+      global: {
+        stubs: {
+          AgentInteractionDrawer: true,
+          MessageScroller: { template: "<div><slot /></div>" },
+        },
       },
-    ]))
-
-    const wrapper = mountChat()
+    })
     await flushPromises()
 
-    expect(wrapper.text()).toContain('后台任务')
-    expect(wrapper.text()).not.toContain('客户档案更新')
-    expect(wrapper.text()).not.toContain('跟进任务对账')
+    await wrapper.get("textarea").setValue("本轮跟进")
+    await wrapper.get("form").trigger("submit")
+    await flushPromises()
+    await wrapper.get("textarea").setValue("下一轮问题")
+    await wrapper.get("form").trigger("submit")
+    await flushPromises()
 
-    await wrapper.get('.agent-async-operation-list__trigger').trigger('click')
-    expect(wrapper.text()).toContain('客户档案更新')
-    expect(wrapper.text()).toContain('跟进任务对账')
+    const text = wrapper.text()
+    expect(text.indexOf("客户档案更新")).toBeGreaterThan(text.indexOf("本轮已记录"))
+    expect(text.indexOf("客户档案更新")).toBeLessThan(text.indexOf("下一轮问题"))
     wrapper.unmount()
   })
 })

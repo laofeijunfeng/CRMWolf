@@ -132,6 +132,26 @@ class CustomerActivityPostCommitJobCRUD:
             .first()
         )
 
+    def skip_forbidden_source(
+        self, db: Session, *, team_id: int, public_id: str,
+        result_json: dict[str, object],
+    ) -> CustomerActivityPostCommitJob | None:
+        """Mark an accidentally queued Assistant 2.0 job terminal before claiming."""
+        job = self.get_by_public_id(db, team_id=team_id, public_id=public_id, for_update=True)
+        if job is None or job.status in CustomerActivityPostCommitJobStatus.TERMINAL:
+            return job
+        job.status = CustomerActivityPostCommitJobStatus.SKIPPED
+        job.result_json = result_json
+        job.error_message = None
+        job.next_attempt_at = None
+        job.finished_at = business_now()
+        job.lease_token = None
+        job.lease_expires_at = None
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+        return job
+
     def claim_for_execution(
         self,
         db: Session,

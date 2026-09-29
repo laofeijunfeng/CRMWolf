@@ -2,10 +2,12 @@
 
 # ===== 前端 =====
 CRM-Client/node_modules/
-CRM-Client/dist/
 CRM-Client/coverage/
+CRM-Client/dist/
 CRM-Client/.vite/
 CRM-Client/*.local
+CRM-Client/test-results/
+outputs/
 
 # ===== 后端 =====
 CRM-Server/venv/
@@ -70,6 +72,7 @@ uploads/*
 .sdd/
 .superpowers/
 .gstack/
+.workbuddy/
 
 # ===== Git worktrees =====
 .worktrees/

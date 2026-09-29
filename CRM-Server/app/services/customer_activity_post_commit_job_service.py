@@ -21,7 +21,7 @@ from app.models.customer_activity_post_commit_job import (
 from app.services.customer_activity_post_commit_operation_projector import (
     customer_activity_post_commit_operation_projector,
 )
-from app.services.customer_activity_post_commit_workflow import customer_activity_post_commit_workflow
+from app.services.customer_activity_contracts import CustomerActivitySubmissionSource
 from app.utils.time import business_now
 
 if TYPE_CHECKING:
@@ -54,6 +54,8 @@ class CustomerActivityPostCommitJobService:
         actor_id: str | None = None,
     ) -> CustomerActivityPostCommitJobRequest:
         """Write the revision-scoped durable job in the caller's transaction."""
+        if activity.submission_source == CustomerActivitySubmissionSource.ASSISTANT_2.value:
+            raise ValueError("Assistant 2.0 活动不能排入旧后提交任务")
 
         job = customer_activity_post_commit_job_crud.enqueue(
             db,
@@ -83,6 +85,8 @@ class CustomerActivityPostCommitJobService:
             activity = customer_activity_crud.get_by_id(db, activity_id, team_id)
             if activity is None:
                 raise ValueError("客户活动不存在")
+            if activity.submission_source == CustomerActivitySubmissionSource.ASSISTANT_2.value:
+                raise ValueError("Assistant 2.0 活动不能排入旧后提交任务")
             revision = int(activity_revision or activity.activity_revision or 1)
             job = customer_activity_post_commit_job_crud.enqueue(
                 db,
@@ -114,6 +118,15 @@ class CustomerActivityPostCommitJobService:
             if existing.status in CustomerActivityPostCommitJobStatus.TERMINAL:
                 self._project_bound_operation(db, existing)
                 return dict(existing.result_json or {})
+            activity = customer_activity_crud.get_by_id(db, existing.activity_id, existing.team_id)
+            if activity is not None and activity.submission_source == CustomerActivitySubmissionSource.ASSISTANT_2.value:
+                result = self._skipped_result(existing.activity_id, "ASSISTANT_2_SOURCE")
+                skipped = customer_activity_post_commit_job_crud.skip_forbidden_source(
+                    db, team_id=request.team_id, public_id=request.job_public_id,
+                    result_json=result,
+                )
+                self._project_bound_operation(db, skipped or existing)
+                return result
             max_attempts = max(1, settings.CUSTOMER_ACTIVITY_POST_COMMIT_MAX_ATTEMPTS)
             if int(existing.attempt_count or 0) >= max_attempts:
                 terminal_result = self._retries_exhausted_result(
@@ -157,6 +170,14 @@ class CustomerActivityPostCommitJobService:
                 )
                 self._project_bound_operation(db, updated or job)
                 return result
+            if activity.submission_source == CustomerActivitySubmissionSource.ASSISTANT_2.value:
+                result = self._skipped_result(job.activity_id, "ASSISTANT_2_SOURCE")
+                updated = customer_activity_post_commit_job_crud.mark_completed_if_lease_owner(
+                    db, team_id=job.team_id, public_id=job.public_id,
+                    lease_token=lease_token, result_json=result, skipped=True,
+                )
+                self._project_bound_operation(db, updated or job)
+                return result
             if int(activity.activity_revision or 1) != int(job.activity_revision):
                 result = self._skipped_result(job.activity_id, "SUPERSEDED_ACTIVITY_REVISION")
                 updated = customer_activity_post_commit_job_crud.mark_completed_if_lease_owner(
@@ -182,7 +203,6 @@ class CustomerActivityPostCommitJobService:
             self._project_bound_operation(db, job)
         finally:
             db.close()
-
         try:
             state = await customer_activity_post_commit_workflow.run(
                 activity_id=job_data["activity_id"],
@@ -437,3 +457,18 @@ def _empty_post_commit_outcome() -> dict[str, object]:
 
 
 customer_activity_post_commit_job_service = CustomerActivityPostCommitJobService()
+
+
+def __getattr__(name: str):
+    """Lazily expose the legacy post-commit workflow without importing it eagerly.
+
+    The assistant 2.0 write chain imports this module; the LangGraph workflow
+    must only load when legacy post-commit work actually runs (X1).
+    """
+
+    if name == "customer_activity_post_commit_workflow":
+        from app.services.customer_activity_post_commit_workflow import customer_activity_post_commit_workflow
+
+        globals()[name] = customer_activity_post_commit_workflow
+        return customer_activity_post_commit_workflow
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

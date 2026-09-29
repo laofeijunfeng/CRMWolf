@@ -36,8 +36,23 @@ class _Query:
     def __init__(self, value: object) -> None:
         self.value = value
 
+    def options(self, *args: object, **kwargs: object) -> _Query:
+        return self
+
     def filter(self, *args: object, **kwargs: object) -> _Query:
         return self
+
+    def order_by(self, *args: object, **kwargs: object) -> _Query:
+        return self
+
+    def limit(self, *args: object, **kwargs: object) -> _Query:
+        return self
+
+    def all(self) -> list[object]:
+        return []
+
+    def first(self) -> object:
+        return self.value
 
     def one_or_none(self) -> object:
         return self.value
@@ -117,6 +132,7 @@ def _db(
         team_id=1,
         public_id="cus_33",
         account_name="上海星云科技有限公司",
+        product_links=[],
     )
     return _DB({CustomerOpportunitySuggestionJob: job, CustomerActivity: activity, Customer: customer})
 

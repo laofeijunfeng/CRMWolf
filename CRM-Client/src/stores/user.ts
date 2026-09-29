@@ -5,15 +5,38 @@ import { logger } from '@/utils/logger'
 import { usePermissionStore } from './permissions'
 import { useTeamStore } from './team'
 
-export const useUserStore = defineStore('user', () => {
-  const token = ref<string>(localStorage.getItem('token') ?? '')
-  const userInfo = ref<UserResponse | null>(null)
+const TOKEN_STORAGE_KEY = 'token'
 
+const isTokenExpired = (value: string): boolean => {
+  const payloadPart = value.split('.')[1]
+  if (payloadPart === undefined || payloadPart === '') return true
+  try {
+    const decoded = JSON.parse(atob(payloadPart.replace(/-/g, '+').replace(/_/g, '/'))) as { exp?: unknown }
+    if (typeof decoded.exp !== 'number') return false
+    return decoded.exp * 1000 <= Date.now()
+  } catch {
+    return false
+  }
+}
+
+/** Drops a leftover token that is expired so the router treats the session as logged out. */
+const readStoredToken = (): string => {
+  const stored = localStorage.getItem(TOKEN_STORAGE_KEY) ?? ''
+  if (stored !== '' && isTokenExpired(stored)) {
+    localStorage.removeItem(TOKEN_STORAGE_KEY)
+    return ''
+  }
+  return stored
+}
+export const useUserStore = defineStore('user', () => {
+
+  const token = ref<string>(readStoredToken())
+  const userInfo = ref<UserResponse | null>(null)
   const loading = ref(false)
 
   const setToken = (newToken: string): void => {
     token.value = newToken
-    localStorage.setItem('token', newToken)
+    localStorage.setItem(TOKEN_STORAGE_KEY, newToken)
   }
 
   const setUserInfo = (info: UserResponse): void => {
@@ -66,7 +89,7 @@ export const useUserStore = defineStore('user', () => {
 
     token.value = ''
     userInfo.value = null
-    localStorage.removeItem('token')
+    localStorage.removeItem(TOKEN_STORAGE_KEY)
     permissionStore.clearPermissions()
     teamStore.clearTeam()
   }

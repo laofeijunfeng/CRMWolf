@@ -398,6 +398,7 @@ async def _execute_v2_rule(db: Session, rule: ReminderRule, payload: dict, now: 
             continue
         # Hash all field names and full precision timestamps to bound the indexed window key.
         anchor_key = "|".join(f"{field}:{value}" for field, value in sorted(anchors)) if anchors else "object"
+        window = sha256(anchor_key.encode()).hexdigest()
         ledger = db.query(ReminderRuleRun).filter(
             ReminderRuleRun.rule_id == rule.id,
             ReminderRuleRun.object_id == obj.id,

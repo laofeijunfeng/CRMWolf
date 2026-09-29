@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -47,6 +48,35 @@ def business_now() -> datetime:
 
 def business_today() -> date:
     return business_now().date()
+
+def resolve_follow_up_time(text: str, *, base: datetime) -> datetime | None:
+    """Resolve a user-supplied date in business-local time; never guess vague dates."""
+    value = text.strip()
+    if not value:
+        return None
+    match = re.fullmatch(r"(20\d{2})[-/年](\d{1,2})[-/月](\d{1,2})日?(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?", value)
+    if match:
+        year, month, day = (int(part) for part in match.group(1, 2, 3))
+        hour, minute, second = (
+            int(part) if part is not None else default
+            for part, default in zip(match.group(4, 5, 6), (9, 0, 0), strict=True)
+        )
+        try:
+            return datetime(year, month, day, hour, minute, second)
+        except ValueError:
+            return None
+    weekdays = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}
+    weekday = re.fullmatch(r"(下|本|这)?(?:周|星期|礼拜)([一二三四五六日天])", value)
+    if weekday:
+        day = weekdays[weekday.group(2)]
+        offset = day - base.weekday()
+        if weekday.group(1) == "下" or (weekday.group(1) is None and offset < 0):
+            offset += 7
+        return datetime.combine(base.date() + timedelta(days=offset), time(9))
+    days = {"今天": 0, "今日": 0, "明天": 1, "后天": 2, "大后天": 3}
+    if value in days:
+        return datetime.combine(base.date() + timedelta(days=days[value]), time(9))
+    return None
 
 
 def normalize_business_timezone(timezone_name: str | None = None) -> str:

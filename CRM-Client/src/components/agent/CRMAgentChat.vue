@@ -132,7 +132,10 @@
         </div>
       </Message>
       <div v-for="(label, index) in requestStatusLabels" :key="index" role="status" class="agent-chat__request-status px-10 text-sm text-warning">{{ label }}</div>
-      <div v-for="request in unresolvedTextRequests" :key="request.requestId" role="status" class="agent-chat__request-status px-10 text-sm text-muted-foreground">这一条结果确认中。</div>
+      <div v-for="request in unresolvedTextRequests" :key="request.requestId" role="status" class="agent-chat__request-status flex items-center gap-2 px-10 text-sm text-muted-foreground">
+        <span>结果未确认。</span>
+        <Button type="button" variant="ghost" size="sm" aria-label="重试这一条" :disabled="isStreaming" @click="retryRequestById(request.requestId)">重试</Button>
+      </div>
       <div v-if="confirmationPending" role="status" class="agent-chat__pending-status px-10 text-sm text-muted-foreground">{{ pendingRequests.filter(request => request.kind !== 'text').length }} 项操作状态确认中，请勿重复提交。</div>
 
       <section
@@ -841,17 +844,21 @@ const sendMessage = async (): Promise<void> => {
   input.value = ''
   await submitInput({ type: 'text', text }, { pendingText: text, label: '正在理解并处理...' })
 }
-const retryRequest = async (messageId: number): Promise<void> => {
-  const pending = retryRequestForMessage(messageId)
-  if (pending === undefined || isStreaming.value) return
-  pending.hold = false
-  pendingRequests.value = pendingRequests.value.map(item => item.requestId === pending.requestId ? { ...pending } : item)
+const retryRequestById = async (requestId: string): Promise<void> => {
+  const pending = pendingRequests.value.find(request => request.requestId === requestId && request.kind === 'text')
+  if (pending === undefined || pending.hold === true || isStreaming.value) return
   isStreaming.value = true
   try {
     await pollRequestStatus(pending)
   } finally {
     isStreaming.value = false
   }
+}
+const retryRequest = async (messageId: number): Promise<void> => {
+  const pending = retryRequestForMessage(messageId)
+  if (pending === undefined) return
+  pending.hold = false
+  await retryRequestById(pending.requestId)
 }
 
 const unlockInteraction = (actionId: string): void => {

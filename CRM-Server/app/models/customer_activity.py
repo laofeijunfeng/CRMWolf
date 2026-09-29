@@ -26,10 +26,10 @@ class CustomerActivity(Base):
         String(30),
         nullable=False,
         default=CustomerActivitySubmissionSource.FORM.value,
-        comment="活动提交来源：AGENT/FORM/CUTOVER_MIGRATION",
+        comment="活动提交来源：AGENT/ASSISTANT_2/FORM/CUTOVER_MIGRATION",
     )
-    submission_id = Column(String(120), nullable=True, comment="页面提交幂等ID；Agent 使用 command 幂等")
-    submission_fingerprint = Column(String(64), nullable=True, comment="页面提交请求指纹")
+    submission_id = Column(String(120), nullable=True, comment="提交幂等ID；ASSISTANT_2 必填")
+    submission_fingerprint = Column(String(64), nullable=True, comment="提交请求指纹；ASSISTANT_2 必填")
     processing_status = Column(
         String(20),
         nullable=False,
@@ -63,8 +63,14 @@ class CustomerActivity(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "submission_source IN ('AGENT', 'FORM', 'CUTOVER_MIGRATION')",
+            "submission_source IN ('AGENT', 'ASSISTANT_2', 'FORM', 'CUTOVER_MIGRATION')",
             name="ck_customer_activity_submission_source",
+        ),
+        CheckConstraint(
+            "submission_source != 'ASSISTANT_2' OR "
+            "(submission_id IS NOT NULL AND LENGTH(TRIM(submission_id)) > 0 "
+            "AND submission_fingerprint IS NOT NULL AND LENGTH(TRIM(submission_fingerprint)) = 64)",
+            name="ck_customer_activity_assistant2_submission",
         ),
         CheckConstraint(
             "processing_status IN ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED')",

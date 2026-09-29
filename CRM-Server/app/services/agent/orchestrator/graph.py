@@ -77,12 +77,6 @@ from app.services.agent.semantic_plan import (
     semantic_plan_is_write,
     semantic_plan_supports_workflow_write,
 )
-from app.services.agent.ui.actions import (
-    ActionAlreadyConsumedError,
-    ActionExpiredError,
-    ActionUnavailableError,
-    AgentUIActionRepository,
-)
 from app.services.agent.workflow import (
     WorkflowInterruptPayload,
     WorkflowOpportunitySuggestionStart,
@@ -506,6 +500,13 @@ class RootOrchestrator:
         db = cast("Session", runtime.db)
         if db is None:
             return self._workflow_failure("WORKFLOW_CHECKPOINT_UNAVAILABLE")
+        from app.services.agent.ui.actions import (
+            ActionAlreadyConsumedError,
+            ActionExpiredError,
+            ActionUnavailableError,
+            AgentUIActionRepository,
+        )
+
         try:
             claim = AgentUIActionRepository().begin_text_continuation(
                 db,

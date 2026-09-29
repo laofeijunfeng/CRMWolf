@@ -21,6 +21,7 @@ class MeetingActionItem(BaseModel):
     owner: str = ""
     action: str = ""
     due_date: Optional[str] = None
+    item_id: Optional[str] = Field(None, description="行动项稳定 ID，由服务端生成，模型不可指定")
 
 
 class MeetingContent(BaseModel):
@@ -36,6 +37,7 @@ class MeetingContent(BaseModel):
     decisions_or_commitments: list[str] = Field(default_factory=list)
     action_items: list[MeetingActionItem] = Field(default_factory=list)
     next_step_summary: str = ""
+    next_action_absence_reason: str = ""
 
 
 class FollowUpContent(BaseModel):
@@ -47,6 +49,7 @@ class FollowUpContent(BaseModel):
     current_progress: str = Field("", description="项目、机会或事项当前进展，例如立项评估、采购流程、测试验证等。")
     risks: list[str] = Field(default_factory=list, description="原文提到的风险、阻碍、异议或不确定性。")
     next_action: str = Field("", description="下一步动作，忠于原文，不要编造。")
+    next_action_absence_reason: str = Field("", description="明确暂无下一步行动的用户原话原因，不是行动。")
     next_follow_time_text: str = Field("", description="原文中的下次跟进时间表达。")
 
 

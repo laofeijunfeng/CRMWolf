@@ -1989,6 +1989,10 @@ onBeforeUnmount(() => {
 
 .drilldown-fade-enter-active,
 .drilldown-fade-leave-active {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
   transition: opacity $wolf-motion-state-duration-v2 ease, transform $wolf-motion-state-duration-v2 ease;
 }
 

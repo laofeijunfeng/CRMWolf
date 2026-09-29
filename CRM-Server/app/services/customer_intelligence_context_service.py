@@ -14,6 +14,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import TYPE_CHECKING
 
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.crud.product import product_crud
@@ -22,6 +23,8 @@ from app.models.contract import Contract
 from app.models.customer import Contact, Customer, CustomerProduct
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
+from app.services.customer_activity_contracts import CustomerActivitySubmissionSource
+from app.services.customer_activity_source_isolation import eligible_activity_source
 from app.models.deal_journey import CustomerDealJourney, CustomerDealJourneyEvent
 from app.models.opportunity import Opportunity
 from app.models.payment import PaymentPlan, PaymentRecord
@@ -437,6 +440,7 @@ class CustomerIntelligenceContextService:
             query_text=query_text,
             evidence_limit=evidence_limit,
             source_types=source_types,
+            exclude_assistant2=True,
         )
         return CustomerIntelligenceContext(
             strong_context=strong_context,
@@ -471,7 +475,11 @@ class CustomerIntelligenceContextService:
         )
         activities = (
             db.query(CustomerActivity)
-            .filter(CustomerActivity.customer_id == customer.id, CustomerActivity.team_id == team_id)
+            .filter(
+                CustomerActivity.customer_id == customer.id,
+                CustomerActivity.team_id == team_id,
+                CustomerActivity.submission_source != CustomerActivitySubmissionSource.ASSISTANT_2.value,
+            )
             .order_by(CustomerActivity.occurred_at.desc(), CustomerActivity.id.desc())
             .limit(50)
             .all()
@@ -481,6 +489,7 @@ class CustomerIntelligenceContextService:
             .filter(
                 CustomerActivityDeletionTombstone.customer_id == customer.id,
                 CustomerActivityDeletionTombstone.team_id == team_id,
+                CustomerActivityDeletionTombstone.submission_source != CustomerActivitySubmissionSource.ASSISTANT_2.value,
             )
             .order_by(CustomerActivityDeletionTombstone.id.desc())
             .limit(200)
@@ -504,6 +513,13 @@ class CustomerIntelligenceContextService:
                 CustomerDealJourneyEvent.customer_id == customer.id,
                 CustomerDealJourneyEvent.team_id == team_id,
                 CustomerDealJourneyEvent.deal_journey_id.in_(journey_ids),
+                or_(
+                    CustomerDealJourneyEvent.source_type.notin_(("customer_activity", "customer_follow_up")),
+                    and_(
+                        CustomerDealJourneyEvent.source_id.is_not(None),
+                        eligible_activity_source(team_id, int(customer.id), CustomerDealJourneyEvent.source_id),
+                    ),
+                ),
             )
             .order_by(CustomerDealJourneyEvent.event_time.desc(), CustomerDealJourneyEvent.id.desc())
             .limit(200)
@@ -515,6 +531,12 @@ class CustomerIntelligenceContextService:
             db.query(SalesCommitment)
             .filter(SalesCommitment.customer_id == customer.id, SalesCommitment.team_id == team_id)
             .order_by(SalesCommitment.updated_time.desc(), SalesCommitment.id.desc())
+            .filter(
+                or_(
+                    SalesCommitment.source_activity_id.is_(None),
+                    eligible_activity_source(team_id, int(customer.id), SalesCommitment.source_activity_id),
+                )
+            )
             .limit(100)
             .all()
         )
@@ -522,6 +544,12 @@ class CustomerIntelligenceContextService:
             db.query(FollowUpTask)
             .filter(FollowUpTask.customer_id == customer.id, FollowUpTask.team_id == team_id)
             .order_by(FollowUpTask.updated_time.desc(), FollowUpTask.id.desc())
+            .filter(
+                or_(
+                    FollowUpTask.source_activity_id.is_(None),
+                    eligible_activity_source(team_id, int(customer.id), FollowUpTask.source_activity_id),
+                )
+            )
             .limit(100)
             .all()
         )
@@ -529,6 +557,12 @@ class CustomerIntelligenceContextService:
         task_events = (
             db.query(FollowUpTaskEvent)
             .filter(FollowUpTaskEvent.team_id == team_id, FollowUpTaskEvent.task_id.in_(task_ids))
+            .filter(
+                or_(
+                    FollowUpTaskEvent.source_activity_id.is_(None),
+                    eligible_activity_source(team_id, int(customer.id), FollowUpTaskEvent.source_activity_id),
+                )
+            )
             .order_by(FollowUpTaskEvent.created_time.desc(), FollowUpTaskEvent.id.desc())
             .limit(200)
             .all()
@@ -560,7 +594,8 @@ class CustomerIntelligenceContextService:
         task_event_payload = [_task_event_to_dict(item) for item in task_events]
         recorded_follow_ups = [*task_payload, *commitment_payload]
         context_facts = self.fact_service.to_context_payload(
-            db, team_id=team_id, customer_id=int(customer.id), limit=50
+            db, team_id=team_id, customer_id=int(customer.id), limit=50,
+            exclude_assistant2=True,
         )
         watermarks = _source_watermarks(
             customer=customer,

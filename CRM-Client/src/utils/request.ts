@@ -70,8 +70,8 @@ axiosInstance.interceptors.response.use(
     return data as typeof response
   },
   (error: AxiosError) => {
-    // 只处理 401（跳转登录）
-    if (error.response?.status === 401 && !authRedirectInFlight) {
+    // 只处理 401（跳转登录）；已在登录页时不再重复登出，避免 401 与路由守卫互相触发重定向循环
+    if (error.response?.status === 401 && !authRedirectInFlight && !window.location.pathname.startsWith('/login')) {
       authRedirectInFlight = true
       const returnPath = rememberAuthReturnPath()
       const userStore = useUserStore()

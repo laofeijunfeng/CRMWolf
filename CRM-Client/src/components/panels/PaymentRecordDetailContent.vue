@@ -424,7 +424,7 @@ watch(
         </div>
       </SheetHeader>
 
-      <ScrollArea class="flex-1">
+      <ScrollArea class="record-sheet-scroll">
         <div class="sheet-body">
           <template v-if="loading">
             <div class="loading-stack" aria-live="polite" aria-busy="true">
@@ -683,6 +683,19 @@ $record-title-avatar-size: calc($wolf-touch-target-min-v2 + $wolf-space-xs-v2);
 $record-header-mobile-indent: calc($record-title-avatar-size + $wolf-space-md-v2);
 $record-sheet-min-height: ($wolf-touch-target-min-v2 * 8) + $wolf-space-2xl-v2;
 $record-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
+
+.detail-embedded-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  background: $wolf-bg-card-v2;
+}
+
+.record-sheet-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+}
 
 .record-sheet-header {
   padding: $wolf-space-xl-v2;
@@ -1021,6 +1034,7 @@ $record-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
   padding: $wolf-space-lg-v2;
   border-top: $record-border-width solid $wolf-border-default-v2;
   display: flex;
+  flex: 0 0 auto;
   flex-direction: row;
   justify-content: flex-end;
   gap: $wolf-space-sm-v2;

@@ -457,8 +457,12 @@ watch(
 <style scoped lang="scss">
 @use '@/styles/variables-v2.scss' as *;
 
-.customer-transfer-dialog {
+:global(.customer-transfer-dialog) {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   max-width: 520px;
+  max-height: $wolf-modal-height-mobile-v2;
+  overflow: hidden;
 }
 
 .customer-transfer-dialog__title {
@@ -469,8 +473,13 @@ watch(
 
 .customer-transfer-dialog__body {
   display: flex;
+  min-height: 0;
   flex-direction: column;
   gap: $wolf-space-lg-v2;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-inline: calc($wolf-focus-ring-width-v2 + $wolf-focus-ring-offset-v2);
+  scroll-padding-bottom: calc($wolf-space-xl-v2 + $wolf-safe-area-bottom-v2);
 }
 
 .customer-transfer-dialog__context {

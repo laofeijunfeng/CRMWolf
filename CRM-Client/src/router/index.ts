@@ -81,6 +81,12 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true, title: 'AI Agent', keepAlive: true }
       },
       {
+        path: 'assistant',
+        name: 'SalesAssistant',
+        component: () => import('@/views/SalesAssistant.vue'),
+        meta: { requiresAuth: true, title: '销售助手', keepAlive: true }
+      },
+      {
         path: 'follow-up-confirmations',
         redirect: '/customer-tracking'
       },

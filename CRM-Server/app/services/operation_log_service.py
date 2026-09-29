@@ -48,6 +48,7 @@ class OperationLogService:
         remark: Optional[str] = None,
         team_id: Optional[int] = None,
         commit: bool = True,
+        required: bool = False,
     ) -> Optional[object]:
         """
         记录操作日志
@@ -81,6 +82,8 @@ class OperationLogService:
 
             return operation_log_crud.create(db, log_data, team_id=team_id, commit=commit)
         except Exception as e:
+            if required:
+                raise
             print(f"记录操作日志失败: {str(e)}")
             return None
 
@@ -147,6 +150,7 @@ class OperationLogService:
         team_id: Optional[int] = None,
         activity_id: Optional[int] = None,
         commit: bool = True,
+        required: bool = False,
     ):
         """记录客户活动"""
         content_data = {"content": activity_content, "activity_kind": activity_kind}
@@ -170,6 +174,7 @@ class OperationLogService:
             content=content_data,
             team_id=team_id,
             commit=commit,
+            required=required,
         )
 
     def log_lead_follow_up(

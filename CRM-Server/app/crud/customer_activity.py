@@ -59,6 +59,7 @@ def _upsert_customer_activity_evidence(
     activity: CustomerActivity,
     *,
     commit: bool = True,
+    required: bool = False,
 ) -> None:
     try:
         from app.services.customer_vector_document_service import customer_vector_document_service
@@ -66,6 +67,8 @@ def _upsert_customer_activity_evidence(
         customer_vector_document_service.upsert_customer_activity(db, activity, commit=commit)
     except Exception:
         logger.exception("客户活动证据元数据写入失败: activity_id=%s", activity.id)
+        if required:
+            raise
 
 
 def _mark_customer_activity_evidence_deleted(db: Session, activity: CustomerActivity) -> None:
@@ -242,23 +245,22 @@ class CustomerActivityCRUD:
         from app.models.deal_journey import DealJourneyEventType, DealJourneySourceType
 
         label = get_activity_kind_meta(db_obj.activity_kind)["label"]
-        deal_journey_service.record_event(
-            db,
-            deal_journey_id=db_obj.deal_journey_id,
-            team_id=team_id,
-            customer_id=customer_id,
-            event_type=DealJourneyEventType.ACTIVITY_ADDED,
-            source_type=DealJourneySourceType.CUSTOMER_ACTIVITY,
-            source_id=db_obj.id,
-            event_time=db_obj.occurred_at,
-            actor_id=creator_id,
-            summary=f"新增客户活动: {label}",
-            # CustomerActivityWriteService enqueues the canonical, revision-scoped
-            # intelligence event in the same transaction. The journey event remains
-            # evidence/audit and must not create a duplicate intelligence run.
-            enqueue_customer_intelligence=False,
-        )
+        if db_obj.submission_source != CustomerActivitySubmissionSource.ASSISTANT_2.value:
+            deal_journey_service.record_event(
+                db,
+                deal_journey_id=db_obj.deal_journey_id,
+                team_id=team_id,
+                customer_id=customer_id,
+                event_type=DealJourneyEventType.ACTIVITY_ADDED,
+                source_type=DealJourneySourceType.CUSTOMER_ACTIVITY,
+                source_id=db_obj.id,
+                event_time=db_obj.occurred_at,
+                actor_id=creator_id,
+                summary=f"新增客户活动: {label}",
+                enqueue_customer_intelligence=False,
+            )
 
+        is_assistant2 = db_obj.submission_source == CustomerActivitySubmissionSource.ASSISTANT_2.value
         operation_log_service.log_customer_activity(
             db=db,
             customer_id=customer_id,
@@ -271,8 +273,9 @@ class CustomerActivityCRUD:
             team_id=team_id,
             activity_id=db_obj.id,
             commit=False,
+            required=is_assistant2,
         )
-        _upsert_customer_activity_evidence(db, db_obj, commit=False)
+        _upsert_customer_activity_evidence(db, db_obj, commit=False, required=is_assistant2)
         if commit:
             db.commit()
             db.refresh(db_obj)
@@ -420,6 +423,7 @@ class CustomerActivityCRUD:
                     customer_id=db_obj.customer_id,
                     activity_id=db_obj.id,
                     deal_journey_id=db_obj.deal_journey_id,
+                    submission_source=db_obj.submission_source,
                     activity_occurred_at=db_obj.occurred_at,
                     activity_revision=db_obj.activity_revision,
                     deleted_by=deleted_by,

@@ -44,7 +44,8 @@ import {
   Receipt,
   Stamp,
   TrendingUp,
-  Wallet,
+  Sparkles,
+  Wallet
 } from 'lucide-vue-next'
 import {
   Sidebar,
@@ -137,7 +138,13 @@ const navGroups = computed<NavMainGroup[]>(() => [
         label: 'AI Agent',
         path: '/agent',
         icon: Bot,
-        active: currentPath.value.startsWith('/agent'),
+        active: currentPath.value.startsWith('/agent') && !currentPath.value.startsWith('/assistant'),
+      },
+      {
+        label: '销售助手',
+        path: '/assistant',
+        icon: Sparkles,
+        active: currentPath.value.startsWith('/assistant'),
       },
       {
         label: '线索管理',

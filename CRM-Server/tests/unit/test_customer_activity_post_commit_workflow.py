@@ -10,7 +10,7 @@ from app.core.database import Base
 from app.crud.sales_commitment import follow_up_task_confirmation_case_crud, follow_up_task_crud
 from app.models.agent import AgentMessage, AgentSession, AgentWorkflowAction
 from app.models.agent_persistence import AgentUIAction
-from app.models.customer import Customer
+from app.models.customer import Customer, CustomerProduct
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_vector_document import CustomerVectorDocument
 from app.models.sales_commitment import (
@@ -83,6 +83,7 @@ def db_session(monkeypatch):
         engine,
         tables=[
             Customer.__table__,
+            CustomerProduct.__table__,
             CustomerActivity.__table__,
             CustomerVectorDocument.__table__,
             SalesCommitment.__table__,

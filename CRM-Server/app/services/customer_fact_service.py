@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 from typing import TYPE_CHECKING, Literal, TypeAlias
+from sqlalchemy import exists, or_, select
+
+from app.services.customer_activity_source_isolation import eligible_activity_source
 
 from app.models.customer_fact import (
     CustomerFact,
@@ -348,13 +351,39 @@ class CustomerFactService:
             grouped.setdefault(int(source.fact_id), []).append(source)
         return grouped
 
-    def to_context_payload(self, db: Session, *, team_id: int, customer_id: int, limit: int = 50) -> list[JsonObject]:
-        facts = self.list_active_facts(db, team_id=team_id, customer_id=customer_id, limit=limit)
+    def to_context_payload(
+        self, db: Session, *, team_id: int, customer_id: int, limit: int = 50,
+        exclude_assistant2: bool = False,
+    ) -> list[JsonObject]:
+        if not exclude_assistant2:
+            facts = self.list_active_facts(db, team_id=team_id, customer_id=customer_id, limit=limit)
+            sources_by_fact = self.list_sources(db, fact_ids=[int(fact.id) for fact in facts])
+            return [_fact_payload(fact, sources_by_fact.get(int(fact.id), [])) for fact in facts]
+        tainted_source = exists(
+            select(1).where(
+                CustomerFactSource.fact_id == CustomerFact.id,
+                or_(
+                    CustomerFactSource.source_type.in_(("customer_activity", "follow_up"))
+                    & ~eligible_activity_source(team_id, customer_id, CustomerFactSource.source_object_id),
+                    (CustomerFactSource.business_object_type == "customer_activity")
+                    & ~eligible_activity_source(team_id, customer_id, CustomerFactSource.business_object_id),
+                ),
+            )
+        )
+        facts = (
+            db.query(CustomerFact)
+            .filter(
+                CustomerFact.team_id == team_id,
+                CustomerFact.customer_id == customer_id,
+                CustomerFact.status == CustomerFactStatus.ACTIVE,
+                ~tainted_source,
+            )
+            .order_by(CustomerFact.confidence.desc(), CustomerFact.occurred_at.desc(), CustomerFact.updated_time.desc())
+            .limit(limit)
+            .all()
+        )
         sources_by_fact = self.list_sources(db, fact_ids=[int(fact.id) for fact in facts])
-        return [
-            _fact_payload(fact, sources_by_fact.get(int(fact.id), []))
-            for fact in facts
-        ]
+        return [_fact_payload(fact, sources_by_fact.get(int(fact.id), [])) for fact in facts]
 
     def fact_key(self, *, team_id: int, customer_id: int, fact_type: str, subject: str | None) -> str:
         raw = f"crmwolf/customer-fact/{team_id}/{customer_id}/{fact_type}/{_clean_optional_text(subject) or ''}"

@@ -25,6 +25,7 @@ from app.services.agent.types import JSONDict, coerce_json_dict
 from app.services.customer_fact_extraction_service import (
     customer_fact_extraction_service,
 )
+from app.services.customer_activity_source_isolation import eligible_activity_source
 from app.services.customer_fact_service import (
     CustomerFactCandidateInput,
     CustomerFactInput,
@@ -323,6 +324,13 @@ class CustomerProfileProjectionGraphService:
             raise ValueError("customer profile projection team_id does not match event")
         if event_tenant_id != event_team_id:
             raise ValueError("customer profile projection tenant_id does not match event team_id")
+        if event.source.source_type == "customer_activity":
+            source_activity_id = _positive_int(event.source.source_object_id)
+            with self._db_scope() as db:
+                if source_activity_id is None or not db.query(
+                    eligible_activity_source(team_id, customer_id, source_activity_id)
+                ).scalar():
+                    raise ValueError("Assistant 2.0 or missing activity cannot refresh the legacy profile")
         context = CustomerProfileProjectionRuntimeContext(
             team_id=team_id,
             user_id=request.user_id,
@@ -381,6 +389,23 @@ class CustomerProfileProjectionGraphService:
             payload = self.context_service.build_context(
                 db, team_id=ctx.team_id, customer_id=customer_id, query_text="", evidence_limit=20
             ).to_agent_payload()
+            for evidence in _json_dict_list(payload.get("semantic_evidence")):
+                if evidence.get("source_type") not in {"customer_activity", "follow_up"} and evidence.get("business_object_type") != "customer_activity":
+                    continue
+                source_id = _positive_int(evidence.get("source_id") or evidence.get("source_object_id"))
+                business_id = _positive_int(evidence.get("business_object_id"))
+                if evidence.get("source_type") in {"customer_activity", "follow_up"} and (
+                    source_id is None or not db.query(
+                        eligible_activity_source(ctx.team_id, customer_id, source_id)
+                    ).scalar()
+                ):
+                    raise ValueError("Assistant 2.0 or missing activity cannot enter the legacy profile")
+                if evidence.get("business_object_type") == "customer_activity" and (
+                    business_id is None or not db.query(
+                        eligible_activity_source(ctx.team_id, customer_id, business_id)
+                    ).scalar()
+                ):
+                    raise ValueError("Assistant 2.0 or missing activity cannot enter the legacy profile")
         return {
             "customer_context": payload,
             "visible_trace": [_trace("读取客户事实、业务旅程和业务记录", "客户档案上下文已加载")],

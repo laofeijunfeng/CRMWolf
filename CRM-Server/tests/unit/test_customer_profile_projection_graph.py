@@ -1,9 +1,11 @@
 from datetime import datetime
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
+from sqlalchemy.pool import StaticPool
 from app.schemas.customer_profile import CustomerProfileSections
 from app.services.agent.customer_profile_projection_graph import (
     CustomerProfileProjectionGraphService,
@@ -21,11 +23,25 @@ from app.services.customer_intelligence_event_service import (
 )
 from app.services.customer_profile_projection_quality import CustomerProfileQualityReport
 from app.services.customer_profile_projection_service import CustomerProfileProjectionDraft
+from sqlalchemy import BigInteger, create_engine
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.orm import sessionmaker
+
+from app.core.database import Base
+from app.models.customer_activity import CustomerActivity
+from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
+
+
+@compiles(BigInteger, "sqlite")
+def _bigint_to_sqlite_int(element, compiler, **kw):
+    return "INTEGER"
 
 
 class FakeDB:
     def commit(self):
         pass
+    def query(self, *args):
+        return SimpleNamespace(scalar=lambda: True)
 
     def rollback(self):
         pass
@@ -421,3 +437,86 @@ async def test_profile_workflow_validates_request_before_running_graph():
                 {"team_id": 7, "event": _event(), "unexpected": True}  # type: ignore[typeddict-item]
             )
         ]
+
+@pytest.mark.asyncio
+async def test_assistant2_event_cannot_publish_legacy_profile() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine, tables=[CustomerActivity.__table__, CustomerActivityDeletionTombstone.__table__])
+    Session = sessionmaker(bind=engine)
+    with Session.begin() as db:
+        db.add(CustomerActivity(
+            id=1, team_id=7, customer_id=101, activity_kind="PHONE_FOLLOW_UP",
+            source_content="isolated", creator_id="9", owner_id="9",
+            submission_source="ASSISTANT_2", submission_id="turn-1",
+            submission_fingerprint="a" * 64,
+        ))
+    projection = FakeProjectionService()
+    facts = FakeFactService()
+    service = CustomerProfileProjectionGraphService(
+        context_service=FakeContextService(), memory_store_service=FakeMemoryService(),
+        fact_extraction_service=FakeFactExtractor(), fact_service=facts,
+        projection_service=projection, checkpointer=InMemorySaver(), session_factory=Session,
+    )
+    try:
+        with pytest.raises(ValueError, match="Assistant 2.0"):
+            async for _ in service.stream_events({
+                "team_id": 7, "user_id": 9, "session_id": 10, "run_id": 88,
+                "event": _event(),
+            }):
+                pass
+        assert not projection.publish_calls
+        assert not facts.calls
+    finally:
+        engine.dispose()
+
+@pytest.mark.parametrize("source_id,business_id", [("1", "1"), ("1", "2"), ("2", "1")])
+@pytest.mark.asyncio
+async def test_refresh_cannot_persist_fact_from_assistant2_evidence(source_id, business_id) -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine, tables=[CustomerActivity.__table__, CustomerActivityDeletionTombstone.__table__])
+    Session = sessionmaker(bind=engine)
+    with Session.begin() as db:
+        db.add(CustomerActivity(
+            id=1, team_id=7, customer_id=101, activity_kind="PHONE_FOLLOW_UP",
+            source_content="isolated", creator_id="9", owner_id="9",
+            submission_source="ASSISTANT_2", submission_id="turn-1",
+            submission_fingerprint="a" * 64,
+        ))
+        db.add(CustomerActivity(
+            id=2, team_id=7, customer_id=101, activity_kind="PHONE_FOLLOW_UP",
+            source_content="legacy", creator_id="9", owner_id="9", submission_source="FORM",
+        ))
+    class MismatchedContext(FakeContext):
+        def to_agent_payload(self):
+            payload = super().to_agent_payload()
+            payload["semantic_evidence"][0].update(
+                source_id=source_id, business_object_type="customer_activity", business_object_id=business_id,
+            )
+            return payload
+
+    class MismatchedContextService(FakeContextService):
+        def build_context(self, db, **kwargs):
+            return MismatchedContext()
+
+    facts = FakeFactService()
+    projection = FakeProjectionService()
+    service = CustomerProfileProjectionGraphService(
+        context_service=MismatchedContextService(), memory_store_service=FakeMemoryService(),
+        fact_extraction_service=FakeFactExtractor(), fact_service=facts,
+        projection_service=projection, checkpointer=InMemorySaver(), session_factory=Session,
+    )
+    refresh_event = replace(
+        _event(), trigger_type="manual_refresh_requested",
+        source=CustomerIntelligenceSource("manual_refresh", "refresh-1"),
+    )
+    try:
+        with pytest.raises(ValueError, match="Assistant 2.0"):
+            async for _ in service.stream_events({
+                "team_id": 7, "user_id": 9, "session_id": 10, "run_id": 92,
+                "event": refresh_event,
+            }):
+                pass
+        assert facts.calls == []
+        assert projection.publish_calls == []
+    finally:
+        engine.dispose()

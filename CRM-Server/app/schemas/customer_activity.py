@@ -41,9 +41,10 @@ class CustomerActivityBase(BaseModel):
     source_content: str = Field(..., min_length=1, description="原始输入内容")
     submission_source: str = Field(
         default=CustomerActivitySubmissionSource.FORM.value,
-        description="活动提交来源：AGENT/FORM/CUTOVER_MIGRATION",
+        description="活动提交来源：AGENT/ASSISTANT_2/FORM/CUTOVER_MIGRATION",
     )
     submission_id: Optional[str] = Field(None, max_length=120, description="页面提交幂等ID")
+    submission_fingerprint: Optional[str] = Field(None, min_length=64, max_length=64, description="Assistant 2.0 冻结命令请求指纹")
     content_json: Optional[Dict[str, Any]] = Field(None, description="结构化活动内容")
     summary: Optional[str] = Field(None, description="列表摘要")
     next_follow_time: Optional[datetime] = Field(None, description="计划下次跟进时间")

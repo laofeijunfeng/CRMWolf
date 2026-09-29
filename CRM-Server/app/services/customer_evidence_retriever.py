@@ -6,6 +6,10 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from sqlalchemy import select
+
+from app.models.deal_journey import CustomerDealJourneyEvent
+from app.services.customer_activity_source_isolation import eligible_activity_source
 from sqlalchemy.orm import Session
 
 from app.services.customer_embedding_service import (
@@ -121,6 +125,7 @@ class CustomerEvidenceRetriever:
         query_text: str | None,
         evidence_limit: int,
         source_types: Sequence[SourceType] | None = None,
+        exclude_assistant2: bool = False,
     ) -> CustomerEvidenceRetrievalResult:
         requested_source_types = [str(item) for item in source_types] if source_types else []
         query_present = bool(query_text and query_text.strip())
@@ -143,14 +148,51 @@ class CustomerEvidenceRetriever:
 
         try:
             vector = self.embedding_service.embed_query(db, team_id, query_text or "")
-            raw_results = self.qdrant_index_service.search_customer_evidence(
-                query_vector=vector,
-                tenant_id=team_id,
-                team_id=team_id,
-                customer_id=customer_id,
-                limit=max(evidence_limit * 3, evidence_limit),
-                source_types=source_types,
+            accepted: list[CustomerEvidenceHit] = []
+            scanned = 0
+            dropped = 0
+            top_score: float | None = None
+            window = max(evidence_limit * 3, evidence_limit)
+            # Widen the window while ineligible (e.g. Assistant 2.0) hits crowd
+            # it out; otherwise they would starve legitimate legacy evidence.
+            while True:
+                raw_results = self.qdrant_index_service.search_customer_evidence(
+                    query_vector=vector,
+                    tenant_id=team_id,
+                    team_id=team_id,
+                    customer_id=customer_id,
+                    limit=window,
+                    source_types=source_types,
+                )
+                top_score = max((item.score for item in raw_results), default=top_score)
+                scanned += len(raw_results)
+                for item in raw_results:
+                    if item.score < self.min_score:
+                        dropped += 1
+                    elif not exclude_assistant2 or self._eligible_legacy_evidence(db, item, team_id, customer_id):
+                        if all(hit.evidence_id != item.id for hit in accepted):
+                            accepted.append(self._evidence_hit(item))
+                    else:
+                        dropped += 1
+                if len(accepted) >= evidence_limit or len(raw_results) < window or window >= 96:
+                    break
+                window *= 2
+            hits = sorted(accepted, key=lambda item: item.score, reverse=True)[:evidence_limit]
+            retrieval_status = "ok" if hits else "low_confidence" if scanned else "empty"
+            state = EvidenceRetrievalState(
+                status=retrieval_status,
+                enabled=True,
+                query_text_present=True,
+                requested_limit=evidence_limit,
+                raw_count=scanned,
+                returned_count=len(hits),
+                dropped_count=dropped,
+                top_score=top_score,
+                min_score=self.min_score,
+                source_types=requested_source_types,
+                strategy="customer_semantic_qdrant",
             )
+            return CustomerEvidenceRetrievalResult(hits=hits, state=state)
         except CustomerEmbeddingUnavailableError as exc:
             logger.info("客户智能证据检索跳过: %s", exc)
             return self._empty_state(
@@ -172,24 +214,50 @@ class CustomerEvidenceRetriever:
                 error_message=str(exc),
             )
 
-        accepted = [self._evidence_hit(item) for item in raw_results if item.score >= self.min_score]
-        hits = sorted(accepted, key=lambda item: item.score, reverse=True)[:evidence_limit]
-        top_score = max((item.score for item in raw_results), default=None)
-        status = "ok" if hits else "low_confidence" if raw_results else "empty"
-        state = EvidenceRetrievalState(
-            status=status,
-            enabled=True,
-            query_text_present=True,
-            requested_limit=evidence_limit,
-            raw_count=len(raw_results),
-            returned_count=len(hits),
-            dropped_count=max(len(raw_results) - len(accepted), 0),
-            top_score=top_score,
-            min_score=self.min_score,
-            source_types=requested_source_types,
-            strategy="customer_semantic_qdrant",
-        )
-        return CustomerEvidenceRetrievalResult(hits=hits, state=state)
+    @staticmethod
+    def _eligible_legacy_evidence(
+        db: Session, item: CustomerEvidenceSearchResult, team_id: int, customer_id: int,
+    ) -> bool:
+        activity_backed = item.source_type in {"follow_up", "customer_activity"} or item.business_object_type == "customer_activity"
+        if activity_backed:
+            source_id = item.source_object_id
+            if item.business_object_type == "customer_activity" and item.business_object_id != source_id:
+                return False
+            if not source_id or not source_id.isdecimal():
+                return False
+            return bool(db.scalar(select(eligible_activity_source(team_id, customer_id, int(source_id)))))
+        if item.source_type == "business_flow" or item.business_object_type == "deal_journey_event":
+            event_id = item.source_object_id
+            if not event_id or not event_id.isdecimal():
+                return False
+            event = db.query(CustomerDealJourneyEvent).filter(
+                CustomerDealJourneyEvent.id == int(event_id),
+                CustomerDealJourneyEvent.team_id == team_id,
+                CustomerDealJourneyEvent.customer_id == customer_id,
+            ).first()
+            if event is None:
+                return False
+            if event.source_type in {"customer_activity", "customer_follow_up"}:
+                return event.source_id is not None and bool(
+                    db.scalar(select(eligible_activity_source(team_id, customer_id, event.source_id)))
+                )
+            return True
+        if item.source_type == "follow_up_task" or item.business_object_type == "follow_up_task":
+            from app.models.sales_commitment import FollowUpTask
+
+            task_row = db.query(FollowUpTask).filter(
+                FollowUpTask.public_id == item.source_object_id,
+                FollowUpTask.team_id == team_id,
+                FollowUpTask.customer_id == customer_id,
+            ).first()
+            if task_row is None:
+                return False
+            if task_row.source_activity_id is None:
+                return True
+            return bool(db.scalar(
+                select(eligible_activity_source(team_id, customer_id, int(task_row.source_activity_id)))
+            ))
+        return True
 
     def _empty_state(
         self,

@@ -140,6 +140,7 @@ def _form_submission_fingerprint(*, obj_in: CustomerActivityCreate, customer_id:
     payload = obj_in.model_dump(mode="json")
     payload.pop("submission_id", None)
     payload.pop("submission_source", None)
+    payload.pop("submission_fingerprint", None)
     payload["customer_id"] = customer_id
     payload["team_id"] = team_id
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -327,6 +328,74 @@ class CustomerActivityWriteService:
             before_commit=before_commit,
         )
 
+    def create_final_from_assistant2(
+        self,
+        db: Session,
+        *,
+        obj_in: CustomerActivityCreate,
+        finalization: CustomerActivityFinalization,
+        customer_id: int,
+        creator_id: str,
+        team_id: int,
+        actor_id: str | None,
+        before_commit: CustomerActivityBeforeCommit | None = None,
+    ) -> CustomerActivityWriteResult:
+        """Stage a canonical assistant activity in the caller's transaction.
+
+        The caller commits the activity and its frozen-command receipt together.
+        No legacy outbox, post-commit graph, or implicit rollback is permitted.
+        """
+        submission_id = getattr(obj_in, "submission_id", None)
+        fingerprint = getattr(obj_in, "submission_fingerprint", None)
+        if not isinstance(submission_id, str) or not submission_id.strip():
+            raise CustomerActivitySubmissionConflictError("Assistant 2.0 提交缺少幂等ID")
+        if not isinstance(fingerprint, str) or len(fingerprint) != 64 or any(
+            character not in "0123456789abcdef" for character in fingerprint
+        ):
+            raise CustomerActivitySubmissionConflictError("Assistant 2.0 提交缺少有效请求指纹")
+        if finalization.effectiveness_score < 60 or not finalization.effectiveness_is_valid:
+            raise ValueError("Assistant 2.0 最终评分未通过，不能写入客户活动")
+        existing = self.activity_crud.get_by_submission_id(
+            db, team_id=team_id, submission_id=submission_id
+        )
+        if existing is not None:
+            if (
+                existing.submission_source != CustomerActivitySubmissionSource.ASSISTANT_2.value
+                or existing.submission_fingerprint != fingerprint
+                or int(existing.customer_id) != customer_id
+            ):
+                raise CustomerActivitySubmissionConflictError("submission_id 已由其他提交使用")
+            result = CustomerActivityWriteResult(
+                activity=existing,
+                activity_revision=int(existing.activity_revision or 1),
+                post_commit_job=None,
+                customer_intelligence_request=None,
+            )
+        else:
+            activity = self.activity_crud.create(
+                db=db,
+                obj_in=obj_in,
+                customer_id=customer_id,
+                creator_id=creator_id,
+                team_id=team_id,
+                submission_source=CustomerActivitySubmissionSource.ASSISTANT_2.value,
+                submission_id=submission_id,
+                submission_fingerprint=fingerprint,
+                commit=False,
+            )
+            activity = self._apply_finalization(
+                db, activity=activity, finalization=finalization, increment_revision=False
+            )
+            result = CustomerActivityWriteResult(
+                activity=activity,
+                activity_revision=int(activity.activity_revision or 1),
+                post_commit_job=None,
+                customer_intelligence_request=None,
+            )
+        if before_commit is not None:
+            before_commit(result)
+        return result
+
     def finalize_pending_from_ai(
         self,
         db: Session,
@@ -454,25 +523,27 @@ class CustomerActivityWriteService:
         behind the same application seam as create/update. The caller only
         needs to kick the returned request after this method succeeds.
         """
+        is_assistant2 = activity.submission_source == CustomerActivitySubmissionSource.ASSISTANT_2.value
 
         from app.models.sales_commitment import FollowUpTaskProjectionTrigger
         from app.services.follow_up_task_projection_service import follow_up_task_projection_service
 
         activity_id = int(activity.id)
         try:
-            follow_up_task_projection_service.run_activity_projection(
-                db,
-                activity_id=activity.id,
-                activity_snapshot=activity,
-                trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_DELETED,
-                actor_id=actor_id,
-                team_id=int(activity.team_id),
-                commit=False,
-            )
-            intelligence_request = self._enqueue_customer_intelligence(
-                db,
-                activity=activity,
-                trigger_type="customer_activity_deleted",
+            if not is_assistant2:
+                follow_up_task_projection_service.run_activity_projection(
+                    db,
+                    activity_id=activity.id,
+                    activity_snapshot=activity,
+                    trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_DELETED,
+                    actor_id=actor_id,
+                    team_id=int(activity.team_id),
+                    commit=False,
+                )
+            intelligence_request = (
+                None if is_assistant2 else self._enqueue_customer_intelligence(
+                    db, activity=activity, trigger_type="customer_activity_deleted"
+                )
             )
             # Preserve durable task evidence and close every still-runnable
             # activity-owned job before hard-deleting the source row. This is

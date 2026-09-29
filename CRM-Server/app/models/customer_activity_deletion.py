@@ -23,6 +23,7 @@ class CustomerActivityDeletionTombstone(Base):
         comment="客户ID",
     )
     activity_id = Column(BigInteger, nullable=False, comment="已删除客户活动ID")
+    submission_source = Column(String(30), nullable=False, server_default="FORM", comment="删除前活动提交来源")
     deal_journey_id = Column(BigInteger, nullable=True, comment="活动所属业务旅程ID快照")
     activity_occurred_at = Column(DateTime, nullable=True, comment="活动发生时间快照")
     activity_revision = Column(Integer, nullable=True, comment="删除前活动语义修订号")

@@ -36,16 +36,11 @@ from app.services.agent.async_operation_service import (
     AgentAsyncOperationService,
     agent_async_operation_service,
 )
-from app.services.agent.customer_profile_projection_graph import (
-    CustomerProfileProjectionInput,
-    build_customer_profile_thread_id,
-)
-from app.services.agent.customer_profile_projection_workflow import (
-    CustomerProfileProjectionWorkflow,
-    CustomerProfileProjectionWorkflowRunner,
-)
 from app.services.agent.durable_work_contracts import AgentAsyncOperationBinding
 from app.services.agent.types import JSONDict, coerce_json_dict
+
+if TYPE_CHECKING:
+    from app.services.agent.customer_profile_projection_workflow import CustomerProfileProjectionWorkflowRunner
 from app.services.customer_identity_resolution_service import (
     CustomerIdentityResolutionService,
     customer_identity_resolution_service,
@@ -173,7 +168,7 @@ class CustomerIntelligenceRefreshService:
         profile_workflow: CustomerProfileProjectionWorkflowRunner | None = None,
         readiness_gate: CustomerProfileReadinessGate | None = None,
     ) -> None:
-        self.profile_workflow = profile_workflow or CustomerProfileProjectionWorkflow()
+        self._explicit_profile_workflow = profile_workflow
         self.event_service = event_service or customer_intelligence_event_service
         self.run_service = run_service or customer_intelligence_run_service
         self.identity_resolution_service = identity_resolution_service or customer_identity_resolution_service
@@ -185,6 +180,14 @@ class CustomerIntelligenceRefreshService:
             operation_service=self.async_operation_service,
         )
         self._background_tasks: set[asyncio.Task[JSONDict]] = set()
+
+    @property
+    def profile_workflow(self) -> CustomerProfileProjectionWorkflowRunner:
+        if self._explicit_profile_workflow is not None:
+            return self._explicit_profile_workflow
+        from app.services.agent.customer_profile_projection_workflow import CustomerProfileProjectionWorkflow
+
+        return CustomerProfileProjectionWorkflow()
 
     async def trigger_committed_event_refresh(
         self,
@@ -371,6 +374,8 @@ class CustomerIntelligenceRefreshService:
         scope = cast("CustomerIntelligenceRefreshScope", str(run.scope))
         if scope not in {"full", "partial"}:
             raise ValueError("客户智能持久运行刷新范围无效")
+        from app.services.agent.customer_profile_projection_graph import build_customer_profile_thread_id
+
         graph_thread_id = build_customer_profile_thread_id(
             team_id=binding.team_id,
             customer_id=int(event.customer_id),
@@ -698,7 +703,7 @@ class CustomerIntelligenceRefreshService:
             else:
                 graph_user_id = int(operation.user_id) if operation is not None else _actor_user_id(event.actor_id)
                 graph_session_id = int(operation.session_id or 0) if operation is not None else 0
-            graph_input: CustomerProfileProjectionInput = {
+            graph_input: dict[str, object] = {
                 "team_id": event.team_id,
                 "user_id": graph_user_id,
                 "session_id": graph_session_id,

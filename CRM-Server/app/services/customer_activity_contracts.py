@@ -14,6 +14,7 @@ class CustomerActivitySubmissionSource(StrEnum):
     """The authoritative origin of an activity submission."""
 
     AGENT = "AGENT"
+    ASSISTANT_2 = "ASSISTANT_2"
     FORM = "FORM"
     CUTOVER_MIGRATION = "CUTOVER_MIGRATION"
 

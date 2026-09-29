@@ -72,9 +72,9 @@ class FakeQdrantIndexService:
                 team_id=team_id,
                 customer_id=customer_id,
                 source_type="follow_up",
-                source_object_id="9001",
+                source_object_id="701",
                 business_object_type="customer_activity",
-                business_object_id="9001",
+                business_object_id="701",
                 title="电话跟进",
                 text="张总确认本周开始 POC。",
             )
@@ -475,6 +475,96 @@ def test_customer_intelligence_context_empty_product_is_null_list() -> None:
         assert payload["strong_context"]["customer"]["product_name"] is None
         assert payload["strong_context"]["customer"]["products"] == []
         assert payload["product_catalog"] == []
+    finally:
+        db.close()
+        engine.dispose()
+
+def test_assistant2_activity_does_not_change_legacy_profile_inputs_or_watermarks() -> None:
+    engine, db = _session()
+    service = CustomerIntelligenceContextService(
+        embedding_service=FakeEmbeddingService(), qdrant_index_service=FakeQdrantIndexService()
+    )
+    try:
+        _seed_customer_context(db)
+        db.add(CustomerDealJourney(
+            id=999, team_id=2, customer_id=101, name="POC", status="ACTIVE"
+        ))
+        db.flush()
+        baseline = service.build_context(db, team_id=2, customer_id=101, query_text="POC")
+        db.add(CustomerActivity(
+            id=702, team_id=2, customer_id=101, activity_kind="PHONE_FOLLOW_UP",
+            source_content="Agent 2.0 私有活动", summary="不应进入旧档案",
+            occurred_at=datetime(2026, 9, 2, 10), creator_id="9", owner_id="9",
+            submission_source="ASSISTANT_2", submission_id="turn-702",
+            submission_fingerprint="a" * 64,
+        ))
+        db.add(CustomerDealJourneyEvent(
+            id=703, team_id=2, deal_journey_id=999, customer_id=101,
+            event_type="activity_added", event_time=datetime(2026, 9, 2, 10),
+            source_type="customer_activity", source_id=702,
+        ))
+        customer_fact_service.upsert_fact(
+            db,
+            CustomerFactInput(
+                tenant_id=2, team_id=2, customer_id=101, fact_type="risk",
+                subject="隔离", content="不可流入旧档案", confidence=0.95,
+                source=CustomerFactSourceInput(
+                    source_type="customer_activity", source_object_id="702",
+                    business_object_type="customer_activity", business_object_id="702",
+                ),
+            ),
+        )
+        customer_fact_service.upsert_fact(
+            db,
+            CustomerFactInput(
+                tenant_id=2, team_id=2, customer_id=101, fact_type="risk",
+                subject="错配引用", content="旧活动ID掩盖新来源", confidence=0.95,
+                source=CustomerFactSourceInput(
+                    source_type="customer_activity", source_object_id="701",
+                    business_object_type="customer_activity", business_object_id="702",
+                ),
+            ),
+        )
+        db.flush()
+        after = service.build_context(db, team_id=2, customer_id=101, query_text="POC")
+        assert after.strong_context.recent_activities == baseline.strong_context.recent_activities
+        assert after.strong_context.customer_facts == baseline.strong_context.customer_facts
+        assert after.source_watermark == baseline.source_watermark
+    finally:
+        db.close()
+        engine.dispose()
+
+def test_semantic_evidence_ignores_assistant2_and_untraceable_activity() -> None:
+    class MixedOrigins(FakeQdrantIndexService):
+        def search_customer_evidence(self, **kwargs):
+            legitimate = super().search_customer_evidence(**kwargs)[0]
+            return [
+                CustomerEvidenceSearchResult(
+                    id=f"evidence-{activity_id}", score=score,
+                    tenant_id=2, team_id=2, customer_id=101,
+                    source_type="follow_up", source_object_id=str(activity_id),
+                    business_object_type="customer_activity", business_object_id=str(activity_id),
+                    title="跟进", text="隔离活动" if activity_id != 701 else "旧活动",
+                )
+                for activity_id, score in ((702, 0.98), (703, 0.97), (701, 0.92))
+            ]
+
+    engine, db = _session()
+    try:
+        _seed_customer_context(db)
+        db.add(CustomerActivity(
+            id=702, team_id=2, customer_id=101, activity_kind="PHONE_FOLLOW_UP",
+            source_content="2.0 隔离", occurred_at=datetime(2026, 9, 2, 10),
+            creator_id="9", owner_id="9", submission_source="ASSISTANT_2",
+            submission_id="turn-702", submission_fingerprint="a" * 64,
+        ))
+        db.flush()
+        service = CustomerIntelligenceContextService(
+            embedding_service=FakeEmbeddingService(), qdrant_index_service=MixedOrigins()
+        )
+        result = service.build_context(db, team_id=2, customer_id=101, query_text="跟进")
+        assert [hit.evidence_id for hit in result.evidence_hits] == ["evidence-701"]
+        assert result.retrieval_state.dropped_count == 2
     finally:
         db.close()
         engine.dispose()

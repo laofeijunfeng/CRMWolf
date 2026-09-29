@@ -34,6 +34,10 @@ class _FakeActivityCRUD:
     def __init__(self) -> None:
         self.calls = []
 
+    def get_by_submission_id(self, db, *, team_id, submission_id):
+        return None
+
+
     def create(self, db, **kwargs):
         self.calls.append(kwargs)
         assert kwargs["commit"] is False
@@ -50,7 +54,7 @@ class _FakeActivityCRUD:
             next_action="提供测试报告",
             next_follow_time=None,
             occurred_at=None,
-            submission_source="AGENT",
+            submission_source=kwargs.get("submission_source", "AGENT"),
         )
 
     def apply_finalization(self, db, activity, **kwargs):
@@ -275,6 +279,110 @@ def test_create_final_from_agent_persists_final_score_without_ai_job():
     assert opportunity_suggestion_jobs.enqueue_calls == [(212, 1, 1)]
     service.kick(result)
     assert opportunity_suggestion_jobs.kick_calls == [result.opportunity_suggestion_job]
+
+
+def test_assistant2_final_write_is_uncommitted_and_creates_no_legacy_work():
+    db = _FakeSession()
+    activity_crud = _FakeActivityCRUD()
+    post_commit_jobs = _FakePostCommitJobs()
+    suggestion_jobs = _FakeOpportunitySuggestionJobs()
+    intelligence = _FakeIntelligenceRefresh()
+    service = CustomerActivityWriteService(
+        activity_crud=activity_crud,
+        ai_job_service=_FakeAIJobs(),
+        post_commit_job_service=post_commit_jobs,
+        opportunity_suggestion_job_service=suggestion_jobs,
+        intelligence_event_service=CustomerIntelligenceEventService(),
+        intelligence_refresh_service=intelligence,
+    )
+    obj_in = SimpleNamespace(
+        activity_kind="WECHAT_FOLLOW_UP",
+        source_content="跟进内容",
+        submission_id="assistant-command-1",
+        submission_fingerprint="a" * 64,
+    )
+
+    result = service.create_final_from_assistant2(
+        db, obj_in=obj_in, finalization=_finalization(), customer_id=10,
+        creator_id="1", team_id=1, actor_id="1",
+    )
+
+    assert result.activity.submission_source == "ASSISTANT_2"
+    assert activity_crud.calls[0]["submission_id"] == "assistant-command-1"
+    assert activity_crud.calls[0]["submission_fingerprint"] == "a" * 64
+    assert result.activity.effectiveness_score == 82
+    assert (result.post_commit_job, result.customer_intelligence_request,
+            result.ai_job, result.opportunity_suggestion_job) == (None, None, None, None)
+    assert not post_commit_jobs.calls and not suggestion_jobs.enqueue_calls and not intelligence.calls
+    assert db.commits == db.rollbacks == 0
+
+def test_assistant2_writer_replays_persisted_activity_and_rejects_conflicting_identity(monkeypatch):
+    from sqlalchemy import BigInteger, create_engine, event
+    from sqlalchemy.ext.compiler import compiles
+    from sqlalchemy.orm import sessionmaker
+
+    from app.core.database import Base
+    from app.models.customer import Customer
+    from app.models.customer_activity import CustomerActivity
+    from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
+    from app.schemas.customer_activity import CustomerActivityCreate
+    from app.services.customer_activity_write_service import CustomerActivitySubmissionConflictError
+
+    @compiles(BigInteger, "sqlite")
+    def bigint_as_integer(element, compiler, **kwargs):
+        return "INTEGER"
+
+    engine = create_engine("sqlite:///:memory:")
+    @event.listens_for(engine, "before_cursor_execute", retval=True)
+    def skip_indexes(conn, cursor, statement, parameters, context, executemany):
+        return ("SELECT 1", ()) if statement.startswith("CREATE INDEX") else (statement, parameters)
+
+    Base.metadata.create_all(engine, tables=[
+        Customer.__table__, CustomerActivity.__table__, CustomerActivityDeletionTombstone.__table__,
+    ])
+    monkeypatch.setattr("app.services.deal_journey_service.deal_journey_service.infer_for_customer", lambda *args: None)
+    monkeypatch.setattr("app.services.operation_log_service.operation_log_service.log_customer_activity", lambda **kwargs: None)
+    monkeypatch.setattr("app.crud.customer_activity._upsert_customer_activity_evidence", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.crud.customer_activity._mark_customer_activity_evidence_deleted", lambda *args: None)
+    db = sessionmaker(bind=engine)()
+    try:
+        db.add(Customer(id=10, team_id=1, account_name="客户", city="上海", creator_id="1"))
+        db.commit()
+        skip_jobs = SimpleNamespace(mark_unfinished_skipped_for_activity=lambda *args, **kwargs: None)
+        service = CustomerActivityWriteService(ai_job_crud=skip_jobs, post_commit_job_crud=skip_jobs,
+                                                opportunity_suggestion_job_crud=skip_jobs)
+        obj_in = CustomerActivityCreate(activity_kind="WECHAT_FOLLOW_UP", source_content="跟进内容",
+                                        submission_id="assistant-command-1", submission_fingerprint="a" * 64)
+        write = lambda payload, customer_id=10: service.create_final_from_assistant2(
+            db, obj_in=payload, finalization=_finalization(), customer_id=customer_id,
+            creator_id="1", team_id=1, actor_id="1",
+        )
+        created = write(obj_in)
+        assert db.query(CustomerActivity).count() == 1
+        db.rollback()
+        assert db.query(CustomerActivity).count() == 0
+        created = write(obj_in)
+        created_id = created.activity.id
+        db.commit()
+        db.close()
+        db = sessionmaker(bind=engine)()
+        replayed = write(obj_in)
+        assert replayed.activity.id == created_id
+        assert db.query(CustomerActivity).count() == 1
+        assert replayed.activity.effectiveness_score == 82
+        with pytest.raises(CustomerActivitySubmissionConflictError):
+            write(obj_in.model_copy(update={"submission_fingerprint": "b" * 64}))
+        with pytest.raises(CustomerActivitySubmissionConflictError):
+            write(obj_in, customer_id=11)
+        deleted = service.delete(db, activity=replayed.activity, actor_id="1")
+        assert deleted.customer_intelligence_request is None
+        assert db.query(CustomerActivity).count() == 0
+        tombstone = db.query(CustomerActivityDeletionTombstone).one()
+        assert tombstone.activity_id == created_id
+        assert tombstone.submission_source == "ASSISTANT_2"
+    finally:
+        db.close()
+        engine.dispose()
 
 
 def test_agent_suggestion_outbox_failure_does_not_rollback_activity():

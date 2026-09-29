@@ -11,6 +11,7 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.models.customer_activity import CustomerActivity
 from app.core.database import Base
 from app.models.customer_activity_post_commit_job import (
     CustomerActivityPostCommitJob,
@@ -30,7 +31,7 @@ def _bigint_to_sqlite_int(element, compiler, **kw):
 @pytest.fixture
 def job_session_factory(monkeypatch):
     engine = create_engine("sqlite:///:memory:", poolclass=StaticPool, connect_args={"check_same_thread": False})
-    Base.metadata.create_all(engine, tables=[CustomerActivityPostCommitJob.__table__])
+    Base.metadata.create_all(engine, tables=[CustomerActivity.__table__, CustomerActivityPostCommitJob.__table__])
     Session = sessionmaker(bind=engine)
     monkeypatch.setattr("app.services.customer_activity_post_commit_job_service.SessionLocal", Session)
     monkeypatch.setattr(
@@ -120,6 +121,7 @@ async def test_job_passes_persisted_activity_revision_to_workflow(job_session_fa
         lambda db, activity_id, team_id: SimpleNamespace(
             id=activity_id,
             team_id=team_id,
+            submission_source="FORM",
             activity_revision=7,
         ),
     )
@@ -181,7 +183,7 @@ async def test_last_crashing_attempt_is_persisted_and_returned_as_exhausted(job_
 
     monkeypatch.setattr(
         "app.services.customer_activity_post_commit_job_service.customer_activity_crud.get_by_id",
-        lambda db, activity_id, team_id: SimpleNamespace(id=activity_id, team_id=team_id, activity_revision=1),
+        lambda db, activity_id, team_id: SimpleNamespace(id=activity_id, team_id=team_id, activity_revision=1, submission_source="FORM"),
     )
 
     async def _crash(**kwargs):
@@ -233,7 +235,7 @@ async def test_last_workflow_error_attempt_becomes_terminal_immediately(job_sess
 
     monkeypatch.setattr(
         "app.services.customer_activity_post_commit_job_service.customer_activity_crud.get_by_id",
-        lambda db, activity_id, team_id: SimpleNamespace(id=activity_id, team_id=team_id, activity_revision=1),
+        lambda db, activity_id, team_id: SimpleNamespace(id=activity_id, team_id=team_id, activity_revision=1, submission_source="FORM"),
     )
 
     async def _workflow_error(**kwargs):
@@ -364,6 +366,7 @@ async def test_completed_job_projects_bound_async_operation(monkeypatch):
         lambda db, activity_id, team_id: SimpleNamespace(
             id=activity_id,
             team_id=team_id,
+            submission_source="FORM",
             activity_revision=1,
         ),
     )
@@ -475,6 +478,7 @@ async def test_superseded_job_does_not_complete_operation_until_successor_finish
         lambda db, activity_id, team_id: SimpleNamespace(
             id=activity_id,
             team_id=team_id,
+            submission_source="FORM",
             activity_revision=2,
         ),
     )
@@ -512,3 +516,46 @@ async def test_superseded_job_does_not_complete_operation_until_successor_finish
     assert (operation.result_json or {}).get("post_commit", {}).get("needs_user_confirmation") is True
     session.close()
     engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,attempts", [
+    (CustomerActivityPostCommitJobStatus.QUEUED, 0),
+    (CustomerActivityPostCommitJobStatus.FAILED, 5),
+    (CustomerActivityPostCommitJobStatus.RUNNING, 1),
+])
+async def test_assistant2_accidental_job_is_skipped_without_legacy_work(
+    job_session_factory, monkeypatch, status, attempts,
+):
+    session = job_session_factory()
+    session.add(CustomerActivity(
+        id=731, team_id=1, customer_id=None, activity_kind="PHONE_FOLLOW_UP",
+        source_content="isolated", creator_id="1", owner_id="1",
+        submission_source="ASSISTANT_2", submission_id="turn-731",
+        submission_fingerprint="b" * 64,
+    ))
+    session.add(CustomerActivityPostCommitJob(
+        public_id=f"pcj_forbidden_{status}", team_id=1, activity_id=731,
+        activity_revision=1, trigger_type="ACTIVITY_CREATED_DETERMINISTIC",
+        actor_id="1", status=status, attempt_count=attempts,
+        run_id=f"run-{status}", graph_thread_id=f"thread-{status}",
+    ))
+    session.commit()
+    session.close()
+
+    async def forbidden_workflow(**kwargs):
+        pytest.fail("2.0 activity reached the legacy graph")
+
+    monkeypatch.setattr(
+        "app.services.customer_activity_post_commit_job_service.customer_activity_post_commit_workflow.run",
+        forbidden_workflow,
+    )
+    request = CustomerActivityPostCommitJobRequest(job_public_id=f"pcj_forbidden_{status}", team_id=1)
+    result = await CustomerActivityPostCommitJobService().run(request)
+    session = job_session_factory()
+    job = session.query(CustomerActivityPostCommitJob).filter_by(public_id=request.job_public_id).one()
+    assert job.status == CustomerActivityPostCommitJobStatus.SKIPPED
+    assert job.attempt_count == attempts
+    assert result["skip_reason"] == "ASSISTANT_2_SOURCE"
+    assert (await CustomerActivityPostCommitJobService().run(request)) == result
+    session.close()

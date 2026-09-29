@@ -51,6 +51,7 @@ from app.api import (
     view_preferences,
 )
 from app.api.agent import router as agent_router
+from app.api.assistant import router as assistant_router
 from app.api.agent_query import router as agent_query_router
 from app.api.ai_config import router as ai_config_router
 from app.api.customer_ai import router as customer_ai_router
@@ -161,6 +162,7 @@ api_router.include_router(license_application_router)  # 新增：License申请�
 api_router.include_router(ai_config_router)
 api_router.include_router(agent_router)
 api_router.include_router(agent_query_router)
+api_router.include_router(assistant_router)
 api_router.include_router(im_bots_router)
 api_router.include_router(frontend_logs_router)
 
@@ -245,6 +247,9 @@ async def startup_event():
     from app.tasks.agent_turn_execution_recovery import start_agent_turn_execution_recovery_scheduler
     start_agent_turn_execution_recovery_scheduler()
 
+    from app.tasks.assistant_turn_recovery import start_assistant_turn_recovery
+    start_assistant_turn_recovery()
+
     logger.info("审批超时自动催办任务已停用，催办改为审批中心手动触发")
 
 
@@ -295,6 +300,8 @@ async def shutdown_event():
     stop_customer_intelligence_refresh_retry_scheduler()
     from app.tasks.agent_turn_execution_recovery import stop_agent_turn_execution_recovery_scheduler
     stop_agent_turn_execution_recovery_scheduler()
+    from app.tasks.assistant_turn_recovery import stop_assistant_turn_recovery
+    stop_assistant_turn_recovery()
     stop_customer_evidence_sync_scheduler()
 
 

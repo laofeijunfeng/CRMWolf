@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from typing import TYPE_CHECKING
 from dataclasses import dataclass
 
 from sqlalchemy import inspect, or_
@@ -15,7 +15,8 @@ from app.models.customer_identity_term import (
     CustomerIdentityTermSource,
     CustomerIdentityTermStatus,
 )
-from app.services.customer_knowledge_candidate_service import CustomerVisibilityPredicate
+if TYPE_CHECKING:
+    from app.services.customer_knowledge_candidate_service import CustomerVisibilityPredicate
 
 
 IDENTITY_AUTO_SELECT_SCORE = 0.86

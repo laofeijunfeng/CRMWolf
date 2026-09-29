@@ -570,9 +570,10 @@ watch(
         </div>
       </SheetHeader>
 
-      <ScrollArea class="flex-1">
+      <ScrollArea class="payment-sheet-scroll">
         <div class="sheet-body">
           <DataViewStatePanel
+            class="payment-plan-sections"
             :state="loading && !paymentPlan ? 'loading' : errorMessage ? 'error' : paymentPlan ? 'ready' : 'empty'"
             :error-title="errorMessage || '回款计划加载失败'"
             error-description="请检查网络连接后重试。"
@@ -819,6 +820,19 @@ $payment-header-mobile-indent: calc($payment-title-avatar-size + $wolf-space-md-
 $payment-sheet-min-height: ($wolf-touch-target-min-v2 * 12) + $wolf-space-2xl-v2;
 $payment-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
 
+.detail-embedded-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  background: $wolf-bg-card-v2;
+}
+
+.payment-sheet-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .payment-sheet-header {
   padding: $wolf-space-xl-v2;
   padding-bottom: $wolf-space-lg-v2;
@@ -927,6 +941,17 @@ $payment-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
     gap: $wolf-space-lg-v2;
   }
 }
+
+.payment-plan-sections {
+  display: flex;
+  flex-direction: column;
+  gap: $wolf-space-xl-v2;
+
+  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+    gap: $wolf-space-lg-v2;
+  }
+}
+
 
 .loading-stack {
   display: flex;
@@ -1086,6 +1111,7 @@ $payment-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
   padding: $wolf-space-lg-v2;
   border-top: $payment-border-width solid $wolf-border-default-v2;
   display: flex;
+  flex: 0 0 auto;
   flex-direction: row;
   justify-content: flex-end;
   gap: $wolf-space-sm-v2;

@@ -27,17 +27,15 @@ from app.crud.procurement import procurement_stage_template_crud
 from app.models.customer_activity import CustomerActivity
 from app.models.opportunity import Opportunity, OpportunityStatus
 from app.services.agent.schemas import AgentBusinessSuggestion, AgentSemanticParseResult
-from app.services.agent.suggestion import (
-    AgentSuggestionEnvelope,
-    AgentSuggestionGenerator,
-    agent_suggestion_generator,
-)
 from app.services.ai_task_limiter import ai_generation_semaphore
 from app.services.customer_activity_contracts import (
     CustomerActivitySubmissionSource,
     CustomerActivitySuggestionJobStatus,
 )
 from app.utils.time import business_now
+
+if TYPE_CHECKING:
+    from app.services.agent.suggestion import AgentSuggestionEnvelope, AgentSuggestionGenerator
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -85,7 +83,15 @@ class CustomerOpportunitySuggestionJobService:
         suggestion_generator: AgentSuggestionGenerator | None = None,
     ) -> None:
         self.job_crud = job_crud or customer_opportunity_suggestion_job_crud
-        self.suggestion_generator = suggestion_generator or agent_suggestion_generator
+        self._explicit_generator = suggestion_generator
+
+    @property
+    def suggestion_generator(self) -> AgentSuggestionGenerator:
+        if self._explicit_generator is not None:
+            return self._explicit_generator
+        from app.services.agent.suggestion import agent_suggestion_generator
+
+        return agent_suggestion_generator
 
     def enqueue_in_transaction(
         self,
