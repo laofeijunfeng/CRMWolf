@@ -344,6 +344,77 @@ V 为 `CRM-Client/tests/components/{SalesAssistantProposal,SalesAssistantProcess
 
 **2026-10-08 U02 新团队独立 HTTP／Chromium 定向补验（只更新 §9）：**仅在 `mysql+pymysql://root:assistant-test-only@127.0.0.1:3308/crm_assistant_acceptance` 创建全新团队 `1993`／用户 `990127465`；专用 HTTP `127.0.0.1:18267` 同时校验环境与 SQLAlchemy engine 的限定 DSN，只挂载真实 assistant／teams／auth 路由且不启动主应用后台任务；专用 Vite `127.0.0.1:5213` 显式指向该 HTTP 服务。独立认证 HTTP 为 A `ast_9a12b43d14cf4c90bb4d007b151788f6`、B `ast_5b8268dd06264b8cbed218a8d5caebb1` 各创建一条 `ACTIVE/version=0` 任务（POST 201，GET 200）。实际 Chromium `/assistant` 显示 A、B 最近任务；以 CDP 在**响应阶段暂扣真实 GET 200 的浏览器交付**：A→B（B GET 暂扣）→A 后才放 B 响应，当前仍 A、A 输入草稿恢复；反向暂扣 A GET，切 B 后才放 A 响应，当前仍 B、无 A 草稿，再回 A 可见原草稿。中间加载阶段输入框暂为空，不把这一瞬间当成草稿丢失。随后实际浏览器在 A、B 各发送一次文本，经真实服务 `/submit` POST 200；各自响应阶段暂扣 SSE，先切另一个任务再放流，另一个任务的**聊天区**未出现原任务消息或处理进度；B→A 的反向探针还在重开 B 后见 B 自身失败卡。首个 A→B 探针曾把侧栏的 A 标题误判为聊天泄漏，改为检查聊天区后由页面复核；先前 CDP 长调用超时不计通过。独立 HTTP 两任务 GET 都为 `ACTIVE/version=1/error_code=AI_UNAVAILABLE`，各自原 turn GET 200／`FAILED`、事件均为 `[accepted(1),stage(2),error(3,AI_UNAVAILABLE)]`；团队限定 MySQL 查询各有一条所属 turn，任务两条、request 四条、目标 CRM effect 零。新团队没有 AI 配置，因此这些是真实业务 HTTP 的失败轮次与客户端迟到交付时序，**不是在线模型成功、服务端故障或真实网络断流**；既有模拟 API 的 503／签名等待路径与本次证据互不替代。关闭本轮专用 Chromium tab，监督器停止专用 18267／5213；按唯一团队和身份清理后，隔离库 89 张带 `team_id` 的表中该团队均零行，turn events、team、user 均零；删除本轮 JWT 身份文件、临时脚本和数据库备份，不停止共用 MySQL／8000 服务。U02 的真实 HTTP＋浏览器 A→B→A、迟到 GET／SSE 归属为**定向通过**，在线模型签发等待及全套 U01–U06／§10 A–D 发布门禁仍未批准。
 
+### 9.8 2026-10-08 在线模型定向补证（非七项完成／非发布批准）
+
+**适用范围：**本节只补充本次隔离运行态证据，不改写 §9 既有失败记录或 §10 的历史判定。团队 `1994`、用户 `990127466`、角色 `1127`、客户 `4802／星河验收公司`、产品／模块、采购方式及审批流均为 ORM synthetic fixture；模型输入仅为虚构业务事实。专用业务 HTTP 为 `127.0.0.1:18268`，实际 Chromium 页面为 `127.0.0.1:5214/assistant`，数据库实际连接限定为 `127.0.0.1:3308/crm_assistant_acceptance`。没有使用或停止现有 8000 服务，没有修改 .env，没有输出模型密钥、JWT、密码、Authorization 或带密钥配置响应。
+
+**安全证据限制：**后续审阅发现早期 fixture 与 HTTP 包装器直接给进程设置 DATABASE_URL，再核对 engine；HTTP 虽也检查了环境值，但检查发生在赋值之后。因此只能证明实际连接了限定隔离库，**不能证明这些早期入口对错误外部 DSN 失败关闭，不满足该项验收约束**。不靠事后修改临时文件美化历史。最终独立数据库探针和清理入口在导入／连接前检查外部环境，连接后再次核对 engine；清理入口以错误外部 DSN 实测返回 `exit 2 / REFUSED: DATABASE_URL is not the exact allowlisted DSN`。
+
+#### 模型可用性与最小提示词修复
+
+- 原配置模型 `qwen3.5-plus` 两次真实 transport 返回 HTTP 422／model not found；同凭据模型列表 HTTP 200，共 67 项且不含该模型。另有 GLM 回复因 `content_ / extra_forbidden` 被严格 schema 拒绝、gpt-5.5 网关返回要求输入含 json 的 400。这些失败不计业务通过；未增加生产 fallback，也未放宽 schema。
+- 本轮成功路径使用隔离团队配置的 `deepseek-v4-pro`，真实 transport／structurer／canonical merge／评分／writer／nominator 均未换固定输出。HTTP 包装器只观测安全字段集合、异常类型和耗时，委托原实现并原样返回／抛出；不等于主应用全部后台任务验收。
+- A 在 v5 的真实 StructuredFollowUp transport 成功（6.997 秒），但 `model_fields_set` 缺少 `next_action_absence_reason`；原 `_require_complete_content()` 抛“活动正文结构不完整”，未到 merge。根因为跟进／会议提示词漏列该 canonical 字段。
+- 唯一生产源码修复为 `CRM-Server/app/services/assistant/llm.py` 两段提示词：完整列出该字段，要求无事实也返回空值且不得省略，仅记录用户明示暂无的原因／复查条件。typed parsing、完整性校验与独立下一步门禁保持不变。专用服务重启后的同一 A 原文通过结构化／merge／评分并签发下一步 FIELD。会议 C 的真实 StructuredMeeting（16.197 秒）亦完整返回 13 个必需 canonical 字段并通过原校验；这不等于其暂无语义通过。
+
+#### 五条活动的最终持久状态
+
+下表来自清理前独立 READ ONLY 一致快照，按 team＋冻结 submission_id 查得各一条 `ASSISTANT_2` 活动；分数与来源段数不是中间评分历史。
+
+| 任务 | public ID | 最终状态／版本 | 活动 ID | 最终分／来源段 | submission ID |
+| --- | --- | --- | --- | --- | --- |
+| A | `ast_e33efa9e9146474691397dc443d583c1` | `COMPLETED/v23` | 2408 | 82／2 | `asub_2da819f836684415bad083eb6a1d03d6` |
+| B | `ast_4450b97b64194a7b9c8688b42ff7c089` | `COMPLETED/v22` | 2407 | 99／4 | `asub_f4516728809445898a93090ad5e4b1ed` |
+| C | `ast_12984e3b8c50441387896b9acd464182` | `COMPLETED/v11` | 2409 | 68／2 | `asub_5d866751f8b144619fa8db5beb512327` |
+| D | `ast_2c7647273602415abb9e8246ee042210` | `COMPLETED/v13` | 2410 | 79／2 | `asub_b3bc62efa7e0437db278c0020cf6dde8` |
+| E | `ast_e67a47fb9ea74b58a735717873e4469e` | `CANCELLED/v12` | 2411 | 82／2 | `asub_cf32c8d87df0499c9cb422e090e26026` |
+
+- A 活动指纹：`deb49b56d33c63495495afcc7548728e005a78e39abd11bf294977b8dc1de087`。
+- B 活动指纹：`d5bebd9d3b8f2c40e4df040a1f3b6ebf693c9b9845490398fbe24819ef233f98`。
+- C 活动指纹：`7e0c34c945419f6df85622682caeff2c3851bf8275aadcfb5aafbcc8b3f59c1c`。
+- D 活动指纹：`96e488ba4d41f0a7516539febcc9990d6936cdef0dda5d4b871d0248560c2b17`。
+- E 活动指纹：`785b3f59d0ede467cd1b8df4af4d11b6e0d2ac0283e1e697a8edf72104296b27`。
+
+- 五条均逐项断言：完整 `content_json`、原始 `source_content`、冻结来源段拼接、最终 `effectiveness_score`、`effectiveness_reason`、完整 `effectiveness_detail_json`、`next_action`、submission ID／指纹及冻结模型元数据与命令一致。title／summary／next_follow_time 等其余映射未在清理前逐项独立断言，**不得把上述范围扩大成所有字段完全相等**。
+- 最终团队总数为活动 5、商机 1、目标效果 1；旧 AIJob 0、PostCommitJob 0。command claim 仅 B 有 1 条，A／C／D／E 各 0。任务 ACTIVE 0、turn PENDING／RUNNING 0 后才停止自有 writer 并清理。
+
+#### A／B：实际 Chromium、真实签卡与精确目标效果
+
+- **A 真暂无（U03／D03 定向）：**浏览器初次只输入暂无理由却提交 `choice=null`，及把理由当行动的 79 分稿均不计通过、未写入。先 change-kind 清未提交 canonical，再实际点击“这条没有下一步”，观察选择 banner。请求 `cd3ab73e-f6a1-4f01-a235-5ff7ecbd0299`／turn `atn_e782d28539fb478690fb7e013140cac7` 使用 `awa_7f46189d23914927b64ab15eece734ba / expected_version=16 / choice=EXPLICITLY_NONE`；v20 确认稿 82 分、两段来源，next_action.value=null、canonical next_action 为空、action_evidence=[]，原因精确为“复核结论明确前暂不安排下一步”。最终活动 2408 的 next_action 为 SQL NULL、原因一致。已确认持久成功确认请求 `7c40bb09-735d-41c9-bc64-670c3cc6ffc1`／turn `atn_2afcc18c6fe748d3af6bcd32cb7fb43e`；续验另有一次页面确认点击未保存网络详情，**不能据唯一活动声称 A 只有一次确认 POST**。
+- **签名等待下任务隔离（U02／U03 定向）：**A 暂无理由未提交时，将 B 的真实 GET 200 在浏览器接收端交付为 503，页面保留 A、理由及可交互状态；切 B 输入框为空、无 A 理由。B 真实模型处理完成时已切 A，A 聊天与处理进度不串。A 真实选择暂无后 A→B→A 恢复自己的理由与选择 banner。这是客户端接收端故障注入，不是后端真实 503；不替代完整 U01–U06。
+- **B 客户与更正（D04 定向）：**首次补充前客户仅为 CANDIDATE、无绑定 authority；模型把联系人“陈明”当客户名，后经真实签名客户 FIELD 回答公司全名继续，不称“丢失已匹配客户”。实际浏览器更正“原审批平均五个工作日改为审批平均三个工作日”，请求 `39f29f53-c8d1-460d-857f-5172fd58e61b`／turn `atn_5817481612694e1b9ea6857a9d9f9767`，使 v10→v14、整稿重评 99 分、四段来源；正文／客户反馈／risks 均为三个工作日，source_corrections 保存 old/new，superseded_source_evidence 保留旧 quote。活动 2407 正文不含旧五个工作日。
+- **B 旧卡 409：**浏览器请求 `762e51d1-c5c1-46eb-87bd-d96f55ab169e` 以旧 `awa_15bb975d06d2487c883003f6a18c6ef0 / expected_version=10` 确认，真实返回 `409/STATE_CONFLICT` 附最新 v14；独立快照按该请求键核 AssistantRequest 0 行、关联 AssistantTurn 0 行。新确认签卡为 `awa_bbd9a2157b354d0985d6fc2e6dcd7257 / expected_version=14`。
+- **B accepted-only 恢复（U04／U05 定向）：**请求 `75fba6ce-0f06-4605-b3c4-8024b02d36b4` 的真实确认 POST 200 在浏览器接收端只交付 accepted，丢弃后续 SSE；worker／writer／提名器不替换。trace 为一次该确认 POST，随后原 B task GET 200 和内部 `atn_b1c64c0c274d41b9a430c019fa408a1e?after_seq=1` GET 200、多次补读、无第二确认 POST。原确认 turn `atn_de975af20b5e4e36bc8f850e39c37617` 的独立 GET 为 SUCCEEDED，事件 accepted1／stage-write2／stage-write3／waiting4，waiting4.next_turn_id 指向该内部 continue_proposals turn；原 turn 的独立 after_seq=1 只返回 2／3／4。**浏览器实际观察的是原 task→内部 turn 恢复，原确认 turn 游标是独立 HTTP 补证，不能互换叙述**。
+- **真实模型提名（O01 定向）：**OpportunityNominations／deepseek-v4-pro transport 4.275 秒；quote 为“陈明明确表示公司计划采购星河采购系统，用于统一采购申请、审批跟踪和预算统计”，segment `seg_8ed9768ff5d41eed`，candidate key `7250fc8d8af54d150cd85a365a8d38a19ce20ffb7d698b0eb0573219c8e9019b`。当时运行态 assembly 注入 OpportunityNominator，传真实 nominations 时禁 legacy hints；不以当前磁盘不同版本推断运行态实现。
+- **实际页内商机表单（O04／C 定向）：**浏览器填写“星河采购系统在线验收商机”、成交日 2026-11-30、金额 88000、用户数 12、PERPETUAL、NEW、决策人数 3，选择本团队产品／BASE 模块、采购方式 1055、初始阶段 2696“接触”、owner 990127466。实际截图已核验页内表单和选中值、无可见错误；请求 `aef69474-6dfc-4dc0-a9b5-76bb0519639c`／turn `atn_be32c19f0f76434d8a186f19e1ca6a84` 后 B 为 COMPLETED/v22/SUCCEEDED。此时刷新并显式重开 B，持久显示“活动已写入”“商机已创建”。这是源码变化前的浏览器成功证据。
+- **独立 MySQL 精确归因：**唯一商机 `opp_e0335c8543064680b53f786b09f08cbf`（969）、command `acm_22de06c120ed425788d8b884039c3565`、actor 990127466、指纹 `1813dbff0e24df813e32c86c69be6c158dcb3b7d95e2a72330aa5830908013be`，effect 623／opportunity_create、approval 141；claim／商机／效果／助手 receipt 各 1，claim.status=SUCCEEDED、target_invocation=STARTED。effect.stage_snapshot_id 实为 NULL，不将其误判成创建失败；商机 current_stage_snapshot_id=1059，独立 .one() 核同 team／opportunity、stage_name=接触。审批 141 同 team／OPPORTUNITY／business_id=969、PENDING，商机 pending_review。未额外核 snapshot 的 template FK，不能扩大此范围；审批流及后补首节点是 ORM fixture，不是生产审批配置证明。
+
+#### C／D／E：HTTP 边界与明确失败
+
+- C／D 的初始原文经实际浏览器发送；下述后续补充／确认／拒绝受客户端契约阻断后改走**独立真实认证 HTTP**，不是浏览器同链。E 全程为独立真实 HTTP。不得拿这些终态补齐后续 Web 展示验收。
+- **C 会议暂无语义未通过：**真模型判 ONLINE_MEETING，主题“档案统一归档需求确认”、内部／客户参会人分组正确，13 个正文必需字段齐全。实际提交 EXPLICITLY_NONE 后 next_action.value=null、确认卡 next_action=null，但 canonical 仍有“客户完成内部档案盘点”的 action_item 和 UNRESOLVED action_evidence。最终活动 2409／68 分只证明字段完整性及真实写入，**不能证明会议暂无语义一致或日期门禁通过**。C 无 offer 是事实，原因未定位，不称已有商机去重通过。
+- **D 真实候选后拒绝（O／R 定向）：**活动 2410／79 分先完成写入，再由真实模型提出“陈明明确表示公司计划采购星河报销系统，用于统一发票收集和报销审批”，candidate key `b34536505a4e70a6fc5ae725d4540079821e22a9a1e32e8eb5288b29f808c730`。offer `awa_26932d6308234f0ab80af701d5746a1f / expected_version=11` 实际 POST kind=confirm／choice=reject，turn `atn_f7254988906d4a15a3bba04d7bee3709`，最终 COMPLETED/v13/REFUSED；committed 保留活动并追加 refused:opportunity_create。独立终态快照证实该任务 claim 0、活动仍在，团队唯一商机／效果仍精确归 B，不是 D 产生。
+- **E 真实候选后取消（O／R 定向）：**活动 2411／82 分写入后 v11 实际 offer，再 POST kind=cancel，turn `atn_647ca50e1f114f19badf8c52c1470a34`，最终 CANCELLED/v12、无 waiting／processing、committed 保留活动。该任务 claim 0，团队商机／效果仍各 1、归 B。E 构造原文时仅把 D 首处“星河报销系统”替换为“星河费用管理系统”，原文实际含两个产品名；offer 忠于仍存在的报销系统句子，**不据此宣称产品消歧通过，也不归因为模型凭空换产品**。
+- **日期缺口保留：**B 虽有带明确日期时间的下一步文本，本次读取 canonical action_evidence 的 due_at 仍 null／resolution_status=UNRESOLVED；没有该行动的真实下游日期任务写入证据。本轮不是 T01／T02 的在线模型日期通过证明，也未覆盖 <60→补充→>=60 的真实阈值跨越。
+
+#### 当前磁盘源码／客户端阻断与定向测试
+
+- 后段观察到客户端 schema／API／聊天组件及服务端相关文件的修改时间均为 2026-10-08 17:23:00 +0800，当时 git status --short 为空；其来源未判定，不恢复／覆盖整批文件。磁盘 llm.py 提示词亦缺本轮修复，故仅重新应用自身两处最小提示词改动。coordinator／proposals 当前磁盘实现与此前专用进程加载版本不同；此后未重启专用 HTTP，不能把其运行态成功冒充当前磁盘源码端到端通过。
+- 实际刷新客户端后 GET/tasks 返回 A–D 四条服务端任务，但页面显示“4 条历史任务无法识别，已跳过”“当前没有进行中的任务”。浏览器实际 safeParse：AssistantTaskViewSchema 顶层拒绝 verified_auto_wins、proposals_enabled、processing_turn_id、processing_turn_status、outcome_code、form_errors、error_code；B committed[1] 另拒绝 command_id。**当前客户端契约不兼容是实测阻断，不是四条任务丢失**。E 后来创建，未再刷新核对跳过条数；不编造五条均跳过。
+- 当前磁盘源码、限定 DATABASE_URL 下执行 `venv/bin/python -m pytest -q --no-cov tests/unit/test_assistant_model_transport.py tests/unit/test_assistant_intake.py`：`36 passed, 22 warnings in 2.96s`。加 `tests/unit/test_assistant_confirmation_contract.py` 的三文件命令为 `1 failed, 51 passed, 30 warnings in 4.38s`；test_legacy_source_still_tolerates_audit_failure 的 SQLite fixture 未建 crm_customer_legacy_source_progress，旧来源 create 查询该表失败。未改测试／生产代码掩盖此失败。
+- 源码变化后原 corrections 测试文件已不存在，原三文件命令退出 4／no tests ran／file not found；未恢复用户移除文件。此前 16＋93 passed 是变化前结果，不作为当前源码证明。本轮未运行前端测试、全套、lint 或 build。提示词 reviewer 无 findings 只覆盖两段提示词及未放宽校验，不批准当前客户端或全部门禁。
+
+#### 隔离清理与门禁结论
+
+- 已停止 model-http-1008、model-vite-1008、model-chrome-1008 并释放本轮 managed tab。未停止共享 MySQL、crm-backend、crm-frontend 或无关 Chromium。
+- 清理前 inventory 捕获 89 张 team_id 表、34 turns、39 requests、81 actions、156 条无 team 的 turn events、5 活动、1 商机／效果／阶段快照／审批及其派生记录。数据库没有三张 crm_langgraph_checkpoint* 表：首次 inventory 因缺表拒绝，确认三张均不存在后只按全缺处理、部分存在仍拒绝；没有为清理建表或跳过已有 checkpoint 数据。tenant memory 0，精确 thread 身份捕获 8 条。
+- 12 条向量元数据均 PENDING／synced_at null、创建更新时间相同；最初脚本误将 metadata_version=2 判成外部同步异常，查 CustomerEvidenceBuilder.metadata_version=2 后修正，仅此默认版本不构成同步证明。本轮专用服务不加载 main 的向量 scheduler，未运行同步 worker 或手工 upsert；据此提供 no-vector-sync-ran 保证后才清理，**不单凭 PENDING 推断历史无同步**。未连接或修改外部 Qdrant。
+- 精确环境／engine 双重校验、FK／跨团队引用检查、child-first、单事务删除 385 行；含团队 1994、用户 990127466、角色 1127、专属关系与无其他引用的两条 fixture permission。提交后另起 verify 及独立 READ ONLY 一致快照：89 张 team 表、捕获无 team 子表、tenant memory、专属身份全部 0；其他团队在 89 张表的逐表行数与清理前相同。该行数比较不等于其他团队正文内容审计。
+- 保存本节证据后已精确删除本轮 `/tmp/crmwolf-model-accept-1008.json`、fixture／HTTP／cleanup 三个脚本、cleanup manifest、两张截图与 `crmwolf-model-chrome-1008/` profile；七个文件逐项 exists=false，profile 缺失检查退出 0。未使用宽泛匹配删除其他轮次资源。数据库清理后未重建 fixture、重启专用服务或再次提交确认／拒绝／取消。
+- **§10 A–D 全部继续未批准，七项不标完成。**本节补齐真实模型提名／更正／评分／实际表单创建的定向运行态证据，不消除历史副本来源审计、生产老 claim 精确核验、去重阈值／纯日期政策／运维职责批准、灰度监控／生产回滚、完整低分补充与日期用例的缺口；当前客户端不兼容、会议暂无语义及早期入口环境 guard 缺陷也必须保留。后续验收必须针对实际待发布源码重跑，不能混用本次运行态与当前磁盘。
+- **阶段性提交决策：**用户确认 Agent 2.0 目前尚无人使用。本次仅将两段提示词修复与本节证据保存为开发阶段提交，不将存量 2.0 任务兼容／迁移作为本次提交的前置条件；该确认不证明旧客户智能历史来源安全，也不代表功能已验收或批准启用。提交前再次运行上述三文件测试，结果为 `1 failed, 51 passed, 30 warnings in 4.51s`，仍为同一 SQLite fixture 缺表失败。当前客户端契约、会议暂无语义及其他缺口保留为启用前待修／待验项。
+
+
 ## 10. 实施批次、发布门禁、兼容与待决策
 
 | 批次 | 完成门禁与回退边界 |

@@ -44,7 +44,8 @@ STRUCTURE_FOLLOW_UP_PROMPT = """你是 CRM 销售助手的跟进整理器。把�
 - content 覆盖原文全部事实点：客户反馈、进展、风险、承诺；可调整语序、去重，不得删减事实。
 - customer_name 只填原文明确出现的客户名称，没有则留空。
 - next_action 忠于原文，没有则留空。
-- content_json 必须完整填写：content、customer_feedback、current_progress、risks、next_action、next_follow_time_text；所有事实均保留。
+- content_json 必须完整填写：content、customer_feedback、current_progress、risks、next_action、next_action_absence_reason、next_follow_time_text；没有对应事实的字段也必须返回空值，不得省略。
+- next_action_absence_reason 只记录用户明确暂无下一步的原因或复查条件；未明确表示暂无下一步时留空，不得把缺少行动推断成暂无行动。
 - 不确定的信息一律留空，禁止编造。
 只输出结构化结果。"""
 
@@ -53,7 +54,8 @@ STRUCTURE_MEETING_PROMPT = """你是 CRM 销售助手的会议纪要整理器。
 规则：
 - customer_name 只填原文明确出现的客户（公司）名称，没有则留空。
 - meeting_subject 填会议主题；content 按发言人分组整理关键讨论、客户诉求、决策和承诺。
-- content_json 必须完整填写 meeting_subject、meeting_background、communication_context、participants（internal/customer）、key_minutes、qa_items、requirements、concerns_or_objections、risks、decisions_or_commitments、action_items、next_step_summary。
+- content_json 必须完整填写 meeting_subject、meeting_background、communication_context、participants（internal/customer）、key_minutes、qa_items、requirements、concerns_or_objections、risks、decisions_or_commitments、action_items、next_step_summary、next_action_absence_reason；没有对应事实的字段也必须返回空值，不得省略。
+- next_action_absence_reason 只记录用户明确暂无下一步的原因或复查条件；未明确表示暂无下一步时留空，不得把缺少行动推断成暂无行动。
 - action_items 每项均包含 owner、action、due_date，保留原文的所有行动项，不可只保留首条。
 - participants 区分我方与客户方成员及其角色，只有「双方参会」时保留原样。
 - next_action 填首要行动项，尽量含负责人和时间；原文没有则留空。
