@@ -241,6 +241,7 @@ export interface CustomerResponse {
 }
 
 export interface ContactResponse {
+  id: number
   customer_id: string
   name: string
   gender: number | null

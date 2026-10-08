@@ -22,10 +22,10 @@ from app.core.database import SessionLocal
 from app.schemas.customer_profile import CustomerProfileSections  # noqa: TC001
 from app.services.agent.checkpointer import agent_checkpoint_saver
 from app.services.agent.types import JSONDict, coerce_json_dict
+from app.services.customer_activity_source_isolation import eligible_activity_source
 from app.services.customer_fact_extraction_service import (
     customer_fact_extraction_service,
 )
-from app.services.customer_activity_source_isolation import eligible_activity_source
 from app.services.customer_fact_service import (
     CustomerFactCandidateInput,
     CustomerFactInput,
@@ -44,6 +44,7 @@ from app.services.customer_memory_store_service import (
     customer_memory_store_service,
 )
 from app.services.customer_profile_projection_service import (
+    PROFILE_SECTION_NAMES,
     PROFILE_WORKFLOW_OWNER,
     CustomerProfileProjectionDraft,
     CustomerProfileProjectionService,
@@ -58,7 +59,6 @@ if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
     from langgraph.runtime import Runtime
     from sqlalchemy.orm import Session
-
 
 
 CUSTOMER_PROFILE_WORKFLOW_NAMESPACE = "crm_agent_customer_profile_projection"
@@ -327,9 +327,10 @@ class CustomerProfileProjectionGraphService:
         if event.source.source_type == "customer_activity":
             source_activity_id = _positive_int(event.source.source_object_id)
             with self._db_scope() as db:
-                if source_activity_id is None or not db.query(
-                    eligible_activity_source(team_id, customer_id, source_activity_id)
-                ).scalar():
+                if (
+                    source_activity_id is None
+                    or not db.query(eligible_activity_source(team_id, customer_id, source_activity_id)).scalar()
+                ):
                     raise ValueError("Assistant 2.0 or missing activity cannot refresh the legacy profile")
         context = CustomerProfileProjectionRuntimeContext(
             team_id=team_id,
@@ -348,6 +349,9 @@ class CustomerProfileProjectionGraphService:
             snapshot = await self._graph.aget_state(config)
             if getattr(snapshot, "next", ()):
                 checkpoint_input = None
+                if any(node in {"validate_profile_draft", "publish_profile_projection"} for node in snapshot.next):
+                    # Facts already committed; retry composition, not extraction or writes.
+                    await self._graph.aupdate_state(config, {}, as_node="persist_fact_candidates")
         async for chunk in self._stream_graph_run(checkpoint_input, context, config):
             yield chunk
 
@@ -390,20 +394,21 @@ class CustomerProfileProjectionGraphService:
                 db, team_id=ctx.team_id, customer_id=customer_id, query_text="", evidence_limit=20
             ).to_agent_payload()
             for evidence in _json_dict_list(payload.get("semantic_evidence")):
-                if evidence.get("source_type") not in {"customer_activity", "follow_up"} and evidence.get("business_object_type") != "customer_activity":
+                if (
+                    evidence.get("source_type") not in {"customer_activity", "follow_up"}
+                    and evidence.get("business_object_type") != "customer_activity"
+                ):
                     continue
                 source_id = _positive_int(evidence.get("source_id") or evidence.get("source_object_id"))
                 business_id = _positive_int(evidence.get("business_object_id"))
                 if evidence.get("source_type") in {"customer_activity", "follow_up"} and (
-                    source_id is None or not db.query(
-                        eligible_activity_source(ctx.team_id, customer_id, source_id)
-                    ).scalar()
+                    source_id is None
+                    or not db.query(eligible_activity_source(ctx.team_id, customer_id, source_id)).scalar()
                 ):
                     raise ValueError("Assistant 2.0 or missing activity cannot enter the legacy profile")
                 if evidence.get("business_object_type") == "customer_activity" and (
-                    business_id is None or not db.query(
-                        eligible_activity_source(ctx.team_id, customer_id, business_id)
-                    ).scalar()
+                    business_id is None
+                    or not db.query(eligible_activity_source(ctx.team_id, customer_id, business_id)).scalar()
                 ):
                     raise ValueError("Assistant 2.0 or missing activity cannot enter the legacy profile")
         return {
@@ -572,17 +577,17 @@ class CustomerProfileProjectionGraphService:
     def _compose_profile_draft(
         self,
         state: CustomerProfileProjectionState,
-        runtime: object,  # noqa: ARG002
+        runtime: object,
     ) -> CustomerProfileProjectionState:
         event = coerce_json_dict(state.get("event"))
+        # Fact persistence and resumed executions can invalidate the checkpoint snapshot.
+        fresh_context = coerce_json_dict(self._load_customer_context(state, runtime).get("customer_context"))
         snapshot = CustomerProfileContextSnapshot(
-            customer_context=coerce_json_dict(state.get("customer_context")),
+            customer_context=fresh_context,
             customer_memory=coerce_json_dict(state.get("customer_memory")),
-            source_watermark=coerce_json_dict(
-                coerce_json_dict(state.get("customer_context")).get("source_watermark")
-            ),
+            source_watermark=coerce_json_dict(fresh_context.get("source_watermark")),
         )
-        plan = _target_sections(event)
+        plan = PROFILE_SECTION_NAMES
         draft = self.projection_service.draft_from_context(
             context=snapshot.customer_context,
             source_event_key=str(event.get("event_key") or "") or None,
@@ -602,9 +607,10 @@ class CustomerProfileProjectionGraphService:
             target_sections=draft.target_sections,
         )
         return {
+            "customer_context": fresh_context,
             "profile_projection_draft": typed.model_dump(mode="json"),
             "visible_trace": [_trace("形成客户档案草稿", "客户当前情况、业务旅程和跟进过程已整理")],
-            "events": [{"event": "customer_profile_draft_composed", "sections": plan}],
+            "events": [{"event": "customer_profile_draft_composed", "sections": list(plan)}],
         }
 
     def _validate_profile_draft(
@@ -810,49 +816,6 @@ _FACT_TYPES = {
     "preference",
     "summary",
 }
-
-
-def _target_sections(event: JSONDict) -> list[str]:
-    trigger = str(event.get("trigger_type") or "")
-    if trigger in {
-        "customer_created",
-        "customer_converted_from_lead",
-        "manual_refresh_requested",
-        "customer_intelligence_batch_rebuild_requested",
-        "customer_intelligence_historical_backfill_requested",
-        "customer_intelligence_reconciliation_requested",
-    }:
-        return [
-            "current_situation",
-            "current_journeys",
-            "important_changes",
-            "long_term_context",
-            "follow_up_process",
-            "recorded_follow_ups",
-        ]
-    if trigger.startswith("customer_contact_"):
-        return ["long_term_context", "important_changes"]
-    if trigger in {"deal_journey_event_recorded", "deal_journey_association_changed"} or trigger.startswith(
-        "customer_business_object_"
-    ):
-        payload = coerce_json_dict(event.get("payload"))
-        # Customer creation is a full bootstrap even though it uses the same
-        # business-object event family as later master-data updates.
-        if (
-            trigger == "customer_business_object_created"
-            and payload.get("object_type") == "customer"
-            and payload.get("refresh_scope") == "full"
-        ):
-            return [
-                "current_situation",
-                "current_journeys",
-                "important_changes",
-                "long_term_context",
-                "follow_up_process",
-                "recorded_follow_ups",
-            ]
-        return ["current_situation", "current_journeys", "important_changes", "recorded_follow_ups"]
-    return ["current_situation", "current_journeys", "important_changes", "follow_up_process", "recorded_follow_ups"]
 
 
 customer_profile_projection_graph_service = CustomerProfileProjectionGraphService(checkpointer=agent_checkpoint_saver)

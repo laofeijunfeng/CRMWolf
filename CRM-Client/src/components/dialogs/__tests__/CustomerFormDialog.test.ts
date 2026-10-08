@@ -6,6 +6,7 @@ import FormErrorSummary from '@/components/crmwolf/FormErrorSummary.vue'
 import customerApi, { type CustomerDetailResponse } from '@/api/customer'
 import procurementApi from '@/api/procurement'
 import { acquisitionSourceApi } from '@/api/acquisition-source'
+import { entityParseApi } from '@/api/entityParse'
 import { customerCreateSchema, customerEditSchema, customerFormSchema } from '@/schemas/customer-form'
 
 vi.mock('@/api/product', () => ({
@@ -511,6 +512,57 @@ describe('CustomerFormDialog progressive edit sections', () => {
     props: { open: true, mode: 'create' },
     attachTo: document.body,
   })
+  it('ignores a late create parse after switching to another customer edit session', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    let emitParse: Parameters<typeof entityParseApi.parseCustomer>[1] | undefined
+    let finishParse: (() => void) | undefined
+    vi.spyOn(entityParseApi, 'parseCustomer').mockImplementation((_content, onEvent) => {
+      emitParse = onEvent
+      return new Promise<void>((resolve) => { finishParse = resolve })
+    })
+    const wrapper = mountCreate()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { rawText: string; handleParse: () => Promise<void>; values: Record<string, unknown> }
+    vm.rawText = '待解析的新客户'
+    const parsing = vm.handleParse()
+    await wrapper.setProps({ open: false })
+    await wrapper.setProps({ open: true, mode: 'edit', customerId: customerDetail.id, customer: customerDetail })
+    await flushPromises()
+    emitParse?.({ event: 'parsed', customer_info: {
+      account_name: '不相关的新客户', city: '北京', company_scale: null, source: null,
+      source_public_id: null, product: null, product_public_id: null, industry_hint: null, missing_fields: [],
+    } })
+    finishParse?.()
+    await parsing
+    await flushPromises()
+    expect(vm.values['account_name']).toBe(customerDetail.account_name)
+    expect(vm.values['city']).toBe(customerDetail.city)
+    expect(vm.values['product_public_id']).toBe(customerDetail.product_public_id)
+    wrapper.unmount()
+  })
+
+  it('asks before discarding a create form populated only through parsing', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    vi.spyOn(entityParseApi, 'parseCustomer').mockImplementation(async (_content, onEvent) => {
+      onEvent({ event: 'parsed', customer_info: {
+        account_name: '解析客户', city: '北京', company_scale: null, source: null,
+        source_public_id: null, product: null, product_public_id: null, industry_hint: null, missing_fields: [],
+      } })
+    })
+    const wrapper = mountCreate()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { rawText: string; handleParse: () => Promise<void>; handleCancel: () => void; showConfirmDialog: boolean }
+    vm.rawText = '解析客户在北京'
+    await vm.handleParse()
+    await flushPromises()
+    vm.handleCancel()
+    expect(vm.showConfirmDialog).toBe(true)
+    expect(wrapper.emitted('update:open')).toBeUndefined()
+    wrapper.unmount()
+  })
+
   it('renders the more-information trigger collapsed in create and edit modes', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])

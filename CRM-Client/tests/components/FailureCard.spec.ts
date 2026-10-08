@@ -3,21 +3,14 @@ import { describe, expect, it } from 'vitest'
 
 import FailureCard from '@/components/sales-assistant/FailureCard.vue'
 
-describe('terminal assistant failure', () => {
-  it('keeps an independently committed customer activity visible after a later failure', () => {
+describe('customer not found failure card', () => {
+  it('offers rename and abort for either not-found wording when the field is customer', () => {
     const wrapper = mount(FailureCard, {
-      props: {
-        message: '后续商机处理失败', errorCode: 'CRM_WRITE_REJECTED',
-        task: {
-          public_id: 'ast_1', status: 'ACTIVE', proposals_enabled: true, goal: '记录沟通', activity_kind: 'FOLLOW_UP',
-          draft: { customer: { status: 'MISSING' }, content: { status: 'MISSING' }, next_action: { status: 'MISSING' }, next_follow_time: { status: 'MISSING' } },
-          waiting: null, committed: [{ kind: 'customer_activity', public_id: 'act_1', customer_id: 1 }],
-          budget_steps: 0, budget_max_steps: 50, version: 2
-        }
-      }
+      props: { message: '未找到对应客户，请核对并提供客户准确名称。', waiting: { type: 'FIELD', field: 'customer', question_id: 'q1', prompt: '未找到对应客户' } },
     })
 
-    expect(wrapper.text()).toContain('客户活动已写入，不受后续处理失败影响')
-    expect(wrapper.text()).not.toContain('本次写入未完成')
+    expect(wrapper.text()).toContain('尚未写入')
+    expect(wrapper.text()).toContain('修改客户名称')
+    expect(wrapper.text()).toContain('结束本次记录')
   })
 })

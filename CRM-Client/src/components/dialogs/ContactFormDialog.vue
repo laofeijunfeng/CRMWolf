@@ -106,7 +106,7 @@ const reportsToOptions = computed(() =>
   (props.availableContacts ?? [])
     .filter(contact => contact.id !== props.contact?.id)
     .map(contact => ({
-      value: contact.id as number,
+      value: contact.id,
       label: `${contact.name}${contact.position !== undefined && contact.position !== null && contact.position.trim().length > 0 ? ` (${contact.position})` : ''}`,
     }))
 )

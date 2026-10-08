@@ -13,6 +13,7 @@ from app.core.database import Base
 from app.models.assistant import AssistantAction, AssistantTask, AssistantTaskStatus
 from app.models.customer import Customer, CustomerMember, CustomerProduct
 from app.models.customer_activity import CustomerActivity
+from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
 from app.services.assistant.contracts import DraftField, TaskDraft
 from app.services.assistant.coordinator import AssistantCoordinator, AssistantInput
 from app.services.assistant.real_writer import RealActivityWriter
@@ -38,6 +39,7 @@ def db(tmp_path, monkeypatch):
 
     Base.metadata.create_all(engine, tables=[Customer.__table__, CustomerProduct.__table__,
                                              CustomerMember.__table__, CustomerActivity.__table__,
+                                             CustomerLegacySourceProgress.__table__,
                                              AssistantTask.__table__, AssistantAction.__table__])
     monkeypatch.setattr("app.services.deal_journey_service.deal_journey_service.infer_for_customer", lambda *args: None)
     monkeypatch.setattr("app.services.deal_journey_service.deal_journey_service.record_event", lambda *args, **kw: None)

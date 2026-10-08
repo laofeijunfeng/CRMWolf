@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, watch } from 'vue'
+import { ref, computed, nextTick, watch, onBeforeUnmount } from 'vue'
 import { useForm, useField } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { toast } from 'vue-sonner'
@@ -107,6 +107,13 @@ const optionsError = computed(() => procurementMethodsError.value !== null || so
 const rawText = ref('')
 const parsing = ref(false)
 const parseStatus = ref('')
+let parseGeneration = 0
+function invalidateParse(): void {
+  parseGeneration += 1
+  parsing.value = false
+  parseStatus.value = ''
+}
+onBeforeUnmount(invalidateParse)
 const moreInfoOpen = ref(false)
 const industryHierarchy = ref<import('@/schemas/customer').CustomerIndustryHierarchy>({})
 const industryHierarchyLoading = ref(false)
@@ -134,7 +141,10 @@ const closeGuard = useDialogCloseGuard({
     || licenseExpiryDateValue.value !== licenseExpiryDateBaseline.value
   )),
   submitting: writeSubmitting,
-  emitOpen: (open) => emit('update:open', open),
+  emitOpen: (open) => {
+    if (!open) invalidateParse()
+    emit('update:open', open)
+  },
 })
 const showConfirmDialog = closeGuard.showConfirmDialog
 const fieldLabels: Record<string, string> = {
@@ -414,6 +424,7 @@ function retryCustomerDetail(): void {
 watch(
   [(): boolean => props.open, (): string | undefined => props.customerId, (): string => props.mode],
   async ([open, customerId]): Promise<void> => {
+    invalidateParse()
     if (!open) {
       if (closeGuard.handleParentClose()) return
       return
@@ -523,19 +534,25 @@ function applyParsedCustomer(info: CustomerParsedInfo, contact: CustomerParsedCo
   if (contact?.contact_gender === '1' || contact?.contact_gender === '2') {
     setFieldValue('contact_gender', contact.contact_gender === '1' ? '男' : '女')
   }
+  isDirty.value = true
+  submitError.value = null
   void nextTick().then(() => { applyingFormValues.value = false })
 }
 
 async function handleParse(): Promise<void> {
+  if (!props.open || props.mode !== 'create' || parsing.value) return
   const content = rawText.value.trim()
   if (content === '') {
     parseStatus.value = '先粘贴一段客户原文'
     return
   }
+  const generation = ++parseGeneration
+  const isCurrent = (): boolean => generation === parseGeneration && props.open && props.mode === 'create'
   parsing.value = true
   parseStatus.value = '正在解析…'
   try {
     await entityParseApi.parseCustomer(content, (event): void => {
+      if (!isCurrent()) return
       if (event.event === 'parsed' && event.customer_info !== undefined) {
         applyParsedCustomer(event.customer_info, event.contact_info ?? undefined)
         parseStatus.value = '已填入，可直接修改后保存'
@@ -545,10 +562,11 @@ async function handleParse(): Promise<void> {
       }
     })
   } catch {
+    if (!isCurrent()) return
     parseStatus.value = 'AI 解析失败，请稍后重试'
     toast.error('AI 解析失败，请稍后重试')
   } finally {
-    parsing.value = false
+    if (isCurrent()) parsing.value = false
   }
 }
 function applySuccessfulWriteBaselines(customer: CustomerResponse): void {

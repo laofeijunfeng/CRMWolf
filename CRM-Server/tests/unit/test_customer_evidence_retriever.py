@@ -1,5 +1,17 @@
+from dataclasses import replace
+from datetime import datetime
+
+import pytest
+
+from app.models.customer import Customer
+from app.models.customer_activity import CustomerActivity
+from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
+from app.models.sales_commitment import FollowUpTask, SalesCommitment
+from app.services.customer_evidence_builder import CustomerEvidenceBuilder
 from app.services.customer_evidence_retriever import CustomerEvidenceRetriever
 from app.services.customer_qdrant_index_service import CustomerEvidenceSearchResult
+from app.services.legacy_profile_source import source_origin
+from tests.unit.test_customer_intelligence_context_service import _seed_customer_context, _session
 
 
 class FakeEmbeddingService:
@@ -80,90 +92,227 @@ class FakeTaskEvidenceQdrant:
         return self.hits
 
 
-def _follow_up_task_hit(score: float = 0.9, source_object_id: str = "fut_2_0") -> CustomerEvidenceSearchResult:
+def _follow_up_row(model, **overrides):
+    fields = (
+        {"task_hash": "task-940"}
+        if model is FollowUpTask
+        else {
+            "commitment_hash": "commitment-940",
+            "content": "周五发送验收报告",
+        }
+    )
+    fields.update(
+        id=940,
+        team_id=2,
+        customer_id=101,
+        creator_id="9",
+        owner_id="9",
+        title="发送验收报告",
+        due_at=datetime(2026, 10, 1),
+        source_type="CUSTOMER_ACTIVITY",
+        source_key="activity:701",
+        source_activity_id=701,
+    )
+    fields.update(overrides)
+    return model(**fields)
+
+
+def _follow_up_hit(row):
+    builder = CustomerEvidenceBuilder()
+    evidence = builder.from_follow_up_task(row) if isinstance(row, FollowUpTask) else builder.from_sales_commitment(row)
+    assert evidence is not None
     return CustomerEvidenceSearchResult(
-        id="task-hit", score=score, tenant_id=2, team_id=2, customer_id=101,
-        source_type="follow_up_task", source_object_id=source_object_id,
-        business_object_type="follow_up_task", business_object_id=source_object_id,
-        title="跟进任务: 发送验收报告", text="王总明确说POC通过，周五发验收报告",
+        id=evidence.document_key,
+        score=0.9,
+        tenant_id=evidence.tenant_id,
+        team_id=evidence.team_id,
+        customer_id=evidence.customer_id,
+        source_type=evidence.source_type,
+        source_object_id=evidence.source_object_id,
+        business_object_type=evidence.business_object_type,
+        business_object_id=evidence.business_object_id,
+        title=evidence.title,
+        text=evidence.text,
     )
 
-def test_assistant2_backed_follow_up_task_evidence_is_excluded() -> None:
-    from types import SimpleNamespace
 
-    hit = _follow_up_task_hit()
-    qdrant = FakeTaskEvidenceQdrant([hit])
-    retriever = CustomerEvidenceRetriever(
-        embedding_service=FakeEmbeddingService(), qdrant_index_service=qdrant, min_score=0.45,
-    )
-    task_row = SimpleNamespace(public_id="fut_2_0", source_activity_id=55)
+@pytest.mark.parametrize("model", [FollowUpTask, SalesCommitment])
+@pytest.mark.parametrize("deleted_activity", [False, True], ids=["live", "deleted"])
+def test_legacy_public_follow_up_evidence_survives_assistant2_filter(model, deleted_activity) -> None:
+    engine, db = _session()
+    try:
+        _seed_customer_context(db)
+        row = _follow_up_row(model)
+        db.add(row)
+        db.flush()
+        if deleted_activity:
+            db.add(
+                CustomerActivityDeletionTombstone(
+                    team_id=2,
+                    customer_id=101,
+                    activity_id=701,
+                    submission_source="FORM",
+                )
+            )
+            row.source_activity_id = None
+            db.delete(db.query(CustomerActivity).filter_by(id=701).one())
+            db.flush()
+        hit = _follow_up_hit(row)
+        retriever = CustomerEvidenceRetriever(
+            embedding_service=FakeEmbeddingService(),
+            qdrant_index_service=FakeTaskEvidenceQdrant([hit]),
+            min_score=0.45,
+        )
+        result = retriever.retrieve_customer_evidence(
+            db,
+            team_id=2,
+            customer_id=101,
+            query_text="POC 验收",
+            evidence_limit=1,
+            exclude_assistant2=True,
+        )
+        assert result.state.status == "ok"
+        assert [(item.evidence_id, item.source_object_id) for item in result.hits] == [(hit.id, row.public_id)]
+    finally:
+        db.close()
+        engine.dispose()
 
-    class FakeTaskDb:
-        def scalar(self, statement):
-            return False  # underlying activity source ineligible (ASSISTANT_2)
 
-        def query(self, model):
-            class _Query:
-                def filter(self, *criteria):
-                    return self
+@pytest.mark.parametrize("model", [FollowUpTask, SalesCommitment])
+@pytest.mark.parametrize(
+    "case",
+    [
+        "assistant2",
+        "originless",
+        "unknown_activity",
+        "activity_conflict",
+        "public_source_hint",
+        "cross_team",
+        "cross_customer",
+        "conflicting_evidence_hint",
+        "malformed_id",
+        "unknown_id",
+    ],
+)
+def test_unverified_public_follow_up_evidence_is_excluded(model, case) -> None:
+    engine, db = _session()
+    try:
+        _seed_customer_context(db)
+        row = _follow_up_row(model)
+        if case in {"assistant2", "activity_conflict"}:
+            db.add(
+                CustomerActivity(
+                    id=902,
+                    team_id=2,
+                    customer_id=101,
+                    activity_kind="PHONE_FOLLOW_UP",
+                    source_content="2.0",
+                    creator_id="9",
+                    owner_id="9",
+                    submission_source="ASSISTANT_2",
+                    submission_id="turn-902",
+                    submission_fingerprint="a" * 64,
+                )
+            )
+            row.source_key = "activity:902"
+            if case == "assistant2":
+                row.source_activity_id = 902
+        elif case == "originless":
+            row.source_activity_id = None
+            row.source_key = "public:unverified"
+        elif case == "public_source_hint":
+            row.source_public_id = "act_unverified"
+        elif case == "unknown_activity":
+            row.source_activity_id = None
+            row.source_key = "activity:999"
+        elif case in {"cross_team", "cross_customer"}:
+            row.team_id = 3 if case == "cross_team" else 2
+            row.customer_id = 102
+            db.add(Customer(id=102, team_id=row.team_id, account_name="其他客户", city="深圳", creator_id="9"))
+            db.add(
+                CustomerActivity(
+                    id=903,
+                    team_id=row.team_id,
+                    customer_id=102,
+                    activity_kind="PHONE_FOLLOW_UP",
+                    source_content="其他客户的旧活动",
+                    creator_id="9",
+                    owner_id="9",
+                    submission_source="FORM",
+                )
+            )
+            row.source_key = "activity:903"
+            row.source_activity_id = 903
+        db.add(row)
+        db.flush()
+        hit = _follow_up_hit(row)
+        if case == "conflicting_evidence_hint":
+            other = _follow_up_row(
+                model,
+                id=941,
+                **({"task_hash": "task-941"} if model is FollowUpTask else {"commitment_hash": "commitment-941"}),
+            )
+            db.add(other)
+            db.flush()
+            hit = replace(hit, business_object_id=other.public_id)
+        elif case in {"malformed_id", "unknown_id"}:
+            prefix = "fut" if model is FollowUpTask else "scm"
+            identifier = f"{prefix}_legacy" if case == "malformed_id" else f"{prefix}_" + "f" * 32
+            hit = replace(hit, source_object_id=identifier, business_object_id=identifier)
+        elif case in {"cross_team", "cross_customer"}:
+            assert source_origin(db, row.team_id, row.customer_id, hit.source_type, row.public_id)
+            # A vector payload claiming this customer cannot borrow a real source from another scope.
+            hit = replace(hit, tenant_id=2, team_id=2, customer_id=101)
+        retriever = CustomerEvidenceRetriever(
+            embedding_service=FakeEmbeddingService(),
+            qdrant_index_service=FakeTaskEvidenceQdrant([hit]),
+            min_score=0.45,
+        )
+        result = retriever.retrieve_customer_evidence(
+            db,
+            team_id=2,
+            customer_id=101,
+            query_text="POC 验收",
+            evidence_limit=1,
+            exclude_assistant2=True,
+        )
+        assert result.state.status == "low_confidence"
+        assert result.hits == []
+        assert result.state.returned_count == 0
+    finally:
+        db.close()
+        engine.dispose()
 
-                def first(self):
-                    return task_row
-
-            return _Query()
-
-    result = retriever.retrieve_customer_evidence(
-        FakeTaskDb(), team_id=2, customer_id=101,
-        query_text="POC 验收", evidence_limit=1, exclude_assistant2=True,
-    )
-    assert result.hits == []
-    assert result.state.returned_count == 0
-
-def test_legacy_follow_up_task_evidence_without_activity_source_still_passes() -> None:
-    from types import SimpleNamespace
-
-    hit = _follow_up_task_hit(0.7, source_object_id="fut_legacy")
-    qdrant = FakeTaskEvidenceQdrant([hit])
-    retriever = CustomerEvidenceRetriever(
-        embedding_service=FakeEmbeddingService(), qdrant_index_service=qdrant, min_score=0.45,
-    )
-    task_row = SimpleNamespace(public_id="fut_legacy", source_activity_id=None)
-
-    class FakeTaskDb:
-        def scalar(self, statement):
-            return True
-
-        def query(self, model):
-            class _Query:
-                def filter(self, *criteria):
-                    return self
-
-                def first(self):
-                    return task_row
-
-            return _Query()
-
-    result = retriever.retrieve_customer_evidence(
-        FakeTaskDb(), team_id=2, customer_id=101,
-        query_text="POC 验收", evidence_limit=1, exclude_assistant2=True,
-    )
-    assert [item.evidence_id for item in result.hits] == ["task-hit"]
 
 def test_assistant2_flood_does_not_starve_legacy_evidence(monkeypatch) -> None:
     """Overfetch window full of 2.0 hits must not hide older legacy evidence."""
 
     legacy_hit = CustomerEvidenceSearchResult(
-        id="legacy-hit", score=0.50, tenant_id=2, team_id=2, customer_id=101,
-        source_type="follow_up", source_object_id="7",
-        business_object_type="customer_activity", business_object_id="7",
-        title="电话跟进", text="早期POC背景",
+        id="legacy-hit",
+        score=0.50,
+        tenant_id=2,
+        team_id=2,
+        customer_id=101,
+        source_type="follow_up",
+        source_object_id="7",
+        business_object_type="customer_activity",
+        business_object_id="7",
+        title="电话跟进",
+        text="早期POC背景",
     )
     flood = [
         CustomerEvidenceSearchResult(
-            id=f"assistant2-{index}", score=0.95, tenant_id=2, team_id=2, customer_id=101,
-            source_type="follow_up", source_object_id=str(900 + index),
-            business_object_type="customer_activity", business_object_id=str(900 + index),
-            title="助手活动", text="2.0 洪泛",
+            id=f"assistant2-{index}",
+            score=0.95,
+            tenant_id=2,
+            team_id=2,
+            customer_id=101,
+            source_type="follow_up",
+            source_object_id=str(900 + index),
+            business_object_type="customer_activity",
+            business_object_id=str(900 + index),
+            title="助手活动",
+            text="2.0 洪泛",
         )
         for index in range(6)
     ]
@@ -185,12 +334,18 @@ def test_assistant2_flood_does_not_starve_legacy_evidence(monkeypatch) -> None:
     monkeypatch.setattr(CustomerEvidenceRetriever, "_eligible_legacy_evidence", staticmethod(eligibility_by_source))
     qdrant = FloodQdrant()
     retriever = CustomerEvidenceRetriever(
-        embedding_service=FakeEmbeddingService(), qdrant_index_service=qdrant, min_score=0.45,
+        embedding_service=FakeEmbeddingService(),
+        qdrant_index_service=qdrant,
+        min_score=0.45,
     )
 
     result = retriever.retrieve_customer_evidence(
-        object(), team_id=2, customer_id=101,
-        query_text="POC", evidence_limit=1, exclude_assistant2=True,
+        object(),
+        team_id=2,
+        customer_id=101,
+        query_text="POC",
+        evidence_limit=1,
+        exclude_assistant2=True,
     )
     assert [hit.evidence_id for hit in result.hits] == ["legacy-hit"]
     # The retriever must have widened the search window beyond the initial 3N.

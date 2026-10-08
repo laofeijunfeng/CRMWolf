@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import BigInteger, create_engine, event, text
+from sqlalchemy import BigInteger, create_engine, event
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 
@@ -14,6 +14,7 @@ from app.core.list_export.catalogs import LIST_EXPORT_CATALOGS
 from app.core.list_query.catalogs.customers import CUSTOMERS_LIST_QUERY_CATALOG
 from app.core.list_query.engine import apply_filters, apply_sorts
 from app.models.customer import Contact, Customer, CustomerMember, CustomerProduct, CustomerStatus
+from app.models.deal_journey import CustomerDealJourney
 from app.models.product import Product
 from app.models.user import User
 from app.schemas.customer import CustomerListResponse
@@ -32,10 +33,7 @@ def db(tmp_path: Path):
     def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
         dbapi_connection.execute("PRAGMA foreign_keys=ON")
 
-    with engine.begin() as connection:
-        connection.execute(text("CREATE TABLE IF NOT EXISTS crm_customer_deal_journeys (id INTEGER PRIMARY KEY)"))
-
-    tables = [User.__table__, Product.__table__, Customer.__table__, CustomerProduct.__table__, CustomerMember.__table__, Contact.__table__]
+    tables = [User.__table__, Product.__table__, Customer.__table__, CustomerProduct.__table__, CustomerMember.__table__, Contact.__table__, CustomerDealJourney.__table__]
     renamed_indexes = []
     for table in tables:
         for index in table.indexes:

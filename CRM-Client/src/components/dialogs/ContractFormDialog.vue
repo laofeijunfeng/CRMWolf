@@ -235,7 +235,7 @@ const contactSelectOptions = computed(() =>
   contacts.value.map(contact => {
     const position = contact.position?.trim()
     return {
-      value: contact.id as number,
+      value: contact.id,
       label: `${contact.name}${position !== undefined && position !== '' ? ` (${position})` : ''}`,
     }
   })

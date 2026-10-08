@@ -11,10 +11,10 @@ import pytest
 from sqlalchemy import text
 
 from app.core.database import SessionLocal, engine
-from app.models.customer import Customer
 from app.models.contract import Contract, PaymentStatus
-from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
+from app.models.customer import Contact, Customer
 from app.models.customer_activity import CustomerActivity
+from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
 from app.models.deal_journey import (
     CustomerDealJourney,
     CustomerDealJourneyEvent,
@@ -25,7 +25,11 @@ from app.models.deal_journey import (
 from app.models.opportunity import Opportunity
 from app.models.team import Team
 from app.services.deal_journey_service import deal_journey_service
-from app.services.legacy_profile_source import advance_activity_progress, advance_eligible_progress, lock_source_customer
+from app.services.legacy_profile_source import (
+    advance_activity_progress,
+    advance_eligible_progress,
+    lock_source_customer,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -85,6 +89,7 @@ def journey_case():
             cleanup.execute(text("DELETE FROM crm_customer_activities WHERE customer_id=:customer AND team_id=:team"), params)
             cleanup.execute(text("DELETE FROM crm_opportunities WHERE customer_id=:customer AND team_id=:team"), params)
             cleanup.execute(text("DELETE FROM crm_customer_deal_journeys WHERE customer_id=:customer AND team_id=:team"), params)
+            cleanup.execute(text("DELETE FROM crm_contacts WHERE customer_id=:customer AND team_id=:team"), params)
             cleanup.execute(text("DELETE FROM crm_customers WHERE id=:customer AND team_id=:team"), params)
             cleanup.execute(text("DELETE FROM teams WHERE id=:team"), params)
             cleanup.commit()
@@ -304,9 +309,15 @@ def test_assistant_two_event_does_not_advance_legacy_progress(journey_case) -> N
 def test_preloaded_contract_does_not_close_journey_after_payment_reversal(journey_case) -> None:
     team_id, customer_id, first_id, _, opportunity_id = journey_case
     with SessionLocal() as setup:
+        signing_contact = Contact(
+            team_id=team_id, customer_id=customer_id, name="Payment regression signer", mobile="13800000000",
+        )
+        setup.add(signing_contact)
+        setup.flush()
         contract = Contract(
             team_id=team_id, customer_id=customer_id, opportunity_id=opportunity_id,
             deal_journey_id=first_id, contract_number=f"CT{uuid4().hex}",
+            signing_contact_id=signing_contact.id,
             contract_name="Payment regression", user_count=1, total_amount=Decimal("300.00"),
             license_type="PERPETUAL", standard_unit_price=Decimal("300.00"),
             owner_id="990126011", creator_id="990126011", payment_status=PaymentStatus.COMPLETED,

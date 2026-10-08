@@ -12,14 +12,14 @@ from app.models.customer_profile_projection import CustomerProfileCurrent, Custo
 from app.models.customer_vector_document import CustomerVectorDocument
 from app.models.deal_journey import CustomerDealJourney, CustomerDealJourneyEvent
 from app.models.operation_log import OperationLog
-from app.models.sales_commitment import FollowUpTask
+from app.models.sales_commitment import FollowUpTask, SalesCommitment
 from app.models.team import Team
 from app.services.customer_intelligence_context_service import CustomerIntelligenceContextService
 from app.services.customer_profile_evidence_resolver import CustomerProfileEvidenceResolver
 from app.services.customer_profile_projection_service import (
     CustomerProfileProjectionService,
 )
-from app.services.legacy_profile_source import fact_origin, follow_up_origin
+from app.services.legacy_profile_source import fact_origin, follow_up_origin, source_origin, source_status
 from tests.unit.test_customer_intelligence_context_service import _seed_customer_context, _session
 
 
@@ -138,15 +138,26 @@ def test_task_event_with_malformed_deleted_activity_key_is_unverified_not_an_err
     try:
         _seed_customer_context(db)
         task = FollowUpTask(
-            id=932, team_id=2, customer_id=101, creator_id="9", owner_id="9",
-            title="无法归因的任务", due_at=datetime(2026, 10, 1),
-            source_type="customer_activity", source_key="activity:bad-id", task_hash="bad-key-932",
+            id=932,
+            team_id=2,
+            customer_id=101,
+            creator_id="9",
+            owner_id="9",
+            title="无法归因的任务",
+            due_at=datetime(2026, 10, 1),
+            source_type="customer_activity",
+            source_key="activity:bad-id",
+            task_hash="bad-key-932",
         )
         db.add(task)
         db.flush()
         event = FollowUpTaskEvent(
-            id=933, team_id=2, task_id=932, event_type="UPDATED",
-            source_type="customer_activity", source_activity_id=None,
+            id=933,
+            team_id=2,
+            task_id=932,
+            event_type="UPDATED",
+            source_type="customer_activity",
+            source_activity_id=None,
         )
         db.add(event)
         db.flush()
@@ -184,6 +195,133 @@ def test_conflicting_business_reference_does_not_authorize_old_activity():
         engine.dispose()
 
 
+@pytest.mark.parametrize(
+    "model,kind,alias",
+    [
+        (FollowUpTask, "follow_up_task", "task"),
+        (SalesCommitment, "sales_commitment", "commitment"),
+    ],
+)
+def test_public_follow_up_sources_preserve_aliases_decimal_ids_and_exact_hints(model, kind, alias):
+    engine, db = _session()
+    try:
+        _seed_customer_context(db)
+        rows = []
+        for identifier in (940, 941):
+            fields = (
+                {"task_hash": f"task-{identifier}"}
+                if model is FollowUpTask
+                else {
+                    "commitment_hash": f"commitment-{identifier}",
+                    "content": "发送验收报告",
+                }
+            )
+            row = model(
+                id=identifier,
+                team_id=2,
+                customer_id=101,
+                creator_id="9",
+                owner_id="9",
+                title="旧活动跟进",
+                due_at=datetime(2026, 10, 1),
+                source_type="CUSTOMER_ACTIVITY",
+                source_key="activity:701",
+                source_activity_id=701,
+                **fields,
+            )
+            db.add(row)
+            rows.append(row)
+        db.flush()
+        row, other = rows
+        for source_id in (row.public_id, str(row.id), row.id):
+            assert source_status(db, 2, 101, kind, source_id) == "VERIFIED"
+            assert source_origin(db, 2, 101, alias, source_id, kind, source_id)
+            assert source_origin(db, 2, 101, kind, source_id, alias, source_id)
+        assert source_status(db, 2, 101, kind, row.public_id, kind, other.public_id) == "UNKNOWN"
+        assert source_status(db, 2, 101, kind, row.public_id, kind, str(row.id)) == "UNKNOWN"
+        assert source_status(db, 2, 101, kind, row.public_id, "customer_activity", "701") == "UNKNOWN"
+        assert source_status(db, 2, 101, kind, row.public_id, kind, None) == "UNKNOWN"
+        assert source_status(db, 2, 101, kind, row.public_id, None, row.public_id) == "UNKNOWN"
+        assert source_status(db, 3, 101, kind, row.public_id, kind, row.public_id) == "UNKNOWN"
+        assert source_status(db, 2, 102, kind, row.public_id, kind, row.public_id) == "UNKNOWN"
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "model,kind,prefix",
+    [
+        (FollowUpTask, "follow_up_task", "fut"),
+        (SalesCommitment, "sales_commitment", "scm"),
+    ],
+)
+def test_public_follow_up_sources_require_canonical_ids_and_verified_provenance(model, kind, prefix):
+    engine, db = _session()
+    try:
+        _seed_customer_context(db)
+        db.add(
+            CustomerActivity(
+                id=902,
+                team_id=2,
+                customer_id=101,
+                activity_kind="PHONE_FOLLOW_UP",
+                source_content="2.0",
+                creator_id="9",
+                owner_id="9",
+                submission_source="ASSISTANT_2",
+                submission_id="turn-902",
+                submission_fingerprint="a" * 64,
+            )
+        )
+        cases = [
+            ({"source_key": "activity:902", "source_activity_id": 902}, "EXCLUDED"),
+            ({"source_key": "activity:999", "source_activity_id": None}, "UNKNOWN"),
+            ({"source_key": "public:unverified", "source_activity_id": None}, "UNKNOWN"),
+            ({"source_key": "activity:902"}, "UNKNOWN"),
+            ({"source_public_id": "act_unverified"}, "UNKNOWN"),
+            ({"public_id": f"{prefix}_legacy"}, "UNKNOWN"),
+        ]
+        for identifier, (overrides, expected) in enumerate(cases, start=940):
+            fields = (
+                {"task_hash": f"task-{identifier}"}
+                if model is FollowUpTask
+                else {
+                    "commitment_hash": f"commitment-{identifier}",
+                    "content": "发送验收报告",
+                }
+            )
+            fields.update(
+                id=identifier,
+                team_id=2,
+                customer_id=101,
+                creator_id="9",
+                owner_id="9",
+                title="来源校验",
+                due_at=datetime(2026, 10, 1),
+                source_type="CUSTOMER_ACTIVITY",
+                source_key="activity:701",
+                source_activity_id=701,
+            )
+            fields.update(overrides)
+            row = model(**fields)
+            db.add(row)
+            db.flush()
+            assert source_status(db, 2, 101, kind, row.public_id, kind, row.public_id) == expected
+            assert not source_origin(db, 2, 101, kind, row.public_id, kind, row.public_id)
+        for source_id in (
+            None,
+            "",
+            f"{prefix}_" + "f" * 32,
+            f"{prefix}_" + "A" * 32,
+            "scm_" + "e" * 32 if prefix == "fut" else "fut_" + "e" * 32,
+        ):
+            assert source_status(db, 2, 101, kind, source_id, kind, source_id) == "UNKNOWN"
+    finally:
+        db.close()
+        engine.dispose()
+
+
 def test_deleted_legacy_activity_keeps_null_fk_task_and_commitment_origin():
     from app.models.sales_commitment import SalesCommitment
 
@@ -191,21 +329,42 @@ def test_deleted_legacy_activity_keeps_null_fk_task_and_commitment_origin():
     try:
         _seed_customer_context(db)
         commitment = SalesCommitment(
-            id=940, team_id=2, customer_id=101, creator_id="9", owner_id="9",
-            title="旧承诺", content="回访", source_type="CUSTOMER_ACTIVITY",
-            source_key="activity:701", source_activity_id=701, commitment_hash="commitment-940",
+            id=940,
+            team_id=2,
+            customer_id=101,
+            creator_id="9",
+            owner_id="9",
+            title="旧承诺",
+            content="回访",
+            source_type="CUSTOMER_ACTIVITY",
+            source_key="activity:701",
+            source_activity_id=701,
+            commitment_hash="commitment-940",
         )
         task = FollowUpTask(
-            id=941, team_id=2, customer_id=101, creator_id="9", owner_id="9",
-            title="独立旧任务", due_at=datetime(2026, 10, 1), source_type="CUSTOMER_ACTIVITY",
-            source_key="activity:701", source_activity_id=701, task_hash="task-941",
+            id=941,
+            team_id=2,
+            customer_id=101,
+            creator_id="9",
+            owner_id="9",
+            title="独立旧任务",
+            due_at=datetime(2026, 10, 1),
+            source_type="CUSTOMER_ACTIVITY",
+            source_key="activity:701",
+            source_activity_id=701,
+            task_hash="task-941",
         )
         db.add_all([commitment, task])
         db.flush()
         activity = db.query(CustomerActivity).filter_by(id=701).one()
-        db.add(CustomerActivityDeletionTombstone(
-            team_id=2, customer_id=101, activity_id=701, submission_source="FORM",
-        ))
+        db.add(
+            CustomerActivityDeletionTombstone(
+                team_id=2,
+                customer_id=101,
+                activity_id=701,
+                submission_source="FORM",
+            )
+        )
         commitment.source_activity_id = None
         task.source_activity_id = None
         db.delete(activity)
@@ -223,12 +382,22 @@ def test_null_fk_standalone_origin_excludes_deleted_assistant_and_unverified_sou
     engine, db = _session()
     try:
         _seed_customer_context(db)
-        db.add(CustomerActivityDeletionTombstone(
-            team_id=2, customer_id=101, activity_id=902, submission_source="ASSISTANT_2",
-        ))
-        db.add(CustomerActivityDeletionTombstone(
-            team_id=3, customer_id=101, activity_id=903, submission_source="FORM",
-        ))
+        db.add(
+            CustomerActivityDeletionTombstone(
+                team_id=2,
+                customer_id=101,
+                activity_id=902,
+                submission_source="ASSISTANT_2",
+            )
+        )
+        db.add(
+            CustomerActivityDeletionTombstone(
+                team_id=3,
+                customer_id=101,
+                activity_id=903,
+                submission_source="FORM",
+            )
+        )
         db.flush()
         for source_type, key in (
             ("CUSTOMER_ACTIVITY", "activity:902"),
@@ -239,14 +408,26 @@ def test_null_fk_standalone_origin_excludes_deleted_assistant_and_unverified_sou
             ("UNKNOWN", "activity:701"),
         ):
             task = FollowUpTask(
-                team_id=2, customer_id=101, creator_id="9", owner_id="9",
-                title="不可验证任务", due_at=datetime(2026, 10, 1),
-                source_type=source_type, source_key=key, task_hash="unverified",
+                team_id=2,
+                customer_id=101,
+                creator_id="9",
+                owner_id="9",
+                title="不可验证任务",
+                due_at=datetime(2026, 10, 1),
+                source_type=source_type,
+                source_key=key,
+                task_hash="unverified",
             )
             commitment = SalesCommitment(
-                team_id=2, customer_id=101, creator_id="9", owner_id="9",
-                title="不可验证承诺", content="回访", source_type=source_type,
-                source_key=key, commitment_hash="unverified",
+                team_id=2,
+                customer_id=101,
+                creator_id="9",
+                owner_id="9",
+                title="不可验证承诺",
+                content="回访",
+                source_type=source_type,
+                source_key=key,
+                commitment_hash="unverified",
             )
             assert not follow_up_origin(db, task, 2, 101)
             assert not follow_up_origin(db, commitment, 2, 101)
@@ -261,27 +442,58 @@ def test_follow_up_origin_rejects_conflicting_activity_public_id_and_commitment_
     engine, db = _session()
     try:
         _seed_customer_context(db)
-        db.add(CustomerActivity(
-            id=703, team_id=2, customer_id=101, activity_kind="PHONE_FOLLOW_UP",
-            source_content="另一个旧活动", creator_id="9", owner_id="9", submission_source="FORM",
-        ))
-        db.add(CustomerActivity(
-            id=902, team_id=2, customer_id=101, activity_kind="PHONE_FOLLOW_UP",
-            source_content="2.0", creator_id="9", owner_id="9",
-            submission_source="ASSISTANT_2", submission_id="turn-902",
-            submission_fingerprint="a" * 64,
-        ))
+        db.add(
+            CustomerActivity(
+                id=703,
+                team_id=2,
+                customer_id=101,
+                activity_kind="PHONE_FOLLOW_UP",
+                source_content="另一个旧活动",
+                creator_id="9",
+                owner_id="9",
+                submission_source="FORM",
+            )
+        )
+        db.add(
+            CustomerActivity(
+                id=902,
+                team_id=2,
+                customer_id=101,
+                activity_kind="PHONE_FOLLOW_UP",
+                source_content="2.0",
+                creator_id="9",
+                owner_id="9",
+                submission_source="ASSISTANT_2",
+                submission_id="turn-902",
+                submission_fingerprint="a" * 64,
+            )
+        )
         commitment = SalesCommitment(
-            id=940, team_id=2, customer_id=101, creator_id="9", owner_id="9",
-            title="2.0 承诺", content="秘密", source_type="CUSTOMER_ACTIVITY",
-            source_key="activity:902", source_activity_id=902, commitment_hash="commitment-940",
+            id=940,
+            team_id=2,
+            customer_id=101,
+            creator_id="9",
+            owner_id="9",
+            title="2.0 承诺",
+            content="秘密",
+            source_type="CUSTOMER_ACTIVITY",
+            source_key="activity:902",
+            source_activity_id=902,
+            commitment_hash="commitment-940",
         )
         db.add(commitment)
         db.flush()
         task = FollowUpTask(
-            team_id=2, customer_id=101, creator_id="9", owner_id="9",
-            title="旧任务", due_at=datetime(2026, 10, 1), source_type="CUSTOMER_ACTIVITY",
-            source_key="activity:701", source_activity_id=701, task_hash="conflict",
+            team_id=2,
+            customer_id=101,
+            creator_id="9",
+            owner_id="9",
+            title="旧任务",
+            due_at=datetime(2026, 10, 1),
+            source_type="CUSTOMER_ACTIVITY",
+            source_key="activity:701",
+            source_activity_id=701,
+            task_hash="conflict",
         )
         assert follow_up_origin(db, task, 2, 101)
         task.source_key = "activity:902"
@@ -309,21 +521,41 @@ def test_commitment_source_requires_same_customer_and_no_conflicting_task_hints(
     try:
         _seed_customer_context(db)
         good = SalesCommitment(
-            id=940, team_id=2, customer_id=101, creator_id="9", owner_id="9",
-            title="旧承诺", content="回访", source_type="CUSTOMER_ACTIVITY",
-            source_key="activity:701", commitment_hash="commitment-940",
+            id=940,
+            team_id=2,
+            customer_id=101,
+            creator_id="9",
+            owner_id="9",
+            title="旧承诺",
+            content="回访",
+            source_type="CUSTOMER_ACTIVITY",
+            source_key="activity:701",
+            commitment_hash="commitment-940",
         )
         other_customer = SalesCommitment(
-            id=941, team_id=2, customer_id=102, creator_id="9", owner_id="9",
-            title="其他客户承诺", content="回访", source_type="CUSTOMER_ACTIVITY",
-            source_key="activity:701", commitment_hash="commitment-941",
+            id=941,
+            team_id=2,
+            customer_id=102,
+            creator_id="9",
+            owner_id="9",
+            title="其他客户承诺",
+            content="回访",
+            source_type="CUSTOMER_ACTIVITY",
+            source_key="activity:701",
+            commitment_hash="commitment-941",
         )
         db.add_all([good, other_customer])
         db.flush()
         task = FollowUpTask(
-            team_id=2, customer_id=101, creator_id="9", owner_id="9",
-            title="关联承诺任务", due_at=datetime(2026, 10, 1),
-            source_type="sales_commitment", source_key="commitment:940", task_hash="task-940",
+            team_id=2,
+            customer_id=101,
+            creator_id="9",
+            owner_id="9",
+            title="关联承诺任务",
+            due_at=datetime(2026, 10, 1),
+            source_type="sales_commitment",
+            source_key="commitment:940",
+            task_hash="task-940",
         )
         assert follow_up_origin(db, task, 2, 101)
         task.commitment_id = 941
@@ -567,7 +799,11 @@ def test_publication_accepts_qualified_source_and_creates_certified_current_poin
         db.commit()
         _seed_customer_context(db)
         context = CustomerIntelligenceContextService().build_context(
-            db, team_id=2, customer_id=101, query_text="", evidence_limit=0,
+            db,
+            team_id=2,
+            customer_id=101,
+            query_text="",
+            evidence_limit=0,
         )
         service = CustomerProfileProjectionService()
         draft = service.draft_from_context(context=context.to_dict(), source_event_key=None)
@@ -578,7 +814,9 @@ def test_publication_accepts_qualified_source_and_creates_certified_current_poin
 
         assert is_certified_profile_version(publication.version)
         customer, current, version = service.get_current_by_public_id(
-            db, team_id=2, customer_public_id=db.query(Customer).filter_by(id=101).one().public_id,
+            db,
+            team_id=2,
+            customer_public_id=db.query(Customer).filter_by(id=101).one().public_id,
         )
         assert customer.id == 101
         assert current.current_profile_version_id == publication.version.id

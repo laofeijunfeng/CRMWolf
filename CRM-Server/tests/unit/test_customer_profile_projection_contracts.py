@@ -158,7 +158,10 @@ def test_projection_service_publishes_reads_and_deduplicates_on_sqlite(profile_d
     assert "current_situation" in publication.changed_sections
     assert publication.version.profile_version == 1
     assert publication.current.profile_status == CustomerProfileStatus.READY
-    assert publication.current.latest_source_watermark_json == draft.source_watermark
+    assert publication.current.latest_source_watermark_json == {
+        **draft.source_watermark,
+        "source_provenance_status": "VERIFIED",
+    }
 
     customer, current, version = service.get_current_by_public_id(
         profile_db, team_id=2, customer_public_id=profile_db.query(Customer).filter_by(id=101).one().public_id

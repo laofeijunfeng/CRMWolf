@@ -13,12 +13,12 @@ from app.models.customer_activity import CustomerActivity
 from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
 from app.models.customer_fact import CustomerFact, CustomerFactRevision, CustomerFactSource
 from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
-from app.models.industry import Industry
 from app.models.deal_journey import CustomerDealJourney, CustomerDealJourneyEvent
+from app.models.industry import Industry
 from app.models.opportunity import Opportunity
 from app.models.payment import PaymentPlan, PaymentRecord
-from app.models.sales_commitment import FollowUpTask, FollowUpTaskEvent, SalesCommitment
 from app.models.product import Product, ProductModule
+from app.models.sales_commitment import FollowUpTask, FollowUpTaskEvent, SalesCommitment
 from app.services.customer_fact_service import CustomerFactInput, CustomerFactSourceInput, customer_fact_service
 from app.services.customer_intelligence_context_service import (
     CustomerIntelligenceContextNotFound,
@@ -111,8 +111,8 @@ class LowScoreQdrantIndexService(FakeQdrantIndexService):
         ]
 
 
-def _session():
-    engine = create_engine("sqlite:///:memory:")
+def _session(*, database_url="sqlite:///:memory:"):
+    engine = create_engine(database_url)
 
     @event.listens_for(engine, "before_cursor_execute", retval=True)
     def _skip_sqlite_indexes(conn, cursor, statement, parameters, context, executemany):

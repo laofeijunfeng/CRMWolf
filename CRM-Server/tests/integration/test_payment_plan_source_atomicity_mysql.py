@@ -13,7 +13,7 @@ from sqlalchemy import text
 from app.core.database import SessionLocal, engine
 from app.crud.payment import payment_plan_crud
 from app.models.contract import Contract, ContractStatus
-from app.models.customer import Customer
+from app.models.customer import Contact, Customer
 from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
 from app.models.deal_journey import CustomerDealJourney, CustomerDealJourneyEvent
 from app.models.operation_log import OperationLog
@@ -64,9 +64,15 @@ def test_record_event_failure_rolls_back_payment_plans_progress_and_events(monke
         )
         seed.add(opportunity)
         seed.flush()
+        signing_contact = Contact(
+            team_id=team.id, customer_id=customer.id, name=f"Signing contact {suffix}", mobile="13800000000",
+        )
+        seed.add(signing_contact)
+        seed.flush()
         contract = Contract(
             team_id=team.id, contract_number=f"CT{suffix}", contract_name=f"Contract {suffix}",
             customer_id=customer.id, opportunity_id=opportunity.id, deal_journey_id=journey.id,
+            signing_contact_id=signing_contact.id,
             user_count=1, total_amount=Decimal("300.00"), license_type="PERPETUAL",
             standard_unit_price=Decimal("300.00"), status=ContractStatus.SIGNED,
             owner_id="990126011", creator_id="990126011",
@@ -133,6 +139,7 @@ def test_record_event_failure_rolls_back_payment_plans_progress_and_events(monke
             cleanup.execute(text("DELETE FROM crm_contracts WHERE id=:contract AND team_id=:team"), params)
             cleanup.execute(text("DELETE FROM crm_opportunities WHERE customer_id=:customer AND team_id=:team"), params)
             cleanup.execute(text("DELETE FROM crm_customer_deal_journeys WHERE id=:journey AND team_id=:team"), params)
+            cleanup.execute(text("DELETE FROM crm_contacts WHERE customer_id=:customer AND team_id=:team"), params)
             cleanup.execute(text("DELETE FROM crm_customers WHERE id=:customer AND team_id=:team"), params)
             cleanup.execute(text("DELETE FROM teams WHERE id=:team"), params)
             cleanup.commit()

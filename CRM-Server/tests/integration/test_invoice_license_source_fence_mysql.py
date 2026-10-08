@@ -18,7 +18,7 @@ from app.crud.crud_license_application import license_application_crud
 from app.crud.invoice import invoice_application_crud
 from app.models.approval import Approval, ApprovalStatus
 from app.models.contract import Contract, ContractStatus
-from app.models.customer import Customer
+from app.models.customer import Contact, Customer
 from app.models.deal_journey import CustomerDealJourney
 from app.models.invoice import InvoiceApplication, InvoiceTitle, InvoiceType
 from app.models.license_application import LicenseApplication, LicenseApplicationStatus
@@ -67,10 +67,16 @@ def invoice_rows():
         )
         seed.add(opportunity)
         seed.flush()
+        signing_contact = Contact(
+            team_id=team.id, customer_id=customer.id, name=f"Signing contact {suffix}", mobile="13800000000",
+        )
+        seed.add(signing_contact)
+        seed.flush()
         contracts = [
             Contract(
                 team_id=team.id, contract_number=f"CT{suffix}{index}", contract_name=f"Contract {index}",
                 customer_id=customer.id, opportunity_id=opportunity.id, deal_journey_id=journey.id,
+                signing_contact_id=signing_contact.id,
                 user_count=1, total_amount=Decimal("500.00"), license_type="PERPETUAL",
                 standard_unit_price=Decimal("500.00"), status=ContractStatus.SIGNED,
                 owner_id="990126011", creator_id="990126011",
@@ -108,6 +114,7 @@ def invoice_rows():
                             {"team": team_id, "first": contract_id, "second": other_contract_id})
             cleanup.execute(text("DELETE FROM crm_opportunities WHERE team_id=:team AND customer_id=:customer"), params)
             cleanup.execute(text("DELETE FROM crm_customer_deal_journeys WHERE team_id=:team AND id=:journey"), params)
+            cleanup.execute(text("DELETE FROM crm_contacts WHERE team_id=:team AND customer_id=:customer"), params)
             cleanup.execute(text("DELETE FROM crm_customers WHERE team_id=:team AND id=:customer"), params)
             cleanup.execute(text("DELETE FROM teams WHERE id=:team"), params)
             cleanup.commit()
