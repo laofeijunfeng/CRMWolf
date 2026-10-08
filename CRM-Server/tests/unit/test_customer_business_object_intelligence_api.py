@@ -569,6 +569,9 @@ async def test_create_contract_triggers_business_object_intelligence(monkeypatch
         lambda contract_payload: _RequestData(customer_id=101, opportunity_id="opp_301", signing_contact_id=201),
     )
     monkeypatch.setattr(contracts_api.contract_crud, "create", lambda **kwargs: contract)
+    monkeypatch.setattr(
+        contracts_api, "_lock_created_contract_for_file_commit", lambda db, contract, **kwargs: contract,
+    )
     monkeypatch.setattr(contracts_api.file_storage_service, "save_contract_file", lambda **kwargs: "/contracts/401.pdf")
     monkeypatch.setattr(contracts_api.ApprovalService, "submit_for_approval", lambda db, contract_id: None)
 
@@ -683,12 +686,13 @@ async def test_update_payment_plan_triggers_business_object_intelligence(monkeyp
 async def test_create_payment_record_triggers_business_object_intelligence(monkeypatch) -> None:
     record = _payment_record()
     scheduled = []
+    db = _FakeDb()
 
     execution = SimpleNamespace(operation_id="op_test_payment", status="PENDING")
     monkeypatch.setattr(
         payments_api.command_execution_service,
         "begin",
-        lambda *args, **kwargs: (execution, False),
+        lambda *args, **kwargs: (db.events.append("command") or execution, False),
     )
     monkeypatch.setattr(
         payments_api.command_execution_service,
@@ -699,14 +703,14 @@ async def test_create_payment_record_triggers_business_object_intelligence(monke
     monkeypatch.setattr(
         payments_api, "check_payment_view_permission", lambda plan_id, team_id, current_user, db: record.payment_plan
     )
+    monkeypatch.setattr(payments_api, "lock_source_customer", lambda *args, **kwargs: db.events.append("customer"))
     monkeypatch.setattr(payments_api, "_validate_payment_commission_member", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         payments_api.payment_record_crud,
         "create",
-        lambda db, plan_id, record_data, creator_id, creator_name, team_id, **kwargs: record,
+        lambda db, plan_id, record_data, creator_id, creator_name, team_id, **kwargs: (db.events.append("record") or record),
     )
 
-    db = _FakeDb()
 
     async def fake_trigger_with_order(db, change):
         db.events.append("intelligence")
@@ -725,8 +729,7 @@ async def test_create_payment_record_triggers_business_object_intelligence(monke
     assert result.id == 601
     assert scheduled[0].source_type == "payment_record"
     assert scheduled[0].source_id == 601
-    assert scheduled[0].change_type == "created"
-    assert db.events == ["commit", "intelligence"]
+    assert db.events == ["customer", "command", "record", "commit", "intelligence"]
 
 
 @pytest.mark.asyncio

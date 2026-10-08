@@ -23,11 +23,7 @@ export const leadSchema = z.object({
     .max(50, '联系人姓名最多 50 个字符'),
 
   contact_phone: z.string()
-    .regex(/^1[3-9]\d{9}$/, '请输入正确的手机号码'),
-
-  remark: z.string()
-    .max(500, '备注最多 500 个字符')
-    .optional()
+    .regex(/^1[3-9]\d{9}$/, '请输入正确的手机号码')
 })
 
 export type LeadForm = z.infer<typeof leadSchema>

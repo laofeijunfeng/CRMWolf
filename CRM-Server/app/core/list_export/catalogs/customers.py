@@ -6,6 +6,8 @@ CUSTOMERS_LIST_EXPORT_CATALOG = ListExportCatalog(
     fields=(
         ListExportField("public_id", "业务 ID", "text"),
         ListExportField("account_name", "客户名称", "text"),
+        ListExportField("primary_contact_name", "联系人", "text"),
+        ListExportField("primary_contact_mobile", "联系电话", "text"),
         ListExportField("owner", "负责人", "text"),
         ListExportField("collaborators", "协作者", "text"),
         ListExportField("city", "城市", "text"),

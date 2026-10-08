@@ -16,6 +16,7 @@ from app.models.deployment import DeploymentInfo
 from app.models.contract import Contract
 from app.constants.business_types import BusinessType
 from app.services.business_number_generator import BusinessNumberGenerator
+from app.services.legacy_profile_source import advance_eligible_progress, lock_source_customer
 from app.utils.approval_delete_guard import assert_deletable_approval_resource
 from app.schemas.license_application import (
     LicenseApplicationCreate,
@@ -131,7 +132,7 @@ class LicenseApplicationCRUD:
         """
         # 验证客户存在
         customer = db.query(Customer).filter(
-            Customer.id == obj_in.customer_id,
+            Customer.public_id == obj_in.customer_id,
             Customer.team_id == team_id
         ).first()
         if not customer:
@@ -142,7 +143,7 @@ class LicenseApplicationCRUD:
             deployment = db.query(DeploymentInfo).filter(
                 DeploymentInfo.id == obj_in.deployment_info_id,
                 DeploymentInfo.team_id == team_id,
-                DeploymentInfo.customer_id == obj_in.customer_id
+                DeploymentInfo.customer_id == customer.id
             ).first()
             if not deployment:
                 raise ValueError("部署信息不存在或不属于该客户")
@@ -152,7 +153,7 @@ class LicenseApplicationCRUD:
             contract = db.query(Contract).filter(
                 Contract.id == obj_in.contract_id,
                 Contract.team_id == team_id,
-                Contract.customer_id == obj_in.customer_id
+                Contract.customer_id == customer.id
             ).first()
             if not contract:
                 raise ValueError("合同不存在或不属于该客户")
@@ -164,7 +165,7 @@ class LicenseApplicationCRUD:
         db_obj = LicenseApplication(
             team_id=team_id,
             application_number=application_number,
-            customer_id=obj_in.customer_id,
+            customer_id=customer.id,
             deployment_info_id=obj_in.deployment_info_id,
             contract_id=obj_in.contract_id,
             expiry_date=obj_in.expiry_date,
@@ -480,26 +481,42 @@ class LicenseApplicationCRUD:
         db.refresh(application)
         return application
 
+    def _lock_issue_customer(self, db: Session, team_id: int, application_id: int) -> Optional[int]:
+        with db.no_autoflush:
+            customer_id = db.query(LicenseApplication.customer_id).filter_by(
+                id=application_id, team_id=team_id,
+            ).scalar()
+        if customer_id is not None:
+            lock_source_customer(db, team_id=team_id, customer_id=int(customer_id))
+        return int(customer_id) if customer_id is not None else None
+
     def _ensure_approved_for_issue(
         self,
         db: Session,
         team_id: int,
-        application_id: int
+        application_id: int,
+        customer_id: Optional[int],
     ) -> Optional[LicenseApplication]:
-        """校验 License 申请已通过通用审批，只有审批通过后才能发放。"""
-        from app.crud.approval import approval_crud
-        from app.constants.business_types import BusinessType
-        from app.models.approval import ApprovalStatus
+        """Check the current approval and application while holding the customer lock."""
+        from app.models.approval import Approval, ApprovalStatus
 
-        application = self.get(db, team_id, application_id)
-        if not application:
+        if customer_id is None:
             return None
 
-        approval = approval_crud.get_by_entity(
-            db, BusinessType.LICENSE, application_id, team_id
-        )
+        # Approval writers lock Customer -> Approval -> LicenseApplication.
+        # Lock in the same order and bypass any older RR identity-map values.
+        with db.no_autoflush:
+            approval = db.query(Approval).filter_by(
+                business_type=BusinessType.LICENSE, business_id=application_id, team_id=team_id,
+            ).order_by(Approval.id.desc()).populate_existing().with_for_update().first()
         if not approval or approval.status != ApprovalStatus.APPROVED:
             raise ValueError("License申请未通过审批，不可发放")
+        with db.no_autoflush:
+            application = db.query(LicenseApplication).filter_by(
+                id=application_id, team_id=team_id,
+            ).populate_existing().with_for_update().one_or_none()
+        if application is None or int(application.customer_id) != customer_id:
+            raise ValueError("License申请所属客户已变更，请重试")
 
         if application.status == LicenseApplicationStatus.ISSUED:
             raise ValueError("License申请已发放")
@@ -515,7 +532,8 @@ class LicenseApplicationCRUD:
         issuer_id: str
     ) -> Optional[LicenseApplication]:
         """发放已审批通过的 License 申请（简化版本）。"""
-        application = self._ensure_approved_for_issue(db, team_id, application_id)
+        customer_id = self._lock_issue_customer(db, team_id, application_id)
+        application = self._ensure_approved_for_issue(db, team_id, application_id, customer_id)
         if not application:
             return None
 
@@ -524,10 +542,9 @@ class LicenseApplicationCRUD:
         application.approver_id = issuer_id
         application.approved_time = business_now()
 
+        self.update_customer_license_info(db, team_id, application, commit=False)
         db.commit()
         db.refresh(application)
-
-        self.update_customer_license_info(db, team_id, application)
 
         return application
 
@@ -540,7 +557,8 @@ class LicenseApplicationCRUD:
         issuer_id: str
     ) -> Optional[LicenseApplication]:
         """发放已审批通过的 License 申请（完整版本，解析 License 信息）。"""
-        application = self._ensure_approved_for_issue(db, team_id, application_id)
+        customer_id = self._lock_issue_customer(db, team_id, application_id)
+        application = self._ensure_approved_for_issue(db, team_id, application_id, customer_id)
         if not application:
             return None
 
@@ -554,10 +572,9 @@ class LicenseApplicationCRUD:
         application.approver_id = issuer_id
         application.approved_time = business_now()
 
+        self.update_customer_license_info(db, team_id, application, commit=False)
         db.commit()
         db.refresh(application)
-
-        self.update_customer_license_info(db, team_id, application)
 
         return application
 
@@ -593,31 +610,20 @@ class LicenseApplicationCRUD:
     def update_customer_license_expiry(
         self,
         db: Session,
+        team_id: int,
         customer_id: int,
         expiry_date: date
     ) -> bool:
-        """
-        更新客户 License 到期时间
-
-        如果新的到期时间晚于当前客户的 license_expiry_date，则更新。
-
-        Args:
-            db: 数据库会话
-            customer_id: 客户ID
-            expiry_date: 新的到期时间
-
-        Returns:
-            bool: 是否成功更新
-
-        Note:
-            此方法已弃用，请使用 update_customer_license_info
-        """
-        customer = db.query(Customer).filter(Customer.id == customer_id).first()
-        if not customer:
+        """Update a customer's latest License expiry in its owning team."""
+        with db.no_autoflush:
+            customer = db.query(Customer).filter_by(
+                id=customer_id, team_id=team_id
+            ).populate_existing().with_for_update().one_or_none()
+        if customer is None:
             return False
 
-        # 只有新的到期时间晚于当前时间才更新
         if customer.license_expiry_date is None or expiry_date > customer.license_expiry_date:
+            advance_eligible_progress(db, team_id=team_id, customer_id=customer.id)
             customer.license_expiry_date = expiry_date
             db.commit()
             return True
@@ -628,7 +634,9 @@ class LicenseApplicationCRUD:
         self,
         db: Session,
         team_id: int,
-        issued_application: LicenseApplication
+        issued_application: LicenseApplication,
+        *,
+        commit: bool = True,
     ) -> None:
         """
         更新客户 License 最晚到期时间和类型。
@@ -642,20 +650,24 @@ class LicenseApplicationCRUD:
             team_id: 团队ID
             issued_application: 本次已发放的 License 申请
         """
-        customer = db.query(Customer).filter(
-            Customer.id == issued_application.customer_id,
-            Customer.team_id == team_id
-        ).first()
-        if not customer:
+        if issued_application.team_id != team_id:
+            return
+        with db.no_autoflush:
+            customer = db.query(Customer).filter_by(
+                id=issued_application.customer_id, team_id=team_id
+            ).populate_existing().with_for_update().one_or_none()
+        if customer is None:
             return
 
         if (
             customer.license_expiry_date is None
             or issued_application.expiry_date > customer.license_expiry_date
         ):
+            advance_eligible_progress(db, team_id=team_id, customer_id=customer.id)
             customer.license_expiry_date = issued_application.expiry_date
             customer.license_type = issued_application.license_type
-            db.commit()
+            if commit:
+                db.commit()
 
 
 # 创建全局实例

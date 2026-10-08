@@ -67,6 +67,7 @@ const confirmationReply = {
 } as const
 type TrackingRow = FollowUpTaskItem & {
   customer_name: string
+  product_name: string
   owner_name: string
   tracking_content: string
   tracking_time: string
@@ -132,6 +133,14 @@ const fields: ListFieldDefinition[] = [
     label: '客户',
     type: 'text',
     column: { width: '220px' },
+    filter: true,
+    sort: true
+  },
+  {
+    key: 'product_name',
+    label: '产品',
+    type: 'text',
+    column: { width: '120px' },
     filter: true,
     sort: true
   },
@@ -212,6 +221,7 @@ const columnPreferenceMode = computed<'default' | 'custom'>(() => isCustomFilter
 const rows = computed<TrackingRow[]>(() => tasks.value.map((task) => ({
   ...task,
   customer_name: task.customer?.name ?? '-',
+  product_name: task.customer?.product_name ?? '-',
   owner_name: task.owner_info?.name ?? task.owner_id,
   tracking_content: task.title.trim().length > 0
     ? task.title
@@ -936,6 +946,10 @@ watchEffect(() => {
         <span class="tracking-cell-strong">{{ row.customer_name }}</span>
       </template>
 
+      <template #cell-product_name="{ row }">
+        {{ row.product_name }}
+      </template>
+
       <template #cell-tracking_content="{ row }">
         <div class="tracking-content-cell">
           <button
@@ -1071,6 +1085,10 @@ watchEffect(() => {
                       <div class="tracking-attribute-item">
                         <div class="tracking-attribute-label">客户</div>
                         <div class="tracking-attribute-value">{{ selectedTask.customer?.name ?? '-' }}</div>
+                      </div>
+                      <div class="tracking-attribute-item">
+                        <div class="tracking-attribute-label">产品</div>
+                        <div class="tracking-attribute-value">{{ selectedTask.customer?.product_name ?? '-' }}</div>
                       </div>
                       <div class="tracking-attribute-item">
                         <div class="tracking-attribute-label">负责人</div>

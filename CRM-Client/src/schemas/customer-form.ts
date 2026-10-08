@@ -10,7 +10,6 @@ export const companyScaleOptions = [
 ] as const
 
 const customerLicenseTypeSchema = z.enum(['TRIAL', 'OFFICIAL']).optional().or(z.literal(''))
-const customerLifecycleStatusSchema = z.union([z.literal(0), z.literal(1)]).optional()
 const customerLicenseExpirySchema = z.string().optional().or(z.literal(''))
 
 const rejectExpiryWithoutLicenseType = (values: Record<string, unknown>): boolean => {
@@ -54,7 +53,6 @@ const customerFormObjectSchema = z.object({
     invalid_type_error: '请选择采购方式'
   }).int().positive('请选择采购方式'),
   industry: z.string().max(100).optional().or(z.literal('')),
-  status: customerLifecycleStatusSchema,
   license_type: customerLicenseTypeSchema,
   license_expiry_date: customerLicenseExpirySchema,
 })
@@ -84,7 +82,6 @@ export const customerCreateSchema = customerFormObjectSchema.pick({
   product_public_id: true,
   default_procurement_method_id: true,
   industry: true,
-  status: true,
   license_type: true,
   license_expiry_date: true,
 }).extend({

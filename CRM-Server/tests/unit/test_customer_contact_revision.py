@@ -3,9 +3,20 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import pytest
+
 from app.crud.customer import ContactCRUD
 from app.models.customer import Contact
 from app.schemas.customer import ContactUpdate
+
+
+@pytest.fixture(autouse=True)
+def _mock_source_lock_for_isolated_contacts(monkeypatch):
+    from app.crud import customer as customer_module
+
+    monkeypatch.setattr(customer_module, "lock_source_customer", lambda *args, **kwargs: None)
+    monkeypatch.setattr(customer_module, "advance_eligible_progress", lambda *args, **kwargs: None)
+    monkeypatch.setattr(ContactCRUD, "_locked_contact", staticmethod(lambda db, contact: contact))
 
 
 def _contact(*, contact_id: int, is_primary: int, revision: int = 1) -> Contact:

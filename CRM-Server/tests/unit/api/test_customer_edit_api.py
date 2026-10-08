@@ -61,7 +61,9 @@ def _patch_route_dependencies(monkeypatch, customer):
     _allow_edit_permission(monkeypatch, customer)
     real_update_status = customers_api.customer_crud.update_status_with_version
     crud_db = MagicMock()
-    crud_db.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = customer
+    crud_db.query.return_value.filter.return_value.populate_existing.return_value.with_for_update.return_value.first.return_value = customer
+    from app.crud import customer as customer_module
+    monkeypatch.setattr(customer_module, "advance_eligible_progress", lambda *args, **kwargs: None)
 
     def update_status_with_version(db, db_customer, *, status, expected_version):
         calls.updates.append({"customer": db_customer, "status": status, "expected_version": expected_version})
@@ -191,6 +193,8 @@ def _patch_snapshot_route_dependencies(monkeypatch, customer):
     real_update_snapshot = customers_api.customer_crud.update_license_snapshot
     crud_db = MagicMock()
     crud_db.query.return_value.filter.return_value.populate_existing.return_value.with_for_update.return_value.first.return_value = customer
+    from app.crud import customer as customer_module
+    monkeypatch.setattr(customer_module, "advance_eligible_progress", lambda *args, **kwargs: None)
 
     def update_license_snapshot(db, db_customer, payload):
         calls.updates.append(payload)
@@ -1041,6 +1045,7 @@ def _patch_create_dependencies(monkeypatch, *, industry=None, industries=None, l
         lambda db, team_id, product_public_id: SimpleNamespace(id=1, team_id=team_id, public_id=product_public_id),
     )
     monkeypatch.setattr("app.crud.customer.replace_product_links", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.crud.customer.advance_eligible_progress", lambda *args, **kwargs: None)
 
 
 def test_create_persists_status_license_and_industry_code(monkeypatch):
@@ -1163,6 +1168,8 @@ def test_contact_create_flushes_without_commit_or_refresh_when_commit_false(monk
     added = []
     db.add.side_effect = lambda obj: added.append(obj)
     monkeypatch.setattr(contact_crud, "get_primary_by_customer_id", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.crud.customer.lock_source_customer", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.crud.customer.advance_eligible_progress", lambda *args, **kwargs: None)
 
     created = contact_crud.create(
         db,

@@ -401,13 +401,15 @@ watch(
 
 <template>
   <Dialog :open="props.open" @update:open="handleOpenChange">
-    <DialogContent class="license-application-dialog w-[calc(100vw-2rem)] max-h-[min(90vh,90dvh)] overflow-y-auto overscroll-contain [scroll-padding-bottom:calc(5rem+env(safe-area-inset-bottom,0px))]">
+    <DialogContent class="license-application-form-dialog license-application-dialog w-[calc(100vw-2rem)]">
       <DialogHeader>
         <DialogTitle>申请 License</DialogTitle>
         <DialogDescription>选择部署信息、License 类型和有效期，提交后进入审批流程。</DialogDescription>
       </DialogHeader>
 
-      <form class="license-application-dialog__form" novalidate @submit.prevent="handleSubmit">
+      <div class="license-application-form-dialog__body">
+
+      <form id="license-application-form" class="license-application-dialog__form" novalidate @submit.prevent="handleSubmit">
         <div class="license-application-dialog__grid">
           <SelectField
             id="license-deployment"
@@ -499,15 +501,18 @@ watch(
           :disabled="submitting"
         />
 
-        <DialogFooter class="license-application-dialog__footer">
+        </form>
+      </div>
+
+
+        <DialogFooter class="license-application-form-dialog__footer">
           <Button type="button" variant="outline" :disabled="submitting" @click="handleCancel">
             取消
           </Button>
-          <Button type="submit" :disabled="submitting || !hasDeployments">
+          <Button type="submit" form="license-application-form" :disabled="submitting || !hasDeployments">
             {{ submitting ? '提交中...' : '提交申请' }}
           </Button>
         </DialogFooter>
-      </form>
     </DialogContent>
   </Dialog>
 
@@ -595,5 +600,27 @@ watch(
   .license-application-dialog__grid {
     grid-template-columns: 1fr;
   }
+}
+</style>
+
+<style lang="scss">
+@use '@/styles/variables-v2.scss' as *;
+
+/* 非 scoped：DialogContent 经 Portal 渲染，scoped data 属性不随 class 传递 */
+.license-application-form-dialog {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  max-height: $wolf-modal-height-mobile-v2;
+  overflow: hidden;
+}
+
+.license-application-form-dialog__body {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: $wolf-space-lg-v2;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-bottom: calc($wolf-space-xl-v2 + $wolf-safe-area-bottom-v2);
 }
 </style>

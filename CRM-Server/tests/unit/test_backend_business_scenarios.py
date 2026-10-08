@@ -47,6 +47,7 @@ from app.models.customer_activity import CustomerActivity
 from app.models.customer_activity_agent_origin import CustomerActivityAgentOrigin
 from app.models.customer_fact import CustomerFact, CustomerFactRevision, CustomerFactSource
 from app.models.customer_intelligence_run import CustomerIntelligenceRun
+from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
 from app.models.customer_vector_document import CustomerVectorDocument
 from app.models.deal_journey import CustomerDealJourney, CustomerDealJourneyEvent, DealJourneyEventType
 from app.models.deployment import DeploymentInfo
@@ -153,6 +154,7 @@ def scenario_env(monkeypatch):
         Permission.__table__,
         RolePermission.__table__,
         Customer.__table__,
+        CustomerLegacySourceProgress.__table__,
         Contact.__table__,
         CustomerMember.__table__,
         CustomerProduct.__table__,

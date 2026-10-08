@@ -39,6 +39,12 @@ from app.models.sales_commitment import (
     SalesCommitmentStatus,
 )
 from app.schemas.system_recovery import FollowUpConfirmationDeliveryRecoveryCandidate
+from app.services.legacy_profile_source import (
+    activity_origin,
+    advance_eligible_progress,
+    follow_up_origin,
+    lock_source_customer,
+)
 from app.utils.time import (
     DUE_AT_GRANULARITY_DATETIME,
     FOLLOW_UP_TASK_DUE_WINDOW_OVERDUE,
@@ -144,6 +150,27 @@ def _sync_task_status_timestamps(db_obj: FollowUpTask, data: dict[str, Any]) -> 
         db_obj.cancelled_at = data.get("cancelled_at") or db_obj.cancelled_at or now
         db_obj.completed_at = None
 
+
+def _lock_profile_source(db: Session, row: SalesCommitment | FollowUpTask) -> bool:
+    lock_source_customer(db, team_id=row.team_id, customer_id=row.customer_id)
+    return follow_up_origin(db, row, row.team_id, row.customer_id)
+
+
+def _advance_profile_source(db: Session, row: SalesCommitment | FollowUpTask) -> None:
+    advance_eligible_progress(db, team_id=row.team_id, customer_id=row.customer_id)
+
+
+def _eligible_task_event(db: Session, event: FollowUpTaskEvent) -> FollowUpTask | None:
+    task = db.query(FollowUpTask).filter_by(id=event.task_id, team_id=event.team_id).one_or_none()
+    if task is None:
+        return None
+    lock_source_customer(db, team_id=task.team_id, customer_id=task.customer_id)
+    # A deletion SET NULLs the task FK; the task's source_key and deletion
+    # tombstone still identify the original activity. Require the same source
+    # chain as readers, rather than granting eligibility to any old activity.
+    from app.services.legacy_profile_source import task_event_source_status
+
+    return task if task_event_source_status(db, event, task, task.team_id, task.customer_id) == "VERIFIED" else None
 
 class SalesCommitmentCRUD:
     def get_by_id(self, db: Session, commitment_id: int, team_id: int | None = None) -> SalesCommitment | None:
@@ -256,7 +283,10 @@ class SalesCommitmentCRUD:
         data = _dump(obj_in)
         data["source_key"] = _resolve_source_key(data)
         db_obj = SalesCommitment(**data)
+        eligible = _lock_profile_source(db, db_obj)
         db.add(db_obj)
+        if eligible:
+            _advance_profile_source(db, db_obj)
         return _flush_or_commit(db, db_obj, commit=commit)
 
     def update(
@@ -268,11 +298,14 @@ class SalesCommitmentCRUD:
         commit: bool = True,
     ) -> SalesCommitment:
         data = _dump(obj_in, exclude_unset=True)
+        eligible_before = _lock_profile_source(db, db_obj)
         changed = any(getattr(db_obj, field, None) != value for field, value in data.items())
         for field, value in data.items():
             setattr(db_obj, field, value)
         if changed:
             db_obj.post_commit_revision = int(getattr(db_obj, "post_commit_revision", None) or 0) + 1
+            if eligible_before or follow_up_origin(db, db_obj, db_obj.team_id, db_obj.customer_id):
+                _advance_profile_source(db, db_obj)
         return _flush_or_commit(db, db_obj, commit=commit)
 
 
@@ -594,7 +627,10 @@ class FollowUpTaskCRUD:
         data["source_key"] = _resolve_source_key(data)
         db_obj = FollowUpTask(**data)
         _sync_task_status_timestamps(db_obj, data)
+        eligible = _lock_profile_source(db, db_obj)
         db.add(db_obj)
+        if eligible:
+            _advance_profile_source(db, db_obj)
         return _flush_or_commit(db, db_obj, commit=commit)
 
     def update(
@@ -606,27 +642,46 @@ class FollowUpTaskCRUD:
         commit: bool = True,
     ) -> FollowUpTask:
         data = _dump(obj_in, exclude_unset=True)
+        eligible_before = _lock_profile_source(db, db_obj)
+        previous = {field: getattr(db_obj, field, None) for field in (*data, "completed_at", "cancelled_at")}
         for field, value in data.items():
             setattr(db_obj, field, value)
         _sync_task_status_timestamps(db_obj, data)
+        if any(getattr(db_obj, field, None) != value for field, value in previous.items()):
+            if eligible_before or follow_up_origin(db, db_obj, db_obj.team_id, db_obj.customer_id):
+                _advance_profile_source(db, db_obj)
         return _flush_or_commit(db, db_obj, commit=commit)
 
     def complete(self, db: Session, db_obj: FollowUpTask, *, commit: bool = True) -> FollowUpTask:
+        eligible = _lock_profile_source(db, db_obj)
+        changed = db_obj.status != FollowUpTaskStatus.COMPLETED or db_obj.completed_at is None or db_obj.cancelled_at is not None
         db_obj.status = FollowUpTaskStatus.COMPLETED
-        db_obj.completed_at = business_now()
+        if changed:
+            db_obj.completed_at = business_now()
         db_obj.cancelled_at = None
+        if eligible and changed:
+            _advance_profile_source(db, db_obj)
         return _flush_or_commit(db, db_obj, commit=commit)
 
     def cancel(self, db: Session, db_obj: FollowUpTask, *, commit: bool = True) -> FollowUpTask:
+        eligible = _lock_profile_source(db, db_obj)
+        changed = db_obj.status != FollowUpTaskStatus.CANCELLED or db_obj.cancelled_at is None or db_obj.completed_at is not None
         db_obj.status = FollowUpTaskStatus.CANCELLED
-        db_obj.cancelled_at = business_now()
+        if changed:
+            db_obj.cancelled_at = business_now()
         db_obj.completed_at = None
+        if eligible and changed:
+            _advance_profile_source(db, db_obj)
         return _flush_or_commit(db, db_obj, commit=commit)
 
     def reopen(self, db: Session, db_obj: FollowUpTask, *, commit: bool = True) -> FollowUpTask:
+        eligible = _lock_profile_source(db, db_obj)
+        changed = db_obj.status != FollowUpTaskStatus.OPEN or db_obj.completed_at is not None or db_obj.cancelled_at is not None
         db_obj.status = FollowUpTaskStatus.OPEN
         db_obj.completed_at = None
         db_obj.cancelled_at = None
+        if eligible and changed:
+            _advance_profile_source(db, db_obj)
         return _flush_or_commit(db, db_obj, commit=commit)
 
     def _apply_task_filters(
@@ -690,7 +745,10 @@ class FollowUpTaskEventCRUD:
         commit: bool = True,
     ) -> FollowUpTaskEvent:
         db_obj = FollowUpTaskEvent(**_dump(obj_in))
+        eligible_task = _eligible_task_event(db, db_obj)
         db.add(db_obj)
+        if eligible_task is not None:
+            _advance_profile_source(db, eligible_task)
         return _flush_or_commit(db, db_obj, commit=commit)
 
     def list_by_task(

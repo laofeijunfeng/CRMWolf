@@ -100,6 +100,14 @@
       "label": "客户名称",
       "type": "text"
     },
+    "primary_contact_name": {
+      "label": "联系人",
+      "type": "text"
+    },
+    "primary_contact_mobile": {
+      "label": "联系电话",
+      "type": "text"
+    },
     "owner": {
       "label": "负责人",
       "type": "text"
@@ -160,6 +168,10 @@
     },
     "customer_name": {
       "label": "客户",
+      "type": "text"
+    },
+    "product_name": {
+      "label": "产品",
       "type": "text"
     },
     "tracking_content": {

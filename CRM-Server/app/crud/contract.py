@@ -14,6 +14,7 @@ from app.utils.approval_delete_guard import assert_deletable_approval_resource
 from app.schemas.contract import ContractCreate, ContractUpdate
 from app.services.business_number_generator import BusinessNumberGenerator
 from app.services.contract import ContractPricingService
+from app.services.legacy_profile_source import advance_eligible_progress, lock_source_customer
 from app.utils.time import business_now
 from app.core.list_query import (
     FilterCondition,
@@ -450,6 +451,7 @@ class ContractCRUD:
         from app.services.operation_log_service import operation_log_service
         
         contract_data = obj_in.model_dump()
+        lock_source_customer(db, team_id=team_id, customer_id=int(contract_data['customer_id']))
         explicit_owner_id = contract_data.pop('owner_id', None)
         
         contract_number = BusinessNumberGenerator.generate('CT', db)
@@ -498,8 +500,7 @@ class ContractCRUD:
         )
         
         db.add(db_obj)
-        db.commit()
-        db.refresh(db_obj)
+        db.flush()
 
         operator = user_crud.get_by_id(db, int(creator_id))
         operator_name = operator.name if operator else None
@@ -523,7 +524,8 @@ class ContractCRUD:
                 "totalAmount": float(db_obj.total_amount),
                 "customerId": db_obj.customer_id,
                 "customerName": customer.account_name if customer else None
-            }
+            },
+            commit=False,
         )
 
         from app.models.deal_journey import DealJourneyEventType, DealJourneySourceType
@@ -540,6 +542,7 @@ class ContractCRUD:
             actor_id=creator_id,
             summary=f"创建合同：{db_obj.contract_name}",
         )
+        advance_eligible_progress(db, team_id=team_id, customer_id=int(db_obj.customer_id))
         db.commit()
         db.refresh(db_obj)
 
@@ -560,6 +563,7 @@ class ContractCRUD:
     ) -> Contract:
         from app.models.opportunity import Opportunity
         from app.models.customer import Customer
+        lock_source_customer(db, team_id=team_id, customer_id=int(customer_id))
 
         if self.has_active_contract_for_opportunity(db, opportunity_id, team_id):
             raise ValueError("该商机已创建合同")
@@ -599,8 +603,7 @@ class ContractCRUD:
         )
         
         db.add(db_obj)
-        db.commit()
-        db.refresh(db_obj)
+        db.flush()
 
         from app.models.deal_journey import DealJourneyEventType, DealJourneySourceType
         from app.services.deal_journey_service import deal_journey_service
@@ -616,6 +619,7 @@ class ContractCRUD:
             actor_id=creator_id,
             summary=f"创建合同：{db_obj.contract_name}",
         )
+        advance_eligible_progress(db, team_id=team_id, customer_id=int(db_obj.customer_id))
         db.commit()
         db.refresh(db_obj)
 
@@ -629,6 +633,15 @@ class ContractCRUD:
         db_obj: Contract,
         obj_in: ContractUpdate
     ) -> Contract:
+        team_id = int(db_obj.team_id)
+        customer_id = int(db_obj.customer_id)
+        lock_source_customer(db, team_id=team_id, customer_id=customer_id)
+        with db.no_autoflush:
+            db_obj = db.query(Contract).filter(
+                Contract.id == db_obj.id, Contract.team_id == team_id,
+            ).populate_existing().with_for_update().one()
+        if int(db_obj.customer_id) != customer_id:
+            raise ValueError("合同所属客户已变更，请重试")
         update_data = obj_in.model_dump(exclude_unset=True)
         
         if 'total_amount' in update_data or 'user_count' in update_data or \
@@ -656,6 +669,8 @@ class ContractCRUD:
                 )
                 update_data['expiry_date'] = expiry_date
         
+        if any(getattr(db_obj, field) != value for field, value in update_data.items()):
+            advance_eligible_progress(db, team_id=team_id, customer_id=customer_id)
         for field, value in update_data.items():
             setattr(db_obj, field, value)
         
@@ -686,6 +701,15 @@ class ContractCRUD:
         contract = self.get_by_id(db, contract_id)
         if not contract:
             return False
+        team_id = int(contract.team_id)
+        customer_id = int(contract.customer_id)
+        lock_source_customer(db, team_id=team_id, customer_id=customer_id)
+        with db.no_autoflush:
+            contract = db.query(Contract).filter(
+                Contract.id == contract_id, Contract.team_id == team_id,
+            ).populate_existing().with_for_update().one_or_none()
+        if contract is None or int(contract.customer_id) != customer_id:
+            raise ValueError("合同所属客户已变更，请重试")
 
         if contract.deleted_at is not None:
             raise ValueError("合同已被删除")
@@ -704,6 +728,9 @@ class ContractCRUD:
         if contract.status != ContractStatus.DRAFT:
             raise ValueError("只有草稿状态的合同可以删除")
 
+        advance_eligible_progress(
+            db, team_id=int(contract.team_id), customer_id=int(contract.customer_id), deleted=True,
+        )
         # 软删除：设置 deleted_at 时间戳
         contract.deleted_at = business_now()
         contract.status = ContractStatus.DRAFT  # 合同状态回到草稿
@@ -753,10 +780,22 @@ class ContractCRUD:
         contract = self.get_by_id(db, contract_id)
         if not contract or not contract.deleted_at:
             return False
+        team_id = int(contract.team_id)
+        customer_id = int(contract.customer_id)
+        lock_source_customer(db, team_id=team_id, customer_id=customer_id)
+        with db.no_autoflush:
+            contract = db.query(Contract).filter(
+                Contract.id == contract_id, Contract.team_id == team_id,
+            ).populate_existing().with_for_update().one_or_none()
+        if contract is None or int(contract.customer_id) != customer_id:
+            raise ValueError("合同所属客户已变更，请重试")
+        if not contract.deleted_at:
+            return False
 
         if self.has_active_contract_for_opportunity(db, contract.opportunity_id, contract.team_id):
             raise ValueError("该商机已创建合同，无法恢复该合同")
 
+        advance_eligible_progress(db, team_id=int(contract.team_id), customer_id=int(contract.customer_id))
         contract.deleted_at = None
         db.commit()
         return True

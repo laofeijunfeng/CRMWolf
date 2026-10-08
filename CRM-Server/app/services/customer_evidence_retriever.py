@@ -218,46 +218,12 @@ class CustomerEvidenceRetriever:
     def _eligible_legacy_evidence(
         db: Session, item: CustomerEvidenceSearchResult, team_id: int, customer_id: int,
     ) -> bool:
-        activity_backed = item.source_type in {"follow_up", "customer_activity"} or item.business_object_type == "customer_activity"
-        if activity_backed:
-            source_id = item.source_object_id
-            if item.business_object_type == "customer_activity" and item.business_object_id != source_id:
-                return False
-            if not source_id or not source_id.isdecimal():
-                return False
-            return bool(db.scalar(select(eligible_activity_source(team_id, customer_id, int(source_id)))))
-        if item.source_type == "business_flow" or item.business_object_type == "deal_journey_event":
-            event_id = item.source_object_id
-            if not event_id or not event_id.isdecimal():
-                return False
-            event = db.query(CustomerDealJourneyEvent).filter(
-                CustomerDealJourneyEvent.id == int(event_id),
-                CustomerDealJourneyEvent.team_id == team_id,
-                CustomerDealJourneyEvent.customer_id == customer_id,
-            ).first()
-            if event is None:
-                return False
-            if event.source_type in {"customer_activity", "customer_follow_up"}:
-                return event.source_id is not None and bool(
-                    db.scalar(select(eligible_activity_source(team_id, customer_id, event.source_id)))
-                )
-            return True
-        if item.source_type == "follow_up_task" or item.business_object_type == "follow_up_task":
-            from app.models.sales_commitment import FollowUpTask
+        from app.services.legacy_profile_source import source_origin
 
-            task_row = db.query(FollowUpTask).filter(
-                FollowUpTask.public_id == item.source_object_id,
-                FollowUpTask.team_id == team_id,
-                FollowUpTask.customer_id == customer_id,
-            ).first()
-            if task_row is None:
-                return False
-            if task_row.source_activity_id is None:
-                return True
-            return bool(db.scalar(
-                select(eligible_activity_source(team_id, customer_id, int(task_row.source_activity_id)))
-            ))
-        return True
+        return source_origin(
+            db, team_id, customer_id, item.source_type, item.source_object_id,
+            item.business_object_type, item.business_object_id,
+        )
 
     def _empty_state(
         self,

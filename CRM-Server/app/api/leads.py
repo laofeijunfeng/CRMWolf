@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, Header, HTTPException, status, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from typing import Iterator, List, Optional
 from datetime import datetime, timedelta
@@ -18,6 +18,7 @@ from app.schemas.lead import (
     LeadBatchImportRequest, LeadBatchImportResponse,
     LeadTrendResponse, LeadConversionResponse, LeadMarkInvalidRequest,
 )
+from app.schemas.lead_parse import LeadParseRequest
 from app.schemas.list_export import LeadListExportRequest
 from app.schemas.common import PaginatedResponse
 from app.schemas.customer import ConvertLeadToCustomer, ConvertResponse
@@ -46,6 +47,7 @@ from app.core.list_export import (
     list_export_file_response,
     run_list_export_or_400,
 )
+from app.services.ai_parser.factory import EntityAIParserFactory
 
 router = APIRouter(prefix="/v1/leads", tags=["线索管理"])
 
@@ -294,6 +296,42 @@ def export_leads(
         file_stem=f"线索列表-{'公海线索' if request.tab == 'public' else '全部线索'}",
     ))
     return list_export_file_response(generated)
+
+
+@router.post("/parse", summary="AI 解析线索信息", description="AI 解析线索信息（SSE 流式响应），解析结果回填表单，不创建线索")
+async def parse_lead_info(
+    request: LeadParseRequest,
+    current_user: User = Depends(get_current_active_user),
+    team_id: int = Depends(get_current_user_team),
+):
+    """
+    AI 解析线索信息（SSE 流式响应）
+
+    SSE 事件类型：
+    - status: 状态更新
+    - content: AI 思考过程片段
+    - parsed: 解析结果（lead_info 含 source_public_id / product_public_id）
+    - error: 错误
+    """
+    parser = EntityAIParserFactory.get_parser("lead")
+    if not parser:
+        raise HTTPException(status_code=500, detail="Parser not found")
+
+    async def generate_sse():
+        db = SessionLocal()
+        try:
+            async for event in parser.parse_stream(db, request.content, team_id):
+                yield f"data: {json.dumps(event, ensure_ascii=False, default=str)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'event': 'error', 'message': f'AI 解析失败：{str(e)}'}, ensure_ascii=False)}\n\n"
+        finally:
+            db.close()
+
+    return StreamingResponse(
+        generate_sse(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/", response_model=LeadResponse, status_code=status.HTTP_201_CREATED, summary="创建线索", description="创建新的线索")

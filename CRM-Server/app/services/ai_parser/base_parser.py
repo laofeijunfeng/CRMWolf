@@ -167,7 +167,7 @@ class EntityAIParserBase(ABC):
                     {"role": "user", "content": user_message}
                 ],
                 "temperature": 0.1,
-                "max_tokens": 1024,
+                "max_tokens": 4096,
                 "stream": True
             }
 
@@ -213,12 +213,26 @@ class EntityAIParserBase(ABC):
                             except json.JSONDecodeError:
                                 continue
 
-                    # 解析完整响应
+                    # 解析完整响应。reasoning 模型可能把 token 预算耗在思考上，
+                    # content 为空或被截断时给出可读错误，而不是裸 JSONDecodeError。
+                    if not full_content.strip():
+                        yield {"event": "error", "message": "AI 输出为空（思考过程可能耗尽了输出额度），请重试"}
+                        return
                     clean_content = self._clean_json_response(full_content)
-                    parsed = json.loads(clean_content)
+                    try:
+                        parsed = json.loads(clean_content)
+                    except json.JSONDecodeError:
+                        logger.warning(
+                            "%s AI parse got malformed JSON (len=%d): %.200s",
+                            self.entity_type, len(clean_content), clean_content,
+                        )
+                        yield {"event": "error", "message": "AI 输出被截断或格式异常，请重试"}
+                        return
 
-                    # 调用子类的解析方法
+                    # 调用子类的解析方法，并把名称解析成表单可用的 public_id
                     result = self.parse_ai_response(parsed)
+                    if hasattr(self, "attach_catalog_ids"):
+                        self.attach_catalog_ids(result, db, team_id)
 
                     yield {
                         "event": "parsed",

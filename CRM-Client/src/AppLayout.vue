@@ -233,12 +233,15 @@ const isFixedWorkspaceRoute = computed(() => (
 const appLayoutClass = computed(() => ({
   'app-layout--fixed': isFixedWorkspaceRoute.value,
 }))
+const isContainedChatRoute = computed(() => (
+  route.name === 'SalesAssistant' || route.name === 'AgentChat' || route.path.startsWith('/agent')
+))
 const mainViewClass = computed(() => ({
-  'main-view--contained': route.name === 'AgentChat' || route.path.startsWith('/agent'),
+  'main-view--contained': isContainedChatRoute.value,
   'main-view--fixed': isFixedWorkspaceRoute.value,
 }))
 const mainContentClass = computed(() => ({
-  'main-content--contained': route.name === 'AgentChat' || route.path.startsWith('/agent'),
+  'main-content--contained': isContainedChatRoute.value,
   'main-content--fixed': isFixedWorkspaceRoute.value,
 }))
 

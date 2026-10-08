@@ -4,7 +4,7 @@ Business writes and the durable customer-intelligence run are not always able
 to share one transaction yet.  This read-side reconciliation closes that
 post-commit crash window: it compares the current business snapshot with the
 watermark captured by the last published profile and creates an idempotent
-refresh intent when the snapshot is newer, regressed, or missing.
+refresh intent when the snapshot differs, regresses, or is missing.
 """
 
 from __future__ import annotations
@@ -166,7 +166,7 @@ class CustomerIntelligenceReconciliationService:
                         team_id=owning_team_id,
                         customer_id=customer_id,
                         source_watermark=source_watermark,
-                        reason="对账发现业务水位高于档案已处理水位",
+                        reason="对账发现档案来源快照与当前业务来源不一致",
                     )
                     request = self.refresh_service.enqueue_committed_event_refresh(
                         db,
@@ -237,9 +237,32 @@ class CustomerIntelligenceReconciliationService:
                 source_watermark,
             )
         known_watermark = _json_object(version.source_watermark_json)
-        comparison = self.watermark_service.compare(source_watermark, known_watermark)
+        metadata_keys = ("source_snapshot_hash", "source_policy_version", "source_provenance_status")
+        excluded_keys = (*metadata_keys, "customer_updated_at")
+        comparison = self.watermark_service.compare(
+            {key: value for key, value in source_watermark.items() if key not in excluded_keys},
+            {key: value for key, value in known_watermark.items() if key not in excluded_keys},
+        )
+        # These metadata fields are equality tokens, not monotonic watermarks.
+        # Even identical unknown values cannot certify a published source.
+        metadata_changed = any(
+            source_watermark.get(key) != known_watermark.get(key)
+            or key not in source_watermark
+            or key not in known_watermark
+            for key in metadata_keys
+        )
+        metadata_unknown = (
+            not source_watermark.get("source_snapshot_hash")
+            or not source_watermark.get("source_policy_version")
+            or source_watermark.get("source_provenance_status") != "VERIFIED"
+            or not known_watermark.get("source_snapshot_hash")
+            or not known_watermark.get("source_policy_version")
+            or known_watermark.get("source_provenance_status") != "VERIFIED"
+        )
         needs_refresh = bool(
-            comparison.advanced_keys
+            metadata_unknown
+            or metadata_changed
+            or comparison.advanced_keys
             or comparison.regressed_keys
             or comparison.missing_keys
         )

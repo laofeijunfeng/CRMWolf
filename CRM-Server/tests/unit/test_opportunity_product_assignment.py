@@ -6,12 +6,17 @@ import pytest
 from sqlalchemy import BigInteger, create_engine, event
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.schema import DropIndex
 
 from app.core.database import Base
 from app.crud.opportunity import opportunity_crud
 from app.crud.product import product_crud
+from app.models.customer import Customer
+from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
 from app.models.opportunity import Opportunity, OpportunityProductModule
 from app.models.product import Product, ProductModule
+from app.models.team import Team
+from app.schemas.opportunity import OpportunityUpdate
 from app.schemas.product import ProductCreate, ProductModuleCreate
 
 
@@ -28,16 +33,24 @@ def db(tmp_path: Path):
     def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
         dbapi_connection.execute("PRAGMA foreign_keys=OFF")
 
-    Base.metadata.create_all(
-        engine,
-        tables=[
-            Product.__table__,
-            ProductModule.__table__,
-            Opportunity.__table__,
-            OpportunityProductModule.__table__,
-        ],
-    )
+    tables = [
+        Customer.__table__, CustomerLegacySourceProgress.__table__, Product.__table__,
+        ProductModule.__table__, Opportunity.__table__, OpportunityProductModule.__table__,
+        Team.__table__,
+    ]
+    previous_indexes = {}
+    for table in tables:
+        with engine.begin() as connection:
+            for index in table.indexes:
+                previous = previous_indexes.get(index.name)
+                if previous is not None:
+                    connection.execute(DropIndex(previous))
+            table.create(connection)
+        previous_indexes.update((index.name, index) for index in table.indexes)
     session = sessionmaker(bind=engine, expire_on_commit=False)()
+    session.add(Customer(id=1, team_id=1, account_name="客户", city="上海", creator_id="u1"))
+    session.add(Team(id=1, name="测试团队", code="OPP1", owner_id=1))
+    session.commit()
     try:
         yield session
     finally:
@@ -82,6 +95,12 @@ def test_assign_product_binds_selected_modules_and_rejects_foreign_modules(db):
 
     assert opportunity.product_id == crm.id
     assert [module.public_id for module in opportunity.selected_modules] == [addon.public_id]
+    revision = db.query(CustomerLegacySourceProgress).filter_by(team_id=1, customer_id=1).one().eligible_revision
+    opportunity_crud.assign_product(
+        db, opportunity, team_id=1, product_public_id=crm.public_id,
+        module_public_ids=[addon.public_id, addon.public_id],
+    )
+    assert db.query(CustomerLegacySourceProgress).filter_by(team_id=1, customer_id=1).one().eligible_revision == revision
 
     with pytest.raises(ValueError, match="不属于所选产品"):
         opportunity_crud.assign_product(
@@ -91,6 +110,16 @@ def test_assign_product_binds_selected_modules_and_rejects_foreign_modules(db):
             product_public_id=crm.public_id,
             module_public_ids=[oa_base.public_id],
         )
+
+def test_opportunity_update_advances_only_for_changed_business_fields(db):
+    opportunity = _opportunity(db)
+    opportunity_crud.update(db, opportunity, OpportunityUpdate(opportunity_name="新商机"))
+    progress = db.query(CustomerLegacySourceProgress).filter_by(team_id=1, customer_id=1).one()
+    assert progress.eligible_revision == 1
+    opportunity_crud.update(db, opportunity, OpportunityUpdate(opportunity_name="新商机"))
+    db.refresh(progress)
+    assert progress.eligible_revision == 1
+
 
 
 def test_assign_product_replaces_previous_modules_when_product_changes(db):

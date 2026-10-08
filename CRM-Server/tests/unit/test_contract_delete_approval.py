@@ -16,6 +16,8 @@ from sqlalchemy.orm import sessionmaker
 
 from app.models.contract import Contract, ContractStatus
 from app.models.approval import Approval, ApprovalRecord, ApprovalStatus, ApprovalAction, ApprovalFlow, ApprovalNode
+from app.models.customer import Customer
+from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
 from app.crud.contract import contract_crud
 from app.constants.approval_phase import ApprovalPhase
 
@@ -30,6 +32,11 @@ def db_session():
 
     # 创建表结构（手动定义，避免导入所有模型）
     from sqlalchemy import Table, Column, BigInteger, String, Integer, DateTime, Date, Numeric, Text, ForeignKey
+    # 保留真实模型的客户锁和来源进度表；合同手工表没有索引，不会与客户的 idx_team_id 冲突。
+    Customer.__table__.to_metadata(metadata)
+    # SQLite 仅对 INTEGER PRIMARY KEY 自动生成主键，生产模型仍使用 BigInteger。
+    progress_table = CustomerLegacySourceProgress.__table__.to_metadata(metadata)
+    progress_table.c.id.type = BigInteger().with_variant(Integer(), "sqlite")
 
     # 合同表
     contracts_table = Table(
@@ -134,6 +141,8 @@ def db_session():
     metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     session = Session()
+    session.add(Customer(id=1, team_id=1, account_name="测试客户", city="北京", creator_id="user_001"))
+    session.commit()
     yield session
     session.close()
     engine.dispose()

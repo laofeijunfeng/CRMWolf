@@ -53,6 +53,7 @@ from app.models.customer_identity_term import (
 )
 from app.models.customer_enrichment_job import CustomerEnrichmentJob
 from app.models.customer_intelligence_run import CustomerIntelligenceRun, CustomerIntelligenceRunStatus
+from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
 from app.models.customer_opportunity_suggestion_job import CustomerOpportunitySuggestionJob
 from app.models.customer_profile_projection import (
     CustomerProfileCurrent,
@@ -210,6 +211,7 @@ __all__ = [
     "CustomerEnrichmentJob",
     "CustomerIntelligenceRun",
     "CustomerIntelligenceRunStatus",
+    "CustomerLegacySourceProgress",
     "CustomerMember",
     "CustomerOpportunitySuggestionJob",
     "CustomerProfileCurrent",

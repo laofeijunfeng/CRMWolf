@@ -71,6 +71,8 @@ vi.mock('@/components/crmwolf', () => ({
       const editAction = props.getRowActions(row).primaryActions?.find(action => action.id === 'edit')
       return h('div', { key: row.id }, [
         slots['cell-account_name']?.({ row }),
+        slots['cell-primary_contact']?.({ row }),
+        slots['cell-owner']?.({ row }),
         editAction?.handler
           ? h('button', { type: 'button', 'data-testid': `edit-customer-${row.id}`, onClick: () => editAction.handler?.(row as unknown as Record<string, unknown>) }, 'edit')
           : null,
@@ -365,4 +367,69 @@ describe('Customers local detail sheet state', () => {
     expect(customerApi.getCustomers).toHaveBeenCalledTimes(1)
     expect(sheetRefresh).not.toHaveBeenCalled()
   })
+
+  it('shows source, secondary industry, and scale under the customer name', async () => {
+    customerApi.getCustomers.mockResolvedValue([{
+      ...customerFixture(),
+      company_scale: '201-500人',
+      industry_info: { name: 'IT/互联网/软件' },
+      source_info: { name: '转介绍' },
+    }])
+
+    const wrapper = mount(Customers)
+    await flushPromises()
+
+    expect(wrapper.get('.customer-name-meta').text()).toBe('转介绍 · 互联网 · 201-500人')
+  })
+
+  it('omits empty profile fields instead of showing placeholders', async () => {
+    customerApi.getCustomers.mockResolvedValue([{
+      ...customerFixture(),
+      company_scale: '   ',
+      industry_info: { name: '房地产' },
+    }])
+
+    const wrapper = mount(Customers)
+    await flushPromises()
+
+    expect(wrapper.get('.customer-name-meta').text()).toBe('房地产')
+  })
+
+  it('shows the primary contact mobile under the contact name', async () => {
+    customerApi.getCustomers.mockResolvedValue([{
+      ...customerFixture(),
+      primary_contact_name: '林俊锋',
+      primary_contact_mobile: '15767977509',
+    }])
+
+    const wrapper = mount(Customers)
+    await flushPromises()
+
+    expect(wrapper.get('.customer-contact-name').text()).toBe('林俊锋')
+    expect(wrapper.get('.customer-contact-meta').text()).toBe('15767977509')
+    expect(wrapper.find('.customer-contact-cell svg').exists()).toBe(false)
+  })
+
+  it('shows collaborators under the owner', async () => {
+    customerApi.getCustomers.mockResolvedValue([{
+      ...customerFixture(),
+      owner_info: { name: '王敏' },
+      collaborator_infos: [{ name: '李雷' }, { name: '韩梅梅' }],
+    }])
+
+    const wrapper = mount(Customers)
+    await flushPromises()
+
+    expect(wrapper.get('.customer-owner-name').text()).toBe('王敏')
+    expect(wrapper.get('.customer-owner-meta').text()).toBe('李雷、韩梅梅')
+  })
+
+  it('hides the collaborator line when the customer has no collaborators', async () => {
+    const wrapper = mount(Customers)
+    await flushPromises()
+
+    expect(wrapper.get('.customer-owner-name').text()).toBe('-')
+    expect(wrapper.find('.customer-owner-meta').exists()).toBe(false)
+  })
+
 })

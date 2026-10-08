@@ -188,7 +188,9 @@ class CustomerVectorDocumentService:
             return None
         return self.upsert_evidence_metadata(db, evidence, commit=commit)
 
-    def mark_source_deleted(self, db: Session, team_id: int, source_type: str, source_object_id: str) -> int:
+    def mark_source_deleted(
+        self, db: Session, team_id: int, source_type: str, source_object_id: str, *, commit: bool = True,
+    ) -> int:
         documents = (
             db.query(CustomerVectorDocument)
             .filter(
@@ -209,15 +211,21 @@ class CustomerVectorDocumentService:
             document.sync_error = None
             document.updated_time = business_now()
         if documents:
-            db.commit()
+            if commit:
+                db.commit()
+            else:
+                db.flush()
         return len(documents)
 
-    def mark_customer_activity_deleted(self, db: Session, activity: CustomerActivity) -> int:
+    def mark_customer_activity_deleted(
+        self, db: Session, activity: CustomerActivity, *, commit: bool = True,
+    ) -> int:
         return self.mark_source_deleted(
             db=db,
             team_id=int(activity.team_id),
             source_type=CustomerVectorDocumentSourceType.FOLLOW_UP,
             source_object_id=str(activity.id),
+            commit=commit,
         )
 
     def mark_sales_commitment_deleted(self, db: Session, commitment: SalesCommitment) -> int:

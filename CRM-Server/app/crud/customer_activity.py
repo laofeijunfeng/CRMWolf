@@ -12,6 +12,7 @@ from app.schemas.customer_activity import CustomerActivityCreate
 from app.services.customer_activity_contracts import CustomerActivitySubmissionSource
 from app.services.customer_activity_kinds import get_activity_kind_meta
 from app.services.legacy_customer_activity_adapter import activity_kind_from_legacy_lead_method
+from app.services.legacy_profile_source import advance_activity_progress, lock_source_customer
 from app.utils.time import business_now
 
 logger = logging.getLogger(__name__)
@@ -72,12 +73,14 @@ def _upsert_customer_activity_evidence(
 
 
 def _mark_customer_activity_evidence_deleted(db: Session, activity: CustomerActivity) -> None:
+    activity_id = activity.id
     try:
         from app.services.customer_vector_document_service import customer_vector_document_service
 
-        customer_vector_document_service.mark_customer_activity_deleted(db, activity)
+        customer_vector_document_service.mark_customer_activity_deleted(db, activity, commit=False)
     except Exception:
-        logger.exception("客户活动证据元数据删除标记失败: activity_id=%s", activity.id)
+        logger.exception("客户活动证据元数据删除标记失败: activity_id=%s", activity_id)
+        raise
 
 
 POST_COMMIT_RELEVANT_FIELDS = frozenset(
@@ -238,6 +241,9 @@ class CustomerActivityCRUD:
         if journey:
             data["deal_journey_id"] = journey.id
 
+        advance_activity_progress(
+            db, team_id=team_id, customer_id=customer_id, submission_source=data["submission_source"],
+        )
         db_obj = CustomerActivity(**data)
         db.add(db_obj)
         db.flush()
@@ -245,22 +251,22 @@ class CustomerActivityCRUD:
         from app.models.deal_journey import DealJourneyEventType, DealJourneySourceType
 
         label = get_activity_kind_meta(db_obj.activity_kind)["label"]
-        if db_obj.submission_source != CustomerActivitySubmissionSource.ASSISTANT_2.value:
-            deal_journey_service.record_event(
-                db,
-                deal_journey_id=db_obj.deal_journey_id,
-                team_id=team_id,
-                customer_id=customer_id,
-                event_type=DealJourneyEventType.ACTIVITY_ADDED,
-                source_type=DealJourneySourceType.CUSTOMER_ACTIVITY,
-                source_id=db_obj.id,
-                event_time=db_obj.occurred_at,
-                actor_id=creator_id,
-                summary=f"新增客户活动: {label}",
-                enqueue_customer_intelligence=False,
-            )
-
         is_assistant2 = db_obj.submission_source == CustomerActivitySubmissionSource.ASSISTANT_2.value
+        deal_journey_service.record_event(
+            db,
+            deal_journey_id=db_obj.deal_journey_id,
+            team_id=team_id,
+            customer_id=customer_id,
+            event_type=DealJourneyEventType.ACTIVITY_ADDED,
+            source_type=DealJourneySourceType.CUSTOMER_ACTIVITY,
+            source_id=db_obj.id,
+            event_time=db_obj.occurred_at,
+            actor_id=creator_id,
+            summary=f"新增客户活动: {label}",
+            enqueue_customer_intelligence=not is_assistant2,
+        )
+
+
         operation_log_service.log_customer_activity(
             db=db,
             customer_id=customer_id,
@@ -292,7 +298,15 @@ class CustomerActivityCRUD:
         *,
         commit: bool = True,
     ) -> list[CustomerActivity]:
-        lead_follow_ups = db.query(LeadFollowUp).filter(LeadFollowUp.lead_id == lead_id).all()
+        lead_follow_ups = db.query(LeadFollowUp).filter(
+            LeadFollowUp.lead_id == lead_id, LeadFollowUp.team_id == team_id,
+        ).all()
+        if lead_follow_ups:
+            advance_activity_progress(
+                db, team_id=team_id, customer_id=new_customer_id,
+                submission_source=CustomerActivitySubmissionSource.CUTOVER_MIGRATION.value,
+                count=len(lead_follow_ups),
+            )
         migrated = []
         for lead_follow_up in lead_follow_ups:
             kind = activity_kind_from_legacy_lead_method(lead_follow_up.method)
@@ -300,6 +314,7 @@ class CustomerActivityCRUD:
             activity = CustomerActivity(
                 customer_id=new_customer_id,
                 team_id=team_id,
+                submission_source=CustomerActivitySubmissionSource.CUTOVER_MIGRATION.value,
                 deal_journey_id=None,
                 original_lead_id=lead_id,
                 activity_kind=kind,
@@ -332,6 +347,25 @@ class CustomerActivityCRUD:
         return migrated
 
 
+    @staticmethod
+    def _lock_current_activity(db: Session, activity: CustomerActivity) -> CustomerActivity:
+        # Lock the customer's publication fence before reading mutable source
+        # identity. RR identity-map objects and snapshot SELECTs are not current.
+        team_id, customer_id = activity.team_id, activity.customer_id
+        if customer_id is not None:
+            lock_source_customer(db, team_id=team_id, customer_id=customer_id)
+        with db.no_autoflush:
+            current = (
+                db.query(CustomerActivity)
+                .filter(CustomerActivity.id == activity.id)
+                .populate_existing()
+                .with_for_update()
+                .one_or_none()
+            )
+        if current is None or current.team_id != team_id or current.customer_id != customer_id:
+            raise ValueError("客户活动归属已变化")
+        return current
+
     def apply_finalization(
         self,
         db: Session,
@@ -353,6 +387,12 @@ class CustomerActivityCRUD:
     ) -> CustomerActivity:
         """Persist one canonical structured-and-scored activity result."""
 
+        activity = self._lock_current_activity(db, activity)
+        if activity.customer_id is not None:
+            advance_activity_progress(
+                db, team_id=activity.team_id, customer_id=activity.customer_id,
+                submission_source=activity.submission_source,
+            )
         resolved_summary = summary or self.build_summary(
             activity.activity_kind,
             content_json,
@@ -410,6 +450,12 @@ class CustomerActivityCRUD:
         commit: bool = True,
         deleted_by: str | None = None,
     ) -> CustomerActivity:
+        db_obj = self._lock_current_activity(db, db_obj)
+        if db_obj.customer_id is not None:
+            advance_activity_progress(
+                db, team_id=db_obj.team_id, customer_id=db_obj.customer_id,
+                submission_source=db_obj.submission_source, deleted=True,
+            )
         _mark_customer_activity_evidence_deleted(db, db_obj)
         # The operational activity row is hard-deleted, so keep a durable
         # source-side tombstone in the same transaction.  Its monotonically

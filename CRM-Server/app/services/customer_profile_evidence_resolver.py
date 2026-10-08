@@ -18,6 +18,7 @@ from app.models.customer_activity import CustomerActivity
 from app.models.customer_fact import CustomerFact
 from app.models.deal_journey import CustomerDealJourneyEvent
 from app.models.sales_commitment import FollowUpTask, SalesCommitment
+from app.services.legacy_profile_source import activity_origin, event_origin, fact_origin, follow_up_origin
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -79,6 +80,10 @@ class CustomerProfileEvidenceResolver:
             if isinstance(reference, Mapping)
         ]
 
+    def unavailable_reference(self, evidence_ref: str) -> CustomerProfileResolvedEvidence:
+        """Return no cached title or source link when a projection is untrusted."""
+        return self._fallback(key=_text(evidence_ref), source_type="unknown", source_id=None, source_version=None)
+
     def resolve_one(
         self,
         db: Session,
@@ -93,7 +98,6 @@ class CustomerProfileEvidenceResolver:
         source_id = _string_id(reference.get("source_id"))
         source_version = _source_version(reference.get("source_version"))
         fallback = self._fallback(
-            reference,
             key=key,
             source_type=source_type,
             source_id=source_id,
@@ -105,7 +109,7 @@ class CustomerProfileEvidenceResolver:
         kind = source_type.lower()
         if kind in {"customer_activity", "activity"}:
             row = _query_by_id(db, CustomerActivity, team_id, customer_id, source_id)
-            if row is None:
+            if row is None or not activity_origin(db, team_id, customer_id, row.id):
                 return fallback
             return _available(
                 key,
@@ -119,7 +123,7 @@ class CustomerProfileEvidenceResolver:
             )
         if kind in {"deal_journey_event", "journey_event"}:
             row = _query_by_id(db, CustomerDealJourneyEvent, team_id, customer_id, source_id)
-            if row is None:
+            if row is None or not event_origin(db, row, team_id, customer_id):
                 return fallback
             return _available(
                 key,
@@ -133,7 +137,7 @@ class CustomerProfileEvidenceResolver:
             )
         if kind in {"follow_up_task", "task"}:
             row = _query_by_id(db, FollowUpTask, team_id, customer_id, source_id)
-            if row is None:
+            if row is None or not follow_up_origin(db, row, team_id, customer_id):
                 return fallback
             return _available(
                 key,
@@ -147,7 +151,7 @@ class CustomerProfileEvidenceResolver:
             )
         if kind in {"sales_commitment", "commitment"}:
             row = _query_by_id(db, SalesCommitment, team_id, customer_id, source_id)
-            if row is None:
+            if row is None or not follow_up_origin(db, row, team_id, customer_id):
                 return fallback
             return _available(
                 key,
@@ -161,7 +165,7 @@ class CustomerProfileEvidenceResolver:
             )
         if kind in {"customer_fact", "fact"}:
             row = _query_by_id(db, CustomerFact, team_id, customer_id, source_id)
-            if row is None:
+            if row is None or not fact_origin(db, row, team_id, customer_id):
                 return fallback
             return _available(
                 key,
@@ -177,7 +181,6 @@ class CustomerProfileEvidenceResolver:
 
     def _fallback(
         self,
-        reference: Mapping[str, object],
         *,
         key: str,
         source_type: str,
@@ -189,11 +192,7 @@ class CustomerProfileEvidenceResolver:
             source_type=source_type,
             source_id=source_id,
             source_version=source_version,
-            occurred_at=(
-                reference.get("occurred_at")
-                if isinstance(reference.get("occurred_at"), (str, datetime))
-                else None
-            ),
+            occurred_at=None,
             title="原始记录不可用",
             snippet=None,
             visibility="UNAVAILABLE",

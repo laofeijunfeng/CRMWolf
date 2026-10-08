@@ -92,6 +92,7 @@ class CustomerProfileProjectionCRUD:
                 CustomerProfileProjectionVersion.customer_id == customer_id,
                 CustomerProfileProjectionVersion.content_hash == content_hash,
                 CustomerProfileProjectionVersion.source_watermark_hash == source_watermark_hash,
+                CustomerProfileProjectionVersion.source_discriminator == "CERTIFIED_V1",
                 CustomerProfileProjectionVersion.publication_status.in_(CUSTOMER_PROFILE_READABLE_PUBLICATION_STATUSES),
             )
             .order_by(CustomerProfileProjectionVersion.profile_version.desc())

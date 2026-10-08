@@ -19,10 +19,18 @@ from sqlalchemy.orm import Session
 import logging
 
 from app.constants.approval_phase import ApprovalPhase
-from app.services.approval_adapter import get_adapter
+from app.services.approval_adapter import advance_approval_source, get_adapter, get_approval_customer_id
 from app.crud.approval import approval_crud, approval_flow_crud
 from app.models.approval import Approval
 from app.services.outbound_notification_job_service import outbound_notification_job_service
+from app.services.assistant.crm_effects import (
+    AssistantCRMCommand,
+    AssistantCRMFingerprintConflict,
+    AssistantCRMNoEffect,
+    checked_effect,
+    record_effect,
+)
+from sqlalchemy.exc import IntegrityError
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +44,23 @@ class ApprovalTransactionManager:
             return None
         return getattr(phase, "value", phase)
 
+    @staticmethod
+    def _read_assistant_creation(db: Session, command: AssistantCRMCommand):
+        existing = checked_effect(db, command, "opportunity_create")
+        if existing is None:
+            return None
+        from app.models.opportunity import Opportunity
+
+        entity = db.query(Opportunity).filter_by(
+            team_id=command.team_id, public_id=existing.target_public_id,
+        ).one_or_none()
+        approval = db.query(Approval).filter_by(
+            id=existing.approval_id, team_id=command.team_id,
+        ).one_or_none()
+        if entity is None or approval is None or approval.business_id != entity.id:
+            raise ValueError("Assistant CRM effect target missing")
+        return entity, approval, None
+
     def create_with_approval(
         self,
         db: Session,
@@ -46,7 +71,8 @@ class ApprovalTransactionManager:
         submitter_name: str,
         team_id: int,
         rollback_on_no_flow: bool = False,
-        send_notification: bool = True
+        send_notification: bool = True,
+        assistant_command: AssistantCRMCommand | None = None,
     ) -> Tuple[Any, Optional[Approval], Optional[str]]:
         """
         创建业务单据 + 自动提交审批（Contract/Payment 场景）
@@ -66,6 +92,12 @@ class ApprovalTransactionManager:
             - approval: 创建的审批实例（如果审批流程匹配成功）
             - error_message: 错误消息（如果失败）
         """
+        if assistant_command is not None:
+            if business_type != "OPPORTUNITY" or assistant_command.team_id != team_id or str(assistant_command.actor_id) != str(submitter_id):
+                raise ValueError("Assistant CRM command target mismatch")
+            committed = self._read_assistant_creation(db, assistant_command)
+            if committed is not None:
+                return committed
         try:
             # 1. 创建业务单据（approval_phase = DRAFT）
             entity = entity_create_func()
@@ -89,8 +121,10 @@ class ApprovalTransactionManager:
 
             # 3. 审批流程未匹配 → commit 单据，返回提示
             if flow is None:
-                if rollback_on_no_flow:
+                if rollback_on_no_flow or assistant_command is not None:
                     db.rollback()
+                    if assistant_command is not None:
+                        raise AssistantCRMNoEffect(err_msg or "请先配置审批流程")
                     logger.info(f"审批流程未匹配，已回滚业务单据创建（business_type={business_type}）")
                     return (None, None, err_msg or "请先配置审批流程")
                 entity.approval_phase = ApprovalPhase.DRAFT.value
@@ -115,6 +149,8 @@ class ApprovalTransactionManager:
                 return (None, None, "系统异常：审批创建失败，请稍后重试")
 
             # 5. 切换 approval_phase = PENDING_REVIEW
+            if self._approval_phase_value(entity.approval_phase) != ApprovalPhase.PENDING_REVIEW.value:
+                advance_approval_source(db, business_type, entity)
             entity.approval_phase = ApprovalPhase.PENDING_REVIEW.value
 
             # 6. adapter.on_submit() 触发原有 status 联动
@@ -140,6 +176,12 @@ class ApprovalTransactionManager:
                         exc_info=True,
                     )
 
+            if assistant_command is not None:
+                db.flush()  # Materialize both generated IDs before recording the target effect.
+                record_effect(
+                    db, assistant_command, "opportunity_create",
+                    target_public_id=entity.public_id, approval_id=approval.id,
+                )
             # 8. 统一 commit，再 kick 出站通知 worker
             db.commit()
             db.refresh(entity)
@@ -153,13 +195,35 @@ class ApprovalTransactionManager:
 
             return (entity, approval, None)
 
+        except AssistantCRMFingerprintConflict:
+            db.rollback()
+            raise
+        except AssistantCRMNoEffect:
+            db.rollback()
+            raise
         except ValueError as e:
             logger.info("create_with_approval 业务校验失败: %s", e)
             db.rollback()
+            if assistant_command is not None:
+                committed = self._read_assistant_creation(db, assistant_command)
+                if committed is not None:
+                    return committed
             return (None, None, str(e))
+        except IntegrityError as e:
+            db.rollback()
+            if assistant_command is not None:
+                committed = self._read_assistant_creation(db, assistant_command)
+                if committed is not None:
+                    return committed
+            logger.error("create_with_approval 唯一约束冲突: %s", e, exc_info=True)
+            return (None, None, f"系统异常：{str(e)}")
         except Exception as e:
             logger.error(f"create_with_approval 异常: {e}", exc_info=True)
             db.rollback()
+            if assistant_command is not None:
+                committed = self._read_assistant_creation(db, assistant_command)
+                if committed is not None:
+                    return committed
             return (None, None, f"系统异常：{str(e)}")
 
     def submit_for_approval(
@@ -193,21 +257,33 @@ class ApprovalTransactionManager:
         try:
             # 1. 获取业务单据
             adapter = get_adapter(business_type)
-            entity = adapter.get_entity(db, entity_id, team_id)
+            with db.no_autoflush:
+                entity = adapter.get_entity(db, entity_id, team_id)
 
             if entity is None:
                 return (None, "业务单据不存在")
 
-            # 锁住业务单据行，串行化“检查状态 -> 创建审批”的关键区段。
-            # 这样两个并发提交不会都在 DRAFT 状态下创建审批实例。
+            with db.no_autoflush:
+                customer_id = (
+                    get_approval_customer_id(db, business_type, entity)
+                    if hasattr(type(entity), "__table__") else None
+                )
+            if customer_id is not None and business_type in {
+                "CONTRACT", "PAYMENT", "INVOICE", "OPPORTUNITY", "LICENSE",
+            }:
+                from app.services.legacy_profile_source import lock_source_customer
+                lock_source_customer(db, team_id=team_id, customer_id=customer_id)
             entity_model = type(entity)
             if hasattr(entity_model, "__table__") and hasattr(entity_model, "id"):
                 entity_query = db.query(entity_model).filter(entity_model.id == entity_id)
                 if hasattr(entity_model, "team_id"):
                     entity_query = entity_query.filter(entity_model.team_id == team_id)
-                locked_entity = entity_query.with_for_update().first()
+                with db.no_autoflush:
+                    locked_entity = entity_query.populate_existing().with_for_update().first()
                 if locked_entity is not None:
                     entity = locked_entity
+                    if customer_id is not None and get_approval_customer_id(db, business_type, entity) != customer_id:
+                        return (None, "业务单据所属客户已变更，请刷新后重试")
 
             # 2. 已在审批中的单据：幂等返回现有实例。
             #    这条路径用于网络重试/用户重复点击，不改变正常用户路径，
@@ -274,6 +350,7 @@ class ApprovalTransactionManager:
                 submitter_name=submitter_name
             )
 
+            advance_approval_source(db, business_type, entity)
             # 6. 切换 approval_phase = PENDING_REVIEW
             if hasattr(entity, 'approval_phase'):
                 entity.approval_phase = ApprovalPhase.PENDING_REVIEW.value

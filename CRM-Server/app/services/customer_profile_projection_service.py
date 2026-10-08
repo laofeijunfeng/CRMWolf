@@ -9,14 +9,16 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from hashlib import sha256
 from typing import TYPE_CHECKING
 
+from sqlalchemy import event as sqlalchemy_event
 from sqlalchemy.exc import IntegrityError
 
+from app.core.config import get_settings
 from app.crud.customer_profile_projection import customer_profile_projection_crud
+from app.crud.product import product_crud
 from app.models.customer import Customer
 from app.models.customer_profile_projection import (
     CustomerProfileCurrent,
@@ -26,9 +28,10 @@ from app.models.customer_profile_projection import (
 )
 from app.schemas.customer_profile import CustomerProfileSections
 from app.services.agent.types import JSONDict, coerce_json_dict
+from app.services.customer_intelligence_context_service import CustomerIntelligenceContextService
 from app.services.customer_profile_demand_claims import (
-    CatalogProductRef,
     _TOPIC_TITLES,
+    CatalogProductRef,
     _group_activities,
     _unique_activity_texts,
     compose_demand_claims,
@@ -39,12 +42,24 @@ from app.services.customer_profile_projection_policy import (
     customer_profile_projection_policy,
 )
 from app.services.customer_profile_projection_validator import CustomerProfileProjectionValidationError
+from app.services.customer_profile_version_certification import (
+    SOURCE_DISCRIMINATOR,
+    certify_profile_version,
+    is_certified_profile_version,
+)
 from app.services.customer_profile_watermark_service import (
     customer_profile_watermark_service,
+)
+from app.services.legacy_profile_source import (
+    LEGACY_PROFILE_SOURCE_POLICY,
+    lock_source_customer,
+    trace_customer_source_provenance,
 )
 from app.utils.time import business_now
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
     from sqlalchemy.orm import Session
 
     from app.services.customer_profile_projection_quality import CustomerProfileQualityReport
@@ -127,8 +142,7 @@ def publication_result_payload(
         "success": True,
         "published": True,
         "publication_status": str(
-            getattr(publication, "publication_status", None)
-            or getattr(version, "publication_status", "PUBLISHED")
+            getattr(publication, "publication_status", None) or getattr(version, "publication_status", "PUBLISHED")
         ),
         "deduplicated": bool(getattr(publication, "deduplicated", False)),
         "profile_version": int(version.profile_version),
@@ -229,13 +243,15 @@ class CustomerProfileProjectionService:
         )
         if previous is None:
             return draft
+        if not is_certified_profile_version(previous):
+            raise CustomerProfileProjectionError(
+                "前版档案来源无法核证, 禁止继承正文或证据", code="PROFILE_SOURCE_FENCE_UNVERIFIED"
+            )
 
         previous_sections = CustomerProfileSections.model_validate(_version_sections(previous))
         merged_sections = draft.sections.model_copy(
             update={
-                name: getattr(draft.sections, name)
-                if name in target_sections
-                else getattr(previous_sections, name)
+                name: getattr(draft.sections, name) if name in target_sections else getattr(previous_sections, name)
                 for name in PROFILE_SECTION_NAMES
             }
         )
@@ -275,6 +291,10 @@ class CustomerProfileProjectionService:
         )
         if previous is None:
             return None
+        if not is_certified_profile_version(previous):
+            raise CustomerProfileProjectionError(
+                "前版档案来源无法核证, 禁止继承正文或证据", code="PROFILE_SOURCE_FENCE_UNVERIFIED"
+            )
         return _version_sections(previous)
 
     def ensure_current(
@@ -382,7 +402,9 @@ class CustomerProfileProjectionService:
         run_id: int | None = None,
     ) -> CustomerProfileCurrent:
         current = self.ensure_current(db, team_id=team_id, customer_id=customer_id)
-        current.latest_source_watermark_json = _json_object(source_watermark)
+        current.latest_source_watermark_json = customer_profile_watermark_service.merge(
+            _json_object(current.latest_source_watermark_json or {}), _json_object(source_watermark)
+        )
         current.profile_status = CustomerProfileStatus.STALE
         current.stale_reason = reason[:255]
         if run_id is not None:
@@ -407,16 +429,96 @@ class CustomerProfileProjectionService:
         # publication-side work, even when its payload is otherwise valid.
         # Direct service calls without a durable run remain available for
         # migration/unit-test tooling and do not bypass the runtime firewall.
+        if not get_settings().LEGACY_PROFILE_PUBLICATION_ENABLED:
+            raise CustomerProfileProjectionError(
+                "旧客户档案新发表已暂停", code="PROFILE_PUBLICATION_DISABLED"
+            )
         if run_id is not None and publication_owner != PROFILE_WORKFLOW_OWNER:
             raise CustomerProfileProjectionError(
                 "客户档案只能由专用投影工作流发布",
                 code="PROFILE_PUBLISH_OWNER_FORBIDDEN",
             )
 
-        customer = db.query(Customer).filter(Customer.team_id == team_id, Customer.id == customer_id).one_or_none()
-        if customer is None:
-            raise CustomerProfileProjectionError("客户不存在或不属于当前团队")
+        # Product writers take Team -> Customer; this publisher uses the same
+        # order. No source can commit after this fence and before our commit.
+        # Never trust an earlier REPEATABLE READ snapshot or identity-map row.
+        if db.new or db.dirty or db.deleted:
+            raise CustomerProfileProjectionError("发表需使用独立的来源读取事务", code="PROFILE_SOURCE_FENCE_UNVERIFIED")
+        try:
+            product_crud.lock_catalog_team(db, team_id)
+            lock_source_customer(db, team_id=team_id, customer_id=customer_id)
+        except (LookupError, ValueError) as exc:
+            raise CustomerProfileProjectionError("客户不存在或不属于当前团队") from exc
+        # Any reads made earlier in this session may have established a MySQL
+        # RR snapshot. Current locking reads for *every* source and eager/lazy
+        # relationship plus populate_existing ensure the builder sees committed
+        # source rows after the Team/Customer fences, not old ORM state.
+        db.expire_all()
 
+        def current_source_read(state: object) -> None:
+            if state.is_select:
+                state.statement = state.statement.with_for_update().execution_options(populate_existing=True)
+
+        sqlalchemy_event.listen(db, "do_orm_execute", current_source_read)
+        try:
+            fresh_context = CustomerIntelligenceContextService().build_context(
+                db,
+                team_id=team_id,
+                customer_id=customer_id,
+                query_text="",
+                evidence_limit=0,
+            )
+            if not trace_customer_source_provenance(db, team_id=team_id, customer_id=customer_id):
+                raise CustomerProfileProjectionError(
+                    "客户旧来源链无法核证", code="PROFILE_SOURCE_FENCE_UNVERIFIED"
+                )
+            from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
+            progress = db.query(CustomerLegacySourceProgress).filter_by(
+                team_id=team_id, customer_id=customer_id,
+            ).populate_existing().with_for_update().one_or_none()
+            if progress is not None and progress.policy_version != LEGACY_PROFILE_SOURCE_POLICY:
+                raise CustomerProfileProjectionError(
+                    "来源政策无法核证", code="PROFILE_SOURCE_FENCE_UNVERIFIED"
+                )
+            if progress is None:
+                progress = CustomerLegacySourceProgress(team_id=team_id, customer_id=customer_id)
+                db.add(progress)
+                db.flush()
+            progress.provenance_status = "VERIFIED"
+            fresh_context.source_watermark["source_provenance_status"] = "VERIFIED"
+        finally:
+            sqlalchemy_event.remove(db, "do_orm_execute", current_source_read)
+        fresh_watermark = fresh_context.source_watermark
+        if fresh_watermark.get("source_policy_version") != LEGACY_PROFILE_SOURCE_POLICY or not fresh_watermark.get(
+            "source_snapshot_hash"
+        ):
+            raise CustomerProfileProjectionError("来源政策或完整快照无法核证", code="PROFILE_SOURCE_FENCE_UNVERIFIED")
+        fresh_draft = self.draft_from_context(
+            context=fresh_context.to_dict(),
+            source_event_key=draft.source_event_key,
+            target_sections=draft.target_sections,
+        )
+        draft_watermark = dict(draft.source_watermark)
+        if draft_watermark.get("source_provenance_status") == "UNVERIFIED":
+            draft_watermark["source_provenance_status"] = "VERIFIED"
+        if _canonical_json(draft_watermark) != _canonical_json(fresh_draft.source_watermark):
+            raise CustomerProfileProjectionError("草稿水位已落后于当前来源", code="PROFILE_PUBLISH_REJECTED_STALE")
+        draft = replace(draft, source_watermark=draft_watermark)
+        if (
+            _canonical_json(draft.sections.model_dump(mode="json"))
+            != _canonical_json(fresh_draft.sections.model_dump(mode="json"))
+            or _canonical_json(draft.evidence_refs) != _canonical_json(fresh_draft.evidence_refs)
+            or any(
+                getattr(draft, key) != getattr(fresh_draft, key)
+                for key in (
+                    "fact_watermark",
+                    "journey_watermark",
+                    "task_watermark",
+                    "commitment_watermark",
+                )
+            )
+        ):
+            raise CustomerProfileProjectionError("草稿无法以当前来源核证", code="PROFILE_SOURCE_FENCE_UNVERIFIED")
         draft = self.merge_partial_draft(
             db,
             team_id=team_id,
@@ -432,6 +534,14 @@ class CustomerProfileProjectionService:
         # policy assessment is authoritative at the publication seam.
         assessment = self.assess_draft(draft, inherited_sections=inherited_sections)
         sections = assessment.sections
+        # A partial must not carry a certified but now-stale section or citation
+        # into a new source snapshot. Full deterministic rebuild is required.
+        if _canonical_json(sections.model_dump(mode="json")) != _canonical_json(
+            fresh_draft.sections.model_dump(mode="json")
+        ) or _canonical_json(draft.evidence_refs) != _canonical_json(fresh_draft.evidence_refs):
+            raise CustomerProfileProjectionError(
+                "继承段落或引用不再对应当前来源", code="PROFILE_SOURCE_FENCE_UNVERIFIED"
+            )
         quality_report = assessment.quality_report
         source_watermark = _json_object(draft.source_watermark)
         evidence_refs = _json_list(draft.evidence_refs)
@@ -456,9 +566,7 @@ class CustomerProfileProjectionService:
                 customer_id=customer_id,
                 version_id=current.current_profile_version_id,
             )
-        changed_sections = tuple(
-            _changed_section_names(_version_sections(previous), sections.model_dump(mode="json"))
-        )
+        changed_sections = tuple(_changed_section_names(_version_sections(previous), sections.model_dump(mode="json")))
         comparison = customer_profile_watermark_service.compare(source_watermark, known_watermark)
         if comparison.is_behind:
             raise CustomerProfileProjectionError(
@@ -473,6 +581,8 @@ class CustomerProfileProjectionService:
             content_hash=content_hash,
             source_watermark_hash=watermark_hash,
         )
+        if duplicate is not None and not is_certified_profile_version(duplicate):
+            raise CustomerProfileProjectionError("重复版本的来源认证无效", code="PROFILE_SOURCE_FENCE_UNVERIFIED")
         if duplicate is not None:
             if duplicate.profile_version >= current_version_number:
                 current.current_profile_version_id = duplicate.id
@@ -526,6 +636,7 @@ class CustomerProfileProjectionService:
             quality_report_json=quality_report.as_json(),
             source_watermark_json=source_watermark,
             source_watermark_hash=watermark_hash,
+            source_discriminator=SOURCE_DISCRIMINATOR,
             fact_watermark=max(0, int(draft.fact_watermark)),
             journey_watermark=max(0, int(draft.journey_watermark)),
             task_watermark=max(0, int(draft.task_watermark)),
@@ -539,6 +650,8 @@ class CustomerProfileProjectionService:
             created_time=now,
         )
         db.add(version)
+        db.flush()
+        certify_profile_version(version)
         db.flush()
 
         if previous is not None and previous.id != version.id:
@@ -768,7 +881,6 @@ class CustomerProfileProjectionService:
             source_watermark
             or coerce_json_dict(context.get("source_watermark"))
             or {
-                "customer_updated_at": customer.get("updated_time"),
                 "latest_activity_at": latest_activity.get("occurred_at"),
                 "latest_journey_at": _latest_value(journey_events, "event_time"),
                 "latest_task_event_at": _latest_value(task_events, "created_time"),
@@ -805,9 +917,7 @@ class CustomerProfileProjectionService:
         )
         normalized_target_sections = tuple(
             dict.fromkeys(
-                section
-                for section in (target_sections or PROFILE_SECTION_NAMES)
-                if section in PROFILE_SECTION_NAMES
+                section for section in (target_sections or PROFILE_SECTION_NAMES) if section in PROFILE_SECTION_NAMES
             )
         )
         return CustomerProfileProjectionDraft(
@@ -941,11 +1051,7 @@ def _customer_basics(customer: Mapping[str, object]) -> dict[str, object]:
         "status",
         "created_time",
     )
-    return {
-        key: value
-        for key in keys
-        if (value := customer.get(key)) not in (None, "", [])
-    }
+    return {key: value for key in keys if (value := customer.get(key)) not in (None, "", [])}
 
 
 def _evidence_key(kind: str, object_id: object) -> str:
@@ -1131,8 +1237,7 @@ def _important_change_items(
     result: list[dict[str, object]] = []
     for topic, grouped in _group_activities(activities):
         if topic == "other" or (
-            topic == "generic_demand"
-            and not any(_is_meaningful_activity(item) for item in grouped)
+            topic == "generic_demand" and not any(_is_meaningful_activity(item) for item in grouped)
         ):
             continue
         latest = grouped[-1]
@@ -1284,9 +1389,7 @@ def _follow_up_process(activities: list[dict[str, object]]) -> list[dict[str, ob
                 actions.append(action)
         refs = _refs(*(_evidence_key("activity", item.get("id")) for item in grouped))
         journey_ids = list(
-            dict.fromkeys(
-                item.get("deal_journey_id") for item in grouped if item.get("deal_journey_id") is not None
-            )
+            dict.fromkeys(item.get("deal_journey_id") for item in grouped if item.get("deal_journey_id") is not None)
         )
         result.append(
             {
@@ -1386,9 +1489,7 @@ def _recorded_follow_ups(
             *(
                 _evidence_key(
                     "task" if entry.get("kind") == "task" else "commitment",
-                    (entry.get("task_id") or entry.get("id"))
-                    if entry.get("kind") == "task"
-                    else entry.get("id"),
+                    (entry.get("task_id") or entry.get("id")) if entry.get("kind") == "task" else entry.get("id"),
                 )
                 for entry in grouped
             )
@@ -1412,15 +1513,9 @@ def _recorded_follow_ups(
                 "raw_status": item.get("status"),
                 "due_at": max(due_dates, default=None),
                 "completed_at": (
-                    max(completed_dates, default=None)
-                    if raw_status in {"COMPLETED", "FULFILLED"}
-                    else None
+                    max(completed_dates, default=None) if raw_status in {"COMPLETED", "FULFILLED"} else None
                 ),
-                "cancelled_at": (
-                    max(cancelled_dates, default=None)
-                    if raw_status == "CANCELLED"
-                    else None
-                ),
+                "cancelled_at": (max(cancelled_dates, default=None) if raw_status == "CANCELLED" else None),
                 "deal_journey_id": item.get("deal_journey_id"),
                 "source_activity_id": item.get("source_activity_id"),
                 "activity_count": len(grouped),
@@ -1693,9 +1788,7 @@ def _current_situation_from_business_state(
     if constraints:
         fragments.append("当前推进重点是" + "，".join(constraints) + "")  # noqa: RUF001
 
-    open_opportunities = [
-        item for item in opportunities if str(item.get("status")) in {"0", "FOLLOWING", "None"}
-    ]
+    open_opportunities = [item for item in opportunities if str(item.get("status")) in {"0", "FOLLOWING", "None"}]
     if contracts:
         fragments.append(f"档案中已有{len(contracts)}份合同记录")
     elif open_opportunities:
@@ -1714,25 +1807,34 @@ def _current_situation_from_business_state(
     return prefix + "；".join(fragments[:4]) + "。"  # noqa: RUF001
 
 
-def _business_status_rows(*, active_journeys, opportunities, contracts) -> list[dict[str, object]]:
+def _business_status_rows(
+    *,
+    active_journeys: list[dict[str, object]],
+    opportunities: list[dict[str, object]],
+    contracts: list[dict[str, object]],
+) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
-    stages = list(dict.fromkeys(
-        _text(item.get("current_stage"), limit=40)
-        for item in active_journeys
-        if _text(item.get("current_stage"), limit=40)
-    ))
+    stages = list(
+        dict.fromkeys(
+            _text(item.get("current_stage"), limit=40)
+            for item in active_journeys
+            if _text(item.get("current_stage"), limit=40)
+        )
+    )
     if active_journeys:
         current = f"{len(active_journeys)} 条进行中的业务旅程"
         if stages:
-            current += f"，当前阶段主要为{'、'.join(stages)}"
+            current += f", 当前阶段主要为{'、'.join(stages)}"
         rows.append({"dimension": "业务旅程", "current": current, "judgement": ""})
     open_opportunities = [item for item in opportunities if str(item.get("status")) in {"0", "FOLLOWING", "None"}]
     if open_opportunities:
-        rows.append({
-            "dimension": "商业推进",
-            "current": f"{len(open_opportunities)} 条跟进中的商机",
-            "judgement": "",
-        })
+        rows.append(
+            {
+                "dimension": "商业推进",
+                "current": f"{len(open_opportunities)} 条跟进中的商机",
+                "judgement": "",
+            }
+        )
     if contracts:
         rows.append({"dimension": "合同", "current": f"{len(contracts)} 份合同记录", "judgement": ""})
     return rows
@@ -1790,11 +1892,7 @@ def _version_sections(version: CustomerProfileProjectionVersion | None) -> dict[
 def _changed_section_names(before: dict[str, object], after: dict[str, object]) -> list[str]:
     """Return top-level profile sections whose published value really changed."""
 
-    return [
-        section
-        for section in PROFILE_SECTION_NAMES
-        if _diff_values(before.get(section), after.get(section))
-    ]
+    return [section for section in PROFILE_SECTION_NAMES if _diff_values(before.get(section), after.get(section))]
 
 
 def _diff_values(before: object, after: object, *, path: str = "", limit: int = 100) -> list[dict[str, object]]:

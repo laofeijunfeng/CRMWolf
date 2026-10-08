@@ -42,6 +42,7 @@ from fastapi.responses import FileResponse
 from typing import Iterator
 from app.schemas.common import PaginatedResponse
 from app.models.opportunity import Opportunity
+from app.models.contract import Contract
 from app.models.customer import Customer
 from app.schemas.contract import (
     ContractCreate,
@@ -58,6 +59,7 @@ from app.services.customer_business_object_intelligence_service import (
 )
 from app.services.outbound_notification_job_service import outbound_notification_job_service
 from app.services.file_storage import FileStorageError, file_storage_service
+from app.services.legacy_profile_source import advance_eligible_progress
 from app.utils.public_id import is_opportunity_public_id
 
 logger = logging.getLogger(__name__)
@@ -313,6 +315,24 @@ async def _trigger_contract_intelligence_refresh(
     customer_business_object_intelligence_service.enqueue_change_refresh_after_commit(change)
 
 
+def _lock_created_contract_for_file_commit(
+    db: Session, contract: Contract, *, team_id: int, deleted: bool = False,
+) -> Contract:
+    """Fence the file transaction on the owning customer before touching the contract."""
+    if int(contract.team_id) != int(team_id):
+        raise ValueError("合同所属团队已变更，请重试")
+    customer_id = int(contract.customer_id)
+    advance_eligible_progress(db, team_id=team_id, customer_id=customer_id, deleted=deleted)
+    with db.no_autoflush:
+        locked = db.query(Contract).filter(
+            Contract.id == contract.id, Contract.team_id == team_id,
+        ).populate_existing().with_for_update().one_or_none()
+    if locked is None or int(locked.customer_id) != customer_id:
+        db.rollback()
+        raise ValueError("合同所属客户已变更，请重试")
+    return locked
+
+
 @router.post("/", response_model=ContractResponse, status_code=status.HTTP_201_CREATED, summary="创建合同", description="""
 手动创建新合同，系统自动生成合同编号并计算标准单价。
 
@@ -382,6 +402,7 @@ async def create_contract(
                 content=file_content,
             )
         except FileStorageError as file_error:
+            db_contract = _lock_created_contract_for_file_commit(db, db_contract, team_id=team_id, deleted=True)
             db.delete(db_contract)
             db.commit()
             raise HTTPException(
@@ -389,6 +410,7 @@ async def create_contract(
                 detail=str(file_error)
             )
 
+        db_contract = _lock_created_contract_for_file_commit(db, db_contract, team_id=team_id)
         db_contract.contract_file_path = contract_file_path
         db_contract.contract_file_name = file.filename
         db_contract.contract_file_size = len(file_content)
@@ -529,6 +551,7 @@ async def create_contract_from_opportunity(
                 content=file_content,
             )
         except FileStorageError as file_error:
+            db_contract = _lock_created_contract_for_file_commit(db, db_contract, team_id=team_id, deleted=True)
             db.delete(db_contract)
             db.commit()
             raise HTTPException(
@@ -536,6 +559,7 @@ async def create_contract_from_opportunity(
                 detail=str(file_error)
             )
 
+        db_contract = _lock_created_contract_for_file_commit(db, db_contract, team_id=team_id)
         db_contract.contract_file_path = contract_file_path
         db_contract.contract_file_name = file.filename
         db_contract.contract_file_size = len(file_content)

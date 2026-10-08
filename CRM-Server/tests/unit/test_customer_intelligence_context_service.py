@@ -12,6 +12,7 @@ from app.models.customer import Contact, Customer, CustomerProduct
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
 from app.models.customer_fact import CustomerFact, CustomerFactRevision, CustomerFactSource
+from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
 from app.models.industry import Industry
 from app.models.deal_journey import CustomerDealJourney, CustomerDealJourneyEvent
 from app.models.opportunity import Opportunity
@@ -138,6 +139,7 @@ def _session():
             CustomerFact.__table__,
             CustomerFactSource.__table__,
             CustomerFactRevision.__table__,
+            CustomerLegacySourceProgress.__table__,
             Industry.__table__,
             Product.__table__,
             ProductModule.__table__,

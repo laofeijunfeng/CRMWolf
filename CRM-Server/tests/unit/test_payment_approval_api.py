@@ -38,6 +38,7 @@ from app.models.approval import (
 )
 from app.models.contract import Contract, ContractStatus
 from app.models.customer import Customer
+from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
 from app.models.opportunity import Opportunity
 from app.models.outbound_notification_job import OutboundNotificationJob
 from app.models.payment import (
@@ -62,6 +63,7 @@ def db_session():
     tables = [
         User.__table__,
         Customer.__table__,
+        CustomerLegacySourceProgress.__table__,
         Opportunity.__table__,
         Contract.__table__,
         PaymentPlan.__table__,
@@ -307,6 +309,37 @@ def test_payment_adapter_cancel_keeps_confirmation_pending(
     assert seed_payment_record.confirmation_status == PaymentConfirmationStatus.PENDING
 
 
+def test_payment_adapter_approves_only_after_customer_fence(db_session, seed_payment_record, monkeypatch):
+    from sqlalchemy import event
+    from app.crud import payment as payment_module
+
+    record = seed_payment_record
+    record.payment_plan.due_date = __import__("datetime").date(2027, 8, 1)
+    db_session.commit()
+    order = []
+    real_lock = payment_module.lock_source_customer
+
+    def observe_lock(session, *, team_id, customer_id):
+        order.append("lock")
+        return real_lock(session, team_id=team_id, customer_id=customer_id)
+
+    def observe_write(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().startswith("UPDATE crm_payment_records"):
+            order.append("write")
+
+    monkeypatch.setattr(payment_module, "lock_source_customer", observe_lock)
+    event.listen(db_session.get_bind(), "before_cursor_execute", observe_write)
+    try:
+        PaymentRecordAdapter().on_approved(db_session, record)
+        db_session.flush()
+    finally:
+        event.remove(db_session.get_bind(), "before_cursor_execute", observe_write)
+
+    assert "write" in order and "lock" in order
+    assert order.index("lock") < order.index("write")
+    assert record.confirmation_status == PaymentConfirmationStatus.CONFIRMED
+
+
 def test_update_payment_record_creator_can_edit_after_withdraw(
     db_session, client, seed_payment_record, seed_payment_flow, patched_perms,
 ):
@@ -445,3 +478,83 @@ def test_submit_approval_not_found(client, patched_perms):
     patched_perms(["payment:submit"])
     r = client.post("/v1/payments/records/999999/submit-approval")
     assert r.status_code == 404, r.text
+
+
+def test_update_status_refreshes_plan_after_customer_fence(db_session, seed_payment_record, monkeypatch):
+    from sqlalchemy import update
+    from app.crud import payment as payment_module
+
+    plan = seed_payment_record.payment_plan
+    plan.due_date = __import__("datetime").date(2027, 8, 1)
+    plan.status = PaymentPlanStatus.OVERDUE
+    db_session.commit()
+    assert plan.status == PaymentPlanStatus.OVERDUE
+    real_lock = payment_module.lock_source_customer
+
+    def change_status_before_lock(session, *, team_id, customer_id):
+        session.execute(
+            update(PaymentPlan).where(PaymentPlan.id == plan.id)
+            .values(status=PaymentPlanStatus.PENDING)
+            .execution_options(synchronize_session=False)
+        )
+        return real_lock(session, team_id=team_id, customer_id=customer_id)
+
+    monkeypatch.setattr(payment_module, "lock_source_customer", change_status_before_lock)
+    payment_module.payment_plan_crud.update_status(db_session, plan)
+    assert plan.status == PaymentPlanStatus.PENDING
+    assert db_session.query(CustomerLegacySourceProgress).count() == 0
+
+
+def test_dormant_confirm_locks_customer_before_record_transition(db_session, seed_payment_record, monkeypatch):
+    from app.crud import payment as payment_module
+
+    real_lock = payment_module.lock_source_customer
+    seed_payment_record.payment_plan.due_date = __import__("datetime").date(2027, 8, 1)
+    db_session.commit()
+
+    locked = []
+
+    def observe_lock(session, *, team_id, customer_id):
+        if not locked:
+            assert seed_payment_record.confirmation_status == PaymentConfirmationStatus.PENDING
+        locked.append(customer_id)
+        return real_lock(session, team_id=team_id, customer_id=customer_id)
+
+    monkeypatch.setattr(payment_module, "lock_source_customer", observe_lock)
+    monkeypatch.setattr(
+        "app.services.deal_journey_service.deal_journey_service.refresh_closure_status",
+        lambda db, journey_id: None,
+    )
+    confirmed = payment_module.payment_record_crud.confirm_payment(
+        db_session, seed_payment_record.id, "2", "财务", "confirm",
+    )
+    assert locked and set(locked) == {1}
+    assert confirmed.confirmation_status == PaymentConfirmationStatus.CONFIRMED
+    assert db_session.query(CustomerLegacySourceProgress).filter_by(
+        team_id=1, customer_id=1,
+    ).one().eligible_revision == 1
+
+
+def test_contract_payment_status_uses_post_fence_contract(db_session, seed_payment_record, monkeypatch):
+    from sqlalchemy import update
+    from app.crud import payment as payment_module
+
+    contract = seed_payment_record.payment_plan.contract
+    seed_payment_record.payment_plan.due_date = __import__("datetime").date(2027, 8, 1)
+    db_session.commit()
+    contract.payment_status = "PARTIAL"
+    db_session.commit()
+    real_lock = payment_module.lock_source_customer
+
+    def correct_status_before_lock(session, *, team_id, customer_id):
+        session.execute(
+            update(Contract).where(Contract.id == contract.id)
+            .values(payment_status="UNPAID")
+            .execution_options(synchronize_session=False)
+        )
+        return real_lock(session, team_id=team_id, customer_id=customer_id)
+
+    monkeypatch.setattr(payment_module, "lock_source_customer", correct_status_before_lock)
+    payment_module.payment_record_crud._update_contract_payment_status(db_session, contract.id)
+    assert contract.payment_status == "UNPAID"
+    assert db_session.query(CustomerLegacySourceProgress).count() == 0

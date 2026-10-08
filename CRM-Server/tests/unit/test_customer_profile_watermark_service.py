@@ -47,3 +47,27 @@ def test_merge_preserves_max_numeric_and_latest_sparse_metadata():
         "customer_id": 101,
         "latest_activity_at": "2026-08-28T12:00:00",
     }
+
+
+def test_authoritative_revision_allows_snapshot_maximum_to_fall_after_delete():
+    service = CustomerProfileWatermarkService()
+    before = {
+        "source_policy_version": "LEGACY_PROFILE_ELIGIBLE_V1",
+        "eligible_revision": 8,
+        "deletion_revision": 1,
+        "activity_id": 72,
+        "latest_activity_at": "2026-09-30T10:00:00",
+        "source_snapshot_hash": "before",
+    }
+    after = {
+        **before,
+        "eligible_revision": 9,
+        "deletion_revision": 2,
+        "activity_id": 71,
+        "latest_activity_at": "2026-09-29T10:00:00",
+        "source_snapshot_hash": "after",
+    }
+
+    assert service.compare(after, before).is_behind is False
+    assert service.merge(before, after) == after
+    assert service.compare(before, after).is_behind is True

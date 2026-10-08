@@ -458,6 +458,27 @@ describe('CRMAgentChat Agent UI protocol', () => {
     wrapper.unmount()
   })
 
+  it('clears the composer immediately after sending and does not restore the sent text', async () => {
+    let finishStream: (() => void) | undefined
+    api.chatStream.mockImplementation(() => new Promise<void>(resolve => {
+      finishStream = resolve
+    }))
+    const wrapper = mountChat()
+    await flushPromises()
+
+    await startRequest(wrapper, '记录这次客户跟进')
+    await flushPromises()
+
+    const composer = wrapper.get('form textarea').element as HTMLTextAreaElement
+    expect(composer.value).toBe('')
+    expect(wrapper.text()).toContain('记录这次客户跟进')
+
+    finishStream?.()
+    await flushPromises()
+    expect((wrapper.get('form textarea').element as HTMLTextAreaElement).value).toBe('')
+    wrapper.unmount()
+  })
+
   it('uses delta text only as a temporary projection and replaces it with the final envelope', async () => {
     let emitEvent: ((event: AgentStreamEvent) => void) | undefined
     let finishStream: (() => void) | undefined

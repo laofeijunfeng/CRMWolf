@@ -4,12 +4,16 @@ import json
 from datetime import datetime
 from types import SimpleNamespace
 
-from sqlalchemy import BigInteger, create_engine
+from sqlalchemy import BigInteger, create_engine, event
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
 from app.models.customer import Customer
+from app.models.customer_activity import CustomerActivity
+from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
+from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
+from app.models.opportunity import Opportunity
 from app.models.deal_journey import (
     CustomerDealJourney,
     CustomerDealJourneyEvent,
@@ -29,9 +33,15 @@ def _bigint_to_sqlite_int(element, compiler, **kwargs):
 
 def _session():
     engine = create_engine("sqlite:///:memory:")
+
+    @event.listens_for(engine, "before_cursor_execute", retval=True)
+    def skip_indexes(conn, cursor, statement, parameters, context, executemany):
+        return ("SELECT 1", ()) if statement.startswith("CREATE INDEX") else (statement, parameters)
     Base.metadata.create_all(
         engine,
-        tables=[Customer.__table__, CustomerDealJourney.__table__, CustomerDealJourneyEvent.__table__],
+        tables=[Customer.__table__, CustomerActivity.__table__, CustomerActivityDeletionTombstone.__table__,
+                CustomerLegacySourceProgress.__table__, Opportunity.__table__,
+                CustomerDealJourney.__table__, CustomerDealJourneyEvent.__table__],
     )
     return sessionmaker(bind=engine)()
 

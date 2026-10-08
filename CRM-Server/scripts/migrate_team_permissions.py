@@ -21,6 +21,7 @@ from app.models.permission import Permission
 from app.models.role_permission import RolePermission
 from app.services.permission_service import permission_service
 from app.services.init_service import ROLES_DATA, ROLE_PERMISSIONS_MAPPING
+from app.constants.permissions import OPT_IN_PERMISSION_CODES
 
 
 def migrate_roles(db):
@@ -62,7 +63,7 @@ def migrate_role_permissions(db):
 
         # 确定目标权限
         if perm_config == "all":
-            target_perm_codes = all_perm_codes
+            target_perm_codes = all_perm_codes - OPT_IN_PERMISSION_CODES
         else:
             target_perm_codes = set(perm_config)
 

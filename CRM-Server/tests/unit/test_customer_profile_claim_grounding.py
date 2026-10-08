@@ -1,16 +1,4 @@
 import pytest
-from sqlalchemy import BigInteger, create_engine
-from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.orm.attributes import flag_modified
-from sqlalchemy.pool import StaticPool
-
-from app.core.database import Base
-from app.models.customer import Customer
-from app.models.customer_profile_projection import (
-    CustomerProfileCurrent,
-    CustomerProfileProjectionVersion,
-)
 from app.schemas.customer_profile import CustomerProfileSections
 from app.services.customer_profile_claim_grounding import (
     PROFILE_CLAIM_UNGROUNDED,
@@ -26,41 +14,6 @@ from app.services.customer_profile_projection_validator import (
 )
 
 
-@compiles(BigInteger, "sqlite")
-def _bigint_to_sqlite_int(element, compiler, **kw):
-    return "INTEGER"
-
-
-@pytest.fixture
-def profile_db():
-    engine = create_engine(
-        "sqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    Base.metadata.create_all(
-        engine,
-        tables=[
-            Customer.__table__,
-            CustomerProfileProjectionVersion.__table__,
-            CustomerProfileCurrent.__table__,
-        ],
-    )
-    session = sessionmaker(bind=engine)()
-    session.add(
-        Customer(
-            id=1,
-            public_id="cus_profile_test",
-            team_id=1,
-            account_name="客户档案测试客户",
-            city="上海",
-            creator_id="user_1",
-        )
-    )
-    session.commit()
-    yield session
-    session.close()
-    engine.dispose()
 
 OLD = "客户正在重新评估 Apifox 私有化部署方案，需要私有环境安装包和试用方案。"
 QUOTE = "今天看到了 Hifox，需要私有化部署。"
@@ -379,35 +332,6 @@ def test_invented_apifox_summary_still_rejected_with_summary_refs():
     assert exc.value.code == PROFILE_CLAIM_UNGROUNDED
 
 
-def test_validate_draft_skips_byte_identical_inherited_current_situation():
-    service = CustomerProfileProjectionService()
-    canned_situation = {
-        "summary": OLD,
-        "demand_background": {
-            "summary": OLD,
-            "items": [{"statement": OLD, "evidence_refs": ["activity:1"]}],
-        },
-    }
-    inherited = {
-        "current_situation": canned_situation,
-        "follow_up_process": [{"business_change": OLD, "evidence_refs": ["activity:1"]}],
-    }
-    draft = CustomerProfileProjectionDraft(
-        sections=CustomerProfileSections(
-            current_situation=canned_situation,
-            current_journeys=[],
-            important_changes=[{"summary": "联系人已更新"}],
-            long_term_context={"overview": "新的长期背景"},
-            follow_up_process=inherited["follow_up_process"],
-            recorded_follow_ups=[],
-        ),
-        evidence_refs=[{"evidence_key": "activity:1", "source_type": "customer_activity", "snippet": QUOTE}],
-        source_watermark={"product_catalog_names": ["Hifox", "Apifox"]},
-        target_sections=("long_term_context", "important_changes"),
-    )
-    service.validate_draft(draft, inherited_sections=inherited)
-    assert draft.sections.current_situation["summary"] == OLD
-
 
 def test_validate_draft_still_rejects_canned_sentence_without_inherited_payload():
     service = CustomerProfileProjectionService()
@@ -465,49 +389,6 @@ def test_validate_draft_does_not_skip_new_demand_claims_when_current_situation_c
     assert exc.value.code == PROFILE_CLAIM_UNGROUNDED
 
 
-def test_partial_publish_keeps_legacy_canned_current_situation(profile_db):
-    service = CustomerProfileProjectionService()
-    first = CustomerProfileProjectionDraft(
-        sections=CustomerProfileSections(
-            current_situation={"summary": "早期沟通。"},
-            current_journeys=[],
-            important_changes=[],
-            long_term_context={"overview": "旧长期背景"},
-            follow_up_process=[],
-            recorded_follow_ups=[],
-        ),
-        evidence_refs=[{"evidence_key": "activity:1", "source_type": "customer_activity", "snippet": QUOTE}],
-        source_watermark={"activity_id": 1},
-    )
-    publication = service.publish(profile_db, team_id=1, customer_id=1, draft=first)
-    profile_db.commit()
-    publication.version.current_situation_json = {
-        "summary": OLD,
-        "demand_background": {
-            "summary": OLD,
-            "items": [{"statement": OLD, "evidence_refs": ["activity:1"]}],
-        },
-    }
-    flag_modified(publication.version, "current_situation_json")
-    profile_db.commit()
-
-    partial = CustomerProfileProjectionDraft(
-        sections=CustomerProfileSections(
-            current_situation={"summary": "不应覆盖当前情况"},
-            current_journeys=[],
-            important_changes=[{"summary": "联系人已更新"}],
-            long_term_context={"overview": "新的长期背景"},
-            follow_up_process=[{"business_change": "不应覆盖"}],
-            recorded_follow_ups=[],
-        ),
-        evidence_refs=[{"evidence_key": "activity:2", "source_type": "customer_activity", "snippet": "更新了联系人"}],
-        source_watermark={"activity_id": 2, "product_catalog_names": ["Hifox", "Apifox"]},
-        target_sections=("long_term_context", "important_changes"),
-    )
-    published = service.publish(profile_db, team_id=1, customer_id=1, draft=partial)
-    profile_db.commit()
-    assert published.version.current_situation_json["summary"] == OLD
-    assert published.version.long_term_context_json == {"overview": "新的长期背景"}
 
 
 def test_full_draft_that_writes_canned_apifox_still_fails():

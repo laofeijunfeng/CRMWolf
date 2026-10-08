@@ -9,7 +9,7 @@ from app.models.role import Role
 from app.models.permission import Permission
 from app.models.role_permission import RolePermission
 from app.core.logging import get_logger
-from app.constants.permissions import ALL_PERMISSIONS, ROLES_DATA, ROLE_PERMISSIONS_MAPPING
+from app.constants.permissions import ALL_PERMISSIONS, ROLES_DATA, ROLE_PERMISSIONS_MAPPING, OPT_IN_PERMISSION_CODES
 
 logger = get_logger(__name__)
 
@@ -76,8 +76,8 @@ def ensure_role_permissions(db: Session, roles: dict, permissions: dict) -> None
 
         # 确定需要分配的权限
         if perm_config == "all":
-            # TEAM_ADMIN 获得所有权限
-            target_perm_codes = all_perm_codes
+            # TEAM_ADMIN receives catalog permissions except explicit-only grants.
+            target_perm_codes = all_perm_codes - OPT_IN_PERMISSION_CODES
         else:
             target_perm_codes = set(perm_config)
 

@@ -16,6 +16,7 @@ from app.schemas.payment import (
     PaymentRecordCreate, PaymentRecordUpdate
 )
 from app.services.business_number_generator import BusinessNumberGenerator
+from app.services.legacy_profile_source import advance_eligible_progress, lock_source_customer
 from app.utils.time import business_now
 from app.core.list_query import (
     FilterCondition,
@@ -65,6 +66,26 @@ TWOPLACES = Decimal("0.01")
 
 def as_money(value: Any) -> Decimal:
     return Decimal(str(value)).quantize(TWOPLACES)
+
+
+def _contract_customer_id(db: Session, *, contract_id: int, team_id: int) -> int:
+    with db.no_autoflush:
+        customer_id = db.query(Contract.customer_id).filter(
+            Contract.id == contract_id, Contract.team_id == team_id,
+        ).scalar()
+    if customer_id is None:
+        raise ValueError("合同不存在")
+    return int(customer_id)
+
+
+def _plan_customer_id(db: Session, *, plan_id: int, team_id: int) -> int:
+    with db.no_autoflush:
+        contract_id = db.query(PaymentPlan.contract_id).filter(
+            PaymentPlan.id == plan_id, PaymentPlan.team_id == team_id,
+        ).scalar()
+    if contract_id is None:
+        raise ValueError("回款计划不存在")
+    return _contract_customer_id(db, contract_id=int(contract_id), team_id=team_id)
 
 
 class PaymentPlanCRUD:
@@ -276,6 +297,7 @@ class PaymentPlanCRUD:
         contract = (
             db.query(Contract)
             .filter(Contract.id == contract_id)
+            .populate_existing()
             .with_for_update()
             .first()
         )
@@ -290,6 +312,11 @@ class PaymentPlanCRUD:
         exclude_plan_id: Optional[int] = None,
     ) -> Decimal:
         plans = db.query(PaymentPlan).filter(PaymentPlan.contract_id == contract_id).all()
+        for plan in plans:
+            state = inspect(plan, raiseerr=False)
+            if state is not None and not state.modified:
+                db.refresh(plan)
+
         total = Decimal("0.00")
         for plan in plans:
             if exclude_plan_id is not None and getattr(plan, "id", None) == exclude_plan_id:
@@ -305,11 +332,14 @@ class PaymentPlanCRUD:
             )
 
     def create(self, db: Session, contract_id: int, obj_in: PaymentPlanCreate, team_id: int) -> PaymentPlan:
+        customer_id = _contract_customer_id(db, contract_id=contract_id, team_id=team_id)
+        lock_source_customer(db, team_id=team_id, customer_id=customer_id)
         contract = self._lock_contract(db, contract_id)
         new_total = self._existing_planned_total(db, contract_id) + as_money(obj_in.planned_amount)
         self._assert_planned_total_within_contract(contract, new_total)
 
         # 生成计划编号
+        advance_eligible_progress(db, team_id=team_id, customer_id=customer_id)
         plan_number = BusinessNumberGenerator.generate('PP', db)
 
         db_plan = PaymentPlan(
@@ -320,8 +350,7 @@ class PaymentPlanCRUD:
             **obj_in.model_dump()
         )
         db.add(db_plan)
-        db.commit()
-        db.refresh(db_plan)
+        db.flush()
         from app.models.deal_journey import DealJourneyEventType, DealJourneySourceType
         from app.services.deal_journey_service import deal_journey_service
         deal_journey_service.record_event(
@@ -346,11 +375,16 @@ class PaymentPlanCRUD:
         from app.models.payment import PaymentPlan
         from app.services.operation_log_service import operation_log_service
 
+        if not plans_data:
+            return []
+        customer_id = _contract_customer_id(db, contract_id=contract_id, team_id=team_id)
+        lock_source_customer(db, team_id=team_id, customer_id=customer_id)
         contract = self._lock_contract(db, contract_id)
         requested_total = sum((as_money(plan.planned_amount) for plan in plans_data), Decimal("0.00"))
         new_total = self._existing_planned_total(db, contract_id) + requested_total
         self._assert_planned_total_within_contract(contract, new_total)
 
+        advance_eligible_progress(db, team_id=team_id, customer_id=customer_id, count=len(plans_data))
         plans = []
         for plan_data in plans_data:
             # 生成计划编号
@@ -364,15 +398,8 @@ class PaymentPlanCRUD:
                 **plan_data.model_dump()
             )
             db.add(db_plan)
+            db.flush()
             plans.append(db_plan)
-
-        db.commit()
-
-        # 刷新对象并确保所有字段加载（避免延迟加载）
-        for plan in plans:
-            db.refresh(plan)
-            # 显式加载关系字段（如有）
-            # db.expunge(plan)  # 将对象从 Session分离，但保持属性可访问
 
         operator = user_crud.get_by_id(db, int(creator_id))
         operator_name = operator.name if operator else None
@@ -414,13 +441,21 @@ class PaymentPlanCRUD:
                 "totalPlannedAmount": float(requested_total),
                 "customerId": contract.customer_id,
                 "customerName": customer.account_name if customer else None
-            }
+            },
+            commit=False,
         )
+
+        db.commit()
+        for plan in plans:
+            db.refresh(plan)
 
         return plans
 
     def update(self, db: Session, db_obj: PaymentPlan, obj_in: PaymentPlanUpdate) -> PaymentPlan:
         update_data = obj_in.model_dump(exclude_unset=True)
+        customer_id = _contract_customer_id(db, contract_id=db_obj.contract_id, team_id=db_obj.team_id)
+        lock_source_customer(db, team_id=int(db_obj.team_id), customer_id=customer_id)
+        db.refresh(db_obj)
         contract = self._lock_contract(db, db_obj.contract_id)
         old_total = self._existing_planned_total(db, db_obj.contract_id)
         if "planned_amount" in update_data:
@@ -431,6 +466,8 @@ class PaymentPlanCRUD:
             if new_total > old_total:
                 self._assert_planned_total_within_contract(contract, new_total)
 
+        if any(getattr(db_obj, field) != value for field, value in update_data.items()):
+            advance_eligible_progress(db, team_id=int(db_obj.team_id), customer_id=customer_id)
         for field, value in update_data.items():
             setattr(db_obj, field, value)
 
@@ -445,15 +482,24 @@ class PaymentPlanCRUD:
         return db_obj
 
     def delete(self, db: Session, plan_id: int, team_id: int) -> bool:
-        plan = self.get_by_id(db, plan_id, team_id)  # 使用 team_id 进行团队隔离验证
+        with db.no_autoflush:
+            customer_id = db.query(Contract.customer_id).join(
+                PaymentPlan, PaymentPlan.contract_id == Contract.id,
+            ).filter(PaymentPlan.id == plan_id, PaymentPlan.team_id == team_id,
+                     Contract.team_id == team_id).scalar()
+        if customer_id is None:
+            return False
+        lock_source_customer(db, team_id=team_id, customer_id=int(customer_id))
+        plan = db.query(PaymentPlan).filter_by(id=plan_id, team_id=team_id).populate_existing().first()
         if not plan:
             return False
-
         if plan.payment_records:
             raise ValueError("存在关联的回款记录，无法删除")
 
         contract_id = plan.contract_id
         deal_journey_id = plan.deal_journey_id
+        advance_eligible_progress(db, team_id=team_id, customer_id=customer_id,
+                                  deleted=True, count=1 + len(plan.invoice_applications))
         db.delete(plan)
         db.flush()
         from app.crud.payment import payment_record_crud
@@ -466,22 +512,30 @@ class PaymentPlanCRUD:
     def update_status(self, db: Session, plan: PaymentPlan, commit: bool = True) -> PaymentPlan:
         from app.models.payment import PaymentRecord
         
-        # 从数据库重新查询回款记录，确保获取最新数据
+        customer_id = _plan_customer_id(db, plan_id=int(plan.id), team_id=int(plan.team_id))
+        lock_source_customer(db, team_id=int(plan.team_id), customer_id=customer_id)
+        if not inspect(plan).modified:
+            db.refresh(plan)
         payment_records = db.query(PaymentRecord).filter(
             PaymentRecord.payment_plan_id == plan.id
         ).all()
-        
+        for record in payment_records:
+            if not inspect(record).modified:
+                db.refresh(record)
+
         total_paid = sum_approved_payment_amount(payment_records)
         planned = float(plan.planned_amount)
-        
         if total_paid >= planned:
-            plan.status = PaymentPlanStatus.COMPLETED
+            new_status = PaymentPlanStatus.COMPLETED
         elif total_paid > 0:
-            plan.status = PaymentPlanStatus.PARTIAL
+            new_status = PaymentPlanStatus.PARTIAL
         elif plan.due_date < date.today():
-            plan.status = PaymentPlanStatus.OVERDUE
+            new_status = PaymentPlanStatus.OVERDUE
         else:
-            plan.status = PaymentPlanStatus.PENDING
+            new_status = PaymentPlanStatus.PENDING
+        if plan.status != new_status:
+            advance_eligible_progress(db, team_id=int(plan.team_id), customer_id=customer_id)
+            plan.status = new_status
         
         if commit:
             db.commit()
@@ -955,11 +1009,14 @@ class PaymentRecordCRUD:
                     raise PaymentRecordIdempotencyConflict("幂等键已用于其他回款登记请求")
                 return existing
 
+        customer_id = _plan_customer_id(db, plan_id=plan_id, team_id=team_id)
+        lock_source_customer(db, team_id=team_id, customer_id=customer_id)
         # 锁住计划及其已有记录，保证并发登记不能同时通过金额校验。
         plan = (
             db.query(PaymentPlan)
             .filter(PaymentPlan.id == plan_id, PaymentPlan.team_id == team_id)
             .with_for_update()
+            .populate_existing()
             .first()
         )
         if not plan:
@@ -989,6 +1046,7 @@ class PaymentRecordCRUD:
                 f"回款金额超出计划，计划金额: {planned}，已登记: {total_paid}，本次: {requested_amount}"
             )
 
+        advance_eligible_progress(db, team_id=team_id, customer_id=customer_id)
         # 生成记录编号
         record_number = BusinessNumberGenerator.generate('PAY', db)
         record_data = obj_in.model_dump()
@@ -1089,6 +1147,11 @@ class PaymentRecordCRUD:
     
     def update(self, db: Session, db_obj: PaymentRecord, obj_in: PaymentRecordUpdate) -> PaymentRecord:
         from app.crud.user import user_crud
+        customer_id = _plan_customer_id(
+            db, plan_id=int(db_obj.payment_plan_id), team_id=int(db_obj.team_id),
+        )
+        lock_source_customer(db, team_id=int(db_obj.team_id), customer_id=customer_id)
+        db.refresh(db_obj)
 
         update_data = obj_in.model_dump(exclude_unset=True)
         commission_member_id = update_data.pop("commission_member_id", None)
@@ -1102,6 +1165,7 @@ class PaymentRecordCRUD:
                     PaymentPlan.id == db_obj.payment_plan_id,
                     PaymentPlan.team_id == db_obj.team_id,
                 )
+                .populate_existing()
                 .with_for_update()
                 .first()
             )
@@ -1123,6 +1187,10 @@ class PaymentRecordCRUD:
                 raise ValueError(
                     f"回款金额超出计划，计划金额: {plan.planned_amount}，其他已登记: {other_amount}，本次: {new_amount}"
                 )
+        if any(getattr(db_obj, field) != value for field, value in update_data.items()) or (
+            commission_member_id is not None and db_obj.commission_member_id != str(commission_member_id)
+        ):
+            advance_eligible_progress(db, team_id=int(db_obj.team_id), customer_id=customer_id)
 
         for field, value in update_data.items():
             setattr(db_obj, field, value)
@@ -1154,9 +1222,18 @@ class PaymentRecordCRUD:
         return db_obj
     
     def delete(self, db: Session, record_id: int, team_id: int) -> bool:
-        record = self.get_by_id(db, record_id, team_id)  # 使用 team_id 进行团队隔离验证
+        with db.no_autoflush:
+            plan_id = db.query(PaymentRecord.payment_plan_id).filter_by(
+                id=record_id, team_id=team_id,
+            ).scalar()
+        if plan_id is None:
+            return False
+        customer_id = _plan_customer_id(db, plan_id=int(plan_id), team_id=team_id)
+        lock_source_customer(db, team_id=team_id, customer_id=customer_id)
+        record = db.query(PaymentRecord).filter_by(id=record_id, team_id=team_id).populate_existing().first()
         if not record:
             return False
+
 
         assert_deletable_approval_resource(
             db,
@@ -1168,6 +1245,8 @@ class PaymentRecordCRUD:
             locked_business_statuses=(PaymentConfirmationStatus.CONFIRMED,),
         )
 
+        advance_eligible_progress(db, team_id=team_id, customer_id=customer_id,
+                                  deleted=True, count=1 + len(record.invoice_applications))
         plan_id = record.payment_plan_id
         db.delete(record)
         db.flush()
@@ -1175,8 +1254,8 @@ class PaymentRecordCRUD:
         from app.crud.payment import payment_plan_crud
         plan = db.query(PaymentPlan).filter(PaymentPlan.id == plan_id).first()
         if plan:
-            payment_plan_crud.update_status(db, plan)
-            self._update_contract_payment_status(db, plan.contract_id)
+            payment_plan_crud.update_status(db, plan, commit=False)
+            self._update_contract_payment_status(db, plan.contract_id, commit=False)
             # 历史回款记录可能没有成交旅程；删除回款本身不应依赖
             # 不存在的可选关联对象。
             if plan.deal_journey_id is not None:
@@ -1206,13 +1285,25 @@ class PaymentRecordCRUD:
         from app.models.payment import PaymentConfirmationStatus
         from app.models.invoice import InvoiceApplication
 
-        record = self.get_by_id(db, record_id)
-        if not record:
+        with db.no_autoflush:
+            owner = db.query(PaymentRecord.team_id, PaymentRecord.payment_plan_id).filter(
+                PaymentRecord.id == record_id,
+            ).first()
+        if not owner:
             return None
 
+        team_id, plan_id = map(int, owner)
+        customer_id = _plan_customer_id(db, plan_id=plan_id, team_id=team_id)
+        lock_source_customer(db, team_id=team_id, customer_id=customer_id)
+        record = db.query(PaymentRecord).filter_by(id=record_id, team_id=team_id).populate_existing().first()
+        if not record:
+            return None
         if record.confirmation_status != PaymentConfirmationStatus.PENDING:
             raise ValueError("只能确认待确认状态的回款记录")
 
+        if action not in ("confirm", "dispute"):
+            raise ValueError("无效的确认操作")
+        advance_eligible_progress(db, team_id=team_id, customer_id=customer_id)
         # action=dispute 已废弃（无实际业务使用）
         if action == "confirm":
             record.confirmation_status = PaymentConfirmationStatus.CONFIRMED
@@ -1255,33 +1346,44 @@ class PaymentRecordCRUD:
         from app.models.contract import Contract
         from app.models.payment import PaymentPlanStatus
         
-        contract = db.query(Contract).filter(Contract.id == contract_id).first()
-        if not contract:
+        with db.no_autoflush:
+            owner = db.query(Contract.team_id, Contract.customer_id).filter(Contract.id == contract_id).first()
+        if not owner:
             return
-        
-        plans = db.query(PaymentPlan).filter(PaymentPlan.contract_id == contract_id).all()
-        
+        team_id, customer_id = map(int, owner)
+        lock_source_customer(db, team_id=team_id, customer_id=customer_id)
+        with db.no_autoflush:
+            contract = db.query(Contract).filter(Contract.id == contract_id).first()
+            plans = db.query(PaymentPlan).filter(PaymentPlan.contract_id == contract_id).all()
+        if not inspect(contract).modified:
+            db.refresh(contract, attribute_names=["payment_status", "total_paid_amount"])
+
+        for plan in plans:
+            if not inspect(plan).modified:
+                db.refresh(plan)
+            db.expire(plan, ["payment_records"])
         if not plans:
-            contract.payment_status = PaymentStatus.UNPAID
-            contract.total_paid_amount = 0
+            payment_status = PaymentStatus.UNPAID
+            total_paid = 0
         else:
             total_paid = sum(sum_approved_payment_amount(p.payment_records) for p in plans)
-            contract.total_paid_amount = total_paid
-            
             total_planned = sum(float(p.planned_amount) for p in plans)
-            
             has_overdue = any(p.status == PaymentPlanStatus.OVERDUE for p in plans)
             all_completed = all(p.status == PaymentPlanStatus.COMPLETED for p in plans)
-            
+
             if has_overdue:
-                contract.payment_status = PaymentStatus.OVERDUE
+                payment_status = PaymentStatus.OVERDUE
             elif total_paid >= total_planned:
-                contract.payment_status = PaymentStatus.COMPLETED
+                payment_status = PaymentStatus.COMPLETED
             elif total_paid > 0:
-                contract.payment_status = PaymentStatus.PARTIAL
+                payment_status = PaymentStatus.PARTIAL
             else:
-                contract.payment_status = PaymentStatus.UNPAID
-        
+                payment_status = PaymentStatus.UNPAID
+
+        if contract.payment_status != payment_status or contract.total_paid_amount != total_paid:
+            advance_eligible_progress(db, team_id=int(contract.team_id), customer_id=int(contract.customer_id))
+            contract.payment_status = payment_status
+            contract.total_paid_amount = total_paid
         if commit:
             db.commit()
 

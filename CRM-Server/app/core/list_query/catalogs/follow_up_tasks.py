@@ -4,6 +4,7 @@ from app.core.list_query.catalog import ListQueryCatalog, ListQueryField
 from app.core.list_query.catalogs.common import (
     follow_up_content_expression,
     follow_up_customer_name_expression,
+    follow_up_product_name_expression,
     follow_up_status_label_expression,
     text_search_predicate,
 )
@@ -17,6 +18,11 @@ FOLLOW_UP_TASKS_LIST_QUERY_CATALOG = ListQueryCatalog(
             key="customer_name",
             type="text",
             expression=follow_up_customer_name_expression(),
+        ),
+        ListQueryField(
+            key="product_name",
+            type="text",
+            expression=follow_up_product_name_expression(),
         ),
         ListQueryField(
             key="tracking_content",

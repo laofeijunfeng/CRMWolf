@@ -11,7 +11,6 @@ const baselineSnapshot: CustomerEditableSnapshot = {
   product_public_id: 'prd_crm',
   default_procurement_method_id: 8,
   industry: 'internet_saas',
-  status: 0,
   license_type: 'TRIAL',
   license_expiry_date: '2026-12-31',
 }
@@ -27,7 +26,6 @@ describe('buildCustomerUpdatePayload', () => {
       product_public_id: 'prd_crm',
       default_procurement_method_id: 8,
       industry: 'internet_saas',
-      status: 0,
       license_type: 'TRIAL',
       license_expiry_date: '2026-12-31',
     }
@@ -37,25 +35,6 @@ describe('buildCustomerUpdatePayload', () => {
     })
   })
 
-  it('includes status in the ordinary update diff', () => {
-    const current: CustomerEditableSnapshot = {
-      account_name: '客户 A',
-      city: '上海',
-      address: '浦东',
-      company_scale: '51-200人',
-      source_public_id: 'acq_source',
-      product_public_id: 'prd_crm',
-      default_procurement_method_id: 8,
-      industry: 'internet_saas',
-      status: 1,
-      license_type: 'TRIAL',
-      license_expiry_date: '2026-12-31',
-    }
-    expect(buildCustomerUpdatePayload(current, baselineSnapshot, 12)).toEqual({
-      expected_version: 12,
-      status: 1,
-    })
-  })
 
   it('sends the complete license pair when only the type changes', () => {
     const current: CustomerEditableSnapshot = {
@@ -67,7 +46,6 @@ describe('buildCustomerUpdatePayload', () => {
       product_public_id: 'prd_crm',
       default_procurement_method_id: 8,
       industry: 'internet_saas',
-      status: 0,
       license_type: 'OFFICIAL',
       license_expiry_date: '2026-12-31',
     }
@@ -88,7 +66,6 @@ describe('buildCustomerUpdatePayload', () => {
       product_public_id: 'prd_crm',
       default_procurement_method_id: 8,
       industry: 'internet_saas',
-      status: 0,
       license_type: 'OFFICIAL',
       license_expiry_date: '',
     }

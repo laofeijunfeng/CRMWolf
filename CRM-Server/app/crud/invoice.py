@@ -25,6 +25,7 @@ from app.schemas.invoice import (
     InvoiceTitleUpdate,
 )
 from app.services.business_number_generator import BusinessNumberGenerator
+from app.services.legacy_profile_source import advance_eligible_progress, lock_source_customer
 from app.utils.approval_delete_guard import assert_deletable_approval_resource
 from app.utils.time import business_now
 from app.core.list_query import (
@@ -396,6 +397,17 @@ class InvoiceApplicationCRUD:
         
         return applications, total
     
+    @staticmethod
+    def _lock_application(db: Session, application: InvoiceApplication) -> InvoiceApplication:
+        """Refresh the invoice under its customer lock before checking or changing it."""
+        lock_source_customer(
+            db, team_id=int(application.team_id), customer_id=int(application.customer_id),
+        )
+        with db.no_autoflush:
+            return db.query(InvoiceApplication).filter_by(
+                id=application.id, team_id=application.team_id, customer_id=application.customer_id,
+            ).populate_existing().with_for_update().one()
+
     def create(
         self,
         db: Session,
@@ -418,6 +430,28 @@ class InvoiceApplicationCRUD:
         if invoice_title.customer_id != contract.customer_id:
             raise ValueError("开票抬头不属于该客户")
         
+        customer_id = int(contract.customer_id)
+        lock_source_customer(db, team_id=team_id, customer_id=customer_id)
+        # The lookups above are only a routing hint. MySQL RR can retain both an
+        # old read view and ORM instances after another writer commits. Lock and
+        # refresh each source row before copying anything into the invoice.
+        with db.no_autoflush:
+            contract = db.query(Contract).filter_by(
+                id=contract.id, team_id=team_id,
+            ).populate_existing().with_for_update().one_or_none()
+            if contract is None or int(contract.customer_id) != customer_id:
+                raise ValueError("关联合同所属客户已变更，请重试")
+            payment_plan = db.query(PaymentPlan).filter_by(
+                id=obj_in.payment_plan_id, team_id=team_id,
+            ).populate_existing().with_for_update().one_or_none()
+            if payment_plan is None or int(payment_plan.contract_id) != int(contract.id):
+                raise ValueError("回款计划所属合同已变更，请重试")
+            invoice_title = db.query(InvoiceTitle).filter_by(
+                id=obj_in.invoice_title_id, team_id=team_id,
+            ).populate_existing().with_for_update().one_or_none()
+        if invoice_title is None or int(invoice_title.customer_id) != int(contract.customer_id):
+            raise ValueError("开票抬头不属于该客户")
+
         application_number = self._generate_application_number(db)
         
         db_obj = InvoiceApplication(
@@ -442,9 +476,9 @@ class InvoiceApplicationCRUD:
             invoice_address=invoice_title.address,
             invoice_phone=invoice_title.phone
         )
+        advance_eligible_progress(db, team_id=team_id, customer_id=int(contract.customer_id))
         db.add(db_obj)
-        db.commit()
-        db.refresh(db_obj)
+        db.flush()
         from app.models.deal_journey import DealJourneyEventType, DealJourneySourceType
         from app.services.deal_journey_service import deal_journey_service
         deal_journey_service.record_event(
@@ -464,6 +498,7 @@ class InvoiceApplicationCRUD:
         return db_obj
     
     def update(self, db: Session, db_obj: InvoiceApplication, obj_in: InvoiceApplicationUpdate) -> InvoiceApplication:
+        db_obj = self._lock_application(db, db_obj)
         if db_obj.status not in [InvoiceApplicationStatus.DRAFT, InvoiceApplicationStatus.REJECTED]:
             raise ValueError("只有草稿或已拒绝状态的发票申请可以编辑")
         
@@ -477,14 +512,18 @@ class InvoiceApplicationCRUD:
             if invoice_title.customer_id != db_obj.customer_id:
                 raise ValueError("开票抬头不属于该客户")
             
-            db_obj.invoice_title_type = invoice_title.title_type
-            db_obj.invoice_title_text = invoice_title.title
-            db_obj.invoice_taxpayer_id = invoice_title.taxpayer_id
-            db_obj.invoice_bank_name = invoice_title.bank_name
-            db_obj.invoice_bank_account = invoice_title.bank_account
-            db_obj.invoice_address = invoice_title.address
-            db_obj.invoice_phone = invoice_title.phone
+            update_data.update({
+                'invoice_title_type': invoice_title.title_type,
+                'invoice_title_text': invoice_title.title,
+                'invoice_taxpayer_id': invoice_title.taxpayer_id,
+                'invoice_bank_name': invoice_title.bank_name,
+                'invoice_bank_account': invoice_title.bank_account,
+                'invoice_address': invoice_title.address,
+                'invoice_phone': invoice_title.phone,
+            })
         
+        if any(getattr(db_obj, field) != value for field, value in update_data.items()):
+            advance_eligible_progress(db, team_id=int(db_obj.team_id), customer_id=int(db_obj.customer_id))
         for field, value in update_data.items():
             setattr(db_obj, field, value)
         
@@ -519,9 +558,11 @@ class InvoiceApplicationCRUD:
         from app.crud.approval import approval_crud
         from app.models.approval import ApprovalStatus
 
-        application = self.get_by_id(db, application_id, team_id)
+        with db.no_autoflush:
+            application = self.get_by_id(db, application_id, team_id)
         if not application:
             return None
+        application = self._lock_application(db, application)
 
         approval = approval_crud.get_by_entity(
             db, BusinessType.INVOICE, application_id, team_id,
@@ -532,14 +573,14 @@ class InvoiceApplicationCRUD:
         if application.status != InvoiceApplicationStatus.APPROVED:
             raise ValueError(f"发票申请状态为 {application.status}，不可开票")
 
+        advance_eligible_progress(db, team_id=int(application.team_id), customer_id=int(application.customer_id))
         if invoice_file_path is not None:
             application.invoice_file_path = invoice_file_path
         if invoice_number is not None:
             application.invoice_number = invoice_number
         application.status = InvoiceApplicationStatus.ISSUED
         application.issued_time = business_now()
-        db.commit()
-        db.refresh(application)
+        db.flush()
         from app.models.deal_journey import DealJourneyEventType, DealJourneySourceType
         from app.services.deal_journey_service import deal_journey_service
         deal_journey_service.record_event(
@@ -580,6 +621,9 @@ class InvoiceApplicationCRUD:
         if application.status not in [InvoiceApplicationStatus.DRAFT, InvoiceApplicationStatus.REJECTED]:
             raise ValueError("只有草稿或已拒绝状态的发票申请可以删除")
 
+        advance_eligible_progress(
+            db, team_id=int(application.team_id), customer_id=int(application.customer_id), deleted=True,
+        )
         db.delete(application)
         db.commit()
         return True

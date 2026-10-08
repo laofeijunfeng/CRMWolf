@@ -570,13 +570,15 @@ watch(
 
 <template>
   <Dialog :open="props.open" @update:open="handleOpenChange">
-    <DialogContent class="invoice-application-dialog w-[calc(100vw-2rem)] max-h-[min(90vh,90dvh)] overflow-y-auto overscroll-contain [scroll-padding-bottom:calc(5rem+env(safe-area-inset-bottom,0px))]">
+    <DialogContent class="invoice-application-form-dialog invoice-application-dialog w-[calc(100vw-2rem)]">
       <DialogHeader>
         <DialogTitle>{{ title }}</DialogTitle>
         <DialogDescription>{{ description }}</DialogDescription>
       </DialogHeader>
 
-      <form class="invoice-application-dialog__form" novalidate @submit.prevent="handleSubmit">
+      <div class="invoice-application-form-dialog__body">
+
+      <form id="invoice-application-form" class="invoice-application-dialog__form" novalidate @submit.prevent="handleSubmit">
         <InputField
           v-if="(hasFixedCustomer && fixedCustomer !== null) || !isCreateMode"
           id="invoice-application-fixed-customer"
@@ -711,15 +713,18 @@ watch(
           正在加载原申请上下文...
         </p>
 
-        <DialogFooter class="invoice-application-dialog__footer">
+        </form>
+      </div>
+
+
+        <DialogFooter class="invoice-application-form-dialog__footer">
           <Button type="button" variant="outline" :disabled="submitting" @click="handleCancel">
             取消
           </Button>
-          <Button type="submit" :disabled="submitting">
+          <Button type="submit" form="invoice-application-form" :disabled="submitting">
             {{ submitButtonText }}
           </Button>
         </DialogFooter>
-      </form>
     </DialogContent>
   </Dialog>
 
@@ -836,5 +841,27 @@ watch(
   .invoice-application-dialog__readonly-grid {
     grid-template-columns: 1fr;
   }
+}
+</style>
+
+<style lang="scss">
+@use '@/styles/variables-v2.scss' as *;
+
+/* 非 scoped：DialogContent 经 Portal 渲染，scoped data 属性不随 class 传递 */
+.invoice-application-form-dialog {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  max-height: $wolf-modal-height-mobile-v2;
+  overflow: hidden;
+}
+
+.invoice-application-form-dialog__body {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: $wolf-space-lg-v2;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-bottom: calc($wolf-space-xl-v2 + $wolf-safe-area-bottom-v2);
 }
 </style>

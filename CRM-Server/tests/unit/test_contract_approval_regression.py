@@ -45,6 +45,9 @@ from app.models.approval import (
 )
 from app.models.contract import Contract, ContractStatus
 from app.crud.approval import approval_crud, approval_flow_crud
+from app.models.customer import Customer
+from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
+
 
 
 # ---------- DB fixtures ----------------------------------------------------
@@ -58,15 +61,26 @@ def db_session():
         connect_args={"check_same_thread": False},
     )
     tables = [
+        Customer.__table__,
+        CustomerLegacySourceProgress.__table__,
         Contract.__table__,
         ApprovalFlow.__table__,
         ApprovalNode.__table__,
         Approval.__table__,
         ApprovalRecord.__table__,
     ]
-    Base.metadata.create_all(engine, tables=tables)
+    # Customer and Contract both define idx_team_id; this SQLite fixture
+    # omits the customer's redundant index without changing model metadata.
+    customer_index = next(index for index in Customer.__table__.indexes if index.name == "idx_team_id")
+    Customer.__table__.indexes.discard(customer_index)
+    try:
+        Base.metadata.create_all(engine, tables=tables)
+    finally:
+        Customer.__table__.indexes.add(customer_index)
     Session = sessionmaker(bind=engine)
     session = Session()
+    session.add(Customer(id=1, team_id=1, account_name="测试客户", city="北京", creator_id="u1"))
+    session.commit()
     yield session
     session.close()
     engine.dispose()

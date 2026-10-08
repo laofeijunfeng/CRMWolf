@@ -33,6 +33,7 @@ import {
   TextareaField,
 } from '@/components/crmwolf'
 import { leadApi, type LeadCreate, type LeadDetail, type LeadUpdate } from '@/api/lead'
+import { entityParseApi, type LeadParsedInfo } from '@/api/entityParse'
 import { leadSchema, type LeadForm } from '@/schemas/lead-form'
 import { useAcquisitionSourceOptions } from '@/composables/useAcquisitionSourceOptions'
 import { productPublicIdFromIntent } from '@/utils/productIntent'
@@ -60,6 +61,11 @@ const initialValues = ref<Partial<LeadForm>>({})
 const isDirty = ref(false)
 const showConfirmDialog = ref(false)
 let loadRequestId = 0
+
+// 智能解析状态（仅创建模式展示）
+const rawText = ref('')
+const parsing = ref(false)
+const parseStatus = ref('')
 
 // 计算属性
 const visible = computed({
@@ -96,10 +102,47 @@ function applyLeadDetail(lead: LeadDetail): void {
     company_scale: lead.company_scale as LeadForm['company_scale'] | undefined,
     contact_name: lead.contact_name,
     contact_phone: lead.contact_phone
-    // remark is optional - will be undefined if not supported by API yet
   }
   // Loading values is not a user edit.
   isDirty.value = false
+}
+
+// 把解析结果覆盖进表单：后端已把来源/产品对成 public_id，直接可用
+function applyParsedLead(info: LeadParsedInfo, formApi: { setFieldValue: (field: string, value: unknown) => void }): void {
+  formApi.setFieldValue('lead_name', info.lead_name ?? '')
+  formApi.setFieldValue('city', info.city ?? '')
+  formApi.setFieldValue('contact_name', info.contact_name ?? '')
+  formApi.setFieldValue('contact_phone', info.contact_phone ?? '')
+  formApi.setFieldValue('company_scale', info.company_scale ?? undefined)
+  formApi.setFieldValue('source_public_id', info.source_public_id ?? '')
+  formApi.setFieldValue('product_public_id', info.product_public_id ?? '')
+  isDirty.value = true
+}
+
+async function handleParse(formApi: { setFieldValue: (field: string, value: unknown) => void }): Promise<void> {
+  const content = rawText.value.trim()
+  if (content === '') {
+    parseStatus.value = '先粘贴一段线索原文'
+    return
+  }
+  parsing.value = true
+  parseStatus.value = '正在解析…'
+  try {
+    await entityParseApi.parseLead(content, (event): void => {
+      if (event.event === 'parsed' && event.lead_info !== undefined) {
+        applyParsedLead(event.lead_info, formApi)
+        parseStatus.value = '已填入，可直接修改后保存'
+      } else if (event.event === 'error') {
+        parseStatus.value = event.message ?? 'AI 解析失败'
+        toast.error(event.message ?? 'AI 解析失败')
+      }
+    })
+  } catch {
+    parseStatus.value = 'AI 解析失败，请稍后重试'
+    toast.error('AI 解析失败，请稍后重试')
+  } finally {
+    parsing.value = false
+  }
 }
 
 // 编辑模式：优先消费父层预加载的详情，避免弹窗打开后再经历空表单/加载态切换。
@@ -118,6 +161,8 @@ watch([
 
   if (mode === 'create') {
     loading.value = false
+    rawText.value = ''
+    parseStatus.value = ''
     void loadFormOptions()
     return
   }
@@ -228,12 +273,37 @@ const continueEditing = (): void => {
 
       <Form
         v-else
+        v-slot="{ setFieldValue }"
         :schema="leadSchema"
         :initial-values="initialValues"
         @submit="handleSubmit"
       >
+        <!-- 智能解析（仅创建模式，原文与表单同屏展示） -->
+        <div v-if="mode === 'create'" class="space-y-2">
+          <TextareaField
+            id="lead-raw-text"
+            v-model="rawText"
+            :rows="3"
+            label="线索原文"
+            placeholder="粘贴客户、联系人、电话、城市等信息"
+            control-class="resize-none"
+          />
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-xs text-muted-foreground min-h-4">{{ parseStatus }}</span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              :disabled="parsing"
+              @click="handleParse({ setFieldValue })"
+            >
+              {{ parsing ? '解析中…' : '智能解析' }}
+            </Button>
+          </div>
+        </div>
+
         <!-- 基本信息 Section -->
-        <div class="space-y-4">
+        <div class="space-y-4 mt-4">
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <!-- 线索名称 -->
             <FormField v-slot="{ value, handleChange }" name="lead_name">
@@ -343,21 +413,6 @@ const continueEditing = (): void => {
               </FormItem>
             </FormField>
           </div>
-
-          <!-- 备注（全宽） -->
-          <FormField v-slot="{ value, handleChange }" name="remark">
-            <FormItem>
-              <TextareaField
-                id="lead-remark"
-                :model-value="String(value ?? '')"
-                label="备注"
-                :rows="4"
-                placeholder="请输入备注信息（可选）"
-                @update:model-value="handleChange"
-              />
-              <FormMessage />
-            </FormItem>
-          </FormField>
         </div>
 
         <!-- DialogFooter 在 Form 内部 -->

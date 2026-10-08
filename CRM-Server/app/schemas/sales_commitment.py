@@ -748,6 +748,7 @@ class FollowUpTaskQueryCustomerResponse(BaseModel):
     public_id: str
     name: str
     account_name: str
+    product_name: str | None = None
 
 
 class FollowUpTaskQueryUserResponse(BaseModel):

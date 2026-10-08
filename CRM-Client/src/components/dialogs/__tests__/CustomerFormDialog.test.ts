@@ -511,23 +511,6 @@ describe('CustomerFormDialog progressive edit sections', () => {
     props: { open: true, mode: 'create' },
     attachTo: document.body,
   })
-  const mountCreateAndFillRequiredFields = (): VueWrapper<InstanceType<typeof CustomerFormDialog>> => {
-    const wrapper = mountCreate()
-    const vm = wrapper.vm as unknown as { setValues: (values: Record<string, unknown>) => void }
-    vm.setValues({
-      account_name: '新客户',
-      city: '上海',
-      company_scale: '1-50人',
-      source_public_id: 'source-1',
-      default_procurement_method_id: 1,
-      contact_name: '张三',
-      contact_mobile: '13800138000',
-      contact_position: '经理',
-      contact_gender: '男',
-      product_public_id: 'prd_crm',
-    })
-    return wrapper
-  }
   it('renders the more-information trigger collapsed in create and edit modes', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
@@ -573,49 +556,6 @@ describe('CustomerFormDialog progressive edit sections', () => {
     wrapper.unmount()
   })
 
-  it('renders one flat more-information group without independent save actions', async () => {
-    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
-    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
-    const wrapper = mountEdit({ ...customerDetail, status: 0 })
-    await flushPromises()
-    await wrapper.get('#customer-more-info-trigger').trigger('click')
-    expect(wrapper.get('#customer-more-info-trigger').attributes('aria-expanded')).toBe('true')
-    expect(wrapper.get('#customer-more-info-trigger').attributes('aria-controls')).toBe('customer-more-info-content')
-    expect(wrapper.text()).toContain('行业')
-    expect(wrapper.text()).toContain('客户状态')
-    expect(wrapper.text()).toContain('授权类型')
-    expect(wrapper.text()).toContain('授权到期日')
-    expect(wrapper.text()).toContain('此处只更新客户授权汇总信息，不创建 License 申请、不发起审批，也不修改正式 License 记录。')
-    expect(wrapper.findAll('button').some((button) => button.text() === '应用状态变更')).toBe(false)
-    expect(wrapper.findAll('button').some((button) => button.text() === '保存授权信息')).toBe(false)
-    expect(wrapper.findAll('button').some((button) => button.text() === '清除日期')).toBe(false)
-    expect(wrapper.findAll('button').filter((button) => button.text() === '保存客户资料')).toHaveLength(1)
-    wrapper.unmount()
-  })
-  it('counts an existing status 0 in the collapsed more-information summary', async () => {
-    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
-    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
-    const wrapper = mountEdit({ ...customerDetail, status: 0, industry: null, license_type: null, license_expiry_date: null })
-    await flushPromises()
-    await nextTick()
-
-    expect(wrapper.get('#customer-more-info-trigger').text()).toContain('1 项')
-    wrapper.unmount()
-  })
-
-  it.each([2, 3])('counts read-only existing status %s in the collapsed summary and preserves the read-only message', async (status) => {
-    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
-    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
-    const wrapper = mountEdit({ ...customerDetail, status: status as 2 | 3, industry: null, license_type: null, license_expiry_date: null })
-    await flushPromises()
-    await nextTick()
-
-    expect(wrapper.get('#customer-more-info-trigger').text()).toContain('1 项')
-    await wrapper.get('#customer-more-info-trigger').trigger('click')
-    await nextTick()
-    expect(wrapper.text()).toContain('该客户状态由其他流程管理，暂不支持在此修改。')
-    wrapper.unmount()
-  })
 
   it('saves an industry-only edit through the ordinary dirty-diff update', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
@@ -643,126 +583,6 @@ describe('CustomerFormDialog progressive edit sections', () => {
     expect(wrapper.emitted('refresh')).toBeUndefined()
   })
 
-  it('saves profile, industry, status, and license in one ordinary PUT', async () => {
-    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
-    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
-    const updateCustomer = vi.spyOn(customerApi, 'updateCustomer').mockResolvedValue({
-      ...customerDetail,
-      industry: 'finance_securities',
-      city: '上海',
-      status: 1,
-      version: 4,
-      license_expiry_date: '2027-01-01',
-      license_type: 'OFFICIAL',
-    })
-    const wrapper = mountEdit({ ...customerDetail, status: 0, version: 3, city: '北京' })
-    await flushPromises()
-    const vm = wrapper.vm as unknown as {
-      setValues: (values: Record<string, unknown>) => void
-      industryValue: string
-      lifecycleStatusValue: 0 | 1 | null
-      licenseTypeValue: 'TRIAL' | 'OFFICIAL' | null
-      licenseExpiryDateValue: string | null
-      onSubmit: (event: Event) => Promise<void>
-    }
-    vm.setValues({ city: '上海' })
-    vm.industryValue = 'finance_securities'
-    vm.lifecycleStatusValue = 1
-    vm.licenseTypeValue = 'OFFICIAL'
-    vm.licenseExpiryDateValue = '2027-01-01'
-    await vm.onSubmit(new Event('submit'))
-    await flushPromises()
-
-    expect(updateCustomer).toHaveBeenCalledTimes(1)
-    expect(updateCustomer).toHaveBeenCalledWith('customer-1', {
-      expected_version: 3,
-      city: '上海',
-      industry: 'finance_securities',
-      status: 1,
-      license_type: 'OFFICIAL',
-      license_expiry_date: '2027-01-01',
-    })
-    expect(wrapper.emitted('update:open')).toContainEqual([false])
-    expect(wrapper.emitted('success')).toHaveLength(1)
-    wrapper.unmount()
-  })
-
-  it('sends optional more-information values through the create POST', async () => {
-    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
-    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
-    const createCustomer = vi.spyOn(customerApi, 'createCustomer').mockResolvedValue({
-      ...customerDetail,
-      id: 'customer-created',
-      public_id: 'CUS-CREATED',
-      account_name: '新客户',
-      industry: 'internet_saas',
-      city: '上海',
-      address: null,
-      company_scale: '1-50人',
-      status: 1,
-      version: 1,
-      license_expiry_date: '2026-12-31',
-      license_type: 'TRIAL',
-    })
-    const wrapper = mountCreateAndFillRequiredFields()
-    await flushPromises()
-    const vm = wrapper.vm as unknown as {
-      industryValue: string
-      lifecycleStatusValue: 0 | 1 | null
-      licenseTypeValue: 'TRIAL' | 'OFFICIAL' | null
-      licenseExpiryDateValue: string | null
-      onSubmit: (event: Event) => Promise<void>
-    }
-    vm.industryValue = 'internet_saas'
-    vm.lifecycleStatusValue = 1
-    vm.licenseTypeValue = 'TRIAL'
-    vm.licenseExpiryDateValue = '2026-12-31'
-    await vm.onSubmit(new Event('submit'))
-    await flushPromises()
-
-    expect(createCustomer).toHaveBeenCalledWith(expect.objectContaining({
-      product_public_id: 'prd_crm',
-      industry: 'internet_saas',
-      status: 1,
-      license_type: 'TRIAL',
-      license_expiry_date: '2026-12-31',
-    }))
-    wrapper.unmount()
-  })
-
-  it('saves a status change through the ordinary PUT and closes', async () => {
-    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
-    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
-    const customer = { ...customerDetail, status: 0 as const, version: 8 }
-    const updateCustomer = vi.spyOn(customerApi, 'updateCustomer').mockResolvedValue({ ...customer, status: 1, version: 9 })
-    const updateLifecycle = vi.spyOn(customerApi, 'updateCustomerLifecycleStatus')
-    const wrapper = mountEdit(customer)
-    await flushPromises()
-
-    const vm = wrapper.vm as unknown as { lifecycleStatusValue: 0 | 1 | null; onSubmit: (event: Event) => Promise<void> }
-    vm.lifecycleStatusValue = 1
-    await vm.onSubmit(new Event('submit'))
-    await flushPromises()
-
-    expect(updateLifecycle).not.toHaveBeenCalled()
-    expect(updateCustomer).toHaveBeenCalledWith('customer-1', { expected_version: 8, status: 1 })
-    expect(wrapper.emitted('refresh')).toBeUndefined()
-    expect(wrapper.emitted('success')).toHaveLength(1)
-    expect(wrapper.emitted('update:open')).toContainEqual([false])
-    wrapper.unmount()
-  })
-  it.each([2, 3])('does not treat read-only lifecycle status %s as dirty', async (status) => {
-    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
-    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
-    const wrapper = mountEdit({ ...customerDetail, status: status as 2 | 3 })
-    await flushPromises()
-    const vm = wrapper.vm as unknown as { handleCancel: () => void; showConfirmDialog: boolean; lifecycleStatusValue: unknown }
-    expect(vm.lifecycleStatusValue).toBeNull()
-    vm.handleCancel()
-    expect(vm.showConfirmDialog).toBe(false)
-    expect(wrapper.emitted('update:open')).toContainEqual([false])
-    wrapper.unmount()
-  })
 
   it('treats null industry and empty industry baseline as unchanged', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
@@ -904,17 +724,7 @@ describe('CustomerFormDialog recovery and close guards', () => {
     },
     props: { open: true, mode: 'edit', customerId: customer.id, customer },
   })
-  it('labels the status control as 客户状态', async () => {
-    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
-    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
-    const wrapper = mountRecoveryEdit({ ...customerDetail, status: 0 })
-    await flushPromises()
-    await wrapper.get('#customer-more-info-trigger').trigger('click')
-    await nextTick()
-    expect(wrapper.text()).toContain('客户状态')
-    wrapper.unmount()
-  })
-  it('disables only industry after hierarchy loading failure and retries successfully', async () => {
+    it('disables only industry after hierarchy loading failure and retries successfully', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
     const getHierarchy = vi.spyOn(customerApi, 'getIndustryHierarchy')
@@ -932,7 +742,6 @@ describe('CustomerFormDialog recovery and close guards', () => {
     expect(wrapper.get('#customer-procurement-method').attributes('disabled')).toBeUndefined()
     expect(wrapper.get('#customer-address').attributes('disabled')).toBeUndefined()
     expect(wrapper.get('#customer-more-info-trigger').attributes('disabled')).toBeUndefined()
-    expect(wrapper.get('#customer-lifecycle-status').attributes('disabled')).toBeUndefined()
     expect(wrapper.get('#customer-license-type').attributes('disabled')).toBeUndefined()
     expect(wrapper.get('#customer-license-expiry-date').attributes('disabled')).toBeUndefined()
     await wrapper.findAll('button').find((button) => button.text() === '重试')?.trigger('click')
@@ -1115,14 +924,12 @@ describe('CustomerFormDialog recovery and close guards', () => {
     const vm = wrapper.vm as unknown as {
       setValues: (values: Record<string, unknown>) => void
       industryValue: string
-      lifecycleStatusValue: 0 | 1 | null
       licenseTypeValue: 'TRIAL' | 'OFFICIAL' | null
       licenseExpiryDateValue: string | null
       onSubmit: (event: Event) => Promise<void>
     }
     vm.setValues({ account_name: '当前输入' })
     vm.industryValue = 'internet_saas'
-    vm.lifecycleStatusValue = 1
     vm.licenseTypeValue = 'OFFICIAL'
     vm.licenseExpiryDateValue = '2026-12-31'
     await vm.onSubmit(new Event('submit'))
@@ -1130,22 +937,11 @@ describe('CustomerFormDialog recovery and close guards', () => {
     await wrapper.findAll('button').find((button) => button.text() === '保留当前输入并继续编辑')?.trigger('click')
     await flushPromises()
     expect(vm.industryValue).toBe('internet_saas')
-    expect(vm.lifecycleStatusValue).toBe(1)
     expect(vm.licenseTypeValue).toBe('OFFICIAL')
     expect(vm.licenseExpiryDateValue).toBe('2026-12-31')
     wrapper.unmount()
   })
 
-  it.each([2, 3])('renders status %s as read-only and clean', async (status) => {
-    const wrapper = mountRecoveryEdit({ ...customerDetail, status: status as 2 | 3 })
-    await flushPromises()
-    await wrapper.get('#customer-more-info-trigger').trigger('click')
-    expect(wrapper.text()).toContain('该客户状态由其他流程管理，暂不支持在此修改。')
-    const vm = wrapper.vm as unknown as { handleCancel: () => void; showConfirmDialog: boolean }
-    vm.handleCancel()
-    expect(vm.showConfirmDialog).toBe(false)
-    wrapper.unmount()
-  })
 
   it('keeps ordinary profile dirty state after preserving input through a conflict', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
@@ -1221,59 +1017,7 @@ describe('CustomerFormDialog recovery and close guards', () => {
     })
     wrapper.unmount()
   })
-  it('keeps status target, dialog open, and error after ordinary PUT failure', async () => {
-    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
-    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
-    const updateCustomer = vi.spyOn(customerApi, 'updateCustomer').mockRejectedValue(new Error('update failed'))
-    const updateLifecycle = vi.spyOn(customerApi, 'updateCustomerLifecycleStatus')
-    const wrapper = mountRecoveryEdit({ ...customerDetail, status: 0 })
-    await flushPromises()
-    await wrapper.get('#customer-more-info-trigger').trigger('click')
-    await flushPromises()
-    const vm = wrapper.vm as unknown as { lifecycleStatusValue: 0 | 1 | null; onSubmit: (event: Event) => Promise<void> }
-    vm.lifecycleStatusValue = 1
-    await vm.onSubmit(new Event('submit'))
-    await flushPromises()
-
-    expect(updateLifecycle).not.toHaveBeenCalled()
-    expect(updateCustomer).toHaveBeenCalledWith('customer-1', { expected_version: 3, status: 1 })
-    expect(wrapper.props('open')).toBe(true)
-    expect(wrapper.get('#customer-lifecycle-status').text()).toBe('1')
-    expect(wrapper.find('[role="alert"]').text()).toContain('请重试')
-    expect(wrapper.emitted('update:open')).toBeUndefined()
-    wrapper.unmount()
-  })
-  it('offers status recovery after a conflict and retries with refreshed version and preserved target', async () => {
-    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
-    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
-    const latest = { ...customerDetail, status: 0 as const, version: 11 }
-    const updateCustomer = vi.spyOn(customerApi, 'updateCustomer')
-      .mockRejectedValueOnce({ response: { status: 409 } })
-      .mockResolvedValueOnce({ ...latest, status: 1, version: 12 })
-    const updateLifecycle = vi.spyOn(customerApi, 'updateCustomerLifecycleStatus')
-    const getDetail = vi.spyOn(customerApi, 'getCustomerDetail').mockResolvedValue(latest)
-    const wrapper = mountRecoveryEdit({ ...customerDetail, status: 0, version: 10 })
-    await flushPromises()
-    await wrapper.get('#customer-more-info-trigger').trigger('click')
-    await flushPromises()
-    const vm = wrapper.vm as unknown as { lifecycleStatusValue: 0 | 1 | null; onSubmit: (event: Event) => Promise<void> }
-    vm.lifecycleStatusValue = 1
-    await vm.onSubmit(new Event('submit'))
-    await flushPromises()
-    expect(wrapper.find('[role="alert"]').text()).toContain('其他人可能已经修改了该对象')
-    const preserve = wrapper.findAll('button').find((button) => button.text() === '保留当前输入并继续编辑')
-    expect(preserve).toBeDefined()
-    await preserve?.trigger('click')
-    await flushPromises()
-    expect(getDetail).toHaveBeenCalled()
-    expect(vm.lifecycleStatusValue).toBe(1)
-    await vm.onSubmit(new Event('submit'))
-    await flushPromises()
-    expect(updateLifecycle).not.toHaveBeenCalled()
-    expect(updateCustomer).toHaveBeenLastCalledWith('customer-1', { status: 1, expected_version: 11 })
-    wrapper.unmount()
-  })
-  it('shows the explicit authorization side-effect warning', async () => {
+      it('shows the explicit authorization side-effect warning', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
     const wrapper = mountRecoveryEdit()
@@ -1284,45 +1028,7 @@ describe('CustomerFormDialog recovery and close guards', () => {
     wrapper.unmount()
   })
 
-  it('drops a stale lifecycle target when the latest server state is read-only', async () => {
-    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
-    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
-    const latest = { ...customerDetail, status: 2 as const, version: 11 }
-    const updateCustomer = vi.spyOn(customerApi, 'updateCustomer')
-      .mockRejectedValueOnce({ response: { status: 409 } })
-    const updateLifecycle = vi.spyOn(customerApi, 'updateCustomerLifecycleStatus')
-    const getDetail = vi.spyOn(customerApi, 'getCustomerDetail').mockResolvedValue(latest)
-    const wrapper = mountRecoveryEdit({ ...customerDetail, status: 0, version: 10 })
-    await flushPromises()
-    await wrapper.get('#customer-more-info-trigger').trigger('click')
-    await flushPromises()
-    const submitVm = wrapper.vm as unknown as { lifecycleStatusValue: 0 | 1 | null; onSubmit: (event: Event) => Promise<void> }
-    submitVm.lifecycleStatusValue = 1
-    await submitVm.onSubmit(new Event('submit'))
-
-    await wrapper.findAll('button').find((button) => button.text() === '保留当前输入并继续编辑')?.trigger('click')
-    await flushPromises()
-
-    const vm = wrapper.vm as unknown as {
-      lifecycleStatusValue: 0 | 1 | null
-      lifecycleStatusBaseline: 0 | 1 | null
-      showConfirmDialog: boolean
-      handleCancel: () => void
-    }
-    expect(getDetail).toHaveBeenCalledTimes(1)
-    expect(updateLifecycle).not.toHaveBeenCalled()
-    expect(updateCustomer).toHaveBeenCalledTimes(1)
-    expect(vm.lifecycleStatusValue).toBeNull()
-    expect(vm.lifecycleStatusBaseline).toBeNull()
-    expect(wrapper.text()).toContain('该客户状态由其他流程管理，暂不支持在此修改。')
-
-    vm.handleCancel()
-    expect(vm.showConfirmDialog).toBe(false)
-    expect(wrapper.emitted('update:open')).toContainEqual([false])
-    wrapper.unmount()
-  })
-
-  it.each([
+    it.each([
     ['ordinary profile', (vm: { setValues: (values: Record<string, unknown>) => void; licenseTypeValue: string | null }): void => { vm.setValues({ account_name: '已修改' }) }],
     ['inline license', (vm: { setValues: (values: Record<string, unknown>) => void; licenseTypeValue: string | null }): void => { vm.licenseTypeValue = 'TRIAL' }],
   ])('invokes discard guard for %s dirty close attempts', async (_label, dirty) => {

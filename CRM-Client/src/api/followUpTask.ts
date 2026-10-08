@@ -15,6 +15,7 @@ export interface FollowUpTaskCustomer {
   public_id: string
   name: string
   account_name: string
+  product_name?: string | null
 }
 
 export interface FollowUpTaskSourceActivity {

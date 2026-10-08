@@ -17,7 +17,7 @@ from app.api.customers import router as customers_router
 from app.api.leads import router as leads_router
 from app.core import deps
 from app.core.database import Base
-from app.models.customer import Customer, CustomerMember, CustomerProduct, CustomerStatus
+from app.models.customer import Contact, Customer, CustomerMember, CustomerProduct, CustomerStatus
 from app.models.lead import Lead, LeadProduct, LeadSource, LeadStatus
 from app.models.product import Product
 from app.models.user import User, UserStatus
@@ -42,6 +42,7 @@ def db_session():
         CustomerMember.__table__,
         CustomerProduct.__table__,
         Lead.__table__,
+        Contact.__table__,
         LeadProduct.__table__,
     ]
     renamed_indexes = []

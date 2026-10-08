@@ -100,7 +100,9 @@ const handleViewAll = (): void => {
     @update:open="handleOpenChange"
   >
     <template #trigger>
-      <slot name="trigger" />
+      <span class="customer-deal-journey-trigger">
+        <slot name="trigger" />
+      </span>
     </template>
 
     <section aria-label="客户业务旅程概览">
@@ -217,6 +219,13 @@ const handleViewAll = (): void => {
 
 <style scoped lang="scss">
 @use '@/styles/variables-v2.scss' as *;
+
+.customer-deal-journey-trigger {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
 
 .status-badge {
   display: inline-flex;

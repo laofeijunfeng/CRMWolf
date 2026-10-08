@@ -55,6 +55,7 @@ from app.schemas.opportunity import (
     StageDurationResponse,
 )
 from app.services.approval_transaction_manager import approval_transaction_manager
+from app.services.assistant.crm_effects import AssistantCRMCommand
 from app.services.customer_business_object_intelligence_service import (
     CustomerBusinessObjectChangeRefreshInput,
     customer_business_object_intelligence_service,
@@ -135,12 +136,13 @@ async def _trigger_opportunity_intelligence_refresh(
 
 
 
-@router.post("/", response_model=OpportunityResponse, status_code=status.HTTP_201_CREATED, summary="创建商机", description="为指定客户创建商机")
 async def create_opportunity(
     opportunity: OpportunityCreate,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(require_permission("opportunity:create")),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    *,
+    assistant_command: AssistantCRMCommand | None = None,
 ):
     customer = check_customer_edit_permission(opportunity.customer_id, team_id, current_user, db)
     opportunity.customer_id = customer.id
@@ -168,6 +170,7 @@ async def create_opportunity(
         submitter_name=submitter_name,
         team_id=team_id,
         rollback_on_no_flow=True,
+        assistant_command=assistant_command,
     )
 
     if entity is None:
@@ -186,6 +189,15 @@ async def create_opportunity(
         ),
     )
     return OpportunityResponse(**_opportunity_response_dict(db, entity, team_id))
+
+@router.post("/", response_model=OpportunityResponse, status_code=status.HTTP_201_CREATED, summary="创建商机", description="为指定客户创建商机")
+async def create_opportunity_http(
+    opportunity: OpportunityCreate,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(require_permission("opportunity:create")),
+    db: Session = Depends(get_db),
+):
+    return await create_opportunity(opportunity, team_id, current_user, db)
 
 
 @router.get("/", response_model=PaginatedResponse[OpportunityListResponse], summary="查询商机列表", description="支持分页、按状态/阶段/负责人等多条件筛选和动态排序，返回客户名称、采购阶段、负责人信息")
@@ -832,13 +844,14 @@ async def update_opportunity_deal_journey(
     return OpportunityResponse(**_opportunity_response_dict(db, db_opportunity, db_opportunity.team_id))
 
 
-@router.post("/{opportunity_id}/move-stage", response_model=OpportunityDetailResponse, summary="推进商机阶段", description="推进商机到下一阶段，使用新的采购阶段模板系统，创建阶段快照")
 async def move_opportunity_stage(
     opportunity_id: str,
     stage_move: OpportunityMoveToStage,
     db_opportunity = Depends(check_opportunity_edit_permission),
     current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    *,
+    assistant_command: AssistantCRMCommand | None = None,
 ):
 
     from sqlalchemy import text
@@ -851,7 +864,8 @@ async def move_opportunity_stage(
         db=db,
         opportunity_id=db_opportunity.id,
         target_stage_template_id=stage_move.stage_template_id,
-        operator_id=str(current_user.id)
+        operator_id=str(current_user.id),
+        assistant_command=assistant_command,
     )
     await _trigger_opportunity_intelligence_refresh(
         db,
@@ -948,6 +962,16 @@ async def move_opportunity_stage(
     result.update(_opportunity_product_payload(updated_opportunity))
     
     return result
+
+@router.post("/{opportunity_id}/move-stage", response_model=OpportunityDetailResponse, summary="推进商机阶段", description="推进商机到下一阶段，使用新的采购阶段模板系统，创建阶段快照")
+async def move_opportunity_stage_http(
+    opportunity_id: str,
+    stage_move: OpportunityMoveToStage,
+    db_opportunity = Depends(check_opportunity_edit_permission),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    return await move_opportunity_stage(opportunity_id, stage_move, db_opportunity, current_user, db)
 
 
 @router.patch("/{opportunity_id}/win", response_model=OpportunityResponse, summary="标记赢单", description="状态改为已赢单，记录实际成交金额")

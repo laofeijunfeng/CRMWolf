@@ -235,7 +235,7 @@ const contactSelectOptions = computed(() =>
   contacts.value.map(contact => {
     const position = contact.position?.trim()
     return {
-      value: contact.id,
+      value: contact.id as number,
       label: `${contact.name}${position !== undefined && position !== '' ? ` (${position})` : ''}`,
     }
   })
@@ -591,13 +591,15 @@ function continueEditing(): void {
 
 <template>
   <Dialog :open="props.open" @update:open="handleOpenChange">
-    <DialogContent class="w-[calc(100vw-2rem)] max-w-[720px] max-h-[min(90vh,90dvh)] overflow-y-auto overscroll-contain [scroll-padding-bottom:calc(5rem+env(safe-area-inset-bottom,0px))]">
+    <DialogContent class="contract-form-dialog w-[calc(100vw-2rem)] max-w-[720px]">
       <DialogHeader>
         <DialogTitle>{{ isEdit ? '编辑合同' : '新建合同' }}</DialogTitle>
         <DialogDescription class="sr-only">填写合同基本信息、授权信息和签署日期</DialogDescription>
       </DialogHeader>
 
-      <form class="space-y-4" @submit="onSubmit">
+      <div class="contract-form-dialog__body">
+
+      <form id="contract-form" class="space-y-4" @submit="onSubmit">
         <!-- Customer (required, only in create mode) -->
         <FormField v-if="!isEdit" v-slot="{ value, handleChange }" name="customer_id">
           <FormItem>
@@ -795,15 +797,18 @@ function continueEditing(): void {
         </FormField>
 
         <!-- DialogFooter -->
-        <DialogFooter class="mt-6 pt-4 border-t">
+        </form>
+      </div>
+
+
+        <DialogFooter class="contract-form-dialog__footer">
           <Button variant="outline" type="button" :disabled="submitting" @click="handleCancel">
             取消
           </Button>
-          <Button type="submit" :loading="submitting" :disabled="!canSubmit">
+          <Button type="submit" form="contract-form" :loading="submitting" :disabled="!canSubmit">
             {{ submitting ? '提交中...' : '确定' }}
           </Button>
         </DialogFooter>
-      </form>
     </DialogContent>
   </Dialog>
 
@@ -827,3 +832,25 @@ function continueEditing(): void {
     </AlertDialogContent>
   </AlertDialog>
 </template>
+
+<style lang="scss">
+@use '@/styles/variables-v2.scss' as *;
+
+/* 非 scoped：DialogContent 经 Portal 渲染，scoped data 属性不随 class 传递 */
+.contract-form-dialog {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  max-height: $wolf-modal-height-mobile-v2;
+  overflow: hidden;
+}
+
+.contract-form-dialog__body {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: $wolf-space-lg-v2;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-bottom: calc($wolf-space-xl-v2 + $wolf-safe-area-bottom-v2);
+}
+</style>

@@ -10,9 +10,8 @@ from app.schemas.procurement import (
     ProcurementStageTemplateResponse
 )
 from app.crud.procurement import opportunity_stage_snapshot_crud
-from app.crud.opportunity import opportunity_crud
+from app.crud.opportunity import _bump_opportunity_version, _lock_opportunity, opportunity_crud
 from app.crud.procurement import procurement_stage_template_crud
-from app.models.procurement import ProcurementMethod
 from app.utils.public_id import is_opportunity_public_id
 
 
@@ -134,24 +133,34 @@ def set_opportunity_procurement_method(
     current_user: User = Depends(get_current_active_user)
 ):
     opportunity = _get_opportunity_or_404(db, opportunity_id, team_id)
+    # The customer source fence must precede the opportunity row lock and any snapshot write.
+    opportunity = _lock_opportunity(db, opportunity.id, team_id)
+    if opportunity is None or opportunity.public_id != opportunity_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="商机不存在或不属于当前团队"
+        )
 
-    # 权限校验
+    # Recheck permission and current stage while holding the opportunity row lock.
     if opportunity.owner_id != str(current_user.id) and not current_user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="只有商机负责人或管理员可以设置采购方式"
         )
 
-    # 检查采购方式是否存在
     from app.crud.procurement import procurement_method_crud
     procurement_method = procurement_method_crud.get(db, procurement_method_id)
-    if not procurement_method:
+    if procurement_method is None or procurement_method.team_id != team_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"采购方式 {procurement_method_id} 不存在"
         )
+    if procurement_method.is_active != 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="只能使用已启用的采购方式"
+        )
 
-    # 检查是否已有阶段
     existing_snapshot = opportunity_stage_snapshot_crud.get_current(db, opportunity.id)
     if existing_snapshot:
         raise HTTPException(
@@ -159,9 +168,8 @@ def set_opportunity_procurement_method(
             detail="商机已有阶段，不能修改采购方式。请使用推进阶段功能"
         )
 
-    # 获取默认起始阶段
     default_stage = procurement_stage_template_crud.get_default_stage(
-        db, procurement_method_id
+        db, procurement_method_id, team_id
     )
     if not default_stage:
         raise HTTPException(
@@ -169,19 +177,21 @@ def set_opportunity_procurement_method(
             detail=f"采购方式 {procurement_method_id} 没有设置默认起始阶段"
         )
 
-    # 创建阶段快照
-    new_snapshot = opportunity_stage_snapshot_crud.create(
-        db, opportunity.id, default_stage
-    )
+    try:
+        # CRUD flushes the snapshot and source progress without committing either.
+        new_snapshot = opportunity_stage_snapshot_crud.create(
+            db, opportunity.id, default_stage, commit=False
+        )
+        opportunity.procurement_method_id = procurement_method_id
+        opportunity.current_stage_snapshot_id = new_snapshot.id
+        opportunity.current_stage_name = new_snapshot.stage_name
+        opportunity.current_win_probability = new_snapshot.win_probability
+        opportunity.current_stage_entered_at = new_snapshot.entered_at
+        response = _snapshot_response(new_snapshot, opportunity.public_id)
+        _bump_opportunity_version(opportunity)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
-    # 更新商机
-    opportunity.procurement_method_id = procurement_method_id
-    opportunity.current_stage_snapshot_id = new_snapshot.id
-    opportunity.current_stage_name = new_snapshot.stage_name
-    opportunity.current_win_probability = new_snapshot.win_probability
-    opportunity.current_stage_entered_at = new_snapshot.entered_at
-
-    db.commit()
-    db.refresh(new_snapshot)
-
-    return _snapshot_response(new_snapshot, opportunity.public_id)
+    return response

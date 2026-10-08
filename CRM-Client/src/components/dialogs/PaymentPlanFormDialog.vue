@@ -621,13 +621,15 @@ watch(
 
 <template>
   <Dialog :open="props.open" @update:open="handleOpenChange">
-    <DialogContent class="payment-plan-form-dialog w-[calc(100vw-2rem)] max-h-[min(90vh,90dvh)] overflow-y-auto overscroll-contain [scroll-padding-bottom:calc(5rem+env(safe-area-inset-bottom,0px))]">
+    <DialogContent class="payment-plan-form-dialog payment-plan-form-dialog w-[calc(100vw-2rem)]">
       <DialogHeader>
         <DialogTitle>{{ title }}</DialogTitle>
         <DialogDescription>{{ description }}</DialogDescription>
       </DialogHeader>
 
-      <form class="payment-plan-form-dialog__form" novalidate @submit.prevent="handleSubmit">
+      <div class="payment-plan-form-dialog__body">
+
+      <form id="payment-plan-form" class="payment-plan-form-dialog__form" novalidate @submit.prevent="handleSubmit">
         <InputField
           v-if="isCreateMode && hasFixedContract && fixedContract !== null"
           id="payment-plan-fixed-contract"
@@ -722,15 +724,18 @@ watch(
           :disabled="submitting"
         />
 
+        </form>
+      </div>
+
+
         <DialogFooter class="payment-plan-form-dialog__footer">
           <Button type="button" variant="outline" :disabled="submitting" @click="handleCancel">
             取消
           </Button>
-          <Button type="submit" :disabled="submitting">
+          <Button type="submit" form="payment-plan-form" :disabled="submitting">
             {{ submitting ? '保存中...' : '保存' }}
           </Button>
         </DialogFooter>
-      </form>
     </DialogContent>
   </Dialog>
   <AlertDialog :open="showConfirmDialog" @update:open="closeGuard.handleConfirmOpenChange">
@@ -783,5 +788,27 @@ watch(
   .payment-plan-form-dialog__grid {
     grid-template-columns: 1fr;
   }
+}
+</style>
+
+<style lang="scss">
+@use '@/styles/variables-v2.scss' as *;
+
+/* 非 scoped：DialogContent 经 Portal 渲染，scoped data 属性不随 class 传递 */
+.payment-plan-form-dialog {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  max-height: $wolf-modal-height-mobile-v2;
+  overflow: hidden;
+}
+
+.payment-plan-form-dialog__body {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: $wolf-space-lg-v2;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-bottom: calc($wolf-space-xl-v2 + $wolf-safe-area-bottom-v2);
 }
 </style>

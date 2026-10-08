@@ -12,6 +12,8 @@ from app.schemas.procurement import (
     ProcurementStageTemplateCreate, ProcurementStageTemplateUpdate,
 )
 from app.utils.time import business_now
+from app.models.opportunity import Opportunity
+from app.services.legacy_profile_source import advance_eligible_progress, lock_source_customer
 
 
 class ProcurementMethodCRUD:
@@ -401,10 +403,32 @@ class OpportunityStageSnapshotCRUD:
         self,
         db: Session,
         opportunity_id: int,
-        stage_template: ProcurementStageTemplate
+        stage_template: ProcurementStageTemplate,
+        *,
+        commit: bool = True,
     ) -> OpportunityStageSnapshot:
-        """创建阶段快照"""
+        """Create the first stage under the customer source fence; caller controls commit."""
+        with db.no_autoflush:
+            binding = db.query(Opportunity.team_id, Opportunity.customer_id).filter(
+                Opportunity.id == opportunity_id,
+            ).one()
+            lock_source_customer(
+                db, team_id=int(binding.team_id), customer_id=int(binding.customer_id),
+            )
+            opportunity = db.query(Opportunity).filter(
+                Opportunity.id == opportunity_id, Opportunity.team_id == binding.team_id,
+            ).populate_existing().with_for_update().one_or_none()
+            if opportunity is None or opportunity.customer_id != binding.customer_id:
+                raise ValueError("商机客户归属已变更，请重试")
+            if opportunity.status != 0:
+                raise ValueError("只能为跟进中的商机设置阶段")
+            if opportunity.current_stage_snapshot_id is not None or self.get_current(db, opportunity_id):
+                raise ValueError("商机已有阶段，不能重复创建快照")
+        advance_eligible_progress(
+            db, team_id=int(opportunity.team_id), customer_id=int(opportunity.customer_id),
+        )
         snapshot = OpportunityStageSnapshot(
+            team_id=int(opportunity.team_id),
             opportunity_id=opportunity_id,
             procurement_stage_template_id=stage_template.id,
             stage_name=stage_template.stage_name,
@@ -414,8 +438,10 @@ class OpportunityStageSnapshotCRUD:
             snapshot_version=stage_template.version
         )
         db.add(snapshot)
-        db.commit()
-        db.refresh(snapshot)
+        db.flush()
+        if commit:
+            db.commit()
+            db.refresh(snapshot)
         return snapshot
     
     def get_available_stages(
@@ -557,42 +583,45 @@ class ProcurementManagementToolCRUD:
         
         opportunities = query.all()
         
+        # Acquire customer fences in a stable order before changing any snapshot.
+        for customer_id in sorted({int(opp.customer_id) for opp in opportunities}):
+            lock_source_customer(db, team_id=team_id, customer_id=customer_id)
         migrated_count = 0
         failed_count = 0
         errors = []
         
         for opp in opportunities:
             try:
-                # 结束当前阶段快照
-                current_snapshot = db.query(OpportunityStageSnapshot).filter(
-                    OpportunityStageSnapshot.opportunity_id == opp.id,
-                    OpportunityStageSnapshot.exited_at == None
-                ).first()
-                
-                if current_snapshot:
-                    current_snapshot.exited_at = business_now()
-                
-                # 创建新的阶段快照
-                new_snapshot = OpportunityStageSnapshot(
-                    opportunity_id=opp.id,
-                    procurement_stage_template_id=default_stage.id,
-                    stage_name=default_stage.stage_name,
-                    win_probability=default_stage.win_probability,
-                    template_sort_order=default_stage.sort_order,
-                    template_code=default_stage.template_code,
-                    snapshot_version=default_stage.version,
-                    team_id=team_id
-                )
-                db.add(new_snapshot)
-                db.flush()
-                
-                # 更新商机信息
-                opp.procurement_method_id = target_method_id
-                opp.current_stage_snapshot_id = new_snapshot.id
-                opp.current_stage_name = new_snapshot.stage_name
-                opp.current_win_probability = new_snapshot.win_probability
-                opp.current_stage_entered_at = new_snapshot.entered_at
-                
+                # A failed opportunity must not retain an eligible revision or a partial snapshot.
+                with db.begin_nested():
+                    advance_eligible_progress(db, team_id=team_id, customer_id=int(opp.customer_id))
+                    current_snapshot = db.query(OpportunityStageSnapshot).filter(
+                        OpportunityStageSnapshot.opportunity_id == opp.id,
+                        OpportunityStageSnapshot.exited_at == None
+                    ).first()
+
+                    if current_snapshot:
+                        current_snapshot.exited_at = business_now()
+
+                    new_snapshot = OpportunityStageSnapshot(
+                        opportunity_id=opp.id,
+                        procurement_stage_template_id=default_stage.id,
+                        stage_name=default_stage.stage_name,
+                        win_probability=default_stage.win_probability,
+                        template_sort_order=default_stage.sort_order,
+                        template_code=default_stage.template_code,
+                        snapshot_version=default_stage.version,
+                        team_id=team_id
+                    )
+                    db.add(new_snapshot)
+                    db.flush()
+
+                    opp.procurement_method_id = target_method_id
+                    opp.current_stage_snapshot_id = new_snapshot.id
+                    opp.current_stage_name = new_snapshot.stage_name
+                    opp.current_win_probability = new_snapshot.win_probability
+                    opp.current_stage_entered_at = new_snapshot.entered_at
+
                 migrated_count += 1
                 
             except Exception as e:

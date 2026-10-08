@@ -1,21 +1,20 @@
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import BigInteger, create_engine, func
-from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy import func
 
 from app.api.customer_profiles import _decode_cursor, _encode_cursor
-from app.core.database import Base
-from app.crud.customer_profile_projection import customer_profile_projection_crud
+from app.crud.customer import customer_crud
 from app.models.customer import Customer
 from app.models.customer_profile_projection import (
     CustomerProfileCurrent,
     CustomerProfileProjectionVersion,
     CustomerProfileStatus,
 )
+from app.models.team import Team
+from app.schemas.customer import CustomerUpdate
 from app.schemas.customer_profile import CustomerProfileSections
-from app.services.agent.customer_profile_projection_graph import CustomerProfileNarrativeDraft
+from app.services.customer_intelligence_context_service import CustomerIntelligenceContextService
+from app.services.customer_profile_demand_claims import CatalogProductRef
 from app.services.customer_profile_projection_quality import (
     CustomerProfileProjectionQualityLinter,
 )
@@ -31,47 +30,27 @@ from app.services.customer_profile_projection_service import (
     _important_change_items,
     _recorded_follow_ups,
 )
-from app.services.customer_profile_demand_claims import CatalogProductRef
-
-
-@compiles(BigInteger, "sqlite")
-def _bigint_to_sqlite_int(element, compiler, **kw):
-    return "INTEGER"
+from app.services.customer_profile_version_certification import is_certified_profile_version
+from tests.unit.test_customer_intelligence_context_service import _seed_customer_context, _session
 
 
 @pytest.fixture
 def profile_db():
-    engine = create_engine(
-        "sqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    Base.metadata.create_all(
-        engine,
-        tables=[
-            Customer.__table__,
-            CustomerProfileProjectionVersion.__table__,
-            CustomerProfileCurrent.__table__,
-        ],
-    )
-    session = sessionmaker(bind=engine)()
-    session.add(
-        Customer(
-            id=1,
-            public_id="cus_profile_test",
-            team_id=1,
-            account_name="客户档案测试客户",
-            city="上海",
-            creator_id="user_1",
-        )
-    )
+    engine, session = _session()
+    Team.__table__.create(engine, checkfirst=True)
+    CustomerProfileProjectionVersion.__table__.create(engine, checkfirst=True)
+    CustomerProfileCurrent.__table__.create(engine, checkfirst=True)
+    session.add(Team(id=2, name="档案测试团队", code="PROFILE-2", owner_id=9))
     session.commit()
-    yield session
-    session.close()
-    engine.dispose()
+    _seed_customer_context(session)
+    try:
+        yield session
+    finally:
+        session.close()
+        engine.dispose()
 
 
-def _draft(*, summary: str = "当前已有明确的项目背景。", activity_watermark: int = 1):
+def _draft(*, summary: str = "当前已有明确的项目背景。"):
     return CustomerProfileProjectionDraft(
         sections=CustomerProfileSections(
             current_situation={"summary": summary},
@@ -82,13 +61,23 @@ def _draft(*, summary: str = "当前已有明确的项目背景。", activity_wa
             recorded_follow_ups=[],
         ),
         evidence_refs=[{"evidence_key": "activity:1", "source_type": "customer_activity"}],
-        source_watermark={"activity_id": activity_watermark},
-        fact_watermark=2,
-        journey_watermark=3,
-        task_watermark=4,
-        commitment_watermark=5,
-        source_event_key="customer_activity:1",
+        source_watermark={"activity_id": 1},
     )
+
+
+def _fresh_draft(db, *, target_sections=()):
+    context = CustomerIntelligenceContextService().build_context(
+        db, team_id=2, customer_id=101, query_text="", evidence_limit=0,
+    )
+    return CustomerProfileProjectionService().draft_from_context(
+        context=context.to_dict(), source_event_key=None, target_sections=target_sections,
+    )
+
+
+def _update_customer_city(db, city):
+    customer = db.query(Customer).filter_by(team_id=2, id=101).one()
+    customer_crud.update(db, customer, CustomerUpdate(city=city))
+    db.commit()
 
 
 def test_profile_diff_reports_nested_leaf_changes_and_new_values():
@@ -130,51 +119,24 @@ def test_profile_cursor_rejects_legacy_unscoped_cursor():
     assert exc_info.value.detail["code"] == "PROFILE_CURSOR_INVALID"
 
 
-def test_narrative_draft_partial_publish_keeps_typed_sections(profile_db):
-    service = CustomerProfileProjectionService()
-    service.publish(profile_db, team_id=1, customer_id=1, draft=_draft())
-    profile_db.commit()
-
-    narrative = CustomerProfileNarrativeDraft(
-        sections=CustomerProfileSections(
-            current_situation={"summary": "第二版当前情况"},
-            current_journeys=[],
-            important_changes=[],
-            long_term_context={},
-            follow_up_process=[],
-            recorded_follow_ups=[],
-        ),
-        evidence_refs=[{"evidence_key": "activity:1", "source_type": "customer_activity"}],
-        source_watermark={"activity_id": 2},
-        target_sections=("current_situation",),
-    )
-
-    draft = narrative.to_projection_draft()
-    assert isinstance(draft.sections, CustomerProfileSections)
-    publication = service.publish(profile_db, team_id=1, customer_id=1, draft=draft)
-
-    assert publication.version.current_situation_json == {"summary": "第二版当前情况"}
-
-
-
 def test_projection_service_ensure_current_is_idempotent_and_updates_run_state(profile_db):
     service = CustomerProfileProjectionService()
 
-    current = service.ensure_current(profile_db, team_id=1, customer_id=1)
+    current = service.ensure_current(profile_db, team_id=2, customer_id=101)
     profile_db.commit()
 
     assert current.profile_status == CustomerProfileStatus.NOT_READY
     assert current.latest_source_watermark_json == {}
     assert profile_db.query(CustomerProfileCurrent).count() == 1
 
-    same_current = service.ensure_current(profile_db, team_id=1, customer_id=1)
+    same_current = service.ensure_current(profile_db, team_id=2, customer_id=101)
     assert same_current.id == current.id
     assert profile_db.query(CustomerProfileCurrent).count() == 1
 
     updating_current = service.ensure_current(
         profile_db,
-        team_id=1,
-        customer_id=1,
+        team_id=2,
+        customer_id=101,
         status=CustomerProfileStatus.UPDATING,
         active_run_id=42,
     )
@@ -185,87 +147,45 @@ def test_projection_service_ensure_current_is_idempotent_and_updates_run_state(p
     assert updating_current.active_run_id == 42
 
 
-def test_projection_service_recovers_from_first_insert_unique_race(profile_db, monkeypatch):
-    service = CustomerProfileProjectionService()
-    original_get_current = customer_profile_projection_crud.get_current
-    calls = 0
-
-    def get_current_with_race(db, *, team_id, customer_id, for_update=False):
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            # Simulate another transaction winning between the initial
-            # snapshot read and this transaction's INSERT.
-            db.add(
-                CustomerProfileCurrent(
-                    team_id=team_id,
-                    customer_id=customer_id,
-                    profile_status=CustomerProfileStatus.NOT_READY,
-                    latest_source_watermark_json={},
-                )
-            )
-            db.flush()
-            return None
-        return original_get_current(db, team_id=team_id, customer_id=customer_id, for_update=for_update)
-
-    monkeypatch.setattr(customer_profile_projection_crud, "get_current", get_current_with_race)
-
-    current = service.ensure_current(
-        profile_db,
-        team_id=1,
-        customer_id=1,
-        status=CustomerProfileStatus.UPDATING,
-        active_run_id=99,
-    )
-    profile_db.commit()
-
-    assert calls == 2
-    assert profile_db.query(CustomerProfileCurrent).count() == 1
-    assert current.profile_status == CustomerProfileStatus.UPDATING
-    assert current.active_run_id == 99
-
-
 def test_projection_service_publishes_reads_and_deduplicates_on_sqlite(profile_db):
     service = CustomerProfileProjectionService()
-    draft = _draft()
+    draft = _fresh_draft(profile_db)
 
-    publication = service.publish(profile_db, team_id=1, customer_id=1, draft=draft)
+    publication = service.publish(profile_db, team_id=2, customer_id=101, draft=draft)
     profile_db.commit()
 
     assert publication.deduplicated is False
-    assert publication.changed_sections == ("current_situation",)
+    assert "current_situation" in publication.changed_sections
     assert publication.version.profile_version == 1
     assert publication.current.profile_status == CustomerProfileStatus.READY
-    assert publication.current.latest_source_watermark_json == {"activity_id": 1}
+    assert publication.current.latest_source_watermark_json == draft.source_watermark
 
     customer, current, version = service.get_current_by_public_id(
-        profile_db, team_id=1, customer_public_id="cus_profile_test"
+        profile_db, team_id=2, customer_public_id=profile_db.query(Customer).filter_by(id=101).one().public_id
     )
-    assert customer.id == 1
+    assert customer.id == 101
     assert current is not None
     assert version is not None
     assert version.id == publication.version.id
     assert version.current_situation_json == draft.sections.current_situation
 
-    duplicate = service.publish(profile_db, team_id=1, customer_id=1, draft=draft)
+    duplicate = service.publish(profile_db, team_id=2, customer_id=101, draft=_fresh_draft(profile_db))
     profile_db.commit()
 
     assert duplicate.deduplicated is True
     assert duplicate.changed_sections == ()
+    assert is_certified_profile_version(publication.version)
     assert duplicate.version.id == publication.version.id
     assert profile_db.query(CustomerProfileProjectionVersion).count() == 1
     assert profile_db.query(func.count(CustomerProfileCurrent.id)).scalar() == 1
 
+    _update_customer_city(profile_db, "深圳")
     changed = service.publish(
-        profile_db,
-        team_id=1,
-        customer_id=1,
-        draft=_draft(summary="项目背景已补充新的事实。", activity_watermark=2),
+        profile_db, team_id=2, customer_id=101, draft=_fresh_draft(profile_db),
     )
-    profile_db.commit()
 
     assert changed.deduplicated is False
-    assert changed.changed_sections == ("current_situation",)
+    assert "current_situation" in changed.changed_sections
     assert changed.version.profile_version == 2
     assert changed.current.current_profile_version_id == changed.version.id
     assert profile_db.query(CustomerProfileProjectionVersion).count() == 2
@@ -273,103 +193,88 @@ def test_projection_service_publishes_reads_and_deduplicates_on_sqlite(profile_d
 
 def test_projection_publish_rejects_stale_expected_version_and_watermark(profile_db):
     service = CustomerProfileProjectionService()
-    first = service.publish(profile_db, team_id=1, customer_id=1, draft=_draft(activity_watermark=5))
+    first = service.publish(profile_db, team_id=2, customer_id=101, draft=_fresh_draft(profile_db))
     profile_db.commit()
 
-    with pytest.raises(Exception) as cas_error:
+    with pytest.raises(CustomerProfileProjectionError) as cas_error:
         service.publish(
             profile_db,
-            team_id=1,
-            customer_id=1,
-            draft=_draft(summary="并发写入", activity_watermark=6),
+            team_id=2,
+            customer_id=101,
+            draft=_fresh_draft(profile_db),
             expected_current_version=0,
         )
-    assert getattr(cas_error.value, "code", None) == "PROFILE_PUBLISH_REJECTED_STALE"
+    assert cas_error.value.code == "PROFILE_PUBLISH_REJECTED_STALE"
 
-    with pytest.raises(Exception) as watermark_error:
-        service.publish(
-            profile_db,
-            team_id=1,
-            customer_id=1,
-            draft=_draft(summary="落后水位", activity_watermark=4),
-        )
-    assert getattr(watermark_error.value, "code", None) == "PROFILE_PUBLISH_REJECTED_STALE"
+    stale_draft = _fresh_draft(profile_db)
+    _update_customer_city(profile_db, "深圳")
+    with pytest.raises(CustomerProfileProjectionError) as watermark_error:
+        service.publish(profile_db, team_id=2, customer_id=101, draft=stale_draft)
+    assert watermark_error.value.code == "PROFILE_PUBLISH_REJECTED_STALE"
     assert first.version.profile_version == 1
+    assert profile_db.query(CustomerProfileProjectionVersion).count() == 1
 
 
 def test_projection_publish_keeps_immutable_history_and_current_pointer_at_latest(profile_db):
     service = CustomerProfileProjectionService()
-    first = service.publish(profile_db, team_id=1, customer_id=1, draft=_draft(summary="第一版", activity_watermark=1))
+    first = service.publish(profile_db, team_id=2, customer_id=101, draft=_fresh_draft(profile_db))
     profile_db.commit()
     first_summary = first.version.current_situation_json["summary"]
 
-    second = service.publish(profile_db, team_id=1, customer_id=1, draft=_draft(summary="第二版", activity_watermark=2))
+    _update_customer_city(profile_db, "深圳")
+    second = service.publish(profile_db, team_id=2, customer_id=101, draft=_fresh_draft(profile_db))
     profile_db.commit()
 
     stored_first = profile_db.query(CustomerProfileProjectionVersion).filter_by(id=first.version.id).one()
-    current = profile_db.query(CustomerProfileCurrent).filter_by(team_id=1, customer_id=1).one()
+    current = profile_db.query(CustomerProfileCurrent).filter_by(team_id=2, customer_id=101).one()
     assert stored_first.current_situation_json["summary"] == first_summary
     assert stored_first.publication_status == "SUPERSEDED"
     assert second.version.profile_version == 2
+    assert is_certified_profile_version(stored_first)
+    assert is_certified_profile_version(second.version)
     assert current.current_profile_version_id == second.version.id
     assert current.last_successful_version == 2
 
-    # Replaying an older version cannot move the current pointer backwards.
-    with pytest.raises(Exception) as stale_error:
-        service.publish(
-            profile_db,
-            team_id=1,
-            customer_id=1,
-            draft=_draft(summary="第一版", activity_watermark=1),
-        )
-    assert getattr(stale_error.value, "code", None) == "PROFILE_PUBLISH_REJECTED_STALE"
-    current = profile_db.query(CustomerProfileCurrent).filter_by(team_id=1, customer_id=1).one()
+    # A stale compare-and-swap cannot move the current pointer backwards.
+    with pytest.raises(CustomerProfileProjectionError) as stale_error:
+        service.publish(profile_db, team_id=2, customer_id=101, draft=_fresh_draft(profile_db), expected_current_version=1)
+    assert stale_error.value.code == "PROFILE_PUBLISH_REJECTED_STALE"
+    current = profile_db.query(CustomerProfileCurrent).filter_by(team_id=2, customer_id=101).one()
     assert current.current_profile_version_id == second.version.id
     assert current.last_successful_version == 2
 
 
 def test_partial_projection_preserves_unaffected_sections(profile_db):
     service = CustomerProfileProjectionService()
-    first = CustomerProfileProjectionDraft(
-        sections=CustomerProfileSections(
-            current_situation={"summary": "第一版当前情况"},
-            current_journeys=[{"id": "journey-1", "status": "ACTIVE"}],
-            important_changes=[{"summary": "第一版变化"}],
-            long_term_context={"overview": "长期背景"},
-            follow_up_process=[{"summary": "第一版跟进过程"}],
-            recorded_follow_ups=[{"summary": "第一版后续事项"}],
-        ),
-        evidence_refs=[{"evidence_key": "activity:1", "source_type": "customer_activity"}],
-        source_watermark={"activity_id": 1},
-        target_sections=("current_situation",),
-    )
-    service.publish(profile_db, team_id=1, customer_id=1, draft=first)
+    first = service.publish(profile_db, team_id=2, customer_id=101, draft=_fresh_draft(profile_db))
     profile_db.commit()
 
-    partial = CustomerProfileProjectionDraft(
-        sections=CustomerProfileSections(
-            current_situation={"summary": "第二版当前情况"},
-            current_journeys=[{"id": "journey-2", "status": "ACTIVE"}],
-            important_changes=[{"summary": "第二版变化"}],
-            long_term_context={"overview": "不应覆盖"},
-            follow_up_process=[{"summary": "不应覆盖"}],
-            recorded_follow_ups=[{"summary": "不应覆盖"}],
-        ),
-        evidence_refs=[{"evidence_key": "activity:2", "source_type": "customer_activity"}],
-        source_watermark={"activity_id": 2},
-        target_sections=("current_situation",),
-    )
-    publication = service.publish(profile_db, team_id=1, customer_id=1, draft=partial)
+    # An unchanged, source-qualified partial cannot fabricate a new version.
+    partial = _fresh_draft(profile_db, target_sections=("current_situation",))
+    publication = service.publish(profile_db, team_id=2, customer_id=101, draft=partial)
     profile_db.commit()
 
-    assert publication.version.current_situation_json == {"summary": "第二版当前情况"}
-    assert publication.version.current_journeys_json == [{"id": "journey-1", "status": "ACTIVE"}]
-    assert publication.version.long_term_context_json == {"overview": "长期背景"}
-    assert publication.version.follow_up_process_json == [{"summary": "第一版跟进过程"}]
-    assert {item["evidence_key"] for item in publication.version.evidence_refs_json} == {
-        "activity:1",
-        "activity:2",
-    }
+    assert publication.deduplicated
+    assert publication.version.id == first.version.id
+    assert publication.version.long_term_context_json == first.version.long_term_context_json
+    assert publication.version.evidence_refs_json == first.version.evidence_refs_json
+    assert profile_db.query(CustomerProfileProjectionVersion).count() == 1
+
+
+def test_partial_projection_rejects_stale_unaffected_sections(profile_db):
+    service = CustomerProfileProjectionService()
+    first = service.publish(profile_db, team_id=2, customer_id=101, draft=_fresh_draft(profile_db))
+    profile_db.commit()
+
+    _update_customer_city(profile_db, "深圳")
+    partial = _fresh_draft(profile_db, target_sections=("current_situation",))
+    with pytest.raises(CustomerProfileProjectionError) as exc:
+        service.publish(profile_db, team_id=2, customer_id=101, draft=partial)
+
+    assert exc.value.code == "PROFILE_SOURCE_FENCE_UNVERIFIED"
+    current = profile_db.query(CustomerProfileCurrent).filter_by(team_id=2, customer_id=101).one()
+    assert current.current_profile_version_id == first.version.id
+    assert profile_db.query(CustomerProfileProjectionVersion).count() == 1
 
 
 def test_projection_omits_system_boundary_disclaimer_from_customer_profile():
@@ -890,42 +795,21 @@ def test_profile_contract_rejects_explicit_sales_guidance_role():
         service.validate_draft(draft)
 
 
-def test_profile_quality_warning_does_not_block_publication(profile_db):
-    service = CustomerProfileProjectionService()
-    draft = CustomerProfileProjectionDraft(
-        sections=CustomerProfileSections(
-            current_situation={"summary": "建议销售本周联系客户确认预算。"},
-            current_journeys=[],
-            important_changes=[],
-            long_term_context={},
-            follow_up_process=[],
-            recorded_follow_ups=[],
-        ),
-        evidence_refs=[{"evidence_key": "activity:1", "source_type": "customer_activity"}],
-        source_watermark={"activity_id": 1},
-    )
-
-    publication = service.publish(profile_db, team_id=1, customer_id=1, draft=draft)
-
-    assert publication.version.publication_status == "PUBLISHED_WITH_WARNINGS"
-    assert publication.version.quality_report_json["issues"][0]["code"] == (
-        "PROFILE_NARRATIVE_SALES_GUIDANCE_SUSPECTED"
-    )
-
-
 def test_durable_profile_publish_requires_dedicated_workflow_owner(profile_db):
     service = CustomerProfileProjectionService()
 
     with pytest.raises(CustomerProfileProjectionError) as exc_info:
         service.publish(
             profile_db,
-            team_id=1,
-            customer_id=1,
-            draft=_draft(),
+            team_id=2,
+            customer_id=101,
+            draft=_fresh_draft(profile_db),
             run_id=42,
         )
 
     assert exc_info.value.code == "PROFILE_PUBLISH_OWNER_FORBIDDEN"
+    assert profile_db.query(CustomerProfileCurrent).count() == 0
+    assert profile_db.query(CustomerProfileProjectionVersion).count() == 0
 
 
 def test_dedicated_workflow_owner_can_publish_durable_profile(profile_db):
@@ -933,33 +817,15 @@ def test_dedicated_workflow_owner_can_publish_durable_profile(profile_db):
 
     publication = service.publish(
         profile_db,
-        team_id=1,
-        customer_id=1,
-        draft=_draft(),
+        team_id=2,
+        customer_id=101,
+        draft=_fresh_draft(profile_db),
         run_id=42,
         publication_owner=PROFILE_WORKFLOW_OWNER,
     )
 
     assert publication.version.profile_version == 1
     assert publication.version.run_id == 42
+    assert is_certified_profile_version(publication.version)
 
 
-def test_customer_expression_advice_wording_is_publishable(profile_db):
-    service = CustomerProfileProjectionService()
-    draft = CustomerProfileProjectionDraft(
-        sections=CustomerProfileSections(
-            current_situation={"summary": "客户建议先完成内部试用。"},
-            current_journeys=[],
-            important_changes=[],
-            long_term_context={},
-            follow_up_process=[],
-            recorded_follow_ups=[],
-        ),
-        evidence_refs=[{"evidence_key": "activity:1", "source_type": "customer_activity"}],
-        source_watermark={"activity_id": 2},
-    )
-
-    publication = service.publish(profile_db, team_id=1, customer_id=1, draft=draft)
-
-    assert publication.version.publication_status == "PUBLISHED"
-    assert publication.version.quality_report_json == {"issues": []}

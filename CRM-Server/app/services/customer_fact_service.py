@@ -169,10 +169,27 @@ class CustomerFactService:
             conflict_reason=conflict_reason,
         )
 
+    @staticmethod
+    def _eligible_source(db: Session, fact_input: CustomerFactInput) -> bool:
+        from app.services.legacy_profile_source import source_origin
+
+        source = fact_input.source
+        return source is not None and source_origin(
+            db, fact_input.team_id, fact_input.customer_id,
+            source.source_type, source.source_object_id,
+            source.business_object_type, source.business_object_id,
+        )
+
     def upsert_fact(self, db: Session, fact_input: CustomerFactInput) -> CustomerFact:
         content = fact_input.content.strip()
         if not content:
             raise ValueError("客户事实内容不能为空")
+        from app.services.legacy_profile_source import advance_eligible_progress, fact_origin, lock_source_customer
+
+        # Origin itself is mutable (activities can be deleted), so acquire the
+        # customer's source lock before inspecting provenance or fact identity.
+        lock_source_customer(db, team_id=fact_input.team_id, customer_id=fact_input.customer_id)
+        eligible_source = self._eligible_source(db, fact_input)
 
         fact_key = self.fact_key(
             team_id=fact_input.team_id,
@@ -180,11 +197,27 @@ class CustomerFactService:
             fact_type=fact_input.fact_type,
             subject=fact_input.subject,
         )
-        fact = (
-            db.query(CustomerFact)
-            .filter(CustomerFact.fact_key == fact_key)
-            .one_or_none()
+        fact = db.query(CustomerFact).filter(CustomerFact.fact_key == fact_key).one_or_none()
+        if fact is not None and fact_origin(
+            db, fact, fact_input.team_id, fact_input.customer_id,
+        ) != eligible_source:
+            raise ValueError("不可混合未经验证的来源与旧版客户事实")
+        changed = fact is None or _fact_changed(
+            fact, content=content, confidence=_clamp_confidence(fact_input.confidence),
+            status=CustomerFactStatus.ACTIVE, occurred_at=fact_input.occurred_at,
         )
+        source = fact_input.source
+        if eligible_source and fact is not None and source is not None:
+            existing_source = db.query(CustomerFactSource).filter_by(
+                fact_id=fact.id, source_type=source.source_type,
+                source_object_id=source.source_object_id.strip(),
+            ).one_or_none()
+            changed = changed or existing_source is None or (
+                existing_source.business_object_type != _clean_optional_text(source.business_object_type)
+                or existing_source.business_object_id != _clean_optional_text(source.business_object_id)
+                or existing_source.evidence_id != _clean_optional_text(source.evidence_id)
+                or existing_source.quote != _clean_optional_text(source.quote)
+            )
         if fact is None:
             fact = CustomerFact(
                 fact_key=fact_key,
@@ -246,6 +279,8 @@ class CustomerFactService:
 
         if fact_input.source is not None:
             self.attach_source(db, fact=fact, source=fact_input.source)
+        if eligible_source and changed:
+            advance_eligible_progress(db, team_id=fact_input.team_id, customer_id=fact_input.customer_id)
         return fact
 
     def _record_revision(
@@ -359,31 +394,23 @@ class CustomerFactService:
             facts = self.list_active_facts(db, team_id=team_id, customer_id=customer_id, limit=limit)
             sources_by_fact = self.list_sources(db, fact_ids=[int(fact.id) for fact in facts])
             return [_fact_payload(fact, sources_by_fact.get(int(fact.id), [])) for fact in facts]
-        tainted_source = exists(
-            select(1).where(
-                CustomerFactSource.fact_id == CustomerFact.id,
-                or_(
-                    CustomerFactSource.source_type.in_(("customer_activity", "follow_up"))
-                    & ~eligible_activity_source(team_id, customer_id, CustomerFactSource.source_object_id),
-                    (CustomerFactSource.business_object_type == "customer_activity")
-                    & ~eligible_activity_source(team_id, customer_id, CustomerFactSource.business_object_id),
-                ),
-            )
-        )
+        # Filter before the display limit: a recent ineligible fact cannot
+        # displace older, eligible customer intelligence.
         facts = (
             db.query(CustomerFact)
             .filter(
                 CustomerFact.team_id == team_id,
                 CustomerFact.customer_id == customer_id,
                 CustomerFact.status == CustomerFactStatus.ACTIVE,
-                ~tainted_source,
             )
             .order_by(CustomerFact.confidence.desc(), CustomerFact.occurred_at.desc(), CustomerFact.updated_time.desc())
-            .limit(limit)
             .all()
         )
-        sources_by_fact = self.list_sources(db, fact_ids=[int(fact.id) for fact in facts])
-        return [_fact_payload(fact, sources_by_fact.get(int(fact.id), [])) for fact in facts]
+        from app.services.legacy_profile_source import fact_origin
+
+        eligible = [fact for fact in facts if fact_origin(db, fact, team_id, customer_id)][:limit]
+        sources_by_fact = self.list_sources(db, fact_ids=[int(fact.id) for fact in eligible])
+        return [_fact_payload(fact, sources_by_fact.get(int(fact.id), [])) for fact in eligible]
 
     def fact_key(self, *, team_id: int, customer_id: int, fact_type: str, subject: str | None) -> str:
         raw = f"crmwolf/customer-fact/{team_id}/{customer_id}/{fact_type}/{_clean_optional_text(subject) or ''}"

@@ -24,6 +24,7 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { FormField, FormItem, FormMessage } from '@/components/ui/form'
 import { Button } from '@/components/ui/button'
+import { entityParseApi, type CustomerParsedInfo, type CustomerParsedContact } from '@/api/entityParse'
 import {
   DateField,
   IndustryHierarchySelectField,
@@ -31,6 +32,7 @@ import {
   ProductIntentPicker,
   SegmentedChoiceControl,
   SelectField,
+  TextareaField,
 } from '@/components/crmwolf'
 import FormErrorSummary from '@/components/crmwolf/FormErrorSummary.vue'
 import { handleApiError } from '@/utils/errorHandler'
@@ -101,6 +103,10 @@ const { formSelectOptions: sourceSelectOptions, loading: sourceOptionsLoading, l
 const sourceOptionsError = ref<FeedbackError | null>(null)
 const optionsLoading = computed(() => procurementMethodsLoading.value || sourceOptionsLoading.value)
 const optionsError = computed(() => procurementMethodsError.value !== null || sourceOptionsError.value !== null)
+// 智能解析状态（仅创建模式展示，解析结果只回填表单）
+const rawText = ref('')
+const parsing = ref(false)
+const parseStatus = ref('')
 const moreInfoOpen = ref(false)
 const industryHierarchy = ref<import('@/schemas/customer').CustomerIndustryHierarchy>({})
 const industryHierarchyLoading = ref(false)
@@ -109,9 +115,6 @@ const industryValue = ref('')
 const industryBaseline = ref('')
 const retainedIndustryInfo = ref<CustomerDetailResponse['industry_info']>(null)
 const profileBaseline = ref<CustomerEditableSnapshot>(emptyEditableSnapshot())
-const lifecycleStatusValue = ref<0 | 1 | null>(null)
-const lifecycleStatusBaseline = ref<0 | 1 | null>(null)
-const customerStatusPresent = ref(false)
 const licenseTypeValue = ref<'TRIAL' | 'OFFICIAL' | null>(null)
 const licenseExpiryDateValue = ref<string | null>(null)
 const licenseTypeBaseline = ref<'TRIAL' | 'OFFICIAL' | null>(null)
@@ -119,7 +122,6 @@ const licenseExpiryDateBaseline = ref<string | null>(null)
 const isDirty = ref(false)
 const applyingFormValues = ref(false)
 const writeSubmitting = computed(() => submitting.value)
-const statusIsReadOnly = computed(() => props.mode === 'edit' && customerStatusPresent.value && lifecycleStatusValue.value === null)
 const industryErrorMessage = computed(() => {
   const message = errors.value.industry
   return typeof message === 'string' ? message : ''
@@ -128,7 +130,6 @@ const closeGuard = useDialogCloseGuard({
   isDirty: computed(() => (
     isDirty.value
     || industryValue.value !== industryBaseline.value
-    || lifecycleStatusValue.value !== lifecycleStatusBaseline.value
     || licenseTypeValue.value !== licenseTypeBaseline.value
     || licenseExpiryDateValue.value !== licenseExpiryDateBaseline.value
   )),
@@ -149,12 +150,11 @@ const fieldLabels: Record<string, string> = {
   contact_position: '职位',
   contact_gender: '性别',
   industry: '行业',
-  status: '客户状态',
   license_type: '授权类型',
   license_expiry_date: '授权到期日',
 }
 const contactFields = new Set(['contact_name', 'contact_mobile', 'contact_position', 'contact_gender'])
-const progressiveFields = new Set(['industry', 'status', 'license_type', 'license_expiry_date'])
+const progressiveFields = new Set(['industry', 'license_type', 'license_expiry_date'])
 const errorSummary = computed(() => Object.entries(errors.value).flatMap(([field, message]) => {
   if (props.mode === 'edit' && contactFields.has(field)) return []
   if (typeof message !== 'string' || message === '') return []
@@ -163,7 +163,6 @@ const errorSummary = computed(() => Object.entries(errors.value).flatMap(([field
 const moreInfoCount = computed(() => {
   let count = 0
   if (industryValue.value !== '') count += 1
-  if (lifecycleStatusValue.value !== null || (props.mode === 'edit' && customerStatusPresent.value)) count += 1
   if (licenseTypeValue.value !== null) count += 1
   if (licenseExpiryDateValue.value !== null) count += 1
   return count
@@ -245,13 +244,9 @@ function emptyEditableSnapshot(): CustomerEditableSnapshot {
     product_public_id: null,
     default_procurement_method_id: null,
     industry: null,
-    status: null,
     license_type: null,
     license_expiry_date: null,
   }
-}
-function editableStatus(status: CustomerDetailResponse['status']): 0 | 1 | null {
-  return status === 0 || status === 1 ? status : null
 }
 function editableLicenseType(value: string | null): 'TRIAL' | 'OFFICIAL' | null {
   return value === 'TRIAL' || value === 'OFFICIAL' ? value : null
@@ -301,7 +296,6 @@ function buildEditableSnapshot(customer: {
   product_public_id?: string | null
   default_procurement_method_id: number | null
   industry: string | null
-  status: CustomerDetailResponse['status']
   license_type: string | null
   license_expiry_date: string | null
 }): CustomerEditableSnapshot {
@@ -314,7 +308,6 @@ function buildEditableSnapshot(customer: {
     product_public_id: productPublicIdFromIntent(customer) || null,
     default_procurement_method_id: customer.default_procurement_method_id,
     industry: customer.industry,
-    status: editableStatus(customer.status),
     license_type: editableLicenseType(customer.license_type),
     license_expiry_date: customer.license_expiry_date,
   }
@@ -329,7 +322,6 @@ function buildCurrentSnapshot(editData: CustomerEditForm): CustomerEditableSnaps
     product_public_id: editData.product_public_id ?? null,
     default_procurement_method_id: editData.default_procurement_method_id ?? null,
     industry: normalizeIndustryValue(industryValue.value),
-    status: lifecycleStatusValue.value,
     license_type: licenseTypeValue.value,
     license_expiry_date: licenseExpiryDateValue.value,
   }
@@ -353,10 +345,6 @@ function mergeCustomerProfileValues(latest: CustomerDetailResponse): CustomerEdi
   return formValues
 }
 function mapContactGenderToApi(gender: string): '1' | '2' { return gender === '女' ? '2' : '1' }
-function handleLifecycleStatusChange(value: string | number): void {
-  const normalized = Number(value)
-  if (normalized === 0 || normalized === 1) lifecycleStatusValue.value = normalized
-}
 function handleProcurementMethodChange(value: string, handleChange: (value: number | undefined) => void): void {
   const procurementMethodId = Number(value)
   handleChange(Number.isFinite(procurementMethodId) && procurementMethodId > 0 ? procurementMethodId : undefined)
@@ -367,16 +355,12 @@ function handleLicenseTypeChange(value: string | number): void {
 function applyMoreInformationFromCustomer(customer: {
   industry: string | null
   industry_info?: CustomerDetailResponse['industry_info']
-  status: CustomerDetailResponse['status']
   license_type: string | null
   license_expiry_date: string | null
 }): void {
   industryValue.value = customer.industry ?? ''
   industryBaseline.value = customer.industry ?? ''
   retainedIndustryInfo.value = customer.industry_info ?? null
-  customerStatusPresent.value = customer.status === 0 || customer.status === 1 || customer.status === 2 || customer.status === 3
-  lifecycleStatusValue.value = editableStatus(customer.status)
-  lifecycleStatusBaseline.value = lifecycleStatusValue.value
   licenseTypeValue.value = editableLicenseType(customer.license_type)
   licenseExpiryDateValue.value = customer.license_expiry_date
   licenseTypeBaseline.value = licenseTypeValue.value
@@ -386,9 +370,6 @@ function resetCreateMoreInformation(): void {
   industryValue.value = ''
   industryBaseline.value = ''
   retainedIndustryInfo.value = null
-  customerStatusPresent.value = false
-  lifecycleStatusValue.value = null
-  lifecycleStatusBaseline.value = null
   licenseTypeValue.value = null
   licenseExpiryDateValue.value = null
   licenseTypeBaseline.value = null
@@ -408,7 +389,7 @@ async function applyCustomerDetail(customer: CustomerDetailResponse): Promise<vo
   setValues(formValues as unknown as CustomerForm | CustomerCreateForm, false)
   resetForm({ values: formValues as unknown as CustomerForm | CustomerCreateForm, errors: {} }, { force: true })
   await nextTick()
-  for (const field of ['account_name', 'city', 'address', 'company_scale', 'source_public_id', 'product_public_id', 'default_procurement_method_id', 'industry', 'status', 'license_type', 'license_expiry_date', 'contact_name', 'contact_mobile', 'contact_position', 'contact_gender'] as const) {
+  for (const field of ['account_name', 'city', 'address', 'company_scale', 'source_public_id', 'product_public_id', 'default_procurement_method_id', 'industry', 'license_type', 'license_expiry_date', 'contact_name', 'contact_mobile', 'contact_position', 'contact_gender'] as const) {
     setFieldError(field, undefined)
   }
   applyingFormValues.value = false
@@ -449,6 +430,8 @@ watch(
       if (prefetched !== null && prefetched !== undefined && prefetched.id === customerId) await applyCustomerDetail(prefetched)
       else await loadCustomerDetail(customerId)
     } else if (props.mode === 'create') {
+      rawText.value = ''
+      parseStatus.value = ''
       applyingFormValues.value = true
       resetForm({
         values: {
@@ -475,7 +458,7 @@ watch(
 )
 function clearFieldErrors(): void {
   setErrors({})
-  for (const field of ['account_name', 'city', 'address', 'company_scale', 'source_public_id', 'product_public_id', 'default_procurement_method_id', 'industry', 'status', 'license_type', 'license_expiry_date', 'contact_name', 'contact_mobile', 'contact_position', 'contact_gender'] as const) {
+  for (const field of ['account_name', 'city', 'address', 'company_scale', 'source_public_id', 'product_public_id', 'default_procurement_method_id', 'industry', 'license_type', 'license_expiry_date', 'contact_name', 'contact_mobile', 'contact_position', 'contact_gender'] as const) {
     setFieldError(field, undefined)
   }
 }
@@ -483,6 +466,7 @@ async function refreshConflict(preserveInput: boolean): Promise<void> {
   if (props.mode !== 'edit' || props.customerId === undefined || loading.value) return
   submitError.value = null
   loading.value = true
+
   try {
     const latest = await customerApi.getCustomerDetail(props.customerId)
     loadedVersion.value = latest.version
@@ -492,14 +476,11 @@ async function refreshConflict(preserveInput: boolean): Promise<void> {
     }
 
     const preservedIndustry = normalizeIndustryValue(industryValue.value) !== normalizeIndustryValue(industryBaseline.value)
-    const preservedLifecycleStatus = lifecycleStatusValue.value !== lifecycleStatusBaseline.value
     const preservedLicenseSnapshot = licenseTypeValue.value !== licenseTypeBaseline.value || licenseExpiryDateValue.value !== licenseExpiryDateBaseline.value
-    const previousLifecycleStatus = lifecycleStatusValue.value
     const previousLicenseType = licenseTypeValue.value
     const previousLicenseExpiryDate = licenseExpiryDateValue.value
     const mergedValues = mergeCustomerProfileValues(latest)
     const latestBaseline = buildEditableSnapshot(latest)
-    const latestLifecycleStatus = editableStatus(latest.status)
     const latestLicenseType = editableLicenseType(latest.license_type)
 
     ensureOption(latest.source_info)
@@ -507,13 +488,10 @@ async function refreshConflict(preserveInput: boolean): Promise<void> {
     industryBaseline.value = normalizeIndustryValue(latest.industry) ?? ''
     industryValue.value = preservedIndustry ? industryValue.value : latest.industry ?? ''
     retainedIndustryInfo.value = latest.industry_info ?? null
-    customerStatusPresent.value = latest.status === 0 || latest.status === 1 || latest.status === 2 || latest.status === 3
-    lifecycleStatusBaseline.value = latestLifecycleStatus
     licenseTypeBaseline.value = latestLicenseType
     licenseExpiryDateBaseline.value = latest.license_expiry_date
     licenseTypeValue.value = preservedLicenseSnapshot ? previousLicenseType : latestLicenseType
     licenseExpiryDateValue.value = preservedLicenseSnapshot ? previousLicenseExpiryDate : latest.license_expiry_date
-    lifecycleStatusValue.value = latestLifecycleStatus === null ? null : preservedLifecycleStatus ? previousLifecycleStatus : latestLifecycleStatus
 
     applyingFormValues.value = true
     setValues(mergedValues as unknown as CustomerForm | CustomerCreateForm, false)
@@ -523,9 +501,8 @@ async function refreshConflict(preserveInput: boolean): Promise<void> {
     applyingFormValues.value = false
     const mergedProfileDirty = customerProfileFields.some((field) => hasProfileInputChanged(field, mergedValues, latestBaseline))
     const mergedIndustryDirty = normalizeIndustryValue(industryValue.value) !== normalizeIndustryValue(latestBaseline.industry)
-    const mergedStatusDirty = lifecycleStatusValue.value !== lifecycleStatusBaseline.value
     const mergedLicenseDirty = licenseTypeValue.value !== licenseTypeBaseline.value || licenseExpiryDateValue.value !== licenseExpiryDateBaseline.value
-    isDirty.value = mergedProfileDirty || mergedIndustryDirty || mergedStatusDirty || mergedLicenseDirty
+    isDirty.value = mergedProfileDirty || mergedIndustryDirty || mergedLicenseDirty
   } catch (error) {
     submitError.value = toFeedbackError(error, '客户最新版本')
     handleApiError(error, '获取客户最新版本')
@@ -533,14 +510,52 @@ async function refreshConflict(preserveInput: boolean): Promise<void> {
     loading.value = false
   }
 }
+function applyParsedCustomer(info: CustomerParsedInfo, contact: CustomerParsedContact | undefined): void {
+  applyingFormValues.value = true
+  setFieldValue('account_name', info.account_name ?? '')
+  setFieldValue('city', info.city ?? '')
+  setFieldValue('company_scale', info.company_scale ?? undefined)
+  setFieldValue('source_public_id', info.source_public_id ?? undefined)
+  setFieldValue('product_public_id', info.product_public_id ?? '')
+  setFieldValue('contact_name', contact?.contact_name ?? '')
+  setFieldValue('contact_mobile', contact?.contact_phone ?? '')
+  setFieldValue('contact_position', contact?.contact_position ?? '')
+  if (contact?.contact_gender === '1' || contact?.contact_gender === '2') {
+    setFieldValue('contact_gender', contact.contact_gender === '1' ? '男' : '女')
+  }
+  void nextTick().then(() => { applyingFormValues.value = false })
+}
+
+async function handleParse(): Promise<void> {
+  const content = rawText.value.trim()
+  if (content === '') {
+    parseStatus.value = '先粘贴一段客户原文'
+    return
+  }
+  parsing.value = true
+  parseStatus.value = '正在解析…'
+  try {
+    await entityParseApi.parseCustomer(content, (event): void => {
+      if (event.event === 'parsed' && event.customer_info !== undefined) {
+        applyParsedCustomer(event.customer_info, event.contact_info ?? undefined)
+        parseStatus.value = '已填入，可直接修改后保存'
+      } else if (event.event === 'error') {
+        parseStatus.value = event.message ?? 'AI 解析失败'
+        toast.error(event.message ?? 'AI 解析失败')
+      }
+    })
+  } catch {
+    parseStatus.value = 'AI 解析失败，请稍后重试'
+    toast.error('AI 解析失败，请稍后重试')
+  } finally {
+    parsing.value = false
+  }
+}
 function applySuccessfulWriteBaselines(customer: CustomerResponse): void {
   loadedVersion.value = customer.version
   profileBaseline.value = buildEditableSnapshot(customer)
   industryBaseline.value = customer.industry ?? ''
   industryValue.value = customer.industry ?? ''
-  customerStatusPresent.value = customer.status === 0 || customer.status === 1 || customer.status === 2 || customer.status === 3
-  lifecycleStatusValue.value = editableStatus(customer.status)
-  lifecycleStatusBaseline.value = lifecycleStatusValue.value
   licenseTypeValue.value = editableLicenseType(customer.license_type)
   licenseExpiryDateValue.value = customer.license_expiry_date
   licenseTypeBaseline.value = licenseTypeValue.value
@@ -549,7 +564,6 @@ function applySuccessfulWriteBaselines(customer: CustomerResponse): void {
 }
 function syncMoreInfoFormValues(): void {
   setFieldValue('industry', industryValue.value)
-  setFieldValue('status', lifecycleStatusValue.value ?? undefined)
   setFieldValue('license_type', licenseTypeValue.value ?? '')
   setFieldValue('license_expiry_date', licenseExpiryDateValue.value ?? '')
 }
@@ -582,7 +596,6 @@ const submitForm = handleSubmit(async (formValues): Promise<void> => {
       }
       const createIndustry = normalizeIndustryValue(industryValue.value)
       if (createIndustry !== null) createPayload.industry = createIndustry
-      if (lifecycleStatusValue.value !== null) createPayload.status = lifecycleStatusValue.value
       const createExpiry = normalizeDateValue(licenseExpiryDateValue.value)
       if (createExpiry !== null && licenseTypeValue.value !== null) {
         createPayload.license_type = licenseTypeValue.value
@@ -630,13 +643,15 @@ function continueEditing(): void { closeGuard.continueEditing() }
 
 <template>
   <Dialog :open="props.open" @update:open="handleOpenChange">
-    <DialogContent class="w-[calc(100vw-2rem)] sm:max-w-2xl max-h-[min(90vh,90dvh)] overflow-y-auto overscroll-contain [scroll-padding-bottom:calc(5rem+env(safe-area-inset-bottom,0px))]">
+    <DialogContent class="customer-form-dialog w-[calc(100vw-2rem)] sm:max-w-2xl">
       <DialogHeader>
         <DialogTitle>{{ mode === 'create' ? '新建客户' : '编辑客户' }}</DialogTitle>
         <DialogDescription data-testid="customer-dialog-description" class="text-sm text-slate-500">
           {{ mode === 'create' ? '填写客户基础信息和联系人信息' : '先修改常用客户资料，更多信息按需展开' }}
         </DialogDescription>
       </DialogHeader>
+
+      <div class="customer-form-dialog__body">
 
       <div v-if="loading" class="flex justify-center py-8">
         <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
@@ -655,7 +670,7 @@ function continueEditing(): void { closeGuard.continueEditing() }
         </template>
       </ErrorState>
 
-      <form v-else class="space-y-4" @submit="onSubmit">
+      <form v-else id="customer-form" class="space-y-4" @submit="onSubmit">
         <div v-if="submitError" class="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm" role="alert" aria-live="assertive">
           <p class="font-medium">{{ submitError.title }}</p>
           <p>{{ submitError.description }}</p>
@@ -682,6 +697,30 @@ function continueEditing(): void { closeGuard.continueEditing() }
           <Button class="mt-2" type="button" variant="outline" @click="retryOptions">
             重试选项加载
           </Button>
+        </div>
+
+        <!-- 智能解析（仅创建模式，原文与表单同屏展示） -->
+        <div v-if="mode === 'create'" class="space-y-2">
+          <TextareaField
+            id="customer-raw-text"
+            v-model="rawText"
+            :rows="3"
+            label="客户原文"
+            placeholder="粘贴公司、联系人、电话、城市等信息"
+            control-class="resize-none"
+          />
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-xs text-muted-foreground min-h-4">{{ parseStatus }}</span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              :disabled="parsing"
+              @click="handleParse"
+            >
+              {{ parsing ? '解析中…' : '智能解析' }}
+            </Button>
+          </div>
         </div>
 
         <!-- Basic Information Section -->
@@ -901,14 +940,6 @@ function continueEditing(): void { closeGuard.continueEditing() }
                 label="行业"
               />
               <SelectField
-                id="customer-lifecycle-status"
-                :model-value="lifecycleStatusValue ?? ''"
-                label="客户状态"
-                :options="[{ value: 0, label: '跟进中' }, { value: 1, label: '已成交' }]"
-                :disabled="statusIsReadOnly || writeSubmitting"
-                @update:model-value="handleLifecycleStatusChange"
-              />
-              <SelectField
                 id="customer-license-type"
                 :model-value="licenseTypeValue ?? ''"
                 label="授权类型"
@@ -924,23 +955,22 @@ function continueEditing(): void { closeGuard.continueEditing() }
                 @update:model-value="licenseExpiryDateValue = $event === null ? null : formatLocalDate($event)"
               />
             </div>
-            <p v-if="statusIsReadOnly" class="text-xs leading-relaxed text-slate-500">该客户状态由其他流程管理，暂不支持在此修改。</p>
             <p class="text-xs leading-relaxed text-slate-500">此处只更新客户授权汇总信息，不创建 License 申请、不发起审批，也不修改正式 License 记录。</p>
             <p class="text-sm text-slate-700"><span class="font-medium">授权状态：</span>{{ licenseStatusLabel(licenseExpiryDateValue, licenseTypeValue) }}</p>
             </div>
           </CollapsibleContent>
         </Collapsible>
-
-        <!-- DialogFooter -->
-        <DialogFooter class="mt-6 pt-4 border-t">
-          <Button variant="outline" type="button" :disabled="writeSubmitting" @click="handleCancel">
-            取消
-          </Button>
-          <Button type="submit" :loading="submitting" :disabled="writeSubmitting || optionsLoading || optionsError">
-            {{ submitting ? '提交中...' : (mode === 'create' ? '创建客户' : '保存客户资料') }}
-          </Button>
-        </DialogFooter>
       </form>
+      </div>
+
+      <DialogFooter class="customer-form-dialog__footer">
+        <Button variant="outline" type="button" :disabled="writeSubmitting" @click="handleCancel">
+          取消
+        </Button>
+        <Button type="submit" form="customer-form" :loading="submitting" :disabled="writeSubmitting || optionsLoading || optionsError">
+          {{ submitting ? '提交中...' : (mode === 'create' ? '创建客户' : '保存客户资料') }}
+        </Button>
+      </DialogFooter>
     </DialogContent>
   </Dialog>
 
@@ -964,3 +994,31 @@ function continueEditing(): void { closeGuard.continueEditing() }
     </AlertDialogContent>
   </AlertDialog>
 </template>
+
+<style lang="scss">
+@use '@/styles/variables-v2.scss' as *;
+
+/* 非 scoped：DialogContent 经 Portal 渲染，scoped data 属性不随 class 传递 */
+.customer-form-dialog {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  max-height: $wolf-modal-height-mobile-v2;
+  overflow: hidden;
+}
+
+.customer-form-dialog__body {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: $wolf-space-lg-v2;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-bottom: calc($wolf-space-xl-v2 + $wolf-safe-area-bottom-v2);
+}
+
+.customer-form-dialog__footer {
+  gap: $wolf-space-sm-v2;
+  padding-top: $wolf-space-lg-v2;
+  border-top: 1px solid $wolf-border-divider-v2;
+}
+</style>

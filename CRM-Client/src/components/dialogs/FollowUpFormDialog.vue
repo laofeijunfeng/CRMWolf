@@ -237,13 +237,15 @@ function handleOpenChange(open: boolean): void {
 
 <template>
   <Dialog :open="props.open" @update:open="handleOpenChange">
-    <DialogContent class="w-[calc(100vw-2rem)] max-h-[min(90vh,90dvh)] overflow-y-auto overscroll-contain [scroll-padding-bottom:calc(5rem+env(safe-area-inset-bottom,0px))]">
+    <DialogContent class="follow-up-form-dialog w-[calc(100vw-2rem)]">
       <DialogHeader>
         <DialogTitle>添加客户活动</DialogTitle>
         <DialogDescription class="sr-only">记录本次客户活动的详细信息</DialogDescription>
       </DialogHeader>
 
-      <form class="space-y-4" @submit="onSubmit">
+      <div class="follow-up-form-dialog__body">
+
+      <form id="follow-up-form" class="space-y-4" @submit="onSubmit">
         <FormErrorSummary :items="validationErrorItems" />
 
         <!-- Follow-up Method (RadioGroup) -->
@@ -311,13 +313,17 @@ function handleOpenChange(open: boolean): void {
         </FormField>
 
         <!-- DialogFooter -->
-        <DialogFooter class="mt-6 pt-4 border-t">
+        </form>
+      </div>
+
+        <DialogFooter class="follow-up-form-dialog__footer">
           <Button variant="outline" type="button" :disabled="submittingMode !== null" @click="handleCancel">
             取消
           </Button>
           <Button
             variant="outline"
             type="submit"
+            form="follow-up-form"
             :loading="submittingMode === 'activity'"
             :disabled="submittingMode !== null"
           >
@@ -333,7 +339,6 @@ function handleOpenChange(open: boolean): void {
             提交并完成追踪
           </Button>
         </DialogFooter>
-      </form>
     </DialogContent>
   </Dialog>
 
@@ -357,3 +362,59 @@ function handleOpenChange(open: boolean): void {
     </AlertDialogContent>
   </AlertDialog>
 </template>
+
+<style lang="scss">
+@use '@/styles/variables-v2.scss' as *;
+
+/* 非 scoped：DialogContent 经 Portal 渲染，scoped data 属性不随 class 传递 */
+.follow-up-form-dialog {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  max-height: $wolf-modal-height-mobile-v2;
+  overflow: hidden;
+}
+
+.follow-up-form-dialog__body {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: $wolf-space-lg-v2;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-bottom: calc($wolf-space-xl-v2 + $wolf-safe-area-bottom-v2);
+}
+
+.follow-up-form-dialog__footer {
+  gap: $wolf-space-sm-v2;
+  padding-top: $wolf-space-lg-v2;
+  border-top: 1px solid $wolf-border-divider-v2;
+}
+</style>
+
+<style lang="scss">
+@use '@/styles/variables-v2.scss' as *;
+
+/* 非 scoped：DialogContent 经 Portal 渲染，scoped data 属性不随 class 传递 */
+.follow-up-form-dialog {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  max-height: $wolf-modal-height-mobile-v2;
+  overflow: hidden;
+}
+
+.follow-up-form-dialog__body {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: $wolf-space-lg-v2;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-bottom: calc($wolf-space-xl-v2 + $wolf-safe-area-bottom-v2);
+}
+
+.follow-up-form-dialog__footer {
+  gap: $wolf-space-sm-v2;
+  padding-top: $wolf-space-lg-v2;
+  border-top: 1px solid $wolf-border-divider-v2;
+}
+</style>

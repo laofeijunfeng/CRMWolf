@@ -54,6 +54,7 @@ from app.models.invoice import (
 )
 from app.models.payment import PaymentRecord, PaymentConfirmationStatus
 from app.models.customer import Customer, CustomerMember
+from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
 from app.models.user import User, UserStatus
 from app.models.role import Role
 from app.models.user_role import UserRole
@@ -87,6 +88,7 @@ def db_session():
         Permission.__table__,
         RolePermission.__table__,
         Customer.__table__,
+        CustomerLegacySourceProgress.__table__,
         CustomerMember.__table__,
         Contract.__table__,
         InvoiceApplication.__table__,

@@ -4,14 +4,34 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import BigInteger, create_engine
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.database import Base
 from app.core.exceptions import ConflictException
 from app.crud.customer import customer_crud
 from app.models.customer import Customer
+from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
 from app.schemas.customer import CustomerLicenseSnapshotUpdate, CustomerUpdate
+
+
+@compiles(BigInteger, "sqlite")
+def _bigint_to_sqlite_int(element, compiler, **kwargs):  # noqa: ARG001
+    return "INTEGER"
+
+
+@pytest.fixture(autouse=True)
+def _mock_progress_for_mocked_sessions(monkeypatch):
+    from app.crud import customer as customer_module
+
+    real_advance = customer_module.advance_eligible_progress
+
+    def advance(db, **kwargs):
+        if isinstance(db, Session):
+            return real_advance(db, **kwargs)
+
+    monkeypatch.setattr(customer_module, "advance_eligible_progress", advance)
 
 
 def _locked_customer(db, customer):
@@ -46,7 +66,7 @@ def _locked_customer_for_update(db: MagicMock, **overrides: object) -> SimpleNam
 
 def _sqlite_customer_sessions(tmp_path: Path):
     engine = create_engine(f"sqlite:///{tmp_path / 'customer-lock-refresh.db'}")
-    Base.metadata.create_all(engine, tables=[Customer.__table__])
+    Base.metadata.create_all(engine, tables=[Customer.__table__, CustomerLegacySourceProgress.__table__])
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
     seed = session_factory()
     seed.add(

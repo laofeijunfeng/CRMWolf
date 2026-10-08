@@ -24,6 +24,12 @@ DEPRECATED_PERMISSION_CODES = frozenset({
     "payment:api:read",
     "invoice:api:list",
 })
+# Broad-role seeding must not grant either operational permission by implication.
+OPT_IN_PERMISSION_CODES = frozenset({
+    "assistant:commands:reconcile:team",
+    "assistant:proposals:manage:team",
+})
+
 
 # 所有系统权限定义
 ALL_PERMISSIONS = [
@@ -137,6 +143,8 @@ ALL_PERMISSIONS = [
 
     # AI 相关权限
     {"name": "AI 配置管理", "code": "ai:manage", "resource": "ai", "action": "manage"},
+    {"name": "核对团队助手命令", "code": "assistant:commands:reconcile:team", "resource": "assistant_command", "action": "reconcile", "scope": "team"},
+    {"name": "管理团队助手提案", "code": "assistant:proposals:manage:team", "resource": "assistant_proposal", "action": "manage", "scope": "team"},
     {"name": "AI 配置查看", "code": "ai:view", "resource": "ai", "action": "view"},
 
     # 统计和报表权限
@@ -229,10 +237,14 @@ ROLES_DATA = [
     {"name": "销售总监", "code": "SALES_DIRECTOR", "description": "销售总监，可查看团队所有数据"},
     {"name": "销售成员", "code": "SALES_MEMBER", "description": "销售成员，仅查看和操作自己的数据"},
     {"name": "财务人员", "code": "FINANCE", "description": "财务人员，发票审批、回款确认"},
+    {"name": "助手命令核对员", "code": "ASSISTANT_COMMAND_OPERATOR", "description": "仅核对本团队的助手命令执行结果"},
+    {"name": "助手提案操作员", "code": "ASSISTANT_PROPOSAL_OPERATOR", "description": "仅管理本团队的助手提案启停"},
 ]
 
 # 角色权限映射
 ROLE_PERMISSIONS_MAPPING = {
+    "ASSISTANT_COMMAND_OPERATOR": ["assistant:commands:reconcile:team"],
+    "ASSISTANT_PROPOSAL_OPERATOR": ["assistant:proposals:manage:team"],
     "TEAM_ADMIN": "all",  # 所有权限
     "SALES_DIRECTOR": [
         "product:view",

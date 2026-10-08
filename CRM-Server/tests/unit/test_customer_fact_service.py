@@ -1,12 +1,22 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, create_engine
+from sqlalchemy import BigInteger, create_engine, event
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
+from app.models.contract import Contract
+from app.models.customer_activity import CustomerActivity
+from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
+from app.models.deal_journey import CustomerDealJourney, CustomerDealJourneyEvent
+from app.models.invoice import InvoiceApplication
+from app.models.opportunity import Opportunity
+from app.models.payment import PaymentPlan, PaymentRecord
+from app.models.procurement import OpportunityStageSnapshot
+from app.models.sales_commitment import FollowUpTask, SalesCommitment
 from app.models.customer import Customer
 from app.models.customer_fact import CustomerFact, CustomerFactRevision, CustomerFactSource
+from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
 from app.services.customer_fact_service import (
     CustomerFactCandidateInput,
     CustomerFactInput,
@@ -22,11 +32,30 @@ def _bigint_to_sqlite_int(element, compiler, **kw):
 
 def _session():
     engine = create_engine("sqlite:///:memory:")
+    @event.listens_for(engine, "before_cursor_execute", retval=True)
+    def _skip_sqlite_indexes(conn, cursor, statement, parameters, context, executemany):
+        if statement.startswith("CREATE INDEX"):
+            return "SELECT 1", ()
+        return statement, parameters
+
     Base.metadata.create_all(engine, tables=[
         Customer.__table__,
+        CustomerActivity.__table__,
+        CustomerActivityDeletionTombstone.__table__,
+        CustomerDealJourney.__table__,
+        CustomerDealJourneyEvent.__table__,
+        Opportunity.__table__,
+        OpportunityStageSnapshot.__table__,
+        Contract.__table__,
+        PaymentPlan.__table__,
+        PaymentRecord.__table__,
+        InvoiceApplication.__table__,
+        FollowUpTask.__table__,
+        SalesCommitment.__table__,
         CustomerFact.__table__,
         CustomerFactSource.__table__,
         CustomerFactRevision.__table__,
+        CustomerLegacySourceProgress.__table__,
     ])
     Session = sessionmaker(bind=engine)
     return Session()
@@ -127,6 +156,74 @@ def test_customer_fact_service_does_not_create_revision_for_duplicate_fact_paylo
     assert first.id == second.id
     assert second.version == 1
     assert db.query(CustomerFactRevision).count() == 1
+
+
+def test_fact_progress_excludes_assistant_origin_and_advances_eligible_mutations():
+    db = _session()
+    _customer(db)
+    legacy = CustomerFactInput(
+        tenant_id=2, team_id=2, customer_id=101, fact_type="need", subject="采购",
+        content="初版", confidence=0.8,
+        source=CustomerFactSourceInput(source_type="customer_activity", source_object_id="701"),
+    )
+    assistant = CustomerFactInput(
+        tenant_id=2, team_id=2, customer_id=101, fact_type="risk", subject="风险",
+        content="仅 2.0", confidence=0.8,
+        source=CustomerFactSourceInput(source_type="customer_activity", source_object_id="902"),
+    )
+    db.add_all([
+        CustomerActivity(id=701, team_id=2, customer_id=101, activity_kind="PHONE_FOLLOW_UP",
+                         source_content="旧源", creator_id="9", owner_id="9"),
+        CustomerActivity(id=902, team_id=2, customer_id=101, activity_kind="PHONE_FOLLOW_UP",
+                         source_content="秘密", creator_id="9", owner_id="9", submission_source="ASSISTANT_2",
+                         submission_id="turn-902", submission_fingerprint="a" * 64),
+    ])
+    db.flush()
+    customer_fact_service.upsert_fact(db, legacy)
+    progress = db.query(CustomerLegacySourceProgress).filter_by(team_id=2, customer_id=101).one()
+    assert progress.eligible_revision == 1
+    customer_fact_service.upsert_fact(db, assistant)
+    db.refresh(progress)
+    assert progress.eligible_revision == 1
+    customer_fact_service.upsert_fact(db, CustomerFactInput(
+        tenant_id=2, team_id=2, customer_id=101, fact_type="need", subject="采购",
+        content="新版", confidence=0.8, source=legacy.source,
+    ))
+    db.refresh(progress)
+    assert progress.eligible_revision == 2
+    customer_fact_service.upsert_fact(db, CustomerFactInput(
+        tenant_id=2, team_id=2, customer_id=101, fact_type="need", subject="采购",
+        content="新版", confidence=0.8, source=legacy.source,
+    ))
+    db.refresh(progress)
+    assert progress.eligible_revision == 2
+
+def test_assistant_fact_cannot_overwrite_eligible_content():
+    import pytest
+
+    db = _session()
+    _customer(db)
+    db.add_all([
+        CustomerActivity(id=701, team_id=2, customer_id=101, activity_kind="PHONE_FOLLOW_UP",
+                         source_content="旧来源", creator_id="9", owner_id="9"),
+        CustomerActivity(id=902, team_id=2, customer_id=101, activity_kind="PHONE_FOLLOW_UP",
+                         source_content="2.0 来源", creator_id="9", owner_id="9", submission_source="ASSISTANT_2",
+                         submission_id="turn-902", submission_fingerprint="a" * 64),
+    ])
+    db.flush()
+    old_fact = customer_fact_service.upsert_fact(db, CustomerFactInput(
+        tenant_id=2, team_id=2, customer_id=101, fact_type="need", subject="采购",
+        content="已核实需求", source=CustomerFactSourceInput(source_type="customer_activity", source_object_id="701"),
+    ))
+    with pytest.raises(ValueError, match="未经验证"):
+        customer_fact_service.upsert_fact(db, CustomerFactInput(
+            tenant_id=2, team_id=2, customer_id=101, fact_type="need", subject="采购",
+            content="未核实的 2.0 内容", source=CustomerFactSourceInput(
+                source_type="customer_activity", source_object_id="902",
+            ),
+        ))
+    db.refresh(old_fact)
+    assert old_fact.content == "已核实需求"
 
 
 def test_customer_fact_service_projects_context_payload_with_sources():

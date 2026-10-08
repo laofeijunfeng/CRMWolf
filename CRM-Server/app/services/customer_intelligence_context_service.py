@@ -7,6 +7,7 @@ that can help Agent reasoning and customer profile summarization.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -14,7 +15,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import and_, or_
+from sqlalchemy import inspect
 from sqlalchemy.orm import Session, joinedload
 
 from app.crud.product import product_crud
@@ -23,9 +24,8 @@ from app.models.contract import Contract
 from app.models.customer import Contact, Customer, CustomerProduct
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
-from app.services.customer_activity_contracts import CustomerActivitySubmissionSource
-from app.services.customer_activity_source_isolation import eligible_activity_source
-from app.models.deal_journey import CustomerDealJourney, CustomerDealJourneyEvent
+from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
+from app.models.deal_journey import CustomerDealJourney, CustomerDealJourneyEvent, DealJourneyEventType
 from app.models.opportunity import Opportunity
 from app.models.payment import PaymentPlan, PaymentRecord
 from app.models.sales_commitment import FollowUpTask, FollowUpTaskEvent, SalesCommitment
@@ -37,6 +37,13 @@ from app.services.customer_evidence_retriever import (
 )
 from app.services.customer_fact_service import CustomerFactService, customer_fact_service
 from app.services.industry_display_service import industry_display_service
+from app.services.legacy_profile_source import (
+    LEGACY_ACTIVITY_SOURCES,
+    LEGACY_PROFILE_SOURCE_POLICY,
+    event_origin,
+    follow_up_origin,
+    task_event_source_status,
+)
 
 if TYPE_CHECKING:
     from app.services.customer_qdrant_index_service import SourceType
@@ -450,134 +457,76 @@ class CustomerIntelligenceContextService:
         )
 
     def _build_strong_context(self, db: Session, *, customer: Customer, team_id: int) -> CustomerStrongContext:
-        contacts = (
-            db.query(Contact)
-            .filter(Contact.customer_id == customer.id, Contact.team_id == team_id)
-            .order_by(Contact.is_primary.desc(), Contact.is_decision_maker.desc(), Contact.created_time.asc())
-            .limit(50)
-            .all()
-        )
-        opportunities = (
-            db.query(Opportunity)
-            .options(joinedload(Opportunity.product))
-            .filter(Opportunity.customer_id == customer.id, Opportunity.team_id == team_id)
-            .order_by(Opportunity.status.asc(), Opportunity.last_modified_time.desc())
-            .limit(50)
-            .all()
-        )
-        contracts = (
-            db.query(Contract)
-            .options(joinedload(Contract.payment_plans).joinedload(PaymentPlan.payment_records))
-            .filter(Contract.customer_id == customer.id, Contract.team_id == team_id, Contract.deleted_at.is_(None))
-            .order_by(Contract.created_time.desc())
-            .limit(50)
-            .all()
-        )
-        activities = (
-            db.query(CustomerActivity)
-            .filter(
-                CustomerActivity.customer_id == customer.id,
-                CustomerActivity.team_id == team_id,
-                CustomerActivity.submission_source != CustomerActivitySubmissionSource.ASSISTANT_2.value,
-            )
-            .order_by(CustomerActivity.occurred_at.desc(), CustomerActivity.id.desc())
-            .limit(50)
-            .all()
-        )
-        activity_deletions = (
-            db.query(CustomerActivityDeletionTombstone)
-            .filter(
-                CustomerActivityDeletionTombstone.customer_id == customer.id,
-                CustomerActivityDeletionTombstone.team_id == team_id,
-                CustomerActivityDeletionTombstone.submission_source != CustomerActivitySubmissionSource.ASSISTANT_2.value,
-            )
-            .order_by(CustomerActivityDeletionTombstone.id.desc())
-            .limit(200)
-            .all()
-        )
-        deal_journeys = (
-            db.query(CustomerDealJourney)
-            .filter(CustomerDealJourney.customer_id == customer.id, CustomerDealJourney.team_id == team_id)
-            .order_by(
-                CustomerDealJourney.status.asc(),
-                CustomerDealJourney.last_event_at.desc(),
-                CustomerDealJourney.id.desc(),
-            )
-            .limit(50)
-            .all()
-        )
-        journey_ids = [int(item.id) for item in deal_journeys]
-        journey_events = (
-            db.query(CustomerDealJourneyEvent)
-            .filter(
-                CustomerDealJourneyEvent.customer_id == customer.id,
-                CustomerDealJourneyEvent.team_id == team_id,
-                CustomerDealJourneyEvent.deal_journey_id.in_(journey_ids),
-                or_(
-                    CustomerDealJourneyEvent.source_type.notin_(("customer_activity", "customer_follow_up")),
-                    and_(
-                        CustomerDealJourneyEvent.source_id.is_not(None),
-                        eligible_activity_source(team_id, int(customer.id), CustomerDealJourneyEvent.source_id),
-                    ),
-                ),
-            )
-            .order_by(CustomerDealJourneyEvent.event_time.desc(), CustomerDealJourneyEvent.id.desc())
-            .limit(200)
-            .all()
-            if journey_ids
-            else []
-        )
-        commitments = (
-            db.query(SalesCommitment)
-            .filter(SalesCommitment.customer_id == customer.id, SalesCommitment.team_id == team_id)
-            .order_by(SalesCommitment.updated_time.desc(), SalesCommitment.id.desc())
-            .filter(
-                or_(
-                    SalesCommitment.source_activity_id.is_(None),
-                    eligible_activity_source(team_id, int(customer.id), SalesCommitment.source_activity_id),
-                )
-            )
-            .limit(100)
-            .all()
-        )
-        tasks = (
-            db.query(FollowUpTask)
-            .filter(FollowUpTask.customer_id == customer.id, FollowUpTask.team_id == team_id)
-            .order_by(FollowUpTask.updated_time.desc(), FollowUpTask.id.desc())
-            .filter(
-                or_(
-                    FollowUpTask.source_activity_id.is_(None),
-                    eligible_activity_source(team_id, int(customer.id), FollowUpTask.source_activity_id),
-                )
-            )
-            .limit(100)
-            .all()
-        )
-        task_ids = [int(item.id) for item in tasks]
-        task_events = (
-            db.query(FollowUpTaskEvent)
-            .filter(FollowUpTaskEvent.team_id == team_id, FollowUpTaskEvent.task_id.in_(task_ids))
-            .filter(
-                or_(
-                    FollowUpTaskEvent.source_activity_id.is_(None),
-                    eligible_activity_source(team_id, int(customer.id), FollowUpTaskEvent.source_activity_id),
-                )
-            )
-            .order_by(FollowUpTaskEvent.created_time.desc(), FollowUpTaskEvent.id.desc())
-            .limit(200)
-            .all()
-            if task_ids
-            else []
-        )
-        same_industry_rows = (
-            db.query(Customer.account_name)
-            .filter(Customer.team_id == team_id, Customer.id != customer.id, Customer.industry == customer.industry)
-            .order_by(Customer.last_modified_time.desc())
-            .limit(10)
-            .all()
-            if customer.industry
-            else []
-        )
+        all_contacts = db.query(Contact).filter(Contact.customer_id == customer.id, Contact.team_id == team_id).all()
+        contacts = sorted(all_contacts, key=lambda item: (
+            -int(bool(item.is_primary)), -int(bool(item.is_decision_maker)), item.created_time or datetime.min,
+        ))[:50]
+        all_opportunities = db.query(Opportunity).options(joinedload(Opportunity.product)).filter(
+            Opportunity.customer_id == customer.id, Opportunity.team_id == team_id,
+        ).all()
+        opportunities = sorted(all_opportunities, key=lambda item: (
+            item.last_modified_time or datetime.min, int(item.id),
+        ), reverse=True)[:50]
+        all_contracts = db.query(Contract).options(
+            joinedload(Contract.payment_plans).joinedload(PaymentPlan.payment_records)
+        ).filter(Contract.customer_id == customer.id, Contract.team_id == team_id,
+                 Contract.deleted_at.is_(None)).all()
+        contracts = sorted(all_contracts, key=lambda item: item.created_time or datetime.min, reverse=True)[:50]
+        all_activities = db.query(CustomerActivity).filter(
+            CustomerActivity.customer_id == customer.id, CustomerActivity.team_id == team_id,
+            CustomerActivity.submission_source.in_(LEGACY_ACTIVITY_SOURCES),
+        ).all()
+        activities = sorted(all_activities, key=lambda item: (item.occurred_at or datetime.min, int(item.id)), reverse=True)[:50]
+        all_deletions = db.query(CustomerActivityDeletionTombstone).filter(
+            CustomerActivityDeletionTombstone.team_id == team_id,
+            CustomerActivityDeletionTombstone.customer_id == customer.id,
+            CustomerActivityDeletionTombstone.submission_source.in_(LEGACY_ACTIVITY_SOURCES),
+        ).all()
+        # Build the eligible contribution set before ordering and display
+        # limits; the shared journey aggregate is not a legacy source.
+        all_journeys = db.query(CustomerDealJourney).filter(
+            CustomerDealJourney.customer_id == customer.id,
+            CustomerDealJourney.team_id == team_id,
+        ).all()
+        all_events = db.query(CustomerDealJourneyEvent).filter(
+            CustomerDealJourneyEvent.customer_id == customer.id,
+            CustomerDealJourneyEvent.team_id == team_id,
+        ).all()
+        eligible_events = [event for event in all_events if event_origin(db, event, team_id, int(customer.id))]
+        event_dates = {}
+        for event in eligible_events:
+            key = int(event.deal_journey_id)
+            event_dates[key] = max(event_dates.get(key, event.event_time), event.event_time)
+        all_commitments = db.query(SalesCommitment).filter(
+            SalesCommitment.customer_id == customer.id, SalesCommitment.team_id == team_id,
+        ).all()
+        eligible_commitments = [row for row in all_commitments if follow_up_origin(db, row, team_id, int(customer.id))]
+        all_tasks = db.query(FollowUpTask).filter(
+            FollowUpTask.customer_id == customer.id, FollowUpTask.team_id == team_id,
+        ).all()
+        eligible_tasks = [row for row in all_tasks if follow_up_origin(db, row, team_id, int(customer.id))]
+        eligible_journeys = [journey for journey in all_journeys if int(journey.id) in event_dates
+                             or any(item.deal_journey_id == journey.id for item in all_opportunities)
+                             or any(item.deal_journey_id == journey.id for item in all_contracts)]
+        deal_journeys = sorted(eligible_journeys, key=lambda item: (
+            event_dates.get(int(item.id), datetime.min), int(item.id),
+        ), reverse=True)[:50]
+        journey_ids = {int(item.id) for item in deal_journeys}
+        journey_events = sorted((event for event in eligible_events if int(event.deal_journey_id) in journey_ids),
+                                key=lambda item: (item.event_time, int(item.id)), reverse=True)[:200]
+        commitments = sorted(eligible_commitments, key=lambda item: (item.updated_time or datetime.min, int(item.id)), reverse=True)[:100]
+        tasks = sorted(eligible_tasks, key=lambda item: (item.updated_time or datetime.min, int(item.id)), reverse=True)[:100]
+        eligible_task_ids = {int(item.id) for item in eligible_tasks}
+        eligible_task_by_id = {int(item.id): item for item in eligible_tasks}
+        all_task_events = db.query(FollowUpTaskEvent).filter(
+            FollowUpTaskEvent.team_id == team_id,
+            FollowUpTaskEvent.task_id.in_(eligible_task_ids),
+        ).all() if eligible_task_ids else []
+        eligible_task_events = [event for event in all_task_events if task_event_source_status(
+            db, event, eligible_task_by_id[int(event.task_id)], team_id, int(customer.id),
+        ) == "VERIFIED"]
+        task_events = sorted((event for event in eligible_task_events if event.task_id in {item.id for item in tasks}),
+                             key=lambda item: (item.created_time or datetime.min, int(item.id)), reverse=True)[:200]
 
         payment_plans: list[PaymentPlanFact] = []
         payment_records: list[PaymentRecordFact] = []
@@ -587,37 +536,94 @@ class CustomerIntelligenceContextService:
                 for record in sorted(plan.payment_records or [], key=lambda item: item.payment_date or date.min):
                     payment_records.append(self._payment_record_fact(record, plan.contract_id))
 
-        journey_payload = [_journey_to_dict(item) for item in deal_journeys]
+        opportunities_by_id = {int(item.id): item for item in all_opportunities}
+        journey_payload = [
+            _journey_to_dict(
+                item,
+                legacy_events=[event for event in eligible_events if event.deal_journey_id == item.id],
+                opportunity=opportunities_by_id.get(int(item.primary_opportunity_id))
+                if item.primary_opportunity_id is not None else None,
+            )
+            for item in deal_journeys
+        ]
         journey_event_payload = [_journey_event_to_dict(item) for item in journey_events]
         commitment_payload = [_commitment_to_dict(item) for item in commitments]
         task_payload = [_task_to_dict(item) for item in tasks]
         task_event_payload = [_task_event_to_dict(item) for item in task_events]
         recorded_follow_ups = [*task_payload, *commitment_payload]
-        context_facts = self.fact_service.to_context_payload(
-            db, team_id=team_id, customer_id=int(customer.id), limit=50,
-            exclude_assistant2=True,
+        all_context_facts = self.fact_service.to_context_payload(
+            db, team_id=team_id, customer_id=int(customer.id), limit=2**31 - 1, exclude_assistant2=True,
         )
+        context_facts = all_context_facts[:50]
+        catalog = [
+            {"public_id": item.public_id, "name": item.name, "is_active": True}
+            for item in product_crud.list(db, team_id, is_active=True)
+        ]
+        progress = db.query(CustomerLegacySourceProgress).filter_by(
+            team_id=team_id, customer_id=customer.id,
+        ).one_or_none()
+        opportunity_snapshot = _snapshot_rows(all_opportunities)
+        for row in opportunity_snapshot:
+            product = opportunities_by_id[int(row["id"])].product
+            row["product_public_id"] = product.public_id if product is not None else None
+            row["product_name"] = product.name if product is not None else None
+        source_snapshot = {
+            "customer": self._customer_fact(db, customer).to_dict(),
+            "contacts": _snapshot_rows(all_contacts),
+            "opportunities": opportunity_snapshot,
+            "contracts": _snapshot_rows(all_contracts),
+            "payment_plans": _snapshot_rows(
+                plan for contract in all_contracts for plan in (contract.payment_plans or [])
+            ),
+            "payment_records": _snapshot_rows(
+                record for contract in all_contracts for plan in (contract.payment_plans or [])
+                for record in (plan.payment_records or [])
+            ),
+            "activities": _snapshot_rows(all_activities),
+            "activity_deletions": _snapshot_rows(all_deletions),
+            "facts": sorted(all_context_facts, key=lambda item: int(item.get("id") or 0)),
+            "journeys": sorted(
+                (_journey_to_dict(
+                    item,
+                    legacy_events=[event for event in eligible_events if event.deal_journey_id == item.id],
+                    opportunity=opportunities_by_id.get(int(item.primary_opportunity_id))
+                    if item.primary_opportunity_id is not None else None,
+                ) for item in eligible_journeys),
+                key=lambda item: int(item["id"]),
+            ),
+            "journey_events": _snapshot_rows(eligible_events),
+            "tasks": _snapshot_rows(eligible_tasks),
+            "commitments": _snapshot_rows(eligible_commitments),
+            "task_events": _snapshot_rows(eligible_task_events),
+            "product_catalog": sorted(catalog, key=lambda item: str(item["public_id"])),
+        }
         watermarks = _source_watermarks(
             customer=customer,
-            contacts=contacts,
-            opportunities=opportunities,
-            contracts=contracts,
-            payment_plans=[plan for contract in contracts for plan in (contract.payment_plans or [])],
-            payment_records=[
-                record
-                for contract in contracts
-                for plan in (contract.payment_plans or [])
-                for record in (plan.payment_records or [])
-            ],
-            activities=activities,
-            activity_deletions=activity_deletions,
-            facts=context_facts,
-            journeys=deal_journeys,
-            journey_events=journey_events,
-            tasks=tasks,
-            commitments=commitments,
-            task_events=task_events,
+            contacts=all_contacts,
+            opportunities=all_opportunities,
+            contracts=all_contracts,
+            payment_plans=[plan for contract in all_contracts for plan in (contract.payment_plans or [])],
+            payment_records=[record for contract in all_contracts for plan in (contract.payment_plans or [])
+                             for record in (plan.payment_records or [])],
+            activities=all_activities,
+            activity_deletions=all_deletions,
+            facts=all_context_facts,
+            journeys=eligible_journeys,
+            journey_events=eligible_events,
+            tasks=eligible_tasks,
+            commitments=eligible_commitments,
+            task_events=eligible_task_events,
         )
+        watermarks.update({
+            "eligible_revision": int(progress.eligible_revision or 0) if progress else 0,
+            "deletion_revision": int(progress.deletion_revision or 0) if progress else 0,
+            "source_policy_version": str(progress.policy_version) if progress else LEGACY_PROFILE_SOURCE_POLICY,
+            "source_provenance_status": str(progress.provenance_status) if progress else "UNVERIFIED",
+            "source_snapshot_hash": hashlib.sha256(
+                json.dumps(source_snapshot, sort_keys=True, ensure_ascii=False, default=str,
+                           separators=(",", ":")).encode("utf-8")
+            ).hexdigest(),
+        })
 
         return CustomerStrongContext(
             customer=self._customer_fact(db, customer),
@@ -628,17 +634,14 @@ class CustomerIntelligenceContextService:
             payment_plans=payment_plans,
             payment_records=payment_records,
             recent_activities=[self._activity_fact(item) for item in activities],
-            same_industry_customers=[str(row[0]) for row in same_industry_rows],
+            same_industry_customers=[],
             deal_journeys=journey_payload,
             deal_journey_events=journey_event_payload,
             recorded_follow_ups=recorded_follow_ups,
             sales_commitments=commitment_payload,
             follow_up_task_events=task_event_payload,
             source_watermarks=watermarks,
-            product_catalog=[
-                {"public_id": item.public_id, "name": item.name, "is_active": True}
-                for item in product_crud.list(db, team_id, is_active=True)
-            ],
+            product_catalog=catalog,
         )
 
     def _customer_fact(self, db: Session, customer: Customer) -> CustomerFact:
@@ -795,17 +798,35 @@ def _json_metadata(value: object) -> JsonObject:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def _journey_to_dict(journey: CustomerDealJourney) -> JsonObject:
+def _journey_to_dict(
+    journey: CustomerDealJourney, *, legacy_events: list[CustomerDealJourneyEvent],
+    opportunity: Opportunity | None,
+) -> JsonObject:
+    event_times = [event.event_time for event in legacy_events]
+    terminal_events = [event for event in legacy_events if event.event_type in {
+        DealJourneyEventType.OPPORTUNITY_WON, DealJourneyEventType.OPPORTUNITY_LOST,
+    }]
+    last_event = max(event_times, default=None)
+    status = "ACTIVE"
+    latest_terminal = None
+    if terminal_events:
+        latest_terminal = max(terminal_events, key=lambda event: (event.event_time, int(event.id)))
+        status = "WON" if latest_terminal.event_type == DealJourneyEventType.OPPORTUNITY_WON else "LOST"
+    elif opportunity is not None:
+        status = {1: "WON", 2: "LOST"}.get(opportunity.status, "ACTIVE")
+    start = min(event_times, default=None)
+    if opportunity is not None and opportunity.created_time is not None:
+        start = min(start, opportunity.created_time) if start else opportunity.created_time
     return {
         "id": int(journey.id),
-        "name": journey.name,
-        "status": journey.status,
-        "primary_opportunity_id": journey.primary_opportunity_id,
-        "started_at": _iso(journey.started_at),
-        "closed_at": _iso(journey.closed_at),
-        "last_event_at": _iso(journey.last_event_at),
-        "created_time": _iso(journey.created_time),
-        "updated_time": _iso(journey.updated_time),
+        "name": opportunity.opportunity_name if opportunity is not None else "业务旅程",
+        "status": status,
+        "primary_opportunity_id": opportunity.id if opportunity is not None else None,
+        "started_at": _iso(start),
+        "closed_at": _iso(latest_terminal.event_time if latest_terminal is not None else None),
+        "last_event_at": _iso(last_event),
+        "created_time": _iso(last_event),
+        "updated_time": _iso(last_event),
         "public_id": getattr(journey, "public_id", None),
     }
 
@@ -880,6 +901,17 @@ def _task_event_to_dict(event: FollowUpTaskEvent) -> JsonObject:
     }
 
 
+def _snapshot_rows(rows: object) -> list[JsonObject]:
+    """Freeze every eligible row, including those beyond presentation limits."""
+    return sorted(
+        (
+            {column.key: getattr(row, column.key) for column in inspect(row).mapper.column_attrs}
+            for row in rows
+        ),
+        key=lambda item: int(item["id"]),
+    )
+
+
 def _source_watermarks(
     *,
     customer: Customer,
@@ -899,7 +931,6 @@ def _source_watermarks(
 ) -> JsonObject:
     return {
         "customer_id": int(customer.id),
-        "customer_updated_at": _iso(customer.last_modified_time or customer.updated_time),
         "contact_id": max((int(item.id) for item in contacts), default=0),
         "opportunity_id": max((int(item.id) for item in opportunities), default=0),
         "contract_id": max((int(item.id) for item in contracts), default=0),
@@ -931,7 +962,7 @@ def _source_watermarks(
         "latest_task_at": max((_iso(item.updated_time) or "" for item in tasks), default=None),
         "latest_task_event_at": max((_iso(item.created_time) or "" for item in task_events), default=None),
         "latest_commitment_at": max((_iso(item.updated_time) or "" for item in commitments), default=None),
-        "latest_journey_updated_at": max((_iso(item.updated_time) or "" for item in journeys), default=None),
+        "latest_journey_updated_at": max((_iso(item.event_time) or "" for item in journey_events), default=None),
         "fact_version": max((int(item.get("version") or 0) for item in facts), default=0),
     }
 

@@ -5,14 +5,34 @@ from unittest.mock import MagicMock
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import BigInteger, create_engine
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.database import Base
 from app.core.exceptions import ConflictException
 from app.crud.customer import customer_crud
 from app.models.customer import Customer
+from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
 from app.schemas.customer import CustomerUpdate
+
+
+@compiles(BigInteger, "sqlite")
+def _bigint_to_sqlite_int(element, compiler, **kwargs):  # noqa: ARG001
+    return "INTEGER"
+
+
+@pytest.fixture(autouse=True)
+def _mock_progress_for_mocked_sessions(monkeypatch):
+    from app.crud import customer as customer_module
+
+    real_advance = customer_module.advance_eligible_progress
+
+    def advance(db, **kwargs):
+        if isinstance(db, Session):
+            return real_advance(db, **kwargs)
+
+    monkeypatch.setattr(customer_module, "advance_eligible_progress", advance)
 
 
 def test_customer_update_carries_expected_version_for_optimistic_locking() -> None:
@@ -211,7 +231,7 @@ def test_update_customer_logs_both_submitted_source_fields(monkeypatch) -> None:
 
 def _sqlite_customer_sessions(tmp_path: Path):
     engine = create_engine(f"sqlite:///{tmp_path / 'customer-update-lock-refresh.db'}")
-    Base.metadata.create_all(engine, tables=[Customer.__table__])
+    Base.metadata.create_all(engine, tables=[Customer.__table__, CustomerLegacySourceProgress.__table__])
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
     seed = session_factory()
     seed.add(

@@ -11,8 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from app.crud.sales_commitment import follow_up_task_confirmation_case_crud
-from app.models.sales_commitment import FollowUpTaskConfirmationStatus
+from app.models.sales_commitment import FollowUpTaskConfirmationCase, FollowUpTaskConfirmationStatus
 from app.services.customer_activity_revision_fence import (
     CustomerActivityRevisionFence,
     customer_activity_revision_fence,
@@ -24,11 +23,10 @@ from app.services.follow_up_confirmation_case_lifecycle_service import (
 from app.services.follow_up_task_confirmation_cleanup_service import (
     FollowUpTaskConfirmationCancelReason,
 )
+from app.services.legacy_profile_source import lock_source_customer
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
-
-    from app.models.sales_commitment import FollowUpTaskConfirmationCase
 
 
 class FollowUpConfirmationCaseRevisionReason:
@@ -78,15 +76,10 @@ class FollowUpConfirmationCaseRevisionGuard:
         case_public_id: str,
         requested_contract: FollowUpConfirmationSourceRevisionContract | None = None,
     ) -> FollowUpConfirmationCaseRevisionGuardResult:
-        case = follow_up_task_confirmation_case_crud.get_by_public_id_for_update(
-            db,
-            public_id=case_public_id,
-            team_id=team_id,
-        )
-        return self._validate_locked_case(
+        return self._lock_and_validate(
             db,
             team_id=team_id,
-            case=case,
+            case_filter=FollowUpTaskConfirmationCase.public_id == case_public_id,
             requested_contract=requested_contract,
         )
 
@@ -100,11 +93,48 @@ class FollowUpConfirmationCaseRevisionGuard:
     ) -> FollowUpConfirmationCaseRevisionGuardResult:
         """Validate a delivery-bound case without relying on JSON payload fields."""
 
-        case = follow_up_task_confirmation_case_crud.get_by_id_for_update(
+        return self._lock_and_validate(
             db,
-            case_id=case_id,
             team_id=team_id,
+            case_filter=FollowUpTaskConfirmationCase.id == case_id,
+            requested_contract=requested_contract,
         )
+
+    def _lock_and_validate(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        case_filter: object,
+        requested_contract: FollowUpConfirmationSourceRevisionContract | None,
+    ) -> FollowUpConfirmationCaseRevisionGuardResult:
+        # Read only the tenant-scoped key before locking anything. A changed
+        # customer binding makes the second, locked read miss instead of
+        # acquiring a Case lock under the wrong customer's lock.
+        with db.no_autoflush:
+            source = (
+                db.query(FollowUpTaskConfirmationCase.customer_id)
+                .filter(FollowUpTaskConfirmationCase.team_id == team_id, case_filter)
+                .one_or_none()
+            )
+            if source is None:
+                case = None
+            else:
+                lock_source_customer(db, team_id=team_id, customer_id=source.customer_id)
+                case = (
+                    db.query(FollowUpTaskConfirmationCase)
+                    .filter(
+                        FollowUpTaskConfirmationCase.team_id == team_id,
+                        FollowUpTaskConfirmationCase.customer_id == source.customer_id,
+                        case_filter,
+                    )
+                    .with_for_update()
+                    .one_or_none()
+                )
+                if case is not None:
+                    if case in db.dirty:
+                        db.flush([case])
+                    db.refresh(case, with_for_update=True)
         return self._validate_locked_case(
             db,
             team_id=team_id,
@@ -169,6 +199,7 @@ class FollowUpConfirmationCaseRevisionGuard:
             team_id=team_id,
             activity_id=contract.source_activity_id,
             expected_revision=contract.activity_revision,
+            customer_id=case.customer_id,
         )
         if fence.allowed:
             return FollowUpConfirmationCaseRevisionGuardResult(case=case, contract=contract, reason=None)

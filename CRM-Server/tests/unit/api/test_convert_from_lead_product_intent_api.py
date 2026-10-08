@@ -18,6 +18,7 @@ from app.crud.product import product_crud
 from app.models.acquisition_source import AcquisitionSource
 from app.models.command_execution import CommandExecution
 from app.models.customer import Contact, Customer, CustomerProduct
+from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
 from app.models.lead import Lead, LeadFollowUp, LeadProduct
 from app.models.operation_log import OperationLog
 from app.models.opportunity import Opportunity, OpportunityProductModule
@@ -53,6 +54,7 @@ def convert_client(monkeypatch):
         LeadProduct.__table__,
         LeadFollowUp.__table__,
         Customer.__table__,
+        CustomerLegacySourceProgress.__table__,
         CustomerProduct.__table__,
         Contact.__table__,
         Opportunity.__table__,

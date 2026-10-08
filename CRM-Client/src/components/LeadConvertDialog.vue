@@ -516,7 +516,7 @@ watch(
 <style scoped lang="scss">
 @use '@/styles/variables-v2.scss' as *;
 
-.lead-convert-dialog {
+:global(.lead-convert-dialog) {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   max-height: $wolf-modal-height-mobile-v2;

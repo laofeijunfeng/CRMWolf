@@ -6,6 +6,7 @@ FOLLOW_UP_TASKS_LIST_EXPORT_CATALOG = ListExportCatalog(
     fields=(
         ListExportField("public_id", "业务 ID", "text"),
         ListExportField("customer_name", "客户", "text"),
+        ListExportField("product_name", "产品", "text"),
         ListExportField("tracking_content", "追踪内容", "text"),
         ListExportField("status_label", "状态", "text"),
         ListExportField("tracking_time", "跟进时效", "datetime"),

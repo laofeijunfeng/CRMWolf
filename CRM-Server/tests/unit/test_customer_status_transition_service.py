@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
@@ -56,6 +57,9 @@ class _LockedQuery:
         self.locked = True
         return self
 
+    def populate_existing(self):
+        return self
+
     def first(self):
         return self.customer
 
@@ -63,6 +67,7 @@ class _LockedQuery:
 class _FakeSession:
     def __init__(self, customer):
         self.query_result = _LockedQuery(customer)
+        self.no_autoflush = nullcontext()
         self.commits = 0
         self.refreshed = []
 
@@ -74,6 +79,13 @@ class _FakeSession:
 
     def refresh(self, customer):
         self.refreshed.append(customer)
+
+
+@pytest.fixture(autouse=True)
+def _mock_progress_for_status_unit(monkeypatch):
+    from app.crud import customer as customer_module
+
+    monkeypatch.setattr(customer_module, "advance_eligible_progress", lambda *args, **kwargs: None)
 
 
 def test_locked_status_update_checks_version_before_mutation():

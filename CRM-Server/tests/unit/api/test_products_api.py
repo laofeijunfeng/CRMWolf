@@ -16,6 +16,8 @@ from app.core import database, deps
 from app.core.database import Base
 from app.crud.product import product_crud
 from app.models.product import Product, ProductModule
+from app.models.team import Team
+from app.models.user import User
 from app.schemas.product import ProductCreate
 
 
@@ -38,9 +40,15 @@ def api_env(monkeypatch):
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
-    Base.metadata.create_all(engine, tables=[Product.__table__, ProductModule.__table__])
+    Base.metadata.create_all(engine, tables=[User.__table__, Team.__table__, Product.__table__, ProductModule.__table__])
     session_factory = sessionmaker(bind=engine)
     db = session_factory()
+    db.add_all([
+        User(id=7, email="seller@example.com", name="销售成员"),
+        Team(id=1, name="One", code="TEAM_ONE", owner_id=7),
+        Team(id=2, name="Two", code="TEAM_TWO", owner_id=7),
+    ])
+    db.commit()
     current_user = SimpleNamespace(
         id=7,
         status="active",

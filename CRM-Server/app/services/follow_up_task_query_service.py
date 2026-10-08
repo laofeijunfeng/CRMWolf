@@ -5,8 +5,9 @@ from typing import TYPE_CHECKING, Any, Protocol
 from app.core.list_query import FilterCondition, ListQueryContext, SortCondition, apply_search
 from app.core.list_query.catalogs import FOLLOW_UP_TASKS_LIST_QUERY_CATALOG
 from app.crud.permission import permission_crud
+from app.crud.product_intent import product_intent_payloads_by_owner
 from app.crud.sales_commitment import follow_up_task_confirmation_case_crud, follow_up_task_crud
-from app.models.customer import Customer, CustomerMember
+from app.models.customer import Customer, CustomerMember, CustomerProduct
 from app.models.customer_activity import CustomerActivity
 from app.models.sales_commitment import FollowUpTask, FollowUpTaskStatus
 from app.models.user import User
@@ -191,6 +192,12 @@ class FollowUpTaskQueryService:
         payload = self._task_payload(
             task,
             customer,
+            product_name=product_intent_payloads_by_owner(
+                db,
+                link_model=CustomerProduct,
+                owner_fk="customer_id",
+                owner_ids=[customer.id] if customer is not None else [],
+            ).get(task.customer_id, {}).get("product_name"),
             users_by_id=users_by_id,
             pending_confirmations=pending_confirmations_by_task_id.get(task.id, []),
         )
@@ -245,6 +252,12 @@ class FollowUpTaskQueryService:
             team_id=team_id,
             customer_ids=[task.customer_id for task in tasks],
         )
+        products_by_customer_id = product_intent_payloads_by_owner(
+            projection_db,
+            link_model=CustomerProduct,
+            owner_fk="customer_id",
+            owner_ids=[customer.id for customer in customers_by_id.values()],
+        )
         users_by_id = self._users_by_id(
             projection_db,
             user_ids=[task.owner_id for task in tasks] + [task.creator_id for task in tasks],
@@ -255,10 +268,12 @@ class FollowUpTaskQueryService:
             user_id=user_id,
             tasks=tasks,
         )
+        no_product: dict[str, Any] = {}
         return [
             self._task_payload(
                 task,
                 customers_by_id.get(task.customer_id),
+                product_name=products_by_customer_id.get(task.customer_id, no_product).get("product_name"),
                 users_by_id=users_by_id,
                 semantic_evidence=evidence.get(str(task.public_id)),
                 pending_confirmations=pending_confirmations_by_task_id.get(task.id, []),
@@ -424,6 +439,7 @@ class FollowUpTaskQueryService:
         task: FollowUpTask,
         customer: Customer | None,
         *,
+        product_name: str | None = None,
         users_by_id: dict[str, dict[str, Any]] | None = None,
         semantic_evidence: list[dict[str, Any]] | None = None,
         pending_confirmations: list[FollowUpTaskConfirmationCase] | None = None,
@@ -432,7 +448,7 @@ class FollowUpTaskQueryService:
         return {
             "id": task.public_id,
             "public_id": task.public_id,
-            "customer": self._customer_payload(customer),
+            "customer": self._customer_payload(customer, product_name),
             "owner_id": task.owner_id,
             "owner_info": users.get(task.owner_id),
             "creator_id": task.creator_id,
@@ -510,7 +526,7 @@ class FollowUpTaskQueryService:
         }
 
     @staticmethod
-    def _customer_payload(customer: Customer | None) -> dict[str, Any] | None:
+    def _customer_payload(customer: Customer | None, product_name: str | None = None) -> dict[str, Any] | None:
         if customer is None:
             return None
         return {
@@ -518,6 +534,7 @@ class FollowUpTaskQueryService:
             "public_id": customer.public_id,
             "name": customer.account_name,
             "account_name": customer.account_name,
+            "product_name": product_name,
         }
 
     @staticmethod

@@ -4,7 +4,12 @@ from typing import Any, Dict
 from sqlalchemy.orm import Session
 
 from app.crud.customer import contact_crud, customer_crud
-from app.crud.product_intent import EMPTY_CATALOG_MESSAGE, first_active_product
+from app.crud.product_intent import (
+    EMPTY_CATALOG_MESSAGE,
+    first_active_product,
+    format_active_product_catalog,
+    match_active_product,
+)
 from app.schemas.customer import ContactCreate, CustomerCreate
 from app.services.acquisition_source_service import (
     default_source_name,
@@ -39,7 +44,8 @@ PARSE_CUSTOMER_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的客户信息�
 - contact_email: 主联系人邮箱
 - company_scale: 公司规模
 - source: 客户来源
-
+- product: 意向产品名称。只能输出当前团队启用产品名称之一，未明确或无法唯一匹配时返回 null，禁止猜测：
+{product_enum_block}
 ## 客户来源枚举值
 
 只能输出当前团队启用的获客来源名称之一，禁止发明新来源，禁止输出“线索转化”：
@@ -58,12 +64,17 @@ PARSE_CUSTOMER_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的客户信息�
 
 ## 公司规模枚举值
 
-用户可能说"大概500人"、"几百人"、"几十人"等，你需要智能匹配：
+用户可能说"大概500人"、"几百人"、"几十人"、"10~29人"等，你需要智能匹配：
 - "1-50人": 人数在50人以下
 - "51-200人": 人数在51-200人之间
 - "201-500人": 人数在201-500人之间
 - "501-1000人": 人数在501-1000人之间
 - "1000人以上": 人数超过1000人
+
+**纯数字区间是人数规模**："10~29"、"100-199"、"15到40"这类用 ~、-、到 连接的数字区间，
+是公司人数区间的常见写法，不是日期。按区间落在上述哪个枚举段就输出哪个（如 "10~29" →
+"1-50人"，"100~199" → "51-200人"）。区间跨两个枚举段时，按区间的**上限**归段，
+如 "800~1200" → "1000人以上"、"300-400" → "201-500人"，不要反复权衡。
 
 如果用户未提及公司规模，返回 null。
 
@@ -89,6 +100,7 @@ PARSE_CUSTOMER_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的客户信息�
     "city": "提取的城市",
     "company_scale": "匹配的公司规模枚举值或 null",
     "source": "匹配的客户来源枚举值或 null",
+    "product": "匹配的产品名称或 null",
     "industry_hint": "行业关键词或 null",
     "missing_fields": ["缺失的必填字段列表"]
   },
@@ -120,6 +132,7 @@ PARSE_CUSTOMER_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的客户信息�
     "city": "杭州",
     "company_scale": "501-1000人",
     "source": "线上注册",
+    "product": null,
     "industry_hint": "互联网",
     "missing_fields": []
   },
@@ -149,11 +162,15 @@ class CustomerAIParser(EntityAIParserBase):
         current_date = business_now().strftime("%Y-%m-%d")
         names = format_active_source_names(db, team_id)
         source_enum_block = "\n".join(f'- "{name}"' for name in names)
+        _catalog_text, names_enum = format_active_product_catalog(db, team_id)
+        product_names = [name for name in names_enum.split("|") if name]
+        product_enum_block = "\n".join(f'- "{name}"' for name in product_names) or "- 无"
         return (
             PARSE_CUSTOMER_SYSTEM_PROMPT_TEMPLATE
             .replace("{current_date}", current_date)
             .replace("{source_enum_block}", source_enum_block)
             .replace("{default_source_name}", default_source_name(db, team_id))
+            .replace("{product_enum_block}", product_enum_block)
         )
 
     def get_enum_maps(self) -> Dict[str, Dict[str, Any]]:
@@ -183,6 +200,9 @@ class CustomerAIParser(EntityAIParserBase):
                 "city": customer_info.get("city"),
                 "company_scale": customer_info.get("company_scale"),
                 "source": customer_info.get("source"),
+                "source_public_id": None,
+                "product": customer_info.get("product"),
+                "product_public_id": None,
                 "industry_hint": customer_info.get("industry_hint"),
                 "missing_fields": customer_info.get("missing_fields", [])
             },
@@ -205,6 +225,27 @@ class CustomerAIParser(EntityAIParserBase):
             }
 
         return result
+
+    def attach_catalog_ids(self, result: Dict[str, Any], db: Session, team_id: int) -> None:
+        """把 AI 输出的来源/产品名称解析成表单可用的 public_id。"""
+        customer_info = result.get("customer_info", {})
+        raw_source = str(customer_info.get("source") or "").strip()
+        if raw_source:
+            try:
+                source_row = resolve_source_for_ai(db, team_id, raw_source)
+                customer_info["source"] = source_row.name
+                customer_info["source_public_id"] = source_row.public_id
+            except Exception:
+                customer_info["source_public_id"] = None
+        else:
+            customer_info["source_public_id"] = None
+        product_row = match_active_product(db, team_id, customer_info.get("product"))
+        if product_row is not None:
+            customer_info["product"] = product_row.name
+            customer_info["product_public_id"] = product_row.public_id
+        else:
+            customer_info["product"] = None
+            customer_info["product_public_id"] = None
 
     async def create_entity(
         self,

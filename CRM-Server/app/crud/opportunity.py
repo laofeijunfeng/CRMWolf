@@ -1,3 +1,4 @@
+from decimal import Decimal
 from sqlalchemy.orm import Query, Session, selectinload
 from sqlalchemy import and_, func, cast, Integer
 from typing import Optional, List, Tuple
@@ -8,6 +9,7 @@ from app.models.product import ProductModule
 from app.constants.business_types import BusinessType
 from app.services.business_number_generator import BusinessNumberGenerator
 from app.utils.approval_delete_guard import assert_deletable_approval_resource
+from app.services.legacy_profile_source import advance_eligible_progress, lock_source_customer
 from app.utils.time import business_now
 from app.core.list_query import (
     FilterCondition,
@@ -30,6 +32,12 @@ from app.schemas.opportunity import (
     OpportunityLose,
     LicenseTypeEnum,
 )
+from app.services.assistant.crm_effects import (
+    AssistantCRMCommand,
+    AssistantCRMStaleTarget,
+    checked_effect,
+    record_effect,
+)
 
 
 def _split_csv(value: Optional[str]) -> List[str]:
@@ -51,6 +59,23 @@ def _split_int_csv(value: Optional[str]) -> List[int]:
 def _bump_opportunity_version(opportunity: Opportunity) -> None:
     """Advance the aggregate version after a persisted opportunity mutation."""
     opportunity.version = int(getattr(opportunity, "version", 1) or 1) + 1
+
+def _lock_opportunity(db: Session, opportunity_id: int, team_id: Optional[int] = None) -> Optional[Opportunity]:
+    """Lock the customer before its opportunity; recheck the binding under the row lock."""
+    with db.no_autoflush:
+        binding = db.query(Opportunity.team_id, Opportunity.customer_id).filter(
+            Opportunity.id == opportunity_id,
+        ).first()
+        if binding is None or (team_id is not None and binding.team_id != team_id):
+            return None
+        lock_source_customer(db, team_id=binding.team_id, customer_id=binding.customer_id)
+        opportunity = db.query(Opportunity).filter(
+            Opportunity.id == opportunity_id, Opportunity.team_id == binding.team_id,
+        ).populate_existing().with_for_update().one_or_none()
+        if opportunity is None or opportunity.customer_id != binding.customer_id:
+            raise ValueError("商机客户归属已变更，请重试")
+        return opportunity
+
 
 
 class OpportunityStageCRUD:
@@ -358,15 +383,15 @@ class OpportunityCRUD:
         return db_obj
 
     def create_without_commit(self, db: Session, obj_in: OpportunityCreate, creator_id: str, team_id: int) -> Opportunity:
-        from app.crud.opportunity import opportunity_stage_crud
         from app.crud.procurement import procurement_stage_template_crud
         from app.services.pricing import pricing_service
         from app.services.deal_journey_service import deal_journey_service
         from app.models.procurement import OpportunityStageSnapshot
         
-        customer = db.query(Customer).filter(Customer.id == obj_in.customer_id).first()
-        if not customer:
-            raise ValueError("客户不存在")
+        from app.crud.product import product_crud
+
+        product_crud.lock_catalog_team(db, team_id)
+        customer = lock_source_customer(db, team_id=team_id, customer_id=obj_in.customer_id)
 
         # 1. 确定采购方式
         if obj_in.procurement_method_id is not None:
@@ -418,6 +443,7 @@ class OpportunityCRUD:
         )
         opportunity_data['unit_price'] = float(unit_price)
         
+        advance_eligible_progress(db, team_id=team_id, customer_id=customer.id)
         # 5. 创建商机对象
         db_obj = Opportunity(**opportunity_data)
         db.add(db_obj)
@@ -452,6 +478,7 @@ class OpportunityCRUD:
             team_id=team_id,
             product_public_id=obj_in.product_public_id,
             module_public_ids=obj_in.product_module_public_ids,
+            _creating=True,
         )
 
         return db_obj
@@ -497,12 +524,25 @@ class OpportunityCRUD:
         )
 
     def update(self, db: Session, db_obj: Opportunity, obj_in: OpportunityUpdate) -> Opportunity:
+        update_data = obj_in.model_dump(exclude_unset=True)
+        if "product_public_id" in update_data or "product_module_public_ids" in update_data:
+            from app.crud.product import product_crud
+
+            product_crud.lock_catalog_team(db, int(db_obj.team_id))
+        db_obj = _lock_opportunity(db, db_obj.id, team_id=int(db_obj.team_id))
+        if db_obj is None:
+            raise ValueError("商机不存在")
         from app.services.pricing import pricing_service
 
-        update_data = obj_in.model_dump(exclude_unset=True)
         product_fields_set = "product_public_id" in update_data or "product_module_public_ids" in update_data
         product_public_id = update_data.pop("product_public_id", None)
         module_public_ids = update_data.pop("product_module_public_ids", None)
+        changed = any(
+            Decimal(str(getattr(db_obj, field))) != Decimal(str(value))
+            if field in {"total_amount", "unit_price"} and value is not None
+            else getattr(db_obj, field) != value
+            for field, value in update_data.items()
+        )
 
         pricing_fields = ['total_amount', 'user_count', 'license_type', 'subscription_years']
         should_recalculate = any(field in update_data for field in pricing_fields)
@@ -520,9 +560,12 @@ class OpportunityCRUD:
                 subscription_years=int(subscription_years) if subscription_years else 1
             )
             update_data['unit_price'] = float(unit_price)
+            changed = changed or Decimal(str(db_obj.unit_price)) != Decimal(str(unit_price))
 
         for field, value in update_data.items():
             setattr(db_obj, field, value)
+        previous_product_id = db_obj.product_id
+        previous_module_ids = {link.product_module_id for link in db_obj.module_links} if product_fields_set else set()
         if product_fields_set:
             self.assign_product(
                 db,
@@ -530,8 +573,13 @@ class OpportunityCRUD:
                 team_id=int(db_obj.team_id),
                 product_public_id=str(product_public_id or ""),
                 module_public_ids=list(module_public_ids or []),
+                _creating=True,
             )
-        _bump_opportunity_version(db_obj)
+        product_changed = product_fields_set and (previous_product_id != db_obj.product_id or
+                                                  previous_module_ids != {link.product_module_id for link in db_obj.module_links})
+        if changed or product_changed:
+            advance_eligible_progress(db, team_id=int(db_obj.team_id), customer_id=int(db_obj.customer_id))
+            _bump_opportunity_version(db_obj)
         db.commit()
         db.refresh(db_obj)
         return db_obj
@@ -544,8 +592,14 @@ class OpportunityCRUD:
         team_id: int,
         product_public_id: str,
         module_public_ids: List[str],
+        _creating: bool = False,
     ) -> Opportunity:
         from app.crud.product import product_crud
+        if not _creating:
+            product_crud.lock_catalog_team(db, team_id)
+        opportunity = _lock_opportunity(db, opportunity.id, team_id=team_id) if not _creating else opportunity
+        if opportunity is None:
+            raise ValueError("商机不存在")
 
         unique_module_ids: List[str] = []
         seen: set[str] = set()
@@ -557,25 +611,43 @@ class OpportunityCRUD:
         if not product_public_id:
             from app.crud.product_intent import EMPTY_CATALOG_MESSAGE
 
-            if not product_crud.list(db, team_id, is_active=True):
+            from app.models.product import Product
+
+            with db.no_autoflush:
+                has_catalog = db.query(Product.id).filter(
+                    Product.team_id == team_id, Product.is_active.is_(True),
+                ).with_for_update().first()
+            if has_catalog is None:
                 raise ValueError(EMPTY_CATALOG_MESSAGE)
             raise ValueError("请选择产品")
         if not unique_module_ids:
             raise ValueError("请至少选择一个产品模块")
 
-        product = product_crud.get_by_public_id(db, product_public_id, team_id)
+        product = product_crud.current_catalog_product(db, team_id, product_public_id)
         if product is None or not bool(product.is_active):
             raise ValueError("产品不存在")
 
         modules: List[ProductModule] = []
         for public_id in unique_module_ids:
-            module = product_crud.get_module_by_public_id(db, public_id, team_id, product_id=int(product.id))
+            with db.no_autoflush:
+                module = db.query(ProductModule).filter(
+                    ProductModule.public_id == public_id, ProductModule.team_id == team_id,
+                    ProductModule.product_id == product.id,
+                ).populate_existing().with_for_update().one_or_none()
             if module is None or int(module.product_id) != int(product.id):
                 raise ValueError("产品模块不属于所选产品")
             if not bool(module.is_active):
                 raise ValueError("产品模块已停用")
             modules.append(module)
 
+        product_changed = opportunity.product_id != product.id or {
+            link.product_module_id for link in opportunity.module_links
+        } != {module.id for module in modules}
+        if not product_changed:
+            return opportunity
+        if not _creating:
+            advance_eligible_progress(db, team_id=team_id, customer_id=int(opportunity.customer_id))
+            _bump_opportunity_version(opportunity)
         opportunity.product_id = product.id
         opportunity.product = product
         opportunity.module_links.clear()
@@ -597,7 +669,8 @@ class OpportunityCRUD:
         db: Session,
         opportunity_id: int,
         target_stage_template_id: int,
-        operator_id: str
+        operator_id: str,
+        assistant_command: AssistantCRMCommand | None = None,
     ) -> Opportunity:
         """推进商机到新阶段"""
         from app.crud.procurement import procurement_stage_template_crud
@@ -605,7 +678,42 @@ class OpportunityCRUD:
         from app.services.operation_log_service import operation_log_service
         from app.crud.user import user_crud
         
-        opportunity = self.get_by_id(db, opportunity_id)
+        opportunity = _lock_opportunity(
+            db, opportunity_id, team_id=assistant_command.team_id if assistant_command is not None else None,
+        )
+        if assistant_command is not None:
+            if str(assistant_command.actor_id) != str(operator_id):
+                raise ValueError("Assistant CRM command actor mismatch")
+            with db.no_autoflush:
+                existing = checked_effect(db, assistant_command, "opportunity_stage")
+            if existing is not None:
+                if opportunity is None or existing.target_public_id != opportunity.public_id:
+                    db.rollback()
+                    raise ValueError("Assistant CRM effect target mismatch")
+                return opportunity
+            if opportunity is None or assistant_command.expected_version is None or (
+                assistant_command.expected_snapshot_id != opportunity.current_stage_snapshot_id
+                or assistant_command.expected_version != opportunity.version
+            ):
+                db.rollback()
+                raise AssistantCRMStaleTarget("Assistant CRM stage target changed")
+            from app.services.opportunity_presenter import resolve_opportunity_approval_phase
+
+            if resolve_opportunity_approval_phase(db, opportunity, assistant_command.team_id) != "approved":
+                db.rollback()
+                raise ValueError("商机审批通过后才能进行该操作")
+            from app.crud.permission import permission_crud
+
+            permission_codes = {
+                permission.code for permission in permission_crud.get_user_permissions(
+                    db, assistant_command.actor_id, assistant_command.team_id,
+                )
+            }
+            if "opportunity:edit:all" not in permission_codes and not (
+                "opportunity:edit:own" in permission_codes and opportunity.owner_id == str(operator_id)
+            ):
+                db.rollback()
+                raise ValueError("Assistant CRM stage edit permission revoked")
         if not opportunity:
             raise ValueError("商机不存在")
         
@@ -643,6 +751,9 @@ class OpportunityCRUD:
             if not allowed_start_stage or int(allowed_start_stage.id) != int(target_stage.id):
                 raise ValueError("商机起始阶段只能设置为采购流程的默认起始阶段")
         
+        advance_eligible_progress(db, team_id=opportunity.team_id, customer_id=opportunity.customer_id)
+        previous_snapshot_id = opportunity.current_stage_snapshot_id
+        previous_version = opportunity.version
         if current_snapshot:
             current_snapshot.exited_at = business_now()
 
@@ -670,7 +781,20 @@ class OpportunityCRUD:
         from app.services.deal_journey_service import deal_journey_service
         deal_journey_service.record_opportunity_stage_changed(db, opportunity, new_snapshot, operator_id)
         
-        db.commit()
+        if assistant_command is not None:
+            try:
+                record_effect(
+                    db, assistant_command, "opportunity_stage",
+                    target_public_id=opportunity.public_id,
+                    stage_snapshot_id=new_snapshot.id, previous_snapshot_id=previous_snapshot_id,
+                    previous_version=previous_version, resulting_version=opportunity.version,
+                )
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
+        else:
+            db.commit()
         db.refresh(opportunity)
         
         operator = user_crud.get_by_id(db, int(operator_id))
@@ -684,14 +808,35 @@ class OpportunityCRUD:
                 actual_amount=float(opportunity.total_amount),
                 actual_closing_date=date_type.today()
             )
-            
+            # The stage receipt committed separately; establish the same lock order again.
+            opportunity = _lock_opportunity(db, opportunity.id, team_id=opportunity.team_id)
+            if opportunity is None:
+                raise ValueError("商机不存在")
+            if opportunity.current_stage_snapshot_id != new_snapshot.id or opportunity.version != previous_version + 1:
+                db.rollback()
+                raise AssistantCRMStaleTarget("Opportunity changed after stage target commit")
+            advance_eligible_progress(db, team_id=opportunity.team_id, customer_id=opportunity.customer_id)
             opportunity.status = OpportunityStatus.WON.value
             opportunity.actual_amount = win_data.actual_amount
             opportunity.actual_closing_date = win_data.actual_closing_date
             opportunity.win_probability = 100
             _bump_opportunity_version(opportunity)
             
-            db.commit()
+            if assistant_command is not None:
+                try:
+                    record_effect(
+                        db, assistant_command, "opportunity_auto_won",
+                        target_public_id=opportunity.public_id,
+                        stage_snapshot_id=new_snapshot.id,
+                        previous_snapshot_id=previous_snapshot_id,
+                        previous_version=previous_version, resulting_version=opportunity.version,
+                    )
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                    raise
+            else:
+                db.commit()
             db.refresh(opportunity)
             
             operation_log_service.log(
@@ -739,20 +884,20 @@ class OpportunityCRUD:
         operator_id: str
     ) -> Opportunity:
         """设置商机采购方式，自动进入默认起始阶段"""
-        from app.crud.procurement import (
-            procurement_method_crud,
-            procurement_stage_template_crud,
-            opportunity_stage_snapshot_crud
-        )
+        from app.crud.procurement import procurement_method_crud, procurement_stage_template_crud
+        from app.models.procurement import OpportunityStageSnapshot
         from app.services.operation_log_service import operation_log_service
         from app.crud.user import user_crud
 
-        opportunity = self.get_by_id(db, opportunity_id)
+        opportunity = _lock_opportunity(db, opportunity_id)
         if not opportunity:
             raise ValueError("商机不存在")
 
         # 检查是否已有阶段
-        existing_snapshot = opportunity_stage_snapshot_crud.get_current(db, opportunity_id)
+        existing_snapshot = db.query(OpportunityStageSnapshot).filter(
+            OpportunityStageSnapshot.opportunity_id == opportunity_id,
+            OpportunityStageSnapshot.exited_at.is_(None),
+        ).first()
         if existing_snapshot:
             raise ValueError("商机已有阶段，不能修改采购方式")
 
@@ -769,9 +914,20 @@ class OpportunityCRUD:
             raise ValueError(f"采购方式 {procurement_method_id} 没有设置默认起始阶段")
 
         # 创建阶段快照
-        new_snapshot = opportunity_stage_snapshot_crud.create(
-            db, opportunity_id, default_stage
+        advance_eligible_progress(db, team_id=opportunity.team_id, customer_id=opportunity.customer_id)
+        new_snapshot = OpportunityStageSnapshot(
+            team_id=opportunity.team_id,
+            opportunity_id=opportunity_id,
+            procurement_stage_template_id=default_stage.id,
+            stage_name=default_stage.stage_name,
+            win_probability=default_stage.win_probability,
+            template_sort_order=default_stage.sort_order,
+            template_code=default_stage.template_code,
+            snapshot_version=default_stage.version,
+            entered_at=business_now(),
         )
+        db.add(new_snapshot)
+        db.flush()
 
         # 更新商机
         opportunity.procurement_method_id = procurement_method_id
@@ -818,6 +974,9 @@ class OpportunityCRUD:
         from app.crud.user import user_crud
         from app.services.operation_log_service import operation_log_service
         
+        db_obj = _lock_opportunity(db, db_obj.id, team_id=db_obj.team_id)
+        if db_obj is None:
+            raise ValueError("商机不存在")
         if db_obj.status == OpportunityStatus.WON.value:
             raise ValueError("商机已经是赢单状态")
         
@@ -831,6 +990,7 @@ class OpportunityCRUD:
         if won_stage:
             db_obj.stage_id = won_stage.id
         
+        advance_eligible_progress(db, team_id=db_obj.team_id, customer_id=db_obj.customer_id)
         db_obj.status = OpportunityStatus.WON.value
         db_obj.actual_amount = win_data.actual_amount
         db_obj.actual_closing_date = win_data.actual_closing_date
@@ -878,12 +1038,16 @@ class OpportunityCRUD:
         from app.crud.user import user_crud
         from app.services.operation_log_service import operation_log_service
         
+        db_obj = _lock_opportunity(db, db_obj.id, team_id=db_obj.team_id)
+        if db_obj is None:
+            raise ValueError("商机不存在")
         if db_obj.status == OpportunityStatus.LOST.value:
             raise ValueError("商机已经是输单状态")
         
         if db_obj.status == OpportunityStatus.WON.value:
             raise ValueError("商机已赢单，无法标记为输单")
         
+        advance_eligible_progress(db, team_id=db_obj.team_id, customer_id=db_obj.customer_id)
         db_obj.status = OpportunityStatus.LOST.value
         db_obj.loss_reason = lose_data.loss_reason
         db_obj.win_probability = 0
@@ -928,7 +1092,7 @@ class OpportunityCRUD:
         from app.models.contract import Contract
         from app.models.procurement import OpportunityStageSnapshot
 
-        opportunity = self.get_by_id(db, opportunity_id)
+        opportunity = _lock_opportunity(db, opportunity_id)
         if not opportunity:
             return False
 
@@ -949,6 +1113,7 @@ class OpportunityCRUD:
         if contracts > 0:
             raise ValueError(f"该商机存在 {contracts} 个关联合同，无法删除。请先删除相关合同。")
 
+        advance_eligible_progress(db, team_id=opportunity.team_id, customer_id=opportunity.customer_id, deleted=True)
         opportunity.current_stage_snapshot_id = None
         db.query(OpportunityStageSnapshot).filter(
             OpportunityStageSnapshot.opportunity_id == opportunity_id

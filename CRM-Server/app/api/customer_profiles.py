@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.database import get_db
 from app.core.deps import check_customer_view_permission, get_current_active_user, get_current_user_team
+from app.crud.customer_profile_projection import customer_profile_projection_crud
 from app.crud.permission import permission_crud
 from app.models.customer_profile_projection import (
     CustomerProfileCurrent,
@@ -43,9 +44,12 @@ from app.schemas.customer_profile import (
 from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
 from app.services.customer_profile_evidence_resolver import customer_profile_evidence_resolver
 from app.services.customer_profile_projection_service import customer_profile_projection_service
+from app.services.customer_profile_version_certification import is_certified_profile_version
 from app.utils.time import business_now
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from sqlalchemy.orm import Session
 
     from app.models.user import User
@@ -65,6 +69,37 @@ def _profile_status(value: object) -> CustomerProfileStatusValue:
     if normalized in {"READY", "UPDATING", "STALE", "PARTIAL", "FAILED", "NOT_READY"}:
         return cast("CustomerProfileStatusValue", normalized)
     return "NOT_READY"
+
+
+def _readable_version(
+    *,
+    team_id: int,
+    customer_id: int,
+    current: CustomerProfileCurrent | None,
+    version: CustomerProfileProjectionVersion | None,
+) -> CustomerProfileProjectionVersion | None:
+    if (
+        version is None
+        or current is None
+        or current.current_profile_version_id != version.id
+        or version.team_id != team_id
+        or version.customer_id != customer_id
+    ):
+        return None
+    return version if is_certified_profile_version(version) else None
+
+
+def _read_status(
+    current: CustomerProfileCurrent | None,
+    version: CustomerProfileProjectionVersion | None,
+) -> CustomerProfileStatusValue:
+    if (
+        current
+        and current.current_profile_version_id is not None
+        and (version is None or current.current_profile_version_id != version.id)
+    ):
+        return "STALE"
+    return _profile_status(current.profile_status if current else CustomerProfileStatus.NOT_READY)
 
 
 def _ok(data: T, *, request_id: str | None = None) -> CustomerProfileApiEnvelope[T]:
@@ -101,7 +136,17 @@ def get_customer_profile(
     _, current, version = customer_profile_projection_service.get_current_by_public_id(
         db, team_id=team_id, customer_public_id=str(customer.public_id)
     )
-    return _ok(_profile_response(customer_public_id=str(customer.public_id), current=current, version=version))
+    version = _readable_version(team_id=team_id, customer_id=int(customer.id), current=current, version=version)
+    response = _profile_response(customer_public_id=str(customer.public_id), current=current, version=version)
+    if version is not None:
+        response.evidence_refs = customer_profile_evidence_resolver.resolve_registry(
+            db,
+            team_id=team_id,
+            customer_id=int(customer.id),
+            customer_public_id=str(customer.public_id),
+            registry=_list_json(version.evidence_refs_json),
+        )
+    return _ok(response)
 
 
 def _get_profile_subresource(
@@ -123,7 +168,8 @@ def _get_profile_subresource(
     _, current, version = customer_profile_projection_service.get_current_by_public_id(
         db, team_id=team_id, customer_public_id=str(customer.public_id)
     )
-    profile_status = _profile_status(current.profile_status if current else CustomerProfileStatus.NOT_READY)
+    version = _readable_version(team_id=team_id, customer_id=int(customer.id), current=current, version=version)
+    profile_status = _read_status(current, version)
     items = _list_json(getattr(version, section, None) if version is not None else None)
     if evidence_ref:
         items = [
@@ -176,38 +222,74 @@ def get_customer_profile_changes(
     _, current, version = customer_profile_projection_service.get_current_by_public_id(
         db, team_id=team_id, customer_public_id=str(customer.public_id)
     )
-    profile_status = _profile_status(current.profile_status if current else CustomerProfileStatus.NOT_READY)
+    version = _readable_version(team_id=team_id, customer_id=int(customer.id), current=current, version=version)
+    profile_status = _read_status(current, version)
     decoded_before = (
-        _decode_cursor(cursor, resource="changes", customer_public_id=customer_public_id)
-        if cursor
-        else None
+        _decode_cursor(cursor, resource="changes", customer_public_id=customer_public_id) if cursor else None
     )
-    items, next_version = customer_profile_projection_service.list_changes(
+    safe_items: list[dict[str, Any]] = []
+    last_included: int | None = None
+    for candidate in _history_versions(
         db,
         team_id=team_id,
         customer_id=int(customer.id),
-        limit=limit,
         before_version=decoded_before,
-        from_value=from_value,
-        to_value=to_value,
-        section_id=section_id,
-    )
-    next_cursor = (
-        _encode_cursor(
-            resource="changes",
-            customer_public_id=customer_public_id,
-            sort_key=str(next_version),
+    ):
+        if not is_certified_profile_version(candidate):
+            continue
+        previous = customer_profile_projection_crud.get_previous_version(
+            db,
+            team_id=team_id,
+            customer_id=int(customer.id),
+            profile_version=int(candidate.profile_version),
         )
-        if next_version is not None
-        else None
-    )
+        if previous is not None and not is_certified_profile_version(previous):
+            continue
+        # Do not ask the projection service to build a diff until both of its
+        # actual adjacent inputs have passed the per-version certificate check.
+        changes, _ = customer_profile_projection_service.list_changes(
+            db,
+            team_id=team_id,
+            customer_id=int(customer.id),
+            limit=1,
+            before_version=int(candidate.profile_version) + 1,
+            from_value=from_value,
+            to_value=to_value,
+            section_id=section_id,
+        )
+        for item in changes:
+            if item["to_profile_version"] != candidate.profile_version or item["from_profile_version"] != (
+                previous.profile_version if previous else None
+            ):
+                continue
+            if len(safe_items) == limit:
+                return _ok(
+                    CustomerProfileSubresourceResponse(
+                        profile_status=profile_status,
+                        current_profile_version=str(version.public_id) if version else None,
+                        items=safe_items,
+                        next_cursor=_encode_cursor(
+                            resource="changes", customer_public_id=customer_public_id, sort_key=str(last_included)
+                        ),
+                        has_more=True,
+                    )
+                )
+            item["evidence_refs"] = customer_profile_evidence_resolver.resolve_registry(
+                db,
+                team_id=team_id,
+                customer_id=int(customer.id),
+                customer_public_id=str(customer.public_id),
+                registry=_list_json(item.get("evidence_refs")),
+            )
+            safe_items.append(item)
+            last_included = int(candidate.profile_version)
     return _ok(
         CustomerProfileSubresourceResponse(
             profile_status=profile_status,
             current_profile_version=str(version.public_id) if version else None,
-            items=items,
-            next_cursor=next_cursor,
-            has_more=next_cursor is not None,
+            items=safe_items,
+            next_cursor=None,
+            has_more=False,
         )
     )
 
@@ -231,7 +313,8 @@ def get_customer_profile_evidence(
     _, current, version = customer_profile_projection_service.get_current_by_public_id(
         db, team_id=team_id, customer_public_id=str(customer.public_id)
     )
-    profile_status = _profile_status(current.profile_status if current else CustomerProfileStatus.NOT_READY)
+    version = _readable_version(team_id=team_id, customer_id=int(customer.id), current=current, version=version)
+    profile_status = _read_status(current, version)
     registry = _list_json(version.evidence_refs_json if version is not None else None)
     if evidence_ref:
         registry = [
@@ -239,6 +322,17 @@ def get_customer_profile_evidence(
             for item in registry
             if evidence_ref in {str(item.get("evidence_key") or ""), str(item.get("evidence_id") or "")}
         ]
+    if version is None and evidence_ref:
+        unavailable = customer_profile_evidence_resolver.unavailable_reference(evidence_ref)
+        return _ok(
+            CustomerProfileSubresourceResponse(
+                profile_status=profile_status,
+                current_profile_version=None,
+                items=[unavailable.to_dict()],
+                next_cursor=None,
+                has_more=False,
+            )
+        )
     resolved = customer_profile_evidence_resolver.resolve_registry(
         db,
         team_id=team_id,
@@ -328,25 +422,28 @@ def list_customer_profile_versions(
 ) -> CustomerProfileApiEnvelope[CustomerProfileVersionListResponse]:
     customer = check_customer_view_permission(customer_public_id, team_id, current_user, db)
     _require_profile_permission(db, current_user, team_id, "customer_profile:history")
-    decoded_before = (
-        _decode_version_cursor(cursor, customer_public_id=customer_public_id)
-        if cursor
-        else before_version
-    )
-    rows, next_version = customer_profile_projection_service.list_versions(
-        db, team_id=team_id, customer_id=int(customer.id), limit=limit, before_version=decoded_before
-    )
-    next_cursor = (
-        _encode_version_cursor(next_version, customer_public_id=customer_public_id)
-        if next_version is not None
-        else None
-    )
-    data = CustomerProfileVersionListResponse(
-        items=[_version_summary(row) for row in rows],
-        next_cursor=next_cursor,
-        has_more=next_cursor is not None,
-    )
-    return _ok(data)
+    decoded_before = _decode_version_cursor(cursor, customer_public_id=customer_public_id) if cursor else before_version
+    items: list[CustomerProfileVersionSummary] = []
+    last_included: int | None = None
+    for candidate in _history_versions(
+        db,
+        team_id=team_id,
+        customer_id=int(customer.id),
+        before_version=decoded_before,
+    ):
+        if not is_certified_profile_version(candidate):
+            continue
+        if len(items) == limit:
+            return _ok(
+                CustomerProfileVersionListResponse(
+                    items=items,
+                    next_cursor=_encode_version_cursor(last_included, customer_public_id=customer_public_id),
+                    has_more=True,
+                )
+            )
+        items.append(_version_summary(candidate))
+        last_included = int(candidate.profile_version)
+    return _ok(CustomerProfileVersionListResponse(items=items, next_cursor=None, has_more=False))
 
 
 @router.post(
@@ -403,11 +500,7 @@ def _paginate(
     resource: str,
     customer_public_id: str,
 ) -> tuple[list[dict[str, Any]], str | None, bool]:
-    offset = (
-        _decode_cursor(cursor, resource=resource, customer_public_id=customer_public_id)
-        if cursor
-        else 0
-    )
+    offset = _decode_cursor(cursor, resource=resource, customer_public_id=customer_public_id) if cursor else 0
     page = items[offset : offset + limit]
     next_offset = offset + len(page)
     has_more = next_offset < len(items)
@@ -472,6 +565,30 @@ def _decode_version_cursor(cursor: str, *, customer_public_id: str) -> int:
     return _decode_cursor(cursor, resource="profile_versions", customer_public_id=customer_public_id)
 
 
+def _history_versions(
+    db: Session,
+    *,
+    team_id: int,
+    customer_id: int,
+    before_version: int | None,
+) -> Iterator[CustomerProfileProjectionVersion]:
+    """Scan raw rows without treating a raw-row page boundary as a visible cursor."""
+    while True:
+        rows, _ = customer_profile_projection_service.list_versions(
+            db,
+            team_id=team_id,
+            customer_id=customer_id,
+            limit=100,
+            before_version=before_version,
+        )
+        if not rows:
+            return
+        yield from rows
+        if len(rows) < 100:
+            return
+        before_version = int(rows[-1].profile_version)
+
+
 def _list_json(value: object) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
@@ -496,12 +613,16 @@ def _profile_response(
     current: CustomerProfileCurrent | None,
     version: CustomerProfileProjectionVersion | None,
 ) -> CustomerProfileResponse:
-    profile_status = _profile_status(current.profile_status if current else CustomerProfileStatus.NOT_READY)
+    profile_status = _read_status(current, version)
     watermark = current.latest_source_watermark_json if current else {}
     watermark = watermark if isinstance(watermark, dict) else {}
     profile_as_of = version.published_at if version else None
-    latest_event_at = _datetime_value(
-        watermark.get("occurred_at") or watermark.get("latest_activity_at") or watermark.get("latest_journey_at")
+    latest_event_at = (
+        _datetime_value(
+            watermark.get("occurred_at") or watermark.get("latest_activity_at") or watermark.get("latest_journey_at")
+        )
+        if version is not None
+        else None
     )
     if version is None:
         sections = CustomerProfileSections()
@@ -530,7 +651,9 @@ def _profile_response(
             profile_as_of=profile_as_of,
             latest_business_event_at=latest_event_at,
             is_stale=profile_status != CustomerProfileStatus.READY,
-            stale_reason=str(current.stale_reason) if current and current.stale_reason else None,
+            stale_reason=(
+                str(current.stale_reason) if version is not None and current and current.stale_reason else None
+            ),
         ),
         sections=sections,
         evidence_refs=evidence_refs,

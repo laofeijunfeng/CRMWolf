@@ -1,6 +1,6 @@
 import logging
 from datetime import date
-from typing import Iterator, List, Literal, Optional
+from typing import Any, Iterator, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from fastapi.responses import FileResponse
@@ -122,6 +122,10 @@ from app.services.customer_business_object_intelligence_service import (
     CustomerBusinessObjectChangeType,
     CustomerBusinessObjectSourceType,
     customer_business_object_intelligence_service,
+)
+from app.services.customer_derived_status import (
+    CUSTOMER_DERIVED_STATUS_LABELS,
+    derive_customer_statuses_for_list,
 )
 from app.services.customer_lifecycle_post_commit_coordinator import (
     customer_lifecycle_post_commit_coordinator,
@@ -444,6 +448,17 @@ def _contact_response(contact: Contact, customer_public_id: str) -> ContactRespo
     )
 
 
+def _derived_status_payload(db: Session, customer: Any) -> dict:
+    derived = derive_customer_statuses_for_list(db, customer.team_id, [customer]).get(int(customer.id))
+    if derived is None:
+        return {}
+    return {
+        "derived_status": derived.status.value,
+        "derived_status_label": CUSTOMER_DERIVED_STATUS_LABELS[derived.status],
+        "derived_stage_hint": derived.stage_hint,
+    }
+
+
 def _customer_response(db: Session, customer) -> CustomerResponse:
     source_lead_public_id = None
     if customer.source_lead_id:
@@ -473,6 +488,7 @@ def _customer_response(db: Session, customer) -> CustomerResponse:
         "license_expiry_date": customer.license_expiry_date,
         "license_type": customer.license_type,
         **product_intent_payload(customer.product_links),
+        **_derived_status_payload(db, customer),
     })
 
 
@@ -1639,9 +1655,19 @@ def _build_customer_list_responses(db: Session, customers: List, team_id: int) -
         owner_ids=customer_ids,
     )
     empty_product_payload = product_intent_payload([])
+    primary_contacts = {}
+    if customer_ids:
+        primary_rows = db.query(Contact).filter(
+            Contact.team_id == team_id,
+            Contact.customer_id.in_(customer_ids),
+            Contact.is_primary == 1,
+        ).all()
+        primary_contacts = {contact.customer_id: contact for contact in primary_rows}
 
+    derived_statuses = derive_customer_statuses_for_list(db, team_id, customers)
 
     for customer in customers:
+        derived = derived_statuses.get(int(customer.id))
         customer_dict = {
             'id': customer.public_id,
             'public_id': customer.public_id,
@@ -1669,6 +1695,11 @@ def _build_customer_list_responses(db: Session, customers: List, team_id: int) -
             'creator_info': users_info.get(customer.creator_id) if customer.creator_id else None,
             'default_procurement_method_info': procurement_methods_info.get(customer.default_procurement_method_id) if customer.default_procurement_method_id else None,
             **product_payloads.get(customer.id, empty_product_payload),
+            'primary_contact_name': primary_contacts[customer.id].name if customer.id in primary_contacts else None,
+            'primary_contact_mobile': primary_contacts[customer.id].mobile if customer.id in primary_contacts else None,
+            'derived_status': derived.status.value if derived else None,
+            'derived_status_label': CUSTOMER_DERIVED_STATUS_LABELS[derived.status] if derived else None,
+            'derived_stage_hint': derived.stage_hint if derived else None,
         }
         result.append(CustomerListResponse(**customer_dict))
 
@@ -1700,6 +1731,8 @@ def _customer_export_row(item: CustomerListResponse) -> dict[str, object]:
         "public_id": item.public_id,
         "account_name": item.account_name,
         "owner": item.owner_info.name if item.owner_info else None,
+        "primary_contact_name": item.primary_contact_name,
+        "primary_contact_mobile": item.primary_contact_mobile,
         "collaborators": "、".join(user.name for user in item.collaborator_infos or []),
         "city": item.city,
         "company_scale": item.company_scale,
@@ -2218,6 +2251,7 @@ def get_customer(
         **_customer_source_fields(db, customer),
         "source_lead_id": source_lead.public_id if (source_lead := lead_crud.get_by_id(db, customer.source_lead_id, team_id)) else None,
         **product_intent_payload(customer.product_links),
+        **_derived_status_payload(db, customer),
     }
 
     return CustomerDetailResponse(
@@ -2820,7 +2854,7 @@ async def return_customer_to_pool(
     return command_execution_service.to_response_payload(execution)
 
 
-@router.get("/public/list", response_model=PaginatedResponse[CustomerResponse], summary="查询公海客户", description="获取公海池中的客户列表，支持动态排序")
+@router.get("/public/list", response_model=PaginatedResponse[CustomerListResponse], summary="查询公海客户", description="获取公海池中的客户列表，支持动态排序，返回主要联系人信息")
 def get_public_customers(
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="返回记录数"),
@@ -2849,7 +2883,7 @@ def get_public_customers(
     page = skip // limit + 1
     total_pages = (total + limit - 1) // limit if total > 0 else 0
     return PaginatedResponse[CustomerResponse](
-        items=[_customer_response(db, customer) for customer in customers],
+        items=_build_customer_list_responses(db, customers, team_id),
         total=total,
         page=page,
         page_size=limit,

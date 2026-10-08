@@ -77,6 +77,12 @@ class CustomerProfileProjectionVersion(Base):
     )
     source_watermark_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, comment="来源水位")
     source_watermark_hash: Mapped[str] = mapped_column(CHAR(64), nullable=False, comment="来源水位哈希")
+    source_attestation_json: Mapped[dict[str, object] | None] = mapped_column(
+        JSON, nullable=True, comment="仅新发表版本具有逐版本来源认证, 历史行保持空值"
+    )
+    source_discriminator: Mapped[str | None] = mapped_column(
+        String(32), nullable=True, comment="新认证版本的去重域, 历史行保持空值"
+    )
     fact_watermark: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="事实水位")
     journey_watermark: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="旅程水位")
     task_watermark: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="任务水位")
@@ -100,6 +106,7 @@ class CustomerProfileProjectionVersion(Base):
             "team_id",
             "customer_id",
             "content_hash",
+            "source_discriminator",
             "source_watermark_hash",
             name="uq_customer_profile_projection_content_watermark",
         ),

@@ -19,9 +19,12 @@ from app.crud.sales_commitment import (
 )
 from app.models.agent_persistence import AgentUIAction
 from app.models.command_execution import CommandExecution
-from app.models.customer import Customer, CustomerMember
-from app.models.customer_intelligence_run import CustomerIntelligenceRun
+from app.models.customer import Customer, CustomerMember, CustomerProduct
 from app.models.customer_activity import CustomerActivity
+from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
+from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
+from app.models.product import Product
+from app.models.customer_intelligence_run import CustomerIntelligenceRun
 from app.models.customer_vector_document import CustomerVectorDocument
 from app.models.sales_commitment import (
     DueAtGranularity,
@@ -82,6 +85,10 @@ def db_session():
             CustomerActivity.__table__,
             CustomerVectorDocument.__table__,
             SalesCommitment.__table__,
+            Product.__table__,
+            CustomerProduct.__table__,
+            CustomerActivityDeletionTombstone.__table__,
+            CustomerLegacySourceProgress.__table__,
             FollowUpTask.__table__,
             FollowUpTaskEvent.__table__,
             FollowUpTaskProjectionRun.__table__,
@@ -938,6 +945,52 @@ def test_list_follow_up_tasks_applies_server_filters_sorts_count_and_pagination(
     assert payload["total"] == 2
     assert len(payload["items"]) == 1
     assert payload["items"][0]["id"] == second.public_id
+
+
+def test_list_follow_up_tasks_returns_customer_intent_product(client, db_session):
+    task = _create_task(db_session)
+    db_session.add(
+        Product(
+            id=501,
+            public_id="prd_501",
+            team_id=1,
+            code="CRM",
+            name="CRM 标准版",
+            is_active=True,
+            created_by="9",
+        )
+    )
+    db_session.add(CustomerProduct(customer_id=1, product_id=501, team_id=1))
+    db_session.commit()
+
+    response = client.get("/v1/follow-up-tasks")
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert [item["customer"]["product_name"] for item in items] == ["CRM 标准版"]
+
+    filtered = client.get(
+        "/v1/follow-up-tasks",
+        params={
+            "status": "all",
+            "filters": '[{"field":"product_name","op":"contains","value":"标准版"}]',
+            "sorts": '[{"field":"product_name","direction":"asc"}]',
+        },
+    )
+    assert filtered.status_code == 200
+    assert filtered.json()["total"] == 1
+    assert filtered.json()["items"][0]["id"] == task.public_id
+
+
+def test_list_follow_up_tasks_without_product_link_leaves_product_name_null(client, db_session):
+    _create_task(db_session)
+    db_session.commit()
+
+    response = client.get("/v1/follow-up-tasks")
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert [item["customer"]["product_name"] for item in items] == [None]
 
 
 def test_list_follow_up_tasks_rejects_unknown_unified_query_field(client, db_session):

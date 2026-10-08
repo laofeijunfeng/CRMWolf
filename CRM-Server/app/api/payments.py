@@ -74,6 +74,7 @@ from app.services.customer_business_object_intelligence_service import (
     CustomerBusinessObjectChangeRefreshInput,
     customer_business_object_intelligence_service,
 )
+from app.services.legacy_profile_source import lock_source_customer
 from app.services.outbound_notification_job_service import outbound_notification_job_service
 
 router = APIRouter(prefix="/v1/payments", tags=["回款管理"])
@@ -699,6 +700,7 @@ def _payment_record_from_command_replay(execution) -> PaymentRecordResponse:
 def _persist_payment_command_failure(
     db: Session,
     *,
+    customer_id: int,
     team_id: int,
     actor_id: str,
     command_type: str,
@@ -714,6 +716,7 @@ def _persist_payment_command_failure(
 ) -> None:
     """Persist a failure after the business transaction has been rolled back."""
     try:
+        lock_source_customer(db, team_id=team_id, customer_id=customer_id)
         execution, replay = command_execution_service.begin(
             db,
             team_id=team_id,
@@ -1505,6 +1508,9 @@ async def create_payment_record(
             )
 
     plan = check_payment_view_permission(plan_id, team_id, current_user, db)
+    contract = plan.contract
+    if plan.team_id != team_id or contract is None or contract.team_id != team_id or contract.customer_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="回款计划不存在")
     if idempotency_key:
         existing_record = payment_record_crud.get_by_idempotency_key(db, team_id, idempotency_key)
         if existing_record:
@@ -1519,6 +1525,9 @@ async def create_payment_record(
                 "plan_id": plan_id,
                 "record": _payment_record_request_data(record_data),
             })
+            # Legacy rows may need a command receipt; fence that write too,
+            # without advancing source progress for a replay.
+            lock_source_customer(db, team_id=team_id, customer_id=contract.customer_id)
             try:
                 execution, replay = command_execution_service.begin(
                     db,
@@ -1560,7 +1569,7 @@ async def create_payment_record(
     _validate_payment_commission_member(
         db,
         team_id=team_id,
-        customer_id=plan.contract.customer_id if plan.contract else None,
+        customer_id=contract.customer_id,
         current_user_id=str(current_user.id),
         commission_member_id=record_data.commission_member_id,
     )
@@ -1570,6 +1579,11 @@ async def create_payment_record(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="该回款计划已登记，无法继续登记回款",
         )
+
+    # CommandExecution.begin flushes a command row. Take the customer fence
+    # first so the command, payment-plan/record locks, source progress, and
+    # payment fact all follow the publisher's customer-first lock order.
+    lock_source_customer(db, team_id=team_id, customer_id=contract.customer_id)
 
     fingerprint = request_fingerprint({
         "plan_id": plan_id,
@@ -1667,6 +1681,7 @@ async def create_payment_record(
         # of reporting a false amount-conflict to the user.
         db.rollback()
         try:
+            lock_source_customer(db, team_id=team_id, customer_id=contract.customer_id)
             execution, replay = command_execution_service.begin(
                 db,
                 team_id=team_id,
@@ -1703,6 +1718,7 @@ async def create_payment_record(
         _persist_payment_command_failure(
             db,
             team_id=team_id,
+            customer_id=contract.customer_id,
             actor_id=str(current_user.id),
             command_type="PAYMENT_RECORD_CREATE",
             resource_type="PAYMENT_PLAN",
@@ -1720,6 +1736,7 @@ async def create_payment_record(
         _persist_payment_command_failure(
             db,
             team_id=team_id,
+            customer_id=contract.customer_id,
             actor_id=str(current_user.id),
             command_type="PAYMENT_RECORD_CREATE",
             resource_type="PAYMENT_PLAN",
@@ -1738,6 +1755,7 @@ async def create_payment_record(
         _persist_payment_command_failure(
             db,
             team_id=team_id,
+            customer_id=contract.customer_id,
             actor_id=str(current_user.id),
             command_type="PAYMENT_RECORD_CREATE",
             resource_type="PAYMENT_PLAN",
@@ -1755,6 +1773,7 @@ async def create_payment_record(
         _persist_payment_command_failure(
             db,
             team_id=team_id,
+            customer_id=contract.customer_id,
             actor_id=str(current_user.id),
             command_type="PAYMENT_RECORD_CREATE",
             resource_type="PAYMENT_PLAN",

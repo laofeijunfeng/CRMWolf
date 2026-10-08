@@ -16,7 +16,12 @@ from app.services.acquisition_source_service import (
 from app.services.lead_ai_confirmed_write_service import lead_ai_confirmed_write_service
 from app.utils.time import business_now
 from app.crud.lead import lead_crud
-from app.crud.product_intent import EMPTY_CATALOG_MESSAGE, first_active_product
+from app.crud.product_intent import (
+    EMPTY_CATALOG_MESSAGE,
+    first_active_product,
+    format_active_product_catalog,
+    match_active_product,
+)
 from app.schemas.lead import LeadCreate
 from app.models.lead import CompanyScale, FollowUpMethod
 
@@ -41,7 +46,8 @@ PARSE_LEAD_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的线索信息解�
 
 **可选字段**：
 - company_scale: 公司规模
-
+- product: 意向产品名称。只能输出当前团队启用产品名称之一，未明确或无法唯一匹配时返回 null，禁止猜测：
+{product_enum_block}
 ## 线索来源枚举值
 
 只能输出当前团队启用的获客来源名称之一，禁止发明新来源，禁止输出“线索转化”：
@@ -50,12 +56,17 @@ PARSE_LEAD_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的线索信息解�
 
 ## 公司规模枚举值
 
-用户可能说"大概500人"、"几百人"、"几十人"等，你需要智能匹配：
+用户可能说"大概500人"、"几百人"、"几十人"、"10~29人"等，你需要智能匹配：
 - "1-50人": 人数在50人以下
 - "51-200人": 人数在51-200人之间
 - "201-500人": 人数在201-500人之间
 - "501-1000人": 人数在501-1000人之间
 - "1000人以上": 人数超过1000人
+
+**纯数字区间是人数规模**："10~29"、"100-199"、"15到40"这类用 ~、-、到 连接的数字区间，
+是公司人数区间的常见写法，不是日期。按区间落在上述哪个枚举段就输出哪个（如 "10~29" →
+"1-50人"，"100~199" → "51-200人"）。区间跨两个枚举段时，按区间的**上限**归段，
+如 "800~1200" → "1000人以上"、"300-400" → "201-500人"，不要反复权衡。
 
 如果用户未提及公司规模，不要猜测，返回 null。
 
@@ -78,6 +89,7 @@ PARSE_LEAD_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的线索信息解�
     "source": "匹配的线索来源枚举值",
     "city": "提取的城市",
     "company_scale": "匹配的公司规模枚举值或 null",
+    "product": "匹配的产品名称或 null",
     "contact_name": "提取的联系人姓名",
     "contact_phone": "提取的11位手机号",
     "missing_fields": ["缺失的必填字段列表"]
@@ -115,6 +127,7 @@ PARSE_LEAD_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的线索信息解�
     "source": "线上注册",
     "city": "杭州",
     "company_scale": "501-1000人",
+    "product": null,
     "contact_name": "张三",
     "contact_phone": "13800138000",
     "missing_fields": []
@@ -138,6 +151,7 @@ PARSE_LEAD_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的线索信息解�
     "source": null,
     "city": "广州",
     "company_scale": null,
+    "product": null,
     "contact_name": "李四",
     "contact_phone": null,
     "missing_fields": ["lead_name", "source", "contact_phone"]
@@ -160,11 +174,15 @@ class LeadAIParser(EntityAIParserBase):
         current_date = business_now().strftime("%Y-%m-%d")
         names = format_active_source_names(db, team_id)
         source_enum_block = "\n".join(f'- "{name}"' for name in names)
+        _catalog_text, names_enum = format_active_product_catalog(db, team_id)
+        product_names = [name for name in names_enum.split("|") if name]
+        product_enum_block = "\n".join(f'- "{name}"' for name in product_names) or "- 无"
         return (
             PARSE_LEAD_SYSTEM_PROMPT_TEMPLATE
             .replace("{current_date}", current_date)
             .replace("{source_enum_block}", source_enum_block)
             .replace("{default_source_name}", default_source_name(db, team_id))
+            .replace("{product_enum_block}", product_enum_block)
         )
 
     def get_enum_maps(self) -> Dict[str, Dict[str, Any]]:
@@ -194,8 +212,11 @@ class LeadAIParser(EntityAIParserBase):
             "lead_info": {
                 "lead_name": lead_info.get("lead_name"),
                 "source": lead_info.get("source"),
+                "source_public_id": None,
                 "city": lead_info.get("city"),
                 "company_scale": lead_info.get("company_scale"),
+                "product": lead_info.get("product"),
+                "product_public_id": None,
                 "contact_name": lead_info.get("contact_name"),
                 "contact_phone": lead_info.get("contact_phone"),
                 "missing_fields": lead_info.get("missing_fields", [])
@@ -213,6 +234,27 @@ class LeadAIParser(EntityAIParserBase):
             }
 
         return result
+
+    def attach_catalog_ids(self, result: Dict[str, Any], db: Session, team_id: int) -> None:
+        """把 AI 输出的来源/产品名称解析成表单可用的 public_id。"""
+        lead_info = result.get("lead_info", {})
+        raw_source = str(lead_info.get("source") or "").strip()
+        if raw_source:
+            try:
+                source_row = resolve_source_for_ai(db, team_id, raw_source)
+                lead_info["source"] = source_row.name
+                lead_info["source_public_id"] = source_row.public_id
+            except Exception:
+                lead_info["source_public_id"] = None
+        else:
+            lead_info["source_public_id"] = None
+        product_row = match_active_product(db, team_id, lead_info.get("product"))
+        if product_row is not None:
+            lead_info["product"] = product_row.name
+            lead_info["product_public_id"] = product_row.public_id
+        else:
+            lead_info["product"] = None
+            lead_info["product_public_id"] = None
 
     async def create_entity(
         self,

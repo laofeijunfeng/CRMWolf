@@ -204,12 +204,14 @@ function handleOpenChange(open: boolean): void {
 
 <template>
   <Dialog :open="props.open" @update:open="handleOpenChange">
-    <DialogContent class="w-[calc(100vw-2rem)] max-h-[min(90vh,90dvh)] overflow-y-auto overscroll-contain [scroll-padding-bottom:calc(5rem+env(safe-area-inset-bottom,0px))]">
+    <DialogContent class="invoice-title-form-dialog w-[calc(100vw-2rem)]">
       <DialogHeader>
         <DialogTitle>{{ isEdit ? '编辑发票抬头' : '新建发票抬头' }}</DialogTitle>
       </DialogHeader>
 
-      <form class="space-y-4" @submit="onSubmit">
+      <div class="invoice-title-form-dialog__body">
+
+      <form id="invoice-title-form" class="space-y-4" @submit="onSubmit">
         <!-- Title Type -->
         <div class="space-y-2">
           <Label id="invoice-title-type-label" class="text-sm font-medium">
@@ -310,15 +312,17 @@ function handleOpenChange(open: boolean): void {
         </FormField>
 
         <!-- DialogFooter -->
-        <DialogFooter class="mt-6 pt-4 border-t">
+        </form>
+      </div>
+
+        <DialogFooter class="invoice-title-form-dialog__footer">
           <Button variant="outline" type="button" :disabled="submitting" @click="handleCancel">
             取消
           </Button>
-          <Button type="submit" :loading="submitting">
+          <Button type="submit" form="invoice-title-form" :loading="submitting">
             {{ submitting ? '提交中...' : '确定' }}
           </Button>
         </DialogFooter>
-      </form>
     </DialogContent>
   </Dialog>
 
@@ -345,4 +349,32 @@ function handleOpenChange(open: boolean): void {
 
 <style scoped lang="scss">
 @use '@/styles/variables-v2.scss' as *;
+</style>
+
+<style lang="scss">
+@use '@/styles/variables-v2.scss' as *;
+
+/* 非 scoped：DialogContent 经 Portal 渲染，scoped data 属性不随 class 传递 */
+.invoice-title-form-dialog {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  max-height: $wolf-modal-height-mobile-v2;
+  overflow: hidden;
+}
+
+.invoice-title-form-dialog__body {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: $wolf-space-lg-v2;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-bottom: calc($wolf-space-xl-v2 + $wolf-safe-area-bottom-v2);
+}
+
+.invoice-title-form-dialog__footer {
+  gap: $wolf-space-sm-v2;
+  padding-top: $wolf-space-lg-v2;
+  border-top: 1px solid $wolf-border-divider-v2;
+}
 </style>

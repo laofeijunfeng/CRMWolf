@@ -246,10 +246,12 @@ const activeColumns = ref<ViewPreferenceConfig['columns']>([])
 
 // ==================== DataTable 配置 ====================
 const customerStatusFilterOptions = [
-  { value: '0', label: '跟进中' },
-  { value: '1', label: '已赢单' },
-  { value: '2', label: '已输单' },
-  { value: '3', label: '已失效' }
+  { value: 'not_started', label: '未启动' },
+  { value: 'following', label: '跟进中' },
+  { value: 'repurchasing', label: '复购中' },
+  { value: 'won', label: '已成交' },
+  { value: 'lost', label: '已流失' },
+  { value: 'public_pool', label: '公海' }
 ]
 
 const ownerFieldOptions = computed(() =>
@@ -270,20 +272,64 @@ const fields = computed<ListFieldDefinition[]>(() => [
     key: 'account_name',
     label: '客户名称',
     type: 'text',
-    column: { width: '220px' },
+    column: { width: '280px' },
     filter: true,
     sort: true
+  },
+  {
+    key: 'status',
+    label: '状态',
+    type: 'enum',
+    options: customerStatusFilterOptions,
+    column: { width: '200px' },
+    filter: true,
+    sort: true
+  },
+  {
+    key: 'primary_contact',
+    label: '主要联系人',
+    role: 'decoration',
+    column: { width: '140px' },
+    filter: false,
+    sort: false,
+    export: false
+  },
+  {
+    key: 'primary_contact_name',
+    label: '联系人',
+    type: 'text',
+    column: false,
+    filter: true,
+    sort: true,
+    export: true
+  },
+  {
+    key: 'primary_contact_mobile',
+    label: '联系电话',
+    type: 'text',
+    column: false,
+    filter: true,
+    sort: true,
+    export: true
   },
   {
     key: 'owner',
     label: '负责人',
     type: 'enum',
     options: ownerFieldOptions.value,
-    column: { width: '100px' },
+    column: { width: '120px' },
     filter: { apiKey: 'owner_id' },
     sort: { apiKey: 'owner_id' }
   },
-  { key: 'collaborators', label: '协作者', type: 'text', column: { width: '100px' } },
+  {
+    key: 'collaborators',
+    label: '协作者',
+    type: 'text',
+    column: false,
+    filter: true,
+    sort: true,
+    export: true
+  },
   {
     key: 'city',
     label: '城市',
@@ -297,18 +343,10 @@ const fields = computed<ListFieldDefinition[]>(() => [
     label: '规模',
     type: 'enum',
     options: [...companyScaleOptions],
-    column: { width: '120px' },
+    column: false,
     filter: true,
-    sort: true
-  },
-  {
-    key: 'status',
-    label: '状态',
-    type: 'enum',
-    options: customerStatusFilterOptions,
-    column: { align: 'center', width: '100px' },
-    filter: true,
-    sort: true
+    sort: true,
+    export: true
   },
   {
     key: 'license_status',
@@ -324,18 +362,20 @@ const fields = computed<ListFieldDefinition[]>(() => [
     label: '行业',
     type: 'enum',
     options: industryFilterOptions.value,
-    column: { width: '120px' },
+    column: false,
     filter: true,
-    sort: true
+    sort: true,
+    export: true
   },
   {
     key: 'source',
     label: '来源',
     type: 'enum',
     options: sourceFilterSelectOptions.value,
-    column: { width: '120px' },
+    column: false,
     filter: true,
-    sort: true
+    sort: true,
+    export: true
   },
   { key: 'product_name', label: '产品', type: 'text', column: { width: '120px' }, filter: true, sort: true },
   { key: 'creator', label: '创建人', type: 'text', column: { width: '100px' } },
@@ -349,13 +389,15 @@ const fields = computed<ListFieldDefinition[]>(() => [
   },
 ])
 
-const formatCollaborators = (row: CustomerTableRow): string => {
+const collaboratorNames = (row: CustomerTableRow): string => {
   const names = row.collaborator_infos
     ?.map((user) => user.name?.trim())
     .filter((name): name is string => Boolean(name))
 
-  return names && names.length > 0 ? names.join('、') : '-'
+  return names !== undefined && names.length > 0 ? names.join('、') : ''
 }
+
+const formatCollaborators = (row: CustomerTableRow): string => collaboratorNames(row) || '-'
 
 const canCreateCustomer = computed(() => permissionStore.hasPermission('customer:create'))
 const canExportCustomers = computed(() => permissionStore.hasPermission('customer:export'))
@@ -457,11 +499,17 @@ const normalizeCustomerListResponse = (response: CustomerTableRow[] | CustomerLi
   return normalizeCustomerList(response)
 }
 
-const getIndustryBadgeStatus = (row: CustomerResponse): string => {
-  const industryName = row.industry_info?.name
-  if (industryName === undefined || industryName === null || industryName.trim() === '') return '-'
-  const segments = industryName.split('/')
+const industryLabel = (row: CustomerResponse): string => {
+  const industryName = row.industry_info?.name?.trim() ?? ''
+  if (industryName === '') return ''
+  const segments = industryName.split('/').map((segment) => segment.trim()).filter((segment) => segment !== '')
   return segments.length > 1 ? segments[1] ?? industryName : industryName
+}
+
+const customerProfileMeta = (row: CustomerResponse): string => {
+  const source = getAcquisitionSourceDisplayName(row, '').trim()
+  const scale = row.company_scale?.trim() ?? ''
+  return [source, industryLabel(row), scale].filter((part) => part !== '').join(' · ')
 }
 
 const isCustomerResponse = (row: unknown): row is CustomerResponse => {
@@ -1130,15 +1178,14 @@ const getLicenseStatusClass = (row: CustomerResponse): string => {
   return licenseStatusClass(row.license_expiry_date, row.license_type)
 }
 
-// 状态映射函数（数字状态 → 字符串状态）
-const mapCustomerStatus = (status: number): 'following' | 'won' | 'lost' | 'expired' => {
-  const map: Record<number, 'following' | 'won' | 'lost' | 'expired'> = {
-    0: 'following',
-    1: 'won',
-    2: 'lost',
-    3: 'expired'
-  }
-  return map[status] || 'following'
+// 派生客户状态（后端 derived_status;旧数据/接口降级时按 legacy status 兜底）
+const customerDerivedStatusKey = (row: CustomerResponse): string => {
+  if (row.derived_status !== null && row.derived_status !== undefined && row.derived_status !== '') return row.derived_status
+  const legacy = Number(row.status)
+  if (legacy === 3) return 'public_pool'
+  if (legacy === 2) return 'lost'
+  if (legacy === 1) return 'won'
+  return 'not_started'
 }
 
 // ==================== Lifecycle ====================
@@ -1256,12 +1303,15 @@ watchEffect(() => {
           <div class="customer-mobile-card-title">
             {{ row.account_name }}
           </div>
-          <StatusBadge :status="mapCustomerStatus(row.status)" type="customer" />
+          <div class="customer-mobile-status">
+            <StatusBadge :status="customerDerivedStatusKey(row)" type="customerDerived" />
+            <span v-if="row.derived_stage_hint" class="customer-status-stage-hint">{{ row.derived_stage_hint }}</span>
+          </div>
         </div>
         <div class="customer-mobile-card-badges">
           <StatusBadge
-            v-if="row.industry_info?.name"
-            :status="getIndustryBadgeStatus(row)"
+            v-if="industryLabel(row)"
+            :status="industryLabel(row)"
             type="industry"
           />
           <StatusBadge
@@ -1285,41 +1335,25 @@ watchEffect(() => {
         <TableRowActions :row="row" v-bind="getRowActions(row)" size="lg" />
       </template>
 
-      <!-- 客户名称 -->
+      <!-- 客户名称（hover 旅程预览已移至状态列） -->
       <template #cell-account_name="{ row }">
-        <CustomerDealJourneyHoverCard
-          :customer-id="row.id"
-          :customer-name="row.account_name"
-          @select-journey="openCustomerJourney(row.id, $event)"
-          @view-all="openCustomerJourneys(row.id)"
-        >
-          <template #trigger>
-            <span class="link-text" data-testid="customer-deal-journey-trigger" @click.stop="openCustomerDetail(row.id)">
-              {{ row.account_name }}
-            </span>
-          </template>
-        </CustomerDealJourneyHoverCard>
+        <div class="customer-name-cell data-table-stacked-cell">
+          <span class="customer-account-name" data-testid="customer-account-name" @click.stop="openCustomerDetail(row.id)">
+            {{ row.account_name }}
+          </span>
+          <span v-if="customerProfileMeta(row)" class="customer-name-meta">
+            {{ customerProfileMeta(row) }}
+          </span>
+        </div>
       </template>
-
-      <!-- 行业：有二级行业时只显示二级（解析 name 中的 "/"），否则显示完整路径 -->
-      <template #cell-industry="{ row }">
-        <StatusBadge
-          v-if="row.industry_info?.name"
-          :status="getIndustryBadgeStatus(row)"
-          type="industry"
-        />
+      <template #cell-primary_contact="{ row }">
+        <div v-if="row.primary_contact_name || row.primary_contact_mobile" class="customer-contact-cell data-table-stacked-cell">
+          <span v-if="row.primary_contact_name" class="customer-contact-name">{{ row.primary_contact_name }}</span>
+          <span v-if="row.primary_contact_mobile" class="customer-contact-meta">{{ row.primary_contact_mobile }}</span>
+        </div>
         <span v-else class="text-muted-foreground">-</span>
       </template>
 
-      <!-- 来源 -->
-      <template #cell-source="{ row }">
-        <StatusBadge
-          v-if="getAcquisitionSourceDisplayName(row, '')"
-          :status="getAcquisitionSourceDisplayName(row, '')"
-          type="source"
-        />
-        <span v-else class="text-muted-foreground">-</span>
-      </template>
 
       <!-- 产品 -->
       <template #cell-product_name="{ row }">
@@ -1330,20 +1364,21 @@ watchEffect(() => {
       <template #cell-city="{ row }">
         {{ row.city || '-' }}
       </template>
-
-      <!-- 规模 -->
-      <template #cell-company_scale="{ row }">
-        <StatusBadge
-          v-if="row.company_scale"
-          :status="row.company_scale"
-          type="companyScale"
-        />
-        <span v-else class="text-muted-foreground">-</span>
-      </template>
-
-      <!-- 状态 -->
+      <!-- 状态（读时派生：大类徽章 + 进行中旅程阶段小字；hover 看旅程列表） -->
       <template #cell-status="{ row }">
-        <StatusBadge :status="mapCustomerStatus(row.status)" type="customer" />
+        <CustomerDealJourneyHoverCard
+          :customer-id="row.id"
+          :customer-name="row.account_name"
+          @select-journey="openCustomerJourney(row.id, $event)"
+          @view-all="openCustomerJourneys(row.id)"
+        >
+          <template #trigger>
+            <div class="customer-status-cell" data-testid="customer-deal-journey-trigger">
+              <StatusBadge :status="customerDerivedStatusKey(row)" type="customerDerived" />
+              <span v-if="row.derived_stage_hint" class="customer-status-stage-hint">{{ row.derived_stage_hint }}</span>
+            </div>
+          </template>
+        </CustomerDealJourneyHoverCard>
       </template>
 
       <!-- 授权状态 -->
@@ -1363,14 +1398,11 @@ watchEffect(() => {
         {{ row.default_procurement_method_info?.name || '-' }}
       </template>
 
-      <!-- 负责人 -->
       <template #cell-owner="{ row }">
-        {{ row.owner_info?.name || '-' }}
-      </template>
-
-      <!-- 协作者 -->
-      <template #cell-collaborators="{ row }">
-        {{ formatCollaborators(row) }}
+        <div class="customer-owner-cell data-table-stacked-cell">
+          <span class="customer-owner-name">{{ row.owner_info?.name || '-' }}</span>
+          <span v-if="collaboratorNames(row)" class="customer-owner-meta">{{ collaboratorNames(row) }}</span>
+        </div>
       </template>
 
       <!-- 创建人 -->
@@ -1517,16 +1549,97 @@ watchEffect(() => {
   }
 }
 
-// 链接样式
-.link-text {
-  color: $wolf-text-link-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  cursor: pointer;
-
-  &:hover {
-    color: $wolf-text-link-hover-v2;
-  }
+.customer-name-cell.data-table-stacked-cell {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  flex-direction: column;
+  gap: 2px;
 }
+
+.customer-name-meta,
+.customer-account-name {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.customer-name-meta {
+  color: $wolf-text-tertiary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  font-weight: $wolf-font-weight-normal-v2;
+  line-height: 16px;
+}
+
+.customer-account-name {
+  color: $wolf-text-primary-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
+  cursor: pointer;
+}
+
+.customer-contact-cell.data-table-stacked-cell {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.customer-contact-name,
+.customer-contact-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.customer-contact-name {
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-body-v2;
+  line-height: 20px;
+}
+
+.customer-contact-meta {
+  color: $wolf-text-tertiary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  line-height: 16px;
+}
+
+.customer-owner-cell.data-table-stacked-cell {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.customer-owner-cell {
+  gap: 2px;
+}
+
+.customer-owner-name,
+.customer-owner-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.customer-owner-name {
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-body-v2;
+  line-height: 20px;
+}
+
+.customer-owner-meta {
+  color: $wolf-text-tertiary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  line-height: 16px;
+}
+
 
 .license-badge {
   display: inline-flex;
@@ -1572,6 +1685,25 @@ watchEffect(() => {
   align-items: flex-start;
   justify-content: space-between;
   gap: $wolf-space-sm-v2;
+}
+
+.customer-status-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.customer-status-stage-hint {
+  font-size: $wolf-font-size-caption-v2;
+  color: $wolf-text-tertiary-v2;
+}
+
+.customer-mobile-status {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
 }
 
 .customer-mobile-card-title {

@@ -71,7 +71,9 @@ export const CustomerListResponseSchema = PaginatedResponseSchema(
     owner_info: UserInfoSchema.nullable(),
     collaborator_infos: z.array(UserInfoSchema).default([]),
     creator_info: UserInfoSchema.nullable(),
-    default_procurement_method_info: ProcurementMethodInfoSchema.nullable().optional()
+    default_procurement_method_info: ProcurementMethodInfoSchema.nullable().optional(),
+    primary_contact_name: z.string().nullable().optional(),
+    primary_contact_mobile: z.string().nullable().optional(),
   })
 )
 

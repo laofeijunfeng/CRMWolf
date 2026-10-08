@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { HTMLAttributes } from "vue"
 import { computed, nextTick, onMounted, ref, watch } from "vue"
-import { useVModel } from "@vueuse/core"
 import { cn } from "@/lib/utils"
 import { Textarea } from "@/components/ui/textarea"
 
@@ -23,12 +22,8 @@ const props = withDefaults(defineProps<{
   maxRows: 10,
 })
 
-const emits = defineEmits<(e: "update:modelValue", payload: string | number | undefined) => void>()
+const emit = defineEmits<(e: "update:modelValue", payload: string | number | undefined) => void>()
 
-const modelValue = useVModel(props, "modelValue", emits, {
-  passive: true,
-  defaultValue: props.defaultValue,
-})
 const textareaRef = ref<TextareaComponentInstance | null>(null)
 
 const normalizedMinRows = computed(() => Math.max(1, Math.floor(props.minRows)))
@@ -70,7 +65,7 @@ const resizeTextarea = async (): Promise<void> => {
 }
 
 watch(
-  [modelValue, (): boolean => props.autoResize, normalizedMinRows, normalizedMaxRows],
+  [(): string | number | undefined => props.modelValue, (): boolean => props.autoResize, normalizedMinRows, normalizedMaxRows],
   (): void => void resizeTextarea(),
   { flush: "post" },
 )
@@ -81,12 +76,13 @@ onMounted(() => void resizeTextarea())
   <Textarea
     ref="textareaRef"
     data-slot="input-group-control"
-    v-model="modelValue"
+    :model-value="modelValue ?? defaultValue"
     :rows="props.autoResize ? normalizedMinRows : props.rows"
     :class="cn(
       'flex-1 resize-none rounded-none border-0 bg-transparent py-3 shadow-none ring-offset-transparent focus-visible:ring-0 focus-visible:ring-transparent focus-visible:ring-offset-0',
       props.class,
     )"
+    @update:model-value="emit('update:modelValue', $event)"
     @input="resizeTextarea"
   />
 </template>

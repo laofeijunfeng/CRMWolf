@@ -23,6 +23,7 @@ from app.core import database, deps
 from app.core.database import Base
 from app.models.acquisition_source import AcquisitionSource
 from app.models.customer import Contact, Customer, CustomerMember
+from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
 from app.models.lead import Lead, LeadFollowUp, LeadStatus
 from app.models.role import Role
 from app.models.team import Team, UserTeam
@@ -62,6 +63,7 @@ def api_env(monkeypatch):
         Lead.__table__,
         LeadFollowUp.__table__,
         Customer.__table__,
+        CustomerLegacySourceProgress.__table__,
         Contact.__table__,
         CustomerMember.__table__,
     ]

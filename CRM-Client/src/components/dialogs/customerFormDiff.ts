@@ -9,7 +9,6 @@ export interface CustomerEditableSnapshot {
   product_public_id: string | null
   default_procurement_method_id: number | null
   industry: string | null
-  status: 0 | 1 | null
   license_type: 'TRIAL' | 'OFFICIAL' | null
   license_expiry_date: string | null
 }
@@ -23,7 +22,6 @@ type CustomerDiffField =
   | 'product_public_id'
   | 'default_procurement_method_id'
   | 'industry'
-  | 'status'
   | 'license'
 
 const customerDiffFields: readonly CustomerDiffField[] = [
@@ -35,7 +33,6 @@ const customerDiffFields: readonly CustomerDiffField[] = [
   'product_public_id',
   'default_procurement_method_id',
   'industry',
-  'status',
   'license',
 ]
 
@@ -144,15 +141,6 @@ export function buildCustomerUpdatePayload(
         const baselineValue = normalizeText(baseline.industry)
         if (currentValue !== baselineValue) {
           payload.industry = currentValue
-          hasChanges = true
-        }
-        break
-      }
-      case 'status': {
-        const currentValue = current.status === 0 || current.status === 1 ? current.status : null
-        const baselineValue = baseline.status === 0 || baseline.status === 1 ? baseline.status : null
-        if (currentValue !== baselineValue && currentValue !== null) {
-          payload.status = currentValue
           hasChanges = true
         }
         break

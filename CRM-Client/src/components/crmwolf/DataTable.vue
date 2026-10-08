@@ -1775,6 +1775,13 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 
+  &:has(.data-table-stacked-cell) {
+    height: auto;
+    padding-top: 8px;
+    padding-bottom: 8px;
+    white-space: normal;
+  }
+
   &.text-center { text-align: center; }
   &.text-right { text-align: right; }
 

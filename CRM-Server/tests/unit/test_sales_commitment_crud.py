@@ -33,8 +33,10 @@ from app.crud.sales_commitment import (
 )
 from app.models.agent import AgentMessage, AgentSession
 from app.models.agent_persistence import AgentUIAction
-from app.models.customer import Customer, CustomerMember
+from app.models.customer import Customer, CustomerMember, CustomerProduct
 from app.models.customer_activity import CustomerActivity
+from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
+from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
 from app.models.customer_vector_document import (
     CustomerVectorDocument,
     CustomerVectorDocumentSourceType,
@@ -111,8 +113,11 @@ def db_session():
             AgentMessage.__table__,
             AgentUIAction.__table__,
             Customer.__table__,
+            CustomerProduct.__table__,
             CustomerMember.__table__,
             CustomerActivity.__table__,
+            CustomerActivityDeletionTombstone.__table__,
+            CustomerLegacySourceProgress.__table__,
             CustomerVectorDocument.__table__,
             SalesCommitment.__table__,
             FollowUpTask.__table__,
@@ -404,6 +409,8 @@ def test_follow_up_task_owner_listing_filters_team_status_customer_and_due_windo
 
 def test_follow_up_task_public_id_listing_is_owner_scoped_and_preserves_requested_order(db_session):
     _seed_customer_and_activity(db_session)
+    db_session.add(Customer(id=2, team_id=2, account_name="其他团队客户", city="广州", creator_id="3"))
+    db_session.flush()
     first = follow_up_task_crud.create(
         db_session,
         _task_create(task_hash="owner-first"),
@@ -418,7 +425,9 @@ def test_follow_up_task_public_id_listing_is_owner_scoped_and_preserves_requeste
     )
     other_team = follow_up_task_crud.create(
         db_session,
-        _task_create(team_id=2, task_hash="other-team-ref"),
+        _task_create(team_id=2, customer_id=2, source_activity_id=None, task_hash="other-team-ref").model_copy(
+            update={"source_public_id": "other-team-source"},
+        ),
     )
 
     rows = follow_up_task_crud.list_for_owner_by_public_ids(

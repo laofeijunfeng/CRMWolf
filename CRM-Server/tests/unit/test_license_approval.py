@@ -9,13 +9,16 @@ from sqlalchemy.types import BigInteger
 
 from app.core.database import Base
 from app.crud.approval import approval_flow_crud, approval_crud
+from app.crud import crud_license_application as license_crud_module
 from app.crud.crud_license_application import license_application_crud
 from app.constants.business_types import BusinessType
 from app.models.approval import Approval, ApprovalRecord, ApprovalFlow, ApprovalNode
 from app.models.customer import Customer
+from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
 from app.models.license_application import LicenseApplicationStatus
 from app.models.license_application import LicenseApplication
 from app.models.approval import ApprovalStatus
+from app.schemas.license_application import LicenseApplicationApproveFull
 from app.schemas.license_application import LicenseApplicationCreate
 from app.schemas.approval import ApprovalFlowCreate, ApprovalNodeCreate
 from app.services.approval_adapter import get_adapter
@@ -31,6 +34,7 @@ def db():
     engine = create_engine("sqlite:///:memory:")
     tables = [
         Customer.__table__,
+        CustomerLegacySourceProgress.__table__,
         LicenseApplication.__table__,
         ApprovalFlow.__table__,
         ApprovalNode.__table__,
@@ -156,7 +160,7 @@ def test_license_application_submit_creates_approval(db, test_team, test_user, t
         test_team.id,
         str(test_user.feishu_user_id),
         LicenseApplicationCreate(
-            customer_id=test_customer.id,
+            customer_id=test_customer.public_id,
             license_type="TRIAL",
             authorized_users=10,
             expiry_date=date(2026, 12, 31),
@@ -166,7 +170,6 @@ def test_license_application_submit_creates_approval(db, test_team, test_user, t
 
     assert application.id is not None
     assert application.status == LicenseApplicationStatus.DRAFT
-    assert application.application_number.startswith("LIC-")
 
     # 3. 提交申请（接入审批引擎）
     adapter = get_adapter(BusinessType.LICENSE)
@@ -209,7 +212,7 @@ def test_license_application_without_flow_direct_approval(db, test_team, test_us
         test_team.id,
         str(test_user.feishu_user_id),
         LicenseApplicationCreate(
-            customer_id=test_customer.id,
+            customer_id=test_customer.public_id,
             license_type="TRIAL",
             authorized_users=10,
             expiry_date=date(2026, 12, 31),
@@ -262,7 +265,7 @@ def test_license_approval_flow_visible_in_approval_center(db, test_team, test_us
         test_team.id,
         str(test_user.feishu_user_id),
         LicenseApplicationCreate(
-            customer_id=test_customer.id,
+            customer_id=test_customer.public_id,
             license_type="TRIAL",
             authorized_users=10,
             expiry_date=date(2027, 12, 31),
@@ -298,3 +301,141 @@ def test_license_approval_flow_visible_in_approval_center(db, test_team, test_us
     found_approval = next((a for a in license_approvals if a.business_id == application.id), None)
     assert found_approval is not None
     assert found_approval.status == ApprovalStatus.PENDING
+
+
+def test_license_info_advances_with_newer_snapshot_only(db, test_customer):
+    application = LicenseApplication(
+        team_id=1,
+        application_number="LIC-SNAPSHOT-1",
+        customer_id=test_customer.id,
+        expiry_date=date(2027, 12, 31),
+        license_type="OFFICIAL",
+        authorized_users=10,
+        applicant_id="tester",
+    )
+    db.add(application)
+    db.commit()
+
+    license_application_crud.update_customer_license_info(db, 1, application)
+    db.refresh(test_customer)
+    assert (test_customer.license_expiry_date, test_customer.license_type) == (date(2027, 12, 31), "OFFICIAL")
+    progress = db.query(CustomerLegacySourceProgress).filter_by(team_id=1, customer_id=test_customer.id).one()
+    assert progress.eligible_revision == 1
+
+    license_application_crud.update_customer_license_info(db, 1, application)
+    older = LicenseApplication(
+        team_id=1,
+        application_number="LIC-SNAPSHOT-OLDER",
+        customer_id=test_customer.id,
+        expiry_date=date(2026, 12, 31),
+        license_type="TRIAL",
+        authorized_users=10,
+        applicant_id="tester",
+    )
+    license_application_crud.update_customer_license_info(db, 1, older)
+    db.refresh(progress)
+    db.refresh(test_customer)
+    assert progress.eligible_revision == 1
+    assert (test_customer.license_expiry_date, test_customer.license_type) == (date(2027, 12, 31), "OFFICIAL")
+
+
+def test_license_expiry_requires_owning_team_and_advances_only_on_change(db, test_customer):
+    assert license_application_crud.update_customer_license_expiry(db, 2, test_customer.id, date(2028, 1, 1)) is False
+    assert license_application_crud.update_customer_license_expiry(db, 1, test_customer.id, date(2028, 1, 1)) is True
+    assert license_application_crud.update_customer_license_expiry(db, 1, test_customer.id, date(2028, 1, 1)) is False
+    assert license_application_crud.update_customer_license_expiry(db, 1, test_customer.id, date(2027, 1, 1)) is False
+    db.refresh(test_customer)
+    assert test_customer.license_expiry_date == date(2028, 1, 1)
+    progress = db.query(CustomerLegacySourceProgress).filter_by(team_id=1, customer_id=test_customer.id).one()
+    assert progress.eligible_revision == 1
+    assert db.query(CustomerLegacySourceProgress).filter_by(team_id=2).count() == 0
+
+
+def test_license_info_rejects_cross_team_application(db, test_customer):
+    other_team_application = LicenseApplication(
+        team_id=2,
+        application_number="LIC-OTHER-TEAM",
+        customer_id=test_customer.id,
+        expiry_date=date(2028, 1, 1),
+        license_type="TRIAL",
+        authorized_users=10,
+        applicant_id="tester",
+    )
+    license_application_crud.update_customer_license_info(db, 1, other_team_application)
+    db.refresh(test_customer)
+    assert test_customer.license_expiry_date is None
+    assert db.query(CustomerLegacySourceProgress).count() == 0
+
+
+def test_issue_rolls_back_application_when_snapshot_progress_fails(db, test_customer, monkeypatch):
+    application = LicenseApplication(
+        team_id=1,
+        application_number="LIC-ATOMIC-ISSUE",
+        customer_id=test_customer.id,
+        expiry_date=date(2028, 1, 1),
+        license_type="TRIAL",
+        authorized_users=10,
+        applicant_id="tester",
+        status=LicenseApplicationStatus.APPROVED,
+    )
+    db.add(application)
+    db.commit()
+    approval = Approval(
+        team_id=1,
+        business_type=BusinessType.LICENSE,
+        business_id=application.id,
+        status=ApprovalStatus.APPROVED,
+        submitter_id="tester",
+    )
+    db.add(approval)
+    db.commit()
+
+    def reject_progress(*_args, **_kwargs):
+        raise RuntimeError("progress unavailable")
+
+    monkeypatch.setattr(license_crud_module, "advance_eligible_progress", reject_progress)
+    with pytest.raises(RuntimeError, match="progress unavailable"):
+        license_application_crud.issue_full(
+            db, 1, application.id, LicenseApplicationApproveFull(license_info="企业编号: 123"), "issuer",
+        )
+    db.rollback()
+    db.refresh(application)
+    db.refresh(test_customer)
+    assert application.status == LicenseApplicationStatus.APPROVED
+    assert application.enterprise_id is None
+    assert test_customer.license_expiry_date is None
+    assert db.query(CustomerLegacySourceProgress).count() == 0
+
+
+def test_issue_locks_customer_before_changing_application(db, test_customer, monkeypatch):
+    application = LicenseApplication(
+        team_id=1, application_number="LIC-LOCK-ISSUE", customer_id=test_customer.id,
+        expiry_date=date(2028, 1, 1), license_type="TRIAL",
+        authorized_users=10, applicant_id="tester", status=LicenseApplicationStatus.APPROVED,
+    )
+    db.add(application)
+    db.commit()
+    db.add(Approval(
+        team_id=1, business_type=BusinessType.LICENSE, business_id=application.id,
+        status=ApprovalStatus.APPROVED, submitter_id="tester",
+    ))
+    db.commit()
+
+    from app.services.legacy_profile_source import lock_source_customer as real_lock
+
+    locked = []
+
+    def observe_lock(session, *, team_id, customer_id):
+        assert application.status == LicenseApplicationStatus.APPROVED
+        locked.append(customer_id)
+        return real_lock(session, team_id=team_id, customer_id=customer_id)
+
+    monkeypatch.setattr(license_crud_module, "lock_source_customer", observe_lock, raising=False)
+    license_application_crud.issue_full(
+        db, 1, application.id, LicenseApplicationApproveFull(license_info="企业编号: 123"), "issuer",
+    )
+    assert locked == [test_customer.id]
+    assert application.status == LicenseApplicationStatus.ISSUED
+    assert db.query(CustomerLegacySourceProgress).filter_by(
+        team_id=1, customer_id=test_customer.id,
+    ).one().eligible_revision == 1

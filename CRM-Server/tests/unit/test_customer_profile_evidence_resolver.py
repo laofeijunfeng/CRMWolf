@@ -1,16 +1,19 @@
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 
 import pytest
-from sqlalchemy import BigInteger, create_engine
+from sqlalchemy import BigInteger, create_engine, event
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
 from app.models.customer import Customer
+from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
 from app.models.customer_activity import CustomerActivity
-from app.models.customer_fact import CustomerFact
+from app.models.customer_fact import CustomerFact, CustomerFactSource
 from app.models.deal_journey import CustomerDealJourneyEvent
+from app.models.opportunity import Opportunity
 from app.models.sales_commitment import FollowUpTask, SalesCommitment
 from app.services.customer_profile_evidence_resolver import CustomerProfileEvidenceResolver
 
@@ -27,12 +30,19 @@ def evidence_db():
         poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
+    @event.listens_for(engine, "before_cursor_execute", retval=True)
+    def _skip_sqlite_indexes(conn, cursor, statement, parameters, context, executemany):
+        return ("SELECT 1", ()) if statement.startswith("CREATE INDEX") else (statement, parameters)
+
     Base.metadata.create_all(
         engine,
         tables=[
             Customer.__table__,
+            CustomerActivityDeletionTombstone.__table__,
             CustomerActivity.__table__,
             CustomerDealJourneyEvent.__table__,
+            Opportunity.__table__,
+            CustomerFactSource.__table__,
             CustomerFact.__table__,
             SalesCommitment.__table__,
             FollowUpTask.__table__,
@@ -89,6 +99,39 @@ def evidence_db():
         )
     )
     session.add(
+        CustomerActivity(
+            id=12,
+            team_id=1,
+            customer_id=1,
+            activity_kind="meeting",
+            title="2.0 私有笔记",
+            source_content="绝不能暴露 2.0 内容",
+            submission_source="ASSISTANT_2",
+            submission_id="turn-12",
+            submission_fingerprint="a" * 64,
+            occurred_at=occurred_at,
+            creator_id="user_1",
+            owner_id="user_1",
+        )
+    )
+    session.add(
+        Opportunity(
+            id=301,
+            team_id=1,
+            customer_id=1,
+            opportunity_number="OPP301",
+            opportunity_name="服务器方案商机",
+            total_amount=Decimal("1000.00"),
+            user_count=1,
+            unit_price=Decimal("1000.00"),
+            license_type="SUBSCRIPTION",
+            purchase_type="NEW",
+            expected_closing_date=date(2026, 12, 31),
+            owner_id="user_1",
+            creator_id="user_1",
+        )
+    )
+    session.add(
         CustomerDealJourneyEvent(
             id=20,
             team_id=1,
@@ -113,6 +156,14 @@ def evidence_db():
             content="客户需要线上服务器",
             confidence=0.9,
             occurred_at=occurred_at,
+        )
+    )
+    session.add(
+        CustomerFactSource(
+            id=31,
+            fact_id=30,
+            source_type="customer_activity",
+            source_object_id="10",
         )
     )
     session.add(
@@ -231,8 +282,24 @@ def test_cross_team_and_cross_customer_references_cannot_be_resolved(evidence_db
     assert cross_team.availability == "UNAVAILABLE"
     assert wrong_customer.availability == "UNAVAILABLE"
 
+def test_assistant2_source_is_unavailable_even_with_cached_legacy_evidence(evidence_db):
+    resolved = CustomerProfileEvidenceResolver().resolve_one(
+        evidence_db,
+        team_id=1,
+        customer_id=1,
+        customer_public_id="cus_profile_evidence",
+        reference={"evidence_key": "activity:12", "source_type": "customer_activity", "source_id": 12,
+                   "title": "旧缓存", "snippet": "绝不能暴露 2.0 内容", "occurred_at": "2026-09-01T10:00:00"},
+    )
 
-def test_unknown_or_legacy_reference_preserves_registry_metadata_as_unavailable(evidence_db):
+    assert resolved.availability == "UNAVAILABLE"
+    assert resolved.snippet is None
+    assert resolved.link is None
+    assert "绝不能暴露" not in str(resolved)
+    assert resolved.occurred_at is None
+
+
+def test_unknown_or_legacy_reference_discards_cached_metadata_as_unavailable(evidence_db):
     resolver = CustomerProfileEvidenceResolver()
 
     resolved = resolver.resolve_one(
@@ -252,4 +319,4 @@ def test_unknown_or_legacy_reference_preserves_registry_metadata_as_unavailable(
     assert resolved.evidence_key == "legacy-1"
     assert resolved.source_id is None
     assert resolved.availability == "UNAVAILABLE"
-    assert resolved.occurred_at == "2026-08-28T08:00:00"
+    assert resolved.occurred_at is None

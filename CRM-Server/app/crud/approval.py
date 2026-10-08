@@ -720,7 +720,7 @@ class ApprovalCRUD:
             flow: 匹配到的审批流程
             submitter_id: 提交人系统用户ID
             submitter_name: 提交人姓名
-            auto_commit: 是否自动 commit（False 时不 commit，由调用方统一 commit）
+            auto_commit: True 由 create_approval_generic 统一提交并回写单据状态；False 由事务管理器提交
 
         Returns:
             Approval: 创建后的审批实例
@@ -729,10 +729,28 @@ class ApprovalCRUD:
         from app.services.approval_adapter import get_adapter
 
         adapter = get_adapter(business_type)
-        entity = adapter.get_entity(db, business_id, team_id)
+        with db.no_autoflush:
+            entity = adapter.get_entity(db, business_id, team_id)
         if entity is None:
             raise ValueError("业务单据不存在")
 
+        if auto_commit:
+            from app.services.approval_adapter import advance_approval_source, get_approval_customer_id
+            from app.services.legacy_profile_source import lock_source_customer
+
+            with db.no_autoflush:
+                customer_id = get_approval_customer_id(db, business_type, entity)
+            if customer_id is not None and business_type in {
+                BusinessType.CONTRACT, BusinessType.PAYMENT, BusinessType.INVOICE,
+                BusinessType.OPPORTUNITY, BusinessType.LICENSE,
+            }:
+                lock_source_customer(db, team_id=team_id, customer_id=customer_id)
+                with db.no_autoflush:
+                    entity = db.query(type(entity)).filter(
+                        type(entity).id == business_id, type(entity).team_id == team_id,
+                    ).populate_existing().with_for_update().one()
+                if get_approval_customer_id(db, business_type, entity) != customer_id:
+                    raise ValueError("业务单据所属客户已变更，请重新提交")
         # contract_id 是旧合同审批兼容字段；非合同审批统一依赖 business_type/business_id 定位。
         contract_id = business_id if business_type == BusinessType.CONTRACT else None
 
@@ -758,7 +776,24 @@ class ApprovalCRUD:
             submitter_id=submitter_id,
             submitter_name=submitter_name,
         )
+        if auto_commit:
+            source_state = (
+                getattr(entity, "approval_phase", None),
+                getattr(entity, "status", None),
+                getattr(entity, "confirmation_status", None),
+            )
 
+        if auto_commit:
+            from app.constants.approval_phase import ApprovalPhase
+            if hasattr(entity, "approval_phase"):
+                entity.approval_phase = ApprovalPhase.PENDING_REVIEW.value
+            adapter.on_submit(db, entity)
+            if source_state != (
+                getattr(entity, "approval_phase", None),
+                getattr(entity, "status", None),
+                getattr(entity, "confirmation_status", None),
+            ):
+                advance_approval_source(db, business_type, entity)
         db.add(db_approval)
         db.flush()
 
@@ -777,25 +812,30 @@ class ApprovalCRUD:
         if hasattr(entity, 'approval_id'):
             entity.approval_id = db_approval.id
 
-        # 注意：不调用 adapter.on_submit，因为 approval_phase 切换由 ApprovalTransactionManager 管理
-        # auto_commit=False 时，由调用方（ApprovalTransactionManager）统一 commit
-        # auto_commit=True 时（兼容旧调用方），此处自动 commit
-
-        if not auto_commit:
-            # 不 commit，不调用 on_submit，由 ApprovalTransactionManager 管理
-            return db_approval
-
-        # auto_commit=True 时，调用 adapter.on_submit 并 commit（兼容旧调用方）
-        adapter.on_submit(db, entity)
-        db.commit()
-        db.refresh(db_approval)
+        # False: ApprovalTransactionManager 切换单据状态并统一提交；True: wrapper 提交。
         return db_approval
+
+
 
     def approve(self, db: Session, approval: Approval, action_request: ApprovalActionRequest, approver_id: str, approver_name: str) -> Approval:
         from app.models.approval import ApprovalNode
-        from app.services.approval_adapter import get_adapter
+        from app.services.approval_adapter import advance_approval_source, get_adapter, get_approval_customer_id
+        from app.services.legacy_profile_source import lock_source_customer
         from app.constants.approval_phase import ApprovalPhase
 
+        adapter = get_adapter(approval.business_type)
+        with db.no_autoflush:
+            entity = adapter.get_entity(db, approval.business_id, approval.team_id)
+        with db.no_autoflush:
+            customer_id = get_approval_customer_id(db, approval.business_type, entity)
+        if customer_id is not None and approval.business_type in {
+            BusinessType.CONTRACT, BusinessType.PAYMENT, BusinessType.INVOICE,
+            BusinessType.OPPORTUNITY, BusinessType.LICENSE,
+        }:
+            lock_source_customer(db, team_id=approval.team_id, customer_id=customer_id)
+        approval = db.query(Approval).filter(
+            Approval.id == approval.id, Approval.team_id == approval.team_id,
+        ).populate_existing().with_for_update().one()
         # 乐观锁检查：防止并发审批冲突
         if action_request.updated_time is not None:
             if approval.updated_time != action_request.updated_time:
@@ -819,9 +859,14 @@ class ApprovalCRUD:
         )
         db.add(record)
 
-        # A5：经适配器回写单据状态；E4 守卫——单据已删则仅终结审批，不回写
-        adapter = get_adapter(approval.business_type)
-        entity = adapter.get_entity(db, approval.business_id, approval.team_id)
+        # The customer fence precedes this entity lock and all adapter side effects.
+        if entity is not None:
+            with db.no_autoflush:
+                entity = db.query(type(entity)).filter(
+                    type(entity).id == entity.id, type(entity).team_id == approval.team_id,
+                ).populate_existing().with_for_update().one()
+            if customer_id is not None and get_approval_customer_id(db, approval.business_type, entity) != customer_id:
+                raise ValueError("业务单据所属客户已变更，请刷新后重试")
 
         if action_request.action.value == ApprovalAction.APPROVE:
             next_node = db.query(ApprovalNode).filter(
@@ -834,6 +879,8 @@ class ApprovalCRUD:
                 # 多级审批中间节点通过：approval_phase 保持 PENDING_REVIEW
             else:
                 # 最后节点通过：Approval.status = APPROVED
+                if entity is not None:
+                    advance_approval_source(db, approval.business_type, entity)
                 approval.status = ApprovalStatus.APPROVED
                 if entity is not None:
                     # 切换 entity.approval_phase = APPROVED
@@ -843,6 +890,8 @@ class ApprovalCRUD:
 
         elif action_request.action.value == ApprovalAction.REJECT:
             # Approval.status = REJECTED
+            if entity is not None:
+                advance_approval_source(db, approval.business_type, entity)
             approval.status = ApprovalStatus.REJECTED
             if entity is not None:
                 # 切换 entity.approval_phase = REJECTED
@@ -855,9 +904,23 @@ class ApprovalCRUD:
         return approval
 
     def cancel(self, db: Session, approval: Approval, user_id: str) -> Approval:
-        from app.services.approval_adapter import get_adapter
+        from app.services.approval_adapter import advance_approval_source, get_adapter, get_approval_customer_id
+        from app.services.legacy_profile_source import lock_source_customer
         from app.constants.approval_phase import ApprovalPhase
 
+        adapter = get_adapter(approval.business_type)
+        with db.no_autoflush:
+            entity = adapter.get_entity(db, approval.business_id, approval.team_id)
+        with db.no_autoflush:
+            customer_id = get_approval_customer_id(db, approval.business_type, entity)
+        if customer_id is not None and approval.business_type in {
+            BusinessType.CONTRACT, BusinessType.PAYMENT, BusinessType.INVOICE,
+            BusinessType.OPPORTUNITY, BusinessType.LICENSE,
+        }:
+            lock_source_customer(db, team_id=approval.team_id, customer_id=customer_id)
+        approval = db.query(Approval).filter(
+            Approval.id == approval.id, Approval.team_id == approval.team_id,
+        ).populate_existing().with_for_update().one()
         if approval.status != ApprovalStatus.PENDING:
             raise ValueError("只能撤回审批中的审批流程")
 
@@ -866,10 +929,15 @@ class ApprovalCRUD:
 
         approval.status = ApprovalStatus.CANCELLED
 
-        # A5：经适配器回写单据状态；E4 守卫——单据已删则仅终结审批，不回写
-        adapter = get_adapter(approval.business_type)
-        entity = adapter.get_entity(db, approval.business_id, approval.team_id)
         if entity is not None:
+            with db.no_autoflush:
+                entity = db.query(type(entity)).filter(
+                    type(entity).id == entity.id, type(entity).team_id == approval.team_id,
+                ).populate_existing().with_for_update().one()
+            if customer_id is not None and get_approval_customer_id(db, approval.business_type, entity) != customer_id:
+                raise ValueError("业务单据所属客户已变更，请刷新后重试")
+        if entity is not None:
+            advance_approval_source(db, approval.business_type, entity)
             # 切换 entity.approval_phase = DRAFT（允许重新提交）
             if hasattr(entity, 'approval_phase'):
                 entity.approval_phase = ApprovalPhase.DRAFT.value

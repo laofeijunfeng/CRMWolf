@@ -354,6 +354,17 @@ class CustomerResponse(BaseModel):
     product_public_id: Optional[str] = Field(None, description="意向产品对外ID")
     product_name: Optional[str] = Field(None, description="意向产品名称")
     products: List[ProductIntentRef] = Field(default_factory=list, description="意向产品列表")
+    derived_status: Optional[str] = Field(
+        None,
+        description=(
+            "派生客户状态: not_started未启动/following跟进中/repurchasing复购中/"
+            "won已成交/lost已流失/public_pool公海"
+        ),
+    )
+    derived_status_label: Optional[str] = Field(None, description="派生客户状态中文标签")
+    derived_stage_hint: Optional[str] = Field(
+        None, description="进行中旅程进展小字,如「新购 · 初期交流」;终态为空"
+    )
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -436,7 +447,19 @@ class CustomerListResponse(CustomerResponse):
     collaborator_infos: List[OwnerInfo] = Field(default_factory=list, description="协作者信息")
     creator_info: Optional[OwnerInfo] = Field(None, description="创建人信息")
     default_procurement_method_info: Optional[ProcurementMethodInfo] = Field(None, description="默认采购方式信息")
-
+    primary_contact_name: Optional[str] = Field(None, description="主要联系人姓名")
+    primary_contact_mobile: Optional[str] = Field(None, description="主要联系人电话")
+    derived_status: Optional[str] = Field(
+        None,
+        description=(
+            "派生客户状态: not_started未启动/following跟进中/repurchasing复购中/"
+            "won已成交/lost已流失/public_pool公海"
+        ),
+    )
+    derived_status_label: Optional[str] = Field(None, description="派生客户状态中文标签")
+    derived_stage_hint: Optional[str] = Field(
+        None, description="进行中旅程进展小字,如「新购 · 初期交流」;终态为空"
+    )
 
 class CustomerIdentityCandidateResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -495,6 +518,17 @@ class CustomerDetailResponse(BaseModel):
     product_public_id: Optional[str] = Field(None, description="意向产品对外ID")
     product_name: Optional[str] = Field(None, description="意向产品名称")
     products: List[ProductIntentRef] = Field(default_factory=list, description="意向产品列表")
+    derived_status: Optional[str] = Field(
+        None,
+        description=(
+            "派生客户状态: not_started未启动/following跟进中/repurchasing复购中/"
+            "won已成交/lost已流失/public_pool公海"
+        ),
+    )
+    derived_status_label: Optional[str] = Field(None, description="派生客户状态中文标签")
+    derived_stage_hint: Optional[str] = Field(
+        None, description="进行中旅程进展小字,如「新购 · 初期交流」;终态为空"
+    )
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -5,6 +5,7 @@ from app.core.database import get_db
 from app.core.deps import get_current_user_team, require_permission
 from app.crud.role import role_crud
 from app.crud.permission import permission_crud
+from app.crud.team import user_team_crud
 from app.schemas.role import RoleCreate, RoleUpdate, RoleResponse, RoleWithPermissions, UserRoleCreate, RolePermissionsUpdate, RoleUserResponse
 from app.schemas.permission import PermissionResponse
 from app.services.permission_service import permission_service
@@ -128,6 +129,7 @@ def assign_role_to_user(
     role_id: int,
     user_role: UserRoleCreate,
     current_user = Depends(require_permission("role:manage")),
+    team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db)
 ):
     role = role_crud.get_by_id(db, role_id)
@@ -142,6 +144,11 @@ def assign_role_to_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="角色ID不匹配"
         )
+    if user_role.team_id != team_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="不能管理其他团队的角色")
+    if user_team_crud.get_by_user_and_team(db, user_role.user_id, team_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="团队成员不存在")
+
 
     result = role_crud.assign_to_user(db, user_role.user_id, user_role.role_id, user_role.team_id)
     # 清除用户权限缓存
@@ -155,6 +162,7 @@ def remove_role_from_user(
     user_id: int,
     team_id: int = Query(..., description="团队ID"),
     current_user = Depends(require_permission("role:manage")),
+    current_team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db)
 ):
     role = role_crud.get_by_id(db, role_id)
@@ -163,6 +171,11 @@ def remove_role_from_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="角色不存在"
         )
+    if team_id != current_team_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="不能管理其他团队的角色")
+    if user_team_crud.get_by_user_and_team(db, user_id, team_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="团队成员不存在")
+
 
     success = role_crud.remove_from_user(db, user_id, role_id, team_id)
     if not success:

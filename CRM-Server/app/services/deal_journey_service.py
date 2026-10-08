@@ -3,7 +3,6 @@ import logging
 from datetime import date, datetime, time
 from typing import Optional
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.deal_journey import (
@@ -18,6 +17,7 @@ from app.services.customer_intelligence_event_publication_service import (
     customer_intelligence_event_publication_service,
 )
 from app.services.customer_intelligence_event_service import JsonObject
+from app.services.legacy_profile_source import advance_eligible_progress, event_origin, lock_source_customer
 from app.utils.time import business_now
 
 logger = logging.getLogger(__name__)
@@ -49,6 +49,9 @@ class DealJourneyService:
         opportunity,
         actor_id: str | None = None,
     ) -> CustomerDealJourney:
+        lock_source_customer(db, team_id=opportunity.team_id, customer_id=opportunity.customer_id)
+        db.flush()
+        opportunity = self._lock_opportunity(db, opportunity)
         previous_deal_journey_id = self._positive_int(getattr(opportunity, "deal_journey_id", None))
         journey = None
         if previous_deal_journey_id:
@@ -59,7 +62,7 @@ class DealJourneyService:
                     CustomerDealJourney.team_id == opportunity.team_id,
                     CustomerDealJourney.customer_id == opportunity.customer_id,
                 )
-                .first()
+                .populate_existing().with_for_update().one_or_none()
             )
 
         if journey is None:
@@ -70,7 +73,7 @@ class DealJourneyService:
                     CustomerDealJourney.team_id == opportunity.team_id,
                     CustomerDealJourney.customer_id == opportunity.customer_id,
                 )
-                .first()
+                .populate_existing().with_for_update().one_or_none()
             )
 
         if journey is None:
@@ -88,6 +91,8 @@ class DealJourneyService:
             db.flush()
 
         opportunity.deal_journey_id = journey.id
+        if previous_deal_journey_id != int(journey.id):
+            advance_eligible_progress(db, team_id=opportunity.team_id, customer_id=opportunity.customer_id)
         if previous_deal_journey_id != int(journey.id):
             self.record_event(
                 db,
@@ -128,6 +133,8 @@ class DealJourneyService:
         Both sides receive an association event, allowing the old journey to
         be negatively re-projected and the new journey to be populated.
         """
+        lock_source_customer(db, team_id=opportunity.team_id, customer_id=opportunity.customer_id)
+        db.flush()
         opportunity = self._lock_opportunity(db, opportunity)
         current_version = int(getattr(opportunity, "version", 1) or 1)
         if expected_version is not None and current_version != expected_version:
@@ -144,7 +151,7 @@ class DealJourneyService:
                 CustomerDealJourney.team_id == opportunity.team_id,
                 CustomerDealJourney.customer_id == opportunity.customer_id,
             )
-            .first()
+            .populate_existing().with_for_update().one_or_none()
         )
         if target is None:
             raise ValueError("目标业务旅程不存在，或不属于当前客户")
@@ -154,6 +161,7 @@ class DealJourneyService:
         previous_id = self._positive_int(getattr(opportunity, "deal_journey_id", None))
         if previous_id == int(target.id):
             return target
+        advance_eligible_progress(db, team_id=opportunity.team_id, customer_id=opportunity.customer_id)
 
         previous = None
         if previous_id is not None:
@@ -164,7 +172,7 @@ class DealJourneyService:
                     CustomerDealJourney.team_id == opportunity.team_id,
                     CustomerDealJourney.customer_id == opportunity.customer_id,
                 )
-                .first()
+                .populate_existing().with_for_update().one_or_none()
             )
             if previous is not None and previous.primary_opportunity_id == opportunity.id:
                 previous.primary_opportunity_id = None
@@ -231,6 +239,8 @@ class DealJourneyService:
         expected_version: int | None = None,
     ) -> CustomerDealJourney | None:
         """Remove the current journey association and retain all evidence."""
+        lock_source_customer(db, team_id=opportunity.team_id, customer_id=opportunity.customer_id)
+        db.flush()
         opportunity = self._lock_opportunity(db, opportunity)
         current_version = int(getattr(opportunity, "version", 1) or 1)
         if expected_version is not None and current_version != expected_version:
@@ -243,6 +253,7 @@ class DealJourneyService:
         previous_id = self._positive_int(getattr(opportunity, "deal_journey_id", None))
         if previous_id is None:
             return None
+        advance_eligible_progress(db, team_id=opportunity.team_id, customer_id=opportunity.customer_id)
 
         previous = (
             db.query(CustomerDealJourney)
@@ -251,7 +262,7 @@ class DealJourneyService:
                 CustomerDealJourney.team_id == opportunity.team_id,
                 CustomerDealJourney.customer_id == opportunity.customer_id,
             )
-            .first()
+            .populate_existing().with_for_update().one_or_none()
         )
         if previous is not None and previous.primary_opportunity_id == opportunity.id:
             previous.primary_opportunity_id = None
@@ -314,24 +325,28 @@ class DealJourneyService:
         if not isinstance(opportunity, Opportunity):
             return opportunity
 
-        locked = (
-            db.query(Opportunity)
-            .filter(
-                Opportunity.id == opportunity.id,
-                Opportunity.team_id == opportunity.team_id,
-                Opportunity.customer_id == opportunity.customer_id,
+        with db.no_autoflush:
+            locked = (
+                db.query(Opportunity)
+                .filter(
+                    Opportunity.id == opportunity.id,
+                    Opportunity.team_id == opportunity.team_id,
+                    Opportunity.customer_id == opportunity.customer_id,
+                )
+                .populate_existing().with_for_update().one_or_none()
             )
-            .with_for_update()
-            .one_or_none()
-        )
-        return locked or opportunity
+        if locked is None:
+            raise ValueError("商机不存在，或不属于当前客户")
+        return locked
 
     def infer_for_customer(self, db: Session, customer_id: int, team_id: int) -> CustomerDealJourney | None:
+        lock_source_customer(db, team_id=team_id, customer_id=customer_id)
+        db.flush()
         journeys = db.query(CustomerDealJourney).filter(
             CustomerDealJourney.customer_id == customer_id,
             CustomerDealJourney.team_id == team_id,
             CustomerDealJourney.status.notin_([DealJourneyStatus.LOST, DealJourneyStatus.COMPLETED]),
-        ).limit(2).all()
+        ).limit(2).populate_existing().with_for_update().all()
         if len(journeys) == 1:
             return journeys[0]
         return None
@@ -354,28 +369,57 @@ class DealJourneyService:
     ) -> Optional[CustomerDealJourneyEvent]:
         if not deal_journey_id:
             return None
+        # Serialize both source lookup and event insertion with legacy publication.
+        lock_source_customer(db, team_id=team_id, customer_id=customer_id)
+        # Include caller changes only after the customer fence, then use current
+        # locking reads even when this session began its RR snapshot earlier.
+        db.flush()
+        journey = (
+            db.query(CustomerDealJourney)
+            .filter(
+                CustomerDealJourney.id == deal_journey_id,
+                CustomerDealJourney.team_id == team_id,
+                CustomerDealJourney.customer_id == customer_id,
+            )
+            .populate_existing().with_for_update().one_or_none()
+        )
+        if journey is None:
+            raise ValueError("业务旅程不存在，或不属于当前客户")
 
         normalized_event_time = self._as_datetime(event_time) or business_now()
         event_query = db.query(CustomerDealJourneyEvent).filter(
+            CustomerDealJourneyEvent.team_id == team_id,
+            CustomerDealJourneyEvent.customer_id == customer_id,
             CustomerDealJourneyEvent.deal_journey_id == deal_journey_id,
             CustomerDealJourneyEvent.event_type == event_type,
             CustomerDealJourneyEvent.source_type == source_type,
             CustomerDealJourneyEvent.source_id == source_id,
         )
-        existing = event_query.first()
-        if event_type == DealJourneyEventType.ASSOCIATION_CHANGED and metadata:
-            # The same opportunity may move A -> B -> A.  Association history
-            # must retain each distinct transition while retries of one
-            # transition remain idempotent.
-            desired_metadata = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
-            existing = next(
-                (
-                    candidate
-                    for candidate in event_query.order_by(CustomerDealJourneyEvent.id.desc()).all()
-                    if candidate.metadata_json == desired_metadata
-                ),
-                None,
-            )
+        # A missing range SELECT FOR UPDATE locks the next-key gap on every
+        # event index; independent customers can then deadlock while inserting.
+        # The customer fence serializes same-customer writers. Resolve IDs
+        # without gap locks, then lock only an existing primary-key record.
+        association = event_type == DealJourneyEventType.ASSOCIATION_CHANGED and metadata
+        desired_metadata = json.dumps(metadata, ensure_ascii=False, sort_keys=True) if association else None
+        with db.no_autoflush:
+            local_ids = [row[0] for row in event_query.with_entities(CustomerDealJourneyEvent.id).all()]
+            committed_ids = []
+            if db.get_bind().dialect.name == "mysql" and (association or not local_ids):
+                # An earlier RR snapshot may not see a recently committed
+                # event. A fresh read-only connection sees it after the
+                # customer lock, without locking an absent index gap.
+                with db.get_bind().connect() as reader:
+                    committed_ids = [row[0] for row in reader.execute(
+                        event_query.with_entities(CustomerDealJourneyEvent.id).statement
+                    )]
+            existing = None
+            for event_id in sorted(set(local_ids + committed_ids), reverse=bool(association)):
+                candidate = db.query(CustomerDealJourneyEvent).filter_by(
+                    id=event_id, team_id=team_id, customer_id=customer_id,
+                ).populate_existing().with_for_update().one_or_none()
+                if candidate is not None and (not association or candidate.metadata_json == desired_metadata):
+                    existing = candidate
+                    break
         if existing:
             self._upsert_event_evidence(db, existing)
             if enqueue_customer_intelligence:
@@ -395,13 +439,14 @@ class DealJourneyService:
             metadata_json=json.dumps(metadata, ensure_ascii=False, sort_keys=True) if metadata else None,
         )
         db.add(event)
+        if event_origin(db, event, team_id, customer_id, current=True):
+            advance_eligible_progress(db, team_id=team_id, customer_id=customer_id)
         db.flush()
         self._upsert_event_evidence(db, event)
         if enqueue_customer_intelligence:
             self._enqueue_customer_intelligence_refresh(db, event)
 
-        journey = db.query(CustomerDealJourney).filter(CustomerDealJourney.id == deal_journey_id).first()
-        if journey and (journey.last_event_at is None or normalized_event_time > journey.last_event_at):
+        if journey.last_event_at is None or normalized_event_time > journey.last_event_at:
             journey.last_event_at = normalized_event_time
         return event
 
@@ -542,46 +587,87 @@ class DealJourneyService:
 
         from app.models.contract import Contract, PaymentStatus
         from app.models.opportunity import Opportunity
-        from app.models.payment import PaymentConfirmationStatus, PaymentRecord
+        from app.models.payment import PaymentConfirmationStatus, PaymentPlan, PaymentRecord
 
-        journey = db.query(CustomerDealJourney).filter(CustomerDealJourney.id == deal_journey_id).first()
-        if not journey:
+        # Resolve only the ownership key before locking: a journey row lock here
+        # would invert the customer -> source order used by payment writers.
+        with db.no_autoflush:
+            owner = db.query(CustomerDealJourney.team_id, CustomerDealJourney.customer_id).filter(
+                CustomerDealJourney.id == deal_journey_id,
+            ).one_or_none()
+        if owner is None:
+            return None
+        team_id, customer_id = owner
+        lock_source_customer(db, team_id=team_id, customer_id=customer_id)
+        # Include the caller's source changes in this transaction, then reload
+        # the current row under its lock rather than trusting a cached journey.
+        db.flush()
+        journey = db.query(CustomerDealJourney).filter(
+            CustomerDealJourney.id == deal_journey_id,
+            CustomerDealJourney.team_id == team_id,
+            CustomerDealJourney.customer_id == customer_id,
+        ).populate_existing().with_for_update().one_or_none()
+        if journey is None:
             return None
 
         opportunity = None
         if journey.primary_opportunity_id:
-            opportunity = db.query(Opportunity).filter(Opportunity.id == journey.primary_opportunity_id).first()
+            opportunity = db.query(Opportunity).filter(
+                Opportunity.id == journey.primary_opportunity_id,
+                Opportunity.team_id == team_id,
+                Opportunity.customer_id == customer_id,
+            ).populate_existing().with_for_update().one_or_none()
 
         if opportunity and opportunity.status == 2:
-            journey.status = DealJourneyStatus.LOST
-            journey.closed_at = self._closing_time(opportunity) or business_now()
-            return journey
-
-        contracts = db.query(Contract).filter(
-            Contract.deal_journey_id == journey.id,
-            Contract.deleted_at.is_(None),
-        ).all()
-        if contracts and all(contract.payment_status == PaymentStatus.COMPLETED for contract in contracts):
-            last_confirmed_at = db.query(func.max(PaymentRecord.confirmed_time)).filter(
-                PaymentRecord.deal_journey_id == journey.id,
-                PaymentRecord.confirmation_status == PaymentConfirmationStatus.CONFIRMED,
-            ).scalar()
-            if last_confirmed_at is None:
-                last_payment_date = db.query(func.max(PaymentRecord.payment_date)).filter(
-                    PaymentRecord.deal_journey_id == journey.id,
-                    PaymentRecord.confirmation_status == PaymentConfirmationStatus.CONFIRMED,
-                ).scalar()
-                last_confirmed_at = self._as_datetime(last_payment_date)
-
-            journey.status = DealJourneyStatus.COMPLETED
-            journey.closed_at = self._as_datetime(last_confirmed_at) or business_now()
-            return journey
-
-        if opportunity and opportunity.status == 1:
-            journey.status = DealJourneyStatus.WON
+            status = DealJourneyStatus.LOST
+            closed_at = self._closing_time(opportunity)
+            if closed_at is None:
+                closed_at = journey.closed_at if journey.status == status else business_now()
         else:
-            journey.status = DealJourneyStatus.ACTIVE
-        journey.closed_at = None
+            contracts = db.query(Contract).filter(
+                Contract.deal_journey_id == journey.id,
+                Contract.team_id == team_id,
+                Contract.customer_id == customer_id,
+                Contract.deleted_at.is_(None),
+            ).populate_existing().with_for_update().all()
+            if contracts and all(contract.payment_status == PaymentStatus.COMPLETED for contract in contracts):
+                confirmed_records = db.query(PaymentRecord.confirmed_time, PaymentRecord.payment_date).join(
+                    PaymentPlan, PaymentPlan.id == PaymentRecord.payment_plan_id,
+                ).join(Contract, Contract.id == PaymentPlan.contract_id).filter(
+                    PaymentRecord.deal_journey_id == journey.id,
+                    PaymentRecord.team_id == team_id,
+                    PaymentRecord.confirmation_status == PaymentConfirmationStatus.CONFIRMED,
+                    PaymentPlan.team_id == team_id,
+                    Contract.team_id == team_id,
+                    Contract.customer_id == customer_id,
+                    Contract.deleted_at.is_(None),
+                ).with_for_update().all()
+                last_confirmed_at = max(
+                    (row.confirmed_time for row in confirmed_records if row.confirmed_time is not None),
+                    default=None,
+                )
+                if last_confirmed_at is None:
+                    last_payment_date = max(
+                        (row.payment_date for row in confirmed_records if row.payment_date is not None),
+                        default=None,
+                    )
+                    last_confirmed_at = self._as_datetime(last_payment_date)
+                status = DealJourneyStatus.COMPLETED
+                closed_at = self._as_datetime(last_confirmed_at)
+                if closed_at is None:
+                    closed_at = journey.closed_at if journey.status == status else business_now()
+            else:
+                status = DealJourneyStatus.WON if opportunity and opportunity.status == 1 else DealJourneyStatus.ACTIVE
+                closed_at = None
+
+        # Shared journey aggregate fields are deliberately not a legacy profile
+        # contribution: context derives status from eligible events/opportunity.
+        # The source writer advances its own progress; an aggregate replay must
+        # neither add a revision nor manufacture a fresh closure timestamp.
+        if journey.status != status:
+            journey.status = status
+        if journey.closed_at != closed_at:
+            journey.closed_at = closed_at
         return journey
 
     def _closing_time(self, opportunity) -> Optional[datetime]:

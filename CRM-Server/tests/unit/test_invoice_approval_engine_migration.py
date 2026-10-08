@@ -45,17 +45,23 @@ from app.models.invoice import (
 from app.models.user import User, UserStatus
 from app.schemas.approval import ApprovalActionRequest
 
+from app.models.customer import Customer
+from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
+
 
 # ---------- DB fixtures ----------------------------------------------------
 
 @pytest.fixture(scope="function")
 def db_session():
+    # Approval transitions and issuance share a real customer revision row.
     engine = create_engine(
         "sqlite:///:memory:",
         poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
     tables = [
+        Customer.__table__,
+        CustomerLegacySourceProgress.__table__,
         User.__table__,
         InvoiceApplication.__table__,
         ApprovalFlow.__table__,
@@ -66,6 +72,8 @@ def db_session():
     Base.metadata.create_all(engine, tables=tables)
     Session = sessionmaker(bind=engine)
     session = Session()
+    session.add(Customer(id=1, team_id=1, account_name="测试客户", city="北京", creator_id="1"))
+    session.commit()
     yield session
     session.close()
     engine.dispose()

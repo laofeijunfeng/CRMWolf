@@ -7,6 +7,7 @@ import type { AssistantTaskView } from '@/schemas/assistant-contracts'
 const meetingTask: AssistantTaskView = {
   public_id: 'ast_m1',
   status: 'ACTIVE',
+  proposals_enabled: true,
   goal: '今天下午的线上会议原文',
   activity_kind: 'ONLINE_MEETING',
   draft: {
@@ -49,6 +50,7 @@ describe('MeetingConfirmationCard', () => {
     const cancel = wrapper.findAll('button').find((b) => b.text() === '取消')
     expect(confirm).toBeDefined()
     expect(cancel).toBeDefined()
+    expect(wrapper.text()).toContain('纪要有误？请在下方输入更正后发送')
   })
 
   it('renders read-only when replayed', () => {
@@ -57,6 +59,7 @@ describe('MeetingConfirmationCard', () => {
     })
     expect(wrapper.text()).toContain('历史记录')
     expect(wrapper.findAll('button').filter((b) => b.text() === '确认写入').length).toBe(0)
+    expect(wrapper.text()).not.toContain('纪要有误？请在下方输入更正后发送')
   })
 
   it('falls back gracefully when meeting slots are empty', () => {
@@ -83,7 +86,7 @@ describe('MeetingConfirmationCard', () => {
     }
     const waiting = {
       type: 'CONFIRMATION' as const, field: 'activity_write', question_id: 'q1', prompt: '确认写入？',
-      confirmation_payload: { customer_name: '原客户', activity_kind: 'ONLINE_MEETING', title: '原主题', summary: '原摘要', content_json: {}, source_content: '原文记录', score: 88, score_reason: '依据', next_action: '原行动' }
+      confirmation_payload: { kind: 'activity_write' as const, activity: { customer_name: '原客户', activity_kind: 'ONLINE_MEETING', title: '原主题', summary: '原摘要', content_json: {}, source_content: '原文记录', score: 88, score_reason: '依据', next_action: '原行动' } }
     }
     const wrapper = mount(MeetingConfirmationCard, { props: { task, waiting, replayed: false, busy: false } })
     expect(wrapper.text()).toContain('原客户')
@@ -100,7 +103,7 @@ describe('MeetingConfirmationCard', () => {
     const task: AssistantTaskView = { ...meetingTask, draft: { ...meetingTask.draft, content: { status: 'CANDIDATE', value: '后来讨论' }, next_action: { status: 'CANDIDATE', value: '后来行动' } } }
     const waiting = {
       type: 'CONFIRMATION' as const, field: 'activity_write', question_id: 'q1', prompt: '确认写入？',
-      confirmation_payload: { customer_name: '睿狐', activity_kind: 'ONLINE_MEETING', title: '会面', summary: null, content_json: {}, source_content: '原文', score: 82, score_reason: '依据', next_action: null }
+      confirmation_payload: { kind: 'activity_write' as const, activity: { customer_name: '睿狐', activity_kind: 'ONLINE_MEETING', title: '会面', summary: null, content_json: {}, source_content: '原文', score: 82, score_reason: '依据', next_action: null } }
     }
     const wrapper = mount(MeetingConfirmationCard, { props: { task, waiting, replayed: false, busy: false } })
     expect(wrapper.text()).not.toContain('后来讨论')

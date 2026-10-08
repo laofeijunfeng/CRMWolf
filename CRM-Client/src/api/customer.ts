@@ -232,11 +232,15 @@ export interface CustomerResponse {
   creator_info?: UserBasicInfo
   product_public_id?: string | null
   product_name?: string | null
+  primary_contact_name?: string | null
+  primary_contact_mobile?: string | null
   products?: { public_id: string; name: string }[]
+  derived_status?: string | null
+  derived_status_label?: string | null
+  derived_stage_hint?: string | null
 }
 
 export interface ContactResponse {
-  id: number
   customer_id: string
   name: string
   gender: number | null

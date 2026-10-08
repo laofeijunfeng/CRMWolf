@@ -523,13 +523,16 @@ class CustomerActivityWriteService:
         behind the same application seam as create/update. The caller only
         needs to kick the returned request after this method succeeds.
         """
-        is_assistant2 = activity.submission_source == CustomerActivitySubmissionSource.ASSISTANT_2.value
 
         from app.models.sales_commitment import FollowUpTaskProjectionTrigger
         from app.services.follow_up_task_projection_service import follow_up_task_projection_service
 
-        activity_id = int(activity.id)
         try:
+            # A loaded activity may come from an earlier RR snapshot. Resolve
+            # its current source before deciding which downstream work to write.
+            activity = self.activity_crud._lock_current_activity(db, activity)
+            activity_id = int(activity.id)
+            is_assistant2 = activity.submission_source == CustomerActivitySubmissionSource.ASSISTANT_2.value
             if not is_assistant2:
                 follow_up_task_projection_service.run_activity_projection(
                     db,

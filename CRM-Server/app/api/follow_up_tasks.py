@@ -117,6 +117,7 @@ def _follow_up_export_row(item: dict[str, Any]) -> dict[str, object]:
     return {
         "public_id": item.get("public_id"),
         "customer_name": customer.get("name") if customer else None,
+        "product_name": customer.get("product_name") if customer else None,
         "tracking_content": _follow_up_tracking_content(item),
         "status_label": _follow_up_status_label(item),
         "tracking_time": tracking_time,

@@ -18,6 +18,7 @@ import { Badge } from '@/components/ui/badge'
 // 状态类型定义
 export type LeadStatus = 'new' | 'following' | 'converted' | 'invalid'
 export type CustomerStatus = 'following' | 'won' | 'lost' | 'expired'
+export type CustomerDerivedStatusKey = 'not_started' | 'following' | 'repurchasing' | 'won' | 'lost' | 'public_pool'
 export type OpportunityStatus = 'active' | 'won' | 'lost'
 export type ContractStatus = 'draft' | 'pending_review' | 'signed' | 'expired' | 'terminated'
 export type InvoiceStatus = 'draft' | 'pending_review' | 'approved' | 'rejected' | 'issued' | 'cancelled'
@@ -32,7 +33,7 @@ export type ProcurementTypeType = 'NEW' | 'RENEWAL' | 'EXPANSION'
 export type IndustryType = 'IT/互联网' | '金融' | '教育' | '医疗' | '制造' | '零售' | '房地产' | '其他'
 export type CompanyScaleType = '1-50人' | '51-200人' | '201-500人' | '501-1000人' | '1000人以上'
 
-type StatusType = 'lead' | 'customer' | 'opportunity' | 'contract' | 'invoice' | 'paymentPlan' | 'paymentRecord' | 'generic' | 'source' | 'authorizationMode' | 'procurementType' | 'industry' | 'companyScale'
+type StatusType = 'lead' | 'customer' | 'customerDerived' | 'opportunity' | 'contract' | 'invoice' | 'paymentPlan' | 'paymentRecord' | 'generic' | 'source' | 'authorizationMode' | 'procurementType' | 'industry' | 'companyScale'
 type StatusColor = 'neutral' | 'info' | 'warning' | 'success' | 'danger'
 
 interface StatusConfigItem {
@@ -63,6 +64,14 @@ const STATUS_CONFIG = {
     won: { label: '已赢单', color: 'success' },
     lost: { label: '已输单', color: 'danger' },
     expired: { label: '已失效', color: 'danger' }
+  },
+  customerDerived: {
+    not_started: { label: '未启动', color: 'neutral' },
+    following: { label: '跟进中', color: 'info' },
+    repurchasing: { label: '复购中', color: 'success' },
+    won: { label: '已成交', color: 'success' },
+    lost: { label: '已流失', color: 'danger' },
+    public_pool: { label: '公海', color: 'neutral' }
   },
   opportunity: {
     active: { label: '跟进中', color: 'warning' },
@@ -168,6 +177,7 @@ const ariaLabel = computed(() => config.value.label)
     role="status"
     :aria-label="ariaLabel"
   >
+    <span class="status-badge-dot" aria-hidden="true"></span>
     {{ config.label }}
   </Badge>
 </template>
@@ -185,6 +195,15 @@ const ariaLabel = computed(() => config.value.label)
   border-radius: $wolf-radius-full-v2;
   white-space: nowrap;
   border: none;
+}
+
+.status-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+  margin-right: 6px;
 }
 
 .status-badge--small {

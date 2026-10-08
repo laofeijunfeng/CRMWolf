@@ -669,6 +669,32 @@
         "not_in"
       ]
     },
+    "primary_contact_mobile": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "primary_contact_name": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
     "product_name": {
       "type": "text",
       "filterable": true,
@@ -714,19 +740,28 @@
       "filterable": true,
       "sortable": true,
       "ops": [
-        "contains",
         "eq",
         "in",
-        "is_empty",
-        "is_not_empty",
         "neq",
-        "not_contains",
         "not_in"
       ]
     }
   },
   "follow_up_tasks": {
     "customer_name": {
+      "type": "text",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "contains",
+        "eq",
+        "is_empty",
+        "is_not_empty",
+        "neq",
+        "not_contains"
+      ]
+    },
+    "product_name": {
       "type": "text",
       "filterable": true,
       "sortable": true,
@@ -1137,6 +1172,18 @@
       ]
     },
     "expected_closing_date": {
+      "type": "date",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "after",
+        "before",
+        "eq",
+        "is_empty",
+        "is_not_empty"
+      ]
+    },
+    "last_modified_time": {
       "type": "date",
       "filterable": true,
       "sortable": true,

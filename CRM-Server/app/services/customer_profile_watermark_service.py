@@ -18,15 +18,27 @@ class WatermarkComparison:
 
 
 class CustomerProfileWatermarkService:
-    """Own watermark ordering so publication cannot regress on stale runs.
+    """Compare complete eligible-source snapshots by their monotonic revision.
 
-    Watermarks are intentionally schema-light: numeric IDs are compared as
-    monotonic counters, while ISO timestamps are compared chronologically (or
-    lexically when they are not parseable). Unknown values are treated as
-    equal unless the candidate is missing a value known by the current pointer.
+    Live IDs and timestamps can decrease after deletion; they describe the
+    current view, not its ordering. Sparse refresh events are scheduling
+    metadata, never a replacement for a complete source snapshot.
     """
 
     def compare(self, candidate: Mapping[str, object], known: Mapping[str, object]) -> WatermarkComparison:
+        candidate_full = self._is_complete_source(candidate)
+        known_full = self._is_complete_source(known)
+        if candidate_full and known_full:
+            if candidate["source_policy_version"] != known["source_policy_version"]:
+                return WatermarkComparison(is_behind=True, regressed_keys=("source_policy_version",))
+            keys = ("eligible_revision", "deletion_revision")
+            advanced = tuple(key for key in keys if candidate[key] > known[key])
+            regressed = tuple(key for key in keys if candidate[key] < known[key])
+            return WatermarkComparison(bool(regressed), advanced, regressed)
+        if candidate_full:
+            return WatermarkComparison(False, advanced_keys=("eligible_revision",))
+        if known_full:
+            return WatermarkComparison(True, missing_keys=("eligible_revision", "source_snapshot_hash"))
         advanced: list[str] = []
         regressed: list[str] = []
         missing: list[str] = []
@@ -53,6 +65,13 @@ class CustomerProfileWatermarkService:
         )
 
     def merge(self, known: Mapping[str, object], candidate: Mapping[str, object]) -> dict[str, object]:
+        if self._is_complete_source(candidate):
+            if self._is_complete_source(known) and self.compare(candidate, known).is_behind:
+                return dict(known)
+            return dict(candidate)
+        if self._is_complete_source(known):
+            return {**known, **{key: value for key, value in candidate.items()
+                              if key in {"event_key", "trigger_type", "occurred_at"}}}
         result = dict(known)
         for key, value in candidate.items():
             relation = self._compare_value(value, result.get(key)) if key in result else 1
@@ -62,6 +81,15 @@ class CustomerProfileWatermarkService:
 
     def is_behind(self, candidate: Mapping[str, object], known: Mapping[str, object]) -> bool:
         return self.compare(candidate, known).is_behind
+
+    @staticmethod
+    def _is_complete_source(watermark: Mapping[str, object]) -> bool:
+        return (
+            isinstance(watermark.get("eligible_revision"), int)
+            and isinstance(watermark.get("deletion_revision"), int)
+            and isinstance(watermark.get("source_policy_version"), str)
+            and isinstance(watermark.get("source_snapshot_hash"), str)
+        )
 
     @classmethod
     def _compare_value(cls, left: object, right: object) -> int | None:

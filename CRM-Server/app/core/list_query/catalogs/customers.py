@@ -13,9 +13,14 @@ from app.core.list_query.catalogs.common import (
     user_name_expression,
 )
 from app.core.list_query.types import JoinSpec, SortCondition
-from app.models.customer import Customer, CustomerProduct, CustomerStatus
+from app.models.customer import Contact, Customer, CustomerProduct
 from app.models.procurement import ProcurementMethod
 from app.models.product import Product
+from app.services.customer_derived_status import (
+    CustomerDerivedStatus,
+    derived_status_expression,
+    derived_status_predicate,
+)
 
 
 def _customer_product_name_expression():
@@ -27,11 +32,26 @@ def _customer_product_name_expression():
         .limit(1)
         .scalar_subquery()
     )
+def _primary_contact_expression(column):
+    return (
+        select(column)
+        .where(
+            Contact.customer_id == Customer.id,
+            Contact.team_id == Customer.team_id,
+            Contact.is_primary == 1,
+        )
+        .order_by(Contact.id.asc())
+        .limit(1)
+        .scalar_subquery()
+    )
+
 
 CUSTOMERS_LIST_QUERY_CATALOG = ListQueryCatalog(
     name="customers",
     fields=[
         ListQueryField(key="account_name", type="text", expression=Customer.account_name),
+        ListQueryField(key="primary_contact_name", type="text", expression=_primary_contact_expression(Contact.name)),
+        ListQueryField(key="primary_contact_mobile", type="text", expression=_primary_contact_expression(Contact.mobile)),
         person_field("owner_id", Customer.owner_id),
         ListQueryField(
             key="collaborators",
@@ -49,9 +69,11 @@ CUSTOMERS_LIST_QUERY_CATALOG = ListQueryCatalog(
         ListQueryField(
             key="status",
             type="enum",
-            expression=Customer.status,
-            enum_type=CustomerStatus,
+            enum_type=CustomerDerivedStatus,
             enum_persist="value",
+            expression_builder=lambda _ctx: derived_status_expression(),
+            predicate_builder=derived_status_predicate,
+            allowed_ops=["eq", "neq", "in", "not_in"],
         ),
         ListQueryField(
             key="license_status",

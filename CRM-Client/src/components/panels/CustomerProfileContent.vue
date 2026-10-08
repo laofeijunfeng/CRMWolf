@@ -133,12 +133,16 @@ const currentStage = computed(() => {
   const activeStage = activeJourneys.value[0]?.['current_stage']
   return stringValue(activeStage ?? journeys.value[0]?.['current_stage'])
 })
-const customerStatusLabel = (value: unknown): string => ({
-  '0': '跟进中',
-  '1': '已成交',
-  '2': '已输单',
-  '3': '已沉寂'
-}[stringValue(value)] ?? stringValue(value))
+const customerStatusLabel = (customer: Record<string, unknown>): string => {
+  const derived = stringValue(customer['derived_status_label'])
+  if (derived !== '') return derived
+  return ({
+    '0': '跟进中',
+    '1': '已成交',
+    '2': '已输单',
+    '3': '公海'
+  }[stringValue(customer['status'])] ?? stringValue(customer['status']))
+}
 const journeyStatusLabel = computed(() => {
   if (activeJourneys.value.length > 0) return '业务旅程进行中'
   if (journeys.value.length > 0) return '业务旅程已记录'
@@ -158,7 +162,7 @@ const badgeTone = (value: string): string => {
   return 'profile-badge--neutral'
 }
 const headerStatusItems = computed(() => [
-  customerStatusLabel(customer.value['status']),
+  customerStatusLabel(customer.value),
   stringValue(customer.value['industry_name']) || stringValue(customer.value['industry']),
   licenseLabel.value,
   journeyStatusLabel.value
@@ -175,8 +179,7 @@ const overviewRows = computed<ProfileRow[]>(() => [
   { label: '所属行业', value: stringValue(customer.value['industry_name']) || stringValue(customer.value['industry']) },
   { label: '所在城市', value: stringValue(customer.value['city']) },
   { label: '公司规模', value: stringValue(customer.value['company_scale']) },
-  { label: '客户来源', value: stringValue(customer.value['source']) },
-  { label: '客户状态', value: customerStatusLabel(customer.value['status']) },
+  { label: '客户状态', value: customerStatusLabel(customer.value) },
   { label: '当前产品状态', value: licenseLabel.value },
   { label: '研发侧规模', value: stringValue(customer.value['研发侧规模']) || stringValue(customer.value['team_size']) },
   { label: '当前业务旅程', value: activeJourneys.value.length > 1

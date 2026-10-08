@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
@@ -24,6 +25,9 @@ class _FakeQuery:
 
     def options(self, *args, **kwargs):
         return self
+    def populate_existing(self):
+        return self
+
 
     def with_for_update(self):
         self._locked = True
@@ -35,6 +39,9 @@ class _FakeQuery:
     def all(self):
         return list(self._rows)
 
+    def scalar(self):
+        return self._value
+
 
 class _FakeDb:
     def __init__(self, *, contract, customer, user, existing_plans=None):
@@ -42,16 +49,21 @@ class _FakeDb:
         self.customer = customer
         self.user = user
         self.existing_plans = list(existing_plans or [])
+        self.no_autoflush = nullcontext()
         self._next_id = 100
         self.added = []
         self.commits = 0
         self.locked_contracts = []
 
     def query(self, model):
+        if model is PaymentPlan.contract_id:
+            return _FakeQuery(self.contract.id)
         if model is PaymentPlan:
             return _FakeQuery(self.existing_plans[0] if self.existing_plans else None, rows=self.existing_plans)
         if model is PaymentPlan.planned_amount:
             return _FakeQuery(None, rows=[(plan.planned_amount,) for plan in self.existing_plans])
+        if model is Contract.customer_id:
+            return _FakeQuery(self.contract.customer_id)
         values = {
             Contract: self.contract,
             Customer: self.customer,
@@ -81,6 +93,9 @@ class _FakeDb:
             obj.payment_records = []
             obj.invoice_applications = []
 
+    def flush(self):
+        return None
+
     def commit(self):
         self.commits += 1
 
@@ -98,6 +113,13 @@ class _FakeDealJourneyService:
 
     def refresh_closure_status(self, db, deal_journey_id):
         self.refreshed.append(deal_journey_id)
+
+
+@pytest.fixture(autouse=True)
+def _stub_source_progress_for_fake_db(monkeypatch):
+    # These arithmetic tests use a fake session; source progress has DB-specific locking.
+    monkeypatch.setattr("app.crud.payment.lock_source_customer", lambda db, **kwargs: db.customer)
+    monkeypatch.setattr("app.crud.payment.advance_eligible_progress", lambda db, **kwargs: None)
 
 
 def test_batch_create_passes_team_id_to_operation_log(monkeypatch):
@@ -183,6 +205,7 @@ def _user():
 def _plan(*, plan_id, amount, stage="已有"):
     return SimpleNamespace(
         id=plan_id,
+        team_id=7,
         contract_id=39,
         planned_amount=Decimal(str(amount)),
         stage_name=stage,

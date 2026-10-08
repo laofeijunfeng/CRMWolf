@@ -12,8 +12,9 @@ from app.core.list_query.license_status import license_status_expression
 from app.core.list_query.types import FilterCondition, ListQueryContext
 from app.models.approval import Approval, ApprovalStatus
 from app.models.contract import Contract
-from app.models.customer import Customer, CustomerMember
+from app.models.customer import Customer, CustomerMember, CustomerProduct
 from app.models.customer_identity_term import CustomerIdentityTerm, CustomerIdentityTermStatus
+from app.models.product import Product
 from app.models.invoice import (
     InvoiceApplication,
     InvoiceRedOffset,
@@ -383,6 +384,20 @@ def follow_up_customer_name_expression():
         )
         .limit(1)
         .correlate_except(Customer)
+        .scalar_subquery()
+    )
+
+def follow_up_product_name_expression():
+    return (
+        select(Product.name)
+        .join(CustomerProduct, CustomerProduct.product_id == Product.id)
+        .where(
+            CustomerProduct.customer_id == FollowUpTask.customer_id,
+            CustomerProduct.team_id == FollowUpTask.team_id,
+        )
+        .order_by(CustomerProduct.product_id)
+        .limit(1)
+        .correlate_except(CustomerProduct)
         .scalar_subquery()
     )
 

@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
 from app.crud.customer import customer_crud
-from app.crud.lead import lead_crud
+from app.crud.lead import lead_crud, lead_follow_up_crud
 from app.crud.opportunity import opportunity_crud
 from app.crud.product import product_crud
 from app.crud.product_intent import (
@@ -18,15 +18,22 @@ from app.crud.product_intent import (
     product_intent_payload,
 )
 from app.models.acquisition_source import AcquisitionSource
+from app.models.deal_journey import CustomerDealJourney
+from app.models.customer_activity import CustomerActivity
+from app.models.customer_vector_document import CustomerVectorDocument
+from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
 from app.models.customer import Contact, Customer, CustomerProduct
 from app.models.industry import Industry
 from app.models.lead import Lead, LeadFollowUp, LeadProduct
 from app.models.operation_log import OperationLog
 from app.models.opportunity import Opportunity, OpportunityProductModule
 from app.models.product import Product, ProductModule
+from app.models.team import Team
+from app.models.user import User
 from app.schemas.customer import ConvertLeadToCustomer, CustomerCreate, CustomerUpdate
 from app.schemas.lead import LeadConvertRequest, LeadCreate
-from app.schemas.product import ProductCreate
+from app.schemas.lead import LeadFollowUpCreate
+from app.schemas.product import ProductCreate, ProductUpdate
 
 
 @compiles(BigInteger, "sqlite")
@@ -42,10 +49,11 @@ def db(tmp_path: Path):
     def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
         dbapi_connection.execute("PRAGMA foreign_keys=ON")
 
-    with engine.begin() as connection:
-        connection.execute(text("CREATE TABLE IF NOT EXISTS crm_customer_deal_journeys (id INTEGER PRIMARY KEY)"))
+    # The response loads journey rows; use the ORM schema, not an id-only FK stub.
 
     tables = [
+        User.__table__,
+        Team.__table__,
         AcquisitionSource.__table__,
         Industry.__table__,
         Product.__table__,
@@ -54,7 +62,11 @@ def db(tmp_path: Path):
         LeadProduct.__table__,
         LeadFollowUp.__table__,
         Customer.__table__,
+        CustomerLegacySourceProgress.__table__,
         CustomerProduct.__table__,
+        CustomerDealJourney.__table__,
+        CustomerActivity.__table__,
+        CustomerVectorDocument.__table__,
         Contact.__table__,
         Opportunity.__table__,
         OpportunityProductModule.__table__,
@@ -73,6 +85,12 @@ def db(tmp_path: Path):
             index.name = original_name
     session = sessionmaker(bind=engine, expire_on_commit=False)()
     try:
+        session.add(User(id=1, email="product-intent@example.com", name="Product owner"))
+        session.flush()
+        session.add_all([
+            Team(id=1, name="Product team", code="PROD1", owner_id=1),
+            Team(id=2, name="Other team", code="PROD2", owner_id=1),
+        ])
         session.add(
             AcquisitionSource(
                 team_id=1,
@@ -212,6 +230,18 @@ def test_update_customer_without_product_keeps_existing_link(db):
     links = db.query(CustomerProduct).filter(CustomerProduct.customer_id == customer.id).all()
     assert [link.product_id for link in links] == [crm.id]
 
+def test_customer_product_noop_preserves_source_progress(db):
+    crm = product_crud.create(db, 1, ProductCreate(name="CRM"), "u1")
+    customer = customer_crud.create(db, _customer_in(product_public_id=crm.public_id), "u1", 1)
+    progress = db.query(CustomerLegacySourceProgress).filter_by(team_id=1, customer_id=customer.id).one()
+    initial_revision = progress.eligible_revision
+
+    customer_crud.update(db, customer, CustomerUpdate(product_public_id=crm.public_id))
+
+    db.refresh(progress)
+    assert progress.eligible_revision == initial_revision
+    assert [link.product_id for link in customer.product_links] == [crm.id]
+
 
 def test_convert_copies_lead_product(db):
     crm = product_crud.create(db, 1, ProductCreate(name="CRM"), "u1")
@@ -225,6 +255,57 @@ def test_convert_copies_lead_product(db):
         team_id=1,
     )
     assert [link.product_id for link in customer.product_links] == [crm.id]
+
+def test_convert_follow_up_preserves_cutover_provenance(db):
+    crm = product_crud.create(db, 1, ProductCreate(name="CRM"), "u1")
+    lead = lead_crud.create(db, _lead_in(product_public_id=crm.public_id), "u1", 1)
+    source = lead_follow_up_crud.create(
+        db, LeadFollowUpCreate(content="客户同意先试用", method="电话"), lead.id, "u1", 1,
+    )
+
+    customer, _contact = customer_crud.convert_from_lead(
+        db, lead_id=lead.id, account_name=lead.lead_name, address=None, creator_id="u1", team_id=1,
+    )
+
+    migrated = db.query(CustomerActivity).filter_by(team_id=1, customer_id=customer.id).one()
+    assert migrated.original_lead_id == lead.id
+    assert migrated.source_content == source.content
+    assert migrated.submission_source == "CUTOVER_MIGRATION"
+    progress = db.query(CustomerLegacySourceProgress).filter_by(team_id=1, customer_id=customer.id).one()
+    assert progress.eligible_revision == 2  # customer creation and migrated follow-up
+
+def test_convert_does_not_import_follow_up_from_another_team(db):
+    crm = product_crud.create(db, 1, ProductCreate(name="CRM"), "u1")
+    lead = lead_crud.create(db, _lead_in(product_public_id=crm.public_id), "u1", 1)
+    db.add(LeadFollowUp(
+        team_id=2, lead_id=lead.id, content="其他团队的私有记录", method="电话", creator_id="u1",
+    ))
+    db.commit()
+
+    customer, _contact = customer_crud.convert_from_lead(
+        db, lead_id=lead.id, account_name=lead.lead_name, address=None, creator_id="u1", team_id=1,
+    )
+
+    assert db.query(CustomerActivity).filter_by(team_id=1, customer_id=customer.id).count() == 0
+    progress = db.query(CustomerLegacySourceProgress).filter_by(team_id=1, customer_id=customer.id).one()
+    assert progress.eligible_revision == 1
+
+
+def test_convert_rejects_lead_product_disabled_after_lead_creation(db):
+    crm = product_crud.create(db, 1, ProductCreate(name="CRM"), "u1")
+    lead = lead_crud.create(db, _lead_in(product_public_id=crm.public_id), "u1", 1)
+    product_crud.create(db, 1, ProductCreate(name="OA"), "u1")
+    product_crud.update(db, crm, ProductUpdate(is_active=False), "u1")
+
+    with pytest.raises(ValueError, match="请选择启用中的产品"):
+        customer_crud.convert_from_lead(
+            db,
+            lead_id=lead.id,
+            account_name=lead.lead_name,
+            address=None,
+            creator_id="u1",
+            team_id=1,
+        )
 
 
 def test_convert_request_product_overrides_lead_product(db):

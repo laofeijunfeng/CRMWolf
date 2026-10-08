@@ -14,7 +14,6 @@ from decimal import Decimal, InvalidOperation
 from typing import Protocol, Any, Optional
 
 from sqlalchemy import inspect
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.constants.business_types import BusinessType
@@ -123,8 +122,17 @@ class PaymentRecordAdapter:
         if entity is None: return  # E4 守卫
         entity.confirmation_status = PaymentConfirmationStatus.PENDING
 
+    @staticmethod
+    def _lock_customer(db, entity):
+        from app.crud.payment import _plan_customer_id
+        from app.services.legacy_profile_source import lock_source_customer
+
+        customer_id = _plan_customer_id(db, plan_id=entity.payment_plan_id, team_id=entity.team_id)
+        lock_source_customer(db, team_id=entity.team_id, customer_id=customer_id)
+
     def on_approved(self, db, entity):
         if entity is None: return  # E4 守卫
+        self._lock_customer(db, entity)
         # 审批通过即确认入账
         entity.confirmation_status = PaymentConfirmationStatus.CONFIRMED
         if entity.confirmed_time is None:
@@ -160,6 +168,7 @@ class PaymentRecordAdapter:
 
     def on_cancelled(self, db, entity):
         if entity is None: return  # E4 守卫
+        self._lock_customer(db, entity)
         # approval_phase 切换由 Approval Engine 管理（entity.approval_phase = DRAFT）
         # 回款的 confirmation_status 是财务确认状态；撤回审批只影响 approval_phase，
         # 未审批通过前仍是待确认，重新提交能力由 approval_phase=DRAFT 表达。
@@ -174,11 +183,8 @@ class PaymentRecordAdapter:
 
         if not self._payment_plan_table_available(db):
             return
-        try:
+        with db.no_autoflush:
             plan = db.query(PaymentPlan).filter(PaymentPlan.id == entity.payment_plan_id).first()
-        except OperationalError:
-            db.rollback()
-            return
         if not plan:
             return
         payment_plan_crud.update_status(db, plan, commit=False)
@@ -490,41 +496,56 @@ def get_approval_card_fields(db: Session, business_type: str, entity: Any) -> di
     }
 
 
+def advance_approval_source(db: Session, business_type: str, entity: Any) -> None:
+    """Fence one visible approval transition before changing its source row.
+
+    The caller owns the commit and invokes this once per actual transition,
+    before adapter side effects (including journey events).
+    """
+    if business_type not in {
+        BusinessType.CONTRACT, BusinessType.PAYMENT, BusinessType.INVOICE,
+        BusinessType.OPPORTUNITY, BusinessType.LICENSE,
+    } or entity is None or not hasattr(type(entity), "__table__"):
+        return
+    customer_id = get_approval_customer_id(db, business_type, entity)
+    if customer_id is None:
+        return
+    from app.services.legacy_profile_source import advance_eligible_progress
+
+    advance_eligible_progress(db, team_id=int(entity.team_id), customer_id=customer_id)
+
+
 def get_approval_customer_id(db: Session, business_type: str, entity: Any) -> Optional[int]:
     """从审批单据解析所属客户 ID，供客户树只读权限复用。"""
     if entity is None:
         return None
+
+
+    customer_id = getattr(entity, "customer_id", None)
+    if customer_id:
+        return int(customer_id)
 
     customer = getattr(entity, "customer", None)
     customer_id = getattr(customer, "id", None) if customer is not None else None
     if customer_id:
         return int(customer_id)
 
-    customer_id = getattr(entity, "customer_id", None)
-    if customer_id:
-        return int(customer_id)
-
     if business_type == BusinessType.PAYMENT:
-        payment_plan = getattr(entity, "payment_plan", None)
-        if payment_plan is None:
-            payment_plan_id = getattr(entity, "payment_plan_id", None)
-            if payment_plan_id:
-                payment_plan = db.query(PaymentPlan).filter(
-                    PaymentPlan.id == payment_plan_id,
-                    PaymentPlan.team_id == getattr(entity, "team_id", None),
-                ).first()
-        if payment_plan is None:
-            return None
-        contract = getattr(payment_plan, "contract", None)
-        if contract is None:
-            from app.models.contract import Contract
-            contract = db.query(Contract).filter(
-                Contract.id == payment_plan.contract_id,
+        payment_plan_id = getattr(entity, "payment_plan_id", None)
+        if payment_plan_id:
+            # A previously loaded relationship may still point at the old plan after
+            # a concurrent relink; resolve the owning customer from current rows.
+            customer_id = db.query(Contract.customer_id).join(
+                PaymentPlan, PaymentPlan.contract_id == Contract.id,
+            ).filter(
+                PaymentPlan.id == payment_plan_id,
+                PaymentPlan.team_id == getattr(entity, "team_id", None),
                 Contract.team_id == getattr(entity, "team_id", None),
-            ).first()
-        if contract is None:
-            return None
-        return int(contract.customer_id) if contract.customer_id else None
+            ).scalar()
+            return int(customer_id) if customer_id else None
+        payment_plan = getattr(entity, "payment_plan", None)
+        contract = getattr(payment_plan, "contract", None) if payment_plan is not None else None
+        return int(contract.customer_id) if contract is not None and contract.customer_id else None
 
     if business_type == BusinessType.INVOICE_REISSUE:
         original = getattr(entity, "original_invoice_application", None)

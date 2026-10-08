@@ -18,11 +18,14 @@ from app.crud.industry import industry_crud
 from app.crud.operation_log import operation_log_crud
 from app.crud.product_intent import (
     EMPTY_CATALOG_MESSAGE,
+    INACTIVE_PRODUCT_MESSAGE,
     MISSING_PRODUCT_MESSAGE,
-    first_active_product,
+    PRODUCT_NOT_FOUND_MESSAGE,
+    ProductNotFoundError,
+    match_catalog_product,
     replace_product_links,
-    resolve_writable_product,
 )
+from app.crud.product import product_crud
 from app.models.contract import Contract
 from app.models.customer import Contact, Customer, CustomerMember, CustomerProduct
 from app.models.lead import Lead, LeadProduct, LeadStatus
@@ -37,7 +40,15 @@ from app.schemas.customer import (
     CustomerUpdate,
 )
 from app.services.acquisition_source_service import get_by_id, resolve_source_for_entity_write
+from app.services.legacy_profile_source import advance_eligible_progress, lock_source_customer
 from app.utils.time import business_now
+
+
+def _locked_source_customer(db: Session, *, team_id: int, customer_id: int) -> Customer:
+    with db.no_autoflush:
+        return db.query(Customer).filter(
+            Customer.id == customer_id, Customer.team_id == team_id,
+        ).populate_existing().with_for_update().one()
 
 
 def _split_csv(value: Optional[str]) -> List[str]:
@@ -348,6 +359,9 @@ class CustomerCRUD:
     ) -> Customer:
         from app.services.operation_log_service import operation_log_service
 
+        # Catalog edits take the Team lock before scanning Customer rows. A new
+        # customer must enter that same order before it chooses a product.
+        product_crud.lock_catalog_team(db, team_id)
         product = self._resolve_product_for_write(db, team_id, obj_in.product_public_id)
         customer_data = obj_in.model_dump(exclude={"primary_contact", "source_public_id", "source", "product_public_id"})
         source_row = resolve_source_for_entity_write(
@@ -371,6 +385,7 @@ class CustomerCRUD:
         db_obj = Customer(**customer_data)
         db.add(db_obj)
         db.flush()
+        advance_eligible_progress(db, team_id=team_id, customer_id=db_obj.id)
         replace_product_links(
             db,
             team_id=team_id,
@@ -410,17 +425,17 @@ class CustomerCRUD:
         db_obj: Customer,
         obj_in: CustomerUpdate,
     ) -> Tuple[Customer, dict[str, Any], dict[str, Any]]:
-        locked_customer = (
-            db.query(Customer)
-            .options(selectinload(Customer.product_links).selectinload(CustomerProduct.product))
-            .filter(
-                Customer.id == db_obj.id,
-                Customer.team_id == db_obj.team_id,
+        if "product_public_id" in obj_in.model_fields_set:
+            product_crud.lock_catalog_team(db, int(db_obj.team_id))
+        with db.no_autoflush:
+            locked_customer = (
+                db.query(Customer)
+                .options(selectinload(Customer.product_links).selectinload(CustomerProduct.product))
+                .filter(Customer.id == db_obj.id, Customer.team_id == db_obj.team_id)
+                .populate_existing()
+                .with_for_update()
+                .first()
             )
-            .populate_existing()
-            .with_for_update()
-            .first()
-        )
         if locked_customer is None:
             raise ConflictException("客户已不存在，请刷新后确认最新状态")
         if obj_in.expected_version is not None and locked_customer.version != obj_in.expected_version:
@@ -489,14 +504,7 @@ class CustomerCRUD:
                 db, locked_customer.team_id, obj_in.product_public_id
             )
             next_product_public_id = product.public_id
-            replace_product_links(
-                db,
-                team_id=locked_customer.team_id,
-                link_cls=CustomerProduct,
-                owner_id=locked_customer.id,
-                owner_fk="customer_id",
-                product=product,
-            )
+            product_links_changed = {link.product_id for link in current_links} != {product.id}
 
         audit_fields = (
             "account_name",
@@ -546,13 +554,26 @@ class CustomerCRUD:
                 before[field] = old_value
                 after[field] = new_value
 
-        if before:
+        if before or any(getattr(locked_customer, field) != value for field, value in proposed.items()) or (
+            "product_public_id" in fields_set and product_links_changed
+        ):
+            advance_eligible_progress(db, team_id=locked_customer.team_id, customer_id=locked_customer.id)
             for field, value in proposed.items():
                 setattr(locked_customer, field, value)
+            if "product_public_id" in fields_set and product_links_changed:
+                replace_product_links(
+                    db,
+                    team_id=locked_customer.team_id,
+                    link_cls=CustomerProduct,
+                    owner_id=locked_customer.id,
+                    owner_fk="customer_id",
+                    product=product,
+                )
             locked_customer.version += 1
             db.commit()
             db.refresh(locked_customer)
         elif "product_public_id" in fields_set:
+            # Preserve the command version receipt without rewriting unchanged links.
             locked_customer.version += 1
             db.commit()
             db.refresh(locked_customer)
@@ -570,13 +591,14 @@ class CustomerCRUD:
         db_obj: Customer,
         obj_in: CustomerLicenseSnapshotUpdate,
     ) -> Tuple[Customer, dict[str, Any], dict[str, Any]]:
-        locked_customer = (
-            db.query(Customer)
-            .filter(Customer.id == db_obj.id, Customer.team_id == db_obj.team_id)
-            .populate_existing()
-            .with_for_update()
-            .first()
-        )
+        with db.no_autoflush:
+            locked_customer = (
+                db.query(Customer)
+                .filter(Customer.id == db_obj.id, Customer.team_id == db_obj.team_id)
+                .populate_existing()
+                .with_for_update()
+                .first()
+            )
         if locked_customer is None:
             raise ConflictException("客户已不存在，请刷新后确认最新状态")
         if locked_customer.version != obj_in.expected_version:
@@ -586,6 +608,12 @@ class CustomerCRUD:
             "license_type": locked_customer.license_type,
             "license_expiry_date": locked_customer.license_expiry_date,
         }
+        if before == {"license_type": obj_in.license_type, "license_expiry_date": obj_in.license_expiry_date}:
+            locked_customer.version += 1
+            db.commit()
+            db.refresh(locked_customer)
+            return locked_customer, before, before.copy()
+        advance_eligible_progress(db, team_id=locked_customer.team_id, customer_id=locked_customer.id)
         locked_customer.license_type = obj_in.license_type
         locked_customer.license_expiry_date = obj_in.license_expiry_date
         locked_customer.version += 1
@@ -598,11 +626,19 @@ class CustomerCRUD:
         return locked_customer, before, after
 
     def update_status(self, db: Session, db_obj: Customer, status: int) -> Customer:
-        db_obj.status = status
-        db_obj.version += 1
+        locked_customer = _locked_source_customer(db, team_id=db_obj.team_id, customer_id=db_obj.id)
+        if locked_customer.status == status:
+            locked_customer.version += 1
+            db.commit()
+            db.refresh(locked_customer)
+            return locked_customer
+        advance_eligible_progress(db, team_id=locked_customer.team_id, customer_id=locked_customer.id)
+        locked_customer.status = status
+        locked_customer.version += 1
         db.commit()
-        db.refresh(db_obj)
-        return db_obj
+        db.refresh(locked_customer)
+        return locked_customer
+
     def update_status_with_version(
         self,
         db: Session,
@@ -611,28 +647,45 @@ class CustomerCRUD:
         status: int,
         expected_version: int,
     ) -> Customer:
-        locked_customer = (
-            db.query(Customer)
-            .filter(Customer.id == db_obj.id, Customer.team_id == db_obj.team_id)
-            .with_for_update()
-            .first()
-        )
+        with db.no_autoflush:
+            locked_customer = (
+                db.query(Customer)
+                .filter(Customer.id == db_obj.id, Customer.team_id == db_obj.team_id)
+                .populate_existing()
+                .with_for_update()
+                .first()
+            )
         if locked_customer is None:
             raise ConflictException("客户已不存在，请刷新后确认最新状态")
         if locked_customer.version != expected_version:
             raise ConflictException("客户已发生变化，请刷新后确认最新状态")
-
+        if locked_customer.status == status:
+            locked_customer.version += 1
+            db.commit()
+            db.refresh(locked_customer)
+            return locked_customer
+        advance_eligible_progress(db, team_id=locked_customer.team_id, customer_id=locked_customer.id)
         locked_customer.status = status
         locked_customer.version += 1
         db.commit()
         db.refresh(locked_customer)
         return locked_customer
 
-    def update_industry(self, db: Session, customer_id: int, industry: str) -> Customer:
+    def update_industry(self, db: Session, customer_id: int, industry: str, team_id: int) -> Customer:
         """更新客户行业字段"""
-        customer = db.query(Customer).filter(Customer.id == customer_id).first()
+        with db.no_autoflush:
+            customer = (
+                db.query(Customer)
+                .filter(Customer.id == customer_id, Customer.team_id == team_id)
+                .populate_existing()
+                .with_for_update()
+                .first()
+            )
         if not customer:
             raise ValueError("客户不存在")
+        if customer.industry == industry:
+            return customer
+        advance_eligible_progress(db, team_id=customer.team_id, customer_id=customer.id)
         customer.industry = industry
         customer.version += 1
         db.commit()
@@ -646,15 +699,17 @@ class CustomerCRUD:
 
         注意：删除前会检查是否存在关联合同，如有则抛出异常
         """
-        from app.crud.contract import contract_crud
         from app.services.operation_log_service import operation_log_service
 
         # Use customer's team_id if not provided
         if team_id is None:
             team_id = db_obj.team_id
+        if db_obj.team_id != team_id:
+            raise ValueError("客户不存在")
+        db_obj = _locked_source_customer(db, team_id=team_id, customer_id=db_obj.id)
 
         # 检查是否存在关联合同
-        contracts = db.query(Contract).filter(Contract.customer_id == db_obj.id, Contract.deleted_at.is_(None)).count()
+        contracts = db.query(Contract).filter(Contract.customer_id == db_obj.id, Contract.team_id == team_id, Contract.deleted_at.is_(None)).count()
         if contracts > 0:
             raise ValueError(f"该客户存在 {contracts} 个关联合同，无法删除。请先删除相关合同。")
 
@@ -682,6 +737,7 @@ class CustomerCRUD:
                         "deletedCustomerId": db_obj.id,
                         "deletedCustomerName": db_obj.account_name,
                     },
+                    commit=False,
                 )
 
         customer_name = db_obj.account_name
@@ -727,6 +783,9 @@ class CustomerCRUD:
         from app.crud.customer_activity import customer_activity_crud
         from app.services.operation_log_service import operation_log_service
 
+        # Take the catalog Team lock before reading the lead or inserting a
+        # customer; catalog edits otherwise miss this new source in their scan.
+        product_crud.lock_catalog_team(db, team_id)
         lead = (
             db.query(Lead)
             .options(selectinload(Lead.product_links).selectinload(LeadProduct.product))
@@ -767,6 +826,7 @@ class CustomerCRUD:
 
         db.add(customer)
         db.flush()
+        advance_eligible_progress(db, team_id=team_id, customer_id=customer.id)
         product = self._resolve_convert_product(db, team_id, lead, product_public_id)
         replace_product_links(
             db,
@@ -873,16 +933,12 @@ class CustomerCRUD:
         expected_version: Optional[int] = None,
         commit: bool = True,
     ) -> Customer:
-        locked_customer = (
-            db.query(Customer)
-            .filter(Customer.id == customer.id, Customer.team_id == team_id)
-            .with_for_update()
-            .first()
-        ) or customer
+        locked_customer = _locked_source_customer(db, team_id=team_id, customer_id=customer.id)
         if locked_customer.owner_id is None:
             raise ValueError("该客户已在公海池中")
         if expected_version is not None and locked_customer.version != expected_version:
             raise ValueError("RESOURCE_VERSION_CONFLICT")
+        advance_eligible_progress(db, team_id=team_id, customer_id=locked_customer.id)
 
         locked_customer.owner_id = None
         locked_customer.return_reason = return_reason
@@ -894,6 +950,7 @@ class CustomerCRUD:
         if commit:
             db.commit()
             db.refresh(locked_customer)
+        return locked_customer
 
     def build_public_list_query(
         self,
@@ -1000,16 +1057,12 @@ class CustomerCRUD:
         expected_version: Optional[int] = None,
         commit: bool = True,
     ) -> Customer:
-        locked_customer = (
-            db.query(Customer)
-            .filter(Customer.id == customer.id, Customer.team_id == team_id)
-            .with_for_update()
-            .first()
-        ) or customer
+        locked_customer = _locked_source_customer(db, team_id=team_id, customer_id=customer.id)
         if locked_customer.owner_id is not None:
             raise ValueError("该客户已有负责人，无法领取")
         if expected_version is not None and locked_customer.version != expected_version:
             raise ValueError("RESOURCE_VERSION_CONFLICT")
+        advance_eligible_progress(db, team_id=team_id, customer_id=locked_customer.id)
 
         locked_customer.owner_id = owner_id
         locked_customer.return_reason = None
@@ -1085,18 +1138,14 @@ class CustomerCRUD:
         used by old callers. New command callers opt into the explicit result
         summary and keep the transaction under API control.
         """
-        locked_customer = (
-            db.query(Customer)
-            .filter(Customer.id == customer.id, Customer.team_id == team_id)
-            .with_for_update()
-            .first()
-        ) or customer
+        locked_customer = _locked_source_customer(db, team_id=team_id, customer_id=customer.id)
         if expected_version is not None and locked_customer.version != expected_version:
             raise ValueError("RESOURCE_VERSION_CONFLICT")
 
         previous_owner_id = locked_customer.owner_id
         if previous_owner_id == new_owner_id:
             raise ValueError("目标负责人已是当前负责人，无需重复移交")
+        advance_eligible_progress(db, team_id=team_id, customer_id=locked_customer.id)
 
         locked_customer.owner_id = new_owner_id
         if locked_customer.status == 3:
@@ -1181,6 +1230,9 @@ class CustomerCRUD:
     ) -> Customer:
         """标记客户为输单，记录输单原因"""
         from app.services.operation_log_service import operation_log_service
+        customer = _locked_source_customer(db, team_id=customer.team_id, customer_id=customer.id)
+        if customer.status != 2 or customer.loss_reason != loss_reason:
+            advance_eligible_progress(db, team_id=customer.team_id, customer_id=customer.id)
 
         customer.status = 2
         customer.loss_reason = loss_reason
@@ -1205,10 +1257,26 @@ class CustomerCRUD:
 
     def _resolve_product_for_write(
         self, db: Session, team_id: int, product_public_id: str | None
-    ):
-        if first_active_product(db, team_id) is None:
+    ) -> Product:
+        # The caller already owns the Team fence. A repeatable-read snapshot
+        # may predate a newly added product; read the current catalog instead.
+        with db.no_autoflush:
+            active = db.query(Product).filter(
+                Product.team_id == team_id, Product.is_active.is_(True),
+            ).order_by(Product.id).populate_existing().with_for_update().all()
+        if not active:
             raise ValueError(EMPTY_CATALOG_MESSAGE)
-        return resolve_writable_product(db, team_id, product_public_id)
+        if product_public_id is None or not str(product_public_id).strip():
+            raise ValueError(MISSING_PRODUCT_MESSAGE)
+        matched = match_catalog_product(active, product_public_id)
+        if matched is not None:
+            return matched
+        current = product_crud.current_catalog_product(db, team_id, str(product_public_id).strip())
+        if current is None:
+            raise ProductNotFoundError(PRODUCT_NOT_FOUND_MESSAGE)
+        if not current.is_active:
+            raise ValueError(INACTIVE_PRODUCT_MESSAGE)
+        return current
 
     def _resolve_convert_product(
         self,
@@ -1222,12 +1290,25 @@ class CustomerCRUD:
             return self._resolve_product_for_write(db, team_id, requested)
         links = sorted(lead.product_links or [], key=lambda link: link.product_id)
         if links:
-            return links[0].product
+            return self._resolve_product_for_write(db, team_id, links[0].product.public_id)
         raise ValueError(MISSING_PRODUCT_MESSAGE)
 
 
 
 class ContactCRUD:
+    @staticmethod
+    def _locked_contact(db: Session, contact: Contact) -> Contact:
+        lock_source_customer(db, team_id=contact.team_id, customer_id=contact.customer_id)
+        with db.no_autoflush:
+            current = db.query(Contact).filter(
+                Contact.id == contact.id,
+                Contact.team_id == contact.team_id,
+                Contact.customer_id == contact.customer_id,
+            ).populate_existing().first()
+        if current is None:
+            raise ValueError("联系人不存在")
+        return current
+
     def get_by_id(self, db: Session, contact_id: int, team_id: Optional[int] = None) -> Optional[Contact]:
         """获取联系人详情
 
@@ -1320,14 +1401,19 @@ class ContactCRUD:
         contact_data["customer_id"] = customer_id
         contact_data["team_id"] = team_id
         contact_data["is_primary"] = 1 if is_primary else 0
+        lock_source_customer(db, team_id=team_id, customer_id=customer_id)
 
         if is_primary:
             existing_primary = self.get_primary_by_customer_id(db, customer_id, team_id)
             if existing_primary:
                 existing_primary.is_primary = 0
+                existing_primary.post_commit_revision = int(
+                    getattr(existing_primary, "post_commit_revision", None) or 1
+                ) + 1
 
         db_obj = Contact(**contact_data)
         db.add(db_obj)
+        advance_eligible_progress(db, team_id=team_id, customer_id=customer_id)
         if commit:
             db.commit()
             db.refresh(db_obj)
@@ -1337,17 +1423,20 @@ class ContactCRUD:
 
     def update(self, db: Session, db_obj: Contact, obj_in: ContactUpdate) -> Contact:
         update_data = obj_in.model_dump(exclude_unset=True)
-
-        if update_data:
-            changed = any(getattr(db_obj, field, None) != value for field, value in update_data.items())
-            for field, value in update_data.items():
-                setattr(db_obj, field, value)
-            if changed:
-                db_obj.post_commit_revision = int(getattr(db_obj, "post_commit_revision", None) or 1) + 1
-
+        if not update_data:
+            return db_obj
+        db_obj = self._locked_contact(db, db_obj)
+        changed_fields = {field for field, value in update_data.items() if getattr(db_obj, field, None) != value}
+        if not changed_fields:
             db.commit()
             db.refresh(db_obj)
-
+            return db_obj
+        advance_eligible_progress(db, team_id=db_obj.team_id, customer_id=db_obj.customer_id)
+        for field, value in update_data.items():
+            setattr(db_obj, field, value)
+        db_obj.post_commit_revision = int(getattr(db_obj, "post_commit_revision", None) or 1) + 1
+        db.commit()
+        db.refresh(db_obj)
         return db_obj
 
     def set_primary(self, db: Session, contact: Contact, team_id: Optional[int] = None) -> Contact:
@@ -1361,15 +1450,21 @@ class ContactCRUD:
         Returns:
             更新后的联系人对象
         """
+        if team_id is not None and contact.team_id != team_id:
+            raise ValueError("联系人不存在")
+        contact = self._locked_contact(db, contact)
         customer_id = contact.customer_id
-
-        existing_primary = self.get_primary_by_customer_id(db, customer_id, team_id)
+        existing_primary = self.get_primary_by_customer_id(db, customer_id, contact.team_id)
+        if contact.is_primary and (existing_primary is None or existing_primary.id == contact.id):
+            db.commit()
+            db.refresh(contact)
+            return contact
+        advance_eligible_progress(db, team_id=contact.team_id, customer_id=customer_id)
         if existing_primary and existing_primary.id != contact.id:
             existing_primary.is_primary = 0
             existing_primary.post_commit_revision = int(
                 getattr(existing_primary, "post_commit_revision", None) or 1
             ) + 1
-
         if not contact.is_primary:
             contact.is_primary = 1
             contact.post_commit_revision = int(getattr(contact, "post_commit_revision", None) or 1) + 1
@@ -1378,9 +1473,10 @@ class ContactCRUD:
         return contact
 
     def delete(self, db: Session, db_obj: Contact) -> Contact:
+        db_obj = self._locked_contact(db, db_obj)
         if db_obj.is_primary:
             raise ValueError("不能删除主联系人")
-
+        advance_eligible_progress(db, team_id=db_obj.team_id, customer_id=db_obj.customer_id, deleted=True)
         db.delete(db_obj)
         db.commit()
         return db_obj

@@ -12,6 +12,8 @@ from app.models.agent import AgentMessage, AgentSession
 from app.models.agent_persistence import AgentUIAction
 from app.models.customer import Customer
 from app.models.customer_activity import CustomerActivity
+from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
+from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
 from app.models.customer_vector_document import CustomerVectorDocument
 from app.models.sales_commitment import (
     DueAtGranularity,
@@ -28,6 +30,8 @@ from app.models.sales_commitment import (
     SalesCommitment,
 )
 from app.schemas.sales_commitment import FollowUpTaskInternalCreate
+from app.services.customer_activity_revision_fence import customer_activity_revision_fence
+from app.services.follow_up_confirmation_case_revision_guard import follow_up_confirmation_case_revision_guard
 from app.services.follow_up_task_confirmation_channel_service import (
     FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION,
     FOLLOW_UP_CONFIRMATION_PROMPT_EVENT,
@@ -67,6 +71,8 @@ def db_session():
             AgentUIAction.__table__,
             Customer.__table__,
             CustomerActivity.__table__,
+            CustomerActivityDeletionTombstone.__table__,
+            CustomerLegacySourceProgress.__table__,
             CustomerVectorDocument.__table__,
             SalesCommitment.__table__,
             FollowUpTask.__table__,
@@ -217,6 +223,111 @@ def _create_confirmation_case(
         )
         .case
     )
+
+
+@pytest.mark.parametrize("lookup", ["public_id", "id"])
+def test_confirmation_revision_guard_locks_customer_before_case_and_activity(db_session, lookup):
+    task = _create_task(db_session)
+    case = _create_confirmation_case(
+        db_session,
+        task,
+        source_activity_id=101,
+        source_activity_revision=1,
+    )
+    case_public_id = case.public_id
+    case_id = case.id
+    db_session.commit()
+
+    selects = []
+
+    def capture_select(conn, cursor, statement, parameters, context, executemany):
+        if statement.startswith("SELECT"):
+            selects.append(statement)
+
+    engine = db_session.get_bind()
+    event.listen(engine, "before_cursor_execute", capture_select)
+    try:
+        if lookup == "public_id":
+            result = follow_up_confirmation_case_revision_guard.lock_and_validate(
+                db_session, team_id=1, case_public_id=case_public_id
+            )
+        else:
+            result = follow_up_confirmation_case_revision_guard.lock_and_validate_by_id(
+                db_session, team_id=1, case_id=case_id
+            )
+    finally:
+        event.remove(engine, "before_cursor_execute", capture_select)
+
+    assert result.allowed
+    customer_lock = next(i for i, sql in enumerate(selects) if "FROM crm_customers " in sql)
+    case_lock = next(
+        i for i, sql in enumerate(selects)
+        if "FROM crm_follow_up_task_confirmation_cases " in sql
+        and "crm_follow_up_task_confirmation_cases.status" in sql
+    )
+    activity_lock = next(
+        i for i, sql in enumerate(selects)
+        if "FROM crm_customer_activities " in sql and "crm_customer_activities.activity_revision" in sql
+    )
+    assert customer_lock < case_lock < activity_lock
+
+
+def test_activity_revision_fence_locks_customer_before_activity(db_session):
+    db_session.commit()
+    selects = []
+
+    def capture_select(conn, cursor, statement, parameters, context, executemany):
+        if statement.startswith("SELECT"):
+            selects.append(statement)
+
+    engine = db_session.get_bind()
+    event.listen(engine, "before_cursor_execute", capture_select)
+    try:
+        result = customer_activity_revision_fence.lock_for_mutation(
+            db_session, team_id=1, activity_id=101, expected_revision=1
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", capture_select)
+
+    assert result.allowed
+    customer_lock = next(i for i, sql in enumerate(selects) if "FROM crm_customers " in sql)
+    activity_lock = next(
+        i for i, sql in enumerate(selects)
+        if "FROM crm_customer_activities " in sql and "crm_customer_activities.activity_revision" in sql
+    )
+    assert customer_lock < activity_lock
+
+
+def test_confirmation_guard_never_validates_another_customers_activity(db_session):
+    task = _create_task(db_session)
+    case = _create_confirmation_case(
+        db_session,
+        task,
+        source_activity_id=101,
+        source_activity_revision=1,
+    )
+    other_customer = Customer(
+        id=2,
+        public_id="cus_22222222222222222222222222222222",
+        team_id=1,
+        account_name="另一客户",
+        city="上海",
+        owner_id="9",
+        creator_id="9",
+    )
+    db_session.add(other_customer)
+    activity = db_session.get(CustomerActivity, 101)
+    activity.customer_id = 2
+    db_session.commit()
+
+    result = follow_up_confirmation_case_revision_guard.lock_and_validate(
+        db_session, team_id=1, case_public_id=case.public_id
+    )
+
+    assert not result.allowed
+    assert result.reason == "ACTIVITY_NOT_FOUND"
+    db_session.refresh(case)
+    assert case.status == FollowUpTaskConfirmationStatus.CANCELLED
 
 
 def test_prompt_next_pending_case_records_delivery_and_interaction(db_session):

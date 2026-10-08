@@ -33,6 +33,9 @@ from app.models.approval import (
 from app.models.contract import Contract, ContractStatus
 from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus, InvoiceType
 from app.crud.approval import approval_crud, approval_flow_crud
+from app.models.customer import Customer
+from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
+
 
 
 @pytest.fixture(scope="function")
@@ -41,6 +44,8 @@ def db_session():
     engine = create_engine("sqlite:///:memory:")
     # 显式列表：只建本测试用到的表；FK 指向的表（customers 等）不建，SQLite 不强制 FK
     tables = [
+        Customer.__table__,
+        CustomerLegacySourceProgress.__table__,
         Contract.__table__,
         InvoiceApplication.__table__,
         ApprovalFlow.__table__,
@@ -48,9 +53,16 @@ def db_session():
         Approval.__table__,
         ApprovalRecord.__table__,
     ]
-    Base.metadata.create_all(engine, tables=tables)
+    customer_index = next(index for index in Customer.__table__.indexes if index.name == "idx_team_id")
+    Customer.__table__.indexes.discard(customer_index)
+    try:
+        Base.metadata.create_all(engine, tables=tables)
+    finally:
+        Customer.__table__.indexes.add(customer_index)
     Session = sessionmaker(bind=engine)
     session = Session()
+    session.add(Customer(id=1, team_id=1, account_name="测试客户", city="北京", creator_id="u1"))
+    session.commit()
     yield session
     session.close()
     engine.dispose()
@@ -346,6 +358,45 @@ def test_cancel_writes_contract_draft_via_adapter(
     assert seed_contract_draft.status == ContractStatus.DRAFT
     db_session.refresh(ap)
     assert ap.status == ApprovalStatus.CANCELLED
+
+def test_approval_transitions_advance_customer_revision_only_on_source_change(
+    db_session, seed_contract_draft, seed_flow_with_one_node
+):
+    from app.schemas.approval import ApprovalActionRequest
+
+    flow, _ = seed_flow_with_one_node
+    db_session.add(ApprovalNode(
+        team_id=1, flow_id=flow.id, node_name="终审", node_code="FINAL",
+        node_order=2, approve_role="DIRECTOR", is_required=1,
+    ))
+    db_session.commit()
+    approval = approval_crud.create_approval(db_session, seed_contract_draft, flow, "u1", "eddie")
+    progress = db_session.query(CustomerLegacySourceProgress).filter_by(team_id=1, customer_id=1).one()
+    assert progress.eligible_revision == 1
+
+    request = ApprovalActionRequest(action=ApprovalAction.APPROVE, comment="同意", updated_time=approval.updated_time)
+    approval_crud.approve(db_session, approval, request, "reviewer", "审核人")
+    db_session.refresh(progress)
+    assert approval.status == ApprovalStatus.PENDING
+    assert seed_contract_draft.status == ContractStatus.PENDING_REVIEW
+    assert progress.eligible_revision == 1
+
+    request = ApprovalActionRequest(action=ApprovalAction.APPROVE, comment="终审同意", updated_time=approval.updated_time)
+    approval_crud.approve(db_session, approval, request, "director", "终审人")
+    db_session.refresh(progress)
+    assert seed_contract_draft.status == ContractStatus.SIGNED
+    assert progress.eligible_revision == 2
+
+
+def test_cancel_approval_advances_customer_revision(
+    db_session, seed_contract_draft, seed_flow_with_one_node
+):
+    flow, _ = seed_flow_with_one_node
+    approval = approval_crud.create_approval(db_session, seed_contract_draft, flow, "u1", "eddie")
+    approval_crud.cancel(db_session, approval, "u1")
+    progress = db_session.query(CustomerLegacySourceProgress).filter_by(team_id=1, customer_id=1).one()
+    assert seed_contract_draft.status == ContractStatus.DRAFT
+    assert progress.eligible_revision == 2
 
 
 def test_approve_entity_deleted_skips_on_status_write(

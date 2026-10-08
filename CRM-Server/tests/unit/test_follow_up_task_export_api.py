@@ -22,8 +22,11 @@ from app.core.database import Base
 from app.crud.sales_commitment import follow_up_task_crud, sales_commitment_crud
 from app.models.agent_persistence import AgentUIAction
 from app.models.command_execution import CommandExecution
-from app.models.customer import Customer, CustomerMember
+from app.models.customer import Customer, CustomerMember, CustomerProduct
 from app.models.customer_activity import CustomerActivity
+from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
+from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
+from app.models.product import Product
 from app.models.customer_intelligence_run import CustomerIntelligenceRun
 from app.models.customer_vector_document import CustomerVectorDocument
 from app.models.sales_commitment import (
@@ -77,6 +80,10 @@ def db_session():
             CustomerActivity.__table__,
             CustomerVectorDocument.__table__,
             SalesCommitment.__table__,
+            Product.__table__,
+            CustomerProduct.__table__,
+            CustomerActivityDeletionTombstone.__table__,
+            CustomerLegacySourceProgress.__table__,
             FollowUpTask.__table__,
             FollowUpTaskEvent.__table__,
             FollowUpTaskProjectionRun.__table__,

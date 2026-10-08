@@ -10,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
 from app.models.customer import Customer
+from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
 from app.models.industry import Industry
 from app.models.operation_log import OperationLog
 from app.services.customer_enrichment_contracts import CustomerEnrichmentDecision
@@ -48,7 +49,7 @@ def _seed_customer(
 
     Base.metadata.create_all(
         engine,
-        tables=[Industry.__table__, Customer.__table__, OperationLog.__table__],
+        tables=[Industry.__table__, Customer.__table__, OperationLog.__table__, CustomerLegacySourceProgress.__table__],
     )
     db = sessionmaker(bind=engine, expire_on_commit=False)()
     primary = Industry(level=1, code="internet", name="互联网", is_active=1, sort_order=10)
@@ -127,6 +128,8 @@ def test_apply_sets_null_industry_and_logs_once():
     assert result.customer_version == 5
     assert customer.industry == "internet_saas"
     assert customer.version == 5
+    progress = db.query(CustomerLegacySourceProgress).filter_by(team_id=2, customer_id=customer.id).one()
+    assert progress.eligible_revision == 1
     assert len(log_service.calls) == 1
     assert log_service.calls[0]["commit"] is False
     log = db.query(OperationLog).one()

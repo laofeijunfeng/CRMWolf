@@ -36,6 +36,8 @@ class Settings(BaseSettings):
 
     # T2-T3 兼容：仍接受线索/客户旧 source 字符串
     ACQUISITION_SOURCE_ACCEPT_LEGACY_SOURCE: bool = True
+    ASSISTANT_NEW_PROPOSALS_ENABLED: bool = True
+    LEGACY_PROFILE_PUBLICATION_ENABLED: bool = True
 
     # Redis 配置(用于限流)
     REDIS_HOST: str = "localhost"

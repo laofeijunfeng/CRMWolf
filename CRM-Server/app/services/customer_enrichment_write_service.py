@@ -8,6 +8,7 @@ from sqlalchemy import update
 from app.constants.operation_log_events import EventActions, EventTypes, ResourceTypes
 from app.models.customer import Customer
 from app.services.customer_enrichment_plan import CustomerEnrichmentFieldRegistry
+from app.services.legacy_profile_source import advance_eligible_progress
 from app.services.operation_log_service import operation_log_service
 from app.utils.time import business_now
 
@@ -61,6 +62,16 @@ class CustomerEnrichmentWriteService:
             applied_fields, applied_values, decision_reasons, column_values = self._validated_values(
                 db, decisions
             )
+            # The CAS uses bulk DML (not ORM flush), so acquire the same lock
+            # used by legacy source publication before touching customer data.
+            locked_customer = db.query(Customer).filter_by(
+                id=customer_id, team_id=team_id,
+            ).with_for_update().one_or_none()
+            if locked_customer is None:
+                db.rollback()
+                return self._conflict_result(
+                    db, team_id=team_id, customer_id=customer_id, field_keys=applied_fields,
+                )
             conditions = [
                 Customer.id == customer_id,
                 Customer.team_id == team_id,
@@ -90,6 +101,7 @@ class CustomerEnrichmentWriteService:
                     customer_id=customer_id,
                     field_keys=applied_fields,
                 )
+            advance_eligible_progress(db, team_id=team_id, customer_id=customer_id)
 
             log = self._log_service.log(
                 db=db,
