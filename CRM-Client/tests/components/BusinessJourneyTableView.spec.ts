@@ -156,6 +156,21 @@ describe('BusinessJourneyTableView layout', () => {
     expect(progress.classes()).toContain('h-1.5')
     expect(indicator.classes()).toContain('bg-yellow-500')
   })
+  it('renders derived progress in mobile cards with the shared color and accessible label', () => {
+    const wrapper = mountJourneyTable([journeyFixture])
+    const card = wrapper.get('.data-table-mobile-card')
+    const progressCell = card.get('[data-testid="business-journey-progress"]')
+    const progress = progressCell.get('[role="progressbar"]')
+    const indicator = progress.get(':scope > div')
+
+    expect(card.text()).toContain('华东续约旅程')
+    expect(card.text()).toContain('示例科技')
+    expect(card.text()).toContain('当前阶段：持续推进')
+    expect(progressCell.attributes('aria-label')).toBe('华东续约旅程 当前进度 29%')
+    expect(progressCell.text()).toContain('29%')
+    expect(progress.attributes('aria-label')).toBe('华东续约旅程 当前进度 29%')
+    expect(indicator.classes()).toContain('bg-yellow-500')
+  })
 
   it.each([
     ['early_communication', ['bg-sky-50', 'text-sky-700', 'border-sky-100']],

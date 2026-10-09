@@ -153,6 +153,47 @@ const getJourneyProgressLabel = (row: BusinessJourneyListItem): string =>
     @search-apply="emit('search-apply', $event)"
     @search-clear="emit('search-clear')"
   >
+    <template #mobile-card="{ row }">
+      <div class="business-journey-mobile-card-header">
+        <div class="business-journey-mobile-card-title">
+          {{ row.name }}
+        </div>
+        <Badge
+          variant="outline"
+          data-testid="business-journey-mobile-stage-badge"
+          :class="businessJourneyStagePresentation[row.current_board_stage].badgeClass"
+        >
+          {{ row.current_board_stage_label || stageLabels.get(row.current_board_stage) || '-' }}
+        </Badge>
+      </div>
+      <div class="business-journey-mobile-card-customer">
+        {{ row.customer_name || '-' }}
+      </div>
+      <div
+        class="business-journey-mobile-card-progress flex min-w-0 items-center gap-2"
+        data-testid="business-journey-progress"
+        role="group"
+        :aria-label="getJourneyProgressLabel(row)"
+      >
+        <Progress
+          :model-value="getJourneyProgressPercent(row)"
+          :indicator-class="getJourneyProgressColorClass(row)"
+          class="h-1.5 min-w-0 flex-1 bg-secondary"
+          :aria-label="getJourneyProgressLabel(row)"
+        />
+        <span class="shrink-0 tabular-nums text-xs text-muted-foreground">
+          {{ getJourneyProgressPercent(row) }}%
+        </span>
+      </div>
+      <div class="business-journey-mobile-card-meta">
+        <span class="business-journey-mobile-card-meta-item">
+          当前阶段：{{ row.current_board_stage_label || stageLabels.get(row.current_board_stage) || '-' }}
+        </span>
+        <span class="business-journey-mobile-card-meta-item">
+          主商机：{{ row.primary_opportunity_name || '-' }}
+        </span>
+      </div>
+    </template>
     <template #cell-name="{ row }">
       <span
         class="business-journey-name-link"
@@ -225,5 +266,46 @@ const getJourneyProgressLabel = (row: BusinessJourneyListItem): string =>
   &:hover {
     color: $wolf-text-link-hover-v2;
   }
+}
+.business-journey-mobile-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: $wolf-space-sm-v2;
+}
+
+.business-journey-mobile-card-title {
+  min-width: 0;
+  font-size: $wolf-font-size-body-mobile-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
+  color: $wolf-text-primary-v2;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.business-journey-mobile-card-customer {
+  margin-top: $wolf-space-xs-v2;
+  font-size: $wolf-font-size-body-v2;
+  color: $wolf-text-secondary-v2;
+  overflow-wrap: anywhere;
+}
+
+.business-journey-mobile-card-progress {
+  margin-top: $wolf-space-sm-v2;
+}
+
+.business-journey-mobile-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $wolf-space-xs-v2 $wolf-space-md-v2;
+  margin-top: $wolf-space-sm-v2;
+  font-size: $wolf-font-size-caption-mobile-v2;
+  color: $wolf-text-tertiary-v2;
+}
+
+.business-journey-mobile-card-meta-item {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 </style>
