@@ -19,7 +19,6 @@ from app.models.license_application import LicenseApplicationStatus
 from app.models.license_application import LicenseApplication
 from app.models.approval import ApprovalStatus
 from app.schemas.license_application import LicenseApplicationApproveFull
-from app.schemas.license_application import LicenseApplicationCreate
 from app.schemas.approval import ApprovalFlowCreate, ApprovalNodeCreate
 from app.services.approval_adapter import get_adapter
 
@@ -159,8 +158,8 @@ def test_license_application_submit_creates_approval(db, test_team, test_user, t
         db,
         test_team.id,
         str(test_user.feishu_user_id),
-        LicenseApplicationCreate(
-            customer_id=test_customer.public_id,
+        LicenseApplicationInternalCreate(
+            customer_id=test_customer.id,
             license_type="TRIAL",
             authorized_users=10,
             expiry_date=date(2026, 12, 31),
@@ -211,8 +210,8 @@ def test_license_application_without_flow_direct_approval(db, test_team, test_us
         db,
         test_team.id,
         str(test_user.feishu_user_id),
-        LicenseApplicationCreate(
-            customer_id=test_customer.public_id,
+        LicenseApplicationInternalCreate(
+            customer_id=test_customer.id,
             license_type="TRIAL",
             authorized_users=10,
             expiry_date=date(2026, 12, 31),
@@ -264,8 +263,8 @@ def test_license_approval_flow_visible_in_approval_center(db, test_team, test_us
         db,
         test_team.id,
         str(test_user.feishu_user_id),
-        LicenseApplicationCreate(
-            customer_id=test_customer.public_id,
+        LicenseApplicationInternalCreate(
+            customer_id=test_customer.id,
             license_type="TRIAL",
             authorized_users=10,
             expiry_date=date(2027, 12, 31),

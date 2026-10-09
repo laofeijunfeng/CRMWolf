@@ -32,6 +32,7 @@ from app.schemas.license_application import (
     LicenseApplicationApprove,
     LicenseApplicationApproveFull,
     LicenseApplicationCreate,
+    LicenseApplicationInternalCreate,
     LicenseApplicationResponse,
     LicenseApplicationUpdate,
 )
@@ -129,8 +130,22 @@ def create_application(
 ):
     """创建 License 申请（草稿状态）"""
     customer = check_customer_edit_permission(application.customer_id, team_id, current_user, db)
-    application = application.model_copy(update={"customer_id": customer.id})
-    created = create_license_application(db, team_id, application, current_user.id)
+    internal_application = LicenseApplicationInternalCreate(
+        customer_id=customer.id,
+        deployment_info_id=application.deployment_info_id,
+        contract_id=application.contract_id,
+        license_type=application.license_type,
+        authorized_users=application.authorized_users,
+        expiry_date=application.expiry_date,
+        remark=application.remark,
+    )
+    try:
+        created = create_license_application(db, team_id, internal_application, current_user.id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
     _enqueue_license_application_intelligence_refresh(
         db,
         created,

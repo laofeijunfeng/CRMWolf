@@ -18,6 +18,7 @@ from app.models.contract import ContractStatus
 from app.models.invoice import InvoiceApplicationStatus
 from app.models.license_application import LicenseApplicationStatus
 from app.models.payment import PaymentPlanStatus
+from app.schemas.license_application import LicenseApplicationInternalCreate
 
 
 class _RequestData(SimpleNamespace):
@@ -1167,7 +1168,15 @@ def test_create_license_application_enqueues_business_object_intelligence(monkey
     monkeypatch.setattr(license_application_api, "_enqueue_license_application_intelligence_refresh", fake_enqueue)
 
     result = license_application_api.create_application(
-        _RequestData(customer_id=101),
+        _RequestData(
+            customer_id="cus_101",
+            deployment_info_id=901,
+            contract_id=401,
+            license_type="OFFICIAL",
+            authorized_users=80,
+            expiry_date=date(2027, 8, 2),
+            remark="正式授权",
+        ),
         team_id=2,
         current_user=SimpleNamespace(id=9),
         db=object(),
@@ -1180,6 +1189,91 @@ def test_create_license_application_enqueues_business_object_intelligence(monkey
     assert scheduled[0].change_type == "created"
     assert scheduled[0].payload["has_supported_modules"] is True
     assert scheduled[0].payload["has_server_license_code"] is False
+
+
+def test_create_license_application_converts_public_customer_id_to_internal_schema(monkeypatch):
+    captured = []
+    application = _license_application()
+
+    monkeypatch.setattr(
+        license_application_api,
+        "check_customer_edit_permission",
+        lambda customer_id, team_id, current_user, db: _customer(),
+    )
+    monkeypatch.setattr(
+        license_application_api,
+        "create_license_application",
+        lambda db, team_id, obj_in, applicant_id: captured.append(obj_in) or application,
+    )
+    monkeypatch.setattr(
+        license_application_api,
+        "_enqueue_license_application_intelligence_refresh",
+        lambda *args, **kwargs: None,
+    )
+
+    result = license_application_api.create_application(
+        _RequestData(
+            customer_id="cus_101",
+            deployment_info_id=901,
+            contract_id=401,
+            license_type="OFFICIAL",
+            authorized_users=80,
+            expiry_date=date(2027, 8, 2),
+            remark="正式授权",
+        ),
+        team_id=2,
+        current_user=SimpleNamespace(id=9),
+        db=object(),
+    )
+
+    assert result.id == 1001
+    assert len(captured) == 1
+    assert isinstance(captured[0], LicenseApplicationInternalCreate)
+    assert captured[0].customer_id == 101
+
+
+def test_create_license_application_value_error_returns_bad_request_without_enqueue(monkeypatch):
+    scheduled = []
+
+    def fake_create(db, team_id, obj_in, applicant_id):
+        raise ValueError("部署信息不存在或不属于该客户")
+
+    monkeypatch.setattr(
+        license_application_api,
+        "check_customer_edit_permission",
+        lambda customer_id, team_id, current_user, db: _customer(),
+    )
+    monkeypatch.setattr(
+        license_application_api,
+        "create_license_application",
+        fake_create,
+    )
+    monkeypatch.setattr(
+        license_application_api,
+        "_enqueue_license_application_intelligence_refresh",
+        lambda *args, **kwargs: scheduled.append(args),
+    )
+
+    with pytest.raises(license_application_api.HTTPException) as exc_info:
+        license_application_api.create_application(
+            _RequestData(
+                customer_id="cus_101",
+                deployment_info_id=901,
+                contract_id=401,
+                license_type="OFFICIAL",
+                authorized_users=80,
+                expiry_date=date(2027, 8, 2),
+                remark="正式授权",
+            ),
+            team_id=2,
+            current_user=SimpleNamespace(id=9),
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "部署信息不存在或不属于该客户"
+    assert scheduled == []
+
 
 
 def test_submit_license_application_enqueues_business_object_intelligence(monkeypatch) -> None:

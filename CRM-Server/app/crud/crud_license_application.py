@@ -19,7 +19,7 @@ from app.services.business_number_generator import BusinessNumberGenerator
 from app.services.legacy_profile_source import advance_eligible_progress, lock_source_customer
 from app.utils.approval_delete_guard import assert_deletable_approval_resource
 from app.schemas.license_application import (
-    LicenseApplicationCreate,
+    LicenseApplicationInternalCreate,
     LicenseApplicationUpdate,
     LicenseApplicationApprove,
     LicenseApplicationApproveFull
@@ -113,7 +113,7 @@ class LicenseApplicationCRUD:
         db: Session,
         team_id: int,
         applicant_id: str,
-        obj_in: LicenseApplicationCreate
+        obj_in: LicenseApplicationInternalCreate
     ) -> LicenseApplication:
         """
         创建 License 申请
@@ -132,7 +132,7 @@ class LicenseApplicationCRUD:
         """
         # 验证客户存在
         customer = db.query(Customer).filter(
-            Customer.public_id == obj_in.customer_id,
+            Customer.id == obj_in.customer_id,
             Customer.team_id == team_id
         ).first()
         if not customer:
@@ -681,7 +681,7 @@ license_application_crud = LicenseApplicationCRUD()
 def create_license_application(
     db: Session,
     team_id: int,
-    obj_in: LicenseApplicationCreate,
+    obj_in: LicenseApplicationInternalCreate,
     applicant_id: str
 ) -> LicenseApplication:
     """创建 License 申请"""
