@@ -22,6 +22,7 @@ from app.crud.crud_deployment import (
 from app.models.deployment import DeploymentInfo
 from app.schemas.deployment import (
     DeploymentInfoCreate,
+    DeploymentInfoInternalCreate,
     DeploymentInfoResponse,
     DeploymentInfoUpdate,
 )
@@ -79,8 +80,17 @@ def create_deployment(
 ):
     """创建部署信息"""
     customer = check_customer_edit_permission(deployment.customer_id, team_id, current_user, db)
-    deployment = deployment.model_copy(update={"customer_id": customer.id})
-    created = create_deployment_info(db, team_id, deployment)
+    deployment_data = DeploymentInfoInternalCreate(
+        customer_id=customer.id,
+        deployment_name=deployment.deployment_name,
+        server_address=deployment.server_address,
+        authorized_users=deployment.authorized_users,
+        is_default=deployment.is_default,
+    )
+    try:
+        created = create_deployment_info(db, team_id, deployment_data)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     _enqueue_deployment_intelligence_refresh(
         db,
         created,

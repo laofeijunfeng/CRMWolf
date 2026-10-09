@@ -18,6 +18,8 @@ from app.models.contract import ContractStatus
 from app.models.invoice import InvoiceApplicationStatus
 from app.models.license_application import LicenseApplicationStatus
 from app.models.payment import PaymentPlanStatus
+from app.schemas.deployment import DeploymentInfoInternalCreate
+
 from app.schemas.license_application import LicenseApplicationInternalCreate
 
 
@@ -1065,9 +1067,14 @@ def test_create_deployment_info_enqueues_business_object_intelligence(monkeypatc
     )
     monkeypatch.setattr(deployment_api, "create_deployment_info", lambda db, team_id, obj_in: deployment)
     monkeypatch.setattr(deployment_api, "_enqueue_deployment_intelligence_refresh", fake_enqueue)
-
     result = deployment_api.create_deployment(
-        _RequestData(customer_id=101),
+        _RequestData(
+            customer_id="cus_101",
+            deployment_name="生产环境",
+            server_address="https://crm.example.com",
+            authorized_users=200,
+            is_default=True,
+        ),
         team_id=2,
         current_user=SimpleNamespace(id=9),
         db=_FakeDb(),
@@ -1079,6 +1086,77 @@ def test_create_deployment_info_enqueues_business_object_intelligence(monkeypatc
     assert scheduled[0].source_id == 901
     assert scheduled[0].change_type == "created"
     assert scheduled[0].payload["has_server_address"] is True
+
+def test_deployment_info_converts_public_customer_id(monkeypatch) -> None:
+    deployment = _deployment_info()
+    captured = {}
+
+    def fake_create(db, team_id, obj_in):
+        captured["obj_in"] = obj_in
+        return deployment
+
+    monkeypatch.setattr(
+        deployment_api,
+        "check_customer_edit_permission",
+        lambda customer_id, team_id, current_user, db: _customer(),
+    )
+    monkeypatch.setattr(deployment_api, "create_deployment_info", fake_create)
+    monkeypatch.setattr(deployment_api, "_enqueue_deployment_intelligence_refresh", lambda *args, **kwargs: None)
+
+    result = deployment_api.create_deployment(
+        _RequestData(
+            customer_id="cus_101",
+            deployment_name="生产环境",
+            server_address="https://crm.example.com",
+            authorized_users=200,
+            is_default=True,
+        ),
+        team_id=2,
+        current_user=SimpleNamespace(id=9),
+        db=_FakeDb(),
+    )
+
+    assert isinstance(captured["obj_in"], DeploymentInfoInternalCreate)
+    assert captured["obj_in"].customer_id == 101
+    assert result.customer_id == "cus_101"
+
+
+def test_deployment_value_error(monkeypatch) -> None:
+    scheduled = []
+
+    monkeypatch.setattr(
+        deployment_api,
+        "check_customer_edit_permission",
+        lambda customer_id, team_id, current_user, db: _customer(),
+    )
+    monkeypatch.setattr(
+        deployment_api,
+        "create_deployment_info",
+        lambda db, team_id, obj_in: (_ for _ in ()).throw(ValueError("部署信息创建失败")),
+    )
+    monkeypatch.setattr(
+        deployment_api,
+        "_enqueue_deployment_intelligence_refresh",
+        lambda *args, **kwargs: scheduled.append(args),
+    )
+
+    with pytest.raises(deployment_api.HTTPException) as exc_info:
+        deployment_api.create_deployment(
+            _RequestData(
+                customer_id="cus_101",
+                deployment_name="生产环境",
+                server_address="https://crm.example.com",
+                authorized_users=200,
+                is_default=True,
+            ),
+            team_id=2,
+            current_user=SimpleNamespace(id=9),
+            db=_FakeDb(),
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "部署信息创建失败"
+    assert scheduled == []
 
 
 def test_set_default_deployment_info_enqueues_business_object_intelligence(monkeypatch) -> None:

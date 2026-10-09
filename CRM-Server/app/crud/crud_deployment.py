@@ -3,7 +3,7 @@ from typing import List, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from app.models.deployment import DeploymentInfo
-from app.schemas.deployment import DeploymentInfoCreate, DeploymentInfoUpdate
+from app.schemas.deployment import DeploymentInfoInternalCreate, DeploymentInfoUpdate
 
 
 class DeploymentInfoCRUD:
@@ -13,7 +13,7 @@ class DeploymentInfoCRUD:
         self,
         db: Session,
         team_id: int,
-        obj_in: DeploymentInfoCreate
+        obj_in: DeploymentInfoInternalCreate
     ) -> DeploymentInfo:
         """
         创建部署信息
@@ -235,7 +235,7 @@ class DeploymentInfoCRUD:
 deployment_info_crud = DeploymentInfoCRUD()
 
 # 独立函数导出（供 API 直接导入）
-def create_deployment_info(db: Session, team_id: int, obj_in: DeploymentInfoCreate) -> DeploymentInfo:
+def create_deployment_info(db: Session, team_id: int, obj_in: DeploymentInfoInternalCreate) -> DeploymentInfo:
     return deployment_info_crud.create(db, team_id, obj_in)
 
 def get_deployment_info(db: Session, team_id: int, deployment_id: int) -> Optional[DeploymentInfo]:
