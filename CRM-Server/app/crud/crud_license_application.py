@@ -667,6 +667,11 @@ class LicenseApplicationCRUD:
                 .first()
             )
 
+            previous_values = (
+                customer.license_type,
+                customer.license_authorized_users,
+                customer.license_expiry_date,
+            )
             previous_expiry = customer.license_expiry_date
             if selected_application is None:
                 selected_values = (None, None, None)
@@ -683,7 +688,7 @@ class LicenseApplicationCRUD:
                 previous_expiry is None or selected_expiry > previous_expiry
             ):
                 advance_eligible_progress(db, team_id=team_id, customer_id=customer.id)
-            if commit:
+            if commit and selected_values != previous_values:
                 db.commit()
 
 # 创建全局实例
