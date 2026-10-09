@@ -131,6 +131,13 @@ class ContractCreate(ContractBase):
     owner_id: Optional[str] = Field(None, description="合同负责人系统用户ID，不传则继承商机/客户负责人")
 
 
+class ContractInternalCreate(ContractBase):
+    """Internal contract creation model using database foreign-key IDs."""
+    customer_id: int = Field(..., description="关联客户内部ID")
+    opportunity_id: int = Field(..., description="关联商机内部ID")
+    owner_id: Optional[str] = Field(None, description="合同负责人系统用户ID")
+
+
 class ContractUpdate(BaseModel):
     contract_name: Optional[str] = Field(None, min_length=1, max_length=255, description="合同名称")
     user_count: Optional[int] = Field(None, gt=0, description="采购用户数")

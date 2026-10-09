@@ -33,6 +33,11 @@ class DeploymentInfoCreate(DeploymentInfoBase):
     customer_id: str = Field(..., description="关联客户对外ID")
 
 
+
+class DeploymentInfoInternalCreate(DeploymentInfoBase):
+    """Internal deployment creation model using database foreign-key IDs."""
+    customer_id: int = Field(..., description="关联客户内部ID")
+
 class DeploymentInfoUpdate(BaseModel):
     """更新部署信息请求模型"""
     deployment_name: Optional[str] = Field(None, min_length=1, max_length=100, description="部署名称")

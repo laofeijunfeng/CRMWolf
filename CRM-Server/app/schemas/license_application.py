@@ -78,6 +78,9 @@ class LicenseApplicationCreate(LicenseApplicationBase):
         if self.license_type == LicenseType.OFFICIAL and not self.contract_id:
             raise ValueError('正式版 License 必须关联合同')
         return self
+class LicenseApplicationInternalCreate(LicenseApplicationCreate):
+    """Internal License creation model using database foreign-key IDs."""
+    customer_id: int = Field(..., description="关联客户内部ID")
 
 
 class LicenseApplicationUpdate(BaseModel):

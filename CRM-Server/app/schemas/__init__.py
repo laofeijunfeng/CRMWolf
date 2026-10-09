@@ -18,6 +18,7 @@ from app.schemas.chat_message import ChatMessageRequest, ChatMessageResponse, Ch
 from app.schemas.deployment import (
     DeploymentInfoBase,
     DeploymentInfoCreate,
+    DeploymentInfoInternalCreate,
     DeploymentInfoListResponse,
     DeploymentInfoMessageResponse,
     DeploymentInfoResponse,
@@ -93,6 +94,7 @@ __all__ = [
     "ChatReplyData",
     "DeploymentInfoBase",
     "DeploymentInfoCreate",
+    "DeploymentInfoInternalCreate",
     "DeploymentInfoListResponse",
     "DeploymentInfoMessageResponse",
     "DeploymentInfoResponse",
