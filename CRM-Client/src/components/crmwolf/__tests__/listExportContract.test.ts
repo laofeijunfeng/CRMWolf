@@ -139,4 +139,8 @@ describe('DataTable frontend/backend list-export contract', () => {
       }
     }
   })
+
+  it('exposes the customer authorized-user export field in the generated manifest', () => {
+    expect(manifest['customers']?.['license_authorized_users']).toEqual({ label: '授权人数', type: 'number' })
+  })
 })

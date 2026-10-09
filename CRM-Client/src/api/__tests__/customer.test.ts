@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { CustomerDetailResponseSchema, CustomerResponseSchema } from '@/schemas/customer'
 
 const post = vi.fn()
 const put = vi.fn()
@@ -36,6 +37,7 @@ const customerResponse = {
   version: 3,
   license_expiry_date: null,
   license_type: null,
+  license_authorized_users: null
 }
 
 describe('customerApi lifecycle, license snapshot, and industry hierarchy', () => {
@@ -106,6 +108,29 @@ describe('customerApi lifecycle, license snapshot, and industry hierarchy', () =
       license_expiry_date: '2027-01-01',
     }, undefined)
     expect(result).toEqual({ ...customerResponse, products: [] })
+  })
+
+  it('keeps authorized users out of all customer write payloads', async () => {
+    post.mockResolvedValue(customerResponse)
+    put.mockResolvedValue(customerResponse)
+    patch.mockResolvedValue(customerResponse)
+    const { default: customerApi } = await import('../customer')
+
+    await customerApi.createCustomer({
+      account_name: 'Acme Corp',
+      city: '上海',
+      product_public_id: 'prd_crm',
+    })
+    await customerApi.updateCustomer('customer-1', { city: '深圳' })
+    await customerApi.updateCustomerLicenseSnapshot('customer-1', {
+      expected_version: 3,
+      license_type: 'OFFICIAL',
+      license_expiry_date: '2027-01-01',
+    })
+
+    expect(post.mock.calls[0]?.[1]).not.toHaveProperty('license_authorized_users')
+    expect(put.mock.calls[0]?.[1]).not.toHaveProperty('license_authorized_users')
+    expect(patch.mock.calls[0]?.[1]).not.toHaveProperty('license_authorized_users')
   })
 
   it('rejects malformed license snapshot responses through the customer response schema', async () => {
@@ -192,5 +217,19 @@ describe('customerApi lifecycle, license snapshot, and industry hierarchy', () =
     expect(result.product_public_id).toBe('prd_crm')
     expect(result.product_name).toBe('CRM')
     expect(result.products).toEqual([{ public_id: 'prd_crm', name: 'CRM' }])
+  })
+  it('accepts numeric, null, and omitted customer license authorized users', async () => {
+
+    expect(CustomerResponseSchema.parse({ ...customerResponse, license_authorized_users: 32 }).license_authorized_users).toBe(32)
+    expect(CustomerResponseSchema.parse({ ...customerResponse, license_authorized_users: null }).license_authorized_users).toBeNull()
+    expect(CustomerResponseSchema.parse({ ...customerResponse, license_authorized_users: undefined }).license_authorized_users).toBeUndefined()
+    expect(CustomerDetailResponseSchema.parse({
+      ...customerResponse,
+      owner_info: null,
+      creator_info: null,
+      contacts: [],
+      loss_reason: null,
+      license_authorized_users: 32,
+    }).license_authorized_users).toBe(32)
   })
 })

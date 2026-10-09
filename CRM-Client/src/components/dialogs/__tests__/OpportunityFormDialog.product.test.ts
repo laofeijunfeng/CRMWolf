@@ -223,6 +223,7 @@ const customerDetail = (overrides: Partial<CustomerDetailResponse> = {}): Custom
   last_modified_time: '2026-07-15T00:00:00.000Z',
   version: 1,
   license_expiry_date: null,
+  license_authorized_users: null,
   license_type: null,
   contacts: [],
   product_public_id: 'prd_crm',

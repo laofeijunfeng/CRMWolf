@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 import importlib.util
 from pathlib import Path
 from types import ModuleType
@@ -97,13 +99,20 @@ def _column_names(connection: sa.Connection, table_name: str) -> set[str]:
     return {column[1] for column in connection.execute(sa.text(f"PRAGMA table_info('{table_name}')"))}
 
 
-def _customer_snapshot(connection: sa.Connection, customer_id: int) -> tuple[str | None, int | None, object]:
+def _customer_snapshot(connection: sa.Connection, customer_id: int) -> tuple[str | None, int | None, date | None]:
+    customers = sa.table(
+        "crm_customers",
+        sa.column("id", sa.Integer()),
+        sa.column("license_type", sa.String()),
+        sa.column("license_authorized_users", sa.Integer()),
+        sa.column("license_expiry_date", sa.Date()),
+    )
     row = connection.execute(
-        sa.text(
-            "SELECT license_type, license_authorized_users, license_expiry_date "
-            "FROM crm_customers WHERE id = :customer_id"
-        ),
-        {"customer_id": customer_id},
+        sa.select(
+            customers.c.license_type,
+            customers.c.license_authorized_users,
+            customers.c.license_expiry_date,
+        ).where(customers.c.id == customer_id)
     ).one()
     return row[0], row[1], row[2]
 
@@ -133,7 +142,7 @@ def test_migration_backfills_same_winner_and_downgrades_cleanly() -> None:
         assert _customer_snapshot(connection, customer_id=1) == (
             "OFFICIAL",
             42,
-            "2029-01-01",
+            date(2029, 1, 1),
         )
         assert _customer_snapshot(connection, customer_id=2) == (None, None, None)
         assert _customer_snapshot(connection, customer_id=3) == (None, None, None)

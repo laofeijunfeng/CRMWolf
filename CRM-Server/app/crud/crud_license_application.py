@@ -651,6 +651,11 @@ class LicenseApplicationCRUD:
             ).populate_existing().with_for_update().one_or_none()
             if customer is None:
                 return
+            # issue()/issue_full() set ISSUED before calling with commit=False.
+            # Flush only this application so the winner query sees the new status
+            # without committing or flushing unrelated pending changes.
+            db.flush([issued_application])
+
 
             selected_application = (
                 db.query(LicenseApplication)

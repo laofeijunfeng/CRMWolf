@@ -355,6 +355,13 @@ const fields = computed<ListFieldDefinition[]>(() => [
     options: Object.entries(LICENSE_STATUS_LABELS).map(([value, label]) => ({ value, label })),
     column: { align: 'center', width: '100px' }
   },
+  {
+    key: 'license_authorized_users',
+    label: '授权人数',
+    type: 'number',
+    column: { width: '100px' }
+  },
+
   { key: 'license_expiry_date', label: '授权到期', type: 'date', column: { width: '120px' } },
   { key: 'default_procurement_method', label: '默认采购方式', type: 'text', column: { width: '140px' } },
   {
@@ -1386,6 +1393,11 @@ watchEffect(() => {
         <span class="license-badge" :class="getLicenseStatusClass(row)">
           {{ getLicenseStatusLabel(row) }}
         </span>
+      </template>
+
+      <!-- 授权人数 -->
+      <template #cell-license_authorized_users="{ row }">
+        {{ row.license_authorized_users ?? '-' }}
       </template>
 
       <!-- 授权到期 -->

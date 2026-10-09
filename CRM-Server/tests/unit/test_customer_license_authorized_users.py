@@ -323,6 +323,29 @@ def test_commit_false_defers_snapshot_persistence_until_commit(db, customer, mon
     assert (customer.license_type, customer.license_authorized_users, customer.license_expiry_date) == (
         "TRIAL", 5, date(2028, 1, 1)
     )
+def test_snapshot_includes_in_memory_issued_application_before_outer_commit(db, customer, monkeypatch):
+    application = _application(
+        "issued-in-memory",
+        status=LicenseApplicationStatus.APPROVED,
+        license_type="OFFICIAL",
+        users=32,
+        expiry=date(2029, 1, 1),
+    )
+    db.add(application)
+    db.commit()
+    _disable_progress_side_effect(monkeypatch)
+
+    application.status = LicenseApplicationStatus.ISSUED
+    with db.no_autoflush:
+        assert db.query(LicenseApplication.status).filter_by(id=application.id).scalar() == LicenseApplicationStatus.APPROVED
+
+    license_application_crud.update_customer_license_info(db, 1, application, commit=False)
+
+    assert (customer.license_type, customer.license_authorized_users, customer.license_expiry_date) == (
+        "OFFICIAL", 32, date(2029, 1, 1)
+    )
+
+
 
 
 def test_commit_true_persists_snapshot(db, customer, monkeypatch):

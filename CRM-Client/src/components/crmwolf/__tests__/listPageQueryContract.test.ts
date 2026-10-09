@@ -235,4 +235,28 @@ describe('DataTable frontend/backend list-query contract', () => {
     expect(source).not.toContain('pagedRows')
     expect(source).not.toMatch(/\.slice\s*\(/)
   })
+
+  it('keeps customer license columns ordered and renders authorized users read-only', () => {
+    const customersSource = readFileSync(resolve(viewsDir, 'Customers.vue'), 'utf8')
+    const statusIndex = customersSource.indexOf("key: 'license_status'")
+    const usersIndex = customersSource.indexOf("key: 'license_authorized_users'")
+    const expiryIndex = customersSource.indexOf("key: 'license_expiry_date'")
+
+    expect(statusIndex).toBeGreaterThanOrEqual(0)
+    expect(usersIndex).toBeGreaterThan(statusIndex)
+    expect(expiryIndex).toBeGreaterThan(usersIndex)
+    expect(customersSource).toContain("key: 'license_authorized_users'")
+    expect(customersSource).toContain("label: '授权人数'")
+    expect(customersSource).toContain("type: 'number'")
+    expect(customersSource).toContain('row.license_authorized_users ?? \'-\'')
+
+    const detailSource = readFileSync(resolve(viewsDir, 'CustomerDetailSheet.vue'), 'utf8')
+    const statusLabelIndex = detailSource.indexOf('<div class="attribute-label">授权状态</div>')
+    const usersLabelIndex = detailSource.indexOf('<div class="attribute-label">授权人数</div>')
+    const expiryLabelIndex = detailSource.indexOf('<div class="attribute-label">授权到期</div>')
+
+    expect(usersLabelIndex).toBeGreaterThan(statusLabelIndex)
+    expect(expiryLabelIndex).toBeGreaterThan(usersLabelIndex)
+    expect(detailSource).toContain('customer?.license_authorized_users ?? \'-\'')
+  })
 })

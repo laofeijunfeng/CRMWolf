@@ -59,6 +59,7 @@ export const CustomerResponseSchema = z.object({
   last_modified_time: z.string(), // 放宽日期格式验证
   version: z.number().int().nonnegative(),
   license_expiry_date: z.string().nullable().optional(),
+  license_authorized_users: z.number().int().nullable().optional(),
   license_type: z.string().nullable().optional()
 })
 

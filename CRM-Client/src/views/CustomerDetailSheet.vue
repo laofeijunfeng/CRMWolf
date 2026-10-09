@@ -1657,6 +1657,10 @@ onBeforeUnmount(() => {
                         </div>
                       </div>
                       <div class="attribute-item">
+                        <div class="attribute-label">授权人数</div>
+                        <div class="attribute-value">{{ customer?.license_authorized_users ?? '-' }}</div>
+                      </div>
+                      <div class="attribute-item">
                         <div class="attribute-label">授权到期</div>
                         <div class="attribute-value">{{ formatDate(customer?.license_expiry_date) }}</div>
                       </div>
