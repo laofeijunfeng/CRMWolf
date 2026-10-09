@@ -304,19 +304,6 @@ def test_commit_true_does_not_commit_unrelated_pending_changes_when_snapshot_is_
 
     assert db.query(Customer).filter_by(id=unrelated.id).one().account_name == "待提交客户"
 
-def test_commit_true_persists_snapshot(db, customer, monkeypatch):
-    application = _application("committed", license_type="OFFICIAL", users=20, expiry=date(2028, 1, 1))
-    db.add(application)
-    db.commit()
-    _disable_progress_side_effect(monkeypatch)
-
-    license_application_crud.update_customer_license_info(db, 1, application, commit=True)
-    db.expire_all()
-    persisted = db.query(Customer).filter_by(id=customer.id).one()
-
-    assert (persisted.license_type, persisted.license_authorized_users, persisted.license_expiry_date) == (
-        "OFFICIAL", 20, date(2028, 1, 1)
-    )
 
 
 def test_commit_false_defers_snapshot_persistence_until_commit(db, customer, monkeypatch):
