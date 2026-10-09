@@ -91,6 +91,11 @@ class Customer(Base):
 
     license_expiry_date = Column(Date, nullable=True, comment="客户 License 最晚到期时间（自动更新）")
     license_type = Column(String(20), nullable=True, comment="客户 License 类型（自动更新）：TRIAL/OFFICIAL")
+    license_authorized_users = Column(
+        Integer,
+        nullable=True,
+        comment="客户 License 授权人数（自动更新）",
+    )
 
     contacts = relationship("Contact", back_populates="customer", cascade="all, delete-orphan")
     contracts = relationship("Contract", back_populates="customer", cascade="all, delete-orphan")

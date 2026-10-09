@@ -639,16 +639,9 @@ class LicenseApplicationCRUD:
         commit: bool = True,
     ) -> None:
         """
-        更新客户 License 最晚到期时间和类型。
+        Recompute and persist the customer's License snapshot from the winning issued application.
 
-        仅当本次发放的 License 到期时间晚于客户当前记录，或客户尚未记录
-        License 到期时间时，才更新客户表。较早到期的试用/正式 License 不会
-        覆盖客户当前更远的授权信息。
-
-        Args:
-            db: 数据库会话
-            team_id: 团队ID
-            issued_application: 本次已发放的 License 申请
+        The customer row is locked before selecting the single winning application.
         """
         if issued_application.team_id != team_id:
             return
@@ -656,19 +649,42 @@ class LicenseApplicationCRUD:
             customer = db.query(Customer).filter_by(
                 id=issued_application.customer_id, team_id=team_id
             ).populate_existing().with_for_update().one_or_none()
-        if customer is None:
-            return
+            if customer is None:
+                return
 
-        if (
-            customer.license_expiry_date is None
-            or issued_application.expiry_date > customer.license_expiry_date
-        ):
-            advance_eligible_progress(db, team_id=team_id, customer_id=customer.id)
-            customer.license_expiry_date = issued_application.expiry_date
-            customer.license_type = issued_application.license_type
+            selected_application = (
+                db.query(LicenseApplication)
+                .filter(
+                    LicenseApplication.customer_id == customer.id,
+                    LicenseApplication.team_id == team_id,
+                    LicenseApplication.status == LicenseApplicationStatus.ISSUED,
+                )
+                .order_by(
+                    LicenseApplication.expiry_date.desc(),
+                    LicenseApplication.last_modified_time.desc(),
+                    LicenseApplication.id.desc(),
+                )
+                .first()
+            )
+
+            previous_expiry = customer.license_expiry_date
+            if selected_application is None:
+                selected_values = (None, None, None)
+            else:
+                selected_values = (
+                    selected_application.license_type,
+                    selected_application.authorized_users,
+                    selected_application.expiry_date,
+                )
+
+            customer.license_type, customer.license_authorized_users, customer.license_expiry_date = selected_values
+            selected_expiry = selected_values[2]
+            if selected_expiry is not None and (
+                previous_expiry is None or selected_expiry > previous_expiry
+            ):
+                advance_eligible_progress(db, team_id=team_id, customer_id=customer.id)
             if commit:
                 db.commit()
-
 
 # 创建全局实例
 license_application_crud = LicenseApplicationCRUD()
