@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import BusinessJourneyTableView from '@/components/business-journey/BusinessJourneyTableView.vue'
 import { createBusinessJourneyListFields } from '@/components/business-journey/businessJourneyListFields'
 import type { BusinessJourneyListItem } from '@/schemas/dealJourney'
+import { projectListFieldCatalog } from '@/components/crmwolf/listFieldCatalog'
 
 const journeyFixture: BusinessJourneyListItem = {
   id: 'djy_test',
@@ -105,6 +106,42 @@ describe('BusinessJourneyTableView layout', () => {
     expect(wrapper.text()).toContain('2026-10-01')
     expect(wrapper.text()).not.toContain('开始时间')
     expect(wrapper.text()).not.toContain('2026-09-01')
+  })
+
+  it('registers progress immediately after stage as a default-visible display-only field', () => {
+    const fields = createBusinessJourneyListFields([])
+
+    expect(fields.map(field => field.key)).toEqual([
+      'name',
+      'customer_name',
+      'current_board_stage',
+      'progress',
+      'primary_opportunity_name',
+      'product_name',
+      'amount',
+      'purchase_type',
+      'owner_id',
+      'last_event_at',
+      'expected_closing_date'
+    ])
+
+    expect(fields[3]).toMatchObject({
+      key: 'progress',
+      label: '当前进度',
+      role: 'decoration',
+      column: { width: '96px' },
+      filter: false,
+      filterDisabledReason: '当前进度由当前阶段派生，不支持筛选',
+      sort: false,
+      sortDisabledReason: '当前进度由当前阶段派生，不支持排序',
+      export: false
+    })
+
+    const projected = projectListFieldCatalog(fields)
+    expect(projected.columns.map(column => column.key)).toContain('progress')
+    expect(projected.filterFields.map(field => field.key)).not.toContain('progress')
+    expect(projected.sortFields.map(field => field.key)).not.toContain('progress')
+    expect(projected.exportFields.map(field => field.fieldKey)).not.toContain('progress')
   })
 
   it.each([
