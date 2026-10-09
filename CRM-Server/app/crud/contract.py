@@ -11,7 +11,7 @@ from app.models.license_application import LicenseApplication
 from app.models.opportunity import Opportunity
 from app.constants.business_types import BusinessType
 from app.utils.approval_delete_guard import assert_deletable_approval_resource
-from app.schemas.contract import ContractCreate, ContractInternalCreate, ContractUpdate
+from app.schemas.contract import ContractInternalCreate, ContractUpdate
 from app.services.business_number_generator import BusinessNumberGenerator
 from app.services.contract import ContractPricingService
 from app.services.legacy_profile_source import advance_eligible_progress, lock_source_customer
