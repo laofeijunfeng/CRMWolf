@@ -53,8 +53,15 @@ vi.mock('@/components/crmwolf', () => ({
   }),
   Progress: defineComponent({
     name: 'Progress',
-    props: { modelValue: Number },
-    setup: (props, { attrs }) => () => h('div', { ...attrs, 'data-progress': String(props.modelValue) }),
+    props: {
+      modelValue: Number,
+      indicatorClass: String,
+    },
+    setup: (props, { attrs }) => () => h('div', {
+      ...attrs,
+      'data-progress': String(props.modelValue),
+      'data-indicator-class': props.indicatorClass,
+    }),
   }),
   DataViewStatePanel: defineComponent({
     name: 'DataViewStatePanel',
@@ -229,6 +236,10 @@ describe('CustomerDealJourneyHoverCard', () => {
     expect(html.indexOf('金额 320000')).toBeLessThan(html.indexOf('data-progress'))
     expect(html.indexOf('data-progress')).toBeLessThan(html.indexOf('即将签约'))
     expect(item.get('[data-progress="43"]').exists()).toBe(true)
+    const firstProgress = item.get('[data-progress="43"]')
+    expect(firstProgress.attributes('data-indicator-class')).toBe('bg-green-500')
+    expect(item.text()).toContain('43%')
+    expect(firstProgress.attributes('aria-label')).toBe('企业 CRM 升级项目 旅程进度 43%')
     expect(wrapper.get(`[data-testid="customer-deal-journey-stage-${JOURNEY_IDS.first}"]`).text()).toBe('即将签约')
 
     await item.trigger('click')
@@ -285,6 +296,8 @@ describe('CustomerDealJourneyHoverCard', () => {
 
     const progress = wrapper.get('[data-progress="100"]')
     expect(progress.attributes('aria-label')).toBe('已完成项目 旅程进度 100%')
+    expect(progress.attributes('data-indicator-class')).toBe('bg-blue-500')
+    expect(wrapper.text()).toContain('100%')
     expect(wrapper.text()).not.toContain('赢率')
   })
 
