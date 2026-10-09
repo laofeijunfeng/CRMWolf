@@ -145,7 +145,7 @@ describe('BusinessJourneyTableView layout', () => {
   })
   it('renders the derived percentage, shared color, compact bar, and accessible label', () => {
     const wrapper = mountJourneyTable([journeyFixture])
-    const progressCell = wrapper.get('[data-testid="business-journey-progress"]')
+    const progressCell = wrapper.get('.data-table tbody [data-testid="business-journey-progress"]')
     const progress = progressCell.get('[role="progressbar"]')
     const indicator = progressCell.get('[role="progressbar"] > div')
 
