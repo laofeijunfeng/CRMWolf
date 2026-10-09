@@ -46,6 +46,7 @@ from app.models.contract import Contract
 from app.models.customer import Customer
 from app.schemas.contract import (
     ContractCreate,
+    ContractInternalCreate,
     ContractDetailResponse,
     ContractListResponse,
     ContractResponse,
@@ -362,10 +363,8 @@ async def create_contract(
         )
 
     customer = check_customer_edit_permission(contract.customer_id, team_id, current_user, db)
-    contract = contract.model_copy(update={"customer_id": customer.id})
 
     opportunity = _get_opportunity_by_public_id_or_404(db, contract.opportunity_id, team_id)
-    contract = contract.model_copy(update={"opportunity_id": opportunity.id})
 
     contact = contact_crud.get_by_id(db, contract.signing_contact_id, team_id)
     if not contact:
@@ -374,22 +373,36 @@ async def create_contract(
             detail="联系人不存在"
         )
 
-    if contact.customer_id != contract.customer_id:
+    if contact.customer_id != customer.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="签约人不属于该客户"
         )
 
-    if opportunity.customer_id != contract.customer_id:
+    if opportunity.customer_id != customer.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="商机关联的客户与合同客户不一致"
         )
 
+    internal_contract = ContractInternalCreate(
+        contract_name=contract.contract_name,
+        customer_id=customer.id,
+        opportunity_id=opportunity.id,
+        signing_contact_id=contract.signing_contact_id,
+        user_count=contract.user_count,
+        total_amount=contract.total_amount,
+        license_type=contract.license_type,
+        subscription_years=contract.subscription_years,
+        signing_date=contract.signing_date,
+        effective_date=contract.effective_date,
+        owner_id=contract.owner_id,
+    )
+
     try:
         db_contract = contract_crud.create(
             db=db,
-            obj_in=contract,
+            obj_in=internal_contract,
             creator_id=str(current_user.id),
             team_id=team_id
         )

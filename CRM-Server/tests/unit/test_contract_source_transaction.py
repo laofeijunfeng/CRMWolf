@@ -67,9 +67,11 @@ async def test_contract_file_second_transaction_fences_source(
         db.commit()
         before = _watermark(db)
         after_create = []
+        captured_create = []
         # Use an actual committed contract/progress pair rather than the CRUD's
         # independent contract-number and operation-log dependencies.
         def create_contract(**kwargs):
+            captured_create.append(kwargs)
             row = Contract(
                 id=402, team_id=2, customer_id=101, opportunity_id=301,
                 contract_number="HT-002", contract_name="新合同", user_count=10,
@@ -107,7 +109,19 @@ async def test_contract_file_second_transaction_fences_source(
         )
         monkeypatch.setattr(
             contracts_api, "_parse_contract_payload",
-            lambda payload: _Request(customer_id=101, opportunity_id="opp_301", signing_contact_id=201),
+            lambda payload: _Request(
+                customer_id="cus_101",
+                opportunity_id="opp_301",
+                signing_contact_id=201,
+                contract_name="新合同",
+                user_count=10,
+                total_amount=Decimal("1000"),
+                license_type="SUBSCRIPTION",
+                subscription_years=1,
+                signing_date=None,
+                effective_date=None,
+                owner_id=None,
+            ),
         )
         monkeypatch.setattr(contracts_api.ApprovalService, "submit_for_approval", lambda db, id: None)
 
@@ -149,6 +163,10 @@ async def test_contract_file_second_transaction_fences_source(
             assert row.contract_file_size == len(b"contract")
             assert after["deletion_revision"] == before["deletion_revision"]
             assert after["source_snapshot_hash"] != after_create[0]["source_snapshot_hash"]
+        if from_opportunity:
+            assert captured_create[0]["opportunity_id"] == 301
+            assert captured_create[0]["customer_id"] == 101
+            assert captured_create[0]["team_id"] == 2
         other_team = db.query(CustomerLegacySourceProgress).filter_by(team_id=3, customer_id=202).one()
         assert (other_team.eligible_revision, other_team.deletion_revision) == (11, 4)
     finally:

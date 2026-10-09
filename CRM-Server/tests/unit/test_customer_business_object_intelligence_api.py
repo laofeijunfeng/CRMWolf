@@ -18,10 +18,10 @@ from app.models.contract import ContractStatus
 from app.models.invoice import InvoiceApplicationStatus
 from app.models.license_application import LicenseApplicationStatus
 from app.models.payment import PaymentPlanStatus
+from app.schemas.contract import ContractCreate, ContractInternalCreate
 from app.schemas.deployment import DeploymentInfoInternalCreate
 
 from app.schemas.license_application import LicenseApplicationInternalCreate
-
 
 class _RequestData(SimpleNamespace):
     """Small Pydantic-model stand-in for API inputs used by these unit tests."""
@@ -541,6 +541,128 @@ async def test_delete_contract_does_not_trigger_business_object_intelligence_whe
 
 
 @pytest.mark.asyncio
+async def test_create_contract_resolves_public_ids_into_internal_create(monkeypatch) -> None:
+    contract = _contract()
+    captured = []
+    scheduled = []
+
+    monkeypatch.setattr(
+        contracts_api, "check_customer_edit_permission", lambda customer_id, team_id, current_user, db: _customer()
+    )
+    monkeypatch.setattr(
+        contracts_api,
+        "_get_opportunity_by_public_id_or_404",
+        lambda db, opportunity_id, team_id: SimpleNamespace(id=301, customer_id=101),
+    )
+    monkeypatch.setattr(
+        contracts_api.contact_crud, "get_by_id", lambda db, contact_id, team_id: SimpleNamespace(customer_id=101)
+    )
+    monkeypatch.setattr(
+        contracts_api,
+        "_parse_contract_payload",
+        lambda contract_payload: ContractCreate(
+            customer_id="cus_101",
+            opportunity_id="opp_301",
+            signing_contact_id=201,
+            contract_name="企业版采购合同",
+            user_count=100,
+            total_amount=Decimal("120000"),
+            license_type="SUBSCRIPTION",
+            subscription_years=1,
+        ),
+    )
+
+    def capture_create(**kwargs):
+        captured.append(kwargs["obj_in"])
+        return contract
+
+    monkeypatch.setattr(contracts_api.contract_crud, "create", capture_create)
+    monkeypatch.setattr(
+        contracts_api, "_lock_created_contract_for_file_commit", lambda db, contract, **kwargs: contract,
+    )
+    monkeypatch.setattr(contracts_api.file_storage_service, "save_contract_file", lambda **kwargs: "/contracts/401.pdf")
+    monkeypatch.setattr(contracts_api.ApprovalService, "submit_for_approval", lambda db, contract_id: None)
+
+    async def fake_trigger(db, change):
+        scheduled.append(change)
+
+    monkeypatch.setattr(contracts_api, "_trigger_contract_intelligence_refresh", fake_trigger)
+
+    result = await contracts_api.create_contract(
+        contract_payload="{}",
+        file=_FakeUploadFile(),
+        team_id=2,
+        current_user=SimpleNamespace(id=9, name="张三"),
+        db=_FakeDb(),
+    )
+
+    assert isinstance(captured[0], ContractInternalCreate)
+    assert captured[0].customer_id == 101
+    assert captured[0].opportunity_id == 301
+    assert result.customer_id == "cus_101"
+    assert result.opportunity_id == "opp_301"
+    assert scheduled[0].source_id == 401
+
+
+@pytest.mark.asyncio
+async def test_create_contract_value_error_has_no_post_create_side_effect(monkeypatch) -> None:
+    side_effects = []
+    monkeypatch.setattr(
+        contracts_api, "check_customer_edit_permission", lambda customer_id, team_id, current_user, db: _customer()
+    )
+    monkeypatch.setattr(
+        contracts_api,
+        "_get_opportunity_by_public_id_or_404",
+        lambda db, opportunity_id, team_id: SimpleNamespace(id=301, customer_id=101),
+    )
+    monkeypatch.setattr(
+        contracts_api.contact_crud, "get_by_id", lambda db, contact_id, team_id: SimpleNamespace(customer_id=101)
+    )
+    monkeypatch.setattr(
+        contracts_api,
+        "_parse_contract_payload",
+        lambda contract_payload: ContractCreate(
+            customer_id="cus_101",
+            opportunity_id="opp_301",
+            signing_contact_id=201,
+            contract_name="企业版采购合同",
+            user_count=100,
+            total_amount=Decimal("120000"),
+            license_type="SUBSCRIPTION",
+            subscription_years=1,
+        ),
+    )
+    monkeypatch.setattr(
+        contracts_api.contract_crud,
+        "create",
+        lambda **kwargs: (_ for _ in ()).throw(ValueError("该商机已创建合同")),
+    )
+    monkeypatch.setattr(
+        contracts_api.file_storage_service,
+        "save_contract_file",
+        lambda **kwargs: side_effects.append("stored"),
+    )
+    monkeypatch.setattr(
+        contracts_api.ApprovalService,
+        "submit_for_approval",
+        lambda db, contract_id: side_effects.append("approved"),
+    )
+
+    with pytest.raises(contracts_api.HTTPException) as exc:
+        await contracts_api.create_contract(
+            contract_payload="{}",
+            file=_FakeUploadFile(),
+            team_id=2,
+            current_user=SimpleNamespace(id=9, name="张三"),
+            db=_FakeDb(),
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "该商机已创建合同"
+    assert side_effects == []
+
+
+@pytest.mark.asyncio
 async def test_create_contract_triggers_business_object_intelligence(monkeypatch) -> None:
     contract = _contract()
     scheduled = []
@@ -569,7 +691,16 @@ async def test_create_contract_triggers_business_object_intelligence(monkeypatch
     monkeypatch.setattr(
         contracts_api,
         "_parse_contract_payload",
-        lambda contract_payload: _RequestData(customer_id=101, opportunity_id="opp_301", signing_contact_id=201),
+        lambda contract_payload: ContractCreate(
+            customer_id="cus_101",
+            opportunity_id="opp_301",
+            signing_contact_id=201,
+            contract_name="企业版采购合同",
+            user_count=100,
+            total_amount=Decimal("120000"),
+            license_type="SUBSCRIPTION",
+            subscription_years=1,
+        ),
     )
     monkeypatch.setattr(contracts_api.contract_crud, "create", lambda **kwargs: contract)
     monkeypatch.setattr(

@@ -11,7 +11,7 @@ from app.models.license_application import LicenseApplication
 from app.models.opportunity import Opportunity
 from app.constants.business_types import BusinessType
 from app.utils.approval_delete_guard import assert_deletable_approval_resource
-from app.schemas.contract import ContractCreate, ContractUpdate
+from app.schemas.contract import ContractCreate, ContractInternalCreate, ContractUpdate
 from app.services.business_number_generator import BusinessNumberGenerator
 from app.services.contract import ContractPricingService
 from app.services.legacy_profile_source import advance_eligible_progress, lock_source_customer
@@ -442,7 +442,7 @@ class ContractCRUD:
     def create(
         self,
         db: Session,
-        obj_in: ContractCreate,
+        obj_in: ContractInternalCreate,
         creator_id: str,
         team_id: int
     ) -> Contract:
@@ -451,7 +451,7 @@ class ContractCRUD:
         from app.services.operation_log_service import operation_log_service
         
         contract_data = obj_in.model_dump()
-        lock_source_customer(db, team_id=team_id, customer_id=int(contract_data['customer_id']))
+        lock_source_customer(db, team_id=team_id, customer_id=contract_data['customer_id'])
         explicit_owner_id = contract_data.pop('owner_id', None)
         
         contract_number = BusinessNumberGenerator.generate('CT', db)
@@ -542,7 +542,7 @@ class ContractCRUD:
             actor_id=creator_id,
             summary=f"创建合同：{db_obj.contract_name}",
         )
-        advance_eligible_progress(db, team_id=team_id, customer_id=int(db_obj.customer_id))
+        advance_eligible_progress(db, team_id=team_id, customer_id=db_obj.customer_id)
         db.commit()
         db.refresh(db_obj)
 
@@ -563,15 +563,21 @@ class ContractCRUD:
     ) -> Contract:
         from app.models.opportunity import Opportunity
         from app.models.customer import Customer
-        lock_source_customer(db, team_id=team_id, customer_id=int(customer_id))
+        lock_source_customer(db, team_id=team_id, customer_id=customer_id)
 
         if self.has_active_contract_for_opportunity(db, opportunity_id, team_id):
             raise ValueError("该商机已创建合同")
 
-        opportunity = db.query(Opportunity).filter(Opportunity.id == opportunity_id).first()
+        opportunity = db.query(Opportunity).filter(
+            Opportunity.id == opportunity_id,
+            Opportunity.team_id == team_id,
+        ).first()
         if not opportunity:
             raise ValueError("商机不存在")
-        customer = db.query(Customer).filter(Customer.id == customer_id).first()
+        customer = db.query(Customer).filter(
+            Customer.id == customer_id,
+            Customer.team_id == team_id,
+        ).first()
         owner_id = opportunity.owner_id or (customer.owner_id if customer else None) or creator_id
 
         contract_number = BusinessNumberGenerator.generate('CT', db)
@@ -619,7 +625,7 @@ class ContractCRUD:
             actor_id=creator_id,
             summary=f"创建合同：{db_obj.contract_name}",
         )
-        advance_eligible_progress(db, team_id=team_id, customer_id=int(db_obj.customer_id))
+        advance_eligible_progress(db, team_id=team_id, customer_id=db_obj.customer_id)
         db.commit()
         db.refresh(db_obj)
 
