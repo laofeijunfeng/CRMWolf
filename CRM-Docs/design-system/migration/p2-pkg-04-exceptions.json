@@ -70,7 +70,11 @@
       "id": "DS-EX-006",
       "category": "status-color",
       "files": [
-        "CRM-Client/src/utils/dealJourney.ts"
+        "CRM-Client/src/utils/dealJourney.ts",
+        "CRM-Client/src/utils/__tests__/dealJourney.test.ts",
+        "CRM-Client/src/components/ui/progress/__tests__/Progress.test.ts",
+        "CRM-Client/tests/components/BusinessJourneyTableView.spec.ts",
+        "CRM-Client/tests/components/CustomerDealJourneyHoverCard.spec.ts"
       ],
       "match": "\\b(?:bg-orange-500|bg-amber-500|bg-yellow-500|bg-lime-500|bg-green-500|bg-emerald-500|bg-teal-500|bg-cyan-500|bg-sky-500|bg-blue-500)\\b",
       "reason": "业务旅程进度条使用十段量化进度色阶；颜色与阶段百分比一一对应，必须保留完整 Tailwind 字面量以支持静态发现，并由阶段文字和百分比提供非颜色状态线索。",
