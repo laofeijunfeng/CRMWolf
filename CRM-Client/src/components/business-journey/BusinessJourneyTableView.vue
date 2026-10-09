@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { AmountText, Badge, DataTable, StatusBadge } from '@/components/crmwolf'
+import { AmountText, Badge, DataTable, Progress, StatusBadge } from '@/components/crmwolf'
 import type { ViewDisplayMode, ViewPreferenceConfig } from '@/api/viewPreference'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
@@ -8,6 +8,10 @@ import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { BusinessJourneyListItem } from '@/schemas/dealJourney'
 import type { FeedbackError } from '@/types/feedback'
 import { businessJourneyStagePresentation } from './businessJourneyStagePresentation'
+import {
+  dealJourneyProgressColorClass,
+  dealJourneyProgressPercent
+} from '@/utils/dealJourney'
 
 interface Props {
   fields: ListFieldDefinition[]
@@ -82,6 +86,14 @@ const formatDate = (value: string | null | undefined): string => value?.slice(0,
 const handleRowClick = (row: BusinessJourneyListItem): void => {
   emit('row-click', { customerId: row.customer_id, journeyPublicId: row.public_id })
 }
+const getJourneyProgressPercent = (row: BusinessJourneyListItem): number =>
+  dealJourneyProgressPercent(row.current_board_stage)
+
+const getJourneyProgressColorClass = (row: BusinessJourneyListItem): string =>
+  dealJourneyProgressColorClass(getJourneyProgressPercent(row))
+
+const getJourneyProgressLabel = (row: BusinessJourneyListItem): string =>
+  `${row.name} 当前进度 ${getJourneyProgressPercent(row)}%`
 </script>
 
 <template>
@@ -158,6 +170,24 @@ const handleRowClick = (row: BusinessJourneyListItem): void => {
       >
         {{ row.current_board_stage_label || stageLabels.get(row.current_board_stage) || '-' }}
       </Badge>
+    </template>
+    <template #cell-progress="{ row }">
+      <div
+        class="flex min-w-0 items-center gap-2"
+        data-testid="business-journey-progress"
+        role="group"
+        :aria-label="getJourneyProgressLabel(row)"
+      >
+        <Progress
+          :model-value="getJourneyProgressPercent(row)"
+          :indicator-class="getJourneyProgressColorClass(row)"
+          class="h-1.5 min-w-0 flex-1 bg-secondary"
+          :aria-label="getJourneyProgressLabel(row)"
+        />
+        <span class="shrink-0 tabular-nums text-xs text-muted-foreground">
+          {{ getJourneyProgressPercent(row) }}%
+        </span>
+      </div>
     </template>
     <template #cell-primary_opportunity_name="{ row }">
       {{ row.primary_opportunity_name || '-' }}

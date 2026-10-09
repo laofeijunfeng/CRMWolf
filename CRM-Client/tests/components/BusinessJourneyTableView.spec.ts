@@ -143,6 +143,19 @@ describe('BusinessJourneyTableView layout', () => {
     expect(projected.sortFields.map(field => field.key)).not.toContain('progress')
     expect(projected.exportFields.map(field => field.fieldKey)).not.toContain('progress')
   })
+  it('renders the derived percentage, shared color, compact bar, and accessible label', () => {
+    const wrapper = mountJourneyTable([journeyFixture])
+    const progressCell = wrapper.get('[data-testid="business-journey-progress"]')
+    const progress = progressCell.get('[role="progressbar"]')
+    const indicator = progressCell.get('[role="progressbar"] > div')
+
+    expect(progressCell.attributes('aria-label')).toBe('华东续约旅程 当前进度 29%')
+    expect(progress.attributes('aria-label')).toBe('华东续约旅程 当前进度 29%')
+    expect(progressCell.text()).toContain('29%')
+    expect(progressCell.classes()).toContain('items-center')
+    expect(progress.classes()).toContain('h-1.5')
+    expect(indicator.classes()).toContain('bg-yellow-500')
+  })
 
   it.each([
     ['early_communication', ['bg-sky-50', 'text-sky-700', 'border-sky-100']],
