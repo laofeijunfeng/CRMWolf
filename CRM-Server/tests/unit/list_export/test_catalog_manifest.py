@@ -32,6 +32,7 @@ def test_all_core_datatables_have_export_catalogs_without_internal_id() -> None:
 def test_manifest_contains_user_facing_contract() -> None:
     manifest = build_list_export_manifest(LIST_EXPORT_CATALOGS)
     assert manifest["customers"]["public_id"] == {"label": "业务 ID", "type": "text"}
+    assert manifest["customers"]["license_authorized_users"] == {"label": "授权人数", "type": "number"}
     assert manifest["payment_records"]["actual_amount"] == {"label": "回款金额", "type": "currency"}
     assert manifest["payment_records"].get("license_type") == {"label": "授权模式", "type": "text"}
     assert manifest["payment_records"].get("purchase_type") == {"label": "采购类型", "type": "text"}

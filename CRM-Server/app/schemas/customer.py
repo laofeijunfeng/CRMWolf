@@ -350,6 +350,7 @@ class CustomerResponse(BaseModel):
     version: int = Field(..., description="版本号（乐观锁，防止并发修改冲突）")
     # License 授权字段
     license_expiry_date: Optional[date] = Field(None, description="客户 License 最晚到期时间")
+    license_authorized_users: Optional[int] = Field(None, description="客户 License 授权人数")
     license_type: Optional[str] = Field(None, description="客户 License 类型：TRIAL/OFFICIAL")
     product_public_id: Optional[str] = Field(None, description="意向产品对外ID")
     product_name: Optional[str] = Field(None, description="意向产品名称")
@@ -514,6 +515,7 @@ class CustomerDetailResponse(BaseModel):
     customer_intelligence_has_inputs: bool = Field(False, description="是否存在可用于整理客户智能档案的业务输入")
     # License 授权字段
     license_expiry_date: Optional[date] = Field(None, description="客户 License 最晚到期时间")
+    license_authorized_users: Optional[int] = Field(None, description="客户 License 授权人数")
     license_type: Optional[str] = Field(None, description="客户 License 类型：TRIAL/OFFICIAL")
     product_public_id: Optional[str] = Field(None, description="意向产品对外ID")
     product_name: Optional[str] = Field(None, description="意向产品名称")

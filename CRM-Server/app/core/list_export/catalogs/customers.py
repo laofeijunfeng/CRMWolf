@@ -14,6 +14,7 @@ CUSTOMERS_LIST_EXPORT_CATALOG = ListExportCatalog(
         ListExportField("company_scale", "规模", "text"),
         ListExportField("status", "状态", "text"),
         ListExportField("license_status", "授权状态", "text"),
+        ListExportField("license_authorized_users", "授权人数", "number"),
         ListExportField("license_expiry_date", "授权到期", "date"),
         ListExportField("default_procurement_method", "默认采购方式", "text"),
         ListExportField("industry", "行业", "text"),

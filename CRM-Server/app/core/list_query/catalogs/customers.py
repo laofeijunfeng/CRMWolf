@@ -81,6 +81,11 @@ CUSTOMERS_LIST_QUERY_CATALOG = ListQueryCatalog(
             expression_builder=customer_license_status_expression,
         ),
         ListQueryField(
+            key="license_authorized_users",
+            type="number",
+            expression=Customer.license_authorized_users,
+        ),
+        ListQueryField(
             key="license_expiry_date",
             type="date",
             expression=Customer.license_expiry_date,

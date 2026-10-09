@@ -627,6 +627,21 @@
         "is_not_empty"
       ]
     },
+    "license_authorized_users": {
+      "type": "number",
+      "filterable": true,
+      "sortable": true,
+      "ops": [
+        "eq",
+        "gt",
+        "gte",
+        "is_empty",
+        "is_not_empty",
+        "lt",
+        "lte",
+        "neq"
+      ]
+    },
     "license_expiry_date": {
       "type": "date",
       "filterable": true,

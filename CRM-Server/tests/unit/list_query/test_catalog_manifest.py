@@ -24,6 +24,12 @@ def test_build_list_query_manifest_exposes_each_catalog_field_type():
         "ops": ["contains", "eq", "in", "is_empty", "is_not_empty", "neq", "not_contains", "not_in"],
     }
     assert manifest["customers"]["license_expiry_date"]["type"] == "date"
+    assert manifest["customers"]["license_authorized_users"] == {
+        "type": "number",
+        "filterable": True,
+        "sortable": True,
+        "ops": ["eq", "gt", "gte", "is_empty", "is_not_empty", "lt", "lte", "neq"],
+    }
     assert manifest["payment_plans"]["planned_amount"]["type"] == "number"
     assert manifest["approvals"]["overdue_hours"]["sortable"] is True
     assert manifest["payment_records"]["approval_status"]["sortable"] is True
