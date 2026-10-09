@@ -43,13 +43,39 @@ def test_internal_create_schemas_accept_integer_foreign_keys():
 @pytest.mark.parametrize(
     "model, payload",
     [
-        (LicenseApplicationInternalCreate, {"customer_id": "cus_230"}),
-        (DeploymentInfoInternalCreate, {"customer_id": "cus_230"}),
+        (
+            LicenseApplicationInternalCreate,
+            {
+                "customer_id": "cus_230",
+                "deployment_info_id": 50,
+                "contract_id": 74,
+                "license_type": LicenseType.OFFICIAL,
+                "authorized_users": 10,
+                "expiry_date": date(2027, 12, 31),
+            },
+        ),
+        (
+            DeploymentInfoInternalCreate,
+            {
+                "customer_id": "cus_230",
+                "deployment_name": "生产环境",
+                "server_address": "https://crm.example.com",
+            },
+        ),
         (
             ContractInternalCreate,
-            {"customer_id": "cus_230", "opportunity_id": "opp_301"},
+            {
+                "customer_id": "cus_230",
+                "opportunity_id": "opp_301",
+                "signing_contact_id": 201,
+                "contract_name": "企业版采购合同",
+                "user_count": 10,
+                "total_amount": Decimal("1000"),
+                "license_type": LicenseTypeEnum.SUBSCRIPTION,
+                "subscription_years": 1,
+            },
         ),
-    ],
+    ]
 )
 def test_internal_create_schemas_reject_public_foreign_keys(model, payload):
     with pytest.raises(ValidationError):
