@@ -568,7 +568,10 @@ async def test_create_contract_resolves_public_ids_into_internal_create(monkeypa
             user_count=100,
             total_amount=Decimal("120000"),
             license_type="SUBSCRIPTION",
-            subscription_years=1,
+            subscription_years=2,
+            signing_date=date(2026, 9, 15),
+            effective_date=date(2026, 10, 1),
+            owner_id="owner-42",
         ),
     )
 
@@ -597,8 +600,17 @@ async def test_create_contract_resolves_public_ids_into_internal_create(monkeypa
     )
 
     assert isinstance(captured[0], ContractInternalCreate)
+    assert captured[0].contract_name == "企业版采购合同"
     assert captured[0].customer_id == 101
     assert captured[0].opportunity_id == 301
+    assert captured[0].signing_contact_id == 201
+    assert captured[0].user_count == 100
+    assert captured[0].total_amount == Decimal("120000")
+    assert captured[0].license_type.value == "SUBSCRIPTION"
+    assert captured[0].subscription_years == 2
+    assert captured[0].signing_date == date(2026, 9, 15)
+    assert captured[0].effective_date == date(2026, 10, 1)
+    assert captured[0].owner_id == "owner-42"
     assert result.customer_id == "cus_101"
     assert result.opportunity_id == "opp_301"
     assert scheduled[0].source_id == 401
