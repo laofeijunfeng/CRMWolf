@@ -18,7 +18,7 @@ from app.models.customer_legacy_source_progress import CustomerLegacySourceProgr
 from app.models.license_application import LicenseApplicationStatus
 from app.models.license_application import LicenseApplication
 from app.models.approval import ApprovalStatus
-from app.schemas.license_application import LicenseApplicationApproveFull
+from app.schemas.license_application import LicenseApplicationApproveFull, LicenseApplicationInternalCreate
 from app.schemas.approval import ApprovalFlowCreate, ApprovalNodeCreate
 from app.services.approval_adapter import get_adapter
 
