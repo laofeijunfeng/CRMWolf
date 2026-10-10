@@ -1,6 +1,6 @@
 # 销售助手 Agent 2.0 七项优化 TRD（实施与验收证据）
 
-- **版本：**2026-09-30 目标设计；2026-10-01 实施及隔离验收证据；2026-10-02 至 2026-10-03 复核 §9–§10。§1–§8 的“现状／代码路径可判定”是改造前基线，不应据此断言当前仍有相同缺口；§9 为改造后实际观察，§10 为发布门禁判定。本文不代表已获产品、安全或生产发布批准。
+- **版本：**2026-09-30 目标设计；2026-10-01 实施及隔离验收证据；2026-10-02 至 2026-10-03 复核 §9–§10；2026-10-08 §9.9 补当前源码四类修复与同链验收。§1–§8 的“现状／代码路径可判定”是改造前基线，§9 各节仅证明各自时点和指定运行版本，不能把历史运行态混作当前源码；§10 为发布门禁判定。本文不代表已获产品、安全或生产发布批准。
 - **范围：**仅销售助手 Web `/assistant` 与后端 `/v1/assistant`，以及这条链路实际触达的旧客户智能读取／发布边界和 CRM 命令边界。旧 Web Agent、飞书 IM、页面表单不切换；不创建客户、线索、回款或合同。
 - **优先合同：**[`CONTEXT.md`](../../../CONTEXT.md) 第 15–44 行和 Accepted [`docs/adr/0001-customer-activity-workflow-parity.md`](../../../docs/adr/0001-customer-activity-workflow-parity.md) 第 16–54 行。本文细化其 2.0 入口规则，不推翻活动新增／删除、最终评分一次保存、下一步行动门禁、提交后独立处理及商机独立原子。界面实现另遵循 [`CRM-Docs/design-system/README.md`](../../design-system/README.md)。
 - **关系：**新增的专题 TRD；不替代、不改写 [`agent-2-optimization-trd.md`](agent-2-optimization-trd.md) 和 [`agent-2-round3-optimization-trd.md`](agent-2-round3-optimization-trd.md)。旧文档的代码“现状”和测试结论有历史时点限制；本文件的当前实现以以下代码路径为准，不将原草案里的旧缺口继续算作今天的缺口。
@@ -22,6 +22,8 @@
 七项依赖顺序：**① 来源视图／发布边界**和**③ 目标提交归因**是安全底座；**② 候选＋表单**依赖③的写入协议；**④ 确定拒绝／待对账**依赖③的效果回执；**⑤ 客户端协议**消费②④；**⑥ 原文更正**决定①②可执行证据；**⑦ 运维／日期**横切②④⑥。可以分批开发，不能在缺归因时打开商机创建按钮。
 
 ## 1. 优化一：2.0 来源、旧客户智能投影和水位彻底隔离
+
+> **2026-10-10 批次作废：**客户档案能力已整体移除（设计 `docs/superpowers/specs/2026-10-10-customer-profile-removal-design.md`；分支 `codex/customer-profile-removal` 合入 main）。投影、水位、发表栅栏、legacy source progress、`/profile` API、三张档案表已物理删除（Alembic 152/153）。本节 §1.1–§1.3 与 §9.1 S01–S09、§10 A 批次的“旧档案发表”目标不再存在，保留原文仅作历史基线。仍然有效的残留边界只有一条：2.0 活动及其派生不得流入旧客户智能读取路径——该边界在档案移除中已由“上下文不再读取客户事实 + 证据检索保留 `eligible_activity_source` 过滤 + `legacy_profile_source` 仅存 origin/provenance 判定”实现，并有 `test_customer_intelligence_context_service.py` 等回归覆盖。A 批次门禁据此改判：**档案侧无遗留验收条件**；B/C/D 批次条件不变。
 
 ### 1.1 现状与证据
 
@@ -414,12 +416,96 @@ V 为 `CRM-Client/tests/components/{SalesAssistantProposal,SalesAssistantProcess
 - **§10 A–D 全部继续未批准，七项不标完成。**本节补齐真实模型提名／更正／评分／实际表单创建的定向运行态证据，不消除历史副本来源审计、生产老 claim 精确核验、去重阈值／纯日期政策／运维职责批准、灰度监控／生产回滚、完整低分补充与日期用例的缺口；当前客户端不兼容、会议暂无语义及早期入口环境 guard 缺陷也必须保留。后续验收必须针对实际待发布源码重跑，不能混用本次运行态与当前磁盘。
 - **阶段性提交决策：**用户确认 Agent 2.0 目前尚无人使用。本次仅将两段提示词修复与本节证据保存为开发阶段提交，不将存量 2.0 任务兼容／迁移作为本次提交的前置条件；该确认不证明旧客户智能历史来源安全，也不代表功能已验收或批准启用。提交前再次运行上述三文件测试，结果为 `1 failed, 51 passed, 30 warnings in 4.51s`，仍为同一 SQLite fixture 缺表失败。当前客户端契约、会议暂无语义及其他缺口保留为启用前待修／待验项。
 
+### 9.9 2026-10-08 当前源码四类修复与隔离同链验收
 
+本节承接 §9.8 暴露的客户端合同、会议暂无、日期执行及商机误去重问题，只覆盖用户批准的四类优化。**不回写历史失败为通过，不宣称七项全量完成，不批准 §10 A–D 发布。**Agent 2.0 尚无人使用，不以不存在的 2.0 存量迁移阻塞本轮；共享 CRM 和旧客户智能的来源安全边界不因此取消。
+
+#### 当前实现合同
+
+- **双端协议与恢复：**`assistant/contracts.py`、`api/assistant.py`、客户端 `schemas/assistant-contracts`、`api/assistant.ts` 与聊天卡片统一封闭的 `activity_write/preview`、`proposal/proposal_kind/candidate` 判别合同及 typed committed receipt；任务种类与七种 CRM 活动种类分开。detail GET 严格校验，列表逐行隔离坏记录并展示跳过数量，不放宽未知命令 schema。`processing_turn_id/status` 暴露本人内部轮次，刷新／重试只补读原轮次，不发第二次输入。任务导航保留 epoch fence，并在当前导航失败时释放无 owner 的 submitting 锁。收据按 committed 判断，不以 COMPLETED 猜活动已写；后续拒绝／取消与此前活动成功分别展示。冻结确认仅执行真实 write，不虚构重新整理／评分阶段。
+- **会议明确暂无：**`intake_flow.py`、`coordinator.py` 与 `action_evidence.py` 清除当前 canonical action_items、next_action 和 next_follow_time；旧证据转 `EXPLICITLY_NONE`，原话和原因保留。后续 structurer 即使带回旧行动和旧日期，也不能恢复其下游资格。明确更正只替换唯一匹配旧行动，保留 item_id 并递增证据 revision；普通补充不冒充更正，真实两次行动仍可并存。
+- **接受锚点与日期：**模型调用前持久保存 SourceSegment，以 owned AssistantTurn.created_time 固定接受锚点；同 `(turn_id,text)` 幂等，同句新轮保留独立接受事件，类型选择不新增接受记录。日期只绑定本行动局部分句，其他主体、独立句子或后续明确反证不能借旧 ACTIVE 证据授权。真实任务执行器从已存活动重验 canonical、源 segment／引用范围、owner/action、首次 anchor、Asia/Shanghai、parser version、粒度及重算结果，不要求中文原话逐字包含 ISO。活动冻结合同增 `next_follow_time_granularity`，候选顶层增 `due_date_granularity`，后者由持久 validated evidence 绑定、参与候选签名和执行前重验；展示 metadata 不单独授权。纯日期页面仅显示日期，明确午夜 DATETIME 保留时刻，不在浏览器解析中文或凭午夜猜粒度。保留现有活动 09:00 存储及任务日末 23:59:59 政策，二者不混用；证据本身仍是 DATE＋00:00。
+- **商机目标与真实归因：**`opportunity_target_matching.py` 在 pre-offer 和 executor 共同按同团队／客户、产品、模块集合、采购类型、许可类型／订阅期限比较目标；金额、人数、成交日期不是目标身份。商机名 strip 后完全相等，不以 SQL 原始名称前筛漏掉 padded 旧名，不加 fuzzy 阈值；明确重复跳过、不同目标继续、歧义保守不创建。`proposals.py`／`crm_proposal_commands.py` 的 command_id/fingerprint 与 claim、目标 API 的 assistant_command 及精确 checked_effect 对齐；首次成功和恢复都不再按同名对象或任意阶段变化猜成功，无归因旧 claim 保 UNKNOWN 且不重放。未扩张 auto_won 语义。
+
+#### 验收层级与数据库身份
+
+- 本轮**未调用真实模型**。独立 HTTP harness 使用固定 classifier／structurer／quality gate、受控接受时钟，真实认证路由、durable worker、RealActivityWriter 和 RealCRMProposalExecutor；仅输入虚构业务数据。SQLite 回归、TestClient、mock API 组件测试与下面的独立 HTTP／浏览器／MySQL 证据分别计量，不能拿固定输出当真实模型能力。两个 bounded 只读审查已完成；其确认的问题分别由日期授权和导航失败回归先红后绿修复，不以审查意见代替运行验证。
+- 独占 `--rm`、无 volume 的 `crmwolf-fouropt-1008c` MySQL 8.0 容器，仅 `mysql+pymysql/root@127.0.0.1:3308/crm_assistant_acceptance`；导入应用前校验外部 DSN identity，导入后精确比较 engine.url，不覆盖错误入口环境。当前 schema 由 `Base.metadata.create_all()` 建立，是 **ORM fixture，不是迁移验收**。`001_initial` 为依赖外部 init_db 的 no-op marker；未对已存在全 schema 盲跑 `alembic upgrade head`，也不声称待发布副本迁移通过。
+- 新建团队 `10082026`、用户 `100820261`、客户 `cus_four_1008c`。HTTP `18313`、Vite `5213`、专属 CDP Chromium `18314`；Vite 只代理本轮 HTTP。未重建已清理团队 1994、未访问共享业务库、未修改 .env、未调用 8000 业务服务、未运行模型／向量后台或连接外部 Qdrant。
+
+#### 独立 HTTP、真实页面和独立 MySQL 同链结果
+
+| 场景 | 当前源码实测证据 |
+| --- | --- |
+| 跨夜补充＋DATETIME | `ast_6557581974904467aa5a588e48914f18`：首句接受 `2026-10-08T23:59:00`，FIELD 补充 `2026-10-10T08:00:00`；冻结活动和真实下游任务完成。独立 MySQL 逐字段断言 1 活动、1 FollowUpTask、1 CREATED Event；due_at=`2026-10-14T15:00:00`、DATETIME、Asia/Shanghai，证据 anchor 仍是首次接受、segment=`seg_faa116c5d9a6620746c1`、quote=`我下周三下午三点发方案`、parser=`assistant-date-v1`，源接受轮次和两条 source_records 均对应。confirm 事件只有 write start/done，没有 structure／quality_gate；确认不增加固定 seam 调用计数。刷新重开 COMPLETED 任务，实际页面可见“活动已写入”。 |
+| 类型选择不重锚定 | `ast_8d07265ca8464f6a879adeb61e87ada6`：初始 UNCLEAR，经真实签发 action/version 选择 FOLLOW_UP，选择前后 source_records 全量相等、未追加接受事件，得到 typed 活动确认；未确认业务写，随后正常取消。 |
+| 会议明确暂无＋旧模型值 | `ast_4adae97c4a6e407e9ca00f9be6e29427`：先有 ACTIVE 行动和日期，FIELD 接受 EXPLICITLY_NONE 与等待预算审批原因，固定 structurer 故意返回旧值。frozen action_items=[]、next_action/next_follow_time=null、无 ACTIVE evidence；真实确认后独立 MySQL 1 活动、0 Task/Event，原“暂无下一步”保留，旧证据为 EXPLICITLY_NONE。确认前后 structure/gate 均为 5。相同请求键同 input 重放 200，旧 action 换新键 409，独立复查仍无重复写。 |
+| 纯日期完整链 | `ast_5906289ac9a44a448e967f03a7ba7043`：实际 `/assistant` 点击确认活动，再确认创建跟进任务，两个卡片均显示 `2026-10-14`，无默认 09:00／证据午夜伪时刻；独立 MySQL 1 活动、1 FollowUpTask、1 CREATED Event，任务 due_at=`2026-10-14T23:59:59`、DATE、Asia/Shanghai。证据仍为 `2026-10-14T00:00:00`、quote=`我下周三发方案`、anchor=`2026-10-08T23:59:00`、parser=`assistant-date-v1`；活动仍沿既有规则存 09:00，未改变业务存储政策。两次确认均未增加 structure/gate。旧展示合同的自有纯日期任务通过正常 cancel 收口，未改其已写活动、持久卡或指纹。 |
+| 同一内部轮次刷新与恢复 | 上述纯日期任务写活动后受控 hold `continue_proposals`，真实 GET 见 `atn_be3fc72e216d409789a03dcd90e08e48/RUNNING`、无 waiting、活动 receipt 已持久。单次局部 request 监听内 reload，只观察 assistant latest-active GET 和该 **同一 turn GET**，零 assistant POST；textarea 禁用、可见“活动已写入”、“重试同步”启用。实际点击恢复又只 GET 同 turn；release 后再补读得到 typed 日期 proposal 并继续写真实任务。DOM、截图及点击均验证，不把空 request 数组当零 POST 证据。 |
+| 实际页面拒绝后续 | `ast_f37b8dd8d8c443fd8ba2a1558f16ad18`：页面点击写活动、proposal“暂不处理”，显示拒绝而非 FailureCard，GET 终态 COMPLETED、committed 保留活动并追加 refused:follow_up_task_create；GET 同步终态后实际可见“已完成”“活动已写入”。独立 MySQL 1 活动、0 Task/Event。 |
+| 实际页面取消后续 | `ast_dc1d882837354a0baddf852e1a631a37`：活动写入且 proposal 待确认时点击“取消任务”，页面显示“已取消”和“活动已写入”，提案仅历史记录、无失败卡；GET CANCELLED、waiting=null、committed 仅原活动。独立 MySQL 1 活动、0 Task/Event，活动未回滚。 |
+
+#### 最后改动后的集中验证
+
+- 后端 13 文件：`test_assistant_action_evidence`、`intake`、`confirmation_contract`、`proposals`、`opportunity_target_matching`、`opportunity_targets_adapter`、`api`、`coordinator`、`stage_events`、`runtime_isolation`、`task_state`、`quality`、`events`；批准 DSN 下 guarded pytest `-q --no-cov`：**226 passed，57 warnings，29.90s，exit 0**。覆盖日期局部绑定／后续撤销、更正、跨夜真实 writer／executor、暂无 canonical、签名／幂等／归因、目标歧义、团队边界等实际行为，不等于 MySQL 并发或生产事故演练。
+- 客户端 7 文件：`assistantContracts.spec.ts`、`SalesAssistantProcessing`、`SalesAssistantChat`、`SalesAssistantReplay`、`SalesAssistantVisibility`、`MeetingConfirmationCard`、`AssistantTaskSidebar`；Vitest **69 passed，exit 0**。日期精度回归先红（服务端缺 next_follow_time_granularity、页面泄露 T09:00:00）再绿；DATETIME midnight 保留。恢复／拒绝测试另断言用户可见活动收据，不仅检查传给侧栏的 props。
+- 18 个相关后端源／测试文件完整 Ruff：**All checks passed**；恢复合理的中文 grammar／提示和 FastAPI Depends 例外，Pydantic 运行时类型不盲移 TYPE_CHECKING，未放宽配置。7 个相关前端生产文件 scoped ESLint `--max-warnings=0`：exit 0。将 tests/ 纳入同一 ESLint 命令的尝试因现有 tsconfig.json 仅 include src/ 而出现 7 个 parser project 错误；未改项目配置绕过，不称测试文件 ESLint 已过。
+- `npm run type-check`：**exit 2，9 个无关文件 22 diagnostics**，与本轮前已有结果相同，本轮助手生产文件无诊断。涉及 SettingsProductsPage.test.ts、ListAdvancedTools.vue、PaymentPlanFormDialog.test.ts、SettingsApprovalFlowsPage.vue、DataTable.vue、ProcurementStagesSettings.vue、SettingsContent.vue、SettingsMembersPage.vue、SettingsProcurementMethodsPage.vue；未扩张修复。`npx vite build`：**exit 0，5212 modules transformed**，仅为资产构建；不能称包含 vue-tsc 的 `npm run build` 通过。
+
+#### 剩余发布边界
+
+本轮修复及运行证据限以上四类当前源码。未验实际待发布副本的 Alembic 升级、MySQL 并发／进程死亡、线上商机候选生产者→页内表单→真实创建整链、生产历史来源／老 claim 盘点、灰度监控与生产回滚；adapter 的 DISTINCT sentinel 只到真实 API 边界，不是 MySQL 实际商机创建。没有重试不存在的 qwen3.5-plus、没有模型 fallback，也不把 §9.8 的历史真实模型／表单运行态升级成本轮证明。§10 A–D 继续未批准；本轮不提交、不推送、不部署。
+
+#### 本轮自有资源清理
+
+- 已释放 `four-opt-1008c-owned` 浏览器 tab；旧 `four-opt-1008c-ui` 已不存在，未释放其他 tab。关闭本轮 HTTP client，停止 `assistant-fouropt-http-1008c`、`assistant-fouropt-vite-1008c`、`assistant-fouropt-chrome-1008c`、`assistant-fouropt-db-1008c`；监督状态均为 exited。`docker container inspect crmwolf-fouropt-1008c` 返回 No such container，确认本轮无 volume 的自毁容器及隔离 fixture 已移除。
+- 按精确清单移除本轮 token、Chrome profile、harness／guard／inspector 脚本、Vite 配置、五份 owned task DB JSON 和三张截图；清单含可能未生成的 preview 路径，共 19 个路径逐项核验均不存在，不把原已缺失路径计为实际删除文件。未使用宽泛匹配删除旧轮次文件；未停止或修改 8000、共享 MySQL、团队服务或无关 Chromium。证据保存在本节及对应源码行为回归，不为复查重建 fixture。
+
+
+### 9.10 2026-10-09 A 批次迁移图与隔离迁移阻断（未批准）
+
+本次先核对当前 checkout 的迁移图，再建立全新、无 volume 的临时 MySQL；**没有把空库结果或合成 fixture 解释为历史存量安全证据**。
+
+- **当前迁移图：**当前 checkout 的 `CRM-Server/migrations/versions/` 源文件最新为 `150_profile_version_attestation.py`；`cd CRM-Server && venv/bin/alembic heads` 返回 `150_profile_version_attestation (head)`。`151_assistant_proposal_policy` 只存在于历史运行态的未跟踪提交 `05cf9f0b`，不在当前 HEAD `88f0c3eb`／其 `d49d8dad` 基线的源迁移目录中；当前未凭文档补写 151，也未把历史运行态的 `alembic current` 结果混入当前 checkout 证据。
+- **隔离迁移 smoke：**新建无 volume 容器 `crmwolf-a-migration-1009`，仅绑定 `127.0.0.1:3310`，数据库为专用 `crm_a_migration`，未连接共享 `crm-mysql-dev`。空库 `alembic current` 无已应用 revision；`alembic upgrade head` 先执行 `001_initial`，随后在 `002_user_roles_team` 因 `001_initial` 是 no-op、目标表 `user_roles` 尚未建立而失败。失败后隔离库仅保留 `alembic_version=001_initial` 和 1 张表（迁移版本表）。这证明当前基线不能从空库直接重放完整 schema；不是历史副本迁移通过证据。没有使用 `Base.metadata.create_all()`、`alembic stamp head` 或手工 SQL 绕过失败。
+- **迁移静态编译补充：**使用当前 `env.py` 的 MySQL offline 模式生成 `upgrade head --sql` 时，输出 `001_initial` 后在 `002_user_roles_team` 的 `op.alter_column('user_roles', 'team_id', nullable=False)` 处失败：MySQL 方言要求 `existing_type`，但该迁移未提供。此为离线 SQL 生成阻断，不能替代历史副本在线升级结果；真实空库在线 smoke 仍先因 `user_roles` 不存在而失败。
+- **后段静态编译补充：**从 `147_assistant_crm_effects` 生成至 `head` 时，`148` 可生成 DDL／bootstrap SQL，但 `149_assistant_command_operator` 在 offline `MockConnection` 上调用 `sa.inspect(connection)`，导致离线生成失败；从 `149` 到 `150` 单独生成成功，输出两列新增、唯一索引替换及版本更新 SQL。该结果只说明这段 SQL 可渲染，不证明在线历史副本执行成功。
+- **更早迁移的离线边界：**从 `002` 继续静态生成会在 `003_config_tables_team` 的 `conn.execute(...).fetchall()` 处失败；该迁移依赖在线数据库结果并包含数据变更。因此当前迁移链不能通过一条完整 offline SQL 生成命令完成端到端校验，仍必须等待获准历史副本做在线、可回滚的实际迁移验收。
+- **迁移图结构盘点：**通过 `ScriptDirectory` 加载当前迁移目录，得到 153 个 revision；`base=001_initial`、唯一 `head=150_profile_version_attestation`，无重复 revision ID、无缺失 parent。图中存在两个分支点（`123_payment_record_idempotency`、`135_deal_journey_public_ids`）和两个 merge revision（`125_merge_activity_and_payment_heads`、`137_datatable_export_permissions`）。因此 revision 图本身闭合，但这不证明任一历史 schema 能安全在线升级。
+- **在线依赖静态盘点：**对 153 个迁移源码做 AST 只读扫描，发现 16 个迁移文件共 28 处 `sa.inspect`／`inspect` schema inspection 调用，63 个迁移文件共 205 处 `fetchall`、`fetchone`、`scalar`、`scalars`、`first` 或 `all` 结果消费调用。该盘点支持“offline `--sql` 不是完整验收方法”的边界判断；不将静态命中数解释为在线失败，也未修改迁移源码。
+- **现有历史审计器覆盖边界：**`scripts/audit_legacy_profile_versions.py` 当前只遍历 profile versions 与 current pointers，解析六段正文、直接 `CustomerActivity` 的 Assistant 2.0 文本命中和 citation resolver 结果；没有调用 `trace_customer_source_provenance()`，也没有聚合旅程／业务流事件、事实及事实来源、承诺、任务及任务事件、删除墓碑、向量文档、来源进度完整性或全量来源水位。该结果与当前设计一致：在用户批准审计扩展前，不修改脚本、不以现有聚合结果宣称 A 通过。
+ - **历史副本状态（§9.10 记录时点）：**当时仓库、已知临时资源和部署制品中仍没有带完整历史业务数据、`alembic_version`、生成来源和可验证 SHA-256 的获准待发布副本；共享 `crm-mysql-dev` 仍明确排除。后续建立的当前 dev 存量隔离副本及其审计证据见 §9.11，仍不等同于正式待发布副本。
+- **当前源码定向回归：**A 相关单元测试命令为 `81 passed, 23 warnings`，退出码 0，覆盖审计器、来源认证、投影合同、citation resolver、水位、投影图和读时 readiness gate。将来源 MySQL 集成测试指向本次 3310 隔离库时，测试的严格 DSN guard 要求专用 `3308/crm_assistant_acceptance`，因此结果为 `23 skipped`；没有写入该迁移 smoke 库，也不把 skipped 记为 S01–S09 通过。
+ - **门禁结论（§9.10 记录时点）：**当时仅完成迁移图核对、空库失败复现和无历史数据的源码回归；后续历史 dev 存量隔离审计见 §9.11，但仍未完成历史副本迁移和真实待发布副本上的 S01–S09。因此 A 继续**未批准**，A–D 不得发布、灰度或扩大流量。下一硬前置仍是取得获准的带历史数据待发布副本；不补写 151，不以空库零异常或 synthetic fixture 关闭 A。
+
+### 9.11 2026-10-09 真实 dev 存量隔离副本全链路审计（仍未批准）
+
+本节补充并更新 §9.10 的时间点记录：从共享开发库生成一致性逻辑副本后，仅在新建隔离容器上恢复并审计；共享 `crm-mysql-dev` 未执行迁移、DDL、测试写入或清理。本节副本是**当前 dev 存量副本**，不是正式待发布副本，不能替代获准发布前验收。
+
+- **副本与迁移边界：**压缩 dump 大小为 `532885741` bytes，`gzip -t` 通过，SHA-256 为 `8407a6a92d744820265dc4907d87cbb8d6bf3839cf003bea7eb2d85e4c1eb74f`；恢复至隔离容器 `crmwolf-a-devclone-1009`、宿主 `127.0.0.1:3311`、数据库 `crm_a_devclone`。副本 `alembic_version` 为 `151_assistant_proposal_policy`；当前 checkout 源码 head 为 `150_profile_version_attestation`，因此 `alembic current` 与 `alembic upgrade head` 均在 revision lookup 阶段报 `Can't locate revision identified by '151_assistant_proposal_policy'`，未执行迁移。未补写 151、未 stamp、未手工修改版本表、未 downgrade 或以 SQL 绕过。
+- **只读与 schema 兼容：**全链路审计在临时 SELECT-only 身份、MySQL `REPEATABLE READ`、`START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY` 单次快照中完成，输出仅为聚合值和固定错误码。当前 ORM 与历史 schema 唯一差异为 `crm_customers.license_authorized_users` 缺失；使用 `load_only()` 排除该列，88 个客户加载成功，88 个强上下文及完整来源水位构建成功；未执行 DDL 或修改源码。
+- **存量规模：**客户 `88`，profile versions `2440`，current pointers `88`，source progress `88`，vector documents `1385`，activities `480`，activity deletion tombstones `0`。
+- **来源链聚合：**客户级 provenance `VERIFIED=45`、`UNKNOWN=43`；活动来源 `FORM=283`、`AGENT=181`、`CUTOVER_MIGRATION=4`、`ASSISTANT_2=12`，2.0 活动按规则排除；journey events `VERIFIED=441`；commitments `VERIFIED=399`；tasks `VERIFIED=317`、`UNKNOWN=23`；task events `VERIFIED=441`、`UNKNOWN=9`；facts `VERIFIED=359`、`UNKNOWN=307`；fact source rows 缺失 `0`；tombstones `0`。
+- **历史正文与引用：**六段正文来源未证明 `2440`；Assistant 2.0 直接正文命中 `0`；profile versions blocking `2440`、uncertified `2439`；citations available `86759`、unavailable `22287`；current pointer 非法 `0`。这组直接命中结果不能证明不存在转述或已删除来源污染。
+- **水位与 current：**不完整五项 source watermark `2439`；版本 source snapshot mismatch `2439`；current watermark mismatch `87`；current snapshot mismatch `86`；source progress policy 均为 `LEGACY_PROFILE_ELIGIBLE_V1`，provenance status `VERIFIED=1`、`UNVERIFIED=87`。因此水位／进度不能作为历史正文可发表证明。
+- **向量文档：**来源类型为 `business_flow=234`、`follow_up=426`、`follow_up_task=326`、`sales_commitment=399`；来源状态 `VERIFIED=1364`、`EXCLUDED=12`、`UNKNOWN=9`；sync status `SYNCED=1385`。未输出 vector text、title、document key、source ID 或业务标识。
+- **shadow diff：**在同一只读快照内从强上下文生成 deterministic draft，六段 canonical JSON 机械比较为 changed `86`、unchanged `1`、无 current version `1`；因历史正文未证明、来源或认证门禁不满足，安全语义下 blocked `88`，shadow errors `0`。`unchanged=1` 不解释为安全或可发表。
+- **S01–S09：**严格测试副本恢复曾因 `crm_langgraph_checkpoint_writes` 表空间耗尽（OS error 28）失败并已清理；此前指向非批准端口的运行被 strict DSN guard 记为 `23 skipped`，没有任何 S01–S09 pass 证据。故 S01–S09 仍未执行，不能以 skipped 或失败副本关闭 A。
+- **门禁结论：**本节完成的是当前 dev 存量副本的只读审计与 shadow diff，不是迁移通过、正式待发布副本验收或 S01–S09 通过。A 继续**未批准**；A–D 不得发布、灰度或扩大流量。
+
+### 9.12 2026-10-10 客户档案移除对七项的前置变更（与 §1 头部声明配套）
+
+本节记录档案撤下在本 TRD 范围内的实际执行结果，作为 §1 作废声明与 §10 A 批次改判的证据基础。
+
+- **数据库（共享 dev `crm-mysql-dev`@3307 实测）：**Alembic 链修复为 `…150 → 151_customer_license_authorized_users → 151_assistant_proposal_policy → 152_remove_customer_profile_prepare → 153_remove_customer_profile_complete`，`alembic_version=153`。九类非 `alias` 事实 548 条全删（来源/修订为 0），`alias` 18 条保留；三张档案表（projection_versions/current/legacy_source_progress）information_schema 确认不存在；向量仅存 `business_flow=241/follow_up=426/follow_up_task=326/sales_commitment=399`，`DELETE_PENDING=0`；客户记忆仅 `retrieval` 区段。未对生产执行。
+- **行为层（合并后 main 测试实测）：**事实类型收窄为 alias-only（`ensure_allowed_customer_fact_type` 拒绝九类，`CUSTOMER_FACT_TYPE_REMOVED`）；九类事实提案在 `validate_candidate` 前置拒绝；问答上下文 `customer_facts` 恒空、不再查 legacy progress；客户记忆仅收四个证据字段的结构化 retrieval 引用；客户智能 Graph 事实提炼/评估/持久化节点移出执行图；旧 `/profile` 路由统一 `410 CUSTOMER_PROFILE_REMOVED`（含 refresh POST）；三个档案调度器不再注册；`advance_eligible_progress` 等死调用从全部 CRUD 清除，`legacy_profile_source` 仅存 origin/provenance 判定。合并后 272 项相关测试通过（§9.9 十三文件 225 项 + 撤下专项 47 项）。
+- **对七项的影响判定：**①来源/投影/水位——验收对象已不存在，A 批次档案侧条件关闭（唯一保留边界：2.0 来源不流入客户智能读取，由上述行为层改动+回归覆盖）；②③④⑤⑥⑦的目标与验收行不受影响，B/C/D 门禁条件不变。§9.8 曾记录的“SQLite fixture 缺 `crm_customer_legacy_source_progress` 表”类测试阻塞随表删除一并消失。
+- **遗留声明：**开发库 Qdrant 中对应 152 标记点的实际删除未经退役服务执行验证（MySQL 侧已清零）；生产发布时必须先跑 `customer_profile_vector_retirement_service.retire_pending_documents` 确认点消失再执行 153。本节不构成 B/C/D 门禁的任何通过证明。
 ## 10. 实施批次、发布门禁、兼容与待决策
 
 | 批次 | 完成门禁与回退边界 |
 | --- | --- |
-| A · 来源与读安全 | Alembic 后来源链可追溯，旧客户视图／证据读时门禁、全量合格进度及客户级发表栅栏部署；S01–S09 运行并对存量版本差异盘点。此前**不得**以过滤直接活动为理由宣布隔离完成。异常仅暂停新发表、保留安全读时门禁和旧合格版。 |
+| A · 来源与读安全 | **2026-10-10 更新：**旧客户档案能力已整体移除（§1 头部声明），原“发表栅栏/存量版本盘点/S01–S09”验收对象不复存在，A 批次的档案侧条件**全部关闭**。仍需维持的只有：2.0 来源不流入客户智能读取的回归测试保持绿色；Alembic 152/153 已在目标环境执行。 |
 | B · 命令真实归因与状态 | 创建／阶段目标**实际提交**写唯一相关效果，分段赢单单独记录；CLAIMED 超租约和人工权限上线。C01–C06、R01–R04、T03 的 MySQL 双会话、丢响应和恢复通过；不能先部署靠同名猜成功的创建交互。旧历史 claim 保留不明状态。 |
 | C · 候选／表单／语义 | 真实候选来源、已有商机静默去重、Agent 内表单、有效 canonical 更正／日期依据、最终评分和下一步门禁上线；O01–O07、D01–D04、T01–T02 通过，旧入口规则不变。 |
 | D · 前端与灰度 | 判别 payload 双端一致、409／error／内部 turn 补读、切任务隔离、typed 呈现；U01–U06 用实际浏览器走通，功能按团队渐进开启。指标和回滚 T04 通过后扩大流量。 |
@@ -437,9 +523,9 @@ V 为 `CRM-Client/tests/components/{SalesAssistantProposal,SalesAssistantProcess
 
 兼容原则：新写仅用新 schema 和目标相关命令；历史已完成活动仍一次性最终化、不重评分、不改业务评分历史；未完成的**已签发活动确认**按 §5 迁移新签名等待且保留冻结命令；未 claim 的旧提案退役旧签名并重新核证，已 claim／结果不明的旧提案保持待人工核对、绝不重放；历史已完成任务／旧拒绝回执仅读时适配，不破坏动作审计；旧档案不可变版本不篡改。迁移、唯一索引和历史回填必须是 Alembic 与可重跑任务，记录按 team 的数量／策略版本／高水位，不在仓库根目录放一次性脚本或报告。新旧前端交错发布期间服务端明确 wire 版本：未升级的客户端不得看到可提交的新提案卡；不能靠放宽前端 schema 让不认识的命令可点。
 
-**审阅需明确的决策（未批准前不得声称现行能力）：**
 
-1. 旧档案共享旅程中，哪些非事件聚合字段拥有独立可证明的旧合格来源；无法还原时采用本文件的客户级发表失败关闭，以及对存量可能污染正文的隔离／修复策略。
+**审阅需明确的决策（未批准前不得声称现行能力）：**
+1. ~~旧档案共享旅程非事件聚合字段的独立合格来源与污染正文处置~~——**2026-10-10 随档案移除作废**，无存量正文需要处置。
 2. 日期只有日粒度时的业务到期时刻（本草案沿用现有任务纯日期 23:59:59，而不是跟进时间 09:00）、对“周末／月底左右”等表达的歧义边界；确认后冻结解析版本与基准。
 3. 独立运维权限名及谁可在团队内人工核对，含需要何种**目标提交证据**才能关闭老格式 `UNKNOWN`；无证据不允许直接改 `SUCCEEDED`。
 4. 现有商机高置信去重的业务判定阈值及目标不唯一时是呈现选择卡还是不提建议；任何选择都不得靠同名读回证明命令成功。
