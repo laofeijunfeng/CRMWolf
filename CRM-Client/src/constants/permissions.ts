@@ -94,7 +94,7 @@ export const PERMISSION_RESOURCE_NAMES: Readonly<Record<string, string>> = {
   customer_activity: '客户活动',
   customer_contact: '客户联系人',
   customer_follow_up: '客户跟进',
-  customer_profile: '客户档案',
+  customer_profile: '客户数据',
   finance: '财务',
   follow_up_task: '客户追踪',
   invoice: '发票',

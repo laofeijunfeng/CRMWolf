@@ -204,17 +204,6 @@ async def startup_event():
     from app.tasks.customer_evidence_sync import start_customer_evidence_sync_scheduler
     start_customer_evidence_sync_scheduler()
 
-    logger.info("启动客户智能档案刷新重试任务...")
-    from app.tasks.customer_intelligence_refresh_retry import start_customer_intelligence_refresh_retry_scheduler
-    start_customer_intelligence_refresh_retry_scheduler()
-
-    logger.info("启动客户智能历史补档任务...")
-    from app.tasks.customer_intelligence_backfill import start_customer_intelligence_backfill_scheduler
-    start_customer_intelligence_backfill_scheduler()
-
-    logger.info("启动客户智能档案对账任务...")
-    from app.tasks.customer_intelligence_reconciliation import start_customer_intelligence_reconciliation_scheduler
-    start_customer_intelligence_reconciliation_scheduler()
 
     logger.info("启动跟进确认投递恢复扫描任务...")
     from app.tasks.follow_up_confirmation_delivery_recovery import (
@@ -279,8 +268,6 @@ async def shutdown_event():
         stop_customer_opportunity_suggestion_recovery_scheduler,
     )
     from app.tasks.customer_evidence_sync import stop_customer_evidence_sync_scheduler
-    from app.tasks.customer_intelligence_backfill import stop_customer_intelligence_backfill_scheduler
-    from app.tasks.customer_intelligence_refresh_retry import stop_customer_intelligence_refresh_retry_scheduler
     from app.tasks.follow_up_confirmation_delivery_recovery import (
         stop_follow_up_confirmation_delivery_recovery_scheduler,
     )
@@ -294,10 +281,6 @@ async def shutdown_event():
     stop_outbound_notification_recovery_scheduler()
     stop_customer_opportunity_suggestion_recovery_scheduler()
     stop_follow_up_confirmation_delivery_recovery_scheduler()
-    stop_customer_intelligence_backfill_scheduler()
-    from app.tasks.customer_intelligence_reconciliation import stop_customer_intelligence_reconciliation_scheduler
-    stop_customer_intelligence_reconciliation_scheduler()
-    stop_customer_intelligence_refresh_retry_scheduler()
     from app.tasks.agent_turn_execution_recovery import stop_agent_turn_execution_recovery_scheduler
     stop_agent_turn_execution_recovery_scheduler()
     from app.tasks.assistant_turn_recovery import stop_assistant_turn_recovery

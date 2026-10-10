@@ -58,7 +58,7 @@ const createQueuedProjection = (
     resource_id: acknowledgement.customerId ?? null,
     resource_public_id: null,
     status: "QUEUED",
-    summary: "客户活动已记录，客户档案更新已进入后台队列。",
+    summary: "客户活动已记录，后台处理已进入队列。",
     current_step: null,
     graph_thread_id: null,
     result: {},

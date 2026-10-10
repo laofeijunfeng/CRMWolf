@@ -154,18 +154,18 @@ def _receipt(*, activity_id: int = 241) -> CustomerActivityDurableWorkReceipt:
 
 
 
-def test_customer_activity_receipt_requires_both_background_work_identities() -> None:
+def test_customer_activity_receipt_requires_task_reconciliation_identity() -> None:
     with pytest.raises(ValueError, match="post_commit_job_public_id"):
         CustomerActivityDurableWorkReceipt(
             activity_id=241,
             customer_intelligence_request_id="cir_async_001",
         )
 
-    with pytest.raises(ValueError, match="customer_intelligence_request_id"):
-        CustomerActivityDurableWorkReceipt(
-            activity_id=241,
-            post_commit_job_public_id="pcj_async_001",
-        )
+    receipt = CustomerActivityDurableWorkReceipt(
+        activity_id=241,
+        post_commit_job_public_id="pcj_async_001",
+    )
+    assert receipt.customer_intelligence_request_id is None
 
 
 def _turn_messages(db, *, receipt: CustomerActivityDurableWorkReceipt) -> tuple[int, int]:

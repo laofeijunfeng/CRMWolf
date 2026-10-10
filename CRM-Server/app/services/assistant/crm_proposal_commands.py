@@ -16,8 +16,8 @@ if TYPE_CHECKING:
 
     from app.models.assistant import AssistantTask
 
-FACT_TYPES = frozenset({
-    "alias", "need", "budget", "risk", "stage", "stakeholder_attitude",
+REMOVED_FACT_TYPES = frozenset({
+    "need", "budget", "risk", "stage", "stakeholder_attitude",
     "competitor", "next_step", "preference", "summary",
 })
 
@@ -109,6 +109,8 @@ def validate_candidate(db: Session, task: AssistantTask, candidate: dict) -> dic
     if customer is None:
         return None
     kind = candidate.get("kind")
+    if kind == "customer_fact":
+        return None
     quote = candidate.get("evidence_quote")
     payload = candidate.get("payload")
     if not isinstance(quote, str) or not quote.strip() or quote.strip() not in (activity.source_content or ""):
@@ -118,24 +120,7 @@ def validate_candidate(db: Session, task: AssistantTask, candidate: dict) -> dic
     try:
         codes = _permissions(db, task)
         if kind == "customer_fact":
-            if payload.get("fact_type") not in FACT_TYPES or not isinstance(payload.get("content"), str):
-                return None
-            if not payload["content"].strip() or payload["content"].strip() not in quote:
-                return None
-            _customer_edit(db, task, customer)
-            from app.models.customer_fact import CustomerFact
-            from app.services.customer_fact_service import CustomerFactService
-
-            fact_key = CustomerFactService().fact_key(
-                team_id=task.team_id, customer_id=customer.id,
-                fact_type=payload["fact_type"], subject=payload.get("subject"),
-            )
-            existing = db.query(CustomerFact).filter(CustomerFact.fact_key == fact_key).one_or_none()
-            if existing is not None and existing.content.strip() == payload["content"].strip():
-                return None
-            return {**candidate, "activity_id": activity.id, "customer_id": customer.id,
-                    "source_revision": activity.activity_revision,
-                    "prior_fact_version": existing.version if existing else None}
+            return None
         if kind == "follow_up_task_create":
             from datetime import datetime, time
             from app.crud.sales_commitment import follow_up_task_crud
@@ -259,19 +244,6 @@ class RealCRMProposalExecutor:
             raise ValueError("CRM 状态已变化，不能继续执行旧提议")
         kind = proposal["kind"]
         payload = proposal["payload"]
-        if kind == "customer_fact":
-            from app.services.customer_fact_service import CustomerFactInput, CustomerFactSourceInput, CustomerFactService
-
-            fact = CustomerFactService().upsert_fact(db, CustomerFactInput(
-                tenant_id=task.team_id, team_id=task.team_id, customer_id=validated["customer_id"],
-                fact_type=payload["fact_type"], subject=payload.get("subject"), content=payload["content"],
-                confidence=1.0,
-                source=CustomerFactSourceInput(
-                    source_type="customer_activity", source_object_id=str(validated["activity_id"]),
-                    evidence_id=proposal["key"], quote=proposal["evidence_quote"],
-                ),
-            ))
-            return {"kind": "customer_fact", "public_id": str(fact.id)}
         if kind == "follow_up_task_create":
             from datetime import datetime, time
             from app.crud.sales_commitment import follow_up_task_crud, follow_up_task_event_crud

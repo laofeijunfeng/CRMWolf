@@ -277,13 +277,6 @@ class CustomerContextAnswerService:
         if profile_line:
             parts.append(f"- **基础信息**：{profile_line}。")
 
-        facts = _object_list(strong_context.get("customer_facts"))
-        if facts:
-            used_sections.append("facts")
-            fact_texts = [_text(item.get("content")) for item in facts[:3]]
-            fact_line = "; ".join(item for item in fact_texts if item)
-            if fact_line:
-                parts.append(f"- **客户事实**：{fact_line}。")
 
         opportunities = _object_list(strong_context.get("opportunities"))
         if opportunities:
@@ -306,12 +299,6 @@ class CustomerContextAnswerService:
             used_sections.append("activities")
             parts.append("- **近期动态**：" + "; ".join(_activity_line(item) for item in activities[:3]) + "。")
 
-        memory_summaries = _object_list(customer_memory.get("summaries"))
-        if memory_summaries:
-            used_sections.append("memory")
-            memory_text = _memory_line(memory_summaries[0])
-            if memory_text:
-                parts.append(f"- **长期记忆**：{memory_text}。")
 
         evidence_items = _object_list(customer_context.get("semantic_evidence"))
         citations = _citations_from_context(customer_context)

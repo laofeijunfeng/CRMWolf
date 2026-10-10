@@ -26,18 +26,27 @@ JsonScalar: TypeAlias = str | int | float | bool | None
 JsonValue: TypeAlias = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
 JsonObject: TypeAlias = dict[str, JsonValue]
 
-CustomerFactType: TypeAlias = Literal[
-    "alias",
-    "need",
-    "budget",
-    "risk",
-    "stage",
-    "stakeholder_attitude",
-    "competitor",
-    "next_step",
-    "preference",
-    "summary",
-]
+CustomerFactType: TypeAlias = Literal["alias"]
+REMOVED_CUSTOMER_FACT_TYPES = frozenset(
+    {
+        "need",
+        "budget",
+        "risk",
+        "stage",
+        "stakeholder_attitude",
+        "competitor",
+        "next_step",
+        "preference",
+        "summary",
+    }
+)
+ALLOWED_CUSTOMER_FACT_TYPES = frozenset({"alias"})
+
+
+def ensure_allowed_customer_fact_type(fact_type: str) -> CustomerFactType:
+    if fact_type in REMOVED_CUSTOMER_FACT_TYPES or fact_type not in ALLOWED_CUSTOMER_FACT_TYPES:
+        raise ValueError("CUSTOMER_FACT_TYPE_REMOVED")
+    return "alias"
 CustomerFactCandidateAction: TypeAlias = Literal["upsert", "ignore"]
 
 
@@ -104,6 +113,7 @@ class CustomerFactService:
         result for auditability and ignored without creating an interaction.
         """
         auto_threshold = DEFAULT_AUTO_FACT_CONFIDENCE_THRESHOLD
+        ensure_allowed_customer_fact_type(candidate.fact_type)
         if candidate.action == "ignore":
             return CustomerFactCandidateAssessment(action="ignore", reason="candidate_marked_ignore")
 
@@ -181,6 +191,7 @@ class CustomerFactService:
         )
 
     def upsert_fact(self, db: Session, fact_input: CustomerFactInput) -> CustomerFact:
+        ensure_allowed_customer_fact_type(fact_input.fact_type)
         content = fact_input.content.strip()
         if not content:
             raise ValueError("客户事实内容不能为空")

@@ -140,7 +140,7 @@ export const getAgentAsyncOperationStatusMeta = (
 ): AgentAsyncOperationStatusMeta => AGENT_ASYNC_OPERATION_STATUS_META[status]
 
 export const AGENT_ASYNC_OPERATION_TITLES: Readonly<Record<string, string>> = {
-  customer_intelligence_refresh: "客户档案更新",
+  customer_intelligence_refresh: "客户智能处理",
   customer_activity_post_commit: "跟进任务对账",
   customer_opportunity_suggestion: "商机建议分析",
 }

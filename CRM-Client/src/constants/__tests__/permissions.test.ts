@@ -43,7 +43,7 @@ const permissionResponse = (
 
 describe('permission catalog', () => {
   it('localizes resource and action labels used by the role permission dialog', () => {
-    expect(getPermissionResourceName('customer_profile')).toBe('客户档案')
+    expect(getPermissionResourceName('customer_profile')).toBe('客户数据')
     expect(getPermissionResourceName('approval_flow')).toBe('审批流程')
     expect(getPermissionActionName('view')).toBe('查看')
     expect(getPermissionActionName('mark_issued')).toBe('标记已开票')

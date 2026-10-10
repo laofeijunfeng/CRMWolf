@@ -291,7 +291,7 @@ def _seed_customer_context(db: Session) -> Customer:
             tenant_id=2,
             team_id=2,
             customer_id=101,
-            fact_type="need",
+            fact_type="alias",
             subject="试用",
             content="客户已经进入 POC，需要准备试用环境。",
             confidence=0.91,
@@ -328,7 +328,7 @@ def test_customer_intelligence_context_combines_strong_facts_and_semantic_eviden
         payload = context.to_agent_payload()
 
         assert payload["strong_context"]["customer"]["account_name"] == "越秀金融"
-        assert payload["strong_context"]["customer_facts"][0]["content"] == "客户已经进入 POC，需要准备试用环境。"
+        assert payload["strong_context"]["customer_facts"] == []
         assert payload["strong_context"]["opportunities"][0]["stage"] == "POC"
         customer = payload["strong_context"]["customer"]
         assert customer["product_public_id"] == "prd_hifox"
@@ -505,28 +505,6 @@ def test_assistant2_activity_does_not_change_legacy_profile_inputs_or_watermarks
             event_type="activity_added", event_time=datetime(2026, 9, 2, 10),
             source_type="customer_activity", source_id=702,
         ))
-        customer_fact_service.upsert_fact(
-            db,
-            CustomerFactInput(
-                tenant_id=2, team_id=2, customer_id=101, fact_type="risk",
-                subject="隔离", content="不可流入旧档案", confidence=0.95,
-                source=CustomerFactSourceInput(
-                    source_type="customer_activity", source_object_id="702",
-                    business_object_type="customer_activity", business_object_id="702",
-                ),
-            ),
-        )
-        customer_fact_service.upsert_fact(
-            db,
-            CustomerFactInput(
-                tenant_id=2, team_id=2, customer_id=101, fact_type="risk",
-                subject="错配引用", content="旧活动ID掩盖新来源", confidence=0.95,
-                source=CustomerFactSourceInput(
-                    source_type="customer_activity", source_object_id="701",
-                    business_object_type="customer_activity", business_object_id="702",
-                ),
-            ),
-        )
         db.flush()
         after = service.build_context(db, team_id=2, customer_id=101, query_text="POC")
         assert after.strong_context.recent_activities == baseline.strong_context.recent_activities
