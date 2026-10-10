@@ -510,6 +510,16 @@ V 为 `CRM-Client/tests/components/{SalesAssistantProposal,SalesAssistantProcess
 | C · 候选／表单／语义 | 真实候选来源、已有商机静默去重、Agent 内表单、有效 canonical 更正／日期依据、最终评分和下一步门禁上线；O01–O07、D01–D04、T01–T02 通过，旧入口规则不变。 |
 | D · 前端与灰度 | 判别 payload 双端一致、409／error／内部 turn 补读、切任务隔离、typed 呈现；U01–U06 用实际浏览器走通，功能按团队渐进开启。指标和回滚 T04 通过后扩大流量。 |
 
+### 9.13 2026-10-10 收口批次：TRD 对齐、WIP 入库、T03 运维权限、商机提名链（仍在 B/C/D 门禁内）
+
+本节记录当日收口四项的实际执行与证据；**不改变 §10 B–D 未批准结论，不构成灰度或发布批准。**
+
+- **TRD 对齐：**§1 头部新增批次作废声明，§10 A 批次改判“档案侧条件全部关闭”，待决策 1 划掉，§9.12 记录档案移除实测（Alembic 153、九类事实 548 清零、三表删除、向量四类留存、272 项回归）。提交 `7dd53ee1`。
+- **WIP 入库：**§9.9 四类修复的前端 14 文件单独提交 `50dcdb4e`；后端部分已随 `3fed3dfe` 先行入库（含 action_evidence、opportunity_target_matching 及 13 个测试文件），当日验证 225 项通过。顺带发现并修复 manifest 与后端 `list_query` 算子目录脱节（`d49d8dad` 曾把 enum 算子从 8 削到 4），按后端 `DEFAULT_OPS` 对齐 3 个字段，提交 `eea71544`。
+- **T03 运维权限（§7.1 首段落地）：**`GET /v1/assistant/unknown-commands` 从“团队全量、del current_user”改为三层：持 `assistant:commands:reconcile:team`（迁移 149 已种子）看本团队 UNKNOWN+CLAIMED（含 `last_checked_at` 最小字段）；普通团队成员仅看本人记录（owner 过滤）；无团队归属 403。`list_unresolved_command_claims` 增加 `owner_user_id`/`include_claimed` 参数。TDD 四用例（本人隔离、越权 403、operator 看团队含 CLAIMED、跨团队不泄漏）先红后绿，提交含于 `feat(assistant): enforce owner and operator claim query scopes`。
+- **商机提名链（§2.2 第 1 步的模型侧）：**`opportunity_nominator.py` 恢复并适配当前 `source_records` segment 结构：模型只提名 `opportunity_create/opportunity_stage` 信号（结构化 schema、闭世界 prompt、无金额字段、阶段必须带 target+相邻阶段），服务端 `validate_candidate` 独立重绑证据与 CRM 权威；接入 `offer_next_proposal`（规则 hints 优先，模型提名兜底）；模型/凭据不可用时记 warning 并降级为不提名，绝不阻塞已提交活动。提名器 3 用例（引用转发、阶段缺目标丢弃、无信号空返回）通过；5 个旧 fixture 缺 `crm_ai_config` 的回归由降级路径覆盖后全绿。
+- **集中回归：**助手 15 文件 232 passed；档案撤下专项 10 文件 58 passed；前端助手 7 文件 69 passed。人工裁决（§7.1 后半）与 T03 的 operator 端到端 MySQL/HTTP 层、§10 四决策中的 2/3/4 仍待业务批准，B/C/D 门禁维持未批准。
+
 **本轮门禁复核（截至 2026-10-04；A–D 均不批准发布／扩大流量）：**下表的“未批准”不否定上面指定测试通过，而是逐项遵守该批次完整条件；隔离库内无记录不代表生产无存量。下一次判定必须附对应实际环境、身份和事务证据，不能把固定候选、TestClient、mock API 或故障注入升级成真实模型／生产事故证据。
 
 | 批次 | 本轮实测及尚缺的发布证据 | 判定 |
