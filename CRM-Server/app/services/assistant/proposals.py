@@ -146,9 +146,12 @@ async def readback_outcome(db: Session, task: AssistantTask, proposal: dict) -> 
 
 
 async def offer_next_proposal(db: Session, task: AssistantTask) -> tuple[AssistantTask, str, bool]:
-    if source_activity(db, task) is None:
+    activity = source_activity(db, task)
+    if activity is None:
         raise ValueError("committed customer activity is missing")
     proposal = next_proposal(db, task)
+    if proposal is None:
+        proposal = await _nominate_next_proposal(db, task, activity)
     if proposal is None:
         result = apply_task_update(
             db,
@@ -173,6 +176,44 @@ async def offer_next_proposal(db: Session, task: AssistantTask) -> tuple[Assista
         ),
     )
     return result.task, waiting.prompt, True
+
+
+async def _nominate_next_proposal(
+    db: Session,
+    task: AssistantTask,
+    activity: object,
+) -> dict | None:
+    """Model-nominated purchase/stage signals; server rebinds evidence and authority."""
+
+    import logging
+
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from app.services.assistant.model_transport import AssistantLLMError
+    from app.services.assistant.opportunity_nominator import OpportunityNominator
+
+    logger = logging.getLogger(__name__)
+    try:
+        nominations = await OpportunityNominator().nominate(db, task, activity)
+    except (AssistantLLMError, SQLAlchemyError) as exc:
+        logger.warning("商机提名不可用，跳过模型提名: %s", exc)
+        return None
+    settled = {item.get("proposal_key") for item in task.committed_json or [] if item.get("proposal_key")}
+    for candidate in nominations:
+        hint = {
+            "kind": candidate["kind"],
+            "evidence_quote": candidate["evidence_quote"],
+            "target_public_id": candidate.get("target_public_id"),
+            "payload": candidate.get("payload") or {},
+        }
+        bound = validate_candidate(db, task, hint)
+        if bound is None:
+            continue
+        key = _candidate_key(bound)
+        if key in settled:
+            continue
+        return {**bound, "key": key}
+    return None
 
 
 async def settle_proposal(
