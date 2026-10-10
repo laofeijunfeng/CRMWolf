@@ -71,6 +71,101 @@ describe('DataTable row interaction', () => {
     expect(card.text()).toContain('审批中')
     expect(card.text()).toContain('负责人：张三')
   })
+  it('marks the first visible data column as the primary text column', () => {
+    const wrapper = mount(DataTable, {
+      props: {
+        fields: [
+          { key: 'name', label: '名称', type: 'text', column: true },
+          { key: 'status', label: '状态', type: 'text', column: true }
+        ] satisfies ListFieldDefinition[],
+        data: [{ id: 1, name: '合同 A', status: '审批中' }],
+        total: 1,
+        page: 1,
+        pageSize: 10
+      }
+    })
+
+    const cells = wrapper.findAll('tbody tr.data-table-row > td.data-table-cell')
+    expect(cells[0]?.classes()).toContain('data-table-cell--primary')
+    expect(cells[1]?.classes()).not.toContain('data-table-cell--primary')
+  })
+
+  it('ignores the selection cell and hidden columns when finding the primary column', () => {
+    const wrapper = mount(DataTable, {
+      props: {
+        fields: [
+          { key: 'hidden', label: '隐藏', type: 'text', column: { visible: false } },
+          { key: 'name', label: '名称', type: 'text', column: true },
+          { key: 'status', label: '状态', type: 'text', column: true }
+        ] satisfies ListFieldDefinition[],
+        data: [{ id: 1, hidden: '内部', name: '合同 A', status: '审批中' }],
+        total: 1,
+        page: 1,
+        pageSize: 10,
+        selectable: true
+      }
+    })
+
+    expect(wrapper.get('tbody tr > td.data-table-selection-cell').classes()).not.toContain('data-table-cell--primary')
+    const cells = wrapper.findAll('tbody tr.data-table-row > td.data-table-cell:not(.data-table-selection-cell)')
+    expect(cells[0]?.text()).toBe('合同 A')
+    expect(cells[0]?.classes()).toContain('data-table-cell--primary')
+    expect(cells[1]?.classes()).not.toContain('data-table-cell--primary')
+  })
+  it('marks the first column after custom preference reordering as primary', () => {
+    const wrapper = mount(DataTable, {
+      props: {
+        fields: [
+          { key: 'name', label: '名称', type: 'text', column: true },
+          { key: 'status', label: '状态', type: 'text', column: true },
+          { key: 'owner', label: '负责人', type: 'text', column: true }
+        ] satisfies ListFieldDefinition[],
+        data: [{ id: 1, name: '合同 A', status: '审批中', owner: '张三' }],
+        total: 1,
+        page: 1,
+        pageSize: 10,
+        fixedLeftCount: 0,
+        columnPreferenceMode: 'custom',
+        columnPreferenceConfig: {
+          version: 1,
+          columns: [
+            { key: 'name', order: 20, visible: true },
+            { key: 'status', order: 0, visible: true },
+            { key: 'owner', order: 10, visible: true }
+          ]
+        }
+      }
+    })
+
+    const cells = wrapper.findAll('tbody tr.data-table-row > td.data-table-cell')
+    expect(cells.map((cell) => cell.text())).toEqual(['审批中', '张三', '合同 A'])
+    expect(cells[0]?.classes()).toContain('data-table-cell--primary')
+    expect(cells[1]?.classes()).not.toContain('data-table-cell--primary')
+    expect(cells[2]?.classes()).not.toContain('data-table-cell--primary')
+  })
+  it('skips all non-business role columns when finding the primary column', () => {
+    const wrapper = mount(DataTable, {
+      props: {
+        fields: [
+          { key: 'keyword', label: '关键字', role: 'keyword', column: true },
+          { key: 'badge', label: '标记', role: 'decoration', column: true },
+          { key: 'actions', label: '操作', role: 'action', column: true },
+          { key: 'name', label: '名称', type: 'text', column: true }
+        ] satisfies ListFieldDefinition[],
+        data: [{ id: 1, keyword: '重点', badge: '高价值', actions: '查看', name: '合同 A' }],
+        total: 1,
+        page: 1,
+        pageSize: 10
+      }
+    })
+
+    const cells = wrapper.findAll('tbody tr.data-table-row > td.data-table-cell')
+    expect(cells.map((cell) => cell.text())).toEqual(['重点', '高价值', '查看', '合同 A'])
+    expect(cells[0]?.classes()).not.toContain('data-table-cell--primary')
+    expect(cells[1]?.classes()).not.toContain('data-table-cell--primary')
+    expect(cells[2]?.classes()).not.toContain('data-table-cell--primary')
+    expect(cells[3]?.classes()).toContain('data-table-cell--primary')
+  })
 
   it('emits row-click from mobile cards but ignores nested controls', async () => {
     const wrapper = mount(DataTable, {

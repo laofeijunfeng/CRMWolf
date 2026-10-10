@@ -236,19 +236,20 @@ describe('DataTable frontend/backend list-query contract', () => {
     expect(source).not.toMatch(/\.slice\s*\(/)
   })
 
-  it('keeps customer license columns ordered and renders authorized users read-only', () => {
+  it('renders customer authorization as one renewal-first column', () => {
     const customersSource = readFileSync(resolve(viewsDir, 'Customers.vue'), 'utf8')
-    const statusIndex = customersSource.indexOf("key: 'license_status'")
-    const usersIndex = customersSource.indexOf("key: 'license_authorized_users'")
-    const expiryIndex = customersSource.indexOf("key: 'license_expiry_date'")
+    const licenseColumn = customersSource.match(/\{[^}]*key: 'license_expiry_date'[^}]*\}/s)?.[0] ?? ''
 
-    expect(statusIndex).toBeGreaterThanOrEqual(0)
-    expect(usersIndex).toBeGreaterThan(statusIndex)
-    expect(expiryIndex).toBeGreaterThan(usersIndex)
+    expect(licenseColumn).toContain("label: '授权'")
+    expect(licenseColumn).toContain('column: { width: \'180px\' }')
+    expect(customersSource).toContain("key: 'license_status'")
     expect(customersSource).toContain("key: 'license_authorized_users'")
-    expect(customersSource).toContain("label: '授权人数'")
-    expect(customersSource).toContain("type: 'number'")
-    expect(customersSource).toContain('row.license_authorized_users ?? \'-\'')
+    expect(customersSource).toContain('column: false')
+    expect(customersSource).toContain('formatLicenseSummary(')
+    expect(customersSource).toContain('license-summary__primary')
+    expect(customersSource).not.toContain("label: '授权到期'")
+    expect(customersSource).not.toContain('<template #cell-license_status')
+    expect(customersSource).not.toContain('<template #cell-license_authorized_users')
 
     const detailSource = readFileSync(resolve(viewsDir, 'CustomerDetailSheet.vue'), 'utf8')
     const statusLabelIndex = detailSource.indexOf('<div class="attribute-label">授权状态</div>')

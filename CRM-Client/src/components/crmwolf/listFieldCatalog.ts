@@ -65,6 +65,7 @@ export interface DataTableExportField {
 export interface DataTableColumn {
   key: string
   title: string
+  role?: ListFieldRole
   width?: string
   align?: 'left' | 'center' | 'right'
   fixed?: 'left' | 'right' | undefined
@@ -224,7 +225,8 @@ export function projectListFieldCatalog(fields: ListFieldDefinition[]): Projecte
       const column = field.column === true ? {} : field.column
       const projected: DataTableColumn = {
         key: field.key,
-        title: field.label
+        title: field.label,
+        ...(field.role !== undefined ? { role: field.role } : {})
       }
       if (column.width !== undefined) projected.width = column.width
       if (column.align !== undefined) projected.align = column.align

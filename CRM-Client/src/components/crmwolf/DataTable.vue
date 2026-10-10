@@ -463,6 +463,9 @@ const processedColumns = computed<ProcessedColumn[]>(() =>
     .filter((column) => column.visible !== false)
     .map((column, index) => ({ ...column, index }))
 )
+const primaryColumnKey = computed(() =>
+  processedColumns.value.find((column) => column.role === undefined)?.key
+)
 
 const columnConfigOptions = computed<ColumnConfigOption[]>(() =>
   preferredColumns.value.map((column) => ({
@@ -1292,6 +1295,7 @@ onBeforeUnmount(() => {
                 :key="col.key"
                 class="data-table-cell"
                 :class="[
+                  col.key === primaryColumnKey ? 'data-table-cell--primary' : '',
                   isDetailColumn(col) ? 'data-table-cell--detail' : '',
                   getAlignClass(col.align),
                   col.fixed ? `fixed-${col.fixed}` : '',
@@ -1804,6 +1808,10 @@ onBeforeUnmount(() => {
   &.fixed-right.has-shadow {
     box-shadow: -1px 0 0 $wolf-border-light-v2, -8px 0 12px rgba(15, 23, 42, 0.04);
   }
+}
+.data-table-cell--primary {
+  color: $wolf-text-primary-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
 }
 
 .data-table-actions-header,
