@@ -515,14 +515,15 @@ V 为 `CRM-Client/tests/components/{SalesAssistantProposal,SalesAssistantProcess
 本节记录当日收口四项的实际执行与证据；**不改变 §10 B–D 未批准结论，不构成灰度或发布批准。**
 
 - **TRD 对齐：**§1 头部新增批次作废声明，§10 A 批次改判“档案侧条件全部关闭”，待决策 1 划掉，§9.12 记录档案移除实测（Alembic 153、九类事实 548 清零、三表删除、向量四类留存、272 项回归）。提交 `7dd53ee1`。
-- **WIP 入库：**§9.9 四类修复的前端 14 文件单独提交 `50dcdb4e`；后端部分已随 `3fed3dfe` 先行入库（含 action_evidence、opportunity_target_matching 及 13 个测试文件），当日验证 225 项通过。顺带发现并修复 manifest 与后端 `list_query` 算子目录脱节（`d49d8dad` 曾把 enum 算子从 8 削到 4），按后端 `DEFAULT_OPS` 对齐 3 个字段，提交 `eea71544`。
-- **T03 运维权限（§7.1 首段落地）：**`GET /v1/assistant/unknown-commands` 从“团队全量、del current_user”改为三层：持 `assistant:commands:reconcile:team`（迁移 149 已种子）看本团队 UNKNOWN+CLAIMED（含 `last_checked_at` 最小字段）；普通团队成员仅看本人记录（owner 过滤）；无团队归属 403。`list_unresolved_command_claims` 增加 `owner_user_id`/`include_claimed` 参数。TDD 四用例（本人隔离、越权 403、operator 看团队含 CLAIMED、跨团队不泄漏）先红后绿，提交含于 `feat(assistant): enforce owner and operator claim query scopes`。
-- **商机提名链（§2.2 第 1 步的模型侧）：**`opportunity_nominator.py` 恢复并适配当前 `source_records` segment 结构：模型只提名 `opportunity_create/opportunity_stage` 信号（结构化 schema、闭世界 prompt、无金额字段、阶段必须带 target+相邻阶段），服务端 `validate_candidate` 独立重绑证据与 CRM 权威；接入 `offer_next_proposal`（规则 hints 优先，模型提名兜底）；模型/凭据不可用时记 warning 并降级为不提名，绝不阻塞已提交活动。提名器 3 用例（引用转发、阶段缺目标丢弃、无信号空返回）通过；5 个旧 fixture 缺 `crm_ai_config` 的回归由降级路径覆盖后全绿。
-- **集中回归：**助手 15 文件 232 passed；档案撤下专项 10 文件 58 passed；前端助手 7 文件 69 passed；T03 operator 端到端见下方补证。剩余人工裁决端点（§7.1 后半，依赖决策 3）与 §10 决策 2/3/4 业务批准；B/C/D 门禁维持未批准。
+2. ~~日期只有日粒度时的业务到期时刻~~——**2026-10-10 已批准：纯日期任务统一 23:59:59（Asia/Shanghai），与既有任务政策一致；跟进时间解析器默认 09:00 不偷用于任务；“周末／月底左右”等歧义表达一律 `AMBIGUOUS` 追问，不臆造日期。**当前实现（`action_evidence.py` 解析链 + §9.9 纯日期验收）即为此政策，无需改动。**
+3. ~~独立运维权限名及裁决证据标准~~——**2026-10-10 已批准：`assistant:commands:reconcile:team`（迁移 149 种子）+ `ASSISTANT_COMMAND_OPERATOR` 角色承担裁决；只有精确 `(team,command_id,effect_kind)` 目标回执可判 `SUCCEEDED`；持久 `NOT_STARTED` 无调用证明可判 `REJECTED`；其余一律保 `UNKNOWN`；裁决绝不能触发重试。**裁决端点随本决策实施，见 §9.13 补记。**
+4. ~~商机高置信去重阈值~~——**2026-10-10 已批准（保守规则）：商机名 strip 后完全相等才拦截创建提议；部分名称重叠不拦（§9.2 O02 “分析平台培训服务”误拦反例已修）；歧义目标保守不创建、不呈现选择卡。语义匹配阈值暂不引入，未来如需须另行批准并重验 O02。**当前 `opportunity_target_matching.py` 即为此规则。
 
 
 **T03 隔离 MySQL + 独立 HTTP 端到端（2026-10-10 补证）：**一次性 `--rm` 容器 `crmwolf-t03-1010`（仅 127.0.0.1:3308/crm_t03_acceptance，MySQL 8.0），`Base.metadata.create_all()` ORM fixture（非迁移验收）；种真实 `Permission(assistant:commands:reconcile:team)`+`Role(ASSISTANT_COMMAND_OPERATOR)`+`UserRole` 权限行、4 用户（owner/peer 同团队、operator 持角色、outsider 仅属团队 2）、5 条 claim（owner UNKNOWN、peer UNKNOWN+CLAIMED+RECONCILED、跨团队 UNKNOWN）。独立 Uvicorn 18260 + 独立 HTTP 实测：owner 200 仅 `t_owner_u/UNKNOWN`；peer（无权限成员）200 仅 `t_peer_u/UNKNOWN`、不见本人 CLAIMED；operator 200 全团队 `t_owner_u+t_peer_u/UNKNOWN、t_peer_c/CLAIMED`、无 RECONCILED；outsider 200 仅本团队 `t_foreign`，零跨团队泄漏。无成员对他人记录有任何可见性。首启小表集曾被启动任务缺 `crm_agent_turn_executions` 拖垮，重建完整 schema 后通过——不构成对部分表环境的兼容承诺。服务与容器已清理（`docker rm -f` 后 0 残留）。
 **本轮门禁复核（截至 2026-10-04；A–D 均不批准发布／扩大流量）：**下表的“未批准”不否定上面指定测试通过，而是逐项遵守该批次完整条件；隔离库内无记录不代表生产无存量。下一次判定必须附对应实际环境、身份和事务证据，不能把固定候选、TestClient、mock API 或故障注入升级成真实模型／生产事故证据。
+
+**决策落地与裁决端点（2026-10-10 续）：**用户批准全部三项待决策（§10 列表 2/3/4 已划掉并记录理由）。决策 2（23:59:59+歧义追问）与决策 4（名称全等+歧义不创建）确认现状即合同，零代码改动。决策 3 实施 `POST /v1/assistant/unknown-commands/{action_public_id}/adjudicate`：仅 `assistant:commands:reconcile:team` 可调；`SUCCEEDED` 需 `(team,command_id)` 在 `AssistantCRMEffect` 有精确回执（老格式无 command_id 一律拒绝）；`REJECTED` 需持久非 STARTED 证明；终态 claim 409 不可重复裁决；必须给理由；裁决结果含 operator 与理由审计字段；**裁决绝不重试命令**。TDD 五用例（无权限 403、STARTED 拒绝 409、NOT_STARTED 可拒 200、无回执不可判成功 409、不存在 404）先红后绿；连同查询/提案/API 回归 75 passed。提交 `feat(assistant): add evidence-gated claim adjudication`。B/C/D 门禁仍维持未批准——裁决端点的 MySQL 隔离端到端与生产 claim 盘点仍属发布前置，不在本轮。
 
 | 批次 | 本轮实测及尚缺的发布证据 | 判定 |
 | --- | --- | --- |
