@@ -15,6 +15,7 @@ from app.core.database import get_db
 from app.core.deps import get_current_active_user, get_current_user_team
 from app.models.assistant import AssistantAction, AssistantTask
 from app.models.assistant_turn import AssistantTurn
+from app.models.team import UserTeam
 from app.services.assistant.contracts import (  # noqa: TC001 - Pydantic resolves response models at runtime.
     CommittedReceipt,
     TaskDraft,
@@ -399,12 +400,28 @@ async def list_unknown_commands(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> list[dict[str, object]]:
-    """Team-scoped unresolved CRM command claims for manual reconciliation."""
+    """Owner-scoped unresolved claims; team operators also see CLAIMED within their team."""
 
-    del current_user
+    from app.crud.permission import permission_crud
     from app.services.assistant.proposals import list_unresolved_command_claims
 
-    return list_unresolved_command_claims(db, team_id=team_id)
+    permission_codes = {
+        permission.code
+        for permission in permission_crud.get_user_permissions(db, int(current_user.id), team_id)
+    }
+    if "assistant:commands:reconcile:team" in permission_codes:
+        return list_unresolved_command_claims(db, team_id=team_id, include_claimed=True)
+    from fastapi import HTTPException, status
+
+    membership = (
+        db.query(UserTeam.id)
+        .filter(UserTeam.user_id == int(current_user.id), UserTeam.team_id == team_id)
+        .first()
+    )
+    if membership is not None:
+        # Team members see their own unresolved commands only (TRD §7.1).
+        return list_unresolved_command_claims(db, team_id=team_id, owner_user_id=int(current_user.id))
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="没有核对助手命令的权限")
 
 
 @router.get("/tasks/{public_id}/turns/{turn_id}", response_model=AssistantTurnView)

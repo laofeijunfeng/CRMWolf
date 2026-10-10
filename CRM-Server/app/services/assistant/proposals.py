@@ -331,24 +331,33 @@ def _mark_claim_status(db: Session, claim: AssistantAction, status: str, *, publ
         db.flush()
 
 
-def list_unresolved_command_claims(db: Session, *, team_id: int) -> list[dict[str, object]]:
-    """TRD §8: surface UNKNOWN CRM command claims for manual reconciliation."""
+def list_unresolved_command_claims(
+    db: Session,
+    *,
+    team_id: int,
+    owner_user_id: int | None = None,
+    include_claimed: bool = False,
+) -> list[dict[str, object]]:
+    """TRD §7.1/§8: owner sees own claims; team operators see team-scope including CLAIMED."""
 
     from app.models.assistant import AssistantTask
 
-    rows = (
+    statuses = {"UNKNOWN", "CLAIMED"} if include_claimed else {"UNKNOWN"}
+    query = (
         db.query(AssistantAction)
         .join(AssistantTask, AssistantTask.id == AssistantAction.task_id)
         .filter(
             AssistantAction.team_id == team_id,
             AssistantAction.action == "proposal_command_claim",
         )
-        .all()
     )
+    if owner_user_id is not None:
+        query = query.filter(AssistantTask.user_id == owner_user_id)
+
     unresolved: list[dict[str, object]] = []
-    for row in rows:
+    for row in query.all():
         result = row.result_json or {}
-        if result.get("status") not in {"UNKNOWN"}:
+        if result.get("status") not in statuses:
             continue
         task = db.get(AssistantTask, row.task_id)
         unresolved.append(
@@ -359,6 +368,7 @@ def list_unresolved_command_claims(db: Session, *, team_id: int) -> list[dict[st
                 "task_public_id": task.public_id if task is not None else None,
                 "action_public_id": row.public_id,
                 "created_time": row.created_time.isoformat() if row.created_time else None,
+                "last_checked_at": row.updated_time.isoformat() if getattr(row, "updated_time", None) else None,
             }
         )
     return unresolved
