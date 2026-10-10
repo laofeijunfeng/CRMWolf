@@ -50,10 +50,6 @@ def _candidate_hints(db: Session, task: AssistantTask) -> list[dict]:
         content = {}
     if not isinstance(content, dict):
         content = {}
-    for fact in content.get("customer_facts", []) if isinstance(content.get("customer_facts"), list) else []:
-        if isinstance(fact, dict):
-            hints.append({"kind": "customer_fact", "evidence_quote": fact.get("evidence_quote"),
-                          "payload": {field: fact.get(field) for field in ("fact_type", "subject", "content")}})
     for action in content.get("action_items", []) if isinstance(content.get("action_items"), list) else []:
         if isinstance(action, dict) and isinstance(action.get("action"), str):
             hints.append({"kind": "follow_up_task_create", "evidence_quote": action["action"],
