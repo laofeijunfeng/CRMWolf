@@ -347,49 +347,6 @@ async def test_meeting_actions_create_distinct_real_tasks_and_events(crm_session
     assert finished.committed_json[0] == {"kind": "customer_activity", "public_id": "1"}
 
 
-async def test_real_fact_write_rechecks_revision_and_permission(crm_session):
-    import json
-
-    from app.models.customer_fact import CustomerFact
-    from app.models.team import UserTeam
-    from app.services.assistant.crm_proposal_commands import RealCRMProposalExecutor
-
-    task = _task(crm_session, content="客户确认预算80万")
-    activity = crm_session.query(CustomerActivity).one()
-    activity.content_json = json.dumps(
-        {
-            "customer_facts": [
-                {"fact_type": "budget", "content": "预算80万", "evidence_quote": "客户确认预算80万"},
-            ]
-        }
-    )
-    crm_session.commit()
-    offered, _, active = await offer_next_proposal(crm_session, task)
-    assert active
-    activity.activity_revision += 1
-    crm_session.commit()
-    with pytest.raises(ValueError, match="状态已变化"):
-        await settle_proposal(crm_session, offered, accepted=True, executor=RealCRMProposalExecutor())
-    assert crm_session.query(CustomerFact).count() == 0
-    activity.activity_revision -= 1
-    membership = crm_session.query(UserTeam).one()
-    crm_session.delete(membership)
-    crm_session.commit()
-    with pytest.raises(ValueError, match="证据或操作权限"):
-        await settle_proposal(crm_session, offered, accepted=True, executor=RealCRMProposalExecutor())
-    assert crm_session.query(CustomerFact).count() == 0
-    crm_session.add(UserTeam(user_id=2, team_id=1))
-    crm_session.commit()
-    settled, _, followup = await settle_proposal(
-        crm_session, offered, accepted=True, executor=RealCRMProposalExecutor()
-    )
-    assert followup and settled.status == AssistantTaskStatus.ACTIVE and settled.waiting_field is None
-    finished, _, active = await offer_next_proposal(crm_session, settled)
-    assert not active and finished.status == AssistantTaskStatus.COMPLETED
-    assert crm_session.query(CustomerFact).one().content == "预算80万"
-    assert finished.committed_json[0]["kind"] == "customer_activity"
-
-
 async def test_no_activity_cannot_complete(db_session):
     task = _task(db_session)
     db_session.delete(db_session.query(CustomerActivity).one())

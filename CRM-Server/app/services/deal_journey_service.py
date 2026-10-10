@@ -91,7 +91,6 @@ class DealJourneyService:
 
         opportunity.deal_journey_id = journey.id
         if previous_deal_journey_id != int(journey.id):
-        if previous_deal_journey_id != int(journey.id):
             self.record_event(
                 db,
                 deal_journey_id=journey.id,
@@ -431,7 +430,6 @@ class DealJourneyService:
             metadata_json=json.dumps(metadata, ensure_ascii=False, sort_keys=True) if metadata else None,
         )
         db.add(event)
-        if event_origin(db, event, team_id, customer_id, current=True):
         db.flush()
         self._upsert_event_evidence(db, event)
         if enqueue_customer_intelligence:
