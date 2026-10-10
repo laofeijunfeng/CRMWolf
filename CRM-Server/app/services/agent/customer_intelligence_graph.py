@@ -250,9 +250,6 @@ class CustomerIntelligenceGraphService:
         graph.add_node("load_customer_context", self._load_customer_context)
         graph.add_node("retrieve_memory", self._retrieve_memory)
         graph.add_node("plan_refresh", self._plan_refresh)
-        graph.add_node("extract_facts", self._extract_facts)
-        graph.add_node("assess_facts", self._assess_facts)
-        graph.add_node("persist_facts", self._persist_facts)
         graph.add_node("answer_context", self._answer_context)
         graph.add_node("write_memory", self._write_memory)
         graph.add_node("emit_trace", self._emit_trace)
@@ -271,19 +268,9 @@ class CustomerIntelligenceGraphService:
             "plan_refresh",
             self._route_after_plan,
             {
-                "extract_facts": "extract_facts",
                 "write_memory": "write_memory",
                 "answer_context": "answer_context",
                 "emit_trace": "emit_trace",
-            },
-        )
-        graph.add_edge("extract_facts", "assess_facts")
-        graph.add_edge("assess_facts", "persist_facts")
-        graph.add_conditional_edges(
-            "persist_facts",
-            self._route_after_persist_facts,
-            {
-                "write_memory": "write_memory",
             },
         )
         graph.add_edge("answer_context", "emit_trace")
@@ -522,7 +509,7 @@ class CustomerIntelligenceGraphService:
         route = _route_for_event(event)
         refresh_plan = {
             "route": route,
-            "requires_llm_extraction": route == "write_memory",
+            "requires_llm_extraction": False,
             "requires_review": False,
             "target_sections": _target_sections(route),
             "reason": _plan_reason(trigger_type, route),
@@ -537,9 +524,6 @@ class CustomerIntelligenceGraphService:
     def _route_after_plan(self, state: CustomerIntelligenceGraphState) -> str:
         route = state.get("route")
         if route == "write_memory":
-            refresh_plan = coerce_json_dict(state.get("refresh_plan"))
-            if refresh_plan.get("requires_llm_extraction") is True:
-                return "extract_facts"
             return "write_memory"
         if route == "answer_context":
             return "answer_context"
@@ -865,15 +849,6 @@ class CustomerIntelligenceGraphService:
                         key="latest_evidence_refs",
                         value=retrieval_index,
                     )
-                fact_index = _fact_index_from_state(state, customer_context)
-                if fact_index:
-                    self.memory_store_service.upsert_fact_index(
-                        db,
-                        tenant_id=tenant_id,
-                        customer_id=customer_id,
-                        key="latest_customer_fact_refs",
-                        value=fact_index,
-                    )
                 db.flush()
         except Exception as exc:
             return {
@@ -892,7 +867,7 @@ class CustomerIntelligenceGraphService:
                     "event": "customer_intelligence_memory_written",
                     "customer_id": customer_id,
                     "sections": _written_memory_sections(
-                        retrieval_index=bool(retrieval_index), fact_index=bool(fact_index)
+                        retrieval_index=bool(retrieval_index), fact_index=False
                     ),
                 }
             ],

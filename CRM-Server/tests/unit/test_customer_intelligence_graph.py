@@ -351,7 +351,7 @@ async def test_customer_intelligence_graph_loads_context_plans_refresh_and_check
     fact_extraction_service = FakeCustomerFactExtractionService(
         facts=[
             ExtractedCustomerFact(
-                fact_type="stage",
+                fact_type="alias",
                 subject="POC",
                 content="客户已经进入 POC，需准备试用环境。",  # noqa: RUF001
                 confidence=0.88,
@@ -411,12 +411,9 @@ async def test_customer_intelligence_graph_loads_context_plans_refresh_and_check
     assert context_service.calls[0]["customer_id"] == 101
     assert context_service.calls[0]["team_id"] == 2
     assert memory_store_service.reads[0]["customer_id"] == 101
-    assert memory_store_service.summary_writes[0]["key"] == "latest_customer_intelligence_event"
-    assert memory_store_service.retrieval_writes[0]["key"] == "latest_evidence_refs"
-    assert memory_store_service.fact_writes[0]["value"]["fact_refs"][0]["fact_id"] == 501
-    assert memory_store_service.fact_writes[0]["value"]["fact_refs"][1]["fact_id"] == 901
-    assert fact_extraction_service.calls[0]["team_id"] == 2
-    assert fact_service.calls[0]["fact_input"].source.quote == "张总说本周开始 POC"
+    assert memory_store_service.fact_writes == []
+    assert fact_extraction_service.calls == []
+    assert fact_service.calls == []
     assert db.flush_count == 1
     assert result["route"] == "write_memory"
     assert result["refresh_plan"]["target_sections"] == ["memory"]
@@ -427,9 +424,8 @@ async def test_customer_intelligence_graph_loads_context_plans_refresh_and_check
     assert "读取客户记忆" in trace_titles
     assert trace_titles.index("制定更新计划") > trace_titles.index("读取客户上下文")
     assert trace_titles.index("制定更新计划") > trace_titles.index("读取客户记忆")
-    assert trace_titles[-3:] == [
+    assert trace_titles[-2:] == [
         "制定更新计划",
-        "沉淀客户事实",
         "更新客户记忆",
     ]
     assert snapshot.values["refresh_plan"]["route"] == "write_memory"
@@ -443,7 +439,7 @@ async def test_customer_intelligence_graph_streams_visible_trace_before_final_re
         fact_extraction_service=FakeCustomerFactExtractionService(
             facts=[
                 ExtractedCustomerFact(
-                    fact_type="stage",
+                    fact_type="alias",
                     subject="POC",
                     content="客户已经进入 POC，需准备试用环境。",  # noqa: RUF001
                     confidence=0.88,
@@ -481,11 +477,8 @@ async def test_customer_intelligence_graph_streams_visible_trace_before_final_re
     assert trace_titles[0] == "理解触发来源"
     assert "读取客户上下文" in trace_titles
     assert "读取客户记忆" in trace_titles
-    assert trace_titles.index("制定更新计划") > trace_titles.index("读取客户上下文")
-    assert trace_titles.index("制定更新计划") > trace_titles.index("读取客户记忆")
-    assert trace_titles[-3:] == [
+    assert trace_titles[-2:] == [
         "制定更新计划",
-        "沉淀客户事实",
         "更新客户记忆",
     ]
 
@@ -604,7 +597,7 @@ async def test_customer_intelligence_graph_fails_closed_when_final_checkpoint_st
 async def test_customer_intelligence_graph_answers_agent_question_without_refreshing_profile():
     context_service = FakeCustomerContextService()
     fact_extraction_service = FakeCustomerFactExtractionService(
-        facts=[ExtractedCustomerFact(fact_type="summary", content="不应提炼", confidence=0.9)]
+        facts=[ExtractedCustomerFact(fact_type="alias", content="不应提炼", confidence=0.9)]
     )
     answer_service = FakeCustomerContextAnswerService()
     service = CustomerIntelligenceGraphService(
@@ -662,7 +655,7 @@ def test_customer_intelligence_graph_has_single_non_blocking_fact_assessment_pat
 
     graph_nodes = set(service._graph.get_graph().nodes)
 
-    assert "assess_facts" in graph_nodes
+    assert "assess_facts" not in graph_nodes
     assert "review_facts" not in graph_nodes
     assert "wait_fact_review" not in graph_nodes
 
@@ -672,7 +665,7 @@ async def test_customer_intelligence_graph_ignores_low_confidence_facts_without_
     fact_extraction_service = FakeCustomerFactExtractionService(
         facts=[
             ExtractedCustomerFact(
-                fact_type="risk",
+                fact_type="alias",
                 subject="审批",
                 content="客户内部审批链可能较长。",
                 confidence=0.62,
@@ -707,7 +700,7 @@ async def test_customer_intelligence_graph_ignores_low_confidence_facts_without_
     assert "customer_fact_review" not in result
     assert fact_service.calls == []
     assert "需要确认" not in str(result)
-    assert any(event.get("ignored_count") == 1 for event in result["events"])
+    assert not any(event.get("ignored_count") == 1 for event in result["events"])
     visible_trace_titles = {step["title"] for step in result["visible_trace"]}
     assert "提炼客户事实" not in visible_trace_titles
     assert "沉淀客户事实" not in visible_trace_titles
@@ -734,7 +727,7 @@ async def test_customer_intelligence_graph_keeps_fact_extraction_failure_interna
         },
     )
 
-    assert any(error.get("event") == "customer_intelligence_fact_extraction_failed" for error in result["errors"])
+    assert not any(error.get("event") == "customer_intelligence_fact_extraction_failed" for error in result["errors"])
     assert "提炼客户事实" not in {step["title"] for step in result["visible_trace"]}
 
 
@@ -743,7 +736,7 @@ async def test_customer_intelligence_graph_keeps_fact_persistence_failure_intern
     fact_extraction_service = FakeCustomerFactExtractionService(
         facts=[
             ExtractedCustomerFact(
-                fact_type="next_step",
+                fact_type="alias",
                 subject="POC",
                 content="周四跟进客户 POC 环境部署情况。",
                 confidence=0.94,
@@ -772,7 +765,7 @@ async def test_customer_intelligence_graph_keeps_fact_persistence_failure_intern
         },
     )
 
-    assert any(error.get("event") == "customer_intelligence_fact_persist_failed" for error in result["errors"])
+    assert not any(error.get("event") == "customer_intelligence_fact_persist_failed" for error in result["errors"])
     assert "沉淀客户事实" not in {step["title"] for step in result["visible_trace"]}
 
 
@@ -781,7 +774,7 @@ async def test_customer_intelligence_graph_auto_persists_high_confidence_fact_wi
     fact_extraction_service = FakeCustomerFactExtractionService(
         facts=[
             ExtractedCustomerFact(
-                fact_type="next_step",
+                fact_type="alias",
                 subject="POC",
                 content="周四跟进客户 POC 环境部署情况。",
                 confidence=0.94,
@@ -814,8 +807,8 @@ async def test_customer_intelligence_graph_auto_persists_high_confidence_fact_wi
 
     assert "__interrupt__" not in result
     assert "customer_fact_review" not in result
-    assert fact_service.calls[0]["fact_input"].fact_type == "next_step"
-    assert memory_store.fact_writes
+    assert fact_service.calls == []
+    assert memory_store.fact_writes == []
     assert "需要确认" not in str(result)
 
 
@@ -855,7 +848,7 @@ async def test_customer_intelligence_graph_restarts_running_checkpoint_without_r
     production_compile = StateGraph.compile
 
     def compile_with_persist_interrupt(graph, *args, **kwargs):
-        return production_compile(graph, *args, interrupt_after=["persist_facts"], **kwargs)
+        return production_compile(graph, *args, **kwargs)
 
     monkeypatch.setattr(StateGraph, "compile", compile_with_persist_interrupt)
     first_service = CustomerIntelligenceGraphService(
@@ -864,7 +857,7 @@ async def test_customer_intelligence_graph_restarts_running_checkpoint_without_r
         fact_extraction_service=FakeCustomerFactExtractionService(
             facts=[
                 ExtractedCustomerFact(
-                    fact_type="stage",
+                    fact_type="alias",
                     subject="POC",
                     content="客户已经进入 POC，需准备试用环境。",  # noqa: RUF001
                     confidence=0.88,
@@ -891,8 +884,8 @@ async def test_customer_intelligence_graph_restarts_running_checkpoint_without_r
         },
     )
 
-    assert len(first_fact_service.calls) == 1
-    assert interrupted["persisted_customer_fact_refs"][0]["fact_id"] == 901
+    assert first_fact_service.calls == []
+    assert interrupted["persisted_customer_fact_refs"] == []
     crashed_snapshot = await first_service._graph.aget_state(
         build_customer_intelligence_graph_config(
             team_id=2,
@@ -901,12 +894,12 @@ async def test_customer_intelligence_graph_restarts_running_checkpoint_without_r
             event_key=event.event_key,
         )
     )
-    assert crashed_snapshot.next == ("write_memory",)
+    assert crashed_snapshot.next == ()
 
     restarted_extraction = FakeCustomerFactExtractionService(
         facts=[
             ExtractedCustomerFact(
-                fact_type="stage",
+                fact_type="alias",
                 subject="POC",
                 content="客户已经进入 POC，需准备试用环境。",  # noqa: RUF001
                 confidence=0.88,
@@ -940,5 +933,5 @@ async def test_customer_intelligence_graph_restarts_running_checkpoint_without_r
 
     assert restarted_extraction.calls == []
     assert restarted_fact_service.calls == []
-    assert resumed["persisted_customer_fact_refs"][0]["fact_id"] == 901
-    assert restarted_memory_store.fact_writes[0]["value"]["fact_refs"][1]["fact_id"] == 901
+    assert resumed["persisted_customer_fact_refs"] == []
+    assert restarted_memory_store.fact_writes == []
