@@ -33,7 +33,6 @@ import DealJourneyDetailHost from '@/components/business-journey/DealJourneyDeta
 import ContractDetailContent from '@/components/panels/ContractDetailContent.vue'
 import PaymentPlanDetailContent from '@/components/panels/PaymentPlanDetailContent.vue'
 import PaymentRecordDetailContent from '@/components/panels/PaymentRecordDetailContent.vue'
-import CustomerProfileContent from '@/components/panels/CustomerProfileContent.vue'
 
 // Dialogs
 import FollowUpFormDialog from '@/components/dialogs/FollowUpFormDialog.vue'
@@ -50,8 +49,6 @@ import { toast } from 'vue-sonner'
 import { handleApiError } from '@/utils/errorHandler'
 import { formatProductIntentName } from '@/utils/productIntent'
 import customerApi, { type CustomerDetailResponse, type ContactResponse, type CustomerMemberResponse } from '@/api/customer'
-import customerProfileApi from '@/api/customerProfile'
-import type { CustomerProfileEvidence, CustomerProfileResponse } from '@/schemas/customerProfile'
 import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
 import customerActivityApi, { type CustomerActivityResponse } from '@/api/customerActivity'
 import { dealJourneyApi, type DealJourney } from '@/api/dealJourney'
@@ -71,7 +68,7 @@ import type { DetailContextNode, DetailObjectType } from '@/types/detailContext'
 import { useDetailContextStack } from '@/composables/useDetailContextStack'
 
 // ==================== Props & Emits ====================
-type CustomerDetailPanel = 'customer-profile' | 'customer-info' | 'followup' | 'journeys'
+type CustomerDetailPanel = 'customer-info' | 'followup' | 'journeys'
 type CustomerDetailPanelTarget = CustomerDetailPanel | 'opportunities'
 
 interface Props {
@@ -103,8 +100,7 @@ const hasNestedDetail = computed(() => {
 // ==================== State ====================
 const loading = ref(false)  // TODO: Task 3 - 加载客户详情数据时使用
 const detailError = ref<FeedbackError | null>(null)
-const activePanel = ref('customer-profile')  // Sidebar 导航切换
-const refreshingCustomerProfile = ref(false)
+const activePanel = ref('customer-info')  // Sidebar 导航切换
 
 // ==================== Dialog States ====================
 const followUpDialogOpen = ref(false)
@@ -134,8 +130,6 @@ const restoreFocusJourneyId = ref<string | null>(null)
 
 // ==================== Data Loading State ====================
 const customer = ref<CustomerDetailResponse | null>(null)
-const customerProfile = ref<CustomerProfileResponse | null>(null)
-const customerProfileEvidence = ref<CustomerProfileEvidence[]>([])
 const followUps = ref<CustomerActivityResponse[]>([])
 const journeys = ref<DealJourney[]>([])
 const selectedJourney = computed(() => (
@@ -155,8 +149,6 @@ type CustomerDetailPanelKey =
   | 'invoiceTitles'
   | 'deployments'
   | 'customerMembers'
-  | 'customerProfile'
-  | 'customerProfileEvidence'
   | 'paymentPlans'
 const panelErrors = ref<Partial<Record<CustomerDetailPanelKey, FeedbackError | undefined>>>({})
 const panelLoading = ref<Record<CustomerDetailPanelKey, boolean>>({
@@ -166,8 +158,6 @@ const panelLoading = ref<Record<CustomerDetailPanelKey, boolean>>({
   invoiceTitles: false,
   deployments: false,
   customerMembers: false,
-  customerProfile: false,
-  customerProfileEvidence: false,
   paymentPlans: false,
 })
 const CUSTOMER_DETAIL_PANELS: CustomerDetailPanelKey[] = [
@@ -177,8 +167,6 @@ const CUSTOMER_DETAIL_PANELS: CustomerDetailPanelKey[] = [
   'invoiceTitles',
   'deployments',
   'customerMembers',
-  'customerProfile',
-  'customerProfileEvidence',
   'paymentPlans',
 ]
 const panelRequestIds: Record<CustomerDetailPanelKey, number> = {
@@ -188,15 +176,9 @@ const panelRequestIds: Record<CustomerDetailPanelKey, number> = {
   invoiceTitles: 0,
   deployments: 0,
   customerMembers: 0,
-  customerProfile: 0,
-  customerProfileEvidence: 0,
   paymentPlans: 0,
 }
 let latestLoadRequestId = 0
-let profileRefreshPollGeneration = 0
-
-const PROFILE_REFRESH_POLL_INTERVAL_MS = 2000
-const PROFILE_REFRESH_POLL_TIMEOUT_MS = 120000
 
 // ==================== Navigation Tabs ====================
 interface NavTabItem {
@@ -205,7 +187,6 @@ interface NavTabItem {
 }
 
 const navTabs: NavTabItem[] = [
-  { key: 'customer-profile', label: '客户档案' },
   { key: 'customer-info', label: '客户信息' },
   { key: 'followup', label: '客户活动' },
   { key: 'journeys', label: '业务旅程' }
@@ -335,7 +316,7 @@ const resetDetailContext = (): void => {
 }
 
 const resetLocalNavigation = (): void => {
-  activePanel.value = 'customer-profile'
+  activePanel.value = 'customer-info'
   selectedJourneyId.value = null
   selectedContractId.value = null
   selectedPlanId.value = null
@@ -572,9 +553,7 @@ const loadAllData = async (customerId: string): Promise<boolean> => {
       contractsResult,
       invoiceTitlesResult,
       deploymentsResult,
-      customerMembersResult,
-      customerProfileResult,
-      customerProfileEvidenceResult
+      customerMembersResult
     ] = await Promise.allSettled([
       customerApi.getCustomerDetail(customerId),
       customerActivityApi.getActivities(customerId),
@@ -583,8 +562,6 @@ const loadAllData = async (customerId: string): Promise<boolean> => {
       invoiceApi.getInvoiceTitles(customerId),
       deploymentApi.list(customerId),
       customerApi.getCustomerMembers(customerId),
-      customerProfileApi.getProfile(customerId),
-      customerProfileApi.getEvidence(customerId),
     ])
 
     if (customerDetailResult.status === 'rejected') {
@@ -602,8 +579,6 @@ const loadAllData = async (customerId: string): Promise<boolean> => {
       invoiceTitles: invoiceTitlesResult.status === 'fulfilled' && isCurrentPanelLoad('invoiceTitles'),
       deployments: deploymentsResult.status === 'fulfilled' && isCurrentPanelLoad('deployments'),
       customerMembers: customerMembersResult.status === 'fulfilled' && isCurrentPanelLoad('customerMembers'),
-      customerProfile: customerProfileResult.status === 'fulfilled' && isCurrentPanelLoad('customerProfile'),
-      customerProfileEvidence: customerProfileEvidenceResult.status === 'fulfilled' && isCurrentPanelLoad('customerProfileEvidence'),
       paymentPlans: false,
     }
     const followUpsData = readPanel(followUpsResult, 'followUps', '客户活动', followUps.value)
@@ -612,8 +587,6 @@ const loadAllData = async (customerId: string): Promise<boolean> => {
     const invoiceTitlesData = readPanel(invoiceTitlesResult, 'invoiceTitles', '发票抬头', { invoice_titles: invoiceTitles.value })
     const deploymentsData = readPanel(deploymentsResult, 'deployments', '部署信息', deployments.value)
     const customerMembersData = readPanel(customerMembersResult, 'customerMembers', '客户团队', customerMembers.value)
-    const profileData = readPanel(customerProfileResult, 'customerProfile', '客户档案', customerProfile.value)
-    const profileEvidenceData = readPanel(customerProfileEvidenceResult, 'customerProfileEvidence', '客户档案证据', customerProfileEvidence.value)
     if (isCurrentPanelLoad('followUps')) followUps.value = followUpsData
     if (isCurrentPanelLoad('journeys')) {
       journeys.value = journeysData
@@ -623,8 +596,6 @@ const loadAllData = async (customerId: string): Promise<boolean> => {
     if (isCurrentPanelLoad('invoiceTitles')) invoiceTitles.value = invoiceTitlesData.invoice_titles ?? []
     if (isCurrentPanelLoad('deployments')) deployments.value = deploymentsData
     if (isCurrentPanelLoad('customerMembers')) customerMembers.value = customerMembersData
-    if (isCurrentPanelLoad('customerProfile')) customerProfile.value = profileData
-    if (isCurrentPanelLoad('customerProfileEvidence')) customerProfileEvidence.value = profileEvidenceData
 
     CUSTOMER_DETAIL_PANELS.forEach((panel) => {
       if (panel !== 'paymentPlans' && isCurrentPanelLoad(panel)) setPanelLoading(panel, false)
@@ -670,8 +641,7 @@ const retryPanel = async (panel: CustomerDetailPanelKey): Promise<boolean> => {
   if (!hasNestedDetail.value) {
     activePanel.value = panel === 'followUps' ? 'followup'
       : panel === 'journeys' ? 'journeys'
-        : panel === 'customerProfile' || panel === 'customerProfileEvidence' ? 'customer-profile'
-          : 'customer-info'
+        : 'customer-info'
   }
   const customerId = props.customerId
   switch (panel) {
@@ -692,10 +662,6 @@ const retryPanel = async (panel: CustomerDetailPanelKey): Promise<boolean> => {
       return runPanelRequest(panel, '部署信息', () => deploymentApi.list(customerId), (data) => { deployments.value = data })
     case 'customerMembers':
       return runPanelRequest(panel, '客户团队', () => customerApi.getCustomerMembers(customerId), (data) => { customerMembers.value = data })
-    case 'customerProfile':
-      return runPanelRequest(panel, '客户档案', () => customerProfileApi.getProfile(customerId), (data) => { customerProfile.value = data })
-    case 'customerProfileEvidence':
-      return runPanelRequest(panel, '客户档案证据', () => customerProfileApi.getEvidence(customerId), (data) => { customerProfileEvidence.value = data })
     case 'paymentPlans':
       return loadPaymentPlansForContracts(contracts.value)
   }
@@ -705,71 +671,6 @@ const refreshCustomerMembers = async (): Promise<void> => {
   const refreshed = await retryPanel('customerMembers')
   warnIfCustomerDetailRefreshFailed(refreshed, '客户团队操作')
   emit('refresh')
-}
-
-const waitForCustomerProfileRefresh = async (
-  customerId: string,
-  pollGeneration: number
-): Promise<CustomerProfileResponse['profile_status'] | null> => {
-  const deadline = Date.now() + PROFILE_REFRESH_POLL_TIMEOUT_MS
-
-  while (Date.now() < deadline) {
-    await new Promise<void>((resolve) => {
-      window.setTimeout(resolve, PROFILE_REFRESH_POLL_INTERVAL_MS)
-    })
-
-    if (
-      pollGeneration !== profileRefreshPollGeneration
-      || !props.visible
-      || props.customerId !== customerId
-    ) {
-      return null
-    }
-
-    try {
-      const [profileData, evidenceData] = await Promise.all([
-        customerProfileApi.getProfile(customerId),
-        customerProfileApi.getEvidence(customerId)
-      ])
-      customerProfile.value = profileData
-      customerProfileEvidence.value = evidenceData
-
-      if (['READY', 'PARTIAL', 'FAILED'].includes(profileData.profile_status)) {
-        return profileData.profile_status
-      }
-    } catch {
-      // 后台任务运行期间接口可能短暂不可用，继续下一轮轮询。
-    }
-  }
-
-  return null
-}
-
-const handleRefreshCustomerProfile = async (): Promise<void> => {
-  if (props.customerId === null) return
-  const customerId = props.customerId
-  const pollGeneration = ++profileRefreshPollGeneration
-  refreshingCustomerProfile.value = true
-  try {
-    await customerProfileApi.refresh(customerId, { scope: 'full', reason: 'manual_refresh' })
-    toast.info('客户档案正在更新，完成后会自动展示最新内容')
-    await loadAllData(customerId)
-    const status = await waitForCustomerProfileRefresh(customerId, pollGeneration)
-
-    if (status === 'READY' || status === 'PARTIAL') {
-      toast.success('客户档案已更新')
-    } else if (status === 'FAILED') {
-      toast.error('客户档案更新失败，请稍后重试')
-    } else if (pollGeneration === profileRefreshPollGeneration && props.visible && props.customerId === customerId) {
-      toast.info('客户档案仍在后台更新，请稍后重新查看')
-    }
-  } catch (error) {
-    handleApiError(error, '刷新客户智能档案')
-  } finally {
-    if (pollGeneration === profileRefreshPollGeneration) {
-      refreshingCustomerProfile.value = false
-    }
-  }
 }
 
 // ==================== Dialog Handlers ====================
@@ -1406,8 +1307,6 @@ const handlePaymentPlanDetailViewApproval = (record: PaymentRecordInfo): void =>
 // ==================== Watch ====================
 watch(() => props.visible, (visible): void => {
   if (!visible) {
-    profileRefreshPollGeneration += 1
-    refreshingCustomerProfile.value = false
   }
 
   if (visible && props.customerId !== null) {
@@ -1419,8 +1318,6 @@ watch(() => props.visible, (visible): void => {
     // 清理状态
     resetLocalNavigation()
     customer.value = null
-    customerProfile.value = null
-    customerProfileEvidence.value = []
     followUps.value = []
     journeys.value = []
     contracts.value = []
@@ -1436,8 +1333,6 @@ watch(() => props.visible, (visible): void => {
 
 watch(() => props.customerId, (customerId, previousCustomerId): void => {
   if (customerId !== previousCustomerId) {
-    profileRefreshPollGeneration += 1
-    refreshingCustomerProfile.value = false
     deploymentDialogOpen.value = false
   }
   if (!props.visible || customerId === null || customerId === previousCustomerId) return
@@ -1461,7 +1356,6 @@ watch(() => props.targetPanel, (panel): void => {
   setActivePanel(resolveTargetPanel(panel))
 })
 onBeforeUnmount(() => {
-  profileRefreshPollGeneration += 1
 })
 
 </script>
@@ -1565,50 +1459,6 @@ onBeforeUnmount(() => {
             </ErrorState>
           </div>
           <div v-else class="p-6 space-y-6">
-            <template v-if="activePanel === 'customer-profile'">
-              <div
-                v-if="panelLoading.customerProfile"
-                class="customer-detail-panel-loading"
-                aria-busy="true"
-                aria-live="polite"
-              >
-                <div class="loading-spinner loading-spinner--small" />
-                <span>正在加载客户档案…</span>
-              </div>
-              <ErrorState
-                v-else-if="panelErrors.customerProfile"
-                :variant="panelErrors.customerProfile.variant ?? 'error'"
-                :title="panelErrors.customerProfile.title"
-                :description="panelErrors.customerProfile.description"
-              >
-                <template #action>
-                  <Button v-if="panelErrors.customerProfile.retryable !== false" type="button" :loading="panelLoading.customerProfile" @click="retryPanel('customerProfile')">
-                    重试加载
-                  </Button>
-                </template>
-              </ErrorState>
-              <CustomerProfileContent
-                v-else
-                :profile="customerProfile"
-                :evidence="customerProfileEvidence"
-                :customer="customer"
-                :customer-name="customer?.account_name ?? '客户'"
-                :refreshing="refreshingCustomerProfile"
-                @refresh="handleRefreshCustomerProfile"
-              />
-              <ErrorState
-                v-if="panelErrors.customerProfileEvidence"
-                :variant="panelErrors.customerProfileEvidence.variant ?? 'error'"
-                :title="panelErrors.customerProfileEvidence.title"
-                :description="panelErrors.customerProfileEvidence.description"
-              >
-                <template #action>
-                  <Button v-if="panelErrors.customerProfileEvidence.retryable !== false" type="button" :loading="panelLoading.customerProfileEvidence" @click="retryPanel('customerProfileEvidence')">
-                    重试加载证据
-                  </Button>
-                </template>
-              </ErrorState>
-            </template>
 
             <template v-if="activePanel === 'customer-info'">
               <!-- 基本信息卡片 -->
@@ -1872,7 +1722,7 @@ onBeforeUnmount(() => {
 
         <!-- Footer -->
         <SheetFooter
-          v-if="activePanel !== 'customer-profile'"
+          
           class="customer-detail-sheet__footer p-4 border-t border-wolf-border-default-v2"
         >
           <template v-if="activePanel === 'customer-info'">

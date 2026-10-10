@@ -41,7 +41,7 @@ describe('AgentAsyncOperationCard', () => {
     const wrapper = mount(AgentAsyncOperationCard, {
       props: {
         operation: makeOperation('DEGRADED', {
-          summary: '客户档案已更新',
+          summary: '客户智能处理已更新',
         }),
       },
     })
@@ -51,7 +51,7 @@ describe('AgentAsyncOperationCard', () => {
     await wrapper.get('button').trigger('click')
 
     expect(wrapper.text()).toContain('已完成，但部分结果待核查')
-    expect(wrapper.text()).toContain('客户档案已更新，部分结果待核查。')
+    expect(wrapper.text()).toContain('客户智能处理已更新，部分结果待核查。')
   })
 
   it('shows the current step and finished time without runtime internals', async () => {

@@ -73,7 +73,7 @@ const props = defineProps<{
 const expanded = ref(false)
 const detailsId = computed(() => `agent-async-operation-${props.operation.public_id}-details`)
 const OPERATION_TITLES: Record<string, string> = {
-  customer_intelligence_refresh: "客户档案更新",
+  customer_intelligence_refresh: "客户智能处理",
   customer_activity_post_commit: "跟进任务对账",
 }
 

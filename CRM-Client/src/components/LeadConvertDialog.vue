@@ -350,7 +350,7 @@ watch(
       <DialogHeader>
         <DialogTitle>转化为客户</DialogTitle>
         <DialogDescription>
-          将线索转化为客户，创建客户档案
+          将线索转化为客户
         </DialogDescription>
       </DialogHeader>
 
