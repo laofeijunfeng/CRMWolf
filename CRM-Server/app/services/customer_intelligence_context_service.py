@@ -551,17 +551,10 @@ class CustomerIntelligenceContextService:
         task_payload = [_task_to_dict(item) for item in tasks]
         task_event_payload = [_task_event_to_dict(item) for item in task_events]
         recorded_follow_ups = [*task_payload, *commitment_payload]
-        all_context_facts = self.fact_service.to_context_payload(
-            db, team_id=team_id, customer_id=int(customer.id), limit=2**31 - 1, exclude_assistant2=True,
-        )
-        context_facts = all_context_facts[:50]
         catalog = [
             {"public_id": item.public_id, "name": item.name, "is_active": True}
             for item in product_crud.list(db, team_id, is_active=True)
         ]
-        progress = db.query(CustomerLegacySourceProgress).filter_by(
-            team_id=team_id, customer_id=customer.id,
-        ).one_or_none()
         opportunity_snapshot = _snapshot_rows(all_opportunities)
         for row in opportunity_snapshot:
             product = opportunities_by_id[int(row["id"])].product
@@ -581,7 +574,7 @@ class CustomerIntelligenceContextService:
             ),
             "activities": _snapshot_rows(all_activities),
             "activity_deletions": _snapshot_rows(all_deletions),
-            "facts": sorted(all_context_facts, key=lambda item: int(item.get("id") or 0)),
+            "facts": [],
             "journeys": sorted(
                 (_journey_to_dict(
                     item,
@@ -607,7 +600,7 @@ class CustomerIntelligenceContextService:
                              for record in (plan.payment_records or [])],
             activities=all_activities,
             activity_deletions=all_deletions,
-            facts=all_context_facts,
+            facts=[],
             journeys=eligible_journeys,
             journey_events=eligible_events,
             tasks=eligible_tasks,
@@ -615,10 +608,10 @@ class CustomerIntelligenceContextService:
             task_events=eligible_task_events,
         )
         watermarks.update({
-            "eligible_revision": int(progress.eligible_revision or 0) if progress else 0,
-            "deletion_revision": int(progress.deletion_revision or 0) if progress else 0,
-            "source_policy_version": str(progress.policy_version) if progress else LEGACY_PROFILE_SOURCE_POLICY,
-            "source_provenance_status": str(progress.provenance_status) if progress else "UNVERIFIED",
+            "eligible_revision": 0,
+            "deletion_revision": 0,
+            "source_policy_version": LEGACY_PROFILE_SOURCE_POLICY,
+            "source_provenance_status": "UNVERIFIED",
             "source_snapshot_hash": hashlib.sha256(
                 json.dumps(source_snapshot, sort_keys=True, ensure_ascii=False, default=str,
                            separators=(",", ":")).encode("utf-8")
@@ -627,7 +620,7 @@ class CustomerIntelligenceContextService:
 
         return CustomerStrongContext(
             customer=self._customer_fact(db, customer),
-            customer_facts=context_facts,
+            customer_facts=[],
             contacts=[self._contact_fact(item) for item in contacts],
             opportunities=[self._opportunity_fact(item) for item in opportunities],
             contracts=[self._contract_fact(item) for item in contracts],
