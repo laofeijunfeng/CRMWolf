@@ -70,7 +70,7 @@ import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
 import { serializeListQuery } from '@/utils/listQuery'
 import { isCustomerPublicId } from '@/utils/customerRoutes'
 import { isDealJourneyPublicId } from '@/utils/dealJourney'
-import { LICENSE_STATUS_LABELS, licenseStatusClass, licenseStatusLabel } from '@/utils/licenseStatus'
+import { LICENSE_STATUS_LABELS, formatLicenseSummary, licenseStatusClass, type LicenseSummary } from '@/utils/licenseStatus'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 import type { FormSuccessPayload } from '@/types/actionOutcome'
 import {
@@ -353,16 +353,29 @@ const fields = computed<ListFieldDefinition[]>(() => [
     label: '授权状态',
     type: 'enum',
     options: Object.entries(LICENSE_STATUS_LABELS).map(([value, label]) => ({ value, label })),
-    column: { align: 'center', width: '100px' }
+    column: false,
+    filter: true,
+    sort: true,
+    export: true
   },
   {
     key: 'license_authorized_users',
     label: '授权人数',
     type: 'number',
-    column: { width: '100px' }
+    column: false,
+    filter: true,
+    sort: true,
+    export: true
   },
-
-  { key: 'license_expiry_date', label: '授权到期', type: 'date', column: { width: '120px' } },
+  {
+    key: 'license_expiry_date',
+    label: '授权',
+    type: 'date',
+    column: { width: '180px' },
+    filter: true,
+    sort: true,
+    export: true
+  },
   { key: 'default_procurement_method', label: '默认采购方式', type: 'text', column: { width: '140px' } },
   {
     key: 'industry',
@@ -1166,19 +1179,8 @@ const formatDateTime = (dateStr?: string): string => {
   })
 }
 
-const formatDate = (dateStr?: string | null): string => {
-  if (dateStr === undefined || dateStr === null || dateStr.trim() === '') return '-'
-  const date = new Date(dateStr)
-  if (Number.isNaN(date.getTime())) return '-'
-  return date.toLocaleDateString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  })
-}
-
-const getLicenseStatusLabel = (row: CustomerResponse): string => {
-  return licenseStatusLabel(row.license_expiry_date, row.license_type)
+const getLicenseSummary = (row: CustomerResponse): LicenseSummary => {
+  return formatLicenseSummary(row.license_expiry_date, row.license_type, row.license_authorized_users)
 }
 
 const getLicenseStatusClass = (row: CustomerResponse): string => {
@@ -1326,8 +1328,12 @@ watchEffect(() => {
             :status="getAcquisitionSourceDisplayName(row, '')"
             type="source"
           />
-          <span class="license-badge" :class="getLicenseStatusClass(row)">
-            {{ getLicenseStatusLabel(row) }}
+          <span class="license-summary" :class="getLicenseStatusClass(row)">
+            <span class="license-summary__bar"></span>
+            <span class="license-summary__text">
+              <span class="license-summary__primary" :class="`is-${getLicenseSummary(row).tone}`">{{ getLicenseSummary(row).primary }}</span>
+              <span class="license-summary__secondary">{{ getLicenseSummary(row).secondary }}</span>
+            </span>
           </span>
         </div>
         <div class="customer-mobile-card-meta">
@@ -1388,21 +1394,14 @@ watchEffect(() => {
         </CustomerDealJourneyHoverCard>
       </template>
 
-      <!-- 授权状态 -->
-      <template #cell-license_status="{ row }">
-        <span class="license-badge" :class="getLicenseStatusClass(row)">
-          {{ getLicenseStatusLabel(row) }}
-        </span>
-      </template>
-
-      <!-- 授权人数 -->
-      <template #cell-license_authorized_users="{ row }">
-        {{ row.license_authorized_users ?? '-' }}
-      </template>
-
-      <!-- 授权到期 -->
       <template #cell-license_expiry_date="{ row }">
-        {{ formatDate(row.license_expiry_date) }}
+        <span class="license-summary" :class="getLicenseStatusClass(row)">
+          <span class="license-summary__bar"></span>
+          <span class="license-summary__text">
+            <span class="license-summary__primary" :class="`is-${getLicenseSummary(row).tone}`">{{ getLicenseSummary(row).primary }}</span>
+            <span class="license-summary__secondary">{{ getLicenseSummary(row).secondary }}</span>
+          </span>
+        </span>
       </template>
 
       <!-- 默认采购方式 -->
@@ -1653,44 +1652,49 @@ watchEffect(() => {
 }
 
 
-.license-badge {
+.license-summary {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  min-width: 52px;
-  height: 24px;
-  padding: 0 $wolf-space-sm-v2;
-  border-radius: $wolf-radius-v2;
-  border: 1px solid transparent;
-  font-size: $wolf-font-size-caption-v2;
+  gap: 8px;
+  min-width: 0;
+}
+
+.license-summary__bar {
+  width: 3px;
+  height: 28px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.license-summary__text {
+  display: grid;
+  min-width: 0;
+}
+
+.license-summary__primary {
+  color: $wolf-text-primary-v2;
   font-weight: $wolf-font-weight-medium-v2;
-  line-height: 1;
-  white-space: nowrap;
+  line-height: 18px;
 }
 
-.license-badge--official {
-  color: $wolf-success-text-v2;
-  background: $wolf-success-bg-v2;
-  border-color: $wolf-success-bg-v2;
-}
-
-.license-badge--trial {
+.license-summary__primary.is-soon {
   color: $wolf-warning-text-v2;
-  background: $wolf-warning-bg-v2;
-  border-color: $wolf-warning-bg-v2;
 }
 
-.license-badge--expired {
+.license-summary__primary.is-urgent {
   color: $wolf-danger-text-v2;
-  background: $wolf-danger-bg-v2;
-  border-color: $wolf-danger-bg-v2;
 }
 
-.license-badge--none {
+.license-summary__secondary {
   color: $wolf-text-tertiary-v2;
-  background: $wolf-bg-muted-v2;
-  border-color: $wolf-border-light-v2;
+  font-size: $wolf-font-size-caption-v2;
+  line-height: 16px;
 }
+
+.license-badge--official { color: $wolf-success-v2; }
+.license-badge--trial { color: $wolf-warning-v2; }
+.license-badge--expired { color: $wolf-danger-v2; }
+.license-badge--none { color: $wolf-text-tertiary-v2; }
 
 .customer-mobile-card-header {
   display: flex;
