@@ -46,6 +46,8 @@ const statusMeta = (task: AssistantTaskView): { label: string; tone: string } =>
   return { label: '失败', tone: 'text-destructive' }
 }
 
+const activityWritten = computed(() => props.task?.committed.some((receipt) => receipt.kind === 'customer_activity') === true)
+
 const statusHint = computed(() => {
   const task = props.task
   if (task === null) return ''
@@ -70,9 +72,9 @@ const statusHint = computed(() => {
           <span class="min-w-0 flex-1 truncate text-xs font-medium" :title="task.goal">{{ task.goal }}</span>
           <span class="shrink-0 text-[10px] font-medium" :class="statusMeta(task).tone">{{ statusMeta(task).label }}</span>
         </div>
-        <div class="mt-2.5 text-[11px] text-muted-foreground">
-          <span v-if="task.status === 'COMPLETED'" class="text-success">活动已写入</span>
-          <template v-else>{{ statusHint }}</template>
+        <div v-if="activityWritten || statusHint" class="mt-2.5 space-y-1 text-[11px] text-muted-foreground">
+          <div v-if="activityWritten" class="text-success">活动已写入</div>
+          <div v-if="statusHint">{{ statusHint }}</div>
         </div>
         <button
           v-if="task.status === 'ACTIVE'"

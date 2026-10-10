@@ -79,11 +79,11 @@ describe('MeetingConfirmationCard', () => {
   it('shows the frozen write candidate instead of a subsequently changed draft', () => {
     const task: AssistantTaskView = {
       ...meetingTask,
-      draft: { ...meetingTask.draft, customer: { status: 'ACCEPTED', value: '新客户' }, content: { status: 'CANDIDATE', value: '新摘要' }, next_action: { status: 'CANDIDATE', value: '新行动' }, quality_score: { status: 'CANDIDATE', value: '42' } }
+      draft: { ...meetingTask.draft, customer: { status: 'ACCEPTED', value: '新客户' }, participants: { status: 'CANDIDATE', value: '后来参会人' }, content: { status: 'CANDIDATE', value: '新摘要' }, next_action: { status: 'CANDIDATE', value: '新行动' }, quality_score: { status: 'CANDIDATE', value: '42' } }
     }
     const waiting = {
       type: 'CONFIRMATION' as const, field: 'activity_write', question_id: 'q1', prompt: '确认写入？',
-      confirmation_payload: { customer_name: '原客户', activity_kind: 'ONLINE_MEETING', title: '原主题', summary: '原摘要', content_json: {}, source_content: '原文记录', score: 88, score_reason: '依据', next_action: '原行动' }
+      confirmation_payload: { kind: 'activity_write' as const, preview: { customer_name: '原客户', activity_kind: 'ONLINE_MEETING' as const, title: '原主题', summary: '原摘要', content_json: { participants: { internal: ['虚构同事甲'], customer: ['虚构客户乙'] } }, source_content: '原文记录', score: 88, score_reason: '依据', next_action: '原行动' } }
     }
     const wrapper = mount(MeetingConfirmationCard, { props: { task, waiting, replayed: false, busy: false } })
     expect(wrapper.text()).toContain('原客户')
@@ -91,6 +91,9 @@ describe('MeetingConfirmationCard', () => {
     expect(wrapper.text()).toContain('原摘要')
     expect(wrapper.text()).toContain('原行动')
     expect(wrapper.text()).toContain('88 / 100')
+    expect(wrapper.text()).toContain('我方：虚构同事甲')
+    expect(wrapper.text()).toContain('客户方：虚构客户乙')
+    expect(wrapper.text()).not.toContain('后来参会人')
     expect(wrapper.text()).not.toContain('新客户')
     expect(wrapper.text()).not.toContain('新摘要')
     expect(wrapper.text()).not.toContain('新行动')
@@ -100,11 +103,12 @@ describe('MeetingConfirmationCard', () => {
     const task: AssistantTaskView = { ...meetingTask, draft: { ...meetingTask.draft, content: { status: 'CANDIDATE', value: '后来讨论' }, next_action: { status: 'CANDIDATE', value: '后来行动' } } }
     const waiting = {
       type: 'CONFIRMATION' as const, field: 'activity_write', question_id: 'q1', prompt: '确认写入？',
-      confirmation_payload: { customer_name: '睿狐', activity_kind: 'ONLINE_MEETING', title: '会面', summary: null, content_json: {}, source_content: '原文', score: 82, score_reason: '依据', next_action: null }
+      confirmation_payload: { kind: 'activity_write' as const, preview: { customer_name: '睿狐', activity_kind: 'ONLINE_MEETING' as const, title: '会面', summary: null, content_json: {}, source_content: '原文', score: 82, score_reason: '依据', next_action: null } }
     }
     const wrapper = mount(MeetingConfirmationCard, { props: { task, waiting, replayed: false, busy: false } })
     expect(wrapper.text()).not.toContain('后来讨论')
     expect(wrapper.text()).not.toContain('后来行动')
+    expect(wrapper.text()).not.toContain('客户方：王总、李经理')
     expect(wrapper.text()).toContain('未提供行动项')
   })
 })

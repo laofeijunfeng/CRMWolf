@@ -22,11 +22,22 @@ const KIND_LABELS: Record<string, string> = {
   OFFLINE_MEETING: '线下会议'
 }
 
-const kindLabel = computed(() => KIND_LABELS[props.waiting.confirmation_payload?.activity_kind ?? props.task.activity_kind ?? ''] ?? '会议')
+const frozen = computed(() => props.waiting.confirmation_payload?.kind === 'activity_write' ? props.waiting.confirmation_payload.preview : null)
+const kindLabel = computed(() => KIND_LABELS[frozen.value?.activity_kind ?? props.task.activity_kind ?? ''] ?? '会议')
 const draft = computed<TaskDraft>(() => props.task.draft)
-const frozen = computed(() => props.waiting.confirmation_payload)
 const subject = computed(() => frozen.value ? frozen.value.title ?? '' : draft.value.meeting_subject?.value ?? '')
-const participants = computed(() => draft.value.participants?.value ?? '')
+const participants = computed(() => {
+  if (frozen.value === null) return draft.value.participants?.value ?? ''
+  const value = frozen.value.content_json['participants']
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return ''
+  const roles = value as Record<string, unknown>
+  return ([['internal', '我方'], ['customer', '客户方']] as const).flatMap(([key, label]) => {
+    const names = roles[key]
+    if (!Array.isArray(names)) return []
+    const knownNames = names.filter((name): name is string => typeof name === 'string' && name.trim() !== '')
+    return knownNames.length === 0 ? [] : [`${label}：${knownNames.join('、')}`]
+  }).join('；')
+})
 const scoreText = computed(() => frozen.value?.score !== undefined ? String(frozen.value.score) : draft.value.quality_score?.value ?? '')
 const discussionText = computed(() => frozen.value ? frozen.value.summary ?? '' : draft.value.content.value ?? '')
 const nextAction = computed(() => frozen.value ? frozen.value.next_action ?? '' : draft.value.next_action.value ?? '')

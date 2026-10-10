@@ -34,23 +34,21 @@ describe('AssistantTaskSidebar', () => {
     expect(wrapper.find('button[disabled]').exists()).toBe(false)
   })
 
-  it('shows the compact progress hint instead of the step list', () => {
-    const active = mount(AssistantTaskSidebar, { props: { task: kindWaiting(baseTask) } })
-    expect(active.text()).toContain('进行中')
-    expect(active.text()).not.toContain('类型确认')
-
-    const task: AssistantTaskView = {
+  it('keeps the committed activity visible through pending and cancelled follow-up work', async () => {
+    const wrapper = mount(AssistantTaskSidebar, { props: { task: baseTask } })
+    expect(wrapper.text()).not.toContain('活动已写入')
+    const written: AssistantTaskView = {
       ...baseTask,
-      status: 'COMPLETED',
-      activity_kind: 'ONLINE_MEETING',
-      draft: {
-        ...baseTask.draft,
-        content: { status: 'ACCEPTED', value: '已写入' }
-      }
+      committed: [{ kind: 'customer_activity', public_id: 'activity_fictional', customer_id: 42 }],
+      waiting: { type: 'CONFIRMATION', field: 'proposal:follow_up_task_create', question_id: 'q_next', prompt: '创建跟进任务？' }
     }
-    const done = mount(AssistantTaskSidebar, { props: { task } })
-    expect(done.text()).toContain('活动已写入')
-    expect(done.text()).not.toContain('内容整理')
+    await wrapper.setProps({ task: written })
+    expect(wrapper.text()).toContain('活动已写入')
+    expect(wrapper.text()).toContain('后续事项待确认')
+    await wrapper.setProps({ task: { ...written, status: 'CANCELLED', waiting: null } })
+    expect(wrapper.text()).toContain('活动已写入')
+    await wrapper.setProps({ task: { ...baseTask, status: 'COMPLETED' } })
+    expect(wrapper.text()).not.toContain('活动已写入')
   })
 
 
@@ -107,7 +105,12 @@ describe('AssistantTaskSidebar', () => {
         task: {
           ...baseTask,
           draft: { ...baseTask.draft, content: { status: 'ACCEPTED', value: '已写入' } },
-          waiting: { type: 'CONFIRMATION', field: 'proposal:opportunity_create', question_id: 'q2', prompt: '创建商机？' }
+          waiting: { type: 'CONFIRMATION', field: 'proposal:opportunity_create', question_id: 'q2', prompt: '创建商机？',
+            confirmation_payload: { kind: 'proposal', proposal_kind: 'opportunity_create', candidate: {
+              kind: 'opportunity_create', key: 'fictional-opportunity', payload: { opportunity_name: '虚构商机' },
+              evidence_quote: '计划采购虚构系统', activity_id: 1, customer_id: 42, source_revision: 1
+            } }
+          }
         }
       }
     })

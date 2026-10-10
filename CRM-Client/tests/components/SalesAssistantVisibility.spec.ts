@@ -60,7 +60,7 @@ beforeEach(() => {
   listTasksMock.mockReset()
   latestActiveMock.mockReset()
   latestActiveMock.mockResolvedValue(null)
-  listTasksMock.mockResolvedValue([])
+  listTasksMock.mockResolvedValue({ tasks: [], skipped: [] })
 })
 
 describe('message visibility regression', () => {

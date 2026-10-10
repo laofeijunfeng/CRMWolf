@@ -1,28 +1,39 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import type { ProposalConfirmation, ProposalKind } from '@/schemas/assistant-contracts'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 
-/**
- * ProposalCard — 场景6：活动写入成功后的后续提案。
- * 服务端固定优先级：商机 → 跟进任务。历史回放时只读。
- */
 const props = defineProps<{
-  field: string
+  proposal: ProposalConfirmation
   prompt: string
   replayed: boolean
   busy: boolean
   customerName?: string | undefined
-  nextAction?: string | undefined
+  outcome?: 'accepted' | 'refused' | undefined
 }>()
 
 const emit = defineEmits<(e: 'accept' | 'refuse') => void>()
 
-const META: Record<string, { label: string; detail: string }> = {
-  opportunity: { label: '创建商机', detail: '这次活动出现了商机信号，确认后才会创建。' },
-  follow_up_task: { label: '完成关联任务', detail: '这次活动的下一步与现有跟进任务相关，确认后才会更新。' }
+const META: Record<ProposalKind, { label: string; detail: string }> = {
+  opportunity_create: { label: '创建商机', detail: '确认后创建这条证据支持的商机。' },
+  opportunity_stage: { label: '推进商机', detail: '确认后更新目标商机的阶段。' },
+  follow_up_task: { label: '更新跟进任务', detail: '确认后执行目标跟进任务的状态变更。' },
+  follow_up_task_create: { label: '创建跟进任务', detail: '确认后创建这项跟进任务。' },
+  customer_fact: { label: '写入客户事实', detail: '确认后将这条信息写入客户档案。' }
 }
 
-const meta = META[props.field.replace('proposal:', '')] ?? { label: '下一步建议', detail: props.prompt }
+const meta = computed(() => META[props.proposal.proposal_kind])
+const details = computed(() => Object.entries(props.proposal.candidate.payload)
+  .filter((entry): entry is [string, string | number] => typeof entry[1] === 'string' || typeof entry[1] === 'number')
+  .map(([key, value]): [string, string | number] => [key,
+    key === 'due_date' && props.proposal.candidate.due_date_granularity === 'DATE' && typeof value === 'string'
+      ? value.slice(0, 10) : value]))
+const DETAIL_LABELS: Record<string, string> = {
+  content: '客户事实', subject: '主题', fact_type: '事实类型', action: '行动', owner: '负责人',
+  due_date: '日期', opportunity_name: '商机名称', total_amount: '金额', user_count: '用户数',
+  expected_closing_date: '预计成交日期', stage_template_id: '目标阶段'
+}
 </script>
 
 <template>
@@ -33,25 +44,18 @@ const meta = META[props.field.replace('proposal:', '')] ?? { label: '下一步�
     </div>
     <div class="px-4 py-3">
       <p class="text-sm text-muted-foreground">{{ meta.detail }}</p>
-      <div
-        v-if="(customerName ?? '') !== '' || (nextAction ?? '') !== ''"
-        class="mt-2.5 grid grid-cols-2 gap-x-4 gap-y-1.5 rounded-wolf-md border bg-muted/30 px-3 py-2.5 text-sm"
-      >
-        <div v-if="(customerName ?? '') !== ''">
-          <span class="text-xs text-muted-foreground">客户</span>
-          <div class="truncate font-medium" :title="customerName">{{ customerName }}</div>
-        </div>
-        <div v-if="(nextAction ?? '') !== ''">
-          <span class="text-xs text-muted-foreground">下一步</span>
-          <div class="truncate font-medium" :title="nextAction">{{ nextAction }}</div>
-        </div>
+      <div class="mt-2.5 space-y-2 rounded-wolf-md border bg-muted/30 px-3 py-2.5 text-sm">
+        <div v-if="customerName"><span class="text-xs text-muted-foreground">客户</span> {{ customerName }}</div>
+        <div v-if="proposal.candidate.target_public_id"><span class="text-xs text-muted-foreground">目标</span> {{ proposal.candidate.target_public_id }}</div>
+        <div v-for="[key, value] in details" :key="key"><span class="text-xs text-muted-foreground">{{ DETAIL_LABELS[key] ?? key }}</span> {{ value }}</div>
+        <div><span class="text-xs text-muted-foreground">原文依据</span><p class="whitespace-pre-wrap">{{ proposal.candidate.evidence_quote }}</p></div>
       </div>
       <div v-if="!replayed" class="mt-3 flex items-center gap-2">
         <Button size="sm" :disabled="busy" @click="emit('accept')">{{ meta.label }}</Button>
         <Button size="sm" variant="outline" :disabled="busy" @click="emit('refuse')">暂不处理</Button>
       </div>
       <div v-else class="mt-3 inline-flex items-center gap-1.5 rounded-wolf-md border bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
-        已处理 · 暂不处理
+        {{ outcome === 'accepted' ? '已执行' : outcome === 'refused' ? '暂不处理' : '历史记录' }}
       </div>
     </div>
   </div>

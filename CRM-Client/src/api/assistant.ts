@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 import {
   AssistantTaskViewSchema,
+  AssistantTurnStatusSchema,
   parseAssistantTaskList,
   SubmitInputResponseSchema,
   type AssistantInputKind,
@@ -57,7 +58,7 @@ const TurnEventSchema = z.object({
 
 const AssistantTurnSchema = z.object({
   turn_id: z.string(),
-  status: z.enum(['PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED']),
+  status: AssistantTurnStatusSchema,
   events: z.array(TurnEventSchema),
   task: AssistantTaskViewSchema
 }).strict()

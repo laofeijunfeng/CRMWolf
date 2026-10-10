@@ -61,7 +61,7 @@ beforeEach(() => {
   createTaskMock.mockReset()
   submitInputMock.mockReset()
   latestActiveMock.mockResolvedValue(null)
-  listTasksMock.mockResolvedValue([])
+  listTasksMock.mockResolvedValue({ tasks: [], skipped: [] })
 })
 
 describe('history replay readability', () => {
@@ -100,7 +100,7 @@ describe('history replay readability', () => {
         activity_public_id: 'act_9',
         confirmation: {
           prompt: '确认后写入这条客户活动？',
-          confirmation_payload: { customer_name: '广州睿狐科技有限公司', activity_kind: 'ONLINE_MEETING', title: 'POC 部署方案评审', summary: '客户确认 POC 可行', content_json: {}, source_content: '原文记录', score: 69, score_reason: '依据充分', next_action: '周五前提交数据出境说明' }
+          confirmation_payload: { kind: 'activity_write', preview: { customer_name: '广州睿狐科技有限公司', activity_kind: 'ONLINE_MEETING', title: 'POC 部署方案评审', summary: '客户确认 POC 可行', content_json: {}, source_content: '原文记录', score: 69, score_reason: '依据充分', next_action: '周五前提交数据出境说明' } }
         },
       }),
       act('SYSTEM', 'show_write_receipt', {}, { label: '已记录这条客户活动。' }, 'receipt'),
@@ -139,9 +139,13 @@ describe('history replay readability', () => {
   it('renders no confirmation buttons for finished tasks', async () => {
     const waiting: TaskWaiting = {
       type: 'CONFIRMATION',
-      field: 'proposal:opportunity',
+      field: 'proposal:opportunity_create',
       question_id: 'q9',
-      prompt: '为这个客户创建商机吗？'
+      prompt: '为这个客户创建商机吗？',
+      confirmation_payload: { kind: 'proposal', proposal_kind: 'opportunity_create', candidate: {
+        kind: 'opportunity_create', key: 'fictional-opportunity', payload: { opportunity_name: '虚构商机' },
+        evidence_quote: '计划采购虚构系统', activity_id: 1, customer_id: 42, source_revision: 1
+      } }
     }
     getTaskMock.mockResolvedValue(makeTask({ status: 'COMPLETED', waiting }))
     listActionsMock.mockResolvedValue([
@@ -163,7 +167,10 @@ describe('history replay readability', () => {
       type: 'CONFIRMATION',
       field: 'activity_write',
       question_id: 'q8',
-      prompt: '确认后写入这条客户活动？'
+      prompt: '确认后写入这条客户活动？',
+      confirmation_payload: { kind: 'activity_write', preview: {
+        customer_name: '虚构星河科技', activity_kind: 'ONLINE_MEETING', content_json: {}, source_content: '会议原文', score: 82, score_reason: '内容完整'
+      } }
     }
     getTaskMock.mockResolvedValue(makeTask({ status: 'ACTIVE', waiting }))
     listActionsMock.mockResolvedValue([

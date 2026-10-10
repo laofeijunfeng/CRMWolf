@@ -58,7 +58,7 @@ const kindWaiting = makeTask({
 const confirmWaiting = makeTask({
   activity_kind: 'ONLINE_MEETING',
   draft: { ...emptyDraft, content: { status: 'CANDIDATE', value: '已整理' } },
-  waiting: { type: 'CONFIRMATION', field: 'activity_write', question_id: 'q2', prompt: '确认后写入？' }
+  waiting: { type: 'CONFIRMATION', field: 'activity_write', question_id: 'q2', prompt: '确认后写入？', confirmation_payload: { kind: 'activity_write', preview: { customer_name: '虚构云杉公司', activity_kind: 'ONLINE_MEETING', content_json: {}, source_content: '会议原文', score: 82, score_reason: '内容完整' } } }
 })
 
 beforeEach(() => {
@@ -154,6 +154,8 @@ describe('SalesAssistantChat waiting interactions', () => {
     await flushPromises()
     expect(streamCalls.at(-1)?.input).toMatchObject({ kind: 'cancel' })
     expect(streamCalls.at(-1)?.input['client_request_id']).toEqual(expect.any(String))
+    expect(wrapper.findComponent({ name: 'FailureCard' }).exists()).toBe(false)
+    expect(wrapper.text()).toContain('已取消')
   })
 
   it('submits only the current wait identity when the same question gets a newer action', async () => {

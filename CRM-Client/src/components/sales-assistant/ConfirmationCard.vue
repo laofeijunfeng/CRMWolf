@@ -20,13 +20,23 @@ const emit = defineEmits<(e: 'confirm' | 'reject' | 'request-edit' | 'change-kin
 
 const KIND_LABELS: Record<string, string> = {
   FOLLOW_UP: '跟进',
+  PHONE_FOLLOW_UP: '电话跟进',
+  WECHAT_FOLLOW_UP: '微信跟进',
+  EMAIL_FOLLOW_UP: '邮件跟进',
+  VISIT_FOLLOW_UP: '拜访跟进',
+  OTHER_FOLLOW_UP: '其他跟进',
   ONLINE_MEETING: '线上会议',
   OFFLINE_MEETING: '线下会议'
 }
 
-const kindLabel = computed(() => KIND_LABELS[props.waiting.confirmation_payload?.activity_kind ?? props.task.activity_kind ?? ''] ?? '活动')
+const frozen = computed(() => props.waiting.confirmation_payload?.kind === 'activity_write' ? props.waiting.confirmation_payload.preview : null)
+const kindLabel = computed(() => KIND_LABELS[frozen.value?.activity_kind ?? props.task.activity_kind ?? ''] ?? '活动')
 const draft = computed<TaskDraft>(() => props.task.draft)
-const frozen = computed(() => props.waiting.confirmation_payload)
+const followTime = computed(() => {
+  const candidate = frozen.value
+  const value = candidate ? candidate.next_follow_time : draft.value.next_follow_time.value
+  return candidate?.next_follow_time_granularity === 'DATE' ? value?.slice(0, 10) : value
+})
 
 interface Slot { status: string; value?: string | null | undefined }
 
@@ -44,7 +54,7 @@ const fields = computed<FieldRow[]>(() => {
   return [
     fieldRow('customer', '客户', { status: d.customer.status, value: candidate ? candidate.customer_name : d.customer.value }, d.customer.status === 'ACCEPTED' ? '已绑定' : undefined),
     fieldRow('next_action', '下一步', { status: d.next_action.status, value: candidate ? candidate.next_action : d.next_action.value }),
-    fieldRow('next_follow_time', '下次跟进时间', { status: d.next_follow_time.status, value: candidate ? candidate.next_follow_time : d.next_follow_time.value }, '待解析具体日期')
+    fieldRow('next_follow_time', '下次跟进时间', { status: d.next_follow_time.status, value: followTime.value }, candidate ? undefined : '待解析具体日期')
   ].filter((row): row is FieldRow => row !== null)
 })
 
@@ -72,7 +82,7 @@ const qualityText = computed(() => frozen.value?.score !== undefined ? String(fr
         <div v-if="frozen" class="mt-2 space-y-1 text-xs text-muted-foreground">
           <p v-if="frozen.score_reason">评分依据：{{ frozen.score_reason }}</p>
           <p v-if="frozen.next_action">下一步：{{ frozen.next_action }}</p>
-          <p v-if="frozen.next_follow_time">跟进时间：{{ frozen.next_follow_time }}</p>
+          <p v-if="followTime">跟进时间：{{ followTime }}</p>
         </div>
       </div>
 
