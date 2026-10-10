@@ -17,17 +17,14 @@ from uuid import uuid4
 from sqlalchemy import exists, or_
 
 from app.core.config import get_settings
+from sqlalchemy import false as sa_false
+
 from app.core.database import SessionLocal
 from app.crud.team import team_crud
 from app.models.contract import Contract
 from app.models.customer import Contact, Customer
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_intelligence_run import CustomerIntelligenceRun, CustomerIntelligenceRunStatus
-from app.models.customer_profile_projection import (
-    CUSTOMER_PROFILE_READABLE_PUBLICATION_STATUSES,
-    CustomerProfileCurrent,
-    CustomerProfileProjectionVersion,
-)
 from app.models.deployment import DeploymentInfo
 from app.models.invoice import InvoiceApplication, InvoiceTitle
 from app.models.license_application import LicenseApplication
@@ -39,8 +36,6 @@ from app.services.agent.async_operation_service import (
 from app.services.agent.durable_work_contracts import AgentAsyncOperationBinding
 from app.services.agent.types import JSONDict, coerce_json_dict
 
-if TYPE_CHECKING:
-    from app.services.agent.customer_profile_projection_workflow import CustomerProfileProjectionWorkflowRunner
 from app.services.customer_identity_resolution_service import (
     CustomerIdentityResolutionService,
     customer_identity_resolution_service,
@@ -62,15 +57,6 @@ from app.services.customer_intelligence_run_service import (
     CustomerIntelligenceRunLeaseMutationStatus,
     CustomerIntelligenceRunService,
     customer_intelligence_run_service,
-)
-from app.services.customer_profile_projection_service import (
-    PROFILE_SCHEMA_VERSION,
-    CustomerProfileProjectionService,
-    customer_profile_projection_service,
-)
-from app.services.customer_profile_readiness_gate import (
-    CustomerProfileReadinessGate,
-    customer_profile_readiness_gate,
 )
 from app.utils.time import business_now
 
@@ -164,30 +150,18 @@ class CustomerIntelligenceRefreshService:
         identity_resolution_service: CustomerIdentityResolutionService | None = None,
         async_operation_service: AgentAsyncOperationService | None = None,
         operation_projector: CustomerIntelligenceOperationProjector | None = None,
-        profile_projection_service: CustomerProfileProjectionService | None = None,
         profile_workflow: CustomerProfileProjectionWorkflowRunner | None = None,
         readiness_gate: CustomerProfileReadinessGate | None = None,
     ) -> None:
-        self._explicit_profile_workflow = profile_workflow
         self.event_service = event_service or customer_intelligence_event_service
         self.run_service = run_service or customer_intelligence_run_service
         self.identity_resolution_service = identity_resolution_service or customer_identity_resolution_service
         self.async_operation_service = async_operation_service or agent_async_operation_service
-        self.profile_projection_service = profile_projection_service or customer_profile_projection_service
-        self.readiness_gate = readiness_gate or customer_profile_readiness_gate
         self.operation_projector = operation_projector or CustomerIntelligenceOperationProjector(
             run_service=self.run_service,
             operation_service=self.async_operation_service,
         )
         self._background_tasks: set[asyncio.Task[JSONDict]] = set()
-
-    @property
-    def profile_workflow(self) -> CustomerProfileProjectionWorkflowRunner:
-        if self._explicit_profile_workflow is not None:
-            return self._explicit_profile_workflow
-        from app.services.agent.customer_profile_projection_workflow import CustomerProfileProjectionWorkflow
-
-        return CustomerProfileProjectionWorkflow()
 
     async def trigger_committed_event_refresh(
         self,
@@ -374,13 +348,7 @@ class CustomerIntelligenceRefreshService:
         scope = cast("CustomerIntelligenceRefreshScope", str(run.scope))
         if scope not in {"full", "partial"}:
             raise ValueError("客户智能持久运行刷新范围无效")
-        from app.services.agent.customer_profile_projection_graph import build_customer_profile_thread_id
-
-        graph_thread_id = build_customer_profile_thread_id(
-            team_id=binding.team_id,
-            customer_id=int(event.customer_id),
-            run_id=int(run.id),
-        )
+        graph_thread_id = f"crm_agent_customer_intelligence:{binding.team_id}:{event.event_key}"[:240]
         operation = self.async_operation_service.bind_source(
             db,
             operation_key=f"customer-intelligence:{request_id}",
@@ -640,7 +608,7 @@ class CustomerIntelligenceRefreshService:
             max_attempts=settings.CUSTOMER_INTELLIGENCE_MAX_ATTEMPTS,
         )
         try:
-            deferred = self._defer_profile_run_if_needed(run_input, now=business_now())
+            deferred = None
             if deferred is not None:
                 return {
                     "success": True,
@@ -842,28 +810,8 @@ class CustomerIntelligenceRefreshService:
             "run_status": run_status,
         }
 
-    def _defer_profile_run_if_needed(
-        self,
-        run_input: CustomerIntelligenceRunInput,
-        *,
-        now: datetime,
-    ) -> datetime | None:
-        db = SessionLocal()
-        try:
-            run = self.run_service.ensure_pending(db, run_input)
-            deferred = self.readiness_gate.defer_if_needed(
-                db,
-                event=run_input.event,
-                run=run,
-                now=now,
-            )
-            db.commit()
-            return deferred
-        except Exception:
-            db.rollback()
-            raise
-        finally:
-            db.close()
+    def _defer_profile_run_if_needed(self, run_input: CustomerIntelligenceRunInput, *, now: datetime) -> datetime | None:
+        return None
 
     def _claim_run(
         self,
@@ -1657,26 +1605,10 @@ class CustomerIntelligenceRefreshService:
         return int(row[0])
 
     def _has_published_v2_profile_filter(self) -> ColumnElement[bool]:
-        return exists().where(
-            CustomerProfileCurrent.team_id == CustomerIntelligenceRun.team_id,
-            CustomerProfileCurrent.customer_id == CustomerIntelligenceRun.customer_id,
-            CustomerProfileCurrent.current_profile_version_id == CustomerProfileProjectionVersion.id,
-            CustomerProfileProjectionVersion.team_id == CustomerIntelligenceRun.team_id,
-            CustomerProfileProjectionVersion.customer_id == CustomerIntelligenceRun.customer_id,
-            CustomerProfileProjectionVersion.schema_version == PROFILE_SCHEMA_VERSION,
-            CustomerProfileProjectionVersion.publication_status.in_(CUSTOMER_PROFILE_READABLE_PUBLICATION_STATUSES),
-        )
+        return sa_false()
 
     def _missing_customer_profile_v2_filter(self) -> ColumnElement[bool]:
-        return ~exists().where(
-            CustomerProfileCurrent.team_id == Customer.team_id,
-            CustomerProfileCurrent.customer_id == Customer.id,
-            CustomerProfileCurrent.current_profile_version_id == CustomerProfileProjectionVersion.id,
-            CustomerProfileProjectionVersion.team_id == Customer.team_id,
-            CustomerProfileProjectionVersion.customer_id == Customer.id,
-            CustomerProfileProjectionVersion.schema_version == PROFILE_SCHEMA_VERSION,
-            CustomerProfileProjectionVersion.publication_status.in_(CUSTOMER_PROFILE_READABLE_PUBLICATION_STATUSES),
-        )
+        return sa_false()
 
     def _has_active_customer_intelligence_run_filter(self) -> ColumnElement[bool]:
         return exists().where(

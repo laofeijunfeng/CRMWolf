@@ -201,45 +201,6 @@ def test_customer_fact_service_does_not_create_revision_for_duplicate_fact_paylo
     assert db.query(CustomerFactRevision).count() == 1
 
 
-def test_fact_progress_excludes_assistant_origin_and_advances_eligible_mutations():
-    db = _session()
-    _customer(db)
-    legacy = CustomerFactInput(
-        tenant_id=2, team_id=2, customer_id=101, fact_type="alias", subject="采购",
-        content="初版", confidence=0.8,
-        source=CustomerFactSourceInput(source_type="customer_activity", source_object_id="701"),
-    )
-    assistant = CustomerFactInput(
-        tenant_id=2, team_id=2, customer_id=101, fact_type="alias", subject="风险",
-        content="仅 2.0", confidence=0.8,
-        source=CustomerFactSourceInput(source_type="customer_activity", source_object_id="902"),
-    )
-    db.add_all([
-        CustomerActivity(id=701, team_id=2, customer_id=101, activity_kind="PHONE_FOLLOW_UP",
-                         source_content="旧源", creator_id="9", owner_id="9"),
-        CustomerActivity(id=902, team_id=2, customer_id=101, activity_kind="PHONE_FOLLOW_UP",
-                         source_content="秘密", creator_id="9", owner_id="9", submission_source="ASSISTANT_2",
-                         submission_id="turn-902", submission_fingerprint="a" * 64),
-    ])
-    db.flush()
-    customer_fact_service.upsert_fact(db, legacy)
-    progress = db.query(CustomerLegacySourceProgress).filter_by(team_id=2, customer_id=101).one()
-    assert progress.eligible_revision == 1
-    customer_fact_service.upsert_fact(db, assistant)
-    db.refresh(progress)
-    assert progress.eligible_revision == 1
-    customer_fact_service.upsert_fact(db, CustomerFactInput(
-        tenant_id=2, team_id=2, customer_id=101, fact_type="alias", subject="采购",
-        content="新版", confidence=0.8, source=legacy.source,
-    ))
-    db.refresh(progress)
-    assert progress.eligible_revision == 2
-    customer_fact_service.upsert_fact(db, CustomerFactInput(
-        tenant_id=2, team_id=2, customer_id=101, fact_type="alias", subject="采购",
-        content="新版", confidence=0.8, source=legacy.source,
-    ))
-    db.refresh(progress)
-    assert progress.eligible_revision == 2
 
 def test_assistant_fact_cannot_overwrite_eligible_content():
     import pytest

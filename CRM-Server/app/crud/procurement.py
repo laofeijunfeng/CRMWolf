@@ -13,7 +13,6 @@ from app.schemas.procurement import (
 )
 from app.utils.time import business_now
 from app.models.opportunity import Opportunity
-from app.services.legacy_profile_source import advance_eligible_progress, lock_source_customer
 
 
 class ProcurementMethodCRUD:
@@ -412,9 +411,6 @@ class OpportunityStageSnapshotCRUD:
             binding = db.query(Opportunity.team_id, Opportunity.customer_id).filter(
                 Opportunity.id == opportunity_id,
             ).one()
-            lock_source_customer(
-                db, team_id=int(binding.team_id), customer_id=int(binding.customer_id),
-            )
             opportunity = db.query(Opportunity).filter(
                 Opportunity.id == opportunity_id, Opportunity.team_id == binding.team_id,
             ).populate_existing().with_for_update().one_or_none()
@@ -424,9 +420,6 @@ class OpportunityStageSnapshotCRUD:
                 raise ValueError("只能为跟进中的商机设置阶段")
             if opportunity.current_stage_snapshot_id is not None or self.get_current(db, opportunity_id):
                 raise ValueError("商机已有阶段，不能重复创建快照")
-        advance_eligible_progress(
-            db, team_id=int(opportunity.team_id), customer_id=int(opportunity.customer_id),
-        )
         snapshot = OpportunityStageSnapshot(
             team_id=int(opportunity.team_id),
             opportunity_id=opportunity_id,
@@ -584,8 +577,6 @@ class ProcurementManagementToolCRUD:
         opportunities = query.all()
         
         # Acquire customer fences in a stable order before changing any snapshot.
-        for customer_id in sorted({int(opp.customer_id) for opp in opportunities}):
-            lock_source_customer(db, team_id=team_id, customer_id=customer_id)
         migrated_count = 0
         failed_count = 0
         errors = []
@@ -594,7 +585,6 @@ class ProcurementManagementToolCRUD:
             try:
                 # A failed opportunity must not retain an eligible revision or a partial snapshot.
                 with db.begin_nested():
-                    advance_eligible_progress(db, team_id=team_id, customer_id=int(opp.customer_id))
                     current_snapshot = db.query(OpportunityStageSnapshot).filter(
                         OpportunityStageSnapshot.opportunity_id == opp.id,
                         OpportunityStageSnapshot.exited_at == None

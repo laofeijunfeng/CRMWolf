@@ -23,7 +23,6 @@ from app.services.follow_up_confirmation_case_lifecycle_service import (
 from app.services.follow_up_task_confirmation_cleanup_service import (
     FollowUpTaskConfirmationCancelReason,
 )
-from app.services.legacy_profile_source import lock_source_customer
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -120,7 +119,6 @@ class FollowUpConfirmationCaseRevisionGuard:
             if source is None:
                 case = None
             else:
-                lock_source_customer(db, team_id=team_id, customer_id=source.customer_id)
                 case = (
                     db.query(FollowUpTaskConfirmationCase)
                     .filter(

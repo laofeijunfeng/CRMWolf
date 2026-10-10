@@ -16,7 +16,6 @@ from app.schemas.payment import (
     PaymentRecordCreate, PaymentRecordUpdate
 )
 from app.services.business_number_generator import BusinessNumberGenerator
-from app.services.legacy_profile_source import advance_eligible_progress, lock_source_customer
 from app.utils.time import business_now
 from app.core.list_query import (
     FilterCondition,
@@ -333,13 +332,11 @@ class PaymentPlanCRUD:
 
     def create(self, db: Session, contract_id: int, obj_in: PaymentPlanCreate, team_id: int) -> PaymentPlan:
         customer_id = _contract_customer_id(db, contract_id=contract_id, team_id=team_id)
-        lock_source_customer(db, team_id=team_id, customer_id=customer_id)
         contract = self._lock_contract(db, contract_id)
         new_total = self._existing_planned_total(db, contract_id) + as_money(obj_in.planned_amount)
         self._assert_planned_total_within_contract(contract, new_total)
 
         # 生成计划编号
-        advance_eligible_progress(db, team_id=team_id, customer_id=customer_id)
         plan_number = BusinessNumberGenerator.generate('PP', db)
 
         db_plan = PaymentPlan(
@@ -378,13 +375,10 @@ class PaymentPlanCRUD:
         if not plans_data:
             return []
         customer_id = _contract_customer_id(db, contract_id=contract_id, team_id=team_id)
-        lock_source_customer(db, team_id=team_id, customer_id=customer_id)
         contract = self._lock_contract(db, contract_id)
         requested_total = sum((as_money(plan.planned_amount) for plan in plans_data), Decimal("0.00"))
         new_total = self._existing_planned_total(db, contract_id) + requested_total
         self._assert_planned_total_within_contract(contract, new_total)
-
-        advance_eligible_progress(db, team_id=team_id, customer_id=customer_id, count=len(plans_data))
         plans = []
         for plan_data in plans_data:
             # 生成计划编号
@@ -454,7 +448,6 @@ class PaymentPlanCRUD:
     def update(self, db: Session, db_obj: PaymentPlan, obj_in: PaymentPlanUpdate) -> PaymentPlan:
         update_data = obj_in.model_dump(exclude_unset=True)
         customer_id = _contract_customer_id(db, contract_id=db_obj.contract_id, team_id=db_obj.team_id)
-        lock_source_customer(db, team_id=int(db_obj.team_id), customer_id=customer_id)
         db.refresh(db_obj)
         contract = self._lock_contract(db, db_obj.contract_id)
         old_total = self._existing_planned_total(db, db_obj.contract_id)
@@ -466,8 +459,6 @@ class PaymentPlanCRUD:
             if new_total > old_total:
                 self._assert_planned_total_within_contract(contract, new_total)
 
-        if any(getattr(db_obj, field) != value for field, value in update_data.items()):
-            advance_eligible_progress(db, team_id=int(db_obj.team_id), customer_id=customer_id)
         for field, value in update_data.items():
             setattr(db_obj, field, value)
 
@@ -489,7 +480,6 @@ class PaymentPlanCRUD:
                      Contract.team_id == team_id).scalar()
         if customer_id is None:
             return False
-        lock_source_customer(db, team_id=team_id, customer_id=int(customer_id))
         plan = db.query(PaymentPlan).filter_by(id=plan_id, team_id=team_id).populate_existing().first()
         if not plan:
             return False
@@ -498,8 +488,6 @@ class PaymentPlanCRUD:
 
         contract_id = plan.contract_id
         deal_journey_id = plan.deal_journey_id
-        advance_eligible_progress(db, team_id=team_id, customer_id=customer_id,
-                                  deleted=True, count=1 + len(plan.invoice_applications))
         db.delete(plan)
         db.flush()
         from app.crud.payment import payment_record_crud
@@ -513,7 +501,6 @@ class PaymentPlanCRUD:
         from app.models.payment import PaymentRecord
         
         customer_id = _plan_customer_id(db, plan_id=int(plan.id), team_id=int(plan.team_id))
-        lock_source_customer(db, team_id=int(plan.team_id), customer_id=customer_id)
         if not inspect(plan).modified:
             db.refresh(plan)
         payment_records = db.query(PaymentRecord).filter(
@@ -534,7 +521,6 @@ class PaymentPlanCRUD:
         else:
             new_status = PaymentPlanStatus.PENDING
         if plan.status != new_status:
-            advance_eligible_progress(db, team_id=int(plan.team_id), customer_id=customer_id)
             plan.status = new_status
         
         if commit:
@@ -1010,7 +996,6 @@ class PaymentRecordCRUD:
                 return existing
 
         customer_id = _plan_customer_id(db, plan_id=plan_id, team_id=team_id)
-        lock_source_customer(db, team_id=team_id, customer_id=customer_id)
         # 锁住计划及其已有记录，保证并发登记不能同时通过金额校验。
         plan = (
             db.query(PaymentPlan)
@@ -1045,8 +1030,6 @@ class PaymentRecordCRUD:
             raise ValueError(
                 f"回款金额超出计划，计划金额: {planned}，已登记: {total_paid}，本次: {requested_amount}"
             )
-
-        advance_eligible_progress(db, team_id=team_id, customer_id=customer_id)
         # 生成记录编号
         record_number = BusinessNumberGenerator.generate('PAY', db)
         record_data = obj_in.model_dump()
@@ -1150,7 +1133,6 @@ class PaymentRecordCRUD:
         customer_id = _plan_customer_id(
             db, plan_id=int(db_obj.payment_plan_id), team_id=int(db_obj.team_id),
         )
-        lock_source_customer(db, team_id=int(db_obj.team_id), customer_id=customer_id)
         db.refresh(db_obj)
 
         update_data = obj_in.model_dump(exclude_unset=True)
@@ -1187,11 +1169,6 @@ class PaymentRecordCRUD:
                 raise ValueError(
                     f"回款金额超出计划，计划金额: {plan.planned_amount}，其他已登记: {other_amount}，本次: {new_amount}"
                 )
-        if any(getattr(db_obj, field) != value for field, value in update_data.items()) or (
-            commission_member_id is not None and db_obj.commission_member_id != str(commission_member_id)
-        ):
-            advance_eligible_progress(db, team_id=int(db_obj.team_id), customer_id=customer_id)
-
         for field, value in update_data.items():
             setattr(db_obj, field, value)
 
@@ -1229,7 +1206,6 @@ class PaymentRecordCRUD:
         if plan_id is None:
             return False
         customer_id = _plan_customer_id(db, plan_id=int(plan_id), team_id=team_id)
-        lock_source_customer(db, team_id=team_id, customer_id=customer_id)
         record = db.query(PaymentRecord).filter_by(id=record_id, team_id=team_id).populate_existing().first()
         if not record:
             return False
@@ -1244,9 +1220,6 @@ class PaymentRecordCRUD:
             resource_name="回款登记",
             locked_business_statuses=(PaymentConfirmationStatus.CONFIRMED,),
         )
-
-        advance_eligible_progress(db, team_id=team_id, customer_id=customer_id,
-                                  deleted=True, count=1 + len(record.invoice_applications))
         plan_id = record.payment_plan_id
         db.delete(record)
         db.flush()
@@ -1294,7 +1267,6 @@ class PaymentRecordCRUD:
 
         team_id, plan_id = map(int, owner)
         customer_id = _plan_customer_id(db, plan_id=plan_id, team_id=team_id)
-        lock_source_customer(db, team_id=team_id, customer_id=customer_id)
         record = db.query(PaymentRecord).filter_by(id=record_id, team_id=team_id).populate_existing().first()
         if not record:
             return None
@@ -1303,7 +1275,6 @@ class PaymentRecordCRUD:
 
         if action not in ("confirm", "dispute"):
             raise ValueError("无效的确认操作")
-        advance_eligible_progress(db, team_id=team_id, customer_id=customer_id)
         # action=dispute 已废弃（无实际业务使用）
         if action == "confirm":
             record.confirmation_status = PaymentConfirmationStatus.CONFIRMED
@@ -1351,7 +1322,6 @@ class PaymentRecordCRUD:
         if not owner:
             return
         team_id, customer_id = map(int, owner)
-        lock_source_customer(db, team_id=team_id, customer_id=customer_id)
         with db.no_autoflush:
             contract = db.query(Contract).filter(Contract.id == contract_id).first()
             plans = db.query(PaymentPlan).filter(PaymentPlan.contract_id == contract_id).all()
@@ -1381,7 +1351,6 @@ class PaymentRecordCRUD:
                 payment_status = PaymentStatus.UNPAID
 
         if contract.payment_status != payment_status or contract.total_paid_amount != total_paid:
-            advance_eligible_progress(db, team_id=int(contract.team_id), customer_id=int(contract.customer_id))
             contract.payment_status = payment_status
             contract.total_paid_amount = total_paid
         if commit:

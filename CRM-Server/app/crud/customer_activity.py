@@ -12,7 +12,6 @@ from app.schemas.customer_activity import CustomerActivityCreate
 from app.services.customer_activity_contracts import CustomerActivitySubmissionSource
 from app.services.customer_activity_kinds import get_activity_kind_meta
 from app.services.legacy_customer_activity_adapter import activity_kind_from_legacy_lead_method
-from app.services.legacy_profile_source import advance_activity_progress, lock_source_customer
 from app.utils.time import business_now
 
 logger = logging.getLogger(__name__)
@@ -240,10 +239,6 @@ class CustomerActivityCRUD:
         journey = deal_journey_service.infer_for_customer(db, customer_id, team_id)
         if journey:
             data["deal_journey_id"] = journey.id
-
-        advance_activity_progress(
-            db, team_id=team_id, customer_id=customer_id, submission_source=data["submission_source"],
-        )
         db_obj = CustomerActivity(**data)
         db.add(db_obj)
         db.flush()
@@ -301,12 +296,6 @@ class CustomerActivityCRUD:
         lead_follow_ups = db.query(LeadFollowUp).filter(
             LeadFollowUp.lead_id == lead_id, LeadFollowUp.team_id == team_id,
         ).all()
-        if lead_follow_ups:
-            advance_activity_progress(
-                db, team_id=team_id, customer_id=new_customer_id,
-                submission_source=CustomerActivitySubmissionSource.CUTOVER_MIGRATION.value,
-                count=len(lead_follow_ups),
-            )
         migrated = []
         for lead_follow_up in lead_follow_ups:
             kind = activity_kind_from_legacy_lead_method(lead_follow_up.method)
@@ -352,8 +341,6 @@ class CustomerActivityCRUD:
         # Lock the customer's publication fence before reading mutable source
         # identity. RR identity-map objects and snapshot SELECTs are not current.
         team_id, customer_id = activity.team_id, activity.customer_id
-        if customer_id is not None:
-            lock_source_customer(db, team_id=team_id, customer_id=customer_id)
         with db.no_autoflush:
             current = (
                 db.query(CustomerActivity)
@@ -388,11 +375,6 @@ class CustomerActivityCRUD:
         """Persist one canonical structured-and-scored activity result."""
 
         activity = self._lock_current_activity(db, activity)
-        if activity.customer_id is not None:
-            advance_activity_progress(
-                db, team_id=activity.team_id, customer_id=activity.customer_id,
-                submission_source=activity.submission_source,
-            )
         resolved_summary = summary or self.build_summary(
             activity.activity_kind,
             content_json,
@@ -451,11 +433,6 @@ class CustomerActivityCRUD:
         deleted_by: str | None = None,
     ) -> CustomerActivity:
         db_obj = self._lock_current_activity(db, db_obj)
-        if db_obj.customer_id is not None:
-            advance_activity_progress(
-                db, team_id=db_obj.team_id, customer_id=db_obj.customer_id,
-                submission_source=db_obj.submission_source, deleted=True,
-            )
         _mark_customer_activity_evidence_deleted(db, db_obj)
         # The operational activity row is hard-deleted, so keep a durable
         # source-side tombstone in the same transaction.  Its monotonically

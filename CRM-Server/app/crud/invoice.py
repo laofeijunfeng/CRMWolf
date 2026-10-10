@@ -25,7 +25,6 @@ from app.schemas.invoice import (
     InvoiceTitleUpdate,
 )
 from app.services.business_number_generator import BusinessNumberGenerator
-from app.services.legacy_profile_source import advance_eligible_progress, lock_source_customer
 from app.utils.approval_delete_guard import assert_deletable_approval_resource
 from app.utils.time import business_now
 from app.core.list_query import (
@@ -400,9 +399,6 @@ class InvoiceApplicationCRUD:
     @staticmethod
     def _lock_application(db: Session, application: InvoiceApplication) -> InvoiceApplication:
         """Refresh the invoice under its customer lock before checking or changing it."""
-        lock_source_customer(
-            db, team_id=int(application.team_id), customer_id=int(application.customer_id),
-        )
         with db.no_autoflush:
             return db.query(InvoiceApplication).filter_by(
                 id=application.id, team_id=application.team_id, customer_id=application.customer_id,
@@ -431,7 +427,6 @@ class InvoiceApplicationCRUD:
             raise ValueError("开票抬头不属于该客户")
         
         customer_id = int(contract.customer_id)
-        lock_source_customer(db, team_id=team_id, customer_id=customer_id)
         # The lookups above are only a routing hint. MySQL RR can retain both an
         # old read view and ORM instances after another writer commits. Lock and
         # refresh each source row before copying anything into the invoice.
@@ -476,7 +471,6 @@ class InvoiceApplicationCRUD:
             invoice_address=invoice_title.address,
             invoice_phone=invoice_title.phone
         )
-        advance_eligible_progress(db, team_id=team_id, customer_id=int(contract.customer_id))
         db.add(db_obj)
         db.flush()
         from app.models.deal_journey import DealJourneyEventType, DealJourneySourceType
@@ -522,8 +516,6 @@ class InvoiceApplicationCRUD:
                 'invoice_phone': invoice_title.phone,
             })
         
-        if any(getattr(db_obj, field) != value for field, value in update_data.items()):
-            advance_eligible_progress(db, team_id=int(db_obj.team_id), customer_id=int(db_obj.customer_id))
         for field, value in update_data.items():
             setattr(db_obj, field, value)
         
@@ -572,8 +564,6 @@ class InvoiceApplicationCRUD:
 
         if application.status != InvoiceApplicationStatus.APPROVED:
             raise ValueError(f"发票申请状态为 {application.status}，不可开票")
-
-        advance_eligible_progress(db, team_id=int(application.team_id), customer_id=int(application.customer_id))
         if invoice_file_path is not None:
             application.invoice_file_path = invoice_file_path
         if invoice_number is not None:
@@ -620,10 +610,6 @@ class InvoiceApplicationCRUD:
 
         if application.status not in [InvoiceApplicationStatus.DRAFT, InvoiceApplicationStatus.REJECTED]:
             raise ValueError("只有草稿或已拒绝状态的发票申请可以删除")
-
-        advance_eligible_progress(
-            db, team_id=int(application.team_id), customer_id=int(application.customer_id), deleted=True,
-        )
         db.delete(application)
         db.commit()
         return True

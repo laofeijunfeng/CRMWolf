@@ -125,10 +125,8 @@ class PaymentRecordAdapter:
     @staticmethod
     def _lock_customer(db, entity):
         from app.crud.payment import _plan_customer_id
-        from app.services.legacy_profile_source import lock_source_customer
 
         customer_id = _plan_customer_id(db, plan_id=entity.payment_plan_id, team_id=entity.team_id)
-        lock_source_customer(db, team_id=entity.team_id, customer_id=customer_id)
 
     def on_approved(self, db, entity):
         if entity is None: return  # E4 守卫
@@ -510,9 +508,6 @@ def advance_approval_source(db: Session, business_type: str, entity: Any) -> Non
     customer_id = get_approval_customer_id(db, business_type, entity)
     if customer_id is None:
         return
-    from app.services.legacy_profile_source import advance_eligible_progress
-
-    advance_eligible_progress(db, team_id=int(entity.team_id), customer_id=customer_id)
 
 
 def get_approval_customer_id(db: Session, business_type: str, entity: Any) -> Optional[int]:

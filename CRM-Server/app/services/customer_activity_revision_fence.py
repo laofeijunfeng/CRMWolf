@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from app.models.customer_activity import CustomerActivity
-from app.services.legacy_profile_source import lock_source_customer
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -64,8 +63,6 @@ class CustomerActivityRevisionFence:
                 )
 
             source_customer_id = source.customer_id
-            if source_customer_id is not None:
-                lock_source_customer(db, team_id=team_id, customer_id=source_customer_id)
             activity = (
                 db.query(CustomerActivity)
                 .filter(

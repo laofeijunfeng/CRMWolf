@@ -736,7 +736,6 @@ class ApprovalCRUD:
 
         if auto_commit:
             from app.services.approval_adapter import advance_approval_source, get_approval_customer_id
-            from app.services.legacy_profile_source import lock_source_customer
 
             with db.no_autoflush:
                 customer_id = get_approval_customer_id(db, business_type, entity)
@@ -744,7 +743,6 @@ class ApprovalCRUD:
                 BusinessType.CONTRACT, BusinessType.PAYMENT, BusinessType.INVOICE,
                 BusinessType.OPPORTUNITY, BusinessType.LICENSE,
             }:
-                lock_source_customer(db, team_id=team_id, customer_id=customer_id)
                 with db.no_autoflush:
                     entity = db.query(type(entity)).filter(
                         type(entity).id == business_id, type(entity).team_id == team_id,
@@ -820,7 +818,6 @@ class ApprovalCRUD:
     def approve(self, db: Session, approval: Approval, action_request: ApprovalActionRequest, approver_id: str, approver_name: str) -> Approval:
         from app.models.approval import ApprovalNode
         from app.services.approval_adapter import advance_approval_source, get_adapter, get_approval_customer_id
-        from app.services.legacy_profile_source import lock_source_customer
         from app.constants.approval_phase import ApprovalPhase
 
         adapter = get_adapter(approval.business_type)
@@ -828,11 +825,6 @@ class ApprovalCRUD:
             entity = adapter.get_entity(db, approval.business_id, approval.team_id)
         with db.no_autoflush:
             customer_id = get_approval_customer_id(db, approval.business_type, entity)
-        if customer_id is not None and approval.business_type in {
-            BusinessType.CONTRACT, BusinessType.PAYMENT, BusinessType.INVOICE,
-            BusinessType.OPPORTUNITY, BusinessType.LICENSE,
-        }:
-            lock_source_customer(db, team_id=approval.team_id, customer_id=customer_id)
         approval = db.query(Approval).filter(
             Approval.id == approval.id, Approval.team_id == approval.team_id,
         ).populate_existing().with_for_update().one()
@@ -905,7 +897,6 @@ class ApprovalCRUD:
 
     def cancel(self, db: Session, approval: Approval, user_id: str) -> Approval:
         from app.services.approval_adapter import advance_approval_source, get_adapter, get_approval_customer_id
-        from app.services.legacy_profile_source import lock_source_customer
         from app.constants.approval_phase import ApprovalPhase
 
         adapter = get_adapter(approval.business_type)
@@ -913,11 +904,6 @@ class ApprovalCRUD:
             entity = adapter.get_entity(db, approval.business_id, approval.team_id)
         with db.no_autoflush:
             customer_id = get_approval_customer_id(db, approval.business_type, entity)
-        if customer_id is not None and approval.business_type in {
-            BusinessType.CONTRACT, BusinessType.PAYMENT, BusinessType.INVOICE,
-            BusinessType.OPPORTUNITY, BusinessType.LICENSE,
-        }:
-            lock_source_customer(db, team_id=approval.team_id, customer_id=customer_id)
         approval = db.query(Approval).filter(
             Approval.id == approval.id, Approval.team_id == approval.team_id,
         ).populate_existing().with_for_update().one()

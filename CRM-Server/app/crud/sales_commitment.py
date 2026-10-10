@@ -41,9 +41,7 @@ from app.models.sales_commitment import (
 from app.schemas.system_recovery import FollowUpConfirmationDeliveryRecoveryCandidate
 from app.services.legacy_profile_source import (
     activity_origin,
-    advance_eligible_progress,
     follow_up_origin,
-    lock_source_customer,
 )
 from app.utils.time import (
     DUE_AT_GRANULARITY_DATETIME,
@@ -152,19 +150,13 @@ def _sync_task_status_timestamps(db_obj: FollowUpTask, data: dict[str, Any]) -> 
 
 
 def _lock_profile_source(db: Session, row: SalesCommitment | FollowUpTask) -> bool:
-    lock_source_customer(db, team_id=row.team_id, customer_id=row.customer_id)
     return follow_up_origin(db, row, row.team_id, row.customer_id)
-
-
-def _advance_profile_source(db: Session, row: SalesCommitment | FollowUpTask) -> None:
-    advance_eligible_progress(db, team_id=row.team_id, customer_id=row.customer_id)
 
 
 def _eligible_task_event(db: Session, event: FollowUpTaskEvent) -> FollowUpTask | None:
     task = db.query(FollowUpTask).filter_by(id=event.task_id, team_id=event.team_id).one_or_none()
     if task is None:
         return None
-    lock_source_customer(db, team_id=task.team_id, customer_id=task.customer_id)
     # A deletion SET NULLs the task FK; the task's source_key and deletion
     # tombstone still identify the original activity. Require the same source
     # chain as readers, rather than granting eligibility to any old activity.

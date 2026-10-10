@@ -9,7 +9,6 @@ from app.models.customer import Customer, CustomerProduct
 from app.models.opportunity import Opportunity
 from app.models.product import Product, ProductModule, ProductModuleRole
 from app.models.team import Team
-from app.services.legacy_profile_source import advance_eligible_progress
 from app.utils.public_id import generate_public_id
 from app.utils.time import business_now
 
@@ -53,11 +52,6 @@ class ProductCRUD:
             return [int(row.id) for row in db.query(Customer.id).filter(
                 Customer.team_id == team_id,
             ).order_by(Customer.id).with_for_update().all()]
-
-    @staticmethod
-    def _advance_customers(db: Session, team_id: int, customer_ids: list[int], *, deleted: bool = False) -> None:
-        for customer_id in customer_ids:
-            advance_eligible_progress(db, team_id=team_id, customer_id=customer_id, deleted=deleted)
 
     @classmethod
     def _locked_product(

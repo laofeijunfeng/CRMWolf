@@ -15,4 +15,4 @@ def test_revision_151_is_present_and_descends_from_150() -> None:
     revision = script.get_revision("151_assistant_proposal_policy")
 
     assert revision.down_revision == "151_customer_license_authorized_users"
-    assert script.get_current_head() == "151_assistant_proposal_policy"
+    assert script.get_current_head() == "153_remove_customer_profile_complete"

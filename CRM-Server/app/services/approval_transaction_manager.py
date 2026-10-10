@@ -268,11 +268,6 @@ class ApprovalTransactionManager:
                     get_approval_customer_id(db, business_type, entity)
                     if hasattr(type(entity), "__table__") else None
                 )
-            if customer_id is not None and business_type in {
-                "CONTRACT", "PAYMENT", "INVOICE", "OPPORTUNITY", "LICENSE",
-            }:
-                from app.services.legacy_profile_source import lock_source_customer
-                lock_source_customer(db, team_id=team_id, customer_id=customer_id)
             entity_model = type(entity)
             if hasattr(entity_model, "__table__") and hasattr(entity_model, "id"):
                 entity_query = db.query(entity_model).filter(entity_model.id == entity_id)

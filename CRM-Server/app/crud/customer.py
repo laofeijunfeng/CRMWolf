@@ -40,7 +40,6 @@ from app.schemas.customer import (
     CustomerUpdate,
 )
 from app.services.acquisition_source_service import get_by_id, resolve_source_for_entity_write
-from app.services.legacy_profile_source import advance_eligible_progress, lock_source_customer
 from app.utils.time import business_now
 
 
@@ -385,7 +384,6 @@ class CustomerCRUD:
         db_obj = Customer(**customer_data)
         db.add(db_obj)
         db.flush()
-        advance_eligible_progress(db, team_id=team_id, customer_id=db_obj.id)
         replace_product_links(
             db,
             team_id=team_id,
@@ -557,7 +555,6 @@ class CustomerCRUD:
         if before or any(getattr(locked_customer, field) != value for field, value in proposed.items()) or (
             "product_public_id" in fields_set and product_links_changed
         ):
-            advance_eligible_progress(db, team_id=locked_customer.team_id, customer_id=locked_customer.id)
             for field, value in proposed.items():
                 setattr(locked_customer, field, value)
             if "product_public_id" in fields_set and product_links_changed:
@@ -613,7 +610,6 @@ class CustomerCRUD:
             db.commit()
             db.refresh(locked_customer)
             return locked_customer, before, before.copy()
-        advance_eligible_progress(db, team_id=locked_customer.team_id, customer_id=locked_customer.id)
         locked_customer.license_type = obj_in.license_type
         locked_customer.license_expiry_date = obj_in.license_expiry_date
         locked_customer.version += 1
@@ -632,7 +628,6 @@ class CustomerCRUD:
             db.commit()
             db.refresh(locked_customer)
             return locked_customer
-        advance_eligible_progress(db, team_id=locked_customer.team_id, customer_id=locked_customer.id)
         locked_customer.status = status
         locked_customer.version += 1
         db.commit()
@@ -664,7 +659,6 @@ class CustomerCRUD:
             db.commit()
             db.refresh(locked_customer)
             return locked_customer
-        advance_eligible_progress(db, team_id=locked_customer.team_id, customer_id=locked_customer.id)
         locked_customer.status = status
         locked_customer.version += 1
         db.commit()
@@ -685,7 +679,6 @@ class CustomerCRUD:
             raise ValueError("客户不存在")
         if customer.industry == industry:
             return customer
-        advance_eligible_progress(db, team_id=customer.team_id, customer_id=customer.id)
         customer.industry = industry
         customer.version += 1
         db.commit()
@@ -826,7 +819,6 @@ class CustomerCRUD:
 
         db.add(customer)
         db.flush()
-        advance_eligible_progress(db, team_id=team_id, customer_id=customer.id)
         product = self._resolve_convert_product(db, team_id, lead, product_public_id)
         replace_product_links(
             db,
@@ -938,7 +930,6 @@ class CustomerCRUD:
             raise ValueError("该客户已在公海池中")
         if expected_version is not None and locked_customer.version != expected_version:
             raise ValueError("RESOURCE_VERSION_CONFLICT")
-        advance_eligible_progress(db, team_id=team_id, customer_id=locked_customer.id)
 
         locked_customer.owner_id = None
         locked_customer.return_reason = return_reason
@@ -1062,7 +1053,6 @@ class CustomerCRUD:
             raise ValueError("该客户已有负责人，无法领取")
         if expected_version is not None and locked_customer.version != expected_version:
             raise ValueError("RESOURCE_VERSION_CONFLICT")
-        advance_eligible_progress(db, team_id=team_id, customer_id=locked_customer.id)
 
         locked_customer.owner_id = owner_id
         locked_customer.return_reason = None
@@ -1145,7 +1135,6 @@ class CustomerCRUD:
         previous_owner_id = locked_customer.owner_id
         if previous_owner_id == new_owner_id:
             raise ValueError("目标负责人已是当前负责人，无需重复移交")
-        advance_eligible_progress(db, team_id=team_id, customer_id=locked_customer.id)
 
         locked_customer.owner_id = new_owner_id
         if locked_customer.status == 3:
@@ -1231,8 +1220,6 @@ class CustomerCRUD:
         """标记客户为输单，记录输单原因"""
         from app.services.operation_log_service import operation_log_service
         customer = _locked_source_customer(db, team_id=customer.team_id, customer_id=customer.id)
-        if customer.status != 2 or customer.loss_reason != loss_reason:
-            advance_eligible_progress(db, team_id=customer.team_id, customer_id=customer.id)
 
         customer.status = 2
         customer.loss_reason = loss_reason
@@ -1298,7 +1285,6 @@ class CustomerCRUD:
 class ContactCRUD:
     @staticmethod
     def _locked_contact(db: Session, contact: Contact) -> Contact:
-        lock_source_customer(db, team_id=contact.team_id, customer_id=contact.customer_id)
         with db.no_autoflush:
             current = db.query(Contact).filter(
                 Contact.id == contact.id,
@@ -1401,7 +1387,6 @@ class ContactCRUD:
         contact_data["customer_id"] = customer_id
         contact_data["team_id"] = team_id
         contact_data["is_primary"] = 1 if is_primary else 0
-        lock_source_customer(db, team_id=team_id, customer_id=customer_id)
 
         if is_primary:
             existing_primary = self.get_primary_by_customer_id(db, customer_id, team_id)
@@ -1413,7 +1398,6 @@ class ContactCRUD:
 
         db_obj = Contact(**contact_data)
         db.add(db_obj)
-        advance_eligible_progress(db, team_id=team_id, customer_id=customer_id)
         if commit:
             db.commit()
             db.refresh(db_obj)
@@ -1431,7 +1415,6 @@ class ContactCRUD:
             db.commit()
             db.refresh(db_obj)
             return db_obj
-        advance_eligible_progress(db, team_id=db_obj.team_id, customer_id=db_obj.customer_id)
         for field, value in update_data.items():
             setattr(db_obj, field, value)
         db_obj.post_commit_revision = int(getattr(db_obj, "post_commit_revision", None) or 1) + 1
@@ -1459,7 +1442,6 @@ class ContactCRUD:
             db.commit()
             db.refresh(contact)
             return contact
-        advance_eligible_progress(db, team_id=contact.team_id, customer_id=customer_id)
         if existing_primary and existing_primary.id != contact.id:
             existing_primary.is_primary = 0
             existing_primary.post_commit_revision = int(
@@ -1476,7 +1458,6 @@ class ContactCRUD:
         db_obj = self._locked_contact(db, db_obj)
         if db_obj.is_primary:
             raise ValueError("不能删除主联系人")
-        advance_eligible_progress(db, team_id=db_obj.team_id, customer_id=db_obj.customer_id, deleted=True)
         db.delete(db_obj)
         db.commit()
         return db_obj

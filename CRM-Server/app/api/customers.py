@@ -2264,11 +2264,7 @@ def get_customer(
         creator_info=creator_info,
         default_procurement_method_info=procurement_method_info,
         industry_info=industry_info,
-        customer_intelligence_has_inputs=customer_intelligence_refresh_service.has_customer_business_data(
-            db,
-            customer_id=customer.id,
-            team_id=team_id,
-        ),
+        customer_intelligence_has_inputs=False,
     )
 
 
@@ -3446,77 +3442,6 @@ def assign_customer(
     return command_execution_service.to_response_payload(execution)
 
 
-@router.post(
-    "/{customer_id}/regenerate-intelligence",
-    response_model=MessageResponse,
-    summary="重新生成客户智能档案",
-    description="AI重新生成客户档案和客户概况",
-)
-async def regenerate_customer_intelligence(
-    customer_id: str,
-    payload: CustomerIntelligenceRegenerateRequest,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
-    from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
-
-    customer = _get_viewable_customer(db, customer_id, team_id, current_user)
-    await customer_intelligence_refresh_service.trigger_manual_refresh(
-        db,
-        team_id=team_id,
-        customer_id=customer.id,
-        actor_id=str(current_user.id),
-        scope=payload.scope,
-    )
-
-    return MessageResponse(message="客户智能档案正在生成")
-
-
-@router.post(
-    "/intelligence/batch-rebuild",
-    response_model=CustomerIntelligenceBatchRebuildResponse,
-    summary="批量重建客户智能档案",
-    description="通过客户智能 LangGraph 运行时批量重建客户档案/客户概况",
-)
-async def rebuild_customer_intelligence_batch(
-    payload: CustomerIntelligenceBatchRebuildRequest,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(require_permission("customer:edit:all")),
-    db: Session = Depends(get_db),
-):
-    from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
-
-    customer_ids = None
-    if payload.customer_ids is not None:
-        customers = [
-            _get_customer_or_404(db, customer_public_id, team_id)
-            for customer_public_id in payload.customer_ids
-        ]
-        customer_ids = [customer.id for customer in customers]
-
-    result = await customer_intelligence_refresh_service.trigger_batch_rebuild(
-        db,
-        team_id=team_id,
-        actor_id=str(current_user.id),
-        scope=payload.scope,
-        customer_ids=customer_ids,
-        limit=payload.limit,
-    )
-    result_customers = [
-        customer_crud.get_by_id(db, customer_id, team_id)
-        for customer_id in result.customer_ids
-    ]
-    return CustomerIntelligenceBatchRebuildResponse(
-        message="客户智能档案批量重建已开始",
-        request_id=result.request_id,
-        scope=result.scope,
-        total=result.total,
-        scheduled=result.scheduled,
-        customer_ids=[customer.public_id for customer in result_customers if customer],
-    )
-
-
 @router.get(
     "/intelligence/runs",
     response_model=CustomerIntelligenceRunDiagnosticListResponse,
@@ -3576,29 +3501,3 @@ def get_customer_intelligence_run(
         )
     return _customer_intelligence_run_response(db, team_id, diagnostic)
 
-
-@router.post(
-    "/intelligence/retries/run-due",
-    response_model=CustomerIntelligenceRetryDueResponse,
-    summary="执行到期客户智能重试",
-    description="调度已到重试时间的客户智能 LangGraph 运行",
-)
-async def run_due_customer_intelligence_retries(
-    limit: int = Query(20, ge=1, le=100, description="本次最多处理数量"),
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(require_permission("customer:edit:all")),
-):
-    from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
-
-    result = await customer_intelligence_refresh_service.run_due_retries(team_id=team_id, limit=limit)
-    return CustomerIntelligenceRetryDueResponse(
-        success=result.get("success") is True,
-        total=int(result.get("total") or 0),
-        succeeded=int(result.get("succeeded") or 0),
-        failed=int(result.get("failed") or 0),
-        results=[
-            item
-            for item in result.get("results", [])
-            if isinstance(item, dict)
-        ],
-    )

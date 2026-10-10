@@ -8,7 +8,6 @@ from sqlalchemy import update
 from app.constants.operation_log_events import EventActions, EventTypes, ResourceTypes
 from app.models.customer import Customer
 from app.services.customer_enrichment_plan import CustomerEnrichmentFieldRegistry
-from app.services.legacy_profile_source import advance_eligible_progress
 from app.services.operation_log_service import operation_log_service
 from app.utils.time import business_now
 
@@ -101,7 +100,6 @@ class CustomerEnrichmentWriteService:
                     customer_id=customer_id,
                     field_keys=applied_fields,
                 )
-            advance_eligible_progress(db, team_id=team_id, customer_id=customer_id)
 
             log = self._log_service.log(
                 db=db,

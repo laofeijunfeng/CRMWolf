@@ -17,7 +17,7 @@ from app.services.customer_intelligence_event_publication_service import (
     customer_intelligence_event_publication_service,
 )
 from app.services.customer_intelligence_event_service import JsonObject
-from app.services.legacy_profile_source import advance_eligible_progress, event_origin, lock_source_customer
+from app.services.legacy_profile_source import event_origin
 from app.utils.time import business_now
 
 logger = logging.getLogger(__name__)
@@ -49,7 +49,6 @@ class DealJourneyService:
         opportunity,
         actor_id: str | None = None,
     ) -> CustomerDealJourney:
-        lock_source_customer(db, team_id=opportunity.team_id, customer_id=opportunity.customer_id)
         db.flush()
         opportunity = self._lock_opportunity(db, opportunity)
         previous_deal_journey_id = self._positive_int(getattr(opportunity, "deal_journey_id", None))
@@ -92,7 +91,6 @@ class DealJourneyService:
 
         opportunity.deal_journey_id = journey.id
         if previous_deal_journey_id != int(journey.id):
-            advance_eligible_progress(db, team_id=opportunity.team_id, customer_id=opportunity.customer_id)
         if previous_deal_journey_id != int(journey.id):
             self.record_event(
                 db,
@@ -133,7 +131,6 @@ class DealJourneyService:
         Both sides receive an association event, allowing the old journey to
         be negatively re-projected and the new journey to be populated.
         """
-        lock_source_customer(db, team_id=opportunity.team_id, customer_id=opportunity.customer_id)
         db.flush()
         opportunity = self._lock_opportunity(db, opportunity)
         current_version = int(getattr(opportunity, "version", 1) or 1)
@@ -161,7 +158,6 @@ class DealJourneyService:
         previous_id = self._positive_int(getattr(opportunity, "deal_journey_id", None))
         if previous_id == int(target.id):
             return target
-        advance_eligible_progress(db, team_id=opportunity.team_id, customer_id=opportunity.customer_id)
 
         previous = None
         if previous_id is not None:
@@ -239,7 +235,6 @@ class DealJourneyService:
         expected_version: int | None = None,
     ) -> CustomerDealJourney | None:
         """Remove the current journey association and retain all evidence."""
-        lock_source_customer(db, team_id=opportunity.team_id, customer_id=opportunity.customer_id)
         db.flush()
         opportunity = self._lock_opportunity(db, opportunity)
         current_version = int(getattr(opportunity, "version", 1) or 1)
@@ -253,7 +248,6 @@ class DealJourneyService:
         previous_id = self._positive_int(getattr(opportunity, "deal_journey_id", None))
         if previous_id is None:
             return None
-        advance_eligible_progress(db, team_id=opportunity.team_id, customer_id=opportunity.customer_id)
 
         previous = (
             db.query(CustomerDealJourney)
@@ -340,7 +334,6 @@ class DealJourneyService:
         return locked
 
     def infer_for_customer(self, db: Session, customer_id: int, team_id: int) -> CustomerDealJourney | None:
-        lock_source_customer(db, team_id=team_id, customer_id=customer_id)
         db.flush()
         journeys = db.query(CustomerDealJourney).filter(
             CustomerDealJourney.customer_id == customer_id,
@@ -370,7 +363,6 @@ class DealJourneyService:
         if not deal_journey_id:
             return None
         # Serialize both source lookup and event insertion with legacy publication.
-        lock_source_customer(db, team_id=team_id, customer_id=customer_id)
         # Include caller changes only after the customer fence, then use current
         # locking reads even when this session began its RR snapshot earlier.
         db.flush()
@@ -440,7 +432,6 @@ class DealJourneyService:
         )
         db.add(event)
         if event_origin(db, event, team_id, customer_id, current=True):
-            advance_eligible_progress(db, team_id=team_id, customer_id=customer_id)
         db.flush()
         self._upsert_event_evidence(db, event)
         if enqueue_customer_intelligence:
@@ -598,7 +589,6 @@ class DealJourneyService:
         if owner is None:
             return None
         team_id, customer_id = owner
-        lock_source_customer(db, team_id=team_id, customer_id=customer_id)
         # Include the caller's source changes in this transaction, then reload
         # the current row under its lock rather than trusting a cached journey.
         db.flush()

@@ -16,7 +16,6 @@ from app.models.deployment import DeploymentInfo
 from app.models.contract import Contract
 from app.constants.business_types import BusinessType
 from app.services.business_number_generator import BusinessNumberGenerator
-from app.services.legacy_profile_source import advance_eligible_progress, lock_source_customer
 from app.utils.approval_delete_guard import assert_deletable_approval_resource
 from app.schemas.license_application import (
     LicenseApplicationInternalCreate,
@@ -486,8 +485,6 @@ class LicenseApplicationCRUD:
             customer_id = db.query(LicenseApplication.customer_id).filter_by(
                 id=application_id, team_id=team_id,
             ).scalar()
-        if customer_id is not None:
-            lock_source_customer(db, team_id=team_id, customer_id=int(customer_id))
         return int(customer_id) if customer_id is not None else None
 
     def _ensure_approved_for_issue(
@@ -623,7 +620,6 @@ class LicenseApplicationCRUD:
             return False
 
         if customer.license_expiry_date is None or expiry_date > customer.license_expiry_date:
-            advance_eligible_progress(db, team_id=team_id, customer_id=customer.id)
             customer.license_expiry_date = expiry_date
             db.commit()
             return True
@@ -689,10 +685,6 @@ class LicenseApplicationCRUD:
 
             customer.license_type, customer.license_authorized_users, customer.license_expiry_date = selected_values
             selected_expiry = selected_values[2]
-            if selected_expiry is not None and (
-                previous_expiry is None or selected_expiry > previous_expiry
-            ):
-                advance_eligible_progress(db, team_id=team_id, customer_id=customer.id)
             if commit and selected_values != previous_values:
                 db.commit()
 

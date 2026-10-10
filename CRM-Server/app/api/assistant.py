@@ -1,5 +1,4 @@
 """/v1/assistant routes: thin transport over the Agent 2.0 coordinator."""
-
 # ruff: noqa: RUF001, B008
 
 from __future__ import annotations
@@ -10,16 +9,22 @@ from typing import TYPE_CHECKING, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
 from app.core.database import get_db
 from app.core.deps import get_current_active_user, get_current_user_team
-from app.models.assistant import AssistantAction, AssistantTask, AssistantTaskStatus
-from app.services.assistant.contracts import TaskDraft, TaskWaiting
+from app.models.assistant import AssistantAction, AssistantTask
+from app.models.assistant_turn import AssistantTurn
+from app.services.assistant.contracts import (  # noqa: TC001 - Pydantic resolves response models at runtime.
+    CommittedReceipt,
+    TaskDraft,
+    TaskStatus,
+    TaskWaiting,
+    TurnStatus,
+)
 from app.services.assistant.coordinator import (
     AssistantCoordinator,
 )
-from app.models.assistant_turn import AssistantTurn
 from app.services.assistant.turns import (
     AssistantRequestConflict,
     AssistantStateConflict,
@@ -47,16 +52,45 @@ class AssistantTaskView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     public_id: str
-    status: str
+    status: TaskStatus
     goal: str
     activity_kind: str | None
     draft: TaskDraft
     waiting: TaskWaiting | None
-    committed: list[dict[str, object]]
+    committed: list[CommittedReceipt]
     budget_steps: int
     budget_max_steps: int
     version: int
     last_modified_time: str | None = None
+    processing_turn_id: str | None = None
+    processing_turn_status: TurnStatus | None = None
+
+    @model_validator(mode="after")
+    def match_processing_pointer(self) -> AssistantTaskView:
+        if (self.processing_turn_id is None) != (self.processing_turn_status is None):
+            raise ValueError("processing turn ID and status must appear together")
+        return self
+
+    @field_serializer("committed")
+    def serialize_receipts(self, receipts: list[CommittedReceipt]) -> list[dict[str, object]]:
+        return [receipt.model_dump(mode="json", exclude_unset=True) for receipt in receipts]
+
+
+class AssistantTurnEventView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    seq: int = Field(ge=0)
+    event: str
+    data: dict[str, object]
+
+
+class AssistantTurnView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    turn_id: str
+    status: TurnStatus
+    events: list[AssistantTurnEventView]
+    task: AssistantTaskView
 
 
 class CreateTaskRequest(BaseModel):
@@ -105,8 +139,23 @@ def _build_coordinator() -> AssistantCoordinator:
 _coordinator = _build_coordinator()
 
 
-def _view(task: AssistantTask) -> AssistantTaskView:
+def _view(task: AssistantTask, db: Session) -> AssistantTaskView:
     from app.services.assistant.task_state import load_draft, load_waiting
+
+    turn = None
+    if task.active_turn_id is not None:
+        turn = (
+            db.query(AssistantTurn)
+            .filter_by(
+                id=task.active_turn_id,
+                task_id=task.id,
+                team_id=task.team_id,
+                user_id=task.user_id,
+            )
+            .one_or_none()
+        )
+        if turn is None:
+            raise ValueError("active assistant turn does not belong to the task")
 
     return AssistantTaskView(
         last_modified_time=task.last_modified_time.isoformat() if task.last_modified_time else None,
@@ -120,7 +169,34 @@ def _view(task: AssistantTask) -> AssistantTaskView:
         budget_steps=task.budget_steps,
         budget_max_steps=task.budget_max_steps,
         version=task.version,
+        processing_turn_id=turn.public_id if turn is not None else None,
+        processing_turn_status=turn.status if turn is not None else None,
     )
+
+
+def _list_view(task: AssistantTask, db: Session) -> dict[str, object]:
+    """Keep unreadable rows identifiable without exposing unvalidated stored JSON."""
+    try:
+        return _view(task, db).model_dump(mode="json")
+    except ValueError:
+        # A null draft deliberately remains unreadable to the strict client row
+        # parser, which counts/skips this row instead of losing the entire list.
+        # Never return raw draft/waiting/authority JSON on this recovery path.
+        return {
+            "public_id": task.public_id,
+            "status": task.status,
+            "goal": task.goal,
+            "activity_kind": task.activity_kind,
+            "draft": None,
+            "waiting": None,
+            "committed": [],
+            "budget_steps": task.budget_steps,
+            "budget_max_steps": task.budget_max_steps,
+            "version": task.version,
+            "last_modified_time": task.last_modified_time.isoformat() if task.last_modified_time else None,
+            "processing_turn_id": None,
+            "processing_turn_status": None,
+        }
 
 
 def _owned_task(db: Session, *, team_id: int, user_id: int, public_id: str) -> AssistantTask:
@@ -139,12 +215,15 @@ async def create_task(
 ) -> AssistantTaskView:
     try:
         task = accept_create(
-            db, team_id=team_id, user_id=current_user.id,
-            key=request.client_request_id, goal=request.goal,
+            db,
+            team_id=team_id,
+            user_id=current_user.id,
+            key=request.client_request_id,
+            goal=request.goal,
         )
     except AssistantRequestConflict as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    return _view(task)
+    return _view(task, db)
 
 
 @router.get("/tasks/{public_id}", response_model=AssistantTaskView)
@@ -154,22 +233,23 @@ async def get_task(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> AssistantTaskView:
-    return _view(_owned_task(db, team_id=team_id, user_id=current_user.id, public_id=public_id))
+    return _view(_owned_task(db, team_id=team_id, user_id=current_user.id, public_id=public_id), db)
 
-@router.get("/tasks", response_model=list[AssistantTaskView])
+
+@router.get("/tasks", response_model=list[dict[str, object]])
 async def list_tasks(
     status_filter: str | None = None,
     team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
-) -> list[AssistantTaskView]:
+) -> list[dict[str, object]]:
     """List this user's tasks, newest first, optionally by status."""
 
     query = db.query(AssistantTask).filter_by(team_id=team_id, user_id=current_user.id)
     if status_filter is not None:
         query = query.filter_by(status=status_filter)
     tasks = query.order_by(AssistantTask.id.desc()).limit(50).all()
-    return [_view(task) for task in tasks]
+    return [_list_view(task, db) for task in tasks]
 
 
 @router.get("/tasks/latest/active", response_model=AssistantTaskView | None)
@@ -186,7 +266,7 @@ async def latest_active_task(
         .order_by(AssistantTask.id.desc())
         .first()
     )
-    return _view(task) if task is not None else None
+    return _view(task, db) if task is not None else None
 
 
 class ChangeKindRequest(BaseModel):
@@ -211,7 +291,11 @@ async def change_kind(
 
     from app.services.assistant.contracts import DraftField
     from app.services.assistant.task_state import (
-        InvalidTaskTransitionError, TaskStateConflictError, TaskUpdate, apply_task_update, load_draft,
+        InvalidTaskTransitionError,
+        TaskStateConflictError,
+        TaskUpdate,
+        apply_task_update,
+        load_draft,
     )
 
     allowed = {"FOLLOW_UP", "ONLINE_MEETING", "OFFLINE_MEETING"}
@@ -219,12 +303,19 @@ async def change_kind(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="未知活动类型")
 
     task = _owned_task(db, team_id=team_id, user_id=current_user.id, public_id=public_id)
-    if task.status != "ACTIVE" or task.active_turn_id is not None or any(
-        item.get("kind") == "customer_activity" for item in task.committed_json or []
+    if (
+        task.status != "ACTIVE"
+        or task.active_turn_id is not None
+        or any(item.get("kind") == "customer_activity" for item in task.committed_json or [])
     ):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
-            "code": "STATE_CONFLICT", "message": "当前任务不能修改活动类型", "task": _view(task).model_dump(mode="json"),
-        })
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "STATE_CONFLICT",
+                "message": "当前任务不能修改活动类型",
+                "task": _view(task, db).model_dump(mode="json"),
+            },
+        )
 
     draft = load_draft(task)
     # Clear kind-dependent slots; keep customer identity binding.
@@ -243,11 +334,21 @@ async def change_kind(
     )
     try:
         result = apply_task_update(
-            db, task, TaskUpdate(
-                require_no_active_turn=True, activity_kind=request.kind, draft=reset,
-                clear_frozen_activity_command=True, clear_waiting=True,
-                action_actor="USER", action_name="change_kind", action_input={"kind": request.kind},
-                action_result={"accepted": True, "cleared": ["content", "next_action", "meeting_subject", "participants"]},
+            db,
+            task,
+            TaskUpdate(
+                require_no_active_turn=True,
+                activity_kind=request.kind,
+                draft=reset,
+                clear_frozen_activity_command=True,
+                clear_waiting=True,
+                action_actor="USER",
+                action_name="change_kind",
+                action_input={"kind": request.kind},
+                action_result={
+                    "accepted": True,
+                    "cleared": ["content", "next_action", "meeting_subject", "participants"],
+                },
             ),
         )
         db.commit()
@@ -255,10 +356,15 @@ async def change_kind(
         db.rollback()
         db.expire_all()
         latest = _owned_task(db, team_id=team_id, user_id=current_user.id, public_id=public_id)
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
-            "code": "STATE_CONFLICT", "message": str(exc), "task": _view(latest).model_dump(mode="json"),
-        }) from exc
-    return _view(result.task)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "STATE_CONFLICT",
+                "message": str(exc),
+                "task": _view(latest, db).model_dump(mode="json"),
+            },
+        ) from exc
+    return _view(result.task, db)
 
 
 @router.get("/tasks/{public_id}/actions", response_model=list[dict[str, object]])
@@ -271,12 +377,7 @@ async def list_task_actions(
     """Append-only action log of one owned task, oldest first."""
 
     task = _owned_task(db, team_id=team_id, user_id=current_user.id, public_id=public_id)
-    actions = (
-        db.query(AssistantAction)
-        .filter_by(task_id=task.id)
-        .order_by(AssistantAction.id.asc())
-        .all()
-    )
+    actions = db.query(AssistantAction).filter_by(task_id=task.id).order_by(AssistantAction.id.asc()).all()
     return [
         {
             "actor": action.actor,
@@ -306,8 +407,7 @@ async def list_unknown_commands(
     return list_unresolved_command_claims(db, team_id=team_id)
 
 
-
-@router.get("/tasks/{public_id}/turns/{turn_id}")
+@router.get("/tasks/{public_id}/turns/{turn_id}", response_model=AssistantTurnView)
 async def read_turn(
     public_id: str,
     turn_id: str,
@@ -315,22 +415,29 @@ async def read_turn(
     team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
-) -> dict[str, object]:
+) -> AssistantTurnView:
     task = _owned_task(db, team_id=team_id, user_id=current_user.id, public_id=public_id)
-    turn = db.query(AssistantTurn).filter_by(
-        public_id=turn_id, task_id=task.id, team_id=team_id, user_id=current_user.id,
-    ).one_or_none()
+    turn = (
+        db.query(AssistantTurn)
+        .filter_by(
+            public_id=turn_id,
+            task_id=task.id,
+            team_id=team_id,
+            user_id=current_user.id,
+        )
+        .one_or_none()
+    )
     if turn is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="轮次不存在")
-    return {
-        "turn_id": turn.public_id,
-        "status": turn.status,
-        "events": [
-            {"seq": event.seq, "event": event.event, "data": event.data_json}
+    return AssistantTurnView(
+        turn_id=turn.public_id,
+        status=turn.status,
+        events=[
+            AssistantTurnEventView(seq=event.seq, event=event.event, data=event.data_json)
             for event in events_after(db, turn_id=turn.id, seq=max(after_seq, 0))
         ],
-        "task": _view(task).model_dump(mode="json"),
-    }
+        task=_view(task, db),
+    )
 
 
 @router.post("/tasks/{public_id}/submit")
@@ -348,18 +455,25 @@ async def submit_input(
     task = _owned_task(db, team_id=team_id, user_id=user_id, public_id=public_id)
     try:
         turn, created = accept_submit(
-            db, task=task, key=request.client_request_id,
+            db,
+            task=task,
+            key=request.client_request_id,
             input_data={"kind": request.kind, "text": request.text, "choice": request.choice},
-            action_id=request.action_id, expected_version=request.expected_version,
+            action_id=request.action_id,
+            expected_version=request.expected_version,
         )
     except (AssistantRequestConflict, AssistantStateConflict) as exc:
         db.rollback()
         db.expire_all()
         latest = _owned_task(db, team_id=team_id, user_id=user_id, public_id=public_id)
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
-            "code": "STATE_CONFLICT" if isinstance(exc, AssistantStateConflict) else "REQUEST_CONFLICT",
-            "message": str(exc), "task": _view(latest).model_dump(mode="json"),
-        }) from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "STATE_CONFLICT" if isinstance(exc, AssistantStateConflict) else "REQUEST_CONFLICT",
+                "message": str(exc),
+                "task": _view(latest, db).model_dump(mode="json"),
+            },
+        ) from exc
     from sqlalchemy.orm import sessionmaker
 
     factory = sessionmaker(bind=db.get_bind(), autoflush=False, expire_on_commit=False)
@@ -385,6 +499,7 @@ async def submit_input(
             await asyncio.sleep(0.1)
 
     return StreamingResponse(
-        stream(), media_type="text/event-stream",
+        stream(),
+        media_type="text/event-stream",
         headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
     )

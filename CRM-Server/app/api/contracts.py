@@ -60,7 +60,6 @@ from app.services.customer_business_object_intelligence_service import (
 )
 from app.services.outbound_notification_job_service import outbound_notification_job_service
 from app.services.file_storage import FileStorageError, file_storage_service
-from app.services.legacy_profile_source import advance_eligible_progress
 from app.utils.public_id import is_opportunity_public_id
 
 logger = logging.getLogger(__name__)
@@ -323,7 +322,6 @@ def _lock_created_contract_for_file_commit(
     if int(contract.team_id) != int(team_id):
         raise ValueError("合同所属团队已变更，请重试")
     customer_id = int(contract.customer_id)
-    advance_eligible_progress(db, team_id=team_id, customer_id=customer_id, deleted=deleted)
     with db.no_autoflush:
         locked = db.query(Contract).filter(
             Contract.id == contract.id, Contract.team_id == team_id,

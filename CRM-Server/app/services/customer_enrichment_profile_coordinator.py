@@ -246,13 +246,7 @@ class CustomerEnrichmentProfileCoordinator:
         except RuntimeError:
             logger.debug("当前线程没有运行中的事件循环, 已释放档案任务交由恢复器执行")
             return
-        task = asyncio.create_task(
-            self.refresh_service.run_due_retries(
-                team_id=team_id,
-                limit=max(1, len(released)),
-            )
-        )
-        task.add_done_callback(self._consume_task_exception)
+        # Profile refresh retries were removed with the customer profile capability.
 
 
     @staticmethod

@@ -9,7 +9,6 @@ from app.models.product import ProductModule
 from app.constants.business_types import BusinessType
 from app.services.business_number_generator import BusinessNumberGenerator
 from app.utils.approval_delete_guard import assert_deletable_approval_resource
-from app.services.legacy_profile_source import advance_eligible_progress, lock_source_customer
 from app.utils.time import business_now
 from app.core.list_query import (
     FilterCondition,
@@ -68,7 +67,6 @@ def _lock_opportunity(db: Session, opportunity_id: int, team_id: Optional[int] =
         ).first()
         if binding is None or (team_id is not None and binding.team_id != team_id):
             return None
-        lock_source_customer(db, team_id=binding.team_id, customer_id=binding.customer_id)
         opportunity = db.query(Opportunity).filter(
             Opportunity.id == opportunity_id, Opportunity.team_id == binding.team_id,
         ).populate_existing().with_for_update().one_or_none()
@@ -391,7 +389,6 @@ class OpportunityCRUD:
         from app.crud.product import product_crud
 
         product_crud.lock_catalog_team(db, team_id)
-        customer = lock_source_customer(db, team_id=team_id, customer_id=obj_in.customer_id)
 
         # 1. 确定采购方式
         if obj_in.procurement_method_id is not None:
@@ -442,8 +439,6 @@ class OpportunityCRUD:
             subscription_years=obj_in.subscription_years or 1
         )
         opportunity_data['unit_price'] = float(unit_price)
-        
-        advance_eligible_progress(db, team_id=team_id, customer_id=customer.id)
         # 5. 创建商机对象
         db_obj = Opportunity(**opportunity_data)
         db.add(db_obj)
@@ -578,7 +573,6 @@ class OpportunityCRUD:
         product_changed = product_fields_set and (previous_product_id != db_obj.product_id or
                                                   previous_module_ids != {link.product_module_id for link in db_obj.module_links})
         if changed or product_changed:
-            advance_eligible_progress(db, team_id=int(db_obj.team_id), customer_id=int(db_obj.customer_id))
             _bump_opportunity_version(db_obj)
         db.commit()
         db.refresh(db_obj)
@@ -646,7 +640,6 @@ class OpportunityCRUD:
         if not product_changed:
             return opportunity
         if not _creating:
-            advance_eligible_progress(db, team_id=team_id, customer_id=int(opportunity.customer_id))
             _bump_opportunity_version(opportunity)
         opportunity.product_id = product.id
         opportunity.product = product
@@ -750,8 +743,6 @@ class OpportunityCRUD:
             allowed_start_stage = default_stage or first_stage
             if not allowed_start_stage or int(allowed_start_stage.id) != int(target_stage.id):
                 raise ValueError("商机起始阶段只能设置为采购流程的默认起始阶段")
-        
-        advance_eligible_progress(db, team_id=opportunity.team_id, customer_id=opportunity.customer_id)
         previous_snapshot_id = opportunity.current_stage_snapshot_id
         previous_version = opportunity.version
         if current_snapshot:
@@ -815,7 +806,6 @@ class OpportunityCRUD:
             if opportunity.current_stage_snapshot_id != new_snapshot.id or opportunity.version != previous_version + 1:
                 db.rollback()
                 raise AssistantCRMStaleTarget("Opportunity changed after stage target commit")
-            advance_eligible_progress(db, team_id=opportunity.team_id, customer_id=opportunity.customer_id)
             opportunity.status = OpportunityStatus.WON.value
             opportunity.actual_amount = win_data.actual_amount
             opportunity.actual_closing_date = win_data.actual_closing_date
@@ -914,7 +904,6 @@ class OpportunityCRUD:
             raise ValueError(f"采购方式 {procurement_method_id} 没有设置默认起始阶段")
 
         # 创建阶段快照
-        advance_eligible_progress(db, team_id=opportunity.team_id, customer_id=opportunity.customer_id)
         new_snapshot = OpportunityStageSnapshot(
             team_id=opportunity.team_id,
             opportunity_id=opportunity_id,
@@ -989,8 +978,6 @@ class OpportunityCRUD:
         
         if won_stage:
             db_obj.stage_id = won_stage.id
-        
-        advance_eligible_progress(db, team_id=db_obj.team_id, customer_id=db_obj.customer_id)
         db_obj.status = OpportunityStatus.WON.value
         db_obj.actual_amount = win_data.actual_amount
         db_obj.actual_closing_date = win_data.actual_closing_date
@@ -1046,8 +1033,6 @@ class OpportunityCRUD:
         
         if db_obj.status == OpportunityStatus.WON.value:
             raise ValueError("商机已赢单，无法标记为输单")
-        
-        advance_eligible_progress(db, team_id=db_obj.team_id, customer_id=db_obj.customer_id)
         db_obj.status = OpportunityStatus.LOST.value
         db_obj.loss_reason = lose_data.loss_reason
         db_obj.win_probability = 0
@@ -1112,8 +1097,6 @@ class OpportunityCRUD:
         ).count()
         if contracts > 0:
             raise ValueError(f"该商机存在 {contracts} 个关联合同，无法删除。请先删除相关合同。")
-
-        advance_eligible_progress(db, team_id=opportunity.team_id, customer_id=opportunity.customer_id, deleted=True)
         opportunity.current_stage_snapshot_id = None
         db.query(OpportunityStageSnapshot).filter(
             OpportunityStageSnapshot.opportunity_id == opportunity_id

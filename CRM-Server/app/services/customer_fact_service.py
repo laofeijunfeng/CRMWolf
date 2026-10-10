@@ -195,11 +195,10 @@ class CustomerFactService:
         content = fact_input.content.strip()
         if not content:
             raise ValueError("客户事实内容不能为空")
-        from app.services.legacy_profile_source import advance_eligible_progress, fact_origin, lock_source_customer
+        from app.services.legacy_profile_source import fact_origin
 
         # Origin itself is mutable (activities can be deleted), so acquire the
         # customer's source lock before inspecting provenance or fact identity.
-        lock_source_customer(db, team_id=fact_input.team_id, customer_id=fact_input.customer_id)
         eligible_source = self._eligible_source(db, fact_input)
 
         fact_key = self.fact_key(
@@ -290,8 +289,6 @@ class CustomerFactService:
 
         if fact_input.source is not None:
             self.attach_source(db, fact=fact, source=fact_input.source)
-        if eligible_source and changed:
-            advance_eligible_progress(db, team_id=fact_input.team_id, customer_id=fact_input.customer_id)
         return fact
 
     def _record_revision(

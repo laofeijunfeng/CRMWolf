@@ -74,7 +74,6 @@ from app.services.customer_business_object_intelligence_service import (
     CustomerBusinessObjectChangeRefreshInput,
     customer_business_object_intelligence_service,
 )
-from app.services.legacy_profile_source import lock_source_customer
 from app.services.outbound_notification_job_service import outbound_notification_job_service
 
 router = APIRouter(prefix="/v1/payments", tags=["回款管理"])
@@ -716,7 +715,6 @@ def _persist_payment_command_failure(
 ) -> None:
     """Persist a failure after the business transaction has been rolled back."""
     try:
-        lock_source_customer(db, team_id=team_id, customer_id=customer_id)
         execution, replay = command_execution_service.begin(
             db,
             team_id=team_id,
@@ -1527,7 +1525,6 @@ async def create_payment_record(
             })
             # Legacy rows may need a command receipt; fence that write too,
             # without advancing source progress for a replay.
-            lock_source_customer(db, team_id=team_id, customer_id=contract.customer_id)
             try:
                 execution, replay = command_execution_service.begin(
                     db,
@@ -1583,7 +1580,6 @@ async def create_payment_record(
     # CommandExecution.begin flushes a command row. Take the customer fence
     # first so the command, payment-plan/record locks, source progress, and
     # payment fact all follow the publisher's customer-first lock order.
-    lock_source_customer(db, team_id=team_id, customer_id=contract.customer_id)
 
     fingerprint = request_fingerprint({
         "plan_id": plan_id,
@@ -1681,7 +1677,6 @@ async def create_payment_record(
         # of reporting a false amount-conflict to the user.
         db.rollback()
         try:
-            lock_source_customer(db, team_id=team_id, customer_id=contract.customer_id)
             execution, replay = command_execution_service.begin(
                 db,
                 team_id=team_id,

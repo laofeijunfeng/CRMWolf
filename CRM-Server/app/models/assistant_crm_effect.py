@@ -1,6 +1,6 @@
 """Immutable receipt identifying an assistant command's committed CRM target effect."""
 
-from datetime import datetime  # noqa: TC003
+from datetime import datetime
 
 from sqlalchemy import BigInteger, DateTime, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
@@ -26,6 +26,4 @@ class AssistantCRMEffect(Base):
     resulting_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=business_now)
 
-    __table_args__ = (
-        UniqueConstraint("team_id", "command_id", "effect_kind", name="uq_assistant_crm_effect_command"),
-    )
+    __table_args__ = (UniqueConstraint("team_id", "command_id", "effect_kind", name="uq_assistant_crm_effect_command"),)
