@@ -5,7 +5,11 @@ import { AmountText, Badge, Button, DataViewStatePanel, HoverInfo, Progress, Ske
 import { Separator } from '@/components/ui/separator'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { dealJourneyApi, type DealJourney } from '@/api/dealJourney'
-import { dealJourneyProgressPercent, type DealJourneyBoardStage } from '@/utils/dealJourney'
+import {
+  dealJourneyProgressColorClass,
+  dealJourneyProgressPercent,
+  type DealJourneyBoardStage
+} from '@/utils/dealJourney'
 
 const PREVIEW_LIMIT = 3
 const HIDDEN_JOURNEY_STATUSES = new Set(['LOST', 'ARCHIVED'])
@@ -33,6 +37,14 @@ const isPreviewable = (journey: DealJourney): boolean =>
 
 const getProductName = (journey: DealJourney): string =>
   journey.primary_opportunity?.product_name ?? ''
+const getJourneyProgressPercent = (journey: DealJourney): number =>
+  dealJourneyProgressPercent(journey.current_board_stage)
+
+const getJourneyProgressColorClass = (journey: DealJourney): string =>
+  dealJourneyProgressColorClass(getJourneyProgressPercent(journey))
+
+const getJourneyProgressLabel = (journey: DealJourney): string =>
+  `${journey.name} 旅程进度 ${getJourneyProgressPercent(journey)}%`
 
 const boardStageBadgeClass = (stage: DealJourneyBoardStage): string => {
   if (stage === 'lost') return 'status-danger'
@@ -177,11 +189,17 @@ const handleViewAll = (): void => {
                       class="shrink-0 self-start text-wolf-text-primary-v2"
                     />
                   </span>
-                  <Progress
-                    :model-value="dealJourneyProgressPercent(journey.current_board_stage)"
-                    class="mt-wolf-md h-1.5 bg-wolf-bg-card"
-                    :aria-label="`${journey.name} 旅程进度 ${dealJourneyProgressPercent(journey.current_board_stage)}%`"
-                  />
+                  <div class="mt-wolf-md flex items-center gap-wolf-sm">
+                    <Progress
+                      :model-value="getJourneyProgressPercent(journey)"
+                      :indicator-class="getJourneyProgressColorClass(journey)"
+                      class="h-1.5 min-w-0 flex-1 bg-wolf-bg-card"
+                      :aria-label="getJourneyProgressLabel(journey)"
+                    />
+                    <span class="shrink-0 tabular-nums text-wolf-caption text-wolf-text-tertiary-v2">
+                      {{ getJourneyProgressPercent(journey) }}%
+                    </span>
+                  </div>
                   <span class="mt-wolf-sm flex items-center justify-between gap-wolf-md">
                     <Badge
                       :class="['status-badge', 'shrink-0', boardStageBadgeClass(journey.current_board_stage)]"

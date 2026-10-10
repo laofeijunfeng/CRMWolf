@@ -1,7 +1,7 @@
 {
   "$schema": "./p2-pkg-04-exceptions.schema.json",
   "version": "1.0",
-  "lastVerified": "2026-09-21",
+  "lastVerified": "2026-10-09",
   "exceptions": [
     {
       "id": "DS-EX-001",
@@ -62,6 +62,22 @@
       ],
       "match": "rgba\\(37, 99, 235|rgb\\((?:240 249 255|239 246 255|245 243 255|255 251 235|236 254 255|236 253 245|248 250 252|255 241 242)\\)",
       "reason": "Task 5 extracts the shipped business-journey board unchanged; these exact column fills and focus ring preserve the legacy board visual until a separately approved palette migration.",
+      "owner": "frontend",
+      "reviewDate": "2026-12-21",
+      "status": "active"
+    },
+    {
+      "id": "DS-EX-006",
+      "category": "status-color",
+      "files": [
+        "CRM-Client/src/utils/dealJourney.ts",
+        "CRM-Client/src/utils/__tests__/dealJourney.test.ts",
+        "CRM-Client/src/components/ui/progress/__tests__/Progress.test.ts",
+        "CRM-Client/tests/components/BusinessJourneyTableView.spec.ts",
+        "CRM-Client/tests/components/CustomerDealJourneyHoverCard.spec.ts"
+      ],
+      "match": "\\b(?:bg-orange-500|bg-amber-500|bg-yellow-500|bg-lime-500|bg-green-500|bg-emerald-500|bg-teal-500|bg-cyan-500|bg-sky-500|bg-blue-500)\\b",
+      "reason": "业务旅程进度条使用十段量化进度色阶；颜色与阶段百分比一一对应，必须保留完整 Tailwind 字面量以支持静态发现，并由阶段文字和百分比提供非颜色状态线索。",
       "owner": "frontend",
       "reviewDate": "2026-12-21",
       "status": "active"

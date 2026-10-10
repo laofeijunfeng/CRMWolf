@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEAL_JOURNEY_BOARD_STAGE_LABELS,
+  dealJourneyProgressColorClass,
   dealJourneyProgressPercent,
   isDealJourneyPublicId
 } from '@/utils/dealJourney'
@@ -21,6 +22,31 @@ describe('dealJourney', () => {
     expect(dealJourneyProgressPercent('invoice_processing')).toBe(86)
     expect(dealJourneyProgressPercent('completed')).toBe(100)
     expect(dealJourneyProgressPercent('lost')).toBe(0)
+  })
+
+  it.each([
+    [0, 'bg-orange-500'],
+    [10, 'bg-orange-500'],
+    [11, 'bg-amber-500'],
+    [20, 'bg-amber-500'],
+    [21, 'bg-yellow-500'],
+    [30, 'bg-yellow-500'],
+    [31, 'bg-lime-500'],
+    [40, 'bg-lime-500'],
+    [41, 'bg-green-500'],
+    [50, 'bg-green-500'],
+    [51, 'bg-emerald-500'],
+    [60, 'bg-emerald-500'],
+    [61, 'bg-teal-500'],
+    [70, 'bg-teal-500'],
+    [71, 'bg-cyan-500'],
+    [80, 'bg-cyan-500'],
+    [81, 'bg-sky-500'],
+    [90, 'bg-sky-500'],
+    [91, 'bg-blue-500'],
+    [100, 'bg-blue-500']
+  ] as const)('maps %s percent to the expected progress color', (percent, expected) => {
+    expect(dealJourneyProgressColorClass(percent)).toBe(expected)
   })
 
   it('uses board Chinese labels', () => {
