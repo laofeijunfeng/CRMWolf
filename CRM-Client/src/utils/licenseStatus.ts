@@ -59,3 +59,50 @@ export function licenseStatusClass(
 ): string {
   return `license-badge--${classifyLicenseStatus(expiryDate, licenseType, today)}`
 }
+
+export interface LicenseSummary {
+  primary: string
+  secondary: string
+  tone: 'normal' | 'soon' | 'urgent' | 'none'
+}
+
+const RENEWAL_WINDOW_DAYS = 90
+function formatDateOnly(value: Date): string {
+  const year = value.getFullYear()
+  const month = String(value.getMonth() + 1).padStart(2, '0')
+  const day = String(value.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+export function formatLicenseSummary(
+  expiryDate: string | Date | null | undefined,
+  licenseType: string | null | undefined,
+  authorizedUsers: number | null | undefined,
+  today: Date = new Date()
+): LicenseSummary {
+  const expiry = expiryDate === null || expiryDate === undefined || expiryDate === ''
+    ? null
+    : toDateOnly(expiryDate)
+  if (expiry === null) {
+    return { primary: '未授权', secondary: '-', tone: 'none' }
+  }
+
+  const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  const days = Math.round((expiry.getTime() - todayDate.getTime()) / 86_400_000)
+  const expiryText = formatDateOnly(expiry)
+  const userText = `${authorizedUsers ?? '-'} 人`
+  if (days < 0) {
+    return {
+      primary: `已过期 ${-days} 天`,
+      secondary: `${userText} · ${expiryText}`,
+      tone: 'urgent'
+    }
+  }
+
+  const statusText = licenseStatusLabel(expiry, licenseType, today)
+  return {
+    primary: days < RENEWAL_WINDOW_DAYS ? `${days} 天后到期` : expiryText,
+    secondary: `${statusText} · ${userText}`,
+    tone: days < RENEWAL_WINDOW_DAYS ? 'soon' : 'normal'
+  }
+}
