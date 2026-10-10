@@ -965,8 +965,10 @@ class CRMAgentToolService:
         opportunity_suggestion_job_public_id = durable_work.get("opportunity_suggestion_job_public_id")
         if not isinstance(post_commit_job_public_id, str) or not post_commit_job_public_id:
             raise ValueError("客户活动写入结果缺少跟进任务对账回执")
-        if not isinstance(intelligence_request_id, str) or not intelligence_request_id:
-            raise ValueError("客户活动写入结果缺少客户档案提炼回执")
+        if intelligence_request_id is not None and not isinstance(intelligence_request_id, str):
+            raise ValueError("客户活动写入结果的客户智能请求标识无效")
+        if isinstance(intelligence_request_id, str) and not intelligence_request_id:
+            intelligence_request_id = None
         return CustomerActivityDurableWorkReceipt(
             activity_id=activity_id,
             post_commit_job_public_id=post_commit_job_public_id,
