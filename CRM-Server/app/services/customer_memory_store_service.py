@@ -161,54 +161,6 @@ class CustomerMemoryStoreService:
     def store(self, db: Session) -> MySQLAgentMemoryStore:
         return MySQLAgentMemoryStore(db)
 
-    def upsert_summary(
-        self,
-        db: Session,
-        *,
-        tenant_id: int,
-        customer_id: int,
-        key: str,
-        value: JsonObject,
-    ) -> None:
-        self.store(db).put(
-            customer_memory_namespace(tenant_id=tenant_id, customer_id=customer_id, section=CUSTOMER_MEMORY_SUMMARIES),
-            key,
-            value,
-            index=False,
-        )
-
-    def upsert_preference(
-        self,
-        db: Session,
-        *,
-        tenant_id: int,
-        customer_id: int,
-        key: str,
-        value: JsonObject,
-    ) -> None:
-        self.store(db).put(
-            customer_memory_namespace(tenant_id=tenant_id, customer_id=customer_id, section=CUSTOMER_MEMORY_PREFERENCES),
-            key,
-            value,
-            index=False,
-        )
-
-    def upsert_fact_index(
-        self,
-        db: Session,
-        *,
-        tenant_id: int,
-        customer_id: int,
-        key: str,
-        value: JsonObject,
-    ) -> None:
-        self.store(db).put(
-            customer_memory_namespace(tenant_id=tenant_id, customer_id=customer_id, section=CUSTOMER_MEMORY_FACTS),
-            key,
-            value,
-            index=False,
-        )
-
     def upsert_retrieval_index(
         self,
         db: Session,
@@ -218,6 +170,11 @@ class CustomerMemoryStoreService:
         key: str,
         value: JsonObject,
     ) -> None:
+        allowed = {"source_type", "source_object_id", "document_key", "score"}
+        if set(value) != allowed or not all(isinstance(value[field], str) and value[field] for field in allowed - {"score"}):
+            raise ValueError("CUSTOMER_MEMORY_REFERENCE_INVALID")
+        if not isinstance(value["score"], (int, float)) or isinstance(value["score"], bool):
+            raise ValueError("CUSTOMER_MEMORY_REFERENCE_INVALID")
         self.store(db).put(
             customer_memory_namespace(tenant_id=tenant_id, customer_id=customer_id, section=CUSTOMER_MEMORY_RETRIEVAL),
             key,
@@ -225,6 +182,14 @@ class CustomerMemoryStoreService:
             index=False,
         )
 
+    def upsert_summary(self, *args, **kwargs) -> None:
+        raise ValueError("CUSTOMER_MEMORY_SECTION_REMOVED")
+
+    def upsert_preference(self, *args, **kwargs) -> None:
+        raise ValueError("CUSTOMER_MEMORY_SECTION_REMOVED")
+
+    def upsert_fact_index(self, *args, **kwargs) -> None:
+        raise ValueError("CUSTOMER_MEMORY_SECTION_REMOVED")
     def list_customer_memory(
         self,
         db: Session,
@@ -257,13 +222,7 @@ class CustomerMemoryStoreService:
                     "value": _json_value(item.value),
                     "updated_at": item.updated_at.isoformat(),
                 })
-        return {
-            "namespace_prefix": list((str(tenant_id), "customer", str(customer_id))),
-            "facts": grouped[CUSTOMER_MEMORY_FACTS],
-            "summaries": grouped[CUSTOMER_MEMORY_SUMMARIES],
-            "preferences": grouped[CUSTOMER_MEMORY_PREFERENCES],
-            "retrieval": grouped[CUSTOMER_MEMORY_RETRIEVAL],
-        }
+        return {"retrieval": grouped[CUSTOMER_MEMORY_RETRIEVAL]}
 
 
 def _validate_namespace(namespace: tuple[str, ...]) -> None:
