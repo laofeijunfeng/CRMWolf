@@ -1,5 +1,7 @@
 from datetime import datetime
 
+import pytest
+
 from sqlalchemy import BigInteger, create_engine, event
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
@@ -67,6 +69,47 @@ def _customer(db):
     db.commit()
     return customer
 
+REMOVED_FACT_TYPES = (
+    "need",
+    "budget",
+    "risk",
+    "stage",
+    "stakeholder_attitude",
+    "competitor",
+    "next_step",
+    "preference",
+    "summary",
+)
+
+
+@pytest.mark.parametrize("fact_type", REMOVED_FACT_TYPES)
+def test_removed_customer_fact_types_are_rejected(fact_type: str) -> None:
+    db = _session()
+    _customer(db)
+    candidate = CustomerFactCandidateInput(
+        fact_type=fact_type,
+        content="已移除的客户事实",
+        confidence=0.95,
+        evidence_quote="原始活动证据",
+    )
+
+    with pytest.raises(ValueError, match="CUSTOMER_FACT_TYPE_REMOVED"):
+        customer_fact_service.assess_candidate_against_context(candidate=candidate, existing_facts=[])
+    with pytest.raises(ValueError, match="CUSTOMER_FACT_TYPE_REMOVED"):
+        customer_fact_service.upsert_fact(
+            db,
+            CustomerFactInput(
+                tenant_id=2,
+                team_id=2,
+                customer_id=101,
+                fact_type=fact_type,
+                content="已移除的客户事实",
+            ),
+        )
+
+    assert db.query(CustomerFact).count() == 0
+
+
 
 def test_customer_fact_service_upserts_fact_and_source_idempotently():
     db = _session()
@@ -78,7 +121,7 @@ def test_customer_fact_service_upserts_fact_and_source_idempotently():
             tenant_id=2,
             team_id=2,
             customer_id=101,
-            fact_type="need",
+            fact_type="alias",
             subject="采购流程",
             content="客户希望规范合同和采购流程。",
             confidence=0.82,
@@ -99,7 +142,7 @@ def test_customer_fact_service_upserts_fact_and_source_idempotently():
             tenant_id=2,
             team_id=2,
             customer_id=101,
-            fact_type="need",
+            fact_type="alias",
             subject="采购流程",
             content="客户希望先规范采购流程，再推进合同审批。",
             confidence=1.2,
@@ -138,7 +181,7 @@ def test_customer_fact_service_does_not_create_revision_for_duplicate_fact_paylo
         tenant_id=2,
         team_id=2,
         customer_id=101,
-        fact_type="need",
+        fact_type="alias",
         subject="采购流程",
         content="客户希望规范合同和采购流程。",
         confidence=0.82,
@@ -162,12 +205,12 @@ def test_fact_progress_excludes_assistant_origin_and_advances_eligible_mutations
     db = _session()
     _customer(db)
     legacy = CustomerFactInput(
-        tenant_id=2, team_id=2, customer_id=101, fact_type="need", subject="采购",
+        tenant_id=2, team_id=2, customer_id=101, fact_type="alias", subject="采购",
         content="初版", confidence=0.8,
         source=CustomerFactSourceInput(source_type="customer_activity", source_object_id="701"),
     )
     assistant = CustomerFactInput(
-        tenant_id=2, team_id=2, customer_id=101, fact_type="risk", subject="风险",
+        tenant_id=2, team_id=2, customer_id=101, fact_type="alias", subject="风险",
         content="仅 2.0", confidence=0.8,
         source=CustomerFactSourceInput(source_type="customer_activity", source_object_id="902"),
     )
@@ -186,13 +229,13 @@ def test_fact_progress_excludes_assistant_origin_and_advances_eligible_mutations
     db.refresh(progress)
     assert progress.eligible_revision == 1
     customer_fact_service.upsert_fact(db, CustomerFactInput(
-        tenant_id=2, team_id=2, customer_id=101, fact_type="need", subject="采购",
+        tenant_id=2, team_id=2, customer_id=101, fact_type="alias", subject="采购",
         content="新版", confidence=0.8, source=legacy.source,
     ))
     db.refresh(progress)
     assert progress.eligible_revision == 2
     customer_fact_service.upsert_fact(db, CustomerFactInput(
-        tenant_id=2, team_id=2, customer_id=101, fact_type="need", subject="采购",
+        tenant_id=2, team_id=2, customer_id=101, fact_type="alias", subject="采购",
         content="新版", confidence=0.8, source=legacy.source,
     ))
     db.refresh(progress)
@@ -212,12 +255,12 @@ def test_assistant_fact_cannot_overwrite_eligible_content():
     ])
     db.flush()
     old_fact = customer_fact_service.upsert_fact(db, CustomerFactInput(
-        tenant_id=2, team_id=2, customer_id=101, fact_type="need", subject="采购",
+        tenant_id=2, team_id=2, customer_id=101, fact_type="alias", subject="采购",
         content="已核实需求", source=CustomerFactSourceInput(source_type="customer_activity", source_object_id="701"),
     ))
     with pytest.raises(ValueError, match="未经验证"):
         customer_fact_service.upsert_fact(db, CustomerFactInput(
-            tenant_id=2, team_id=2, customer_id=101, fact_type="need", subject="采购",
+            tenant_id=2, team_id=2, customer_id=101, fact_type="alias", subject="采购",
             content="未核实的 2.0 内容", source=CustomerFactSourceInput(
                 source_type="customer_activity", source_object_id="902",
             ),
@@ -235,7 +278,7 @@ def test_customer_fact_service_projects_context_payload_with_sources():
             tenant_id=2,
             team_id=2,
             customer_id=101,
-            fact_type="risk",
+            fact_type="alias",
             subject="审批",
             content="客户内部审批链较长。",
             confidence=0.76,
@@ -251,7 +294,7 @@ def test_customer_fact_service_projects_context_payload_with_sources():
 
     payload = customer_fact_service.to_context_payload(db, team_id=2, customer_id=101)
 
-    assert payload[0]["fact_type"] == "risk"
+    assert payload[0]["fact_type"] == "alias"
     assert payload[0]["version"] == 1
     assert payload[0]["sources"][0]["business_object_id"] == "301"
 
@@ -259,7 +302,7 @@ def test_customer_fact_service_projects_context_payload_with_sources():
 def test_customer_fact_service_ignores_low_confidence_conflicting_candidate():
     assessment = customer_fact_service.assess_candidate_against_context(
         candidate=CustomerFactCandidateInput(
-            fact_type="stage",
+            fact_type="alias",
             subject="POC",
             content="客户已经完成 POC，准备进入合同审批。",
             confidence=0.76,
@@ -267,7 +310,7 @@ def test_customer_fact_service_ignores_low_confidence_conflicting_candidate():
         ),
         existing_facts=[{
             "id": 501,
-            "fact_type": "stage",
+            "fact_type": "alias",
             "subject": "POC",
             "content": "客户刚开始 POC。",
             "confidence": 0.9,
@@ -286,7 +329,7 @@ def test_customer_fact_service_ignores_low_confidence_conflicting_candidate():
 def test_customer_fact_service_ignores_high_confidence_candidate_without_evidence():
     assessment = customer_fact_service.assess_candidate_against_context(
         candidate=CustomerFactCandidateInput(
-            fact_type="need",
+            fact_type="alias",
             subject="私有化部署",
             content="客户需要私有环境安装包和试用方案。",
             confidence=0.96,
@@ -303,7 +346,7 @@ def test_customer_fact_service_ignores_high_confidence_candidate_without_evidenc
 def test_customer_fact_service_silently_ignores_high_confidence_conflict():
     assessment = customer_fact_service.assess_candidate_against_context(
         candidate=CustomerFactCandidateInput(
-            fact_type="stage",
+            fact_type="alias",
             subject="POC",
             content="客户已经完成 POC，准备进入合同审批。",
             confidence=0.97,
@@ -312,7 +355,7 @@ def test_customer_fact_service_silently_ignores_high_confidence_conflict():
         ),
         existing_facts=[{
             "id": 501,
-            "fact_type": "stage",
+            "fact_type": "alias",
             "subject": "POC",
             "content": "客户刚开始 POC。",
             "confidence": 0.9,
