@@ -238,9 +238,13 @@
       "filterable": true,
       "sortable": false,
       "ops": [
+        "contains",
         "eq",
         "in",
+        "is_empty",
+        "is_not_empty",
         "neq",
+        "not_contains",
         "not_in"
       ]
     },
@@ -527,7 +531,6 @@
       "ops": [
         "contains",
         "eq",
-        "in",
         "is_empty",
         "is_not_empty",
         "neq",
@@ -755,9 +758,13 @@
       "filterable": true,
       "sortable": true,
       "ops": [
+        "contains",
         "eq",
         "in",
+        "is_empty",
+        "is_not_empty",
         "neq",
+        "not_contains",
         "not_in"
       ]
     }
