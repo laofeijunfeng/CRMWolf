@@ -27,7 +27,7 @@ from app.core.list_export import (
     list_export_file_response,
     run_list_export_or_400,
 )
-from app.core.list_query import optional_request_list_query, run_or_400
+from app.core.list_query import optional_request_list_query, run_or_400, uses_unified_list_query
 from app.crud.approval import approval_crud, approval_flow_crud
 from app.crud.customer_member import customer_member_crud
 from app.crud.payment import (
@@ -62,6 +62,8 @@ from app.schemas.payment import (
     PaymentRecordUpdate,
     PaymentReminder,
 )
+from app.schemas.payment_plan_board import PaymentPlanBoardResponse
+from app.services.payment_plan_board_service import build_payment_plan_board
 from app.services.approval_transaction_manager import approval_transaction_manager
 from app.services.command_execution_service import (
     CommandAlreadyInProgress,
@@ -263,7 +265,14 @@ def _enum_value(value: object) -> str | None:
     return getattr(value, "value", value)
 
 
-def _payment_view_own_user_id(db: Session, current_user, team_id: int) -> str | None:
+def resolve_payment_scope_user_id(
+    db: Session,
+    current_user,
+    team_id: int,
+    *,
+    me: bool,
+    missing_detail: str,
+) -> str | None:
     permission_codes = {
         permission.code
         for permission in permission_crud.get_user_permissions(db, current_user.id, team_id)
@@ -273,11 +282,21 @@ def _payment_view_own_user_id(db: Session, current_user, team_id: int) -> str | 
     if not has_view_all and not has_view_own:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="没有查看回款数据的权限",
+            detail=missing_detail,
         )
-    if has_view_own and not has_view_all:
+    if me or (has_view_own and not has_view_all):
         return str(current_user.id)
     return None
+
+
+def _payment_view_own_user_id(db: Session, current_user, team_id: int) -> str | None:
+    return resolve_payment_scope_user_id(
+        db,
+        current_user,
+        team_id,
+        me=False,
+        missing_detail="没有查看回款数据的权限",
+    )
 
 
 def _attach_payment_plan_owner_names(projection_db: Session, plans: list[PaymentPlan]) -> None:
@@ -1197,6 +1216,76 @@ def get_payment_summary(
         customer_name=customer_name,
         opportunity_id=opportunity_id,
         opportunity_name=opportunity_name
+    )
+
+
+
+@router.get("/payment-plans/board", response_model=PaymentPlanBoardResponse)
+def get_payment_plan_board(
+    plan_status: str | None = Query(None, alias="status"),
+    status_exclude: str | None = Query(None),
+    owner_id: str | None = Query(None),
+    keyword: str | None = Query(None),
+    search: str | None = Query(None),
+    me: bool = Query(False),
+    due_date_start: date | None = Query(None),
+    due_date_end: date | None = Query(None),
+    sort: str | None = Query(None),
+    order_by: str | None = Query(None),
+    order_dir: str | None = Query(None),
+    filters: str | None = Query(None),
+    sorts: str | None = Query(None),
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> PaymentPlanBoardResponse:
+    current_user_id = resolve_payment_scope_user_id(
+        db,
+        current_user,
+        team_id,
+        me=me,
+        missing_detail="没有查看回款计划的权限",
+    )
+    parsed_filters, parsed_sorts = optional_request_list_query(
+        filters_raw=filters,
+        sorts_raw=sorts,
+    )
+    plans = run_or_400(lambda: payment_plan_crud.build_population_query(
+        db,
+        team_id=team_id,
+        status=plan_status,
+        status_exclude=status_exclude,
+        owner_id=owner_id,
+        keyword=keyword,
+        search=search,
+        due_date_start=due_date_start,
+        due_date_end=due_date_end,
+        sort=sort,
+        order_by=order_by,
+        order_dir=order_dir,
+        current_user_id=current_user_id,
+        filters=parsed_filters,
+        sorts=parsed_sorts,
+    ).all())
+    permission_codes = {
+        permission.code
+        for permission in permission_crud.get_user_permissions(db, current_user.id, team_id)
+    }
+    return build_payment_plan_board(
+        db,
+        team_id=team_id,
+        current_user_id=str(current_user.id),
+        permission_codes=permission_codes,
+        plans=plans,
+        legacy_branch_active=not uses_unified_list_query(filters=parsed_filters, sorts=parsed_sorts),
+        due_date_start=due_date_start,
+        due_date_end=due_date_end,
+        filters=parsed_filters,
+        sort=sort,
+        order_by=order_by,
+        order_dir=order_dir,
+        sorts=parsed_sorts,
+        today=date.today(),
     )
 
 
