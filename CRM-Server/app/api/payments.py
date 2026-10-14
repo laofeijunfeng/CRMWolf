@@ -1,5 +1,6 @@
 import logging
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Iterator, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
@@ -63,7 +64,9 @@ from app.schemas.payment import (
     PaymentReminder,
 )
 from app.schemas.payment_plan_board import PaymentPlanBoardResponse
+from app.schemas.payment_record_board import PaymentRecordBoardResponse
 from app.services.payment_plan_board_service import build_payment_plan_board
+from app.services.payment_record_board_service import build_payment_record_board
 from app.services.approval_transaction_manager import approval_transaction_manager
 from app.services.command_execution_service import (
     CommandAlreadyInProgress,
@@ -2030,6 +2033,125 @@ def resolve_payment_record(
             detail="回款登记结果尚未确认",
         )
     return _payment_record_detail_response(record, team_id, current_user, db)
+
+
+@router.get("/payment-records/board", response_model=PaymentRecordBoardResponse)
+def get_payment_record_board(
+    contract_id: int | None = Query(None),
+    payment_plan_id: int | None = Query(None),
+    payment_date_start: date | None = Query(None),
+    payment_date_end: date | None = Query(None),
+    min_amount: float | None = Query(None, ge=0),
+    actual_amount: float | None = Query(None, ge=0),
+    creator_id: str | None = Query(None),
+    keyword: str | None = Query(None),
+    search: str | None = Query(None),
+    record_number: str | None = Query(None),
+    record_number_exclude: str | None = Query(None),
+    customer_name: str | None = Query(None),
+    customer_name_exclude: str | None = Query(None),
+    actual_payer_name: str | None = Query(None),
+    actual_payer_name_exclude: str | None = Query(None),
+    invoice_title_text: str | None = Query(None),
+    invoice_title_text_exclude: str | None = Query(None),
+    contract_name: str | None = Query(None),
+    contract_name_exclude: str | None = Query(None),
+    owner_name: str | None = Query(None),
+    owner_name_exclude: str | None = Query(None),
+    commission_member_name: str | None = Query(None),
+    commission_member_name_exclude: str | None = Query(None),
+    confirmation_status: str | None = Query(None),
+    confirmation_status_exclude: str | None = Query(None),
+    created_time_start: date | None = Query(None),
+    created_time_end: date | None = Query(None),
+    me: bool = Query(False),
+    approval_status: str | None = Query(None),
+    approval_status_exclude: str | None = Query(None),
+    sort: str | None = Query(None),
+    order_by: str | None = Query(None),
+    order_dir: str | None = Query(None),
+    filters: str | None = Query(None),
+    sorts: str | None = Query(None),
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> PaymentRecordBoardResponse:
+    current_user_id = resolve_payment_scope_user_id(
+        db,
+        current_user,
+        team_id,
+        me=me,
+        missing_detail="没有查看回款记录的权限",
+    )
+    parsed_filters, parsed_sorts = optional_request_list_query(
+        filters_raw=filters,
+        sorts_raw=sorts,
+    )
+    if approval_status == "confirmed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="回款记录看板使用审批状态 approved，不接受确认页签 confirmed",
+        )
+    decimal_min_amount = Decimal(str(min_amount)) if min_amount else None
+    decimal_actual_amount = Decimal(str(actual_amount)) if actual_amount is not None else None
+    records = run_or_400(lambda: payment_record_crud.build_population_query(
+        db,
+        team_id=team_id,
+        contract_id=contract_id,
+        payment_plan_id=payment_plan_id,
+        payment_date_start=payment_date_start,
+        payment_date_end=payment_date_end,
+        min_amount=float(decimal_min_amount) if decimal_min_amount is not None else None,
+        actual_amount=float(decimal_actual_amount) if decimal_actual_amount is not None else None,
+        creator_id=creator_id,
+        keyword=keyword,
+        search=search,
+        record_number=record_number,
+        record_number_exclude=record_number_exclude,
+        customer_name=customer_name,
+        customer_name_exclude=customer_name_exclude,
+        actual_payer_name=actual_payer_name,
+        actual_payer_name_exclude=actual_payer_name_exclude,
+        invoice_title_text=invoice_title_text,
+        invoice_title_text_exclude=invoice_title_text_exclude,
+        contract_name=contract_name,
+        contract_name_exclude=contract_name_exclude,
+        owner_name=owner_name,
+        owner_name_exclude=owner_name_exclude,
+        commission_member_name=commission_member_name,
+        commission_member_name_exclude=commission_member_name_exclude,
+        confirmation_status=confirmation_status,
+        confirmation_status_exclude=confirmation_status_exclude,
+        created_time_start=created_time_start,
+        created_time_end=created_time_end,
+        current_user_id=current_user_id,
+        approval_status=approval_status,
+        sort=sort,
+        order_by=order_by,
+        order_dir=order_dir,
+        filters=parsed_filters,
+        sorts=parsed_sorts,
+    ).all())
+    permission_codes = {
+        permission.code
+        for permission in permission_crud.get_user_permissions(db, current_user.id, team_id)
+    }
+    return build_payment_record_board(
+        db,
+        team_id=team_id,
+        current_user_id=str(current_user.id),
+        permission_codes=permission_codes,
+        records=records,
+        legacy_branch_active=not uses_unified_list_query(filters=parsed_filters, sorts=parsed_sorts),
+        payment_date_start=payment_date_start,
+        payment_date_end=payment_date_end,
+        filters=parsed_filters,
+        sort=sort,
+        order_by=order_by,
+        order_dir=order_dir,
+        sorts=parsed_sorts,
+        today=date.today(),
+    )
 
 
 @router.get(
