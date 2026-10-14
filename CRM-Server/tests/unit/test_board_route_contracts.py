@@ -538,13 +538,18 @@ def test_missing_view_permission_returns_route_specific_403(contract, request) -
 def test_own_only_scope_excludes_other_user_from_summary_trends_counts_and_previews(contract, request) -> None:
     api_env = request.getfixturevalue(f"{contract['name']}_api_env")
     module = MODULES[contract["name"]]
-    if contract["name"] in {"customer", "opportunity"}:
+    if contract["name"] in {"customer", "opportunity", "contract"}:
         class _FrozenDate(date):
             @classmethod
             def today(cls) -> date:
                 return date(2026, 10, 12)
 
-        module_date = customer_api.customers_api if contract["name"] == "customer" else opportunity_api.opportunities_api
+        if contract["name"] == "customer":
+            module_date = customer_api.customers_api
+        elif contract["name"] == "opportunity":
+            module_date = opportunity_api.opportunities_api
+        else:
+            module_date = contract_api.contracts_api
         request.getfixturevalue("monkeypatch").setattr(module_date, "date", _FrozenDate)
     if contract["name"] in {"payment_plan", "payment_record"}:
         module._freeze(request.getfixturevalue("monkeypatch"), date(2026, 10, 12))
@@ -565,6 +570,9 @@ def test_own_only_scope_excludes_other_user_from_summary_trends_counts_and_previ
     assert sum(point["count"] for point in totals["trends"]) == 1
     if contract["name"] in {"customer", "opportunity"}:
         assert "2026-06" in {point["date"] for point in totals["trends"]}
+    if contract["name"] == "contract":
+        june = next(point for point in totals["trends"] if point["date"] == "2026-06")
+        assert june["count"] == 1
 
 
 @pytest.mark.parametrize("contract", ROUTE_CONTRACTS, ids=lambda item: item["name"])
