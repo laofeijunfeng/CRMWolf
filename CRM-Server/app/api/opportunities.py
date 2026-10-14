@@ -38,6 +38,8 @@ from app.core.database import SessionLocal
 from app.schemas.list_export import OpportunityListExportRequest
 from fastapi.responses import FileResponse
 from typing import Iterator
+from app.schemas.opportunity_board import OpportunityBoardResponse
+from app.services.opportunity_board_service import build_opportunity_board
 from app.schemas.common import PaginatedResponse
 from app.schemas.opportunity import (
     MessageResponse,
@@ -680,6 +682,109 @@ def get_available_opportunities_for_contract(
         }))
 
     return result
+
+
+@router.get("/board", response_model=OpportunityBoardResponse)
+def get_opportunity_board(
+    opportunity_status: str | None = Query(None, alias="status"),
+    status_exclude: str | None = Query(None),
+    stage_id: int | None = Query(None),
+    owner_id: str | None = Query(None),
+    owner_id_exclude: str | None = Query(None),
+    customer_public_id: str | None = Query(None, alias="customer_id"),
+    keyword: str | None = Query(None),
+    customer_keyword: str | None = Query(None),
+    search: str | None = Query(None),
+    license_type: str | None = Query(None),
+    license_type_exclude: str | None = Query(None),
+    purchase_type: str | None = Query(None),
+    purchase_type_exclude: str | None = Query(None),
+    stage_name: str | None = Query(None),
+    expected_closing_date_start: date | None = Query(None),
+    expected_closing_date_end: date | None = Query(None),
+    order_by: str | None = Query(None),
+    order_dir: str | None = Query(None),
+    filters: str | None = Query(None),
+    sorts: str | None = Query(None),
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> OpportunityBoardResponse:
+    from app.crud.permission import permission_crud
+
+    user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+    permission_codes = {permission.code for permission in user_permissions}
+    has_view_all = "opportunity:view:all" in permission_codes
+    parsed_filters, parsed_sorts = optional_request_list_query(
+        filters_raw=filters,
+        sorts_raw=sorts,
+    )
+    internal_customer_id = None
+    if customer_public_id is not None:
+        customer = check_customer_view_permission(customer_public_id, team_id, current_user, db)
+        internal_customer_id = customer.id
+
+    current_user_id = str(current_user.id)
+    if uses_unified_list_query(filters=parsed_filters, sorts=parsed_sorts):
+        actual_owner_id = enforce_owner_view_scope(
+            parsed_filters or [],
+            current_user_id=current_user_id,
+            has_view_all=has_view_all,
+            permission_detail="只能查看自己负责的商机，或需要 opportunity:view:all 权限查看他人数据",
+            default_to_self=customer_public_id is None,
+        )
+    else:
+        actual_owner_id = owner_id
+        requested_owner_ids = [item.strip() for item in actual_owner_id.split(",") if item.strip()] if actual_owner_id else []
+        if requested_owner_ids and any(item != current_user_id for item in requested_owner_ids) and not has_view_all:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="只能查看自己负责的商机，或需要 opportunity:view:all 权限查看他人数据",
+            )
+        if customer_public_id is not None:
+            actual_owner_id = None
+        elif actual_owner_id is None and not has_view_all:
+            actual_owner_id = current_user_id
+
+    rows = run_or_400(lambda: opportunity_crud.build_population_query(
+        db,
+        team_id=team_id,
+        status=opportunity_status,
+        status_exclude=status_exclude,
+        stage_id=stage_id,
+        owner_id=actual_owner_id,
+        owner_id_exclude=owner_id_exclude,
+        customer_id=internal_customer_id,
+        keyword=keyword,
+        customer_keyword=customer_keyword,
+        search=search,
+        license_type=license_type,
+        license_type_exclude=license_type_exclude,
+        purchase_type=purchase_type,
+        purchase_type_exclude=purchase_type_exclude,
+        stage_name=stage_name,
+        expected_closing_date_start=expected_closing_date_start,
+        expected_closing_date_end=expected_closing_date_end,
+        order_by=order_by,
+        order_dir=order_dir,
+        filters=parsed_filters,
+        sorts=parsed_sorts,
+    ).all())
+    return build_opportunity_board(
+        db,
+        team_id=team_id,
+        current_user_id=current_user_id,
+        permission_codes=permission_codes,
+        rows=rows,
+        legacy_branch_active=not uses_unified_list_query(filters=parsed_filters, sorts=parsed_sorts),
+        created_time_start=None,
+        created_time_end=None,
+        filters=parsed_filters,
+        order_by=order_by,
+        order_dir=order_dir,
+        sorts=parsed_sorts,
+        today=date.today(),
+    )
 
 
 @router.get("/{opportunity_id}", response_model=OpportunityDetailResponse, summary="获取商机详情", description="返回商机完整信息及关联的客户、负责人、创建人等信息")
