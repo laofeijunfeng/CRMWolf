@@ -293,7 +293,7 @@ def _parse_value(field: ListQueryField, value: Any) -> Any:
     if field.type == "number":
         return _parse_number(value)
     if field.type == "date":
-        return _parse_date(value)
+        return parse_date_value(value)
     return str(value).strip()
 
 
@@ -319,7 +319,7 @@ def _parse_number(value: Any):
         return None
 
 
-def _parse_date(value: Any):
+def parse_date_value(value: object) -> datetime | None:
     if isinstance(value, datetime):
         return value
     if isinstance(value, date):
