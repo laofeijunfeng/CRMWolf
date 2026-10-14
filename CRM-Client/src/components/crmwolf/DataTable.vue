@@ -444,11 +444,13 @@ function buildColumnPreferenceConfig(columns: ColumnConfigOption[]): ViewPrefere
   return {
     ...(existingConfig ?? { version: 1, columns: [] }),
     version: 1,
-    columns: columns.map((column, index) => ({
-      key: column.key,
-      order: index * 10,
-      visible: column.visible,
-    })),
+    columns: columns
+      .filter((column) => column.configurable || column.hideable)
+      .map((column, index) => ({
+        key: column.key,
+        order: index * 10,
+        visible: column.visible,
+      })),
     ...(activeMode === undefined ? {} : { display_mode: activeMode }),
   }
 }

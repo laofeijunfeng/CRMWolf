@@ -728,6 +728,7 @@ describe('DataTable display mode selector', () => {
         pageSize: 10,
         viewKey: 'customers.list',
         columnConfigEnabled: true,
+        fixedLeftCount: 0,
         viewDisplayMode: 'table',
         viewDisplayModeEnabled: true,
       },
@@ -819,6 +820,13 @@ describe('customer display mode normalization and saved-view rollback', () => {
     if (resolveApply === undefined) throw new Error('refresh was not started')
     resolveApply(false)
     await Promise.resolve()
+
+    expect(activeTab.value).toBe('all')
+    expect(activeFilters.value).toEqual([{ field: 'status', op: 'eq', value: 'following' }])
+    expect(activeSorts.value).toEqual([{ field: 'updated_time', direction: 'desc' }])
+    expect(activeColumns.value).toEqual([{ key: 'name', order: 0, visible: true }])
+    expect(displayMode.value).toBe('table')
+    expect(views.applyError.value).toMatchObject({ retryable: true })
 
     resolveRefresh = undefined
     const retryPromise = views.retryViewApply()

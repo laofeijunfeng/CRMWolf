@@ -20,6 +20,7 @@ interface UseCustomFilterViewsOptions {
   builtInDisplayMode?: ViewDisplayMode
   normalizeDisplayMode?: (mode: ViewDisplayMode | null | undefined) => 'table' | 'board'
   getBuiltInFilters?: (tabKey: string) => ListFilterCondition[]
+  refresh: () => boolean | undefined | Promise<unknown>
   onViewApplySuccess?: (tabKey: string) => void
 }
 

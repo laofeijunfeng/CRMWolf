@@ -130,8 +130,11 @@ describe('overlay panel chrome', () => {
 
     await openToolbarPopover(wrapper, '视图配置')
 
-    expect(document.body.textContent).toContain('看板视图')
+    expect(document.body.textContent).toContain('列表')
+    expect(document.body.textContent).toContain('看板')
+    expect(document.body.textContent).not.toContain('看板视图')
     expect(document.body.textContent).toContain('字段')
+    expect(document.body.querySelector('[role="switch"]')).toBeNull()
     expect(findButton('关闭')).toBeTruthy()
   })
 })

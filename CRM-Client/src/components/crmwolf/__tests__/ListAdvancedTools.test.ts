@@ -224,9 +224,16 @@ describe('ListAdvancedTools', () => {
     expect(trigger).toBeDefined()
     trigger?.click()
     await flushPromises()
-    const boardSwitch = document.body.querySelector('[role="switch"]')
-    expect(boardSwitch).not.toBeNull()
-    ;(boardSwitch as HTMLElement).click()
+    const board = Array.from(document.body.querySelectorAll('button')).find((item) => (
+      item.textContent?.trim() === '看板'
+    ))
+    const list = Array.from(document.body.querySelectorAll('button')).find((item) => (
+      item.textContent?.trim() === '列表'
+    ))
+    expect(board).toBeInstanceOf(HTMLButtonElement)
+    expect(list).toBeInstanceOf(HTMLButtonElement)
+    expect(document.body.querySelector('[role="switch"]')).toBeNull()
+    board?.click()
     await flushPromises()
     expect(wrapper.emitted('update:view-display-mode')).toEqual([['board']])
   })
@@ -262,7 +269,8 @@ describe('ListAdvancedTools', () => {
     const wrapper = mount(ListAdvancedTools, { props, attachTo: document.body })
     wrappers.push(wrapper)
     await flushPromises()
-    expect(document.body.textContent).not.toContain('看板视图')
+    expect(document.body.textContent).not.toContain('看板')
+    expect(document.body.textContent).not.toContain('列表')
     expect(document.body.textContent).not.toContain('视图配置')
     expect(document.body.textContent).toContain('字段配置')
   })
@@ -290,11 +298,17 @@ describe('ListAdvancedTools', () => {
     ))
     trigger?.click()
     await flushPromises()
-    const boardSwitch = document.body.querySelector('[role="switch"]') as HTMLElement | null
-    boardSwitch?.click()
+    const board = Array.from(document.body.querySelectorAll('button')).find((item) => (
+      item.textContent?.trim() === '看板'
+    ))
+    board?.click()
     await wrapper.setProps({ viewDisplayMode: 'board' })
     viewport.setWidth(768)
     await flushPromises()
-    expect(document.body.querySelector('[role="switch"]')?.getAttribute('data-state')).toBe('checked')
+    const selectedBoard = Array.from(document.body.querySelectorAll('button')).find((item) => (
+      item.textContent?.trim() === '看板'
+    ))
+    expect(selectedBoard?.getAttribute('data-state')).toBe('on')
+    expect(document.body.querySelector('[role="switch"]')).toBeNull()
   })
 })
