@@ -869,6 +869,7 @@ function continueEditing(): void {
   gap: $wolf-space-lg-v2;
   overflow-y: auto;
   overscroll-behavior: contain;
+  padding-inline: calc($wolf-focus-ring-width-v2 + $wolf-focus-ring-offset-v2);
   scroll-padding-bottom: calc($wolf-space-xl-v2 + $wolf-safe-area-bottom-v2);
 }
 </style>
