@@ -653,7 +653,28 @@ def test_customer_filter_resolves_public_id_before_population_query(api_env) -> 
     assert column["items"][0]["action_state"]["can_edit"] is False
 
 
-def test_approve_requires_current_node_role_and_own_permission(api_env) -> None:
+def test_node_role_user_can_approve_another_users_contract_without_approve_all(api_env) -> None:
+    api_env.db.add(_contract(
+        1,
+        name="他人待审",
+        status="PENDING_REVIEW",
+        approval_phase="pending_review",
+        creator_id="8",
+        owner_id="8",
+    ))
+    _pending_approval(api_env.db, 1, approve_role="SALES_DIRECTOR")
+    api_env.db.commit()
+    _grant(api_env.db, 7, "contract:view:all", role_code="SALES_DIRECTOR")
+
+    response = _board(api_env.client)
+
+    assert response.status_code == 200, response.text
+    actions = _columns(response.json())["PENDING_REVIEW"]["items"][0]["action_state"]
+    assert actions["can_approve"] is True
+    assert actions["can_reject"] is True
+
+
+def test_wrong_node_role_cannot_approve_even_with_approve_all(api_env) -> None:
     api_env.db.add(_contract(
         1,
         name="自建待审",
@@ -664,7 +685,7 @@ def test_approve_requires_current_node_role_and_own_permission(api_env) -> None:
     ))
     _pending_approval(api_env.db, 1, approve_role="SALES_DIRECTOR")
     api_env.db.commit()
-    _grant(api_env.db, 7, "contract:view:all", "contract:approve:all", role_code="FINANCE")
+    _grant(api_env.db, 7, "contract:view:all", "contract:approve:all", "contract:approve:own", role_code="FINANCE")
 
     response = _board(api_env.client)
 
@@ -674,7 +695,9 @@ def test_approve_requires_current_node_role_and_own_permission(api_env) -> None:
     assert actions["can_reject"] is False
 
 
-def test_approve_own_covers_only_contracts_created_by_current_user(api_env) -> None:
+
+
+def test_approve_own_is_required_only_for_contracts_created_by_current_user(api_env) -> None:
     api_env.db.add_all([
         _contract(
             1,
@@ -696,15 +719,23 @@ def test_approve_own_covers_only_contracts_created_by_current_user(api_env) -> N
     _pending_approval(api_env.db, 1, approve_role="SALES_DIRECTOR")
     _pending_approval(api_env.db, 2, approve_role="SALES_DIRECTOR")
     api_env.db.commit()
+    _grant(api_env.db, 7, "contract:view:all", role_code="SALES_DIRECTOR")
+
+    denied = _board(api_env.client)
+
+    assert denied.status_code == 200, denied.text
+    denied_items = {item["id"]: item for item in _columns(denied.json())["PENDING_REVIEW"]["items"]}
+    assert denied_items[1]["action_state"]["can_approve"] is False
+    assert denied_items[1]["action_state"]["can_reject"] is False
+    assert denied_items[2]["action_state"]["can_approve"] is True
+    assert denied_items[2]["action_state"]["can_reject"] is True
+
     _grant(api_env.db, 7, "contract:view:all", "contract:approve:own", role_code="SALES_DIRECTOR")
+    allowed = _board(api_env.client)
 
-    response = _board(api_env.client)
-
-    assert response.status_code == 200, response.text
-    items = {item["id"]: item for item in _columns(response.json())["PENDING_REVIEW"]["items"]}
-    own_actions = items[1]["action_state"]
-    other_actions = items[2]["action_state"]
-    assert own_actions["can_approve"] is True
-    assert own_actions["can_reject"] is True
-    assert other_actions["can_approve"] is False
-    assert other_actions["can_reject"] is False
+    assert allowed.status_code == 200, allowed.text
+    allowed_items = {item["id"]: item for item in _columns(allowed.json())["PENDING_REVIEW"]["items"]}
+    assert allowed_items[1]["action_state"]["can_approve"] is True
+    assert allowed_items[1]["action_state"]["can_reject"] is True
+    assert allowed_items[2]["action_state"]["can_approve"] is True
+    assert allowed_items[2]["action_state"]["can_reject"] is True
