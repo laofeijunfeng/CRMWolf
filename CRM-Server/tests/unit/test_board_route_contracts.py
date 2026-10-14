@@ -538,6 +538,14 @@ def test_missing_view_permission_returns_route_specific_403(contract, request) -
 def test_own_only_scope_excludes_other_user_from_summary_trends_counts_and_previews(contract, request) -> None:
     api_env = request.getfixturevalue(f"{contract['name']}_api_env")
     module = MODULES[contract["name"]]
+    if contract["name"] in {"customer", "opportunity"}:
+        class _FrozenDate(date):
+            @classmethod
+            def today(cls) -> date:
+                return date(2026, 10, 12)
+
+        module_date = customer_api.customers_api if contract["name"] == "customer" else opportunity_api.opportunities_api
+        request.getfixturevalue("monkeypatch").setattr(module_date, "date", _FrozenDate)
     if contract["name"] in {"payment_plan", "payment_record"}:
         module._freeze(request.getfixturevalue("monkeypatch"), date(2026, 10, 12))
     SEEDERS[contract["name"]](api_env, count=1, include_other=True)
@@ -554,7 +562,9 @@ def test_own_only_scope_excludes_other_user_from_summary_trends_counts_and_previ
     populated = [column for column in totals["columns"] if column["count"]]
     assert len(populated) == 1
     assert populated[0]["count"] == 1
-    assert sum(point["count"] for point in totals["trends"]) <= 1
+    assert sum(point["count"] for point in totals["trends"]) == 1
+    if contract["name"] in {"customer", "opportunity"}:
+        assert "2026-06" in {point["date"] for point in totals["trends"]}
 
 
 @pytest.mark.parametrize("contract", ROUTE_CONTRACTS, ids=lambda item: item["name"])
