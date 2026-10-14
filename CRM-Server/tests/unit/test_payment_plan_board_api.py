@@ -655,3 +655,39 @@ def test_preview_limit_keeps_full_totals_and_sort_changes_order_only(api_env, mo
             continue
         assert _columns(default_body)[key]["count"] == 0
         assert {name: _columns(default_body)[key][name] for name in ZERO_AMOUNTS} == ZERO_AMOUNTS
+
+
+def test_view_all_non_owner_matches_edit_and_delete_endpoints(api_env) -> None:
+    api_env.db.add_all([
+        _contract(1, name="他人合同", customer_id=2, opportunity_id=2, owner_id="8"),
+        _plan(1, contract_id=1, name="可改可删", amount="10.00", status="PENDING", due_date=date(2026, 6, 2)),
+        _plan(2, contract_id=1, name="已有记录", amount="20.00", status="PARTIAL", due_date=date(2026, 6, 3)),
+        _record(1, plan_id=2, amount="5.00", payment_date=date(2026, 5, 1), approval_phase="draft"),
+    ])
+    api_env.db.commit()
+    _grant(api_env.db, 7, "payment:view:all", "payment:plan:edit", "payment:plan:delete")
+
+    response = _board(api_env.client)
+
+    assert response.status_code == 200, response.text
+    columns = _columns(response.json())
+    editable = columns["PENDING"]["items"][0]
+    assert editable["owner"]["id"] == "8"
+    assert editable["action_state"] == {"can_edit": True, "can_delete": True, "can_view_detail": True}
+    recorded = columns["PARTIAL"]["items"][0]
+    assert recorded["action_state"] == {"can_edit": False, "can_delete": False, "can_view_detail": True}
+
+
+def test_completed_plan_without_records_can_delete_but_not_edit(api_env) -> None:
+    api_env.db.add_all([
+        _contract(1, name="甲合同"),
+        _plan(1, contract_id=1, name="已登记无记录", amount="40.00", status="COMPLETED", due_date=date(2026, 8, 5)),
+    ])
+    api_env.db.commit()
+    _grant(api_env.db, 7, "payment:view:all", "payment:plan:edit", "payment:plan:delete")
+
+    response = _board(api_env.client)
+
+    assert response.status_code == 200, response.text
+    item = _columns(response.json())["COMPLETED"]["items"][0]
+    assert item["action_state"] == {"can_edit": False, "can_delete": True, "can_view_detail": True}

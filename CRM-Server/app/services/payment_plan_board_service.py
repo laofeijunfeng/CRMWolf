@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import func
+from sqlalchemy import exists, func
 from sqlalchemy.orm import Session
 
 from app.core.list_query.types import FilterCondition, ListQueryContext, SortCondition
@@ -98,6 +98,7 @@ def build_payment_plan_board(
     """Group every authorized plan before preview truncation."""
     materialized = list(plans)
     paid_by_plan = sum_canonical_approved_amounts(db, team_id, [int(plan.id) for plan in materialized])
+    plans_with_records = _plans_with_records(db, team_id, [int(plan.id) for plan in materialized])
     owners = _owner_map(db, materialized)
     buckets: dict[str, list[PaymentPlan]] = {key: [] for key in COLUMN_KEYS}
     for plan in materialized:
@@ -108,6 +109,7 @@ def build_payment_plan_board(
             key,
             buckets[key],
             paid_by_plan,
+            plans_with_records,
             owners,
             current_user_id,
             permission_codes,
@@ -159,6 +161,23 @@ def sum_canonical_approved_amounts(
     for plan_id, amount in rows:
         paid[int(plan_id)] = Decimal(str(amount or 0))
     return paid
+
+
+def _plans_with_records(db: Session, team_id: int, plan_ids: Sequence[int]) -> set[int]:
+    """Return plan IDs that have at least one payment record."""
+    if not plan_ids:
+        return set()
+    record_exists = exists().where(PaymentRecord.payment_plan_id == PaymentPlan.id)
+    rows = (
+        db.query(PaymentPlan.id)
+        .filter(
+            PaymentPlan.team_id == team_id,
+            PaymentPlan.id.in_(plan_ids),
+            record_exists,
+        )
+        .all()
+    )
+    return {int(plan_id) for (plan_id,) in rows}
 
 
 def _column_key(plan: PaymentPlan) -> str:
@@ -216,6 +235,7 @@ def _column(
     key: str,
     plans: Sequence[PaymentPlan],
     paid_by_plan: Mapping[int, Decimal],
+    plans_with_records: set[int],
     owners: Mapping[str, BoardOwner],
     current_user_id: str,
     permission_codes: set[str],
@@ -257,7 +277,7 @@ def _column(
         remaining_amount=money_string(remaining_total),
         overdue_remaining_amount=money_string(overdue_remaining),
         items=[
-            _item(plan, key, paid_by_plan, owners, current_user_id, permission_codes)
+            _item(plan, key, paid_by_plan, plans_with_records, owners, current_user_id, permission_codes)
             for plan in shown
         ],
         has_more=remaining_count > 0,
@@ -269,6 +289,7 @@ def _item(
     plan: PaymentPlan,
     key: str,
     paid_by_plan: Mapping[int, Decimal],
+    plans_with_records: set[int],
     owners: Mapping[str, BoardOwner],
     current_user_id: str,
     permission_codes: set[str],
@@ -299,27 +320,23 @@ def _item(
             paid_amount=paid_text,
             remaining_amount=remaining_text,
         ),
-        action_state=_action_state(plan, key, owner_id, current_user_id, permission_codes),
+        action_state=_action_state(plan, key, plans_with_records, permission_codes),
     )
 
 
 def _action_state(
     plan: PaymentPlan,
     key: str,
-    owner_id: str | None,
-    current_user_id: str,
+    plans_with_records: set[int],
     permission_codes: set[str],
 ) -> PaymentPlanBoardActionState:
-    owns_row = owner_id == str(current_user_id)
-    editable = key != "COMPLETED" and not plan.payment_records
-    can_edit = editable and (
-        "payment:plan:edit:all" in permission_codes
-        or ("payment:plan:edit" in permission_codes and owns_row)
+    has_records = int(plan.id) in plans_with_records
+    can_edit = (
+        "payment:plan:edit" in permission_codes
+        and key != "COMPLETED"
+        and not has_records
     )
-    can_delete = editable and (
-        "payment:plan:delete:all" in permission_codes
-        or ("payment:plan:delete" in permission_codes and owns_row)
-    )
+    can_delete = "payment:plan:delete" in permission_codes and not has_records
     return PaymentPlanBoardActionState(
         can_edit=can_edit,
         can_delete=can_delete,
