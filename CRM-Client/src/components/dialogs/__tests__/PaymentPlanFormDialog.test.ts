@@ -2,7 +2,8 @@ import { defineComponent, h, nextTick, ref, type VNode } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import PaymentPlanFormDialog from '../PaymentPlanFormDialog.vue'
-import contractApi from '@/api/contract'
+import contractApi, { type ContractListResponse } from '@/api/contract'
+import { opportunityApi, type Opportunity } from '@/api/opportunity'
 import paymentApi, { type PaymentPlanResponse } from '@/api/payment'
 import { formatCurrency } from '@/utils/format'
 
@@ -52,9 +53,12 @@ const DateFieldStub = defineComponent({
   inheritAttrs: false,
   props: { modelValue: { type: [String, Date], default: null } },
   emits: ['update:modelValue'],
-  setup(_, { emit, attrs }): () => VNode {
+  setup(props, { emit, attrs }): () => VNode {
     return () => h('input', {
       ...attrs,
+      value: props.modelValue instanceof Date
+        ? `${props.modelValue.getFullYear()}-${String(props.modelValue.getMonth() + 1).padStart(2, '0')}-${String(props.modelValue.getDate()).padStart(2, '0')}`
+        : '',
       onInput: () => emit('update:modelValue', new Date(2026, 8, 4)),
     })
   },
@@ -406,6 +410,85 @@ describe('PaymentPlanFormDialog', () => {
     expect(wrapper.get('[data-testid="payment-plan-amount-helper"]').text()).toBe(
       `还可分配 ${formatCurrency(0)}`,
     )
+    wrapper.unmount()
+  })
+
+
+  it('prefills the plan date from the opportunity expected close date on create', async () => {
+    const wrapper = mount(PaymentPlanFormDialog, {
+      props: {
+        open: true,
+        mode: 'create',
+        fixedContract: {
+          id: 1,
+          contract_name: '合同',
+          total_amount: 40000,
+          expected_closing_date: '2026-11-15',
+        },
+      },
+      global: { stubs: formStubs },
+    })
+    await flushPromises()
+
+    expect((wrapper.get('#payment-plan-due-date').element as HTMLInputElement).value).toBe('2026-11-15')
+    wrapper.unmount()
+  })
+
+  it('keeps an existing plan date when editing', async () => {
+    const current = existingPlan(12000, 1)
+    vi.spyOn(paymentApi, 'getPaymentPlans').mockResolvedValue([current])
+
+    const wrapper = mount(PaymentPlanFormDialog, {
+      props: {
+        open: true,
+        mode: 'edit',
+        plan: current,
+        fixedContract: {
+          id: 1,
+          contract_name: '合同',
+          total_amount: 40000,
+          expected_closing_date: '2026-11-15',
+        },
+      },
+      global: { stubs: formStubs },
+    })
+    await flushPromises()
+
+    expect((wrapper.get('#payment-plan-due-date').element as HTMLInputElement).value).toBe('2026-08-01')
+    wrapper.unmount()
+  })
+
+  it('loads the opportunity close date when the selected contract only has an opportunity id', async () => {
+    vi.spyOn(contractApi, 'getCustomerContracts').mockResolvedValue([{
+      id: 1,
+      contract_name: '合同',
+      total_amount: '40000',
+      opportunity_id: 'opp-1',
+    } as ContractListResponse])
+    vi.spyOn(opportunityApi, 'getOpportunity').mockResolvedValue({
+      expected_closing_date: '2026-11-15',
+    } as Opportunity)
+
+    const wrapper = mount(PaymentPlanFormDialog, {
+      props: {
+        open: true,
+        mode: 'create',
+      },
+      global: { stubs: formStubs },
+    })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      form: { customerId: string; contractId: string }
+      fetchContracts: (customerId?: string) => Promise<void>
+    }
+    vm.form.customerId = 'customer-1'
+    await vm.fetchContracts('customer-1')
+    vm.form.contractId = '1'
+    await flushPromises()
+
+    expect(opportunityApi.getOpportunity).toHaveBeenCalledWith('opp-1')
+    expect((wrapper.get('#payment-plan-due-date').element as HTMLInputElement).value).toBe('2026-11-15')
     wrapper.unmount()
   })
 

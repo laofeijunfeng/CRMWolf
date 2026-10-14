@@ -29,6 +29,7 @@ import {
 } from '@/components/crmwolf'
 import contractApi, { type ContractListResponse } from '@/api/contract'
 import customerApi, { type CustomerResponse } from '@/api/customer'
+import { opportunityApi } from '@/api/opportunity'
 import paymentApi, {
   type PaymentPlanCreate,
   type PaymentPlanResponse,
@@ -74,6 +75,8 @@ interface PaymentPlanContractOption {
   contract_name: string
   total_amount: string | number
   customer_name?: string
+  opportunity_id?: string | null
+  expected_closing_date?: string | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -555,10 +558,59 @@ async function refreshAllocation(contractId: number): Promise<void> {
   await Promise.all([
     loadExistingPlans(contractId, generation),
     loadContractTotalForEdit(contractId, generation),
+    prefillCreateDueDate(contractId, generation),
   ])
   if (generation !== allocationLoadGeneration) return
   applyCreatePrefill()
   validatePlannedAmount('input')
+}
+
+
+async function prefillCreateDueDate(contractId: number, generation: number): Promise<void> {
+  if (!isCreateMode.value) return
+  const knownDate = props.fixedContract?.id === contractId
+    ? opportunityCloseDate(props.fixedContract.expected_closing_date)
+    : ''
+  if (knownDate !== '') {
+    if (generation !== allocationLoadGeneration) return
+    applyCreateDueDatePrefill(knownDate)
+    return
+  }
+
+  let opportunityId = props.fixedContract?.id === contractId
+    ? props.fixedContract.opportunity_id ?? ''
+    : contracts.value.find((contract) => contract.id === contractId)?.opportunity_id ?? ''
+  if (opportunityId.trim() === '') {
+    try {
+      const contract = await contractApi.getContract(contractId)
+      if (generation !== allocationLoadGeneration) return
+      opportunityId = contract.opportunity_id ?? ''
+    } catch {
+      return
+    }
+  }
+  if (opportunityId.trim() === '') return
+
+  try {
+    const opportunity = await opportunityApi.getOpportunity(opportunityId)
+    if (generation !== allocationLoadGeneration) return
+    applyCreateDueDatePrefill(opportunity.expected_closing_date)
+  } catch {
+    // 预计成交日期拿不到时，计划日期保持空白，仍由用户手选。
+  }
+}
+
+function opportunityCloseDate(value: string | null | undefined): string {
+  const date = value?.trim() ?? ''
+  return isValidLocalDate(date) ? date : ''
+}
+
+function applyCreateDueDatePrefill(date: string): void {
+  if (!isCreateMode.value || form.dueDate.trim() !== '') return
+  const closeDate = opportunityCloseDate(date)
+  if (closeDate === '') return
+  form.dueDate = closeDate
+  initialForm.value = { ...form }
 }
 
 function applyCreatePrefill(): void {
