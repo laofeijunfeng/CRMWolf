@@ -1,6 +1,6 @@
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { toast } from 'vue-sonner'
-import { viewPreferenceApi, type ViewDisplayMode, type ViewPreferenceConfig, type ViewPreferenceItem } from '@/api/viewPreference'
+import { viewPreferenceApi, type ViewDisplayMode, type ViewPreferenceConfig, type ViewPreferenceItem, normalizeCustomerDisplayMode } from '@/api/viewPreference'
 import type { TabItem } from '@/stores/header'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
@@ -18,8 +18,8 @@ interface UseCustomFilterViewsOptions {
   activeColumns: Ref<ViewPreferenceConfig['columns']>
   activeDisplayMode?: Ref<ViewDisplayMode>
   builtInDisplayMode?: ViewDisplayMode
+  normalizeDisplayMode?: (mode: ViewDisplayMode | null | undefined) => 'table' | 'board'
   getBuiltInFilters?: (tabKey: string) => ListFilterCondition[]
-  refresh: () => boolean | undefined | Promise<unknown>
   onViewApplySuccess?: (tabKey: string) => void
 }
 
@@ -259,7 +259,9 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
       options.activeSorts.value = (view.config.sorts ?? []) as unknown as ListSortCondition[]
       options.activeColumns.value = view.config.columns ?? []
       if (options.activeDisplayMode !== undefined && view.config.display_mode != null) {
-        options.activeDisplayMode.value = view.config.display_mode
+        options.activeDisplayMode.value = options.normalizeDisplayMode === undefined
+          ? view.config.display_mode
+          : options.normalizeDisplayMode(view.config.display_mode)
       }
       options.activeTab.value = buildTabKey(view.id)
       await options.refresh()
@@ -336,6 +338,15 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
         committedViewSnapshot.value = cloneSnapshot(target)
         pendingViewApply.value = null
         options.onViewApplySuccess?.(target.activeTab)
+        if (
+          options.normalizeDisplayMode === normalizeCustomerDisplayMode
+          && options.activeDisplayMode?.value === 'board'
+        ) {
+          const appliedView = findViewByTabKey(target.activeTab)
+          if (appliedView?.config.display_mode === 'chart') {
+            await updateActiveCustomViewConfig()
+          }
+        }
       }
     } catch {
       if (sequence !== viewApplySequence) return
@@ -363,7 +374,9 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
       columns: view.config.columns ?? [],
       ...(options.activeDisplayMode === undefined
         ? {}
-        : { displayMode: view.config.display_mode ?? 'table' }),
+        : { displayMode: options.normalizeDisplayMode === undefined
+          ? view.config.display_mode ?? 'table'
+          : options.normalizeDisplayMode(view.config.display_mode) }),
     }
     void performViewApply(target, previous)
     return true

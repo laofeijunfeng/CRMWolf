@@ -248,7 +248,7 @@ const emit = defineEmits<{
   'column-config-current-change': [value: ViewPreferenceConfig]
   'column-config-save': [value: ViewPreferenceConfig]
   'column-config-reset': []
-  'update:view-display-mode': [value: ViewDisplayMode]
+  'update:view-display-mode': [value: 'table' | 'board']
   'save-current-view': []
   'remove-filter': [id: string]
   'clear-filters': []
@@ -437,15 +437,19 @@ function applyColumnPreference(columns: ProcessedColumn[], config: ViewPreferenc
 }
 
 function buildColumnPreferenceConfig(columns: ColumnConfigOption[]): ViewPreferenceConfig {
+  const activeMode = props.viewDisplayMode === 'table' || props.viewDisplayMode === 'board'
+    ? props.viewDisplayMode
+    : undefined
+  const existingConfig = effectiveColumnPreferenceConfig.value
   return {
+    ...(existingConfig ?? { version: 1, columns: [] }),
     version: 1,
-    columns: columns
-      .filter((column) => column.configurable || column.hideable)
-      .map((column, index) => ({
-        key: column.key,
-        order: index * 10,
-        visible: column.visible,
-      }))
+    columns: columns.map((column, index) => ({
+      key: column.key,
+      order: index * 10,
+      visible: column.visible,
+    })),
+    ...(activeMode === undefined ? {} : { display_mode: activeMode }),
   }
 }
 
@@ -1125,7 +1129,7 @@ onBeforeUnmount(() => {
         </ErrorState>
       </div>
       <div
-        v-else
+        v-else-if="props.viewDisplayMode !== 'board'"
         class="data-table-content"
         :class="[
           { 'has-mobile-cards': mobileMode === 'card' },
@@ -1357,7 +1361,7 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- 分页区（固定在卡片底部） -->
-      <div class="data-table-footer" :class="{ 'data-table-footer--compact': compactPagination }">
+      <div v-if="props.viewDisplayMode !== 'board'" class="data-table-footer" :class="{ 'data-table-footer--compact': compactPagination }">
         <span class="total-text">共 {{ total }} 条</span>
         <Pagination
           :page="page"

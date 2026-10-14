@@ -4,7 +4,7 @@ import { Eye, EyeOff, GripVertical, Lock, Settings2, User, Users } from 'lucide-
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Switch } from '@/components/ui/switch'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import TableToolbarButton from './TableToolbarButton.vue'
 import TableToolbarBuilderPanel from './TableToolbarBuilderPanel.vue'
 import type { ViewDisplayMode, ViewPreferenceScope } from '@/api/viewPreference'
@@ -43,7 +43,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   'update:open': [value: boolean]
-  'update:view-display-mode': [value: ViewDisplayMode]
+  'update:view-display-mode': [value: 'table' | 'board']
   'save-current-view': []
   change: [value: ColumnConfigOption[]]
   save: [scope: ViewPreferenceScope]
@@ -63,11 +63,17 @@ const dragKey = ref<string | null>(null)
 const selectedScope = ref<ViewPreferenceScope>(props.scope)
 const normalizedActiveCount = computed(() => props.activeCount ?? 0)
 const isActive = computed(() => props.active || normalizedActiveCount.value > 0)
-const boardViewEnabled = computed(() => props.viewDisplayMode === 'board')
 const normalizedViewConfigPanelTitle = computed(() => props.viewConfigPanelTitle ?? '字段配置')
+const selectableDisplayMode = computed<'table' | 'board' | undefined>(() => (
+  props.viewDisplayMode === 'table' || props.viewDisplayMode === 'board'
+    ? props.viewDisplayMode
+    : undefined
+))
 
-function handleDisplayModeChange(checked: boolean): void {
-  emit('update:view-display-mode', checked ? 'board' : 'table')
+function emitMode(value: unknown): void {
+  if (value === 'table' || value === 'board') {
+    emit('update:view-display-mode', value)
+  }
 }
 
 function cloneColumns(columns: ColumnConfigOption[]): ColumnConfigOption[] {
@@ -162,16 +168,17 @@ watch(() => props.scope, (scope) => {
           </Button>
         </div>
 
-        <div v-if="viewDisplayModeEnabled" class="column-config-view-section">
-          <div class="column-config-view-row">
-            <span>看板视图</span>
-            <Switch
-              :model-value="boardViewEnabled"
-              aria-label="看板视图"
-              @update:model-value="handleDisplayModeChange"
-            />
-          </div>
-        </div>
+        <ToggleGroup
+          v-if="viewDisplayModeEnabled"
+          type="single"
+          class="column-config-mode-selector"
+          aria-label="展示模式"
+          :model-value="selectableDisplayMode"
+          @update:model-value="emitMode"
+        >
+          <ToggleGroupItem value="table">列表</ToggleGroupItem>
+          <ToggleGroupItem value="board">看板</ToggleGroupItem>
+        </ToggleGroup>
 
         <div v-if="viewDisplayModeEnabled" class="column-config-section-title column-config-section-title--columns">字段</div>
 
@@ -248,9 +255,13 @@ watch(() => props.scope, (scope) => {
   gap: $wolf-space-sm-v2;
 }
 
-.column-config-view-section {
-  display: flex;
-  flex-direction: column;
+.column-config-mode-selector {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: $wolf-space-xs-v2;
+  padding: $wolf-space-xs-v2;
+  border-radius: $wolf-radius-v2;
+  background: $wolf-bg-muted-v2;
 }
 
 .column-config-section-title {
@@ -260,16 +271,6 @@ watch(() => props.scope, (scope) => {
 
 .column-config-section-title--columns {
   margin-top: $wolf-space-sm-v2;
-}
-
-.column-config-view-row {
-  display: flex;
-  min-height: $wolf-touch-target-min-v2;
-  align-items: center;
-  justify-content: space-between;
-  gap: $wolf-space-md-v2;
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-body-v2;
 }
 
 .column-config-list-scroll {

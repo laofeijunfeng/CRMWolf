@@ -4,7 +4,7 @@ import request from '@/utils/request'
 
 export type ViewPreferenceScope = 'personal' | 'team'
 
-export type ViewDisplayMode = 'table' | 'board'
+export type ViewDisplayMode = 'table' | 'board' | 'chart'
 
 export interface ViewPreferenceColumn {
   key: string
@@ -83,7 +83,7 @@ const ViewPreferenceConfigSchema: z.ZodType<ViewPreferenceConfig> = z.object({
   sorts: z.array(z.record(z.string(), z.unknown())).optional(),
   filters: z.array(z.record(z.string(), z.unknown())).optional(),
   density: z.string().nullable().optional(),
-  display_mode: z.enum(['table', 'board']).nullable().optional(),
+  display_mode: z.enum(['table', 'board', 'chart']).nullable().optional(),
 })
 const ViewPreferenceItemSchema: z.ZodType<ViewPreferenceItem> = z.object({
   id: z.number(),
@@ -112,6 +112,10 @@ const ViewPreferenceCustomViewListResponseSchema: z.ZodType<ViewPreferenceCustom
   view_key: z.string(),
   items: z.array(ViewPreferenceItemSchema),
 })
+
+export function normalizeCustomerDisplayMode(mode: ViewDisplayMode | null | undefined): 'table' | 'board' {
+  return mode === 'board' || mode === 'chart' ? 'board' : 'table'
+}
 
 export const viewPreferenceApi = {
   get: (
@@ -169,5 +173,9 @@ export const viewPreferenceApi = {
 
   deleteCustomView: (viewKey: string, id: number): Promise<null> =>
     // eslint-disable-next-line crmwolf/require-zod-schema
-    request.delete<null>(`/v1/view-preferences/${encodeURIComponent(viewKey)}/custom-views/${encodeURIComponent(String(id))}`)
+    request.delete<null>(`/v1/view-preferences/${encodeURIComponent(viewKey)}/custom-views/${encodeURIComponent(String(id))}`),
+
+  parseConfig(data: unknown): ViewPreferenceConfig {
+    return ViewPreferenceConfigSchema.parse(data)
+  },
 }

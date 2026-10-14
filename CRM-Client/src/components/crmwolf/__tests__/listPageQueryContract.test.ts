@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import ts from 'typescript'
 import { listFilterOperatorsByType } from '../listFilterTypes'
+import { normalizeCustomerDisplayMode, viewPreferenceApi } from '@/api/viewPreference'
 
 type BackendCatalogManifest = Record<
   string,
@@ -259,5 +260,29 @@ describe('DataTable frontend/backend list-query contract', () => {
     expect(usersLabelIndex).toBeGreaterThan(statusLabelIndex)
     expect(expiryLabelIndex).toBeGreaterThan(usersLabelIndex)
     expect(detailSource).toContain('customer?.license_authorized_users ?? \'-\'')
+  })
+
+  it('normalizes customer chart preferences without rewriting unrelated chart preferences', () => {
+    const customer = viewPreferenceApi.parseConfig({
+      version: 1,
+      columns: [{ key: 'account_name', order: 0, visible: true }],
+      filters: [{ field: 'account_name', op: 'contains', value: '重点' }],
+      sorts: [{ field: 'updated_time', direction: 'desc' }],
+      display_mode: 'chart',
+    })
+    const unrelated = viewPreferenceApi.parseConfig({
+      version: 1,
+      columns: [],
+      display_mode: 'chart',
+    })
+
+    expect(normalizeCustomerDisplayMode(customer.display_mode)).toBe('board')
+    expect({ ...customer, display_mode: normalizeCustomerDisplayMode(customer.display_mode) }).toEqual({
+      ...customer,
+      display_mode: 'board',
+    })
+    expect(unrelated.display_mode).toBe('chart')
+    expect(customer.filters).toEqual([{ field: 'account_name', op: 'contains', value: '重点' }])
+    expect(customer.sorts).toEqual([{ field: 'updated_time', direction: 'desc' }])
   })
 })

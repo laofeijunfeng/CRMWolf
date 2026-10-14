@@ -1,5 +1,8 @@
+import { ref } from 'vue'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { useCustomFilterViews } from '@/composables/useCustomFilterViews'
+import { normalizeCustomerDisplayMode, viewPreferenceApi, type ViewDisplayMode, type ViewPreferenceConfig, type ViewPreferenceItem } from '@/api/viewPreference'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import DataTable from '../DataTable.vue'
@@ -566,5 +569,267 @@ describe('DataTable row context menu', () => {
     await flushPromises()
     expect(rowActionHandlers.remove).toHaveBeenCalledTimes(1)
     expect(rowActionHandlers.edit).not.toHaveBeenCalled()
+  })
+})
+
+const preferenceColumns = [
+  { key: 'name', order: 0, visible: true },
+  { key: 'status', order: 10, visible: false },
+]
+
+function preferenceItem(displayMode: ViewDisplayMode | null): ViewPreferenceItem {
+  return {
+    id: 7,
+    team_id: 1,
+    user_id: 2,
+    view_key: 'customers.list',
+    scope: 'personal',
+    preference_key: 'custom',
+    name: '重点客户',
+    is_default: false,
+    sort_order: null,
+    config: {
+      version: 1,
+      columns: preferenceColumns,
+      filters: [{ field: 'account_name', op: 'contains', value: '重点' }],
+      sorts: [{ field: 'updated_time', direction: 'desc' }],
+      ...(displayMode === null ? {} : { display_mode: displayMode }),
+    },
+    created_by: 2,
+    updated_by: 2,
+    created_time: '2026-10-14T00:00:00Z',
+    updated_time: '2026-10-14T00:00:00Z',
+  }
+}
+
+describe('DataTable display mode selector', () => {
+  afterEach(() => {
+    document.body.innerHTML = ''
+    vi.restoreAllMocks()
+  })
+
+  async function openModeSelector(mode: ViewDisplayMode | null = 'table'): Promise<VueWrapper> {
+    const wrapper = mount(DataTable, {
+      attachTo: document.body,
+      props: {
+        fields,
+        data,
+        total: 40,
+        page: 3,
+        pageSize: 10,
+        viewKey: 'customers.list',
+        columnConfigEnabled: true,
+        viewDisplayModeEnabled: true,
+        viewDisplayMode: mode,
+      },
+    })
+    await flushPromises()
+    const trigger = Array.from(document.body.querySelectorAll('button')).find((button) => (
+      button.textContent?.includes('字段配置') === true
+    ))
+    trigger?.click()
+    await flushPromises()
+    return wrapper
+  }
+
+  it('renders list and board labels and emits only those modes', async () => {
+    const wrapper = await openModeSelector('table')
+
+    expect(document.body.textContent).toContain('列表')
+    expect(document.body.textContent).toContain('看板')
+    expect(document.body.querySelector('[role="switch"]')).toBeNull()
+
+    const board = Array.from(document.body.querySelectorAll('button')).find((item) => (
+      item.textContent?.trim() === '看板'
+    ))
+    board?.click()
+    await flushPromises()
+
+    expect(wrapper.emitted('update:view-display-mode')).toEqual([['board']])
+    expect(wrapper.emitted('update:view-display-mode')?.flat()).not.toContain('chart')
+    wrapper.unmount()
+  })
+
+  it('rejects a chart value in the selector', async () => {
+    const wrapper = await openModeSelector('chart')
+    const options = ['列表', '看板'].map((label) => (
+      Array.from(document.body.querySelectorAll('button')).find((item) => item.textContent?.trim() === label)
+    ))
+    const selected = options.filter((item) => (
+      item?.getAttribute('data-state') === 'on' || item?.getAttribute('aria-pressed') === 'true'
+    ))
+
+    expect(options.every((item) => item instanceof HTMLButtonElement)).toBe(true)
+    expect(selected).toEqual([])
+    expect(wrapper.emitted('update:view-display-mode')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('hides list-only controls and pagination in board mode without clearing page state', async () => {
+    const wrapper = mount(DataTable, {
+      props: {
+        fields,
+        data,
+        total: 40,
+        page: 3,
+        pageSize: 10,
+        viewDisplayMode: 'board',
+        viewDisplayModeEnabled: true,
+        searchEnabled: true,
+        search: '重点',
+        filterFields: [{ key: 'name', label: '名称', type: 'text' }],
+        filters: [{ field: 'name', op: 'contains', value: '重点' }],
+        sorts: [{ field: 'name', direction: 'asc' }],
+      },
+    })
+
+    expect(wrapper.find('.data-table-footer').exists()).toBe(false)
+    expect(wrapper.find('table.data-table').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('共 40 条')
+    expect(wrapper.props('page')).toBe(3)
+    expect(wrapper.props('filters')).toEqual([{ field: 'name', op: 'contains', value: '重点' }])
+    expect(wrapper.props('sorts')).toEqual([{ field: 'name', direction: 'asc' }])
+    expect(wrapper.emitted('update:page')).toBeUndefined()
+    expect(wrapper.emitted('filter-reset')).toBeUndefined()
+    expect(wrapper.emitted('sort-reset')).toBeUndefined()
+  })
+
+  it('stores display mode with columns and restores both with pagination', async () => {
+    const stored: ViewPreferenceConfig = {
+      version: 1,
+      columns: preferenceColumns,
+      display_mode: 'board',
+    }
+    vi.spyOn(viewPreferenceApi, 'get').mockResolvedValue({
+      view_key: 'customers.list',
+      personal: null,
+      team: null,
+      effective_scope: 'personal',
+      effective_config: stored,
+    })
+    const save = vi.spyOn(viewPreferenceApi, 'save').mockImplementation(async (_viewKey, request) => ({
+      view_key: 'customers.list',
+      personal: null,
+      team: null,
+      effective_scope: request.scope,
+      effective_config: request.config,
+    }))
+
+    const wrapper = mount(DataTable, {
+      attachTo: document.body,
+      props: {
+        fields: [
+          { key: 'name', label: '名称', type: 'text', column: true },
+          { key: 'status', label: '状态', type: 'text', column: true },
+        ] satisfies ListFieldDefinition[],
+        data: [{ id: 1, name: '客户 A', status: '跟进中' }],
+        total: 40,
+        page: 3,
+        pageSize: 10,
+        viewKey: 'customers.list',
+        columnConfigEnabled: true,
+        viewDisplayMode: 'table',
+        viewDisplayModeEnabled: true,
+      },
+    })
+    await flushPromises()
+    expect(wrapper.findAll('th').map((header) => header.text())).toEqual(['名称'])
+
+    await wrapper.setProps({ viewDisplayMode: 'board' })
+    expect(wrapper.find('.data-table-footer').exists()).toBe(false)
+    expect(wrapper.props('page')).toBe(3)
+
+    const trigger = Array.from(document.body.querySelectorAll('button')).find((button) => (
+      button.textContent?.includes('字段配置') === true
+    ))
+    trigger?.click()
+    await flushPromises()
+    Array.from(document.body.querySelectorAll('button')).find((button) => (
+      button.textContent?.replace(/\s+/g, '') === '保存'
+    ))?.click()
+    await flushPromises()
+
+    expect(JSON.stringify(save.mock.calls[0]?.[1]?.config)).toBe(JSON.stringify({
+      version: 1,
+      columns: preferenceColumns,
+      display_mode: 'board',
+    }))
+
+    await wrapper.setProps({ viewDisplayMode: 'table' })
+    expect(wrapper.findAll('th').map((header) => header.text())).toEqual(['名称'])
+    expect(wrapper.find('.data-table-footer').text()).toContain('共 40 条')
+    expect(wrapper.props('page')).toBe(3)
+    wrapper.unmount()
+  })
+})
+
+describe('customer display mode normalization and saved-view rollback', () => {
+  it('normalizes only customer chart preferences to board', () => {
+    expect(normalizeCustomerDisplayMode('chart')).toBe('board')
+    expect(normalizeCustomerDisplayMode('board')).toBe('board')
+    expect(normalizeCustomerDisplayMode('table')).toBe('table')
+    expect(normalizeCustomerDisplayMode(null)).toBe('table')
+    expect(normalizeCustomerDisplayMode(undefined)).toBe('table')
+  })
+
+  it('keeps a non-customer stored chart value unchanged', () => {
+    const parsed = viewPreferenceApi.parseConfig({
+      version: 1,
+      columns: [],
+      display_mode: 'chart',
+    })
+
+    expect(parsed.display_mode).toBe('chart')
+    expect(normalizeCustomerDisplayMode('chart')).toBe('board')
+  })
+
+  it('saves normalized board after a successful customer view apply and rolls back synchronously', async () => {
+    const activeTab = ref('all')
+    const activeFilters = ref([{ field: 'status', op: 'eq', value: 'following' }])
+    const activeSorts = ref([{ field: 'updated_time', direction: 'desc' }])
+    const activeColumns = ref([{ key: 'name', order: 0, visible: true }])
+    const displayMode = ref<'table' | 'board'>('table')
+    const page = ref(3)
+    let resolveRefresh: ((value: boolean) => void) | undefined
+    const refresh = vi.fn(() => new Promise<boolean>((resolve) => {
+      resolveRefresh = resolve
+    }))
+    const update = vi.spyOn(viewPreferenceApi, 'updateCustomView').mockResolvedValue(
+      preferenceItem('board'),
+    )
+    const views = useCustomFilterViews({
+      viewKey: 'customers.list',
+      activeTab,
+      activeFilters,
+      activeSorts,
+      activeColumns,
+      activeDisplayMode: displayMode,
+      normalizeDisplayMode: normalizeCustomerDisplayMode,
+      refresh,
+    })
+    views.customViews.value = [preferenceItem('chart')]
+
+    expect(views.applyCustomViewTab('custom-view:7')).toBe(true)
+    expect(activeTab.value).toBe('custom-view:7')
+    expect(displayMode.value).toBe('board')
+    expect(update).not.toHaveBeenCalled()
+    expect(refresh).toHaveBeenCalledTimes(1)
+
+    const resolveApply = resolveRefresh
+    if (resolveApply === undefined) throw new Error('refresh was not started')
+    resolveApply(false)
+    await Promise.resolve()
+
+    resolveRefresh = undefined
+    const retryPromise = views.retryViewApply()
+    await Promise.resolve()
+    const resolveRetry = resolveRefresh
+    if (resolveRetry === undefined) throw new Error('retry was not started')
+    resolveRetry(true)
+    await retryPromise
+    expect(displayMode.value).toBe('board')
+    expect(update).toHaveBeenCalledWith('customers.list', 7, {
+      config: expect.objectContaining({ display_mode: 'board' }) as unknown,
+    })
   })
 })
