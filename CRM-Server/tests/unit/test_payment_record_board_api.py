@@ -454,7 +454,7 @@ def test_board_groups_canonical_columns_and_keeps_confirmation_independent(api_e
         _approval(21, record_id=3, status=ApprovalStatus.REJECTED),
         _record(4, plan_id=1, amount="40.00", payment_date=date(2026, 8, 5), approval_phase="draft", confirmation_status=PaymentConfirmationStatus.CONFIRMED),
         _approval(22, record_id=4, status=ApprovalStatus.APPROVED),
-        _record(5, plan_id=1, amount="50.40", payment_date=date(2026, 9, 6), approval_phase="withdrawn", confirmation_status=None),
+        _record(5, plan_id=1, amount="50.40", payment_date=date(2026, 9, 6), approval_phase="withdrawn", confirmation_status="UNKNOWN"),
         _record(6, plan_id=1, amount="1000.00", payment_date=date(2026, 6, 1), approval_phase="approved", team_id=2),
         _record(7, plan_id=1, amount="8.00", payment_date=date(2026, 6, 7), approval_phase="approved"),
         _approval(23, record_id=7, status=ApprovalStatus.APPROVED, team_id=2),
@@ -468,6 +468,9 @@ def test_board_groups_canonical_columns_and_keeps_confirmation_independent(api_e
     _link(api_env.db, 7, 23)
     _link(api_env.db, 8, 24)
     api_env.db.commit()
+    loaded_unknown = api_env.db.query(PaymentRecord).filter(PaymentRecord.id == 5).one()
+    api_env.db.refresh(loaded_unknown)
+    assert loaded_unknown.confirmation_status == "UNKNOWN"
     _grant(
         api_env.db,
         7,
@@ -541,7 +544,7 @@ def test_board_groups_canonical_columns_and_keeps_confirmation_independent(api_e
     assert by_id[4]["metadata"]["confirmation_status"] == "CONFIRMED"
     assert by_id[4]["action_state"] == {"can_edit": False, "can_delete": False, "can_resubmit": False}
     assert by_id[5]["status"] == "unclassified"
-    assert by_id[5]["metadata"]["confirmation_status"] == "PENDING"
+    assert by_id[5]["metadata"]["confirmation_status"] is None
     assert by_id[7]["status"] == "approved"
     assert by_id[8]["status"] == "approved"
 
@@ -721,7 +724,7 @@ def test_preview_limit_keeps_full_totals_and_sort_changes_order_only(api_env, mo
             _record(
                 index,
                 plan_id=1,
-                amount=f"{index}.00",
+                amount=f"{10 - index}.00",
                 payment_date=date(2026, 6, index),
                 confirmation_status=PaymentConfirmationStatus.CONFIRMED if index == 1 else PaymentConfirmationStatus.PENDING,
             )
@@ -745,9 +748,9 @@ def test_preview_limit_keeps_full_totals_and_sort_changes_order_only(api_env, mo
     assert all(isinstance(item["id"], int) for item in default_column["items"])
     assert default_column["has_more"] is True
     assert default_column["remaining_count"] == 2
-    assert default_column["actual_amount"] == "28.00"
-    assert default_column["confirmed_amount"] == "1.00"
-    assert [item["id"] for item in sorted_column["items"]] == [7, 6, 5, 4, 3]
+    assert default_column["actual_amount"] == "42.00"
+    assert default_column["confirmed_amount"] == "9.00"
+    assert [item["id"] for item in sorted_column["items"]] == [1, 2, 3, 4, 5]
     assert sorted_column["count"] == default_column["count"]
     assert sorted_column["actual_amount"] == default_column["actual_amount"]
     assert sorted_column["confirmed_amount"] == default_column["confirmed_amount"]
@@ -759,3 +762,47 @@ def test_preview_limit_keeps_full_totals_and_sort_changes_order_only(api_env, mo
             continue
         assert _columns(default_body)[key]["count"] == 0
         assert {name: _columns(default_body)[key][name] for name in ZERO_AMOUNTS} == ZERO_AMOUNTS
+
+
+def test_approval_exclude_removes_approved_from_counts_amounts_and_trends(api_env, monkeypatch) -> None:
+    _freeze(monkeypatch, date(2026, 10, 12))
+    api_env.db.add_all([
+        _contract(1, name="甲合同"),
+        _plan(1, contract_id=1),
+        _record(
+            1,
+            plan_id=1,
+            amount="40.00",
+            payment_date=date(2026, 6, 5),
+            approval_phase="draft",
+            confirmation_status=PaymentConfirmationStatus.CONFIRMED,
+        ),
+        _approval(22, record_id=1, status=ApprovalStatus.APPROVED),
+        _record(2, plan_id=1, amount="15.25", payment_date=date(2026, 6, 6), approval_phase="rejected"),
+        _approval(23, record_id=2, status=ApprovalStatus.REJECTED),
+    ])
+    api_env.db.flush()
+    _link(api_env.db, 1, 22)
+    _link(api_env.db, 2, 23)
+    api_env.db.commit()
+    _grant(api_env.db, 7, "payment:view:all")
+
+    response = _board(api_env.client, approval_status_exclude="approved")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    columns = _columns(body)
+    assert columns["approved"]["count"] == 0
+    assert columns["approved"]["items"] == []
+    assert columns["rejected"]["count"] == 1
+    assert columns["rejected"]["items"][0]["id"] == 2
+    assert all(item["id"] != 1 for column in columns.values() for item in column["items"])
+    assert _metric(body, "total_count")["value"] == 1
+    assert _metric(body, "actual_total")["value"] == "15.25"
+    assert _metric(body, "confirmed_amount")["value"] == "0.00"
+    assert _metric(body, "unconfirmed_amount")["value"] == "15.25"
+    june = {point["date"]: point for point in body["trends"]}["2026-06"]
+    assert june["count"] == 1
+    assert june["actual_amount"] == "15.25"
+    assert june["confirmed_amount"] == "0.00"
+    assert june["unconfirmed_amount"] == "15.25"

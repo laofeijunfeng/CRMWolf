@@ -2126,6 +2126,7 @@ def get_payment_record_board(
         created_time_end=created_time_end,
         current_user_id=current_user_id,
         approval_status=approval_status,
+        approval_status_exclude=approval_status_exclude,
         sort=sort,
         order_by=order_by,
         order_dir=order_dir,
