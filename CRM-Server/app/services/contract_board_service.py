@@ -318,7 +318,7 @@ def _action_state(
     if key == "PENDING_REVIEW" and pending_role and pending_role in role_codes:
         is_self = row.creator_id == str(current_user_id)
         can_decide = (not is_self and "contract:approve:all" in permission_codes) or (
-            "contract:approve:own" in permission_codes
+            is_self and "contract:approve:own" in permission_codes
         )
     return ContractBoardActionState(
         can_edit=can_edit,

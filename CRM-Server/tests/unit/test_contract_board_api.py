@@ -672,3 +672,39 @@ def test_approve_requires_current_node_role_and_own_permission(api_env) -> None:
     actions = _columns(response.json())["PENDING_REVIEW"]["items"][0]["action_state"]
     assert actions["can_approve"] is False
     assert actions["can_reject"] is False
+
+
+def test_approve_own_covers_only_contracts_created_by_current_user(api_env) -> None:
+    api_env.db.add_all([
+        _contract(
+            1,
+            name="自己创建的待审",
+            status="PENDING_REVIEW",
+            approval_phase="pending_review",
+            creator_id="7",
+            owner_id="8",
+        ),
+        _contract(
+            2,
+            name="他人创建的待审",
+            status="PENDING_REVIEW",
+            approval_phase="pending_review",
+            creator_id="8",
+            owner_id="7",
+        ),
+    ])
+    _pending_approval(api_env.db, 1, approve_role="SALES_DIRECTOR")
+    _pending_approval(api_env.db, 2, approve_role="SALES_DIRECTOR")
+    api_env.db.commit()
+    _grant(api_env.db, 7, "contract:view:all", "contract:approve:own", role_code="SALES_DIRECTOR")
+
+    response = _board(api_env.client)
+
+    assert response.status_code == 200, response.text
+    items = {item["id"]: item for item in _columns(response.json())["PENDING_REVIEW"]["items"]}
+    own_actions = items[1]["action_state"]
+    other_actions = items[2]["action_state"]
+    assert own_actions["can_approve"] is True
+    assert own_actions["can_reject"] is True
+    assert other_actions["can_approve"] is False
+    assert other_actions["can_reject"] is False
