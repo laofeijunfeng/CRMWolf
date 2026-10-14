@@ -37,29 +37,6 @@ def sum_approved_payment_amount(records: List[PaymentRecord]) -> float:
     return sum(float(r.actual_amount) for r in records if _is_approved_payment_record(r))
 
 
-def _payment_approval_status_predicate(status_value: str, *, exclude: bool = False):
-    from sqlalchemy import or_
-
-    from app.core.list_query.types import ListQueryContext
-    from app.services.payment_approval_status import (
-        PaymentApprovalReadStatus,
-        payment_approval_status_expression,
-    )
-
-    expression = payment_approval_status_expression(ListQueryContext())
-    if status_value == PaymentApprovalReadStatus.UNCLASSIFIED:
-        return expression.isnot(None) if exclude else expression.is_(None)
-    if status_value in {
-        PaymentApprovalReadStatus.PENDING_SUBMIT,
-        PaymentApprovalReadStatus.PENDING_APPROVAL,
-        PaymentApprovalReadStatus.REJECTED,
-        PaymentApprovalReadStatus.APPROVED,
-    }:
-        matched = expression == status_value
-        return or_(expression.is_(None), ~matched) if exclude else matched
-    return None
-
-
 def _split_csv(value: Optional[str]) -> List[str]:
     if value is None:
         return []
@@ -655,15 +632,27 @@ class PaymentRecordCRUD:
 
     def _apply_record_scope(self, query, *, approval_status: str | None, current_user_id: str | None):
         from app.models.contract import Contract
-        from app.services.payment_approval_status import payment_approval_status_expression
+        from app.services.payment_approval_status import (
+            PaymentApprovalReadStatus,
+            payment_approval_status_expression,
+        )
 
         approval_expression = payment_approval_status_expression(ListQueryContext())
         approval_values = _split_csv(approval_status)
         if approval_values:
             predicates = []
             for value in approval_values:
-                predicates.append(approval_expression.is_(None) if value == "unclassified" else approval_expression == value)
-            query = query.filter(or_(*predicates))
+                if value == PaymentApprovalReadStatus.UNCLASSIFIED:
+                    predicates.append(approval_expression.is_(None))
+                elif value in {
+                    PaymentApprovalReadStatus.PENDING_SUBMIT,
+                    PaymentApprovalReadStatus.PENDING_APPROVAL,
+                    PaymentApprovalReadStatus.REJECTED,
+                    PaymentApprovalReadStatus.APPROVED,
+                }:
+                    predicates.append(approval_expression == value)
+            if predicates:
+                query = query.filter(or_(*predicates))
         if current_user_id:
             query = query.filter(Contract.creator_id == current_user_id)
         return query
@@ -716,7 +705,10 @@ class PaymentRecordCRUD:
         from app.models.opportunity import Opportunity
         from app.models.invoice import InvoiceApplication
         from app.models.user import User
-        from app.services.payment_approval_status import payment_approval_status_expression
+        from app.services.payment_approval_status import (
+            PaymentApprovalReadStatus,
+            payment_approval_status_expression,
+        )
 
         records_query = self._base_records_query(db, team_id)
         context = ListQueryContext(db=db, team_id=team_id, current_user_id=current_user_id)
@@ -755,12 +747,22 @@ class PaymentRecordCRUD:
         ).limit(1).correlate(Contract, Opportunity).scalar_subquery()
 
         approval_expression = payment_approval_status_expression(context)
+        known_statuses = {
+            PaymentApprovalReadStatus.PENDING_SUBMIT,
+            PaymentApprovalReadStatus.PENDING_APPROVAL,
+            PaymentApprovalReadStatus.REJECTED,
+            PaymentApprovalReadStatus.APPROVED,
+        }
         approval_values = _split_csv(approval_status)
         if approval_values:
             predicates = []
             for value in approval_values:
-                predicates.append(approval_expression.is_(None) if value == "unclassified" else approval_expression == value)
-            records_query = records_query.filter(or_(*predicates))
+                if value == PaymentApprovalReadStatus.UNCLASSIFIED:
+                    predicates.append(approval_expression.is_(None))
+                elif value in known_statuses:
+                    predicates.append(approval_expression == value)
+            if predicates:
+                records_query = records_query.filter(or_(*predicates))
         if current_user_id:
             records_query = records_query.filter(Contract.creator_id == current_user_id)
         records_query = apply_search(records_query, PAYMENT_RECORDS_LIST_QUERY_CATALOG, search, context=context)
@@ -768,8 +770,12 @@ class PaymentRecordCRUD:
         if excluded_values:
             excluded = []
             for value in excluded_values:
-                excluded.append(approval_expression.is_(None) if value == "unclassified" else approval_expression == value)
-            records_query = records_query.filter(~or_(*excluded))
+                if value == PaymentApprovalReadStatus.UNCLASSIFIED:
+                    excluded.append(approval_expression.is_not(None))
+                elif value in known_statuses:
+                    excluded.append(~and_(approval_expression.is_not(None), approval_expression == value))
+            if excluded:
+                records_query = records_query.filter(and_(*excluded))
         if contract_id:
             records_query = records_query.filter(PaymentPlan.contract_id == contract_id)
         if payment_plan_id:
