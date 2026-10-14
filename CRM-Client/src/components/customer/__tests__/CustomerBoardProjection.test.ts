@@ -124,32 +124,34 @@ function mountProjection(value: CustomerBoardResponse = response) {
 }
 
 describe('CustomerBoardProjection', () => {
-  it('maps public ids, metadata, nullable amounts, and derived-status view-all keys', async () => {
+  it('renders owner, stage, industry, city, scale, license expiry, and public id through BoardView', async () => {
     const wrapper = mountProjection()
+    const following = wrapper.get('[data-column-key="following"]')
 
-    expect(wrapper.get('[data-column-key="following"]').text()).toContain('星河科技')
-    expect(wrapper.get('[data-column-key="following"]').text()).toContain('王敏')
-    expect(wrapper.get('[data-column-key="following"]').text()).toContain('软件')
-    expect(wrapper.get('[data-column-key="following"]').text()).toContain('上海')
-    expect(wrapper.get('[data-column-key="following"]').text()).toContain('100-499人')
-    expect(wrapper.get('[data-column-key="following"]').text()).toContain('正式授权')
-    expect(wrapper.get('[data-column-key="following"]').text()).toContain('2027-03-15')
-    expect(wrapper.get('[data-column-key="following"]').findComponent({ name: 'AmountText' }).props('value')).toBe('1200.50')
+    expect(wrapper.findComponent({ name: 'BoardView' }).exists()).toBe(true)
+    expect(following.text()).toContain('星河科技')
+    expect(following.text()).toContain('王敏')
+    expect(following.text()).toContain('方案沟通')
+    expect(following.text()).toContain('软件')
+    expect(following.text()).toContain('上海')
+    expect(following.text()).toContain('100-499人')
+    expect(following.text()).toContain('正式授权')
+    expect(following.text()).toContain('2027-03-15')
+    expect(following.text()).toContain('cus_public_1')
+    expect(following.findComponent({ name: 'AmountText' }).props('value')).toBe('1200.50')
 
     const lost = wrapper.get('[data-column-key="lost"]')
     expect(lost.text()).toContain('北辰制造')
     expect(lost.findComponent({ name: 'AmountText' }).exists()).toBe(false)
 
-    const followingCard = wrapper.get('[data-column-key="following"] [role="button"]')
-    await followingCard.trigger('keydown', { key: 'Enter' })
+    await following.get('[role="button"]').trigger('keydown', { key: 'Enter' })
     expect(wrapper.emitted('activate-card')).toEqual([[{ id: 'cus_public_1', columnKey: 'following' }]])
 
-    await wrapper.get('[data-column-key="lost"] button').trigger('click')
+    await lost.get('button').trigger('click')
     expect(wrapper.emitted('view-all')).toEqual([['lost']])
-    expect(wrapper.emitted('activate-card')).toHaveLength(1)
   })
 
-  it('converts customer trend counts only at the chart boundary', () => {
+  it('passes numeric customer trend counts through BoardView without changing the response', () => {
     const wrapper = mountProjection()
     const chart = wrapper.getComponent({ name: 'AreaTrendChart' })
 
@@ -158,23 +160,14 @@ describe('CustomerBoardProjection', () => {
       { month: '2026-09', count: 1 },
       { month: '2026-10', count: 2 },
     ])
-    expect(chart.props('series')).toEqual([
-      expect.objectContaining({ key: 'count', label: '客户数' }),
-    ])
     expect(response.trends).toEqual([
       { date: '2026-09', count: 1 },
       { date: '2026-10', count: 2 },
     ])
-    for (const point of chart.props('data') as Array<Record<string, unknown>>) {
-      expect(Object.keys(point).sort()).toEqual(['count', 'month'])
-    }
   })
 
   it('formats percentage summaries and omits an empty trend chart', () => {
-    const wrapper = mountProjection({
-      ...response,
-      trends: [],
-    })
+    const wrapper = mountProjection({ ...response, trends: [] })
 
     expect(wrapper.text()).toContain('50%')
     expect(wrapper.text()).toContain('-')

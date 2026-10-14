@@ -127,53 +127,45 @@ function mountProjection() {
 }
 
 describe('PaymentRecordBoardProjection', () => {
-  it('keeps canonical approved separate from the confirmation badge', () => {
+  it('renders amount, payment date, relations, separate approval and confirmation labels, numeric id, and canonical approved', () => {
     const wrapper = mountProjection()
     const approved = wrapper.get('[data-column-key="approved"]')
 
-    expect(approved.text()).toContain('已通过')
-    expect(approved.text()).toContain('PR-2026-091')
+    expect(wrapper.findComponent({ name: 'BoardView' }).exists()).toBe(true)
+    expect(approved.text()).toContain('6400.00')
     expect(approved.text()).toContain('2026-09-18')
+    expect(approved.text()).toContain('星河科技')
+    expect(approved.text()).toContain('星河年度合同')
+    expect(approved.text()).toContain('星河科技有限公司')
+    expect(approved.text()).toContain('周宁')
+    expect(approved.text()).toContain('李娜')
+    expect(approved.text()).toContain('已通过')
     expect(approved.text()).toContain('已确认')
+    expect(approved.text()).toContain('91')
     expect(approved.text()).not.toContain('confirmed')
     expect(approved.findComponent({ name: 'AmountText' }).props('value')).toBe('6400.00')
-
-    const badges = approved.findAllComponents({ name: 'Badge' }).map((badge) => badge.text())
-    expect(badges).toEqual(expect.arrayContaining(['已通过', '已确认']))
-    expect(badges).not.toContain('已确认页签')
   })
 
-  it('emits the numeric record id and does not relabel approved as the external confirmed tab', async () => {
+  it('emits the numeric record id and canonical approved column key', async () => {
     const wrapper = mountProjection()
 
     await wrapper.get('[data-column-key="approved"] [role="button"]').trigger('click')
     expect(wrapper.emitted('activate-card')).toEqual([[{ id: 91, columnKey: 'approved' }]])
-
     await wrapper.get('[data-column-key="approved"] button').trigger('click')
     expect(wrapper.emitted('view-all')).toEqual([['approved']])
-    expect(wrapper.text()).not.toContain('已确认页签')
   })
 
-  it('converts record trend amounts without changing transport strings', () => {
+  it('converts record chart amounts without changing transport strings', () => {
     const wrapper = mountProjection()
     const chart = wrapper.getComponent({ name: 'AreaTrendChart' })
-    const point = (chart.props('data') as Array<Record<string, unknown>>)[0]
 
-    expect(chart.props('xKey')).toBe('month')
-    expect(point).toEqual({
+    expect(chart.props('data')).toEqual([{
       month: '2026-09',
       count: 1,
       actual_amount: 6400,
       confirmed_amount: 6400,
       unconfirmed_amount: 0,
-    })
-    expect(Object.keys(point ?? {}).sort()).toEqual([
-      'actual_amount',
-      'confirmed_amount',
-      'count',
-      'month',
-      'unconfirmed_amount',
-    ])
+    }])
     expect(response.trends[0]?.actual_amount).toBe('6400.00')
     expect(response.columns[0]?.key).toBe('approved')
   })

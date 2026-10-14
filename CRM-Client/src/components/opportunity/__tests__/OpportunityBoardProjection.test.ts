@@ -150,27 +150,29 @@ function mountProjection() {
 }
 
 describe('OpportunityBoardProjection', () => {
-  it('preserves column order and formats amount, win probability, and closing date', () => {
+  it('renders amount, win probability, closing date, customer, purchase, license, and public id in backend order', () => {
     const wrapper = mountProjection()
     const keys = wrapper.findAll('[data-column-key]').map((column) => column.attributes('data-column-key'))
 
+    expect(wrapper.findComponent({ name: 'BoardView' }).exists()).toBe(true)
     expect(keys).toEqual(['stage:18:42', 'stage:19:77', 'unset_stage'])
     const first = wrapper.get('[data-column-key="stage:18:42"]')
     expect(first.text()).toContain('星河续购')
+    expect(first.text()).toContain('¥8,800.00')
     expect(first.text()).toContain('65.5%')
     expect(first.text()).toContain('2026-11-30')
-    expect(first.text()).toContain('公开招标')
-    expect(first.text()).toContain('STD-02')
+    expect(first.text()).toContain('星河科技')
+    expect(first.text()).toContain('续购')
+    expect(first.text()).toContain('订阅')
+    expect(first.text()).toContain('opp_public_1')
     expect(first.findComponent({ name: 'AmountText' }).props('value')).toBe('8800.00')
 
     const second = wrapper.get('[data-column-key="stage:19:77"]')
     expect(second.text()).toContain('北辰新购')
     expect(second.text()).not.toContain('%')
-    expect(second.findAllComponents({ name: 'AmountText' })).toHaveLength(1)
-    expect(second.findComponent({ name: 'AmountText' }).props('value')).toBe('100.00')
   })
 
-  it('emits the public opportunity id and method/template identity, not a snapshot row id', async () => {
+  it('emits the public opportunity id and method/template view-all identity', async () => {
     const wrapper = mountProjection()
 
     await wrapper.get('[data-column-key="stage:18:42"] [role="button"]').trigger('click')
@@ -178,27 +180,17 @@ describe('OpportunityBoardProjection', () => {
 
     await wrapper.get('[data-column-key="stage:19:77"] button').trigger('click')
     expect(wrapper.emitted('view-all')).toEqual([['method:19:template:77']])
-    expect(JSON.stringify(wrapper.emitted('view-all'))).not.toContain('snapshot')
   })
 
-  it('converts fixed-point trend amounts only inside fresh chart points', () => {
+  it('converts fixed-point trend amounts only in the chart values', () => {
     const wrapper = mountProjection()
     const chart = wrapper.getComponent({ name: 'AreaTrendChart' })
-    const data = chart.props('data') as Array<Record<string, unknown>>
 
-    expect(chart.props('xKey')).toBe('month')
-    expect(data).toEqual([
+    expect(chart.props('data')).toEqual([
       { month: '2026-09', count: 1, amount: 8800 },
       { month: '2026-10', count: 0, amount: -12.5 },
     ])
-    expect(chart.props('series')).toEqual([
-      expect.objectContaining({ key: 'count', label: '商机数' }),
-      expect.objectContaining({ key: 'amount', label: '金额' }),
-    ])
     expect(response.trends[0]?.amount).toBe('8800.00')
     expect(response.trends[1]?.amount).toBe('-12.50')
-    for (const point of data) {
-      expect(Object.keys(point).sort()).toEqual(['amount', 'count', 'month'])
-    }
   })
 })

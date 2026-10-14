@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import AmountText from '@/components/crmwolf/AmountText.vue'
-import AreaTrendChart from '@/components/crmwolf/AreaTrendChart.vue'
-import type { AreaTrendDatum, AreaTrendSeries } from '@/components/crmwolf/AreaTrendChart.vue'
+import BoardView from '@/components/crmwolf/BoardView.vue'
 import type {
   BoardCardActivation,
   BoardCardPresentation,
   BoardMetadataRow,
   BoardProjection,
+  BoardTrendPointPresentation,
+  BoardTrendSeriesPresentation,
 } from '@/components/crmwolf/boardTypes'
 import type { OpportunityBoardResponse } from '@/schemas/opportunityBoard'
 import { formatCurrency, formatLocalDate } from '@/utils/format'
@@ -23,12 +23,7 @@ type OpportunityColumn = OpportunityBoardResponse['columns'][number]
 type OpportunityItem = OpportunityColumn['items'][number]
 type OpportunityTrend = OpportunityBoardResponse['trends'][number]
 
-interface OpportunityColumnView {
-  source: OpportunityColumn
-  cards: ReadonlyArray<{ source: OpportunityItem; card: BoardCardPresentation }>
-}
-
-const trendSeries: AreaTrendSeries[] = [
+const trendSeries: BoardTrendSeriesPresentation[] = [
   {
     key: 'count',
     label: '商机数',
@@ -61,6 +56,9 @@ function metadataRows(item: OpportunityItem): BoardMetadataRow[] {
   const probability = item.metadata.win_probability
   const closingDate = item.metadata.expected_closing_date
   const rows: Array<BoardMetadataRow | null> = [
+    item.amount === null
+      ? null
+      : { key: 'amount', label: '金额', value: formatCurrency(item.amount) },
     item.metadata.customer_name === null
       ? null
       : { key: 'customer_name', label: '客户', value: item.metadata.customer_name },
@@ -82,6 +80,7 @@ function metadataRows(item: OpportunityItem): BoardMetadataRow[] {
     item.metadata.template_code === null
       ? null
       : { key: 'template_code', label: '模板', value: item.metadata.template_code },
+    { key: 'public_id', label: '商机编号', value: item.id },
   ]
   return rows.filter((row): row is BoardMetadataRow => row !== null)
 }
@@ -91,7 +90,7 @@ function presentCard(column: OpportunityColumn, item: OpportunityItem): BoardCar
     id: item.id,
     title: item.title,
     subtitle: item.subtitle,
-    primaryValue: item.amount === null ? null : formatCurrency(item.amount),
+    primaryValue: item.amount,
     dateLabel: item.date === null ? null : localDateLabel(item.date),
     ownerLabel: item.owner?.name ?? null,
     statusLabel: column.label,
@@ -99,50 +98,51 @@ function presentCard(column: OpportunityColumn, item: OpportunityItem): BoardCar
   }
 }
 
-function viewAllPayload(column: OpportunityColumn): string {
-  if (column.procurement_method_id !== null && column.procurement_stage_template_id !== null) {
+function viewAllPayloadForKey(columnKey: string): string {
+  const column = props.response.columns.find((item) => item.key === columnKey)
+  if (
+    column !== undefined
+    && column.procurement_method_id !== null
+    && column.procurement_stage_template_id !== null
+  ) {
     return `method:${column.procurement_method_id}:template:${column.procurement_stage_template_id}`
   }
-  return column.key
+  return columnKey
 }
 
-function opportunityChartPoint(source: OpportunityTrend): AreaTrendDatum {
+function opportunityChartPoint(source: OpportunityTrend): BoardTrendPointPresentation {
   return {
     month: source.date,
-    count: source.count,
-    amount: chartAmount(source.amount),
+    values: {
+      count: source.count,
+      amount: chartAmount(source.amount),
+    },
   }
 }
-
-const columns = computed<OpportunityColumnView[]>(() => props.response.columns.map((column) => ({
-  source: column,
-  cards: column.items.map((item) => ({ source: item, card: presentCard(column, item) })),
-})))
 
 const projection = computed<BoardProjection>(() => ({
   metrics: props.response.summary.map((metric) => ({
     key: metric.key,
     label: metric.label,
-    value: metric.value_type === 'amount' ? formatCurrency(metric.value) : String(metric.value),
+    value: metric.value_type === 'amount' ? metric.value : String(metric.value),
     valueType: metric.value_type,
     ...(metric.secondary_label == null || metric.secondary_value == null
       ? {}
       : {
           secondaryLabel: metric.secondary_label,
           secondaryValue: metric.value_type === 'amount'
-            ? formatCurrency(metric.secondary_value)
+            ? metric.secondary_value
             : String(metric.secondary_value),
         }),
   })),
-  columns: columns.value.map((column) => ({
-    key: column.source.key,
-    label: column.source.label,
-    tone: column.source.tone,
-    countLabel: String(column.source.count),
-    amountLabel: column.source.amount,
-    hasMore: column.source.has_more,
-    remainingCount: column.source.remaining_count,
-    cards: column.cards.map((entry) => entry.card),
+  columns: props.response.columns.map((column) => ({
+    key: column.key,
+    label: column.label,
+    tone: column.tone,
+    countLabel: String(column.count),
+    amountLabel: column.amount,
+    remainingCount: column.remaining_count,
+    cards: column.items.map((item) => presentCard(column, item)),
   })),
   trend: props.response.trends.length === 0
     ? null
@@ -150,111 +150,16 @@ const projection = computed<BoardProjection>(() => ({
         title: '商机趋势',
         description: '按完整月份统计商机数和金额',
         series: trendSeries,
-        points: props.response.trends.map((source) => ({
-          month: source.date,
-          values: { count: source.count, amount: source.amount },
-        })),
+        points: props.response.trends.map(opportunityChartPoint),
       },
 }))
-
-const chartData = computed(() => props.response.trends.map(opportunityChartPoint))
-
-function activate(column: OpportunityColumn, item: OpportunityItem): void {
-  emit('activate-card', { id: item.id, columnKey: column.key })
-}
 </script>
 
 <template>
-  <div class="domain-board-projection">
-    <div class="board-columns">
-      <section
-        v-for="column in columns"
-        :key="column.source.key"
-        class="board-column"
-        :data-column-key="column.source.key"
-        :data-tone="column.source.tone"
-      >
-        <header>
-          <h2>{{ column.source.label }}</h2>
-          <span>{{ column.source.count }}</span>
-        </header>
-        <p>
-          <AmountText :value="column.source.amount" size="sm" />
-        </p>
-        <article
-          v-for="entry in column.cards"
-          :key="String(entry.card.id)"
-          class="board-card"
-          tabindex="0"
-          role="button"
-          @click="activate(column.source, entry.source)"
-          @keydown.enter.prevent="activate(column.source, entry.source)"
-          @keydown.space.prevent="activate(column.source, entry.source)"
-        >
-          <h3>{{ entry.card.title }}</h3>
-          <AmountText v-if="entry.source.amount !== null" :value="entry.source.amount" size="lg" />
-          <p v-if="entry.card.primaryValue && entry.source.amount === null">{{ entry.card.primaryValue }}</p>
-          <dl v-if="entry.card.metadata.length > 0">
-            <div v-for="row in entry.card.metadata" :key="row.key">
-              <dt>{{ row.label }}</dt>
-              <dd>{{ row.value }}</dd>
-            </div>
-          </dl>
-        </article>
-        <p v-if="column.cards.length === 0">暂无记录</p>
-        <button type="button" @click.stop="emit('view-all', viewAllPayload(column.source))">查看全部</button>
-      </section>
-    </div>
-
-    <AreaTrendChart
-      v-if="projection.trend"
-      :title="projection.trend.title"
-      :description="projection.trend.description"
-      :data="chartData"
-      :series="trendSeries"
-      x-key="month"
-    />
-  </div>
+  <BoardView
+    :projection="projection"
+    :can-drill-through="true"
+    @activate-card="emit('activate-card', $event)"
+    @view-all="emit('view-all', viewAllPayloadForKey($event))"
+  />
 </template>
-
-<style scoped lang="scss">
-.domain-board-projection {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.board-columns {
-  display: grid;
-  min-width: 0;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(240px, 320px);
-  gap: 12px;
-  overflow-x: auto;
-  overscroll-behavior: contain;
-}
-
-.board-column,
-.board-card {
-  border-radius: 8px;
-}
-
-.board-card {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.board-card dl {
-  display: grid;
-  gap: 4px;
-  margin: 0;
-}
-
-.board-card dl div {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-}
-</style>

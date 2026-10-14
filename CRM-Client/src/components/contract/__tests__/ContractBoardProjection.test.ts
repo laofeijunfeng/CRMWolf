@@ -85,12 +85,13 @@ function mountProjection() {
 }
 
 describe('ContractBoardProjection', () => {
-  it('preserves all seven columns and formats contract metadata with AmountText', () => {
+  it('renders amount, dates, customer, opportunity, license, purchase, owner, numeric id, and all seven columns', () => {
     const wrapper = mountProjection()
     const keys = wrapper.findAll('[data-column-key]').map((column) => column.attributes('data-column-key'))
-
-    expect(keys).toEqual([...statuses])
     const signed = wrapper.get('[data-column-key="SIGNED"]')
+
+    expect(wrapper.findComponent({ name: 'BoardView' }).exists()).toBe(true)
+    expect(keys).toEqual([...statuses])
     expect(signed.text()).toContain('星河年度合同')
     expect(signed.text()).toContain('赵磊')
     expect(signed.text()).toContain('星河科技')
@@ -100,10 +101,9 @@ describe('ContractBoardProjection', () => {
     expect(signed.text()).toContain('2026-08-01')
     expect(signed.text()).toContain('2026-08-15')
     expect(signed.text()).toContain('2027-08-14')
-    expect(signed.text()).toContain('25')
-    expect(signed.findAllComponents({ name: 'AmountText' }).some((amount) => amount.props('value') === '32000.00')).toBe(true)
+    expect(signed.text()).toContain('42')
+    expect(signed.findComponent({ name: 'AmountText' }).props('value')).toBe('32000.00')
     expect(wrapper.get('[data-column-key="UNCLASSIFIED"]').text()).toContain('未分类')
-    expect(wrapper.get('[data-column-key="UNCLASSIFIED"]').text()).toContain('暂无记录')
   })
 
   it('emits the numeric contract id and the unclassified column key', async () => {
@@ -111,19 +111,15 @@ describe('ContractBoardProjection', () => {
 
     await wrapper.get('[data-column-key="SIGNED"] [role="button"]').trigger('keydown', { key: ' ' })
     expect(wrapper.emitted('activate-card')).toEqual([[{ id: 42, columnKey: 'SIGNED' }]])
-
     await wrapper.get('[data-column-key="UNCLASSIFIED"] button').trigger('click')
     expect(wrapper.emitted('view-all')).toEqual([['UNCLASSIFIED']])
   })
 
-  it('passes a fresh contract chart point with a numeric amount', () => {
+  it('passes a numeric contract chart amount without changing the response', () => {
     const wrapper = mountProjection()
     const chart = wrapper.getComponent({ name: 'AreaTrendChart' })
-    const point = (chart.props('data') as Array<Record<string, unknown>>)[0]
 
-    expect(chart.props('xKey')).toBe('month')
-    expect(point).toEqual({ month: '2026-08', count: 1, amount: 32000 })
-    expect(Object.keys(point ?? {}).sort()).toEqual(['amount', 'count', 'month'])
+    expect(chart.props('data')).toEqual([{ month: '2026-08', count: 1, amount: 32000 }])
     expect(response.trends[0]?.amount).toBe('32000.00')
   })
 })

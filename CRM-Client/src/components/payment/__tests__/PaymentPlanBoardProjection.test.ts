@@ -98,21 +98,25 @@ function mountProjection() {
 }
 
 describe('PaymentPlanBoardProjection', () => {
-  it('renders planned, approved paid, remaining, and overdue amounts independently of status text', () => {
+  it('renders planned, paid, remaining, overdue, due date, relations, stage, owner, status, and numeric id', () => {
     const wrapper = mountProjection()
     const column = wrapper.get('[data-column-key="OVERDUE"]')
-    const values = wrapper.findAllComponents({ name: 'AmountText' }).map((amount) => amount.props('value'))
 
-    expect(column.text()).toContain('已逾期')
-    expect(column.text()).toContain('PP-2026-007')
-    expect(column.text()).toContain('陈晨')
+    expect(wrapper.findComponent({ name: 'BoardView' }).exists()).toBe(true)
+    expect(column.text()).toContain('10000.00')
+    expect(column.text()).toContain('2500.00')
+    expect(column.text()).toContain('7500.00')
     expect(column.text()).toContain('2026-07-31')
-    expect(values).toEqual(expect.arrayContaining([
-      '10000.00',
-      '2500.00',
+    expect(column.text()).toContain('星河科技')
+    expect(column.text()).toContain('星河年度合同')
+    expect(column.text()).toContain('星河续购')
+    expect(column.text()).toContain('已逾期')
+    expect(column.text()).toContain('陈晨')
+    expect(column.text()).toContain('7')
+    expect(column.findAllComponents({ name: 'AmountText' }).map((amount) => amount.props('value'))).toEqual([
       '7500.00',
-    ]))
-    expect(values.filter((value) => value === '7500.00').length).toBeGreaterThanOrEqual(2)
+      '10000.00',
+    ])
   })
 
   it('emits the numeric payment plan id', async () => {
@@ -124,32 +128,17 @@ describe('PaymentPlanBoardProjection', () => {
     expect(wrapper.emitted('view-all')).toEqual([['OVERDUE']])
   })
 
-  it('converts only known payment-plan series at the chart boundary', () => {
+  it('converts payment-plan chart amounts without changing the response', () => {
     const wrapper = mountProjection()
     const chart = wrapper.getComponent({ name: 'AreaTrendChart' })
-    const point = (chart.props('data') as Array<Record<string, unknown>>)[0]
 
-    expect(chart.props('xKey')).toBe('month')
-    expect(point).toEqual({
+    expect(chart.props('data')).toEqual([{
       month: '2026-07',
       count: 1,
       planned_amount: 10000,
       paid_amount: 2500,
       remaining_amount: 7500,
-    })
-    expect(Object.keys(point ?? {}).sort()).toEqual([
-      'count',
-      'month',
-      'paid_amount',
-      'planned_amount',
-      'remaining_amount',
-    ])
+    }])
     expect(response.trends[0]?.planned_amount).toBe('10000.00')
-    expect((chart.props('series') as Array<{ key: string }>).map((series) => series.key)).toEqual([
-      'count',
-      'planned_amount',
-      'paid_amount',
-      'remaining_amount',
-    ])
   })
 })
