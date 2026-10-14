@@ -333,11 +333,14 @@ def _preview_order(
 def _directed(value, ascending: bool):
     if isinstance(value, datetime):
         stamp = value.timestamp()
-        return stamp if ascending else -stamp
+        return (0, stamp if ascending else -stamp)
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return value if ascending else -value
+        return (0, value if ascending else -value)
     text = "" if value is None else str(value)
-    return text if ascending else tuple(-ord(char) for char in text)
+    if text == "":
+        return (1,)
+    ordered = text if ascending else tuple(-ord(char) for char in text)
+    return (0, ordered)
 
 def _sort_value(row: Customer, field: str):
     if field == "account_name":

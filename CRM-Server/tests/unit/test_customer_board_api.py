@@ -651,3 +651,25 @@ def test_explicit_source_sort_uses_source_name_then_public_id(api_env) -> None:
         "cus_f", "cus_z", "cus_g", "cus_e", "cus_d",
     ]
     assert _counts(body)["total_count"] == 7
+
+
+def test_descending_text_sort_places_null_and_empty_after_real_values(api_env) -> None:
+    api_env.db.add_all([
+        _customer(1, name="空来源甲", owner_id="7", created_time=datetime(2026, 5, 1), source=None, public_id="cus_null"),
+        _customer(2, name="空来源乙", owner_id="7", created_time=datetime(2026, 5, 2), source="", public_id="cus_empty"),
+        _customer(3, name="同名甲", owner_id="7", created_time=datetime(2026, 5, 3), source="web", public_id="cus_b"),
+        _customer(4, name="同名乙", owner_id="7", created_time=datetime(2026, 5, 4), source="web", public_id="cus_a"),
+        _customer(5, name="推荐", owner_id="7", created_time=datetime(2026, 5, 5), source="referral", public_id="cus_r"),
+    ])
+    api_env.db.commit()
+    _grant(api_env.db, 7, "customer:view:all")
+
+    response = _board(api_env.client, order_by="source", order_dir="desc")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert [item["id"] for item in _columns(body)["not_started"]["items"]] == [
+        "cus_a", "cus_b", "cus_r", "cus_empty", "cus_null",
+    ]
+    assert _columns(body)["not_started"]["count"] == 5
+    assert _counts(body)["total_count"] == 5
